@@ -1,0 +1,70 @@
+name: Argon-Task
+description: Aufgabe für Argon (Gemini 4 Argon in Antigravity). Wird vom Lead (Claude) angelegt und muss ohne Rückfragen bearbeitbar sein.
+title: "[Argon] "
+labels: ["agent:argon"]
+body:
+  - type: textarea
+    id: ziel
+    attributes:
+      label: Ziel
+      description: Was soll am Ende erreicht sein? (1–3 Sätze)
+    validations:
+      required: true
+  - type: textarea
+    id: kontext
+    attributes:
+      label: Kontext
+      description: Hintergrund, relevante Dateien, Links, Mockups/Screenshots (Argon kann Bilder auswerten).
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope (erlaubte Dateien/Ordner)
+      description: Nur diese Pfade darf Argon ändern.
+      placeholder: |
+        - src/features/xyz/**
+        - tests/xyz/**
+    validations:
+      required: true
+  - type: textarea
+    id: schnittstellen
+    attributes:
+      label: Schnittstellen / Verträge
+      description: Typen, API-Endpunkte, Props etc., die eingehalten werden müssen und nicht geändert werden dürfen.
+  - type: input
+    id: abhaengig
+    attributes:
+      label: Abhängig von
+      description: Issue-Nummer(n), deren PR vorher gemergt sein muss, z. B. "#3". Leer lassen, wenn keine.
+  - type: textarea
+    id: akzeptanz
+    attributes:
+      label: Akzeptanzkriterien
+      description: Prüfbare Kriterien – der PR ist erst fertig, wenn alle erfüllt sind.
+      placeholder: |
+        - [ ] …
+        - [ ] Build und Tests laufen grün
+    validations:
+      required: true
+  - type: dropdown
+    id: staerke
+    attributes:
+      label: Warum Argon?
+      description: Welche Stärke von Argon nutzt dieser Task?
+      options:
+        - Multimodal (Mockup/Screenshot → UI, visuelle Prüfung)
+        - Langer Kontext (ganzes Repo / lange Dokumente)
+        - Security-Audit
+        - Fachlogik (Finanzen/Recht/Business)
+        - Große Textmengen (Doku, Testdaten, Übersetzungen)
+        - Second Opinion / Gegen-Review
+        - Sonstiges
+  - type: dropdown
+    id: modell
+    attributes:
+      label: Empfohlenes Modell in Antigravity
+      description: Bei "Flash" zusätzlich das Label modell:flash setzen.
+      options:
+        - Gemini 4 Argon (Standard)
+        - Flash-Modell (einfache, mechanische Aufgabe)
