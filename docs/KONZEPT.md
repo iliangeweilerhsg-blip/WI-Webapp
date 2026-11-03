@@ -1,7 +1,10 @@
 # WI-Webapp – Gesamtkonzept
 
 > **Arbeitstitel:** *Studien-Gehirn* – meine persönliche Wissensbibliothek fürs ganze Studium.
-> **Status:** Entwurf v0.1 (03.11.2026) · **Fokus:** Eigennutzung, Architektur so, dass ein späterer Verkauf nicht verbaut ist.
+> **Status:** Entwurf v0.2 (03.11.2026) · **Fokus:** Eigennutzung, Architektur so, dass ein späterer Verkauf nicht verbaut ist.
+> **Setup:** MacBook + iPad mit Apple Pencil · Vorlesungen dürfen aufgenommen werden.
+>
+> **Weitere Dokumente:** [Studienalltag & Leitprinzipien](STUDIENALLTAG.md) · [Feature-Katalog (GoodNotes, StudySmarter, Quizlet + neue Ideen)](FEATURE-KATALOG.md) · [Lernmodell (FSRS, Beherrschung, Klausur-Readiness)](LERNMODELL.md)
 
 ---
 
@@ -24,8 +27,8 @@ Im Studium liegt das Wissen verstreut: Folien im LMS, Übungsblätter als separa
 ## 3. Nicht-Ziele (vorerst)
 
 - **Kein Multi-User, kein Bezahlsystem.** Erst wenn es für mich funktioniert. (Datenmodell bekommt trotzdem eine `user_id`, damit es später geht.)
-- **Kein GoodNotes-Klon.** Stift, Textmarker, Radierer, Lasso, Seiten – mehr nicht. Siehe Entscheidung E1.
-- **Keine native iOS-App in v1.** Web-App/PWA im Browser des iPads reicht für Apple Pencil.
+- **Kein GoodNotes-Klon.** Nur die Funktionen, die einen Alltagsmoment verbessern (siehe [Feature-Katalog](FEATURE-KATALOG.md)).
+- **Keine native App außer der iPad-Schreib-App.** Dashboard, Bibliothek und Lernen laufen als Web-App (siehe E1).
 - **Kein automatisches LMS-Scraping in v1.** Folien werden per Drag & Drop hochgeladen (später P2).
 - **Keine KI-Avatare/„Hollywood"-Videos.** Lernvideos = erzählte, animierte Folien. Das reicht didaktisch völlig.
 
@@ -83,7 +86,13 @@ Der **Wochenplaner** ist der Taktgeber: Er weiß, wann die nächste Vorlesung is
 - **Audio-Aufnahme + Live-Transkript** (Ticker). Ein Klick auf **★** markiert „das ist wichtig / klausurrelevant / nicht verstanden" – diese Marker steuern später die Nacharbeitung.
 - **Schnell-Tags** auf dem iPad per Geste oder Button: ❓ *nicht verstanden*, ⚠️ *klausurrelevant*, 🔗 *erinnert mich an …*.
 
-**Das iPad** öffnet dieselbe Web-App im „Schreib-Modus": nur Canvas + aktuelle Folie als optionaler Hintergrund + Werkzeugleiste. Folienwechsel am Laptop → iPad springt mit.
+**Das iPad** läuft mit einer eigenen **Schreib-App** (nativ, siehe E1): Canvas, aktuelle Folie als optionaler Hintergrund, Werkzeugleiste, Marker-Buttons, Tafel-Kamera. Folienwechsel am Mac → das iPad springt mit, und umgekehrt (Wischen auf dem iPad blättert die Folie).
+
+**Damit ich in der Vorlesung nichts bedienen muss** (Details in [Studienalltag](STUDIENALLTAG.md)):
+- **Ein-Tipp-Start:** Die App weiß aus dem Stundenplan, welche Vorlesung jetzt ist. Auto-Stopp am Kalenderende.
+- **Auto-Folienverfolgung:** Das Live-Transkript wird mit dem Folieninhalt abgeglichen. Vergessene Wechsel werden nachträglich korrigiert.
+- **Folienloser Modus:** Sind die Folien noch nicht da, läuft alles trotzdem. Die Zuordnung passiert, sobald sie hochgeladen sind.
+- **Klausurhinweis-Detektor:** „Das kommt in der Klausur" im Audio setzt automatisch ⚠️.
 
 ### 5.2 Wissensbibliothek (Obsidian-Prinzip)
 
@@ -120,7 +129,7 @@ Nach Ende der Aufnahme (bzw. beim Hochladen von Folien/Übungen) läuft im Hinte
 ### 5.4 Lernen (Quiz & Karteikarten – à la StudySmarter / Quizlet)
 
 - **Fragetypen:** Karteikarte, Multiple Choice, Lückentext, offene Frage (KI bewertet meine Antwort und erklärt), Rechen-/Anwendungsaufgabe, „Erkläre den Zusammenhang zwischen A und B" (nutzt die Graph-Links).
-- **Spaced Repetition mit FSRS** (moderner Nachfolger des Anki-Algorithmus) → tägliche „Fällig"-Liste.
+- **Spaced Repetition mit FSRS** (moderner Nachfolger des Anki-Algorithmus) → tägliche „Fällig"-Liste. Erklärung und unsere Erweiterungen: [Lernmodell](LERNMODELL.md).
 - **Beherrschungsgrad pro Konzept** (0–100 %) aus Wiederholungen + Korrektheit + Fragetyp (Anwendung zählt mehr als Definition).
 - **Lernmodi:** Tägliche Wiederholung · Vorlesung X durchgehen · Fach Y · „Nur Schwächen" · Klausur-Simulation (zeitlich begrenzt, gemischt, im Stil alter Klausuren).
 - **Fehleranalyse:** Bei falschen Antworten speichert die KI *warum* (Begriff verwechselt? Rechenfehler? Voraussetzung fehlt?). Das füttert die Lernvideos.
@@ -156,21 +165,37 @@ Alle Videos werden **pro Konzept** gespeichert → die Videothek ist automatisch
 
 ## 6. Wichtige Entscheidungen
 
-### E1 – GoodNotes: eigene Handschrift-Ebene statt GoodNotes-Integration
+### E1 – GoodNotes-Funktionen selbst bauen, Schreib-App auf dem iPad nativ
 
-**Problem:** GoodNotes hat **keine öffentliche Schnittstelle** und keine Live-Übertragung. Man kann den Inhalt während der Vorlesung nicht in eine andere App streamen.
+**Ausgangslage:** GoodNotes hat **keine öffentliche Schnittstelle** und keine Live-Übertragung. Deshalb bauen wir die Funktionen, die wir wirklich brauchen, selbst nach. Das *Wie* klären wir mit dem REA-Skill (siehe [Feature-Katalog](FEATURE-KATALOG.md)). Alte GoodNotes-Notizbücher kommen per PDF-Export als Import rein.
 
-| Option | Live am Display? | Daten in der App? | Bewertung |
-|---|---|---|---|
-| A) **Eigener Stift-Canvas** in der Web-App auf dem iPad, Live-Sync zum Laptop | ✅ | ✅ (Striche, Folienbezug, Handschrifterkennung) | **Empfohlen** |
-| B) GoodNotes + iPad-Bildschirm spiegeln (AirPlay/Sidecar) als Fenster | ✅ | ❌ nur ein Bild | Notlösung |
-| C) GoodNotes-Export (Auto-Backup als PDF nach Drive/Dropbox) → Import | ❌ erst danach | ⚠️ nur PDF, kein Folienbezug | Als **Import für alte Notizen** sinnvoll |
+**Web oder nativ auf dem iPad?**
 
-**Entscheidung:** A als Hauptweg, C als Import-Funktion für bestehende GoodNotes-Notizbücher. Mit Apple Pencil im Safari-Browser bekommt man Druckstärke und Neigung (Pointer Events) – das Schreibgefühl kann sehr nah an GoodNotes herankommen (Bibliothek *perfect-freehand* für schöne Striche). Der Vorteil gegenüber GoodNotes ist riesig: Jeder Strich weiß, **auf welcher Folie** und **zu welcher Sekunde im Audio** er entstand.
+| | Web-App (Safari) | **Native iPad-App (SwiftUI + PencilKit)** |
+|---|---|---|
+| Schreib-Latenz | spürbar höher | wie GoodNotes (Apple sagt Striche voraus) |
+| Handballenerkennung | eingeschränkt | ✅ systemseitig |
+| Pencil-Doppeltipp / Squeeze | ❌ nicht verfügbar | ✅ |
+| Fertige Werkzeuge (Stift, Marker, Radierer, Lasso, Lineal) | alles selbst bauen | ✅ in PencilKit enthalten |
+| Zeitstempel pro Strich | selbst erfassen | ✅ Erstellungszeit pro Strich, Zeitversatz pro Punkt |
+| Aufwand | eine Codebasis | zweite Codebasis (Swift), Xcode auf dem Mac |
 
-### E2 – Lokal-first, ein eigener Server
+**Entscheidung:** Die **Schreib-App auf dem iPad wird nativ** (SwiftUI + PencilKit). Leitprinzip 2 sagt: Schreibgefühl ist nicht verhandelbar, und genau dort ist die Web-Variante schwächer. **Alles andere bleibt Web-App** (Mac-Dashboard, Bibliothek, Lernen, Planer). Die iPad-App überträgt Striche als neutrales JSON (Punkte, Druck, Zeit, Folien-ID). Das Mac-Dashboard zeichnet sie selbst. Damit sind wir nicht an Apple gebunden, falls später andere Tablets dazukommen.
 
-Für Eigennutzung: Die App läuft auf meinem Laptop (oder einem kleinen Server/VPS). iPad und Laptop synchronisieren über **CRDT (Yjs)** – das funktioniert auch bei schlechtem Uni-WLAN, und nichts geht verloren, wenn die Verbindung kurz weg ist. Für einen späteren Verkauf lässt sich derselbe Aufbau in die Cloud heben.
+*Hinweis:* PencilKit meldet einen Strich erst, wenn er fertig ist. Am Mac erscheint also jeder Strich **nach dem Absetzen**, typischerweise in unter einer Sekunde. Für einen Live-Spiegel reicht das. Echte Mitzeichnung während des Strichs wäre ein späteres Extra.
+
+### E2 – Lokal speichern zuerst, Sync über einen kleinen Server
+
+Alles wird **zuerst lokal** gespeichert (iPad und Mac), danach synchronisiert. Ein Verbindungsabbruch kostet so nie Daten.
+
+**Haken im Hörsaal:** Im Uni-WLAN (z. B. eduroam) sehen sich Geräte untereinander oft nicht („Client Isolation"). iPad und Mac können sich dort direkt also womöglich nicht erreichen. Deshalb:
+1. **Standard:** Beide Geräte synchronisieren über einen **kleinen Sync-Server im Internet** (günstiger VPS oder später Cloud). Das funktioniert in jedem WLAN mit Internet.
+2. **Ohne Internet:** Beide schreiben lokal weiter und gleichen später ab. Notfalls hilft der iPhone-Hotspot oder ein privates Netz wie Tailscale.
+3. **Später (P2):** Direktverbindung iPad ↔ Mac ohne Netz über Apples Multipeer Connectivity (bräuchte einen kleinen nativen Mac-Helfer).
+
+**Gleiche Uhr für alle:** Striche (iPad) und Audio (Mac) müssen auf die Sekunde zusammenpassen. Beide Geräte gleichen ihre Uhr beim Start mit dem Server ab (Zeitversatz messen).
+
+Die **Audioaufnahme** läuft am Mac im Browser, in 30-Sekunden-Stücken gespeichert und nach und nach hochgeladen.
 
 ### E3 – Wissensnotizen als Markdown-Dateien
 
@@ -185,11 +210,13 @@ Transkription (Whisper – lokal oder per API), LLM (Claude API) und Sprachausga
 ## 7. Technische Architektur
 
 ```
- iPad (Safari, PWA)            Laptop (Browser)
+ iPad (native App)             Mac (Browser)
  ┌──────────────────┐          ┌──────────────────────────────┐
- │ Schreib-Modus    │◄──Yjs───►│ Dashboard · Bibliothek ·     │
- │ Canvas + Folie   │ WebSocket│ Lernen · Planer · Videos     │
- └──────────────────┘          └──────────────┬───────────────┘
+ │ Schreib-App      │          │ Dashboard · Bibliothek ·     │
+ │ PencilKit + Folie│          │ Lernen · Planer · Videos     │
+ └────────┬─────────┘          └──────────────┬───────────────┘
+          │  Striche, Marker, Fotos (lokal zuerst, dann Sync)   │
+          └──────────────────────┬────────────────────────────┘
                                               │ HTTP/WebSocket
                          ┌────────────────────▼────────────────────┐
                          │  Web-Backend (Next.js / TypeScript)      │
@@ -210,10 +237,11 @@ Transkription (Whisper – lokal oder per API), LLM (Claude API) und Sprachausga
 
 | Bereich | Vorschlag | Warum |
 |---|---|---|
-| Frontend | Next.js (React, TypeScript), Tailwind, als PWA | Eine Codebasis für Laptop und iPad |
+| Frontend (Mac) | Next.js (React, TypeScript), Tailwind | Dashboard, Bibliothek, Lernen, Planer |
+| iPad-Schreib-App | SwiftUI + PencilKit, lokale Speicherung | Schreibgefühl wie GoodNotes, Pencil-Gesten (E1) |
 | PDF-Anzeige | pdf.js | Standard, läuft überall |
-| Handschrift | Eigener Canvas + perfect-freehand, Pointer Events | Apple-Pencil-Druck, volle Kontrolle über Daten |
-| Echtzeit-Sync | Yjs + y-websocket | Offline-fest, konfliktfrei |
+| Striche am Mac anzeigen | Canvas + perfect-freehand | Zeichnet die Striche aus dem neutralen JSON |
+| Sync | Eigener Sync-Server (WebSocket), Änderungsprotokoll pro Notizbuch; für Text-Notizen Yjs | Offline-fest, funktioniert auch bei Client Isolation (E2) |
 | Backend | Next.js API / tRPC, Prisma oder Drizzle | Typsicher, schnell entwickelt |
 | KI-Worker | Python (FastAPI + Job-Queue, z. B. arq/Celery) | Bestes Ökosystem für PDF, Audio, ML |
 | PDF-Parsing | PyMuPDF | Text + Bilder pro Seite |
@@ -253,8 +281,10 @@ Kalender-Ereignis (Vorlesung | fest | Lernblock) ── Lernblock → (Modul | K
 
 - [ ] **Module & Vorlesungen anlegen**, Folien- und Übungs-PDFs hochladen.
 - [ ] **Dashboard** mit Folie | Übung | Notizen nebeneinander; Folienwechsel werden mit Zeitstempel gespeichert.
-- [ ] **iPad-Schreibmodus** mit Apple Pencil (Stift, Marker, Radierer, Seiten); Striche erscheinen in < 200 ms am Laptop; nach Verbindungsabbruch gehen keine Striche verloren.
+- [ ] **Ein-Tipp-Start** aus dem Stundenplan, Auto-Stopp; **folienloser Modus** mit späterer Zuordnung.
+- [ ] **iPad-Schreib-App** (PencilKit: Stift, Marker, Radierer, Lasso, Seiten, Folie als Hintergrund, Marker ❓⚠️🔗, Tafel-Foto). Jeder Strich ist nach dem Absetzen in < 1 s am Mac. Nach einem Verbindungsabbruch geht kein Strich verloren.
 - [ ] **Audio-Aufnahme** im Browser, sicher gespeichert (auch bei Absturz: Aufnahme in Stücken speichern).
+- [ ] **Automatische Backups** (täglich) und Vault-Export.
 - [ ] **Transkription + Ausrichtung** pro Folie nach der Vorlesung.
 - [ ] **Rückblick einer Vorlesung**: Folie anklicken → meine Notiz + was der Prof dazu gesagt hat (mit Audio-Abspielen ab der Stelle).
 
@@ -286,7 +316,7 @@ Kalender-Ereignis (Vorlesung | fest | Lernblock) ── Lernblock → (Modul | K
 | Phase | Inhalt | Ergebnis |
 |---|---|---|
 | **0 – Fundament** | Repo-Setup, Docker Compose, DB-Schema, Upload, PDF-Viewer | Folien und Übungen pro Modul ablegen und ansehen |
-| **1 – Vorlesungs-Dashboard** | 3-Spalten-Layout, iPad-Canvas + Yjs-Sync, Folienwechsel-Log, Audio-Aufnahme | **In der nächsten Vorlesung einsetzbar** |
+| **1 – Vorlesungs-Dashboard** | 3-Spalten-Layout, iPad-Schreib-App (PencilKit) + Sync-Server, Folienwechsel-Log, Audio-Aufnahme, Ein-Tipp-Start | **In der nächsten Vorlesung einsetzbar** |
 | **2 – Nacharbeitung** | Whisper, Ausrichtung, Rückblick-Ansicht, Folie↔Übung, Konzept-Extraktion, Vault | Jede Vorlesung wird automatisch zur verlinkten Wissensnotiz |
 | **3 – Lernen** | Fragen, Quiz, FSRS, Beherrschung, Fehleranalyse | Klausurvorbereitung läuft über die App |
 | **4 – Planen** | ICS/Google-Import, Wochenplaner, Vorbereitungs-Check | Die Woche plant sich selbst |
@@ -296,7 +326,8 @@ Kalender-Ereignis (Vorlesung | fest | Lernblock) ── Lernblock → (Modul | K
 
 ## 10. Risiken & Rechtliches
 
-- **Aufnahme der Vorlesung:** Das Aufnehmen nicht-öffentlich gesprochener Worte ohne Einverständnis kann strafbar sein (DE: § 201 StGB; CH: Art. 179bis ff. StGB). → **Vorher den Professor fragen** bzw. Uni-Regeln prüfen. Viele erlauben es für den Eigengebrauch; manche Vorlesungen werden ohnehin aufgezeichnet – dann deren Aufnahme importieren statt selbst aufnehmen.
+- **Aufnahme der Vorlesung:** ✅ geklärt, ich darf aufnehmen. Für einen späteren Verkauf bleibt das ein Hinweis an die Nutzer: Ohne Einverständnis kann das Aufnehmen strafbar sein (DE: § 201 StGB; CH: Art. 179bis ff. StGB).
+- **Nachbau fremder Funktionen:** Nur Funktionsweisen übernehmen, nie fremden Code, Design oder Marken (siehe [Feature-Katalog](FEATURE-KATALOG.md)).
 - **Urheberrecht an Folien:** Für den Eigengebrauch unproblematisch. Bei einem späteren Produkt dürfen Folien/Inhalte **nicht zwischen Nutzern geteilt** werden – nur die Software wird verkauft.
 - **KI-Fehler:** Generierte Notizen/Fragen können falsch sein → immer mit Quelle (Folie/Transkript-Stelle) verlinken; Bestätigung in der Nacharbeitungs-Ansicht.
 - **Kosten:** Transkription und LLM-Aufrufe pro Vorlesung im Blick behalten (Kostenzähler im Admin-Bereich); Whisper lokal ist kostenlos.
@@ -307,12 +338,15 @@ Kalender-Ereignis (Vorlesung | fest | Lernblock) ── Lernblock → (Modul | K
 
 ## 11. Offene Fragen
 
+**Geklärt:** Mac + iPad mit Apple Pencil ✅ · Aufnahme erlaubt ✅ · GoodNotes-Funktionen werden mit dem REA-Skill analysiert und selbst gebaut ✅
+
 | # | Frage | Blockiert? |
 |---|---|---|
-| F1 | Welches Tablet genau (iPad + Apple Pencil?) und welcher Laptop (Mac/Windows)? | Ja – Phase 1 |
-| F2 | Ist „eigener Stift-Canvas statt GoodNotes" (E1) für dich ok, oder ist GoodNotes selbst ein Muss? | Ja – Phase 1 |
+| F1 | Welches iPad-Modell und welcher Apple Pencil (2. Gen., USB-C, Pro)? Davon hängen Gesten wie Squeeze und Hover ab. | Nein |
+| F2 | Gibt es einen Apple-Developer-Account? Ohne ihn muss die iPad-App alle 7 Tage neu aus Xcode installiert werden. Mit ihm (99 $/Jahr) geht es per TestFlight. | Ja – Phase 1 |
 | F3 | Wie sieht dein bestehendes Obsidian-Lernsystem aus (Vorlagen, Tags, Ordner)? Gerne Beispiele ins Repo legen. | Ja – Phase 2 |
-| F4 | Woher kommen Folien/Übungen (LMS wie Canvas/Moodle, Mail, …)? Gibt es den Stundenplan als ICS-Export? | Nein |
-| F5 | Darfst du die Vorlesungen aufnehmen, bzw. gibt es offizielle Aufzeichnungen? | Ja – Audio-Teil |
-| F6 | Lokal auf dem Laptop laufen lassen oder auf einem kleinen Server (dann auch vom Handy erreichbar)? | Nein |
+| F4 | Woher kommen Folien und Übungen (LMS wie Canvas/Moodle, Mail …)? Gibt es den Stundenplan als ICS-Export? | Nein |
+| F5 | Hast du ein iPhone? Dann lohnt sich der Review-Modus fürs Pendeln (M1) auch dort. | Nein |
+| F6 | Sync-Server: kleiner VPS (ca. 5 €/Monat) okay, oder lieber erst nur lokal testen? | Ja – Phase 1 |
 | F7 | Sprache der Vorlesungen (Deutsch/Englisch gemischt?) – wichtig für Transkription und Fragen. | Nein |
+| F8 | Dateien für REA: GoodNotes-Mac-App und die Web-Bundles von Quizlet/StudySmarter hochladen, sobald wir an die jeweiligen Funktionen gehen. | Nein |
