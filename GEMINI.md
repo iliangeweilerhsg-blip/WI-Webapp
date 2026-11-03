@@ -31,6 +31,9 @@ Ein Issue mit „Abhängig von #X“ überspringen, solange der PR zu #X nicht g
    git merge --no-edit origin/main   # bei Nacharbeit: aktuellen main einarbeiten
    ```
 5. **Umsetzen** – nur im Scope des Issues. Vorhandene Build-/Lint-/Test-Befehle ausführen.
+   **Zwischenstände sichern:** Nach jedem sinnvollen Teilschritt committen und pushen
+   (`git commit -m "wip: … (#<nr>)" && git push -u origin argon/issue-<nr>`). Falls dein Limit mitten in der Arbeit endet,
+   kann Claude so direkt auf deinem Branch weitermachen.
 6. **Commit & Push:**
    ```bash
    git add -A && git commit -m "argon: <kurzbeschreibung> (#<nr>)"
@@ -41,6 +44,12 @@ Ein Issue mit „Abhängig von #X“ überspringen, solange der PR zu #X nicht g
    - PR vorhanden: `gh pr comment <pr> --body "**[Argon]** Nacharbeit erledigt: …"` und `gh pr edit <pr> --add-label status:review`
 8. **Freigeben:** `gh issue edit <nr> --remove-label status:in-arbeit --remove-label agent:argon`
 9. Weiter mit dem nächsten Issue.
+
+### Wenn dein Kontingent knapp wird
+
+Siehst du eine Warnung zum Nutzungslimit: sofort den aktuellen Stand als `wip:`-Commit pushen und kommentieren:
+`gh issue comment <nr> --body "**[Argon]** Limit erreicht. Stand: … Nächster Schritt wäre: …"`
+Danach `gh issue edit <nr> --add-label argon:limit` – Claude übernimmt dann.
 
 ### Wenn du nicht weiterkommst
 

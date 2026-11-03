@@ -105,6 +105,19 @@ Claude markiert im Issue, welches Modell sinnvoll ist (Label `modell:flash` nur 
 5. **Merge-Reihenfolge** bestimmt Claude, Konflikte löst Claude.
 6. **Argon** zählt als weiterer paralleler Worker mit denselben Regeln. Über `status:in-arbeit` sieht jeder, was belegt ist.
 
+## 5a. Fallback: Argons Limit ist aufgebraucht
+
+Das Gemini-Abo hat Nutzungslimits. Ist es aufgebraucht, macht Claude weiter, und die Arbeit geht nicht verloren:
+
+1. **Argon sichert Zwischenstände** als `wip:`-Commits auf `argon/issue-<nr>`. Bei einer Limit-Warnung schreibt Argon einen Kommentar mit dem aktuellen Stand und setzt `argon:limit`.
+2. **Claude prüft das Repo automatisch alle 2 Stunden** über eine geplante Aufgabe in der Claude-Session und übernimmt:
+   - Issues mit `argon:limit`: sofort
+   - Issues mit `status:in-arbeit`, bei denen seit über 60 Minuten weder Commit noch Kommentar kam: Die Session ist vermutlich abgebrochen, Claude übernimmt
+   - weitere `agent:argon`-Issues aus der Warteschlange, wenn ein anderes Issue davon abhängt oder sie länger als 24 Stunden unbearbeitet liegen
+3. **So übernimmt Claude:** Claude kommentiert `**[Claude]** Übernehme wegen Argon-Limit` und tauscht die Labels `agent:argon`/`argon:limit` gegen `agent:claude`. Dann arbeitet Claude auf demselben Branch `argon/issue-<nr>` weiter und öffnet bzw. aktualisiert den PR mit „Erstellt von: Argon + Claude“.
+4. Aufgaben, die **wirklich** Argons Stärke brauchen (z. B. Analyse eines riesigen Dokuments), lässt Claude bis zum nächsten Argon-Start liegen. Ausnahme: Etwas hängt davon ab.
+5. **Owner:** Du musst nichts tun. Schneller geht es, wenn du hier im Claude-Chat „Argon-Limit erreicht“ schreibst.
+
 ## 6. Tagesrhythmus
 
 **Nachts / ohne Owner (Claude):**
@@ -134,7 +147,7 @@ Siehe [`ERFAHRUNGSLOG.md`](ERFAHRUNGSLOG.md) (eigene Datei, damit es keine Merge
 1. Diesen Branch nach `main` mergen – **vorher** startet Argon nicht (der Start-Prompt prüft das).
 2. Antigravity installieren, mit dem Google-Konto des Abos anmelden, Repo klonen und öffnen.
 3. GitHub CLI installieren und `gh auth login` ausführen.
-4. Labels anlegen: `bash scripts/setup-labels.sh` (einmalig; schadet auch mehrfach nicht).
+4. Labels: legt Argon beim ersten Start automatisch an (laut Start-Prompt). Alternativ selbst: `bash scripts/setup-labels.sh`.
 5. In Antigravity erlauben, dass der Agent Terminal-Befehle ohne Einzelbestätigung ausführt.
 6. Prüfen, ob „Gemini 4 Argon“ in der Modell-Auswahl von Antigravity für dein Abo erscheint.
    Falls nicht: das stärkste verfügbare Gemini-Modell nehmen und es Claude mitteilen, dann wird die Matrix angepasst.

@@ -29,6 +29,7 @@ Anlegen mit `bash scripts/setup-labels.sh`.
 | `status:review` | PR | Wartet auf Review durch Claude | PR-Autor |
 | `status:freigegeben` | PR | Claude hat freigegeben – Owner kann mergen | Claude |
 | `modell:flash` | Issue | Einfache Aufgabe, Flash-Modell reicht | Claude |
+| `argon:limit` | Issue | Argons Kontingent war aufgebraucht – Claude übernimmt | Argon oder Owner |
 
 **Gleiches GitHub-Konto:** Beide Agenten schreiben über den Account des Owners. Darum beginnt jeder Kommentar
 mit `**[Claude]**` / `**[Claude-Review]**` bzw. `**[Argon]**`. Freigaben laufen über das Label `status:freigegeben`,
@@ -51,6 +52,7 @@ nicht über GitHub-Approvals (eigene PRs kann man auf GitHub nicht approven).
 10. **Ehrlich berichten.** Was nicht getestet wurde oder nicht funktioniert, steht im PR – nichts schönreden.
 11. **Bei Unklarheit nicht raten:** Frage ins Issue schreiben, `status:blockiert` setzen, mit dem nächsten Task weitermachen.
 12. **Abhängigkeiten:** Ein Issue mit „Abhängig von #X“ erst bearbeiten, wenn der PR zu #X gemergt ist.
+13. **Übernahme bei Argon-Limit:** Siehe `docs/KOLLABORATION.md`, Abschnitt „Fallback“. Claude arbeitet dann auf Argons Branch weiter. Die Arbeit geht nie verloren, weil Argon Zwischenstände pusht.
 
 ## PR-Beschreibung (Pflichtinhalt)
 
