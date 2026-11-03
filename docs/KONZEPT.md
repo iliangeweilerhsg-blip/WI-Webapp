@@ -83,7 +83,7 @@ Der **Wochenplaner** ist der Taktgeber: Er weiß, wann die nächste Vorlesung is
 - **Notizen-Panel**: Live-Spiegel dessen, was ich auf dem iPad schreibe (siehe E1). Zwei Modi:
   - *Freie Seite* (wie ein Notizblock), automatisch an die gerade gezeigte Folie geheftet.
   - *Auf die Folie schreiben* (Annotation direkt über der Folie).
-- **Audio-Aufnahme + Live-Transkript** (Ticker). Ein Klick auf **★** markiert „das ist wichtig / klausurrelevant / nicht verstanden" – diese Marker steuern später die Nacharbeitung.
+- **Audio-Aufnahme.** Das Transkript entsteht standardmäßig **nach** der Vorlesung. Der Live-Ticker unten im Bild ist optional und kommt später. Ein Tipp auf **❓ / ⚠️ / 🔗** markiert „nicht verstanden / klausurrelevant / erinnert mich an …". Diese Marker steuern später die Nacharbeitung.
 - **Schnell-Tags** auf dem iPad per Geste oder Button: ❓ *nicht verstanden*, ⚠️ *klausurrelevant*, 🔗 *erinnert mich an …*.
 
 **Das iPad** läuft mit einer eigenen **Schreib-App** (nativ, siehe E1): Canvas, aktuelle Folie als optionaler Hintergrund, Werkzeugleiste, Marker-Buttons, Tafel-Kamera. Folienwechsel am Mac → das iPad springt mit, und umgekehrt (Wischen auf dem iPad blättert die Folie).

@@ -32,9 +32,9 @@ Wir wollen verstehen, *wie* eine Funktion in einer Referenz-App funktioniert, un
 - **Quizlet / StudySmarter:** Hier lohnt sich REA kaum. Die interessanten Teile (Lernmodus, Auswertung) liegen hinter dem Login und vermutlich auf deren Servern. Für diese Apps reichen Stufe 1–3. Selbst herunterladen und zerlegen werde ich die Web-Apps nicht.
 - Wir übernehmen **Funktionsweisen**, nie fremden Code, Grafiken, Icons, Markennamen oder Design. Eigenes UI, eigene Umsetzung. Das hält auch einen späteren Verkauf sauber.
 - Ergebnisse pro App kommen nach `docs/referenz-analysen/<app>.md`: was gesehen, was abgeleitet, was unklar ist.
-- Die Tabellen unten sind aus Produktkenntnis vorbefüllt. 🔍 markiert, was die Recherche noch klären soll.
+- Recherche-Stand 03.11.2026: Abdeckband, Formerkennung, Lernmodus und Magic Marker sind geklärt (Quellen in `referenz-analysen/`).
 
-**Legende:** ✅ übernehmen · 🔧 übernehmen und anpassen · ⏳ später · ❌ weglassen · 🔍 mit REA genauer analysieren
+**Legende:** ✅ übernehmen · 🔧 übernehmen und anpassen · ⏳ später · ❌ weglassen · 🔍 noch zu recherchieren
 
 ---
 
@@ -49,13 +49,13 @@ Wir wollen verstehen, *wie* eine Funktion in einer Referenz-App funktioniert, un
 | Lasso: verschieben, skalieren, Farbe ändern | ✅ | P0 | M3 | |
 | Lasso → **Karteikarte erstellen** | 🔧 | P1 | M7 | Bereich auf Notiz/Folie einkreisen → wird Karte (eigene Idee, baut auf Lasso auf) |
 | Lasso → in Text umwandeln | ⏳ | P2 | M5 | Kommt mit der Handschrifterkennung |
-| Formen-Erkennung (Linie/Kreis/Pfeil beim Halten) | ✅ | P1 | M3 | Für Diagramme (ER, BPMN, Graphen) unverzichtbar 🔍 |
+| Formen-Erkennung (Linie/Kreis/Pfeil beim Halten) | 🔧 | P1 | M3 | Für Diagramme (ER, BPMN, Graphen) unverzichtbar. Lieber nichts erkennen als falsch ([Recherche](referenz-analysen/goodnotes.md)) |
 | Zoom-Fenster (groß schreiben, klein ablegen) | ⏳ | P2 | M3 | Nett, aber kein Muss |
 | Seitenvorlagen: blanko, liniert, kariert, **Cornell** | 🔧 | P1 | M3 | Cornell-Vorlage mit KI-Spalte „Schlüsselfragen", die nach der VL gefüllt wird |
 | PDF importieren und direkt annotieren | ✅ | P0 | M3 | Modus „Auf die Folie schreiben" |
 | Handschriftsuche | 🔧 | P1 | M5 | In die globale ⌘K-Suche integriert |
 | Gliederung / Lesezeichen | 🔧 | P1 | M5 | Ergibt sich aus Folienstruktur und Konzepten |
-| **Abdeckband** (Teile verdecken, zum Selbsttest antippen) | ✅ | P1 | M7 | Aktives Lernen direkt in den eigenen Notizen 🔍 |
+| **Abdeckband** (Teile verdecken, zum Selbsttest antippen) | 🔧 | P1 | M7 | Dazu „Alle zudecken" per Knopf, und jedes Band kann eine FSRS-Karte werden ([Recherche](referenz-analysen/goodnotes.md)) |
 | Bilder / Kamera einfügen | 🔧 | P0 | M3 | **Tafel-Foto mit Zeitstempel** |
 | Textfelder | ✅ | P1 | M3 | |
 | Sticker / Elemente | 🔧 | P1 | M4 | Nur als **Marker-Stempel** ❓ ⚠️ 🔗 mit Bedeutung |
@@ -71,12 +71,12 @@ Wir wollen verstehen, *wie* eine Funktion in einer Referenz-App funktioniert, un
 |---|---|---|---|---|
 | Lernplan bis zum Prüfungstermin | 🔧 | P1 | M10, Klausur | Bei uns mit echtem Stundenplan und freien Slots statt nur „x Karten pro Tag" |
 | Karteikarten automatisch aus PDFs / Folien | 🔧 | P1 | M7 | Bei uns aus Folien **plus Transkript plus meinen ❓-Markern** |
-| Text in PDF markieren → Karteikarte | ✅ | P1 | M7 | Geht auch über Lasso (siehe oben) |
+| Text in PDF markieren → Karteikarte („Magic Marker") | 🔧 | P1 | M7 | Die KI formuliert die Karte, die Quelle wird automatisch verlinkt ([Recherche](referenz-analysen/studysmarter.md)) |
 | Karten mit Bild / Formel (LaTeX) | ✅ | P1 | M1 | WI braucht Formeln und Diagramme |
 | Verschiedene Fragetypen (MC, offen, Lückentext …) | ✅ | P1 | M1, M7 | |
 | Lernstatistiken pro Fach | 🔧 | P1 | M10 | Als **Klausur-Readiness** (siehe [Lernmodell](LERNMODELL.md)) |
 | Zusammenfassungen | 🔧 | P1 | M7 | Vorlesungs-Zusammenfassung mit Quellen-Links |
-| Streaks, Lernziele, Gamification | ⏳ | P2 | M9 | Höchstens dezent, kein Druck (Leitprinzip 9) 🔍 |
+| Streaks, Lernziele, Gamification | ❌ | – | M9 | Widerspricht Leitprinzip 9. Stattdessen: ehrliche Prognose |
 | Community-Inhalte / fremde Lernsets | ❌ | – | – | Mein Material ist die Quelle |
 
 ## 4. Quizlet – Lernmodi
@@ -84,7 +84,7 @@ Wir wollen verstehen, *wie* eine Funktion in einer Referenz-App funktioniert, un
 | Funktion | Entscheidung | Prio | Moment | Warum / unsere Variante |
 |---|---|---|---|---|
 | Karteikarten mit Wischen („kann ich" / „lerne ich noch") | 🔧 | P1 | M1 | Wischen bleibt, die Bewertung läuft über FSRS (Nochmal/Schwer/Gut/Leicht) |
-| **Lernmodus** (adaptiv: erst Auswahl, dann frei schreiben, Fehler in Runden wiederholen) | 🔧 | P1 | M7 | Erweitert zu **Lernstufen pro Konzept**: Erkennen → Abrufen → Anwenden → Verknüpfen 🔍 |
+| **Lernmodus** (Runden, fertig bei zweimal hintereinander richtig, tolerante Bewertung) | 🔧 | P1 | M7 | Erweitert zu **Lernstufen pro Konzept**: Erkennen → Abrufen → Anwenden → Verknüpfen ([Recherche](referenz-analysen/quizlet.md)) |
 | **Test-Modus** (generierte Probeprüfung mit gemischten Fragetypen) | 🔧 | P1 | Klausur | Im **Stil der Altklausuren**, mit Zeitlimit |
 | Begriff ↔ Definition umkehren | ✅ | P1 | M1 | |
 | Karten markieren (Stern) | ✅ | P1 | M1 | |
