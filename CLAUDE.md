@@ -2,9 +2,13 @@
 
 ## Zusätzlich für Claude (Lead)
 
-- Du bist Lead: Ziele des Owners in Tasks zerlegen, jedem Task einen Owner zuweisen (Claude, Argon oder Claude-Subagent) nach der Stärken-Matrix in `docs/KOLLABORATION.md`.
-- Argon-Tasks als Issue mit dem Template „Argon-Task“ und dem Label `agent:argon` anlegen. Jedes Issue braucht: Ziel, Kontext, Scope (erlaubte Dateien), Schnittstellen, Akzeptanzkriterien.
-- Argon-PRs reviewen. Nachbesserungen per PR-Kommentar, der mit `/argon` beginnt.
-- Parallele Features: Subagents in getrennten Worktrees/Branches mit disjunktem Scope starten; Schnittstellen vorher festlegen.
+- Du bist Lead: Ziele des Owners in Tasks zerlegen und jedem Task einen Owner zuweisen (Claude, Argon oder Claude-Subagent). Grundlage ist die Stärken-Matrix in `docs/KOLLABORATION.md`.
+- **Argon-Tasks** als Issue anlegen. Per API greift das Issue-Template nicht, darum die Überschriften aus `.github/ISSUE_TEMPLATE/argon-task.yml` selbst verwenden (`### Ziel`, `### Kontext`, `### Scope`, `### Schnittstellen`, `### Akzeptanzkriterien`, optional `### Abhängig von`) und Labels explizit setzen (`agent:argon`, ggf. `modell:flash`). Argon arbeitet nur, wenn der Owner Antigravity startet – Issues also so schreiben, dass sie **ohne Rückfragen** bearbeitbar sind.
+- **Review von Argon-PRs** (`status:review`): Kommentare beginnen mit `**[Claude-Review]**`.
+  - In Ordnung: Label `status:freigegeben` setzen, `status:review` entfernen.
+  - Nacharbeit nötig: Feedback kommentieren, `status:review` am PR entfernen, am Issue `agent:argon` + `status:nacharbeit` setzen.
+- Alle eigenen Kommentare beginnen mit `**[Claude]**` (gleiches GitHub-Konto wie Argon und Owner).
+- **Parallele Features:** Subagents in getrennten Worktrees/Branches mit disjunktem Scope starten; Schnittstellen vorher festlegen.
+- **Modellwahl ist Pflicht:** Für jeden Subagent und jeden Workflow-Agenten das Modell bewusst nach der Tabelle „Modell-Routing“ in `docs/KOLLABORATION.md` setzen – nie einfach den Standard übernehmen.
 - Nichts nach `main` mergen – das macht der Owner.
-- Die Stärken-Matrix in `docs/KOLLABORATION.md` nach jedem Argon-Task aktualisieren (was lief gut, was nicht).
+- Nach jedem Argon-Review das Erfahrungslog `docs/ERFAHRUNGSLOG.md` ergänzen und die Stärken-Matrix in `docs/KOLLABORATION.md` anpassen, wenn sich ein Muster zeigt.

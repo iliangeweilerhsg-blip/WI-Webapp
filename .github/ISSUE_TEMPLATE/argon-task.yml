@@ -1,5 +1,5 @@
 name: Argon-Task
-description: Aufgabe für Argon (Gemini 4 Argon). Wird vom Lead (Claude) angelegt.
+description: Aufgabe für Argon (Gemini 4 Argon in Antigravity). Wird vom Lead (Claude) angelegt und muss ohne Rückfragen bearbeitbar sein.
 title: "[Argon] "
 labels: ["agent:argon"]
 body:
@@ -32,6 +32,11 @@ body:
     attributes:
       label: Schnittstellen / Verträge
       description: Typen, API-Endpunkte, Props etc., die eingehalten werden müssen und nicht geändert werden dürfen.
+  - type: input
+    id: abhaengig
+    attributes:
+      label: Abhängig von
+      description: Issue-Nummer(n), deren PR vorher gemergt sein muss, z. B. "#3". Leer lassen, wenn keine.
   - type: textarea
     id: akzeptanz
     attributes:
@@ -55,3 +60,11 @@ body:
         - Große Textmengen (Doku, Testdaten, Übersetzungen)
         - Second Opinion / Gegen-Review
         - Sonstiges
+  - type: dropdown
+    id: modell
+    attributes:
+      label: Empfohlenes Modell in Antigravity
+      description: Bei "Flash" zusätzlich das Label modell:flash setzen.
+      options:
+        - Gemini 4 Argon (Standard)
+        - Flash-Modell (einfache, mechanische Aufgabe)

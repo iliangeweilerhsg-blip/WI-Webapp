@@ -1,126 +1,157 @@
 # Zusammenarbeit: Claude (Lead) × Argon (Gemini 4 Argon)
 
-Stand: November 2026
+Stand: 3. November 2026 · Betrieb **nur über Abos** (Claude-Abo und Google-AI-Abo), keine API-Keys.
 
 ## 1. Grundidee
 
 Claude führt, Argon ist Spezialist, der Owner (Mensch) entscheidet und merged.
-Beide KIs arbeiten im selben GitHub-Repo, aber **nie auf demselben Branch**. Die Koordination läuft über
-**Issues → Branches → Pull Requests → Reviews**, also über den normalen GitHub-Prozess, der für Menschen nachvollziehbar bleibt.
+Die beiden KIs laufen in getrennten Produkten und können sich nicht direkt aufrufen.
+**GitHub ist die gemeinsame Schnittstelle:** Aufgaben sind Issues, Ergebnisse sind Pull Requests, Feedback sind Reviews und Kommentare.
 
 ```
-Owner ──Ziel──▶ Claude (Lead)
-                 │  zerlegt in Tasks, legt Schnittstellen fest
-                 ├──▶ selbst erledigen                      (Branch claude/…)
-                 ├──▶ Claude-Subagents, parallel             (Branches feat/…, je eigener Worktree)
-                 └──▶ Issue mit Label agent:argon ──▶ GitHub Action ──▶ Argon
-                                                                 │
-                                         PR von argon/issue-N ◀──┘
-                 Claude reviewt ──▶ "/argon <Feedback>" ──▶ Argon bessert nach
-                 Claude gibt frei ──▶ Owner merged
+Owner ──Ziel──▶ Claude (Lead, Claude Code in der Cloud)
+                 │  zerlegt in Tasks, legt Schnittstellen fest, wählt das Modell pro Task
+                 ├──▶ selbst erledigen                         Branch claude/…
+                 ├──▶ Claude-Subagents/Workflows, parallel      Branches feat/…
+                 └──▶ Issue mit Label agent:argon  ──┐         (Queue)
+                                                     │
+Owner öffnet Antigravity + Start-Prompt ──▶ Argon arbeitet die Queue ab
+                                                     │
+                       PR "[Argon] …" (status:review) ◀┘
+                 Claude reviewt ──▶ Feedback + Issue: agent:argon, status:nacharbeit ──▶ nächster Argon-Schub
+                 Claude gibt frei (status:freigegeben) ──▶ Owner merged
 ```
 
-## 2. Was Argon besonders gut kann – und wofür wir es einsetzen
+## 2. Welche Kanäle es per Abo gibt (Recherche, Nov. 2026)
 
-Gemini 4 Argon ist seit 30.09.2026 angekündigt und seit Mitte Oktober 2026 über die Gemini API verfügbar.
-**Achtung:** Die meisten Zahlen stammen von Google selbst oder aus Sekundärquellen und sind nicht unabhängig geprüft.
-Darum starten wir mit einer Pilotphase (Abschnitt 5) und passen die Matrix danach an.
-
-| Stärke von Argon (laut Quellen) | Beleg (Stand Recherche) | Einsatz bei uns |
+| Kanal | Status | Verwendung bei uns |
 |---|---|---|
-| **Sehr langer Kontext** (~1 Mio. Tokens, inkl. „long decode“ über 65k Output hinaus) | Stärkster Vorsprung ggü. Konkurrenz u. a. bei GraphWalks 256k–1M (84,2 %) | Ganzes Repo auf einmal analysieren: Konsistenz-Checks, große Migrationen, Doku über die gesamte Codebasis, lange Vorgaben/PDFs (z. B. Aufgabenstellung, Richtlinien) auswerten |
-| **Multimodal** (Bild, Video, Dateien) | SWE-bench Multimodal 56 % (Vals AI, Platz 4 von 18) | Mockup/Skizze/Screenshot → UI-Komponente; visuelle Prüfung von Screenshots (Layout, Abstände, Responsive) |
-| **Security / Cyber-Defense** | Laut Google speziell trainiert, Schwachstellen zu finden, zu validieren und zu patchen | Security-Audits vor Releases (Auth, Input-Validierung, Abhängigkeiten) |
-| **Wissensarbeit** (Finanzen, Recht) | Führt in Reviews bei Legal/Finance-Benchmarks | Fachlogik einer Wirtschaftsinformatik-App (Berechnungen, Geschäftsregeln), Entwürfe für Datenschutz-/Rechtstexte – **immer menschlich prüfen** |
-| **Große Mengen Output** | Long decode | Testdaten, Seed-Daten, Übersetzungen, umfangreiche Doku |
-| **Second Opinion** | anderes Modell = andere blinde Flecken | Gegen-Review von Claudes PRs bei kritischen Stellen |
+| **Claude Code** (Claude-Abo) | Läuft in Cloud-Sessions, auch ohne den Owner; kann Subagents, Workflows und weitere Sessions starten | **Lead**, arbeitet auch nachts |
+| **Google Antigravity** (Google AI Pro/Ultra) | Desktop-IDE auf dem Rechner des Owners; liest `AGENTS.md` und `GEMINI.md` automatisch (bei Konflikten gewinnt `GEMINI.md`). Eine Cloud-Ausführung ist angekündigt, aber noch nicht verfügbar | **Argon**, läuft, wenn der Owner es startet |
+| Gemini CLI mit Google-Login | Quellen widersprechen sich, ob der Abo-Login noch funktioniert | Ersatz für Antigravity, falls nötig; gleiche Regeln |
+| Jules | **Wird eingestellt:** ab 11.11.2026 nur noch lesbar, Abschaltung am 31.12.2026 | Nicht verwenden |
+| Gemini Code Assist GitHub-App (kostenlos) | Laut Berichten seit Juli 2026 für Privatnutzer eingestellt | Nicht verwenden |
+
+**Folge:** Argon arbeitet **asynchron in Schüben**, immer wenn der Owner Antigravity startet. Claude bereitet die Queue so vor,
+dass Argon sie ohne Rückfragen abarbeiten kann. Sobald Antigravity Cloud-Ausführung bekommt, kann Argon ebenfalls ohne den Owner laufen.
+Dann wird nur der Startweg ausgetauscht, der Prozess bleibt gleich.
+
+## 3. Was Argon besonders gut kann – und wofür wir es einsetzen
+
+Gemini 4 Argon wurde am 30.09.2026 angekündigt und ist seit Mitte Oktober 2026 breit verfügbar.
+**Achtung:** Die meisten Zahlen stammen von Google oder aus Sekundärquellen und sind nicht unabhängig geprüft.
+Das Erfahrungslog (Abschnitt 8) korrigiert die Matrix anhand echter Ergebnisse.
+
+| Stärke von Argon (laut Quellen) | Beleg | Einsatz bei uns |
+|---|---|---|
+| **Sehr langer Kontext** (~1 Mio. Tokens) | Größter Vorsprung u. a. bei GraphWalks 256k–1M (84,2 %) | Ganzes Repo auf einmal analysieren: Konsistenz, große Migrationen, Architektur-Doku, lange Vorgaben/PDFs auswerten |
+| **Multimodal** (Bild, Video, Dateien) | SWE-bench Multimodal 56 % (Vals AI, Platz 4 von 18) | Mockup/Screenshot → UI-Komponente; visuelle Prüfung von Screenshots |
+| **Security / Cyber-Defense** | Laut Google speziell trainiert, Schwachstellen zu finden, zu validieren und zu patchen | Security-Audits vor Releases |
+| **Wissensarbeit** (Finanzen, Recht) | Führt in Reviews bei Legal-/Finance-Benchmarks | Fachlogik der Wirtschaftsinformatik-App, Entwürfe für Rechtstexte – **immer menschlich prüfen** |
+| **Große Output-Mengen** | Long decode | Testdaten, Seed-Daten, Übersetzungen, umfangreiche Doku |
+| **Second Opinion** | anderes Modell = andere blinde Flecken | Gegen-Review von Claudes PRs an kritischen Stellen |
 
 | Schwäche von Argon (laut Quellen) | Folge |
 |---|---|
-| Terminal-/Shell-lastige Agentenarbeit (Terminal-Bench ~57 % vs. ~66 % bei Claude Opus 5.5) | Build-Setup, CI, Debugging mit vielen Befehlen macht Claude |
-| Wettbewerbsprogrammierung schwach (ProgramBench 2,5 %) | Knifflige Algorithmen eher Claude |
-| Berichte über Zweifel an der Coding-Leistung im Alltag trotz guter Benchmarks | Jeder Argon-PR wird von Claude reviewt |
+| Terminal-lastige Agentenarbeit (Terminal-Bench ~57 % vs. ~66 % bei Claude Opus 5.5) | Build-Setup, CI und Debugging macht Claude |
+| Wettbewerbsprogrammierung schwach (ProgramBench 2,5 %) | Knifflige Algorithmen macht Claude |
+| Berichte über Zweifel an der Coding-Leistung im Alltag | Jeder Argon-PR wird von Claude reviewt |
+| Läuft nur, wenn der Owner Antigravity startet | Nichts Eiliges oder Blockierendes an Argon geben |
 
-**Claude (Lead) übernimmt daher:** Architektur und Tech-Stack, Aufgabenzerlegung, Schnittstellen,
-Build/CI/Tooling, Debugging, Integration mehrerer Branches, Code-Reviews.
+**Claude (Lead) übernimmt:** Architektur und Tech-Stack, Aufgabenzerlegung, Schnittstellen, Build/CI/Tooling,
+Debugging, Integration mehrerer Branches, Code-Reviews und alles, was über Nacht fertig werden muss.
 
 ### Zuordnungsregel
 
-> Braucht der Task **viel Kontext auf einmal, Bilder, Security-Blick oder Fachwissen** → Argon.
-> Braucht der Task **viele Terminal-Schritte, Architekturentscheidungen oder Integration** → Claude.
-> Mehrere **unabhängige Features** → Claude-Subagents parallel (Abschnitt 4).
+> Braucht der Task **viel Kontext auf einmal, Bilder, einen Security-Blick oder Fachwissen** und darf er bis zum nächsten Antigravity-Start warten? → **Argon**.
+> Braucht er **Terminal-Arbeit, Architekturentscheidungen, Integration** oder ist er **eilig**? → **Claude**.
+> Mehrere **unabhängige Features**? → **Claude-Subagents parallel** (Abschnitt 5).
 
-## 3. Ablauf eines Argon-Tasks
+## 4. Modell-Routing (Pflicht)
 
-1. **Claude legt ein Issue an** (Template „Argon-Task“, Label `agent:argon`) mit Ziel, Kontext, **Scope**, Schnittstellen und Akzeptanzkriterien.
-2. Das Label startet den Workflow [`.github/workflows/argon.yml`](../.github/workflows/argon.yml):
-   - Branch `argon/issue-<nr>` wird angelegt,
-   - Argon bearbeitet die Aufgabe (ohne Zugriff auf GitHub-Tokens),
-   - der Workflow committet, pusht und öffnet einen PR (`Closes #<nr>`).
-3. **Claude reviewt den PR.** Nachbesserung per PR-Kommentar: `/argon Bitte …` – Argon arbeitet auf demselben Branch weiter.
-4. Wenn alles passt, gibt Claude frei, **der Owner merged**.
-5. Claude trägt die Erfahrung in Abschnitt 6 ein (was hat gut/schlecht geklappt).
+Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so günstig wie möglich.
 
-Alternativ kann der Owner Argon auch lokal in **Google Antigravity** oder der **Gemini CLI** auf einem `argon/*`-Branch arbeiten lassen.
-Argon liest dann automatisch `GEMINI.md` (und damit `AGENTS.md`) – die Regeln gelten genauso.
+### Claude-Seite (Subagents, Workflows, Cloud-Sessions)
 
-## 4. Parallele Features mit Claude-Subagents
+| Modell | Wann |
+|---|---|
+| **Opus** | Architektur, Schnittstellen, Reviews (v. a. von Argon-PRs), Debugging, Security-kritischer Code, Merge-Konflikte |
+| **Sonnet** | Features nach klarer Spezifikation, Tests schreiben, normale Refactorings |
+| **Haiku** | Mechanisches: Suchen, Umbenennen, Formatieren, kleine Doku-Änderungen, Zusammenfassungen |
 
-Claude kann als Lead eigene Subagents mit genau umrissenen Aufgaben starten, die gleichzeitig an verschiedenen Features arbeiten:
+### Gemini-Seite (Modellwahl in Antigravity)
+
+| Modell | Wann |
+|---|---|
+| **Gemini 4 Argon** | Standard für alle `agent:argon`-Issues |
+| **Flash-Modell** | Nur wenn **alle** offenen Argon-Issues das Label `modell:flash` tragen (einfache Massenarbeit). Spart Abo-Kontingent |
+
+Claude markiert im Issue, welches Modell sinnvoll ist (Label `modell:flash` nur bei einfachen Tasks).
+
+## 5. Parallele Features mit Claude-Subagents
 
 | Variante | Wie | Wann |
 |---|---|---|
-| **Subagent mit eigenem Worktree** | Jeder Subagent bekommt eine eigene Git-Arbeitskopie und einen eigenen Branch (`feat/…`) | 2–4 kleinere Features gleichzeitig, Ergebnis kommt zu Claude zurück |
+| **Subagent mit eigenem Worktree** | Eigene Git-Arbeitskopie und eigener Branch (`feat/…`) pro Subagent | 2–4 kleinere Features gleichzeitig |
 | **Eigene Cloud-Session pro Feature** | Claude startet eine separate Claude-Code-Session mit eigenem Container und Ziel-Branch und überwacht sie | Größere, länger laufende Features |
-| **Workflow (Multi-Agent)** | Orchestrierung vieler Agenten per Skript | Nur wenn der Owner das ausdrücklich will („nutze einen Workflow“) – kostet viele Tokens |
+| **Workflow (Multi-Agent)** | Orchestrierung mehrerer Agenten per Skript, Modell pro Agent nach Abschnitt 4 | Vom Owner freigegeben; für größere Pakete, z. B. nachts |
 
 **Damit sich niemand in die Quere kommt:**
 
-1. **Schnittstellen zuerst:** Claude legt gemeinsame Typen/API-Verträge in einem eigenen kleinen PR fest, *bevor* parallel gearbeitet wird.
-2. **Disjunkter Scope:** Jeder Task bekommt eigene Ordner (z. B. `src/features/<feature>/`). Zwei parallele Tasks dürfen nie dieselbe Datei ändern.
+1. **Schnittstellen zuerst:** Gemeinsame Typen und API-Verträge kommen in einem eigenen kleinen PR, *bevor* parallel gearbeitet wird.
+2. **Disjunkter Scope:** Jeder Task bekommt eigene Ordner (z. B. `src/features/<feature>/`). Zwei parallele Tasks ändern nie dieselbe Datei.
 3. **Gemeinsame Dateien** (Routing, Navigation, `package.json`, Lockfile) ändert nur Claude beim Integrieren.
-4. **Ein Branch pro Task**, von aktuellem `main` abgezweigt; kleine PRs, schnell mergen, danach rebasen.
-5. **Merge-Reihenfolge** bestimmt Claude; Konflikte löst Claude beim Integrieren.
+4. **Ein Branch pro Task**, abgezweigt vom aktuellen `main`; kleine PRs, schnell mergen, danach rebasen.
+5. **Merge-Reihenfolge** bestimmt Claude, Konflikte löst Claude.
+6. **Argon** zählt als weiterer paralleler Worker mit denselben Regeln. Über `status:in-arbeit` sieht jeder, was belegt ist.
 
-Argon zählt dabei als ein weiterer paralleler Worker – mit denselben Regeln.
+## 6. Tagesrhythmus
 
-## 5. Pilotphase: Argons Stärken im echten Projekt prüfen
+**Nachts / ohne Owner (Claude):**
+- `agent:claude`-Issues und vom Owner vorgegebene Ziele umsetzen, bei Bedarf mit Subagents/Workflows
+- Argon-PRs reviewen, die Argon-Queue für den nächsten Schub vorbereiten
+- Fragen an den Owner als Issue mit `status:blockiert` sammeln statt zu raten
 
-Sobald der Tech-Stack steht, vergibt Claude drei kleine Test-Tasks, die je eine behauptete Stärke prüfen:
+**Morgens (Owner, ca. 10 Minuten):**
+1. Freigegebene PRs mergen: `gh pr list --label status:freigegeben`
+2. Fragen beantworten: `gh issue list --label status:blockiert`. Nach der Antwort das Label `status:blockiert` entfernen
+3. Antigravity öffnen, Modell wählen, Prompt aus [`docs/argon/START-PROMPT.md`](argon/START-PROMPT.md) einfügen. Argon arbeitet die Queue ab, während du etwas anderes machst
+4. Hängt ein Issue auf `status:in-arbeit`, ohne dass jemand daran arbeitet: `gh issue edit <nr> --remove-label status:in-arbeit`
 
-1. **Multimodal:** Screenshot/Skizze einer Seite → Argon baut die UI-Komponente.
-2. **Security:** Argon auditiert das Repo (Auth, Eingaben, Abhängigkeiten) und schlägt Fixes vor.
-3. **Langer Kontext:** Argon prüft die gesamte Codebasis auf Inkonsistenzen und schreibt die Architektur-Doku.
+## 7. Pilotphase: Argons Stärken im echten Projekt prüfen
 
-Claude bewertet Qualität, Scope-Treue und Nachbesserungsbedarf und passt die Matrix in Abschnitt 2 an.
+1. **Onboarding (Issue #1):** Argon prüft den Prozess selbst und verbessert `GEMINI.md`/Start-Prompt – testet den kompletten Ablauf Issue → PR → Review.
+2. **Multimodal:** Screenshot/Skizze → UI-Komponente (sobald der Tech-Stack steht).
+3. **Security:** Audit des Repos (Auth, Eingaben, Abhängigkeiten).
+4. **Langer Kontext:** Gesamte Codebasis auf Inkonsistenzen prüfen und Architektur-Doku schreiben.
 
-## 6. Erfahrungslog
+## 8. Erfahrungslog
 
-| Datum | Issue/PR | Typ | Ergebnis | Lernpunkt |
-|---|---|---|---|---|
-| – | – | – | – | – |
+Siehe [`ERFAHRUNGSLOG.md`](ERFAHRUNGSLOG.md) (eigene Datei, damit es keine Merge-Konflikte mit dieser Doku gibt).
 
 ## Einrichtung (einmalig, durch den Owner)
 
-1. **Gemini-API-Key** in Google AI Studio erzeugen (bezahlte API-Stufe nötig für Argon).
-2. GitHub → *Settings → Secrets and variables → Actions*:
-   - Secret `GEMINI_API_KEY` = API-Key
-   - optional Variable `GEMINI_MODEL` (Standard: `gemini-4-argon`; anpassen, falls Google die Modell-ID anders benennt)
-3. *Settings → Actions → General → Workflow permissions*: „Read and write permissions“ und
-   **„Allow GitHub Actions to create and approve pull requests“** aktivieren.
-4. Label `agent:argon` anlegen (Issues → Labels).
-5. Diesen Branch nach `main` mergen – Issue-Workflows laufen immer in der Version auf dem Default-Branch.
-
-Hinweise:
-- PRs, die mit dem Standard-`GITHUB_TOKEN` erstellt werden, starten keine weiteren Workflows (z. B. CI). Wenn später CI auf Argon-PRs laufen soll, kann man eine GitHub App oder einen Fine-grained Token verwenden.
-- Argon kann absichtlich keine Dateien unter `.github/` ändern.
+1. Diesen Branch nach `main` mergen – **vorher** startet Argon nicht (der Start-Prompt prüft das).
+2. Antigravity installieren, mit dem Google-Konto des Abos anmelden, Repo klonen und öffnen.
+3. GitHub CLI installieren und `gh auth login` ausführen.
+4. Labels anlegen: `bash scripts/setup-labels.sh` (einmalig; schadet auch mehrfach nicht).
+5. In Antigravity erlauben, dass der Agent Terminal-Befehle ohne Einzelbestätigung ausführt.
+6. Prüfen, ob „Gemini 4 Argon“ in der Modell-Auswahl von Antigravity für dein Abo erscheint.
+   Falls nicht: das stärkste verfügbare Gemini-Modell nehmen und es Claude mitteilen, dann wird die Matrix angepasst.
+7. Empfohlen: Branch-Schutz für `main` (Settings → Branches bzw. Rulesets: PR verpflichtend, keine direkten Pushes).
+   Argon arbeitet mit deinem Login – so ist ein versehentlicher Push auf `main` technisch ausgeschlossen.
+   Bei privaten Repos ist das je nach GitHub-Plan evtl. nicht verfügbar.
 
 ## Quellen
 
 - [TechCrunch: Google releases Gemini 4 Argon](https://techcrunch.com/2026/09/30/google-releases-gemini-4-argon-called-its-most-powerful-model-yet/)
 - [CNBC: Google rolls out Gemini 4 Argon](https://www.cnbc.com/2026/09/30/google-gemini-4-argon-ai.html)
 - [Vals AI: Gemini 4 Argon Benchmarks](https://www.vals.ai/models/google_gemini-4-argon)
-- [computingforgeeks: Gemini 4 Argon Pricing, Benchmarks and API Tested](https://computingforgeeks.com/gemini-4-argon-released-features-benchmarks/)
+- [computingforgeeks: Gemini 4 Argon Benchmarks](https://computingforgeeks.com/gemini-4-argon-released-features-benchmarks/)
 - [Layer3 Labs: Gemini 4 Argon for Coding](https://www.layer3labs.io/guides/gemini-4-argon-for-coding)
-- [google-github-actions/run-gemini-cli](https://github.com/google-github-actions/run-gemini-cli)
-- [gemini-cli PR: Unterstützung für gemini-4-argon](https://github.com/google-gemini/gemini-cli/pull/29875)
+- [Times of AI: Google schaltet Jules ab, Wechsel zu Antigravity](https://www.timesofai.com/news/google-jules-antigravity/)
+- [posixai: Jules-Abschaltung – Termine](https://posixai.com/blog/google-jules-shutdown-december-31-how-to-export-data)
+- [testingcatalog: Cloud-Ausführung für Antigravity angekündigt](https://www.testingcatalog.com/cloud-execution-is-coming-to-antigravity-soon/)
+- [agentpedia: AGENTS.md in Antigravity](https://agentpedia.codes/blog/antigravity-agents-md-guide)
+- [Gemini CLI: Authentifizierung](https://geminicli.com/docs/get-started/authentication.md)
+- [Qodo: Einstellung der kostenlosen Gemini-Code-Assist-GitHub-App](https://www.qodo.ai/?p=22530)

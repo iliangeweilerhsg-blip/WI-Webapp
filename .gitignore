@@ -1,4 +1,3 @@
-# Arbeitsdateien des Argon-Workflows
+# Lokale Agenten-Arbeitsdateien
 .argon/
-.gemini/
-gemini-artifacts/
+.gemini/tmp/
