@@ -5,34 +5,34 @@
 
 ---
 
-## 1. Prozess: Funktionen aus Referenz-Apps übernehmen (mit dem REA-Skill)
+## 1. Prozess: Wie wir herausfinden, wie eine Funktion funktioniert
 
-Der Reverse-Engineering-Skill **`rea-reverse-engineering`** (REA 6.8.0, im claude.ai-Account) dient dazu, zu verstehen, *wie* eine Funktion in einer Referenz-App funktioniert. Danach bauen wir sie **selbst und passend zu unserem Datenmodell**.
+Wir wollen verstehen, *wie* eine Funktion in einer Referenz-App funktioniert, und sie dann **selbst und passend zu unserem Datenmodell** bauen.
 
 ```
 1. MOMENT     Welcher Alltagsmoment (M1–M13) wird besser?        → kein Moment = kein Feature
-2. ANALYSE    Referenz-App mit REA untersuchen:                   → Interaktion, Datenmodell,
-              Interaktion, Datenstruktur, Algorithmus, Edge-Cases   Algorithmus notieren
-3. GATE       Nutzen-Check: P0/P1/P2? Was lassen wir weg?          → Eintrag in diesem Katalog
-4. ADAPTION   Wie wird es *besser* durch unsere Verknüpfungen?     → z. B. Strich ↔ Folie ↔ Audio
-              (Folie, Audio, Konzept, Übung)
-5. BAU        Eigene Umsetzung, eigenes UI                         → Status hier aktualisieren
+2. RECHERCHE  Quellen in dieser Reihenfolge (siehe unten)        → Interaktion, Logik, Edge-Cases
+3. GATE       Nutzen-Check: P0/P1/P2? Was lassen wir weg?        → Eintrag in diesem Katalog
+4. ADAPTION   Wie wird es *besser* durch unsere Verknüpfungen?   → z. B. Strich ↔ Folie ↔ Audio
+5. BAU        Eigene Umsetzung, eigenes UI                       → Status hier aktualisieren
 ```
 
-**Spielregeln** (decken sich mit den verbindlichen Regeln des REA-Skills)
-- Wir übernehmen **Funktionsweisen**, nicht fremden Code, Grafiken, Icons, Markennamen oder das Design. REA erklärt Architektur und Abläufe in eigenen Worten und gibt keinen dekompilierten Code in größerem Umfang wieder. Wir bauen alles selbst, mit eigenem UI. Das hält auch einen späteren Verkauf sauber.
-- **Nur statische Analyse:** Die Ziel-App wird nie gestartet. Keine Anfragen an Server oder APIs, die in der App stehen. Keine Umgehung von Bezahlschranken oder Kopierschutz.
-- **Eingabe:** Die Datei muss hochgeladen werden. REA lädt nichts selbst herunter.
+**Quellen-Reihenfolge – Claude holt sich die Infos selbst, du nennst nur die App:**
 
-| Referenz-App | Was hochladen | REA-Einstieg |
-|---|---|---|
-| GoodNotes | Mac-App (`.app` aus `/Programme`, als ZIP) oder das JavaScript der Web-Version | `inspect-artifact`, danach je nach Typ `analyze` (nativ, mit Ghidra) oder `analyze-javascript-application` |
-| Quizlet | JavaScript-Bundle der Web-App (im Browser über die Entwicklertools gespeichert) | `analyze-javascript-application` |
-| StudySmarter | JavaScript-Bundle der Web-App | `analyze-javascript-application` |
+| # | Quelle | Wer | Wofür |
+|---|---|---|---|
+| 1 | **Öffentliche Infos:** Hilfe-Center, Produktseiten, Changelogs, Tutorial-Videos (inkl. YouTube-Transkripte) | Claude, per Web-Recherche | Reicht für die meisten Funktionen: Was macht sie, wie bedient man sie, welche Sonderfälle gibt es? |
+| 2 | **Open-Source-Pendants** mit offenem Quellcode, z. B. Anki + FSRS (Lernalgorithmus), Saber und Xournal++ (Handschrift-Apps), perfect-freehand (Strichglättung) | Claude | Algorithmen und Datenstrukturen ganz legal im Detail nachlesen |
+| 3 | **Deine Beobachtung:** kurze Bildschirmaufnahme oder Beschreibung, wie du eine Funktion in GoodNotes nutzt | du, nur bei Bedarf | Was dir am Schreibgefühl wichtig ist, steht in keiner Doku |
+| 4 | **REA-Skill** (`rea-reverse-engineering`) | Claude, mit einer Datei von dir | Nur für konkrete Restfragen, die 1–3 nicht beantworten |
 
-  iOS-Apps aus dem App Store sind verschlüsselt und kommen nicht in Frage. DMG-Dateien kann REA nicht entpacken, also die `.app` direkt als ZIP hochladen.
-- Die REA-Ergebnisse pro App kommen nach `docs/referenz-analysen/<app>.md`: was gesehen, was abgeleitet, was unklar ist.
-- Die Tabellen unten sind aus Produktkenntnis vorbefüllt. 🔍 markiert, wo REA Details klären soll, sobald die Dateien vorliegen.
+**Zu Stufe 4 (REA):**
+- REA analysiert nur Dateien, die hochgeladen werden, und arbeitet nur statisch. Die Regeln des Skills verbieten, Server oder URLs aufzurufen, die in der untersuchten App stehen.
+- **GoodNotes:** Falls wir es brauchen, lädst du GoodNotes kostenlos aus dem Mac App Store, packst die `.app` aus dem Programme-Ordner als ZIP und lädst sie hoch. Mehr ist nicht nötig.
+- **Quizlet / StudySmarter:** Hier lohnt sich REA kaum. Die interessanten Teile (Lernmodus, Auswertung) liegen hinter dem Login und vermutlich auf deren Servern. Für diese Apps reichen Stufe 1–3. Selbst herunterladen und zerlegen werde ich die Web-Apps nicht.
+- Wir übernehmen **Funktionsweisen**, nie fremden Code, Grafiken, Icons, Markennamen oder Design. Eigenes UI, eigene Umsetzung. Das hält auch einen späteren Verkauf sauber.
+- Ergebnisse pro App kommen nach `docs/referenz-analysen/<app>.md`: was gesehen, was abgeleitet, was unklar ist.
+- Die Tabellen unten sind aus Produktkenntnis vorbefüllt. 🔍 markiert, was die Recherche noch klären soll.
 
 **Legende:** ✅ übernehmen · 🔧 übernehmen und anpassen · ⏳ später · ❌ weglassen · 🔍 mit REA genauer analysieren
 
@@ -109,29 +109,31 @@ Der Reverse-Engineering-Skill **`rea-reverse-engineering`** (REA 6.8.0, im claud
 
 Aus der Alltagsanalyse abgeleitet. Sortiert nach Wirkung.
 
-| # | Funktion | Moment | Prio | Kurzbeschreibung |
-|---|---|---|---|---|
-| N1 | **Auto-Folienverfolgung** | M3 | P0 | Transkript wird live mit den Folien abgeglichen. Die App schlägt Folienwechsel vor und korrigiert vergessene Wechsel nachträglich. |
-| N2 | **Klausurhinweis-Detektor** | M4 | P1 | Erkennt Sätze wie „das kommt in der Klausur" im Audio und setzt automatisch einen ⚠️-Marker. Diese Stellen haben beim Lernen höchste Priorität. |
-| N3 | **Ein-Tipp-Start aus dem Stundenplan** | M2 | P0 | Die App weiß, welche Vorlesung jetzt läuft, und öffnet alles. Auto-Stopp am Ende. |
-| N4 | **Folienloser Modus + spätere Zuordnung** | M2 | P0 | Folien kommen nachher? Die Zuordnung zu Audio und Notizen passiert automatisch beim Hochladen. |
-| N5 | **Tafel-Foto mit Zeitstempel** | M3 | P0 | iPad-Kamera, Bild landet an der richtigen Stelle im Notizbuch, später OCR. |
-| N6 | **⌘K-Schnellsuche** | M5 | P1 | In Konzepten, Folien, Transkripten und Handschrift, auch während der Vorlesung. |
-| N7 | **Geführte Nacharbeitung (15 min)** | M7 | P1 | ❓ klären → Zusammenfassung → 3 Abruffragen → Konzepte bestätigen → Karten aussortieren. |
-| N8 | **Feynman-Modus („Erklär's mir")** | M7 | P1 | Ich erkläre ein Konzept laut oder schriftlich. Die KI findet Lücken und Fehler und erzeugt daraus Karten. |
-| N9 | **Übungsmodus mit Lösungsvergleich** | M8 | P1 | Aufgabe, eigene Lösung, Musterlösung. Fehler werden Konzepten zugeordnet. |
-| N10 | **Abhängigkeits-Warnung** | M12 | P1 | „VL 8 baut auf VL 6 auf, die noch nicht nachgearbeitet ist." Die Nacharbeitung von VL 6 wird vorgezogen. |
-| N11 | **Klausur-Readiness & Prognose** | Klausur | P1 | Pro Fach: „Stand heute 62 %, bei aktuellem Tempo 85 % am Klausurtag". Dazu die 5 wichtigsten Lücken. |
-| N12 | **Altklausuren-Analyse** | Klausur | P1 | Themengewichtung und Fragestil lernen und daraus Klausursimulationen bauen. |
-| N13 | **Tagesbriefing & Tagesabschluss** | M7, M9 | P1 | Morgens: was heute ansteht. Abends: 1-Minuten-Abschluss ohne Schuld-UI. |
-| N14 | **Sonntags-Wochenplanung** | M10 | P1 | 5-Minuten-Rückblick und Wochenplan zum Abnicken. |
-| N15 | **Audio-Lernmodus fürs Pendeln** | M1 | P2 | Karten werden vorgelesen, ich antworte laut, die KI bewertet. |
-| N16 | **Fächerbrücken** | – | P1 | „Das kennst du aus Statistik II als …". Wird in Notizen und Lernvideos automatisch eingeblendet. |
-| N17 | **Fokus-Timer, der dazulernt** | M7 | P2 | Erfasst die echte Dauer meiner Blöcke. Der Planer schätzt danach realistischer. |
-| N18 | **Leistungs-Tageszeit-Analyse** | M10 | P2 | Wann beantworte ich Fragen am besten? Schwere Themen landen in diesen Zeitfenstern. |
-| N19 | **Semesterstart-Assistent** | Semester | P1 | Stundenplan (ICS) und Modulbeschreibungen importieren → Module, Prüfungsform, ECTS, Termine. |
-| N20 | **Formelblatt- / Spickzettel-Generator** | Klausur | P2 | Für erlaubte Hilfsmittel: verdichtet aus meinen Konzepten und Formeln. |
-| N21 | **Glossar pro Fach** | M5 | P1 | Automatisch aus den Konzepten, zweisprachig (DE/EN). |
-| N22 | **Import verpasster Vorlesungen** | M13 | P1 | Fremde oder offizielle Aufzeichnung läuft durch dieselbe Pipeline. |
-| N23 | **Erhaltungsmodus nach dem Semester** | Semester | P2 | Wenige Wiederholungen pro Woche halten die Grundlagen aktiv. |
-| N24 | **Automatische Backups + Export** | – | P0 | Täglich verschlüsselt sichern, Vault als Markdown jederzeit exportierbar. |
+**Rückmeldung vom 03.11.2026:** N2, N4, N8 und N9 bestätigt (optional, P1). N1 abgelehnt. Die übrigen Vorschläge sind noch offen.
+
+| # | Funktion | Status | Moment | Prio | Kurzbeschreibung |
+|---|---|---|---|---|---|
+| N1 | ~~**Auto-Folienverfolgung (live)**~~ | ❌ abgelehnt | M3 | – | Zu viel Aufwand für den Live-Betrieb. Ersatz ohne Mehraufwand: Vergessene Folienwechsel korrigiert **nach** der Vorlesung dieselbe Zuordnung wie im folienlosen Modus (N4). |
+| N2 | **Klausurhinweis-Detektor** | ✅ bestätigt | M4 | P1 | Erkennt Sätze wie „das kommt in der Klausur" im Audio und setzt automatisch einen ⚠️-Marker. Diese Stellen haben beim Lernen höchste Priorität. |
+| N3 | **Ein-Tipp-Start aus dem Stundenplan** | offen | M2 | P0 | Die App weiß, welche Vorlesung jetzt läuft, und öffnet alles. Auto-Stopp am Ende. |
+| N4 | **Folienloser Modus + spätere Zuordnung** | ✅ bestätigt | M2 | P1 | Folien kommen nachher? Die Zuordnung zu Audio und Notizen passiert automatisch beim Hochladen. Korrigiert nebenbei vergessene Folienwechsel. |
+| N5 | **Tafel-Foto mit Zeitstempel** | offen | M3 | P0 | iPad-Kamera, Bild landet an der richtigen Stelle im Notizbuch, später OCR. |
+| N6 | **⌘K-Schnellsuche** | offen | M5 | P1 | In Konzepten, Folien, Transkripten und Handschrift, auch während der Vorlesung. |
+| N7 | **Geführte Nacharbeitung (15 min)** | offen | M7 | P1 | ❓ klären → Zusammenfassung → 3 Abruffragen → Konzepte bestätigen → Karten aussortieren. |
+| N8 | **Feynman-Modus („Erklär's mir")** | ✅ bestätigt | M7 | P1 | Ich erkläre ein Konzept laut oder schriftlich. Die KI findet Lücken und Fehler und erzeugt daraus Karten. |
+| N9 | **Übungsmodus mit Lösungsvergleich** | ✅ bestätigt | M8 | P1 | Aufgabe, eigene Lösung, Musterlösung. Fehler werden Konzepten zugeordnet. |
+| N10 | **Abhängigkeits-Warnung** | offen | M12 | P1 | „VL 8 baut auf VL 6 auf, die noch nicht nachgearbeitet ist." Die Nacharbeitung von VL 6 wird vorgezogen. |
+| N11 | **Klausur-Readiness & Prognose** | offen | Klausur | P1 | Pro Fach: „Stand heute 62 %, bei aktuellem Tempo 85 % am Klausurtag". Dazu die 5 wichtigsten Lücken. |
+| N12 | **Altklausuren-Analyse** | offen | Klausur | P1 | Themengewichtung und Fragestil lernen und daraus Klausursimulationen bauen. |
+| N13 | **Tagesbriefing & Tagesabschluss** | offen | M7, M9 | P1 | Morgens: was heute ansteht. Abends: 1-Minuten-Abschluss ohne Schuld-UI. |
+| N14 | **Sonntags-Wochenplanung** | offen | M10 | P1 | 5-Minuten-Rückblick und Wochenplan zum Abnicken. |
+| N15 | **Audio-Lernmodus fürs Pendeln** | offen | M1 | P2 | Karten werden vorgelesen, ich antworte laut, die KI bewertet. |
+| N16 | **Fächerbrücken** | offen | – | P1 | „Das kennst du aus Statistik II als …". Wird in Notizen und Lernvideos automatisch eingeblendet. |
+| N17 | **Fokus-Timer, der dazulernt** | offen | M7 | P2 | Erfasst die echte Dauer meiner Blöcke. Der Planer schätzt danach realistischer. |
+| N18 | **Leistungs-Tageszeit-Analyse** | offen | M10 | P2 | Wann beantworte ich Fragen am besten? Schwere Themen landen in diesen Zeitfenstern. |
+| N19 | **Semesterstart-Assistent** | offen | Semester | P1 | Stundenplan (ICS) und Modulbeschreibungen importieren → Module, Prüfungsform, ECTS, Termine. |
+| N20 | **Formelblatt- / Spickzettel-Generator** | offen | Klausur | P2 | Für erlaubte Hilfsmittel: verdichtet aus meinen Konzepten und Formeln. |
+| N21 | **Glossar pro Fach** | offen | M5 | P1 | Automatisch aus den Konzepten, zweisprachig (DE/EN). |
+| N22 | **Import verpasster Vorlesungen** | offen | M13 | P1 | Fremde oder offizielle Aufzeichnung läuft durch dieselbe Pipeline. |
+| N23 | **Erhaltungsmodus nach dem Semester** | offen | Semester | P2 | Wenige Wiederholungen pro Woche halten die Grundlagen aktiv. |
+| N24 | **Automatische Backups + Export** | offen | – | P0 | Täglich verschlüsselt sichern, Vault als Markdown jederzeit exportierbar. |

@@ -90,9 +90,8 @@ Der **Wochenplaner** ist der Taktgeber: Er weiß, wann die nächste Vorlesung is
 
 **Damit ich in der Vorlesung nichts bedienen muss** (Details in [Studienalltag](STUDIENALLTAG.md)):
 - **Ein-Tipp-Start:** Die App weiß aus dem Stundenplan, welche Vorlesung jetzt ist. Auto-Stopp am Kalenderende.
-- **Auto-Folienverfolgung:** Das Live-Transkript wird mit dem Folieninhalt abgeglichen. Vergessene Wechsel werden nachträglich korrigiert.
-- **Folienloser Modus:** Sind die Folien noch nicht da, läuft alles trotzdem. Die Zuordnung passiert, sobald sie hochgeladen sind.
-- **Klausurhinweis-Detektor:** „Das kommt in der Klausur" im Audio setzt automatisch ⚠️.
+- **Folienloser Modus (optional):** Sind die Folien noch nicht da, läuft alles trotzdem. Die Zuordnung passiert, sobald sie hochgeladen sind. Derselbe Abgleich korrigiert nach der Vorlesung auch vergessene Folienwechsel. Live läuft nichts davon.
+- **Klausurhinweis-Detektor (optional):** „Das kommt in der Klausur" im Audio setzt automatisch ⚠️.
 
 ### 5.2 Wissensbibliothek (Obsidian-Prinzip)
 
@@ -105,7 +104,50 @@ Der **Wochenplaner** ist der Taktgeber: Er weiß, wann die nächste Vorlesung is
 - **Graph-Ansicht** über das ganze Studium, filterbar nach Semester/Fach/Beherrschung (Knoten rot = Schwäche, grün = sitzt).
 - **Volltextsuche + semantische Suche** („Wo hat Prof. X über Kausalität vs. Korrelation gesprochen?") über Folien, Transkripte, Notizen (inkl. erkannter Handschrift).
 
-> 🧩 **Hier soll dein bestehendes Obsidian-Lernsystem rein.** Die Struktur deiner Notizvorlagen, Tags und Links wird zur Vorlage dafür, wie die KI Konzeptnotizen anlegt (siehe offene Fragen).
+**Vault-Struktur** (eigener Entwurf, es gibt keine Vorlage aus einem bestehenden System):
+
+```
+Vault/
+├── Konzepte/                  ← flach, NICHT nach Fach sortiert, damit fachübergreifende Links natürlich sind
+│   ├── Normalisierung (Datenbanken).md
+│   └── Funktionale Abhängigkeit.md
+├── Fächer/
+│   └── Datenbanksysteme/
+│       ├── _Fach.md           ← Übersicht: Prüfungsform, Termine, Readiness, Konzeptliste
+│       ├── Vorlesungen/VL07 – Normalformen.md
+│       └── Übungen/Blatt 04.md
+├── Klausuren/
+└── Inbox/                     ← KI-Vorschläge, die ich noch nicht bestätigt habe
+```
+
+**Aufbau einer Konzeptnotiz** (die App füllt sie aus, ich ergänze in eigenen Worten):
+
+```markdown
+---
+typ: konzept
+faecher: [Datenbanksysteme]
+baut_auf: ["[[Funktionale Abhängigkeit]]", "[[Relation]]"]
+status: verstanden          # neu | in-arbeit | verstanden | sitzt (aus der Beherrschung)
+klausurrelevant: true
+---
+# Normalisierung (Datenbanken)
+
+> **In einem Satz:** Tabellen so zerlegen, dass keine Daten doppelt gespeichert werden und keine Anomalien entstehen.
+
+## Kernidee – in meinen Worten
+## Wofür brauche ich das?
+## Beispiel
+## Typische Fehler & Verwechslungen      ← wird aus meinen falschen Antworten gefüllt
+## Zusammenhänge
+- baut auf: [[Funktionale Abhängigkeit]]
+- wird angewendet in: [[Datenbankentwurf]]
+- verwandt aus anderem Fach: [[Redundanz (Informationstheorie)]]
+## Belege
+- 📄 VL07 Folie 14–18 · 🎧 00:42:13 · ✍️ Notiz VL07 S. 3 · 📝 Blatt 04 A2b
+## Offene Fragen ❓
+```
+
+Warum so: **„Kernidee in meinen Worten"** und **„Typische Fehler"** sind die Abschnitte mit dem größten Lerneffekt (aktive Verarbeitung). **„Belege"** erfüllt Leitprinzip 8. Die Notizen bleiben normales Markdown und funktionieren in Obsidian.
 
 ### 5.3 KI-Pipeline (Nacharbeitung, läuft automatisch)
 
@@ -182,16 +224,29 @@ Alle Videos werden **pro Konzept** gespeichert → die Videothek ist automatisch
 
 **Entscheidung:** Die **Schreib-App auf dem iPad wird nativ** (SwiftUI + PencilKit). Leitprinzip 2 sagt: Schreibgefühl ist nicht verhandelbar, und genau dort ist die Web-Variante schwächer. **Alles andere bleibt Web-App** (Mac-Dashboard, Bibliothek, Lernen, Planer). Die iPad-App überträgt Striche als neutrales JSON (Punkte, Druck, Zeit, Folien-ID). Das Mac-Dashboard zeichnet sie selbst. Damit sind wir nicht an Apple gebunden, falls später andere Tablets dazukommen.
 
+**Wie kommt die App ohne Apple-Developer-Account aufs iPad?**
+
+| Weg | Ablauf | Haken |
+|---|---|---|
+| **A) Swift Playgrounds** (empfohlen) | Die iPad-App wird als *App-Playground* (`.swiftpm`) gebaut. Dieses Format öffnet sowohl Xcode am Mac als auch die kostenlose App *Swift Playgrounds* auf dem iPad. Dort läuft sie direkt, ohne Ablaufdatum. | Läuft innerhalb von Swift Playgrounds (Vollbild möglich). Einige Systemrechte sind eingeschränkt. Kamera, Netzwerk zum Mac und PencilKit testen wir gleich zu Beginn von Phase 1. |
+| **B) Xcode + kostenlose Apple-ID** | App per Kabel oder WLAN vom Mac aufs iPad spielen | Läuft nach **7 Tagen ab** und muss neu aufgespielt werden. Die Daten bleiben erhalten, aber wenn das mitten in der Vorlesung passiert, öffnet sich die App nicht. |
+| **C) AltStore** | Erneuert die 7-Tage-Signatur von B automatisch, solange der Mac mit AltServer im selben WLAN ist | Zusätzliches Tool, Erneuerung kann scheitern |
+| **D) Apple-Developer-Account** (99 $/Jahr) | Signatur gilt 1 Jahr, Verteilung per TestFlight | Kosten. Erst nötig, wenn die App weitergegeben werden soll |
+
+**Entscheidung:** Wir bauen die iPad-App als `.swiftpm`-Projekt. Damit ist jederzeit Weg A oder B möglich, ohne etwas umzubauen. Fällt im ersten Test etwas Wichtiges in Swift Playgrounds weg, nutzen wir B mit wöchentlichem Neuaufspielen (oder C).
+
 *Hinweis:* PencilKit meldet einen Strich erst, wenn er fertig ist. Am Mac erscheint also jeder Strich **nach dem Absetzen**, typischerweise in unter einer Sekunde. Für einen Live-Spiegel reicht das. Echte Mitzeichnung während des Strichs wäre ein späteres Extra.
 
 ### E2 – Lokal speichern zuerst, Sync über einen kleinen Server
 
 Alles wird **zuerst lokal** gespeichert (iPad und Mac), danach synchronisiert. Ein Verbindungsabbruch kostet so nie Daten.
 
-**Haken im Hörsaal:** Im Uni-WLAN (z. B. eduroam) sehen sich Geräte untereinander oft nicht („Client Isolation"). iPad und Mac können sich dort direkt also womöglich nicht erreichen. Deshalb:
-1. **Standard:** Beide Geräte synchronisieren über einen **kleinen Sync-Server im Internet** (günstiger VPS oder später Cloud). Das funktioniert in jedem WLAN mit Internet.
-2. **Ohne Internet:** Beide schreiben lokal weiter und gleichen später ab. Notfalls hilft der iPhone-Hotspot oder ein privates Netz wie Tailscale.
-3. **Später (P2):** Direktverbindung iPad ↔ Mac ohne Netz über Apples Multipeer Connectivity (bräuchte einen kleinen nativen Mac-Helfer).
+**Phase 1 – nur lokal:** Der Sync-Server läuft **auf dem Mac**. Das iPad verbindet sich im selben WLAN mit dem Mac. Kein Internet-Server, keine Kosten.
+
+**Haken im Hörsaal:** Im Uni-WLAN (z. B. eduroam) sehen sich Geräte untereinander oft nicht („Client Isolation"). Ob das bei dir so ist, testen wir in der ersten Vorlesung. Falls ja:
+1. **iPad schreibt trotzdem weiter** und speichert lokal. Am Mac fehlt dann nur die Live-Anzeige. Der Abgleich passiert, sobald beide wieder im selben Netz sind (z. B. zu Hause). Durch die Zeitstempel geht keine Zuordnung zu Folie oder Audio verloren.
+2. **Live-Anzeige im Hörsaal** über ein gemeinsames Netz: iPhone-Hotspot (falls vorhanden) oder ein privates Netz wie Tailscale.
+3. **Später:** kleiner Sync-Server im Internet (VPS) oder eine Direktverbindung iPad ↔ Mac über Apples Multipeer Connectivity.
 
 **Gleiche Uhr für alle:** Striche (iPad) und Audio (Mac) müssen auf die Sekunde zusammenpassen. Beide Geräte gleichen ihre Uhr beim Start mit dem Server ab (Zeitversatz messen).
 
@@ -281,7 +336,7 @@ Kalender-Ereignis (Vorlesung | fest | Lernblock) ── Lernblock → (Modul | K
 
 - [ ] **Module & Vorlesungen anlegen**, Folien- und Übungs-PDFs hochladen.
 - [ ] **Dashboard** mit Folie | Übung | Notizen nebeneinander; Folienwechsel werden mit Zeitstempel gespeichert.
-- [ ] **Ein-Tipp-Start** aus dem Stundenplan, Auto-Stopp; **folienloser Modus** mit späterer Zuordnung.
+- [ ] **Ein-Tipp-Start** aus dem Stundenplan, Auto-Stopp.
 - [ ] **iPad-Schreib-App** (PencilKit: Stift, Marker, Radierer, Lasso, Seiten, Folie als Hintergrund, Marker ❓⚠️🔗, Tafel-Foto). Jeder Strich ist nach dem Absetzen in < 1 s am Mac. Nach einem Verbindungsabbruch geht kein Strich verloren.
 - [ ] **Audio-Aufnahme** im Browser, sicher gespeichert (auch bei Absturz: Aufnahme in Stücken speichern).
 - [ ] **Automatische Backups** (täglich) und Vault-Export.
@@ -290,6 +345,7 @@ Kalender-Ereignis (Vorlesung | fest | Lernblock) ── Lernblock → (Modul | K
 
 ### P1 – macht es zur Lernmaschine
 
+- [ ] Optional, bestätigt: **folienloser Modus** mit späterer Zuordnung (korrigiert auch vergessene Folienwechsel), **Klausurhinweis-Detektor**, **Feynman-Modus**, **Übungsmodus mit Lösungsvergleich**.
 - [ ] Folie ↔ Übung automatisch zuordnen (vor der Vorlesung), im Dashboard anzeigen.
 - [ ] Konzept-Extraktion, Wissensnotizen als Markdown, Verlinkung + Duplikat-Erkennung, Nacharbeitungs-Ansicht.
 - [ ] Fragen generieren, Quiz-Modi, FSRS, Beherrschungsgrad pro Konzept.
@@ -316,7 +372,7 @@ Kalender-Ereignis (Vorlesung | fest | Lernblock) ── Lernblock → (Modul | K
 | Phase | Inhalt | Ergebnis |
 |---|---|---|
 | **0 – Fundament** | Repo-Setup, Docker Compose, DB-Schema, Upload, PDF-Viewer | Folien und Übungen pro Modul ablegen und ansehen |
-| **1 – Vorlesungs-Dashboard** | 3-Spalten-Layout, iPad-Schreib-App (PencilKit) + Sync-Server, Folienwechsel-Log, Audio-Aufnahme, Ein-Tipp-Start | **In der nächsten Vorlesung einsetzbar** |
+| **1 – Vorlesungs-Dashboard** | Zuerst ein Test: PencilKit, Kamera und Netzwerk in Swift Playgrounds. Danach 3-Spalten-Layout, iPad-Schreib-App (`.swiftpm`), Sync-Server lokal auf dem Mac, Folienwechsel-Log, Audio-Aufnahme, Ein-Tipp-Start | **In der nächsten Vorlesung einsetzbar** |
 | **2 – Nacharbeitung** | Whisper, Ausrichtung, Rückblick-Ansicht, Folie↔Übung, Konzept-Extraktion, Vault | Jede Vorlesung wird automatisch zur verlinkten Wissensnotiz |
 | **3 – Lernen** | Fragen, Quiz, FSRS, Beherrschung, Fehleranalyse | Klausurvorbereitung läuft über die App |
 | **4 – Planen** | ICS/Google-Import, Wochenplaner, Vorbereitungs-Check | Die Woche plant sich selbst |
@@ -338,15 +394,18 @@ Kalender-Ereignis (Vorlesung | fest | Lernblock) ── Lernblock → (Modul | K
 
 ## 11. Offene Fragen
 
-**Geklärt:** Mac + iPad mit Apple Pencil ✅ · Aufnahme erlaubt ✅ · GoodNotes-Funktionen werden mit dem REA-Skill analysiert und selbst gebaut ✅
+**Geklärt:**
+- Mac + iPad mit Apple Pencil ✅
+- Aufnahme erlaubt ✅
+- Kein Apple-Developer-Account, Weg über Swift Playgrounds bzw. 7-Tage-Signatur ist okay ✅
+- Erst nur lokal testen ✅
+- Es gibt kein bestehendes Obsidian-System, die Vault-Struktur entwerfen wir selbst (§5.2) ✅
+- Die Recherche zu Referenz-Apps macht Claude selbst, REA nur bei Restfragen ✅
+- Live-Auto-Folienverfolgung abgelehnt ✅
 
 | # | Frage | Blockiert? |
 |---|---|---|
 | F1 | Welches iPad-Modell und welcher Apple Pencil (2. Gen., USB-C, Pro)? Davon hängen Gesten wie Squeeze und Hover ab. | Nein |
-| F2 | Gibt es einen Apple-Developer-Account? Ohne ihn muss die iPad-App alle 7 Tage neu aus Xcode installiert werden. Mit ihm (99 $/Jahr) geht es per TestFlight. | Ja – Phase 1 |
-| F3 | Wie sieht dein bestehendes Obsidian-Lernsystem aus (Vorlagen, Tags, Ordner)? Gerne Beispiele ins Repo legen. | Ja – Phase 2 |
 | F4 | Woher kommen Folien und Übungen (LMS wie Canvas/Moodle, Mail …)? Gibt es den Stundenplan als ICS-Export? | Nein |
-| F5 | Hast du ein iPhone? Dann lohnt sich der Review-Modus fürs Pendeln (M1) auch dort. | Nein |
-| F6 | Sync-Server: kleiner VPS (ca. 5 €/Monat) okay, oder lieber erst nur lokal testen? | Ja – Phase 1 |
+| F5 | Hast du ein iPhone? Dann ginge der Hotspot für die Live-Anzeige im Hörsaal, und der Review-Modus fürs Pendeln (M1) lohnt sich dort. | Nein |
 | F7 | Sprache der Vorlesungen (Deutsch/Englisch gemischt?) – wichtig für Transkription und Fragen. | Nein |
-| F8 | Dateien für REA: GoodNotes-Mac-App und die Web-Bundles von Quizlet/StudySmarter hochladen, sobald wir an die jeweiligen Funktionen gehen. | Nein |

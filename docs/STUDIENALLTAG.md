@@ -32,7 +32,7 @@ Typische Realität:
 
 *Moment M3 – „Mitschreiben ohne Reibung".*
 → **Schreibgefühl wie GoodNotes** – Latenz, Handballenerkennung, Pencil-Gesten. Hier entscheidet sich, ob ich die App benutze.
-→ **Folienverfolgung darf nicht von meiner Disziplin abhängen:** Die App erkennt aus Transkript + Folieninhalt, welche Folie gerade dran ist, und schlägt den Wechsel vor bzw. korrigiert nachträglich.
+→ **Blättern mit einem Wisch auf dem iPad.** Vergesse ich einen Wechsel, ist das egal: **Nach** der Vorlesung gleicht die App Transkript und Folien ab und korrigiert die Zuordnung. Nichts davon läuft live.
 → **Tafel-Foto** mit der iPad-Kamera, landet mit Zeitstempel im Notizbuch.
 
 *Moment M4 – „Merken, nicht klären".*
