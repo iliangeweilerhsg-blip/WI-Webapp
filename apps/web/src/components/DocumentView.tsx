@@ -6,6 +6,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -64,7 +65,8 @@ const iconButton =
 function useElementSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
-  useEffect(() => {
+  // Vor dem ersten Zeichnen messen, damit die Seite nicht erst im Standardmaß erscheint und dann springt
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const measure = () => {
@@ -177,14 +179,21 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
       (size) => {
         if (!cancelled) setMeasured((m) => ({ ...m, [current]: { w: size.width, h: size.height } }));
       },
-      () => {},
+      () => {
+        // Größe nicht lesbar: mit dem Standardformat weiterzeichnen statt gar nichts zu zeigen
+        if (!cancelled) setMeasured((m) => ({ ...m, [current]: { w: DEFAULT_PAGE.w, h: DEFAULT_PAGE.h } }));
+      },
     );
     return () => {
       cancelled = true;
     };
   }, [pdf, current, meta.sizes, measured]);
 
-  const base = meta.sizes[current - 1] ?? measured[current] ?? DEFAULT_PAGE;
+  // Erst zeichnen, wenn die Seitengröße bekannt ist (vom Core, von pdf.js oder aus dem Vorschaubild). Sonst wird
+  // zuerst im Standardformat gezeichnet und gleich danach noch einmal: Die Seite blitzt auf und springt.
+  const sizeKnown = Boolean(meta.sizes[current - 1] ?? measured[current]);
+  const sizeOf = (n: number) => meta.sizes[n - 1] ?? measured[n] ?? DEFAULT_PAGE;
+  const base = sizeOf(current);
   const availW = Math.max(area.w - PAGE_MARGIN, 100);
   const availH = Math.max(area.h - PAGE_MARGIN, 100);
   const fitScale = Math.min(availW / base.w, availH / base.h);
@@ -202,7 +211,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   // Scharfe Seite von pdf.js über dem schnellen Vorschaubild
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!pdf || !canvas || current < 1 || (pageCount > 0 && current > pageCount)) return;
+    if (!pdf || !canvas || !sizeKnown || current < 1 || (pageCount > 0 && current > pageCount)) return;
     const controller = new AbortController();
     // Das Zeichnen leert die Fläche: Bis die Seite fertig ist, zeigt das Vorschaubild des Core
     setRenderedPage(null);
@@ -215,7 +224,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
       },
     );
     return () => controller.abort();
-  }, [pdf, current, cssWidth, pageCount]);
+  }, [pdf, current, cssWidth, pageCount, sizeKnown]);
 
   // ---------- Suche ----------
 
@@ -581,11 +590,6 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
         </form>
       ) : null}
 
-      {meta.state === 'neu' ? (
-        <p role="status" className="border-b border-border px-4 py-2 text-sm text-text-muted">
-          Wird verarbeitet … Die Vorschaubilder erscheinen gleich.
-        </p>
-      ) : null}
       {meta.state === 'fehler' ? (
         <p className="border-b border-border px-4 py-2 text-sm text-text-muted">
           Dieses PDF konnte nicht vollständig verarbeitet werden. Lesen kannst du es trotzdem.
@@ -597,7 +601,16 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
         </p>
       ) : null}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
+        {meta.state === 'neu' ? (
+          // Schwebt über der Seite statt eine Zeile einzunehmen: Beim Wechsel auf „verarbeitet“ verschiebt sich nichts
+          <p
+            role="status"
+            className="pointer-events-none absolute bottom-3 right-6 z-10 rounded-full border border-border bg-surface-raised px-3 py-1 text-xs text-text-muted shadow-sm"
+          >
+            Wird verarbeitet … Die Vorschaubilder erscheinen gleich.
+          </p>
+        ) : null}
         <nav aria-label="Seiten" className="w-36 shrink-0 overflow-y-auto border-r border-border p-2">
           <ol className="flex flex-col gap-2">
             {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
@@ -619,8 +632,17 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
                       className="block w-full rounded-sm bg-white"
                     />
                   ) : (
-                    <span className="sr-only">Seite {n}</span>
+                    // Platzhalter, bis die Vorschaubilder da sind (Seitennummer steht darunter)
+                    <span
+                      aria-hidden="true"
+                      data-testid="thumb-placeholder"
+                      className="block w-full rounded-sm bg-white/70 ring-1 ring-border"
+                      style={{
+                        aspectRatio: `${sizeOf(n).w} / ${sizeOf(n).h}`,
+                      }}
+                    />
                   )}
+                  {ready ? null : <span className="sr-only">Seite {n}</span>}
                   <span aria-hidden="true" className="mt-1 block text-text-muted">
                     {n}
                   </span>
@@ -639,7 +661,12 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           <div className="grid min-h-full min-w-full place-items-center p-4">
             <div
               className="relative bg-white shadow-md"
-              style={{ width: cssWidth, height: cssHeight }}
+              // Solange noch gar keine Seitengröße bekannt ist, wäre das nur ein Kasten im Standardmaß, der gleich springt
+              style={{
+                width: cssWidth,
+                height: cssHeight,
+                ...(!sizeKnown && !ready && !pdfFailed ? { opacity: 0 } : {}),
+              }}
               data-testid="page-frame"
             >
               {ready ? (

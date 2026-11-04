@@ -13,7 +13,15 @@ import {
 } from 'react';
 import { UploadResultSchema } from '@sg/shared';
 import { ApiRequestError, apiUpload, friendlyMessage } from './api.ts';
-import { KIND_WORDS, collectionPath, invalidateMaterial, type MaterialKind } from './material.ts';
+import {
+  KIND_WORDS,
+  POLL_INTERVAL_MS,
+  collectionPath,
+  fetchIngest,
+  invalidateMaterial,
+  titleFromFile,
+  type MaterialKind,
+} from './material.ts';
 import { useToast } from './toast.tsx';
 import { uuidv7 } from './uuid.ts';
 
@@ -56,6 +64,9 @@ interface UploadApi {
 }
 
 const UploadContext = createContext<UploadApi | null>(null);
+
+/** So lange wird ein Eintrag nach dem Hochladen beobachtet (Einlesen dauert selten länger) */
+const WATCH_MAX_MS = 10 * 60_000;
 
 function looksLikePdf(file: File): boolean {
   return file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
@@ -149,6 +160,55 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     [commit, toast],
   );
 
+  // Frisch hochgeladene Einträge im Blick behalten, bis das Einlesen durch ist: Scheitert es (`neu` → `fehler`),
+  // sagt ein ruhiger Toast es, auch wenn man inzwischen woanders ist. Die Datei bleibt gespeichert.
+  const watched = useRef(new Map<string, { kind: MaterialKind; since: number }>());
+  const watchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const polling = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      if (watchTimer.current) clearTimeout(watchTimer.current);
+    };
+  }, []);
+
+  const pollWatched = useCallback(async () => {
+    watchTimer.current = null;
+    polling.current = true;
+    for (const [id, { kind, since }] of [...watched.current]) {
+      try {
+        const { state, title } = await fetchIngest(client, kind, id);
+        if (state === 'neu') {
+          if (Date.now() - since > WATCH_MAX_MS) watched.current.delete(id);
+          continue;
+        }
+        watched.current.delete(id);
+        void invalidateMaterial(client);
+        if (state === 'fehler' && alive.current) {
+          toast.show({ message: `„${title}“ ließ sich nicht lesen. Die Datei ist gespeichert.` });
+        }
+      } catch {
+        // Core gerade nicht erreichbar oder Eintrag gelöscht: nach Ablauf der Frist aufgeben
+        if (Date.now() - since > WATCH_MAX_MS) watched.current.delete(id);
+      }
+    }
+    polling.current = false;
+    if (alive.current && watched.current.size > 0) {
+      watchTimer.current = setTimeout(() => void pollWatched(), POLL_INTERVAL_MS);
+    }
+  }, [client, toast]);
+
+  const watchIngest = useCallback(
+    (kind: MaterialKind, id: string) => {
+      watched.current.set(id, { kind, since: Date.now() });
+      // Läuft gerade eine Runde, plant sie die nächste selbst
+      if (!polling.current) watchTimer.current ??= setTimeout(() => void pollWatched(), POLL_INTERVAL_MS);
+    },
+    [pollWatched],
+  );
+
   const run = useCallback(
     async (id: string) => {
       const entry = entriesRef.current.find((e) => e.id === id);
@@ -156,6 +216,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       patch(id, { status: 'laeuft', message: undefined, retryable: undefined });
       try {
         const fields: Record<string, string> = { module_id: entry.moduleId };
+        // Lesbarer Titel statt Dateiname: „Mikro_Vorlesung_70.pdf“ → „Mikro Vorlesung 70“
+        const title = titleFromFile(entry.file.name);
+        if (title) fields.title = title;
         const result = await apiUpload(collectionPath(entry.kind), UploadResultSchema, {
           file: entry.file,
           fields,
@@ -163,6 +226,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         });
         await invalidateMaterial(client);
         patch(id, { status: result.duplicate ? 'dublette' : 'fertig', resultId: result.id });
+        if (!result.duplicate) watchIngest(entry.kind, result.id);
       } catch (failure) {
         const retryable =
           failure instanceof ApiRequestError &&
@@ -181,7 +245,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       }
       finishBatch(entry.batch);
     },
-    [client, finishBatch, patch],
+    [client, finishBatch, patch, watchIngest],
   );
 
   const enqueue = useCallback<UploadApi['enqueue']>(

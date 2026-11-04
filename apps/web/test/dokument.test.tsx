@@ -22,7 +22,7 @@ const pdf = vi.hoisted(() => {
     ],
     5: [{ str: 'Zusammenfassung', x: 10, y: 10, w: 150, h: 12 }],
   };
-  const render = vi.fn(async () => true);
+  const render = vi.fn(async (_page: number, _canvas: unknown, _cssWidth: number, _signal?: unknown) => true);
   const doc = {
     numPages: 5,
     pageSize: vi.fn(async () => ({ width: 720, height: 405 })),
@@ -38,6 +38,7 @@ vi.mock('../src/lib/pdf.ts', () => ({ openPdf: pdf.openPdf }));
 import { DocumentView } from '../src/components/DocumentView.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
+import { POLL_INTERVAL_MS } from '../src/lib/material.ts';
 import { installFakeCore, makeDeck, makeSheet } from './fake-core.ts';
 
 const DECK = makeDeck({ title: 'VL 03 Normalisierung', ingest_state: 'verarbeitet', page_count: 5 });
@@ -329,5 +330,103 @@ describe('PDF-Anzeige (Nacharbeit)', () => {
       </ThemeProvider>,
     );
     await waitFor(() => expect(pageRegion()).toHaveAccessibleName('Seite 4 von 5'));
+  });
+});
+
+describe('PDF-Anzeige während des Einlesens (F-ORG-02)', () => {
+  const frameCanvas = () => screen.getByTestId('page-frame').querySelector('canvas') as HTMLCanvasElement;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('Zustand „neu“: Seite 1 kommt sofort aus pdf.js, in der echten Größe, Seitenzahl aus pdf.js', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    await openViewer();
+    // Ohne Core-Bilder und ohne Seitengrößen: pdf.js zeichnet die erste Seite
+    await waitFor(() => expect(pdf.render).toHaveBeenCalled());
+    expect(pdf.render.mock.calls[0]?.[0]).toBe(1);
+    // Zuerst die Größe aus pdf.js (720 × 405 pt), nicht das Standardformat: Breite 768 statt ≈ 401
+    expect(pdf.render.mock.calls[0]?.[2]).toBe(768);
+    expect(pdf.render).toHaveBeenCalledTimes(1);
+    expect(within(pageRegion()).queryByRole('img')).not.toBeInTheDocument();
+    await waitFor(() => expect(frameCanvas().style.visibility).toBe('visible'));
+    expect(pageRegion()).toHaveAccessibleName('Seite 1 von 5');
+    expect(screen.getByText('/ 5')).toBeInTheDocument();
+  });
+
+  it('Zustand „neu“: Blättern per Taste und Knopf, Seitenleiste mit Platzhaltern statt Vorschaubildern', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    const user = userEvent.setup();
+    await openViewer();
+    const thumbs = screen.getByRole('navigation', { name: 'Seiten' });
+    await waitFor(() => expect(within(thumbs).getAllByRole('button')).toHaveLength(5));
+    expect(within(thumbs).queryAllByRole('img')).toHaveLength(0);
+    expect(within(thumbs).getAllByTestId('thumb-placeholder')).toHaveLength(5);
+    expect(within(thumbs).getByRole('button', { name: 'Seite 3' })).toBeInTheDocument();
+
+    await user.keyboard('{ArrowRight}');
+    expect(pageRegion()).toHaveAccessibleName('Seite 2 von 5');
+    await user.click(screen.getByRole('button', { name: 'Nächste Seite' }));
+    expect(pageRegion()).toHaveAccessibleName('Seite 3 von 5');
+    await user.click(within(thumbs).getByRole('button', { name: 'Seite 5' }));
+    expect(pageRegion()).toHaveAccessibleName('Seite 5 von 5');
+    await waitFor(() => expect(pdf.render.mock.calls.some((c) => c[0] === 5)).toBe(true));
+  });
+
+  it('Zustand „neu“: Suche funktioniert schon', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    const user = userEvent.setup();
+    const viewer = await openViewer();
+    fireEvent.keyDown(viewer, { key: 'f', ctrlKey: true });
+    await user.type(await screen.findByRole('textbox', { name: 'Suchbegriff' }), 'normalisierung');
+    await waitFor(() =>
+      expect(within(screen.getByRole('search')).getByRole('status')).toHaveTextContent('1 von 3'),
+    );
+    expect(pageRegion()).toHaveAccessibleName('Seite 2 von 5');
+  });
+
+  it('Wechsel auf „verarbeitet“: Bilder und Vorschauen kommen dazu, Seite bleibt, nichts wird neu gezeichnet', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await openViewer();
+    await user.keyboard('{ArrowRight}{ArrowRight}');
+    expect(pageRegion()).toHaveAccessibleName('Seite 3 von 5');
+    await waitFor(() => expect(frameCanvas().style.visibility).toBe('visible'));
+    const renders = pdf.render.mock.calls.length;
+    const sizeBefore = screen.getByTestId('page-frame').style.width;
+
+    core.finishIngest(DECK.id, 5);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 200);
+    });
+    const thumbs = screen.getByRole('navigation', { name: 'Seiten' });
+    await waitFor(() => expect(within(thumbs).getAllByRole('img')).toHaveLength(5));
+    expect(within(thumbs).queryAllByTestId('thumb-placeholder')).toHaveLength(0);
+    expect(mainImage()).toHaveAttribute('alt', 'Seite 3');
+    expect(pageRegion()).toHaveAccessibleName('Seite 3 von 5');
+    expect(screen.queryByText(/Wird verarbeitet/)).not.toBeInTheDocument();
+    // Kein Flackern: gleiche Größe, die scharfe Seite bleibt sichtbar, kein zusätzlicher Zeichenvorgang
+    expect(screen.getByTestId('page-frame').style.width).toBe(sizeBefore);
+    expect(frameCanvas().style.visibility).toBe('visible');
+    expect(pdf.render.mock.calls.length).toBe(renders);
+  });
+
+  it('Seitengröße nicht lesbar: gezeichnet wird trotzdem (Standardformat)', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    pdf.doc.pageSize.mockRejectedValueOnce(new Error('kaputt'));
+    await openViewer();
+    await waitFor(() => expect(pdf.render).toHaveBeenCalled());
   });
 });

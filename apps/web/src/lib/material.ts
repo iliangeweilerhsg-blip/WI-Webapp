@@ -103,6 +103,40 @@ export function useSheets(moduleId: string) {
 }
 
 /** Foliensatz mit allen Folien (für Vorschaubild und Viewer). Pollt, solange der Satz eingelesen wird. */
+/** Titel aus dem Dateinamen: ohne `.pdf`, Unterstriche und Mehrfach-Leerzeichen werden zu einem Leerzeichen. */
+export function titleFromFile(filename: string): string {
+  return filename
+    .replace(/\.pdf$/i, '')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+/** Einlese-Zustand und Titel eines Eintrags (teilt den Cache mit den Detailansichten). */
+export async function fetchIngest(
+  client: QueryClient,
+  kind: MaterialKind,
+  id: string,
+): Promise<{ state: SlideDeck['ingest_state']; title: string }> {
+  if (kind === 'folien') {
+    const { deck } = await client.fetchQuery({
+      queryKey: ['deck', id],
+      queryFn: ({ signal }) =>
+        apiGet(`/slide-decks/${encodeURIComponent(id)}`, SlideDeckDetailSchema, { signal }),
+      staleTime: 0,
+    });
+    return { state: deck.ingest_state, title: deck.title };
+  }
+  const sheet = await client.fetchQuery({
+    queryKey: ['sheet', id],
+    queryFn: ({ signal }) =>
+      apiGet(`/exercise-sheets/${encodeURIComponent(id)}`, ExerciseSheetSchema, { signal }),
+    staleTime: 0,
+  });
+  return { state: sheet.ingest_state, title: sheet.title };
+}
+
 export function useDeckDetail(id: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['deck', id],

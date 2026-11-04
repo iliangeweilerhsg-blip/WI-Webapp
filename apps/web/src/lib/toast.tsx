@@ -40,7 +40,7 @@ interface ToastApi {
 
 const ToastContext = createContext<ToastApi | null>(null);
 
-const DEFAULT_DURATION_MS = 6_000;
+const DEFAULT_DURATION_MS = 5_000;
 
 /**
  * Ruhige Rückmeldung unten mittig. Höchstens ein Toast gleichzeitig, der neueste ersetzt den alten.

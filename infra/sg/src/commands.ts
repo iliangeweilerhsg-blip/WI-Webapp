@@ -117,9 +117,27 @@ interface Service {
   closed: Promise<void>;
 }
 
-function startService(cfg: SgConfig, name: ServiceName, cmd: string, args: string[]): Service {
+/**
+ * Core direkt mit Node starten, mit demselben Einstieg wie das `start`-Skript von `@sg/core` (`node src/main.ts`,
+ * ein Test hält beides gleich). Über `pnpm --filter … start` würde pnpm beim gewollten Beenden (SIGTERM) zusätzlich
+ * `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL` und `ELIFECYCLE` ausgeben, obwohl alles sauber endet. Nebenbei entfällt ein
+ * Zwischenprozess in der Prozessgruppe.
+ */
+export const CORE_ENTRY = 'src/main.ts';
+
+export function coreCommand(cfg: SgConfig): { cmd: string; args: string[]; cwd: string } {
+  return { cmd: process.execPath, args: [CORE_ENTRY], cwd: join(cfg.repoRoot, 'services', 'core') };
+}
+
+function startService(
+  cfg: SgConfig,
+  name: ServiceName,
+  cmd: string,
+  args: string[],
+  cwd = cfg.repoRoot,
+): Service {
   const child = spawn(cmd, args, {
-    cwd: cfg.repoRoot,
+    cwd,
     env: childEnv(cfg, process.env),
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true, // eigene Prozessgruppe (pgid === pid)
@@ -268,7 +286,8 @@ export async function start(cfg: SgConfig): Promise<number> {
   process.on('exit', onProcessExit);
 
   try {
-    services.push(startService(cfg, 'core', 'pnpm', ['--filter', '@sg/core', 'start']));
+    const core = coreCommand(cfg);
+    services.push(startService(cfg, 'core', core.cmd, core.args, core.cwd));
     if (avail.worker) {
       services.push(startService(cfg, 'worker', 'uv', ['run', '--project', 'services/worker', 'sg-worker']));
     } else {
