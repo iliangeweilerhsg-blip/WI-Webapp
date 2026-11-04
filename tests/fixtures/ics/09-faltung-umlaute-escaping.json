@@ -1,0 +1,22 @@
+{
+  "datei": "09-faltung-umlaute-escaping.ics",
+  "beschreibung": "Einzeltermin mit mehrzeiliger RFC-5545-Zeilenfaltung (CRLF + Leerzeichen), UTF-8-Umlauten sowie escapeten Kommas, Semikolons und Zeilenumbrüchen.",
+  "zeitraum": {
+    "von": "2026-09-15",
+    "bis": "2026-09-30"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-oekonometrie-vl-folding@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Einführung in die Ökonometrie – Vorlesung: Schätzer, Tests; Modellwahl & Überprüfung",
+      "location": "Gebäude Süd, Flügel Ost; Hörsaal Ü-12 (Erdgeschoss)",
+      "starts_at": "2026-09-23T08:15:00Z",
+      "ends_at": "2026-09-23T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Einführung in die Ökonometrie"
+    }
+  ]
+}

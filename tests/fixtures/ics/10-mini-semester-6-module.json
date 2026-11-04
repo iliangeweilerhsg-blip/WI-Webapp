@@ -1,0 +1,202 @@
+{
+  "datei": "10-mini-semester-6-module.ics",
+  "beschreibung": "Realistisches Mini-Semester mit 6 Modulen und uneinheitlich abgekürzten Titeln für Vorlesungen, Übungen, Tutorien und Prüfungen zum Testen von F-KAL-02.",
+  "zeitraum": {
+    "von": "2026-10-01",
+    "bis": "2027-01-31"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-mini-mikro-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-05T08:15:00+02:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-10-05T06:15:00Z",
+      "ends_at": "2026-10-05T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mini-dbs-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-05T10:15:00+02:00",
+      "title": "Datenbanksysteme (VL)",
+      "location": "Hörsaal B-02",
+      "starts_at": "2026-10-05T08:15:00Z",
+      "ends_at": "2026-10-05T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Datenbanksysteme"
+    },
+    {
+      "external_uid": "hs26-mini-wi-vl@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Wirtschaftsinformatik Vorlesung",
+      "location": "Hörsaal A-03",
+      "starts_at": "2026-10-06T06:15:00Z",
+      "ends_at": "2026-10-06T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Wirtschaftsinformatik"
+    },
+    {
+      "external_uid": "hs26-mini-mikro-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "MikroÖk I Ü",
+      "location": "Seminarraum A-102",
+      "starts_at": "2026-10-06T10:15:00Z",
+      "ends_at": "2026-10-06T12:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mini-makro-vl@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Makroökonomie I - VL",
+      "location": "Hörsaal A-02",
+      "starts_at": "2026-10-07T06:15:00Z",
+      "ends_at": "2026-10-07T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Makroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mini-dbs-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "DBS Übung Gr. 2",
+      "location": "Rechnerpool C-202",
+      "starts_at": "2026-10-07T12:15:00Z",
+      "ends_at": "2026-10-07T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Datenbanksysteme"
+    },
+    {
+      "external_uid": "hs26-mini-stat-vl@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Statistik I Vorlesung",
+      "location": "Hörsaal B-01",
+      "starts_at": "2026-10-08T06:15:00Z",
+      "ends_at": "2026-10-08T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Statistik I"
+    },
+    {
+      "external_uid": "hs26-mini-or-vl@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Operations Research (Vorlesung)",
+      "location": "Hörsaal D-01",
+      "starts_at": "2026-10-08T08:15:00Z",
+      "ends_at": "2026-10-08T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Operations Research"
+    },
+    {
+      "external_uid": "hs26-mini-mikro-tut@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Tutorium Mikro",
+      "location": "Seminarraum A-105",
+      "starts_at": "2026-10-08T14:15:00Z",
+      "ends_at": "2026-10-08T16:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "tutorium",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mini-stat-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Stat I – Übung",
+      "location": "Seminarraum B-202",
+      "starts_at": "2026-10-09T06:15:00Z",
+      "ends_at": "2026-10-09T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Statistik I"
+    },
+    {
+      "external_uid": "hs26-mini-wi-tut@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "WI Tutorium",
+      "location": "Seminarraum B-104",
+      "starts_at": "2026-10-09T08:15:00Z",
+      "ends_at": "2026-10-09T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "tutorium",
+      "modul_erwartet": "Wirtschaftsinformatik"
+    },
+    {
+      "external_uid": "hs26-mini-makro-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Übung Makro I",
+      "location": "Seminarraum A-201",
+      "starts_at": "2026-10-09T12:15:00Z",
+      "ends_at": "2026-10-09T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Makroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mini-mikro-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-12T08:15:00+02:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-10-12T06:15:00Z",
+      "ends_at": "2026-10-12T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mini-dbs-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-12T10:15:00+02:00",
+      "title": "Datenbanksysteme (VL)",
+      "location": "Hörsaal B-02",
+      "starts_at": "2026-10-12T08:15:00Z",
+      "ends_at": "2026-10-12T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Datenbanksysteme"
+    },
+    {
+      "external_uid": "hs26-mini-dbs-pruef@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Klausur Datenbanksysteme",
+      "location": "Hörsaalzentrum Audimax",
+      "starts_at": "2027-01-20T08:00:00Z",
+      "ends_at": "2027-01-20T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "pruefung",
+      "modul_erwartet": "Datenbanksysteme"
+    },
+    {
+      "external_uid": "hs26-mini-or-pruef@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "OR Klausur",
+      "location": "Sporthalle Nord",
+      "starts_at": "2027-01-25T13:00:00Z",
+      "ends_at": "2027-01-25T15:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "pruefung",
+      "modul_erwartet": "Operations Research"
+    }
+  ]
+}

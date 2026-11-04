@@ -1,0 +1,154 @@
+{
+  "datei": "01-woechentlich-exdate.ics",
+  "beschreibung": "Wöchentliche Vorlesung über das Herbstsemester 2026 mit UNTIL und drei ausgenommenen Terminen via EXDATE (Semester-Break und Feiertag).",
+  "zeitraum": {
+    "von": "2026-09-14",
+    "bis": "2026-12-23"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-15T10:15:00+02:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-09-15T08:15:00Z",
+      "ends_at": "2026-09-15T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-22T10:15:00+02:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-09-22T08:15:00Z",
+      "ends_at": "2026-09-22T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-29T10:15:00+02:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-09-29T08:15:00Z",
+      "ends_at": "2026-09-29T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-06T10:15:00+02:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-10-06T08:15:00Z",
+      "ends_at": "2026-10-06T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-13T10:15:00+02:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-10-13T08:15:00Z",
+      "ends_at": "2026-10-13T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-20T10:15:00+02:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-10-20T08:15:00Z",
+      "ends_at": "2026-10-20T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-11-10T10:15:00+01:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-11-10T09:15:00Z",
+      "ends_at": "2026-11-10T11:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-11-17T10:15:00+01:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-11-17T09:15:00Z",
+      "ends_at": "2026-11-17T11:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-11-24T10:15:00+01:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-11-24T09:15:00Z",
+      "ends_at": "2026-11-24T11:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-12-01T10:15:00+01:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-12-01T09:15:00Z",
+      "ends_at": "2026-12-01T11:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-12-15T10:15:00+01:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-12-15T09:15:00Z",
+      "ends_at": "2026-12-15T11:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    },
+    {
+      "external_uid": "hs26-mikro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-12-22T10:15:00+01:00",
+      "title": "Mikroökonomie I – Vorlesung",
+      "location": "Hörsaal A-01",
+      "starts_at": "2026-12-22T09:15:00Z",
+      "ends_at": "2026-12-22T11:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Mikroökonomie I"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "vorher_datei": "11a-abgleich-vorher.ics",
+  "nachher_datei": "11b-abgleich-nachher.ics",
+  "beschreibung": "Erwartetes Abgleichergebnis zwischen 11a-abgleich-vorher.ics und 11b-abgleich-nachher.ics nach F-KAL-01 (Schlüssel: external_uid + recurrence_id).",
+  "geaendert": [
+    {
+      "external_uid": "hs26-abgleich-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-20T10:15:00+02:00"
+    }
+  ],
+  "entfallen": [
+    {
+      "external_uid": "hs26-abgleich-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-27T10:15:00+01:00"
+    }
+  ],
+  "neu": [
+    {
+      "external_uid": "hs26-abgleich-zusatz-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": null
+    }
+  ]
+}
