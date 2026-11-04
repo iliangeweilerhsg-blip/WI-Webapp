@@ -40,6 +40,7 @@ cd ~/WI-Webapp && git checkout main && git pull
 ```bash
 pnpm install
 ```
+Ab jetzt reicht nach jedem `git pull` einfach `pnpm sg start`. Neue Pakete werden dann selbst installiert und die Oberfläche selbst neu gebaut.
 
 ## 3. Gesundheitscheck
 
@@ -55,7 +56,7 @@ pnpm sg start
 ```
 Beim ersten Mal dauert das ein paar Minuten:
 - Die Datenbank wird heruntergeladen.
-- Die Web-App wird gebaut.
+- Die Web-App wird gebaut. Das passiert auch nach jedem Update einmal und dauert dann etwa eine Minute.
 - Die Python-Pakete werden installiert.
 
 Danach öffnet sich der Browser mit dem Studien-Gehirn. Das Terminal bleibt offen, dort laufen die Logs mit `[core]` und `[worker]`.
@@ -76,22 +77,25 @@ Bitte der Reihe nach durchgehen und abhaken:
 - [ ] Modul bearbeiten (Kürzel, Farbe), löschen, „Rückgängig“: Das Modul ist wieder da
 
 **Folien (F-ORG-02)**
-- [ ] Ein echtes Vorlesungs-PDF auf den Tab „Vorlesungen“ ziehen. Es erscheint in der Liste, „wird verarbeitet“ wechselt zu fertig
-- [ ] Dasselbe PDF noch einmal hochladen: Meldung „Schon vorhanden“, kein zweiter Eintrag
+- [ ] Ein echtes Vorlesungs-PDF auf den Tab „Vorlesungen“ ziehen (oder „PDF auswählen“). Unten erscheint „Foliensatz hinzugefügt“, in der Liste steht kurz „Wird verarbeitet …“, danach Vorschaubild und Seitenzahl
+- [ ] Dasselbe PDF noch einmal hochladen: Meldung „Schon vorhanden“ mit „Anzeigen“, kein zweiter Eintrag
+- [ ] Foliensatz umbenennen und löschen, „Rückgängig“: Er ist wieder da
 - [ ] Ein großes PDF mit 60 oder mehr Seiten hochladen: Die ersten Seiten sind in **unter 3 Sekunden** sichtbar, fertig verarbeitet in **unter 60 Sekunden**
 
 **Übungsblätter (F-ORG-03)**
-- [ ] Ein Übungsblatt-PDF auf den Tab „Übungen“ ziehen. Es erscheint in der Liste
+- [ ] Ein Übungsblatt-PDF auf den Tab „Übungen“ ziehen. Meldung „Übungsblatt hinzugefügt“, es erscheint in der Liste
 
 **PDF-Anzeige (F-ORG-04)**
 - [ ] Foliensatz öffnen: Seitenleiste mit Vorschaubildern, Klick springt zur Seite
-- [ ] Zoom (+/−, Einpassen) funktioniert
-- [ ] Suche im Dokument findet ein Wort und springt von Treffer zu Treffer
+- [ ] Oben eine Seitenzahl eintippen und Enter: springt dorthin
+- [ ] Zoom (−/+, „Einpassen“, „Breite“) funktioniert
+- [ ] „Suchen“ (oder ⌘F, wenn du vorher in die Seite geklickt hast): findet ein Wort, markiert es und springt mit den Pfeilen von Treffer zu Treffer
 - [ ] Mit ←/→ blättern
+- [ ] Ein eingescanntes PDF oder eins mit vielen Bildern sieht genauso aus wie in Vorschau.app
 
 **Stabilität**
 - [ ] Strg+C beendet alles sauber. `pnpm sg start` erneut: Alle Daten sind noch da
-- [ ] Hell und Dunkel (umschaltbar in den Einstellungen) sehen beide gut aus
+- [ ] Hell und Dunkel (Einstellungen → Darstellung) sehen beide gut aus
 
 ## 6. Ergebnis an Claude melden
 
@@ -100,6 +104,7 @@ Bitte der Reihe nach durchgehen und abhaken:
 
 ## Gut zu wissen
 
+- **Update:** `git pull` und danach `pnpm sg start`. Neue Pakete und die neue Oberfläche kommen dabei automatisch.
 - Deine Daten liegen in `~/StudienGehirn/` (Dateien) und in der Datenbank (Docker-Volume `sg_pgdata`). Sie bleiben beim Beenden erhalten.
 - Automatische Backups kommen mit Phase 1 (T1-18). Bis dahin bitte noch keine wichtigen Notizen ausschließlich in der App ablegen.
 - Die App läuft nur lokal auf deinem Mac. Es gibt keinen Internet-Server und keine Telemetrie.
