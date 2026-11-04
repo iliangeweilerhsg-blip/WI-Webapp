@@ -105,6 +105,9 @@ export async function openPdf(url: string): Promise<PdfDoc> {
     async pageSize(number) {
       const page = await doc.getPage(number);
       const view = page.getViewport({ scale: 1 });
+      // Die Größe steht fest, die Seite wird nicht mehr gebraucht (bei langen Dokumenten sonst alle im Speicher).
+      // pdf.js räumt erst auf, wenn kein Zeichenvorgang dieser Seite mehr läuft: Die Zeichenschlange bleibt ungestört.
+      page.cleanup();
       return { width: view.width, height: view.height };
     },
 

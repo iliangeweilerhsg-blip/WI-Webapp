@@ -22,10 +22,10 @@ const pdf = vi.hoisted(() => {
     ],
     5: [{ str: 'Zusammenfassung', x: 10, y: 10, w: 150, h: 12 }],
   };
-  const render = vi.fn(async () => true);
+  const render = vi.fn(async (_page: number, _canvas: unknown, _cssWidth: number, _signal?: unknown) => true);
   const doc = {
     numPages: 5,
-    pageSize: vi.fn(async () => ({ width: 720, height: 405 })),
+    pageSize: vi.fn(async (_page: number) => ({ width: 720, height: 405 })),
     textItems: vi.fn(async (n: number) => pages[n] ?? []),
     render,
     destroy: vi.fn(),
@@ -38,6 +38,7 @@ vi.mock('../src/lib/pdf.ts', () => ({ openPdf: pdf.openPdf }));
 import { DocumentView } from '../src/components/DocumentView.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
+import { POLL_INTERVAL_MS } from '../src/lib/material.ts';
 import { installFakeCore, makeDeck, makeSheet } from './fake-core.ts';
 
 const DECK = makeDeck({ title: 'VL 03 Normalisierung', ingest_state: 'verarbeitet', page_count: 5 });
@@ -300,6 +301,98 @@ describe('PDF-Anzeige (Nacharbeit)', () => {
     expect(screen.queryByText(/vorschaubilder bleiben nutzbar/i)).not.toBeInTheDocument();
   });
 
+  it('Ladefehler (Netz, Satz noch in Arbeit) ist nicht „beschädigt“: ruhig, genau eine Aktion „Erneut versuchen“', async () => {
+    installFakeCore({ decks: [makeDeck({ id: DECK.id, title: 'Frisch', ingest_state: 'neu' })] });
+    const network = new TypeError('Failed to fetch');
+    pdf.openPdf.mockRejectedValueOnce(network);
+    const user = userEvent.setup();
+    nav.search = `typ=folien&id=${DECK.id}`;
+    view();
+    expect(await screen.findByText('Konnte nicht geladen werden.')).toBeInTheDocument();
+    expect(screen.queryByText(/beschädigt/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Erneut versuchen' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Zurück zum Modul' })).not.toBeInTheDocument();
+    expect(pdf.openPdf).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
+    expect(pdf.openPdf).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Dokumentanzeige' })).toBeInTheDocument());
+    expect(screen.queryByText('Konnte nicht geladen werden.')).not.toBeInTheDocument();
+  });
+
+  it('pdf.js meldet ein unlesbares PDF: „beschädigt“, auch wenn der Core noch einliest', async () => {
+    installFakeCore({ decks: [makeDeck({ id: DECK.id, title: 'Frisch', ingest_state: 'neu' })] });
+    const invalid = Object.assign(new Error('Invalid PDF structure.'), { name: 'InvalidPDFException' });
+    pdf.openPdf.mockRejectedValueOnce(invalid);
+    nav.search = `typ=folien&id=${DECK.id}`;
+    view();
+    expect(await screen.findByText(/Vielleicht ist die Datei beschädigt/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).not.toBeInTheDocument();
+  });
+
+  it('Ladefehler bei noch nicht verarbeitetem Satz: versucht es von selbst noch einmal, sobald er fertig ist', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch', ingest_state: 'neu' })],
+    });
+    pdf.openPdf.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    nav.search = `typ=folien&id=${DECK.id}`;
+    view();
+    expect(await screen.findByText('Konnte nicht geladen werden.')).toBeInTheDocument();
+    core.finishIngest(DECK.id, 5);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 300);
+    });
+    await waitFor(() => expect(pdf.openPdf).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('Konnte nicht geladen werden.')).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('passwortgeschütztes PDF: eigener Text, keine Aktion zum Wiederholen', async () => {
+    installFakeCore({ decks: [makeDeck({ id: DECK.id, title: 'Geheim', ingest_state: 'neu' })] });
+    pdf.openPdf.mockRejectedValueOnce(
+      Object.assign(new Error('No password given'), { name: 'PasswordException' }),
+    );
+    nav.search = `typ=folien&id=${DECK.id}`;
+    view();
+    expect(
+      await screen.findByText(
+        'Dieses PDF ist passwortgeschützt. Speichere es ohne Passwort und zieh es noch einmal herein.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).not.toBeInTheDocument();
+  });
+
+  it('Core kennt die Seiten, pdf.js scheitert am Laden: Hinweis mit „Erneut versuchen“', async () => {
+    deckCore();
+    pdf.openPdf.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const user = userEvent.setup();
+    await openViewer();
+    expect(await screen.findByText(/nicht scharf anzeigen/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
+    expect(pdf.openPdf).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.queryByText(/nicht scharf anzeigen/)).not.toBeInTheDocument());
+  });
+
+  it('Ladefehler, solange der Core weg war: versucht von selbst noch einmal, sobald er wieder erreichbar ist', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = deckCore();
+    pdf.openPdf.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await openViewer();
+    expect(await screen.findByText(/nicht scharf anzeigen/)).toBeInTheDocument();
+    core.down = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    core.down = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    await waitFor(() => expect(pdf.openPdf).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/nicht scharf anzeigen/)).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
   it('Suche zeigt „Sucht …“, solange pdf.js noch lädt, nicht „Kein Treffer“', async () => {
     deckCore();
     let release: (doc: typeof pdf.doc) => void = () => {};
@@ -329,5 +422,162 @@ describe('PDF-Anzeige (Nacharbeit)', () => {
       </ThemeProvider>,
     );
     await waitFor(() => expect(pageRegion()).toHaveAccessibleName('Seite 4 von 5'));
+  });
+});
+
+describe('PDF-Anzeige während des Einlesens (F-ORG-02)', () => {
+  const frameCanvas = () => screen.getByTestId('page-frame').querySelector('canvas') as HTMLCanvasElement;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('Zustand „neu“: Seite 1 kommt sofort aus pdf.js, in der echten Größe, Seitenzahl aus pdf.js', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    await openViewer();
+    // Ohne Core-Bilder und ohne Seitengrößen: pdf.js zeichnet die erste Seite
+    await waitFor(() => expect(pdf.render).toHaveBeenCalled());
+    expect(pdf.render.mock.calls[0]?.[0]).toBe(1);
+    // Zuerst die Größe aus pdf.js (720 × 405 pt), nicht das Standardformat: Breite 768 statt ≈ 401
+    expect(pdf.render.mock.calls[0]?.[2]).toBe(768);
+    expect(pdf.render).toHaveBeenCalledTimes(1);
+    expect(within(pageRegion()).queryByRole('img')).not.toBeInTheDocument();
+    await waitFor(() => expect(frameCanvas().style.visibility).toBe('visible'));
+    expect(pageRegion()).toHaveAccessibleName('Seite 1 von 5');
+    expect(screen.getByText('/ 5')).toBeInTheDocument();
+  });
+
+  it('Zustand „neu“: Blättern per Taste und Knopf, Seitenleiste mit Platzhaltern statt Vorschaubildern', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    const user = userEvent.setup();
+    await openViewer();
+    const thumbs = screen.getByRole('navigation', { name: 'Seiten' });
+    await waitFor(() => expect(within(thumbs).getAllByRole('button')).toHaveLength(5));
+    expect(within(thumbs).queryAllByRole('img')).toHaveLength(0);
+    expect(within(thumbs).getAllByTestId('thumb-placeholder')).toHaveLength(5);
+    expect(within(thumbs).getByRole('button', { name: 'Seite 3' })).toBeInTheDocument();
+
+    await user.keyboard('{ArrowRight}');
+    expect(pageRegion()).toHaveAccessibleName('Seite 2 von 5');
+    await user.click(screen.getByRole('button', { name: 'Nächste Seite' }));
+    expect(pageRegion()).toHaveAccessibleName('Seite 3 von 5');
+    await user.click(within(thumbs).getByRole('button', { name: 'Seite 5' }));
+    expect(pageRegion()).toHaveAccessibleName('Seite 5 von 5');
+    await waitFor(() => expect(pdf.render.mock.calls.some((c) => c[0] === 5)).toBe(true));
+  });
+
+  it('Zustand „neu“: Suche funktioniert schon', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    const user = userEvent.setup();
+    const viewer = await openViewer();
+    fireEvent.keyDown(viewer, { key: 'f', ctrlKey: true });
+    await user.type(await screen.findByRole('textbox', { name: 'Suchbegriff' }), 'normalisierung');
+    await waitFor(() =>
+      expect(within(screen.getByRole('search')).getByRole('status')).toHaveTextContent('1 von 3'),
+    );
+    expect(pageRegion()).toHaveAccessibleName('Seite 2 von 5');
+  });
+
+  it('Wechsel auf „verarbeitet“: Bilder und Vorschauen kommen dazu, Seite bleibt, nichts wird neu gezeichnet', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await openViewer();
+    await user.keyboard('{ArrowRight}{ArrowRight}');
+    expect(pageRegion()).toHaveAccessibleName('Seite 3 von 5');
+    await waitFor(() => expect(frameCanvas().style.visibility).toBe('visible'));
+    const renders = pdf.render.mock.calls.length;
+    const sizeBefore = screen.getByTestId('page-frame').style.width;
+
+    core.finishIngest(DECK.id, 5);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 200);
+    });
+    const thumbs = screen.getByRole('navigation', { name: 'Seiten' });
+    await waitFor(() => expect(within(thumbs).getAllByRole('img')).toHaveLength(5));
+    expect(within(thumbs).queryAllByTestId('thumb-placeholder')).toHaveLength(0);
+    expect(mainImage()).toHaveAttribute('alt', 'Seite 3');
+    expect(pageRegion()).toHaveAccessibleName('Seite 3 von 5');
+    expect(screen.queryByText(/Wird verarbeitet/)).not.toBeInTheDocument();
+    // Kein Flackern: gleiche Größe, die scharfe Seite bleibt sichtbar, kein zusätzlicher Zeichenvorgang
+    expect(screen.getByTestId('page-frame').style.width).toBe(sizeBefore);
+    expect(frameCanvas().style.visibility).toBe('visible');
+    expect(pdf.render.mock.calls.length).toBe(renders);
+  });
+
+  it('liest alle Seitengrößen vorab; Platzhalter und Vorschaubilder haben das Seitenformat (Leiste springt nicht)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    pdf.doc.pageSize.mockClear();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await openViewer();
+    await waitFor(() => expect(pdf.doc.pageSize.mock.calls.map((c) => c[0]).sort()).toEqual([1, 2, 3, 4, 5]));
+    const thumbs = screen.getByRole('navigation', { name: 'Seiten' });
+    await waitFor(() => {
+      const ratios = within(thumbs)
+        .getAllByTestId('thumb-placeholder')
+        .map((el) => (el as HTMLElement).style.aspectRatio.replace(/\s/g, ''));
+      expect(ratios).toEqual(Array(5).fill('720/405'));
+    });
+    // Der Rahmen wird beim Blättern nie unsichtbar
+    const frame = screen.getByTestId('page-frame');
+    for (let i = 0; i < 4; i += 1) {
+      await user.keyboard('{ArrowRight}');
+      expect(frame.style.opacity).toBe('');
+    }
+    core.finishIngest(DECK.id, 5);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 200);
+    });
+    await waitFor(() => expect(within(thumbs).getAllByRole('img')).toHaveLength(5));
+    for (const img of within(thumbs).getAllByRole('img')) {
+      expect((img as HTMLElement).style.aspectRatio.replace(/\s/g, '')).toBe('720/405');
+    }
+  });
+
+  it('früher Sprung auf eine ferne Seite: deren Größe wird sofort einzeln gelesen, die Seite wird gezeichnet', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Lang Normalisierung', ingest_state: 'neu' })],
+    });
+    const requested: number[] = [];
+    // Die Runden ab Seite 1 hängen (langsamer Start); nur Seite 300 antwortet
+    pdf.doc.pageSize.mockImplementation((n: number) => {
+      requested.push(n);
+      return n === 300 ? Promise.resolve({ width: 720, height: 405 }) : new Promise(() => {});
+    });
+    pdf.doc.numPages = 300;
+    try {
+      const viewer = await openViewer();
+      await waitFor(() => expect(requested).toContain(1));
+      pdf.render.mockClear();
+      await act(async () => {
+        fireEvent.keyDown(viewer, { key: 'End' });
+      });
+      expect(pageRegion()).toHaveAccessibleName('Seite 300 von 300');
+      await waitFor(() => expect(requested).toContain(300));
+      await waitFor(() => expect(pdf.render.mock.calls.map((c) => c[0])).toContain(300));
+    } finally {
+      pdf.doc.numPages = 5;
+      pdf.doc.pageSize.mockImplementation(async () => ({ width: 720, height: 405 }));
+    }
+  });
+
+  it('Seitengröße nicht lesbar: gezeichnet wird trotzdem (Standardformat)', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    pdf.doc.pageSize.mockRejectedValueOnce(new Error('kaputt'));
+    await openViewer();
+    await waitFor(() => expect(pdf.render).toHaveBeenCalled());
   });
 });

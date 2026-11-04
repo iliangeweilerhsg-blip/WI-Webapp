@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   errors: [] as string[],
   failRender: null as Error | null,
   destroyed: 0,
+  cleaned: [] as number[],
 }));
 
 vi.mock('pdfjs-dist', () => {
@@ -17,7 +18,7 @@ vi.mock('pdfjs-dist', () => {
       height: 405 * scale,
       transform: [],
     }),
-    cleanup: vi.fn(),
+    cleanup: () => state.cleaned.push(number),
     render: ({ canvas }: { canvas: { id?: number } }) => {
       if (state.drawing > 0)
         state.errors.push('Cannot use the same canvas during multiple render() operations');
@@ -75,6 +76,7 @@ beforeEach(() => {
   state.errors = [];
   state.failRender = null;
   state.destroyed = 0;
+  state.cleaned = [];
 });
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
@@ -135,5 +137,26 @@ describe('openPdf().render', () => {
     await tick();
     state.gate.get(1)?.();
     await expect(result).rejects.toThrow('kaputt');
+  });
+});
+
+describe('openPdf().pageSize', () => {
+  it('gibt die Seite nach dem Lesen der Größe frei und stört die Zeichenschlange nicht', async () => {
+    const doc = await openPdf('/x.pdf');
+    const el = canvas();
+    const drawing = doc.render(1, el, 800, new AbortController().signal);
+    await tick();
+    state.gate.get(1)?.();
+    await wait(5);
+    expect(state.drawing).toBe(1);
+
+    const size = doc.pageSize(2);
+    await tick();
+    state.gate.get(2)?.();
+    expect(await size).toEqual({ width: 720, height: 405 });
+    expect(state.cleaned).toEqual([2]);
+    // Der laufende Vorgang wurde weder abgebrochen noch behindert
+    expect(await drawing).toBe(true);
+    expect(state.errors).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 # Feature-Katalog
 
 > Welche Funktionen übernehmen wir aus Referenz-Apps, und welche Funktionen kommen neu dazu?
-> **Regel:** Eine Funktion kommt nur rein, wenn sie einen konkreten Moment aus dem [Studienalltag](STUDIENALLTAG.md) (M1–M13) verbessert.
+> **Regel:** Eine Funktion kommt nur rein, wenn sie einen konkreten Moment aus dem [Studienalltag](spezifikation/01-PRODUKT.md#8-alltagsmomente-kurzfassung) (M1–M13) verbessert.
 
 ---
 
@@ -74,7 +74,7 @@ Wir wollen verstehen, *wie* eine Funktion in einer Referenz-App funktioniert, un
 | Text in PDF markieren → Karteikarte („Magic Marker") | 🔧 | P1 | M7 | Die KI formuliert die Karte, die Quelle wird automatisch verlinkt ([Recherche](referenz-analysen/studysmarter.md)) |
 | Karten mit Bild / Formel (LaTeX) | ✅ | P1 | M1 | WI braucht Formeln und Diagramme |
 | Verschiedene Fragetypen (MC, offen, Lückentext …) | ✅ | P1 | M1, M7 | |
-| Lernstatistiken pro Fach | 🔧 | P1 | M10 | Als **Klausur-Readiness** (siehe [Lernmodell](LERNMODELL.md)) |
+| Lernstatistiken pro Fach | 🔧 | P1 | M10 | Als **Klausur-Readiness** (siehe [Lernmodell](spezifikation/06-LERNMODELL-PLANER.md)) |
 | Zusammenfassungen | 🔧 | P1 | M7 | Vorlesungs-Zusammenfassung mit Quellen-Links |
 | Streaks, Lernziele, Gamification | ❌ | – | M9 | Widerspricht Leitprinzip 9. Stattdessen: ehrliche Prognose |
 | Community-Inhalte / fremde Lernsets | ❌ | – | – | Mein Material ist die Quelle |
@@ -98,7 +98,7 @@ Wir wollen verstehen, *wie* eine Funktion in einer Referenz-App funktioniert, un
 
 | Funktion | Entscheidung | Prio | Warum |
 |---|---|---|---|
-| FSRS-Algorithmus inkl. Optimierer | ✅ | P1 | Siehe [Lernmodell](LERNMODELL.md) |
+| FSRS-Algorithmus inkl. Optimierer | ✅ | P1 | Siehe [Lernmodell](spezifikation/06-LERNMODELL-PLANER.md) |
 | Lückentext-Karten (Cloze) | ✅ | P1 | Ideal für Definitionen |
 | Bildverdeckung (Image Occlusion) | ✅ | P1 | Siehe Quizlet-Diagramme |
 | Anki-Export (.apkg) | ⏳ | P2 | Karten mit Lerngruppe teilen, kein Lock-in |

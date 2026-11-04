@@ -141,7 +141,7 @@ class Speech(Protocol):
 |---|---|---|
 | Transcriber | `mlx-whisper` mit `large-v3-turbo` (Metal) | OpenAI-Whisper-API |
 | Embedder | `BAAI/bge-m3` (mehrsprachig, 1024 Dimensionen) auf MPS | – |
-| LLM | – (Cloud nötig) | Claude API. Stufen: `fast` = `claude-haiku-5-5`, `standard` = `claude-sonnet-5-5`, `deep` = `claude-opus-5-5`. Zuordnung in den Einstellungen änderbar. |
+| LLM | – (Cloud nötig) | Claude API. Stufen (Beispiel-IDs, konkrete Modell-Strings über `config/.env` und Einstellungen änderbar): `fast` = `claude-haiku-5-5`, `standard` = `claude-sonnet-5-5`, `deep` = `claude-opus-5-5`. |
 | Speech | macOS-Stimmen (`say`) für Entwürfe | TTS-API für fertige Videos |
 
 - Jeder LLM-Aufruf hat einen **`task`-Namen** (z. B. `concepts.extract`). Darüber laufen Kostenzähler, Logs und Prompt-Versionen.

@@ -55,6 +55,17 @@ describe('Kontrast (WCAG 2.1 AA, Text >= 4,5 : 1)', () => {
         expect(contrast(c['border-strong'], bg)).toBeGreaterThanOrEqual(3);
       }
     });
+    it(`Suchtreffer im PDF-Viewer (${mode}): Seite ist immer weiß, Text bleibt lesbar, Rahmen sichtbar`, () => {
+      const page = '#ffffff';
+      const pageText = tokens.color.light.text; // die Seite bleibt auch im dunklen Modus weiß
+      // Die Treffer liegen mit multiply über der weißen Seite: dunkler Text darunter muss lesbar bleiben
+      expect(contrast(pageText, c.hit)).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(pageText, c['hit-active'])).toBeGreaterThanOrEqual(4.5);
+      // Treffer heben sich von der Seite ab, der aktive deutlicher als die übrigen
+      expect(contrast(c.hit, page)).toBeGreaterThanOrEqual(1.2);
+      expect(contrast(c['hit-active'], page)).toBeGreaterThan(contrast(c.hit, page));
+      expect(contrast(c['hit-outline'], page)).toBeGreaterThanOrEqual(3);
+    });
     it(`keine Modulfarbe ist mit Aufnahme-Rot verwechselbar: Sättigung deutlich geringer (${mode})`, () => {
       for (const value of Object.values<{ light: string; dark: string }>(tokens.module)) {
         const hueClose = Math.min(hue(value[mode]), 360 - hue(value[mode])) < 25 || hue(value[mode]) > 335;

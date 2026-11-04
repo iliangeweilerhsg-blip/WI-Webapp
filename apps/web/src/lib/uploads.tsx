@@ -13,7 +13,18 @@ import {
 } from 'react';
 import { UploadResultSchema } from '@sg/shared';
 import { ApiRequestError, apiUpload, friendlyMessage } from './api.ts';
-import { KIND_WORDS, collectionPath, invalidateMaterial, type MaterialKind } from './material.ts';
+import {
+  KIND_WORDS,
+  POLL_INTERVAL_MS,
+  cachedMaterialTitle,
+  collectionPath,
+  fetchIngest,
+  invalidateMaterial,
+  titleFromFile,
+  unscheduleMaterialDelete,
+  pendingMaterialDeleteCount,
+  type MaterialKind,
+} from './material.ts';
 import { useToast } from './toast.tsx';
 import { uuidv7 } from './uuid.ts';
 
@@ -34,6 +45,8 @@ export interface UploadEntry {
   retryable?: boolean;
   /** ID des neuen bzw. schon vorhandenen Objekts */
   resultId?: string;
+  /** Die Datei war zum Löschen vorgemerkt (Rückgängig-Fenster) und ist wieder da: Titel des Eintrags */
+  restoredTitle?: string;
 }
 
 /** Wohin Dateien gehören, wenn sie irgendwo ins Fenster gezogen werden. */
@@ -57,6 +70,10 @@ interface UploadApi {
 
 const UploadContext = createContext<UploadApi | null>(null);
 
+/** So lange wird ein Eintrag nach dem Hochladen beobachtet (Einlesen dauert selten länger) */
+const WATCH_MAX_MS = 10 * 60_000;
+const WATCH_MAX_DELAY_MS = 10_000;
+
 function looksLikePdf(file: File): boolean {
   return file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
 }
@@ -69,14 +86,16 @@ interface Outcome {
   fresh: number;
   duplicate: number;
   failed: number;
+  restored: number;
   firstDuplicate?: UploadEntry;
   firstFailure?: UploadEntry;
 }
 
 function summarize(batch: readonly UploadEntry[]): { message: string; open?: UploadEntry } {
-  const outcome: Outcome = { fresh: 0, duplicate: 0, failed: 0 };
+  const outcome: Outcome = { fresh: 0, duplicate: 0, failed: 0, restored: 0 };
   for (const entry of batch) {
     if (entry.status === 'fertig') outcome.fresh += 1;
+    else if (entry.status === 'dublette' && entry.restoredTitle !== undefined) outcome.restored += 1;
     else if (entry.status === 'dublette') {
       outcome.duplicate += 1;
       outcome.firstDuplicate ??= entry;
@@ -88,6 +107,7 @@ function summarize(batch: readonly UploadEntry[]): { message: string; open?: Upl
   const kind = batch[0]?.kind ?? 'folien';
   const words = KIND_WORDS[kind];
   if (batch.length === 1) {
+    if (outcome.restored) return { message: `„${batch[0]?.restoredTitle}“ ist wieder da.` };
     if (outcome.fresh) return { message: words.added };
     if (outcome.duplicate) return { message: 'Schon vorhanden', open: outcome.firstDuplicate };
     return { message: outcome.firstFailure?.message ?? 'Das hat nicht geklappt.' };
@@ -96,6 +116,7 @@ function summarize(batch: readonly UploadEntry[]): { message: string; open?: Upl
   if (outcome.fresh) {
     parts.push(`${outcome.fresh} ${outcome.fresh === 1 ? words.one : words.many} hinzugefügt`);
   }
+  if (outcome.restored) parts.push(`${outcome.restored} wieder da`);
   if (outcome.duplicate) parts.push(`${outcome.duplicate} schon vorhanden`);
   if (outcome.failed) parts.push(`${outcome.failed} nicht hochgeladen`);
   return {
@@ -149,6 +170,83 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     [commit, toast],
   );
 
+  // Frisch hochgeladene Einträge im Blick behalten, bis das Einlesen durch ist: Scheitert es (`neu` → `fehler`),
+  // sagt ein ruhiger Toast es, auch wenn man inzwischen woanders ist. Die Datei bleibt gespeichert.
+  const watched = useRef(new Map<string, { kind: MaterialKind; since: number }>());
+  const watchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const polling = useRef(false);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      if (watchTimer.current) clearTimeout(watchTimer.current);
+      watchTimer.current = null;
+    };
+  }, []);
+
+  const rounds = useRef(0);
+  /** Pausen zwischen den Runden werden länger (2 s → höchstens 10 s), das Einlesen dauert meist nur Sekunden */
+  const nextDelay = useCallback(
+    () => Math.min(WATCH_MAX_DELAY_MS, POLL_INTERVAL_MS * 1.5 ** rounds.current++),
+    [],
+  );
+
+  const pollWatched = useCallback(async () => {
+    watchTimer.current = null;
+    polling.current = true;
+    const failed: MaterialKind[] = [];
+    let failedTitle = '';
+    for (const [id, { kind, since }] of [...watched.current]) {
+      try {
+        const { state, title } = await fetchIngest(client, kind, id);
+        if (state === 'neu') {
+          if (Date.now() - since > WATCH_MAX_MS) watched.current.delete(id);
+          continue;
+        }
+        watched.current.delete(id);
+        void invalidateMaterial(client);
+        if (state === 'fehler') {
+          failed.push(kind);
+          failedTitle = title;
+        }
+      } catch (failure) {
+        // Gelöscht (404): nichts mehr zu beobachten. Sonst Core gerade nicht erreichbar: nach Ablauf der Frist aufgeben
+        const gone = failure instanceof ApiRequestError && failure.status === 404;
+        if (gone || Date.now() - since > WATCH_MAX_MS) watched.current.delete(id);
+      }
+    }
+    polling.current = false;
+    // Mehrere Fehler derselben Runde teilen sich einen Toast (der neueste würde sonst die anderen ersetzen)
+    if (failed.length > 0 && alive.current) {
+      const one = failed.length === 1;
+      const sameKind = failed.every((k) => k === failed[0]);
+      const noun = sameKind ? KIND_WORDS[failed[0] ?? 'folien'].many : 'Dateien';
+      toast.show({
+        message: one
+          ? `„${failedTitle}“ ließ sich nicht lesen. Die Datei ist gespeichert.`
+          : `${failed.length} ${noun} ließen sich nicht lesen. Die Dateien sind gespeichert.`,
+      });
+    }
+    if (alive.current && watched.current.size > 0) {
+      watchTimer.current = setTimeout(() => void pollWatched(), nextDelay());
+    }
+  }, [client, toast, nextDelay]);
+
+  const watchIngest = useCallback(
+    (kind: MaterialKind, id: string) => {
+      watched.current.set(id, { kind, since: Date.now() });
+      // Ein neuer Eintrag setzt die Pausen auf 2 s zurück (sonst wartet er auf eine Runde mit 10 s Abstand)
+      rounds.current = 0;
+      // Läuft gerade eine Runde, plant sie die nächste selbst (mit der zurückgesetzten Pause)
+      if (!polling.current) {
+        if (watchTimer.current) clearTimeout(watchTimer.current);
+        watchTimer.current = setTimeout(() => void pollWatched(), nextDelay());
+      }
+    },
+    [pollWatched, nextDelay],
+  );
+
   const run = useCallback(
     async (id: string) => {
       const entry = entriesRef.current.find((e) => e.id === id);
@@ -156,13 +254,30 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       patch(id, { status: 'laeuft', message: undefined, retryable: undefined });
       try {
         const fields: Record<string, string> = { module_id: entry.moduleId };
+        // Lesbarer Titel statt Dateiname: „Mikro_Vorlesung_70.pdf“ → „Mikro Vorlesung 70“
+        const title = titleFromFile(entry.file.name);
+        if (title) fields.title = title;
         const result = await apiUpload(collectionPath(entry.kind), UploadResultSchema, {
           file: entry.file,
           fields,
           idempotencyKey: entry.key,
         });
+        // Dieselbe Datei im Rückgängig-Fenster erneut hochgeladen: Die Dublette ist die vorgemerkte Löschung.
+        // Sie wird zurückgenommen, sonst ginge das DELETE später raus und „Anzeigen“ zeigte auf ein gelöschtes Blatt.
+        const restoredTitle =
+          result.duplicate && unscheduleMaterialDelete(entry.kind, result.id)
+            ? (cachedMaterialTitle(client, entry.kind, entry.moduleId, result.id) ??
+              titleFromFile(entry.file.name))
+            : undefined;
+        if (restoredTitle !== undefined && pendingMaterialDeleteCount() === 0)
+          toast.dismissGroup('material-delete');
         await invalidateMaterial(client);
-        patch(id, { status: result.duplicate ? 'dublette' : 'fertig', resultId: result.id });
+        patch(id, {
+          status: result.duplicate ? 'dublette' : 'fertig',
+          resultId: result.id,
+          ...(restoredTitle !== undefined ? { restoredTitle } : {}),
+        });
+        if (!result.duplicate) watchIngest(entry.kind, result.id);
       } catch (failure) {
         const retryable =
           failure instanceof ApiRequestError &&
@@ -181,7 +296,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       }
       finishBatch(entry.batch);
     },
-    [client, finishBatch, patch],
+    [client, finishBatch, patch, watchIngest, toast],
   );
 
   const enqueue = useCallback<UploadApi['enqueue']>(

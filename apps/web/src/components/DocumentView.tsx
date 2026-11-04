@@ -6,6 +6,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -13,6 +14,8 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { openPdf, type PdfDoc, type PdfTextItem } from '../lib/pdf.ts';
+import { classifyPdfError, type PdfFailure } from '../lib/pdf-errors.ts';
+import { useCoreHealth } from './CoreStatus.tsx';
 import { findHits, hitRect, makeMeasurer, type SearchHit } from '../lib/pdf-search.ts';
 import {
   isMaterialKind,
@@ -36,6 +39,8 @@ const ZOOM_STEP = 1.25;
 const PAGE_MARGIN = 32;
 const DEFAULT_PAGE = { w: 595, h: 842 };
 const SEARCH_DEBOUNCE_MS = 150;
+/** So viele Seitenköpfe liest pdf.js gleichzeitig vorab */
+const SIZE_BATCH = 8;
 
 type Zoom = { mode: 'fit' } | { mode: 'width' } | { mode: 'custom'; scale: number };
 
@@ -64,7 +69,8 @@ const iconButton =
 function useElementSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
-  useEffect(() => {
+  // Vor dem ersten Zeichnen messen, damit die Seite nicht erst im Standardmaß erscheint und dann springt
+  useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     const measure = () => {
@@ -84,6 +90,9 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const params = useSearchParams();
   const [pdf, setPdf] = useState<PdfDoc | null>(null);
   const [pdfFailed, setPdfFailed] = useState(false);
+  /** Das PDF selbst ist unlesbar (nicht bloß nicht geladen): Dann hilft kein zweiter Versuch */
+  const [pdfKind, setPdfKind] = useState<PdfFailure>('load');
+  const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState(() => parsePage(params.get('seite')));
   const [zoom, setZoom] = useState<Zoom>({ mode: 'fit' });
   const [measured, setMeasured] = useState<Record<number, { w: number; h: number }>>({});
@@ -104,6 +113,8 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const measurer = useMemo(() => makeMeasurer(), []);
   const { ref: areaRef, size: area } = useElementSize<HTMLDivElement>();
   const ready = meta.state === 'verarbeitet';
+  /** Ladefehler (nicht das PDF selbst): ein neuer Versuch kann helfen */
+  const retryable = pdfFailed && pdfKind === 'load' && meta.state !== 'fehler';
 
   // pdf.js sofort anstoßen, parallel zu den Vorschaubildern aus dem Core
   useEffect(() => {
@@ -112,6 +123,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     textCache.current = new Map();
     setPdf(null);
     setPdfFailed(false);
+    setPdfKind('load');
     openPdf(pdfUrl(kind, id)).then(
       (doc) => {
         if (cancelled) doc.destroy();
@@ -120,15 +132,42 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           setPdf(doc);
         }
       },
-      () => {
-        if (!cancelled) setPdfFailed(true);
+      (failure: unknown) => {
+        if (cancelled) return;
+        setPdfKind(classifyPdfError(failure));
+        setPdfFailed(true);
       },
     );
     return () => {
       cancelled = true;
       opened?.destroy();
     };
-  }, [kind, id]);
+  }, [kind, id, attempt]);
+
+  // Der Satz war noch in Arbeit, als das PDF nicht ladbar war: Sobald sich sein Zustand ändert, noch einmal versuchen
+  useEffect(() => {
+    if (retryable) setAttempt((n) => n + 1);
+    // Nur der Wechsel des Einlese-Zustands zählt, nicht der Fehler selbst
+  }, [meta.state]);
+
+  // Core war weg und ist wieder da (Health wechselt auf ok): ebenfalls von selbst noch einmal versuchen. Solange der Fehler
+  // steht, fragen wir den Status alle 5 s ab, sonst bemerkt man den Neustart erst nach bis zu 30 s.
+  const health = useCoreHealth();
+  const coreOk = health.isSuccess;
+  const sawCoreDown = useRef(false);
+  useEffect(() => {
+    if (health.isError) sawCoreDown.current = true;
+    else if (coreOk && sawCoreDown.current) {
+      sawCoreDown.current = false;
+      if (retryable) setAttempt((n) => n + 1);
+    }
+  }, [health.isError, coreOk, retryable]);
+  const refetchHealth = health.refetch;
+  useEffect(() => {
+    if (!retryable) return;
+    const timer = setInterval(() => void refetchHealth(), 5_000);
+    return () => clearInterval(timer);
+  }, [retryable, refetchHealth]);
 
   const pageCount = meta.pageCount ?? pdf?.numPages ?? 0;
   const current = pageCount > 0 ? clamp(page, 1, pageCount) : page;
@@ -169,22 +208,69 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     [areaRef, pageCount],
   );
 
-  // Seitengröße: vom Core (Folien), von pdf.js oder aus dem Vorschaubild
-  useEffect(() => {
-    if (!pdf || meta.sizes[current - 1] || measured[current]) return;
-    let cancelled = false;
-    pdf.pageSize(current).then(
-      (size) => {
-        if (!cancelled) setMeasured((m) => ({ ...m, [current]: { w: size.width, h: size.height } }));
-      },
-      () => {},
+  // Seitengrößen: vom Core (Folien), von pdf.js oder aus dem Vorschaubild. Sobald pdf.js offen ist, lesen wir alle
+  // Größen einmal vorab (schnell, nur die Seitenköpfe). So gibt es beim Blättern keinen Sprung und die Seitenleiste
+  // kennt die Formate ihrer Platzhalter. Die Reihenfolge richtet sich nach der Seite, auf der man gerade ist: Jede
+  // Runde nimmt die acht noch unbekannten Seiten, die ihr am nächsten liegen. Springt man früh weit weg und kennt
+  // die Größe der neuen Seite noch nicht, wird sie sofort einzeln gelesen, statt auf die Runden zu warten.
+  const knownSize = (n: number) => meta.sizes[n - 1] ?? measured[n] ?? null;
+  const sizeState = useRef({ current, known: (n: number) => knownSize(n) !== null });
+  sizeState.current = { current, known: (n) => knownSize(n) !== null };
+  const sizeReads = useRef(new Set<number>());
+  const livePdf = useRef<PdfDoc | null>(null);
+  livePdf.current = pdf;
+
+  const readSizes = useCallback(async (doc: PdfDoc, numbers: number[]) => {
+    for (const n of numbers) sizeReads.current.add(n);
+    const sizes = await Promise.all(
+      numbers.map((n) =>
+        doc.pageSize(n).then(
+          (size) => [n, { w: size.width, h: size.height }] as const,
+          // Größe nicht lesbar: mit dem Standardformat weiterzeichnen statt gar nichts zu zeigen
+          () => [n, { w: DEFAULT_PAGE.w, h: DEFAULT_PAGE.h }] as const,
+        ),
+      ),
     );
+    if (livePdf.current !== doc) return false;
+    setMeasured((m) => {
+      const next = { ...m };
+      for (const [n, size] of sizes) next[n] ??= size;
+      return next;
+    });
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (!pdf) return;
+    sizeReads.current = new Set();
+    let cancelled = false;
+    (async () => {
+      while (!cancelled) {
+        const here = sizeState.current;
+        const batch = Array.from({ length: pdf.numPages }, (_, i) => i + 1)
+          .filter((n) => !sizeReads.current.has(n) && !here.known(n))
+          .sort((a, b) => Math.abs(a - here.current) - Math.abs(b - here.current))
+          .slice(0, SIZE_BATCH);
+        if (batch.length === 0 || !(await readSizes(pdf, batch))) return;
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [pdf, current, meta.sizes, measured]);
+  }, [pdf, readSizes]);
 
-  const base = meta.sizes[current - 1] ?? measured[current] ?? DEFAULT_PAGE;
+  const sizeKnown = knownSize(current) !== null;
+  useEffect(() => {
+    if (!pdf || sizeKnown || current < 1 || current > pdf.numPages || sizeReads.current.has(current)) return;
+    void readSizes(pdf, [current]);
+  }, [pdf, current, sizeKnown, readSizes]);
+
+  // Erst zeichnen, wenn die Seitengröße bekannt ist (vom Core, von pdf.js oder aus dem Vorschaubild). Sonst wird
+  // zuerst im Standardformat gezeichnet und gleich danach noch einmal: Die Seite blitzt auf und springt.
+  // Unbekannte Seiten übernehmen das Format einer bekannten statt A4: Der Rahmen springt nicht
+  const fallbackSize = meta.sizes.find(Boolean) ?? Object.values(measured)[0] ?? null;
+  const sizeOf = (n: number) => knownSize(n) ?? fallbackSize ?? DEFAULT_PAGE;
+  const base = sizeOf(current);
   const availW = Math.max(area.w - PAGE_MARGIN, 100);
   const availH = Math.max(area.h - PAGE_MARGIN, 100);
   const fitScale = Math.min(availW / base.w, availH / base.h);
@@ -202,7 +288,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   // Scharfe Seite von pdf.js über dem schnellen Vorschaubild
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!pdf || !canvas || current < 1 || (pageCount > 0 && current > pageCount)) return;
+    if (!pdf || !canvas || !sizeKnown || current < 1 || (pageCount > 0 && current > pageCount)) return;
     const controller = new AbortController();
     // Das Zeichnen leert die Fläche: Bis die Seite fertig ist, zeigt das Vorschaubild des Core
     setRenderedPage(null);
@@ -215,7 +301,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
       },
     );
     return () => controller.abort();
-  }, [pdf, current, cssWidth, pageCount]);
+  }, [pdf, current, cssWidth, pageCount, sizeKnown]);
 
   // ---------- Suche ----------
 
@@ -398,26 +484,47 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           ? 'Kein Treffer'
           : `${active + 1} von ${hits.length}`;
 
-  // pdf.js kann das Dokument nicht lesen und der Core kennt keine Seiten: nichts zu zeigen
+  // pdf.js kann das Dokument nicht lesen und der Core kennt keine Seiten: nichts zu zeigen. „Beschädigt“ gilt nur,
+  // wenn das Einlesen gescheitert ist oder pdf.js die Datei als unlesbar meldet; ein Ladefehler (Netz, Core, Satz
+  // noch in Arbeit) ist behebbar: ruhiger Text, genau eine Aktion.
   if (pdfFailed && pageCount === 0) {
+    const corrupt = !retryable;
     return (
       <div className="p-8">
         <h1 id="screen-title" className="text-xxl font-semibold">
           {meta.title}
         </h1>
         <div className="mt-6">
-          <EmptyState
-            action={
-              <Link
-                href={moduleHref(meta.moduleId)}
-                className="text-sm font-medium text-accent hover:underline"
-              >
-                Zurück zum Modul
-              </Link>
-            }
-          >
-            Dieses PDF lässt sich nicht anzeigen. Vielleicht ist die Datei beschädigt.
-          </EmptyState>
+          {corrupt ? (
+            <EmptyState
+              action={
+                <Link
+                  href={moduleHref(meta.moduleId)}
+                  className="text-sm font-medium text-accent hover:underline"
+                >
+                  Zurück zum Modul
+                </Link>
+              }
+            >
+              {pdfKind === 'password'
+                ? 'Dieses PDF ist passwortgeschützt. Speichere es ohne Passwort und zieh es noch einmal herein.'
+                : 'Dieses PDF lässt sich nicht anzeigen. Vielleicht ist die Datei beschädigt.'}
+            </EmptyState>
+          ) : (
+            <EmptyState
+              action={
+                <button
+                  type="button"
+                  onClick={() => setAttempt((n) => n + 1)}
+                  className="text-sm font-medium text-accent hover:underline"
+                >
+                  Erneut versuchen
+                </button>
+              }
+            >
+              Konnte nicht geladen werden.
+            </EmptyState>
+          )}
         </div>
       </div>
     );
@@ -581,11 +688,6 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
         </form>
       ) : null}
 
-      {meta.state === 'neu' ? (
-        <p role="status" className="border-b border-border px-4 py-2 text-sm text-text-muted">
-          Wird verarbeitet … Die Vorschaubilder erscheinen gleich.
-        </p>
-      ) : null}
       {meta.state === 'fehler' ? (
         <p className="border-b border-border px-4 py-2 text-sm text-text-muted">
           Dieses PDF konnte nicht vollständig verarbeitet werden. Lesen kannst du es trotzdem.
@@ -594,10 +696,28 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
       {pdfFailed ? (
         <p role="status" className="border-b border-border px-4 py-2 text-sm text-text-muted">
           Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.
+          {retryable ? (
+            <button
+              type="button"
+              onClick={() => setAttempt((n) => n + 1)}
+              className="ml-3 font-medium text-accent hover:underline"
+            >
+              Erneut versuchen
+            </button>
+          ) : null}
         </p>
       ) : null}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
+        {meta.state === 'neu' ? (
+          // Schwebt über der Seite statt eine Zeile einzunehmen: Beim Wechsel auf „verarbeitet“ verschiebt sich nichts
+          <p
+            role="status"
+            className="pointer-events-none absolute bottom-3 right-6 z-10 rounded-full border border-border bg-surface-raised px-3 py-1 text-xs text-text-muted shadow-sm"
+          >
+            Wird verarbeitet … Die Vorschaubilder erscheinen gleich.
+          </p>
+        ) : null}
         <nav aria-label="Seiten" className="w-36 shrink-0 overflow-y-auto border-r border-border p-2">
           <ol className="flex flex-col gap-2">
             {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
@@ -616,11 +736,22 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
                       src={pageThumbUrl(kind, id, meta.slideIds[n - 1] ?? null, n)}
                       alt={`Seite ${n}`}
                       loading="lazy"
+                      // Gleiches Format wie der Platzhalter: Die Leiste springt nicht, wenn die Bilder nachladen
+                      style={{ aspectRatio: `${sizeOf(n).w} / ${sizeOf(n).h}` }}
                       className="block w-full rounded-sm bg-white"
                     />
                   ) : (
-                    <span className="sr-only">Seite {n}</span>
+                    // Platzhalter, bis die Vorschaubilder da sind (Seitennummer steht darunter)
+                    <span
+                      aria-hidden="true"
+                      data-testid="thumb-placeholder"
+                      className="block w-full rounded-sm bg-white/70 ring-1 ring-border"
+                      style={{
+                        aspectRatio: `${sizeOf(n).w} / ${sizeOf(n).h}`,
+                      }}
+                    />
                   )}
+                  {ready ? null : <span className="sr-only">Seite {n}</span>}
                   <span aria-hidden="true" className="mt-1 block text-text-muted">
                     {n}
                   </span>
@@ -639,7 +770,13 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           <div className="grid min-h-full min-w-full place-items-center p-4">
             <div
               className="relative bg-white shadow-md"
-              style={{ width: cssWidth, height: cssHeight }}
+              // Solange noch gar keine Seitengröße bekannt ist, wäre das nur ein Kasten im Standardmaß, der gleich springt.
+              // Danach bleibt der Rahmen immer sichtbar.
+              style={{
+                width: cssWidth,
+                height: cssHeight,
+                ...(!sizeKnown && !fallbackSize && !ready && !pdfFailed ? { opacity: 0 } : {}),
+              }}
               data-testid="page-frame"
             >
               {ready ? (
@@ -679,9 +816,11 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
                       top: rect.top * scale,
                       width: rect.width * scale,
                       height: rect.height * scale,
-                      // Aus dem Akzent der Design-Tokens (hell und dunkel), die Seite selbst ist immer weiß
-                      backgroundColor: `color-mix(in srgb, var(--sg-color-accent) ${isActive ? 45 : 25}%, transparent)`,
-                      outline: isActive ? '2px solid var(--sg-color-accent)' : undefined,
+                      // Eigene Treffer-Tokens (hell und dunkel). Die Seite ist immer weiß, `multiply` lässt den Text
+                      // darunter lesbar, wie ein Textmarker.
+                      backgroundColor: isActive ? 'var(--sg-color-hit-active)' : 'var(--sg-color-hit)',
+                      mixBlendMode: 'multiply',
+                      outline: isActive ? '2px solid var(--sg-color-hit-outline)' : undefined,
                     }}
                   />
                 );
