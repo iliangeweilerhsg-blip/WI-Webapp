@@ -30,9 +30,9 @@ function SourceRow({
   const isUrl = source.kind === 'ics_url';
   return (
     <li className="py-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <span className="font-medium">{source.name}</span>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <span className="font-medium break-words">{source.name}</span>
           <span className="ml-2 text-sm text-text-muted">
             {source.event_count} {source.event_count === 1 ? 'Termin' : 'Termine'} ·{' '}
             {isUrl ? 'abonniert' : 'Datei'}
@@ -43,24 +43,26 @@ function SourceRow({
               : 'Noch nicht abgeglichen'}
           </p>
           {source.last_error ? (
-            <p role="status" className="mt-1 text-sm">
+            <p role="status" className="mt-1 text-sm text-danger">
               Der letzte Abgleich hat nicht geklappt. Die bisherigen Termine bleiben. {source.last_error}
             </p>
           ) : null}
         </div>
-        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           {isUrl ? (
             <button
               type="button"
               disabled={busy}
-              aria-label={`${source.name} jetzt abgleichen`}
+              aria-label={`Jetzt abgleichen: ${source.name}`}
               onClick={() => onSync(source)}
               className={smallButton}
             >
               Jetzt abgleichen
             </button>
           ) : (
-            <label className={`${smallButton} cursor-pointer`}>
+            <label
+              className={`${smallButton} cursor-pointer focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent`}
+            >
               Neue Fassung
               <input
                 type="file"
@@ -85,7 +87,7 @@ function SourceRow({
                   setConfirming(false);
                   onDelete(source);
                 }}
-                aria-label={`${source.name} wirklich entfernen`}
+                aria-label={`Ja, entfernen: ${source.name}`}
                 className={smallButton}
               >
                 Ja, entfernen
@@ -98,7 +100,7 @@ function SourceRow({
             <button
               type="button"
               disabled={busy}
-              aria-label={`${source.name} entfernen`}
+              aria-label={`Entfernen: ${source.name}`}
               onClick={() => setConfirming(true)}
               className={smallButton}
             >
@@ -132,7 +134,8 @@ export function CalendarSources({ onResult }: { onResult: (result: IcsImportResu
       toast.show({ message: `${source.name}: ${summarizeImport(result)}` });
       if (result.module_suggestions.length > 0 || result.warnings.length > 0) onResult(result);
     } catch (failure) {
-      setError(`${source.name}: ${calendarErrorMessage(failure)}`);
+      // Bei URL-Quellen steht der Fehler danach an der Quelle (`last_error`): nicht noch einmal melden
+      if (source.kind !== 'ics_url') setError(`${source.name}: ${calendarErrorMessage(failure)}`);
     }
   }
 
@@ -158,7 +161,7 @@ export function CalendarSources({ onResult }: { onResult: (result: IcsImportResu
         ))}
       </ul>
       {error ? (
-        <p role="alert" className="mt-3 text-sm text-text-muted">
+        <p role="alert" className="mt-3 text-sm text-danger">
           {error}
         </p>
       ) : null}

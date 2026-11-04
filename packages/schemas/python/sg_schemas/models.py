@@ -1369,6 +1369,12 @@ class IcsModuleSuggestion(BaseModel):
         min_length=1,
     )
     kind: CalendarEventKind
+    short: StrictStr | None = Field(
+        None,
+        description='Kürzel, wenn die Titel dasselbe Modul abgekürzt nennen (Stat I / Statistik I). Fehlt, wenn es keins gibt. Gehört in short_name des neuen Moduls, damit der Abgleich beide Schreibweisen zuordnet.',
+        max_length=12,
+        min_length=1,
+    )
     event_count: StrictInt = Field(..., ge=1)
     series_event_ids: list[Uuid] = Field(
         ...,

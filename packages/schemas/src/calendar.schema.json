@@ -373,6 +373,12 @@
         "kind": {
           "$ref": "#/$defs/CalendarEventKind"
         },
+        "short": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12,
+          "description": "Kürzel, wenn die Titel dasselbe Modul abgekürzt nennen (Stat I / Statistik I). Fehlt, wenn es keins gibt. Gehört in short_name des neuen Moduls, damit der Abgleich beide Schreibweisen zuordnet."
+        },
         "event_count": {
           "type": "integer",
           "minimum": 1

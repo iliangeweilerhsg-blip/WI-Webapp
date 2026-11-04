@@ -8,7 +8,7 @@ import {
   summarizeImport,
   useImportFile,
   useImportUrl,
-  useUpdateEvent,
+  useReassign,
 } from '../lib/calendar.ts';
 import { friendlyMessage } from '../lib/api.ts';
 import { useCreateModule } from '../lib/modules.ts';
@@ -88,7 +88,7 @@ export function CalendarImport({ onResult }: { onResult: (result: IcsImportResul
             />
           </label>
           {fileError ? (
-            <p role="alert" className="mt-2 text-sm text-text-muted">
+            <p role="alert" className="mt-2 text-sm text-danger">
               {fileError}
             </p>
           ) : null}
@@ -112,7 +112,7 @@ export function CalendarImport({ onResult }: { onResult: (result: IcsImportResul
             />
           </label>
           {urlError ? (
-            <p role="alert" className="mt-2 text-sm text-text-muted">
+            <p role="alert" className="mt-2 text-sm text-danger">
               {urlError}
             </p>
           ) : null}
@@ -146,7 +146,7 @@ export function CalendarImportResult({
 }) {
   const semesters = useSemesters();
   const createModule = useCreateModule();
-  const updateEvent = useUpdateEvent();
+  const reassign = useReassign();
   const [done, setDone] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -155,14 +155,15 @@ export function CalendarImportResult({
   const open = result.module_suggestions.filter((s) => !done.has(s.name));
   const { counts } = result;
 
+  /** Modul anlegen (mit Kürzel). Die Termine ordnet danach `POST /calendar/reassign` für alle Module zugleich zu. */
   async function create(suggestion: IcsModuleSuggestion): Promise<boolean> {
     if (!semester) return false;
     try {
-      const created = await createModule.mutateAsync({ semester_id: semester.id, name: suggestion.name });
-      // Nach POST /modules: eine Serie nach der anderen dem neuen Modul zuordnen (IcsModuleSuggestion)
-      for (const eventId of suggestion.series_event_ids) {
-        await updateEvent.mutateAsync({ id: eventId, patch: { module_id: created.id, scope: 'serie' } });
-      }
+      await createModule.mutateAsync({
+        semester_id: semester.id,
+        name: suggestion.name,
+        ...(suggestion.short ? { short_name: suggestion.short } : {}),
+      });
       setDone((previous) => new Set(previous).add(suggestion.name));
       return true;
     } catch (failure) {
@@ -171,20 +172,23 @@ export function CalendarImportResult({
     }
   }
 
-  async function createOne(suggestion: IcsModuleSuggestion) {
+  async function run(suggestions: IcsModuleSuggestion[]) {
     if (busy) return;
     setBusy(true);
     setError(null);
-    await create(suggestion);
-    setBusy(false);
-  }
-
-  async function createAll() {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    for (const suggestion of open) {
+    let created = 0;
+    for (const suggestion of suggestions) {
       if (!(await create(suggestion))) break;
+      created += 1;
+    }
+    if (created > 0) {
+      try {
+        await reassign.mutateAsync();
+      } catch (failure) {
+        setError(
+          `Die Module sind angelegt, die Termine ließen sich nicht zuordnen. ${calendarErrorMessage(failure)}`,
+        );
+      }
     }
     setBusy(false);
   }
@@ -195,9 +199,9 @@ export function CalendarImportResult({
       aria-label="Ergebnis des Imports"
       className="rounded-lg border border-border bg-surface p-4"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-medium">{result.source.name}</h2>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg font-medium break-words">{result.source.name}</h2>
           <p className="mt-1 text-sm">{summarizeImport(result)}</p>
           <p className="mt-1 text-sm text-text-muted">
             {counts.zugeordnet > 0
@@ -227,7 +231,7 @@ export function CalendarImportResult({
           <div className="flex items-center justify-between gap-3">
             <h3 className="text-sm font-medium">Neues Modul anlegen?</h3>
             {open.length > 1 && semester ? (
-              <button type="button" onClick={createAll} disabled={busy} className={smallButton}>
+              <button type="button" onClick={() => run(open)} disabled={busy} className={smallButton}>
                 Alle anlegen
               </button>
             ) : null}
@@ -248,6 +252,9 @@ export function CalendarImportResult({
               <li key={suggestion.name} className="flex items-center justify-between gap-3 py-2">
                 <div className="min-w-0">
                   <span className="font-medium">{suggestion.name}</span>
+                  {suggestion.short ? (
+                    <span className="ml-2 text-sm text-text-muted">({suggestion.short})</span>
+                  ) : null}
                   <span className="ml-2 text-sm text-text-muted">
                     {suggestion.event_count} {suggestion.event_count === 1 ? 'Termin' : 'Termine'}
                   </span>
@@ -255,9 +262,9 @@ export function CalendarImportResult({
                 {semester ? (
                   <button
                     type="button"
-                    onClick={() => createOne(suggestion)}
+                    onClick={() => run([suggestion])}
                     disabled={busy}
-                    aria-label={`Modul ${suggestion.name} anlegen`}
+                    aria-label={`Anlegen: Modul ${suggestion.name}`}
                     className={smallButton}
                   >
                     Anlegen
@@ -270,7 +277,7 @@ export function CalendarImportResult({
       ) : null}
 
       {error ? (
-        <p role="alert" className="mt-3 text-sm text-text-muted">
+        <p role="alert" className="mt-3 text-sm text-danger">
           {error}
         </p>
       ) : null}

@@ -71,7 +71,13 @@ export interface CalendarCore extends FakeCore {
   sources: CalendarSource[];
   events: CalendarEvent[];
   /** Alle Anfragen an /calendar/… (Pfad mit Query) */
-  calendarRequests: { method: string; path: string; body: unknown; form: FormData | null }[];
+  calendarRequests: {
+    method: string;
+    path: string;
+    body: unknown;
+    form: FormData | null;
+    headers: Record<string, string>;
+  }[];
   /** Was der nächste Import (Datei oder URL) anlegt */
   importPlan: ImportPlan;
   /** Die nächste Anfrage an /calendar/… scheitert mit diesem Fehler */
@@ -127,7 +133,13 @@ export function installCalendarCore(
       const method = init?.method ?? 'GET';
       const form = init?.body instanceof FormData ? init.body : null;
       const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null;
-      core.calendarRequests.push({ method, path: path + url.search, body, form });
+      core.calendarRequests.push({
+        method,
+        path: path + url.search,
+        body,
+        form,
+        headers: (init?.headers ?? {}) as Record<string, string>,
+      });
       if (core.down) throw new TypeError('Failed to fetch');
       if (core.rejectNext) {
         const { status, code, message } = core.rejectNext;
@@ -198,6 +210,24 @@ export function installCalendarCore(
           .filter((e) => !to || Date.parse(e.starts_at) < Date.parse(to))
           .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
         return json({ items, next_cursor: null });
+      }
+      if (path === '/calendar/reassign' && method === 'POST') {
+        // Wie der Core in klein: Modulname oder Kürzel im Titel
+        let changed = 0;
+        for (const event of core.events) {
+          if (event.assigned_by !== 'auto') continue;
+          const found = core.modules.find(
+            (m) =>
+              !m.deleted_at &&
+              (event.title.toLowerCase().includes(m.name.toLowerCase()) ||
+                (m.short_name !== null && event.title.toLowerCase().includes(m.short_name.toLowerCase()))),
+          );
+          if ((found?.id ?? null) !== event.module_id) {
+            event.module_id = found?.id ?? null;
+            changed += 1;
+          }
+        }
+        return json({ changed, ohne_modul: core.events.filter((e) => e.module_id === null).length });
       }
       const eventOne = /^\/calendar\/events\/([^/]+)$/.exec(path);
       if (eventOne && method === 'PATCH') {

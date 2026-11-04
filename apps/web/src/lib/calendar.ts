@@ -11,7 +11,7 @@ import {
   type CalendarSource,
   type IcsImportResult,
 } from '@sg/shared';
-import { ApiRequestError, apiGet, apiSend, apiUpload, friendlyMessage } from './api.ts';
+import { ApiRequestError, apiGet, apiSend, apiUpload, friendlyMessage, type Parser } from './api.ts';
 import { useHydrationSafe } from './hydrated.ts';
 import { uuidv7 } from './uuid.ts';
 
@@ -66,8 +66,13 @@ export function calendarErrorMessage(error: unknown): string {
         return 'Diesen Termin gibt es nicht mehr.';
       case 'module_not_found':
         return 'Dieses Modul gibt es nicht mehr.';
+      case 'ics_too_complex':
+        return 'Die Datei ist zu komplex und wurde nicht ausgewertet. Exportiere nur den Zeitraum, den du brauchst.';
+      case 'unexpected_file':
+        return 'Eine abonnierte Adresse nimmt keine Datei an. Sie wird neu abgerufen.';
       case 'validation_failed':
-        return 'Die Adresse passt nicht. Sie muss mit https:// oder webcal:// beginnen.';
+        // Der Core nennt bei einer ungültigen Adresse den Grund. Sonst bleibt es beim allgemeinen Text.
+        return detail && detail !== 'Die Anfrage ist ungültig.' ? detail : friendlyMessage(error);
       default:
     }
   }
@@ -91,6 +96,10 @@ export function startOfWeek(date: Date): Date {
   const offset = (start.getDay() + 6) % 7; // Montag = 0
   start.setDate(start.getDate() - offset);
   return start;
+}
+
+export function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
 export function addDays(date: Date, days: number): Date {
@@ -194,12 +203,26 @@ export function useWeekEvents(weekStart: Date | null) {
   return useHydrationSafe(query);
 }
 
-/** Termine ohne Modul (für den Hinweis „n Termine ohne Modul“) */
+/** So viele Termine ohne Modul zählt der Hinweis höchstens (eine Seite des Core) */
+export const UNASSIGNED_LIMIT = 200;
+
+/** „5“ bzw. „200+“, wenn die Obergrenze erreicht ist */
+export function formatCount(count: number): string {
+  return count >= UNASSIGNED_LIMIT ? `${UNASSIGNED_LIMIT}+` : String(count);
+}
+
+/** Kommende Termine ohne Modul (ab heute 0 Uhr, ohne abgesagte), für den Hinweis „n Termine ohne Modul“ */
 export function useUnassignedCount() {
   const query = useQuery({
     queryKey: [...CALENDAR_KEY, 'unassigned'],
-    queryFn: ({ signal }) =>
-      apiGet('/calendar/events?unassigned=true&limit=200', CalendarEventListSchema, { signal }),
+    queryFn: ({ signal }) => {
+      const from = startOfDay(new Date()).toISOString();
+      return apiGet(
+        `/calendar/events?unassigned=true&from=${encodeURIComponent(from)}&limit=${UNASSIGNED_LIMIT}`,
+        CalendarEventListSchema,
+        { signal },
+      );
+    },
     select: (page) => page.items.length,
   });
   return useHydrationSafe(query);
@@ -236,11 +259,26 @@ export function useImportUrl() {
 }
 
 /** ICS-Datei importieren (multipart). Der Schlüssel gilt für diese Datei, ein Wiederholen legt nichts doppelt an. */
+/** Ein Schlüssel je Datei: Wiederholt der Nutzer nach einem Netzfehler, legt der Core nichts doppelt an (08 §1) */
+const uploadKeys = new WeakMap<File, string>();
+function keyFor(file: File): string {
+  let key = uploadKeys.get(file);
+  if (!key) {
+    key = uuidv7();
+    uploadKeys.set(file, key);
+  }
+  return key;
+}
+
 export function useImportFile() {
   const invalidate = useInvalidateCalendar();
   return useMutation({
     mutationFn: ({ file }: { file: File }) =>
-      apiUpload('/calendar/sources', IcsImportResultSchema, { file, fields: {}, idempotencyKey: uuidv7() }),
+      apiUpload('/calendar/sources', IcsImportResultSchema, {
+        file,
+        fields: {},
+        idempotencyKey: keyFor(file),
+      }),
     onSuccess: invalidate,
   });
 }
@@ -251,7 +289,8 @@ export function useSyncSource() {
   return useMutation({
     mutationFn: ({ source, file }: { source: CalendarSource; file?: File }): Promise<IcsImportResult> => {
       const path = `/calendar/sources/${encodeURIComponent(source.id)}/sync`;
-      if (file) return apiUpload(path, IcsImportResultSchema, { file, fields: {}, idempotencyKey: uuidv7() });
+      if (file)
+        return apiUpload(path, IcsImportResultSchema, { file, fields: {}, idempotencyKey: keyFor(file) });
       return apiSend('POST', path, IcsImportResultSchema);
     },
     // Auch nach einem Fehler neu laden: `last_error` steht dann an der Quelle
@@ -264,6 +303,30 @@ export function useDeleteSource() {
   return useMutation({
     mutationFn: (source: CalendarSource) =>
       apiSend('DELETE', `/calendar/sources/${encodeURIComponent(source.id)}`, null),
+    onSuccess: invalidate,
+  });
+}
+
+export interface ReassignResult {
+  changed: number;
+  ohne_modul: number;
+}
+
+const ReassignParser: Parser<ReassignResult> = {
+  safeParse(value) {
+    const v = value as Partial<ReassignResult> | null;
+    if (v && Number.isInteger(v.changed) && Number.isInteger(v.ohne_modul)) {
+      return { success: true, data: v as ReassignResult };
+    }
+    return { success: false, error: { message: 'Antwort von /calendar/reassign passt nicht' } };
+  },
+};
+
+/** Automatische Zuordnung aller Termine neu berechnen, nach dem Anlegen von Modulen (VERTRAEGE §7.1) */
+export function useReassign() {
+  const invalidate = useInvalidateCalendar();
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/calendar/reassign', ReassignParser),
     onSuccess: invalidate,
   });
 }

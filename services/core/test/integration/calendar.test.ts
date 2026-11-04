@@ -524,9 +524,13 @@ describe('Modulvorschläge', () => {
     );
     const mikro = result.module_suggestions.find((s) => s.name === 'Mikroökonomie I');
     const events = await allEvents();
-    const mikroEvents = events.filter((e) => e.title.startsWith('Mikroökonomie I'));
+    // „MikroÖk I Ü“ ist dasselbe Modul abgekürzt und steckt im selben Vorschlag
+    const mikroEvents = events.filter(
+      (e) => e.title.startsWith('Mikroökonomie I') || e.title.startsWith('MikroÖk I'),
+    );
     expect(mikro?.event_count).toBe(mikroEvents.length);
     expect(mikro?.kind).toBe('vorlesung');
+    expect(mikro?.short).toBe('MikroÖk I');
     // Ein Termin je Serie (UID), und zwar der früheste
     const uids = new Set(mikroEvents.map((e) => e.external_uid));
     expect(mikro?.series_event_ids).toHaveLength(uids.size);
@@ -538,6 +542,14 @@ describe('Modulvorschläge', () => {
         .sort()[0];
       expect(event?.starts_at).toBe(earliest);
     }
+    // Kürzel und Langname werden ein Vorschlag, das Kürzel steht in `short`
+    const shortOf = (name: string) => result.module_suggestions.find((x) => x.name === name)?.short;
+    expect(shortOf('Statistik I')).toBe('Stat I');
+    expect(shortOf('Wirtschaftsinformatik')).toBe('WI');
+    expect(shortOf('Operations Research')).toBe('OR');
+    expect(shortOf('Datenbanksysteme')).toBe('DBS');
+    for (const abbreviated of ['Stat I', 'WI', 'OR', 'DBS', 'MikroÖk I'])
+      expect(names).not.toContain(abbreviated);
     expect(result.module_suggestions.every((s) => s.event_count >= 1 && s.series_event_ids.length >= 1)).toBe(
       true,
     );
@@ -1090,6 +1102,166 @@ describe('Zeitplan: beim Start und alle 6 h', () => {
     } finally {
       await started.close();
     }
+  });
+});
+
+const NEVER_RETURNS = wrap(
+  'BEGIN:VEVENT\r\nUID:n@t\r\nDTSTART:20261110T100000Z\r\nDTEND:20261110T110000Z\r\nRRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30\r\nSUMMARY:x\r\nEND:VEVENT\r\n',
+);
+
+describe('Neu zuordnen: POST /calendar/reassign', () => {
+  const reassign = (remoteAddress = '127.0.0.1') =>
+    t.request({ method: 'POST', url: `${API}/calendar/reassign`, remoteAddress });
+
+  it('ordnet automatisch zugeordnete Termine nach dem Anlegen eines Moduls neu zu; zweiter Aufruf ändert nichts', async () => {
+    const semester = await createSemester();
+    const result = await importFile(fixture('10-mini-semester-6-module.ics'));
+    expect(result.counts.zugeordnet).toBe(0);
+    const total = result.counts.neu;
+    ensure.mockClear();
+
+    const stat = result.module_suggestions.find((s) => s.name === 'Statistik I');
+    const mod = await createModule(semester.id, 'Statistik I', { short_name: stat?.short });
+    const res = await reassign();
+    expect(res.statusCode, res.body).toBe(200);
+    const first = res.json() as { changed: number; ohne_modul: number };
+    const mine = (await allEvents()).filter((e) => e.module_id === mod.id);
+    // Langname und Kürzel gehören beide dazu
+    expect(mine.map((e) => e.title).sort()).toEqual(['Stat I – Übung', 'Statistik I Vorlesung'].sort());
+    expect(first.changed).toBe(mine.length);
+    expect(first.ohne_modul).toBe(total - mine.length);
+    expect(ensure).toHaveBeenCalledTimes(1);
+    expect(new Set(ensure.mock.calls[0]?.[1])).toEqual(new Set(mine.map((e) => e.id)));
+
+    ensure.mockClear();
+    const again = (await reassign()).json() as { changed: number };
+    expect(again.changed).toBe(0);
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
+  it('manuelle Zuordnungen bleiben unangetastet', async () => {
+    const semester = await createSemester();
+    await importFile(weekly('m@test', 'Statistik I', 3));
+    const other = await createModule(semester.id, 'Datenbanksysteme');
+    const [first] = await allEvents();
+    await t.request({
+      method: 'PATCH',
+      url: `${API}/calendar/events/${first?.id}`,
+      payload: { module_id: other.id, kind: 'tutorium', scope: 'einzeln' },
+    });
+    await createModule(semester.id, 'Statistik I');
+    const res = (await reassign()).json() as { changed: number };
+    expect(res.changed).toBe(2);
+    const events = await allEvents();
+    expect(events[0]).toMatchObject({ module_id: other.id, kind: 'tutorium', assigned_by: 'manuell' });
+    expect(events.slice(1).every((e) => e.assigned_by === 'auto' && e.module_id !== null)).toBe(true);
+  });
+
+  it('nur lokal: aus dem Netz wird die Route abgewiesen', async () => {
+    const res = await reassign('192.168.1.20');
+    expect([401, 403]).toContain(res.statusCode);
+  });
+
+  it('ohne Termine: changed 0', async () => {
+    expect((await reassign()).json()).toEqual({ changed: 0, ohne_modul: 0 });
+  });
+});
+
+describe('Review-Nachträge: Grenzen und Rennen', () => {
+  it('Datei mit einer Regel, die nie zurückkehrt: 400 ics_too_complex, nichts wird angelegt', async () => {
+    const restore = setCalendarHooks({ parseDeadlineMs: () => 300 });
+    try {
+      expect((await errorOf(await postFile(NEVER_RETURNS), 400)).code).toBe('ics_too_complex');
+      const rows = await t.handle.sql`SELECT count(*)::int AS n FROM calendar_source`;
+      expect(rows[0]?.n).toBe(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it('URL-Quelle mit zu komplexer Datei: last_error, Termine bleiben', async () => {
+    fetchMock.mockResolvedValueOnce(weekly('c@t', 'Statistik I', 2));
+    const created = IcsImportResultSchema.parse(
+      (await postJson('/calendar/sources', { url: 'https://komplex.example.edu/a.ics' })).json(),
+    );
+    const restore = setCalendarHooks({ parseDeadlineMs: () => 300 });
+    try {
+      fetchMock.mockResolvedValueOnce(NEVER_RETURNS);
+      const res = await postJson(`/calendar/sources/${created.source.id}/sync`, {});
+      expect((await errorOf(res, 400)).code).toBe('ics_too_complex');
+    } finally {
+      restore();
+    }
+    const rows = await t.handle.sql`SELECT last_error FROM calendar_source`;
+    expect(rows[0]?.last_error).toContain('zu komplex');
+    expect((await allEvents()).filter((e) => !e.cancelled)).toHaveLength(2);
+  });
+
+  it('Löschen und Abgleich laufen nacheinander: keine Termine einer gelöschten Quelle bleiben sichtbar', async () => {
+    const created = await importFile(weekly('race@t', 'Statistik I', 20));
+    const body = multipart([filePart(weekly('race@t', 'Statistik I', 25))]);
+    const results = await Promise.all([
+      t.request({ method: 'DELETE', url: `${API}/calendar/sources/${created.source.id}` }),
+      t.request({
+        method: 'POST',
+        url: `${API}/calendar/sources/${created.source.id}/sync`,
+        payload: body.payload,
+        headers: body.headers,
+      }),
+    ]);
+    for (const r of results) expect([200, 204, 404]).toContain(r.statusCode);
+    const rows = await t.handle.sql`SELECT count(*)::int AS orphans FROM calendar_event e
+      JOIN calendar_source s ON s.id = e.source_id WHERE s.deleted_at IS NOT NULL AND e.deleted_at IS NULL`;
+    expect(rows[0]?.orphans).toBe(0);
+  });
+
+  it('dieselbe id gleichzeitig: einmal 201, sonst 409 calendar_source_exists (kein 500)', async () => {
+    const id = uuidv7();
+    const responses = await Promise.all(
+      [1, 2, 3].map((i) => postFile(weekly(`id${i}@t`, 'x', 1), [{ name: 'id', value: id }])),
+    );
+    expect(responses.map((r) => r.statusCode).sort()).toEqual([201, 409, 409]);
+    const rows = await t.handle.sql`SELECT count(*)::int AS n FROM calendar_source`;
+    expect(rows[0]?.n).toBe(1);
+  });
+
+  it('Datei an eine URL-Quelle: 400 unexpected_file, kein Abruf', async () => {
+    fetchMock.mockResolvedValueOnce(weekly('u@t', 'x', 1));
+    const created = IcsImportResultSchema.parse(
+      (await postJson('/calendar/sources', { url: 'https://url.example.edu/a.ics' })).json(),
+    );
+    fetchMock.mockClear();
+    const body = multipart([filePart(weekly('u@t', 'x', 2))]);
+    const res = await t.request({
+      method: 'POST',
+      url: `${API}/calendar/sources/${created.source.id}/sync`,
+      payload: body.payload,
+      headers: body.headers,
+    });
+    expect((await errorOf(res, 400)).code).toBe('unexpected_file');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('viele Warnungen werden begrenzt und zusammengefasst', async () => {
+    const bad = wrap(
+      Array.from({ length: 40 }, (_, i) => `BEGIN:VEVENT\r\nUID:w${i}@t\r\nSUMMARY:x\r\nEND:VEVENT\r\n`).join(
+        '',
+      ),
+    );
+    const result = await importFile(bad);
+    expect(result.warnings.length).toBe(6);
+    expect(result.warnings.at(-1)?.message).toContain('insgesamt 40');
+  });
+
+  it('Termine älter als das Fenster (1 Jahr) einer offenen Serie werden nicht abgesagt', async () => {
+    const created = await importFile(weekly('alt@t', 'Statistik I', 2));
+    await t.handle
+      .sql`UPDATE calendar_event SET starts_at = starts_at - interval '3 years', ends_at = ends_at - interval '3 years'`;
+    const open = wrap(
+      'BEGIN:VEVENT\r\nUID:alt@t\r\nDTSTART;TZID=Europe/Zurich:20261109T101500\r\nDTEND;TZID=Europe/Zurich:20261109T120000\r\nRRULE:FREQ=WEEKLY\r\nSUMMARY:Statistik I\r\nEND:VEVENT\r\n',
+    );
+    const second = await syncFile(created.source.id, open);
+    expect(second.counts.entfallen).toBe(0);
   });
 });
 

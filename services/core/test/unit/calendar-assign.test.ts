@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   detectKind,
+  isAbbreviation,
   matchModule,
   suggestModuleName,
   suggestionKey,
@@ -177,5 +178,29 @@ describe('suggestModuleName', () => {
 
   it('gleicher Name, gleicher Schlüssel (egal wie geschrieben)', () => {
     expect(suggestionKey('Ökonometrie I')).toBe(suggestionKey('oekonometrie  i'));
+  });
+});
+
+describe('isAbbreviation', () => {
+  it.each([
+    ['Stat I', 'Statistik I'],
+    ['WI', 'Wirtschaftsinformatik'],
+    ['OR', 'Operations Research'],
+    ['DBS', 'Datenbanksysteme'],
+    ['MikroÖk I', 'Mikroökonomie I'],
+    ['Makro I', 'Makroökonomie I'],
+  ])('%s kürzt %s ab', (short, long) => {
+    expect(isAbbreviation(short, long)).toBe(true);
+  });
+
+  it.each([
+    ['Stat I', 'Statistik II'],
+    ['Statistik I', 'Statistik I'],
+    ['Mikro', 'Makroökonomie I'],
+    ['Datenbanksysteme', 'DBS'],
+    ['X', 'Statistik'],
+    ['Recht', 'Wirtschaftsrecht'],
+  ])('%s kürzt %s nicht ab', (short, long) => {
+    expect(isAbbreviation(short, long)).toBe(false);
   });
 });

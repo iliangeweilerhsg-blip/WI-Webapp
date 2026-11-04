@@ -1047,6 +1047,10 @@ export interface IcsModuleSuggestion {
  */
 name: string
 kind: CalendarEventKind
+/**
+ * Kürzel, wenn die Titel dasselbe Modul abgekürzt nennen (Stat I / Statistik I). Fehlt, wenn es keins gibt. Gehört in short_name des neuen Moduls, damit der Abgleich beide Schreibweisen zuordnet.
+ */
+short?: string
 event_count: number
 /**
  * Je Serie ein Termin. Nach POST /modules: PATCH /calendar/events/{id} mit module_id, scope=serie

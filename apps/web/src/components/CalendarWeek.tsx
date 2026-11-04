@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import type { CalendarEvent, CalendarEventKind, CalendarEventUpdate, Module } from '@sg/shared';
 import {
   EDITABLE_KINDS,
@@ -40,6 +40,7 @@ function EventEditor({
 }: {
   event: CalendarEvent;
   modules: readonly Module[];
+  /** `restoreFocus`: Der Fokus geht zurück auf den Knopf, der den Editor geöffnet hat */
   onClose: () => void;
 }) {
   const update = useUpdateEvent();
@@ -131,7 +132,7 @@ function EventEditor({
         </fieldset>
       ) : null}
       {error ? (
-        <p role="alert" className="mt-3 text-sm text-text-muted">
+        <p role="alert" className="mt-3 text-sm text-danger">
           {error}
         </p>
       ) : null}
@@ -153,11 +154,18 @@ function EventEditor({
 
 function EventItem({ event, modules }: { event: CalendarEvent; modules: readonly Module[] }) {
   const [editing, setEditing] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
   const module = modules.find((m) => m.id === event.module_id);
+  const close = () => {
+    setEditing(false);
+    // Der Editor verschwindet samt Fokus: zurück zum Auslöser, nicht auf <body>
+    requestAnimationFrame(() => trigger.current?.focus());
+  };
+  const label = module ? 'Ändern' : 'Zuordnen';
   return (
     <li className="py-3">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <p className={`font-medium ${event.cancelled ? 'text-text-muted line-through' : ''}`}>
             {event.title}
           </p>
@@ -172,16 +180,18 @@ function EventItem({ event, modules }: { event: CalendarEvent; modules: readonly
           </p>
         </div>
         <button
+          ref={trigger}
           type="button"
           aria-expanded={editing}
-          aria-label={`${event.title} bearbeiten`}
-          onClick={() => setEditing((open) => !open)}
+          // Der sichtbare Text steht am Anfang des Namens (WCAG 2.5.3)
+          aria-label={`${label}: ${event.title}`}
+          onClick={() => (editing ? close() : setEditing(true))}
           className={smallButton}
         >
-          {module ? 'Ändern' : 'Zuordnen'}
+          {label}
         </button>
       </div>
-      {editing ? <EventEditor event={event} modules={modules} onClose={() => setEditing(false)} /> : null}
+      {editing ? <EventEditor event={event} modules={modules} onClose={close} /> : null}
     </li>
   );
 }

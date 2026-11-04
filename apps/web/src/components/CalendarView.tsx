@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { IcsImportResult } from '@sg/shared';
 import {
   addDays,
+  formatCount,
   formatWeek,
   startOfWeek,
   useCalendarSources,
@@ -115,8 +116,8 @@ export function CalendarView() {
           {unassigned.isSuccess && unassigned.data > 0 ? (
             <p className="mt-3 text-sm text-text-muted">
               {unassigned.data === 1
-                ? '1 Termin hat noch kein Modul.'
-                : `${unassigned.data} Termine haben noch kein Modul.`}{' '}
+                ? '1 kommender Termin hat noch kein Modul.'
+                : `${formatCount(unassigned.data)} kommende Termine haben noch kein Modul.`}{' '}
               Öffne „Zuordnen“ am Termin oder lege Module aus dem Stundenplan an.
             </p>
           ) : null}

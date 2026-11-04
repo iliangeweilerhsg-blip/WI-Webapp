@@ -23,13 +23,15 @@ import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage, type Page } f
 import { uuidv7 } from '../lib/uuid7.ts';
 import {
   detectKind,
+  isAbbreviation,
   matchModule,
   suggestionKey,
   suggestModuleName,
   type ModuleCandidate,
 } from './calendar-assign.ts';
 import { fetchIcs, IcsFetchError, InvalidIcsUrlError, normalizeIcsUrl } from './calendar-fetch.ts';
-import { IcsParseError, parseIcs, type ParsedEvent, type ParseResult } from './calendar-ics.ts';
+import { IcsParseError, IcsTooComplexError, type ParsedEvent, type ParseResult } from './calendar-ics.ts';
+import { parseIcsIsolated } from './calendar-parse.ts';
 import { ensurePlannedSessions as ensureSessionsImpl } from './sessions.ts';
 import { softDelete } from './trash.ts';
 
@@ -46,6 +48,8 @@ export interface CalendarHooks {
   /** ICS-Text von einer URL laden (SSRF-geschützt, `calendar-fetch.ts`) */
   fetchIcs: (url: string) => Promise<string>;
   now: () => Date;
+  /** Zeitbudget fürs Auflösen in ms (Standard 5000, nur für Tests kürzer) */
+  parseDeadlineMs: () => number | undefined;
   /** Zeitzone für Termine ohne Zone (`TZ` des Systems) */
   defaultTimeZone: () => string;
 }
@@ -64,6 +68,7 @@ export const calendarHooks: CalendarHooks = {
   },
   fetchIcs: (url) => fetchIcs(url),
   now: () => new Date(),
+  parseDeadlineMs: () => undefined,
   defaultTimeZone: () => process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
 };
 
@@ -181,6 +186,8 @@ export async function listSources(
 /** Quelle weich löschen. Die Kaskade (Termine, nie gestartete Sessions) macht `softDelete` (VERTRAEGE §13). */
 export async function deleteSource(db: Db, id: string): Promise<void> {
   await db.transaction(async (tx) => {
+    // Sperre wie beim Abgleich: Löschen und gleichzeitiger Abgleich laufen nacheinander
+    await lockKey(tx, `source:${id}`);
     await softDelete(tx, 'calendar_source', id);
   });
 }
@@ -196,11 +203,17 @@ async function lockKey(tx: Tx, key: string): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${LOCK_NS}, hashtext(${key}))`);
 }
 
-function parseOrThrow(text: string): ParseResult {
+async function parseOrThrow(text: string): Promise<ParseResult> {
   try {
-    return parseIcs(text, { now: calendarHooks.now(), defaultTimeZone: calendarHooks.defaultTimeZone() });
+    const deadlineMs = calendarHooks.parseDeadlineMs();
+    return await parseIcsIsolated(text, {
+      now: calendarHooks.now(),
+      defaultTimeZone: calendarHooks.defaultTimeZone(),
+      ...(deadlineMs !== undefined ? { deadlineMs } : {}),
+    });
   } catch (error) {
     if (error instanceof IcsParseError) throw new HttpError(422, 'ics_invalid', error.message);
+    if (error instanceof IcsTooComplexError) throw new HttpError(400, 'ics_too_complex', error.message);
     throw error;
   }
 }
@@ -232,6 +245,12 @@ function checkUrl(raw: string): URL {
 
 function defaultNameOf(url: URL): string {
   return url.hostname.replace(/^\[|\]$/g, '');
+}
+
+function idTaken(id: string | undefined): HttpError {
+  return new HttpError(409, 'calendar_source_exists', 'Eine Kalenderquelle mit dieser ID gibt es schon.', {
+    id,
+  });
 }
 
 async function assertIdFree(db: DbOrTx, id: string | undefined): Promise<void> {
@@ -279,7 +298,7 @@ export async function createUrlSource(db: Db, input: CreateUrlSourceInput): Prom
   await assertIdFree(db, input.id);
 
   const text = await fetchOrThrow(href);
-  const parsed = parseOrThrow(text);
+  const parsed = await parseOrThrow(text);
 
   return db.transaction(async (tx) => {
     await lockKey(tx, `url:${href}`);
@@ -300,8 +319,10 @@ export async function createUrlSource(db: Db, input: CreateUrlSourceInput): Prom
         url: href,
         readonly: true,
       })
+      .onConflictDoNothing({ target: calendarSource.id })
       .returning();
-    return applyParsed(tx, source as SourceRow, parsed);
+    if (!source) throw idTaken(input.id);
+    return applyParsed(tx, source, parsed);
   });
 }
 
@@ -315,7 +336,7 @@ export interface CreateFileSourceInput {
 /** `POST /calendar/sources` mit Datei (201 `IcsImportResult`) */
 export async function createFileSource(db: Db, input: CreateFileSourceInput): Promise<IcsImportResult> {
   await assertIdFree(db, input.id);
-  const parsed = parseOrThrow(input.content);
+  const parsed = await parseOrThrow(input.content);
   return db.transaction(async (tx) => {
     const [source] = await tx
       .insert(calendarSource)
@@ -327,8 +348,10 @@ export async function createFileSource(db: Db, input: CreateFileSourceInput): Pr
         url: null,
         readonly: true,
       })
+      .onConflictDoNothing({ target: calendarSource.id })
       .returning();
-    return applyParsed(tx, source as SourceRow, parsed);
+    if (!source) throw idTaken(input.id);
+    return applyParsed(tx, source, parsed);
   });
 }
 
@@ -349,6 +372,13 @@ export async function syncSource(db: Db, id: string, fileContent?: string): Prom
   if (!source) throw sourceNotFound();
 
   let text: string;
+  if (source.kind === 'ics_url' && fileContent !== undefined) {
+    throw new HttpError(
+      400,
+      'unexpected_file',
+      'Eine URL-Quelle nimmt keine Datei an. Sie wird neu abgerufen.',
+    );
+  }
   if (source.kind === 'ics_url' && source.url) {
     try {
       text = await fetchOrThrow(source.url);
@@ -374,7 +404,7 @@ export async function syncSource(db: Db, id: string, fileContent?: string): Prom
 
   let parsed: ParseResult;
   try {
-    parsed = parseOrThrow(text);
+    parsed = await parseOrThrow(text);
   } catch (error) {
     if (error instanceof HttpError && source.kind === 'ics_url') {
       await recordError(db, id, `Die Datei lässt sich nicht lesen: ${error.message}`);
@@ -450,7 +480,15 @@ async function loadModuleScope(tx: DbOrTx): Promise<ModuleScope> {
 }
 
 /** Kalendertag (JJJJ-MM-TT) des Termins: ganztägig das Datum selbst, sonst in der Zeitzone des Systems */
-function dayOf(event: ParsedEvent, timeZone: string): string {
+interface AssignInput {
+  title: string;
+  location: string | null;
+  description: string | null;
+  allDay: boolean;
+  startsAt: Date;
+}
+
+function dayOf(event: AssignInput, timeZone: string): string {
   if (event.allDay) return event.startsAt.toISOString().slice(0, 10);
   try {
     return new Intl.DateTimeFormat('sv-SE', {
@@ -472,12 +510,12 @@ function candidatesFor(scope: ModuleScope, day: string): ModuleCandidate[] {
   return scope.current;
 }
 
-function autoAssignment(event: ParsedEvent, scope: ModuleScope, timeZone: string): Assignment {
+function autoAssignment(event: AssignInput, scope: ModuleScope, timeZone: string): Assignment {
   const moduleId = matchModule(textOf(event), candidatesFor(scope, dayOf(event, timeZone)));
   return { moduleId, kind: detectKind(textOf(event), event.allDay, moduleId !== null), assignedBy: 'auto' };
 }
 
-const textOf = (event: ParsedEvent) => ({
+const textOf = (event: AssignInput) => ({
   title: event.title,
   location: event.location,
   description: event.description,
@@ -625,7 +663,13 @@ async function applyParsed(tx: Tx, source: SourceRow, parsed: ParseResult): Prom
   // Fehlt in der Quelle: abgesagt, nie gelöscht. Bei abgeschnittener Quelle (zu viele Termine) fehlt Wissen: nichts absagen.
   const vanished = parsed.truncated
     ? []
-    : existingRows.filter((row) => !row.cancelled && !seen.has(keyOf(row.externalUid, row.recurrenceId)));
+    : existingRows.filter(
+        (row) =>
+          !row.cancelled &&
+          // Offene Serien liefern nur Vorkommen ab heute − 1 Jahr: Ältere fehlen nicht „in der Quelle“
+          row.startsAt >= parsed.windowStart &&
+          !seen.has(keyOf(row.externalUid, row.recurrenceId)),
+      );
   for (const row of vanished) {
     touched.add(row.id);
     entfallen.push(refOf(row));
@@ -703,12 +747,19 @@ async function applyParsed(tx: Tx, source: SourceRow, parsed: ParseResult): Prom
   };
 }
 
+interface SuggestionGroup extends IcsModuleSuggestion {
+  uids: Set<string>;
+  shortCount?: number;
+}
+
 /**
  * „Neues Modul anlegen?“ für unbekannte Titel (F-KAL-02): Termine ohne Modul, die der Abgleich zugeordnet hat (nicht manuell
  * freigelassen), zusammengefasst nach bereinigtem Namen. Feste Termine (Feiertage) schlagen kein Modul vor.
+ * Nennen die Titel dasselbe Modul lang und abgekürzt (Stat I / Statistik I), wird daraus ein Vorschlag mit dem
+ * Langnamen und dem Kürzel in `short`. Das gilt nur, wenn die Abkürzung zu genau einem Langnamen passt.
  */
 function suggestModules(rows: EventRow[]): IcsModuleSuggestion[] {
-  const groups = new Map<string, IcsModuleSuggestion & { uids: Set<string> }>();
+  const groups = new Map<string, SuggestionGroup>();
   for (const row of rows) {
     if (row.assignedBy !== 'auto' || row.kind === 'fest' || row.kind === 'lernblock_export') continue;
     const name = suggestModuleName(row.title);
@@ -733,7 +784,73 @@ function suggestModules(rows: EventRow[]): IcsModuleSuggestion[] {
       group.series_event_ids.push(row.id);
     }
   }
-  return [...groups.values()].map(({ uids: _uids, ...suggestion }) => suggestion);
+
+  // Abkürzungen in ihren Langnamen aufgehen lassen, kürzeste zuerst
+  const merged = new Set<SuggestionGroup>();
+  const byLength = [...groups.values()].sort((a, b) => a.name.length - b.name.length);
+  for (const group of byLength) {
+    const targets = byLength.filter(
+      (other) => other !== group && !merged.has(other) && isAbbreviation(group.name, other.name),
+    );
+    const target = targets.length === 1 ? targets[0] : undefined;
+    if (!target) continue;
+    merged.add(group);
+    target.event_count += group.event_count;
+    target.series_event_ids.push(...group.series_event_ids);
+    for (const uid of group.uids) target.uids.add(uid);
+    // Das häufigste Kürzel gewinnt (höchstens 12 Zeichen wie short_name)
+    if (
+      group.name.length <= 12 &&
+      (target.short === undefined || group.event_count > (target.shortCount ?? 0))
+    ) {
+      target.short = group.name;
+      target.shortCount = group.event_count;
+    }
+  }
+  return [...groups.values()]
+    .filter((group) => !merged.has(group))
+    .map(({ uids: _uids, shortCount: _count, ...suggestion }) => suggestion);
+}
+
+/**
+ * `POST /calendar/reassign`: Modul und Art aller automatisch zugeordneten Termine neu bestimmen (nach „Modul anlegen“).
+ * Manuelle Zuordnungen bleiben unangetastet, ein zweiter Aufruf ändert nichts.
+ */
+export async function reassignAutoEvents(db: Db): Promise<{ changed: number; ohne_modul: number }> {
+  return db.transaction(async (tx) => {
+    // Eine gemeinsame Sperre: zwei Neuzuordnungen laufen nacheinander
+    await lockKey(tx, 'reassign');
+    const timeZone = calendarHooks.defaultTimeZone();
+    const scope = await loadModuleScope(tx);
+    const rows = await tx
+      .select()
+      .from(calendarEvent)
+      .where(and(isNull(calendarEvent.deletedAt), eq(calendarEvent.assignedBy, 'auto')));
+    const groups = new Map<string, { moduleId: string | null; kind: CalendarEventKind; ids: string[] }>();
+    let withoutModule = 0;
+    for (const row of rows) {
+      const next = autoAssignment(row, scope, timeZone);
+      if (next.moduleId === null && !row.cancelled) withoutModule += 1;
+      if (next.moduleId === row.moduleId && next.kind === row.kind) continue;
+      const key = `${next.moduleId ?? ''}|${next.kind}`;
+      const group = groups.get(key) ?? { moduleId: next.moduleId, kind: next.kind, ids: [] };
+      group.ids.push(row.id);
+      groups.set(key, group);
+    }
+    const changedIds: string[] = [];
+    for (const group of groups.values()) {
+      for (let i = 0; i < group.ids.length; i += CHUNK) {
+        const part = group.ids.slice(i, i + CHUNK);
+        await tx
+          .update(calendarEvent)
+          .set({ moduleId: group.moduleId, kind: group.kind, updatedAt: sql`now()` as unknown as Date })
+          .where(and(inArray(calendarEvent.id, part), eq(calendarEvent.assignedBy, 'auto')));
+        changedIds.push(...part);
+      }
+    }
+    if (changedIds.length > 0) await calendarHooks.ensurePlannedSessions(tx, changedIds);
+    return { changed: changedIds.length, ohne_modul: withoutModule };
+  });
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import {
   calendarErrorMessage,
   dayKey,
   eventDay,
+  formatCount,
   formatEventTime,
   formatWeek,
   groupByDay,
@@ -310,7 +311,7 @@ describe('Kalender: Woche', () => {
       ],
     });
     mount();
-    expect(await screen.findByText(/2 Termine haben noch kein Modul/)).toBeInTheDocument();
+    expect(await screen.findByText(/2 kommende Termine haben noch kein Modul/)).toBeInTheDocument();
   });
 
   it('ohne Quellen: Import-Karte und ein ruhiger leerer Zustand', async () => {
@@ -401,7 +402,16 @@ describe('Kalender: Import', () => {
     ],
     [{ status: 422, code: 'ics_invalid', message: 'x' }, 'keine gültige ICS-Datei'],
     [{ status: 409, code: 'calendar_source_exists', message: 'x' }, 'Diesen Kalender gibt es schon.'],
-    [{ status: 400, code: 'validation_failed', message: 'x' }, 'https:// oder webcal://'],
+    [
+      {
+        status: 400,
+        code: 'validation_failed',
+        message: 'Die Adresse ist ungültig. Sie muss mit https:// oder webcal:// beginnen.',
+      },
+      'Die Adresse ist ungültig. Sie muss mit https:// oder webcal:// beginnen.',
+    ],
+    [{ status: 400, code: 'validation_failed', message: 'Die Anfrage ist ungültig.' }, 'Das passt so nicht'],
+    [{ status: 400, code: 'ics_too_complex', message: 'x' }, 'zu komplex'],
   ])('URL-Fehler %j wird freundlich gezeigt, nichts bleibt zurück', async (rejection, expected) => {
     const core = installCalendarCore();
     const user = userEvent.setup();
@@ -440,6 +450,7 @@ describe('Kalender: Import', () => {
       id: '0190f6a2-0000-7000-8000-0000000000f1',
       external_uid: 'dbs@x',
       source_id: SOURCE.id,
+      title: 'Datenbanksysteme (VL)',
     });
     const second = makeEvent({
       id: '0190f6a2-0000-7000-8000-0000000000f2',
@@ -466,6 +477,7 @@ describe('Kalender: Import', () => {
                   suggestions: [
                     {
                       name: 'Datenbanksysteme',
+                      short: 'DBS',
                       kind: 'vorlesung',
                       event_count: 4,
                       series_event_ids: [first.id],
@@ -483,24 +495,25 @@ describe('Kalender: Import', () => {
         return original(input, init);
       }),
     );
-    await user.click(await screen.findByRole('button', { name: `${SOURCE.name} jetzt abgleichen` }));
+    await user.click(await screen.findByRole('button', { name: `Jetzt abgleichen: ${SOURCE.name}` }));
     const result = await screen.findByRole('region', { name: 'Ergebnis des Imports' });
-    await user.click(within(result).getByRole('button', { name: 'Modul Datenbanksysteme anlegen' }));
+    await user.click(within(result).getByRole('button', { name: 'Anlegen: Modul Datenbanksysteme' }));
     await waitFor(() => expect(within(result).queryByText('Datenbanksysteme')).not.toBeInTheDocument());
     const requests = core.requests.filter((r) => r.method === 'POST' && r.path === '/modules');
     expect(requests[0]?.body).toMatchObject({ semester_id: SEMESTER.id, name: 'Datenbanksysteme' });
     const createdModule = core.modules.find((m) => m.name === 'Datenbanksysteme');
-    const patch = core.calendarRequests.find((r) => r.method === 'PATCH');
-    expect(patch?.path).toBe(`/calendar/events/${first.id}`);
-    expect(patch?.body).toEqual({ module_id: createdModule?.id, scope: 'serie' });
+    // Das Kürzel wandert in short_name, die Termine ordnet ein einziger Aufruf von /calendar/reassign zu
+    expect(requests[0]?.body).toMatchObject({ short_name: 'DBS' });
+    expect(core.calendarRequests.filter((r) => r.path === '/calendar/reassign')).toHaveLength(1);
+    expect(core.calendarRequests.some((r) => r.method === 'PATCH')).toBe(false);
     expect(core.events.find((e) => e.id === first.id)?.module_id).toBe(createdModule?.id);
     // Der zweite Vorschlag ist noch da
-    expect(within(result).getByRole('button', { name: 'Modul Statistik anlegen' })).toBeInTheDocument();
+    expect(within(result).getByRole('button', { name: 'Anlegen: Modul Statistik' })).toBeInTheDocument();
   });
 
   it('Modulvorschläge: „Alle anlegen“ legt jedes Modul an', async () => {
-    const a = makeEvent({ id: '0190f6a2-0000-7000-8000-0000000000f3', external_uid: 'a@x' });
-    const b = makeEvent({ id: '0190f6a2-0000-7000-8000-0000000000f4', external_uid: 'b@x' });
+    const a = makeEvent({ id: '0190f6a2-0000-7000-8000-0000000000f3', external_uid: 'a@x', title: 'Alpha' });
+    const b = makeEvent({ id: '0190f6a2-0000-7000-8000-0000000000f4', external_uid: 'b@x', title: 'Beta' });
     const core = installCalendarCore({ semesters: [SEMESTER], events: [a, b] });
     core.importPlan = {
       events: [],
@@ -520,6 +533,8 @@ describe('Kalender: Import', () => {
     await waitFor(() =>
       expect(within(result).queryByRole('list', { name: 'Modulvorschläge' })).not.toBeInTheDocument(),
     );
+    // Ein einziger Aufruf für alle Module, nach dem Anlegen
+    expect(core.calendarRequests.filter((r) => r.path === '/calendar/reassign')).toHaveLength(1);
     expect(core.events.find((e) => e.id === a.id)?.module_id).toBe(core.modules[0]?.id);
     expect(core.events.find((e) => e.id === b.id)?.module_id).toBe(core.modules[1]?.id);
   });
@@ -574,7 +589,7 @@ describe('Kalender: Termin zuordnen', () => {
     const { core, events } = seriesCore();
     const user = userEvent.setup();
     mount();
-    await user.click(await screen.findByRole('button', { name: 'Unbekannte Vorlesung bearbeiten' }));
+    await user.click(await screen.findByRole('button', { name: 'Zuordnen: Unbekannte Vorlesung' }));
     const form = screen.getByRole('form', { name: 'Termin „Unbekannte Vorlesung“ bearbeiten' });
     const save = within(form).getByRole('button', { name: 'Speichern' });
     expect(save).toBeDisabled();
@@ -599,7 +614,7 @@ describe('Kalender: Termin zuordnen', () => {
     const { core, events } = seriesCore();
     const user = userEvent.setup();
     mount();
-    await user.click(await screen.findByRole('button', { name: 'Unbekannte Vorlesung bearbeiten' }));
+    await user.click(await screen.findByRole('button', { name: 'Zuordnen: Unbekannte Vorlesung' }));
     const form = screen.getByRole('form', { name: /bearbeiten/ });
     await user.selectOptions(within(form).getByLabelText('Modul'), 'Mikroökonomie I');
     await user.click(within(form).getByRole('radio', { name: 'Nur diesen Termin' }));
@@ -621,7 +636,7 @@ describe('Kalender: Termin zuordnen', () => {
     });
     const user = userEvent.setup();
     mount();
-    await user.click(await screen.findByRole('button', { name: 'Einzeln bearbeiten' }));
+    await user.click(await screen.findByRole('button', { name: 'Zuordnen: Einzeln' }));
     const form = screen.getByRole('form', { name: /bearbeiten/ });
     expect(within(form).queryByText('Gilt für')).not.toBeInTheDocument();
     await user.selectOptions(within(form).getByLabelText('Modul'), 'Mikroökonomie I');
@@ -635,7 +650,7 @@ describe('Kalender: Termin zuordnen', () => {
     const core = installCalendarCore({ semesters: [SEMESTER], modules: [MIKRO], events: [assigned] });
     const user = userEvent.setup();
     mount();
-    await user.click(await screen.findByRole('button', { name: 'Mit Modul bearbeiten' }));
+    await user.click(await screen.findByRole('button', { name: 'Ändern: Mit Modul' }));
     const form = screen.getByRole('form', { name: /bearbeiten/ });
     expect(within(form).getByLabelText('Modul')).toHaveValue(MIKRO.id);
     await user.selectOptions(within(form).getByLabelText('Modul'), 'Kein Modul');
@@ -648,7 +663,7 @@ describe('Kalender: Termin zuordnen', () => {
     const { core } = seriesCore();
     const user = userEvent.setup();
     mount();
-    await user.click(await screen.findByRole('button', { name: 'Unbekannte Vorlesung bearbeiten' }));
+    await user.click(await screen.findByRole('button', { name: 'Zuordnen: Unbekannte Vorlesung' }));
     const form = screen.getByRole('form', { name: /bearbeiten/ });
     await user.selectOptions(within(form).getByLabelText('Modul'), 'Datenbanksysteme');
     core.rejectNext = { status: 404, code: 'module_not_found', message: 'x' };
@@ -686,7 +701,7 @@ describe('Kalender: Quellen', () => {
     );
     expect(within(list).getByRole('status')).toHaveTextContent('timeout');
     expect(
-      within(list).getByRole('button', { name: 'stundenplan.example.edu jetzt abgleichen' }),
+      within(list).getByRole('button', { name: 'Jetzt abgleichen: stundenplan.example.edu' }),
     ).toBeInTheDocument();
     expect(within(list).getByLabelText('Neue Fassung für hs26.ics hochladen')).toBeInTheDocument();
   });
@@ -695,25 +710,40 @@ describe('Kalender: Quellen', () => {
     const core = installCalendarCore({ sources: [SOURCE] });
     const user = userEvent.setup();
     mount();
-    await user.click(await screen.findByRole('button', { name: `${SOURCE.name} jetzt abgleichen` }));
+    await user.click(await screen.findByRole('button', { name: `Jetzt abgleichen: ${SOURCE.name}` }));
     expect(await screen.findByText(`${SOURCE.name}: Die Datei enthält keine Termine.`)).toBeInTheDocument();
     expect(writes(core)[0]).toMatchObject({ method: 'POST', path: `/calendar/sources/${SOURCE.id}/sync` });
   });
 
-  it('Abgleich scheitert: Hinweis, die Liste bleibt', async () => {
+  it('Abgleich einer URL-Quelle scheitert: kein Alarm, der Fehler steht an der Quelle (nur einmal)', async () => {
     const core = installCalendarCore({ sources: [SOURCE] });
     const user = userEvent.setup();
     mount();
-    const button = await screen.findByRole('button', { name: `${SOURCE.name} jetzt abgleichen` });
+    const button = await screen.findByRole('button', { name: `Jetzt abgleichen: ${SOURCE.name}` });
     core.rejectNext = {
       status: 502,
       code: 'ics_fetch_failed',
       message: 'Der Server antwortet nicht rechtzeitig.',
     };
+    // Der Core hat den Fehler an der Quelle vermerkt, bevor die Liste neu geladen wird
+    core.sources[0]!.last_error = 'Abruf fehlgeschlagen (timeout): Der Server antwortet nicht rechtzeitig.';
     await user.click(button);
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      `${SOURCE.name}: Die Adresse lässt sich nicht abrufen. Der Server antwortet nicht rechtzeitig.`,
+    const list = await screen.findByRole('list', { name: 'Kalenderquellen' });
+    await waitFor(() =>
+      expect(within(list).getByRole('status')).toHaveTextContent('Der letzte Abgleich hat nicht geklappt'),
     );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Der Server antwortet nicht rechtzeitig/)).toHaveLength(1);
+  });
+
+  it('Abgleich einer Datei-Quelle scheitert: Hinweis (die Datei steht nicht an der Quelle)', async () => {
+    const core = installCalendarCore({ sources: [FILE_SOURCE] });
+    const user = userEvent.setup();
+    mount();
+    const input = await screen.findByLabelText('Neue Fassung für hs26.ics hochladen');
+    core.rejectNext = { status: 422, code: 'ics_invalid', message: 'x' };
+    await user.upload(input, icsFile('kaputt.ics'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('hs26.ics: Das ist keine gültige ICS-Datei');
     expect(screen.getByRole('list', { name: 'Kalenderquellen' })).toBeInTheDocument();
   });
 
@@ -739,16 +769,108 @@ describe('Kalender: Quellen', () => {
     const user = userEvent.setup();
     mount();
     await screen.findByText('Weg damit');
-    await user.click(await screen.findByRole('button', { name: `${SOURCE.name} entfernen` }));
+    await user.click(await screen.findByRole('button', { name: `Entfernen: ${SOURCE.name}` }));
     expect(screen.getByText(/Die Quelle und ihre Termine verschwinden aus dem Kalender/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Abbrechen' }));
     expect(writes(core)).toHaveLength(0);
-    await user.click(screen.getByRole('button', { name: `${SOURCE.name} entfernen` }));
-    await user.click(screen.getByRole('button', { name: `${SOURCE.name} wirklich entfernen` }));
+    await user.click(screen.getByRole('button', { name: `Entfernen: ${SOURCE.name}` }));
+    await user.click(screen.getByRole('button', { name: `Ja, entfernen: ${SOURCE.name}` }));
     await waitFor(() => expect(writes(core)).toHaveLength(1));
     expect(writes(core)[0]).toMatchObject({ method: 'DELETE', path: `/calendar/sources/${SOURCE.id}` });
     await waitFor(() => expect(screen.queryByText('Weg damit')).not.toBeInTheDocument());
     expect(screen.queryByRole('list', { name: 'Kalenderquellen' })).not.toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Stundenplan importieren' })).toBeInTheDocument();
+  });
+});
+
+describe('Kalender: Bedienung und Nachträge aus dem Review', () => {
+  it('formatCount zeigt die Obergrenze sichtbar', () => {
+    expect(formatCount(7)).toBe('7');
+    expect(formatCount(199)).toBe('199');
+    expect(formatCount(200)).toBe('200+');
+  });
+
+  it('Termine ohne Modul zählen ab heute und zeigen „200+“ an der Obergrenze', async () => {
+    const many = Array.from({ length: 200 }, (_, i) =>
+      makeEvent({ id: `0190f6a2-0000-7000-8000-${String(700000 + i).padStart(12, '0')}`, title: `T${i}` }),
+    );
+    const core = installCalendarCore({ sources: [SOURCE], events: many });
+    mount();
+    expect(await screen.findByText(/200\+ kommende Termine haben noch kein Modul/)).toBeInTheDocument();
+    const query = core.calendarRequests.find((r) => r.path.includes('unassigned=true'))?.path ?? '';
+    const params = new URL(query, 'http://x').searchParams;
+    expect(params.get('from')).toBe(new Date(2026, 10, 4).toISOString());
+    expect(params.get('limit')).toBe('200');
+  });
+
+  it('Der Fokus kehrt nach „Speichern“ und „Abbrechen“ zum Auslöser zurück', async () => {
+    const single = makeEvent({ title: 'Einzeln' });
+    installCalendarCore({ semesters: [SEMESTER], modules: [MIKRO], events: [single] });
+    const user = userEvent.setup();
+    mount();
+    const trigger = await screen.findByRole('button', { name: 'Zuordnen: Einzeln' });
+    await user.click(trigger);
+    await user.click(screen.getByRole('button', { name: 'Abbrechen' }));
+    await waitFor(() => expect(trigger).toHaveFocus());
+    await user.click(trigger);
+    const form = screen.getByRole('form', { name: /bearbeiten/ });
+    await user.selectOptions(within(form).getByLabelText('Modul'), 'Mikroökonomie I');
+    await user.click(within(form).getByRole('button', { name: 'Speichern' }));
+    await waitFor(() => expect(screen.queryByRole('form', { name: /bearbeiten/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Ändern: Einzeln' })).toHaveFocus());
+  });
+
+  it('sichtbarer Text steht am Anfang des zugänglichen Namens (WCAG 2.5.3)', async () => {
+    installCalendarCore({ sources: [SOURCE], events: [makeEvent({ title: 'Titel' })] });
+    const user = userEvent.setup();
+    mount();
+    const visible = await screen.findByRole('button', { name: /Zuordnen/ });
+    expect(visible).toHaveTextContent('Zuordnen');
+    expect(visible.getAttribute('aria-label')).toBe('Zuordnen: Titel');
+    await user.click(await screen.findByRole('button', { name: `Entfernen: ${SOURCE.name}` }));
+    const yes = screen.getByRole('button', { name: `Ja, entfernen: ${SOURCE.name}` });
+    expect(yes).toHaveTextContent('Ja, entfernen');
+  });
+
+  it('„Neue Fassung“ zeigt einen sichtbaren Fokus am Etikett', async () => {
+    const fileSource = makeSource({
+      id: '0190f6a2-0000-7000-8000-0000000000c9',
+      kind: 'ics_file',
+      name: 'f.ics',
+      url: null,
+    });
+    installCalendarCore({ sources: [fileSource] });
+    mount();
+    const input = await screen.findByLabelText('Neue Fassung für f.ics hochladen');
+    expect(input.closest('label')?.className).toContain('focus-within:outline');
+  });
+
+  it('Ein Wiederholen nach einem Netzfehler benutzt denselben Idempotency-Key', async () => {
+    const core = installCalendarCore();
+    core.importPlan = { events: [makeEvent()], suggestions: [], warnings: [] };
+    const user = userEvent.setup();
+    mount();
+    const file = icsFile('wieder.ics');
+    await user.upload(await screen.findByLabelText('ICS-Datei'), file);
+    core.down = true;
+    await user.click(screen.getByRole('button', { name: 'Datei importieren' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    core.down = false;
+    await user.click(screen.getByRole('button', { name: 'Datei importieren' }));
+    await screen.findByRole('region', { name: 'Ergebnis des Imports' });
+    const posts = core.calendarRequests.filter((r) => r.method === 'POST' && r.path === '/calendar/sources');
+    expect(posts.length).toBeGreaterThanOrEqual(1);
+    const keys = posts.map((r) => r.headers['Idempotency-Key']);
+    expect(new Set(keys).size).toBe(1);
+  });
+
+  it('Fehlertexte stehen in der Fehlerfarbe', async () => {
+    const core = installCalendarCore();
+    const user = userEvent.setup();
+    mount();
+    await user.type(await screen.findByLabelText(/Adresse/), 'https://x.example.edu/a.ics');
+    core.rejectNext = { status: 409, code: 'calendar_source_exists', message: 'x' };
+    await user.click(screen.getByRole('button', { name: 'Abonnieren' }));
+    expect(await screen.findByRole('alert')).toHaveClass('text-danger');
   });
 });

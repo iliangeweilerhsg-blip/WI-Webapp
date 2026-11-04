@@ -3636,12 +3636,17 @@ struct ICSModuleSuggestion: Codable {
     /// Je Serie ein Termin. Nach POST /modules: PATCH /calendar/events/{id} mit module_id,
     /// scope=serie
     let seriesEventIDS: [String]
+    /// Kürzel, wenn die Titel dasselbe Modul abgekürzt nennen (Stat I / Statistik I). Fehlt,
+    /// wenn es keins gibt. Gehört in short_name des neuen Moduls, damit der Abgleich beide
+    /// Schreibweisen zuordnet.
+    let short: String?
 
     enum CodingKeys: String, CodingKey {
         case eventCount = "event_count"
         case kind = "kind"
         case name = "name"
         case seriesEventIDS = "series_event_ids"
+        case short = "short"
     }
 }
 
@@ -3667,13 +3672,15 @@ extension ICSModuleSuggestion {
         eventCount: Int? = nil,
         kind: CalendarEventKind? = nil,
         name: String? = nil,
-        seriesEventIDS: [String]? = nil
+        seriesEventIDS: [String]? = nil,
+        short: String?? = nil
     ) -> ICSModuleSuggestion {
         return ICSModuleSuggestion(
             eventCount: eventCount ?? self.eventCount,
             kind: kind ?? self.kind,
             name: name ?? self.name,
-            seriesEventIDS: seriesEventIDS ?? self.seriesEventIDS
+            seriesEventIDS: seriesEventIDS ?? self.seriesEventIDS,
+            short: short ?? self.short
         )
     }
 
@@ -14725,6 +14732,7 @@ extension ICSModuleSuggestion {
         try container.encode(kind, forKey: .kind)
         try container.encode(name, forKey: .name)
         try container.encode(seriesEventIDS, forKey: .seriesEventIDS)
+        try container.encodeIfPresent(short, forKey: .short)
     }
 }
 

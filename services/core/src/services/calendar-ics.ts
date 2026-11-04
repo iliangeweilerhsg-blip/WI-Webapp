@@ -36,6 +36,8 @@ export interface ParseOptions {
   horizonDays?: number;
   /** Höchstens so viele Termine pro Quelle (Standard 5000) */
   maxEvents?: number;
+  /** Zeitbudget für das ganze Auflösen in ms (Standard 5000). Danach `IcsTooComplexError`. */
+  deadlineMs?: number;
 }
 
 export interface ParseResult {
@@ -43,6 +45,19 @@ export interface ParseResult {
   warnings: IcsWarning[];
   /** true, wenn wegen `maxEvents` Vorkommen fehlen. Dann darf der Abgleich nichts als „entfallen“ werten. */
   truncated: boolean;
+  /**
+   * Offene Serien liefern nur Vorkommen ab diesem Zeitpunkt (heute − 1 Jahr). Ältere Termine zählt der Abgleich
+   * nicht als „entfallen“.
+   */
+  windowStart: Date;
+}
+
+/** Die Datei braucht zu lange zum Auflösen (→ 400 `ics_too_complex`) */
+export class IcsTooComplexError extends Error {
+  constructor(message = 'Die Datei ist zu komplex und wurde nicht ausgewertet.') {
+    super(message);
+    this.name = 'IcsTooComplexError';
+  }
 }
 
 /** Datei ist kein lesbarer Kalender (→ 422 `ics_invalid`) */
@@ -61,6 +76,13 @@ export const MAX_EVENTS_PER_SOURCE = 5000;
 /** Obergrenze für Schritte pro Serie, damit eine Regel wie FREQ=SECONDLY den Core nicht lahmlegt */
 const MAX_ITERATIONS_PER_SERIES = 20_000;
 const DAY_MS = 86_400_000;
+export const DEFAULT_DEADLINE_MS = 5000;
+/** Offene Serien: Vorkommen ab heute − so viele Tage */
+export const WINDOW_BACK_DAYS = 365;
+/** Höchstens so viele Warnungen je Code, danach eine Sammelzeile */
+export const MAX_WARNINGS_PER_CODE = 5;
+/** Zu schnelle Wiederholungen: nicht aufgelöst */
+const REJECTED_FREQ = new Set(['SECONDLY', 'MINUTELY', 'HOURLY']);
 
 // ---------------------------------------------------------------------------------------------
 // Zeitzonen über Intl
@@ -114,7 +136,10 @@ function zoneOffsetMs(zone: string, utcMs: number): number {
   return wall - Math.floor(utcMs / 1000) * 1000;
 }
 
-/** Ortszeit (Wanduhr) in der Zone → UTC-Zeitpunkt in ms. In der Lücke der Sommerzeit zählt der spätere Offset. */
+/**
+ * Ortszeit (Wanduhr) in der Zone → UTC-Zeitpunkt in ms. Bei mehrdeutiger Zeit (Ende der Sommerzeit) zählt das erste
+ * Vorkommen, in der Lücke (Beginn der Sommerzeit) die Zeit nach dem Sprung.
+ */
 export function zonedWallToUtc(
   zone: string,
   year: number,
@@ -125,10 +150,14 @@ export function zonedWallToUtc(
   second: number,
 ): number {
   const guess = Date.UTC(year, month - 1, day, hour, minute, second);
-  let utc = guess - zoneOffsetMs(zone, guess);
-  const corrected = guess - zoneOffsetMs(zone, utc);
-  if (corrected !== utc) utc = corrected;
-  return utc;
+  const before = zoneOffsetMs(zone, guess - DAY_MS);
+  const after = zoneOffsetMs(zone, guess + DAY_MS);
+  const candidates = [...new Set([before, after])]
+    .map((offset) => guess - offset)
+    .filter((utc) => zoneOffsetMs(zone, utc) === guess - utc)
+    .sort((a, b) => a - b);
+  // Lücke: keine gültige Ortszeit, der Offset vor dem Sprung schiebt sie hinter die Lücke
+  return candidates[0] ?? guess - before;
 }
 
 const pad = (n: number, width = 2) => String(Math.abs(n)).padStart(width, '0');
@@ -154,10 +183,20 @@ interface Context {
   options: ParseOptions;
   warnings: IcsWarning[];
   warnedZones: Set<string>;
+  /** Anzahl je Warnungscode (auch der nicht gespeicherten) */
+  warnCounts: Map<string, number>;
+  /** Absolute Frist (ms seit Epoche) */
+  deadline: number;
+}
+
+function checkDeadline(ctx: Context): void {
+  if (Date.now() > ctx.deadline) throw new IcsTooComplexError();
 }
 
 function warn(ctx: Context, code: string, message: string, uid: string | null): void {
-  ctx.warnings.push({ code, message, external_uid: uid });
+  const seen = (ctx.warnCounts.get(code) ?? 0) + 1;
+  ctx.warnCounts.set(code, seen);
+  if (seen <= MAX_WARNINGS_PER_CODE) ctx.warnings.push({ code, message, external_uid: uid });
 }
 
 function tzidOf(component: IcalComponent, property: string): string | null {
@@ -221,13 +260,15 @@ function isCancelled(component: IcalComponent): boolean {
 // ---------------------------------------------------------------------------------------------
 
 /** ical.js liefert bei mehreren VCALENDAR eine Liste von jCal-Objekten, sonst ein einzelnes */
-function firstCalendar(jcal: unknown): IcalComponent {
-  const single =
-    Array.isArray(jcal) && typeof jcal[0] === 'string' ? jcal : Array.isArray(jcal) ? jcal[0] : null;
-  if (!Array.isArray(single)) throw new IcsParseError('Die Datei enthält keinen Kalender.');
-  const component = new ICAL.Component(single);
-  if (component.name !== 'vcalendar') throw new IcsParseError('Die Datei enthält keinen VCALENDAR.');
-  return component;
+function allCalendars(jcal: unknown): IcalComponent[] {
+  const list: unknown[] =
+    Array.isArray(jcal) && typeof jcal[0] === 'string' ? [jcal] : Array.isArray(jcal) ? jcal : [];
+  const calendars = list
+    .filter((entry): entry is unknown[] => Array.isArray(entry))
+    .map((entry) => new ICAL.Component(entry as never))
+    .filter((component) => component.name === 'vcalendar');
+  if (calendars.length === 0) throw new IcsParseError('Die Datei enthält keinen VCALENDAR.');
+  return calendars;
 }
 
 interface Series {
@@ -237,45 +278,36 @@ interface Series {
 }
 
 /**
- * Liest ICS-Text und löst alle Termine auf (Wiederholungen, Ausnahmen, Zeitzonen).
- * Wirft `IcsParseError`, wenn der Text kein Kalender ist.
+ * Liest ICS-Text und löst alle Termine auf (Wiederholungen, Ausnahmen, Zeitzonen). Mehrere VCALENDAR in einer Datei
+ * werden alle gelesen.
+ * Wirft `IcsParseError`, wenn der Text kein Kalender ist, und `IcsTooComplexError`, wenn das Zeitbudget nicht reicht.
  */
 export function parseIcs(text: string, options: ParseOptions): ParseResult {
   const source = text.startsWith(BOM) ? text.slice(1) : text;
   if (!/^\s*BEGIN:VCALENDAR/im.test(source)) {
     throw new IcsParseError('Die Datei ist kein ICS-Kalender (BEGIN:VCALENDAR fehlt).');
   }
-  let calendar: IcalComponent;
+  const ctx: Context = {
+    options,
+    warnings: [],
+    warnedZones: new Set(),
+    warnCounts: new Map(),
+    deadline: Date.now() + (options.deadlineMs ?? DEFAULT_DEADLINE_MS),
+  };
+  let calendars: IcalComponent[];
   try {
-    calendar = firstCalendar(ICAL.parse(source));
+    calendars = allCalendars(ICAL.parse(source));
   } catch (error) {
     if (error instanceof IcsParseError) throw error;
     throw new IcsParseError(
       `Die Datei lässt sich nicht lesen: ${error instanceof Error ? error.message : 'Fehler'}`,
     );
   }
+  checkDeadline(ctx);
 
-  const ctx: Context = { options, warnings: [], warnedZones: new Set() };
   const maxEvents = options.maxEvents ?? MAX_EVENTS_PER_SOURCE;
   const horizonMs = options.now.getTime() + (options.horizonDays ?? DEFAULT_HORIZON_DAYS) * DAY_MS;
-
-  // Nach UID gruppieren: Master (ohne RECURRENCE-ID) und Ausnahmen
-  const groups = new Map<string, Series>();
-  for (const vevent of calendar.getAllSubcomponents('vevent')) {
-    const uid = textOf(vevent, 'uid');
-    if (!uid) {
-      warn(ctx, 'uid_missing', 'Ein Termin ohne UID wurde übersprungen.', null);
-      continue;
-    }
-    let group = groups.get(uid);
-    if (!group) {
-      group = { uid, master: null, exceptions: [] };
-      groups.set(uid, group);
-    }
-    if (vevent.hasProperty('recurrence-id')) group.exceptions.push(vevent);
-    else if (group.master === null) group.master = vevent;
-    else warn(ctx, 'uid_duplicate', 'Die UID kommt mehrfach vor. Nur der erste Termin zählt.', uid);
-  }
+  const windowStart = new Date(options.now.getTime() - WINDOW_BACK_DAYS * DAY_MS);
 
   const events: ParsedEvent[] = [];
   let truncated = false;
@@ -301,19 +333,53 @@ export function parseIcs(text: string, options: ParseOptions): ParseResult {
     return true;
   };
 
-  for (const group of groups.values()) {
-    try {
-      resolveSeries(group, ctx, horizonMs, push);
-    } catch (error) {
-      warn(
-        ctx,
-        'event_invalid',
-        `Der Termin ließ sich nicht auflösen: ${error instanceof Error ? error.message : 'Fehler'}`,
-        group.uid,
-      );
+  for (const calendar of calendars) {
+    // Nach UID gruppieren: Master (ohne RECURRENCE-ID) und Ausnahmen
+    const groups = new Map<string, Series>();
+    for (const vevent of calendar.getAllSubcomponents('vevent')) {
+      const uid = textOf(vevent, 'uid');
+      if (!uid) {
+        warn(ctx, 'uid_missing', 'Ein Termin ohne UID wurde übersprungen.', null);
+        continue;
+      }
+      let group = groups.get(uid);
+      if (!group) {
+        group = { uid, master: null, exceptions: [] };
+        groups.set(uid, group);
+      }
+      if (vevent.hasProperty('recurrence-id')) group.exceptions.push(vevent);
+      else if (group.master === null) group.master = vevent;
+      else warn(ctx, 'uid_duplicate', 'Die UID kommt mehrfach vor. Nur der erste Termin zählt.', uid);
+    }
+    for (const group of groups.values()) {
+      // Voll: nichts mehr auflösen (auch nicht für den Rest der Datei)
+      if (truncated) break;
+      checkDeadline(ctx);
+      try {
+        resolveSeries(group, ctx, { horizonMs, windowStart: windowStart.getTime() }, push);
+      } catch (error) {
+        if (error instanceof IcsTooComplexError) throw error;
+        warn(
+          ctx,
+          'event_invalid',
+          `Der Termin ließ sich nicht auflösen: ${error instanceof Error ? error.message : 'Fehler'}`,
+          group.uid,
+        );
+      }
     }
   }
-  return { events, warnings: ctx.warnings, truncated };
+
+  // Sammelzeile je Code, wenn Warnungen weggelassen wurden
+  for (const [code, count] of ctx.warnCounts) {
+    if (count > MAX_WARNINGS_PER_CODE) {
+      ctx.warnings.push({
+        code,
+        message: `${count - MAX_WARNINGS_PER_CODE} weitere Hinweise dieser Art (insgesamt ${count}).`,
+        external_uid: null,
+      });
+    }
+  }
+  return { events, warnings: ctx.warnings, truncated, windowStart };
 }
 
 /** Termin aus Komponente und (bereits berechneter) Start-/Endzeit */
@@ -346,7 +412,8 @@ function standalone(
   recurrenceId: string | null,
   ctx: Context,
 ): ParsedEvent {
-  const event = new ICAL.Event(item);
+  // Ohne `exceptions` durchsucht ical.js bei jedem Termin alle VEVENTs der Datei (quadratisch)
+  const event = new ICAL.Event(item, { exceptions: [] });
   const start = event.startDate;
   if (!start) throw new Error('DTSTART fehlt');
   const startInstant = instantOf(start, tzidOf(item, 'dtstart'), ctx, uid);
@@ -355,10 +422,24 @@ function standalone(
   return toEvent(item, uid, recurrenceId, { time: start, instant: startInstant }, { instant: endInstant });
 }
 
+/** Steht der Zeitpunkt in einem EXDATE des Termins? */
+function isExcluded(event: IcalEvent, time: IcalTime): boolean {
+  return event.component
+    .getAllProperties('exdate')
+    .some((prop) => prop.getValues().some((value: IcalTime) => value.compare(time) === 0));
+}
+
+interface Window {
+  /** Offene Serien enden hier (heute + 180 Tage) */
+  horizonMs: number;
+  /** Offene Serien beginnen hier (heute − 1 Jahr) */
+  windowStart: number;
+}
+
 function resolveSeries(
   group: Series,
   ctx: Context,
-  horizonMs: number,
+  window: Window,
   push: (event: ParsedEvent) => boolean,
 ): void {
   const { uid, master, exceptions } = group;
@@ -366,15 +447,49 @@ function resolveSeries(
 
   if (master) {
     const event: IcalEvent = new ICAL.Event(master, { exceptions });
+    const rules = master
+      .getAllProperties('rrule')
+      .map((prop) => prop.getFirstValue() as { freq?: string; until?: unknown; count?: unknown } | null);
     if (!event.isRecurring()) {
+      if (!push(standalone(master, uid, null, ctx))) return;
+    } else if (rules.some((rule) => rule && REJECTED_FREQ.has(String(rule.freq)))) {
+      warn(
+        ctx,
+        'rrule_unsupported',
+        'Wiederholungen im Sekunden-, Minuten- oder Stundentakt werden nicht aufgelöst. Nur der erste Termin zählt.',
+        uid,
+      );
       if (!push(standalone(master, uid, null, ctx))) return;
     } else {
       const masterTzid = tzidOf(master, 'dtstart');
-      const openEnded = master.getAllProperties('rrule').some((prop) => {
-        const rule = prop.getFirstValue() as { until?: unknown; count?: unknown } | null;
-        return !rule || (!rule.until && !rule.count);
-      });
+      const openEnded = rules.some((rule) => !rule || (!rule.until && !rule.count));
+      const emit = (next: IcalTime): boolean => {
+        const details = event.getOccurrenceDetails(next);
+        const occurrenceInstant = instantOf(next, masterTzid, ctx, uid);
+        const item = details.item.component;
+        const itemTzid = tzidOf(item, 'dtstart') ?? masterTzid;
+        const isException = item !== master;
+        if (isException) consumed.add(item);
+        // Offene Serien: Vorkommen vor dem Fenster (heute − 1 Jahr) füllen das Limit nicht auf
+        if (openEnded && occurrenceInstant < window.windowStart) return true;
+        const startInstant = isException
+          ? instantOf(details.startDate, itemTzid, ctx, uid)
+          : occurrenceInstant;
+        // Ende: aus der Ausnahme bzw. Beginn + Dauer, in derselben Ortszeit-Rechnung wie der Beginn
+        const endInstant = instantOf(details.endDate, itemTzid, ctx, uid);
+        return push(
+          toEvent(
+            item,
+            uid,
+            recurrenceKey(next, occurrenceInstant),
+            { time: details.startDate, instant: startInstant },
+            { instant: endInstant },
+          ),
+        );
+      };
       try {
+        // RFC 5545: Bei RDATE ohne RRULE ist auch DTSTART selbst ein Vorkommen (ical.js liefert es nicht)
+        if (rules.length === 0 && !isExcluded(event, event.startDate) && !emit(event.startDate)) return;
         const iterator = event.iterator();
         let steps = 0;
         let next: IcalTime | null;
@@ -389,29 +504,12 @@ function resolveSeries(
             );
             break;
           }
-          const details = event.getOccurrenceDetails(next);
-          const occurrenceInstant = instantOf(next, masterTzid, ctx, uid);
-          if (openEnded && occurrenceInstant > horizonMs) break;
-
-          const item = details.item.component;
-          const itemTzid = tzidOf(item, 'dtstart') ?? masterTzid;
-          const isException = item !== master;
-          if (isException) consumed.add(item);
-          const startInstant = isException
-            ? instantOf(details.startDate, itemTzid, ctx, uid)
-            : occurrenceInstant;
-          // Ende: aus der Ausnahme bzw. Beginn + Dauer, in derselben Ortszeit-Rechnung wie der Beginn
-          const endInstant = instantOf(details.endDate, itemTzid, ctx, uid);
-          const parsed = toEvent(
-            item,
-            uid,
-            recurrenceKey(next, occurrenceInstant),
-            { time: details.startDate, instant: startInstant },
-            { instant: endInstant },
-          );
-          if (!push(parsed)) return;
+          checkDeadline(ctx);
+          if (openEnded && instantOf(next, masterTzid, ctx, uid) > window.horizonMs) break;
+          if (!emit(next)) return;
         }
       } catch (error) {
+        if (error instanceof IcsTooComplexError) throw error;
         warn(
           ctx,
           'rrule_unsupported',

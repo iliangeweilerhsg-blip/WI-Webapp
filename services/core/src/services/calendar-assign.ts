@@ -239,3 +239,46 @@ export function suggestModuleName(title: string): string {
 export function suggestionKey(name: string): string {
   return tokenize(name).join(' ');
 }
+
+/** Kommen alle Zeichen von `short` in dieser Reihenfolge in `long` vor? */
+function isSubsequence(short: string, long: string): boolean {
+  let at = 0;
+  for (const char of long) if (char === short[at]) at += 1;
+  return at === short.length;
+}
+
+/**
+ * Ist `short` eine Abkürzung von `long`? Beispiele: „Stat I“ / „Statistik I“, „WI“ / „Wirtschaftsinformatik“,
+ * „OR“ / „Operations Research“, „DBS“ / „Datenbanksysteme“, „MikroÖk I“ / „Mikroökonomie I“.
+ * - gleiche Wortzahl, das erste Wort ein Wortanfang, alle weiteren Wörter gleich („Stat I“ ist nicht „Statistik II“)
+ * - ein Wort, das die Anfangsbuchstaben der Wörter von `long` ist
+ * - ein Wort (3 bis 5 Zeichen), dessen Buchstaben in einem einzigen längeren Wort in dieser Reihenfolge vorkommen
+ */
+export function isAbbreviation(short: string, long: string): boolean {
+  const s = tokenize(short);
+  const l = tokenize(long);
+  if (s.length === 0 || l.length === 0 || s.join(' ') === l.join(' ')) return false;
+  if (s.length === l.length) {
+    const first = s[0] as string;
+    const firstLong = l[0] as string;
+    const restEqual = s.slice(1).every((word, i) => word === l[i + 1]);
+    if (restEqual && first.length >= 2 && firstLong.startsWith(first)) return true;
+  }
+  if (s.length === 1) {
+    const word = s[0] as string;
+    if (l.length >= 2 && word.length >= 2 && word === l.map((w) => w[0]).join('')) return true;
+    if (l.length === 1) {
+      const full = l[0] as string;
+      if (
+        word.length >= 3 &&
+        word.length <= 5 &&
+        full.length > word.length &&
+        full[0] === word[0] &&
+        isSubsequence(word, full)
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}

@@ -25,6 +25,7 @@ import {
   getEvent,
   listEvents,
   listSources,
+  reassignAutoEvents,
   syncAllUrlSources,
   syncSource,
   updateEvent,
@@ -54,6 +55,19 @@ declare module 'fastify' {
 }
 
 const IdParams = z.object({ id: UuidSchema });
+const ReassignResultSchema = z.object({
+  changed: z.number().int().min(0).describe('Termine, deren Modul oder Art sich geändert hat'),
+  ohne_modul: z
+    .number()
+    .int()
+    .min(0)
+    .describe('Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach'),
+});
+
+/** Lokal heißt: Die Socket-Adresse ist Loopback (VERTRAEGE §5), nie `Host` oder `X-Forwarded-For` */
+function isLoopback(address: string | undefined): boolean {
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
+}
 const SourcesQuery = PageQuerySchema;
 const flag = z.enum(['true', 'false']).optional();
 const EventsQuery = PageQuerySchema.extend({
@@ -210,10 +224,21 @@ export async function calendarRoutes(app: FastifyInstance, deps: CalendarRouteDe
       }
       const body = CalendarSourceCreateSchema.safeParse(request.body);
       if (!body.success) {
-        throw new HttpError(400, 'validation_failed', 'Die Anfrage ist ungültig.', {
-          in: 'body',
-          issues: body.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message })),
-        });
+        const urlIssue = body.error.issues.some((issue) => issue.path[0] === 'url');
+        throw new HttpError(
+          400,
+          'validation_failed',
+          urlIssue
+            ? 'Die Adresse ist ungültig. Sie muss mit https:// oder webcal:// beginnen.'
+            : 'Die Anfrage ist ungültig.',
+          {
+            in: 'body',
+            issues: body.error.issues.map((issue) => ({
+              path: issue.path.join('.'),
+              message: issue.message,
+            })),
+          },
+        );
       }
       return reply.code(201).send(await createUrlSource(db, body.data));
     },
@@ -303,6 +328,29 @@ export async function calendarRoutes(app: FastifyInstance, deps: CalendarRouteDe
       },
     },
     async (request) => getEvent(db, request.params.id),
+  );
+
+  typed.post(
+    '/calendar/reassign',
+    {
+      schema: {
+        tags: ['Kalender'],
+        summary: 'Automatische Zuordnung aller Termine neu berechnen (lokal)',
+        description:
+          'Bestimmt Modul und Art aller Termine mit `assigned_by = auto` neu, etwa nach dem Anlegen eines Moduls. Manuelle Zuordnungen bleiben unangetastet, ein zweiter Aufruf ändert nichts. Nur lokale Anfragen.',
+        response: { 200: ReassignResultSchema, 403: ApiErrorSchema },
+      },
+    },
+    async (request) => {
+      if (!isLoopback(request.socket.remoteAddress)) {
+        throw new HttpError(
+          403,
+          'local_only',
+          'Diese Route gibt es nur auf dem Mac, auf dem der Core läuft.',
+        );
+      }
+      return reassignAutoEvents(db);
+    },
   );
 
   typed.patch(
