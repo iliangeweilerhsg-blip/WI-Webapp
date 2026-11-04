@@ -37,6 +37,37 @@ CREATE TABLE job (
 CREATE INDEX job_pick_idx ON job (priority DESC, created_at) WHERE state = 'wartet' AND deleted_at IS NULL;
 """
 
+# Vereinfachte Kopie der Material-Tabellen aus dem Core (03 §4): ohne Fremdschlüssel auf
+# `module`/`session` und ohne `embedding`. Der Core besitzt das Schema.
+MATERIAL_TABLES_SQL = """
+CREATE TABLE slide_deck (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz,
+  module_id uuid NOT NULL, session_id uuid, title text NOT NULL, file_path text NOT NULL,
+  sha256 text NOT NULL, page_count integer, uploaded_at timestamptz NOT NULL DEFAULT now(),
+  ingest_state text NOT NULL DEFAULT 'neu' CHECK (ingest_state IN ('neu','verarbeitet','fehler'))
+);
+CREATE TABLE slide (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz,
+  deck_id uuid NOT NULL REFERENCES slide_deck(id) ON DELETE CASCADE,
+  index integer NOT NULL CHECK (index >= 1), image_path text, thumb_path text,
+  width_pt real NOT NULL, height_pt real NOT NULL, text text NOT NULL DEFAULT '',
+  text_blocks jsonb NOT NULL DEFAULT '[]'::jsonb, vision_summary text, title text, chapter text
+);
+CREATE UNIQUE INDEX slide_deck_index_uq ON slide (deck_id, index) WHERE deleted_at IS NULL;
+CREATE TABLE exercise_sheet (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz,
+  module_id uuid NOT NULL, title text NOT NULL, number integer, file_path text NOT NULL,
+  sha256 text NOT NULL, page_count integer, due_at timestamptz, solution_file_path text,
+  ingest_state text NOT NULL DEFAULT 'neu' CHECK (ingest_state IN ('neu','verarbeitet','fehler'))
+);
+"""
+
 USER_ID = uuid.UUID("00000000-0000-7000-8000-000000000001")
 
 
@@ -56,6 +87,7 @@ def schema(database_url: str) -> Iterator[str]:
         admin.execute(f'CREATE SCHEMA "{name}"')
         admin.execute(f'SET search_path TO "{name}"')
         admin.execute(JOB_TABLE_SQL)
+        admin.execute(MATERIAL_TABLES_SQL)
         try:
             yield name
         finally:
