@@ -1,0 +1,118 @@
+/* GENERIERT aus tokens.json – nicht von Hand ändern. Neu erzeugen: pnpm --filter @sg/ui-tokens gen */
+:root {
+  color-scheme: light dark;
+  --sg-space-1: 4px;
+  --sg-space-2: 8px;
+  --sg-space-3: 12px;
+  --sg-space-4: 16px;
+  --sg-space-6: 24px;
+  --sg-space-8: 32px;
+  --sg-radius-sm: 4px;
+  --sg-radius-md: 8px;
+  --sg-radius-lg: 12px;
+  --sg-radius-full: 9999px;
+  --sg-font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", Inter, "Segoe UI", system-ui, sans-serif;
+  --sg-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sg-font-size-xs: 12px;
+  --sg-font-size-sm: 14px;
+  --sg-font-size-md: 16px;
+  --sg-font-size-lg: 18px;
+  --sg-font-size-xl: 22px;
+  --sg-font-size-xxl: 28px;
+  --sg-font-size-card-min: 22px;
+  --sg-font-size-card-max: 28px;
+  --sg-motion-fast: 100ms;
+  --sg-motion-base: 150ms;
+  --sg-color-bg: #ffffff;
+  --sg-color-surface: #f4f4f5;
+  --sg-color-surface-raised: #ffffff;
+  --sg-color-border: #e4e4e7;
+  --sg-color-border-strong: #a1a1aa;
+  --sg-color-text: #18181b;
+  --sg-color-text-muted: #52525b;
+  --sg-color-accent: #2f5de0;
+  --sg-color-accent-contrast: #ffffff;
+  --sg-color-accent-soft: #e8edfc;
+  --sg-color-record: #c42b1c;
+  --sg-color-danger: #c42b1c;
+  --sg-mod-01: #355a8d;
+  --sg-mod-02: #2d7076;
+  --sg-mod-03: #2b734f;
+  --sg-mod-04: #49732b;
+  --sg-mod-05: #6f5a2a;
+  --sg-mod-06: #8d5535;
+  --sg-mod-07: #8d4135;
+  --sg-mod-08: #8d3552;
+  --sg-mod-09: #8d358d;
+  --sg-mod-10: #5a358d;
+  --sg-mod-11: #353d8d;
+  --sg-mod-12: #55656d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sg-color-bg: #161618;
+    --sg-color-surface: #232326;
+    --sg-color-surface-raised: #2c2c30;
+    --sg-color-border: #3a3a3f;
+    --sg-color-border-strong: #71717a;
+    --sg-color-text: #f4f4f5;
+    --sg-color-text-muted: #a1a1aa;
+    --sg-color-accent: #8da6ff;
+    --sg-color-accent-contrast: #0b1020;
+    --sg-color-accent-soft: #25304f;
+    --sg-color-record: #ff6b5b;
+    --sg-color-danger: #ff6b5b;
+    --sg-mod-01: #94b2db;
+    --sg-mod-02: #94d5db;
+    --sg-mod-03: #94dbb8;
+    --sg-mod-04: #b2db94;
+    --sg-mod-05: #dbc694;
+    --sg-mod-06: #dbae94;
+    --sg-mod-07: #db9d94;
+    --sg-mod-08: #db94ac;
+    --sg-mod-09: #db94db;
+    --sg-mod-10: #b294db;
+    --sg-mod-11: #949adb;
+    --sg-mod-12: #abbcc4;
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --sg-color-bg: #161618;
+  --sg-color-surface: #232326;
+  --sg-color-surface-raised: #2c2c30;
+  --sg-color-border: #3a3a3f;
+  --sg-color-border-strong: #71717a;
+  --sg-color-text: #f4f4f5;
+  --sg-color-text-muted: #a1a1aa;
+  --sg-color-accent: #8da6ff;
+  --sg-color-accent-contrast: #0b1020;
+  --sg-color-accent-soft: #25304f;
+  --sg-color-record: #ff6b5b;
+  --sg-color-danger: #ff6b5b;
+  --sg-mod-01: #94b2db;
+  --sg-mod-02: #94d5db;
+  --sg-mod-03: #94dbb8;
+  --sg-mod-04: #b2db94;
+  --sg-mod-05: #dbc694;
+  --sg-mod-06: #dbae94;
+  --sg-mod-07: #db9d94;
+  --sg-mod-08: #db94ac;
+  --sg-mod-09: #db94db;
+  --sg-mod-10: #b294db;
+  --sg-mod-11: #949adb;
+  --sg-mod-12: #abbcc4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sg-motion-fast: 0ms;
+    --sg-motion-base: 0ms;
+  }
+}

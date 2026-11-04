@@ -1,0 +1,20 @@
+{
+  "name": "@sg/ui-tokens",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Design-Tokens (07 §8): eine JSON-Quelle, daraus CSS-Variablen (Web) und Swift-Konstanten (iPad)",
+  "exports": {
+    "./tokens.json": "./tokens.json",
+    "./tokens.css": "./generated/tokens.css",
+    "./contrast": "./scripts/contrast.mjs"
+  },
+  "scripts": {
+    "gen": "node scripts/generate.mjs",
+    "check": "node scripts/generate.mjs --check",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "5.1.0"
+  }
+}
