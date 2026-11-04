@@ -8,3 +8,4 @@ services/worker/
 apps/ipad/
 *.md
 .github/
+.claude/

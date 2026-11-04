@@ -40,6 +40,7 @@ struct SchemaBundle: Codable {
     let slideDeck: SlideDeck?
     let slideDeckDetail: SlideDeckDetail?
     let slideDeckList: SlideDeckList?
+    let slideDeckUpdate: SlideDeckUpdate?
     let task: Task?
     let textBlock: TextBlock?
     let timestamp: Date?
@@ -78,6 +79,7 @@ struct SchemaBundle: Codable {
         case slideDeck = "SlideDeck"
         case slideDeckDetail = "SlideDeckDetail"
         case slideDeckList = "SlideDeckList"
+        case slideDeckUpdate = "SlideDeckUpdate"
         case task = "Task"
         case textBlock = "TextBlock"
         case timestamp = "Timestamp"
@@ -136,6 +138,7 @@ extension SchemaBundle {
         slideDeck: SlideDeck?? = nil,
         slideDeckDetail: SlideDeckDetail?? = nil,
         slideDeckList: SlideDeckList?? = nil,
+        slideDeckUpdate: SlideDeckUpdate?? = nil,
         task: Task?? = nil,
         textBlock: TextBlock?? = nil,
         timestamp: Date?? = nil,
@@ -174,6 +177,7 @@ extension SchemaBundle {
             slideDeck: slideDeck ?? self.slideDeck,
             slideDeckDetail: slideDeckDetail ?? self.slideDeckDetail,
             slideDeckList: slideDeckList ?? self.slideDeckList,
+            slideDeckUpdate: slideDeckUpdate ?? self.slideDeckUpdate,
             task: task ?? self.task,
             textBlock: textBlock ?? self.textBlock,
             timestamp: timestamp ?? self.timestamp,
@@ -1844,6 +1848,51 @@ extension SlideDeckList {
         return SlideDeckList(
             items: items ?? self.items,
             nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// PATCH /slide-decks/{id}
+// MARK: - SlideDeckUpdate
+struct SlideDeckUpdate: Codable {
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title = "title"
+    }
+}
+
+// MARK: SlideDeckUpdate convenience initializers and mutators
+
+extension SlideDeckUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SlideDeckUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        title: String?? = nil
+    ) -> SlideDeckUpdate {
+        return SlideDeckUpdate(
+            title: title ?? self.title
         )
     }
 
