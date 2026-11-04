@@ -1,0 +1,92 @@
+# CI (10 §1): Lint, Typen, Tests, Codegen-Prüfung, Contract-Tests, Secret-Scanning.
+# Swift-Tests laufen lokal auf dem Mac (kein macOS-Runner).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typescript:
+    name: TypeScript (Lint, Typen, Tests, Codegen)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v7
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Generierte Schemas aktuell?
+        run: pnpm schemas:check
+
+  integration:
+    name: Integration (Core + Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sg
+          POSTGRES_PASSWORD: sg
+          POSTGRES_DB: sg_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U sg" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://sg:sg@localhost:5432/sg_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r --if-present run test:integration
+
+  python:
+    name: Python (Schemas, Worker)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - name: Contract-Tests (Pydantic)
+        working-directory: packages/schemas
+        run: uv run --project python --locked pytest python/tests -q
+      - name: Worker (ruff, mypy, pytest)
+        if: hashFiles('services/worker/pyproject.toml') != ''
+        working-directory: services/worker
+        run: |
+          uv run --locked ruff check .
+          uv run --locked ruff format --check .
+          uv run --locked mypy
+          uv run --locked pytest -q
+
+  secrets:
+    name: Secret-Scanning
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks liest die Commits des PR
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

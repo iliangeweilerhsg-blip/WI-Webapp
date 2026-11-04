@@ -1,0 +1,29 @@
+{
+  "name": "studien-gehirn",
+  "private": true,
+  "type": "module",
+  "description": "Studien-Gehirn (WI-Webapp) – Monorepo",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22.18 <23"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "test": "pnpm -r --if-present run test",
+    "schemas:gen": "pnpm --filter @sg/schemas run gen",
+    "schemas:check": "pnpm --filter @sg/schemas run check"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.5",
+    "eslint": "10.14.0",
+    "globals": "17.14.0",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
+  }
+}

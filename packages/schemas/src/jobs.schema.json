@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Jobs zwischen Core und Worker (03 §13, 08 §5)",
+  "$defs": {
+    "JobType": {
+      "type": "string",
+      "enum": [
+        "pdf.ingest",
+        "embed.slides",
+        "embed.tasks",
+        "sheet.split",
+        "match.tasks_slides",
+        "audio.finalize",
+        "transcribe",
+        "align.log",
+        "align.content",
+        "detect.exam_hints",
+        "ocr.photos",
+        "ocr.ink",
+        "concepts.extract",
+        "concepts.resolve",
+        "summary.write",
+        "cards.generate",
+        "cornell.questions",
+        "explain.questions",
+        "vault.write",
+        "prereq.check",
+        "past_exam.analyze",
+        "grade.open",
+        "grade.analyze_error",
+        "feynman.evaluate",
+        "solution.compare",
+        "search.index",
+        "rag.answer",
+        "video.v0",
+        "video.v1",
+        "video.v2",
+        "fsrs.optimize",
+        "maintenance.nightly"
+      ]
+    },
+    "JobState": {
+      "type": "string",
+      "enum": ["wartet", "laeuft", "fertig", "fehler", "abgebrochen"]
+    },
+    "Job": {
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "type",
+        "payload",
+        "state",
+        "priority",
+        "attempts",
+        "max_attempts",
+        "depends_on",
+        "session_id",
+        "locked_by",
+        "locked_at",
+        "error",
+        "result",
+        "run_after"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/JobType"
+        },
+        "payload": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Je nach type, z. B. PdfIngestPayload"
+        },
+        "state": {
+          "$ref": "#/$defs/JobState"
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Höher = früher"
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          }
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locked_by": {
+          "type": ["string", "null"]
+        },
+        "locked_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": ["string", "null"]
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "run_after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PdfIngestPayload": {
+      "description": "pdf.ingest: entweder ein Foliensatz oder ein Übungsblatt (genau eine ID). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PdfIngestDeckPayload"
+        },
+        {
+          "$ref": "#/$defs/PdfIngestSheetPayload"
+        }
+      ]
+    },
+    "PdfIngestResult": {
+      "type": "object",
+      "required": ["page_count", "pages_with_text", "duration_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "page_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pages_with_text": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "JobList": {
+      "type": "object",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Job"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "PdfIngestDeckPayload": {
+      "type": "object",
+      "required": ["slide_deck_id"],
+      "additionalProperties": false,
+      "properties": {
+        "slide_deck_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "PdfIngestSheetPayload": {
+      "type": "object",
+      "required": ["exercise_sheet_id"],
+      "additionalProperties": false,
+      "properties": {
+        "exercise_sheet_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    }
+  }
+}

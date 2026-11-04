@@ -1,0 +1,15 @@
+{
+  "id": "0190f6a2-7b3c-7d4e-8f00-000000000005",
+  "user_id": "0190f6a2-0000-7000-8000-000000000000",
+  "created_at": "2026-11-04T08:00:00Z",
+  "updated_at": "2026-11-04T08:00:00Z",
+  "deleted_at": null,
+  "module_id": "0190f6a2-7b3c-7d4e-8f00-000000000002",
+  "title": "Übungsblatt 3",
+  "number": 3,
+  "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "page_count": null,
+  "due_at": "2026-11-20T23:59:00Z",
+  "has_solution": false,
+  "ingest_state": "neu"
+}

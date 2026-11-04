@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gemeinsame Typen",
+  "$defs": {
+    "Uuid": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv7 (03 §1)"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601, UTC"
+    },
+    "IsoDate": {
+      "type": "string",
+      "format": "date"
+    },
+    "Lang": {
+      "type": "string",
+      "enum": ["de", "en", "mixed"]
+    },
+    "ModuleColor": {
+      "type": "string",
+      "description": "Token aus der festen Palette mit 12 Tönen (07 §8), Werte in packages/ui-tokens",
+      "enum": [
+        "mod-01",
+        "mod-02",
+        "mod-03",
+        "mod-04",
+        "mod-05",
+        "mod-06",
+        "mod-07",
+        "mod-08",
+        "mod-09",
+        "mod-10",
+        "mod-11",
+        "mod-12"
+      ]
+    },
+    "ApiError": {
+      "type": "object",
+      "description": "Fehlerformat der REST-API (08 §1)",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ApiErrorBody"
+        }
+      }
+    },
+    "BBox": {
+      "type": "array",
+      "description": "[x, y, w, h] in pt",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "ApiErrorBody": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "examples": ["slide_deck_not_found"]
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "Health": {
+      "type": "object",
+      "description": "Antwort von GET /api/v1/health (docs/VERTRAEGE.md §2)",
+      "required": ["status", "db", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok"]
+        },
+        "db": {
+          "type": "string",
+          "enum": ["ok", "fehler"]
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

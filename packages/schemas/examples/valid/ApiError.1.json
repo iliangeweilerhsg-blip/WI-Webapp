@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "slide_deck_not_found",
+    "message": "Foliensatz nicht gefunden",
+    "details": {
+      "id": "0190f6a2-7b3c-7d4e-8f00-000000000003"
+    }
+  }
+}

@@ -1,3 +1,30 @@
 # Lokale Agenten-Arbeitsdateien
 .argon/
 .gemini/tmp/
+
+# Node / Build
+node_modules/
+dist/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Swift
+.build/
+.swiftpm/xcode/
+*.xcuserstate
+
+# System / Geheimnisse
+.DS_Store
+.env
+.env.*
+!.env.example
