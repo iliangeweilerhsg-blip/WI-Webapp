@@ -2229,7 +2229,7 @@ class PairStartResponse(BaseModel):
 
 class PairingCode(BaseModel):
     """
-    Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur lokal; Ereignis pairing.requested)
+    Offenes Kopplungsfenster für die Anzeige in der Web-App (Antwort von POST /devices/pairings, nur lokal). Anfragen von Geräten liefern das Ereignis pairing.requested und GET /devices/pairings/requests (PairingRequestList)
     """
 
     model_config = ConfigDict(
@@ -2262,7 +2262,7 @@ class PairingCode(BaseModel):
 
 class PairingRequest(BaseModel):
     """
-    Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id})
+    Anfrage eines Geräts über pair/start (Nutzlast des Ereignisses pairing.requested). Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App empfiehlt darum den QR-Weg
     """
 
     model_config = ConfigDict(
@@ -2285,6 +2285,17 @@ class PairingRequest(BaseModel):
     requested_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
+
+
+class PairingRequestList(BaseModel):
+    """
+    GET /devices/pairings/requests (nur lokal): offene (nicht abgelehnte) Anfragen des aktuellen Kopplungsfensters, älteste zuerst. Ohne offenes Fenster leer. Höchstens 10, danach antwortet pair/start mit 429 pairing_requests_full
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[PairingRequest] = Field(..., max_length=10)
 
 
 class PdfIngestDeckPayload(BaseModel):
@@ -4397,6 +4408,9 @@ class SchemaBundle(BaseModel):
     )
     PairingCode_1: PairingCode | None = Field(None, alias='PairingCode')
     PairingRequest_1: PairingRequest | None = Field(None, alias='PairingRequest')
+    PairingRequestList_1: PairingRequestList | None = Field(
+        None, alias='PairingRequestList'
+    )
     PdfIngestDeckPayload_1: PdfIngestDeckPayload | None = Field(
         None, alias='PdfIngestDeckPayload'
     )

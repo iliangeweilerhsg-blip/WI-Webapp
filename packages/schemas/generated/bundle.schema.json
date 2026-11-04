@@ -362,6 +362,9 @@
     "PairingRequest": {
       "$ref": "#/$defs/PairingRequest"
     },
+    "PairingRequestList": {
+      "$ref": "#/$defs/PairingRequestList"
+    },
     "PdfIngestDeckPayload": {
       "$ref": "#/$defs/PdfIngestDeckPayload"
     },
@@ -4559,7 +4562,7 @@
     "PairingCode": {
       "title": "PairingCode",
       "type": "object",
-      "description": "Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur lokal; Ereignis pairing.requested)",
+      "description": "Offenes Kopplungsfenster für die Anzeige in der Web-App (Antwort von POST /devices/pairings, nur lokal). Anfragen von Geräten liefern das Ereignis pairing.requested und GET /devices/pairings/requests (PairingRequestList)",
       "required": [
         "pairing_id",
         "code",
@@ -4606,7 +4609,7 @@
     "PairingRequest": {
       "title": "PairingRequest",
       "type": "object",
-      "description": "Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id})",
+      "description": "Anfrage eines Geräts über pair/start (Nutzlast des Ereignisses pairing.requested). Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App empfiehlt darum den QR-Weg",
       "required": [
         "request_id",
         "pairing_id",
@@ -4632,6 +4635,24 @@
         },
         "requested_at": {
           "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "PairingRequestList": {
+      "title": "PairingRequestList",
+      "type": "object",
+      "description": "GET /devices/pairings/requests (nur lokal): offene (nicht abgelehnte) Anfragen des aktuellen Kopplungsfensters, älteste zuerst. Ohne offenes Fenster leer. Höchstens 10, danach antwortet pair/start mit 429 pairing_requests_full",
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/PairingRequest"
+          }
         }
       }
     },
