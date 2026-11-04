@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 import sg_schemas.models as models
 
@@ -20,10 +20,10 @@ def _cases(kind: str) -> list[tuple[str, str, object]]:
 
 @pytest.mark.parametrize(("name", "type_name", "data"), _cases("valid"))
 def test_valid(name: str, type_name: str, data: object) -> None:
-    getattr(models, type_name).model_validate(data)
+    TypeAdapter(getattr(models, type_name)).validate_python(data)
 
 
 @pytest.mark.parametrize(("name", "type_name", "data"), _cases("invalid"))
 def test_invalid(name: str, type_name: str, data: object) -> None:
     with pytest.raises(ValidationError):
-        getattr(models, type_name).model_validate(data)
+        TypeAdapter(getattr(models, type_name)).validate_python(data)

@@ -67,15 +67,15 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - name: Contract-Tests (Pydantic)
         working-directory: packages/schemas
-        run: uv run --project python pytest python/tests -q
+        run: uv run --project python --locked pytest python/tests -q
       - name: Worker (ruff, mypy, pytest)
         if: hashFiles('services/worker/pyproject.toml') != ''
         working-directory: services/worker
         run: |
-          uv run ruff check .
-          uv run ruff format --check .
-          uv run mypy
-          uv run pytest -q
+          uv run --locked ruff check .
+          uv run --locked ruff format --check .
+          uv run --locked mypy
+          uv run --locked pytest -q
 
   secrets:
     name: Secret-Scanning

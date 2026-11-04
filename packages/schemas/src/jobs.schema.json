@@ -94,6 +94,7 @@
         },
         "payload": {
           "type": "object",
+          "additionalProperties": true,
           "description": "Je nach type, z. B. PdfIngestPayload"
         },
         "state": {
@@ -144,7 +145,15 @@
           "type": ["string", "null"]
         },
         "result": {
-          "type": ["object", "null"]
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "run_after": {
           "anyOf": [
@@ -159,17 +168,15 @@
       }
     },
     "PdfIngestPayload": {
-      "type": "object",
-      "description": "pdf.ingest: genau eines von slide_deck_id oder exercise_sheet_id ist gesetzt (prüft der Core beim Anlegen). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.",
-      "additionalProperties": false,
-      "properties": {
-        "slide_deck_id": {
-          "$ref": "#/$defs/Uuid"
+      "description": "pdf.ingest: entweder ein Foliensatz oder ein Übungsblatt (genau eine ID). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PdfIngestDeckPayload"
         },
-        "exercise_sheet_id": {
-          "$ref": "#/$defs/Uuid"
+        {
+          "$ref": "#/$defs/PdfIngestSheetPayload"
         }
-      }
+      ]
     },
     "PdfIngestResult": {
       "type": "object",
@@ -203,6 +210,26 @@
         },
         "next_cursor": {
           "type": ["string", "null"]
+        }
+      }
+    },
+    "PdfIngestDeckPayload": {
+      "type": "object",
+      "required": ["slide_deck_id"],
+      "additionalProperties": false,
+      "properties": {
+        "slide_deck_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "PdfIngestSheetPayload": {
+      "type": "object",
+      "required": ["exercise_sheet_id"],
+      "additionalProperties": false,
+      "properties": {
+        "exercise_sheet_id": {
+          "$ref": "#/$defs/Uuid"
         }
       }
     }

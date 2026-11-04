@@ -9,10 +9,10 @@
   },
   "scripts": {
     "gen": "node scripts/gen.mjs",
-    "check": "node scripts/gen.mjs && git diff --exit-code -- generated ../shared/src/generated python/sg_schemas",
+    "check": "node scripts/gen.mjs && test -z \"$(git status --porcelain -- generated ../shared/src/generated python/sg_schemas)\" || (git status --porcelain -- generated ../shared/src/generated python/sg_schemas && echo \"Generierte Dateien veraltet: pnpm schemas:gen ausführen und committen\" && exit 1)",
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p .",
-    "test:py": "uv run --project python pytest python/tests -q"
+    "test:py": "uv run --project python --locked pytest python/tests -q"
   },
   "devDependencies": {
     "@apidevtools/json-schema-ref-parser": "16.0.5",

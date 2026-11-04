@@ -10,11 +10,12 @@ import Foundation
 // MARK: - SchemaBundle
 struct SchemaBundle: Codable {
     let apiError: APIError?
+    let apiErrorBody: APIErrorBody?
     let bBox: [Double]?
-    let entityMeta: EntityMeta?
     let exerciseSheet: ExerciseSheet?
     let exerciseSheetList: ExerciseSheetList?
     let exerciseSheetUpdate: ExerciseSheetUpdate?
+    let health: Health?
     let ingestState: IngestState?
     let isoDate: String?
     let job: Job?
@@ -27,8 +28,10 @@ struct SchemaBundle: Codable {
     let moduleCreate: ModuleCreate?
     let moduleList: ModuleList?
     let moduleUpdate: ModuleUpdate?
+    let pdfIngestDeckPayload: PDFIngestDeckPayload?
     let pdfIngestPayload: PDFIngestPayload?
     let pdfIngestResult: PDFIngestResult?
+    let pdfIngestSheetPayload: PDFIngestSheetPayload?
     let semester: Semester?
     let semesterCreate: SemesterCreate?
     let semesterList: SemesterList?
@@ -45,11 +48,12 @@ struct SchemaBundle: Codable {
 
     enum CodingKeys: String, CodingKey {
         case apiError = "ApiError"
+        case apiErrorBody = "ApiErrorBody"
         case bBox = "BBox"
-        case entityMeta = "EntityMeta"
         case exerciseSheet = "ExerciseSheet"
         case exerciseSheetList = "ExerciseSheetList"
         case exerciseSheetUpdate = "ExerciseSheetUpdate"
+        case health = "Health"
         case ingestState = "IngestState"
         case isoDate = "IsoDate"
         case job = "Job"
@@ -62,8 +66,10 @@ struct SchemaBundle: Codable {
         case moduleCreate = "ModuleCreate"
         case moduleList = "ModuleList"
         case moduleUpdate = "ModuleUpdate"
+        case pdfIngestDeckPayload = "PdfIngestDeckPayload"
         case pdfIngestPayload = "PdfIngestPayload"
         case pdfIngestResult = "PdfIngestResult"
+        case pdfIngestSheetPayload = "PdfIngestSheetPayload"
         case semester = "Semester"
         case semesterCreate = "SemesterCreate"
         case semesterList = "SemesterList"
@@ -100,11 +106,12 @@ extension SchemaBundle {
 
     func with(
         apiError: APIError?? = nil,
+        apiErrorBody: APIErrorBody?? = nil,
         bBox: [Double]?? = nil,
-        entityMeta: EntityMeta?? = nil,
         exerciseSheet: ExerciseSheet?? = nil,
         exerciseSheetList: ExerciseSheetList?? = nil,
         exerciseSheetUpdate: ExerciseSheetUpdate?? = nil,
+        health: Health?? = nil,
         ingestState: IngestState?? = nil,
         isoDate: String?? = nil,
         job: Job?? = nil,
@@ -117,8 +124,10 @@ extension SchemaBundle {
         moduleCreate: ModuleCreate?? = nil,
         moduleList: ModuleList?? = nil,
         moduleUpdate: ModuleUpdate?? = nil,
+        pdfIngestDeckPayload: PDFIngestDeckPayload?? = nil,
         pdfIngestPayload: PDFIngestPayload?? = nil,
         pdfIngestResult: PDFIngestResult?? = nil,
+        pdfIngestSheetPayload: PDFIngestSheetPayload?? = nil,
         semester: Semester?? = nil,
         semesterCreate: SemesterCreate?? = nil,
         semesterList: SemesterList?? = nil,
@@ -135,11 +144,12 @@ extension SchemaBundle {
     ) -> SchemaBundle {
         return SchemaBundle(
             apiError: apiError ?? self.apiError,
+            apiErrorBody: apiErrorBody ?? self.apiErrorBody,
             bBox: bBox ?? self.bBox,
-            entityMeta: entityMeta ?? self.entityMeta,
             exerciseSheet: exerciseSheet ?? self.exerciseSheet,
             exerciseSheetList: exerciseSheetList ?? self.exerciseSheetList,
             exerciseSheetUpdate: exerciseSheetUpdate ?? self.exerciseSheetUpdate,
+            health: health ?? self.health,
             ingestState: ingestState ?? self.ingestState,
             isoDate: isoDate ?? self.isoDate,
             job: job ?? self.job,
@@ -152,8 +162,10 @@ extension SchemaBundle {
             moduleCreate: moduleCreate ?? self.moduleCreate,
             moduleList: moduleList ?? self.moduleList,
             moduleUpdate: moduleUpdate ?? self.moduleUpdate,
+            pdfIngestDeckPayload: pdfIngestDeckPayload ?? self.pdfIngestDeckPayload,
             pdfIngestPayload: pdfIngestPayload ?? self.pdfIngestPayload,
             pdfIngestResult: pdfIngestResult ?? self.pdfIngestResult,
+            pdfIngestSheetPayload: pdfIngestSheetPayload ?? self.pdfIngestSheetPayload,
             semester: semester ?? self.semester,
             semesterCreate: semesterCreate ?? self.semesterCreate,
             semesterList: semesterList ?? self.semesterList,
@@ -182,7 +194,7 @@ extension SchemaBundle {
 /// Fehlerformat der REST-API (08 §1)
 // MARK: - APIError
 struct APIError: Codable {
-    let error: Error
+    let error: APIErrorBody
 
     enum CodingKeys: String, CodingKey {
         case error = "error"
@@ -208,7 +220,7 @@ extension APIError {
     }
 
     func with(
-        error: Error? = nil
+        error: APIErrorBody? = nil
     ) -> APIError {
         return APIError(
             error: error ?? self.error
@@ -224,8 +236,8 @@ extension APIError {
     }
 }
 
-// MARK: - Error
-struct Error: Codable {
+// MARK: - APIErrorBody
+struct APIErrorBody: Codable {
     let code: String
     let details: [String: JSONAny]?
     let message: String
@@ -237,11 +249,11 @@ struct Error: Codable {
     }
 }
 
-// MARK: Error convenience initializers and mutators
+// MARK: APIErrorBody convenience initializers and mutators
 
-extension Error {
+extension APIErrorBody {
     init(data: Data) throws {
-        self = try newJSONDecoder().decode(Error.self, from: data)
+        self = try newJSONDecoder().decode(APIErrorBody.self, from: data)
     }
 
     init(_ json: String, using encoding: String.Encoding = .utf8) throws {
@@ -259,72 +271,11 @@ extension Error {
         code: String? = nil,
         details: [String: JSONAny]?? = nil,
         message: String? = nil
-    ) -> Error {
-        return Error(
+    ) -> APIErrorBody {
+        return APIErrorBody(
             code: code ?? self.code,
             details: details ?? self.details,
             message: message ?? self.message
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-/// Pflichtfelder jeder Tabelle (03 §1)
-// MARK: - EntityMeta
-struct EntityMeta: Codable {
-    let createdAt: Date
-    let deletedAt: Date?
-    let id: String
-    let updatedAt: Date
-    let userID: String
-
-    enum CodingKeys: String, CodingKey {
-        case createdAt = "created_at"
-        case deletedAt = "deleted_at"
-        case id = "id"
-        case updatedAt = "updated_at"
-        case userID = "user_id"
-    }
-}
-
-// MARK: EntityMeta convenience initializers and mutators
-
-extension EntityMeta {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(EntityMeta.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        createdAt: Date? = nil,
-        deletedAt: Date?? = nil,
-        id: String? = nil,
-        updatedAt: Date? = nil,
-        userID: String? = nil
-    ) -> EntityMeta {
-        return EntityMeta(
-            createdAt: createdAt ?? self.createdAt,
-            deletedAt: deletedAt ?? self.deletedAt,
-            id: id ?? self.id,
-            updatedAt: updatedAt ?? self.updatedAt,
-            userID: userID ?? self.userID
         )
     }
 
@@ -537,6 +488,68 @@ extension ExerciseSheetUpdate {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// Antwort von GET /api/v1/health (docs/VERTRAEGE.md §2)
+// MARK: - Health
+struct Health: Codable {
+    let db: DB
+    let status: Status
+    let version: String
+
+    enum CodingKeys: String, CodingKey {
+        case db = "db"
+        case status = "status"
+        case version = "version"
+    }
+}
+
+// MARK: Health convenience initializers and mutators
+
+extension Health {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Health.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        db: DB? = nil,
+        status: Status? = nil,
+        version: String? = nil
+    ) -> Health {
+        return Health(
+            db: db ?? self.db,
+            status: status ?? self.status,
+            version: version ?? self.version
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum DB: String, Codable {
+    case fehler = "fehler"
+    case ok = "ok"
+}
+
+enum Status: String, Codable {
+    case ok = "ok"
 }
 
 // MARK: - Job
@@ -1068,16 +1081,60 @@ extension ModuleUpdate {
     }
 }
 
-/// pdf.ingest: genau eines von slide_deck_id oder exercise_sheet_id ist gesetzt (prüft der
-/// Core beim Anlegen). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.
-// MARK: - PDFIngestPayload
-struct PDFIngestPayload: Codable {
-    let exerciseSheetID: String?
-    let slideDeckID: String?
+// MARK: - PDFIngestDeckPayload
+struct PDFIngestDeckPayload: Codable {
+    let slideDeckID: String
 
     enum CodingKeys: String, CodingKey {
-        case exerciseSheetID = "exercise_sheet_id"
         case slideDeckID = "slide_deck_id"
+    }
+}
+
+// MARK: PDFIngestDeckPayload convenience initializers and mutators
+
+extension PDFIngestDeckPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PDFIngestDeckPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        slideDeckID: String? = nil
+    ) -> PDFIngestDeckPayload {
+        return PDFIngestDeckPayload(
+            slideDeckID: slideDeckID ?? self.slideDeckID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// pdf.ingest: entweder ein Foliensatz oder ein Übungsblatt (genau eine ID). Ergänzung zu 08
+/// §5: Übungsblätter laufen über denselben Job.
+// MARK: - PDFIngestPayload
+struct PDFIngestPayload: Codable {
+    let slideDeckID: String?
+    let exerciseSheetID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case slideDeckID = "slide_deck_id"
+        case exerciseSheetID = "exercise_sheet_id"
     }
 }
 
@@ -1100,12 +1157,12 @@ extension PDFIngestPayload {
     }
 
     func with(
-        exerciseSheetID: String?? = nil,
-        slideDeckID: String?? = nil
+        slideDeckID: String?? = nil,
+        exerciseSheetID: String?? = nil
     ) -> PDFIngestPayload {
         return PDFIngestPayload(
-            exerciseSheetID: exerciseSheetID ?? self.exerciseSheetID,
-            slideDeckID: slideDeckID ?? self.slideDeckID
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            exerciseSheetID: exerciseSheetID ?? self.exerciseSheetID
         )
     }
 
@@ -1158,6 +1215,50 @@ extension PDFIngestResult {
             durationMS: durationMS ?? self.durationMS,
             pageCount: pageCount ?? self.pageCount,
             pagesWithText: pagesWithText ?? self.pagesWithText
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - PDFIngestSheetPayload
+struct PDFIngestSheetPayload: Codable {
+    let exerciseSheetID: String
+
+    enum CodingKeys: String, CodingKey {
+        case exerciseSheetID = "exercise_sheet_id"
+    }
+}
+
+// MARK: PDFIngestSheetPayload convenience initializers and mutators
+
+extension PDFIngestSheetPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PDFIngestSheetPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        exerciseSheetID: String? = nil
+    ) -> PDFIngestSheetPayload {
+        return PDFIngestSheetPayload(
+            exerciseSheetID: exerciseSheetID ?? self.exerciseSheetID
         )
     }
 

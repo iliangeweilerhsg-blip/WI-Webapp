@@ -1,0 +1,22 @@
+{
+  "id": "0190f6a2-7b3c-7d4e-8f00-000000000006",
+  "user_id": "0190f6a2-0000-7000-8000-000000000000",
+  "created_at": "2026-11-04T08:00:00Z",
+  "updated_at": "2026-11-04T08:00:00Z",
+  "deleted_at": null,
+  "type": "pdf.ingest",
+  "payload": {
+    "slide_deck_id": "0190f6a2-7b3c-7d4e-8f00-000000000003"
+  },
+  "state": "wartet",
+  "priority": true,
+  "attempts": 0,
+  "max_attempts": 3,
+  "depends_on": [],
+  "session_id": null,
+  "locked_by": null,
+  "locked_at": null,
+  "error": null,
+  "result": null,
+  "run_after": null
+}

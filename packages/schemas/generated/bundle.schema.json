@@ -8,11 +8,11 @@
     "ApiError": {
       "$ref": "#/$defs/ApiError"
     },
+    "ApiErrorBody": {
+      "$ref": "#/$defs/ApiErrorBody"
+    },
     "BBox": {
       "$ref": "#/$defs/BBox"
-    },
-    "EntityMeta": {
-      "$ref": "#/$defs/EntityMeta"
     },
     "ExerciseSheet": {
       "$ref": "#/$defs/ExerciseSheet"
@@ -22,6 +22,9 @@
     },
     "ExerciseSheetUpdate": {
       "$ref": "#/$defs/ExerciseSheetUpdate"
+    },
+    "Health": {
+      "$ref": "#/$defs/Health"
     },
     "IngestState": {
       "$ref": "#/$defs/IngestState"
@@ -59,11 +62,17 @@
     "ModuleUpdate": {
       "$ref": "#/$defs/ModuleUpdate"
     },
+    "PdfIngestDeckPayload": {
+      "$ref": "#/$defs/PdfIngestDeckPayload"
+    },
     "PdfIngestPayload": {
       "$ref": "#/$defs/PdfIngestPayload"
     },
     "PdfIngestResult": {
       "$ref": "#/$defs/PdfIngestResult"
+    },
+    "PdfIngestSheetPayload": {
+      "$ref": "#/$defs/PdfIngestSheetPayload"
     },
     "Semester": {
       "$ref": "#/$defs/Semester"
@@ -116,27 +125,32 @@
       "additionalProperties": false,
       "properties": {
         "error": {
+          "$ref": "#/$defs/ApiErrorBody"
+        }
+      }
+    },
+    "ApiErrorBody": {
+      "title": "ApiErrorBody",
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "examples": [
+            "slide_deck_not_found"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
           "type": "object",
-          "required": [
-            "code",
-            "message"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "code": {
-              "type": "string",
-              "pattern": "^[a-z][a-z0-9_]*$",
-              "examples": [
-                "slide_deck_not_found"
-              ]
-            },
-            "message": {
-              "type": "string"
-            },
-            "details": {
-              "type": "object"
-            }
-          }
+          "additionalProperties": true
         }
       }
     },
@@ -149,42 +163,6 @@
       },
       "minItems": 4,
       "maxItems": 4
-    },
-    "EntityMeta": {
-      "title": "EntityMeta",
-      "type": "object",
-      "description": "Pflichtfelder jeder Tabelle (03 §1)",
-      "required": [
-        "id",
-        "user_id",
-        "created_at",
-        "updated_at",
-        "deleted_at"
-      ],
-      "properties": {
-        "id": {
-          "$ref": "#/$defs/Uuid"
-        },
-        "user_id": {
-          "$ref": "#/$defs/Uuid"
-        },
-        "created_at": {
-          "$ref": "#/$defs/Timestamp"
-        },
-        "updated_at": {
-          "$ref": "#/$defs/Timestamp"
-        },
-        "deleted_at": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Timestamp"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      }
     },
     "ExerciseSheet": {
       "title": "ExerciseSheet",
@@ -321,6 +299,35 @@
         }
       }
     },
+    "Health": {
+      "title": "Health",
+      "type": "object",
+      "description": "Antwort von GET /api/v1/health (docs/VERTRAEGE.md §2)",
+      "required": [
+        "status",
+        "db",
+        "version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok"
+          ]
+        },
+        "db": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "fehler"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
     "IngestState": {
       "title": "IngestState",
       "type": "string",
@@ -387,6 +394,7 @@
         },
         "payload": {
           "type": "object",
+          "additionalProperties": true,
           "description": "Je nach type, z. B. PdfIngestPayload"
         },
         "state": {
@@ -443,9 +451,14 @@
           ]
         },
         "result": {
-          "type": [
-            "object",
-            "null"
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": true
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "run_after": {
@@ -814,19 +827,30 @@
         }
       }
     },
-    "PdfIngestPayload": {
-      "title": "PdfIngestPayload",
+    "PdfIngestDeckPayload": {
+      "title": "PdfIngestDeckPayload",
       "type": "object",
-      "description": "pdf.ingest: genau eines von slide_deck_id oder exercise_sheet_id ist gesetzt (prüft der Core beim Anlegen). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.",
+      "required": [
+        "slide_deck_id"
+      ],
       "additionalProperties": false,
       "properties": {
         "slide_deck_id": {
           "$ref": "#/$defs/Uuid"
-        },
-        "exercise_sheet_id": {
-          "$ref": "#/$defs/Uuid"
         }
       }
+    },
+    "PdfIngestPayload": {
+      "title": "PdfIngestPayload",
+      "description": "pdf.ingest: entweder ein Foliensatz oder ein Übungsblatt (genau eine ID). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PdfIngestDeckPayload"
+        },
+        {
+          "$ref": "#/$defs/PdfIngestSheetPayload"
+        }
+      ]
     },
     "PdfIngestResult": {
       "title": "PdfIngestResult",
@@ -849,6 +873,19 @@
         "duration_ms": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "PdfIngestSheetPayload": {
+      "title": "PdfIngestSheetPayload",
+      "type": "object",
+      "required": [
+        "exercise_sheet_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "exercise_sheet_id": {
+          "$ref": "#/$defs/Uuid"
         }
       }
     },

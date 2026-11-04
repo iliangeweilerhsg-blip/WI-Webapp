@@ -30,7 +30,7 @@ Geheimnisse wie API-Schlüssel stehen in `$SG_DATA_DIR/config/.env` mit Rechten 
 | Web | `pnpm --filter @sg/web dev` | Next-Dev-Server auf Port 3000 |
 | CLI | `pnpm sg start\|stop\|migrate\|doctor` | Siehe T0-03 |
 
-**Gesundheitsprüfung:** `GET /api/v1/health` liefert `{"status":"ok","db":"ok"|"fehler","version":"<semver>"}`. Die CLI wartet beim Start darauf.
+**Gesundheitsprüfung:** `GET /api/v1/health` liefert den Typ `Health` aus `packages/schemas`. Die CLI wartet beim Start darauf.
 
 ## 3. Datenbank
 
@@ -81,6 +81,12 @@ CREATE INDEX job_pick_idx ON job (priority DESC, created_at) WHERE state = 'wart
 
 **Unbekannter Job-Typ:** Der Worker setzt `state='fehler'` mit `error='unbekannter Job-Typ'` und läuft weiter.
 
+**Abhängigkeit fehlgeschlagen:** Ist ein Job aus `depends_on` im Zustand `fehler` oder `abgebrochen`, setzt der Worker den abhängigen Job auf `abgebrochen`. Als `error` steht dann `Abhängigkeit <job_id> fehlgeschlagen`. Sonst würde der Job ewig warten.
+
+### Spalten mit Zahlen
+
+`numeric`-Spalten wie `module.ects` werden in Drizzle mit `{ mode: 'number' }` gelesen. Die API liefert JSON-Zahlen, keine Strings.
+
 ## 4. Dateiablage (08 §7)
 
 Pfade relativ zu `SG_DATA_DIR`:
@@ -96,6 +102,9 @@ In der DB steht `file_path` relativ zu `SG_DATA_DIR`. So lässt sich der Datenor
 ## 5. HTTP-Konventionen des Core
 
 - Basis `/api/v1`, Fehlerformat `ApiError`, Listen mit `?cursor&limit` (08 §1).
-- `localhost` braucht kein Token. Anfragen aus dem Netz brauchen `Authorization: Bearer <device_token>`. In Phase 0 werden sie mit `401 device_token_required` abgelehnt, weil es noch keine Kopplung gibt (T1-10).
+- **Lokal oder Netz** entscheidet allein die Socket-Adresse (`request.socket.remoteAddress` ist `127.0.0.1` oder `::1`). `trustProxy` bleibt aus. `Host` und `X-Forwarded-For` werden dafür **nie** ausgewertet.
+- Lokale Anfragen brauchen kein Token. Anfragen aus dem Netz brauchen `Authorization: Bearer <device_token>`. In Phase 0 werden sie mit `401 device_token_required` abgelehnt, weil es noch keine Kopplung gibt (T1-10).
+- **Schutz gegen DNS-Rebinding:** Anfragen, deren `Host` nicht `localhost`, `127.0.0.1`, `[::1]` oder `<rechnername>.local` (jeweils mit `SG_CORE_PORT`) ist, beantwortet der Core mit `421 host_not_allowed`.
+- **Schutz gegen CSRF:** Zustandsändernde Anfragen (`POST`, `PUT`, `PATCH`, `DELETE`) mit `Origin`-Header werden mit `403 origin_not_allowed` abgelehnt. Ausgenommen sind die eigene Herkunft (`http://<erlaubter Host>:<SG_CORE_PORT>`) und `SG_DEV_WEB_ORIGIN`. Ohne `Origin`-Header (z. B. `curl`, iPad-App) gilt nur die Token-Regel.
 - Statische Web-App unter `/`. Unbekannte Pfade außerhalb von `/api` liefern `index.html` bzw. die passende `.html`-Datei aus dem Export.
 - Die Web-App nutzt Routen mit Query-Parametern statt dynamischer Segmente (`/modul?id=<uuid>`), weil der Static Export die IDs beim Build nicht kennt.

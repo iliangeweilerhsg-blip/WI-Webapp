@@ -7,49 +7,66 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    RootModel,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+)
 
 
-class Error(BaseModel):
+class ApiErrorBody(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    code: str = Field(
+    code: StrictStr = Field(
         ..., examples=['slide_deck_not_found'], pattern='^[a-z][a-z0-9_]*$'
     )
-    message: str
+    message: StrictStr
     details: dict[str, Any] | None = None
 
 
-class ApiError(BaseModel):
-    """
-    Fehlerformat der REST-API (08 §1)
-    """
-
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    error: Error
-
-
-class BBox(RootModel[list[float]]):
+class BBox(RootModel[list[StrictFloat]]):
     """
     [x, y, w, h] in pt
     """
 
-    root: list[float] = Field(
+    root: list[StrictFloat] = Field(
         ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
     )
+
+
+class Status(StrEnum):
+    ok = 'ok'
+
+
+class Db(StrEnum):
+    ok = 'ok'
+    fehler = 'fehler'
+
+
+class Health(BaseModel):
+    """
+    Antwort von GET /api/v1/health (docs/VERTRAEGE.md §2)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    status: Status
+    db: Db
+    version: StrictStr
 
 
 class IngestState(StrEnum):
     neu = 'neu'
     verarbeitet = 'verarbeitet'
     fehler = 'fehler'
-
-
-class IsoDate(RootModel[date]):
-    root: date = Field(..., title='IsoDate')
 
 
 class JobState(StrEnum):
@@ -124,20 +141,20 @@ class PdfIngestResult(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_count: int = Field(..., ge=0)
-    pages_with_text: int = Field(..., ge=0)
-    duration_ms: int = Field(..., ge=0)
+    page_count: StrictInt = Field(..., ge=0)
+    pages_with_text: StrictInt = Field(..., ge=0)
+    duration_ms: StrictInt = Field(..., ge=0)
 
 
 class SemesterUpdate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    name: str | None = Field(None, min_length=1)
-    starts_on: IsoDate | None = None
-    ends_on: IsoDate | None = None
-    is_current: bool | None = None
-    archived: bool | None = Field(
+    name: StrictStr | None = Field(None, min_length=1)
+    starts_on: date | None = None
+    ends_on: date | None = None
+    is_current: StrictBool | None = None
+    archived: StrictBool | None = Field(
         None, description='true = archivieren, false = wiederherstellen'
     )
 
@@ -146,28 +163,21 @@ class TextBlock(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    text: str
-    bbox: BBox
+    text: StrictStr
+    bbox: list[StrictFloat] = Field(
+        ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
+    )
 
 
-class Timestamp(RootModel[AwareDatetime]):
-    root: AwareDatetime = Field(..., description='ISO 8601, UTC', title='Timestamp')
-
-
-class Uuid(RootModel[UUID]):
-    root: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-
-
-class EntityMeta(BaseModel):
+class ApiError(BaseModel):
     """
-    Pflichtfelder jeder Tabelle (03 §1)
+    Fehlerformat der REST-API (08 §1)
     """
 
-    id: Uuid
-    user_id: Uuid
-    created_at: Timestamp
-    updated_at: Timestamp
-    deleted_at: Timestamp | None
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    error: ApiErrorBody
 
 
 class ExerciseSheet(BaseModel):
@@ -178,18 +188,22 @@ class ExerciseSheet(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid
-    user_id: Uuid
-    created_at: Timestamp
-    updated_at: Timestamp
-    deleted_at: Timestamp | None
-    module_id: Uuid
-    title: str
-    number: int | None
-    sha256: str = Field(..., pattern='^[a-f0-9]{64}$')
-    page_count: int | None = Field(..., ge=0)
-    due_at: Timestamp | None = Field(..., description='Abgabe, geht in den Planer')
-    has_solution: bool = Field(
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    title: StrictStr
+    number: StrictInt | None
+    sha256: StrictStr = Field(..., pattern='^[a-f0-9]{64}$')
+    page_count: StrictInt | None = Field(..., ge=0)
+    due_at: AwareDatetime | None = Field(..., description='Abgabe, geht in den Planer')
+    has_solution: StrictBool = Field(
         ..., description='Musterlösung hinterlegt (F-ORG-05, Phase 3)'
     )
     ingest_state: IngestState
@@ -200,42 +214,46 @@ class ExerciseSheetList(BaseModel):
         extra='forbid',
     )
     items: list[ExerciseSheet]
-    next_cursor: str | None
+    next_cursor: StrictStr | None
 
 
 class ExerciseSheetUpdate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    title: str | None = None
-    number: int | None = None
-    due_at: Timestamp | None = None
+    title: StrictStr | None = None
+    number: StrictInt | None = None
+    due_at: AwareDatetime | None = None
 
 
 class Job(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid
-    user_id: Uuid
-    created_at: Timestamp
-    updated_at: Timestamp
-    deleted_at: Timestamp | None
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
     type: JobType
     payload: dict[str, Any] = Field(
         ..., description='Je nach type, z. B. PdfIngestPayload'
     )
     state: JobState
-    priority: int = Field(..., description='Höher = früher')
-    attempts: int = Field(..., ge=0)
-    max_attempts: int = Field(..., ge=1)
-    depends_on: list[Uuid]
-    session_id: Uuid | None
-    locked_by: str | None
-    locked_at: Timestamp | None
-    error: str | None
+    priority: StrictInt = Field(..., description='Höher = früher')
+    attempts: StrictInt = Field(..., ge=0)
+    max_attempts: StrictInt = Field(..., ge=1)
+    depends_on: list[UUID]
+    session_id: UUID | None
+    locked_by: StrictStr | None
+    locked_at: AwareDatetime | None
+    error: StrictStr | None
     result: dict[str, Any] | None
-    run_after: Timestamp | None
+    run_after: AwareDatetime | None
 
 
 class JobList(BaseModel):
@@ -243,27 +261,33 @@ class JobList(BaseModel):
         extra='forbid',
     )
     items: list[Job]
-    next_cursor: str | None
+    next_cursor: StrictStr | None
 
 
 class Module(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid
-    user_id: Uuid
-    created_at: Timestamp
-    updated_at: Timestamp
-    deleted_at: Timestamp | None
-    semester_id: Uuid
-    name: str = Field(..., examples=['Datenbanksysteme'], min_length=1)
-    short_name: str | None = Field(..., examples=['DBS'])
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    semester_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    name: StrictStr = Field(..., examples=['Datenbanksysteme'], min_length=1)
+    short_name: StrictStr | None = Field(..., examples=['DBS'])
     color: ModuleColor
-    ects: float | None = Field(..., ge=0.0)
-    exam_type: str | None = Field(..., examples=['schriftlich', 'mündlich', 'Projekt'])
-    lecturer: str | None
+    ects: StrictFloat | None = Field(..., ge=0.0)
+    exam_type: StrictStr | None = Field(
+        ..., examples=['schriftlich', 'mündlich', 'Projekt']
+    )
+    lecturer: StrictStr | None
     lang: Lang | None
-    description_md: str | None
+    description_md: StrictStr | None
 
 
 class ModuleCreate(BaseModel):
@@ -274,16 +298,16 @@ class ModuleCreate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid | None = None
-    semester_id: Uuid
-    name: str = Field(..., min_length=1)
-    short_name: str | None = None
+    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    semester_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    name: StrictStr = Field(..., min_length=1)
+    short_name: StrictStr | None = None
     color: ModuleColor | None = None
-    ects: float | None = Field(None, ge=0.0)
-    exam_type: str | None = None
-    lecturer: str | None = None
+    ects: StrictFloat | None = Field(None, ge=0.0)
+    exam_type: StrictStr | None = None
+    lecturer: StrictStr | None = None
     lang: Lang | None = None
-    description_md: str | None = None
+    description_md: StrictStr | None = None
 
 
 class ModuleList(BaseModel):
@@ -291,50 +315,58 @@ class ModuleList(BaseModel):
         extra='forbid',
     )
     items: list[Module]
-    next_cursor: str | None
+    next_cursor: StrictStr | None
 
 
 class ModuleUpdate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    semester_id: Uuid | None = None
-    name: str | None = Field(None, min_length=1)
-    short_name: str | None = None
+    semester_id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    name: StrictStr | None = Field(None, min_length=1)
+    short_name: StrictStr | None = None
     color: ModuleColor | None = None
-    ects: float | None = Field(None, ge=0.0)
-    exam_type: str | None = None
-    lecturer: str | None = None
+    ects: StrictFloat | None = Field(None, ge=0.0)
+    exam_type: StrictStr | None = None
+    lecturer: StrictStr | None = None
     lang: Lang | None = None
-    description_md: str | None = None
+    description_md: StrictStr | None = None
 
 
-class PdfIngestPayload(BaseModel):
-    """
-    pdf.ingest: genau eines von slide_deck_id oder exercise_sheet_id ist gesetzt (prüft der Core beim Anlegen). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.
-    """
-
+class PdfIngestDeckPayload(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    slide_deck_id: Uuid | None = None
-    exercise_sheet_id: Uuid | None = None
+    slide_deck_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+
+
+class PdfIngestSheetPayload(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    exercise_sheet_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
 
 
 class Semester(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid
-    user_id: Uuid
-    created_at: Timestamp
-    updated_at: Timestamp
-    deleted_at: Timestamp | None
-    name: str = Field(..., examples=['HS 2026'], min_length=1)
-    starts_on: IsoDate | None
-    ends_on: IsoDate | None
-    is_current: bool = Field(..., description='Höchstens ein Semester ist aktuell')
-    archived_at: Timestamp | None = Field(
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    name: StrictStr = Field(..., examples=['HS 2026'], min_length=1)
+    starts_on: date | None
+    ends_on: date | None
+    is_current: StrictBool = Field(
+        ..., description='Höchstens ein Semester ist aktuell'
+    )
+    archived_at: AwareDatetime | None = Field(
         ...,
         description='Archiviert = nur in der Navigation ausgeblendet, bleibt durchsuchbar und lernbar (F-ORG-01). Ergänzung zu 03 §3.',
     )
@@ -348,11 +380,11 @@ class SemesterCreate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid | None = None
-    name: str = Field(..., min_length=1)
-    starts_on: IsoDate | None = None
-    ends_on: IsoDate | None = None
-    is_current: bool | None = None
+    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    name: StrictStr = Field(..., min_length=1)
+    starts_on: date | None = None
+    ends_on: date | None = None
+    is_current: StrictBool | None = None
 
 
 class SemesterList(BaseModel):
@@ -360,7 +392,7 @@ class SemesterList(BaseModel):
         extra='forbid',
     )
     items: list[Semester]
-    next_cursor: str | None
+    next_cursor: StrictStr | None
 
 
 class Slide(BaseModel):
@@ -371,39 +403,49 @@ class Slide(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid
-    user_id: Uuid
-    created_at: Timestamp
-    updated_at: Timestamp
-    deleted_at: Timestamp | None
-    deck_id: Uuid
-    index: int = Field(..., description='1-basiert', ge=1)
-    width_pt: float
-    height_pt: float
-    text: str = Field(..., description='Textlayer, leer wenn keiner vorhanden')
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    deck_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    index: StrictInt = Field(..., description='1-basiert', ge=1)
+    width_pt: StrictFloat
+    height_pt: StrictFloat
+    text: StrictStr = Field(..., description='Textlayer, leer wenn keiner vorhanden')
     text_blocks: list[TextBlock]
-    vision_summary: str | None
-    title: str | None
-    chapter: str | None
+    vision_summary: StrictStr | None
+    title: StrictStr | None
+    chapter: StrictStr | None
 
 
 class SlideDeck(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid
-    user_id: Uuid
-    created_at: Timestamp
-    updated_at: Timestamp
-    deleted_at: Timestamp | None
-    module_id: Uuid
-    session_id: Uuid | None
-    title: str
-    sha256: str = Field(..., pattern='^[a-f0-9]{64}$')
-    page_count: int | None = Field(
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: UUID | None
+    title: StrictStr
+    sha256: StrictStr = Field(..., pattern='^[a-f0-9]{64}$')
+    page_count: StrictInt | None = Field(
         ..., description='null bis pdf.ingest gelaufen ist', ge=0
     )
-    uploaded_at: Timestamp
+    uploaded_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
     ingest_state: IngestState
 
 
@@ -420,7 +462,7 @@ class SlideDeckList(BaseModel):
         extra='forbid',
     )
     items: list[SlideDeck]
-    next_cursor: str | None
+    next_cursor: StrictStr | None
 
 
 class Task(BaseModel):
@@ -431,17 +473,21 @@ class Task(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid
-    user_id: Uuid
-    created_at: Timestamp
-    updated_at: Timestamp
-    deleted_at: Timestamp | None
-    sheet_id: Uuid
-    label: str = Field(..., examples=['2b'])
-    page_index: int = Field(..., ge=1)
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    sheet_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    label: StrictStr = Field(..., examples=['2b'])
+    page_index: StrictInt = Field(..., ge=1)
     bbox: BBox | None
-    text: str
-    solution_text: str | None
+    text: StrictStr
+    solution_text: StrictStr | None
 
 
 class UploadResult(BaseModel):
@@ -452,8 +498,8 @@ class UploadResult(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: Uuid
-    duplicate: bool
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    duplicate: StrictBool
 
 
 class SchemaBundle(BaseModel):
@@ -462,8 +508,10 @@ class SchemaBundle(BaseModel):
     """
 
     ApiError_1: ApiError | None = Field(None, alias='ApiError')
-    BBox_1: BBox | None = Field(None, alias='BBox')
-    EntityMeta_1: EntityMeta | None = Field(None, alias='EntityMeta')
+    ApiErrorBody_1: ApiErrorBody | None = Field(None, alias='ApiErrorBody')
+    BBox: list[StrictFloat] | None = Field(
+        None, description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
+    )
     ExerciseSheet_1: ExerciseSheet | None = Field(None, alias='ExerciseSheet')
     ExerciseSheetList_1: ExerciseSheetList | None = Field(
         None, alias='ExerciseSheetList'
@@ -471,8 +519,9 @@ class SchemaBundle(BaseModel):
     ExerciseSheetUpdate_1: ExerciseSheetUpdate | None = Field(
         None, alias='ExerciseSheetUpdate'
     )
+    Health_1: Health | None = Field(None, alias='Health')
     IngestState_1: IngestState | None = Field(None, alias='IngestState')
-    IsoDate_1: IsoDate | None = Field(None, alias='IsoDate')
+    IsoDate: date | None = Field(None, title='IsoDate')
     Job_1: Job | None = Field(None, alias='Job')
     JobList_1: JobList | None = Field(None, alias='JobList')
     JobState_1: JobState | None = Field(None, alias='JobState')
@@ -483,8 +532,18 @@ class SchemaBundle(BaseModel):
     ModuleCreate_1: ModuleCreate | None = Field(None, alias='ModuleCreate')
     ModuleList_1: ModuleList | None = Field(None, alias='ModuleList')
     ModuleUpdate_1: ModuleUpdate | None = Field(None, alias='ModuleUpdate')
-    PdfIngestPayload_1: PdfIngestPayload | None = Field(None, alias='PdfIngestPayload')
+    PdfIngestDeckPayload_1: PdfIngestDeckPayload | None = Field(
+        None, alias='PdfIngestDeckPayload'
+    )
+    PdfIngestPayload: PdfIngestDeckPayload | PdfIngestSheetPayload | None = Field(
+        None,
+        description='pdf.ingest: entweder ein Foliensatz oder ein Übungsblatt (genau eine ID). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.',
+        title='PdfIngestPayload',
+    )
     PdfIngestResult_1: PdfIngestResult | None = Field(None, alias='PdfIngestResult')
+    PdfIngestSheetPayload_1: PdfIngestSheetPayload | None = Field(
+        None, alias='PdfIngestSheetPayload'
+    )
     Semester_1: Semester | None = Field(None, alias='Semester')
     SemesterCreate_1: SemesterCreate | None = Field(None, alias='SemesterCreate')
     SemesterList_1: SemesterList | None = Field(None, alias='SemesterList')
@@ -495,6 +554,12 @@ class SchemaBundle(BaseModel):
     SlideDeckList_1: SlideDeckList | None = Field(None, alias='SlideDeckList')
     Task_1: Task | None = Field(None, alias='Task')
     TextBlock_1: TextBlock | None = Field(None, alias='TextBlock')
-    Timestamp_1: Timestamp | None = Field(None, alias='Timestamp')
+    Timestamp: AwareDatetime | None = Field(
+        None, description='ISO 8601, UTC', title='Timestamp'
+    )
     UploadResult_1: UploadResult | None = Field(None, alias='UploadResult')
-    Uuid_1: Uuid | None = Field(None, alias='Uuid')
+    Uuid: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+
+
+# Union-Typen (für Validierung: pydantic.TypeAdapter(<Typ>))
+type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload

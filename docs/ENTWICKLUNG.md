@@ -54,8 +54,24 @@ Erzeugt werden:
   - Subagents: `feat/F-XXX-nn-kurz` bzw. `feat/T0-xx-kurz`
   - Argon: `argon/issue-<nr>`
 - **Merge:** Merge-Commit. Das weicht von „Squash“ in 10 §1 ab, gilt aber laut Owner-Freigabe in `CLAUDE.md`.
-- **TypeScript:** `strict` und `noUncheckedIndexedAccess`. Imports zwischen Workspace-Paketen über den Paketnamen (`@sg/shared`).
+- **TypeScript:** `strict`, `noUncheckedIndexedAccess` und `erasableSyntaxOnly`. Erlaubt ist nur Syntax, die sich beim Ausführen einfach weglassen lässt, also keine `enum`s und keine `namespace`s. Imports zwischen Workspace-Paketen laufen über den Paketnamen (`@sg/shared`).
+- **`@sg/shared` wird nicht gebaut.** Das Paket exportiert TypeScript-Quellen mit `.ts`-Imports. Für die Nutzer gilt:
+  - **Core:** läuft direkt mit Node ≥ 22.18 (Type-Stripping) oder `tsx`. `tsc` nur mit `noEmit` und `allowImportingTsExtensions`, nie `tsc` zum Erzeugen von JS.
+  - **Web:** `transpilePackages: ['@sg/shared']` in der Next-Konfiguration und `allowImportingTsExtensions` in der tsconfig.
+  - **Tests:** Vitest importiert das Paket direkt.
 - **Python:** `ruff` und `mypy --strict`, Tests mit `pytest`.
+
+## Schemas beschreiben die API, nicht die Tabellen
+
+Die Typen in `packages/schemas` sind die **API- und Nachrichtenformate**. Die Datenbanktabellen legt der Core nach 03 §3–4 und `docs/VERTRAEGE.md` §3 an.
+Interne Spalten wie `file_path`, `image_path`, `thumb_path`, `solution_file_path` und `embedding` gehören zur Tabelle, aber nicht in die API.
+Dateien liefert die API über eigene Endpunkte aus:
+- `GET /slides/{id}/image` und `GET /slides/{id}/thumb` (Vorschaubild, Ergänzung zu 08 §1)
+- Übungsblätter entsprechend in T0-09
+
+Schemas für `calendar_source`, `calendar_event` und `session` folgen mit T1-01 und T1-02. Bis dahin ist `SlideDeck.session_id` immer `null`.
+
+**Bekannte Lücke:** Pydantic akzeptiert bei Zeitstempeln auch Zahlen (Unix-Zeit), Zod und JSON Schema nicht. Payloads schreibt nur der Core, und der prüft mit Zod. Darum ist das in Phase 0 unkritisch.
 
 ## Bewusste Ergänzungen zur Spezifikation
 
@@ -66,3 +82,6 @@ Erzeugt werden:
 | `pdf.ingest` Payload | `exercise_sheet_id` als Alternative zu `slide_deck_id` | Ein Job für beide PDF-Arten |
 | Modulfarben | Tokens `mod-01` … `mod-12` | 07 §8 legt die Palette fest, die Werte stehen in `packages/ui-tokens` |
 | TypeScript | Version 6.0 | 7.0 wird von `typescript-eslint` noch nicht unterstützt |
+| `ExerciseSheet` (API) | `page_count` neu, `has_solution` statt `solution_file_path` | Der Dateipfad ist intern, die API meldet nur, ob eine Lösung da ist |
+| `GET /slides/{id}/thumb` | Neuer Endpunkt | Die Seitenleiste der PDF-Anzeige braucht kleine Vorschaubilder (F-ORG-04) |
+| `Health` | Neues Schema | Antwort von `GET /api/v1/health`, die CLI wartet darauf |

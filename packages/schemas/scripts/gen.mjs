@@ -47,6 +47,9 @@ let types = await compile(structuredClone(bundle), 'SchemaBundle', {
   bannerComment: `/* ${BANNER} */`,
   unreachableDefinitions: true,
   additionalProperties: false,
+  // gleiche Semantik wie Zod: freie Objekte als any, Arraylängen nur zur Laufzeit geprüft
+  unknownAny: false,
+  ignoreMinAndMaxItems: true,
   format: false,
 });
 types = types.replace(/export interface SchemaBundle \{[\s\S]*?\n\}\n/, '');
@@ -62,18 +65,26 @@ for (const n of names) {
   zod += `\nexport const ${n}Schema = ${expr.trim().replace(/;$/, '')};\n`;
 }
 writeFileSync(join(out.ts, 'zod.ts'), zod);
+// Typ-Gleichheit: z.infer<XSchema> muss exakt X entsprechen (wird von tsc in @sg/shared geprüft)
+let check = `/* ${BANNER} */\n/* eslint-disable @typescript-eslint/no-unused-vars */\nimport type { z } from 'zod';\nimport type * as T from './types.ts';\nimport type * as Z from './zod.ts';\n\n`;
+check +=
+  'type Equal<A, B> = (<X>() => X extends A ? 1 : 2) extends <X>() => X extends B ? 1 : 2 ? true : false;\n\n';
+for (const n of names) check += `const _${n}: Equal<z.infer<typeof Z.${n}Schema>, T.${n}> = true;\n`;
+writeFileSync(join(out.ts, 'type-equality.check.ts'), check);
 writeFileSync(
   join(out.ts, 'index.ts'),
   `/* ${BANNER} */\nexport type * from './types.ts';\nexport * from './zod.ts';\n`,
 );
 
-// 4. Python (Pydantic v2) über datamodel-code-generator (feste Version)
+// 4. Python (Pydantic v2) über datamodel-code-generator (Version über python/uv.lock gepinnt)
 mkdirSync(dirname(out.py), { recursive: true });
 execFileSync(
-  'uvx',
+  'uv',
   [
-    '--from',
-    'datamodel-code-generator==0.88.0',
+    'run',
+    '--project',
+    join(root, 'python'),
+    '--locked',
     'datamodel-codegen',
     '--input',
     out.bundle,
@@ -95,9 +106,27 @@ execFileSync(
     `# ${BANNER}`,
     '--formatters',
     'builtin',
+    '--strict-types',
+    'str',
+    'int',
+    'float',
+    'bool',
+    '--collapse-root-models',
   ],
   { stdio: 'inherit' },
 );
+
+// --collapse-root-models entfernt Union-Typen auf oberster Ebene: als TypeAlias wieder anhängen
+const unions = names.filter((n) => Array.isArray(defs[n].anyOf) && defs[n].anyOf.every((s) => s.$ref));
+if (unions.length) {
+  let py = readFileSync(out.py, 'utf8');
+  py += '\n\n# Union-Typen (für Validierung: pydantic.TypeAdapter(<Typ>))\n';
+  for (const n of unions) {
+    const parts = defs[n].anyOf.map((s) => s.$ref.split('/').pop());
+    py += `type ${n} = ${parts.join(' | ')}\n`;
+  }
+  writeFileSync(out.py, py);
+}
 
 // 5. Swift (Codable) über quicktype
 mkdirSync(dirname(out.swift), { recursive: true });

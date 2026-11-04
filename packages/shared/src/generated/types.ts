@@ -9,7 +9,7 @@
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "BBox".
  */
-export type BBox = [number, number, number, number]
+export type BBox = number[]
 /**
  * UUIDv7 (03 §1)
  * 
@@ -56,6 +56,13 @@ export type Lang = ("de" | "en" | "mixed")
  * via the `definition` "ModuleColor".
  */
 export type ModuleColor = ("mod-01" | "mod-02" | "mod-03" | "mod-04" | "mod-05" | "mod-06" | "mod-07" | "mod-08" | "mod-09" | "mod-10" | "mod-11" | "mod-12")
+/**
+ * pdf.ingest: entweder ein Foliensatz oder ein Übungsblatt (genau eine ID). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "PdfIngestPayload".
+ */
+export type PdfIngestPayload = (PdfIngestDeckPayload | PdfIngestSheetPayload)
 
 /**
  * GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
@@ -67,26 +74,18 @@ export type ModuleColor = ("mod-01" | "mod-02" | "mod-03" | "mod-04" | "mod-05" 
  * via the `definition` "ApiError".
  */
 export interface ApiError {
-error: {
+error: ApiErrorBody
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ApiErrorBody".
+ */
+export interface ApiErrorBody {
 code: string
 message: string
 details?: {
-
+[k: string]: any
 }
-}
-}
-/**
- * Pflichtfelder jeder Tabelle (03 §1)
- * 
- * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "EntityMeta".
- */
-export interface EntityMeta {
-id: Uuid
-user_id: Uuid
-created_at: Timestamp
-updated_at: Timestamp
-deleted_at: (Timestamp | null)
 }
 /**
  * Übungsblatt. Ergänzung zu 03 §4: ingest_state zeigt den Fortschritt von pdf.ingest für das Blatt.
@@ -133,6 +132,17 @@ number?: (number | null)
 due_at?: (Timestamp | null)
 }
 /**
+ * Antwort von GET /api/v1/health (docs/VERTRAEGE.md §2)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "Health".
+ */
+export interface Health {
+status: "ok"
+db: ("ok" | "fehler")
+version: string
+}
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "Job".
  */
@@ -147,7 +157,7 @@ type: JobType
  * Je nach type, z. B. PdfIngestPayload
  */
 payload: {
-
+[k: string]: any
 }
 state: JobState
 /**
@@ -162,7 +172,7 @@ locked_by: (string | null)
 locked_at: (Timestamp | null)
 error: (string | null)
 result: ({
-
+[k: string]: any
 } | null)
 run_after: (Timestamp | null)
 }
@@ -236,14 +246,18 @@ lang?: (Lang | null)
 description_md?: (string | null)
 }
 /**
- * pdf.ingest: genau eines von slide_deck_id oder exercise_sheet_id ist gesetzt (prüft der Core beim Anlegen). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.
- * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "PdfIngestPayload".
+ * via the `definition` "PdfIngestDeckPayload".
  */
-export interface PdfIngestPayload {
-slide_deck_id?: Uuid
-exercise_sheet_id?: Uuid
+export interface PdfIngestDeckPayload {
+slide_deck_id: Uuid
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "PdfIngestSheetPayload".
+ */
+export interface PdfIngestSheetPayload {
+exercise_sheet_id: Uuid
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
