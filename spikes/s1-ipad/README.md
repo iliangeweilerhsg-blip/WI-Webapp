@@ -10,6 +10,8 @@ Mit diesem Paket klären wir in **ca. 45 bis 60 Minuten** gleichzeitig zwei offe
 ## Wichtige Sicherheitshinweise vor dem Start
 
 - **Unverschlüsseltes lokales Testprotokoll im WLAN:** Während `server.mjs` läuft (`0.0.0.0:4797`), kann jedes andere Gerät im selben WLAN mitlesen oder eigene Test-Striche einschleusen.
+- **Verbindungsplätze:** Der Server erlaubt höchstens 8 gleichzeitige WebSocket-Verbindungen. Ein Gerät im selben WLAN kann diese 8 Plätze belegen und das iPad aussperren (für den Spike vertretbar; ein Platz wird nach einem Protokollfehler nach ca. 1 s freigegeben, sonst nach 5 Minuten Inaktivität). Hilft nur: Server neu starten bzw. anderes Netz verwenden.
+- **Speichergrenzen:** Pro Strich höchstens 5000 Punkte, im Speicher insgesamt ca. 20 MB; darüber lehnt der Server Striche mit Meldung ab. `strokes.jsonl` wird ab 25 MB nicht mehr beschrieben (Warnung in Konsole und Viewer). Den Viewer bitte über `http://localhost:4797` öffnen, nur dann zählen seine Latenzmeldungen.
 - **Empfehlung:** Führe den Test im **eigenen Heim-WLAN** oder über einen **persönlichen Hotspot** durch, schreibe **keine privaten oder vertraulichen Inhalte** auf die Testfläche und beende den Server nach dem Test wieder mit **`Strg+C`** (er schaltet sich zudem nach 60 Minuten automatisch ab).
 
 ---
@@ -96,3 +98,5 @@ Um die Mac-Gegenstelle inkl. RFC-6455-Framing, Host-/Origin-Prüfung, Ping-Pong 
 ```bash
 node spikes/s1-ipad/mac/test-client.mjs
 ```
+
+Der Test läuft in einem temporären `HOME` (`os.tmpdir()/s1-test-…`), das am Ende gelöscht wird. Deine echten Messdaten unter `~/StudienGehirn/spikes/s1/` bleiben unangetastet.

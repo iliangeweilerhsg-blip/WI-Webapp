@@ -9,14 +9,35 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const SERVER_PATH = path.resolve(__dirname, 'server.mjs');
 const FIXTURE_01_PATH = path.resolve(REPO_ROOT, 'tests', 'fixtures', 'strokes', '01-handschrift-pen.json');
-const S1_OUT_DIR = path.resolve(os.homedir(), 'StudienGehirn', 'spikes', 's1');
+// Der Test arbeitet ausschliesslich in einem temporaeren HOME und fasst das echte ~/StudienGehirn nie an.
+let TEST_HOME = '';
+let S1_OUT_DIR = '';
+
+function waitForExit(proc) {
+  return new Promise((resolve) => {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      resolve();
+      return;
+    }
+    proc.once('exit', () => resolve());
+  });
+}
+
+async function stopProcess(proc) {
+  if (!proc) return;
+  const exited = waitForExit(proc);
+  if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGTERM');
+  const timer = setTimeout(() => proc.kill('SIGKILL'), 5000);
+  await exited;
+  clearTimeout(timer);
+}
 const TEST_PORT = 4795;
 
 function sleep(ms) {
@@ -132,20 +153,34 @@ function connectWs(port, customHeaders = {}) {
 }
 
 async function main() {
-  rmSync(S1_OUT_DIR, { recursive: true, force: true });
+  TEST_HOME = mkdtempSync(path.join(os.tmpdir(), 's1-test-'));
+  S1_OUT_DIR = path.resolve(TEST_HOME, 'StudienGehirn', 'spikes', 's1');
+  const childEnv = { ...process.env, HOME: TEST_HOME, USERPROFILE: TEST_HOME };
+  try {
+    await runTests(childEnv);
+  } finally {
+    await stopProcess(runState.noDnsProc);
+    await stopProcess(runState.serverProc);
+    rmSync(TEST_HOME, { recursive: true, force: true });
+  }
+}
 
+const runState = { noDnsProc: null, serverProc: null };
+
+async function runTests(childEnv) {
   // 1) Linux-Fallback ohne dns-sd prüfen
   console.log('1) Prüfe Start ohne dns-sd (Linux-Fallback) ...');
   const noDnsProc = spawn(process.execPath, [SERVER_PATH, '--port', String(TEST_PORT - 1)], {
-    env: { ...process.env, PATH: '/nonexistent' },
+    env: { ...childEnv, PATH: '/nonexistent' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let noDnsOut = '';
   noDnsProc.stdout.on('data', (d) => {
     noDnsOut += String(d);
   });
+  runState.noDnsProc = noDnsProc;
   await sleep(900);
-  noDnsProc.kill('SIGTERM');
+  await stopProcess(noDnsProc);
   if (!noDnsOut.includes('ohne Bonjour weiter')) {
     throw new Error('Erwartete Meldung bei fehlendem dns-sd nicht gefunden.');
   }
@@ -154,11 +189,13 @@ async function main() {
   // 2) Gegenstelle starten
   console.log(`2) Starte Mac-Gegenstelle auf Port ${TEST_PORT} ...`);
   const serverProc = spawn(process.execPath, [SERVER_PATH, '--port', String(TEST_PORT), '--no-bonjour'], {
+    env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  runState.serverProc = serverProc;
   await sleep(900);
 
-  try {
+  {
     // 3) Sicherheits- & RFC-6455-Prüfungen (S1, S3, S4, Blocker 3)
     console.log('3) Prüfe Host-/Origin-Schutz & RFC-6455-Protokollregeln ...');
 
@@ -299,9 +336,6 @@ async function main() {
     console.log(
       `   [OK] 3 Striche gespeichert & verifiziert (Latenzen: ${stateData.strokes.map((s) => `${s.latency_ms}ms`).join(', ')}, Median=${stateData.latency_median_ms}ms, p95=${stateData.latency_p95_ms}ms).`,
     );
-  } finally {
-    serverProc.kill('SIGTERM');
-    rmSync(S1_OUT_DIR, { recursive: true, force: true });
   }
 
   console.log('\n[ERFOLG] Alle Funktions-, Format- und Sicherheitstests für Spike S1 + S3 bestanden.');

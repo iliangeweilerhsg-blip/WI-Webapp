@@ -14,7 +14,10 @@ const AUTO_SHUTDOWN_MS = 60 * 60 * 1000; // 60 Minuten
 const MAX_WS_MESSAGE_BYTES = 512 * 1024; // 512 KB Limit pro WebSocket-Nachricht
 const MAX_WS_CONNECTIONS = 8; // S2: Höchstens 8 gleichzeitige WebSocket-Verbindungen
 const SOCKET_IDLE_TIMEOUT_MS = 5 * 60 * 1000; // S2: 5 Minuten Idle-Timeout
-const MAX_POINTS_PER_STROKE = 10_000; // S2: Max. 10.000 Punkte pro Strich (240 KB)
+const MAX_POINTS_PER_STROKE = 5_000; // N1: Max. 5.000 Punkte pro Strich (120 KB roh)
+const MAX_MEMORY_BASE64_BYTES = 20 * 1024 * 1024; // N1: Insgesamt ca. 20 MB Base64 im Speicher
+const MAX_STATE_STROKES = 500; // N1: GET /state liefert nur die letzten 500 Striche
+const SOCKET_DESTROY_DELAY_MS = 1000; // N4: Socket nach Protokollfehler spätestens nach 1 s zerstören
 const MAX_STROKES_PER_SESSION = 5_000; // S2: Max. 5.000 Striche pro Sitzung im Speicher
 const MAX_STROKES_FILE_BYTES = 25 * 1024 * 1024; // S2: Max. 25 MB für strokes.jsonl
 const WS_MAGIC_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
@@ -189,6 +192,11 @@ function closeWithStatus(socket, statusCode, reason = '') {
   try {
     if (socket.writable) {
       socket.end(encodeCloseFrame(statusCode, reason));
+      // N4: Ein Client, der nicht schließt, darf keinen der 8 Plätze blockieren
+      const t = setTimeout(() => {
+        if (!socket.destroyed) socket.destroy();
+      }, SOCKET_DESTROY_DELAY_MS);
+      t.unref();
     } else {
       socket.destroy();
     }
@@ -465,6 +473,8 @@ const state = {
     loaded_ok: null,
   },
   pingCount: 0,
+  memoryBase64Bytes: 0,
+  storageFull: false,
 };
 
 const wsClients = new Set();
@@ -527,6 +537,12 @@ function handleWsJsonMessage(client, msg) {
       }
 
       const { error: validationErr, sanitized, pointCount } = validateAndSanitizeStroke(msg.stroke);
+      if (sanitized && state.memoryBase64Bytes + sanitized.points.length > MAX_MEMORY_BASE64_BYTES) {
+        const memMsg = `Speicherbudget erreicht (${Math.round(MAX_MEMORY_BASE64_BYTES / 1024 / 1024)} MB Base64). Strich abgelehnt – Server neu starten.`;
+        console.warn(`[${timeStamp()}] [WARN] ${memMsg}`);
+        sendWsJson(client.socket, { type: 'error', message: memMsg });
+        return;
+      }
       if (validationErr || !sanitized) {
         console.warn(`[${timeStamp()}] [WARN] Ungültiger Strich abgewiesen: ${validationErr}`);
         sendWsJson(client.socket, { type: 'error', message: validationErr || 'Ungültiger Strich.' });
@@ -552,11 +568,17 @@ function handleWsJsonMessage(client, msg) {
       };
 
       state.strokes.push(entry);
+      state.memoryBase64Bytes += sanitized.points.length;
 
       // S2: Dateigröße von strokes.jsonl begrenzen
       const currentFileSize = existsSync(strokesLogPath) ? statSync(strokesLogPath).size : 0;
       if (currentFileSize < MAX_STROKES_FILE_BYTES) {
         appendFileSync(strokesLogPath, `${JSON.stringify(entry)}\n`, 'utf8');
+      } else if (!state.storageFull) {
+        state.storageFull = true;
+        const fullMsg = `strokes.jsonl hat ${Math.round(MAX_STROKES_FILE_BYTES / 1024 / 1024)} MB erreicht – Striche werden NICHT mehr gespeichert (nur noch live im Speicher).`;
+        console.warn(`[${timeStamp()}] [WARN] ${fullMsg}`);
+        broadcastToAll({ type: 'storage.full', message: fullMsg });
       }
       persistSessionSummary();
 
@@ -580,6 +602,8 @@ function handleWsJsonMessage(client, msg) {
 
     // 3) Browser-Viewer meldet exakte Darstellungs-Latenz nach requestAnimationFrame
     if (msg.type === 'viewer.rendered') {
+      // Nur Viewer-Verbindungen (Origin localhost) dürfen die Latenz melden
+      if (!client.isViewer) return;
       const seq = Number(msg.seq);
       const displayLatencyMs = Number(msg.display_latency_ms);
       if (
@@ -696,7 +720,10 @@ const server = http.createServer((req, res) => {
       latency_p95_ms: percentile(state.latenciesMs, 95),
       checkpoints: state.checkpoints,
       raw_summaries: state.rawSummaries,
-      strokes: state.strokes,
+      storage_full: state.storageFull,
+      memory_base64_bytes: state.memoryBase64Bytes,
+      strokes_truncated: state.strokes.length > MAX_STATE_STROKES,
+      strokes: state.strokes.slice(-MAX_STATE_STROKES),
     });
     res.writeHead(200, {
       'Content-Type': 'application/json; charset=utf-8',
@@ -756,7 +783,11 @@ server.on('upgrade', (req, socket, head) => {
   });
 
   const role = (req.url || '').includes('role=viewer') ? 'viewer' : 'ipad';
-  const clientEntry = { socket, role };
+  const originHeader = req.headers.origin;
+  const isViewer =
+    role === 'viewer' &&
+    (originHeader === `http://localhost:${port}` || originHeader === `http://127.0.0.1:${port}`);
+  const clientEntry = { socket, role, isViewer };
   wsClients.add(clientEntry);
 
   if (role === 'ipad') {

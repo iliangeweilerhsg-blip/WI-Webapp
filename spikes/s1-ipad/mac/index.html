@@ -202,7 +202,8 @@
       <div class="split">
         <div class="card">
           <div class="metric-label" style="margin-bottom: 8px">
-            Live-Zeichenfläche (A4-Seitengröße 595&times;842 pt · 2 Ebenen: unten
+            Live-Zeichenfläche (mind. A4-Seitengröße 595&times;842 pt, wächst mit den Strichen · 2 Ebenen:
+            unten
             <code>highlight</code>, oben <code>ink</code>)
           </div>
           <div class="canvas-wrap">
@@ -264,8 +265,12 @@
 
     <script>
       (function () {
-        const PAGE_WIDTH_PT = 595;
-        const PAGE_HEIGHT_PT = 842;
+        const BASE_PAGE_WIDTH_PT = 595;
+        const BASE_PAGE_HEIGHT_PT = 842;
+        const MAX_PAGE_PT = 4000;
+        // Zeichenfläche passt sich der bbox der Striche an (iPad kann breiter als A4 sein)
+        let pageWidthPt = BASE_PAGE_WIDTH_PT;
+        let pageHeightPt = BASE_PAGE_HEIGHT_PT;
 
         const connStatusBadge = document.getElementById('connStatusBadge');
         const strokeCountVal = document.getElementById('strokeCountVal');
@@ -286,10 +291,41 @@
 
         // Viewer-Canvas mit A4-Seitengröße (595×842 pt) und devicePixelRatio initialisieren
         const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
-        highlightCanvas.width = Math.round(PAGE_WIDTH_PT * dpr);
-        highlightCanvas.height = Math.round(PAGE_HEIGHT_PT * dpr);
-        inkCanvas.width = Math.round(PAGE_WIDTH_PT * dpr);
-        inkCanvas.height = Math.round(PAGE_HEIGHT_PT * dpr);
+        const canvasWrap = document.querySelector('.canvas-wrap');
+        function applyCanvasSize() {
+          for (const c of [highlightCanvas, inkCanvas]) {
+            c.width = Math.round(pageWidthPt * dpr);
+            c.height = Math.round(pageHeightPt * dpr);
+          }
+          canvasWrap.style.aspectRatio = `${pageWidthPt} / ${pageHeightPt}`;
+        }
+        applyCanvasSize();
+
+        // Vergrößert die Fläche, falls eine bbox darüber hinausgeht. Gibt true zurück, wenn neu gezeichnet werden muss.
+        function growToFit(stroke) {
+          const b = stroke && stroke.bbox;
+          if (!Array.isArray(b) || b.length !== 4) return false;
+          const right = Number(b[0]) + Number(b[2]);
+          const bottom = Number(b[1]) + Number(b[3]);
+          let changed = false;
+          if (Number.isFinite(right) && right + 8 > pageWidthPt) {
+            pageWidthPt = Math.min(MAX_PAGE_PT, Math.ceil(right + 8));
+            changed = true;
+          }
+          if (Number.isFinite(bottom) && bottom + 8 > pageHeightPt) {
+            pageHeightPt = Math.min(MAX_PAGE_PT, Math.ceil(bottom + 8));
+            changed = true;
+          }
+          if (changed) applyCanvasSize();
+          return changed;
+        }
+
+        function redrawAll() {
+          clearAllCanvases();
+          for (const entry of appState.strokes) {
+            drawStrokeOnCanvas(entry.stroke);
+          }
+        }
 
         let appState = {
           bonjour_active: false,
@@ -524,6 +560,19 @@
 
         let ws = null;
 
+        function showStorageWarning(text) {
+          let box = document.getElementById('storageWarning');
+          if (!box) {
+            box = document.createElement('div');
+            box.id = 'storageWarning';
+            box.setAttribute('role', 'alert');
+            box.style.cssText =
+              'position:sticky;top:0;z-index:10;padding:10px 14px;margin-bottom:12px;border-radius:8px;background:#b3261e;color:#fff;font-weight:600';
+            document.body.insertBefore(box, document.body.firstChild);
+          }
+          box.textContent = `ACHTUNG: ${text}`;
+        }
+
         async function loadInitialState() {
           try {
             const res = await fetch('/state', { cache: 'no-store' });
@@ -531,10 +580,12 @@
             const data = await res.json();
             appState = { ...appState, ...data };
             window.__s1MacState = appState;
-            clearAllCanvases();
             for (const entry of appState.strokes) {
-              drawStrokeOnCanvas(entry.stroke);
+              growToFit(entry.stroke);
             }
+            redrawAll();
+            if (data.storage_full)
+              showStorageWarning('strokes.jsonl ist voll – es wird nicht mehr gespeichert.');
             renderTablesAndReport();
           } catch {
             // ignore
@@ -566,8 +617,10 @@
                 appState.latency_p95_ms = msg.stats.latency_p95_ms;
               }
 
+              const resized = growToFit(entry.stroke);
               requestAnimationFrame(() => {
-                drawStrokeOnCanvas(entry.stroke);
+                if (resized) redrawAll();
+                else drawStrokeOnCanvas(entry.stroke);
                 const tRendered = Date.now();
                 const displayLatency = Math.max(0, tRendered - entry.t_pen_up_ms);
                 entry.latency_ms = Math.round(displayLatency * 10) / 10;
@@ -589,6 +642,10 @@
             } else if (msg.type === 'raw_stats.updated') {
               appState.raw_summaries = Array.isArray(msg.summaries) ? msg.summaries : [];
               renderTablesAndReport();
+            } else if (msg.type === 'storage.full') {
+              showStorageWarning(typeof msg.message === 'string' ? msg.message : 'Speicher voll.');
+            } else if (msg.type === 'error' && typeof msg.message === 'string') {
+              showStorageWarning(`Server: ${msg.message}`);
             } else if (msg.type === 'checkpoints.updated') {
               appState.checkpoints = msg.checkpoints || {};
               renderTablesAndReport();
