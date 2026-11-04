@@ -150,14 +150,22 @@ describe('terminateGroup', () => {
   });
 
   it('waitOnly sendet kein SIGTERM, wartet nur und eskaliert nach der Gnadenfrist', async () => {
-    // Würde bei SIGTERM sofort enden – darf es aber nicht bekommen.
-    const pid = spawnGroup(`trap "exit 0" TERM; sleep 30 & wait`);
+    // Bekommt die Gruppe SIGTERM, hinterlässt der Trap eine Markierungsdatei.
+    const mark = join(tmp(), 'sigterm-erhalten');
+    const pid = spawnGroup(`trap 'touch "${mark}"; exit 0' TERM; sleep 30 & wait`);
     await sleep(300);
-    const t0 = Date.now();
     const gone = await terminateGroup(pid, { graceMs: 800, waitOnly: true, killWaitMs: 2000 });
+    expect(gone).toBe(true); // Eskalation per SIGKILL findet trotzdem statt
+    expect(existsSync(mark)).toBe(false); // aber nie ein SIGTERM
+  });
+
+  it('ohne waitOnly kommt SIGTERM an (Gegenprobe zur Markierung)', async () => {
+    const mark = join(tmp(), 'sigterm-erhalten');
+    const pid = spawnGroup(`trap 'touch "${mark}"; exit 0' TERM; sleep 30 & wait`);
+    await sleep(300);
+    const gone = await terminateGroup(pid, { graceMs: 2000, killWaitMs: 2000 });
     expect(gone).toBe(true);
-    expect(Date.now() - t0).toBeGreaterThanOrEqual(700);
-    expect(groupAlive(pid)).toBe(false);
+    expect(existsSync(mark)).toBe(true);
   });
 
   it('meldet true für eine nicht (mehr) vorhandene Gruppe', async () => {

@@ -255,6 +255,7 @@ export async function start(cfg: SgConfig): Promise<number> {
   const onSignal = (sig: NodeJS.Signals): void => {
     signalCount++;
     if (signalCount === 1) {
+      if (shutdownPromise) log('Wird bereits beendet – erneut Strg+C zum sofortigen Abbruch.');
       void shutdown(`${sig} empfangen`);
     } else if (!forced) {
       forced = true;
