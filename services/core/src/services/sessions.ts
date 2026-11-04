@@ -144,7 +144,7 @@ async function loadSession(tx: DbOrTx, id: string, lock = false): Promise<Loaded
     .from(session)
     .leftJoin(calendarEvent, eq(calendarEvent.id, session.calendarEventId))
     .where(eq(session.id, id));
-  const [found] = await (lock ? query.for('update', { of: session }) : query);
+  const [found] = await (lock ? query.for('no key update', { of: session }) : query);
   return found ?? null;
 }
 
@@ -177,7 +177,8 @@ function transitionInvalid(state: string, action: SessionAction): HttpError {
 }
 
 /**
- * Sperrreihenfolge (VERTRAEGE §16.2): erst diese Advisory-Sperre, dann Session-Zeilen, dann `sync_stream` (`appendOp`).
+ * Sperrreihenfolge (VERTRAEGE §16.2): erst diese Advisory-Sperre, dann Session-Zeilen nur mit `FOR NO KEY UPDATE`
+ * (Ops mit FK auf die Session, z. B. `marker.add`, halten `sync_stream` und brauchen `KEY SHARE`), dann `sync_stream`.
  * Der Dispatcher ruft sie als `preLock` VOR `appendOp` der Client-Operation auf (siehe `SESSION_PRELOCKS`).
  * Eine Transaktion lang die Zustandswechsel aller Sessions serialisieren (ein Nutzer, selten, kurz) */
 export async function lockSessionTransitions(tx: Tx): Promise<void> {
@@ -351,7 +352,7 @@ async function createOfflineSession(tx: Tx, sessionId: string, input: Transition
       .select()
       .from(session)
       .where(and(eq(session.calendarEventId, event.id), notDeleted(session)))
-      .for('update');
+      .for('no key update');
     if (replaced) {
       const neverStarted =
         replaced.startedAt === null && (NEVER_STARTED_STATES as readonly string[]).includes(replaced.state);
@@ -447,7 +448,7 @@ async function startSession(
     .from(session)
     .leftJoin(calendarEvent, eq(calendarEvent.id, session.calendarEventId))
     .where(and(inArray(session.state, [...ACTIVE_STATES]), notDeleted(session), ne(session.id, row.id)))
-    .for('update', { of: session });
+    .for('no key update', { of: session });
 
   const startFields = {
     startedAt: at,
@@ -704,7 +705,7 @@ export async function runSessionTick(
         and(inArray(session.state, ['geplant', 'bereit']), isNull(session.startedAt), notDeleted(session)),
       )
       .orderBy(asc(session.id))
-      .for('update', { of: session });
+      .for('no key update', { of: session });
     for (const p of planned) {
       const next = plannedState(now, p.plannedStartsAt, p.plannedEndsAt);
       if (next !== p.row.state) {
@@ -723,7 +724,7 @@ export async function runSessionTick(
       .leftJoin(calendarEvent, eq(calendarEvent.id, session.calendarEventId))
       .where(and(inArray(session.state, [...ACTIVE_STATES]), notDeleted(session)))
       .orderBy(asc(session.id))
-      .for('update', { of: session });
+      .for('no key update', { of: session });
     if (active.length === 0) return;
     const { lecture } = await getSettings(tx, config);
     for (const a of active) {
@@ -866,7 +867,7 @@ export async function ensurePlannedSessions(
     .from(session)
     .where(and(inArray(session.calendarEventId, ids), notDeleted(session)))
     .orderBy(asc(session.id))
-    .for('update');
+    .for('no key update');
   const byEvent = new Map(sessions.map((s) => [s.calendarEventId, s]));
 
   for (const event of events) {

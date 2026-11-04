@@ -1669,7 +1669,6 @@ describe('Nacharbeit (Review PR #65)', () => {
     );
     expect(late).toMatchObject({ code: 'session_transition_invalid' });
     const manual = await mkSession({ state: 'laeuft', startedAt: T(0) });
-    await handle.db.update(session).set({ state: 'beendet' }).where(eq(session.id, id));
     await transition(manual, 'stop', { at: T(30) });
     const early = await runHandler(
       clientOp('session.pause', manual, { session_id: manual }, T(10).getTime()),
@@ -1699,4 +1698,50 @@ describe('Nacharbeit (Review PR #65)', () => {
     const [j] = await handle.db.select().from(job).where(eq(job.sessionId, id));
     expect(j!.runAfter).toEqual(T(40));
   });
+
+  // N1: Ops mit FK auf die Session sperren erst den Strom (appendOp), dann KEY SHARE auf die Session-Zeile.
+  // Zustandswechsel halten die Session-Zeile nur mit FOR NO KEY UPDATE und wollen danach den Strom.
+  it.each(['rest-stop', 'tick'] as const)(
+    'N1: marker.add (appendOp, dann Handler) gegen %s ohne Deadlock',
+    async (other) => {
+      for (let round = 0; round < 12; round += 1) {
+        await handle.sql`TRUNCATE session, sync_op, sync_stream CASCADE`;
+        const id = await mkSession({ state: 'laeuft', startedAt: T(0), startedFrom: 'mac' });
+        const op = clientOp(
+          'marker.add',
+          id,
+          {
+            marker_id: uuidv7(),
+            session_id: id,
+            kind: 'frage',
+            t_ms: 5,
+            page_id: null,
+            position: null,
+            note: null,
+            source: 'ipad',
+          },
+          T(1).getTime(),
+        );
+        const flow = handle.db.transaction(async (tx) => {
+          await appendOp(tx, op.stream, {
+            kind: op.kind,
+            data: op.data,
+            at: op.at,
+            clockUncertain: false,
+            origin: 'ipad',
+            opId: op.op_id,
+            deviceId: DEVICE,
+          });
+          await SESSION_HANDLERS[op.kind]!(tx, op, { deviceId: DEVICE, origin: 'ipad' });
+        });
+        const change =
+          other === 'rest-stop'
+            ? transition(id, 'stop', { at: T(30) })
+            : runSessionTick(handle.db, config, T(1000));
+        const outcomes = await Promise.allSettled([flow, change]);
+        expect(outcomes.map((o) => o.status)).toEqual(['fulfilled', 'fulfilled']);
+        expect((await row(id)).state).not.toBe('laeuft');
+      }
+    },
+  );
 });

@@ -189,6 +189,8 @@ export const SESSION_PRELOCKS: Readonly<Record<string, (tx: Tx, op: SyncOp) => P
 /** Meldet die Handler dieses Tickets in der Registry an (T1-08) */
 export function registerSessionHandlers(): void {
   for (const [kind, handler] of Object.entries(SESSION_HANDLERS)) {
+    // TODO(T1-08-Rebase): registerOpHandler(kind, handler, { preLock: SESSION_PRELOCKS[kind] }) aufrufen, sobald die
+    // Registry von T1-08 den dritten Parameter kennt. Bis dahin hängt der Lead SESSION_PRELOCKS im Dispatcher ein.
     registerOpHandler(kind as SyncOp['kind'], handler);
   }
 }
