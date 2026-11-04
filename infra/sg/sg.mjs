@@ -13,4 +13,14 @@ if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
   process.exit(1);
 }
 
+// Pakete vor dem ersten Import aus node_modules aktualisieren (nach git pull). Nicht bei reiner Hilfe.
+const args = process.argv.slice(2);
+if (args.length > 0 && !args.includes('--help') && !args.includes('-h') && args[0] !== 'help') {
+  const { dirname, resolve } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const { syncDeps } = await import('./deps.mjs');
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+  if (!syncDeps(repoRoot)) process.exit(1);
+}
+
 await import('./src/main.ts');

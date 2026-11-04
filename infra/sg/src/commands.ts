@@ -23,7 +23,7 @@ import {
   type TerminateOptions,
 } from './procs.ts';
 import { realSystem } from './system.ts';
-import { ensureDeps, ensureWebBuild, type PrepareIo } from './webbuild.ts';
+import { ensureWebBuild, type PrepareIo } from './webbuild.ts';
 
 const log = (msg: string): void => console.log(`[sg] ${msg}`);
 const err = (msg: string): void => console.error(`[sg] ${msg}`);
@@ -209,8 +209,6 @@ export async function start(cfg: SgConfig): Promise<number> {
     return 1;
   }
   clearStopMarker(cfg);
-
-  if (!(await ensureDeps(cfg, prepareIo(cfg)))) return 1;
 
   log('Starte PostgreSQL (docker compose) …');
   const up = await runInherit('docker', composeArgs(cfg, 'up', '-d', '--wait'), cfg);

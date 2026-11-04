@@ -1,12 +1,9 @@
-// Hält Abhängigkeiten und Static Export der Web-App vor `sg start` aktuell.
+// Hält den Static Export der Web-App vor `sg start` aktuell.
 //
-// Der Owner aktualisiert mit `git pull` und startet mit `pnpm sg start`. Ohne diese Prüfungen
-// fehlten nach einem Pull neue Pakete (Build scheitert) bzw. der Core lieferte einen veralteten
-// Export aus. Darum:
-//  1. Weicht `pnpm-lock.yaml` von der installierten Kopie (`node_modules/.pnpm/lock.yaml`) ab,
-//     wird `pnpm install --frozen-lockfile` ausgeführt.
-//  2. Der Export wird neu gebaut, wenn er fehlt oder sich die Quellen seit dem letzten Build durch
-//     `sg start` geändert haben (Fingerabdruck aus Git-Baum-Hashes, Stempel neben dem Export).
+// Der Owner aktualisiert mit `git pull` und startet mit `pnpm sg start`. Ohne diese Prüfung lieferte
+// der Core danach einen veralteten Export aus. Darum wird neu gebaut, wenn der Export fehlt oder sich
+// die Quellen seit dem letzten Build durch `sg start` geändert haben (Fingerabdruck aus Git-Baum-
+// Hashes, Stempel neben dem Export). Die Pakete selbst gleicht vorher `infra/sg/deps.mjs` ab.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -22,27 +19,6 @@ export const WEB_SOURCES = [
 ] as const;
 
 const GIT_TIMEOUT_MS = 10_000;
-
-// ---------------------------------------------------------------- Abhängigkeiten
-
-/**
- * true, wenn die installierten Pakete zum Lockfile passen. pnpm legt beim Installieren eine
- * byte-gleiche Kopie des Lockfiles unter node_modules/.pnpm/lock.yaml ab.
- * null, wenn das Repo kein Lockfile hat (dann gibt es nichts zu prüfen).
- */
-export function depsInSync(repoRoot: string): boolean | null {
-  let wanted: Buffer;
-  try {
-    wanted = readFileSync(join(repoRoot, 'pnpm-lock.yaml'));
-  } catch {
-    return null;
-  }
-  try {
-    return wanted.equals(readFileSync(join(repoRoot, 'node_modules', '.pnpm', 'lock.yaml')));
-  } catch {
-    return false;
-  }
-}
 
 // ---------------------------------------------------------------- Static Export
 
@@ -96,7 +72,9 @@ export function webFingerprint(repoRoot: string): string | null {
 /** true, wenn die Quellen nicht committete Änderungen haben (dann passt der Stempel nicht zu HEAD). */
 export function webSourcesDirty(repoRoot: string): boolean {
   try {
-    return git(repoRoot, ['status', '--porcelain', '--', ...WEB_SOURCES]).trim() !== '';
+    return (
+      git(repoRoot, ['--no-optional-locks', 'status', '--porcelain', '--', ...WEB_SOURCES]).trim() !== ''
+    );
   } catch {
     return true;
   }
@@ -130,16 +108,6 @@ export interface PrepareIo {
   hasFile: (path: string) => boolean;
 }
 
-/** Installiert fehlende/veraltete Pakete. false, wenn das nötig war und gescheitert ist. */
-export async function ensureDeps(cfg: SgConfig, io: PrepareIo): Promise<boolean> {
-  if (depsInSync(cfg.repoRoot) !== false) return true;
-  io.log('Pakete haben sich geändert (z. B. nach git pull), installiere sie (pnpm install) …');
-  const code = await io.run('pnpm', ['install', '--frozen-lockfile']);
-  if (code === 0) return true;
-  io.err('"pnpm install" ist fehlgeschlagen. Bitte die Meldung oben an Claude schicken.');
-  return false;
-}
-
 /** Baut den Static Export, wenn er fehlt oder veraltet ist. Bricht nie ab: Der Core startet in jedem Fall. */
 export async function ensureWebBuild(cfg: SgConfig, io: PrepareIo, webAvailable: boolean): Promise<void> {
   const index = join(cfg.webDir, 'index.html');
@@ -147,7 +115,7 @@ export async function ensureWebBuild(cfg: SgConfig, io: PrepareIo, webAvailable:
   const fingerprint = webFingerprint(cfg.repoRoot);
   if (isDefault && fingerprint === null && webAvailable) {
     io.log(
-      'Hinweis: Ohne Git lässt sich nicht erkennen, ob die Web-App veraltet ist. Gebaut wird nur, wenn sie fehlt.',
+      'Hinweis: Ob die Web-App veraltet ist, lässt sich nicht erkennen (Git fehlt oder Quellen nicht im Commit). Gebaut wird nur, wenn sie fehlt.',
     );
   }
   const reason = webBuildReason({

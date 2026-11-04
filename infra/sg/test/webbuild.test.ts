@@ -2,12 +2,10 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '../src/config.ts';
 import {
   defaultWebDir,
-  depsInSync,
-  ensureDeps,
   ensureWebBuild,
   readWebStamp,
   webBuildReason,
@@ -42,18 +40,17 @@ function gitEnv(): NodeJS.ProcessEnv {
 function git(cwd: string, ...args: string[]): void {
   execFileSync('git', ['-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'ignore', env: gitEnv() });
 }
-/** Die Funktionen unter Test rufen git selbst auf – dieselbe isolierte Umgebung für den Testprozess. */
-function withGitEnv<T>(fn: () => T): T {
-  const saved = { ...process.env };
-  Object.assign(process.env, gitEnv());
-  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete process.env[k];
-  try {
-    return fn();
-  } finally {
-    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
-    Object.assign(process.env, saved);
+/** Die Funktionen unter Test rufen git selbst auf: dieselbe isolierte Umgebung für den ganzen Test. */
+beforeEach(() => {
+  const env = gitEnv();
+  for (const k of ['GIT_CEILING_DIRECTORIES', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM'] as const) {
+    vi.stubEnv(k, env[k]);
   }
-}
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) vi.stubEnv(k, undefined);
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 /** Mini-Repo mit allen Quellen der Web-App. */
 function repo(): string {
@@ -101,7 +98,7 @@ describe('webBuildReason', () => {
 
 describe('webFingerprint / webSourcesDirty', () => {
   it('ändert sich nur durch Commits an den Quellen der Web-App', () => {
-    withGitEnv(() => {
+    {
       const r = repo();
       const first = webFingerprint(r);
       expect(first).toMatch(/^[0-9a-f]+(:[0-9a-f]+){4}$/);
@@ -123,36 +120,22 @@ describe('webFingerprint / webSourcesDirty', () => {
         expect(now).not.toBe(last);
         last = now;
       }
-    });
+    }
   });
 
   it('erkennt nicht committete Änderungen, ignoriert aber den Stempel selbst', () => {
-    withGitEnv(() => {
+    {
       const r = repo();
       expect(webSourcesDirty(r)).toBe(false);
       writeWebStamp(r, 'x');
       expect(webSourcesDirty(r)).toBe(false);
       writeFileSync(join(r, 'apps', 'web', 'page.tsx'), 'lokal');
       expect(webSourcesDirty(r)).toBe(true);
-    });
+    }
   });
 
   it('liefert null ohne Git-Repo', () => {
-    withGitEnv(() => expect(webFingerprint(tmp())).toBeNull());
-  });
-});
-
-describe('depsInSync', () => {
-  it('vergleicht das Lockfile mit der installierten Kopie', () => {
-    const r = tmp();
-    expect(depsInSync(r)).toBeNull();
-    writeFileSync(join(r, 'pnpm-lock.yaml'), 'lock: 1');
-    expect(depsInSync(r)).toBe(false);
-    mkdirSync(join(r, 'node_modules', '.pnpm'), { recursive: true });
-    writeFileSync(join(r, 'node_modules', '.pnpm', 'lock.yaml'), 'lock: 1');
-    expect(depsInSync(r)).toBe(true);
-    writeFileSync(join(r, 'pnpm-lock.yaml'), 'lock: 2');
-    expect(depsInSync(r)).toBe(false);
+    expect(webFingerprint(tmp())).toBeNull();
   });
 });
 
@@ -198,28 +181,6 @@ function fakeIo(opts: { exit?: number; files?: Set<string>; onRun?: () => void }
 }
 const BUILD = 'pnpm --filter @sg/web build';
 
-describe('ensureDeps', () => {
-  it('installiert nur, wenn das Lockfile abweicht, und meldet Fehlschläge', async () => {
-    const r = tmp();
-    const cfg = resolveConfig({ SG_DATA_DIR: join(r, 'd') }, '/h', r);
-    writeFileSync(join(r, 'pnpm-lock.yaml'), 'lock');
-
-    const ok = fakeIo();
-    expect(await ensureDeps(cfg, ok)).toBe(true);
-    expect(ok.calls).toEqual(['pnpm install --frozen-lockfile']);
-
-    const bad = fakeIo({ exit: 1 });
-    expect(await ensureDeps(cfg, bad)).toBe(false);
-    expect(bad.errors.join()).toContain('pnpm install');
-
-    mkdirSync(join(r, 'node_modules', '.pnpm'), { recursive: true });
-    writeFileSync(join(r, 'node_modules', '.pnpm', 'lock.yaml'), 'lock');
-    const none = fakeIo();
-    expect(await ensureDeps(cfg, none)).toBe(true);
-    expect(none.calls).toEqual([]);
-  });
-});
-
 describe('ensureWebBuild', () => {
   function setup() {
     const r = repo();
@@ -229,7 +190,7 @@ describe('ensureWebBuild', () => {
   }
 
   it('baut bei fehlendem Export und schreibt danach den Stempel', async () => {
-    await withGitEnv(async () => {
+    {
       const { r, cfg, index } = setup();
       const io = fakeIo({
         onRun: () => {
@@ -244,11 +205,11 @@ describe('ensureWebBuild', () => {
       const again = fakeIo();
       await ensureWebBuild(cfg, again, true);
       expect(again.calls).toEqual([]);
-    });
+    }
   });
 
   it('baut nach einem Commit an den Quellen neu', async () => {
-    await withGitEnv(async () => {
+    {
       const { r, cfg, index } = setup();
       mkdirSync(cfg.webDir, { recursive: true });
       writeFileSync(index, 'x');
@@ -260,11 +221,11 @@ describe('ensureWebBuild', () => {
       expect(io.calls).toEqual([BUILD]);
       expect(io.logs.join()).toContain('geändert');
       expect(readWebStamp(r)).toBe(webFingerprint(r));
-    });
+    }
   });
 
   it('schreibt bei fehlgeschlagenem Build keinen Stempel und meldet den tatsächlichen Zustand', async () => {
-    await withGitEnv(async () => {
+    {
       const { r, cfg, index } = setup();
       mkdirSync(cfg.webDir, { recursive: true });
       writeFileSync(index, 'x');
@@ -276,11 +237,11 @@ describe('ensureWebBuild', () => {
       const wiped = fakeIo({ exit: 1, onRun: () => rmSync(cfg.webDir, { recursive: true, force: true }) });
       await ensureWebBuild(cfg, wiped, true);
       expect(wiped.errors.join()).toContain('keine Oberfläche');
-    });
+    }
   });
 
   it('schreibt keinen Stempel, wenn die Quellen lokal geändert sind', async () => {
-    await withGitEnv(async () => {
+    {
       const { r, cfg, index } = setup();
       writeFileSync(join(r, 'apps', 'web', 'page.tsx'), 'lokal');
       const io = fakeIo({
@@ -292,16 +253,16 @@ describe('ensureWebBuild', () => {
       await ensureWebBuild(cfg, io, true);
       expect(io.calls).toEqual([BUILD]);
       expect(readWebStamp(r)).toBeNull();
-    });
+    }
   });
 
   it('meldet eine fehlende Web-App, ohne zu bauen', async () => {
-    await withGitEnv(async () => {
+    {
       const { cfg } = setup();
       const io = fakeIo();
       await ensureWebBuild(cfg, io, false);
       expect(io.calls).toEqual([]);
       expect(io.errors.join()).toContain('Web-App fehlt');
-    });
+    }
   });
 });
