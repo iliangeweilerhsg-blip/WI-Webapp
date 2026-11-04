@@ -5,30 +5,31 @@
 | **Geprüfte Dokumente** | `docs/spezifikation/00-UEBERSICHT.md` bis `10-UMSETZUNG.md`, `docs/FEATURE-KATALOG.md`, `docs/referenz-analysen/{README,goodnotes,quizlet,studysmarter}.md` |
 | **Datum** | 04.11.2026 |
 | **Prüfer** | Argon (`Gemini 4 Argon (Medium)`) |
-| **Status** | Abgeschlossen (Issue #8) |
+| **Status** | Blocker B-01 bis B-07 eingearbeitet (Issue #21); ursprünglich erstellt in Issue #8 |
 
 ---
 
 ## Top 10 der wichtigsten Befunde
 
-| Rang | ID | Einstufung | Kurzbeschreibung | Fundstelle A | Fundstelle B |
-|---|---|---|---|---|---|
-| 1 | **B-01** | **Blocker** | **`stroke`-Schema unvollständig:** `transform` fehlt in der DB-Tabelle; `bbox` hat widersprüchliche Typen (`jsonb` vs. `[x,y,w,h]`), `created_at` (`timestamptz` vs. `int` ms). | `03-DATENMODELL.md` §6 (`stroke`, Z. 173–181) | `08-SCHNITTSTELLEN.md` §4.1 (`Stroke`, Z. 118–132) |
-| 2 | **B-02** | **Blocker** | **`page.template`-Werte widersprüchlich:** „Punktraster" ist in F-INK-02 gefordert, fehlt aber in der DB-Aufzählung von `page.template`. | `03-DATENMODELL.md` §6 (`page`, Z. 166) | `04-FUNKTIONEN.md` (`F-INK-02`, Z. 276) |
-| 3 | **B-03** | **Blocker** | **Fehlendes Ticket & fehlender REST-Endpunkt für Vault-Export (`F-DAT-03`, P0 Phase 1):** `F-DAT-03 (Vault)` ist als P0 in Phase 1 eingestuft, fehlt aber komplett im Phase-1-Backlog (`T1-18` nennt nur `F-DAT-01, -02, -04`). | `04-FUNKTIONEN.md` (`F-DAT-03`, Z. 840–846, Z. 884) | `10-UMSETZUNG.md` §5 (`T1-18`, Z. 106) |
-| 4 | **B-04** | **Blocker** | **WebSocket-Sync vs. Offline-Architektur:** WS-Operationen `slide.change`, `marker.add`, `session.start/.stop` übertragen weder `t_ms` noch `started_at`; bei verspätetem Offline-Sync (F-SYN-03) oder iPad-Offline-Start (F-SES-02) gehen die echten Ereigniszeiten verloren. | `08-SCHNITTSTELLEN.md` §2.3 (Z. 67–92) | `02-ARCHITEKTUR.md` §5–6 (Z. 102–115), `03-DATENMODELL.md` §5 (Z. 117–154) |
-| 5 | **B-05** | **Blocker** | **Kein Schreib-Endpunkt / keine WS-Op zum Anlegen von `notebook` und zum Hochladen von `.pkdrawing`:** Das iPad soll freie Notizbücher anlegen (`F-INK-02`) und `.pkdrawing` per HTTP hochladen (`drawing.snapshot`), aber in REST existieren nur `GET /notebooks` und kein Upload-Endpunkt für `.pkdrawing`. | `04-FUNKTIONEN.md` (`F-INK-02`, Z. 274; `F-INK-14`, Z. 349) | `08-SCHNITTSTELLEN.md` §1 (Z. 27) & §2.3 (Z. 86) |
-| 6 | **B-06** | **Blocker** | **Audio-Format-Bruch zwischen Safari, Core und Worker:** Chrome liefert `.webm` (Opus), Safari `.mp4` (AAC). Die Dateiablage legt Chunks aber fest als `chunks/<seq>.webm` und die Gesamtdatei als `full.m4a` an (`ffmpeg concat` ohne Transcodierung scheitert bei WebM→M4A). | `04-FUNKTIONEN.md` (`F-AUD-01`, Z. 394–397) | `08-SCHNITTSTELLEN.md` §7 (Z. 230) |
-| 7 | **B-07** | **Blocker** | **Phase-0-Umfang für `T0-05` / `F-ORG-02` vs. Embeddings:** `F-ORG-02` stößt laut `02 §4.2` und `05 §2` nach `pdf.ingest` sofort `embed.slides` an. In `02 §7` und `T0-05` fehlt jedoch `Embedder` im Phase-0-Ticket, und in `03 §4` ist `slide.embedding` nicht als `NULL`-fähig deklariert. | `02-ARCHITEKTUR.md` §4.2 (Z. 94), `05-KI-PIPELINE.md` §2 (Z. 20) | `10-UMSETZUNG.md` §5 (`T0-05`, `T0-08`, Z. 78–81), `03-DATENMODELL.md` §4 (Z. 93) |
-| 8 | **W-01** | **Wichtig** | **Fehlende Referenz `docs/LERNMODELL.md` §2.7 bei Fehleranalyse (`F-LRN-06`):** Für 3 von 5 Fehlertypen (`verfahren`, `nur_auswendig`, `fluechtig`) ist die Systemreaktion nirgends in `04` oder `06` spezifiziert, da nur auf das fehlende Dokument verwiesen wird. | `04-FUNKTIONEN.md` (`F-LRN-06`, Z. 643–646) | `03-DATENMODELL.md` §9 (`error_record`, Z. 267–270), `06-LERNMODELL-PLANER.md` |
-| 9 | **W-02** | **Wichtig** | **Datenmodell-Lücken für Phase 2 (`concept.kind`, Block-Hashes, Ausschlussliste, `explain.questions`):** Mehrere in Pipeline (05), Lernmodell (06) und Vault (08) zwingend benötigte Felder existieren im Datenmodell (03) nicht. | `03-DATENMODELL.md` §5, §7, §8 | `05-KI-PIPELINE.md` §P7a/b, `06-LERNMODELL-PLANER.md` §2.1, `08-SCHNITTSTELLEN.md` §5 & §8.2–8.3 |
-| 10 | **W-03** | **Wichtig** | **Widersprüchliches Stufenschema für `open`-Karten und Deckel-Formel:** `F-LRN-01` stuft `open` als Stufe `2–3` ein; `06 §2.1` deckelt `verfahren`/`modell`-Konzepte bei `0,60`, solange keine Stufe-3-Karte richtig war, während `F-LRN-04` Stufe 3 erst freischaltet, wenn alle Stufe-2-Karten richtig waren. | `04-FUNKTIONEN.md` (`F-LRN-01`, Z. 600; `F-LRN-04`, Z. 630) | `06-LERNMODELL-PLANER.md` §2.1 (Z. 25–35) |
+| Rang | ID | Einstufung | Status | Kurzbeschreibung | Fundstelle A | Fundstelle B |
+|---|---|---|---|---|---|---|
+| 1 | **B-01** | **Blocker** | **Eingearbeitet (#21)** (Pkt. 3 durch Konvention erledigt) | **`stroke`-Schema unvollständig:** `transform` fehlt in der DB-Tabelle; `bbox` hat widersprüchliche Typen (`jsonb` vs. `[x,y,w,h]`), `created_at` (`timestamptz` vs. `int` ms). | `03-DATENMODELL.md` §6 (`stroke`, Z. 173–181) | `08-SCHNITTSTELLEN.md` §4.1 (`Stroke`, Z. 118–132) |
+| 2 | **B-02** | **Blocker** | **Eingearbeitet (#21)** | **`page.template`-Werte widersprüchlich:** „Punktraster" ist in F-INK-02 gefordert, fehlt aber in der DB-Aufzählung von `page.template`. | `03-DATENMODELL.md` §6 (`page`, Z. 166) | `04-FUNKTIONEN.md` (`F-INK-02`, Z. 276) |
+| 3 | **B-03** | **Blocker** | **Eingearbeitet (#21)** | **Fehlendes Ticket & fehlender REST-Endpunkt für Vault-Export (`F-DAT-03`, P0 Phase 1):** `F-DAT-03 (Vault)` ist als P0 in Phase 1 eingestuft, fehlt aber komplett im Phase-1-Backlog (`T1-18` nennt nur `F-DAT-01, -02, -04`). | `04-FUNKTIONEN.md` (`F-DAT-03`, Z. 840–846, Z. 884) | `10-UMSETZUNG.md` §5 (`T1-18`, Z. 106) |
+| 4 | **B-04** | **Blocker** | **Eingearbeitet (#21)** | **WebSocket-Sync vs. Offline-Architektur:** WS-Operationen `slide.change`, `marker.add`, `session.start/.stop` übertragen weder `t_ms` noch `started_at`; bei verspätetem Offline-Sync (F-SYN-03) oder iPad-Offline-Start (F-SES-02) gehen die echten Ereigniszeiten verloren. | `08-SCHNITTSTELLEN.md` §2.3 (Z. 67–92) | `02-ARCHITEKTUR.md` §5–6 (Z. 102–115), `03-DATENMODELL.md` §5 (Z. 117–154) |
+| 5 | **B-05** | **Blocker** | **Eingearbeitet (#21)** | **Kein Schreib-Endpunkt / keine WS-Op zum Anlegen von `notebook` und zum Hochladen von `.pkdrawing`:** Das iPad soll freie Notizbücher anlegen (`F-INK-02`) und `.pkdrawing` per HTTP hochladen (`drawing.snapshot`), aber in REST existieren nur `GET /notebooks` und kein Upload-Endpunkt für `.pkdrawing`. | `04-FUNKTIONEN.md` (`F-INK-02`, Z. 274; `F-INK-14`, Z. 349) | `08-SCHNITTSTELLEN.md` §1 (Z. 27) & §2.3 (Z. 86) |
+| 6 | **B-06** | **Blocker** | **Eingearbeitet (#21)** | **Audio-Format-Bruch zwischen Safari, Core und Worker:** Chrome liefert `.webm` (Opus), Safari `.mp4` (AAC). Die Dateiablage legt Chunks aber fest als `chunks/<seq>.webm` und die Gesamtdatei als `full.m4a` an (`ffmpeg concat` ohne Transcodierung scheitert bei WebM→M4A). | `04-FUNKTIONEN.md` (`F-AUD-01`, Z. 394–397) | `08-SCHNITTSTELLEN.md` §7 (Z. 230) |
+| 7 | **B-07** | **Blocker** | **Eingearbeitet (#21)** (Pkt. 1 durch Konvention erledigt) | **Phase-0-Umfang für `T0-05` / `F-ORG-02` vs. Embeddings:** `F-ORG-02` stößt laut `02 §4.2` und `05 §2` nach `pdf.ingest` sofort `embed.slides` an. In `02 §7` und `T0-05` fehlt jedoch `Embedder` im Phase-0-Ticket, und in `03 §4` ist `slide.embedding` nicht als `NULL`-fähig deklariert. | `02-ARCHITEKTUR.md` §4.2 (Z. 94), `05-KI-PIPELINE.md` §2 (Z. 20) | `10-UMSETZUNG.md` §5 (`T0-05`, `T0-08`, Z. 78–81), `03-DATENMODELL.md` §4 (Z. 93) |
+| 8 | **W-01** | **Wichtig** | Offen (Phase 3) | **Fehlende Referenz `docs/LERNMODELL.md` §2.7 bei Fehleranalyse (`F-LRN-06`):** Für 3 von 5 Fehlertypen (`verfahren`, `nur_auswendig`, `fluechtig`) ist die Systemreaktion nirgends in `04` oder `06` spezifiziert, da nur auf das fehlende Dokument verwiesen wird. | `04-FUNKTIONEN.md` (`F-LRN-06`, Z. 643–646) | `03-DATENMODELL.md` §9 (`error_record`, Z. 267–270), `06-LERNMODELL-PLANER.md` |
+| 9 | **W-02** | **Wichtig** | Offen (Phase 2) | **Datenmodell-Lücken für Phase 2 (`concept.kind`, Block-Hashes, Ausschlussliste, `explain.questions`):** Mehrere in Pipeline (05), Lernmodell (06) und Vault (08) zwingend benötigte Felder existieren im Datenmodell (03) nicht. | `03-DATENMODELL.md` §5, §7, §8 | `05-KI-PIPELINE.md` §P7a/b, `06-LERNMODELL-PLANER.md` §2.1, `08-SCHNITTSTELLEN.md` §5 & §8.2–8.3 |
+| 10 | **W-03** | **Wichtig** | Offen (Phase 3) | **Widersprüchliches Stufenschema für `open`-Karten und Deckel-Formel:** `F-LRN-01` stuft `open` als Stufe `2–3` ein; `06 §2.1` deckelt `verfahren`/`modell`-Konzepte bei `0,60`, solange keine Stufe-3-Karte richtig war, während `F-LRN-04` Stufe 3 erst freischaltet, wenn alle Stufe-2-Karten richtig waren. | `04-FUNKTIONEN.md` (`F-LRN-01`, Z. 600; `F-LRN-04`, Z. 630) | `06-LERNMODELL-PLANER.md` §2.1 (Z. 25–35) |
 
 ---
 
 ## 1. Blocker (behindern Phase 0 oder Phase 1)
 
 ### B-01 · `stroke`-Datenmodell vs. JSON-Schnittstelle (Fehlende Spalte `transform`, Typkonflikte)
+- **Status:** **Eingearbeitet (Issue #21)** – Punkte 1 und 2 in `03 §6` und `08 §1` umgesetzt; Punkt 3 (`NULL`-Freigabe) **durch Konvention erledigt** (`03 §1` Notation: Spalten ohne `not null` sind optional).
 - **Einstufung:** Blocker (Phase 0 `T0-02` Schemas / Phase 1 `T1-14`, `T1-16`)
 - **Fundstellen:**
   - `docs/spezifikation/03-DATENMODELL.md` §6 (`stroke`, Z. 173–181)
@@ -42,6 +43,7 @@
   - In `packages/schemas` verbindlich festlegen, ob Zeitstempel in WebSocket/JSON-Payloads als Epochen-Millisekunden (`int8`) oder ISO-8601-Strings übertragen werden (Empfehlung: in WS/Stroke-Payloads `int8` ms für kompakte Serialisierung, in DB Konvertierung nach `timestamptz`).
 
 ### B-02 · Fehlende Vorlage `punktraster` in `page.template`
+- **Status:** **Eingearbeitet (Issue #21)** – `punktraster` in `03 §6` (`page.template`) ergänzt.
 - **Einstufung:** Blocker (Phase 0 `T0-02` / Phase 1 `T1-13`)
 - **Fundstellen:**
   - `docs/spezifikation/03-DATENMODELL.md` §6 (`page`, Z. 166)
@@ -52,6 +54,7 @@
   Die Enum-Werte für `page.template` in `03 §6` und `packages/schemas` auf `blanko | liniert | kariert | punktraster | cornell | folie` erweitern.
 
 ### B-03 · `F-DAT-03` (Vault-Export, P0 Phase 1) hat kein Ticket in Phase 1 und keinen klaren API-Vertrag
+- **Status:** **Eingearbeitet (Issue #21)** – Vault-Teil von `F-DAT-03` nach Phase 2 (`E-BIB`) verschoben (`04` und `10 §5`).
 - **Einstufung:** Blocker (Phase 1 Planung / Vollständigkeit)
 - **Fundstellen:**
   - `docs/spezifikation/04-FUNKTIONEN.md` (`F-DAT-03`, Z. 840–846 & Phasenübersicht Z. 884)
@@ -63,6 +66,7 @@
   Entweder `F-DAT-03` insgesamt nach Phase 2 (Vault-Export mit `E-BIB`) und Phase 3 (Vollexport/PDF-Paket) verschieben, oder in `T1-18` präzisieren, dass in Phase 1 `POST /export` bereits den Rohdaten-/Notizbuch-Export bereitstellt.
 
 ### B-04 · WebSocket-Operationen im Sync-Protokoll fehlen Ereigniszeitstempel (`t_ms`) und Offline-Felder
+- **Status:** **Eingearbeitet (Issue #21)** – Nutzlasten und `t_ms`-Regel in `08 §2.3` ergänzt.
 - **Einstufung:** Blocker (Phase 1 `T1-08`, `T1-14`, `T1-15`)
 - **Fundstellen:**
   - `docs/spezifikation/08-SCHNITTSTELLEN.md` §2.3 (Z. 67–92)
@@ -80,6 +84,7 @@
   - `photo.add`: `{ photo_id, session_id, t_ms, page_id?, file_ref }`
 
 ### B-05 · Fehlende REST-/Sync-Endpunkte für Notizbücher, `.pkdrawing`-Uploads und Erst-Abzug
+- **Status:** **Eingearbeitet (Issue #21)** – Endpunkte in `08 §1` und Verweis in `08 §2.3` (`drawing.snapshot`) ergänzt.
 - **Einstufung:** Blocker (Phase 1 `T1-08`, `T1-11`, `T1-14`)
 - **Fundstellen:**
   - `docs/spezifikation/08-SCHNITTSTELLEN.md` §1 (Z. 27) & §2.3 (Z. 79–86)
@@ -95,6 +100,7 @@
   - `GET /photos/{id}/file`
 
 ### B-06 · Audio-Container- und Dateiendungs-Konflikt (`.webm` vs. `.mp4`/`.m4a`)
+- **Status:** **Eingearbeitet (Issue #21)** – Chunk-Endung und AAC-Transcodierung in `04 F-AUD-01` und `08 §7` sowie Prüfpunkt in Spike `S4` (`10 §4`) ergänzt.
 - **Einstufung:** Blocker (Phase 1 `T1-06`)
 - **Fundstellen:**
   - `docs/spezifikation/04-FUNKTIONEN.md` (`F-AUD-01`, Z. 394–397)
@@ -111,6 +117,7 @@
   - Für `MediaRecorder` in `T1-06` festlegen, wie Chunks geschnitten werden (entweder Header-Chunk `seq=0` beim Concat voranstellen oder Recorder alle 30 s rotieren), und dies in Spike **S4** explizit testen.
 
 ### B-07 · Phase-0-Abgrenzung bei `F-ORG-02` (`pdf.ingest` ohne Vision vs. `embed.slides`)
+- **Status:** **Eingearbeitet (Issue #21)** – Punkt 1 (`NULL`-Freigabe für `embedding`) **durch Konvention erledigt** (`03 §1` Notation); Punkt 2 in `10 §5` (`T0-08`) ergänzt.
 - **Einstufung:** Blocker (Phase 0 `T0-04`, `T0-05`, `T0-08`)
 - **Fundstellen:**
   - `docs/spezifikation/10-UMSETZUNG.md` §5 (`T0-05`, `T0-08`, Z. 78–81)
