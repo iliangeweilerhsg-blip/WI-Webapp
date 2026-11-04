@@ -59,6 +59,8 @@ export interface QueueEntry {
   failures: number;
   /** Anzahl aufgelöster `page_version_conflict` für diese `op_id` */
   conflicts: number;
+  /** Wurde schon einmal gesendet? Dann wird sie nicht mehr uhrkorrigiert (§11.5), sonst gäbe es `op_id_reused` */
+  sent: boolean;
 }
 
 export interface ShelfEntry {
@@ -106,7 +108,8 @@ export type PageConflictResolver = (
   ctx: PageConflictContext,
 ) => Promise<{ fields: PageUpdateFields; version: number } | null>;
 
-export type ConnectionState = 'idle' | 'connecting' | 'syncing' | 'online' | 'backoff' | 'failed' | 'closed';
+export type ConnectionState =
+  'idle' | 'follower' | 'connecting' | 'syncing' | 'online' | 'backoff' | 'failed' | 'closed';
 
 export interface ClockInfo {
   offsetMs: number;

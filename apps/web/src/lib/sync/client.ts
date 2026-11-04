@@ -12,6 +12,7 @@ import {
 } from '@sg/shared';
 import { uuidv7 } from '../uuid.ts';
 import { correctClock, dependentsOf, isServerOnlyKind, rewriteSessionId } from './ops.ts';
+import { createWebLocksCoordinator, type TabCoordinator, type TabMessage } from './tabs.ts';
 import { createDefaultStore, MemoryQueueStore, type QueueStore } from './store.ts';
 import type {
   ClientEventMap,
@@ -52,6 +53,8 @@ export const BACKOFF_MAX_MS = 30_000;
 export const POISON_LIMIT = 5;
 export const MAX_FRAME_BYTES = 1_000_000;
 const MAX_CONFLICT_RETRIES = 5;
+const PONG_TIMEOUT_MS = 5_000;
+const REMOTE_RESET_TIMEOUT_MS = 30_000;
 
 export interface SyncClientOptions {
   /** `ws(s)://…/sync`. Standard: `NEXT_PUBLIC_SG_SYNC_URL`, sonst aus `NEXT_PUBLIC_SG_API_BASE` bzw. dem Seitenursprung. */
@@ -77,6 +80,13 @@ export interface SyncClientOptions {
   /** Wartezeit auf eine fehlende `seq`, bevor neu abonniert wird (§11.2) */
   gapWaitMs?: number;
   maxInFlight?: number;
+  /** Höchstzeit bis `welcome` nach dem Öffnen; danach trennen und neu verbinden */
+  welcomeTimeoutMs?: number;
+  /**
+   * Koordination mehrerer Tabs: nur der Leader-Tab verbindet. Standard: Web Locks + BroadcastChannel, falls vorhanden.
+   * `null` schaltet das ab (immer Leader).
+   */
+  tabs?: TabCoordinator | null;
   /** Höchstzeit für den ersten Uhrabgleich; danach wird die Warteschlange trotzdem gesendet */
   clockSyncTimeoutMs?: number;
 }
@@ -103,17 +113,25 @@ interface SeqItem {
   op: SyncOp | null;
 }
 
+interface Receiver {
+  onOp: (op: SyncOp) => void;
+  onReset: ResetHandler | undefined;
+  /** Stellvertreter für Tabs ohne eigene Verbindung (Leader reicht Operationen weiter) */
+  remote?: boolean;
+}
+
 interface Subscription {
   stream: string;
   lastSeq: number;
   lastOpId: string | null;
-  onOp: (op: SyncOp) => void;
-  onReset: ResetHandler | undefined;
+  /** Mehrere Empfänger je Strom; Position, Lücken und `reset` gelten einmal pro Strom */
+  receivers: Set<Receiver>;
   buffer: Map<number, SeqItem>;
   gapTimer: ReturnType<typeof setTimeout> | null;
-  /** Reset läuft: eingehende Operationen des Stroms werden ignoriert */
+  /** Reset läuft oder ist offen: eingehende Operationen des Stroms werden ignoriert */
   resetting: boolean;
-  resetInFlight: boolean;
+  resetRequested: boolean;
+  resetInfo: ResetInfo | null;
 }
 
 /** Fehlernachricht in lockerer Form: auch unbekannte Fehlercodes (neuere Server-Version) werden verstanden. */
@@ -177,6 +195,7 @@ export class SyncClient {
   private readonly gapWaitMs: number;
   private readonly maxInFlight: number;
   private readonly clockSyncTimeoutMs: number;
+  private readonly welcomeTimeoutMs: number;
 
   private persistent = true;
   private readonly ready: Promise<void>;
@@ -186,11 +205,18 @@ export class SyncClient {
   private queue: QueueEntry[] = [];
   private byOpId = new Map<string, QueueEntry>();
   private inFlight = new Set<string>();
+  /** Operationen, die vorübergehend nicht gesendet werden (Konfliktauflösung, abhängig von unklaren Operationen) */
   private held = new Set<string>();
+  /** Schon gesendete Operationen, deren Elternoperation abgelehnt wurde: ihre eigene Antwort entscheidet (opId -> Auslöser) */
+  private suspects = new Map<string, string>();
+  /** Noch nicht gesendete Operationen hinter einer unklaren Operation (opId -> unklare opId) */
+  private deferred = new Map<string, string>();
+  private conflictChain = new Map<string, Promise<void>>();
   private pending = new Map<string, { resolve: (ack: SyncAck) => void; reject: (err: unknown) => void }>();
   private shelfCount = 0;
 
   private subs = new Map<string, Subscription>();
+  private resetPromises = new Map<string, Promise<boolean>>();
   private listeners = new Map<string, Set<(data: never) => void>>();
   private lastPresence: {
     session_id: string | null;
@@ -204,19 +230,33 @@ export class SyncClient {
   private connId = 0;
   private fatalCode: string | null = null;
   private sessionSuperseded = false;
+  private supersededStreak = 0;
   private backoffAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private welcomeTimer: ReturnType<typeof setTimeout> | null = null;
   private lastReceivedAt = 0;
   private welcomed = false;
   private sending = false;
 
   private clockTimer: ReturnType<typeof setTimeout> | null = null;
   private clockTimeout: ReturnType<typeof setTimeout> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
   private clockSamples: { offset: number; rtt: number }[] = [];
   private clockPingT0: number | null = null;
+  private clockPingSeq = 0;
+  private clockLost = 0;
   private clockKnown = false;
   private measuredOffset = 0;
+
+  // Mehrere Tabs
+  private readonly tabId = uuidv7();
+  private readonly coordinator: TabCoordinator | null;
+  private isLeader: boolean;
+  private tabsStarted = false;
+  private offTab: (() => void) | null = null;
+  private remoteTabs = new Map<string, Set<string>>();
+  private remoteResets = new Map<string, (pos: StreamPosition) => void>();
 
   constructor(options: SyncClientOptions = {}) {
     this.opts = options;
@@ -228,16 +268,31 @@ export class SyncClient {
     this.gapWaitMs = options.gapWaitMs ?? 1_000;
     this.maxInFlight = options.maxInFlight ?? MAX_IN_FLIGHT;
     this.clockSyncTimeoutMs = options.clockSyncTimeoutMs ?? 10_000;
+    this.welcomeTimeoutMs = options.welcomeTimeoutMs ?? 10_000;
+    this.coordinator = options.tabs === undefined ? createWebLocksCoordinator() : options.tabs;
+    this.isLeader = this.coordinator === null;
     this.ready = this.load();
   }
 
   // ------------------------------------------------------------------ öffentliche Schnittstelle
 
-  /** Lädt die Warteschlange und baut die Verbindung auf. Verbindet danach von selbst neu (§11.2, §11.4). */
+  /**
+   * Lädt die Warteschlange und baut die Verbindung auf. Verbindet danach von selbst neu (§11.2, §11.4).
+   * Mit mehreren Tabs verbindet nur der Leader-Tab; die anderen schreiben in die gemeinsame Warteschlange.
+   */
   async connect(): Promise<void> {
     await this.ready;
     this.wanted = true;
     this.fatalCode = null;
+    if (this.coordinator) {
+      if (!this.tabsStarted) {
+        this.tabsStarted = true;
+        this.offTab = this.coordinator.onMessage((m) => this.handleTab(m));
+        this.setState('follower');
+        this.coordinator.acquire(() => void this.becomeLeader());
+      }
+      return;
+    }
     if (this.ws || this.reconnectTimer) return;
     this.openSocket();
   }
@@ -245,6 +300,7 @@ export class SyncClient {
   /** Trennt und verbindet nicht mehr. Die Warteschlange bleibt erhalten. */
   disconnect(): void {
     this.wanted = false;
+    this.connId++;
     this.clearReconnect();
     const ws = this.ws;
     if (ws) {
@@ -255,6 +311,13 @@ export class SyncClient {
         // schon zu
       }
       this.afterClose();
+    }
+    if (this.coordinator && this.tabsStarted) {
+      this.offTab?.();
+      this.offTab = null;
+      this.coordinator.release();
+      this.tabsStarted = false;
+      this.isLeader = false;
     }
     this.setState('closed');
   }
@@ -279,28 +342,47 @@ export class SyncClient {
     return this.persistent;
   }
 
+  /** Hält dieser Tab die Verbindung? (Ohne Tab-Koordination immer `true`.) */
+  get leader(): boolean {
+    return this.isLeader;
+  }
+
   /** Aktuell gemessener (nicht unbedingt angewandter) Uhrversatz, `null` vor dem ersten Abgleich. */
   get clockOffsetMs(): number | null {
     return this.clockKnown ? this.measuredOffset : null;
   }
 
-  /** Wartet, bis die Verbindung angemeldet und der Uhrabgleich fertig ist. */
-  whenOnline(): Promise<void> {
+  /** Wartet, bis die Verbindung angemeldet und der Uhrabgleich fertig ist. `signal` räumt den Listener auf. */
+  whenOnline(signal?: AbortSignal): Promise<void> {
     if (this.state === 'online') return Promise.resolve();
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        off();
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        cleanup();
+        reject(new DOMException('abgebrochen', 'AbortError'));
+      };
       const off = this.onEvent('connection', (c) => {
         if (c.state === 'online') {
-          off();
+          cleanup();
           resolve();
         }
       });
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener('abort', onAbort, { once: true });
     });
   }
 
   /**
    * Abonniert einen Strom. `from` stammt aus `stream_seq`/`stream_op_id` des REST-Stands (§11.1); `last_seq = 0` nur
-   * für Ströme, die der Client selbst anlegt. `onOp` bekommt Operationen lückenlos in `seq`-Reihenfolge. Bei `reset`
-   * ruft der Client `opts.onReset` (REST laden, abgleichen, neue Position liefern). Rückgabe: Abo beenden.
+   * für Ströme, die der Client selbst anlegt. `onOp` bekommt Operationen lückenlos in `seq`-Reihenfolge.
+   *
+   * Mehrere Abos je Strom sind erlaubt: Alle Empfänger bekommen jede Operation, Position und `reset` gelten einmal
+   * pro Strom. Abonniert ein weiterer Empfänger mit einer älteren Position, gilt die ältere (Operationen werden dann
+   * erneut geliefert; sie sind idempotent). Bei `reset` werden alle `onReset`-Handler aufgerufen; die älteste gelieferte
+   * Position gilt. Rückgabe: dieses Abo beenden.
    */
   subscribe(
     stream: string,
@@ -309,27 +391,9 @@ export class SyncClient {
     opts: { onReset?: ResetHandler } = {},
   ): () => void {
     if (!SyncStreamIdSchema.safeParse(stream).success) throw new TypeError(`Ungültiger Strom: ${stream}`);
-    const old = this.subs.get(stream);
-    if (old?.gapTimer) clearTimeout(old.gapTimer);
-    const sub: Subscription = {
-      stream,
-      lastSeq: from.lastSeq,
-      lastOpId: from.lastOpId,
-      onOp,
-      onReset: opts.onReset,
-      buffer: new Map(),
-      gapTimer: null,
-      resetting: false,
-      resetInFlight: old?.resetInFlight ?? false,
-    };
-    this.subs.set(stream, sub);
-    this.sendSubscribe([sub]);
-    return () => {
-      if (this.subs.get(stream) !== sub) return;
-      if (sub.gapTimer) clearTimeout(sub.gapTimer);
-      this.subs.delete(stream);
-      this.sendJson({ type: 'unsubscribe', streams: [stream] });
-    };
+    const receiver: Receiver = { onOp, onReset: opts.onReset };
+    this.addReceiver(stream, from, receiver);
+    return () => this.removeReceiver(stream, receiver);
   }
 
   /**
@@ -348,7 +412,8 @@ export class SyncClient {
         this.queue.push(entry);
         this.byOpId.set(op.op_id, entry);
         this.emit('queue', { pending: this.queue.length });
-        this.pump();
+        if (this.coordinator && !this.isLeader) this.postTab({ t: 'enqueued' });
+        else this.pump();
       }).catch((err: unknown) => {
         this.pending.delete(op.op_id);
         reject(err);
@@ -373,7 +438,8 @@ export class SyncClient {
   /** Meldet, was dieser Client gerade zeigt. Wird nach dem Neuverbinden erneut gesendet. */
   setPresence(p: { session_id: string | null; notebook_id: string | null; page_id: string | null }): void {
     this.lastPresence = p;
-    if (this.welcomed) this.sendJson({ type: 'presence', ...p });
+    if (this.coordinator && !this.isLeader) this.postTab({ t: 'presence', p });
+    else if (this.welcomed) this.sendJson({ type: 'presence', ...p });
   }
 
   /** Inhalt der Fehlerablage (nie automatisch geleert, §11.2). */
@@ -404,6 +470,13 @@ export class SyncClient {
   private setQueue(entries: QueueEntry[]): void {
     this.queue = entries;
     this.byOpId = new Map(entries.map((e) => [e.op.op_id, e]));
+  }
+
+  /** Warteschlange neu aus dem gemeinsamen Speicher lesen (andere Tabs haben angehängt); Bekanntes bleibt erhalten. */
+  private async reloadQueue(): Promise<void> {
+    const list = await this.store.list();
+    const known = new Map(this.queue.map((e) => [e.key, e]));
+    this.setQueue(list.map((e) => known.get(e.key) ?? e));
   }
 
   /** Speicherzugriffe laufen nacheinander, damit Reihenfolge und Zähler stimmen. */
@@ -456,6 +529,7 @@ export class SyncClient {
   ): void {
     this.state = state;
     this.emit('connection', { state, retryInMs, closeCode });
+    if (this.coordinator && this.isLeader) this.postTab({ t: 'state', state, retryInMs, closeCode });
   }
 
   private openSocket(): void {
@@ -477,6 +551,10 @@ export class SyncClient {
       if (this.ws !== ws) return;
       this.lastReceivedAt = this.now();
       this.startKeepalive(ws);
+      // `welcome` muss kommen; sonst trennen und neu verbinden
+      this.welcomeTimer = setTimeout(() => {
+        if (this.ws === ws && !this.welcomed) this.forceClose(ws, 4000);
+      }, this.welcomeTimeoutMs);
       this.sendJson({
         type: 'hello',
         protocol: 1,
@@ -512,6 +590,17 @@ export class SyncClient {
     ws.onclose = null;
   }
 
+  /** Verbindung von uns aus beenden (Keepalive, `welcome` fehlt) und wie ein Schließen behandeln. */
+  private forceClose(ws: WebSocketLike, code: number): void {
+    this.detach(ws);
+    try {
+      ws.close(code, 'client');
+    } catch {
+      // schon zu
+    }
+    this.enqueueInbox(() => this.handleClose(ws, code));
+  }
+
   /** Nachrichten und Schließen laufen strikt nacheinander in Empfangsreihenfolge. */
   private enqueueInbox(fn: () => Promise<void>): void {
     this.inbox = this.inbox.then(fn).catch(() => undefined);
@@ -523,13 +612,7 @@ export class SyncClient {
       if (this.ws !== ws) return;
       if (this.now() - this.lastReceivedAt >= KEEPALIVE_DEAD_MS) {
         // 45 s Funkstille: trennen und neu verbinden (§11.4)
-        this.detach(ws);
-        try {
-          ws.close(4000, 'keepalive');
-        } catch {
-          // schon zu
-        }
-        this.enqueueInbox(() => this.handleClose(ws, 4000));
+        this.forceClose(ws, 4000);
         return;
       }
       this.sendJson({ type: 'ping' });
@@ -539,6 +622,8 @@ export class SyncClient {
   private stopKeepalive(): void {
     if (this.keepaliveTimer) clearInterval(this.keepaliveTimer);
     this.keepaliveTimer = null;
+    if (this.welcomeTimer) clearTimeout(this.welcomeTimer);
+    this.welcomeTimer = null;
   }
 
   /** Aufräumen nach dem Schließen, gemeinsam für `disconnect` und `handleClose`. */
@@ -559,6 +644,8 @@ export class SyncClient {
   private async handleClose(ws: WebSocketLike, code: number): Promise<void> {
     if (this.ws !== ws) return;
     this.afterClose();
+    // Unklare Operationen (Elternoperation abgelehnt, nie beantwortet) kommen jetzt in die Fehlerablage
+    await this.settleSuspects();
     if (!this.wanted) {
       this.setState('closed', null, code);
       return;
@@ -568,8 +655,9 @@ export class SyncClient {
       return;
     }
     if (code === 4409 || this.sessionSuperseded) {
-      // Warteschlange ist umgeschrieben; sofort neu verbinden, ohne Wartezeit (§9.2)
-      this.scheduleReconnect(0, code);
+      // Warteschlange ist umgeschrieben (§9.2): beim ersten Mal sofort, danach mit Wartezeit gegen enge Schleifen
+      this.supersededStreak += 1;
+      this.scheduleReconnect(this.supersededStreak <= 1 ? 0 : null, code);
       return;
     }
     // 4503, 4408, Netzfehler, Keepalive: exponentielle Wartezeit mit Jitter
@@ -582,10 +670,11 @@ export class SyncClient {
     this.emit('fatal', { code, message: `Sync-Verbindung dauerhaft abgelehnt (${code})` });
   }
 
+  /** 1 s, 2 s, 4 s … höchstens 30 s. Der Zufallsanteil verkürzt die Wartezeit um bis zu 25 %, nie darüber hinaus. */
   private backoffDelay(): number {
     const base = Math.min(BACKOFF_MAX_MS, BACKOFF_START_MS * 2 ** this.backoffAttempt);
     this.backoffAttempt = Math.min(this.backoffAttempt + 1, 16);
-    return Math.round(base + this.random() * base * 0.25);
+    return Math.min(BACKOFF_MAX_MS, Math.round(base * (1 - this.random() * 0.25)));
   }
 
   private scheduleReconnect(delay: number | null, closeCode: number | null = null): void {
@@ -622,7 +711,7 @@ export class SyncClient {
     }
     const parsed = SyncServerMessageSchema.safeParse(json);
     if (!parsed.success) {
-      this.handleUnknown(json);
+      await this.handleUnknown(json);
       return;
     }
     const msg: SyncServerMessage = parsed.data;
@@ -651,6 +740,7 @@ export class SyncClient {
       }
       case 'event':
         this.emit(msg.name, msg.data as never);
+        if (this.coordinator) this.postTab({ t: 'event', name: msg.name, data: msg.data });
         return;
     }
   }
@@ -660,12 +750,12 @@ export class SyncClient {
    * Enum-Werten überspringen, `seq` aber als empfangen zählen. Unbekannte Fehlercodes behandeln wir über ihre Flags.
    * Alles andere ignorieren.
    */
-  private handleUnknown(json: unknown): void {
+  private async handleUnknown(json: unknown): Promise<void> {
     if (json === null || typeof json !== 'object') return;
     const o = json as Record<string, unknown>;
     if (o.type === 'error') {
       const err = looseError(json);
-      if (err) this.enqueueInbox(() => this.onError(err));
+      if (err) await this.onError(err);
       return;
     }
     if (o.type !== 'op') return;
@@ -685,6 +775,66 @@ export class SyncClient {
     this.acceptSeq(sub, { seq: op.seq, opId: op.op_id, op });
   }
 
+  // ------------------------------------------------------------------ Abos, Ströme
+
+  private newSub(stream: string, pos: StreamPosition): Subscription {
+    return {
+      stream,
+      lastSeq: pos.lastSeq,
+      lastOpId: pos.lastOpId,
+      receivers: new Set(),
+      buffer: new Map(),
+      gapTimer: null,
+      resetting: false,
+      resetRequested: false,
+      resetInfo: null,
+    };
+  }
+
+  private setPosition(sub: Subscription, pos: StreamPosition): void {
+    sub.lastSeq = pos.lastSeq;
+    sub.lastOpId = pos.lastOpId;
+    sub.buffer.clear();
+    if (sub.gapTimer) clearTimeout(sub.gapTimer);
+    sub.gapTimer = null;
+  }
+
+  private addReceiver(stream: string, from: StreamPosition, receiver: Receiver): void {
+    let sub = this.subs.get(stream);
+    if (!sub) {
+      sub = this.newSub(stream, from);
+      sub.receivers.add(receiver);
+      this.subs.set(stream, sub);
+      this.sendSubscribe([sub]);
+      return;
+    }
+    sub.receivers.add(receiver);
+    if (sub.resetting) {
+      if (this.resetPromises.has(stream)) {
+        // Reset läuft: der neue Empfänger bekommt seinen Handler in einer weiteren Runde
+        sub.resetRequested = true;
+      } else {
+        // früherer Reset ist gescheitert oder hatte keinen Handler: die frische REST-Position übernimmt
+        sub.resetting = false;
+        this.setPosition(sub, from);
+        this.sendSubscribe([sub]);
+      }
+    } else if (from.lastSeq < sub.lastSeq) {
+      this.setPosition(sub, from);
+      this.sendSubscribe([sub]);
+    }
+  }
+
+  private removeReceiver(stream: string, receiver: Receiver): void {
+    const sub = this.subs.get(stream);
+    if (!sub || !sub.receivers.delete(receiver)) return;
+    if (sub.receivers.size > 0) return;
+    if (sub.gapTimer) clearTimeout(sub.gapTimer);
+    this.subs.delete(stream);
+    if (this.coordinator && !this.isLeader) this.postTab({ t: 'unsub', stream });
+    else this.sendJson({ type: 'unsubscribe', streams: [stream] });
+  }
+
   /** Lückenlose Auslieferung je Strom: `last_seq` ist die höchste `seq`, bis zu der alles angewendet ist (§11.2). */
   private acceptSeq(sub: Subscription, item: SeqItem): void {
     if (item.seq <= sub.lastSeq) return;
@@ -701,10 +851,12 @@ export class SyncClient {
       sub.lastSeq = next.seq;
       sub.lastOpId = next.opId;
       if (next.op) {
-        try {
-          sub.onOp(next.op);
-        } catch (err) {
-          console.error('Sync: Fehler im onOp-Handler', err);
+        for (const r of [...sub.receivers]) {
+          try {
+            r.onOp(next.op);
+          } catch (err) {
+            console.error('Sync: Fehler im onOp-Handler', err);
+          }
         }
       }
     }
@@ -723,7 +875,13 @@ export class SyncClient {
   }
 
   private sendSubscribe(subs: Subscription[]): void {
-    if (!this.welcomed || subs.length === 0) return;
+    if (subs.length === 0) return;
+    if (this.coordinator && !this.isLeader) {
+      for (const s of subs)
+        this.postTab({ t: 'sub', stream: s.stream, lastSeq: s.lastSeq, lastOpId: s.lastOpId });
+      return;
+    }
+    if (!this.welcomed) return;
     this.sendJson({
       type: 'subscribe',
       streams: subs.map((s) => ({ stream: s.stream, last_seq: s.lastSeq, last_op_id: s.lastOpId })),
@@ -733,6 +891,8 @@ export class SyncClient {
   private async onWelcome(w: Extract<SyncServerMessage, { type: 'welcome' }>, connId: number): Promise<void> {
     if (this.state !== 'connecting') return;
     this.welcomed = true;
+    if (this.welcomeTimer) clearTimeout(this.welcomeTimer);
+    this.welcomeTimer = null;
     this.setState('syncing');
     const stored = await this.store.getMeta('db_epoch').catch(() => null);
     if (connId !== this.connId) return;
@@ -783,40 +943,52 @@ export class SyncClient {
       sub.gapTimer = null;
       this.emit('reset', info);
     }
-    const todo = resets.filter(({ sub }) => !sub.resetInFlight);
-    const finish = async (): Promise<void> => {
-      const results = await Promise.all(todo.map(({ sub, info }) => this.runReset(sub, info)));
-      if (epochToStore && results.every(Boolean) && resets.length === todo.length) {
+    void (async () => {
+      const results = await Promise.all(resets.map(({ sub, info }) => this.requestReset(sub, info)));
+      if (epochToStore && results.every(Boolean)) {
         await this.store.setMeta('db_epoch', epochToStore).catch(() => undefined);
       }
-    };
-    if (epochToStore && resets.length === 0) {
-      void this.store.setMeta('db_epoch', epochToStore).catch(() => undefined);
-      return;
-    }
-    void finish();
+    })();
   }
 
-  private async runReset(sub: Subscription, info: ResetInfo): Promise<boolean> {
-    if (!sub.onReset) {
-      this.emit('reset.failed', { stream: sub.stream, error: new Error('kein onReset-Handler') });
-      return false;
+  /** Pro Strom läuft höchstens ein Reset; weitere Anforderungen führen zu einer weiteren Runde danach. */
+  private requestReset(sub: Subscription, info: ResetInfo): Promise<boolean> {
+    sub.resetInfo = info;
+    sub.resetRequested = true;
+    let p = this.resetPromises.get(sub.stream);
+    if (!p) {
+      const run = this.resetLoop(sub).finally(() => {
+        if (this.resetPromises.get(sub.stream) === run) this.resetPromises.delete(sub.stream);
+      });
+      p = run;
+      this.resetPromises.set(sub.stream, run);
     }
-    sub.resetInFlight = true;
-    try {
-      const pos = await sub.onReset(info);
+    return p;
+  }
+
+  private async resetLoop(sub: Subscription): Promise<boolean> {
+    for (;;) {
+      sub.resetRequested = false;
+      const info = sub.resetInfo;
+      const handlers = [...sub.receivers].filter((r) => r.onReset);
+      if (!info || handlers.length === 0) {
+        this.emit('reset.failed', { stream: sub.stream, error: new Error('kein onReset-Handler') });
+        return false;
+      }
+      let positions: StreamPosition[];
+      try {
+        positions = await Promise.all(handlers.map((r) => r.onReset!(info)));
+      } catch (error) {
+        this.emit('reset.failed', { stream: sub.stream, error });
+        return false;
+      }
       if (this.subs.get(sub.stream) !== sub) return false;
-      sub.lastSeq = pos.lastSeq;
-      sub.lastOpId = pos.lastOpId;
+      if (sub.resetRequested) continue; // neuer Empfänger oder neuer Reset: noch eine Runde
+      const oldest = positions.reduce((a, b) => (b.lastSeq < a.lastSeq ? b : a));
+      this.setPosition(sub, oldest);
       sub.resetting = false;
-      sub.buffer.clear();
       this.sendSubscribe([sub]);
       return true;
-    } catch (error) {
-      this.emit('reset.failed', { stream: sub.stream, error });
-      return false;
-    } finally {
-      sub.resetInFlight = false;
     }
   }
 
@@ -825,6 +997,7 @@ export class SyncClient {
   private startClockSync(connId: number): void {
     this.stopClockSync();
     this.clockSamples = [];
+    this.clockLost = 0;
     if (this.state === 'syncing') {
       this.clockTimeout = setTimeout(() => {
         // Server antwortet nicht auf time.ping: Warteschlange trotzdem senden (ohne Versatz bleibt clock_uncertain)
@@ -838,47 +1011,70 @@ export class SyncClient {
   private stopClockSync(): void {
     if (this.clockTimer) clearTimeout(this.clockTimer);
     if (this.clockTimeout) clearTimeout(this.clockTimeout);
+    if (this.pongTimer) clearTimeout(this.pongTimer);
     this.clockTimer = null;
     this.clockTimeout = null;
+    this.pongTimer = null;
   }
 
   private sendClockPing(): void {
+    const seq = ++this.clockPingSeq;
     this.clockPingT0 = this.now();
     this.sendJson({ type: 'time.ping', t0: this.clockPingT0 });
+    if (this.pongTimer) clearTimeout(this.pongTimer);
+    // Verlorenes time.pong: nach 5 s weiter; nach 3 Verlusten mit dem Vorhandenen abschließen
+    this.pongTimer = setTimeout(() => {
+      if (seq !== this.clockPingSeq || this.clockPingT0 === null) return;
+      this.clockPingT0 = null;
+      this.clockLost += 1;
+      if (this.clockLost > 3) this.finishClock();
+      else this.sendClockPing();
+    }, PONG_TIMEOUT_MS);
   }
 
   private onTimePong(t0: number, ts: number): void {
     if (this.clockPingT0 === null || t0 !== this.clockPingT0) return;
     this.clockPingT0 = null;
+    if (this.pongTimer) clearTimeout(this.pongTimer);
+    this.pongTimer = null;
     const t1 = this.now();
     this.clockSamples.push({ offset: ts - (t0 + t1) / 2, rtt: t1 - t0 });
     if (this.clockSamples.length < CLOCK_ROUNDS) {
       this.sendClockPing();
       return;
     }
-    const offset = Math.round(median(this.clockSamples.map((s) => s.offset)));
-    const rtt = Math.max(0, Math.round(median(this.clockSamples.map((s) => s.rtt))));
+    this.finishClock();
+  }
+
+  private finishClock(): void {
+    const samples = this.clockSamples;
     this.clockSamples = [];
-    this.sendJson({ type: 'time.offset', offset_ms: offset, rtt_ms: rtt });
-    this.measuredOffset = offset;
-    this.clockKnown = true;
-    this.emit('clock', { offsetMs: offset, rttMs: rtt, suspicious: Math.abs(offset) > 2_000 });
+    const connId = this.connId;
+    this.clockTimer = setTimeout(() => this.startClockSync(this.connId), CLOCK_RESYNC_MS);
+    if (samples.length > 0) {
+      const offset = Math.round(median(samples.map((s) => s.offset)));
+      const rtt = Math.max(0, Math.round(median(samples.map((s) => s.rtt))));
+      this.sendJson({ type: 'time.offset', offset_ms: offset, rtt_ms: rtt });
+      this.measuredOffset = offset;
+      this.clockKnown = true;
+      this.emit('clock', { offsetMs: offset, rttMs: rtt, suspicious: Math.abs(offset) > 2_000 });
+    }
     if (this.clockTimeout) clearTimeout(this.clockTimeout);
     this.clockTimeout = null;
-    this.clockTimer = setTimeout(() => this.startClockSync(this.connId), CLOCK_RESYNC_MS);
-    const connId = this.connId;
     // Noch nicht gesendete Operationen mit unsicherer Uhr korrigieren, dann erst die Warteschlange senden
     void this.locked(() => this.correctPending()).then(() => {
       if (connId === this.connId && this.state === 'syncing') this.goOnline();
     });
   }
 
+  /** Nur Operationen, die noch nie gesendet wurden (§11.5); sonst gäbe dieselbe `op_id` mit anderem Inhalt `op_id_reused`. */
   private async correctPending(): Promise<void> {
+    if (!this.clockKnown) return;
     const foreign = this.opts.isForeignSession ?? (() => false);
     const offset = this.effectiveOffset();
     const changed: QueueEntry[] = [];
     for (const e of this.queue) {
-      if (this.inFlight.has(e.op.op_id) || !e.op.clock_uncertain) continue;
+      if (e.sent || !e.op.clock_uncertain) continue;
       e.op = correctClock(e.op, offset, foreign);
       changed.push(e);
     }
@@ -897,28 +1093,44 @@ export class SyncClient {
 
   /** Sendet unbestätigte Operationen in Originalreihenfolge, höchstens `maxInFlight` ohne Antwort (§11.2). */
   private pump(): void {
-    if (this.state !== 'online' || this.sending) return;
+    if (this.state !== 'online' || this.sending || !this.isLeader) return;
     this.sending = true;
+    const fresh: QueueEntry[] = [];
     try {
+      // Updates einer Seite bleiben hinter einer festgehaltenen (Konflikt) derselben Seite
+      const blockedPages = new Set<string>();
       for (const e of this.queue) {
         if (this.inFlight.size >= this.maxInFlight) break;
         const id = e.op.op_id;
-        if (this.inFlight.has(id) || this.held.has(id)) continue;
+        const page = e.op.kind === 'page.update' ? e.op.data.page_id : null;
+        if (this.held.has(id)) {
+          if (page) blockedPages.add(page);
+          continue;
+        }
+        if (this.inFlight.has(id) || (page && blockedPages.has(page))) continue;
         if (!this.sendJson(e.op)) break;
         this.inFlight.add(id);
+        if (!e.sent) {
+          e.sent = true;
+          fresh.push(e);
+        }
       }
     } finally {
       this.sending = false;
     }
+    if (fresh.length > 0) void this.locked(() => this.store.putMany(fresh)).catch(() => undefined);
   }
 
   private async onAck(ack: SyncAck): Promise<void> {
     const sub = this.subs.get(ack.stream);
     if (sub && !sub.resetting) this.acceptSeq(sub, { seq: ack.seq, opId: ack.op_id, op: null });
     this.inFlight.delete(ack.op_id);
+    if (this.coordinator) this.postTab({ t: 'ack', ack });
     const entry = this.byOpId.get(ack.op_id);
     if (!entry) return; // doppelter ack oder schon in der Fehlerablage
     this.backoffAttempt = 0;
+    this.supersededStreak = 0;
+    this.releaseSuspect(ack.op_id);
     // Im Arbeitsspeicher sofort entfernen, damit `pump` die Operation nicht noch einmal sendet
     this.dropEntries([entry]);
     await this.locked(() => this.store.removeMany([entry.key]));
@@ -935,6 +1147,18 @@ export class SyncClient {
       this.byOpId.delete(e.op.op_id);
       this.inFlight.delete(e.op.op_id);
       this.held.delete(e.op.op_id);
+      this.suspects.delete(e.op.op_id);
+      this.deferred.delete(e.op.op_id);
+    }
+  }
+
+  /** Eine unklare Operation wurde bestätigt: ihre zurückgestellten Nachfolger dürfen gesendet werden. */
+  private releaseSuspect(opId: string): void {
+    if (!this.suspects.delete(opId)) return;
+    for (const [id, by] of [...this.deferred]) {
+      if (by !== opId) continue;
+      this.deferred.delete(id);
+      this.held.delete(id);
     }
   }
 
@@ -949,7 +1173,7 @@ export class SyncClient {
     if (!entry) return; // schon bestätigt oder abgelegt
     this.inFlight.delete(err.opId);
     if (err.code === 'page_version_conflict' && !err.retryable) {
-      void this.resolveConflict(entry, err);
+      this.startConflict(entry, err);
       return;
     }
     if (err.retryable) {
@@ -963,27 +1187,55 @@ export class SyncClient {
       }
       return;
     }
-    await this.shelveWithDependents(entry, 'rejected', err);
+    // Eine unklare Operation, deren Elternoperation abgelehnt wurde, gilt jetzt als abhängig
+    const cause = this.suspects.get(err.opId) ?? null;
+    await this.shelveWithDependents(entry, cause ? 'dependent' : 'rejected', err, cause);
   }
 
-  /** Operation und abhängige Operationen in die Fehlerablage verschieben (§11.2). */
+  /**
+   * Operation und abhängige Operationen in die Fehlerablage verschieben (§11.2). Abhängige, die schon gesendet sind,
+   * bleiben zunächst stehen: ihre eigene Antwort entscheidet (Fehler: ablegen, `ack`: normal).
+   */
   private async shelveWithDependents(
     root: QueueEntry,
     kind: ShelfReasonKind,
     err: Pick<LooseError, 'code' | 'message'>,
+    causedBy: string | null = null,
   ): Promise<void> {
+    // `session.start` mit `session_transition_invalid`: die Session existiert, also ist nichts davon abhängig
+    const noDeps = root.op.kind === 'session.start' && err.code === 'session_transition_invalid';
     const later = this.queue.filter((e) => e.key > root.key);
-    const deps = dependentsOf(root.op, later);
-    const now = this.now();
-    const shelved: NewShelfEntry[] = [
-      { shelvedAt: now, op: root.op, reason: { kind, code: err.code, message: err.message, causedBy: null } },
-      ...deps.map((d): NewShelfEntry => ({
-        shelvedAt: now,
-        op: d.op,
-        reason: { kind: 'dependent', code: err.code, message: err.message, causedBy: root.op.op_id },
-      })),
+    const deps = noDeps ? [] : dependentsOf(root.op, later);
+    const items: { entry: QueueEntry; kind: ShelfReasonKind; causedBy: string | null }[] = [
+      { entry: root, kind, causedBy },
     ];
-    const all = [root, ...deps];
+    let unclear: string | null = null;
+    for (const d of deps) {
+      const id = d.op.op_id;
+      if (unclear === null && this.inFlight.has(id)) {
+        unclear = id;
+        this.suspects.set(id, root.op.op_id);
+      } else if (unclear !== null) {
+        this.deferred.set(id, unclear);
+        this.held.add(id);
+      } else {
+        items.push({ entry: d, kind: 'dependent', causedBy: root.op.op_id });
+      }
+    }
+    await this.shelveEntries(items, err);
+  }
+
+  private async shelveEntries(
+    items: { entry: QueueEntry; kind: ShelfReasonKind; causedBy: string | null }[],
+    err: Pick<LooseError, 'code' | 'message'>,
+  ): Promise<void> {
+    const now = this.now();
+    const shelved: NewShelfEntry[] = items.map((i) => ({
+      shelvedAt: now,
+      op: i.entry.op,
+      reason: { kind: i.kind, code: err.code, message: err.message, causedBy: i.causedBy },
+    }));
+    const all = items.map((i) => i.entry);
     await this.locked(async () => {
       await this.store.shelve(
         all.map((e) => e.key),
@@ -992,41 +1244,84 @@ export class SyncClient {
       this.dropEntries(all);
       this.shelfCount += all.length;
     });
-    for (const [i, e] of all.entries()) {
-      const p = this.pending.get(e.op.op_id);
-      this.pending.delete(e.op.op_id);
-      p?.reject(
-        new SyncRejectedError({
+    for (const i of items) {
+      const p = this.pending.get(i.entry.op.op_id);
+      this.pending.delete(i.entry.op.op_id);
+      const error = new SyncRejectedError({
+        code: err.code,
+        message: err.message,
+        opId: i.entry.op.op_id,
+        kind: i.kind,
+      });
+      p?.reject(error);
+      if (this.coordinator) {
+        this.postTab({
+          t: 'rejected',
+          opId: i.entry.op.op_id,
           code: err.code,
           message: err.message,
-          opId: e.op.op_id,
-          kind: i === 0 ? kind : 'dependent',
-        }),
-      );
+          kind: i.kind,
+        });
+      }
     }
     this.emit('shelf', { count: this.shelfCount });
     this.emit('queue', { pending: this.queue.length });
+    if (this.coordinator) this.postTab({ t: 'shelf', count: this.shelfCount });
     this.pump();
   }
 
-  /** `page_version_conflict` (§11.2): Fachcode lädt die Seite neu und legt die eigenen Felder auf den Serverstand. */
+  /** Verbindung zu: unklare Operationen (nie beantwortet) und ihre zurückgestellten Nachfolger ablegen. */
+  private async settleSuspects(): Promise<void> {
+    const items: { entry: QueueEntry; kind: ShelfReasonKind; causedBy: string | null }[] = [];
+    for (const e of this.queue) {
+      const cause = this.suspects.get(e.op.op_id) ?? this.deferred.get(e.op.op_id);
+      if (cause !== undefined) {
+        const root = this.suspects.get(e.op.op_id) ?? this.suspects.get(cause) ?? null;
+        items.push({ entry: e, kind: 'dependent', causedBy: root });
+      }
+    }
+    if (items.length === 0) return;
+    await this.shelveEntries(items, {
+      code: 'dependency_rejected',
+      message: 'Elternoperation wurde abgelehnt',
+    });
+  }
+
+  /** `page_version_conflict` je Seite nacheinander in Warteschlangenreihenfolge auflösen (§11.2). */
+  private startConflict(entry: QueueEntry, err: LooseError): void {
+    this.held.add(entry.op.op_id); // sofort, damit spätere Updates derselben Seite nicht vorbeiziehen
+    const page = entry.op.kind === 'page.update' ? entry.op.data.page_id : entry.op.op_id;
+    const prev = this.conflictChain.get(page) ?? Promise.resolve();
+    const next = prev
+      .then(() => this.resolveConflict(entry, err))
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.conflictChain.get(page) === next) this.conflictChain.delete(page);
+      });
+    this.conflictChain.set(page, next);
+  }
+
+  /** Fachcode lädt die Seite neu und legt die eigenen Felder auf den Serverstand. */
   private async resolveConflict(entry: QueueEntry, err: LooseError): Promise<void> {
+    if (this.byOpId.get(entry.op.op_id) !== entry) return;
     const resolver = this.opts.onPageVersionConflict;
-    const op = entry.op;
-    if (!resolver || op.kind !== 'page.update' || entry.conflicts >= MAX_CONFLICT_RETRIES) {
+    const current = entry.op;
+    if (!resolver || current.kind !== 'page.update' || entry.conflicts >= MAX_CONFLICT_RETRIES) {
+      this.held.delete(current.op_id);
       await this.shelveWithDependents(entry, 'conflict_unresolved', err);
       return;
     }
-    this.held.add(op.op_id);
-    const result = await resolver({ op, message: err.message }).catch(() => null);
-    this.held.delete(op.op_id);
-    if (this.byOpId.get(op.op_id) !== entry) return; // inzwischen bestätigt
+    const result = await resolver({ op: current, message: err.message }).catch(() => null);
+    if (this.byOpId.get(current.op_id) !== entry) return; // inzwischen bestätigt oder abgelegt
+    this.held.delete(current.op_id);
     if (!result) {
       await this.shelveWithDependents(entry, 'conflict_unresolved', err);
       return;
     }
     entry.conflicts += 1;
-    entry.op = { ...op, data: { ...op.data, fields: result.fields, version: result.version } };
+    // Die Operation kann inzwischen umgeschrieben worden sein (4409): vom aktuellen Stand ausgehen
+    const latest = entry.op as typeof current;
+    entry.op = { ...latest, data: { ...latest.data, fields: result.fields, version: result.version } };
     await this.locked(() => this.store.putMany([entry]));
     this.pump();
   }
@@ -1047,6 +1342,175 @@ export class SyncClient {
       await this.store.putMany(this.queue);
     });
     this.emit('session.superseded', { oldSessionId: oldId, newSessionId: newId });
+  }
+
+  // ------------------------------------------------------------------ Mehrere Tabs
+
+  private postTab(msg: { t: string; [key: string]: unknown }): void {
+    this.coordinator?.post({ ...msg, from: this.tabId });
+  }
+
+  private async becomeLeader(): Promise<void> {
+    await this.ready;
+    this.isLeader = true;
+    await this.locked(() => this.reloadQueue()).catch(() => undefined);
+    this.postTab({ t: 'leader' });
+    if (this.wanted && !this.ws) this.openSocket();
+  }
+
+  private handleTab(msg: TabMessage): void {
+    if (msg.from === this.tabId) return;
+    if (this.isLeader) {
+      this.handleTabAsLeader(msg);
+      return;
+    }
+    switch (msg.t) {
+      case 'ack': {
+        const ack = msg.ack as SyncAck;
+        const sub = this.subs.get(ack.stream);
+        if (sub && !sub.resetting) this.acceptSeq(sub, { seq: ack.seq, opId: ack.op_id, op: null });
+        const entry = this.byOpId.get(ack.op_id);
+        if (entry) this.dropEntries([entry]);
+        this.pending.get(ack.op_id)?.resolve(ack);
+        this.pending.delete(ack.op_id);
+        this.emit('queue', { pending: this.queue.length });
+        return;
+      }
+      case 'rejected': {
+        const opId = msg.opId as string;
+        const entry = this.byOpId.get(opId);
+        if (entry) this.dropEntries([entry]);
+        this.pending.get(opId)?.reject(
+          new SyncRejectedError({
+            code: String(msg.code),
+            message: String(msg.message),
+            opId,
+            kind: msg.kind as ShelfReasonKind,
+          }),
+        );
+        this.pending.delete(opId);
+        this.emit('queue', { pending: this.queue.length });
+        return;
+      }
+      case 'shelf':
+        this.shelfCount = msg.count as number;
+        this.emit('shelf', { count: this.shelfCount });
+        return;
+      case 'op':
+        this.onServerOp(msg.op as SyncOp);
+        return;
+      case 'event':
+        this.emit(msg.name as ClientEventName, msg.data as never);
+        return;
+      case 'state':
+        this.setStateFromLeader(msg);
+        return;
+      case 'reset': {
+        const info = msg.info as ResetInfo;
+        const sub = this.subs.get(info.stream);
+        if (!sub) return;
+        this.startResets([{ sub, info }], null);
+        void this.requestReset(sub, info).then((ok) => {
+          if (ok)
+            this.postTab({
+              t: 'reset-done',
+              stream: info.stream,
+              lastSeq: sub.lastSeq,
+              lastOpId: sub.lastOpId,
+            });
+        });
+        return;
+      }
+      case 'leader':
+        // Neuer Leader: Abos erneut anmelden (die Warteschlange liest er selbst aus dem Speicher)
+        this.sendSubscribe([...this.subs.values()]);
+        if (this.lastPresence) this.postTab({ t: 'presence', p: this.lastPresence });
+        return;
+      default:
+        return;
+    }
+  }
+
+  private setStateFromLeader(msg: TabMessage): void {
+    this.state = msg.state as ConnectionState;
+    this.emit('connection', {
+      state: this.state,
+      retryInMs: (msg.retryInMs as number | null) ?? null,
+      closeCode: (msg.closeCode as number | null) ?? null,
+    });
+  }
+
+  private handleTabAsLeader(msg: TabMessage): void {
+    switch (msg.t) {
+      case 'enqueued':
+        void this.locked(async () => {
+          await this.reloadQueue();
+          this.pump();
+        });
+        return;
+      case 'presence':
+        this.lastPresence = msg.p as typeof this.lastPresence;
+        if (this.welcomed && this.lastPresence) this.sendJson({ type: 'presence', ...this.lastPresence });
+        return;
+      case 'sub': {
+        const stream = msg.stream as string;
+        const tabs = this.remoteTabs.get(stream) ?? new Set<string>();
+        this.remoteTabs.set(stream, tabs);
+        const pos = { lastSeq: msg.lastSeq as number, lastOpId: (msg.lastOpId as string | null) ?? null };
+        const existing = this.subs.get(stream);
+        const hasProxy = existing ? [...existing.receivers].some((r) => r.remote) : false;
+        tabs.add(msg.from);
+        if (!hasProxy) this.addReceiver(stream, pos, this.remoteReceiver(stream));
+        else if (existing && !existing.resetting && pos.lastSeq < existing.lastSeq) {
+          this.setPosition(existing, pos);
+          this.sendSubscribe([existing]);
+        }
+        return;
+      }
+      case 'unsub': {
+        const stream = msg.stream as string;
+        const tabs = this.remoteTabs.get(stream);
+        tabs?.delete(msg.from);
+        if (tabs && tabs.size === 0) {
+          this.remoteTabs.delete(stream);
+          const sub = this.subs.get(stream);
+          const proxy = sub ? [...sub.receivers].find((r) => r.remote) : undefined;
+          if (proxy) this.removeReceiver(stream, proxy);
+        }
+        return;
+      }
+      case 'reset-done': {
+        const resolve = this.remoteResets.get(msg.stream as string);
+        this.remoteResets.delete(msg.stream as string);
+        resolve?.({ lastSeq: msg.lastSeq as number, lastOpId: (msg.lastOpId as string | null) ?? null });
+        return;
+      }
+      case 'leader':
+        // Zwei Leader gleichzeitig kann es mit Web Locks nicht geben; ignorieren
+        return;
+      default:
+        return;
+    }
+  }
+
+  /** Stellvertreter-Empfänger: reicht Operationen und `reset` an die anderen Tabs weiter. */
+  private remoteReceiver(stream: string): Receiver {
+    return {
+      remote: true,
+      onOp: (op) => this.postTab({ t: 'op', op }),
+      onReset: (info) =>
+        new Promise<StreamPosition>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            this.remoteResets.delete(stream);
+            reject(new Error('Kein Tab hat den Reset beantwortet'));
+          }, REMOTE_RESET_TIMEOUT_MS);
+          this.remoteResets.set(stream, (pos) => {
+            clearTimeout(timer);
+            resolve(pos);
+          });
+          this.postTab({ t: 'reset', info });
+        }),
+    };
   }
 
   // ------------------------------------------------------------------ Ereignisse

@@ -27,7 +27,7 @@ export function downloadShelf(entries: readonly ShelfEntry[]): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
 
 const KIND_LABEL: Record<ShelfEntry['reason']['kind'], string> = {

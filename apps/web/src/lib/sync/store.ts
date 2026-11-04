@@ -27,7 +27,13 @@ export class MemoryQueueStore implements QueueStore {
   private meta = new Map<string, string>();
 
   async append(op: QueuedOp): Promise<QueueEntry> {
-    const entry: QueueEntry = { key: this.nextKey++, op: structuredClone(op), failures: 0, conflicts: 0 };
+    const entry: QueueEntry = {
+      key: this.nextKey++,
+      op: structuredClone(op),
+      failures: 0,
+      conflicts: 0,
+      sent: false,
+    };
     this.queue.set(entry.key, entry);
     return structuredClone(entry);
   }
@@ -103,7 +109,22 @@ export class IndexedDbQueueStore implements QueueStore {
         db.createObjectStore('shelf', { keyPath: 'id', autoIncrement: true });
         db.createObjectStore('meta', { keyPath: 'name' });
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onblocked = () => {
+        // Ein anderer Tab hält eine ältere Version offen; die Anfrage wartet, bis er schließt
+        console.warn('Sync: IndexedDB-Upgrade blockiert, ein anderer Tab hält die Datenbank offen');
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        // Anderer Tab will aktualisieren oder löschen: Verbindung freigeben, beim nächsten Zugriff neu öffnen
+        db.onversionchange = () => {
+          db.close();
+          this.dbPromise = null;
+        };
+        db.onclose = () => {
+          this.dbPromise = null;
+        };
+        resolve(db);
+      };
       req.onerror = () => reject(req.error ?? new Error('IndexedDB lässt sich nicht öffnen'));
     });
     return this.dbPromise;
@@ -120,10 +141,10 @@ export class IndexedDbQueueStore implements QueueStore {
   async append(op: QueuedOp): Promise<QueueEntry> {
     const db = await this.db();
     const tx = db.transaction('queue', 'readwrite');
-    const entry = { op, failures: 0, conflicts: 0 };
+    const entry = { op, failures: 0, conflicts: 0, sent: false };
     const key = await done(tx.objectStore('queue').add(entry));
     await finished(tx);
-    return { key: key as number, op, failures: 0, conflicts: 0 };
+    return { key: key as number, op: structuredClone(op), failures: 0, conflicts: 0, sent: false };
   }
 
   async list(): Promise<QueueEntry[]> {

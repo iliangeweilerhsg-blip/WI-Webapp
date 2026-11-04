@@ -73,6 +73,8 @@ export class FakeServer {
   skewMs = 0;
   /** Antwortet auf nichts (Keepalive-Test) */
   mute = false;
+  /** Beantwortet time.ping nicht */
+  muteTime = false;
   /** Entscheidet je Operation; Standard: bestätigen. */
   decide: (op: Msg, socket: FakeSocket) => OpDecision = () => ({ ack: true });
   /** Empfangene Operationen (op_id) in Reihenfolge, über alle Verbindungen */
@@ -143,6 +145,7 @@ export class FakeServer {
 
   onClientMessage(socket: FakeSocket, msg: Msg): void {
     if (this.mute) return;
+    if (this.muteTime && msg.type === 'time.ping') return;
     switch (msg.type) {
       case 'hello': {
         const resume = this.resume(msg.streams as Msg[]);

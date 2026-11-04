@@ -388,7 +388,7 @@ describe('Fehler und Schließcodes', () => {
     c.onEvent('connection', (s) => s.state === 'backoff' && states.push(s.retryInMs));
     server.last.serverClose(4503);
     await settle();
-    expect(states).toEqual([1125]);
+    expect(states).toEqual([875]); // Zufallsanteil verkürzt, verlängert nie
   });
 
   it('Poison-Op: nach 5x internal_error samt Abhängigen in die Fehlerablage, Rest läuft weiter', async () => {
@@ -445,9 +445,21 @@ describe('Fehler und Schließcodes', () => {
     });
     await settle();
     expect(await a).toBeInstanceOf(SyncRejectedError);
+    // b ist schon gesendet: seine eigene Antwort entscheidet (hier Fehler -> abgelegt)
+    expect(c.pendingCount).toBe(1);
+    server.last.push({
+      type: 'error',
+      code: 'notebook_not_found',
+      message: 'x',
+      op_id: c.pendingOps()[0]!.op_id,
+      stream: nbStream(1),
+      retryable: false,
+      fatal: false,
+    });
+    await settle();
     expect(await b).toBeInstanceOf(SyncRejectedError);
     await expect(free).resolves.toBeTruthy();
-    expect(shelfEvents).toEqual([2]);
+    expect(shelfEvents).toEqual([1, 2]);
     expect(c.connectionState).toBe('online');
   });
 
