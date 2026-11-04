@@ -159,6 +159,17 @@ class SemesterUpdate(BaseModel):
     )
 
 
+class SlideDeckUpdate(BaseModel):
+    """
+    PATCH /slide-decks/{id}
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    title: StrictStr | None = Field(None, min_length=1)
+
+
 class TextBlock(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -552,6 +563,7 @@ class SchemaBundle(BaseModel):
     SlideDeck_1: SlideDeck | None = Field(None, alias='SlideDeck')
     SlideDeckDetail_1: SlideDeckDetail | None = Field(None, alias='SlideDeckDetail')
     SlideDeckList_1: SlideDeckList | None = Field(None, alias='SlideDeckList')
+    SlideDeckUpdate_1: SlideDeckUpdate | None = Field(None, alias='SlideDeckUpdate')
     Task_1: Task | None = Field(None, alias='Task')
     TextBlock_1: TextBlock | None = Field(None, alias='TextBlock')
     Timestamp: AwareDatetime | None = Field(

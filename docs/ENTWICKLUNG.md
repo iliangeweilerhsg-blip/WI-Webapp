@@ -9,12 +9,12 @@ Regeln für die Zusammenarbeit der Agenten stehen in [`AGENTS.md`](../AGENTS.md)
 |---|---|---|
 | `packages/schemas` | JSON Schemas (Quelle der Wahrheit), Codegen, Contract-Tests | ✅ T0-02 |
 | `packages/shared` | Generierte TS-Typen und Zod-Validatoren, gemeinsame Konstanten | ✅ T0-02 |
-| `packages/ui-tokens` | Design-Tokens (JSON → CSS-Variablen, Swift) | T0-06 |
-| `services/core` | Node 22, Fastify, Drizzle, REST-API | T0-04 |
-| `services/worker` | Python 3.12 (uv), Job-Schleife, Pipeline | T0-05 |
-| `apps/web` | Next.js (Static Export), React, Tailwind | T0-06 |
+| `packages/ui-tokens` | Design-Tokens (JSON → CSS-Variablen, Swift) | ✅ T0-06 |
+| `services/core` | Node 22, Fastify, Drizzle, REST-API | ✅ T0-04 |
+| `services/worker` | Python 3.12 (uv), Job-Schleife, Pipeline | ✅ T0-05 |
+| `apps/web` | Next.js (Static Export), React, Tailwind | ✅ T0-06 |
 | `apps/ipad` | SwiftUI + PencilKit (`.swiftpm`) | Phase 1 |
-| `infra` | Docker Compose (Postgres + pgvector), `sg`-CLI | T0-03 |
+| `infra` | Docker Compose (Postgres + pgvector), `sg`-CLI | ✅ T0-03 |
 
 ## Befehle
 
@@ -29,6 +29,17 @@ pnpm schemas:check        # wie CI: generierte Dateien aktuell?
 ```
 
 Python-Contract-Tests: `cd packages/schemas && uv run --project python pytest python/tests -q`
+
+## Datenbank-Migrationen
+
+- Migrationen erzeugt `drizzle-kit` aus `services/core/src/db/schema/`, abgelegt unter `services/core/drizzle/`. Danach muss `drizzle-kit generate` „No schema changes“ melden.
+- **Nur vorwärts:** Drizzle kennt keine Down-Migrationen. Änderungen werden rückwärtskompatibel gebaut: erst Spalte hinzufügen, später alte entfernen.
+- Vor jeder Migration auf dem Mac des Owners wird ein Backup gemacht. `sg backup` folgt mit T1-18, bis dahin von Hand mit `pg_dump`.
+- **Ausgerollte Migrationen nie ändern.** Solange eine Migration nur auf Branches existiert, darf sie neu erzeugt werden.
+- **Fremdschlüssel:**
+  - CASCADE für Teile eines Ganzen, z. B. `slide` → `slide_deck`.
+  - SET NULL für optionale Verweise.
+  - NO ACTION für Pflicht-Eltern, z. B. `module` → `semester`. Endgültiges Löschen geschieht nur bewusst.
 
 ## Datenformate ändern
 

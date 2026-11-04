@@ -14,6 +14,7 @@ export default tseslint.config(
       '**/next-env.d.ts',
       'services/worker/**',
       'apps/ipad/**',
+      '.claude/**', // lokale Agenten-Worktrees
     ],
   },
   js.configs.recommended,
