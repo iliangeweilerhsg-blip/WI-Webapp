@@ -23,6 +23,14 @@ Grundlage: Spezifikation 02 §3, `docs/VERTRAEGE.md`.
 | `pnpm sg migrate` | `pnpm --filter @sg/core migrate` |
 | `pnpm sg backup` / `restore` | Platzhalter, kommen mit T1-18 (Exit-Code 2) |
 
+**Nach `git pull`:** `pnpm sg start` hält alles selbst aktuell.
+
+- **Pakete:** Jeder `sg`-Befehl außer `stop` und der Hilfe vergleicht vor dem Laden seiner eigenen Module `pnpm-lock.yaml` mit der installierten Kopie (`node_modules/.pnpm/lock.yaml`). Bei Abweichung führt er zuerst `pnpm install --frozen-lockfile` aus (`infra/sg/deps.mjs`). Schreibt pnpm die Kopie dabei nicht neu, etwa bei einem anders formatierten Lockfile, merkt sich `sg` das erfolgreiche Install in `node_modules/.sg-deps`. Scheitert das Install, brechen `start` und `migrate` ab. Andere Befehle wie `doctor` laufen mit einer Warnung weiter. `stop` installiert nie, damit es auch offline und bei laufender App funktioniert.
+- **Web-App:** `sg start` baut den Static Export neu, wenn er fehlt oder wenn sich die Quellen seit dem letzten Build durch `sg start` geändert haben. Quellen sind `apps/web`, `packages`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` und `tsconfig.base.json`. Verglichen werden die Git-Baum-Hashes des letzten Commits, gemerkt in `apps/web/.sg-build-stamp` (gitignored).
+- Nicht committete Änderungen lösen keinen Build aus, und nach einem Build aus geändertem Stand wird kein Stempel geschrieben. Das gilt auch für ungetrackte, nicht ignorierte Dateien unter den Quellen: Mit ihnen baut `sg start` bei jedem Start neu. Für die Entwicklung gibt es `pnpm --filter @sg/web dev`.
+- `NEXT_PUBLIC_*`-Variablen aus der Shell fließen nicht in den Vergleich ein.
+- Ein per `SG_WEB_DIR` umgelenkter Export wird nur gebaut, wenn er fehlt.
+
 Existieren Core, Worker oder Web-App noch nicht, meldet `sg` das klar. Bei fehlendem Core bricht `start` nach dem Datenbank-Start ab, ein fehlender Worker wird nur gemeldet.
 
 ## Umgebungsvariablen

@@ -23,6 +23,7 @@ import {
   type TerminateOptions,
 } from './procs.ts';
 import { realSystem } from './system.ts';
+import { ensureWebBuild, type PrepareIo } from './webbuild.ts';
 
 const log = (msg: string): void => console.log(`[sg] ${msg}`);
 const err = (msg: string): void => console.error(`[sg] ${msg}`);
@@ -181,6 +182,10 @@ function stopOptions(cfg: SgConfig, name: ServiceName, force?: () => boolean): T
   };
 }
 
+function prepareIo(cfg: SgConfig): PrepareIo {
+  return { run: (cmd, args) => runInherit(cmd, args, cfg), log, err, hasFile };
+}
+
 export async function start(cfg: SgConfig): Promise<number> {
   const avail = availability(cfg.repoRoot);
   if (!avail.core) {
@@ -212,19 +217,7 @@ export async function start(cfg: SgConfig): Promise<number> {
     return 1;
   }
 
-  if (!hasFile(join(cfg.webDir, 'index.html'))) {
-    if (avail.web) {
-      log('Static Export der Web-App fehlt, baue ihn (pnpm --filter @sg/web build) …');
-      const code = await runInherit('pnpm', ['--filter', '@sg/web', 'build'], cfg);
-      if (code !== 0) {
-        err(
-          'Build der Web-App fehlgeschlagen. Der Core startet trotzdem, liefert aber keine Oberfläche aus.',
-        );
-      }
-    } else {
-      err(`Web-App fehlt noch (Ticket T0-06, erwartet in ${cfg.webDir}). Core startet nur mit der API.`);
-    }
-  }
+  await ensureWebBuild(cfg, prepareIo(cfg), avail.web);
 
   if ((await migrate(cfg)) !== 0) return 1;
 
