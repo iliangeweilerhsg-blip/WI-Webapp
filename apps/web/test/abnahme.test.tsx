@@ -58,11 +58,28 @@ afterEach(() => {
 
 const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)));
 
+/** Zeit in Sekundenschritten vorstellen, bis der Text da ist (ein Toast steht nur 5 s) */
+async function advanceUntilText(text: string, maxMs = 15_000) {
+  for (let t = 0; t < maxMs && !screen.queryByText(text); t += 1_000) await advance(1_000);
+  return screen.findByText(text);
+}
+
 describe('Titel aus dem Dateinamen', () => {
   it('Unterstriche und Mehrfach-Leerzeichen werden zu einem Leerzeichen, .pdf entfällt', () => {
     expect(titleFromFile('Mikro_Vorlesung_70.pdf')).toBe('Mikro Vorlesung 70');
     expect(titleFromFile('  VL__03 _ Normalisierung .PDF')).toBe('VL 03 Normalisierung');
     expect(titleFromFile('.pdf')).toBe('');
+    expect(titleFromFile('___.pdf')).toBe('');
+  });
+
+  it('NFC, ohne Steuerzeichen, auf 300 Code Points gekürzt (Emoji wird nicht zerschnitten)', () => {
+    // NFD: „e“ + kombinierender Akut wird zu „é“
+    expect(titleFromFile('Cafe\u0301.pdf')).toBe('Caf\u00e9');
+    expect(titleFromFile('A\u0001B\u007fC.pdf')).toBe('ABC');
+    const cut = titleFromFile(`${'a'.repeat(299)}😀😀.pdf`);
+    expect([...cut]).toHaveLength(300);
+    expect(cut.endsWith('😀')).toBe(true);
+    expect(cut).not.toMatch(/[\ud800-\udbff]$/);
   });
 
   it('der Upload schickt den lesbaren Titel mit', async () => {
@@ -87,9 +104,8 @@ describe('Einlesen gescheitert nach dem Hochladen', () => {
     expect(screen.queryByText(/ließ sich nicht lesen/)).not.toBeInTheDocument();
 
     core.failIngest(id);
-    await advance(POLL_INTERVAL_MS + 100);
     expect(
-      await screen.findByText('„Kaputt PDF“ ließ sich nicht lesen. Die Datei ist gespeichert.'),
+      await advanceUntilText('„Kaputt PDF“ ließ sich nicht lesen. Die Datei ist gespeichert.'),
     ).toBeInTheDocument();
   });
 
@@ -99,12 +115,37 @@ describe('Einlesen gescheitert nach dem Hochladen', () => {
     await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('Gut.pdf'));
     await screen.findByText('Foliensatz hinzugefügt');
     core.finishIngest(core.decks[0]?.id ?? '', 3);
-    await advance(POLL_INTERVAL_MS + 100);
+    await advance(10_100);
     expect(screen.queryByText(/ließ sich nicht lesen/)).not.toBeInTheDocument();
     const before = core.requests.length;
     await advance(POLL_INTERVAL_MS * 3);
     // Fertig beobachtet: keine weiteren Abfragen nur für den Toast
     expect(core.requests.slice(before).filter((r) => r.path.startsWith('/slide-decks/'))).toHaveLength(0);
+  });
+
+  it('mehrere Fehler derselben Runde: ein Sammel-Toast', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const core = await openModule();
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), [pdf('A.pdf'), pdf('BB.pdf')]);
+    await screen.findByText('2 Foliensätze hinzugefügt');
+    for (const d of core.decks) core.failIngest(d.id);
+    expect(
+      await advanceUntilText('2 Foliensätze ließen sich nicht lesen. Die Dateien sind gespeichert.'),
+    ).toBeInTheDocument();
+  });
+
+  it('gelöschter Eintrag (404): wird nicht weiter beobachtet', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const core = await openModule();
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('Weg.pdf'));
+    await screen.findByText('Foliensatz hinzugefügt');
+    const deck = core.decks[0];
+    if (deck) deck.deleted_at = new Date().toISOString();
+    await advance(POLL_INTERVAL_MS + 100);
+    const seen = core.requests.length;
+    await advance(30_000);
+    const detail = core.requests.slice(seen).filter((r) => r.path === `/slide-decks/${deck?.id}`);
+    expect(detail).toHaveLength(0);
   });
 
   it('der Toast geht nach höchstens 5 s von selbst weg', async () => {

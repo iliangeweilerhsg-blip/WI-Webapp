@@ -25,7 +25,7 @@ const pdf = vi.hoisted(() => {
   const render = vi.fn(async (_page: number, _canvas: unknown, _cssWidth: number, _signal?: unknown) => true);
   const doc = {
     numPages: 5,
-    pageSize: vi.fn(async () => ({ width: 720, height: 405 })),
+    pageSize: vi.fn(async (_page: number) => ({ width: 720, height: 405 })),
     textItems: vi.fn(async (n: number) => pages[n] ?? []),
     render,
     destroy: vi.fn(),
@@ -419,6 +419,38 @@ describe('PDF-Anzeige während des Einlesens (F-ORG-02)', () => {
     expect(screen.getByTestId('page-frame').style.width).toBe(sizeBefore);
     expect(frameCanvas().style.visibility).toBe('visible');
     expect(pdf.render.mock.calls.length).toBe(renders);
+  });
+
+  it('liest alle Seitengrößen vorab; Platzhalter und Vorschaubilder haben das Seitenformat (Leiste springt nicht)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch Normalisierung', ingest_state: 'neu' })],
+    });
+    pdf.doc.pageSize.mockClear();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await openViewer();
+    await waitFor(() => expect(pdf.doc.pageSize.mock.calls.map((c) => c[0]).sort()).toEqual([1, 2, 3, 4, 5]));
+    const thumbs = screen.getByRole('navigation', { name: 'Seiten' });
+    await waitFor(() => {
+      const ratios = within(thumbs)
+        .getAllByTestId('thumb-placeholder')
+        .map((el) => (el as HTMLElement).style.aspectRatio.replace(/\s/g, ''));
+      expect(ratios).toEqual(Array(5).fill('720/405'));
+    });
+    // Der Rahmen wird beim Blättern nie unsichtbar
+    const frame = screen.getByTestId('page-frame');
+    for (let i = 0; i < 4; i += 1) {
+      await user.keyboard('{ArrowRight}');
+      expect(frame.style.opacity).toBe('');
+    }
+    core.finishIngest(DECK.id, 5);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 200);
+    });
+    await waitFor(() => expect(within(thumbs).getAllByRole('img')).toHaveLength(5));
+    for (const img of within(thumbs).getAllByRole('img')) {
+      expect((img as HTMLElement).style.aspectRatio.replace(/\s/g, '')).toBe('720/405');
+    }
   });
 
   it('Seitengröße nicht lesbar: gezeichnet wird trotzdem (Standardformat)', async () => {

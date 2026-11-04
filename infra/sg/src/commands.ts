@@ -341,7 +341,13 @@ export async function start(cfg: SgConfig): Promise<number> {
   await Promise.all(services.map((s) => s.exitedPromise));
   if (shutdownPromise) await shutdownPromise;
   // Enkel können die Pipes noch kurz offen halten; nicht ewig darauf warten.
-  await Promise.race([Promise.all(services.map((s) => s.closed)), sleep(3000)]);
+  // Der Timer wird danach gelöscht, sonst hielte er den Prozess 3 s am Leben.
+  let giveUp: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    Promise.all(services.map((s) => s.closed)),
+    new Promise<void>((resolve) => (giveUp = setTimeout(resolve, 3000))),
+  ]);
+  clearTimeout(giveUp);
 
   for (const sig of signals) process.off(sig, onSignal);
   process.off('exit', onProcessExit);

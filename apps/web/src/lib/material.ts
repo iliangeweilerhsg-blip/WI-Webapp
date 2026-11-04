@@ -102,15 +102,22 @@ export function useSheets(moduleId: string) {
   });
 }
 
-/** Foliensatz mit allen Folien (für Vorschaubild und Viewer). Pollt, solange der Satz eingelesen wird. */
-/** Titel aus dem Dateinamen: ohne `.pdf`, Unterstriche und Mehrfach-Leerzeichen werden zu einem Leerzeichen. */
+/**
+ * Titel aus dem Dateinamen: ohne `.pdf`, ohne Steuerzeichen, NFC-normalisiert, Unterstriche und Mehrfach-Leerzeichen
+ * werden zu einem Leerzeichen, höchstens 300 Zeichen (Code Points, ein Emoji wird nicht zerschnitten).
+ */
 export function titleFromFile(filename: string): string {
-  return filename
+  const cleaned = [...filename.normalize('NFC')]
+    .filter((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      return code > 0x1f && code !== 0x7f;
+    })
+    .join('')
     .replace(/\.pdf$/i, '')
     .replace(/_/g, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 300);
+    .trim();
+  return [...cleaned].slice(0, 300).join('');
 }
 
 /** Einlese-Zustand und Titel eines Eintrags (teilt den Cache mit den Detailansichten). */
@@ -137,6 +144,7 @@ export async function fetchIngest(
   return { state: sheet.ingest_state, title: sheet.title };
 }
 
+/** Foliensatz mit allen Folien (für Vorschaubild und Viewer). Pollt, solange der Satz eingelesen wird. */
 export function useDeckDetail(id: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['deck', id],

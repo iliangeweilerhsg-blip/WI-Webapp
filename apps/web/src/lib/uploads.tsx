@@ -67,6 +67,7 @@ const UploadContext = createContext<UploadApi | null>(null);
 
 /** So lange wird ein Eintrag nach dem Hochladen beobachtet (Einlesen dauert selten länger) */
 const WATCH_MAX_MS = 10 * 60_000;
+const WATCH_MAX_DELAY_MS = 10_000;
 
 function looksLikePdf(file: File): boolean {
   return file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
@@ -171,12 +172,22 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     return () => {
       alive.current = false;
       if (watchTimer.current) clearTimeout(watchTimer.current);
+      watchTimer.current = null;
     };
   }, []);
+
+  const rounds = useRef(0);
+  /** Pausen zwischen den Runden werden länger (2 s → höchstens 10 s), das Einlesen dauert meist nur Sekunden */
+  const nextDelay = useCallback(
+    () => Math.min(WATCH_MAX_DELAY_MS, POLL_INTERVAL_MS * 1.5 ** rounds.current++),
+    [],
+  );
 
   const pollWatched = useCallback(async () => {
     watchTimer.current = null;
     polling.current = true;
+    const failed: MaterialKind[] = [];
+    let failedTitle = '';
     for (const [id, { kind, since }] of [...watched.current]) {
       try {
         const { state, title } = await fetchIngest(client, kind, id);
@@ -186,27 +197,43 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         }
         watched.current.delete(id);
         void invalidateMaterial(client);
-        if (state === 'fehler' && alive.current) {
-          toast.show({ message: `„${title}“ ließ sich nicht lesen. Die Datei ist gespeichert.` });
+        if (state === 'fehler') {
+          failed.push(kind);
+          failedTitle = title;
         }
-      } catch {
-        // Core gerade nicht erreichbar oder Eintrag gelöscht: nach Ablauf der Frist aufgeben
-        if (Date.now() - since > WATCH_MAX_MS) watched.current.delete(id);
+      } catch (failure) {
+        // Gelöscht (404): nichts mehr zu beobachten. Sonst Core gerade nicht erreichbar: nach Ablauf der Frist aufgeben
+        const gone = failure instanceof ApiRequestError && failure.status === 404;
+        if (gone || Date.now() - since > WATCH_MAX_MS) watched.current.delete(id);
       }
     }
     polling.current = false;
-    if (alive.current && watched.current.size > 0) {
-      watchTimer.current = setTimeout(() => void pollWatched(), POLL_INTERVAL_MS);
+    // Mehrere Fehler derselben Runde teilen sich einen Toast (der neueste würde sonst die anderen ersetzen)
+    if (failed.length > 0 && alive.current) {
+      const one = failed.length === 1;
+      const sameKind = failed.every((k) => k === failed[0]);
+      const noun = sameKind ? KIND_WORDS[failed[0] ?? 'folien'].many : 'Dateien';
+      toast.show({
+        message: one
+          ? `„${failedTitle}“ ließ sich nicht lesen. Die Datei ist gespeichert.`
+          : `${failed.length} ${noun} ließen sich nicht lesen. Die Dateien sind gespeichert.`,
+      });
     }
-  }, [client, toast]);
+    if (alive.current && watched.current.size > 0) {
+      watchTimer.current = setTimeout(() => void pollWatched(), nextDelay());
+    }
+  }, [client, toast, nextDelay]);
 
   const watchIngest = useCallback(
     (kind: MaterialKind, id: string) => {
       watched.current.set(id, { kind, since: Date.now() });
       // Läuft gerade eine Runde, plant sie die nächste selbst
-      if (!polling.current) watchTimer.current ??= setTimeout(() => void pollWatched(), POLL_INTERVAL_MS);
+      if (!polling.current && !watchTimer.current) {
+        rounds.current = 0;
+        watchTimer.current = setTimeout(() => void pollWatched(), nextDelay());
+      }
     },
-    [pollWatched],
+    [pollWatched, nextDelay],
   );
 
   const run = useCallback(

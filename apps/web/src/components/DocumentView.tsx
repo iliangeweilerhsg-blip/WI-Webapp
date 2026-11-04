@@ -37,6 +37,8 @@ const ZOOM_STEP = 1.25;
 const PAGE_MARGIN = 32;
 const DEFAULT_PAGE = { w: 595, h: 842 };
 const SEARCH_DEBOUNCE_MS = 150;
+/** So viele Seitenköpfe liest pdf.js gleichzeitig vorab */
+const SIZE_BATCH = 8;
 
 type Zoom = { mode: 'fit' } | { mode: 'width' } | { mode: 'custom'; scale: number };
 
@@ -171,28 +173,48 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     [areaRef, pageCount],
   );
 
-  // Seitengröße: vom Core (Folien), von pdf.js oder aus dem Vorschaubild
+  // Seitengrößen: vom Core (Folien), von pdf.js oder aus dem Vorschaubild. Sobald pdf.js offen ist, lesen wir alle
+  // Größen einmal vorab (schnell, nur die Seitenköpfe): zuerst die Seiten um die aktuelle, dann der Rest. So gibt es
+  // beim Blättern keinen Sprung und die Seitenleiste kennt die Formate ihrer Platzhalter.
+  const startPage = useRef(current);
   useEffect(() => {
-    if (!pdf || meta.sizes[current - 1] || measured[current]) return;
+    if (!pdf) return;
     let cancelled = false;
-    pdf.pageSize(current).then(
-      (size) => {
-        if (!cancelled) setMeasured((m) => ({ ...m, [current]: { w: size.width, h: size.height } }));
-      },
-      () => {
-        // Größe nicht lesbar: mit dem Standardformat weiterzeichnen statt gar nichts zu zeigen
-        if (!cancelled) setMeasured((m) => ({ ...m, [current]: { w: DEFAULT_PAGE.w, h: DEFAULT_PAGE.h } }));
-      },
+    const order = Array.from({ length: pdf.numPages }, (_, i) => i + 1).sort(
+      (a, b) => Math.abs(a - startPage.current) - Math.abs(b - startPage.current),
     );
+    (async () => {
+      for (let i = 0; i < order.length && !cancelled; i += SIZE_BATCH) {
+        const batch = order.slice(i, i + SIZE_BATCH);
+        const sizes = await Promise.all(
+          batch.map((n) =>
+            pdf.pageSize(n).then(
+              (size) => [n, { w: size.width, h: size.height }] as const,
+              // Größe nicht lesbar: mit dem Standardformat weiterzeichnen statt gar nichts zu zeigen
+              () => [n, { w: DEFAULT_PAGE.w, h: DEFAULT_PAGE.h }] as const,
+            ),
+          ),
+        );
+        if (cancelled) return;
+        setMeasured((m) => {
+          const next = { ...m };
+          for (const [n, size] of sizes) next[n] ??= size;
+          return next;
+        });
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [pdf, current, meta.sizes, measured]);
+  }, [pdf]);
 
   // Erst zeichnen, wenn die Seitengröße bekannt ist (vom Core, von pdf.js oder aus dem Vorschaubild). Sonst wird
   // zuerst im Standardformat gezeichnet und gleich danach noch einmal: Die Seite blitzt auf und springt.
-  const sizeKnown = Boolean(meta.sizes[current - 1] ?? measured[current]);
-  const sizeOf = (n: number) => meta.sizes[n - 1] ?? measured[n] ?? DEFAULT_PAGE;
+  const knownSize = (n: number) => meta.sizes[n - 1] ?? measured[n] ?? null;
+  const sizeKnown = knownSize(current) !== null;
+  // Unbekannte Seiten übernehmen das Format einer bekannten statt A4: Der Rahmen springt nicht
+  const fallbackSize = meta.sizes.find(Boolean) ?? Object.values(measured)[0] ?? null;
+  const sizeOf = (n: number) => knownSize(n) ?? fallbackSize ?? DEFAULT_PAGE;
   const base = sizeOf(current);
   const availW = Math.max(area.w - PAGE_MARGIN, 100);
   const availH = Math.max(area.h - PAGE_MARGIN, 100);
@@ -629,6 +651,8 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
                       src={pageThumbUrl(kind, id, meta.slideIds[n - 1] ?? null, n)}
                       alt={`Seite ${n}`}
                       loading="lazy"
+                      // Gleiches Format wie der Platzhalter: Die Leiste springt nicht, wenn die Bilder nachladen
+                      style={{ aspectRatio: `${sizeOf(n).w} / ${sizeOf(n).h}` }}
                       className="block w-full rounded-sm bg-white"
                     />
                   ) : (
@@ -661,11 +685,12 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           <div className="grid min-h-full min-w-full place-items-center p-4">
             <div
               className="relative bg-white shadow-md"
-              // Solange noch gar keine Seitengröße bekannt ist, wäre das nur ein Kasten im Standardmaß, der gleich springt
+              // Solange noch gar keine Seitengröße bekannt ist, wäre das nur ein Kasten im Standardmaß, der gleich springt.
+              // Danach bleibt der Rahmen immer sichtbar.
               style={{
                 width: cssWidth,
                 height: cssHeight,
-                ...(!sizeKnown && !ready && !pdfFailed ? { opacity: 0 } : {}),
+                ...(!sizeKnown && !fallbackSize && !ready && !pdfFailed ? { opacity: 0 } : {}),
               }}
               data-testid="page-frame"
             >
