@@ -83,11 +83,16 @@ export function registerOpHandler(
   handler: OpHandler,
   opts: OpHandlerOptions = {},
 ): void {
-  if (SERVER_ONLY_KINDS.has(kind)) {
-    throw new Error(`${kind} ist eine Server-Operation und hat keinen Client-Handler`);
-  }
+  // Server-Operationen (SERVER_ONLY_KINDS) dürfen registriert werden, der Dispatcher lehnt sie von Clients aber
+  // immer vorher mit op_not_allowed ab: Ihr Handler läuft nie für eine Client-Operation
   if (handlers.has(kind)) throw new Error(`Für ${kind} ist schon ein Handler registriert`);
   handlers.set(kind, { handler, preLock: opts.preLock });
+}
+
+/** Handler abmelden (z. B. beim Beenden der App, damit eine neue Instanz im selben Prozess neu registrieren kann) */
+export function unregisterOpHandler(kind: SyncOp['kind'], handler?: OpHandler): void {
+  const current = handlers.get(kind);
+  if (current && (handler === undefined || current.handler === handler)) handlers.delete(kind);
 }
 
 /** Registrierter Handler oder `undefined` */

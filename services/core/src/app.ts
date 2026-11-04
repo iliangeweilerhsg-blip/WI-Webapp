@@ -13,6 +13,7 @@ import { registerIdempotency } from './plugins/idempotency.ts';
 import { createSecurityGuard, registerSecurity, type DeviceTokenVerifier } from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
 import { materialRoutes } from './routes/material.ts';
+import { inkRoutes } from './routes/notebooks.ts';
 import { organisationRoutes } from './routes/organisation.ts';
 import { systemRoutes } from './routes/system.ts';
 import { syncPlugin } from './sync/server.ts';
@@ -99,6 +100,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(systemRoutes, { db, version });
       await api.register(materialRoutes, { db, config });
       await api.register(organisationRoutes, { db });
+      await api.register(inkRoutes, { db, config });
     },
     { prefix: API_BASE },
   );

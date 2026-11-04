@@ -7,7 +7,12 @@ import type { Tx } from '../../src/db/client.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { appendOp, findOpById, setOnOpCommitted, type AppendOpInput } from '../../src/sync/append.ts';
 import { publishAfterCommit, publishEvent } from '../../src/sync/events.ts';
-import { registerOpHandler, SyncOpError } from '../../src/sync/handlers.ts';
+import {
+  getOpRegistration,
+  registerOpHandler,
+  SyncOpError,
+  unregisterOpHandler,
+} from '../../src/sync/handlers.ts';
 import { getActiveHub } from '../../src/sync/hub.ts';
 import { syncLimits } from '../../src/sync/limits.ts';
 import {
@@ -20,6 +25,7 @@ import {
   type Msg,
   type SyncTestApp,
 } from './sync-helpers.ts';
+import { loadStrokeFixtures, makeOp, notebookCreateData, pageCreateData, seedModule } from './ink-helpers.ts';
 
 let app: SyncTestApp;
 let url: string;
@@ -683,14 +689,49 @@ describe('Operationen, ack und Duplikate (§11.2, §16.2)', () => {
       clock_uncertain: false,
       data: { page_id: uuidv7() },
     };
-    client.send(op);
-    expect(await client.next((m) => m.type === 'error')).toMatchObject({
-      code: 'internal_error',
-      retryable: true,
-      fatal: true,
-      details: { reason: 'handler_missing', kind: 'page.delete' },
-    });
-    expect(await client.closed()).toBe(4503);
+    // page.delete hat seit Core-Ink einen Handler: für den Test kurz abmelden
+    const registration = getOpRegistration('page.delete');
+    if (registration) unregisterOpHandler('page.delete');
+    try {
+      client.send(op);
+      expect(await client.next((m) => m.type === 'error')).toMatchObject({
+        code: 'internal_error',
+        retryable: true,
+        fatal: true,
+        details: { reason: 'handler_missing', kind: 'page.delete' },
+      });
+      expect(await client.closed()).toBe(4503);
+    } finally {
+      if (registration) {
+        registerOpHandler(
+          'page.delete',
+          registration.handler,
+          registration.preLock ? { preLock: registration.preLock } : {},
+        );
+      }
+    }
+  });
+
+  it('Core-Ink-Handler sind beim Start eingehängt: stroke.add ergibt ack und eine Zeile in stroke', async () => {
+    const { moduleId } = await seedModule(app.handle.db);
+    const nb = notebookCreateData(moduleId);
+    const stream = `notebook:${nb.notebook_id}`;
+    const pc = pageCreateData(nb.notebook_id);
+    const stroke = structuredClone(loadStrokeFixtures()[0]!.strokes[0]!);
+    const client = await ready();
+    const ops = [
+      makeOp('notebook.create', stream, nb),
+      makeOp('page.create', stream, pc),
+      makeOp('stroke.add', stream, { page_id: pc.page_id, stroke }),
+    ];
+    for (const op of ops) client.send(op);
+    await waitFor(() => client.of('ack').length === 3 || client.of('error').length > 0, 10_000, 'acks');
+    expect(client.of('error')).toEqual([]);
+    expect(client.of('ack')).toEqual(
+      ops.map((op, i) => ({ type: 'ack', op_id: op.op_id, stream, seq: i + 1 })),
+    );
+    const rows = await app.handle.sql`SELECT client_id, deleted_at FROM stroke WHERE page_id = ${pc.page_id}`;
+    expect(rows).toEqual([{ client_id: stroke.client_id, deleted_at: null }]);
   });
 
   it('too_many_pending: frühere Operationen laufen durch, dann error und 4503', async () => {
