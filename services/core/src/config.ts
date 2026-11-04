@@ -1,0 +1,66 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseEnv } from 'node:util';
+import { CORE_PORT } from '@sg/shared';
+
+export type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
+
+/** Laufzeit-Konfiguration aus Umgebungsvariablen (docs/VERTRAEGE.md §1) */
+export interface Config {
+  dataDir: string;
+  databaseUrl: string;
+  port: number;
+  host: string;
+  webDir: string;
+  /** Erlaubter CORS-Origin der Entwicklungs-Web-App, leer = kein CORS */
+  devWebOrigin: string;
+  logLevel: LogLevel;
+}
+
+const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'];
+
+function expandHome(path: string): string {
+  if (path === '~') return homedir();
+  if (path.startsWith('~/')) return join(homedir(), path.slice(2));
+  return path;
+}
+
+/** Repo-Wurzel relativ zu dieser Datei (services/core/src/config.ts) */
+const repoRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
+
+/**
+ * Liest `$SG_DATA_DIR/config/.env` und trägt fehlende Variablen ein.
+ * Bereits gesetzte Umgebungsvariablen haben Vorrang. Rückgabe: Pfad der gelesenen Datei oder null.
+ */
+export function loadDotEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+  const dataDir = resolve(expandHome(env.SG_DATA_DIR || join(homedir(), 'StudienGehirn')));
+  const file = join(dataDir, 'config', '.env');
+  if (!existsSync(file)) return null;
+  const parsed = parseEnv(readFileSync(file, 'utf8'));
+  for (const [key, value] of Object.entries(parsed)) {
+    if (env[key] === undefined && value !== undefined) env[key] = value;
+  }
+  return file;
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const port = env.SG_CORE_PORT ? Number(env.SG_CORE_PORT) : CORE_PORT;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`SG_CORE_PORT ist keine gültige Portnummer: ${env.SG_CORE_PORT}`);
+  }
+  const logLevel = env.SG_LOG_LEVEL || 'info';
+  if (!LOG_LEVELS.includes(logLevel)) {
+    throw new Error(`SG_LOG_LEVEL ist ungültig: ${logLevel} (erlaubt: ${LOG_LEVELS.join(', ')})`);
+  }
+  return {
+    dataDir: resolve(expandHome(env.SG_DATA_DIR || join(homedir(), 'StudienGehirn'))),
+    databaseUrl: env.DATABASE_URL || 'postgres://sg:sg@127.0.0.1:5432/sg',
+    port,
+    host: env.SG_CORE_HOST || '0.0.0.0',
+    webDir: resolve(expandHome(env.SG_WEB_DIR || join(repoRoot, 'apps', 'web', 'out'))),
+    devWebOrigin: (env.SG_DEV_WEB_ORIGIN || '').replace(/\/+$/, ''),
+    logLevel: logLevel as LogLevel,
+  };
+}
