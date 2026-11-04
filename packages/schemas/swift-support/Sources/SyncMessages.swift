@@ -39,6 +39,12 @@ private struct SGEnvelope: Decodable {
     let code: String?
     let stream: String?
     let seq: Int?
+    let opID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type, kind, name, code, stream, seq
+        case opID = "op_id"
+    }
 }
 
 enum SGSyncOp {
@@ -63,18 +69,21 @@ enum SGSyncOp {
     case markerAdd(MarkerAddOp)
     case markerRemove(MarkerRemoveOp)
     case photoAdd(PhotoAddOp)
-    /// Nicht darstellbare Operation: unbekanntes kind oder unbekannter Enum-Wert. seq zählt trotzdem
-    case unknown(kind: String, stream: String?, seq: Int?)
+    /// Nicht darstellbare Operation: unbekanntes kind, unbekannter Enum-Wert oder unbekanntes
+    /// Seitenelement. seq und op_id zählen trotzdem (last_seq, last_op_id)
+    case unknown(kind: String, stream: String?, seq: Int?, opID: String?)
 
     static func decode(_ data: Data) throws -> SGSyncOp {
         let env = try SGSync.decode(SGEnvelope.self, from: data)
         do {
             if let op = try decodeKnown(env.kind ?? "", data) { return op }
             SGSync.log("Unbekannte Operation ignoriert: \(env.kind ?? "-")")
-        } catch let error as DecodingError {
+        } catch {
+            // Jeder Fehler, nicht nur DecodingError: auch SGSyncError.unknownElement (neuer
+            // Elementtyp in element.upsert) darf die Dekodierung nicht abbrechen (VERTRAEGE §11.2)
             SGSync.log("Operation \(env.kind ?? "-") nicht lesbar, ignoriert: \(error)")
         }
-        return .unknown(kind: env.kind ?? "", stream: env.stream, seq: env.seq)
+        return .unknown(kind: env.kind ?? "", stream: env.stream, seq: env.seq, opID: env.opID)
     }
 
     private static func decodeKnown(_ kind: String, _ data: Data) throws -> SGSyncOp? {
@@ -128,7 +137,7 @@ enum SGSyncOp {
         case .markerAdd(let v): return try SGSync.encode(v)
         case .markerRemove(let v): return try SGSync.encode(v)
         case .photoAdd(let v): return try SGSync.encode(v)
-        case .unknown(let kind, _, _): throw SGSyncError.notEncodable("Operation \(kind)")
+        case .unknown(let kind, _, _, _): throw SGSyncError.notEncodable("Operation \(kind)")
         }
     }
 }

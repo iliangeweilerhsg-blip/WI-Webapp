@@ -268,7 +268,8 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `GET /devices` | – | 200 `DeviceList` | |
 | `DELETE /devices/{id}` | – | 204. Token sofort ungültig, offene WebSockets des Geräts werden mit Code 4401 geschlossen | 404 `device_not_found` |
 | `POST /devices/pairings` (**lokal**) | – | 201 `PairingCode`, öffnet das Kopplungsfenster (§12) | |
-| `POST /devices/pair/start` (Netz ohne Token) | `PairStartRequest` | 201 `PairStartResponse` | 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited` |
+| `POST /devices/pair/start` (Netz ohne Token) | `PairStartRequest` | 201 `PairStartResponse` | 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited`, 429 `pairing_requests_full` |
+| `GET /devices/pairings/requests` (**lokal**) | – | 200 `PairingRequestList`, offene Anfragen des aktuellen Fensters (leer ohne Fenster) | |
 | `DELETE /devices/pairings/requests/{request_id}` (**lokal**) | – | 204, Anfrage abgelehnt | 404 `pairing_request_not_found` |
 | `POST /devices/pair/confirm` (Netz ohne Token) | `PairConfirmRequest` | 201 `PairResponse` | 403 `pairing_code_invalid`, 403 `pairing_request_rejected`, 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited` |
 | `GET /backups` | – | 200 `BackupOverview` | |
@@ -549,7 +550,10 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 2. **Bonjour-Weg:** Der Core kündigt `_studiengehirn._tcp` an (TXT `v=1`, `name=<Macname>`). Das iPad ruft `POST /devices/pair/start` auf.
    - Das geht nur bei offenem Fenster, sonst `409 pairing_window_closed`. Es belegt das Fenster **nicht exklusiv**: Mehrere Anfragen sind möglich.
    - Der Core legt eine Anfrage (`PairingRequest`) mit `device_name` und `public_nonce` an und antwortet mit `request_id` und `pairing_id`. Der Code steht **nicht** in der Antwort.
-   - Die Web-App bekommt `pairing.requested` und listet die Anfragen. Eine fremde Anfrage kann der Nutzer ablehnen (`DELETE /devices/pairings/requests/{request_id}`, nur lokal).
+   - **Höchstens 10 offene Anfragen pro Fenster.** Offen heißt: nicht abgelehnt. Die elfte `pair/start`-Anfrage bekommt `429 pairing_requests_full`. Lehnt der Nutzer eine Anfrage ab, wird ein Platz frei.
+   - Die Web-App bekommt `pairing.requested` (Nutzlast `PairingRequest`) und listet die Anfragen. Nach dem Neuladen holt sie sich die offenen Anfragen über `GET /devices/pairings/requests` (nur lokal, `PairingRequestList`). Das ist eine eigene Route statt einer Erweiterung von `POST /devices/pairings`: Die Antwort des POST gibt es nur einmal beim Öffnen, Anfragen kommen aber erst danach, und das Neuladen darf kein neues Fenster öffnen (das würde das alte ersetzen, Schritt 1).
+   - Eine fremde Anfrage kann der Nutzer ablehnen (`DELETE /devices/pairings/requests/{request_id}`, nur lokal).
+   - **Phishing:** `device_name` ist frei wählbar, jeder im Netz kann sich „iPad von Ilian“ nennen. Die Web-App empfiehlt darum den **QR-Weg** und zeigt bei Anfragen aus dem Bonjour-Weg einen Hinweis, dass Name und Absender nicht geprüft sind. Der Code bleibt das Geheimnis.
 3. **Bestätigen:** Der Nutzer tippt den Code am iPad ein, oder der QR-Scan liefert `pairing_id` und Code. Das iPad ruft `POST /devices/pair/confirm` auf.
    - `pairing_id` muss das offene Fenster sein. **Das Geheimnis ist der Code.** Die Nonce wird nicht gegen fremde `pair/start`-Anfragen geprüft, ein QR-Scan klappt also auch, wenn sich vorher jemand anderes angemeldet hat.
    - Gehört `public_nonce` zu einer **abgelehnten** Anfrage: `403 pairing_request_rejected`.
@@ -558,7 +562,8 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
    - **Pro Nonce:** Nach 5 falschen Codes wird diese Nonce abgewiesen (`pairing_code_invalid`). Andere Geräte sind nicht betroffen.
    - **Pro Fenster:** Nach 20 falschen Codes ist das Fenster geschlossen (`pairing_window_closed`). Die Web-App zeigt „Viele Fehlversuche“.
    - **Global:** Bei mehr als 20 falschen Codes pro Stunde sind alle `pair/*`-Aufrufe gesperrt (`423 pairing_locked`), bis am Mac ein neues Fenster geöffnet wird.
-   - **Restrisiko:** Ein Angreifer im selben WLAN kann die Kopplung durch Raten **verzögern**, aber ohne Code nicht übernehmen. Ein neues Fenster am Mac hebt jede Sperre auf.
+   - **Neues Fenster setzt zurück:** Ein neues, **lokal** geöffnetes Fenster (`POST /devices/pairings`) setzt den globalen Stundenzähler und die Sperre zurück, ebenso die Zähler pro Nonce und pro Fenster. Sonst reichte ein falscher Code pro neuem Fenster, um wieder mit `423` zu sperren. Da nur der Nutzer am Mac das Fenster öffnen kann (`local_only`), kann ein Angreifer die Zähler nicht selbst zurücksetzen.
+   - **Restrisiko (DoS):** Ein Angreifer im selben WLAN kann die Kopplung durch Raten oder durch Anfragen **blockieren, solange er im Netz ist**: Er verbraucht das Budget (20 falsche Codes schließen das Fenster) und kann nach jedem neuen Fenster erneut raten. Ohne Code übernehmen kann er sie nicht. Abhilfe: in einem anderen Netz koppeln (Heim-WLAN oder Hotspot). Ein neues Fenster am Mac hebt die Sperre auf, hilft aber nicht gegen einen Angreifer, der weiter raten darf.
    - **Pro Absenderadresse:** höchstens 10 `pair/*`-Aufrufe pro Minute (`429 pairing_rate_limited`).
 5. **Speicherung des Codes:** nur **im Speicher** des Core-Prozesses, nie in der Datenbank. Der Code wird mit `crypto.randomInt` erzeugt und mit `crypto.timingSafeEqual` verglichen.
    - Gründe: Er lebt höchstens 5 min, und es gibt genau einen Core-Prozess.
@@ -661,6 +666,7 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `ics_invalid`, `checksum_mismatch` | 422 | Inhalt ungültig |
 | `pairing_locked` | 423 | Kopplung gesperrt, neues Fenster am Mac öffnen |
 | `pairing_rate_limited` | 429 | zu viele Versuche |
+| `pairing_requests_full` | 429 | 10 offene Kopplungsanfragen im Fenster, eine ablehnen oder neues Fenster öffnen (§12) |
 | `ics_fetch_failed` | 502 | ICS-URL nicht erreichbar oder über den Grenzen |
 
 **Sync-Fehler:** `SyncErrorCode` im Schema.
