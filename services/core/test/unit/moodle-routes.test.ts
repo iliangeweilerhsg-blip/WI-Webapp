@@ -8,7 +8,12 @@ import {
   MoodleActionResultSchema,
   MoodleStatusSchema,
 } from '@sg/shared';
-import { DEFAULT_ACTION_HANDLERS, type MoodleActionHandlers } from '../../src/moodle/actions.ts';
+import {
+  DEFAULT_ACTION_HANDLERS,
+  MOODLE_ACTION_SPECS,
+  type MoodleActionHandlers,
+} from '../../src/moodle/actions.ts';
+import { WRITE_WSFUNCTIONS } from '../../src/moodle/client.ts';
 import { createMoodleServices } from '../../src/moodle/index.ts';
 import { StaticTokenStore } from '../../src/moodle/token-store.ts';
 import { registerErrorHandler } from '../../src/plugins/errors.ts';
@@ -442,5 +447,14 @@ describe('Nacharbeit Review: Bestätigung über die Route', () => {
     });
     expect(ok.statusCode).toBe(200);
     expect(executed).toEqual(['assign.save_draft', 'assign.save_draft']);
+  });
+});
+
+describe('Schreibende Moodle-Funktionen', () => {
+  it('jede schreibende Funktion aus dem Aktionskatalog steht in WRITE_WSFUNCTIONS', () => {
+    const fromCatalog = Object.values(MOODLE_ACTION_SPECS)
+      .flatMap((spec) => spec.wsfunctions)
+      .filter((name) => !/_get_/.test(name));
+    for (const name of fromCatalog) expect(WRITE_WSFUNCTIONS.has(name), name).toBe(true);
   });
 });

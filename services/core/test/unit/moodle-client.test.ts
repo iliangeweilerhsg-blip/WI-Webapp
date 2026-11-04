@@ -400,9 +400,53 @@ describe('Nacharbeit Review: Weiterleitungen, read/write, Zeitlimits, Downloads'
     expect(requests).toHaveLength(2);
     file.stream.destroy();
     // Ein zerstörter Stream gibt den Platz ebenfalls frei
-    await new Promise((resolve) => setTimeout(resolve, 20));
     (await c.downloadFile(ref)).stream.resume();
     expect(requests).toHaveLength(3);
+  });
+
+  it('nie gelesener Stream gibt den Platz nach dem Zeitlimit frei', async () => {
+    const { client: c, requests } = client(
+      () => new Response('%PDF', { status: 200, headers: { 'content-type': 'application/pdf' } }),
+      FAKE_TOKEN,
+      { maxConcurrent: 1, fileTimeoutMs: 50 },
+    );
+    const abandoned = await c.downloadFile(ref);
+    const errors: unknown[] = [];
+    abandoned.stream.on('error', (error) => errors.push(error));
+    const next = c.downloadFile(ref);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(requests).toHaveLength(1);
+    (await next).stream.resume();
+    expect(requests).toHaveLength(2);
+    expect(errors).toHaveLength(1);
+  });
+
+  it('destroy() gibt den Platz sofort frei, auch wenn Moodle gerade nichts sendet', async () => {
+    const { client: c, requests } = client(
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('%PDF'));
+              // danach kommt nichts mehr
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/pdf' } },
+        ),
+      FAKE_TOKEN,
+      { maxConcurrent: 1 },
+    );
+    const first = await c.downloadFile(ref);
+    first.stream.resume();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    first.stream.destroy();
+    const second = await Promise.race([
+      c.downloadFile(ref),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 200)),
+    ]);
+    expect(second).not.toBeNull();
+    expect(requests).toHaveLength(2);
+    second?.stream.destroy();
   });
 
   it('große JSON-Datei ohne Content-Length wird gestreamt, nicht als Fehler gelesen', async () => {

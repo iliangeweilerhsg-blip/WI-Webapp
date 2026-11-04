@@ -387,8 +387,8 @@ export class MoodleClient {
 
   /**
    * Lädt eine Datei über `webservice/pluginfile.php`. Der Token geht als Formularfeld `token` per POST
-   * mit. Der Platz in der Drosselung bleibt belegt, bis der Stream endet oder abbricht (spätestens
-   * nach dem Zeitlimit von 120 s).
+   * mit. Der Platz in der Drosselung bleibt belegt, bis der Stream endet, zerstört wird oder das
+   * Zeitlimit (120 s) abläuft. Danach wird der Stream mit Fehler beendet.
    */
   async downloadFile(ref: string): Promise<MoodleDownload> {
     if (!isValidFileRef(ref)) {
@@ -475,27 +475,49 @@ export class MoodleClient {
         }
       }
 
+      // Ab hier gibt der Stream den Platz frei: am Ende, bei destroy() oder spätestens nach dem
+      // Zeitlimit, auch wenn niemand den Stream liest
       slot.keep();
       const release = slot.release;
-      async function* chunks(): AsyncGenerator<Uint8Array> {
-        try {
-          yield* head;
-          while (!done) {
-            const chunk = await body.read();
-            if (chunk.done) break;
-            yield chunk.value;
-          }
-        } finally {
-          release();
-          body.releaseLock();
-        }
-      }
-      const stream = Readable.from(chunks(), { objectMode: false });
-      // Auch wenn der Stream nie gelesen, sondern zerstört wird
-      stream.once('close', () => {
+      const pending = [...head];
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
         release();
         void body.cancel().catch(() => {});
+      };
+      const stream = new Readable({
+        read() {
+          const next = pending.shift();
+          if (next) {
+            this.push(next);
+            return;
+          }
+          if (done) {
+            this.push(null);
+            return;
+          }
+          body.read().then(
+            (chunk) => {
+              if (chunk.done) this.push(null);
+              else this.push(chunk.value);
+            },
+            (error: unknown) => this.destroy(error instanceof Error ? error : new Error(String(error))),
+          );
+        },
+        destroy(error, callback) {
+          finish();
+          callback(error);
+        },
       });
+      // finish() läuft frühestens im nächsten Tick, timer ist dann gesetzt
+      const timer = setTimeout(
+        () => stream.destroy(new Error('Zeitlimit beim Datei-Download überschritten')),
+        this.fileTimeoutMs,
+      );
+      timer.unref();
       return { stream, contentType, contentLength, filename };
     });
   }
