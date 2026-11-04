@@ -6,4 +6,5 @@ Entwickelt von Mensch + KI-Team: Claude (Lead) und Argon (Gemini 4 Argon über A
 - Ablauf, Rollen, Modellwahl und Einrichtung: [docs/KOLLABORATION.md](docs/KOLLABORATION.md)
 - Produktspezifikation „Studien-Gehirn“: [docs/spezifikation/](docs/spezifikation/00-UEBERSICHT.md)
 - Entwicklung (Struktur, Befehle, Konventionen): [docs/ENTWICKLUNG.md](docs/ENTWICKLUNG.md)
+- Verträge zwischen Core, Worker, Web und CLI: [docs/VERTRAEGE.md](docs/VERTRAEGE.md)
 - Argon starten (Dauerbetrieb, einmal pro Tag): [docs/argon/DAUERBETRIEB.md](docs/argon/DAUERBETRIEB.md)
