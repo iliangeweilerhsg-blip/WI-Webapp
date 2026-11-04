@@ -35,10 +35,15 @@ interface ToastItem extends ToastOptions {
   parts?: ToastOptions[];
 }
 
-interface ToastApi {
+export interface ToastApi {
   show: (toast: ToastOptions) => void;
   /** Nimmt die Toasts einer Gruppe zurück, ohne `onAction`/`onExpire` auszulösen (z. B. weil die Löschung zurückgenommen wurde) */
   dismissGroup: (group: string) => void;
+  /**
+   * Ändert die Meldung der Gruppe im sichtbaren Toast, ohne Timer, Fokus oder Aktion anzutasten (z. B. neue Zahl nach
+   * teilweisem Rückgängig). Hat der sichtbare Toast die Gruppe nicht, passiert nichts und die Antwort ist `false`.
+   */
+  amend: (group: string, message: string) => boolean;
 }
 
 /** Fasst offene Löschungen zu einem Toast zusammen: ein Klick macht alle rückgängig, alle laufen gemeinsam ab. */
@@ -157,6 +162,28 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [rescueFocus, display],
   );
 
+  /** Tauscht den sichtbaren Toast gegen einen neuen mit derselben `id`: Element, Fokus und Restzeit bleiben erhalten. */
+  const replaceCurrent = useCallback((next: ToastItem) => {
+    current.current = next;
+    setToast(next);
+  }, []);
+
+  const amend = useCallback(
+    (group: string, message: string) => {
+      const old = current.current;
+      if (!old) return false;
+      if (old.parts) {
+        if (!old.parts.some((p) => p.group === group)) return false;
+        const parts = old.parts.map((p) => (p.group === group ? { ...p, message } : p));
+        const { id, parts: _parts, ...base } = old;
+        replaceCurrent({ ...combine(parts, base), id } as ToastItem);
+      } else if (old.group === group) replaceCurrent({ ...old, message });
+      else return false;
+      return true;
+    },
+    [replaceCurrent],
+  );
+
   const dismissGroup = useCallback(
     (group: string) => {
       queued.current = queued.current.filter((w) => w.group !== group);
@@ -167,17 +194,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         if (parts.length === old.parts.length) return;
         const newest = parts.at(-1);
         if (newest) {
-          const { id: _id, ...base } = old;
-          display(combine(parts, { ...base, ...newest, focusAction: false }));
+          // An Ort und Stelle: Der Rest-Toast behält Restzeit und Fokus (kein Sprung auf #main, keine neuen 10 s)
+          const { id, parts: _parts, ...base } = old;
+          replaceCurrent({ ...combine(parts, { ...base, ...newest, focusAction: false }), id } as ToastItem);
           return;
         }
       } else if (old.group !== group) return;
       dismiss(old.id);
     },
-    [display, dismiss],
+    [display, dismiss, replaceCurrent],
   );
 
-  const api = useMemo(() => ({ show, dismissGroup }), [show, dismissGroup]);
+  const api = useMemo(() => ({ show, dismissGroup, amend }), [show, dismissGroup, amend]);
 
   useEffect(() => {
     if (!toast || paused) return;
@@ -203,12 +231,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 left-1/2 z-[70] -translate-x-1/2">
+      {/* Dauerhafte Live-Region: Screenreader sagen nur Inhalt an, der in eine schon vorhandene Region kommt */}
+      <div
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="toast-live"
+        className="pointer-events-none fixed bottom-4 left-1/2 z-[70] -translate-x-1/2"
+      >
         {toast ? (
           <div
             key={toast.id}
             ref={elementRef}
-            role="status"
             onMouseEnter={() => setPaused(true)}
             onMouseLeave={() => setPaused(false)}
             className="pointer-events-auto flex items-center gap-4 rounded-lg border border-border-strong bg-surface-raised px-4 py-3 text-sm shadow-lg"

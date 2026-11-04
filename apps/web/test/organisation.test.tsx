@@ -326,7 +326,7 @@ describe('Modulseite', () => {
 
     // sofort weg aus Seitenleiste und Modulseite, Toast mit Rückgängig, Weiterleitung nach Heute
     expect(within(sidebar).queryByRole('link', { name: 'Datenbanksysteme' })).not.toBeInTheDocument();
-    const toast = screen.getByText('Modul gelöscht').closest('[role="status"]') as HTMLElement;
+    const toast = screen.getByText('Modul gelöscht').closest('[data-testid="toast-live"]') as HTMLElement;
     expect(within(toast).getByRole('button', { name: 'Rückgängig' })).toBeInTheDocument();
     expect(nav.push).toHaveBeenCalledWith('/');
     expect(writes(core)).toEqual([]);

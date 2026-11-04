@@ -35,13 +35,17 @@ function assetBase(version: string): string {
   return `${basePath.replace(/\/+$/, '')}/pdfjs/${version}/`;
 }
 
-export async function openPdf(url: string): Promise<PdfDoc> {
+/** Adresse des Workers. Ab dem zweiten Versuch mit Cache-Buster: Chrome cacht einen gescheiterten Modul-Import. */
+export function workerSource(attempt: number): string {
+  const src = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url);
+  if (attempt > 0) src.searchParams.set('retry', String(attempt));
+  return src.toString();
+}
+
+export async function openPdf(url: string, attempt = 0): Promise<PdfDoc> {
   const pdfjs = await import('pdfjs-dist');
-  if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url,
-    ).toString();
+  if (!pdfjs.GlobalWorkerOptions.workerSrc || attempt > 0) {
+    pdfjs.GlobalWorkerOptions.workerSrc = workerSource(attempt);
   }
   const base = assetBase(pdfjs.version);
   const task = pdfjs.getDocument({

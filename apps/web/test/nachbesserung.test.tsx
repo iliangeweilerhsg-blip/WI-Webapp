@@ -292,7 +292,7 @@ describe('Modulseite (Nachbesserung)', () => {
     await screen.findByRole('heading', { level: 1, name: /Datenbanksysteme/ });
     await user.click(screen.getByRole('button', { name: 'Löschen' }));
     blurActive();
-    const toast = screen.getByText('Modul gelöscht').closest('[role="status"]') as HTMLElement;
+    const toast = screen.getByText('Modul gelöscht').parentElement as HTMLElement;
     await user.hover(toast);
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS + 5000);
     expect(writes(core)).toEqual([]);

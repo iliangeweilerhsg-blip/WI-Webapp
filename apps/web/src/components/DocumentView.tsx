@@ -133,7 +133,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     setPdf(null);
     setPdfFailed(false);
     setPdfKind('load');
-    openPdf(pdfUrl(kind, id)).then(
+    openPdf(pdfUrl(kind, id), attempt).then(
       (doc) => {
         if (cancelled) doc.destroy();
         else {
@@ -172,11 +172,18 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     }
   }, [health.isError, coreOk, retryable]);
   const refetchHealth = health.refetch;
+  // Das Abfragen endet: Bei gesundem Core (Datei selbst dauerhaft 404/500) nach {@link HEALTH_GRACE_MS}, sonst nach
+  // {@link HEALTH_MAX_MS}. Danach genügt der Takt des Statusfelds (30 s).
+  const coreDown = health.isError;
   useEffect(() => {
     if (!retryable) return;
     const timer = setInterval(() => void refetchHealth(), 5_000);
-    return () => clearInterval(timer);
-  }, [retryable, refetchHealth]);
+    const stop = setTimeout(() => clearInterval(timer), coreDown ? HEALTH_MAX_MS : HEALTH_GRACE_MS);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(stop);
+    };
+  }, [retryable, coreDown, refetchHealth]);
 
   const pageCount = meta.pageCount ?? pdf?.numPages ?? 0;
   const current = pageCount > 0 ? clamp(page, 1, pageCount) : page;
@@ -774,8 +781,10 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
         </p>
       ) : null}
       {pdfFailed ? (
-        <p role="status" className="border-b border-border px-4 py-2 text-sm text-text-muted">
-          Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.
+        <div className="border-b border-border px-4 py-2 text-sm text-text-muted">
+          <span role="status">
+            Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.
+          </span>
           {retryable ? (
             <button
               type="button"
@@ -785,7 +794,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
               Erneut versuchen
             </button>
           ) : null}
-        </p>
+        </div>
       ) : null}
 
       <div className="relative flex min-h-0 flex-1">
@@ -996,6 +1005,11 @@ function DocumentScreen() {
 }
 
 /** PDF-Anzeige (F-ORG-04) – Route mit Query-Parametern `?typ=folien|blatt&id=…&seite=…` (VERTRAEGE §5). */
+/** So lange wird nach einem Ladefehler bei gesundem Core noch schnell nach dem Core gefragt. */
+export const HEALTH_GRACE_MS = 30_000;
+/** Längste Dauer der schnellen Abfrage, solange der Core nicht antwortet. */
+export const HEALTH_MAX_MS = 5 * 60_000;
+
 export function DocumentView() {
   return (
     <section aria-labelledby="screen-title" className="h-full">

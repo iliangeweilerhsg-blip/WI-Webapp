@@ -102,7 +102,7 @@ describe('PDF-Anzeige', () => {
     );
     // pdf.js bekommt das Original aus dem Core (Range-fähig)
     await waitFor(() =>
-      expect(pdf.openPdf).toHaveBeenCalledWith(expect.stringContaining(`/slide-decks/${DECK.id}/file`)),
+      expect(pdf.openPdf).toHaveBeenCalledWith(expect.stringContaining(`/slide-decks/${DECK.id}/file`), 0),
     );
     await waitFor(() => expect(pdf.render).toHaveBeenCalled());
   });

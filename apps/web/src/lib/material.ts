@@ -199,6 +199,8 @@ interface PendingDelete {
   kind: MaterialKind;
   id: string;
   onFailed: () => void;
+  /** Das DELETE ist unterwegs: Die Löschung lässt sich nicht mehr zurücknehmen. */
+  sending?: boolean;
 }
 
 const pending = new Map<string, PendingDelete>();
@@ -233,8 +235,19 @@ export function useVisibleItems<T extends { id: string }>(kind: MaterialKind, it
   return useMemo(() => items?.filter((item) => !hidden.has(keyOf(kind, item.id))), [items, hidden, kind]);
 }
 
+/** Anzahl der Löschungen, die sich noch rückgängig machen lassen (ohne bereits abgeschickte). */
 export function pendingMaterialDeleteCount(): number {
-  return pending.size;
+  let count = 0;
+  for (const entry of pending.values()) if (!entry.sending) count += 1;
+  return count;
+}
+
+/** Text des „Rückgängig“-Toasts passend zur aktuellen Zahl offener Löschungen; `null`, wenn keine offen ist. */
+export function pendingDeleteMessage(): string | null {
+  const open = [...pending.values()].filter((entry) => !entry.sending);
+  const [first] = open;
+  if (!first) return null;
+  return open.length === 1 ? `${KIND_WORDS[first.kind].one} gelöscht` : `${open.length} Dateien gelöscht`;
 }
 
 async function sendDelete(kind: MaterialKind, id: string, keepalive: boolean): Promise<void> {
@@ -249,7 +262,9 @@ async function sendDelete(kind: MaterialKind, id: string, keepalive: boolean): P
 
 async function commitDelete(key: string): Promise<void> {
   const entry = pending.get(key);
-  if (!entry) return;
+  if (!entry || entry.sending) return;
+  // Ab jetzt ist die Löschung nicht mehr zurücknehmbar (sonst käme „ist wieder da“, obwohl die Datei verschwindet)
+  entry.sending = true;
   try {
     await sendDelete(entry.kind, entry.id, false);
   } catch {
@@ -283,9 +298,13 @@ export function scheduleMaterialDelete(
  * meldet dann die ID der vorgemerkten Löschung als Dublette). `true`, wenn der Eintrag vorgemerkt war.
  */
 export function unscheduleMaterialDelete(kind: MaterialKind, id: string): boolean {
-  const removed = pending.delete(keyOf(kind, id));
-  if (removed) publish();
-  return removed;
+  const key = keyOf(kind, id);
+  const entry = pending.get(key);
+  // Schon abgeschickt: nicht mehr zurücknehmbar
+  if (!entry || entry.sending) return false;
+  pending.delete(key);
+  publish();
+  return true;
 }
 
 /** Titel eines Eintrags aus den geladenen Listen des Moduls (für Meldungen). */
@@ -303,7 +322,7 @@ export function cachedMaterialTitle(
 }
 
 export function undoMaterialDeletes(): void {
-  pending.clear();
+  for (const [key, entry] of [...pending]) if (!entry.sending) pending.delete(key);
   publish();
 }
 
