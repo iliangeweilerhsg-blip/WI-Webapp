@@ -27,7 +27,7 @@ Anlegen mit `bash scripts/setup-labels.sh`.
 | `status:nacharbeit` | Issue | Review-Feedback liegt vor, bitte nacharbeiten (zusammen mit `agent:…`) | Claude |
 | `status:blockiert` | Issue | Rückfrage an den Owner (Frage steht im Issue) | Agent; Owner entfernt es nach der Antwort |
 | `status:review` | PR | Wartet auf Review durch Claude | PR-Autor |
-| `status:freigegeben` | PR | Claude hat freigegeben – Owner kann mergen | Claude |
+| `status:freigegeben` | PR | Claude hat freigegeben und merged
 | `modell:flash` | Issue | Einfache Aufgabe, Flash-Modell reicht | Claude |
 | `argon:limit` | Issue | Argons Kontingent war aufgebraucht – Claude übernimmt | Argon oder Owner |
 
@@ -37,7 +37,7 @@ nicht über GitHub-Approvals (eigene PRs kann man auf GitHub nicht approven).
 
 ## Grundregeln
 
-1. **Kein Agent pusht direkt auf `main`.** Jede Änderung kommt per Pull Request; gemergt wird nur vom Owner.
+1. *gemergt wird nur von Claude (nach den Merge-Regeln in CLAUDE.md). Argon merged nie. Der Owner kann per Label status:halt ein Veto einlegen.
 2. **Ein Task = ein Branch = ein PR.** Branch-Namen:
    - `claude/<kurzbeschreibung>` – Lead
    - `argon/issue-<nr>` – Argon
