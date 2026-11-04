@@ -1,0 +1,743 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Spike S2 · WLAN-Test (iPad ↔ Mac)</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f7f9;
+        --surface: #ffffff;
+        --surface-muted: #eef1f5;
+        --border: #d5dbe3;
+        --text: #14181f;
+        --text-muted: #525d6d;
+        --primary: #1a5cff;
+        --primary-hover: #1248cc;
+        --primary-text: #ffffff;
+        --ok-bg: #e7f6ed;
+        --ok-border: #28804a;
+        --ok-text: #134e2a;
+        --warn-bg: #fff4e0;
+        --warn-border: #b86e00;
+        --warn-text: #663c00;
+        --err-bg: #fdeaea;
+        --err-border: #c92a2a;
+        --err-text: #7a1414;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f1318;
+          --surface: #181e26;
+          --surface-muted: #212934;
+          --border: #313c4b;
+          --text: #f1f5f9;
+          --text-muted: #9aa6b8;
+          --primary: #4785ff;
+          --primary-hover: #699cff;
+          --primary-text: #0b111a;
+          --ok-bg: #122d1f;
+          --ok-border: #38a169;
+          --ok-text: #a7f3d0;
+          --warn-bg: #33240b;
+          --warn-border: #e09f3e;
+          --warn-text: #fde68a;
+          --err-bg: #361518;
+          --err-border: #f05252;
+          --err-text: #fecaca;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 20px 16px 48px;
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+        font-size: 18px;
+        line-height: 1.5;
+        background: var(--bg);
+        color: var(--text);
+        font-variant-numeric: tabular-nums;
+      }
+
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+      }
+
+      header {
+        margin-bottom: 20px;
+      }
+
+      .eyebrow {
+        font-size: 14px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--text-muted);
+        margin: 0 0 4px;
+      }
+
+      h1 {
+        font-size: 26px;
+        line-height: 1.25;
+        margin: 0 0 8px;
+      }
+
+      .subtitle {
+        margin: 0;
+        color: var(--text-muted);
+        font-size: 16px;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 20px;
+        margin-bottom: 16px;
+      }
+
+      .controls-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        flex: 1 1 240px;
+      }
+
+      label {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--text-muted);
+      }
+
+      input[type='text'] {
+        font-size: 18px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--surface-muted);
+        color: var(--text);
+      }
+
+      .btn {
+        appearance: none;
+        border: none;
+        border-radius: 12px;
+        font-size: 19px;
+        font-weight: 700;
+        padding: 14px 22px;
+        cursor: pointer;
+        background: var(--primary);
+        color: var(--primary-text);
+        min-height: 54px;
+        transition: opacity 0.15s ease;
+      }
+
+      .btn:hover:not(:disabled) {
+        background: var(--primary-hover);
+      }
+
+      .btn:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+
+      .btn-secondary {
+        background: var(--surface-muted);
+        color: var(--text);
+        border: 1px solid var(--border);
+        font-size: 17px;
+        padding: 12px 18px;
+        min-height: 48px;
+      }
+
+      .progress-wrap {
+        margin-top: 16px;
+      }
+
+      .progress-head {
+        display: flex;
+        justify-content: space-between;
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+
+      .progress-bar-bg {
+        width: 100%;
+        height: 12px;
+        border-radius: 999px;
+        background: var(--surface-muted);
+        overflow: hidden;
+      }
+
+      .progress-bar-fill {
+        height: 100%;
+        width: 0%;
+        background: var(--primary);
+        transition: width 0.25s linear;
+      }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 12px;
+      }
+
+      .metric-box {
+        background: var(--surface-muted);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+
+      .metric-label {
+        font-size: 14px;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+
+      .metric-value {
+        font-size: 24px;
+        font-weight: 700;
+      }
+
+      .metric-sub {
+        font-size: 14px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+
+      .result-banner {
+        border-radius: 14px;
+        padding: 20px;
+        margin-bottom: 16px;
+        border: 2px solid transparent;
+        display: none;
+      }
+
+      .result-banner.visible {
+        display: block;
+      }
+
+      .result-banner.ok {
+        background: var(--ok-bg);
+        border-color: var(--ok-border);
+        color: var(--ok-text);
+      }
+
+      .result-banner.warn {
+        background: var(--warn-bg);
+        border-color: var(--warn-border);
+        color: var(--warn-text);
+      }
+
+      .result-banner.err {
+        background: var(--err-bg);
+        border-color: var(--err-border);
+        color: var(--err-text);
+      }
+
+      .result-title {
+        font-size: 24px;
+        font-weight: 800;
+        margin: 0 0 6px;
+      }
+
+      .result-detail {
+        margin: 0 0 14px;
+        font-size: 17px;
+      }
+
+      .copy-area {
+        margin-top: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 196px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 14px;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+        resize: vertical;
+      }
+
+      .copy-feedback {
+        font-size: 15px;
+        font-weight: 600;
+      }
+
+      .info-note {
+        font-size: 15px;
+        color: var(--text-muted);
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Studien-Gehirn · Spike S2</p>
+        <h1>WLAN-Verbindungstest (iPad ↔ Mac)</h1>
+        <p class="subtitle">
+          Prüft, ob das iPad den Mac im selben WLAN stabil für die Live-Synchronisation erreicht.
+        </p>
+      </header>
+
+      <section class="card" aria-label="Teststeuerung">
+        <div class="controls-row">
+          <div class="input-group">
+            <label for="wlan-input">WLAN-Name / Hörsaal (optional für Bericht)</label>
+            <input id="wlan-input" type="text" placeholder="z. B. eduroam / Hörsaal H1" autocomplete="off" />
+          </div>
+          <button id="start-btn" class="btn" type="button">Test starten (5 min)</button>
+        </div>
+
+        <div class="progress-wrap">
+          <div class="progress-head">
+            <span id="status-text">Bereit zum Start</span>
+            <span id="timer-text">05:00</span>
+          </div>
+          <div class="progress-bar-bg" role="progressbar" aria-valuemin="0" aria-valuemax="100">
+            <div id="progress-fill" class="progress-bar-fill"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="result-banner" class="result-banner" aria-live="polite">
+        <h2 id="result-title" class="result-title">Ergebnis</h2>
+        <p id="result-detail" class="result-detail"></p>
+        <div class="copy-area">
+          <div>
+            <button id="copy-btn" class="btn btn-secondary" type="button">Ergebnis kopieren</button>
+            <span id="copy-feedback" class="copy-feedback" aria-live="polite"></span>
+          </div>
+          <textarea id="summary-box" readonly aria-label="Textzusammenfassung des Messlaufs"></textarea>
+        </div>
+      </section>
+
+      <section class="card" aria-label="Live-Messwerte">
+        <div class="metrics-grid">
+          <div class="metric-box">
+            <div class="metric-label">Pings (OK / Fehlgeschlagen)</div>
+            <div id="metric-pings" class="metric-value">0 / 0</div>
+            <div id="metric-rate" class="metric-sub">Erfolgsquote: –</div>
+          </div>
+
+          <div class="metric-box">
+            <div class="metric-label">Latenz (Median / p95 / Max)</div>
+            <div id="metric-latency" class="metric-value">– / – / –</div>
+            <div id="metric-last-rtt" class="metric-sub">Letzter Ping: –</div>
+          </div>
+
+          <div class="metric-box">
+            <div class="metric-label">Event-Strom (SSE-Abbrüche)</div>
+            <div id="metric-sse-drops" class="metric-value">0</div>
+            <div id="metric-sse-count" class="metric-sub">Empfangene Events: 0</div>
+          </div>
+
+          <div class="metric-box">
+            <div class="metric-label">Längste Lücke</div>
+            <div id="metric-max-gap" class="metric-value">0,0 s</div>
+            <div id="metric-curr-gap" class="metric-sub">Aktuell: keine Lücke</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <p class="info-note">
+          <strong>Hinweis zu „✗ Keine Verbindung“:</strong> Wenn diese Seite im Uni-WLAN auf dem iPad gar
+          nicht erst lädt, blockiert das WLAN direkte Verbindungen zwischen Geräten (Client-Isolation). Siehe
+          <code>spikes/s2-wlan/README.md</code> für die Gegenprobe per iPhone-Hotspot.
+        </p>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        const params = new URLSearchParams(window.location.search);
+        const rawDauer = Number.parseInt(params.get('dauer') || '300', 10);
+        const totalSeconds = Number.isFinite(rawDauer) && rawDauer >= 5 && rawDauer <= 1800 ? rawDauer : 300;
+
+        const startBtn = document.getElementById('start-btn');
+        const wlanInput = document.getElementById('wlan-input');
+        const statusText = document.getElementById('status-text');
+        const timerText = document.getElementById('timer-text');
+        const progressFill = document.getElementById('progress-fill');
+
+        const metricPings = document.getElementById('metric-pings');
+        const metricRate = document.getElementById('metric-rate');
+        const metricLatency = document.getElementById('metric-latency');
+        const metricLastRtt = document.getElementById('metric-last-rtt');
+        const metricSseDrops = document.getElementById('metric-sse-drops');
+        const metricSseCount = document.getElementById('metric-sse-count');
+        const metricMaxGap = document.getElementById('metric-max-gap');
+        const metricCurrGap = document.getElementById('metric-curr-gap');
+
+        const resultBanner = document.getElementById('result-banner');
+        const resultTitle = document.getElementById('result-title');
+        const resultDetail = document.getElementById('result-detail');
+        const copyBtn = document.getElementById('copy-btn');
+        const copyFeedback = document.getElementById('copy-feedback');
+        const summaryBox = document.getElementById('summary-box');
+
+        function formatClock(sec) {
+          const clamped = Math.max(0, Math.ceil(sec));
+          const m = String(Math.floor(clamped / 60)).padStart(2, '0');
+          const s = String(clamped % 60).padStart(2, '0');
+          return m + ':' + s;
+        }
+
+        function formatDe(num, digits) {
+          return num.toFixed(digits).replace('.', ',');
+        }
+
+        function quantile(sorted, q) {
+          if (sorted.length === 0) return null;
+          const pos = (sorted.length - 1) * q;
+          const base = Math.floor(pos);
+          const rest = pos - base;
+          if (sorted[base + 1] !== undefined) {
+            return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+          }
+          return sorted[base];
+        }
+
+        timerText.textContent = formatClock(totalSeconds);
+        if (totalSeconds !== 300) {
+          statusText.textContent = 'Bereit (Testdauer per URL: ' + totalSeconds + ' s)';
+        }
+
+        let running = false;
+        let tickInterval = null;
+        let uiInterval = null;
+        let eventSource = null;
+
+        let testStartPerf = 0;
+        let lastOkPerf = 0;
+        let inOutage = false;
+        let outageOriginPerf = 0;
+        let maxGapSec = 0;
+
+        let pingsOk = 0;
+        let pingsFail = 0;
+        let latencies = [];
+        let lastRttMs = null;
+
+        let sseEvents = 0;
+        let sseDrops = 0;
+        let lastSsePerf = 0;
+        let sseStalled = false;
+
+        function computeCurrentGapSec(nowPerf) {
+          if (!inOutage) return 0;
+          return Math.max(0, (nowPerf - outageOriginPerf) / 1000);
+        }
+
+        function updateUi() {
+          const nowPerf = performance.now();
+          const elapsedSec = running ? (nowPerf - testStartPerf) / 1000 : 0;
+          if (running) {
+            const remaining = Math.max(0, totalSeconds - elapsedSec);
+            timerText.textContent = formatClock(remaining);
+            const pct = Math.min(100, (elapsedSec / totalSeconds) * 100);
+            progressFill.style.width = pct.toFixed(1) + '%';
+
+            if (nowPerf - lastSsePerf > 2500 && !sseStalled) {
+              sseStalled = true;
+              sseDrops += 1;
+            }
+          }
+
+          const currGap = running ? computeCurrentGapSec(nowPerf) : 0;
+          const effectiveMaxGap = Math.max(maxGapSec, currGap);
+
+          const totalPings = pingsOk + pingsFail;
+          metricPings.textContent = pingsOk + ' / ' + pingsFail;
+          if (totalPings > 0) {
+            const rate = (pingsOk / totalPings) * 100;
+            metricRate.textContent = 'Erfolgsquote: ' + formatDe(rate, 1) + ' %';
+          } else {
+            metricRate.textContent = 'Erfolgsquote: –';
+          }
+
+          if (latencies.length > 0) {
+            const sorted = latencies.slice().sort(function (a, b) {
+              return a - b;
+            });
+            const med = Math.round(quantile(sorted, 0.5));
+            const p95 = Math.round(quantile(sorted, 0.95));
+            const max = Math.round(sorted[sorted.length - 1]);
+            metricLatency.textContent = med + ' / ' + p95 + ' / ' + max + ' ms';
+            metricLastRtt.textContent =
+              lastRttMs !== null ? 'Letzter Ping: ' + Math.round(lastRttMs) + ' ms' : 'Letzter Ping: –';
+          } else {
+            metricLatency.textContent = '– / – / –';
+            metricLastRtt.textContent = 'Letzter Ping: –';
+          }
+
+          metricSseDrops.textContent = String(sseDrops);
+          metricSseCount.textContent = 'Empfangene Events: ' + sseEvents;
+
+          metricMaxGap.textContent = formatDe(effectiveMaxGap, 1) + ' s';
+          if (currGap >= 1.0 && running) {
+            metricCurrGap.textContent = 'Aktueller Ausfall: ' + formatDe(currGap, 1) + ' s';
+          } else {
+            metricCurrGap.textContent = 'Aktuell: keine Lücke';
+          }
+        }
+
+        async function sendPing() {
+          if (!running) return;
+          const attemptStart = performance.now();
+          const controller = new AbortController();
+          const timeoutId = setTimeout(function () {
+            controller.abort();
+          }, 2000);
+
+          try {
+            const res = await fetch('/ping?t=' + Date.now(), {
+              method: 'GET',
+              cache: 'no-store',
+              signal: controller.signal,
+            });
+            clearTimeout(timeoutId);
+            if (!running) return;
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            await res.json();
+
+            const nowPerf = performance.now();
+            const rtt = nowPerf - attemptStart;
+            lastRttMs = rtt;
+            latencies.push(rtt);
+            pingsOk += 1;
+
+            if (inOutage) {
+              const gap = Math.max(0, (nowPerf - outageOriginPerf) / 1000);
+              if (gap > maxGapSec) maxGapSec = gap;
+              inOutage = false;
+            } else if (nowPerf - lastOkPerf > 2200) {
+              const implicitGap = Math.max(0, (nowPerf - (lastOkPerf + 1000)) / 1000);
+              if (implicitGap > maxGapSec) maxGapSec = implicitGap;
+            }
+            lastOkPerf = nowPerf;
+          } catch {
+            clearTimeout(timeoutId);
+            if (!running) return;
+            pingsFail += 1;
+            if (!inOutage) {
+              inOutage = true;
+              outageOriginPerf = Math.min(attemptStart, lastOkPerf + 1000);
+            }
+            const currGap = computeCurrentGapSec(performance.now());
+            if (currGap > maxGapSec) maxGapSec = currGap;
+          }
+          updateUi();
+        }
+
+        function finishTest() {
+          if (!running) return;
+          const endPerf = performance.now();
+          if (inOutage) {
+            const finalGap = Math.max(0, (endPerf - outageOriginPerf) / 1000);
+            if (finalGap > maxGapSec) maxGapSec = finalGap;
+            inOutage = false;
+          }
+          running = false;
+          if (tickInterval) clearInterval(tickInterval);
+          if (uiInterval) clearInterval(uiInterval);
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+
+          progressFill.style.width = '100%';
+          timerText.textContent = '00:00';
+          statusText.textContent = 'Messung abgeschlossen (' + totalSeconds + ' s)';
+          startBtn.disabled = false;
+          startBtn.textContent =
+            'Test erneut starten (' + (totalSeconds === 300 ? '5 min' : totalSeconds + ' s') + ')';
+          updateUi();
+
+          const totalPings = pingsOk + pingsFail;
+          const okRatio = totalPings > 0 ? pingsOk / totalPings : 0;
+          const okPct = okRatio * 100;
+
+          const sorted = latencies.slice().sort(function (a, b) {
+            return a - b;
+          });
+          const med = sorted.length > 0 ? Math.round(quantile(sorted, 0.5)) : null;
+          const p95 = sorted.length > 0 ? Math.round(quantile(sorted, 0.95)) : null;
+          const max = sorted.length > 0 ? Math.round(sorted[sorted.length - 1]) : null;
+
+          resultBanner.className = 'result-banner visible';
+          let verdictText = '';
+          if (pingsOk === 0) {
+            resultBanner.classList.add('err');
+            verdictText = '✗ Keine Verbindung';
+            resultTitle.textContent = verdictText;
+            resultDetail.textContent =
+              'Kein einziger Ping hat den Mac erreicht. Das Uni-WLAN blockiert die Verbindung zwischen Geräten (Client-Isolation).';
+          } else if (okRatio >= 0.99 && maxGapSec <= 5.0) {
+            resultBanner.classList.add('ok');
+            verdictText = '✓ Verbindung stabil';
+            resultTitle.textContent = verdictText + ' — Verbindung möglich';
+            resultDetail.textContent =
+              'Erfolgsquote ' +
+              formatDe(okPct, 1) +
+              ' % (≥ 99 %) und längste Lücke ' +
+              formatDe(maxGapSec, 1) +
+              ' s (≤ 5 s). Direkte Synchronisation iPad ↔ Mac im WLAN ist stabil möglich.';
+          } else {
+            resultBanner.classList.add('warn');
+            verdictText = '⚠ Verbindung instabil';
+            resultTitle.textContent = verdictText;
+            resultDetail.textContent =
+              'Erfolgsquote ' +
+              formatDe(okPct, 1) +
+              ' %, längste Lücke ' +
+              formatDe(maxGapSec, 1) +
+              ' s, SSE-Abbrüche: ' +
+              sseDrops +
+              '. Für den Hörsaal wird iPhone-Hotspot oder Offline-Pufferung empfohlen.';
+          }
+
+          const wlanName = (wlanInput.value || '').trim() || '<WLAN-Name hier eintragen>';
+          const nowIso = new Date().toISOString().replace('T', ' ').slice(0, 19);
+          const summaryLines = [
+            '=== Spike S2 · WLAN-Messbericht ===',
+            'Datum:           ' + nowIso,
+            'WLAN / Ort:      ' + wlanName,
+            'Aufgerufene URL: ' + window.location.origin,
+            'Testdauer:       ' + totalSeconds + ' s',
+            'Ergebnis:        ' + verdictText,
+            'Pings OK/Fehler: ' +
+              pingsOk +
+              ' OK / ' +
+              pingsFail +
+              ' fehlgeschlagen (' +
+              formatDe(okPct, 1) +
+              ' %)',
+            'Latenz:          ' +
+              (med !== null
+                ? 'Median ' + med + ' ms, p95 ' + p95 + ' ms, Max ' + max + ' ms'
+                : 'keine gültigen Messwerte'),
+            'SSE-Stream:      ' + sseEvents + ' Events empfangen, ' + sseDrops + ' Abbrüche',
+            'Längste Lücke:   ' + formatDe(maxGapSec, 1) + ' s',
+          ];
+          summaryBox.value = summaryLines.join('\n');
+        }
+
+        function startTest() {
+          if (running) return;
+          running = true;
+          testStartPerf = performance.now();
+          lastOkPerf = testStartPerf - 1000;
+          inOutage = false;
+          outageOriginPerf = testStartPerf;
+          maxGapSec = 0;
+
+          pingsOk = 0;
+          pingsFail = 0;
+          latencies = [];
+          lastRttMs = null;
+
+          sseEvents = 0;
+          sseDrops = 0;
+          lastSsePerf = testStartPerf;
+          sseStalled = false;
+
+          copyFeedback.textContent = '';
+          resultBanner.className = 'result-banner';
+          startBtn.disabled = true;
+          statusText.textContent = 'Messung läuft …';
+          updateUi();
+
+          eventSource = new EventSource('/events');
+          eventSource.onmessage = function () {
+            if (!running) return;
+            sseEvents += 1;
+            lastSsePerf = performance.now();
+            sseStalled = false;
+            updateUi();
+          };
+          eventSource.onerror = function () {
+            if (!running) return;
+            if (!sseStalled) {
+              sseStalled = true;
+              sseDrops += 1;
+            }
+            updateUi();
+          };
+
+          sendPing();
+          tickInterval = setInterval(function () {
+            const elapsedSec = (performance.now() - testStartPerf) / 1000;
+            if (elapsedSec >= totalSeconds) {
+              finishTest();
+              return;
+            }
+            sendPing();
+          }, 1000);
+
+          uiInterval = setInterval(function () {
+            const elapsedSec = (performance.now() - testStartPerf) / 1000;
+            if (elapsedSec >= totalSeconds) {
+              finishTest();
+              return;
+            }
+            updateUi();
+          }, 250);
+        }
+
+        startBtn.addEventListener('click', startTest);
+
+        copyBtn.addEventListener('click', async function () {
+          const text = summaryBox.value;
+          if (!text) return;
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(text);
+              copyFeedback.textContent = '✓ In Zwischenablage kopiert!';
+              return;
+            }
+          } catch {
+            // Fallback für unverschlüsseltes HTTP im LAN auf iPad Safari
+          }
+          summaryBox.focus();
+          summaryBox.select();
+          summaryBox.setSelectionRange(0, text.length);
+          const ok = document.execCommand('copy');
+          copyFeedback.textContent = ok
+            ? '✓ In Zwischenablage kopiert!'
+            : 'Text markiert – bitte mit „Kopieren“ übernehmen.';
+        });
+
+        if (params.get('autostart') === '1') {
+          startTest();
+        }
+      })();
+    </script>
+  </body>
+</html>

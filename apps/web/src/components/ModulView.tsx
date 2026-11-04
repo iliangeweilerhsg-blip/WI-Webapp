@@ -2,7 +2,7 @@
 
 import { useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { Suspense, useCallback, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { Module, ModuleUpdate } from '@sg/shared';
 import { friendlyMessage } from '../lib/api.ts';
 import {
@@ -16,20 +16,23 @@ import {
   useUpdateModule,
   useVisibleModules,
 } from '../lib/modules.ts';
+import { documentHref, type MaterialKind } from '../lib/material.ts';
 import { useToast } from '../lib/toast.tsx';
+import { useUploadTarget } from '../lib/uploads.tsx';
 import { CoreHint } from './CoreHint.tsx';
+import { MaterialPanel } from './MaterialPanel.tsx';
 import { EmptyState } from './Placeholder.tsx';
 
 const TABS = [
   {
     id: 'vorlesungen',
     label: 'Vorlesungen',
-    empty: 'Noch keine Vorlesungen. Folien kannst du hier bald ablegen.',
+    empty: 'Noch keine Vorlesungen.',
   },
   {
     id: 'uebungen',
     label: 'Übungen',
-    empty: 'Noch keine Übungen. Übungsblätter erscheinen hier, sobald du sie ablegen kannst.',
+    empty: 'Noch keine Übungen.',
   },
   {
     id: 'konzepte',
@@ -53,9 +56,17 @@ function Title({ children }: { children: string }) {
   );
 }
 
-function ModuleTabs() {
+const TAB_KIND: Partial<Record<TabId, MaterialKind>> = { vorlesungen: 'folien', uebungen: 'blatt' };
+
+function ModuleTabs({ moduleId }: { moduleId: string }) {
   const [active, setActive] = useState<TabId>('vorlesungen');
   const current = TABS.find((t) => t.id === active) ?? TABS[0];
+  const router = useRouter();
+  const push = router.push;
+  const kind = TAB_KIND[active];
+  const openDocument = useCallback((k: MaterialKind, id: string) => push(documentHref(k, id)), [push]);
+  // Dateien, die irgendwo ins Fenster fallen, gehören zu diesem Modul und Tab
+  useUploadTarget({ moduleId, kind: kind ?? null, open: openDocument });
 
   function onKeyDown(e: KeyboardEvent, index: number) {
     let target: number;
@@ -102,7 +113,11 @@ function ModuleTabs() {
         tabIndex={0}
         className="mt-4"
       >
-        <EmptyState>{current.empty}</EmptyState>
+        {kind ? (
+          <MaterialPanel key={kind} moduleId={moduleId} kind={kind} onOpen={openDocument} />
+        ) : (
+          <EmptyState>{current.empty}</EmptyState>
+        )}
       </div>
     </div>
   );
@@ -346,7 +361,7 @@ function ModuleView() {
         <ModuleEditForm key={module.updated_at} module={module} onClose={() => setEditing(false)} />
       ) : null}
 
-      <ModuleTabs />
+      <ModuleTabs moduleId={module.id} />
     </>
   );
 }

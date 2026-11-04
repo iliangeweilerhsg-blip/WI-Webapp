@@ -42,6 +42,9 @@ const CODE_MESSAGES: Record<string, string> = {
   origin_not_allowed: 'Der Core lehnt diese Herkunft ab. Öffne die App über den Core oder localhost.',
   semester_archived: 'Ein archiviertes Semester kann nicht aktuell sein. Stelle es erst wieder her.',
   validation_failed: 'Das passt so nicht. Prüfe deine Eingabe.',
+  invalid_pdf: 'Das ist kein gültiges PDF. Wähle eine andere Datei.',
+  file_too_large: 'Die Datei ist zu groß (höchstens 200 MB).',
+  idempotency_key_in_progress: 'Die Datei wird gerade schon hochgeladen.',
 };
 
 function messageForStatus(status: number): string {
@@ -184,6 +187,37 @@ export async function apiSend<T>(
   }
   if (!res.ok) throw await toApiError(res);
   if (schema === null) return;
+  return parseBody(res, schema);
+}
+
+export interface UploadOptions {
+  file: File;
+  /** Textfelder neben der Datei (z. B. `module_id`) */
+  fields: Record<string, string>;
+  /** Pro Datei genau ein Schlüssel; ein Wiederholen nach Netzfehler nutzt denselben (08 §1) */
+  idempotencyKey: string;
+  signal?: AbortSignal;
+}
+
+/** Datei-Upload per multipart (POST). Die Antwort wird mit `schema` geprüft. */
+export async function apiUpload<T>(path: string, schema: Parser<T>, options: UploadOptions): Promise<T> {
+  const form = new FormData();
+  for (const [name, value] of Object.entries(options.fields)) form.append(name, value);
+  form.append('file', options.file, options.file.name);
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase()}${path}`, {
+      method: 'POST',
+      // Content-Type setzt der Browser samt Boundary
+      headers: { Accept: 'application/json', 'Idempotency-Key': options.idempotencyKey },
+      body: form,
+      signal: options.signal,
+    });
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+    throw unreachable(cause);
+  }
+  if (!res.ok) throw await toApiError(res);
   return parseBody(res, schema);
 }
 

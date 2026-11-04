@@ -2,7 +2,6 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Suspense } from 'react';
 import { NAV_MAIN, NAV_SETTINGS, NAV_TOP, type NavItem } from '../lib/nav.ts';
 import { CoreStatus } from './CoreStatus.tsx';
 import { Icon } from './Icon.tsx';
@@ -64,9 +63,7 @@ export function Sidebar({ expanded, onToggle, onOpenSearch, onOpenSetup, inboxCo
             <NavLink key={item.href} item={item} />
           ))}
         </ul>
-        <Suspense fallback={null}>
-          <ModuleNav {...(onOpenSetup ? { onOpenSetup } : {})} />
-        </Suspense>
+        <ModuleNav {...(onOpenSetup ? { onOpenSetup } : {})} />
         <ul className="mt-4 flex flex-col gap-1">
           {NAV_MAIN.map((item) => (
             <NavLink key={item.href} item={item} count={item.href === '/inbox' ? inboxCount : null} />

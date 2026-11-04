@@ -61,7 +61,7 @@ Richtwerte für ein Team von 3–4 Personen.
 | **S1** | Läuft die iPad-App in **Swift Playgrounds** mit allem, was wir brauchen? | Minimal-App als `.swiftpm`: zwei PencilKit-Ebenen, `UIPencilInteraction`, Kamera, Bonjour-Suche + WebSocket ins lokale Netz (Local-Network-Freigabe), Speichern beim Beenden | Ja → Weg A. Nein → Weg B (Xcode, 7-Tage-Signatur, ggf. AltStore). Dokumentieren in `docs/entscheidungen/S1.md`. |
 | **S2** | Erlaubt das Uni-WLAN Verbindungen zwischen iPad und Mac? | Kleiner WebSocket-Echo-Test im Hörsaal (Core auf dem Mac, Client auf dem iPad) | Ja → normaler Betrieb. Nein → Offline-Weg ist der Hörsaal-Standard. Hotspot-Empfehlung im Einrichtungsdialog. |
 | **S3** | Erreichen wir ≤ 1 s Strich-Spiegelung und eine originalgetreue Darstellung am Mac? | PencilKit → neutrales Format → perfect-freehand. 10 min Testschrift, Vergleich als Bild | Parameter für Breite/Druck festlegen. Ggf. Strichbild als Fallback. |
-| **S4** | Ist die Audioaufnahme in Safari **und** Chrome stabil (Chunks, Ruhezustand, Wake Lock, Hintergrund-Tab)? | 2-h-Aufnahme je Browser, Deckel-zu-Test, Tab-Wechsel | Empfohlener Browser + Hinweise im Einrichtungsdialog |
+| **S4** | Ist die Audioaufnahme in Safari **und** Chrome stabil (Chunks, Ruhezustand, Wake Lock, Hintergrund-Tab)? | 2-h-Aufnahme je Browser, Deckel-zu-Test, Tab-Wechsel. Klären, ob Chunks ab `seq ≥ 1` eigenständig decodierbar sind (sonst Recorder alle 30 s neu starten). | Empfohlener Browser + Hinweise im Einrichtungsdialog |
 | **S5** | Wie schnell ist lokale Transkription auf dem Mac des Nutzers? | `mlx-whisper large-v3-turbo` auf 90 min Testaudio | Lokal als Standard (≤ 15 min) oder Cloud-Standard |
 
 ## 5. Erstes Backlog
@@ -78,7 +78,7 @@ Größen: **S** ≤ 1 Tag · **M** 2–3 Tage · **L** 4–5 Tage.
 | T0-05 | Worker-Gerüst: Job-Schleife (`SKIP LOCKED` + `LISTEN/NOTIFY`), Logging, LLM-Schnittstelle (02 §7) | – | M |
 | T0-06 | Web-Gerüst: Static Export, Navigation (07 §2), Design-Tokens, Hell/Dunkel | – | M |
 | T0-07 | Semester & Module (API + UI), Einrichtungsdialog | F-ORG-01 | M |
-| T0-08 | Folien-Upload, Zuordnung, `pdf.ingest` (ohne Vision) | F-ORG-02 | L |
+| T0-08 | Folien-Upload, Zuordnung, `pdf.ingest` (ohne Vision; `embed.slides` und Vision folgen in Phase 2, E-NAC/E-SUC) | F-ORG-02 | L |
 | T0-09 | Übungsblatt-Upload | F-ORG-03 | S |
 | T0-10 | PDF-Anzeige mit Seitenleiste, Zoom, Suche | F-ORG-04 | M |
 
@@ -111,7 +111,7 @@ Größen: **S** ≤ 1 Tag · **M** 2–3 Tage · **L** 4–5 Tage.
 | Epic | Inhalt |
 |---|---|
 | E-NAC | Transkription, Ausrichtung (log + Inhalt), Rückblick, Audio-Wiedergabe der Notizen, geführte Nacharbeitung, Inbox, Klausurhinweis-Detektor, Zusammenfassung |
-| E-BIB | Vault-Schreiber mit Blockregeln, Datei-Watcher, Konzeptansicht, Zusammenführen/Teilen, Fachübersicht |
+| E-BIB | Vault-Schreiber mit Blockregeln, Datei-Watcher, Konzeptansicht, Zusammenführen/Teilen, Fachübersicht, F-DAT-03 (Vault) |
 | E-SUC | Suchindex, ⌘K, Frag deine Vorlesung |
 | E-LRN | Kartentypen, Erzeugung, FSRS, Lernsitzung, Bewertung, Fehleranalyse, Markieren/Lasso → Karte, Bildverdeckung, Abdeckband, Probeklausur, Readiness, Feynman, Übungsmodus, Altklausuren, Wiederholung auf dem iPad |
 | E-GRA | Graph, Glossar, Fächerbrücken |
