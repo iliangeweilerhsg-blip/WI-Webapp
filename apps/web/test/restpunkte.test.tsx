@@ -1,7 +1,6 @@
 // Restpunkte aus dem Review von #42 (Issue #43): Lösch-Race, Health-Abfrage, Toast-Feinheiten, Live-Region, Worker-Cache
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { QueryClient } from '@tanstack/react-query';
 
 const nav = vi.hoisted(() => ({ pathname: '/dokument', search: '' }));
@@ -20,7 +19,7 @@ const pdf = vi.hoisted(() => {
     render: vi.fn(async () => true),
     destroy: vi.fn(),
   };
-  return { doc, openPdf: vi.fn(async (_url: string, _attempt?: number) => doc) };
+  return { doc, openPdf: vi.fn(async (_url: string) => doc) };
 });
 vi.mock('../src/lib/pdf.ts', () => ({ openPdf: pdf.openPdf }));
 
@@ -187,26 +186,21 @@ describe('Punkt 2 und 4: PDF-Anzeige', () => {
     view();
     expect(await screen.findByText(/nicht scharf anzeigen/)).toBeInTheDocument();
     const healthCalls = () => core.requests.filter((r) => r.path === '/health').length;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(HEALTH_GRACE_MS + 5_000);
-    });
-    const after = healthCalls();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-    });
-    // Nur noch der 30-s-Takt des Statusfelds, nicht 12 Abfragen im 5-s-Takt
-    expect(healthCalls() - after).toBeLessThanOrEqual(3);
-  });
-
-  it('der Neuversuch reicht die Versuchsnummer an openPdf (Cache-Buster für den Worker)', async () => {
-    const core = installFakeCore({ decks: [DECK] });
-    core.finishIngest(DECK.id, 5);
-    pdf.openPdf.mockRejectedValueOnce(new TypeError('Failed to fetch'));
-    const user = userEvent.setup();
-    view();
-    await user.click(await screen.findByRole('button', { name: 'Erneut versuchen' }));
-    await waitFor(() => expect(pdf.openPdf).toHaveBeenCalledTimes(2));
-    expect(pdf.openPdf.mock.calls[0]?.[1]).toBe(0);
-    expect(pdf.openPdf.mock.calls[1]?.[1]).toBe(1);
+    const step = async (ms: number) => {
+      for (let t = 0; t < ms; t += 5_000) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5_000);
+        });
+      }
+    };
+    const start = healthCalls();
+    await step(HEALTH_GRACE_MS);
+    const withinGrace = healthCalls() - start;
+    // Innerhalb der Frist wird im 5-s-Takt gefragt (sechs Schritte)
+    expect(withinGrace).toBeGreaterThanOrEqual(5);
+    const afterGrace = healthCalls();
+    await step(60_000);
+    // Danach nur noch der 30-s-Takt des Statusfelds (zwei Abfragen in 60 s), nicht zwölf
+    expect(healthCalls() - afterGrace).toBeLessThanOrEqual(3);
   });
 });

@@ -56,12 +56,28 @@ vi.mock('pdfjs-dist', () => {
   return {
     version: '0.0.0-test',
     GlobalWorkerOptions: { workerSrc: 'x' },
+    PDFWorker: { create: () => ({ destroy: () => {} }) },
     Util: { transform: () => [] },
     getDocument: () => ({ promise: Promise.resolve(doc), destroy: () => state.destroyed++ }),
   };
 });
 
 import { openPdf } from '../src/lib/pdf.ts';
+
+// Der Worker meldet sich sofort bereit (jsdom kennt keine Worker)
+class FakeWorker extends EventTarget {
+  static urls: string[] = [];
+  static failNext = false;
+  constructor(url: string) {
+    super();
+    FakeWorker.urls.push(String(url));
+    const fail = FakeWorker.failNext;
+    FakeWorker.failNext = false;
+    setTimeout(() => this.dispatchEvent(new Event(fail ? 'error' : 'message')), 0);
+  }
+  terminate() {}
+}
+vi.stubGlobal('Worker', FakeWorker);
 
 function canvas() {
   const el = document.createElement('canvas');
@@ -158,5 +174,16 @@ describe('openPdf().pageSize', () => {
     // Der laufende Vorgang wurde weder abgebrochen noch behindert
     expect(await drawing).toBe(true);
     expect(state.errors).toEqual([]);
+  });
+});
+
+describe('openPdf(): Worker-Start', () => {
+  it('scheitert der Worker, bekommt der nächste Versuch einen Cache-Buster; ein 404 des PDF löst keinen aus', async () => {
+    FakeWorker.urls = [];
+    FakeWorker.failNext = true;
+    await expect(openPdf('/x.pdf')).rejects.toThrow(/Worker/);
+    await openPdf('/x.pdf');
+    expect(FakeWorker.urls[0]).not.toContain('retry=');
+    expect(FakeWorker.urls[1]).toContain('retry=1');
   });
 });

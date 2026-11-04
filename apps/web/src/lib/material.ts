@@ -201,6 +201,8 @@ interface PendingDelete {
   onFailed: () => void;
   /** Das DELETE ist unterwegs: Die Löschung lässt sich nicht mehr zurücknehmen. */
   sending?: boolean;
+  /** Erledigt, sobald das DELETE durch ist (oder gescheitert) und der Eintrag aus der Vormerkung verschwunden ist */
+  done?: Promise<void>;
 }
 
 const pending = new Map<string, PendingDelete>();
@@ -260,11 +262,27 @@ async function sendDelete(kind: MaterialKind, id: string, keepalive: boolean): P
   }
 }
 
-async function commitDelete(key: string): Promise<void> {
+function commitDelete(key: string): Promise<void> {
   const entry = pending.get(key);
-  if (!entry || entry.sending) return;
+  if (!entry || entry.sending) return Promise.resolve();
   // Ab jetzt ist die Löschung nicht mehr zurücknehmbar (sonst käme „ist wieder da“, obwohl die Datei verschwindet)
   entry.sending = true;
+  entry.done = runDelete(key, entry);
+  return entry.done;
+}
+
+/**
+ * Wartet, bis ein bereits abgeschicktes DELETE durch ist. `true`, wenn der Eintrag gerade gelöscht wurde (dann kennt
+ * der Core die Datei nicht mehr und ein neuer Upload wird angenommen), sonst `false` (nichts zu warten).
+ */
+export async function awaitMaterialDelete(kind: MaterialKind, id: string): Promise<boolean> {
+  const entry = pending.get(keyOf(kind, id));
+  if (!entry?.sending || !entry.done) return false;
+  await entry.done;
+  return true;
+}
+
+async function runDelete(key: string, entry: PendingDelete): Promise<void> {
   try {
     await sendDelete(entry.kind, entry.id, false);
   } catch {
@@ -335,7 +353,10 @@ function ensurePageHideFlush(): void {
   if (flushRegistered || typeof window === 'undefined') return;
   flushRegistered = true;
   window.addEventListener('pagehide', () => {
-    for (const entry of pending.values()) void sendDelete(entry.kind, entry.id, true).catch(() => {});
+    // Schon abgeschickte DELETEs laufen weiter (keepalive nicht nötig), kein zweites senden
+    for (const entry of pending.values()) {
+      if (!entry.sending) void sendDelete(entry.kind, entry.id, true).catch(() => {});
+    }
     pending.clear();
   });
 }

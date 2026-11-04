@@ -176,8 +176,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         if (!old.parts.some((p) => p.group === group)) return false;
         const parts = old.parts.map((p) => (p.group === group ? { ...p, message } : p));
         const { id, parts: _parts, ...base } = old;
-        replaceCurrent({ ...combine(parts, base), id } as ToastItem);
-      } else if (old.group === group) replaceCurrent({ ...old, message });
+        replaceCurrent({ ...combine(parts, { ...base, focusAction: false }), id } as ToastItem);
+      } else if (old.group === group) replaceCurrent({ ...old, message, focusAction: false });
       else return false;
       return true;
     },
@@ -202,7 +202,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       } else if (old.group !== group) return;
       dismiss(old.id);
     },
-    [display, dismiss, replaceCurrent],
+    [dismiss, replaceCurrent],
   );
 
   const api = useMemo(() => ({ show, dismissGroup, amend }), [show, dismissGroup, amend]);

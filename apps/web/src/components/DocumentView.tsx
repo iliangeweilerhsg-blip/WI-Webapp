@@ -133,7 +133,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     setPdf(null);
     setPdfFailed(false);
     setPdfKind('load');
-    openPdf(pdfUrl(kind, id), attempt).then(
+    openPdf(pdfUrl(kind, id)).then(
       (doc) => {
         if (cancelled) doc.destroy();
         else {
@@ -780,22 +780,23 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           Dieses PDF konnte nicht vollständig verarbeitet werden. Lesen kannst du es trotzdem.
         </p>
       ) : null}
-      {pdfFailed ? (
-        <div className="border-b border-border px-4 py-2 text-sm text-text-muted">
-          <span role="status">
-            Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.
-          </span>
-          {retryable ? (
-            <button
-              type="button"
-              onClick={() => setAttempt((n) => n + 1)}
-              className="ml-3 font-medium text-accent hover:underline"
-            >
-              Erneut versuchen
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      {/* Der Hinweis ist ein dauerhaftes Live-Element, nur sein Inhalt wechselt; der Knopf liegt daneben, nicht darin */}
+      <div className={pdfFailed ? 'border-b border-border px-4 py-2 text-sm text-text-muted' : undefined}>
+        <span role="status">
+          {pdfFailed
+            ? 'Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.'
+            : null}
+        </span>
+        {pdfFailed && retryable ? (
+          <button
+            type="button"
+            onClick={() => setAttempt((n) => n + 1)}
+            className="ml-3 font-medium text-accent hover:underline"
+          >
+            Erneut versuchen
+          </button>
+        ) : null}
+      </div>
 
       <div className="relative flex min-h-0 flex-1">
         {meta.state === 'neu' ? (
@@ -1004,11 +1005,12 @@ function DocumentScreen() {
   return <Viewer key={`${kind}:${id}`} kind={kind} id={id} meta={meta} />;
 }
 
-/** PDF-Anzeige (F-ORG-04) – Route mit Query-Parametern `?typ=folien|blatt&id=…&seite=…` (VERTRAEGE §5). */
 /** So lange wird nach einem Ladefehler bei gesundem Core noch schnell nach dem Core gefragt. */
 export const HEALTH_GRACE_MS = 30_000;
 /** Längste Dauer der schnellen Abfrage, solange der Core nicht antwortet. */
 export const HEALTH_MAX_MS = 5 * 60_000;
+
+/** PDF-Anzeige (F-ORG-04) – Route mit Query-Parametern `?typ=folien|blatt&id=…&seite=…` (VERTRAEGE §5). */
 
 export function DocumentView() {
   return (

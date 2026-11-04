@@ -22,6 +22,7 @@ import {
   invalidateMaterial,
   titleFromFile,
   unscheduleMaterialDelete,
+  awaitMaterialDelete,
   pendingDeleteMessage,
   type MaterialKind,
 } from './material.ts';
@@ -262,11 +263,18 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         // Lesbarer Titel statt Dateiname: „Mikro_Vorlesung_70.pdf“ → „Mikro Vorlesung 70“
         const title = titleFromFile(entry.file.name);
         if (title) fields.title = title;
-        const result = await apiUpload(collectionPath(entry.kind), UploadResultSchema, {
-          file: entry.file,
-          fields,
-          idempotencyKey: entry.key,
-        });
+        const upload = (idempotencyKey: string) =>
+          apiUpload(collectionPath(entry.kind), UploadResultSchema, {
+            file: entry.file,
+            fields,
+            idempotencyKey,
+          });
+        let result = await upload(entry.key);
+        // Die Dublette ist eine Löschung, deren DELETE schon unterwegs ist: abwarten, dann ist die Datei dem Core
+        // unbekannt und derselbe Inhalt wird als neuer Eintrag angenommen (neuer Schlüssel, der alte gilt der Dublette).
+        if (result.duplicate && (await awaitMaterialDelete(entry.kind, result.id))) {
+          result = await upload(globalThis.crypto.randomUUID());
+        }
         // Dieselbe Datei im Rückgängig-Fenster erneut hochgeladen: Die Dublette ist die vorgemerkte Löschung.
         // Sie wird zurückgenommen, sonst ginge das DELETE später raus und „Anzeigen“ zeigte auf ein gelöschtes Blatt.
         const restoredTitle =
