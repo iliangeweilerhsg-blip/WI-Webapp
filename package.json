@@ -13,6 +13,7 @@
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "pnpm -r --if-present run test",
+    "sg": "node infra/sg/src/main.ts",
     "schemas:gen": "pnpm --filter @sg/schemas run gen",
     "schemas:check": "pnpm --filter @sg/schemas run check"
   },

@@ -1,0 +1,49 @@
+// Argumente der CLI (reine Logik, gut testbar).
+
+export const COMMANDS = {
+  start: 'Datenbank, Core und Worker starten und die Web-App öffnen',
+  stop: 'Core, Worker und Datenbank anhalten',
+  migrate: 'Datenbank-Migrationen ausführen (pnpm --filter @sg/core migrate)',
+  doctor: 'Voraussetzungen prüfen (Node, pnpm, uv, Docker, Ports, Datenordner)',
+  backup: 'Datensicherung (kommt mit T1-18)',
+  restore: 'Wiederherstellung (kommt mit T1-18)',
+} as const;
+
+export type CommandName = keyof typeof COMMANDS;
+
+export type ParsedArgs =
+  | { kind: 'help' }
+  | { kind: 'command'; command: CommandName; rest: string[] }
+  | { kind: 'error'; message: string };
+
+export function isCommandName(value: string): value is CommandName {
+  return Object.hasOwn(COMMANDS, value);
+}
+
+export function parseArgs(argv: string[]): ParsedArgs {
+  const [first, ...rest] = argv;
+  if (first === undefined || first === '--help' || first === '-h' || first === 'help') {
+    return { kind: 'help' };
+  }
+  if (!isCommandName(first)) {
+    return { kind: 'error', message: `Unbekannter Befehl "${first}".` };
+  }
+  if (rest.includes('--help') || rest.includes('-h')) return { kind: 'help' };
+  return { kind: 'command', command: first, rest };
+}
+
+export function helpText(): string {
+  const width = Math.max(...Object.keys(COMMANDS).map((c) => c.length));
+  const lines = Object.entries(COMMANDS).map(([name, text]) => `  ${name.padEnd(width)}  ${text}`);
+  return [
+    'sg – Steuerung des Studien-Gehirns',
+    '',
+    'Aufruf: pnpm sg <befehl>',
+    '',
+    'Befehle:',
+    ...lines,
+    '',
+    'Umgebungsvariablen: SG_DATA_DIR (Standard ~/StudienGehirn), DATABASE_URL, SG_CORE_PORT (Standard 4710), SG_WEB_DIR',
+    'Hilfe: pnpm sg --help',
+  ].join('\n');
+}

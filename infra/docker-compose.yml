@@ -1,0 +1,26 @@
+# PostgreSQL 16 + pgvector für das Studien-Gehirn (Entwicklungs-Defaults, siehe infra/README.md).
+# Start/Stopp normalerweise über `pnpm sg start` / `pnpm sg stop`.
+name: studiengehirn
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: studiengehirn-db
+    environment:
+      # Dev-Defaults: Der Port ist nur auf 127.0.0.1 erreichbar, die Daten liegen lokal.
+      POSTGRES_USER: sg
+      POSTGRES_PASSWORD: sg
+      POSTGRES_DB: sg
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - sg_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U sg -d sg']
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  sg_pgdata:

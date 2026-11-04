@@ -1,0 +1,22 @@
+{
+  "name": "@sg/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "sg-CLI: start, stop, migrate, doctor (Backup/Restore folgen mit T1-18)",
+  "bin": {
+    "sg": "./src/main.ts"
+  },
+  "scripts": {
+    "sg": "node src/main.ts",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sg/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3",
+    "vitest": "5.1.0"
+  }
+}
