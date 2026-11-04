@@ -37,6 +37,7 @@ export function makeModule(overrides: Partial<Module> = {}): Module {
     lecturer: null,
     lang: 'de',
     description_md: null,
+    settings: {},
     ...overrides,
   };
 }

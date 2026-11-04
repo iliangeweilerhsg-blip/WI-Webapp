@@ -3133,7 +3133,8 @@
         "exam_type",
         "lecturer",
         "lang",
-        "description_md"
+        "description_md",
+        "settings"
       ],
       "additionalProperties": false,
       "properties": {
@@ -3220,6 +3221,9 @@
             "string",
             "null"
           ]
+        },
+        "settings": {
+          "$ref": "#/$defs/ModuleSettings"
         }
       }
     },
@@ -3441,8 +3445,12 @@
             "string",
             "null"
           ]
+        },
+        "settings": {
+          "$ref": "#/$defs/ModuleSettingsUpdate"
         }
-      }
+      },
+      "description": "PATCH /modules/{id}. settings wird Schlüssel für Schlüssel zusammengeführt, null entfernt einen Schlüssel (docs/VERTRAEGE.md §14.2)"
     },
     "Notebook": {
       "title": "Notebook",

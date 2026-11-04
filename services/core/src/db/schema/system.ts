@@ -60,25 +60,42 @@ export const setting = pgTable('setting', {
   deletedAt: timestamptz('deleted_at'),
 });
 
-export const device = pgTable('device', {
-  ...baseColumns(),
-  name: text('name').notNull(),
-  kind: text('kind').notNull(),
-  tokenHash: text('token_hash').notNull().unique(), // SHA-256 des Geräte-Tokens
-  lastSeenAt: timestamptz('last_seen_at'),
-  clockOffsetMs: integer('clock_offset_ms').notNull().default(0),
-  appVersion: text('app_version'),
-});
+/** Gekoppeltes Gerät (03 §13, VERTRAEGE §12). Gelöscht = widerrufen, das Token gilt dann nicht mehr. */
+export const device = pgTable(
+  'device',
+  {
+    ...baseColumns(),
+    name: text('name').notNull(),
+    kind: text('kind').notNull(), // ipad | iphone (VERTRAEGE §6.1)
+    tokenHash: text('token_hash').notNull().unique(), // SHA-256 des Geräte-Tokens (hex)
+    lastSeenAt: timestamptz('last_seen_at'),
+    /** Gemessener Uhrversatz (`time.offset`, VERTRAEGE §11.5). NULL = noch nicht gemessen */
+    clockOffsetMs: integer('clock_offset_ms'),
+    appVersion: text('app_version'),
+  },
+  (t) => [check('device_kind_chk', sql`${t.kind} IN ('ipad','iphone')`)],
+);
 
-export const backupRun = pgTable('backup_run', {
-  ...baseColumns(),
-  startedAt: timestamptz('started_at').notNull(),
-  finishedAt: timestamptz('finished_at'),
-  target: text('target').notNull(),
-  sizeBytes: bigint('size_bytes', { mode: 'number' }),
-  state: text('state').notNull(),
-  error: text('error'),
-});
+/** Ein Backup-Lauf (03 §13, VERTRAEGE §13). Schreibt die CLI (`sg backup`). */
+export const backupRun = pgTable(
+  'backup_run',
+  {
+    ...baseColumns(),
+    startedAt: timestamptz('started_at').notNull(),
+    finishedAt: timestamptz('finished_at'),
+    target: text('target').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }),
+    state: text('state').notNull(), // laeuft | fertig | fehler
+    error: text('error'),
+    trigger: text('trigger').notNull(), // zeitplan | manuell | vor_migration
+    /** Name des Stands für `sg restore <stand>`, z. B. 20261104T030012Z */
+    stand: text('stand'),
+  },
+  (t) => [
+    check('backup_run_state_chk', sql`${t.state} IN ('laeuft','fertig','fehler')`),
+    check('backup_run_trigger_chk', sql`${t.trigger} IN ('zeitplan','manuell','vor_migration')`),
+  ],
+);
 
 export const costEntry = pgTable(
   'cost_entry',

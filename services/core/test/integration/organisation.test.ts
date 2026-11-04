@@ -225,6 +225,7 @@ describe('Module', () => {
       lang: null,
       description_md: null,
       deleted_at: null,
+      settings: {},
     });
     const got = await t.request({ url: `${API}/modules/${m.id}` });
     expect(ModuleSchema.parse(got.json())).toEqual(m);
@@ -346,6 +347,42 @@ describe('Module', () => {
       payload: { semester_id: uuidv7() },
     });
     expect((await errorOf(badSemester, 404)).code).toBe('semester_not_found');
+  });
+
+  it('PATCH settings führt Schlüssel für Schlüssel zusammen, null entfernt (VERTRAEGE §14.2)', async () => {
+    const s = await createSemester();
+    const m = await createModule(s.id);
+    // Web-App setzt Layout und Spalten, iPad den Schreibmodus: keiner überschreibt den anderen
+    await patch<Module>(`/modules/${m.id}`, { settings: { layout: 'fokus', column_widths: [50, 20, 30] } });
+    const both = await patch<Module>(`/modules/${m.id}`, { settings: { ink_mode: 'auf_folie' } });
+    expect(ModuleSchema.parse(both).settings).toEqual({
+      layout: 'fokus',
+      column_widths: [50, 20, 30],
+      ink_mode: 'auf_folie',
+    });
+    // Andere Felder lassen settings unverändert
+    const renamed = await patch<Module>(`/modules/${m.id}`, { name: 'Neu' });
+    expect(renamed.settings).toEqual(both.settings);
+    // null entfernt einen Schlüssel, leeres Objekt ändert nichts
+    const removed = await patch<Module>(`/modules/${m.id}`, {
+      settings: { column_widths: null, layout: 'standard' },
+    });
+    expect(removed.settings).toEqual({ layout: 'standard', ink_mode: 'auf_folie' });
+    const unchanged = await patch<Module>(`/modules/${m.id}`, { settings: {} });
+    expect(unchanged.settings).toEqual(removed.settings);
+
+    const bad = await t.request({
+      method: 'PATCH',
+      url: `${API}/modules/${m.id}`,
+      payload: { settings: { layout: 'riesig' } },
+    });
+    expect((await errorOf(bad, 400)).code).toBe('validation_failed');
+    const twoColumns = await t.request({
+      method: 'PATCH',
+      url: `${API}/modules/${m.id}`,
+      payload: { settings: { column_widths: [50, 50] } },
+    });
+    expect((await errorOf(twoColumns, 400)).code).toBe('validation_failed');
   });
 
   it('GET /modules?semester_id filtert, ohne Filter kommen alle', async () => {

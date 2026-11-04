@@ -10,10 +10,12 @@ import {
   numeric,
   pgTable,
   text,
+  unique,
   uniqueIndex,
   uuid,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
+import type { ModuleSettings, SessionStartOffset } from '@sg/shared';
 import { baseColumns, timestamptz } from './common.ts';
 import { slideDeck } from './material.ts';
 
@@ -51,6 +53,11 @@ export const courseModule = pgTable(
     lecturer: text('lecturer'),
     lang: text('lang'),
     descriptionMd: text('description_md'),
+    /** Modul-Einstellungen (W-06 Option A, VERTRAEGE §14.2). Fehlender Schlüssel = globaler Standard */
+    settings: jsonb('settings')
+      .$type<ModuleSettings>()
+      .notNull()
+      .default(sql`'{}'::jsonb`),
   },
   (t) => [
     index('module_semester_idx').on(t.semesterId),
@@ -64,8 +71,12 @@ export const calendarSource = pgTable(
   {
     ...baseColumns(),
     kind: text('kind').notNull(), // ics_file | ics_url | google
+    /** Anzeigename (VERTRAEGE §6.1). Standard: Dateiname bzw. Host der URL */
+    name: text('name').notNull(),
     url: text('url'),
     lastSyncedAt: timestamptz('last_synced_at'),
+    /** Fehler des letzten Abgleichs, NULL nach Erfolg (VERTRAEGE §6.1) */
+    lastError: text('last_error'),
     readonly: boolean('readonly').notNull().default(true),
   },
   (t) => [check('calendar_source_kind_chk', sql`${t.kind} IN ('ics_file','ics_url','google')`)],
@@ -85,15 +96,23 @@ export const calendarEvent = pgTable(
     endsAt: timestamptz('ends_at').notNull(),
     recurrenceId: text('recurrence_id'),
     cancelled: boolean('cancelled').notNull().default(false),
+    // Ergänzungen VERTRAEGE §6.1
+    description: text('description'),
+    allDay: boolean('all_day').notNull().default(false),
+    /** auto: Zuordnung läuft beim Abgleich neu. manuell: bleibt beim Abgleich erhalten */
+    assignedBy: text('assigned_by').notNull().default('auto'),
   },
   (t) => [
     index('calendar_event_starts_idx').on(t.startsAt),
     index('calendar_event_module_idx').on(t.moduleId),
     index('calendar_event_source_uid_idx').on(t.sourceId, t.externalUid),
+    // Abgleichschlüssel (F-KAL-01, VERTRAEGE §6.1). Einzeltermine haben recurrence_id NULL.
+    unique('calendar_event_sync_uq').on(t.sourceId, t.externalUid, t.recurrenceId).nullsNotDistinct(),
     check(
       'calendar_event_kind_chk',
       sql`${t.kind} IN ('vorlesung','uebung','tutorium','pruefung','fest','lernblock_export')`,
     ),
+    check('calendar_event_assigned_by_chk', sql`${t.assignedBy} IN ('auto','manuell')`),
   ],
 );
 
@@ -116,6 +135,13 @@ export const session = pgTable(
     startedFrom: text('started_from'),
     processing: jsonb('processing').$type<Record<string, string>>(),
     reviewState: text('review_state').notNull().default('offen'),
+    /** Abweichender Offline-Start je Gerät (VERTRAEGE §9.3) */
+    startOffsets: jsonb('start_offsets')
+      .$type<SessionStartOffset[]>()
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    /** „weiter aufnehmen“: vor diesem Zeitpunkt stoppt keine Auto-Stopp-Regel (VERTRAEGE §9.4) */
+    autoStopExtendedUntil: timestamptz('auto_stop_extended_until'),
   },
   (t) => [
     index('session_module_idx').on(t.moduleId),
@@ -123,10 +149,10 @@ export const session = pgTable(
     uniqueIndex('session_event_uq')
       .on(t.calendarEventId)
       .where(sql`${t.calendarEventId} IS NOT NULL AND ${t.deletedAt} IS NULL`),
-    // Invariante 03 §14.1: höchstens eine laufende Session
-    uniqueIndex('session_one_running_uq')
+    // Invariante 03 §14.1, gilt für laeuft und pausiert zusammen (VERTRAEGE §9.1)
+    uniqueIndex('session_one_active_uq')
       .on(t.userId)
-      .where(sql`${t.state} = 'laeuft' AND ${t.deletedAt} IS NULL`),
+      .where(sql`${t.state} IN ('laeuft','pausiert') AND ${t.deletedAt} IS NULL`),
     check(
       'session_state_chk',
       sql`${t.state} IN ('geplant','bereit','laeuft','pausiert','beendet','verarbeitet','verpasst')`,
