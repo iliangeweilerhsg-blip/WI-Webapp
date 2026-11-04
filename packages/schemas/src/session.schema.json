@@ -1,0 +1,803 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sessions und Session-Daten (03 §3, §5, F-SES-01..05, F-DSH-02/05, F-AUD-01)",
+  "$defs": {
+    "SessionState": {
+      "type": "string",
+      "enum": ["geplant", "bereit", "laeuft", "pausiert", "beendet", "verpasst", "verarbeitet"],
+      "description": "Zustandsautomat F-SES-01, Übergänge in docs/VERTRAEGE.md"
+    },
+    "StopReason": {
+      "type": "string",
+      "enum": ["manuell", "kalenderende", "stille", "maximaldauer", "absturz_wiederhergestellt"]
+    },
+    "ReviewState": {
+      "type": "string",
+      "enum": ["offen", "in_arbeit", "erledigt"],
+      "description": "Nacharbeitung (F-NAC-05, Phase 2)"
+    },
+    "SessionProcessing": {
+      "type": "object",
+      "description": "Fortschritt der Pipeline: Job-Typ → Zustand des letzten Jobs dieses Typs (03 §3 session.processing)",
+      "additionalProperties": {
+        "$ref": "#/$defs/JobState"
+      }
+    },
+    "Session": {
+      "type": "object",
+      "description": "Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem Kalendertermin (null bei spontanen Sessions).",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "calendar_event_id",
+        "module_id",
+        "slide_deck_id",
+        "number",
+        "title",
+        "state",
+        "started_at",
+        "ended_at",
+        "stop_reason",
+        "started_from",
+        "processing",
+        "review_state",
+        "planned_starts_at",
+        "planned_ends_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calendar_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "number": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "VL-Nummer im Modul (VL 7), Regeln in docs/VERTRAEGE.md"
+        },
+        "title": {
+          "type": ["string", "null"]
+        },
+        "state": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientDevice"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "processing": {
+          "$ref": "#/$defs/SessionProcessing"
+        },
+        "review_state": {
+          "$ref": "#/$defs/ReviewState"
+        },
+        "planned_starts_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "planned_ends_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionCreate": {
+      "type": "object",
+      "description": "POST /sessions: spontane Session ohne Termin (F-SES-04). Ergebnis im Zustand bereit, danach /start.",
+      "required": ["module_id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "SessionUpdate": {
+      "type": "object",
+      "description": "PATCH /sessions/{id}",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": ["string", "null"]
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionStartRequest": {
+      "type": "object",
+      "description": "POST /sessions/{id}/start. started_at setzt der Core (Serverzeit).",
+      "required": ["started_from"],
+      "additionalProperties": false,
+      "properties": {
+        "started_from": {
+          "$ref": "#/$defs/ClientDevice"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionStopRequest": {
+      "type": "object",
+      "description": "POST /sessions/{id}/stop. reason fehlt = manuell. absturz_wiederhergestellt setzt nur der Core.",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/StopReason"
+        }
+      }
+    },
+    "SessionStartResult": {
+      "type": "object",
+      "description": "ended_session: eine andere Session, die wegen des Starts automatisch beendet wurde (F-SES-02)",
+      "required": ["session", "ended_session"],
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        },
+        "ended_session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Session"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionList": {
+      "type": "object",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Session"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "SlideEventSource": {
+      "type": "string",
+      "enum": ["manuell_mac", "manuell_ipad", "korrektur"]
+    },
+    "SlideEvent": {
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "slide_id",
+        "slide_index",
+        "t_ms",
+        "device",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slide_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "device": {
+          "$ref": "#/$defs/ClientDevice"
+        },
+        "source": {
+          "$ref": "#/$defs/SlideEventSource"
+        }
+      }
+    },
+    "MarkerKind": {
+      "type": "string",
+      "enum": ["frage", "klausur", "verknuepfung"]
+    },
+    "MarkerSource": {
+      "type": "string",
+      "enum": ["ipad", "mac", "detektor"]
+    },
+    "MarkerPosition": {
+      "type": "object",
+      "description": "Stelle auf der Seite in pt (Ursprung oben links)",
+      "required": ["x", "y"],
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "Marker": {
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "kind",
+        "t_ms",
+        "page_id",
+        "position",
+        "source",
+        "note",
+        "resolved_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/MarkerKind"
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MarkerPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/MarkerSource"
+        },
+        "note": {
+          "type": ["string", "null"]
+        },
+        "resolved_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PhotoMime": {
+      "type": "string",
+      "enum": ["image/heic", "image/jpeg"]
+    },
+    "Photo": {
+      "type": "object",
+      "description": "Tafel-Foto (Metadaten). Datei: GET /photos/{id}/file",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "t_ms",
+        "page_id",
+        "mime",
+        "sha256",
+        "size_bytes",
+        "has_file",
+        "ocr_text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mime": {
+          "$ref": "#/$defs/PhotoMime"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "has_file": {
+          "type": "boolean",
+          "description": "false, bis PUT /photos/{id}/file angekommen ist"
+        },
+        "ocr_text": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "RecordingState": {
+      "type": "string",
+      "enum": ["laeuft", "vollstaendig", "mit_luecken"]
+    },
+    "AudioCodec": {
+      "type": "string",
+      "enum": ["opus", "aac"]
+    },
+    "Recording": {
+      "type": "object",
+      "description": "Eine Aufnahme = ein MediaRecorder-Strom. Nach einem Neuladen beginnt eine neue Aufnahme derselben Session (F-SES-05).",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "mime",
+        "codec",
+        "started_ms",
+        "duration_ms",
+        "state",
+        "chunks_independent",
+        "chunk_count",
+        "last_seq",
+        "completed_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "mime": {
+          "type": "string",
+          "pattern": "^audio/(webm|mp4)(;.*)?$",
+          "examples": ["audio/webm;codecs=opus", "audio/mp4"]
+        },
+        "codec": {
+          "$ref": "#/$defs/AudioCodec"
+        },
+        "started_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "duration_ms": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Länge der Gesamtdatei, gesetzt von audio.finalize"
+        },
+        "state": {
+          "$ref": "#/$defs/RecordingState"
+        },
+        "chunks_independent": {
+          "type": "boolean",
+          "description": "true: jeder Chunk ist eine eigenständige Datei (Recorder je Chunk neu gestartet). false: Chunks ergeben in seq-Reihenfolge einen Bytestrom. Ergänzung, offen bis Spike S4"
+        },
+        "chunk_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Abgeleitet: empfangene Chunks"
+        },
+        "last_seq": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Abgeleitet: höchste empfangene seq"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RecordingCreate": {
+      "type": "object",
+      "description": "POST /sessions/{id}/recordings",
+      "required": ["mime", "codec", "started_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "mime": {
+          "type": "string",
+          "pattern": "^audio/(webm|mp4)(;.*)?$"
+        },
+        "codec": {
+          "$ref": "#/$defs/AudioCodec"
+        },
+        "started_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "chunks_independent": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RecordingComplete": {
+      "type": "object",
+      "description": "POST /recordings/{id}/complete: der Client hat den letzten Chunk hochgeladen. Der Core stellt audio.finalize ein.",
+      "required": ["last_seq", "duration_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "last_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Aufgenommene Länge laut Client"
+        }
+      }
+    },
+    "AudioChunkMeta": {
+      "type": "object",
+      "description": "Geparste Metadaten von PUT /recordings/{id}/chunks/{seq}: Header X-Start-Ms, X-Duration-Ms (Dezimalzahlen), X-Sha256 (hex des Bodys)",
+      "required": ["seq", "start_ms", "duration_ms", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Pfad {seq}, 0-basiert, lückenlos (Invariante 2)"
+        },
+        "start_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        }
+      }
+    },
+    "AudioChunk": {
+      "type": "object",
+      "description": "Antwort auf PUT /recordings/{id}/chunks/{seq}",
+      "required": [
+        "recording_id",
+        "seq",
+        "start_ms",
+        "duration_ms",
+        "sha256",
+        "size_bytes",
+        "received_at",
+        "duplicate"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "recording_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "start_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "received_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "duplicate": {
+          "type": "boolean",
+          "description": "true: identischer Chunk lag schon vor (200 statt 201)"
+        }
+      }
+    },
+    "SessionSnapshot": {
+      "type": "object",
+      "description": "GET /sessions/{id}/snapshot: Live-Stand für Dashboard und iPad (ohne gelöschte Objekte, nach t_ms sortiert)",
+      "required": ["session", "slide_events", "markers", "photos", "recordings", "stream_seq"],
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        },
+        "slide_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SlideEvent"
+          }
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Marker"
+          }
+        },
+        "photos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Photo"
+          }
+        },
+        "recordings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Recording"
+          }
+        },
+        "stream_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "seq des Stroms session:<id>, zu der dieser Stand gehört. Danach per Sync ab stream_seq + 1"
+        }
+      }
+    }
+  }
+}

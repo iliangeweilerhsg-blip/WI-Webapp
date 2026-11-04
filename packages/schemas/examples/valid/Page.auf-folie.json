@@ -1,0 +1,17 @@
+{
+  "id": "019a4e14-0000-7000-8000-000000000051",
+  "user_id": "019a4e14-0000-7000-8000-000000000001",
+  "created_at": "2026-11-04T07:15:00Z",
+  "updated_at": "2026-11-04T07:15:00Z",
+  "deleted_at": null,
+  "notebook_id": "019a4e14-0000-7000-8000-000000000050",
+  "session_id": "019a4e14-0000-7000-8000-000000000030",
+  "index": 3,
+  "template": "folie",
+  "background_slide_id": "019a4e14-0000-7000-8000-000000000041",
+  "attached_slide_id": null,
+  "width_pt": 720,
+  "height_pt": 405,
+  "version": 4,
+  "has_pkdrawing": true
+}

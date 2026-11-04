@@ -1,0 +1,468 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Kalender: Quellen, Termine, ICS-Import (03 §3, F-KAL-01/02)",
+  "$defs": {
+    "CalendarSourceKind": {
+      "type": "string",
+      "enum": ["ics_file", "ics_url", "google"],
+      "description": "google erst ab Phase 4 (F-KAL-03)"
+    },
+    "CalendarEventKind": {
+      "type": "string",
+      "enum": ["vorlesung", "uebung", "tutorium", "pruefung", "fest", "lernblock_export"]
+    },
+    "CalendarAssignment": {
+      "type": "string",
+      "enum": ["auto", "manuell"],
+      "description": "auto: Modul und Art hat der Abgleich gesetzt und darf sie ändern. manuell: vom Nutzer gesetzt, der Abgleich ändert module_id und kind nie mehr (F-KAL-02)."
+    },
+    "CalendarUpdateScope": {
+      "type": "string",
+      "enum": ["serie", "einzeln"],
+      "description": "serie: alle Termine derselben Quelle mit gleicher external_uid (F-KAL-02). einzeln: nur dieser Termin."
+    },
+    "CalendarSource": {
+      "type": "object",
+      "description": "Kalenderquelle",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "kind",
+        "name",
+        "url",
+        "last_synced_at",
+        "last_error",
+        "readonly",
+        "event_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarSourceKind"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Anzeigename. Ergänzung zu 03 §3. Standard: Dateiname bzw. Host der URL"
+        },
+        "url": {
+          "type": ["string", "null"],
+          "description": "Nur bei ics_url (webcal:// wird als https:// gespeichert)"
+        },
+        "last_synced_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_error": {
+          "type": ["string", "null"],
+          "description": "Fehler des letzten Abgleichs, null nach Erfolg. Ergänzung zu 03 §3"
+        },
+        "readonly": {
+          "type": "boolean"
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Abgeleitet: Termine dieser Quelle (ohne gelöschte)"
+        }
+      }
+    },
+    "CalendarSourceCreate": {
+      "type": "object",
+      "description": "JSON-Body von POST /calendar/sources für eine ICS-URL. Eine ICS-Datei kommt stattdessen als multipart (Felder file, name). Antwort: IcsImportResult.",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^(https?|webcal)://",
+          "description": "ICS-URL (Abo, Abgleich alle 6 h und beim Start)"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "CalendarSourceList": {
+      "type": "object",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CalendarSource"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "CalendarEvent": {
+      "type": "object",
+      "description": "Termin. session_id ist abgeleitet: die nicht gelöschte Session zu diesem Termin.",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "source_id",
+        "external_uid",
+        "recurrence_id",
+        "module_id",
+        "kind",
+        "assigned_by",
+        "title",
+        "location",
+        "description",
+        "starts_at",
+        "ends_at",
+        "all_day",
+        "cancelled",
+        "session_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "external_uid": {
+          "type": ["string", "null"],
+          "description": "UID aus der Quelle, null bei manuellen Terminen"
+        },
+        "recurrence_id": {
+          "type": ["string", "null"],
+          "description": "Kennung des Vorkommens: ISO 8601 mit Offset der Ortszeit (2026-10-20T10:15:00+02:00) bzw. Datum (2026-11-01) bei ganztägigen Serien. null bei Einzelterminen. Abgleichschlüssel: (source_id, external_uid, recurrence_id)"
+        },
+        "module_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarEventKind"
+        },
+        "assigned_by": {
+          "$ref": "#/$defs/CalendarAssignment"
+        },
+        "title": {
+          "type": "string"
+        },
+        "location": {
+          "type": ["string", "null"]
+        },
+        "description": {
+          "type": ["string", "null"],
+          "description": "DESCRIPTION aus der Quelle. Ergänzung zu 03 §3"
+        },
+        "starts_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "ends_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "all_day": {
+          "type": "boolean",
+          "description": "Ganztägig (VALUE=DATE). starts_at/ends_at sind dann 00:00 UTC des Datums (wie tests/fixtures/ics/08). Ergänzung zu 03 §3"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CalendarEventUpdate": {
+      "type": "object",
+      "description": "PATCH /calendar/events/{id}. Setzt assigned_by=manuell. scope fehlt = serie. Antwort: CalendarEventList mit allen geänderten Terminen.",
+      "additionalProperties": false,
+      "properties": {
+        "module_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarEventKind"
+        },
+        "scope": {
+          "$ref": "#/$defs/CalendarUpdateScope"
+        }
+      }
+    },
+    "CalendarEventList": {
+      "type": "object",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CalendarEvent"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "IcsEventRef": {
+      "type": "object",
+      "description": "Termin in einem Abgleichergebnis (Schlüssel wie tests/fixtures/ics/11-abgleich-erwartung.json)",
+      "required": ["event_id", "external_uid", "recurrence_id", "title", "starts_at", "module_id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "external_uid": {
+          "type": "string"
+        },
+        "recurrence_id": {
+          "type": ["string", "null"]
+        },
+        "title": {
+          "type": "string"
+        },
+        "starts_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "module_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarEventKind"
+        }
+      }
+    },
+    "IcsImportCounts": {
+      "type": "object",
+      "required": ["neu", "geaendert", "entfallen", "unveraendert", "zugeordnet", "ohne_modul"],
+      "additionalProperties": false,
+      "properties": {
+        "neu": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "geaendert": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "entfallen": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unveraendert": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "zugeordnet": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "In diesem Lauf automatisch einem Modul zugeordnet"
+        },
+        "ohne_modul": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Nicht abgesagte Termine der Quelle ohne Modul nach dem Lauf"
+        }
+      }
+    },
+    "IcsModuleSuggestion": {
+      "type": "object",
+      "description": "Vorschlag „neues Modul anlegen?\" für unbekannte Titel (F-KAL-02)",
+      "required": ["name", "kind", "event_count", "series_event_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Vorgeschlagener Modulname, aus dem Titel bereinigt"
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarEventKind"
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "series_event_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1,
+          "description": "Je Serie ein Termin. Nach POST /modules: PATCH /calendar/events/{id} mit module_id, scope=serie"
+        }
+      }
+    },
+    "IcsWarning": {
+      "type": "object",
+      "required": ["code", "message", "external_uid"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "examples": ["rrule_unsupported", "timezone_unknown"]
+        },
+        "message": {
+          "type": "string"
+        },
+        "external_uid": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "IcsImportResult": {
+      "type": "object",
+      "description": "Antwort auf POST /calendar/sources (201) und POST /calendar/sources/{id}/sync (200). Der Abgleich läuft synchron im Core, nicht als Job.",
+      "required": [
+        "source",
+        "counts",
+        "neu",
+        "geaendert",
+        "entfallen",
+        "zugeordnet",
+        "module_suggestions",
+        "warnings"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/CalendarSource"
+        },
+        "counts": {
+          "$ref": "#/$defs/IcsImportCounts"
+        },
+        "neu": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsEventRef"
+          }
+        },
+        "geaendert": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsEventRef"
+          }
+        },
+        "entfallen": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsEventRef"
+          }
+        },
+        "zugeordnet": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsEventRef"
+          }
+        },
+        "module_suggestions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsModuleSuggestion"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsWarning"
+          }
+        }
+      }
+    }
+  }
+}

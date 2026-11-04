@@ -1,0 +1,15 @@
+{
+  "type": "welcome",
+  "protocol": 1,
+  "server_time": 1762240562123,
+  "server_version": "0.1.0",
+  "device_id": "019a4e14-0000-7000-8000-000000000080",
+  "resume": [
+    {
+      "stream": "notebook:019a4e14-0000-7000-8000-000000000050",
+      "from_seq": 0,
+      "head_seq": 0,
+      "reset": false
+    }
+  ]
+}

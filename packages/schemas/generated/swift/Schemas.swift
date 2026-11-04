@@ -11,78 +11,440 @@ import Foundation
 struct SchemaBundle: Codable {
     let apiError: APIError?
     let apiErrorBody: APIErrorBody?
+    let appearance: Appearance?
+    let audioChunk: AudioChunk?
+    let audioChunkMeta: AudioChunkMeta?
+    let audioCodec: AudioCodec?
+    let audioFinalizePayload: AudioFinalizePayload?
+    let audioFinalizeResult: AudioFinalizeResult?
+    let audioGap: AudioGap?
+    let audioGapReason: AudioGapReason?
+    let backupOverview: BackupOverview?
+    let backupRun: BackupRun?
+    let backupState: BackupState?
+    let backupStatus: BackupStatus?
+    let backupTrigger: BackupTrigger?
     let bBox: [Double]?
+    let calendarAssignment: CalendarAssignment?
+    let calendarEvent: CalendarEvent?
+    let calendarEventKind: CalendarEventKind?
+    let calendarEventList: CalendarEventList?
+    let calendarEventUpdate: CalendarEventUpdate?
+    let calendarSource: CalendarSource?
+    let calendarSourceCreate: CalendarSourceCreate?
+    let calendarSourceKind: CalendarSourceKind?
+    let calendarSourceList: CalendarSourceList?
+    let calendarUpdateScope: CalendarUpdateScope?
+    let clientDevice: ClientDevice?
+    let columnWidths: [Double]?
+    let dashboardLayout: DashboardLayout?
+    let dataSettings: DataSettings?
+    let dataSettingsUpdate: DataSettingsUpdate?
+    let device: Device?
+    let deviceKind: DeviceKind?
+    let deviceList: DeviceList?
+    let drawingSnapshotData: DrawingSnapshotData?
+    let drawingSnapshotOp: DrawingSnapshotOp?
+    let elementRemoveData: ElementRemoveData?
+    let elementRemoveOp: ElementRemoveOp?
+    let elementUpsertData: ElementUpsertData?
+    let elementUpsertOp: ElementUpsertOp?
+    let epochMS: Int?
     let exerciseSheet: ExerciseSheet?
     let exerciseSheetList: ExerciseSheetList?
     let exerciseSheetUpdate: ExerciseSheetUpdate?
+    let fileReceipt: FileReceipt?
+    let fileRef: FileRef?
+    let generalSettings: GeneralSettings?
+    let generalSettingsUpdate: GeneralSettingsUpdate?
     let health: Health?
+    let hexColor: String?
+    let icsEventRef: ICSEventRef?
+    let icsImportCounts: ICSImportCounts?
+    let icsImportResult: ICSImportResult?
+    let icsModuleSuggestion: ICSModuleSuggestion?
+    let icsWarning: ICSWarning?
+    let imageElement: ImageElement?
+    let imageElementPayload: ImageElementPayload?
     let ingestState: IngestState?
+    let inkMode: InkMode?
     let isoDate: String?
     let job: Job?
     let jobList: JobList?
     let jobState: JobState?
     let jobType: JobType?
     let lang: Lang?
+    let lectureSettings: LectureSettings?
+    let lectureSettingsUpdate: LectureSettingsUpdate?
+    let marker: Marker?
+    let markerAddData: MarkerAddData?
+    let markerAddOp: MarkerAddOp?
+    let markerKind: MarkerKind?
+    let markerPosition: MarkerPosition?
+    let markerRemoveData: MarkerRemoveData?
+    let markerRemoveOp: MarkerRemoveOp?
+    let markerSource: MarkerSource?
     let module: Module?
     let moduleColor: ModuleColor?
     let moduleCreate: ModuleCreate?
     let moduleList: ModuleList?
+    let moduleSettings: ModuleSettings?
+    let moduleSettingsUpdate: ModuleSettingsUpdate?
     let moduleUpdate: ModuleUpdate?
+    let notebook: Notebook?
+    let notebookCreate: NotebookCreate?
+    let notebookKind: NotebookKind?
+    let notebookList: NotebookList?
+    let notebookPages: NotebookPages?
+    let notebookStreamID: String?
+    let notebookUpdate: NotebookUpdate?
+    let page: Page?
+    let pageCreateData: PageCreateData?
+    let pageCreateOp: PageCreateOp?
+    let pageDeleteData: PageDeleteData?
+    let pageDeleteOp: PageDeleteOp?
+    let pageDetail: PageDetail?
+    let pageElement: PageElement?
+    let pageStrokes: PageStrokes?
+    let pageTemplate: PageTemplate?
+    let pageUpdateData: PageUpdateData?
+    let pageUpdateFields: PageUpdateFields?
+    let pageUpdateOp: PageUpdateOp?
+    let pairConfirmRequest: PairConfirmRequest?
+    let pairingCode: PairingCode?
+    let pairResponse: PairResponse?
+    let pairStartRequest: PairStartRequest?
+    let pairStartResponse: PairStartResponse?
     let pdfIngestDeckPayload: PDFIngestDeckPayload?
     let pdfIngestPayload: PDFIngestPayload?
     let pdfIngestResult: PDFIngestResult?
     let pdfIngestSheetPayload: PDFIngestSheetPayload?
+    let pencilDoubleTapAction: PencilDoubleTapAction?
+    let pencilSqueezeAction: PencilSqueezeAction?
+    let penSettings: PenSettings?
+    let penSettingsUpdate: PenSettingsUpdate?
+    let photo: Photo?
+    let photoAddData: PhotoAddData?
+    let photoAddOp: PhotoAddOp?
+    let photoMIME: PhotoMIME?
+    let point2: [Double]?
+    let recording: Recording?
+    let recordingComplete: RecordingComplete?
+    let recordingCreate: RecordingCreate?
+    let recordingState: RecordingState?
+    let reviewState: ReviewState?
     let semester: Semester?
     let semesterCreate: SemesterCreate?
     let semesterList: SemesterList?
     let semesterUpdate: SemesterUpdate?
+    let session: Session?
+    let sessionCreate: SessionCreate?
+    let sessionList: SessionList?
+    let sessionMS: Int?
+    let sessionPauseOp: SessionPauseOp?
+    let sessionProcessing: [String: JobState]?
+    let sessionRefData: SessionRefData?
+    let sessionResumeOp: SessionResumeOp?
+    let sessionSnapshot: SessionSnapshot?
+    let sessionStartData: SessionStartData?
+    let sessionStartOp: SessionStartOp?
+    let sessionStartRequest: SessionStartRequest?
+    let sessionStartResult: SessionStartResult?
+    let sessionState: SessionState?
+    let sessionStopData: SessionStopData?
+    let sessionStopOp: SessionStopOp?
+    let sessionStopRequest: SessionStopRequest?
+    let sessionStreamID: String?
+    let sessionUpdate: SessionUpdate?
+    let settings: Settings?
+    let settingsUpdate: SettingsUpdate?
+    let sha256: String?
+    let shapeElement: ShapeElement?
+    let shapeElementPayload: ShapeElementPayload?
+    let shapeKind: ShapeKind?
     let slide: Slide?
+    let slideChangeData: SlideChangeData?
+    let slideChangeOp: SlideChangeOp?
     let slideDeck: SlideDeck?
     let slideDeckDetail: SlideDeckDetail?
     let slideDeckList: SlideDeckList?
     let slideDeckUpdate: SlideDeckUpdate?
+    let slideEvent: SlideEvent?
+    let slideEventSource: SlideEventSource?
+    let stampElement: StampElement?
+    let stampElementPayload: StampElementPayload?
+    let stopReason: StopReason?
+    let stroke: Stroke?
+    let strokeAddData: StrokeAddData?
+    let strokeAddOp: StrokeAddOp?
+    let strokeLayer: StrokeLayer?
+    let strokeRemoveData: StrokeRemoveData?
+    let strokeRemoveOp: StrokeRemoveOp?
+    let strokeTool: StrokeTool?
+    let syncACK: SyncACK?
+    let syncClientKind: SyncClientKind?
+    let syncClientMessage: SyncClientMessage?
+    let syncConnectionEvent: SyncConnectionEvent?
+    let syncConnectionInfo: SyncConnectionInfo?
+    let syncError: SyncError?
+    let syncErrorCode: SyncErrorCode?
+    let syncEvent: SyncEvent?
+    let syncHello: SyncHello?
+    let syncOp: SyncOp?
+    let syncOrigin: SyncOrigin?
+    let syncPairingEvent: SyncPairingEvent?
+    let syncPing: SyncPing?
+    let syncPong: SyncPong?
+    let syncPresence: SyncPresence?
+    let syncPresenceEvent: SyncPresenceEvent?
+    let syncPresenceInfo: SyncPresenceInfo?
+    let syncResume: SyncResume?
+    let syncServerMessage: SyncServerMessage?
+    let syncSessionUpdatedEvent: SyncSessionUpdatedEvent?
+    let syncStreamID: String?
+    let syncStreamPosition: SyncStreamPosition?
+    let syncSubscribe: SyncSubscribe?
+    let syncSubscribed: SyncSubscribed?
+    let syncTimeOffset: SyncTimeOffset?
+    let syncTimePing: SyncTimePing?
+    let syncTimePong: SyncTimePong?
+    let syncUnsubscribe: SyncUnsubscribe?
+    let syncWelcome: SyncWelcome?
+    let tapeElement: TapeElement?
+    let tapeElementPayload: TapeElementPayload?
     let task: Task?
     let textBlock: TextBlock?
+    let textElement: TextElement?
+    let textElementPayload: TextElementPayload?
+    let textSize: TextSize?
     let timestamp: Date?
+    let toolbarSide: ToolbarSide?
+    let transform: [Double]?
+    let trashItem: TrashItem?
+    let trashKind: TrashKind?
+    let trashList: TrashList?
+    let trashParent: TrashParent?
+    let trashRestoreResult: TrashRestoreResult?
     let uploadResult: UploadResult?
     let uuid: String?
 
     enum CodingKeys: String, CodingKey {
         case apiError = "ApiError"
         case apiErrorBody = "ApiErrorBody"
+        case appearance = "Appearance"
+        case audioChunk = "AudioChunk"
+        case audioChunkMeta = "AudioChunkMeta"
+        case audioCodec = "AudioCodec"
+        case audioFinalizePayload = "AudioFinalizePayload"
+        case audioFinalizeResult = "AudioFinalizeResult"
+        case audioGap = "AudioGap"
+        case audioGapReason = "AudioGapReason"
+        case backupOverview = "BackupOverview"
+        case backupRun = "BackupRun"
+        case backupState = "BackupState"
+        case backupStatus = "BackupStatus"
+        case backupTrigger = "BackupTrigger"
         case bBox = "BBox"
+        case calendarAssignment = "CalendarAssignment"
+        case calendarEvent = "CalendarEvent"
+        case calendarEventKind = "CalendarEventKind"
+        case calendarEventList = "CalendarEventList"
+        case calendarEventUpdate = "CalendarEventUpdate"
+        case calendarSource = "CalendarSource"
+        case calendarSourceCreate = "CalendarSourceCreate"
+        case calendarSourceKind = "CalendarSourceKind"
+        case calendarSourceList = "CalendarSourceList"
+        case calendarUpdateScope = "CalendarUpdateScope"
+        case clientDevice = "ClientDevice"
+        case columnWidths = "ColumnWidths"
+        case dashboardLayout = "DashboardLayout"
+        case dataSettings = "DataSettings"
+        case dataSettingsUpdate = "DataSettingsUpdate"
+        case device = "Device"
+        case deviceKind = "DeviceKind"
+        case deviceList = "DeviceList"
+        case drawingSnapshotData = "DrawingSnapshotData"
+        case drawingSnapshotOp = "DrawingSnapshotOp"
+        case elementRemoveData = "ElementRemoveData"
+        case elementRemoveOp = "ElementRemoveOp"
+        case elementUpsertData = "ElementUpsertData"
+        case elementUpsertOp = "ElementUpsertOp"
+        case epochMS = "EpochMs"
         case exerciseSheet = "ExerciseSheet"
         case exerciseSheetList = "ExerciseSheetList"
         case exerciseSheetUpdate = "ExerciseSheetUpdate"
+        case fileReceipt = "FileReceipt"
+        case fileRef = "FileRef"
+        case generalSettings = "GeneralSettings"
+        case generalSettingsUpdate = "GeneralSettingsUpdate"
         case health = "Health"
+        case hexColor = "HexColor"
+        case icsEventRef = "IcsEventRef"
+        case icsImportCounts = "IcsImportCounts"
+        case icsImportResult = "IcsImportResult"
+        case icsModuleSuggestion = "IcsModuleSuggestion"
+        case icsWarning = "IcsWarning"
+        case imageElement = "ImageElement"
+        case imageElementPayload = "ImageElementPayload"
         case ingestState = "IngestState"
+        case inkMode = "InkMode"
         case isoDate = "IsoDate"
         case job = "Job"
         case jobList = "JobList"
         case jobState = "JobState"
         case jobType = "JobType"
         case lang = "Lang"
+        case lectureSettings = "LectureSettings"
+        case lectureSettingsUpdate = "LectureSettingsUpdate"
+        case marker = "Marker"
+        case markerAddData = "MarkerAddData"
+        case markerAddOp = "MarkerAddOp"
+        case markerKind = "MarkerKind"
+        case markerPosition = "MarkerPosition"
+        case markerRemoveData = "MarkerRemoveData"
+        case markerRemoveOp = "MarkerRemoveOp"
+        case markerSource = "MarkerSource"
         case module = "Module"
         case moduleColor = "ModuleColor"
         case moduleCreate = "ModuleCreate"
         case moduleList = "ModuleList"
+        case moduleSettings = "ModuleSettings"
+        case moduleSettingsUpdate = "ModuleSettingsUpdate"
         case moduleUpdate = "ModuleUpdate"
+        case notebook = "Notebook"
+        case notebookCreate = "NotebookCreate"
+        case notebookKind = "NotebookKind"
+        case notebookList = "NotebookList"
+        case notebookPages = "NotebookPages"
+        case notebookStreamID = "NotebookStreamId"
+        case notebookUpdate = "NotebookUpdate"
+        case page = "Page"
+        case pageCreateData = "PageCreateData"
+        case pageCreateOp = "PageCreateOp"
+        case pageDeleteData = "PageDeleteData"
+        case pageDeleteOp = "PageDeleteOp"
+        case pageDetail = "PageDetail"
+        case pageElement = "PageElement"
+        case pageStrokes = "PageStrokes"
+        case pageTemplate = "PageTemplate"
+        case pageUpdateData = "PageUpdateData"
+        case pageUpdateFields = "PageUpdateFields"
+        case pageUpdateOp = "PageUpdateOp"
+        case pairConfirmRequest = "PairConfirmRequest"
+        case pairingCode = "PairingCode"
+        case pairResponse = "PairResponse"
+        case pairStartRequest = "PairStartRequest"
+        case pairStartResponse = "PairStartResponse"
         case pdfIngestDeckPayload = "PdfIngestDeckPayload"
         case pdfIngestPayload = "PdfIngestPayload"
         case pdfIngestResult = "PdfIngestResult"
         case pdfIngestSheetPayload = "PdfIngestSheetPayload"
+        case pencilDoubleTapAction = "PencilDoubleTapAction"
+        case pencilSqueezeAction = "PencilSqueezeAction"
+        case penSettings = "PenSettings"
+        case penSettingsUpdate = "PenSettingsUpdate"
+        case photo = "Photo"
+        case photoAddData = "PhotoAddData"
+        case photoAddOp = "PhotoAddOp"
+        case photoMIME = "PhotoMime"
+        case point2 = "Point2"
+        case recording = "Recording"
+        case recordingComplete = "RecordingComplete"
+        case recordingCreate = "RecordingCreate"
+        case recordingState = "RecordingState"
+        case reviewState = "ReviewState"
         case semester = "Semester"
         case semesterCreate = "SemesterCreate"
         case semesterList = "SemesterList"
         case semesterUpdate = "SemesterUpdate"
+        case session = "Session"
+        case sessionCreate = "SessionCreate"
+        case sessionList = "SessionList"
+        case sessionMS = "SessionMs"
+        case sessionPauseOp = "SessionPauseOp"
+        case sessionProcessing = "SessionProcessing"
+        case sessionRefData = "SessionRefData"
+        case sessionResumeOp = "SessionResumeOp"
+        case sessionSnapshot = "SessionSnapshot"
+        case sessionStartData = "SessionStartData"
+        case sessionStartOp = "SessionStartOp"
+        case sessionStartRequest = "SessionStartRequest"
+        case sessionStartResult = "SessionStartResult"
+        case sessionState = "SessionState"
+        case sessionStopData = "SessionStopData"
+        case sessionStopOp = "SessionStopOp"
+        case sessionStopRequest = "SessionStopRequest"
+        case sessionStreamID = "SessionStreamId"
+        case sessionUpdate = "SessionUpdate"
+        case settings = "Settings"
+        case settingsUpdate = "SettingsUpdate"
+        case sha256 = "Sha256"
+        case shapeElement = "ShapeElement"
+        case shapeElementPayload = "ShapeElementPayload"
+        case shapeKind = "ShapeKind"
         case slide = "Slide"
+        case slideChangeData = "SlideChangeData"
+        case slideChangeOp = "SlideChangeOp"
         case slideDeck = "SlideDeck"
         case slideDeckDetail = "SlideDeckDetail"
         case slideDeckList = "SlideDeckList"
         case slideDeckUpdate = "SlideDeckUpdate"
+        case slideEvent = "SlideEvent"
+        case slideEventSource = "SlideEventSource"
+        case stampElement = "StampElement"
+        case stampElementPayload = "StampElementPayload"
+        case stopReason = "StopReason"
+        case stroke = "Stroke"
+        case strokeAddData = "StrokeAddData"
+        case strokeAddOp = "StrokeAddOp"
+        case strokeLayer = "StrokeLayer"
+        case strokeRemoveData = "StrokeRemoveData"
+        case strokeRemoveOp = "StrokeRemoveOp"
+        case strokeTool = "StrokeTool"
+        case syncACK = "SyncAck"
+        case syncClientKind = "SyncClientKind"
+        case syncClientMessage = "SyncClientMessage"
+        case syncConnectionEvent = "SyncConnectionEvent"
+        case syncConnectionInfo = "SyncConnectionInfo"
+        case syncError = "SyncError"
+        case syncErrorCode = "SyncErrorCode"
+        case syncEvent = "SyncEvent"
+        case syncHello = "SyncHello"
+        case syncOp = "SyncOp"
+        case syncOrigin = "SyncOrigin"
+        case syncPairingEvent = "SyncPairingEvent"
+        case syncPing = "SyncPing"
+        case syncPong = "SyncPong"
+        case syncPresence = "SyncPresence"
+        case syncPresenceEvent = "SyncPresenceEvent"
+        case syncPresenceInfo = "SyncPresenceInfo"
+        case syncResume = "SyncResume"
+        case syncServerMessage = "SyncServerMessage"
+        case syncSessionUpdatedEvent = "SyncSessionUpdatedEvent"
+        case syncStreamID = "SyncStreamId"
+        case syncStreamPosition = "SyncStreamPosition"
+        case syncSubscribe = "SyncSubscribe"
+        case syncSubscribed = "SyncSubscribed"
+        case syncTimeOffset = "SyncTimeOffset"
+        case syncTimePing = "SyncTimePing"
+        case syncTimePong = "SyncTimePong"
+        case syncUnsubscribe = "SyncUnsubscribe"
+        case syncWelcome = "SyncWelcome"
+        case tapeElement = "TapeElement"
+        case tapeElementPayload = "TapeElementPayload"
         case task = "Task"
         case textBlock = "TextBlock"
+        case textElement = "TextElement"
+        case textElementPayload = "TextElementPayload"
+        case textSize = "TextSize"
         case timestamp = "Timestamp"
+        case toolbarSide = "ToolbarSide"
+        case transform = "Transform"
+        case trashItem = "TrashItem"
+        case trashKind = "TrashKind"
+        case trashList = "TrashList"
+        case trashParent = "TrashParent"
+        case trashRestoreResult = "TrashRestoreResult"
         case uploadResult = "UploadResult"
         case uuid = "Uuid"
     }
@@ -109,78 +471,440 @@ extension SchemaBundle {
     func with(
         apiError: APIError?? = nil,
         apiErrorBody: APIErrorBody?? = nil,
+        appearance: Appearance?? = nil,
+        audioChunk: AudioChunk?? = nil,
+        audioChunkMeta: AudioChunkMeta?? = nil,
+        audioCodec: AudioCodec?? = nil,
+        audioFinalizePayload: AudioFinalizePayload?? = nil,
+        audioFinalizeResult: AudioFinalizeResult?? = nil,
+        audioGap: AudioGap?? = nil,
+        audioGapReason: AudioGapReason?? = nil,
+        backupOverview: BackupOverview?? = nil,
+        backupRun: BackupRun?? = nil,
+        backupState: BackupState?? = nil,
+        backupStatus: BackupStatus?? = nil,
+        backupTrigger: BackupTrigger?? = nil,
         bBox: [Double]?? = nil,
+        calendarAssignment: CalendarAssignment?? = nil,
+        calendarEvent: CalendarEvent?? = nil,
+        calendarEventKind: CalendarEventKind?? = nil,
+        calendarEventList: CalendarEventList?? = nil,
+        calendarEventUpdate: CalendarEventUpdate?? = nil,
+        calendarSource: CalendarSource?? = nil,
+        calendarSourceCreate: CalendarSourceCreate?? = nil,
+        calendarSourceKind: CalendarSourceKind?? = nil,
+        calendarSourceList: CalendarSourceList?? = nil,
+        calendarUpdateScope: CalendarUpdateScope?? = nil,
+        clientDevice: ClientDevice?? = nil,
+        columnWidths: [Double]?? = nil,
+        dashboardLayout: DashboardLayout?? = nil,
+        dataSettings: DataSettings?? = nil,
+        dataSettingsUpdate: DataSettingsUpdate?? = nil,
+        device: Device?? = nil,
+        deviceKind: DeviceKind?? = nil,
+        deviceList: DeviceList?? = nil,
+        drawingSnapshotData: DrawingSnapshotData?? = nil,
+        drawingSnapshotOp: DrawingSnapshotOp?? = nil,
+        elementRemoveData: ElementRemoveData?? = nil,
+        elementRemoveOp: ElementRemoveOp?? = nil,
+        elementUpsertData: ElementUpsertData?? = nil,
+        elementUpsertOp: ElementUpsertOp?? = nil,
+        epochMS: Int?? = nil,
         exerciseSheet: ExerciseSheet?? = nil,
         exerciseSheetList: ExerciseSheetList?? = nil,
         exerciseSheetUpdate: ExerciseSheetUpdate?? = nil,
+        fileReceipt: FileReceipt?? = nil,
+        fileRef: FileRef?? = nil,
+        generalSettings: GeneralSettings?? = nil,
+        generalSettingsUpdate: GeneralSettingsUpdate?? = nil,
         health: Health?? = nil,
+        hexColor: String?? = nil,
+        icsEventRef: ICSEventRef?? = nil,
+        icsImportCounts: ICSImportCounts?? = nil,
+        icsImportResult: ICSImportResult?? = nil,
+        icsModuleSuggestion: ICSModuleSuggestion?? = nil,
+        icsWarning: ICSWarning?? = nil,
+        imageElement: ImageElement?? = nil,
+        imageElementPayload: ImageElementPayload?? = nil,
         ingestState: IngestState?? = nil,
+        inkMode: InkMode?? = nil,
         isoDate: String?? = nil,
         job: Job?? = nil,
         jobList: JobList?? = nil,
         jobState: JobState?? = nil,
         jobType: JobType?? = nil,
         lang: Lang?? = nil,
+        lectureSettings: LectureSettings?? = nil,
+        lectureSettingsUpdate: LectureSettingsUpdate?? = nil,
+        marker: Marker?? = nil,
+        markerAddData: MarkerAddData?? = nil,
+        markerAddOp: MarkerAddOp?? = nil,
+        markerKind: MarkerKind?? = nil,
+        markerPosition: MarkerPosition?? = nil,
+        markerRemoveData: MarkerRemoveData?? = nil,
+        markerRemoveOp: MarkerRemoveOp?? = nil,
+        markerSource: MarkerSource?? = nil,
         module: Module?? = nil,
         moduleColor: ModuleColor?? = nil,
         moduleCreate: ModuleCreate?? = nil,
         moduleList: ModuleList?? = nil,
+        moduleSettings: ModuleSettings?? = nil,
+        moduleSettingsUpdate: ModuleSettingsUpdate?? = nil,
         moduleUpdate: ModuleUpdate?? = nil,
+        notebook: Notebook?? = nil,
+        notebookCreate: NotebookCreate?? = nil,
+        notebookKind: NotebookKind?? = nil,
+        notebookList: NotebookList?? = nil,
+        notebookPages: NotebookPages?? = nil,
+        notebookStreamID: String?? = nil,
+        notebookUpdate: NotebookUpdate?? = nil,
+        page: Page?? = nil,
+        pageCreateData: PageCreateData?? = nil,
+        pageCreateOp: PageCreateOp?? = nil,
+        pageDeleteData: PageDeleteData?? = nil,
+        pageDeleteOp: PageDeleteOp?? = nil,
+        pageDetail: PageDetail?? = nil,
+        pageElement: PageElement?? = nil,
+        pageStrokes: PageStrokes?? = nil,
+        pageTemplate: PageTemplate?? = nil,
+        pageUpdateData: PageUpdateData?? = nil,
+        pageUpdateFields: PageUpdateFields?? = nil,
+        pageUpdateOp: PageUpdateOp?? = nil,
+        pairConfirmRequest: PairConfirmRequest?? = nil,
+        pairingCode: PairingCode?? = nil,
+        pairResponse: PairResponse?? = nil,
+        pairStartRequest: PairStartRequest?? = nil,
+        pairStartResponse: PairStartResponse?? = nil,
         pdfIngestDeckPayload: PDFIngestDeckPayload?? = nil,
         pdfIngestPayload: PDFIngestPayload?? = nil,
         pdfIngestResult: PDFIngestResult?? = nil,
         pdfIngestSheetPayload: PDFIngestSheetPayload?? = nil,
+        pencilDoubleTapAction: PencilDoubleTapAction?? = nil,
+        pencilSqueezeAction: PencilSqueezeAction?? = nil,
+        penSettings: PenSettings?? = nil,
+        penSettingsUpdate: PenSettingsUpdate?? = nil,
+        photo: Photo?? = nil,
+        photoAddData: PhotoAddData?? = nil,
+        photoAddOp: PhotoAddOp?? = nil,
+        photoMIME: PhotoMIME?? = nil,
+        point2: [Double]?? = nil,
+        recording: Recording?? = nil,
+        recordingComplete: RecordingComplete?? = nil,
+        recordingCreate: RecordingCreate?? = nil,
+        recordingState: RecordingState?? = nil,
+        reviewState: ReviewState?? = nil,
         semester: Semester?? = nil,
         semesterCreate: SemesterCreate?? = nil,
         semesterList: SemesterList?? = nil,
         semesterUpdate: SemesterUpdate?? = nil,
+        session: Session?? = nil,
+        sessionCreate: SessionCreate?? = nil,
+        sessionList: SessionList?? = nil,
+        sessionMS: Int?? = nil,
+        sessionPauseOp: SessionPauseOp?? = nil,
+        sessionProcessing: [String: JobState]?? = nil,
+        sessionRefData: SessionRefData?? = nil,
+        sessionResumeOp: SessionResumeOp?? = nil,
+        sessionSnapshot: SessionSnapshot?? = nil,
+        sessionStartData: SessionStartData?? = nil,
+        sessionStartOp: SessionStartOp?? = nil,
+        sessionStartRequest: SessionStartRequest?? = nil,
+        sessionStartResult: SessionStartResult?? = nil,
+        sessionState: SessionState?? = nil,
+        sessionStopData: SessionStopData?? = nil,
+        sessionStopOp: SessionStopOp?? = nil,
+        sessionStopRequest: SessionStopRequest?? = nil,
+        sessionStreamID: String?? = nil,
+        sessionUpdate: SessionUpdate?? = nil,
+        settings: Settings?? = nil,
+        settingsUpdate: SettingsUpdate?? = nil,
+        sha256: String?? = nil,
+        shapeElement: ShapeElement?? = nil,
+        shapeElementPayload: ShapeElementPayload?? = nil,
+        shapeKind: ShapeKind?? = nil,
         slide: Slide?? = nil,
+        slideChangeData: SlideChangeData?? = nil,
+        slideChangeOp: SlideChangeOp?? = nil,
         slideDeck: SlideDeck?? = nil,
         slideDeckDetail: SlideDeckDetail?? = nil,
         slideDeckList: SlideDeckList?? = nil,
         slideDeckUpdate: SlideDeckUpdate?? = nil,
+        slideEvent: SlideEvent?? = nil,
+        slideEventSource: SlideEventSource?? = nil,
+        stampElement: StampElement?? = nil,
+        stampElementPayload: StampElementPayload?? = nil,
+        stopReason: StopReason?? = nil,
+        stroke: Stroke?? = nil,
+        strokeAddData: StrokeAddData?? = nil,
+        strokeAddOp: StrokeAddOp?? = nil,
+        strokeLayer: StrokeLayer?? = nil,
+        strokeRemoveData: StrokeRemoveData?? = nil,
+        strokeRemoveOp: StrokeRemoveOp?? = nil,
+        strokeTool: StrokeTool?? = nil,
+        syncACK: SyncACK?? = nil,
+        syncClientKind: SyncClientKind?? = nil,
+        syncClientMessage: SyncClientMessage?? = nil,
+        syncConnectionEvent: SyncConnectionEvent?? = nil,
+        syncConnectionInfo: SyncConnectionInfo?? = nil,
+        syncError: SyncError?? = nil,
+        syncErrorCode: SyncErrorCode?? = nil,
+        syncEvent: SyncEvent?? = nil,
+        syncHello: SyncHello?? = nil,
+        syncOp: SyncOp?? = nil,
+        syncOrigin: SyncOrigin?? = nil,
+        syncPairingEvent: SyncPairingEvent?? = nil,
+        syncPing: SyncPing?? = nil,
+        syncPong: SyncPong?? = nil,
+        syncPresence: SyncPresence?? = nil,
+        syncPresenceEvent: SyncPresenceEvent?? = nil,
+        syncPresenceInfo: SyncPresenceInfo?? = nil,
+        syncResume: SyncResume?? = nil,
+        syncServerMessage: SyncServerMessage?? = nil,
+        syncSessionUpdatedEvent: SyncSessionUpdatedEvent?? = nil,
+        syncStreamID: String?? = nil,
+        syncStreamPosition: SyncStreamPosition?? = nil,
+        syncSubscribe: SyncSubscribe?? = nil,
+        syncSubscribed: SyncSubscribed?? = nil,
+        syncTimeOffset: SyncTimeOffset?? = nil,
+        syncTimePing: SyncTimePing?? = nil,
+        syncTimePong: SyncTimePong?? = nil,
+        syncUnsubscribe: SyncUnsubscribe?? = nil,
+        syncWelcome: SyncWelcome?? = nil,
+        tapeElement: TapeElement?? = nil,
+        tapeElementPayload: TapeElementPayload?? = nil,
         task: Task?? = nil,
         textBlock: TextBlock?? = nil,
+        textElement: TextElement?? = nil,
+        textElementPayload: TextElementPayload?? = nil,
+        textSize: TextSize?? = nil,
         timestamp: Date?? = nil,
+        toolbarSide: ToolbarSide?? = nil,
+        transform: [Double]?? = nil,
+        trashItem: TrashItem?? = nil,
+        trashKind: TrashKind?? = nil,
+        trashList: TrashList?? = nil,
+        trashParent: TrashParent?? = nil,
+        trashRestoreResult: TrashRestoreResult?? = nil,
         uploadResult: UploadResult?? = nil,
         uuid: String?? = nil
     ) -> SchemaBundle {
         return SchemaBundle(
             apiError: apiError ?? self.apiError,
             apiErrorBody: apiErrorBody ?? self.apiErrorBody,
+            appearance: appearance ?? self.appearance,
+            audioChunk: audioChunk ?? self.audioChunk,
+            audioChunkMeta: audioChunkMeta ?? self.audioChunkMeta,
+            audioCodec: audioCodec ?? self.audioCodec,
+            audioFinalizePayload: audioFinalizePayload ?? self.audioFinalizePayload,
+            audioFinalizeResult: audioFinalizeResult ?? self.audioFinalizeResult,
+            audioGap: audioGap ?? self.audioGap,
+            audioGapReason: audioGapReason ?? self.audioGapReason,
+            backupOverview: backupOverview ?? self.backupOverview,
+            backupRun: backupRun ?? self.backupRun,
+            backupState: backupState ?? self.backupState,
+            backupStatus: backupStatus ?? self.backupStatus,
+            backupTrigger: backupTrigger ?? self.backupTrigger,
             bBox: bBox ?? self.bBox,
+            calendarAssignment: calendarAssignment ?? self.calendarAssignment,
+            calendarEvent: calendarEvent ?? self.calendarEvent,
+            calendarEventKind: calendarEventKind ?? self.calendarEventKind,
+            calendarEventList: calendarEventList ?? self.calendarEventList,
+            calendarEventUpdate: calendarEventUpdate ?? self.calendarEventUpdate,
+            calendarSource: calendarSource ?? self.calendarSource,
+            calendarSourceCreate: calendarSourceCreate ?? self.calendarSourceCreate,
+            calendarSourceKind: calendarSourceKind ?? self.calendarSourceKind,
+            calendarSourceList: calendarSourceList ?? self.calendarSourceList,
+            calendarUpdateScope: calendarUpdateScope ?? self.calendarUpdateScope,
+            clientDevice: clientDevice ?? self.clientDevice,
+            columnWidths: columnWidths ?? self.columnWidths,
+            dashboardLayout: dashboardLayout ?? self.dashboardLayout,
+            dataSettings: dataSettings ?? self.dataSettings,
+            dataSettingsUpdate: dataSettingsUpdate ?? self.dataSettingsUpdate,
+            device: device ?? self.device,
+            deviceKind: deviceKind ?? self.deviceKind,
+            deviceList: deviceList ?? self.deviceList,
+            drawingSnapshotData: drawingSnapshotData ?? self.drawingSnapshotData,
+            drawingSnapshotOp: drawingSnapshotOp ?? self.drawingSnapshotOp,
+            elementRemoveData: elementRemoveData ?? self.elementRemoveData,
+            elementRemoveOp: elementRemoveOp ?? self.elementRemoveOp,
+            elementUpsertData: elementUpsertData ?? self.elementUpsertData,
+            elementUpsertOp: elementUpsertOp ?? self.elementUpsertOp,
+            epochMS: epochMS ?? self.epochMS,
             exerciseSheet: exerciseSheet ?? self.exerciseSheet,
             exerciseSheetList: exerciseSheetList ?? self.exerciseSheetList,
             exerciseSheetUpdate: exerciseSheetUpdate ?? self.exerciseSheetUpdate,
+            fileReceipt: fileReceipt ?? self.fileReceipt,
+            fileRef: fileRef ?? self.fileRef,
+            generalSettings: generalSettings ?? self.generalSettings,
+            generalSettingsUpdate: generalSettingsUpdate ?? self.generalSettingsUpdate,
             health: health ?? self.health,
+            hexColor: hexColor ?? self.hexColor,
+            icsEventRef: icsEventRef ?? self.icsEventRef,
+            icsImportCounts: icsImportCounts ?? self.icsImportCounts,
+            icsImportResult: icsImportResult ?? self.icsImportResult,
+            icsModuleSuggestion: icsModuleSuggestion ?? self.icsModuleSuggestion,
+            icsWarning: icsWarning ?? self.icsWarning,
+            imageElement: imageElement ?? self.imageElement,
+            imageElementPayload: imageElementPayload ?? self.imageElementPayload,
             ingestState: ingestState ?? self.ingestState,
+            inkMode: inkMode ?? self.inkMode,
             isoDate: isoDate ?? self.isoDate,
             job: job ?? self.job,
             jobList: jobList ?? self.jobList,
             jobState: jobState ?? self.jobState,
             jobType: jobType ?? self.jobType,
             lang: lang ?? self.lang,
+            lectureSettings: lectureSettings ?? self.lectureSettings,
+            lectureSettingsUpdate: lectureSettingsUpdate ?? self.lectureSettingsUpdate,
+            marker: marker ?? self.marker,
+            markerAddData: markerAddData ?? self.markerAddData,
+            markerAddOp: markerAddOp ?? self.markerAddOp,
+            markerKind: markerKind ?? self.markerKind,
+            markerPosition: markerPosition ?? self.markerPosition,
+            markerRemoveData: markerRemoveData ?? self.markerRemoveData,
+            markerRemoveOp: markerRemoveOp ?? self.markerRemoveOp,
+            markerSource: markerSource ?? self.markerSource,
             module: module ?? self.module,
             moduleColor: moduleColor ?? self.moduleColor,
             moduleCreate: moduleCreate ?? self.moduleCreate,
             moduleList: moduleList ?? self.moduleList,
+            moduleSettings: moduleSettings ?? self.moduleSettings,
+            moduleSettingsUpdate: moduleSettingsUpdate ?? self.moduleSettingsUpdate,
             moduleUpdate: moduleUpdate ?? self.moduleUpdate,
+            notebook: notebook ?? self.notebook,
+            notebookCreate: notebookCreate ?? self.notebookCreate,
+            notebookKind: notebookKind ?? self.notebookKind,
+            notebookList: notebookList ?? self.notebookList,
+            notebookPages: notebookPages ?? self.notebookPages,
+            notebookStreamID: notebookStreamID ?? self.notebookStreamID,
+            notebookUpdate: notebookUpdate ?? self.notebookUpdate,
+            page: page ?? self.page,
+            pageCreateData: pageCreateData ?? self.pageCreateData,
+            pageCreateOp: pageCreateOp ?? self.pageCreateOp,
+            pageDeleteData: pageDeleteData ?? self.pageDeleteData,
+            pageDeleteOp: pageDeleteOp ?? self.pageDeleteOp,
+            pageDetail: pageDetail ?? self.pageDetail,
+            pageElement: pageElement ?? self.pageElement,
+            pageStrokes: pageStrokes ?? self.pageStrokes,
+            pageTemplate: pageTemplate ?? self.pageTemplate,
+            pageUpdateData: pageUpdateData ?? self.pageUpdateData,
+            pageUpdateFields: pageUpdateFields ?? self.pageUpdateFields,
+            pageUpdateOp: pageUpdateOp ?? self.pageUpdateOp,
+            pairConfirmRequest: pairConfirmRequest ?? self.pairConfirmRequest,
+            pairingCode: pairingCode ?? self.pairingCode,
+            pairResponse: pairResponse ?? self.pairResponse,
+            pairStartRequest: pairStartRequest ?? self.pairStartRequest,
+            pairStartResponse: pairStartResponse ?? self.pairStartResponse,
             pdfIngestDeckPayload: pdfIngestDeckPayload ?? self.pdfIngestDeckPayload,
             pdfIngestPayload: pdfIngestPayload ?? self.pdfIngestPayload,
             pdfIngestResult: pdfIngestResult ?? self.pdfIngestResult,
             pdfIngestSheetPayload: pdfIngestSheetPayload ?? self.pdfIngestSheetPayload,
+            pencilDoubleTapAction: pencilDoubleTapAction ?? self.pencilDoubleTapAction,
+            pencilSqueezeAction: pencilSqueezeAction ?? self.pencilSqueezeAction,
+            penSettings: penSettings ?? self.penSettings,
+            penSettingsUpdate: penSettingsUpdate ?? self.penSettingsUpdate,
+            photo: photo ?? self.photo,
+            photoAddData: photoAddData ?? self.photoAddData,
+            photoAddOp: photoAddOp ?? self.photoAddOp,
+            photoMIME: photoMIME ?? self.photoMIME,
+            point2: point2 ?? self.point2,
+            recording: recording ?? self.recording,
+            recordingComplete: recordingComplete ?? self.recordingComplete,
+            recordingCreate: recordingCreate ?? self.recordingCreate,
+            recordingState: recordingState ?? self.recordingState,
+            reviewState: reviewState ?? self.reviewState,
             semester: semester ?? self.semester,
             semesterCreate: semesterCreate ?? self.semesterCreate,
             semesterList: semesterList ?? self.semesterList,
             semesterUpdate: semesterUpdate ?? self.semesterUpdate,
+            session: session ?? self.session,
+            sessionCreate: sessionCreate ?? self.sessionCreate,
+            sessionList: sessionList ?? self.sessionList,
+            sessionMS: sessionMS ?? self.sessionMS,
+            sessionPauseOp: sessionPauseOp ?? self.sessionPauseOp,
+            sessionProcessing: sessionProcessing ?? self.sessionProcessing,
+            sessionRefData: sessionRefData ?? self.sessionRefData,
+            sessionResumeOp: sessionResumeOp ?? self.sessionResumeOp,
+            sessionSnapshot: sessionSnapshot ?? self.sessionSnapshot,
+            sessionStartData: sessionStartData ?? self.sessionStartData,
+            sessionStartOp: sessionStartOp ?? self.sessionStartOp,
+            sessionStartRequest: sessionStartRequest ?? self.sessionStartRequest,
+            sessionStartResult: sessionStartResult ?? self.sessionStartResult,
+            sessionState: sessionState ?? self.sessionState,
+            sessionStopData: sessionStopData ?? self.sessionStopData,
+            sessionStopOp: sessionStopOp ?? self.sessionStopOp,
+            sessionStopRequest: sessionStopRequest ?? self.sessionStopRequest,
+            sessionStreamID: sessionStreamID ?? self.sessionStreamID,
+            sessionUpdate: sessionUpdate ?? self.sessionUpdate,
+            settings: settings ?? self.settings,
+            settingsUpdate: settingsUpdate ?? self.settingsUpdate,
+            sha256: sha256 ?? self.sha256,
+            shapeElement: shapeElement ?? self.shapeElement,
+            shapeElementPayload: shapeElementPayload ?? self.shapeElementPayload,
+            shapeKind: shapeKind ?? self.shapeKind,
             slide: slide ?? self.slide,
+            slideChangeData: slideChangeData ?? self.slideChangeData,
+            slideChangeOp: slideChangeOp ?? self.slideChangeOp,
             slideDeck: slideDeck ?? self.slideDeck,
             slideDeckDetail: slideDeckDetail ?? self.slideDeckDetail,
             slideDeckList: slideDeckList ?? self.slideDeckList,
             slideDeckUpdate: slideDeckUpdate ?? self.slideDeckUpdate,
+            slideEvent: slideEvent ?? self.slideEvent,
+            slideEventSource: slideEventSource ?? self.slideEventSource,
+            stampElement: stampElement ?? self.stampElement,
+            stampElementPayload: stampElementPayload ?? self.stampElementPayload,
+            stopReason: stopReason ?? self.stopReason,
+            stroke: stroke ?? self.stroke,
+            strokeAddData: strokeAddData ?? self.strokeAddData,
+            strokeAddOp: strokeAddOp ?? self.strokeAddOp,
+            strokeLayer: strokeLayer ?? self.strokeLayer,
+            strokeRemoveData: strokeRemoveData ?? self.strokeRemoveData,
+            strokeRemoveOp: strokeRemoveOp ?? self.strokeRemoveOp,
+            strokeTool: strokeTool ?? self.strokeTool,
+            syncACK: syncACK ?? self.syncACK,
+            syncClientKind: syncClientKind ?? self.syncClientKind,
+            syncClientMessage: syncClientMessage ?? self.syncClientMessage,
+            syncConnectionEvent: syncConnectionEvent ?? self.syncConnectionEvent,
+            syncConnectionInfo: syncConnectionInfo ?? self.syncConnectionInfo,
+            syncError: syncError ?? self.syncError,
+            syncErrorCode: syncErrorCode ?? self.syncErrorCode,
+            syncEvent: syncEvent ?? self.syncEvent,
+            syncHello: syncHello ?? self.syncHello,
+            syncOp: syncOp ?? self.syncOp,
+            syncOrigin: syncOrigin ?? self.syncOrigin,
+            syncPairingEvent: syncPairingEvent ?? self.syncPairingEvent,
+            syncPing: syncPing ?? self.syncPing,
+            syncPong: syncPong ?? self.syncPong,
+            syncPresence: syncPresence ?? self.syncPresence,
+            syncPresenceEvent: syncPresenceEvent ?? self.syncPresenceEvent,
+            syncPresenceInfo: syncPresenceInfo ?? self.syncPresenceInfo,
+            syncResume: syncResume ?? self.syncResume,
+            syncServerMessage: syncServerMessage ?? self.syncServerMessage,
+            syncSessionUpdatedEvent: syncSessionUpdatedEvent ?? self.syncSessionUpdatedEvent,
+            syncStreamID: syncStreamID ?? self.syncStreamID,
+            syncStreamPosition: syncStreamPosition ?? self.syncStreamPosition,
+            syncSubscribe: syncSubscribe ?? self.syncSubscribe,
+            syncSubscribed: syncSubscribed ?? self.syncSubscribed,
+            syncTimeOffset: syncTimeOffset ?? self.syncTimeOffset,
+            syncTimePing: syncTimePing ?? self.syncTimePing,
+            syncTimePong: syncTimePong ?? self.syncTimePong,
+            syncUnsubscribe: syncUnsubscribe ?? self.syncUnsubscribe,
+            syncWelcome: syncWelcome ?? self.syncWelcome,
+            tapeElement: tapeElement ?? self.tapeElement,
+            tapeElementPayload: tapeElementPayload ?? self.tapeElementPayload,
             task: task ?? self.task,
             textBlock: textBlock ?? self.textBlock,
+            textElement: textElement ?? self.textElement,
+            textElementPayload: textElementPayload ?? self.textElementPayload,
+            textSize: textSize ?? self.textSize,
             timestamp: timestamp ?? self.timestamp,
+            toolbarSide: toolbarSide ?? self.toolbarSide,
+            transform: transform ?? self.transform,
+            trashItem: trashItem ?? self.trashItem,
+            trashKind: trashKind ?? self.trashKind,
+            trashList: trashList ?? self.trashList,
+            trashParent: trashParent ?? self.trashParent,
+            trashRestoreResult: trashRestoreResult ?? self.trashRestoreResult,
             uploadResult: uploadResult ?? self.uploadResult,
             uuid: uuid ?? self.uuid
         )
@@ -290,6 +1014,1909 @@ extension APIErrorBody {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+enum Appearance: String, Codable {
+    case dunkel = "dunkel"
+    case hell = "hell"
+    case system = "system"
+}
+
+/// Antwort auf PUT /recordings/{id}/chunks/{seq}
+// MARK: - AudioChunk
+struct AudioChunk: Codable {
+    /// true: identischer Chunk lag schon vor (200 statt 201)
+    let duplicate: Bool
+    let durationMS: Int
+    let receivedAt: Date
+    let recordingID: String
+    let seq: Int
+    let sha256: String
+    let sizeBytes: Int
+    let startMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case duplicate = "duplicate"
+        case durationMS = "duration_ms"
+        case receivedAt = "received_at"
+        case recordingID = "recording_id"
+        case seq = "seq"
+        case sha256 = "sha256"
+        case sizeBytes = "size_bytes"
+        case startMS = "start_ms"
+    }
+}
+
+// MARK: AudioChunk convenience initializers and mutators
+
+extension AudioChunk {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AudioChunk.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        duplicate: Bool? = nil,
+        durationMS: Int? = nil,
+        receivedAt: Date? = nil,
+        recordingID: String? = nil,
+        seq: Int? = nil,
+        sha256: String? = nil,
+        sizeBytes: Int? = nil,
+        startMS: Int? = nil
+    ) -> AudioChunk {
+        return AudioChunk(
+            duplicate: duplicate ?? self.duplicate,
+            durationMS: durationMS ?? self.durationMS,
+            receivedAt: receivedAt ?? self.receivedAt,
+            recordingID: recordingID ?? self.recordingID,
+            seq: seq ?? self.seq,
+            sha256: sha256 ?? self.sha256,
+            sizeBytes: sizeBytes ?? self.sizeBytes,
+            startMS: startMS ?? self.startMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Geparste Metadaten von PUT /recordings/{id}/chunks/{seq}: Header X-Start-Ms,
+/// X-Duration-Ms (Dezimalzahlen), X-Sha256 (hex des Bodys)
+// MARK: - AudioChunkMeta
+struct AudioChunkMeta: Codable {
+    let durationMS: Int
+    /// Pfad {seq}, 0-basiert, lückenlos (Invariante 2)
+    let seq: Int
+    let sha256: String
+    let startMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case durationMS = "duration_ms"
+        case seq = "seq"
+        case sha256 = "sha256"
+        case startMS = "start_ms"
+    }
+}
+
+// MARK: AudioChunkMeta convenience initializers and mutators
+
+extension AudioChunkMeta {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AudioChunkMeta.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        durationMS: Int? = nil,
+        seq: Int? = nil,
+        sha256: String? = nil,
+        startMS: Int? = nil
+    ) -> AudioChunkMeta {
+        return AudioChunkMeta(
+            durationMS: durationMS ?? self.durationMS,
+            seq: seq ?? self.seq,
+            sha256: sha256 ?? self.sha256,
+            startMS: startMS ?? self.startMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum AudioCodec: String, Codable {
+    case aac = "aac"
+    case opus = "opus"
+}
+
+/// audio.finalize (08 §5)
+// MARK: - AudioFinalizePayload
+struct AudioFinalizePayload: Codable {
+    let recordingID: String
+
+    enum CodingKeys: String, CodingKey {
+        case recordingID = "recording_id"
+    }
+}
+
+// MARK: AudioFinalizePayload convenience initializers and mutators
+
+extension AudioFinalizePayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AudioFinalizePayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        recordingID: String? = nil
+    ) -> AudioFinalizePayload {
+        return AudioFinalizePayload(
+            recordingID: recordingID ?? self.recordingID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// job.result von audio.finalize. state ist nie laeuft
+// MARK: - AudioFinalizeResult
+struct AudioFinalizeResult: Codable {
+    /// Länge von full.m4a
+    let audioDurationMS: Int
+    let chunkCount: Int
+    /// Laufzeit des Jobs
+    let durationMS: Int
+    let fileSizeBytes: Int
+    let gaps: [AudioGap]
+    let missingSeqs: [Int]
+    let recordingID: String
+    let state: RecordingState
+
+    enum CodingKeys: String, CodingKey {
+        case audioDurationMS = "audio_duration_ms"
+        case chunkCount = "chunk_count"
+        case durationMS = "duration_ms"
+        case fileSizeBytes = "file_size_bytes"
+        case gaps = "gaps"
+        case missingSeqs = "missing_seqs"
+        case recordingID = "recording_id"
+        case state = "state"
+    }
+}
+
+// MARK: AudioFinalizeResult convenience initializers and mutators
+
+extension AudioFinalizeResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AudioFinalizeResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        audioDurationMS: Int? = nil,
+        chunkCount: Int? = nil,
+        durationMS: Int? = nil,
+        fileSizeBytes: Int? = nil,
+        gaps: [AudioGap]? = nil,
+        missingSeqs: [Int]? = nil,
+        recordingID: String? = nil,
+        state: RecordingState? = nil
+    ) -> AudioFinalizeResult {
+        return AudioFinalizeResult(
+            audioDurationMS: audioDurationMS ?? self.audioDurationMS,
+            chunkCount: chunkCount ?? self.chunkCount,
+            durationMS: durationMS ?? self.durationMS,
+            fileSizeBytes: fileSizeBytes ?? self.fileSizeBytes,
+            gaps: gaps ?? self.gaps,
+            missingSeqs: missingSeqs ?? self.missingSeqs,
+            recordingID: recordingID ?? self.recordingID,
+            state: state ?? self.state
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - AudioGap
+struct AudioGap: Codable {
+    let durationMS: Int
+    let reason: AudioGapReason
+    let startMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case durationMS = "duration_ms"
+        case reason = "reason"
+        case startMS = "start_ms"
+    }
+}
+
+// MARK: AudioGap convenience initializers and mutators
+
+extension AudioGap {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AudioGap.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        durationMS: Int? = nil,
+        reason: AudioGapReason? = nil,
+        startMS: Int? = nil
+    ) -> AudioGap {
+        return AudioGap(
+            durationMS: durationMS ?? self.durationMS,
+            reason: reason ?? self.reason,
+            startMS: startMS ?? self.startMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// fehlender_chunk: seq fehlt. zeitluecke: start_ms springt (z. B. Recorder neu gestartet)
+enum AudioGapReason: String, Codable {
+    case fehlenderChunk = "fehlender_chunk"
+    case zeitluecke = "zeitluecke"
+}
+
+enum RecordingState: String, Codable {
+    case laeuft = "laeuft"
+    case mitLuecken = "mit_luecken"
+    case vollstaendig = "vollstaendig"
+}
+
+/// GET /backups: Status und Läufe, neueste zuerst
+// MARK: - BackupOverview
+struct BackupOverview: Codable {
+    let items: [BackupRun]
+    let nextCursor: String?
+    let status: BackupStatus
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+        case status = "status"
+    }
+}
+
+// MARK: BackupOverview convenience initializers and mutators
+
+extension BackupOverview {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(BackupOverview.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [BackupRun]? = nil,
+        nextCursor: String?? = nil,
+        status: BackupStatus? = nil
+    ) -> BackupOverview {
+        return BackupOverview(
+            items: items ?? self.items,
+            nextCursor: nextCursor ?? self.nextCursor,
+            status: status ?? self.status
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ein Backup-Lauf (03 §13 backup_run)
+// MARK: - BackupRun
+struct BackupRun: Codable {
+    let createdAt: Date
+    let deletedAt: Date?
+    let error: String?
+    let finishedAt: Date?
+    let id: String
+    let sizeBytes: Int?
+    /// Name des Stands für sg restore <stand>, z. B. 20261104T030012Z. null solange er läuft
+    /// oder bei Fehler
+    let stand: String?
+    let startedAt: Date
+    let state: BackupState
+    /// Absoluter Pfad des Ziels
+    let target: String
+    let trigger: BackupTrigger
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case error = "error"
+        case finishedAt = "finished_at"
+        case id = "id"
+        case sizeBytes = "size_bytes"
+        case stand = "stand"
+        case startedAt = "started_at"
+        case state = "state"
+        case target = "target"
+        case trigger = "trigger"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: BackupRun convenience initializers and mutators
+
+extension BackupRun {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(BackupRun.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        error: String?? = nil,
+        finishedAt: Date?? = nil,
+        id: String? = nil,
+        sizeBytes: Int?? = nil,
+        stand: String?? = nil,
+        startedAt: Date? = nil,
+        state: BackupState? = nil,
+        target: String? = nil,
+        trigger: BackupTrigger? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> BackupRun {
+        return BackupRun(
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            error: error ?? self.error,
+            finishedAt: finishedAt ?? self.finishedAt,
+            id: id ?? self.id,
+            sizeBytes: sizeBytes ?? self.sizeBytes,
+            stand: stand ?? self.stand,
+            startedAt: startedAt ?? self.startedAt,
+            state: state ?? self.state,
+            target: target ?? self.target,
+            trigger: trigger ?? self.trigger,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum BackupState: String, Codable {
+    case fehler = "fehler"
+    case fertig = "fertig"
+    case laeuft = "laeuft"
+}
+
+enum BackupTrigger: String, Codable {
+    case manuell = "manuell"
+    case vorMigration = "vor_migration"
+    case zeitplan = "zeitplan"
+}
+
+// MARK: - BackupStatus
+struct BackupStatus: Codable {
+    let lastSuccessAt: Date?
+    let nextRunAt: Date?
+    let running: Bool
+    /// Letztes erfolgreiches Backup älter als 3 Tage (F-DAT-01)
+    let stale: Bool
+    /// null = kein Ziel eingestellt, Backups pausieren
+    let target: String?
+
+    enum CodingKeys: String, CodingKey {
+        case lastSuccessAt = "last_success_at"
+        case nextRunAt = "next_run_at"
+        case running = "running"
+        case stale = "stale"
+        case target = "target"
+    }
+}
+
+// MARK: BackupStatus convenience initializers and mutators
+
+extension BackupStatus {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(BackupStatus.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        lastSuccessAt: Date?? = nil,
+        nextRunAt: Date?? = nil,
+        running: Bool? = nil,
+        stale: Bool? = nil,
+        target: String?? = nil
+    ) -> BackupStatus {
+        return BackupStatus(
+            lastSuccessAt: lastSuccessAt ?? self.lastSuccessAt,
+            nextRunAt: nextRunAt ?? self.nextRunAt,
+            running: running ?? self.running,
+            stale: stale ?? self.stale,
+            target: target ?? self.target
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// auto: Modul und Art hat der Abgleich gesetzt und darf sie ändern. manuell: vom Nutzer
+/// gesetzt, der Abgleich ändert module_id und kind nie mehr (F-KAL-02).
+enum CalendarAssignment: String, Codable {
+    case auto = "auto"
+    case manuell = "manuell"
+}
+
+/// Termin. session_id ist abgeleitet: die nicht gelöschte Session zu diesem Termin.
+// MARK: - CalendarEvent
+struct CalendarEvent: Codable {
+    /// Ganztägig (VALUE=DATE). starts_at/ends_at sind dann 00:00 UTC des Datums (wie
+    /// tests/fixtures/ics/08). Ergänzung zu 03 §3
+    let allDay: Bool
+    let assignedBy: CalendarAssignment
+    let cancelled: Bool
+    let createdAt: Date
+    let deletedAt: Date?
+    /// DESCRIPTION aus der Quelle. Ergänzung zu 03 §3
+    let description: String?
+    let endsAt: Date
+    /// UID aus der Quelle, null bei manuellen Terminen
+    let externalUid: String?
+    let id: String
+    let kind: CalendarEventKind
+    let location: String?
+    let moduleID: String?
+    /// Kennung des Vorkommens: ISO 8601 mit Offset der Ortszeit (2026-10-20T10:15:00+02:00) bzw.
+    /// Datum (2026-11-01) bei ganztägigen Serien. null bei Einzelterminen. Abgleichschlüssel:
+    /// (source_id, external_uid, recurrence_id)
+    let recurrenceID: String?
+    let sessionID: String?
+    let sourceID: String?
+    let startsAt: Date
+    let title: String
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case allDay = "all_day"
+        case assignedBy = "assigned_by"
+        case cancelled = "cancelled"
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case description = "description"
+        case endsAt = "ends_at"
+        case externalUid = "external_uid"
+        case id = "id"
+        case kind = "kind"
+        case location = "location"
+        case moduleID = "module_id"
+        case recurrenceID = "recurrence_id"
+        case sessionID = "session_id"
+        case sourceID = "source_id"
+        case startsAt = "starts_at"
+        case title = "title"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: CalendarEvent convenience initializers and mutators
+
+extension CalendarEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CalendarEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        allDay: Bool? = nil,
+        assignedBy: CalendarAssignment? = nil,
+        cancelled: Bool? = nil,
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        description: String?? = nil,
+        endsAt: Date? = nil,
+        externalUid: String?? = nil,
+        id: String? = nil,
+        kind: CalendarEventKind? = nil,
+        location: String?? = nil,
+        moduleID: String?? = nil,
+        recurrenceID: String?? = nil,
+        sessionID: String?? = nil,
+        sourceID: String?? = nil,
+        startsAt: Date? = nil,
+        title: String? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> CalendarEvent {
+        return CalendarEvent(
+            allDay: allDay ?? self.allDay,
+            assignedBy: assignedBy ?? self.assignedBy,
+            cancelled: cancelled ?? self.cancelled,
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            description: description ?? self.description,
+            endsAt: endsAt ?? self.endsAt,
+            externalUid: externalUid ?? self.externalUid,
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            location: location ?? self.location,
+            moduleID: moduleID ?? self.moduleID,
+            recurrenceID: recurrenceID ?? self.recurrenceID,
+            sessionID: sessionID ?? self.sessionID,
+            sourceID: sourceID ?? self.sourceID,
+            startsAt: startsAt ?? self.startsAt,
+            title: title ?? self.title,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum CalendarEventKind: String, Codable {
+    case fest = "fest"
+    case lernblockExport = "lernblock_export"
+    case pruefung = "pruefung"
+    case tutorium = "tutorium"
+    case uebung = "uebung"
+    case vorlesung = "vorlesung"
+}
+
+// MARK: - CalendarEventList
+struct CalendarEventList: Codable {
+    let items: [CalendarEvent]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+    }
+}
+
+// MARK: CalendarEventList convenience initializers and mutators
+
+extension CalendarEventList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CalendarEventList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [CalendarEvent]? = nil,
+        nextCursor: String?? = nil
+    ) -> CalendarEventList {
+        return CalendarEventList(
+            items: items ?? self.items,
+            nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// PATCH /calendar/events/{id}. Setzt assigned_by=manuell. scope fehlt = serie. Antwort:
+/// CalendarEventList mit allen geänderten Terminen.
+// MARK: - CalendarEventUpdate
+struct CalendarEventUpdate: Codable {
+    let kind: CalendarEventKind?
+    let moduleID: String?
+    let scope: CalendarUpdateScope?
+
+    enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case moduleID = "module_id"
+        case scope = "scope"
+    }
+}
+
+// MARK: CalendarEventUpdate convenience initializers and mutators
+
+extension CalendarEventUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CalendarEventUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: CalendarEventKind?? = nil,
+        moduleID: String?? = nil,
+        scope: CalendarUpdateScope?? = nil
+    ) -> CalendarEventUpdate {
+        return CalendarEventUpdate(
+            kind: kind ?? self.kind,
+            moduleID: moduleID ?? self.moduleID,
+            scope: scope ?? self.scope
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// serie: alle Termine derselben Quelle mit gleicher external_uid (F-KAL-02). einzeln: nur
+/// dieser Termin.
+enum CalendarUpdateScope: String, Codable {
+    case einzeln = "einzeln"
+    case serie = "serie"
+}
+
+/// Kalenderquelle
+// MARK: - CalendarSource
+struct CalendarSource: Codable {
+    let createdAt: Date
+    let deletedAt: Date?
+    /// Abgeleitet: Termine dieser Quelle (ohne gelöschte)
+    let eventCount: Int
+    let id: String
+    let kind: CalendarSourceKind
+    /// Fehler des letzten Abgleichs, null nach Erfolg. Ergänzung zu 03 §3
+    let lastError: String?
+    let lastSyncedAt: Date?
+    /// Anzeigename. Ergänzung zu 03 §3. Standard: Dateiname bzw. Host der URL
+    let name: String
+    let readonly: Bool
+    let updatedAt: Date
+    /// Nur bei ics_url (webcal:// wird als https:// gespeichert)
+    let url: String?
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case eventCount = "event_count"
+        case id = "id"
+        case kind = "kind"
+        case lastError = "last_error"
+        case lastSyncedAt = "last_synced_at"
+        case name = "name"
+        case readonly = "readonly"
+        case updatedAt = "updated_at"
+        case url = "url"
+        case userID = "user_id"
+    }
+}
+
+// MARK: CalendarSource convenience initializers and mutators
+
+extension CalendarSource {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CalendarSource.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        eventCount: Int? = nil,
+        id: String? = nil,
+        kind: CalendarSourceKind? = nil,
+        lastError: String?? = nil,
+        lastSyncedAt: Date?? = nil,
+        name: String? = nil,
+        readonly: Bool? = nil,
+        updatedAt: Date? = nil,
+        url: String?? = nil,
+        userID: String? = nil
+    ) -> CalendarSource {
+        return CalendarSource(
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            eventCount: eventCount ?? self.eventCount,
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            lastError: lastError ?? self.lastError,
+            lastSyncedAt: lastSyncedAt ?? self.lastSyncedAt,
+            name: name ?? self.name,
+            readonly: readonly ?? self.readonly,
+            updatedAt: updatedAt ?? self.updatedAt,
+            url: url ?? self.url,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// google erst ab Phase 4 (F-KAL-03)
+enum CalendarSourceKind: String, Codable {
+    case google = "google"
+    case icsFile = "ics_file"
+    case icsURL = "ics_url"
+}
+
+/// JSON-Body von POST /calendar/sources für eine ICS-URL. Eine ICS-Datei kommt stattdessen
+/// als multipart (Felder file, name). Antwort: IcsImportResult.
+// MARK: - CalendarSourceCreate
+struct CalendarSourceCreate: Codable {
+    let id: String?
+    let name: String?
+    /// ICS-URL (Abo, Abgleich alle 6 h und beim Start)
+    let url: String
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case name = "name"
+        case url = "url"
+    }
+}
+
+// MARK: CalendarSourceCreate convenience initializers and mutators
+
+extension CalendarSourceCreate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CalendarSourceCreate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String?? = nil,
+        name: String?? = nil,
+        url: String? = nil
+    ) -> CalendarSourceCreate {
+        return CalendarSourceCreate(
+            id: id ?? self.id,
+            name: name ?? self.name,
+            url: url ?? self.url
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - CalendarSourceList
+struct CalendarSourceList: Codable {
+    let items: [CalendarSource]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+    }
+}
+
+// MARK: CalendarSourceList convenience initializers and mutators
+
+extension CalendarSourceList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CalendarSourceList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [CalendarSource]? = nil,
+        nextCursor: String?? = nil
+    ) -> CalendarSourceList {
+        return CalendarSourceList(
+            items: items ?? self.items,
+            nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Gerät, auf dem ein Ereignis entstanden ist
+enum ClientDevice: String, Codable {
+    case ipad = "ipad"
+    case mac = "mac"
+}
+
+/// Layout-Vorlagen F-DSH-01
+enum DashboardLayout: String, Codable {
+    case fokus = "fokus"
+    case folieGross = "folie_gross"
+    case notizenGross = "notizen_gross"
+    case standard = "standard"
+}
+
+// MARK: - DataSettings
+struct DataSettings: Codable {
+    /// age mit Passphrase (P1). Die Passphrase steht nie in den Einstellungen
+    let backupEncryption: Bool
+    /// Absoluter Pfad, null = keine Backups
+    let backupTarget: String?
+    /// Ortszeit des Macs (Standard 03:00)
+    let backupTime: String
+
+    enum CodingKeys: String, CodingKey {
+        case backupEncryption = "backup_encryption"
+        case backupTarget = "backup_target"
+        case backupTime = "backup_time"
+    }
+}
+
+// MARK: DataSettings convenience initializers and mutators
+
+extension DataSettings {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DataSettings.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        backupEncryption: Bool? = nil,
+        backupTarget: String?? = nil,
+        backupTime: String? = nil
+    ) -> DataSettings {
+        return DataSettings(
+            backupEncryption: backupEncryption ?? self.backupEncryption,
+            backupTarget: backupTarget ?? self.backupTarget,
+            backupTime: backupTime ?? self.backupTime
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - DataSettingsUpdate
+struct DataSettingsUpdate: Codable {
+    /// age mit Passphrase (P1). Die Passphrase steht nie in den Einstellungen
+    let backupEncryption: Bool?
+    /// Absoluter Pfad, null = keine Backups
+    let backupTarget: String?
+    /// Ortszeit des Macs (Standard 03:00)
+    let backupTime: String?
+
+    enum CodingKeys: String, CodingKey {
+        case backupEncryption = "backup_encryption"
+        case backupTarget = "backup_target"
+        case backupTime = "backup_time"
+    }
+}
+
+// MARK: DataSettingsUpdate convenience initializers and mutators
+
+extension DataSettingsUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DataSettingsUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        backupEncryption: Bool?? = nil,
+        backupTarget: String?? = nil,
+        backupTime: String?? = nil
+    ) -> DataSettingsUpdate {
+        return DataSettingsUpdate(
+            backupEncryption: backupEncryption ?? self.backupEncryption,
+            backupTarget: backupTarget ?? self.backupTarget,
+            backupTime: backupTime ?? self.backupTime
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Gekoppeltes Gerät. Das Token selbst gibt die API nie aus (gespeichert nur token_hash).
+// MARK: - Device
+struct Device: Codable {
+    let appVersion: String?
+    let clockOffsetMS: Int?
+    /// Abgeleitet: hat gerade eine Sync-Verbindung
+    let connected: Bool
+    let createdAt: Date
+    let deletedAt: Date?
+    let id: String
+    let kind: DeviceKind
+    let lastSeenAt: Date?
+    let name: String
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case appVersion = "app_version"
+        case clockOffsetMS = "clock_offset_ms"
+        case connected = "connected"
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case id = "id"
+        case kind = "kind"
+        case lastSeenAt = "last_seen_at"
+        case name = "name"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: Device convenience initializers and mutators
+
+extension Device {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Device.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        appVersion: String?? = nil,
+        clockOffsetMS: Int?? = nil,
+        connected: Bool? = nil,
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        id: String? = nil,
+        kind: DeviceKind? = nil,
+        lastSeenAt: Date?? = nil,
+        name: String? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> Device {
+        return Device(
+            appVersion: appVersion ?? self.appVersion,
+            clockOffsetMS: clockOffsetMS ?? self.clockOffsetMS,
+            connected: connected ?? self.connected,
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            lastSeenAt: lastSeenAt ?? self.lastSeenAt,
+            name: name ?? self.name,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum DeviceKind: String, Codable {
+    case ipad = "ipad"
+    case iphone = "iphone"
+}
+
+// MARK: - DeviceList
+struct DeviceList: Codable {
+    let items: [Device]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+    }
+}
+
+// MARK: DeviceList convenience initializers and mutators
+
+extension DeviceList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DeviceList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [Device]? = nil,
+        nextCursor: String?? = nil
+    ) -> DeviceList {
+        return DeviceList(
+            items: items ?? self.items,
+            nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad
+// MARK: - DrawingSnapshotData
+struct DrawingSnapshotData: Codable {
+    let pageID: String
+    let pkdrawingRef: FileRef
+
+    enum CodingKeys: String, CodingKey {
+        case pageID = "page_id"
+        case pkdrawingRef = "pkdrawing_ref"
+    }
+}
+
+// MARK: DrawingSnapshotData convenience initializers and mutators
+
+extension DrawingSnapshotData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DrawingSnapshotData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        pageID: String? = nil,
+        pkdrawingRef: FileRef? = nil
+    ) -> DrawingSnapshotData {
+        return DrawingSnapshotData(
+            pageID: pageID ?? self.pageID,
+            pkdrawingRef: pkdrawingRef ?? self.pkdrawingRef
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Verweis auf eine Datei, die getrennt per HTTP hochgeladen wird (08 §2.3 file_ref /
+/// pkdrawing_ref). Der Core prüft sha256 beim Upload.
+// MARK: - FileRef
+struct FileRef: Codable {
+    let mime: String
+    let sha256: String
+    let sizeBytes: Int
+
+    enum CodingKeys: String, CodingKey {
+        case mime = "mime"
+        case sha256 = "sha256"
+        case sizeBytes = "size_bytes"
+    }
+}
+
+// MARK: FileRef convenience initializers and mutators
+
+extension FileRef {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(FileRef.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        mime: String? = nil,
+        sha256: String? = nil,
+        sizeBytes: Int? = nil
+    ) -> FileRef {
+        return FileRef(
+            mime: mime ?? self.mime,
+            sha256: sha256 ?? self.sha256,
+            sizeBytes: sizeBytes ?? self.sizeBytes
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - DrawingSnapshotOp
+struct DrawingSnapshotOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: DrawingSnapshotData
+    let kind: DrawingSnapshotOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: DrawingSnapshotOp convenience initializers and mutators
+
+extension DrawingSnapshotOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DrawingSnapshotOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: DrawingSnapshotData? = nil,
+        kind: DrawingSnapshotOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> DrawingSnapshotOp {
+        return DrawingSnapshotOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum DrawingSnapshotOpKind: String, Codable {
+    case drawingSnapshot = "drawing.snapshot"
+}
+
+/// Wer die Operation erzeugt hat (vom Server gesetzt)
+enum SyncOrigin: String, Codable {
+    case ipad = "ipad"
+    case server = "server"
+    case web = "web"
+}
+
+enum DrawingSnapshotOpType: String, Codable {
+    case op = "op"
+}
+
+// MARK: - ElementRemoveData
+struct ElementRemoveData: Codable {
+    let elementID: String
+    let pageID: String
+
+    enum CodingKeys: String, CodingKey {
+        case elementID = "element_id"
+        case pageID = "page_id"
+    }
+}
+
+// MARK: ElementRemoveData convenience initializers and mutators
+
+extension ElementRemoveData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ElementRemoveData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        elementID: String? = nil,
+        pageID: String? = nil
+    ) -> ElementRemoveData {
+        return ElementRemoveData(
+            elementID: elementID ?? self.elementID,
+            pageID: pageID ?? self.pageID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ElementRemoveOp
+struct ElementRemoveOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: ElementRemoveData
+    let kind: ElementRemoveOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: ElementRemoveOp convenience initializers and mutators
+
+extension ElementRemoveOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ElementRemoveOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: ElementRemoveData? = nil,
+        kind: ElementRemoveOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> ElementRemoveOp {
+        return ElementRemoveOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum ElementRemoveOpKind: String, Codable {
+    case elementRemove = "element.remove"
+}
+
+// MARK: - ElementUpsertData
+struct ElementUpsertData: Codable {
+    let element: PageElement
+    let pageID: String
+
+    enum CodingKeys: String, CodingKey {
+        case element = "element"
+        case pageID = "page_id"
+    }
+}
+
+// MARK: ElementUpsertData convenience initializers and mutators
+
+extension ElementUpsertData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ElementUpsertData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        element: PageElement? = nil,
+        pageID: String? = nil
+    ) -> ElementUpsertData {
+        return ElementUpsertData(
+            element: element ?? self.element,
+            pageID: pageID ?? self.pageID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Seitenelement (08 §4.4), unterschieden über kind. frame [x, y, w, h] in pt. crop bei
+/// image: [x, y, w, h] relativ zum Bild (0–1), null = ganzes Bild. Phase 1 nutzt image
+/// (Tafel-Foto) und stamp (Marker-Stempel).
+// MARK: - PageElement
+struct PageElement: Codable {
+    let elementID: String
+    let frame: [Double]
+    let kind: PageElementKind
+    let payload: ElementPayload
+    let tMS: Int?
+    let z: Int
+
+    enum CodingKeys: String, CodingKey {
+        case elementID = "element_id"
+        case frame = "frame"
+        case kind = "kind"
+        case payload = "payload"
+        case tMS = "t_ms"
+        case z = "z"
+    }
+}
+
+// MARK: PageElement convenience initializers and mutators
+
+extension PageElement {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageElement.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        elementID: String? = nil,
+        frame: [Double]? = nil,
+        kind: PageElementKind? = nil,
+        payload: ElementPayload? = nil,
+        tMS: Int?? = nil,
+        z: Int? = nil
+    ) -> PageElement {
+        return PageElement(
+            elementID: elementID ?? self.elementID,
+            frame: frame ?? self.frame,
+            kind: kind ?? self.kind,
+            payload: payload ?? self.payload,
+            tMS: tMS ?? self.tMS,
+            z: z ?? self.z
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PageElementKind: String, Codable {
+    case image = "image"
+    case shape = "shape"
+    case stamp = "stamp"
+    case tape = "tape"
+    case text = "text"
+}
+
+// MARK: - ElementPayload
+struct ElementPayload: Codable {
+    let size: TextSize?
+    let text: String?
+    let crop: [Double]?
+    let photoID: String?
+    let color: String?
+    let points: [[Double]]?
+    let shape: ShapeKind?
+    let width: Double?
+    let cardID: String?
+    let covered: Bool?
+    let markerID: String?
+    let markerKind: MarkerKind?
+
+    enum CodingKeys: String, CodingKey {
+        case size = "size"
+        case text = "text"
+        case crop = "crop"
+        case photoID = "photo_id"
+        case color = "color"
+        case points = "points"
+        case shape = "shape"
+        case width = "width"
+        case cardID = "card_id"
+        case covered = "covered"
+        case markerID = "marker_id"
+        case markerKind = "marker_kind"
+    }
+}
+
+// MARK: ElementPayload convenience initializers and mutators
+
+extension ElementPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ElementPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        size: TextSize?? = nil,
+        text: String?? = nil,
+        crop: [Double]?? = nil,
+        photoID: String?? = nil,
+        color: String?? = nil,
+        points: [[Double]]?? = nil,
+        shape: ShapeKind?? = nil,
+        width: Double?? = nil,
+        cardID: String?? = nil,
+        covered: Bool?? = nil,
+        markerID: String?? = nil,
+        markerKind: MarkerKind?? = nil
+    ) -> ElementPayload {
+        return ElementPayload(
+            size: size ?? self.size,
+            text: text ?? self.text,
+            crop: crop ?? self.crop,
+            photoID: photoID ?? self.photoID,
+            color: color ?? self.color,
+            points: points ?? self.points,
+            shape: shape ?? self.shape,
+            width: width ?? self.width,
+            cardID: cardID ?? self.cardID,
+            covered: covered ?? self.covered,
+            markerID: markerID ?? self.markerID,
+            markerKind: markerKind ?? self.markerKind
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum MarkerKind: String, Codable {
+    case frage = "frage"
+    case klausur = "klausur"
+    case verknuepfung = "verknuepfung"
+}
+
+enum ShapeKind: String, Codable {
+    case arrow = "arrow"
+    case diamond = "diamond"
+    case ellipse = "ellipse"
+    case line = "line"
+    case rectangle = "rectangle"
+    case triangle = "triangle"
+}
+
+enum TextSize: String, Codable {
+    case l = "l"
+    case m = "m"
+    case s = "s"
+}
+
+// MARK: - ElementUpsertOp
+struct ElementUpsertOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: ElementUpsertData
+    let kind: ElementUpsertOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: ElementUpsertOp convenience initializers and mutators
+
+extension ElementUpsertOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ElementUpsertOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: ElementUpsertData? = nil,
+        kind: ElementUpsertOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> ElementUpsertOp {
+        return ElementUpsertOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum ElementUpsertOpKind: String, Codable {
+    case elementUpsert = "element.upsert"
 }
 
 /// Übungsblatt. Ergänzung zu 03 §4: ingest_state zeigt den Fortschritt von pdf.ingest für
@@ -494,6 +3121,175 @@ extension ExerciseSheetUpdate {
     }
 }
 
+/// Antwort auf PUT /photos/{id}/file und PUT /pages/{id}/pkdrawing
+// MARK: - FileReceipt
+struct FileReceipt: Codable {
+    /// true: dieselbe Datei (gleiches sha256) lag schon vor, nichts geändert
+    let duplicate: Bool
+    let id: String
+    let receivedAt: Date
+    let sha256: String
+    let sizeBytes: Int
+
+    enum CodingKeys: String, CodingKey {
+        case duplicate = "duplicate"
+        case id = "id"
+        case receivedAt = "received_at"
+        case sha256 = "sha256"
+        case sizeBytes = "size_bytes"
+    }
+}
+
+// MARK: FileReceipt convenience initializers and mutators
+
+extension FileReceipt {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(FileReceipt.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        duplicate: Bool? = nil,
+        id: String? = nil,
+        receivedAt: Date? = nil,
+        sha256: String? = nil,
+        sizeBytes: Int? = nil
+    ) -> FileReceipt {
+        return FileReceipt(
+            duplicate: duplicate ?? self.duplicate,
+            id: id ?? self.id,
+            receivedAt: receivedAt ?? self.receivedAt,
+            sha256: sha256 ?? self.sha256,
+            sizeBytes: sizeBytes ?? self.sizeBytes
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - GeneralSettings
+struct GeneralSettings: Codable {
+    let appearance: Appearance
+    let contentLang: Lang
+    /// SG_DATA_DIR, nur lesbar (Änderung über die Umgebung und Neustart)
+    let dataDir: String
+
+    enum CodingKeys: String, CodingKey {
+        case appearance = "appearance"
+        case contentLang = "content_lang"
+        case dataDir = "data_dir"
+    }
+}
+
+// MARK: GeneralSettings convenience initializers and mutators
+
+extension GeneralSettings {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(GeneralSettings.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        appearance: Appearance? = nil,
+        contentLang: Lang? = nil,
+        dataDir: String? = nil
+    ) -> GeneralSettings {
+        return GeneralSettings(
+            appearance: appearance ?? self.appearance,
+            contentLang: contentLang ?? self.contentLang,
+            dataDir: dataDir ?? self.dataDir
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum Lang: String, Codable {
+    case de = "de"
+    case en = "en"
+    case mixed = "mixed"
+}
+
+// MARK: - GeneralSettingsUpdate
+struct GeneralSettingsUpdate: Codable {
+    let appearance: Appearance?
+    let contentLang: Lang?
+
+    enum CodingKeys: String, CodingKey {
+        case appearance = "appearance"
+        case contentLang = "content_lang"
+    }
+}
+
+// MARK: GeneralSettingsUpdate convenience initializers and mutators
+
+extension GeneralSettingsUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(GeneralSettingsUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        appearance: Appearance?? = nil,
+        contentLang: Lang?? = nil
+    ) -> GeneralSettingsUpdate {
+        return GeneralSettingsUpdate(
+            appearance: appearance ?? self.appearance,
+            contentLang: contentLang ?? self.contentLang
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// Antwort von GET /api/v1/health (docs/VERTRAEGE.md §2)
 // MARK: - Health
 struct Health: Codable {
@@ -554,6 +3350,450 @@ enum DB: String, Codable {
 
 enum Status: String, Codable {
     case ok = "ok"
+}
+
+/// Termin in einem Abgleichergebnis (Schlüssel wie
+/// tests/fixtures/ics/11-abgleich-erwartung.json)
+// MARK: - ICSEventRef
+struct ICSEventRef: Codable {
+    let eventID: String
+    let externalUid: String
+    let kind: CalendarEventKind
+    let moduleID: String?
+    let recurrenceID: String?
+    let startsAt: Date
+    let title: String
+
+    enum CodingKeys: String, CodingKey {
+        case eventID = "event_id"
+        case externalUid = "external_uid"
+        case kind = "kind"
+        case moduleID = "module_id"
+        case recurrenceID = "recurrence_id"
+        case startsAt = "starts_at"
+        case title = "title"
+    }
+}
+
+// MARK: ICSEventRef convenience initializers and mutators
+
+extension ICSEventRef {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ICSEventRef.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        eventID: String? = nil,
+        externalUid: String? = nil,
+        kind: CalendarEventKind? = nil,
+        moduleID: String?? = nil,
+        recurrenceID: String?? = nil,
+        startsAt: Date? = nil,
+        title: String? = nil
+    ) -> ICSEventRef {
+        return ICSEventRef(
+            eventID: eventID ?? self.eventID,
+            externalUid: externalUid ?? self.externalUid,
+            kind: kind ?? self.kind,
+            moduleID: moduleID ?? self.moduleID,
+            recurrenceID: recurrenceID ?? self.recurrenceID,
+            startsAt: startsAt ?? self.startsAt,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ICSImportCounts
+struct ICSImportCounts: Codable {
+    let entfallen: Int
+    let geaendert: Int
+    let neu: Int
+    /// Nicht abgesagte Termine der Quelle ohne Modul nach dem Lauf
+    let ohneModul: Int
+    let unveraendert: Int
+    /// In diesem Lauf automatisch einem Modul zugeordnet
+    let zugeordnet: Int
+
+    enum CodingKeys: String, CodingKey {
+        case entfallen = "entfallen"
+        case geaendert = "geaendert"
+        case neu = "neu"
+        case ohneModul = "ohne_modul"
+        case unveraendert = "unveraendert"
+        case zugeordnet = "zugeordnet"
+    }
+}
+
+// MARK: ICSImportCounts convenience initializers and mutators
+
+extension ICSImportCounts {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ICSImportCounts.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        entfallen: Int? = nil,
+        geaendert: Int? = nil,
+        neu: Int? = nil,
+        ohneModul: Int? = nil,
+        unveraendert: Int? = nil,
+        zugeordnet: Int? = nil
+    ) -> ICSImportCounts {
+        return ICSImportCounts(
+            entfallen: entfallen ?? self.entfallen,
+            geaendert: geaendert ?? self.geaendert,
+            neu: neu ?? self.neu,
+            ohneModul: ohneModul ?? self.ohneModul,
+            unveraendert: unveraendert ?? self.unveraendert,
+            zugeordnet: zugeordnet ?? self.zugeordnet
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort auf POST /calendar/sources (201) und POST /calendar/sources/{id}/sync (200). Der
+/// Abgleich läuft synchron im Core, nicht als Job.
+// MARK: - ICSImportResult
+struct ICSImportResult: Codable {
+    let counts: ICSImportCounts
+    let entfallen: [ICSEventRef]
+    let geaendert: [ICSEventRef]
+    let moduleSuggestions: [ICSModuleSuggestion]
+    let neu: [ICSEventRef]
+    let source: CalendarSource
+    let warnings: [ICSWarning]
+    let zugeordnet: [ICSEventRef]
+
+    enum CodingKeys: String, CodingKey {
+        case counts = "counts"
+        case entfallen = "entfallen"
+        case geaendert = "geaendert"
+        case moduleSuggestions = "module_suggestions"
+        case neu = "neu"
+        case source = "source"
+        case warnings = "warnings"
+        case zugeordnet = "zugeordnet"
+    }
+}
+
+// MARK: ICSImportResult convenience initializers and mutators
+
+extension ICSImportResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ICSImportResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        counts: ICSImportCounts? = nil,
+        entfallen: [ICSEventRef]? = nil,
+        geaendert: [ICSEventRef]? = nil,
+        moduleSuggestions: [ICSModuleSuggestion]? = nil,
+        neu: [ICSEventRef]? = nil,
+        source: CalendarSource? = nil,
+        warnings: [ICSWarning]? = nil,
+        zugeordnet: [ICSEventRef]? = nil
+    ) -> ICSImportResult {
+        return ICSImportResult(
+            counts: counts ?? self.counts,
+            entfallen: entfallen ?? self.entfallen,
+            geaendert: geaendert ?? self.geaendert,
+            moduleSuggestions: moduleSuggestions ?? self.moduleSuggestions,
+            neu: neu ?? self.neu,
+            source: source ?? self.source,
+            warnings: warnings ?? self.warnings,
+            zugeordnet: zugeordnet ?? self.zugeordnet
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Vorschlag „neues Modul anlegen?" für unbekannte Titel (F-KAL-02)
+// MARK: - ICSModuleSuggestion
+struct ICSModuleSuggestion: Codable {
+    let eventCount: Int
+    let kind: CalendarEventKind
+    /// Vorgeschlagener Modulname, aus dem Titel bereinigt
+    let name: String
+    /// Je Serie ein Termin. Nach POST /modules: PATCH /calendar/events/{id} mit module_id,
+    /// scope=serie
+    let seriesEventIDS: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case eventCount = "event_count"
+        case kind = "kind"
+        case name = "name"
+        case seriesEventIDS = "series_event_ids"
+    }
+}
+
+// MARK: ICSModuleSuggestion convenience initializers and mutators
+
+extension ICSModuleSuggestion {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ICSModuleSuggestion.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        eventCount: Int? = nil,
+        kind: CalendarEventKind? = nil,
+        name: String? = nil,
+        seriesEventIDS: [String]? = nil
+    ) -> ICSModuleSuggestion {
+        return ICSModuleSuggestion(
+            eventCount: eventCount ?? self.eventCount,
+            kind: kind ?? self.kind,
+            name: name ?? self.name,
+            seriesEventIDS: seriesEventIDS ?? self.seriesEventIDS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ICSWarning
+struct ICSWarning: Codable {
+    let code: String
+    let externalUid: String?
+    let message: String
+
+    enum CodingKeys: String, CodingKey {
+        case code = "code"
+        case externalUid = "external_uid"
+        case message = "message"
+    }
+}
+
+// MARK: ICSWarning convenience initializers and mutators
+
+extension ICSWarning {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ICSWarning.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        code: String? = nil,
+        externalUid: String?? = nil,
+        message: String? = nil
+    ) -> ICSWarning {
+        return ICSWarning(
+            code: code ?? self.code,
+            externalUid: externalUid ?? self.externalUid,
+            message: message ?? self.message
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ImageElement
+struct ImageElement: Codable {
+    let elementID: String
+    let frame: [Double]
+    let kind: ImageElementKind
+    let payload: ImageElementPayload
+    let tMS: Int?
+    let z: Int
+
+    enum CodingKeys: String, CodingKey {
+        case elementID = "element_id"
+        case frame = "frame"
+        case kind = "kind"
+        case payload = "payload"
+        case tMS = "t_ms"
+        case z = "z"
+    }
+}
+
+// MARK: ImageElement convenience initializers and mutators
+
+extension ImageElement {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ImageElement.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        elementID: String? = nil,
+        frame: [Double]? = nil,
+        kind: ImageElementKind? = nil,
+        payload: ImageElementPayload? = nil,
+        tMS: Int?? = nil,
+        z: Int? = nil
+    ) -> ImageElement {
+        return ImageElement(
+            elementID: elementID ?? self.elementID,
+            frame: frame ?? self.frame,
+            kind: kind ?? self.kind,
+            payload: payload ?? self.payload,
+            tMS: tMS ?? self.tMS,
+            z: z ?? self.z
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum ImageElementKind: String, Codable {
+    case image = "image"
+}
+
+// MARK: - ImageElementPayload
+struct ImageElementPayload: Codable {
+    let crop: [Double]?
+    let photoID: String
+
+    enum CodingKeys: String, CodingKey {
+        case crop = "crop"
+        case photoID = "photo_id"
+    }
+}
+
+// MARK: ImageElementPayload convenience initializers and mutators
+
+extension ImageElementPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ImageElementPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        crop: [Double]?? = nil,
+        photoID: String? = nil
+    ) -> ImageElementPayload {
+        return ImageElementPayload(
+            crop: crop ?? self.crop,
+            photoID: photoID ?? self.photoID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Schreibmodus F-INK-03
+enum InkMode: String, Codable {
+    case aufFolie = "auf_folie"
+    case freieSeite = "freie_seite"
 }
 
 // MARK: - Job
@@ -761,10 +4001,621 @@ extension JobList {
     }
 }
 
-enum Lang: String, Codable {
-    case de = "de"
-    case en = "en"
-    case mixed = "mixed"
+// MARK: - LectureSettings
+struct LectureSettings: Codable {
+    /// Regel 1: Kalenderende + X min … (Standard 10)
+    let autoStopAfterEndMin: Int
+    /// Verlängerung per Tipp (Standard 15)
+    let autoStopExtendMin: Int
+    /// Regel 2: Kalenderende + X min (Standard 30)
+    let autoStopHardAfterEndMin: Int
+    /// Regel 4: Maximaldauer (Standard 240)
+    let autoStopMaxDurationMin: Int
+    /// … und X min keine Sprache (Standard 3)
+    let autoStopQuietWindowMin: Int
+    /// Regel 3: Stille ≥ X min (Standard 15)
+    let autoStopSilenceMin: Int
+    /// Hinweis vor dem Stopp (Standard 60)
+    let autoStopWarningS: Int
+    let defaultInkMode: InkMode
+    let defaultLayout: DashboardLayout
+    /// deviceId aus MediaDevices, null = Standardmikrofon
+    let microphoneID: String?
+    let toolbarSide: ToolbarSide
+
+    enum CodingKeys: String, CodingKey {
+        case autoStopAfterEndMin = "auto_stop_after_end_min"
+        case autoStopExtendMin = "auto_stop_extend_min"
+        case autoStopHardAfterEndMin = "auto_stop_hard_after_end_min"
+        case autoStopMaxDurationMin = "auto_stop_max_duration_min"
+        case autoStopQuietWindowMin = "auto_stop_quiet_window_min"
+        case autoStopSilenceMin = "auto_stop_silence_min"
+        case autoStopWarningS = "auto_stop_warning_s"
+        case defaultInkMode = "default_ink_mode"
+        case defaultLayout = "default_layout"
+        case microphoneID = "microphone_id"
+        case toolbarSide = "toolbar_side"
+    }
+}
+
+// MARK: LectureSettings convenience initializers and mutators
+
+extension LectureSettings {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(LectureSettings.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        autoStopAfterEndMin: Int? = nil,
+        autoStopExtendMin: Int? = nil,
+        autoStopHardAfterEndMin: Int? = nil,
+        autoStopMaxDurationMin: Int? = nil,
+        autoStopQuietWindowMin: Int? = nil,
+        autoStopSilenceMin: Int? = nil,
+        autoStopWarningS: Int? = nil,
+        defaultInkMode: InkMode? = nil,
+        defaultLayout: DashboardLayout? = nil,
+        microphoneID: String?? = nil,
+        toolbarSide: ToolbarSide? = nil
+    ) -> LectureSettings {
+        return LectureSettings(
+            autoStopAfterEndMin: autoStopAfterEndMin ?? self.autoStopAfterEndMin,
+            autoStopExtendMin: autoStopExtendMin ?? self.autoStopExtendMin,
+            autoStopHardAfterEndMin: autoStopHardAfterEndMin ?? self.autoStopHardAfterEndMin,
+            autoStopMaxDurationMin: autoStopMaxDurationMin ?? self.autoStopMaxDurationMin,
+            autoStopQuietWindowMin: autoStopQuietWindowMin ?? self.autoStopQuietWindowMin,
+            autoStopSilenceMin: autoStopSilenceMin ?? self.autoStopSilenceMin,
+            autoStopWarningS: autoStopWarningS ?? self.autoStopWarningS,
+            defaultInkMode: defaultInkMode ?? self.defaultInkMode,
+            defaultLayout: defaultLayout ?? self.defaultLayout,
+            microphoneID: microphoneID ?? self.microphoneID,
+            toolbarSide: toolbarSide ?? self.toolbarSide
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Händigkeit: Seite der Werkzeugleiste auf dem iPad
+enum ToolbarSide: String, Codable {
+    case links = "links"
+    case rechts = "rechts"
+}
+
+// MARK: - LectureSettingsUpdate
+struct LectureSettingsUpdate: Codable {
+    /// Regel 1: Kalenderende + X min … (Standard 10)
+    let autoStopAfterEndMin: Int?
+    /// Verlängerung per Tipp (Standard 15)
+    let autoStopExtendMin: Int?
+    /// Regel 2: Kalenderende + X min (Standard 30)
+    let autoStopHardAfterEndMin: Int?
+    /// Regel 4: Maximaldauer (Standard 240)
+    let autoStopMaxDurationMin: Int?
+    /// … und X min keine Sprache (Standard 3)
+    let autoStopQuietWindowMin: Int?
+    /// Regel 3: Stille ≥ X min (Standard 15)
+    let autoStopSilenceMin: Int?
+    /// Hinweis vor dem Stopp (Standard 60)
+    let autoStopWarningS: Int?
+    let defaultInkMode: InkMode?
+    let defaultLayout: DashboardLayout?
+    /// deviceId aus MediaDevices, null = Standardmikrofon
+    let microphoneID: String?
+    let toolbarSide: ToolbarSide?
+
+    enum CodingKeys: String, CodingKey {
+        case autoStopAfterEndMin = "auto_stop_after_end_min"
+        case autoStopExtendMin = "auto_stop_extend_min"
+        case autoStopHardAfterEndMin = "auto_stop_hard_after_end_min"
+        case autoStopMaxDurationMin = "auto_stop_max_duration_min"
+        case autoStopQuietWindowMin = "auto_stop_quiet_window_min"
+        case autoStopSilenceMin = "auto_stop_silence_min"
+        case autoStopWarningS = "auto_stop_warning_s"
+        case defaultInkMode = "default_ink_mode"
+        case defaultLayout = "default_layout"
+        case microphoneID = "microphone_id"
+        case toolbarSide = "toolbar_side"
+    }
+}
+
+// MARK: LectureSettingsUpdate convenience initializers and mutators
+
+extension LectureSettingsUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(LectureSettingsUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        autoStopAfterEndMin: Int?? = nil,
+        autoStopExtendMin: Int?? = nil,
+        autoStopHardAfterEndMin: Int?? = nil,
+        autoStopMaxDurationMin: Int?? = nil,
+        autoStopQuietWindowMin: Int?? = nil,
+        autoStopSilenceMin: Int?? = nil,
+        autoStopWarningS: Int?? = nil,
+        defaultInkMode: InkMode?? = nil,
+        defaultLayout: DashboardLayout?? = nil,
+        microphoneID: String?? = nil,
+        toolbarSide: ToolbarSide?? = nil
+    ) -> LectureSettingsUpdate {
+        return LectureSettingsUpdate(
+            autoStopAfterEndMin: autoStopAfterEndMin ?? self.autoStopAfterEndMin,
+            autoStopExtendMin: autoStopExtendMin ?? self.autoStopExtendMin,
+            autoStopHardAfterEndMin: autoStopHardAfterEndMin ?? self.autoStopHardAfterEndMin,
+            autoStopMaxDurationMin: autoStopMaxDurationMin ?? self.autoStopMaxDurationMin,
+            autoStopQuietWindowMin: autoStopQuietWindowMin ?? self.autoStopQuietWindowMin,
+            autoStopSilenceMin: autoStopSilenceMin ?? self.autoStopSilenceMin,
+            autoStopWarningS: autoStopWarningS ?? self.autoStopWarningS,
+            defaultInkMode: defaultInkMode ?? self.defaultInkMode,
+            defaultLayout: defaultLayout ?? self.defaultLayout,
+            microphoneID: microphoneID ?? self.microphoneID,
+            toolbarSide: toolbarSide ?? self.toolbarSide
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Marker
+struct Marker: Codable {
+    let createdAt: Date
+    let deletedAt: Date?
+    let id: String
+    let kind: MarkerKind
+    let note: String?
+    let pageID: String?
+    let position: MarkerPosition?
+    let resolvedAt: Date?
+    let sessionID: String
+    let source: MarkerSource
+    let tMS: Int
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case id = "id"
+        case kind = "kind"
+        case note = "note"
+        case pageID = "page_id"
+        case position = "position"
+        case resolvedAt = "resolved_at"
+        case sessionID = "session_id"
+        case source = "source"
+        case tMS = "t_ms"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: Marker convenience initializers and mutators
+
+extension Marker {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Marker.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        id: String? = nil,
+        kind: MarkerKind? = nil,
+        note: String?? = nil,
+        pageID: String?? = nil,
+        position: MarkerPosition?? = nil,
+        resolvedAt: Date?? = nil,
+        sessionID: String? = nil,
+        source: MarkerSource? = nil,
+        tMS: Int? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> Marker {
+        return Marker(
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            note: note ?? self.note,
+            pageID: pageID ?? self.pageID,
+            position: position ?? self.position,
+            resolvedAt: resolvedAt ?? self.resolvedAt,
+            sessionID: sessionID ?? self.sessionID,
+            source: source ?? self.source,
+            tMS: tMS ?? self.tMS,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Stelle auf der Seite in pt (Ursprung oben links)
+// MARK: - MarkerPosition
+struct MarkerPosition: Codable {
+    let x: Double
+    let y: Double
+
+    enum CodingKeys: String, CodingKey {
+        case x = "x"
+        case y = "y"
+    }
+}
+
+// MARK: MarkerPosition convenience initializers and mutators
+
+extension MarkerPosition {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MarkerPosition.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        x: Double? = nil,
+        y: Double? = nil
+    ) -> MarkerPosition {
+        return MarkerPosition(
+            x: x ?? self.x,
+            y: y ?? self.y
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum MarkerSource: String, Codable {
+    case detektor = "detektor"
+    case ipad = "ipad"
+    case mac = "mac"
+}
+
+/// Marker vom iPad (F-INK-05) und vom Mac (F-DSH-05, source=mac)
+// MARK: - MarkerAddData
+struct MarkerAddData: Codable {
+    let kind: MarkerKind
+    let markerID: String
+    let note: String?
+    let pageID: String?
+    let position: MarkerPosition?
+    let sessionID: String
+    let source: ClientDevice
+    let tMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case markerID = "marker_id"
+        case note = "note"
+        case pageID = "page_id"
+        case position = "position"
+        case sessionID = "session_id"
+        case source = "source"
+        case tMS = "t_ms"
+    }
+}
+
+// MARK: MarkerAddData convenience initializers and mutators
+
+extension MarkerAddData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MarkerAddData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: MarkerKind? = nil,
+        markerID: String? = nil,
+        note: String?? = nil,
+        pageID: String?? = nil,
+        position: MarkerPosition?? = nil,
+        sessionID: String? = nil,
+        source: ClientDevice? = nil,
+        tMS: Int? = nil
+    ) -> MarkerAddData {
+        return MarkerAddData(
+            kind: kind ?? self.kind,
+            markerID: markerID ?? self.markerID,
+            note: note ?? self.note,
+            pageID: pageID ?? self.pageID,
+            position: position ?? self.position,
+            sessionID: sessionID ?? self.sessionID,
+            source: source ?? self.source,
+            tMS: tMS ?? self.tMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MarkerAddOp
+struct MarkerAddOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: MarkerAddData
+    let kind: MarkerAddOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: MarkerAddOp convenience initializers and mutators
+
+extension MarkerAddOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MarkerAddOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: MarkerAddData? = nil,
+        kind: MarkerAddOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> MarkerAddOp {
+        return MarkerAddOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum MarkerAddOpKind: String, Codable {
+    case markerAdd = "marker.add"
+}
+
+/// Rückgängig (⌘Z, F-DSH-05) bzw. Löschen
+// MARK: - MarkerRemoveData
+struct MarkerRemoveData: Codable {
+    let markerID: String
+
+    enum CodingKeys: String, CodingKey {
+        case markerID = "marker_id"
+    }
+}
+
+// MARK: MarkerRemoveData convenience initializers and mutators
+
+extension MarkerRemoveData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MarkerRemoveData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        markerID: String? = nil
+    ) -> MarkerRemoveData {
+        return MarkerRemoveData(
+            markerID: markerID ?? self.markerID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MarkerRemoveOp
+struct MarkerRemoveOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: MarkerRemoveData
+    let kind: MarkerRemoveOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: MarkerRemoveOp convenience initializers and mutators
+
+extension MarkerRemoveOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MarkerRemoveOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: MarkerRemoveData? = nil,
+        kind: MarkerRemoveOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> MarkerRemoveOp {
+        return MarkerRemoveOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum MarkerRemoveOpKind: String, Codable {
+    case markerRemove = "marker.remove"
 }
 
 // MARK: - Module
@@ -1009,6 +4860,114 @@ extension ModuleList {
     }
 }
 
+/// module.settings (W-06 Option A, 03 §3). Fehlender Schlüssel = globaler Standard aus
+/// Settings.lecture
+// MARK: - ModuleSettings
+struct ModuleSettings: Codable {
+    let columnWidths: [Double]?
+    let inkMode: InkMode?
+    let layout: DashboardLayout?
+
+    enum CodingKeys: String, CodingKey {
+        case columnWidths = "column_widths"
+        case inkMode = "ink_mode"
+        case layout = "layout"
+    }
+}
+
+// MARK: ModuleSettings convenience initializers and mutators
+
+extension ModuleSettings {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ModuleSettings.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        columnWidths: [Double]?? = nil,
+        inkMode: InkMode?? = nil,
+        layout: DashboardLayout?? = nil
+    ) -> ModuleSettings {
+        return ModuleSettings(
+            columnWidths: columnWidths ?? self.columnWidths,
+            inkMode: inkMode ?? self.inkMode,
+            layout: layout ?? self.layout
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Teil von ModuleUpdate.settings: Schlüssel für Schlüssel zusammenführen, null entfernt den
+/// Schlüssel
+// MARK: - ModuleSettingsUpdate
+struct ModuleSettingsUpdate: Codable {
+    let columnWidths: [Double]?
+    let inkMode: InkMode?
+    let layout: DashboardLayout?
+
+    enum CodingKeys: String, CodingKey {
+        case columnWidths = "column_widths"
+        case inkMode = "ink_mode"
+        case layout = "layout"
+    }
+}
+
+// MARK: ModuleSettingsUpdate convenience initializers and mutators
+
+extension ModuleSettingsUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ModuleSettingsUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        columnWidths: [Double]?? = nil,
+        inkMode: InkMode?? = nil,
+        layout: DashboardLayout?? = nil
+    ) -> ModuleSettingsUpdate {
+        return ModuleSettingsUpdate(
+            columnWidths: columnWidths ?? self.columnWidths,
+            inkMode: inkMode ?? self.inkMode,
+            layout: layout ?? self.layout
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - ModuleUpdate
 struct ModuleUpdate: Codable {
     let color: ModuleColor?
@@ -1073,6 +5032,1374 @@ extension ModuleUpdate {
             name: name ?? self.name,
             semesterID: semesterID ?? self.semesterID,
             shortName: shortName ?? self.shortName
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Notebook
+struct Notebook: Codable {
+    let createdAt: Date
+    let deletedAt: Date?
+    let id: String
+    let kind: NotebookKind
+    let moduleID: String
+    /// Abgeleitet
+    let pageCount: Int
+    let title: String
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case id = "id"
+        case kind = "kind"
+        case moduleID = "module_id"
+        case pageCount = "page_count"
+        case title = "title"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: Notebook convenience initializers and mutators
+
+extension Notebook {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Notebook.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        id: String? = nil,
+        kind: NotebookKind? = nil,
+        moduleID: String? = nil,
+        pageCount: Int? = nil,
+        title: String? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> Notebook {
+        return Notebook(
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            moduleID: moduleID ?? self.moduleID,
+            pageCount: pageCount ?? self.pageCount,
+            title: title ?? self.title,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum NotebookKind: String, Codable {
+    case frei = "frei"
+    case uebung = "uebung"
+    case vorlesung = "vorlesung"
+}
+
+/// POST /notebooks. kind fehlt = frei
+// MARK: - NotebookCreate
+struct NotebookCreate: Codable {
+    let id: String?
+    let kind: NotebookKind?
+    let moduleID: String
+    let title: String
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case kind = "kind"
+        case moduleID = "module_id"
+        case title = "title"
+    }
+}
+
+// MARK: NotebookCreate convenience initializers and mutators
+
+extension NotebookCreate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookCreate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String?? = nil,
+        kind: NotebookKind?? = nil,
+        moduleID: String? = nil,
+        title: String? = nil
+    ) -> NotebookCreate {
+        return NotebookCreate(
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            moduleID: moduleID ?? self.moduleID,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - NotebookList
+struct NotebookList: Codable {
+    let items: [Notebook]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+    }
+}
+
+// MARK: NotebookList convenience initializers and mutators
+
+extension NotebookList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [Notebook]? = nil,
+        nextCursor: String?? = nil
+    ) -> NotebookList {
+        return NotebookList(
+            items: items ?? self.items,
+            nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /notebooks/{id}/pages, nach index sortiert, ohne gelöschte Seiten
+// MARK: - NotebookPages
+struct NotebookPages: Codable {
+    let items: [Page]
+    let notebookID: String
+    /// seq des Stroms notebook:<id> zu diesem Stand
+    let streamSeq: Int
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case notebookID = "notebook_id"
+        case streamSeq = "stream_seq"
+    }
+}
+
+// MARK: NotebookPages convenience initializers and mutators
+
+extension NotebookPages {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookPages.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [Page]? = nil,
+        notebookID: String? = nil,
+        streamSeq: Int? = nil
+    ) -> NotebookPages {
+        return NotebookPages(
+            items: items ?? self.items,
+            notebookID: notebookID ?? self.notebookID,
+            streamSeq: streamSeq ?? self.streamSeq
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Page
+struct Page: Codable {
+    let attachedSlideID: String?
+    let backgroundSlideID: String?
+    let createdAt: Date
+    let deletedAt: Date?
+    /// Abgeleitet: PencilKit-Sicherung liegt vor (GET /pages/{id}/pkdrawing)
+    let hasPkdrawing: Bool
+    let heightPt: Double
+    let id: String
+    /// Reihenfolge im Notizbuch, 1-basiert
+    let index: Int
+    let notebookID: String
+    let sessionID: String?
+    let template: PageTemplate
+    let updatedAt: Date
+    let userID: String
+    let version: Int
+    let widthPt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case attachedSlideID = "attached_slide_id"
+        case backgroundSlideID = "background_slide_id"
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case hasPkdrawing = "has_pkdrawing"
+        case heightPt = "height_pt"
+        case id = "id"
+        case index = "index"
+        case notebookID = "notebook_id"
+        case sessionID = "session_id"
+        case template = "template"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+        case version = "version"
+        case widthPt = "width_pt"
+    }
+}
+
+// MARK: Page convenience initializers and mutators
+
+extension Page {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Page.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        attachedSlideID: String?? = nil,
+        backgroundSlideID: String?? = nil,
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        hasPkdrawing: Bool? = nil,
+        heightPt: Double? = nil,
+        id: String? = nil,
+        index: Int? = nil,
+        notebookID: String? = nil,
+        sessionID: String?? = nil,
+        template: PageTemplate? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil,
+        version: Int? = nil,
+        widthPt: Double? = nil
+    ) -> Page {
+        return Page(
+            attachedSlideID: attachedSlideID ?? self.attachedSlideID,
+            backgroundSlideID: backgroundSlideID ?? self.backgroundSlideID,
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            hasPkdrawing: hasPkdrawing ?? self.hasPkdrawing,
+            heightPt: heightPt ?? self.heightPt,
+            id: id ?? self.id,
+            index: index ?? self.index,
+            notebookID: notebookID ?? self.notebookID,
+            sessionID: sessionID ?? self.sessionID,
+            template: template ?? self.template,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID,
+            version: version ?? self.version,
+            widthPt: widthPt ?? self.widthPt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PageTemplate: String, Codable {
+    case blanko = "blanko"
+    case cornell = "cornell"
+    case folie = "folie"
+    case kariert = "kariert"
+    case liniert = "liniert"
+    case punktraster = "punktraster"
+}
+
+/// PATCH /notebooks/{id}
+// MARK: - NotebookUpdate
+struct NotebookUpdate: Codable {
+    let moduleID: String?
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case moduleID = "module_id"
+        case title = "title"
+    }
+}
+
+// MARK: NotebookUpdate convenience initializers and mutators
+
+extension NotebookUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        moduleID: String?? = nil,
+        title: String?? = nil
+    ) -> NotebookUpdate {
+        return NotebookUpdate(
+            moduleID: moduleID ?? self.moduleID,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - PageCreateData
+struct PageCreateData: Codable {
+    let attachedSlideID: String?
+    let backgroundSlideID: String?
+    let heightPt: Double
+    let index: Int
+    let notebookID: String
+    let pageID: String
+    let sessionID: String?
+    let template: PageTemplate
+    let widthPt: Double
+
+    enum CodingKeys: String, CodingKey {
+        case attachedSlideID = "attached_slide_id"
+        case backgroundSlideID = "background_slide_id"
+        case heightPt = "height_pt"
+        case index = "index"
+        case notebookID = "notebook_id"
+        case pageID = "page_id"
+        case sessionID = "session_id"
+        case template = "template"
+        case widthPt = "width_pt"
+    }
+}
+
+// MARK: PageCreateData convenience initializers and mutators
+
+extension PageCreateData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageCreateData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        attachedSlideID: String?? = nil,
+        backgroundSlideID: String?? = nil,
+        heightPt: Double? = nil,
+        index: Int? = nil,
+        notebookID: String? = nil,
+        pageID: String? = nil,
+        sessionID: String?? = nil,
+        template: PageTemplate? = nil,
+        widthPt: Double? = nil
+    ) -> PageCreateData {
+        return PageCreateData(
+            attachedSlideID: attachedSlideID ?? self.attachedSlideID,
+            backgroundSlideID: backgroundSlideID ?? self.backgroundSlideID,
+            heightPt: heightPt ?? self.heightPt,
+            index: index ?? self.index,
+            notebookID: notebookID ?? self.notebookID,
+            pageID: pageID ?? self.pageID,
+            sessionID: sessionID ?? self.sessionID,
+            template: template ?? self.template,
+            widthPt: widthPt ?? self.widthPt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - PageCreateOp
+struct PageCreateOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: PageCreateData
+    let kind: PageCreateOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: PageCreateOp convenience initializers and mutators
+
+extension PageCreateOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageCreateOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: PageCreateData? = nil,
+        kind: PageCreateOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> PageCreateOp {
+        return PageCreateOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PageCreateOpKind: String, Codable {
+    case pageCreate = "page.create"
+}
+
+// MARK: - PageDeleteData
+struct PageDeleteData: Codable {
+    let pageID: String
+
+    enum CodingKeys: String, CodingKey {
+        case pageID = "page_id"
+    }
+}
+
+// MARK: PageDeleteData convenience initializers and mutators
+
+extension PageDeleteData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageDeleteData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        pageID: String? = nil
+    ) -> PageDeleteData {
+        return PageDeleteData(
+            pageID: pageID ?? self.pageID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - PageDeleteOp
+struct PageDeleteOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: PageDeleteData
+    let kind: PageDeleteOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: PageDeleteOp convenience initializers and mutators
+
+extension PageDeleteOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageDeleteOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: PageDeleteData? = nil,
+        kind: PageDeleteOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> PageDeleteOp {
+        return PageDeleteOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PageDeleteOpKind: String, Codable {
+    case pageDelete = "page.delete"
+}
+
+/// GET /pages/{id}: Seite mit Elementen (ohne gelöschte, nach z sortiert)
+// MARK: - PageDetail
+struct PageDetail: Codable {
+    let elements: [PageElement]
+    let page: Page
+    let streamSeq: Int
+
+    enum CodingKeys: String, CodingKey {
+        case elements = "elements"
+        case page = "page"
+        case streamSeq = "stream_seq"
+    }
+}
+
+// MARK: PageDetail convenience initializers and mutators
+
+extension PageDetail {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageDetail.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        elements: [PageElement]? = nil,
+        page: Page? = nil,
+        streamSeq: Int? = nil
+    ) -> PageDetail {
+        return PageDetail(
+            elements: elements ?? self.elements,
+            page: page ?? self.page,
+            streamSeq: streamSeq ?? self.streamSeq
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /pages/{id}/strokes: alle nicht gelöschten Striche, nach created_at sortiert
+// MARK: - PageStrokes
+struct PageStrokes: Codable {
+    let pageID: String
+    /// seq des Stroms notebook:<id> zu diesem Stand
+    let streamSeq: Int
+    let strokes: [Stroke]
+
+    enum CodingKeys: String, CodingKey {
+        case pageID = "page_id"
+        case streamSeq = "stream_seq"
+        case strokes = "strokes"
+    }
+}
+
+// MARK: PageStrokes convenience initializers and mutators
+
+extension PageStrokes {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageStrokes.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        pageID: String? = nil,
+        streamSeq: Int? = nil,
+        strokes: [Stroke]? = nil
+    ) -> PageStrokes {
+        return PageStrokes(
+            pageID: pageID ?? self.pageID,
+            streamSeq: streamSeq ?? self.streamSeq,
+            strokes: strokes ?? self.strokes
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Neutrales Strich-Format (08 §4.1/4.2). points sind Rohkoordinaten VOR transform, bbox
+/// gilt NACH transform inklusive halber Breite. dt des ersten Punkts ist 0; t_end_ms −
+/// t_start_ms entspricht dem letzten dt. t_start_ms/t_end_ms null außerhalb einer Session.
+// MARK: - Stroke
+struct Stroke: Codable {
+    let bbox: [Double]
+    let clientID: String
+    let color: String
+    let createdAt: Int
+    let layer: StrokeLayer
+    /// Base64 (ohne Zeilenumbrüche) von n ≥ 1 Punkten à 24 Byte: x, y, dt, force, azimuth,
+    /// altitude als Float32 little-endian (08 §4.2). 24 Byte = genau 32 Base64-Zeichen, daher
+    /// nie Padding
+    let points: String
+    let tEndMS: Int?
+    let tStartMS: Int?
+    let tool: StrokeTool
+    let transform: [Double]
+    /// Grundbreite in pt
+    let width: Double
+
+    enum CodingKeys: String, CodingKey {
+        case bbox = "bbox"
+        case clientID = "client_id"
+        case color = "color"
+        case createdAt = "created_at"
+        case layer = "layer"
+        case points = "points"
+        case tEndMS = "t_end_ms"
+        case tStartMS = "t_start_ms"
+        case tool = "tool"
+        case transform = "transform"
+        case width = "width"
+    }
+}
+
+// MARK: Stroke convenience initializers and mutators
+
+extension Stroke {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Stroke.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        bbox: [Double]? = nil,
+        clientID: String? = nil,
+        color: String? = nil,
+        createdAt: Int? = nil,
+        layer: StrokeLayer? = nil,
+        points: String? = nil,
+        tEndMS: Int?? = nil,
+        tStartMS: Int?? = nil,
+        tool: StrokeTool? = nil,
+        transform: [Double]? = nil,
+        width: Double? = nil
+    ) -> Stroke {
+        return Stroke(
+            bbox: bbox ?? self.bbox,
+            clientID: clientID ?? self.clientID,
+            color: color ?? self.color,
+            createdAt: createdAt ?? self.createdAt,
+            layer: layer ?? self.layer,
+            points: points ?? self.points,
+            tEndMS: tEndMS ?? self.tEndMS,
+            tStartMS: tStartMS ?? self.tStartMS,
+            tool: tool ?? self.tool,
+            transform: transform ?? self.transform,
+            width: width ?? self.width
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum StrokeLayer: String, Codable {
+    case highlight = "highlight"
+    case ink = "ink"
+}
+
+enum StrokeTool: String, Codable {
+    case fountain = "fountain"
+    case marker = "marker"
+    case monoline = "monoline"
+    case pen = "pen"
+    case pencil = "pencil"
+}
+
+// MARK: - PageUpdateData
+struct PageUpdateData: Codable {
+    let fields: PageUpdateFields
+    let pageID: String
+    /// Version, auf der die Änderung beruht. Der Core setzt danach version + 1
+    let version: Int
+
+    enum CodingKeys: String, CodingKey {
+        case fields = "fields"
+        case pageID = "page_id"
+        case version = "version"
+    }
+}
+
+// MARK: PageUpdateData convenience initializers and mutators
+
+extension PageUpdateData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageUpdateData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        fields: PageUpdateFields? = nil,
+        pageID: String? = nil,
+        version: Int? = nil
+    ) -> PageUpdateData {
+        return PageUpdateData(
+            fields: fields ?? self.fields,
+            pageID: pageID ?? self.pageID,
+            version: version ?? self.version
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Geänderte Felder, mindestens eins
+// MARK: - PageUpdateFields
+struct PageUpdateFields: Codable {
+    let attachedSlideID: String?
+    let backgroundSlideID: String?
+    let index: Int?
+    let sessionID: String?
+    let template: PageTemplate?
+
+    enum CodingKeys: String, CodingKey {
+        case attachedSlideID = "attached_slide_id"
+        case backgroundSlideID = "background_slide_id"
+        case index = "index"
+        case sessionID = "session_id"
+        case template = "template"
+    }
+}
+
+// MARK: PageUpdateFields convenience initializers and mutators
+
+extension PageUpdateFields {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageUpdateFields.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        attachedSlideID: String?? = nil,
+        backgroundSlideID: String?? = nil,
+        index: Int?? = nil,
+        sessionID: String?? = nil,
+        template: PageTemplate?? = nil
+    ) -> PageUpdateFields {
+        return PageUpdateFields(
+            attachedSlideID: attachedSlideID ?? self.attachedSlideID,
+            backgroundSlideID: backgroundSlideID ?? self.backgroundSlideID,
+            index: index ?? self.index,
+            sessionID: sessionID ?? self.sessionID,
+            template: template ?? self.template
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - PageUpdateOp
+struct PageUpdateOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: PageUpdateData
+    let kind: PageUpdateOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: PageUpdateOp convenience initializers and mutators
+
+extension PageUpdateOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageUpdateOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: PageUpdateData? = nil,
+        kind: PageUpdateOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> PageUpdateOp {
+        return PageUpdateOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PageUpdateOpKind: String, Codable {
+    case pageUpdate = "page.update"
+}
+
+/// POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). public_nonce muss zu
+/// pair/start passen, falls der Code von dort stammt.
+// MARK: - PairConfirmRequest
+struct PairConfirmRequest: Codable {
+    let appVersion: String?
+    let code: String
+    let deviceName: String
+    let kind: DeviceKind
+    let publicNonce: String
+
+    enum CodingKeys: String, CodingKey {
+        case appVersion = "app_version"
+        case code = "code"
+        case deviceName = "device_name"
+        case kind = "kind"
+        case publicNonce = "public_nonce"
+    }
+}
+
+// MARK: PairConfirmRequest convenience initializers and mutators
+
+extension PairConfirmRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PairConfirmRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        appVersion: String?? = nil,
+        code: String? = nil,
+        deviceName: String? = nil,
+        kind: DeviceKind? = nil,
+        publicNonce: String? = nil
+    ) -> PairConfirmRequest {
+        return PairConfirmRequest(
+            appVersion: appVersion ?? self.appVersion,
+            code: code ?? self.code,
+            deviceName: deviceName ?? self.deviceName,
+            kind: kind ?? self.kind,
+            publicNonce: publicNonce ?? self.publicNonce
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort auf POST /devices/pair/confirm (201)
+// MARK: - PairResponse
+struct PairResponse: Codable {
+    let device: Device
+    /// 256 Bit Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben
+    let deviceToken: String
+
+    enum CodingKeys: String, CodingKey {
+        case device = "device"
+        case deviceToken = "device_token"
+    }
+}
+
+// MARK: PairResponse convenience initializers and mutators
+
+extension PairResponse {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PairResponse.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        device: Device? = nil,
+        deviceToken: String? = nil
+    ) -> PairResponse {
+        return PairResponse(
+            device: device ?? self.device,
+            deviceToken: deviceToken ?? self.deviceToken
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// POST /devices/pair/start (aus dem Netz ohne Token erlaubt)
+// MARK: - PairStartRequest
+struct PairStartRequest: Codable {
+    let deviceName: String
+    let kind: DeviceKind
+    /// Zufallswert des iPads (base64url, ≥ 128 Bit)
+    let publicNonce: String
+
+    enum CodingKeys: String, CodingKey {
+        case deviceName = "device_name"
+        case kind = "kind"
+        case publicNonce = "public_nonce"
+    }
+}
+
+// MARK: PairStartRequest convenience initializers and mutators
+
+extension PairStartRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PairStartRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        deviceName: String? = nil,
+        kind: DeviceKind? = nil,
+        publicNonce: String? = nil
+    ) -> PairStartRequest {
+        return PairStartRequest(
+            deviceName: deviceName ?? self.deviceName,
+            kind: kind ?? self.kind,
+            publicNonce: publicNonce ?? self.publicNonce
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Der Code steht NICHT in der Antwort, nur in der Web-App
+// MARK: - PairStartResponse
+struct PairStartResponse: Codable {
+    let expiresAt: Date
+    let pairingID: String
+
+    enum CodingKeys: String, CodingKey {
+        case expiresAt = "expires_at"
+        case pairingID = "pairing_id"
+    }
+}
+
+// MARK: PairStartResponse convenience initializers and mutators
+
+extension PairStartResponse {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PairStartResponse.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        expiresAt: Date? = nil,
+        pairingID: String? = nil
+    ) -> PairStartResponse {
+        return PairStartResponse(
+            expiresAt: expiresAt ?? self.expiresAt,
+            pairingID: pairingID ?? self.pairingID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis
+/// pairing.requested)
+// MARK: - PairingCode
+struct PairingCode: Codable {
+    let code: String
+    /// Name aus pair/start, null bei einem Code für den QR-Weg
+    let deviceName: String?
+    let expiresAt: Date
+    let pairingID: String
+    let qrURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case code = "code"
+        case deviceName = "device_name"
+        case expiresAt = "expires_at"
+        case pairingID = "pairing_id"
+        case qrURL = "qr_url"
+    }
+}
+
+// MARK: PairingCode convenience initializers and mutators
+
+extension PairingCode {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PairingCode.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        code: String? = nil,
+        deviceName: String?? = nil,
+        expiresAt: Date? = nil,
+        pairingID: String? = nil,
+        qrURL: String? = nil
+    ) -> PairingCode {
+        return PairingCode(
+            code: code ?? self.code,
+            deviceName: deviceName ?? self.deviceName,
+            expiresAt: expiresAt ?? self.expiresAt,
+            pairingID: pairingID ?? self.pairingID,
+            qrURL: qrURL ?? self.qrURL
         )
     }
 
@@ -1273,6 +6600,603 @@ extension PDFIngestSheetPayload {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+// MARK: - PenSettings
+struct PenSettings: Codable {
+    let doubleTap: PencilDoubleTapAction
+    let favoriteColors: [String]
+    /// Formerkennung (F-INK-09, ab Phase 3)
+    let shapeRecognition: Bool
+    let squeeze: PencilSqueezeAction
+
+    enum CodingKeys: String, CodingKey {
+        case doubleTap = "double_tap"
+        case favoriteColors = "favorite_colors"
+        case shapeRecognition = "shape_recognition"
+        case squeeze = "squeeze"
+    }
+}
+
+// MARK: PenSettings convenience initializers and mutators
+
+extension PenSettings {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PenSettings.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        doubleTap: PencilDoubleTapAction? = nil,
+        favoriteColors: [String]? = nil,
+        shapeRecognition: Bool? = nil,
+        squeeze: PencilSqueezeAction? = nil
+    ) -> PenSettings {
+        return PenSettings(
+            doubleTap: doubleTap ?? self.doubleTap,
+            favoriteColors: favoriteColors ?? self.favoriteColors,
+            shapeRecognition: shapeRecognition ?? self.shapeRecognition,
+            squeeze: squeeze ?? self.squeeze
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// system = Einstellung von iPadOS übernehmen
+enum PencilDoubleTapAction: String, Codable {
+    case aus = "aus"
+    case farbpalette = "farbpalette"
+    case letztesWerkzeug = "letztes_werkzeug"
+    case radierer = "radierer"
+    case system = "system"
+}
+
+enum PencilSqueezeAction: String, Codable {
+    case aus = "aus"
+    case radierer = "radierer"
+    case system = "system"
+    case werkzeugpalette = "werkzeugpalette"
+}
+
+// MARK: - PenSettingsUpdate
+struct PenSettingsUpdate: Codable {
+    let doubleTap: PencilDoubleTapAction?
+    let favoriteColors: [String]?
+    /// Formerkennung (F-INK-09, ab Phase 3)
+    let shapeRecognition: Bool?
+    let squeeze: PencilSqueezeAction?
+
+    enum CodingKeys: String, CodingKey {
+        case doubleTap = "double_tap"
+        case favoriteColors = "favorite_colors"
+        case shapeRecognition = "shape_recognition"
+        case squeeze = "squeeze"
+    }
+}
+
+// MARK: PenSettingsUpdate convenience initializers and mutators
+
+extension PenSettingsUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PenSettingsUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        doubleTap: PencilDoubleTapAction?? = nil,
+        favoriteColors: [String]?? = nil,
+        shapeRecognition: Bool?? = nil,
+        squeeze: PencilSqueezeAction?? = nil
+    ) -> PenSettingsUpdate {
+        return PenSettingsUpdate(
+            doubleTap: doubleTap ?? self.doubleTap,
+            favoriteColors: favoriteColors ?? self.favoriteColors,
+            shapeRecognition: shapeRecognition ?? self.shapeRecognition,
+            squeeze: squeeze ?? self.squeeze
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Tafel-Foto (Metadaten). Datei: GET /photos/{id}/file
+// MARK: - Photo
+struct Photo: Codable {
+    let createdAt: Date
+    let deletedAt: Date?
+    /// false, bis PUT /photos/{id}/file angekommen ist
+    let hasFile: Bool
+    let id: String
+    let mime: PhotoMIME
+    let ocrText: String?
+    let pageID: String?
+    let sessionID: String
+    let sha256: String
+    let sizeBytes: Int
+    let tMS: Int
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case hasFile = "has_file"
+        case id = "id"
+        case mime = "mime"
+        case ocrText = "ocr_text"
+        case pageID = "page_id"
+        case sessionID = "session_id"
+        case sha256 = "sha256"
+        case sizeBytes = "size_bytes"
+        case tMS = "t_ms"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: Photo convenience initializers and mutators
+
+extension Photo {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Photo.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        hasFile: Bool? = nil,
+        id: String? = nil,
+        mime: PhotoMIME? = nil,
+        ocrText: String?? = nil,
+        pageID: String?? = nil,
+        sessionID: String? = nil,
+        sha256: String? = nil,
+        sizeBytes: Int? = nil,
+        tMS: Int? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> Photo {
+        return Photo(
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            hasFile: hasFile ?? self.hasFile,
+            id: id ?? self.id,
+            mime: mime ?? self.mime,
+            ocrText: ocrText ?? self.ocrText,
+            pageID: pageID ?? self.pageID,
+            sessionID: sessionID ?? self.sessionID,
+            sha256: sha256 ?? self.sha256,
+            sizeBytes: sizeBytes ?? self.sizeBytes,
+            tMS: tMS ?? self.tMS,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PhotoMIME: String, Codable {
+    case imageHeic = "image/heic"
+    case imageJPEG = "image/jpeg"
+}
+
+/// Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
+// MARK: - PhotoAddData
+struct PhotoAddData: Codable {
+    let fileRef: FileRef
+    let pageID: String?
+    let photoID: String
+    let sessionID: String
+    let tMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case fileRef = "file_ref"
+        case pageID = "page_id"
+        case photoID = "photo_id"
+        case sessionID = "session_id"
+        case tMS = "t_ms"
+    }
+}
+
+// MARK: PhotoAddData convenience initializers and mutators
+
+extension PhotoAddData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PhotoAddData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        fileRef: FileRef? = nil,
+        pageID: String?? = nil,
+        photoID: String? = nil,
+        sessionID: String? = nil,
+        tMS: Int? = nil
+    ) -> PhotoAddData {
+        return PhotoAddData(
+            fileRef: fileRef ?? self.fileRef,
+            pageID: pageID ?? self.pageID,
+            photoID: photoID ?? self.photoID,
+            sessionID: sessionID ?? self.sessionID,
+            tMS: tMS ?? self.tMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - PhotoAddOp
+struct PhotoAddOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: PhotoAddData
+    let kind: PhotoAddOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: PhotoAddOp convenience initializers and mutators
+
+extension PhotoAddOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PhotoAddOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: PhotoAddData? = nil,
+        kind: PhotoAddOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> PhotoAddOp {
+        return PhotoAddOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PhotoAddOpKind: String, Codable {
+    case photoAdd = "photo.add"
+}
+
+/// Eine Aufnahme = ein MediaRecorder-Strom. Nach einem Neuladen beginnt eine neue Aufnahme
+/// derselben Session (F-SES-05).
+// MARK: - Recording
+struct Recording: Codable {
+    /// Abgeleitet: empfangene Chunks
+    let chunkCount: Int
+    /// true: jeder Chunk ist eine eigenständige Datei (Recorder je Chunk neu gestartet). false:
+    /// Chunks ergeben in seq-Reihenfolge einen Bytestrom. Ergänzung, offen bis Spike S4
+    let chunksIndependent: Bool
+    let codec: AudioCodec
+    let completedAt: Date?
+    let createdAt: Date
+    let deletedAt: Date?
+    /// Länge der Gesamtdatei, gesetzt von audio.finalize
+    let durationMS: Int?
+    let id: String
+    /// Abgeleitet: höchste empfangene seq
+    let lastSeq: Int?
+    let mime: String
+    let sessionID: String
+    let startedMS: Int
+    let state: RecordingState
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case chunkCount = "chunk_count"
+        case chunksIndependent = "chunks_independent"
+        case codec = "codec"
+        case completedAt = "completed_at"
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case durationMS = "duration_ms"
+        case id = "id"
+        case lastSeq = "last_seq"
+        case mime = "mime"
+        case sessionID = "session_id"
+        case startedMS = "started_ms"
+        case state = "state"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: Recording convenience initializers and mutators
+
+extension Recording {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Recording.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        chunkCount: Int? = nil,
+        chunksIndependent: Bool? = nil,
+        codec: AudioCodec? = nil,
+        completedAt: Date?? = nil,
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        durationMS: Int?? = nil,
+        id: String? = nil,
+        lastSeq: Int?? = nil,
+        mime: String? = nil,
+        sessionID: String? = nil,
+        startedMS: Int? = nil,
+        state: RecordingState? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> Recording {
+        return Recording(
+            chunkCount: chunkCount ?? self.chunkCount,
+            chunksIndependent: chunksIndependent ?? self.chunksIndependent,
+            codec: codec ?? self.codec,
+            completedAt: completedAt ?? self.completedAt,
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            durationMS: durationMS ?? self.durationMS,
+            id: id ?? self.id,
+            lastSeq: lastSeq ?? self.lastSeq,
+            mime: mime ?? self.mime,
+            sessionID: sessionID ?? self.sessionID,
+            startedMS: startedMS ?? self.startedMS,
+            state: state ?? self.state,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// POST /recordings/{id}/complete: der Client hat den letzten Chunk hochgeladen. Der Core
+/// stellt audio.finalize ein.
+// MARK: - RecordingComplete
+struct RecordingComplete: Codable {
+    /// Aufgenommene Länge laut Client
+    let durationMS: Int
+    let lastSeq: Int
+
+    enum CodingKeys: String, CodingKey {
+        case durationMS = "duration_ms"
+        case lastSeq = "last_seq"
+    }
+}
+
+// MARK: RecordingComplete convenience initializers and mutators
+
+extension RecordingComplete {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(RecordingComplete.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        durationMS: Int? = nil,
+        lastSeq: Int? = nil
+    ) -> RecordingComplete {
+        return RecordingComplete(
+            durationMS: durationMS ?? self.durationMS,
+            lastSeq: lastSeq ?? self.lastSeq
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// POST /sessions/{id}/recordings
+// MARK: - RecordingCreate
+struct RecordingCreate: Codable {
+    let chunksIndependent: Bool?
+    let codec: AudioCodec
+    let id: String?
+    let mime: String
+    let startedMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case chunksIndependent = "chunks_independent"
+        case codec = "codec"
+        case id = "id"
+        case mime = "mime"
+        case startedMS = "started_ms"
+    }
+}
+
+// MARK: RecordingCreate convenience initializers and mutators
+
+extension RecordingCreate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(RecordingCreate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        chunksIndependent: Bool?? = nil,
+        codec: AudioCodec? = nil,
+        id: String?? = nil,
+        mime: String? = nil,
+        startedMS: Int? = nil
+    ) -> RecordingCreate {
+        return RecordingCreate(
+            chunksIndependent: chunksIndependent ?? self.chunksIndependent,
+            codec: codec ?? self.codec,
+            id: id ?? self.id,
+            mime: mime ?? self.mime,
+            startedMS: startedMS ?? self.startedMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Nacharbeitung (F-NAC-05, Phase 2)
+enum ReviewState: String, Codable {
+    case erledigt = "erledigt"
+    case inArbeit = "in_arbeit"
+    case offen = "offen"
 }
 
 // MARK: - Semester
@@ -1528,6 +7452,1323 @@ extension SemesterUpdate {
     }
 }
 
+/// Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem
+/// Kalendertermin (null bei spontanen Sessions).
+// MARK: - Session
+struct Session: Codable {
+    let calendarEventID: String?
+    let createdAt: Date
+    let deletedAt: Date?
+    let endedAt: Date?
+    let id: String
+    let moduleID: String
+    /// VL-Nummer im Modul (VL 7), Regeln in docs/VERTRAEGE.md
+    let number: Int?
+    let plannedEndsAt: Date?
+    let plannedStartsAt: Date?
+    let processing: [String: JobState]
+    let reviewState: ReviewState
+    let slideDeckID: String?
+    let startedAt: Date?
+    let startedFrom: ClientDevice?
+    let state: SessionState
+    let stopReason: StopReason?
+    let title: String?
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case calendarEventID = "calendar_event_id"
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case endedAt = "ended_at"
+        case id = "id"
+        case moduleID = "module_id"
+        case number = "number"
+        case plannedEndsAt = "planned_ends_at"
+        case plannedStartsAt = "planned_starts_at"
+        case processing = "processing"
+        case reviewState = "review_state"
+        case slideDeckID = "slide_deck_id"
+        case startedAt = "started_at"
+        case startedFrom = "started_from"
+        case state = "state"
+        case stopReason = "stop_reason"
+        case title = "title"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: Session convenience initializers and mutators
+
+extension Session {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Session.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        calendarEventID: String?? = nil,
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        endedAt: Date?? = nil,
+        id: String? = nil,
+        moduleID: String? = nil,
+        number: Int?? = nil,
+        plannedEndsAt: Date?? = nil,
+        plannedStartsAt: Date?? = nil,
+        processing: [String: JobState]? = nil,
+        reviewState: ReviewState? = nil,
+        slideDeckID: String?? = nil,
+        startedAt: Date?? = nil,
+        startedFrom: ClientDevice?? = nil,
+        state: SessionState? = nil,
+        stopReason: StopReason?? = nil,
+        title: String?? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> Session {
+        return Session(
+            calendarEventID: calendarEventID ?? self.calendarEventID,
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            endedAt: endedAt ?? self.endedAt,
+            id: id ?? self.id,
+            moduleID: moduleID ?? self.moduleID,
+            number: number ?? self.number,
+            plannedEndsAt: plannedEndsAt ?? self.plannedEndsAt,
+            plannedStartsAt: plannedStartsAt ?? self.plannedStartsAt,
+            processing: processing ?? self.processing,
+            reviewState: reviewState ?? self.reviewState,
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            startedAt: startedAt ?? self.startedAt,
+            startedFrom: startedFrom ?? self.startedFrom,
+            state: state ?? self.state,
+            stopReason: stopReason ?? self.stopReason,
+            title: title ?? self.title,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Zustandsautomat F-SES-01, Übergänge in docs/VERTRAEGE.md
+enum SessionState: String, Codable {
+    case beendet = "beendet"
+    case bereit = "bereit"
+    case geplant = "geplant"
+    case laeuft = "laeuft"
+    case pausiert = "pausiert"
+    case verarbeitet = "verarbeitet"
+    case verpasst = "verpasst"
+}
+
+enum StopReason: String, Codable {
+    case absturzWiederhergestellt = "absturz_wiederhergestellt"
+    case kalenderende = "kalenderende"
+    case manuell = "manuell"
+    case maximaldauer = "maximaldauer"
+    case stille = "stille"
+}
+
+/// POST /sessions: spontane Session ohne Termin (F-SES-04). Ergebnis im Zustand bereit,
+/// danach /start.
+// MARK: - SessionCreate
+struct SessionCreate: Codable {
+    let id: String?
+    let moduleID: String
+    let slideDeckID: String?
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case moduleID = "module_id"
+        case slideDeckID = "slide_deck_id"
+        case title = "title"
+    }
+}
+
+// MARK: SessionCreate convenience initializers and mutators
+
+extension SessionCreate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionCreate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String?? = nil,
+        moduleID: String? = nil,
+        slideDeckID: String?? = nil,
+        title: String?? = nil
+    ) -> SessionCreate {
+        return SessionCreate(
+            id: id ?? self.id,
+            moduleID: moduleID ?? self.moduleID,
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SessionList
+struct SessionList: Codable {
+    let items: [Session]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+    }
+}
+
+// MARK: SessionList convenience initializers and mutators
+
+extension SessionList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [Session]? = nil,
+        nextCursor: String?? = nil
+    ) -> SessionList {
+        return SessionList(
+            items: items ?? self.items,
+            nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SessionPauseOp
+struct SessionPauseOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: SessionRefData
+    let kind: SessionPauseOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: SessionPauseOp convenience initializers and mutators
+
+extension SessionPauseOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionPauseOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: SessionRefData? = nil,
+        kind: SessionPauseOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> SessionPauseOp {
+        return SessionPauseOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// session.pause / session.resume
+// MARK: - SessionRefData
+struct SessionRefData: Codable {
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: SessionRefData convenience initializers and mutators
+
+extension SessionRefData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionRefData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        sessionID: String? = nil
+    ) -> SessionRefData {
+        return SessionRefData(
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SessionPauseOpKind: String, Codable {
+    case sessionPause = "session.pause"
+}
+
+// MARK: - SessionResumeOp
+struct SessionResumeOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: SessionRefData
+    let kind: SessionResumeOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: SessionResumeOp convenience initializers and mutators
+
+extension SessionResumeOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionResumeOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: SessionRefData? = nil,
+        kind: SessionResumeOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> SessionResumeOp {
+        return SessionResumeOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SessionResumeOpKind: String, Codable {
+    case sessionResume = "session.resume"
+}
+
+/// GET /sessions/{id}/snapshot: Live-Stand für Dashboard und iPad (ohne gelöschte Objekte,
+/// nach t_ms sortiert)
+// MARK: - SessionSnapshot
+struct SessionSnapshot: Codable {
+    let markers: [Marker]
+    let photos: [Photo]
+    let recordings: [Recording]
+    let session: Session
+    let slideEvents: [SlideEvent]
+    /// seq des Stroms session:<id>, zu der dieser Stand gehört. Danach per Sync ab stream_seq + 1
+    let streamSeq: Int
+
+    enum CodingKeys: String, CodingKey {
+        case markers = "markers"
+        case photos = "photos"
+        case recordings = "recordings"
+        case session = "session"
+        case slideEvents = "slide_events"
+        case streamSeq = "stream_seq"
+    }
+}
+
+// MARK: SessionSnapshot convenience initializers and mutators
+
+extension SessionSnapshot {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionSnapshot.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        markers: [Marker]? = nil,
+        photos: [Photo]? = nil,
+        recordings: [Recording]? = nil,
+        session: Session? = nil,
+        slideEvents: [SlideEvent]? = nil,
+        streamSeq: Int? = nil
+    ) -> SessionSnapshot {
+        return SessionSnapshot(
+            markers: markers ?? self.markers,
+            photos: photos ?? self.photos,
+            recordings: recordings ?? self.recordings,
+            session: session ?? self.session,
+            slideEvents: slideEvents ?? self.slideEvents,
+            streamSeq: streamSeq ?? self.streamSeq
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SlideEvent
+struct SlideEvent: Codable {
+    let createdAt: Date
+    let deletedAt: Date?
+    let device: ClientDevice
+    let id: String
+    let sessionID: String
+    let slideID: String?
+    let slideIndex: Int
+    let source: SlideEventSource
+    let tMS: Int
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case device = "device"
+        case id = "id"
+        case sessionID = "session_id"
+        case slideID = "slide_id"
+        case slideIndex = "slide_index"
+        case source = "source"
+        case tMS = "t_ms"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: SlideEvent convenience initializers and mutators
+
+extension SlideEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SlideEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        device: ClientDevice? = nil,
+        id: String? = nil,
+        sessionID: String? = nil,
+        slideID: String?? = nil,
+        slideIndex: Int? = nil,
+        source: SlideEventSource? = nil,
+        tMS: Int? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> SlideEvent {
+        return SlideEvent(
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            device: device ?? self.device,
+            id: id ?? self.id,
+            sessionID: sessionID ?? self.sessionID,
+            slideID: slideID ?? self.slideID,
+            slideIndex: slideIndex ?? self.slideIndex,
+            source: source ?? self.source,
+            tMS: tMS ?? self.tMS,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SlideEventSource: String, Codable {
+    case korrektur = "korrektur"
+    case manuellIpad = "manuell_ipad"
+    case manuellMAC = "manuell_mac"
+}
+
+/// Unbekannte session_id: der Core legt die Session an (Start offline auf dem iPad, F-SES-02
+/// Schritt 3)
+// MARK: - SessionStartData
+struct SessionStartData: Codable {
+    let calendarEventID: String?
+    let moduleID: String
+    let sessionID: String
+    let slideDeckID: String?
+    let startedAt: Int
+    let startedFrom: ClientDevice
+
+    enum CodingKeys: String, CodingKey {
+        case calendarEventID = "calendar_event_id"
+        case moduleID = "module_id"
+        case sessionID = "session_id"
+        case slideDeckID = "slide_deck_id"
+        case startedAt = "started_at"
+        case startedFrom = "started_from"
+    }
+}
+
+// MARK: SessionStartData convenience initializers and mutators
+
+extension SessionStartData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionStartData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        calendarEventID: String?? = nil,
+        moduleID: String? = nil,
+        sessionID: String? = nil,
+        slideDeckID: String?? = nil,
+        startedAt: Int? = nil,
+        startedFrom: ClientDevice? = nil
+    ) -> SessionStartData {
+        return SessionStartData(
+            calendarEventID: calendarEventID ?? self.calendarEventID,
+            moduleID: moduleID ?? self.moduleID,
+            sessionID: sessionID ?? self.sessionID,
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            startedAt: startedAt ?? self.startedAt,
+            startedFrom: startedFrom ?? self.startedFrom
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SessionStartOp
+struct SessionStartOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: SessionStartData
+    let kind: SessionStartOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: SessionStartOp convenience initializers and mutators
+
+extension SessionStartOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionStartOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: SessionStartData? = nil,
+        kind: SessionStartOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> SessionStartOp {
+        return SessionStartOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SessionStartOpKind: String, Codable {
+    case sessionStart = "session.start"
+}
+
+/// POST /sessions/{id}/start. started_at setzt der Core (Serverzeit).
+// MARK: - SessionStartRequest
+struct SessionStartRequest: Codable {
+    let slideDeckID: String?
+    let startedFrom: ClientDevice
+
+    enum CodingKeys: String, CodingKey {
+        case slideDeckID = "slide_deck_id"
+        case startedFrom = "started_from"
+    }
+}
+
+// MARK: SessionStartRequest convenience initializers and mutators
+
+extension SessionStartRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionStartRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        slideDeckID: String?? = nil,
+        startedFrom: ClientDevice? = nil
+    ) -> SessionStartRequest {
+        return SessionStartRequest(
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            startedFrom: startedFrom ?? self.startedFrom
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// ended_session: eine andere Session, die wegen des Starts automatisch beendet wurde
+/// (F-SES-02)
+// MARK: - SessionStartResult
+struct SessionStartResult: Codable {
+    let endedSession: Session?
+    let session: Session
+
+    enum CodingKeys: String, CodingKey {
+        case endedSession = "ended_session"
+        case session = "session"
+    }
+}
+
+// MARK: SessionStartResult convenience initializers and mutators
+
+extension SessionStartResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionStartResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        endedSession: Session?? = nil,
+        session: Session? = nil
+    ) -> SessionStartResult {
+        return SessionStartResult(
+            endedSession: endedSession ?? self.endedSession,
+            session: session ?? self.session
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SessionStopData
+struct SessionStopData: Codable {
+    let reason: StopReason?
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case reason = "reason"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: SessionStopData convenience initializers and mutators
+
+extension SessionStopData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionStopData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        reason: StopReason?? = nil,
+        sessionID: String? = nil
+    ) -> SessionStopData {
+        return SessionStopData(
+            reason: reason ?? self.reason,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SessionStopOp
+struct SessionStopOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: SessionStopData
+    let kind: SessionStopOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: SessionStopOp convenience initializers and mutators
+
+extension SessionStopOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionStopOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: SessionStopData? = nil,
+        kind: SessionStopOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> SessionStopOp {
+        return SessionStopOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SessionStopOpKind: String, Codable {
+    case sessionStop = "session.stop"
+}
+
+/// POST /sessions/{id}/stop. reason fehlt = manuell. absturz_wiederhergestellt setzt nur der
+/// Core.
+// MARK: - SessionStopRequest
+struct SessionStopRequest: Codable {
+    let reason: StopReason?
+
+    enum CodingKeys: String, CodingKey {
+        case reason = "reason"
+    }
+}
+
+// MARK: SessionStopRequest convenience initializers and mutators
+
+extension SessionStopRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionStopRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        reason: StopReason?? = nil
+    ) -> SessionStopRequest {
+        return SessionStopRequest(
+            reason: reason ?? self.reason
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// PATCH /sessions/{id}
+// MARK: - SessionUpdate
+struct SessionUpdate: Codable {
+    let slideDeckID: String?
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case slideDeckID = "slide_deck_id"
+        case title = "title"
+    }
+}
+
+// MARK: SessionUpdate convenience initializers and mutators
+
+extension SessionUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        slideDeckID: String?? = nil,
+        title: String?? = nil
+    ) -> SessionUpdate {
+        return SessionUpdate(
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /settings: alle Phase-1-Bereiche, fehlende Werte mit Standard aufgefüllt. Geräte
+/// stehen unter /devices.
+// MARK: - Settings
+struct Settings: Codable {
+    let data: DataSettings
+    let general: GeneralSettings
+    let lecture: LectureSettings
+    let pen: PenSettings
+
+    enum CodingKeys: String, CodingKey {
+        case data = "data"
+        case general = "general"
+        case lecture = "lecture"
+        case pen = "pen"
+    }
+}
+
+// MARK: Settings convenience initializers and mutators
+
+extension Settings {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Settings.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: DataSettings? = nil,
+        general: GeneralSettings? = nil,
+        lecture: LectureSettings? = nil,
+        pen: PenSettings? = nil
+    ) -> Settings {
+        return Settings(
+            data: data ?? self.data,
+            general: general ?? self.general,
+            lecture: lecture ?? self.lecture,
+            pen: pen ?? self.pen
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// PATCH /settings: nur die angegebenen Felder ändern sich. Antwort: Settings
+// MARK: - SettingsUpdate
+struct SettingsUpdate: Codable {
+    let data: DataSettingsUpdate?
+    let general: GeneralSettingsUpdate?
+    let lecture: LectureSettingsUpdate?
+    let pen: PenSettingsUpdate?
+
+    enum CodingKeys: String, CodingKey {
+        case data = "data"
+        case general = "general"
+        case lecture = "lecture"
+        case pen = "pen"
+    }
+}
+
+// MARK: SettingsUpdate convenience initializers and mutators
+
+extension SettingsUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SettingsUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: DataSettingsUpdate?? = nil,
+        general: GeneralSettingsUpdate?? = nil,
+        lecture: LectureSettingsUpdate?? = nil,
+        pen: PenSettingsUpdate?? = nil
+    ) -> SettingsUpdate {
+        return SettingsUpdate(
+            data: data ?? self.data,
+            general: general ?? self.general,
+            lecture: lecture ?? self.lecture,
+            pen: pen ?? self.pen
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - ShapeElement
+struct ShapeElement: Codable {
+    let elementID: String
+    let frame: [Double]
+    let kind: ShapeElementKind
+    let payload: ShapeElementPayload
+    let tMS: Int?
+    let z: Int
+
+    enum CodingKeys: String, CodingKey {
+        case elementID = "element_id"
+        case frame = "frame"
+        case kind = "kind"
+        case payload = "payload"
+        case tMS = "t_ms"
+        case z = "z"
+    }
+}
+
+// MARK: ShapeElement convenience initializers and mutators
+
+extension ShapeElement {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ShapeElement.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        elementID: String? = nil,
+        frame: [Double]? = nil,
+        kind: ShapeElementKind? = nil,
+        payload: ShapeElementPayload? = nil,
+        tMS: Int?? = nil,
+        z: Int? = nil
+    ) -> ShapeElement {
+        return ShapeElement(
+            elementID: elementID ?? self.elementID,
+            frame: frame ?? self.frame,
+            kind: kind ?? self.kind,
+            payload: payload ?? self.payload,
+            tMS: tMS ?? self.tMS,
+            z: z ?? self.z
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum ShapeElementKind: String, Codable {
+    case shape = "shape"
+}
+
+// MARK: - ShapeElementPayload
+struct ShapeElementPayload: Codable {
+    let color: String
+    let points: [[Double]]
+    let shape: ShapeKind
+    let width: Double
+
+    enum CodingKeys: String, CodingKey {
+        case color = "color"
+        case points = "points"
+        case shape = "shape"
+        case width = "width"
+    }
+}
+
+// MARK: ShapeElementPayload convenience initializers and mutators
+
+extension ShapeElementPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ShapeElementPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        color: String? = nil,
+        points: [[Double]]? = nil,
+        shape: ShapeKind? = nil,
+        width: Double? = nil
+    ) -> ShapeElementPayload {
+        return ShapeElementPayload(
+            color: color ?? self.color,
+            points: points ?? self.points,
+            shape: shape ?? self.shape,
+            width: width ?? self.width
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// Eine Seite eines Foliensatzes. Bilder über GET /slides/{id}/image bzw. /thumb.
 // MARK: - Slide
 struct Slide: Codable {
@@ -1673,6 +8914,151 @@ extension TextBlock {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+// MARK: - SlideChangeData
+struct SlideChangeData: Codable {
+    let device: ClientDevice
+    let eventID: String
+    let sessionID: String
+    let slideID: String?
+    let slideIndex: Int
+    let tMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case device = "device"
+        case eventID = "event_id"
+        case sessionID = "session_id"
+        case slideID = "slide_id"
+        case slideIndex = "slide_index"
+        case tMS = "t_ms"
+    }
+}
+
+// MARK: SlideChangeData convenience initializers and mutators
+
+extension SlideChangeData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SlideChangeData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        device: ClientDevice? = nil,
+        eventID: String? = nil,
+        sessionID: String? = nil,
+        slideID: String?? = nil,
+        slideIndex: Int? = nil,
+        tMS: Int? = nil
+    ) -> SlideChangeData {
+        return SlideChangeData(
+            device: device ?? self.device,
+            eventID: eventID ?? self.eventID,
+            sessionID: sessionID ?? self.sessionID,
+            slideID: slideID ?? self.slideID,
+            slideIndex: slideIndex ?? self.slideIndex,
+            tMS: tMS ?? self.tMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SlideChangeOp
+struct SlideChangeOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: SlideChangeData
+    let kind: SlideChangeOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: SlideChangeOp convenience initializers and mutators
+
+extension SlideChangeOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SlideChangeOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: SlideChangeData? = nil,
+        kind: SlideChangeOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> SlideChangeOp {
+        return SlideChangeOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SlideChangeOpKind: String, Codable {
+    case slideChange = "slide.change"
 }
 
 // MARK: - SlideDeck
@@ -1905,6 +9291,2924 @@ extension SlideDeckUpdate {
     }
 }
 
+// MARK: - StampElement
+struct StampElement: Codable {
+    let elementID: String
+    let frame: [Double]
+    let kind: StampElementKind
+    let payload: StampElementPayload
+    let tMS: Int?
+    let z: Int
+
+    enum CodingKeys: String, CodingKey {
+        case elementID = "element_id"
+        case frame = "frame"
+        case kind = "kind"
+        case payload = "payload"
+        case tMS = "t_ms"
+        case z = "z"
+    }
+}
+
+// MARK: StampElement convenience initializers and mutators
+
+extension StampElement {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(StampElement.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        elementID: String? = nil,
+        frame: [Double]? = nil,
+        kind: StampElementKind? = nil,
+        payload: StampElementPayload? = nil,
+        tMS: Int?? = nil,
+        z: Int? = nil
+    ) -> StampElement {
+        return StampElement(
+            elementID: elementID ?? self.elementID,
+            frame: frame ?? self.frame,
+            kind: kind ?? self.kind,
+            payload: payload ?? self.payload,
+            tMS: tMS ?? self.tMS,
+            z: z ?? self.z
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum StampElementKind: String, Codable {
+    case stamp = "stamp"
+}
+
+// MARK: - StampElementPayload
+struct StampElementPayload: Codable {
+    let markerID: String
+    let markerKind: MarkerKind
+
+    enum CodingKeys: String, CodingKey {
+        case markerID = "marker_id"
+        case markerKind = "marker_kind"
+    }
+}
+
+// MARK: StampElementPayload convenience initializers and mutators
+
+extension StampElementPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(StampElementPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        markerID: String? = nil,
+        markerKind: MarkerKind? = nil
+    ) -> StampElementPayload {
+        return StampElementPayload(
+            markerID: markerID ?? self.markerID,
+            markerKind: markerKind ?? self.markerKind
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - StrokeAddData
+struct StrokeAddData: Codable {
+    let pageID: String
+    let stroke: Stroke
+
+    enum CodingKeys: String, CodingKey {
+        case pageID = "page_id"
+        case stroke = "stroke"
+    }
+}
+
+// MARK: StrokeAddData convenience initializers and mutators
+
+extension StrokeAddData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(StrokeAddData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        pageID: String? = nil,
+        stroke: Stroke? = nil
+    ) -> StrokeAddData {
+        return StrokeAddData(
+            pageID: pageID ?? self.pageID,
+            stroke: stroke ?? self.stroke
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - StrokeAddOp
+struct StrokeAddOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: StrokeAddData
+    let kind: StrokeAddOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: StrokeAddOp convenience initializers and mutators
+
+extension StrokeAddOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(StrokeAddOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: StrokeAddData? = nil,
+        kind: StrokeAddOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> StrokeAddOp {
+        return StrokeAddOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum StrokeAddOpKind: String, Codable {
+    case strokeAdd = "stroke.add"
+}
+
+// MARK: - StrokeRemoveData
+struct StrokeRemoveData: Codable {
+    let clientIDS: [String]
+    let pageID: String
+
+    enum CodingKeys: String, CodingKey {
+        case clientIDS = "client_ids"
+        case pageID = "page_id"
+    }
+}
+
+// MARK: StrokeRemoveData convenience initializers and mutators
+
+extension StrokeRemoveData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(StrokeRemoveData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        clientIDS: [String]? = nil,
+        pageID: String? = nil
+    ) -> StrokeRemoveData {
+        return StrokeRemoveData(
+            clientIDS: clientIDS ?? self.clientIDS,
+            pageID: pageID ?? self.pageID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - StrokeRemoveOp
+struct StrokeRemoveOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: StrokeRemoveData
+    let kind: StrokeRemoveOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: StrokeRemoveOp convenience initializers and mutators
+
+extension StrokeRemoveOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(StrokeRemoveOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: StrokeRemoveData? = nil,
+        kind: StrokeRemoveOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> StrokeRemoveOp {
+        return StrokeRemoveOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum StrokeRemoveOpKind: String, Codable {
+    case strokeRemove = "stroke.remove"
+}
+
+// MARK: - SyncACK
+struct SyncACK: Codable {
+    let opID: String
+    let seq: Int
+    let stream: String
+    let type: SyncACKType
+
+    enum CodingKeys: String, CodingKey {
+        case opID = "op_id"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: SyncACK convenience initializers and mutators
+
+extension SyncACK {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncACK.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        opID: String? = nil,
+        seq: Int? = nil,
+        stream: String? = nil,
+        type: SyncACKType? = nil
+    ) -> SyncACK {
+        return SyncACK(
+            opID: opID ?? self.opID,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncACKType: String, Codable {
+    case ack = "ack"
+}
+
+enum SyncClientKind: String, Codable {
+    case ipad = "ipad"
+    case web = "web"
+}
+
+/// Alle Nachrichten Client → Server
+///
+/// Erste Nachricht des Clients (08 §2.1). token (Gerätetoken) Pflicht für Verbindungen aus
+/// dem Netz, lokal (Web-App) ohne.
+///
+/// Weitere Ströme abonnieren, ohne neu zu verbinden. Antwort: subscribed. Ergänzung zu 08
+/// §2
+///
+/// t0 = lokale Uhr des Clients beim Senden (F-SYN-02)
+///
+/// Ergebnis des Uhrabgleichs an den Server (device.clock_offset_ms). Ergänzung zu 08 §2.1
+///
+/// Keepalive des Clients alle 15 s
+///
+/// Was der Client gerade zeigt (ersetzt den vorigen Stand). Das iPad sendet sie bei jedem
+/// Seitenwechsel, die Notizen-Spalte folgt ihr (F-DSH-04). Ergänzung zu 08 §2
+// MARK: - SyncClientMessage
+struct SyncClientMessage: Codable {
+    let appVersion: String?
+    let client: SyncClientKind?
+    let deviceID: String?
+    let syncClientMessageProtocol: Double?
+    let streams: [Stream]?
+    let token: String?
+    let type: SyncClientMessageType
+    let t0: Int?
+    /// Gemessener Versatz Server − Client
+    let offsetMS: Int?
+    /// Median der Umlaufzeit
+    let rttMS: Int?
+    let notebookID: String?
+    let pageID: String?
+    let sessionID: String?
+    let at: Int?
+    let clockUncertain: Bool?
+    let data: DataClass?
+    let kind: SyncClientMessageKind?
+    let opID: String?
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String?
+
+    enum CodingKeys: String, CodingKey {
+        case appVersion = "app_version"
+        case client = "client"
+        case deviceID = "device_id"
+        case syncClientMessageProtocol = "protocol"
+        case streams = "streams"
+        case token = "token"
+        case type = "type"
+        case t0 = "t0"
+        case offsetMS = "offset_ms"
+        case rttMS = "rtt_ms"
+        case notebookID = "notebook_id"
+        case pageID = "page_id"
+        case sessionID = "session_id"
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+    }
+}
+
+// MARK: SyncClientMessage convenience initializers and mutators
+
+extension SyncClientMessage {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncClientMessage.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        appVersion: String?? = nil,
+        client: SyncClientKind?? = nil,
+        deviceID: String?? = nil,
+        syncClientMessageProtocol: Double?? = nil,
+        streams: [Stream]?? = nil,
+        token: String?? = nil,
+        type: SyncClientMessageType? = nil,
+        t0: Int?? = nil,
+        offsetMS: Int?? = nil,
+        rttMS: Int?? = nil,
+        notebookID: String?? = nil,
+        pageID: String?? = nil,
+        sessionID: String?? = nil,
+        at: Int?? = nil,
+        clockUncertain: Bool?? = nil,
+        data: DataClass?? = nil,
+        kind: SyncClientMessageKind?? = nil,
+        opID: String?? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String?? = nil
+    ) -> SyncClientMessage {
+        return SyncClientMessage(
+            appVersion: appVersion ?? self.appVersion,
+            client: client ?? self.client,
+            deviceID: deviceID ?? self.deviceID,
+            syncClientMessageProtocol: syncClientMessageProtocol ?? self.syncClientMessageProtocol,
+            streams: streams ?? self.streams,
+            token: token ?? self.token,
+            type: type ?? self.type,
+            t0: t0 ?? self.t0,
+            offsetMS: offsetMS ?? self.offsetMS,
+            rttMS: rttMS ?? self.rttMS,
+            notebookID: notebookID ?? self.notebookID,
+            pageID: pageID ?? self.pageID,
+            sessionID: sessionID ?? self.sessionID,
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad
+///
+/// Unbekannte session_id: der Core legt die Session an (Start offline auf dem iPad, F-SES-02
+/// Schritt 3)
+///
+/// session.pause / session.resume
+///
+/// Marker vom iPad (F-INK-05) und vom Mac (F-DSH-05, source=mac)
+///
+/// Rückgängig (⌘Z, F-DSH-05) bzw. Löschen
+///
+/// Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
+// MARK: - DataClass
+struct DataClass: Codable {
+    let attachedSlideID: String?
+    let backgroundSlideID: String?
+    let heightPt: Double?
+    let index: Int?
+    let notebookID: String?
+    let pageID: String?
+    let sessionID: String?
+    let template: PageTemplate?
+    let widthPt: Double?
+    let fields: PageUpdateFields?
+    /// Version, auf der die Änderung beruht. Der Core setzt danach version + 1
+    let version: Int?
+    let stroke: Stroke?
+    let clientIDS: [String]?
+    let element: PageElement?
+    let elementID: String?
+    let pkdrawingRef: FileRef?
+    let calendarEventID: String?
+    let moduleID: String?
+    let slideDeckID: String?
+    let startedAt: Int?
+    let startedFrom: ClientDevice?
+    let reason: StopReason?
+    let device: ClientDevice?
+    let eventID: String?
+    let slideID: String?
+    let slideIndex: Int?
+    let tMS: Int?
+    let kind: MarkerKind?
+    let markerID: String?
+    let note: String?
+    let position: MarkerPosition?
+    let source: ClientDevice?
+    let fileRef: FileRef?
+    let photoID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case attachedSlideID = "attached_slide_id"
+        case backgroundSlideID = "background_slide_id"
+        case heightPt = "height_pt"
+        case index = "index"
+        case notebookID = "notebook_id"
+        case pageID = "page_id"
+        case sessionID = "session_id"
+        case template = "template"
+        case widthPt = "width_pt"
+        case fields = "fields"
+        case version = "version"
+        case stroke = "stroke"
+        case clientIDS = "client_ids"
+        case element = "element"
+        case elementID = "element_id"
+        case pkdrawingRef = "pkdrawing_ref"
+        case calendarEventID = "calendar_event_id"
+        case moduleID = "module_id"
+        case slideDeckID = "slide_deck_id"
+        case startedAt = "started_at"
+        case startedFrom = "started_from"
+        case reason = "reason"
+        case device = "device"
+        case eventID = "event_id"
+        case slideID = "slide_id"
+        case slideIndex = "slide_index"
+        case tMS = "t_ms"
+        case kind = "kind"
+        case markerID = "marker_id"
+        case note = "note"
+        case position = "position"
+        case source = "source"
+        case fileRef = "file_ref"
+        case photoID = "photo_id"
+    }
+}
+
+// MARK: DataClass convenience initializers and mutators
+
+extension DataClass {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(DataClass.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        attachedSlideID: String?? = nil,
+        backgroundSlideID: String?? = nil,
+        heightPt: Double?? = nil,
+        index: Int?? = nil,
+        notebookID: String?? = nil,
+        pageID: String?? = nil,
+        sessionID: String?? = nil,
+        template: PageTemplate?? = nil,
+        widthPt: Double?? = nil,
+        fields: PageUpdateFields?? = nil,
+        version: Int?? = nil,
+        stroke: Stroke?? = nil,
+        clientIDS: [String]?? = nil,
+        element: PageElement?? = nil,
+        elementID: String?? = nil,
+        pkdrawingRef: FileRef?? = nil,
+        calendarEventID: String?? = nil,
+        moduleID: String?? = nil,
+        slideDeckID: String?? = nil,
+        startedAt: Int?? = nil,
+        startedFrom: ClientDevice?? = nil,
+        reason: StopReason?? = nil,
+        device: ClientDevice?? = nil,
+        eventID: String?? = nil,
+        slideID: String?? = nil,
+        slideIndex: Int?? = nil,
+        tMS: Int?? = nil,
+        kind: MarkerKind?? = nil,
+        markerID: String?? = nil,
+        note: String?? = nil,
+        position: MarkerPosition?? = nil,
+        source: ClientDevice?? = nil,
+        fileRef: FileRef?? = nil,
+        photoID: String?? = nil
+    ) -> DataClass {
+        return DataClass(
+            attachedSlideID: attachedSlideID ?? self.attachedSlideID,
+            backgroundSlideID: backgroundSlideID ?? self.backgroundSlideID,
+            heightPt: heightPt ?? self.heightPt,
+            index: index ?? self.index,
+            notebookID: notebookID ?? self.notebookID,
+            pageID: pageID ?? self.pageID,
+            sessionID: sessionID ?? self.sessionID,
+            template: template ?? self.template,
+            widthPt: widthPt ?? self.widthPt,
+            fields: fields ?? self.fields,
+            version: version ?? self.version,
+            stroke: stroke ?? self.stroke,
+            clientIDS: clientIDS ?? self.clientIDS,
+            element: element ?? self.element,
+            elementID: elementID ?? self.elementID,
+            pkdrawingRef: pkdrawingRef ?? self.pkdrawingRef,
+            calendarEventID: calendarEventID ?? self.calendarEventID,
+            moduleID: moduleID ?? self.moduleID,
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            startedAt: startedAt ?? self.startedAt,
+            startedFrom: startedFrom ?? self.startedFrom,
+            reason: reason ?? self.reason,
+            device: device ?? self.device,
+            eventID: eventID ?? self.eventID,
+            slideID: slideID ?? self.slideID,
+            slideIndex: slideIndex ?? self.slideIndex,
+            tMS: tMS ?? self.tMS,
+            kind: kind ?? self.kind,
+            markerID: markerID ?? self.markerID,
+            note: note ?? self.note,
+            position: position ?? self.position,
+            source: source ?? self.source,
+            fileRef: fileRef ?? self.fileRef,
+            photoID: photoID ?? self.photoID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncClientMessageKind: String, Codable {
+    case drawingSnapshot = "drawing.snapshot"
+    case elementRemove = "element.remove"
+    case elementUpsert = "element.upsert"
+    case markerAdd = "marker.add"
+    case markerRemove = "marker.remove"
+    case pageCreate = "page.create"
+    case pageDelete = "page.delete"
+    case pageUpdate = "page.update"
+    case photoAdd = "photo.add"
+    case sessionPause = "session.pause"
+    case sessionResume = "session.resume"
+    case sessionStart = "session.start"
+    case sessionStop = "session.stop"
+    case slideChange = "slide.change"
+    case strokeAdd = "stroke.add"
+    case strokeRemove = "stroke.remove"
+}
+
+enum Stream: Codable {
+    case string(String)
+    case syncStreamPosition(SyncStreamPosition)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let x = try? container.decode(String.self) {
+            self = .string(x)
+            return
+        }
+        if let x = try? container.decode(SyncStreamPosition.self) {
+            self = .syncStreamPosition(x)
+            return
+        }
+        throw DecodingError.typeMismatch(Stream.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for Stream"))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let x):
+            try container.encode(x)
+        case .syncStreamPosition(let x):
+            try container.encode(x)
+        }
+    }
+}
+
+// MARK: - SyncStreamPosition
+struct SyncStreamPosition: Codable {
+    /// Letzte beim Client angewandte seq, 0 = nichts
+    let lastSeq: Int
+    let stream: String
+
+    enum CodingKeys: String, CodingKey {
+        case lastSeq = "last_seq"
+        case stream = "stream"
+    }
+}
+
+// MARK: SyncStreamPosition convenience initializers and mutators
+
+extension SyncStreamPosition {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncStreamPosition.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        lastSeq: Int? = nil,
+        stream: String? = nil
+    ) -> SyncStreamPosition {
+        return SyncStreamPosition(
+            lastSeq: lastSeq ?? self.lastSeq,
+            stream: stream ?? self.stream
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncClientMessageType: String, Codable {
+    case hello = "hello"
+    case op = "op"
+    case ping = "ping"
+    case presence = "presence"
+    case subscribe = "subscribe"
+    case timeOffset = "time.offset"
+    case timePing = "time.ping"
+    case unsubscribe = "unsubscribe"
+}
+
+/// Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
+// MARK: - SyncConnectionEvent
+struct SyncConnectionEvent: Codable {
+    let data: SyncConnectionInfo
+    let name: SyncConnectionEventName
+    let type: SyncConnectionEventType
+
+    enum CodingKeys: String, CodingKey {
+        case data = "data"
+        case name = "name"
+        case type = "type"
+    }
+}
+
+// MARK: SyncConnectionEvent convenience initializers and mutators
+
+extension SyncConnectionEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncConnectionEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: SyncConnectionInfo? = nil,
+        name: SyncConnectionEventName? = nil,
+        type: SyncConnectionEventType? = nil
+    ) -> SyncConnectionEvent {
+        return SyncConnectionEvent(
+            data: data ?? self.data,
+            name: name ?? self.name,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SyncConnectionInfo
+struct SyncConnectionInfo: Codable {
+    let client: SyncClientKind
+    let connected: Bool
+    let deviceID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case client = "client"
+        case connected = "connected"
+        case deviceID = "device_id"
+    }
+}
+
+// MARK: SyncConnectionInfo convenience initializers and mutators
+
+extension SyncConnectionInfo {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncConnectionInfo.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        client: SyncClientKind? = nil,
+        connected: Bool? = nil,
+        deviceID: String?? = nil
+    ) -> SyncConnectionInfo {
+        return SyncConnectionInfo(
+            client: client ?? self.client,
+            connected: connected ?? self.connected,
+            deviceID: deviceID ?? self.deviceID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncConnectionEventName: String, Codable {
+    case deviceConnection = "device.connection"
+}
+
+enum SyncConnectionEventType: String, Codable {
+    case event = "event"
+}
+
+// MARK: - SyncError
+struct SyncError: Codable {
+    let code: SyncErrorCode
+    let details: [String: JSONAny]?
+    /// true: der Server schließt die Verbindung direkt danach
+    let fatal: Bool
+    let message: String
+    let opID: String?
+    /// Nur mit op_id: true = Operation in der Warteschlange lassen und später erneut senden,
+    /// false = endgültig abgelehnt, aus der Warteschlange entfernen
+    let retryable: Bool
+    let stream: String?
+    let type: SyncErrorType
+
+    enum CodingKeys: String, CodingKey {
+        case code = "code"
+        case details = "details"
+        case fatal = "fatal"
+        case message = "message"
+        case opID = "op_id"
+        case retryable = "retryable"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: SyncError convenience initializers and mutators
+
+extension SyncError {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncError.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        code: SyncErrorCode? = nil,
+        details: [String: JSONAny]?? = nil,
+        fatal: Bool? = nil,
+        message: String? = nil,
+        opID: String?? = nil,
+        retryable: Bool? = nil,
+        stream: String?? = nil,
+        type: SyncErrorType? = nil
+    ) -> SyncError {
+        return SyncError(
+            code: code ?? self.code,
+            details: details ?? self.details,
+            fatal: fatal ?? self.fatal,
+            message: message ?? self.message,
+            opID: opID ?? self.opID,
+            retryable: retryable ?? self.retryable,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncErrorCode: String, Codable {
+    case deviceTokenInvalid = "device_token_invalid"
+    case helloInvalid = "hello_invalid"
+    case helloRequired = "hello_required"
+    case internalError = "internal_error"
+    case messageInvalid = "message_invalid"
+    case moduleNotFound = "module_not_found"
+    case notebookNotFound = "notebook_not_found"
+    case opIDReused = "op_id_reused"
+    case pageNotFound = "page_not_found"
+    case pageVersionConflict = "page_version_conflict"
+    case protocolUnsupported = "protocol_unsupported"
+    case sessionNotFound = "session_not_found"
+    case sessionTransitionInvalid = "session_transition_invalid"
+    case streamMismatch = "stream_mismatch"
+    case tooManyPending = "too_many_pending"
+}
+
+enum SyncErrorType: String, Codable {
+    case error = "error"
+}
+
+/// Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert
+///
+/// Zustand oder Felder einer Session haben sich geändert (auch zeitgesteuert: bereit,
+/// verpasst, verarbeitet)
+///
+/// Weitergabe von presence eines anderen Clients
+///
+/// Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
+///
+/// Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)
+// MARK: - SyncEvent
+struct SyncEvent: Codable {
+    let data: SyncEventData
+    let name: SyncEventName
+    let type: SyncConnectionEventType
+
+    enum CodingKeys: String, CodingKey {
+        case data = "data"
+        case name = "name"
+        case type = "type"
+    }
+}
+
+// MARK: SyncEvent convenience initializers and mutators
+
+extension SyncEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: SyncEventData? = nil,
+        name: SyncEventName? = nil,
+        type: SyncConnectionEventType? = nil
+    ) -> SyncEvent {
+        return SyncEvent(
+            data: data ?? self.data,
+            name: name ?? self.name,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem
+/// Kalendertermin (null bei spontanen Sessions).
+///
+/// Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis
+/// pairing.requested)
+// MARK: - SyncEventData
+struct SyncEventData: Codable {
+    let calendarEventID: String?
+    let createdAt: Date?
+    let deletedAt: Date?
+    let endedAt: Date?
+    let id: String?
+    let moduleID: String?
+    /// VL-Nummer im Modul (VL 7), Regeln in docs/VERTRAEGE.md
+    let number: Int?
+    let plannedEndsAt: Date?
+    let plannedStartsAt: Date?
+    let processing: [String: JobState]?
+    let reviewState: ReviewState?
+    let slideDeckID: String?
+    let startedAt: Date?
+    let startedFrom: ClientDevice?
+    let state: SessionState?
+    let stopReason: StopReason?
+    let title: String?
+    let updatedAt: Date?
+    let userID: String?
+    let client: SyncClientKind?
+    let deviceID: String?
+    /// Name aus pair/start, null bei einem Code für den QR-Weg
+    let deviceName: String?
+    let notebookID: String?
+    let pageID: String?
+    let sessionID: String?
+    let connected: Bool?
+    let code: String?
+    let expiresAt: Date?
+    let pairingID: String?
+    let qrURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case calendarEventID = "calendar_event_id"
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case endedAt = "ended_at"
+        case id = "id"
+        case moduleID = "module_id"
+        case number = "number"
+        case plannedEndsAt = "planned_ends_at"
+        case plannedStartsAt = "planned_starts_at"
+        case processing = "processing"
+        case reviewState = "review_state"
+        case slideDeckID = "slide_deck_id"
+        case startedAt = "started_at"
+        case startedFrom = "started_from"
+        case state = "state"
+        case stopReason = "stop_reason"
+        case title = "title"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+        case client = "client"
+        case deviceID = "device_id"
+        case deviceName = "device_name"
+        case notebookID = "notebook_id"
+        case pageID = "page_id"
+        case sessionID = "session_id"
+        case connected = "connected"
+        case code = "code"
+        case expiresAt = "expires_at"
+        case pairingID = "pairing_id"
+        case qrURL = "qr_url"
+    }
+}
+
+// MARK: SyncEventData convenience initializers and mutators
+
+extension SyncEventData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncEventData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        calendarEventID: String?? = nil,
+        createdAt: Date?? = nil,
+        deletedAt: Date?? = nil,
+        endedAt: Date?? = nil,
+        id: String?? = nil,
+        moduleID: String?? = nil,
+        number: Int?? = nil,
+        plannedEndsAt: Date?? = nil,
+        plannedStartsAt: Date?? = nil,
+        processing: [String: JobState]?? = nil,
+        reviewState: ReviewState?? = nil,
+        slideDeckID: String?? = nil,
+        startedAt: Date?? = nil,
+        startedFrom: ClientDevice?? = nil,
+        state: SessionState?? = nil,
+        stopReason: StopReason?? = nil,
+        title: String?? = nil,
+        updatedAt: Date?? = nil,
+        userID: String?? = nil,
+        client: SyncClientKind?? = nil,
+        deviceID: String?? = nil,
+        deviceName: String?? = nil,
+        notebookID: String?? = nil,
+        pageID: String?? = nil,
+        sessionID: String?? = nil,
+        connected: Bool?? = nil,
+        code: String?? = nil,
+        expiresAt: Date?? = nil,
+        pairingID: String?? = nil,
+        qrURL: String?? = nil
+    ) -> SyncEventData {
+        return SyncEventData(
+            calendarEventID: calendarEventID ?? self.calendarEventID,
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            endedAt: endedAt ?? self.endedAt,
+            id: id ?? self.id,
+            moduleID: moduleID ?? self.moduleID,
+            number: number ?? self.number,
+            plannedEndsAt: plannedEndsAt ?? self.plannedEndsAt,
+            plannedStartsAt: plannedStartsAt ?? self.plannedStartsAt,
+            processing: processing ?? self.processing,
+            reviewState: reviewState ?? self.reviewState,
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            startedAt: startedAt ?? self.startedAt,
+            startedFrom: startedFrom ?? self.startedFrom,
+            state: state ?? self.state,
+            stopReason: stopReason ?? self.stopReason,
+            title: title ?? self.title,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID,
+            client: client ?? self.client,
+            deviceID: deviceID ?? self.deviceID,
+            deviceName: deviceName ?? self.deviceName,
+            notebookID: notebookID ?? self.notebookID,
+            pageID: pageID ?? self.pageID,
+            sessionID: sessionID ?? self.sessionID,
+            connected: connected ?? self.connected,
+            code: code ?? self.code,
+            expiresAt: expiresAt ?? self.expiresAt,
+            pairingID: pairingID ?? self.pairingID,
+            qrURL: qrURL ?? self.qrURL
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncEventName: String, Codable {
+    case deviceConnection = "device.connection"
+    case pairingRequested = "pairing.requested"
+    case presence = "presence"
+    case sessionUpdated = "session.updated"
+}
+
+/// Erste Nachricht des Clients (08 §2.1). token (Gerätetoken) Pflicht für Verbindungen aus
+/// dem Netz, lokal (Web-App) ohne.
+// MARK: - SyncHello
+struct SyncHello: Codable {
+    let appVersion: String
+    let client: SyncClientKind
+    let deviceID: String?
+    let syncHelloProtocol: Double
+    let streams: [SyncStreamPosition]
+    let token: String?
+    let type: SyncHelloType
+
+    enum CodingKeys: String, CodingKey {
+        case appVersion = "app_version"
+        case client = "client"
+        case deviceID = "device_id"
+        case syncHelloProtocol = "protocol"
+        case streams = "streams"
+        case token = "token"
+        case type = "type"
+    }
+}
+
+// MARK: SyncHello convenience initializers and mutators
+
+extension SyncHello {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncHello.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        appVersion: String? = nil,
+        client: SyncClientKind? = nil,
+        deviceID: String?? = nil,
+        syncHelloProtocol: Double? = nil,
+        streams: [SyncStreamPosition]? = nil,
+        token: String?? = nil,
+        type: SyncHelloType? = nil
+    ) -> SyncHello {
+        return SyncHello(
+            appVersion: appVersion ?? self.appVersion,
+            client: client ?? self.client,
+            deviceID: deviceID ?? self.deviceID,
+            syncHelloProtocol: syncHelloProtocol ?? self.syncHelloProtocol,
+            streams: streams ?? self.streams,
+            token: token ?? self.token,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncHelloType: String, Codable {
+    case hello = "hello"
+}
+
+/// Operation (08 §2.3), unterschieden über kind. Client → Server ohne seq/origin, Server →
+/// Client mit seq und origin.
+// MARK: - SyncOp
+struct SyncOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: DataClass
+    let kind: SyncClientMessageKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: SyncOp convenience initializers and mutators
+
+extension SyncOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: DataClass? = nil,
+        kind: SyncClientMessageKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> SyncOp {
+        return SyncOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)
+// MARK: - SyncPairingEvent
+struct SyncPairingEvent: Codable {
+    let data: PairingCode
+    let name: SyncPairingEventName
+    let type: SyncConnectionEventType
+
+    enum CodingKeys: String, CodingKey {
+        case data = "data"
+        case name = "name"
+        case type = "type"
+    }
+}
+
+// MARK: SyncPairingEvent convenience initializers and mutators
+
+extension SyncPairingEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncPairingEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: PairingCode? = nil,
+        name: SyncPairingEventName? = nil,
+        type: SyncConnectionEventType? = nil
+    ) -> SyncPairingEvent {
+        return SyncPairingEvent(
+            data: data ?? self.data,
+            name: name ?? self.name,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncPairingEventName: String, Codable {
+    case pairingRequested = "pairing.requested"
+}
+
+/// Keepalive des Clients alle 15 s
+// MARK: - SyncPing
+struct SyncPing: Codable {
+    let type: SyncPingType
+
+    enum CodingKeys: String, CodingKey {
+        case type = "type"
+    }
+}
+
+// MARK: SyncPing convenience initializers and mutators
+
+extension SyncPing {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncPing.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        type: SyncPingType? = nil
+    ) -> SyncPing {
+        return SyncPing(
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncPingType: String, Codable {
+    case ping = "ping"
+}
+
+// MARK: - SyncPong
+struct SyncPong: Codable {
+    let type: SyncPongType
+
+    enum CodingKeys: String, CodingKey {
+        case type = "type"
+    }
+}
+
+// MARK: SyncPong convenience initializers and mutators
+
+extension SyncPong {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncPong.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        type: SyncPongType? = nil
+    ) -> SyncPong {
+        return SyncPong(
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncPongType: String, Codable {
+    case pong = "pong"
+}
+
+/// Was der Client gerade zeigt (ersetzt den vorigen Stand). Das iPad sendet sie bei jedem
+/// Seitenwechsel, die Notizen-Spalte folgt ihr (F-DSH-04). Ergänzung zu 08 §2
+// MARK: - SyncPresence
+struct SyncPresence: Codable {
+    let notebookID: String?
+    let pageID: String?
+    let sessionID: String?
+    let type: NameEnum
+
+    enum CodingKeys: String, CodingKey {
+        case notebookID = "notebook_id"
+        case pageID = "page_id"
+        case sessionID = "session_id"
+        case type = "type"
+    }
+}
+
+// MARK: SyncPresence convenience initializers and mutators
+
+extension SyncPresence {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncPresence.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        notebookID: String?? = nil,
+        pageID: String?? = nil,
+        sessionID: String?? = nil,
+        type: NameEnum? = nil
+    ) -> SyncPresence {
+        return SyncPresence(
+            notebookID: notebookID ?? self.notebookID,
+            pageID: pageID ?? self.pageID,
+            sessionID: sessionID ?? self.sessionID,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum NameEnum: String, Codable {
+    case presence = "presence"
+}
+
+/// Weitergabe von presence eines anderen Clients
+// MARK: - SyncPresenceEvent
+struct SyncPresenceEvent: Codable {
+    let data: SyncPresenceInfo
+    let name: NameEnum
+    let type: SyncConnectionEventType
+
+    enum CodingKeys: String, CodingKey {
+        case data = "data"
+        case name = "name"
+        case type = "type"
+    }
+}
+
+// MARK: SyncPresenceEvent convenience initializers and mutators
+
+extension SyncPresenceEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncPresenceEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: SyncPresenceInfo? = nil,
+        name: NameEnum? = nil,
+        type: SyncConnectionEventType? = nil
+    ) -> SyncPresenceEvent {
+        return SyncPresenceEvent(
+            data: data ?? self.data,
+            name: name ?? self.name,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SyncPresenceInfo
+struct SyncPresenceInfo: Codable {
+    let client: SyncClientKind
+    let deviceID: String?
+    let deviceName: String?
+    let notebookID: String?
+    let pageID: String?
+    let sessionID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case client = "client"
+        case deviceID = "device_id"
+        case deviceName = "device_name"
+        case notebookID = "notebook_id"
+        case pageID = "page_id"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: SyncPresenceInfo convenience initializers and mutators
+
+extension SyncPresenceInfo {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncPresenceInfo.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        client: SyncClientKind? = nil,
+        deviceID: String?? = nil,
+        deviceName: String?? = nil,
+        notebookID: String?? = nil,
+        pageID: String?? = nil,
+        sessionID: String?? = nil
+    ) -> SyncPresenceInfo {
+        return SyncPresenceInfo(
+            client: client ?? self.client,
+            deviceID: deviceID ?? self.deviceID,
+            deviceName: deviceName ?? self.deviceName,
+            notebookID: notebookID ?? self.notebookID,
+            pageID: pageID ?? self.pageID,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SyncResume
+struct SyncResume: Codable {
+    /// Ab dieser seq sendet der Server die fehlenden Operationen
+    let fromSeq: Int
+    /// Aktuell höchste seq des Stroms. Ergänzung zu 08 §2.1
+    let headSeq: Int
+    /// true: der Client kennt eine seq, die der Server nicht hat (z. B. nach Wiederherstellung
+    /// eines Backups). Der Client verwirft seinen Stand des Stroms, lädt per REST neu und
+    /// abonniert ab dem dortigen stream_seq. from_seq ist dann 1.
+    let reset: Bool
+    let stream: String
+
+    enum CodingKeys: String, CodingKey {
+        case fromSeq = "from_seq"
+        case headSeq = "head_seq"
+        case reset = "reset"
+        case stream = "stream"
+    }
+}
+
+// MARK: SyncResume convenience initializers and mutators
+
+extension SyncResume {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncResume.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        fromSeq: Int? = nil,
+        headSeq: Int? = nil,
+        reset: Bool? = nil,
+        stream: String? = nil
+    ) -> SyncResume {
+        return SyncResume(
+            fromSeq: fromSeq ?? self.fromSeq,
+            headSeq: headSeq ?? self.headSeq,
+            reset: reset ?? self.reset,
+            stream: stream ?? self.stream
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Alle Nachrichten Server → Client
+///
+/// ts = Serveruhr beim Antworten. Versatz = Median über 5 Runden von ts − (t0 + t1) / 2
+///
+/// Zustand oder Felder einer Session haben sich geändert (auch zeitgesteuert: bereit,
+/// verpasst, verarbeitet)
+///
+/// Weitergabe von presence eines anderen Clients
+///
+/// Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
+///
+/// Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)
+// MARK: - SyncServerMessage
+struct SyncServerMessage: Codable {
+    let deviceID: String?
+    let syncServerMessageProtocol: Double?
+    let resume: [SyncResume]?
+    let serverTime: Int?
+    let serverVersion: String?
+    let type: SyncServerMessageType
+    let opID: String?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String?
+    let at: Int?
+    let clockUncertain: Bool?
+    let data: SyncServerMessageData?
+    let kind: SyncClientMessageKind?
+    let origin: SyncOrigin?
+    let t0: Int?
+    let ts: Int?
+    let code: SyncErrorCode?
+    let details: [String: JSONAny]?
+    /// true: der Server schließt die Verbindung direkt danach
+    let fatal: Bool?
+    let message: String?
+    /// Nur mit op_id: true = Operation in der Warteschlange lassen und später erneut senden,
+    /// false = endgültig abgelehnt, aus der Warteschlange entfernen
+    let retryable: Bool?
+    let name: SyncEventName?
+
+    enum CodingKeys: String, CodingKey {
+        case deviceID = "device_id"
+        case syncServerMessageProtocol = "protocol"
+        case resume = "resume"
+        case serverTime = "server_time"
+        case serverVersion = "server_version"
+        case type = "type"
+        case opID = "op_id"
+        case seq = "seq"
+        case stream = "stream"
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case origin = "origin"
+        case t0 = "t0"
+        case ts = "ts"
+        case code = "code"
+        case details = "details"
+        case fatal = "fatal"
+        case message = "message"
+        case retryable = "retryable"
+        case name = "name"
+    }
+}
+
+// MARK: SyncServerMessage convenience initializers and mutators
+
+extension SyncServerMessage {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncServerMessage.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        deviceID: String?? = nil,
+        syncServerMessageProtocol: Double?? = nil,
+        resume: [SyncResume]?? = nil,
+        serverTime: Int?? = nil,
+        serverVersion: String?? = nil,
+        type: SyncServerMessageType? = nil,
+        opID: String?? = nil,
+        seq: Int?? = nil,
+        stream: String?? = nil,
+        at: Int?? = nil,
+        clockUncertain: Bool?? = nil,
+        data: SyncServerMessageData?? = nil,
+        kind: SyncClientMessageKind?? = nil,
+        origin: SyncOrigin?? = nil,
+        t0: Int?? = nil,
+        ts: Int?? = nil,
+        code: SyncErrorCode?? = nil,
+        details: [String: JSONAny]?? = nil,
+        fatal: Bool?? = nil,
+        message: String?? = nil,
+        retryable: Bool?? = nil,
+        name: SyncEventName?? = nil
+    ) -> SyncServerMessage {
+        return SyncServerMessage(
+            deviceID: deviceID ?? self.deviceID,
+            syncServerMessageProtocol: syncServerMessageProtocol ?? self.syncServerMessageProtocol,
+            resume: resume ?? self.resume,
+            serverTime: serverTime ?? self.serverTime,
+            serverVersion: serverVersion ?? self.serverVersion,
+            type: type ?? self.type,
+            opID: opID ?? self.opID,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            origin: origin ?? self.origin,
+            t0: t0 ?? self.t0,
+            ts: ts ?? self.ts,
+            code: code ?? self.code,
+            details: details ?? self.details,
+            fatal: fatal ?? self.fatal,
+            message: message ?? self.message,
+            retryable: retryable ?? self.retryable,
+            name: name ?? self.name
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad
+///
+/// Unbekannte session_id: der Core legt die Session an (Start offline auf dem iPad, F-SES-02
+/// Schritt 3)
+///
+/// session.pause / session.resume
+///
+/// Marker vom iPad (F-INK-05) und vom Mac (F-DSH-05, source=mac)
+///
+/// Rückgängig (⌘Z, F-DSH-05) bzw. Löschen
+///
+/// Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
+///
+/// Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem
+/// Kalendertermin (null bei spontanen Sessions).
+///
+/// Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis
+/// pairing.requested)
+// MARK: - SyncServerMessageData
+struct SyncServerMessageData: Codable {
+    let attachedSlideID: String?
+    let backgroundSlideID: String?
+    let heightPt: Double?
+    let index: Int?
+    let notebookID: String?
+    let pageID: String?
+    let sessionID: String?
+    let template: PageTemplate?
+    let widthPt: Double?
+    let fields: PageUpdateFields?
+    /// Version, auf der die Änderung beruht. Der Core setzt danach version + 1
+    let version: Int?
+    let stroke: Stroke?
+    let clientIDS: [String]?
+    let element: PageElement?
+    let elementID: String?
+    let pkdrawingRef: FileRef?
+    let calendarEventID: String?
+    let moduleID: String?
+    let slideDeckID: String?
+    let startedAt: StartedAt?
+    let startedFrom: ClientDevice?
+    let reason: StopReason?
+    let device: ClientDevice?
+    let eventID: String?
+    let slideID: String?
+    let slideIndex: Int?
+    let tMS: Int?
+    let kind: MarkerKind?
+    let markerID: String?
+    let note: String?
+    let position: MarkerPosition?
+    let source: ClientDevice?
+    let fileRef: FileRef?
+    let photoID: String?
+    let createdAt: Date?
+    let deletedAt: Date?
+    let endedAt: Date?
+    let id: String?
+    /// VL-Nummer im Modul (VL 7), Regeln in docs/VERTRAEGE.md
+    let number: Int?
+    let plannedEndsAt: Date?
+    let plannedStartsAt: Date?
+    let processing: [String: JobState]?
+    let reviewState: ReviewState?
+    let state: SessionState?
+    let stopReason: StopReason?
+    let title: String?
+    let updatedAt: Date?
+    let userID: String?
+    let client: SyncClientKind?
+    let deviceID: String?
+    /// Name aus pair/start, null bei einem Code für den QR-Weg
+    let deviceName: String?
+    let connected: Bool?
+    let code: String?
+    let expiresAt: Date?
+    let pairingID: String?
+    let qrURL: String?
+
+    enum CodingKeys: String, CodingKey {
+        case attachedSlideID = "attached_slide_id"
+        case backgroundSlideID = "background_slide_id"
+        case heightPt = "height_pt"
+        case index = "index"
+        case notebookID = "notebook_id"
+        case pageID = "page_id"
+        case sessionID = "session_id"
+        case template = "template"
+        case widthPt = "width_pt"
+        case fields = "fields"
+        case version = "version"
+        case stroke = "stroke"
+        case clientIDS = "client_ids"
+        case element = "element"
+        case elementID = "element_id"
+        case pkdrawingRef = "pkdrawing_ref"
+        case calendarEventID = "calendar_event_id"
+        case moduleID = "module_id"
+        case slideDeckID = "slide_deck_id"
+        case startedAt = "started_at"
+        case startedFrom = "started_from"
+        case reason = "reason"
+        case device = "device"
+        case eventID = "event_id"
+        case slideID = "slide_id"
+        case slideIndex = "slide_index"
+        case tMS = "t_ms"
+        case kind = "kind"
+        case markerID = "marker_id"
+        case note = "note"
+        case position = "position"
+        case source = "source"
+        case fileRef = "file_ref"
+        case photoID = "photo_id"
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case endedAt = "ended_at"
+        case id = "id"
+        case number = "number"
+        case plannedEndsAt = "planned_ends_at"
+        case plannedStartsAt = "planned_starts_at"
+        case processing = "processing"
+        case reviewState = "review_state"
+        case state = "state"
+        case stopReason = "stop_reason"
+        case title = "title"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+        case client = "client"
+        case deviceID = "device_id"
+        case deviceName = "device_name"
+        case connected = "connected"
+        case code = "code"
+        case expiresAt = "expires_at"
+        case pairingID = "pairing_id"
+        case qrURL = "qr_url"
+    }
+}
+
+// MARK: SyncServerMessageData convenience initializers and mutators
+
+extension SyncServerMessageData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncServerMessageData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        attachedSlideID: String?? = nil,
+        backgroundSlideID: String?? = nil,
+        heightPt: Double?? = nil,
+        index: Int?? = nil,
+        notebookID: String?? = nil,
+        pageID: String?? = nil,
+        sessionID: String?? = nil,
+        template: PageTemplate?? = nil,
+        widthPt: Double?? = nil,
+        fields: PageUpdateFields?? = nil,
+        version: Int?? = nil,
+        stroke: Stroke?? = nil,
+        clientIDS: [String]?? = nil,
+        element: PageElement?? = nil,
+        elementID: String?? = nil,
+        pkdrawingRef: FileRef?? = nil,
+        calendarEventID: String?? = nil,
+        moduleID: String?? = nil,
+        slideDeckID: String?? = nil,
+        startedAt: StartedAt?? = nil,
+        startedFrom: ClientDevice?? = nil,
+        reason: StopReason?? = nil,
+        device: ClientDevice?? = nil,
+        eventID: String?? = nil,
+        slideID: String?? = nil,
+        slideIndex: Int?? = nil,
+        tMS: Int?? = nil,
+        kind: MarkerKind?? = nil,
+        markerID: String?? = nil,
+        note: String?? = nil,
+        position: MarkerPosition?? = nil,
+        source: ClientDevice?? = nil,
+        fileRef: FileRef?? = nil,
+        photoID: String?? = nil,
+        createdAt: Date?? = nil,
+        deletedAt: Date?? = nil,
+        endedAt: Date?? = nil,
+        id: String?? = nil,
+        number: Int?? = nil,
+        plannedEndsAt: Date?? = nil,
+        plannedStartsAt: Date?? = nil,
+        processing: [String: JobState]?? = nil,
+        reviewState: ReviewState?? = nil,
+        state: SessionState?? = nil,
+        stopReason: StopReason?? = nil,
+        title: String?? = nil,
+        updatedAt: Date?? = nil,
+        userID: String?? = nil,
+        client: SyncClientKind?? = nil,
+        deviceID: String?? = nil,
+        deviceName: String?? = nil,
+        connected: Bool?? = nil,
+        code: String?? = nil,
+        expiresAt: Date?? = nil,
+        pairingID: String?? = nil,
+        qrURL: String?? = nil
+    ) -> SyncServerMessageData {
+        return SyncServerMessageData(
+            attachedSlideID: attachedSlideID ?? self.attachedSlideID,
+            backgroundSlideID: backgroundSlideID ?? self.backgroundSlideID,
+            heightPt: heightPt ?? self.heightPt,
+            index: index ?? self.index,
+            notebookID: notebookID ?? self.notebookID,
+            pageID: pageID ?? self.pageID,
+            sessionID: sessionID ?? self.sessionID,
+            template: template ?? self.template,
+            widthPt: widthPt ?? self.widthPt,
+            fields: fields ?? self.fields,
+            version: version ?? self.version,
+            stroke: stroke ?? self.stroke,
+            clientIDS: clientIDS ?? self.clientIDS,
+            element: element ?? self.element,
+            elementID: elementID ?? self.elementID,
+            pkdrawingRef: pkdrawingRef ?? self.pkdrawingRef,
+            calendarEventID: calendarEventID ?? self.calendarEventID,
+            moduleID: moduleID ?? self.moduleID,
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            startedAt: startedAt ?? self.startedAt,
+            startedFrom: startedFrom ?? self.startedFrom,
+            reason: reason ?? self.reason,
+            device: device ?? self.device,
+            eventID: eventID ?? self.eventID,
+            slideID: slideID ?? self.slideID,
+            slideIndex: slideIndex ?? self.slideIndex,
+            tMS: tMS ?? self.tMS,
+            kind: kind ?? self.kind,
+            markerID: markerID ?? self.markerID,
+            note: note ?? self.note,
+            position: position ?? self.position,
+            source: source ?? self.source,
+            fileRef: fileRef ?? self.fileRef,
+            photoID: photoID ?? self.photoID,
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            endedAt: endedAt ?? self.endedAt,
+            id: id ?? self.id,
+            number: number ?? self.number,
+            plannedEndsAt: plannedEndsAt ?? self.plannedEndsAt,
+            plannedStartsAt: plannedStartsAt ?? self.plannedStartsAt,
+            processing: processing ?? self.processing,
+            reviewState: reviewState ?? self.reviewState,
+            state: state ?? self.state,
+            stopReason: stopReason ?? self.stopReason,
+            title: title ?? self.title,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID,
+            client: client ?? self.client,
+            deviceID: deviceID ?? self.deviceID,
+            deviceName: deviceName ?? self.deviceName,
+            connected: connected ?? self.connected,
+            code: code ?? self.code,
+            expiresAt: expiresAt ?? self.expiresAt,
+            pairingID: pairingID ?? self.pairingID,
+            qrURL: qrURL ?? self.qrURL
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum StartedAt: Codable {
+    case dateTime(Date)
+    case integer(Int)
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let x = try? container.decode(Int.self) {
+            self = .integer(x)
+            return
+        }
+        if let x = try? container.decode(Date.self) {
+            self = .dateTime(x)
+            return
+        }
+        if container.decodeNil() {
+            self = .null
+            return
+        }
+        throw DecodingError.typeMismatch(StartedAt.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for StartedAt"))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .dateTime(let x):
+            try container.encode(x)
+        case .integer(let x):
+            try container.encode(x)
+        case .null:
+            try container.encodeNil()
+        }
+    }
+}
+
+enum SyncServerMessageType: String, Codable {
+    case ack = "ack"
+    case error = "error"
+    case event = "event"
+    case op = "op"
+    case pong = "pong"
+    case subscribed = "subscribed"
+    case timePong = "time.pong"
+    case welcome = "welcome"
+}
+
+/// Zustand oder Felder einer Session haben sich geändert (auch zeitgesteuert: bereit,
+/// verpasst, verarbeitet)
+// MARK: - SyncSessionUpdatedEvent
+struct SyncSessionUpdatedEvent: Codable {
+    let data: Session
+    let name: SyncSessionUpdatedEventName
+    let type: SyncConnectionEventType
+
+    enum CodingKeys: String, CodingKey {
+        case data = "data"
+        case name = "name"
+        case type = "type"
+    }
+}
+
+// MARK: SyncSessionUpdatedEvent convenience initializers and mutators
+
+extension SyncSessionUpdatedEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncSessionUpdatedEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: Session? = nil,
+        name: SyncSessionUpdatedEventName? = nil,
+        type: SyncConnectionEventType? = nil
+    ) -> SyncSessionUpdatedEvent {
+        return SyncSessionUpdatedEvent(
+            data: data ?? self.data,
+            name: name ?? self.name,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncSessionUpdatedEventName: String, Codable {
+    case sessionUpdated = "session.updated"
+}
+
+/// Weitere Ströme abonnieren, ohne neu zu verbinden. Antwort: subscribed. Ergänzung zu 08 §2
+// MARK: - SyncSubscribe
+struct SyncSubscribe: Codable {
+    let streams: [SyncStreamPosition]
+    let type: SyncSubscribeType
+
+    enum CodingKeys: String, CodingKey {
+        case streams = "streams"
+        case type = "type"
+    }
+}
+
+// MARK: SyncSubscribe convenience initializers and mutators
+
+extension SyncSubscribe {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncSubscribe.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        streams: [SyncStreamPosition]? = nil,
+        type: SyncSubscribeType? = nil
+    ) -> SyncSubscribe {
+        return SyncSubscribe(
+            streams: streams ?? self.streams,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncSubscribeType: String, Codable {
+    case subscribe = "subscribe"
+}
+
+// MARK: - SyncSubscribed
+struct SyncSubscribed: Codable {
+    let resume: [SyncResume]
+    let type: SyncSubscribedType
+
+    enum CodingKeys: String, CodingKey {
+        case resume = "resume"
+        case type = "type"
+    }
+}
+
+// MARK: SyncSubscribed convenience initializers and mutators
+
+extension SyncSubscribed {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncSubscribed.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        resume: [SyncResume]? = nil,
+        type: SyncSubscribedType? = nil
+    ) -> SyncSubscribed {
+        return SyncSubscribed(
+            resume: resume ?? self.resume,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncSubscribedType: String, Codable {
+    case subscribed = "subscribed"
+}
+
+/// Ergebnis des Uhrabgleichs an den Server (device.clock_offset_ms). Ergänzung zu 08 §2.1
+// MARK: - SyncTimeOffset
+struct SyncTimeOffset: Codable {
+    /// Gemessener Versatz Server − Client
+    let offsetMS: Int
+    /// Median der Umlaufzeit
+    let rttMS: Int
+    let type: SyncTimeOffsetType
+
+    enum CodingKeys: String, CodingKey {
+        case offsetMS = "offset_ms"
+        case rttMS = "rtt_ms"
+        case type = "type"
+    }
+}
+
+// MARK: SyncTimeOffset convenience initializers and mutators
+
+extension SyncTimeOffset {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncTimeOffset.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        offsetMS: Int? = nil,
+        rttMS: Int? = nil,
+        type: SyncTimeOffsetType? = nil
+    ) -> SyncTimeOffset {
+        return SyncTimeOffset(
+            offsetMS: offsetMS ?? self.offsetMS,
+            rttMS: rttMS ?? self.rttMS,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncTimeOffsetType: String, Codable {
+    case timeOffset = "time.offset"
+}
+
+/// t0 = lokale Uhr des Clients beim Senden (F-SYN-02)
+// MARK: - SyncTimePing
+struct SyncTimePing: Codable {
+    let t0: Int
+    let type: SyncTimePingType
+
+    enum CodingKeys: String, CodingKey {
+        case t0 = "t0"
+        case type = "type"
+    }
+}
+
+// MARK: SyncTimePing convenience initializers and mutators
+
+extension SyncTimePing {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncTimePing.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        t0: Int? = nil,
+        type: SyncTimePingType? = nil
+    ) -> SyncTimePing {
+        return SyncTimePing(
+            t0: t0 ?? self.t0,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncTimePingType: String, Codable {
+    case timePing = "time.ping"
+}
+
+/// ts = Serveruhr beim Antworten. Versatz = Median über 5 Runden von ts − (t0 + t1) / 2
+// MARK: - SyncTimePong
+struct SyncTimePong: Codable {
+    let t0: Int
+    let ts: Int
+    let type: SyncTimePongType
+
+    enum CodingKeys: String, CodingKey {
+        case t0 = "t0"
+        case ts = "ts"
+        case type = "type"
+    }
+}
+
+// MARK: SyncTimePong convenience initializers and mutators
+
+extension SyncTimePong {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncTimePong.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        t0: Int? = nil,
+        ts: Int? = nil,
+        type: SyncTimePongType? = nil
+    ) -> SyncTimePong {
+        return SyncTimePong(
+            t0: t0 ?? self.t0,
+            ts: ts ?? self.ts,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncTimePongType: String, Codable {
+    case timePong = "time.pong"
+}
+
+// MARK: - SyncUnsubscribe
+struct SyncUnsubscribe: Codable {
+    let streams: [String]
+    let type: SyncUnsubscribeType
+
+    enum CodingKeys: String, CodingKey {
+        case streams = "streams"
+        case type = "type"
+    }
+}
+
+// MARK: SyncUnsubscribe convenience initializers and mutators
+
+extension SyncUnsubscribe {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncUnsubscribe.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        streams: [String]? = nil,
+        type: SyncUnsubscribeType? = nil
+    ) -> SyncUnsubscribe {
+        return SyncUnsubscribe(
+            streams: streams ?? self.streams,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncUnsubscribeType: String, Codable {
+    case unsubscribe = "unsubscribe"
+}
+
+// MARK: - SyncWelcome
+struct SyncWelcome: Codable {
+    let deviceID: String?
+    let syncWelcomeProtocol: Double
+    let resume: [SyncResume]
+    let serverTime: Int
+    let serverVersion: String
+    let type: SyncWelcomeType
+
+    enum CodingKeys: String, CodingKey {
+        case deviceID = "device_id"
+        case syncWelcomeProtocol = "protocol"
+        case resume = "resume"
+        case serverTime = "server_time"
+        case serverVersion = "server_version"
+        case type = "type"
+    }
+}
+
+// MARK: SyncWelcome convenience initializers and mutators
+
+extension SyncWelcome {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncWelcome.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        deviceID: String?? = nil,
+        syncWelcomeProtocol: Double? = nil,
+        resume: [SyncResume]? = nil,
+        serverTime: Int? = nil,
+        serverVersion: String? = nil,
+        type: SyncWelcomeType? = nil
+    ) -> SyncWelcome {
+        return SyncWelcome(
+            deviceID: deviceID ?? self.deviceID,
+            syncWelcomeProtocol: syncWelcomeProtocol ?? self.syncWelcomeProtocol,
+            resume: resume ?? self.resume,
+            serverTime: serverTime ?? self.serverTime,
+            serverVersion: serverVersion ?? self.serverVersion,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncWelcomeType: String, Codable {
+    case welcome = "welcome"
+}
+
+// MARK: - TapeElement
+struct TapeElement: Codable {
+    let elementID: String
+    let frame: [Double]
+    let kind: TapeElementKind
+    let payload: TapeElementPayload
+    let tMS: Int?
+    let z: Int
+
+    enum CodingKeys: String, CodingKey {
+        case elementID = "element_id"
+        case frame = "frame"
+        case kind = "kind"
+        case payload = "payload"
+        case tMS = "t_ms"
+        case z = "z"
+    }
+}
+
+// MARK: TapeElement convenience initializers and mutators
+
+extension TapeElement {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TapeElement.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        elementID: String? = nil,
+        frame: [Double]? = nil,
+        kind: TapeElementKind? = nil,
+        payload: TapeElementPayload? = nil,
+        tMS: Int?? = nil,
+        z: Int? = nil
+    ) -> TapeElement {
+        return TapeElement(
+            elementID: elementID ?? self.elementID,
+            frame: frame ?? self.frame,
+            kind: kind ?? self.kind,
+            payload: payload ?? self.payload,
+            tMS: tMS ?? self.tMS,
+            z: z ?? self.z
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum TapeElementKind: String, Codable {
+    case tape = "tape"
+}
+
+// MARK: - TapeElementPayload
+struct TapeElementPayload: Codable {
+    let cardID: String?
+    let color: String
+    let covered: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case cardID = "card_id"
+        case color = "color"
+        case covered = "covered"
+    }
+}
+
+// MARK: TapeElementPayload convenience initializers and mutators
+
+extension TapeElementPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TapeElementPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cardID: String?? = nil,
+        color: String? = nil,
+        covered: Bool? = nil
+    ) -> TapeElementPayload {
+        return TapeElementPayload(
+            cardID: cardID ?? self.cardID,
+            color: color ?? self.color,
+            covered: covered ?? self.covered
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// Teilaufgabe eines Übungsblatts. Zerlegung erst ab Phase 2 (F-ORG-03).
 // MARK: - Task
 struct Task: Codable {
@@ -1978,6 +12282,360 @@ extension Task {
             text: text ?? self.text,
             updatedAt: updatedAt ?? self.updatedAt,
             userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TextElement
+struct TextElement: Codable {
+    let elementID: String
+    let frame: [Double]
+    let kind: TextElementKind
+    let payload: TextElementPayload
+    let tMS: Int?
+    let z: Int
+
+    enum CodingKeys: String, CodingKey {
+        case elementID = "element_id"
+        case frame = "frame"
+        case kind = "kind"
+        case payload = "payload"
+        case tMS = "t_ms"
+        case z = "z"
+    }
+}
+
+// MARK: TextElement convenience initializers and mutators
+
+extension TextElement {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TextElement.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        elementID: String? = nil,
+        frame: [Double]? = nil,
+        kind: TextElementKind? = nil,
+        payload: TextElementPayload? = nil,
+        tMS: Int?? = nil,
+        z: Int? = nil
+    ) -> TextElement {
+        return TextElement(
+            elementID: elementID ?? self.elementID,
+            frame: frame ?? self.frame,
+            kind: kind ?? self.kind,
+            payload: payload ?? self.payload,
+            tMS: tMS ?? self.tMS,
+            z: z ?? self.z
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum TextElementKind: String, Codable {
+    case text = "text"
+}
+
+// MARK: - TextElementPayload
+struct TextElementPayload: Codable {
+    let size: TextSize
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case size = "size"
+        case text = "text"
+    }
+}
+
+// MARK: TextElementPayload convenience initializers and mutators
+
+extension TextElementPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TextElementPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        size: TextSize? = nil,
+        text: String? = nil
+    ) -> TextElementPayload {
+        return TextElementPayload(
+            size: size ?? self.size,
+            text: text ?? self.text
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Direkt gelöschtes Objekt im Papierkorb (F-DAT-04). Mitgelöschte Teile erscheinen nicht
+/// einzeln.
+// MARK: - TrashItem
+struct TrashItem: Codable {
+    let deletedAt: Date
+    /// Mitgelöschte abhängige Objekte, die mit wiederhergestellt werden
+    let dependentCount: Int
+    let id: String
+    let kind: TrashKind
+    let parent: TrashParent?
+    let purgeAt: Date
+    /// Anzeigename (Titel, Name oder z. B. „Seite 3")
+    let title: String
+
+    enum CodingKeys: String, CodingKey {
+        case deletedAt = "deleted_at"
+        case dependentCount = "dependent_count"
+        case id = "id"
+        case kind = "kind"
+        case parent = "parent"
+        case purgeAt = "purge_at"
+        case title = "title"
+    }
+}
+
+// MARK: TrashItem convenience initializers and mutators
+
+extension TrashItem {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TrashItem.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        deletedAt: Date? = nil,
+        dependentCount: Int? = nil,
+        id: String? = nil,
+        kind: TrashKind? = nil,
+        parent: TrashParent?? = nil,
+        purgeAt: Date? = nil,
+        title: String? = nil
+    ) -> TrashItem {
+        return TrashItem(
+            deletedAt: deletedAt ?? self.deletedAt,
+            dependentCount: dependentCount ?? self.dependentCount,
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            parent: parent ?? self.parent,
+            purgeAt: purgeAt ?? self.purgeAt,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum TrashKind: String, Codable {
+    case calendarSource = "calendar_source"
+    case exerciseSheet = "exercise_sheet"
+    case marker = "marker"
+    case module = "module"
+    case notebook = "notebook"
+    case page = "page"
+    case photo = "photo"
+    case semester = "semester"
+    case session = "session"
+    case slideDeck = "slide_deck"
+}
+
+// MARK: - TrashParent
+struct TrashParent: Codable {
+    let id: String
+    let kind: TrashKind
+    let title: String
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case kind = "kind"
+        case title = "title"
+    }
+}
+
+// MARK: TrashParent convenience initializers and mutators
+
+extension TrashParent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TrashParent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String? = nil,
+        kind: TrashKind? = nil,
+        title: String? = nil
+    ) -> TrashParent {
+        return TrashParent(
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TrashList
+struct TrashList: Codable {
+    let items: [TrashItem]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+    }
+}
+
+// MARK: TrashList convenience initializers and mutators
+
+extension TrashList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TrashList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [TrashItem]? = nil,
+        nextCursor: String?? = nil
+    ) -> TrashList {
+        return TrashList(
+            items: items ?? self.items,
+            nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// POST /trash/{id}/restore, auch für „Rückgängig" im Toast
+// MARK: - TrashRestoreResult
+struct TrashRestoreResult: Codable {
+    let id: String
+    let kind: TrashKind
+    let restoredCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case kind = "kind"
+        case restoredCount = "restored_count"
+    }
+}
+
+// MARK: TrashRestoreResult convenience initializers and mutators
+
+extension TrashRestoreResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TrashRestoreResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String? = nil,
+        kind: TrashKind? = nil,
+        restoredCount: Int? = nil
+    ) -> TrashRestoreResult {
+        return TrashRestoreResult(
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            restoredCount: restoredCount ?? self.restoredCount
         )
     }
 

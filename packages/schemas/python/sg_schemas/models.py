@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -31,6 +31,30 @@ class ApiErrorBody(BaseModel):
     details: dict[str, Any] | None = None
 
 
+class Appearance(StrEnum):
+    hell = 'hell'
+    dunkel = 'dunkel'
+    system = 'system'
+
+
+class AudioCodec(StrEnum):
+    opus = 'opus'
+    aac = 'aac'
+
+
+class MissingSeq(RootModel[StrictInt]):
+    root: StrictInt = Field(..., ge=0)
+
+
+class AudioGapReason(StrEnum):
+    """
+    fehlender_chunk: seq fehlt. zeitluecke: start_ms springt (z. B. Recorder neu gestartet)
+    """
+
+    fehlender_chunk = 'fehlender_chunk'
+    zeitluecke = 'zeitluecke'
+
+
 class BBox(RootModel[list[StrictFloat]]):
     """
     [x, y, w, h] in pt
@@ -39,6 +63,134 @@ class BBox(RootModel[list[StrictFloat]]):
     root: list[StrictFloat] = Field(
         ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
     )
+
+
+class BackupState(StrEnum):
+    laeuft = 'laeuft'
+    fertig = 'fertig'
+    fehler = 'fehler'
+
+
+class BackupTrigger(StrEnum):
+    zeitplan = 'zeitplan'
+    manuell = 'manuell'
+    vor_migration = 'vor_migration'
+
+
+class CalendarAssignment(StrEnum):
+    """
+    auto: Modul und Art hat der Abgleich gesetzt und darf sie ändern. manuell: vom Nutzer gesetzt, der Abgleich ändert module_id und kind nie mehr (F-KAL-02).
+    """
+
+    auto = 'auto'
+    manuell = 'manuell'
+
+
+class CalendarEventKind(StrEnum):
+    vorlesung = 'vorlesung'
+    uebung = 'uebung'
+    tutorium = 'tutorium'
+    pruefung = 'pruefung'
+    fest = 'fest'
+    lernblock_export = 'lernblock_export'
+
+
+class CalendarSourceKind(StrEnum):
+    """
+    google erst ab Phase 4 (F-KAL-03)
+    """
+
+    ics_file = 'ics_file'
+    ics_url = 'ics_url'
+    google = 'google'
+
+
+class CalendarUpdateScope(StrEnum):
+    """
+    serie: alle Termine derselben Quelle mit gleicher external_uid (F-KAL-02). einzeln: nur dieser Termin.
+    """
+
+    serie = 'serie'
+    einzeln = 'einzeln'
+
+
+class ClientDevice(StrEnum):
+    """
+    Gerät, auf dem ein Ereignis entstanden ist
+    """
+
+    mac = 'mac'
+    ipad = 'ipad'
+
+
+class ColumnWidth(RootModel[StrictFloat]):
+    root: StrictFloat = Field(..., ge=0.0, le=100.0)
+
+
+class ColumnWidths(RootModel[list[ColumnWidth]]):
+    """
+    Spaltenbreiten Folie | Übung | Notizen in Prozent, Summe 100
+    """
+
+    root: list[ColumnWidth] = Field(
+        ...,
+        description='Spaltenbreiten Folie | Übung | Notizen in Prozent, Summe 100',
+        max_length=3,
+        min_length=3,
+        title='ColumnWidths',
+    )
+
+
+class DashboardLayout(StrEnum):
+    """
+    Layout-Vorlagen F-DSH-01
+    """
+
+    standard = 'standard'
+    folie_gross = 'folie_gross'
+    notizen_gross = 'notizen_gross'
+    fokus = 'fokus'
+
+
+class DataSettings(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    backup_target: StrictStr | None = Field(
+        ..., description='Absoluter Pfad, null = keine Backups'
+    )
+    backup_encryption: StrictBool = Field(
+        ...,
+        description='age mit Passphrase (P1). Die Passphrase steht nie in den Einstellungen',
+    )
+    backup_time: StrictStr = Field(
+        ...,
+        description='Ortszeit des Macs (Standard 03:00)',
+        pattern='^([01][0-9]|2[0-3]):[0-5][0-9]$',
+    )
+
+
+class DataSettingsUpdate(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    backup_target: StrictStr | None = Field(
+        None, description='Absoluter Pfad, null = keine Backups'
+    )
+    backup_encryption: StrictBool | None = Field(
+        None,
+        description='age mit Passphrase (P1). Die Passphrase steht nie in den Einstellungen',
+    )
+    backup_time: StrictStr | None = Field(
+        None,
+        description='Ortszeit des Macs (Standard 03:00)',
+        pattern='^([01][0-9]|2[0-3]):[0-5][0-9]$',
+    )
+
+
+class DeviceKind(StrEnum):
+    ipad = 'ipad'
+    iphone = 'iphone'
 
 
 class Status(StrEnum):
@@ -63,10 +215,60 @@ class Health(BaseModel):
     version: StrictStr
 
 
+class HexColor(RootModel[StrictStr]):
+    root: StrictStr = Field(
+        ...,
+        description='RGBA als #RRGGBBAA',
+        examples=['#1E2A44FF'],
+        pattern='^#[0-9A-Fa-f]{8}$',
+        title='HexColor',
+    )
+
+
+class IcsImportCounts(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    neu: StrictInt = Field(..., ge=0)
+    geaendert: StrictInt = Field(..., ge=0)
+    entfallen: StrictInt = Field(..., ge=0)
+    unveraendert: StrictInt = Field(..., ge=0)
+    zugeordnet: StrictInt = Field(
+        ..., description='In diesem Lauf automatisch einem Modul zugeordnet', ge=0
+    )
+    ohne_modul: StrictInt = Field(
+        ...,
+        description='Nicht abgesagte Termine der Quelle ohne Modul nach dem Lauf',
+        ge=0,
+    )
+
+
+class IcsWarning(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    code: StrictStr = Field(
+        ...,
+        examples=['rrule_unsupported', 'timezone_unknown'],
+        pattern='^[a-z][a-z0-9_]*$',
+    )
+    message: StrictStr
+    external_uid: StrictStr | None
+
+
 class IngestState(StrEnum):
     neu = 'neu'
     verarbeitet = 'verarbeitet'
     fehler = 'fehler'
+
+
+class InkMode(StrEnum):
+    """
+    Schreibmodus F-INK-03
+    """
+
+    freie_seite = 'freie_seite'
+    auf_folie = 'auf_folie'
 
 
 class JobState(StrEnum):
@@ -118,6 +320,30 @@ class Lang(StrEnum):
     mixed = 'mixed'
 
 
+class MarkerKind(StrEnum):
+    frage = 'frage'
+    klausur = 'klausur'
+    verknuepfung = 'verknuepfung'
+
+
+class MarkerPosition(BaseModel):
+    """
+    Stelle auf der Seite in pt (Ursprung oben links)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    x: StrictFloat
+    y: StrictFloat
+
+
+class MarkerSource(StrEnum):
+    ipad = 'ipad'
+    mac = 'mac'
+    detektor = 'detektor'
+
+
 class ModuleColor(StrEnum):
     """
     Token aus der festen Palette mit 12 Tönen (07 §8), Werte in packages/ui-tokens
@@ -137,6 +363,85 @@ class ModuleColor(StrEnum):
     mod_12 = 'mod-12'
 
 
+class ModuleSettings(BaseModel):
+    """
+    module.settings (W-06 Option A, 03 §3). Fehlender Schlüssel = globaler Standard aus Settings.lecture
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    layout: DashboardLayout | None = None
+    column_widths: list[ColumnWidth] | None = Field(
+        None,
+        description='Spaltenbreiten Folie | Übung | Notizen in Prozent, Summe 100',
+        max_length=3,
+        min_length=3,
+        title='ColumnWidths',
+    )
+    ink_mode: InkMode | None = None
+
+
+class ModuleSettingsUpdate(BaseModel):
+    """
+    Teil von ModuleUpdate.settings: Schlüssel für Schlüssel zusammenführen, null entfernt den Schlüssel
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    layout: DashboardLayout | None = None
+    column_widths: ColumnWidths | None = None
+    ink_mode: InkMode | None = None
+
+
+class NotebookKind(StrEnum):
+    vorlesung = 'vorlesung'
+    uebung = 'uebung'
+    frei = 'frei'
+
+
+class PageTemplate(StrEnum):
+    blanko = 'blanko'
+    liniert = 'liniert'
+    kariert = 'kariert'
+    punktraster = 'punktraster'
+    cornell = 'cornell'
+    folie = 'folie'
+
+
+class PairConfirmRequest(BaseModel):
+    """
+    POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). public_nonce muss zu pair/start passen, falls der Code von dort stammt.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    code: StrictStr = Field(..., pattern='^[0-9]{6}$')
+    device_name: StrictStr = Field(..., max_length=64, min_length=1)
+    kind: DeviceKind
+    public_nonce: StrictStr = Field(..., pattern='^[A-Za-z0-9_-]{22,128}$')
+    app_version: StrictStr | None = Field(None, min_length=1)
+
+
+class PairStartRequest(BaseModel):
+    """
+    POST /devices/pair/start (aus dem Netz ohne Token erlaubt)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    device_name: StrictStr = Field(..., max_length=64, min_length=1)
+    kind: DeviceKind
+    public_nonce: StrictStr = Field(
+        ...,
+        description='Zufallswert des iPads (base64url, ≥ 128 Bit)',
+        pattern='^[A-Za-z0-9_-]{22,128}$',
+    )
+
+
 class PdfIngestResult(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -144,6 +449,70 @@ class PdfIngestResult(BaseModel):
     page_count: StrictInt = Field(..., ge=0)
     pages_with_text: StrictInt = Field(..., ge=0)
     duration_ms: StrictInt = Field(..., ge=0)
+
+
+class PencilDoubleTapAction(StrEnum):
+    """
+    system = Einstellung von iPadOS übernehmen
+    """
+
+    radierer = 'radierer'
+    letztes_werkzeug = 'letztes_werkzeug'
+    farbpalette = 'farbpalette'
+    system = 'system'
+    aus = 'aus'
+
+
+class PencilSqueezeAction(StrEnum):
+    werkzeugpalette = 'werkzeugpalette'
+    radierer = 'radierer'
+    system = 'system'
+    aus = 'aus'
+
+
+class PhotoMime(StrEnum):
+    image_heic = 'image/heic'
+    image_jpeg = 'image/jpeg'
+
+
+class Point2(RootModel[list[StrictFloat]]):
+    """
+    [x, y] in pt
+    """
+
+    root: list[StrictFloat] = Field(
+        ..., description='[x, y] in pt', max_length=2, min_length=2, title='Point2'
+    )
+
+
+class RecordingComplete(BaseModel):
+    """
+    POST /recordings/{id}/complete: der Client hat den letzten Chunk hochgeladen. Der Core stellt audio.finalize ein.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    last_seq: StrictInt = Field(..., ge=0)
+    duration_ms: StrictInt = Field(
+        ..., description='Aufgenommene Länge laut Client', ge=0
+    )
+
+
+class RecordingState(StrEnum):
+    laeuft = 'laeuft'
+    vollstaendig = 'vollstaendig'
+    mit_luecken = 'mit_luecken'
+
+
+class ReviewState(StrEnum):
+    """
+    Nacharbeitung (F-NAC-05, Phase 2)
+    """
+
+    offen = 'offen'
+    in_arbeit = 'in_arbeit'
+    erledigt = 'erledigt'
 
 
 class SemesterUpdate(BaseModel):
@@ -159,6 +528,38 @@ class SemesterUpdate(BaseModel):
     )
 
 
+class SessionMs(RootModel[StrictInt]):
+    root: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+
+
+class SessionState(StrEnum):
+    """
+    Zustandsautomat F-SES-01, Übergänge in docs/VERTRAEGE.md
+    """
+
+    geplant = 'geplant'
+    bereit = 'bereit'
+    laeuft = 'laeuft'
+    pausiert = 'pausiert'
+    beendet = 'beendet'
+    verpasst = 'verpasst'
+    verarbeitet = 'verarbeitet'
+
+
+class ShapeKind(StrEnum):
+    rectangle = 'rectangle'
+    ellipse = 'ellipse'
+    line = 'line'
+    arrow = 'arrow'
+    triangle = 'triangle'
+    diamond = 'diamond'
+
+
 class SlideDeckUpdate(BaseModel):
     """
     PATCH /slide-decks/{id}
@@ -168,6 +569,181 @@ class SlideDeckUpdate(BaseModel):
         extra='forbid',
     )
     title: StrictStr | None = Field(None, min_length=1)
+
+
+class SlideEventSource(StrEnum):
+    manuell_mac = 'manuell_mac'
+    manuell_ipad = 'manuell_ipad'
+    korrektur = 'korrektur'
+
+
+class StopReason(StrEnum):
+    manuell = 'manuell'
+    kalenderende = 'kalenderende'
+    stille = 'stille'
+    maximaldauer = 'maximaldauer'
+    absturz_wiederhergestellt = 'absturz_wiederhergestellt'
+
+
+class StrokeLayer(StrEnum):
+    ink = 'ink'
+    highlight = 'highlight'
+
+
+class StrokeTool(StrEnum):
+    pen = 'pen'
+    pencil = 'pencil'
+    marker = 'marker'
+    monoline = 'monoline'
+    fountain = 'fountain'
+
+
+class SyncClientKind(StrEnum):
+    ipad = 'ipad'
+    web = 'web'
+
+
+class SyncErrorCode(StrEnum):
+    protocol_unsupported = 'protocol_unsupported'
+    hello_required = 'hello_required'
+    hello_invalid = 'hello_invalid'
+    device_token_invalid = 'device_token_invalid'
+    message_invalid = 'message_invalid'
+    too_many_pending = 'too_many_pending'
+    op_id_reused = 'op_id_reused'
+    stream_mismatch = 'stream_mismatch'
+    module_not_found = 'module_not_found'
+    session_not_found = 'session_not_found'
+    session_transition_invalid = 'session_transition_invalid'
+    notebook_not_found = 'notebook_not_found'
+    page_not_found = 'page_not_found'
+    page_version_conflict = 'page_version_conflict'
+    internal_error = 'internal_error'
+
+
+class SyncOrigin(StrEnum):
+    """
+    Wer die Operation erzeugt hat (vom Server gesetzt)
+    """
+
+    ipad = 'ipad'
+    web = 'web'
+    server = 'server'
+
+
+class SyncPing(BaseModel):
+    """
+    Keepalive des Clients alle 15 s
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['ping']
+
+
+class SyncPong(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['pong']
+
+
+class SyncStreamId(RootModel[StrictStr]):
+    root: StrictStr = Field(
+        ...,
+        description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
+        pattern='^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$',
+        title='SyncStreamId',
+    )
+
+
+class SyncStreamPosition(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    stream: StrictStr = Field(
+        ...,
+        description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
+        pattern='^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$',
+        title='SyncStreamId',
+    )
+    last_seq: StrictInt = Field(
+        ..., description='Letzte beim Client angewandte seq, 0 = nichts', ge=0
+    )
+
+
+class SyncSubscribe(BaseModel):
+    """
+    Weitere Ströme abonnieren, ohne neu zu verbinden. Antwort: subscribed. Ergänzung zu 08 §2
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['subscribe']
+    streams: list[SyncStreamPosition] = Field(..., min_length=1)
+
+
+class SyncTimeOffset(BaseModel):
+    """
+    Ergebnis des Uhrabgleichs an den Server (device.clock_offset_ms). Ergänzung zu 08 §2.1
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['time.offset']
+    offset_ms: StrictInt = Field(..., description='Gemessener Versatz Server − Client')
+    rtt_ms: StrictInt = Field(..., description='Median der Umlaufzeit', ge=0)
+
+
+class SyncTimePing(BaseModel):
+    """
+    t0 = lokale Uhr des Clients beim Senden (F-SYN-02)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['time.ping']
+    t0: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+
+
+class SyncTimePong(BaseModel):
+    """
+    ts = Serveruhr beim Antworten. Versatz = Median über 5 Runden von ts − (t0 + t1) / 2
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['time.pong']
+    t0: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    ts: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+
+
+class SyncUnsubscribe(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['unsubscribe']
+    streams: list[SyncStreamId] = Field(..., min_length=1)
 
 
 class TextBlock(BaseModel):
@@ -180,6 +756,34 @@ class TextBlock(BaseModel):
     )
 
 
+class TextSize(StrEnum):
+    s = 's'
+    m = 'm'
+    l = 'l'
+
+
+class ToolbarSide(StrEnum):
+    """
+    Händigkeit: Seite der Werkzeugleiste auf dem iPad
+    """
+
+    links = 'links'
+    rechts = 'rechts'
+
+
+class TrashKind(StrEnum):
+    semester = 'semester'
+    module = 'module'
+    slide_deck = 'slide_deck'
+    exercise_sheet = 'exercise_sheet'
+    calendar_source = 'calendar_source'
+    session = 'session'
+    notebook = 'notebook'
+    page = 'page'
+    marker = 'marker'
+    photo = 'photo'
+
+
 class ApiError(BaseModel):
     """
     Fehlerformat der REST-API (08 §1)
@@ -189,6 +793,332 @@ class ApiError(BaseModel):
         extra='forbid',
     )
     error: ApiErrorBody
+
+
+class AudioChunk(BaseModel):
+    """
+    Antwort auf PUT /recordings/{id}/chunks/{seq}
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    recording_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    seq: StrictInt = Field(..., ge=0)
+    start_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    duration_ms: StrictInt = Field(..., ge=1)
+    sha256: StrictStr = Field(
+        ...,
+        description='SHA-256, hex, Kleinbuchstaben',
+        pattern='^[a-f0-9]{64}$',
+        title='Sha256',
+    )
+    size_bytes: StrictInt = Field(..., ge=1)
+    received_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    duplicate: StrictBool = Field(
+        ..., description='true: identischer Chunk lag schon vor (200 statt 201)'
+    )
+
+
+class AudioChunkMeta(BaseModel):
+    """
+    Geparste Metadaten von PUT /recordings/{id}/chunks/{seq}: Header X-Start-Ms, X-Duration-Ms (Dezimalzahlen), X-Sha256 (hex des Bodys)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    seq: StrictInt = Field(
+        ..., description='Pfad {seq}, 0-basiert, lückenlos (Invariante 2)', ge=0
+    )
+    start_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    duration_ms: StrictInt = Field(..., ge=1)
+    sha256: StrictStr = Field(
+        ...,
+        description='SHA-256, hex, Kleinbuchstaben',
+        pattern='^[a-f0-9]{64}$',
+        title='Sha256',
+    )
+
+
+class AudioFinalizePayload(BaseModel):
+    """
+    audio.finalize (08 §5)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    recording_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+
+
+class AudioGap(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    start_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    duration_ms: StrictInt = Field(..., ge=1)
+    reason: AudioGapReason
+
+
+class BackupRun(BaseModel):
+    """
+    Ein Backup-Lauf (03 §13 backup_run)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    started_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    finished_at: AwareDatetime | None
+    target: StrictStr = Field(..., description='Absoluter Pfad des Ziels')
+    size_bytes: StrictInt | None = Field(..., ge=0)
+    state: BackupState
+    error: StrictStr | None
+    trigger: BackupTrigger
+    stand: StrictStr | None = Field(
+        ...,
+        description='Name des Stands für sg restore <stand>, z. B. 20261104T030012Z. null solange er läuft oder bei Fehler',
+        pattern='^[0-9]{8}T[0-9]{6}Z$',
+    )
+
+
+class BackupStatus(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    target: StrictStr | None = Field(
+        ..., description='null = kein Ziel eingestellt, Backups pausieren'
+    )
+    last_success_at: AwareDatetime | None
+    next_run_at: AwareDatetime | None
+    stale: StrictBool = Field(
+        ..., description='Letztes erfolgreiches Backup älter als 3 Tage (F-DAT-01)'
+    )
+    running: StrictBool
+
+
+class CalendarEvent(BaseModel):
+    """
+    Termin. session_id ist abgeleitet: die nicht gelöschte Session zu diesem Termin.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    source_id: UUID | None
+    external_uid: StrictStr | None = Field(
+        ..., description='UID aus der Quelle, null bei manuellen Terminen'
+    )
+    recurrence_id: StrictStr | None = Field(
+        ...,
+        description='Kennung des Vorkommens: ISO 8601 mit Offset der Ortszeit (2026-10-20T10:15:00+02:00) bzw. Datum (2026-11-01) bei ganztägigen Serien. null bei Einzelterminen. Abgleichschlüssel: (source_id, external_uid, recurrence_id)',
+    )
+    module_id: UUID | None
+    kind: CalendarEventKind
+    assigned_by: CalendarAssignment
+    title: StrictStr
+    location: StrictStr | None
+    description: StrictStr | None = Field(
+        ..., description='DESCRIPTION aus der Quelle. Ergänzung zu 03 §3'
+    )
+    starts_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    ends_at: AwareDatetime = Field(..., description='ISO 8601, UTC', title='Timestamp')
+    all_day: StrictBool = Field(
+        ...,
+        description='Ganztägig (VALUE=DATE). starts_at/ends_at sind dann 00:00 UTC des Datums (wie tests/fixtures/ics/08). Ergänzung zu 03 §3',
+    )
+    cancelled: StrictBool
+    session_id: UUID | None
+
+
+class CalendarEventList(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[CalendarEvent]
+    next_cursor: StrictStr | None
+
+
+class CalendarEventUpdate(BaseModel):
+    """
+    PATCH /calendar/events/{id}. Setzt assigned_by=manuell. scope fehlt = serie. Antwort: CalendarEventList mit allen geänderten Terminen.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    module_id: UUID | None = None
+    kind: CalendarEventKind | None = None
+    scope: CalendarUpdateScope | None = None
+
+
+class CalendarSource(BaseModel):
+    """
+    Kalenderquelle
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    kind: CalendarSourceKind
+    name: StrictStr = Field(
+        ...,
+        description='Anzeigename. Ergänzung zu 03 §3. Standard: Dateiname bzw. Host der URL',
+        min_length=1,
+    )
+    url: StrictStr | None = Field(
+        ..., description='Nur bei ics_url (webcal:// wird als https:// gespeichert)'
+    )
+    last_synced_at: AwareDatetime | None
+    last_error: StrictStr | None = Field(
+        ...,
+        description='Fehler des letzten Abgleichs, null nach Erfolg. Ergänzung zu 03 §3',
+    )
+    readonly: StrictBool
+    event_count: StrictInt = Field(
+        ..., description='Abgeleitet: Termine dieser Quelle (ohne gelöschte)', ge=0
+    )
+
+
+class CalendarSourceCreate(BaseModel):
+    """
+    JSON-Body von POST /calendar/sources für eine ICS-URL. Eine ICS-Datei kommt stattdessen als multipart (Felder file, name). Antwort: IcsImportResult.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    url: StrictStr = Field(
+        ...,
+        description='ICS-URL (Abo, Abgleich alle 6 h und beim Start)',
+        pattern='^(https?|webcal)://',
+    )
+    name: StrictStr | None = Field(None, min_length=1)
+
+
+class CalendarSourceList(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[CalendarSource]
+    next_cursor: StrictStr | None
+
+
+class Device(BaseModel):
+    """
+    Gekoppeltes Gerät. Das Token selbst gibt die API nie aus (gespeichert nur token_hash).
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    name: StrictStr = Field(..., min_length=1)
+    kind: DeviceKind
+    last_seen_at: AwareDatetime | None
+    clock_offset_ms: StrictInt | None
+    app_version: StrictStr | None
+    connected: StrictBool = Field(
+        ..., description='Abgeleitet: hat gerade eine Sync-Verbindung'
+    )
+
+
+class DeviceList(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[Device]
+    next_cursor: StrictStr | None
+
+
+class ElementRemoveData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+
+
+class ElementRemoveOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['element.remove']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: ElementRemoveData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
 
 
 class ExerciseSheet(BaseModel):
@@ -237,6 +1167,118 @@ class ExerciseSheetUpdate(BaseModel):
     due_at: AwareDatetime | None = None
 
 
+class FileReceipt(BaseModel):
+    """
+    Antwort auf PUT /photos/{id}/file und PUT /pages/{id}/pkdrawing
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    sha256: StrictStr = Field(
+        ...,
+        description='SHA-256, hex, Kleinbuchstaben',
+        pattern='^[a-f0-9]{64}$',
+        title='Sha256',
+    )
+    size_bytes: StrictInt = Field(..., ge=1)
+    received_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    duplicate: StrictBool = Field(
+        ...,
+        description='true: dieselbe Datei (gleiches sha256) lag schon vor, nichts geändert',
+    )
+
+
+class FileRef(BaseModel):
+    """
+    Verweis auf eine Datei, die getrennt per HTTP hochgeladen wird (08 §2.3 file_ref / pkdrawing_ref). Der Core prüft sha256 beim Upload.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    sha256: StrictStr = Field(
+        ...,
+        description='SHA-256, hex, Kleinbuchstaben',
+        pattern='^[a-f0-9]{64}$',
+        title='Sha256',
+    )
+    mime: StrictStr = Field(..., examples=['image/heic'], min_length=1)
+    size_bytes: StrictInt = Field(..., ge=1)
+
+
+class GeneralSettings(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    data_dir: StrictStr = Field(
+        ...,
+        description='SG_DATA_DIR, nur lesbar (Änderung über die Umgebung und Neustart)',
+    )
+    content_lang: Lang
+    appearance: Appearance
+
+
+class GeneralSettingsUpdate(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    content_lang: Lang | None = None
+    appearance: Appearance | None = None
+
+
+class IcsEventRef(BaseModel):
+    """
+    Termin in einem Abgleichergebnis (Schlüssel wie tests/fixtures/ics/11-abgleich-erwartung.json)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    event_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    external_uid: StrictStr
+    recurrence_id: StrictStr | None
+    title: StrictStr
+    starts_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    module_id: UUID | None
+    kind: CalendarEventKind
+
+
+class IcsModuleSuggestion(BaseModel):
+    """
+    Vorschlag „neues Modul anlegen?" für unbekannte Titel (F-KAL-02)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    name: StrictStr = Field(
+        ...,
+        description='Vorgeschlagener Modulname, aus dem Titel bereinigt',
+        min_length=1,
+    )
+    kind: CalendarEventKind
+    event_count: StrictInt = Field(..., ge=1)
+    series_event_ids: list[UUID] = Field(
+        ...,
+        description='Je Serie ein Termin. Nach POST /modules: PATCH /calendar/events/{id} mit module_id, scope=serie',
+        min_length=1,
+    )
+
+
+class ImageElementPayload(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    photo_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    crop: BBox | None
+
+
 class Job(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -273,6 +1315,182 @@ class JobList(BaseModel):
     )
     items: list[Job]
     next_cursor: StrictStr | None
+
+
+class LectureSettings(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    microphone_id: StrictStr | None = Field(
+        ..., description='deviceId aus MediaDevices, null = Standardmikrofon'
+    )
+    auto_stop_after_end_min: StrictInt = Field(
+        ..., description='Regel 1: Kalenderende + X min … (Standard 10)', ge=1
+    )
+    auto_stop_quiet_window_min: StrictInt = Field(
+        ..., description='… und X min keine Sprache (Standard 3)', ge=1
+    )
+    auto_stop_hard_after_end_min: StrictInt = Field(
+        ..., description='Regel 2: Kalenderende + X min (Standard 30)', ge=1
+    )
+    auto_stop_silence_min: StrictInt = Field(
+        ..., description='Regel 3: Stille ≥ X min (Standard 15)', ge=1
+    )
+    auto_stop_max_duration_min: StrictInt = Field(
+        ..., description='Regel 4: Maximaldauer (Standard 240)', ge=1
+    )
+    auto_stop_warning_s: StrictInt = Field(
+        ..., description='Hinweis vor dem Stopp (Standard 60)', ge=0
+    )
+    auto_stop_extend_min: StrictInt = Field(
+        ..., description='Verlängerung per Tipp (Standard 15)', ge=1
+    )
+    default_layout: DashboardLayout
+    default_ink_mode: InkMode
+    toolbar_side: ToolbarSide
+
+
+class LectureSettingsUpdate(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    microphone_id: StrictStr | None = Field(
+        None, description='deviceId aus MediaDevices, null = Standardmikrofon'
+    )
+    auto_stop_after_end_min: StrictInt | None = Field(
+        None, description='Regel 1: Kalenderende + X min … (Standard 10)', ge=1
+    )
+    auto_stop_quiet_window_min: StrictInt | None = Field(
+        None, description='… und X min keine Sprache (Standard 3)', ge=1
+    )
+    auto_stop_hard_after_end_min: StrictInt | None = Field(
+        None, description='Regel 2: Kalenderende + X min (Standard 30)', ge=1
+    )
+    auto_stop_silence_min: StrictInt | None = Field(
+        None, description='Regel 3: Stille ≥ X min (Standard 15)', ge=1
+    )
+    auto_stop_max_duration_min: StrictInt | None = Field(
+        None, description='Regel 4: Maximaldauer (Standard 240)', ge=1
+    )
+    auto_stop_warning_s: StrictInt | None = Field(
+        None, description='Hinweis vor dem Stopp (Standard 60)', ge=0
+    )
+    auto_stop_extend_min: StrictInt | None = Field(
+        None, description='Verlängerung per Tipp (Standard 15)', ge=1
+    )
+    default_layout: DashboardLayout | None = None
+    default_ink_mode: InkMode | None = None
+    toolbar_side: ToolbarSide | None = None
+
+
+class Marker(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: MarkerKind
+    t_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    page_id: UUID | None
+    position: MarkerPosition | None
+    source: MarkerSource
+    note: StrictStr | None
+    resolved_at: AwareDatetime | None
+
+
+class MarkerAddData(BaseModel):
+    """
+    Marker vom iPad (F-INK-05) und vom Mac (F-DSH-05, source=mac)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    marker_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: MarkerKind
+    t_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    page_id: UUID | None = None
+    position: MarkerPosition | None = None
+    note: StrictStr | None = None
+    source: ClientDevice
+
+
+class MarkerAddOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    kind: Literal['marker.add']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: MarkerAddData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class MarkerRemoveData(BaseModel):
+    """
+    Rückgängig (⌘Z, F-DSH-05) bzw. Löschen
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    marker_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+
+
+class MarkerRemoveOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    kind: Literal['marker.remove']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: MarkerRemoveData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
 
 
 class Module(BaseModel):
@@ -344,6 +1562,227 @@ class ModuleUpdate(BaseModel):
     description_md: StrictStr | None = None
 
 
+class Notebook(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    title: StrictStr = Field(..., min_length=1)
+    kind: NotebookKind
+    page_count: StrictInt = Field(..., description='Abgeleitet', ge=0)
+
+
+class NotebookCreate(BaseModel):
+    """
+    POST /notebooks. kind fehlt = frei
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    title: StrictStr = Field(..., min_length=1)
+    kind: NotebookKind | None = None
+
+
+class NotebookList(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[Notebook]
+    next_cursor: StrictStr | None
+
+
+class NotebookUpdate(BaseModel):
+    """
+    PATCH /notebooks/{id}
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    title: StrictStr | None = Field(None, min_length=1)
+    module_id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+
+
+class Page(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    notebook_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: UUID | None
+    index: StrictInt = Field(
+        ..., description='Reihenfolge im Notizbuch, 1-basiert', ge=1
+    )
+    template: PageTemplate
+    background_slide_id: UUID | None
+    attached_slide_id: UUID | None
+    width_pt: StrictFloat = Field(..., gt=0.0)
+    height_pt: StrictFloat = Field(..., gt=0.0)
+    version: StrictInt = Field(..., ge=1)
+    has_pkdrawing: StrictBool = Field(
+        ...,
+        description='Abgeleitet: PencilKit-Sicherung liegt vor (GET /pages/{id}/pkdrawing)',
+    )
+
+
+class PageCreateData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    notebook_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: UUID | None = None
+    index: StrictInt = Field(..., ge=1)
+    template: PageTemplate
+    width_pt: StrictFloat = Field(..., gt=0.0)
+    height_pt: StrictFloat = Field(..., gt=0.0)
+    background_slide_id: UUID | None = None
+    attached_slide_id: UUID | None = None
+
+
+class PageCreateOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['page.create']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: PageCreateData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class PageDeleteData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+
+
+class PageDeleteOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['page.delete']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: PageDeleteData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class PageUpdateFields(BaseModel):
+    """
+    Geänderte Felder, mindestens eins
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    index: StrictInt | None = Field(None, ge=1)
+    template: PageTemplate | None = None
+    session_id: UUID | None = None
+    background_slide_id: UUID | None = None
+    attached_slide_id: UUID | None = None
+
+
+class PairResponse(BaseModel):
+    """
+    Antwort auf POST /devices/pair/confirm (201)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    device: Device
+    device_token: StrictStr = Field(
+        ...,
+        description='256 Bit Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben',
+        pattern='^[A-Za-z0-9_-]{43}$',
+    )
+
+
+class PairStartResponse(BaseModel):
+    """
+    Der Code steht NICHT in der Antwort, nur in der Web-App
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    pairing_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    expires_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+
+
+class PairingCode(BaseModel):
+    """
+    Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis pairing.requested)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    pairing_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    code: StrictStr = Field(..., pattern='^[0-9]{6}$')
+    expires_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    device_name: StrictStr | None = Field(
+        ..., description='Name aus pair/start, null bei einem Code für den QR-Weg'
+    )
+    qr_url: StrictStr = Field(
+        ...,
+        examples=['sg://pair?host=192.168.1.20&port=4710&code=482913'],
+        pattern='^sg://pair\\?',
+    )
+
+
 class PdfIngestDeckPayload(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -356,6 +1795,180 @@ class PdfIngestSheetPayload(BaseModel):
         extra='forbid',
     )
     exercise_sheet_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+
+
+class PenSettings(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    double_tap: PencilDoubleTapAction
+    squeeze: PencilSqueezeAction
+    shape_recognition: StrictBool = Field(
+        ..., description='Formerkennung (F-INK-09, ab Phase 3)'
+    )
+    favorite_colors: list[HexColor] = Field(..., max_length=8)
+
+
+class PenSettingsUpdate(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    double_tap: PencilDoubleTapAction | None = None
+    squeeze: PencilSqueezeAction | None = None
+    shape_recognition: StrictBool | None = Field(
+        None, description='Formerkennung (F-INK-09, ab Phase 3)'
+    )
+    favorite_colors: list[HexColor] | None = Field(None, max_length=8)
+
+
+class Photo(BaseModel):
+    """
+    Tafel-Foto (Metadaten). Datei: GET /photos/{id}/file
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    t_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    page_id: UUID | None
+    mime: PhotoMime
+    sha256: StrictStr = Field(
+        ...,
+        description='SHA-256, hex, Kleinbuchstaben',
+        pattern='^[a-f0-9]{64}$',
+        title='Sha256',
+    )
+    size_bytes: StrictInt = Field(..., ge=1)
+    has_file: StrictBool = Field(
+        ..., description='false, bis PUT /photos/{id}/file angekommen ist'
+    )
+    ocr_text: StrictStr | None
+
+
+class PhotoAddData(BaseModel):
+    """
+    Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    photo_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    t_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    page_id: UUID | None = None
+    file_ref: FileRef
+
+
+class PhotoAddOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    kind: Literal['photo.add']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: PhotoAddData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class Recording(BaseModel):
+    """
+    Eine Aufnahme = ein MediaRecorder-Strom. Nach einem Neuladen beginnt eine neue Aufnahme derselben Session (F-SES-05).
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    mime: StrictStr = Field(
+        ...,
+        examples=['audio/webm;codecs=opus', 'audio/mp4'],
+        pattern='^audio/(webm|mp4)(;.*)?$',
+    )
+    codec: AudioCodec
+    started_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    duration_ms: StrictInt | None = Field(
+        ..., description='Länge der Gesamtdatei, gesetzt von audio.finalize', ge=0
+    )
+    state: RecordingState
+    chunks_independent: StrictBool = Field(
+        ...,
+        description='true: jeder Chunk ist eine eigenständige Datei (Recorder je Chunk neu gestartet). false: Chunks ergeben in seq-Reihenfolge einen Bytestrom. Ergänzung, offen bis Spike S4',
+    )
+    chunk_count: StrictInt = Field(
+        ..., description='Abgeleitet: empfangene Chunks', ge=0
+    )
+    last_seq: StrictInt | None = Field(
+        ..., description='Abgeleitet: höchste empfangene seq', ge=0
+    )
+    completed_at: AwareDatetime | None
+
+
+class RecordingCreate(BaseModel):
+    """
+    POST /sessions/{id}/recordings
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    mime: StrictStr = Field(..., pattern='^audio/(webm|mp4)(;.*)?$')
+    codec: AudioCodec
+    started_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    chunks_independent: StrictBool | None = None
 
 
 class Semester(BaseModel):
@@ -406,6 +2019,266 @@ class SemesterList(BaseModel):
     next_cursor: StrictStr | None
 
 
+class Session(BaseModel):
+    """
+    Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem Kalendertermin (null bei spontanen Sessions).
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    calendar_event_id: UUID | None
+    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    slide_deck_id: UUID | None
+    number: StrictInt | None = Field(
+        ..., description='VL-Nummer im Modul (VL 7), Regeln in docs/VERTRAEGE.md', ge=1
+    )
+    title: StrictStr | None
+    state: SessionState
+    started_at: AwareDatetime | None
+    ended_at: AwareDatetime | None
+    stop_reason: StopReason | None
+    started_from: ClientDevice | None
+    processing: dict[str, JobState]
+    review_state: ReviewState
+    planned_starts_at: AwareDatetime | None
+    planned_ends_at: AwareDatetime | None
+
+
+class SessionCreate(BaseModel):
+    """
+    POST /sessions: spontane Session ohne Termin (F-SES-04). Ergebnis im Zustand bereit, danach /start.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    slide_deck_id: UUID | None = None
+    title: StrictStr | None = None
+
+
+class SessionList(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[Session]
+    next_cursor: StrictStr | None
+
+
+class SessionRefData(BaseModel):
+    """
+    session.pause / session.resume
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+
+
+class SessionResumeOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    kind: Literal['session.resume']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: SessionRefData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class SessionStartData(BaseModel):
+    """
+    Unbekannte session_id: der Core legt die Session an (Start offline auf dem iPad, F-SES-02 Schritt 3)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    calendar_event_id: UUID | None = None
+    slide_deck_id: UUID | None = None
+    started_from: ClientDevice
+    started_at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+
+
+class SessionStartOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    kind: Literal['session.start']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: SessionStartData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class SessionStartRequest(BaseModel):
+    """
+    POST /sessions/{id}/start. started_at setzt der Core (Serverzeit).
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    started_from: ClientDevice
+    slide_deck_id: UUID | None = None
+
+
+class SessionStartResult(BaseModel):
+    """
+    ended_session: eine andere Session, die wegen des Starts automatisch beendet wurde (F-SES-02)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session: Session
+    ended_session: Session | None
+
+
+class SessionStopData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    reason: StopReason | None = None
+
+
+class SessionStopOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    kind: Literal['session.stop']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: SessionStopData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class SessionStopRequest(BaseModel):
+    """
+    POST /sessions/{id}/stop. reason fehlt = manuell. absturz_wiederhergestellt setzt nur der Core.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    reason: StopReason | None = None
+
+
+class SessionUpdate(BaseModel):
+    """
+    PATCH /sessions/{id}
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    title: StrictStr | None = None
+    slide_deck_id: UUID | None = None
+
+
+class Settings(BaseModel):
+    """
+    GET /settings: alle Phase-1-Bereiche, fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    general: GeneralSettings
+    lecture: LectureSettings
+    pen: PenSettings
+    data: DataSettings
+
+
+class SettingsUpdate(BaseModel):
+    """
+    PATCH /settings: nur die angegebenen Felder ändern sich. Antwort: Settings
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    general: GeneralSettingsUpdate | None = None
+    lecture: LectureSettingsUpdate | None = None
+    pen: PenSettingsUpdate | None = None
+    data: DataSettingsUpdate | None = None
+
+
+class ShapeElementPayload(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    shape: ShapeKind
+    points: list[Point2] = Field(..., min_length=2)
+    color: StrictStr = Field(
+        ...,
+        description='RGBA als #RRGGBBAA',
+        examples=['#1E2A44FF'],
+        pattern='^#[0-9A-Fa-f]{8}$',
+        title='HexColor',
+    )
+    width: StrictFloat = Field(..., gt=0.0)
+
+
 class Slide(BaseModel):
     """
     Eine Seite eines Foliensatzes. Bilder über GET /slides/{id}/image bzw. /thumb.
@@ -432,6 +2305,47 @@ class Slide(BaseModel):
     vision_summary: StrictStr | None
     title: StrictStr | None
     chapter: StrictStr | None
+
+
+class SlideChangeData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    event_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    slide_id: UUID | None = None
+    slide_index: StrictInt = Field(..., ge=1)
+    t_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    device: ClientDevice
+
+
+class SlideChangeOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    kind: Literal['slide.change']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: SlideChangeData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
 
 
 class SlideDeck(BaseModel):
@@ -476,6 +2390,329 @@ class SlideDeckList(BaseModel):
     next_cursor: StrictStr | None
 
 
+class SlideEvent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    slide_id: UUID | None
+    slide_index: StrictInt = Field(..., ge=1)
+    t_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    device: ClientDevice
+    source: SlideEventSource
+
+
+class StampElementPayload(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    marker_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    marker_kind: MarkerKind
+
+
+class Stroke(BaseModel):
+    """
+    Neutrales Strich-Format (08 §4.1/4.2). points sind Rohkoordinaten VOR transform, bbox gilt NACH transform inklusive halber Breite. dt des ersten Punkts ist 0; t_end_ms − t_start_ms entspricht dem letzten dt. t_start_ms/t_end_ms null außerhalb einer Session.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    client_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    tool: StrokeTool
+    layer: StrokeLayer
+    color: StrictStr = Field(
+        ...,
+        description='RGBA als #RRGGBBAA',
+        examples=['#1E2A44FF'],
+        pattern='^#[0-9A-Fa-f]{8}$',
+        title='HexColor',
+    )
+    width: StrictFloat = Field(..., description='Grundbreite in pt', gt=0.0)
+    created_at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    t_start_ms: SessionMs | None
+    t_end_ms: SessionMs | None
+    transform: list[StrictFloat] = Field(
+        ...,
+        description="Affine Transformation [a, b, c, d, e, f] (CGAffineTransform): x' = a·x + c·y + e, y' = b·x + d·y + f",
+        max_length=6,
+        min_length=6,
+        title='Transform',
+    )
+    bbox: list[StrictFloat] = Field(
+        ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
+    )
+    points: StrictStr = Field(
+        ...,
+        description='Base64 (ohne Zeilenumbrüche) von n ≥ 1 Punkten à 24 Byte: x, y, dt, force, azimuth, altitude als Float32 little-endian (08 §4.2). 24 Byte = genau 32 Base64-Zeichen, daher nie Padding',
+        pattern='^(?:[A-Za-z0-9+/]{32})+$',
+    )
+
+
+class StrokeAddData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stroke: Stroke
+
+
+class StrokeAddOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['stroke.add']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: StrokeAddData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class StrokeRemoveData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    client_ids: list[UUID] = Field(..., min_length=1)
+
+
+class StrokeRemoveOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['stroke.remove']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: StrokeRemoveData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class SyncAck(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['ack']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
+        pattern='^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$',
+        title='SyncStreamId',
+    )
+    seq: StrictInt = Field(..., ge=1)
+
+
+class SyncConnectionInfo(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    client: SyncClientKind
+    device_id: UUID | None
+    connected: StrictBool
+
+
+class SyncError(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['error']
+    code: SyncErrorCode
+    message: StrictStr
+    op_id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr | None = Field(
+        None,
+        description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
+        pattern='^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$',
+        title='SyncStreamId',
+    )
+    retryable: StrictBool = Field(
+        ...,
+        description='Nur mit op_id: true = Operation in der Warteschlange lassen und später erneut senden, false = endgültig abgelehnt, aus der Warteschlange entfernen',
+    )
+    fatal: StrictBool = Field(
+        ..., description='true: der Server schließt die Verbindung direkt danach'
+    )
+    details: dict[str, Any] | None = None
+
+
+class SyncHello(BaseModel):
+    """
+    Erste Nachricht des Clients (08 §2.1). token (Gerätetoken) Pflicht für Verbindungen aus dem Netz, lokal (Web-App) ohne.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['hello']
+    protocol: Literal[1]
+    client: SyncClientKind
+    device_id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    token: StrictStr | None = Field(None, min_length=1)
+    app_version: StrictStr = Field(..., min_length=1)
+    streams: list[SyncStreamPosition]
+
+
+class SyncPairingEvent(BaseModel):
+    """
+    Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['event']
+    name: Literal['pairing.requested']
+    data: PairingCode
+
+
+class SyncPresence(BaseModel):
+    """
+    Was der Client gerade zeigt (ersetzt den vorigen Stand). Das iPad sendet sie bei jedem Seitenwechsel, die Notizen-Spalte folgt ihr (F-DSH-04). Ergänzung zu 08 §2
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['presence']
+    session_id: UUID | None
+    notebook_id: UUID | None
+    page_id: UUID | None
+
+
+class SyncPresenceInfo(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    client: SyncClientKind
+    device_id: UUID | None
+    device_name: StrictStr | None
+    session_id: UUID | None
+    notebook_id: UUID | None
+    page_id: UUID | None
+
+
+class SyncResume(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    stream: StrictStr = Field(
+        ...,
+        description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
+        pattern='^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$',
+        title='SyncStreamId',
+    )
+    from_seq: StrictInt = Field(
+        ...,
+        description='Ab dieser seq sendet der Server die fehlenden Operationen',
+        ge=1,
+    )
+    head_seq: StrictInt = Field(
+        ..., description='Aktuell höchste seq des Stroms. Ergänzung zu 08 §2.1', ge=0
+    )
+    reset: StrictBool = Field(
+        ...,
+        description='true: der Client kennt eine seq, die der Server nicht hat (z. B. nach Wiederherstellung eines Backups). Der Client verwirft seinen Stand des Stroms, lädt per REST neu und abonniert ab dem dortigen stream_seq. from_seq ist dann 1.',
+    )
+
+
+class SyncSessionUpdatedEvent(BaseModel):
+    """
+    Zustand oder Felder einer Session haben sich geändert (auch zeitgesteuert: bereit, verpasst, verarbeitet)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['event']
+    name: Literal['session.updated']
+    data: Session
+
+
+class SyncSubscribed(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['subscribed']
+    resume: list[SyncResume]
+
+
+class SyncWelcome(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['welcome']
+    protocol: Literal[1]
+    server_time: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    server_version: StrictStr
+    device_id: UUID | None
+    resume: list[SyncResume]
+
+
+class TapeElementPayload(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    color: StrictStr = Field(
+        ...,
+        description='RGBA als #RRGGBBAA',
+        examples=['#1E2A44FF'],
+        pattern='^#[0-9A-Fa-f]{8}$',
+        title='HexColor',
+    )
+    covered: StrictBool
+    card_id: UUID | None
+
+
 class Task(BaseModel):
     """
     Teilaufgabe eines Übungsblatts. Zerlegung erst ab Phase 2 (F-ORG-03).
@@ -501,6 +2738,36 @@ class Task(BaseModel):
     solution_text: StrictStr | None
 
 
+class TextElementPayload(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    text: StrictStr
+    size: TextSize
+
+
+class TrashParent(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: TrashKind
+    title: StrictStr
+
+
+class TrashRestoreResult(BaseModel):
+    """
+    POST /trash/{id}/restore, auch für „Rückgängig" im Toast
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: TrashKind
+    restored_count: StrictInt = Field(..., ge=1)
+
+
 class UploadResult(BaseModel):
     """
     Antwort auf POST /slide-decks und POST /exercise-sheets. duplicate=true: Datei mit gleichem sha256 existiert schon, es wurde nichts angelegt (F-ORG-02 Sonderfall). id ist die ID des neuen bzw. bereits vorhandenen Objekts.
@@ -513,6 +2780,382 @@ class UploadResult(BaseModel):
     duplicate: StrictBool
 
 
+class AudioFinalizeResult(BaseModel):
+    """
+    job.result von audio.finalize. state ist nie laeuft
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    recording_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    state: RecordingState
+    audio_duration_ms: StrictInt = Field(..., description='Länge von full.m4a', ge=0)
+    chunk_count: StrictInt = Field(..., ge=0)
+    missing_seqs: list[MissingSeq]
+    gaps: list[AudioGap]
+    file_size_bytes: StrictInt = Field(..., ge=0)
+    duration_ms: StrictInt = Field(..., description='Laufzeit des Jobs', ge=0)
+
+
+class BackupOverview(BaseModel):
+    """
+    GET /backups: Status und Läufe, neueste zuerst
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    status: BackupStatus
+    items: list[BackupRun]
+    next_cursor: StrictStr | None
+
+
+class DrawingSnapshotData(BaseModel):
+    """
+    Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    pkdrawing_ref: FileRef
+
+
+class DrawingSnapshotOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['drawing.snapshot']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: DrawingSnapshotData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class IcsImportResult(BaseModel):
+    """
+    Antwort auf POST /calendar/sources (201) und POST /calendar/sources/{id}/sync (200). Der Abgleich läuft synchron im Core, nicht als Job.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    source: CalendarSource
+    counts: IcsImportCounts
+    neu: list[IcsEventRef]
+    geaendert: list[IcsEventRef]
+    entfallen: list[IcsEventRef]
+    zugeordnet: list[IcsEventRef]
+    module_suggestions: list[IcsModuleSuggestion]
+    warnings: list[IcsWarning]
+
+
+class ImageElement(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: Literal['image']
+    frame: list[StrictFloat] = Field(
+        ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
+    )
+    z: StrictInt
+    t_ms: SessionMs | None
+    payload: ImageElementPayload
+
+
+class NotebookPages(BaseModel):
+    """
+    GET /notebooks/{id}/pages, nach index sortiert, ohne gelöschte Seiten
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    notebook_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream_seq: StrictInt = Field(
+        ..., description='seq des Stroms notebook:<id> zu diesem Stand', ge=0
+    )
+    items: list[Page]
+
+
+class PageStrokes(BaseModel):
+    """
+    GET /pages/{id}/strokes: alle nicht gelöschten Striche, nach created_at sortiert
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream_seq: StrictInt = Field(
+        ..., description='seq des Stroms notebook:<id> zu diesem Stand', ge=0
+    )
+    strokes: list[Stroke]
+
+
+class PageUpdateData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    fields: PageUpdateFields
+    version: StrictInt = Field(
+        ...,
+        description='Version, auf der die Änderung beruht. Der Core setzt danach version + 1',
+        ge=1,
+    )
+
+
+class PageUpdateOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['page.update']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: PageUpdateData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class SessionPauseOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    kind: Literal['session.pause']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: SessionRefData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class SessionSnapshot(BaseModel):
+    """
+    GET /sessions/{id}/snapshot: Live-Stand für Dashboard und iPad (ohne gelöschte Objekte, nach t_ms sortiert)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session: Session
+    slide_events: list[SlideEvent]
+    markers: list[Marker]
+    photos: list[Photo]
+    recordings: list[Recording]
+    stream_seq: StrictInt = Field(
+        ...,
+        description='seq des Stroms session:<id>, zu der dieser Stand gehört. Danach per Sync ab stream_seq + 1',
+        ge=0,
+    )
+
+
+class ShapeElement(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: Literal['shape']
+    frame: list[StrictFloat] = Field(
+        ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
+    )
+    z: StrictInt
+    t_ms: SessionMs | None
+    payload: ShapeElementPayload
+
+
+class StampElement(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: Literal['stamp']
+    frame: list[StrictFloat] = Field(
+        ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
+    )
+    z: StrictInt
+    t_ms: SessionMs | None
+    payload: StampElementPayload
+
+
+class SyncConnectionEvent(BaseModel):
+    """
+    Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['event']
+    name: Literal['device.connection']
+    data: SyncConnectionInfo
+
+
+class SyncPresenceEvent(BaseModel):
+    """
+    Weitergabe von presence eines anderen Clients
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['event']
+    name: Literal['presence']
+    data: SyncPresenceInfo
+
+
+class TapeElement(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: Literal['tape']
+    frame: list[StrictFloat] = Field(
+        ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
+    )
+    z: StrictInt
+    t_ms: SessionMs | None
+    payload: TapeElementPayload
+
+
+class TextElement(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: Literal['text']
+    frame: list[StrictFloat] = Field(
+        ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
+    )
+    z: StrictInt
+    t_ms: SessionMs | None
+    payload: TextElementPayload
+
+
+class TrashItem(BaseModel):
+    """
+    Direkt gelöschtes Objekt im Papierkorb (F-DAT-04). Mitgelöschte Teile erscheinen nicht einzeln.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    kind: TrashKind
+    title: StrictStr = Field(
+        ..., description='Anzeigename (Titel, Name oder z. B. „Seite 3")'
+    )
+    deleted_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    purge_at: AwareDatetime = Field(..., description='ISO 8601, UTC', title='Timestamp')
+    parent: TrashParent | None
+    dependent_count: StrictInt = Field(
+        ...,
+        description='Mitgelöschte abhängige Objekte, die mit wiederhergestellt werden',
+        ge=0,
+    )
+
+
+class TrashList(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[TrashItem]
+    next_cursor: StrictStr | None
+
+
+class ElementUpsertData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    element: TextElement | ImageElement | ShapeElement | TapeElement | StampElement = (
+        Field(
+            ...,
+            description='Seitenelement (08 §4.4), unterschieden über kind. frame [x, y, w, h] in pt. crop bei image: [x, y, w, h] relativ zum Bild (0–1), null = ganzes Bild. Phase 1 nutzt image (Tafel-Foto) und stamp (Marker-Stempel).',
+            title='PageElement',
+        )
+    )
+
+
+class ElementUpsertOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['element.upsert']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: ElementUpsertData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class PageDetail(BaseModel):
+    """
+    GET /pages/{id}: Seite mit Elementen (ohne gelöschte, nach z sortiert)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page: Page
+    elements: list[TextElement | ImageElement | ShapeElement | TapeElement | StampElement]
+    stream_seq: StrictInt = Field(..., ge=0)
+
+
 class SchemaBundle(BaseModel):
     """
     GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
@@ -520,8 +3163,87 @@ class SchemaBundle(BaseModel):
 
     ApiError_1: ApiError | None = Field(None, alias='ApiError')
     ApiErrorBody_1: ApiErrorBody | None = Field(None, alias='ApiErrorBody')
+    Appearance_1: Appearance | None = Field(None, alias='Appearance')
+    AudioChunk_1: AudioChunk | None = Field(None, alias='AudioChunk')
+    AudioChunkMeta_1: AudioChunkMeta | None = Field(None, alias='AudioChunkMeta')
+    AudioCodec_1: AudioCodec | None = Field(None, alias='AudioCodec')
+    AudioFinalizePayload_1: AudioFinalizePayload | None = Field(
+        None, alias='AudioFinalizePayload'
+    )
+    AudioFinalizeResult_1: AudioFinalizeResult | None = Field(
+        None, alias='AudioFinalizeResult'
+    )
+    AudioGap_1: AudioGap | None = Field(None, alias='AudioGap')
+    AudioGapReason_1: AudioGapReason | None = Field(None, alias='AudioGapReason')
     BBox: list[StrictFloat] | None = Field(
         None, description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
+    )
+    BackupOverview_1: BackupOverview | None = Field(None, alias='BackupOverview')
+    BackupRun_1: BackupRun | None = Field(None, alias='BackupRun')
+    BackupState_1: BackupState | None = Field(None, alias='BackupState')
+    BackupStatus_1: BackupStatus | None = Field(None, alias='BackupStatus')
+    BackupTrigger_1: BackupTrigger | None = Field(None, alias='BackupTrigger')
+    CalendarAssignment_1: CalendarAssignment | None = Field(
+        None, alias='CalendarAssignment'
+    )
+    CalendarEvent_1: CalendarEvent | None = Field(None, alias='CalendarEvent')
+    CalendarEventKind_1: CalendarEventKind | None = Field(
+        None, alias='CalendarEventKind'
+    )
+    CalendarEventList_1: CalendarEventList | None = Field(
+        None, alias='CalendarEventList'
+    )
+    CalendarEventUpdate_1: CalendarEventUpdate | None = Field(
+        None, alias='CalendarEventUpdate'
+    )
+    CalendarSource_1: CalendarSource | None = Field(None, alias='CalendarSource')
+    CalendarSourceCreate_1: CalendarSourceCreate | None = Field(
+        None, alias='CalendarSourceCreate'
+    )
+    CalendarSourceKind_1: CalendarSourceKind | None = Field(
+        None, alias='CalendarSourceKind'
+    )
+    CalendarSourceList_1: CalendarSourceList | None = Field(
+        None, alias='CalendarSourceList'
+    )
+    CalendarUpdateScope_1: CalendarUpdateScope | None = Field(
+        None, alias='CalendarUpdateScope'
+    )
+    ClientDevice_1: ClientDevice | None = Field(None, alias='ClientDevice')
+    ColumnWidths: list[ColumnWidth] | None = Field(
+        None,
+        description='Spaltenbreiten Folie | Übung | Notizen in Prozent, Summe 100',
+        max_length=3,
+        min_length=3,
+        title='ColumnWidths',
+    )
+    DashboardLayout_1: DashboardLayout | None = Field(None, alias='DashboardLayout')
+    DataSettings_1: DataSettings | None = Field(None, alias='DataSettings')
+    DataSettingsUpdate_1: DataSettingsUpdate | None = Field(
+        None, alias='DataSettingsUpdate'
+    )
+    Device_1: Device | None = Field(None, alias='Device')
+    DeviceKind_1: DeviceKind | None = Field(None, alias='DeviceKind')
+    DeviceList_1: DeviceList | None = Field(None, alias='DeviceList')
+    DrawingSnapshotData_1: DrawingSnapshotData | None = Field(
+        None, alias='DrawingSnapshotData'
+    )
+    DrawingSnapshotOp_1: DrawingSnapshotOp | None = Field(
+        None, alias='DrawingSnapshotOp'
+    )
+    ElementRemoveData_1: ElementRemoveData | None = Field(
+        None, alias='ElementRemoveData'
+    )
+    ElementRemoveOp_1: ElementRemoveOp | None = Field(None, alias='ElementRemoveOp')
+    ElementUpsertData_1: ElementUpsertData | None = Field(
+        None, alias='ElementUpsertData'
+    )
+    ElementUpsertOp_1: ElementUpsertOp | None = Field(None, alias='ElementUpsertOp')
+    EpochMs: StrictInt | None = Field(
+        None,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
     )
     ExerciseSheet_1: ExerciseSheet | None = Field(None, alias='ExerciseSheet')
     ExerciseSheetList_1: ExerciseSheetList | None = Field(
@@ -530,19 +3252,94 @@ class SchemaBundle(BaseModel):
     ExerciseSheetUpdate_1: ExerciseSheetUpdate | None = Field(
         None, alias='ExerciseSheetUpdate'
     )
+    FileReceipt_1: FileReceipt | None = Field(None, alias='FileReceipt')
+    FileRef_1: FileRef | None = Field(None, alias='FileRef')
+    GeneralSettings_1: GeneralSettings | None = Field(None, alias='GeneralSettings')
+    GeneralSettingsUpdate_1: GeneralSettingsUpdate | None = Field(
+        None, alias='GeneralSettingsUpdate'
+    )
     Health_1: Health | None = Field(None, alias='Health')
+    HexColor: StrictStr | None = Field(
+        None,
+        description='RGBA als #RRGGBBAA',
+        examples=['#1E2A44FF'],
+        pattern='^#[0-9A-Fa-f]{8}$',
+        title='HexColor',
+    )
+    IcsEventRef_1: IcsEventRef | None = Field(None, alias='IcsEventRef')
+    IcsImportCounts_1: IcsImportCounts | None = Field(None, alias='IcsImportCounts')
+    IcsImportResult_1: IcsImportResult | None = Field(None, alias='IcsImportResult')
+    IcsModuleSuggestion_1: IcsModuleSuggestion | None = Field(
+        None, alias='IcsModuleSuggestion'
+    )
+    IcsWarning_1: IcsWarning | None = Field(None, alias='IcsWarning')
+    ImageElement_1: ImageElement | None = Field(None, alias='ImageElement')
+    ImageElementPayload_1: ImageElementPayload | None = Field(
+        None, alias='ImageElementPayload'
+    )
     IngestState_1: IngestState | None = Field(None, alias='IngestState')
+    InkMode_1: InkMode | None = Field(None, alias='InkMode')
     IsoDate: date | None = Field(None, title='IsoDate')
     Job_1: Job | None = Field(None, alias='Job')
     JobList_1: JobList | None = Field(None, alias='JobList')
     JobState_1: JobState | None = Field(None, alias='JobState')
     JobType_1: JobType | None = Field(None, alias='JobType')
     Lang_1: Lang | None = Field(None, alias='Lang')
+    LectureSettings_1: LectureSettings | None = Field(None, alias='LectureSettings')
+    LectureSettingsUpdate_1: LectureSettingsUpdate | None = Field(
+        None, alias='LectureSettingsUpdate'
+    )
+    Marker_1: Marker | None = Field(None, alias='Marker')
+    MarkerAddData_1: MarkerAddData | None = Field(None, alias='MarkerAddData')
+    MarkerAddOp_1: MarkerAddOp | None = Field(None, alias='MarkerAddOp')
+    MarkerKind_1: MarkerKind | None = Field(None, alias='MarkerKind')
+    MarkerPosition_1: MarkerPosition | None = Field(None, alias='MarkerPosition')
+    MarkerRemoveData_1: MarkerRemoveData | None = Field(None, alias='MarkerRemoveData')
+    MarkerRemoveOp_1: MarkerRemoveOp | None = Field(None, alias='MarkerRemoveOp')
+    MarkerSource_1: MarkerSource | None = Field(None, alias='MarkerSource')
     Module_1: Module | None = Field(None, alias='Module')
     ModuleColor_1: ModuleColor | None = Field(None, alias='ModuleColor')
     ModuleCreate_1: ModuleCreate | None = Field(None, alias='ModuleCreate')
     ModuleList_1: ModuleList | None = Field(None, alias='ModuleList')
+    ModuleSettings_1: ModuleSettings | None = Field(None, alias='ModuleSettings')
+    ModuleSettingsUpdate_1: ModuleSettingsUpdate | None = Field(
+        None, alias='ModuleSettingsUpdate'
+    )
     ModuleUpdate_1: ModuleUpdate | None = Field(None, alias='ModuleUpdate')
+    Notebook_1: Notebook | None = Field(None, alias='Notebook')
+    NotebookCreate_1: NotebookCreate | None = Field(None, alias='NotebookCreate')
+    NotebookKind_1: NotebookKind | None = Field(None, alias='NotebookKind')
+    NotebookList_1: NotebookList | None = Field(None, alias='NotebookList')
+    NotebookPages_1: NotebookPages | None = Field(None, alias='NotebookPages')
+    NotebookStreamId: StrictStr | None = Field(
+        None,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    NotebookUpdate_1: NotebookUpdate | None = Field(None, alias='NotebookUpdate')
+    Page_1: Page | None = Field(None, alias='Page')
+    PageCreateData_1: PageCreateData | None = Field(None, alias='PageCreateData')
+    PageCreateOp_1: PageCreateOp | None = Field(None, alias='PageCreateOp')
+    PageDeleteData_1: PageDeleteData | None = Field(None, alias='PageDeleteData')
+    PageDeleteOp_1: PageDeleteOp | None = Field(None, alias='PageDeleteOp')
+    PageDetail_1: PageDetail | None = Field(None, alias='PageDetail')
+    PageElement: (
+        TextElement | ImageElement | ShapeElement | TapeElement | StampElement | None
+    ) = Field(None, description='Seitenelement (08 §4.4), unterschieden über kind. frame [x, y, w, h] in pt. crop bei image: [x, y, w, h] relativ zum Bild (0–1), null = ganzes Bild. Phase 1 nutzt image (Tafel-Foto) und stamp (Marker-Stempel).', title='PageElement')
+    PageStrokes_1: PageStrokes | None = Field(None, alias='PageStrokes')
+    PageTemplate_1: PageTemplate | None = Field(None, alias='PageTemplate')
+    PageUpdateData_1: PageUpdateData | None = Field(None, alias='PageUpdateData')
+    PageUpdateFields_1: PageUpdateFields | None = Field(None, alias='PageUpdateFields')
+    PageUpdateOp_1: PageUpdateOp | None = Field(None, alias='PageUpdateOp')
+    PairConfirmRequest_1: PairConfirmRequest | None = Field(
+        None, alias='PairConfirmRequest'
+    )
+    PairResponse_1: PairResponse | None = Field(None, alias='PairResponse')
+    PairStartRequest_1: PairStartRequest | None = Field(None, alias='PairStartRequest')
+    PairStartResponse_1: PairStartResponse | None = Field(
+        None, alias='PairStartResponse'
+    )
+    PairingCode_1: PairingCode | None = Field(None, alias='PairingCode')
     PdfIngestDeckPayload_1: PdfIngestDeckPayload | None = Field(
         None, alias='PdfIngestDeckPayload'
     )
@@ -555,23 +3352,260 @@ class SchemaBundle(BaseModel):
     PdfIngestSheetPayload_1: PdfIngestSheetPayload | None = Field(
         None, alias='PdfIngestSheetPayload'
     )
+    PenSettings_1: PenSettings | None = Field(None, alias='PenSettings')
+    PenSettingsUpdate_1: PenSettingsUpdate | None = Field(
+        None, alias='PenSettingsUpdate'
+    )
+    PencilDoubleTapAction_1: PencilDoubleTapAction | None = Field(
+        None, alias='PencilDoubleTapAction'
+    )
+    PencilSqueezeAction_1: PencilSqueezeAction | None = Field(
+        None, alias='PencilSqueezeAction'
+    )
+    Photo_1: Photo | None = Field(None, alias='Photo')
+    PhotoAddData_1: PhotoAddData | None = Field(None, alias='PhotoAddData')
+    PhotoAddOp_1: PhotoAddOp | None = Field(None, alias='PhotoAddOp')
+    PhotoMime_1: PhotoMime | None = Field(None, alias='PhotoMime')
+    Point2: list[StrictFloat] | None = Field(
+        None, description='[x, y] in pt', max_length=2, min_length=2, title='Point2'
+    )
+    Recording_1: Recording | None = Field(None, alias='Recording')
+    RecordingComplete_1: RecordingComplete | None = Field(
+        None, alias='RecordingComplete'
+    )
+    RecordingCreate_1: RecordingCreate | None = Field(None, alias='RecordingCreate')
+    RecordingState_1: RecordingState | None = Field(None, alias='RecordingState')
+    ReviewState_1: ReviewState | None = Field(None, alias='ReviewState')
     Semester_1: Semester | None = Field(None, alias='Semester')
     SemesterCreate_1: SemesterCreate | None = Field(None, alias='SemesterCreate')
     SemesterList_1: SemesterList | None = Field(None, alias='SemesterList')
     SemesterUpdate_1: SemesterUpdate | None = Field(None, alias='SemesterUpdate')
+    Session_1: Session | None = Field(None, alias='Session')
+    SessionCreate_1: SessionCreate | None = Field(None, alias='SessionCreate')
+    SessionList_1: SessionList | None = Field(None, alias='SessionList')
+    SessionMs: StrictInt | None = Field(
+        None,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    SessionPauseOp_1: SessionPauseOp | None = Field(None, alias='SessionPauseOp')
+    SessionProcessing: dict[str, JobState] | None = None
+    SessionRefData_1: SessionRefData | None = Field(None, alias='SessionRefData')
+    SessionResumeOp_1: SessionResumeOp | None = Field(None, alias='SessionResumeOp')
+    SessionSnapshot_1: SessionSnapshot | None = Field(None, alias='SessionSnapshot')
+    SessionStartData_1: SessionStartData | None = Field(None, alias='SessionStartData')
+    SessionStartOp_1: SessionStartOp | None = Field(None, alias='SessionStartOp')
+    SessionStartRequest_1: SessionStartRequest | None = Field(
+        None, alias='SessionStartRequest'
+    )
+    SessionStartResult_1: SessionStartResult | None = Field(
+        None, alias='SessionStartResult'
+    )
+    SessionState_1: SessionState | None = Field(None, alias='SessionState')
+    SessionStopData_1: SessionStopData | None = Field(None, alias='SessionStopData')
+    SessionStopOp_1: SessionStopOp | None = Field(None, alias='SessionStopOp')
+    SessionStopRequest_1: SessionStopRequest | None = Field(
+        None, alias='SessionStopRequest'
+    )
+    SessionStreamId: StrictStr | None = Field(
+        None,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    SessionUpdate_1: SessionUpdate | None = Field(None, alias='SessionUpdate')
+    Settings_1: Settings | None = Field(None, alias='Settings')
+    SettingsUpdate_1: SettingsUpdate | None = Field(None, alias='SettingsUpdate')
+    Sha256: StrictStr | None = Field(
+        None,
+        description='SHA-256, hex, Kleinbuchstaben',
+        pattern='^[a-f0-9]{64}$',
+        title='Sha256',
+    )
+    ShapeElement_1: ShapeElement | None = Field(None, alias='ShapeElement')
+    ShapeElementPayload_1: ShapeElementPayload | None = Field(
+        None, alias='ShapeElementPayload'
+    )
+    ShapeKind_1: ShapeKind | None = Field(None, alias='ShapeKind')
     Slide_1: Slide | None = Field(None, alias='Slide')
+    SlideChangeData_1: SlideChangeData | None = Field(None, alias='SlideChangeData')
+    SlideChangeOp_1: SlideChangeOp | None = Field(None, alias='SlideChangeOp')
     SlideDeck_1: SlideDeck | None = Field(None, alias='SlideDeck')
     SlideDeckDetail_1: SlideDeckDetail | None = Field(None, alias='SlideDeckDetail')
     SlideDeckList_1: SlideDeckList | None = Field(None, alias='SlideDeckList')
     SlideDeckUpdate_1: SlideDeckUpdate | None = Field(None, alias='SlideDeckUpdate')
+    SlideEvent_1: SlideEvent | None = Field(None, alias='SlideEvent')
+    SlideEventSource_1: SlideEventSource | None = Field(None, alias='SlideEventSource')
+    StampElement_1: StampElement | None = Field(None, alias='StampElement')
+    StampElementPayload_1: StampElementPayload | None = Field(
+        None, alias='StampElementPayload'
+    )
+    StopReason_1: StopReason | None = Field(None, alias='StopReason')
+    Stroke_1: Stroke | None = Field(None, alias='Stroke')
+    StrokeAddData_1: StrokeAddData | None = Field(None, alias='StrokeAddData')
+    StrokeAddOp_1: StrokeAddOp | None = Field(None, alias='StrokeAddOp')
+    StrokeLayer_1: StrokeLayer | None = Field(None, alias='StrokeLayer')
+    StrokeRemoveData_1: StrokeRemoveData | None = Field(None, alias='StrokeRemoveData')
+    StrokeRemoveOp_1: StrokeRemoveOp | None = Field(None, alias='StrokeRemoveOp')
+    StrokeTool_1: StrokeTool | None = Field(None, alias='StrokeTool')
+    SyncAck_1: SyncAck | None = Field(None, alias='SyncAck')
+    SyncClientKind_1: SyncClientKind | None = Field(None, alias='SyncClientKind')
+    SyncClientMessage: (
+        SyncHello
+        | SyncSubscribe
+        | SyncUnsubscribe
+        | SyncTimePing
+        | SyncTimeOffset
+        | SyncPing
+        | SyncPresence
+        | PageCreateOp
+        | PageUpdateOp
+        | PageDeleteOp
+        | StrokeAddOp
+        | StrokeRemoveOp
+        | ElementUpsertOp
+        | ElementRemoveOp
+        | DrawingSnapshotOp
+        | SessionStartOp
+        | SessionPauseOp
+        | SessionResumeOp
+        | SessionStopOp
+        | SlideChangeOp
+        | MarkerAddOp
+        | MarkerRemoveOp
+        | PhotoAddOp
+        | None
+    ) = Field(None, description='Alle Nachrichten Client → Server', title='SyncClientMessage')
+    SyncConnectionEvent_1: SyncConnectionEvent | None = Field(
+        None, alias='SyncConnectionEvent'
+    )
+    SyncConnectionInfo_1: SyncConnectionInfo | None = Field(
+        None, alias='SyncConnectionInfo'
+    )
+    SyncError_1: SyncError | None = Field(None, alias='SyncError')
+    SyncErrorCode_1: SyncErrorCode | None = Field(None, alias='SyncErrorCode')
+    SyncEvent: (
+        SyncSessionUpdatedEvent
+        | SyncPresenceEvent
+        | SyncConnectionEvent
+        | SyncPairingEvent
+        | None
+    ) = Field(None, description='Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert', title='SyncEvent')
+    SyncHello_1: SyncHello | None = Field(None, alias='SyncHello')
+    SyncOp: (
+        PageCreateOp
+        | PageUpdateOp
+        | PageDeleteOp
+        | StrokeAddOp
+        | StrokeRemoveOp
+        | ElementUpsertOp
+        | ElementRemoveOp
+        | DrawingSnapshotOp
+        | SessionStartOp
+        | SessionPauseOp
+        | SessionResumeOp
+        | SessionStopOp
+        | SlideChangeOp
+        | MarkerAddOp
+        | MarkerRemoveOp
+        | PhotoAddOp
+        | None
+    ) = Field(None, description='Operation (08 §2.3), unterschieden über kind. Client → Server ohne seq/origin, Server → Client mit seq und origin.', title='SyncOp')
+    SyncOrigin_1: SyncOrigin | None = Field(None, alias='SyncOrigin')
+    SyncPairingEvent_1: SyncPairingEvent | None = Field(None, alias='SyncPairingEvent')
+    SyncPing_1: SyncPing | None = Field(None, alias='SyncPing')
+    SyncPong_1: SyncPong | None = Field(None, alias='SyncPong')
+    SyncPresence_1: SyncPresence | None = Field(None, alias='SyncPresence')
+    SyncPresenceEvent_1: SyncPresenceEvent | None = Field(
+        None, alias='SyncPresenceEvent'
+    )
+    SyncPresenceInfo_1: SyncPresenceInfo | None = Field(None, alias='SyncPresenceInfo')
+    SyncResume_1: SyncResume | None = Field(None, alias='SyncResume')
+    SyncServerMessage: (
+        SyncWelcome
+        | SyncSubscribed
+        | SyncAck
+        | SyncTimePong
+        | SyncPong
+        | SyncError
+        | PageCreateOp
+        | PageUpdateOp
+        | PageDeleteOp
+        | StrokeAddOp
+        | StrokeRemoveOp
+        | ElementUpsertOp
+        | ElementRemoveOp
+        | DrawingSnapshotOp
+        | SessionStartOp
+        | SessionPauseOp
+        | SessionResumeOp
+        | SessionStopOp
+        | SlideChangeOp
+        | MarkerAddOp
+        | MarkerRemoveOp
+        | PhotoAddOp
+        | SyncSessionUpdatedEvent
+        | SyncPresenceEvent
+        | SyncConnectionEvent
+        | SyncPairingEvent
+        | None
+    ) = Field(None, description='Alle Nachrichten Server → Client', title='SyncServerMessage')
+    SyncSessionUpdatedEvent_1: SyncSessionUpdatedEvent | None = Field(
+        None, alias='SyncSessionUpdatedEvent'
+    )
+    SyncStreamId: StrictStr | None = Field(
+        None,
+        description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
+        pattern='^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$',
+        title='SyncStreamId',
+    )
+    SyncStreamPosition_1: SyncStreamPosition | None = Field(
+        None, alias='SyncStreamPosition'
+    )
+    SyncSubscribe_1: SyncSubscribe | None = Field(None, alias='SyncSubscribe')
+    SyncSubscribed_1: SyncSubscribed | None = Field(None, alias='SyncSubscribed')
+    SyncTimeOffset_1: SyncTimeOffset | None = Field(None, alias='SyncTimeOffset')
+    SyncTimePing_1: SyncTimePing | None = Field(None, alias='SyncTimePing')
+    SyncTimePong_1: SyncTimePong | None = Field(None, alias='SyncTimePong')
+    SyncUnsubscribe_1: SyncUnsubscribe | None = Field(None, alias='SyncUnsubscribe')
+    SyncWelcome_1: SyncWelcome | None = Field(None, alias='SyncWelcome')
+    TapeElement_1: TapeElement | None = Field(None, alias='TapeElement')
+    TapeElementPayload_1: TapeElementPayload | None = Field(
+        None, alias='TapeElementPayload'
+    )
     Task_1: Task | None = Field(None, alias='Task')
     TextBlock_1: TextBlock | None = Field(None, alias='TextBlock')
+    TextElement_1: TextElement | None = Field(None, alias='TextElement')
+    TextElementPayload_1: TextElementPayload | None = Field(
+        None, alias='TextElementPayload'
+    )
+    TextSize_1: TextSize | None = Field(None, alias='TextSize')
     Timestamp: AwareDatetime | None = Field(
         None, description='ISO 8601, UTC', title='Timestamp'
+    )
+    ToolbarSide_1: ToolbarSide | None = Field(None, alias='ToolbarSide')
+    Transform: list[StrictFloat] | None = Field(
+        None,
+        description="Affine Transformation [a, b, c, d, e, f] (CGAffineTransform): x' = a·x + c·y + e, y' = b·x + d·y + f",
+        max_length=6,
+        min_length=6,
+        title='Transform',
+    )
+    TrashItem_1: TrashItem | None = Field(None, alias='TrashItem')
+    TrashKind_1: TrashKind | None = Field(None, alias='TrashKind')
+    TrashList_1: TrashList | None = Field(None, alias='TrashList')
+    TrashParent_1: TrashParent | None = Field(None, alias='TrashParent')
+    TrashRestoreResult_1: TrashRestoreResult | None = Field(
+        None, alias='TrashRestoreResult'
     )
     UploadResult_1: UploadResult | None = Field(None, alias='UploadResult')
     Uuid: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
 
 
 # Union-Typen (für Validierung: pydantic.TypeAdapter(<Typ>))
+type PageElement = TextElement | ImageElement | ShapeElement | TapeElement | StampElement
 type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload
+type SyncClientMessage = SyncHello | SyncSubscribe | SyncUnsubscribe | SyncTimePing | SyncTimeOffset | SyncPing | SyncPresence | SyncOp
+type SyncEvent = SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent
+type SyncOp = PageCreateOp | PageUpdateOp | PageDeleteOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp
+type SyncServerMessage = SyncWelcome | SyncSubscribed | SyncAck | SyncOp | SyncTimePong | SyncPong | SyncError | SyncEvent

@@ -1,0 +1,20 @@
+{
+  "type": "op",
+  "op_id": "019a4e14-0000-7000-8000-000000000901",
+  "stream": "notebook:019a4e14-0000-7000-8000-000000000050",
+  "kind": "page.create",
+  "at": 1762240562123,
+  "clock_uncertain": false,
+  "data": {
+    "page_id": "019a4e14-0000-7000-8000-000000000051",
+    "notebook_id": "019a4e14-0000-7000-8000-000000000050",
+    "session_id": "019a4e14-0000-7000-8000-000000000030",
+    "index": 3,
+    "template": "kariert",
+    "width_pt": 595,
+    "height_pt": 842,
+    "attached_slide_id": "019a4e14-0000-7000-8000-000000000041"
+  },
+  "seq": 1833,
+  "origin": "ipad"
+}

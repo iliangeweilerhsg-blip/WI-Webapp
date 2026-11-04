@@ -1,0 +1,14 @@
+{
+  "id": "019a4e14-0000-7000-8000-000000000020",
+  "user_id": "019a4e14-0000-7000-8000-000000000001",
+  "created_at": "2026-11-04T07:15:00Z",
+  "updated_at": "2026-11-04T07:15:00Z",
+  "deleted_at": null,
+  "kind": "ics_file",
+  "name": "stundenplan.ics",
+  "url": null,
+  "last_synced_at": "2026-11-04T07:15:00Z",
+  "last_error": null,
+  "readonly": true,
+  "event_count": 42
+}

@@ -11,8 +11,122 @@
     "ApiErrorBody": {
       "$ref": "#/$defs/ApiErrorBody"
     },
+    "Appearance": {
+      "$ref": "#/$defs/Appearance"
+    },
+    "AudioChunk": {
+      "$ref": "#/$defs/AudioChunk"
+    },
+    "AudioChunkMeta": {
+      "$ref": "#/$defs/AudioChunkMeta"
+    },
+    "AudioCodec": {
+      "$ref": "#/$defs/AudioCodec"
+    },
+    "AudioFinalizePayload": {
+      "$ref": "#/$defs/AudioFinalizePayload"
+    },
+    "AudioFinalizeResult": {
+      "$ref": "#/$defs/AudioFinalizeResult"
+    },
+    "AudioGap": {
+      "$ref": "#/$defs/AudioGap"
+    },
+    "AudioGapReason": {
+      "$ref": "#/$defs/AudioGapReason"
+    },
     "BBox": {
       "$ref": "#/$defs/BBox"
+    },
+    "BackupOverview": {
+      "$ref": "#/$defs/BackupOverview"
+    },
+    "BackupRun": {
+      "$ref": "#/$defs/BackupRun"
+    },
+    "BackupState": {
+      "$ref": "#/$defs/BackupState"
+    },
+    "BackupStatus": {
+      "$ref": "#/$defs/BackupStatus"
+    },
+    "BackupTrigger": {
+      "$ref": "#/$defs/BackupTrigger"
+    },
+    "CalendarAssignment": {
+      "$ref": "#/$defs/CalendarAssignment"
+    },
+    "CalendarEvent": {
+      "$ref": "#/$defs/CalendarEvent"
+    },
+    "CalendarEventKind": {
+      "$ref": "#/$defs/CalendarEventKind"
+    },
+    "CalendarEventList": {
+      "$ref": "#/$defs/CalendarEventList"
+    },
+    "CalendarEventUpdate": {
+      "$ref": "#/$defs/CalendarEventUpdate"
+    },
+    "CalendarSource": {
+      "$ref": "#/$defs/CalendarSource"
+    },
+    "CalendarSourceCreate": {
+      "$ref": "#/$defs/CalendarSourceCreate"
+    },
+    "CalendarSourceKind": {
+      "$ref": "#/$defs/CalendarSourceKind"
+    },
+    "CalendarSourceList": {
+      "$ref": "#/$defs/CalendarSourceList"
+    },
+    "CalendarUpdateScope": {
+      "$ref": "#/$defs/CalendarUpdateScope"
+    },
+    "ClientDevice": {
+      "$ref": "#/$defs/ClientDevice"
+    },
+    "ColumnWidths": {
+      "$ref": "#/$defs/ColumnWidths"
+    },
+    "DashboardLayout": {
+      "$ref": "#/$defs/DashboardLayout"
+    },
+    "DataSettings": {
+      "$ref": "#/$defs/DataSettings"
+    },
+    "DataSettingsUpdate": {
+      "$ref": "#/$defs/DataSettingsUpdate"
+    },
+    "Device": {
+      "$ref": "#/$defs/Device"
+    },
+    "DeviceKind": {
+      "$ref": "#/$defs/DeviceKind"
+    },
+    "DeviceList": {
+      "$ref": "#/$defs/DeviceList"
+    },
+    "DrawingSnapshotData": {
+      "$ref": "#/$defs/DrawingSnapshotData"
+    },
+    "DrawingSnapshotOp": {
+      "$ref": "#/$defs/DrawingSnapshotOp"
+    },
+    "ElementRemoveData": {
+      "$ref": "#/$defs/ElementRemoveData"
+    },
+    "ElementRemoveOp": {
+      "$ref": "#/$defs/ElementRemoveOp"
+    },
+    "ElementUpsertData": {
+      "$ref": "#/$defs/ElementUpsertData"
+    },
+    "ElementUpsertOp": {
+      "$ref": "#/$defs/ElementUpsertOp"
+    },
+    "EpochMs": {
+      "$ref": "#/$defs/EpochMs"
     },
     "ExerciseSheet": {
       "$ref": "#/$defs/ExerciseSheet"
@@ -23,11 +137,50 @@
     "ExerciseSheetUpdate": {
       "$ref": "#/$defs/ExerciseSheetUpdate"
     },
+    "FileReceipt": {
+      "$ref": "#/$defs/FileReceipt"
+    },
+    "FileRef": {
+      "$ref": "#/$defs/FileRef"
+    },
+    "GeneralSettings": {
+      "$ref": "#/$defs/GeneralSettings"
+    },
+    "GeneralSettingsUpdate": {
+      "$ref": "#/$defs/GeneralSettingsUpdate"
+    },
     "Health": {
       "$ref": "#/$defs/Health"
     },
+    "HexColor": {
+      "$ref": "#/$defs/HexColor"
+    },
+    "IcsEventRef": {
+      "$ref": "#/$defs/IcsEventRef"
+    },
+    "IcsImportCounts": {
+      "$ref": "#/$defs/IcsImportCounts"
+    },
+    "IcsImportResult": {
+      "$ref": "#/$defs/IcsImportResult"
+    },
+    "IcsModuleSuggestion": {
+      "$ref": "#/$defs/IcsModuleSuggestion"
+    },
+    "IcsWarning": {
+      "$ref": "#/$defs/IcsWarning"
+    },
+    "ImageElement": {
+      "$ref": "#/$defs/ImageElement"
+    },
+    "ImageElementPayload": {
+      "$ref": "#/$defs/ImageElementPayload"
+    },
     "IngestState": {
       "$ref": "#/$defs/IngestState"
+    },
+    "InkMode": {
+      "$ref": "#/$defs/InkMode"
     },
     "IsoDate": {
       "$ref": "#/$defs/IsoDate"
@@ -47,6 +200,36 @@
     "Lang": {
       "$ref": "#/$defs/Lang"
     },
+    "LectureSettings": {
+      "$ref": "#/$defs/LectureSettings"
+    },
+    "LectureSettingsUpdate": {
+      "$ref": "#/$defs/LectureSettingsUpdate"
+    },
+    "Marker": {
+      "$ref": "#/$defs/Marker"
+    },
+    "MarkerAddData": {
+      "$ref": "#/$defs/MarkerAddData"
+    },
+    "MarkerAddOp": {
+      "$ref": "#/$defs/MarkerAddOp"
+    },
+    "MarkerKind": {
+      "$ref": "#/$defs/MarkerKind"
+    },
+    "MarkerPosition": {
+      "$ref": "#/$defs/MarkerPosition"
+    },
+    "MarkerRemoveData": {
+      "$ref": "#/$defs/MarkerRemoveData"
+    },
+    "MarkerRemoveOp": {
+      "$ref": "#/$defs/MarkerRemoveOp"
+    },
+    "MarkerSource": {
+      "$ref": "#/$defs/MarkerSource"
+    },
     "Module": {
       "$ref": "#/$defs/Module"
     },
@@ -59,8 +242,86 @@
     "ModuleList": {
       "$ref": "#/$defs/ModuleList"
     },
+    "ModuleSettings": {
+      "$ref": "#/$defs/ModuleSettings"
+    },
+    "ModuleSettingsUpdate": {
+      "$ref": "#/$defs/ModuleSettingsUpdate"
+    },
     "ModuleUpdate": {
       "$ref": "#/$defs/ModuleUpdate"
+    },
+    "Notebook": {
+      "$ref": "#/$defs/Notebook"
+    },
+    "NotebookCreate": {
+      "$ref": "#/$defs/NotebookCreate"
+    },
+    "NotebookKind": {
+      "$ref": "#/$defs/NotebookKind"
+    },
+    "NotebookList": {
+      "$ref": "#/$defs/NotebookList"
+    },
+    "NotebookPages": {
+      "$ref": "#/$defs/NotebookPages"
+    },
+    "NotebookStreamId": {
+      "$ref": "#/$defs/NotebookStreamId"
+    },
+    "NotebookUpdate": {
+      "$ref": "#/$defs/NotebookUpdate"
+    },
+    "Page": {
+      "$ref": "#/$defs/Page"
+    },
+    "PageCreateData": {
+      "$ref": "#/$defs/PageCreateData"
+    },
+    "PageCreateOp": {
+      "$ref": "#/$defs/PageCreateOp"
+    },
+    "PageDeleteData": {
+      "$ref": "#/$defs/PageDeleteData"
+    },
+    "PageDeleteOp": {
+      "$ref": "#/$defs/PageDeleteOp"
+    },
+    "PageDetail": {
+      "$ref": "#/$defs/PageDetail"
+    },
+    "PageElement": {
+      "$ref": "#/$defs/PageElement"
+    },
+    "PageStrokes": {
+      "$ref": "#/$defs/PageStrokes"
+    },
+    "PageTemplate": {
+      "$ref": "#/$defs/PageTemplate"
+    },
+    "PageUpdateData": {
+      "$ref": "#/$defs/PageUpdateData"
+    },
+    "PageUpdateFields": {
+      "$ref": "#/$defs/PageUpdateFields"
+    },
+    "PageUpdateOp": {
+      "$ref": "#/$defs/PageUpdateOp"
+    },
+    "PairConfirmRequest": {
+      "$ref": "#/$defs/PairConfirmRequest"
+    },
+    "PairResponse": {
+      "$ref": "#/$defs/PairResponse"
+    },
+    "PairStartRequest": {
+      "$ref": "#/$defs/PairStartRequest"
+    },
+    "PairStartResponse": {
+      "$ref": "#/$defs/PairStartResponse"
+    },
+    "PairingCode": {
+      "$ref": "#/$defs/PairingCode"
     },
     "PdfIngestDeckPayload": {
       "$ref": "#/$defs/PdfIngestDeckPayload"
@@ -74,6 +335,48 @@
     "PdfIngestSheetPayload": {
       "$ref": "#/$defs/PdfIngestSheetPayload"
     },
+    "PenSettings": {
+      "$ref": "#/$defs/PenSettings"
+    },
+    "PenSettingsUpdate": {
+      "$ref": "#/$defs/PenSettingsUpdate"
+    },
+    "PencilDoubleTapAction": {
+      "$ref": "#/$defs/PencilDoubleTapAction"
+    },
+    "PencilSqueezeAction": {
+      "$ref": "#/$defs/PencilSqueezeAction"
+    },
+    "Photo": {
+      "$ref": "#/$defs/Photo"
+    },
+    "PhotoAddData": {
+      "$ref": "#/$defs/PhotoAddData"
+    },
+    "PhotoAddOp": {
+      "$ref": "#/$defs/PhotoAddOp"
+    },
+    "PhotoMime": {
+      "$ref": "#/$defs/PhotoMime"
+    },
+    "Point2": {
+      "$ref": "#/$defs/Point2"
+    },
+    "Recording": {
+      "$ref": "#/$defs/Recording"
+    },
+    "RecordingComplete": {
+      "$ref": "#/$defs/RecordingComplete"
+    },
+    "RecordingCreate": {
+      "$ref": "#/$defs/RecordingCreate"
+    },
+    "RecordingState": {
+      "$ref": "#/$defs/RecordingState"
+    },
+    "ReviewState": {
+      "$ref": "#/$defs/ReviewState"
+    },
     "Semester": {
       "$ref": "#/$defs/Semester"
     },
@@ -86,8 +389,89 @@
     "SemesterUpdate": {
       "$ref": "#/$defs/SemesterUpdate"
     },
+    "Session": {
+      "$ref": "#/$defs/Session"
+    },
+    "SessionCreate": {
+      "$ref": "#/$defs/SessionCreate"
+    },
+    "SessionList": {
+      "$ref": "#/$defs/SessionList"
+    },
+    "SessionMs": {
+      "$ref": "#/$defs/SessionMs"
+    },
+    "SessionPauseOp": {
+      "$ref": "#/$defs/SessionPauseOp"
+    },
+    "SessionProcessing": {
+      "$ref": "#/$defs/SessionProcessing"
+    },
+    "SessionRefData": {
+      "$ref": "#/$defs/SessionRefData"
+    },
+    "SessionResumeOp": {
+      "$ref": "#/$defs/SessionResumeOp"
+    },
+    "SessionSnapshot": {
+      "$ref": "#/$defs/SessionSnapshot"
+    },
+    "SessionStartData": {
+      "$ref": "#/$defs/SessionStartData"
+    },
+    "SessionStartOp": {
+      "$ref": "#/$defs/SessionStartOp"
+    },
+    "SessionStartRequest": {
+      "$ref": "#/$defs/SessionStartRequest"
+    },
+    "SessionStartResult": {
+      "$ref": "#/$defs/SessionStartResult"
+    },
+    "SessionState": {
+      "$ref": "#/$defs/SessionState"
+    },
+    "SessionStopData": {
+      "$ref": "#/$defs/SessionStopData"
+    },
+    "SessionStopOp": {
+      "$ref": "#/$defs/SessionStopOp"
+    },
+    "SessionStopRequest": {
+      "$ref": "#/$defs/SessionStopRequest"
+    },
+    "SessionStreamId": {
+      "$ref": "#/$defs/SessionStreamId"
+    },
+    "SessionUpdate": {
+      "$ref": "#/$defs/SessionUpdate"
+    },
+    "Settings": {
+      "$ref": "#/$defs/Settings"
+    },
+    "SettingsUpdate": {
+      "$ref": "#/$defs/SettingsUpdate"
+    },
+    "Sha256": {
+      "$ref": "#/$defs/Sha256"
+    },
+    "ShapeElement": {
+      "$ref": "#/$defs/ShapeElement"
+    },
+    "ShapeElementPayload": {
+      "$ref": "#/$defs/ShapeElementPayload"
+    },
+    "ShapeKind": {
+      "$ref": "#/$defs/ShapeKind"
+    },
     "Slide": {
       "$ref": "#/$defs/Slide"
+    },
+    "SlideChangeData": {
+      "$ref": "#/$defs/SlideChangeData"
+    },
+    "SlideChangeOp": {
+      "$ref": "#/$defs/SlideChangeOp"
     },
     "SlideDeck": {
       "$ref": "#/$defs/SlideDeck"
@@ -101,14 +485,173 @@
     "SlideDeckUpdate": {
       "$ref": "#/$defs/SlideDeckUpdate"
     },
+    "SlideEvent": {
+      "$ref": "#/$defs/SlideEvent"
+    },
+    "SlideEventSource": {
+      "$ref": "#/$defs/SlideEventSource"
+    },
+    "StampElement": {
+      "$ref": "#/$defs/StampElement"
+    },
+    "StampElementPayload": {
+      "$ref": "#/$defs/StampElementPayload"
+    },
+    "StopReason": {
+      "$ref": "#/$defs/StopReason"
+    },
+    "Stroke": {
+      "$ref": "#/$defs/Stroke"
+    },
+    "StrokeAddData": {
+      "$ref": "#/$defs/StrokeAddData"
+    },
+    "StrokeAddOp": {
+      "$ref": "#/$defs/StrokeAddOp"
+    },
+    "StrokeLayer": {
+      "$ref": "#/$defs/StrokeLayer"
+    },
+    "StrokeRemoveData": {
+      "$ref": "#/$defs/StrokeRemoveData"
+    },
+    "StrokeRemoveOp": {
+      "$ref": "#/$defs/StrokeRemoveOp"
+    },
+    "StrokeTool": {
+      "$ref": "#/$defs/StrokeTool"
+    },
+    "SyncAck": {
+      "$ref": "#/$defs/SyncAck"
+    },
+    "SyncClientKind": {
+      "$ref": "#/$defs/SyncClientKind"
+    },
+    "SyncClientMessage": {
+      "$ref": "#/$defs/SyncClientMessage"
+    },
+    "SyncConnectionEvent": {
+      "$ref": "#/$defs/SyncConnectionEvent"
+    },
+    "SyncConnectionInfo": {
+      "$ref": "#/$defs/SyncConnectionInfo"
+    },
+    "SyncError": {
+      "$ref": "#/$defs/SyncError"
+    },
+    "SyncErrorCode": {
+      "$ref": "#/$defs/SyncErrorCode"
+    },
+    "SyncEvent": {
+      "$ref": "#/$defs/SyncEvent"
+    },
+    "SyncHello": {
+      "$ref": "#/$defs/SyncHello"
+    },
+    "SyncOp": {
+      "$ref": "#/$defs/SyncOp"
+    },
+    "SyncOrigin": {
+      "$ref": "#/$defs/SyncOrigin"
+    },
+    "SyncPairingEvent": {
+      "$ref": "#/$defs/SyncPairingEvent"
+    },
+    "SyncPing": {
+      "$ref": "#/$defs/SyncPing"
+    },
+    "SyncPong": {
+      "$ref": "#/$defs/SyncPong"
+    },
+    "SyncPresence": {
+      "$ref": "#/$defs/SyncPresence"
+    },
+    "SyncPresenceEvent": {
+      "$ref": "#/$defs/SyncPresenceEvent"
+    },
+    "SyncPresenceInfo": {
+      "$ref": "#/$defs/SyncPresenceInfo"
+    },
+    "SyncResume": {
+      "$ref": "#/$defs/SyncResume"
+    },
+    "SyncServerMessage": {
+      "$ref": "#/$defs/SyncServerMessage"
+    },
+    "SyncSessionUpdatedEvent": {
+      "$ref": "#/$defs/SyncSessionUpdatedEvent"
+    },
+    "SyncStreamId": {
+      "$ref": "#/$defs/SyncStreamId"
+    },
+    "SyncStreamPosition": {
+      "$ref": "#/$defs/SyncStreamPosition"
+    },
+    "SyncSubscribe": {
+      "$ref": "#/$defs/SyncSubscribe"
+    },
+    "SyncSubscribed": {
+      "$ref": "#/$defs/SyncSubscribed"
+    },
+    "SyncTimeOffset": {
+      "$ref": "#/$defs/SyncTimeOffset"
+    },
+    "SyncTimePing": {
+      "$ref": "#/$defs/SyncTimePing"
+    },
+    "SyncTimePong": {
+      "$ref": "#/$defs/SyncTimePong"
+    },
+    "SyncUnsubscribe": {
+      "$ref": "#/$defs/SyncUnsubscribe"
+    },
+    "SyncWelcome": {
+      "$ref": "#/$defs/SyncWelcome"
+    },
+    "TapeElement": {
+      "$ref": "#/$defs/TapeElement"
+    },
+    "TapeElementPayload": {
+      "$ref": "#/$defs/TapeElementPayload"
+    },
     "Task": {
       "$ref": "#/$defs/Task"
     },
     "TextBlock": {
       "$ref": "#/$defs/TextBlock"
     },
+    "TextElement": {
+      "$ref": "#/$defs/TextElement"
+    },
+    "TextElementPayload": {
+      "$ref": "#/$defs/TextElementPayload"
+    },
+    "TextSize": {
+      "$ref": "#/$defs/TextSize"
+    },
     "Timestamp": {
       "$ref": "#/$defs/Timestamp"
+    },
+    "ToolbarSide": {
+      "$ref": "#/$defs/ToolbarSide"
+    },
+    "Transform": {
+      "$ref": "#/$defs/Transform"
+    },
+    "TrashItem": {
+      "$ref": "#/$defs/TrashItem"
+    },
+    "TrashKind": {
+      "$ref": "#/$defs/TrashKind"
+    },
+    "TrashList": {
+      "$ref": "#/$defs/TrashList"
+    },
+    "TrashParent": {
+      "$ref": "#/$defs/TrashParent"
+    },
+    "TrashRestoreResult": {
+      "$ref": "#/$defs/TrashRestoreResult"
     },
     "UploadResult": {
       "$ref": "#/$defs/UploadResult"
@@ -157,6 +700,198 @@
         }
       }
     },
+    "Appearance": {
+      "title": "Appearance",
+      "type": "string",
+      "enum": [
+        "hell",
+        "dunkel",
+        "system"
+      ]
+    },
+    "AudioChunk": {
+      "title": "AudioChunk",
+      "type": "object",
+      "description": "Antwort auf PUT /recordings/{id}/chunks/{seq}",
+      "required": [
+        "recording_id",
+        "seq",
+        "start_ms",
+        "duration_ms",
+        "sha256",
+        "size_bytes",
+        "received_at",
+        "duplicate"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "recording_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "start_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "received_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "duplicate": {
+          "type": "boolean",
+          "description": "true: identischer Chunk lag schon vor (200 statt 201)"
+        }
+      }
+    },
+    "AudioChunkMeta": {
+      "title": "AudioChunkMeta",
+      "type": "object",
+      "description": "Geparste Metadaten von PUT /recordings/{id}/chunks/{seq}: Header X-Start-Ms, X-Duration-Ms (Dezimalzahlen), X-Sha256 (hex des Bodys)",
+      "required": [
+        "seq",
+        "start_ms",
+        "duration_ms",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Pfad {seq}, 0-basiert, lückenlos (Invariante 2)"
+        },
+        "start_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        }
+      }
+    },
+    "AudioCodec": {
+      "title": "AudioCodec",
+      "type": "string",
+      "enum": [
+        "opus",
+        "aac"
+      ]
+    },
+    "AudioFinalizePayload": {
+      "title": "AudioFinalizePayload",
+      "type": "object",
+      "description": "audio.finalize (08 §5)",
+      "required": [
+        "recording_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "recording_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "AudioFinalizeResult": {
+      "title": "AudioFinalizeResult",
+      "type": "object",
+      "description": "job.result von audio.finalize. state ist nie laeuft",
+      "required": [
+        "recording_id",
+        "state",
+        "audio_duration_ms",
+        "chunk_count",
+        "missing_seqs",
+        "gaps",
+        "file_size_bytes",
+        "duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "recording_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "state": {
+          "$ref": "#/$defs/RecordingState"
+        },
+        "audio_duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Länge von full.m4a"
+        },
+        "chunk_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "missing_seqs": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AudioGap"
+          }
+        },
+        "file_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Laufzeit des Jobs"
+        }
+      }
+    },
+    "AudioGap": {
+      "title": "AudioGap",
+      "type": "object",
+      "required": [
+        "start_ms",
+        "duration_ms",
+        "reason"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "start_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "$ref": "#/$defs/AudioGapReason"
+        }
+      }
+    },
+    "AudioGapReason": {
+      "title": "AudioGapReason",
+      "type": "string",
+      "enum": [
+        "fehlender_chunk",
+        "zeitluecke"
+      ],
+      "description": "fehlender_chunk: seq fehlt. zeitluecke: start_ms springt (z. B. Recorder neu gestartet)"
+    },
     "BBox": {
       "title": "BBox",
       "type": "array",
@@ -166,6 +901,919 @@
       },
       "minItems": 4,
       "maxItems": 4
+    },
+    "BackupOverview": {
+      "title": "BackupOverview",
+      "type": "object",
+      "description": "GET /backups: Status und Läufe, neueste zuerst",
+      "required": [
+        "status",
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/BackupStatus"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackupRun"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "BackupRun": {
+      "title": "BackupRun",
+      "type": "object",
+      "description": "Ein Backup-Lauf (03 §13 backup_run)",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "started_at",
+        "finished_at",
+        "target",
+        "size_bytes",
+        "state",
+        "error",
+        "trigger",
+        "stand"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string",
+          "description": "Absoluter Pfad des Ziels"
+        },
+        "size_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "state": {
+          "$ref": "#/$defs/BackupState"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trigger": {
+          "$ref": "#/$defs/BackupTrigger"
+        },
+        "stand": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{8}T[0-9]{6}Z$",
+          "description": "Name des Stands für sg restore <stand>, z. B. 20261104T030012Z. null solange er läuft oder bei Fehler"
+        }
+      }
+    },
+    "BackupState": {
+      "title": "BackupState",
+      "type": "string",
+      "enum": [
+        "laeuft",
+        "fertig",
+        "fehler"
+      ]
+    },
+    "BackupStatus": {
+      "title": "BackupStatus",
+      "type": "object",
+      "required": [
+        "target",
+        "last_success_at",
+        "next_run_at",
+        "stale",
+        "running"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "null = kein Ziel eingestellt, Backups pausieren"
+        },
+        "last_success_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_run_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stale": {
+          "type": "boolean",
+          "description": "Letztes erfolgreiches Backup älter als 3 Tage (F-DAT-01)"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      }
+    },
+    "BackupTrigger": {
+      "title": "BackupTrigger",
+      "type": "string",
+      "enum": [
+        "zeitplan",
+        "manuell",
+        "vor_migration"
+      ]
+    },
+    "CalendarAssignment": {
+      "title": "CalendarAssignment",
+      "type": "string",
+      "enum": [
+        "auto",
+        "manuell"
+      ],
+      "description": "auto: Modul und Art hat der Abgleich gesetzt und darf sie ändern. manuell: vom Nutzer gesetzt, der Abgleich ändert module_id und kind nie mehr (F-KAL-02)."
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "type": "object",
+      "description": "Termin. session_id ist abgeleitet: die nicht gelöschte Session zu diesem Termin.",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "source_id",
+        "external_uid",
+        "recurrence_id",
+        "module_id",
+        "kind",
+        "assigned_by",
+        "title",
+        "location",
+        "description",
+        "starts_at",
+        "ends_at",
+        "all_day",
+        "cancelled",
+        "session_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "external_uid": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "UID aus der Quelle, null bei manuellen Terminen"
+        },
+        "recurrence_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Kennung des Vorkommens: ISO 8601 mit Offset der Ortszeit (2026-10-20T10:15:00+02:00) bzw. Datum (2026-11-01) bei ganztägigen Serien. null bei Einzelterminen. Abgleichschlüssel: (source_id, external_uid, recurrence_id)"
+        },
+        "module_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarEventKind"
+        },
+        "assigned_by": {
+          "$ref": "#/$defs/CalendarAssignment"
+        },
+        "title": {
+          "type": "string"
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "DESCRIPTION aus der Quelle. Ergänzung zu 03 §3"
+        },
+        "starts_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "ends_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "all_day": {
+          "type": "boolean",
+          "description": "Ganztägig (VALUE=DATE). starts_at/ends_at sind dann 00:00 UTC des Datums (wie tests/fixtures/ics/08). Ergänzung zu 03 §3"
+        },
+        "cancelled": {
+          "type": "boolean"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CalendarEventKind": {
+      "title": "CalendarEventKind",
+      "type": "string",
+      "enum": [
+        "vorlesung",
+        "uebung",
+        "tutorium",
+        "pruefung",
+        "fest",
+        "lernblock_export"
+      ]
+    },
+    "CalendarEventList": {
+      "title": "CalendarEventList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CalendarEvent"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "CalendarEventUpdate": {
+      "title": "CalendarEventUpdate",
+      "type": "object",
+      "description": "PATCH /calendar/events/{id}. Setzt assigned_by=manuell. scope fehlt = serie. Antwort: CalendarEventList mit allen geänderten Terminen.",
+      "additionalProperties": false,
+      "properties": {
+        "module_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarEventKind"
+        },
+        "scope": {
+          "$ref": "#/$defs/CalendarUpdateScope"
+        }
+      }
+    },
+    "CalendarSource": {
+      "title": "CalendarSource",
+      "type": "object",
+      "description": "Kalenderquelle",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "kind",
+        "name",
+        "url",
+        "last_synced_at",
+        "last_error",
+        "readonly",
+        "event_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarSourceKind"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Anzeigename. Ergänzung zu 03 §3. Standard: Dateiname bzw. Host der URL"
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Nur bei ics_url (webcal:// wird als https:// gespeichert)"
+        },
+        "last_synced_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Fehler des letzten Abgleichs, null nach Erfolg. Ergänzung zu 03 §3"
+        },
+        "readonly": {
+          "type": "boolean"
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Abgeleitet: Termine dieser Quelle (ohne gelöschte)"
+        }
+      }
+    },
+    "CalendarSourceCreate": {
+      "title": "CalendarSourceCreate",
+      "type": "object",
+      "description": "JSON-Body von POST /calendar/sources für eine ICS-URL. Eine ICS-Datei kommt stattdessen als multipart (Felder file, name). Antwort: IcsImportResult.",
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "url": {
+          "type": "string",
+          "pattern": "^(https?|webcal)://",
+          "description": "ICS-URL (Abo, Abgleich alle 6 h und beim Start)"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "CalendarSourceKind": {
+      "title": "CalendarSourceKind",
+      "type": "string",
+      "enum": [
+        "ics_file",
+        "ics_url",
+        "google"
+      ],
+      "description": "google erst ab Phase 4 (F-KAL-03)"
+    },
+    "CalendarSourceList": {
+      "title": "CalendarSourceList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CalendarSource"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "CalendarUpdateScope": {
+      "title": "CalendarUpdateScope",
+      "type": "string",
+      "enum": [
+        "serie",
+        "einzeln"
+      ],
+      "description": "serie: alle Termine derselben Quelle mit gleicher external_uid (F-KAL-02). einzeln: nur dieser Termin."
+    },
+    "ClientDevice": {
+      "title": "ClientDevice",
+      "type": "string",
+      "enum": [
+        "mac",
+        "ipad"
+      ],
+      "description": "Gerät, auf dem ein Ereignis entstanden ist"
+    },
+    "ColumnWidths": {
+      "title": "ColumnWidths",
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "minItems": 3,
+      "maxItems": 3,
+      "description": "Spaltenbreiten Folie | Übung | Notizen in Prozent, Summe 100"
+    },
+    "DashboardLayout": {
+      "title": "DashboardLayout",
+      "type": "string",
+      "enum": [
+        "standard",
+        "folie_gross",
+        "notizen_gross",
+        "fokus"
+      ],
+      "description": "Layout-Vorlagen F-DSH-01"
+    },
+    "DataSettings": {
+      "title": "DataSettings",
+      "type": "object",
+      "required": [
+        "backup_target",
+        "backup_encryption",
+        "backup_time"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "backup_target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Absoluter Pfad, null = keine Backups"
+        },
+        "backup_encryption": {
+          "type": "boolean",
+          "description": "age mit Passphrase (P1). Die Passphrase steht nie in den Einstellungen"
+        },
+        "backup_time": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Ortszeit des Macs (Standard 03:00)"
+        }
+      }
+    },
+    "DataSettingsUpdate": {
+      "title": "DataSettingsUpdate",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "backup_target": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Absoluter Pfad, null = keine Backups"
+        },
+        "backup_encryption": {
+          "type": "boolean",
+          "description": "age mit Passphrase (P1). Die Passphrase steht nie in den Einstellungen"
+        },
+        "backup_time": {
+          "type": "string",
+          "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
+          "description": "Ortszeit des Macs (Standard 03:00)"
+        }
+      }
+    },
+    "Device": {
+      "title": "Device",
+      "type": "object",
+      "description": "Gekoppeltes Gerät. Das Token selbst gibt die API nie aus (gespeichert nur token_hash).",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "name",
+        "kind",
+        "last_seen_at",
+        "clock_offset_ms",
+        "app_version",
+        "connected"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "last_seen_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clock_offset_ms": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "app_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "connected": {
+          "type": "boolean",
+          "description": "Abgeleitet: hat gerade eine Sync-Verbindung"
+        }
+      }
+    },
+    "DeviceKind": {
+      "title": "DeviceKind",
+      "type": "string",
+      "enum": [
+        "ipad",
+        "iphone"
+      ]
+    },
+    "DeviceList": {
+      "title": "DeviceList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Device"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "DrawingSnapshotData": {
+      "title": "DrawingSnapshotData",
+      "type": "object",
+      "description": "Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad",
+      "required": [
+        "page_id",
+        "pkdrawing_ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "pkdrawing_ref": {
+          "$ref": "#/$defs/FileRef"
+        }
+      }
+    },
+    "DrawingSnapshotOp": {
+      "title": "DrawingSnapshotOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "drawing.snapshot"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/DrawingSnapshotData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "ElementRemoveData": {
+      "title": "ElementRemoveData",
+      "type": "object",
+      "required": [
+        "page_id",
+        "element_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "ElementRemoveOp": {
+      "title": "ElementRemoveOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "element.remove"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/ElementRemoveData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "ElementUpsertData": {
+      "title": "ElementUpsertData",
+      "type": "object",
+      "required": [
+        "page_id",
+        "element"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "element": {
+          "$ref": "#/$defs/PageElement"
+        }
+      }
+    },
+    "ElementUpsertOp": {
+      "title": "ElementUpsertOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "element.upsert"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/ElementUpsertData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "EpochMs": {
+      "title": "EpochMs",
+      "type": "integer",
+      "minimum": 0,
+      "description": "Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1)."
     },
     "ExerciseSheet": {
       "title": "ExerciseSheet",
@@ -302,6 +1950,100 @@
         }
       }
     },
+    "FileReceipt": {
+      "title": "FileReceipt",
+      "type": "object",
+      "description": "Antwort auf PUT /photos/{id}/file und PUT /pages/{id}/pkdrawing",
+      "required": [
+        "id",
+        "sha256",
+        "size_bytes",
+        "received_at",
+        "duplicate"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "received_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "duplicate": {
+          "type": "boolean",
+          "description": "true: dieselbe Datei (gleiches sha256) lag schon vor, nichts geändert"
+        }
+      }
+    },
+    "FileRef": {
+      "title": "FileRef",
+      "type": "object",
+      "description": "Verweis auf eine Datei, die getrennt per HTTP hochgeladen wird (08 §2.3 file_ref / pkdrawing_ref). Der Core prüft sha256 beim Upload.",
+      "required": [
+        "sha256",
+        "mime",
+        "size_bytes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "mime": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "image/heic"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "GeneralSettings": {
+      "title": "GeneralSettings",
+      "type": "object",
+      "required": [
+        "data_dir",
+        "content_lang",
+        "appearance"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "data_dir": {
+          "type": "string",
+          "description": "SG_DATA_DIR, nur lesbar (Änderung über die Umgebung und Neustart)"
+        },
+        "content_lang": {
+          "$ref": "#/$defs/Lang"
+        },
+        "appearance": {
+          "$ref": "#/$defs/Appearance"
+        }
+      }
+    },
+    "GeneralSettingsUpdate": {
+      "title": "GeneralSettingsUpdate",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "content_lang": {
+          "$ref": "#/$defs/Lang"
+        },
+        "appearance": {
+          "$ref": "#/$defs/Appearance"
+        }
+      }
+    },
     "Health": {
       "title": "Health",
       "type": "object",
@@ -331,6 +2073,291 @@
         }
       }
     },
+    "HexColor": {
+      "title": "HexColor",
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{8}$",
+      "description": "RGBA als #RRGGBBAA",
+      "examples": [
+        "#1E2A44FF"
+      ]
+    },
+    "IcsEventRef": {
+      "title": "IcsEventRef",
+      "type": "object",
+      "description": "Termin in einem Abgleichergebnis (Schlüssel wie tests/fixtures/ics/11-abgleich-erwartung.json)",
+      "required": [
+        "event_id",
+        "external_uid",
+        "recurrence_id",
+        "title",
+        "starts_at",
+        "module_id",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "external_uid": {
+          "type": "string"
+        },
+        "recurrence_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "starts_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "module_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarEventKind"
+        }
+      }
+    },
+    "IcsImportCounts": {
+      "title": "IcsImportCounts",
+      "type": "object",
+      "required": [
+        "neu",
+        "geaendert",
+        "entfallen",
+        "unveraendert",
+        "zugeordnet",
+        "ohne_modul"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "neu": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "geaendert": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "entfallen": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unveraendert": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "zugeordnet": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "In diesem Lauf automatisch einem Modul zugeordnet"
+        },
+        "ohne_modul": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Nicht abgesagte Termine der Quelle ohne Modul nach dem Lauf"
+        }
+      }
+    },
+    "IcsImportResult": {
+      "title": "IcsImportResult",
+      "type": "object",
+      "description": "Antwort auf POST /calendar/sources (201) und POST /calendar/sources/{id}/sync (200). Der Abgleich läuft synchron im Core, nicht als Job.",
+      "required": [
+        "source",
+        "counts",
+        "neu",
+        "geaendert",
+        "entfallen",
+        "zugeordnet",
+        "module_suggestions",
+        "warnings"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/CalendarSource"
+        },
+        "counts": {
+          "$ref": "#/$defs/IcsImportCounts"
+        },
+        "neu": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsEventRef"
+          }
+        },
+        "geaendert": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsEventRef"
+          }
+        },
+        "entfallen": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsEventRef"
+          }
+        },
+        "zugeordnet": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsEventRef"
+          }
+        },
+        "module_suggestions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsModuleSuggestion"
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/IcsWarning"
+          }
+        }
+      }
+    },
+    "IcsModuleSuggestion": {
+      "title": "IcsModuleSuggestion",
+      "type": "object",
+      "description": "Vorschlag „neues Modul anlegen?\" für unbekannte Titel (F-KAL-02)",
+      "required": [
+        "name",
+        "kind",
+        "event_count",
+        "series_event_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Vorgeschlagener Modulname, aus dem Titel bereinigt"
+        },
+        "kind": {
+          "$ref": "#/$defs/CalendarEventKind"
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "series_event_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1,
+          "description": "Je Serie ein Termin. Nach POST /modules: PATCH /calendar/events/{id} mit module_id, scope=serie"
+        }
+      }
+    },
+    "IcsWarning": {
+      "title": "IcsWarning",
+      "type": "object",
+      "required": [
+        "code",
+        "message",
+        "external_uid"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "examples": [
+            "rrule_unsupported",
+            "timezone_unknown"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "external_uid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ImageElement": {
+      "title": "ImageElement",
+      "type": "object",
+      "required": [
+        "element_id",
+        "kind",
+        "frame",
+        "z",
+        "t_ms",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "image"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/ImageElementPayload"
+        }
+      }
+    },
+    "ImageElementPayload": {
+      "title": "ImageElementPayload",
+      "type": "object",
+      "required": [
+        "photo_id",
+        "crop"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "photo_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "crop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BBox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "IngestState": {
       "title": "IngestState",
       "type": "string",
@@ -339,6 +2366,15 @@
         "verarbeitet",
         "fehler"
       ]
+    },
+    "InkMode": {
+      "title": "InkMode",
+      "type": "string",
+      "enum": [
+        "freie_seite",
+        "auf_folie"
+      ],
+      "description": "Schreibmodus F-INK-03"
     },
     "IsoDate": {
       "title": "IsoDate",
@@ -557,6 +2593,423 @@
         "mixed"
       ]
     },
+    "LectureSettings": {
+      "title": "LectureSettings",
+      "type": "object",
+      "required": [
+        "microphone_id",
+        "auto_stop_after_end_min",
+        "auto_stop_quiet_window_min",
+        "auto_stop_hard_after_end_min",
+        "auto_stop_silence_min",
+        "auto_stop_max_duration_min",
+        "auto_stop_warning_s",
+        "auto_stop_extend_min",
+        "default_layout",
+        "default_ink_mode",
+        "toolbar_side"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "microphone_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "deviceId aus MediaDevices, null = Standardmikrofon"
+        },
+        "auto_stop_after_end_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Regel 1: Kalenderende + X min … (Standard 10)"
+        },
+        "auto_stop_quiet_window_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "… und X min keine Sprache (Standard 3)"
+        },
+        "auto_stop_hard_after_end_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Regel 2: Kalenderende + X min (Standard 30)"
+        },
+        "auto_stop_silence_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Regel 3: Stille ≥ X min (Standard 15)"
+        },
+        "auto_stop_max_duration_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Regel 4: Maximaldauer (Standard 240)"
+        },
+        "auto_stop_warning_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Hinweis vor dem Stopp (Standard 60)"
+        },
+        "auto_stop_extend_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Verlängerung per Tipp (Standard 15)"
+        },
+        "default_layout": {
+          "$ref": "#/$defs/DashboardLayout"
+        },
+        "default_ink_mode": {
+          "$ref": "#/$defs/InkMode"
+        },
+        "toolbar_side": {
+          "$ref": "#/$defs/ToolbarSide"
+        }
+      }
+    },
+    "LectureSettingsUpdate": {
+      "title": "LectureSettingsUpdate",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "microphone_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "deviceId aus MediaDevices, null = Standardmikrofon"
+        },
+        "auto_stop_after_end_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Regel 1: Kalenderende + X min … (Standard 10)"
+        },
+        "auto_stop_quiet_window_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "… und X min keine Sprache (Standard 3)"
+        },
+        "auto_stop_hard_after_end_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Regel 2: Kalenderende + X min (Standard 30)"
+        },
+        "auto_stop_silence_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Regel 3: Stille ≥ X min (Standard 15)"
+        },
+        "auto_stop_max_duration_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Regel 4: Maximaldauer (Standard 240)"
+        },
+        "auto_stop_warning_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Hinweis vor dem Stopp (Standard 60)"
+        },
+        "auto_stop_extend_min": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Verlängerung per Tipp (Standard 15)"
+        },
+        "default_layout": {
+          "$ref": "#/$defs/DashboardLayout"
+        },
+        "default_ink_mode": {
+          "$ref": "#/$defs/InkMode"
+        },
+        "toolbar_side": {
+          "$ref": "#/$defs/ToolbarSide"
+        }
+      }
+    },
+    "Marker": {
+      "title": "Marker",
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "kind",
+        "t_ms",
+        "page_id",
+        "position",
+        "source",
+        "note",
+        "resolved_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/MarkerKind"
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MarkerPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/MarkerSource"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "resolved_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MarkerAddData": {
+      "title": "MarkerAddData",
+      "type": "object",
+      "description": "Marker vom iPad (F-INK-05) und vom Mac (F-DSH-05, source=mac)",
+      "required": [
+        "marker_id",
+        "session_id",
+        "kind",
+        "t_ms",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "marker_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/MarkerKind"
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MarkerPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/ClientDevice"
+        }
+      }
+    },
+    "MarkerAddOp": {
+      "title": "MarkerAddOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "marker.add"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/MarkerAddData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "MarkerKind": {
+      "title": "MarkerKind",
+      "type": "string",
+      "enum": [
+        "frage",
+        "klausur",
+        "verknuepfung"
+      ]
+    },
+    "MarkerPosition": {
+      "title": "MarkerPosition",
+      "type": "object",
+      "description": "Stelle auf der Seite in pt (Ursprung oben links)",
+      "required": [
+        "x",
+        "y"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "MarkerRemoveData": {
+      "title": "MarkerRemoveData",
+      "type": "object",
+      "description": "Rückgängig (⌘Z, F-DSH-05) bzw. Löschen",
+      "required": [
+        "marker_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "marker_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "MarkerRemoveOp": {
+      "title": "MarkerRemoveOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "marker.remove"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/MarkerRemoveData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "MarkerSource": {
+      "title": "MarkerSource",
+      "type": "string",
+      "enum": [
+        "ipad",
+        "mac",
+        "detektor"
+      ]
+    },
     "Module": {
       "title": "Module",
       "type": "object",
@@ -772,6 +3225,61 @@
         }
       }
     },
+    "ModuleSettings": {
+      "title": "ModuleSettings",
+      "type": "object",
+      "description": "module.settings (W-06 Option A, 03 §3). Fehlender Schlüssel = globaler Standard aus Settings.lecture",
+      "additionalProperties": false,
+      "properties": {
+        "layout": {
+          "$ref": "#/$defs/DashboardLayout"
+        },
+        "column_widths": {
+          "$ref": "#/$defs/ColumnWidths"
+        },
+        "ink_mode": {
+          "$ref": "#/$defs/InkMode"
+        }
+      }
+    },
+    "ModuleSettingsUpdate": {
+      "title": "ModuleSettingsUpdate",
+      "type": "object",
+      "description": "Teil von ModuleUpdate.settings: Schlüssel für Schlüssel zusammenführen, null entfernt den Schlüssel",
+      "additionalProperties": false,
+      "properties": {
+        "layout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DashboardLayout"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "column_widths": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColumnWidths"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ink_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InkMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "ModuleUpdate": {
       "title": "ModuleUpdate",
       "type": "object",
@@ -826,6 +3334,773 @@
           "type": [
             "string",
             "null"
+          ]
+        }
+      }
+    },
+    "Notebook": {
+      "title": "Notebook",
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "module_id",
+        "title",
+        "kind",
+        "page_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookKind"
+        },
+        "page_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Abgeleitet"
+        }
+      }
+    },
+    "NotebookCreate": {
+      "title": "NotebookCreate",
+      "type": "object",
+      "description": "POST /notebooks. kind fehlt = frei",
+      "required": [
+        "module_id",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookKind"
+        }
+      }
+    },
+    "NotebookKind": {
+      "title": "NotebookKind",
+      "type": "string",
+      "enum": [
+        "vorlesung",
+        "uebung",
+        "frei"
+      ]
+    },
+    "NotebookList": {
+      "title": "NotebookList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Notebook"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "NotebookPages": {
+      "title": "NotebookPages",
+      "type": "object",
+      "description": "GET /notebooks/{id}/pages, nach index sortiert, ohne gelöschte Seiten",
+      "required": [
+        "notebook_id",
+        "stream_seq",
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "seq des Stroms notebook:<id> zu diesem Stand"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Page"
+          }
+        }
+      }
+    },
+    "NotebookStreamId": {
+      "title": "NotebookStreamId",
+      "type": "string",
+      "pattern": "^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "NotebookUpdate": {
+      "title": "NotebookUpdate",
+      "type": "object",
+      "description": "PATCH /notebooks/{id}",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "Page": {
+      "title": "Page",
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "notebook_id",
+        "session_id",
+        "index",
+        "template",
+        "background_slide_id",
+        "attached_slide_id",
+        "width_pt",
+        "height_pt",
+        "version",
+        "has_pkdrawing"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Reihenfolge im Notizbuch, 1-basiert"
+        },
+        "template": {
+          "$ref": "#/$defs/PageTemplate"
+        },
+        "background_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attached_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "width_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "has_pkdrawing": {
+          "type": "boolean",
+          "description": "Abgeleitet: PencilKit-Sicherung liegt vor (GET /pages/{id}/pkdrawing)"
+        }
+      }
+    },
+    "PageCreateData": {
+      "title": "PageCreateData",
+      "type": "object",
+      "required": [
+        "page_id",
+        "notebook_id",
+        "index",
+        "template",
+        "width_pt",
+        "height_pt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "template": {
+          "$ref": "#/$defs/PageTemplate"
+        },
+        "width_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "background_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attached_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PageCreateOp": {
+      "title": "PageCreateOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "page.create"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PageCreateData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "PageDeleteData": {
+      "title": "PageDeleteData",
+      "type": "object",
+      "required": [
+        "page_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "PageDeleteOp": {
+      "title": "PageDeleteOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "page.delete"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PageDeleteData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "PageDetail": {
+      "title": "PageDetail",
+      "type": "object",
+      "description": "GET /pages/{id}: Seite mit Elementen (ohne gelöschte, nach z sortiert)",
+      "required": [
+        "page",
+        "elements",
+        "stream_seq"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page": {
+          "$ref": "#/$defs/Page"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PageElement"
+          }
+        },
+        "stream_seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "PageElement": {
+      "title": "PageElement",
+      "description": "Seitenelement (08 §4.4), unterschieden über kind. frame [x, y, w, h] in pt. crop bei image: [x, y, w, h] relativ zum Bild (0–1), null = ganzes Bild. Phase 1 nutzt image (Tafel-Foto) und stamp (Marker-Stempel).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TextElement"
+        },
+        {
+          "$ref": "#/$defs/ImageElement"
+        },
+        {
+          "$ref": "#/$defs/ShapeElement"
+        },
+        {
+          "$ref": "#/$defs/TapeElement"
+        },
+        {
+          "$ref": "#/$defs/StampElement"
+        }
+      ]
+    },
+    "PageStrokes": {
+      "title": "PageStrokes",
+      "type": "object",
+      "description": "GET /pages/{id}/strokes: alle nicht gelöschten Striche, nach created_at sortiert",
+      "required": [
+        "page_id",
+        "stream_seq",
+        "strokes"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "seq des Stroms notebook:<id> zu diesem Stand"
+        },
+        "strokes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Stroke"
+          }
+        }
+      }
+    },
+    "PageTemplate": {
+      "title": "PageTemplate",
+      "type": "string",
+      "enum": [
+        "blanko",
+        "liniert",
+        "kariert",
+        "punktraster",
+        "cornell",
+        "folie"
+      ]
+    },
+    "PageUpdateData": {
+      "title": "PageUpdateData",
+      "type": "object",
+      "required": [
+        "page_id",
+        "fields",
+        "version"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "fields": {
+          "$ref": "#/$defs/PageUpdateFields"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version, auf der die Änderung beruht. Der Core setzt danach version + 1"
+        }
+      }
+    },
+    "PageUpdateFields": {
+      "title": "PageUpdateFields",
+      "type": "object",
+      "description": "Geänderte Felder, mindestens eins",
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "template": {
+          "$ref": "#/$defs/PageTemplate"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "background_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attached_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PageUpdateOp": {
+      "title": "PageUpdateOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "page.update"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PageUpdateData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "PairConfirmRequest": {
+      "title": "PairConfirmRequest",
+      "type": "object",
+      "description": "POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). public_nonce muss zu pair/start passen, falls der Code von dort stammt.",
+      "required": [
+        "code",
+        "device_name",
+        "kind",
+        "public_nonce"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$"
+        },
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "public_nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22,128}$"
+        },
+        "app_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "PairResponse": {
+      "title": "PairResponse",
+      "type": "object",
+      "description": "Antwort auf POST /devices/pair/confirm (201)",
+      "required": [
+        "device",
+        "device_token"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/Device"
+        },
+        "device_token": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "256 Bit Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben"
+        }
+      }
+    },
+    "PairStartRequest": {
+      "title": "PairStartRequest",
+      "type": "object",
+      "description": "POST /devices/pair/start (aus dem Netz ohne Token erlaubt)",
+      "required": [
+        "device_name",
+        "kind",
+        "public_nonce"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "public_nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22,128}$",
+          "description": "Zufallswert des iPads (base64url, ≥ 128 Bit)"
+        }
+      }
+    },
+    "PairStartResponse": {
+      "title": "PairStartResponse",
+      "type": "object",
+      "description": "Der Code steht NICHT in der Antwort, nur in der Web-App",
+      "required": [
+        "pairing_id",
+        "expires_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pairing_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "PairingCode": {
+      "title": "PairingCode",
+      "type": "object",
+      "description": "Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis pairing.requested)",
+      "required": [
+        "pairing_id",
+        "code",
+        "expires_at",
+        "device_name",
+        "qr_url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "pairing_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "device_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name aus pair/start, null bei einem Code für den QR-Weg"
+        },
+        "qr_url": {
+          "type": "string",
+          "pattern": "^sg://pair\\?",
+          "examples": [
+            "sg://pair?host=192.168.1.20&port=4710&code=482913"
           ]
         }
       }
@@ -891,6 +4166,433 @@
           "$ref": "#/$defs/Uuid"
         }
       }
+    },
+    "PenSettings": {
+      "title": "PenSettings",
+      "type": "object",
+      "required": [
+        "double_tap",
+        "squeeze",
+        "shape_recognition",
+        "favorite_colors"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "double_tap": {
+          "$ref": "#/$defs/PencilDoubleTapAction"
+        },
+        "squeeze": {
+          "$ref": "#/$defs/PencilSqueezeAction"
+        },
+        "shape_recognition": {
+          "type": "boolean",
+          "description": "Formerkennung (F-INK-09, ab Phase 3)"
+        },
+        "favorite_colors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HexColor"
+          },
+          "maxItems": 8
+        }
+      }
+    },
+    "PenSettingsUpdate": {
+      "title": "PenSettingsUpdate",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "double_tap": {
+          "$ref": "#/$defs/PencilDoubleTapAction"
+        },
+        "squeeze": {
+          "$ref": "#/$defs/PencilSqueezeAction"
+        },
+        "shape_recognition": {
+          "type": "boolean",
+          "description": "Formerkennung (F-INK-09, ab Phase 3)"
+        },
+        "favorite_colors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HexColor"
+          },
+          "maxItems": 8
+        }
+      }
+    },
+    "PencilDoubleTapAction": {
+      "title": "PencilDoubleTapAction",
+      "type": "string",
+      "enum": [
+        "radierer",
+        "letztes_werkzeug",
+        "farbpalette",
+        "system",
+        "aus"
+      ],
+      "description": "system = Einstellung von iPadOS übernehmen"
+    },
+    "PencilSqueezeAction": {
+      "title": "PencilSqueezeAction",
+      "type": "string",
+      "enum": [
+        "werkzeugpalette",
+        "radierer",
+        "system",
+        "aus"
+      ]
+    },
+    "Photo": {
+      "title": "Photo",
+      "type": "object",
+      "description": "Tafel-Foto (Metadaten). Datei: GET /photos/{id}/file",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "t_ms",
+        "page_id",
+        "mime",
+        "sha256",
+        "size_bytes",
+        "has_file",
+        "ocr_text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mime": {
+          "$ref": "#/$defs/PhotoMime"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "has_file": {
+          "type": "boolean",
+          "description": "false, bis PUT /photos/{id}/file angekommen ist"
+        },
+        "ocr_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "PhotoAddData": {
+      "title": "PhotoAddData",
+      "type": "object",
+      "description": "Datei per PUT /photos/{photo_id}/file, Reihenfolge egal",
+      "required": [
+        "photo_id",
+        "session_id",
+        "t_ms",
+        "file_ref"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "photo_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "file_ref": {
+          "$ref": "#/$defs/FileRef"
+        }
+      }
+    },
+    "PhotoAddOp": {
+      "title": "PhotoAddOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "photo.add"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PhotoAddData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "PhotoMime": {
+      "title": "PhotoMime",
+      "type": "string",
+      "enum": [
+        "image/heic",
+        "image/jpeg"
+      ]
+    },
+    "Point2": {
+      "title": "Point2",
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "[x, y] in pt"
+    },
+    "Recording": {
+      "title": "Recording",
+      "type": "object",
+      "description": "Eine Aufnahme = ein MediaRecorder-Strom. Nach einem Neuladen beginnt eine neue Aufnahme derselben Session (F-SES-05).",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "mime",
+        "codec",
+        "started_ms",
+        "duration_ms",
+        "state",
+        "chunks_independent",
+        "chunk_count",
+        "last_seq",
+        "completed_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "mime": {
+          "type": "string",
+          "pattern": "^audio/(webm|mp4)(;.*)?$",
+          "examples": [
+            "audio/webm;codecs=opus",
+            "audio/mp4"
+          ]
+        },
+        "codec": {
+          "$ref": "#/$defs/AudioCodec"
+        },
+        "started_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "duration_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Länge der Gesamtdatei, gesetzt von audio.finalize"
+        },
+        "state": {
+          "$ref": "#/$defs/RecordingState"
+        },
+        "chunks_independent": {
+          "type": "boolean",
+          "description": "true: jeder Chunk ist eine eigenständige Datei (Recorder je Chunk neu gestartet). false: Chunks ergeben in seq-Reihenfolge einen Bytestrom. Ergänzung, offen bis Spike S4"
+        },
+        "chunk_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Abgeleitet: empfangene Chunks"
+        },
+        "last_seq": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Abgeleitet: höchste empfangene seq"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RecordingComplete": {
+      "title": "RecordingComplete",
+      "type": "object",
+      "description": "POST /recordings/{id}/complete: der Client hat den letzten Chunk hochgeladen. Der Core stellt audio.finalize ein.",
+      "required": [
+        "last_seq",
+        "duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "last_seq": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Aufgenommene Länge laut Client"
+        }
+      }
+    },
+    "RecordingCreate": {
+      "title": "RecordingCreate",
+      "type": "object",
+      "description": "POST /sessions/{id}/recordings",
+      "required": [
+        "mime",
+        "codec",
+        "started_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "mime": {
+          "type": "string",
+          "pattern": "^audio/(webm|mp4)(;.*)?$"
+        },
+        "codec": {
+          "$ref": "#/$defs/AudioCodec"
+        },
+        "started_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "chunks_independent": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RecordingState": {
+      "title": "RecordingState",
+      "type": "string",
+      "enum": [
+        "laeuft",
+        "vollstaendig",
+        "mit_luecken"
+      ]
+    },
+    "ReviewState": {
+      "title": "ReviewState",
+      "type": "string",
+      "enum": [
+        "offen",
+        "in_arbeit",
+        "erledigt"
+      ],
+      "description": "Nacharbeitung (F-NAC-05, Phase 2)"
     },
     "Semester": {
       "title": "Semester",
@@ -1077,6 +4779,774 @@
         }
       }
     },
+    "Session": {
+      "title": "Session",
+      "type": "object",
+      "description": "Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem Kalendertermin (null bei spontanen Sessions).",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "calendar_event_id",
+        "module_id",
+        "slide_deck_id",
+        "number",
+        "title",
+        "state",
+        "started_at",
+        "ended_at",
+        "stop_reason",
+        "started_from",
+        "processing",
+        "review_state",
+        "planned_starts_at",
+        "planned_ends_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calendar_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "VL-Nummer im Modul (VL 7), Regeln in docs/VERTRAEGE.md"
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/SessionState"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stop_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClientDevice"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "processing": {
+          "$ref": "#/$defs/SessionProcessing"
+        },
+        "review_state": {
+          "$ref": "#/$defs/ReviewState"
+        },
+        "planned_starts_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "planned_ends_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionCreate": {
+      "title": "SessionCreate",
+      "type": "object",
+      "description": "POST /sessions: spontane Session ohne Termin (F-SES-04). Ergebnis im Zustand bereit, danach /start.",
+      "required": [
+        "module_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SessionList": {
+      "title": "SessionList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Session"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SessionMs": {
+      "title": "SessionMs",
+      "type": "integer",
+      "minimum": 0,
+      "description": "Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0."
+    },
+    "SessionPauseOp": {
+      "title": "SessionPauseOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "session.pause"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SessionRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SessionProcessing": {
+      "title": "SessionProcessing",
+      "type": "object",
+      "description": "Fortschritt der Pipeline: Job-Typ → Zustand des letzten Jobs dieses Typs (03 §3 session.processing)",
+      "additionalProperties": {
+        "$ref": "#/$defs/JobState"
+      }
+    },
+    "SessionRefData": {
+      "title": "SessionRefData",
+      "type": "object",
+      "description": "session.pause / session.resume",
+      "required": [
+        "session_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "SessionResumeOp": {
+      "title": "SessionResumeOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "session.resume"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SessionRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SessionSnapshot": {
+      "title": "SessionSnapshot",
+      "type": "object",
+      "description": "GET /sessions/{id}/snapshot: Live-Stand für Dashboard und iPad (ohne gelöschte Objekte, nach t_ms sortiert)",
+      "required": [
+        "session",
+        "slide_events",
+        "markers",
+        "photos",
+        "recordings",
+        "stream_seq"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        },
+        "slide_events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SlideEvent"
+          }
+        },
+        "markers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Marker"
+          }
+        },
+        "photos": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Photo"
+          }
+        },
+        "recordings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Recording"
+          }
+        },
+        "stream_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "seq des Stroms session:<id>, zu der dieser Stand gehört. Danach per Sync ab stream_seq + 1"
+        }
+      }
+    },
+    "SessionStartData": {
+      "title": "SessionStartData",
+      "type": "object",
+      "description": "Unbekannte session_id: der Core legt die Session an (Start offline auf dem iPad, F-SES-02 Schritt 3)",
+      "required": [
+        "session_id",
+        "module_id",
+        "started_from",
+        "started_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "calendar_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_from": {
+          "$ref": "#/$defs/ClientDevice"
+        },
+        "started_at": {
+          "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "SessionStartOp": {
+      "title": "SessionStartOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "session.start"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SessionStartData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SessionStartRequest": {
+      "title": "SessionStartRequest",
+      "type": "object",
+      "description": "POST /sessions/{id}/start. started_at setzt der Core (Serverzeit).",
+      "required": [
+        "started_from"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "started_from": {
+          "$ref": "#/$defs/ClientDevice"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionStartResult": {
+      "title": "SessionStartResult",
+      "type": "object",
+      "description": "ended_session: eine andere Session, die wegen des Starts automatisch beendet wurde (F-SES-02)",
+      "required": [
+        "session",
+        "ended_session"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        },
+        "ended_session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Session"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionState": {
+      "title": "SessionState",
+      "type": "string",
+      "enum": [
+        "geplant",
+        "bereit",
+        "laeuft",
+        "pausiert",
+        "beendet",
+        "verpasst",
+        "verarbeitet"
+      ],
+      "description": "Zustandsautomat F-SES-01, Übergänge in docs/VERTRAEGE.md"
+    },
+    "SessionStopData": {
+      "title": "SessionStopData",
+      "type": "object",
+      "required": [
+        "session_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "reason": {
+          "$ref": "#/$defs/StopReason"
+        }
+      }
+    },
+    "SessionStopOp": {
+      "title": "SessionStopOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "session.stop"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SessionStopData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SessionStopRequest": {
+      "title": "SessionStopRequest",
+      "type": "object",
+      "description": "POST /sessions/{id}/stop. reason fehlt = manuell. absturz_wiederhergestellt setzt nur der Core.",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "$ref": "#/$defs/StopReason"
+        }
+      }
+    },
+    "SessionStreamId": {
+      "title": "SessionStreamId",
+      "type": "string",
+      "pattern": "^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "SessionUpdate": {
+      "title": "SessionUpdate",
+      "type": "object",
+      "description": "PATCH /sessions/{id}",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Settings": {
+      "title": "Settings",
+      "type": "object",
+      "description": "GET /settings: alle Phase-1-Bereiche, fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.",
+      "required": [
+        "general",
+        "lecture",
+        "pen",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "general": {
+          "$ref": "#/$defs/GeneralSettings"
+        },
+        "lecture": {
+          "$ref": "#/$defs/LectureSettings"
+        },
+        "pen": {
+          "$ref": "#/$defs/PenSettings"
+        },
+        "data": {
+          "$ref": "#/$defs/DataSettings"
+        }
+      }
+    },
+    "SettingsUpdate": {
+      "title": "SettingsUpdate",
+      "type": "object",
+      "description": "PATCH /settings: nur die angegebenen Felder ändern sich. Antwort: Settings",
+      "additionalProperties": false,
+      "properties": {
+        "general": {
+          "$ref": "#/$defs/GeneralSettingsUpdate"
+        },
+        "lecture": {
+          "$ref": "#/$defs/LectureSettingsUpdate"
+        },
+        "pen": {
+          "$ref": "#/$defs/PenSettingsUpdate"
+        },
+        "data": {
+          "$ref": "#/$defs/DataSettingsUpdate"
+        }
+      }
+    },
+    "Sha256": {
+      "title": "Sha256",
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256, hex, Kleinbuchstaben"
+    },
+    "ShapeElement": {
+      "title": "ShapeElement",
+      "type": "object",
+      "required": [
+        "element_id",
+        "kind",
+        "frame",
+        "z",
+        "t_ms",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "shape"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/ShapeElementPayload"
+        }
+      }
+    },
+    "ShapeElementPayload": {
+      "title": "ShapeElementPayload",
+      "type": "object",
+      "required": [
+        "shape",
+        "points",
+        "color",
+        "width"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "$ref": "#/$defs/ShapeKind"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Point2"
+          },
+          "minItems": 2
+        },
+        "color": {
+          "$ref": "#/$defs/HexColor"
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "ShapeKind": {
+      "title": "ShapeKind",
+      "type": "string",
+      "enum": [
+        "rectangle",
+        "ellipse",
+        "line",
+        "arrow",
+        "triangle",
+        "diamond"
+      ]
+    },
     "Slide": {
       "title": "Slide",
       "type": "object",
@@ -1162,6 +5632,91 @@
             "string",
             "null"
           ]
+        }
+      }
+    },
+    "SlideChangeData": {
+      "title": "SlideChangeData",
+      "type": "object",
+      "required": [
+        "event_id",
+        "session_id",
+        "slide_index",
+        "t_ms",
+        "device"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slide_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "device": {
+          "$ref": "#/$defs/ClientDevice"
+        }
+      }
+    },
+    "SlideChangeOp": {
+      "title": "SlideChangeOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "slide.change"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SlideChangeData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
         }
       }
     },
@@ -1297,6 +5852,1197 @@
         }
       }
     },
+    "SlideEvent": {
+      "title": "SlideEvent",
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "slide_id",
+        "slide_index",
+        "t_ms",
+        "device",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slide_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "device": {
+          "$ref": "#/$defs/ClientDevice"
+        },
+        "source": {
+          "$ref": "#/$defs/SlideEventSource"
+        }
+      }
+    },
+    "SlideEventSource": {
+      "title": "SlideEventSource",
+      "type": "string",
+      "enum": [
+        "manuell_mac",
+        "manuell_ipad",
+        "korrektur"
+      ]
+    },
+    "StampElement": {
+      "title": "StampElement",
+      "type": "object",
+      "required": [
+        "element_id",
+        "kind",
+        "frame",
+        "z",
+        "t_ms",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "stamp"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/StampElementPayload"
+        }
+      }
+    },
+    "StampElementPayload": {
+      "title": "StampElementPayload",
+      "type": "object",
+      "required": [
+        "marker_id",
+        "marker_kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "marker_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "marker_kind": {
+          "$ref": "#/$defs/MarkerKind"
+        }
+      }
+    },
+    "StopReason": {
+      "title": "StopReason",
+      "type": "string",
+      "enum": [
+        "manuell",
+        "kalenderende",
+        "stille",
+        "maximaldauer",
+        "absturz_wiederhergestellt"
+      ]
+    },
+    "Stroke": {
+      "title": "Stroke",
+      "type": "object",
+      "description": "Neutrales Strich-Format (08 §4.1/4.2). points sind Rohkoordinaten VOR transform, bbox gilt NACH transform inklusive halber Breite. dt des ersten Punkts ist 0; t_end_ms − t_start_ms entspricht dem letzten dt. t_start_ms/t_end_ms null außerhalb einer Session.",
+      "required": [
+        "client_id",
+        "tool",
+        "layer",
+        "color",
+        "width",
+        "created_at",
+        "t_start_ms",
+        "t_end_ms",
+        "transform",
+        "bbox",
+        "points"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "client_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "tool": {
+          "$ref": "#/$defs/StrokeTool"
+        },
+        "layer": {
+          "$ref": "#/$defs/StrokeLayer"
+        },
+        "color": {
+          "$ref": "#/$defs/HexColor"
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Grundbreite in pt"
+        },
+        "created_at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "t_start_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "t_end_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transform": {
+          "$ref": "#/$defs/Transform"
+        },
+        "bbox": {
+          "$ref": "#/$defs/BBox"
+        },
+        "points": {
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9+/]{32})+$",
+          "description": "Base64 (ohne Zeilenumbrüche) von n ≥ 1 Punkten à 24 Byte: x, y, dt, force, azimuth, altitude als Float32 little-endian (08 §4.2). 24 Byte = genau 32 Base64-Zeichen, daher nie Padding"
+        }
+      }
+    },
+    "StrokeAddData": {
+      "title": "StrokeAddData",
+      "type": "object",
+      "required": [
+        "page_id",
+        "stroke"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stroke": {
+          "$ref": "#/$defs/Stroke"
+        }
+      }
+    },
+    "StrokeAddOp": {
+      "title": "StrokeAddOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "stroke.add"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/StrokeAddData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "StrokeLayer": {
+      "title": "StrokeLayer",
+      "type": "string",
+      "enum": [
+        "ink",
+        "highlight"
+      ]
+    },
+    "StrokeRemoveData": {
+      "title": "StrokeRemoveData",
+      "type": "object",
+      "required": [
+        "page_id",
+        "client_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "client_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "StrokeRemoveOp": {
+      "title": "StrokeRemoveOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "stroke.remove"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/StrokeRemoveData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "StrokeTool": {
+      "title": "StrokeTool",
+      "type": "string",
+      "enum": [
+        "pen",
+        "pencil",
+        "marker",
+        "monoline",
+        "fountain"
+      ]
+    },
+    "SyncAck": {
+      "title": "SyncAck",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "seq"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ack"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SyncStreamId"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "SyncClientKind": {
+      "title": "SyncClientKind",
+      "type": "string",
+      "enum": [
+        "ipad",
+        "web"
+      ]
+    },
+    "SyncClientMessage": {
+      "title": "SyncClientMessage",
+      "description": "Alle Nachrichten Client → Server",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SyncHello"
+        },
+        {
+          "$ref": "#/$defs/SyncSubscribe"
+        },
+        {
+          "$ref": "#/$defs/SyncUnsubscribe"
+        },
+        {
+          "$ref": "#/$defs/SyncTimePing"
+        },
+        {
+          "$ref": "#/$defs/SyncTimeOffset"
+        },
+        {
+          "$ref": "#/$defs/SyncPing"
+        },
+        {
+          "$ref": "#/$defs/SyncPresence"
+        },
+        {
+          "$ref": "#/$defs/SyncOp"
+        }
+      ]
+    },
+    "SyncConnectionEvent": {
+      "title": "SyncConnectionEvent",
+      "type": "object",
+      "description": "Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)",
+      "required": [
+        "type",
+        "name",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "device.connection"
+        },
+        "data": {
+          "$ref": "#/$defs/SyncConnectionInfo"
+        }
+      }
+    },
+    "SyncConnectionInfo": {
+      "title": "SyncConnectionInfo",
+      "type": "object",
+      "required": [
+        "client",
+        "device_id",
+        "connected"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/SyncClientKind"
+        },
+        "device_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connected": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SyncError": {
+      "title": "SyncError",
+      "type": "object",
+      "required": [
+        "type",
+        "code",
+        "message",
+        "retryable",
+        "fatal"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "error"
+        },
+        "code": {
+          "$ref": "#/$defs/SyncErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SyncStreamId"
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Nur mit op_id: true = Operation in der Warteschlange lassen und später erneut senden, false = endgültig abgelehnt, aus der Warteschlange entfernen"
+        },
+        "fatal": {
+          "type": "boolean",
+          "description": "true: der Server schließt die Verbindung direkt danach"
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "SyncErrorCode": {
+      "title": "SyncErrorCode",
+      "type": "string",
+      "enum": [
+        "protocol_unsupported",
+        "hello_required",
+        "hello_invalid",
+        "device_token_invalid",
+        "message_invalid",
+        "too_many_pending",
+        "op_id_reused",
+        "stream_mismatch",
+        "module_not_found",
+        "session_not_found",
+        "session_transition_invalid",
+        "notebook_not_found",
+        "page_not_found",
+        "page_version_conflict",
+        "internal_error"
+      ]
+    },
+    "SyncEvent": {
+      "title": "SyncEvent",
+      "description": "Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SyncSessionUpdatedEvent"
+        },
+        {
+          "$ref": "#/$defs/SyncPresenceEvent"
+        },
+        {
+          "$ref": "#/$defs/SyncConnectionEvent"
+        },
+        {
+          "$ref": "#/$defs/SyncPairingEvent"
+        }
+      ]
+    },
+    "SyncHello": {
+      "title": "SyncHello",
+      "type": "object",
+      "description": "Erste Nachricht des Clients (08 §2.1). token (Gerätetoken) Pflicht für Verbindungen aus dem Netz, lokal (Web-App) ohne.",
+      "required": [
+        "type",
+        "protocol",
+        "client",
+        "app_version",
+        "streams"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "hello"
+        },
+        "protocol": {
+          "const": 1
+        },
+        "client": {
+          "$ref": "#/$defs/SyncClientKind"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "app_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncStreamPosition"
+          }
+        }
+      }
+    },
+    "SyncOp": {
+      "title": "SyncOp",
+      "description": "Operation (08 §2.3), unterschieden über kind. Client → Server ohne seq/origin, Server → Client mit seq und origin.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PageCreateOp"
+        },
+        {
+          "$ref": "#/$defs/PageUpdateOp"
+        },
+        {
+          "$ref": "#/$defs/PageDeleteOp"
+        },
+        {
+          "$ref": "#/$defs/StrokeAddOp"
+        },
+        {
+          "$ref": "#/$defs/StrokeRemoveOp"
+        },
+        {
+          "$ref": "#/$defs/ElementUpsertOp"
+        },
+        {
+          "$ref": "#/$defs/ElementRemoveOp"
+        },
+        {
+          "$ref": "#/$defs/DrawingSnapshotOp"
+        },
+        {
+          "$ref": "#/$defs/SessionStartOp"
+        },
+        {
+          "$ref": "#/$defs/SessionPauseOp"
+        },
+        {
+          "$ref": "#/$defs/SessionResumeOp"
+        },
+        {
+          "$ref": "#/$defs/SessionStopOp"
+        },
+        {
+          "$ref": "#/$defs/SlideChangeOp"
+        },
+        {
+          "$ref": "#/$defs/MarkerAddOp"
+        },
+        {
+          "$ref": "#/$defs/MarkerRemoveOp"
+        },
+        {
+          "$ref": "#/$defs/PhotoAddOp"
+        }
+      ]
+    },
+    "SyncOrigin": {
+      "title": "SyncOrigin",
+      "type": "string",
+      "enum": [
+        "ipad",
+        "web",
+        "server"
+      ],
+      "description": "Wer die Operation erzeugt hat (vom Server gesetzt)"
+    },
+    "SyncPairingEvent": {
+      "title": "SyncPairingEvent",
+      "type": "object",
+      "description": "Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)",
+      "required": [
+        "type",
+        "name",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "pairing.requested"
+        },
+        "data": {
+          "$ref": "#/$defs/PairingCode"
+        }
+      }
+    },
+    "SyncPing": {
+      "title": "SyncPing",
+      "type": "object",
+      "description": "Keepalive des Clients alle 15 s",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ping"
+        }
+      }
+    },
+    "SyncPong": {
+      "title": "SyncPong",
+      "type": "object",
+      "required": [
+        "type"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "pong"
+        }
+      }
+    },
+    "SyncPresence": {
+      "title": "SyncPresence",
+      "type": "object",
+      "description": "Was der Client gerade zeigt (ersetzt den vorigen Stand). Das iPad sendet sie bei jedem Seitenwechsel, die Notizen-Spalte folgt ihr (F-DSH-04). Ergänzung zu 08 §2",
+      "required": [
+        "type",
+        "session_id",
+        "notebook_id",
+        "page_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "presence"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notebook_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SyncPresenceEvent": {
+      "title": "SyncPresenceEvent",
+      "type": "object",
+      "description": "Weitergabe von presence eines anderen Clients",
+      "required": [
+        "type",
+        "name",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "presence"
+        },
+        "data": {
+          "$ref": "#/$defs/SyncPresenceInfo"
+        }
+      }
+    },
+    "SyncPresenceInfo": {
+      "title": "SyncPresenceInfo",
+      "type": "object",
+      "required": [
+        "client",
+        "device_id",
+        "device_name",
+        "session_id",
+        "notebook_id",
+        "page_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/SyncClientKind"
+        },
+        "device_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "device_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notebook_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SyncResume": {
+      "title": "SyncResume",
+      "type": "object",
+      "required": [
+        "stream",
+        "from_seq",
+        "head_seq",
+        "reset"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "stream": {
+          "$ref": "#/$defs/SyncStreamId"
+        },
+        "from_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Ab dieser seq sendet der Server die fehlenden Operationen"
+        },
+        "head_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Aktuell höchste seq des Stroms. Ergänzung zu 08 §2.1"
+        },
+        "reset": {
+          "type": "boolean",
+          "description": "true: der Client kennt eine seq, die der Server nicht hat (z. B. nach Wiederherstellung eines Backups). Der Client verwirft seinen Stand des Stroms, lädt per REST neu und abonniert ab dem dortigen stream_seq. from_seq ist dann 1."
+        }
+      }
+    },
+    "SyncServerMessage": {
+      "title": "SyncServerMessage",
+      "description": "Alle Nachrichten Server → Client",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SyncWelcome"
+        },
+        {
+          "$ref": "#/$defs/SyncSubscribed"
+        },
+        {
+          "$ref": "#/$defs/SyncAck"
+        },
+        {
+          "$ref": "#/$defs/SyncOp"
+        },
+        {
+          "$ref": "#/$defs/SyncTimePong"
+        },
+        {
+          "$ref": "#/$defs/SyncPong"
+        },
+        {
+          "$ref": "#/$defs/SyncError"
+        },
+        {
+          "$ref": "#/$defs/SyncEvent"
+        }
+      ]
+    },
+    "SyncSessionUpdatedEvent": {
+      "title": "SyncSessionUpdatedEvent",
+      "type": "object",
+      "description": "Zustand oder Felder einer Session haben sich geändert (auch zeitgesteuert: bereit, verpasst, verarbeitet)",
+      "required": [
+        "type",
+        "name",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "session.updated"
+        },
+        "data": {
+          "$ref": "#/$defs/Session"
+        }
+      }
+    },
+    "SyncStreamId": {
+      "title": "SyncStreamId",
+      "type": "string",
+      "pattern": "^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$",
+      "description": "Strom (08 §2.2): notebook:<id>, session:<id> oder user"
+    },
+    "SyncStreamPosition": {
+      "title": "SyncStreamPosition",
+      "type": "object",
+      "required": [
+        "stream",
+        "last_seq"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "stream": {
+          "$ref": "#/$defs/SyncStreamId"
+        },
+        "last_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Letzte beim Client angewandte seq, 0 = nichts"
+        }
+      }
+    },
+    "SyncSubscribe": {
+      "title": "SyncSubscribe",
+      "type": "object",
+      "description": "Weitere Ströme abonnieren, ohne neu zu verbinden. Antwort: subscribed. Ergänzung zu 08 §2",
+      "required": [
+        "type",
+        "streams"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "subscribe"
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncStreamPosition"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "SyncSubscribed": {
+      "title": "SyncSubscribed",
+      "type": "object",
+      "required": [
+        "type",
+        "resume"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "subscribed"
+        },
+        "resume": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncResume"
+          }
+        }
+      }
+    },
+    "SyncTimeOffset": {
+      "title": "SyncTimeOffset",
+      "type": "object",
+      "description": "Ergebnis des Uhrabgleichs an den Server (device.clock_offset_ms). Ergänzung zu 08 §2.1",
+      "required": [
+        "type",
+        "offset_ms",
+        "rtt_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "time.offset"
+        },
+        "offset_ms": {
+          "type": "integer",
+          "description": "Gemessener Versatz Server − Client"
+        },
+        "rtt_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Median der Umlaufzeit"
+        }
+      }
+    },
+    "SyncTimePing": {
+      "title": "SyncTimePing",
+      "type": "object",
+      "description": "t0 = lokale Uhr des Clients beim Senden (F-SYN-02)",
+      "required": [
+        "type",
+        "t0"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "time.ping"
+        },
+        "t0": {
+          "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "SyncTimePong": {
+      "title": "SyncTimePong",
+      "type": "object",
+      "description": "ts = Serveruhr beim Antworten. Versatz = Median über 5 Runden von ts − (t0 + t1) / 2",
+      "required": [
+        "type",
+        "t0",
+        "ts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "time.pong"
+        },
+        "t0": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "ts": {
+          "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "SyncUnsubscribe": {
+      "title": "SyncUnsubscribe",
+      "type": "object",
+      "required": [
+        "type",
+        "streams"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "unsubscribe"
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncStreamId"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "SyncWelcome": {
+      "title": "SyncWelcome",
+      "type": "object",
+      "required": [
+        "type",
+        "protocol",
+        "server_time",
+        "server_version",
+        "device_id",
+        "resume"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "welcome"
+        },
+        "protocol": {
+          "const": 1
+        },
+        "server_time": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "server_version": {
+          "type": "string"
+        },
+        "device_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resume": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncResume"
+          }
+        }
+      }
+    },
+    "TapeElement": {
+      "title": "TapeElement",
+      "type": "object",
+      "required": [
+        "element_id",
+        "kind",
+        "frame",
+        "z",
+        "t_ms",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "tape"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/TapeElementPayload"
+        }
+      }
+    },
+    "TapeElementPayload": {
+      "title": "TapeElementPayload",
+      "type": "object",
+      "required": [
+        "color",
+        "covered",
+        "card_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/HexColor"
+        },
+        "covered": {
+          "type": "boolean"
+        },
+        "card_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
     "Task": {
       "title": "Task",
       "type": "object",
@@ -1389,11 +7135,227 @@
         }
       }
     },
+    "TextElement": {
+      "title": "TextElement",
+      "type": "object",
+      "required": [
+        "element_id",
+        "kind",
+        "frame",
+        "z",
+        "t_ms",
+        "payload"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "text"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/TextElementPayload"
+        }
+      }
+    },
+    "TextElementPayload": {
+      "title": "TextElementPayload",
+      "type": "object",
+      "required": [
+        "text",
+        "size"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "size": {
+          "$ref": "#/$defs/TextSize"
+        }
+      }
+    },
+    "TextSize": {
+      "title": "TextSize",
+      "type": "string",
+      "enum": [
+        "s",
+        "m",
+        "l"
+      ]
+    },
     "Timestamp": {
       "title": "Timestamp",
       "type": "string",
       "format": "date-time",
       "description": "ISO 8601, UTC"
+    },
+    "ToolbarSide": {
+      "title": "ToolbarSide",
+      "type": "string",
+      "enum": [
+        "links",
+        "rechts"
+      ],
+      "description": "Händigkeit: Seite der Werkzeugleiste auf dem iPad"
+    },
+    "Transform": {
+      "title": "Transform",
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 6,
+      "maxItems": 6,
+      "description": "Affine Transformation [a, b, c, d, e, f] (CGAffineTransform): x' = a·x + c·y + e, y' = b·x + d·y + f"
+    },
+    "TrashItem": {
+      "title": "TrashItem",
+      "type": "object",
+      "description": "Direkt gelöschtes Objekt im Papierkorb (F-DAT-04). Mitgelöschte Teile erscheinen nicht einzeln.",
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "deleted_at",
+        "purge_at",
+        "parent",
+        "dependent_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/TrashKind"
+        },
+        "title": {
+          "type": "string",
+          "description": "Anzeigename (Titel, Name oder z. B. „Seite 3\")"
+        },
+        "deleted_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "purge_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrashParent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dependent_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Mitgelöschte abhängige Objekte, die mit wiederhergestellt werden"
+        }
+      }
+    },
+    "TrashKind": {
+      "title": "TrashKind",
+      "type": "string",
+      "enum": [
+        "semester",
+        "module",
+        "slide_deck",
+        "exercise_sheet",
+        "calendar_source",
+        "session",
+        "notebook",
+        "page",
+        "marker",
+        "photo"
+      ]
+    },
+    "TrashList": {
+      "title": "TrashList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TrashItem"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "TrashParent": {
+      "title": "TrashParent",
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/TrashKind"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "TrashRestoreResult": {
+      "title": "TrashRestoreResult",
+      "type": "object",
+      "description": "POST /trash/{id}/restore, auch für „Rückgängig\" im Toast",
+      "required": [
+        "id",
+        "kind",
+        "restored_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/TrashKind"
+        },
+        "restored_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
     },
     "UploadResult": {
       "title": "UploadResult",

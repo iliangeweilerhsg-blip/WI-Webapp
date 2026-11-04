@@ -1,0 +1,12 @@
+{
+  "element_id": "019a4e14-0000-7000-8000-000000000055",
+  "kind": "tape",
+  "frame": [50, 300, 200, 24],
+  "z": 5,
+  "t_ms": null,
+  "payload": {
+    "color": "#9AA0A6FF",
+    "covered": true,
+    "card_id": null
+  }
+}

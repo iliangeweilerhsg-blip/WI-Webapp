@@ -1,0 +1,655 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Handschrift: Notizbücher, Seiten, Striche, Seitenelemente (03 §6, 08 §4)",
+  "$defs": {
+    "NotebookKind": {
+      "type": "string",
+      "enum": ["vorlesung", "uebung", "frei"]
+    },
+    "PageTemplate": {
+      "type": "string",
+      "enum": ["blanko", "liniert", "kariert", "punktraster", "cornell", "folie"]
+    },
+    "StrokeTool": {
+      "type": "string",
+      "enum": ["pen", "pencil", "marker", "monoline", "fountain"]
+    },
+    "StrokeLayer": {
+      "type": "string",
+      "enum": ["ink", "highlight"]
+    },
+    "Transform": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 6,
+      "maxItems": 6,
+      "description": "Affine Transformation [a, b, c, d, e, f] (CGAffineTransform): x' = a·x + c·y + e, y' = b·x + d·y + f"
+    },
+    "Notebook": {
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "module_id",
+        "title",
+        "kind",
+        "page_count"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookKind"
+        },
+        "page_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Abgeleitet"
+        }
+      }
+    },
+    "NotebookCreate": {
+      "type": "object",
+      "description": "POST /notebooks. kind fehlt = frei",
+      "required": ["module_id", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookKind"
+        }
+      }
+    },
+    "NotebookUpdate": {
+      "type": "object",
+      "description": "PATCH /notebooks/{id}",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "NotebookList": {
+      "type": "object",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Notebook"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "Page": {
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "notebook_id",
+        "session_id",
+        "index",
+        "template",
+        "background_slide_id",
+        "attached_slide_id",
+        "width_pt",
+        "height_pt",
+        "version",
+        "has_pkdrawing"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Reihenfolge im Notizbuch, 1-basiert"
+        },
+        "template": {
+          "$ref": "#/$defs/PageTemplate"
+        },
+        "background_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attached_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "width_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "has_pkdrawing": {
+          "type": "boolean",
+          "description": "Abgeleitet: PencilKit-Sicherung liegt vor (GET /pages/{id}/pkdrawing)"
+        }
+      }
+    },
+    "NotebookPages": {
+      "type": "object",
+      "description": "GET /notebooks/{id}/pages, nach index sortiert, ohne gelöschte Seiten",
+      "required": ["notebook_id", "stream_seq", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "seq des Stroms notebook:<id> zu diesem Stand"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Page"
+          }
+        }
+      }
+    },
+    "Stroke": {
+      "type": "object",
+      "description": "Neutrales Strich-Format (08 §4.1/4.2). points sind Rohkoordinaten VOR transform, bbox gilt NACH transform inklusive halber Breite. dt des ersten Punkts ist 0; t_end_ms − t_start_ms entspricht dem letzten dt. t_start_ms/t_end_ms null außerhalb einer Session.",
+      "required": [
+        "client_id",
+        "tool",
+        "layer",
+        "color",
+        "width",
+        "created_at",
+        "t_start_ms",
+        "t_end_ms",
+        "transform",
+        "bbox",
+        "points"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "client_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "tool": {
+          "$ref": "#/$defs/StrokeTool"
+        },
+        "layer": {
+          "$ref": "#/$defs/StrokeLayer"
+        },
+        "color": {
+          "$ref": "#/$defs/HexColor"
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Grundbreite in pt"
+        },
+        "created_at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "t_start_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "t_end_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transform": {
+          "$ref": "#/$defs/Transform"
+        },
+        "bbox": {
+          "$ref": "#/$defs/BBox"
+        },
+        "points": {
+          "type": "string",
+          "pattern": "^(?:[A-Za-z0-9+/]{32})+$",
+          "description": "Base64 (ohne Zeilenumbrüche) von n ≥ 1 Punkten à 24 Byte: x, y, dt, force, azimuth, altitude als Float32 little-endian (08 §4.2). 24 Byte = genau 32 Base64-Zeichen, daher nie Padding"
+        }
+      }
+    },
+    "PageStrokes": {
+      "type": "object",
+      "description": "GET /pages/{id}/strokes: alle nicht gelöschten Striche, nach created_at sortiert",
+      "required": ["page_id", "stream_seq", "strokes"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "seq des Stroms notebook:<id> zu diesem Stand"
+        },
+        "strokes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Stroke"
+          }
+        }
+      }
+    },
+    "TextSize": {
+      "type": "string",
+      "enum": ["s", "m", "l"]
+    },
+    "ShapeKind": {
+      "type": "string",
+      "enum": ["rectangle", "ellipse", "line", "arrow", "triangle", "diamond"]
+    },
+    "TextElementPayload": {
+      "type": "object",
+      "required": ["text", "size"],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "size": {
+          "$ref": "#/$defs/TextSize"
+        }
+      }
+    },
+    "ImageElementPayload": {
+      "type": "object",
+      "required": ["photo_id", "crop"],
+      "additionalProperties": false,
+      "properties": {
+        "photo_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "crop": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BBox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ShapeElementPayload": {
+      "type": "object",
+      "required": ["shape", "points", "color", "width"],
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "$ref": "#/$defs/ShapeKind"
+        },
+        "points": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Point2"
+          },
+          "minItems": 2
+        },
+        "color": {
+          "$ref": "#/$defs/HexColor"
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "TapeElementPayload": {
+      "type": "object",
+      "required": ["color", "covered", "card_id"],
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/HexColor"
+        },
+        "covered": {
+          "type": "boolean"
+        },
+        "card_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "StampElementPayload": {
+      "type": "object",
+      "required": ["marker_id", "marker_kind"],
+      "additionalProperties": false,
+      "properties": {
+        "marker_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "marker_kind": {
+          "$ref": "#/$defs/MarkerKind"
+        }
+      }
+    },
+    "TextElement": {
+      "type": "object",
+      "required": ["element_id", "kind", "frame", "z", "t_ms", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "text"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/TextElementPayload"
+        }
+      }
+    },
+    "ImageElement": {
+      "type": "object",
+      "required": ["element_id", "kind", "frame", "z", "t_ms", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "image"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/ImageElementPayload"
+        }
+      }
+    },
+    "ShapeElement": {
+      "type": "object",
+      "required": ["element_id", "kind", "frame", "z", "t_ms", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "shape"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/ShapeElementPayload"
+        }
+      }
+    },
+    "TapeElement": {
+      "type": "object",
+      "required": ["element_id", "kind", "frame", "z", "t_ms", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "tape"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/TapeElementPayload"
+        }
+      }
+    },
+    "StampElement": {
+      "type": "object",
+      "required": ["element_id", "kind", "frame", "z", "t_ms", "payload"],
+      "additionalProperties": false,
+      "properties": {
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "const": "stamp"
+        },
+        "frame": {
+          "$ref": "#/$defs/BBox"
+        },
+        "z": {
+          "type": "integer"
+        },
+        "t_ms": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionMs"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/StampElementPayload"
+        }
+      }
+    },
+    "PageElement": {
+      "description": "Seitenelement (08 §4.4), unterschieden über kind. frame [x, y, w, h] in pt. crop bei image: [x, y, w, h] relativ zum Bild (0–1), null = ganzes Bild. Phase 1 nutzt image (Tafel-Foto) und stamp (Marker-Stempel).",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TextElement"
+        },
+        {
+          "$ref": "#/$defs/ImageElement"
+        },
+        {
+          "$ref": "#/$defs/ShapeElement"
+        },
+        {
+          "$ref": "#/$defs/TapeElement"
+        },
+        {
+          "$ref": "#/$defs/StampElement"
+        }
+      ]
+    },
+    "PageDetail": {
+      "type": "object",
+      "description": "GET /pages/{id}: Seite mit Elementen (ohne gelöschte, nach z sortiert)",
+      "required": ["page", "elements", "stream_seq"],
+      "additionalProperties": false,
+      "properties": {
+        "page": {
+          "$ref": "#/$defs/Page"
+        },
+        "elements": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PageElement"
+          }
+        },
+        "stream_seq": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
