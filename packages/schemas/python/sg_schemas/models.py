@@ -1693,6 +1693,7 @@ class Module(BaseModel):
     lecturer: StrictStr | None
     lang: Lang | None
     description_md: StrictStr | None
+    settings: ModuleSettings
 
 
 class ModuleCreate(BaseModel):
@@ -1734,6 +1735,10 @@ class ModuleList(BaseModel):
 
 
 class ModuleUpdate(BaseModel):
+    """
+    PATCH /modules/{id}. settings wird Schlüssel für Schlüssel zusammengeführt, null entfernt einen Schlüssel (docs/VERTRAEGE.md §14.2)
+    """
+
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -1751,6 +1756,7 @@ class ModuleUpdate(BaseModel):
     lecturer: StrictStr | None = None
     lang: Lang | None = None
     description_md: StrictStr | None = None
+    settings: ModuleSettingsUpdate | None = None
 
 
 class Notebook(BaseModel):

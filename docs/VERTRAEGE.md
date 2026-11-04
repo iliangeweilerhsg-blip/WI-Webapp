@@ -40,6 +40,7 @@ Geheimnisse wie API-Schlüssel stehen in `$SG_DATA_DIR/config/.env` mit Rechten 
 - **Eigentümer des Schemas ist der Core** (Drizzle-Migrationen unter `services/core/drizzle/`). Der Worker legt keine Tabellen an.
 - Die erste Migration aktiviert `CREATE EXTENSION IF NOT EXISTS vector` und `pgcrypto`.
 - Jede Tabelle hat die Pflichtfelder aus 03 §1. IDs sind UUIDv7 und werden in der Anwendung erzeugt, nicht in der DB.
+  Ausnahmen: `setting` (Schlüssel `key` statt `id`), `idempotency_key` und die Sync-Tabellen `sync_stream`, `sync_op`, `sync_meta`. Sie haben genau die Spalten aus §6.1, ohne `id`, `user_id` und `deleted_at`.
 
 ### Tabelle `job` (verbindlich für Core und Worker)
 
@@ -155,7 +156,7 @@ In der DB steht `file_path` relativ zu `SG_DATA_DIR`. So lässt sich der Datenor
 - **Zeit:** REST liefert ISO 8601 UTC mit `Z`, Millisekunden nur, wenn sie nicht 0 sind. Im Sync-Protokoll sind alle absoluten Zeiten Epochen-ms (`EpochMs`). Sitzungszeiten heißen `t_ms` bzw. `*_ms` (`SessionMs`). Eingebettete REST-Objekte, etwa `Session` im Ereignis `session.updated`, behalten ihr REST-Format.
 - **IDs:** Clients erzeugen UUIDv7 für alles, was sie offline anlegen (Notizbücher, Seiten, Striche, Marker, Fotos, spontane Sessions, Aufnahmen). **Alle UUIDs werden in Kleinbuchstaben erzeugt und übertragen.** Der Server normalisiert nicht: Großbuchstaben verletzen das Schema (`Uuid`) und werden abgelehnt. Alle Create-Bodies haben ein optionales `id`. Ist die `id` schon vergeben, antwortet der Core mit `409 <objekt>_exists`. Wiederholte Anfragen sichert der `Idempotency-Key` ab (08 §1).
 - **Pfadparameter** prüft der Core mit dem Schema: `{id}` als `Uuid`, `{seq}` als Ganzzahl ≥ 0. Ein ungültiger Wert ergibt `400 validation_failed`, nicht 404.
-- **Verweise über Stromgrenzen** (`slide_id`, `background_slide_id`, `attached_slide_id`, `page.session_id`, `photo_id` in Bildelementen, `marker_id` in Stempeln): Der Core speichert sie **ohne Fremdschlüssel** und löst sie beim Lesen auf (F-SYN-03: Folie kommt später, Session wurde offline angelegt). Fremdschlüssel gibt es nur innerhalb eines Stroms, z. B. `page.notebook_id`, `stroke.page_id` und `marker.session_id`.
+- **Verweise über Stromgrenzen** (`slide_id`, `background_slide_id`, `attached_slide_id`, `page.session_id`, `marker.page_id`, `photo.page_id`, `photo_id` in Bildelementen, `marker_id` in Stempeln): Der Core speichert sie **ohne Fremdschlüssel** und löst sie beim Lesen auf (F-SYN-03: Folie kommt später, Session wurde offline angelegt). Fremdschlüssel gibt es nur innerhalb eines Stroms, z. B. `page.notebook_id`, `stroke.page_id` und `marker.session_id`. `sync_op.device_id` hat ebenfalls keinen Fremdschlüssel, damit der Verlauf nach dem Entfernen eines Geräts lesbar bleibt.
 - **Löschen** ist weich (03 §1). Abhängige Objekte bekommen **denselben** `deleted_at`-Zeitstempel (Kaskaden in §13). Darüber stellt der Papierkorb genau den Löschvorgang wieder her.
 
 ### 6.1 Neue Tabellen und Ergänzungen zu 03
@@ -167,17 +168,18 @@ Eigentümer der Tabellen bleibt der Core. Alle Tabellen legt **T1-DB** in einer 
 | `module` | `settings jsonb NOT NULL DEFAULT '{}'` (`ModuleSettings`) | W-06 Option A, übernommen in 03 §3 |
 | `calendar_source` | `name text`, `last_error text NULL` | Anzeige mehrerer Quellen, Fehler beim URL-Abgleich |
 | `calendar_event` | `description text NULL`, `all_day bool`, `assigned_by text` (`auto`/`manuell`) | Zuordnung über die Beschreibung (F-KAL-02), ganztägige Termine (Testfall ics/08), manuelle Zuordnung bleibt beim Abgleich erhalten |
-| `calendar_event` | `UNIQUE (source_id, external_uid, recurrence_id)` mit `NULLS NOT DISTINCT` | Abgleichschlüssel (F-KAL-01) |
+| `calendar_event` | Unique-Index `(source_id, external_uid, recurrence_id) NULLS NOT DISTINCT WHERE source_id IS NOT NULL` (`calendar_event_sync_uq`). Upsert mit `ON CONFLICT (source_id, external_uid, recurrence_id) WHERE source_id IS NOT NULL` | Abgleichschlüssel (F-KAL-01). Manuelle Termine (`source_id NULL`) fallen nicht darunter |
 | `session` | `UNIQUE (calendar_event_id) WHERE deleted_at IS NULL` | Eine Session pro Termin |
 | `session` | `start_offsets jsonb NOT NULL DEFAULT '[]'` (`SessionStartOffset[]`), `auto_stop_extended_until timestamptz NULL` | Abweichender Offline-Start (§9.3), Verlängerung (§9.4) |
-| `recording` | `chunks_independent bool`, `completed_at timestamptz NULL` | Spike S4, Abschluss durch den Client |
+| `recording` | `chunks_independent bool`, `completed_at timestamptz NULL`, `completed_last_seq int NULL`, `completed_duration_ms int8 NULL` (Angaben aus `RecordingComplete`) | Spike S4, Abschluss durch den Client. `completed_last_seq` braucht `recording_seq_conflict` (§7.3) und `audio.finalize` für fehlende Chunks am Ende (§10.2) |
 | `audio_chunk` | `size_bytes int8` | Antwort `AudioChunk` |
 | `photo` | `mime text`, `sha256 text`, `size_bytes int8`, `file_path` erst nach Upload gesetzt | Upload unabhängig von `photo.add` |
-| `device` | `kind`: `ipad` \| `iphone` | 03 §13 lässt die Werte offen |
+| `device` | `kind`: `ipad` \| `iphone`. `clock_offset_ms` nullbar, `NULL` = noch nicht gemessen | 03 §13 lässt die Werte offen |
+| `page_element` | `frame jsonb NOT NULL` (`[x, y, w, h]`) | `PageElement.frame` der API |
 | `backup_run` | `trigger text`, `stand text NULL` | Anzeige, Name für `sg restore <stand>` |
 | `sync_stream` (neu) | `stream text PRIMARY KEY`, `head_seq int8 NOT NULL DEFAULT 0` | Vergabe von `seq` mit Zeilensperre (§11.2) |
 | `sync_op` (neu) | `stream text`, `seq int8`, `op_id uuid UNIQUE`, `kind`, `at int8`, `clock_uncertain`, `data jsonb`, `origin`, `device_id NULL`, `received_at`; `UNIQUE (stream, seq)` | Nachlieferung ab `from_seq` und Idempotenz (§11). Aufbewahrung §13 |
-| `sync_meta` (neu) | eine Zeile mit `db_epoch uuid` | Epoche für `welcome` (§11.1). `sg restore` setzt sie neu |
+| `sync_meta` (neu) | eine Zeile mit `db_epoch uuid` | Epoche für `welcome` (§11.1). `sg restore` setzt sie neu. Die Migration legt die Zeile an |
 | `setting` | Schlüssel `general`, `lecture`, `pen`, `data`, Wert je Bereich (§14) | F-EIN-01 |
 
 Die Kopplung braucht **keine Tabelle**. Codes leben nur im Speicher des Core (§12).
@@ -188,6 +190,8 @@ Abgeleitete Felder der API, etwa `event_count`, `session_id` am Termin, `planned
 
 Basis `/api/v1`, Konventionen aus §5 und 08 §1. Fehlerkörper immer `ApiError`. Für alle Routen gelten außerdem `400 validation_failed`, `401 device_token_required|device_token_invalid` (aus dem Netz), `403 origin_not_allowed` und `421 host_not_allowed`. Mit **lokal** markierte Routen lehnen Anfragen aus dem Netz mit `403 local_only` ab, auch mit gültigem Token.
 Listen mit `?cursor&limit` (Standard 50, höchstens 200).
+
+**Lösch-Routen aus Phase 0:** `DELETE /modules/{id}` und `DELETE /semesters/{id}` antworten ab T1-18 (Umstellung auf `softDelete`) mit `409 session_active` und `details.session_ids`, wenn die Kaskade eine laufende oder pausierte Session enthält. Dann wird nichts gelöscht.
 
 ### 7.1 Kalender (T1-01)
 
@@ -268,7 +272,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `GET /backups` | – | 200 `BackupOverview` | |
 | `POST /backup` | – | 202 `BackupRun` | 409 `backup_running`, 409 `backup_target_missing` |
 | `GET /trash?kind` | – | 200 `TrashList`, nach `deleted_at` absteigend | |
-| `POST /trash/{id}/restore` | – | 200 `TrashRestoreResult` | 404 `trash_item_not_found`, 409 `restore_parent_deleted` (`details.parent`) |
+| `POST /trash/{id}/restore` | – | 200 `TrashRestoreResult` | 404 `trash_item_not_found`, 409 `restore_parent_deleted` (`details.parent`), 409 `restore_conflict` (`details.constraint`, `details.conflicting_id`) |
 | `GET /settings` | – | 200 `Settings` | |
 | `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad nicht absolut oder nicht beschreibbar) |
 
@@ -442,7 +446,7 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
 - `at` ist die synchronisierte Zeit, **zu der die Operation auf dem Gerät entstanden ist**, nicht der Sendezeitpunkt. Verspätet gesendete Operationen behalten `at` und `t_ms` (08 §2.3).
 - Der Server prüft jede Operation gegen `SyncOp`. **`seq` und `origin` setzt nur der Server.** Schickt ein Client sie mit, folgt `error message_invalid` (`retryable = false`). Stimmen Strom und Inhalt nicht überein, etwa `stroke.add` auf eine Seite eines anderen Notizbuchs oder `marker.add` mit anderer `session_id` als der Strom, folgt `error stream_mismatch`. Server-Operationen (`notebook.update`, `notebook.delete`, `notebook.restore`, `page.restore`) von einem Client ergeben `error op_not_allowed`.
 - **Vergabe von `seq`:** In derselben Transaktion wie die fachliche Änderung: `sync_stream`-Zeile des Stroms mit `SELECT … FOR UPDATE` sperren (bzw. anlegen), `head_seq + 1` vergeben, `sync_op` schreiben, Kopf hochzählen, Commit. So ist `seq` pro Strom lückenlos und die Reihenfolge entspricht der Commit-Reihenfolge.
-- **Reihenfolge:** Der Server verarbeitet die Operationen einer Verbindung strikt in Empfangsreihenfolge, eine nach der anderen. Pro Verbindung gehen `ack` und Weitergaben eines Stroms **in `seq`-Reihenfolge** raus, auch wenn Commits anderer Verbindungen dazwischenliegen. Die Weitergabe an andere Abonnenten trägt `seq` und `origin`. Der Absender bekommt seine eigene Operation nicht zurück.
+- **Reihenfolge:** Der Server verarbeitet die Operationen einer Verbindung strikt in Empfangsreihenfolge, eine nach der anderen. Auch das `ack` geht über dieselbe geordnete Auslieferung nach dem Commit (Hook `onOpCommitted`, §16.2) wie die Weitergaben. So kommt `ack n+1` beim Client nie vor der Operation `n` eines anderen Absenders an. Pro Verbindung gehen `ack` und Weitergaben eines Stroms **in `seq`-Reihenfolge** raus, auch wenn Commits anderer Verbindungen dazwischenliegen. Die Weitergabe an andere Abonnenten trägt `seq` und `origin`. Der Absender bekommt seine eigene Operation nicht zurück.
 - **`last_seq`** ist beim Client die höchste `seq`, bis zu der er **lückenlos** alle Operationen erhalten und angewendet hat (eigene über `ack`, fremde über Weitergabe). Sieht er eine Lücke, wartet er kurz und abonniert bei Bedarf neu ab `last_seq`.
 - **Idempotenz:** Ist eine `op_id` schon bekannt, sendet der Server das ursprüngliche `ack` erneut. Gleiche `op_id` mit anderem `stream`, `kind` oder `data` ergibt `error op_id_reused` (`retryable = false`).
 - **Wiederholbare Fehler gelten für die Verbindung.** `too_many_pending`, `internal_error` und jeder andere Fehler mit `retryable = true` kommen immer mit `fatal = true`. Der Server **schließt die Verbindung** danach mit Code 4503 und verarbeitet keine weiteren Nachrichten dieser Verbindung. Der Client verbindet neu und sendet ab der betroffenen Operation in der Originalreihenfolge. So kann keine spätere Operation eines Stroms vor einer früheren ankommen.
@@ -583,8 +587,14 @@ Nachweis: CI-Job **Swift-Contract** (`bash packages/schemas/swift-support/check.
 
 - `GET /trash` zeigt nur **direkt** gelöschte Objekte. Das sind die, deren Elternobjekt nicht mit demselben Zeitstempel gelöscht wurde. `purge_at = deleted_at + 30 Tage`.
 - `POST /trash/{id}/restore` stellt das Objekt und alle Teile mit **genau** diesem `deleted_at` wieder her. Die ID ist die Objekt-ID (UUIDs sind tabellenübergreifend eindeutig). Ist das Elternobjekt selbst gelöscht, folgt `409 restore_parent_deleted`. Für Notizbücher und Seiten schreibt der Core `notebook.restore` bzw. `page.restore` in den Strom (§11.3).
+- **Konflikte beim Wiederherstellen:** Wäre danach ein partieller Unique-Index verletzt, etwa weil der Termin inzwischen eine neue Session hat, antwortet der Core mit `409 restore_conflict` und `details: { constraint, conflicting_id }`. Dann wird nichts wiederhergestellt. `conflicting_id` ist `null`, wenn der Konflikt erst beim Schreiben auffällt.
+  - Ausnahme Semester: Ist inzwischen ein anderes Semester aktuell, kommt das wiederhergestellte mit `is_current = false` zurück. Das ist kein Fehler.
 - „Rückgängig“ im Toast (10 s, F-DAT-04) nutzt denselben Endpunkt. Für Marker nutzt die Web-App stattdessen `marker.remove` im Sync.
 - Dateien (Fotos, Chunks, `pkdrawing`, PDFs) bleiben bis zum endgültigen Löschen liegen.
+- **Offene Punkte für T1-18:**
+  - `task_slide_link` gehört zu keiner Kaskade. Verknüpfungen gelöschter Folien oder Aufgaben bleiben stehen und müssen beim Lesen gefiltert werden.
+  - Sessions, die mit ihrer `calendar_source` gelöscht wurden, haben die Quelle nicht als Elternobjekt. `restore_parent_deleted` prüft nur das Modul. Sie kommen nur über die Quelle zurück.
+  - `softDelete` setzt `deleted_at` millisekundengenau aus der Uhr des Core. Zwei Löschvorgänge in derselben Millisekunde im selben Teilbaum würden zusammen wiederhergestellt. Das ist bei einem Nutzer praktisch ausgeschlossen. Mikrosekunden aus `clock_timestamp()` gingen verloren, sobald Handler den Wert als JS-`Date` weitergeben (§11.2).
 
 **`maintenance.nightly`** (Worker, T1-18)
 - **Anlegen:** Der Core legt den Job täglich um 03:30 Ortszeit an, mit Payload `MaintenanceNightlyPayload` (Standard `{}` = 30 Tage, ohne `dry_run`). Ergebnis: `MaintenanceNightlyResult`.
@@ -630,7 +640,7 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `notebook_default` | 409 | Standard-Notizbuch lässt sich nicht löschen |
 | `session_transition_invalid`, `session_not_active`, `session_active` | 409 | Zustandsautomat (§9.1) |
 | `chunk_conflict`, `recording_seq_conflict`, `photo_file_conflict` | 409 | Gleiche ID, anderer Inhalt |
-| `backup_running`, `backup_target_missing`, `restore_parent_deleted` | 409 | Daten (§13) |
+| `backup_running`, `backup_target_missing`, `restore_parent_deleted`, `restore_conflict` | 409 | Daten (§13) |
 | `pairing_window_closed` | 409 | Kopplungsfenster zu oder abgelaufen (§12) |
 | `chunk_header_invalid`, `backup_target_invalid` | 400 | Anfrage ungültig |
 | `pairing_code_invalid`, `pairing_request_rejected`, `local_only` | 403 | Code falsch, Anfrage abgelehnt bzw. Route nur lokal |
@@ -656,7 +666,7 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 ### 16.1 Reihenfolge
 
 1. **T1-DB (zuerst, Claude-Subagent Opus).** Besitzt `services/core/src/db/schema/**`, `services/core/drizzle/**`, `pnpm-lock.yaml`, `package.json` der Pakete und die Schema-Änderung an `Module`/`ModuleUpdate` mit der kleinen Anpassung in `services/core/src/services/organisation.ts` (§14.2).
-   - **Inhalt:** **alle** Phase-1-Tabellen aus §6.1, 03 §3, §5, §6 und §13 in einer Migration.
+   - **Inhalt:** **alle** Phase-1-Tabellen aus §6.1, 03 §3, §5, §6 und §13 in einer Migration. `transcript_segment` und `slide_segment` (03 §5) gehören zu Phase 2 und kommen mit deren Migration.
    - **Fertig gebaut und getestet** (DB-nah, von vielen Tickets zur Laufzeit gebraucht): `appendOp` (ohne Versand, der Versand nach dem Commit läuft über einen Hook, den T1-08 einhängt), `softDelete`/`restoreFromTrash` mit den Kaskaden aus §13 und `getSettings` mit den Standards aus §14.1.
    - **Nur als Gerüst** (`throw new Error('nicht umgesetzt')`): die übrigen Schnittstellen aus §16.2.
    - **Abhängigkeiten im Lockfile:** `ical.js` (T1-01), `@fastify/websocket` (T1-08), `bonjour-service` (T1-10), `perfect-freehand` (T1-16).
@@ -669,16 +679,17 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 
 | Schnittstelle | Datei | Signatur | Füllt |
 |---|---|---|---|
-| Operation anhängen | `services/core/src/sync/append.ts` | `appendOp(tx: Tx, stream: string, op: { kind: SyncOp['kind']; data: unknown; at: number; clockUncertain: boolean; origin: SyncOrigin; opId?: string; deviceId?: string \| null }): Promise<{ seq: number; opId: string }>`. Sperrt `sync_stream`, schreibt `sync_op` und ruft nach dem Commit `onOpCommitted` auf (Hook, Standard: nichts) | **T1-DB**. T1-08 setzt den Hook für den Versand |
+| Operation anhängen | `services/core/src/sync/append.ts` | `appendOp(tx: Tx, stream: string, op: { kind: SyncOp['kind']; data: unknown; at: number; clockUncertain: boolean; origin: SyncOrigin; opId?: string; deviceId?: string \| null }): Promise<{ seq: number; opId: string; duplicate: boolean }>`. Sperrt `sync_stream`, prüft unter der Sperre die `op_id`, schreibt `sync_op` und meldet die Operation per `pg_notify('sg_sync_op')`. Postgres stellt das erst nach dem Commit zu. `listenCommittedOps(sql, db, onError?)` ruft dann `onOpCommitted` auf, je Strom lückenlos in `seq`-Reihenfolge, auch nach einem Neuverbinden. Wirft der Hook, wiederholt er später ab derselben `seq`. Setter: `setOnOpCommitted(hook)`, Standard: nichts. `findOpById(db, opId)` liefert eine gespeicherte Operation | **T1-DB**. T1-08 startet `listenCommittedOps` beim Core-Start und setzt den Hook für Versand und `ack` (§11.2) |
+| Duplikate | Dispatcher in `services/core/src/sync/**` | Der Dispatcher von T1-08 ruft **zentral vor dem Handler** `findOpById` auf. Gleiche Operation (Strom, Art, Daten): ursprüngliches `ack` ohne Handler. Abweichende: `error op_id_reused`. Handler prüfen das nie selbst. Gleichzeitige Duplikate fängt `appendOp` ab (`duplicate = true` bzw. `internal_error`, wiederholbar) | T1-08 |
 | Op-Handler | `services/core/src/sync/handlers.ts` | `registerOpHandler(kind, (tx: Tx, op: SyncOp, ctx: { deviceId: string \| null; origin: SyncOrigin }) => Promise<void>)`. Fehler über `throw new SyncOpError(code: SyncErrorCode, retryable: boolean, details?)` | Registry T1-08, Handler die Fachtickets |
-| Ereignisse | `services/core/src/sync/events.ts` | `publishEvent(event: SyncEvent, opts?: { localOnly?: boolean }): void` und `publishAfterCommit(tx: Tx, event: SyncEvent)` | T1-08 |
+| Ereignisse | `services/core/src/sync/events.ts` | `publishEvent(event: SyncEvent, opts?: { localOnly?: boolean }): void` und `publishAfterCommit(tx: Tx, event: SyncEvent): Promise<void>`. `publishAfterCommit` nutzt denselben Weg wie `appendOp`: `pg_notify('sg_event', <Event-JSON>)` in `tx`, das Ereignis vollständig in der Nutzlast, über 7000 Byte (UTF-8) wirft es. Ein Listener auf `sg_event` ruft `publishEvent` auf | T1-08 |
 | Verbindungen | `services/core/src/sync/connections.ts` | `closeDeviceConnections(deviceId: string, code: number): void`, `isDeviceConnected(deviceId: string): boolean` | T1-08 |
 | Session-Übergang | `services/core/src/services/sessions.ts` | `transitionSession(tx: Tx, sessionId: string, action: 'start' \| 'pause' \| 'resume' \| 'stop', input: { at: Date; origin: SyncOrigin; deviceId?: string \| null; startedFrom?: ClientDevice; reason?: StopReason; moduleId?: string; calendarEventId?: string \| null; slideDeckId?: string \| null }): Promise<{ session: Session; endedSession: Session \| null }>` (schreibt selbst die Server-Operationen) | T1-02 |
 | Kalender → Session | `services/core/src/services/sessions.ts` | `ensurePlannedSessions(tx: Tx, eventIds: string[]): Promise<void>` (anlegen, löschen, `module_id`, VL-Nummer neu) | T1-02, aufgerufen von T1-01 |
 | Token prüfen | `services/core/src/services/devices.ts` | `verifyDeviceToken(db: Db, token: string): Promise<{ deviceId: string } \| null>` | T1-10 |
 | Wächter → Route | `services/core/src/plugins/security.ts` | `DeviceTokenVerifier` liefert künftig `Promise<{ deviceId: string } \| null>`. Der Wächter setzt `request.sgDevice: { deviceId: string } \| null` (`null` = lokal). Für `GET /sync` mit `Upgrade: websocket` prüft er zusätzlich `Origin` wie bei zustandsändernden Anfragen | T1-10. T1-08 liest `request.sgDevice` beim Upgrade |
-| Einstellungen | `services/core/src/services/settings.ts` | `getSettings(db: Db): Promise<Settings>` | **T1-DB**. T1-19 baut `PATCH`. Genutzt von T1-02 (Auto-Stopp) und T1-18 |
-| Papierkorb | `services/core/src/services/trash.ts` | `softDelete(tx: Tx, kind: TrashKind, id: string): Promise<Date>` (Kaskade §13), `restoreFromTrash(tx: Tx, id: string): Promise<TrashRestoreResult>` | **T1-DB**. T1-18 baut die Routen und schreibt Server-Operationen bei der Wiederherstellung. Alle Lösch-Routen rufen `softDelete` |
+| Einstellungen | `services/core/src/services/settings.ts` | `getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): Promise<Settings>`. `general.data_dir` kommt aus der App-Konfiguration | **T1-DB**. T1-19 baut `PATCH`. Genutzt von T1-02 (Auto-Stopp) und T1-18 |
+| Papierkorb | `services/core/src/services/trash.ts` | `softDelete(tx: Tx, kind: TrashKind, id: string): Promise<Date>` (Kaskade §13; wirft `HttpError` 404 `<kind>_not_found`, 409 `session_active`, 409 `notebook_default`), `restoreFromTrash(tx: Tx, id: string): Promise<TrashRestoreResult>` (404 `trash_item_not_found`, 409 `restore_parent_deleted`, 409 `restore_conflict`) | **T1-DB**. T1-18 baut die Routen und schreibt Server-Operationen bei der Wiederherstellung. Alle Lösch-Routen rufen `softDelete` |
 | Fotos | `services/core/src/services/photos.ts` | `upsertPhotoMeta(tx: Tx, data: PhotoAddData): Promise<void>` und `storePhotoFile(id, stream, sha256, mime): Promise<FileReceipt>` prüfen sich gegenseitig (sha256, Typ) | Core-Ink (Handler `photo.add` und `PUT /photos`) |
 | Recorder → Auto-Stopp | `apps/web/src/lib/recorder/level.ts` | `subscribeAudioLevel(fn: (s: { at: number; rms: number }) => void): () => void`, alle 250 ms während der Aufnahme. Die Spracherkennung baut T1-07 darauf. Der Stopp läuft per `POST /sessions/{id}/stop`. Der Recorder reagiert auf `session.updated` (`beendet`) und schließt die Aufnahme ab (`complete`) | T1-06 liefert, T1-07 nutzt |
 | Web-Sync-Client | `apps/web/src/lib/sync/client.ts` | `class SyncClient { connect(); subscribe(stream: string, from: { lastSeq: number; lastOpId: string \| null }, onOp: (op: SyncOp) => void); send(op): Promise<SyncAck>; onEvent(name, fn); }`. `from` stammt aus `stream_seq`/`stream_op_id` des REST-Stands. Dazu Warteschlange in IndexedDB, Uhrabgleich, Wartezeit nach 4503, Fehlerablage | T1-WS |

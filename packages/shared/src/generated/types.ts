@@ -1329,6 +1329,18 @@ exam_type: (string | null)
 lecturer: (string | null)
 lang: (Lang | null)
 description_md: (string | null)
+settings: ModuleSettings
+}
+/**
+ * module.settings (W-06 Option A, 03 §3). Fehlender Schlüssel = globaler Standard aus Settings.lecture
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ModuleSettings".
+ */
+export interface ModuleSettings {
+layout?: DashboardLayout
+column_widths?: ColumnWidths
+ink_mode?: InkMode
 }
 /**
  * Name genügt, alles andere optional (F-ORG-01). Ohne Farbe vergibt der Core die nächste freie Palettenfarbe. id ist optional und darf vom Client erzeugt werden (03 §1).
@@ -1357,17 +1369,6 @@ items: Module[]
 next_cursor: (string | null)
 }
 /**
- * module.settings (W-06 Option A, 03 §3). Fehlender Schlüssel = globaler Standard aus Settings.lecture
- * 
- * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "ModuleSettings".
- */
-export interface ModuleSettings {
-layout?: DashboardLayout
-column_widths?: ColumnWidths
-ink_mode?: InkMode
-}
-/**
  * Teil von ModuleUpdate.settings: Schlüssel für Schlüssel zusammenführen, null entfernt den Schlüssel
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1379,6 +1380,8 @@ column_widths?: (ColumnWidths | null)
 ink_mode?: (InkMode | null)
 }
 /**
+ * PATCH /modules/{id}. settings wird Schlüssel für Schlüssel zusammengeführt, null entfernt einen Schlüssel (docs/VERTRAEGE.md §14.2)
+ * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "ModuleUpdate".
  */
@@ -1392,6 +1395,7 @@ exam_type?: (string | null)
 lecturer?: (string | null)
 lang?: (Lang | null)
 description_md?: (string | null)
+settings?: ModuleSettingsUpdate
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema

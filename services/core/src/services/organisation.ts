@@ -5,6 +5,8 @@ import {
   type Module,
   type ModuleColor,
   type ModuleCreate,
+  type ModuleSettings,
+  type ModuleSettingsUpdate,
   type ModuleUpdate,
   type Semester,
   type SemesterCreate,
@@ -67,7 +69,36 @@ export function toApiModule(row: ModuleRow): Module {
     lecturer: row.lecturer,
     lang: row.lang as Module['lang'],
     description_md: row.descriptionMd,
+    settings: row.settings,
   };
+}
+
+/**
+ * `module.settings` Schlüssel für Schlüssel zusammenführen, `null` entfernt einen Schlüssel (VERTRAEGE §14.2).
+ * Läuft in SQL auf dem aktuellen Wert, damit sich Web-App (`layout`, `column_widths`) und iPad (`ink_mode`)
+ * bei gleichzeitigen Änderungen nicht gegenseitig überschreiben.
+ */
+function mergeModuleSettings(update: ModuleSettingsUpdate): SQL {
+  if (update.column_widths) {
+    // Das Schema prüft drei Werte zwischen 0 und 100, die Summe prüft der Core (ColumnWidths, F-DSH-01)
+    const sum = update.column_widths.reduce((a, b) => a + b, 0);
+    if (Math.abs(sum - 100) > 0.01) {
+      throw new HttpError(400, 'validation_failed', 'Die Spaltenbreiten müssen zusammen 100 % ergeben.', {
+        field: 'settings.column_widths',
+        sum,
+      });
+    }
+  }
+  const set: ModuleSettings = {};
+  const remove: string[] = [];
+  for (const [key, value] of Object.entries(update)) {
+    if (value === undefined) continue;
+    if (value === null) remove.push(key);
+    else (set as Record<string, unknown>)[key] = value;
+  }
+  let merged = sql`(${courseModule.settings} || ${JSON.stringify(set)}::jsonb)`;
+  for (const key of remove) merged = sql`(${merged} - ${key}::text)`;
+  return merged;
 }
 
 const semesterNotFound = () => new HttpError(404, 'semester_not_found', 'Dieses Semester gibt es nicht.');
@@ -348,6 +379,8 @@ export async function updateModule(db: Db, id: string, input: ModuleUpdate): Pro
     if (input.lecturer !== undefined) patch.lecturer = input.lecturer;
     if (input.lang !== undefined) patch.lang = input.lang;
     if (input.description_md !== undefined) patch.descriptionMd = input.description_md;
+    if (input.settings !== undefined)
+      patch.settings = mergeModuleSettings(input.settings) as unknown as ModuleSettings;
     const [row] = await tx.update(courseModule).set(patch).where(eq(courseModule.id, id)).returning();
     return toApiModule(row as ModuleRow);
   });

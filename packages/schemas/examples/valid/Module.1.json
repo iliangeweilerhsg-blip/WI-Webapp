@@ -12,5 +12,8 @@
   "exam_type": "schriftlich",
   "lecturer": null,
   "lang": "de",
-  "description_md": null
+  "description_md": null,
+  "settings": {
+    "layout": "standard"
+  }
 }

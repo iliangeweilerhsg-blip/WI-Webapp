@@ -4808,6 +4808,7 @@ struct Module: Codable {
     let lecturer: String?
     let name: String
     let semesterID: String
+    let settings: ModuleSettings
     let shortName: String?
     let updatedAt: Date
     let userID: String
@@ -4824,6 +4825,7 @@ struct Module: Codable {
         case lecturer = "lecturer"
         case name = "name"
         case semesterID = "semester_id"
+        case settings = "settings"
         case shortName = "short_name"
         case updatedAt = "updated_at"
         case userID = "user_id"
@@ -4860,6 +4862,7 @@ extension Module {
         lecturer: String?? = nil,
         name: String? = nil,
         semesterID: String? = nil,
+        settings: ModuleSettings? = nil,
         shortName: String?? = nil,
         updatedAt: Date? = nil,
         userID: String? = nil
@@ -4876,6 +4879,7 @@ extension Module {
             lecturer: lecturer ?? self.lecturer,
             name: name ?? self.name,
             semesterID: semesterID ?? self.semesterID,
+            settings: settings ?? self.settings,
             shortName: shortName ?? self.shortName,
             updatedAt: updatedAt ?? self.updatedAt,
             userID: userID ?? self.userID
@@ -4905,6 +4909,60 @@ enum ModuleColor: String, Codable {
     case mod10 = "mod-10"
     case mod11 = "mod-11"
     case mod12 = "mod-12"
+}
+
+/// module.settings (W-06 Option A, 03 §3). Fehlender Schlüssel = globaler Standard aus
+/// Settings.lecture
+// MARK: - ModuleSettings
+struct ModuleSettings: Codable {
+    let columnWidths: [Double]?
+    let inkMode: InkMode?
+    let layout: DashboardLayout?
+
+    enum CodingKeys: String, CodingKey {
+        case columnWidths = "column_widths"
+        case inkMode = "ink_mode"
+        case layout = "layout"
+    }
+}
+
+// MARK: ModuleSettings convenience initializers and mutators
+
+extension ModuleSettings {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ModuleSettings.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        columnWidths: [Double]?? = nil,
+        inkMode: InkMode?? = nil,
+        layout: DashboardLayout?? = nil
+    ) -> ModuleSettings {
+        return ModuleSettings(
+            columnWidths: columnWidths ?? self.columnWidths,
+            inkMode: inkMode ?? self.inkMode,
+            layout: layout ?? self.layout
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
 }
 
 /// Name genügt, alles andere optional (F-ORG-01). Ohne Farbe vergibt der Core die nächste
@@ -5037,60 +5095,6 @@ extension ModuleList {
     }
 }
 
-/// module.settings (W-06 Option A, 03 §3). Fehlender Schlüssel = globaler Standard aus
-/// Settings.lecture
-// MARK: - ModuleSettings
-struct ModuleSettings: Codable {
-    let columnWidths: [Double]?
-    let inkMode: InkMode?
-    let layout: DashboardLayout?
-
-    enum CodingKeys: String, CodingKey {
-        case columnWidths = "column_widths"
-        case inkMode = "ink_mode"
-        case layout = "layout"
-    }
-}
-
-// MARK: ModuleSettings convenience initializers and mutators
-
-extension ModuleSettings {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(ModuleSettings.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        columnWidths: [Double]?? = nil,
-        inkMode: InkMode?? = nil,
-        layout: DashboardLayout?? = nil
-    ) -> ModuleSettings {
-        return ModuleSettings(
-            columnWidths: columnWidths ?? self.columnWidths,
-            inkMode: inkMode ?? self.inkMode,
-            layout: layout ?? self.layout
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
 /// Teil von ModuleUpdate.settings: Schlüssel für Schlüssel zusammenführen, null entfernt den
 /// Schlüssel
 // MARK: - ModuleSettingsUpdate
@@ -5145,6 +5149,8 @@ extension ModuleSettingsUpdate {
     }
 }
 
+/// PATCH /modules/{id}. settings wird Schlüssel für Schlüssel zusammengeführt, null entfernt
+/// einen Schlüssel (docs/VERTRAEGE.md §14.2)
 // MARK: - ModuleUpdate
 struct ModuleUpdate: Codable {
     let color: ModuleColor?
@@ -5155,6 +5161,7 @@ struct ModuleUpdate: Codable {
     let lecturer: String?
     let name: String?
     let semesterID: String?
+    let settings: ModuleSettingsUpdate?
     let shortName: String?
 
     enum CodingKeys: String, CodingKey {
@@ -5166,6 +5173,7 @@ struct ModuleUpdate: Codable {
         case lecturer = "lecturer"
         case name = "name"
         case semesterID = "semester_id"
+        case settings = "settings"
         case shortName = "short_name"
     }
 }
@@ -5197,6 +5205,7 @@ extension ModuleUpdate {
         lecturer: String?? = nil,
         name: String?? = nil,
         semesterID: String?? = nil,
+        settings: ModuleSettingsUpdate?? = nil,
         shortName: String?? = nil
     ) -> ModuleUpdate {
         return ModuleUpdate(
@@ -5208,6 +5217,7 @@ extension ModuleUpdate {
             lecturer: lecturer ?? self.lecturer,
             name: name ?? self.name,
             semesterID: semesterID ?? self.semesterID,
+            settings: settings ?? self.settings,
             shortName: shortName ?? self.shortName
         )
     }
@@ -14924,9 +14934,19 @@ extension Module {
         try container.encode(lecturer, forKey: .lecturer)
         try container.encode(name, forKey: .name)
         try container.encode(semesterID, forKey: .semesterID)
+        try container.encode(settings, forKey: .settings)
         try container.encode(shortName, forKey: .shortName)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension ModuleSettings {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(columnWidths, forKey: .columnWidths)
+        try container.encodeIfPresent(inkMode, forKey: .inkMode)
+        try container.encodeIfPresent(layout, forKey: .layout)
     }
 }
 
@@ -14954,15 +14974,6 @@ extension ModuleList {
     }
 }
 
-extension ModuleSettings {
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encodeIfPresent(columnWidths, forKey: .columnWidths)
-        try container.encodeIfPresent(inkMode, forKey: .inkMode)
-        try container.encodeIfPresent(layout, forKey: .layout)
-    }
-}
-
 extension ModuleSettingsUpdate {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -14983,6 +14994,7 @@ extension ModuleUpdate {
         try container.encodeIfPresent(lecturer, forKey: .lecturer)
         try container.encodeIfPresent(name, forKey: .name)
         try container.encodeIfPresent(semesterID, forKey: .semesterID)
+        try container.encodeIfPresent(settings, forKey: .settings)
         try container.encodeIfPresent(shortName, forKey: .shortName)
     }
 }
