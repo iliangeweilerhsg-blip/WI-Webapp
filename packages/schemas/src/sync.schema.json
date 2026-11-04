@@ -26,7 +26,7 @@
     },
     "SyncStreamPosition": {
       "type": "object",
-      "required": ["stream", "last_seq"],
+      "required": ["stream", "last_seq", "last_op_id"],
       "additionalProperties": false,
       "properties": {
         "stream": {
@@ -35,7 +35,18 @@
         "last_seq": {
           "type": "integer",
           "minimum": 0,
-          "description": "Letzte beim Client angewandte seq, 0 = nichts"
+          "description": "Höchste lückenlos empfangene und angewandte seq, 0 = nichts"
+        },
+        "last_op_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "op_id der Operation mit last_seq, null bei last_seq = 0. Der Server prüft das Paar, sonst reset"
         }
       }
     },
@@ -65,7 +76,7 @@
     },
     "SyncHello": {
       "type": "object",
-      "description": "Erste Nachricht des Clients (08 §2.1). token (Gerätetoken) Pflicht für Verbindungen aus dem Netz, lokal (Web-App) ohne.",
+      "description": "Erste Nachricht des Clients (08 §2.1). Das Gerätetoken steht nicht hier, sondern beim Upgrade im Header Authorization: Bearer (VERTRAEGE §11.1). device_id nur zur Gegenprobe.",
       "required": ["type", "protocol", "client", "app_version", "streams"],
       "additionalProperties": false,
       "properties": {
@@ -81,10 +92,6 @@
         "device_id": {
           "$ref": "#/$defs/Uuid"
         },
-        "token": {
-          "type": "string",
-          "minLength": 1
-        },
         "app_version": {
           "type": "string",
           "minLength": 1
@@ -99,7 +106,7 @@
     },
     "SyncWelcome": {
       "type": "object",
-      "required": ["type", "protocol", "server_time", "server_version", "device_id", "resume"],
+      "required": ["type", "protocol", "server_time", "server_version", "db_epoch", "device_id", "resume"],
       "additionalProperties": false,
       "properties": {
         "type": {
@@ -113,6 +120,9 @@
         },
         "server_version": {
           "type": "string"
+        },
+        "db_epoch": {
+          "$ref": "#/$defs/Uuid"
         },
         "device_id": {
           "anyOf": [
@@ -130,7 +140,8 @@
             "$ref": "#/$defs/SyncResume"
           }
         }
-      }
+      },
+      "description": "db_epoch ändert sich bei jeder Wiederherstellung der Datenbank. Weicht sie vom gespeicherten Wert ab, behandelt der Client alle Ströme wie reset (VERTRAEGE §11.1)."
     },
     "SyncSubscribe": {
       "type": "object",
@@ -334,6 +345,8 @@
         "notebook_kind_exists",
         "page_not_found",
         "page_version_conflict",
+        "op_not_allowed",
+        "session_superseded",
         "internal_error"
       ]
     },
@@ -373,7 +386,7 @@
     },
     "PageUpdateFields": {
       "type": "object",
-      "description": "Geänderte Felder, mindestens eins",
+      "description": "Alle änderbaren Felder der Seite mit ihrem neuen Stand. Kein Teil-Update: im Sync gibt es keine optionalen nullbaren Felder (VERTRAEGE §11.7)",
       "additionalProperties": false,
       "properties": {
         "index": {
@@ -413,11 +426,22 @@
             }
           ]
         }
-      }
+      },
+      "required": ["index", "template", "session_id", "background_slide_id", "attached_slide_id"]
     },
     "PageCreateData": {
       "type": "object",
-      "required": ["page_id", "notebook_id", "index", "template", "width_pt", "height_pt"],
+      "required": [
+        "page_id",
+        "notebook_id",
+        "session_id",
+        "index",
+        "template",
+        "width_pt",
+        "height_pt",
+        "background_slide_id",
+        "attached_slide_id"
+      ],
       "additionalProperties": false,
       "properties": {
         "page_id": {
@@ -574,7 +598,14 @@
     "SessionStartData": {
       "type": "object",
       "description": "Unbekannte session_id: der Core legt die Session an (Start offline auf dem iPad, F-SES-02 Schritt 3)",
-      "required": ["session_id", "module_id", "started_from", "started_at"],
+      "required": [
+        "session_id",
+        "module_id",
+        "calendar_event_id",
+        "slide_deck_id",
+        "started_from",
+        "started_at"
+      ],
       "additionalProperties": false,
       "properties": {
         "session_id": {
@@ -637,7 +668,7 @@
     },
     "SlideChangeData": {
       "type": "object",
-      "required": ["event_id", "session_id", "slide_index", "t_ms", "device"],
+      "required": ["event_id", "session_id", "slide_id", "slide_index", "t_ms", "device"],
       "additionalProperties": false,
       "properties": {
         "event_id": {
@@ -671,7 +702,7 @@
     "MarkerAddData": {
       "type": "object",
       "description": "Marker vom iPad (F-INK-05) und vom Mac (F-DSH-05, source=mac)",
-      "required": ["marker_id", "session_id", "kind", "t_ms", "source"],
+      "required": ["marker_id", "session_id", "kind", "t_ms", "page_id", "position", "note", "source"],
       "additionalProperties": false,
       "properties": {
         "marker_id": {
@@ -728,7 +759,7 @@
     "PhotoAddData": {
       "type": "object",
       "description": "Datei per PUT /photos/{photo_id}/file, Reihenfolge egal",
-      "required": ["photo_id", "session_id", "t_ms", "file_ref"],
+      "required": ["photo_id", "session_id", "t_ms", "page_id", "file_ref"],
       "additionalProperties": false,
       "properties": {
         "photo_id": {
@@ -751,7 +782,7 @@
           ]
         },
         "file_ref": {
-          "$ref": "#/$defs/FileRef"
+          "$ref": "#/$defs/PhotoFileRef"
         }
       }
     },
@@ -898,6 +929,154 @@
           "$ref": "#/$defs/SyncOrigin"
         }
       }
+    },
+    "NotebookUpdateOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "notebook.update"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookUpdateData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      },
+      "description": "Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb"
+    },
+    "NotebookDeleteOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "notebook.delete"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      },
+      "description": "Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb"
+    },
+    "NotebookRestoreOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "notebook.restore"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      },
+      "description": "Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb"
+    },
+    "PageRestoreOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "page.restore"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PageRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      },
+      "description": "Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb"
     },
     "StrokeAddOp": {
       "type": "object",
@@ -1383,6 +1562,18 @@
           "$ref": "#/$defs/PageDeleteOp"
         },
         {
+          "$ref": "#/$defs/NotebookUpdateOp"
+        },
+        {
+          "$ref": "#/$defs/NotebookDeleteOp"
+        },
+        {
+          "$ref": "#/$defs/NotebookRestoreOp"
+        },
+        {
+          "$ref": "#/$defs/PageRestoreOp"
+        },
+        {
           "$ref": "#/$defs/StrokeAddOp"
         },
         {
@@ -1644,7 +1835,7 @@
     },
     "NotebookCreateData": {
       "type": "object",
-      "description": "Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id. kind fehlt = frei.",
+      "description": "Freies Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id.",
       "required": ["notebook_id", "module_id", "title", "created_at"],
       "additionalProperties": false,
       "properties": {
@@ -1659,10 +1850,77 @@
           "minLength": 1
         },
         "kind": {
-          "$ref": "#/$defs/NotebookKind"
+          "const": "frei",
+          "description": "Nur frei. Die Notizbücher vorlesung/uebung legt der Core an"
         },
         "created_at": {
           "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "PhotoFileRef": {
+      "type": "object",
+      "description": "Datei eines Tafel-Fotos, hochgeladen per PUT /photos/{photo_id}/file",
+      "required": ["sha256", "mime", "size_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "mime": {
+          "$ref": "#/$defs/PhotoMime"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "NotebookUpdateFields": {
+      "type": "object",
+      "description": "Aktueller Stand der per REST änderbaren Felder",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      },
+      "required": ["title", "module_id"]
+    },
+    "NotebookUpdateData": {
+      "type": "object",
+      "required": ["notebook_id", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "fields": {
+          "$ref": "#/$defs/NotebookUpdateFields"
+        }
+      }
+    },
+    "NotebookRefData": {
+      "type": "object",
+      "required": ["notebook_id"],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "PageRefData": {
+      "type": "object",
+      "required": ["page_id"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
         }
       }
     }

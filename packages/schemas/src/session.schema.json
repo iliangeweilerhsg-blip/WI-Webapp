@@ -45,7 +45,8 @@
         "processing",
         "review_state",
         "planned_starts_at",
-        "planned_ends_at"
+        "planned_ends_at",
+        "auto_stop_extended_until"
       ],
       "additionalProperties": false,
       "properties": {
@@ -162,6 +163,16 @@
           ]
         },
         "planned_ends_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "auto_stop_extended_until": {
           "anyOf": [
             {
               "$ref": "#/$defs/Timestamp"
@@ -817,6 +828,18 @@
         },
         "offset_ms": {
           "type": "integer"
+        }
+      }
+    },
+    "SessionExtendRequest": {
+      "type": "object",
+      "description": "POST /sessions/{id}/extend: Auto-Stopp aufschieben (F-SES-03). minutes fehlt = lecture.auto_stop_extend_min",
+      "additionalProperties": false,
+      "properties": {
+        "minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 120
         }
       }
     }

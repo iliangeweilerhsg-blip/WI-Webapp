@@ -17,5 +17,6 @@
   "processing": {},
   "review_state": "offen",
   "planned_starts_at": null,
-  "planned_ends_at": null
+  "planned_ends_at": null,
+  "auto_stop_extended_until": null
 }

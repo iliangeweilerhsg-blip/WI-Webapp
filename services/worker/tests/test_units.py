@@ -49,7 +49,7 @@ def test_registry_validates_payload_union() -> None:
     spec = reg.get("pdf.ingest")
     assert spec is not None
     deck_id = uuid.uuid4()
-    assert spec.validate({"slide_deck_id": str(deck_id)}).slide_deck_id == deck_id
+    assert spec.validate({"slide_deck_id": str(deck_id)}).slide_deck_id == str(deck_id)
     with pytest.raises(PayloadError):
         spec.validate({"slide_deck_id": str(deck_id), "extra": 1})
     with pytest.raises(ValueError):

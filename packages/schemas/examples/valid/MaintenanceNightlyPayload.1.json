@@ -1,0 +1,4 @@
+{
+  "purge_older_than_days": 30,
+  "dry_run": true
+}

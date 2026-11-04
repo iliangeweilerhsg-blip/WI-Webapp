@@ -277,7 +277,7 @@
         "missing_seqs",
         "gaps",
         "file_size_bytes",
-        "duration_ms"
+        "job_duration_ms"
       ],
       "additionalProperties": false,
       "properties": {
@@ -313,10 +313,63 @@
           "type": "integer",
           "minimum": 0
         },
-        "duration_ms": {
+        "job_duration_ms": {
           "type": "integer",
           "minimum": 0,
           "description": "Laufzeit des Jobs"
+        }
+      }
+    },
+    "MaintenanceNightlyPayload": {
+      "type": "object",
+      "description": "maintenance.nightly (08 §5, T1-18). Phase 1: Papierkorb leeren, verwaiste Dateien, sync_op gelöschter Ströme",
+      "additionalProperties": false,
+      "properties": {
+        "purge_older_than_days": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Standard 30 (F-DAT-04)"
+        },
+        "dry_run": {
+          "type": "boolean",
+          "description": "Nur zählen, nichts löschen"
+        }
+      }
+    },
+    "MaintenanceNightlyResult": {
+      "type": "object",
+      "required": [
+        "purged_count",
+        "purged_by_kind",
+        "orphan_files_removed",
+        "sync_ops_removed",
+        "job_duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "purged_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "purged_by_kind": {
+          "type": "object",
+          "description": "Endgültig gelöschte Objekte je Tabelle",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "orphan_files_removed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sync_ops_removed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "job_duration_ms": {
+          "type": "integer",
+          "minimum": 0
         }
       }
     }

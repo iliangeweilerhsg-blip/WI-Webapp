@@ -1,0 +1,11 @@
+{
+  "purged_count": 17,
+  "purged_by_kind": {
+    "module": 1,
+    "stroke": 15,
+    "page": 1
+  },
+  "orphan_files_removed": 2,
+  "sync_ops_removed": 940,
+  "job_duration_ms": 812
+}

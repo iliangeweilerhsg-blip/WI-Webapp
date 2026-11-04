@@ -76,10 +76,12 @@ struct SchemaBundle: Codable {
     let lang: Lang?
     let lectureSettings: LectureSettings?
     let lectureSettingsUpdate: LectureSettingsUpdate?
+    let maintenanceNightlyPayload: MaintenanceNightlyPayload?
+    let maintenanceNightlyResult: MaintenanceNightlyResult?
     let marker: Marker?
     let markerAddData: MarkerAddData?
     let markerAddOp: MarkerAddOp?
-    let markerKind: MarkerKind?
+    let markerKind: MarkerKindEnum?
     let markerPosition: MarkerPosition?
     let markerRemoveData: MarkerRemoveData?
     let markerRemoveOp: MarkerRemoveOp?
@@ -95,11 +97,17 @@ struct SchemaBundle: Codable {
     let notebookCreate: NotebookCreate?
     let notebookCreateData: NotebookCreateData?
     let notebookCreateOp: NotebookCreateOp?
+    let notebookDeleteOp: NotebookDeleteOp?
     let notebookKind: NotebookKind?
     let notebookList: NotebookList?
     let notebookPages: NotebookPages?
+    let notebookRefData: NotebookRefData?
+    let notebookRestoreOp: NotebookRestoreOp?
     let notebookStreamID: String?
     let notebookUpdate: NotebookUpdate?
+    let notebookUpdateData: NotebookUpdateData?
+    let notebookUpdateFields: NotebookUpdateFields?
+    let notebookUpdateOp: NotebookUpdateOp?
     let page: Page?
     let pageCreateData: PageCreateData?
     let pageCreateOp: PageCreateOp?
@@ -107,6 +115,8 @@ struct SchemaBundle: Codable {
     let pageDeleteOp: PageDeleteOp?
     let pageDetail: PageDetail?
     let pageElement: PageElement?
+    let pageRefData: PageRefData?
+    let pageRestoreOp: PageRestoreOp?
     let pageStrokes: PageStrokes?
     let pageTemplate: PageTemplate?
     let pageUpdateData: PageUpdateData?
@@ -128,6 +138,7 @@ struct SchemaBundle: Codable {
     let photo: Photo?
     let photoAddData: PhotoAddData?
     let photoAddOp: PhotoAddOp?
+    let photoFileRef: PhotoFileRef?
     let photoMIME: PhotoMIME?
     let point2: [Double]?
     let recording: Recording?
@@ -141,6 +152,7 @@ struct SchemaBundle: Codable {
     let semesterUpdate: SemesterUpdate?
     let session: Session?
     let sessionCreate: SessionCreate?
+    let sessionExtendRequest: SessionExtendRequest?
     let sessionList: SessionList?
     let sessionMS: Int?
     let sessionPauseOp: SessionPauseOp?
@@ -299,6 +311,8 @@ struct SchemaBundle: Codable {
         case lang = "Lang"
         case lectureSettings = "LectureSettings"
         case lectureSettingsUpdate = "LectureSettingsUpdate"
+        case maintenanceNightlyPayload = "MaintenanceNightlyPayload"
+        case maintenanceNightlyResult = "MaintenanceNightlyResult"
         case marker = "Marker"
         case markerAddData = "MarkerAddData"
         case markerAddOp = "MarkerAddOp"
@@ -318,11 +332,17 @@ struct SchemaBundle: Codable {
         case notebookCreate = "NotebookCreate"
         case notebookCreateData = "NotebookCreateData"
         case notebookCreateOp = "NotebookCreateOp"
+        case notebookDeleteOp = "NotebookDeleteOp"
         case notebookKind = "NotebookKind"
         case notebookList = "NotebookList"
         case notebookPages = "NotebookPages"
+        case notebookRefData = "NotebookRefData"
+        case notebookRestoreOp = "NotebookRestoreOp"
         case notebookStreamID = "NotebookStreamId"
         case notebookUpdate = "NotebookUpdate"
+        case notebookUpdateData = "NotebookUpdateData"
+        case notebookUpdateFields = "NotebookUpdateFields"
+        case notebookUpdateOp = "NotebookUpdateOp"
         case page = "Page"
         case pageCreateData = "PageCreateData"
         case pageCreateOp = "PageCreateOp"
@@ -330,6 +350,8 @@ struct SchemaBundle: Codable {
         case pageDeleteOp = "PageDeleteOp"
         case pageDetail = "PageDetail"
         case pageElement = "PageElement"
+        case pageRefData = "PageRefData"
+        case pageRestoreOp = "PageRestoreOp"
         case pageStrokes = "PageStrokes"
         case pageTemplate = "PageTemplate"
         case pageUpdateData = "PageUpdateData"
@@ -351,6 +373,7 @@ struct SchemaBundle: Codable {
         case photo = "Photo"
         case photoAddData = "PhotoAddData"
         case photoAddOp = "PhotoAddOp"
+        case photoFileRef = "PhotoFileRef"
         case photoMIME = "PhotoMime"
         case point2 = "Point2"
         case recording = "Recording"
@@ -364,6 +387,7 @@ struct SchemaBundle: Codable {
         case semesterUpdate = "SemesterUpdate"
         case session = "Session"
         case sessionCreate = "SessionCreate"
+        case sessionExtendRequest = "SessionExtendRequest"
         case sessionList = "SessionList"
         case sessionMS = "SessionMs"
         case sessionPauseOp = "SessionPauseOp"
@@ -542,10 +566,12 @@ extension SchemaBundle {
         lang: Lang?? = nil,
         lectureSettings: LectureSettings?? = nil,
         lectureSettingsUpdate: LectureSettingsUpdate?? = nil,
+        maintenanceNightlyPayload: MaintenanceNightlyPayload?? = nil,
+        maintenanceNightlyResult: MaintenanceNightlyResult?? = nil,
         marker: Marker?? = nil,
         markerAddData: MarkerAddData?? = nil,
         markerAddOp: MarkerAddOp?? = nil,
-        markerKind: MarkerKind?? = nil,
+        markerKind: MarkerKindEnum?? = nil,
         markerPosition: MarkerPosition?? = nil,
         markerRemoveData: MarkerRemoveData?? = nil,
         markerRemoveOp: MarkerRemoveOp?? = nil,
@@ -561,11 +587,17 @@ extension SchemaBundle {
         notebookCreate: NotebookCreate?? = nil,
         notebookCreateData: NotebookCreateData?? = nil,
         notebookCreateOp: NotebookCreateOp?? = nil,
+        notebookDeleteOp: NotebookDeleteOp?? = nil,
         notebookKind: NotebookKind?? = nil,
         notebookList: NotebookList?? = nil,
         notebookPages: NotebookPages?? = nil,
+        notebookRefData: NotebookRefData?? = nil,
+        notebookRestoreOp: NotebookRestoreOp?? = nil,
         notebookStreamID: String?? = nil,
         notebookUpdate: NotebookUpdate?? = nil,
+        notebookUpdateData: NotebookUpdateData?? = nil,
+        notebookUpdateFields: NotebookUpdateFields?? = nil,
+        notebookUpdateOp: NotebookUpdateOp?? = nil,
         page: Page?? = nil,
         pageCreateData: PageCreateData?? = nil,
         pageCreateOp: PageCreateOp?? = nil,
@@ -573,6 +605,8 @@ extension SchemaBundle {
         pageDeleteOp: PageDeleteOp?? = nil,
         pageDetail: PageDetail?? = nil,
         pageElement: PageElement?? = nil,
+        pageRefData: PageRefData?? = nil,
+        pageRestoreOp: PageRestoreOp?? = nil,
         pageStrokes: PageStrokes?? = nil,
         pageTemplate: PageTemplate?? = nil,
         pageUpdateData: PageUpdateData?? = nil,
@@ -594,6 +628,7 @@ extension SchemaBundle {
         photo: Photo?? = nil,
         photoAddData: PhotoAddData?? = nil,
         photoAddOp: PhotoAddOp?? = nil,
+        photoFileRef: PhotoFileRef?? = nil,
         photoMIME: PhotoMIME?? = nil,
         point2: [Double]?? = nil,
         recording: Recording?? = nil,
@@ -607,6 +642,7 @@ extension SchemaBundle {
         semesterUpdate: SemesterUpdate?? = nil,
         session: Session?? = nil,
         sessionCreate: SessionCreate?? = nil,
+        sessionExtendRequest: SessionExtendRequest?? = nil,
         sessionList: SessionList?? = nil,
         sessionMS: Int?? = nil,
         sessionPauseOp: SessionPauseOp?? = nil,
@@ -765,6 +801,8 @@ extension SchemaBundle {
             lang: lang ?? self.lang,
             lectureSettings: lectureSettings ?? self.lectureSettings,
             lectureSettingsUpdate: lectureSettingsUpdate ?? self.lectureSettingsUpdate,
+            maintenanceNightlyPayload: maintenanceNightlyPayload ?? self.maintenanceNightlyPayload,
+            maintenanceNightlyResult: maintenanceNightlyResult ?? self.maintenanceNightlyResult,
             marker: marker ?? self.marker,
             markerAddData: markerAddData ?? self.markerAddData,
             markerAddOp: markerAddOp ?? self.markerAddOp,
@@ -784,11 +822,17 @@ extension SchemaBundle {
             notebookCreate: notebookCreate ?? self.notebookCreate,
             notebookCreateData: notebookCreateData ?? self.notebookCreateData,
             notebookCreateOp: notebookCreateOp ?? self.notebookCreateOp,
+            notebookDeleteOp: notebookDeleteOp ?? self.notebookDeleteOp,
             notebookKind: notebookKind ?? self.notebookKind,
             notebookList: notebookList ?? self.notebookList,
             notebookPages: notebookPages ?? self.notebookPages,
+            notebookRefData: notebookRefData ?? self.notebookRefData,
+            notebookRestoreOp: notebookRestoreOp ?? self.notebookRestoreOp,
             notebookStreamID: notebookStreamID ?? self.notebookStreamID,
             notebookUpdate: notebookUpdate ?? self.notebookUpdate,
+            notebookUpdateData: notebookUpdateData ?? self.notebookUpdateData,
+            notebookUpdateFields: notebookUpdateFields ?? self.notebookUpdateFields,
+            notebookUpdateOp: notebookUpdateOp ?? self.notebookUpdateOp,
             page: page ?? self.page,
             pageCreateData: pageCreateData ?? self.pageCreateData,
             pageCreateOp: pageCreateOp ?? self.pageCreateOp,
@@ -796,6 +840,8 @@ extension SchemaBundle {
             pageDeleteOp: pageDeleteOp ?? self.pageDeleteOp,
             pageDetail: pageDetail ?? self.pageDetail,
             pageElement: pageElement ?? self.pageElement,
+            pageRefData: pageRefData ?? self.pageRefData,
+            pageRestoreOp: pageRestoreOp ?? self.pageRestoreOp,
             pageStrokes: pageStrokes ?? self.pageStrokes,
             pageTemplate: pageTemplate ?? self.pageTemplate,
             pageUpdateData: pageUpdateData ?? self.pageUpdateData,
@@ -817,6 +863,7 @@ extension SchemaBundle {
             photo: photo ?? self.photo,
             photoAddData: photoAddData ?? self.photoAddData,
             photoAddOp: photoAddOp ?? self.photoAddOp,
+            photoFileRef: photoFileRef ?? self.photoFileRef,
             photoMIME: photoMIME ?? self.photoMIME,
             point2: point2 ?? self.point2,
             recording: recording ?? self.recording,
@@ -830,6 +877,7 @@ extension SchemaBundle {
             semesterUpdate: semesterUpdate ?? self.semesterUpdate,
             session: session ?? self.session,
             sessionCreate: sessionCreate ?? self.sessionCreate,
+            sessionExtendRequest: sessionExtendRequest ?? self.sessionExtendRequest,
             sessionList: sessionList ?? self.sessionList,
             sessionMS: sessionMS ?? self.sessionMS,
             sessionPauseOp: sessionPauseOp ?? self.sessionPauseOp,
@@ -1223,10 +1271,10 @@ struct AudioFinalizeResult: Codable {
     /// Länge von full.m4a
     let audioDurationMS: Int
     let chunkCount: Int
-    /// Laufzeit des Jobs
-    let durationMS: Int
     let fileSizeBytes: Int
     let gaps: [AudioGap]
+    /// Laufzeit des Jobs
+    let jobDurationMS: Int
     let missingSeqs: [Int]
     let recordingID: String
     let state: RecordingState
@@ -1234,9 +1282,9 @@ struct AudioFinalizeResult: Codable {
     enum CodingKeys: String, CodingKey {
         case audioDurationMS = "audio_duration_ms"
         case chunkCount = "chunk_count"
-        case durationMS = "duration_ms"
         case fileSizeBytes = "file_size_bytes"
         case gaps = "gaps"
+        case jobDurationMS = "job_duration_ms"
         case missingSeqs = "missing_seqs"
         case recordingID = "recording_id"
         case state = "state"
@@ -1264,9 +1312,9 @@ extension AudioFinalizeResult {
     func with(
         audioDurationMS: Int? = nil,
         chunkCount: Int? = nil,
-        durationMS: Int? = nil,
         fileSizeBytes: Int? = nil,
         gaps: [AudioGap]? = nil,
+        jobDurationMS: Int? = nil,
         missingSeqs: [Int]? = nil,
         recordingID: String? = nil,
         state: RecordingState? = nil
@@ -1274,9 +1322,9 @@ extension AudioFinalizeResult {
         return AudioFinalizeResult(
             audioDurationMS: audioDurationMS ?? self.audioDurationMS,
             chunkCount: chunkCount ?? self.chunkCount,
-            durationMS: durationMS ?? self.durationMS,
             fileSizeBytes: fileSizeBytes ?? self.fileSizeBytes,
             gaps: gaps ?? self.gaps,
+            jobDurationMS: jobDurationMS ?? self.jobDurationMS,
             missingSeqs: missingSeqs ?? self.missingSeqs,
             recordingID: recordingID ?? self.recordingID,
             state: state ?? self.state
@@ -2754,7 +2802,7 @@ struct ElementPayload: Codable {
     let cardID: String?
     let covered: Bool?
     let markerID: String?
-    let markerKind: MarkerKind?
+    let markerKind: MarkerKindEnum?
 
     enum CodingKeys: String, CodingKey {
         case size = "size"
@@ -2802,7 +2850,7 @@ extension ElementPayload {
         cardID: String?? = nil,
         covered: Bool?? = nil,
         markerID: String?? = nil,
-        markerKind: MarkerKind?? = nil
+        markerKind: MarkerKindEnum?? = nil
     ) -> ElementPayload {
         return ElementPayload(
             size: size ?? self.size,
@@ -2829,7 +2877,7 @@ extension ElementPayload {
     }
 }
 
-enum MarkerKind: String, Codable {
+enum MarkerKindEnum: String, Codable {
     case frage = "frage"
     case klausur = "klausur"
     case verknuepfung = "verknuepfung"
@@ -4203,12 +4251,125 @@ extension LectureSettingsUpdate {
     }
 }
 
+/// maintenance.nightly (08 §5, T1-18). Phase 1: Papierkorb leeren, verwaiste Dateien,
+/// sync_op gelöschter Ströme
+// MARK: - MaintenanceNightlyPayload
+struct MaintenanceNightlyPayload: Codable {
+    /// Nur zählen, nichts löschen
+    let dryRun: Bool?
+    /// Standard 30 (F-DAT-04)
+    let purgeOlderThanDays: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case dryRun = "dry_run"
+        case purgeOlderThanDays = "purge_older_than_days"
+    }
+}
+
+// MARK: MaintenanceNightlyPayload convenience initializers and mutators
+
+extension MaintenanceNightlyPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MaintenanceNightlyPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        dryRun: Bool?? = nil,
+        purgeOlderThanDays: Int?? = nil
+    ) -> MaintenanceNightlyPayload {
+        return MaintenanceNightlyPayload(
+            dryRun: dryRun ?? self.dryRun,
+            purgeOlderThanDays: purgeOlderThanDays ?? self.purgeOlderThanDays
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MaintenanceNightlyResult
+struct MaintenanceNightlyResult: Codable {
+    let jobDurationMS: Int
+    let orphanFilesRemoved: Int
+    /// Endgültig gelöschte Objekte je Tabelle
+    let purgedByKind: [String: Int]
+    let purgedCount: Int
+    let syncOpsRemoved: Int
+
+    enum CodingKeys: String, CodingKey {
+        case jobDurationMS = "job_duration_ms"
+        case orphanFilesRemoved = "orphan_files_removed"
+        case purgedByKind = "purged_by_kind"
+        case purgedCount = "purged_count"
+        case syncOpsRemoved = "sync_ops_removed"
+    }
+}
+
+// MARK: MaintenanceNightlyResult convenience initializers and mutators
+
+extension MaintenanceNightlyResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MaintenanceNightlyResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        jobDurationMS: Int? = nil,
+        orphanFilesRemoved: Int? = nil,
+        purgedByKind: [String: Int]? = nil,
+        purgedCount: Int? = nil,
+        syncOpsRemoved: Int? = nil
+    ) -> MaintenanceNightlyResult {
+        return MaintenanceNightlyResult(
+            jobDurationMS: jobDurationMS ?? self.jobDurationMS,
+            orphanFilesRemoved: orphanFilesRemoved ?? self.orphanFilesRemoved,
+            purgedByKind: purgedByKind ?? self.purgedByKind,
+            purgedCount: purgedCount ?? self.purgedCount,
+            syncOpsRemoved: syncOpsRemoved ?? self.syncOpsRemoved
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - Marker
 struct Marker: Codable {
     let createdAt: Date
     let deletedAt: Date?
     let id: String
-    let kind: MarkerKind
+    let kind: MarkerKindEnum
     let note: String?
     let pageID: String?
     let position: MarkerPosition?
@@ -4258,7 +4419,7 @@ extension Marker {
         createdAt: Date? = nil,
         deletedAt: Date?? = nil,
         id: String? = nil,
-        kind: MarkerKind? = nil,
+        kind: MarkerKindEnum? = nil,
         note: String?? = nil,
         pageID: String?? = nil,
         position: MarkerPosition?? = nil,
@@ -4353,7 +4514,7 @@ enum MarkerSource: String, Codable {
 /// Marker vom iPad (F-INK-05) und vom Mac (F-DSH-05, source=mac)
 // MARK: - MarkerAddData
 struct MarkerAddData: Codable {
-    let kind: MarkerKind
+    let kind: MarkerKindEnum
     let markerID: String
     let note: String?
     let pageID: String?
@@ -4393,7 +4554,7 @@ extension MarkerAddData {
     }
 
     func with(
-        kind: MarkerKind? = nil,
+        kind: MarkerKindEnum? = nil,
         markerID: String? = nil,
         note: String?? = nil,
         pageID: String?? = nil,
@@ -5196,12 +5357,13 @@ extension NotebookCreate {
     }
 }
 
-/// Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent
-/// über notebook_id. kind fehlt = frei.
+/// Freies Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>,
+/// idempotent über notebook_id.
 // MARK: - NotebookCreateData
 struct NotebookCreateData: Codable {
     let createdAt: Int
-    let kind: NotebookKind?
+    /// Nur frei. Die Notizbücher vorlesung/uebung legt der Core an
+    let kind: NotebookCreateDataKind?
     let moduleID: String
     let notebookID: String
     let title: String
@@ -5235,7 +5397,7 @@ extension NotebookCreateData {
 
     func with(
         createdAt: Int? = nil,
-        kind: NotebookKind?? = nil,
+        kind: NotebookCreateDataKind?? = nil,
         moduleID: String? = nil,
         notebookID: String? = nil,
         title: String? = nil
@@ -5256,6 +5418,10 @@ extension NotebookCreateData {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+enum NotebookCreateDataKind: String, Codable {
+    case frei = "frei"
 }
 
 // MARK: - NotebookCreateOp
@@ -5337,6 +5503,133 @@ extension NotebookCreateOp {
 
 enum NotebookCreateOpKind: String, Codable {
     case notebookCreate = "notebook.create"
+}
+
+/// Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem
+/// Papierkorb
+// MARK: - NotebookDeleteOp
+struct NotebookDeleteOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: NotebookRefData
+    let kind: NotebookDeleteOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: NotebookDeleteOp convenience initializers and mutators
+
+extension NotebookDeleteOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookDeleteOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: NotebookRefData? = nil,
+        kind: NotebookDeleteOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> NotebookDeleteOp {
+        return NotebookDeleteOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - NotebookRefData
+struct NotebookRefData: Codable {
+    let notebookID: String
+
+    enum CodingKeys: String, CodingKey {
+        case notebookID = "notebook_id"
+    }
+}
+
+// MARK: NotebookRefData convenience initializers and mutators
+
+extension NotebookRefData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookRefData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        notebookID: String? = nil
+    ) -> NotebookRefData {
+        return NotebookRefData(
+            notebookID: notebookID ?? self.notebookID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum NotebookDeleteOpKind: String, Codable {
+    case notebookDelete = "notebook.delete"
 }
 
 // MARK: - NotebookList
@@ -5552,6 +5845,89 @@ enum PageTemplate: String, Codable {
     case punktraster = "punktraster"
 }
 
+/// Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem
+/// Papierkorb
+// MARK: - NotebookRestoreOp
+struct NotebookRestoreOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: NotebookRefData
+    let kind: NotebookRestoreOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: NotebookRestoreOp convenience initializers and mutators
+
+extension NotebookRestoreOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookRestoreOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: NotebookRefData? = nil,
+        kind: NotebookRestoreOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> NotebookRestoreOp {
+        return NotebookRestoreOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum NotebookRestoreOpKind: String, Codable {
+    case notebookRestore = "notebook.restore"
+}
+
 /// PATCH /notebooks/{id}
 // MARK: - NotebookUpdate
 struct NotebookUpdate: Codable {
@@ -5599,6 +5975,186 @@ extension NotebookUpdate {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+// MARK: - NotebookUpdateData
+struct NotebookUpdateData: Codable {
+    let fields: NotebookUpdateFields
+    let notebookID: String
+
+    enum CodingKeys: String, CodingKey {
+        case fields = "fields"
+        case notebookID = "notebook_id"
+    }
+}
+
+// MARK: NotebookUpdateData convenience initializers and mutators
+
+extension NotebookUpdateData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookUpdateData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        fields: NotebookUpdateFields? = nil,
+        notebookID: String? = nil
+    ) -> NotebookUpdateData {
+        return NotebookUpdateData(
+            fields: fields ?? self.fields,
+            notebookID: notebookID ?? self.notebookID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Aktueller Stand der per REST änderbaren Felder
+// MARK: - NotebookUpdateFields
+struct NotebookUpdateFields: Codable {
+    let moduleID: String
+    let title: String
+
+    enum CodingKeys: String, CodingKey {
+        case moduleID = "module_id"
+        case title = "title"
+    }
+}
+
+// MARK: NotebookUpdateFields convenience initializers and mutators
+
+extension NotebookUpdateFields {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookUpdateFields.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        moduleID: String? = nil,
+        title: String? = nil
+    ) -> NotebookUpdateFields {
+        return NotebookUpdateFields(
+            moduleID: moduleID ?? self.moduleID,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem
+/// Papierkorb
+// MARK: - NotebookUpdateOp
+struct NotebookUpdateOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: NotebookUpdateData
+    let kind: NotebookUpdateOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: NotebookUpdateOp convenience initializers and mutators
+
+extension NotebookUpdateOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookUpdateOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: NotebookUpdateData? = nil,
+        kind: NotebookUpdateOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> NotebookUpdateOp {
+        return NotebookUpdateOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum NotebookUpdateOpKind: String, Codable {
+    case notebookUpdate = "notebook.update"
 }
 
 // MARK: - PageCreateData
@@ -5936,6 +6492,133 @@ extension PageDetail {
     }
 }
 
+// MARK: - PageRefData
+struct PageRefData: Codable {
+    let pageID: String
+
+    enum CodingKeys: String, CodingKey {
+        case pageID = "page_id"
+    }
+}
+
+// MARK: PageRefData convenience initializers and mutators
+
+extension PageRefData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageRefData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        pageID: String? = nil
+    ) -> PageRefData {
+        return PageRefData(
+            pageID: pageID ?? self.pageID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem
+/// Papierkorb
+// MARK: - PageRestoreOp
+struct PageRestoreOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: PageRefData
+    let kind: PageRestoreOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: PageRestoreOp convenience initializers and mutators
+
+extension PageRestoreOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PageRestoreOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: PageRefData? = nil,
+        kind: PageRestoreOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> PageRestoreOp {
+        return PageRestoreOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PageRestoreOpKind: String, Codable {
+    case pageRestore = "page.restore"
+}
+
 /// GET /pages/{id}/strokes: alle nicht gelöschten Striche, nach created_at sortiert
 // MARK: - PageStrokes
 struct PageStrokes: Codable {
@@ -6147,14 +6830,15 @@ extension PageUpdateData {
     }
 }
 
-/// Geänderte Felder, mindestens eins
+/// Alle änderbaren Felder der Seite mit ihrem neuen Stand. Kein Teil-Update: im Sync gibt es
+/// keine optionalen nullbaren Felder (VERTRAEGE §11.7)
 // MARK: - PageUpdateFields
 struct PageUpdateFields: Codable {
     let attachedSlideID: String?
     let backgroundSlideID: String?
-    let index: Int?
+    let index: Int
     let sessionID: String?
-    let template: PageTemplate?
+    let template: PageTemplate
 
     enum CodingKeys: String, CodingKey {
         case attachedSlideID = "attached_slide_id"
@@ -6186,9 +6870,9 @@ extension PageUpdateFields {
     func with(
         attachedSlideID: String?? = nil,
         backgroundSlideID: String?? = nil,
-        index: Int?? = nil,
+        index: Int? = nil,
         sessionID: String?? = nil,
-        template: PageTemplate?? = nil
+        template: PageTemplate? = nil
     ) -> PageUpdateFields {
         return PageUpdateFields(
             attachedSlideID: attachedSlideID ?? self.attachedSlideID,
@@ -6289,14 +6973,16 @@ enum PageUpdateOpKind: String, Codable {
     case pageUpdate = "page.update"
 }
 
-/// POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). public_nonce muss zu
-/// pair/start passen, falls der Code von dort stammt.
+/// POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). pairing_id aus dem QR-Code
+/// bzw. aus pair/start. public_nonce muss zu pair/start passen, falls sich das iPad dort
+/// gemeldet hat.
 // MARK: - PairConfirmRequest
 struct PairConfirmRequest: Codable {
     let appVersion: String?
     let code: String
     let deviceName: String
     let kind: DeviceKind
+    let pairingID: String
     let publicNonce: String
 
     enum CodingKeys: String, CodingKey {
@@ -6304,6 +6990,7 @@ struct PairConfirmRequest: Codable {
         case code = "code"
         case deviceName = "device_name"
         case kind = "kind"
+        case pairingID = "pairing_id"
         case publicNonce = "public_nonce"
     }
 }
@@ -6331,6 +7018,7 @@ extension PairConfirmRequest {
         code: String? = nil,
         deviceName: String? = nil,
         kind: DeviceKind? = nil,
+        pairingID: String? = nil,
         publicNonce: String? = nil
     ) -> PairConfirmRequest {
         return PairConfirmRequest(
@@ -6338,6 +7026,7 @@ extension PairConfirmRequest {
             code: code ?? self.code,
             deviceName: deviceName ?? self.deviceName,
             kind: kind ?? self.kind,
+            pairingID: pairingID ?? self.pairingID,
             publicNonce: publicNonce ?? self.publicNonce
         )
     }
@@ -6401,7 +7090,8 @@ extension PairResponse {
     }
 }
 
-/// POST /devices/pair/start (aus dem Netz ohne Token erlaubt)
+/// POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur angenommen, solange am
+/// Mac ein Kopplungsfenster offen ist
 // MARK: - PairStartRequest
 struct PairStartRequest: Codable {
     let deviceName: String
@@ -6504,12 +7194,12 @@ extension PairStartResponse {
     }
 }
 
-/// Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis
-/// pairing.requested)
+/// Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur
+/// lokal; Ereignis pairing.requested)
 // MARK: - PairingCode
 struct PairingCode: Codable {
     let code: String
-    /// Name aus pair/start, null bei einem Code für den QR-Weg
+    /// Name aus pair/start, null solange sich kein iPad gemeldet hat
     let deviceName: String?
     let expiresAt: Date
     /// Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für
@@ -6517,7 +7207,7 @@ struct PairingCode: Codable {
     let host: String
     let pairingID: String
     let port: Int
-    /// Inhalt des QR-Codes: dieselben Daten wie host, port und code
+    /// Inhalt des QR-Codes: dieselben Daten wie host, port, pairing_id und code
     let qrURL: String
 
     enum CodingKeys: String, CodingKey {
@@ -7000,7 +7690,7 @@ enum PhotoMIME: String, Codable {
 /// Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
 // MARK: - PhotoAddData
 struct PhotoAddData: Codable {
-    let fileRef: FileRef
+    let fileRef: PhotoFileRef
     let pageID: String?
     let photoID: String
     let sessionID: String
@@ -7034,7 +7724,7 @@ extension PhotoAddData {
     }
 
     func with(
-        fileRef: FileRef? = nil,
+        fileRef: PhotoFileRef? = nil,
         pageID: String?? = nil,
         photoID: String? = nil,
         sessionID: String? = nil,
@@ -7046,6 +7736,59 @@ extension PhotoAddData {
             photoID: photoID ?? self.photoID,
             sessionID: sessionID ?? self.sessionID,
             tMS: tMS ?? self.tMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Datei eines Tafel-Fotos, hochgeladen per PUT /photos/{photo_id}/file
+// MARK: - PhotoFileRef
+struct PhotoFileRef: Codable {
+    let mime: PhotoMIME
+    let sha256: String
+    let sizeBytes: Int
+
+    enum CodingKeys: String, CodingKey {
+        case mime = "mime"
+        case sha256 = "sha256"
+        case sizeBytes = "size_bytes"
+    }
+}
+
+// MARK: PhotoFileRef convenience initializers and mutators
+
+extension PhotoFileRef {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PhotoFileRef.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        mime: PhotoMIME? = nil,
+        sha256: String? = nil,
+        sizeBytes: Int? = nil
+    ) -> PhotoFileRef {
+        return PhotoFileRef(
+            mime: mime ?? self.mime,
+            sha256: sha256 ?? self.sha256,
+            sizeBytes: sizeBytes ?? self.sizeBytes
         )
     }
 
@@ -7622,6 +8365,7 @@ extension SemesterUpdate {
 /// Kalendertermin (null bei spontanen Sessions).
 // MARK: - Session
 struct Session: Codable {
+    let autoStopExtendedUntil: Date?
     let calendarEventID: String?
     let createdAt: Date
     let deletedAt: Date?
@@ -7646,6 +8390,7 @@ struct Session: Codable {
     let userID: String
 
     enum CodingKeys: String, CodingKey {
+        case autoStopExtendedUntil = "auto_stop_extended_until"
         case calendarEventID = "calendar_event_id"
         case createdAt = "created_at"
         case deletedAt = "deleted_at"
@@ -7688,6 +8433,7 @@ extension Session {
     }
 
     func with(
+        autoStopExtendedUntil: Date?? = nil,
         calendarEventID: String?? = nil,
         createdAt: Date? = nil,
         deletedAt: Date?? = nil,
@@ -7710,6 +8456,7 @@ extension Session {
         userID: String? = nil
     ) -> Session {
         return Session(
+            autoStopExtendedUntil: autoStopExtendedUntil ?? self.autoStopExtendedUntil,
             calendarEventID: calendarEventID ?? self.calendarEventID,
             createdAt: createdAt ?? self.createdAt,
             deletedAt: deletedAt ?? self.deletedAt,
@@ -7859,6 +8606,52 @@ extension SessionCreate {
             moduleID: moduleID ?? self.moduleID,
             slideDeckID: slideDeckID ?? self.slideDeckID,
             title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// POST /sessions/{id}/extend: Auto-Stopp aufschieben (F-SES-03). minutes fehlt =
+/// lecture.auto_stop_extend_min
+// MARK: - SessionExtendRequest
+struct SessionExtendRequest: Codable {
+    let minutes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case minutes = "minutes"
+    }
+}
+
+// MARK: SessionExtendRequest convenience initializers and mutators
+
+extension SessionExtendRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionExtendRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        minutes: Int?? = nil
+    ) -> SessionExtendRequest {
+        return SessionExtendRequest(
+            minutes: minutes ?? self.minutes
         )
     }
 
@@ -9585,7 +10378,7 @@ enum StampElementKind: String, Codable {
 // MARK: - StampElementPayload
 struct StampElementPayload: Codable {
     let markerID: String
-    let markerKind: MarkerKind
+    let markerKind: MarkerKindEnum
 
     enum CodingKeys: String, CodingKey {
         case markerID = "marker_id"
@@ -9613,7 +10406,7 @@ extension StampElementPayload {
 
     func with(
         markerID: String? = nil,
-        markerKind: MarkerKind? = nil
+        markerKind: MarkerKindEnum? = nil
     ) -> StampElementPayload {
         return StampElementPayload(
             markerID: markerID ?? self.markerID,
@@ -9955,8 +10748,8 @@ enum SyncClientKind: String, Codable {
 
 /// Alle Nachrichten Client → Server
 ///
-/// Erste Nachricht des Clients (08 §2.1). token (Gerätetoken) Pflicht für Verbindungen aus
-/// dem Netz, lokal (Web-App) ohne.
+/// Erste Nachricht des Clients (08 §2.1). Das Gerätetoken steht nicht hier, sondern beim
+/// Upgrade im Header Authorization: Bearer (VERTRAEGE §11.1). device_id nur zur Gegenprobe.
 ///
 /// Weitere Ströme abonnieren, ohne neu zu verbinden. Antwort: subscribed. Ergänzung zu 08
 /// §2
@@ -9969,6 +10762,9 @@ enum SyncClientKind: String, Codable {
 ///
 /// Was der Client gerade zeigt (ersetzt den vorigen Stand). Das iPad sendet sie bei jedem
 /// Seitenwechsel, die Notizen-Spalte folgt ihr (F-DSH-04). Ergänzung zu 08 §2
+///
+/// Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem
+/// Papierkorb
 // MARK: - SyncClientMessage
 struct SyncClientMessage: Codable {
     let appVersion: String?
@@ -9976,7 +10772,6 @@ struct SyncClientMessage: Codable {
     let deviceID: String?
     let syncClientMessageProtocol: Double?
     let streams: [Stream]?
-    let token: String?
     let type: SyncClientMessageType
     let t0: Int?
     /// Gemessener Versatz Server − Client
@@ -10002,7 +10797,6 @@ struct SyncClientMessage: Codable {
         case deviceID = "device_id"
         case syncClientMessageProtocol = "protocol"
         case streams = "streams"
-        case token = "token"
         case type = "type"
         case t0 = "t0"
         case offsetMS = "offset_ms"
@@ -10045,7 +10839,6 @@ extension SyncClientMessage {
         deviceID: String?? = nil,
         syncClientMessageProtocol: Double?? = nil,
         streams: [Stream]?? = nil,
-        token: String?? = nil,
         type: SyncClientMessageType? = nil,
         t0: Int?? = nil,
         offsetMS: Int?? = nil,
@@ -10068,7 +10861,6 @@ extension SyncClientMessage {
             deviceID: deviceID ?? self.deviceID,
             syncClientMessageProtocol: syncClientMessageProtocol ?? self.syncClientMessageProtocol,
             streams: streams ?? self.streams,
-            token: token ?? self.token,
             type: type ?? self.type,
             t0: t0 ?? self.t0,
             offsetMS: offsetMS ?? self.offsetMS,
@@ -10096,8 +10888,8 @@ extension SyncClientMessage {
     }
 }
 
-/// Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent
-/// über notebook_id. kind fehlt = frei.
+/// Freies Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>,
+/// idempotent über notebook_id.
 ///
 /// Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad
 ///
@@ -10114,7 +10906,8 @@ extension SyncClientMessage {
 // MARK: - DataClass
 struct DataClass: Codable {
     let createdAt: Int?
-    let kind: Kind?
+    /// Nur frei. Die Notizbücher vorlesung/uebung legt der Core an
+    let kind: PurpleMarkerKind?
     let moduleID: String?
     let notebookID: String?
     let title: String?
@@ -10126,7 +10919,7 @@ struct DataClass: Codable {
     let sessionID: String?
     let template: PageTemplate?
     let widthPt: Double?
-    let fields: PageUpdateFields?
+    let fields: UpdateFields?
     /// Version, auf der die Änderung beruht. Der Core setzt danach version + 1
     let version: Int?
     let stroke: Stroke?
@@ -10148,7 +10941,7 @@ struct DataClass: Codable {
     let note: String?
     let position: MarkerPosition?
     let source: ClientDevice?
-    let fileRef: FileRef?
+    let fileRef: PhotoFileRef?
     let photoID: String?
 
     enum CodingKeys: String, CodingKey {
@@ -10211,7 +11004,7 @@ extension DataClass {
 
     func with(
         createdAt: Int?? = nil,
-        kind: Kind?? = nil,
+        kind: PurpleMarkerKind?? = nil,
         moduleID: String?? = nil,
         notebookID: String?? = nil,
         title: String?? = nil,
@@ -10223,7 +11016,7 @@ extension DataClass {
         sessionID: String?? = nil,
         template: PageTemplate?? = nil,
         widthPt: Double?? = nil,
-        fields: PageUpdateFields?? = nil,
+        fields: UpdateFields?? = nil,
         version: Int?? = nil,
         stroke: Stroke?? = nil,
         clientIDS: [String]?? = nil,
@@ -10244,7 +11037,7 @@ extension DataClass {
         note: String?? = nil,
         position: MarkerPosition?? = nil,
         source: ClientDevice?? = nil,
-        fileRef: FileRef?? = nil,
+        fileRef: PhotoFileRef?? = nil,
         photoID: String?? = nil
     ) -> DataClass {
         return DataClass(
@@ -10296,13 +11089,83 @@ extension DataClass {
     }
 }
 
-enum Kind: String, Codable {
+/// Alle änderbaren Felder der Seite mit ihrem neuen Stand. Kein Teil-Update: im Sync gibt es
+/// keine optionalen nullbaren Felder (VERTRAEGE §11.7)
+///
+/// Aktueller Stand der per REST änderbaren Felder
+// MARK: - UpdateFields
+struct UpdateFields: Codable {
+    let attachedSlideID: String?
+    let backgroundSlideID: String?
+    let index: Int?
+    let sessionID: String?
+    let template: PageTemplate?
+    let moduleID: String?
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case attachedSlideID = "attached_slide_id"
+        case backgroundSlideID = "background_slide_id"
+        case index = "index"
+        case sessionID = "session_id"
+        case template = "template"
+        case moduleID = "module_id"
+        case title = "title"
+    }
+}
+
+// MARK: UpdateFields convenience initializers and mutators
+
+extension UpdateFields {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(UpdateFields.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        attachedSlideID: String?? = nil,
+        backgroundSlideID: String?? = nil,
+        index: Int?? = nil,
+        sessionID: String?? = nil,
+        template: PageTemplate?? = nil,
+        moduleID: String?? = nil,
+        title: String?? = nil
+    ) -> UpdateFields {
+        return UpdateFields(
+            attachedSlideID: attachedSlideID ?? self.attachedSlideID,
+            backgroundSlideID: backgroundSlideID ?? self.backgroundSlideID,
+            index: index ?? self.index,
+            sessionID: sessionID ?? self.sessionID,
+            template: template ?? self.template,
+            moduleID: moduleID ?? self.moduleID,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PurpleMarkerKind: String, Codable {
     case frage = "frage"
     case frei = "frei"
     case klausur = "klausur"
-    case uebung = "uebung"
     case verknuepfung = "verknuepfung"
-    case vorlesung = "vorlesung"
 }
 
 enum SyncClientMessageKind: String, Codable {
@@ -10312,8 +11175,12 @@ enum SyncClientMessageKind: String, Codable {
     case markerAdd = "marker.add"
     case markerRemove = "marker.remove"
     case notebookCreate = "notebook.create"
+    case notebookDelete = "notebook.delete"
+    case notebookRestore = "notebook.restore"
+    case notebookUpdate = "notebook.update"
     case pageCreate = "page.create"
     case pageDelete = "page.delete"
+    case pageRestore = "page.restore"
     case pageUpdate = "page.update"
     case photoAdd = "photo.add"
     case sessionPause = "session.pause"
@@ -10355,11 +11222,15 @@ enum Stream: Codable {
 
 // MARK: - SyncStreamPosition
 struct SyncStreamPosition: Codable {
-    /// Letzte beim Client angewandte seq, 0 = nichts
+    /// op_id der Operation mit last_seq, null bei last_seq = 0. Der Server prüft das Paar, sonst
+    /// reset
+    let lastOpID: String?
+    /// Höchste lückenlos empfangene und angewandte seq, 0 = nichts
     let lastSeq: Int
     let stream: String
 
     enum CodingKeys: String, CodingKey {
+        case lastOpID = "last_op_id"
         case lastSeq = "last_seq"
         case stream = "stream"
     }
@@ -10384,10 +11255,12 @@ extension SyncStreamPosition {
     }
 
     func with(
+        lastOpID: String?? = nil,
         lastSeq: Int? = nil,
         stream: String? = nil
     ) -> SyncStreamPosition {
         return SyncStreamPosition(
+            lastOpID: lastOpID ?? self.lastOpID,
             lastSeq: lastSeq ?? self.lastSeq,
             stream: stream ?? self.stream
         )
@@ -10611,10 +11484,12 @@ enum SyncErrorCode: String, Codable {
     case notebookKindExists = "notebook_kind_exists"
     case notebookNotFound = "notebook_not_found"
     case opIDReused = "op_id_reused"
+    case opNotAllowed = "op_not_allowed"
     case pageNotFound = "page_not_found"
     case pageVersionConflict = "page_version_conflict"
     case protocolUnsupported = "protocol_unsupported"
     case sessionNotFound = "session_not_found"
+    case sessionSuperseded = "session_superseded"
     case sessionTransitionInvalid = "session_transition_invalid"
     case streamMismatch = "stream_mismatch"
     case tooManyPending = "too_many_pending"
@@ -10689,10 +11564,11 @@ extension SyncEvent {
 /// Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem
 /// Kalendertermin (null bei spontanen Sessions).
 ///
-/// Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis
-/// pairing.requested)
+/// Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur
+/// lokal; Ereignis pairing.requested)
 // MARK: - SyncEventData
 struct SyncEventData: Codable {
+    let autoStopExtendedUntil: Date?
     let calendarEventID: String?
     let createdAt: Date?
     let deletedAt: Date?
@@ -10717,7 +11593,7 @@ struct SyncEventData: Codable {
     let userID: String?
     let client: SyncClientKind?
     let deviceID: String?
-    /// Name aus pair/start, null bei einem Code für den QR-Weg
+    /// Name aus pair/start, null solange sich kein iPad gemeldet hat
     let deviceName: String?
     let notebookID: String?
     let pageID: String?
@@ -10730,10 +11606,11 @@ struct SyncEventData: Codable {
     let host: String?
     let pairingID: String?
     let port: Int?
-    /// Inhalt des QR-Codes: dieselben Daten wie host, port und code
+    /// Inhalt des QR-Codes: dieselben Daten wie host, port, pairing_id und code
     let qrURL: String?
 
     enum CodingKeys: String, CodingKey {
+        case autoStopExtendedUntil = "auto_stop_extended_until"
         case calendarEventID = "calendar_event_id"
         case createdAt = "created_at"
         case deletedAt = "deleted_at"
@@ -10789,6 +11666,7 @@ extension SyncEventData {
     }
 
     func with(
+        autoStopExtendedUntil: Date?? = nil,
         calendarEventID: String?? = nil,
         createdAt: Date?? = nil,
         deletedAt: Date?? = nil,
@@ -10824,6 +11702,7 @@ extension SyncEventData {
         qrURL: String?? = nil
     ) -> SyncEventData {
         return SyncEventData(
+            autoStopExtendedUntil: autoStopExtendedUntil ?? self.autoStopExtendedUntil,
             calendarEventID: calendarEventID ?? self.calendarEventID,
             createdAt: createdAt ?? self.createdAt,
             deletedAt: deletedAt ?? self.deletedAt,
@@ -10876,8 +11755,8 @@ enum SyncEventName: String, Codable {
     case sessionUpdated = "session.updated"
 }
 
-/// Erste Nachricht des Clients (08 §2.1). token (Gerätetoken) Pflicht für Verbindungen aus
-/// dem Netz, lokal (Web-App) ohne.
+/// Erste Nachricht des Clients (08 §2.1). Das Gerätetoken steht nicht hier, sondern beim
+/// Upgrade im Header Authorization: Bearer (VERTRAEGE §11.1). device_id nur zur Gegenprobe.
 // MARK: - SyncHello
 struct SyncHello: Codable {
     let appVersion: String
@@ -10885,7 +11764,6 @@ struct SyncHello: Codable {
     let deviceID: String?
     let syncHelloProtocol: Double
     let streams: [SyncStreamPosition]
-    let token: String?
     let type: SyncHelloType
 
     enum CodingKeys: String, CodingKey {
@@ -10894,7 +11772,6 @@ struct SyncHello: Codable {
         case deviceID = "device_id"
         case syncHelloProtocol = "protocol"
         case streams = "streams"
-        case token = "token"
         case type = "type"
     }
 }
@@ -10923,7 +11800,6 @@ extension SyncHello {
         deviceID: String?? = nil,
         syncHelloProtocol: Double? = nil,
         streams: [SyncStreamPosition]? = nil,
-        token: String?? = nil,
         type: SyncHelloType? = nil
     ) -> SyncHello {
         return SyncHello(
@@ -10932,7 +11808,6 @@ extension SyncHello {
             deviceID: deviceID ?? self.deviceID,
             syncHelloProtocol: syncHelloProtocol ?? self.syncHelloProtocol,
             streams: streams ?? self.streams,
-            token: token ?? self.token,
             type: type ?? self.type
         )
     }
@@ -10952,6 +11827,9 @@ enum SyncHelloType: String, Codable {
 
 /// Operation (08 §2.3), unterschieden über kind. Client → Server ohne seq/origin, Server →
 /// Client mit seq und origin.
+///
+/// Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem
+/// Papierkorb
 // MARK: - SyncOp
 struct SyncOp: Codable {
     let at: Int
@@ -11425,6 +12303,12 @@ extension SyncResume {
 
 /// Alle Nachrichten Server → Client
 ///
+/// db_epoch ändert sich bei jeder Wiederherstellung der Datenbank. Weicht sie vom
+/// gespeicherten Wert ab, behandelt der Client alle Ströme wie reset (VERTRAEGE §11.1).
+///
+/// Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem
+/// Papierkorb
+///
 /// ts = Serveruhr beim Antworten. Versatz = Median über 5 Runden von ts − (t0 + t1) / 2
 ///
 /// Zustand oder Felder einer Session haben sich geändert (auch zeitgesteuert: bereit,
@@ -11437,6 +12321,7 @@ extension SyncResume {
 /// Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)
 // MARK: - SyncServerMessage
 struct SyncServerMessage: Codable {
+    let dbEpoch: String?
     let deviceID: String?
     let syncServerMessageProtocol: Double?
     let resume: [SyncResume]?
@@ -11465,6 +12350,7 @@ struct SyncServerMessage: Codable {
     let name: SyncEventName?
 
     enum CodingKeys: String, CodingKey {
+        case dbEpoch = "db_epoch"
         case deviceID = "device_id"
         case syncServerMessageProtocol = "protocol"
         case resume = "resume"
@@ -11509,6 +12395,7 @@ extension SyncServerMessage {
     }
 
     func with(
+        dbEpoch: String?? = nil,
         deviceID: String?? = nil,
         syncServerMessageProtocol: Double?? = nil,
         resume: [SyncResume]?? = nil,
@@ -11533,6 +12420,7 @@ extension SyncServerMessage {
         name: SyncEventName?? = nil
     ) -> SyncServerMessage {
         return SyncServerMessage(
+            dbEpoch: dbEpoch ?? self.dbEpoch,
             deviceID: deviceID ?? self.deviceID,
             syncServerMessageProtocol: syncServerMessageProtocol ?? self.syncServerMessageProtocol,
             resume: resume ?? self.resume,
@@ -11567,8 +12455,8 @@ extension SyncServerMessage {
     }
 }
 
-/// Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent
-/// über notebook_id. kind fehlt = frei.
+/// Freies Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>,
+/// idempotent über notebook_id.
 ///
 /// Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad
 ///
@@ -11586,12 +12474,13 @@ extension SyncServerMessage {
 /// Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem
 /// Kalendertermin (null bei spontanen Sessions).
 ///
-/// Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis
-/// pairing.requested)
+/// Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur
+/// lokal; Ereignis pairing.requested)
 // MARK: - SyncServerMessageData
 struct SyncServerMessageData: Codable {
     let createdAt: CreatedAt?
-    let kind: Kind?
+    /// Nur frei. Die Notizbücher vorlesung/uebung legt der Core an
+    let kind: PurpleMarkerKind?
     let moduleID: String?
     let notebookID: String?
     let title: String?
@@ -11603,7 +12492,7 @@ struct SyncServerMessageData: Codable {
     let sessionID: String?
     let template: PageTemplate?
     let widthPt: Double?
-    let fields: PageUpdateFields?
+    let fields: UpdateFields?
     /// Version, auf der die Änderung beruht. Der Core setzt danach version + 1
     let version: Int?
     let stroke: Stroke?
@@ -11625,8 +12514,9 @@ struct SyncServerMessageData: Codable {
     let note: String?
     let position: MarkerPosition?
     let source: ClientDevice?
-    let fileRef: FileRef?
+    let fileRef: PhotoFileRef?
     let photoID: String?
+    let autoStopExtendedUntil: Date?
     let deletedAt: Date?
     let endedAt: Date?
     let id: String?
@@ -11644,7 +12534,7 @@ struct SyncServerMessageData: Codable {
     let userID: String?
     let client: SyncClientKind?
     let deviceID: String?
-    /// Name aus pair/start, null bei einem Code für den QR-Weg
+    /// Name aus pair/start, null solange sich kein iPad gemeldet hat
     let deviceName: String?
     let connected: Bool?
     let code: String?
@@ -11654,7 +12544,7 @@ struct SyncServerMessageData: Codable {
     let host: String?
     let pairingID: String?
     let port: Int?
-    /// Inhalt des QR-Codes: dieselben Daten wie host, port und code
+    /// Inhalt des QR-Codes: dieselben Daten wie host, port, pairing_id und code
     let qrURL: String?
 
     enum CodingKeys: String, CodingKey {
@@ -11694,6 +12584,7 @@ struct SyncServerMessageData: Codable {
         case source = "source"
         case fileRef = "file_ref"
         case photoID = "photo_id"
+        case autoStopExtendedUntil = "auto_stop_extended_until"
         case deletedAt = "deleted_at"
         case endedAt = "ended_at"
         case id = "id"
@@ -11740,7 +12631,7 @@ extension SyncServerMessageData {
 
     func with(
         createdAt: CreatedAt?? = nil,
-        kind: Kind?? = nil,
+        kind: PurpleMarkerKind?? = nil,
         moduleID: String?? = nil,
         notebookID: String?? = nil,
         title: String?? = nil,
@@ -11752,7 +12643,7 @@ extension SyncServerMessageData {
         sessionID: String?? = nil,
         template: PageTemplate?? = nil,
         widthPt: Double?? = nil,
-        fields: PageUpdateFields?? = nil,
+        fields: UpdateFields?? = nil,
         version: Int?? = nil,
         stroke: Stroke?? = nil,
         clientIDS: [String]?? = nil,
@@ -11773,8 +12664,9 @@ extension SyncServerMessageData {
         note: String?? = nil,
         position: MarkerPosition?? = nil,
         source: ClientDevice?? = nil,
-        fileRef: FileRef?? = nil,
+        fileRef: PhotoFileRef?? = nil,
         photoID: String?? = nil,
+        autoStopExtendedUntil: Date?? = nil,
         deletedAt: Date?? = nil,
         endedAt: Date?? = nil,
         id: String?? = nil,
@@ -11836,6 +12728,7 @@ extension SyncServerMessageData {
             source: source ?? self.source,
             fileRef: fileRef ?? self.fileRef,
             photoID: photoID ?? self.photoID,
+            autoStopExtendedUntil: autoStopExtendedUntil ?? self.autoStopExtendedUntil,
             deletedAt: deletedAt ?? self.deletedAt,
             endedAt: endedAt ?? self.endedAt,
             id: id ?? self.id,
@@ -12329,8 +13222,11 @@ enum SyncUnsubscribeType: String, Codable {
     case unsubscribe = "unsubscribe"
 }
 
+/// db_epoch ändert sich bei jeder Wiederherstellung der Datenbank. Weicht sie vom
+/// gespeicherten Wert ab, behandelt der Client alle Ströme wie reset (VERTRAEGE §11.1).
 // MARK: - SyncWelcome
 struct SyncWelcome: Codable {
+    let dbEpoch: String
     let deviceID: String?
     let syncWelcomeProtocol: Double
     let resume: [SyncResume]
@@ -12339,6 +13235,7 @@ struct SyncWelcome: Codable {
     let type: SyncWelcomeType
 
     enum CodingKeys: String, CodingKey {
+        case dbEpoch = "db_epoch"
         case deviceID = "device_id"
         case syncWelcomeProtocol = "protocol"
         case resume = "resume"
@@ -12367,6 +13264,7 @@ extension SyncWelcome {
     }
 
     func with(
+        dbEpoch: String? = nil,
         deviceID: String?? = nil,
         syncWelcomeProtocol: Double? = nil,
         resume: [SyncResume]? = nil,
@@ -12375,6 +13273,7 @@ extension SyncWelcome {
         type: SyncWelcomeType? = nil
     ) -> SyncWelcome {
         return SyncWelcome(
+            dbEpoch: dbEpoch ?? self.dbEpoch,
             deviceID: deviceID ?? self.deviceID,
             syncWelcomeProtocol: syncWelcomeProtocol ?? self.syncWelcomeProtocol,
             resume: resume ?? self.resume,
@@ -13011,18 +13910,45 @@ extension UploadResult {
 
 func newJSONDecoder() -> JSONDecoder {
     let decoder = JSONDecoder()
-    if #available(iOS 10.0, OSX 10.12, tvOS 10.0, watchOS 3.0, *) {
-        decoder.dateDecodingStrategy = .iso8601
+    decoder.dateDecodingStrategy = .custom { decoder in
+        let container = try decoder.singleValueContainer()
+        let string = try container.decode(String.self)
+        if let date = sgParseTimestamp(string) { return date }
+        throw DecodingError.dataCorruptedError(in: container, debugDescription: "Ungültiger Zeitstempel: \(string)")
     }
     return decoder
 }
 
 func newJSONEncoder() -> JSONEncoder {
     let encoder = JSONEncoder()
-    if #available(iOS 10.0, OSX 10.12, tvOS 10.0, watchOS 3.0, *) {
-        encoder.dateEncodingStrategy = .iso8601
+    encoder.dateEncodingStrategy = .custom { date, encoder in
+        var container = encoder.singleValueContainer()
+        try container.encode(sgFormatTimestamp(date))
     }
     return encoder
+}
+
+/// ISO 8601 mit und ohne Sekundenbruchteile, mit Z oder Offset
+func sgParseTimestamp(_ string: String) -> Date? {
+    let fractional = ISO8601DateFormatter()
+    fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = fractional.date(from: string) { return date }
+    let plain = ISO8601DateFormatter()
+    plain.formatOptions = [.withInternetDateTime]
+    return plain.date(from: string)
+}
+
+/// UTC mit Z; Millisekunden nur, wenn sie nicht 0 sind (wie der Core sie schreibt)
+func sgFormatTimestamp(_ date: Date) -> String {
+    let millis = Int64((date.timeIntervalSince1970 * 1000).rounded())
+    var seconds = millis / 1000
+    var rest = millis % 1000
+    if rest < 0 { rest += 1000; seconds -= 1 }
+    let plain = ISO8601DateFormatter()
+    plain.formatOptions = [.withInternetDateTime]
+    let base = plain.string(from: Date(timeIntervalSince1970: TimeInterval(seconds)))
+    if rest == 0 { return base }
+    return String(base.dropLast()) + "." + String(format: "%03d", Int(rest)) + "Z"
 }
 
 // MARK: - Encode/decode helpers
@@ -13268,5 +14194,1998 @@ class JSONAny: Codable {
             var container = encoder.singleValueContainer()
             try JSONAny.encode(to: &container, value: self.value)
         }
+    }
+}
+
+// MARK: - Pflichtfelder explizit kodieren (auch null), siehe docs/VERTRAEGE.md §11.7
+
+extension APIError {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(error, forKey: .error)
+    }
+}
+
+extension APIErrorBody {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(code, forKey: .code)
+        try container.encodeIfPresent(details, forKey: .details)
+        try container.encode(message, forKey: .message)
+    }
+}
+
+extension AudioChunk {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(duplicate, forKey: .duplicate)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(receivedAt, forKey: .receivedAt)
+        try container.encode(recordingID, forKey: .recordingID)
+        try container.encode(seq, forKey: .seq)
+        try container.encode(sha256, forKey: .sha256)
+        try container.encode(sizeBytes, forKey: .sizeBytes)
+        try container.encode(startMS, forKey: .startMS)
+    }
+}
+
+extension AudioChunkMeta {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(seq, forKey: .seq)
+        try container.encode(sha256, forKey: .sha256)
+        try container.encode(startMS, forKey: .startMS)
+    }
+}
+
+extension AudioFinalizePayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(recordingID, forKey: .recordingID)
+    }
+}
+
+extension AudioFinalizeResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(audioDurationMS, forKey: .audioDurationMS)
+        try container.encode(chunkCount, forKey: .chunkCount)
+        try container.encode(fileSizeBytes, forKey: .fileSizeBytes)
+        try container.encode(gaps, forKey: .gaps)
+        try container.encode(jobDurationMS, forKey: .jobDurationMS)
+        try container.encode(missingSeqs, forKey: .missingSeqs)
+        try container.encode(recordingID, forKey: .recordingID)
+        try container.encode(state, forKey: .state)
+    }
+}
+
+extension AudioGap {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(reason, forKey: .reason)
+        try container.encode(startMS, forKey: .startMS)
+    }
+}
+
+extension BackupOverview {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+        try container.encode(status, forKey: .status)
+    }
+}
+
+extension BackupRun {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(error, forKey: .error)
+        try container.encode(finishedAt, forKey: .finishedAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(sizeBytes, forKey: .sizeBytes)
+        try container.encode(stand, forKey: .stand)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encode(state, forKey: .state)
+        try container.encode(target, forKey: .target)
+        try container.encode(trigger, forKey: .trigger)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension BackupStatus {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(lastSuccessAt, forKey: .lastSuccessAt)
+        try container.encode(nextRunAt, forKey: .nextRunAt)
+        try container.encode(running, forKey: .running)
+        try container.encode(stale, forKey: .stale)
+        try container.encode(target, forKey: .target)
+    }
+}
+
+extension CalendarEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(allDay, forKey: .allDay)
+        try container.encode(assignedBy, forKey: .assignedBy)
+        try container.encode(cancelled, forKey: .cancelled)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(description, forKey: .description)
+        try container.encode(endsAt, forKey: .endsAt)
+        try container.encode(externalUid, forKey: .externalUid)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(location, forKey: .location)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(recurrenceID, forKey: .recurrenceID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(sourceID, forKey: .sourceID)
+        try container.encode(startsAt, forKey: .startsAt)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension CalendarEventList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension CalendarEventUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(kind, forKey: .kind)
+        try container.encodeIfPresent(moduleID, forKey: .moduleID)
+        try container.encodeIfPresent(scope, forKey: .scope)
+    }
+}
+
+extension CalendarSource {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(eventCount, forKey: .eventCount)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(lastError, forKey: .lastError)
+        try container.encode(lastSyncedAt, forKey: .lastSyncedAt)
+        try container.encode(name, forKey: .name)
+        try container.encode(readonly, forKey: .readonly)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(url, forKey: .url)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension CalendarSourceCreate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encode(url, forKey: .url)
+    }
+}
+
+extension CalendarSourceList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension DataSettings {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(backupEncryption, forKey: .backupEncryption)
+        try container.encode(backupTarget, forKey: .backupTarget)
+        try container.encode(backupTime, forKey: .backupTime)
+    }
+}
+
+extension DataSettingsUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(backupEncryption, forKey: .backupEncryption)
+        try container.encodeIfPresent(backupTarget, forKey: .backupTarget)
+        try container.encodeIfPresent(backupTime, forKey: .backupTime)
+    }
+}
+
+extension Device {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(appVersion, forKey: .appVersion)
+        try container.encode(clockOffsetMS, forKey: .clockOffsetMS)
+        try container.encode(connected, forKey: .connected)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(lastSeenAt, forKey: .lastSeenAt)
+        try container.encode(name, forKey: .name)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension DeviceList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension DrawingSnapshotData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(pkdrawingRef, forKey: .pkdrawingRef)
+    }
+}
+
+extension FileRef {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(mime, forKey: .mime)
+        try container.encode(sha256, forKey: .sha256)
+        try container.encode(sizeBytes, forKey: .sizeBytes)
+    }
+}
+
+extension DrawingSnapshotOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension ElementRemoveData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(elementID, forKey: .elementID)
+        try container.encode(pageID, forKey: .pageID)
+    }
+}
+
+extension ElementRemoveOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension ElementUpsertData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(element, forKey: .element)
+        try container.encode(pageID, forKey: .pageID)
+    }
+}
+
+extension PageElement {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(elementID, forKey: .elementID)
+        try container.encode(frame, forKey: .frame)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(payload, forKey: .payload)
+        try container.encode(tMS, forKey: .tMS)
+        try container.encode(z, forKey: .z)
+    }
+}
+
+extension ElementUpsertOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension ExerciseSheet {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(dueAt, forKey: .dueAt)
+        try container.encode(hasSolution, forKey: .hasSolution)
+        try container.encode(id, forKey: .id)
+        try container.encode(ingestState, forKey: .ingestState)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(number, forKey: .number)
+        try container.encode(pageCount, forKey: .pageCount)
+        try container.encode(sha256, forKey: .sha256)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension ExerciseSheetList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension ExerciseSheetUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(dueAt, forKey: .dueAt)
+        try container.encodeIfPresent(number, forKey: .number)
+        try container.encodeIfPresent(title, forKey: .title)
+    }
+}
+
+extension FileReceipt {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(duplicate, forKey: .duplicate)
+        try container.encode(id, forKey: .id)
+        try container.encode(receivedAt, forKey: .receivedAt)
+        try container.encode(sha256, forKey: .sha256)
+        try container.encode(sizeBytes, forKey: .sizeBytes)
+    }
+}
+
+extension GeneralSettings {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(appearance, forKey: .appearance)
+        try container.encode(contentLang, forKey: .contentLang)
+        try container.encode(dataDir, forKey: .dataDir)
+    }
+}
+
+extension GeneralSettingsUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(appearance, forKey: .appearance)
+        try container.encodeIfPresent(contentLang, forKey: .contentLang)
+    }
+}
+
+extension Health {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(db, forKey: .db)
+        try container.encode(status, forKey: .status)
+        try container.encode(version, forKey: .version)
+    }
+}
+
+extension ICSEventRef {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(eventID, forKey: .eventID)
+        try container.encode(externalUid, forKey: .externalUid)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(recurrenceID, forKey: .recurrenceID)
+        try container.encode(startsAt, forKey: .startsAt)
+        try container.encode(title, forKey: .title)
+    }
+}
+
+extension ICSImportCounts {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(entfallen, forKey: .entfallen)
+        try container.encode(geaendert, forKey: .geaendert)
+        try container.encode(neu, forKey: .neu)
+        try container.encode(ohneModul, forKey: .ohneModul)
+        try container.encode(unveraendert, forKey: .unveraendert)
+        try container.encode(zugeordnet, forKey: .zugeordnet)
+    }
+}
+
+extension ICSImportResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(counts, forKey: .counts)
+        try container.encode(entfallen, forKey: .entfallen)
+        try container.encode(geaendert, forKey: .geaendert)
+        try container.encode(moduleSuggestions, forKey: .moduleSuggestions)
+        try container.encode(neu, forKey: .neu)
+        try container.encode(source, forKey: .source)
+        try container.encode(warnings, forKey: .warnings)
+        try container.encode(zugeordnet, forKey: .zugeordnet)
+    }
+}
+
+extension ICSModuleSuggestion {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(eventCount, forKey: .eventCount)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(name, forKey: .name)
+        try container.encode(seriesEventIDS, forKey: .seriesEventIDS)
+    }
+}
+
+extension ICSWarning {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(code, forKey: .code)
+        try container.encode(externalUid, forKey: .externalUid)
+        try container.encode(message, forKey: .message)
+    }
+}
+
+extension ImageElement {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(elementID, forKey: .elementID)
+        try container.encode(frame, forKey: .frame)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(payload, forKey: .payload)
+        try container.encode(tMS, forKey: .tMS)
+        try container.encode(z, forKey: .z)
+    }
+}
+
+extension ImageElementPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(crop, forKey: .crop)
+        try container.encode(photoID, forKey: .photoID)
+    }
+}
+
+extension Job {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(attempts, forKey: .attempts)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(dependsOn, forKey: .dependsOn)
+        try container.encode(error, forKey: .error)
+        try container.encode(id, forKey: .id)
+        try container.encode(lockedAt, forKey: .lockedAt)
+        try container.encode(lockedBy, forKey: .lockedBy)
+        try container.encode(maxAttempts, forKey: .maxAttempts)
+        try container.encode(payload, forKey: .payload)
+        try container.encode(priority, forKey: .priority)
+        try container.encode(result, forKey: .result)
+        try container.encode(runAfter, forKey: .runAfter)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(state, forKey: .state)
+        try container.encode(type, forKey: .type)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension JobList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension LectureSettings {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(autoStopAfterEndMin, forKey: .autoStopAfterEndMin)
+        try container.encode(autoStopExtendMin, forKey: .autoStopExtendMin)
+        try container.encode(autoStopHardAfterEndMin, forKey: .autoStopHardAfterEndMin)
+        try container.encode(autoStopMaxDurationMin, forKey: .autoStopMaxDurationMin)
+        try container.encode(autoStopQuietWindowMin, forKey: .autoStopQuietWindowMin)
+        try container.encode(autoStopSilenceMin, forKey: .autoStopSilenceMin)
+        try container.encode(autoStopWarningS, forKey: .autoStopWarningS)
+        try container.encode(defaultInkMode, forKey: .defaultInkMode)
+        try container.encode(defaultLayout, forKey: .defaultLayout)
+        try container.encode(microphoneID, forKey: .microphoneID)
+        try container.encode(toolbarSide, forKey: .toolbarSide)
+    }
+}
+
+extension LectureSettingsUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(autoStopAfterEndMin, forKey: .autoStopAfterEndMin)
+        try container.encodeIfPresent(autoStopExtendMin, forKey: .autoStopExtendMin)
+        try container.encodeIfPresent(autoStopHardAfterEndMin, forKey: .autoStopHardAfterEndMin)
+        try container.encodeIfPresent(autoStopMaxDurationMin, forKey: .autoStopMaxDurationMin)
+        try container.encodeIfPresent(autoStopQuietWindowMin, forKey: .autoStopQuietWindowMin)
+        try container.encodeIfPresent(autoStopSilenceMin, forKey: .autoStopSilenceMin)
+        try container.encodeIfPresent(autoStopWarningS, forKey: .autoStopWarningS)
+        try container.encodeIfPresent(defaultInkMode, forKey: .defaultInkMode)
+        try container.encodeIfPresent(defaultLayout, forKey: .defaultLayout)
+        try container.encodeIfPresent(microphoneID, forKey: .microphoneID)
+        try container.encodeIfPresent(toolbarSide, forKey: .toolbarSide)
+    }
+}
+
+extension MaintenanceNightlyPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(dryRun, forKey: .dryRun)
+        try container.encodeIfPresent(purgeOlderThanDays, forKey: .purgeOlderThanDays)
+    }
+}
+
+extension MaintenanceNightlyResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(jobDurationMS, forKey: .jobDurationMS)
+        try container.encode(orphanFilesRemoved, forKey: .orphanFilesRemoved)
+        try container.encode(purgedByKind, forKey: .purgedByKind)
+        try container.encode(purgedCount, forKey: .purgedCount)
+        try container.encode(syncOpsRemoved, forKey: .syncOpsRemoved)
+    }
+}
+
+extension Marker {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(note, forKey: .note)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(position, forKey: .position)
+        try container.encode(resolvedAt, forKey: .resolvedAt)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(source, forKey: .source)
+        try container.encode(tMS, forKey: .tMS)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension MarkerPosition {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(x, forKey: .x)
+        try container.encode(y, forKey: .y)
+    }
+}
+
+extension MarkerAddData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(markerID, forKey: .markerID)
+        try container.encode(note, forKey: .note)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(position, forKey: .position)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(source, forKey: .source)
+        try container.encode(tMS, forKey: .tMS)
+    }
+}
+
+extension MarkerAddOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension MarkerRemoveData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(markerID, forKey: .markerID)
+    }
+}
+
+extension MarkerRemoveOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension Module {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(color, forKey: .color)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(descriptionMd, forKey: .descriptionMd)
+        try container.encode(ects, forKey: .ects)
+        try container.encode(examType, forKey: .examType)
+        try container.encode(id, forKey: .id)
+        try container.encode(lang, forKey: .lang)
+        try container.encode(lecturer, forKey: .lecturer)
+        try container.encode(name, forKey: .name)
+        try container.encode(semesterID, forKey: .semesterID)
+        try container.encode(shortName, forKey: .shortName)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension ModuleCreate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(color, forKey: .color)
+        try container.encodeIfPresent(descriptionMd, forKey: .descriptionMd)
+        try container.encodeIfPresent(ects, forKey: .ects)
+        try container.encodeIfPresent(examType, forKey: .examType)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encodeIfPresent(lang, forKey: .lang)
+        try container.encodeIfPresent(lecturer, forKey: .lecturer)
+        try container.encode(name, forKey: .name)
+        try container.encode(semesterID, forKey: .semesterID)
+        try container.encodeIfPresent(shortName, forKey: .shortName)
+    }
+}
+
+extension ModuleList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension ModuleSettings {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(columnWidths, forKey: .columnWidths)
+        try container.encodeIfPresent(inkMode, forKey: .inkMode)
+        try container.encodeIfPresent(layout, forKey: .layout)
+    }
+}
+
+extension ModuleSettingsUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(columnWidths, forKey: .columnWidths)
+        try container.encodeIfPresent(inkMode, forKey: .inkMode)
+        try container.encodeIfPresent(layout, forKey: .layout)
+    }
+}
+
+extension ModuleUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(color, forKey: .color)
+        try container.encodeIfPresent(descriptionMd, forKey: .descriptionMd)
+        try container.encodeIfPresent(ects, forKey: .ects)
+        try container.encodeIfPresent(examType, forKey: .examType)
+        try container.encodeIfPresent(lang, forKey: .lang)
+        try container.encodeIfPresent(lecturer, forKey: .lecturer)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(semesterID, forKey: .semesterID)
+        try container.encodeIfPresent(shortName, forKey: .shortName)
+    }
+}
+
+extension Notebook {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(pageCount, forKey: .pageCount)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension NotebookCreate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encodeIfPresent(kind, forKey: .kind)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(title, forKey: .title)
+    }
+}
+
+extension NotebookCreateData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(kind, forKey: .kind)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(notebookID, forKey: .notebookID)
+        try container.encode(title, forKey: .title)
+    }
+}
+
+extension NotebookCreateOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension NotebookDeleteOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension NotebookRefData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(notebookID, forKey: .notebookID)
+    }
+}
+
+extension NotebookList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension NotebookPages {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(notebookID, forKey: .notebookID)
+        try container.encode(streamSeq, forKey: .streamSeq)
+    }
+}
+
+extension Page {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(attachedSlideID, forKey: .attachedSlideID)
+        try container.encode(backgroundSlideID, forKey: .backgroundSlideID)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(hasPkdrawing, forKey: .hasPkdrawing)
+        try container.encode(heightPt, forKey: .heightPt)
+        try container.encode(id, forKey: .id)
+        try container.encode(index, forKey: .index)
+        try container.encode(notebookID, forKey: .notebookID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(template, forKey: .template)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+        try container.encode(version, forKey: .version)
+        try container.encode(widthPt, forKey: .widthPt)
+    }
+}
+
+extension NotebookRestoreOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension NotebookUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(moduleID, forKey: .moduleID)
+        try container.encodeIfPresent(title, forKey: .title)
+    }
+}
+
+extension NotebookUpdateData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fields, forKey: .fields)
+        try container.encode(notebookID, forKey: .notebookID)
+    }
+}
+
+extension NotebookUpdateFields {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(title, forKey: .title)
+    }
+}
+
+extension NotebookUpdateOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension PageCreateData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(attachedSlideID, forKey: .attachedSlideID)
+        try container.encode(backgroundSlideID, forKey: .backgroundSlideID)
+        try container.encode(heightPt, forKey: .heightPt)
+        try container.encode(index, forKey: .index)
+        try container.encode(notebookID, forKey: .notebookID)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(template, forKey: .template)
+        try container.encode(widthPt, forKey: .widthPt)
+    }
+}
+
+extension PageCreateOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension PageDeleteData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pageID, forKey: .pageID)
+    }
+}
+
+extension PageDeleteOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension PageDetail {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(elements, forKey: .elements)
+        try container.encode(page, forKey: .page)
+        try container.encode(streamSeq, forKey: .streamSeq)
+    }
+}
+
+extension PageRefData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pageID, forKey: .pageID)
+    }
+}
+
+extension PageRestoreOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension PageStrokes {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(streamSeq, forKey: .streamSeq)
+        try container.encode(strokes, forKey: .strokes)
+    }
+}
+
+extension Stroke {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(bbox, forKey: .bbox)
+        try container.encode(clientID, forKey: .clientID)
+        try container.encode(color, forKey: .color)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(layer, forKey: .layer)
+        try container.encode(points, forKey: .points)
+        try container.encode(tEndMS, forKey: .tEndMS)
+        try container.encode(tStartMS, forKey: .tStartMS)
+        try container.encode(tool, forKey: .tool)
+        try container.encode(transform, forKey: .transform)
+        try container.encode(width, forKey: .width)
+    }
+}
+
+extension PageUpdateData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fields, forKey: .fields)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(version, forKey: .version)
+    }
+}
+
+extension PageUpdateFields {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(attachedSlideID, forKey: .attachedSlideID)
+        try container.encode(backgroundSlideID, forKey: .backgroundSlideID)
+        try container.encode(index, forKey: .index)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(template, forKey: .template)
+    }
+}
+
+extension PageUpdateOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension PairConfirmRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(appVersion, forKey: .appVersion)
+        try container.encode(code, forKey: .code)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(pairingID, forKey: .pairingID)
+        try container.encode(publicNonce, forKey: .publicNonce)
+    }
+}
+
+extension PairResponse {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(device, forKey: .device)
+        try container.encode(deviceToken, forKey: .deviceToken)
+    }
+}
+
+extension PairStartRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(publicNonce, forKey: .publicNonce)
+    }
+}
+
+extension PairStartResponse {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(expiresAt, forKey: .expiresAt)
+        try container.encode(pairingID, forKey: .pairingID)
+    }
+}
+
+extension PairingCode {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(code, forKey: .code)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(expiresAt, forKey: .expiresAt)
+        try container.encode(host, forKey: .host)
+        try container.encode(pairingID, forKey: .pairingID)
+        try container.encode(port, forKey: .port)
+        try container.encode(qrURL, forKey: .qrURL)
+    }
+}
+
+extension PDFIngestDeckPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(slideDeckID, forKey: .slideDeckID)
+    }
+}
+
+extension PDFIngestResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(pageCount, forKey: .pageCount)
+        try container.encode(pagesWithText, forKey: .pagesWithText)
+    }
+}
+
+extension PDFIngestSheetPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(exerciseSheetID, forKey: .exerciseSheetID)
+    }
+}
+
+extension PenSettings {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(doubleTap, forKey: .doubleTap)
+        try container.encode(favoriteColors, forKey: .favoriteColors)
+        try container.encode(shapeRecognition, forKey: .shapeRecognition)
+        try container.encode(squeeze, forKey: .squeeze)
+    }
+}
+
+extension PenSettingsUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(doubleTap, forKey: .doubleTap)
+        try container.encodeIfPresent(favoriteColors, forKey: .favoriteColors)
+        try container.encodeIfPresent(shapeRecognition, forKey: .shapeRecognition)
+        try container.encodeIfPresent(squeeze, forKey: .squeeze)
+    }
+}
+
+extension Photo {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(hasFile, forKey: .hasFile)
+        try container.encode(id, forKey: .id)
+        try container.encode(mime, forKey: .mime)
+        try container.encode(ocrText, forKey: .ocrText)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(sha256, forKey: .sha256)
+        try container.encode(sizeBytes, forKey: .sizeBytes)
+        try container.encode(tMS, forKey: .tMS)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension PhotoAddData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fileRef, forKey: .fileRef)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(photoID, forKey: .photoID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(tMS, forKey: .tMS)
+    }
+}
+
+extension PhotoFileRef {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(mime, forKey: .mime)
+        try container.encode(sha256, forKey: .sha256)
+        try container.encode(sizeBytes, forKey: .sizeBytes)
+    }
+}
+
+extension PhotoAddOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension Recording {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chunkCount, forKey: .chunkCount)
+        try container.encode(chunksIndependent, forKey: .chunksIndependent)
+        try container.encode(codec, forKey: .codec)
+        try container.encode(completedAt, forKey: .completedAt)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(id, forKey: .id)
+        try container.encode(lastSeq, forKey: .lastSeq)
+        try container.encode(mime, forKey: .mime)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(startedMS, forKey: .startedMS)
+        try container.encode(state, forKey: .state)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension RecordingComplete {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(lastSeq, forKey: .lastSeq)
+    }
+}
+
+extension RecordingCreate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(chunksIndependent, forKey: .chunksIndependent)
+        try container.encode(codec, forKey: .codec)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(mime, forKey: .mime)
+        try container.encode(startedMS, forKey: .startedMS)
+    }
+}
+
+extension Semester {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(archivedAt, forKey: .archivedAt)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(endsOn, forKey: .endsOn)
+        try container.encode(id, forKey: .id)
+        try container.encode(isCurrent, forKey: .isCurrent)
+        try container.encode(name, forKey: .name)
+        try container.encode(startsOn, forKey: .startsOn)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension SemesterCreate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(endsOn, forKey: .endsOn)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encodeIfPresent(isCurrent, forKey: .isCurrent)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(startsOn, forKey: .startsOn)
+    }
+}
+
+extension SemesterList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension SemesterUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(archived, forKey: .archived)
+        try container.encodeIfPresent(endsOn, forKey: .endsOn)
+        try container.encodeIfPresent(isCurrent, forKey: .isCurrent)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(startsOn, forKey: .startsOn)
+    }
+}
+
+extension Session {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(autoStopExtendedUntil, forKey: .autoStopExtendedUntil)
+        try container.encode(calendarEventID, forKey: .calendarEventID)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(endedAt, forKey: .endedAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(number, forKey: .number)
+        try container.encode(plannedEndsAt, forKey: .plannedEndsAt)
+        try container.encode(plannedStartsAt, forKey: .plannedStartsAt)
+        try container.encode(processing, forKey: .processing)
+        try container.encode(reviewState, forKey: .reviewState)
+        try container.encode(slideDeckID, forKey: .slideDeckID)
+        try container.encodeIfPresent(startOffsets, forKey: .startOffsets)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encode(startedFrom, forKey: .startedFrom)
+        try container.encode(state, forKey: .state)
+        try container.encode(stopReason, forKey: .stopReason)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension SessionStartOffset {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deviceID, forKey: .deviceID)
+        try container.encode(offsetMS, forKey: .offsetMS)
+    }
+}
+
+extension SessionCreate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encodeIfPresent(slideDeckID, forKey: .slideDeckID)
+        try container.encodeIfPresent(title, forKey: .title)
+    }
+}
+
+extension SessionExtendRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(minutes, forKey: .minutes)
+    }
+}
+
+extension SessionList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension SessionPauseOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SessionRefData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension SessionResumeOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SessionSnapshot {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(markers, forKey: .markers)
+        try container.encode(photos, forKey: .photos)
+        try container.encode(recordings, forKey: .recordings)
+        try container.encode(session, forKey: .session)
+        try container.encode(slideEvents, forKey: .slideEvents)
+        try container.encode(streamSeq, forKey: .streamSeq)
+    }
+}
+
+extension SlideEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(device, forKey: .device)
+        try container.encode(id, forKey: .id)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(slideID, forKey: .slideID)
+        try container.encode(slideIndex, forKey: .slideIndex)
+        try container.encode(source, forKey: .source)
+        try container.encode(tMS, forKey: .tMS)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension SessionStartData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(calendarEventID, forKey: .calendarEventID)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(slideDeckID, forKey: .slideDeckID)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encode(startedFrom, forKey: .startedFrom)
+    }
+}
+
+extension SessionStartOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SessionStartRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(slideDeckID, forKey: .slideDeckID)
+        try container.encode(startedFrom, forKey: .startedFrom)
+    }
+}
+
+extension SessionStartResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(endedSession, forKey: .endedSession)
+        try container.encode(session, forKey: .session)
+    }
+}
+
+extension SessionStopData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(reason, forKey: .reason)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension SessionStopOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SessionStopRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(reason, forKey: .reason)
+    }
+}
+
+extension SessionUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(slideDeckID, forKey: .slideDeckID)
+        try container.encodeIfPresent(title, forKey: .title)
+    }
+}
+
+extension Settings {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encode(general, forKey: .general)
+        try container.encode(lecture, forKey: .lecture)
+        try container.encode(pen, forKey: .pen)
+    }
+}
+
+extension SettingsUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(data, forKey: .data)
+        try container.encodeIfPresent(general, forKey: .general)
+        try container.encodeIfPresent(lecture, forKey: .lecture)
+        try container.encodeIfPresent(pen, forKey: .pen)
+    }
+}
+
+extension ShapeElement {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(elementID, forKey: .elementID)
+        try container.encode(frame, forKey: .frame)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(payload, forKey: .payload)
+        try container.encode(tMS, forKey: .tMS)
+        try container.encode(z, forKey: .z)
+    }
+}
+
+extension ShapeElementPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(color, forKey: .color)
+        try container.encode(points, forKey: .points)
+        try container.encode(shape, forKey: .shape)
+        try container.encode(width, forKey: .width)
+    }
+}
+
+extension Slide {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chapter, forKey: .chapter)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deckID, forKey: .deckID)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(heightPt, forKey: .heightPt)
+        try container.encode(id, forKey: .id)
+        try container.encode(index, forKey: .index)
+        try container.encode(text, forKey: .text)
+        try container.encode(textBlocks, forKey: .textBlocks)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+        try container.encode(visionSummary, forKey: .visionSummary)
+        try container.encode(widthPt, forKey: .widthPt)
+    }
+}
+
+extension TextBlock {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(bbox, forKey: .bbox)
+        try container.encode(text, forKey: .text)
+    }
+}
+
+extension SlideChangeData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(device, forKey: .device)
+        try container.encode(eventID, forKey: .eventID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(slideID, forKey: .slideID)
+        try container.encode(slideIndex, forKey: .slideIndex)
+        try container.encode(tMS, forKey: .tMS)
+    }
+}
+
+extension SlideChangeOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SlideDeck {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(ingestState, forKey: .ingestState)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(pageCount, forKey: .pageCount)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(sha256, forKey: .sha256)
+        try container.encode(title, forKey: .title)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(uploadedAt, forKey: .uploadedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension SlideDeckDetail {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deck, forKey: .deck)
+        try container.encode(slides, forKey: .slides)
+    }
+}
+
+extension SlideDeckList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension SlideDeckUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(title, forKey: .title)
+    }
+}
+
+extension StampElement {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(elementID, forKey: .elementID)
+        try container.encode(frame, forKey: .frame)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(payload, forKey: .payload)
+        try container.encode(tMS, forKey: .tMS)
+        try container.encode(z, forKey: .z)
+    }
+}
+
+extension StampElementPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(markerID, forKey: .markerID)
+        try container.encode(markerKind, forKey: .markerKind)
+    }
+}
+
+extension StrokeAddData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(stroke, forKey: .stroke)
+    }
+}
+
+extension StrokeAddOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension StrokeRemoveData {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(clientIDS, forKey: .clientIDS)
+        try container.encode(pageID, forKey: .pageID)
+    }
+}
+
+extension StrokeRemoveOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncACK {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(opID, forKey: .opID)
+        try container.encode(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncStreamPosition {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(lastOpID, forKey: .lastOpID)
+        try container.encode(lastSeq, forKey: .lastSeq)
+        try container.encode(stream, forKey: .stream)
+    }
+}
+
+extension SyncConnectionEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encode(name, forKey: .name)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncConnectionInfo {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(client, forKey: .client)
+        try container.encode(connected, forKey: .connected)
+        try container.encode(deviceID, forKey: .deviceID)
+    }
+}
+
+extension SyncError {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(code, forKey: .code)
+        try container.encodeIfPresent(details, forKey: .details)
+        try container.encode(fatal, forKey: .fatal)
+        try container.encode(message, forKey: .message)
+        try container.encodeIfPresent(opID, forKey: .opID)
+        try container.encode(retryable, forKey: .retryable)
+        try container.encodeIfPresent(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encode(name, forKey: .name)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncHello {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(appVersion, forKey: .appVersion)
+        try container.encode(client, forKey: .client)
+        try container.encodeIfPresent(deviceID, forKey: .deviceID)
+        try container.encode(syncHelloProtocol, forKey: .syncHelloProtocol)
+        try container.encode(streams, forKey: .streams)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncOp {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(at, forKey: .at)
+        try container.encode(clockUncertain, forKey: .clockUncertain)
+        try container.encode(data, forKey: .data)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(opID, forKey: .opID)
+        try container.encodeIfPresent(origin, forKey: .origin)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        try container.encode(stream, forKey: .stream)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncPairingEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encode(name, forKey: .name)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncPing {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncPong {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncPresence {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(notebookID, forKey: .notebookID)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncPresenceEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encode(name, forKey: .name)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncPresenceInfo {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(client, forKey: .client)
+        try container.encode(deviceID, forKey: .deviceID)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(notebookID, forKey: .notebookID)
+        try container.encode(pageID, forKey: .pageID)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension SyncResume {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fromSeq, forKey: .fromSeq)
+        try container.encode(headSeq, forKey: .headSeq)
+        try container.encode(reset, forKey: .reset)
+        try container.encode(stream, forKey: .stream)
+    }
+}
+
+extension SyncSessionUpdatedEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encode(name, forKey: .name)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncSubscribe {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(streams, forKey: .streams)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncSubscribed {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(resume, forKey: .resume)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncTimeOffset {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(offsetMS, forKey: .offsetMS)
+        try container.encode(rttMS, forKey: .rttMS)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncTimePing {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(t0, forKey: .t0)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncTimePong {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(t0, forKey: .t0)
+        try container.encode(ts, forKey: .ts)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncUnsubscribe {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(streams, forKey: .streams)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncWelcome {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(dbEpoch, forKey: .dbEpoch)
+        try container.encode(deviceID, forKey: .deviceID)
+        try container.encode(syncWelcomeProtocol, forKey: .syncWelcomeProtocol)
+        try container.encode(resume, forKey: .resume)
+        try container.encode(serverTime, forKey: .serverTime)
+        try container.encode(serverVersion, forKey: .serverVersion)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension TapeElement {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(elementID, forKey: .elementID)
+        try container.encode(frame, forKey: .frame)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(payload, forKey: .payload)
+        try container.encode(tMS, forKey: .tMS)
+        try container.encode(z, forKey: .z)
+    }
+}
+
+extension TapeElementPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cardID, forKey: .cardID)
+        try container.encode(color, forKey: .color)
+        try container.encode(covered, forKey: .covered)
+    }
+}
+
+extension Task {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(bbox, forKey: .bbox)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(label, forKey: .label)
+        try container.encode(pageIndex, forKey: .pageIndex)
+        try container.encode(sheetID, forKey: .sheetID)
+        try container.encode(solutionText, forKey: .solutionText)
+        try container.encode(text, forKey: .text)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension TextElement {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(elementID, forKey: .elementID)
+        try container.encode(frame, forKey: .frame)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(payload, forKey: .payload)
+        try container.encode(tMS, forKey: .tMS)
+        try container.encode(z, forKey: .z)
+    }
+}
+
+extension TextElementPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(size, forKey: .size)
+        try container.encode(text, forKey: .text)
+    }
+}
+
+extension TrashItem {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(dependentCount, forKey: .dependentCount)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(parent, forKey: .parent)
+        try container.encode(purgeAt, forKey: .purgeAt)
+        try container.encode(title, forKey: .title)
+    }
+}
+
+extension TrashParent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(title, forKey: .title)
+    }
+}
+
+extension TrashList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension TrashRestoreResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(restoredCount, forKey: .restoredCount)
+    }
+}
+
+extension UploadResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(duplicate, forKey: .duplicate)
+        try container.encode(id, forKey: .id)
     }
 }

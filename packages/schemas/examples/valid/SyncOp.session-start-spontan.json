@@ -9,6 +9,8 @@
     "session_id": "019a4e14-0000-7000-8000-000000000031",
     "module_id": "019a4e14-0000-7000-8000-000000000010",
     "started_from": "ipad",
-    "started_at": 1762240562000
+    "started_at": 1762240562000,
+    "calendar_event_id": null,
+    "slide_deck_id": null
   }
 }

@@ -3,7 +3,8 @@
   "streams": [
     {
       "stream": "session:019a4e14-0000-7000-8000-000000000030",
-      "last_seq": 0
+      "last_seq": 0,
+      "last_op_id": null
     }
   ]
 }

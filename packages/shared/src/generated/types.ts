@@ -6,7 +6,7 @@
  */
 export type Appearance = ("hell" | "dunkel" | "system")
 /**
- * UUIDv7 (03 §1)
+ * UUIDv7 (03 §1), Kleinbuchstaben
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "Uuid".
@@ -342,12 +342,12 @@ export type SyncClientMessage = (SyncHello | SyncSubscribe | SyncUnsubscribe | S
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SyncOp".
  */
-export type SyncOp = (NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp)
+export type SyncOp = (NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | NotebookUpdateOp | NotebookDeleteOp | NotebookRestoreOp | PageRestoreOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp)
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SyncErrorCode".
  */
-export type SyncErrorCode = ("protocol_unsupported" | "hello_required" | "hello_invalid" | "device_token_invalid" | "message_invalid" | "too_many_pending" | "op_id_reused" | "stream_mismatch" | "module_not_found" | "session_not_found" | "session_transition_invalid" | "notebook_not_found" | "notebook_kind_exists" | "page_not_found" | "page_version_conflict" | "internal_error")
+export type SyncErrorCode = ("protocol_unsupported" | "hello_required" | "hello_invalid" | "device_token_invalid" | "message_invalid" | "too_many_pending" | "op_id_reused" | "stream_mismatch" | "module_not_found" | "session_not_found" | "session_transition_invalid" | "notebook_not_found" | "notebook_kind_exists" | "page_not_found" | "page_version_conflict" | "op_not_allowed" | "session_superseded" | "internal_error")
 /**
  * Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert
  * 
@@ -454,7 +454,7 @@ file_size_bytes: number
 /**
  * Laufzeit des Jobs
  */
-duration_ms: number
+job_duration_ms: number
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1189,6 +1189,38 @@ default_ink_mode?: InkMode
 toolbar_side?: ToolbarSide
 }
 /**
+ * maintenance.nightly (08 §5, T1-18). Phase 1: Papierkorb leeren, verwaiste Dateien, sync_op gelöschter Ströme
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MaintenanceNightlyPayload".
+ */
+export interface MaintenanceNightlyPayload {
+/**
+ * Standard 30 (F-DAT-04)
+ */
+purge_older_than_days?: number
+/**
+ * Nur zählen, nichts löschen
+ */
+dry_run?: boolean
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MaintenanceNightlyResult".
+ */
+export interface MaintenanceNightlyResult {
+purged_count: number
+/**
+ * Endgültig gelöschte Objekte je Tabelle
+ */
+purged_by_kind: {
+[k: string]: number
+}
+orphan_files_removed: number
+sync_ops_removed: number
+job_duration_ms: number
+}
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "Marker".
  */
@@ -1228,9 +1260,9 @@ marker_id: Uuid
 session_id: Uuid
 kind: MarkerKind
 t_ms: SessionMs
-page_id?: (Uuid | null)
-position?: (MarkerPosition | null)
-note?: (string | null)
+page_id: (Uuid | null)
+position: (MarkerPosition | null)
+note: (string | null)
 source: ClientDevice
 }
 /**
@@ -1392,7 +1424,7 @@ title: string
 kind?: NotebookKind
 }
 /**
- * Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id. kind fehlt = frei.
+ * Freies Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id.
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "NotebookCreateData".
@@ -1401,7 +1433,10 @@ export interface NotebookCreateData {
 notebook_id: Uuid
 module_id: Uuid
 title: string
-kind?: NotebookKind
+/**
+ * Nur frei. Die Notizbücher vorlesung/uebung legt der Core an
+ */
+kind?: "frei"
 created_at: EpochMs
 }
 /**
@@ -1421,6 +1456,33 @@ data: NotebookCreateData
  */
 seq?: number
 origin?: SyncOrigin
+}
+/**
+ * Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookDeleteOp".
+ */
+export interface NotebookDeleteOp {
+type: "op"
+op_id: Uuid
+stream: NotebookStreamId
+kind: "notebook.delete"
+at: EpochMs
+clock_uncertain: boolean
+data: NotebookRefData
+/**
+ * Nur Server → Client
+ */
+seq?: number
+origin?: SyncOrigin
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookRefData".
+ */
+export interface NotebookRefData {
+notebook_id: Uuid
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1472,6 +1534,26 @@ version: number
 has_pkdrawing: boolean
 }
 /**
+ * Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookRestoreOp".
+ */
+export interface NotebookRestoreOp {
+type: "op"
+op_id: Uuid
+stream: NotebookStreamId
+kind: "notebook.restore"
+at: EpochMs
+clock_uncertain: boolean
+data: NotebookRefData
+/**
+ * Nur Server → Client
+ */
+seq?: number
+origin?: SyncOrigin
+}
+/**
  * PATCH /notebooks/{id}
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1483,18 +1565,56 @@ module_id?: Uuid
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookUpdateData".
+ */
+export interface NotebookUpdateData {
+notebook_id: Uuid
+fields: NotebookUpdateFields
+}
+/**
+ * Aktueller Stand der per REST änderbaren Felder
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookUpdateFields".
+ */
+export interface NotebookUpdateFields {
+title: string
+module_id: Uuid
+}
+/**
+ * Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookUpdateOp".
+ */
+export interface NotebookUpdateOp {
+type: "op"
+op_id: Uuid
+stream: NotebookStreamId
+kind: "notebook.update"
+at: EpochMs
+clock_uncertain: boolean
+data: NotebookUpdateData
+/**
+ * Nur Server → Client
+ */
+seq?: number
+origin?: SyncOrigin
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PageCreateData".
  */
 export interface PageCreateData {
 page_id: Uuid
 notebook_id: Uuid
-session_id?: (Uuid | null)
+session_id: (Uuid | null)
 index: number
 template: PageTemplate
 width_pt: number
 height_pt: number
-background_slide_id?: (Uuid | null)
-attached_slide_id?: (Uuid | null)
+background_slide_id: (Uuid | null)
+attached_slide_id: (Uuid | null)
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1551,6 +1671,33 @@ elements: PageElement[]
 stream_seq: number
 }
 /**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "PageRefData".
+ */
+export interface PageRefData {
+page_id: Uuid
+}
+/**
+ * Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "PageRestoreOp".
+ */
+export interface PageRestoreOp {
+type: "op"
+op_id: Uuid
+stream: NotebookStreamId
+kind: "page.restore"
+at: EpochMs
+clock_uncertain: boolean
+data: PageRefData
+/**
+ * Nur Server → Client
+ */
+seq?: number
+origin?: SyncOrigin
+}
+/**
  * GET /pages/{id}/strokes: alle nicht gelöschten Striche, nach created_at sortiert
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1602,17 +1749,17 @@ fields: PageUpdateFields
 version: number
 }
 /**
- * Geänderte Felder, mindestens eins
+ * Alle änderbaren Felder der Seite mit ihrem neuen Stand. Kein Teil-Update: im Sync gibt es keine optionalen nullbaren Felder (VERTRAEGE §11.7)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PageUpdateFields".
  */
 export interface PageUpdateFields {
-index?: number
-template?: PageTemplate
-session_id?: (Uuid | null)
-background_slide_id?: (Uuid | null)
-attached_slide_id?: (Uuid | null)
+index: number
+template: PageTemplate
+session_id: (Uuid | null)
+background_slide_id: (Uuid | null)
+attached_slide_id: (Uuid | null)
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1633,12 +1780,13 @@ seq?: number
 origin?: SyncOrigin
 }
 /**
- * POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). public_nonce muss zu pair/start passen, falls der Code von dort stammt.
+ * POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). pairing_id aus dem QR-Code bzw. aus pair/start. public_nonce muss zu pair/start passen, falls sich das iPad dort gemeldet hat.
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PairConfirmRequest".
  */
 export interface PairConfirmRequest {
+pairing_id: Uuid
 code: string
 device_name: string
 kind: DeviceKind
@@ -1659,7 +1807,7 @@ device: Device
 device_token: string
 }
 /**
- * POST /devices/pair/start (aus dem Netz ohne Token erlaubt)
+ * POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur angenommen, solange am Mac ein Kopplungsfenster offen ist
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PairStartRequest".
@@ -1683,7 +1831,7 @@ pairing_id: Uuid
 expires_at: Timestamp
 }
 /**
- * Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis pairing.requested)
+ * Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur lokal; Ereignis pairing.requested)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PairingCode".
@@ -1693,7 +1841,7 @@ pairing_id: Uuid
 code: string
 expires_at: Timestamp
 /**
- * Name aus pair/start, null bei einem Code für den QR-Weg
+ * Name aus pair/start, null solange sich kein iPad gemeldet hat
  */
 device_name: (string | null)
 /**
@@ -1702,7 +1850,7 @@ device_name: (string | null)
 host: string
 port: number
 /**
- * Inhalt des QR-Codes: dieselben Daten wie host, port und code
+ * Inhalt des QR-Codes: dieselben Daten wie host, port, pairing_id und code
  */
 qr_url: string
 }
@@ -1795,8 +1943,19 @@ export interface PhotoAddData {
 photo_id: Uuid
 session_id: Uuid
 t_ms: SessionMs
-page_id?: (Uuid | null)
-file_ref: FileRef
+page_id: (Uuid | null)
+file_ref: PhotoFileRef
+}
+/**
+ * Datei eines Tafel-Fotos, hochgeladen per PUT /photos/{photo_id}/file
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "PhotoFileRef".
+ */
+export interface PhotoFileRef {
+sha256: Sha256
+mime: PhotoMime
+size_bytes: number
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1963,6 +2122,7 @@ processing: SessionProcessing
 review_state: ReviewState
 planned_starts_at: (Timestamp | null)
 planned_ends_at: (Timestamp | null)
+auto_stop_extended_until: (Timestamp | null)
 /**
  * Abweichende Startzeiten von Geräten (VERTRAEGE §9.3). Fehlt oder leer = keine Abweichung
  */
@@ -1998,6 +2158,15 @@ id?: Uuid
 module_id: Uuid
 slide_deck_id?: (Uuid | null)
 title?: (string | null)
+}
+/**
+ * POST /sessions/{id}/extend: Auto-Stopp aufschieben (F-SES-03). minutes fehlt = lecture.auto_stop_extend_min
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionExtendRequest".
+ */
+export interface SessionExtendRequest {
+minutes?: number
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -2095,8 +2264,8 @@ source: SlideEventSource
 export interface SessionStartData {
 session_id: Uuid
 module_id: Uuid
-calendar_event_id?: (Uuid | null)
-slide_deck_id?: (Uuid | null)
+calendar_event_id: (Uuid | null)
+slide_deck_id: (Uuid | null)
 started_from: ClientDevice
 started_at: EpochMs
 }
@@ -2250,7 +2419,7 @@ bbox: BBox
 export interface SlideChangeData {
 event_id: Uuid
 session_id: Uuid
-slide_id?: (Uuid | null)
+slide_id: (Uuid | null)
 slide_index: number
 t_ms: SessionMs
 device: ClientDevice
@@ -2385,7 +2554,7 @@ stream: SyncStreamId
 seq: number
 }
 /**
- * Erste Nachricht des Clients (08 §2.1). token (Gerätetoken) Pflicht für Verbindungen aus dem Netz, lokal (Web-App) ohne.
+ * Erste Nachricht des Clients (08 §2.1). Das Gerätetoken steht nicht hier, sondern beim Upgrade im Header Authorization: Bearer (VERTRAEGE §11.1). device_id nur zur Gegenprobe.
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SyncHello".
@@ -2395,7 +2564,6 @@ type: "hello"
 protocol: 1
 client: SyncClientKind
 device_id?: Uuid
-token?: string
 app_version: string
 streams: SyncStreamPosition[]
 }
@@ -2406,9 +2574,13 @@ streams: SyncStreamPosition[]
 export interface SyncStreamPosition {
 stream: SyncStreamId
 /**
- * Letzte beim Client angewandte seq, 0 = nichts
+ * Höchste lückenlos empfangene und angewandte seq, 0 = nichts
  */
 last_seq: number
+/**
+ * op_id der Operation mit last_seq, null bei last_seq = 0. Der Server prüft das Paar, sonst reset
+ */
+last_op_id: (Uuid | null)
 }
 /**
  * Weitere Ströme abonnieren, ohne neu zu verbinden. Antwort: subscribed. Ergänzung zu 08 §2
@@ -2596,6 +2768,8 @@ head_seq: number
 reset: boolean
 }
 /**
+ * db_epoch ändert sich bei jeder Wiederherstellung der Datenbank. Weicht sie vom gespeicherten Wert ab, behandelt der Client alle Ströme wie reset (VERTRAEGE §11.1).
+ * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SyncWelcome".
  */
@@ -2604,6 +2778,7 @@ type: "welcome"
 protocol: 1
 server_time: EpochMs
 server_version: string
+db_epoch: Uuid
 device_id: (Uuid | null)
 resume: SyncResume[]
 }

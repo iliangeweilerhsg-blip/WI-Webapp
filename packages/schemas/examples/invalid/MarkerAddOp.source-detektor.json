@@ -10,6 +10,9 @@
     "session_id": "019a4e14-0000-7000-8000-000000000030",
     "kind": "klausur",
     "t_ms": 1203000,
-    "source": "detektor"
+    "source": "detektor",
+    "page_id": null,
+    "position": null,
+    "note": null
   }
 }

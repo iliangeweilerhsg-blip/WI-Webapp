@@ -4,8 +4,8 @@
   "$defs": {
     "Uuid": {
       "type": "string",
-      "format": "uuid",
-      "description": "UUIDv7 (03 §1)"
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv7 (03 §1), Kleinbuchstaben"
     },
     "Timestamp": {
       "type": "string",

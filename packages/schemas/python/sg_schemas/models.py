@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import date
 from enum import StrEnum
 from typing import Any, Literal
-from uuid import UUID
 
 from pydantic import (
     AwareDatetime,
@@ -320,6 +319,37 @@ class Lang(StrEnum):
     mixed = 'mixed'
 
 
+class MaintenanceNightlyPayload(BaseModel):
+    """
+    maintenance.nightly (08 §5, T1-18). Phase 1: Papierkorb leeren, verwaiste Dateien, sync_op gelöschter Ströme
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    purge_older_than_days: StrictInt | None = Field(
+        None, description='Standard 30 (F-DAT-04)', ge=1
+    )
+    dry_run: StrictBool | None = Field(None, description='Nur zählen, nichts löschen')
+
+
+class PurgedByKind(RootModel[StrictInt]):
+    root: StrictInt = Field(..., ge=0)
+
+
+class MaintenanceNightlyResult(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    purged_count: StrictInt = Field(..., ge=0)
+    purged_by_kind: dict[str, PurgedByKind] = Field(
+        ..., description='Endgültig gelöschte Objekte je Tabelle'
+    )
+    orphan_files_removed: StrictInt = Field(..., ge=0)
+    sync_ops_removed: StrictInt = Field(..., ge=0)
+    job_duration_ms: StrictInt = Field(..., ge=0)
+
+
 class MarkerKind(StrEnum):
     frage = 'frage'
     klausur = 'klausur'
@@ -410,24 +440,9 @@ class PageTemplate(StrEnum):
     folie = 'folie'
 
 
-class PairConfirmRequest(BaseModel):
-    """
-    POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). public_nonce muss zu pair/start passen, falls der Code von dort stammt.
-    """
-
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    code: StrictStr = Field(..., pattern='^[0-9]{6}$')
-    device_name: StrictStr = Field(..., max_length=64, min_length=1)
-    kind: DeviceKind
-    public_nonce: StrictStr = Field(..., pattern='^[A-Za-z0-9_-]{22,128}$')
-    app_version: StrictStr | None = Field(None, min_length=1)
-
-
 class PairStartRequest(BaseModel):
     """
-    POST /devices/pair/start (aus dem Netz ohne Token erlaubt)
+    POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur angenommen, solange am Mac ein Kopplungsfenster offen ist
     """
 
     model_config = ConfigDict(
@@ -528,6 +543,17 @@ class SemesterUpdate(BaseModel):
     )
 
 
+class SessionExtendRequest(BaseModel):
+    """
+    POST /sessions/{id}/extend: Auto-Stopp aufschieben (F-SES-03). minutes fehlt = lecture.auto_stop_extend_min
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    minutes: StrictInt | None = Field(None, ge=1, le=120)
+
+
 class SessionMs(RootModel[StrictInt]):
     root: StrictInt = Field(
         ...,
@@ -619,6 +645,8 @@ class SyncErrorCode(StrEnum):
     notebook_kind_exists = 'notebook_kind_exists'
     page_not_found = 'page_not_found'
     page_version_conflict = 'page_version_conflict'
+    op_not_allowed = 'op_not_allowed'
+    session_superseded = 'session_superseded'
     internal_error = 'internal_error'
 
 
@@ -657,33 +685,6 @@ class SyncStreamId(RootModel[StrictStr]):
         pattern='^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$',
         title='SyncStreamId',
     )
-
-
-class SyncStreamPosition(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    stream: StrictStr = Field(
-        ...,
-        description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
-        pattern='^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$',
-        title='SyncStreamId',
-    )
-    last_seq: StrictInt = Field(
-        ..., description='Letzte beim Client angewandte seq, 0 = nichts', ge=0
-    )
-
-
-class SyncSubscribe(BaseModel):
-    """
-    Weitere Ströme abonnieren, ohne neu zu verbinden. Antwort: subscribed. Ergänzung zu 08 §2
-    """
-
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    type: Literal['subscribe']
-    streams: list[SyncStreamPosition] = Field(..., min_length=1)
 
 
 class SyncTimeOffset(BaseModel):
@@ -785,6 +786,15 @@ class TrashKind(StrEnum):
     photo = 'photo'
 
 
+class Uuid(RootModel[StrictStr]):
+    root: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+
+
 class ApiError(BaseModel):
     """
     Fehlerformat der REST-API (08 §1)
@@ -804,7 +814,12 @@ class AudioChunk(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    recording_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    recording_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     seq: StrictInt = Field(..., ge=0)
     start_ms: StrictInt = Field(
         ...,
@@ -862,7 +877,12 @@ class AudioFinalizePayload(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    recording_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    recording_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
 
 
 class AudioGap(BaseModel):
@@ -887,8 +907,18 @@ class BackupRun(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -935,8 +965,18 @@ class CalendarEvent(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -944,7 +984,7 @@ class CalendarEvent(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    source_id: UUID | None
+    source_id: Uuid | None
     external_uid: StrictStr | None = Field(
         ..., description='UID aus der Quelle, null bei manuellen Terminen'
     )
@@ -952,7 +992,7 @@ class CalendarEvent(BaseModel):
         ...,
         description='Kennung des Vorkommens: ISO 8601 mit Offset der Ortszeit (2026-10-20T10:15:00+02:00) bzw. Datum (2026-11-01) bei ganztägigen Serien. null bei Einzelterminen. Abgleichschlüssel: (source_id, external_uid, recurrence_id)',
     )
-    module_id: UUID | None
+    module_id: Uuid | None
     kind: CalendarEventKind
     assigned_by: CalendarAssignment
     title: StrictStr
@@ -969,7 +1009,7 @@ class CalendarEvent(BaseModel):
         description='Ganztägig (VALUE=DATE). starts_at/ends_at sind dann 00:00 UTC des Datums (wie tests/fixtures/ics/08). Ergänzung zu 03 §3',
     )
     cancelled: StrictBool
-    session_id: UUID | None
+    session_id: Uuid | None
 
 
 class CalendarEventList(BaseModel):
@@ -988,7 +1028,7 @@ class CalendarEventUpdate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    module_id: UUID | None = None
+    module_id: Uuid | None = None
     kind: CalendarEventKind | None = None
     scope: CalendarUpdateScope | None = None
 
@@ -1001,8 +1041,18 @@ class CalendarSource(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1038,7 +1088,12 @@ class CalendarSourceCreate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     url: StrictStr = Field(
         ...,
         description='ICS-URL (Abo, Abgleich alle 6 h und beim Start)',
@@ -1063,8 +1118,18 @@ class Device(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1094,8 +1159,18 @@ class ElementRemoveData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    element_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
 
 
 class ElementRemoveOp(BaseModel):
@@ -1103,7 +1178,12 @@ class ElementRemoveOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -1130,8 +1210,18 @@ class ExerciseSheet(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1139,7 +1229,12 @@ class ExerciseSheet(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     title: StrictStr
     number: StrictInt | None
     sha256: StrictStr = Field(..., pattern='^[a-f0-9]{64}$')
@@ -1176,7 +1271,12 @@ class FileReceipt(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     sha256: StrictStr = Field(
         ...,
         description='SHA-256, hex, Kleinbuchstaben',
@@ -1239,14 +1339,19 @@ class IcsEventRef(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    event_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    event_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     external_uid: StrictStr
     recurrence_id: StrictStr | None
     title: StrictStr
     starts_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
-    module_id: UUID | None
+    module_id: Uuid | None
     kind: CalendarEventKind
 
 
@@ -1265,7 +1370,7 @@ class IcsModuleSuggestion(BaseModel):
     )
     kind: CalendarEventKind
     event_count: StrictInt = Field(..., ge=1)
-    series_event_ids: list[UUID] = Field(
+    series_event_ids: list[Uuid] = Field(
         ...,
         description='Je Serie ein Termin. Nach POST /modules: PATCH /calendar/events/{id} mit module_id, scope=serie',
         min_length=1,
@@ -1276,7 +1381,12 @@ class ImageElementPayload(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    photo_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    photo_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     crop: BBox | None
 
 
@@ -1284,8 +1394,18 @@ class Job(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1301,8 +1421,8 @@ class Job(BaseModel):
     priority: StrictInt = Field(..., description='Höher = früher')
     attempts: StrictInt = Field(..., ge=0)
     max_attempts: StrictInt = Field(..., ge=1)
-    depends_on: list[UUID]
-    session_id: UUID | None
+    depends_on: list[Uuid]
+    session_id: Uuid | None
     locked_by: StrictStr | None
     locked_at: AwareDatetime | None
     error: StrictStr | None
@@ -1388,8 +1508,18 @@ class Marker(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1397,7 +1527,12 @@ class Marker(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: MarkerKind
     t_ms: StrictInt = Field(
         ...,
@@ -1405,7 +1540,7 @@ class Marker(BaseModel):
         ge=0,
         title='SessionMs',
     )
-    page_id: UUID | None
+    page_id: Uuid | None
     position: MarkerPosition | None
     source: MarkerSource
     note: StrictStr | None
@@ -1420,8 +1555,18 @@ class MarkerAddData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    marker_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    marker_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: MarkerKind
     t_ms: StrictInt = Field(
         ...,
@@ -1429,9 +1574,9 @@ class MarkerAddData(BaseModel):
         ge=0,
         title='SessionMs',
     )
-    page_id: UUID | None = None
-    position: MarkerPosition | None = None
-    note: StrictStr | None = None
+    page_id: Uuid | None
+    position: MarkerPosition | None
+    note: StrictStr | None
     source: ClientDevice
 
 
@@ -1440,7 +1585,12 @@ class MarkerAddOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -1467,7 +1617,12 @@ class MarkerRemoveData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    marker_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    marker_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
 
 
 class MarkerRemoveOp(BaseModel):
@@ -1475,7 +1630,12 @@ class MarkerRemoveOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -1498,8 +1658,18 @@ class Module(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1507,7 +1677,12 @@ class Module(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    semester_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    semester_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     name: StrictStr = Field(..., examples=['Datenbanksysteme'], min_length=1)
     short_name: StrictStr | None = Field(..., examples=['DBS'])
     color: ModuleColor
@@ -1528,8 +1703,18 @@ class ModuleCreate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
-    semester_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    semester_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     name: StrictStr = Field(..., min_length=1)
     short_name: StrictStr | None = None
     color: ModuleColor | None = None
@@ -1552,7 +1737,12 @@ class ModuleUpdate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    semester_id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    semester_id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     name: StrictStr | None = Field(None, min_length=1)
     short_name: StrictStr | None = None
     color: ModuleColor | None = None
@@ -1567,8 +1757,18 @@ class Notebook(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1576,7 +1776,12 @@ class Notebook(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     title: StrictStr = Field(..., min_length=1)
     kind: NotebookKind
     page_count: StrictInt = Field(..., description='Abgeleitet', ge=0)
@@ -1590,24 +1795,46 @@ class NotebookCreate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
-    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     title: StrictStr = Field(..., min_length=1)
     kind: NotebookKind | None = None
 
 
 class NotebookCreateData(BaseModel):
     """
-    Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id. kind fehlt = frei.
+    Freies Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id.
     """
 
     model_config = ConfigDict(
         extra='forbid',
     )
-    notebook_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    notebook_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     title: StrictStr = Field(..., min_length=1)
-    kind: NotebookKind | None = None
+    kind: Literal['frei'] | None = Field(
+        None, description='Nur frei. Die Notizbücher vorlesung/uebung legt der Core an'
+    )
     created_at: StrictInt = Field(
         ...,
         description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
@@ -1621,7 +1848,12 @@ class NotebookCreateOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -1648,6 +1880,51 @@ class NotebookList(BaseModel):
     next_cursor: StrictStr | None
 
 
+class NotebookRefData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    notebook_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+
+
+class NotebookRestoreOp(BaseModel):
+    """
+    Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['notebook.restore']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: NotebookRefData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
 class NotebookUpdate(BaseModel):
     """
     PATCH /notebooks/{id}
@@ -1657,15 +1934,47 @@ class NotebookUpdate(BaseModel):
         extra='forbid',
     )
     title: StrictStr | None = Field(None, min_length=1)
-    module_id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    module_id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+
+
+class NotebookUpdateFields(BaseModel):
+    """
+    Aktueller Stand der per REST änderbaren Felder
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    title: StrictStr = Field(..., min_length=1)
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
 
 
 class Page(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1673,14 +1982,19 @@ class Page(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    notebook_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    session_id: UUID | None
+    notebook_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_id: Uuid | None
     index: StrictInt = Field(
         ..., description='Reihenfolge im Notizbuch, 1-basiert', ge=1
     )
     template: PageTemplate
-    background_slide_id: UUID | None
-    attached_slide_id: UUID | None
+    background_slide_id: Uuid | None
+    attached_slide_id: Uuid | None
     width_pt: StrictFloat = Field(..., gt=0.0)
     height_pt: StrictFloat = Field(..., gt=0.0)
     version: StrictInt = Field(..., ge=1)
@@ -1694,15 +2008,25 @@ class PageCreateData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    notebook_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    session_id: UUID | None = None
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    notebook_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_id: Uuid | None
     index: StrictInt = Field(..., ge=1)
     template: PageTemplate
     width_pt: StrictFloat = Field(..., gt=0.0)
     height_pt: StrictFloat = Field(..., gt=0.0)
-    background_slide_id: UUID | None = None
-    attached_slide_id: UUID | None = None
+    background_slide_id: Uuid | None
+    attached_slide_id: Uuid | None
 
 
 class PageCreateOp(BaseModel):
@@ -1710,7 +2034,12 @@ class PageCreateOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -1733,7 +2062,12 @@ class PageDeleteData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
 
 
 class PageDeleteOp(BaseModel):
@@ -1741,7 +2075,12 @@ class PageDeleteOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -1760,19 +2099,85 @@ class PageDeleteOp(BaseModel):
     origin: SyncOrigin | None = None
 
 
-class PageUpdateFields(BaseModel):
+class PageRefData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+
+
+class PageRestoreOp(BaseModel):
     """
-    Geänderte Felder, mindestens eins
+    Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb
     """
 
     model_config = ConfigDict(
         extra='forbid',
     )
-    index: StrictInt | None = Field(None, ge=1)
-    template: PageTemplate | None = None
-    session_id: UUID | None = None
-    background_slide_id: UUID | None = None
-    attached_slide_id: UUID | None = None
+    type: Literal['op']
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['page.restore']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: PageRefData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
+class PageUpdateFields(BaseModel):
+    """
+    Alle änderbaren Felder der Seite mit ihrem neuen Stand. Kein Teil-Update: im Sync gibt es keine optionalen nullbaren Felder (VERTRAEGE §11.7)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    index: StrictInt = Field(..., ge=1)
+    template: PageTemplate
+    session_id: Uuid | None
+    background_slide_id: Uuid | None
+    attached_slide_id: Uuid | None
+
+
+class PairConfirmRequest(BaseModel):
+    """
+    POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). pairing_id aus dem QR-Code bzw. aus pair/start. public_nonce muss zu pair/start passen, falls sich das iPad dort gemeldet hat.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    pairing_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    code: StrictStr = Field(..., pattern='^[0-9]{6}$')
+    device_name: StrictStr = Field(..., max_length=64, min_length=1)
+    kind: DeviceKind
+    public_nonce: StrictStr = Field(..., pattern='^[A-Za-z0-9_-]{22,128}$')
+    app_version: StrictStr | None = Field(None, min_length=1)
 
 
 class PairResponse(BaseModel):
@@ -1799,7 +2204,12 @@ class PairStartResponse(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    pairing_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    pairing_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     expires_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1807,19 +2217,24 @@ class PairStartResponse(BaseModel):
 
 class PairingCode(BaseModel):
     """
-    Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis pairing.requested)
+    Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur lokal; Ereignis pairing.requested)
     """
 
     model_config = ConfigDict(
         extra='forbid',
     )
-    pairing_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    pairing_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     code: StrictStr = Field(..., pattern='^[0-9]{6}$')
     expires_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     device_name: StrictStr | None = Field(
-        ..., description='Name aus pair/start, null bei einem Code für den QR-Weg'
+        ..., description='Name aus pair/start, null solange sich kein iPad gemeldet hat'
     )
     host: StrictStr = Field(
         ...,
@@ -1830,9 +2245,9 @@ class PairingCode(BaseModel):
     port: StrictInt = Field(..., ge=1, le=65535)
     qr_url: StrictStr = Field(
         ...,
-        description='Inhalt des QR-Codes: dieselben Daten wie host, port und code',
-        examples=['sg://pair?v=1&host=192.168.1.20&port=4710&code=482913'],
-        pattern='^sg://pair\\?v=1&host=[^&]+&port=[0-9]+&code=[0-9]{6}$',
+        description='Inhalt des QR-Codes: dieselben Daten wie host, port, pairing_id und code',
+        examples=['sg://pair?v=1&host=192.168.1.20&port=4710&pairing_id=019a4e14-0000-7000-8000-000000000081&code=482913'],
+        pattern='^sg://pair\\?v=1&host=[^&]+&port=[0-9]+&pairing_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}&code=[0-9]{6}$',
     )
 
 
@@ -1840,14 +2255,24 @@ class PdfIngestDeckPayload(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    slide_deck_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    slide_deck_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
 
 
 class PdfIngestSheetPayload(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    exercise_sheet_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    exercise_sheet_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
 
 
 class PenSettings(BaseModel):
@@ -1882,8 +2307,18 @@ class Photo(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1891,14 +2326,19 @@ class Photo(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     t_ms: StrictInt = Field(
         ...,
         description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
         ge=0,
         title='SessionMs',
     )
-    page_id: UUID | None
+    page_id: Uuid | None
     mime: PhotoMime
     sha256: StrictStr = Field(
         ...,
@@ -1913,48 +2353,22 @@ class Photo(BaseModel):
     ocr_text: StrictStr | None
 
 
-class PhotoAddData(BaseModel):
+class PhotoFileRef(BaseModel):
     """
-    Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
+    Datei eines Tafel-Fotos, hochgeladen per PUT /photos/{photo_id}/file
     """
 
     model_config = ConfigDict(
         extra='forbid',
     )
-    photo_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    t_ms: StrictInt = Field(
+    sha256: StrictStr = Field(
         ...,
-        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
-        ge=0,
-        title='SessionMs',
+        description='SHA-256, hex, Kleinbuchstaben',
+        pattern='^[a-f0-9]{64}$',
+        title='Sha256',
     )
-    page_id: UUID | None = None
-    file_ref: FileRef
-
-
-class PhotoAddOp(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    stream: StrictStr = Field(
-        ...,
-        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
-        title='SessionStreamId',
-    )
-    kind: Literal['photo.add']
-    at: StrictInt = Field(
-        ...,
-        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
-        ge=0,
-        title='EpochMs',
-    )
-    clock_uncertain: StrictBool
-    data: PhotoAddData
-    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
-    origin: SyncOrigin | None = None
+    mime: PhotoMime
+    size_bytes: StrictInt = Field(..., ge=1)
 
 
 class Recording(BaseModel):
@@ -1965,8 +2379,18 @@ class Recording(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -1974,7 +2398,12 @@ class Recording(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     mime: StrictStr = Field(
         ...,
         examples=['audio/webm;codecs=opus', 'audio/mp4'],
@@ -2012,7 +2441,12 @@ class RecordingCreate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     mime: StrictStr = Field(..., pattern='^audio/(webm|mp4)(;.*)?$')
     codec: AudioCodec
     started_ms: StrictInt = Field(
@@ -2028,8 +2462,18 @@ class Semester(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -2057,7 +2501,12 @@ class SemesterCreate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     name: StrictStr = Field(..., min_length=1)
     starts_on: date | None = None
     ends_on: date | None = None
@@ -2080,9 +2529,19 @@ class SessionCreate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
-    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    slide_deck_id: UUID | None = None
+    id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_deck_id: Uuid | None = None
     title: StrictStr | None = None
 
 
@@ -2094,7 +2553,12 @@ class SessionRefData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
 
 
 class SessionResumeOp(BaseModel):
@@ -2102,7 +2566,12 @@ class SessionResumeOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -2129,10 +2598,20 @@ class SessionStartData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    calendar_event_id: UUID | None = None
-    slide_deck_id: UUID | None = None
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    calendar_event_id: Uuid | None
+    slide_deck_id: Uuid | None
     started_from: ClientDevice
     started_at: StrictInt = Field(
         ...,
@@ -2150,7 +2629,12 @@ class SessionStartOffset(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    device_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    device_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     offset_ms: StrictInt
 
 
@@ -2159,7 +2643,12 @@ class SessionStartOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -2187,14 +2676,19 @@ class SessionStartRequest(BaseModel):
         extra='forbid',
     )
     started_from: ClientDevice
-    slide_deck_id: UUID | None = None
+    slide_deck_id: Uuid | None = None
 
 
 class SessionStopData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     reason: StopReason | None = None
 
 
@@ -2203,7 +2697,12 @@ class SessionStopOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -2242,7 +2741,7 @@ class SessionUpdate(BaseModel):
         extra='forbid',
     )
     title: StrictStr | None = None
-    slide_deck_id: UUID | None = None
+    slide_deck_id: Uuid | None = None
 
 
 class Settings(BaseModel):
@@ -2297,8 +2796,18 @@ class Slide(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -2306,7 +2815,12 @@ class Slide(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    deck_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    deck_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     index: StrictInt = Field(..., description='1-basiert', ge=1)
     width_pt: StrictFloat
     height_pt: StrictFloat
@@ -2321,9 +2835,19 @@ class SlideChangeData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    event_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    slide_id: UUID | None = None
+    event_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_id: Uuid | None
     slide_index: StrictInt = Field(..., ge=1)
     t_ms: StrictInt = Field(
         ...,
@@ -2339,7 +2863,12 @@ class SlideChangeOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -2362,8 +2891,18 @@ class SlideDeck(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -2371,8 +2910,13 @@ class SlideDeck(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    session_id: UUID | None
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_id: Uuid | None
     title: StrictStr
     sha256: StrictStr = Field(..., pattern='^[a-f0-9]{64}$')
     page_count: StrictInt | None = Field(
@@ -2404,8 +2948,18 @@ class SlideEvent(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -2413,8 +2967,13 @@ class SlideEvent(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    session_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    slide_id: UUID | None
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_id: Uuid | None
     slide_index: StrictInt = Field(..., ge=1)
     t_ms: StrictInt = Field(
         ...,
@@ -2430,7 +2989,12 @@ class StampElementPayload(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    marker_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    marker_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     marker_kind: MarkerKind
 
 
@@ -2442,7 +3006,12 @@ class Stroke(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    client_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    client_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     tool: StrokeTool
     layer: StrokeLayer
     color: StrictStr = Field(
@@ -2482,7 +3051,12 @@ class StrokeAddData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stroke: Stroke
 
 
@@ -2491,7 +3065,12 @@ class StrokeAddOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -2514,8 +3093,13 @@ class StrokeRemoveData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    client_ids: list[UUID] = Field(..., min_length=1)
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    client_ids: list[Uuid] = Field(..., min_length=1)
 
 
 class StrokeRemoveOp(BaseModel):
@@ -2523,7 +3107,12 @@ class StrokeRemoveOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -2547,7 +3136,12 @@ class SyncAck(BaseModel):
         extra='forbid',
     )
     type: Literal['ack']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
@@ -2562,7 +3156,7 @@ class SyncConnectionInfo(BaseModel):
         extra='forbid',
     )
     client: SyncClientKind
-    device_id: UUID | None
+    device_id: Uuid | None
     connected: StrictBool
 
 
@@ -2573,7 +3167,12 @@ class SyncError(BaseModel):
     type: Literal['error']
     code: SyncErrorCode
     message: StrictStr
-    op_id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr | None = Field(
         None,
         description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
@@ -2588,23 +3187,6 @@ class SyncError(BaseModel):
         ..., description='true: der Server schließt die Verbindung direkt danach'
     )
     details: dict[str, Any] | None = None
-
-
-class SyncHello(BaseModel):
-    """
-    Erste Nachricht des Clients (08 §2.1). token (Gerätetoken) Pflicht für Verbindungen aus dem Netz, lokal (Web-App) ohne.
-    """
-
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    type: Literal['hello']
-    protocol: Literal[1]
-    client: SyncClientKind
-    device_id: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
-    token: StrictStr | None = Field(None, min_length=1)
-    app_version: StrictStr = Field(..., min_length=1)
-    streams: list[SyncStreamPosition]
 
 
 class SyncPairingEvent(BaseModel):
@@ -2629,9 +3211,9 @@ class SyncPresence(BaseModel):
         extra='forbid',
     )
     type: Literal['presence']
-    session_id: UUID | None
-    notebook_id: UUID | None
-    page_id: UUID | None
+    session_id: Uuid | None
+    notebook_id: Uuid | None
+    page_id: Uuid | None
 
 
 class SyncPresenceInfo(BaseModel):
@@ -2639,11 +3221,11 @@ class SyncPresenceInfo(BaseModel):
         extra='forbid',
     )
     client: SyncClientKind
-    device_id: UUID | None
+    device_id: Uuid | None
     device_name: StrictStr | None
-    session_id: UUID | None
-    notebook_id: UUID | None
-    page_id: UUID | None
+    session_id: Uuid | None
+    notebook_id: Uuid | None
+    page_id: Uuid | None
 
 
 class SyncResume(BaseModel):
@@ -2670,6 +3252,39 @@ class SyncResume(BaseModel):
     )
 
 
+class SyncStreamPosition(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    stream: StrictStr = Field(
+        ...,
+        description='Strom (08 §2.2): notebook:<id>, session:<id> oder user',
+        pattern='^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$',
+        title='SyncStreamId',
+    )
+    last_seq: StrictInt = Field(
+        ...,
+        description='Höchste lückenlos empfangene und angewandte seq, 0 = nichts',
+        ge=0,
+    )
+    last_op_id: Uuid | None = Field(
+        ...,
+        description='op_id der Operation mit last_seq, null bei last_seq = 0. Der Server prüft das Paar, sonst reset',
+    )
+
+
+class SyncSubscribe(BaseModel):
+    """
+    Weitere Ströme abonnieren, ohne neu zu verbinden. Antwort: subscribed. Ergänzung zu 08 §2
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['subscribe']
+    streams: list[SyncStreamPosition] = Field(..., min_length=1)
+
+
 class SyncSubscribed(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -2679,6 +3294,10 @@ class SyncSubscribed(BaseModel):
 
 
 class SyncWelcome(BaseModel):
+    """
+    db_epoch ändert sich bei jeder Wiederherstellung der Datenbank. Weicht sie vom gespeicherten Wert ab, behandelt der Client alle Ströme wie reset (VERTRAEGE §11.1).
+    """
+
     model_config = ConfigDict(
         extra='forbid',
     )
@@ -2691,7 +3310,13 @@ class SyncWelcome(BaseModel):
         title='EpochMs',
     )
     server_version: StrictStr
-    device_id: UUID | None
+    db_epoch: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    device_id: Uuid | None
     resume: list[SyncResume]
 
 
@@ -2707,7 +3332,7 @@ class TapeElementPayload(BaseModel):
         title='HexColor',
     )
     covered: StrictBool
-    card_id: UUID | None
+    card_id: Uuid | None
 
 
 class Task(BaseModel):
@@ -2718,8 +3343,18 @@ class Task(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -2727,7 +3362,12 @@ class Task(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    sheet_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    sheet_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     label: StrictStr = Field(..., examples=['2b'])
     page_index: StrictInt = Field(..., ge=1)
     bbox: BBox | None
@@ -2747,7 +3387,12 @@ class TrashParent(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: TrashKind
     title: StrictStr
 
@@ -2760,7 +3405,12 @@ class TrashRestoreResult(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: TrashKind
     restored_count: StrictInt = Field(..., ge=1)
 
@@ -2773,7 +3423,12 @@ class UploadResult(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     duplicate: StrictBool
 
 
@@ -2785,14 +3440,19 @@ class AudioFinalizeResult(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    recording_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    recording_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     state: RecordingState
     audio_duration_ms: StrictInt = Field(..., description='Länge von full.m4a', ge=0)
     chunk_count: StrictInt = Field(..., ge=0)
     missing_seqs: list[MissingSeq]
     gaps: list[AudioGap]
     file_size_bytes: StrictInt = Field(..., ge=0)
-    duration_ms: StrictInt = Field(..., description='Laufzeit des Jobs', ge=0)
+    job_duration_ms: StrictInt = Field(..., description='Laufzeit des Jobs', ge=0)
 
 
 class BackupOverview(BaseModel):
@@ -2816,7 +3476,12 @@ class DrawingSnapshotData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     pkdrawing_ref: FileRef
 
 
@@ -2825,7 +3490,12 @@ class DrawingSnapshotOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -2866,7 +3536,12 @@ class ImageElement(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    element_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: Literal['image']
     frame: list[StrictFloat] = Field(
         ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
@@ -2874,6 +3549,39 @@ class ImageElement(BaseModel):
     z: StrictInt
     t_ms: SessionMs | None
     payload: ImageElementPayload
+
+
+class NotebookDeleteOp(BaseModel):
+    """
+    Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['notebook.delete']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: NotebookRefData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
 
 
 class NotebookPages(BaseModel):
@@ -2884,11 +3592,62 @@ class NotebookPages(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    notebook_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    notebook_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream_seq: StrictInt = Field(
         ..., description='seq des Stroms notebook:<id> zu diesem Stand', ge=0
     )
     items: list[Page]
+
+
+class NotebookUpdateData(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    notebook_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    fields: NotebookUpdateFields
+
+
+class NotebookUpdateOp(BaseModel):
+    """
+    Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['notebook.update']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: NotebookUpdateData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
 
 
 class PageStrokes(BaseModel):
@@ -2899,7 +3658,12 @@ class PageStrokes(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream_seq: StrictInt = Field(
         ..., description='seq des Stroms notebook:<id> zu diesem Stand', ge=0
     )
@@ -2910,7 +3674,12 @@ class PageUpdateData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     fields: PageUpdateFields
     version: StrictInt = Field(
         ...,
@@ -2924,7 +3693,12 @@ class PageUpdateOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -2943,6 +3717,65 @@ class PageUpdateOp(BaseModel):
     origin: SyncOrigin | None = None
 
 
+class PhotoAddData(BaseModel):
+    """
+    Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    photo_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    t_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    page_id: Uuid | None
+    file_ref: PhotoFileRef
+
+
+class PhotoAddOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    stream: StrictStr = Field(
+        ...,
+        pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='SessionStreamId',
+    )
+    kind: Literal['photo.add']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: PhotoAddData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
 class Session(BaseModel):
     """
     Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem Kalendertermin (null bei spontanen Sessions).
@@ -2951,8 +3784,18 @@ class Session(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
@@ -2960,9 +3803,14 @@ class Session(BaseModel):
         ..., description='ISO 8601, UTC', title='Timestamp'
     )
     deleted_at: AwareDatetime | None
-    calendar_event_id: UUID | None
-    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    slide_deck_id: UUID | None
+    calendar_event_id: Uuid | None
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_deck_id: Uuid | None
     number: StrictInt | None = Field(
         ..., description='VL-Nummer im Modul (VL 7), Regeln in docs/VERTRAEGE.md', ge=1
     )
@@ -2976,6 +3824,7 @@ class Session(BaseModel):
     review_state: ReviewState
     planned_starts_at: AwareDatetime | None
     planned_ends_at: AwareDatetime | None
+    auto_stop_extended_until: AwareDatetime | None
     start_offsets: list[SessionStartOffset] | None = Field(
         None,
         description='Abweichende Startzeiten von Geräten (VERTRAEGE §9.3). Fehlt oder leer = keine Abweichung',
@@ -2995,7 +3844,12 @@ class SessionPauseOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -3050,7 +3904,12 @@ class ShapeElement(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    element_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: Literal['shape']
     frame: list[StrictFloat] = Field(
         ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
@@ -3064,7 +3923,12 @@ class StampElement(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    element_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: Literal['stamp']
     frame: list[StrictFloat] = Field(
         ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
@@ -3085,6 +3949,27 @@ class SyncConnectionEvent(BaseModel):
     type: Literal['event']
     name: Literal['device.connection']
     data: SyncConnectionInfo
+
+
+class SyncHello(BaseModel):
+    """
+    Erste Nachricht des Clients (08 §2.1). Das Gerätetoken steht nicht hier, sondern beim Upgrade im Header Authorization: Bearer (VERTRAEGE §11.1). device_id nur zur Gegenprobe.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['hello']
+    protocol: Literal[1]
+    client: SyncClientKind
+    device_id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    app_version: StrictStr = Field(..., min_length=1)
+    streams: list[SyncStreamPosition]
 
 
 class SyncPresenceEvent(BaseModel):
@@ -3117,7 +4002,12 @@ class TapeElement(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    element_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: Literal['tape']
     frame: list[StrictFloat] = Field(
         ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
@@ -3131,7 +4021,12 @@ class TextElement(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    element_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    element_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: Literal['text']
     frame: list[StrictFloat] = Field(
         ..., description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
@@ -3149,7 +4044,12 @@ class TrashItem(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     kind: TrashKind
     title: StrictStr = Field(
         ..., description='Anzeigename (Titel, Name oder z. B. „Seite 3")'
@@ -3178,7 +4078,12 @@ class ElementUpsertData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    page_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    page_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     element: TextElement | ImageElement | ShapeElement | TapeElement | StampElement = (
         Field(
             ...,
@@ -3193,7 +4098,12 @@ class ElementUpsertOp(BaseModel):
         extra='forbid',
     )
     type: Literal['op']
-    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    op_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
     stream: StrictStr = Field(
         ...,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
@@ -3358,6 +4268,12 @@ class SchemaBundle(BaseModel):
     LectureSettingsUpdate_1: LectureSettingsUpdate | None = Field(
         None, alias='LectureSettingsUpdate'
     )
+    MaintenanceNightlyPayload_1: MaintenanceNightlyPayload | None = Field(
+        None, alias='MaintenanceNightlyPayload'
+    )
+    MaintenanceNightlyResult_1: MaintenanceNightlyResult | None = Field(
+        None, alias='MaintenanceNightlyResult'
+    )
     Marker_1: Marker | None = Field(None, alias='Marker')
     MarkerAddData_1: MarkerAddData | None = Field(None, alias='MarkerAddData')
     MarkerAddOp_1: MarkerAddOp | None = Field(None, alias='MarkerAddOp')
@@ -3381,15 +4297,27 @@ class SchemaBundle(BaseModel):
         None, alias='NotebookCreateData'
     )
     NotebookCreateOp_1: NotebookCreateOp | None = Field(None, alias='NotebookCreateOp')
+    NotebookDeleteOp_1: NotebookDeleteOp | None = Field(None, alias='NotebookDeleteOp')
     NotebookKind_1: NotebookKind | None = Field(None, alias='NotebookKind')
     NotebookList_1: NotebookList | None = Field(None, alias='NotebookList')
     NotebookPages_1: NotebookPages | None = Field(None, alias='NotebookPages')
+    NotebookRefData_1: NotebookRefData | None = Field(None, alias='NotebookRefData')
+    NotebookRestoreOp_1: NotebookRestoreOp | None = Field(
+        None, alias='NotebookRestoreOp'
+    )
     NotebookStreamId: StrictStr | None = Field(
         None,
         pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
         title='NotebookStreamId',
     )
     NotebookUpdate_1: NotebookUpdate | None = Field(None, alias='NotebookUpdate')
+    NotebookUpdateData_1: NotebookUpdateData | None = Field(
+        None, alias='NotebookUpdateData'
+    )
+    NotebookUpdateFields_1: NotebookUpdateFields | None = Field(
+        None, alias='NotebookUpdateFields'
+    )
+    NotebookUpdateOp_1: NotebookUpdateOp | None = Field(None, alias='NotebookUpdateOp')
     Page_1: Page | None = Field(None, alias='Page')
     PageCreateData_1: PageCreateData | None = Field(None, alias='PageCreateData')
     PageCreateOp_1: PageCreateOp | None = Field(None, alias='PageCreateOp')
@@ -3399,6 +4327,8 @@ class SchemaBundle(BaseModel):
     PageElement: (
         TextElement | ImageElement | ShapeElement | TapeElement | StampElement | None
     ) = Field(None, description='Seitenelement (08 §4.4), unterschieden über kind. frame [x, y, w, h] in pt. crop bei image: [x, y, w, h] relativ zum Bild (0–1), null = ganzes Bild. Phase 1 nutzt image (Tafel-Foto) und stamp (Marker-Stempel).', title='PageElement')
+    PageRefData_1: PageRefData | None = Field(None, alias='PageRefData')
+    PageRestoreOp_1: PageRestoreOp | None = Field(None, alias='PageRestoreOp')
     PageStrokes_1: PageStrokes | None = Field(None, alias='PageStrokes')
     PageTemplate_1: PageTemplate | None = Field(None, alias='PageTemplate')
     PageUpdateData_1: PageUpdateData | None = Field(None, alias='PageUpdateData')
@@ -3438,6 +4368,7 @@ class SchemaBundle(BaseModel):
     Photo_1: Photo | None = Field(None, alias='Photo')
     PhotoAddData_1: PhotoAddData | None = Field(None, alias='PhotoAddData')
     PhotoAddOp_1: PhotoAddOp | None = Field(None, alias='PhotoAddOp')
+    PhotoFileRef_1: PhotoFileRef | None = Field(None, alias='PhotoFileRef')
     PhotoMime_1: PhotoMime | None = Field(None, alias='PhotoMime')
     Point2: list[StrictFloat] | None = Field(
         None, description='[x, y] in pt', max_length=2, min_length=2, title='Point2'
@@ -3455,6 +4386,9 @@ class SchemaBundle(BaseModel):
     SemesterUpdate_1: SemesterUpdate | None = Field(None, alias='SemesterUpdate')
     Session_1: Session | None = Field(None, alias='Session')
     SessionCreate_1: SessionCreate | None = Field(None, alias='SessionCreate')
+    SessionExtendRequest_1: SessionExtendRequest | None = Field(
+        None, alias='SessionExtendRequest'
+    )
     SessionList_1: SessionList | None = Field(None, alias='SessionList')
     SessionMs: StrictInt | None = Field(
         None,
@@ -3538,6 +4472,10 @@ class SchemaBundle(BaseModel):
         | PageCreateOp
         | PageUpdateOp
         | PageDeleteOp
+        | NotebookUpdateOp
+        | NotebookDeleteOp
+        | NotebookRestoreOp
+        | PageRestoreOp
         | StrokeAddOp
         | StrokeRemoveOp
         | ElementUpsertOp
@@ -3574,6 +4512,10 @@ class SchemaBundle(BaseModel):
         | PageCreateOp
         | PageUpdateOp
         | PageDeleteOp
+        | NotebookUpdateOp
+        | NotebookDeleteOp
+        | NotebookRestoreOp
+        | PageRestoreOp
         | StrokeAddOp
         | StrokeRemoveOp
         | ElementUpsertOp
@@ -3610,6 +4552,10 @@ class SchemaBundle(BaseModel):
         | PageCreateOp
         | PageUpdateOp
         | PageDeleteOp
+        | NotebookUpdateOp
+        | NotebookDeleteOp
+        | NotebookRestoreOp
+        | PageRestoreOp
         | StrokeAddOp
         | StrokeRemoveOp
         | ElementUpsertOp
@@ -3678,7 +4624,12 @@ class SchemaBundle(BaseModel):
         None, alias='TrashRestoreResult'
     )
     UploadResult_1: UploadResult | None = Field(None, alias='UploadResult')
-    Uuid: UUID | None = Field(None, description='UUIDv7 (03 §1)', title='Uuid')
+    Uuid: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
 
 
 # Union-Typen (für Validierung: pydantic.TypeAdapter(<Typ>))
@@ -3686,5 +4637,5 @@ type PageElement = TextElement | ImageElement | ShapeElement | TapeElement | Sta
 type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload
 type SyncClientMessage = SyncHello | SyncSubscribe | SyncUnsubscribe | SyncTimePing | SyncTimeOffset | SyncPing | SyncPresence | SyncOp
 type SyncEvent = SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent
-type SyncOp = NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp
+type SyncOp = NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | NotebookUpdateOp | NotebookDeleteOp | NotebookRestoreOp | PageRestoreOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp
 type SyncServerMessage = SyncWelcome | SyncSubscribed | SyncAck | SyncOp | SyncTimePong | SyncPong | SyncError | SyncEvent

@@ -36,19 +36,20 @@ Ein Formatwechsel ist erst fertig, wenn alle drei Generate-Schritte und Contract
 
 ## 2. Sync-Protokoll (WebSocket)
 
-Endpunkt: `ws://<mac>:4710/sync`. Nachrichten als JSON-Text-Frames.
+Endpunkt: `ws://<mac>:4710/sync`. Nachrichten als JSON-Text-Frames. Geräte aus dem Netz melden sich beim Upgrade mit `Authorization: Bearer <device_token>` an, die lokale Web-App ohne Token.
 
 ### 2.1 Verbindungsaufbau
 ```jsonc
 // Client → Server
-{ "type": "hello", "device_id": "…", "token": "…", "app_version": "1.0.0",
-  "streams": [ { "stream": "notebook:<id>", "last_seq": 1832 },
-               { "stream": "session:<id>",  "last_seq": 77 } ] }
+{ "type": "hello", "protocol": 1, "client": "ipad", "device_id": "…", "app_version": "1.0.0",
+  "streams": [ { "stream": "notebook:<id>", "last_seq": 1832, "last_op_id": "…" },
+               { "stream": "session:<id>",  "last_seq": 77, "last_op_id": "…" } ] }
 // Server → Client
-{ "type": "welcome", "server_time": 1730707200123,
-  "resume": [ { "stream": "notebook:<id>", "from_seq": 1833 } ] }
+{ "type": "welcome", "protocol": 1, "server_time": 1730707200123, "server_version": "…",
+  "db_epoch": "…", "device_id": "…",
+  "resume": [ { "stream": "notebook:<id>", "from_seq": 1833, "head_seq": 1840, "reset": false } ] }
 ```
-Danach sendet der Server fehlende Operationen ab `from_seq`. Anschließend: **Uhrabgleich**
+Danach sendet der Server fehlende Operationen ab `from_seq`. Passt `last_op_id` nicht zur Operation `last_seq` oder hat sich `db_epoch` geändert (Wiederherstellung), kommt `reset`: Der Client gleicht per REST ab und sendet fehlende eigene Daten erneut. Anschließend: **Uhrabgleich**, und erst danach die Ausgangswarteschlange
 ```jsonc
 { "type": "time.ping", "t0": 1730707200456 }             // Client
 { "type": "time.pong", "t0": 1730707200456, "ts": 1730707200470 }  // Server
@@ -79,10 +80,12 @@ Die vollständigen Nachrichten (u. a. `protocol`, `client`, `subscribe`, `presen
 | `kind` | `data` |
 |---|---|
 | `notebook.create` | `{ notebook_id, module_id, title, kind?, created_at }` im Strom `notebook:<notebook_id>`. Idempotent über `notebook_id`. Umbenennen und Löschen nur per REST |
+| `notebook.update` / `notebook.delete` / `notebook.restore` | nur Server: `{ notebook_id, fields: { title, module_id } }` bzw. `{ notebook_id }` nach REST-Änderung oder Papierkorb |
 | `page.create` | `{ page_id, notebook_id, session_id?, index, template, width_pt, height_pt, background_slide_id?, attached_slide_id? }` |
-| `page.update` | `{ page_id, fields: {…}, version }` |
+| `page.update` | `{ page_id, fields: { index, template, session_id, background_slide_id, attached_slide_id }, version }`, immer vollständiger Stand |
 | `page.delete` | `{ page_id }` |
-| `stroke.add` | `{ page_id, stroke: Stroke }` (§4) |
+| `page.restore` | nur Server: `{ page_id }` nach Wiederherstellung aus dem Papierkorb |
+| `stroke.add` | `{ page_id, stroke: Stroke }` (§4). Upsert über `client_id`, auch für Lasso und Umfärben |
 | `stroke.remove` | `{ page_id, client_ids: [ … ] }` |
 | `element.upsert` | `{ page_id, element: PageElement }` (§4.4) |
 | `element.remove` | `{ page_id, element_id }` |
@@ -92,18 +95,23 @@ Die vollständigen Nachrichten (u. a. `protocol`, `client`, `subscribe`, `presen
 | `slide.change` | `{ event_id, session_id, slide_id?, slide_index, t_ms, device: "ipad"\|"mac" }` |
 | `marker.add` | `{ marker_id, session_id, kind, t_ms, page_id?, position?, note?, source: "ipad"\|"mac" }` |
 | `marker.remove` | `{ marker_id }` |
-| `photo.add` | `{ photo_id, session_id, t_ms, page_id?, file_ref }` |
+| `photo.add` | `{ photo_id, session_id, t_ms, page_id?, file_ref: { sha256, mime: image/heic\|image/jpeg, size_bytes } }` |
 | `review.add` (Phase 3) | `{ review_id, card_id, rating, answer?, duration_ms, reviewed_at }` |
 
 **Regeln**
 - `t_ms` ist die Sitzungszeit beim Ereignis auf dem Gerät, nicht beim Senden; verspätet gesendete Operationen behalten sie.
 - Der Server ordnet pro Strom fortlaufende `seq` zu. Bereits bekannte `op_id` werden mit dem vorhandenen `ack` beantwortet (idempotent).
 - Clients senden höchstens 200 offene (unbestätigte) Operationen gleichzeitig.
-- `stroke.add` für eine unbekannte Seite: Der Server legt die Seite nicht automatisch an, sondern hält die Operation zurück, bis `page.create` eintrifft. Das iPad sendet immer in der richtigen Reihenfolge, die Regel gilt als Schutz.
+- Felder mit `?` sind im Sync **Pflichtfelder mit Wert `null`**, nicht weglassbar (eindeutige Kodierung in Swift).
+- Reihenfolge pro Verbindung ist garantiert, der Client sendet Eltern vor Kindern. Der Server hält nichts zurück. Inhalte für weich gelöschte Eltern werden angenommen und mit deren Löschzustand gespeichert. Nie existierende Eltern ergeben einen nicht wiederholbaren Fehler, und der Client legt die Operation samt abhängigen in eine Fehlerablage (`docs/VERTRAEGE.md` §11.2).
+- Ein wiederholbarer Fehler schließt die Verbindung. Der Client verbindet neu und sendet in Originalreihenfolge.
 - Keine Löschung ist endgültig: `stroke.remove` setzt `deleted_at`.
 - **Keepalive:** `{"type":"ping"}` alle 15 s. Nach 45 s ohne Antwort trennt der Client und verbindet neu (exponentielles Warten bis max. 30 s).
 
 ### 2.4 Server-Ereignisse an die Web-App
+Phase 1 (`SyncEvent` in `packages/schemas`): `session.updated` (Session), `presence` (was ein anderes Gerät zeigt), `device.connection` (Gerät verbunden/getrennt), `pairing.requested` (nur an lokale Web-Clients). Ereignisse haben keine `seq` und werden nicht nachgeliefert.
+
+Ab Phase 2 geplant:
 ```jsonc
 { "type": "event", "name": "session.processing", "data": { "session_id": "…", "step": "transcribe", "state": "fertig" } }
 { "type": "event", "name": "plan.updated", "data": { "from": "…", "to": "…" } }
@@ -112,10 +120,10 @@ Die vollständigen Nachrichten (u. a. `protocol`, `client`, `subscribe`, `presen
 
 ## 3. Kopplung von Geräten
 
-1. Die Web-App zeigt unter *Einstellungen → Geräte* einen **QR-Code** und kündigt den Core per Bonjour an (`_studiengehirn._tcp`, TXT-Record `v=1`, `name=<Macname>`).
-2. Das iPad verbindet sich mit `POST /api/v1/devices/pair/start` `{ device_name, public_nonce }` → Server erzeugt einen 6-stelligen Code und zeigt ihn in der Web-App an.
-3. Der Nutzer bestätigt auf dem iPad den gleichen Code → `POST /devices/pair/confirm` `{ code }` → Server antwortet mit `device_token` (256 Bit, zufällig). Gespeichert wird nur `token_hash` (SHA-256).
-4. QR-Code-Variante: QR enthält `sg://pair?v=1&host=…&port=4710&code=…`, also dieselben Daten, die die Web-App auch als Text zeigt. Scannen ersetzt das Eintippen in Schritt 3.
+1. Unter *Einstellungen → Geräte* öffnet die Web-App ein **Kopplungsfenster** (`POST /devices/pairings`, nur lokal, 5 min, höchstens eins offen). Sie zeigt einen 6-stelligen Code und einen **QR-Code**. Der Core kündigt sich per Bonjour an (`_studiengehirn._tcp`, TXT-Record `v=1`, `name=<Macname>`).
+2. Das iPad meldet sich mit `POST /api/v1/devices/pair/start` `{ device_name, kind, public_nonce }` am offenen Fenster an und bekommt die `pairing_id`, aber nicht den Code. Die Web-App zeigt den Gerätenamen.
+3. Der Nutzer tippt den Code am iPad ein → `POST /devices/pair/confirm` `{ pairing_id, code, device_name, kind, public_nonce }` → Server antwortet mit `device_token` (256 Bit, zufällig). Gespeichert wird nur `token_hash` (SHA-256). Der Code liegt nur im Speicher des Core. Fehlversuche sind pro Fenster und global begrenzt (`docs/VERTRAEGE.md` §12).
+4. QR-Code-Variante: QR enthält `sg://pair?v=1&host=…&port=4710&pairing_id=…&code=…`, also dieselben Daten, die die Web-App auch als Text zeigt. Scannen ersetzt Schritt 2 und das Eintippen in Schritt 3.
 5. Gerät entfernen widerruft das Token sofort.
 
 ## 4. Strich-Format
@@ -152,7 +160,8 @@ Optionaler Glättung wird beim Rendern angewendet, nie beim Speichern. Ein durch
 - **Stabile IDs:** PencilKit-Striche haben keine ID. Das iPad hält pro Seite eine Zuordnung `Fingerabdruck → client_id`. Fingerabdruck = Hash aus `path.creationDate`, Punktanzahl und den ersten 3 Punkten (vor Transformation). Bei jeder Änderung (`canvasViewDrawingDidChange`) wird der Strichbestand mit der Zuordnung verglichen:
   - neue Fingerabdrücke → `stroke.add`
   - verschwundene → `stroke.remove`
-  - nur `transform` geändert (Lasso) → `stroke.remove` + `stroke.add` mit gleicher Zeit
+  - gleicher Fingerabdruck, aber geänderte Eigenschaften (Lasso: `transform`; Umfärben: `color`; Skalieren) → nur `stroke.add` mit **gleicher** `client_id` und unveränderter Zeit. Der Server macht daraus ein Upsert.
+  - Gleiche Fingerabdrücke auf einer Seite (z. B. kopierte Striche) werden nach ihrem Vorkommen in `PKDrawing.strokes` durchgezählt: Der Schlüssel ist `Fingerabdruck#n`. So bekommt jede Kopie eine eigene `client_id`.
 - **Werkzeuge:** `PKInkingTool.InkType` wird auf `tool` abgebildet, `PKInk.color` auf `color`. Die Breite kommt aus dem Werkzeug und der Punktgröße.
 - Der Radierer im Pixelmodus teilt Striche in Teilstücke. Die Teilstücke werden zu neuen Strichen mit eigener `client_id`, aber der ursprünglichen `created_at`.
 
