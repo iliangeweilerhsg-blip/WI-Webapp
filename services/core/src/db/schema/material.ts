@@ -26,7 +26,7 @@ export const slideDeck = pgTable(
       .notNull()
       .references(() => courseModule.id),
     // NULL = nicht an eine Session gehängt. Typannotation nötig wegen des Zyklus session ↔ slide_deck.
-    sessionId: uuid('session_id').references((): AnyPgColumn => session.id),
+    sessionId: uuid('session_id').references((): AnyPgColumn => session.id, { onDelete: 'set null' }),
     title: text('title').notNull(),
     filePath: text('file_path').notNull(), // relativ zu SG_DATA_DIR (VERTRAEGE §4)
     sha256: text('sha256').notNull(),
@@ -47,7 +47,7 @@ export const slide = pgTable(
     ...baseColumns(),
     deckId: uuid('deck_id')
       .notNull()
-      .references(() => slideDeck.id),
+      .references(() => slideDeck.id, { onDelete: 'cascade' }),
     index: integer('index').notNull(), // 1-basiert
     imagePath: text('image_path'),
     thumbPath: text('thumb_path'),
@@ -101,7 +101,7 @@ export const task = pgTable(
     ...baseColumns(),
     sheetId: uuid('sheet_id')
       .notNull()
-      .references(() => exerciseSheet.id),
+      .references(() => exerciseSheet.id, { onDelete: 'cascade' }),
     label: text('label').notNull(), // „2b“
     pageIndex: integer('page_index').notNull(),
     bbox: jsonb('bbox').$type<number[]>(),
@@ -121,10 +121,10 @@ export const taskSlideLink = pgTable(
     ...baseColumns(),
     taskId: uuid('task_id')
       .notNull()
-      .references(() => task.id),
+      .references(() => task.id, { onDelete: 'cascade' }),
     slideId: uuid('slide_id')
       .notNull()
-      .references(() => slide.id),
+      .references(() => slide.id, { onDelete: 'cascade' }),
     relevance: real('relevance').notNull(), // 0..1
     reason: text('reason').notNull(), // 1 Satz Begründung
     source: text('source').notNull(), // auto | manuell

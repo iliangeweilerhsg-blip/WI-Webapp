@@ -1,5 +1,6 @@
 import { and, eq, sql, type SQL } from 'drizzle-orm';
-import { SINGLE_USER_ID, type Job, type JobState, type JobType } from '@sg/shared';
+import type { ZodType } from 'zod';
+import { PdfIngestPayloadSchema, SINGLE_USER_ID, type Job, type JobState, type JobType } from '@sg/shared';
 import type { DbOrTx, Tx } from '../db/client.ts';
 import { job } from '../db/schema/index.ts';
 import { notDeleted } from '../db/schema/common.ts';
@@ -8,6 +9,15 @@ import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage, type Page } f
 
 /** NOTIFY-Kanal, auf dem der Worker lauscht (docs/VERTRAEGE.md §3) */
 export const JOB_NOTIFY_CHANNEL = 'sg_jobs';
+
+/**
+ * Zod-Schemas der Job-Payloads (08 §5). `enqueueJob` prüft damit vor dem INSERT.
+ * Für Typen ohne Eintrag gibt es in @sg/shared noch kein Schema: ihr Payload wird vorerst nicht geprüft.
+ * Neue Schemas hier ergänzen, sobald der Job-Typ gebaut wird.
+ */
+export const JOB_PAYLOAD_SCHEMAS: Partial<Record<JobType, ZodType>> = {
+  'pdf.ingest': PdfIngestPayloadSchema,
+};
 
 export interface EnqueueJobInput {
   type: JobType;
@@ -29,6 +39,13 @@ export interface EnqueueJobInput {
  * Gibt die ID des Jobs zurück. Muss in `db.transaction(async (tx) => …)` aufgerufen werden.
  */
 export async function enqueueJob(tx: Tx, input: EnqueueJobInput): Promise<string> {
+  const schema = JOB_PAYLOAD_SCHEMAS[input.type];
+  if (schema) {
+    const parsed = schema.safeParse(input.payload);
+    if (!parsed.success) {
+      throw new Error(`Ungültiges Payload für Job ${input.type}: ${parsed.error.message}`);
+    }
+  }
   const id = uuidv7();
   await tx.insert(job).values({
     id,

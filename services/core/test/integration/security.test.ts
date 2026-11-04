@@ -82,6 +82,29 @@ describe('Netz ohne Token (VERTRAEGE §5)', () => {
   });
 });
 
+describe('Framework-Fehler (kaputte URL)', () => {
+  it('lokal: 400 bad_request im ApiError-Format', async () => {
+    const res = await t.request({ url: '/%E0%A4%A' });
+    expect(res.statusCode).toBe(400);
+    expect(errorCode(res.json())).toBe('bad_request');
+  });
+
+  it('Netz: Sicherheitsprüfung greift auch hier (401 statt 400)', async () => {
+    const res = await t.app.inject({
+      url: '/%E0%A4%A',
+      remoteAddress: '192.168.1.23',
+      headers: { host: `192.168.1.5:${TEST_PORT}` },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(errorCode(res.json())).toBe('device_token_required');
+  });
+
+  it('lokal mit falschem Host: 421', async () => {
+    const res = await t.request({ url: '/%E0%A4%A', headers: { host: 'evil.example' } });
+    expect(res.statusCode).toBe(421);
+  });
+});
+
 describe('Lokal per Socket-Adresse', () => {
   it.each(['127.0.0.1', '::1', '::ffff:127.0.0.1'])('%s braucht kein Token', async (remoteAddress) => {
     const res = await t.app.inject({

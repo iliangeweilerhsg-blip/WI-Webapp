@@ -18,6 +18,9 @@ export interface DbHandle {
 export function createDb(databaseUrl: string): DbHandle {
   const sql = postgres(databaseUrl, {
     max: 10,
+    connect_timeout: 5,
+    // Feste Formate, damit Zeitstempel als Text (Cursor) nie vom Server-Standard abhängen
+    connection: { DateStyle: 'ISO', TimeZone: 'UTC' },
     // NOTICEs (z. B. „Erweiterung existiert schon“) nicht auf stderr kippen
     onnotice: () => {},
   });

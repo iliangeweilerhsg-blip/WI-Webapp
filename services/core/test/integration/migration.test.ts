@@ -4,7 +4,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SINGLE_USER_ID } from '@sg/shared';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import { runMigrations } from '../../src/db/migrate.ts';
-import { courseModule, semester, session } from '../../src/db/schema/index.ts';
+import {
+  calendarEvent,
+  courseModule,
+  exerciseSheet,
+  semester,
+  session,
+  slide,
+  slideDeck,
+  task,
+  taskSlideLink,
+} from '../../src/db/schema/index.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { testDatabaseUrl } from './helpers.ts';
 
@@ -219,5 +229,169 @@ describe('Migrationen', () => {
     const [row] = await handle.db.select().from(courseModule).where(eq(courseModule.id, id));
     expect(row?.ects).toBe(4.5);
     expect(typeof row?.ects).toBe('number');
+  });
+
+  describe('Fremdschlüssel und Invarianten', () => {
+    async function seedModule() {
+      const semesterId = uuidv7();
+      const moduleId = uuidv7();
+      await handle.db
+        .insert(semester)
+        .values({ id: semesterId, userId: SINGLE_USER_ID, name: `S ${semesterId}` });
+      await handle.db.insert(courseModule).values({
+        id: moduleId,
+        userId: SINGLE_USER_ID,
+        semesterId,
+        name: 'M',
+        color: 'mod-03',
+      });
+      return { semesterId, moduleId };
+    }
+    const base = { userId: SINGLE_USER_ID };
+
+    it('nimmt beim endgültigen Löschen eines Foliensatzes Folien und Verknüpfungen mit (CASCADE)', async () => {
+      const { moduleId } = await seedModule();
+      const deckId = uuidv7();
+      const slideId = uuidv7();
+      const sheetId = uuidv7();
+      const taskId = uuidv7();
+      await handle.db.insert(slideDeck).values({
+        id: deckId,
+        ...base,
+        moduleId,
+        title: 'D',
+        filePath: 'media/decks/x/original.pdf',
+        sha256: 'a'.repeat(64),
+      });
+      await handle.db
+        .insert(slide)
+        .values({ id: slideId, ...base, deckId, index: 1, widthPt: 720, heightPt: 540 });
+      await handle.db.insert(exerciseSheet).values({
+        id: sheetId,
+        ...base,
+        moduleId,
+        title: 'Blatt',
+        filePath: 'media/sheets/x/original.pdf',
+        sha256: 'b'.repeat(64),
+      });
+      await handle.db.insert(task).values({ id: taskId, ...base, sheetId, label: '1a', pageIndex: 1 });
+      await handle.db.insert(taskSlideLink).values({
+        id: uuidv7(),
+        ...base,
+        taskId,
+        slideId,
+        relevance: 0.5,
+        reason: 'passt',
+        source: 'auto',
+      });
+
+      await handle.db.delete(slideDeck).where(eq(slideDeck.id, deckId));
+      expect(await handle.db.select().from(slide).where(eq(slide.id, slideId))).toHaveLength(0);
+      expect(await handle.db.select().from(taskSlideLink)).toHaveLength(0);
+      expect(await handle.db.select().from(task).where(eq(task.id, taskId))).toHaveLength(1);
+
+      await handle.db.delete(exerciseSheet).where(eq(exerciseSheet.id, sheetId));
+      expect(await handle.db.select().from(task).where(eq(task.id, taskId))).toHaveLength(0);
+    });
+
+    it('verbietet das Löschen eines Moduls mit Foliensätzen (RESTRICT) und eines Semesters mit Modulen', async () => {
+      const { moduleId, semesterId } = await seedModule();
+      await handle.db.insert(slideDeck).values({
+        id: uuidv7(),
+        ...base,
+        moduleId,
+        title: 'D',
+        filePath: 'p',
+        sha256: 'c'.repeat(64),
+      });
+      await expect(handle.db.delete(courseModule).where(eq(courseModule.id, moduleId))).rejects.toThrow();
+      await expect(handle.db.delete(semester).where(eq(semester.id, semesterId))).rejects.toThrow();
+    });
+
+    it('setzt optionale Verweise auf NULL (SET NULL)', async () => {
+      const { moduleId } = await seedModule();
+      const eventId = uuidv7();
+      const deckId = uuidv7();
+      const sessionId = uuidv7();
+      await handle.db.insert(calendarEvent).values({
+        id: eventId,
+        ...base,
+        moduleId,
+        kind: 'vorlesung',
+        title: 'VL',
+        startsAt: new Date(),
+        endsAt: new Date(),
+      });
+      await handle.db.insert(slideDeck).values({
+        id: deckId,
+        ...base,
+        moduleId,
+        title: 'D',
+        filePath: 'p',
+        sha256: 'd'.repeat(64),
+      });
+      await handle.db.insert(session).values({
+        id: sessionId,
+        ...base,
+        moduleId,
+        calendarEventId: eventId,
+        slideDeckId: deckId,
+      });
+      await handle.db.update(slideDeck).set({ sessionId }).where(eq(slideDeck.id, deckId));
+
+      await handle.db.delete(calendarEvent).where(eq(calendarEvent.id, eventId));
+      await handle.db.delete(slideDeck).where(eq(slideDeck.id, deckId));
+      const [row] = await handle.db.select().from(session).where(eq(session.id, sessionId));
+      expect(row).toMatchObject({ calendarEventId: null, slideDeckId: null });
+    });
+
+    it('lässt cost_entry ohne Job zu und setzt job_id beim Löschen des Jobs auf NULL', async () => {
+      const jobId = uuidv7();
+      const costId = uuidv7();
+      await sql`INSERT INTO job (id, user_id, type) VALUES (${jobId}, ${SINGLE_USER_ID}, 'pdf.ingest')`;
+      await sql`INSERT INTO cost_entry (id, user_id, job_id, provider, model, task)
+        VALUES (${costId}, ${SINGLE_USER_ID}, ${jobId}, 'p', 'm', 't')`;
+      await sql`DELETE FROM job WHERE id = ${jobId}`;
+      const [row] = await sql`SELECT job_id FROM cost_entry WHERE id = ${costId}`;
+      expect(row?.job_id).toBeNull();
+    });
+
+    it('erlaubt höchstens eine Session pro Kalendertermin (1─0..1)', async () => {
+      const { moduleId } = await seedModule();
+      const eventId = uuidv7();
+      await handle.db.insert(calendarEvent).values({
+        id: eventId,
+        ...base,
+        moduleId,
+        kind: 'vorlesung',
+        title: 'VL',
+        startsAt: new Date(),
+        endsAt: new Date(),
+      });
+      await handle.db.insert(session).values({ id: uuidv7(), ...base, moduleId, calendarEventId: eventId });
+      await expect(
+        handle.db.insert(session).values({ id: uuidv7(), ...base, moduleId, calendarEventId: eventId }),
+      ).rejects.toThrow();
+      // spontane Sessions (ohne Termin) gibt es beliebig viele
+      await handle.db.insert(session).values({ id: uuidv7(), ...base, moduleId });
+      await handle.db.insert(session).values({ id: uuidv7(), ...base, moduleId });
+      // weich gelöschte Session gibt den Termin frei
+      await sql`UPDATE session SET deleted_at = now() WHERE calendar_event_id = ${eventId}`;
+      await handle.db.insert(session).values({ id: uuidv7(), ...base, moduleId, calendarEventId: eventId });
+    });
+
+    it('legt die Tabelle idempotency_key an', async () => {
+      const cols = await sql`SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'idempotency_key' ORDER BY column_name`;
+      expect(cols.map((c) => c.column_name)).toEqual([
+        'created_at',
+        'key',
+        'method',
+        'path',
+        'request_hash',
+        'response',
+        'status',
+      ]);
+    });
   });
 });

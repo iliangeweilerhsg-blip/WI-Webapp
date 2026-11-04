@@ -1,14 +1,16 @@
 import { readFileSync } from 'node:fs';
 import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
-import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyReply } from 'fastify';
 import { jsonSchemaTransform, serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import type { Logger } from 'pino';
 import { API_BASE } from '@sg/shared';
 import type { Config } from './config.ts';
 import type { Db } from './db/client.ts';
+import { apiErrorBody, HttpError } from './errors.ts';
 import { registerErrorHandler } from './plugins/errors.ts';
-import { registerSecurity, type DeviceTokenVerifier } from './plugins/security.ts';
+import { registerIdempotency } from './plugins/idempotency.ts';
+import { createSecurityGuard, registerSecurity, type DeviceTokenVerifier } from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
 import { systemRoutes } from './routes/system.ts';
 
@@ -33,21 +35,43 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const { config, db, logger } = options;
   const version = readVersion();
 
+  const guard = createSecurityGuard({
+    config,
+    ...(options.verifyDeviceToken ? { verifyDeviceToken: options.verifyDeviceToken } : {}),
+  });
+
   const app: FastifyInstance = Fastify({
     loggerInstance: logger as FastifyBaseLogger,
     // Lokal oder Netz entscheidet allein die Socket-Adresse (VERTRAEGE §5): kein trustProxy
     trustProxy: false,
+    // Fehler, die Fastify vor den Hooks abfängt (kaputte URL, ungültiger Content-Type …):
+    // auch sie bekommen die Sicherheitsprüfung und das Format ApiError
+    frameworkErrors: (error, request, rawReply) => {
+      const reply = rawReply as unknown as FastifyReply;
+      void (async () => {
+        try {
+          await guard(request);
+        } catch (denied) {
+          if (denied instanceof HttpError) {
+            return reply.code(denied.statusCode).send(apiErrorBody(denied.code, denied.message));
+          }
+        }
+        const status =
+          error.statusCode && error.statusCode >= 400 && error.statusCode < 500 ? error.statusCode : 400;
+        return reply.code(status).send(apiErrorBody('bad_request', 'Die Anfrage ist fehlerhaft.'));
+      })().catch((failure: unknown) => {
+        request.log.error({ err: failure }, 'Framework-Fehler konnte nicht beantwortet werden');
+      });
+    },
   });
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
   // Reihenfolge: Sicherheitsprüfung vor allem anderen (auch vor CORS-Preflight)
-  registerSecurity(app, {
-    config,
-    ...(options.verifyDeviceToken ? { verifyDeviceToken: options.verifyDeviceToken } : {}),
-  });
+  registerSecurity(app, guard);
   registerErrorHandler(app);
+  registerIdempotency(app, db);
 
   await app.register(cors, {
     // Nur die Entwicklungs-Web-App (SG_DEV_WEB_ORIGIN) bekommt CORS-Header

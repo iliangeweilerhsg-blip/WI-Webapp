@@ -7,6 +7,8 @@ import type { Db } from '../db/client.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
 import { listJobs } from '../services/jobs.ts';
 
+const HEALTH_DB_TIMEOUT_MS = 3000;
+
 export interface SystemRouteDeps {
   db: Db;
   version: string;
@@ -30,11 +32,18 @@ export async function systemRoutes(app: FastifyInstance, deps: SystemRouteDeps):
       },
     },
     async () => {
+      // DB-Antwort höchstens 3 s abwarten, sonst gilt sie als „fehler“
+      let timer: NodeJS.Timeout | undefined;
+      const timeout = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('timeout')), HEALTH_DB_TIMEOUT_MS);
+      });
       let dbState: 'ok' | 'fehler' = 'ok';
       try {
-        await deps.db.execute(sql`SELECT 1`);
+        await Promise.race([deps.db.execute(sql`SELECT 1`), timeout]);
       } catch {
         dbState = 'fehler';
+      } finally {
+        clearTimeout(timer);
       }
       return { status: 'ok' as const, db: dbState, version: deps.version };
     },

@@ -1,6 +1,6 @@
 {
-  "id": "c0cf3ed4-d605-46a4-b4a7-db0c551ab9f3",
-  "prevId": "a74f4b72-300a-4728-a926-adf45b439c70",
+  "id": "30907f21-5f87-485d-85a5-db9afd0486d2",
+  "prevId": "c711541c-efc0-44ba-b196-c8e1bdfd77dd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -162,7 +162,7 @@
           "tableTo": "calendar_source",
           "columnsFrom": ["source_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "calendar_event_module_id_module_id_fk": {
@@ -171,7 +171,7 @@
           "tableTo": "module",
           "columnsFrom": ["module_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -615,8 +615,8 @@
           "method": "btree",
           "with": {}
         },
-        "session_event_idx": {
-          "name": "session_event_idx",
+        "session_event_uq": {
+          "name": "session_event_uq",
           "columns": [
             {
               "expression": "calendar_event_id",
@@ -625,7 +625,8 @@
               "nulls": "last"
             }
           ],
-          "isUnique": false,
+          "isUnique": true,
+          "where": "\"session\".\"calendar_event_id\" IS NOT NULL AND \"session\".\"deleted_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -654,7 +655,7 @@
           "tableTo": "calendar_event",
           "columnsFrom": ["calendar_event_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         },
         "session_module_id_module_id_fk": {
@@ -672,7 +673,7 @@
           "tableTo": "slide_deck",
           "columnsFrom": ["slide_deck_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1009,7 +1010,7 @@
           "tableTo": "slide_deck",
           "columnsFrom": ["deck_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1165,7 +1166,7 @@
           "tableTo": "session",
           "columnsFrom": ["session_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1300,7 +1301,7 @@
           "tableTo": "exercise_sheet",
           "columnsFrom": ["sheet_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1430,7 +1431,7 @@
           "tableTo": "task",
           "columnsFrom": ["task_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         },
         "task_slide_link_slide_id_slide_id_fk": {
@@ -1439,7 +1440,7 @@
           "tableTo": "slide",
           "columnsFrom": ["slide_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -1579,7 +1580,7 @@
           "name": "job_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "provider": {
           "name": "provider",
@@ -1667,7 +1668,7 @@
           "tableTo": "job",
           "columnsFrom": ["job_id"],
           "columnsTo": ["id"],
-          "onDelete": "no action",
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -1761,6 +1762,83 @@
           "columns": ["token_hash"]
         }
       },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.idempotency_key": {
+      "name": "idempotency_key",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "method": {
+          "name": "method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "response": {
+          "name": "response",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idempotency_key_created_idx": {
+          "name": "idempotency_key_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "idempotency_key_key_method_path_pk": {
+          "name": "idempotency_key_key_method_path_pk",
+          "columns": ["key", "method", "path"]
+        }
+      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

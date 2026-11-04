@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +43,12 @@ export function loadDotEnv(env: NodeJS.ProcessEnv = process.env): string | null 
     if (env[key] === undefined && value !== undefined) env[key] = value;
   }
   return file;
+}
+
+/** true, wenn Gruppe oder andere die Datei lesen/schreiben dürfen (soll 600 sein, 02 §3). Unter Windows immer false. */
+export function hasOpenPermissions(file: string): boolean {
+  if (process.platform === 'win32') return false;
+  return (statSync(file).mode & 0o077) !== 0;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {

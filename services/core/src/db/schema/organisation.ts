@@ -75,9 +75,9 @@ export const calendarEvent = pgTable(
   'calendar_event',
   {
     ...baseColumns(),
-    sourceId: uuid('source_id').references(() => calendarSource.id), // NULL = manuell
+    sourceId: uuid('source_id').references(() => calendarSource.id, { onDelete: 'set null' }), // NULL = manuell
     externalUid: text('external_uid'), // UID aus ICS/Google, für den Abgleich
-    moduleId: uuid('module_id').references(() => courseModule.id),
+    moduleId: uuid('module_id').references(() => courseModule.id, { onDelete: 'set null' }),
     kind: text('kind').notNull(),
     title: text('title').notNull(),
     location: text('location'),
@@ -101,12 +101,12 @@ export const session = pgTable(
   'session',
   {
     ...baseColumns(),
-    calendarEventId: uuid('calendar_event_id').references(() => calendarEvent.id), // NULL = spontan
+    calendarEventId: uuid('calendar_event_id').references(() => calendarEvent.id, { onDelete: 'set null' }), // NULL = spontan
     moduleId: uuid('module_id')
       .notNull()
       .references(() => courseModule.id),
     // NULL = folienloser Modus. Typannotation nötig wegen des Zyklus session ↔ slide_deck.
-    slideDeckId: uuid('slide_deck_id').references((): AnyPgColumn => slideDeck.id),
+    slideDeckId: uuid('slide_deck_id').references((): AnyPgColumn => slideDeck.id, { onDelete: 'set null' }),
     number: integer('number'), // VL-Nummer im Modul
     title: text('title'),
     state: text('state').notNull().default('geplant'), // Zustandsautomat F-SES-01
@@ -119,7 +119,10 @@ export const session = pgTable(
   },
   (t) => [
     index('session_module_idx').on(t.moduleId),
-    index('session_event_idx').on(t.calendarEventId),
+    // Invariante 03 §2: calendar_event 1─0..1 session
+    uniqueIndex('session_event_uq')
+      .on(t.calendarEventId)
+      .where(sql`${t.calendarEventId} IS NOT NULL AND ${t.deletedAt} IS NULL`),
     // Invariante 03 §14.1: höchstens eine laufende Session
     uniqueIndex('session_one_running_uq')
       .on(t.userId)

@@ -12,6 +12,13 @@ describe('Static Export unter /', () => {
     mkdirSync(join(webDir, '_next'));
     writeFileSync(join(webDir, 'index.html'), '<html>START</html>');
     writeFileSync(join(webDir, 'modul.html'), '<html>MODUL</html>');
+    // Next-Export-Layout: modul.html UND Ordner modul/ mit weiteren Seiten
+    mkdirSync(join(webDir, 'modul'));
+    writeFileSync(join(webDir, 'modul', 'x.html'), '<html>MODUL-X</html>');
+    mkdirSync(join(webDir, 'leer'));
+    mkdirSync(join(webDir, '.git'));
+    writeFileSync(join(webDir, '.git', 'config'), 'GEHEIM');
+    writeFileSync(join(webDir, '.env'), 'GEHEIM');
     writeFileSync(join(webDir, '_next', 'app.js'), 'console.log(1)');
     t = await startTestApp({ webDir });
   });
@@ -31,6 +38,30 @@ describe('Static Export unter /', () => {
       '<html>MODUL</html>',
     );
     expect((await t.request({ url: '/modul/' })).body).toBe('<html>MODUL</html>');
+  });
+
+  it('liefert nie leere 200er: Datei neben gleichnamigem Ordner, leere Ordner', async () => {
+    const modul = await t.request({ url: '/modul' });
+    expect(modul.statusCode).toBe(200);
+    expect(modul.body).toBe('<html>MODUL</html>');
+    expect((await t.request({ url: '/modul/x.html' })).body).toBe('<html>MODUL-X</html>');
+    expect((await t.request({ url: '/modul/x' })).body).toBe('<html>MODUL-X</html>');
+    for (const url of ['/leer', '/leer/', '/modul/']) {
+      const res = await t.request({ url });
+      expect(res.statusCode, url).toBe(200);
+      expect(res.body.length, url).toBeGreaterThan(0);
+    }
+    const head = await t.request({ method: 'HEAD', url: '/modul' });
+    expect(head.statusCode).toBe(200);
+  });
+
+  it('liefert keine versteckten Dateien und Ordner (Dotfiles)', async () => {
+    for (const url of ['/.env', '/.git/config', '/.git', '/modul/.hidden', '/%2eenv']) {
+      const res = await t.request({ url });
+      expect(res.statusCode, url).toBe(404);
+      expect(res.body, url).not.toContain('GEHEIM');
+      expect(ApiErrorSchema.parse(res.json()).error.code).toBe('not_found');
+    }
   });
 
   it('liefert index.html für unbekannte Seiten-Pfade', async () => {

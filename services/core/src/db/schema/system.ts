@@ -8,6 +8,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   real,
   text,
   uuid,
@@ -83,9 +84,7 @@ export const costEntry = pgTable(
   'cost_entry',
   {
     ...baseColumns(),
-    jobId: uuid('job_id')
-      .notNull()
-      .references(() => job.id),
+    jobId: uuid('job_id').references(() => job.id, { onDelete: 'set null' }),
     provider: text('provider').notNull(),
     model: text('model').notNull(),
     task: text('task').notNull(),
@@ -95,4 +94,22 @@ export const costEntry = pgTable(
     costEstimateEur: numeric('cost_estimate_eur', { mode: 'number' }).notNull().default(0),
   },
   (t) => [index('cost_entry_job_idx').on(t.jobId), index('cost_entry_created_idx').on(t.createdAt)],
+);
+
+/** Gespeicherte erste Antworten für `Idempotency-Key` (08 §1). Einträge älter als 24 h werden beim Start gelöscht. */
+export const idempotencyKey = pgTable(
+  'idempotency_key',
+  {
+    key: uuid('key').notNull(),
+    method: text('method').notNull(),
+    path: text('path').notNull(),
+    requestHash: text('request_hash').notNull(),
+    status: integer('status').notNull(),
+    response: jsonb('response').$type<unknown>(),
+    createdAt: timestamptz('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.key, t.method, t.path] }),
+    index('idempotency_key_created_idx').on(t.createdAt),
+  ],
 );

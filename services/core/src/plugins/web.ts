@@ -41,30 +41,41 @@ function isFile(path: string): boolean {
   }
 }
 
+const notFoundBody = () => apiErrorBody('not_found', 'Die Ressource wurde nicht gefunden.');
+
 /**
- * Liefert den Static Export der Web-App unter `/` aus (VERTRAEGE §5) und setzt den
- * Not-Found-Handler:
- * - `/api/…` und alle Nicht-GET-Anfragen: 404 im `ApiError`-Format
- * - sonst die passende `.html`-Datei aus dem Export bzw. `index.html`
- * - fehlt der Export-Ordner: Hinweisseite (503)
+ * Liefert den Static Export der Web-App unter `/` aus (VERTRAEGE §5).
+ *
+ * `@fastify/static` dient nur als `sendFile`-Helfer (`serve: false`), die Auswahl der Datei macht die
+ * Route `GET /*` selbst. Reihenfolge:
+ * 1. `/api…` → 404 `ApiError`
+ * 2. Pfad enthält `..`, versteckte Segmente (`.git`, `.env`), `\` oder NUL → 404
+ * 3. existierende Datei → diese
+ * 4. Pfad mit Endung (außer `.html`) → 404
+ * 5. `<pfad>.html`, `<pfad>/index.html`, sonst `index.html`
+ * Fehlt der Export, zeigt jede Seite eine Hinweisseite (503).
+ * Alle anderen unbekannten Routen und Methoden → 404 `ApiError`.
  */
 export async function registerWeb(app: FastifyInstance, config: Pick<Config, 'webDir'>): Promise<void> {
   const { webDir } = config;
   const available = isFile(join(webDir, 'index.html'));
 
+  app.setNotFoundHandler(async (_request, reply) => reply.code(404).send(notFoundBody()));
+
   if (available) {
-    await app.register(fastifyStatic, { root: webDir, index: ['index.html'] });
+    await app.register(fastifyStatic, { root: webDir, serve: false });
+  } else {
+    app.log.warn(
+      { webDir },
+      'Kein Web-Export gefunden (index.html fehlt): Es wird nur die Hinweisseite ausgeliefert.',
+    );
   }
 
-  app.setNotFoundHandler(async (request, reply) => {
+  app.get('/*', async (request, reply) => {
     const rawPath = request.url.split('?')[0] ?? '/';
-    const isApi = rawPath === '/api' || rawPath.startsWith('/api/');
-    const isRead = request.method === 'GET' || request.method === 'HEAD';
-
-    if (isApi || !isRead) {
-      return reply.code(404).send(apiErrorBody('not_found', 'Die Ressource wurde nicht gefunden.'));
+    if (rawPath === '/api' || rawPath.startsWith('/api/')) {
+      return reply.code(404).send(notFoundBody());
     }
-
     if (!available) {
       return reply.code(503).type('text/html; charset=utf-8').send(missingWebPage(webDir));
     }
@@ -73,29 +84,22 @@ export async function registerWeb(app: FastifyInstance, config: Pick<Config, 'we
     try {
       decoded = decodeURIComponent(rawPath);
     } catch {
-      return reply.code(404).send(apiErrorBody('not_found', 'Die Ressource wurde nicht gefunden.'));
+      return reply.code(404).send(notFoundBody());
     }
-    const rel = posix.normalize(decoded).replace(/^\/+/, '').replace(/\/+$/, '');
-    const safe = !rel.startsWith('..') && !decoded.includes('\0') && !decoded.includes('\\');
-    if (!safe) {
-      return reply.code(404).send(apiErrorBody('not_found', 'Die Ressource wurde nicht gefunden.'));
-    }
+    const segments = decoded.split('/').filter((segment) => segment !== '');
+    const unsafe =
+      decoded.includes('\0') || decoded.includes('\\') || segments.some((segment) => segment.startsWith('.'));
+    if (unsafe) return reply.code(404).send(notFoundBody());
+    const rel = segments.join('/');
 
-    // Echte Dateien mit Endung (z. B. /app.js), die es nicht gibt, sind ein 404 – kein HTML
+    if (rel && isFile(join(webDir, rel))) return reply.sendFile(rel);
+
+    // Dateien mit Endung (z. B. /app.js), die es nicht gibt, sind ein 404 – kein HTML
     const ext = posix.extname(rel);
-    if (ext && ext !== '.html') {
-      return reply.code(404).send(apiErrorBody('not_found', 'Die Ressource wurde nicht gefunden.'));
-    }
+    if (ext && ext !== '.html') return reply.code(404).send(notFoundBody());
 
     const candidates = rel ? [`${rel}.html`, `${rel}/index.html`, 'index.html'] : ['index.html'];
     const hit = candidates.find((candidate) => isFile(join(webDir, candidate))) ?? 'index.html';
-    return reply.code(200).type('text/html; charset=utf-8').sendFile(hit);
+    return reply.type('text/html; charset=utf-8').sendFile(hit);
   });
-
-  if (!available) {
-    app.log.warn(
-      { webDir },
-      'Kein Web-Export gefunden (index.html fehlt): Es wird nur die Hinweisseite ausgeliefert.',
-    );
-  }
 }

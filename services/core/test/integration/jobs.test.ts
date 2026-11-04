@@ -93,7 +93,7 @@ describe('enqueueJob', () => {
     try {
       await expect(
         t.handle.db.transaction(async (tx) => {
-          await enqueueJob(tx, { type: 'pdf.ingest', payload: {} });
+          await enqueueJob(tx, { type: 'pdf.ingest', payload: { slide_deck_id: uuidv7() } });
           throw new Error('fachlicher Fehler');
         }),
       ).rejects.toThrow('fachlicher Fehler');
@@ -109,10 +109,34 @@ describe('enqueueJob', () => {
     const l = await listen();
     try {
       const ids = await t.handle.db.transaction(async (tx) => [
-        await enqueueJob(tx, { type: 'pdf.ingest', payload: {} }),
+        await enqueueJob(tx, { type: 'pdf.ingest', payload: { slide_deck_id: uuidv7() } }),
         await enqueueJob(tx, { type: 'embed.slides', payload: {} }),
       ]);
       expect((await l.waitFor(2)).sort()).toEqual([...ids].sort());
+    } finally {
+      await l.stop();
+    }
+  });
+
+  it('prüft das Payload vor dem INSERT (kein Job, kein NOTIFY)', async () => {
+    const l = await listen();
+    try {
+      for (const payload of [{}, { slide_deck_id: 'keine-uuid' }, { slide_deck_id: uuidv7(), extra: 1 }]) {
+        await expect(
+          t.handle.db.transaction((tx) => enqueueJob(tx, { type: 'pdf.ingest', payload })),
+        ).rejects.toThrow(/Ungültiges Payload für Job pdf\.ingest/);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(l.received).toEqual([]);
+      expect(await t.handle.db.select().from(job)).toHaveLength(0);
+      // Übungsblatt-Variante ist erlaubt
+      await t.handle.db.transaction((tx) =>
+        enqueueJob(tx, { type: 'pdf.ingest', payload: { exercise_sheet_id: uuidv7() } }),
+      );
+      // Typen ohne Schema werden (noch) nicht geprüft
+      await t.handle.db.transaction((tx) =>
+        enqueueJob(tx, { type: 'embed.slides', payload: { beliebig: 1 } }),
+      );
     } finally {
       await l.stop();
     }
@@ -135,7 +159,7 @@ describe('GET /api/v1/jobs', () => {
         await t.handle.db.transaction((tx) =>
           enqueueJob(tx, {
             type: 'pdf.ingest',
-            payload: { n: i },
+            payload: { slide_deck_id: uuidv7() },
             ...(extra.sessionId ? { sessionId: extra.sessionId } : {}),
           }),
         ),
@@ -193,7 +217,8 @@ describe('GET /api/v1/jobs', () => {
     // Alle Jobs einer Transaktion haben dasselbe now() → gleicher created_at
     const ids = await t.handle.db.transaction(async (tx) => {
       const out: string[] = [];
-      for (let i = 0; i < 6; i++) out.push(await enqueueJob(tx, { type: 'pdf.ingest', payload: { i } }));
+      for (let i = 0; i < 6; i++)
+        out.push(await enqueueJob(tx, { type: 'pdf.ingest', payload: { slide_deck_id: uuidv7() } }));
       return out;
     });
     const rows = await t.handle.sql`SELECT count(DISTINCT created_at)::int AS n FROM job`;

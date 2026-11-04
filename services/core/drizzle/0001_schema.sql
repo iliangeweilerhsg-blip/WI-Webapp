@@ -194,7 +194,7 @@ CREATE TABLE "cost_entry" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"deleted_at" timestamp with time zone,
-	"job_id" uuid NOT NULL,
+	"job_id" uuid,
 	"provider" text NOT NULL,
 	"model" text NOT NULL,
 	"task" text NOT NULL,
@@ -217,6 +217,17 @@ CREATE TABLE "device" (
 	"clock_offset_ms" integer DEFAULT 0 NOT NULL,
 	"app_version" text,
 	CONSTRAINT "device_token_hash_unique" UNIQUE("token_hash")
+);
+--> statement-breakpoint
+CREATE TABLE "idempotency_key" (
+	"key" uuid NOT NULL,
+	"method" text NOT NULL,
+	"path" text NOT NULL,
+	"request_hash" text NOT NULL,
+	"status" integer NOT NULL,
+	"response" jsonb,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "idempotency_key_key_method_path_pk" PRIMARY KEY("key","method","path")
 );
 --> statement-breakpoint
 CREATE TABLE "job" (
@@ -250,27 +261,27 @@ CREATE TABLE "setting" (
 	"deleted_at" timestamp with time zone
 );
 --> statement-breakpoint
-ALTER TABLE "calendar_event" ADD CONSTRAINT "calendar_event_source_id_calendar_source_id_fk" FOREIGN KEY ("source_id") REFERENCES "public"."calendar_source"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "calendar_event" ADD CONSTRAINT "calendar_event_module_id_module_id_fk" FOREIGN KEY ("module_id") REFERENCES "public"."module"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "calendar_event" ADD CONSTRAINT "calendar_event_source_id_calendar_source_id_fk" FOREIGN KEY ("source_id") REFERENCES "public"."calendar_source"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "calendar_event" ADD CONSTRAINT "calendar_event_module_id_module_id_fk" FOREIGN KEY ("module_id") REFERENCES "public"."module"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "module" ADD CONSTRAINT "module_semester_id_semester_id_fk" FOREIGN KEY ("semester_id") REFERENCES "public"."semester"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "session" ADD CONSTRAINT "session_calendar_event_id_calendar_event_id_fk" FOREIGN KEY ("calendar_event_id") REFERENCES "public"."calendar_event"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "session" ADD CONSTRAINT "session_calendar_event_id_calendar_event_id_fk" FOREIGN KEY ("calendar_event_id") REFERENCES "public"."calendar_event"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "session" ADD CONSTRAINT "session_module_id_module_id_fk" FOREIGN KEY ("module_id") REFERENCES "public"."module"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "session" ADD CONSTRAINT "session_slide_deck_id_slide_deck_id_fk" FOREIGN KEY ("slide_deck_id") REFERENCES "public"."slide_deck"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "session" ADD CONSTRAINT "session_slide_deck_id_slide_deck_id_fk" FOREIGN KEY ("slide_deck_id") REFERENCES "public"."slide_deck"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "exercise_sheet" ADD CONSTRAINT "exercise_sheet_module_id_module_id_fk" FOREIGN KEY ("module_id") REFERENCES "public"."module"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "slide" ADD CONSTRAINT "slide_deck_id_slide_deck_id_fk" FOREIGN KEY ("deck_id") REFERENCES "public"."slide_deck"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "slide" ADD CONSTRAINT "slide_deck_id_slide_deck_id_fk" FOREIGN KEY ("deck_id") REFERENCES "public"."slide_deck"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "slide_deck" ADD CONSTRAINT "slide_deck_module_id_module_id_fk" FOREIGN KEY ("module_id") REFERENCES "public"."module"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "slide_deck" ADD CONSTRAINT "slide_deck_session_id_session_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."session"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "task" ADD CONSTRAINT "task_sheet_id_exercise_sheet_id_fk" FOREIGN KEY ("sheet_id") REFERENCES "public"."exercise_sheet"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "task_slide_link" ADD CONSTRAINT "task_slide_link_task_id_task_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."task"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "task_slide_link" ADD CONSTRAINT "task_slide_link_slide_id_slide_id_fk" FOREIGN KEY ("slide_id") REFERENCES "public"."slide"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "cost_entry" ADD CONSTRAINT "cost_entry_job_id_job_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."job"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "slide_deck" ADD CONSTRAINT "slide_deck_session_id_session_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."session"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "task" ADD CONSTRAINT "task_sheet_id_exercise_sheet_id_fk" FOREIGN KEY ("sheet_id") REFERENCES "public"."exercise_sheet"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "task_slide_link" ADD CONSTRAINT "task_slide_link_task_id_task_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."task"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "task_slide_link" ADD CONSTRAINT "task_slide_link_slide_id_slide_id_fk" FOREIGN KEY ("slide_id") REFERENCES "public"."slide"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "cost_entry" ADD CONSTRAINT "cost_entry_job_id_job_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."job"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "calendar_event_starts_idx" ON "calendar_event" USING btree ("starts_at");--> statement-breakpoint
 CREATE INDEX "calendar_event_module_idx" ON "calendar_event" USING btree ("module_id");--> statement-breakpoint
 CREATE INDEX "calendar_event_source_uid_idx" ON "calendar_event" USING btree ("source_id","external_uid");--> statement-breakpoint
 CREATE INDEX "module_semester_idx" ON "module" USING btree ("semester_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "semester_current_uq" ON "semester" USING btree ("user_id") WHERE "semester"."is_current" AND "semester"."deleted_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "session_module_idx" ON "session" USING btree ("module_id");--> statement-breakpoint
-CREATE INDEX "session_event_idx" ON "session" USING btree ("calendar_event_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "session_event_uq" ON "session" USING btree ("calendar_event_id") WHERE "session"."calendar_event_id" IS NOT NULL AND "session"."deleted_at" IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "session_one_running_uq" ON "session" USING btree ("user_id") WHERE "session"."state" = 'laeuft' AND "session"."deleted_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "exercise_sheet_module_idx" ON "exercise_sheet" USING btree ("module_id");--> statement-breakpoint
 CREATE INDEX "exercise_sheet_sha_idx" ON "exercise_sheet" USING btree ("module_id","sha256");--> statement-breakpoint
@@ -284,6 +295,7 @@ CREATE UNIQUE INDEX "task_slide_link_uq" ON "task_slide_link" USING btree ("task
 CREATE INDEX "task_slide_link_slide_idx" ON "task_slide_link" USING btree ("slide_id");--> statement-breakpoint
 CREATE INDEX "cost_entry_job_idx" ON "cost_entry" USING btree ("job_id");--> statement-breakpoint
 CREATE INDEX "cost_entry_created_idx" ON "cost_entry" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX "idempotency_key_created_idx" ON "idempotency_key" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "job_pick_idx" ON "job" USING btree ("priority" DESC NULLS FIRST,"created_at") WHERE "job"."state" = 'wartet' AND "job"."deleted_at" IS NULL;--> statement-breakpoint
 CREATE INDEX "job_session_idx" ON "job" USING btree ("session_id");--> statement-breakpoint
 CREATE INDEX "job_created_idx" ON "job" USING btree ("created_at" DESC NULLS FIRST,"id" DESC NULLS FIRST);

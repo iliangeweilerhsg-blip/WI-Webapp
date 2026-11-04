@@ -15,6 +15,9 @@ import { HttpError } from '../errors.ts';
  * 4. Zustandsändernde Anfragen (POST, PUT, PATCH, DELETE) mit `Origin`-Header (Browser) müssen von der
  *    eigenen Herkunft oder `SG_DEV_WEB_ORIGIN` kommen, sonst 403 `origin_not_allowed` (CSRF-Schutz).
  *    Ohne `Origin` (curl, iPad-App) gilt nur die Token-Regel.
+ *
+ * Die Prüfung steckt in einem „Wächter“ (`SecurityGuard`). Er läuft als onRequest-Hook und zusätzlich
+ * bei Framework-Fehlern (z. B. kaputte URL), die Fastify vor den Hooks abfängt.
  */
 
 const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
@@ -26,6 +29,9 @@ export type DeviceTokenVerifier = (token: string, request: FastifyRequest) => Pr
 
 /** Phase 0: es gibt noch keine gekoppelten Geräte */
 export const rejectAllTokens: DeviceTokenVerifier = async () => false;
+
+/** Wirft einen `HttpError`, wenn die Anfrage nicht erlaubt ist */
+export type SecurityGuard = (request: FastifyRequest) => Promise<void>;
 
 export function isLoopbackAddress(address: string | undefined): boolean {
   return address !== undefined && LOOPBACK_ADDRESSES.has(address);
@@ -41,14 +47,14 @@ export interface SecurityOptions {
   verifyDeviceToken?: DeviceTokenVerifier;
 }
 
-export function registerSecurity(app: FastifyInstance, options: SecurityOptions): void {
+export function createSecurityGuard(options: SecurityOptions): SecurityGuard {
   const { port, devWebOrigin } = options.config;
   const verify = options.verifyDeviceToken ?? rejectAllTokens;
   const allowedLocalHosts = new Set(LOOPBACK_HOSTNAMES.map((name) => `${name}:${port}`));
   const ownOrigins = new Set(LOOPBACK_HOSTNAMES.map((name) => `http://${name}:${port}`));
   if (devWebOrigin) ownOrigins.add(devWebOrigin);
 
-  app.addHook('onRequest', async (request) => {
+  return async (request) => {
     // Nur die Socket-Adresse zählt (kein X-Forwarded-For, trustProxy ist aus)
     const local = isLoopbackAddress(request.socket.remoteAddress);
     const host = request.headers.host?.toLowerCase();
@@ -79,5 +85,11 @@ export function registerSecurity(app: FastifyInstance, options: SecurityOptions)
     if (origin !== undefined && MUTATING_METHODS.has(request.method) && !allowedOrigins.has(origin)) {
       throw new HttpError(403, 'origin_not_allowed', 'Der Origin dieser Anfrage ist nicht erlaubt.');
     }
+  };
+}
+
+export function registerSecurity(app: FastifyInstance, guard: SecurityGuard): void {
+  app.addHook('onRequest', async (request) => {
+    await guard(request);
   });
 }
