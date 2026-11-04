@@ -1,11 +1,22 @@
-# Zusammenarbeit: Claude (Lead) × Argon (Gemini 4 Argon)
+# Zusammenarbeit: Claude (Lead) × Claude-Subagents × Argon (Gemini 4 Argon)
 
-Stand: 3. November 2026 · Betrieb **nur über Abos** (Claude-Abo und Google-AI-Abo), keine API-Keys.
+Stand: 4. November 2026 · Betrieb **nur über Abos** (Claude-Abo und Google-AI-Abo), keine API-Keys.
 
 ## 1. Grundidee
 
-Claude führt, Argon ist Spezialist, der Owner (Mensch) entscheidet und merged.
-Die beiden KIs laufen in getrennten Produkten und können sich nicht direkt aufrufen.
+Claude führt und merged, der Owner (Mensch) setzt Ziele und hat ein Veto (`status:halt`).
+
+**Gewichtung (Vorgabe des Owners):** Die Hauptarbeit machen **Claude und Claude-Subagents**.
+**Argon ist zusätzliche Unterstützung**: für Aufgaben, bei denen seine Stärken klar helfen (Abschnitt 3), und als Extra-Kapazität.
+Kein Arbeitspaket darf davon abhängen, dass Argon gerade läuft. Was eilig ist oder etwas blockiert, macht Claude.
+
+| Wer | Anteil (Richtwert) | Typische Arbeit |
+|---|---|---|
+| **Claude (Lead)** | Steuerung | Architektur, Schnittstellen, Aufgaben zerlegen, Reviews, Integration, Merges |
+| **Claude-Subagents** | Großteil der Umsetzung | Features parallel in eigenen Branches, Tests, Refactorings, unabhängige Reviews (Modell nach Abschnitt 4) |
+| **Argon** | Ergänzung | UI aus Mockups/Screenshots, Security-Audits, Analyse langer Dokumente, Gegen-Reviews, große Textmengen |
+
+Claude und Argon laufen in getrennten Produkten und können sich nicht direkt aufrufen.
 **GitHub ist die gemeinsame Schnittstelle:** Aufgaben sind Issues, Ergebnisse sind Pull Requests, Feedback sind Reviews und Kommentare.
 
 ```
@@ -19,7 +30,7 @@ Owner öffnet Antigravity + Start-Prompt ──▶ Argon arbeitet die Queue ab
                                                      │
                        PR "[Argon] …" (status:review) ◀┘
                  Claude reviewt ──▶ Feedback + Issue: agent:argon, status:nacharbeit ──▶ nächster Argon-Schub
-                 Claude gibt frei (status:freigegeben) ──▶ Owner merged
+                 Claude gibt frei (status:freigegeben) ──▶ Claude merged
 ```
 
 ## 2. Welche Kanäle es per Abo gibt (Recherche, Nov. 2026)
@@ -125,10 +136,10 @@ Das Gemini-Abo hat Nutzungslimits. Ist es aufgebraucht, macht Claude weiter, und
 - Argon-PRs reviewen, die Argon-Queue für den nächsten Schub vorbereiten
 - Fragen an den Owner als Issue mit `status:blockiert` sammeln statt zu raten
 
-**Morgens (Owner, ca. 10 Minuten):**
-1. Freigegebene PRs mergen: `gh pr list --label status:freigegeben`
-2. Fragen beantworten: `gh issue list --label status:blockiert`. Nach der Antwort das Label `status:blockiert` entfernen
-3. Antigravity öffnen, Modell wählen, Prompt aus [`docs/argon/DAUERBETRIEB.md`](argon/DAUERBETRIEB.md) einfügen. Argon arbeitet die Queue ab und wartet danach selbstständig auf neue Aufgaben, solange der Mac an ist (einmal pro Tag starten reicht)
+**Morgens (Owner, ca. 5 Minuten):**
+1. Fragen beantworten: `gh issue list --label status:blockiert`. Nach der Antwort das Label `status:blockiert` entfernen
+2. Optional ansehen, was Claude gemergt hat: `gh pr list --state merged --limit 10`. Soll ein offener PR **nicht** gemergt werden: Label `status:halt` setzen
+3. Optional, als Zusatzkapazität: Antigravity öffnen, Modell wählen, Prompt aus [`docs/argon/DAUERBETRIEB.md`](argon/DAUERBETRIEB.md) einfügen. Argon arbeitet seine Queue ab und wartet danach selbstständig auf neue Aufgaben, solange der Mac an ist. Ohne Argon läuft das Projekt trotzdem weiter
 4. Hängt ein Issue auf `status:in-arbeit`, ohne dass jemand daran arbeitet: `gh issue edit <nr> --remove-label status:in-arbeit`
 
 ## 7. Pilotphase: Argons Stärken im echten Projekt prüfen
@@ -144,7 +155,7 @@ Siehe [`ERFAHRUNGSLOG.md`](ERFAHRUNGSLOG.md) (eigene Datei, damit es keine Merge
 
 ## Einrichtung (einmalig, durch den Owner)
 
-1. Diesen Branch nach `main` mergen – **vorher** startet Argon nicht (der Start-Prompt prüft das).
+1. (Erledigt am 04.11.2026) Setup nach `main` gemergt – ohne `GEMINI.md`/`AGENTS.md` auf `main` startet Argon nicht (der Start-Prompt prüft das).
 2. Antigravity installieren, mit dem Google-Konto des Abos anmelden, Repo klonen und öffnen.
 3. GitHub CLI installieren. Sie ist **kein Teil von Antigravity**, sondern ein eigenes Programm, das Argon im Terminal von Antigravity benutzt.
    - Windows: im Terminal `winget install --id GitHub.cli` (dazu Git: `winget install --id Git.Git`)
