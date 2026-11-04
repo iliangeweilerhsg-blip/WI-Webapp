@@ -136,10 +136,10 @@ Das Gemini-Abo hat Nutzungslimits. Ist es aufgebraucht, macht Claude weiter, und
 - Argon-PRs reviewen, die Argon-Queue für den nächsten Schub vorbereiten
 - Fragen an den Owner als Issue mit `status:blockiert` sammeln statt zu raten
 
-**Morgens (Owner, ca. 10 Minuten):**
-1. Freigegebene PRs mergen: `gh pr list --label status:freigegeben`
-2. Fragen beantworten: `gh issue list --label status:blockiert`. Nach der Antwort das Label `status:blockiert` entfernen
-3. Antigravity öffnen, Modell wählen, Prompt aus [`docs/argon/DAUERBETRIEB.md`](argon/DAUERBETRIEB.md) einfügen. Argon arbeitet die Queue ab und wartet danach selbstständig auf neue Aufgaben, solange der Mac an ist (einmal pro Tag starten reicht)
+**Morgens (Owner, ca. 5 Minuten):**
+1. Fragen beantworten: `gh issue list --label status:blockiert`. Nach der Antwort das Label `status:blockiert` entfernen
+2. Optional ansehen, was Claude gemergt hat: `gh pr list --state merged --limit 10`. Soll ein offener PR **nicht** gemergt werden: Label `status:halt` setzen
+3. Optional, als Zusatzkapazität: Antigravity öffnen, Modell wählen, Prompt aus [`docs/argon/DAUERBETRIEB.md`](argon/DAUERBETRIEB.md) einfügen. Argon arbeitet seine Queue ab und wartet danach selbstständig auf neue Aufgaben, solange der Mac an ist. Ohne Argon läuft das Projekt trotzdem weiter
 4. Hängt ein Issue auf `status:in-arbeit`, ohne dass jemand daran arbeitet: `gh issue edit <nr> --remove-label status:in-arbeit`
 
 ## 7. Pilotphase: Argons Stärken im echten Projekt prüfen
@@ -155,7 +155,7 @@ Siehe [`ERFAHRUNGSLOG.md`](ERFAHRUNGSLOG.md) (eigene Datei, damit es keine Merge
 
 ## Einrichtung (einmalig, durch den Owner)
 
-1. Diesen Branch nach `main` mergen – **vorher** startet Argon nicht (der Start-Prompt prüft das).
+1. (Erledigt am 04.11.2026) Setup nach `main` gemergt – ohne `GEMINI.md`/`AGENTS.md` auf `main` startet Argon nicht (der Start-Prompt prüft das).
 2. Antigravity installieren, mit dem Google-Konto des Abos anmelden, Repo klonen und öffnen.
 3. GitHub CLI installieren. Sie ist **kein Teil von Antigravity**, sondern ein eigenes Programm, das Argon im Terminal von Antigravity benutzt.
    - Windows: im Terminal `winget install --id GitHub.cli` (dazu Git: `winget install --id Git.Git`)
