@@ -47,7 +47,9 @@ module(              -- Lehrveranstaltung
   color text,                                               -- Token aus der Palette, nicht frei
   ects numeric, exam_type text,                             -- schriftlich|mündlich|Projekt|…
   lecturer text, lang text,
-  description_md text)                                      -- aus Modulbeschreibung (F-KAL-04)
+  description_md text,                                      -- aus Modulbeschreibung (F-KAL-04)
+  settings jsonb default '{}')                              -- Modul-Einstellungen (W-06): Layout und Spaltenbreiten (F-DSH-01),
+                                                            -- Schreibmodus (F-INK-03); Schema ModuleSettings in packages/schemas
 
 calendar_source(
   kind text,            -- ics_file | ics_url | google
@@ -184,7 +186,7 @@ stroke(                 -- neutrales Strich-Format, Kap. 08 §4
 
 page_element(
   page_id → page, kind text,   -- text | image | shape | tape | stamp
-  payload jsonb,               -- je nach kind, Kap. 08 §4.3
+  payload jsonb,               -- je nach kind, Kap. 08 §4.4
   t_ms int8 NULL, z int)
 ```
 

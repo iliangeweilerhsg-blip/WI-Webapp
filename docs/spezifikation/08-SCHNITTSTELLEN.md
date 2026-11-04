@@ -21,10 +21,10 @@ Ein Formatwechsel ist erst fertig, wenn alle drei Generate-Schritte und Contract
 | Semester & Module | `GET/POST /semesters` · `GET/PATCH /semesters/{id}` · `GET/POST /modules` · `GET/PATCH/DELETE /modules/{id}` |
 | Kalender | `POST /calendar/sources` (ICS-Datei/URL) · `POST /calendar/sources/{id}/sync` · `GET /calendar/events?from&to` · `PATCH /calendar/events/{id}` (Modul, Art) |
 | Material | `POST /slide-decks` (multipart, `module_id`, `session_id?`) · `GET /slide-decks/{id}` · `GET /slides/{id}` · `GET /slides/{id}/image` · `POST /exercise-sheets` · `GET /tasks/{id}` · `PATCH /task-slide-links/{id}` |
-| Sessions | `GET /sessions?module_id&state` · `POST /sessions` (spontan) · `POST /sessions/{id}/start` · `/pause` · `/resume` · `/stop` · `GET /sessions/{id}/timeline` (Segmente, Marker, Striche-Dichte) · `POST /sessions/{id}/import-media` |
-| Audio | `POST /sessions/{id}/recordings` · `PUT /recordings/{id}/chunks/{seq}` (Rohdaten, `X-Start-Ms`, `X-Duration-Ms`, `X-Sha256`) · `GET /recordings/{id}/audio?from_ms&to_ms` (Range-fähig) |
+| Sessions | `GET /sessions?module_id&state` · `POST /sessions` (spontan) · `POST /sessions/{id}/start` · `/pause` · `/resume` · `/stop` · `GET /sessions/{id}/snapshot` (Live-Stand) · `GET /sessions/{id}/timeline` (Segmente, Marker, Striche-Dichte, Phase 2) · `POST /sessions/{id}/import-media` |
+| Audio | `POST /sessions/{id}/recordings` · `PUT /recordings/{id}/chunks/{seq}` (Rohdaten, `X-Start-Ms`, `X-Duration-Ms`, `X-Sha256`) · `POST /recordings/{id}/complete` · `GET /recordings/{id}/audio?from_ms&to_ms` (Range-fähig) |
 | Transkript | `GET /sessions/{id}/transcript?slide_id` |
-| Notizen | `GET/POST /notebooks` · `PATCH/DELETE /notebooks/{id}` · `GET /pages/{id}` · `GET /pages/{id}/strokes` · `PUT/GET /pages/{id}/pkdrawing` · `POST /photos` (multipart) · `GET /photos/{id}/file` |
+| Notizen | `GET/POST /notebooks` · `PATCH/DELETE /notebooks/{id}` · `GET /notebooks/{id}/pages` · `GET /pages/{id}` · `GET /pages/{id}/strokes` · `PUT/GET /pages/{id}/pkdrawing` · `PUT /photos/{id}/file` (Rohdaten, `photo_id` vom iPad) · `GET /photos/{id}/file` |
 | Wissen | `GET/POST /concepts` · `GET/PATCH /concepts/{id}` · `POST /concepts/{id}/merge` · `POST /concepts/{id}/split` · `GET/POST/DELETE /concept-relations` · `GET /concepts/{id}/evidence` · `GET /graph?module_id&semester_id` |
 | Inbox | `GET /inbox?status=offen&session_id` · `POST /inbox/{id}/accept` (optional geänderte Nutzlast) · `POST /inbox/{id}/reject` · `POST /inbox/bulk` |
 | Lernen | `GET /review/queue?context=taeglich` · `POST /reviews` · `GET/POST/PATCH /cards` · `POST /cards/from-selection` · `POST /learn-sessions` · `PATCH /learn-sessions/{id}` · `POST /grade/open` · `GET /readiness?module_id` · `GET /mastery?concept_id` |
@@ -55,6 +55,8 @@ Danach sendet der Server fehlende Operationen ab `from_seq`. Anschließend: **Uh
 ```
 5 Runden, Median-Versatz, Wiederholung alle 5 min.
 
+Die vollständigen Nachrichten (u. a. `protocol`, `client`, `subscribe`, `presence`, `time.offset`, `error`) stehen als `SyncClientMessage` bzw. `SyncServerMessage` in `packages/schemas`. Abläufe, Fehler und Grenzen regelt `docs/VERTRAEGE.md` §11.
+
 ### 2.2 Ströme
 | Strom | Inhalt | Schreiber |
 |---|---|---|
@@ -66,7 +68,7 @@ Danach sendet der Server fehlende Operationen ab `from_seq`. Anschließend: **Uh
 ```jsonc
 { "type": "op", "op_id": "<uuidv7>", "stream": "notebook:<id>",
   "kind": "stroke.add",
-  "at": 1730707260123,                // synchronisierte Zeit
+  "at": 1730707260123,                // synchronisierte Zeit, zu der die Operation auf dem Gerät entstand
   "clock_uncertain": false,
   "data": { … } }
 // Server → alle Clients des Stroms (inkl. Bestätigung an den Absender)
@@ -81,7 +83,7 @@ Danach sendet der Server fehlende Operationen ab `from_seq`. Anschließend: **Uh
 | `page.delete` | `{ page_id }` |
 | `stroke.add` | `{ page_id, stroke: Stroke }` (§4) |
 | `stroke.remove` | `{ page_id, client_ids: [ … ] }` |
-| `element.upsert` | `{ page_id, element: PageElement }` (§4.3) |
+| `element.upsert` | `{ page_id, element: PageElement }` (§4.4) |
 | `element.remove` | `{ page_id, element_id }` |
 | `drawing.snapshot` | `{ page_id, pkdrawing_ref }` (Datei per HTTP über `PUT /pages/{id}/pkdrawing` hochgeladen, nur fürs iPad) |
 | `session.start` | `{ session_id, module_id, calendar_event_id?, slide_deck_id?, started_from: "ipad"\|"mac", started_at }` |
@@ -138,6 +140,11 @@ Danach sendet der Server fehlende Operationen ab `from_seq`. Anschließend: **Uh
 Pro Punkt 6 Werte als `Float32` little-endian, hintereinander:
 `x`, `y` (pt) · `dt` (ms seit `created_at`) · `force` (0–1, normiert) · `azimuth` (rad) · `altitude` (rad).
 Optionaler Glättung wird beim Rendern angewendet, nie beim Speichern. Ein durchschnittlicher Strich hat 40–150 Punkte (≈ 1–4 KB).
+
+**Klarstellungen (Testdaten `tests/fixtures/strokes`, PR #39):**
+- `points` enthält die Rohkoordinaten **vor** `transform`, wie `PKStrokePoint.location` im Pfad-Koordinatensystem. `bbox` gilt **nach** `transform` und schließt die halbe Strichbreite (`width / 2`) ein. Bei einer Lasso-Verschiebung ändern sich also `transform` und `bbox`, `points` bleibt gleich.
+- `dt` des ersten Punkts ist `0`, `dt` steigt monoton. `t_end_ms − t_start_ms` entspricht dem `dt` des letzten Punkts.
+- Ein Punkt hat genau 24 Byte, also 32 Base64-Zeichen. `points` hat darum nie Padding und mindestens einen Punkt.
 
 ### 4.3 Zuordnung PencilKit ↔ neutrales Format (iPad)
 - **Quelle der Wahrheit auf dem iPad** ist `PKDrawing` (verlustfrei). Das neutrale Format wird daraus abgeleitet.

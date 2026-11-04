@@ -15,13 +15,22 @@
     "auto_stop_extend_min": 15,
     "default_layout": "standard",
     "default_ink_mode": "freie_seite",
-    "toolbar_side": "links"
+    "toolbar_side": "rechts"
   },
   "pen": {
     "double_tap": "radierer",
     "squeeze": "werkzeugpalette",
     "shape_recognition": false,
-    "favorite_colors": ["#1E2A44FF", "#C92A2AFF", "#1864ABFF", "#2B8A3EFF"]
+    "favorite_colors": [
+      "#1E2A44FF",
+      "#C92A2AFF",
+      "#1864ABFF",
+      "#2B8A3EFF",
+      "#E67700FF",
+      "#5F3DC4FF",
+      "#495057FF",
+      "#000000FF"
+    ]
   },
   "data": {
     "backup_target": null,

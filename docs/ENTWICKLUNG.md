@@ -45,6 +45,11 @@ Python-Contract-Tests: `cd packages/schemas && uv run --project python pytest py
 
 1. Schema in `packages/schemas/src/*.schema.json` ändern. Alle Typnamen liegen in einem gemeinsamen Namensraum, Verweise als `#/$defs/Name`.
    Neben einem `$ref` keine weiteren Schlüssel (z. B. `description`), sonst erzeugt der Codegen doppelte Typen.
+   Damit alle drei Generatoren gleich prüfen:
+   - **Unions** als `anyOf` aus `$ref`s auf strikte Objekt-Varianten mit `const`-Unterscheider (`type`, `kind`, `name`), kein `oneOf`. Muster: `PdfIngestPayload`, `SyncOp`, `PageElement`. Python bekommt dafür ein `type X = A | B`, das iPad decodiert die Variante selbst (`docs/VERTRAEGE.md` §11.7).
+   - **Enums** immer als eigenes `$def`, nie inline. Sonst erzeugt Pydantic Klassen wie `Kind1`.
+   - **Nicht verwenden:** `minProperties`, `if/then`, `dependentRequired`, `uniqueItems`. Pydantic ignoriert sie, die Contract-Tests würden auseinanderlaufen. Solche Regeln prüft der Core und dokumentiert sie in der `description`.
+   - **Bekannte Nachsicht von Pydantic:** Optionale, nicht nullbare Felder akzeptieren dort auch `null`. Ungültige Beispiele dürfen sich darauf nicht stützen.
 2. Beispiele unter `packages/schemas/examples/valid|invalid/<Typ>.<name>.json` ergänzen.
 3. `pnpm schemas:gen`, dann `pnpm test` und die Python-Contract-Tests.
 4. Generierte Dateien **nie von Hand** ändern:
@@ -80,7 +85,7 @@ Dateien liefert die API über eigene Endpunkte aus:
 - `GET /slides/{id}/image` und `GET /slides/{id}/thumb` (Vorschaubild, Ergänzung zu 08 §1)
 - Übungsblätter entsprechend in T0-09
 
-Schemas für `calendar_source`, `calendar_event` und `session` folgen mit T1-01 und T1-02. Bis dahin ist `SlideDeck.session_id` immer `null`.
+Die Phase-1-Schemas (Kalender, Session, Handschrift, Sync, Geräte, Backups, Einstellungen) und ihre Laufzeitregeln stehen in `docs/VERTRAEGE.md` §6–15. `SlideDeck.session_id` bleibt `null`, bis T1-02 Sessions anlegt.
 
 **Bekannte Lücke:** Pydantic akzeptiert bei Zeitstempeln auch Zahlen (Unix-Zeit), Zod und JSON Schema nicht. Payloads schreibt nur der Core, und der prüft mit Zod. Darum ist das in Phase 0 unkritisch.
 
@@ -96,3 +101,12 @@ Schemas für `calendar_source`, `calendar_event` und `session` folgen mit T1-01 
 | `ExerciseSheet` (API) | `page_count` neu, `has_solution` statt `solution_file_path` | Der Dateipfad ist intern, die API meldet nur, ob eine Lösung da ist |
 | `GET /slides/{id}/thumb` | Neuer Endpunkt | Die Seitenleiste der PDF-Anzeige braucht kleine Vorschaubilder (F-ORG-04) |
 | `Health` | Neues Schema | Antwort von `GET /api/v1/health`, die CLI wartet darauf |
+| `module.settings` | W-06 Option A übernommen, in 03 §3 eingetragen | Layout und Schreibmodus pro Modul (F-DSH-01, F-INK-03) |
+| `calendar_source.name`, `.last_error`; `calendar_event.description`, `.all_day`, `.assigned_by` | Neue Felder | Anzeige, URL-Fehler, Zuordnung über die Beschreibung, ganztägige Termine, manuelle Zuordnung überlebt den Abgleich (VERTRAEGE §6.1) |
+| `Session.planned_starts_at/ends_at` | Abgeleitete Felder | Start-Karte und Auto-Stopp brauchen die Terminzeiten |
+| `recording.chunks_independent`, `.completed_at`, `POST /recordings/{id}/complete` | Neu | Spike S4 offen, Ende der Aufnahme für `audio.finalize` |
+| `PUT /photos/{id}/file` statt `POST /photos` | Geändert in 08 §1 | Wiederholbarer Upload mit der `photo_id` des iPads, Metadaten über `photo.add` |
+| `GET /sessions/{id}/snapshot`, `GET /notebooks/{id}/pages`, `stream_seq` | Neu | REST-Stand und Sync-Strom lückenlos zusammensetzen |
+| Sync: `protocol`, `client`, `subscribe`, `presence`, `time.offset`, `error`, `head_seq`/`reset`, Ereignisse `device.connection`/`pairing.requested` | Ergänzungen zu 08 §2 | Abos ohne Neuverbinden, Notizen-Spalte folgt dem iPad, iPad-Status, Fehler und Wiederherstellung (VERTRAEGE §11) |
+| `POST /devices/pairings` | Neu | QR-Code ohne vorherigen Aufruf vom iPad (08 §3 Schritt 4) |
+| Kalender-Abgleich | Synchron im Core, kein Job `calendar.sync` | VERTRAEGE §8 |
