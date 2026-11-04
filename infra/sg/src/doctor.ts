@@ -81,14 +81,22 @@ export async function checkDocker(sys: System): Promise<CheckResult> {
   return { name, status: 'ok', detail: `läuft (${firstLine(version.stdout)})` };
 }
 
-export async function checkPort(sys: System, port: number, host: string, what: string): Promise<CheckResult> {
+export async function checkPort(
+  sys: System,
+  port: number,
+  hosts: string[],
+  what: string,
+  extraHint = '',
+): Promise<CheckResult> {
   const name = `Port ${port} frei (${what})`;
-  if (await sys.portFree(port, host)) return { name, status: 'ok', detail: 'frei' };
+  let free = true;
+  for (const host of hosts) if (!(await sys.portFree(port, host))) free = false;
+  if (free) return { name, status: 'ok', detail: 'frei' };
   return {
     name,
     status: 'fail',
     detail: 'belegt',
-    hint: `Läuft sg schon? Dann zuerst "pnpm sg stop". Sonst das Programm beenden, das Port ${port} nutzt (macOS: "lsof -i :${port}"). Für den Core lässt sich der Port mit SG_CORE_PORT ändern.`,
+    hint: `Läuft sg schon? Dann zuerst "pnpm sg stop". ${extraHint}Sonst das Programm beenden, das Port ${port} nutzt (macOS: "lsof -i :${port}"). Für den Core lässt sich der Port mit SG_CORE_PORT ändern.`,
   };
 }
 
@@ -136,8 +144,14 @@ export async function runChecks(sys: System, cfg: SgConfig): Promise<CheckResult
       'uv installieren: "brew install uv" oder https://docs.astral.sh/uv/ (für den Python-Worker).',
     ),
     await checkDocker(sys),
-    await checkPort(sys, cfg.corePort, '0.0.0.0', 'Core'),
-    await checkPort(sys, DB_PORT, '127.0.0.1', 'Postgres'),
+    await checkPort(sys, cfg.corePort, ['0.0.0.0', '127.0.0.1'], 'Core'),
+    await checkPort(
+      sys,
+      DB_PORT,
+      ['127.0.0.1'],
+      'Postgres',
+      'Belegt der Container "studiengehirn-db" den Port (docker ps), beenden Sie ihn mit "pnpm sg stop"; sonst muss eine andere Postgres-Instanz beendet werden. ',
+    ),
     checkDataDir(sys, cfg),
     checkAppleSilicon(sys),
   ];

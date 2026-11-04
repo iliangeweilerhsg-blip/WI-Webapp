@@ -10,7 +10,12 @@ export interface SgConfig {
   composeFile: string;
   runDir: string;
   logDir: string;
+  /** Gnadenfrist beim Beenden des Workers (er beendet erst den laufenden Job). */
+  workerStopTimeoutS: number;
 }
+
+export const CORE_STOP_TIMEOUT_S = 15;
+export const DEFAULT_WORKER_STOP_TIMEOUT_S = 120;
 
 export const DEFAULT_CORE_PORT = 4710;
 export const DB_PORT = 5432;
@@ -31,6 +36,14 @@ export const DATA_SUBDIRS = [
   'logs',
   'run',
 ] as const;
+
+export function parsePositiveInt(name: string, value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === '') return fallback;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1)
+    throw new Error(`Ungültiger Wert für ${name}: "${value}" (ganze Zahl ≥ 1)`);
+  return n;
+}
 
 export function parsePort(value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === '') return fallback;
@@ -64,6 +77,11 @@ export function resolveConfig(
     composeFile: join(repoRoot, 'infra', 'docker-compose.yml'),
     runDir: join(dataDir, 'run'),
     logDir: join(dataDir, 'logs'),
+    workerStopTimeoutS: parsePositiveInt(
+      'SG_WORKER_STOP_TIMEOUT_S',
+      env.SG_WORKER_STOP_TIMEOUT_S,
+      DEFAULT_WORKER_STOP_TIMEOUT_S,
+    ),
   };
 }
 

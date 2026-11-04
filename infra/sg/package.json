@@ -5,10 +5,10 @@
   "type": "module",
   "description": "sg-CLI: start, stop, migrate, doctor (Backup/Restore folgen mit T1-18)",
   "bin": {
-    "sg": "./src/main.ts"
+    "sg": "./sg.mjs"
   },
   "scripts": {
-    "sg": "node src/main.ts",
+    "sg": "node sg.mjs",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run"
   },

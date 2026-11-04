@@ -3,29 +3,40 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { HealthSchema, type Health } from '@sg/shared';
 import type { CommandName } from './cli.ts';
-import { appUrl, childEnv, healthUrl, type SgConfig } from './config.ts';
+import { appUrl, childEnv, CORE_STOP_TIMEOUT_S, healthUrl, type SgConfig } from './config.ts';
 import { doctorExitCode, formatChecks, runChecks } from './doctor.ts';
 import {
+  clearStopMarker,
   createLinePrefixer,
   ensureDataDir,
+  groupAlive,
   hasFile,
-  isAlive,
-  readPid,
+  readService,
   removePid,
+  setStopMarker,
+  signalGroup,
   sleep,
+  stopRequested,
   terminateGroup,
   writePid,
   type ServiceName,
+  type TerminateOptions,
 } from './procs.ts';
 import { realSystem } from './system.ts';
 
 const log = (msg: string): void => console.log(`[sg] ${msg}`);
 const err = (msg: string): void => console.error(`[sg] ${msg}`);
 
-/** Prüft eine Antwort von GET /api/v1/health gegen den Typ `Health` aus @sg/shared. */
-export function parseHealth(body: unknown): Health | null {
+export type HealthVerdict =
+  | { state: 'ready'; health: Health }
+  | { state: 'db-error'; health: Health }
+  | { state: 'invalid'; error: string };
+
+/** Bewertet eine Antwort von GET /api/v1/health gegen den Typ `Health` aus @sg/shared. */
+export function evaluateHealth(body: unknown): HealthVerdict {
   const r = HealthSchema.safeParse(body);
-  return r.success ? r.data : null;
+  if (!r.success) return { state: 'invalid', error: r.error.message };
+  return r.data.db === 'ok' ? { state: 'ready', health: r.data } : { state: 'db-error', health: r.data };
 }
 
 export function composeArgs(cfg: SgConfig, ...rest: string[]): string[] {
@@ -67,15 +78,24 @@ export async function migrate(cfg: SgConfig): Promise<number> {
 
 async function waitForHealthy(cfg: SgConfig, dead: () => string | null, timeoutMs = 60000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
+  let warnedDb = false;
   while (Date.now() < deadline) {
     if (dead()) return false;
     try {
       const res = await fetch(healthUrl(cfg), { signal: AbortSignal.timeout(2000) });
       if (res.ok) {
-        const health = parseHealth(await res.json());
-        if (health) {
-          log(`Core ist bereit (Version ${health.version}, Datenbank: ${health.db}).`);
+        const verdict = evaluateHealth(await res.json());
+        if (verdict.state === 'ready') {
+          log(`Core ist bereit (Version ${verdict.health.version}, Datenbank: ${verdict.health.db}).`);
           return true;
+        }
+        if (verdict.state === 'invalid') {
+          err(`Antwort von ${healthUrl(cfg)} entspricht nicht dem Typ Health: ${verdict.error}`);
+          return false;
+        }
+        if (!warnedDb) {
+          warnedDb = true;
+          err('Core läuft, meldet aber einen Datenbank-Fehler (db: "fehler"). Warte weiter …');
         }
       }
     } catch {
@@ -88,10 +108,12 @@ async function waitForHealthy(cfg: SgConfig, dead: () => string | null, timeoutM
 
 interface Service {
   name: ServiceName;
-  cmd: string;
-  args: string[];
   child: ChildProcess;
+  /** Der Anführer (pnpm/uv) ist beendet. */
   exited: boolean;
+  exitedPromise: Promise<void>;
+  /** Anführer beendet und alle Ausgabekanäle geschlossen (Enkel halten Pipes offen). */
+  closed: Promise<void>;
 }
 
 function startService(cfg: SgConfig, name: ServiceName, cmd: string, args: string[]): Service {
@@ -99,9 +121,17 @@ function startService(cfg: SgConfig, name: ServiceName, cmd: string, args: strin
     cwd: cfg.repoRoot,
     env: childEnv(cfg, process.env),
     stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true, // eigene Prozessgruppe, damit Strg+C nicht ungeordnet alles trifft
+    detached: true, // eigene Prozessgruppe (pgid === pid)
   });
-  const svc: Service = { name, cmd, args, child, exited: false };
+  let markExited!: () => void;
+  let markClosed!: () => void;
+  const svc: Service = {
+    name,
+    child,
+    exited: false,
+    exitedPromise: new Promise<void>((r) => (markExited = r)),
+    closed: new Promise<void>((r) => (markClosed = r)),
+  };
   const prefix = `[${name}]`;
   for (const [stream, out] of [
     [child.stdout, console.log],
@@ -112,26 +142,53 @@ function startService(cfg: SgConfig, name: ServiceName, cmd: string, args: strin
     stream?.on('data', (c: string) => p.push(c));
     stream?.on('end', () => p.flush());
   }
-  if (child.pid !== undefined) writePid(cfg, name, child.pid);
   child.once('error', (e) => {
     err(`${name}: Start fehlgeschlagen: ${e.message}`);
     svc.exited = true;
+    markExited();
+    markClosed();
   });
-  child.once('exit', (code, signal) => {
+  child.once('exit', () => {
     svc.exited = true;
-    removePid(cfg, name);
-    log(`${name} beendet (${signal ?? `Exit-Code ${code}`}).`);
+    markExited();
   });
+  child.once('close', () => markClosed());
+  if (child.pid !== undefined) {
+    try {
+      writePid(cfg, name, child.pid);
+    } catch (e) {
+      signalGroup(child.pid, 'SIGKILL');
+      throw e;
+    }
+  }
   return svc;
+}
+
+function stopOptions(cfg: SgConfig, name: ServiceName, force?: () => boolean): TerminateOptions {
+  const worker = name === 'worker';
+  const graceS = worker ? cfg.workerStopTimeoutS : CORE_STOP_TIMEOUT_S;
+  return {
+    graceMs: graceS * 1000,
+    // uv leitet SIGTERM an Python weiter; ein Signal an die ganze Gruppe träfe Python doppelt.
+    leaderOnly: worker,
+    force,
+    onWait: () =>
+      log(
+        worker
+          ? `Worker: warte auf laufenden Job … (bis zu ${graceS} s, zweites Strg+C bricht sofort ab)`
+          : `Core: warte auf sauberes Beenden … (bis zu ${graceS} s)`,
+      ),
+  };
 }
 
 export async function start(cfg: SgConfig): Promise<number> {
   const avail = availability(cfg.repoRoot);
+  if (!avail.core) {
+    err('services/core fehlt noch (Ticket T0-04). Core kann nicht gestartet werden.');
+    return 1;
+  }
 
-  const existing = (['core', 'worker'] as const).filter((n) => {
-    const pid = readPid(cfg, n);
-    return pid !== null && isAlive(pid);
-  });
+  const existing = (['core', 'worker'] as const).filter((n) => readService(cfg, n) !== null);
   if (existing.length > 0) {
     err(`${existing.join(' und ')} läuft bereits. Zuerst "pnpm sg stop" ausführen.`);
     return 1;
@@ -146,11 +203,7 @@ export async function start(cfg: SgConfig): Promise<number> {
     );
     return 1;
   }
-
-  if (!avail.core) {
-    err('services/core fehlt noch (Ticket T0-04). Core kann nicht gestartet werden.');
-    return 1;
-  }
+  clearStopMarker(cfg);
 
   log('Starte PostgreSQL (docker compose) …');
   const up = await runInherit('docker', composeArgs(cfg, 'up', '-d', '--wait'), cfg);
@@ -176,87 +229,133 @@ export async function start(cfg: SgConfig): Promise<number> {
   if ((await migrate(cfg)) !== 0) return 1;
 
   const services: Service[] = [];
-  services.push(startService(cfg, 'core', 'pnpm', ['--filter', '@sg/core', 'start']));
-  if (avail.worker) {
-    services.push(startService(cfg, 'worker', 'uv', ['run', '--project', 'services/worker', 'sg-worker']));
-  } else {
-    err('services/worker fehlt noch (Ticket T0-05). Es läuft nur der Core, Jobs werden nicht verarbeitet.');
-  }
-
   let shuttingDown = false;
+  let forced = false;
+  let shutdownPromise: Promise<void> | null = null;
   let exitCode = 0;
-  const shutdown = async (reason: string): Promise<void> => {
-    if (shuttingDown) return;
+
+  const shutdown = (reason: string): Promise<void> => {
+    if (shutdownPromise) return shutdownPromise;
     shuttingDown = true;
     log(`${reason} – beende Core und Worker …`);
-    await Promise.all(
+    shutdownPromise = Promise.all(
       services.map(async (s) => {
         const pid = s.child.pid;
-        if (pid !== undefined && !s.exited) await terminateGroup(pid);
-        removePid(cfg, s.name);
+        if (pid === undefined) return;
+        const gone = await terminateGroup(
+          pid,
+          stopOptions(cfg, s.name, () => forced),
+        );
+        if (gone) removePid(cfg, s.name);
+        else err(`${s.name}: Prozessgruppe ${pid} ließ sich nicht beenden.`);
       }),
-    );
+    ).then(() => undefined);
+    return shutdownPromise;
   };
 
+  let signalCount = 0;
   const onSignal = (sig: NodeJS.Signals): void => {
-    void shutdown(`${sig} empfangen`);
+    signalCount++;
+    if (signalCount === 1) {
+      void shutdown(`${sig} empfangen`);
+    } else if (!forced) {
+      forced = true;
+      err(`Zweites Signal (${sig}) – sende SIGKILL an alle Prozessgruppen.`);
+      for (const s of services) if (s.child.pid !== undefined) signalGroup(s.child.pid, 'SIGKILL');
+    }
   };
-  process.on('SIGINT', onSignal);
-  process.on('SIGTERM', onSignal);
+  const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+  for (const sig of signals) process.on(sig, onSignal);
+  // Letzter Versuch, falls sg selbst unerwartet endet: keine verwaisten Gruppen hinterlassen.
+  const onProcessExit = (): void => {
+    for (const s of services) {
+      if (s.child.pid !== undefined && groupAlive(s.child.pid)) signalGroup(s.child.pid, 'SIGKILL');
+    }
+  };
+  process.on('exit', onProcessExit);
 
-  const allExited = Promise.all(
-    services.map(
-      (s) => new Promise<void>((resolve) => (s.exited ? resolve() : s.child.once('exit', () => resolve()))),
-    ),
-  );
+  try {
+    services.push(startService(cfg, 'core', 'pnpm', ['--filter', '@sg/core', 'start']));
+    if (avail.worker) {
+      services.push(startService(cfg, 'worker', 'uv', ['run', '--project', 'services/worker', 'sg-worker']));
+    } else {
+      err('services/worker fehlt noch (Ticket T0-05). Es läuft nur der Core, Jobs werden nicht verarbeitet.');
+    }
+  } catch (e) {
+    err(`Dienste konnten nicht gestartet werden: ${(e as Error).message}`);
+    exitCode = 1;
+    forced = true;
+    await shutdown('Startfehler');
+  }
 
-  // Stirbt ein Dienst unerwartet, wird der andere ebenfalls beendet.
+  // Stirbt ein Dienst unerwartet, wird der andere ebenfalls beendet. Nach `sg stop` ist das gewollt.
   for (const s of services) {
-    s.child.once('exit', (code) => {
-      if (!shuttingDown) {
-        exitCode = code === 0 ? 0 : 1;
+    s.child.once('exit', (code, signal) => {
+      log(`${s.name} beendet (${signal ?? `Exit-Code ${code}`}).`);
+      if (shuttingDown) return;
+      if (stopRequested(cfg)) {
+        void shutdown('"sg stop" erkannt');
+      } else {
+        exitCode = 1;
         void shutdown(`${s.name} ist unerwartet beendet`);
       }
     });
   }
 
-  const ready = await waitForHealthy(cfg, () => {
-    const dead = services.find((s) => s.exited);
-    return dead ? dead.name : null;
-  });
   if (!shuttingDown) {
-    if (ready) {
-      log(`Studien-Gehirn läuft: ${appUrl(cfg)}`);
-      log('Mit Strg+C beenden.');
-      if (process.platform === 'darwin') {
-        spawn('open', [appUrl(cfg)], { stdio: 'ignore', detached: true }).unref();
+    const ready = await waitForHealthy(cfg, () => {
+      const dead = services.find((s) => s.exited);
+      return dead ? dead.name : null;
+    });
+    if (!shuttingDown) {
+      if (ready) {
+        log(`Studien-Gehirn läuft: ${appUrl(cfg)}`);
+        log('Mit Strg+C beenden.');
+        if (process.platform === 'darwin') {
+          const opener = spawn('open', [appUrl(cfg)], { stdio: 'ignore', detached: true });
+          opener.on('error', (e) =>
+            err(`Browser konnte nicht geöffnet werden (${e.message}). Bitte ${appUrl(cfg)} öffnen.`),
+          );
+          opener.unref();
+        }
+      } else {
+        err(`Core antwortet nicht wie erwartet unter ${healthUrl(cfg)}. Logs oben prüfen.`);
+        exitCode = 1;
+        await shutdown('Core nicht bereit');
       }
-    } else {
-      err(`Core antwortet nicht unter ${healthUrl(cfg)}. Logs oben prüfen.`);
-      exitCode = 1;
-      await shutdown('Core nicht erreichbar');
     }
   }
 
-  await allExited;
+  await Promise.all(services.map((s) => s.exitedPromise));
+  if (shutdownPromise) await shutdownPromise;
+  // Enkel können die Pipes noch kurz offen halten; nicht ewig darauf warten.
+  await Promise.race([Promise.all(services.map((s) => s.closed)), sleep(3000)]);
+
+  for (const sig of signals) process.off(sig, onSignal);
+  process.off('exit', onProcessExit);
   return exitCode;
 }
 
 export async function stop(cfg: SgConfig): Promise<number> {
   let failed = false;
-  for (const name of ['worker', 'core'] as const) {
-    const pid = readPid(cfg, name);
-    if (pid === null) continue;
-    if (!isAlive(pid)) {
-      removePid(cfg, name);
-      continue;
+  setStopMarker(cfg);
+  try {
+    for (const name of ['worker', 'core'] as const) {
+      const pid = readService(cfg, name);
+      if (pid === null) continue;
+      log(`Beende ${name} (Prozessgruppe ${pid}) …`);
+      if (await terminateGroup(pid, stopOptions(cfg, name))) removePid(cfg, name);
+      else {
+        err(`${name} (Prozessgruppe ${pid}) ließ sich nicht beenden.`);
+        failed = true;
+      }
     }
-    log(`Beende ${name} (PID ${pid}) …`);
-    if (await terminateGroup(pid)) removePid(cfg, name);
-    else {
-      err(`${name} (PID ${pid}) ließ sich nicht beenden.`);
-      failed = true;
-    }
+  } finally {
+    clearStopMarker(cfg);
+  }
+  if (failed) {
+    err('Die Datenbank wird nicht gestoppt, solange Core oder Worker noch laufen.');
+    return 1;
   }
   log('Stoppe PostgreSQL (docker compose stop) …');
   const code = await runInherit('docker', composeArgs(cfg, 'stop'), cfg);
@@ -264,9 +363,9 @@ export async function stop(cfg: SgConfig): Promise<number> {
     err(
       'docker compose stop ist fehlgeschlagen (läuft Docker?). Die Datenbank war evtl. gar nicht gestartet.',
     );
-    failed = true;
+    return 1;
   }
-  return failed ? 1 : 0;
+  return 0;
 }
 
 export async function doctor(cfg: SgConfig): Promise<number> {
