@@ -149,6 +149,17 @@ describe('terminateGroup', () => {
     expect(Date.now() - t0).toBeLessThan(5000);
   });
 
+  it('waitOnly sendet kein SIGTERM, wartet nur und eskaliert nach der Gnadenfrist', async () => {
+    // Würde bei SIGTERM sofort enden – darf es aber nicht bekommen.
+    const pid = spawnGroup(`trap "exit 0" TERM; sleep 30 & wait`);
+    await sleep(300);
+    const t0 = Date.now();
+    const gone = await terminateGroup(pid, { graceMs: 800, waitOnly: true, killWaitMs: 2000 });
+    expect(gone).toBe(true);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(700);
+    expect(groupAlive(pid)).toBe(false);
+  });
+
   it('meldet true für eine nicht (mehr) vorhandene Gruppe', async () => {
     const pid = spawnGroup('exit 0');
     await sleep(300);
