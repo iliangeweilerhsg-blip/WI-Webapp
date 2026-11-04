@@ -10,5 +10,4 @@
 - Alle eigenen Kommentare beginnen mit `**[Claude]**` (gleiches GitHub-Konto wie Argon und Owner).
 - **Parallele Features:** Subagents in getrennten Worktrees/Branches mit disjunktem Scope starten; Schnittstellen vorher festlegen.
 - **Modellwahl ist Pflicht:** Für jeden Subagent und jeden Workflow-Agenten das Modell bewusst nach der Tabelle „Modell-Routing“ in `docs/KOLLABORATION.md` setzen – nie einfach den Standard übernehmen.
-- Nichts nach `main` mergen – das macht der Owner.
-- Nach jedem Argon-Review das Erfahrungslog `docs/ERFAHRUNGSLOG.md` ergänzen und die Stärken-Matrix in `docs/KOLLABORATION.md` anpassen, wenn sich ein Muster zeigt.
+- - Merge-Regeln (Owner-Freigabe vom 04.11.2026): Claude merged freigegebene PRs selbst nach main (Merge-Commit), aber nur wenn kein Label status:halt am PR hängt, keine Konflikte bestehen und CI grün ist. Argon-PRs: nach Claudes Review mit status:freigegeben. Eigene PRs: erst nach unabhängigem Review durch einen frischen Subagent (Opus bei Code, Sonnet bei Doku); bei Security-kritischem zusätzlich Gegen-Review durch Argon.
