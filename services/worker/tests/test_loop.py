@@ -15,7 +15,7 @@ import pytest
 from sg_schemas.models import PdfIngestPayload
 
 from conftest import MakeJob, get_job
-from sg_worker.loop import Worker
+from sg_worker.loop import ORPHAN_ERROR, Worker
 from sg_worker.registry import JobContext, Registry
 
 
@@ -327,17 +327,61 @@ def test_reconnects_after_backends_terminated(
         assert wait_for(lambda: get_job(conn, second)["state"] == "fertig", timeout=10)
 
 
-def test_orphan_job_is_failed_after_reconnect(
+def test_own_running_jobs_are_failed_on_connect(
     worker: Worker, conn: psycopg.Connection[Any], make_job: MakeJob
 ) -> None:
-    job_id = make_job(state="laeuft", attempts=1)
-    conn.execute("UPDATE job SET locked_by = %s WHERE id = %s", (worker.worker_id, job_id))
-    worker._orphan = (job_id, "Verbindung verloren")
+    """Eigene `laeuft`-Jobs (Claim ohne Handler-Lauf) werden beim Verbinden mit Retry freigegeben;
+    fremde bleiben unberührt."""
+    mine = make_job(state="laeuft", attempts=1)
+    mine_last = make_job(state="laeuft", attempts=3, max_attempts=3)
+    foreign = make_job(state="laeuft", attempts=1)
+    conn.execute(
+        "UPDATE job SET locked_by = %s, locked_at = now() WHERE id IN (%s, %s)",
+        (worker.worker_id, mine, mine_last),
+    )
+    conn.execute(
+        "UPDATE job SET locked_by = 'anderer:1', locked_at = now() WHERE id = %s", (foreign,)
+    )
     with running(worker):
-        assert wait_for(lambda: get_job(conn, job_id)["state"] == "wartet")
-    row = get_job(conn, job_id)
-    assert row["error"] == "Verbindung verloren"
+        assert wait_for(lambda: get_job(conn, mine)["state"] == "wartet")
+    row = get_job(conn, mine)
+    assert row["error"] == ORPHAN_ERROR
     assert row["run_after"] is not None
+    assert row["locked_by"] is None
+    assert get_job(conn, mine_last)["state"] == "fehler"
+    assert get_job(conn, foreign)["state"] == "laeuft"
+    assert get_job(conn, foreign)["locked_by"] == "anderer:1"
+
+
+def test_result_is_written_on_fresh_connection_when_connection_dies_after_compute(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    tmp_path: Path,
+    conn: psycopg.Connection[Any],
+    make_job: MakeJob,
+) -> None:
+    reg = Registry()
+    runs: list[int] = []
+
+    def long_job(payload: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
+        runs.append(1)
+        with psycopg.connect(database_url, autocommit=True) as admin:
+            admin.execute("SELECT pg_terminate_backend(%s)", (ctx.conn.info.backend_pid,))
+        return {"berechnet": True}
+
+    reg.register("long", long_job)
+    w = _worker(reg, database_url, connect_kwargs, tmp_path)
+    job_id = make_job("long")
+    with (
+        psycopg.connect(database_url, autocommit=True, **connect_kwargs) as wc,
+        pytest.raises(psycopg.OperationalError),
+    ):
+        w.drain(wc)  # Die Schleife stößt danach auf die tote Verbindung
+    row = get_job(conn, job_id)
+    assert row["state"] == "fertig"
+    assert row["result"] == {"berechnet": True}
+    assert row["attempts"] == 1
+    assert runs == [1]
 
 
 def test_startup_waits_for_database(tmp_path: Path) -> None:

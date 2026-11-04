@@ -14,8 +14,19 @@ from pydantic import TypeAdapter, ValidationError
 from . import jobs
 
 
-class PayloadError(Exception):
+class NonRetryableError(Exception):
+    """Deterministischer Fehler: ein neuer Versuch ändert nichts (Job sofort `fehler`).
+
+    Die Meldung landet in `job.error`: keine absoluten Pfade hineinschreiben.
+    """
+
+
+class PayloadError(NonRetryableError):
     """Das Payload passt nicht zum Schema des Job-Typs. Retry wäre sinnlos."""
+
+
+class LockLostError(Exception):
+    """Der Job gehört diesem Worker nicht mehr (Lock verloren). Nichts committen."""
 
 
 @dataclass
@@ -54,6 +65,9 @@ class JobContext:
 
 
 HandlerFn = Callable[[Any, JobContext], dict[str, Any]]
+#: Läuft, wenn ein Job dieses Typs endgültig `fehler` ist (egal auf welchem Weg: Handler-Fehler,
+#: Verbindungsverlust, abgestürzter Worker). Bekommt die Verbindung und das rohe Payload.
+FailureHook = Callable[[psycopg.Connection[Any], dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
@@ -61,6 +75,7 @@ class HandlerSpec:
     job_type: str
     fn: HandlerFn
     adapter: TypeAdapter[Any] | None
+    on_final_failure: FailureHook | None = None
 
     def validate(self, payload: Any) -> Any:
         if self.adapter is None:
@@ -78,11 +93,17 @@ class Registry:
     def __init__(self) -> None:
         self._handlers: dict[str, HandlerSpec] = {}
 
-    def register(self, job_type: str, fn: HandlerFn, payload_type: Any = None) -> None:
+    def register(
+        self,
+        job_type: str,
+        fn: HandlerFn,
+        payload_type: Any = None,
+        on_final_failure: FailureHook | None = None,
+    ) -> None:
         if job_type in self._handlers:
             raise ValueError(f"Handler für {job_type} ist schon registriert")
         adapter = None if payload_type is None else TypeAdapter(payload_type)
-        self._handlers[job_type] = HandlerSpec(job_type, fn, adapter)
+        self._handlers[job_type] = HandlerSpec(job_type, fn, adapter, on_final_failure)
 
     def get(self, job_type: str) -> HandlerSpec | None:
         return self._handlers.get(job_type)
@@ -96,7 +117,10 @@ default_registry = Registry()
 
 
 def handler[F: HandlerFn](
-    job_type: str, payload_type: Any = None, registry: Registry | None = None
+    job_type: str,
+    payload_type: Any = None,
+    registry: Registry | None = None,
+    on_final_failure: FailureHook | None = None,
 ) -> Callable[[F], F]:
     """Dekorator: registriert `fn(payload, ctx) -> dict` für `job_type`.
 
@@ -105,7 +129,7 @@ def handler[F: HandlerFn](
     """
 
     def decorate(fn: F) -> F:
-        (registry or default_registry).register(job_type, fn, payload_type)
+        (registry or default_registry).register(job_type, fn, payload_type, on_final_failure)
         return fn
 
     return decorate

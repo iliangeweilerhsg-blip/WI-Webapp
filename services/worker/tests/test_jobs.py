@@ -142,7 +142,7 @@ def test_recover_stuck_only_old_locks(conn: psycopg.Connection[Any], make_job: M
         (stuck,),
     )
     conn.execute("UPDATE job SET locked_at = now() - interval '5 minutes' WHERE id = %s", (fresh,))
-    assert jobs.recover_stuck(conn) == 1
+    assert len(jobs.recover_stuck(conn, 30 * 60)) == 1
     assert get_job(conn, stuck)["state"] == "wartet"
     assert get_job(conn, stuck)["locked_by"] is None
     assert get_job(conn, fresh)["state"] == "laeuft"
