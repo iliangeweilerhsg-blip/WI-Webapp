@@ -13,29 +13,30 @@ function dayString(date: Date): string {
 }
 
 /**
- * Tägliche Rotation von `core.log`: Eine Datei, die zuletzt an einem früheren (UTC-)Tag beschrieben
- * wurde, wird zu `core-YYYY-MM-DD.log`. Archive, die älter als `keepDays` Tage sind, werden gelöscht.
- * Rückgabe: true, wenn rotiert wurde (der Aufrufer öffnet die Logdatei dann neu).
+ * Tägliche Rotation von `core.log`. `openedDay` ist der (UTC-)Tag, an dem die aktuelle Datei begonnen
+ * wurde, nicht ihr mtime: Zeilen nach Mitternacht vor der nächsten Prüfung verschieben sonst den Tag.
+ * Ist heute ein anderer Tag, wird die Datei zu `core-<openedDay>.log`. Archive, die älter als
+ * `keepDays` Tage sind, werden gelöscht.
+ * Rückgabe: der Tag, für den die aktuelle Datei jetzt gilt. Weicht er von `openedDay` ab, wurde
+ * rotiert und der Aufrufer öffnet die Logdatei neu.
  */
 export function rotateLogs(
   logDir: string,
+  openedDay: string,
   now: Date = new Date(),
   keepDays: number = LOG_KEEP_DAYS,
-): boolean {
+): string {
   mkdirSync(logDir, { recursive: true });
-  const current = join(logDir, 'core.log');
-  let rotated = false;
+  const today = dayString(now);
+  let day = openedDay;
 
-  if (existsSync(current)) {
-    const modified = statSync(current).mtime;
-    if (dayString(modified) < dayString(now)) {
-      const target = join(logDir, `core-${dayString(modified)}.log`);
-      renameSync(
-        current,
-        existsSync(target) ? join(logDir, `core-${dayString(modified)}-${Date.now()}.log`) : target,
-      );
-      rotated = true;
+  if (openedDay < today) {
+    const current = join(logDir, 'core.log');
+    if (existsSync(current)) {
+      const target = join(logDir, `core-${openedDay}.log`);
+      renameSync(current, existsSync(target) ? join(logDir, `core-${openedDay}-${Date.now()}.log`) : target);
     }
+    day = today;
   }
 
   const cutoff = now.getTime() - keepDays * DAY_MS;
@@ -44,7 +45,13 @@ export function rotateLogs(
     const file = join(logDir, name);
     if (statSync(file).mtime.getTime() < cutoff) unlinkSync(file);
   }
-  return rotated;
+  return day;
+}
+
+/** Tag, an dem eine vorhandene `core.log` begonnen wurde (Näherung beim Start: ihr mtime), sonst heute */
+export function initialLogDay(logDir: string, now: Date = new Date()): string {
+  const current = join(logDir, 'core.log');
+  return existsSync(current) ? dayString(statSync(current).mtime) : dayString(now);
 }
 
 /**
@@ -59,13 +66,17 @@ export function createLogger(
   const streams: pino.StreamEntry[] = [{ stream: process.stdout }];
   if (options.file !== false) {
     const logDir = join(config.dataDir, 'logs');
-    rotateLogs(logDir);
+    let openedDay = rotateLogs(logDir, initialLogDay(logDir));
     const destination = pino.destination({ dest: join(logDir, 'core.log'), mkdir: true, sync: true });
     streams.push({ stream: destination });
     setInterval(
       () => {
         try {
-          if (rotateLogs(logDir)) destination.reopen();
+          const day = rotateLogs(logDir, openedDay);
+          if (day !== openedDay) {
+            destination.reopen();
+            openedDay = day;
+          }
         } catch {
           // Rotation darf den Core nie stören
         }

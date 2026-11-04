@@ -20,6 +20,8 @@ import { HttpError } from '../errors.ts';
  */
 
 export const IDEMPOTENCY_TTL_HOURS = 24;
+/** Eine Reservierung ohne Antwort, die älter ist, gilt als verwaist (Absturz) */
+export const STALE_RESERVATION_MINUTES = 5;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 declare module 'fastify' {
@@ -53,7 +55,7 @@ export async function purgeIdempotencyKeys(db: Db): Promise<number> {
 
 export function registerIdempotency(app: FastifyInstance, db: Db): void {
   app.addHook('preHandler', async (request, reply) => {
-    if (request.method !== 'POST') return;
+    if (request.method !== 'POST' || request.is404) return;
     const header = request.headers['idempotency-key'];
     if (header === undefined) return;
     if (typeof header !== 'string' || !UUID_RE.test(header)) {
@@ -71,6 +73,25 @@ export function registerIdempotency(app: FastifyInstance, db: Db): void {
       .returning({ key: idempotencyKey.key });
 
     if (inserted.length > 0) {
+      request.idempotency = { key, method, path };
+      return;
+    }
+
+    // Verwaiste Reservierung (Prozess abgestürzt): atomar übernehmen, dann wie eine Erstanfrage
+    const taken = await db
+      .update(idempotencyKey)
+      .set({ requestHash, createdAt: sql`now()` })
+      .where(
+        and(
+          eq(idempotencyKey.key, key),
+          eq(idempotencyKey.method, method),
+          eq(idempotencyKey.path, path),
+          eq(idempotencyKey.status, 0),
+          lt(idempotencyKey.createdAt, sql`now() - make_interval(mins => ${STALE_RESERVATION_MINUTES})`),
+        ),
+      )
+      .returning({ key: idempotencyKey.key });
+    if (taken.length > 0) {
       request.idempotency = { key, method, path };
       return;
     }

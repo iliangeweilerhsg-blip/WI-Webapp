@@ -132,6 +132,24 @@ describe('Idempotency-Key (08 §1)', () => {
     expect(calls).toBe(1);
   });
 
+  it('übernimmt eine verwaiste Reservierung (älter als 5 min) und führt die Anfrage aus', async () => {
+    const key = uuidv7();
+    await handle.sql`INSERT INTO idempotency_key (key, method, path, request_hash, status, created_at)
+      VALUES (${key}, 'POST', '/things', 'alt', 0, now() - interval '6 minutes')`;
+    const res = await post(key, { name: 'a' });
+    expect(res.statusCode).toBe(201);
+    expect(res.headers['idempotent-replay']).toBeUndefined();
+    expect(calls).toBe(1);
+    // danach ist die Antwort gespeichert und wird wiederholt
+    expect((await post(key, { name: 'a' })).headers['idempotent-replay']).toBe('true');
+  });
+
+  it('speichert keine Antworten auf nicht existierende Routen', async () => {
+    const res = await post(uuidv7(), { name: 'a' }, '/gibt-es-nicht');
+    expect(res.statusCode).toBe(404);
+    expect(await handle.sql`SELECT 1 FROM idempotency_key`).toHaveLength(0);
+  });
+
   it('GET ignoriert den Header', async () => {
     const res = await app.inject({ url: '/things', headers: { 'idempotency-key': 'egal' } });
     expect(res.statusCode).toBe(200);

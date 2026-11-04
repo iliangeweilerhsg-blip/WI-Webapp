@@ -45,10 +45,14 @@ async function shutdown(signal: string): Promise<void> {
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
 process.on('SIGINT', () => void shutdown('SIGINT'));
 
-try {
-  await purgeIdempotencyKeys(handle.db).catch((error: unknown) =>
+const purge = () =>
+  purgeIdempotencyKeys(handle.db).catch((error: unknown) =>
     logger.warn({ err: error }, 'Alte Idempotency-Keys konnten nicht gelöscht werden'),
   );
+setInterval(() => void purge(), 60 * 60 * 1000).unref();
+
+try {
+  await purge();
   await app.listen({ port: config.port, host: config.host });
 } catch (error) {
   // Kein process.exit: so werden Logs vollständig geschrieben und Handles sauber geschlossen
