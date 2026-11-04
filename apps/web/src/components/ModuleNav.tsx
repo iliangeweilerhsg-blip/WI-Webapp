@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname } from 'next/navigation';
+import { useQueryParam } from '../lib/hydrated.ts';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { friendlyMessage, isUnreachable } from '../lib/api.ts';
 import { moduleHref } from '../lib/nav.ts';
@@ -60,7 +61,7 @@ export function ModuleNav({ onOpenSetup }: { onOpenSetup?: () => void }) {
   const semesters = useSemesters();
   const { query, modules: visible } = useVisibleModules();
   const pathname = usePathname();
-  const activeId = useSearchParams().get('id');
+  const activeId = useQueryParam('id');
   const [adding, setAdding] = useState(false);
   const plusButton = useRef<HTMLButtonElement>(null);
 

@@ -54,6 +54,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const remaining = useRef(0);
   const actionRef = useRef<HTMLButtonElement>(null);
   const elementRef = useRef<HTMLDivElement>(null);
+  const queued = useRef<ToastOptions | null>(null);
+  const showRef = useRef<(options: ToastOptions) => void>(() => {});
 
   /** Lag der Fokus im Toast (z. B. auf „Rückgängig“), geht er in den Hauptbereich, statt auf <body> zu fallen. */
   const rescueFocus = useCallback(() => {
@@ -66,6 +68,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const show = useCallback(
     (options: ToastOptions) => {
       const old = current.current;
+      // Ein offenes „Rückgängig“ wird nicht von einer bloßen Meldung verdrängt (das würde die Löschung sofort
+      // auslösen): Die Meldung wartet, bis der Toast abläuft oder bedient wird. Nur die neueste bleibt übrig.
+      if (old?.onExpire && !options.onExpire && !options.actionLabel && old.group !== options.group) {
+        queued.current = options;
+        return;
+      }
       if (old?.onReplace && old.group !== options.group) old.onReplace();
       if (!options.focusAction) rescueFocus();
       counter.current += 1;
@@ -78,6 +86,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [rescueFocus],
   );
 
+  showRef.current = show;
+
   const api = useMemo(() => ({ show }), [show]);
 
   const dismiss = useCallback(
@@ -86,6 +96,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       rescueFocus();
       current.current = null;
       setToast(null);
+      const next = queued.current;
+      queued.current = null;
+      if (next) showRef.current(next);
     },
     [rescueFocus],
   );

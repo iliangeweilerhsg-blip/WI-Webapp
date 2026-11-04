@@ -175,7 +175,7 @@ describe('PDF-Anzeige', () => {
     await openViewer();
     const frame = screen.getByTestId('page-frame');
     const fitWidth = frame.style.width;
-    const label = screen.getByLabelText('Zoom');
+    const label = screen.getByText(/ %$/);
     const start = label.textContent;
     await user.click(screen.getByRole('button', { name: 'Vergrößern' }));
     expect(label.textContent).not.toBe(start);
@@ -203,7 +203,7 @@ describe('PDF-Anzeige', () => {
     // Im Viewer wird sie übernommen (Standardaktion unterdrückt)
     const handled = fireEvent.keyDown(viewer, { key: 'f', ctrlKey: true });
     expect(handled).toBe(false);
-    const box = await screen.findByRole('textbox', { name: 'Im Dokument suchen' });
+    const box = await screen.findByRole('textbox', { name: 'Suchbegriff' });
     await waitFor(() => expect(box).toHaveFocus());
 
     await user.type(box, 'normalisierung');
@@ -229,7 +229,7 @@ describe('PDF-Anzeige', () => {
     expect(status).toHaveTextContent('1 von 3');
 
     // Pfeiltasten im Suchfeld bewegen den Cursor, sie blättern nicht
-    await user.click(screen.getByRole('textbox', { name: 'Im Dokument suchen' }));
+    await user.click(screen.getByRole('textbox', { name: 'Suchbegriff' }));
     await user.keyboard('{ArrowRight}');
     expect(pageRegion()).toHaveAccessibleName('Seite 2 von 5');
 
@@ -244,7 +244,7 @@ describe('PDF-Anzeige', () => {
     const user = userEvent.setup();
     const viewer = await openViewer();
     fireEvent.keyDown(viewer, { key: 'f', ctrlKey: true });
-    await user.type(await screen.findByRole('textbox', { name: 'Im Dokument suchen' }), 'xyz');
+    await user.type(await screen.findByRole('textbox', { name: 'Suchbegriff' }), 'xyz');
     await waitFor(() =>
       expect(within(screen.getByRole('search')).getByRole('status')).toHaveTextContent('Kein Treffer'),
     );
@@ -281,5 +281,53 @@ describe('PDF-Anzeige', () => {
     nav.search = 'typ=unsinn';
     view();
     expect(await screen.findByText(/Dieses Dokument gibt es nicht/)).toBeInTheDocument();
+  });
+});
+
+describe('PDF-Anzeige (Nacharbeit)', () => {
+  it('kaputtes PDF: ruhiger Leer-Zustand mit einer Aktion, keine Navigation', async () => {
+    installFakeCore({ decks: [makeDeck({ id: DECK.id, title: 'Kaputt', ingest_state: 'fehler' })] });
+    pdf.openPdf.mockRejectedValueOnce(new Error('kaputt'));
+    nav.search = `typ=folien&id=${DECK.id}&seite=2`;
+    view();
+    expect(await screen.findByText(/lässt sich nicht anzeigen/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Zurück zum Modul' })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/modul?id='),
+    );
+    expect(screen.queryByRole('button', { name: 'Nächste Seite' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Lesen kannst du es trotzdem/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/vorschaubilder bleiben nutzbar/i)).not.toBeInTheDocument();
+  });
+
+  it('Suche zeigt „Sucht …“, solange pdf.js noch lädt, nicht „Kein Treffer“', async () => {
+    deckCore();
+    let release: (doc: typeof pdf.doc) => void = () => {};
+    pdf.openPdf.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    const user = userEvent.setup();
+    const viewer = await openViewer();
+    fireEvent.keyDown(viewer, { key: 'f', ctrlKey: true });
+    await user.type(await screen.findByRole('textbox', { name: 'Suchbegriff' }), 'normalisierung');
+    const status = within(screen.getByRole('search')).getByRole('status');
+    expect(status).toHaveTextContent('Sucht …');
+    await act(async () => release(pdf.doc));
+    await waitFor(() => expect(status).toHaveTextContent('1 von 3'));
+  });
+
+  it('übernimmt eine von außen geänderte Seite aus der Adresse', async () => {
+    deckCore();
+    nav.search = `typ=folien&id=${DECK.id}&seite=2`;
+    const { rerender } = view();
+    await screen.findByRole('heading', { level: 1, name: /Normalisierung/ });
+    expect(pageRegion()).toHaveAccessibleName('Seite 2 von 5');
+    nav.search = `typ=folien&id=${DECK.id}&seite=4`;
+    rerender(
+      <ThemeProvider>
+        <QueryProvider>
+          <DocumentView />
+        </QueryProvider>
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(pageRegion()).toHaveAccessibleName('Seite 4 von 5'));
   });
 });

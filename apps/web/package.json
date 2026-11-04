@@ -5,6 +5,8 @@
   "type": "module",
   "description": "Studien-Gehirn Web-App (Next.js 15, Static Export nach out/)",
   "scripts": {
+    "predev": "node scripts/copy-pdfjs-assets.mjs",
+    "prebuild": "node scripts/copy-pdfjs-assets.mjs",
     "dev": "next dev --port 3000",
     "build": "next build",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.test.json",

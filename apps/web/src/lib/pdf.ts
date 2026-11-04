@@ -27,6 +27,12 @@ export interface PdfDoc {
 /** Größte Breite der Zeichenfläche in Gerätepixeln (Speicher schonen bei starkem Zoom) */
 const MAX_CANVAS_WIDTH = 4096;
 
+/** Beiwerk von pdf.js (JPX/JBIG2-wasm, Standardschriften, CMaps, Farbprofile): `scripts/copy-pdfjs-assets.mjs` legt es beim Build lokal ab. */
+function assetBase(version: string): string {
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+  return `${basePath.replace(/\/+$/, '')}/pdfjs/${version}/`;
+}
+
 export async function openPdf(url: string): Promise<PdfDoc> {
   const pdfjs = await import('pdfjs-dist');
   if (!pdfjs.GlobalWorkerOptions.workerSrc) {
@@ -35,8 +41,63 @@ export async function openPdf(url: string): Promise<PdfDoc> {
       import.meta.url,
     ).toString();
   }
-  const task = pdfjs.getDocument({ url });
-  const doc = await task.promise;
+  const base = assetBase(pdfjs.version);
+  const task = pdfjs.getDocument({
+    url,
+    wasmUrl: `${base}wasm/`,
+    standardFontDataUrl: `${base}standard_fonts/`,
+    cMapUrl: `${base}cmaps/`,
+    cMapPacked: true,
+    iccUrl: `${base}iccs/`,
+  });
+  const doc = await task.promise.catch((error: unknown) => {
+    void task.destroy();
+    throw error;
+  });
+
+  // Zeichnen läuft strikt nacheinander: Ein Canvas verträgt nur einen render()-Vorgang, und ein überholter
+  // Vorgang muss erst beendet sein, bevor der nächste anfängt.
+  let queue: Promise<unknown> = Promise.resolve();
+  let active: { cancel: () => void } | null = null;
+
+  async function draw(
+    number: number,
+    canvas: HTMLCanvasElement,
+    cssWidth: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    if (signal?.aborted) return false;
+    const page = await doc.getPage(number);
+    try {
+      if (signal?.aborted) return false;
+      const base = page.getViewport({ scale: 1 });
+      const dpr = Math.max(1, globalThis.devicePixelRatio || 1);
+      const pixelWidth = Math.min(cssWidth * dpr, MAX_CANVAS_WIDTH);
+      const viewport = page.getViewport({ scale: pixelWidth / base.width });
+      const context = canvas.getContext('2d');
+      if (!context) return false;
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      const render = page.render({ canvas, canvasContext: context, viewport });
+      active = { cancel: () => render.cancel() };
+      const onAbort = () => render.cancel();
+      signal?.addEventListener('abort', onAbort);
+      if (signal?.aborted) render.cancel();
+      try {
+        await render.promise;
+        return !signal?.aborted;
+      } catch (error) {
+        // Abbruch durch neuen Zoom oder Seitenwechsel ist kein Fehler, alles andere schon
+        if ((error as { name?: string }).name === 'RenderingCancelledException') return false;
+        throw error;
+      } finally {
+        signal?.removeEventListener('abort', onAbort);
+        active = null;
+      }
+    } finally {
+      page.cleanup();
+    }
+  }
 
   return {
     numPages: doc.numPages,
@@ -60,33 +121,15 @@ export async function openPdf(url: string): Promise<PdfDoc> {
       return items;
     },
 
-    async render(number, canvas, cssWidth, signal) {
-      const page = await doc.getPage(number);
-      const base = page.getViewport({ scale: 1 });
-      const dpr = Math.max(1, globalThis.devicePixelRatio || 1);
-      const pixelWidth = Math.min(cssWidth * dpr, MAX_CANVAS_WIDTH);
-      const viewport = page.getViewport({ scale: pixelWidth / base.width });
-      canvas.width = Math.floor(viewport.width);
-      canvas.height = Math.floor(viewport.height);
-      const context = canvas.getContext('2d');
-      if (!context) return false;
-      const render = page.render({ canvas, canvasContext: context, viewport });
-      const cancel = () => render.cancel();
-      signal?.addEventListener('abort', cancel);
-      try {
-        await render.promise;
-        return !signal?.aborted;
-      } catch (error) {
-        // Abbruch durch neuen Zoom oder Seitenwechsel ist kein Fehler
-        if ((error as { name?: string }).name === 'RenderingCancelledException') return false;
-        throw error;
-      } finally {
-        signal?.removeEventListener('abort', cancel);
-        page.cleanup();
-      }
+    render(number, canvas, cssWidth, signal) {
+      active?.cancel();
+      const run = queue.then(() => draw(number, canvas, cssWidth, signal));
+      queue = run.catch(() => {});
+      return run;
     },
 
     destroy() {
+      active?.cancel();
       void task.destroy();
     },
   };

@@ -2,7 +2,7 @@
 
 import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import type { ExerciseSheet, SlideDeck } from '@sg/shared';
 import { friendlyMessage } from '../lib/api.ts';
 import {
@@ -186,11 +186,16 @@ function MaterialRow({ row, thumb }: { row: RowModel; thumb: React.ReactNode }) 
   const renameButton = useRef<HTMLButtonElement>(null);
   const words = KIND_WORDS[row.kind];
 
+  // Nach dem Bearbeiten (Enter, Esc, Speichern) geht der Fokus deterministisch zurück auf den Knopf
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (wasEditing.current && !editing) renameButton.current?.focus();
+    wasEditing.current = editing;
+  }, [editing]);
+
   function closeEditor() {
     setEditing(false);
     setError(null);
-    // Fokus zurück auf den Knopf, der den Editor geöffnet hat
-    requestAnimationFrame(() => renameButton.current?.focus());
   }
 
   async function onSave(title: string) {

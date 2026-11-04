@@ -367,3 +367,44 @@ describe('Umbenennen und Löschen', () => {
     await waitFor(() => expect(screen.queryByRole('link', { name: 'Blatt 1' })).not.toBeInTheDocument());
   });
 });
+
+describe('Nacharbeit', () => {
+  it('Umbenennen mit Enter: Fokus landet deterministisch auf dem Umbenennen-Knopf', async () => {
+    const user = userEvent.setup();
+    const deck = makeDeck({ title: 'VL 01', ingest_state: 'verarbeitet', page_count: 3 });
+    await openModule({ decks: [deck] });
+    const list = await screen.findByRole('list', { name: 'Foliensätze' });
+    await user.click(within(list).getByRole('button', { name: 'VL 01 umbenennen' }));
+    await user.type(within(list).getByRole('textbox', { name: 'Titel' }), ' neu{Enter}');
+    const button = await within(list).findByRole('button', { name: 'VL 01 neu umbenennen' });
+    await waitFor(() => expect(button).toHaveFocus());
+  });
+
+  it('409 (Key noch in Arbeit) lässt sich mit demselben Key erneut versuchen', async () => {
+    const user = userEvent.setup();
+    const core = await openModule();
+    await screen.findByText('Noch keine Folien.');
+    core.rejectNextUpload = { status: 409, code: 'idempotency_key_in_progress' };
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    const uploads = await screen.findByRole('list', { name: 'Uploads' });
+    await user.click(await within(uploads).findByRole('button', { name: 'Erneut versuchen' }));
+    expect(await screen.findByText('Foliensatz hinzugefügt')).toBeInTheDocument();
+    const sent = posts(core, '/slide-decks');
+    expect(sent[1]?.headers['Idempotency-Key']).toBe(sent[0]?.headers['Idempotency-Key']);
+  });
+
+  it('ein Upload-Toast verdrängt ein offenes „Rückgängig“ nicht (Löschen löst nicht vorzeitig aus)', async () => {
+    const user = userEvent.setup();
+    const deck = makeDeck({ title: 'VL 01', ingest_state: 'verarbeitet', page_count: 3 });
+    const core = await openModule({ decks: [deck] });
+    const list = await screen.findByRole('list', { name: 'Foliensätze' });
+    await user.click(within(list).getByRole('button', { name: 'VL 01 löschen' }));
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 02.pdf'));
+    await screen.findByRole('link', { name: 'VL 02' });
+    expect(screen.getByText('Foliensatz gelöscht')).toBeInTheDocument();
+    expect(core.requests.some((r) => r.method === 'DELETE')).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Rückgängig' }));
+    expect(await screen.findByText('Foliensatz hinzugefügt')).toBeInTheDocument();
+    expect(core.requests.some((r) => r.method === 'DELETE')).toBe(false);
+  });
+});

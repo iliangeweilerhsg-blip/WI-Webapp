@@ -2,3 +2,5 @@
 out/
 *.tsbuildinfo
 next-env.d.ts
+# Kopie von pdf.js-Beiwerk (scripts/copy-pdfjs-assets.mjs)
+public/pdfjs/

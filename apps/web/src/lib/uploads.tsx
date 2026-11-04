@@ -166,7 +166,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       } catch (failure) {
         const retryable =
           failure instanceof ApiRequestError &&
-          (failure.kind === 'unreachable' || (failure.status !== null && failure.status >= 500));
+          (failure.kind === 'unreachable' ||
+            // 409: Derselbe Schlüssel ist noch in Arbeit (erster Versuch lief weiter), später gleicher Key
+            failure.status === 409 ||
+            (failure.status !== null && failure.status >= 500));
         patch(id, {
           status: 'fehler',
           retryable,

@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import type { Semester, SemesterUpdate } from '@sg/shared';
 import { friendlyMessage } from '../lib/api.ts';
+import { useHydrated } from '../lib/hydrated.ts';
 import { useToast } from '../lib/toast.tsx';
 import { suggestSemesterName, useCreateSemester, useSemesters, useUpdateSemester } from '../lib/semesters.ts';
 import { CoreHint } from './CoreHint.tsx';
@@ -57,6 +58,7 @@ function SemesterRow({
 /** Einstellungen → Semester (F-ORG-01): anlegen, als aktuell setzen, archivieren und wiederherstellen. */
 export function SemesterSettings() {
   const semesters = useSemesters();
+  const hydrated = useHydrated();
   const create = useCreateSemester();
   const update = useUpdateSemester();
   const [name, setName] = useState('');
@@ -151,10 +153,15 @@ export function SemesterSettings() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={suggestSemesterName(
-              new Date(),
-              semesters.data?.map((s) => s.name),
-            )}
+            // Das Datum gibt es erst im Browser: Beim Hydratisieren bleibt der Platzhalter wie im HTML leer
+            placeholder={
+              hydrated
+                ? suggestSemesterName(
+                    new Date(),
+                    semesters.data?.map((s) => s.name),
+                  )
+                : ''
+            }
             autoComplete="off"
             className="mt-1 w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md font-normal"
           />

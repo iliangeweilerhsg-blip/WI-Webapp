@@ -13,7 +13,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { openPdf, type PdfDoc, type PdfTextItem } from '../lib/pdf.ts';
-import { findHits, hitRect, type SearchHit } from '../lib/pdf-search.ts';
+import { findHits, hitRect, makeMeasurer, type SearchHit } from '../lib/pdf-search.ts';
 import {
   isMaterialKind,
   pageImageUrl,
@@ -101,6 +101,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const searchInput = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const textCache = useRef(new Map<number, PdfTextItem[]>());
+  const measurer = useMemo(() => makeMeasurer(), []);
   const { ref: areaRef, size: area } = useElementSize<HTMLDivElement>();
   const ready = meta.state === 'verarbeitet';
 
@@ -132,8 +133,20 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const pageCount = meta.pageCount ?? pdf?.numPages ?? 0;
   const current = pageCount > 0 ? clamp(page, 1, pageCount) : page;
 
-  // Deep-Link: `seite` in der Adresse mitführen (ohne neuen Verlaufseintrag)
+  // Deep-Link: `seite` in der Adresse mitführen (ohne neuen Verlaufseintrag). Die zuletzt selbst geschriebenen
+  // Werte merken wir uns: Die Adresse kommt über Next mit Verzögerung zurück und ist dann kein Sprung von außen.
+  const written = useRef<string[]>([String(parsePage(params.get('seite')))]);
+  const seiteParam = params.get('seite');
   useEffect(() => {
+    const value = String(parsePage(seiteParam));
+    if (written.current.includes(value)) return;
+    // Von außen geändert (z. B. „Anzeigen“ auf ein schon offenes Dokument)
+    written.current = [value];
+    setPage(parsePage(seiteParam));
+  }, [seiteParam]);
+
+  useEffect(() => {
+    written.current = [...written.current, String(current)].slice(-8);
     const url = new URL(window.location.href);
     if (current > 1) url.searchParams.set('seite', String(current));
     else url.searchParams.delete('seite');
@@ -147,8 +160,9 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
 
   const goTo = useCallback(
     (target: number) => {
-      const max = pageCount > 0 ? pageCount : Number.MAX_SAFE_INTEGER;
-      setPage(clamp(Math.round(target), 1, max));
+      // Solange die Seitenzahl unbekannt ist, gibt es nichts zu blättern
+      if (pageCount <= 0) return;
+      setPage(clamp(Math.round(target), 1, pageCount));
       setPageInput(null);
       areaRef.current?.scrollTo?.({ top: 0 });
     },
@@ -190,11 +204,15 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     const canvas = canvasRef.current;
     if (!pdf || !canvas || current < 1 || (pageCount > 0 && current > pageCount)) return;
     const controller = new AbortController();
+    // Das Zeichnen leert die Fläche: Bis die Seite fertig ist, zeigt das Vorschaubild des Core
+    setRenderedPage(null);
     pdf.render(current, canvas, cssWidth, controller.signal).then(
       (done) => {
         if (done && !controller.signal.aborted) setRenderedPage(current);
       },
-      () => {},
+      () => {
+        // Kein Abbruch, sondern ein echter Fehler: beim Vorschaubild bleiben
+      },
     );
     return () => controller.abort();
   }, [pdf, current, cssWidth, pageCount]);
@@ -365,17 +383,45 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     pageItems && pageItems.page === current
       ? pageHits.flatMap((hit, i) => {
           const item = pageItems.items[hit.item];
-          return item ? [{ key: `${hit.item}-${hit.start}-${i}`, hit, rect: hitRect(item, hit) }] : [];
+          return item
+            ? [{ key: `${hit.item}-${hit.start}-${i}`, hit, rect: hitRect(item, hit, measurer) }]
+            : [];
         })
       : [];
   const activeHit = hits[active];
-  const searchSummary = searching
-    ? 'Sucht …'
-    : query.trim() === ''
-      ? ''
-      : hits.length === 0
-        ? 'Kein Treffer'
-        : `${active + 1} von ${hits.length}`;
+  const searchSummary =
+    searching || (query.trim() !== '' && !pdf && !pdfFailed)
+      ? 'Sucht …'
+      : query.trim() === ''
+        ? ''
+        : hits.length === 0
+          ? 'Kein Treffer'
+          : `${active + 1} von ${hits.length}`;
+
+  // pdf.js kann das Dokument nicht lesen und der Core kennt keine Seiten: nichts zu zeigen
+  if (pdfFailed && pageCount === 0) {
+    return (
+      <div className="p-8">
+        <h1 id="screen-title" className="text-xxl font-semibold">
+          {meta.title}
+        </h1>
+        <div className="mt-6">
+          <EmptyState
+            action={
+              <Link
+                href={moduleHref(meta.moduleId)}
+                className="text-sm font-medium text-accent hover:underline"
+              >
+                Zurück zum Modul
+              </Link>
+            }
+          >
+            Dieses PDF lässt sich nicht anzeigen. Vielleicht ist die Datei beschädigt.
+          </EmptyState>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -386,11 +432,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
       role="group"
       className="flex h-full flex-col outline-none"
     >
-      <div
-        role="toolbar"
-        aria-label="Dokument"
-        className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-2"
-      >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-4 py-2">
         <Link
           href={moduleHref(meta.moduleId)}
           className="rounded-md px-2 py-1 text-sm text-text-muted hover:bg-surface"
@@ -405,7 +447,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
             type="button"
             className={iconButton}
             onClick={() => goTo(current - 1)}
-            disabled={current <= 1}
+            disabled={pageCount === 0 || current <= 1}
             aria-label="Vorherige Seite"
           >
             ‹
@@ -432,7 +474,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
             type="button"
             className={iconButton}
             onClick={() => goTo(current + 1)}
-            disabled={pageCount > 0 && current >= pageCount}
+            disabled={pageCount === 0 || current >= pageCount}
             aria-label="Nächste Seite"
           >
             ›
@@ -447,7 +489,8 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           >
             −
           </button>
-          <span className="w-12 text-center text-text-muted" aria-label="Zoom">
+          <span className="w-12 text-center text-text-muted">
+            <span className="sr-only">Zoom </span>
             {Math.round((scale / PX_PER_PT) * 100)} %
           </span>
           <button
@@ -488,7 +531,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
       {searchOpen ? (
         <form
           role="search"
-          aria-label="Im Dokument suchen"
+          aria-label="Im Dokument"
           onSubmit={(e) => {
             e.preventDefault();
             stepHit(1);
@@ -505,7 +548,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
                 stepHit(-1);
               }
             }}
-            aria-label="Im Dokument suchen"
+            aria-label="Suchbegriff"
             placeholder="Im Dokument suchen"
             autoComplete="off"
             disabled={pdfFailed}
@@ -636,8 +679,9 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
                       top: rect.top * scale,
                       width: rect.width * scale,
                       height: rect.height * scale,
-                      backgroundColor: isActive ? 'rgba(249, 115, 22, 0.45)' : 'rgba(250, 204, 21, 0.45)',
-                      outline: isActive ? '2px solid rgb(194, 65, 12)' : undefined,
+                      // Aus dem Akzent der Design-Tokens (hell und dunkel), die Seite selbst ist immer weiß
+                      backgroundColor: `color-mix(in srgb, var(--sg-color-accent) ${isActive ? 45 : 25}%, transparent)`,
+                      outline: isActive ? '2px solid var(--sg-color-accent)' : undefined,
                     }}
                   />
                 );
