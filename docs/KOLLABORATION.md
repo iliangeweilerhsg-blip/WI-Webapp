@@ -122,7 +122,7 @@ Das Gemini-Abo hat Nutzungslimits. Ist es aufgebraucht, macht Claude weiter, und
 
 1. **Argon sichert Zwischenstände** als `wip:`-Commits auf `argon/issue-<nr>`. Bei einer Limit-Warnung schreibt Argon einen Kommentar mit dem aktuellen Stand und setzt `argon:limit`.
 2. **Claude prüft das Repo automatisch**, auf zwei Wegen:
-   - **Alle 5 Minuten** läuft in der Claude-Session `scripts/claude-argon-poll.sh` im Hintergrund. Das Skript ruft nur `git ls-remote` auf und verbraucht keine Token. Sobald Argon auf einen Branch `argon/*` pusht, endet es und weckt Claude. Claude reviewt dann den PR und startet das Skript neu.
+   - **Alle 5 Minuten:** In der Claude-Session läuft dauerhaft `scripts/claude-argon-poll.sh` im Hintergrund. Es fragt alle 5 Minuten per `git ls-remote` die Branches `argon/*` ab und verbraucht dabei keine Token. Pusht Argon (neuer, geänderter oder gelöschter Branch), endet das Skript etwa 60 s später und weckt Claude. Claude reviewt den PR und startet das Skript neu. Ohne Änderung endet es nach höchstens 110 min, nach einem Netzwerkfehler sofort, und Claude startet es ebenfalls neu. Der zuletzt gemeldete Stand liegt in `.git/argon-poll.state`, darum wird auch ein Push gemeldet, der zwischen zwei Läufen kam. Das Skript läuft nur, solange die Claude-Session aktiv ist.
    - **Stündlich** läuft zusätzlich eine geplante Aufgabe als Sicherheitsnetz, z. B. für Labels und Kommentare ohne Push.
 
    Dabei übernimmt Claude:
