@@ -96,3 +96,4 @@ Schemas für `calendar_source`, `calendar_event` und `session` folgen mit T1-01 
 | `ExerciseSheet` (API) | `page_count` neu, `has_solution` statt `solution_file_path` | Der Dateipfad ist intern, die API meldet nur, ob eine Lösung da ist |
 | `GET /slides/{id}/thumb` | Neuer Endpunkt | Die Seitenleiste der PDF-Anzeige braucht kleine Vorschaubilder (F-ORG-04) |
 | `Health` | Neues Schema | Antwort von `GET /api/v1/health`, die CLI wartet darauf |
+| Bereich `MDL` (F-MDL-01 bis -06, 08 §9) | Neu | Owner-Entscheidung vom 04.11.2026: Moodle lesen und Aktionen ausführen statt nur Drag & Drop |

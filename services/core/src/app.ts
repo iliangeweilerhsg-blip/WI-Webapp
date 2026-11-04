@@ -12,7 +12,9 @@ import { registerErrorHandler } from './plugins/errors.ts';
 import { registerIdempotency } from './plugins/idempotency.ts';
 import { createSecurityGuard, registerSecurity, type DeviceTokenVerifier } from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
+import { createMoodleServices, type MoodleServices } from './moodle/index.ts';
 import { materialRoutes } from './routes/material.ts';
+import { moodleRoutes } from './routes/moodle.ts';
 import { organisationRoutes } from './routes/organisation.ts';
 import { systemRoutes } from './routes/system.ts';
 
@@ -22,6 +24,8 @@ export interface BuildAppOptions {
   logger: Logger;
   /** Prüft Geräte-Tokens. Standard (Phase 0): jedes Token wird abgewiesen. */
   verifyDeviceToken?: DeviceTokenVerifier;
+  /** Moodle-Anbindung (08 §9). Standard: aus `SG_MOODLE_URL` und dem Schlüsselbund */
+  moodle?: MoodleServices;
 }
 
 function readVersion(): string {
@@ -36,6 +40,8 @@ function readVersion(): string {
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const { config, db, logger } = options;
   const version = readVersion();
+  const moodle =
+    options.moodle ?? createMoodleServices({ config, logger: logger.child({ module: 'moodle' }) });
 
   const guard = createSecurityGuard({
     config,
@@ -85,7 +91,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     openapi: {
       openapi: '3.1.0',
       info: { title: 'Studien-Gehirn Core', version, description: 'REST-API des Core (08 §1)' },
-      tags: [{ name: 'System' }],
+      tags: [{ name: 'System' }, { name: 'Moodle' }],
     },
     transform: jsonSchemaTransform,
   });
@@ -96,6 +102,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(systemRoutes, { db, version });
       await api.register(materialRoutes, { db, config });
       await api.register(organisationRoutes, { db });
+      await api.register(moodleRoutes, { moodle });
     },
     { prefix: API_BASE },
   );

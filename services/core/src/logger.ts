@@ -89,8 +89,8 @@ export function createLogger(
       level: config.logLevel,
       base: { service: 'core' },
       timestamp: pino.stdTimeFunctions.isoTime,
-      // Geheimnisse nie loggen (09 §4)
-      redact: ['req.headers.authorization', 'req.headers.cookie'],
+      // Geheimnisse nie loggen (09 §4). Moodle-Token (08 §9.1) zur Sicherheit auch, falls er je in ein Log-Objekt gerät
+      redact: ['req.headers.authorization', 'req.headers.cookie', 'wstoken', 'token', '*.wstoken', '*.token'],
     },
     pino.multistream(streams),
   );

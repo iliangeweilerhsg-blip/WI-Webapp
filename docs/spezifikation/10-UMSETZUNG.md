@@ -106,6 +106,12 @@ Größen: **S** ≤ 1 Tag · **M** 2–3 Tage · **L** 4–5 Tage.
 | T1-18 | Backups, Wiederherstellung, Papierkorb, Rückgängig-Toast | F-DAT-01, -02, -04 | L |
 | T1-19 | Einstellungen (Allgemein, Geräte, Vorlesung, Stift, Daten) | F-EIN-01 | M |
 | T1-20 | Hörsaal-Test-Protokoll + 3 begleitete Vorlesungen | 09 §6 | M |
+| T1-21 | Moodle-Grundlage: Schemas, Client (Drosselung, Fehler, Redaktion), Token aus dem Schlüsselbund, `GET /moodle/status`, Aktionsrahmen mit Bestätigung | F-MDL-01, -06, 08 §9 | M |
+| T1-22 | Moodle-Lese-Endpunkte inkl. Datei-Stream, Test gegen nachgebautes Moodle | F-MDL-02 | M |
+| T1-23 | Kurszuordnung und Abgleich (Tabellen, Einordnung Folien/Übung, Fristen, Inbox) | F-MDL-03, -04 | L |
+| T1-24 | Moodle-Aktionen aus dem Katalog, Uploads | F-MDL-05 | M |
+| T1-25 | Web: `<MoodleActionButton>` mit Vorschau-Dialog, Statushinweis zum Token | F-MDL-01, -05, -06 | M |
+| T1-26 | CLI `pnpm sg moodle login` und Anleitung | F-MDL-01 | S |
 
 ### Phase 2–5 (Epics)
 | Epic | Inhalt |
@@ -155,7 +161,7 @@ Größen: **S** ≤ 1 Tag · **M** 2–3 Tage · **L** 4–5 Tage.
 | # | Frage | Wer | Bis |
 |---|---|---|---|
 | Q1 | Welches iPad-Modell und welcher Apple Pencil? (Squeeze/Hover) | Nutzer | Start Phase 1 |
-| Q2 | Woher kommen Folien/Übungen (LMS, Mail)? Ist ein ICS-Export vorhanden? | Nutzer | Start Phase 1 |
+| Q2 | ~~Woher kommen Folien/Übungen?~~ **Beantwortet 04.11.2026:** aus Moodle.UP (Uni Potsdam), Web-Service-API aktiv, siehe F-MDL. ICS-Export offen | Nutzer | Start Phase 1 |
 | Q3 | Gibt es ein iPhone? (Hotspot im Hörsaal, Wiederholung unterwegs) | Nutzer | Ende Phase 1 |
 | Q4 | Sprache der Vorlesungen pro Modul | Nutzer | Start Phase 2 |
 | Q5 | Backup-Ziel (externe Platte, iCloud Drive) | Nutzer | Ende Phase 1 |

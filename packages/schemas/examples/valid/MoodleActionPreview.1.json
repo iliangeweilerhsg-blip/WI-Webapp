@@ -1,0 +1,13 @@
+{
+  "action_id": "assign.submit",
+  "risk": "endgueltig",
+  "needs_confirmation": true,
+  "summary": "Abgabe „Blatt 3“ endgültig zur Bewertung einreichen.",
+  "warnings": ["Danach sind keine Änderungen mehr möglich."],
+  "details": {
+    "assignment_id": 42,
+    "files": ["blatt3.pdf"]
+  },
+  "confirmation_token": "Q2xhdWRlLVRlc3QtVG9rZW4",
+  "expires_at": "2026-11-04T12:05:00Z"
+}

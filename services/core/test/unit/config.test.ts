@@ -14,6 +14,20 @@ describe('loadConfig', () => {
     expect(config.webDir.endsWith(join('apps', 'web', 'out'))).toBe(true);
     expect(config.devWebOrigin).toBe('');
     expect(config.logLevel).toBe('info');
+    expect(config.moodleUrl).toBe('');
+  });
+
+  it('liest SG_MOODLE_URL und lehnt unsichere Adressen ab', () => {
+    expect(loadConfig({ SG_MOODLE_URL: 'https://moodle.example.org/' }).moodleUrl).toBe(
+      'https://moodle.example.org',
+    );
+    expect(loadConfig({ SG_MOODLE_URL: 'https://lms.example.org/moodle' }).moodleUrl).toBe(
+      'https://lms.example.org/moodle',
+    );
+    expect(() => loadConfig({ SG_MOODLE_URL: 'http://moodle.example.org' })).toThrow(/https/);
+    expect(() => loadConfig({ SG_MOODLE_URL: 'https://u:p@moodle.example.org' })).toThrow(/https/);
+    expect(() => loadConfig({ SG_MOODLE_URL: 'https://moodle.example.org/?x=1' })).toThrow(/https/);
+    expect(() => loadConfig({ SG_MOODLE_URL: 'kein url' })).toThrow(/gültige/);
   });
 
   it('liest Umgebungsvariablen und entfernt den Schrägstrich am Ende des Dev-Origins', () => {

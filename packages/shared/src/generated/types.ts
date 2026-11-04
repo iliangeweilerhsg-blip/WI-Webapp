@@ -57,6 +57,39 @@ export type Lang = ("de" | "en" | "mixed")
  */
 export type ModuleColor = ("mod-01" | "mod-02" | "mod-03" | "mod-04" | "mod-05" | "mod-06" | "mod-07" | "mod-08" | "mod-09" | "mod-10" | "mod-11" | "mod-12")
 /**
+ * Aktionskatalog (F-MDL-05, 08 §9.3)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionId".
+ */
+export type MoodleActionId = ("assign.save_draft" | "assign.submit" | "forum.create_discussion" | "forum.reply" | "completion.set" | "calendar.create_event" | "message.send" | "notifications.mark_read" | "files.upload_private")
+/**
+ * endgueltig und oeffentlich brauchen eine Bestätigung (F-MDL-06)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionRisk".
+ */
+export type MoodleActionRisk = ("harmlos" | "aenderbar" | "endgueltig" | "oeffentlich")
+/**
+ * Erledigt-Status einer Aktivität
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleCompletion".
+ */
+export type MoodleCompletion = ("offen" | "erledigt")
+/**
+ * Zustand des Moodle-Zugangs (F-MDL-01)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleConnectionState".
+ */
+export type MoodleConnectionState = ("nicht_eingerichtet" | "ok" | "laeuft_bald_ab" | "abgelaufen" | "ungueltig" | "nicht_erreichbar")
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSubmissionState".
+ */
+export type MoodleSubmissionState = ("keine" | "entwurf" | "eingereicht")
+/**
  * pdf.ingest: entweder ein Foliensatz oder ein Übungsblatt (genau eine ID). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -244,6 +277,617 @@ exam_type?: (string | null)
 lecturer?: (string | null)
 lang?: (Lang | null)
 description_md?: (string | null)
+}
+/**
+ * Antwort von GET /moodle/actions
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionCatalog".
+ */
+export interface MoodleActionCatalog {
+items: MoodleActionInfo[]
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionInfo".
+ */
+export interface MoodleActionInfo {
+id: MoodleActionId
+label: string
+description: string
+risk: MoodleActionRisk
+needs_confirmation: boolean
+/**
+ * false = nötige wsfunction für den Token nicht freigegeben
+ */
+available: boolean
+}
+/**
+ * Body von POST /moodle/actions/{action_id}/execute
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionExecute".
+ */
+export interface MoodleActionExecute {
+params: {
+[k: string]: any
+}
+confirmation_token?: (string | null)
+}
+/**
+ * assign.save_draft: mindestens upload_ids oder online_text_html
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionParamsAssignSaveDraft".
+ */
+export interface MoodleActionParamsAssignSaveDraft {
+/**
+ * Moodle-ID
+ */
+assignment_id: number
+/**
+ * @minItems 1
+ * @maxItems 20
+ */
+upload_ids?: Uuid[]
+online_text_html?: string
+}
+/**
+ * assign.submit
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionParamsAssignSubmit".
+ */
+export interface MoodleActionParamsAssignSubmit {
+/**
+ * Moodle-ID
+ */
+assignment_id: number
+accept_statement: boolean
+}
+/**
+ * calendar.create_event (Nutzertermin)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionParamsCalendarCreateEvent".
+ */
+export interface MoodleActionParamsCalendarCreateEvent {
+name: string
+start_at: Timestamp
+duration_minutes?: number
+description_html?: string
+}
+/**
+ * completion.set
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionParamsCompletionSet".
+ */
+export interface MoodleActionParamsCompletionSet {
+/**
+ * Moodle-ID
+ */
+cmid: number
+completed: boolean
+}
+/**
+ * files.upload_private
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionParamsFilesUploadPrivate".
+ */
+export interface MoodleActionParamsFilesUploadPrivate {
+/**
+ * @minItems 1
+ * @maxItems 20
+ */
+upload_ids: Uuid[]
+}
+/**
+ * forum.create_discussion
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionParamsForumCreateDiscussion".
+ */
+export interface MoodleActionParamsForumCreateDiscussion {
+/**
+ * Moodle-ID
+ */
+forum_id: number
+subject: string
+message_html: string
+/**
+ * @minItems 1
+ * @maxItems 20
+ */
+upload_ids?: Uuid[]
+}
+/**
+ * forum.reply
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionParamsForumReply".
+ */
+export interface MoodleActionParamsForumReply {
+/**
+ * Moodle-ID
+ */
+post_id: number
+subject?: string
+message_html: string
+/**
+ * @minItems 1
+ * @maxItems 20
+ */
+upload_ids?: Uuid[]
+}
+/**
+ * message.send
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionParamsMessageSend".
+ */
+export interface MoodleActionParamsMessageSend {
+/**
+ * Moodle-ID
+ */
+to_user_id: number
+text: string
+}
+/**
+ * Antwort der Vorschau. confirmation_token nur bei needs_confirmation
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionPreview".
+ */
+export interface MoodleActionPreview {
+action_id: MoodleActionId
+risk: MoodleActionRisk
+needs_confirmation: boolean
+/**
+ * Ein Satz in Klartext, was passieren wird
+ */
+summary: string
+warnings: string[]
+details: {
+[k: string]: any
+}
+confirmation_token: (string | null)
+expires_at: (Timestamp | null)
+}
+/**
+ * Body von POST /moodle/actions/{action_id}/preview. params nach MoodleActionParams<Name>
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionRequest".
+ */
+export interface MoodleActionRequest {
+params: {
+[k: string]: any
+}
+}
+/**
+ * Antwort von execute bei Erfolg
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActionResult".
+ */
+export interface MoodleActionResult {
+action_id: MoodleActionId
+summary: string
+result: {
+[k: string]: any
+}
+}
+/**
+ * Element eines Kursabschnitts
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleActivity".
+ */
+export interface MoodleActivity {
+/**
+ * Moodle-ID
+ */
+cmid: number
+/**
+ * Moodle-modname, z. B. resource, folder, assign, forum, quiz, url, page, label
+ */
+type: string
+name: string
+url: (string | null)
+visible: boolean
+description_html: (string | null)
+completion: (MoodleCompletion | null)
+/**
+ * true = der Nutzer darf den Status selbst setzen (completion.set)
+ */
+completion_manual: boolean
+instance_id: (number | null)
+files: MoodleFile[]
+}
+/**
+ * Datei in Moodle (Aktivität, Anhang, Abgabe)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleFile".
+ */
+export interface MoodleFile {
+/**
+ * Pfad hinter webservice/pluginfile.php, für GET /moodle/file?ref
+ */
+ref: string
+filename: string
+mime_type: (string | null)
+size_bytes: number
+modified_at: (Timestamp | null)
+}
+/**
+ * Aufgabe mit Abgabe
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleAssignment".
+ */
+export interface MoodleAssignment {
+/**
+ * Moodle-ID
+ */
+moodle_id: number
+/**
+ * Moodle-ID
+ */
+cmid: number
+/**
+ * Moodle-ID
+ */
+course_id: number
+name: string
+due_at: (Timestamp | null)
+cutoff_at: (Timestamp | null)
+opens_at: (Timestamp | null)
+intro_html: (string | null)
+intro_files: MoodleFile[]
+submission_types: ("file" | "onlinetext")[]
+/**
+ * Einreichen verlangt die Erklärung zur Eigenständigkeit (accept_statement)
+ */
+requires_statement: boolean
+/**
+ * true = Entwurf muss ausdrücklich eingereicht werden (assign.submit)
+ */
+requires_submit: boolean
+}
+/**
+ * Antwort von GET /moodle/assignments
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleAssignmentList".
+ */
+export interface MoodleAssignmentList {
+items: MoodleAssignment[]
+}
+/**
+ * Kurs, in den der Nutzer eingeschrieben ist. module_id: zugeordnetes Modul (F-MDL-03)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleCourse".
+ */
+export interface MoodleCourse {
+/**
+ * Moodle-ID
+ */
+moodle_id: number
+short_name: string
+full_name: string
+start_date: (IsoDate | null)
+end_date: (IsoDate | null)
+url: string
+last_access_at: (Timestamp | null)
+module_id: (Uuid | null)
+}
+/**
+ * Antwort von GET /moodle/courses/{course_id}/contents
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleCourseContents".
+ */
+export interface MoodleCourseContents {
+/**
+ * Moodle-ID
+ */
+course_id: number
+sections: MoodleSection[]
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSection".
+ */
+export interface MoodleSection {
+/**
+ * Moodle-ID
+ */
+moodle_id: number
+index: number
+name: string
+visible: boolean
+activities: MoodleActivity[]
+}
+/**
+ * Antwort von GET /moodle/courses
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleCourseList".
+ */
+export interface MoodleCourseList {
+items: MoodleCourse[]
+}
+/**
+ * Kommende Frist aus dem Moodle-Kalender
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleDeadline".
+ */
+export interface MoodleDeadline {
+/**
+ * Moodle-ID
+ */
+event_id: number
+course_id: (number | null)
+cmid: (number | null)
+activity_type: (string | null)
+name: string
+due_at: Timestamp
+url: (string | null)
+/**
+ * Moodle erwartet noch eine Handlung (z. B. Abgabe fehlt)
+ */
+action_required: boolean
+}
+/**
+ * Antwort von GET /moodle/deadlines
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleDeadlineList".
+ */
+export interface MoodleDeadlineList {
+items: MoodleDeadline[]
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleDiscussion".
+ */
+export interface MoodleDiscussion {
+/**
+ * Moodle-ID
+ */
+moodle_id: number
+/**
+ * Moodle-ID
+ */
+forum_id: number
+/**
+ * Moodle-ID
+ */
+first_post_id: number
+subject: string
+author_name: (string | null)
+created_at: Timestamp
+modified_at: Timestamp
+reply_count: number
+pinned: boolean
+}
+/**
+ * Antwort von GET /moodle/forums/{forum_id}/discussions
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleDiscussionList".
+ */
+export interface MoodleDiscussionList {
+items: MoodleDiscussion[]
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleForum".
+ */
+export interface MoodleForum {
+/**
+ * Moodle-ID
+ */
+moodle_id: number
+/**
+ * Moodle-ID
+ */
+cmid: number
+/**
+ * Moodle-ID
+ */
+course_id: number
+name: string
+/**
+ * Moodle-Forumtyp, z. B. news, general, qanda
+ */
+type: string
+can_post: boolean
+}
+/**
+ * Antwort von GET /moodle/forums
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleForumList".
+ */
+export interface MoodleForumList {
+items: MoodleForum[]
+}
+/**
+ * Zeile aus der Notenübersicht. Werte als Text, wie Moodle sie formatiert
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleGradeItem".
+ */
+export interface MoodleGradeItem {
+/**
+ * Moodle-ID
+ */
+course_id: number
+name: string
+/**
+ * course, mod, category, manual
+ */
+item_type: string
+cmid: (number | null)
+grade: (string | null)
+range: (string | null)
+percentage: (string | null)
+feedback_html: (string | null)
+}
+/**
+ * Antwort von GET /moodle/grades
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleGradeList".
+ */
+export interface MoodleGradeList {
+items: MoodleGradeItem[]
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleNotification".
+ */
+export interface MoodleNotification {
+/**
+ * Moodle-ID
+ */
+moodle_id: number
+subject: string
+text: string
+created_at: Timestamp
+read: boolean
+url: (string | null)
+}
+/**
+ * Antwort von GET /moodle/notifications
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleNotificationList".
+ */
+export interface MoodleNotificationList {
+items: MoodleNotification[]
+unread_count: number
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodlePost".
+ */
+export interface MoodlePost {
+/**
+ * Moodle-ID
+ */
+moodle_id: number
+/**
+ * Moodle-ID
+ */
+discussion_id: number
+parent_id: (number | null)
+subject: string
+message_html: string
+author_name: (string | null)
+created_at: Timestamp
+can_reply: boolean
+attachments: MoodleFile[]
+}
+/**
+ * Antwort von GET /moodle/discussions/{discussion_id}/posts
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodlePostList".
+ */
+export interface MoodlePostList {
+items: MoodlePost[]
+}
+/**
+ * Quiz, nur zur Anzeige. Versuche laufen nie über die App (F-MDL-05)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleQuiz".
+ */
+export interface MoodleQuiz {
+/**
+ * Moodle-ID
+ */
+moodle_id: number
+/**
+ * Moodle-ID
+ */
+cmid: number
+/**
+ * Moodle-ID
+ */
+course_id: number
+name: string
+opens_at: (Timestamp | null)
+closes_at: (Timestamp | null)
+/**
+ * 0 = unbegrenzt
+ */
+attempts_allowed: number
+time_limit_minutes: (number | null)
+url: string
+}
+/**
+ * Antwort von GET /moodle/quizzes
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleQuizList".
+ */
+export interface MoodleQuizList {
+items: MoodleQuiz[]
+}
+/**
+ * Antwort von GET /moodle/status (08 §9.2)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleStatus".
+ */
+export interface MoodleStatus {
+state: MoodleConnectionState
+site_url: (string | null)
+site_name: (string | null)
+user_fullname: (string | null)
+token_valid_until: (IsoDate | null)
+checked_at: (Timestamp | null)
+}
+/**
+ * Antwort von GET /moodle/assignments/{assignment_id}/submission
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSubmissionStatus".
+ */
+export interface MoodleSubmissionStatus {
+/**
+ * Moodle-ID
+ */
+assignment_id: number
+state: MoodleSubmissionState
+graded: boolean
+grade: (string | null)
+feedback_html: (string | null)
+last_modified_at: (Timestamp | null)
+can_edit: boolean
+can_submit: boolean
+files: MoodleFile[]
+online_text_html: (string | null)
+}
+/**
+ * Antwort von POST /moodle/uploads
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleUpload".
+ */
+export interface MoodleUpload {
+upload_id: Uuid
+filename: string
+size_bytes: number
+expires_at: Timestamp
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
