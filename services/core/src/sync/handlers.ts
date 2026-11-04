@@ -58,7 +58,11 @@ export class SyncOpError extends Error {
 
 const handlers = new Map<SyncOp['kind'], OpRegistration>();
 
-/** Operationen, die nur der Core selbst schreibt (§11.2). Von einem Client: `op_not_allowed` */
+/**
+ * Operationen, die nur der Core selbst schreibt (§11.2). Von einem Client: `op_not_allowed`.
+ * **Liste von Hand:** Neue Server-Operationen hier eintragen. Ein Unit-Test vergleicht sie mit den Schema-Varianten,
+ * deren Beschreibung mit „Nur vom Server“ beginnt.
+ */
 export const SERVER_ONLY_KINDS: ReadonlySet<SyncOp['kind']> = new Set([
   'notebook.update',
   'notebook.delete',
@@ -103,4 +107,9 @@ export function getOpHandler(kind: SyncOp['kind']): OpHandler | undefined {
 /** Handler samt `preLock` oder `undefined` */
 export function getOpRegistration(kind: SyncOp['kind']): OpRegistration | undefined {
   return handlers.get(kind);
+}
+
+/** Alle registrierten Arten mit ihrem Handler (Momentaufnahme) */
+export function registeredOpHandlers(): Map<SyncOp['kind'], OpHandler> {
+  return new Map([...handlers].map(([kind, r]) => [kind, r.handler]));
 }

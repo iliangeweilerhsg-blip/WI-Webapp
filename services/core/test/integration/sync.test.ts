@@ -625,6 +625,41 @@ describe('Operationen, ack und Duplikate (§11.2, §16.2)', () => {
     expect(await client.closed()).toBe(4503);
   });
 
+  it('ruft für Server-Operationen eines Clients nie den Handler auf (op_not_allowed)', async () => {
+    const previous = getOpRegistration('page.restore');
+    if (previous) unregisterOpHandler('page.restore');
+    const called: string[] = [];
+    const spy = async (_tx: Tx, op: { op_id: string }) => {
+      called.push(op.op_id);
+    };
+    registerOpHandler('page.restore', spy);
+    try {
+      const nb = `notebook:${uuidv7()}`;
+      const client = await ready();
+      const op = markerOp(nb, { kind: 'page.restore', data: { page_id: uuidv7() } });
+      client.send(op);
+      expect(await client.next((m) => m.type === 'error')).toMatchObject({
+        code: 'op_not_allowed',
+        op_id: op.op_id,
+        retryable: false,
+        fatal: false,
+      });
+      client.send({ type: 'ping' });
+      await client.next((m) => m.type === 'pong');
+      expect(called).toEqual([]);
+      expect(await storedOps(nb)).toBe(0);
+    } finally {
+      unregisterOpHandler('page.restore', spy);
+      if (previous) {
+        registerOpHandler(
+          'page.restore',
+          previous.handler,
+          previous.preLock ? { preLock: previous.preLock } : {},
+        );
+      }
+    }
+  });
+
   it('lehnt unbekannte kind, seq/origin vom Client und Server-Operationen ab', async () => {
     const s = sessionStream();
     const client = await ready();

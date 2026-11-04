@@ -9,6 +9,7 @@
 import websocket from '@fastify/websocket';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import postgres from 'postgres';
+import type { SyncOp } from '@sg/shared';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
@@ -16,8 +17,8 @@ import { isLoopbackAddress } from '../plugins/security.ts';
 import { listenCommittedOps, setOnOpCommitted } from './append.ts';
 import { SyncConnection, type SyncSocket } from './connection.ts';
 import { handleEventNotification, SYNC_EVENT_CHANNEL } from './events.ts';
-import { getOpRegistration, unregisterOpHandler, type OpHandler } from './handlers.ts';
-import { createInkHandlers, registerInkHandlers } from './handlers/ink.ts';
+import { registeredOpHandlers, unregisterOpHandler, type OpHandler } from './handlers.ts';
+import { registerInkHandlers } from './handlers/ink.ts';
 import { getActiveHub, setActiveHub, SyncHub } from './hub.ts';
 import { CLOSE, syncLimits } from './limits.ts';
 import { readStreamHeads } from './store.ts';
@@ -113,20 +114,30 @@ async function syncPluginImpl(app: FastifyInstance, options: SyncPluginOptions):
   };
   await tryStart();
 
-  // Fach-Handler (VERTRAEGE §16.2): Core-Ink mit dem Datenordner dieser Instanz. Beim Beenden wieder abmelden,
-  // damit eine weitere App im selben Prozess (Tests) mit ihrem Datenordner registrieren kann
-  const inkKinds = Object.keys(createInkHandlers({ dataDir: config.dataDir })) as (keyof ReturnType<
-    typeof createInkHandlers
-  >)[];
-  let inkHandlers: [keyof ReturnType<typeof createInkHandlers>, OpHandler][] = [];
-  if (inkKinds.some((kind) => getOpRegistration(kind))) {
-    app.log.warn(
-      'Sync: Ink-Handler sind schon registriert (zweite App im selben Prozess), bleiben unverändert',
-    );
-  } else {
-    registerInkHandlers({ dataDir: config.dataDir });
-    inkHandlers = inkKinds.map((kind) => [kind, getOpRegistration(kind)!.handler]);
-  }
+  // Fach-Handler (VERTRAEGE §16.2). Was eine Registrierung neu anmeldet, wird beim Beenden wieder abgemeldet,
+  // damit eine weitere App im selben Prozess (Tests) mit ihrer Konfiguration registrieren kann. Sind die Arten
+  // schon belegt (zweite App gleichzeitig), bleibt die bestehende Registrierung unverändert.
+  const ownHandlers: [SyncOp['kind'], OpHandler][] = [];
+  const registerForApp = (area: string, register: () => void): void => {
+    const before = registeredOpHandlers();
+    try {
+      register();
+    } catch (error) {
+      for (const [kind, handler] of registeredOpHandlers()) {
+        if (before.get(kind) !== handler) unregisterOpHandler(kind, handler);
+      }
+      app.log.warn({ err: error, area }, 'Sync: Handler schon registriert (zweite App im selben Prozess)');
+      return;
+    }
+    for (const [kind, handler] of registeredOpHandlers()) {
+      if (before.get(kind) !== handler) ownHandlers.push([kind, handler]);
+    }
+  };
+  // Core-Ink: notebook.*, page.*, stroke.*, element.*, drawing.snapshot, photo.add
+  registerForApp('ink', () => registerInkHandlers({ dataDir: config.dataDir }));
+  // T1-02 (#65): Session-Handler (session.*, slide.change, marker.*) mit preLock. Sobald registerSessionHandlers
+  // auf main liegt, hier einhängen:
+  //   registerForApp('session', () => registerSessionHandlers());
 
   // Vor dem preClose von @fastify/websocket: eigene Verbindungen mit 1001 schließen
   app.addHook('preClose', async () => {
@@ -134,7 +145,7 @@ async function syncPluginImpl(app: FastifyInstance, options: SyncPluginOptions):
   });
   app.addHook('onClose', async () => {
     closing = true;
-    for (const [kind, handler] of inkHandlers) unregisterOpHandler(kind, handler);
+    for (const [kind, handler] of ownHandlers) unregisterOpHandler(kind, handler);
     if (retryTimer) clearTimeout(retryTimer);
     hub.listenerReady = false;
     if (getActiveHub() === hub) {
