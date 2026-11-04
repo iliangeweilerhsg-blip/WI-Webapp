@@ -66,6 +66,7 @@ function startWorker(
     };
     const onError = (event: Event) => {
       cleanup();
+      pdfWorker.destroy();
       worker.terminate();
       workerFailures += 1;
       reject(Object.assign(new Error('Der PDF-Worker ist nicht gestartet.'), { cause: event }));

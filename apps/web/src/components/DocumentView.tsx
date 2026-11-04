@@ -1011,7 +1011,6 @@ export const HEALTH_GRACE_MS = 30_000;
 export const HEALTH_MAX_MS = 5 * 60_000;
 
 /** PDF-Anzeige (F-ORG-04) – Route mit Query-Parametern `?typ=folien|blatt&id=…&seite=…` (VERTRAEGE §5). */
-
 export function DocumentView() {
   return (
     <section aria-labelledby="screen-title" className="h-full">

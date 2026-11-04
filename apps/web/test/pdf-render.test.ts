@@ -7,6 +7,7 @@ const state = vi.hoisted(() => ({
   drawn: [] as number[],
   errors: [] as string[],
   failRender: null as Error | null,
+  failDocument: null as Error | null,
   destroyed: 0,
   cleaned: [] as number[],
 }));
@@ -58,7 +59,10 @@ vi.mock('pdfjs-dist', () => {
     GlobalWorkerOptions: { workerSrc: 'x' },
     PDFWorker: { create: () => ({ destroy: () => {} }) },
     Util: { transform: () => [] },
-    getDocument: () => ({ promise: Promise.resolve(doc), destroy: () => state.destroyed++ }),
+    getDocument: () => ({
+      promise: state.failDocument ? Promise.reject(state.failDocument) : Promise.resolve(doc),
+      destroy: () => state.destroyed++,
+    }),
   };
 });
 
@@ -91,6 +95,7 @@ beforeEach(() => {
   state.drawn = [];
   state.errors = [];
   state.failRender = null;
+  state.failDocument = null;
   state.destroyed = 0;
   state.cleaned = [];
 });
@@ -178,12 +183,23 @@ describe('openPdf().pageSize', () => {
 });
 
 describe('openPdf(): Worker-Start', () => {
-  it('scheitert der Worker, bekommt der nächste Versuch einen Cache-Buster; ein 404 des PDF löst keinen aus', async () => {
+  it('scheitert der Worker, bekommt der nächste Versuch einen Cache-Buster', async () => {
     FakeWorker.urls = [];
     FakeWorker.failNext = true;
     await expect(openPdf('/x.pdf')).rejects.toThrow(/Worker/);
     await openPdf('/x.pdf');
     expect(FakeWorker.urls[0]).not.toContain('retry=');
     expect(FakeWorker.urls[1]).toContain('retry=1');
+  });
+
+  it('ein 404 des PDF (Worker läuft) löst keinen Cache-Buster aus', async () => {
+    FakeWorker.urls = [];
+    state.failDocument = Object.assign(new Error('Missing PDF'), { name: 'ResponseException' });
+    await expect(openPdf('/x.pdf')).rejects.toThrow(/Missing/);
+    state.failDocument = null;
+    await openPdf('/x.pdf');
+    expect(FakeWorker.urls).toHaveLength(2);
+    // Die Adresse bleibt gleich: kein neuer Cache-Buster nach dem Fehler des PDF
+    expect(FakeWorker.urls[1]).toBe(FakeWorker.urls[0]);
   });
 });

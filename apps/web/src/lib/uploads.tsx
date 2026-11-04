@@ -273,7 +273,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         // Die Dublette ist eine Löschung, deren DELETE schon unterwegs ist: abwarten, dann ist die Datei dem Core
         // unbekannt und derselbe Inhalt wird als neuer Eintrag angenommen (neuer Schlüssel, der alte gilt der Dublette).
         if (result.duplicate && (await awaitMaterialDelete(entry.kind, result.id))) {
-          result = await upload(globalThis.crypto.randomUUID());
+          // Der neue Schlüssel wird gemerkt: „Erneut versuchen“ nach einem Fehler spielt sonst die alte Dublette ab
+          const fresh = globalThis.crypto.randomUUID();
+          patch(id, { key: fresh });
+          result = await upload(fresh);
         }
         // Dieselbe Datei im Rückgängig-Fenster erneut hochgeladen: Die Dublette ist die vorgemerkte Löschung.
         // Sie wird zurückgenommen, sonst ginge das DELETE später raus und „Anzeigen“ zeigte auf ein gelöschtes Blatt.
