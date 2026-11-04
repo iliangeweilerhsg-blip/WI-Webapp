@@ -77,7 +77,7 @@ CREATE INDEX job_pick_idx ON job (priority DESC, created_at) WHERE state = 'wart
 - **Erfolg:** `state='fertig'`, `result` als Zusammenfassung, Lock-Felder leeren.
 - **Fehler mit `attempts < max_attempts`:** `state='wartet'`, `run_after = now() + 30s * 2^(attempts-1)`, `error` setzen.
 - **Fehler sonst:** `state='fehler'`.
-- **Hängende Jobs:** `laeuft` mit `locked_at` älter als 30 min gilt als abgestürzt und wird beim Worker-Start wieder auf `wartet` gesetzt.
+- **Hängende Jobs:** `laeuft` mit `locked_at` älter als 3 min (dreifaches Heartbeat-Intervall) gilt als abgestürzt; der Worker prüft das beim Start und danach jede Minute. Hat der Job `attempts >= max_attempts`, wird er `fehler`, sonst wieder `wartet`.
 
 Ein laufender Job erneuert `locked_at` alle 60 s (Heartbeat). Ergebnis und Fehler schreibt nur der Worker, dessen `locked_by` noch eingetragen ist.
 

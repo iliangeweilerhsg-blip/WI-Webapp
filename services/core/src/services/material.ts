@@ -175,7 +175,8 @@ async function createMaterial(
   moduleId: string,
   upload: StoredUpload,
   insert: (tx: Tx, id: string, filePath: string) => Promise<void>,
-  existing: (tx: Tx) => Promise<string | undefined>,
+  existing: (tx: Tx) => Promise<{ id: string; failed: boolean } | undefined>,
+  reset: (tx: Tx, id: string) => Promise<void>,
   jobPayload: (id: string) => Record<string, unknown>,
   sessionId?: string,
 ): Promise<UploadResult> {
@@ -188,7 +189,18 @@ async function createMaterial(
         sql`SELECT pg_advisory_xact_lock(hashtextextended(${`${kind}:${moduleId}:${upload.sha256}`}, 0))`,
       );
       const duplicate = await existing(tx);
-      if (duplicate) return { id: duplicate, duplicate: true };
+      if (duplicate) {
+        // Früherer Versuch endgültig gescheitert: neu einlesen lassen statt eine tote Dublette zu behalten
+        if (duplicate.failed) {
+          await reset(tx, duplicate.id);
+          await enqueueJob(tx, {
+            type: 'pdf.ingest',
+            payload: jobPayload(duplicate.id),
+            ...(sessionId ? { sessionId } : {}),
+          });
+        }
+        return { id: duplicate.id, duplicate: true };
+      }
 
       const filePath = `media/${folder}/${id}/original.pdf`;
       await insert(tx, id, filePath);
@@ -235,7 +247,7 @@ export async function createSlideDeck(
     },
     async (tx) => {
       const [row] = await tx
-        .select({ id: slideDeck.id })
+        .select({ id: slideDeck.id, state: slideDeck.ingestState })
         .from(slideDeck)
         .where(
           and(
@@ -245,7 +257,13 @@ export async function createSlideDeck(
           ),
         )
         .limit(1);
-      return row?.id;
+      return row && { id: row.id, failed: row.state === 'fehler' };
+    },
+    async (tx, id) => {
+      await tx
+        .update(slideDeck)
+        .set({ ingestState: 'neu', updatedAt: sql`now()` })
+        .where(eq(slideDeck.id, id));
     },
     (id) => ({ slide_deck_id: id }),
     input.sessionId,
@@ -279,7 +297,7 @@ export async function createExerciseSheet(
     },
     async (tx) => {
       const [row] = await tx
-        .select({ id: exerciseSheet.id })
+        .select({ id: exerciseSheet.id, state: exerciseSheet.ingestState })
         .from(exerciseSheet)
         .where(
           and(
@@ -289,7 +307,13 @@ export async function createExerciseSheet(
           ),
         )
         .limit(1);
-      return row?.id;
+      return row && { id: row.id, failed: row.state === 'fehler' };
+    },
+    async (tx, id) => {
+      await tx
+        .update(exerciseSheet)
+        .set({ ingestState: 'neu', updatedAt: sql`now()` })
+        .where(eq(exerciseSheet.id, id));
     },
     (id) => ({ exercise_sheet_id: id }),
   );

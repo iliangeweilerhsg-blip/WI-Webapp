@@ -17,12 +17,13 @@ from psycopg.pq import TransactionStatus
 
 from . import jobs
 from .logging_setup import LOGGER_NAME, job_log_context
-from .registry import JobContext, PayloadError, Registry, default_registry
+from .registry import JobContext, LockLostError, NonRetryableError, Registry, default_registry
 
 DEFAULT_CHANNEL = "sg_jobs"
 POLL_INTERVAL_SECONDS = 30.0
 HEARTBEAT_INTERVAL_SECONDS = 60.0
 RECONNECT_MAX_SECONDS = 30.0
+RECOVER_INTERVAL_SECONDS = 60.0
 _WAKE_SLICE_SECONDS = 0.5  # So schnell reagiert die Schleife auf stop()
 
 ORPHAN_ERROR = "Verbindung während des Jobs verloren"
@@ -39,6 +40,8 @@ class Worker:
         registry: Registry | None = None,
         poll_interval: float = POLL_INTERVAL_SECONDS,
         heartbeat_interval: float = HEARTBEAT_INTERVAL_SECONDS,
+        stuck_after: float = jobs.STUCK_AFTER_SECONDS,
+        recover_interval: float = RECOVER_INTERVAL_SECONDS,
         channel: str = DEFAULT_CHANNEL,
         worker_id: str | None = None,
         connect_kwargs: Mapping[str, Any] | None = None,
@@ -49,6 +52,9 @@ class Worker:
         self.registry = registry or default_registry
         self.poll_interval = poll_interval
         self.heartbeat_interval = heartbeat_interval
+        self.stuck_after = stuck_after
+        self.recover_interval = recover_interval
+        self._last_recover = 0.0
         self.channel = channel
         self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
         self.connect_kwargs = dict(connect_kwargs or {})
@@ -90,8 +96,11 @@ class Worker:
             # Verbindung (auch Claim ohne Handler-Start, "unbekannter Job-Typ") freigeben.
             orphaned = jobs.fail_own_running(work, self.worker_id, ORPHAN_ERROR)
             if orphaned:
-                self.log.warning("Verwaiste eigene Jobs zurückgesetzt", extra={"count": orphaned})
-            recovered = jobs.recover_stuck(work)
+                self.log.warning(
+                    "Verwaiste eigene Jobs zurückgesetzt", extra={"count": len(orphaned)}
+                )
+                self._run_failure_hooks(work, orphaned)
+            recovered = self._recover(work)
             self.log.info(
                 "Worker verbunden",
                 extra={
@@ -102,11 +111,35 @@ class Worker:
             )
             while not self.stopping:
                 self.drain(work)
+                if time.monotonic() - self._last_recover >= self.recover_interval:
+                    self._recover(work)
                 self._wait(listen, work)
+
+    def _recover(self, conn: psycopg.Connection[Any]) -> int:
+        """Abgestürzte Jobs fremder Worker freigeben (Start und danach jede Minute)."""
+        self._last_recover = time.monotonic()
+        rows = jobs.recover_stuck(conn, self.stuck_after)
+        if rows:
+            self.log.warning("Hängende Jobs freigegeben", extra={"count": len(rows)})
+            self._run_failure_hooks(conn, rows)
+        return len(rows)
+
+    def _run_failure_hooks(self, conn: psycopg.Connection[Any], rows: list[jobs.Job]) -> None:
+        """Führt für endgültig gescheiterte Jobs (`fehler`) den Hook ihres Typs aus."""
+        for row in rows:
+            if row.get("state") != "fehler":
+                continue
+            spec = self.registry.get(row["type"])
+            if spec is None or spec.on_final_failure is None:
+                continue
+            try:
+                spec.on_final_failure(conn, row["payload"])
+            except Exception:
+                self.log.exception("Fehler-Hook fehlgeschlagen", extra={"type": row["type"]})
 
     def _wait(self, listen: psycopg.Connection[Any], work: psycopg.Connection[Any]) -> None:
         """Wartet auf NOTIFY, höchstens bis zum nächsten `run_after` bzw. `poll_interval`."""
-        timeout = self.poll_interval
+        timeout = min(self.poll_interval, self.recover_interval)
         next_run = jobs.seconds_until_next_run(work)
         if next_run is not None:
             timeout = min(timeout, next_run + 0.05)
@@ -129,11 +162,13 @@ class Worker:
         return count
 
     def _finish_failed(
-        self, conn: psycopg.Connection[Any], job_id: Any, error: str, *, retry: bool = True
+        self, conn: psycopg.Connection[Any], job: jobs.Job, error: str, *, retry: bool = True
     ) -> None:
-        state = jobs.fail(conn, job_id, self.worker_id, error, retry=retry)
+        state = jobs.fail(conn, job["id"], self.worker_id, error, retry=retry)
         if state is None:
             self.log.warning("Lock verloren, Fehler verworfen", extra={"error": error})
+        elif state == "fehler":
+            self._run_failure_hooks(conn, [{**job, "state": state}])
 
     def _execute(self, conn: psycopg.Connection[Any], job: jobs.Job) -> None:
         job_id = job["id"]
@@ -142,7 +177,7 @@ class Worker:
             self.log.info("Job gestartet", extra={"type": job["type"], "attempt": job["attempts"]})
             spec = self.registry.get(job["type"])
             if spec is None:
-                self._finish_failed(conn, job_id, "unbekannter Job-Typ", retry=False)
+                self._finish_failed(conn, job, "unbekannter Job-Typ", retry=False)
                 self.log.error("unbekannter Job-Typ", extra={"type": job["type"]})
                 return
             heartbeat_stop = threading.Event()
@@ -161,13 +196,17 @@ class Worker:
                     self.log.info("Job fertig")
                 else:
                     self.log.warning("Lock verloren, Ergebnis verworfen")
-            except PayloadError as exc:
-                self._finish_failed(conn, job_id, str(exc), retry=False)
-                self.log.error("Payload ungültig", extra={"error": str(exc)})
+            except LockLostError:
+                self._reset_connection(conn)
+                self.log.warning("Lock verloren, nichts committet")
+            except NonRetryableError as exc:
+                self._reset_connection(conn)
+                self._finish_failed(conn, job, str(exc), retry=False)
+                self.log.error("Job nicht wiederholbar fehlgeschlagen", extra={"error": str(exc)})
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 self._reset_connection(conn)
-                self._finish_failed(conn, job_id, error)
+                self._finish_failed(conn, job, error)
                 self.log.exception("Job fehlgeschlagen")
             finally:
                 heartbeat_stop.set()

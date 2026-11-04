@@ -15,8 +15,12 @@ beachten.
 from __future__ import annotations
 
 import io
+import logging
+import math
 import os
+import re
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -27,7 +31,7 @@ from PIL import Image
 from psycopg.types.json import Jsonb
 from sg_schemas.models import PdfIngestDeckPayload, PdfIngestPayload, PdfIngestSheetPayload
 
-from ..registry import JobContext, PayloadError, handler
+from ..registry import JobContext, LockLostError, NonRetryableError, PayloadError, handler
 from ..uuid7 import uuid7
 
 #: Renderfaktor und Obergrenzen (05 §P1: 2x, max. 2400 px Breite)
@@ -35,11 +39,33 @@ RENDER_SCALE = 2.0
 MAX_IMAGE_WIDTH_PX = 2400
 MAX_IMAGE_HEIGHT_PX = 4800
 THUMB_WIDTH_PX = 320
+THUMB_MAX_HEIGHT_PX = 960  # WebP erlaubt höchstens 16383 px; sehr hohe Seiten bleiben klein
 THUMB_QUALITY = 80
 #: Titel: Schrift im oberen Drittel, Zeilen ab 90 % der größten Schrift gehören dazu
 TITLE_ZONE = 1 / 3
 TITLE_SIZE_TOLERANCE = 0.9
 TITLE_MAX_CHARS = 200
+
+
+log = logging.getLogger(__name__)
+
+
+class IngestError(NonRetryableError):
+    """Das PDF ist unbrauchbar (beschädigt, passwortgeschützt, leer). Ein Retry ändert nichts."""
+
+
+class TransientIngestError(Exception):
+    """Alles andere (I/O, DB): wiederholbar. Meldung ohne absolute Pfade."""
+
+
+_ABS_PATH = re.compile(r"(?<![\w.:])/(?:[\w.\-]+/)+[\w.\-]*")
+
+
+def sanitize_error(text: str, data_dir: Path) -> str:
+    """Entfernt absolute Pfade aus Fehlertexten (`job.error` ist in der API sichtbar)."""
+    for variant in {str(data_dir), str(data_dir.resolve())}:
+        text = text.replace(variant.rstrip("/") + "/", "").replace(variant, "<SG_DATA_DIR>")
+    return _ABS_PATH.sub("<Pfad>", text)
 
 
 @dataclass
@@ -50,8 +76,8 @@ class PageData:
     text: str
     text_blocks: list[dict[str, Any]]
     title: str | None
-    image_rel: str
-    thumb_rel: str
+    image_rel: str | None  # None: Seite nicht renderbar, Text bleibt erhalten
+    thumb_rel: str | None
 
 
 @dataclass
@@ -79,21 +105,27 @@ def _write_atomic(path: Path, data: bytes) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def _render_png(page: pymupdf.Page, width_pt: float, height_pt: float) -> bytes:
+def _finite(value: float) -> float:
+    """NaN/inf (kaputte Textkoordinaten) passen weder in `jsonb` noch in `real`."""
+    return round(value, 2) if math.isfinite(value) else 0.0
+
+
+def _render_page(page: pymupdf.Page, width_pt: float, height_pt: float) -> tuple[bytes, bytes]:
+    """PNG (2x, begrenzt) und WebP-Vorschau. Die Vorschau entsteht aus dem schon gerenderten
+    Pixmap (kein zweites Rendern), Skala `min(320/w, 960/h)` relativ zur Seite."""
     scale = min(RENDER_SCALE, MAX_IMAGE_WIDTH_PX / width_pt, MAX_IMAGE_HEIGHT_PX / height_pt)
     pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
-    return bytes(pix.tobytes("png"))
-
-
-def _render_thumb(page: pymupdf.Page, width_pt: float) -> bytes:
-    scale = THUMB_WIDTH_PX / width_pt
-    pix = page.get_pixmap(
-        matrix=pymupdf.Matrix(scale, scale), colorspace=pymupdf.csRGB, alpha=False
+    png = bytes(pix.tobytes("png"))
+    image = Image.frombuffer(
+        "RGB", (pix.width, pix.height), pix.samples, "raw", "RGB", pix.stride, 1
     )
-    image = Image.frombytes("RGB", (pix.width, pix.height), bytes(pix.samples))
+    factor = min(1.0, min(THUMB_WIDTH_PX / width_pt, THUMB_MAX_HEIGHT_PX / height_pt) / scale)
+    if factor < 1.0:
+        size = (max(1, round(pix.width * factor)), max(1, round(pix.height * factor)))
+        image = image.resize(size, Image.Resampling.LANCZOS)
     buffer = io.BytesIO()
     image.save(buffer, format="WEBP", quality=THUMB_QUALITY, method=4)
-    return buffer.getvalue()
+    return png, buffer.getvalue()
 
 
 def extract_text(page: pymupdf.Page) -> tuple[str, list[dict[str, Any]], str | None]:
@@ -124,7 +156,7 @@ def extract_text(page: pymupdf.Page) -> tuple[str, list[dict[str, Any]], str | N
         blocks.append(
             {
                 "text": "\n".join(text for _, text, _ in lines),
-                "bbox": [round(x0, 2), round(y0, 2), round(x1 - x0, 2), round(y1 - y0, 2)],
+                "bbox": [_finite(x0), _finite(y0), _finite(x1 - x0), _finite(y1 - y0)],
             }
         )
         in_zone = [(size, text) for size, text, top in lines if top < title_limit]
@@ -148,35 +180,57 @@ def process_pdf(pdf_path: Path, media_dir: Path, subdir: str, rel_base: str) -> 
     """Rendert alle Seiten nach `media_dir/<subdir>/<n>.png` und `thumbs/<n>.webp`.
 
     `rel_base` ist der Ordner relativ zu `SG_DATA_DIR` (für die Pfade in der DB). Frühere
-    Ergebnisse werden überschrieben, überzählige Dateien (kürzeres PDF) entfernt.
+    Ergebnisse werden überschrieben, überzählige Dateien (kürzeres PDF) entfernt. Eine nicht
+    renderbare Seite bekommt keine Bildpfade, behält aber ihren Text; das PDF als Ganzes scheitert
+    nur, wenn es sich nicht öffnen lässt, passwortgeschützt oder leer ist.
     """
     out = IngestOutput()
+    if not pdf_path.is_file():
+        raise FileNotFoundError("Original-PDF fehlt")
     try:
         doc = pymupdf.open(pdf_path)
-    except (pymupdf.FileDataError, pymupdf.FileNotFoundError, RuntimeError) as exc:
-        raise ValueError(f"PDF nicht lesbar: {exc}") from exc
+    except (pymupdf.FileDataError, RuntimeError) as exc:
+        raise IngestError("PDF nicht lesbar (beschädigt oder kein PDF)") from exc
     with doc:
         if doc.needs_pass:
-            raise ValueError("PDF ist passwortgeschützt")
+            raise IngestError("PDF ist passwortgeschützt")
         if doc.page_count < 1:
-            raise ValueError("PDF enthält keine Seiten")
+            raise IngestError("PDF enthält keine Seiten")
         for number in range(1, doc.page_count + 1):
-            page = doc.load_page(number - 1)
-            width_pt = float(page.rect.width)
-            height_pt = float(page.rect.height)
-            if width_pt <= 0 or height_pt <= 0:
-                raise ValueError(f"Seite {number} hat keine gültige Größe")
-            image_rel = f"{rel_base}/{subdir}/{number}.png"
-            thumb_rel = f"{rel_base}/thumbs/{number}.webp"
-            png = _render_png(page, width_pt, height_pt)
-            _write_atomic(media_dir / subdir / f"{number}.png", png)
-            _write_atomic(media_dir / "thumbs" / f"{number}.webp", _render_thumb(page, width_pt))
-            text, blocks, title = extract_text(page)
+            png_path = media_dir / subdir / f"{number}.png"
+            thumb_path = media_dir / "thumbs" / f"{number}.webp"
+            try:
+                page = doc.load_page(number - 1)
+                width_pt = float(page.rect.width)
+                height_pt = float(page.rect.height)
+            except Exception as exc:
+                raise IngestError(f"Seite {number} lässt sich nicht laden") from exc
+            if (
+                not (math.isfinite(width_pt) and math.isfinite(height_pt))
+                or min(width_pt, height_pt) <= 0
+            ):
+                raise IngestError(f"Seite {number} hat keine gültige Größe")
+            image_rel: str | None = f"{rel_base}/{subdir}/{number}.png"
+            thumb_rel: str | None = f"{rel_base}/thumbs/{number}.webp"
+            try:
+                png, thumb = _render_page(page, width_pt, height_pt)
+                _write_atomic(png_path, png)
+                _write_atomic(thumb_path, thumb)
+            except Exception:
+                log.warning("Seite %d nicht renderbar, nur Text", number, exc_info=True)
+                image_rel = thumb_rel = None
+                png_path.unlink(missing_ok=True)
+                thumb_path.unlink(missing_ok=True)
+            try:
+                text, blocks, title = extract_text(page)
+            except Exception:
+                log.warning("Text von Seite %d nicht lesbar", number, exc_info=True)
+                text, blocks, title = "", [], None
             out.pages.append(
                 PageData(
                     index=number,
-                    width_pt=round(width_pt, 2),
-                    height_pt=round(height_pt, 2),
+                    width_pt=_finite(width_pt),
+                    height_pt=_finite(height_pt),
                     text=text,
                     text_blocks=blocks,
                     title=title,
@@ -184,6 +238,7 @@ def process_pdf(pdf_path: Path, media_dir: Path, subdir: str, rel_base: str) -> 
                     thumb_rel=thumb_rel,
                 )
             )
+            pymupdf.TOOLS.store_shrink(100)  # Cache der Seite freigeben
     _remove_stale(media_dir / subdir, ".png", len(out.pages))
     _remove_stale(media_dir / "thumbs", ".webp", len(out.pages))
     return out
@@ -203,19 +258,22 @@ def _safe_source(data_dir: Path, file_path: str) -> Path:
     return path
 
 
-def _mark_error_if_last_attempt(ctx: JobContext, table: str, row_id: Any) -> None:
-    """Letzter Versuch gescheitert: `ingest_state='fehler'` (VERTRAEGE §3: danach kein Retry)."""
-    try:
-        row = ctx.conn.execute(
-            "SELECT attempts >= max_attempts FROM job WHERE id = %s", (ctx.job_id,)
-        ).fetchone()
-        if row is not None and row[0]:
-            ctx.conn.execute(
-                f"UPDATE {table} SET ingest_state = 'fehler', updated_at = now() WHERE id = %s",
-                (row_id,),
-            )
-    except psycopg.Error:
-        ctx.logger.exception("ingest_state konnte nicht auf 'fehler' gesetzt werden")
+def mark_ingest_failed(conn: psycopg.Connection[Any], payload: dict[str, Any]) -> None:
+    """Hook `on_final_failure`: Der Job ist endgültig gescheitert, egal auf welchem Weg
+    (Handler-Fehler, Verbindungsverlust, abgestürzter Worker) -> `ingest_state='fehler'`."""
+    for key, table in (("slide_deck_id", "slide_deck"), ("exercise_sheet_id", "exercise_sheet")):
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        try:
+            row_id = uuid.UUID(str(raw))
+        except ValueError:
+            return
+        conn.execute(
+            f"UPDATE {table} SET ingest_state = 'fehler', updated_at = now() WHERE id = %s",
+            (row_id,),
+        )
+        return
 
 
 _UPSERT_SLIDE = """
@@ -230,7 +288,7 @@ ON CONFLICT (deck_id, index) WHERE deleted_at IS NULL DO UPDATE SET
 """
 
 
-@handler("pdf.ingest", payload_type=PdfIngestPayload)
+@handler("pdf.ingest", payload_type=PdfIngestPayload, on_final_failure=mark_ingest_failed)
 def pdf_ingest(
     payload: PdfIngestDeckPayload | PdfIngestSheetPayload, ctx: JobContext
 ) -> dict[str, Any]:
@@ -255,46 +313,53 @@ def pdf_ingest(
         source = _safe_source(ctx.data_dir, file_path)
         rel_base = f"media/{kind}/{row_id}"
         out = process_pdf(source, ctx.data_dir / rel_base, subdir, rel_base)
-    except Exception:
-        _mark_error_if_last_attempt(ctx, table, row_id)
+        result = {
+            "page_count": len(out.pages),
+            "pages_with_text": out.pages_with_text,
+            "duration_ms": int((time.monotonic() - started) * 1000),
+        }
+        with ctx.conn.transaction():
+            if kind == "decks":
+                with ctx.conn.cursor() as cur:
+                    cur.executemany(
+                        _UPSERT_SLIDE,
+                        [
+                            {
+                                "id": uuid7(),
+                                "user_id": user_id,
+                                "deck_id": row_id,
+                                "index": p.index,
+                                "image_path": p.image_rel,
+                                "thumb_path": p.thumb_rel,
+                                "width_pt": p.width_pt,
+                                "height_pt": p.height_pt,
+                                "text": p.text,
+                                "text_blocks": Jsonb(p.text_blocks),
+                                "title": p.title,
+                            }
+                            for p in out.pages
+                        ],
+                    )
+                    # Kürzeres PDF bei erneutem Lauf: überzählige Folien entfernen
+                    cur.execute(
+                        "DELETE FROM slide WHERE deck_id = %s AND index > %s",
+                        (row_id, len(out.pages)),
+                    )
+            ctx.conn.execute(
+                f"UPDATE {table} SET page_count = %s, ingest_state = 'verarbeitet', "
+                "updated_at = now() WHERE id = %s",
+                (len(out.pages), row_id),
+            )
+            ctx.finish(result)
+            if not ctx.lock_ok:
+                # Der Job gehört einem anderen Worker: nichts committen
+                raise LockLostError(ctx.job_id)
+    except (NonRetryableError, LockLostError, psycopg.OperationalError, psycopg.InterfaceError):
         raise
-
-    result = {
-        "page_count": len(out.pages),
-        "pages_with_text": out.pages_with_text,
-        "duration_ms": int((time.monotonic() - started) * 1000),
-    }
-    with ctx.conn.transaction():
-        if kind == "decks":
-            with ctx.conn.cursor() as cur:
-                cur.executemany(
-                    _UPSERT_SLIDE,
-                    [
-                        {
-                            "id": uuid7(),
-                            "user_id": user_id,
-                            "deck_id": row_id,
-                            "index": p.index,
-                            "image_path": p.image_rel,
-                            "thumb_path": p.thumb_rel,
-                            "width_pt": p.width_pt,
-                            "height_pt": p.height_pt,
-                            "text": p.text,
-                            "text_blocks": Jsonb(p.text_blocks),
-                            "title": p.title,
-                        }
-                        for p in out.pages
-                    ],
-                )
-                # Kürzeres PDF bei erneutem Lauf: überzählige Folien entfernen
-                cur.execute(
-                    "DELETE FROM slide WHERE deck_id = %s AND index > %s",
-                    (row_id, len(out.pages)),
-                )
-        ctx.conn.execute(
-            f"UPDATE {table} SET page_count = %s, ingest_state = 'verarbeitet', "
-            "updated_at = now() WHERE id = %s",
-            (len(out.pages), row_id),
-        )
-        ctx.finish(result)
+    except Exception as exc:
+        # Meldung ohne absolute Pfade; `ingest_state='fehler'` setzt der Hook beim endgültigen
+        # Scheitern
+        raise TransientIngestError(
+            sanitize_error(f"{type(exc).__name__}: {exc}", ctx.data_dir)
+        ) from exc
     return result

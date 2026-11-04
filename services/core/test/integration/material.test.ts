@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { request as httpRequest } from 'node:http';
 import { readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -367,6 +368,114 @@ describe('POST /slide-decks', () => {
   });
 });
 
+describe('Magic-Bytes, Wiederholung nach Fehler, Aufräumen', () => {
+  it('akzeptiert %PDF in den ersten 1024 Bytes, nicht danach', async () => {
+    const withPrefix = Buffer.concat([Buffer.from('\n'.repeat(900)), fakePdf('vorspann')]);
+    expect((await uploadDeck({ module_id: moduleId }, { data: withPrefix })).statusCode).toBe(201);
+    const tooLate = Buffer.concat([Buffer.from('x'.repeat(1030)), fakePdf('zu-spaet')]);
+    const res = await uploadDeck({ module_id: moduleId }, { data: tooLate });
+    expect(res.statusCode).toBe(400);
+    expect(ApiErrorSchema.parse(res.json()).error.code).toBe('invalid_pdf');
+    const tiny = await uploadDeck({ module_id: moduleId }, { data: Buffer.from('%PDF') });
+    expect(tiny.statusCode).toBe(201);
+  });
+
+  it.each([
+    ['slide_deck', '/slide-decks', uploadDeck, 'slide_deck_id'],
+    ['exercise_sheet', '/exercise-sheets', uploadSheet, 'exercise_sheet_id'],
+  ] as const)(
+    'gescheiterte Dublette (%s) wird zurückgesetzt und neu eingelesen',
+    async (table, _url, up, key) => {
+      const data = fakePdf(`retry-${table}`);
+      const first = UploadResultSchema.parse((await up({ module_id: moduleId }, { data })).json());
+      const sql = t.handle.sql;
+      await sql`UPDATE ${sql(table)} SET ingest_state = 'fehler' WHERE id = ${first.id}`;
+      await sql`UPDATE job SET state = 'fehler'`;
+
+      const again = await up({ module_id: moduleId }, { data });
+      expect(again.statusCode).toBe(200);
+      expect(UploadResultSchema.parse(again.json())).toEqual({ id: first.id, duplicate: true });
+      const [row] = await sql`SELECT ingest_state FROM ${sql(table)} WHERE id = ${first.id}`;
+      expect(row!.ingest_state).toBe('neu');
+      const jobs = await sql`SELECT payload, state FROM job ORDER BY created_at`;
+      expect(jobs).toHaveLength(2);
+      expect(jobs[1]).toMatchObject({ state: 'wartet', payload: { [key]: first.id } });
+
+      // Nicht gescheitert: keine zweite Einlesung
+      await up({ module_id: moduleId }, { data });
+      expect(await sql`SELECT 1 FROM job`).toHaveLength(2);
+    },
+  );
+
+  it('Abbruch des Clients mitten im Upload hinterlässt keine temporäre Datei', async () => {
+    await t.app.listen({ port: 0, host: '127.0.0.1' });
+    const address = t.app.server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    const boundary = '----abbruch';
+    await new Promise<void>((resolve) => {
+      const req = httpRequest({
+        host: '127.0.0.1',
+        port,
+        method: 'POST',
+        path: `${API}/slide-decks`,
+        headers: {
+          host: `localhost:${t.config.port}`,
+          'content-type': `multipart/form-data; boundary=${boundary}`,
+          'content-length': '5000000',
+        },
+      });
+      req.on('error', () => resolve());
+      req.on('close', () => resolve());
+      req.write(
+        `--${boundary}\r\nContent-Disposition: form-data; name="module_id"\r\n\r\n${moduleId}\r\n` +
+          `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.pdf"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4\n${'x'.repeat(100_000)}`,
+      );
+      setTimeout(() => req.destroy(), 200);
+    });
+    expect(
+      await eventually(
+        () => tmpFiles(t.config.dataDir),
+        (f) => f.length === 0,
+      ),
+    ).toEqual([]);
+    expect(await counts()).toEqual({ decks: 0, sheets: 0, jobs: 0 });
+  });
+
+  it('räumt beim Start alte temporäre Uploads und Ordner ohne DB-Zeile auf', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'sg-core-sweep-'));
+    const old = new Date(Date.now() - 3 * 3600 * 1000);
+    mkdirSync(join(dataDir, 'media', '.tmp'), { recursive: true });
+    const staleTmp = join(dataDir, 'media', '.tmp', 'alt.upload');
+    const freshTmp = join(dataDir, 'media', '.tmp', 'neu.upload');
+    writeFileSync(staleTmp, 'x');
+    writeFileSync(freshTmp, 'x');
+    utimesSync(staleTmp, old, old);
+
+    const orphan = uuidv7();
+    const young = uuidv7();
+    const known = uuidv7();
+    for (const id of [orphan, young, known]) {
+      mkdirSync(join(dataDir, 'media', 'decks', id), { recursive: true });
+      writeFileSync(join(dataDir, 'media', 'decks', id, 'original.pdf'), 'x');
+    }
+    for (const id of [orphan, known]) utimesSync(join(dataDir, 'media', 'decks', id), old, old);
+    await t.handle.sql`INSERT INTO slide_deck (id, user_id, module_id, title, file_path, sha256, deleted_at)
+      VALUES (${known}, ${SINGLE_USER_ID}, ${moduleId}, 'x', 'p', ${'a'.repeat(64)}, now())`;
+
+    const second = await startTestApp({ dataDir });
+    try {
+      const gone = await eventually(
+        () => readdir(join(dataDir, 'media', 'decks')),
+        (names) => !names.includes(orphan),
+      );
+      expect(gone.sort()).toEqual([young, known].sort());
+      expect(await readdir(join(dataDir, 'media', '.tmp'))).toEqual(['neu.upload']);
+    } finally {
+      await second.close();
+    }
+  });
+});
+
 describe('Größenlimit', () => {
   it('antwortet mit 413 file_too_large und räumt auf', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'sg-core-limit-'));
@@ -648,6 +757,13 @@ describe('Foliensätze lesen, ändern, löschen', () => {
 
     const everything = SlideDeckListSchema.parse((await t.request({ url: `${API}/slide-decks` })).json());
     expect(everything.items).toHaveLength(4);
+  });
+
+  it('PATCH ohne Titel ändert nichts', async () => {
+    const id = await createDeck();
+    const res = await t.request({ method: 'PATCH', url: `${API}/slide-decks/${id}`, payload: {} });
+    expect(res.statusCode).toBe(200);
+    expect(SlideDeckSchema.parse(res.json()).title).toBe('Skript');
   });
 
   it('PATCH ändert den Titel, leerer Titel → 400, unbekannt → 404', async () => {

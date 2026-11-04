@@ -18,7 +18,8 @@ from psycopg.types.json import Jsonb
 Conn = psycopg.Connection[Any]
 Job = dict[str, Any]
 
-STUCK_AFTER_MINUTES = 30
+# Dreifaches Heartbeat-Intervall (60 s): so lange darf ein Lock höchstens alt sein (VERTRAEGE §3)
+STUCK_AFTER_SECONDS = 180.0
 BACKOFF_BASE_SECONDS = 30
 
 # Abhängigkeit gescheitert (`fehler`/`abgebrochen`) -> abhängigen Job abbrechen (§3).
@@ -71,25 +72,35 @@ RETURNING job.*
 """
 
 
-def recover_stuck(conn: Conn) -> int:
-    """Setzt abgestürzte Jobs (`laeuft`, Lock älter als 30 min) auf `wartet`. Beim Start."""
-    with conn.cursor() as cur:
+def recover_stuck(conn: Conn, after_seconds: float = STUCK_AFTER_SECONDS) -> list[Job]:
+    """Abgestürzte Jobs (`laeuft`, `locked_at` älter als `after_seconds`): mit
+    `attempts >= max_attempts` -> `fehler`, sonst zurück auf `wartet`.
+
+    Gibt die betroffenen Jobs (id, type, payload, state) zurück, damit der Aufrufer für endgültig
+    gescheiterte die Fehler-Hooks ausführen kann.
+    """
+    with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
-            UPDATE job SET state = 'wartet', locked_by = NULL, locked_at = NULL, updated_at = now()
-            WHERE state = 'laeuft' AND locked_at < now() - make_interval(mins => %s)
+            UPDATE job SET
+              state = CASE WHEN attempts >= max_attempts THEN 'fehler' ELSE 'wartet' END,
+              error = CASE WHEN attempts >= max_attempts
+                      THEN 'Worker abgestürzt oder Lock verloren (zu viele Versuche)' ELSE error END,
+              locked_by = NULL, locked_at = NULL, updated_at = now()
+            WHERE state = 'laeuft' AND locked_at < now() - make_interval(secs => %s)
+            RETURNING id, type, payload, state
             """,
-            (STUCK_AFTER_MINUTES,),
+            (after_seconds,),
         )
-        return cur.rowcount
+        return cur.fetchall()
 
 
-def fail_own_running(conn: Conn, worker_id: str, error: str) -> int:
+def fail_own_running(conn: Conn, worker_id: str, error: str) -> list[Job]:
     """Lässt alle Jobs, die dieser Worker hält (`laeuft`, `locked_by = worker_id`), mit Retry
     fehlschlagen. Beim (Wieder-)Verbinden aufrufen: Ein eigener Job kann dann nicht mehr laufen,
     der Lock stammt aus einer abgebrochenen Verbindung. Backoff und `fehler` wie bei `fail`.
     """
-    with conn.cursor() as cur:
+    with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             """
             UPDATE job SET
@@ -99,10 +110,11 @@ def fail_own_running(conn: Conn, worker_id: str, error: str) -> int:
                           ELSE run_after END,
               error = %(error)s, locked_by = NULL, locked_at = NULL, updated_at = now()
             WHERE state = 'laeuft' AND locked_by = %(worker)s
+            RETURNING id, type, payload, state
             """,
             {"base": BACKOFF_BASE_SECONDS, "error": error, "worker": worker_id},
         )
-        return cur.rowcount
+        return cur.fetchall()
 
 
 def cancel_failed_dependents(conn: Conn) -> int:

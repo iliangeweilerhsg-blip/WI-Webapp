@@ -5,6 +5,7 @@ import { mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import multipart from '@fastify/multipart';
+import { inArray } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -16,12 +17,14 @@ import {
   SlideDeckDetailSchema,
   SlideDeckListSchema,
   SlideDeckSchema,
+  SlideDeckUpdateSchema,
   SlideSchema,
   UploadResultSchema,
   UuidSchema,
 } from '@sg/shared';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
+import { exerciseSheet, slideDeck } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
@@ -38,6 +41,7 @@ import {
   listSlideDecks,
   renameSlideDeck,
   resolveDataPath,
+  toApiDeck,
   toApiSheet,
   toApiSlide,
   updateExerciseSheet,
@@ -47,9 +51,12 @@ import {
 
 /** Größtes erlaubtes PDF (Foliensätze mit vielen Bildern, F-ORG-02) */
 export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
-/** Veraltete temporäre Uploads (Absturz mitten im Upload) werden nach so vielen Stunden entfernt */
-const STALE_TMP_HOURS = 24;
+/** Veraltete temporäre Uploads und Ordner ohne DB-Zeile (Absturz mitten im Upload) werden nach so vielen Minuten entfernt */
+const STALE_MINUTES = 60;
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const PDF_MAGIC = Buffer.from('%PDF');
+/** `%PDF` darf in den ersten 1024 Bytes stehen (PDF-Spezifikation, Acrobat-Toleranz) */
+const MAGIC_WINDOW = 1024;
 const ACCEPTED_MIME = new Set(['application/pdf', 'application/x-pdf', 'application/octet-stream', '']);
 const IMMUTABLE_CACHE = 'private, max-age=31536000, immutable';
 /** Erhöhen, wenn sich die Darstellung der Seitenbilder ändert (neuer ETag) */
@@ -115,21 +122,36 @@ function createUploadParser(dataDir: string, maxBytes: number) {
         const tmpPath = join(tmpDir, `${uuidv7()}.upload`);
         const hash = createHash('sha256');
         let size = 0;
-        let head: Buffer = Buffer.alloc(0);
         let magicOk = false;
         try {
           await pipeline(
             part.file,
             async function* (source: AsyncIterable<Buffer>) {
+              // Die ersten MAGIC_WINDOW Bytes puffern: `%PDF` darf (laut PDF-Spezifikation) nach
+              // etwas Vorspann stehen. Kein PDF: nur noch mitlesen, nichts schreiben.
+              const pending: Buffer[] = [];
+              let pendingSize = 0;
+              let decided = false;
               for await (const chunk of source) {
                 hash.update(chunk);
                 size += chunk.length;
-                if (head.length < PDF_MAGIC.length) {
-                  head = Buffer.concat([head, chunk.subarray(0, PDF_MAGIC.length - head.length)]);
-                  magicOk = head.length === PDF_MAGIC.length && head.equals(PDF_MAGIC);
+                if (decided) {
+                  if (magicOk) yield chunk;
+                  continue;
                 }
-                // Kein PDF: nur noch mitlesen, nichts schreiben
-                if (magicOk && ACCEPTED_MIME.has(mimetype)) yield chunk;
+                pending.push(chunk);
+                pendingSize += chunk.length;
+                if (pendingSize >= MAGIC_WINDOW) {
+                  decided = true;
+                  const head = Buffer.concat(pending);
+                  magicOk = head.subarray(0, MAGIC_WINDOW).includes(PDF_MAGIC) && ACCEPTED_MIME.has(mimetype);
+                  if (magicOk) yield head;
+                }
+              }
+              if (!decided) {
+                const head = Buffer.concat(pending);
+                magicOk = head.includes(PDF_MAGIC) && ACCEPTED_MIME.has(mimetype);
+                if (magicOk) yield head;
               }
             },
             createWriteStream(tmpPath),
@@ -174,9 +196,10 @@ async function cleanupUpload(request: FastifyRequest): Promise<void> {
   if (request.upload) await rm(request.upload.file.tmpPath, { force: true }).catch(() => {});
 }
 
+/** Entfernt temporäre Uploads, die älter als `STALE_MINUTES` sind */
 async function removeStaleTmp(dataDir: string): Promise<void> {
   const dir = uploadTmpDir(dataDir);
-  const limit = Date.now() - STALE_TMP_HOURS * 3600 * 1000;
+  const limit = Date.now() - STALE_MINUTES * 60 * 1000;
   try {
     for (const name of await readdir(dir)) {
       const path = join(dir, name);
@@ -185,6 +208,36 @@ async function removeStaleTmp(dataDir: string): Promise<void> {
     }
   } catch {
     // Ordner existiert noch nicht: nichts zu tun
+  }
+}
+
+const UUID_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Entfernt `media/decks|sheets/<id>/`-Ordner ohne DB-Zeile (Absturz zwischen `rename` und Commit),
+ * die älter als `STALE_MINUTES` sind. Zeilen mit `deleted_at` zählen als vorhanden.
+ */
+async function removeOrphanFolders(db: Db, dataDir: string): Promise<void> {
+  const limit = Date.now() - STALE_MINUTES * 60 * 1000;
+  for (const [folder, table] of [
+    ['decks', slideDeck],
+    ['sheets', exerciseSheet],
+  ] as const) {
+    const root = join(dataDir, 'media', folder);
+    const names = await readdir(root).catch(() => [] as string[]);
+    const old: string[] = [];
+    for (const name of names) {
+      if (!UUID_NAME.test(name)) continue;
+      const info = await stat(join(root, name)).catch(() => null);
+      if (info && info.mtimeMs < limit) old.push(name);
+    }
+    if (old.length === 0) continue;
+    const known = new Set(
+      (await db.select({ id: table.id }).from(table).where(inArray(table.id, old))).map((row) => row.id),
+    );
+    for (const name of old) {
+      if (!known.has(name)) await rm(join(root, name), { recursive: true, force: true });
+    }
   }
 }
 
@@ -213,8 +266,6 @@ const SheetFieldsSchema = z.object({
       .optional(),
   ),
 });
-
-const SlideDeckUpdateSchema = z.object({ title: z.string().trim().min(1).max(300) }).strict();
 
 function parseFields<S extends z.ZodType>(schema: S, fields: Record<string, string>): z.infer<S> {
   const parsed = schema.safeParse(fields);
@@ -327,10 +378,23 @@ export async function materialRoutes(app: FastifyInstance, deps: MaterialRouteDe
     limits: { fileSize: maxBytes, files: 5, fields: 20, fieldSize: 4096, parts: 30 },
   };
   await app.register(multipart, multipartOptions);
-  void removeStaleTmp(dataDir);
+  const sweep = () => {
+    removeStaleTmp(dataDir)
+      .then(() => removeOrphanFolders(db, dataDir))
+      .catch((error: unknown) => app.log.warn({ err: error }, 'Aufräumen der Uploads fehlgeschlagen'));
+  };
+  sweep();
+  const timer = setInterval(sweep, CLEANUP_INTERVAL_MS);
+  timer.unref();
+  app.addHook('onClose', async () => clearInterval(timer));
 
   const parseUpload = createUploadParser(dataDir, maxBytes);
-  const uploadHooks = { preValidation: parseUpload, onResponse: cleanupUpload };
+  const uploadHooks = {
+    preValidation: parseUpload,
+    // Replay, 409 und Fehlerantworten kommen, ohne dass der Handler läuft; der Abbruch des Clients ebenso
+    onResponse: cleanupUpload,
+    onRequestAbort: cleanupUpload,
+  };
 
   // ----- Foliensätze -----
 
@@ -340,7 +404,10 @@ export async function materialRoutes(app: FastifyInstance, deps: MaterialRouteDe
       ...uploadHooks,
       schema: {
         tags: ['Material'],
-        summary: 'Foliensatz hochladen (multipart: file, module_id, session_id?, title?)',
+        summary: 'Foliensatz hochladen',
+        description:
+          'multipart/form-data. Felder: `file` (PDF, Pflicht), `module_id` (UUID, Pflicht), `session_id` (UUID), `title`. Gleiche Datei im selben Modul: 200 mit duplicate=true. Ein gescheiterter Foliensatz wird dabei neu eingelesen.',
+        consumes: ['multipart/form-data'],
         response: {
           200: UploadResultSchema,
           201: UploadResultSchema,
@@ -353,13 +420,17 @@ export async function materialRoutes(app: FastifyInstance, deps: MaterialRouteDe
     async (request, reply) => {
       const upload = request.upload;
       if (!upload) throw new HttpError(400, 'file_missing', 'Das Feld „file“ mit dem PDF fehlt.');
-      const fields = parseFields(DeckFieldsSchema, upload.fields);
-      const result = await createSlideDeck(db, dataDir, upload.file, {
-        moduleId: fields.module_id,
-        sessionId: fields.session_id,
-        title: fields.title,
-      });
-      return reply.code(result.duplicate ? 200 : 201).send(result);
+      try {
+        const fields = parseFields(DeckFieldsSchema, upload.fields);
+        const result = await createSlideDeck(db, dataDir, upload.file, {
+          moduleId: fields.module_id,
+          sessionId: fields.session_id,
+          title: fields.title,
+        });
+        return reply.code(result.duplicate ? 200 : 201).send(result);
+      } finally {
+        await cleanupUpload(request);
+      }
     },
   );
 
@@ -405,7 +476,17 @@ export async function materialRoutes(app: FastifyInstance, deps: MaterialRouteDe
         response: { 200: SlideDeckSchema, ...errorResponses },
       },
     },
-    async (request) => renameSlideDeck(db, request.params.id, request.body.title),
+    async (request) => {
+      const title = request.body.title?.trim();
+      if (title === undefined) return toApiDeck(await getDeckRow(db, request.params.id));
+      if (title === '' || title.length > 300) {
+        throw new HttpError(400, 'validation_failed', 'Der Titel muss 1 bis 300 Zeichen lang sein.', {
+          in: 'body',
+          issues: [{ path: 'title', message: 'muss 1 bis 300 Zeichen lang sein' }],
+        });
+      }
+      return renameSlideDeck(db, request.params.id, title);
+    },
   );
 
   typed.delete(
@@ -491,7 +572,10 @@ export async function materialRoutes(app: FastifyInstance, deps: MaterialRouteDe
       ...uploadHooks,
       schema: {
         tags: ['Material'],
-        summary: 'Übungsblatt hochladen (multipart: file, module_id, title?, number?, due_at?)',
+        summary: 'Übungsblatt hochladen',
+        description:
+          'multipart/form-data. Felder: `file` (PDF, Pflicht), `module_id` (UUID, Pflicht), `title`, `number` (Ganzzahl), `due_at` (ISO 8601 mit Zeitzone). Gleiche Datei im selben Modul: 200 mit duplicate=true.',
+        consumes: ['multipart/form-data'],
         response: {
           200: UploadResultSchema,
           201: UploadResultSchema,
@@ -504,14 +588,18 @@ export async function materialRoutes(app: FastifyInstance, deps: MaterialRouteDe
     async (request, reply) => {
       const upload = request.upload;
       if (!upload) throw new HttpError(400, 'file_missing', 'Das Feld „file“ mit dem PDF fehlt.');
-      const fields = parseFields(SheetFieldsSchema, upload.fields);
-      const result = await createExerciseSheet(db, dataDir, upload.file, {
-        moduleId: fields.module_id,
-        title: fields.title,
-        number: fields.number,
-        dueAt: fields.due_at,
-      });
-      return reply.code(result.duplicate ? 200 : 201).send(result);
+      try {
+        const fields = parseFields(SheetFieldsSchema, upload.fields);
+        const result = await createExerciseSheet(db, dataDir, upload.file, {
+          moduleId: fields.module_id,
+          title: fields.title,
+          number: fields.number,
+          dueAt: fields.due_at,
+        });
+        return reply.code(result.duplicate ? 200 : 201).send(result);
+      } finally {
+        await cleanupUpload(request);
+      }
     },
   );
 

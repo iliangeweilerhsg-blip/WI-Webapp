@@ -15,7 +15,13 @@ from psycopg.types.json import Jsonb
 from sg_schemas.models import PdfIngestPayload, PdfIngestResult
 
 from conftest import USER_ID, get_job
-from sg_worker.handlers.pdf_ingest import extract_text, pdf_ingest, process_pdf
+from sg_worker.handlers.pdf_ingest import (
+    IngestError,
+    extract_text,
+    mark_ingest_failed,
+    pdf_ingest,
+    process_pdf,
+)
 from sg_worker.loop import Worker
 from sg_worker.registry import Registry
 from sg_worker.uuid7 import uuid7
@@ -126,7 +132,7 @@ def test_multiline_title_is_joined(tmp_path: Path) -> None:
 def test_broken_pdf_raises(tmp_path: Path) -> None:
     bad = tmp_path / "bad.pdf"
     bad.write_bytes(b"%PDF-1.4\nkaputt\n")
-    with pytest.raises(ValueError, match="nicht lesbar"):
+    with pytest.raises(IngestError, match="nicht lesbar"):
         process_pdf(bad, tmp_path / "m", "slides", "m")
 
 
@@ -145,7 +151,7 @@ def worker(
     database_url: str, connect_kwargs: dict[str, Any], tmp_path: Path, schema: str
 ) -> Worker:
     reg = Registry()
-    reg.register("pdf.ingest", pdf_ingest, PdfIngestPayload)
+    reg.register("pdf.ingest", pdf_ingest, PdfIngestPayload, on_final_failure=mark_ingest_failed)
     return Worker(
         database_url,
         tmp_path,
@@ -268,32 +274,6 @@ def test_sheet_ingest_writes_pages_not_slides(
     assert (base / "thumbs" / "2.webp").is_file()
     img = Image.open(io.BytesIO((base / "pages" / "1.png").read_bytes()))
     assert img.size == (1920, 1080)
-
-
-def test_broken_pdf_retries_then_marks_fehler(
-    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path
-) -> None:
-    bad = tmp_path / "bad.pdf"
-    bad.write_bytes(b"%PDF-1.4\nkaputt")
-    deck = add_deck(conn, tmp_path, bad)
-    job = add_job(conn, {"slide_deck_id": str(deck)}, max_attempts=2)
-
-    worker.drain(conn)
-    row = get_job(conn, job)
-    assert row["state"] == "wartet"  # Retry laut Vertrag
-    assert "nicht lesbar" in row["error"]
-    # Nach dem ersten Versuch noch nicht endgültig gescheitert
-    assert conn.execute(
-        "SELECT ingest_state FROM slide_deck WHERE id = %s", (deck,)
-    ).fetchone() == ("neu",)
-
-    conn.execute("UPDATE job SET run_after = NULL WHERE id = %s", (job,))
-    worker.drain(conn)
-    assert get_job(conn, job)["state"] == "fehler"
-    assert conn.execute(
-        "SELECT ingest_state FROM slide_deck WHERE id = %s", (deck,)
-    ).fetchone() == ("fehler",)
-    assert conn.execute("SELECT count(*) FROM slide").fetchone() == (0,)
 
 
 def test_missing_row_fails_without_retry(worker: Worker, conn: psycopg.Connection[Any]) -> None:
