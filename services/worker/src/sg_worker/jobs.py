@@ -2,6 +2,9 @@
 
 Alle Funktionen arbeiten auf einer übergebenen Verbindung. Sie committen nicht selbst
 (außer die Verbindung steht auf autocommit), damit Tests Transaktionen offen halten können.
+
+Ergebnis und Fehler schreibt nur der Worker, dessen `locked_by` noch eingetragen ist
+(`complete`/`fail` geben sonst `False`/`None` zurück).
 """
 
 from __future__ import annotations
@@ -18,18 +21,34 @@ Job = dict[str, Any]
 STUCK_AFTER_MINUTES = 30
 BACKOFF_BASE_SECONDS = 30
 
-# Abhängige Jobs abbrechen, deren Abhängigkeit in `fehler`/`abgebrochen` ist (§3).
-_CANCEL_DEPENDENTS_SQL = """
+# Abhängigkeit gescheitert (`fehler`/`abgebrochen`) -> abhängigen Job abbrechen (§3).
+_CANCEL_FAILED_SQL = """
 UPDATE job SET state = 'abgebrochen',
                error = 'Abhängigkeit ' || (
                  SELECT dj.id::text FROM job dj
-                 WHERE dj.id = ANY(job.depends_on) AND dj.state IN ('fehler', 'abgebrochen')
+                 WHERE dj.id = ANY(job.depends_on) AND dj.deleted_at IS NULL
+                   AND dj.state IN ('fehler', 'abgebrochen')
                  ORDER BY dj.created_at, dj.id LIMIT 1
                ) || ' fehlgeschlagen',
                locked_by = NULL, locked_at = NULL, updated_at = now()
 WHERE state = 'wartet' AND deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM job dj
-              WHERE dj.id = ANY(job.depends_on) AND dj.state IN ('fehler', 'abgebrochen'))
+              WHERE dj.id = ANY(job.depends_on) AND dj.deleted_at IS NULL
+                AND dj.state IN ('fehler', 'abgebrochen'))
+"""
+
+# Abhängigkeit existiert nicht oder ist soft-gelöscht -> abhängigen Job abbrechen (§3).
+_CANCEL_UNKNOWN_SQL = """
+UPDATE job SET state = 'abgebrochen',
+               error = 'Abhängigkeit ' || (
+                 SELECT d.id::text FROM unnest(job.depends_on) AS d(id)
+                 WHERE NOT EXISTS (SELECT 1 FROM job dj WHERE dj.id = d.id AND dj.deleted_at IS NULL)
+                 LIMIT 1
+               ) || ' unbekannt',
+               locked_by = NULL, locked_at = NULL, updated_at = now()
+WHERE state = 'wartet' AND deleted_at IS NULL
+  AND EXISTS (SELECT 1 FROM unnest(job.depends_on) AS d(id)
+              WHERE NOT EXISTS (SELECT 1 FROM job dj WHERE dj.id = d.id AND dj.deleted_at IS NULL))
 """
 
 _CLAIM_SQL = """
@@ -37,8 +56,10 @@ WITH next AS (
   SELECT j.id FROM job j
   WHERE j.state = 'wartet' AND j.deleted_at IS NULL
     AND (j.run_after IS NULL OR j.run_after <= now())
-    AND (SELECT count(*) FROM job dj WHERE dj.id = ANY(j.depends_on) AND dj.state = 'fertig')
-        = cardinality(j.depends_on)
+    AND NOT EXISTS (
+      SELECT 1 FROM unnest(j.depends_on) AS d(id)
+      WHERE NOT EXISTS (SELECT 1 FROM job dj
+                        WHERE dj.id = d.id AND dj.state = 'fertig' AND dj.deleted_at IS NULL))
   ORDER BY j.priority DESC, j.created_at
   FOR UPDATE OF j SKIP LOCKED
   LIMIT 1
@@ -64,14 +85,17 @@ def recover_stuck(conn: Conn) -> int:
 
 
 def cancel_failed_dependents(conn: Conn) -> int:
-    """Bricht wartende Jobs ab, deren Abhängigkeit gescheitert ist (kaskadierend)."""
+    """Bricht wartende Jobs mit gescheiterter oder unbekannter Abhängigkeit ab (kaskadierend)."""
     total = 0
     with conn.cursor() as cur:
         while True:
-            cur.execute(_CANCEL_DEPENDENTS_SQL)
-            if cur.rowcount == 0:
+            changed = 0
+            for sql in (_CANCEL_UNKNOWN_SQL, _CANCEL_FAILED_SQL):
+                cur.execute(sql)
+                changed += cur.rowcount
+            if changed == 0:
                 return total
-            total += cur.rowcount
+            total += changed
 
 
 def claim_next(conn: Conn, worker_id: str) -> Job | None:
@@ -81,20 +105,49 @@ def claim_next(conn: Conn, worker_id: str) -> Job | None:
         return cur.fetchone()
 
 
-def complete(conn: Conn, job_id: Any, result: dict[str, Any] | None) -> None:
+def seconds_until_next_run(conn: Conn) -> float | None:
+    """Sekunden bis zum frühesten künftigen `run_after` eines wartenden Jobs (sonst None)."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT extract(epoch FROM min(run_after) - now()) FROM job
+            WHERE state = 'wartet' AND deleted_at IS NULL AND run_after > now()
+            """
+        )
+        row = cur.fetchone()
+    return None if row is None or row[0] is None else float(row[0])
+
+
+def heartbeat(conn: Conn, job_id: Any, worker_id: str) -> bool:
+    """Erneuert `locked_at` eines laufenden Jobs. False, wenn der Lock verloren ist."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE job SET locked_at = now()
+            WHERE id = %s AND state = 'laeuft' AND locked_by = %s
+            """,
+            (job_id, worker_id),
+        )
+        return cur.rowcount == 1
+
+
+def complete(conn: Conn, job_id: Any, worker_id: str, result: dict[str, Any] | None) -> bool:
+    """Schreibt `fertig`. False, wenn der Job diesem Worker nicht mehr gehört."""
     with conn.cursor() as cur:
         cur.execute(
             """
             UPDATE job SET state = 'fertig', result = %s, error = NULL,
                            locked_by = NULL, locked_at = NULL, updated_at = now()
-            WHERE id = %s
+            WHERE id = %s AND state = 'laeuft' AND locked_by = %s
             """,
-            (Jsonb(result if result is not None else {}), job_id),
+            (Jsonb(result if result is not None else {}), job_id, worker_id),
         )
+        return cur.rowcount == 1
 
 
-def fail(conn: Conn, job_id: Any, error: str, *, retry: bool = True) -> str:
-    """Markiert einen Fehlschlag. Gibt den neuen Zustand zurück (`wartet` oder `fehler`).
+def fail(conn: Conn, job_id: Any, worker_id: str, error: str, *, retry: bool = True) -> str | None:
+    """Markiert einen Fehlschlag. Gibt den neuen Zustand zurück (`wartet` oder `fehler`),
+    `None`, wenn der Job diesem Worker nicht mehr gehört.
 
     Mit `retry` und `attempts < max_attempts`: zurück auf `wartet`, `run_after` nach
     Backoff `30 s * 2^(attempts-1)`. Sonst `fehler`.
@@ -108,10 +161,16 @@ def fail(conn: Conn, job_id: Any, error: str, *, retry: bool = True) -> str:
                           THEN now() + make_interval(secs => %(base)s * power(2, attempts - 1))
                           ELSE run_after END,
               error = %(error)s, locked_by = NULL, locked_at = NULL, updated_at = now()
-            WHERE id = %(id)s
+            WHERE id = %(id)s AND state = 'laeuft' AND locked_by = %(worker)s
             RETURNING state
             """,
-            {"retry": retry, "base": BACKOFF_BASE_SECONDS, "error": error, "id": job_id},
+            {
+                "retry": retry,
+                "base": BACKOFF_BASE_SECONDS,
+                "error": error,
+                "id": job_id,
+                "worker": worker_id,
+            },
         )
         row = cur.fetchone()
-    return str(row[0]) if row else "fehler"
+    return str(row[0]) if row else None

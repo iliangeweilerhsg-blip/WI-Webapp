@@ -92,7 +92,7 @@ def test_payload_validated_with_pydantic(
     assert get_job(conn, good)["result"] == {"kind": "PdfIngestDeckPayload"}
     row = get_job(conn, bad)
     assert row["state"] == "fehler"  # ungültiges Payload: kein Retry
-    assert "ungültiges Payload" in row["error"]
+    assert row["error"].startswith("ungültiges Payload: ")
 
 
 def test_dependency_failure_cancels_dependent(
@@ -158,3 +158,203 @@ def test_stop_ends_run_promptly(worker: Worker) -> None:
     with running(worker):
         time.sleep(0.5)
     assert time.monotonic() - start < 5
+
+
+def _worker(
+    reg: Registry,
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    tmp_path: Path,
+    **kw: Any,
+) -> Worker:
+    return Worker(
+        database_url,
+        tmp_path,
+        registry=reg,
+        connect_kwargs=connect_kwargs,
+        channel=f"sg_jobs_{uuid.uuid4().hex[:8]}",
+        **kw,
+    )
+
+
+def test_open_transaction_after_handler_fails_job(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    tmp_path: Path,
+    conn: psycopg.Connection[Any],
+    make_job: MakeJob,
+) -> None:
+    reg = Registry()
+
+    def sloppy(payload: Any, ctx: JobContext) -> dict[str, Any]:
+        ctx.conn.autocommit = False
+        ctx.conn.execute("SELECT 1")  # Transaktion bleibt offen
+        return {}
+
+    reg.register("sloppy", sloppy)
+    w = _worker(reg, database_url, connect_kwargs, tmp_path)
+    job_id = make_job("sloppy", max_attempts=1)
+    with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as wc:
+        w.drain(wc)
+        assert wc.autocommit is True
+        assert wc.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
+    row = get_job(conn, job_id)
+    assert row["state"] == "fehler"
+    assert "Transaktion" in row["error"]
+
+
+def test_finish_inside_transaction_is_atomic(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    tmp_path: Path,
+    conn: psycopg.Connection[Any],
+    make_job: MakeJob,
+) -> None:
+    conn.execute("CREATE TABLE target (v int)")
+    reg = Registry()
+
+    def good(payload: Any, ctx: JobContext) -> dict[str, Any]:
+        with ctx.conn.transaction():
+            ctx.conn.execute("INSERT INTO target VALUES (1)")
+            ctx.finish({"ok": True})
+        return {"ok": True}
+
+    def bad(payload: Any, ctx: JobContext) -> dict[str, Any]:
+        with ctx.conn.transaction():
+            ctx.conn.execute("INSERT INTO target VALUES (2)")
+            ctx.finish({"ok": True})
+            raise RuntimeError("nach finish")
+
+    reg.register("good", good)
+    reg.register("bad", bad)
+    w = _worker(reg, database_url, connect_kwargs, tmp_path)
+    good_id = make_job("good")
+    bad_id = make_job("bad", max_attempts=1)
+    with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as wc:
+        w.drain(wc)
+    assert get_job(conn, good_id)["state"] == "fertig"
+    assert get_job(conn, good_id)["result"] == {"ok": True}
+    assert get_job(conn, bad_id)["state"] == "fehler"  # Rollback: kein halbes fertig
+    assert conn.execute("SELECT array_agg(v) FROM target").fetchone() == ([1],)
+
+
+def test_lost_lock_discards_result(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    tmp_path: Path,
+    conn: psycopg.Connection[Any],
+    make_job: MakeJob,
+) -> None:
+    reg = Registry()
+    holder: dict[str, uuid.UUID] = {}
+
+    def steal(payload: Any, ctx: JobContext) -> dict[str, Any]:
+        conn.execute("UPDATE job SET locked_by = 'jemand-anders' WHERE id = %s", (holder["id"],))
+        return {"x": 1}
+
+    reg.register("steal", steal)
+    w = _worker(reg, database_url, connect_kwargs, tmp_path)
+    holder["id"] = make_job("steal")
+    with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as wc:
+        w.drain(wc)
+    row = get_job(conn, holder["id"])
+    assert row["state"] == "laeuft"
+    assert row["locked_by"] == "jemand-anders"
+    assert row["result"] is None
+
+
+def test_heartbeat_runs_during_handler(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    tmp_path: Path,
+    conn: psycopg.Connection[Any],
+    make_job: MakeJob,
+) -> None:
+    reg = Registry()
+    seen: dict[str, Any] = {}
+    holder: dict[str, uuid.UUID] = {}
+
+    def slow(payload: Any, ctx: JobContext) -> dict[str, Any]:
+        conn.execute(
+            "UPDATE job SET locked_at = now() - interval '20 minutes' WHERE id = %s",
+            (holder["id"],),
+        )
+        time.sleep(0.8)
+        row = conn.execute(
+            "SELECT now() - locked_at < interval '1 minute' FROM job WHERE id = %s",
+            (holder["id"],),
+        ).fetchone()
+        seen["fresh"] = row[0] if row else None
+        return {}
+
+    reg.register("slow", slow)
+    w = _worker(reg, database_url, connect_kwargs, tmp_path, heartbeat_interval=0.2)
+    holder["id"] = make_job("slow")
+    with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as wc:
+        w.drain(wc)
+    assert seen["fresh"] is True
+    assert get_job(conn, holder["id"])["state"] == "fertig"
+
+
+def test_reconnects_after_backends_terminated(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    tmp_path: Path,
+    conn: psycopg.Connection[Any],
+    make_job: MakeJob,
+) -> None:
+    app = f"sgw_{uuid.uuid4().hex[:8]}"
+    worker = _worker(
+        make_registry(),
+        database_url,
+        {**connect_kwargs, "application_name": app},
+        tmp_path,
+    )
+    with running(worker):
+        time.sleep(1)
+        first = make_job()
+        conn.execute("SELECT pg_notify(%s, '')", (worker.channel,))
+        assert wait_for(lambda: get_job(conn, first)["state"] == "fertig", timeout=5)
+        with psycopg.connect(database_url, autocommit=True) as admin:
+            admin.execute(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE application_name = %s",
+                (app,),
+            )
+        time.sleep(1.5)
+        second = make_job()
+        conn.execute("SELECT pg_notify(%s, '')", (worker.channel,))
+        assert wait_for(lambda: get_job(conn, second)["state"] == "fertig", timeout=10)
+
+
+def test_orphan_job_is_failed_after_reconnect(
+    worker: Worker, conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    job_id = make_job(state="laeuft", attempts=1)
+    conn.execute("UPDATE job SET locked_by = %s WHERE id = %s", (worker.worker_id, job_id))
+    worker._orphan = (job_id, "Verbindung verloren")
+    with running(worker):
+        assert wait_for(lambda: get_job(conn, job_id)["state"] == "wartet")
+    row = get_job(conn, job_id)
+    assert row["error"] == "Verbindung verloren"
+    assert row["run_after"] is not None
+
+
+def test_startup_waits_for_database(tmp_path: Path) -> None:
+    w = Worker("postgres://sg:sg@127.0.0.1:1/none", tmp_path, registry=make_registry())
+    thread = threading.Thread(target=w.run, daemon=True)
+    thread.start()
+    time.sleep(1.5)
+    assert thread.is_alive()  # kein Traceback, wartet mit Backoff
+    w.stop()
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+
+
+def test_wait_wakes_for_due_run_after(
+    worker: Worker, conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    job_id = make_job()
+    conn.execute("UPDATE job SET run_after = now() + interval '1500 milliseconds'")
+    with running(worker):
+        assert wait_for(lambda: get_job(conn, job_id)["state"] == "fertig", timeout=6)

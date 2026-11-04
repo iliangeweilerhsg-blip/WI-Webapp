@@ -79,6 +79,8 @@ CREATE INDEX job_pick_idx ON job (priority DESC, created_at) WHERE state = 'wart
 - **Fehler sonst:** `state='fehler'`.
 - **Hängende Jobs:** `laeuft` mit `locked_at` älter als 30 min gilt als abgestürzt und wird beim Worker-Start wieder auf `wartet` gesetzt.
 
+Ein laufender Job erneuert `locked_at` alle 60 s (Heartbeat). Ergebnis und Fehler schreibt nur der Worker, dessen `locked_by` noch eingetragen ist.
+
 **Unbekannter Job-Typ:** Der Worker setzt `state='fehler'` mit `error='unbekannter Job-Typ'` und läuft weiter.
 
 **Ungültiges Payload:** Verletzt das Payload das Schema, setzt der Worker den Job sofort auf `fehler`, ohne Retry. Ein neuer Versuch würde nichts ändern.

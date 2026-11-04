@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 LOGGER_NAME = "sg_worker"
+_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 job_id_var: ContextVar[str | None] = ContextVar("sg_job_id", default=None)
 session_id_var: ContextVar[str | None] = ContextVar("sg_session_id", default=None)
@@ -46,27 +47,37 @@ class JsonFormatter(logging.Formatter):
 
 
 def setup_logging(data_dir: Path, level: str = "info") -> logging.Logger:
-    """Richtet den Logger `sg_worker` ein (idempotent)."""
+    """Richtet die Logger `sg_worker` und `psycopg` ein (idempotent), beide als JSON."""
+    invalid_level = level.upper() not in _LEVELS
+    level_name = "INFO" if invalid_level else level.upper()
     logger = logging.getLogger(LOGGER_NAME)
-    logger.setLevel(level.upper())
-    logger.propagate = False
-    for old in list(logger.handlers):
-        logger.removeHandler(old)
-        old.close()
     formatter = JsonFormatter()
-    stream = logging.StreamHandler(sys.stdout)
-    stream.setFormatter(formatter)
-    logger.addHandler(stream)
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+    file_error: OSError | None = None
     try:
         log_dir = data_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        file_handler = TimedRotatingFileHandler(
-            log_dir / "worker.log", when="midnight", backupCount=14, encoding="utf-8"
+        handlers.append(
+            TimedRotatingFileHandler(
+                log_dir / "worker.log", when="midnight", backupCount=14, encoding="utf-8"
+            )
         )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
     except OSError as exc:
-        logger.warning("Logdatei nicht beschreibbar, nur stdout: %s", exc)
+        file_error = exc
+    for name in (LOGGER_NAME, "psycopg"):
+        target = logging.getLogger(name)
+        for old in list(target.handlers):
+            target.removeHandler(old)
+            old.close()
+        target.setLevel(level_name)
+        target.propagate = False
+        for handler in handlers:
+            handler.setFormatter(formatter)
+            target.addHandler(handler)
+    if invalid_level:
+        logger.warning("Ungültiges SG_LOG_LEVEL %r, verwende info", level)
+    if file_error is not None:
+        logger.warning("Logdatei nicht beschreibbar, nur stdout: %s", file_error)
     return logger
 
 

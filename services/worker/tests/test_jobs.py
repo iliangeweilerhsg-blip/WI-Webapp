@@ -61,7 +61,7 @@ def test_depends_on_waits_until_all_done(conn: psycopg.Connection[Any], make_job
     first = jobs.claim_next(conn, "w")
     assert first is not None
     assert first["id"] == dep_b  # child ist trotz Priorität noch blockiert
-    jobs.complete(conn, dep_b, {})
+    jobs.complete(conn, dep_b, "w", {})
     second = jobs.claim_next(conn, "w")
     assert second is not None
     assert second["id"] == child
@@ -95,7 +95,7 @@ def test_fail_retries_with_backoff(conn: psycopg.Connection[Any], make_job: Make
         job = jobs.claim_next(conn, "w")
         assert job is not None
         assert job["attempts"] == attempt
-        assert jobs.fail(conn, job_id, "kaputt") == "wartet"
+        assert jobs.fail(conn, job_id, "w", "kaputt") == "wartet"
         row = get_job(conn, job_id)
         assert row["state"] == "wartet"
         assert row["error"] == "kaputt"
@@ -114,7 +114,7 @@ def test_fail_after_max_attempts_is_fehler(
 ) -> None:
     job_id = make_job(max_attempts=1)
     assert jobs.claim_next(conn, "w") is not None
-    assert jobs.fail(conn, job_id, "endgültig") == "fehler"
+    assert jobs.fail(conn, job_id, "w", "endgültig") == "fehler"
     row = get_job(conn, job_id)
     assert row["state"] == "fehler"
     assert row["error"] == "endgültig"
@@ -126,7 +126,7 @@ def test_complete_stores_result_and_clears_lock(
 ) -> None:
     job_id = make_job()
     assert jobs.claim_next(conn, "w") is not None
-    jobs.complete(conn, job_id, {"slides": 12})
+    jobs.complete(conn, job_id, "w", {"slides": 12})
     row = get_job(conn, job_id)
     assert row["state"] == "fertig"
     assert row["result"] == {"slides": 12}
@@ -169,8 +169,72 @@ def test_cancelled_dependency_also_cancels(
     conn: psycopg.Connection[Any], make_job: MakeJob
 ) -> None:
     cancelled = make_job(state="abgebrochen")
-    child = make_job(depends_on=[cancelled, uuid.uuid4()])
+    child = make_job(depends_on=[cancelled])
     jobs.cancel_failed_dependents(conn)
     row = get_job(conn, child)
     assert row["state"] == "abgebrochen"
     assert row["error"] == f"Abhängigkeit {cancelled} fehlgeschlagen"
+
+
+def test_duplicate_depends_on_ids(conn: psycopg.Connection[Any], make_job: MakeJob) -> None:
+    dep = make_job(state="fertig")
+    child = make_job(depends_on=[dep, dep])
+    job = jobs.claim_next(conn, "w")
+    assert job is not None
+    assert job["id"] == child
+
+
+def test_missing_dependency_cancels(conn: psycopg.Connection[Any], make_job: MakeJob) -> None:
+    ghost = uuid.uuid4()
+    child = make_job(depends_on=[ghost])
+    jobs.cancel_failed_dependents(conn)
+    row = get_job(conn, child)
+    assert row["state"] == "abgebrochen"
+    assert row["error"] == f"Abhängigkeit {ghost} unbekannt"
+
+
+def test_soft_deleted_dependency_cancels(conn: psycopg.Connection[Any], make_job: MakeJob) -> None:
+    dep = make_job(state="fertig")
+    conn.execute("UPDATE job SET deleted_at = now() WHERE id = %s", (dep,))
+    child = make_job(depends_on=[dep])
+    jobs.cancel_failed_dependents(conn)
+    row = get_job(conn, child)
+    assert row["state"] == "abgebrochen"
+    assert row["error"] == f"Abhängigkeit {dep} unbekannt"
+
+
+def test_complete_and_fail_require_lock_owner(
+    conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    job_id = make_job()
+    assert jobs.claim_next(conn, "alt") is not None
+    assert jobs.complete(conn, job_id, "anderer", {}) is False
+    assert jobs.fail(conn, job_id, "anderer", "x") is None
+    assert get_job(conn, job_id)["state"] == "laeuft"
+    assert jobs.complete(conn, job_id, "alt", {}) is True
+    assert jobs.fail(conn, job_id, "alt", "x") is None
+    assert get_job(conn, job_id)["state"] == "fertig"
+
+
+def test_heartbeat_refreshes_locked_at(conn: psycopg.Connection[Any], make_job: MakeJob) -> None:
+    job_id = make_job()
+    assert jobs.claim_next(conn, "w") is not None
+    conn.execute(
+        "UPDATE job SET locked_at = now() - interval '10 minutes' WHERE id = %s", (job_id,)
+    )
+    assert jobs.heartbeat(conn, job_id, "w") is True
+    row = conn.execute(
+        "SELECT now() - locked_at < interval '1 minute' FROM job WHERE id = %s", (job_id,)
+    ).fetchone()
+    assert row is not None
+    assert row[0] is True
+    assert jobs.heartbeat(conn, job_id, "anderer") is False
+
+
+def test_seconds_until_next_run(conn: psycopg.Connection[Any], make_job: MakeJob) -> None:
+    assert jobs.seconds_until_next_run(conn) is None
+    make_job(run_after="2999-01-01")
+    conn.execute("UPDATE job SET run_after = now() + interval '20 seconds'")
+    secs = jobs.seconds_until_next_run(conn)
+    assert secs is not None
+    assert 10 < secs <= 20

@@ -4,12 +4,38 @@ from __future__ import annotations
 
 import signal
 import sys
+from collections.abc import Callable
 from types import FrameType
 
 from . import handlers  # noqa: F401  (registriert die Handler)
 from .config import Settings, load_env_file
 from .logging_setup import setup_logging
 from .loop import Worker
+
+
+def make_signal_handler(worker: Worker) -> Callable[[int, FrameType | None], None]:
+    """Signal-Handler: setzt nur das Stop-Flag (kein Logging im Handler).
+
+    Mehrfaches SIGTERM ist idempotent. Erst ein zweites SIGINT (Strg+C im Terminal)
+    beendet sofort (KeyboardInterrupt).
+    """
+    sigint_seen = False
+
+    def on_signal(signum: int, _frame: FrameType | None) -> None:
+        nonlocal sigint_seen
+        if signum == signal.SIGINT:
+            if sigint_seen:
+                raise KeyboardInterrupt
+            sigint_seen = True
+        worker.stop()
+
+    return on_signal
+
+
+def install_signal_handlers(worker: Worker) -> None:
+    handler = make_signal_handler(worker)
+    signal.signal(signal.SIGTERM, handler)
+    signal.signal(signal.SIGINT, handler)
 
 
 def main() -> int:
@@ -23,14 +49,12 @@ def main() -> int:
         poll_interval=settings.poll_interval,
         logger=log,
     )
-
-    def on_signal(signum: int, _frame: FrameType | None) -> None:
-        log.info("Signal empfangen, beende nach dem laufenden Job", extra={"signal": signum})
-        worker.stop()
-
-    signal.signal(signal.SIGTERM, on_signal)
-    signal.signal(signal.SIGINT, on_signal)
-    worker.run()
+    install_signal_handlers(worker)
+    try:
+        worker.run()
+    except KeyboardInterrupt:
+        log.warning("Zweites Strg+C, beende sofort")
+        return 130
     return 0
 
 

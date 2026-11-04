@@ -11,20 +11,46 @@ from typing import Any
 import psycopg
 from pydantic import TypeAdapter, ValidationError
 
+from . import jobs
+
 
 class PayloadError(Exception):
     """Das Payload passt nicht zum Schema des Job-Typs. Retry wäre sinnlos."""
 
 
-@dataclass(frozen=True)
+@dataclass
 class JobContext:
-    """Was ein Handler zusätzlich zum Payload bekommt."""
+    """Was ein Handler zusätzlich zum Payload bekommt.
+
+    **Handler müssen idempotent sein**: Nach Verbindungsabbruch, Lock-Verlust oder Retry
+    läuft derselbe Job erneut.
+
+    **Atomar abschließen:** Schreibzugriffe auf Zieltabellen und `fertig` gehören in eine
+    Transaktion::
+
+        with ctx.conn.transaction():
+            ...  # Zieltabellen schreiben
+            ctx.finish({"slides": 12})
+        return {"slides": 12}
+
+    Ohne `finish` schreibt der Worker `fertig` nach der Rückkehr des Handlers. Lässt ein
+    Handler eine Transaktion offen oder schaltet autocommit ab, rollt der Worker zurück
+    und lässt den Job fehlschlagen.
+    """
 
     conn: psycopg.Connection[Any]
     data_dir: Path
     logger: logging.Logger
     job_id: str
     session_id: str | None
+    worker_id: str = ""
+    finished: bool = False
+    lock_ok: bool = True
+
+    def finish(self, result: dict[str, Any]) -> None:
+        """Schreibt `fertig` auf `ctx.conn` (z. B. innerhalb der Handler-Transaktion)."""
+        self.lock_ok = jobs.complete(self.conn, self.job_id, self.worker_id, result)
+        self.finished = True
 
 
 HandlerFn = Callable[[Any, JobContext], dict[str, Any]]
@@ -42,7 +68,10 @@ class HandlerSpec:
         try:
             return self.adapter.validate_python(payload)
         except ValidationError as exc:
-            raise PayloadError(f"ungültiges Payload für {self.job_type}: {exc}") from exc
+            first = exc.errors()[0] if exc.errors() else None
+            where = ".".join(str(x) for x in first["loc"]) if first else ""
+            what = first["msg"] if first else "ungültig"
+            raise PayloadError(f"ungültiges Payload: {where} {what}".strip()) from exc
 
 
 class Registry:

@@ -88,3 +88,28 @@ def test_formatter_without_context() -> None:
     rec = logging.LogRecord("n", logging.INFO, "p", 1, "m", None, None)
     entry = json.loads(JsonFormatter().format(rec))
     assert "job_id" not in entry
+
+
+def test_invalid_log_level_warns_and_uses_info(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    log = setup_logging(tmp_path, "laut")
+    assert log.level == logging.INFO
+    assert "Ungültiges SG_LOG_LEVEL" in capsys.readouterr().out
+    assert logging.getLogger("psycopg").handlers  # psycopg ebenfalls als JSON
+
+
+def test_signal_handler_semantics(tmp_path: Path) -> None:
+    import signal
+
+    from sg_worker.__main__ import make_signal_handler
+    from sg_worker.loop import Worker
+
+    w = Worker("postgres://x", tmp_path, registry=Registry())
+    on_signal = make_signal_handler(w)
+    on_signal(signal.SIGTERM, None)
+    on_signal(signal.SIGTERM, None)  # idempotent
+    assert w.stopping
+    on_signal(signal.SIGINT, None)  # erstes SIGINT: nur Flag
+    with pytest.raises(KeyboardInterrupt):
+        on_signal(signal.SIGINT, None)  # zweites SIGINT: sofort

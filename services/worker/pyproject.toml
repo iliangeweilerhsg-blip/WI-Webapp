@@ -38,10 +38,6 @@ files = ["src"]
 strict = true
 python_version = "3.12"
 
-[[tool.mypy.overrides]]
-module = ["sg_schemas.*"]
-ignore_missing_imports = true
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
