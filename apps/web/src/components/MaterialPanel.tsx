@@ -219,7 +219,6 @@ function MaterialRow({ row, thumb }: { row: RowModel; thumb: React.ReactNode }) 
       actionLabel: 'Rückgängig',
       onAction: undoMaterialDeletes,
       onExpire: commitMaterialDeletes,
-      onReplace: commitMaterialDeletes,
       group: 'material-delete',
       focusAction: true,
       durationMs: UNDO_WINDOW_MS,

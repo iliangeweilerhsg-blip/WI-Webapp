@@ -14,6 +14,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { openPdf, type PdfDoc, type PdfTextItem } from '../lib/pdf.ts';
+import { isCorruptPdfError } from '../lib/pdf-errors.ts';
 import { findHits, hitRect, makeMeasurer, type SearchHit } from '../lib/pdf-search.ts';
 import {
   isMaterialKind,
@@ -88,6 +89,9 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const params = useSearchParams();
   const [pdf, setPdf] = useState<PdfDoc | null>(null);
   const [pdfFailed, setPdfFailed] = useState(false);
+  /** Das PDF selbst ist unlesbar (nicht bloß nicht geladen): Dann hilft kein zweiter Versuch */
+  const [pdfCorrupt, setPdfCorrupt] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState(() => parsePage(params.get('seite')));
   const [zoom, setZoom] = useState<Zoom>({ mode: 'fit' });
   const [measured, setMeasured] = useState<Record<number, { w: number; h: number }>>({});
@@ -116,6 +120,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     textCache.current = new Map();
     setPdf(null);
     setPdfFailed(false);
+    setPdfCorrupt(false);
     openPdf(pdfUrl(kind, id)).then(
       (doc) => {
         if (cancelled) doc.destroy();
@@ -124,15 +129,23 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           setPdf(doc);
         }
       },
-      () => {
-        if (!cancelled) setPdfFailed(true);
+      (failure: unknown) => {
+        if (cancelled) return;
+        setPdfCorrupt(isCorruptPdfError(failure));
+        setPdfFailed(true);
       },
     );
     return () => {
       cancelled = true;
       opened?.destroy();
     };
-  }, [kind, id]);
+  }, [kind, id, attempt]);
+
+  // Der Satz war noch in Arbeit, als das PDF nicht ladbar war: Sobald sich sein Zustand ändert, noch einmal versuchen
+  useEffect(() => {
+    if (pdfFailed && !pdfCorrupt) setAttempt((n) => n + 1);
+    // Nur der Wechsel des Einlese-Zustands zählt, nicht der Fehler selbst
+  }, [meta.state]);
 
   const pageCount = meta.pageCount ?? pdf?.numPages ?? 0;
   const current = pageCount > 0 ? clamp(page, 1, pageCount) : page;
@@ -174,44 +187,64 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   );
 
   // Seitengrößen: vom Core (Folien), von pdf.js oder aus dem Vorschaubild. Sobald pdf.js offen ist, lesen wir alle
-  // Größen einmal vorab (schnell, nur die Seitenköpfe): zuerst die Seiten um die aktuelle, dann der Rest. So gibt es
-  // beim Blättern keinen Sprung und die Seitenleiste kennt die Formate ihrer Platzhalter.
-  const startPage = useRef(current);
+  // Größen einmal vorab (schnell, nur die Seitenköpfe). So gibt es beim Blättern keinen Sprung und die Seitenleiste
+  // kennt die Formate ihrer Platzhalter. Die Reihenfolge richtet sich nach der Seite, auf der man gerade ist: Jede
+  // Runde nimmt die acht noch unbekannten Seiten, die ihr am nächsten liegen. Springt man früh weit weg und kennt
+  // die Größe der neuen Seite noch nicht, wird sie sofort einzeln gelesen, statt auf die Runden zu warten.
+  const knownSize = (n: number) => meta.sizes[n - 1] ?? measured[n] ?? null;
+  const sizeState = useRef({ current, known: (n: number) => knownSize(n) !== null });
+  sizeState.current = { current, known: (n) => knownSize(n) !== null };
+  const sizeReads = useRef(new Set<number>());
+  const livePdf = useRef<PdfDoc | null>(null);
+  livePdf.current = pdf;
+
+  const readSizes = useCallback(async (doc: PdfDoc, numbers: number[]) => {
+    for (const n of numbers) sizeReads.current.add(n);
+    const sizes = await Promise.all(
+      numbers.map((n) =>
+        doc.pageSize(n).then(
+          (size) => [n, { w: size.width, h: size.height }] as const,
+          // Größe nicht lesbar: mit dem Standardformat weiterzeichnen statt gar nichts zu zeigen
+          () => [n, { w: DEFAULT_PAGE.w, h: DEFAULT_PAGE.h }] as const,
+        ),
+      ),
+    );
+    if (livePdf.current !== doc) return false;
+    setMeasured((m) => {
+      const next = { ...m };
+      for (const [n, size] of sizes) next[n] ??= size;
+      return next;
+    });
+    return true;
+  }, []);
+
   useEffect(() => {
     if (!pdf) return;
+    sizeReads.current = new Set();
     let cancelled = false;
-    const order = Array.from({ length: pdf.numPages }, (_, i) => i + 1).sort(
-      (a, b) => Math.abs(a - startPage.current) - Math.abs(b - startPage.current),
-    );
     (async () => {
-      for (let i = 0; i < order.length && !cancelled; i += SIZE_BATCH) {
-        const batch = order.slice(i, i + SIZE_BATCH);
-        const sizes = await Promise.all(
-          batch.map((n) =>
-            pdf.pageSize(n).then(
-              (size) => [n, { w: size.width, h: size.height }] as const,
-              // Größe nicht lesbar: mit dem Standardformat weiterzeichnen statt gar nichts zu zeigen
-              () => [n, { w: DEFAULT_PAGE.w, h: DEFAULT_PAGE.h }] as const,
-            ),
-          ),
-        );
-        if (cancelled) return;
-        setMeasured((m) => {
-          const next = { ...m };
-          for (const [n, size] of sizes) next[n] ??= size;
-          return next;
-        });
+      while (!cancelled) {
+        const here = sizeState.current;
+        const batch = Array.from({ length: pdf.numPages }, (_, i) => i + 1)
+          .filter((n) => !sizeReads.current.has(n) && !here.known(n))
+          .sort((a, b) => Math.abs(a - here.current) - Math.abs(b - here.current))
+          .slice(0, SIZE_BATCH);
+        if (batch.length === 0 || !(await readSizes(pdf, batch))) return;
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [pdf]);
+  }, [pdf, readSizes]);
+
+  const sizeKnown = knownSize(current) !== null;
+  useEffect(() => {
+    if (!pdf || sizeKnown || current < 1 || current > pdf.numPages || sizeReads.current.has(current)) return;
+    void readSizes(pdf, [current]);
+  }, [pdf, current, sizeKnown, readSizes]);
 
   // Erst zeichnen, wenn die Seitengröße bekannt ist (vom Core, von pdf.js oder aus dem Vorschaubild). Sonst wird
   // zuerst im Standardformat gezeichnet und gleich danach noch einmal: Die Seite blitzt auf und springt.
-  const knownSize = (n: number) => meta.sizes[n - 1] ?? measured[n] ?? null;
-  const sizeKnown = knownSize(current) !== null;
   // Unbekannte Seiten übernehmen das Format einer bekannten statt A4: Der Rahmen springt nicht
   const fallbackSize = meta.sizes.find(Boolean) ?? Object.values(measured)[0] ?? null;
   const sizeOf = (n: number) => knownSize(n) ?? fallbackSize ?? DEFAULT_PAGE;
@@ -429,26 +462,45 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           ? 'Kein Treffer'
           : `${active + 1} von ${hits.length}`;
 
-  // pdf.js kann das Dokument nicht lesen und der Core kennt keine Seiten: nichts zu zeigen
+  // pdf.js kann das Dokument nicht lesen und der Core kennt keine Seiten: nichts zu zeigen. „Beschädigt“ gilt nur,
+  // wenn das Einlesen gescheitert ist oder pdf.js die Datei als unlesbar meldet; ein Ladefehler (Netz, Core, Satz
+  // noch in Arbeit) ist behebbar: ruhiger Text, genau eine Aktion.
   if (pdfFailed && pageCount === 0) {
+    const corrupt = pdfCorrupt || meta.state === 'fehler';
     return (
       <div className="p-8">
         <h1 id="screen-title" className="text-xxl font-semibold">
           {meta.title}
         </h1>
         <div className="mt-6">
-          <EmptyState
-            action={
-              <Link
-                href={moduleHref(meta.moduleId)}
-                className="text-sm font-medium text-accent hover:underline"
-              >
-                Zurück zum Modul
-              </Link>
-            }
-          >
-            Dieses PDF lässt sich nicht anzeigen. Vielleicht ist die Datei beschädigt.
-          </EmptyState>
+          {corrupt ? (
+            <EmptyState
+              action={
+                <Link
+                  href={moduleHref(meta.moduleId)}
+                  className="text-sm font-medium text-accent hover:underline"
+                >
+                  Zurück zum Modul
+                </Link>
+              }
+            >
+              Dieses PDF lässt sich nicht anzeigen. Vielleicht ist die Datei beschädigt.
+            </EmptyState>
+          ) : (
+            <EmptyState
+              action={
+                <button
+                  type="button"
+                  onClick={() => setAttempt((n) => n + 1)}
+                  className="text-sm font-medium text-accent hover:underline"
+                >
+                  Erneut versuchen
+                </button>
+              }
+            >
+              Konnte nicht geladen werden.
+            </EmptyState>
+          )}
         </div>
       </div>
     );
@@ -731,9 +783,11 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
                       top: rect.top * scale,
                       width: rect.width * scale,
                       height: rect.height * scale,
-                      // Aus dem Akzent der Design-Tokens (hell und dunkel), die Seite selbst ist immer weiß
-                      backgroundColor: `color-mix(in srgb, var(--sg-color-accent) ${isActive ? 45 : 25}%, transparent)`,
-                      outline: isActive ? '2px solid var(--sg-color-accent)' : undefined,
+                      // Eigene Treffer-Tokens (hell und dunkel). Die Seite ist immer weiß, `multiply` lässt den Text
+                      // darunter lesbar, wie ein Textmarker.
+                      backgroundColor: isActive ? 'var(--sg-color-hit-active)' : 'var(--sg-color-hit)',
+                      mixBlendMode: 'multiply',
+                      outline: isActive ? '2px solid var(--sg-color-hit-outline)' : undefined,
                     }}
                   />
                 );

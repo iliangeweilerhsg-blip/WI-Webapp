@@ -157,3 +157,29 @@ describe('Einlesen gescheitert nach dem Hochladen', () => {
     expect(screen.queryByText('Foliensatz hinzugefügt')).not.toBeInTheDocument();
   });
 });
+
+describe('Beobachten nach dem Hochladen: Pausen (Folgepunkt 7)', () => {
+  it('ein neuer Upload setzt die wachsenden Pausen auf 2 s zurück', async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const core = await openModule();
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('Erste.pdf'));
+    await screen.findByText('Foliensatz hinzugefügt');
+    // Der erste Satz bleibt „neu“, die Pausen wachsen bis auf 10 s
+    await advance(40_000);
+    const first = core.decks[0]?.id ?? '';
+    const before = core.requests.length;
+    await advance(10_100);
+    expect(core.requests.slice(before).filter((r) => r.path === `/slide-decks/${first}`)).toHaveLength(1);
+
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('Zweite.pdf'));
+    await screen.findByText('Foliensatz hinzugefügt');
+    const second = core.decks.find((d) => d.id !== first)?.id ?? '';
+    expect(second).not.toBe('');
+    const mark = core.requests.length;
+    // Schon nach gut 2 s wird der neue Eintrag abgefragt, nicht erst nach der alten Pause von 10 s
+    await advance(POLL_INTERVAL_MS + 200);
+    expect(
+      core.requests.slice(mark).filter((r) => r.path === `/slide-decks/${second}`).length,
+    ).toBeGreaterThan(0);
+  });
+});

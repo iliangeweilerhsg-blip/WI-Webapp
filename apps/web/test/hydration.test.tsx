@@ -1,6 +1,8 @@
 // Hydration (React #418): Waren Abfragen schon fertig, bevor ein Teil der Seite hydratisiert wurde, darf das
 // nicht vom vorgerenderten HTML („lädt“) abweichen.
 import { describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { renderToString } from 'react-dom/server';
 import { hydrateRoot } from 'react-dom/client';
 import { act } from 'react';
@@ -53,5 +55,18 @@ describe('Hydration', () => {
     expect(errors).toEqual([]);
     // Nach der Hydration zeigt die Seite die Daten
     await waitFor(() => expect(container.textContent).toContain('Core verbunden'));
+  });
+
+  // Ursache von React #418 unter Last (Folgepunkt 2): Kam das Theme-Skript des `<head>` aus einer Client-Datei, war es
+  // für das Layout eine Modulreferenz. Der `<head>` hing dann an einem noch ladenden Chunk, React unterbrach die
+  // Hydration mitten im `<head>` und setzte danach den Cursor falsch (React-Fehler bei `head` als Singleton).
+  it('das Theme-Skript im <head> ist eine einfache Zeichenkette, keine Referenz auf ein Client-Modul', () => {
+    const src = (file: string) => readFileSync(join(process.cwd(), 'src', file), 'utf8');
+    expect(src('lib/theme-init.ts')).not.toMatch(/^\s*['"]use client['"]/m);
+    expect(src('app/layout.tsx')).toMatch(/THEME_INIT_SCRIPT[^;]*from '..\/lib\/theme-init\.ts'/);
+    // Auch sonst steht im <head> nichts, was aus einer Client-Datei kommt
+    const head = /<head>([\s\S]*?)<\/head>/.exec(src('app/layout.tsx'))?.[1] ?? '';
+    expect(head).toContain('THEME_INIT_SCRIPT');
+    expect(head).not.toMatch(/<[A-Z]/);
   });
 });

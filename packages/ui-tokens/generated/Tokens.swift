@@ -29,6 +29,9 @@ public enum Tokens {
         public static let accentSoft = Tokens.dynamic(light: 0xE8EDFC, dark: 0x25304F)
         public static let record = Tokens.dynamic(light: 0xC42B1C, dark: 0xFF6B5B)
         public static let danger = Tokens.dynamic(light: 0xC42B1C, dark: 0xFF6B5B)
+        public static let hit = Tokens.dynamic(light: 0xFFE27A, dark: 0xF5D76E)
+        public static let hitActive = Tokens.dynamic(light: 0xFFB347, dark: 0xF0A050)
+        public static let hitOutline = Tokens.dynamic(light: 0x9A4D00, dark: 0xA85400)
     }
 
     /// Modulfarben mod-01 bis mod-12 (07 §8).

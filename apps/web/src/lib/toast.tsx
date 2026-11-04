@@ -23,10 +23,9 @@ export interface ToastOptions {
   /** Der Toast ist von selbst abgelaufen */
   onExpire?: () => void;
   /**
-   * Ein Toast anderer Gruppe hat diesen ersetzt, bevor er ablief. Ein neuer Toast derselben Gruppe
-   * (z. B. die nächste Löschung) führt den alten fort, dann kommt kein `onReplace`.
+   * Toasts derselben Gruppe führen einander fort (z. B. die nächste Löschung): Der neue ersetzt den
+   * sichtbaren bzw. wartenden alten, ohne dass dieser abläuft.
    */
-  onReplace?: () => void;
   group?: string;
 }
 
@@ -42,9 +41,21 @@ const ToastContext = createContext<ToastApi | null>(null);
 
 const DEFAULT_DURATION_MS = 5_000;
 
+/** So viele Toasts warten höchstens hinter dem sichtbaren. Ältere bloße Meldungen verfallen zuerst. */
+export const MAX_WAITING_TOASTS = 3;
+
+/** „Rückgängig“ (hat `onExpire`) und Toasts mit Aktion werden nie von einer anderen Meldung verdrängt. */
+function isProtected(toast: ToastOptions): boolean {
+  return Boolean(toast.onExpire || toast.actionLabel);
+}
+
 /**
- * Ruhige Rückmeldung unten mittig. Höchstens ein Toast gleichzeitig, der neueste ersetzt den alten.
- * Der Timer pausiert, solange die Maus darüber ist. Der Fokus pausiert nicht: Er liegt nach dem Löschen automatisch auf der Aktion, Tastaturnutzer erreichen „Rückgängig“ sofort (WCAG 2.2.1).
+ * Ruhige Rückmeldung unten mittig, eine Meldung zur Zeit (07 §7). Neue Meldungen verdrängen nur eine bloße
+ * Meldung ohne Aktion. Ein sichtbarer Toast mit Aktion, vor allem „Rückgängig“, läuft immer zu Ende: Alles
+ * andere reiht sich dahinter ein (höchstens {@link MAX_WAITING_TOASTS}, die ältesten bloßen Meldungen verfallen
+ * zuerst, Toasts mit `onExpire` nie, sie tragen eine offene Löschung). Eine Dublette-Meldung löst so nie ein
+ * Löschen vorzeitig aus. Der Timer pausiert, solange die Maus darüber ist. Der Fokus pausiert nicht: Er liegt
+ * nach dem Löschen automatisch auf der Aktion, Tastaturnutzer erreichen „Rückgängig“ sofort (WCAG 2.2.1).
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ToastItem | null>(null);
@@ -54,8 +65,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const remaining = useRef(0);
   const actionRef = useRef<HTMLButtonElement>(null);
   const elementRef = useRef<HTMLDivElement>(null);
-  const queued = useRef<ToastOptions | null>(null);
-  const showRef = useRef<(options: ToastOptions) => void>(() => {});
+  const queued = useRef<ToastOptions[]>([]);
 
   /** Lag der Fokus im Toast (z. B. auf „Rückgängig“), geht er in den Hauptbereich, statt auf <body> zu fallen. */
   const rescueFocus = useCallback(() => {
@@ -65,16 +75,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const show = useCallback(
+  const display = useCallback(
     (options: ToastOptions) => {
-      const old = current.current;
-      // Ein offenes „Rückgängig“ wird nicht von einer bloßen Meldung verdrängt (das würde die Löschung sofort
-      // auslösen): Die Meldung wartet, bis der Toast abläuft oder bedient wird. Nur die neueste bleibt übrig.
-      if (old?.onExpire && !options.onExpire && !options.actionLabel && old.group !== options.group) {
-        queued.current = options;
-        return;
-      }
-      if (old?.onReplace && old.group !== options.group) old.onReplace();
       if (!options.focusAction) rescueFocus();
       counter.current += 1;
       const next = { ...options, id: counter.current };
@@ -86,7 +88,34 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [rescueFocus],
   );
 
-  showRef.current = show;
+  const show = useCallback(
+    (options: ToastOptions) => {
+      const old = current.current;
+      const waiting = queued.current;
+      // Gleiche Gruppe: fortführen (der wartende bzw. sichtbare Toast wird ersetzt, nichts läuft ab)
+      const sameWaiting = options.group ? waiting.findIndex((w) => w.group === options.group) : -1;
+      if (sameWaiting >= 0) {
+        waiting[sameWaiting] = options;
+        return;
+      }
+      if (old && options.group && old.group === options.group) {
+        display(options);
+        return;
+      }
+      if (old && (isProtected(old) || waiting.length > 0)) {
+        waiting.push(options);
+        // Zu viele Wartende: die ältesten bloßen Meldungen verfallen, offene Löschungen nie
+        while (waiting.length > MAX_WAITING_TOASTS) {
+          const stale = waiting.findIndex((w) => !w.onExpire);
+          if (stale < 0) break;
+          waiting.splice(stale, 1);
+        }
+        return;
+      }
+      display(options);
+    },
+    [display],
+  );
 
   const api = useMemo(() => ({ show }), [show]);
 
@@ -96,11 +125,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       rescueFocus();
       current.current = null;
       setToast(null);
-      const next = queued.current;
-      queued.current = null;
-      if (next) showRef.current(next);
+      const next = queued.current.shift();
+      if (next) display(next);
     },
-    [rescueFocus],
+    [rescueFocus, display],
   );
 
   useEffect(() => {

@@ -227,9 +227,11 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const watchIngest = useCallback(
     (kind: MaterialKind, id: string) => {
       watched.current.set(id, { kind, since: Date.now() });
-      // Läuft gerade eine Runde, plant sie die nächste selbst
-      if (!polling.current && !watchTimer.current) {
-        rounds.current = 0;
+      // Ein neuer Eintrag setzt die Pausen auf 2 s zurück (sonst wartet er auf eine Runde mit 10 s Abstand)
+      rounds.current = 0;
+      // Läuft gerade eine Runde, plant sie die nächste selbst (mit der zurückgesetzten Pause)
+      if (!polling.current) {
+        if (watchTimer.current) clearTimeout(watchTimer.current);
         watchTimer.current = setTimeout(() => void pollWatched(), nextDelay());
       }
     },
