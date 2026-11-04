@@ -267,7 +267,8 @@
       (function () {
         const BASE_PAGE_WIDTH_PT = 595;
         const BASE_PAGE_HEIGHT_PT = 842;
-        const MAX_PAGE_PT = 4000;
+        // Obergrenze gegen unsinnige bbox-Werte (8000×8000 px je Ebene wären ~256 MB)
+        const MAX_PAGE_PT = 2000;
         // Zeichenfläche passt sich der bbox der Striche an (iPad kann breiter als A4 sein)
         let pageWidthPt = BASE_PAGE_WIDTH_PT;
         let pageHeightPt = BASE_PAGE_HEIGHT_PT;

@@ -865,6 +865,13 @@ server.on('upgrade', (req, socket, head) => {
     processIncomingChunk(head);
   }
 
+  // N5: Beendet die Gegenseite per TCP-FIN ohne WebSocket-Close (App beendet, WLAN weg),
+  // den Platz sofort freigeben statt erst nach dem Idle-Timeout.
+  socket.on('end', () => {
+    wsClients.delete(clientEntry);
+    socket.destroy();
+  });
+
   socket.on('close', () => {
     wsClients.delete(clientEntry);
   });
