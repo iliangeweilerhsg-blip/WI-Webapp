@@ -6,8 +6,13 @@ export type ThemeChoice = 'system' | 'light' | 'dark';
 
 const STORAGE_KEY = 'sg-theme';
 
-/** Wird im <head> vor dem ersten Rendern ausgeführt, damit es nicht blitzt. */
-export const THEME_INIT_SCRIPT = `try{var t=localStorage.getItem('${STORAGE_KEY}');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}`;
+export const SIDEBAR_KEY = 'sg-sidebar-collapsed';
+
+/**
+ * Wird im <head> vor dem ersten Rendern ausgeführt: Theme und eingeklappte Seitenleiste landen als
+ * Attribute auf <html>, damit nichts blitzt oder springt. Das Seitenleisten-Aussehen steuert CSS.
+ */
+export const THEME_INIT_SCRIPT = `try{var d=document.documentElement,t=localStorage.getItem('${STORAGE_KEY}');if(t==='light'||t==='dark')d.setAttribute('data-theme',t);if(localStorage.getItem('${SIDEBAR_KEY}')==='1')d.setAttribute('data-sidebar','collapsed')}catch(e){}`;
 
 function readStored(): ThemeChoice {
   try {

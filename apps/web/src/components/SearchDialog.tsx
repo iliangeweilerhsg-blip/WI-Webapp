@@ -56,7 +56,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
           type="search"
           aria-label="Suchbegriff"
           placeholder="Suchen …"
-          className="w-full rounded-md border border-border bg-bg px-3 py-2 text-md"
+          className="w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md"
         />
         <p className="mt-4 text-sm text-text-muted">
           Die Suche kommt in Phase 2. Dann findest du hier Konzepte, Folien, Gesagtes, Notizen, Aufgaben und

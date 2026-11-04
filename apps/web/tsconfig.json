@@ -11,9 +11,8 @@
     "sourceMap": false,
     "incremental": true,
     "allowJs": false,
-    "plugins": [{ "name": "next" }],
-    "types": ["vitest/globals", "@testing-library/jest-dom"]
+    "plugins": [{ "name": "next" }]
   },
-  "include": ["next-env.d.ts", "src", "test", "next.config.ts", "vitest.config.ts", ".next/types/**/*.ts"],
+  "include": ["next-env.d.ts", "src", "next.config.ts", ".next/types/**/*.ts"],
   "exclude": ["node_modules", "out"]
 }

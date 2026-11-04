@@ -6,7 +6,7 @@ import { THEME_INIT_SCRIPT, ThemeProvider } from '../lib/theme.tsx';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Studien-Gehirn',
+  title: { default: 'Studien-Gehirn', template: '%s · Studien-Gehirn' },
   description: 'Vorlesung, Notizen und Lernen an einem Ort',
 };
 

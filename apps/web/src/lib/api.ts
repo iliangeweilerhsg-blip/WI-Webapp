@@ -66,11 +66,12 @@ async function toApiError(res: Response): Promise<ApiRequestError> {
       userMessage: CODE_MESSAGES[code] ?? messageForStatus(res.status),
     });
   }
+  // Kein ApiError-Body: vermutlich antwortet nicht der Core (z. B. ein Proxy oder ein anderer Server)
   return new ApiRequestError({
     kind: 'api',
     status: res.status,
     message: `HTTP ${res.status}`,
-    userMessage: messageForStatus(res.status),
+    userMessage: res.status >= 500 ? messageForStatus(res.status) : 'Core antwortet unerwartet',
   });
 }
 

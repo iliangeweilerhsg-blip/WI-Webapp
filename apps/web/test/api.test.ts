@@ -44,10 +44,21 @@ describe('apiGet', () => {
     expect(friendlyMessage(err)).toBe('Dieses Gerät ist noch nicht mit dem Core gekoppelt.');
   });
 
-  it('fällt bei unbekanntem Code und Nicht-JSON auf den Status zurück', async () => {
+  it('fällt bei Nicht-JSON auf den Status zurück', async () => {
     mockFetch(async () => new Response('<html>Bad Gateway</html>', { status: 502 }));
     const err = await apiGet('/modules', ModuleListSchema).catch((e: unknown) => e);
     expect(friendlyMessage(err)).toBe('Im Core ist etwas schiefgegangen. Versuch es gleich noch einmal.');
+  });
+
+  it('404 ohne ApiError-Body heißt „Core antwortet unerwartet", mit Body „gibt es nicht"', async () => {
+    mockFetch(async () => new Response('<html>Not Found</html>', { status: 404 }));
+    expect(friendlyMessage(await apiGet('/x', ModuleListSchema).catch((e: unknown) => e))).toBe(
+      'Core antwortet unerwartet',
+    );
+    mockFetch(async () => json({ error: { code: 'module_not_found', message: 'weg' } }, 404));
+    expect(friendlyMessage(await apiGet('/x', ModuleListSchema).catch((e: unknown) => e))).toBe(
+      'Das gibt es nicht (mehr).',
+    );
   });
 
   it('lehnt Antworten ab, die nicht zum Schema passen', async () => {

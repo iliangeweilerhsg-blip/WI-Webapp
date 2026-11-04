@@ -11,7 +11,7 @@ export function CoreHint({ error }: { error: unknown }) {
         <>
           <p className="font-medium">Core nicht erreichbar</p>
           <p className="mt-1 text-text-muted">
-            Sobald der Core läuft, verbindet sich die App automatisch. Starten kannst du ihn mit{' '}
+            Sobald der Core läuft, verbindet sich die App automatisch und lädt neu. Starten kannst du ihn mit{' '}
             <code className="font-mono">pnpm sg start</code>.
           </p>
         </>

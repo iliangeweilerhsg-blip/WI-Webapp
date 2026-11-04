@@ -8,8 +8,11 @@ export function makeQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        // Offline ist ein Normalzustand (R14): nicht hämmern, nur bei Serverfehlern einmal wiederholen
-        retry: (count, error) => !(error instanceof ApiRequestError && error.kind !== 'api') && count < 1,
+        // Offline ist ein Normalzustand (R14): höchstens ein Wiederholungsversuch, nur bei Netzwerkfehlern und 5xx, nie bei 4xx
+        retry: (count, error) =>
+          count < 1 &&
+          error instanceof ApiRequestError &&
+          (error.kind === 'unreachable' || (error.kind === 'api' && (error.status ?? 0) >= 500)),
         refetchOnWindowFocus: false,
         staleTime: 30_000,
       },

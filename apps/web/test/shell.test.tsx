@@ -11,10 +11,11 @@ vi.mock('next/navigation', () => ({
 }));
 
 import { AppShell } from '../src/components/AppShell.tsx';
+import { SettingsView } from '../src/components/SettingsView.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 
-const MODULE = {
+export const MODULE = {
   id: '0190f6a2-0000-7000-8000-0000000000a1',
   user_id: '0190f6a2-0000-7000-8000-000000000000',
   created_at: '2026-11-04T08:00:00Z',
@@ -53,6 +54,7 @@ function coreOffline() {
 beforeEach(() => {
   nav.pathname = '/';
   document.documentElement.removeAttribute('data-theme');
+  document.documentElement.removeAttribute('data-sidebar');
 });
 
 afterEach(() => {
@@ -61,17 +63,28 @@ afterEach(() => {
 });
 
 describe('Navigation', () => {
-  it('zeigt alle Einträge der Seitenleiste in der Reihenfolge von 07 §2', async () => {
+  it('zeigt alle Einträge der Seitenleiste in der Reihenfolge von 07 §2, jeder mit Beschriftung', async () => {
     coreOffline();
     mount();
     const sidebar = screen.getByRole('navigation', { name: 'Hauptnavigation' });
-    const labels = within(sidebar)
-      .getAllByRole('link')
-      .map((a) => a.textContent?.replace(/^[^\p{L}]+/u, '').trim());
-    expect(labels).toEqual(['Heute', 'Bibliothek', 'Lernen', 'Planer', 'Videos', 'Inbox']);
-    expect(screen.getByRole('link', { name: /Einstellungen/ })).toHaveAttribute('href', '/einstellungen');
-    expect(screen.getByRole('link', { name: /Inbox/ })).toHaveAttribute('href', '/inbox');
-    expect(screen.getByRole('link', { name: /Heute/ })).toHaveAttribute('aria-current', 'page');
+    const links = within(sidebar).getAllByRole('link');
+    expect(links.map((a) => a.getAttribute('aria-label'))).toEqual([
+      'Heute',
+      'Bibliothek',
+      'Lernen',
+      'Planer',
+      'Videos',
+      'Inbox',
+    ]);
+    // eingeklappt braucht jedes Ziel einen Tooltip
+    expect(links.map((a) => a.getAttribute('title'))).toEqual(links.map((a) => a.getAttribute('aria-label')));
+    // jedes Ziel hat ein eigenes Symbol
+    const icons = links.map((a) => a.querySelector('svg')?.innerHTML);
+    expect(icons.every(Boolean)).toBe(true);
+    expect(new Set(icons).size).toBe(icons.length);
+    expect(screen.getByRole('link', { name: 'Einstellungen' })).toHaveAttribute('href', '/einstellungen');
+    expect(screen.getByRole('link', { name: 'Inbox' })).toHaveAttribute('href', '/inbox');
+    expect(screen.getByRole('link', { name: 'Heute' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('zeigt Module aus der API mit Modulfarbe und Query-Parameter-Link', async () => {
@@ -85,7 +98,7 @@ describe('Navigation', () => {
     );
     nav.pathname = '/modul';
     mount();
-    const link = await screen.findByRole('link', { name: /DBS/ });
+    const link = await screen.findByRole('link', { name: 'Datenbanksysteme' });
     expect(link).toHaveAttribute('href', `/modul?id=${MODULE.id}`);
     expect(link).toHaveAttribute('aria-current', 'page');
     const dot = link.querySelector('span[aria-hidden]') as HTMLElement;
@@ -95,59 +108,84 @@ describe('Navigation', () => {
   it('stürzt ohne Core nicht ab, sondern zeigt „Core nicht erreichbar"', async () => {
     coreOffline();
     mount();
-    expect(await screen.findAllByText('Core nicht erreichbar')).not.toHaveLength(0);
+    expect(await screen.findAllByText('Core nicht erreichbar', {}, { timeout: 4000 })).not.toHaveLength(0);
     expect(screen.getByText('Inhalt')).toBeInTheDocument();
+  });
+
+  it('hat keinen Theme-Umschalter in der Seitenleiste', () => {
+    coreOffline();
+    mount();
+    expect(screen.queryByRole('group', { name: 'Darstellung' })).not.toBeInTheDocument();
   });
 });
 
-describe('Tastenkürzel', () => {
-  it('⌘K öffnet den Suchdialog, Esc schließt ihn', async () => {
+describe('Tastenkürzel (jsdom ist kein Mac: Strg)', () => {
+  it('Strg+K öffnet den Suchdialog, Esc schließt ihn', async () => {
     coreOffline();
     const user = userEvent.setup();
     mount();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    await user.keyboard('{Meta>}k{/Meta}');
-    const dialog = screen.getByRole('dialog', { name: 'Suche' });
-    expect(dialog).toBeInTheDocument();
+    await user.keyboard('{Control>}k{/Control}');
+    expect(screen.getByRole('dialog', { name: 'Suche' })).toBeInTheDocument();
     expect(screen.getByRole('searchbox')).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('⌘\\ klappt die Seitenleiste ein und aus', async () => {
+  it('Seitenleiste klappt ein und aus und setzt data-sidebar auf <html>', async () => {
     coreOffline();
     const user = userEvent.setup();
     mount();
     const toggle = screen.getByRole('button', { name: /Seitenleiste/ });
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await user.keyboard('{Meta>}\\{/Meta}');
+    await user.keyboard('{Control>}\\{/Control}');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    await user.keyboard('{Meta>}\\{/Meta}');
+    expect(document.documentElement).toHaveAttribute('data-sidebar', 'collapsed');
+    expect(window.localStorage.getItem('sg-sidebar-collapsed')).toBe('1');
+    await user.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(document.documentElement).not.toHaveAttribute('data-sidebar');
   });
 
-  it('⌘[ und ⌘] gehen im Verlauf zurück und vor', async () => {
+  it('übernimmt eine beim Laden gesetzte eingeklappte Leiste', () => {
+    coreOffline();
+    document.documentElement.setAttribute('data-sidebar', 'collapsed');
+    mount();
+    expect(screen.getByRole('button', { name: /Seitenleiste/ })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('Strg+[ und Strg+] gehen im Verlauf zurück und vor, nicht aber im Suchfeld', async () => {
     coreOffline();
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
     const forward = vi.spyOn(window.history, 'forward').mockImplementation(() => {});
     const user = userEvent.setup();
     mount();
-    await user.keyboard('{Meta>}[[{/Meta}');
-    await user.keyboard('{Meta>}]{/Meta}');
+    await user.keyboard('{Control>}[[{/Control}');
+    await user.keyboard('{Control>}]{/Control}');
     expect(back).toHaveBeenCalledTimes(1);
     expect(forward).toHaveBeenCalledTimes(1);
+
+    await user.keyboard('{Control>}k{/Control}');
+    await user.keyboard('{Control>}[[{/Control}');
+    expect(back).toHaveBeenCalledTimes(1);
   });
 });
 
-describe('Darstellung', () => {
-  it('Umschalter setzt data-theme und merkt sich die Wahl', async () => {
+describe('Darstellung (nur in den Einstellungen)', () => {
+  it('Segment-Buttons mit aria-pressed setzen data-theme und merken sich die Wahl', async () => {
     coreOffline();
     const user = userEvent.setup();
-    mount();
-    await user.click(screen.getByRole('radio', { name: 'Dunkel' }));
+    render(
+      <ThemeProvider>
+        <SettingsView />
+      </ThemeProvider>,
+    );
+    expect(screen.getByRole('button', { name: 'System' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Dunkel' }));
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
     expect(window.localStorage.getItem('sg-theme')).toBe('dark');
-    await user.click(screen.getByRole('radio', { name: 'System' }));
+    expect(screen.getByRole('button', { name: 'Dunkel' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'System' }));
     expect(document.documentElement).not.toHaveAttribute('data-theme');
   });
 });

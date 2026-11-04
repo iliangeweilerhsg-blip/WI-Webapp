@@ -5,18 +5,19 @@ import { usePathname } from 'next/navigation';
 import { Suspense } from 'react';
 import { NAV_MAIN, NAV_SETTINGS, NAV_TOP, type NavItem } from '../lib/nav.ts';
 import { CoreStatus } from './CoreStatus.tsx';
+import { Icon } from './Icon.tsx';
 import { ModuleNav } from './ModuleNav.tsx';
-import { ThemeToggle } from './ThemeToggle.tsx';
 
 interface SidebarProps {
-  collapsed: boolean;
+  /** Nur für aria-expanded. Das Aussehen steuert `html[data-sidebar]` per CSS (kein Ruckeln beim Laden). */
+  expanded: boolean;
   onToggle: () => void;
   onOpenSearch: () => void;
   /** Neutrale Inbox-Zahl (07 §2: grau, nie rot). Solange der Core keine Zahl liefert, leer. */
   inboxCount?: number | null;
 }
 
-function NavLink({ item, collapsed, count }: { item: NavItem; collapsed: boolean; count?: number | null }) {
+function NavLink({ item, count }: { item: NavItem; count?: number | null }) {
   const pathname = usePathname();
   const active = item.href === '/' ? pathname === '/' : pathname.startsWith(item.href);
   return (
@@ -24,69 +25,54 @@ function NavLink({ item, collapsed, count }: { item: NavItem; collapsed: boolean
       <Link
         href={item.href}
         aria-current={active ? 'page' : undefined}
-        aria-label={collapsed ? item.label : undefined}
+        aria-label={item.label}
         title={item.label}
         className={`sg-nav-link ${active ? 'sg-nav-link-active' : ''}`}
       >
-        <span aria-hidden="true" className="w-4 shrink-0 text-center">
-          {item.icon}
-        </span>
-        {!collapsed && <span className="flex-1">{item.label}</span>}
-        {!collapsed && count ? (
-          <span className="text-xs tabular-nums text-text-muted" aria-label={`${count} Einträge`}>
-            {count}
-          </span>
-        ) : null}
+        <Icon name={item.icon} />
+        <span className="sg-collapsible flex-1">{item.label}</span>
+        {count ? <span className="sg-collapsible text-xs tabular-nums text-text-muted">{count}</span> : null}
       </Link>
     </li>
   );
 }
 
-export function Sidebar({ collapsed, onToggle, onOpenSearch, inboxCount = null }: SidebarProps) {
+export function Sidebar({ expanded, onToggle, onOpenSearch, inboxCount = null }: SidebarProps) {
   return (
-    <aside
-      id="sidebar"
-      className={`flex shrink-0 flex-col border-r border-border bg-surface sg-transition-width ${
-        collapsed ? 'w-14' : 'w-60'
-      }`}
-    >
+    <aside id="sidebar" className="flex shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex items-center justify-between px-3 py-3">
-        {!collapsed && <span className="text-sm font-semibold">Studien-Gehirn</span>}
+        <span className="sg-collapsible text-sm font-semibold">Studien-Gehirn</span>
         <button
           type="button"
           onClick={onToggle}
-          aria-expanded={!collapsed}
+          aria-expanded={expanded}
           aria-controls="sidebar-nav"
           aria-label="Seitenleiste ein- oder ausklappen"
+          aria-keyshortcuts="Meta+\"
           title="Seitenleiste ein- oder ausklappen (⌘\)"
-          className="sg-nav-link !w-auto"
+          className="sg-nav-link sg-toggle"
         >
-          <span aria-hidden="true">☰</span>
+          <Icon name="menu" />
         </button>
       </div>
 
       <nav id="sidebar-nav" aria-label="Hauptnavigation" className="flex-1 overflow-y-auto px-2">
-        <ul className="flex flex-col gap-0.5">
+        <ul className="flex flex-col gap-1">
           {NAV_TOP.map((item) => (
-            <NavLink key={item.href} item={item} collapsed={collapsed} />
+            <NavLink key={item.href} item={item} />
           ))}
         </ul>
         <Suspense fallback={null}>
-          <ModuleNav collapsed={collapsed} />
+          <ModuleNav />
         </Suspense>
-        <ul className="mt-3 flex flex-col gap-0.5">
+        <ul className="mt-4 flex flex-col gap-1">
           {NAV_MAIN.map((item) => (
-            <NavLink
-              key={item.href}
-              item={item}
-              collapsed={collapsed}
-              count={item.href === '/inbox' ? inboxCount : null}
-            />
+            <NavLink key={item.href} item={item} count={item.href === '/inbox' ? inboxCount : null} />
           ))}
         </ul>
       </nav>
 
-      <div className="flex flex-col gap-0.5 border-t border-border px-2 py-2">
+      <div className="flex flex-col gap-1 border-t border-border px-2 py-2">
         <button
           type="button"
           onClick={onOpenSearch}
@@ -95,27 +81,14 @@ export function Sidebar({ collapsed, onToggle, onOpenSearch, inboxCount = null }
           title="Suche (⌘K)"
           className="sg-nav-link w-full"
         >
-          <span aria-hidden="true" className="w-4 shrink-0 text-center">
-            ⌕
-          </span>
-          {!collapsed && (
-            <>
-              <span className="flex-1 text-left">Suche</span>
-              <kbd className="text-xs text-text-muted">⌘K</kbd>
-            </>
-          )}
+          <Icon name="search" />
+          <span className="sg-collapsible flex-1 text-left">Suche</span>
+          <kbd className="sg-collapsible text-xs text-text-muted">⌘K</kbd>
         </button>
         <ul>
-          <NavLink item={NAV_SETTINGS} collapsed={collapsed} />
+          <NavLink item={NAV_SETTINGS} />
         </ul>
-        {collapsed ? (
-          <ThemeToggle compact />
-        ) : (
-          <div className="px-1 py-1">
-            <ThemeToggle />
-          </div>
-        )}
-        <CoreStatus collapsed={collapsed} />
+        <CoreStatus />
       </div>
     </aside>
   );

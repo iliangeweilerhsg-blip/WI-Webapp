@@ -1,4 +1,7 @@
+import type { Metadata } from 'next';
 import { PlaceholderScreen } from '../../components/Placeholder.tsx';
+
+export const metadata: Metadata = { title: 'Lernen' };
 
 export default function LernenPage() {
   return (

@@ -82,6 +82,9 @@ main:focus {
     min-height: 32px;
     transition: background-color var(--sg-motion-fast);
   }
+  .sg-nav-link.sg-toggle {
+    width: auto;
+  }
   .sg-nav-link:hover {
     background: var(--sg-color-border);
   }
@@ -94,8 +97,28 @@ main:focus {
       background-color var(--sg-motion-fast),
       color var(--sg-motion-fast);
   }
-  .sg-transition-width {
+  #sidebar {
+    width: 240px;
+    overflow: hidden;
+  }
+  html[data-sidebar='collapsed'] #sidebar {
+    width: 56px;
+  }
+  /* Übergang erst nach dem Mount (data-ready), sonst „fährt" die Leiste beim Laden */
+  html[data-ready] #sidebar {
     transition: width var(--sg-motion-base);
+  }
+  html[data-sidebar='collapsed'] .sg-collapsible {
+    display: none;
+  }
+  html[data-sidebar='collapsed'] #sidebar > div:first-child {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  html[data-sidebar='collapsed'] #sidebar .sg-nav-link,
+  html[data-sidebar='collapsed'] #sidebar [role='status'] {
+    justify-content: center;
+    padding-inline: 0;
   }
   .sg-skip-link {
     position: absolute;

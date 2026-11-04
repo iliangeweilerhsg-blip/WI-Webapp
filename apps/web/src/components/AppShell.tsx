@@ -1,40 +1,41 @@
 'use client';
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { matchShortcut } from '../lib/shortcuts.ts';
+import { isMacPlatform, matchShortcut } from '../lib/shortcuts.ts';
+import { SIDEBAR_KEY } from '../lib/theme.tsx';
 import { SearchDialog } from './SearchDialog.tsx';
 import { Sidebar } from './Sidebar.tsx';
 
-const SIDEBAR_KEY = 'sg-sidebar-collapsed';
-
 /** App-Rahmen (07 §2): einklappbare Seitenleiste, Inhalt, globale Kürzel. */
 export function AppShell({ children }: { children: ReactNode }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
-    try {
-      if (window.localStorage.getItem(SIDEBAR_KEY) === '1') setCollapsed(true);
-    } catch {
-      // Speicher nicht verfügbar – Standard bleibt ausgeklappt
-    }
+    const root = document.documentElement;
+    setExpanded(root.getAttribute('data-sidebar') !== 'collapsed');
+    // Übergang erst nach dem ersten Rendern erlauben, damit die Leiste beim Laden nicht „fährt"
+    const id = requestAnimationFrame(() => root.setAttribute('data-ready', ''));
+    return () => cancelAnimationFrame(id);
   }, []);
 
   const toggleSidebar = useCallback(() => {
-    setCollapsed((c) => {
-      const next = !c;
-      try {
-        window.localStorage.setItem(SIDEBAR_KEY, next ? '1' : '0');
-      } catch {
-        // egal
-      }
-      return next;
-    });
+    const root = document.documentElement;
+    const collapse = root.getAttribute('data-sidebar') !== 'collapsed';
+    if (collapse) root.setAttribute('data-sidebar', 'collapsed');
+    else root.removeAttribute('data-sidebar');
+    setExpanded(!collapse);
+    try {
+      window.localStorage.setItem(SIDEBAR_KEY, collapse ? '1' : '0');
+    } catch {
+      // Speicher nicht verfügbar – gilt nur für diese Sitzung
+    }
   }, []);
 
   useEffect(() => {
+    const mac = isMacPlatform();
     function onKeyDown(e: KeyboardEvent) {
-      const action = matchShortcut(e);
+      const action = matchShortcut(e, mac);
       if (!action) return;
       e.preventDefault();
       if (action === 'search') setSearchOpen((o) => !o);
@@ -51,7 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <a href="#main" className="sg-skip-link">
         Zum Inhalt springen
       </a>
-      <Sidebar collapsed={collapsed} onToggle={toggleSidebar} onOpenSearch={() => setSearchOpen(true)} />
+      <Sidebar expanded={expanded} onToggle={toggleSidebar} onOpenSearch={() => setSearchOpen(true)} />
       <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto px-8 py-8">
         <div className="mx-auto max-w-3xl">{children}</div>
       </main>

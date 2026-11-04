@@ -6,15 +6,17 @@
   "description": "Design-Tokens (07 §8): eine JSON-Quelle, daraus CSS-Variablen (Web) und Swift-Konstanten (iPad)",
   "exports": {
     "./tokens.json": "./tokens.json",
-    "./tokens.css": "./generated/tokens.css",
-    "./contrast": "./scripts/contrast.mjs"
+    "./tokens.css": "./generated/tokens.css"
   },
   "scripts": {
     "gen": "node scripts/generate.mjs",
     "check": "node scripts/generate.mjs --check",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p ."
   },
   "devDependencies": {
+    "@types/node": "22.20.5",
+    "typescript": "6.0.3",
     "vitest": "5.1.0"
   }
 }

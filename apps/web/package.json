@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
-    "typecheck": "tsc --noEmit -p .",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run"
   },
   "dependencies": {
