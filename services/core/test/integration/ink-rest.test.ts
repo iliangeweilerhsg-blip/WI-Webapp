@@ -81,6 +81,13 @@ describe('Standard-Notizbücher beim Anlegen eines Moduls', () => {
     expect(res.statusCode, res.body).toBe(201);
     const mod = res.json() as Module;
 
+    // Direkt in der DB: createModule legt sie an, nicht erst der erste GET
+    const rows = await t.handle.db.select().from(notebook).where(eq(notebook.moduleId, mod.id));
+    expect(rows.map((r) => [r.kind, r.title]).sort()).toEqual([
+      ['uebung', 'Übung'],
+      ['vorlesung', 'Vorlesung'],
+    ]);
+
     const list = NotebookListSchema.parse((await json('GET', `/notebooks?module_id=${mod.id}`)).json());
     expect(list.items.map((n) => [n.kind, n.title, n.page_count])).toEqual([
       ['vorlesung', 'Vorlesung', 0],
@@ -102,6 +109,17 @@ describe('Standard-Notizbücher beim Anlegen eines Moduls', () => {
     await t.handle.sql`UPDATE module SET deleted_at = now() WHERE id = ${seed.moduleId}`;
     await json('GET', `/notebooks?module_id=${seed.moduleId}`);
     expect(await t.handle.db.select().from(notebook)).toHaveLength(0);
+  });
+
+  it('GET /notebooks ohne module_id blendet Notizbücher gelöschter Module aus', async () => {
+    const nb = await createNotebook();
+    expect(NotebookListSchema.parse((await json('GET', '/notebooks')).json()).items.map((n) => n.id)).toEqual(
+      [nb.id],
+    );
+    await t.handle.sql`UPDATE module SET deleted_at = now() WHERE id = ${seed.moduleId}`;
+    expect(NotebookListSchema.parse((await json('GET', '/notebooks')).json()).items).toEqual([]);
+    expect((await json('GET', `/notebooks/${nb.id}`)).statusCode).toBe(404);
+    expect((await json('GET', `/notebooks/${nb.id}/pages`)).statusCode).toBe(404);
   });
 
   it('Liste ist paginiert und stabil sortiert', async () => {
@@ -329,6 +347,25 @@ describe('Seiten und Striche lesen', () => {
     expect(times).toEqual([...times].sort((x, y) => x - y));
   });
 
+  it('entfernte Striche erscheinen nicht mehr in GET /pages/{id}/strokes', async () => {
+    const { b, stream } = await seedPages();
+    const [keep, drop] = (loadStrokeFixtures()[0] as { strokes: Stroke[] }).strokes;
+    for (const s of [keep, drop] as Stroke[]) {
+      await runHandler(
+        t.handle.db,
+        t.config.dataDir,
+        makeOp('stroke.add', stream, { page_id: b.page_id, stroke: s }),
+      );
+    }
+    await runHandler(
+      t.handle.db,
+      t.config.dataDir,
+      makeOp('stroke.remove', stream, { page_id: b.page_id, client_ids: [(drop as Stroke).client_id] }),
+    );
+    const body = PageStrokesSchema.parse((await json('GET', `/pages/${b.page_id}/strokes`)).json());
+    expect(body.strokes.map((s) => s.client_id)).toEqual([(keep as Stroke).client_id]);
+  });
+
   it('Elemente erscheinen in GET /pages/{id}, sortiert nach z', async () => {
     const { b, stream } = await seedPages();
     const make = (z: number) => ({
@@ -432,6 +469,7 @@ describe('PUT/GET /pages/{id}/pkdrawing', () => {
 
   it('unbekannte Seite: 404 page_not_found; ungültige Header und Typen', async () => {
     expect((await errorOf(await put(uuidv7(), body), 404)).code).toBe('page_not_found');
+    expect(existsSync(join(t.config.dataDir, 'media', 'pages'))).toBe(false);
     const id = await onePage();
     expect((await errorOf(await put(id, body, { 'x-sha256': 'ABC' }), 400)).code).toBe('validation_failed');
     const noHeader = await t.request({
@@ -570,6 +608,27 @@ describe('Fotos: PUT/GET /photos/{id}/file und photo.add', () => {
     expect(readdirSync(join(t.config.dataDir, 'media', 'photos')).filter((n) => n.endsWith('.part'))).toEqual(
       [],
     );
+  });
+
+  it('gleiche Größe, anderer Inhalt: 409 photo_file_conflict', async () => {
+    const sessionId = await seedSession(t.handle.db, seed.moduleId);
+    const id = uuidv7();
+    await addMeta(sessionId, id);
+    const same = Buffer.from('X'.repeat(bytes.length));
+    expect(same.length).toBe(bytes.length);
+    const res = await putFile(id, same);
+    expect((await errorOf(res, 409)).code).toBe('photo_file_conflict');
+    expect(PhotoSchema.parse((await json('GET', `/photos/${id}`)).json()).has_file).toBe(false);
+  });
+
+  it('HEIC hochgeladen, aber photo.add sagt JPEG: die verwaiste .heic wird entfernt', async () => {
+    const sessionId = await seedSession(t.handle.db, seed.moduleId);
+    const id = uuidv7();
+    const heic = Buffer.from('HEIC-Bytes');
+    expect((await putFile(id, heic, 'image/heic')).statusCode).toBe(201);
+    await addMeta(sessionId, id);
+    expect(existsSync(join(t.config.dataDir, 'media', 'photos', `${id}.heic`))).toBe(false);
+    expect((await putFile(id, bytes)).statusCode).toBe(201);
   });
 
   it('weicht die Datei von photo.add ab (sha256, Typ, Größe): 409 photo_file_conflict', async () => {

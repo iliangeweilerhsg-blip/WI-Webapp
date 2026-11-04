@@ -241,9 +241,10 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 
 | Methode und Pfad | Body | Antwort | Fehler |
 |---|---|---|---|
-| `GET /notebooks?module_id` | – | 200 `NotebookList` | |
+| `GET /notebooks?module_id` | – | 200 `NotebookList` (ohne gelöschte Notizbücher und ohne Notizbücher gelöschter Module) | |
+| `GET /notebooks/{id}` | – | 200 `Notebook` | 404 `notebook_not_found` |
 | `POST /notebooks` | `NotebookCreate` | 201 `Notebook` | 404 `module_not_found`, 409 `notebook_kind_exists` (zweites Notizbuch `vorlesung`/`uebung` im Modul) |
-| `PATCH /notebooks/{id}` | `NotebookUpdate` | 200 `Notebook`, dazu Operation `notebook.update` | 404 `notebook_not_found` |
+| `PATCH /notebooks/{id}` | `NotebookUpdate` | 200 `Notebook`, dazu Operation `notebook.update` (nur bei einer Änderung) | 404 `notebook_not_found`, 404 `module_not_found` (Zielmodul), 409 `notebook_default` („Vorlesung“ und „Übung“ lassen sich umbenennen, aber nicht in ein anderes Modul verschieben) |
 | `DELETE /notebooks/{id}` | – | 204, dazu Operation `notebook.delete` | 404, 409 `notebook_default` (die Notizbücher „Vorlesung“ und „Übung“ eines Moduls lassen sich nicht löschen) |
 | `GET /notebooks/{id}/pages` | – | 200 `NotebookPages`, sortiert nach `index`, dann `created_at`, dann `id` | 404 |
 | `GET /pages/{id}` | – | 200 `PageDetail` | 404 `page_not_found` |
@@ -256,6 +257,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 
 - **Abweichung von 08 §1:** Statt `POST /photos` (multipart) gibt es `PUT /photos/{id}/file` mit der vom iPad vergebenen `photo_id`. Das ist wiederholbar und passt zu Chunks und `pkdrawing`. Die Metadaten entstehen über die Operation `photo.add`, egal ob vor oder nach der Datei.
 - `PUT /photos/{id}/file` für eine noch unbekannte `photo_id` ist erlaubt: Die Datei wird abgelegt, die Zeile entsteht mit `photo.add`. Verwaiste Dateien ohne Zeile räumt `maintenance.nightly` nach 30 Tagen weg.
+- Der Upload von `pkdrawing` und Fotos ist auch für weich gelöschte Seiten bzw. Fotos erlaubt (sie kommen mit der Datei aus dem Papierkorb zurück). `GET` liefert für gelöschte Objekte 404. Ein Foto, dessen Typ von `photo.add` abweicht (HEIC hochgeladen, JPEG gemeldet), wird beim Anlegen der Zeile als verwaiste Datei entfernt.
 - **`page.index` ist nicht eindeutig.** Das iPad ist der einzige Schreiber und hält die Reihenfolge. Bei Gleichstand gilt die Sortierung oben.
 - Der Core legt für jedes Modul die Notizbücher „Vorlesung“ (`vorlesung`) und „Übung“ (`uebung`) an: beim Anlegen des Moduls und, für ältere Module, beim ersten `GET /notebooks?module_id`. Das ist idempotent (F-INK-02).
 
@@ -475,13 +477,13 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
 |---|---|
 | `notebook.create` | Freies Notizbuch anlegen (`kind` nur `frei`). `created_at` aus den Daten. Strom muss `notebook:<notebook_id>` sein, sonst `stream_mismatch`. Existiert die `notebook_id` schon: `ack` ohne Änderung. Unbekanntes Modul: `module_not_found` |
 | `notebook.update` / `.delete` / `.restore` | **Nur Server.** Nach `PATCH`/`DELETE /notebooks/{id}` bzw. Wiederherstellung aus dem Papierkorb. Bei `delete` blenden Clients das Notizbuch aus, bei `restore` laden sie es per REST neu |
-| `page.create` | Seite anlegen, `version = 1`. Strom muss `notebook:<notebook_id>` sein. Existiert die `page_id` schon: `ack` ohne Änderung. Unbekanntes Notizbuch: `notebook_not_found` |
+| `page.create` | Seite anlegen, `version = 1`, `created_at = at` der Operation. `width_pt`/`height_pt` müssen im float4-Bereich liegen (Betrag ≤ 3,4e38), sonst `message_invalid`. Strom muss `notebook:<notebook_id>` sein. Existiert die `page_id` schon: `ack` ohne Änderung. Unbekanntes Notizbuch: `notebook_not_found` |
 | `page.update` | `fields` (vollständiger Stand) übernehmen, wenn `version` der aktuellen entspricht, dann `version + 1`. Sonst `error page_version_conflict` (`retryable = false`). Der Client verfährt wie in §11.2 (neu laden, Felder auflegen, erneut senden) |
 | `page.delete` | Seite mit Strichen und Elementen weich löschen (gleiches `deleted_at`). Vom iPad oder als Server-Operation |
 | `page.restore` | **Nur Server**, nach Wiederherstellung aus dem Papierkorb. Clients laden die Seite per REST neu |
-| `stroke.add` | **Upsert** über `(page_id, client_id)`, letzter Stand gewinnt. Ein gelöschter Strich wird dabei wiederbelebt. Lasso, Umfärben und Skalieren schicken nur `stroke.add` mit gleicher `client_id` (08 §4.3). `clock_uncertain` aus dem Umschlag wird in `stroke.clock_uncertain` gespeichert, `created_at` (ms) als `timestamptz` |
+| `stroke.add` | **Upsert** über `(page_id, client_id)`, letzter Stand gewinnt. Ein gelöschter Strich wird dabei wiederbelebt. Lasso, Umfärben und Skalieren schicken nur `stroke.add` mit gleicher `client_id` (08 §4.3). Ungültige Striche ergeben `message_invalid` (`retryable = false`): `points` kein Base64, kein ganzes Vielfaches von 24 Byte, leer, über 750 000 Byte oder mit NaN/Unendlich; `width`, `transform` und `bbox` nicht endlich oder außerhalb von float4 (Betrag ≤ 3,4e38), `width ≤ 0`. `clock_uncertain` aus dem Umschlag wird in `stroke.clock_uncertain` gespeichert, `created_at` (ms) als `timestamptz` |
 | `stroke.remove` | `deleted_at` setzen. Unbekannte `client_id` werden ignoriert |
-| `element.upsert` / `element.remove` | Upsert über `element_id` bzw. weich löschen |
+| `element.upsert` / `element.remove` | Upsert über `element_id` bzw. weich löschen. Liegt die `element_id` schon auf einer anderen Seite, folgt `stream_mismatch` (nie stillschweigend verschieben) |
 | `drawing.snapshot` | Hinweis an andere iPads, dass `PUT /pages/{id}/pkdrawing` mit diesem sha256 hochgeladen wurde. Der Core bestätigt immer. Ob die Datei vorliegt, zeigt `Page.has_pkdrawing` |
 | `session.start` / `.pause` / `.resume` / `.stop` | wie die REST-Aktionen (§9). `started_at` aus den Daten bzw. `ended_at = at`, nicht die Serverzeit. Sonderfälle in §9.2 und §9.3 |
 | `slide.change` | `slide_event` anlegen, `source` aus `device` (`manuell_mac`/`manuell_ipad`). Idempotent über `event_id` |
@@ -635,14 +637,14 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | Code | HTTP | Bedeutung |
 |---|---|---|
 | `calendar_source_not_found`, `calendar_event_not_found`, `session_not_found`, `recording_not_found`, `notebook_not_found`, `page_not_found`, `photo_not_found`, `device_not_found`, `trash_item_not_found` | 404 | Objekt fehlt oder ist gelöscht |
-| `photo_file_missing`, `pkdrawing_not_found`, `audio_not_ready` | 404 | Datei (noch) nicht vorhanden |
-| `calendar_source_exists`, `session_exists`, `recording_exists`, `notebook_kind_exists` | 409 | Doppelt angelegt |
+| `photo_file_missing`, `pkdrawing_not_found`, `audio_not_ready`, `file_not_found` | 404 | Datei (noch) nicht vorhanden |
+| `calendar_source_exists`, `session_exists`, `recording_exists`, `notebook_exists`, `notebook_kind_exists` | 409 | Doppelt angelegt |
 | `notebook_default` | 409 | Standard-Notizbuch lässt sich nicht löschen |
 | `session_transition_invalid`, `session_not_active`, `session_active` | 409 | Zustandsautomat (§9.1) |
 | `chunk_conflict`, `recording_seq_conflict`, `photo_file_conflict` | 409 | Gleiche ID, anderer Inhalt |
 | `backup_running`, `backup_target_missing`, `restore_parent_deleted`, `restore_conflict` | 409 | Daten (§13) |
 | `pairing_window_closed` | 409 | Kopplungsfenster zu oder abgelaufen (§12) |
-| `chunk_header_invalid`, `backup_target_invalid` | 400 | Anfrage ungültig |
+| `chunk_header_invalid`, `backup_target_invalid`, `upload_aborted` | 400 | Anfrage ungültig (`upload_aborted`: der Client hat den Upload abgebrochen) |
 | `pairing_code_invalid`, `pairing_request_rejected`, `local_only` | 403 | Code falsch, Anfrage abgelehnt bzw. Route nur lokal |
 | `pairing_request_not_found` | 404 | Kopplungsanfrage unbekannt |
 | `file_too_large`, `chunk_too_large` | 413 | Größe |
@@ -680,8 +682,8 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 | Schnittstelle | Datei | Signatur | Füllt |
 |---|---|---|---|
 | Operation anhängen | `services/core/src/sync/append.ts` | `appendOp(tx: Tx, stream: string, op: { kind: SyncOp['kind']; data: unknown; at: number; clockUncertain: boolean; origin: SyncOrigin; opId?: string; deviceId?: string \| null }): Promise<{ seq: number; opId: string; duplicate: boolean }>`. Sperrt `sync_stream`, prüft unter der Sperre die `op_id`, schreibt `sync_op` und meldet die Operation per `pg_notify('sg_sync_op')`. Postgres stellt das erst nach dem Commit zu. `listenCommittedOps(sql, db, onError?)` ruft dann `onOpCommitted` auf, je Strom lückenlos in `seq`-Reihenfolge, auch nach einem Neuverbinden. Wirft der Hook, wiederholt er später ab derselben `seq`. Setter: `setOnOpCommitted(hook)`, Standard: nichts. `findOpById(db, opId)` liefert eine gespeicherte Operation | **T1-DB**. T1-08 startet `listenCommittedOps` beim Core-Start und setzt den Hook für Versand und `ack` (§11.2) |
-| Duplikate | Dispatcher in `services/core/src/sync/**` | Der Dispatcher von T1-08 ruft **zentral vor dem Handler** `findOpById` auf. Gleiche Operation (Strom, Art, Daten): ursprüngliches `ack` ohne Handler. Abweichende: `error op_id_reused`. Handler prüfen das nie selbst. Gleichzeitige Duplikate fängt `appendOp` ab (`duplicate = true` bzw. `internal_error`, wiederholbar) | T1-08 |
-| Op-Handler | `services/core/src/sync/handlers.ts` | `registerOpHandler(kind, (tx: Tx, op: SyncOp, ctx: { deviceId: string \| null; origin: SyncOrigin }) => Promise<void>)`. Fehler über `throw new SyncOpError(code: SyncErrorCode, retryable: boolean, details?)` | Registry T1-08, Handler die Fachtickets |
+| Duplikate | Dispatcher in `services/core/src/sync/**` | Der Dispatcher von T1-08 ruft **zentral vor dem Handler** `findOpById` auf. Gleiche Operation (Strom, Art, Daten): ursprüngliches `ack` ohne Handler. Abweichende: `error op_id_reused`. Handler prüfen das nie selbst. **Ablauf je Operation in einer Transaktion:** `findOpById` → Handler → `appendOp`. Wirft der Handler einen `SyncOpError`, wird die Transaktion zurückgerollt: keine Änderung, keine `seq`. Handler schreiben den Strom-Eintrag der Client-Operation nie selbst, nur Server-Operationen. Gleichzeitige Duplikate fängt `appendOp` ab (`duplicate = true` bzw. `internal_error`, wiederholbar) | T1-08 |
+| Op-Handler | `services/core/src/sync/handlers.ts` | `registerOpHandler(kind, (tx: Tx, op: SyncOp, ctx: { deviceId: string \| null; origin: SyncOrigin }) => Promise<void>)`. Fehler über `throw new SyncOpError(code: SyncErrorCode, retryable: boolean, details?)` | Registry T1-08, Handler die Fachtickets. Core-Ink: `registerInkHandlers({ dataDir })` in `sync/handlers/ink.ts` (T1-08 ruft es beim Start auf, `dataDir` aus der Konfiguration) |
 | Ereignisse | `services/core/src/sync/events.ts` | `publishEvent(event: SyncEvent, opts?: { localOnly?: boolean }): void` und `publishAfterCommit(tx: Tx, event: SyncEvent): Promise<void>`. `publishAfterCommit` nutzt denselben Weg wie `appendOp`: `pg_notify('sg_event', <Event-JSON>)` in `tx`, das Ereignis vollständig in der Nutzlast, über 7000 Byte (UTF-8) wirft es. Ein Listener auf `sg_event` ruft `publishEvent` auf | T1-08 |
 | Verbindungen | `services/core/src/sync/connections.ts` | `closeDeviceConnections(deviceId: string, code: number): void`, `isDeviceConnected(deviceId: string): boolean` | T1-08 |
 | Session-Übergang | `services/core/src/services/sessions.ts` | `transitionSession(tx: Tx, sessionId: string, action: 'start' \| 'pause' \| 'resume' \| 'stop', input: { at: Date; origin: SyncOrigin; deviceId?: string \| null; startedFrom?: ClientDevice; reason?: StopReason; moduleId?: string; calendarEventId?: string \| null; slideDeckId?: string \| null }): Promise<{ session: Session; endedSession: Session \| null }>` (schreibt selbst die Server-Operationen) | T1-02 |
@@ -690,7 +692,7 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 | Wächter → Route | `services/core/src/plugins/security.ts` | `DeviceTokenVerifier` liefert künftig `Promise<{ deviceId: string } \| null>`. Der Wächter setzt `request.sgDevice: { deviceId: string } \| null` (`null` = lokal). Für `GET /sync` mit `Upgrade: websocket` prüft er zusätzlich `Origin` wie bei zustandsändernden Anfragen | T1-10. T1-08 liest `request.sgDevice` beim Upgrade |
 | Einstellungen | `services/core/src/services/settings.ts` | `getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): Promise<Settings>`. `general.data_dir` kommt aus der App-Konfiguration | **T1-DB**. T1-19 baut `PATCH`. Genutzt von T1-02 (Auto-Stopp) und T1-18 |
 | Papierkorb | `services/core/src/services/trash.ts` | `softDelete(tx: Tx, kind: TrashKind, id: string): Promise<Date>` (Kaskade §13; wirft `HttpError` 404 `<kind>_not_found`, 409 `session_active`, 409 `notebook_default`), `restoreFromTrash(tx: Tx, id: string): Promise<TrashRestoreResult>` (404 `trash_item_not_found`, 409 `restore_parent_deleted`, 409 `restore_conflict`) | **T1-DB**. T1-18 baut die Routen und schreibt Server-Operationen bei der Wiederherstellung. Alle Lösch-Routen rufen `softDelete` |
-| Fotos | `services/core/src/services/photos.ts` | `upsertPhotoMeta(tx: Tx, data: PhotoAddData): Promise<void>` und `storePhotoFile(id, stream, sha256, mime): Promise<FileReceipt>` prüfen sich gegenseitig (sha256, Typ) | Core-Ink (Handler `photo.add` und `PUT /photos`) |
+| Fotos | `services/core/src/services/photos.ts` | `upsertPhotoMeta(tx: Tx, data: PhotoAddData, env: { dataDir: string }): Promise<void>` und `storePhotoFile(id, stream, sha256, mime, env: { db: Db; dataDir: string }): Promise<FileReceipt>` (der letzte Parameter `env` ist nötig, weil beide Datenordner bzw. Datenbank brauchen) prüfen sich gegenseitig (sha256, Typ) | Core-Ink (Handler `photo.add` und `PUT /photos`) |
 | Recorder → Auto-Stopp | `apps/web/src/lib/recorder/level.ts` | `subscribeAudioLevel(fn: (s: { at: number; rms: number }) => void): () => void`, alle 250 ms während der Aufnahme. Die Spracherkennung baut T1-07 darauf. Der Stopp läuft per `POST /sessions/{id}/stop`. Der Recorder reagiert auf `session.updated` (`beendet`) und schließt die Aufnahme ab (`complete`) | T1-06 liefert, T1-07 nutzt |
 | Web-Sync-Client | `apps/web/src/lib/sync/client.ts` | `class SyncClient { connect(); subscribe(stream: string, from: { lastSeq: number; lastOpId: string \| null }, onOp: (op: SyncOp) => void); send(op): Promise<SyncAck>; onEvent(name, fn); }`. `from` stammt aus `stream_seq`/`stream_op_id` des REST-Stands. Dazu Warteschlange in IndexedDB, Uhrabgleich, Wartezeit nach 4503, Fehlerablage | T1-WS |
 

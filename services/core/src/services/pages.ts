@@ -22,6 +22,7 @@ import type { Db, DbOrTx } from '../db/client.ts';
 import { notebook, page, pageElement, stroke, syncOp, syncStream } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { resolveDataPath } from './material.ts';
+import { moduleIsActive } from './notebooks.ts';
 
 type PageRow = typeof page.$inferSelect;
 type StrokeRow = typeof stroke.$inferSelect;
@@ -140,7 +141,7 @@ export async function getNotebookPages(db: Db, notebookId: string): Promise<Note
     const [nb] = await tx
       .select({ id: notebook.id })
       .from(notebook)
-      .where(and(eq(notebook.id, notebookId), isNull(notebook.deletedAt)));
+      .where(and(eq(notebook.id, notebookId), isNull(notebook.deletedAt), moduleIsActive));
     if (!nb) throw new HttpError(404, 'notebook_not_found', 'Dieses Notizbuch gibt es nicht.');
     const rows = await tx
       .select()
@@ -241,11 +242,8 @@ export async function storePkdrawing(
   expectedSha256: string,
 ): Promise<FileReceipt> {
   const [row] = await db.select({ id: page.id }).from(page).where(eq(page.id, pageId));
-  if (!row) {
-    // Rest des Bodys verwerfen, damit die Verbindung sauber weiterläuft
-    for await (const chunk of stream) void chunk;
-    throw pageNotFound();
-  }
+  // Ohne Seite sofort 404, der Body wird nicht gelesen (Node verwirft den Rest nach der Antwort)
+  if (!row) throw pageNotFound();
   const relative = pkdrawingRelativePath(pageId);
   const target = resolveDataPath(dataDir, relative);
   if (!target) throw new Error('Pfad außerhalb des Datenordners');

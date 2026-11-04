@@ -10,6 +10,7 @@ import type { Stroke } from '@sg/shared';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import { notebook, page, pageElement, photo, stroke, syncOp } from '../../src/db/schema/index.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
+import { softDelete } from '../../src/services/trash.ts';
 import { decodeStrokePoints, MAX_STROKE_POINT_BYTES } from '../../src/sync/handlers/ink.ts';
 import { SyncOpError } from '../../src/sync/handlers.ts';
 import {
@@ -521,5 +522,124 @@ describe('photo.add', () => {
         .from(photo)
         .where(and(eq(photo.sessionId, sessionId))),
     ).toHaveLength(0);
+  });
+});
+
+describe('float4, int4 und Titel', () => {
+  it('Werte außerhalb von float4 oder NaN/Inf in den Punkten: message_invalid statt DB-Fehler', async () => {
+    const { pageId, stream } = await seedPage();
+    const s = sample();
+    const nan = Buffer.alloc(24);
+    nan.writeFloatLE(Number.NaN, 8);
+    const inf = Buffer.alloc(24);
+    inf.writeFloatLE(Number.POSITIVE_INFINITY, 4);
+    for (const broken of [
+      { width: 1e39 },
+      { transform: [1, 0, 0, 1, 4e38, 0] },
+      { bbox: [0, 0, 1e39, 1] },
+      { points: nan.toString('base64') },
+      { points: inf.toString('base64') },
+    ]) {
+      const error = await failure(run(addStroke(stream, pageId, { ...s, ...broken } as Stroke)));
+      expect(error, JSON.stringify(broken).slice(0, 40)).toMatchObject({
+        code: 'message_invalid',
+        retryable: false,
+      });
+    }
+    expect(await handle.db.select().from(stroke).where(eq(stroke.pageId, pageId))).toHaveLength(0);
+  });
+
+  it('page.create mit width_pt/height_pt außerhalb von float4: message_invalid', async () => {
+    const nb = notebookCreateData(seed.moduleId);
+    await run(makeOp('notebook.create', nbStream(nb.notebook_id), nb));
+    for (const over of [{ width_pt: 1e39 }, { height_pt: 5e38 }, { index: 2 ** 31 }]) {
+      const error = await failure(
+        run(makeOp('page.create', nbStream(nb.notebook_id), pageCreateData(nb.notebook_id, over))),
+      );
+      expect(error.code).toBe('message_invalid');
+    }
+  });
+
+  it('lange Titel sind erlaubt (keine Grenze außerhalb des Schemas)', async () => {
+    const data = notebookCreateData(seed.moduleId, { title: 'x'.repeat(1000) });
+    await run(makeOp('notebook.create', nbStream(data.notebook_id), data));
+    const [row] = await handle.db.select().from(notebook).where(eq(notebook.id, data.notebook_id));
+    expect(row?.title).toHaveLength(1000);
+  });
+});
+
+describe('Rennen gegen das Löschen des Elternobjekts', () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  /**
+   * Transaktion A löscht das Elternobjekt und bleibt offen. Der Handler (B) startet währenddessen und muss
+   * warten. Erst nach dem Commit von A läuft er weiter und muss das Löschen sehen.
+   */
+  async function raceDelete(
+    deleteParent: (tx: Parameters<typeof softDelete>[0]) => Promise<unknown>,
+    handler: () => Promise<unknown>,
+  ) {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let started!: () => void;
+    const deleting = new Promise<void>((resolve) => (started = resolve));
+    const a = handle.db.transaction(async (tx) => {
+      await deleteParent(tx);
+      started();
+      await gate;
+    });
+    await deleting;
+    let settled = false;
+    const b = handler().then(() => (settled = true));
+    await sleep(300);
+    expect(settled, 'Handler muss auf das Löschen warten').toBe(false);
+    release();
+    await a;
+    await b;
+  }
+
+  it('page.create in ein Notizbuch, das gerade gelöscht wird: Seite ist gelöscht', async () => {
+    const nb = notebookCreateData(seed.moduleId);
+    await run(makeOp('notebook.create', nbStream(nb.notebook_id), nb));
+    const pc = pageCreateData(nb.notebook_id);
+    await raceDelete(
+      (tx) => softDelete(tx, 'notebook', nb.notebook_id),
+      () => run(makeOp('page.create', nbStream(nb.notebook_id), pc)),
+    );
+    const [n] = await handle.sql`SELECT deleted_at::text AS d FROM notebook WHERE id = ${nb.notebook_id}`;
+    const [p] = await handle.sql`SELECT deleted_at::text AS d FROM page WHERE id = ${pc.page_id}`;
+    expect(n?.d).toBeTruthy();
+    expect(p?.d).toBe(n?.d);
+  });
+
+  it('notebook.create in ein Modul, das gerade gelöscht wird: Notizbuch ist gelöscht', async () => {
+    const nb = notebookCreateData(seed.moduleId);
+    await raceDelete(
+      (tx) => softDelete(tx, 'module', seed.moduleId),
+      () => run(makeOp('notebook.create', nbStream(nb.notebook_id), nb)),
+    );
+    const [m] = await handle.sql`SELECT deleted_at::text AS d FROM module WHERE id = ${seed.moduleId}`;
+    const [n] = await handle.sql`SELECT deleted_at::text AS d FROM notebook WHERE id = ${nb.notebook_id}`;
+    expect(m?.d).toBeTruthy();
+    expect(n?.d).toBe(m?.d);
+  });
+
+  it('photo.add in eine Session, die gerade gelöscht wird: Foto ist gelöscht', async () => {
+    const sessionId = await seedSession(handle.db, seed.moduleId);
+    const data = {
+      photo_id: uuidv7(),
+      session_id: sessionId,
+      t_ms: 1,
+      page_id: null,
+      file_ref: { sha256: createHash('sha256').update('x').digest('hex'), mime: 'image/jpeg', size_bytes: 1 },
+    };
+    await raceDelete(
+      (tx) => softDelete(tx, 'session', sessionId),
+      () => run(makeOp('photo.add', `session:${sessionId}`, data)),
+    );
+    const [s] = await handle.sql`SELECT deleted_at::text AS d FROM session WHERE id = ${sessionId}`;
+    const [f] = await handle.sql`SELECT deleted_at::text AS d FROM photo WHERE id = ${data.photo_id}`;
+    expect(s?.d).toBeTruthy();
+    expect(f?.d).toBe(s?.d);
   });
 });

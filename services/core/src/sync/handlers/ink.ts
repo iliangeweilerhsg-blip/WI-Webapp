@@ -84,15 +84,28 @@ export function decodeStrokePoints(points: string): Buffer {
     throw messageInvalid('points muss aus ganzen Punkten à 24 Byte bestehen');
   }
   if (bytes.length > MAX_STROKE_POINT_BYTES) throw messageInvalid('points ist zu groß');
+  for (let offset = 0; offset < bytes.length; offset += 4) {
+    if (!Number.isFinite(bytes.readFloatLE(offset)))
+      throw messageInvalid('points enthält NaN oder Unendlich');
+  }
   return bytes;
 }
 
+/** Größter Betrag, den eine `real`-Spalte (float4) aufnimmt. Größere Werte wären ein DB-Fehler (`internal_error`) */
+export const FLOAT4_MAX = 3.4e38;
+const INT4_MAX = 2_147_483_647;
+
+/** Endlich und im Bereich von float4 */
+const float4 = (v: number) => Number.isFinite(v) && Math.abs(v) <= FLOAT4_MAX;
+const int4 = (v: number) => Number.isInteger(v) && Math.abs(v) <= INT4_MAX;
+
 function checkStroke(s: Stroke): Buffer {
-  const finite = (values: readonly number[]) => values.every((v) => Number.isFinite(v));
-  if (s.transform.length !== 6 || !finite(s.transform))
-    throw messageInvalid('transform braucht 6 endliche Zahlen');
-  if (s.bbox.length !== 4 || !finite(s.bbox)) throw messageInvalid('bbox braucht 4 endliche Zahlen');
-  if (!Number.isFinite(s.width) || s.width <= 0) throw messageInvalid('width muss größer als 0 sein');
+  const allFloat4 = (values: readonly number[]) => values.every(float4);
+  if (s.transform.length !== 6 || !allFloat4(s.transform))
+    throw messageInvalid('transform braucht 6 endliche Zahlen im float4-Bereich');
+  if (s.bbox.length !== 4 || !allFloat4(s.bbox))
+    throw messageInvalid('bbox braucht 4 endliche Zahlen im float4-Bereich');
+  if (!float4(s.width) || s.width <= 0) throw messageInvalid('width muss größer als 0 sein (float4)');
   return decodeStrokePoints(s.points);
 }
 
@@ -105,17 +118,20 @@ async function notebookCreate(tx: Tx, op: OpOf<'notebook.create'>): Promise<void
   }
   if (data.kind !== undefined && data.kind !== 'frei') throw messageInvalid('Nur freie Notizbücher');
   const title = data.title.trim();
-  if (title === '' || title.length > 300) throw messageInvalid('title muss 1 bis 300 Zeichen lang sein');
+  if (title === '') throw messageInvalid('title darf nicht leer sein');
 
   const [existing] = await tx
     .select({ id: notebook.id })
     .from(notebook)
     .where(eq(notebook.id, data.notebook_id));
   if (existing) return;
+  // Mit Lesesperre: Läuft gerade ein (noch nicht committetes) Löschen des Moduls, wartet das hier darauf
+  // und sieht dann dessen deleted_at. Sonst entstünde ein aktives Notizbuch in einem gelöschten Modul.
   const [mod] = await tx
     .select({ deletedAt: courseModule.deletedAt })
     .from(courseModule)
-    .where(eq(courseModule.id, data.module_id));
+    .where(eq(courseModule.id, data.module_id))
+    .for('share');
   if (!mod) throw new SyncOpError('module_not_found', false, { module_id: data.module_id });
 
   await tx
@@ -139,10 +155,16 @@ async function pageCreate(tx: Tx, op: OpOf<'page.create'>): Promise<void> {
   }
   const [existing] = await tx.select({ id: page.id }).from(page).where(eq(page.id, data.page_id));
   if (existing) return;
+  if (!float4(data.width_pt) || !float4(data.height_pt) || data.width_pt <= 0 || data.height_pt <= 0) {
+    throw messageInvalid('width_pt und height_pt müssen größer als 0 sein (float4)');
+  }
+  if (!int4(data.index)) throw messageInvalid('index liegt außerhalb des Bereichs');
+  // Mit Lesesperre, siehe notebookCreate
   const [parent] = await tx
     .select({ deletedAt: notebook.deletedAt })
     .from(notebook)
-    .where(eq(notebook.id, data.notebook_id));
+    .where(eq(notebook.id, data.notebook_id))
+    .for('share');
   if (!parent) throw new SyncOpError('notebook_not_found', false, { notebook_id: data.notebook_id });
 
   await tx
@@ -168,6 +190,7 @@ async function pageCreate(tx: Tx, op: OpOf<'page.create'>): Promise<void> {
 async function pageUpdate(tx: Tx, op: OpOf<'page.update'>): Promise<void> {
   const { page_id: pageId, version } = op.data;
   const fields: PageUpdateFields = op.data.fields;
+  if (!int4(fields.index)) throw messageInvalid('index liegt außerhalb des Bereichs');
   const row = await lockPageForStream(tx, op, pageId);
   if (row.version !== version) {
     throw new SyncOpError('page_version_conflict', false, { page_id: pageId, current_version: row.version });
@@ -253,6 +276,7 @@ async function strokeRemove(tx: Tx, op: OpOf<'stroke.remove'>): Promise<void> {
 async function elementUpsert(tx: Tx, op: OpOf<'element.upsert'>): Promise<void> {
   const parent = await lockPageForStream(tx, op, op.data.page_id);
   const el = op.data.element;
+  if (!int4(el.z)) throw messageInvalid('z liegt außerhalb des Bereichs');
   const [existing] = await tx
     .select({ pageId: pageElement.pageId })
     .from(pageElement)

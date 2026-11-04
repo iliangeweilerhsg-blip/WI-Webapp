@@ -116,7 +116,9 @@ export async function upsertPhotoMeta(tx: Tx, data: PhotoAddData, env: PhotoMeta
   const [parent] = await tx
     .select({ deletedAt: session.deletedAt })
     .from(session)
-    .where(eq(session.id, data.session_id));
+    .where(eq(session.id, data.session_id))
+    // Lesesperre: ein laufendes Löschen der Session wird abgewartet (sonst aktives Foto in gelöschter Session)
+    .for('share');
   if (!parent) throw new SyncOpError('session_not_found', false, { session_id: data.session_id });
 
   const { sha256, mime, size_bytes: size } = data.file_ref;
@@ -136,6 +138,10 @@ export async function upsertPhotoMeta(tx: Tx, data: PhotoAddData, env: PhotoMeta
       sizeBytes: size,
     })
     .onConflictDoNothing();
+  // Eine früh hochgeladene Datei der anderen Art (HEIC, aber `file_ref` sagt JPEG) ist verwaist: aufräumen
+  for (const other of MIMES.filter((m) => m !== mime)) {
+    await rm(photoAbsolutePath(env.dataDir, data.photo_id, other), { force: true });
+  }
 }
 
 /**

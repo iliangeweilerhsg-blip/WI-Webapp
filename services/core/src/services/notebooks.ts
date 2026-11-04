@@ -38,10 +38,13 @@ const kindExists = () =>
     'Dieses Modul hat schon ein Notizbuch dieser Art („Vorlesung“ bzw. „Übung“).',
   );
 const badTitle = () =>
-  new HttpError(400, 'validation_failed', 'Der Titel muss 1 bis 300 Zeichen lang sein.', {
+  new HttpError(400, 'validation_failed', 'Der Titel darf nicht leer sein.', {
     in: 'body',
-    issues: [{ path: 'title', message: 'muss 1 bis 300 Zeichen lang sein' }],
+    issues: [{ path: 'title', message: 'darf nicht leer sein' }],
   });
+
+/** Das Modul des Notizbuchs ist nicht gelöscht (bis `deleteModule` über `softDelete` kaskadiert, T1-18) */
+export const moduleIsActive = sql`EXISTS (SELECT 1 FROM module WHERE module.id = notebook.module_id AND module.deleted_at IS NULL)`;
 
 function toApiNotebook(row: NotebookRow, pageCount: number): Notebook {
   return {
@@ -64,7 +67,9 @@ async function activeModuleExists(tx: DbOrTx, moduleId: string): Promise<boolean
   const [mod] = await tx
     .select({ id: courseModule.id })
     .from(courseModule)
-    .where(and(eq(courseModule.id, moduleId), isNull(courseModule.deletedAt)));
+    .where(and(eq(courseModule.id, moduleId), isNull(courseModule.deletedAt)))
+    // Lesesperre: ein laufendes Löschen des Moduls wird abgewartet
+    .for('share');
   return mod !== undefined;
 }
 
@@ -86,7 +91,7 @@ async function getNotebookRow(tx: DbOrTx, id: string): Promise<Notebook> {
   const [found] = await tx
     .select({ row: notebook, pageCount: pageCountOf })
     .from(notebook)
-    .where(and(eq(notebook.id, id), isNull(notebook.deletedAt)));
+    .where(and(eq(notebook.id, id), isNull(notebook.deletedAt), moduleIsActive));
   if (!found) throw notebookNotFound();
   return toApiNotebook(found.row, found.pageCount);
 }
@@ -112,6 +117,7 @@ export async function listNotebooks(
     .where(
       and(
         isNull(notebook.deletedAt),
+        moduleIsActive,
         params.moduleId ? eq(notebook.moduleId, params.moduleId) : undefined,
         afterCursor(notebook.createdAt, notebook.id, cursor, 'asc'),
       ),
@@ -139,7 +145,7 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
 export async function createNotebook(db: Db, input: NotebookCreate): Promise<Notebook> {
   const kind: NotebookKind = input.kind ?? 'frei';
   const title = input.title.trim();
-  if (title === '' || title.length > 300) throw badTitle();
+  if (title === '') throw badTitle();
   try {
     return await db.transaction(async (tx) => {
       if (!(await activeModuleExists(tx, input.module_id))) throw moduleNotFound();
@@ -198,7 +204,7 @@ export async function updateNotebook(db: Db, id: string, input: NotebookUpdate):
       .for('update');
     if (!row) throw notebookNotFound();
     const title = input.title?.trim();
-    if (title !== undefined && (title === '' || title.length > 300)) throw badTitle();
+    if (title !== undefined && title === '') throw badTitle();
     const targetModule =
       input.module_id !== undefined && input.module_id !== row.moduleId ? input.module_id : null;
     if (targetModule !== null) {
