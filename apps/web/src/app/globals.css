@@ -1,0 +1,148 @@
+@import 'tailwindcss';
+@import '@sg/ui-tokens/tokens.css';
+
+/* Theme aus den Design-Tokens (packages/ui-tokens). Werte kommen als CSS-Variablen und wechseln mit Hell/Dunkel. */
+@theme inline {
+  --color-bg: var(--sg-color-bg);
+  --color-surface: var(--sg-color-surface);
+  --color-surface-raised: var(--sg-color-surface-raised);
+  --color-border: var(--sg-color-border);
+  --color-border-strong: var(--sg-color-border-strong);
+  --color-text: var(--sg-color-text);
+  --color-text-muted: var(--sg-color-text-muted);
+  --color-accent: var(--sg-color-accent);
+  --color-accent-contrast: var(--sg-color-accent-contrast);
+  --color-accent-soft: var(--sg-color-accent-soft);
+  --color-record: var(--sg-color-record);
+  --color-danger: var(--sg-color-danger);
+
+  --color-mod-01: var(--sg-mod-01);
+  --color-mod-02: var(--sg-mod-02);
+  --color-mod-03: var(--sg-mod-03);
+  --color-mod-04: var(--sg-mod-04);
+  --color-mod-05: var(--sg-mod-05);
+  --color-mod-06: var(--sg-mod-06);
+  --color-mod-07: var(--sg-mod-07);
+  --color-mod-08: var(--sg-mod-08);
+  --color-mod-09: var(--sg-mod-09);
+  --color-mod-10: var(--sg-mod-10);
+  --color-mod-11: var(--sg-mod-11);
+  --color-mod-12: var(--sg-mod-12);
+
+  --font-sans: var(--sg-font-sans);
+  --font-mono: var(--sg-font-mono);
+
+  --text-xs: var(--sg-font-size-xs);
+  --text-sm: var(--sg-font-size-sm);
+  --text-md: var(--sg-font-size-md);
+  --text-lg: var(--sg-font-size-lg);
+  --text-xl: var(--sg-font-size-xl);
+  --text-xxl: var(--sg-font-size-xxl);
+
+  --radius-sm: var(--sg-radius-sm);
+  --radius-md: var(--sg-radius-md);
+  --radius-lg: var(--sg-radius-lg);
+
+  --spacing: 4px;
+}
+
+html {
+  background: var(--sg-color-bg);
+  color: var(--sg-color-text);
+  font-family: var(--sg-font-sans);
+  font-size: var(--sg-font-size-md);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--sg-color-bg);
+  color: var(--sg-color-text);
+}
+
+/* Sichtbarer Fokus für Tastaturbedienung (07 §9) */
+:focus-visible {
+  outline: 2px solid var(--sg-color-accent);
+  outline-offset: 2px;
+}
+
+main:focus {
+  outline: none;
+}
+
+@layer components {
+  .sg-nav-link {
+    display: flex;
+    align-items: center;
+    gap: var(--sg-space-2);
+    border-radius: var(--sg-radius-md);
+    padding: var(--sg-space-2) var(--sg-space-3);
+    font-size: var(--sg-font-size-sm);
+    color: var(--sg-color-text);
+    min-height: 32px;
+    transition: background-color var(--sg-motion-fast);
+  }
+  .sg-nav-link.sg-toggle {
+    width: auto;
+  }
+  .sg-nav-link:hover {
+    background: var(--sg-color-border);
+  }
+  .sg-nav-link-active {
+    background: var(--sg-color-accent-soft);
+    font-weight: 600;
+  }
+  .sg-transition {
+    transition:
+      background-color var(--sg-motion-fast),
+      color var(--sg-motion-fast);
+  }
+  #sidebar {
+    width: 240px;
+    overflow: hidden;
+  }
+  html[data-sidebar='collapsed'] #sidebar {
+    width: 56px;
+  }
+  /* Übergang erst nach dem Mount (data-ready), sonst „fährt" die Leiste beim Laden */
+  html[data-ready] #sidebar {
+    transition: width var(--sg-motion-base);
+  }
+  html[data-sidebar='collapsed'] .sg-collapsible {
+    display: none;
+  }
+  html[data-sidebar='collapsed'] #sidebar > div:first-child {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  html[data-sidebar='collapsed'] #sidebar .sg-nav-link,
+  html[data-sidebar='collapsed'] #sidebar [role='status'] {
+    justify-content: center;
+    padding-inline: 0;
+  }
+  .sg-skip-link {
+    position: absolute;
+    left: var(--sg-space-2);
+    top: -48px;
+    z-index: 60;
+    background: var(--sg-color-accent);
+    color: var(--sg-color-accent-contrast);
+    padding: var(--sg-space-2) var(--sg-space-4);
+    border-radius: var(--sg-radius-md);
+  }
+  .sg-skip-link:focus {
+    top: var(--sg-space-2);
+  }
+}
+
+/* Systemeinstellung „Bewegung reduzieren" beachten (07 §8) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
