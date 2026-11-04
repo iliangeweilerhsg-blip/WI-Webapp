@@ -70,13 +70,17 @@ export interface TerminateOptions {
   noticeAfterMs?: number;
   /** Wartezeit nach SIGKILL, bis die Gruppe weg sein muss. */
   killWaitMs?: number;
+  /** Kein eigenes SIGTERM senden, nur warten (jemand anderes, z. B. `sg stop`, hat schon signalisiert). */
+  waitOnly?: boolean;
 }
 
 /** Beendet eine Prozessgruppe. Gibt true zurück, wenn danach kein Prozess der Gruppe mehr existiert. */
 export async function terminateGroup(pgid: number, opts: TerminateOptions): Promise<boolean> {
   if (!groupAlive(pgid)) return true;
-  if (opts.leaderOnly) signalLeader(pgid, 'SIGTERM');
-  else signalGroup(pgid, 'SIGTERM');
+  if (!opts.waitOnly) {
+    if (opts.leaderOnly) signalLeader(pgid, 'SIGTERM');
+    else signalGroup(pgid, 'SIGTERM');
+  }
 
   const start = Date.now();
   const deadline = start + opts.graceMs;

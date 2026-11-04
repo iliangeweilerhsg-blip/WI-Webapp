@@ -234,7 +234,8 @@ export async function start(cfg: SgConfig): Promise<number> {
   let shutdownPromise: Promise<void> | null = null;
   let exitCode = 0;
 
-  const shutdown = (reason: string): Promise<void> => {
+  // waitOnly: `sg stop` signalisiert selbst – dann nur warten, sonst bekommen die Dienste das Signal doppelt.
+  const shutdown = (reason: string, waitOnly = false): Promise<void> => {
     if (shutdownPromise) return shutdownPromise;
     shuttingDown = true;
     log(`${reason} – beende Core und Worker …`);
@@ -242,10 +243,7 @@ export async function start(cfg: SgConfig): Promise<number> {
       services.map(async (s) => {
         const pid = s.child.pid;
         if (pid === undefined) return;
-        const gone = await terminateGroup(
-          pid,
-          stopOptions(cfg, s.name, () => forced),
-        );
+        const gone = await terminateGroup(pid, { ...stopOptions(cfg, s.name, () => forced), waitOnly });
         if (gone) removePid(cfg, s.name);
         else err(`${s.name}: Prozessgruppe ${pid} ließ sich nicht beenden.`);
       }),
@@ -257,9 +255,11 @@ export async function start(cfg: SgConfig): Promise<number> {
   const onSignal = (sig: NodeJS.Signals): void => {
     signalCount++;
     if (signalCount === 1) {
+      if (shutdownPromise) log('Wird bereits beendet – erneut Strg+C zum sofortigen Abbruch.');
       void shutdown(`${sig} empfangen`);
     } else if (!forced) {
       forced = true;
+      exitCode = 130;
       err(`Zweites Signal (${sig}) – sende SIGKILL an alle Prozessgruppen.`);
       for (const s of services) if (s.child.pid !== undefined) signalGroup(s.child.pid, 'SIGKILL');
     }
@@ -294,7 +294,7 @@ export async function start(cfg: SgConfig): Promise<number> {
       log(`${s.name} beendet (${signal ?? `Exit-Code ${code}`}).`);
       if (shuttingDown) return;
       if (stopRequested(cfg)) {
-        void shutdown('"sg stop" erkannt');
+        void shutdown('"sg stop" erkannt', true);
       } else {
         exitCode = 1;
         void shutdown(`${s.name} ist unerwartet beendet`);
