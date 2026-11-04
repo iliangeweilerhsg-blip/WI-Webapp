@@ -13,6 +13,7 @@
 set -uo pipefail
 export GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=true SSH_ASKPASS=true GCM_INTERACTIVE=never
 export GIT_SSH_COMMAND="ssh -o BatchMode=yes"
+export LC_ALL=C # gleiche Sortierung für sort/join in jedem Lauf
 
 t0=$(date +%s)
 interval=300
@@ -31,7 +32,9 @@ fi
 deadline=$((t0 + max_runtime))
 
 repo_root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." >/dev/null && pwd)"
-state_file="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir)/argon-poll.state"
+git_dir="$(git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" ||
+  { echo "FEHLER: kein Git-Repo in $repo_root"; exit 2; }
+state_file="$git_dir/argon-poll.state"
 failures=0
 checks=0
 
