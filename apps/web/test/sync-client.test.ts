@@ -399,7 +399,9 @@ describe('Fehler und Schließcodes', () => {
     server.decide = (op) =>
       op.op_id === bad
         ? { error: { code: 'internal_error', retryable: true, fatal: true }, close: 4503 }
-        : { ack: true };
+        : op.kind === 'page.create'
+          ? { error: { code: 'notebook_not_found', retryable: false, fatal: false } }
+          : { ack: true };
     const a = c.send(notebookCreate(1, bad));
     const b = c.send(pageCreate(50, 1));
     const other = c.send(notebookCreate(2, uid(202)));

@@ -1,9 +1,9 @@
 // Nacharbeit nach dem Review von PR #60 (B1, B2, S1 bis S5, Kleinigkeiten)
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SyncOp } from '@sg/shared';
-import { SyncClient, SyncRejectedError } from '../src/lib/sync/client.ts';
+import { SyncClient, SyncNotLeaderError, SyncRejectedError } from '../src/lib/sync/client.ts';
 import { MemoryQueueStore } from '../src/lib/sync/store.ts';
-import type { TabCoordinator, TabMessage } from '../src/lib/sync/tabs.ts';
+import type { LeaderLock, LeaderLockHandlers } from '../src/lib/sync/tabs.ts';
 import type { SendOpInput } from '../src/lib/sync/types.ts';
 import { FakeServer, nbStream, sessStream, uid } from './sync-fake-server.ts';
 
@@ -81,7 +81,6 @@ function make(opts: Partial<ConstructorParameters<typeof SyncClient>[0]> = {}): 
     store,
     webSocketFactory: server.factory,
     random: () => 0,
-    tabs: null,
     ...opts,
   });
   clients.push(c);
@@ -216,21 +215,37 @@ describe('S1: bereits gesendete abhängige Operationen', () => {
     expect(c.shelved).toBe(2);
   });
 
-  it('unbeantwortete abhängige Operation wird beim Trennen abgelegt', async () => {
+  it('N7: unbeantwortete abhängige Operation wird nach dem Trennen erneut gesendet, nicht abgelegt', async () => {
     const c = await setup();
     const bad = uid(313);
     server.decide = (op) =>
       op.op_id === bad || op.kind === 'page.create' ? { ignore: true } : { ack: true };
     const a = c.send(notebookCreate(1, bad)).catch((e: unknown) => e);
-    const b = c.send(pageCreate(50, 1)).catch((e: unknown) => e);
+    const b = c.send(pageCreate(50, 1));
     await settle();
     server.last.push(errorMsg('module_not_found', bad, nbStream(1)));
     await settle();
+    server.decide = () => ({ ack: true });
     server.last.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(1_000);
     await settle();
     expect(await a).toBeInstanceOf(SyncRejectedError);
-    expect(((await b) as SyncRejectedError).kind).toBe('dependent');
-    expect(c.pendingCount).toBe(0);
+    await expect(b).resolves.toBeTruthy(); // der Server entscheidet über die erneute Sendung
+    expect(c.shelved).toBe(1);
+  });
+
+  it('N7: Server committet, unterdrückt das ack und schließt mit 1006 -> erneut senden, dann ack', async () => {
+    const c = await setup();
+    server.decide = () => ({ ack: true, withhold: true });
+    const p = c.send(notebookCreate(1, uid(950)));
+    await settle();
+    server.decide = () => ({ ack: true });
+    server.last.serverClose(1006);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await settle();
+    await expect(p).resolves.toMatchObject({ op_id: uid(950), seq: 1 });
+    expect(server.head(nbStream(1))).toBe(1);
+    expect(c.shelved).toBe(0);
   });
 
   it('session.start mit session_transition_invalid: Nachfolger sind nicht abhängig', async () => {
@@ -360,107 +375,157 @@ describe('Kleinigkeiten', () => {
   });
 });
 
-// ---------------------------------------------------------------- S5: mehrere Tabs
+// ---------------------------------------------------------------- Mehrere Tabs: nur der Leader synchronisiert
 
-class FakeBus {
-  members = new Set<{ handlers: Set<(m: TabMessage) => void> }>();
-  leader: object | null = null;
-  waiting: { me: object; onLeader: () => void }[] = [];
+class FakeLocks {
+  holder: FakeLock | null = null;
+  waiting: FakeLock[] = [];
+  changed: FakeLock[] = [];
+
+  create = (): LeaderLock => new FakeLock(this);
 }
 
-function coordinator(bus: FakeBus): TabCoordinator {
-  const me = { handlers: new Set<(m: TabMessage) => void>() };
-  bus.members.add(me);
-  return {
-    acquire(onLeader) {
-      if (!bus.leader) {
-        bus.leader = me;
-        onLeader();
-      } else bus.waiting.push({ me, onLeader });
-    },
-    release() {
-      bus.members.delete(me);
-      bus.waiting = bus.waiting.filter((w) => w.me !== me);
-      if (bus.leader === me) {
-        bus.leader = null;
-        const next = bus.waiting.shift();
-        if (next) {
-          bus.leader = next.me;
-          next.onLeader();
-        }
+class FakeLock implements LeaderLock {
+  handlers: LeaderLockHandlers | null = null;
+  stopped = false;
+  private readonly owner: FakeLocks;
+
+  constructor(owner: FakeLocks) {
+    this.owner = owner;
+  }
+
+  start(h: LeaderLockHandlers): void {
+    this.handlers = h;
+    this.owner.changed.push(this);
+    this.enqueue();
+  }
+
+  enqueue(): void {
+    if (!this.owner.holder) {
+      this.owner.holder = this;
+      this.handlers?.onLeader();
+      for (const o of this.owner.changed) if (o !== this) o.handlers?.onChanged();
+    } else this.owner.waiting.push(this);
+  }
+
+  steal(): void {
+    const old = this.owner.holder;
+    if (old === this || this.stopped) return;
+    this.owner.waiting = this.owner.waiting.filter((w) => w !== this);
+    this.owner.holder = this;
+    old?.handlers?.onLost();
+    old?.enqueue();
+    this.handlers?.onLeader();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.owner.changed = this.owner.changed.filter((o) => o !== this);
+    this.owner.waiting = this.owner.waiting.filter((w) => w !== this);
+    if (this.owner.holder === this) {
+      this.owner.holder = null;
+      const next = this.owner.waiting.shift();
+      if (next) {
+        this.owner.holder = next;
+        next.handlers?.onLeader();
       }
-    },
-    post(msg) {
-      for (const m of bus.members) {
-        if (m !== me) queueMicrotask(() => m.handlers.forEach((f) => f(msg)));
-      }
-    },
-    onMessage(fn) {
-      me.handlers.add(fn);
-      return () => me.handlers.delete(fn);
-    },
-  };
+    }
+  }
 }
 
-describe('S5: mehrere Tabs', () => {
-  it('nur der Leader verbindet; Operationen des Folge-Tabs gehen über die gemeinsame Warteschlange raus', async () => {
-    const bus = new FakeBus();
-    const a = make({ tabs: coordinator(bus) });
-    const b = make({ tabs: coordinator(bus) });
+describe('Mehrere Tabs: nur der Leader synchronisiert', () => {
+  it('nur ein Tab verbindet; der zweite zeigt other_tab und send() wirft', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    const b = make({ leaderLock: locks.create });
     await a.connect();
     await b.connect();
     await settle();
     expect(a.leader).toBe(true);
     expect(b.leader).toBe(false);
+    expect(b.connectionState).toBe('other_tab');
     expect(server.sockets).toHaveLength(1);
-    const ack = await Promise.all([b.send(notebookCreate(1, uid(900))), settle()]).then(([r]) => r);
-    expect(ack).toMatchObject({ op_id: uid(900), seq: 1 });
-    expect(server.opLog).toEqual([uid(900)]);
+    await expect(b.send(notebookCreate(1))).rejects.toBeInstanceOf(SyncNotLeaderError);
+    expect(await store.list()).toHaveLength(0);
+    await expect(a.send(notebookCreate(1))).resolves.toBeTruthy();
+  });
+
+  it('Hier übernehmen: Leader wechselt, der alte trennt sauber, die Warteschlange geht vom neuen Leader raus', async () => {
+    const locks = new FakeLocks();
+    server.decide = () => ({ ignore: true });
+    const a = make({ leaderLock: locks.create });
+    const b = make({ leaderLock: locks.create });
+    await a.connect();
+    await b.connect();
+    await settle();
+    const pa = a.send(notebookCreate(1, uid(960))).catch((e: unknown) => e);
+    await settle();
+    expect(server.opLog).toEqual([uid(960)]);
+    server.decide = () => ({ ack: true });
+    b.takeOver();
+    await settle();
+    expect(b.leader).toBe(true);
+    expect(a.leader).toBe(false);
+    expect(a.connectionState).toBe('other_tab');
+    expect(server.sockets).toHaveLength(2);
+    expect(server.sockets[0]!.closedByClient).toBe(1000);
+    expect(await pa).toBeInstanceOf(SyncNotLeaderError);
+    expect(server.sockets[1]!.of('op').map((m) => m.op_id)).toEqual([uid(960)]);
     expect(b.pendingCount).toBe(0);
     expect(await store.list()).toHaveLength(0);
+    await expect(a.send(notebookCreate(2))).rejects.toBeInstanceOf(SyncNotLeaderError);
   });
 
-  it('verteilt eingehende Operationen und Ereignisse an den Folge-Tab', async () => {
-    const bus = new FakeBus();
-    const a = make({ tabs: coordinator(bus) });
-    const b = make({ tabs: coordinator(bus) });
+  it('keine Doppelsendungen im laufenden Betrieb', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    await a.connect();
+    await settle();
+    await Promise.all([1, 2, 3, 4, 5].map((i) => a.send(notebookCreate(i, uid(970 + i)))));
+    expect(server.opLog).toEqual([1, 2, 3, 4, 5].map((i) => uid(970 + i)));
+  });
+
+  it('übernimmt, wenn der Leader-Tab schließt', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    const b = make({ leaderLock: locks.create });
     await a.connect();
     await b.connect();
     await settle();
-    const got: number[] = [];
-    const events: unknown[] = [];
-    b.onEvent('device.connection', (d) => events.push(d));
-    b.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, (o) => got.push(o.seq!));
-    await settle();
-    expect(server.sockets[0]!.of('subscribe')).toHaveLength(1);
-    server.last.push(server.addForeign(nbStream(1), 'page.delete', { data: { page_id: uid(77) } }));
-    server.last.push({
-      type: 'event',
-      name: 'device.connection',
-      data: { client: 'ipad', device_id: null, connected: true },
-    });
-    await settle();
-    expect(got).toEqual([1]);
-    expect(events).toHaveLength(1);
-  });
-
-  it('übernimmt als Leader, wenn der Leader-Tab schließt, und sendet die gemeinsame Warteschlange', async () => {
-    const bus = new FakeBus();
-    server.decide = () => ({ ignore: true });
-    const a = make({ tabs: coordinator(bus) });
-    const b = make({ tabs: coordinator(bus) });
-    await a.connect();
-    await b.connect();
-    await settle();
-    void b.send(notebookCreate(1, uid(901))).catch(() => undefined);
-    await settle();
-    expect(server.opLog).toEqual([uid(901)]);
-    server.decide = () => ({ ack: true });
     a.disconnect();
     await settle();
     expect(b.leader).toBe(true);
     expect(server.sockets).toHaveLength(2);
-    expect(server.opLog).toEqual([uid(901), uid(901)]);
-    expect(b.pendingCount).toBe(0);
+  });
+
+  it('disconnect und connect im selben Tab funktionieren (auch direkt hintereinander, StrictMode)', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    void a.connect();
+    a.disconnect();
+    await a.connect();
+    await settle();
+    expect(a.leader).toBe(true);
+    expect(a.connectionState).toBe('online');
+    expect(server.sockets).toHaveLength(1);
+    a.disconnect();
+    await a.connect();
+    await settle();
+    expect(a.connectionState).toBe('online');
+    await expect(a.send(notebookCreate(1))).resolves.toBeTruthy();
+  });
+
+  it('meldet einen Leader-Wechsel an wartende Tabs als Ereignis', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    const b = make({ leaderLock: locks.create });
+    const seen: number[] = [];
+    a.onEvent('leader.changed', () => seen.push(1));
+    await a.connect(); // Leader
+    await b.connect(); // wartet
+    b.onEvent('leader.changed', () => seen.push(2));
+    a.disconnect();
+    await settle();
+    expect(b.leader).toBe(true);
   });
 });

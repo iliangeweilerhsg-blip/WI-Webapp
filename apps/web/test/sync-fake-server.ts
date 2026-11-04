@@ -62,7 +62,7 @@ export interface StoredOp {
 }
 
 export type OpDecision =
-  | { ack: true }
+  | { ack: true; withhold?: boolean }
   | { error: { code: string; retryable: boolean; fatal: boolean; details?: Msg }; close?: number }
   | { ignore: true };
 
@@ -200,6 +200,6 @@ export class FakeServer {
       list.push(stored);
       this.streams.set(stream, list);
     }
-    socket.push({ type: 'ack', op_id, stream, seq: stored.seq });
+    if (!('withhold' in d && d.withhold)) socket.push({ type: 'ack', op_id, stream, seq: stored.seq });
   }
 }

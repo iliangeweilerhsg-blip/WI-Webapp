@@ -109,7 +109,7 @@ export type PageConflictResolver = (
 ) => Promise<{ fields: PageUpdateFields; version: number } | null>;
 
 export type ConnectionState =
-  'idle' | 'follower' | 'connecting' | 'syncing' | 'online' | 'backoff' | 'failed' | 'closed';
+  'idle' | 'other_tab' | 'connecting' | 'syncing' | 'online' | 'backoff' | 'failed' | 'closed';
 
 export interface ClockInfo {
   offsetMs: number;
@@ -140,6 +140,8 @@ export interface ClientEventMap {
   'session.superseded': { oldSessionId: string; newSessionId: string };
   /** Dauerhafter Fehler (Anmeldung/Protokoll): der Client verbindet nicht mehr von selbst */
   fatal: { code: string; message: string };
+  /** Ein anderer Tab meldet einen Leader-Wechsel: Zustand neu laden (REST) */
+  'leader.changed': Record<string, never>;
   /** Eine eingehende Operation wurde übersprungen (unbekannte Art oder Enum-Wert), `seq` zählt trotzdem */
   'op.skipped': { stream: string; seq: number; kind: string | null };
 }
