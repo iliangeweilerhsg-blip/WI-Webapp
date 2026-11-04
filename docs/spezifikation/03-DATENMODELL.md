@@ -12,6 +12,7 @@
 | Embeddings | `vector(1024)` (bge-m3), Index: HNSW, Cosinus |
 | Versionierung | Tabellen mit konfliktträchtigen Feldern haben `version int` (optimistisches Sperren) |
 | JSON | `jsonb` nur für klar abgegrenzte, schemageprüfte Nutzlasten (Schemas in `packages/schemas`) |
+| Notation | Die Tabellendefinitionen unten sind Pseudo-SQL. Spalten ohne `not null` sind optional (`NULL` erlaubt); explizites `NULL` steht nur zur Betonung bei optionalen Fremdschlüsseln und Feldern. |
 
 ## 2. Überblick
 
@@ -163,7 +164,7 @@ notebook(
 page(
   notebook_id → notebook, session_id → session NULL,
   index int,                                    -- Reihenfolge im Notizbuch
-  template text,        -- blanko | liniert | kariert | cornell | folie
+  template text,        -- blanko | liniert | kariert | punktraster | cornell | folie
   background_slide_id → slide NULL,             -- Modus „auf die Folie schreiben"
   attached_slide_id → slide NULL,               -- freie Seite, an Folie geheftet
   width_pt real, height_pt real,
@@ -176,7 +177,8 @@ stroke(                 -- neutrales Strich-Format, Kap. 08 §4
   layer text,           -- ink | highlight (Textmarker-Ebene liegt unter der Schrift)
   color text, width real,
   t_start_ms int8, t_end_ms int8,               -- Sitzungszeit
-  created_at timestamptz,                       -- absolute Zeit (synchronisierte Uhr)
+  created_at timestamptz,                       -- absolute Zeit (synchronisierte Uhr; aus created_at (ms) des Strich-Formats umgerechnet)
+  transform real[],                             -- 6 Werte (affin a,b,c,d,e,f), Standard Identität {1,0,0,1,0,0}
   bbox jsonb, points bytea,                     -- gepackte Punkte (Kap. 08 §4)
   clock_uncertain bool default false)
 
