@@ -60,7 +60,7 @@ Die vollständigen Nachrichten (u. a. `protocol`, `client`, `subscribe`, `presen
 ### 2.2 Ströme
 | Strom | Inhalt | Schreiber |
 |---|---|---|
-| `notebook:<id>` | Seiten anlegen/ändern, Striche hinzufügen/entfernen, Elemente | iPad |
+| `notebook:<id>` | Notizbuch anlegen, Seiten anlegen/ändern, Striche hinzufügen/entfernen, Elemente | iPad |
 | `session:<id>` | Start/Stopp/Pause, Folienwechsel, Marker, Fotos | iPad, Mac |
 | `user` | Abonnements (aktive Session, aktuelle Seite), Plan-Änderungen, Review-Warteschlange (Phase 3) | Server |
 
@@ -78,6 +78,7 @@ Die vollständigen Nachrichten (u. a. `protocol`, `client`, `subscribe`, `presen
 
 | `kind` | `data` |
 |---|---|
+| `notebook.create` | `{ notebook_id, module_id, title, kind?, created_at }` im Strom `notebook:<notebook_id>`. Idempotent über `notebook_id`. Umbenennen und Löschen nur per REST |
 | `page.create` | `{ page_id, notebook_id, session_id?, index, template, width_pt, height_pt, background_slide_id?, attached_slide_id? }` |
 | `page.update` | `{ page_id, fields: {…}, version }` |
 | `page.delete` | `{ page_id }` |
@@ -114,7 +115,7 @@ Die vollständigen Nachrichten (u. a. `protocol`, `client`, `subscribe`, `presen
 1. Die Web-App zeigt unter *Einstellungen → Geräte* einen **QR-Code** und kündigt den Core per Bonjour an (`_studiengehirn._tcp`, TXT-Record `v=1`, `name=<Macname>`).
 2. Das iPad verbindet sich mit `POST /api/v1/devices/pair/start` `{ device_name, public_nonce }` → Server erzeugt einen 6-stelligen Code und zeigt ihn in der Web-App an.
 3. Der Nutzer bestätigt auf dem iPad den gleichen Code → `POST /devices/pair/confirm` `{ code }` → Server antwortet mit `device_token` (256 Bit, zufällig). Gespeichert wird nur `token_hash` (SHA-256).
-4. QR-Code-Variante: QR enthält `sg://pair?host=…&port=4710&code=…`. Scannen ersetzt Schritt 3.
+4. QR-Code-Variante: QR enthält `sg://pair?v=1&host=…&port=4710&code=…`, also dieselben Daten, die die Web-App auch als Text zeigt. Scannen ersetzt das Eintippen in Schritt 3.
 5. Gerät entfernen widerruft das Token sofort.
 
 ## 4. Strich-Format

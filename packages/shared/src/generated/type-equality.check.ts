@@ -90,6 +90,8 @@ const _ModuleSettingsUpdate: Equal<z.infer<typeof Z.ModuleSettingsUpdateSchema>,
 const _ModuleUpdate: Equal<z.infer<typeof Z.ModuleUpdateSchema>, T.ModuleUpdate> = true;
 const _Notebook: Equal<z.infer<typeof Z.NotebookSchema>, T.Notebook> = true;
 const _NotebookCreate: Equal<z.infer<typeof Z.NotebookCreateSchema>, T.NotebookCreate> = true;
+const _NotebookCreateData: Equal<z.infer<typeof Z.NotebookCreateDataSchema>, T.NotebookCreateData> = true;
+const _NotebookCreateOp: Equal<z.infer<typeof Z.NotebookCreateOpSchema>, T.NotebookCreateOp> = true;
 const _NotebookKind: Equal<z.infer<typeof Z.NotebookKindSchema>, T.NotebookKind> = true;
 const _NotebookList: Equal<z.infer<typeof Z.NotebookListSchema>, T.NotebookList> = true;
 const _NotebookPages: Equal<z.infer<typeof Z.NotebookPagesSchema>, T.NotebookPages> = true;
@@ -144,6 +146,7 @@ const _SessionRefData: Equal<z.infer<typeof Z.SessionRefDataSchema>, T.SessionRe
 const _SessionResumeOp: Equal<z.infer<typeof Z.SessionResumeOpSchema>, T.SessionResumeOp> = true;
 const _SessionSnapshot: Equal<z.infer<typeof Z.SessionSnapshotSchema>, T.SessionSnapshot> = true;
 const _SessionStartData: Equal<z.infer<typeof Z.SessionStartDataSchema>, T.SessionStartData> = true;
+const _SessionStartOffset: Equal<z.infer<typeof Z.SessionStartOffsetSchema>, T.SessionStartOffset> = true;
 const _SessionStartOp: Equal<z.infer<typeof Z.SessionStartOpSchema>, T.SessionStartOp> = true;
 const _SessionStartRequest: Equal<z.infer<typeof Z.SessionStartRequestSchema>, T.SessionStartRequest> = true;
 const _SessionStartResult: Equal<z.infer<typeof Z.SessionStartResultSchema>, T.SessionStartResult> = true;

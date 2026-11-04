@@ -342,12 +342,12 @@ export type SyncClientMessage = (SyncHello | SyncSubscribe | SyncUnsubscribe | S
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SyncOp".
  */
-export type SyncOp = (PageCreateOp | PageUpdateOp | PageDeleteOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp)
+export type SyncOp = (NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp)
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SyncErrorCode".
  */
-export type SyncErrorCode = ("protocol_unsupported" | "hello_required" | "hello_invalid" | "device_token_invalid" | "message_invalid" | "too_many_pending" | "op_id_reused" | "stream_mismatch" | "module_not_found" | "session_not_found" | "session_transition_invalid" | "notebook_not_found" | "page_not_found" | "page_version_conflict" | "internal_error")
+export type SyncErrorCode = ("protocol_unsupported" | "hello_required" | "hello_invalid" | "device_token_invalid" | "message_invalid" | "too_many_pending" | "op_id_reused" | "stream_mismatch" | "module_not_found" | "session_not_found" | "session_transition_invalid" | "notebook_not_found" | "notebook_kind_exists" | "page_not_found" | "page_version_conflict" | "internal_error")
 /**
  * Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert
  * 
@@ -1392,6 +1392,37 @@ title: string
 kind?: NotebookKind
 }
 /**
+ * Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id. kind fehlt = frei.
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookCreateData".
+ */
+export interface NotebookCreateData {
+notebook_id: Uuid
+module_id: Uuid
+title: string
+kind?: NotebookKind
+created_at: EpochMs
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookCreateOp".
+ */
+export interface NotebookCreateOp {
+type: "op"
+op_id: Uuid
+stream: NotebookStreamId
+kind: "notebook.create"
+at: EpochMs
+clock_uncertain: boolean
+data: NotebookCreateData
+/**
+ * Nur Server → Client
+ */
+seq?: number
+origin?: SyncOrigin
+}
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "NotebookList".
  */
@@ -1665,6 +1696,14 @@ expires_at: Timestamp
  * Name aus pair/start, null bei einem Code für den QR-Weg
  */
 device_name: (string | null)
+/**
+ * Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für die manuelle Eingabe
+ */
+host: string
+port: number
+/**
+ * Inhalt des QR-Codes: dieselben Daten wie host, port und code
+ */
 qr_url: string
 }
 /**
@@ -1924,6 +1963,10 @@ processing: SessionProcessing
 review_state: ReviewState
 planned_starts_at: (Timestamp | null)
 planned_ends_at: (Timestamp | null)
+/**
+ * Abweichende Startzeiten von Geräten (VERTRAEGE §9.3). Fehlt oder leer = keine Abweichung
+ */
+start_offsets?: SessionStartOffset[]
 }
 /**
  * Fortschritt der Pipeline: Job-Typ → Zustand des letzten Jobs dieses Typs (03 §3 session.processing)
@@ -1933,6 +1976,16 @@ planned_ends_at: (Timestamp | null)
  */
 export interface SessionProcessing {
 [k: string]: JobState
+}
+/**
+ * Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase 2).
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionStartOffset".
+ */
+export interface SessionStartOffset {
+device_id: Uuid
+offset_ms: number
 }
 /**
  * POST /sessions: spontane Session ohne Termin (F-SES-04). Ergebnis im Zustand bereit, danach /start.

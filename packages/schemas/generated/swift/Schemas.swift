@@ -93,6 +93,8 @@ struct SchemaBundle: Codable {
     let moduleUpdate: ModuleUpdate?
     let notebook: Notebook?
     let notebookCreate: NotebookCreate?
+    let notebookCreateData: NotebookCreateData?
+    let notebookCreateOp: NotebookCreateOp?
     let notebookKind: NotebookKind?
     let notebookList: NotebookList?
     let notebookPages: NotebookPages?
@@ -147,6 +149,7 @@ struct SchemaBundle: Codable {
     let sessionResumeOp: SessionResumeOp?
     let sessionSnapshot: SessionSnapshot?
     let sessionStartData: SessionStartData?
+    let sessionStartOffset: SessionStartOffset?
     let sessionStartOp: SessionStartOp?
     let sessionStartRequest: SessionStartRequest?
     let sessionStartResult: SessionStartResult?
@@ -313,6 +316,8 @@ struct SchemaBundle: Codable {
         case moduleUpdate = "ModuleUpdate"
         case notebook = "Notebook"
         case notebookCreate = "NotebookCreate"
+        case notebookCreateData = "NotebookCreateData"
+        case notebookCreateOp = "NotebookCreateOp"
         case notebookKind = "NotebookKind"
         case notebookList = "NotebookList"
         case notebookPages = "NotebookPages"
@@ -367,6 +372,7 @@ struct SchemaBundle: Codable {
         case sessionResumeOp = "SessionResumeOp"
         case sessionSnapshot = "SessionSnapshot"
         case sessionStartData = "SessionStartData"
+        case sessionStartOffset = "SessionStartOffset"
         case sessionStartOp = "SessionStartOp"
         case sessionStartRequest = "SessionStartRequest"
         case sessionStartResult = "SessionStartResult"
@@ -553,6 +559,8 @@ extension SchemaBundle {
         moduleUpdate: ModuleUpdate?? = nil,
         notebook: Notebook?? = nil,
         notebookCreate: NotebookCreate?? = nil,
+        notebookCreateData: NotebookCreateData?? = nil,
+        notebookCreateOp: NotebookCreateOp?? = nil,
         notebookKind: NotebookKind?? = nil,
         notebookList: NotebookList?? = nil,
         notebookPages: NotebookPages?? = nil,
@@ -607,6 +615,7 @@ extension SchemaBundle {
         sessionResumeOp: SessionResumeOp?? = nil,
         sessionSnapshot: SessionSnapshot?? = nil,
         sessionStartData: SessionStartData?? = nil,
+        sessionStartOffset: SessionStartOffset?? = nil,
         sessionStartOp: SessionStartOp?? = nil,
         sessionStartRequest: SessionStartRequest?? = nil,
         sessionStartResult: SessionStartResult?? = nil,
@@ -773,6 +782,8 @@ extension SchemaBundle {
             moduleUpdate: moduleUpdate ?? self.moduleUpdate,
             notebook: notebook ?? self.notebook,
             notebookCreate: notebookCreate ?? self.notebookCreate,
+            notebookCreateData: notebookCreateData ?? self.notebookCreateData,
+            notebookCreateOp: notebookCreateOp ?? self.notebookCreateOp,
             notebookKind: notebookKind ?? self.notebookKind,
             notebookList: notebookList ?? self.notebookList,
             notebookPages: notebookPages ?? self.notebookPages,
@@ -827,6 +838,7 @@ extension SchemaBundle {
             sessionResumeOp: sessionResumeOp ?? self.sessionResumeOp,
             sessionSnapshot: sessionSnapshot ?? self.sessionSnapshot,
             sessionStartData: sessionStartData ?? self.sessionStartData,
+            sessionStartOffset: sessionStartOffset ?? self.sessionStartOffset,
             sessionStartOp: sessionStartOp ?? self.sessionStartOp,
             sessionStartRequest: sessionStartRequest ?? self.sessionStartRequest,
             sessionStartResult: sessionStartResult ?? self.sessionStartResult,
@@ -5184,6 +5196,149 @@ extension NotebookCreate {
     }
 }
 
+/// Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent
+/// über notebook_id. kind fehlt = frei.
+// MARK: - NotebookCreateData
+struct NotebookCreateData: Codable {
+    let createdAt: Int
+    let kind: NotebookKind?
+    let moduleID: String
+    let notebookID: String
+    let title: String
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case kind = "kind"
+        case moduleID = "module_id"
+        case notebookID = "notebook_id"
+        case title = "title"
+    }
+}
+
+// MARK: NotebookCreateData convenience initializers and mutators
+
+extension NotebookCreateData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookCreateData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Int? = nil,
+        kind: NotebookKind?? = nil,
+        moduleID: String? = nil,
+        notebookID: String? = nil,
+        title: String? = nil
+    ) -> NotebookCreateData {
+        return NotebookCreateData(
+            createdAt: createdAt ?? self.createdAt,
+            kind: kind ?? self.kind,
+            moduleID: moduleID ?? self.moduleID,
+            notebookID: notebookID ?? self.notebookID,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - NotebookCreateOp
+struct NotebookCreateOp: Codable {
+    let at: Int
+    let clockUncertain: Bool
+    let data: NotebookCreateData
+    let kind: NotebookCreateOpKind
+    let opID: String
+    let origin: SyncOrigin?
+    /// Nur Server → Client
+    let seq: Int?
+    let stream: String
+    let type: DrawingSnapshotOpType
+
+    enum CodingKeys: String, CodingKey {
+        case at = "at"
+        case clockUncertain = "clock_uncertain"
+        case data = "data"
+        case kind = "kind"
+        case opID = "op_id"
+        case origin = "origin"
+        case seq = "seq"
+        case stream = "stream"
+        case type = "type"
+    }
+}
+
+// MARK: NotebookCreateOp convenience initializers and mutators
+
+extension NotebookCreateOp {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookCreateOp.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        at: Int? = nil,
+        clockUncertain: Bool? = nil,
+        data: NotebookCreateData? = nil,
+        kind: NotebookCreateOpKind? = nil,
+        opID: String? = nil,
+        origin: SyncOrigin?? = nil,
+        seq: Int?? = nil,
+        stream: String? = nil,
+        type: DrawingSnapshotOpType? = nil
+    ) -> NotebookCreateOp {
+        return NotebookCreateOp(
+            at: at ?? self.at,
+            clockUncertain: clockUncertain ?? self.clockUncertain,
+            data: data ?? self.data,
+            kind: kind ?? self.kind,
+            opID: opID ?? self.opID,
+            origin: origin ?? self.origin,
+            seq: seq ?? self.seq,
+            stream: stream ?? self.stream,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum NotebookCreateOpKind: String, Codable {
+    case notebookCreate = "notebook.create"
+}
+
 // MARK: - NotebookList
 struct NotebookList: Codable {
     let items: [Notebook]
@@ -6357,14 +6512,21 @@ struct PairingCode: Codable {
     /// Name aus pair/start, null bei einem Code für den QR-Weg
     let deviceName: String?
     let expiresAt: Date
+    /// Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für
+    /// die manuelle Eingabe
+    let host: String
     let pairingID: String
+    let port: Int
+    /// Inhalt des QR-Codes: dieselben Daten wie host, port und code
     let qrURL: String
 
     enum CodingKeys: String, CodingKey {
         case code = "code"
         case deviceName = "device_name"
         case expiresAt = "expires_at"
+        case host = "host"
         case pairingID = "pairing_id"
+        case port = "port"
         case qrURL = "qr_url"
     }
 }
@@ -6391,14 +6553,18 @@ extension PairingCode {
         code: String? = nil,
         deviceName: String?? = nil,
         expiresAt: Date? = nil,
+        host: String? = nil,
         pairingID: String? = nil,
+        port: Int? = nil,
         qrURL: String? = nil
     ) -> PairingCode {
         return PairingCode(
             code: code ?? self.code,
             deviceName: deviceName ?? self.deviceName,
             expiresAt: expiresAt ?? self.expiresAt,
+            host: host ?? self.host,
             pairingID: pairingID ?? self.pairingID,
+            port: port ?? self.port,
             qrURL: qrURL ?? self.qrURL
         )
     }
@@ -7469,6 +7635,8 @@ struct Session: Codable {
     let processing: [String: JobState]
     let reviewState: ReviewState
     let slideDeckID: String?
+    /// Abweichende Startzeiten von Geräten (VERTRAEGE §9.3). Fehlt oder leer = keine Abweichung
+    let startOffsets: [SessionStartOffset]?
     let startedAt: Date?
     let startedFrom: ClientDevice?
     let state: SessionState
@@ -7490,6 +7658,7 @@ struct Session: Codable {
         case processing = "processing"
         case reviewState = "review_state"
         case slideDeckID = "slide_deck_id"
+        case startOffsets = "start_offsets"
         case startedAt = "started_at"
         case startedFrom = "started_from"
         case state = "state"
@@ -7531,6 +7700,7 @@ extension Session {
         processing: [String: JobState]? = nil,
         reviewState: ReviewState? = nil,
         slideDeckID: String?? = nil,
+        startOffsets: [SessionStartOffset]?? = nil,
         startedAt: Date?? = nil,
         startedFrom: ClientDevice?? = nil,
         state: SessionState? = nil,
@@ -7552,6 +7722,7 @@ extension Session {
             processing: processing ?? self.processing,
             reviewState: reviewState ?? self.reviewState,
             slideDeckID: slideDeckID ?? self.slideDeckID,
+            startOffsets: startOffsets ?? self.startOffsets,
             startedAt: startedAt ?? self.startedAt,
             startedFrom: startedFrom ?? self.startedFrom,
             state: state ?? self.state,
@@ -7559,6 +7730,58 @@ extension Session {
             title: title ?? self.title,
             updatedAt: updatedAt ?? self.updatedAt,
             userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at
+/// des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben
+/// unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase
+/// 2).
+// MARK: - SessionStartOffset
+struct SessionStartOffset: Codable {
+    let deviceID: String
+    let offsetMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case deviceID = "device_id"
+        case offsetMS = "offset_ms"
+    }
+}
+
+// MARK: SessionStartOffset convenience initializers and mutators
+
+extension SessionStartOffset {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionStartOffset.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        deviceID: String? = nil,
+        offsetMS: Int? = nil
+    ) -> SessionStartOffset {
+        return SessionStartOffset(
+            deviceID: deviceID ?? self.deviceID,
+            offsetMS: offsetMS ?? self.offsetMS
         )
     }
 
@@ -9873,6 +10096,9 @@ extension SyncClientMessage {
     }
 }
 
+/// Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent
+/// über notebook_id. kind fehlt = frei.
+///
 /// Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad
 ///
 /// Unbekannte session_id: der Core legt die Session an (Start offline auf dem iPad, F-SES-02
@@ -9887,11 +10113,15 @@ extension SyncClientMessage {
 /// Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
 // MARK: - DataClass
 struct DataClass: Codable {
+    let createdAt: Int?
+    let kind: Kind?
+    let moduleID: String?
+    let notebookID: String?
+    let title: String?
     let attachedSlideID: String?
     let backgroundSlideID: String?
     let heightPt: Double?
     let index: Int?
-    let notebookID: String?
     let pageID: String?
     let sessionID: String?
     let template: PageTemplate?
@@ -9905,7 +10135,6 @@ struct DataClass: Codable {
     let elementID: String?
     let pkdrawingRef: FileRef?
     let calendarEventID: String?
-    let moduleID: String?
     let slideDeckID: String?
     let startedAt: Int?
     let startedFrom: ClientDevice?
@@ -9915,7 +10144,6 @@ struct DataClass: Codable {
     let slideID: String?
     let slideIndex: Int?
     let tMS: Int?
-    let kind: MarkerKind?
     let markerID: String?
     let note: String?
     let position: MarkerPosition?
@@ -9924,11 +10152,15 @@ struct DataClass: Codable {
     let photoID: String?
 
     enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case kind = "kind"
+        case moduleID = "module_id"
+        case notebookID = "notebook_id"
+        case title = "title"
         case attachedSlideID = "attached_slide_id"
         case backgroundSlideID = "background_slide_id"
         case heightPt = "height_pt"
         case index = "index"
-        case notebookID = "notebook_id"
         case pageID = "page_id"
         case sessionID = "session_id"
         case template = "template"
@@ -9941,7 +10173,6 @@ struct DataClass: Codable {
         case elementID = "element_id"
         case pkdrawingRef = "pkdrawing_ref"
         case calendarEventID = "calendar_event_id"
-        case moduleID = "module_id"
         case slideDeckID = "slide_deck_id"
         case startedAt = "started_at"
         case startedFrom = "started_from"
@@ -9951,7 +10182,6 @@ struct DataClass: Codable {
         case slideID = "slide_id"
         case slideIndex = "slide_index"
         case tMS = "t_ms"
-        case kind = "kind"
         case markerID = "marker_id"
         case note = "note"
         case position = "position"
@@ -9980,11 +10210,15 @@ extension DataClass {
     }
 
     func with(
+        createdAt: Int?? = nil,
+        kind: Kind?? = nil,
+        moduleID: String?? = nil,
+        notebookID: String?? = nil,
+        title: String?? = nil,
         attachedSlideID: String?? = nil,
         backgroundSlideID: String?? = nil,
         heightPt: Double?? = nil,
         index: Int?? = nil,
-        notebookID: String?? = nil,
         pageID: String?? = nil,
         sessionID: String?? = nil,
         template: PageTemplate?? = nil,
@@ -9997,7 +10231,6 @@ extension DataClass {
         elementID: String?? = nil,
         pkdrawingRef: FileRef?? = nil,
         calendarEventID: String?? = nil,
-        moduleID: String?? = nil,
         slideDeckID: String?? = nil,
         startedAt: Int?? = nil,
         startedFrom: ClientDevice?? = nil,
@@ -10007,7 +10240,6 @@ extension DataClass {
         slideID: String?? = nil,
         slideIndex: Int?? = nil,
         tMS: Int?? = nil,
-        kind: MarkerKind?? = nil,
         markerID: String?? = nil,
         note: String?? = nil,
         position: MarkerPosition?? = nil,
@@ -10016,11 +10248,15 @@ extension DataClass {
         photoID: String?? = nil
     ) -> DataClass {
         return DataClass(
+            createdAt: createdAt ?? self.createdAt,
+            kind: kind ?? self.kind,
+            moduleID: moduleID ?? self.moduleID,
+            notebookID: notebookID ?? self.notebookID,
+            title: title ?? self.title,
             attachedSlideID: attachedSlideID ?? self.attachedSlideID,
             backgroundSlideID: backgroundSlideID ?? self.backgroundSlideID,
             heightPt: heightPt ?? self.heightPt,
             index: index ?? self.index,
-            notebookID: notebookID ?? self.notebookID,
             pageID: pageID ?? self.pageID,
             sessionID: sessionID ?? self.sessionID,
             template: template ?? self.template,
@@ -10033,7 +10269,6 @@ extension DataClass {
             elementID: elementID ?? self.elementID,
             pkdrawingRef: pkdrawingRef ?? self.pkdrawingRef,
             calendarEventID: calendarEventID ?? self.calendarEventID,
-            moduleID: moduleID ?? self.moduleID,
             slideDeckID: slideDeckID ?? self.slideDeckID,
             startedAt: startedAt ?? self.startedAt,
             startedFrom: startedFrom ?? self.startedFrom,
@@ -10043,7 +10278,6 @@ extension DataClass {
             slideID: slideID ?? self.slideID,
             slideIndex: slideIndex ?? self.slideIndex,
             tMS: tMS ?? self.tMS,
-            kind: kind ?? self.kind,
             markerID: markerID ?? self.markerID,
             note: note ?? self.note,
             position: position ?? self.position,
@@ -10062,12 +10296,22 @@ extension DataClass {
     }
 }
 
+enum Kind: String, Codable {
+    case frage = "frage"
+    case frei = "frei"
+    case klausur = "klausur"
+    case uebung = "uebung"
+    case verknuepfung = "verknuepfung"
+    case vorlesung = "vorlesung"
+}
+
 enum SyncClientMessageKind: String, Codable {
     case drawingSnapshot = "drawing.snapshot"
     case elementRemove = "element.remove"
     case elementUpsert = "element.upsert"
     case markerAdd = "marker.add"
     case markerRemove = "marker.remove"
+    case notebookCreate = "notebook.create"
     case pageCreate = "page.create"
     case pageDelete = "page.delete"
     case pageUpdate = "page.update"
@@ -10364,6 +10608,7 @@ enum SyncErrorCode: String, Codable {
     case internalError = "internal_error"
     case messageInvalid = "message_invalid"
     case moduleNotFound = "module_not_found"
+    case notebookKindExists = "notebook_kind_exists"
     case notebookNotFound = "notebook_not_found"
     case opIDReused = "op_id_reused"
     case pageNotFound = "page_not_found"
@@ -10461,6 +10706,8 @@ struct SyncEventData: Codable {
     let processing: [String: JobState]?
     let reviewState: ReviewState?
     let slideDeckID: String?
+    /// Abweichende Startzeiten von Geräten (VERTRAEGE §9.3). Fehlt oder leer = keine Abweichung
+    let startOffsets: [SessionStartOffset]?
     let startedAt: Date?
     let startedFrom: ClientDevice?
     let state: SessionState?
@@ -10478,7 +10725,12 @@ struct SyncEventData: Codable {
     let connected: Bool?
     let code: String?
     let expiresAt: Date?
+    /// Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für
+    /// die manuelle Eingabe
+    let host: String?
     let pairingID: String?
+    let port: Int?
+    /// Inhalt des QR-Codes: dieselben Daten wie host, port und code
     let qrURL: String?
 
     enum CodingKeys: String, CodingKey {
@@ -10494,6 +10746,7 @@ struct SyncEventData: Codable {
         case processing = "processing"
         case reviewState = "review_state"
         case slideDeckID = "slide_deck_id"
+        case startOffsets = "start_offsets"
         case startedAt = "started_at"
         case startedFrom = "started_from"
         case state = "state"
@@ -10510,7 +10763,9 @@ struct SyncEventData: Codable {
         case connected = "connected"
         case code = "code"
         case expiresAt = "expires_at"
+        case host = "host"
         case pairingID = "pairing_id"
+        case port = "port"
         case qrURL = "qr_url"
     }
 }
@@ -10546,6 +10801,7 @@ extension SyncEventData {
         processing: [String: JobState]?? = nil,
         reviewState: ReviewState?? = nil,
         slideDeckID: String?? = nil,
+        startOffsets: [SessionStartOffset]?? = nil,
         startedAt: Date?? = nil,
         startedFrom: ClientDevice?? = nil,
         state: SessionState?? = nil,
@@ -10562,7 +10818,9 @@ extension SyncEventData {
         connected: Bool?? = nil,
         code: String?? = nil,
         expiresAt: Date?? = nil,
+        host: String?? = nil,
         pairingID: String?? = nil,
+        port: Int?? = nil,
         qrURL: String?? = nil
     ) -> SyncEventData {
         return SyncEventData(
@@ -10578,6 +10836,7 @@ extension SyncEventData {
             processing: processing ?? self.processing,
             reviewState: reviewState ?? self.reviewState,
             slideDeckID: slideDeckID ?? self.slideDeckID,
+            startOffsets: startOffsets ?? self.startOffsets,
             startedAt: startedAt ?? self.startedAt,
             startedFrom: startedFrom ?? self.startedFrom,
             state: state ?? self.state,
@@ -10594,7 +10853,9 @@ extension SyncEventData {
             connected: connected ?? self.connected,
             code: code ?? self.code,
             expiresAt: expiresAt ?? self.expiresAt,
+            host: host ?? self.host,
             pairingID: pairingID ?? self.pairingID,
+            port: port ?? self.port,
             qrURL: qrURL ?? self.qrURL
         )
     }
@@ -11306,6 +11567,9 @@ extension SyncServerMessage {
     }
 }
 
+/// Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent
+/// über notebook_id. kind fehlt = frei.
+///
 /// Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad
 ///
 /// Unbekannte session_id: der Core legt die Session an (Start offline auf dem iPad, F-SES-02
@@ -11326,11 +11590,15 @@ extension SyncServerMessage {
 /// pairing.requested)
 // MARK: - SyncServerMessageData
 struct SyncServerMessageData: Codable {
+    let createdAt: CreatedAt?
+    let kind: Kind?
+    let moduleID: String?
+    let notebookID: String?
+    let title: String?
     let attachedSlideID: String?
     let backgroundSlideID: String?
     let heightPt: Double?
     let index: Int?
-    let notebookID: String?
     let pageID: String?
     let sessionID: String?
     let template: PageTemplate?
@@ -11344,7 +11612,6 @@ struct SyncServerMessageData: Codable {
     let elementID: String?
     let pkdrawingRef: FileRef?
     let calendarEventID: String?
-    let moduleID: String?
     let slideDeckID: String?
     let startedAt: StartedAt?
     let startedFrom: ClientDevice?
@@ -11354,14 +11621,12 @@ struct SyncServerMessageData: Codable {
     let slideID: String?
     let slideIndex: Int?
     let tMS: Int?
-    let kind: MarkerKind?
     let markerID: String?
     let note: String?
     let position: MarkerPosition?
     let source: ClientDevice?
     let fileRef: FileRef?
     let photoID: String?
-    let createdAt: Date?
     let deletedAt: Date?
     let endedAt: Date?
     let id: String?
@@ -11371,9 +11636,10 @@ struct SyncServerMessageData: Codable {
     let plannedStartsAt: Date?
     let processing: [String: JobState]?
     let reviewState: ReviewState?
+    /// Abweichende Startzeiten von Geräten (VERTRAEGE §9.3). Fehlt oder leer = keine Abweichung
+    let startOffsets: [SessionStartOffset]?
     let state: SessionState?
     let stopReason: StopReason?
-    let title: String?
     let updatedAt: Date?
     let userID: String?
     let client: SyncClientKind?
@@ -11383,15 +11649,24 @@ struct SyncServerMessageData: Codable {
     let connected: Bool?
     let code: String?
     let expiresAt: Date?
+    /// Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für
+    /// die manuelle Eingabe
+    let host: String?
     let pairingID: String?
+    let port: Int?
+    /// Inhalt des QR-Codes: dieselben Daten wie host, port und code
     let qrURL: String?
 
     enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case kind = "kind"
+        case moduleID = "module_id"
+        case notebookID = "notebook_id"
+        case title = "title"
         case attachedSlideID = "attached_slide_id"
         case backgroundSlideID = "background_slide_id"
         case heightPt = "height_pt"
         case index = "index"
-        case notebookID = "notebook_id"
         case pageID = "page_id"
         case sessionID = "session_id"
         case template = "template"
@@ -11404,7 +11679,6 @@ struct SyncServerMessageData: Codable {
         case elementID = "element_id"
         case pkdrawingRef = "pkdrawing_ref"
         case calendarEventID = "calendar_event_id"
-        case moduleID = "module_id"
         case slideDeckID = "slide_deck_id"
         case startedAt = "started_at"
         case startedFrom = "started_from"
@@ -11414,14 +11688,12 @@ struct SyncServerMessageData: Codable {
         case slideID = "slide_id"
         case slideIndex = "slide_index"
         case tMS = "t_ms"
-        case kind = "kind"
         case markerID = "marker_id"
         case note = "note"
         case position = "position"
         case source = "source"
         case fileRef = "file_ref"
         case photoID = "photo_id"
-        case createdAt = "created_at"
         case deletedAt = "deleted_at"
         case endedAt = "ended_at"
         case id = "id"
@@ -11430,9 +11702,9 @@ struct SyncServerMessageData: Codable {
         case plannedStartsAt = "planned_starts_at"
         case processing = "processing"
         case reviewState = "review_state"
+        case startOffsets = "start_offsets"
         case state = "state"
         case stopReason = "stop_reason"
-        case title = "title"
         case updatedAt = "updated_at"
         case userID = "user_id"
         case client = "client"
@@ -11441,7 +11713,9 @@ struct SyncServerMessageData: Codable {
         case connected = "connected"
         case code = "code"
         case expiresAt = "expires_at"
+        case host = "host"
         case pairingID = "pairing_id"
+        case port = "port"
         case qrURL = "qr_url"
     }
 }
@@ -11465,11 +11739,15 @@ extension SyncServerMessageData {
     }
 
     func with(
+        createdAt: CreatedAt?? = nil,
+        kind: Kind?? = nil,
+        moduleID: String?? = nil,
+        notebookID: String?? = nil,
+        title: String?? = nil,
         attachedSlideID: String?? = nil,
         backgroundSlideID: String?? = nil,
         heightPt: Double?? = nil,
         index: Int?? = nil,
-        notebookID: String?? = nil,
         pageID: String?? = nil,
         sessionID: String?? = nil,
         template: PageTemplate?? = nil,
@@ -11482,7 +11760,6 @@ extension SyncServerMessageData {
         elementID: String?? = nil,
         pkdrawingRef: FileRef?? = nil,
         calendarEventID: String?? = nil,
-        moduleID: String?? = nil,
         slideDeckID: String?? = nil,
         startedAt: StartedAt?? = nil,
         startedFrom: ClientDevice?? = nil,
@@ -11492,14 +11769,12 @@ extension SyncServerMessageData {
         slideID: String?? = nil,
         slideIndex: Int?? = nil,
         tMS: Int?? = nil,
-        kind: MarkerKind?? = nil,
         markerID: String?? = nil,
         note: String?? = nil,
         position: MarkerPosition?? = nil,
         source: ClientDevice?? = nil,
         fileRef: FileRef?? = nil,
         photoID: String?? = nil,
-        createdAt: Date?? = nil,
         deletedAt: Date?? = nil,
         endedAt: Date?? = nil,
         id: String?? = nil,
@@ -11508,9 +11783,9 @@ extension SyncServerMessageData {
         plannedStartsAt: Date?? = nil,
         processing: [String: JobState]?? = nil,
         reviewState: ReviewState?? = nil,
+        startOffsets: [SessionStartOffset]?? = nil,
         state: SessionState?? = nil,
         stopReason: StopReason?? = nil,
-        title: String?? = nil,
         updatedAt: Date?? = nil,
         userID: String?? = nil,
         client: SyncClientKind?? = nil,
@@ -11519,15 +11794,21 @@ extension SyncServerMessageData {
         connected: Bool?? = nil,
         code: String?? = nil,
         expiresAt: Date?? = nil,
+        host: String?? = nil,
         pairingID: String?? = nil,
+        port: Int?? = nil,
         qrURL: String?? = nil
     ) -> SyncServerMessageData {
         return SyncServerMessageData(
+            createdAt: createdAt ?? self.createdAt,
+            kind: kind ?? self.kind,
+            moduleID: moduleID ?? self.moduleID,
+            notebookID: notebookID ?? self.notebookID,
+            title: title ?? self.title,
             attachedSlideID: attachedSlideID ?? self.attachedSlideID,
             backgroundSlideID: backgroundSlideID ?? self.backgroundSlideID,
             heightPt: heightPt ?? self.heightPt,
             index: index ?? self.index,
-            notebookID: notebookID ?? self.notebookID,
             pageID: pageID ?? self.pageID,
             sessionID: sessionID ?? self.sessionID,
             template: template ?? self.template,
@@ -11540,7 +11821,6 @@ extension SyncServerMessageData {
             elementID: elementID ?? self.elementID,
             pkdrawingRef: pkdrawingRef ?? self.pkdrawingRef,
             calendarEventID: calendarEventID ?? self.calendarEventID,
-            moduleID: moduleID ?? self.moduleID,
             slideDeckID: slideDeckID ?? self.slideDeckID,
             startedAt: startedAt ?? self.startedAt,
             startedFrom: startedFrom ?? self.startedFrom,
@@ -11550,14 +11830,12 @@ extension SyncServerMessageData {
             slideID: slideID ?? self.slideID,
             slideIndex: slideIndex ?? self.slideIndex,
             tMS: tMS ?? self.tMS,
-            kind: kind ?? self.kind,
             markerID: markerID ?? self.markerID,
             note: note ?? self.note,
             position: position ?? self.position,
             source: source ?? self.source,
             fileRef: fileRef ?? self.fileRef,
             photoID: photoID ?? self.photoID,
-            createdAt: createdAt ?? self.createdAt,
             deletedAt: deletedAt ?? self.deletedAt,
             endedAt: endedAt ?? self.endedAt,
             id: id ?? self.id,
@@ -11566,9 +11844,9 @@ extension SyncServerMessageData {
             plannedStartsAt: plannedStartsAt ?? self.plannedStartsAt,
             processing: processing ?? self.processing,
             reviewState: reviewState ?? self.reviewState,
+            startOffsets: startOffsets ?? self.startOffsets,
             state: state ?? self.state,
             stopReason: stopReason ?? self.stopReason,
-            title: title ?? self.title,
             updatedAt: updatedAt ?? self.updatedAt,
             userID: userID ?? self.userID,
             client: client ?? self.client,
@@ -11577,7 +11855,9 @@ extension SyncServerMessageData {
             connected: connected ?? self.connected,
             code: code ?? self.code,
             expiresAt: expiresAt ?? self.expiresAt,
+            host: host ?? self.host,
             pairingID: pairingID ?? self.pairingID,
+            port: port ?? self.port,
             qrURL: qrURL ?? self.qrURL
         )
     }
@@ -11588,6 +11868,34 @@ extension SyncServerMessageData {
 
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum CreatedAt: Codable {
+    case dateTime(Date)
+    case integer(Int)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let x = try? container.decode(Int.self) {
+            self = .integer(x)
+            return
+        }
+        if let x = try? container.decode(Date.self) {
+            self = .dateTime(x)
+            return
+        }
+        throw DecodingError.typeMismatch(CreatedAt.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Wrong type for CreatedAt"))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .dateTime(let x):
+            try container.encode(x)
+        case .integer(let x):
+            try container.encode(x)
+        }
     }
 }
 

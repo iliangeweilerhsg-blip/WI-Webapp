@@ -170,6 +170,13 @@
               "type": "null"
             }
           ]
+        },
+        "start_offsets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionStartOffset"
+          },
+          "description": "Abweichende Startzeiten von Geräten (VERTRAEGE §9.3). Fehlt oder leer = keine Abweichung"
         }
       }
     },
@@ -796,6 +803,20 @@
           "type": "integer",
           "minimum": 0,
           "description": "seq des Stroms session:<id>, zu der dieser Stand gehört. Danach per Sync ab stream_seq + 1"
+        }
+      }
+    },
+    "SessionStartOffset": {
+      "type": "object",
+      "description": "Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase 2).",
+      "required": ["device_id", "offset_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "device_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "offset_ms": {
+          "type": "integer"
         }
       }
     }

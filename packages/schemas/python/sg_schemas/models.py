@@ -616,6 +616,7 @@ class SyncErrorCode(StrEnum):
     session_not_found = 'session_not_found'
     session_transition_invalid = 'session_transition_invalid'
     notebook_not_found = 'notebook_not_found'
+    notebook_kind_exists = 'notebook_kind_exists'
     page_not_found = 'page_not_found'
     page_version_conflict = 'page_version_conflict'
     internal_error = 'internal_error'
@@ -1595,6 +1596,50 @@ class NotebookCreate(BaseModel):
     kind: NotebookKind | None = None
 
 
+class NotebookCreateData(BaseModel):
+    """
+    Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id. kind fehlt = frei.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    notebook_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    title: StrictStr = Field(..., min_length=1)
+    kind: NotebookKind | None = None
+    created_at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+
+
+class NotebookCreateOp(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['op']
+    op_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    stream: StrictStr = Field(
+        ...,
+        pattern='^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='NotebookStreamId',
+    )
+    kind: Literal['notebook.create']
+    at: StrictInt = Field(
+        ...,
+        description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
+        ge=0,
+        title='EpochMs',
+    )
+    clock_uncertain: StrictBool
+    data: NotebookCreateData
+    seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
+    origin: SyncOrigin | None = None
+
+
 class NotebookList(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -1776,10 +1821,18 @@ class PairingCode(BaseModel):
     device_name: StrictStr | None = Field(
         ..., description='Name aus pair/start, null bei einem Code für den QR-Weg'
     )
+    host: StrictStr = Field(
+        ...,
+        description='Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für die manuelle Eingabe',
+        examples=['192.168.1.20'],
+        min_length=1,
+    )
+    port: StrictInt = Field(..., ge=1, le=65535)
     qr_url: StrictStr = Field(
         ...,
-        examples=['sg://pair?host=192.168.1.20&port=4710&code=482913'],
-        pattern='^sg://pair\\?',
+        description='Inhalt des QR-Codes: dieselben Daten wie host, port und code',
+        examples=['sg://pair?v=1&host=192.168.1.20&port=4710&code=482913'],
+        pattern='^sg://pair\\?v=1&host=[^&]+&port=[0-9]+&code=[0-9]{6}$',
     )
 
 
@@ -2019,41 +2072,6 @@ class SemesterList(BaseModel):
     next_cursor: StrictStr | None
 
 
-class Session(BaseModel):
-    """
-    Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem Kalendertermin (null bei spontanen Sessions).
-    """
-
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    created_at: AwareDatetime = Field(
-        ..., description='ISO 8601, UTC', title='Timestamp'
-    )
-    updated_at: AwareDatetime = Field(
-        ..., description='ISO 8601, UTC', title='Timestamp'
-    )
-    deleted_at: AwareDatetime | None
-    calendar_event_id: UUID | None
-    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
-    slide_deck_id: UUID | None
-    number: StrictInt | None = Field(
-        ..., description='VL-Nummer im Modul (VL 7), Regeln in docs/VERTRAEGE.md', ge=1
-    )
-    title: StrictStr | None
-    state: SessionState
-    started_at: AwareDatetime | None
-    ended_at: AwareDatetime | None
-    stop_reason: StopReason | None
-    started_from: ClientDevice | None
-    processing: dict[str, JobState]
-    review_state: ReviewState
-    planned_starts_at: AwareDatetime | None
-    planned_ends_at: AwareDatetime | None
-
-
 class SessionCreate(BaseModel):
     """
     POST /sessions: spontane Session ohne Termin (F-SES-04). Ergebnis im Zustand bereit, danach /start.
@@ -2066,14 +2084,6 @@ class SessionCreate(BaseModel):
     module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
     slide_deck_id: UUID | None = None
     title: StrictStr | None = None
-
-
-class SessionList(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    items: list[Session]
-    next_cursor: StrictStr | None
 
 
 class SessionRefData(BaseModel):
@@ -2132,6 +2142,18 @@ class SessionStartData(BaseModel):
     )
 
 
+class SessionStartOffset(BaseModel):
+    """
+    Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase 2).
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    device_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    offset_ms: StrictInt
+
+
 class SessionStartOp(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -2166,18 +2188,6 @@ class SessionStartRequest(BaseModel):
     )
     started_from: ClientDevice
     slide_deck_id: UUID | None = None
-
-
-class SessionStartResult(BaseModel):
-    """
-    ended_session: eine andere Session, die wegen des Starts automatisch beendet wurde (F-SES-02)
-    """
-
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    session: Session
-    ended_session: Session | None
 
 
 class SessionStopData(BaseModel):
@@ -2660,19 +2670,6 @@ class SyncResume(BaseModel):
     )
 
 
-class SyncSessionUpdatedEvent(BaseModel):
-    """
-    Zustand oder Felder einer Session haben sich geändert (auch zeitgesteuert: bereit, verpasst, verarbeitet)
-    """
-
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    type: Literal['event']
-    name: Literal['session.updated']
-    data: Session
-
-
 class SyncSubscribed(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -2946,6 +2943,53 @@ class PageUpdateOp(BaseModel):
     origin: SyncOrigin | None = None
 
 
+class Session(BaseModel):
+    """
+    Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem Kalendertermin (null bei spontanen Sessions).
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    user_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    calendar_event_id: UUID | None
+    module_id: UUID = Field(..., description='UUIDv7 (03 §1)', title='Uuid')
+    slide_deck_id: UUID | None
+    number: StrictInt | None = Field(
+        ..., description='VL-Nummer im Modul (VL 7), Regeln in docs/VERTRAEGE.md', ge=1
+    )
+    title: StrictStr | None
+    state: SessionState
+    started_at: AwareDatetime | None
+    ended_at: AwareDatetime | None
+    stop_reason: StopReason | None
+    started_from: ClientDevice | None
+    processing: dict[str, JobState]
+    review_state: ReviewState
+    planned_starts_at: AwareDatetime | None
+    planned_ends_at: AwareDatetime | None
+    start_offsets: list[SessionStartOffset] | None = Field(
+        None,
+        description='Abweichende Startzeiten von Geräten (VERTRAEGE §9.3). Fehlt oder leer = keine Abweichung',
+    )
+
+
+class SessionList(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[Session]
+    next_cursor: StrictStr | None
+
+
 class SessionPauseOp(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -2988,6 +3032,18 @@ class SessionSnapshot(BaseModel):
         description='seq des Stroms session:<id>, zu der dieser Stand gehört. Danach per Sync ab stream_seq + 1',
         ge=0,
     )
+
+
+class SessionStartResult(BaseModel):
+    """
+    ended_session: eine andere Session, die wegen des Starts automatisch beendet wurde (F-SES-02)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session: Session
+    ended_session: Session | None
 
 
 class ShapeElement(BaseModel):
@@ -3042,6 +3098,19 @@ class SyncPresenceEvent(BaseModel):
     type: Literal['event']
     name: Literal['presence']
     data: SyncPresenceInfo
+
+
+class SyncSessionUpdatedEvent(BaseModel):
+    """
+    Zustand oder Felder einer Session haben sich geändert (auch zeitgesteuert: bereit, verpasst, verarbeitet)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['event']
+    name: Literal['session.updated']
+    data: Session
 
 
 class TapeElement(BaseModel):
@@ -3308,6 +3377,10 @@ class SchemaBundle(BaseModel):
     ModuleUpdate_1: ModuleUpdate | None = Field(None, alias='ModuleUpdate')
     Notebook_1: Notebook | None = Field(None, alias='Notebook')
     NotebookCreate_1: NotebookCreate | None = Field(None, alias='NotebookCreate')
+    NotebookCreateData_1: NotebookCreateData | None = Field(
+        None, alias='NotebookCreateData'
+    )
+    NotebookCreateOp_1: NotebookCreateOp | None = Field(None, alias='NotebookCreateOp')
     NotebookKind_1: NotebookKind | None = Field(None, alias='NotebookKind')
     NotebookList_1: NotebookList | None = Field(None, alias='NotebookList')
     NotebookPages_1: NotebookPages | None = Field(None, alias='NotebookPages')
@@ -3395,6 +3468,9 @@ class SchemaBundle(BaseModel):
     SessionResumeOp_1: SessionResumeOp | None = Field(None, alias='SessionResumeOp')
     SessionSnapshot_1: SessionSnapshot | None = Field(None, alias='SessionSnapshot')
     SessionStartData_1: SessionStartData | None = Field(None, alias='SessionStartData')
+    SessionStartOffset_1: SessionStartOffset | None = Field(
+        None, alias='SessionStartOffset'
+    )
     SessionStartOp_1: SessionStartOp | None = Field(None, alias='SessionStartOp')
     SessionStartRequest_1: SessionStartRequest | None = Field(
         None, alias='SessionStartRequest'
@@ -3458,6 +3534,7 @@ class SchemaBundle(BaseModel):
         | SyncTimeOffset
         | SyncPing
         | SyncPresence
+        | NotebookCreateOp
         | PageCreateOp
         | PageUpdateOp
         | PageDeleteOp
@@ -3493,7 +3570,8 @@ class SchemaBundle(BaseModel):
     ) = Field(None, description='Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert', title='SyncEvent')
     SyncHello_1: SyncHello | None = Field(None, alias='SyncHello')
     SyncOp: (
-        PageCreateOp
+        NotebookCreateOp
+        | PageCreateOp
         | PageUpdateOp
         | PageDeleteOp
         | StrokeAddOp
@@ -3528,6 +3606,7 @@ class SchemaBundle(BaseModel):
         | SyncTimePong
         | SyncPong
         | SyncError
+        | NotebookCreateOp
         | PageCreateOp
         | PageUpdateOp
         | PageDeleteOp
@@ -3607,5 +3686,5 @@ type PageElement = TextElement | ImageElement | ShapeElement | TapeElement | Sta
 type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload
 type SyncClientMessage = SyncHello | SyncSubscribe | SyncUnsubscribe | SyncTimePing | SyncTimeOffset | SyncPing | SyncPresence | SyncOp
 type SyncEvent = SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent
-type SyncOp = PageCreateOp | PageUpdateOp | PageDeleteOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp
+type SyncOp = NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp
 type SyncServerMessage = SyncWelcome | SyncSubscribed | SyncAck | SyncOp | SyncTimePong | SyncPong | SyncError | SyncEvent

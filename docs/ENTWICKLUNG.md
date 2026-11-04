@@ -109,4 +109,7 @@ Die Phase-1-Schemas (Kalender, Session, Handschrift, Sync, Geräte, Backups, Ein
 | `GET /sessions/{id}/snapshot`, `GET /notebooks/{id}/pages`, `stream_seq` | Neu | REST-Stand und Sync-Strom lückenlos zusammensetzen |
 | Sync: `protocol`, `client`, `subscribe`, `presence`, `time.offset`, `error`, `head_seq`/`reset`, Ereignisse `device.connection`/`pairing.requested` | Ergänzungen zu 08 §2 | Abos ohne Neuverbinden, Notizen-Spalte folgt dem iPad, iPad-Status, Fehler und Wiederherstellung (VERTRAEGE §11) |
 | `POST /devices/pairings` | Neu | QR-Code ohne vorherigen Aufruf vom iPad (08 §3 Schritt 4) |
+| `PairingCode.host`/`.port`, QR-Format `sg://pair?v=1&…` | Neu | QR-Code und Anzeige tragen dieselben Daten, manuelle Eingabe möglich |
+| Operation `notebook.create` | Ergänzung zu 08 §2.3 | Freie Notizbücher offline anlegen (F-INK-02, F-INK-14) |
+| `session.start_offsets` | Neues Feld | Abweichender Offline-Start, `t_ms` werden nicht umgerechnet (VERTRAEGE §9.3) |
 | Kalender-Abgleich | Synchron im Core, kein Job `calendar.sync` | VERTRAEGE §8 |

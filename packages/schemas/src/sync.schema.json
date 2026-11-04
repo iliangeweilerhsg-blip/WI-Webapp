@@ -331,6 +331,7 @@
         "session_not_found",
         "session_transition_invalid",
         "notebook_not_found",
+        "notebook_kind_exists",
         "page_not_found",
         "page_version_conflict",
         "internal_error"
@@ -751,6 +752,42 @@
         },
         "file_ref": {
           "$ref": "#/$defs/FileRef"
+        }
+      }
+    },
+    "NotebookCreateOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "notebook.create"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookCreateData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
         }
       }
     },
@@ -1334,6 +1371,9 @@
       "description": "Operation (08 §2.3), unterschieden über kind. Client → Server ohne seq/origin, Server → Client mit seq und origin.",
       "anyOf": [
         {
+          "$ref": "#/$defs/NotebookCreateOp"
+        },
+        {
           "$ref": "#/$defs/PageCreateOp"
         },
         {
@@ -1601,6 +1641,30 @@
           "$ref": "#/$defs/SyncEvent"
         }
       ]
+    },
+    "NotebookCreateData": {
+      "type": "object",
+      "description": "Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id. kind fehlt = frei.",
+      "required": ["notebook_id", "module_id", "title", "created_at"],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookKind"
+        },
+        "created_at": {
+          "$ref": "#/$defs/EpochMs"
+        }
+      }
     }
   }
 }

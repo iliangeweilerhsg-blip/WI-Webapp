@@ -257,6 +257,12 @@
     "NotebookCreate": {
       "$ref": "#/$defs/NotebookCreate"
     },
+    "NotebookCreateData": {
+      "$ref": "#/$defs/NotebookCreateData"
+    },
+    "NotebookCreateOp": {
+      "$ref": "#/$defs/NotebookCreateOp"
+    },
     "NotebookKind": {
       "$ref": "#/$defs/NotebookKind"
     },
@@ -418,6 +424,9 @@
     },
     "SessionStartData": {
       "$ref": "#/$defs/SessionStartData"
+    },
+    "SessionStartOffset": {
+      "$ref": "#/$defs/SessionStartOffset"
     },
     "SessionStartOp": {
       "$ref": "#/$defs/SessionStartOp"
@@ -3418,6 +3427,81 @@
         }
       }
     },
+    "NotebookCreateData": {
+      "title": "NotebookCreateData",
+      "type": "object",
+      "description": "Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id. kind fehlt = frei.",
+      "required": [
+        "notebook_id",
+        "module_id",
+        "title",
+        "created_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookKind"
+        },
+        "created_at": {
+          "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "NotebookCreateOp": {
+      "title": "NotebookCreateOp",
+      "type": "object",
+      "required": [
+        "type",
+        "op_id",
+        "stream",
+        "kind",
+        "at",
+        "clock_uncertain",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "notebook.create"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookCreateData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
     "NotebookKind": {
       "title": "NotebookKind",
       "type": "string",
@@ -4075,6 +4159,8 @@
         "code",
         "expires_at",
         "device_name",
+        "host",
+        "port",
         "qr_url"
       ],
       "additionalProperties": false,
@@ -4096,12 +4182,26 @@
           ],
           "description": "Name aus pair/start, null bei einem Code für den QR-Weg"
         },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für die manuelle Eingabe",
+          "examples": [
+            "192.168.1.20"
+          ]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
         "qr_url": {
           "type": "string",
-          "pattern": "^sg://pair\\?",
+          "pattern": "^sg://pair\\?v=1&host=[^&]+&port=[0-9]+&code=[0-9]{6}$",
           "examples": [
-            "sg://pair?host=192.168.1.20&port=4710&code=482913"
-          ]
+            "sg://pair?v=1&host=192.168.1.20&port=4710&code=482913"
+          ],
+          "description": "Inhalt des QR-Codes: dieselben Daten wie host, port und code"
         }
       }
     },
@@ -4933,6 +5033,13 @@
               "type": "null"
             }
           ]
+        },
+        "start_offsets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionStartOffset"
+          },
+          "description": "Abweichende Startzeiten von Geräten (VERTRAEGE §9.3). Fehlt oder leer = keine Abweichung"
         }
       }
     },
@@ -5201,6 +5308,24 @@
         },
         "started_at": {
           "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "SessionStartOffset": {
+      "title": "SessionStartOffset",
+      "type": "object",
+      "description": "Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase 2).",
+      "required": [
+        "device_id",
+        "offset_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "device_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "offset_ms": {
+          "type": "integer"
         }
       }
     },
@@ -6387,6 +6512,7 @@
         "session_not_found",
         "session_transition_invalid",
         "notebook_not_found",
+        "notebook_kind_exists",
         "page_not_found",
         "page_version_conflict",
         "internal_error"
@@ -6455,6 +6581,9 @@
       "title": "SyncOp",
       "description": "Operation (08 §2.3), unterschieden über kind. Client → Server ohne seq/origin, Server → Client mit seq und origin.",
       "anyOf": [
+        {
+          "$ref": "#/$defs/NotebookCreateOp"
+        },
         {
           "$ref": "#/$defs/PageCreateOp"
         },

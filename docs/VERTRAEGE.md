@@ -143,11 +143,12 @@ In der DB steht `file_path` relativ zu `SG_DATA_DIR`. So lässt sich der Datenor
 
 - **Datenformate** stehen in `packages/schemas/src`: `calendar`, `session`, `ink`, `sync`, `system`, `settings` sowie Ergänzungen in `common` und `jobs`. Diese Datei regelt alles, was nicht im Schema steht: Endpunkte, Statuscodes, Abläufe, Reihenfolge und Grenzen.
 - **Ein Schreibweg pro Datenart.**
-  - Striche, Seiten, Seitenelemente, Folienwechsel, Marker, Fotos und die Session-Steuerung vom iPad laufen als **Sync-Operation** über den WebSocket (§11). So funktioniert alles auch offline.
+  - Neue Notizbücher, Striche, Seiten, Seitenelemente, Folienwechsel, Marker, Fotos und die Session-Steuerung vom iPad laufen als **Sync-Operation** über den WebSocket (§11). So funktioniert alles auch offline.
+  - Notizbücher **umbenennen, verschieben und löschen** geht in Phase 1 nur per REST, also nur mit Verbindung (`PATCH`/`DELETE /notebooks/{id}`). Die Web-App legt Notizbücher per `POST /notebooks` an.
   - Die Web-App sendet Folienwechsel und Marker **ebenfalls als Operation** über den WebSocket. Es gibt keinen REST-Weg dafür und damit nur eine Implementierung im Core.
   - Start, Pause, Fortsetzen und Stopp kommen aus der Web-App per REST (§9), weil sie eine sofortige Antwort braucht. Der Core legt dafür selbst eine Operation in den Strom `session:<id>` (`origin = server`), damit alle Clients sie sehen.
 - **Zeit:** REST liefert ISO 8601 UTC. Im Sync-Protokoll sind alle absoluten Zeiten Epochen-ms (`EpochMs`). Sitzungszeiten heißen `t_ms` bzw. `*_ms` (`SessionMs`). Eingebettete REST-Objekte, etwa `Session` im Ereignis `session.updated`, behalten ihr REST-Format.
-- **IDs:** Clients erzeugen UUIDv7 für alles, was sie offline anlegen (Seiten, Striche, Marker, Fotos, spontane Sessions, Aufnahmen). Alle Create-Bodies haben ein optionales `id`. Ist die `id` schon vergeben, antwortet der Core mit `409 <objekt>_exists`. Wiederholte Anfragen sichert der `Idempotency-Key` ab (08 §1).
+- **IDs:** Clients erzeugen UUIDv7 für alles, was sie offline anlegen (Notizbücher, Seiten, Striche, Marker, Fotos, spontane Sessions, Aufnahmen). Alle Create-Bodies haben ein optionales `id`. Ist die `id` schon vergeben, antwortet der Core mit `409 <objekt>_exists`. Wiederholte Anfragen sichert der `Idempotency-Key` ab (08 §1).
 - **Verweise über Stromgrenzen** (`slide_id`, `background_slide_id`, `attached_slide_id`, `page.session_id`, `photo_id` in Bildelementen, `marker_id` in Stempeln): Der Core speichert sie **ohne Fremdschlüssel** und löst sie beim Lesen auf (F-SYN-03: Folie kommt später, Session wurde offline angelegt). Fremdschlüssel gibt es nur innerhalb eines Stroms, z. B. `stroke.page_id` und `marker.session_id`.
 - **Löschen** ist weich (03 §1). Abhängige Objekte bekommen **denselben** `deleted_at`-Zeitstempel. Darüber stellt der Papierkorb genau den Löschvorgang wieder her (§13).
 
@@ -162,6 +163,7 @@ Eigentümer der Tabellen bleibt der Core. Spalten nach 03 §3, §5, §6 und §13
 | `calendar_event` | `description text NULL`, `all_day bool`, `assigned_by text` (`auto`/`manuell`) | Zuordnung über die Beschreibung (F-KAL-02), ganztägige Termine (Testfall ics/08), manuelle Zuordnung bleibt beim Abgleich erhalten |
 | `calendar_event` | `UNIQUE (source_id, external_uid, recurrence_id)` mit `NULLS NOT DISTINCT` | Abgleichschlüssel (F-KAL-01) |
 | `session` | `UNIQUE (calendar_event_id) WHERE deleted_at IS NULL` | Eine Session pro Termin |
+| `session` | `start_offsets jsonb NOT NULL DEFAULT '[]'` (`SessionStartOffset[]`) | Abweichender Offline-Start eines Geräts (§9.3) |
 | `recording` | `chunks_independent bool`, `completed_at timestamptz NULL` | Spike S4, Abschluss durch den Client |
 | `audio_chunk` | `size_bytes int8` | Antwort `AudioChunk` |
 | `photo` | `mime text`, `sha256 text`, `size_bytes int8`, `file_path` erst nach Upload gesetzt | Upload unabhängig von `photo.add` |
@@ -267,7 +269,7 @@ Modul-Einstellungen laufen über `PATCH /modules/{id}` (§14.2).
 - Das Parsen eines Semesters dauert Millisekunden und braucht keine KI.
 - Die Logik schreibt nur Core-Tabellen und legt Sessions an (§9.2).
 
-Bibliothek: `ical.js` und `rrule` oder ein gleichwertiges Paket, mit Begründung im PR (`AGENTS.md`, Regel 9). Abnahme: die Erwartungen in `tests/fixtures/ics/*.json`.
+Bibliothek: `ical.js` und `rrule` oder ein gleichwertiges Paket, mit Begründung im PR (`AGENTS.md`, Regel 9). **Abnahme für T1-01:** Alle Erwartungen in `tests/fixtures/ics/*.json` müssen in einem Core-Test bestehen, inklusive Fall 6b (`TZID=Europe/Zurich` ohne `VTIMEZONE`). Dort wird die Zone als IANA-Name über die zoneinfo-Daten der Laufzeit aufgelöst (`Intl` in Node bzw. ein Paket mit IANA-Daten), nicht als UTC oder floating.
 
 Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei neuem Upload.
 
@@ -322,6 +324,16 @@ Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei
 - **`number` (VL 7):** Bei Sessions zu Terminen der Art `vorlesung` die Position in zeitlicher Reihenfolge unter den nicht abgesagten `vorlesung`-Terminen desselben Moduls. Der Core rechnet sie bei jedem Abgleich neu, solange die Session nicht gestartet wurde, danach bleibt sie fest. Sonst `null`.
 - **Folien:** Wird ein Foliensatz mit `session_id` hochgeladen und hat die Session noch kein `slide_deck_id`, setzt der Core es. Ohne Folien läuft der folienlose Modus (F-SES-02).
 - **Sitzungszeit:** `t_ms = Ereigniszeit − started_at`. Pausen ändern sie nicht.
+
+### 9.3 Abweichender Offline-Start
+
+Startet ein Gerät eine Session offline (`session.start` aus der Ausgangswarteschlange), während sie auf dem Server schon mit anderem `started_at` gestartet wurde, gilt:
+
+- **Das `started_at` des Servers bleibt.** `session.start` auf `laeuft`/`pausiert` wird wie in §9.1 ohne Zustandsänderung bestätigt. Auf `beendet`/`verarbeitet` bleibt es ein `session_transition_invalid`.
+- **Die `t_ms` der Operationen dieses Geräts rechnet der Core nicht um.** Sie bleiben, wie das Gerät sie bezogen auf sein eigenes `started_at` berechnet hat.
+- In beiden Fällen speichert der Core in `session.start_offsets` einen Eintrag `{ device_id, offset_ms }`, falls die beiden Startzeiten voneinander abweichen. Dabei ist `offset_ms` = `started_at` aus der Operation − `started_at` der Session (in ms). Pro Gerät gibt es höchstens einen Eintrag, der erste gilt.
+- Die Ausrichtung in Phase 2 rechnet damit um: Sitzungszeit nach Serveruhr = `t_ms + offset_ms`. Das betrifft `t_start_ms`/`t_end_ms` der Striche, `t_ms` von Folienwechseln, Markern, Fotos und Seitenelementen.
+- `device_id` kommt aus der Verbindung (Token). Die Web-App startet nur per REST mit Serverzeit und erzeugt darum keinen Eintrag.
 
 ## 10. Audio (T1-06)
 
@@ -381,6 +393,7 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
 - **Reihenfolge:** Der Server verarbeitet die Operationen einer Verbindung in Empfangsreihenfolge und vergibt `seq` pro Strom lückenlos ab 1 beim Commit. Danach sendet er `ack` an den Absender und die Operation mit `seq` und `origin` an alle anderen Abonnenten. Der Absender bekommt seine eigene Operation nicht zurück.
 - **Idempotenz:** Ist eine `op_id` schon bekannt, sendet der Server das ursprüngliche `ack` erneut. Gleiche `op_id` mit anderem `stream`, `kind` oder `data` ergibt `error op_id_reused` (`retryable = false`).
 - **Höchstens 200 unbestätigte Operationen** pro Verbindung. Darüber folgt `error too_many_pending` mit `op_id` und `retryable = true`. Die Operation wird nicht angewendet.
+- **Notizbuch-Strom:** `notebook.create` läuft im Strom des **neuen** Notizbuchs, also `notebook:<notebook_id>`. Darum stehen Anlegen und alle folgenden `page.create` dieses Notizbuchs im selben Strom, in fester Reihenfolge. Es braucht keine Regel über Stromgrenzen. Ein eigener Strom für Notizbuchlisten (etwa `module:<id>`) ist nicht nötig: Andere Clients erfahren neue Notizbücher, weil sie den Strom abonnieren, sobald sie die ID per REST (`GET /notebooks`) oder aus `presence` kennen.
 - **Zurückhalten:** `stroke.add`, `stroke.remove`, `element.*`, `page.update`, `page.delete` und `drawing.snapshot` für eine Seite, die der Core noch nicht kennt, hält er im Speicher der Verbindung zurück (kein `ack`), bis `page.create` kommt. Endet die Verbindung vorher, verwirft er sie. Der Client sendet sie beim nächsten Verbinden erneut.
 - **`error` mit `op_id`:** Bei `retryable = false` entfernt der Client die Operation endgültig aus der Ausgangswarteschlange und protokolliert sie. Bei `true` sendet er sie später erneut. `error` ohne `op_id` betrifft die Verbindung. Bei `fatal = true` schließt der Server sie.
 - **Neu verbinden:** Der Client sendet alle unbestätigten Operationen erneut, in der ursprünglichen Reihenfolge und in Paketen bis 200 (F-SYN-03).
@@ -389,6 +402,7 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
 
 | `kind` | Wirkung im Core |
 |---|---|
+| `notebook.create` | Notizbuch anlegen. `created_at` aus den Daten, `kind` fehlt = `frei`. Der Strom muss `notebook:<notebook_id>` sein, sonst `stream_mismatch`. Existiert die `notebook_id` schon: `ack` ohne Änderung (idempotent). Unbekanntes Modul: `module_not_found`. Zweites `vorlesung`/`uebung` im Modul: `notebook_kind_exists` (beide `retryable = false`) |
 | `page.create` | Seite anlegen, `version = 1`. Der Strom muss `notebook:<notebook_id>` sein. Existiert die `page_id` schon: `ack` ohne Änderung. Unbekanntes oder gelöschtes Notizbuch: `error notebook_not_found` (`retryable = false`) |
 | `page.update` | `fields` übernehmen, wenn `version` der aktuellen entspricht, dann `version + 1`. Sonst `error page_version_conflict` (`retryable = false`), der Client lädt die Seite neu |
 | `page.delete` | Seite mit Strichen und Elementen weich löschen (gleiches `deleted_at`) |
@@ -429,7 +443,10 @@ quicktype fasst Unions wie `SyncOp` zu **einer** Struktur mit optionalen Feldern
 
 ## 12. Kopplung (F-INK-13, T1-10)
 
-1. **QR-Weg:** Die Web-App (Einstellungen → Geräte) ruft `POST /devices/pairings` auf und zeigt `qr_url` als QR-Code und dazu den Code. Ein neuer Aufruf macht den vorigen Code ungültig.
+1. **QR-Weg:** Die Web-App (Einstellungen → Geräte) ruft `POST /devices/pairings` auf. Sie zeigt `qr_url` als QR-Code und darunter Code, `host` und `port` als Text. Ein neuer Aufruf macht den vorigen Code ungültig.
+   - QR-Inhalt, festes Format: `sg://pair?v=1&host=<host>&port=<port>&code=<code>`. Das sind genau dieselben Daten wie in `host`, `port` und `code`.
+   - `host` ist die IPv4-Adresse der aktiven Netzwerkschnittstelle des Macs (bevorzugt `en0`), weil `.local`-Namen im Uni-WLAN oft nicht auflösen.
+   - Ohne Kamera und ohne Bonjour kann der Nutzer `host` und Code von Hand am iPad eingeben.
 2. **Bonjour-Weg:** Der Core kündigt `_studiengehirn._tcp` an (TXT `v=1`, `name=<Macname>`). Das iPad ruft `POST /devices/pair/start` auf. Der Core erzeugt einen Code, an `public_nonce` gebunden, und sendet `pairing.requested` an die Web-App. Der Code steht **nicht** in der Antwort an das iPad.
 3. Der Nutzer tippt den Code am iPad ein bzw. der QR-Scan liefert ihn. Das iPad ruft `POST /devices/pair/confirm` auf.
    - Code aus Schritt 2: `public_nonce` muss passen.

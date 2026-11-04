@@ -129,7 +129,7 @@
     "PairingCode": {
       "type": "object",
       "description": "Kopplungscode für die Anzeige in der Web-App (POST /devices/pairings, Ereignis pairing.requested)",
-      "required": ["pairing_id", "code", "expires_at", "device_name", "qr_url"],
+      "required": ["pairing_id", "code", "expires_at", "device_name", "host", "port", "qr_url"],
       "additionalProperties": false,
       "properties": {
         "pairing_id": {
@@ -146,10 +146,22 @@
           "type": ["string", "null"],
           "description": "Name aus pair/start, null bei einem Code für den QR-Weg"
         },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für die manuelle Eingabe",
+          "examples": ["192.168.1.20"]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
         "qr_url": {
           "type": "string",
-          "pattern": "^sg://pair\\?",
-          "examples": ["sg://pair?host=192.168.1.20&port=4710&code=482913"]
+          "pattern": "^sg://pair\\?v=1&host=[^&]+&port=[0-9]+&code=[0-9]{6}$",
+          "examples": ["sg://pair?v=1&host=192.168.1.20&port=4710&code=482913"],
+          "description": "Inhalt des QR-Codes: dieselben Daten wie host, port und code"
         }
       }
     },

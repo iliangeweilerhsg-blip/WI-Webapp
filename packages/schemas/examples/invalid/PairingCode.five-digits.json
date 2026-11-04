@@ -3,5 +3,7 @@
   "code": "48291",
   "expires_at": "2026-11-04T07:20:00Z",
   "device_name": "iPad von Ilian",
-  "qr_url": "sg://pair?host=192.168.1.20&port=4710&code=482913"
+  "host": "192.168.1.20",
+  "port": 4710,
+  "qr_url": "sg://pair?v=1&host=192.168.1.20&port=4710&code=482913"
 }
