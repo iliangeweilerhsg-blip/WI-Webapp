@@ -88,13 +88,15 @@ export function normalizeQuery(query: string): string {
 /**
  * Normalisierter Suchtext einer Seite. Zu jeder UTF-16-Einheit im Text steht, aus welchem Textstück sie stammt
  * (`item`, -1 bei eingefügten Leerzeichen) und welchen Bereich ihr Zeichen dort im Originaltext einnimmt.
- * Zeichen über 65535 Einheiten Stücklänge werden begrenzt (praktisch nie).
+ * Die Bereiche sind 16 Bit breit, bei einem Stück über 65535 Einheiten 32 Bit.
  */
 export interface PageText {
   text: string;
   item: Int32Array;
-  from: Uint16Array;
-  to: Uint16Array;
+  from: Uint16Array | Uint32Array;
+  to: Uint16Array | Uint32Array;
+  /** Nur `glue`: Textstellen, an denen ein Zeilenumbruch ohne Strich verbunden wurde (sortiert) */
+  breaks: Int32Array;
 }
 
 /**
@@ -142,12 +144,14 @@ function build(items: readonly PdfTextItem[], mode: Mode): Built {
   let prevSoft = false;
   let hyphens = 0;
   let glues = 0;
+  const breaks: number[] = [];
+  const wide = items.some((item) => item.str.length > 0xffff);
 
   const push = (unit: string, item: number, from: number, to: number) => {
     chars.push(unit);
     itemOf.push(item);
-    fromOf.push(Math.min(from, 0xffff));
-    toOf.push(Math.min(to, 0xffff));
+    fromOf.push(from);
+    toOf.push(to);
   };
   const pop = () => {
     chars.pop();
@@ -206,6 +210,7 @@ function build(items: readonly PdfTextItem[], mode: Mode): Built {
         const glue = lineBreak && !leading && !pendingSpace && LOWER.test(last) && LOWER.test(nextOrig);
         if (glue) glues += 1;
         if (glue && mode === 'glue') {
+          breaks.push(chars.length);
           // verbunden, kein Leerzeichen
         } else if (
           (pendingSpace || lineBreak || leading || isWordGap(prev, item)) &&
@@ -236,8 +241,9 @@ function build(items: readonly PdfTextItem[], mode: Mode): Built {
     page: {
       text: chars.join(''),
       item: Int32Array.from(itemOf),
-      from: Uint16Array.from(fromOf),
-      to: Uint16Array.from(toOf),
+      from: wide ? Uint32Array.from(fromOf) : Uint16Array.from(fromOf),
+      to: wide ? Uint32Array.from(toOf) : Uint16Array.from(toOf),
+      breaks: Int32Array.from(breaks),
     },
     hyphens,
     glues,
@@ -307,7 +313,7 @@ function partsOf(page: PageText, begin: number, end: number): HitPart[] {
 }
 
 /** Lage eines Treffers im Originaltext der Seite als Zahlenbereich (Stücke liegen in Lesereihenfolge). */
-const SLOT = 0x10000;
+const SLOT = 0x400000;
 function span(parts: readonly HitPart[]): [number, number] {
   const first = parts[0];
   const last = parts[parts.length - 1];
@@ -331,6 +337,7 @@ export function findHits(page: number, items: readonly PdfTextItem[], query: str
       const at = variant.text.indexOf(needle, from);
       if (at === -1) break;
       from = at + needle.length;
+      if (variant.breaks.length > 0 && !glueAllowed(variant.breaks, needle, at)) continue;
       const parts = partsOf(variant, at, at + needle.length);
       if (parts.length === 0) continue;
       const [begin, end] = span(parts);
@@ -341,6 +348,34 @@ export function findHits(page: number, items: readonly PdfTextItem[], query: str
     else if (fresh.length > 0) accepted = accepted.concat(fresh).sort((a, b) => a.begin - b.begin);
   });
   return accepted.map((a) => a.hit);
+}
+
+/** Kürzeste Anfrage (ohne Leerzeichen), die über einen ohne Strich verbundenen Zeilenumbruch gesucht wird */
+const GLUE_MIN_LENGTH = 6;
+/** Mindestens so viele Zeichen der Anfrage müssen auf jeder Seite eines verbundenen Umbruchs liegen */
+const GLUE_MIN_SIDE = 2;
+
+/**
+ * Ein Treffer über einen ohne Strich verbundenen Zeilenumbruch („möglichkei“ ↵ „ten“) ist geraten. Er gilt nur für
+ * lange einzelne Wörter, mit mindestens zwei Zeichen auf jeder Seite des Umbruchs; kurze Wörter („ende“, „dass“)
+ * träfen sonst über jeden normalen Umbruch („Kost-en ↵ der“). Grenze: Zwei Tabellenzellen oder Spalten ohne Abstand
+ * („ja“ ↵ „nein“ → „janein“) lassen sich so nicht unterscheiden.
+ */
+function glueAllowed(breaks: Int32Array, needle: string, at: number): boolean {
+  const end = at + needle.length;
+  let lo = 0;
+  let hi = breaks.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((breaks[mid] ?? 0) <= at) lo = mid + 1;
+    else hi = mid;
+  }
+  for (let i = lo; i < breaks.length && (breaks[i] ?? end) < end; i += 1) {
+    const b = breaks[i] ?? 0;
+    if (needle.length < GLUE_MIN_LENGTH || needle.includes(' ')) return false;
+    if (b - at < GLUE_MIN_SIDE || end - b < GLUE_MIN_SIDE) return false;
+  }
+  return true;
 }
 
 /** Binäre Suche in nach Anfang sortierten, in sich überlappungsfreien Bereichen. */

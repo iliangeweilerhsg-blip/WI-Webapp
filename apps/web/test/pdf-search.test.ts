@@ -337,4 +337,38 @@ describe('Suche: Nachbesserungen', () => {
       ]),
     ).toHaveLength(2);
   });
+
+  it('Verbinden ohne Strich gilt nur für lange Wörter mit je 2 Zeichen auf beiden Seiten', () => {
+    const lines = (a: string, b: string): PdfTextItem[] => [
+      { str: a, x: 10, y: 20, w: 60, h: 10, eol: true },
+      { str: b, x: 10, y: 34, w: 60, h: 10 },
+    ];
+    // Normale Umbrüche zwischen zwei Wörtern: keine zusätzlichen Treffer
+    expect(findHits(1, lines('Die Kosten', 'der Firma'), 'ende')).toHaveLength(0);
+    expect(findHits(1, lines('Wir wissen das', 'steigt es'), 'dass')).toHaveLength(0);
+    expect(findHits(1, lines('Die Preise sind', 'es gilt'), 'dies')).toHaveLength(0);
+    expect(findHits(1, lines('Sie nahmen sich Zeit', 'ges ist'), 'zeitg')).toHaveLength(0);
+    // Lang genug, aber nur ein Zeichen auf einer Seite: nicht verbunden
+    expect(
+      findHits(1, lines('Produktionsmöglichkeite', 'n gibt es'), 'produktionsmöglichkeiten'),
+    ).toHaveLength(0);
+    expect(
+      findHits(1, lines('Produktionsmöglichkeit', 'en gibt es'), 'produktionsmöglichkeiten'),
+    ).toHaveLength(1);
+    // Dokumentierte Grenze: zwei Zellen ohne Abstand gelten als ein Wort (6 Zeichen, beide Seiten >= 2)
+    expect(findHits(1, lines('ja', 'nein'), 'janein')).toHaveLength(1);
+    expect(findHits(1, lines('jaja', 'nein'), 'jajanein')).toHaveLength(1);
+    // Wörter mit Leerzeichen und kurze Wörter bleiben auf normalen Umbrüchen findbar
+    expect(findHits(1, lines('Die Kosten', 'der Firma'), 'kosten der')).toHaveLength(1);
+    expect(findHits(1, lines('Die Kosten', 'der Firma'), 'der')).toHaveLength(1);
+  });
+
+  it('Stück mit mehr als 65535 Zeichen: Zuordnung bleibt richtig', () => {
+    const long = `${'a'.repeat(68000)} Markt und Preis`;
+    const items = [{ str: long, x: 0, y: 0, w: 1000, h: 10 }, item('Markt')];
+    const hits = findHits(1, items, 'markt');
+    expect(hits).toHaveLength(2);
+    expect(hits[0]?.parts).toEqual([{ item: 0, start: 68001, length: 5 }]);
+    expect(textOf(items, hits[0]!)).toBe('Markt');
+  });
 });
