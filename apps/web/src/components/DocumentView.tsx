@@ -172,11 +172,18 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     }
   }, [health.isError, coreOk, retryable]);
   const refetchHealth = health.refetch;
+  // Das Abfragen endet: Bei gesundem Core (Datei selbst dauerhaft 404/500) nach {@link HEALTH_GRACE_MS}, sonst nach
+  // {@link HEALTH_MAX_MS}. Danach genügt der Takt des Statusfelds (30 s).
+  const coreDown = health.isError;
   useEffect(() => {
     if (!retryable) return;
     const timer = setInterval(() => void refetchHealth(), 5_000);
-    return () => clearInterval(timer);
-  }, [retryable, refetchHealth]);
+    const stop = setTimeout(() => clearInterval(timer), coreDown ? HEALTH_MAX_MS : HEALTH_GRACE_MS);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(stop);
+    };
+  }, [retryable, coreDown, refetchHealth]);
 
   const pageCount = meta.pageCount ?? pdf?.numPages ?? 0;
   const current = pageCount > 0 ? clamp(page, 1, pageCount) : page;
@@ -773,20 +780,23 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           Dieses PDF konnte nicht vollständig verarbeitet werden. Lesen kannst du es trotzdem.
         </p>
       ) : null}
-      {pdfFailed ? (
-        <p role="status" className="border-b border-border px-4 py-2 text-sm text-text-muted">
-          Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.
-          {retryable ? (
-            <button
-              type="button"
-              onClick={() => setAttempt((n) => n + 1)}
-              className="ml-3 font-medium text-accent hover:underline"
-            >
-              Erneut versuchen
-            </button>
-          ) : null}
-        </p>
-      ) : null}
+      {/* Der Hinweis ist ein dauerhaftes Live-Element, nur sein Inhalt wechselt; der Knopf liegt daneben, nicht darin */}
+      <div className={pdfFailed ? 'border-b border-border px-4 py-2 text-sm text-text-muted' : undefined}>
+        <span role="status">
+          {pdfFailed
+            ? 'Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.'
+            : null}
+        </span>
+        {pdfFailed && retryable ? (
+          <button
+            type="button"
+            onClick={() => setAttempt((n) => n + 1)}
+            className="ml-3 font-medium text-accent hover:underline"
+          >
+            Erneut versuchen
+          </button>
+        ) : null}
+      </div>
 
       <div className="relative flex min-h-0 flex-1">
         {meta.state === 'neu' ? (
@@ -994,6 +1004,11 @@ function DocumentScreen() {
   }
   return <Viewer key={`${kind}:${id}`} kind={kind} id={id} meta={meta} />;
 }
+
+/** So lange wird nach einem Ladefehler bei gesundem Core noch schnell nach dem Core gefragt. */
+export const HEALTH_GRACE_MS = 30_000;
+/** Längste Dauer der schnellen Abfrage, solange der Core nicht antwortet. */
+export const HEALTH_MAX_MS = 5 * 60_000;
 
 /** PDF-Anzeige (F-ORG-04) – Route mit Query-Parametern `?typ=folien|blatt&id=…&seite=…` (VERTRAEGE §5). */
 export function DocumentView() {

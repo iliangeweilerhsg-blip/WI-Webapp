@@ -199,6 +199,10 @@ interface PendingDelete {
   kind: MaterialKind;
   id: string;
   onFailed: () => void;
+  /** Das DELETE ist unterwegs: Die Löschung lässt sich nicht mehr zurücknehmen. */
+  sending?: boolean;
+  /** Erledigt, sobald das DELETE durch ist (oder gescheitert) und der Eintrag aus der Vormerkung verschwunden ist */
+  done?: Promise<void>;
 }
 
 const pending = new Map<string, PendingDelete>();
@@ -233,8 +237,19 @@ export function useVisibleItems<T extends { id: string }>(kind: MaterialKind, it
   return useMemo(() => items?.filter((item) => !hidden.has(keyOf(kind, item.id))), [items, hidden, kind]);
 }
 
+/** Anzahl der Löschungen, die sich noch rückgängig machen lassen (ohne bereits abgeschickte). */
 export function pendingMaterialDeleteCount(): number {
-  return pending.size;
+  let count = 0;
+  for (const entry of pending.values()) if (!entry.sending) count += 1;
+  return count;
+}
+
+/** Text des „Rückgängig“-Toasts passend zur aktuellen Zahl offener Löschungen; `null`, wenn keine offen ist. */
+export function pendingDeleteMessage(): string | null {
+  const open = [...pending.values()].filter((entry) => !entry.sending);
+  const [first] = open;
+  if (!first) return null;
+  return open.length === 1 ? `${KIND_WORDS[first.kind].one} gelöscht` : `${open.length} Dateien gelöscht`;
 }
 
 async function sendDelete(kind: MaterialKind, id: string, keepalive: boolean): Promise<void> {
@@ -247,9 +262,27 @@ async function sendDelete(kind: MaterialKind, id: string, keepalive: boolean): P
   }
 }
 
-async function commitDelete(key: string): Promise<void> {
+function commitDelete(key: string): Promise<void> {
   const entry = pending.get(key);
-  if (!entry) return;
+  if (!entry || entry.sending) return Promise.resolve();
+  // Ab jetzt ist die Löschung nicht mehr zurücknehmbar (sonst käme „ist wieder da“, obwohl die Datei verschwindet)
+  entry.sending = true;
+  entry.done = runDelete(key, entry);
+  return entry.done;
+}
+
+/**
+ * Wartet, bis ein bereits abgeschicktes DELETE durch ist. `true`, wenn der Eintrag gerade gelöscht wurde (dann kennt
+ * der Core die Datei nicht mehr und ein neuer Upload wird angenommen), sonst `false` (nichts zu warten).
+ */
+export async function awaitMaterialDelete(kind: MaterialKind, id: string): Promise<boolean> {
+  const entry = pending.get(keyOf(kind, id));
+  if (!entry?.sending || !entry.done) return false;
+  await entry.done;
+  return true;
+}
+
+async function runDelete(key: string, entry: PendingDelete): Promise<void> {
   try {
     await sendDelete(entry.kind, entry.id, false);
   } catch {
@@ -283,9 +316,13 @@ export function scheduleMaterialDelete(
  * meldet dann die ID der vorgemerkten Löschung als Dublette). `true`, wenn der Eintrag vorgemerkt war.
  */
 export function unscheduleMaterialDelete(kind: MaterialKind, id: string): boolean {
-  const removed = pending.delete(keyOf(kind, id));
-  if (removed) publish();
-  return removed;
+  const key = keyOf(kind, id);
+  const entry = pending.get(key);
+  // Schon abgeschickt: nicht mehr zurücknehmbar
+  if (!entry || entry.sending) return false;
+  pending.delete(key);
+  publish();
+  return true;
 }
 
 /** Titel eines Eintrags aus den geladenen Listen des Moduls (für Meldungen). */
@@ -303,7 +340,7 @@ export function cachedMaterialTitle(
 }
 
 export function undoMaterialDeletes(): void {
-  pending.clear();
+  for (const [key, entry] of [...pending]) if (!entry.sending) pending.delete(key);
   publish();
 }
 
@@ -316,7 +353,10 @@ function ensurePageHideFlush(): void {
   if (flushRegistered || typeof window === 'undefined') return;
   flushRegistered = true;
   window.addEventListener('pagehide', () => {
-    for (const entry of pending.values()) void sendDelete(entry.kind, entry.id, true).catch(() => {});
+    // Schon abgeschickte DELETEs laufen weiter (keepalive nicht nötig), kein zweites senden
+    for (const entry of pending.values()) {
+      if (!entry.sending) void sendDelete(entry.kind, entry.id, true).catch(() => {});
+    }
     pending.clear();
   });
 }

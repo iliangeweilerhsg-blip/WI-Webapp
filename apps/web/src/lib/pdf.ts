@@ -35,25 +35,69 @@ function assetBase(version: string): string {
   return `${basePath.replace(/\/+$/, '')}/pdfjs/${version}/`;
 }
 
+/** Wie oft das Anlegen des Workers schon gescheitert ist (Zähler für den Cache-Buster). */
+let workerFailures = 0;
+
+/** Adresse des Workers. Nach einem gescheiterten Start mit Cache-Buster: Chrome cacht einen gescheiterten Modul-Import. */
+export function workerSource(failures: number): string {
+  // Der Bundler ersetzt `new URL(…, import.meta.url)` durch ein eigenes Objekt, dessen `searchParams` die Adresse nicht
+  // ändern: Der Cache-Buster wird darum an den fertigen Text gehängt.
+  const href = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+  return failures > 0 ? `${href}${href.includes('?') ? '&' : '?'}retry=${failures}` : href;
+}
+
+/**
+ * Legt den Worker selbst an und wartet, bis er meldet, dass er läuft. pdf.js würde bei einem Worker, der nicht startet,
+ * dauerhaft in den „Fake-Worker“-Modus fallen und `workerSrc` danach nie mehr lesen: Ein Neuversuch käme nie an.
+ * Scheitert der Start, merken wir uns das für den Cache-Buster des nächsten Versuchs.
+ */
+function startWorker(
+  pdfjs: typeof import('pdfjs-dist'),
+): Promise<{ worker: Worker; pdfWorker: InstanceType<typeof import('pdfjs-dist').PDFWorker> }> {
+  const worker = new Worker(workerSource(workerFailures), { type: 'module' });
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onError);
+    };
+    const onMessage = () => {
+      cleanup();
+      resolve({ worker, pdfWorker });
+    };
+    const onError = (event: Event) => {
+      cleanup();
+      pdfWorker.destroy();
+      worker.terminate();
+      workerFailures += 1;
+      reject(Object.assign(new Error('Der PDF-Worker ist nicht gestartet.'), { cause: event }));
+    };
+    // Zuerst unser Zuhörer, dann erst pdf.js: Die „bereit“-Nachricht erreicht beide
+    worker.addEventListener('message', onMessage);
+    worker.addEventListener('error', onError);
+    const pdfWorker = pdfjs.PDFWorker.create({ port: worker });
+  });
+}
+
 export async function openPdf(url: string): Promise<PdfDoc> {
   const pdfjs = await import('pdfjs-dist');
-  if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url,
-    ).toString();
-  }
+  const { worker, pdfWorker } = await startWorker(pdfjs);
   const base = assetBase(pdfjs.version);
   const task = pdfjs.getDocument({
     url,
+    worker: pdfWorker,
     wasmUrl: `${base}wasm/`,
     standardFontDataUrl: `${base}standard_fonts/`,
     cMapUrl: `${base}cmaps/`,
     cMapPacked: true,
     iccUrl: `${base}iccs/`,
   });
+  const stop = () => {
+    pdfWorker.destroy();
+    worker.terminate();
+  };
   const doc = await task.promise.catch((error: unknown) => {
     void task.destroy();
+    stop();
     throw error;
   });
 
@@ -142,6 +186,7 @@ export async function openPdf(url: string): Promise<PdfDoc> {
     destroy() {
       active?.cancel();
       void task.destroy();
+      stop();
     },
   };
 }
