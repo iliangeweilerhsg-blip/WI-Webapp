@@ -154,7 +154,7 @@ Größen: **S** ≤ 1 Tag · **M** 2–3 Tage · **L** 4–5 Tage.
 
 | # | Frage | Wer | Bis |
 |---|---|---|---|
-| Q1 | Welches iPad-Modell und welcher Apple Pencil? (Squeeze/Hover) | Nutzer | Start Phase 1 |
+| Q1 | Welches iPad-Modell und welcher Apple Pencil? (Squeeze/Hover) | Nutzer | Start Phase 1 · **Beantwortet 04.11.2026:** iPad Air + Apple Pencil 2 → Druck, Neigung, Doppeltipp; **kein** Squeeze, **kein** Hover. Funktionen dürfen Squeeze/Hover nur zusätzlich nutzen (`#available`), nie voraussetzen. |
 | Q2 | Woher kommen Folien/Übungen (LMS, Mail)? Ist ein ICS-Export vorhanden? | Nutzer | Start Phase 1 |
 | Q3 | Gibt es ein iPhone? (Hotspot im Hörsaal, Wiederholung unterwegs) | Nutzer | Ende Phase 1 |
 | Q4 | Sprache der Vorlesungen pro Modul | Nutzer | Start Phase 2 |
