@@ -80,6 +80,9 @@ jobs:
   secrets:
     name: Secret-Scanning
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read # gitleaks liest die Commits des PR
     steps:
       - uses: actions/checkout@v7
         with:
