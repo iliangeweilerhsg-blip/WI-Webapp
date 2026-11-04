@@ -141,7 +141,7 @@ describe('Host-Allowlist gegen DNS-Rebinding', () => {
 });
 
 describe('Origin-Prüfung gegen CSRF', () => {
-  // Es gibt in diesem Ticket keine schreibende Route. Die Prüfung läuft vor dem Routing,
+  // Die Prüfung läuft vor dem Routing; die Route /noch-nicht-gebaut gibt es bewusst nicht,
   // darum zeigt „nicht 403“ (hier 404 not_found) zuverlässig, dass die Anfrage zugelassen wurde.
   const post = (origin?: string, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'POST') =>
     t.request({ method, url: '/api/v1/noch-nicht-gebaut', headers: origin ? { origin } : {} });

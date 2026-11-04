@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import type { Semester, SemesterUpdate } from '@sg/shared';
 import { friendlyMessage } from '../lib/api.ts';
+import { useToast } from '../lib/toast.tsx';
 import { suggestSemesterName, useCreateSemester, useSemesters, useUpdateSemester } from '../lib/semesters.ts';
 import { CoreHint } from './CoreHint.tsx';
 
@@ -60,6 +61,7 @@ export function SemesterSettings() {
   const update = useUpdateSemester();
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -76,8 +78,21 @@ export function SemesterSettings() {
 
   async function onChange(id: string, patch: SemesterUpdate) {
     setError(null);
+    const target = semesters.data?.find((s) => s.id === id);
     try {
       await update.mutateAsync({ id, patch });
+      if (patch.archived === true && target) {
+        // Das aktuelle Semester wurde archiviert: das neueste nicht archivierte rückt nach
+        const next = target.is_current
+          ? semesters.data?.find((s) => s.id !== id && s.archived_at === null)
+          : undefined;
+        if (next) {
+          await update.mutateAsync({ id: next.id, patch: { is_current: true } });
+          toast.show({ message: `${target.name} archiviert · ${next.name} ist jetzt aktuell` });
+        } else if (target.is_current) {
+          toast.show({ message: `${target.name} archiviert · Es gibt kein aktuelles Semester mehr` });
+        }
+      }
     } catch (failure) {
       setError(friendlyMessage(failure));
     }
@@ -128,7 +143,10 @@ export function SemesterSettings() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder={suggestSemesterName()}
+            placeholder={suggestSemesterName(
+              new Date(),
+              semesters.data?.map((s) => s.name),
+            )}
             autoComplete="off"
             className="mt-1 w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md font-normal"
           />

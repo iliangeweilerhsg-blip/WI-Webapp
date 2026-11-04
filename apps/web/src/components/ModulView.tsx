@@ -8,9 +8,11 @@ import { friendlyMessage } from '../lib/api.ts';
 import {
   MODULE_COLORS,
   UNDO_WINDOW_MS,
+  commitModuleDeletes,
   moduleColorVar,
+  pendingModuleDeleteCount,
   scheduleModuleDelete,
-  undoModuleDelete,
+  undoModuleDeletes,
   useUpdateModule,
   useVisibleModules,
 } from '../lib/modules.ts';
@@ -22,7 +24,7 @@ const TABS = [
   {
     id: 'vorlesungen',
     label: 'Vorlesungen',
-    empty: 'Noch keine Vorlesungen. Das Ablegen von Folien kommt in einem der nächsten Schritte.',
+    empty: 'Noch keine Vorlesungen. Folien kannst du hier bald ablegen.',
   },
   {
     id: 'uebungen',
@@ -56,10 +58,14 @@ function ModuleTabs() {
   const current = TABS.find((t) => t.id === active) ?? TABS[0];
 
   function onKeyDown(e: KeyboardEvent, index: number) {
-    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
-    if (!step) return;
+    let target: number;
+    if (e.key === 'ArrowRight') target = (index + 1) % TABS.length;
+    else if (e.key === 'ArrowLeft') target = (index - 1 + TABS.length) % TABS.length;
+    else if (e.key === 'Home') target = 0;
+    else if (e.key === 'End') target = TABS.length - 1;
+    else return;
     e.preventDefault();
-    const next = TABS[(index + step + TABS.length) % TABS.length];
+    const next = TABS[target];
     if (!next) return;
     setActive(next.id);
     document.getElementById(`tab-${next.id}`)?.focus();
@@ -122,8 +128,8 @@ function ModuleEditForm({ module, onClose }: { module: Module; onClose: () => vo
     const trimmedName = name.trim();
     if (!trimmedName || update.isPending) return;
     const ectsValue = ects.trim() === '' ? null : Number(ects.replace(',', '.'));
-    if (ectsValue !== null && (!Number.isFinite(ectsValue) || ectsValue < 0)) {
-      setError('ECTS braucht eine Zahl ab 0.');
+    if (ectsValue !== null && (!Number.isFinite(ectsValue) || ectsValue < 0 || ectsValue > 60)) {
+      setError('ECTS braucht eine Zahl zwischen 0 und 60.');
       return;
     }
     setError(null);
@@ -274,14 +280,20 @@ function ModuleView() {
   }
 
   function onDelete(target: Module) {
-    // Sofort ausblenden; gelöscht wird erst nach Ablauf des Toasts (R15)
+    // Sofort ausblenden; gelöscht wird erst nach Ablauf des Toasts (R15). Alle offenen Löschungen teilen sich
+    // einen Toast, jede neue startet die 10 s neu.
     scheduleModuleDelete(client, target, () =>
       toast.show({ message: `„${target.name}“ konnte nicht gelöscht werden. Es ist wieder da.` }),
     );
+    const count = pendingModuleDeleteCount();
     toast.show({
-      message: 'Modul gelöscht',
+      message: count === 1 ? 'Modul gelöscht' : `${count} Module gelöscht`,
       actionLabel: 'Rückgängig',
-      onAction: () => undoModuleDelete(target.id),
+      onAction: undoModuleDeletes,
+      onExpire: commitModuleDeletes,
+      onReplace: commitModuleDeletes,
+      group: 'module-delete',
+      focusAction: true,
       durationMs: UNDO_WINDOW_MS,
     });
     router.push('/');

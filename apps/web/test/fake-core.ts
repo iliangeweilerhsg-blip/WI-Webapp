@@ -53,6 +53,8 @@ export interface FakeCore {
   requests: RecordedRequest[];
   /** Solange true, scheitern alle Anfragen wie bei einem nicht laufenden Core */
   down: boolean;
+  /** Verzögerung für POST in ms (Antworten kommen später als die nächste Eingabe) */
+  latencyMs: number;
 }
 
 const json = (body: unknown, status = 200) =>
@@ -62,12 +64,15 @@ const json = (body: unknown, status = 200) =>
  * Kleiner In-Memory-Core für die Web-Tests: /health, /semesters und /modules mit den Regeln des echten Core
  * (erstes Semester wird aktuell, is_current höchstens einmal, Farbvergabe, Soft-Delete). Ersetzt `fetch`.
  */
-export function installFakeCore(initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'down'>> = {}) {
+export function installFakeCore(
+  initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'down' | 'latencyMs'>> = {},
+) {
   const core: FakeCore = {
-    semesters: initial.semesters ?? [],
-    modules: initial.modules ?? [],
+    semesters: structuredClone(initial.semesters ?? []),
+    modules: structuredClone(initial.modules ?? []),
     requests: [],
     down: initial.down ?? false,
+    latencyMs: initial.latencyMs ?? 0,
   };
   let counter = 100;
   const newId = () => `0190f6a2-0000-7000-8000-${String(++counter).padStart(12, '0')}`;
@@ -82,6 +87,9 @@ export function installFakeCore(initial: Partial<Pick<FakeCore, 'semesters' | 'm
       const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null;
       const headers = (init?.headers ?? {}) as Record<string, string>;
       core.requests.push({ method, path: path + url.search, body, headers });
+
+      if (method === 'POST' && core.latencyMs) await new Promise((r) => setTimeout(r, core.latencyMs));
+      if (core.down) throw new TypeError('Failed to fetch');
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
 
@@ -130,7 +138,7 @@ export function installFakeCore(initial: Partial<Pick<FakeCore, 'semesters' | 'm
           (c) => !used.has(c),
         );
         const created = makeModule({
-          id: newId(),
+          id: typeof body?.id === 'string' ? body.id : newId(),
           semester_id: String(body?.semester_id),
           name: String(body?.name),
           short_name: null,

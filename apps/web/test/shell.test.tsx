@@ -14,6 +14,7 @@ import { AppShell } from '../src/components/AppShell.tsx';
 import { SettingsView } from '../src/components/SettingsView.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
+import { ToastProvider } from '../src/lib/toast.tsx';
 import { installFakeCore, makeModule, makeSemester } from './fake-core.ts';
 
 export const MODULE = makeModule();
@@ -158,7 +159,9 @@ describe('Darstellung (nur in den Einstellungen)', () => {
     render(
       <ThemeProvider>
         <QueryProvider>
-          <SettingsView />
+          <ToastProvider>
+            <SettingsView />
+          </ToastProvider>
         </QueryProvider>
       </ThemeProvider>,
     );

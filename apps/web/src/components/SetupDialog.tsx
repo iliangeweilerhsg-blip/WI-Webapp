@@ -1,14 +1,38 @@
 'use client';
 
-import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { Module } from '@sg/shared';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { friendlyMessage } from '../lib/api.ts';
-import { moduleColorVar, useCreateModule } from '../lib/modules.ts';
+import { moduleColorVar } from '../lib/modules.ts';
+import { useQuickModules } from '../lib/quick-modules.ts';
 import { suggestSemesterName, useCreateSemester } from '../lib/semesters.ts';
 
 export const SETUP_SKIPPED_KEY = 'sg-setup-skipped';
 
-type Step = 'semester' | 'module';
+const FOCUSABLE =
+  'button:not([disabled]), input:not([disabled]), [href], select, textarea, [tabindex]:not([tabindex="-1"])';
+
+/** Tab und Shift+Tab bleiben im Dialog */
+export function trapTab(e: ReactKeyboardEvent<HTMLElement>): void {
+  if (e.key !== 'Tab') return;
+  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(FOCUSABLE));
+  const first = items[0];
+  const last = items.at(-1);
+  if (!first || !last) return;
+  const active = document.activeElement;
+  if (e.shiftKey && (active === first || !e.currentTarget.contains(active))) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && (active === last || !e.currentTarget.contains(active))) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+/** Fokus zurück an die Stelle vor dem Dialog, sonst in den Hauptbereich */
+function restoreFocus(previous: HTMLElement | null): void {
+  if (previous && previous !== document.body && document.contains(previous)) previous.focus();
+  else document.getElementById('main')?.focus();
+}
 
 interface SetupDialogProps {
   open: boolean;
@@ -18,45 +42,127 @@ interface SetupDialogProps {
   onDone: () => void;
 }
 
+function ModuleStep({
+  semesterId,
+  error: outerError,
+  onSkip,
+  onDone,
+}: {
+  semesterId: string;
+  error: string | null;
+  onSkip: () => void;
+  onDone: () => void;
+}) {
+  const [name, setName] = useState('');
+  const input = useRef<HTMLInputElement>(null);
+  const quick = useQuickModules({
+    semesterId,
+    keepDone: true,
+    // Nur bei Fehler kommt der Text zurück (und nur, wenn das Feld inzwischen leer ist)
+    onRestore: (text) => setName((current) => (current.trim() ? current : text)),
+  });
+
+  useEffect(() => input.current?.focus(), []);
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    quick.add(name);
+    setName(''); // sofort leeren: schnelles Weitertippen verklebt nichts
+    input.current?.focus();
+  }
+
+  const error = quick.error ?? outerError;
+  return (
+    <div className="mt-1">
+      <h2 id="setup-title" className="text-xl font-semibold">
+        Welche Module belegst du?
+      </h2>
+      <p className="mt-1 text-sm text-text-muted">
+        Tippe einen Namen und drücke Enter. Die Farbe wählt die App für dich.
+      </p>
+      <form onSubmit={onSubmit} className="mt-4">
+        <label htmlFor="setup-module" className="block text-sm font-medium">
+          Modulname
+        </label>
+        <input
+          id="setup-module"
+          ref={input}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoComplete="off"
+          placeholder="z. B. Datenbanksysteme"
+          className="mt-1 w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md"
+        />
+      </form>
+      {error ? (
+        <p role="alert" className="mt-2 text-sm text-text-muted">
+          {error}
+        </p>
+      ) : null}
+      {quick.entries.length > 0 ? (
+        <ul aria-label="Angelegte Module" className="mt-3 flex flex-col gap-1">
+          {quick.entries.map((m) => (
+            <li key={m.id} className="flex items-center gap-2 text-sm">
+              <span
+                aria-hidden="true"
+                className="size-3 shrink-0 rounded-full border border-border-strong"
+                style={
+                  m.module
+                    ? { backgroundColor: moduleColorVar(m.module.color), borderColor: 'transparent' }
+                    : {}
+                }
+              />
+              <span className={m.status === 'pending' ? 'text-text-muted' : ''}>{m.name}</span>
+              {m.status === 'pending' ? (
+                <span className="text-xs text-text-muted">wird angelegt …</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="mt-5 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={onSkip}
+          className="rounded-md px-3 py-2 text-sm text-text-muted hover:bg-surface"
+        >
+          Später
+        </button>
+        <button
+          type="button"
+          onClick={onDone}
+          className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-contrast"
+        >
+          Fertig
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Einrichtungsdialog beim ersten Start (F-ORG-01, 07 §7): Schritt 1 Semester, Schritt 2 Module.
  * Name genügt, Enter legt an, die Liste wächst, die Farbe vergibt der Core. Kein Zwang: „Später“ jederzeit.
  */
 export function SetupDialog({ open, onSkip, onDone }: SetupDialogProps) {
-  const [step, setStep] = useState<Step>('semester');
   const [semesterName, setSemesterName] = useState('');
   const [semesterId, setSemesterId] = useState<string | null>(null);
-  const [moduleName, setModuleName] = useState('');
-  const [created, setCreated] = useState<Module[]>([]);
   const [error, setError] = useState<string | null>(null);
   const semesterInput = useRef<HTMLInputElement>(null);
-  const moduleInput = useRef<HTMLInputElement>(null);
   const createSemester = useCreateSemester();
-  const createModule = useCreateModule();
 
   // Beim Öffnen frisch starten; der Vorschlag kommt aus dem aktuellen Datum (erst im Browser bekannt)
   useEffect(() => {
     if (!open) return;
-    setStep('semester');
     setSemesterName(suggestSemesterName());
     setSemesterId(null);
-    setModuleName('');
-    setCreated([]);
     setError(null);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
-    return () => previous?.focus?.();
+    semesterInput.current?.focus();
+    semesterInput.current?.select();
+    return () => restoreFocus(previous);
   }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const input = step === 'semester' ? semesterInput.current : moduleInput.current;
-    input?.focus();
-    if (step === 'semester') input?.select();
-  }, [open, step]);
 
   if (!open) return null;
 
@@ -68,32 +174,18 @@ export function SetupDialog({ open, onSkip, onDone }: SetupDialogProps) {
     try {
       const semester = await createSemester.mutateAsync({ name });
       setSemesterId(semester.id);
-      setStep('module');
     } catch (failure) {
       setError(friendlyMessage(failure));
     }
   }
 
-  async function submitModule(e: FormEvent) {
-    e.preventDefault();
-    const name = moduleName.trim();
-    if (!name || !semesterId || createModule.isPending) return;
-    setError(null);
-    try {
-      const module = await createModule.mutateAsync({ semester_id: semesterId, name });
-      setCreated((list) => [...list, module]);
-      setModuleName('');
-      moduleInput.current?.focus();
-    } catch (failure) {
-      setError(friendlyMessage(failure));
-    }
-  }
-
-  function onKeyDown(e: React.KeyboardEvent) {
+  function onKeyDown(e: ReactKeyboardEvent<HTMLElement>) {
     if (e.key === 'Escape') {
       e.preventDefault();
       onSkip();
+      return;
     }
+    trapTab(e);
   }
 
   return (
@@ -105,9 +197,11 @@ export function SetupDialog({ open, onSkip, onDone }: SetupDialogProps) {
         onKeyDown={onKeyDown}
         className="w-full max-w-[480px] rounded-lg border border-border bg-surface-raised p-6 shadow-lg"
       >
-        <p className="text-xs text-text-muted">Schritt {step === 'semester' ? 1 : 2} von 2</p>
+        <p className="text-xs text-text-muted">Schritt {semesterId ? 2 : 1} von 2</p>
 
-        {step === 'semester' ? (
+        {semesterId ? (
+          <ModuleStep semesterId={semesterId} error={error} onSkip={onSkip} onDone={onDone} />
+        ) : (
           <form onSubmit={submitSemester} className="mt-1">
             <h2 id="setup-title" className="text-xl font-semibold">
               Willkommen. In welchem Semester bist du?
@@ -148,64 +242,6 @@ export function SetupDialog({ open, onSkip, onDone }: SetupDialogProps) {
               </button>
             </div>
           </form>
-        ) : (
-          <div className="mt-1">
-            <h2 id="setup-title" className="text-xl font-semibold">
-              Welche Module belegst du?
-            </h2>
-            <p className="mt-1 text-sm text-text-muted">
-              Tippe einen Namen und drücke Enter. Die Farbe wählt die App für dich.
-            </p>
-            <form onSubmit={submitModule} className="mt-4">
-              <label htmlFor="setup-module" className="block text-sm font-medium">
-                Modulname
-              </label>
-              <input
-                id="setup-module"
-                ref={moduleInput}
-                value={moduleName}
-                onChange={(e) => setModuleName(e.target.value)}
-                autoComplete="off"
-                placeholder="z. B. Datenbanksysteme"
-                className="mt-1 w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md"
-              />
-            </form>
-            {error ? (
-              <p role="alert" className="mt-2 text-sm text-text-muted">
-                {error}
-              </p>
-            ) : null}
-            {created.length > 0 ? (
-              <ul aria-label="Angelegte Module" className="mt-3 flex flex-col gap-1">
-                {created.map((m) => (
-                  <li key={m.id} className="flex items-center gap-2 text-sm">
-                    <span
-                      aria-hidden="true"
-                      className="size-3 shrink-0 rounded-full"
-                      style={{ backgroundColor: moduleColorVar(m.color) }}
-                    />
-                    {m.name}
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            <div className="mt-5 flex items-center justify-between">
-              <button
-                type="button"
-                onClick={onSkip}
-                className="rounded-md px-3 py-2 text-sm text-text-muted hover:bg-surface"
-              >
-                Später
-              </button>
-              <button
-                type="button"
-                onClick={onDone}
-                className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-contrast"
-              >
-                Fertig
-              </button>
-            </div>
-          </div>
         )}
       </div>
     </div>

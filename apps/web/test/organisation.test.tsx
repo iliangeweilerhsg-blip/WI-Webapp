@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 
@@ -107,8 +107,11 @@ describe('Einrichtungsdialog', () => {
     ]);
     expect(sent[0]?.body).toEqual({ name: 'HS 2026' });
     const semesterId = core.semesters[0]?.id;
-    expect(sent[1]?.body).toEqual({ semester_id: semesterId, name: 'Datenbanksysteme' });
-    expect(sent[2]?.body).toEqual({ semester_id: semesterId, name: 'Statistik' });
+    const clientId = expect.stringMatching(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(sent[1]?.body).toEqual({ id: clientId, semester_id: semesterId, name: 'Datenbanksysteme' });
+    expect(sent[2]?.body).toEqual({ id: clientId, semester_id: semesterId, name: 'Statistik' });
     for (const r of sent) expect(r.headers['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/);
     expect(new Set(sent.map((r) => r.headers['Idempotency-Key'])).size).toBe(3);
 
@@ -324,6 +327,11 @@ describe('Modulseite', () => {
     expect(within(toast).getByRole('button', { name: 'Rückgängig' })).toBeInTheDocument();
     expect(nav.push).toHaveBeenCalledWith('/');
     expect(writes(core)).toEqual([]);
+    // Fokus liegt auf „Rückgängig“; solange er dort ist, läuft der Timer nicht (WCAG 2.2.1)
+    expect(within(toast).getByRole('button', { name: 'Rückgängig' })).toHaveFocus();
+    await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS + 1000);
+    expect(writes(core)).toEqual([]);
+    act(() => (document.activeElement as HTMLElement).blur());
 
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS - 500);
     expect(writes(core)).toEqual([]);
@@ -366,6 +374,7 @@ describe('Modulseite', () => {
     shell(<ModulView />);
     await screen.findByRole('heading', { level: 1, name: /Datenbanksysteme/ });
     await user.click(screen.getByRole('button', { name: 'Löschen' }));
+    act(() => (document.activeElement as HTMLElement).blur());
     core.down = true;
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS + 100);
     expect(await screen.findByText(/konnte nicht gelöscht werden/)).toBeInTheDocument();
@@ -390,7 +399,9 @@ describe('Einstellungen → Semester', () => {
     return render(
       <ThemeProvider>
         <QueryProvider>
-          <SettingsView />
+          <ToastProvider>
+            <SettingsView />
+          </ToastProvider>
         </QueryProvider>
       </ThemeProvider>,
     );

@@ -88,7 +88,8 @@ main:focus {
   .sg-nav-link:hover {
     background: var(--sg-color-border);
   }
-  .sg-nav-link-active {
+  .sg-nav-link-active,
+  .sg-nav-link-active:hover {
     background: var(--sg-color-accent-soft);
     font-weight: 600;
   }

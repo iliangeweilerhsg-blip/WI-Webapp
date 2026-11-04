@@ -28,13 +28,23 @@ export function pickCurrentSemester(semesters: readonly Semester[]): Semester | 
   return active.find((s) => s.is_current) ?? active[0];
 }
 
-/** Vorschlag für den Semesternamen: Herbstsemester ab September (der Januar gehört noch dazu), sonst Frühjahrssemester. */
-export function suggestSemesterName(date: Date = new Date()): string {
+/**
+ * Vorschlag für den Semesternamen: Herbstsemester ab September (der Januar gehört noch dazu), sonst
+ * Frühjahrssemester. Namen, die es schon gibt, werden übersprungen (HS 2026 → FS 2027 → HS 2027 …).
+ */
+export function suggestSemesterName(date: Date = new Date(), taken: readonly string[] = []): string {
   const month = date.getMonth() + 1;
-  const year = date.getFullYear();
-  if (month >= 9) return `HS ${year}`;
-  if (month === 1) return `HS ${year - 1}`;
-  return `FS ${year}`;
+  let year = date.getFullYear();
+  let autumn = month >= 9 || month === 1;
+  if (month === 1) year -= 1;
+  const used = new Set(taken.map((n) => n.trim().toLowerCase()));
+  for (let i = 0; i < 40; i += 1) {
+    const name = `${autumn ? 'HS' : 'FS'} ${year}`;
+    if (!used.has(name.toLowerCase())) return name;
+    if (autumn) year += 1;
+    autumn = !autumn;
+  }
+  return `${autumn ? 'HS' : 'FS'} ${year}`;
 }
 
 export function useCreateSemester() {

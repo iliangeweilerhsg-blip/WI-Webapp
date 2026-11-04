@@ -434,3 +434,31 @@ describe('Module', () => {
     expect(list.items).toHaveLength(1);
   });
 });
+
+describe('Nebenläufigkeit', () => {
+  it('is_current: gleichzeitige PATCHes und POSTs enden ohne Fehler mit genau einem aktuellen Semester', async () => {
+    const seeds: Semester[] = [];
+    for (const n of [1, 2, 3]) seeds.push(await createSemester({ name: `S${n}`, is_current: false }));
+    const results = await Promise.all([
+      ...seeds.map((s) =>
+        t.request({ method: 'PATCH', url: `${API}/semesters/${s.id}`, payload: { is_current: true } }),
+      ),
+      ...[4, 5].map((n) =>
+        t.request({ method: 'POST', url: `${API}/semesters`, payload: { name: `S${n}`, is_current: true } }),
+      ),
+    ]);
+    expect(results.map((r) => r.statusCode)).toEqual([200, 200, 200, 201, 201]);
+    const list = SemesterListSchema.parse((await t.request({ url: `${API}/semesters` })).json());
+    expect(list.items.filter((s) => s.is_current)).toHaveLength(1);
+  });
+
+  it('gleichzeitig mit gleicher Client-ID: ein 201, der Rest 409 conflict', async () => {
+    const id = uuidv7();
+    const results = await Promise.all(
+      [1, 2, 3].map((n) =>
+        t.request({ method: 'POST', url: `${API}/semesters`, payload: { id, name: `S${n}` } }),
+      ),
+    );
+    expect(results.map((r) => r.statusCode).sort()).toEqual([201, 409, 409]);
+  });
+});

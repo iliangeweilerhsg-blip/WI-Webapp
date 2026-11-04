@@ -9,7 +9,7 @@ import {
   type ModuleCreate,
   type ModuleUpdate,
 } from '@sg/shared';
-import { apiGet, apiSend } from './api.ts';
+import { ApiRequestError, apiGet, apiSend } from './api.ts';
 
 /** Feste Palette der Modulfarben (07 §8), Werte in `packages/ui-tokens` */
 export const MODULE_COLORS = Array.from({ length: 12 }, (_, i) => `mod-${String(i + 1).padStart(2, '0')}`);
@@ -54,7 +54,6 @@ export function useUpdateModule() {
 export const UNDO_WINDOW_MS = 10_000;
 
 interface PendingDelete {
-  timer: ReturnType<typeof setTimeout>;
   client: QueryClient;
   onFailed: () => void;
 }
@@ -91,14 +90,23 @@ export function useVisibleModules() {
   return { query, modules };
 }
 
+export function pendingModuleDeleteCount(): number {
+  return pending.size;
+}
+
 async function sendDelete(id: string, keepalive: boolean): Promise<void> {
-  await apiSend('DELETE', `/modules/${encodeURIComponent(id)}`, null, { keepalive });
+  try {
+    await apiSend('DELETE', `/modules/${encodeURIComponent(id)}`, null, { keepalive });
+  } catch (error) {
+    // 404: Das Modul ist schon weg, also ist das Ziel erreicht
+    if (error instanceof ApiRequestError && error.status === 404) return;
+    throw error;
+  }
 }
 
 async function commitDelete(id: string): Promise<void> {
   const entry = pending.get(id);
   if (!entry) return;
-  clearTimeout(entry.timer);
   try {
     await sendDelete(id, false);
   } catch {
@@ -114,25 +122,27 @@ async function commitDelete(id: string): Promise<void> {
   publish();
 }
 
-/** Blendet das Modul sofort aus und löscht es nach {@link UNDO_WINDOW_MS}, falls niemand rückgängig macht. */
+/** Blendet das Modul sofort aus. Gelöscht wird erst bei {@link commitModuleDeletes} (Ablauf des Toasts). */
 export function scheduleModuleDelete(
   client: QueryClient,
   module: Pick<Module, 'id'>,
   onFailed: () => void,
 ): void {
   if (pending.has(module.id)) return;
-  const timer = setTimeout(() => void commitDelete(module.id), UNDO_WINDOW_MS);
-  pending.set(module.id, { timer, client, onFailed });
+  pending.set(module.id, { client, onFailed });
   publish();
   ensurePageHideFlush();
 }
 
-export function undoModuleDelete(id: string): void {
-  const entry = pending.get(id);
-  if (!entry) return;
-  clearTimeout(entry.timer);
-  pending.delete(id);
+/** Macht alle vorgemerkten Löschungen rückgängig. */
+export function undoModuleDeletes(): void {
+  pending.clear();
   publish();
+}
+
+/** Sendet alle vorgemerkten Löschungen. */
+export function commitModuleDeletes(): void {
+  for (const id of [...pending.keys()]) void commitDelete(id);
 }
 
 let flushRegistered = false;
@@ -141,17 +151,13 @@ function ensurePageHideFlush(): void {
   if (flushRegistered || typeof window === 'undefined') return;
   flushRegistered = true;
   window.addEventListener('pagehide', () => {
-    for (const [id, entry] of pending) {
-      clearTimeout(entry.timer);
-      void sendDelete(id, true).catch(() => {});
-    }
+    for (const id of pending.keys()) void sendDelete(id, true).catch(() => {});
     pending.clear();
   });
 }
 
 /** Nur für Tests: alle vorgemerkten Löschungen verwerfen. */
 export function resetPendingModuleDeletes(): void {
-  for (const entry of pending.values()) clearTimeout(entry.timer);
   pending.clear();
   publish();
 }

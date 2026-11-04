@@ -74,13 +74,23 @@ const semesterNotFound = () => new HttpError(404, 'semester_not_found', 'Dieses 
 const moduleNotFound = () => new HttpError(404, 'module_not_found', 'Dieses Modul gibt es nicht.');
 const idTaken = (what: string) => new HttpError(409, 'conflict', `${what} mit dieser ID gibt es schon.`);
 
-/** Primärschlüssel-Verletzung (auch wenn Drizzle den Fehler verpackt) */
-function isUniqueViolation(error: unknown): boolean {
+/** Verletzung des Primärschlüssels dieser Tabelle (auch wenn Drizzle den Fehler verpackt). Andere Unique-Verstöße bleiben Fehler. */
+function isPrimaryKeyViolation(error: unknown, table: string): boolean {
   for (let e: unknown = error, depth = 0; e && depth < 3; depth += 1) {
-    if (typeof e === 'object' && (e as { code?: unknown }).code === '23505') return true;
+    const info = e as { code?: unknown; constraint_name?: unknown };
+    if (info.code === '23505' && info.constraint_name === `${table}_pkey`) return true;
     e = (e as { cause?: unknown }).cause;
   }
   return false;
+}
+
+/**
+ * Serialisiert alle Änderungen an Semestern (`is_current`): letzter Schreiber gewinnt, kein Unique-Fehler.
+ * Die Sperre gilt bis zum Ende der Transaktion.
+ */
+const SEMESTER_LOCK_KEY = 70070001;
+async function lockSemesters(tx: Tx): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${SEMESTER_LOCK_KEY})`);
 }
 
 const now = () => sql`now()` as unknown as Date;
@@ -149,6 +159,7 @@ async function clearCurrentExcept(tx: Tx, id: string): Promise<void> {
 export async function createSemester(db: Db, input: SemesterCreate): Promise<Semester> {
   try {
     return await db.transaction(async (tx) => {
+      await lockSemesters(tx);
       const id = input.id ?? uuidv7();
       if (input.id) {
         const [existing] = await tx.select({ id: semester.id }).from(semester).where(eq(semester.id, id));
@@ -175,13 +186,14 @@ export async function createSemester(db: Db, input: SemesterCreate): Promise<Sem
       return toApiSemester(row as SemesterRow);
     });
   } catch (error) {
-    if (isUniqueViolation(error)) throw idTaken('Ein Semester');
+    if (isPrimaryKeyViolation(error, 'semester')) throw idTaken('Ein Semester');
     throw error;
   }
 }
 
 export async function updateSemester(db: Db, id: string, input: SemesterUpdate): Promise<Semester> {
   return db.transaction(async (tx) => {
+    await lockSemesters(tx);
     const current = await findSemester(tx, id);
     const patch: Partial<typeof semester.$inferInsert> = { updatedAt: now() };
     if (input.name !== undefined) patch.name = input.name;
@@ -317,7 +329,7 @@ export async function createModule(db: Db, input: ModuleCreate): Promise<Module>
       return toApiModule(row as ModuleRow);
     });
   } catch (error) {
-    if (isUniqueViolation(error)) throw idTaken('Ein Modul');
+    if (isPrimaryKeyViolation(error, 'module')) throw idTaken('Ein Modul');
     throw error;
   }
 }
