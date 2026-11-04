@@ -13,14 +13,25 @@ if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
   process.exit(1);
 }
 
-// Pakete vor dem ersten Import aus node_modules aktualisieren (nach git pull). Nicht bei reiner Hilfe.
-const args = process.argv.slice(2);
-if (args.length > 0 && !args.includes('--help') && !args.includes('-h') && args[0] !== 'help') {
+// Pakete vor dem ersten Import aus node_modules aktualisieren (nach git pull).
+// start/migrate brauchen aktuelle Pakete und brechen sonst ab. stop braucht keine neuen Pakete und
+// muss auch offline funktionieren (kein Install, während die App läuft). Übrige Befehle (doctor …)
+// versuchen es und laufen bei einem Fehlschlag mit Warnung weiter.
+const [command] = process.argv.slice(2);
+const isHelp =
+  command === undefined ||
+  command === 'help' ||
+  process.argv.includes('--help') ||
+  process.argv.includes('-h');
+if (!isHelp && command !== 'stop') {
   const { dirname, resolve } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const { syncDeps } = await import('./deps.mjs');
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  if (!syncDeps(repoRoot)) process.exit(1);
+  if (!syncDeps(repoRoot)) {
+    if (command === 'start' || command === 'migrate') process.exit(1);
+    console.error('[sg] Weiter mit den bisher installierten Paketen.');
+  }
 }
 
 await import('./src/main.ts');

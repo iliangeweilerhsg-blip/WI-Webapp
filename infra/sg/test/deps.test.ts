@@ -73,10 +73,22 @@ describe('syncDeps', () => {
       return 0; // „Already up to date“ – Kopie bleibt unverändert
     };
     expect(syncDeps(r, run)).toBe(true);
-    expect(readFileSync(join(r, 'node_modules', '.sg-deps'), 'utf8').trim()).toMatch(/^[0-9a-f]{64}$/);
+    expect(readFileSync(join(r, 'node_modules', '.sg-deps'), 'utf8').trim()).toMatch(
+      /^[0-9a-f]{64}:[0-9a-f]{64}$/,
+    );
     expect(syncDeps(r, run)).toBe(true);
     expect(installs).toBe(1);
     writeFileSync(join(r, 'pnpm-lock.yaml'), 'lock: 2\n');
+    expect(depsInSync(r)).toBe(false);
+  });
+
+  it('verwirft den Merker, wenn danach ein anderer Stand installiert wurde', () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const r = lockRepo('lock: 1\n\n', 'lock: 1\n');
+    expect(syncDeps(r, () => 0)).toBe(true);
+    expect(depsInSync(r)).toBe(true);
+    // anderes Lockfile installiert (Kopie ändert sich), dann Lockfile byte-gleich zurück
+    writeFileSync(join(r, 'node_modules', '.pnpm', 'lock.yaml'), 'lock: alt\n');
     expect(depsInSync(r)).toBe(false);
   });
 });

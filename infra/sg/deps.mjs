@@ -14,6 +14,22 @@ function sha256(buf) {
 }
 
 /**
+ * Merker = Hash des Lockfiles plus Hash der installierten Kopie. Gilt nur, solange beide passen –
+ * ein späteres Install mit anderem Lockfile ändert die Kopie und macht den Merker ungültig.
+ * @param {string} repoRoot
+ * @param {Buffer} wanted
+ */
+function markerValue(repoRoot, wanted) {
+  let installed = 'keine';
+  try {
+    installed = sha256(readFileSync(join(repoRoot, 'node_modules', '.pnpm', 'lock.yaml')));
+  } catch {
+    // keine Kopie vorhanden
+  }
+  return `${sha256(wanted)}:${installed}`;
+}
+
+/**
  * true, wenn die installierten Pakete zum Lockfile passen, null ohne Lockfile.
  * pnpm legt beim Installieren eine Kopie des Lockfiles unter node_modules/.pnpm/lock.yaml ab.
  * @param {string} repoRoot
@@ -32,7 +48,9 @@ export function depsInSync(repoRoot) {
     // keine Kopie → Merker prüfen
   }
   try {
-    return readFileSync(join(repoRoot, 'node_modules', MARKER), 'utf8').trim() === sha256(wanted);
+    return (
+      readFileSync(join(repoRoot, 'node_modules', MARKER), 'utf8').trim() === markerValue(repoRoot, wanted)
+    );
   } catch {
     return false;
   }
@@ -56,7 +74,7 @@ export function syncDeps(repoRoot, run = defaultRun(repoRoot)) {
     try {
       writeFileSync(
         join(repoRoot, 'node_modules', MARKER),
-        `${sha256(readFileSync(join(repoRoot, 'pnpm-lock.yaml')))}\n`,
+        `${markerValue(repoRoot, readFileSync(join(repoRoot, 'pnpm-lock.yaml')))}\n`,
       );
     } catch {
       // Ohne Merker wird beim nächsten Start erneut (schnell) installiert.
