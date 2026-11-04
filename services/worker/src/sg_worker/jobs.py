@@ -84,6 +84,27 @@ def recover_stuck(conn: Conn) -> int:
         return cur.rowcount
 
 
+def fail_own_running(conn: Conn, worker_id: str, error: str) -> int:
+    """Lässt alle Jobs, die dieser Worker hält (`laeuft`, `locked_by = worker_id`), mit Retry
+    fehlschlagen. Beim (Wieder-)Verbinden aufrufen: Ein eigener Job kann dann nicht mehr laufen,
+    der Lock stammt aus einer abgebrochenen Verbindung. Backoff und `fehler` wie bei `fail`.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE job SET
+              state = CASE WHEN attempts < max_attempts THEN 'wartet' ELSE 'fehler' END,
+              run_after = CASE WHEN attempts < max_attempts
+                          THEN now() + make_interval(secs => %(base)s * power(2, attempts - 1))
+                          ELSE run_after END,
+              error = %(error)s, locked_by = NULL, locked_at = NULL, updated_at = now()
+            WHERE state = 'laeuft' AND locked_by = %(worker)s
+            """,
+            {"base": BACKOFF_BASE_SECONDS, "error": error, "worker": worker_id},
+        )
+        return cur.rowcount
+
+
 def cancel_failed_dependents(conn: Conn) -> int:
     """Bricht wartende Jobs mit gescheiterter oder unbekannter Abhängigkeit ab (kaskadierend)."""
     total = 0
