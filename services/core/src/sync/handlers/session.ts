@@ -9,7 +9,12 @@ import { SINGLE_USER_ID, type SyncOp } from '@sg/shared';
 import type { Tx } from '../../db/client.ts';
 import { marker, session, slideEvent } from '../../db/schema/index.ts';
 import { HttpError } from '../../errors.ts';
-import { transitionSession, type SessionAction, type TransitionInput } from '../../services/sessions.ts';
+import {
+  lockSessionTransitions,
+  transitionSession,
+  type SessionAction,
+  type TransitionInput,
+} from '../../services/sessions.ts';
 import { softDelete } from '../../services/trash.ts';
 import { registerOpHandler, SyncOpError, type OpHandler } from '../handlers.ts';
 
@@ -167,6 +172,18 @@ export const SESSION_HANDLERS: Readonly<Record<string, OpHandler>> = {
   'slide.change': slideChange,
   'marker.add': markerAdd,
   'marker.remove': markerRemove,
+};
+
+/**
+ * `preLock` je Operationsart (VERTRAEGE §16.2, Sperrreihenfolge): Der Dispatcher ruft `preLock(tx, op)` VOR `appendOp`
+ * der Client-Operation auf. So sperrt er die Zustandswechsel-Sperre vor `sync_stream`, wie `transitionSession`,
+ * und ein gleichzeitiger REST-Stopp ergibt keinen Deadlock (40P01).
+ */
+export const SESSION_PRELOCKS: Readonly<Record<string, (tx: Tx, op: SyncOp) => Promise<void>>> = {
+  'session.start': (tx) => lockSessionTransitions(tx),
+  'session.pause': (tx) => lockSessionTransitions(tx),
+  'session.resume': (tx) => lockSessionTransitions(tx),
+  'session.stop': (tx) => lockSessionTransitions(tx),
 };
 
 /** Meldet die Handler dieses Tickets in der Registry an (T1-08) */

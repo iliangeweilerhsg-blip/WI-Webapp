@@ -55,6 +55,8 @@ export interface TransitionInput {
   moduleId?: string;
   calendarEventId?: string | null;
   slideDeckId?: string | null;
+  /** Uhr für Folgezeiten (Job-Verzögerung). Standard: Systemzeit. Tests und Takt reichen ihre Zeit durch */
+  now?: Date;
 }
 
 type SessionRow = typeof session.$inferSelect;
@@ -174,8 +176,11 @@ function transitionInvalid(state: string, action: SessionAction): HttpError {
   );
 }
 
-/** Eine Transaktion lang die Zustandswechsel aller Sessions serialisieren (ein Nutzer, selten, kurz) */
-async function lockTransitions(tx: Tx): Promise<void> {
+/**
+ * Sperrreihenfolge (VERTRAEGE §16.2): erst diese Advisory-Sperre, dann Session-Zeilen, dann `sync_stream` (`appendOp`).
+ * Der Dispatcher ruft sie als `preLock` VOR `appendOp` der Client-Operation auf (siehe `SESSION_PRELOCKS`).
+ * Eine Transaktion lang die Zustandswechsel aller Sessions serialisieren (ein Nutzer, selten, kurz) */
+export async function lockSessionTransitions(tx: Tx): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended('sg:session-transition', 0))`);
 }
 
@@ -203,7 +208,7 @@ async function appendServerOp(
 // --- Stopp -----------------------------------------------------------------------------------
 
 /** Je Aufnahme ein Job `audio.finalize` (§3). Gibt zurück, wie viele angelegt wurden */
-async function enqueueFinalizeJobs(tx: Tx, sessionId: string): Promise<number> {
+async function enqueueFinalizeJobs(tx: Tx, sessionId: string, now: Date): Promise<number> {
   const recordings = await tx
     .select({ id: recording.id, completedAt: recording.completedAt })
     .from(recording)
@@ -215,7 +220,7 @@ async function enqueueFinalizeJobs(tx: Tx, sessionId: string): Promise<number> {
       payload: { recording_id: rec.id },
       sessionId,
       // Abgeschlossene Aufnahme sofort, sonst Stopp + 10 min (der Browser liefert noch Chunks nach)
-      ...(rec.completedAt ? {} : { runAfter: new Date(Date.now() + FINALIZE_DELAY_MS) }),
+      ...(rec.completedAt ? {} : { runAfter: new Date(now.getTime() + FINALIZE_DELAY_MS) }),
     });
   }
   return recordings.length;
@@ -231,10 +236,11 @@ async function finishSession(
   endedAt: Date,
   reason: StopReason,
   serverOp: boolean,
+  now: Date,
 ): Promise<void> {
   const { row } = loaded;
   const ended = row.startedAt && endedAt < row.startedAt ? row.startedAt : endedAt;
-  const jobs = await enqueueFinalizeJobs(tx, row.id);
+  const jobs = await enqueueFinalizeJobs(tx, row.id, now);
   await tx
     .update(session)
     .set({
@@ -331,7 +337,8 @@ async function createOfflineSession(tx: Tx, sessionId: string, input: Transition
   if (!mod) throw new HttpError(404, 'module_not_found', 'Das Modul wurde nicht gefunden.');
 
   let event: typeof calendarEvent.$inferSelect | undefined;
-  if (input.calendarEventId) {
+  if (input.calendarEventId && !mod.deletedAt) {
+    // Gelöschtes Modul: Die Session bleibt ohne Termin, sonst scheitert die Wiederherstellung an `session_event_uq`
     // Ein Termin, den der Core nicht kennt, wird nicht verknüpft (FK): die Session ist dann spontan
     [event] = await tx.select().from(calendarEvent).where(eq(calendarEvent.id, input.calendarEventId));
   }
@@ -355,6 +362,10 @@ async function createOfflineSession(tx: Tx, sessionId: string, input: Transition
           'Zu diesem Termin gibt es schon eine gestartete Session.',
           { session_id: replaced.id },
         );
+      }
+      // Ersetzen erst nach der Prüfung wie bei jedem Start: ein verpasster Termin braucht `started_at < Terminende`
+      if (replaced.state === 'verpasst' && !(input.at < event.endsAt)) {
+        throw transitionInvalid(replaced.state, 'start');
       }
       number = replaced.number;
       slideDeckId ??= replaced.slideDeckId;
@@ -414,7 +425,12 @@ async function startSession(
     if (await recordStartOffset(tx, row, input)) await emitUpdated(tx, row.id);
     return { endedId: null };
   }
-  if (row.state === 'beendet' || row.state === 'verarbeitet') throw transitionInvalid(row.state, 'start');
+  if (row.state === 'beendet' || row.state === 'verarbeitet') {
+    // Gerät startete offline: bestätigen, Offset merken. REST-Start auf eine beendete Session bleibt ungültig (§9.1)
+    if (input.origin === 'server') throw transitionInvalid(row.state, 'start');
+    if (await recordStartOffset(tx, row, input)) await emitUpdated(tx, row.id);
+    return { endedId: null };
+  }
   if (row.state === 'verpasst' && loaded.plannedEndsAt && !(at < loaded.plannedEndsAt)) {
     throw transitionInvalid(row.state, 'start');
   }
@@ -440,15 +456,15 @@ async function startSession(
     updatedAt: sql`now()`,
   };
 
-  if (other?.row.startedAt && other.row.startedAt > at) {
+  // Ein REST-Start ist immer „jetzt“; nur Geräte liefern Starts nach
+  if (input.origin !== 'server' && other?.row.startedAt && other.row.startedAt > at) {
     // Nachgelieferter Start beendet nie eine später gestartete Session: starten und sofort wieder beenden (§9.2)
     // Der Zustand bleibt bis zum Ende unverändert: `laeuft` neben der aktiven Session verletzt `session_one_active_uq`
     await tx.update(session).set(startFields).where(eq(session.id, row.id));
     if (slideDeckId) await linkDeckToSession(tx, slideDeckId, row.id);
-    if (input.origin === 'server') await appendStartOp(tx, row.id, row, input, slideDeckId);
     const started = await loadSession(tx, row.id);
     if (!started) throw notFound();
-    await finishSession(tx, started, other.row.startedAt, 'kalenderende', true);
+    await finishSession(tx, started, other.row.startedAt, 'kalenderende', true, input.now ?? new Date());
     return { endedId: null };
   }
 
@@ -457,7 +473,7 @@ async function startSession(
     // Früher gestartete aktive Session endet am Kalenderende, spätestens jetzt (§9.1)
     const planned = other.plannedEndsAt;
     const endedAt = planned && planned < at ? planned : at;
-    await finishSession(tx, other, endedAt, 'kalenderende', true);
+    await finishSession(tx, other, endedAt, 'kalenderende', true, input.now ?? new Date());
     endedId = other.row.id;
   }
 
@@ -510,7 +526,7 @@ export async function transitionSession(
   action: SessionAction,
   input: TransitionInput,
 ): Promise<{ session: Session; endedSession: Session | null }> {
-  await lockTransitions(tx);
+  await lockSessionTransitions(tx);
   let loaded = await loadSession(tx, sessionId, true);
   if (!loaded) {
     if (action !== 'start') throw notFound();
@@ -531,7 +547,10 @@ export async function transitionSession(
     }
     case 'pause': {
       if (row.state === 'pausiert') return result();
-      if (row.state !== 'laeuft') throw transitionInvalid(row.state, action);
+      if (row.state !== 'laeuft') {
+        if (lateAfterCoreStop(row, input)) return result();
+        throw transitionInvalid(row.state, action);
+      }
       await tx
         .update(session)
         .set({ state: 'pausiert', updatedAt: sql`now()` })
@@ -542,7 +561,10 @@ export async function transitionSession(
     }
     case 'resume': {
       if (row.state === 'laeuft') return result();
-      if (row.state !== 'pausiert') throw transitionInvalid(row.state, action);
+      if (row.state !== 'pausiert') {
+        if (lateAfterCoreStop(row, input)) return result();
+        throw transitionInvalid(row.state, action);
+      }
       await tx
         .update(session)
         .set({ state: 'laeuft', updatedAt: sql`now()` })
@@ -554,7 +576,7 @@ export async function transitionSession(
     case 'stop': {
       const reason = input.reason ?? 'manuell';
       if (row.state === 'laeuft' || row.state === 'pausiert') {
-        await finishSession(tx, loaded, input.at, reason, input.origin === 'server');
+        await finishSession(tx, loaded, input.at, reason, input.origin === 'server', input.now ?? new Date());
         return result();
       }
       if (row.state === 'beendet' || row.state === 'verarbeitet') {
@@ -578,6 +600,18 @@ export async function transitionSession(
       throw transitionInvalid(row.state, action);
     }
   }
+}
+
+/** Nachgelieferte pause/resume eines Geräts (`at` vor dem Ende) auf eine vom Core beendete Session: nur bestätigen (§9.1) */
+function lateAfterCoreStop(row: SessionRow, input: TransitionInput): boolean {
+  return (
+    input.origin !== 'server' &&
+    (row.state === 'beendet' || row.state === 'verarbeitet') &&
+    row.endedAt !== null &&
+    input.at < row.endedAt &&
+    row.stopReason !== null &&
+    (CORRECTABLE_REASONS as readonly string[]).includes(row.stopReason)
+  );
 }
 
 async function finalResult(
@@ -659,7 +693,7 @@ export async function runSessionTick(
   options: SessionTickOptions = {},
 ): Promise<void> {
   await db.transaction(async (tx) => {
-    await lockTransitions(tx);
+    await lockSessionTransitions(tx);
 
     // 1. Nie gestartete Sessions mit Termin
     const planned = await tx
@@ -712,12 +746,14 @@ export async function runSessionTick(
           at: await lastActivity(tx, a.row, now),
           origin: 'server',
           reason: 'absturz_wiederhergestellt',
+          now,
         });
       } else {
         await transitionSession(tx, a.row.id, 'stop', {
           at: decision.at,
           origin: 'server',
           reason: decision.reason,
+          now,
         });
       }
     }
@@ -784,7 +820,7 @@ export async function extendSession(
   config: Pick<Config, 'dataDir'>,
   now: Date,
 ): Promise<Session> {
-  await lockTransitions(tx);
+  await lockSessionTransitions(tx);
   const loaded = await loadSession(tx, sessionId, true);
   if (!loaded || loaded.row.deletedAt) throw notFound();
   if (loaded.row.state !== 'laeuft' && loaded.row.state !== 'pausiert') {
@@ -812,13 +848,17 @@ const SESSION_EVENT_KINDS = ['vorlesung', 'uebung', 'tutorium'];
  *   oder `verpasst` je nach Zeit). Eine nie gestartete folgt dem Modul und dem Termin.
  * - Abgesagt, ohne Modul, andere Art oder gelöscht: nie gestartete Session weich löschen. Gestartete bleiben.
  * - `number` wird für nie gestartete Sessions der betroffenen Module neu berechnet.
- * Sendet kein `session.updated`: Der Aufrufer meldet den Abgleich selbst (Import-Ergebnis).
+ * Sendet `session.updated` für jede angelegte, geänderte oder gelöschte Session (nach dem Commit).
  */
-export async function ensurePlannedSessions(tx: Tx, eventIds: string[]): Promise<void> {
+export async function ensurePlannedSessions(
+  tx: Tx,
+  eventIds: string[],
+  now: Date = new Date(),
+): Promise<void> {
   const ids = [...new Set(eventIds)];
   if (ids.length === 0) return;
-  const now = new Date();
   const modules = new Set<string>();
+  const touched = new Set<string>();
 
   const events = await tx.select().from(calendarEvent).where(inArray(calendarEvent.id, ids));
   const sessions = await tx
@@ -850,45 +890,57 @@ export async function ensurePlannedSessions(tx: Tx, eventIds: string[]): Promise
       s.startedAt === null && (NEVER_STARTED_STATES as readonly string[]).includes(s.state);
 
     if (!qualifies) {
-      if (existing && neverStarted(existing)) await softDelete(tx, 'session', existing.id);
+      if (existing && neverStarted(existing)) {
+        await softDelete(tx, 'session', existing.id);
+        touched.add(existing.id);
+      }
       continue;
     }
     const state = plannedState(now, event.startsAt, event.endsAt);
     if (!existing) {
-      await tx
+      const newId = uuidv7();
+      const inserted = await tx
         .insert(session)
         .values({
-          id: uuidv7(),
+          id: newId,
           userId: SINGLE_USER_ID,
           calendarEventId: event.id,
           moduleId: event.moduleId as string,
           state,
         })
-        .onConflictDoNothing();
+        .onConflictDoNothing()
+        .returning({ id: session.id });
+      if (inserted.length > 0) touched.add(newId);
     } else if (neverStarted(existing) && (existing.moduleId !== event.moduleId || existing.state !== state)) {
       await tx
         .update(session)
         .set({ moduleId: event.moduleId as string, state, updatedAt: sql`now()` })
         .where(eq(session.id, existing.id));
+      touched.add(existing.id);
     }
   }
 
   // VL-Nummern der betroffenen Module neu rechnen, nur für nie gestartete Sessions
   for (const moduleId of modules) {
-    await tx.execute(sql`
+    const renumbered = await tx.execute<{ id: string }>(sql`
       WITH ranked AS (
         SELECT id, row_number() OVER (ORDER BY starts_at, id)::int AS n FROM calendar_event
         WHERE module_id = ${moduleId} AND kind = 'vorlesung' AND NOT cancelled AND deleted_at IS NULL
       )
       UPDATE session s SET number = r.n, updated_at = now() FROM ranked r
       WHERE s.calendar_event_id = r.id AND s.deleted_at IS NULL AND s.started_at IS NULL
-        AND s.state IN ('geplant','bereit','verpasst') AND s.number IS DISTINCT FROM r.n`);
-    await tx.execute(sql`
+        AND s.state IN ('geplant','bereit','verpasst') AND s.number IS DISTINCT FROM r.n
+      RETURNING s.id`);
+    for (const r of renumbered) touched.add(r.id);
+    const cleared = await tx.execute<{ id: string }>(sql`
       UPDATE session s SET number = NULL, updated_at = now() FROM calendar_event e
       WHERE s.calendar_event_id = e.id AND s.module_id = ${moduleId} AND s.deleted_at IS NULL
         AND s.started_at IS NULL AND s.state IN ('geplant','bereit','verpasst') AND s.number IS NOT NULL
-        AND (e.kind <> 'vorlesung' OR e.cancelled OR e.deleted_at IS NOT NULL)`);
+        AND (e.kind <> 'vorlesung' OR e.cancelled OR e.deleted_at IS NOT NULL)
+      RETURNING s.id`);
+    for (const r of cleared) touched.add(r.id);
   }
+  for (const id of touched) await emitUpdated(tx, id);
 }
 
 // --- REST: Abfragen und Pflege -------------------------------------------------------------------------
@@ -987,7 +1039,7 @@ export async function updateSession(
 
 /** `DELETE /sessions/{id}`: Papierkorb mit Kaskade (404, 409 `session_active` aus `softDelete`) */
 export async function deleteSession(tx: Tx, id: string): Promise<void> {
-  await lockTransitions(tx);
+  await lockSessionTransitions(tx);
   await softDelete(tx, 'session', id);
   await emitUpdated(tx, id);
 }

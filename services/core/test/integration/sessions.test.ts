@@ -33,7 +33,8 @@ import {
 import { HttpError } from '../../src/errors.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { SyncOpError } from '../../src/sync/handlers.ts';
-import { SESSION_HANDLERS } from '../../src/sync/handlers/session.ts';
+import { appendOp } from '../../src/sync/append.ts';
+import { SESSION_HANDLERS, SESSION_PRELOCKS } from '../../src/sync/handlers/session.ts';
 import {
   ensurePlannedSessions,
   runSessionTick,
@@ -402,14 +403,14 @@ describe('Zustandsautomat (§9.1)', () => {
     expect(await opsOf(late)).toMatchObject([{ kind: 'session.stop', origin: 'server' }]);
   });
 
-  it('Zwei gleichzeitige Starts: genau eine aktive Session, kein Unique-Fehler', async () => {
+  it('Zwei gleichzeitige Starts von Geräten: genau eine aktive Session, die später gestartete gewinnt', async () => {
     for (let round = 0; round < 3; round += 1) {
       await handle.sql`TRUNCATE session, sync_op, sync_stream CASCADE`;
       const a = await mkSession();
       const b = await mkSession();
       const results = await Promise.all([
-        transition(a, 'start', { at: T(0), startedFrom: 'mac' }),
-        transition(b, 'start', { at: T(1), startedFrom: 'mac' }),
+        transition(a, 'start', { at: T(0), origin: 'ipad', deviceId: DEVICE, startedFrom: 'ipad' }),
+        transition(b, 'start', { at: T(1), origin: 'ipad', deviceId: DEVICE, startedFrom: 'ipad' }),
       ]);
       expect(results).toHaveLength(2);
       const active = (await handle.db.select().from(session)).filter((s) =>
@@ -418,6 +419,21 @@ describe('Zustandsautomat (§9.1)', () => {
       // In jeder Reihenfolge: B (später gestartet) läuft, A ist beendet und endet bei B
       expect(active.map((s) => s.id)).toEqual([b]);
       expect(await row(a)).toMatchObject({ state: 'verarbeitet', stopReason: 'kalenderende', endedAt: T(1) });
+    }
+  });
+
+  it('Zwei gleichzeitige REST-Starts: genau eine aktive Session, die zuletzt verarbeitete', async () => {
+    for (let round = 0; round < 3; round += 1) {
+      await handle.sql`TRUNCATE session, sync_op, sync_stream CASCADE`;
+      const a = await mkSession();
+      const b = await mkSession();
+      await Promise.all([
+        transition(a, 'start', { at: T(0), startedFrom: 'mac' }),
+        transition(b, 'start', { at: T(1), startedFrom: 'mac' }),
+      ]);
+      const rows = await handle.db.select().from(session);
+      expect(rows.filter((s) => ['laeuft', 'pausiert'].includes(s.state))).toHaveLength(1);
+      expect(rows.filter((s) => s.state === 'verarbeitet')).toHaveLength(1);
     }
   });
 
@@ -645,14 +661,19 @@ describe('Abweichender Offline-Start (§9.3)', () => {
     expect((await row(id)).startOffsets).toEqual([]);
   });
 
-  it('start auf beendet/verarbeitet bleibt session_transition_invalid', async () => {
-    const id = await mkSession({ state: 'beendet', startedAt: T(0), endedAt: T(5), stopReason: 'manuell' });
-    const error = await runHandler(startOp(id, 2)).catch((e: unknown) => e);
-    expect(error).toMatchObject({
-      code: 'session_transition_invalid',
-      retryable: false,
-      details: { state: 'beendet', action: 'start' },
-    });
+  it('start eines Geräts auf beendet/verarbeitet wird bestätigt und der Offset gespeichert; REST bleibt ungültig', async () => {
+    for (const state of ['beendet', 'verarbeitet'] as const) {
+      const id = await mkSession({ state, startedAt: T(0), endedAt: T(5), stopReason: 'manuell' });
+      await runHandler(startOp(id, 2));
+      const after = await row(id);
+      expect(after).toMatchObject({ state, startedAt: T(0), endedAt: T(5) });
+      expect(after.startOffsets).toEqual([{ device_id: DEVICE, offset_ms: 2 * 60_000 }]);
+      const error = await errorOf(transition(id, 'start', { at: T(9), startedFrom: 'mac' }));
+      expect(error).toMatchObject({
+        code: 'session_transition_invalid',
+        details: { state, action: 'start' },
+      });
+    }
   });
 });
 
@@ -1549,5 +1570,133 @@ describe('Folien-Upload (§9.2)', () => {
     expect((await row(other)).slideDeckId).toBe(first.id);
     const [still] = await handle.db.select().from(slideDeck).where(eq(slideDeck.id, first.id));
     expect(still!.sessionId).toBe(id); // hängt weiter an der ersten Session
+  });
+});
+
+// --- Nacharbeit aus dem Review ----------------------------------------------------------------------------------
+
+describe('Nacharbeit (Review PR #65)', () => {
+  /** Ablauf wie im Dispatcher von T1-08: preLock, appendOp der Client-Operation, Handler – eine Transaktion */
+  const dispatch = (op: SyncOp) =>
+    handle.db.transaction(async (tx) => {
+      await SESSION_PRELOCKS[op.kind]!(tx, op);
+      await appendOp(tx, op.stream, {
+        kind: op.kind,
+        data: op.data,
+        at: op.at,
+        clockUncertain: false,
+        origin: 'ipad',
+        opId: op.op_id,
+        deviceId: DEVICE,
+      });
+      await SESSION_HANDLERS[op.kind]!(tx, op, { deviceId: DEVICE, origin: 'ipad' });
+    });
+
+  it('B1: Client-Operation und REST-Stopp gleichzeitig ergeben keinen Deadlock (40P01)', async () => {
+    for (let round = 0; round < 12; round += 1) {
+      await handle.sql`TRUNCATE session, sync_op, sync_stream CASCADE`;
+      const id = await mkSession({ state: 'laeuft', startedAt: T(0), startedFrom: 'mac' });
+      const outcomes = await Promise.all([
+        dispatch(clientOp('session.pause', id, { session_id: id }, T(1).getTime())).catch((e: unknown) => e),
+        transition(id, 'stop', { at: T(30) }).catch((e: unknown) => e),
+      ]);
+      for (const outcome of outcomes) {
+        if (outcome instanceof Error) {
+          expect(outcome).toSatisfy((e: unknown) => e instanceof SyncOpError || e instanceof HttpError);
+        }
+      }
+      expect((await row(id)).state).not.toBe('laeuft');
+    }
+  });
+
+  it('B2: Ersetzen einer verpassten Session braucht started_at vor dem Terminende', async () => {
+    const eventId = await mkEvent(0, 90);
+    const planned = await mkSession({ state: 'verpasst', calendarEventId: eventId });
+    const id = uuidv7();
+    const error = await errorOf(
+      transition(id, 'start', {
+        at: T(90),
+        origin: 'ipad',
+        startedFrom: 'ipad',
+        moduleId,
+        calendarEventId: eventId,
+      }),
+    );
+    expect(error).toMatchObject({
+      code: 'session_transition_invalid',
+      details: { state: 'verpasst', action: 'start' },
+    });
+    expect((await row(planned)).deletedAt).toBeNull();
+    expect(await handle.db.select().from(session).where(eq(session.id, id))).toHaveLength(0);
+  });
+
+  it('S1: Ein REST-Start ist immer „jetzt“ und gilt nie als nachgeliefert', async () => {
+    const active = await mkSession({ state: 'laeuft', startedAt: T(30), startedFrom: 'mac' });
+    const next = await mkSession();
+    const result = await transition(next, 'start', { at: T(10), startedFrom: 'mac' });
+    expect(result.session.state).toBe('laeuft');
+    expect(result.endedSession).toMatchObject({ id: active, stop_reason: 'kalenderende' });
+    expect((await row(active)).endedAt).toEqual(T(30)); // nie vor started_at
+  });
+
+  it('S2: ensurePlannedSessions sendet session.updated für angelegte, geänderte und gelöschte Sessions', async () => {
+    const ensure = (ids: string[]) => handle.db.transaction((tx) => ensurePlannedSessions(tx, ids));
+    const eventId = await mkEvent(1000, 1090);
+    await ensure([eventId]);
+    expect(events.map((e) => (e.data as Session).calendar_event_id)).toEqual([eventId]);
+    events = [];
+    await ensure([eventId]);
+    expect(events).toHaveLength(0);
+    await handle.db.update(calendarEvent).set({ cancelled: true }).where(eq(calendarEvent.id, eventId));
+    await ensure([eventId]);
+    expect(events).toHaveLength(1);
+    expect((events[0]!.data as Session).deleted_at).not.toBeNull();
+  });
+
+  it('nachgelieferte pause/resume nach einem Stopp des Core (at < ended_at): bestätigt, keine Änderung', async () => {
+    const eventId = await mkEvent(0, 60);
+    const id = await mkSession({ state: 'laeuft', startedAt: T(0), calendarEventId: eventId });
+    await runSessionTick(handle.db, config, T(95));
+    const before = await row(id);
+    events = [];
+    await runHandler(clientOp('session.pause', id, { session_id: id }, T(50).getTime()));
+    await runHandler(clientOp('session.resume', id, { session_id: id }, T(55).getTime()));
+    expect(await row(id)).toEqual(before);
+    expect(events).toHaveLength(0);
+    // Nach dem Ende oder nach einem manuellen Stopp bleibt es ungültig
+    const late = await runHandler(clientOp('session.pause', id, { session_id: id }, T(100).getTime())).catch(
+      (e: unknown) => e,
+    );
+    expect(late).toMatchObject({ code: 'session_transition_invalid' });
+    const manual = await mkSession({ state: 'laeuft', startedAt: T(0) });
+    await handle.db.update(session).set({ state: 'beendet' }).where(eq(session.id, id));
+    await transition(manual, 'stop', { at: T(30) });
+    const early = await runHandler(
+      clientOp('session.pause', manual, { session_id: manual }, T(10).getTime()),
+    ).catch((e: unknown) => e);
+    expect(early).toMatchObject({ code: 'session_transition_invalid' });
+  });
+
+  it('Offline-Start in gelöschtem Modul mit Termin: Session ohne calendar_event_id (kein restore_conflict)', async () => {
+    const eventId = await mkEvent(0, 90);
+    await mkSession({ state: 'geplant', calendarEventId: eventId, deletedAt: T(-3) });
+    await handle.db
+      .update(courseModule)
+      .set({ deletedAt: T(-3) })
+      .where(eq(courseModule.id, moduleId));
+    const id = uuidv7();
+    await runHandler(startOp(id, 1, { calendar_event_id: eventId }));
+    expect(await row(id)).toMatchObject({ calendarEventId: null, deletedAt: T(-3) });
+  });
+
+  it('Job-Verzögerung nutzt die übergebene Uhr', async () => {
+    const id = await mkSession();
+    await handle.db
+      .insert(recording)
+      .values({ id: uuidv7(), ...base, sessionId: id, mime: 'audio/webm', codec: 'opus', startedMs: 0 });
+    await transition(id, 'start', { at: T(0), startedFrom: 'mac' });
+    await transition(id, 'stop', { at: T(30), now: T(30) });
+    const [j] = await handle.db.select().from(job).where(eq(job.sessionId, id));
+    expect(j!.runAfter).toEqual(T(40));
   });
 });

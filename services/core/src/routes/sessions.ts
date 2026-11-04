@@ -190,9 +190,11 @@ export async function sessionRoutes(app: FastifyInstance, deps: SessionRouteDeps
     },
     async (request) =>
       db.transaction(async (tx) => {
+        const stamp = now();
         await requireSession(tx, request.params.id);
         const result = await transitionSession(tx, request.params.id, 'start', {
-          at: now(),
+          at: stamp,
+          now: stamp,
           origin: 'server',
           startedFrom: request.body.started_from,
           ...(request.body.slide_deck_id ? { slideDeckId: request.body.slide_deck_id } : {}),
@@ -214,9 +216,15 @@ export async function sessionRoutes(app: FastifyInstance, deps: SessionRouteDeps
       },
       async (request) =>
         db.transaction(async (tx) => {
+          const stamp = now();
           await requireSession(tx, request.params.id);
-          return (await transitionSession(tx, request.params.id, action, { at: now(), origin: 'server' }))
-            .session;
+          return (
+            await transitionSession(tx, request.params.id, action, {
+              at: stamp,
+              now: stamp,
+              origin: 'server',
+            })
+          ).session;
         }),
     );
   }
@@ -241,10 +249,12 @@ export async function sessionRoutes(app: FastifyInstance, deps: SessionRouteDeps
         });
       }
       return db.transaction(async (tx) => {
+        const stamp = now();
         await requireSession(tx, request.params.id);
         return (
           await transitionSession(tx, request.params.id, 'stop', {
-            at: now(),
+            at: stamp,
+            now: stamp,
             origin: 'server',
             ...(reason ? { reason } : {}),
           })
