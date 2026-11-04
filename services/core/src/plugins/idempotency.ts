@@ -15,8 +15,10 @@ import { HttpError } from '../errors.ts';
  * - Gleicher Schlüssel mit anderer Anfrage: 422 `idempotency_key_reused`.
  * - Gleicher Schlüssel, erste Anfrage läuft noch: 409 `idempotency_key_in_progress`.
  *
- * Gespeichert werden nur JSON-Antworten. Der Anfrage-Hash deckt Query und JSON-Body ab; bei anderen
- * Inhalten (multipart) Content-Type und Content-Length, weil der Body dort erst der Handler liest.
+ * Gespeichert werden nur JSON-Antworten. Der Anfrage-Hash deckt Query und JSON-Body ab. Bei anderen
+ * Inhalten (multipart) hängt er an `request.idempotencyFingerprint`: Routen, die den Body schon vor dem
+ * `preHandler` lesen (Upload-Routen im `preValidation`), setzen dort einen Fingerabdruck über den
+ * Dateiinhalt (sha256) und die Felder. Ohne Fingerabdruck gelten Content-Type und Content-Length.
  */
 
 export const IDEMPOTENCY_TTL_HOURS = 24;
@@ -27,6 +29,11 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 declare module 'fastify' {
   interface FastifyRequest {
     idempotency?: { key: string; method: string; path: string };
+    /**
+     * Fingerabdruck des Anfrage-Inhalts für Nicht-JSON-Bodies, vom Upload-Parser gesetzt, bevor die
+     * Idempotency-Prüfung läuft (z. B. sha256 der Datei + Felder).
+     */
+    idempotencyFingerprint?: string;
   }
 }
 
@@ -38,9 +45,13 @@ export function hashRequest(request: FastifyRequest): string {
   const contentType = request.headers['content-type'] ?? '';
   const query = request.url.includes('?') ? request.url.slice(request.url.indexOf('?')) : '';
   const isJson = contentType.toLowerCase().startsWith('application/json');
-  const content = isJson
-    ? JSON.stringify(request.body ?? null)
-    : `${contentType}|${request.headers['content-length'] ?? ''}`;
+  // Mit Fingerabdruck zählt nur der Inhalt: Der multipart-Boundary und die Länge ändern sich je Versuch
+  const content =
+    request.idempotencyFingerprint !== undefined
+      ? `fingerprint|${request.idempotencyFingerprint}`
+      : isJson
+        ? JSON.stringify(request.body ?? null)
+        : `${contentType}|${request.headers['content-length'] ?? ''}`;
   return createHash('sha256').update(`${query}\n${content}`).digest('hex');
 }
 
