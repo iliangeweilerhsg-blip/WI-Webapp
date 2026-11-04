@@ -10,8 +10,15 @@ import type { Stroke } from '@sg/shared';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import { notebook, page, pageElement, photo, stroke, syncOp } from '../../src/db/schema/index.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
+import { appendOp } from '../../src/sync/append.ts';
+import { deleteNotebook } from '../../src/services/notebooks.ts';
 import { softDelete } from '../../src/services/trash.ts';
-import { decodeStrokePoints, MAX_STROKE_POINT_BYTES } from '../../src/sync/handlers/ink.ts';
+import {
+  createInkHandlers,
+  decodeStrokePoints,
+  MAX_STROKE_POINT_BYTES,
+  type InkOpKind,
+} from '../../src/sync/handlers/ink.ts';
 import { SyncOpError } from '../../src/sync/handlers.ts';
 import {
   AT,
@@ -641,5 +648,77 @@ describe('Rennen gegen das Löschen des Elternobjekts', () => {
     const [f] = await handle.sql`SELECT deleted_at::text AS d FROM photo WHERE id = ${data.photo_id}`;
     expect(s?.d).toBeTruthy();
     expect(f?.d).toBe(s?.d);
+  });
+});
+
+describe('Reihenfolge des Dispatchers: erst appendOp, dann Handler', () => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  it('Handler laufen mit schon geschriebener Client-Op (Strom → Fachzeilen)', async () => {
+    const nb = notebookCreateData(seed.moduleId);
+    const pc = pageCreateData(nb.notebook_id);
+    const dispatch = async (op: ReturnType<typeof makeOp>) => {
+      await handle.db.transaction(async (tx) => {
+        await appendOp(tx, op.stream, {
+          kind: op.kind,
+          data: op.data,
+          at: op.at,
+          clockUncertain: op.clock_uncertain,
+          origin: 'ipad',
+          opId: op.op_id,
+        });
+        await createInkHandlers({ dataDir })[op.kind as InkOpKind](tx, op, {
+          deviceId: null,
+          origin: 'ipad',
+        });
+      });
+    };
+    await dispatch(makeOp('notebook.create', nbStream(nb.notebook_id), nb));
+    await dispatch(makeOp('page.create', nbStream(nb.notebook_id), pc));
+    await dispatch(addStroke(nbStream(nb.notebook_id), pc.page_id, sample()));
+    const ops = await handle.db.select().from(syncOp);
+    expect(ops.map((o) => [o.seq, o.kind])).toEqual([
+      [1, 'notebook.create'],
+      [2, 'page.create'],
+      [3, 'stroke.add'],
+    ]);
+    // Fehler im Handler nach appendOp: Rollback, keine seq vergeben
+    const bad = makeOp('page.update', nbStream(nb.notebook_id), {
+      page_id: pc.page_id,
+      version: 99,
+      fields: {
+        index: 1,
+        template: 'blanko',
+        session_id: null,
+        background_slide_id: null,
+        attached_slide_id: null,
+      },
+    });
+    await expect(dispatch(bad)).rejects.toBeInstanceOf(SyncOpError);
+    expect(await handle.db.select().from(syncOp)).toHaveLength(3);
+  });
+
+  it('DELETE /notebooks/{id} und page.create gleichzeitig: kein Deadlock', async () => {
+    const nb = notebookCreateData(seed.moduleId);
+    await run(makeOp('notebook.create', nbStream(nb.notebook_id), nb));
+    const pc = pageCreateData(nb.notebook_id);
+    const op = makeOp('page.create', nbStream(nb.notebook_id), pc);
+    const dispatching = handle.db.transaction(async (tx) => {
+      await appendOp(tx, op.stream, {
+        kind: op.kind,
+        data: op.data,
+        at: op.at,
+        clockUncertain: false,
+        origin: 'ipad',
+        opId: op.op_id,
+      });
+      await sleep(300); // REST-Löschen startet jetzt und muss auf den Strom warten
+      await createInkHandlers({ dataDir })['page.create'](tx, op, { deviceId: null, origin: 'ipad' });
+    });
+    await sleep(100);
+    const deleting = deleteNotebook(handle.db, nb.notebook_id);
+    await Promise.all([dispatching, deleting]);
+    const [p] = await handle.sql`SELECT deleted_at IS NOT NULL AS gone FROM page WHERE id = ${pc.page_id}`;
+    expect(p?.gone).toBe(true);
   });
 });

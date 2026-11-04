@@ -9,7 +9,7 @@ import {
   type NotebookUpdate,
 } from '@sg/shared';
 import type { Db, DbOrTx, Tx } from '../db/client.ts';
-import { courseModule, notebook } from '../db/schema/index.ts';
+import { courseModule, notebook, syncStream } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
@@ -174,6 +174,21 @@ export async function createNotebook(db: Db, input: NotebookCreate): Promise<Not
   }
 }
 
+/**
+ * Sperrt den Strom des Notizbuchs (wie `appendOp`), bevor Zeilen des Notizbuchs gesperrt werden.
+ * Der Dispatcher geht in der Reihenfolge Strom → Handler (VERTRAEGE §16.2). Würde REST zuerst das Notizbuch
+ * sperren und dann den Strom, könnten beide sich gegenseitig blockieren (Deadlock).
+ */
+async function lockNotebookStream(tx: Tx, notebookId: string): Promise<void> {
+  const stream = notebookStream(notebookId);
+  await tx.insert(syncStream).values({ stream, headSeq: 0 }).onConflictDoNothing();
+  await tx
+    .select({ s: syncStream.stream })
+    .from(syncStream)
+    .where(eq(syncStream.stream, stream))
+    .for('update');
+}
+
 /** Server-Operation (`origin = server`) in den Strom des Notizbuchs schreiben */
 async function appendServerOp(
   tx: Tx,
@@ -197,6 +212,7 @@ async function appendServerOp(
  */
 export async function updateNotebook(db: Db, id: string, input: NotebookUpdate): Promise<Notebook> {
   return db.transaction(async (tx) => {
+    await lockNotebookStream(tx, id);
     const [row] = await tx
       .select()
       .from(notebook)
@@ -240,6 +256,7 @@ export async function updateNotebook(db: Db, id: string, input: NotebookUpdate):
 /** `DELETE /notebooks/{id}`: weich löschen mit Kaskade, dazu `notebook.delete` */
 export async function deleteNotebook(db: Db, id: string): Promise<void> {
   await db.transaction(async (tx) => {
+    await lockNotebookStream(tx, id);
     await softDelete(tx, 'notebook', id);
     await appendServerOp(tx, id, 'notebook.delete', { notebook_id: id });
   });
