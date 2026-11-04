@@ -121,7 +121,11 @@ Claude markiert im Issue, welches Modell sinnvoll ist (Label `modell:flash` nur 
 Das Gemini-Abo hat Nutzungslimits. Ist es aufgebraucht, macht Claude weiter, und die Arbeit geht nicht verloren:
 
 1. **Argon sichert Zwischenstände** als `wip:`-Commits auf `argon/issue-<nr>`. Bei einer Limit-Warnung schreibt Argon einen Kommentar mit dem aktuellen Stand und setzt `argon:limit`.
-2. **Claude prüft das Repo automatisch alle 2 Stunden** über eine geplante Aufgabe in der Claude-Session und übernimmt:
+2. **Claude prüft das Repo automatisch**, auf zwei Wegen:
+   - **Alle 5 Minuten** läuft in der Claude-Session `scripts/claude-argon-poll.sh` im Hintergrund. Das Skript ruft nur `git ls-remote` auf und verbraucht keine Token. Sobald Argon auf einen Branch `argon/*` pusht, endet es und weckt Claude. Claude reviewt dann den PR und startet das Skript neu.
+   - **Stündlich** läuft zusätzlich eine geplante Aufgabe als Sicherheitsnetz, z. B. für Labels und Kommentare ohne Push.
+
+   Dabei übernimmt Claude:
    - Issues mit `argon:limit`: sofort
    - Issues mit `status:in-arbeit`, bei denen seit über 60 Minuten weder Commit noch Kommentar kam: Die Session ist vermutlich abgebrochen, Claude übernimmt
    - weitere `agent:argon`-Issues aus der Warteschlange, wenn ein anderes Issue davon abhängt oder sie länger als 24 Stunden unbearbeitet liegen
