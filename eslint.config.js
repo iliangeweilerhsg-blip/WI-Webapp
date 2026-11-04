@@ -11,6 +11,7 @@ export default tseslint.config(
       '**/.next/**',
       '**/out/**',
       '**/generated/**',
+      '**/next-env.d.ts',
       'services/worker/**',
       'apps/ipad/**',
     ],
