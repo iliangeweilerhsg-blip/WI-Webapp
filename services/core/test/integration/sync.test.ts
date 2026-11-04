@@ -3,6 +3,7 @@
 import { sql } from 'drizzle-orm';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SyncEvent } from '@sg/shared';
+import type { Tx } from '../../src/db/client.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { appendOp, findOpById, type AppendOpInput } from '../../src/sync/append.ts';
 import { publishAfterCommit, publishEvent } from '../../src/sync/events.ts';
@@ -37,8 +38,28 @@ registerOpHandler('marker.add', async (tx, op, ctx) => {
   if (note === 'superseded')
     throw new SyncOpError('session_superseded', false, { session_id: op.data.session_id });
   if (note === 'boom') throw new Error('Handler kaputt');
+  if (note === 'fatal') throw new SyncOpError('module_not_found', false, undefined, { fatal: true });
 });
 registerOpHandler('marker.remove', async () => {});
+
+// Wie T1-02: Advisory-Sperre vor sync_stream. Mit preLock (session.pause) bzw. erst im Handler (session.resume)
+const ADVISORY_KEY = 108_108;
+const lockAdvisory = async (tx: Tx) => {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${ADVISORY_KEY})`);
+};
+/** op_ids, deren Handler lief, und ob die Client-Operation dabei schon in sync_op stand */
+const handlerSawOwnOp = new Map<string, boolean>();
+registerOpHandler(
+  'session.pause',
+  async (tx, op) => {
+    const [row] = await tx.execute<{ n: string }>(
+      sql`SELECT count(*) AS n FROM sync_op WHERE op_id = ${op.op_id}`,
+    );
+    handlerSawOwnOp.set(op.op_id, Number(row!.n) === 1);
+  },
+  { preLock: async (tx) => lockAdvisory(tx) },
+);
+registerOpHandler('session.resume', async (tx) => lockAdvisory(tx));
 
 beforeAll(async () => {
   app = await startSyncApp();
@@ -610,6 +631,79 @@ describe('Operationen, ack und Duplikate (§11.2, §16.2)', () => {
     await waitFor(() => client.of('ack').length === 200, 20_000, '200 acks');
     expect(client.of('error')).toEqual([]);
     expect(seqsOf(client, s)).toEqual(Array.from({ length: 200 }, (_, i) => i + 1));
+  });
+});
+
+describe('preLock und fatal (§16.2)', () => {
+  const sessionOp = (s: string, kind: 'session.pause' | 'session.resume'): Msg => ({
+    type: 'op',
+    op_id: uuidv7(),
+    stream: s,
+    kind,
+    at: 1_793_800_000_000,
+    clock_uncertain: false,
+    data: { session_id: s.slice('session:'.length) },
+  });
+
+  /**
+   * Zweite Transaktion wie T1-02: erst Advisory, dann appendOp im selben Strom. Dazwischen schickt der Client
+   * seine Operation, deren Handler dieselbe Advisory-Sperre braucht.
+   */
+  async function race(kind: 'session.pause' | 'session.resume') {
+    const s = sessionStream();
+    const client = await ready();
+    const op = sessionOp(s, kind);
+    let parallelError: unknown = null;
+    let locked!: () => void;
+    const isLocked = new Promise<void>((r) => (locked = r));
+    const parallel = app.handle.db
+      .transaction(async (tx) => {
+        await lockAdvisory(tx);
+        locked();
+        await sleep(200); // Dispatcher läuft inzwischen bis zur ersten Sperre
+        await appendOp(tx, s, serverOp());
+      })
+      .catch((error: unknown) => {
+        parallelError = error;
+      });
+    await isLocked;
+    client.send(op);
+    await parallel;
+    const answer = await client.next((m) => m.type === 'ack' || m.type === 'error', 10_000);
+    return { s, op, answer, parallelError, client };
+  }
+
+  it('nimmt die Sperren des Handlers vor appendOp: kein Deadlock, Handler läuft nach appendOp', async () => {
+    for (let i = 0; i < 3; i += 1) {
+      const { s, op, answer, parallelError } = await race('session.pause');
+      expect(parallelError).toBeNull();
+      expect(answer).toEqual({ type: 'ack', op_id: op.op_id, stream: s, seq: 2 });
+      expect(handlerSawOwnOp.get(op.op_id as string)).toBe(true);
+    }
+  });
+
+  it('Gegenprobe: Sperre erst im Handler führt zum Deadlock (40P01)', async () => {
+    const { answer, parallelError, client } = await race('session.resume');
+    const deadlocked =
+      (parallelError as { code?: string; cause?: { code?: string } } | null)?.cause?.code === '40P01' ||
+      (parallelError as { code?: string } | null)?.code === '40P01' ||
+      (answer.type === 'error' && answer.code === 'internal_error');
+    expect(deadlocked).toBe(true);
+    if (answer.type === 'error') expect(await client.closed()).toBe(4503);
+  });
+
+  it('SyncOpError mit fatal: error mit fatal = true und Schließen (1008)', async () => {
+    const client = await ready();
+    const op = markerOp(sessionStream());
+    (op.data as Record<string, unknown>).note = 'fatal';
+    client.send(op);
+    expect(await client.next((m) => m.type === 'error')).toMatchObject({
+      code: 'module_not_found',
+      op_id: op.op_id,
+      retryable: false,
+      fatal: true,
+    });
+    expect(await client.closed()).toBe(1008);
   });
 });
 

@@ -23,7 +23,7 @@ import {
 } from '@sg/shared';
 import type { ZodError } from 'zod';
 import { appendOp, findOpById, type CommittedOp } from './append.ts';
-import { getOpHandler, SERVER_ONLY_KINDS, SyncOpError } from './handlers.ts';
+import { getOpRegistration, SERVER_ONLY_KINDS, SyncOpError } from './handlers.ts';
 import type { SyncHub } from './hub.ts';
 import { CLOSE, syncLimits } from './limits.ts';
 import {
@@ -746,8 +746,8 @@ export class SyncConnection {
       return this.duplicateAck(entry, existing.stream, existing.seq);
     }
 
-    const handler = getOpHandler(op.kind);
-    if (!handler) {
+    const registration = getOpRegistration(op.kind);
+    if (!registration) {
       // Server-Lücke, kein Fehler des Clients: wiederholbar (der Client legt sie nach 5 Versuchen ab, §11.2)
       this.hub.logger.error({ kind: op.kind }, 'Sync: kein Handler registriert');
       return this.failOp(entry, 'internal_error', {
@@ -760,7 +760,8 @@ export class SyncConnection {
     const origin = this.client;
     try {
       await this.hub.db.transaction(async (tx) => {
-        await handler(tx, op, { deviceId: this.deviceId, origin });
+        // Reihenfolge (§16.2): Sperren des Handlers, dann sync_stream (appendOp), dann der Handler
+        if (registration.preLock) await registration.preLock(tx, op);
         const result = await appendOp(tx, op.stream, {
           kind: op.kind,
           data: op.data,
@@ -770,8 +771,9 @@ export class SyncConnection {
           opId: op.op_id,
           deviceId: this.deviceId,
         });
-        // Gleichzeitiges Duplikat: Handler-Änderung zurückrollen
+        // Gleichzeitiges Duplikat: nichts geschrieben, Rollback, ursprüngliches ack
         if (result.duplicate) throw new DuplicateOp(result.seq);
+        await registration.handler(tx, op, { deviceId: this.deviceId, origin });
       });
     } catch (error) {
       if (error instanceof DuplicateOp) return this.duplicateAck(entry, op.stream, error.seq);
@@ -783,10 +785,17 @@ export class SyncConnection {
             details: error.details,
           });
         }
-        if (error.code === 'session_superseded') {
+        // session_superseded ist immer fatal (§11.2, §9.2), auch wenn der Handler fatal nicht setzt
+        if (error.code === 'session_superseded' || error.fatal) {
+          const closeCode =
+            error.code === 'session_superseded'
+              ? CLOSE.superseded
+              : error.code === 'device_token_invalid'
+                ? CLOSE.tokenInvalid
+                : CLOSE.policyViolation;
           return this.failOp(entry, error.code, {
             retryable: false,
-            closeCode: CLOSE.superseded,
+            closeCode,
             details: error.details,
           });
         }

@@ -12,24 +12,51 @@ export interface OpHandlerContext {
 export type OpHandler = (tx: Tx, op: SyncOp, ctx: OpHandlerContext) => Promise<void>;
 
 /**
+ * Sperren, die der Handler braucht, **vor** `appendOp` nehmen (z. B. Advisory-Lock und Session-Zeile in T1-02).
+ * `appendOp` sperrt die `sync_stream`-Zeile. Nimmt der Handler seine Sperren erst danach, entsteht mit einer
+ * Transaktion, die in der Reihenfolge Advisory → `sync_stream` sperrt, ein Deadlock (40P01).
+ */
+export type OpPreLock = (tx: Tx, op: SyncOp) => Promise<void>;
+
+export interface OpHandlerOptions {
+  preLock?: OpPreLock;
+}
+
+export interface OpRegistration {
+  handler: OpHandler;
+  preLock: OpPreLock | undefined;
+}
+
+/**
  * Fachlicher Fehler einer Operation. Der Sync-Server macht daraus eine `error`-Nachricht (§11.2).
- * `retryable = true` gilt immer als fatal für die Verbindung (Code 4503).
+ *
+ * - `retryable = true` gilt immer als fatal für die Verbindung (Code 4503).
+ * - `session_superseded` ist immer fatal (Code 4409), auch ohne `fatal`.
+ * - `fatal = true` bei anderen nicht wiederholbaren Fehlern: `error` mit `fatal = true`, dann Schließen
+ *   (`device_token_invalid` mit 4401, sonst 1008).
  */
 export class SyncOpError extends Error {
   readonly code: SyncErrorCode;
   readonly retryable: boolean;
   readonly details: Record<string, unknown> | undefined;
+  readonly fatal: boolean;
 
-  constructor(code: SyncErrorCode, retryable: boolean, details?: Record<string, unknown>) {
+  constructor(
+    code: SyncErrorCode,
+    retryable: boolean,
+    details?: Record<string, unknown>,
+    options: { fatal?: boolean } = {},
+  ) {
     super(code);
     this.name = 'SyncOpError';
     this.code = code;
     this.retryable = retryable;
     this.details = details;
+    this.fatal = retryable || code === 'session_superseded' || options.fatal === true;
   }
 }
 
-const handlers = new Map<SyncOp['kind'], OpHandler>();
+const handlers = new Map<SyncOp['kind'], OpRegistration>();
 
 /** Operationen, die nur der Core selbst schreibt (§11.2). Von einem Client: `op_not_allowed` */
 export const SERVER_ONLY_KINDS: ReadonlySet<SyncOp['kind']> = new Set([
@@ -42,19 +69,33 @@ export const SERVER_ONLY_KINDS: ReadonlySet<SyncOp['kind']> = new Set([
 /**
  * Handler für eine Operationsart registrieren (VERTRAEGE §16.2).
  *
- * Der Dispatcher (`sync/connection.ts`) prüft vorher das Schema und Duplikate (`findOpById`), ruft dann den
- * Handler und `appendOp` in **einer** Transaktion auf. Handler prüfen Duplikate nie selbst und rufen
- * `appendOp` nicht auf. Pro Art gibt es genau einen Handler, ein zweiter wirft.
+ * Der Dispatcher (`sync/connection.ts`) prüft vorher das Schema und Duplikate (`findOpById`, gleiche
+ * Operation → ursprüngliches `ack`). Dann in **einer** Transaktion:
+ *   1. `opts.preLock` (falls gesetzt): Sperren des Handlers,
+ *   2. `appendOp` (die Client-Operation steht vor allen Server-Operationen, die der Handler schreibt),
+ *      bei `duplicate = true` Rollback und ursprüngliches `ack`,
+ *   3. der Handler.
+ * Handler prüfen Duplikate nie selbst und rufen `appendOp` für die Client-Operation nicht auf.
+ * Pro Art gibt es genau einen Handler, ein zweiter wirft.
  */
-export function registerOpHandler(kind: SyncOp['kind'], handler: OpHandler): void {
+export function registerOpHandler(
+  kind: SyncOp['kind'],
+  handler: OpHandler,
+  opts: OpHandlerOptions = {},
+): void {
   if (SERVER_ONLY_KINDS.has(kind)) {
     throw new Error(`${kind} ist eine Server-Operation und hat keinen Client-Handler`);
   }
   if (handlers.has(kind)) throw new Error(`Für ${kind} ist schon ein Handler registriert`);
-  handlers.set(kind, handler);
+  handlers.set(kind, { handler, preLock: opts.preLock });
 }
 
 /** Registrierter Handler oder `undefined` */
 export function getOpHandler(kind: SyncOp['kind']): OpHandler | undefined {
+  return handlers.get(kind)?.handler;
+}
+
+/** Handler samt `preLock` oder `undefined` */
+export function getOpRegistration(kind: SyncOp['kind']): OpRegistration | undefined {
   return handlers.get(kind);
 }
