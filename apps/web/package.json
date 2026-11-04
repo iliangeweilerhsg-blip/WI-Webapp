@@ -15,6 +15,7 @@
     "@sg/ui-tokens": "workspace:*",
     "@tanstack/react-query": "5.105.3",
     "next": "15.5.29",
+    "pdfjs-dist": "6.4.299",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

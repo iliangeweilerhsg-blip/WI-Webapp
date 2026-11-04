@@ -20,6 +20,7 @@ import { QueryProvider } from '../src/lib/query.tsx';
 import { suggestSemesterName } from '../src/lib/semesters.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { ToastProvider } from '../src/lib/toast.tsx';
+import { UploadProvider } from '../src/lib/uploads.tsx';
 import { installFakeCore, makeModule, makeSemester, type FakeCore } from './fake-core.ts';
 
 function shell(children: ReactNode = <p>Inhalt</p>) {
@@ -37,7 +38,9 @@ function modulePage() {
     <ThemeProvider>
       <QueryProvider>
         <ToastProvider>
-          <ModulView />
+          <UploadProvider>
+            <ModulView />
+          </UploadProvider>
         </ToastProvider>
       </QueryProvider>
     </ThemeProvider>,
@@ -243,7 +246,7 @@ describe('Modulseite', () => {
     const tabs = screen.getAllByRole('tab').map((t) => t.textContent);
     expect(tabs).toEqual(['Vorlesungen', 'Übungen', 'Konzepte', 'Altklausuren']);
     expect(screen.getByRole('tab', { name: 'Vorlesungen' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tabpanel')).toHaveTextContent('Noch keine Vorlesungen');
+    expect(await screen.findByText('Noch keine Folien.')).toBeInTheDocument();
     await user.click(screen.getByRole('tab', { name: 'Altklausuren' }));
     expect(screen.getByRole('tabpanel')).toHaveTextContent('Noch keine Altklausuren');
     await user.keyboard('{ArrowRight}');
@@ -397,7 +400,9 @@ describe('Einstellungen → Semester', () => {
       <ThemeProvider>
         <QueryProvider>
           <ToastProvider>
-            <SettingsView />
+            <UploadProvider>
+              <SettingsView />
+            </UploadProvider>
           </ToastProvider>
         </QueryProvider>
       </ThemeProvider>,

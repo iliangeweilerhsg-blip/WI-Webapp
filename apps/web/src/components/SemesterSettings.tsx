@@ -81,6 +81,14 @@ export function SemesterSettings() {
     const target = semesters.data?.find((s) => s.id === id);
     try {
       await update.mutateAsync({ id, patch });
+      if (patch.archived === false && target?.archived_at) {
+        // Ist sonst kein Semester aktuell, wird das wiederhergestellte aktuell – sonst bliebe die Seitenleiste leer
+        const hasCurrent = semesters.data?.some((s) => s.is_current && s.archived_at === null);
+        if (!hasCurrent) {
+          await update.mutateAsync({ id, patch: { is_current: true } });
+          toast.show({ message: `${target.name} wiederhergestellt · ${target.name} ist jetzt aktuell` });
+        }
+      }
       if (patch.archived === true && target) {
         // Das aktuelle Semester wurde archiviert: das neueste nicht archivierte rückt nach
         const next = target.is_current

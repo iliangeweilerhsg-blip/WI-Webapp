@@ -53,25 +53,42 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const current = useRef<ToastItem | null>(null);
   const remaining = useRef(0);
   const actionRef = useRef<HTMLButtonElement>(null);
+  const elementRef = useRef<HTMLDivElement>(null);
 
-  const show = useCallback((options: ToastOptions) => {
-    const old = current.current;
-    if (old?.onReplace && old.group !== options.group) old.onReplace();
-    counter.current += 1;
-    const next = { ...options, id: counter.current };
-    current.current = next;
-    remaining.current = options.durationMs ?? DEFAULT_DURATION_MS;
-    setPaused(false);
-    setToast(next);
+  /** Lag der Fokus im Toast (z. B. auf „Rückgängig“), geht er in den Hauptbereich, statt auf <body> zu fallen. */
+  const rescueFocus = useCallback(() => {
+    const el = elementRef.current;
+    if (el && document.activeElement && el.contains(document.activeElement)) {
+      document.getElementById('main')?.focus();
+    }
   }, []);
+
+  const show = useCallback(
+    (options: ToastOptions) => {
+      const old = current.current;
+      if (old?.onReplace && old.group !== options.group) old.onReplace();
+      if (!options.focusAction) rescueFocus();
+      counter.current += 1;
+      const next = { ...options, id: counter.current };
+      current.current = next;
+      remaining.current = options.durationMs ?? DEFAULT_DURATION_MS;
+      setPaused(false);
+      setToast(next);
+    },
+    [rescueFocus],
+  );
 
   const api = useMemo(() => ({ show }), [show]);
 
-  const dismiss = useCallback((id: number) => {
-    if (current.current?.id !== id) return;
-    current.current = null;
-    setToast(null);
-  }, []);
+  const dismiss = useCallback(
+    (id: number) => {
+      if (current.current?.id !== id) return;
+      rescueFocus();
+      current.current = null;
+      setToast(null);
+    },
+    [rescueFocus],
+  );
 
   useEffect(() => {
     if (!toast || paused) return;
@@ -101,6 +118,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toast ? (
           <div
             key={toast.id}
+            ref={elementRef}
             role="status"
             onMouseEnter={() => setPaused(true)}
             onMouseLeave={() => setPaused(false)}

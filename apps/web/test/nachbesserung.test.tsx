@@ -19,6 +19,7 @@ import { QueryProvider } from '../src/lib/query.tsx';
 import { suggestSemesterName } from '../src/lib/semesters.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { ToastProvider } from '../src/lib/toast.tsx';
+import { UploadProvider } from '../src/lib/uploads.tsx';
 import { uuidv7 } from '../src/lib/uuid.ts';
 import { installFakeCore, makeModule, makeSemester, type FakeCore } from './fake-core.ts';
 
@@ -37,7 +38,9 @@ function modulePage() {
     <ThemeProvider>
       <QueryProvider>
         <ToastProvider>
-          <ModulView />
+          <UploadProvider>
+            <ModulView />
+          </UploadProvider>
         </ToastProvider>
       </QueryProvider>
     </ThemeProvider>,
@@ -111,7 +114,7 @@ describe('Einrichtungsdialog (Nachbesserung)', () => {
     ]);
   });
 
-  it('bei einem Fehler kommt der Text zurück ins Feld', async () => {
+  it('bei einem Fehler bleibt der Name in der Liste „Nicht angelegt“', async () => {
     const core = installFakeCore();
     const user = userEvent.setup();
     render(app());
@@ -120,7 +123,9 @@ describe('Einrichtungsdialog (Nachbesserung)', () => {
     const input = await within(dialog).findByLabelText('Modulname');
     core.down = true;
     await user.type(input, 'Alpha{Enter}');
-    await waitFor(() => expect(input).toHaveValue('Alpha'));
+    // Der Name geht nicht verloren: er steht in der Liste „Nicht angelegt“ mit „Erneut versuchen“
+    const failed = await within(dialog).findByRole('list', { name: 'Nicht angelegt' });
+    expect(within(failed).getByText('Alpha')).toBeInTheDocument();
     expect(within(dialog).getByRole('alert')).toHaveTextContent('Core nicht erreichbar');
     expect(within(dialog).queryByRole('list', { name: 'Angelegte Module' })).not.toBeInTheDocument();
   });
@@ -212,7 +217,7 @@ describe('Modulseite (Nachbesserung)', () => {
     modulePage();
     await screen.findByRole('heading', { level: 1, name: /Datenbanksysteme/ });
     screen.getByRole('tab', { name: 'Vorlesungen' }).focus();
-    expect(screen.getByRole('tabpanel')).toHaveTextContent('Folien kannst du hier bald ablegen.');
+    expect(await within(screen.getByRole('tabpanel')).findByText('Noch keine Folien.')).toBeInTheDocument();
     await user.keyboard('{End}');
     expect(screen.getByRole('tab', { name: 'Altklausuren' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Altklausuren' })).toHaveFocus();
@@ -322,7 +327,9 @@ describe('Semester archivieren (Nachbesserung)', () => {
       <ThemeProvider>
         <QueryProvider>
           <ToastProvider>
-            <SettingsView />
+            <UploadProvider>
+              <SettingsView />
+            </UploadProvider>
           </ToastProvider>
         </QueryProvider>
       </ThemeProvider>,

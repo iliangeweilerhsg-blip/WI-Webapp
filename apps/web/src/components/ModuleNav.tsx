@@ -8,20 +8,18 @@ import { moduleHref } from '../lib/nav.ts';
 import { moduleColorVar, useVisibleModules } from '../lib/modules.ts';
 import { useQuickModules } from '../lib/quick-modules.ts';
 import { pickCurrentSemester, useSemesters } from '../lib/semesters.ts';
+import { FailedModules } from './FailedModules.tsx';
 import { Icon } from './Icon.tsx';
 
 const note = 'sg-collapsible px-3 py-2 text-sm text-text-muted';
 const actionLink = 'mt-1 block font-medium text-accent hover:underline';
 
+type Quick = ReturnType<typeof useQuickModules>;
+
 /** Inline-Namensfeld: Enter legt im aktuellen Semester an, das Feld leert sich sofort. */
-function QuickAdd({ semesterId, onClose }: { semesterId: string; onClose: () => void }) {
+function QuickAdd({ quick, onClose }: { quick: Quick; onClose: () => void }) {
   const [name, setName] = useState('');
   const input = useRef<HTMLInputElement>(null);
-  const quick = useQuickModules({
-    semesterId,
-    keepDone: false,
-    onRestore: (text) => setName((current) => (current.trim() ? current : text)),
-  });
 
   useEffect(() => input.current?.focus(), []);
 
@@ -53,20 +51,6 @@ function QuickAdd({ semesterId, onClose }: { semesterId: string; onClose: () => 
           className="w-full rounded-md border border-border-strong bg-bg px-2 py-1 text-sm"
         />
       </form>
-      {quick.error ? (
-        <p role="alert" className="px-2 pt-1 text-xs text-text-muted">
-          {quick.error}
-        </p>
-      ) : null}
-      {quick.entries.length > 0 ? (
-        <ul aria-label="Wird angelegt" className="pt-1">
-          {quick.entries.map((m) => (
-            <li key={m.id} className="px-2 py-1 text-sm text-text-muted">
-              {m.name} …
-            </li>
-          ))}
-        </ul>
-      ) : null}
     </li>
   );
 }
@@ -78,6 +62,7 @@ export function ModuleNav({ onOpenSetup }: { onOpenSetup?: () => void }) {
   const pathname = usePathname();
   const activeId = useSearchParams().get('id');
   const [adding, setAdding] = useState(false);
+  const plusButton = useRef<HTMLButtonElement>(null);
 
   const current = semesters.data ? pickCurrentSemester(semesters.data) : undefined;
   const failure = semesters.isError ? semesters.error : query.isError ? query.error : null;
@@ -86,6 +71,14 @@ export function ModuleNav({ onOpenSetup }: { onOpenSetup?: () => void }) {
   const noCurrent = semesters.data !== undefined && !noSemester && !current;
   const modules = current ? visible?.filter((m) => m.semester_id === current.id) : [];
   const ready = !loading && !failure;
+  // Die Warteschlange gehört der Seitenleiste, nicht dem Eingabefeld: Schließt man das Feld, läuft sie weiter
+  const quick = useQuickModules({ semesterId: current?.id ?? null, keepDone: false });
+
+  function closeAdd() {
+    setAdding(false);
+    // Fokus zurück auf das „+“, sonst landet er auf dem Body
+    requestAnimationFrame(() => plusButton.current?.focus());
+  }
 
   return (
     <div>
@@ -99,6 +92,7 @@ export function ModuleNav({ onOpenSetup }: { onOpenSetup?: () => void }) {
         </span>
         {current ? (
           <button
+            ref={plusButton}
             type="button"
             onClick={() => setAdding((a) => !a)}
             aria-label="Modul anlegen"
@@ -117,8 +111,22 @@ export function ModuleNav({ onOpenSetup }: { onOpenSetup?: () => void }) {
             {isUnreachable(failure) ? 'Core nicht erreichbar' : friendlyMessage(failure)}
           </li>
         ) : null}
-        {ready && current && adding ? (
-          <QuickAdd semesterId={current.id} onClose={() => setAdding(false)} />
+        {ready && current && adding ? <QuickAdd quick={quick} onClose={closeAdd} /> : null}
+        {ready && current && quick.entries.length > 0 ? (
+          <li className="sg-collapsible">
+            <ul aria-label="Wird angelegt" className="px-1">
+              {quick.entries.map((m) => (
+                <li key={m.id} className="px-2 py-1 text-sm text-text-muted">
+                  {m.name} …
+                </li>
+              ))}
+            </ul>
+          </li>
+        ) : null}
+        {ready && current ? (
+          <li className="sg-collapsible px-3 text-sm text-text-muted empty:hidden">
+            <FailedModules semesterId={current.id} message={quick.error} onRetry={quick.retryFailed} />
+          </li>
         ) : null}
         {ready && noSemester ? (
           <li className={note}>
