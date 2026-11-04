@@ -1,0 +1,13 @@
+# Gitleaks: Standardregeln plus eine eng gefasste Ausnahme.
+# Der Wert unten ist ein erfundenes Gerätetoken aus den Schema-Beispielen
+# (packages/schemas/examples, PairResponse/SyncHello). Er war nie ein echtes Geheimnis.
+# Neue Beispiele bitte mit genau diesem Wert bauen, statt weitere Ausnahmen anzulegen.
+title = "Studien-Gehirn"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Erfundenes Beispiel-Token in packages/schemas/examples"
+regexTarget = "secret"
+regexes = ['''^q5hT0mXy3pM2bW8eN1rV7cK4sL9dF6gH0jA3zQ1uY2o$''']
