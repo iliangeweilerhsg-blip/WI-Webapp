@@ -20,7 +20,7 @@ gh issue list --state open --limit 100 \
   --json number,title,labels,body
 ```
 
-Ein Issue mit „Abhängig von #X“ überspringen, solange #X noch offen bzw. der zugehörige PR nicht gemergt ist (`gh issue view <X> --json state --jq .state` ist nicht `CLOSED`; in der Schlussliste nennen).
+Ein Issue mit „Abhängig von #X“ nur bearbeiten, wenn `gh issue view <X> --json state,stateReason` die Werte `CLOSED` und `COMPLETED` liefert. Sonst überspringen und das Issue in der Schlussliste nennen (auch wenn #X als `NOT_PLANNED` geschlossen wurde).
 
 ### Arbeitsablauf pro Issue
 
