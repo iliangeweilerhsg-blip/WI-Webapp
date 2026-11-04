@@ -348,6 +348,51 @@ describe('PDF-Anzeige (Nacharbeit)', () => {
     vi.useRealTimers();
   });
 
+  it('passwortgeschütztes PDF: eigener Text, keine Aktion zum Wiederholen', async () => {
+    installFakeCore({ decks: [makeDeck({ id: DECK.id, title: 'Geheim', ingest_state: 'neu' })] });
+    pdf.openPdf.mockRejectedValueOnce(
+      Object.assign(new Error('No password given'), { name: 'PasswordException' }),
+    );
+    nav.search = `typ=folien&id=${DECK.id}`;
+    view();
+    expect(
+      await screen.findByText(
+        'Dieses PDF ist passwortgeschützt. Speichere es ohne Passwort und zieh es noch einmal herein.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).not.toBeInTheDocument();
+  });
+
+  it('Core kennt die Seiten, pdf.js scheitert am Laden: Hinweis mit „Erneut versuchen“', async () => {
+    deckCore();
+    pdf.openPdf.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const user = userEvent.setup();
+    await openViewer();
+    expect(await screen.findByText(/nicht scharf anzeigen/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
+    expect(pdf.openPdf).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.queryByText(/nicht scharf anzeigen/)).not.toBeInTheDocument());
+  });
+
+  it('Ladefehler, solange der Core weg war: versucht von selbst noch einmal, sobald er wieder erreichbar ist', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = deckCore();
+    pdf.openPdf.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await openViewer();
+    expect(await screen.findByText(/nicht scharf anzeigen/)).toBeInTheDocument();
+    core.down = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    core.down = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    await waitFor(() => expect(pdf.openPdf).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/nicht scharf anzeigen/)).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
   it('Suche zeigt „Sucht …“, solange pdf.js noch lädt, nicht „Kein Treffer“', async () => {
     deckCore();
     let release: (doc: typeof pdf.doc) => void = () => {};

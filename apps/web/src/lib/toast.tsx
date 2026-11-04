@@ -31,10 +31,26 @@ export interface ToastOptions {
 
 interface ToastItem extends ToastOptions {
   id: number;
+  /** Bei zusammengefassten „Rückgängig“-Toasts: die einzelnen offenen Löschungen */
+  parts?: ToastOptions[];
 }
 
 interface ToastApi {
   show: (toast: ToastOptions) => void;
+  /** Nimmt die Toasts einer Gruppe zurück, ohne `onAction`/`onExpire` auszulösen (z. B. weil die Löschung zurückgenommen wurde) */
+  dismissGroup: (group: string) => void;
+}
+
+/** Fasst offene Löschungen zu einem Toast zusammen: ein Klick macht alle rückgängig, alle laufen gemeinsam ab. */
+function combine(parts: ToastOptions[], newest: ToastOptions): ToastOptions {
+  const messages = [...new Set(parts.map((p) => p.message))];
+  return {
+    ...newest,
+    message: messages.join(' · '),
+    onAction: () => parts.forEach((p) => p.onAction?.()),
+    onExpire: () => parts.forEach((p) => p.onExpire?.()),
+    parts,
+  } as ToastOptions;
 }
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -44,18 +60,18 @@ const DEFAULT_DURATION_MS = 5_000;
 /** So viele Toasts warten höchstens hinter dem sichtbaren. Ältere bloße Meldungen verfallen zuerst. */
 export const MAX_WAITING_TOASTS = 3;
 
-/** „Rückgängig“ (hat `onExpire`) und Toasts mit Aktion werden nie von einer anderen Meldung verdrängt. */
-function isProtected(toast: ToastOptions): boolean {
-  return Boolean(toast.onExpire || toast.actionLabel);
-}
-
 /**
- * Ruhige Rückmeldung unten mittig, eine Meldung zur Zeit (07 §7). Neue Meldungen verdrängen nur eine bloße
- * Meldung ohne Aktion. Ein sichtbarer Toast mit Aktion, vor allem „Rückgängig“, läuft immer zu Ende: Alles
- * andere reiht sich dahinter ein (höchstens {@link MAX_WAITING_TOASTS}, die ältesten bloßen Meldungen verfallen
- * zuerst, Toasts mit `onExpire` nie, sie tragen eine offene Löschung). Eine Dublette-Meldung löst so nie ein
- * Löschen vorzeitig aus. Der Timer pausiert, solange die Maus darüber ist. Der Fokus pausiert nicht: Er liegt
- * nach dem Löschen automatisch auf der Aktion, Tastaturnutzer erreichen „Rückgängig“ sofort (WCAG 2.2.1).
+ * Ruhige Rückmeldung unten mittig, eine Meldung zur Zeit (07 §7). Geschützt ist nur ein Toast mit `onExpire`, also
+ * eine offene Löschung („Rückgängig“): Er wird von nichts vorzeitig beendet, das Löschen löst nie eine andere Meldung aus.
+ * - Alles andere (bloße Meldungen, Toasts mit Aktion wie „Anzeigen“) wartet hinter einem geschützten Toast
+ *   (höchstens {@link MAX_WAITING_TOASTS}, die ältesten bloßen Meldungen verfallen) und wird sonst vom neuesten ersetzt.
+ * - Ein neuer „Rückgängig“-Toast verdrängt sofort jeden Toast ohne `onExpire`. Hatte der verdrängte eine Aktion, geht er
+ *   vorne in die Schlange zurück, bloße Meldungen verfallen. So sind Rückgängig-Toasts nie hinter anderen versteckt.
+ * - Mehrere offene Löschungen (auch verschiedener Gruppen) werden zu einem Toast zusammengefasst („Foliensatz gelöscht ·
+ *   Modul gelöscht“): Ein Klick macht alle rückgängig, alle laufen zusammen ab. Das hält es bei einer Meldung zur Zeit
+ *   und jede Löschung bleibt erreichbar. Jede neue Löschung startet die 10 s neu, der Fokus geht auf den Knopf.
+ * Der Timer pausiert, solange die Maus darüber ist. Der Fokus pausiert nicht: Er liegt nach dem Löschen automatisch auf der
+ * Aktion, Tastaturnutzer erreichen „Rückgängig“ sofort (WCAG 2.2.1).
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ToastItem | null>(null);
@@ -92,23 +108,35 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     (options: ToastOptions) => {
       const old = current.current;
       const waiting = queued.current;
+      if (options.onExpire) {
+        // Offene Löschung: sofort sichtbar, nie in der Schlange
+        if (old?.onExpire) {
+          const parts = [...(old.parts ?? [old])];
+          const same = options.group ? parts.findIndex((p) => p.group === options.group) : -1;
+          if (same >= 0) parts[same] = options;
+          else parts.push(options);
+          display(combine(parts, options));
+          return;
+        }
+        if (old?.actionLabel) {
+          const { id: _id, parts: _parts, ...back } = old;
+          waiting.unshift(back);
+        }
+        display(options);
+        return;
+      }
       // Gleiche Gruppe: fortführen (der wartende bzw. sichtbare Toast wird ersetzt, nichts läuft ab)
       const sameWaiting = options.group ? waiting.findIndex((w) => w.group === options.group) : -1;
       if (sameWaiting >= 0) {
         waiting[sameWaiting] = options;
         return;
       }
-      if (old && options.group && old.group === options.group) {
-        display(options);
-        return;
-      }
-      if (old && (isProtected(old) || waiting.length > 0)) {
+      if (old?.onExpire || (old && waiting.length > 0)) {
         waiting.push(options);
-        // Zu viele Wartende: die ältesten bloßen Meldungen verfallen, offene Löschungen nie
+        // Zu viele Wartende: die ältesten bloßen Meldungen verfallen, bevor Toasts mit Aktion verfallen
         while (waiting.length > MAX_WAITING_TOASTS) {
-          const stale = waiting.findIndex((w) => !w.onExpire);
-          if (stale < 0) break;
-          waiting.splice(stale, 1);
+          const stale = waiting.findIndex((w) => !w.actionLabel);
+          waiting.splice(stale < 0 ? 0 : stale, 1);
         }
         return;
       }
@@ -116,8 +144,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     },
     [display],
   );
-
-  const api = useMemo(() => ({ show }), [show]);
 
   const dismiss = useCallback(
     (id: number) => {
@@ -130,6 +156,28 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     },
     [rescueFocus, display],
   );
+
+  const dismissGroup = useCallback(
+    (group: string) => {
+      queued.current = queued.current.filter((w) => w.group !== group);
+      const old = current.current;
+      if (!old) return;
+      if (old.parts) {
+        const parts = old.parts.filter((p) => p.group !== group);
+        if (parts.length === old.parts.length) return;
+        const newest = parts.at(-1);
+        if (newest) {
+          const { id: _id, ...base } = old;
+          display(combine(parts, { ...base, ...newest, focusAction: false }));
+          return;
+        }
+      } else if (old.group !== group) return;
+      dismiss(old.id);
+    },
+    [display, dismiss],
+  );
+
+  const api = useMemo(() => ({ show, dismissGroup }), [show, dismissGroup]);
 
   useEffect(() => {
     if (!toast || paused) return;

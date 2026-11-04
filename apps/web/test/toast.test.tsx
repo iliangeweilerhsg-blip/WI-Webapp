@@ -50,18 +50,65 @@ describe('Toast-Warteschlange', () => {
     expect(screen.queryByText('Schon vorhanden')).not.toBeInTheDocument();
   });
 
-  it('ein zweiter „Rückgängig“-Toast einer anderen Gruppe beendet den ersten nicht', async () => {
+  it('Löschen, während „Schon vorhanden · Anzeigen“ sichtbar ist: „Rückgängig“ sofort sichtbar und fokussiert', async () => {
+    setup();
+    await show({ message: 'Schon vorhanden', actionLabel: 'Anzeigen', onAction: vi.fn() });
+    expect(screen.getByText('Schon vorhanden')).toBeInTheDocument();
+    await show(undo({ focusAction: true }));
+    expect(screen.getByRole('button', { name: 'Rückgängig' })).toHaveFocus();
+    expect(screen.queryByText('Schon vorhanden')).not.toBeInTheDocument();
+    // Der verdrängte Toast mit Aktion kommt danach wieder, eine bloße Meldung wäre verfallen
+    await advance(10_100);
+    expect(screen.getByText('Schon vorhanden')).toBeInTheDocument();
+  });
+
+  it('eine bloße Meldung, die von „Rückgängig“ verdrängt wird, verfällt', async () => {
+    setup();
+    await show({ message: 'Irgendwas' });
+    await show(undo());
+    await advance(10_100);
+    expect(screen.queryByText('Irgendwas')).not.toBeInTheDocument();
+  });
+
+  it('zwei Löschungen verschiedener Gruppen: ein Toast, beide gleichzeitig rückgängig machbar, kein Warten', async () => {
+    setup();
+    const first = vi.fn();
+    const second = vi.fn();
+    const undoFirst = vi.fn();
+    const undoSecond = vi.fn();
+    await show(undo({ onExpire: first, onAction: undoFirst, focusAction: true }));
+    await advance(3_000);
+    await show(
+      undo({
+        message: 'Foliensatz gelöscht',
+        group: 'material-delete',
+        onExpire: second,
+        onAction: undoSecond,
+        focusAction: true,
+      }),
+    );
+    expect(screen.getByText('Modul gelöscht · Foliensatz gelöscht')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rückgängig' })).toHaveFocus();
+    expect(first).not.toHaveBeenCalled();
+    await act(async () => screen.getByRole('button', { name: 'Rückgängig' }).click());
+    expect(undoFirst).toHaveBeenCalledTimes(1);
+    expect(undoSecond).toHaveBeenCalledTimes(1);
+    await advance(11_000);
+    expect(first).not.toHaveBeenCalled();
+    expect(second).not.toHaveBeenCalled();
+  });
+
+  it('zusammengefasste Löschungen laufen gemeinsam nach 10 s ab', async () => {
     setup();
     const first = vi.fn();
     const second = vi.fn();
     await show(undo({ onExpire: first }));
     await show(undo({ message: 'Foliensatz gelöscht', group: 'material-delete', onExpire: second }));
-    expect(screen.getByText('Modul gelöscht')).toBeInTheDocument();
+    await advance(9_000);
     expect(first).not.toHaveBeenCalled();
-    await advance(10_100);
+    await advance(1_200);
     expect(first).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('Foliensatz gelöscht')).toBeInTheDocument();
-    expect(second).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
   });
 
   it('derselben Gruppe führt der neue Toast den sichtbaren fort (ohne Ablauf)', async () => {
@@ -83,7 +130,6 @@ describe('Toast-Warteschlange', () => {
     await show(undo());
     for (let i = 1; i <= MAX_WAITING_TOASTS + 2; i += 1) await show({ message: `Meldung ${i}` });
     await advance(10_100);
-    // Meldung 1 und 2 sind verfallen, 3 bis 5 warten
     expect(screen.queryByText('Meldung 1')).not.toBeInTheDocument();
     expect(screen.queryByText('Meldung 2')).not.toBeInTheDocument();
     expect(screen.getByText('Meldung 3')).toBeInTheDocument();
@@ -91,17 +137,6 @@ describe('Toast-Warteschlange', () => {
     expect(screen.getByText('Meldung 4')).toBeInTheDocument();
     await advance(5_100);
     expect(screen.getByText('Meldung 5')).toBeInTheDocument();
-  });
-
-  it('wartende „Rückgängig“-Toasts verfallen nie, auch über der Obergrenze', async () => {
-    setup();
-    const expired = vi.fn();
-    await show(undo({ group: 'a' }));
-    for (const group of ['b', 'c', 'd', 'e', 'f']) {
-      await show(undo({ group, message: `Gelöscht ${group}`, onExpire: expired }));
-    }
-    for (let i = 0; i < 6; i += 1) await advance(10_100);
-    expect(expired).toHaveBeenCalledTimes(5);
   });
 
   it('eine bloße Meldung wird von einer neuen ersetzt, solange nichts wartet', async () => {

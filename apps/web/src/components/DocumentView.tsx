@@ -14,7 +14,8 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { openPdf, type PdfDoc, type PdfTextItem } from '../lib/pdf.ts';
-import { isCorruptPdfError } from '../lib/pdf-errors.ts';
+import { classifyPdfError, type PdfFailure } from '../lib/pdf-errors.ts';
+import { useCoreHealth } from './CoreStatus.tsx';
 import { findHits, hitRect, makeMeasurer, type SearchHit } from '../lib/pdf-search.ts';
 import {
   isMaterialKind,
@@ -90,7 +91,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const [pdf, setPdf] = useState<PdfDoc | null>(null);
   const [pdfFailed, setPdfFailed] = useState(false);
   /** Das PDF selbst ist unlesbar (nicht bloß nicht geladen): Dann hilft kein zweiter Versuch */
-  const [pdfCorrupt, setPdfCorrupt] = useState(false);
+  const [pdfKind, setPdfKind] = useState<PdfFailure>('load');
   const [attempt, setAttempt] = useState(0);
   const [page, setPage] = useState(() => parsePage(params.get('seite')));
   const [zoom, setZoom] = useState<Zoom>({ mode: 'fit' });
@@ -112,6 +113,8 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const measurer = useMemo(() => makeMeasurer(), []);
   const { ref: areaRef, size: area } = useElementSize<HTMLDivElement>();
   const ready = meta.state === 'verarbeitet';
+  /** Ladefehler (nicht das PDF selbst): ein neuer Versuch kann helfen */
+  const retryable = pdfFailed && pdfKind === 'load' && meta.state !== 'fehler';
 
   // pdf.js sofort anstoßen, parallel zu den Vorschaubildern aus dem Core
   useEffect(() => {
@@ -120,7 +123,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     textCache.current = new Map();
     setPdf(null);
     setPdfFailed(false);
-    setPdfCorrupt(false);
+    setPdfKind('load');
     openPdf(pdfUrl(kind, id)).then(
       (doc) => {
         if (cancelled) doc.destroy();
@@ -131,7 +134,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
       },
       (failure: unknown) => {
         if (cancelled) return;
-        setPdfCorrupt(isCorruptPdfError(failure));
+        setPdfKind(classifyPdfError(failure));
         setPdfFailed(true);
       },
     );
@@ -143,9 +146,28 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
 
   // Der Satz war noch in Arbeit, als das PDF nicht ladbar war: Sobald sich sein Zustand ändert, noch einmal versuchen
   useEffect(() => {
-    if (pdfFailed && !pdfCorrupt) setAttempt((n) => n + 1);
+    if (retryable) setAttempt((n) => n + 1);
     // Nur der Wechsel des Einlese-Zustands zählt, nicht der Fehler selbst
   }, [meta.state]);
+
+  // Core war weg und ist wieder da (Health wechselt auf ok): ebenfalls von selbst noch einmal versuchen. Solange der Fehler
+  // steht, fragen wir den Status alle 5 s ab, sonst bemerkt man den Neustart erst nach bis zu 30 s.
+  const health = useCoreHealth();
+  const coreOk = health.isSuccess;
+  const sawCoreDown = useRef(false);
+  useEffect(() => {
+    if (health.isError) sawCoreDown.current = true;
+    else if (coreOk && sawCoreDown.current) {
+      sawCoreDown.current = false;
+      if (retryable) setAttempt((n) => n + 1);
+    }
+  }, [health.isError, coreOk, retryable]);
+  const refetchHealth = health.refetch;
+  useEffect(() => {
+    if (!retryable) return;
+    const timer = setInterval(() => void refetchHealth(), 5_000);
+    return () => clearInterval(timer);
+  }, [retryable, refetchHealth]);
 
   const pageCount = meta.pageCount ?? pdf?.numPages ?? 0;
   const current = pageCount > 0 ? clamp(page, 1, pageCount) : page;
@@ -466,7 +488,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   // wenn das Einlesen gescheitert ist oder pdf.js die Datei als unlesbar meldet; ein Ladefehler (Netz, Core, Satz
   // noch in Arbeit) ist behebbar: ruhiger Text, genau eine Aktion.
   if (pdfFailed && pageCount === 0) {
-    const corrupt = pdfCorrupt || meta.state === 'fehler';
+    const corrupt = !retryable;
     return (
       <div className="p-8">
         <h1 id="screen-title" className="text-xxl font-semibold">
@@ -484,7 +506,9 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
                 </Link>
               }
             >
-              Dieses PDF lässt sich nicht anzeigen. Vielleicht ist die Datei beschädigt.
+              {pdfKind === 'password'
+                ? 'Dieses PDF ist passwortgeschützt. Speichere es ohne Passwort und zieh es noch einmal herein.'
+                : 'Dieses PDF lässt sich nicht anzeigen. Vielleicht ist die Datei beschädigt.'}
             </EmptyState>
           ) : (
             <EmptyState
@@ -672,6 +696,15 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
       {pdfFailed ? (
         <p role="status" className="border-b border-border px-4 py-2 text-sm text-text-muted">
           Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.
+          {retryable ? (
+            <button
+              type="button"
+              onClick={() => setAttempt((n) => n + 1)}
+              className="ml-3 font-medium text-accent hover:underline"
+            >
+              Erneut versuchen
+            </button>
+          ) : null}
         </p>
       ) : null}
 

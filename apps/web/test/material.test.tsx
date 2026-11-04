@@ -393,6 +393,38 @@ describe('Nacharbeit', () => {
     expect(sent[1]?.headers['Idempotency-Key']).toBe(sent[0]?.headers['Idempotency-Key']);
   });
 
+  it('dieselbe Datei im Rückgängig-Fenster erneut hochladen: Löschung wird zurückgenommen, kein DELETE', async () => {
+    const user = userEvent.setup();
+    const deck = makeDeck({ title: 'VL 01', ingest_state: 'verarbeitet', page_count: 3 });
+    const core = await openModule({ decks: [deck] });
+    // Der Core kennt die Datei schon: derselbe Inhalt wird als Dublette erkannt
+    const list = await screen.findByRole('list', { name: 'Foliensätze' });
+    await user.click(within(list).getByRole('button', { name: 'VL 01 löschen' }));
+    expect(screen.getByText('Foliensatz gelöscht')).toBeInTheDocument();
+    core.nextUploadDuplicateOf = deck.id;
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    expect(await screen.findByText('„VL 01“ ist wieder da.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Rückgängig' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Anzeigen' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'VL 01' })).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(core.requests.some((r) => r.method === 'DELETE')).toBe(false);
+  });
+
+  it('Löschen, während „Schon vorhanden · Anzeigen“ sichtbar ist: „Rückgängig“ sofort da und fokussiert', async () => {
+    const user = userEvent.setup();
+    const deck = makeDeck({ title: 'VL 01', ingest_state: 'verarbeitet', page_count: 3 });
+    const other = makeDeck({ title: 'VL 02', ingest_state: 'verarbeitet', page_count: 3 });
+    const core = await openModule({ decks: [deck, other] });
+    core.nextUploadDuplicateOf = deck.id;
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    expect(await screen.findByText('Schon vorhanden')).toBeInTheDocument();
+    const list = await screen.findByRole('list', { name: 'Foliensätze' });
+    await user.click(within(list).getByRole('button', { name: 'VL 02 löschen' }));
+    expect(screen.getByRole('button', { name: 'Rückgängig' })).toHaveFocus();
+    expect(core.requests.some((r) => r.method === 'DELETE')).toBe(false);
+  });
+
   it('ein Upload-Toast verdrängt ein offenes „Rückgängig“ nicht (Löschen löst nicht vorzeitig aus)', async () => {
     const user = userEvent.setup();
     const deck = makeDeck({ title: 'VL 01', ingest_state: 'verarbeitet', page_count: 3 });
