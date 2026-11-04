@@ -39,6 +39,8 @@ const ZOOM_STEP = 1.25;
 const PAGE_MARGIN = 32;
 const DEFAULT_PAGE = { w: 595, h: 842 };
 const SEARCH_DEBOUNCE_MS = 150;
+/** Längste Rechenzeit am Stück bei der Suche, danach bekommt die Oberfläche Luft */
+const SEARCH_SLICE_MS = 12;
 /** So viele Seitenköpfe liest pdf.js gleichzeitig vorab */
 const SIZE_BATCH = 8;
 
@@ -330,11 +332,18 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     setSearching(true);
     const timer = setTimeout(async () => {
       const all: SearchHit[] = [];
+      let sliceStart = performance.now();
       try {
         for (let n = 1; n <= pdf.numPages; n += 1) {
           const items = await itemsOf(n);
           if (cancelled) return;
           all.push(...findHits(n, items, query));
+          // Lange Dokumente in Häppchen: Die Oberfläche bleibt bedienbar (Eingabe, Blättern)
+          if (performance.now() - sliceStart > SEARCH_SLICE_MS) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            sliceStart = performance.now();
+            if (cancelled) return;
+          }
         }
       } catch {
         // Text nicht lesbar: wie „kein Treffer“
@@ -467,12 +476,15 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const slideId = meta.slideIds[current - 1] ?? null;
   const pageHitsRects =
     pageItems && pageItems.page === current
-      ? pageHits.flatMap((hit, i) => {
-          const item = pageItems.items[hit.item];
-          return item
-            ? [{ key: `${hit.item}-${hit.start}-${i}`, hit, rect: hitRect(item, hit, measurer) }]
-            : [];
-        })
+      ? pageHits.flatMap((hit, i) =>
+          // Ein Treffer kann über mehrere Textstücke reichen: ein Rechteck je Stück
+          hit.parts.flatMap((part, p) => {
+            const item = pageItems.items[part.item];
+            return item
+              ? [{ key: `${part.item}-${part.start}-${i}-${p}`, hit, rect: hitRect(item, part, measurer) }]
+              : [];
+          }),
+        )
       : [];
   const activeHit = hits[active];
   const searchSummary =
