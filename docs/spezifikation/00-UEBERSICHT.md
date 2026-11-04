@@ -61,10 +61,10 @@ Diese Spezifikation beschreibt das Produkt so vollständig, dass ein Team ohne w
 | AUD | Audioaufnahme |
 | NAC | Nacharbeitung & Rückblick |
 | BIB | Wissensbibliothek |
+| SUC | Suche & „Frag deine Vorlesung" |
 | LRN | Lernen |
 | PLN | Wochenplaner |
 | VID | Lernvideos |
-| SUC | Suche & „Frag deine Vorlesung" |
 | DAT | Daten, Backups, Export, Kosten |
 | EIN | Einstellungen |
 
