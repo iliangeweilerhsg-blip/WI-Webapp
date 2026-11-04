@@ -394,7 +394,7 @@ Beim Wiederverbinden sendet das iPad die Ausgangswarteschlange in Reihenfolge, i
 - Browser-`MediaRecorder`, Opus in WebM (Chrome) bzw. MP4/AAC (Safari), mono, 48 kHz, ≈ 48 kbit/s.
 - `timeslice` = 30 s. Jeder Chunk wird sofort in **IndexedDB** gelegt, dann per HTTP an den Core gesendet (`PUT /recordings/{id}/chunks/{seq}`) und erst nach Bestätigung lokal gelöscht.
 - Einstellungen: Echo-Unterdrückung **aus**, Rauschunterdrückung **ein**, automatische Verstärkung **ein**. Mikrofon wählbar (eingebautes Mikro, externes Ansteckmikro).
-- Der Core schreibt die Chunks als einzelne Dateien und erzeugt nach Session-Ende eine zusammengefügte Datei (`ffmpeg concat`, Lücken als Stille mit korrekter Länge).
+- Der Core schreibt die Chunks als einzelne Dateien und erzeugt nach Session-Ende eine zusammengefügte Datei (`ffmpeg`: zusammenfügen und nach AAC transcodieren, Lücken als Stille mit korrekter Länge).
 
 **Akzeptanzkriterien**
 - [ ] Bei Browser-Absturz gehen höchstens 30 s Audio verloren.
@@ -838,7 +838,7 @@ Videothek nach Fach → Konzept. Player mit Kapiteln, Geschwindigkeit, Quellen-C
 `pnpm sg restore <stand>` stellt einen Stand komplett wieder her. Einzelne gelöschte Objekte kommen über den Papierkorb zurück (F-DAT-04). Die Wiederherstellung wird **monatlich automatisch getestet**: Restore in eine Wegwerf-Datenbank und Zählung der Objekte.
 
 ### F-DAT-03 · Export
-`P0` (Vault) / `P1` (voll) · Phase 1 / 3 · LP12
+`P0` (Vault) / `P1` (voll) · Phase 2 / 3 · LP12
 
 - Der Vault ist jederzeit normales Markdown.
 - **Vollexport:** ZIP mit JSON aller Tabellen (Schema dokumentiert), allen Medien und dem Vault.
@@ -881,8 +881,8 @@ Jede Einstellung hat einen sinnvollen Standard. **Die App ist ohne Besuch der Ei
 | Phase | Funktionen |
 |---|---|
 | **0** | F-ORG-01, F-ORG-02, F-ORG-03 (Upload), F-ORG-04 |
-| **1** | F-KAL-01, F-KAL-02, F-SES-01 bis F-SES-05, F-DSH-01, -02, -04, -05, -06, F-INK-01 bis -07, -13, -14, F-SYN-01 bis -03, F-AUD-01, -02, F-DAT-01 bis -04, F-EIN-01 (Teil) |
-| **2** | F-ORG-03 (Zerlegung), F-SES-06, F-DSH-03, -07, F-INK-08, -12, F-NAC-01 bis -08, F-BIB-01 bis -05, -07, F-SUC-01, F-DAT-05 |
+| **1** | F-KAL-01, F-KAL-02, F-SES-01 bis F-SES-05, F-DSH-01, -02, -04, -05, -06, F-INK-01 bis -07, -13, -14, F-SYN-01 bis -03, F-AUD-01, -02, F-DAT-01, -02, -04, F-EIN-01 (Teil) |
+| **2** | F-ORG-03 (Zerlegung), F-SES-06, F-DSH-03, -07, F-INK-08, -12, F-NAC-01 bis -08, F-BIB-01 bis -05, -07, F-SUC-01, F-DAT-03 (Vault), F-DAT-05 |
 | **3** | F-ORG-05, -06, F-INK-09, -10, -11, F-BIB-06, -08, -09, F-SUC-02, F-LRN-01 bis -17, F-DAT-03 (voll) |
 | **4** | F-KAL-03, -04, -05, F-PLN-01 bis -09 |
 | **5** | F-VID-01 bis -04 |
