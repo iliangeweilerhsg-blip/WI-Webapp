@@ -1,5 +1,6 @@
 'use client';
 
+import { SemesterSettings } from './SemesterSettings.tsx';
 import { ThemeToggle } from './ThemeToggle.tsx';
 
 /** Einstellungen (07 §3.13). Vorerst nur die Darstellung; jede Option mit einem Satz Erklärung. */
@@ -18,6 +19,7 @@ export function SettingsView() {
           <ThemeToggle />
         </div>
       </div>
+      <SemesterSettings />
       <p className="mt-6 text-sm text-text-muted">Weitere Einstellungen kommen mit Phase 1.</p>
     </section>
   );

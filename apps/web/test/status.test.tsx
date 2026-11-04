@@ -5,29 +5,18 @@ import { QueryClientProvider } from '@tanstack/react-query';
 vi.mock('next/navigation', () => ({
   usePathname: () => '/',
   useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 import { AppShell } from '../src/components/AppShell.tsx';
 import { ModulView } from '../src/components/ModulView.tsx';
 import { makeQueryClient } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
+import { ToastProvider } from '../src/lib/toast.tsx';
+import { makeModule, makeSemester } from './fake-core.ts';
 
-const MODULE = {
-  id: '0190f6a2-0000-7000-8000-0000000000a1',
-  user_id: '0190f6a2-0000-7000-8000-000000000000',
-  created_at: '2026-11-04T08:00:00Z',
-  updated_at: '2026-11-04T08:00:00Z',
-  deleted_at: null,
-  semester_id: '0190f6a2-0000-7000-8000-0000000000b1',
-  name: 'Datenbanksysteme',
-  short_name: 'DBS',
-  color: 'mod-03',
-  ects: 6,
-  exam_type: 'Klausur',
-  lecturer: null,
-  lang: 'de',
-  description_md: null,
-};
+const MODULE = makeModule();
+const SEMESTER = makeSemester();
 
 /** Schaltbarer Fake-Core */
 function fakeCore(initiallyUp: boolean) {
@@ -38,7 +27,9 @@ function fakeCore(initiallyUp: boolean) {
       if (!state.up) throw new TypeError('Failed to fetch');
       const body = String(url).includes('/health')
         ? { status: 'ok', db: 'ok', version: '0.0.0' }
-        : { items: [MODULE], next_cursor: null };
+        : String(url).includes('/semesters')
+          ? { items: [SEMESTER], next_cursor: null }
+          : { items: [MODULE], next_cursor: null };
       return new Response(JSON.stringify(body), { status: 200 });
     }),
   );
@@ -116,7 +107,9 @@ describe('Modulseite', () => {
     const client = makeQueryClient();
     render(
       <QueryClientProvider client={client}>
-        <ModulView />
+        <ToastProvider>
+          <ModulView />
+        </ToastProvider>
       </QueryClientProvider>,
     );
     expect(screen.getByRole('heading', { level: 1, name: 'Modul' })).toBeInTheDocument();

@@ -14,23 +14,9 @@ import { AppShell } from '../src/components/AppShell.tsx';
 import { SettingsView } from '../src/components/SettingsView.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
+import { installFakeCore, makeModule, makeSemester } from './fake-core.ts';
 
-export const MODULE = {
-  id: '0190f6a2-0000-7000-8000-0000000000a1',
-  user_id: '0190f6a2-0000-7000-8000-000000000000',
-  created_at: '2026-11-04T08:00:00Z',
-  updated_at: '2026-11-04T08:00:00Z',
-  deleted_at: null,
-  semester_id: '0190f6a2-0000-7000-8000-0000000000b1',
-  name: 'Datenbanksysteme',
-  short_name: 'DBS',
-  color: 'mod-03',
-  ects: 6,
-  exam_type: 'Klausur',
-  lecturer: null,
-  lang: 'de',
-  description_md: null,
-};
+export const MODULE = makeModule();
 
 function mount(children: ReactNode = <p>Inhalt</p>) {
   return render(
@@ -88,14 +74,7 @@ describe('Navigation', () => {
   });
 
   it('zeigt Module aus der API mit Modulfarbe und Query-Parameter-Link', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (url: string) =>
-        String(url).includes('/modules')
-          ? new Response(JSON.stringify({ items: [MODULE], next_cursor: null }), { status: 200 })
-          : new Response('{}', { status: 404 }),
-      ),
-    );
+    installFakeCore({ semesters: [makeSemester()], modules: [MODULE] });
     nav.pathname = '/modul';
     mount();
     const link = await screen.findByRole('link', { name: 'Datenbanksysteme' });
@@ -175,9 +154,12 @@ describe('Darstellung (nur in den Einstellungen)', () => {
   it('Segment-Buttons mit aria-pressed setzen data-theme und merken sich die Wahl', async () => {
     coreOffline();
     const user = userEvent.setup();
+    installFakeCore();
     render(
       <ThemeProvider>
-        <SettingsView />
+        <QueryProvider>
+          <SettingsView />
+        </QueryProvider>
       </ThemeProvider>,
     );
     expect(screen.getByRole('button', { name: 'System' })).toHaveAttribute('aria-pressed', 'true');

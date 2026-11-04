@@ -144,7 +144,7 @@ describe('Origin-Prüfung gegen CSRF', () => {
   // Es gibt in diesem Ticket keine schreibende Route. Die Prüfung läuft vor dem Routing,
   // darum zeigt „nicht 403“ (hier 404 not_found) zuverlässig, dass die Anfrage zugelassen wurde.
   const post = (origin?: string, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE' = 'POST') =>
-    t.request({ method, url: '/api/v1/modules', headers: origin ? { origin } : {} });
+    t.request({ method, url: '/api/v1/noch-nicht-gebaut', headers: origin ? { origin } : {} });
 
   it.each(['POST', 'PUT', 'PATCH', 'DELETE'] as const)(
     '%s mit fremdem Origin → 403 origin_not_allowed',
@@ -186,7 +186,7 @@ describe('Origin-Prüfung gegen CSRF', () => {
     try {
       const res = await ok.app.inject({
         method: 'POST',
-        url: '/api/v1/modules',
+        url: '/api/v1/noch-nicht-gebaut',
         remoteAddress: '192.168.1.23',
         headers: {
           host: `192.168.1.5:${TEST_PORT}`,
@@ -197,7 +197,7 @@ describe('Origin-Prüfung gegen CSRF', () => {
       expect(res.statusCode).toBe(403);
       const same = await ok.app.inject({
         method: 'POST',
-        url: '/api/v1/modules',
+        url: '/api/v1/noch-nicht-gebaut',
         remoteAddress: '192.168.1.23',
         headers: {
           host: `192.168.1.5:${TEST_PORT}`,

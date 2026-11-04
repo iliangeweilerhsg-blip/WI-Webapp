@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { isMacPlatform, matchShortcut } from '../lib/shortcuts.ts';
 import { SIDEBAR_KEY } from '../lib/theme.tsx';
+import { ToastProvider } from '../lib/toast.tsx';
 import { SearchDialog } from './SearchDialog.tsx';
+import { SetupHost } from './SetupHost.tsx';
 import { Sidebar } from './Sidebar.tsx';
 
 /** App-Rahmen (07 §2): einklappbare Seitenleiste, Inhalt, globale Kürzel. */
 export function AppShell({ children }: { children: ReactNode }) {
   const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [setupRequested, setSetupRequested] = useState(0);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -48,15 +51,23 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [toggleSidebar]);
 
   return (
-    <div className="flex h-dvh">
-      <a href="#main" className="sg-skip-link">
-        Zum Inhalt springen
-      </a>
-      <Sidebar expanded={expanded} onToggle={toggleSidebar} onOpenSearch={() => setSearchOpen(true)} />
-      <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto px-8 py-8">
-        <div className="mx-auto max-w-3xl">{children}</div>
-      </main>
-      <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
-    </div>
+    <ToastProvider>
+      <div className="flex h-dvh">
+        <a href="#main" className="sg-skip-link">
+          Zum Inhalt springen
+        </a>
+        <Sidebar
+          expanded={expanded}
+          onToggle={toggleSidebar}
+          onOpenSearch={() => setSearchOpen(true)}
+          onOpenSetup={() => setSetupRequested((n) => n + 1)}
+        />
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto px-8 py-8">
+          <div className="mx-auto max-w-3xl">{children}</div>
+        </main>
+        <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+        <SetupHost requested={setupRequested} />
+      </div>
+    </ToastProvider>
   );
 }
