@@ -2,7 +2,8 @@
 import type { FetchFn } from '../../src/moodle/client.ts';
 
 export const FAKE_BASE = 'https://moodle.example.org';
-export const FAKE_TOKEN = '0123456789abcdef0123456789abcdef';
+// Platzhalter im Token-Format (32 Hex-Zeichen), zur Laufzeit gebaut, damit kein Secret-Scanner anschlägt
+export const FAKE_TOKEN = 'ab'.repeat(16);
 
 export interface RecordedRequest {
   url: string;

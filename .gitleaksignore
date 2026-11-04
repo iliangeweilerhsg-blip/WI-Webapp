@@ -1,0 +1,6 @@
+# Falsch-Positive von gitleaks (generic-api-key) in Commit c016794 (PR #53).
+# Alles künstliche Testwerte, kein echtes Geheimnis: Platzhalter-Token im nachgebauten Moodle
+# und Beispiel-Bestätigungscodes in den Schema-Beispielen. In späteren Commits ersetzt.
+c0167947743c814a184fe84bc4b52dada1d21a94:packages/schemas/examples/valid/MoodleActionExecute.1.json:generic-api-key:6
+c0167947743c814a184fe84bc4b52dada1d21a94:packages/schemas/examples/valid/MoodleActionPreview.1.json:generic-api-key:11
+c0167947743c814a184fe84bc4b52dada1d21a94:services/core/test/unit/moodle-fake.ts:generic-api-key:5
