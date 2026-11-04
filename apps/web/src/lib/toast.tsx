@@ -44,7 +44,7 @@ const DEFAULT_DURATION_MS = 6_000;
 
 /**
  * Ruhige Rückmeldung unten mittig. Höchstens ein Toast gleichzeitig, der neueste ersetzt den alten.
- * Der Timer pausiert, solange die Maus darüber ist oder der Fokus darin liegt (WCAG 2.2.1).
+ * Der Timer pausiert, solange die Maus darüber ist. Der Fokus pausiert nicht: Er liegt nach dem Löschen automatisch auf der Aktion, Tastaturnutzer erreichen „Rückgängig“ sofort (WCAG 2.2.1).
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ToastItem | null>(null);
@@ -104,8 +104,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             role="status"
             onMouseEnter={() => setPaused(true)}
             onMouseLeave={() => setPaused(false)}
-            onFocus={() => setPaused(true)}
-            onBlur={() => setPaused(false)}
             className="pointer-events-auto flex items-center gap-4 rounded-lg border border-border-strong bg-surface-raised px-4 py-3 text-sm shadow-lg"
           >
             <span>{toast.message}</span>

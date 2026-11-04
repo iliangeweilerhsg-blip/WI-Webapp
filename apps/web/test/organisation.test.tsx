@@ -327,11 +327,8 @@ describe('Modulseite', () => {
     expect(within(toast).getByRole('button', { name: 'Rückgängig' })).toBeInTheDocument();
     expect(nav.push).toHaveBeenCalledWith('/');
     expect(writes(core)).toEqual([]);
-    // Fokus liegt auf „Rückgängig“; solange er dort ist, läuft der Timer nicht (WCAG 2.2.1)
+    // Fokus liegt auf „Rückgängig“ und pausiert den Timer nicht
     expect(within(toast).getByRole('button', { name: 'Rückgängig' })).toHaveFocus();
-    await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS + 1000);
-    expect(writes(core)).toEqual([]);
-    act(() => (document.activeElement as HTMLElement).blur());
 
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS - 500);
     expect(writes(core)).toEqual([]);
