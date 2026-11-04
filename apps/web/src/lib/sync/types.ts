@@ -109,7 +109,7 @@ export type PageConflictResolver = (
 ) => Promise<{ fields: PageUpdateFields; version: number } | null>;
 
 export type ConnectionState =
-  'idle' | 'other_tab' | 'connecting' | 'syncing' | 'online' | 'backoff' | 'failed' | 'closed';
+  'idle' | 'acquiring' | 'other_tab' | 'connecting' | 'syncing' | 'online' | 'backoff' | 'failed' | 'closed';
 
 export interface ClockInfo {
   offsetMs: number;

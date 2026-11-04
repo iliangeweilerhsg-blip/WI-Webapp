@@ -1,7 +1,13 @@
 // Nacharbeit nach dem Review von PR #60 (B1, B2, S1 bis S5, Kleinigkeiten)
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SyncOp } from '@sg/shared';
-import { SyncClient, SyncNotLeaderError, SyncRejectedError } from '../src/lib/sync/client.ts';
+import {
+  SyncClient,
+  SyncHandedOverError,
+  SyncNotConnectedError,
+  SyncNotLeaderError,
+  SyncRejectedError,
+} from '../src/lib/sync/client.ts';
 import { MemoryQueueStore } from '../src/lib/sync/store.ts';
 import type { LeaderLock, LeaderLockHandlers } from '../src/lib/sync/tabs.ts';
 import type { SendOpInput } from '../src/lib/sync/types.ts';
@@ -298,8 +304,9 @@ describe('S3: gesendete Operationen werden nicht nachträglich uhrkorrigiert', (
     server.muteTime = true;
     server.decide = () => ({ ignore: true });
     const c = make({ applyClockOffset: true });
+    const cp = c.connect();
     void c.send({ ...sessionStart(30), at: 1000 }).catch(() => undefined);
-    await c.connect();
+    await cp;
     await vi.advanceTimersByTimeAsync(10_000); // Abgleich-Timeout, Warteschlange geht trotzdem raus
     await settle();
     const first = server.sockets[0]!.of('op')[0]!;
@@ -405,7 +412,10 @@ class FakeLock implements LeaderLock {
       this.owner.holder = this;
       this.handlers?.onLeader();
       for (const o of this.owner.changed) if (o !== this) o.handlers?.onChanged();
-    } else this.owner.waiting.push(this);
+    } else {
+      this.handlers?.onOtherTab();
+      this.owner.waiting.push(this);
+    }
   }
 
   steal(): void {
@@ -469,7 +479,9 @@ describe('Mehrere Tabs: nur der Leader synchronisiert', () => {
     expect(a.connectionState).toBe('other_tab');
     expect(server.sockets).toHaveLength(2);
     expect(server.sockets[0]!.closedByClient).toBe(1000);
-    expect(await pa).toBeInstanceOf(SyncNotLeaderError);
+    const handed = await pa;
+    expect(handed).toBeInstanceOf(SyncHandedOverError);
+    expect((handed as SyncHandedOverError).queued).toBe(true);
     expect(server.sockets[1]!.of('op').map((m) => m.op_id)).toEqual([uid(960)]);
     expect(b.pendingCount).toBe(0);
     expect(await store.list()).toHaveLength(0);
@@ -527,5 +539,71 @@ describe('Mehrere Tabs: nur der Leader synchronisiert', () => {
     a.disconnect();
     await settle();
     expect(b.leader).toBe(true);
+  });
+});
+
+describe('Rollenfindung und Schreibschutz', () => {
+  it('B-a: send() direkt nach await connect() klappt im einzigen Tab, other_tab blitzt nie auf', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    const states: string[] = [];
+    a.onEvent('connection', (c) => states.push(c.state));
+    await a.connect();
+    await expect(a.send(notebookCreate(1))).resolves.toBeTruthy();
+    expect(states[0]).toBe('acquiring');
+    expect(states).not.toContain('other_tab');
+  });
+
+  it('B-a: send() ohne auf connect() zu warten wartet auf die Rollenfindung', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    void a.connect();
+    await expect(a.send(notebookCreate(1))).resolves.toBeTruthy();
+  });
+
+  it('B-b: send() ohne connect() oder nach disconnect() wirft SyncNotConnectedError, nichts in der IDB', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    await expect(a.send(notebookCreate(1))).rejects.toBeInstanceOf(SyncNotConnectedError);
+    await a.connect();
+    a.disconnect();
+    await expect(a.send(notebookCreate(2))).rejects.toBeInstanceOf(SyncNotConnectedError);
+    expect(await store.list()).toHaveLength(0);
+  });
+
+  it('Folge-Tab: connect() löst auf, send() endet mit SyncNotLeaderError, nichts in der IDB', async () => {
+    const locks = new FakeLocks();
+    const a = make({ leaderLock: locks.create });
+    const b = make({ leaderLock: locks.create });
+    await a.connect();
+    await b.connect();
+    expect(b.connectionState).toBe('other_tab');
+    await expect(b.send(notebookCreate(1))).rejects.toBeInstanceOf(SyncNotLeaderError);
+    expect(await store.list()).toHaveLength(0);
+  });
+
+  it('der alte Leader schreibt nach dem Verlust der Rolle nichts mehr in den Speicher', async () => {
+    const locks = new FakeLocks();
+    const storeA = new MemoryQueueStore();
+    const hook = vi.fn(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+      return { fields: fields as never, version: 100 };
+    });
+    const a = make({ leaderLock: locks.create, store: storeA, onPageVersionConflict: hook as never });
+    const b = make({ leaderLock: locks.create, store: new MemoryQueueStore() });
+    await a.connect();
+    await b.connect();
+    await settle();
+    server.decide = () => ({ error: { code: 'page_version_conflict', retryable: false, fatal: false } });
+    void a.send(pageUpdate(1)).catch(() => undefined);
+    await settle();
+    expect(hook).toHaveBeenCalledOnce();
+    b.takeOver();
+    await settle();
+    await vi.advanceTimersByTimeAsync(200);
+    await settle();
+    const left = await storeA.list();
+    expect(left).toHaveLength(1);
+    expect((left[0]!.op.data as { version: number }).version).toBe(1);
   });
 });

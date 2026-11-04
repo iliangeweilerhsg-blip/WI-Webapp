@@ -88,8 +88,9 @@ describe('Verbindungsaufbau und Uhrabgleich', () => {
     const c = make();
     const got: SyncOp[] = [];
     c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, (op) => got.push(op));
+    const cp = c.connect();
     const p = c.send(notebookCreate(1));
-    await c.connect();
+    await cp;
     await settle();
     const s = server.last;
     const hello = s.received[0]!;
@@ -111,8 +112,9 @@ describe('Verbindungsaufbau und Uhrabgleich', () => {
   it('korrigiert unsichere Zeitstempel nach dem Abgleich (applyClockOffset)', async () => {
     server.skewMs = 5000;
     const c = make({ applyClockOffset: true });
+    const cp = c.connect();
     const p = c.send({ ...notebookCreate(1), at: 1000 });
-    await c.connect();
+    await cp;
     await settle();
     const op = server.last.of('op')[0]!;
     expect(op.at).toBe(6000);
@@ -124,8 +126,9 @@ describe('Verbindungsaufbau und Uhrabgleich', () => {
   it('Web-App nutzt Versatz 0, meldet aber den gemessenen Wert', async () => {
     server.skewMs = 5000;
     const c = make();
+    const cp = c.connect();
     const p = c.send({ ...notebookCreate(1), at: 1000 });
-    await c.connect();
+    await cp;
     await settle();
     expect(server.last.of('op')[0]).toMatchObject({ at: 1000, clock_uncertain: false });
     expect(server.last.of('time.offset')[0]).toMatchObject({ offset_ms: 5000 });
@@ -225,8 +228,9 @@ describe('Resume-Tabelle (§11.1)', () => {
     c.subscribe(nbStream(1), { lastSeq: 9, lastOpId: uid(1) }, () => undefined, {
       onReset: async () => ({ lastSeq: 3, lastOpId: server.streams.get(nbStream(1))![2]!.op_id }),
     });
+    const cp = c.connect();
     const p = c.send(notebookCreate(2));
-    await c.connect();
+    await cp;
     await settle();
     await expect(p).resolves.toBeTruthy();
   });
@@ -334,6 +338,7 @@ describe('Warteschlange', () => {
 
   it('weist Server-Operationen und seq/origin beim Senden ab', async () => {
     const c = make();
+    await c.connect();
     await expect(
       c.send({
         stream: nbStream(1),

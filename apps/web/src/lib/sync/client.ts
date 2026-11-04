@@ -98,6 +98,31 @@ export class SyncNotLeaderError extends Error {
   }
 }
 
+/** `send()` ohne vorheriges `connect()` (oder nach `disconnect()`). */
+export class SyncNotConnectedError extends Error {
+  constructor(message = 'Der Sync-Client ist nicht verbunden: zuerst connect() aufrufen.') {
+    super(message);
+    this.name = 'SyncNotConnectedError';
+  }
+}
+
+/**
+ * Die Operation liegt bereits in der gemeinsamen Warteschlange; ein anderer Tab hat die Synchronisation übernommen
+ * und sendet sie. Der Fachcode darf sie NICHT erneut senden.
+ */
+export class SyncHandedOverError extends Error {
+  readonly queued = true;
+  readonly opId: string;
+
+  constructor(opId: string) {
+    super(
+      'Ein anderer Tab hat die Synchronisation übernommen; die Operation liegt in der Warteschlange und wird dort gesendet.',
+    );
+    this.name = 'SyncHandedOverError';
+    this.opId = opId;
+  }
+}
+
 /** Die Operation wurde endgültig abgelehnt und liegt in der Fehlerablage. */
 export class SyncRejectedError extends Error {
   readonly code: string;
@@ -257,7 +282,8 @@ export class SyncClient {
   // Mehrere Tabs: nur der Leader synchronisiert
   private leaderLock: LeaderLock | null = null;
   private isLeader = true;
-  private connectGen = 0;
+  /** Aktive Sitzung zwischen `connect()` und `disconnect()`; `decided` löst auf, sobald die Rolle feststeht */
+  private session: { decided: Promise<void>; resolve: () => void } | null = null;
 
   constructor(options: SyncClientOptions = {}) {
     this.opts = options;
@@ -277,31 +303,45 @@ export class SyncClient {
 
   /**
    * Lädt die Warteschlange und baut die Verbindung auf. Verbindet danach von selbst neu (§11.2, §11.4).
-   * Mit mehreren Tabs verbindet nur der Leader-Tab; die anderen schreiben in die gemeinsame Warteschlange.
+   * Die Zusage löst auf, sobald die Rolle feststeht (Leader oder anderer Tab), nicht erst bei `online`.
+   * Mit mehreren Tabs verbindet nur der Leader-Tab; die anderen synchronisieren nicht (`other_tab`).
    */
   async connect(): Promise<void> {
-    const gen = ++this.connectGen;
+    if (this.session) return this.session.decided;
+    let resolve: () => void = () => undefined;
+    const decided = new Promise<void>((r) => {
+      resolve = r;
+    });
+    const session = { decided, resolve };
+    this.session = session;
     await this.ready;
-    // `disconnect()` oder ein weiteres `connect()` während des Wartens (z. B. React StrictMode): dieses hier verfällt
-    if (gen !== this.connectGen) return;
+    // `disconnect()` während des Wartens (z. B. React StrictMode): diese Sitzung verfällt
+    if (this.session !== session) return;
     this.wanted = true;
     this.fatalCode = null;
-    if (this.leaderLock || this.ws || this.reconnectTimer) return;
     // Kanal und Lock werden bei jedem connect() neu angelegt (nach disconnect() sind sie geschlossen)
     const lock = (this.opts.leaderLock ?? createWebLocksLeader)();
     if (!lock) {
       this.isLeader = true;
       this.openSocket();
+      resolve();
       return;
     }
     this.leaderLock = lock;
     this.isLeader = false;
-    this.setState('other_tab');
+    this.setState('acquiring');
     lock.start({
-      onLeader: () => void this.becomeLeader(lock),
+      onLeader: () => void this.becomeLeader(lock, session),
+      onOtherTab: () => {
+        // Erst jetzt steht fest, dass das Lock woanders liegt
+        if (this.session !== session || this.isLeader) return;
+        this.setState('other_tab');
+        resolve();
+      },
       onLost: () => this.loseLeadership(lock),
       onChanged: () => this.emit('leader.changed', {}),
     });
+    return decided;
   }
 
   /** Hier übernehmen: holt die Leader-Rolle von einem anderen Tab (Web Locks `steal`). */
@@ -325,7 +365,8 @@ export class SyncClient {
       }
       this.afterClose();
     }
-    this.connectGen++;
+    this.session?.resolve();
+    this.session = null;
     if (this.leaderLock) {
       const lock = this.leaderLock;
       this.leaderLock = null;
@@ -415,7 +456,11 @@ export class SyncClient {
    * schlägt sie mit `SyncRejectedError` fehl (sie liegt dann in der Fehlerablage).
    */
   async send(input: SendOpInput): Promise<SyncAck> {
+    const session = this.session;
+    if (!session) throw new SyncNotConnectedError();
     await this.ready;
+    await session.decided; // bis die Rolle feststeht (kein Aufblitzen von other_tab beim Start)
+    if (this.session !== session) throw new SyncNotConnectedError();
     // Folge-Tabs schreiben nichts in die Warteschlange; die Operation ginge sonst beim Tab-Wechsel verloren
     if (!this.isLeader) throw new SyncNotLeaderError();
     const op = this.buildOp(input);
@@ -423,7 +468,14 @@ export class SyncClient {
     return new Promise<SyncAck>((resolve, reject) => {
       this.pending.set(op.op_id, { resolve, reject });
       this.locked(async () => {
+        if (!this.isLeader) throw new SyncNotLeaderError();
         const entry = await this.store.append(op);
+        if (!this.isLeader) {
+          // Leader-Rolle während des Schreibens verloren: die Operation liegt im Speicher, der neue Leader sendet sie
+          this.pending.delete(op.op_id);
+          reject(new SyncHandedOverError(op.op_id));
+          return;
+        }
         this.queue.push(entry);
         this.byOpId.set(op.op_id, entry);
         this.emit('queue', { pending: this.queue.length });
@@ -492,6 +544,11 @@ export class SyncClient {
     this.held.clear();
     this.suspects.clear();
     this.deferred.clear();
+  }
+
+  /** Schreibzugriff des Leaders: nach dem Verlust der Rolle schreibt dieser Tab nichts mehr. */
+  private write<T>(fn: () => Promise<T>): Promise<T | undefined> {
+    return this.locked(async () => (this.isLeader ? fn() : undefined));
   }
 
   /** Speicherzugriffe laufen nacheinander, damit Reihenfolge und Zähler stimmen. */
@@ -1067,7 +1124,7 @@ export class SyncClient {
     if (this.clockTimeout) clearTimeout(this.clockTimeout);
     this.clockTimeout = null;
     // Noch nicht gesendete Operationen mit unsicherer Uhr korrigieren, dann erst die Warteschlange senden
-    void this.locked(() => this.correctPending()).then(() => {
+    void this.write(() => this.correctPending()).then(() => {
       if (connId === this.connId && this.state === 'syncing') this.goOnline();
     });
   }
@@ -1123,7 +1180,7 @@ export class SyncClient {
     } finally {
       this.sending = false;
     }
-    if (fresh.length > 0) void this.locked(() => this.store.putMany(fresh)).catch(() => undefined);
+    if (fresh.length > 0) void this.write(() => this.store.putMany(fresh)).catch(() => undefined);
   }
 
   private async onAck(ack: SyncAck): Promise<void> {
@@ -1137,7 +1194,7 @@ export class SyncClient {
     this.releaseSuspect(ack.op_id);
     // Im Arbeitsspeicher sofort entfernen, damit `pump` die Operation nicht noch einmal sendet
     this.dropEntries([entry]);
-    await this.locked(() => this.store.removeMany([entry.key]));
+    await this.write(() => this.store.removeMany([entry.key]));
     this.pending.get(ack.op_id)?.resolve(ack);
     this.pending.delete(ack.op_id);
     this.emit('queue', { pending: this.queue.length });
@@ -1187,7 +1244,7 @@ export class SyncClient {
       if (entry.failures >= POISON_LIMIT) {
         await this.shelveWithDependents(entry, 'poison', err);
       } else {
-        await this.locked(() => this.store.putMany([entry]));
+        await this.write(() => this.store.putMany([entry]));
       }
       return;
     }
@@ -1240,7 +1297,7 @@ export class SyncClient {
       reason: { kind: i.kind, code: err.code, message: err.message, causedBy: i.causedBy },
     }));
     const all = items.map((i) => i.entry);
-    await this.locked(async () => {
+    await this.write(async () => {
       await this.store.shelve(
         all.map((e) => e.key),
         shelved,
@@ -1295,11 +1352,12 @@ export class SyncClient {
       await this.shelveWithDependents(entry, 'conflict_unresolved', err);
       return;
     }
+    if (!this.isLeader) return; // Rolle verloren: nichts mehr schreiben
     entry.conflicts += 1;
     // Die Operation kann inzwischen umgeschrieben worden sein (4409): vom aktuellen Stand ausgehen
     const latest = entry.op as typeof current;
     entry.op = { ...latest, data: { ...latest.data, fields: result.fields, version: result.version } };
-    await this.locked(() => this.store.putMany([entry]));
+    await this.write(() => this.store.putMany([entry]));
     this.pump();
   }
 
@@ -1314,7 +1372,7 @@ export class SyncClient {
       return;
     }
     this.sessionSuperseded = true;
-    await this.locked(async () => {
+    await this.write(async () => {
       for (const e of this.queue) e.op = rewriteSessionId(e.op, oldId, newId);
       await this.store.putMany(this.queue);
     });
@@ -1324,18 +1382,20 @@ export class SyncClient {
   // ------------------------------------------------------------------ Mehrere Tabs
 
   /** Dieser Tab hat das Lock bekommen: Warteschlange vollständig aus dem Speicher lesen, dann verbinden. */
-  private async becomeLeader(lock: LeaderLock): Promise<void> {
+  private async becomeLeader(lock: LeaderLock, session: { resolve: () => void }): Promise<void> {
     await this.ready;
     await this.locked(() => this.reloadQueue()).catch(() => undefined);
     if (this.leaderLock !== lock || !this.wanted) return; // inzwischen getrennt
     this.isLeader = true;
     this.emit('queue', { pending: this.queue.length });
     if (!this.ws) this.openSocket();
+    session.resolve();
   }
 
   /**
    * Ein anderer Tab hat die Leader-Rolle übernommen: sauber trennen. Die Warteschlange liegt im Speicher und wird
-   * vom neuen Leader gesendet; offene `send()`-Versprechen dieses Tabs enden mit `SyncNotLeaderError`.
+   * vom neuen Leader gesendet; offene `send()`-Versprechen enden mit `SyncHandedOverError` (Operation ist in der
+   * Warteschlange, nicht neu senden) bzw. `SyncNotLeaderError` (noch nicht gespeichert).
    */
   private loseLeadership(lock: LeaderLock): void {
     if (this.leaderLock !== lock || !this.isLeader) return;
@@ -1352,12 +1412,9 @@ export class SyncClient {
       }
       this.afterClose();
     }
+    // Operationen in der Warteschlange sendet der neue Leader: der Fachcode darf sie nicht neu senden
     for (const [id, p] of this.pending) {
-      p.reject(
-        new SyncNotLeaderError(
-          'Ein anderer Tab hat die Synchronisation übernommen; die Operation bleibt in der Warteschlange und wird dort gesendet.',
-        ),
-      );
+      p.reject(this.byOpId.has(id) ? new SyncHandedOverError(id) : new SyncNotLeaderError());
       this.pending.delete(id);
     }
     this.setState('other_tab');

@@ -1,6 +1,6 @@
 'use client';
 
-// Hinweis „in einem anderen Tab aktiv“ (VERTRAEGE §11, Mehr-Tab-Regel): Nur ein Tab synchronisiert.
+// Hinweis „in einem anderen Tab aktiv“ (docs/VERTRAEGE.md §11.8): Nur ein Tab synchronisiert.
 // Einhängen (AppShell) macht der Lead.
 import { useEffect, useState } from 'react';
 import type { SyncClient } from './client.ts';

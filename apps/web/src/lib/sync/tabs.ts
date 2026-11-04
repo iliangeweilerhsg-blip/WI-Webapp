@@ -5,6 +5,8 @@
 export interface LeaderLockHandlers {
   /** Dieser Tab ist jetzt Leader */
   onLeader(): void;
+  /** Das Lock liegt nachweislich in einem anderen Tab (erster Versuch ohne Warten ist gescheitert) */
+  onOtherTab(): void;
   /** Das Lock wurde uns entzogen (anderer Tab hat übernommen) */
   onLost(): void;
   /** Ein anderer Tab meldet einen Leader-Wechsel (Zustand neu laden) */
@@ -30,6 +32,43 @@ export function createWebLocksLeader(name = 'sg-sync'): LeaderLock | null {
   let waiting: AbortController | null = null;
   let free: (() => void) | null = null;
   let handlers: LeaderLockHandlers | null = null;
+
+  const grant = (): Promise<void> => {
+    held = true;
+    handlers?.onLeader();
+    try {
+      channel?.postMessage('leader');
+    } catch {
+      // Kanal zu
+    }
+    return new Promise<void>((resolve) => {
+      free = resolve;
+    });
+  };
+
+  const onEnd = (): void => {
+    // Lock entzogen (steal) oder Warten abgebrochen
+    if (stopped || !held) return;
+    held = false;
+    free = null;
+    handlers?.onLost();
+    request(false); // wieder anstellen: wird Leader, wenn der andere Tab schließt
+  };
+
+  /** Erster Versuch ohne Warten: liefert sofort Leader oder „liegt woanders“. */
+  const first = (): void => {
+    navigator.locks
+      .request(lockName, { ifAvailable: true }, (lock) => {
+        if (stopped) return undefined;
+        if (!lock) {
+          handlers?.onOtherTab();
+          request(false);
+          return undefined;
+        }
+        return grant();
+      })
+      .then(() => undefined, onEnd);
+  };
 
   const request = (steal: boolean): void => {
     waiting = steal ? null : new AbortController();
@@ -70,7 +109,7 @@ export function createWebLocksLeader(name = 'sg-sync'): LeaderLock | null {
           if (!stopped && !held) handlers?.onChanged();
         };
       }
-      request(false);
+      first();
     },
     steal() {
       if (stopped || held) return;

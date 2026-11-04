@@ -523,6 +523,15 @@ quicktype fasst Unions zu einem Struct mit optionalen Feldern zusammen. Außerde
 
 Nachweis: CI-Job **Swift-Contract** (`bash packages/schemas/swift-support/check.sh`). Er kompiliert `Schemas.swift` mit der Hilfsschicht und decodiert alle gültigen Beispiele der Sync-Typen, `Stroke` und `PageElement`, der REST-Typen des iPads (`Device`, `DeviceList`, `PairStartResponse`, `PairResponse`, `Notebook`, `NotebookList`, `NotebookPages`, `Page`, `PageStrokes`, `PageDetail` über `SGPageDetail`, `Session`, `SessionList`, `SessionSnapshot`, `Settings`, `FileReceipt`) sowie `tests/fixtures/strokes/*.json`. Dann kodiert er sie wieder und vergleicht sie mit dem Original, `null`-Felder und Millisekunden eingeschlossen. Dazu prüft er das Ignorieren unbekannter Nachrichten und Fehlercodes.
 
+### 11.8 Mehrere Browser-Tabs (Web-Sync-Client)
+
+Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlange und empfängt Operationen und Ereignisse.
+- **Leader** ist der Tab, der das Lock (`navigator.locks`) hält. Ohne Web Locks ist ein Tab immer Leader.
+- `connect()` löst auf, sobald die Rolle feststeht. Bis dahin ist der Zustand `acquiring`. Liegt das Lock nachweislich in einem anderen Tab, ist er `other_tab`.
+- **Folge-Tabs synchronisieren nicht.** Sie schreiben nichts in die Warteschlange und abonnieren nichts. `send()` wirft dort `SyncNotLeaderError`, ohne `connect()` `SyncNotConnectedError`.
+- **Hier übernehmen** (`takeOver()`, Web Locks `steal`): Der alte Leader trennt sauber und zeigt `other_tab`. Seine offenen `send()`-Aufrufe enden mit `SyncHandedOverError` (die Operation liegt in der Warteschlange und wird vom neuen Leader gesendet, **nicht neu senden**) bzw. `SyncNotLeaderError` (noch nicht gespeichert). Der neue Leader liest die Warteschlange vollständig aus der IndexedDB. Schließt der Leader-Tab, übernimmt der wartende Tab.
+- Der `BroadcastChannel` meldet nur „Leader hat gewechselt“ (Client-Ereignis `leader.changed`; der Fachcode lädt seinen Stand per REST neu). Operationen werden nicht zwischen Tabs weitergeleitet.
+
 ## 12. Kopplung (F-INK-13, T1-10)
 
 1. **Kopplungsfenster öffnen (nur am Mac):** Die Web-App (Einstellungen → Geräte) ruft `POST /devices/pairings` auf. Das geht **nur lokal**.
