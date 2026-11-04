@@ -1,0 +1,1113 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spike S4 – Browser-Audioaufnahme (2h-Stabilität &amp; Chunk-Grenzen)</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --card: #1e293b;
+        --border: #334155;
+        --text: #f8fafc;
+        --muted: #94a3b8;
+        --green: #22c55e;
+        --yellow: #eab308;
+        --red: #ef4444;
+        --blue: #38bdf8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.45;
+      }
+      .container {
+        max-width: 820px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 4px 0;
+      }
+      .subtitle {
+        color: var(--muted);
+        font-size: 0.88rem;
+        margin-bottom: 16px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 14px;
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-bottom: 14px;
+      }
+      label {
+        display: block;
+        font-size: 0.78rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 4px;
+      }
+      select,
+      input {
+        width: 100%;
+        padding: 9px 10px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #0b1120;
+        color: var(--text);
+        font-size: 0.92rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+        gap: 10px;
+      }
+      .metric {
+        background: rgba(15, 23, 42, 0.65);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+      .metric-label {
+        font-size: 0.74rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .metric-value {
+        font-size: 1.05rem;
+        font-weight: 700;
+        margin-top: 4px;
+        font-variant-numeric: tabular-nums;
+        word-break: break-word;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+      .badge-ok {
+        background: rgba(34, 197, 94, 0.2);
+        color: #4ade80;
+      }
+      .badge-warn {
+        background: rgba(234, 179, 8, 0.2);
+        color: #facc15;
+      }
+      .badge-err {
+        background: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+      }
+      .btn-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      button {
+        appearance: none;
+        border: none;
+        border-radius: 8px;
+        padding: 11px 16px;
+        font-size: 0.94rem;
+        font-weight: 600;
+        cursor: pointer;
+        color: #0f172a;
+        background: var(--blue);
+      }
+      button.secondary {
+        background: #334155;
+        color: var(--text);
+      }
+      button.danger {
+        background: var(--red);
+        color: #fff;
+      }
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      textarea {
+        width: 100%;
+        min-height: 220px;
+        background: #090d16;
+        color: #e2e8f0;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.8rem;
+        resize: vertical;
+      }
+      .log-box {
+        max-height: 150px;
+        overflow-y: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.76rem;
+        background: #090d16;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+        color: #cbd5e1;
+      }
+      .hint {
+        font-size: 0.82rem;
+        color: var(--muted);
+        margin: 8px 0 0 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Studien-Gehirn · Spike S4: Browser-Audioaufnahme</h1>
+      <div class="subtitle">
+        Langzeit-Stabilitätstest (bis 2 h), Chunk-Grenzen (Variante A vs. B) &amp; IndexedDB-Puffer
+        (<code>F-AUD-01</code>)
+      </div>
+
+      <div class="card">
+        <div class="form-grid">
+          <div>
+            <label for="variantSelect">Aufnahme-Variante</label>
+            <select id="variantSelect">
+              <option value="A">Variante A – timeslice(30s) + Init-Chunk</option>
+              <option value="B">Variante B – Recorder-Rotation alle 30s</option>
+            </select>
+          </div>
+          <div>
+            <label for="modeSelect">Audio-Quelle (Modus)</label>
+            <select id="modeSelect">
+              <option value="sine">Sinuston 440 Hz (Lücken-Messung)</option>
+              <option value="mic">Mikrofon (2h-Praxistest)</option>
+            </select>
+          </div>
+          <div>
+            <label for="durationInput">Dauer (Minuten)</label>
+            <input id="durationInput" type="number" min="0.5" max="240" step="0.5" value="120" />
+          </div>
+          <div>
+            <label for="laufInput">Lauf-ID (optional)</label>
+            <input id="laufInput" type="text" placeholder="automatisch erzeugt" />
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="startBtn" type="button">Aufnahme starten</button>
+          <button id="stopBtn" type="button" class="danger" disabled>
+            Vorzeitig stoppen &amp; Bericht erzeugen
+          </button>
+        </div>
+        <p class="hint" id="mimeHint">Erkannter MIME-Typ wird beim Laden ermittelt …</p>
+      </div>
+
+      <div class="card">
+        <div class="grid">
+          <div class="metric">
+            <div class="metric-label">Status / Lauf-ID</div>
+            <div class="metric-value" id="statusVal">Bereit</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Laufzeit (perf.now / AudioCtx)</div>
+            <div class="metric-value" id="elapsedVal">00:00 / 120:00</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Chunks (Bestätigt / Erzeugt)</div>
+            <div class="metric-value" id="chunksOkVal">0 / 0</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Puffer in IndexedDB (unbestätigt)</div>
+            <div class="metric-value" id="idbPendingVal">0 (Peak: 0)</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Upload-Fehlversuche / Retries</div>
+            <div class="metric-value" id="retriesVal">0 / 0</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">MIME-Typ (automatisch)</div>
+            <div class="metric-value" id="mimeVal">–</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Screen Wake Lock</div>
+            <div class="metric-value" id="wakeLockVal">Nicht angefordert</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Tab im Hintergrund</div>
+            <div class="metric-value" id="bgTabVal">Nein (0× / 0 s)</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="metric-label" style="margin-bottom: 6px">Ereignis-Protokoll (Live)</div>
+        <div class="log-box" id="logBox"></div>
+      </div>
+
+      <div class="card">
+        <div class="metric-label" style="margin-bottom: 8px">
+          Textbericht zum Kopieren (und Auswertungsbefehl für das Terminal)
+        </div>
+        <textarea
+          id="reportBox"
+          readonly
+          placeholder="Bericht erscheint nach Abschluss der Aufnahme …"
+        ></textarea>
+        <div class="btn-row" style="margin-top: 10px">
+          <button id="copyBtn" type="button" class="secondary">Bericht in Zwischenablage</button>
+          <span id="copyFeedback" style="align-self: center; font-size: 0.85rem; color: var(--green)"></span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const params = new URLSearchParams(window.location.search);
+        const DEFAULT_CHUNK_S = 30;
+        const rawChunkS = Number(params.get('chunk_s') || DEFAULT_CHUNK_S);
+        const CHUNK_INTERVAL_MS =
+          Number.isFinite(rawChunkS) && rawChunkS >= 2 && rawChunkS <= 120
+            ? Math.round(rawChunkS * 1000)
+            : DEFAULT_CHUNK_S * 1000;
+
+        const variantSelect = document.getElementById('variantSelect');
+        const modeSelect = document.getElementById('modeSelect');
+        const durationInput = document.getElementById('durationInput');
+        const laufInput = document.getElementById('laufInput');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const mimeHint = document.getElementById('mimeHint');
+
+        const statusVal = document.getElementById('statusVal');
+        const elapsedVal = document.getElementById('elapsedVal');
+        const chunksOkVal = document.getElementById('chunksOkVal');
+        const idbPendingVal = document.getElementById('idbPendingVal');
+        const retriesVal = document.getElementById('retriesVal');
+        const mimeVal = document.getElementById('mimeVal');
+        const wakeLockVal = document.getElementById('wakeLockVal');
+        const bgTabVal = document.getElementById('bgTabVal');
+        const logBox = document.getElementById('logBox');
+        const reportBox = document.getElementById('reportBox');
+        const copyBtn = document.getElementById('copyBtn');
+        const copyFeedback = document.getElementById('copyFeedback');
+
+        if (params.get('variante') === 'B' || params.get('variante') === 'A') {
+          variantSelect.value = params.get('variante');
+        }
+        if (params.get('modus') === 'mic' || params.get('modus') === 'sine') {
+          modeSelect.value = params.get('modus');
+        }
+        if (params.get('dauer')) {
+          const d = Number(params.get('dauer'));
+          if (Number.isFinite(d) && d > 0 && d <= 240) {
+            durationInput.value = String(d);
+          }
+        }
+        if (params.get('lauf')) {
+          laufInput.value = params.get('lauf').replace(/[^a-zA-Z0-9_-]/g, '');
+        }
+
+        function detectSupportedMimeType() {
+          if (typeof MediaRecorder === 'undefined') return '';
+          const candidates = [
+            'audio/webm;codecs=opus',
+            'audio/mp4;codecs=mp4a.40.2',
+            'audio/mp4',
+            'audio/webm',
+          ];
+          for (const c of candidates) {
+            if (typeof MediaRecorder.isTypeSupported === 'function') {
+              if (MediaRecorder.isTypeSupported(c)) return c;
+            }
+          }
+          return '';
+        }
+
+        const detectedMime = detectSupportedMimeType();
+        mimeVal.textContent = detectedMime || 'Standard (Browser)';
+        mimeHint.textContent = `Automatischer MIME-Typ: ${detectedMime || 'Browser-Standard'} · Chunk-Intervall: ${(CHUNK_INTERVAL_MS / 1000).toFixed(0)} s`;
+
+        function appendLog(msg) {
+          const ts = new Date().toTimeString().slice(0, 8);
+          const line = document.createElement('div');
+          line.textContent = `[${ts}] ${msg}`;
+          logBox.appendChild(line);
+          logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        // --- IndexedDB-Puffer (F-AUD-01) ---
+        const IDB_NAME = 'studien-gehirn-s4-buffer';
+        const IDB_STORE = 'pending_chunks';
+        let idbPromise = null;
+
+        function openBufferDb() {
+          if (idbPromise) return idbPromise;
+          idbPromise = new Promise((resolve, reject) => {
+            const req = indexedDB.open(IDB_NAME, 1);
+            req.onupgradeneeded = () => {
+              const db = req.result;
+              if (!db.objectStoreNames.contains(IDB_STORE)) {
+                const store = db.createObjectStore(IDB_STORE, { keyPath: 'id' });
+                store.createIndex('by_lauf', 'lauf', { unique: false });
+              }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          });
+          return idbPromise;
+        }
+
+        async function idbPutChunk(record) {
+          const db = await openBufferDb();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            tx.objectStore(IDB_STORE).put(record);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+          });
+        }
+
+        async function idbDeleteChunk(id) {
+          const db = await openBufferDb();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readwrite');
+            tx.objectStore(IDB_STORE).delete(id);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+          });
+        }
+
+        async function idbGetPendingForLauf(lauf) {
+          const db = await openBufferDb();
+          return new Promise((resolve, reject) => {
+            const tx = db.transaction(IDB_STORE, 'readonly');
+            const idx = tx.objectStore(IDB_STORE).index('by_lauf');
+            const req = idx.getAll(IDBKeyRange.only(lauf));
+            req.onsuccess = () => {
+              const list = req.result || [];
+              list.sort((a, b) => a.seq - b.seq);
+              resolve(list);
+            };
+            req.onerror = () => reject(req.error);
+          });
+        }
+
+        // --- WebAudio-Analyse für Chunk-Dekodierung & Encoder-Priming ---
+        let decodeCtx = null;
+        let variantAHeaderPrefix = null;
+
+        function extractWebmHeaderPrefix(uint8) {
+          // Sucht die erste WebM-Cluster-ID 0x1F43B675
+          for (let i = 0; i + 4 <= uint8.length; i += 1) {
+            if (
+              uint8[i] === 0x1f &&
+              uint8[i + 1] === 0x43 &&
+              uint8[i + 2] === 0xb6 &&
+              uint8[i + 3] === 0x75
+            ) {
+              return uint8.slice(0, i);
+            }
+          }
+          return null;
+        }
+
+        async function analyzeChunkAudio(arrayBuf, seq, variant) {
+          const result = {
+            decodedDurationMs: -1,
+            leadingSilenceMs: -1,
+            trailingSilenceMs: -1,
+            internalSilenceMaxMs: 0,
+          };
+          try {
+            if (!decodeCtx) {
+              const Ctx = window.AudioContext || window.webkitAudioContext;
+              decodeCtx = new Ctx({ sampleRate: 48000 });
+            }
+            const rawBytes = new Uint8Array(arrayBuf);
+            if (variant === 'A' && seq === 0) {
+              variantAHeaderPrefix = extractWebmHeaderPrefix(rawBytes);
+            }
+
+            let decodeTargetBuffer = arrayBuf.slice(0);
+            if (variant === 'A' && seq > 0 && variantAHeaderPrefix) {
+              const combined = new Uint8Array(variantAHeaderPrefix.length + rawBytes.length);
+              combined.set(variantAHeaderPrefix, 0);
+              combined.set(rawBytes, variantAHeaderPrefix.length);
+              decodeTargetBuffer = combined.buffer;
+            }
+
+            const audioBuffer = await decodeCtx.decodeAudioData(decodeTargetBuffer);
+            const sr = audioBuffer.sampleRate;
+            const data = audioBuffer.getChannelData(0);
+            const totalSamples = data.length;
+            result.decodedDurationMs = (totalSamples / sr) * 1000;
+
+            const threshold = 0.00316; // ca. -50 dB
+            let leadingSamples = 0;
+            while (leadingSamples < totalSamples && Math.abs(data[leadingSamples]) < threshold) {
+              leadingSamples += 1;
+            }
+            result.leadingSilenceMs = (leadingSamples / sr) * 1000;
+
+            let trailingSamples = 0;
+            while (
+              trailingSamples < totalSamples - leadingSamples &&
+              Math.abs(data[totalSamples - 1 - trailingSamples]) < threshold
+            ) {
+              trailingSamples += 1;
+            }
+            result.trailingSilenceMs = (trailingSamples / sr) * 1000;
+
+            let maxInternalSilentSamples = 0;
+            let currentSilent = 0;
+            const endIdx = totalSamples - trailingSamples;
+            for (let i = leadingSamples; i < endIdx; i += 1) {
+              if (Math.abs(data[i]) < threshold) {
+                currentSilent += 1;
+                if (currentSilent > maxInternalSilentSamples) {
+                  maxInternalSilentSamples = currentSilent;
+                }
+              } else {
+                currentSilent = 0;
+              }
+            }
+            result.internalSilenceMaxMs = (maxInternalSilentSamples / sr) * 1000;
+          } catch {
+            // Bei Teil-Fragmenten ohne eigenen Header ist decodeAudioData optional
+          }
+          return result;
+        }
+
+        // --- Lauf-Zustand ---
+        let state = {
+          running: false,
+          stopping: false,
+          finished: false,
+          lauf: '',
+          variant: 'A',
+          mode: 'sine',
+          mimeType: detectedMime,
+          targetDurationMs: 120 * 60 * 1000,
+          t0Perf: 0,
+          t0Audio: 0,
+          seqCounter: 0,
+          segmentId: 0,
+          chunksProduced: 0,
+          chunksConfirmed: 0,
+          idbPendingCount: 0,
+          idbPeakPending: 0,
+          uploadFailures: 0,
+          uploadRetriesSent: 0,
+          wakeLockStatus: 'Nicht angefordert',
+          wakeLockDrops: 0,
+          bgSwitchCount: 0,
+          bgTotalMs: 0,
+          bgEnteredAt: null,
+          sleepJumpsDetected: 0,
+        };
+
+        window.__s4State = state;
+
+        let audioCtx = null;
+        let mediaStream = null;
+        let activeRecorder = null;
+        let rotationTimer = null;
+        let uiTimer = null;
+        let flushTimer = null;
+        let wakeLockSentinel = null;
+        let flushing = false;
+        let lastTickPerf = 0;
+
+        async function acquireWakeLock() {
+          if (!('wakeLock' in navigator)) {
+            state.wakeLockStatus = 'Nicht unterstützt';
+            wakeLockVal.textContent = state.wakeLockStatus;
+            return;
+          }
+          try {
+            wakeLockSentinel = await navigator.wakeLock.request('screen');
+            state.wakeLockStatus = 'Aktiv';
+            wakeLockVal.innerHTML = '<span class="badge badge-ok">Aktiv</span>';
+            wakeLockSentinel.addEventListener('release', () => {
+              state.wakeLockDrops += 1;
+              state.wakeLockStatus = 'Freigegeben';
+              wakeLockVal.innerHTML = `<span class="badge badge-warn">Freigegeben (${state.wakeLockDrops}×)</span>`;
+            });
+          } catch (err) {
+            state.wakeLockStatus = `Blockiert (${err.name || 'Fehler'})`;
+            wakeLockVal.innerHTML = `<span class="badge badge-warn">${state.wakeLockStatus}</span>`;
+          }
+        }
+
+        document.addEventListener('visibilitychange', () => {
+          if (!state.running) return;
+          if (document.visibilityState === 'hidden') {
+            state.bgSwitchCount += 1;
+            state.bgEnteredAt = performance.now();
+            appendLog(`Tab in den Hintergrund gewechselt (#${state.bgSwitchCount}).`);
+          } else {
+            if (state.bgEnteredAt !== null) {
+              state.bgTotalMs += performance.now() - state.bgEnteredAt;
+              state.bgEnteredAt = null;
+            }
+            appendLog('Tab wieder im Vordergrund – prüfe Wake Lock.');
+            acquireWakeLock();
+          }
+          updateDashboard();
+        });
+
+        function formatMmSs(ms) {
+          const totalSec = Math.max(0, Math.floor(ms / 1000));
+          const m = Math.floor(totalSec / 60);
+          const s = totalSec % 60;
+          return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        }
+
+        function updateDashboard() {
+          const nowPerf = state.running ? performance.now() - state.t0Perf : 0;
+          const nowAudio = state.running && audioCtx ? (audioCtx.currentTime - state.t0Audio) * 1000 : 0;
+          elapsedVal.textContent = `${formatMmSs(nowPerf)} (Audio: ${(nowAudio / 1000).toFixed(1)}s) / ${formatMmSs(state.targetDurationMs)}`;
+          chunksOkVal.textContent = `${state.chunksConfirmed} / ${state.chunksProduced}`;
+          idbPendingVal.innerHTML =
+            state.idbPendingCount > 0
+              ? `<span class="badge badge-warn">${state.idbPendingCount} im Puffer</span> (Peak: ${state.idbPeakPending})`
+              : `<span class="badge badge-ok">0</span> (Peak: ${state.idbPeakPending})`;
+          retriesVal.textContent = `${state.uploadFailures} Fehler / ${state.uploadRetriesSent} Retries`;
+
+          let currentBgMs = state.bgTotalMs;
+          if (state.bgEnteredAt !== null) {
+            currentBgMs += performance.now() - state.bgEnteredAt;
+          }
+          const isHidden = document.visibilityState === 'hidden';
+          bgTabVal.textContent = `${isHidden ? 'JA' : 'Nein'} (${state.bgSwitchCount}× / ${(currentBgMs / 1000).toFixed(1)} s)`;
+        }
+
+        async function flushPendingChunks() {
+          if (flushing || !state.lauf) return;
+          flushing = true;
+          try {
+            const pending = await idbGetPendingForLauf(state.lauf);
+            state.idbPendingCount = pending.length;
+            if (pending.length > state.idbPeakPending) {
+              state.idbPeakPending = pending.length;
+            }
+            updateDashboard();
+
+            for (const item of pending) {
+              try {
+                const headers = {
+                  'Content-Type': item.mimeType || 'application/octet-stream',
+                  'X-Mime-Type': item.mimeType || 'audio/webm',
+                  'X-Variant': item.variant,
+                  'X-Mode': item.mode,
+                  'X-Segment-Id': String(item.segmentId || 0),
+                  'X-Start-Ms': String(item.startMs),
+                  'X-Duration-Ms': String(item.durationMs),
+                  'X-Audio-Start-Ms': String(item.audioStartMs),
+                  'X-Audio-Time-Ms': String(item.audioTimeMs),
+                  'X-Decoded-Duration-Ms': String(item.decodedDurationMs ?? -1),
+                  'X-Leading-Silence-Ms': String(item.leadingSilenceMs ?? -1),
+                  'X-Trailing-Silence-Ms': String(item.trailingSilenceMs ?? -1),
+                  'X-Internal-Silence-Max-Ms': String(item.internalSilenceMaxMs ?? 0),
+                  'X-Retry-Count': String(item.retryCount || 0),
+                };
+
+                const resp = await fetch(
+                  `/chunk/${encodeURIComponent(item.lauf)}/${encodeURIComponent(String(item.seq))}`,
+                  {
+                    method: 'PUT',
+                    headers,
+                    body: item.buffer,
+                    cache: 'no-store',
+                  },
+                );
+
+                if (!resp.ok) {
+                  throw new Error(`HTTP ${resp.status}`);
+                }
+
+                // Erst nach Bestätigung des Servers aus IndexedDB löschen (F-AUD-01)!
+                await idbDeleteChunk(item.id);
+                state.chunksConfirmed += 1;
+                if (item.retryCount > 0) {
+                  state.uploadRetriesSent += 1;
+                  appendLog(
+                    `Chunk #${item.seq} nach ${item.retryCount} Fehlversuch(en) aus IndexedDB nachgesendet & bestätigt.`,
+                  );
+                } else {
+                  appendLog(
+                    `Chunk #${item.seq} bestätigt (${item.buffer.byteLength} Bytes, Dauer ${item.durationMs.toFixed(0)} ms).`,
+                  );
+                }
+              } catch (err) {
+                state.uploadFailures += 1;
+                item.retryCount = (item.retryCount || 0) + 1;
+                await idbPutChunk(item);
+                appendLog(
+                  `WARNUNG: Upload Chunk #${item.seq} fehlgeschlagen (${err.message || 'Server nicht erreichbar'}) – bleibt in IndexedDB (Versuch #${item.retryCount}).`,
+                );
+                // Bei Serverausfall Reihenfolge wahren und beim nächsten Tick erneut versuchen
+                break;
+              }
+            }
+
+            const remaining = await idbGetPendingForLauf(state.lauf);
+            state.idbPendingCount = remaining.length;
+            if (remaining.length > state.idbPeakPending) {
+              state.idbPeakPending = remaining.length;
+            }
+            updateDashboard();
+          } finally {
+            flushing = false;
+          }
+        }
+
+        async function handleChunkBlob(blob, timing) {
+          if (!blob || blob.size === 0) return;
+          const seq = state.seqCounter;
+          state.seqCounter += 1;
+          state.chunksProduced += 1;
+
+          const arrayBuf = await blob.arrayBuffer();
+          const analysis =
+            state.mode === 'sine'
+              ? await analyzeChunkAudio(arrayBuf, seq, state.variant)
+              : {
+                  decodedDurationMs: -1,
+                  leadingSilenceMs: -1,
+                  trailingSilenceMs: -1,
+                  internalSilenceMaxMs: 0,
+                };
+
+          const record = {
+            id: `${state.lauf}:${seq}`,
+            lauf: state.lauf,
+            seq,
+            segmentId: timing.segmentId,
+            variant: state.variant,
+            mode: state.mode,
+            mimeType: state.mimeType || blob.type || 'audio/webm',
+            startMs: timing.startMs,
+            durationMs: timing.durationMs,
+            audioStartMs: timing.audioStartMs,
+            audioTimeMs: timing.audioTimeMs,
+            decodedDurationMs: analysis.decodedDurationMs,
+            leadingSilenceMs: analysis.leadingSilenceMs,
+            trailingSilenceMs: analysis.trailingSilenceMs,
+            internalSilenceMaxMs: analysis.internalSilenceMaxMs,
+            retryCount: 0,
+            buffer: arrayBuf,
+          };
+
+          // Zuerst lokal in IndexedDB sichern (F-AUD-01)
+          await idbPutChunk(record);
+          const pendingNow = await idbGetPendingForLauf(state.lauf);
+          state.idbPendingCount = pendingNow.length;
+          if (pendingNow.length > state.idbPeakPending) {
+            state.idbPeakPending = pendingNow.length;
+          }
+          updateDashboard();
+
+          await flushPendingChunks();
+        }
+
+        function startVariantARecorder() {
+          const options = state.mimeType ? { mimeType: state.mimeType } : {};
+          const rec = new MediaRecorder(mediaStream, options);
+          const segId = state.segmentId;
+          let lastChunkPerf = performance.now() - state.t0Perf;
+          let lastChunkAudio = (audioCtx.currentTime - state.t0Audio) * 1000;
+
+          rec.ondataavailable = (ev) => {
+            if (!ev.data || ev.data.size === 0) return;
+            const nowPerf = performance.now() - state.t0Perf;
+            const nowAudio = (audioCtx.currentTime - state.t0Audio) * 1000;
+            const timing = {
+              segmentId: segId,
+              startMs: lastChunkPerf,
+              durationMs: Math.max(0, nowPerf - lastChunkPerf),
+              audioStartMs: lastChunkAudio,
+              audioTimeMs: nowAudio,
+            };
+            lastChunkPerf = nowPerf;
+            lastChunkAudio = nowAudio;
+            handleChunkBlob(ev.data, timing);
+          };
+
+          rec.StartTimePerf = lastChunkPerf;
+          rec.start(CHUNK_INTERVAL_MS);
+          activeRecorder = rec;
+          appendLog(
+            `Variante A gestartet: MediaRecorder.start(${CHUNK_INTERVAL_MS} ms) [Segment #${segId}].`,
+          );
+        }
+
+        function startSingleVariantBRecorder() {
+          if (!state.running || state.stopping) return;
+          const options = state.mimeType ? { mimeType: state.mimeType } : {};
+          const rec = new MediaRecorder(mediaStream, options);
+          const segId = state.segmentId;
+          state.segmentId += 1;
+
+          const startPerf = performance.now() - state.t0Perf;
+          const startAudio = (audioCtx.currentTime - state.t0Audio) * 1000;
+
+          rec.ondataavailable = (ev) => {
+            if (!ev.data || ev.data.size === 0) return;
+            const endPerf = performance.now() - state.t0Perf;
+            const endAudio = (audioCtx.currentTime - state.t0Audio) * 1000;
+            handleChunkBlob(ev.data, {
+              segmentId: segId,
+              startMs: startPerf,
+              durationMs: Math.max(0, endPerf - startPerf),
+              audioStartMs: startAudio,
+              audioTimeMs: endAudio,
+            });
+          };
+
+          rec.start();
+          activeRecorder = rec;
+
+          rotationTimer = setTimeout(() => {
+            if (!state.running || state.stopping) return;
+            const prevRec = rec;
+            // Sofort neuen Recorder starten und alten stoppen (Rotation alle 30 s)
+            startSingleVariantBRecorder();
+            try {
+              if (prevRec.state !== 'inactive') {
+                prevRec.stop();
+              }
+            } catch {
+              // ignore
+            }
+          }, CHUNK_INTERVAL_MS);
+        }
+
+        async function setupAudioSource(mode) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          audioCtx = new Ctx({ sampleRate: 48000 });
+          if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+          }
+
+          if (mode === 'sine') {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            const dest = audioCtx.createMediaStreamDestination();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            osc.connect(gain);
+            gain.connect(dest);
+            osc.start();
+            mediaStream = dest.stream;
+            appendLog('440-Hz-Sinuston-Generator (AudioContext -> MediaStreamDestination) aktiv.');
+          } else {
+            mediaStream = await navigator.mediaDevices.getUserMedia({
+              audio: {
+                channelCount: 1,
+                sampleRate: 48000,
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+              },
+            });
+            const src = audioCtx.createMediaStreamSource(mediaStream);
+            const silentGain = audioCtx.createGain();
+            silentGain.gain.setValueAtTime(0, audioCtx.currentTime);
+            src.connect(silentGain);
+            silentGain.connect(audioCtx.destination);
+            appendLog('Mikrofon-Stream (48 kHz mono) aktiv.');
+          }
+        }
+
+        function buildDefaultLaufId(variant, mode) {
+          const now = new Date();
+          const pad = (n) => String(n).padStart(2, '0');
+          const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+          return `s4-${variant}-${mode}-${stamp}`;
+        }
+
+        async function startRecording() {
+          if (state.running) return;
+          const variant = variantSelect.value === 'B' ? 'B' : 'A';
+          const mode = modeSelect.value === 'mic' ? 'mic' : 'sine';
+          const durMin = Number(durationInput.value) || 120;
+          const customLauf = (laufInput.value || '').trim().replace(/[^a-zA-Z0-9_-]/g, '');
+          const lauf = customLauf || buildDefaultLaufId(variant, mode);
+
+          laufInput.value = lauf;
+          variantAHeaderPrefix = null;
+
+          try {
+            await setupAudioSource(mode);
+          } catch (err) {
+            statusVal.innerHTML = '<span class="badge badge-err">Audio-Fehler</span>';
+            appendLog(`FEHLER beim Öffnen der Audioquelle: ${err.message || err}`);
+            return;
+          }
+
+          state.running = true;
+          state.stopping = false;
+          state.finished = false;
+          state.lauf = lauf;
+          state.variant = variant;
+          state.mode = mode;
+          state.mimeType = detectedMime;
+          state.targetDurationMs = Math.round(durMin * 60 * 1000);
+          state.t0Perf = performance.now();
+          state.t0Audio = audioCtx.currentTime;
+          state.seqCounter = 0;
+          state.segmentId = 0;
+          state.chunksProduced = 0;
+          state.chunksConfirmed = 0;
+          state.idbPendingCount = 0;
+          state.idbPeakPending = 0;
+          state.uploadFailures = 0;
+          state.uploadRetriesSent = 0;
+          state.wakeLockDrops = 0;
+          state.bgSwitchCount = 0;
+          state.bgTotalMs = 0;
+          state.bgEnteredAt = document.visibilityState === 'hidden' ? performance.now() : null;
+          state.sleepJumpsDetected = 0;
+
+          startBtn.disabled = true;
+          stopBtn.disabled = false;
+          variantSelect.disabled = true;
+          modeSelect.disabled = true;
+          durationInput.disabled = true;
+          laufInput.disabled = true;
+          reportBox.value = '';
+
+          statusVal.innerHTML = `<span class="badge badge-ok">Läuft (${lauf})</span>`;
+          appendLog(
+            `Starte Lauf "${lauf}" (Variante ${variant}, Modus ${mode}, Ziel ${(state.targetDurationMs / 60000).toFixed(1)} min).`,
+          );
+
+          await acquireWakeLock();
+
+          if (variant === 'A') {
+            startVariantARecorder();
+          } else {
+            appendLog(
+              `Variante B gestartet: Recorder-Rotation alle ${(CHUNK_INTERVAL_MS / 1000).toFixed(0)} s.`,
+            );
+            startSingleVariantBRecorder();
+          }
+
+          lastTickPerf = performance.now();
+          uiTimer = setInterval(() => {
+            if (!state.running) return;
+            const now = performance.now();
+            const delta = now - lastTickPerf;
+            lastTickPerf = now;
+
+            // Ruhezustand / Deckel-zu-Erkennung (Zeitsprung > 10 s bei 1-s-Intervall)
+            if (delta > 10000) {
+              state.sleepJumpsDetected += 1;
+              appendLog(`WARNUNG: Zeitsprung / Ruhezustand erkannt (${(delta / 1000).toFixed(1)} s).`);
+              if (state.variant === 'A' && activeRecorder) {
+                try {
+                  if (activeRecorder.state !== 'inactive') activeRecorder.stop();
+                } catch {
+                  // ignore
+                }
+                state.segmentId += 1;
+                startVariantARecorder();
+              }
+            }
+
+            updateDashboard();
+
+            const elapsed = now - state.t0Perf;
+            if (elapsed >= state.targetDurationMs && !state.stopping) {
+              stopRecording('Ziel-Laufzeit erreicht');
+            }
+          }, 500);
+
+          flushTimer = setInterval(() => {
+            flushPendingChunks();
+          }, 1500);
+        }
+
+        async function stopRecording(reason = 'Manuell beendet') {
+          if (!state.running || state.stopping) return;
+          state.stopping = true;
+          stopBtn.disabled = true;
+          appendLog(`Beende Aufnahme (${reason}) – warte auf letzten Chunk & IndexedDB-Puffer …`);
+
+          if (rotationTimer) {
+            clearTimeout(rotationTimer);
+            rotationTimer = null;
+          }
+          if (uiTimer) {
+            clearInterval(uiTimer);
+            uiTimer = null;
+          }
+
+          const finalElapsedPerfMs = performance.now() - state.t0Perf;
+          const finalElapsedAudioMs = audioCtx ? (audioCtx.currentTime - state.t0Audio) * 1000 : 0;
+
+          if (activeRecorder && activeRecorder.state !== 'inactive') {
+            await new Promise((resolve) => {
+              const prevHandler = activeRecorder.ondataavailable;
+              activeRecorder.addEventListener('stop', () => setTimeout(resolve, 250), {
+                once: true,
+              });
+              try {
+                activeRecorder.stop();
+              } catch {
+                resolve();
+              }
+              if (!prevHandler) resolve();
+            });
+          }
+
+          if (mediaStream) {
+            for (const track of mediaStream.getTracks()) {
+              track.stop();
+            }
+          }
+
+          // Warten, bis der IndexedDB-Puffer vollständig an den Server übertragen wurde
+          for (let waitStep = 0; waitStep < 40; waitStep += 1) {
+            await flushPendingChunks();
+            const rem = await idbGetPendingForLauf(state.lauf);
+            state.idbPendingCount = rem.length;
+            updateDashboard();
+            if (rem.length === 0) break;
+            await new Promise((r) => setTimeout(r, 1000));
+          }
+
+          if (flushTimer) {
+            clearInterval(flushTimer);
+            flushTimer = null;
+          }
+
+          if (wakeLockSentinel) {
+            try {
+              await wakeLockSentinel.release();
+            } catch {
+              // ignore
+            }
+            wakeLockSentinel = null;
+          }
+
+          if (state.bgEnteredAt !== null) {
+            state.bgTotalMs += performance.now() - state.bgEnteredAt;
+            state.bgEnteredAt = null;
+          }
+
+          state.running = false;
+          state.stopping = false;
+          state.finished = true;
+
+          const summaryPayload = {
+            lauf: state.lauf,
+            variant: state.variant,
+            mode: state.mode,
+            mime_type: state.mimeType || 'default',
+            chunk_interval_ms: CHUNK_INTERVAL_MS,
+            target_duration_ms: state.targetDurationMs,
+            actual_perf_duration_ms: Math.round(finalElapsedPerfMs),
+            actual_audio_duration_ms: Math.round(finalElapsedAudioMs),
+            chunks_produced: state.chunksProduced,
+            chunks_confirmed: state.chunksConfirmed,
+            idb_pending_remaining: state.idbPendingCount,
+            idb_peak_pending: state.idbPeakPending,
+            upload_failures: state.uploadFailures,
+            upload_retries_sent: state.uploadRetriesSent,
+            wake_lock_status: state.wakeLockStatus,
+            wake_lock_drops: state.wakeLockDrops,
+            bg_switch_count: state.bgSwitchCount,
+            bg_total_ms: Math.round(state.bgTotalMs),
+            sleep_jumps_detected: state.sleepJumpsDetected,
+            stop_reason: reason,
+          };
+
+          try {
+            await fetch(`/finish/${encodeURIComponent(state.lauf)}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(summaryPayload),
+            });
+          } catch (err) {
+            appendLog(`WARNUNG: Konnte /finish nicht senden (${err.message || err}).`);
+          }
+
+          const reportLines = [
+            '=== SPIKE S4 – BROWSER-LAUFBERICHT ===',
+            `Zeitpunkt:              ${new Date().toISOString()}`,
+            `Lauf-ID:                ${state.lauf}`,
+            `Browser (User-Agent):   ${navigator.userAgent}`,
+            `Variante:               Variante ${state.variant} (${state.variant === 'A' ? 'timeslice + Init-Chunk' : 'Recorder-Rotation'})`,
+            `Modus:                  ${state.mode === 'sine' ? 'Sinuston 440 Hz' : 'Mikrofon'}`,
+            `MIME-Typ:               ${state.mimeType || 'Browser-Standard'}`,
+            `Chunk-Intervall:        ${(CHUNK_INTERVAL_MS / 1000).toFixed(1)} s`,
+            `Dauer Soll:             ${(state.targetDurationMs / 1000).toFixed(2)} s (${(state.targetDurationMs / 60000).toFixed(2)} min)`,
+            `Dauer Ist (perf.now):   ${(finalElapsedPerfMs / 1000).toFixed(2)} s`,
+            `Dauer Ist (AudioCtx):   ${(finalElapsedAudioMs / 1000).toFixed(2)} s`,
+            `Chunks erzeugt:         ${state.chunksProduced}`,
+            `Chunks bestätigt (OK):  ${state.chunksConfirmed}`,
+            `IndexedDB Rest-Puffer:  ${state.idbPendingCount} (Peak während Lauf: ${state.idbPeakPending})`,
+            `Upload-Fehlversuche:    ${state.uploadFailures} (erfolgreiche Retries: ${state.uploadRetriesSent})`,
+            `Screen Wake Lock:       ${state.wakeLockStatus} (Freigaben: ${state.wakeLockDrops}×)`,
+            `Tab im Hintergrund:     ${state.bgSwitchCount}× (insgesamt ${(state.bgTotalMs / 1000).toFixed(1)} s)`,
+            `Ruhezustands-Sprünge:   ${state.sleepJumpsDetected}`,
+            '',
+            'Nächster Schritt im Terminal (auf dem Mac ausführen):',
+            `  node spikes/s4-audio/auswerten.mjs ${state.lauf}`,
+            '=== ENDE SPIKE S4 BROWSER-LAUFBERICHT ===',
+          ];
+
+          reportBox.value = reportLines.join('\n');
+          statusVal.innerHTML = `<span class="badge badge-ok">Fertig (${state.lauf})</span>`;
+          appendLog(`Aufnahme abgeschlossen. Auswertung: node spikes/s4-audio/auswerten.mjs ${state.lauf}`);
+
+          startBtn.disabled = false;
+          variantSelect.disabled = false;
+          modeSelect.disabled = false;
+          durationInput.disabled = false;
+          laufInput.disabled = false;
+        }
+
+        startBtn.addEventListener('click', () => startRecording());
+        stopBtn.addEventListener('click', () => stopRecording('Manuell durch Nutzer gestoppt'));
+
+        copyBtn.addEventListener('click', async () => {
+          if (!reportBox.value) return;
+          try {
+            await navigator.clipboard.writeText(reportBox.value);
+            copyFeedback.textContent = 'Kopiert!';
+            setTimeout(() => {
+              copyFeedback.textContent = '';
+            }, 2000);
+          } catch {
+            reportBox.select();
+            document.execCommand('copy');
+            copyFeedback.textContent = 'Markiert & kopiert!';
+          }
+        });
+
+        updateDashboard();
+
+        if (params.get('autostart') === '1') {
+          setTimeout(() => startRecording(), 300);
+        }
+      })();
+    </script>
+  </body>
+</html>
