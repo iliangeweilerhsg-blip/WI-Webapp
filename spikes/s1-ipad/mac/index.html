@@ -28,7 +28,7 @@
         line-height: 1.45;
       }
       .container {
-        max-width: 1080px;
+        max-width: 1120px;
         margin: 0 auto;
       }
       h1 {
@@ -102,7 +102,8 @@
       .canvas-wrap {
         position: relative;
         width: 100%;
-        height: 480px;
+        aspect-ratio: 595 / 842;
+        max-height: 640px;
         background: #ffffff;
         border-radius: 10px;
         overflow: hidden;
@@ -133,7 +134,7 @@
       }
       textarea {
         width: 100%;
-        min-height: 220px;
+        min-height: 250px;
         background: #090d16;
         color: #e2e8f0;
         border: 1px solid var(--border);
@@ -174,7 +175,9 @@
         <div class="grid">
           <div class="metric">
             <div class="metric-label">WebSocket / Bonjour</div>
-            <div class="metric-value" id="connStatusVal">Verbinde …</div>
+            <div class="metric-value">
+              <span id="connStatusBadge" class="badge badge-warn">Verbinde …</span>
+            </div>
           </div>
           <div class="metric">
             <div class="metric-label">Empfangene Striche</div>
@@ -186,7 +189,7 @@
           </div>
           <div class="metric">
             <div class="metric-label">Latenz Median (Ziel &le; 1000 ms)</div>
-            <div class="metric-value" id="medianLatencyVal">–</div>
+            <div class="metric-value"><span id="medianLatencyBadge">–</span></div>
           </div>
           <div class="metric">
             <div class="metric-label">Latenz p95</div>
@@ -199,12 +202,12 @@
       <div class="split">
         <div class="card">
           <div class="metric-label" style="margin-bottom: 8px">
-            Live-Zeichenfläche (2 Ebenen: unten <code>highlight</code>, oben <code>ink</code> · Polylinie mit
-            Breite &times; force)
+            Live-Zeichenfläche (A4-Seitengröße 595&times;842 pt · 2 Ebenen: unten
+            <code>highlight</code>, oben <code>ink</code>)
           </div>
           <div class="canvas-wrap">
-            <canvas id="highlightCanvas" width="820" height="580"></canvas>
-            <canvas id="inkCanvas" width="820" height="580"></canvas>
+            <canvas id="highlightCanvas"></canvas>
+            <canvas id="inkCanvas"></canvas>
           </div>
         </div>
 
@@ -261,10 +264,13 @@
 
     <script>
       (function () {
-        const connStatusVal = document.getElementById('connStatusVal');
+        const PAGE_WIDTH_PT = 595;
+        const PAGE_HEIGHT_PT = 842;
+
+        const connStatusBadge = document.getElementById('connStatusBadge');
         const strokeCountVal = document.getElementById('strokeCountVal');
         const lastLatencyVal = document.getElementById('lastLatencyVal');
-        const medianLatencyVal = document.getElementById('medianLatencyVal');
+        const medianLatencyBadge = document.getElementById('medianLatencyBadge');
         const p95LatencyVal = document.getElementById('p95LatencyVal');
         const checkpointsRow = document.getElementById('checkpointsRow');
         const strokesTableBody = document.getElementById('strokesTableBody');
@@ -277,6 +283,13 @@
         const inkCanvas = document.getElementById('inkCanvas');
         const hiCtx = highlightCanvas.getContext('2d');
         const inkCtx = inkCanvas.getContext('2d');
+
+        // Viewer-Canvas mit A4-Seitengröße (595×842 pt) und devicePixelRatio initialisieren
+        const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+        highlightCanvas.width = Math.round(PAGE_WIDTH_PT * dpr);
+        highlightCanvas.height = Math.round(PAGE_HEIGHT_PT * dpr);
+        inkCanvas.width = Math.round(PAGE_WIDTH_PT * dpr);
+        inkCanvas.height = Math.round(PAGE_HEIGHT_PT * dpr);
 
         let appState = {
           bonjour_active: false,
@@ -291,7 +304,12 @@
 
         window.__s1MacState = appState;
 
+        /**
+         * Entpackt Base64-kodierte Strichpunkte nach 08 §4.2:
+         * 6 × Float32 Little-Endian: x, y, dt, force (pressure), azimuth, altitude
+         */
         function unpackPointsBase64(b64) {
+          if (typeof b64 !== 'string' || b64.length === 0) return [];
           const bin = atob(b64);
           const len = bin.length;
           if (len % 24 !== 0) return [];
@@ -309,32 +327,44 @@
               y: dv.getFloat32(off + 4, true),
               dt: dv.getFloat32(off + 8, true),
               pressure: dv.getFloat32(off + 12, true),
-              altitude: dv.getFloat32(off + 16, true),
-              azimuth: dv.getFloat32(off + 20, true),
+              azimuth: dv.getFloat32(off + 16, true),
+              altitude: dv.getFloat32(off + 20, true),
             });
           }
           return pts;
         }
 
         function rgbaFromHex(hex, isHighlight) {
-          const clean = (hex || '#1E2A44FF').replace('#', '');
-          const r = Number.parseInt(clean.slice(0, 2) || '1e', 16);
-          const g = Number.parseInt(clean.slice(2, 4) || '2a', 16);
-          const b = Number.parseInt(clean.slice(4, 6) || '44', 16);
+          const clean = String(hex || '#1E2A44FF').replace('#', '');
+          const r = Number.parseInt(clean.slice(0, 2) || '1e', 16) || 0;
+          const g = Number.parseInt(clean.slice(2, 4) || '2a', 16) || 0;
+          const b = Number.parseInt(clean.slice(4, 6) || '44', 16) || 0;
           const a =
             clean.length >= 8 ? Number.parseInt(clean.slice(6, 8), 16) / 255 : isHighlight ? 0.4 : 1.0;
           return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
         }
 
+        function clearAllCanvases() {
+          hiCtx.setTransform(1, 0, 0, 1, 0, 0);
+          inkCtx.setTransform(1, 0, 0, 1, 0, 0);
+          hiCtx.clearRect(0, 0, highlightCanvas.width, highlightCanvas.height);
+          inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+        }
+
         function drawStrokeOnCanvas(stroke) {
+          if (!stroke || typeof stroke !== 'object') return;
           const pts = unpackPointsBase64(stroke.points);
           if (pts.length === 0) return;
 
           const isHighlight = stroke.layer === 'highlight' || stroke.tool === 'marker';
           const ctx = isHighlight ? hiCtx : inkCtx;
-          const t = Array.isArray(stroke.transform) ? stroke.transform : [1, 0, 0, 1, 0, 0];
+          const t =
+            Array.isArray(stroke.transform) && stroke.transform.length === 6
+              ? stroke.transform
+              : [1, 0, 0, 1, 0, 0];
 
           ctx.save();
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           ctx.transform(t[0], t[1], t[2], t[3], t[4], t[5]);
           ctx.strokeStyle = rgbaFromHex(stroke.color, isHighlight);
           ctx.fillStyle = ctx.strokeStyle;
@@ -369,7 +399,9 @@
           ctx.restore();
         }
 
+        // S4: Nur sichere DOM-Erzeugung mit textContent (kein innerHTML)
         function renderCheckpoints(cp) {
+          checkpointsRow.replaceChildren();
           const items = [
             ['08 §4.2 Selbsttest', cp.selftest_08_4_2],
             ['Bonjour-Dialog/Suche', cp.bonjour_dialog],
@@ -379,59 +411,94 @@
             ['PKDrawing gespeichert', cp.saved_ok],
             ['PKDrawing geladen', cp.loaded_ok],
           ];
-          checkpointsRow.innerHTML = items
-            .map(([label, val]) => {
-              const cls = val === true ? 'badge-ok' : val === false ? 'badge-err' : 'badge-warn';
-              const sym = val === true ? '✓' : val === false ? '✗' : '•';
-              return `<span class="badge ${cls}">${sym} ${label}</span>`;
-            })
-            .join('');
+          for (const [label, val] of items) {
+            const span = document.createElement('span');
+            const cls = val === true ? 'badge-ok' : val === false ? 'badge-err' : 'badge-warn';
+            const sym = val === true ? '✓' : val === false ? '✗' : '•';
+            span.className = `badge ${cls}`;
+            span.textContent = `${sym} ${label}`;
+            checkpointsRow.appendChild(span);
+          }
+        }
+
+        function appendCell(tr, text, bold = false) {
+          const td = document.createElement('td');
+          if (bold) {
+            const strong = document.createElement('strong');
+            strong.textContent = String(text);
+            td.appendChild(strong);
+          } else {
+            td.textContent = String(text);
+          }
+          tr.appendChild(td);
         }
 
         function renderTablesAndReport() {
           strokeCountVal.textContent = String(appState.strokes.length);
           const lastStroke = appState.strokes[appState.strokes.length - 1];
-          lastLatencyVal.textContent = lastStroke ? `${lastStroke.latency_ms.toFixed(1)} ms` : '–';
-
-          const med = appState.latency_median_ms || 0;
-          const p95 = appState.latency_p95_ms || 0;
-          medianLatencyVal.innerHTML =
-            appState.strokes.length > 0
-              ? `<span class="badge ${med <= 1000 ? 'badge-ok' : 'badge-err'}">${med.toFixed(1)} ms</span>`
+          lastLatencyVal.textContent =
+            lastStroke && typeof lastStroke.latency_ms === 'number'
+              ? `${lastStroke.latency_ms.toFixed(1)} ms`
               : '–';
-          p95LatencyVal.textContent = appState.strokes.length > 0 ? `${p95.toFixed(1)} ms` : '–';
+
+          const med = Number(appState.latency_median_ms) || 0;
+          const p95 = Number(appState.latency_p95_ms) || 0;
+          if (appState.strokes.length > 0) {
+            medianLatencyBadge.className = `badge ${med <= 1000 ? 'badge-ok' : 'badge-err'}`;
+            medianLatencyBadge.textContent = `${med.toFixed(1)} ms`;
+            p95LatencyVal.textContent = `${p95.toFixed(1)} ms`;
+          } else {
+            medianLatencyBadge.className = '';
+            medianLatencyBadge.textContent = '–';
+            p95LatencyVal.textContent = '–';
+          }
 
           renderCheckpoints(appState.checkpoints || {});
 
+          // Strich-Tabelle sicher mit textContent aufbauen
+          strokesTableBody.replaceChildren();
           const recentStrokes = appState.strokes.slice(-15).reverse();
-          strokesTableBody.innerHTML = recentStrokes
-            .map(
-              (s) =>
-                `<tr><td>#${s.seq}</td><td>${s.stroke.tool}</td><td>${s.stroke.layer}</td><td>${s.point_count}</td><td>${s.latency_ms.toFixed(1)} ms</td></tr>`,
-            )
-            .join('');
+          for (const s of recentStrokes) {
+            if (!s || !s.stroke) continue;
+            const tr = document.createElement('tr');
+            appendCell(tr, `#${s.seq}`);
+            appendCell(tr, s.stroke.tool || '–');
+            appendCell(tr, s.stroke.layer || '–');
+            appendCell(tr, s.point_count ?? 0);
+            appendCell(tr, typeof s.latency_ms === 'number' ? `${s.latency_ms.toFixed(1)} ms` : '–');
+            strokesTableBody.appendChild(tr);
+          }
 
-          rawTableBody.innerHTML = (appState.raw_summaries || [])
-            .map(
-              (r) =>
-                `<tr><td><strong>${r.tool}</strong> (${r.inputType}, n=${r.pointCount})</td><td>${r.force.min} / ${r.force.median} / ${r.force.max}</td><td>${r.altitude.median}</td><td>${r.sizeWidth.median}</td></tr>`,
-            )
-            .join('');
+          // Rohwert-Tabelle sicher mit textContent aufbauen (XSS-frei)
+          rawTableBody.replaceChildren();
+          const validSummaries = Array.isArray(appState.raw_summaries) ? appState.raw_summaries : [];
+          for (const r of validSummaries) {
+            if (!r || typeof r !== 'object' || !r.force || !r.altitude || !r.sizeWidth) continue;
+            const tr = document.createElement('tr');
+            appendCell(tr, `${r.tool} (${r.inputType}, n=${r.pointCount ?? 0})`, true);
+            appendCell(tr, `${r.force.min} / ${r.force.median} / ${r.force.max}`);
+            appendCell(tr, `${r.altitude.median}`);
+            appendCell(tr, `${r.sizeWidth.median}`);
+            rawTableBody.appendChild(tr);
+          }
 
           const cp = appState.checkpoints || {};
           const fmtCp = (v) => (v === true ? '✓ JA' : v === false ? '✗ NEIN' : 'noch offen');
           const rawLines =
-            (appState.raw_summaries || []).length === 0
+            validSummaries.length === 0
               ? ['  (Noch keine Rohwerte vom iPad gesendet)']
-              : appState.raw_summaries.map(
-                  (r) =>
-                    `  - ${r.tool} [${r.inputType}] (${r.strokeCount} Striche, ${r.pointCount} Pkt.): force=[${r.force.min}, med=${r.force.median}, max=${r.force.max}], altitude=[${r.altitude.min}, med=${r.altitude.median}, max=${r.altitude.max}], azimuth=[${r.azimuth.min}, med=${r.azimuth.median}, max=${r.azimuth.max}], size.w=[${r.sizeWidth.min}, med=${r.sizeWidth.median}, max=${r.sizeWidth.max}]`,
-                );
+              : validSummaries
+                  .filter((r) => r && r.force && r.altitude && r.azimuth && r.sizeWidth)
+                  .map(
+                    (r) =>
+                      `  - ${r.tool} [${r.inputType}] (${r.strokeCount} Striche, ${r.pointCount} Pkt.): force=[${r.force.min}, med=${r.force.median}, max=${r.force.max}], altitude=[${r.altitude.min}, med=${r.altitude.median}, max=${r.altitude.max}], azimuth=[${r.azimuth.min}, med=${r.azimuth.median}, max=${r.azimuth.max}], size.w=[${r.sizeWidth.min}, med=${r.sizeWidth.median}, max=${r.sizeWidth.max}]`,
+                  );
 
           reportBox.value = [
             '=== ERGEBNISBOGEN SPIKE S1 + S3 (iPad + Mac-Gegenstelle) ===',
             `Zeitpunkt:                  ${new Date().toISOString()}`,
             `Bonjour-Dienst (_dns-sd):   ${appState.bonjour_info || (appState.bonjour_active ? 'Aktiv' : 'Inaktiv')}`,
+            'Genutzter Start-Weg:        [bitte eintragen: Weg A (Swift Playgrounds) ODER Weg B (Xcode)]',
             '',
             '--- S1: iPad-Prüfpunkte ---',
             `1. 08 §4.2 Format-Selbsttest: ${fmtCp(cp.selftest_08_4_2)}`,
@@ -441,6 +508,8 @@
             `5. Pencil-Doppeltipp:         ${fmtCp(cp.double_tap_ok)}`,
             `6. PKDrawing gespeichert:     ${fmtCp(cp.saved_ok)}`,
             `7. PKDrawing beim Start da:   ${fmtCp(cp.loaded_ok)}`,
+            '8. S1-U1 (Bleibt additionalInfoPlistContentFilePath in Package.swift nach Playgrounds-Bearbeitung erhalten?): [ja / nein / nicht getestet]',
+            '9. S1-U2 (Eigenes Homescreen-Icon auf dem iPad direkt aus Swift Playgrounds ohne Xcode möglich?): [ja / nein]',
             '',
             '--- S3: Spiegelungs-Latenz (Ziel <= 1000 ms) ---',
             `Empfangene Striche:         ${appState.strokes.length}`,
@@ -462,8 +531,7 @@
             const data = await res.json();
             appState = { ...appState, ...data };
             window.__s1MacState = appState;
-            hiCtx.clearRect(0, 0, highlightCanvas.width, highlightCanvas.height);
-            inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+            clearAllCanvases();
             for (const entry of appState.strokes) {
               drawStrokeOnCanvas(entry.stroke);
             }
@@ -478,7 +546,8 @@
           ws = new WebSocket(`${proto}//${window.location.host}/ws?role=viewer`);
 
           ws.onopen = () => {
-            connStatusVal.innerHTML = `<span class="badge badge-ok">Bereit</span>`;
+            connStatusBadge.className = 'badge badge-ok';
+            connStatusBadge.textContent = 'Bereit';
           };
 
           ws.onmessage = (ev) => {
@@ -518,7 +587,7 @@
               appState.latency_p95_ms = msg.stats.latency_p95_ms;
               renderTablesAndReport();
             } else if (msg.type === 'raw_stats.updated') {
-              appState.raw_summaries = msg.summaries || [];
+              appState.raw_summaries = Array.isArray(msg.summaries) ? msg.summaries : [];
               renderTablesAndReport();
             } else if (msg.type === 'checkpoints.updated') {
               appState.checkpoints = msg.checkpoints || {};
@@ -527,7 +596,8 @@
           };
 
           ws.onclose = () => {
-            connStatusVal.innerHTML = '<span class="badge badge-warn">Getrennt</span>';
+            connStatusBadge.className = 'badge badge-warn';
+            connStatusBadge.textContent = 'Getrennt';
             setTimeout(connectViewerWs, 2000);
           };
         }

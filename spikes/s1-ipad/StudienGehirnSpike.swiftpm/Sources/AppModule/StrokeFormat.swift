@@ -8,29 +8,30 @@ import UIKit
 // MARK: - Neutrales Strich-Format nach 08-SCHNITTSTELLEN.md §4.1 & §4.2
 
 /// Ein einzelner Strichpunkt im neutralen Format (6 × Float32 Little-Endian = 24 Byte).
+/// Reihenfolge laut 08 §4.2: `x, y, dt, force (pressure), azimuth, altitude`.
 /// Die Koordinaten `x` und `y` liegen im Seitenkoordinatensystem VOR Anwendung von `transform`.
 public struct NeutralStrokePoint: Equatable, Sendable {
     public var x: Float
     public var y: Float
     public var dt: Float
     public var pressure: Float
-    public var altitude: Float
     public var azimuth: Float
+    public var altitude: Float
 
     public init(
         x: Float,
         y: Float,
         dt: Float,
         pressure: Float,
-        altitude: Float,
-        azimuth: Float
+        azimuth: Float,
+        altitude: Float
     ) {
         self.x = x
         self.y = y
         self.dt = dt
         self.pressure = pressure
-        self.altitude = altitude
         self.azimuth = azimuth
+        self.altitude = altitude
     }
 }
 
@@ -79,13 +80,48 @@ public struct NeutralStrokePayload: Codable, Equatable, Sendable {
     }
 }
 
-/// Umwandlung, Binär-Kodierung (6 × Float32 LE, Base64) und Bounding-Box-Berechnung.
+/// Umwandlung, Binär-Kodierung (6 × Float32 LE, Base64), UUIDv7 und Bounding-Box-Berechnung.
 public enum StrokeFormat {
     /// Vorläufiger Normierungsdivisor für Apple Pencil `PKStrokePoint.force` -> `[0.0, 1.0]`.
     /// Die echten Rohwerte werden im Spike S3 parallel im „Rohwerte"-Tab ungefiltert erfasst.
     public static let defaultPencilForceDivisor: Float = 3.5
 
+    /// Erzeugt eine RFC-9562-konforme UUIDv7 (`xxxxxxxx-xxxx-7xxx-[89ab]xxx-xxxxxxxxxxxx`)
+    /// mit 48-Bit-Millisekunden-Zeitstempel gemäß 08 §4.1.
+    public static func generateUUIDv7(timestampMs: Int64 = Int64(Date().timeIntervalSince1970 * 1000.0)) -> String {
+        let ts = UInt64(max(0, timestampMs)) & 0x0000_FFFF_FFFF_FFFF
+        var bytes = [UInt8](repeating: 0, count: 16)
+
+        // Bytes 0..5: 48-Bit Timestamp Big-Endian
+        bytes[0] = UInt8((ts >> 40) & 0xFF)
+        bytes[1] = UInt8((ts >> 32) & 0xFF)
+        bytes[2] = UInt8((ts >> 24) & 0xFF)
+        bytes[3] = UInt8((ts >> 16) & 0xFF)
+        bytes[4] = UInt8((ts >> 8) & 0xFF)
+        bytes[5] = UInt8(ts & 0xFF)
+
+        // Bytes 6..15: Zufallsbits
+        for i in 6..<16 {
+            bytes[i] = UInt8.random(in: 0...255)
+        }
+
+        // Byte 6: Version 7 (0b0111xxxx)
+        bytes[6] = (bytes[6] & 0x0F) | 0x70
+        // Byte 8: RFC-4122/9562 Variante (0b10xxxxxx)
+        bytes[8] = (bytes[8] & 0x3F) | 0x80
+
+        return String(
+            format: "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5],
+            bytes[6], bytes[7],
+            bytes[8], bytes[9],
+            bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        )
+    }
+
     /// Packt ein Array von `NeutralStrokePoint` in `6 × Float32` Little-Endian (24 Byte/Punkt) und kodiert es als Base64.
+    /// Reihenfolge laut 08 §4.2: `x, y, dt, force (pressure), azimuth, altitude`.
     /// Erzwingt für den allerersten Punkt `dt = 0.0` gemäß 08 §4.2.
     public static func packPointsToBase64(_ points: [NeutralStrokePoint]) -> String {
         guard !points.isEmpty else { return "" }
@@ -97,13 +133,14 @@ public enum StrokeFormat {
             appendFloat32LE(pt.y, to: &data)
             appendFloat32LE(effectiveDt, to: &data)
             appendFloat32LE(clampedPressure, to: &data)
-            appendFloat32LE(pt.altitude, to: &data)
             appendFloat32LE(pt.azimuth, to: &data)
+            appendFloat32LE(pt.altitude, to: &data)
         }
         return data.base64EncodedString()
     }
 
-    /// Entpackt einen Base64-String (`6 × Float32` Little-Endian) zurück in `[NeutralStrokePoint]`.
+    /// Entpackt einen Base64-String (`6 × Float32` Little-Endian: `x, y, dt, pressure, azimuth, altitude`)
+    /// zurück in `[NeutralStrokePoint]`.
     public static func unpackPointsFromBase64(_ base64: String) -> [NeutralStrokePoint]? {
         guard let data = Data(base64Encoded: base64),
               !data.isEmpty,
@@ -121,16 +158,16 @@ public enum StrokeFormat {
                 let y = readFloat32LE(rawBuf, offset: offset + 4)
                 let dt = readFloat32LE(rawBuf, offset: offset + 8)
                 let pressure = readFloat32LE(rawBuf, offset: offset + 12)
-                let altitude = readFloat32LE(rawBuf, offset: offset + 16)
-                let azimuth = readFloat32LE(rawBuf, offset: offset + 20)
+                let azimuth = readFloat32LE(rawBuf, offset: offset + 16)
+                let altitude = readFloat32LE(rawBuf, offset: offset + 20)
                 result.append(
                     NeutralStrokePoint(
                         x: x,
                         y: y,
                         dt: dt,
                         pressure: pressure,
-                        altitude: altitude,
-                        azimuth: azimuth
+                        azimuth: azimuth,
+                        altitude: altitude
                     )
                 )
             }
@@ -247,8 +284,8 @@ public enum StrokeFormat {
                     y: Float(pt.location.y),
                     dt: dtMs,
                     pressure: normalizedPressure,
-                    altitude: Float(pt.altitude),
-                    azimuth: Float(pt.azimuth)
+                    azimuth: Float(pt.azimuth),
+                    altitude: Float(pt.altitude)
                 )
             )
 
@@ -267,27 +304,31 @@ public enum StrokeFormat {
         let avgPointWidth = path.isEmpty ? fallbackWidth : (widthAccum / Double(path.count))
         let strokeWidth = round2(avgPointWidth > 0.1 ? avgPointWidth : fallbackWidth)
 
+        // S6: transform mit voller Genauigkeit übertragen (nicht runden; nur bbox wird gerundet)
         let t = stroke.transform
         let transformArray: [Double] = [
-            round2(Double(t.a)),
-            round2(Double(t.b)),
-            round2(Double(t.c)),
-            round2(Double(t.d)),
-            round2(Double(t.tx)),
-            round2(Double(t.ty))
+            Double(t.a),
+            Double(t.b),
+            Double(t.c),
+            Double(t.d),
+            Double(t.tx),
+            Double(t.ty)
         ]
 
         let bbox = computeBbox(points: neutralPoints, transform: transformArray, width: strokeWidth)
         let base64Points = packPointsToBase64(neutralPoints)
 
-        let createdAtMs = Int64(stroke.path.creationDate.timeIntervalSince1970 * 1000.0)
+        // created_at mit dem Ping-Pong-Uhr-Offset korrigieren
+        let rawCreatedMs = stroke.path.creationDate.timeIntervalSince1970 * 1000.0
+        let createdAtMs = Int64((rawCreatedMs + clockOffsetMs).rounded())
+        let localCreatedMs = Int64(rawCreatedMs.rounded())
         let durationMs = Int64(neutralPoints.last?.dt ?? 0.0)
-        let tStartMs = max(0, createdAtMs - sessionStartMs)
+        let tStartMs = max(0, localCreatedMs - sessionStartMs)
         let tEndMs = tStartMs + max(0, durationMs)
         let nowMacMs = Date().timeIntervalSince1970 * 1000.0 + clockOffsetMs
 
         let payload = NeutralStrokePayload(
-            client_id: UUID().uuidString.lowercased(),
+            client_id: generateUUIDv7(timestampMs: createdAtMs),
             tool: toolName,
             layer: layer,
             color: hexColor,
@@ -417,20 +458,34 @@ public enum StrokeFormatSelfTest {
             return (false, "Entpacken von fixture01Stroke1Base64 fehlgeschlagen")
         }
 
-        // 3. Erster Punkt: dt == 0.0, x == 58.0, y == 160.0
-        guard points[0].dt == 0.0,
-              abs(points[0].x - 58.0) < 0.001,
-              abs(points[0].y - 160.0) < 0.001 else {
-            return (false, "Erster Punkt weicht ab: \(points[0])")
+        // 3. Erster Punkt prüfen: dt == 0.0, x == 58.0, y == 160.0, force ≈ 0.18, azimuth ≈ 0.5478, altitude ≈ 1.1322
+        let p0 = points[0]
+        guard p0.dt == 0.0,
+              abs(p0.x - 58.0) < 0.001,
+              abs(p0.y - 160.0) < 0.001,
+              abs(p0.pressure - 0.18) < 0.001,
+              abs(p0.azimuth - 0.5478) < 0.001,
+              abs(p0.altitude - 1.1322) < 0.001 else {
+            return (false, "Erster Punkt (inkl. azimuth/altitude) weicht ab: \(p0)")
         }
 
-        // 4. Exakter Roundtrip (Erneut packen -> identischer Base64-String)
+        // 4. UUIDv7-Format prüfen
+        let uuid7 = StrokeFormat.generateUUIDv7(timestampMs: 1_762_246_500_000)
+        let uuidParts = uuid7.split(separator: "-")
+        guard uuidParts.count == 5,
+              uuid7.count == 36,
+              uuidParts[2].first == "7",
+              ["8", "9", "a", "b"].contains(String(uuidParts[3].first ?? " ")) else {
+            return (false, "UUIDv7-Format ungültig: \(uuid7)")
+        }
+
+        // 5. Exakter Roundtrip (Erneut packen -> identischer Base64-String)
         let repacked = StrokeFormat.packPointsToBase64(points)
         guard repacked == fixture01Stroke1Base64 else {
             return (false, "Base64-Roundtrip nicht byte-identisch")
         }
 
-        // 5. Bounding-Box nach transform inklusive halber Strichbreite (width = 2.4 -> half = 1.2)
+        // 6. Bounding-Box nach transform inklusive halber Strichbreite (width = 2.4 -> half = 1.2)
         let computedBbox = StrokeFormat.computeBbox(
             points: points,
             transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
@@ -443,7 +498,7 @@ public enum StrokeFormatSelfTest {
         }
 
         #if canImport(PencilKit) && canImport(UIKit)
-        // 6. Synthetischer PKStroke -> neutrales Format -> Roundtrip prüfen
+        // 7. Synthetischer PKStroke -> neutrales Format -> Roundtrip & Feldreihenfolge prüfen
         let ink = PKInk(.pen, color: .black)
         let controlPoints = [
             PKStrokePoint(
@@ -452,8 +507,8 @@ public enum StrokeFormatSelfTest {
                 size: CGSize(width: 2.4, height: 2.4),
                 opacity: 1.0,
                 force: 1.4,
-                azimuth: 0.5,
-                altitude: 1.1
+                azimuth: 0.5478,
+                altitude: 1.1322
             ),
             PKStrokePoint(
                 location: CGPoint(x: 140.0, y: 230.0),
@@ -477,6 +532,8 @@ public enum StrokeFormatSelfTest {
         guard let decodedPk = StrokeFormat.unpackPointsFromBase64(converted.payload.points),
               decodedPk.count == 2,
               decodedPk[0].dt == 0.0,
+              abs(decodedPk[0].azimuth - 0.5478) < 0.01,
+              abs(decodedPk[0].altitude - 1.1322) < 0.01,
               converted.payload.points.count == 64 else {
             return (false, "PKStroke-Konvertierung im Selbsttest fehlgeschlagen")
         }
@@ -484,7 +541,7 @@ public enum StrokeFormatSelfTest {
 
         return (
             true,
-            "08 §4.2 Roundtrip OK (138 Punkte, 4416 Base64-Zeichen, BBox \(computedBbox))"
+            "08 §4.2 Roundtrip OK (138 Punkte, 4416 Base64-Zeichen, azimuth=0.5478, altitude=1.1322, UUIDv7 OK, BBox \(computedBbox))"
         )
     }
 }

@@ -3,7 +3,6 @@ import SwiftUI
 import UIKit
 import PencilKit
 import Network
-import VisionKit
 
 // MARK: - App-Einstiegspunkt (Spike S1 + S3)
 
@@ -89,18 +88,20 @@ final class SpikeViewModel: NSObject, ObservableObject {
     @Published var connectionStatusText: String = "Nicht verbunden"
     @Published var clockOffsetMs: Double = 0.0
     @Published var lastRttMs: Double = 0.0
+    @Published var minRttMs: Double = Double.greatestFiniteMagnitude
     @Published var sentStrokeCount: Int = 0
     @Published var lastPhotoSummary: String = "Noch kein Foto"
 
-    // Zeichnungen für die zwei PKCanvasView-Ebenen
+    // Zeichnungen für die zwei PKCanvasView-Ebenen + Revisionszähler für „Leeren" / „Laden"
     @Published var highlightDrawing = PKDrawing()
     @Published var inkDrawing = PKDrawing()
+    @Published var canvasSyncRevision: Int = 0
 
-    // Gesendete Strich-Signaturen, um nur neue Striche zu schicken
+    // Gesendete Strich-Zähler, um nur neu hinzugekommene Striche zu schicken
     var knownHighlightCount: Int = 0
     var knownInkCount: Int = 0
 
-    // Rohwert-Sammlung: Schlüssel "<tool>-<pencil|finger>"
+    // Rohwert-Sammlung: Schlüssel "<tool>|<pencil|finger>"
     private var rawPointsByBucket: [String: [RawPointMeasurement]] = [:]
     private var strokeCountByBucket: [String: Int] = [:]
     @Published var rawSummaries: [ToolInputRawSummary] = []
@@ -112,6 +113,7 @@ final class SpikeViewModel: NSObject, ObservableObject {
     private var browser: NWBrowser?
     private var wsTask: URLSessionWebSocketTask?
     private var pingTimer: Timer?
+    private var lastDoubleTapAt: TimeInterval = 0
 
     override init() {
         super.init()
@@ -138,6 +140,11 @@ final class SpikeViewModel: NSObject, ObservableObject {
     // MARK: - (1) Werkzeug-Umschaltung & Apple-Pencil-Doppeltipp
 
     func handlePencilDoubleTap(source: String) {
+        let now = Date().timeIntervalSince1970
+        // Kurzes Entprellen (falls iOS 17.5+ sowohl didReceiveTap als auch pencilInteractionDidTap aufruft)
+        guard now - lastDoubleTapAt > 0.15 else { return }
+        lastDoubleTapAt = now
+
         checkDoubleTapOk = true
         if selectedTool == .marker {
             selectedTool = previousNonMarkerTool
@@ -161,6 +168,9 @@ final class SpikeViewModel: NSObject, ObservableObject {
     func startBonjourSearch() {
         browser?.cancel()
         let params = NWParameters.tcp
+        if let ipOptions = params.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+            ipOptions.version = .v4
+        }
         let descriptor = NWBrowser.Descriptor.bonjour(type: "_studiengehirn._tcp", domain: nil)
         let nwBrowser = NWBrowser(for: descriptor, using: params)
         self.browser = nwBrowser
@@ -198,8 +208,13 @@ final class SpikeViewModel: NSObject, ObservableObject {
         nwBrowser.start(queue: .main)
     }
 
+    /// S7: Erzwingt IPv4 bei der Bonjour-Auflösung und klammert IPv6-Adressen bei Bedarf RFC-konform in `[...]`.
     private func resolveAndConnect(endpoint: NWEndpoint) {
-        let conn = NWConnection(to: endpoint, using: .tcp)
+        let tcpParams = NWParameters.tcp
+        if let ipOptions = tcpParams.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+            ipOptions.version = .v4
+        }
+        let conn = NWConnection(to: endpoint, using: tcpParams)
         conn.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
                 guard let self else { return }
@@ -207,7 +222,8 @@ final class SpikeViewModel: NSObject, ObservableObject {
                    let innerEndpoint = conn.currentPath?.remoteEndpoint,
                    case .hostPort(let host, let port) = innerEndpoint {
                     let rawHost = "\(host)".split(separator: "%").first.map(String.init) ?? "\(host)"
-                    let hostPort = "\(rawHost):\(port.rawValue)"
+                    let formattedHost = rawHost.contains(":") ? "[\(rawHost)]" : rawHost
+                    let hostPort = "\(formattedHost):\(port.rawValue)"
                     self.manualHostPort = hostPort
                     conn.cancel()
                     self.connectWebSocket(hostPort: hostPort)
@@ -226,8 +242,15 @@ final class SpikeViewModel: NSObject, ObservableObject {
     func connectWebSocket(hostPort: String) {
         wsTask?.cancel(with: .goingAway, reason: nil)
         pingTimer?.invalidate()
+        minRttMs = Double.greatestFiniteMagnitude
 
-        let normalized = hostPort.contains(":") ? hostPort : "\(hostPort):4797"
+        let normalized: String
+        if hostPort.hasPrefix("[") {
+            normalized = hostPort.contains("]:") ? hostPort : "\(hostPort):4797"
+        } else {
+            normalized = hostPort.contains(":") ? hostPort : "\(hostPort):4797"
+        }
+
         guard let url = URL(string: "ws://\(normalized)/ws") else {
             addLog("Ungültige WebSocket-Adresse: \(normalized)")
             return
@@ -298,9 +321,13 @@ final class SpikeViewModel: NSObject, ObservableObject {
            let tServer = json["t_server_ms"] as? Double {
             let tClientRecv = Date().timeIntervalSince1970 * 1000.0
             let rtt = max(0.0, tClientRecv - tClientSend)
-            let estimatedServerNow = tServer + (rtt / 2.0)
             self.lastRttMs = (rtt * 10.0).rounded() / 10.0
-            self.clockOffsetMs = ((estimatedServerNow - tClientRecv) * 10.0).rounded() / 10.0
+            // Verwende den Offset aus dem Pong mit der kleinsten RTT (geringster Jitter)
+            if rtt <= self.minRttMs {
+                self.minRttMs = rtt
+                let estimatedServerNow = tServer + (rtt / 2.0)
+                self.clockOffsetMs = ((estimatedServerNow - tClientRecv) * 10.0).rounded() / 10.0
+            }
         }
     }
 
@@ -385,17 +412,20 @@ final class SpikeViewModel: NSObject, ObservableObject {
 
         if loadedAny {
             checkLoadedOk = true
+            canvasSyncRevision += 1
             addLog("Gespeicherte PKDrawing beim Start geladen ✓ (\(inkDrawing.strokes.count) Schrift- / \(highlightDrawing.strokes.count) Marker-Striche).")
         } else {
             addLog("Noch keine gespeicherte PKDrawing vorhanden (erster Start).")
         }
     }
 
+    /// S8: Setzt beide PKDrawing-Objekte UND über `canvasSyncRevision` die PKCanvasView-Instanzen zurück.
     func clearCanvas() {
         inkDrawing = PKDrawing()
         highlightDrawing = PKDrawing()
         knownInkCount = 0
         knownHighlightCount = 0
+        canvasSyncRevision += 1
         addLog("Zeichenfläche geleert.")
     }
 
@@ -500,10 +530,7 @@ struct SpikeMainView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // Kopfzeile: Prüfpunkte (✓ / ✗) auf einen Blick
             checkpointBar
-
-            // Verbindung & Werkzeugleiste
             controlToolbar
 
             Picker("Ansicht", selection: $activeTab) {
@@ -733,6 +760,8 @@ struct DualPKCanvasContainer: UIViewRepresentable {
 
         context.coordinator.highlightCanvas = highlightCanvas
         context.coordinator.inkCanvas = inkCanvas
+        context.coordinator.lastSyncedRevision = model.canvasSyncRevision
+        context.coordinator.applyTool(model.selectedTool)
         return container
     }
 
@@ -742,16 +771,18 @@ struct DualPKCanvasContainer: UIViewRepresentable {
             return
         }
 
-        let pkTool = model.selectedTool.makePKTool()
-        if model.selectedTool == .marker {
-            // Textmarker zeichnet auf der unteren Ebene (`highlight`), damit er schwarze Schrift nicht überdeckt
-            highlightCanvas.tool = pkTool
-            highlightCanvas.isUserInteractionEnabled = true
-            inkCanvas.isUserInteractionEnabled = false
-        } else {
-            inkCanvas.tool = pkTool
-            inkCanvas.isUserInteractionEnabled = true
-            highlightCanvas.isUserInteractionEnabled = false
+        // S8: Bei „Leeren" oder „Laden" die echten PKCanvasView.drawing-Instanzen synchronisieren
+        if context.coordinator.lastSyncedRevision != model.canvasSyncRevision {
+            context.coordinator.isProgrammaticSync = true
+            highlightCanvas.drawing = model.highlightDrawing
+            inkCanvas.drawing = model.inkDrawing
+            context.coordinator.lastSyncedRevision = model.canvasSyncRevision
+            context.coordinator.isProgrammaticSync = false
+        }
+
+        // Werkzeug nur bei tatsächlichem Wechsel neu setzen
+        if context.coordinator.lastAppliedTool != model.selectedTool {
+            context.coordinator.applyTool(model.selectedTool)
         }
     }
 
@@ -759,13 +790,34 @@ struct DualPKCanvasContainer: UIViewRepresentable {
         let model: SpikeViewModel
         weak var highlightCanvas: PKCanvasView?
         weak var inkCanvas: PKCanvasView?
+        var lastAppliedTool: SpikeDrawingTool?
+        var lastSyncedRevision: Int = -1
+        var isProgrammaticSync: Bool = false
 
         init(model: SpikeViewModel) {
             self.model = model
         }
 
+        @MainActor
+        func applyTool(_ tool: SpikeDrawingTool) {
+            lastAppliedTool = tool
+            guard let highlightCanvas, let inkCanvas else { return }
+            let pkTool = tool.makePKTool()
+            if tool == .marker {
+                highlightCanvas.tool = pkTool
+                highlightCanvas.isUserInteractionEnabled = true
+                inkCanvas.isUserInteractionEnabled = false
+            } else {
+                inkCanvas.tool = pkTool
+                inkCanvas.isUserInteractionEnabled = true
+                highlightCanvas.isUserInteractionEnabled = false
+            }
+        }
+
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            guard !isProgrammaticSync else { return }
             Task { @MainActor in
+                guard !self.isProgrammaticSync else { return }
                 if canvasView === highlightCanvas {
                     model.highlightDrawing = canvasView.drawing
                     let strokes = canvasView.drawing.strokes
@@ -790,7 +842,7 @@ struct DualPKCanvasContainer: UIViewRepresentable {
     }
 }
 
-// MARK: - UIPencilInteraction für Doppeltipp am Apple Pencil 2 (und optional Squeeze ab iOS 17.5)
+// MARK: - UIPencilInteraction für Doppeltipp am Apple Pencil 2 (und iOS 17.5+ Tap/Squeeze)
 
 struct PencilInteractionHostView: UIViewRepresentable {
     let onDoubleTap: () -> Void
@@ -821,8 +873,12 @@ struct PencilInteractionHostView: UIViewRepresentable {
         }
 
         @available(iOS 17.5, *)
+        func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveTap tap: UIPencilInteraction.Tap) {
+            onDoubleTap()
+        }
+
+        @available(iOS 17.5, *)
         func pencilInteraction(_ interaction: UIPencilInteraction, didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
-            // Optional für Pencil Pro; für Pencil 2 (Q1) genügt Doppeltipp
             if squeeze.phase == .ended {
                 onDoubleTap()
             }
