@@ -124,6 +124,7 @@ struct SchemaBundle: Codable {
     let pageUpdateOp: PageUpdateOp?
     let pairConfirmRequest: PairConfirmRequest?
     let pairingCode: PairingCode?
+    let pairingRequest: PairingRequest?
     let pairResponse: PairResponse?
     let pairStartRequest: PairStartRequest?
     let pairStartResponse: PairStartResponse?
@@ -359,6 +360,7 @@ struct SchemaBundle: Codable {
         case pageUpdateOp = "PageUpdateOp"
         case pairConfirmRequest = "PairConfirmRequest"
         case pairingCode = "PairingCode"
+        case pairingRequest = "PairingRequest"
         case pairResponse = "PairResponse"
         case pairStartRequest = "PairStartRequest"
         case pairStartResponse = "PairStartResponse"
@@ -614,6 +616,7 @@ extension SchemaBundle {
         pageUpdateOp: PageUpdateOp?? = nil,
         pairConfirmRequest: PairConfirmRequest?? = nil,
         pairingCode: PairingCode?? = nil,
+        pairingRequest: PairingRequest?? = nil,
         pairResponse: PairResponse?? = nil,
         pairStartRequest: PairStartRequest?? = nil,
         pairStartResponse: PairStartResponse?? = nil,
@@ -849,6 +852,7 @@ extension SchemaBundle {
             pageUpdateOp: pageUpdateOp ?? self.pageUpdateOp,
             pairConfirmRequest: pairConfirmRequest ?? self.pairConfirmRequest,
             pairingCode: pairingCode ?? self.pairingCode,
+            pairingRequest: pairingRequest ?? self.pairingRequest,
             pairResponse: pairResponse ?? self.pairResponse,
             pairStartRequest: pairStartRequest ?? self.pairStartRequest,
             pairStartResponse: pairStartResponse ?? self.pairStartResponse,
@@ -5685,12 +5689,16 @@ extension NotebookList {
 struct NotebookPages: Codable {
     let items: [Page]
     let notebookID: String
+    /// op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id
+    /// senden
+    let streamOpID: String?
     /// seq des Stroms notebook:<id> zu diesem Stand
     let streamSeq: Int
 
     enum CodingKeys: String, CodingKey {
         case items = "items"
         case notebookID = "notebook_id"
+        case streamOpID = "stream_op_id"
         case streamSeq = "stream_seq"
     }
 }
@@ -5716,11 +5724,13 @@ extension NotebookPages {
     func with(
         items: [Page]? = nil,
         notebookID: String? = nil,
+        streamOpID: String?? = nil,
         streamSeq: Int? = nil
     ) -> NotebookPages {
         return NotebookPages(
             items: items ?? self.items,
             notebookID: notebookID ?? self.notebookID,
+            streamOpID: streamOpID ?? self.streamOpID,
             streamSeq: streamSeq ?? self.streamSeq
         )
     }
@@ -6444,11 +6454,15 @@ enum PageDeleteOpKind: String, Codable {
 struct PageDetail: Codable {
     let elements: [PageElement]
     let page: Page
+    /// op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id
+    /// senden
+    let streamOpID: String?
     let streamSeq: Int
 
     enum CodingKeys: String, CodingKey {
         case elements = "elements"
         case page = "page"
+        case streamOpID = "stream_op_id"
         case streamSeq = "stream_seq"
     }
 }
@@ -6474,11 +6488,13 @@ extension PageDetail {
     func with(
         elements: [PageElement]? = nil,
         page: Page? = nil,
+        streamOpID: String?? = nil,
         streamSeq: Int? = nil
     ) -> PageDetail {
         return PageDetail(
             elements: elements ?? self.elements,
             page: page ?? self.page,
+            streamOpID: streamOpID ?? self.streamOpID,
             streamSeq: streamSeq ?? self.streamSeq
         )
     }
@@ -6623,12 +6639,16 @@ enum PageRestoreOpKind: String, Codable {
 // MARK: - PageStrokes
 struct PageStrokes: Codable {
     let pageID: String
+    /// op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id
+    /// senden
+    let streamOpID: String?
     /// seq des Stroms notebook:<id> zu diesem Stand
     let streamSeq: Int
     let strokes: [Stroke]
 
     enum CodingKeys: String, CodingKey {
         case pageID = "page_id"
+        case streamOpID = "stream_op_id"
         case streamSeq = "stream_seq"
         case strokes = "strokes"
     }
@@ -6654,11 +6674,13 @@ extension PageStrokes {
 
     func with(
         pageID: String? = nil,
+        streamOpID: String?? = nil,
         streamSeq: Int? = nil,
         strokes: [Stroke]? = nil
     ) -> PageStrokes {
         return PageStrokes(
             pageID: pageID ?? self.pageID,
+            streamOpID: streamOpID ?? self.streamOpID,
             streamSeq: streamSeq ?? self.streamSeq,
             strokes: strokes ?? self.strokes
         )
@@ -6973,9 +6995,9 @@ enum PageUpdateOpKind: String, Codable {
     case pageUpdate = "page.update"
 }
 
-/// POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). pairing_id aus dem QR-Code
-/// bzw. aus pair/start. public_nonce muss zu pair/start passen, falls sich das iPad dort
-/// gemeldet hat.
+/// POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). Geheimnis ist der Code.
+/// public_nonce verknüpft die Bestätigung mit einer eigenen pair/start-Anfrage; gehört sie
+/// zu einer abgelehnten Anfrage, wird abgelehnt.
 // MARK: - PairConfirmRequest
 struct PairConfirmRequest: Codable {
     let appVersion: String?
@@ -7090,8 +7112,8 @@ extension PairResponse {
     }
 }
 
-/// POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur angenommen, solange am
-/// Mac ein Kopplungsfenster offen ist
+/// POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur bei offenem
+/// Kopplungsfenster; belegt es nicht exklusiv
 // MARK: - PairStartRequest
 struct PairStartRequest: Codable {
     let deviceName: String
@@ -7145,15 +7167,18 @@ extension PairStartRequest {
     }
 }
 
-/// Der Code steht NICHT in der Antwort, nur in der Web-App
+/// pair/start: request_id der eigenen Anfrage und pairing_id des offenen Fensters. Der Code
+/// steht NICHT in der Antwort
 // MARK: - PairStartResponse
 struct PairStartResponse: Codable {
     let expiresAt: Date
     let pairingID: String
+    let requestID: String
 
     enum CodingKeys: String, CodingKey {
         case expiresAt = "expires_at"
         case pairingID = "pairing_id"
+        case requestID = "request_id"
     }
 }
 
@@ -7177,11 +7202,13 @@ extension PairStartResponse {
 
     func with(
         expiresAt: Date? = nil,
-        pairingID: String? = nil
+        pairingID: String? = nil,
+        requestID: String? = nil
     ) -> PairStartResponse {
         return PairStartResponse(
             expiresAt: expiresAt ?? self.expiresAt,
-            pairingID: pairingID ?? self.pairingID
+            pairingID: pairingID ?? self.pairingID,
+            requestID: requestID ?? self.requestID
         )
     }
 
@@ -7199,8 +7226,6 @@ extension PairStartResponse {
 // MARK: - PairingCode
 struct PairingCode: Codable {
     let code: String
-    /// Name aus pair/start, null solange sich kein iPad gemeldet hat
-    let deviceName: String?
     let expiresAt: Date
     /// Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für
     /// die manuelle Eingabe
@@ -7212,7 +7237,6 @@ struct PairingCode: Codable {
 
     enum CodingKeys: String, CodingKey {
         case code = "code"
-        case deviceName = "device_name"
         case expiresAt = "expires_at"
         case host = "host"
         case pairingID = "pairing_id"
@@ -7241,7 +7265,6 @@ extension PairingCode {
 
     func with(
         code: String? = nil,
-        deviceName: String?? = nil,
         expiresAt: Date? = nil,
         host: String? = nil,
         pairingID: String? = nil,
@@ -7250,12 +7273,73 @@ extension PairingCode {
     ) -> PairingCode {
         return PairingCode(
             code: code ?? self.code,
-            deviceName: deviceName ?? self.deviceName,
             expiresAt: expiresAt ?? self.expiresAt,
             host: host ?? self.host,
             pairingID: pairingID ?? self.pairingID,
             port: port ?? self.port,
             qrURL: qrURL ?? self.qrURL
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen
+/// (DELETE /devices/pairings/requests/{request_id})
+// MARK: - PairingRequest
+struct PairingRequest: Codable {
+    let deviceName: String
+    let kind: DeviceKind
+    let pairingID: String
+    let requestID: String
+    let requestedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case deviceName = "device_name"
+        case kind = "kind"
+        case pairingID = "pairing_id"
+        case requestID = "request_id"
+        case requestedAt = "requested_at"
+    }
+}
+
+// MARK: PairingRequest convenience initializers and mutators
+
+extension PairingRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PairingRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        deviceName: String? = nil,
+        kind: DeviceKind? = nil,
+        pairingID: String? = nil,
+        requestID: String? = nil,
+        requestedAt: Date? = nil
+    ) -> PairingRequest {
+        return PairingRequest(
+            deviceName: deviceName ?? self.deviceName,
+            kind: kind ?? self.kind,
+            pairingID: pairingID ?? self.pairingID,
+            requestID: requestID ?? self.requestID,
+            requestedAt: requestedAt ?? self.requestedAt
         )
     }
 
@@ -8928,6 +9012,9 @@ struct SessionSnapshot: Codable {
     let recordings: [Recording]
     let session: Session
     let slideEvents: [SlideEvent]
+    /// op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id
+    /// senden
+    let streamOpID: String?
     /// seq des Stroms session:<id>, zu der dieser Stand gehört. Danach per Sync ab stream_seq + 1
     let streamSeq: Int
 
@@ -8937,6 +9024,7 @@ struct SessionSnapshot: Codable {
         case recordings = "recordings"
         case session = "session"
         case slideEvents = "slide_events"
+        case streamOpID = "stream_op_id"
         case streamSeq = "stream_seq"
     }
 }
@@ -8965,6 +9053,7 @@ extension SessionSnapshot {
         recordings: [Recording]? = nil,
         session: Session? = nil,
         slideEvents: [SlideEvent]? = nil,
+        streamOpID: String?? = nil,
         streamSeq: Int? = nil
     ) -> SessionSnapshot {
         return SessionSnapshot(
@@ -8973,6 +9062,7 @@ extension SessionSnapshot {
             recordings: recordings ?? self.recordings,
             session: session ?? self.session,
             slideEvents: slideEvents ?? self.slideEvents,
+            streamOpID: streamOpID ?? self.streamOpID,
             streamSeq: streamSeq ?? self.streamSeq
         )
     }
@@ -11403,12 +11493,15 @@ enum SyncConnectionEventType: String, Codable {
 struct SyncError: Codable {
     let code: SyncErrorCode
     let details: [String: JSONAny]?
-    /// true: der Server schließt die Verbindung direkt danach
+    /// true: der Server schließt die Verbindung direkt danach und verarbeitet keine weitere
+    /// Nachricht
     let fatal: Bool
     let message: String
     let opID: String?
-    /// Nur mit op_id: true = Operation in der Warteschlange lassen und später erneut senden,
-    /// false = endgültig abgelehnt, aus der Warteschlange entfernen
+    /// Nur mit op_id: true = Verbindung wird geschlossen, neu verbinden und ab dieser Operation
+    /// erneut senden. false = endgültig abgelehnt: Operation samt abhängigen in die Fehlerablage
+    /// (VERTRAEGE §11.2). Ausnahmen: session_superseded (umschreiben) und page_version_conflict
+    /// (neu laden)
     let retryable: Bool
     let stream: String?
     let type: SyncErrorType
@@ -11508,7 +11601,7 @@ enum SyncErrorType: String, Codable {
 ///
 /// Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
 ///
-/// Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)
+/// Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)
 // MARK: - SyncEvent
 struct SyncEvent: Codable {
     let data: SyncEventData
@@ -11564,8 +11657,8 @@ extension SyncEvent {
 /// Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem
 /// Kalendertermin (null bei spontanen Sessions).
 ///
-/// Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur
-/// lokal; Ereignis pairing.requested)
+/// Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen
+/// (DELETE /devices/pairings/requests/{request_id})
 // MARK: - SyncEventData
 struct SyncEventData: Codable {
     let autoStopExtendedUntil: Date?
@@ -11593,21 +11686,15 @@ struct SyncEventData: Codable {
     let userID: String?
     let client: SyncClientKind?
     let deviceID: String?
-    /// Name aus pair/start, null solange sich kein iPad gemeldet hat
     let deviceName: String?
     let notebookID: String?
     let pageID: String?
     let sessionID: String?
     let connected: Bool?
-    let code: String?
-    let expiresAt: Date?
-    /// Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für
-    /// die manuelle Eingabe
-    let host: String?
+    let kind: DeviceKind?
     let pairingID: String?
-    let port: Int?
-    /// Inhalt des QR-Codes: dieselben Daten wie host, port, pairing_id und code
-    let qrURL: String?
+    let requestID: String?
+    let requestedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case autoStopExtendedUntil = "auto_stop_extended_until"
@@ -11638,12 +11725,10 @@ struct SyncEventData: Codable {
         case pageID = "page_id"
         case sessionID = "session_id"
         case connected = "connected"
-        case code = "code"
-        case expiresAt = "expires_at"
-        case host = "host"
+        case kind = "kind"
         case pairingID = "pairing_id"
-        case port = "port"
-        case qrURL = "qr_url"
+        case requestID = "request_id"
+        case requestedAt = "requested_at"
     }
 }
 
@@ -11694,12 +11779,10 @@ extension SyncEventData {
         pageID: String?? = nil,
         sessionID: String?? = nil,
         connected: Bool?? = nil,
-        code: String?? = nil,
-        expiresAt: Date?? = nil,
-        host: String?? = nil,
+        kind: DeviceKind?? = nil,
         pairingID: String?? = nil,
-        port: Int?? = nil,
-        qrURL: String?? = nil
+        requestID: String?? = nil,
+        requestedAt: Date?? = nil
     ) -> SyncEventData {
         return SyncEventData(
             autoStopExtendedUntil: autoStopExtendedUntil ?? self.autoStopExtendedUntil,
@@ -11730,12 +11813,10 @@ extension SyncEventData {
             pageID: pageID ?? self.pageID,
             sessionID: sessionID ?? self.sessionID,
             connected: connected ?? self.connected,
-            code: code ?? self.code,
-            expiresAt: expiresAt ?? self.expiresAt,
-            host: host ?? self.host,
+            kind: kind ?? self.kind,
             pairingID: pairingID ?? self.pairingID,
-            port: port ?? self.port,
-            qrURL: qrURL ?? self.qrURL
+            requestID: requestID ?? self.requestID,
+            requestedAt: requestedAt ?? self.requestedAt
         )
     }
 
@@ -11907,10 +11988,10 @@ extension SyncOp {
     }
 }
 
-/// Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)
+/// Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)
 // MARK: - SyncPairingEvent
 struct SyncPairingEvent: Codable {
-    let data: PairingCode
+    let data: PairingRequest
     let name: SyncPairingEventName
     let type: SyncConnectionEventType
 
@@ -11940,7 +12021,7 @@ extension SyncPairingEvent {
     }
 
     func with(
-        data: PairingCode? = nil,
+        data: PairingRequest? = nil,
         name: SyncPairingEventName? = nil,
         type: SyncConnectionEventType? = nil
     ) -> SyncPairingEvent {
@@ -12246,9 +12327,10 @@ struct SyncResume: Codable {
     let fromSeq: Int
     /// Aktuell höchste seq des Stroms. Ergänzung zu 08 §2.1
     let headSeq: Int
-    /// true: der Client kennt eine seq, die der Server nicht hat (z. B. nach Wiederherstellung
-    /// eines Backups). Der Client verwirft seinen Stand des Stroms, lädt per REST neu und
-    /// abonniert ab dem dortigen stream_seq. from_seq ist dann 1.
+    /// true: der Server kennt die gemeldete Position nicht (last_op_id passt nicht, seq zu hoch,
+    /// z. B. nach einer Wiederherstellung) und sendet für diesen Strom nichts. Der Client
+    /// verwirft seine Daten NICHT, sondern gleicht per REST ab, sendet fehlende eigene Daten
+    /// erneut und abonniert ab stream_seq/stream_op_id (VERTRAEGE §11.1).
     let reset: Bool
     let stream: String
 
@@ -12318,7 +12400,7 @@ extension SyncResume {
 ///
 /// Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
 ///
-/// Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)
+/// Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)
 // MARK: - SyncServerMessage
 struct SyncServerMessage: Codable {
     let dbEpoch: String?
@@ -12341,11 +12423,14 @@ struct SyncServerMessage: Codable {
     let ts: Int?
     let code: SyncErrorCode?
     let details: [String: JSONAny]?
-    /// true: der Server schließt die Verbindung direkt danach
+    /// true: der Server schließt die Verbindung direkt danach und verarbeitet keine weitere
+    /// Nachricht
     let fatal: Bool?
     let message: String?
-    /// Nur mit op_id: true = Operation in der Warteschlange lassen und später erneut senden,
-    /// false = endgültig abgelehnt, aus der Warteschlange entfernen
+    /// Nur mit op_id: true = Verbindung wird geschlossen, neu verbinden und ab dieser Operation
+    /// erneut senden. false = endgültig abgelehnt: Operation samt abhängigen in die Fehlerablage
+    /// (VERTRAEGE §11.2). Ausnahmen: session_superseded (umschreiben) und page_version_conflict
+    /// (neu laden)
     let retryable: Bool?
     let name: SyncEventName?
 
@@ -12474,13 +12559,13 @@ extension SyncServerMessage {
 /// Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem
 /// Kalendertermin (null bei spontanen Sessions).
 ///
-/// Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur
-/// lokal; Ereignis pairing.requested)
+/// Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen
+/// (DELETE /devices/pairings/requests/{request_id})
 // MARK: - SyncServerMessageData
 struct SyncServerMessageData: Codable {
     let createdAt: CreatedAt?
     /// Nur frei. Die Notizbücher vorlesung/uebung legt der Core an
-    let kind: PurpleMarkerKind?
+    let kind: Kind?
     let moduleID: String?
     let notebookID: String?
     let title: String?
@@ -12534,18 +12619,11 @@ struct SyncServerMessageData: Codable {
     let userID: String?
     let client: SyncClientKind?
     let deviceID: String?
-    /// Name aus pair/start, null solange sich kein iPad gemeldet hat
     let deviceName: String?
     let connected: Bool?
-    let code: String?
-    let expiresAt: Date?
-    /// Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für
-    /// die manuelle Eingabe
-    let host: String?
     let pairingID: String?
-    let port: Int?
-    /// Inhalt des QR-Codes: dieselben Daten wie host, port, pairing_id und code
-    let qrURL: String?
+    let requestID: String?
+    let requestedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case createdAt = "created_at"
@@ -12602,12 +12680,9 @@ struct SyncServerMessageData: Codable {
         case deviceID = "device_id"
         case deviceName = "device_name"
         case connected = "connected"
-        case code = "code"
-        case expiresAt = "expires_at"
-        case host = "host"
         case pairingID = "pairing_id"
-        case port = "port"
-        case qrURL = "qr_url"
+        case requestID = "request_id"
+        case requestedAt = "requested_at"
     }
 }
 
@@ -12631,7 +12706,7 @@ extension SyncServerMessageData {
 
     func with(
         createdAt: CreatedAt?? = nil,
-        kind: PurpleMarkerKind?? = nil,
+        kind: Kind?? = nil,
         moduleID: String?? = nil,
         notebookID: String?? = nil,
         title: String?? = nil,
@@ -12684,12 +12759,9 @@ extension SyncServerMessageData {
         deviceID: String?? = nil,
         deviceName: String?? = nil,
         connected: Bool?? = nil,
-        code: String?? = nil,
-        expiresAt: Date?? = nil,
-        host: String?? = nil,
         pairingID: String?? = nil,
-        port: Int?? = nil,
-        qrURL: String?? = nil
+        requestID: String?? = nil,
+        requestedAt: Date?? = nil
     ) -> SyncServerMessageData {
         return SyncServerMessageData(
             createdAt: createdAt ?? self.createdAt,
@@ -12746,12 +12818,9 @@ extension SyncServerMessageData {
             deviceID: deviceID ?? self.deviceID,
             deviceName: deviceName ?? self.deviceName,
             connected: connected ?? self.connected,
-            code: code ?? self.code,
-            expiresAt: expiresAt ?? self.expiresAt,
-            host: host ?? self.host,
             pairingID: pairingID ?? self.pairingID,
-            port: port ?? self.port,
-            qrURL: qrURL ?? self.qrURL
+            requestID: requestID ?? self.requestID,
+            requestedAt: requestedAt ?? self.requestedAt
         )
     }
 
@@ -12790,6 +12859,15 @@ enum CreatedAt: Codable {
             try container.encode(x)
         }
     }
+}
+
+enum Kind: String, Codable {
+    case frage = "frage"
+    case frei = "frei"
+    case ipad = "ipad"
+    case iphone = "iphone"
+    case klausur = "klausur"
+    case verknuepfung = "verknuepfung"
 }
 
 enum StartedAt: Codable {
@@ -14995,6 +15073,7 @@ extension NotebookPages {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(items, forKey: .items)
         try container.encode(notebookID, forKey: .notebookID)
+        try container.encode(streamOpID, forKey: .streamOpID)
         try container.encode(streamSeq, forKey: .streamSeq)
     }
 }
@@ -15131,6 +15210,7 @@ extension PageDetail {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(elements, forKey: .elements)
         try container.encode(page, forKey: .page)
+        try container.encode(streamOpID, forKey: .streamOpID)
         try container.encode(streamSeq, forKey: .streamSeq)
     }
 }
@@ -15161,6 +15241,7 @@ extension PageStrokes {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(pageID, forKey: .pageID)
+        try container.encode(streamOpID, forKey: .streamOpID)
         try container.encode(streamSeq, forKey: .streamSeq)
         try container.encode(strokes, forKey: .strokes)
     }
@@ -15252,6 +15333,7 @@ extension PairStartResponse {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(expiresAt, forKey: .expiresAt)
         try container.encode(pairingID, forKey: .pairingID)
+        try container.encode(requestID, forKey: .requestID)
     }
 }
 
@@ -15259,12 +15341,22 @@ extension PairingCode {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(code, forKey: .code)
-        try container.encode(deviceName, forKey: .deviceName)
         try container.encode(expiresAt, forKey: .expiresAt)
         try container.encode(host, forKey: .host)
         try container.encode(pairingID, forKey: .pairingID)
         try container.encode(port, forKey: .port)
         try container.encode(qrURL, forKey: .qrURL)
+    }
+}
+
+extension PairingRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deviceName, forKey: .deviceName)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(pairingID, forKey: .pairingID)
+        try container.encode(requestID, forKey: .requestID)
+        try container.encode(requestedAt, forKey: .requestedAt)
     }
 }
 
@@ -15556,6 +15648,7 @@ extension SessionSnapshot {
         try container.encode(recordings, forKey: .recordings)
         try container.encode(session, forKey: .session)
         try container.encode(slideEvents, forKey: .slideEvents)
+        try container.encode(streamOpID, forKey: .streamOpID)
         try container.encode(streamSeq, forKey: .streamSeq)
     }
 }

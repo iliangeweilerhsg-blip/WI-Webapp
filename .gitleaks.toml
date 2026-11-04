@@ -1,12 +1,15 @@
-# Gitleaks: Standardregeln, dazu eine Ausnahme für die Schema-Beispiele.
-# packages/schemas/examples enthält nur künstliche Testwerte (Contract-Tests, docs/ENTWICKLUNG.md).
-# Tokens und Nonces dort sind bewusst als EXAMPLE… mit niedriger Entropie geschrieben.
-# Ältere Commits auf claude/phase1-vertraege enthielten zufällig aussehende, aber erfundene Werte.
+# Gitleaks: Standardregeln plus eine eng gefasste Ausnahme.
+# Künstliche Testwerte in Beispielen beginnen immer mit EXAMPLE und haben niedrige Entropie
+# (z. B. EXAMPLEdevicetoken000…, packages/schemas/examples). Nur diese Werte sind ausgenommen.
+# Die erfundenen Werte älterer Commits von PR #51 stehen einzeln mit Fingerprint in .gitleaksignore.
+# Ein Pfad-UND-Wert-Filter ([[allowlists]] mit condition = "AND") gibt es erst ab gitleaks 8.25.
+# Die gitleaks-action v3 nutzt 8.24.3, daher diese zwei Teile.
 title = "Studien-Gehirn"
 
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Schema-Beispiele enthalten nur künstliche Testwerte"
-paths = ['''^packages/schemas/examples/''']
+description = "Künstliche Testwerte, die mit EXAMPLE beginnen"
+regexTarget = "secret"
+regexes = ['''^EXAMPLE[A-Za-z]*0*$''']

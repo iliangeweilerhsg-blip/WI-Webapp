@@ -70,7 +70,7 @@
         },
         "reset": {
           "type": "boolean",
-          "description": "true: der Client kennt eine seq, die der Server nicht hat (z. B. nach Wiederherstellung eines Backups). Der Client verwirft seinen Stand des Stroms, lädt per REST neu und abonniert ab dem dortigen stream_seq. from_seq ist dann 1."
+          "description": "true: der Server kennt die gemeldete Position nicht (last_op_id passt nicht, seq zu hoch, z. B. nach einer Wiederherstellung) und sendet für diesen Strom nichts. Der Client verwirft seine Daten NICHT, sondern gleicht per REST ab, sendet fehlende eigene Daten erneut und abonniert ab stream_seq/stream_op_id (VERTRAEGE §11.1)."
         }
       }
     },
@@ -372,11 +372,11 @@
         },
         "retryable": {
           "type": "boolean",
-          "description": "Nur mit op_id: true = Operation in der Warteschlange lassen und später erneut senden, false = endgültig abgelehnt, aus der Warteschlange entfernen"
+          "description": "Nur mit op_id: true = Verbindung wird geschlossen, neu verbinden und ab dieser Operation erneut senden. false = endgültig abgelehnt: Operation samt abhängigen in die Fehlerablage (VERTRAEGE §11.2). Ausnahmen: session_superseded (umschreiben) und page_version_conflict (neu laden)"
         },
         "fatal": {
           "type": "boolean",
-          "description": "true: der Server schließt die Verbindung direkt danach"
+          "description": "true: der Server schließt die Verbindung direkt danach und verarbeitet keine weitere Nachricht"
         },
         "details": {
           "type": "object",
@@ -1743,7 +1743,7 @@
     },
     "SyncPairingEvent": {
       "type": "object",
-      "description": "Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)",
+      "description": "Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)",
       "required": ["type", "name", "data"],
       "additionalProperties": false,
       "properties": {
@@ -1754,7 +1754,7 @@
           "const": "pairing.requested"
         },
         "data": {
-          "$ref": "#/$defs/PairingCode"
+          "$ref": "#/$defs/PairingRequest"
         }
       }
     },

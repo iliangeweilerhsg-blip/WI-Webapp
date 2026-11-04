@@ -1504,6 +1504,10 @@ notebook_id: Uuid
  * seq des Stroms notebook:<id> zu diesem Stand
  */
 stream_seq: number
+/**
+ * op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden
+ */
+stream_op_id: (Uuid | null)
 items: Page[]
 }
 /**
@@ -1669,6 +1673,10 @@ export interface PageDetail {
 page: Page
 elements: PageElement[]
 stream_seq: number
+/**
+ * op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden
+ */
+stream_op_id: (Uuid | null)
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1709,6 +1717,10 @@ page_id: Uuid
  * seq des Stroms notebook:<id> zu diesem Stand
  */
 stream_seq: number
+/**
+ * op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden
+ */
+stream_op_id: (Uuid | null)
 strokes: Stroke[]
 }
 /**
@@ -1780,7 +1792,7 @@ seq?: number
 origin?: SyncOrigin
 }
 /**
- * POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). pairing_id aus dem QR-Code bzw. aus pair/start. public_nonce muss zu pair/start passen, falls sich das iPad dort gemeldet hat.
+ * POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). Geheimnis ist der Code. public_nonce verknüpft die Bestätigung mit einer eigenen pair/start-Anfrage; gehört sie zu einer abgelehnten Anfrage, wird abgelehnt.
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PairConfirmRequest".
@@ -1807,7 +1819,7 @@ device: Device
 device_token: string
 }
 /**
- * POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur angenommen, solange am Mac ein Kopplungsfenster offen ist
+ * POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur bei offenem Kopplungsfenster; belegt es nicht exklusiv
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PairStartRequest".
@@ -1821,12 +1833,13 @@ kind: DeviceKind
 public_nonce: string
 }
 /**
- * Der Code steht NICHT in der Antwort, nur in der Web-App
+ * pair/start: request_id der eigenen Anfrage und pairing_id des offenen Fensters. Der Code steht NICHT in der Antwort
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PairStartResponse".
  */
 export interface PairStartResponse {
+request_id: Uuid
 pairing_id: Uuid
 expires_at: Timestamp
 }
@@ -1841,10 +1854,6 @@ pairing_id: Uuid
 code: string
 expires_at: Timestamp
 /**
- * Name aus pair/start, null solange sich kein iPad gemeldet hat
- */
-device_name: (string | null)
-/**
  * Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für die manuelle Eingabe
  */
 host: string
@@ -1853,6 +1862,19 @@ port: number
  * Inhalt des QR-Codes: dieselben Daten wie host, port, pairing_id und code
  */
 qr_url: string
+}
+/**
+ * Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id})
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "PairingRequest".
+ */
+export interface PairingRequest {
+request_id: Uuid
+pairing_id: Uuid
+device_name: string
+kind: DeviceKind
+requested_at: Timestamp
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -2237,6 +2259,10 @@ recordings: Recording[]
  * seq des Stroms session:<id>, zu der dieser Stand gehört. Danach per Sync ab stream_seq + 1
  */
 stream_seq: number
+/**
+ * op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden
+ */
+stream_op_id: (Uuid | null)
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -2685,11 +2711,11 @@ message: string
 op_id?: Uuid
 stream?: SyncStreamId
 /**
- * Nur mit op_id: true = Operation in der Warteschlange lassen und später erneut senden, false = endgültig abgelehnt, aus der Warteschlange entfernen
+ * Nur mit op_id: true = Verbindung wird geschlossen, neu verbinden und ab dieser Operation erneut senden. false = endgültig abgelehnt: Operation samt abhängigen in die Fehlerablage (VERTRAEGE §11.2). Ausnahmen: session_superseded (umschreiben) und page_version_conflict (neu laden)
  */
 retryable: boolean
 /**
- * true: der Server schließt die Verbindung direkt danach
+ * true: der Server schließt die Verbindung direkt danach und verarbeitet keine weitere Nachricht
  */
 fatal: boolean
 details?: {
@@ -2731,7 +2757,7 @@ notebook_id: (Uuid | null)
 page_id: (Uuid | null)
 }
 /**
- * Ein iPad möchte koppeln, Code in der Web-App anzeigen (08 §3)
+ * Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SyncPairingEvent".
@@ -2739,7 +2765,7 @@ page_id: (Uuid | null)
 export interface SyncPairingEvent {
 type: "event"
 name: "pairing.requested"
-data: PairingCode
+data: PairingRequest
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -2763,7 +2789,7 @@ from_seq: number
  */
 head_seq: number
 /**
- * true: der Client kennt eine seq, die der Server nicht hat (z. B. nach Wiederherstellung eines Backups). Der Client verwirft seinen Stand des Stroms, lädt per REST neu und abonniert ab dem dortigen stream_seq. from_seq ist dann 1.
+ * true: der Server kennt die gemeldete Position nicht (last_op_id passt nicht, seq zu hoch, z. B. nach einer Wiederherstellung) und sendet für diesen Strom nichts. Der Client verwirft seine Daten NICHT, sondern gleicht per REST ab, sendet fehlende eigene Daten erneut und abonniert ab stream_seq/stream_op_id (VERTRAEGE §11.1).
  */
 reset: boolean
 }

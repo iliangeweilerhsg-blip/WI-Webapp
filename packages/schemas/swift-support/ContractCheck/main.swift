@@ -1,5 +1,5 @@
-// Swift-Contract (CI-Job, docs/VERTRAEGE.md §11.7): alle gültigen Beispiele der Sync-Nachrichten
-// und von Stroke sowie tests/fixtures/strokes decodieren, wieder kodieren und mit dem Original
+// Swift-Contract (CI-Job, docs/VERTRAEGE.md §11.7): alle gültigen Beispiele der Sync-Nachrichten,
+// der REST-Typen, die das iPad liest, und von Stroke sowie tests/fixtures/strokes decodieren, wieder kodieren und mit dem Original
 // vergleichen. Pflichtfelder mit null müssen dabei erhalten bleiben.
 // Aufruf: contract-check <Repo-Wurzel>
 
@@ -17,6 +17,22 @@ func roundtrip<T: Codable>(_ type: T.Type) -> (Data) throws -> Data {
 let registry: [String: (Data) throws -> Data] = [
     "Stroke": roundtrip(Stroke.self),
     "PageElement": { try SGSync.encode(try SGSync.decode(SGPageElement.self, from: $0)) },
+    // REST-Typen, die das iPad decodiert
+    "Device": roundtrip(Device.self),
+    "DeviceList": roundtrip(DeviceList.self),
+    "PairStartResponse": roundtrip(PairStartResponse.self),
+    "PairResponse": roundtrip(PairResponse.self),
+    "Notebook": roundtrip(Notebook.self),
+    "NotebookList": roundtrip(NotebookList.self),
+    "NotebookPages": roundtrip(NotebookPages.self),
+    "Page": roundtrip(Page.self),
+    "PageStrokes": roundtrip(PageStrokes.self),
+    "PageDetail": roundtrip(SGPageDetail.self),
+    "Session": roundtrip(Session.self),
+    "SessionList": roundtrip(SessionList.self),
+    "SessionSnapshot": roundtrip(SessionSnapshot.self),
+    "Settings": roundtrip(Settings.self),
+    "FileReceipt": roundtrip(FileReceipt.self),
     "SyncOp": { try SGSyncOp.decode($0).encode() },
     "SyncEvent": { try SGSyncEvent.decode($0).encode() },
     "SyncClientMessage": { try SGClientMessage.decode($0).encode() },
@@ -103,11 +119,15 @@ func check(_ label: String, _ original: Data, _ convert: (Data) throws -> Data) 
     }
 }
 
-// Welche Typen gehören zum Sync? Alle $defs aus sync.schema.json, dazu Stroke und PageElement
+// Welche Typen? Alle $defs aus sync.schema.json, dazu Stroke, PageElement und die REST-Typen des iPads
 let syncSchema = try JSONSerialization.jsonObject(
     with: Data(contentsOf: schemas.appendingPathComponent("src/sync.schema.json"))) as! [String: Any]
 var scope = Set((syncSchema["$defs"] as! [String: Any]).keys)
-scope.formUnion(["Stroke", "PageElement"])
+scope.formUnion([
+    "Stroke", "PageElement", "Device", "DeviceList", "PairStartResponse", "PairResponse", "Notebook", "NotebookList",
+    "NotebookPages", "Page", "PageStrokes", "PageDetail", "Session", "SessionList", "SessionSnapshot", "Settings",
+    "FileReceipt",
+])
 
 let validDir = schemas.appendingPathComponent("examples/valid")
 for file in try FileManager.default.contentsOfDirectory(atPath: validDir.path).sorted() where file.hasSuffix(".json") {
@@ -131,8 +151,14 @@ where file.hasSuffix(".json") && file.first!.isNumber {
 var logged: [String] = []
 SGSync.log = { logged.append($0) }
 let futureOp = #"{"type":"op","op_id":"019a4e14-0000-7000-8000-000000000999","stream":"user","kind":"plan.update","at":1,"clock_uncertain":false,"data":{}}"#
-if case .op(.unknown(let kind)) = try SGServerMessage.decode(Data(futureOp.utf8)), kind == "plan.update" {} else {
+if case .op(.unknown(let kind, _, _)) = try SGServerMessage.decode(Data(futureOp.utf8)), kind == "plan.update" {} else {
     failures.append("Unbekannte Operation wurde nicht als .unknown erkannt")
+}
+// Bekannte Operation mit neuem Enum-Wert: überspringen, aber seq weitergeben
+let futureEnum = #"{"type":"op","seq":42,"origin":"ipad","op_id":"019a4e14-0000-7000-8000-000000000998","stream":"session:019a4e14-0000-7000-8000-000000000030","kind":"marker.add","at":1,"clock_uncertain":false,"data":{"marker_id":"019a4e14-0000-7000-8000-000000000060","session_id":"019a4e14-0000-7000-8000-000000000030","kind":"idee","t_ms":1,"page_id":null,"position":null,"note":null,"source":"ipad"}}"#
+if case .op(.unknown(let kind, let stream, let seq)) = try SGServerMessage.decode(Data(futureEnum.utf8)),
+   kind == "marker.add", seq == 42, stream?.hasPrefix("session:") == true {} else {
+    failures.append("Neuer Enum-Wert in bekannter Operation wurde nicht als .unknown mit seq erkannt")
 }
 let futureError = #"{"type":"error","code":"quota_exceeded","message":"x","op_id":"019a4e14-0000-7000-8000-000000000999","retryable":true,"fatal":true}"#
 if case .unknownError(let e) = try SGServerMessage.decode(Data(futureError.utf8)), e.retryable, e.code == "quota_exceeded" {} else {
@@ -141,8 +167,8 @@ if case .unknownError(let e) = try SGServerMessage.decode(Data(futureError.utf8)
 if case .unknown = try SGServerMessage.decode(Data(#"{"type":"bye"}"#.utf8)) {} else {
     failures.append("Unbekannter Nachrichtentyp wurde nicht ignoriert")
 }
-if logged.count != 3 { failures.append("Erwartet 3 Protokolleinträge, erhalten \(logged.count)") }
-checked += 3
+if logged.count != 4 { failures.append("Erwartet 4 Protokolleinträge, erhalten \(logged.count)") }
+checked += 4
 
 if failures.isEmpty {
     print("Swift-Contract: \(checked) Prüfungen bestanden")

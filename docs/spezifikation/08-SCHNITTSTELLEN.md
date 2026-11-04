@@ -21,7 +21,7 @@ Ein Formatwechsel ist erst fertig, wenn alle drei Generate-Schritte und Contract
 | Semester & Module | `GET/POST /semesters` · `GET/PATCH /semesters/{id}` · `GET/POST /modules` · `GET/PATCH/DELETE /modules/{id}` |
 | Kalender | `POST /calendar/sources` (ICS-Datei/URL) · `POST /calendar/sources/{id}/sync` · `GET /calendar/events?from&to` · `PATCH /calendar/events/{id}` (Modul, Art) |
 | Material | `POST /slide-decks` (multipart, `module_id`, `session_id?`) · `GET /slide-decks/{id}` · `GET /slides/{id}` · `GET /slides/{id}/image` · `POST /exercise-sheets` · `GET /tasks/{id}` · `PATCH /task-slide-links/{id}` |
-| Sessions | `GET /sessions?module_id&state` · `POST /sessions` (spontan) · `POST /sessions/{id}/start` · `/pause` · `/resume` · `/stop` · `GET /sessions/{id}/snapshot` (Live-Stand) · `GET /sessions/{id}/timeline` (Segmente, Marker, Striche-Dichte, Phase 2) · `POST /sessions/{id}/import-media` |
+| Sessions | `GET /sessions?module_id&state` · `POST /sessions` (spontan) · `POST /sessions/{id}/start` · `/pause` · `/resume` · `/stop` · `/extend` · `GET /sessions/{id}/snapshot` (Live-Stand) · `GET /sessions/{id}/timeline` (Segmente, Marker, Striche-Dichte, Phase 2) · `POST /sessions/{id}/import-media` |
 | Audio | `POST /sessions/{id}/recordings` · `PUT /recordings/{id}/chunks/{seq}` (Rohdaten, `X-Start-Ms`, `X-Duration-Ms`, `X-Sha256`) · `POST /recordings/{id}/complete` · `GET /recordings/{id}/audio?from_ms&to_ms` (Range-fähig) |
 | Transkript | `GET /sessions/{id}/transcript?slide_id` |
 | Notizen | `GET/POST /notebooks` · `PATCH/DELETE /notebooks/{id}` · `GET /notebooks/{id}/pages` · `GET /pages/{id}` · `GET /pages/{id}/strokes` · `PUT/GET /pages/{id}/pkdrawing` · `PUT /photos/{id}/file` (Rohdaten, `photo_id` vom iPad) · `GET /photos/{id}/file` |
@@ -32,7 +32,7 @@ Ein Formatwechsel ist erst fertig, wenn alle drei Generate-Schritte und Contract
 | Planer | `GET /plan?from&to` · `GET /plan/now` · `PATCH /study-blocks/{id}` (verschieben, pin, skip) · `POST /study-blocks` · `GET/PATCH /preferences` |
 | Suche & Fragen | `GET /search?q&filters` · `POST /ask` (Frag deine Vorlesung, Antwort per Server-Sent Events) |
 | Videos | `GET /videos?concept_id` · `POST /videos` (anfordern) · `GET /videos/{id}/file` |
-| System | `GET /jobs?session_id` · `POST /jobs/{id}/retry` · `GET /costs?month` · `POST /backup` · `GET /backups` · `POST /export` · `GET/PATCH /settings` · `GET/POST/DELETE /devices` · `GET /trash` · `POST /trash/{id}/restore` |
+| System | `GET /jobs?session_id` · `POST /jobs/{id}/retry` · `GET /costs?month` · `POST /backup` · `GET /backups` · `POST /export` · `GET/PATCH /settings` · `GET/DELETE /devices` · `POST /devices/pairings` · `POST /devices/pair/start` · `POST /devices/pair/confirm` · `GET /trash` · `POST /trash/{id}/restore` |
 
 ## 2. Sync-Protokoll (WebSocket)
 
@@ -121,7 +121,7 @@ Ab Phase 2 geplant:
 ## 3. Kopplung von Geräten
 
 1. Unter *Einstellungen → Geräte* öffnet die Web-App ein **Kopplungsfenster** (`POST /devices/pairings`, nur lokal, 5 min, höchstens eins offen). Sie zeigt einen 6-stelligen Code und einen **QR-Code**. Der Core kündigt sich per Bonjour an (`_studiengehirn._tcp`, TXT-Record `v=1`, `name=<Macname>`).
-2. Das iPad meldet sich mit `POST /api/v1/devices/pair/start` `{ device_name, kind, public_nonce }` am offenen Fenster an und bekommt die `pairing_id`, aber nicht den Code. Die Web-App zeigt den Gerätenamen.
+2. Das iPad meldet sich mit `POST /api/v1/devices/pair/start` `{ device_name, kind, public_nonce }` am offenen Fenster an und bekommt `request_id` und `pairing_id`, aber nicht den Code. Das belegt das Fenster nicht exklusiv. Die Web-App listet die Anfragen und kann fremde ablehnen.
 3. Der Nutzer tippt den Code am iPad ein → `POST /devices/pair/confirm` `{ pairing_id, code, device_name, kind, public_nonce }` → Server antwortet mit `device_token` (256 Bit, zufällig). Gespeichert wird nur `token_hash` (SHA-256). Der Code liegt nur im Speicher des Core. Fehlversuche sind pro Fenster und global begrenzt (`docs/VERTRAEGE.md` §12).
 4. QR-Code-Variante: QR enthält `sg://pair?v=1&host=…&port=4710&pairing_id=…&code=…`, also dieselben Daten, die die Web-App auch als Text zeigt. Scannen ersetzt Schritt 2 und das Eintippen in Schritt 3.
 5. Gerät entfernen widerruft das Token sofort.

@@ -780,7 +780,15 @@
     "SessionSnapshot": {
       "type": "object",
       "description": "GET /sessions/{id}/snapshot: Live-Stand für Dashboard und iPad (ohne gelöschte Objekte, nach t_ms sortiert)",
-      "required": ["session", "slide_events", "markers", "photos", "recordings", "stream_seq"],
+      "required": [
+        "session",
+        "slide_events",
+        "markers",
+        "photos",
+        "recordings",
+        "stream_seq",
+        "stream_op_id"
+      ],
       "additionalProperties": false,
       "properties": {
         "session": {
@@ -814,6 +822,17 @@
           "type": "integer",
           "minimum": 0,
           "description": "seq des Stroms session:<id>, zu der dieser Stand gehört. Danach per Sync ab stream_seq + 1"
+        },
+        "stream_op_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden"
         }
       }
     },

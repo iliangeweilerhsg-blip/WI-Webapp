@@ -50,7 +50,7 @@ Python-Contract-Tests: `cd packages/schemas && uv run --project python pytest py
    - **Enums** immer als eigenes `$def`, nie inline. Sonst erzeugt Pydantic Klassen wie `Kind1`.
    - **Nicht verwenden:** `minProperties`, `if/then`, `dependentRequired`, `uniqueItems`. Pydantic ignoriert sie, die Contract-Tests würden auseinanderlaufen. Solche Regeln prüft der Core und dokumentiert sie in der `description`.
    - **Bekannte Nachsicht von Pydantic:** Optionale, nicht nullbare Felder akzeptieren dort auch `null`. Ungültige Beispiele dürfen sich darauf nicht stützen.
-   - **`Uuid`** ist ein String mit Muster (Kleinbuchstaben), bewusst ohne `format: uuid`. Pydantic ignoriert ein Muster am Typ `UUID`, die drei Sprachen würden sonst verschieden prüfen. In Python sind IDs darum `str`.
+   - **`Uuid`** ist ein String mit Muster (Kleinbuchstaben), bewusst ohne `format: uuid`. Pydantic ignoriert ein Muster am Typ `UUID`, die drei Sprachen würden sonst verschieden prüfen. In Python sind IDs darum `str`. `psycopg` liefert `uuid.UUID`, also vor der Validierung `str()` anwenden.
    - **Sync-Typen** (`sync.schema.json`) haben keine Felder, die zugleich optional und nullbar sind. Swift kann „fehlt“ und `null` nicht unterscheiden. Nullbare Felder sind dort Pflichtfelder.
    - **Swift:** `gen.mjs` ergänzt die quicktype-Ausgabe um ein `encode(to:)` je Struct (Pflichtfelder auch als `null`) und um Datumsfunktionen mit Millisekunden. Unions laufen über `packages/schemas/swift-support` (`docs/VERTRAEGE.md` §11.7). Prüfung lokal mit `bash packages/schemas/swift-support/check.sh` (braucht `swiftc`), in der CI im Job „Swift-Contract“.
 2. Beispiele unter `packages/schemas/examples/valid|invalid/<Typ>.<name>.json` ergänzen.
@@ -117,7 +117,8 @@ Die Phase-1-Schemas (Kalender, Session, Handschrift, Sync, Geräte, Backups, Ein
 | `session.start_offsets` | Neues Feld | Abweichender Offline-Start, `t_ms` werden nicht umgerechnet (VERTRAEGE §9.3) |
 | `session.auto_stop_extended_until`, `POST /sessions/{id}/extend` | Neu | „weiter aufnehmen“ (F-SES-03), auch für die Rückfallebene im Core |
 | Server-Operationen `notebook.update/.delete/.restore`, `page.restore` | Ergänzung zu 08 §2.3 | Clients erfahren REST-Änderungen und Wiederherstellungen im Strom |
-| `welcome.db_epoch`, `SyncStreamPosition.last_op_id` | Ergänzung zu 08 §2.1 | Erkennen einer Wiederherstellung (`reset`) |
+| `welcome.db_epoch`, `SyncStreamPosition.last_op_id`, `stream_op_id` in REST-Ständen | Ergänzung zu 08 §2.1 | Erkennen einer Wiederherstellung (`reset`) ohne Reset-Schleife nach REST-Laden |
+| `PairingRequest`, `DELETE /devices/pairings/requests/{id}` | Neu | `pair/start` belegt das Kopplungsfenster nicht exklusiv (Delta-Review PR #51) |
 | `PairConfirmRequest.pairing_id`, `pairing_id` im QR-Inhalt, Kopplungsfenster nur lokal | Geändert in 08 §3 | Sicherheitsreview PR #51 |
 | `page.update` mit vollständigem Feldstand | Geändert in 08 §2.3 | Eindeutige Kodierung ohne optionale nullbare Felder |
 | `MaintenanceNightlyPayload`/`Result` | Neu | Umfang von `maintenance.nightly` in Phase 1 (VERTRAEGE §13) |

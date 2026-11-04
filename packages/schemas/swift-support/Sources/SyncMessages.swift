@@ -7,6 +7,8 @@
 //   unterscheiden, dann die passende generierte Variante decodieren.
 // - Unbekannte type/kind/name werden nicht als Fehler behandelt, sondern als .unknown
 //   zurückgegeben und über SGSync.log protokolliert (neuere Server-Version).
+// - Bekannte Operation mit unbekanntem Enum-Wert (neuere Server-Version): ebenfalls .unknown,
+//   mit stream und seq, damit der Client last_seq trotzdem weiterzählt (VERTRAEGE §11.7).
 // - Fehlercodes werden als String gelesen; unbekannte Codes landen in .unknownError.
 // - Kodieren immer über SGSync.encode: Pflichtfelder mit null bleiben erhalten (encode(to:) in
 //   Schemas.swift), Zeitstempel mit Millisekunden.
@@ -35,6 +37,8 @@ private struct SGEnvelope: Decodable {
     let kind: String?
     let name: String?
     let code: String?
+    let stream: String?
+    let seq: Int?
 }
 
 enum SGSyncOp {
@@ -59,12 +63,23 @@ enum SGSyncOp {
     case markerAdd(MarkerAddOp)
     case markerRemove(MarkerRemoveOp)
     case photoAdd(PhotoAddOp)
-    case unknown(kind: String)
+    /// Nicht darstellbare Operation: unbekanntes kind oder unbekannter Enum-Wert. seq zählt trotzdem
+    case unknown(kind: String, stream: String?, seq: Int?)
 
     static func decode(_ data: Data) throws -> SGSyncOp {
         let env = try SGSync.decode(SGEnvelope.self, from: data)
+        do {
+            if let op = try decodeKnown(env.kind ?? "", data) { return op }
+            SGSync.log("Unbekannte Operation ignoriert: \(env.kind ?? "-")")
+        } catch let error as DecodingError {
+            SGSync.log("Operation \(env.kind ?? "-") nicht lesbar, ignoriert: \(error)")
+        }
+        return .unknown(kind: env.kind ?? "", stream: env.stream, seq: env.seq)
+    }
+
+    private static func decodeKnown(_ kind: String, _ data: Data) throws -> SGSyncOp? {
         let d = SGSync.decoder()
-        switch env.kind ?? "" {
+        switch kind {
         case "notebook.create": return .notebookCreate(try d.decode(NotebookCreateOp.self, from: data))
         case "notebook.update": return .notebookUpdate(try d.decode(NotebookUpdateOp.self, from: data))
         case "notebook.delete": return .notebookDelete(try d.decode(NotebookDeleteOp.self, from: data))
@@ -86,9 +101,7 @@ enum SGSyncOp {
         case "marker.add": return .markerAdd(try d.decode(MarkerAddOp.self, from: data))
         case "marker.remove": return .markerRemove(try d.decode(MarkerRemoveOp.self, from: data))
         case "photo.add": return .photoAdd(try d.decode(PhotoAddOp.self, from: data))
-        default:
-            SGSync.log("Unbekannte Operation ignoriert: \(env.kind ?? "-")")
-            return .unknown(kind: env.kind ?? "")
+        default: return nil
         }
     }
 
@@ -115,7 +128,7 @@ enum SGSyncOp {
         case .markerAdd(let v): return try SGSync.encode(v)
         case .markerRemove(let v): return try SGSync.encode(v)
         case .photoAdd(let v): return try SGSync.encode(v)
-        case .unknown(let kind): throw SGSyncError.notEncodable("Operation \(kind)")
+        case .unknown(let kind, _, _): throw SGSyncError.notEncodable("Operation \(kind)")
         }
     }
 }
@@ -343,4 +356,26 @@ struct SGElementUpsertOp: Codable {
 enum SGSyncError: Error {
     case notEncodable(String)
     case unknownElement(String)
+}
+
+/// GET /pages/{id}: wie PageDetail, aber mit SGPageElement statt des zusammengefassten PageElement
+struct SGPageDetail: Codable {
+    let page: Page
+    let elements: [SGPageElement]
+    let streamSeq: Int
+    let streamOpID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case page, elements
+        case streamSeq = "stream_seq"
+        case streamOpID = "stream_op_id"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(page, forKey: .page)
+        try container.encode(elements, forKey: .elements)
+        try container.encode(streamSeq, forKey: .streamSeq)
+        try container.encode(streamOpID, forKey: .streamOpID)
+    }
 }

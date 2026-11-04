@@ -237,7 +237,7 @@
     "NotebookPages": {
       "type": "object",
       "description": "GET /notebooks/{id}/pages, nach index sortiert, ohne gelöschte Seiten",
-      "required": ["notebook_id", "stream_seq", "items"],
+      "required": ["notebook_id", "stream_seq", "stream_op_id", "items"],
       "additionalProperties": false,
       "properties": {
         "notebook_id": {
@@ -247,6 +247,17 @@
           "type": "integer",
           "minimum": 0,
           "description": "seq des Stroms notebook:<id> zu diesem Stand"
+        },
+        "stream_op_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden"
         },
         "items": {
           "type": "array",
@@ -330,7 +341,7 @@
     "PageStrokes": {
       "type": "object",
       "description": "GET /pages/{id}/strokes: alle nicht gelöschten Striche, nach created_at sortiert",
-      "required": ["page_id", "stream_seq", "strokes"],
+      "required": ["page_id", "stream_seq", "stream_op_id", "strokes"],
       "additionalProperties": false,
       "properties": {
         "page_id": {
@@ -340,6 +351,17 @@
           "type": "integer",
           "minimum": 0,
           "description": "seq des Stroms notebook:<id> zu diesem Stand"
+        },
+        "stream_op_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden"
         },
         "strokes": {
           "type": "array",
@@ -633,7 +655,7 @@
     "PageDetail": {
       "type": "object",
       "description": "GET /pages/{id}: Seite mit Elementen (ohne gelöschte, nach z sortiert)",
-      "required": ["page", "elements", "stream_seq"],
+      "required": ["page", "elements", "stream_seq", "stream_op_id"],
       "additionalProperties": false,
       "properties": {
         "page": {
@@ -648,6 +670,17 @@
         "stream_seq": {
           "type": "integer",
           "minimum": 0
+        },
+        "stream_op_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden"
         }
       }
     }

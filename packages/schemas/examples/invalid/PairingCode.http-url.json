@@ -2,7 +2,6 @@
   "pairing_id": "019a4e14-0000-7000-8000-000000000081",
   "code": "482913",
   "expires_at": "2026-11-04T07:20:00Z",
-  "device_name": "iPad von Ilian",
   "host": "192.168.1.20",
   "port": 4710,
   "qr_url": "http://192.168.1.20:4710"

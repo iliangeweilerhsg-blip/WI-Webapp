@@ -93,7 +93,7 @@
     },
     "PairStartRequest": {
       "type": "object",
-      "description": "POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur angenommen, solange am Mac ein Kopplungsfenster offen ist",
+      "description": "POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur bei offenem Kopplungsfenster; belegt es nicht exklusiv",
       "required": ["device_name", "kind", "public_nonce"],
       "additionalProperties": false,
       "properties": {
@@ -114,10 +114,13 @@
     },
     "PairStartResponse": {
       "type": "object",
-      "description": "Der Code steht NICHT in der Antwort, nur in der Web-App",
-      "required": ["pairing_id", "expires_at"],
+      "description": "pair/start: request_id der eigenen Anfrage und pairing_id des offenen Fensters. Der Code steht NICHT in der Antwort",
+      "required": ["request_id", "pairing_id", "expires_at"],
       "additionalProperties": false,
       "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Uuid"
+        },
         "pairing_id": {
           "$ref": "#/$defs/Uuid"
         },
@@ -129,7 +132,7 @@
     "PairingCode": {
       "type": "object",
       "description": "Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur lokal; Ereignis pairing.requested)",
-      "required": ["pairing_id", "code", "expires_at", "device_name", "host", "port", "qr_url"],
+      "required": ["pairing_id", "code", "expires_at", "host", "port", "qr_url"],
       "additionalProperties": false,
       "properties": {
         "pairing_id": {
@@ -141,10 +144,6 @@
         },
         "expires_at": {
           "$ref": "#/$defs/Timestamp"
-        },
-        "device_name": {
-          "type": ["string", "null"],
-          "description": "Name aus pair/start, null solange sich kein iPad gemeldet hat"
         },
         "host": {
           "type": "string",
@@ -167,9 +166,34 @@
         }
       }
     },
+    "PairingRequest": {
+      "type": "object",
+      "description": "Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id})",
+      "required": ["request_id", "pairing_id", "device_name", "kind", "requested_at"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "pairing_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "requested_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
     "PairConfirmRequest": {
       "type": "object",
-      "description": "POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). pairing_id aus dem QR-Code bzw. aus pair/start. public_nonce muss zu pair/start passen, falls sich das iPad dort gemeldet hat.",
+      "description": "POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). Geheimnis ist der Code. public_nonce verknüpft die Bestätigung mit einer eigenen pair/start-Anfrage; gehört sie zu einer abgelehnten Anfrage, wird abgelehnt.",
       "required": ["pairing_id", "code", "device_name", "kind", "public_nonce"],
       "additionalProperties": false,
       "properties": {
