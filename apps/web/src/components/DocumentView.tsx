@@ -58,7 +58,7 @@ function parsePage(value: string | null): number {
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
 const iconButton =
-  'grid h-8 min-w-8 place-items-center rounded-md px-2 text-sm hover:bg-surface disabled:opacity-40';
+  'grid h-8 min-w-8 place-items-center rounded-md px-2 text-sm hover:bg-surface disabled:opacity-40 aria-expanded:bg-accent-soft aria-pressed:bg-accent-soft';
 
 /** Größe des Anzeigebereichs; ohne ResizeObserver (Tests) gilt ein fester Standard. */
 function useElementSize<T extends HTMLElement>() {
