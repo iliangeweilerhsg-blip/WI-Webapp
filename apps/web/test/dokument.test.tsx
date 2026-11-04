@@ -240,6 +240,78 @@ describe('PDF-Anzeige', () => {
     expect(document.querySelectorAll('[data-hit]')).toHaveLength(0);
   });
 
+  it('Suche: ein Treffer über mehrere Textstücke zählt einmal und bekommt ein Rechteck je Stück', async () => {
+    deckCore();
+    const original = pdf.doc.textItems.getMockImplementation();
+    pdf.doc.textItems.mockImplementation(async (n: number) =>
+      n === 1
+        ? [
+            { str: 'Markt-', x: 10, y: 10, w: 40, h: 12, eol: true },
+            { str: 'gleich', x: 10, y: 26, w: 40, h: 12 },
+            { str: 'gewicht', x: 50, y: 26, w: 50, h: 12 },
+          ]
+        : [],
+    );
+    try {
+      const user = userEvent.setup();
+      const viewer = await openViewer();
+      fireEvent.keyDown(viewer, { key: 'f', ctrlKey: true });
+      await user.type(await screen.findByRole('textbox', { name: 'Suchbegriff' }), 'marktgleichgewicht');
+      const status = within(screen.getByRole('search')).getByRole('status');
+      await waitFor(() => expect(status).toHaveTextContent('1 von 1'));
+      // Je Zeile ein Rahmen: „Markt-“ auf Zeile 1, „gleichgewicht“ (zwei Stücke) auf Zeile 2
+      await waitFor(() => expect(document.querySelectorAll('[data-hit]')).toHaveLength(2));
+      expect(document.querySelectorAll('[data-hit="active"]')).toHaveLength(2);
+    } finally {
+      if (original) pdf.doc.textItems.mockImplementation(original);
+    }
+  });
+
+  it('Suche: Fortschritt, Teilergebnisse, Sprung zum ersten Treffer und jede Seite nur einmal gelesen', async () => {
+    deckCore();
+    const original = pdf.doc.textItems.getMockImplementation();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const hitItem = [{ str: 'Normalisierung', x: 10, y: 10, w: 100, h: 12 }];
+    pdf.doc.textItems.mockClear();
+    pdf.doc.textItems.mockImplementation(async (n: number) => {
+      if (n >= 4) await gate; // ab Seite 4 „langsam“
+      return n === 2 || n === 5 ? hitItem : [];
+    });
+    try {
+      const user = userEvent.setup();
+      const viewer = await openViewer();
+      fireEvent.keyDown(viewer, { key: 'f', ctrlKey: true });
+      const box = await screen.findByRole('textbox', { name: 'Suchbegriff' });
+      await user.type(box, 'normalisierung');
+      const status = within(screen.getByRole('search')).getByRole('status');
+      // Teilergebnis: erster Treffer steht, die Suche läuft noch, kein „Kein Treffer“
+      await waitFor(() => expect(status).toHaveTextContent('1 von 1, sucht'));
+      expect(status).not.toHaveTextContent('Kein Treffer');
+      expect(pageRegion()).toHaveAccessibleName('Seite 2 von 5');
+      release();
+      await waitFor(() => expect(status).toHaveTextContent(/^1 von 2$/));
+      // Vorab-Extraktion und Suche teilen sich die Promises: jede Seite genau einmal
+      const pages = pdf.doc.textItems.mock.calls.map((c) => c[0]).sort();
+      expect(pages).toEqual([1, 2, 3, 4, 5]);
+    } finally {
+      release();
+      if (original) pdf.doc.textItems.mockImplementation(original);
+    }
+  });
+
+  it('Suche: Text wird schon beim Öffnen vorab gelesen, ab der aktuellen Seite', async () => {
+    deckCore();
+    pdf.doc.textItems.mockClear();
+    const user = userEvent.setup();
+    const viewer = await openViewer();
+    await user.keyboard('{ArrowRight}{ArrowRight}');
+    fireEvent.keyDown(viewer, { key: 'f', ctrlKey: true });
+    await screen.findByRole('textbox', { name: 'Suchbegriff' });
+    await waitFor(() => expect(pdf.doc.textItems).toHaveBeenCalledTimes(5));
+    expect(pdf.doc.textItems.mock.calls.map((c) => c[0])).toEqual([3, 4, 5, 1, 2]);
+  });
+
   it('Suche ohne Treffer sagt es ruhig', async () => {
     deckCore();
     const user = userEvent.setup();

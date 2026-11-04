@@ -9,6 +9,8 @@ export interface PdfTextItem {
   y: number;
   w: number;
   h: number;
+  /** Zeilenende laut pdf.js (`hasEOL`): Danach beginnt eine neue Zeile. */
+  eol?: boolean;
 }
 
 export interface PdfDoc {
@@ -117,9 +119,15 @@ export async function openPdf(url: string): Promise<PdfDoc> {
       const content = await page.getTextContent();
       const items: PdfTextItem[] = [];
       for (const item of content.items) {
-        if (!('str' in item) || item.str.trim() === '') continue;
+        if (!('str' in item)) continue;
+        // Leere Stücke und Leerzeichen bleiben erhalten: Sie sind die einzigen Hinweise auf Wort- und Zeilengrenzen
+        // (die Suche braucht sie, Treffer darauf gibt es nicht). Schrift-Normalisierung (Ligaturen, NFKC) macht
+        // pdf.js selbst: `disableNormalization` bleibt auf dem Standard `false`.
+        if (item.str === '' && !item.hasEOL) continue;
         const [, , , , x = 0, y = 0] = pdfjs.Util.transform(view.transform, item.transform);
-        items.push({ str: item.str, x, y: y - item.height, w: item.width, h: item.height });
+        const entry: PdfTextItem = { str: item.str, x, y: y - item.height, w: item.width, h: item.height };
+        if (item.hasEOL) entry.eol = true;
+        items.push(entry);
       }
       return items;
     },
