@@ -5,6 +5,7 @@ Diese Datei liest Claude in jeder Session zuerst. Sie hält fest, **für wen** w
 ## Worum es geht
 
 Persönliche Lern- und Wissensplattform für mein Studium (Wirtschaftsinformatik). Primär für mich selbst; ein späterer Verkauf soll architektonisch nicht verbaut werden, ist aber kein Ziel.
+**Verbindliche Spezifikation für die Umsetzung: `docs/spezifikation/` (gilt bei Widersprüchen).**
 Gesamtkonzept: `docs/KONZEPT.md` · Alltag & Leitprinzipien: `docs/STUDIENALLTAG.md` · Funktionen: `docs/FEATURE-KATALOG.md` · Lernalgorithmus: `docs/LERNMODELL.md`
 
 ## Fakten über den Nutzer (Stand 03.11.2026)

@@ -282,6 +282,7 @@ Jede Funktion muss diese Prinzipien erfüllen. Herleitung: [Studienalltag](docs/
 
 | Dokument | Inhalt |
 |---|---|
+| [docs/spezifikation/](docs/spezifikation/00-UEBERSICHT.md) | **Produktspezifikation für das Entwicklerteam** (verbindlich): Architektur, Datenmodell, alle Funktionen mit Akzeptanzkriterien, KI-Pipeline, Lernmodell & Planer, UX, Schnittstellen, NFA, Umsetzungsplan |
 | [docs/KONZEPT.md](docs/KONZEPT.md) | Gesamtkonzept, Architektur, Datenmodell, Entscheidungen |
 | [docs/STUDIENALLTAG.md](docs/STUDIENALLTAG.md) | Alltagsmomente M1–M13 und Herleitung der Leitprinzipien |
 | [docs/FEATURE-KATALOG.md](docs/FEATURE-KATALOG.md) | Bewertung jeder Funktion aus den Referenz-Apps, eigene Vorschläge |

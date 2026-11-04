@@ -4,6 +4,8 @@
 > **Status:** Entwurf v0.2 (03.11.2026) · **Fokus:** Eigennutzung, Architektur so, dass ein späterer Verkauf nicht verbaut ist.
 > **Setup:** MacBook + iPad mit Apple Pencil · Vorlesungen dürfen aufgenommen werden.
 >
+> **Verbindliche Umsetzungsgrundlage:** [Produktspezifikation](spezifikation/00-UEBERSICHT.md). Bei Widersprüchen gilt die Spezifikation.
+>
 > **Weitere Dokumente:** [Studienalltag & Leitprinzipien](STUDIENALLTAG.md) · [Feature-Katalog (GoodNotes, StudySmarter, Quizlet + neue Ideen)](FEATURE-KATALOG.md) · [Lernmodell (FSRS, Beherrschung, Klausur-Readiness)](LERNMODELL.md)
 
 ---
@@ -292,13 +294,13 @@ Transkription (Whisper – lokal oder per API), LLM (Claude API) und Sprachausga
 
 | Bereich | Vorschlag | Warum |
 |---|---|---|
-| Frontend (Mac) | Next.js (React, TypeScript), Tailwind | Dashboard, Bibliothek, Lernen, Planer |
+| Frontend (Mac) | Next.js (Static Export, React, TypeScript), Tailwind | Dashboard, Bibliothek, Lernen, Planer |
 | iPad-Schreib-App | SwiftUI + PencilKit, lokale Speicherung | Schreibgefühl wie GoodNotes, Pencil-Gesten (E1) |
 | PDF-Anzeige | pdf.js | Standard, läuft überall |
 | Striche am Mac anzeigen | Canvas + perfect-freehand | Zeichnet die Striche aus dem neutralen JSON |
-| Sync | Eigener Sync-Server (WebSocket), Änderungsprotokoll pro Notizbuch; für Text-Notizen Yjs | Offline-fest, funktioniert auch bei Client Isolation (E2) |
-| Backend | Next.js API / tRPC, Prisma oder Drizzle | Typsicher, schnell entwickelt |
-| KI-Worker | Python (FastAPI + Job-Queue, z. B. arq/Celery) | Bestes Ökosystem für PDF, Audio, ML |
+| Sync | Eigener Sync-Server (WebSocket) mit Strömen, Sequenznummern und Bestätigung | Offline-fest, funktioniert auch bei Client Isolation (E2) |
+| Backend (Core) | Node.js, Fastify, Drizzle, `ts-fsrs` | Dauerhaft laufender Prozess für Sync, Planer, Lernlogik |
+| KI-Worker | Python, nativ auf dem Mac (Metal/MLX), Job-Warteschlange in PostgreSQL | Bestes Ökosystem für PDF, Audio, ML, ohne Zusatzdienst |
 | PDF-Parsing | PyMuPDF | Text + Bilder pro Seite |
 | Transkription | faster-whisper (lokal) oder Whisper-API | Deutsch + Englisch, Zeitstempel |
 | LLM | Claude API | Konzept-Extraktion, Fragen, Bewertung, Skripte |
