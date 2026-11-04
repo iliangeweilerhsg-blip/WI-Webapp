@@ -54,6 +54,7 @@ Python-Contract-Tests: `cd packages/schemas && uv run --project python pytest py
    - **Sync-Typen** (`sync.schema.json`) haben keine Felder, die zugleich optional und nullbar sind. Swift kann „fehlt“ und `null` nicht unterscheiden. Nullbare Felder sind dort Pflichtfelder.
    - **Swift:** `gen.mjs` ergänzt die quicktype-Ausgabe um ein `encode(to:)` je Struct (Pflichtfelder auch als `null`) und um Datumsfunktionen mit Millisekunden. Unions laufen über `packages/schemas/swift-support` (`docs/VERTRAEGE.md` §11.7). Prüfung lokal mit `bash packages/schemas/swift-support/check.sh` (braucht `swiftc`), in der CI im Job „Swift-Contract“.
 2. Beispiele unter `packages/schemas/examples/valid|invalid/<Typ>.<name>.json` ergänzen.
+   Token-, Nonce- oder Schlüsselwerte immer als künstliche Werte mit niedriger Entropie schreiben (`EXAMPLEdevicetoken000…`), sonst schlägt das Secret-Scanning (gitleaks) an. Ein Gitleaks-Ausnahmeregelwerk gibt es nicht. Nur die 8 alten Funde aus PR #51 stehen mit Fingerprint in `.gitleaksignore`.
 3. `pnpm schemas:gen`, dann `pnpm test` und die Python-Contract-Tests.
 4. Generierte Dateien **nie von Hand** ändern:
    - `packages/shared/src/generated/`
