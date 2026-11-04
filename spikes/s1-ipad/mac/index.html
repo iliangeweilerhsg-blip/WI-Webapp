@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spike S1 + S3 – Mac-Gegenstelle (Live-Strichspiegelung &amp; Rohwerte)</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --card: #1e293b;
+        --border: #334155;
+        --text: #f8fafc;
+        --muted: #94a3b8;
+        --green: #22c55e;
+        --yellow: #eab308;
+        --red: #ef4444;
+        --blue: #38bdf8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.45;
+      }
+      .container {
+        max-width: 1080px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 4px 0;
+      }
+      .subtitle {
+        color: var(--muted);
+        font-size: 0.88rem;
+        margin-bottom: 14px;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin-bottom: 14px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 10px;
+      }
+      .metric {
+        background: rgba(15, 23, 42, 0.65);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px 12px;
+      }
+      .metric-label {
+        font-size: 0.73rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .metric-value {
+        font-size: 1.05rem;
+        font-weight: 700;
+        margin-top: 4px;
+        font-variant-numeric: tabular-nums;
+      }
+      .badge {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 600;
+      }
+      .badge-ok {
+        background: rgba(34, 197, 94, 0.2);
+        color: #4ade80;
+      }
+      .badge-warn {
+        background: rgba(234, 179, 8, 0.2);
+        color: #facc15;
+      }
+      .badge-err {
+        background: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+      }
+      .split {
+        display: grid;
+        grid-template-columns: 1.35fr 1fr;
+        gap: 14px;
+      }
+      @media (max-width: 860px) {
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+      .canvas-wrap {
+        position: relative;
+        width: 100%;
+        height: 480px;
+        background: #ffffff;
+        border-radius: 10px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+      .canvas-wrap canvas {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+        font-variant-numeric: tabular-nums;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 600;
+      }
+      textarea {
+        width: 100%;
+        min-height: 220px;
+        background: #090d16;
+        color: #e2e8f0;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 10px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.8rem;
+        resize: vertical;
+      }
+      button {
+        appearance: none;
+        border: none;
+        border-radius: 8px;
+        padding: 9px 14px;
+        font-size: 0.88rem;
+        font-weight: 600;
+        cursor: pointer;
+        color: #0f172a;
+        background: var(--blue);
+      }
+      .check-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Studien-Gehirn · Spike S1 + S3: Mac-Gegenstelle</h1>
+      <div class="subtitle">
+        Live-Strichspiegelung vom iPad (<code>08 §4.1/§4.2</code>), Ping-Pong-Uhrabgleich, Latenzmessung (&le;
+        1000 ms) &amp; Apple-Pencil-Rohwerte
+      </div>
+
+      <div class="card">
+        <div class="grid">
+          <div class="metric">
+            <div class="metric-label">WebSocket / Bonjour</div>
+            <div class="metric-value" id="connStatusVal">Verbinde …</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Empfangene Striche</div>
+            <div class="metric-value" id="strokeCountVal">0</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Letzte Strich-Latenz</div>
+            <div class="metric-value" id="lastLatencyVal">–</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Latenz Median (Ziel &le; 1000 ms)</div>
+            <div class="metric-value" id="medianLatencyVal">–</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Latenz p95</div>
+            <div class="metric-value" id="p95LatencyVal">–</div>
+          </div>
+        </div>
+        <div class="check-row" id="checkpointsRow"></div>
+      </div>
+
+      <div class="split">
+        <div class="card">
+          <div class="metric-label" style="margin-bottom: 8px">
+            Live-Zeichenfläche (2 Ebenen: unten <code>highlight</code>, oben <code>ink</code> · Polylinie mit
+            Breite &times; force)
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="highlightCanvas" width="820" height="580"></canvas>
+            <canvas id="inkCanvas" width="820" height="580"></canvas>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="metric-label" style="margin-bottom: 8px">
+            Strich-Protokoll &amp; Darstellungs-Latenz
+          </div>
+          <div style="max-height: 220px; overflow-y: auto; margin-bottom: 12px">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Werkzeug</th>
+                  <th>Ebene</th>
+                  <th>Punkte</th>
+                  <th>Latenz</th>
+                </tr>
+              </thead>
+              <tbody id="strokesTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="metric-label" style="margin-bottom: 8px">
+            Empfangene Rohwerte vom iPad (<code>force</code>, <code>altitude</code>, <code>azimuth</code>,
+            <code>size</code>)
+          </div>
+          <div style="max-height: 200px; overflow-y: auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Werkzeug (Input)</th>
+                  <th>force (min/med/max)</th>
+                  <th>alt (med)</th>
+                  <th>size.w (med)</th>
+                </tr>
+              </thead>
+              <tbody id="rawTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="metric-label" style="margin-bottom: 8px">
+          Ergebnisbogen für Spike S1 + S3 (Kopieren &amp; an Claude schicken)
+        </div>
+        <textarea id="reportBox" readonly></textarea>
+        <div style="margin-top: 8px; display: flex; gap: 10px; align-items: center">
+          <button id="copyBtn" type="button">Ergebnisbogen kopieren</button>
+          <span id="copyFeedback" style="color: var(--green); font-size: 0.85rem"></span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        const connStatusVal = document.getElementById('connStatusVal');
+        const strokeCountVal = document.getElementById('strokeCountVal');
+        const lastLatencyVal = document.getElementById('lastLatencyVal');
+        const medianLatencyVal = document.getElementById('medianLatencyVal');
+        const p95LatencyVal = document.getElementById('p95LatencyVal');
+        const checkpointsRow = document.getElementById('checkpointsRow');
+        const strokesTableBody = document.getElementById('strokesTableBody');
+        const rawTableBody = document.getElementById('rawTableBody');
+        const reportBox = document.getElementById('reportBox');
+        const copyBtn = document.getElementById('copyBtn');
+        const copyFeedback = document.getElementById('copyFeedback');
+
+        const highlightCanvas = document.getElementById('highlightCanvas');
+        const inkCanvas = document.getElementById('inkCanvas');
+        const hiCtx = highlightCanvas.getContext('2d');
+        const inkCtx = inkCanvas.getContext('2d');
+
+        let appState = {
+          bonjour_active: false,
+          bonjour_info: '',
+          stroke_count: 0,
+          latency_median_ms: 0,
+          latency_p95_ms: 0,
+          checkpoints: {},
+          raw_summaries: [],
+          strokes: [],
+        };
+
+        window.__s1MacState = appState;
+
+        function unpackPointsBase64(b64) {
+          const bin = atob(b64);
+          const len = bin.length;
+          if (len % 24 !== 0) return [];
+          const bytes = new Uint8Array(len);
+          for (let i = 0; i < len; i += 1) {
+            bytes[i] = bin.charCodeAt(i);
+          }
+          const dv = new DataView(bytes.buffer);
+          const count = len / 24;
+          const pts = [];
+          for (let i = 0; i < count; i += 1) {
+            const off = i * 24;
+            pts.push({
+              x: dv.getFloat32(off, true),
+              y: dv.getFloat32(off + 4, true),
+              dt: dv.getFloat32(off + 8, true),
+              pressure: dv.getFloat32(off + 12, true),
+              altitude: dv.getFloat32(off + 16, true),
+              azimuth: dv.getFloat32(off + 20, true),
+            });
+          }
+          return pts;
+        }
+
+        function rgbaFromHex(hex, isHighlight) {
+          const clean = (hex || '#1E2A44FF').replace('#', '');
+          const r = Number.parseInt(clean.slice(0, 2) || '1e', 16);
+          const g = Number.parseInt(clean.slice(2, 4) || '2a', 16);
+          const b = Number.parseInt(clean.slice(4, 6) || '44', 16);
+          const a =
+            clean.length >= 8 ? Number.parseInt(clean.slice(6, 8), 16) / 255 : isHighlight ? 0.4 : 1.0;
+          return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`;
+        }
+
+        function drawStrokeOnCanvas(stroke) {
+          const pts = unpackPointsBase64(stroke.points);
+          if (pts.length === 0) return;
+
+          const isHighlight = stroke.layer === 'highlight' || stroke.tool === 'marker';
+          const ctx = isHighlight ? hiCtx : inkCtx;
+          const t = Array.isArray(stroke.transform) ? stroke.transform : [1, 0, 0, 1, 0, 0];
+
+          ctx.save();
+          ctx.transform(t[0], t[1], t[2], t[3], t[4], t[5]);
+          ctx.strokeStyle = rgbaFromHex(stroke.color, isHighlight);
+          ctx.fillStyle = ctx.strokeStyle;
+          ctx.lineCap = isHighlight ? 'butt' : 'round';
+          ctx.lineJoin = 'round';
+
+          const baseW = Number(stroke.width) || 2.4;
+
+          if (pts.length === 1) {
+            const r = Math.max(1, (baseW * (0.5 + pts[0].pressure * 0.7)) / 2);
+            ctx.beginPath();
+            ctx.arc(pts[0].x, pts[0].y, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+            return;
+          }
+
+          for (let i = 1; i < pts.length; i += 1) {
+            const p0 = pts[i - 1];
+            const p1 = pts[i];
+            const pressureFactor =
+              stroke.tool === 'monoline' || stroke.tool === 'marker'
+                ? 1.0
+                : 0.35 + 0.95 * ((p0.pressure + p1.pressure) / 2);
+            ctx.lineWidth = Math.max(0.8, baseW * pressureFactor);
+            ctx.beginPath();
+            ctx.moveTo(p0.x, p0.y);
+            ctx.lineTo(p1.x, p1.y);
+            ctx.stroke();
+          }
+
+          ctx.restore();
+        }
+
+        function renderCheckpoints(cp) {
+          const items = [
+            ['08 §4.2 Selbsttest', cp.selftest_08_4_2],
+            ['Bonjour-Dialog/Suche', cp.bonjour_dialog],
+            ['WebSocket verbunden', cp.websocket_connected],
+            ['Kamera ok', cp.camera_ok],
+            ['Doppeltipp erkannt', cp.double_tap_ok],
+            ['PKDrawing gespeichert', cp.saved_ok],
+            ['PKDrawing geladen', cp.loaded_ok],
+          ];
+          checkpointsRow.innerHTML = items
+            .map(([label, val]) => {
+              const cls = val === true ? 'badge-ok' : val === false ? 'badge-err' : 'badge-warn';
+              const sym = val === true ? '✓' : val === false ? '✗' : '•';
+              return `<span class="badge ${cls}">${sym} ${label}</span>`;
+            })
+            .join('');
+        }
+
+        function renderTablesAndReport() {
+          strokeCountVal.textContent = String(appState.strokes.length);
+          const lastStroke = appState.strokes[appState.strokes.length - 1];
+          lastLatencyVal.textContent = lastStroke ? `${lastStroke.latency_ms.toFixed(1)} ms` : '–';
+
+          const med = appState.latency_median_ms || 0;
+          const p95 = appState.latency_p95_ms || 0;
+          medianLatencyVal.innerHTML =
+            appState.strokes.length > 0
+              ? `<span class="badge ${med <= 1000 ? 'badge-ok' : 'badge-err'}">${med.toFixed(1)} ms</span>`
+              : '–';
+          p95LatencyVal.textContent = appState.strokes.length > 0 ? `${p95.toFixed(1)} ms` : '–';
+
+          renderCheckpoints(appState.checkpoints || {});
+
+          const recentStrokes = appState.strokes.slice(-15).reverse();
+          strokesTableBody.innerHTML = recentStrokes
+            .map(
+              (s) =>
+                `<tr><td>#${s.seq}</td><td>${s.stroke.tool}</td><td>${s.stroke.layer}</td><td>${s.point_count}</td><td>${s.latency_ms.toFixed(1)} ms</td></tr>`,
+            )
+            .join('');
+
+          rawTableBody.innerHTML = (appState.raw_summaries || [])
+            .map(
+              (r) =>
+                `<tr><td><strong>${r.tool}</strong> (${r.inputType}, n=${r.pointCount})</td><td>${r.force.min} / ${r.force.median} / ${r.force.max}</td><td>${r.altitude.median}</td><td>${r.sizeWidth.median}</td></tr>`,
+            )
+            .join('');
+
+          const cp = appState.checkpoints || {};
+          const fmtCp = (v) => (v === true ? '✓ JA' : v === false ? '✗ NEIN' : 'noch offen');
+          const rawLines =
+            (appState.raw_summaries || []).length === 0
+              ? ['  (Noch keine Rohwerte vom iPad gesendet)']
+              : appState.raw_summaries.map(
+                  (r) =>
+                    `  - ${r.tool} [${r.inputType}] (${r.strokeCount} Striche, ${r.pointCount} Pkt.): force=[${r.force.min}, med=${r.force.median}, max=${r.force.max}], altitude=[${r.altitude.min}, med=${r.altitude.median}, max=${r.altitude.max}], azimuth=[${r.azimuth.min}, med=${r.azimuth.median}, max=${r.azimuth.max}], size.w=[${r.sizeWidth.min}, med=${r.sizeWidth.median}, max=${r.sizeWidth.max}]`,
+                );
+
+          reportBox.value = [
+            '=== ERGEBNISBOGEN SPIKE S1 + S3 (iPad + Mac-Gegenstelle) ===',
+            `Zeitpunkt:                  ${new Date().toISOString()}`,
+            `Bonjour-Dienst (_dns-sd):   ${appState.bonjour_info || (appState.bonjour_active ? 'Aktiv' : 'Inaktiv')}`,
+            '',
+            '--- S1: iPad-Prüfpunkte ---',
+            `1. 08 §4.2 Format-Selbsttest: ${fmtCp(cp.selftest_08_4_2)}`,
+            `2. Bonjour-Dialog / Suche:    ${fmtCp(cp.bonjour_dialog)}`,
+            `3. WebSocket verbunden:       ${fmtCp(cp.websocket_connected)}`,
+            `4. Tafel-Foto (Kamera):       ${fmtCp(cp.camera_ok)}`,
+            `5. Pencil-Doppeltipp:         ${fmtCp(cp.double_tap_ok)}`,
+            `6. PKDrawing gespeichert:     ${fmtCp(cp.saved_ok)}`,
+            `7. PKDrawing beim Start da:   ${fmtCp(cp.loaded_ok)}`,
+            '',
+            '--- S3: Spiegelungs-Latenz (Ziel <= 1000 ms) ---',
+            `Empfangene Striche:         ${appState.strokes.length}`,
+            `Latenz Median:              ${med.toFixed(1)} ms`,
+            `Latenz p95:                 ${p95.toFixed(1)} ms`,
+            '',
+            '--- S3: Gemessene Rohwerte (Pencil 2 vs. Finger) ---',
+            ...rawLines,
+            '=== ENDE ERGEBNISBOGEN SPIKE S1 + S3 ===',
+          ].join('\n');
+        }
+
+        let ws = null;
+
+        async function loadInitialState() {
+          try {
+            const res = await fetch('/state', { cache: 'no-store' });
+            if (!res.ok) return;
+            const data = await res.json();
+            appState = { ...appState, ...data };
+            window.__s1MacState = appState;
+            hiCtx.clearRect(0, 0, highlightCanvas.width, highlightCanvas.height);
+            inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+            for (const entry of appState.strokes) {
+              drawStrokeOnCanvas(entry.stroke);
+            }
+            renderTablesAndReport();
+          } catch {
+            // ignore
+          }
+        }
+
+        function connectViewerWs() {
+          const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+          ws = new WebSocket(`${proto}//${window.location.host}/ws?role=viewer`);
+
+          ws.onopen = () => {
+            connStatusVal.innerHTML = `<span class="badge badge-ok">Bereit</span>`;
+          };
+
+          ws.onmessage = (ev) => {
+            let msg;
+            try {
+              msg = JSON.parse(ev.data);
+            } catch {
+              return;
+            }
+
+            if (msg.type === 'stroke.added' && msg.entry) {
+              const entry = msg.entry;
+              appState.strokes.push(entry);
+              if (msg.stats) {
+                appState.latency_median_ms = msg.stats.latency_median_ms;
+                appState.latency_p95_ms = msg.stats.latency_p95_ms;
+              }
+
+              requestAnimationFrame(() => {
+                drawStrokeOnCanvas(entry.stroke);
+                const tRendered = Date.now();
+                const displayLatency = Math.max(0, tRendered - entry.t_pen_up_ms);
+                entry.latency_ms = Math.round(displayLatency * 10) / 10;
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                  ws.send(
+                    JSON.stringify({
+                      type: 'viewer.rendered',
+                      seq: entry.seq,
+                      display_latency_ms: entry.latency_ms,
+                    }),
+                  );
+                }
+                renderTablesAndReport();
+              });
+            } else if (msg.type === 'stats.updated' && msg.stats) {
+              appState.latency_median_ms = msg.stats.latency_median_ms;
+              appState.latency_p95_ms = msg.stats.latency_p95_ms;
+              renderTablesAndReport();
+            } else if (msg.type === 'raw_stats.updated') {
+              appState.raw_summaries = msg.summaries || [];
+              renderTablesAndReport();
+            } else if (msg.type === 'checkpoints.updated') {
+              appState.checkpoints = msg.checkpoints || {};
+              renderTablesAndReport();
+            }
+          };
+
+          ws.onclose = () => {
+            connStatusVal.innerHTML = '<span class="badge badge-warn">Getrennt</span>';
+            setTimeout(connectViewerWs, 2000);
+          };
+        }
+
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(reportBox.value);
+            copyFeedback.textContent = 'Kopiert!';
+            setTimeout(() => {
+              copyFeedback.textContent = '';
+            }, 2000);
+          } catch {
+            reportBox.select();
+            document.execCommand('copy');
+            copyFeedback.textContent = 'Markiert & kopiert!';
+          }
+        });
+
+        loadInitialState().then(() => {
+          connectViewerWs();
+        });
+      })();
+    </script>
+  </body>
+</html>
