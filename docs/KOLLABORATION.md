@@ -1,11 +1,22 @@
-# Zusammenarbeit: Claude (Lead) × Argon (Gemini 4 Argon)
+# Zusammenarbeit: Claude (Lead) × Claude-Subagents × Argon (Gemini 4 Argon)
 
-Stand: 3. November 2026 · Betrieb **nur über Abos** (Claude-Abo und Google-AI-Abo), keine API-Keys.
+Stand: 4. November 2026 · Betrieb **nur über Abos** (Claude-Abo und Google-AI-Abo), keine API-Keys.
 
 ## 1. Grundidee
 
-Claude führt, Argon ist Spezialist, der Owner (Mensch) entscheidet und merged.
-Die beiden KIs laufen in getrennten Produkten und können sich nicht direkt aufrufen.
+Claude führt und merged, der Owner (Mensch) setzt Ziele und hat ein Veto (`status:halt`).
+
+**Gewichtung (Vorgabe des Owners):** Die Hauptarbeit machen **Claude und Claude-Subagents**.
+**Argon ist zusätzliche Unterstützung**: für Aufgaben, bei denen seine Stärken klar helfen (Abschnitt 3), und als Extra-Kapazität.
+Kein Arbeitspaket darf davon abhängen, dass Argon gerade läuft. Was eilig ist oder etwas blockiert, macht Claude.
+
+| Wer | Anteil (Richtwert) | Typische Arbeit |
+|---|---|---|
+| **Claude (Lead)** | Steuerung | Architektur, Schnittstellen, Aufgaben zerlegen, Reviews, Integration, Merges |
+| **Claude-Subagents** | Großteil der Umsetzung | Features parallel in eigenen Branches, Tests, Refactorings, unabhängige Reviews (Modell nach Abschnitt 4) |
+| **Argon** | Ergänzung | UI aus Mockups/Screenshots, Security-Audits, Analyse langer Dokumente, Gegen-Reviews, große Textmengen |
+
+Claude und Argon laufen in getrennten Produkten und können sich nicht direkt aufrufen.
 **GitHub ist die gemeinsame Schnittstelle:** Aufgaben sind Issues, Ergebnisse sind Pull Requests, Feedback sind Reviews und Kommentare.
 
 ```
@@ -19,7 +30,7 @@ Owner öffnet Antigravity + Start-Prompt ──▶ Argon arbeitet die Queue ab
                                                      │
                        PR "[Argon] …" (status:review) ◀┘
                  Claude reviewt ──▶ Feedback + Issue: agent:argon, status:nacharbeit ──▶ nächster Argon-Schub
-                 Claude gibt frei (status:freigegeben) ──▶ Owner merged
+                 Claude gibt frei (status:freigegeben) ──▶ Claude merged
 ```
 
 ## 2. Welche Kanäle es per Abo gibt (Recherche, Nov. 2026)
