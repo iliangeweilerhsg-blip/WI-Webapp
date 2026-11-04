@@ -5,7 +5,7 @@
 | **Geprüfte Dokumente** | `docs/spezifikation/00-UEBERSICHT.md` bis `10-UMSETZUNG.md`, `docs/FEATURE-KATALOG.md`, `docs/referenz-analysen/{README,goodnotes,quizlet,studysmarter}.md` |
 | **Datum** | 04.11.2026 |
 | **Prüfer** | Argon (`Gemini 4 Argon (Medium)`) |
-| **Status** | Blocker B-01 bis B-07 eingearbeitet (Issue #21); ursprünglich erstellt in Issue #8 |
+| **Status** | Blocker B-01 bis B-07 eingearbeitet (Issue #21); Kosmetische Befunde K-01 bis K-03 eingearbeitet (Issue #33); ursprünglich erstellt in Issue #8 |
 
 ---
 
@@ -246,6 +246,7 @@
 ## 3. Kosmetische Befunde & Kleinigkeiten
 
 ### K-01 · Modellnamen in `02-ARCHITEKTUR.md` §7
+- **Status:** **Eingearbeitet (#33)**
 - **Einstufung:** Kosmetisch
 - **Fundstellen:**
   - `docs/spezifikation/02-ARCHITEKTUR.md` §7 (Z. 144)
@@ -255,6 +256,7 @@
   In `T0-05` Modell-IDs über Konfigurationskonstanten kapseln.
 
 ### K-02 · `00-UEBERSICHT.md` Lesereihenfolge vs. Bereichskürzel
+- **Status:** **Eingearbeitet (#33)**
 - **Einstufung:** Kosmetisch
 - **Fundstellen:**
   - `docs/spezifikation/00-UEBERSICHT.md` (Z. 51–70)
@@ -265,6 +267,7 @@
   Reihenfolge in `00-UEBERSICHT.md` bei Gelegenheit an Kapitel 04 angleichen.
 
 ### K-03 · Tote Links auf `KONZEPT.md`, `STUDIENALLTAG.md` und `LERNMODELL.md`
+- **Status:** **Eingearbeitet (#33)**
 - **Einstufung:** Kosmetisch (mit Ausnahme von **W-01**)
 - **Fundstellen:**
   - `docs/FEATURE-KATALOG.md` (Z. 4, 48, 77, 88, 101)
