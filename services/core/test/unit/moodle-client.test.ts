@@ -421,6 +421,25 @@ describe('Nacharbeit Review: Weiterleitungen, read/write, Zeitlimits, Downloads'
     expect(errors).toHaveLength(1);
   });
 
+  it('Zeitlimit ohne Fehler-Listener lässt den Prozess nicht abstürzen', async () => {
+    const { client: c } = client(
+      () => new Response('%PDF', { status: 200, headers: { 'content-type': 'application/pdf' } }),
+      FAKE_TOKEN,
+      { maxConcurrent: 1, fileTimeoutMs: 20 },
+    );
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown) => uncaught.push(error);
+    process.on('uncaughtException', onUncaught);
+    try {
+      const abandoned = await c.downloadFile(ref);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(abandoned.stream.destroyed).toBe(true);
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off('uncaughtException', onUncaught);
+    }
+  });
+
   it('destroy() gibt den Platz sofort frei, auch wenn Moodle gerade nichts sendet', async () => {
     const { client: c, requests } = client(
       () =>

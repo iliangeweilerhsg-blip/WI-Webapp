@@ -512,6 +512,9 @@ export class MoodleClient {
           callback(error);
         },
       });
+      // Ein liegen gelassener Stream ohne eigenen Fehler-Listener darf den Core nicht abstürzen lassen
+      // (Zeitlimit oder Netzfehler). Aufrufer mit pipeline/for await bekommen den Fehler trotzdem.
+      stream.on('error', () => {});
       // finish() läuft frühestens im nächsten Tick, timer ist dann gesetzt
       const timer = setTimeout(
         () => stream.destroy(new Error('Zeitlimit beim Datei-Download überschritten')),
