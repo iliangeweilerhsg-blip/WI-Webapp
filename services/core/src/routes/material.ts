@@ -1,11 +1,11 @@
 // Material-Endpunkte (08 §1 „Material“): Foliensätze, Folien, Übungsblätter, Upload und Dateiauslieferung
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readdir, rm, stat } from 'node:fs/promises';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import multipart from '@fastify/multipart';
-import { inArray } from 'drizzle-orm';
+import { inArray, sql } from 'drizzle-orm';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -176,6 +176,18 @@ function createUploadParser(dataDir: string, maxBytes: number) {
       }
     } catch (error) {
       if (stored) await rm(stored.tmpPath, { force: true });
+      const code = (error as { code?: string }).code;
+      const message = error instanceof Error ? error.message : '';
+      if (
+        request.raw.aborted ||
+        code === 'FST_MP_PREMATURE_CLOSE' ||
+        code === 'ERR_STREAM_PREMATURE_CLOSE' ||
+        message.includes('terminated early')
+      ) {
+        // Client hat abgebrochen: kein Serverfehler
+        request.log.info('Upload vom Client abgebrochen');
+        throw new HttpError(400, 'upload_aborted', 'Der Upload wurde abgebrochen.');
+      }
       throw error;
     }
     if (problem) {
@@ -213,21 +225,43 @@ async function removeStaleTmp(dataDir: string): Promise<void> {
 
 const UUID_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+/** Höchstens so viele Waisen (und höchstens dieser Anteil) gelten als plausibel; mehr = DB passt nicht zum Datenordner */
+const ORPHAN_MAX_COUNT = 3;
+const ORPHAN_MAX_SHARE = 0.1;
+
+interface SweepLog {
+  warn: (obj: object, msg: string) => void;
+}
+
 /**
- * Entfernt `media/decks|sheets/<id>/`-Ordner ohne DB-Zeile (Absturz zwischen `rename` und Commit),
- * die älter als `STALE_MINUTES` sind. Zeilen mit `deleted_at` zählen als vorhanden.
+ * Verschiebt `media/decks|sheets/<id>/`-Ordner ohne DB-Zeile (Absturz zwischen `rename` und Commit),
+ * die älter als `STALE_MINUTES` sind, nach `media/.orphaned/<typ>/<id>`. Es wird NIE gelöscht:
+ * Endgültiges Löschen gibt es erst mit dem Papierkorb (F-DAT-04). Zeilen mit `deleted_at` zählen als vorhanden.
+ *
+ * Schutzschalter gegen eine DB, die nicht zum Datenordner passt (falsche DATABASE_URL, altes Backup):
+ * Hat die Tabelle 0 Zeilen, es gibt aber Ordner, oder gelten mehr als 3 Ordner bzw. mehr als 10 % als
+ * verwaist, wird übersprungen und gewarnt.
  */
-async function removeOrphanFolders(db: Db, dataDir: string): Promise<void> {
+export async function sweepOrphanFolders(db: Db, dataDir: string, log: SweepLog): Promise<number> {
   const limit = Date.now() - STALE_MINUTES * 60 * 1000;
+  let moved = 0;
   for (const [folder, table] of [
     ['decks', slideDeck],
     ['sheets', exerciseSheet],
   ] as const) {
     const root = join(dataDir, 'media', folder);
-    const names = await readdir(root).catch(() => [] as string[]);
+    const all = (await readdir(root).catch(() => [] as string[])).filter((name) => UUID_NAME.test(name));
+    if (all.length === 0) continue;
+    const [{ n = 0 } = {}] = await db.select({ n: sql<number>`count(*)::int` }).from(table);
+    if (n === 0) {
+      log.warn(
+        { folder, folders: all.length },
+        'Tabelle leer, aber Ordner vorhanden: Aufräumen übersprungen',
+      );
+      continue;
+    }
     const old: string[] = [];
-    for (const name of names) {
-      if (!UUID_NAME.test(name)) continue;
+    for (const name of all) {
       const info = await stat(join(root, name)).catch(() => null);
       if (info && info.mtimeMs < limit) old.push(name);
     }
@@ -235,10 +269,25 @@ async function removeOrphanFolders(db: Db, dataDir: string): Promise<void> {
     const known = new Set(
       (await db.select({ id: table.id }).from(table).where(inArray(table.id, old))).map((row) => row.id),
     );
-    for (const name of old) {
-      if (!known.has(name)) await rm(join(root, name), { recursive: true, force: true });
+    const orphans = old.filter((name) => !known.has(name));
+    if (orphans.length === 0) continue;
+    if (orphans.length > ORPHAN_MAX_COUNT || orphans.length / all.length > ORPHAN_MAX_SHARE) {
+      log.warn(
+        { folder, orphans: orphans.length, folders: all.length },
+        'Zu viele verwaiste Ordner, DB passt offenbar nicht zum Datenordner: Aufräumen übersprungen',
+      );
+      continue;
     }
+    const target = join(dataDir, 'media', '.orphaned', folder);
+    await mkdir(target, { recursive: true });
+    for (const name of orphans) {
+      const dest = existsSync(join(target, name)) ? `${name}.${Date.now()}` : name;
+      await rename(join(root, name), join(target, dest));
+      moved++;
+    }
+    log.warn({ folder, moved: orphans.length }, 'Verwaiste Ordner nach media/.orphaned verschoben');
   }
+  return moved;
 }
 
 // ---------- Felder prüfen ----------
@@ -380,7 +429,7 @@ export async function materialRoutes(app: FastifyInstance, deps: MaterialRouteDe
   await app.register(multipart, multipartOptions);
   const sweep = () => {
     removeStaleTmp(dataDir)
-      .then(() => removeOrphanFolders(db, dataDir))
+      .then(() => sweepOrphanFolders(db, dataDir, app.log))
       .catch((error: unknown) => app.log.warn({ err: error }, 'Aufräumen der Uploads fehlgeschlagen'));
   };
   sweep();
