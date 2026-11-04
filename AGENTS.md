@@ -37,7 +37,7 @@ nicht über GitHub-Approvals (eigene PRs kann man auf GitHub nicht approven).
 
 ## Grundregeln
 
-1. *gemergt wird nur von Claude (nach den Merge-Regeln in CLAUDE.md). Argon merged nie. Der Owner kann per Label status:halt ein Veto einlegen.
+1. **Kein Agent pusht direkt auf `main`.** Jede Änderung kommt per Pull Request; gemergt wird nur von Claude (nach den Merge-Regeln in CLAUDE.md). Argon merged nie. Der Owner kann per Label status:halt ein Veto einlegen.
 2. **Ein Task = ein Branch = ein PR.** Branch-Namen:
    - `claude/<kurzbeschreibung>` – Lead
    - `argon/issue-<nr>` – Argon
