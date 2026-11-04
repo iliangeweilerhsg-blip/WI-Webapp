@@ -1,0 +1,46 @@
+{
+  "datei": "07-utc-und-floating-time.ics",
+  "beschreibung": "Kombination aus einem Termin in expliziter UTC-Zeit (Suffix Z) und zwei Terminen in Floating Time ohne Zeitzonenangabe (Sommer- und Winterzeit in Europe/Zurich).",
+  "zeitraum": {
+    "von": "2026-09-15",
+    "bis": "2026-11-15"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-finanzrecht-vl-utc@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Finanzmarktrecht – Vorlesung",
+      "location": "Hörsaal C-03",
+      "starts_at": "2026-09-21T08:15:00Z",
+      "ends_at": "2026-09-21T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Finanzmarktrecht"
+    },
+    {
+      "external_uid": "hs26-finanzrecht-tut-floating@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Tutorium Finanzmarktrecht",
+      "location": "Seminarraum C-105",
+      "starts_at": "2026-09-22T12:15:00Z",
+      "ends_at": "2026-09-22T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "tutorium",
+      "modul_erwartet": "Finanzmarktrecht"
+    },
+    {
+      "external_uid": "hs26-lerngruppe-floating-winter@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Freie Lerngruppe im Café",
+      "location": "Mensa-Foyer",
+      "starts_at": "2026-11-10T15:00:00Z",
+      "ends_at": "2026-11-10T16:30:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": null,
+      "modul_erwartet": null
+    }
+  ]
+}

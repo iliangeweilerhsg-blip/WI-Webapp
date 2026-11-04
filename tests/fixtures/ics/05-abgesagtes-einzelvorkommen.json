@@ -1,0 +1,58 @@
+{
+  "datei": "05-abgesagtes-einzelvorkommen.ics",
+  "beschreibung": "Wöchentliche Übungsserie, bei der das dritte Vorkommen per RECURRENCE-ID und STATUS:CANCELLED als abgesagt markiert ist.",
+  "zeitraum": {
+    "von": "2026-09-14",
+    "bis": "2026-10-15"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-or-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-18T10:15:00+02:00",
+      "title": "Operations Research – Übung",
+      "location": "Seminarraum D-011",
+      "starts_at": "2026-09-18T08:15:00Z",
+      "ends_at": "2026-09-18T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Operations Research"
+    },
+    {
+      "external_uid": "hs26-or-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-25T10:15:00+02:00",
+      "title": "Operations Research – Übung",
+      "location": "Seminarraum D-011",
+      "starts_at": "2026-09-25T08:15:00Z",
+      "ends_at": "2026-09-25T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Operations Research"
+    },
+    {
+      "external_uid": "hs26-or-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-02T10:15:00+02:00",
+      "title": "Operations Research – Übung",
+      "location": "Seminarraum D-011",
+      "starts_at": "2026-10-02T08:15:00Z",
+      "ends_at": "2026-10-02T10:00:00Z",
+      "all_day": false,
+      "cancelled": true,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Operations Research"
+    },
+    {
+      "external_uid": "hs26-or-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-09T10:15:00+02:00",
+      "title": "Operations Research – Übung",
+      "location": "Seminarraum D-011",
+      "starts_at": "2026-10-09T08:15:00Z",
+      "ends_at": "2026-10-09T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Operations Research"
+    }
+  ]
+}

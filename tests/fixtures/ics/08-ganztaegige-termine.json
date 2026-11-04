@@ -1,0 +1,34 @@
+{
+  "datei": "08-ganztaegige-termine.ics",
+  "beschreibung": "Ganztägige Termine mit VALUE=DATE für einen gesetzlichen Feiertag (Allerheiligen) und eine ganztägig eingetragene Blockprüfung.",
+  "zeitraum": {
+    "von": "2026-10-25",
+    "bis": "2027-01-25"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-feiertag-allerheiligen@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Allerheiligen (Vorlesungsfrei)",
+      "location": null,
+      "starts_at": "2026-11-01T00:00:00Z",
+      "ends_at": "2026-11-02T00:00:00Z",
+      "all_day": true,
+      "cancelled": false,
+      "kind_erwartet": "fest",
+      "modul_erwartet": null
+    },
+    {
+      "external_uid": "hs26-mikro1-blockpruefung@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Prüfung Mikroökonomie I",
+      "location": "Sporthalle Nord",
+      "starts_at": "2027-01-18T00:00:00Z",
+      "ends_at": "2027-01-19T00:00:00Z",
+      "all_day": true,
+      "cancelled": false,
+      "kind_erwartet": "pruefung",
+      "modul_erwartet": "Mikroökonomie I"
+    }
+  ]
+}

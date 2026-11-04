@@ -1,0 +1,82 @@
+{
+  "datei": "06a-sommerzeit-mit-vtimezone.ics",
+  "beschreibung": "Zwei Serien über die Zeitumstellung Ende Oktober 2026 (CEST nach CET) und Ende März 2027 (CET nach CEST) mit eingebettetem VTIMEZONE-Block für Europe/Zurich.",
+  "zeitraum": {
+    "von": "2026-10-15",
+    "bis": "2027-04-10"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-statistik-vl-herbst@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-20T08:15:00+02:00",
+      "title": "Statistik – Vorlesung",
+      "location": "Hörsaal B-01",
+      "starts_at": "2026-10-20T06:15:00Z",
+      "ends_at": "2026-10-20T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Statistik"
+    },
+    {
+      "external_uid": "hs26-statistik-vl-herbst@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-27T08:15:00+01:00",
+      "title": "Statistik – Vorlesung",
+      "location": "Hörsaal B-01",
+      "starts_at": "2026-10-27T07:15:00Z",
+      "ends_at": "2026-10-27T09:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Statistik"
+    },
+    {
+      "external_uid": "hs26-statistik-vl-herbst@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-11-03T08:15:00+01:00",
+      "title": "Statistik – Vorlesung",
+      "location": "Hörsaal B-01",
+      "starts_at": "2026-11-03T07:15:00Z",
+      "ends_at": "2026-11-03T09:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Statistik"
+    },
+    {
+      "external_uid": "fs27-statistik2-vl-fruehjahr@campus-fiktiv.example.edu",
+      "recurrence_id": "2027-03-23T08:15:00+01:00",
+      "title": "Statistik II – Vorlesung",
+      "location": "Hörsaal B-01",
+      "starts_at": "2027-03-23T07:15:00Z",
+      "ends_at": "2027-03-23T09:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Statistik II"
+    },
+    {
+      "external_uid": "fs27-statistik2-vl-fruehjahr@campus-fiktiv.example.edu",
+      "recurrence_id": "2027-03-30T08:15:00+02:00",
+      "title": "Statistik II – Vorlesung",
+      "location": "Hörsaal B-01",
+      "starts_at": "2027-03-30T06:15:00Z",
+      "ends_at": "2027-03-30T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Statistik II"
+    },
+    {
+      "external_uid": "fs27-statistik2-vl-fruehjahr@campus-fiktiv.example.edu",
+      "recurrence_id": "2027-04-06T08:15:00+02:00",
+      "title": "Statistik II – Vorlesung",
+      "location": "Hörsaal B-01",
+      "starts_at": "2027-04-06T06:15:00Z",
+      "ends_at": "2027-04-06T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Statistik II"
+    }
+  ]
+}

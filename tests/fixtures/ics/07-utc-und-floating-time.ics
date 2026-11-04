@@ -1,0 +1,33 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Uni-Campus//Stundenplan-Export 2.4//DE
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:hs26-finanzrecht-vl-utc@campus-fiktiv.example.edu
+DTSTAMP:20260901T080000Z
+DTSTART:20260921T081500Z
+DTEND:20260921T100000Z
+SUMMARY:Finanzmarktrecht – Vorlesung
+LOCATION:Hörsaal C-03
+DESCRIPTION:Direkt in UTC (Suffix Z) exportierter Vorlesungstermin.
+END:VEVENT
+BEGIN:VEVENT
+UID:hs26-finanzrecht-tut-floating@campus-fiktiv.example.edu
+DTSTAMP:20260901T080000Z
+DTSTART:20260922T141500
+DTEND:20260922T160000
+SUMMARY:Tutorium Finanzmarktrecht
+LOCATION:Seminarraum C-105
+DESCRIPTION:Floating Time ohne TZID und ohne Z (wird in lokaler Zielzeitzone Europe/Zurich interpretiert).
+END:VEVENT
+BEGIN:VEVENT
+UID:hs26-lerngruppe-floating-winter@campus-fiktiv.example.edu
+DTSTAMP:20260901T080000Z
+DTSTART:20261110T160000
+DTEND:20261110T173000
+SUMMARY:Freie Lerngruppe im Café
+LOCATION:Mensa-Foyer
+DESCRIPTION:Floating Time nach Ende der Sommerzeit (Winterzeit CET, +01:00).
+END:VEVENT
+END:VCALENDAR

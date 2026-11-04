@@ -1,0 +1,82 @@
+{
+  "datei": "02-woechentlich-count.ics",
+  "beschreibung": "Wöchentliche Tutoriumsserie mit fester Anzahl an Wiederholungen (COUNT=6) statt Enddatum.",
+  "zeitraum": {
+    "von": "2026-09-14",
+    "bis": "2026-11-01"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-wiinf-tut@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-16T14:15:00+02:00",
+      "title": "Tutorium Wirtschaftsinformatik",
+      "location": "Seminarraum B-104",
+      "starts_at": "2026-09-16T12:15:00Z",
+      "ends_at": "2026-09-16T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "tutorium",
+      "modul_erwartet": "Wirtschaftsinformatik"
+    },
+    {
+      "external_uid": "hs26-wiinf-tut@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-23T14:15:00+02:00",
+      "title": "Tutorium Wirtschaftsinformatik",
+      "location": "Seminarraum B-104",
+      "starts_at": "2026-09-23T12:15:00Z",
+      "ends_at": "2026-09-23T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "tutorium",
+      "modul_erwartet": "Wirtschaftsinformatik"
+    },
+    {
+      "external_uid": "hs26-wiinf-tut@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-30T14:15:00+02:00",
+      "title": "Tutorium Wirtschaftsinformatik",
+      "location": "Seminarraum B-104",
+      "starts_at": "2026-09-30T12:15:00Z",
+      "ends_at": "2026-09-30T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "tutorium",
+      "modul_erwartet": "Wirtschaftsinformatik"
+    },
+    {
+      "external_uid": "hs26-wiinf-tut@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-07T14:15:00+02:00",
+      "title": "Tutorium Wirtschaftsinformatik",
+      "location": "Seminarraum B-104",
+      "starts_at": "2026-10-07T12:15:00Z",
+      "ends_at": "2026-10-07T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "tutorium",
+      "modul_erwartet": "Wirtschaftsinformatik"
+    },
+    {
+      "external_uid": "hs26-wiinf-tut@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-14T14:15:00+02:00",
+      "title": "Tutorium Wirtschaftsinformatik",
+      "location": "Seminarraum B-104",
+      "starts_at": "2026-10-14T12:15:00Z",
+      "ends_at": "2026-10-14T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "tutorium",
+      "modul_erwartet": "Wirtschaftsinformatik"
+    },
+    {
+      "external_uid": "hs26-wiinf-tut@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-21T14:15:00+02:00",
+      "title": "Tutorium Wirtschaftsinformatik",
+      "location": "Seminarraum B-104",
+      "starts_at": "2026-10-21T12:15:00Z",
+      "ends_at": "2026-10-21T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "tutorium",
+      "modul_erwartet": "Wirtschaftsinformatik"
+    }
+  ]
+}

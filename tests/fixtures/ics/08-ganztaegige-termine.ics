@@ -1,0 +1,23 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Uni-Campus//Stundenplan-Export 2.4//DE
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:hs26-feiertag-allerheiligen@campus-fiktiv.example.edu
+DTSTAMP:20260901T080000Z
+DTSTART;VALUE=DATE:20261101
+DTEND;VALUE=DATE:20261102
+SUMMARY:Allerheiligen (Vorlesungsfrei)
+DESCRIPTION:Gesetzlicher Feiertag im Kanton St. Gallen.
+END:VEVENT
+BEGIN:VEVENT
+UID:hs26-mikro1-blockpruefung@campus-fiktiv.example.edu
+DTSTAMP:20260901T080000Z
+DTSTART;VALUE=DATE:20270118
+DTEND;VALUE=DATE:20270119
+SUMMARY:Prüfung Mikroökonomie I
+LOCATION:Sporthalle Nord
+DESCRIPTION:Ganztägig eingetragener Klausurtermin im Prüfungsblock.
+END:VEVENT
+END:VCALENDAR

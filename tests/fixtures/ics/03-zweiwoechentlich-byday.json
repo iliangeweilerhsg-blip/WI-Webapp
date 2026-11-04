@@ -1,0 +1,82 @@
+{
+  "datei": "03-zweiwoechentlich-byday.ics",
+  "beschreibung": "Zweiwöchentliche Übung (INTERVAL=2) an zwei Wochentagen (BYDAY=TU,TH) mit insgesamt 6 Terminen.",
+  "zeitraum": {
+    "von": "2026-09-14",
+    "bis": "2026-11-01"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-dbs-ueb-biweekly@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-15T16:15:00+02:00",
+      "title": "Datenbanksysteme – Übung",
+      "location": "Rechnerpool C-202",
+      "starts_at": "2026-09-15T14:15:00Z",
+      "ends_at": "2026-09-15T16:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Datenbanksysteme"
+    },
+    {
+      "external_uid": "hs26-dbs-ueb-biweekly@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-17T16:15:00+02:00",
+      "title": "Datenbanksysteme – Übung",
+      "location": "Rechnerpool C-202",
+      "starts_at": "2026-09-17T14:15:00Z",
+      "ends_at": "2026-09-17T16:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Datenbanksysteme"
+    },
+    {
+      "external_uid": "hs26-dbs-ueb-biweekly@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-29T16:15:00+02:00",
+      "title": "Datenbanksysteme – Übung",
+      "location": "Rechnerpool C-202",
+      "starts_at": "2026-09-29T14:15:00Z",
+      "ends_at": "2026-09-29T16:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Datenbanksysteme"
+    },
+    {
+      "external_uid": "hs26-dbs-ueb-biweekly@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-01T16:15:00+02:00",
+      "title": "Datenbanksysteme – Übung",
+      "location": "Rechnerpool C-202",
+      "starts_at": "2026-10-01T14:15:00Z",
+      "ends_at": "2026-10-01T16:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Datenbanksysteme"
+    },
+    {
+      "external_uid": "hs26-dbs-ueb-biweekly@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-13T16:15:00+02:00",
+      "title": "Datenbanksysteme – Übung",
+      "location": "Rechnerpool C-202",
+      "starts_at": "2026-10-13T14:15:00Z",
+      "ends_at": "2026-10-13T16:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Datenbanksysteme"
+    },
+    {
+      "external_uid": "hs26-dbs-ueb-biweekly@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-15T16:15:00+02:00",
+      "title": "Datenbanksysteme – Übung",
+      "location": "Rechnerpool C-202",
+      "starts_at": "2026-10-15T14:15:00Z",
+      "ends_at": "2026-10-15T16:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Datenbanksysteme"
+    }
+  ]
+}

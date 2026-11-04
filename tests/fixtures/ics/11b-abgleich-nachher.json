@@ -1,0 +1,46 @@
+{
+  "datei": "11b-abgleich-nachher.ics",
+  "beschreibung": "Zweite Version derselben Kalenderquelle für den Abgleich: das zweite Vorkommen ist verschoben, das dritte entfallen (EXDATE) und ein Zusatztermin ist neu hinzugekommen.",
+  "zeitraum": {
+    "von": "2026-10-01",
+    "bis": "2026-11-05"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-abgleich-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-13T10:15:00+02:00",
+      "title": "Software Engineering – Vorlesung",
+      "location": "Hörsaal C-01",
+      "starts_at": "2026-10-13T08:15:00Z",
+      "ends_at": "2026-10-13T10:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Software Engineering"
+    },
+    {
+      "external_uid": "hs26-abgleich-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-20T10:15:00+02:00",
+      "title": "Software Engineering – Vorlesung (verschoben)",
+      "location": "Hörsaal C-02",
+      "starts_at": "2026-10-20T12:15:00Z",
+      "ends_at": "2026-10-20T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Software Engineering"
+    },
+    {
+      "external_uid": "hs26-abgleich-zusatz-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Software Engineering – Übung (Zusatztermin)",
+      "location": "Rechnerpool C-201",
+      "starts_at": "2026-10-29T15:15:00Z",
+      "ends_at": "2026-10-29T17:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "uebung",
+      "modul_erwartet": "Software Engineering"
+    }
+  ]
+}

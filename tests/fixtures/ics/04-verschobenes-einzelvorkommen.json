@@ -1,0 +1,58 @@
+{
+  "datei": "04-verschobenes-einzelvorkommen.ics",
+  "beschreibung": "Wöchentliche Vorlesungsserie, bei der das zweite Vorkommen über RECURRENCE-ID auf den Nachmittag und einen anderen Raum verschoben wird.",
+  "zeitraum": {
+    "von": "2026-09-14",
+    "bis": "2026-10-15"
+  },
+  "termine": [
+    {
+      "external_uid": "hs26-makro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-17T08:15:00+02:00",
+      "title": "Makroökonomie I – Vorlesung",
+      "location": "Hörsaal A-02",
+      "starts_at": "2026-09-17T06:15:00Z",
+      "ends_at": "2026-09-17T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Makroökonomie I"
+    },
+    {
+      "external_uid": "hs26-makro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-09-24T08:15:00+02:00",
+      "title": "Makroökonomie I – Vorlesung (Ausweichtermin)",
+      "location": "Audimax",
+      "starts_at": "2026-09-24T12:15:00Z",
+      "ends_at": "2026-09-24T14:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Makroökonomie I"
+    },
+    {
+      "external_uid": "hs26-makro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-01T08:15:00+02:00",
+      "title": "Makroökonomie I – Vorlesung",
+      "location": "Hörsaal A-02",
+      "starts_at": "2026-10-01T06:15:00Z",
+      "ends_at": "2026-10-01T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Makroökonomie I"
+    },
+    {
+      "external_uid": "hs26-makro1-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-08T08:15:00+02:00",
+      "title": "Makroökonomie I – Vorlesung",
+      "location": "Hörsaal A-02",
+      "starts_at": "2026-10-08T06:15:00Z",
+      "ends_at": "2026-10-08T08:00:00Z",
+      "all_day": false,
+      "cancelled": false,
+      "kind_erwartet": "vorlesung",
+      "modul_erwartet": "Makroökonomie I"
+    }
+  ]
+}
