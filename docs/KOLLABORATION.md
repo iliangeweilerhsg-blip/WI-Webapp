@@ -83,8 +83,8 @@ Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so gü
 
 | Modell | Wann |
 |---|---|
-| **Gemini 4 Argon** | Standard für alle `agent:argon`-Issues |
-| **Flash-Modell** | Nur wenn **alle** offenen Argon-Issues das Label `modell:flash` tragen (einfache Massenarbeit). Spart Abo-Kontingent |
+| **Gemini 4 Argon (Medium)** | Standard für alle `agent:argon`-Issues |
+| **Gemini 3.8 Flash (Medium)** | Nur wenn **alle** offenen Argon-Issues das Label `modell:flash` tragen (einfache Massenarbeit). Spart Abo-Kontingent |
 
 Claude markiert im Issue, welches Modell sinnvoll ist (Label `modell:flash` nur bei einfachen Tasks).
 
