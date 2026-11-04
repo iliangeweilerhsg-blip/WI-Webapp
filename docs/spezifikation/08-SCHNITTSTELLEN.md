@@ -9,7 +9,7 @@ Ein Formatwechsel ist erst fertig, wenn alle drei Generate-Schritte und Contract
 
 ## 1. REST-API
 
-- Basis: `http://<mac>:4710/api/v1`, JSON (UTF-8), Zeitangaben ISO 8601 UTC.
+- Basis: `http://<mac>:4710/api/v1`, JSON (UTF-8), Zeitangaben ISO 8601 UTC (Ausnahme: in WebSocket-Umschlägen (`at`) und im Strich-Format (§4.1, `created_at`) werden Epochen-Millisekunden als Integer verwendet).
 - **Authentifizierung:** Anfragen von `localhost` ohne Token. Aus dem Netz `Authorization: Bearer <device_token>`.
 - **Fehlerformat:** `{ "error": { "code": "slide_deck_not_found", "message": "…", "details": {} } }` mit passendem HTTP-Status.
 - **Listen:** Cursor-Paginierung `?cursor=…&limit=…`.
@@ -24,7 +24,7 @@ Ein Formatwechsel ist erst fertig, wenn alle drei Generate-Schritte und Contract
 | Sessions | `GET /sessions?module_id&state` · `POST /sessions` (spontan) · `POST /sessions/{id}/start` · `/pause` · `/resume` · `/stop` · `GET /sessions/{id}/timeline` (Segmente, Marker, Striche-Dichte) · `POST /sessions/{id}/import-media` |
 | Audio | `POST /sessions/{id}/recordings` · `PUT /recordings/{id}/chunks/{seq}` (Rohdaten, `X-Start-Ms`, `X-Duration-Ms`, `X-Sha256`) · `GET /recordings/{id}/audio?from_ms&to_ms` (Range-fähig) |
 | Transkript | `GET /sessions/{id}/transcript?slide_id` |
-| Notizen | `GET /notebooks?module_id` · `GET /pages/{id}` · `GET /pages/{id}/strokes` · `POST /photos` (multipart) |
+| Notizen | `GET/POST /notebooks` · `PATCH/DELETE /notebooks/{id}` · `GET /pages/{id}` · `GET /pages/{id}/strokes` · `PUT/GET /pages/{id}/pkdrawing` · `POST /photos` (multipart) · `GET /photos/{id}/file` |
 | Wissen | `GET/POST /concepts` · `GET/PATCH /concepts/{id}` · `POST /concepts/{id}/merge` · `POST /concepts/{id}/split` · `GET/POST/DELETE /concept-relations` · `GET /concepts/{id}/evidence` · `GET /graph?module_id&semester_id` |
 | Inbox | `GET /inbox?status=offen&session_id` · `POST /inbox/{id}/accept` (optional geänderte Nutzlast) · `POST /inbox/{id}/reject` · `POST /inbox/bulk` |
 | Lernen | `GET /review/queue?context=taeglich` · `POST /reviews` · `GET/POST/PATCH /cards` · `POST /cards/from-selection` · `POST /learn-sessions` · `PATCH /learn-sessions/{id}` · `POST /grade/open` · `GET /readiness?module_id` · `GET /mastery?concept_id` |
@@ -83,15 +83,17 @@ Danach sendet der Server fehlende Operationen ab `from_seq`. Anschließend: **Uh
 | `stroke.remove` | `{ page_id, client_ids: [ … ] }` |
 | `element.upsert` | `{ page_id, element: PageElement }` (§4.3) |
 | `element.remove` | `{ page_id, element_id }` |
-| `drawing.snapshot` | `{ page_id, pkdrawing_ref }` (Datei per HTTP hochgeladen, nur fürs iPad) |
-| `session.start` / `.pause` / `.resume` / `.stop` | `{ session_id, reason? }` |
-| `slide.change` | `{ session_id, slide_id?, slide_index }` |
-| `marker.add` | `{ marker_id, session_id, kind, page_id?, position? }` |
+| `drawing.snapshot` | `{ page_id, pkdrawing_ref }` (Datei per HTTP über `PUT /pages/{id}/pkdrawing` hochgeladen, nur fürs iPad) |
+| `session.start` | `{ session_id, module_id, calendar_event_id?, slide_deck_id?, started_from: "ipad"\|"mac", started_at }` |
+| `session.pause` / `.resume` / `.stop` | `{ session_id, reason? }` |
+| `slide.change` | `{ event_id, session_id, slide_id?, slide_index, t_ms, device: "ipad"\|"mac" }` |
+| `marker.add` | `{ marker_id, session_id, kind, t_ms, page_id?, position?, note?, source: "ipad"\|"mac" }` |
 | `marker.remove` | `{ marker_id }` |
-| `photo.add` | `{ photo_id, session_id, page_id?, file_ref }` |
+| `photo.add` | `{ photo_id, session_id, t_ms, page_id?, file_ref }` |
 | `review.add` (Phase 3) | `{ review_id, card_id, rating, answer?, duration_ms, reviewed_at }` |
 
 **Regeln**
+- `t_ms` ist die Sitzungszeit beim Ereignis auf dem Gerät, nicht beim Senden; verspätet gesendete Operationen behalten sie.
 - Der Server ordnet pro Strom fortlaufende `seq` zu. Bereits bekannte `op_id` werden mit dem vorhandenen `ack` beantwortet (idempotent).
 - Clients senden höchstens 200 offene (unbestätigte) Operationen gleichzeitig.
 - `stroke.add` für eine unbekannte Seite: Der Server legt die Seite nicht automatisch an, sondern hält die Operation zurück, bis `page.create` eintrifft. Das iPad sendet immer in der richtigen Reihenfolge, die Regel gilt als Schutz.
@@ -227,7 +229,7 @@ Texte in Markdown mit LaTeX (`$…$`, `$$…$$`).
 ├── media/
 │   ├── decks/<deck_id>/original.pdf, slides/<index>.png, thumbs/<index>.webp
 │   ├── sheets/<sheet_id>/original.pdf, solution.pdf
-│   ├── recordings/<recording_id>/chunks/<seq>.webm, full.m4a
+│   ├── recordings/<recording_id>/chunks/<seq>.webm|.mp4 (Endung aus recording.mime), full.m4a (AAC, 48 kHz, mono; Lücken als Stille)
 │   ├── photos/<photo_id>.heic|jpg
 │   ├── pages/<page_id>.pkdrawing (vom iPad hochgeladene Sicherung)
 │   ├── imports/<session_id>/…
