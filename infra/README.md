@@ -23,6 +23,8 @@ Grundlage: Spezifikation 02 §3, `docs/VERTRAEGE.md`.
 | `pnpm sg migrate` | `pnpm --filter @sg/core migrate` |
 | `pnpm sg backup` / `restore` | Platzhalter, kommen mit T1-18 (Exit-Code 2) |
 
+**Web-App neu bauen:** `sg start` baut den Static Export, wenn er fehlt oder wenn sich `apps/web`, `packages` oder `pnpm-lock.yaml` seit dem letzten Build durch `sg start` geändert haben (Vergleich der Git-Baum-Hashes des letzten Commits, gemerkt in `$SG_DATA_DIR/run/web-build.txt`). Nach `git pull` reicht also `pnpm sg start`. Nicht committete Änderungen lösen keinen Build aus, dafür gibt es `pnpm --filter @sg/web dev`. Ein per `SG_WEB_DIR` umgelenkter Export wird nur gebaut, wenn er fehlt.
+
 Existieren Core, Worker oder Web-App noch nicht, meldet `sg` das klar. Bei fehlendem Core bricht `start` nach dem Datenbank-Start ab, ein fehlender Worker wird nur gemeldet.
 
 ## Umgebungsvariablen
