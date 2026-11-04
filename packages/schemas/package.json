@@ -1,0 +1,28 @@
+{
+  "name": "@sg/schemas",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "JSON Schemas (Quelle der Wahrheit, 08) und Codegen nach TS/Zod, Python (Pydantic) und Swift",
+  "exports": {
+    "./bundle.schema.json": "./generated/bundle.schema.json"
+  },
+  "scripts": {
+    "gen": "node scripts/gen.mjs",
+    "check": "node scripts/gen.mjs && git diff --exit-code -- generated ../shared/src/generated python/sg_schemas",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p .",
+    "test:py": "uv run --project python pytest python/tests -q"
+  },
+  "devDependencies": {
+    "@apidevtools/json-schema-ref-parser": "16.0.5",
+    "@sg/shared": "workspace:*",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "json-schema-to-typescript": "16.0.0",
+    "json-schema-to-zod": "2.8.1",
+    "quicktype": "26.0.0",
+    "vitest": "5.1.0",
+    "zod": "4.6.7"
+  }
+}

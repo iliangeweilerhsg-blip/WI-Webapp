@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Gemeinsame Typen",
+  "$defs": {
+    "Uuid": { "type": "string", "format": "uuid", "description": "UUIDv7 (03 §1)" },
+    "Timestamp": { "type": "string", "format": "date-time", "description": "ISO 8601, UTC" },
+    "IsoDate": { "type": "string", "format": "date" },
+    "Lang": { "type": "string", "enum": ["de", "en", "mixed"] },
+    "ModuleColor": {
+      "type": "string",
+      "description": "Token aus der festen Palette mit 12 Tönen (07 §8), Werte in packages/ui-tokens",
+      "enum": [
+        "mod-01",
+        "mod-02",
+        "mod-03",
+        "mod-04",
+        "mod-05",
+        "mod-06",
+        "mod-07",
+        "mod-08",
+        "mod-09",
+        "mod-10",
+        "mod-11",
+        "mod-12"
+      ]
+    },
+    "EntityMeta": {
+      "type": "object",
+      "description": "Pflichtfelder jeder Tabelle (03 §1)",
+      "required": ["id", "user_id", "created_at", "updated_at", "deleted_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Uuid" },
+        "user_id": { "$ref": "#/$defs/Uuid" },
+        "created_at": { "$ref": "#/$defs/Timestamp" },
+        "updated_at": { "$ref": "#/$defs/Timestamp" },
+        "deleted_at": { "anyOf": [{ "$ref": "#/$defs/Timestamp" }, { "type": "null" }] }
+      }
+    },
+    "ApiError": {
+      "type": "object",
+      "description": "Fehlerformat der REST-API (08 §1)",
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "examples": ["slide_deck_not_found"]
+            },
+            "message": { "type": "string" },
+            "details": { "type": "object" }
+          }
+        }
+      }
+    },
+    "BBox": {
+      "type": "array",
+      "description": "[x, y, w, h] in pt",
+      "items": { "type": "number" },
+      "minItems": 4,
+      "maxItems": 4
+    }
+  }
+}

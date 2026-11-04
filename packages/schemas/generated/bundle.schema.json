@@ -1,0 +1,1371 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://studien-gehirn.local/schemas/bundle.schema.json",
+  "title": "SchemaBundle",
+  "description": "GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen",
+  "type": "object",
+  "properties": {
+    "ApiError": {
+      "$ref": "#/$defs/ApiError"
+    },
+    "BBox": {
+      "$ref": "#/$defs/BBox"
+    },
+    "EntityMeta": {
+      "$ref": "#/$defs/EntityMeta"
+    },
+    "ExerciseSheet": {
+      "$ref": "#/$defs/ExerciseSheet"
+    },
+    "ExerciseSheetList": {
+      "$ref": "#/$defs/ExerciseSheetList"
+    },
+    "ExerciseSheetUpdate": {
+      "$ref": "#/$defs/ExerciseSheetUpdate"
+    },
+    "IngestState": {
+      "$ref": "#/$defs/IngestState"
+    },
+    "IsoDate": {
+      "$ref": "#/$defs/IsoDate"
+    },
+    "Job": {
+      "$ref": "#/$defs/Job"
+    },
+    "JobList": {
+      "$ref": "#/$defs/JobList"
+    },
+    "JobState": {
+      "$ref": "#/$defs/JobState"
+    },
+    "JobType": {
+      "$ref": "#/$defs/JobType"
+    },
+    "Lang": {
+      "$ref": "#/$defs/Lang"
+    },
+    "Module": {
+      "$ref": "#/$defs/Module"
+    },
+    "ModuleColor": {
+      "$ref": "#/$defs/ModuleColor"
+    },
+    "ModuleCreate": {
+      "$ref": "#/$defs/ModuleCreate"
+    },
+    "ModuleList": {
+      "$ref": "#/$defs/ModuleList"
+    },
+    "ModuleUpdate": {
+      "$ref": "#/$defs/ModuleUpdate"
+    },
+    "PdfIngestPayload": {
+      "$ref": "#/$defs/PdfIngestPayload"
+    },
+    "PdfIngestResult": {
+      "$ref": "#/$defs/PdfIngestResult"
+    },
+    "Semester": {
+      "$ref": "#/$defs/Semester"
+    },
+    "SemesterCreate": {
+      "$ref": "#/$defs/SemesterCreate"
+    },
+    "SemesterList": {
+      "$ref": "#/$defs/SemesterList"
+    },
+    "SemesterUpdate": {
+      "$ref": "#/$defs/SemesterUpdate"
+    },
+    "Slide": {
+      "$ref": "#/$defs/Slide"
+    },
+    "SlideDeck": {
+      "$ref": "#/$defs/SlideDeck"
+    },
+    "SlideDeckDetail": {
+      "$ref": "#/$defs/SlideDeckDetail"
+    },
+    "SlideDeckList": {
+      "$ref": "#/$defs/SlideDeckList"
+    },
+    "Task": {
+      "$ref": "#/$defs/Task"
+    },
+    "TextBlock": {
+      "$ref": "#/$defs/TextBlock"
+    },
+    "Timestamp": {
+      "$ref": "#/$defs/Timestamp"
+    },
+    "UploadResult": {
+      "$ref": "#/$defs/UploadResult"
+    },
+    "Uuid": {
+      "$ref": "#/$defs/Uuid"
+    }
+  },
+  "$defs": {
+    "ApiError": {
+      "title": "ApiError",
+      "type": "object",
+      "description": "Fehlerformat der REST-API (08 §1)",
+      "required": [
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "examples": [
+                "slide_deck_not_found"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "details": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    },
+    "BBox": {
+      "title": "BBox",
+      "type": "array",
+      "description": "[x, y, w, h] in pt",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "EntityMeta": {
+      "title": "EntityMeta",
+      "type": "object",
+      "description": "Pflichtfelder jeder Tabelle (03 §1)",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ExerciseSheet": {
+      "title": "ExerciseSheet",
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "module_id",
+        "title",
+        "number",
+        "sha256",
+        "page_count",
+        "due_at",
+        "has_solution",
+        "ingest_state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "title": {
+          "type": "string"
+        },
+        "number": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "page_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Abgabe, geht in den Planer"
+        },
+        "has_solution": {
+          "type": "boolean",
+          "description": "Musterlösung hinterlegt (F-ORG-05, Phase 3)"
+        },
+        "ingest_state": {
+          "$ref": "#/$defs/IngestState"
+        }
+      },
+      "description": "Übungsblatt. Ergänzung zu 03 §4: ingest_state zeigt den Fortschritt von pdf.ingest für das Blatt."
+    },
+    "ExerciseSheetList": {
+      "title": "ExerciseSheetList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExerciseSheet"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ExerciseSheetUpdate": {
+      "title": "ExerciseSheetUpdate",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "number": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "IngestState": {
+      "title": "IngestState",
+      "type": "string",
+      "enum": [
+        "neu",
+        "verarbeitet",
+        "fehler"
+      ]
+    },
+    "IsoDate": {
+      "title": "IsoDate",
+      "type": "string",
+      "format": "date"
+    },
+    "Job": {
+      "title": "Job",
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "type",
+        "payload",
+        "state",
+        "priority",
+        "attempts",
+        "max_attempts",
+        "depends_on",
+        "session_id",
+        "locked_by",
+        "locked_at",
+        "error",
+        "result",
+        "run_after"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "type": {
+          "$ref": "#/$defs/JobType"
+        },
+        "payload": {
+          "type": "object",
+          "description": "Je nach type, z. B. PdfIngestPayload"
+        },
+        "state": {
+          "$ref": "#/$defs/JobState"
+        },
+        "priority": {
+          "type": "integer",
+          "description": "Höher = früher"
+        },
+        "attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "depends_on": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          }
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "locked_by": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locked_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "run_after": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "JobList": {
+      "title": "JobList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Job"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "JobState": {
+      "title": "JobState",
+      "type": "string",
+      "enum": [
+        "wartet",
+        "laeuft",
+        "fertig",
+        "fehler",
+        "abgebrochen"
+      ]
+    },
+    "JobType": {
+      "title": "JobType",
+      "type": "string",
+      "enum": [
+        "pdf.ingest",
+        "embed.slides",
+        "embed.tasks",
+        "sheet.split",
+        "match.tasks_slides",
+        "audio.finalize",
+        "transcribe",
+        "align.log",
+        "align.content",
+        "detect.exam_hints",
+        "ocr.photos",
+        "ocr.ink",
+        "concepts.extract",
+        "concepts.resolve",
+        "summary.write",
+        "cards.generate",
+        "cornell.questions",
+        "explain.questions",
+        "vault.write",
+        "prereq.check",
+        "past_exam.analyze",
+        "grade.open",
+        "grade.analyze_error",
+        "feynman.evaluate",
+        "solution.compare",
+        "search.index",
+        "rag.answer",
+        "video.v0",
+        "video.v1",
+        "video.v2",
+        "fsrs.optimize",
+        "maintenance.nightly"
+      ]
+    },
+    "Lang": {
+      "title": "Lang",
+      "type": "string",
+      "enum": [
+        "de",
+        "en",
+        "mixed"
+      ]
+    },
+    "Module": {
+      "title": "Module",
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "semester_id",
+        "name",
+        "short_name",
+        "color",
+        "ects",
+        "exam_type",
+        "lecturer",
+        "lang",
+        "description_md"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "semester_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "Datenbanksysteme"
+          ]
+        },
+        "short_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "DBS"
+          ]
+        },
+        "color": {
+          "$ref": "#/$defs/ModuleColor"
+        },
+        "ects": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "exam_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "schriftlich",
+            "mündlich",
+            "Projekt"
+          ]
+        },
+        "lecturer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lang": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Lang"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description_md": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ModuleColor": {
+      "title": "ModuleColor",
+      "type": "string",
+      "description": "Token aus der festen Palette mit 12 Tönen (07 §8), Werte in packages/ui-tokens",
+      "enum": [
+        "mod-01",
+        "mod-02",
+        "mod-03",
+        "mod-04",
+        "mod-05",
+        "mod-06",
+        "mod-07",
+        "mod-08",
+        "mod-09",
+        "mod-10",
+        "mod-11",
+        "mod-12"
+      ]
+    },
+    "ModuleCreate": {
+      "title": "ModuleCreate",
+      "type": "object",
+      "description": "Name genügt, alles andere optional (F-ORG-01). Ohne Farbe vergibt der Core die nächste freie Palettenfarbe. id ist optional und darf vom Client erzeugt werden (03 §1).",
+      "required": [
+        "semester_id",
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "semester_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "short_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color": {
+          "$ref": "#/$defs/ModuleColor"
+        },
+        "ects": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "exam_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lecturer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lang": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Lang"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description_md": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ModuleList": {
+      "title": "ModuleList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Module"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ModuleUpdate": {
+      "title": "ModuleUpdate",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "semester_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "short_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "color": {
+          "$ref": "#/$defs/ModuleColor"
+        },
+        "ects": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "exam_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lecturer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lang": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Lang"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description_md": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "PdfIngestPayload": {
+      "title": "PdfIngestPayload",
+      "type": "object",
+      "description": "pdf.ingest: genau eines von slide_deck_id oder exercise_sheet_id ist gesetzt (prüft der Core beim Anlegen). Ergänzung zu 08 §5: Übungsblätter laufen über denselben Job.",
+      "additionalProperties": false,
+      "properties": {
+        "slide_deck_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "exercise_sheet_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "PdfIngestResult": {
+      "title": "PdfIngestResult",
+      "type": "object",
+      "required": [
+        "page_count",
+        "pages_with_text",
+        "duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pages_with_text": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "Semester": {
+      "title": "Semester",
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "name",
+        "starts_on",
+        "ends_on",
+        "is_current",
+        "archived_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "HS 2026"
+          ]
+        },
+        "starts_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ends_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_current": {
+          "type": "boolean",
+          "description": "Höchstens ein Semester ist aktuell"
+        },
+        "archived_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Archiviert = nur in der Navigation ausgeblendet, bleibt durchsuchbar und lernbar (F-ORG-01). Ergänzung zu 03 §3."
+        }
+      }
+    },
+    "SemesterCreate": {
+      "title": "SemesterCreate",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "starts_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ends_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_current": {
+          "type": "boolean"
+        }
+      },
+      "description": "id ist optional und darf vom Client erzeugt werden (03 §1)."
+    },
+    "SemesterList": {
+      "title": "SemesterList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Semester"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SemesterUpdate": {
+      "title": "SemesterUpdate",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "starts_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ends_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_current": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "true = archivieren, false = wiederherstellen"
+        }
+      }
+    },
+    "Slide": {
+      "title": "Slide",
+      "type": "object",
+      "description": "Eine Seite eines Foliensatzes. Bilder über GET /slides/{id}/image bzw. /thumb.",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "deck_id",
+        "index",
+        "width_pt",
+        "height_pt",
+        "text",
+        "text_blocks",
+        "vision_summary",
+        "title",
+        "chapter"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deck_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-basiert"
+        },
+        "width_pt": {
+          "type": "number"
+        },
+        "height_pt": {
+          "type": "number"
+        },
+        "text": {
+          "type": "string",
+          "description": "Textlayer, leer wenn keiner vorhanden"
+        },
+        "text_blocks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TextBlock"
+          }
+        },
+        "vision_summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chapter": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SlideDeck": {
+      "title": "SlideDeck",
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "module_id",
+        "session_id",
+        "title",
+        "sha256",
+        "page_count",
+        "uploaded_at",
+        "ingest_state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "page_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "null bis pdf.ingest gelaufen ist"
+        },
+        "uploaded_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "ingest_state": {
+          "$ref": "#/$defs/IngestState"
+        }
+      }
+    },
+    "SlideDeckDetail": {
+      "title": "SlideDeckDetail",
+      "type": "object",
+      "required": [
+        "deck",
+        "slides"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "deck": {
+          "$ref": "#/$defs/SlideDeck"
+        },
+        "slides": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Slide"
+          }
+        }
+      }
+    },
+    "SlideDeckList": {
+      "title": "SlideDeckList",
+      "type": "object",
+      "required": [
+        "items",
+        "next_cursor"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SlideDeck"
+          }
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "Task": {
+      "title": "Task",
+      "type": "object",
+      "description": "Teilaufgabe eines Übungsblatts. Zerlegung erst ab Phase 2 (F-ORG-03).",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "sheet_id",
+        "label",
+        "page_index",
+        "bbox",
+        "text",
+        "solution_text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sheet_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "label": {
+          "type": "string",
+          "examples": [
+            "2b"
+          ]
+        },
+        "page_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bbox": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BBox"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "solution_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "TextBlock": {
+      "title": "TextBlock",
+      "type": "object",
+      "required": [
+        "text",
+        "bbox"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "bbox": {
+          "$ref": "#/$defs/BBox"
+        }
+      }
+    },
+    "Timestamp": {
+      "title": "Timestamp",
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601, UTC"
+    },
+    "UploadResult": {
+      "title": "UploadResult",
+      "type": "object",
+      "description": "Antwort auf POST /slide-decks und POST /exercise-sheets. duplicate=true: Datei mit gleichem sha256 existiert schon, es wurde nichts angelegt (F-ORG-02 Sonderfall). id ist die ID des neuen bzw. bereits vorhandenen Objekts.",
+      "required": [
+        "id",
+        "duplicate"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "duplicate": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Uuid": {
+      "title": "Uuid",
+      "type": "string",
+      "format": "uuid",
+      "description": "UUIDv7 (03 §1)"
+    }
+  }
+}
