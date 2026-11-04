@@ -15,6 +15,7 @@ import { registerWeb } from './plugins/web.ts';
 import { materialRoutes } from './routes/material.ts';
 import { organisationRoutes } from './routes/organisation.ts';
 import { systemRoutes } from './routes/system.ts';
+import { syncPlugin } from './sync/server.ts';
 
 export interface BuildAppOptions {
   config: Config;
@@ -74,6 +75,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerSecurity(app, guard);
   registerErrorHandler(app);
   registerIdempotency(app, db);
+  // WebSocket /sync (T1-08). Vor allen Routen, damit Upgrades auf andere Pfade geschlossen werden
+  await app.register(syncPlugin, { db, config, version });
 
   await app.register(cors, {
     // Nur die Entwicklungs-Web-App (SG_DEV_WEB_ORIGIN) bekommt CORS-Header
