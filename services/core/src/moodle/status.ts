@@ -8,7 +8,7 @@ import type { MoodleMeta } from './meta.ts';
 export const EXPIRY_WARNING_DAYS = 7;
 /** `core_webservice_get_site_info` höchstens so oft (08 §9.2) */
 export const STATUS_CACHE_MS = 5 * 60 * 1000;
-/** „Nicht erreichbar“ nur kurz merken, damit ein kurzer Ausfall nicht 5 min nachwirkt */
+/** „Nicht erreichbar“ und „ungültig“ nur kurz merken: Ausfall oder neuer Token wirken so schnell */
 export const UNREACHABLE_CACHE_MS = 60 * 1000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -74,6 +74,8 @@ export class MoodleStatusService {
     this.readMeta = options.readMeta;
     this.now = options.now ?? (() => new Date());
     this.cacheMs = options.cacheMs ?? STATUS_CACHE_MS;
+    // Lehnt Moodle den Token bei irgendeinem Aufruf ab, gilt der Status sofort als veraltet
+    this.client.onTokenRejected(() => this.invalidate());
   }
 
   /** Nächste Abfrage geht wieder an Moodle (z. B. nach neuem Token) */
@@ -114,8 +116,7 @@ export class MoodleStatusService {
   private async check(): Promise<CachedCheck> {
     const now = this.now();
     if (this.cached) {
-      const ttl =
-        this.cached.check === 'unreachable' ? Math.min(this.cacheMs, UNREACHABLE_CACHE_MS) : this.cacheMs;
+      const ttl = this.cached.check === 'ok' ? this.cacheMs : Math.min(this.cacheMs, UNREACHABLE_CACHE_MS);
       if (now.getTime() - this.cached.checkedAt.getTime() < ttl) return this.cached;
     }
     // Gleichzeitige Anfragen teilen sich einen Aufruf
@@ -134,7 +135,7 @@ export class MoodleStatusService {
     }
     let result: CachedCheck;
     try {
-      const info = await this.client.call<SiteInfo>('core_webservice_get_site_info');
+      const info = await this.client.read<SiteInfo>('core_webservice_get_site_info');
       const functions = Array.isArray(info.functions)
         ? new Set(
             info.functions

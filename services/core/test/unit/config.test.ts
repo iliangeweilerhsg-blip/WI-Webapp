@@ -26,6 +26,9 @@ describe('loadConfig', () => {
     );
     expect(() => loadConfig({ SG_MOODLE_URL: 'http://moodle.example.org' })).toThrow(/https/);
     expect(() => loadConfig({ SG_MOODLE_URL: 'https://u:p@moodle.example.org' })).toThrow(/https/);
+    expect(() => loadConfig({ SG_MOODLE_URL: 'https://nutzer:geheim@moodle.example.org' })).not.toThrow(
+      /geheim/,
+    );
     expect(() => loadConfig({ SG_MOODLE_URL: 'https://moodle.example.org/?x=1' })).toThrow(/https/);
     expect(() => loadConfig({ SG_MOODLE_URL: 'kein url' })).toThrow(/gültige/);
   });

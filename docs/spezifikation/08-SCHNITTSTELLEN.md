@@ -320,12 +320,13 @@ Funktionen: F-MDL-01 bis F-MDL-06 (Kap. 04). Datenformate: `packages/schemas/src
 
 | Thema | Festlegung |
 |---|---|
-| Instanz | `SG_MOODLE_URL`, z. B. `https://moodle2.uni-potsdam.de`. Leer = Moodle-Anbindung aus (`GET /moodle/status` → `nicht_eingerichtet`, alle anderen Moodle-Endpunkte → `503 moodle_not_configured`). |
+| Instanz | `SG_MOODLE_URL`, z. B. `https://moodle2.uni-potsdam.de`. Leer = Moodle-Anbindung aus (`GET /moodle/status` → `nicht_eingerichtet`, `GET /moodle/actions` → alle Aktionen `available: false`, alle anderen Moodle-Endpunkte → `503 moodle_not_configured`). |
 | Token | macOS-Schlüsselbund, Dienst `studiengehirn-moodle`. Der Core liest ihn mit `security find-generic-password -s studiengehirn-moodle -w` und hält ihn nur im Speicher. |
 | Metadaten | `config/moodle.json`: `{ "site_url", "user_id", "token_valid_until" (Datum), "created_at" }`. Enthält keinen Token. |
 | Moodle-API | `POST <SG_MOODLE_URL>/webservice/rest/server.php` mit `wstoken`, `wsfunction`, `moodlewsrestformat=json`, Parameter im Body (`application/x-www-form-urlencoded`, verschachtelt als `a[0][b]=…`). Der Token steht **nie** in einer URL. |
 | Dateien | Download über `webservice/pluginfile.php/…`. Der Token geht als Formularfeld `token` per `POST` mit, nicht in der URL. Upload über `webservice/upload.php` (Entwurfsbereich), danach Verwendung in der jeweiligen Aktion. |
-| Drosselung | Höchstens 4 Anfragen pro Sekunde, höchstens 2 gleichzeitig, Zeitlimit 30 s (Dateien 120 s). Lesende Aufrufe werden bei Netzwerkfehlern und `5xx` bis zu 2-mal wiederholt (1 s, 4 s). Schreibende Aufrufe werden **nie** automatisch wiederholt. |
+| Drosselung | Höchstens 4 Anfragen pro Sekunde, höchstens 2 gleichzeitig, Zeitlimit 30 s (Dateien 120 s). Lesende Aufrufe werden bei Netzwerkfehlern und `5xx` bis zu 2-mal wiederholt (1 s, 4 s). Schreibende Aufrufe werden **nie** automatisch wiederholt (der Client trennt `read()` und `write()`; `read()` verweigert bekannte schreibende Funktionen). Scheitert ein schreibender Aufruf an Netzwerk, Zeitlimit oder `5xx`, ist offen, ob Moodle ihn übernommen hat: `502 moodle_unreachable` mit `details.outcome_unknown = true`. Die Web-App wiederholt dann nicht selbst, sondern lässt den Stand neu laden. Ein Datei-Download belegt seinen Platz, bis die Übertragung endet. |
+| Weiterleitungen | Der Core folgt **keiner** HTTP-Weiterleitung von Moodle (`redirect: manual`), sonst ginge der Token im Body an das neue Ziel. Eine `3xx`-Antwort → `502 moodle_unreachable` mit `details.reason = "redirect"`. `SG_MOODLE_URL` muss daher die endgültige Adresse sein. |
 | Logs | Token, `wstoken` und `token` werden redigiert. Geloggt werden Funktionsname, Dauer und Moodle-Fehlercode. |
 
 **Fehler von Moodle** (geprüft am 04.11.2026 gegen Moodle 4.5): Die REST-Schnittstelle antwortet auch bei Fehlern mit HTTP 200 und `{ "exception", "errorcode", "message" }`. `webservice/pluginfile.php` antwortet bei Fehlern mit JSON `{ "error", "errorcode" }`, HTTP 200 (z. B. `invalidtoken`) bzw. 404 (`filenotfound`).
@@ -364,9 +365,11 @@ Alle unter `/api/v1/moodle`. Antworten in eigenen Formaten (Schema-Namen in Klam
 | `GET /moodle/grades?course_id` | `MoodleGradeList` | `gradereport_user_get_grade_items` |
 | `GET /moodle/quizzes?course_id` | `MoodleQuizList` | `mod_quiz_get_quizzes_by_courses` |
 | `GET /moodle/notifications?limit` | `MoodleNotificationList` | `message_popup_get_popup_notifications` |
-| `GET /moodle/file?ref` | Datei (Stream, `Content-Type` und `Content-Length` von Moodle) | `webservice/pluginfile.php` |
+| `GET /moodle/file?ref` | Datei (Stream, `Content-Length` von Moodle, Sicherheits-Header siehe unten) | `webservice/pluginfile.php` |
 
 `ref` ist der Pfad hinter `pluginfile.php`, wie er in `MoodleFile.ref` steht, z. B. `/123/mod_resource/content/4/01-Einfuehrung.pdf`. Ohne `course_id` gelten Listen für alle Kurse des Nutzers.
+
+**Sicherheits-Header für `GET /moodle/file`:** Dateien aus Moodle stammen auch von anderen Personen (z. B. Forenanhänge). Sie dürfen nie als aktive Inhalte im Origin des Core laufen, sonst könnte ein Skript Vorschau und Ausführen ohne Klick auslösen. Darum immer `X-Content-Type-Options: nosniff` und `Content-Security-Policy: sandbox`. `Content-Type` wird nur für eine Allowlist übernommen (`application/pdf`, `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `text/plain`). Alles andere, ausdrücklich auch HTML und SVG, geht als `application/octet-stream` mit `Content-Disposition: attachment`.
 
 ### 9.3 Aktionen
 
@@ -380,7 +383,8 @@ Alle unter `/api/v1/moodle`. Antworten in eigenen Formaten (Schema-Namen in Klam
 - **Uploads:** Dateien für Aktionen (z. B. die Lösung als PDF) werden zuerst zum Core hochgeladen und liegen unter `tmp/moodle-uploads/<upload_id>`. Aktionen verweisen über `upload_ids`. Uploads verfallen nach 24 h. Kein Pfad aus dem Dateisystem wird als Parameter angenommen.
 - **Vorschau** ist für jede Aktion erlaubt, auch ohne Bestätigungspflicht (z. B. um den Text vorher zu zeigen). Sie verändert nichts in Moodle.
 - **Bestätigungscode:** zufällig (128 bit, base64url), gebunden an `action_id` + SHA-256 der kanonischen Parameter (Schlüssel sortiert), gültig 5 min, einmal verwendbar, nur im Speicher des Core. Ein Neustart des Core macht alle Codes ungültig.
-- **Ausführen** mit Risiko `endgueltig`/`oeffentlich` ohne gültigen Code → `409`. Mit Risiko `harmlos`/`aenderbar` wird ein mitgeschickter Code ignoriert.
+- **Ausführen** mit Risiko `endgueltig`/`oeffentlich` ohne Code → `409 moodle_confirmation_required`, mit abgelaufenem, benutztem oder fremdem Code → `409 moodle_confirmation_invalid`. Mit Risiko `harmlos`/`aenderbar` wird ein mitgeschickter Code ignoriert.
+- **Verschärfung im Einzelfall:** Ein Handler darf für bestimmte Parameter zusätzlich eine Bestätigung verlangen (nie weniger). Pflichtfall: `assign.save_draft` bei Aufgaben ohne Einreichen-Schritt (`requires_submit = false`), denn dort gilt Speichern in Moodle sofort als Abgabe. Die Vorschau warnt dann und liefert einen Code.
 - **Idempotenz:** `execute` beachtet `Idempotency-Key` (08 §1). So schickt ein doppelter Klick nichts zweimal ab.
 
 **Parameter je Aktion** (Schema `MoodleActionParams<Name>`)

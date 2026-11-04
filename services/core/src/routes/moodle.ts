@@ -14,6 +14,7 @@ import {
 } from '@sg/shared';
 import { HttpError } from '../errors.ts';
 import { isMoodleActionId, needsConfirmation, type MoodleActionContext } from '../moodle/actions.ts';
+import { moodleNotConfigured } from '../moodle/client.ts';
 import type { MoodleServices } from '../moodle/index.ts';
 
 export interface MoodleRouteDeps {
@@ -47,9 +48,7 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
   async function prepare(id: MoodleActionId, rawParams: unknown) {
     const handler = actions.handler(id);
     const params = actions.parseParams(id, rawParams);
-    if (!(await client.isConfigured())) {
-      throw new HttpError(503, 'moodle_not_configured', 'Moodle ist nicht eingerichtet.');
-    }
+    if (!(await client.isConfigured())) throw moodleNotConfigured();
     const missing = actions.missingFunctions(id, await status.availableFunctions());
     if (missing.length > 0) {
       throw new HttpError(
@@ -59,7 +58,11 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
         { wsfunctions: missing },
       );
     }
-    return { handler, params };
+    // Risiko aus dem Katalog; ein Handler darf im Einzelfall verschärfen (nie lockern)
+    const confirm =
+      needsConfirmation(actions.spec(id).risk) ||
+      (await handler.requiresConfirmation?.(context, params)) === true;
+    return { handler, params, confirm };
   }
 
   typed.get(
@@ -99,10 +102,9 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     },
     async (request) => {
       const id = actionId(request.params.action_id);
-      const { handler, params } = await prepare(id, request.body.params);
+      const { handler, params, confirm } = await prepare(id, request.body.params);
       const preview = await handler.preview(context, params);
       const risk = actions.spec(id).risk;
-      const confirm = needsConfirmation(risk);
       const code = confirm ? confirmations.issue(id, params) : null;
       return {
         action_id: id,
@@ -130,8 +132,8 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     },
     async (request) => {
       const id = actionId(request.params.action_id);
-      const { handler, params } = await prepare(id, request.body.params);
-      if (needsConfirmation(actions.spec(id).risk)) {
+      const { handler, params, confirm } = await prepare(id, request.body.params);
+      if (confirm) {
         const token = request.body.confirmation_token;
         if (!token) {
           throw new HttpError(

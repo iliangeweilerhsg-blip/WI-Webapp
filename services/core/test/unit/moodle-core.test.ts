@@ -176,3 +176,49 @@ describe('KeychainTokenStore', () => {
     expect(await wrong.getToken()).toBeNull();
   });
 });
+
+describe('Nacharbeit Review: Token-Speicher und Status', () => {
+  it('„kein Token“ gilt nur 30 s, danach wird der Schlüsselbund neu gelesen', async () => {
+    let now = 0;
+    let stored = '';
+    const store = new KeychainTokenStore({
+      now: () => now,
+      exec: async () => {
+        if (!stored) throw new Error('could not be found');
+        return { stdout: stored };
+      },
+    });
+    expect(await store.getToken()).toBeNull();
+    stored = FAKE_TOKEN;
+    now += 29_000;
+    expect(await store.getToken()).toBeNull();
+    now += 2_000;
+    expect(await store.getToken()).toBe(FAKE_TOKEN);
+  });
+
+  it('abgelehnter Token in irgendeinem Aufruf verwirft den Status sofort', async () => {
+    let valid = true;
+    const fake = fakeFetch((req) =>
+      restHandler({ core_webservice_get_site_info: siteInfo([]), core_enrol_get_users_courses: [] })({
+        ...req,
+        body: valid
+          ? req.body
+          : new URLSearchParams(
+              [...req.body].map(([k, v]): [string, string] => [k, k === 'wstoken' ? 'x' : v]),
+            ),
+      }),
+    );
+    const client = new MoodleClient({
+      baseUrl: FAKE_BASE,
+      tokens: new StaticTokenStore(FAKE_TOKEN),
+      fetch: fake.fetch,
+      minIntervalMs: 0,
+      sleep: async () => {},
+    });
+    const service = new MoodleStatusService({ client, readMeta: async () => ({}) });
+    expect((await service.getStatus()).state).toBe('ok');
+    valid = false;
+    await client.read('core_enrol_get_users_courses').catch(() => {});
+    expect((await service.getStatus()).state).toBe('ungueltig');
+  });
+});

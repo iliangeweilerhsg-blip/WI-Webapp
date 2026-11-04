@@ -46,6 +46,12 @@ export interface MoodleActionOutcome {
 }
 
 export interface MoodleActionHandler<P> {
+  /**
+   * Optional: verlangt im Einzelfall eine Bestätigung, obwohl das Risiko der Aktion keine vorsieht
+   * (z. B. `assign.save_draft` bei Aufgaben ohne Einreichen-Schritt: Speichern ist dort die Abgabe).
+   * Darf nur verschärfen, nie lockern. Wird bei Vorschau und Ausführen gleich ausgewertet.
+   */
+  requiresConfirmation?(ctx: MoodleActionContext, params: P): Promise<boolean>;
   /** Darf Moodle lesen, aber nie schreiben */
   preview(ctx: MoodleActionContext, params: P): Promise<MoodleActionPreviewResult>;
   execute(ctx: MoodleActionContext, params: P): Promise<MoodleActionOutcome>;
@@ -226,10 +232,9 @@ const completionSet: MoodleActionHandler<MoodleActionParamsMap['completion.set']
     };
   },
   async execute(ctx, params) {
-    const response = await ctx.client.call<{ status?: unknown }>(
+    const response = await ctx.client.write<{ status?: unknown }>(
       'core_completion_update_activity_completion_status_manually',
       { cmid: params.cmid, completed: params.completed },
-      { write: true },
     );
     return {
       summary: params.completed ? 'Als erledigt markiert.' : 'Als nicht erledigt markiert.',
@@ -243,11 +248,9 @@ const notificationsMarkRead: MoodleActionHandler<MoodleActionParamsMap['notifica
     return { summary: 'Alle Moodle-Benachrichtigungen als gelesen markieren.' };
   },
   async execute(ctx) {
-    const response = await ctx.client.call<unknown>(
-      'core_message_mark_all_notifications_as_read',
-      { useridto: await ctx.userId() },
-      { write: true },
-    );
+    const response = await ctx.client.write<unknown>('core_message_mark_all_notifications_as_read', {
+      useridto: await ctx.userId(),
+    });
     return {
       summary: 'Alle Benachrichtigungen sind als gelesen markiert.',
       result: { done: response === true },

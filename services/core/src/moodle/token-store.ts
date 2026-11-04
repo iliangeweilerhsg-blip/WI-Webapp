@@ -6,6 +6,8 @@ export const KEYCHAIN_SERVICE = 'studiengehirn-moodle';
 
 /** Moodle-Tokens sind 32 Hex-Zeichen. Alles andere gilt als „kein Token“ */
 const TOKEN_RE = /^[a-f0-9]{32}$/;
+/** „Kein Token“ nur kurz merken: Ein neu eingetragener Token wirkt so ohne Neustart */
+export const MISSING_TOKEN_CACHE_MS = 30_000;
 
 export interface MoodleTokenStore {
   /** Token oder null, wenn keiner hinterlegt ist. Wirft nie mit dem Token in der Meldung */
@@ -30,16 +32,20 @@ const defaultExec: ExecFileFn = (file, args) =>
  */
 export class KeychainTokenStore implements MoodleTokenStore {
   private cached: string | null | undefined;
+  private missingSince = 0;
   private readonly exec: ExecFileFn;
   private readonly service: string;
+  private readonly now: () => number;
 
-  constructor(options: { exec?: ExecFileFn; service?: string } = {}) {
+  constructor(options: { exec?: ExecFileFn; service?: string; now?: () => number } = {}) {
     this.exec = options.exec ?? defaultExec;
     this.service = options.service ?? KEYCHAIN_SERVICE;
+    this.now = options.now ?? Date.now;
   }
 
   async getToken(): Promise<string | null> {
-    if (this.cached !== undefined) return this.cached;
+    if (typeof this.cached === 'string') return this.cached;
+    if (this.cached === null && this.now() - this.missingSince < MISSING_TOKEN_CACHE_MS) return null;
     let token: string | null;
     try {
       const { stdout } = await this.exec('security', ['find-generic-password', '-s', this.service, '-w']);
@@ -50,6 +56,7 @@ export class KeychainTokenStore implements MoodleTokenStore {
       token = null;
     }
     this.cached = token;
+    if (token === null) this.missingSince = this.now();
     return token;
   }
 

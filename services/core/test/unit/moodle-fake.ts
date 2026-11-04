@@ -7,6 +7,7 @@ export const FAKE_TOKEN = '0123456789abcdef0123456789abcdef';
 export interface RecordedRequest {
   url: string;
   body: URLSearchParams;
+  init: RequestInit;
 }
 
 export type FakeHandler = (request: RecordedRequest) => Response | Promise<Response>;
@@ -22,7 +23,7 @@ export function json(value: unknown, status = 200, headers: Record<string, strin
 export function fakeFetch(handler: FakeHandler): { fetch: FetchFn; requests: RecordedRequest[] } {
   const requests: RecordedRequest[] = [];
   const fetch: FetchFn = async (url, init) => {
-    const request = { url, body: new URLSearchParams(String(init.body ?? '')) };
+    const request = { url, body: new URLSearchParams(String(init.body ?? '')), init };
     requests.push(request);
     return handler(request);
   };

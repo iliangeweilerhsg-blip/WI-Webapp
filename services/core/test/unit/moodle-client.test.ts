@@ -54,7 +54,7 @@ describe('flattenParams', () => {
 describe('MoodleClient.call', () => {
   it('schickt Token und Funktion im Body, nie in der URL', async () => {
     const { client: c, requests } = client(restHandler({ core_webservice_get_site_info: { sitename: 'X' } }));
-    await expect(c.call('core_webservice_get_site_info')).resolves.toEqual({ sitename: 'X' });
+    await expect(c.read('core_webservice_get_site_info')).resolves.toEqual({ sitename: 'X' });
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe(`${FAKE_BASE}/webservice/rest/server.php`);
     expect(requests[0]?.url).not.toContain(FAKE_TOKEN);
@@ -64,7 +64,7 @@ describe('MoodleClient.call', () => {
 
   it('ohne URL oder Token → 503 moodle_not_configured, ohne Anfrage', async () => {
     const { client: c, requests } = client(restHandler({}), null);
-    const error = await httpError(c.call('core_webservice_get_site_info'));
+    const error = await httpError(c.read('core_webservice_get_site_info'));
     expect([error.statusCode, error.code]).toEqual([503, 'moodle_not_configured']);
     expect(requests).toHaveLength(0);
 
@@ -73,12 +73,12 @@ describe('MoodleClient.call', () => {
       tokens: new StaticTokenStore(FAKE_TOKEN),
       fetch: fakeFetch(restHandler({})).fetch,
     });
-    expect((await httpError(off.call('x'))).code).toBe('moodle_not_configured');
+    expect((await httpError(off.read('x'))).code).toBe('moodle_not_configured');
   });
 
   it('invalidtoken → 409 moodle_token_invalid und Token-Zwischenspeicher verworfen', async () => {
     const { client: c, tokens } = client(restHandler({}), 'ffffffffffffffffffffffffffffffff');
-    const error = await httpError(c.call('core_webservice_get_site_info'));
+    const error = await httpError(c.read('core_webservice_get_site_info'));
     expect([error.statusCode, error.code]).toEqual([409, 'moodle_token_invalid']);
     expect(error.message).not.toContain('ffff');
     expect(tokens.invalidations).toBe(1);
@@ -95,9 +95,9 @@ describe('MoodleClient.call', () => {
         : restHandler({})(req),
     );
     for (const fn of ['core_cohort_get_cohorts', 'core_gibt_es_nicht']) {
-      const error = await httpError(c.call(fn));
+      const error = await httpError(c.read(fn));
       expect([error.statusCode, error.code]).toEqual([501, 'moodle_function_unavailable']);
-      expect(error.details).toMatchObject({ wsfunction: fn });
+      expect(error.details).toMatchObject({ wsfunctions: [fn] });
     }
   });
 
@@ -109,7 +109,7 @@ describe('MoodleClient.call', () => {
         message: 'Ungültiger Parameterwert',
       }),
     );
-    const error = await httpError(c.call('core_course_get_contents', { courseid: 1 }));
+    const error = await httpError(c.read('core_course_get_contents', { courseid: 1 }));
     expect([error.statusCode, error.code]).toEqual([502, 'moodle_error']);
     expect(error.details).toEqual({
       wsfunction: 'core_course_get_contents',
@@ -125,7 +125,7 @@ describe('MoodleClient.call', () => {
         delays.push(ms);
       },
     });
-    const error = await httpError(c.call('core_webservice_get_site_info'));
+    const error = await httpError(c.read('core_webservice_get_site_info'));
     expect([error.statusCode, error.code]).toEqual([502, 'moodle_unreachable']);
     expect(requests).toHaveLength(3);
     expect(delays).toEqual([1000, 4000]);
@@ -138,50 +138,48 @@ describe('MoodleClient.call', () => {
       if (calls === 1) throw new TypeError('fetch failed');
       return json([]);
     });
-    await expect(c.call('core_enrol_get_users_courses')).resolves.toEqual([]);
+    await expect(c.read('core_enrol_get_users_courses')).resolves.toEqual([]);
     expect(calls).toBe(2);
   });
 
   it('schreibende Aufrufe werden nie wiederholt', async () => {
     const { client: c, requests } = client(() => new Response('kaputt', { status: 500 }));
-    const error = await httpError(c.call('mod_forum_add_discussion_post', {}, { write: true }));
+    const error = await httpError(c.write('mod_forum_add_discussion_post', {}));
     expect(error.code).toBe('moodle_unreachable');
     expect(requests).toHaveLength(1);
   });
 
   it('Antwort ohne JSON → 502 moodle_unreachable', async () => {
     const { client: c } = client(() => new Response('<html>Wartung</html>', { status: 200 }));
-    const error = await httpError(c.call('core_webservice_get_site_info'));
+    const error = await httpError(c.read('core_webservice_get_site_info'));
     expect(error.details).toEqual({ reason: 'no_json' });
   });
 
   it('höchstens 2 Anfragen gleichzeitig, Starts mit Mindestabstand', async () => {
+    // Echte Zeit: Starts im Abstand von mindestens minIntervalMs (kleine Toleranz für Timer)
     let active = 0;
     let maxActive = 0;
-    let clock = 0;
     const starts: number[] = [];
-    const { client: c } = client(
-      async () => {
-        active += 1;
-        maxActive = Math.max(maxActive, active);
-        starts.push(clock);
-        await new Promise((resolve) => setTimeout(resolve, 5));
-        active -= 1;
-        return json({});
-      },
-      FAKE_TOKEN,
-      {
-        minIntervalMs: 250,
-        now: () => clock,
-        sleep: async (ms: number) => {
-          clock += ms;
-        },
-      },
-    );
-    await Promise.all(Array.from({ length: 6 }, () => c.call('core_webservice_get_site_info')));
+    const fake = fakeFetch(async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      starts.push(performance.now());
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return json({});
+    });
+    const c = new MoodleClient({
+      baseUrl: FAKE_BASE,
+      tokens: new StaticTokenStore(FAKE_TOKEN),
+      fetch: fake.fetch,
+      minIntervalMs: 40,
+    });
+    await Promise.all(Array.from({ length: 6 }, () => c.read('core_webservice_get_site_info')));
+    expect(fake.requests).toHaveLength(6);
     expect(maxActive).toBeLessThanOrEqual(2);
+    // Der i-te Start liegt frühestens i × 40 ms nach dem ersten (Timer dürfen sich nur verspäten)
     for (let i = 1; i < starts.length; i += 1) {
-      expect((starts[i] ?? 0) - (starts[i - 1] ?? 0)).toBeGreaterThanOrEqual(250);
+      expect((starts[i] ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(i * 40 - 5);
     }
   });
 });
@@ -279,5 +277,154 @@ describe('MoodleClient.downloadFile', () => {
     const chunks: Buffer[] = [];
     for await (const chunk of file.stream) chunks.push(Buffer.from(chunk as Uint8Array));
     expect(JSON.parse(Buffer.concat(chunks).toString())).toEqual({ hallo: 'welt' });
+  });
+});
+
+describe('Nacharbeit Review: Weiterleitungen, read/write, Zeitlimits, Downloads', () => {
+  const ref = '/12/mod_resource/content/1/a.pdf';
+  const timeoutError = () =>
+    Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+
+  it('folgt keiner Weiterleitung (echter fetch, zwei lokale Server): Token erreicht das Ziel nie', async () => {
+    const { createServer } = await import('node:http');
+    let leaked = '';
+    const evil = createServer((req, res) => {
+      req.on('data', (chunk: Buffer) => (leaked += chunk.toString()));
+      req.on('end', () => res.end('{}'));
+    });
+    await new Promise<void>((resolve) => evil.listen(0, '127.0.0.1', resolve));
+    const evilPort = (evil.address() as { port: number }).port;
+    const moodle = createServer((req, res) => {
+      req.resume();
+      res.writeHead(307, { location: `http://127.0.0.1:${evilPort}${req.url}` });
+      res.end();
+    });
+    await new Promise<void>((resolve) => moodle.listen(0, '127.0.0.1', resolve));
+    const moodlePort = (moodle.address() as { port: number }).port;
+    try {
+      const real = new MoodleClient({
+        baseUrl: `http://127.0.0.1:${moodlePort}`,
+        tokens: new StaticTokenStore(FAKE_TOKEN),
+        minIntervalMs: 0,
+        sleep: noSleep,
+      });
+      const rest = await httpError(real.read('core_webservice_get_site_info'));
+      expect([rest.statusCode, rest.code, rest.details]).toEqual([
+        502,
+        'moodle_unreachable',
+        { reason: 'redirect' },
+      ]);
+      const file = await httpError(real.downloadFile(ref));
+      expect(file.details).toEqual({ reason: 'redirect' });
+      expect(leaked).toBe('');
+    } finally {
+      moodle.close();
+      evil.close();
+    }
+  });
+
+  it('setzt redirect: manual bei REST und Datei', async () => {
+    const { client: c, requests } = client(
+      () => new Response('%PDF', { status: 200, headers: { 'content-type': 'application/pdf' } }),
+    );
+    await c.read('core_webservice_get_site_info').catch(() => {});
+    await c.downloadFile(ref);
+    expect(requests.map((r) => r.init.redirect)).toEqual(['manual', 'manual']);
+  });
+
+  it('read() verweigert schreibende Funktionen', async () => {
+    const { client: c, requests } = client(() => json({}));
+    await expect(c.read('mod_assign_submit_for_grading')).rejects.toThrow(/write\(\)/);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('write() mit Zeitlimit: kein zweiter Versuch, Ausgang unbekannt', async () => {
+    const { client: c, requests } = client(() => {
+      throw timeoutError();
+    });
+    const error = await httpError(c.write('mod_forum_add_discussion_post', { postid: 1 }));
+    expect(error.details).toEqual({ reason: 'timeout', outcome_unknown: true });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('Zeitlimit beim Lesen der Antwort heißt timeout, nicht network', async () => {
+    const { client: c } = client(
+      () =>
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.error(timeoutError());
+            },
+          }),
+          { status: 200 },
+        ),
+      FAKE_TOKEN,
+      { retryDelaysMs: [] },
+    );
+    expect((await httpError(c.read('core_webservice_get_site_info'))).details).toEqual({ reason: 'timeout' });
+  });
+
+  it('abgelehnter Token benachrichtigt Zuhörer', async () => {
+    const { client: c } = client(restHandler({}), 'ffffffffffffffffffffffffffffffff');
+    let called = 0;
+    c.onTokenRejected(() => (called += 1));
+    await c.read('core_webservice_get_site_info').catch(() => {});
+    expect(called).toBe(1);
+  });
+
+  it('Download wird bei 5xx wiederholt', async () => {
+    let calls = 0;
+    const { client: c } = client(() => {
+      calls += 1;
+      return calls < 3
+        ? new Response('kaputt', { status: 502 })
+        : new Response('%PDF', { status: 200, headers: { 'content-type': 'application/pdf' } });
+    });
+    const file = await c.downloadFile(ref);
+    file.stream.resume();
+    expect(calls).toBe(3);
+  });
+
+  it('Download belegt seinen Platz, bis der Stream endet', async () => {
+    const { client: c, requests } = client(
+      () => new Response('%PDF-Inhalt', { status: 200, headers: { 'content-type': 'application/pdf' } }),
+      FAKE_TOKEN,
+      { maxConcurrent: 1 },
+    );
+    const first = await c.downloadFile(ref);
+    const second = c.downloadFile(ref);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(requests).toHaveLength(1);
+    for await (const chunk of first.stream) void chunk;
+    const file = await second;
+    expect(requests).toHaveLength(2);
+    file.stream.destroy();
+    // Ein zerstörter Stream gibt den Platz ebenfalls frei
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    (await c.downloadFile(ref)).stream.resume();
+    expect(requests).toHaveLength(3);
+  });
+
+  it('große JSON-Datei ohne Content-Length wird gestreamt, nicht als Fehler gelesen', async () => {
+    const big = JSON.stringify({ daten: 'x'.repeat(200 * 1024) });
+    const { client: c } = client(
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const bytes = new TextEncoder().encode(big);
+              for (let i = 0; i < bytes.length; i += 16 * 1024)
+                controller.enqueue(bytes.slice(i, i + 16 * 1024));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const file = await c.downloadFile('/12/mod_resource/content/1/gross.json');
+    expect(file.contentLength).toBeNull();
+    const chunks: Buffer[] = [];
+    for await (const chunk of file.stream) chunks.push(Buffer.from(chunk as Uint8Array));
+    expect(Buffer.concat(chunks).toString()).toBe(big);
   });
 });

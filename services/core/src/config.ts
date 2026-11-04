@@ -68,11 +68,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     try {
       parsed = new URL(moodleUrl);
     } catch {
-      throw new Error(`SG_MOODLE_URL ist keine gültige Adresse: ${moodleUrl}`);
+      throw new Error('SG_MOODLE_URL ist keine gültige Adresse.');
     }
     // Der Token geht an diese Adresse: nur HTTPS, ohne Zugangsdaten, Query oder Fragment
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) {
-      throw new Error(`SG_MOODLE_URL muss eine reine https-Adresse sein: ${moodleUrl}`);
+      // Nur Host und Pfad nennen: Die Adresse könnte Zugangsdaten enthalten
+      throw new Error(
+        `SG_MOODLE_URL muss eine reine https-Adresse sein (ohne Zugangsdaten, Query und Fragment): ${parsed.host}${parsed.pathname}`,
+      );
     }
   }
   return {

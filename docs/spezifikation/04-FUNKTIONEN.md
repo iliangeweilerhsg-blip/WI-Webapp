@@ -176,7 +176,7 @@ Der Core führt einen festen **Aktionskatalog** (08 §9.3). Jede Aktion hat eine
 
 | Aktion | Was passiert | Risiko |
 |---|---|---|
-| `assign.save_draft` | Dateien oder Text als Entwurf in einer Aufgabe speichern | `aenderbar` |
+| `assign.save_draft` | Dateien oder Text als Entwurf in einer Aufgabe speichern (bei Aufgaben ohne Einreichen-Schritt ist das schon die Abgabe: dann mit Bestätigung) | `aenderbar` |
 | `assign.submit` | Entwurf endgültig zur Bewertung einreichen | `endgueltig` |
 | `forum.create_discussion` | Neue Diskussion in einem Forum | `oeffentlich` |
 | `forum.reply` | Antwort auf einen Beitrag | `oeffentlich` |
@@ -199,7 +199,7 @@ Aktionen mit Risiko `endgueltig` oder `oeffentlich` laufen in zwei Schritten:
 1. **Vorschau** (`POST /moodle/actions/{id}/preview`): Der Core prüft die Parameter, liest bei Bedarf den aktuellen Stand aus Moodle und beschreibt in Klartext, was passieren wird, z. B. „Abgabe ‚Blatt 3‘ in ‚Mathematik für Wirtschaftsinformatik‘ endgültig einreichen. Danach sind keine Änderungen mehr möglich.“ Dazu gibt er einen **Bestätigungscode** aus.
 2. **Ausführen** (`POST /moodle/actions/{id}/execute`) nur mit diesem Code.
 
-Der Code gilt **5 Minuten**, **einmal** und nur für **genau diese Aktion mit genau diesen Parametern** (Hash). Ohne gültigen Code antwortet der Core mit `409 moodle_confirmation_required`. Die Web-App zeigt die Vorschau als Dialog mit „Abbrechen“ als Standard. Aktionen mit Risiko `harmlos` oder `aenderbar` laufen ohne Dialog, zeigen aber eine Erfolgsmeldung.
+Der Code gilt **5 Minuten**, **einmal** und nur für **genau diese Aktion mit genau diesen Parametern** (Hash). Fehlt der Code, antwortet der Core mit `409 moodle_confirmation_required`, ist er abgelaufen, schon benutzt oder für andere Angaben ausgestellt, mit `409 moodle_confirmation_invalid`. Die Web-App zeigt die Vorschau als Dialog mit „Abbrechen“ als Standard. Aktionen mit Risiko `harmlos` oder `aenderbar` laufen ohne Dialog, zeigen aber eine Erfolgsmeldung.
 
 **Akzeptanzkriterien**
 - [ ] Ohne vorherige Vorschau lässt sich keine `endgueltig`- oder `oeffentlich`-Aktion ausführen, auch nicht per `curl`.

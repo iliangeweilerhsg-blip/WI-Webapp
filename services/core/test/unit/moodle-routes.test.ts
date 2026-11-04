@@ -36,6 +36,7 @@ async function setup(
     functions?: string[];
     handlers?: MoodleActionHandlers;
     responses?: Record<string, unknown>;
+    now?: () => Date;
   } = {},
 ) {
   const fake = fakeFetch(
@@ -63,6 +64,7 @@ async function setup(
     fetch: fake.fetch,
     handlers: options.handlers ?? { ...DEFAULT_ACTION_HANDLERS, 'assign.submit': submitHandler },
     readMeta: async () => ({ token_valid_until: '2027-01-27' }),
+    ...(options.now ? { now: options.now } : {}),
   });
   app = Fastify({ logger: false });
   app.setValidatorCompiler(validatorCompiler);
@@ -294,5 +296,151 @@ describe('Vorschau und Ausführen (F-MDL-05, F-MDL-06)', () => {
       payload: { params: { cmid: 5, completed: true }, extra: 1 },
     });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('Nacharbeit Review: Bestätigung über die Route', () => {
+  const replyParams = { post_id: 7, message_html: '<p>Danke!</p>' };
+  function extraHandlers(executed: string[]): MoodleActionHandlers {
+    return {
+      ...DEFAULT_ACTION_HANDLERS,
+      'forum.reply': {
+        async preview() {
+          return { summary: 'Antwort im Forum veröffentlichen.' };
+        },
+        async execute() {
+          executed.push('forum.reply');
+          return { summary: 'Veröffentlicht.', result: {} };
+        },
+      },
+      'assign.save_draft': {
+        // Aufgabe ohne Einreichen-Schritt: Speichern ist die Abgabe
+        async requiresConfirmation(_ctx, params) {
+          return params.assignment_id === 99;
+        },
+        async preview() {
+          return { summary: 'Entwurf speichern.' };
+        },
+        async execute() {
+          executed.push('assign.save_draft');
+          return { summary: 'Gespeichert.', result: {} };
+        },
+      },
+    };
+  }
+  const functions = [...ALL_FUNCTIONS, 'mod_forum_add_discussion_post', 'mod_assign_save_submission'];
+
+  it('öffentliche Aktion braucht den Code genauso', async () => {
+    const executed: string[] = [];
+    const { app: a } = await setup({ handlers: extraHandlers(executed), functions });
+    const res = await a.inject({
+      method: 'POST',
+      url: '/moodle/actions/forum.reply/execute',
+      payload: { params: replyParams },
+    });
+    expect(res.json().error.code).toBe('moodle_confirmation_required');
+    const preview = MoodleActionPreviewSchema.parse(
+      (
+        await a.inject({
+          method: 'POST',
+          url: '/moodle/actions/forum.reply/preview',
+          payload: { params: replyParams },
+        })
+      ).json(),
+    );
+    expect(preview.risk).toBe('oeffentlich');
+    const ok = await a.inject({
+      method: 'POST',
+      url: '/moodle/actions/forum.reply/execute',
+      payload: { params: replyParams, confirmation_token: preview.confirmation_token },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(executed).toEqual(['forum.reply']);
+  });
+
+  it('abgelaufener Code wird abgelehnt', async () => {
+    let now = new Date('2026-11-04T10:00:00Z');
+    const executed: string[] = [];
+    const { app: a } = await setup({ handlers: extraHandlers(executed), functions, now: () => now });
+    const preview = MoodleActionPreviewSchema.parse(
+      (
+        await a.inject({
+          method: 'POST',
+          url: '/moodle/actions/forum.reply/preview',
+          payload: { params: replyParams },
+        })
+      ).json(),
+    );
+    expect(preview.expires_at).toBe('2026-11-04T10:05:00.000Z');
+    now = new Date('2026-11-04T10:05:01Z');
+    const res = await a.inject({
+      method: 'POST',
+      url: '/moodle/actions/forum.reply/execute',
+      payload: { params: replyParams, confirmation_token: preview.confirmation_token },
+    });
+    expect(res.json().error.code).toBe('moodle_confirmation_invalid');
+    expect(executed).toHaveLength(0);
+  });
+
+  it('zwei gleichzeitige Ausführungen mit demselben Code: genau eine läuft', async () => {
+    const executed: string[] = [];
+    const { app: a } = await setup({ handlers: extraHandlers(executed), functions });
+    const preview = MoodleActionPreviewSchema.parse(
+      (
+        await a.inject({
+          method: 'POST',
+          url: '/moodle/actions/forum.reply/preview',
+          payload: { params: replyParams },
+        })
+      ).json(),
+    );
+    const run = () =>
+      a.inject({
+        method: 'POST',
+        url: '/moodle/actions/forum.reply/execute',
+        payload: { params: replyParams, confirmation_token: preview.confirmation_token },
+      });
+    const results = await Promise.all([run(), run()]);
+    expect(results.map((r) => r.statusCode).sort()).toEqual([200, 409]);
+    expect(executed).toEqual(['forum.reply']);
+  });
+
+  it('Handler kann Bestätigung im Einzelfall verlangen (assign.save_draft ohne Einreichen-Schritt)', async () => {
+    const executed: string[] = [];
+    const { app: a } = await setup({ handlers: extraHandlers(executed), functions });
+    const normal = { assignment_id: 1, online_text_html: '<p>x</p>' };
+    const direct = { assignment_id: 99, online_text_html: '<p>x</p>' };
+
+    const plain = await a.inject({
+      method: 'POST',
+      url: '/moodle/actions/assign.save_draft/execute',
+      payload: { params: normal },
+    });
+    expect(plain.statusCode).toBe(200);
+
+    const blocked = await a.inject({
+      method: 'POST',
+      url: '/moodle/actions/assign.save_draft/execute',
+      payload: { params: direct },
+    });
+    expect(blocked.json().error.code).toBe('moodle_confirmation_required');
+
+    const preview = MoodleActionPreviewSchema.parse(
+      (
+        await a.inject({
+          method: 'POST',
+          url: '/moodle/actions/assign.save_draft/preview',
+          payload: { params: direct },
+        })
+      ).json(),
+    );
+    expect(preview).toMatchObject({ risk: 'aenderbar', needs_confirmation: true });
+    const ok = await a.inject({
+      method: 'POST',
+      url: '/moodle/actions/assign.save_draft/execute',
+      payload: { params: direct, confirmation_token: preview.confirmation_token },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(executed).toEqual(['assign.save_draft', 'assign.save_draft']);
   });
 });
