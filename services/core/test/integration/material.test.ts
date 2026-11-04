@@ -23,7 +23,7 @@ import {
 import { createDb } from '../../src/db/client.ts';
 import { registerErrorHandler } from '../../src/plugins/errors.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
-import { materialRoutes, parseRange } from '../../src/routes/material.ts';
+import { materialRoutes, parseRange, sweepOrphanFolders } from '../../src/routes/material.ts';
 import { startTestApp, testDatabaseUrl, type TestApp } from './helpers.ts';
 
 let t: TestApp;
@@ -441,7 +441,7 @@ describe('Magic-Bytes, Wiederholung nach Fehler, Aufräumen', () => {
     expect(await counts()).toEqual({ decks: 0, sheets: 0, jobs: 0 });
   });
 
-  it('räumt beim Start alte temporäre Uploads und Ordner ohne DB-Zeile auf', async () => {
+  it('räumt beim Start alte temporäre Uploads auf, frische bleiben', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'sg-core-sweep-'));
     const old = new Date(Date.now() - 3 * 3600 * 1000);
     mkdirSync(join(dataDir, 'media', '.tmp'), { recursive: true });
@@ -450,29 +450,89 @@ describe('Magic-Bytes, Wiederholung nach Fehler, Aufräumen', () => {
     writeFileSync(staleTmp, 'x');
     writeFileSync(freshTmp, 'x');
     utimesSync(staleTmp, old, old);
-
-    const orphan = uuidv7();
-    const young = uuidv7();
-    const known = uuidv7();
-    for (const id of [orphan, young, known]) {
-      mkdirSync(join(dataDir, 'media', 'decks', id), { recursive: true });
-      writeFileSync(join(dataDir, 'media', 'decks', id, 'original.pdf'), 'x');
-    }
-    for (const id of [orphan, known]) utimesSync(join(dataDir, 'media', 'decks', id), old, old);
-    await t.handle.sql`INSERT INTO slide_deck (id, user_id, module_id, title, file_path, sha256, deleted_at)
-      VALUES (${known}, ${SINGLE_USER_ID}, ${moduleId}, 'x', 'p', ${'a'.repeat(64)}, now())`;
-
     const second = await startTestApp({ dataDir });
     try {
-      const gone = await eventually(
-        () => readdir(join(dataDir, 'media', 'decks')),
-        (names) => !names.includes(orphan),
+      const left = await eventually(
+        () => readdir(join(dataDir, 'media', '.tmp')),
+        (names) => !names.includes('alt.upload'),
       );
-      expect(gone.sort()).toEqual([young, known].sort());
-      expect(await readdir(join(dataDir, 'media', '.tmp'))).toEqual(['neu.upload']);
+      expect(left).toEqual(['neu.upload']);
     } finally {
       await second.close();
     }
+  });
+});
+
+describe('Verwaiste Ordner (nie löschen, nur verschieben)', () => {
+  const old = new Date(Date.now() - 3 * 3600 * 1000);
+  const warnings: { obj: object; msg: string }[] = [];
+  const log = { warn: (obj: object, msg: string) => warnings.push({ obj, msg }) };
+
+  async function makeFolders(dataDir: string, count: number, opts: { rows: boolean; old?: boolean }) {
+    const ids: string[] = [];
+    for (let i = 0; i < count; i++) {
+      const id = uuidv7();
+      ids.push(id);
+      const dir = join(dataDir, 'media', 'decks', id);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'original.pdf'), `inhalt-${id}`);
+      if (opts.old ?? true) utimesSync(dir, old, old);
+      if (opts.rows) {
+        await t.handle.sql`INSERT INTO slide_deck (id, user_id, module_id, title, file_path, sha256)
+          VALUES (${id}, ${SINGLE_USER_ID}, ${moduleId}, 'x', 'p', ${randomBytes(32).toString('hex')})`;
+      }
+    }
+    return ids;
+  }
+  const names = (dataDir: string, ...path: string[]) => readdir(join(dataDir, ...path)).catch(() => []);
+
+  beforeEach(() => {
+    warnings.length = 0;
+  });
+
+  it('leere Tabelle, aber Ordner vorhanden: nichts wird angefasst', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'sg-core-orph-'));
+    const ids = await makeFolders(dataDir, 5, { rows: false });
+    expect(await sweepOrphanFolders(t.handle.db, dataDir, log)).toBe(0);
+    expect((await names(dataDir, 'media', 'decks')).sort()).toEqual([...ids].sort());
+    expect(await names(dataDir, 'media', '.orphaned')).toEqual([]);
+    expect(warnings).toHaveLength(1);
+  });
+
+  it('ein einzelner echter Waise wird verschoben, nicht gelöscht; Inhalt unverändert', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'sg-core-orph-'));
+    const known = await makeFolders(dataDir, 10, { rows: true });
+    const [orphan] = await makeFolders(dataDir, 1, { rows: false });
+    const [young] = await makeFolders(dataDir, 0, { rows: false, old: false });
+    expect(young).toBeUndefined();
+    expect(await sweepOrphanFolders(t.handle.db, dataDir, log)).toBe(1);
+    expect((await names(dataDir, 'media', 'decks')).sort()).toEqual([...known].sort());
+    expect(await names(dataDir, 'media', '.orphaned', 'decks')).toEqual([orphan]);
+    expect(readFileSync(join(dataDir, 'media', '.orphaned', 'decks', orphan!, 'original.pdf'), 'utf8')).toBe(
+      `inhalt-${orphan}`,
+    );
+    expect(warnings.some((w) => w.msg.includes('verschoben'))).toBe(true);
+  });
+
+  it('junge Ordner ohne Zeile (laufender Upload) bleiben liegen', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'sg-core-orph-'));
+    await makeFolders(dataDir, 10, { rows: true });
+    const [young] = await makeFolders(dataDir, 1, { rows: false, old: false });
+    expect(await sweepOrphanFolders(t.handle.db, dataDir, log)).toBe(0);
+    expect(await names(dataDir, 'media', 'decks')).toContain(young);
+  });
+
+  it.each([
+    ['mehr als 3 Waisen', 20, 4],
+    ['mehr als 10 % Waisen', 20, 3],
+  ])('%s: Aufräumen wird übersprungen', async (_name, knownCount, orphanCount) => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'sg-core-orph-'));
+    const known = await makeFolders(dataDir, knownCount, { rows: true });
+    const orphans = await makeFolders(dataDir, orphanCount, { rows: false });
+    expect(await sweepOrphanFolders(t.handle.db, dataDir, log)).toBe(0);
+    expect((await names(dataDir, 'media', 'decks')).sort()).toEqual([...known, ...orphans].sort());
+    expect(await names(dataDir, 'media', '.orphaned')).toEqual([]);
+    expect(warnings).toHaveLength(1);
   });
 });
 
