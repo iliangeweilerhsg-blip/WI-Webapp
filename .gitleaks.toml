@@ -1,13 +1,12 @@
-# Gitleaks: Standardregeln plus eine eng gefasste Ausnahme.
-# Der Wert unten ist ein erfundenes Gerätetoken aus den Schema-Beispielen
-# (packages/schemas/examples, PairResponse/SyncHello). Er war nie ein echtes Geheimnis.
-# Neue Beispiele bitte mit genau diesem Wert bauen, statt weitere Ausnahmen anzulegen.
+# Gitleaks: Standardregeln, dazu eine Ausnahme für die Schema-Beispiele.
+# packages/schemas/examples enthält nur künstliche Testwerte (Contract-Tests, docs/ENTWICKLUNG.md).
+# Tokens und Nonces dort sind bewusst als EXAMPLE… mit niedriger Entropie geschrieben.
+# Ältere Commits auf claude/phase1-vertraege enthielten zufällig aussehende, aber erfundene Werte.
 title = "Studien-Gehirn"
 
 [extend]
 useDefault = true
 
 [allowlist]
-description = "Erfundenes Beispiel-Token in packages/schemas/examples"
-regexTarget = "secret"
-regexes = ['''^q5hT0mXy3pM2bW8eN1rV7cK4sL9dF6gH0jA3zQ1uY2o$''']
+description = "Schema-Beispiele enthalten nur künstliche Testwerte"
+paths = ['''^packages/schemas/examples/''']
