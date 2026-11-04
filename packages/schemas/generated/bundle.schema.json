@@ -98,6 +98,9 @@
     "SlideDeckList": {
       "$ref": "#/$defs/SlideDeckList"
     },
+    "SlideDeckUpdate": {
+      "$ref": "#/$defs/SlideDeckUpdate"
+    },
     "Task": {
       "$ref": "#/$defs/Task"
     },
@@ -1279,6 +1282,18 @@
             "string",
             "null"
           ]
+        }
+      }
+    },
+    "SlideDeckUpdate": {
+      "title": "SlideDeckUpdate",
+      "type": "object",
+      "description": "PATCH /slide-decks/{id}",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },

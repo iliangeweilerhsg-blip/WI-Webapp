@@ -37,6 +37,7 @@ const _Slide: Equal<z.infer<typeof Z.SlideSchema>, T.Slide> = true;
 const _SlideDeck: Equal<z.infer<typeof Z.SlideDeckSchema>, T.SlideDeck> = true;
 const _SlideDeckDetail: Equal<z.infer<typeof Z.SlideDeckDetailSchema>, T.SlideDeckDetail> = true;
 const _SlideDeckList: Equal<z.infer<typeof Z.SlideDeckListSchema>, T.SlideDeckList> = true;
+const _SlideDeckUpdate: Equal<z.infer<typeof Z.SlideDeckUpdateSchema>, T.SlideDeckUpdate> = true;
 const _Task: Equal<z.infer<typeof Z.TaskSchema>, T.Task> = true;
 const _TextBlock: Equal<z.infer<typeof Z.TextBlockSchema>, T.TextBlock> = true;
 const _Timestamp: Equal<z.infer<typeof Z.TimestampSchema>, T.Timestamp> = true;

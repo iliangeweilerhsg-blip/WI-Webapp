@@ -399,6 +399,15 @@ items: SlideDeck[]
 next_cursor: (string | null)
 }
 /**
+ * PATCH /slide-decks/{id}
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SlideDeckUpdate".
+ */
+export interface SlideDeckUpdate {
+title?: string
+}
+/**
  * Teilaufgabe eines Übungsblatts. Zerlegung erst ab Phase 2 (F-ORG-03).
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
