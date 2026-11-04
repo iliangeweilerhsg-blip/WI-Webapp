@@ -1,0 +1,9 @@
+{
+  "purged_count": 1,
+  "purged_by_kind": {
+    "module": -1
+  },
+  "orphan_files_removed": 0,
+  "sync_ops_removed": 0,
+  "job_duration_ms": 1
+}

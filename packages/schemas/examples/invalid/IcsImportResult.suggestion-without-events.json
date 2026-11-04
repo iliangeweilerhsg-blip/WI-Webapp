@@ -1,0 +1,83 @@
+{
+  "source": {
+    "id": "019a4e14-0000-7000-8000-000000000020",
+    "user_id": "019a4e14-0000-7000-8000-000000000001",
+    "created_at": "2026-11-04T07:15:00Z",
+    "updated_at": "2026-11-04T07:15:00Z",
+    "deleted_at": null,
+    "kind": "ics_url",
+    "name": "Stundenplan HS 2026",
+    "url": "https://campus-fiktiv.example.edu/ical/abc.ics",
+    "last_synced_at": "2026-11-04T07:15:00Z",
+    "last_error": null,
+    "readonly": true,
+    "event_count": 42
+  },
+  "counts": {
+    "neu": 1,
+    "geaendert": 1,
+    "entfallen": 1,
+    "unveraendert": 10,
+    "zugeordnet": 1,
+    "ohne_modul": 1
+  },
+  "neu": [
+    {
+      "event_id": "019a4e14-0000-7000-8000-000000000023",
+      "external_uid": "hs26-abgleich-zusatz-ueb@campus-fiktiv.example.edu",
+      "recurrence_id": null,
+      "title": "Datenbanksysteme (VL)",
+      "starts_at": "2026-10-20T08:15:00Z",
+      "module_id": null,
+      "kind": "uebung"
+    }
+  ],
+  "geaendert": [
+    {
+      "event_id": "019a4e14-0000-7000-8000-000000000021",
+      "external_uid": "hs26-abgleich-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-20T10:15:00+02:00",
+      "title": "Datenbanksysteme (VL)",
+      "starts_at": "2026-10-20T08:15:00Z",
+      "module_id": "019a4e14-0000-7000-8000-000000000010",
+      "kind": "vorlesung"
+    }
+  ],
+  "entfallen": [
+    {
+      "event_id": "019a4e14-0000-7000-8000-000000000022",
+      "external_uid": "hs26-abgleich-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-27T10:15:00+01:00",
+      "title": "Datenbanksysteme (VL)",
+      "starts_at": "2026-10-20T08:15:00Z",
+      "module_id": "019a4e14-0000-7000-8000-000000000010",
+      "kind": "vorlesung"
+    }
+  ],
+  "zugeordnet": [
+    {
+      "event_id": "019a4e14-0000-7000-8000-000000000021",
+      "external_uid": "hs26-abgleich-vl@campus-fiktiv.example.edu",
+      "recurrence_id": "2026-10-20T10:15:00+02:00",
+      "title": "Datenbanksysteme (VL)",
+      "starts_at": "2026-10-20T08:15:00Z",
+      "module_id": "019a4e14-0000-7000-8000-000000000010",
+      "kind": "vorlesung"
+    }
+  ],
+  "module_suggestions": [
+    {
+      "name": "X",
+      "kind": "uebung",
+      "event_count": 1,
+      "series_event_ids": []
+    }
+  ],
+  "warnings": [
+    {
+      "code": "timezone_unknown",
+      "message": "TZID ohne VTIMEZONE, als Europe/Zurich gelesen",
+      "external_uid": "hs26-x@campus-fiktiv.example.edu"
+    }
+  ]
+}

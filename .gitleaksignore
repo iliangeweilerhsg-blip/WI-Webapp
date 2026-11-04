@@ -1,0 +1,8 @@
+4360db572e6aa9ff3eff52e8e7d80de9f0e86ce6:packages/schemas/examples/invalid/SyncHello.bad-stream.json:generic-api-key:6
+4360db572e6aa9ff3eff52e8e7d80de9f0e86ce6:packages/schemas/examples/invalid/SyncHello.protocol-2.json:generic-api-key:6
+4360db572e6aa9ff3eff52e8e7d80de9f0e86ce6:packages/schemas/examples/invalid/SyncHello.negative-seq.json:generic-api-key:6
+4360db572e6aa9ff3eff52e8e7d80de9f0e86ce6:packages/schemas/examples/invalid/SyncServerMessage.hello.json:generic-api-key:6
+4360db572e6aa9ff3eff52e8e7d80de9f0e86ce6:packages/schemas/examples/valid/PairResponse.1.json:generic-api-key:15
+4360db572e6aa9ff3eff52e8e7d80de9f0e86ce6:packages/schemas/examples/valid/SyncHello.ipad.json:generic-api-key:6
+4360db572e6aa9ff3eff52e8e7d80de9f0e86ce6:packages/schemas/examples/valid/SyncClientMessage.hello.json:generic-api-key:6
+7bec5e6c26624112dbf4b866c7923a3b296bfffa:packages/schemas/examples/invalid/SyncHello.with-token.json:generic-api-key:19

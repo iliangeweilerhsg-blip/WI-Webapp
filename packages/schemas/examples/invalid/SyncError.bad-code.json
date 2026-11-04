@@ -1,0 +1,7 @@
+{
+  "type": "error",
+  "code": "kaputt",
+  "message": "x",
+  "retryable": false,
+  "fatal": false
+}

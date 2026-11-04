@@ -1,0 +1,11 @@
+{
+  "type": "op",
+  "op_id": "019a4e14-0000-7000-8000-000000000930",
+  "stream": "session:019a4e14-0000-7000-8000-000000000030",
+  "kind": "notebook.restore",
+  "at": 1762240562123,
+  "clock_uncertain": false,
+  "data": {
+    "notebook_id": "019a4e14-0000-7000-8000-000000000050"
+  }
+}

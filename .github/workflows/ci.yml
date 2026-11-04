@@ -93,6 +93,16 @@ jobs:
           uv run --locked mypy
           uv run --locked pytest -q
 
+  swift:
+    name: Swift-Contract (Codable gegen Beispiele)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Swift ist auf ubuntu-latest vorinstalliert; die Version steht im Log
+      - run: swift --version
+      - name: Schemas.swift + swift-support kompilieren, Sync-Beispiele und Striche round-trippen
+        run: bash packages/schemas/swift-support/check.sh
+
   secrets:
     name: Secret-Scanning
     runs-on: ubuntu-latest

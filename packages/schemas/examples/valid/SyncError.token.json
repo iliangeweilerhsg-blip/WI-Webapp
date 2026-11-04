@@ -1,0 +1,7 @@
+{
+  "type": "error",
+  "code": "device_token_invalid",
+  "message": "Gerät nicht gekoppelt",
+  "retryable": false,
+  "fatal": true
+}

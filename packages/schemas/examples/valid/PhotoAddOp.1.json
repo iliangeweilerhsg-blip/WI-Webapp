@@ -1,0 +1,19 @@
+{
+  "type": "op",
+  "op_id": "019a4e14-0000-7000-8000-000000000916",
+  "stream": "session:019a4e14-0000-7000-8000-000000000030",
+  "kind": "photo.add",
+  "at": 1762240562123,
+  "clock_uncertain": false,
+  "data": {
+    "photo_id": "019a4e14-0000-7000-8000-000000000061",
+    "session_id": "019a4e14-0000-7000-8000-000000000030",
+    "t_ms": 1500000,
+    "page_id": "019a4e14-0000-7000-8000-000000000051",
+    "file_ref": {
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mime": "image/heic",
+      "size_bytes": 2345678
+    }
+  }
+}

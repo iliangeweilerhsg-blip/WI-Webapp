@@ -1,0 +1,9 @@
+{
+  "type": "event",
+  "name": "device.connection",
+  "data": {
+    "client": "ipad",
+    "device_id": "019a4e14-0000-7000-8000-000000000080",
+    "connected": false
+  }
+}

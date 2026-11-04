@@ -1,0 +1,12 @@
+{
+  "type": "event",
+  "name": "presence",
+  "data": {
+    "client": "ipad",
+    "device_id": "019a4e14-0000-7000-8000-000000000080",
+    "device_name": "iPad von Ilian",
+    "session_id": "019a4e14-0000-7000-8000-000000000030",
+    "notebook_id": "019a4e14-0000-7000-8000-000000000050",
+    "page_id": "019a4e14-0000-7000-8000-000000000051"
+  }
+}

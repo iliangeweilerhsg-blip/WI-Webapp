@@ -1,0 +1,11 @@
+{
+  "type": "subscribed",
+  "resume": [
+    {
+      "stream": "session:019a4e14-0000-7000-8000-000000000030",
+      "from_seq": 1,
+      "head_seq": 0,
+      "reset": false
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "type": "op",
+  "op_id": "019a4e14-0000-7000-8000-000000000917",
+  "stream": "notebook:019a4e14-0000-7000-8000-000000000057",
+  "kind": "notebook.create",
+  "at": 1762240561000,
+  "clock_uncertain": false,
+  "data": {
+    "notebook_id": "019a4e14-0000-7000-8000-000000000057",
+    "module_id": "019a4e14-0000-7000-8000-000000000010",
+    "title": "Skizzen",
+    "kind": "frei",
+    "created_at": 1762240561000
+  },
+  "seq": 1,
+  "origin": "ipad"
+}

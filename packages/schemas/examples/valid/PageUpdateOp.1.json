@@ -1,0 +1,19 @@
+{
+  "type": "op",
+  "op_id": "019a4e14-0000-7000-8000-000000000902",
+  "stream": "notebook:019a4e14-0000-7000-8000-000000000050",
+  "kind": "page.update",
+  "at": 1762240562123,
+  "clock_uncertain": false,
+  "data": {
+    "page_id": "019a4e14-0000-7000-8000-000000000051",
+    "fields": {
+      "index": 3,
+      "template": "liniert",
+      "session_id": "019a4e14-0000-7000-8000-000000000030",
+      "background_slide_id": null,
+      "attached_slide_id": "019a4e14-0000-7000-8000-000000000041"
+    },
+    "version": 4
+  }
+}

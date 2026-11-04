@@ -1,0 +1,25 @@
+{
+  "general": {
+    "data_dir": "/Users/ilian/StudienGehirn",
+    "content_lang": "de",
+    "appearance": "system"
+  },
+  "lecture": {
+    "microphone_id": null,
+    "auto_stop_after_end_min": 10,
+    "auto_stop_quiet_window_min": 3,
+    "auto_stop_hard_after_end_min": 30,
+    "auto_stop_silence_min": 15,
+    "auto_stop_max_duration_min": 240,
+    "auto_stop_warning_s": 60,
+    "auto_stop_extend_min": 15,
+    "default_layout": "standard",
+    "default_ink_mode": "freie_seite",
+    "toolbar_side": "links"
+  },
+  "data": {
+    "backup_target": null,
+    "backup_encryption": false,
+    "backup_time": "03:00"
+  }
+}
