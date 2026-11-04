@@ -20,6 +20,7 @@ const DOUBLE_QUOTES = /[\u201C-\u201F\u2033\u00AB\u00BB]/gu;
 const SINGLE_QUOTES = /[\u2018-\u201B\u2032]/gu;
 const IS_SPACE = /^\s+$/u;
 const MARK = /\p{M}/u;
+const NON_ASCII = /[^\u0020-\u007e\t\n\r]/u;
 
 /**
  * Normalform eines Zeichenclusters (Grundzeichen mit Akzenten): NFKC (löst Ligaturen, geschützte Leerzeichen und
@@ -124,9 +125,17 @@ function build(items: readonly PdfTextItem[], mode: HyphenMode): { page: PageTex
 
   items.forEach((item, index) => {
     const pieces: { text: string; orig: string; from: number; to: number }[] = [];
-    for (const cluster of clusters(item.str)) {
-      const text = normalizeCluster(cluster.text);
-      if (text !== '') pieces.push({ text, orig: cluster.text, from: cluster.from, to: cluster.to });
+    if (!NON_ASCII.test(item.str)) {
+      // Schneller Weg (die meisten Stücke): ein Zeichen = ein Cluster, keine Unicode-Normalisierung nötig
+      for (let i = 0; i < item.str.length; i += 1) {
+        const orig = item.str.charAt(i);
+        pieces.push({ text: /\s/.test(orig) ? ' ' : orig.toLowerCase(), orig, from: i, to: i + 1 });
+      }
+    } else {
+      for (const cluster of clusters(item.str)) {
+        const text = normalizeCluster(cluster.text);
+        if (text !== '') pieces.push({ text, orig: cluster.text, from: cluster.from, to: cluster.to });
+      }
     }
     const firstReal = pieces.findIndex((p) => p.text !== ' ');
     if (firstReal === -1) {

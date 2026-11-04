@@ -240,6 +240,32 @@ describe('PDF-Anzeige', () => {
     expect(document.querySelectorAll('[data-hit]')).toHaveLength(0);
   });
 
+  it('Suche: ein Treffer über mehrere Textstücke zählt einmal und bekommt ein Rechteck je Stück', async () => {
+    deckCore();
+    const original = pdf.doc.textItems.getMockImplementation();
+    pdf.doc.textItems.mockImplementation(async (n: number) =>
+      n === 1
+        ? [
+            { str: 'Markt-', x: 10, y: 10, w: 40, h: 12, eol: true },
+            { str: 'gleich', x: 10, y: 26, w: 40, h: 12 },
+            { str: 'gewicht', x: 50, y: 26, w: 50, h: 12 },
+          ]
+        : [],
+    );
+    try {
+      const user = userEvent.setup();
+      const viewer = await openViewer();
+      fireEvent.keyDown(viewer, { key: 'f', ctrlKey: true });
+      await user.type(await screen.findByRole('textbox', { name: 'Suchbegriff' }), 'marktgleichgewicht');
+      const status = within(screen.getByRole('search')).getByRole('status');
+      await waitFor(() => expect(status).toHaveTextContent('1 von 1'));
+      await waitFor(() => expect(document.querySelectorAll('[data-hit]')).toHaveLength(3));
+      expect(document.querySelectorAll('[data-hit="active"]')).toHaveLength(3);
+    } finally {
+      if (original) pdf.doc.textItems.mockImplementation(original);
+    }
+  });
+
   it('Suche ohne Treffer sagt es ruhig', async () => {
     deckCore();
     const user = userEvent.setup();
