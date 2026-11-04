@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { usePathname } from 'next/navigation';
 import { isMacPlatform, matchShortcut } from '../lib/shortcuts.ts';
 import { SIDEBAR_KEY } from '../lib/theme.tsx';
 import { ToastProvider } from '../lib/toast.tsx';
+import { UploadProvider } from '../lib/uploads.tsx';
 import { SearchDialog } from './SearchDialog.tsx';
 import { SetupHost } from './SetupHost.tsx';
 import { Sidebar } from './Sidebar.tsx';
@@ -13,6 +15,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [setupRequested, setSetupRequested] = useState(0);
+  // Die PDF-Anzeige (F-ORG-04) nutzt die ganze Fläche und scrollt selbst
+  const fullBleed = usePathname() === '/dokument';
 
   useEffect(() => {
     const root = document.documentElement;
@@ -52,22 +56,32 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <ToastProvider>
-      <div className="flex h-dvh">
-        <a href="#main" className="sg-skip-link">
-          Zum Inhalt springen
-        </a>
-        <Sidebar
-          expanded={expanded}
-          onToggle={toggleSidebar}
-          onOpenSearch={() => setSearchOpen(true)}
-          onOpenSetup={() => setSetupRequested((n) => n + 1)}
-        />
-        <main id="main" tabIndex={-1} className="min-w-0 flex-1 overflow-y-auto px-8 py-8">
-          <div className="mx-auto max-w-3xl">{children}</div>
-        </main>
-        <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
-        <SetupHost requested={setupRequested} />
-      </div>
+      <UploadProvider>
+        <div className="flex h-dvh">
+          <a href="#main" className="sg-skip-link">
+            Zum Inhalt springen
+          </a>
+          <Sidebar
+            expanded={expanded}
+            onToggle={toggleSidebar}
+            onOpenSearch={() => setSearchOpen(true)}
+            onOpenSetup={() => setSetupRequested((n) => n + 1)}
+          />
+          <main
+            id="main"
+            tabIndex={-1}
+            className={`min-w-0 flex-1 ${fullBleed ? 'overflow-hidden' : 'overflow-y-auto px-8 py-8'}`}
+          >
+            {fullBleed ? (
+              <div className="h-full">{children}</div>
+            ) : (
+              <div className="mx-auto max-w-3xl">{children}</div>
+            )}
+          </main>
+          <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+          <SetupHost requested={setupRequested} />
+        </div>
+      </UploadProvider>
     </ToastProvider>
   );
 }

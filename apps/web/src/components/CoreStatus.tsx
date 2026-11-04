@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { HealthSchema } from '@sg/shared';
 import { apiGet } from '../lib/api.ts';
+import { useHydrationSafe } from '../lib/hydrated.ts';
 
 /** Verbindungsstatus zum Core. Fällt bei Fehler auf Wiederholen alle 30 s, Erholung lädt fehlgeschlagene Abfragen neu. */
 export function useCoreHealth() {
@@ -23,7 +24,7 @@ export function useCoreHealth() {
     previous.current = health.status;
   }, [health.status, client]);
 
-  return health;
+  return useHydrationSafe(health);
 }
 
 /** Nur wenn die letzte Abfrage gelungen ist. TanStack behält `data` auch nach einem Fehler, deshalb zuerst `isError`. */

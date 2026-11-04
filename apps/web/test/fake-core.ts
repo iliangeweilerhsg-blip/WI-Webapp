@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
-import type { Module, Semester } from '@sg/shared';
+import { createHash } from 'node:crypto';
+import type { ExerciseSheet, Module, Semester, Slide, SlideDeck } from '@sg/shared';
 
 const USER = '0190f6a2-0000-7000-8000-000000000000';
 const NOW = '2026-11-04T08:00:00Z';
@@ -40,6 +41,62 @@ export function makeModule(overrides: Partial<Module> = {}): Module {
   };
 }
 
+export function makeDeck(overrides: Partial<SlideDeck> = {}): SlideDeck {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000d1',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    module_id: '0190f6a2-0000-7000-8000-0000000000a1',
+    session_id: null,
+    title: 'VL 01 Einführung',
+    sha256: 'a'.repeat(64),
+    page_count: null,
+    uploaded_at: NOW,
+    ingest_state: 'neu',
+    ...overrides,
+  };
+}
+
+export function makeSheet(overrides: Partial<ExerciseSheet> = {}): ExerciseSheet {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000e1',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    module_id: '0190f6a2-0000-7000-8000-0000000000a1',
+    title: 'Blatt 1',
+    number: null,
+    sha256: 'b'.repeat(64),
+    page_count: null,
+    due_at: null,
+    has_solution: false,
+    ingest_state: 'neu',
+    ...overrides,
+  };
+}
+
+export function makeSlides(deckId: string, count: number): Slide[] {
+  return Array.from({ length: count }, (_, i) => ({
+    id: `0190f6a2-0000-7000-8000-${String(5000 + i).padStart(12, '0')}`,
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    deck_id: deckId,
+    index: i + 1,
+    width_pt: 720,
+    height_pt: 405,
+    text: '',
+    text_blocks: [],
+    vision_summary: null,
+    title: null,
+    chapter: null,
+  }));
+}
+
 export interface RecordedRequest {
   method: string;
   path: string;
@@ -50,7 +107,18 @@ export interface RecordedRequest {
 export interface FakeCore {
   semesters: Semester[];
   modules: Module[];
+  decks: SlideDeck[];
+  sheets: ExerciseSheet[];
+  slides: Record<string, Slide[]>;
   requests: RecordedRequest[];
+  /** Der nächste Upload scheitert wie bei einer abgerissenen Verbindung; `after` = der Core hat ihn davor verarbeitet */
+  failNextUpload: null | 'before' | 'after';
+  /** Der nächste Upload wird mit diesem Fehler abgelehnt */
+  rejectNextUpload: null | { status: number; code: string };
+  /** Antworten auf POST mit Idempotency-Key (Replay wie beim echten Core) */
+  idempotent: Map<string, { status: number; body: unknown }>;
+  /** Setzt einen Foliensatz/ein Blatt auf `verarbeitet` und legt Folien an */
+  finishIngest: (id: string, pages?: number) => void;
   /** Solange true, scheitern alle Anfragen wie bei einem nicht laufenden Core */
   down: boolean;
   /** Verzögerung für POST in ms (Antworten kommen später als die nächste Eingabe) */
@@ -65,12 +133,31 @@ const json = (body: unknown, status = 200) =>
  * (erstes Semester wird aktuell, is_current höchstens einmal, Farbvergabe, Soft-Delete). Ersetzt `fetch`.
  */
 export function installFakeCore(
-  initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'down' | 'latencyMs'>> = {},
+  initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'decks' | 'sheets' | 'down' | 'latencyMs'>> = {},
 ) {
   const core: FakeCore = {
     semesters: structuredClone(initial.semesters ?? []),
     modules: structuredClone(initial.modules ?? []),
+    decks: structuredClone(initial.decks ?? []),
+    sheets: structuredClone(initial.sheets ?? []),
+    slides: {},
     requests: [],
+    failNextUpload: null,
+    rejectNextUpload: null,
+    idempotent: new Map(),
+    finishIngest(id, pages = 3) {
+      const deck = core.decks.find((d) => d.id === id);
+      if (deck) {
+        deck.ingest_state = 'verarbeitet';
+        deck.page_count = pages;
+        core.slides[id] = makeSlides(id, pages);
+      }
+      const sheet = core.sheets.find((x) => x.id === id);
+      if (sheet) {
+        sheet.ingest_state = 'verarbeitet';
+        sheet.page_count = pages;
+      }
+    },
     down: initial.down ?? false,
     latencyMs: initial.latencyMs ?? 0,
   };
@@ -84,12 +171,16 @@ export function installFakeCore(
       const url = new URL(String(input), 'http://localhost');
       const path = url.pathname.replace(/^\/api\/v1/, '');
       const method = init?.method ?? 'GET';
+      const form = init?.body instanceof FormData ? init.body : null;
       const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null;
       const headers = (init?.headers ?? {}) as Record<string, string>;
       core.requests.push({ method, path: path + url.search, body, headers });
 
       if (method === 'POST' && core.latencyMs) await new Promise((r) => setTimeout(r, core.latencyMs));
       if (core.down) throw new TypeError('Failed to fetch');
+
+      const materialResponse = await handleMaterial(core, { path, method, url, body, form, headers, newId });
+      if (materialResponse) return materialResponse;
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
 
@@ -167,4 +258,86 @@ export function installFakeCore(
     }),
   );
   return core;
+}
+
+interface MaterialCall {
+  path: string;
+  method: string;
+  url: URL;
+  body: Record<string, unknown> | null;
+  form: FormData | null;
+  headers: Record<string, string>;
+  newId: () => string;
+}
+
+/** /slide-decks und /exercise-sheets des Fake-Core: Upload (multipart), Dublette, Listen, Detail, PATCH, DELETE. */
+async function handleMaterial(core: FakeCore, call: MaterialCall): Promise<Response | null> {
+  const { path, method, url, body, form, headers } = call;
+  const kinds = [
+    { prefix: '/slide-decks', list: core.decks as (SlideDeck | ExerciseSheet)[], deck: true },
+    { prefix: '/exercise-sheets', list: core.sheets as (SlideDeck | ExerciseSheet)[], deck: false },
+  ];
+  for (const { prefix, list, deck } of kinds) {
+    if (path === prefix && method === 'POST' && form) {
+      const key = headers['Idempotency-Key'] ?? '';
+      const stored = core.idempotent.get(key);
+      if (stored) return json(stored.body, stored.status);
+      if (core.failNextUpload === 'before') {
+        core.failNextUpload = null;
+        throw new TypeError('Failed to fetch');
+      }
+      if (core.rejectNextUpload) {
+        const { status, code } = core.rejectNextUpload;
+        core.rejectNextUpload = null;
+        return json({ error: { code, message: 'x' } }, status);
+      }
+      const file = form.get('file') as File;
+      const moduleId = String(form.get('module_id'));
+      const sha256 = createHash('sha256').update(`${file.name}:${file.size}`).digest('hex');
+      const existing = list.find((x) => x.sha256 === sha256 && x.module_id === moduleId && !x.deleted_at);
+      let status = 200;
+      let result = { id: existing?.id ?? '', duplicate: true };
+      if (!existing) {
+        const title = file.name.replace(/\.pdf$/i, '');
+        const id = call.newId();
+        list.unshift(
+          deck
+            ? makeDeck({ id, module_id: moduleId, title, sha256 })
+            : makeSheet({ id, module_id: moduleId, title, sha256 }),
+        );
+        status = 201;
+        result = { id, duplicate: false };
+      }
+      core.idempotent.set(key, { status, body: result });
+      if (core.failNextUpload === 'after') {
+        core.failNextUpload = null;
+        throw new TypeError('Failed to fetch');
+      }
+      return json(result, status);
+    }
+    if (path === prefix && method === 'GET') {
+      const moduleId = url.searchParams.get('module_id');
+      return json({
+        items: list.filter((x) => !x.deleted_at && (!moduleId || x.module_id === moduleId)),
+        next_cursor: null,
+      });
+    }
+    const match = new RegExp(`^${prefix}/([^/]+)$`).exec(path);
+    if (match) {
+      const target = list.find((x) => x.id === match[1] && !x.deleted_at);
+      if (!target) return json({ error: { code: 'not_found', message: 'x' } }, 404);
+      if (method === 'GET') {
+        return json(deck ? { deck: target, slides: core.slides[target.id] ?? [] } : target);
+      }
+      if (method === 'PATCH') {
+        Object.assign(target, body);
+        return json(target);
+      }
+      if (method === 'DELETE') {
+        target.deleted_at = new Date().toISOString();
+        return new Response(null, { status: 204 });
+      }
+    }
+  }
+  return null;
 }

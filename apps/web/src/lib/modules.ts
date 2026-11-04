@@ -10,17 +10,20 @@ import {
   type ModuleUpdate,
 } from '@sg/shared';
 import { ApiRequestError, apiGet, apiSend } from './api.ts';
+import { useHydrationSafe } from './hydrated.ts';
 
 /** Feste Palette der Modulfarben (07 §8), Werte in `packages/ui-tokens` */
 export const MODULE_COLORS = Array.from({ length: 12 }, (_, i) => `mod-${String(i + 1).padStart(2, '0')}`);
 
 /** Module aus `GET /modules` (erste Seite; für die Navigation reichen 100). */
 export function useModules() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['modules'],
     queryFn: ({ signal }) => apiGet('/modules?limit=100', ModuleListSchema, { signal }),
     select: (page) => page.items.filter((m) => m.deleted_at === null),
   });
+  // Die Seitenleiste ist vorgerendert: bis zur Hydration „lädt“ (siehe hydrated.ts)
+  return useHydrationSafe(query);
 }
 
 /** CSS-Wert der Modulfarbe (`mod-03` → `var(--sg-mod-03)`). */
