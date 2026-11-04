@@ -23,7 +23,7 @@ import {
   type TerminateOptions,
 } from './procs.ts';
 import { realSystem } from './system.ts';
-import { defaultWebDir, readWebStamp, webBuildReason, webFingerprint, writeWebStamp } from './webbuild.ts';
+import { ensureDeps, ensureWebBuild, type PrepareIo } from './webbuild.ts';
 
 const log = (msg: string): void => console.log(`[sg] ${msg}`);
 const err = (msg: string): void => console.error(`[sg] ${msg}`);
@@ -182,6 +182,10 @@ function stopOptions(cfg: SgConfig, name: ServiceName, force?: () => boolean): T
   };
 }
 
+function prepareIo(cfg: SgConfig): PrepareIo {
+  return { run: (cmd, args) => runInherit(cmd, args, cfg), log, err, hasFile };
+}
+
 export async function start(cfg: SgConfig): Promise<number> {
   const avail = availability(cfg.repoRoot);
   if (!avail.core) {
@@ -206,6 +210,8 @@ export async function start(cfg: SgConfig): Promise<number> {
   }
   clearStopMarker(cfg);
 
+  if (!(await ensureDeps(cfg, prepareIo(cfg)))) return 1;
+
   log('Starte PostgreSQL (docker compose) …');
   const up = await runInherit('docker', composeArgs(cfg, 'up', '-d', '--wait'), cfg);
   if (up !== 0) {
@@ -213,34 +219,7 @@ export async function start(cfg: SgConfig): Promise<number> {
     return 1;
   }
 
-  const fingerprint = webFingerprint(cfg.repoRoot);
-  const buildReason = webBuildReason({
-    indexExists: hasFile(join(cfg.webDir, 'index.html')),
-    defaultWebDir: defaultWebDir(cfg),
-    fingerprint,
-    stamp: readWebStamp(cfg),
-  });
-  if (buildReason !== null) {
-    if (avail.web) {
-      log(
-        buildReason === 'missing'
-          ? 'Static Export der Web-App fehlt, baue ihn (pnpm --filter @sg/web build) …'
-          : 'Web-App hat sich seit dem letzten Build geändert, baue neu (pnpm --filter @sg/web build) …',
-      );
-      const code = await runInherit('pnpm', ['--filter', '@sg/web', 'build'], cfg);
-      if (code === 0) {
-        if (fingerprint !== null) writeWebStamp(cfg, fingerprint);
-      } else if (buildReason === 'missing') {
-        err(
-          'Build der Web-App fehlgeschlagen. Der Core startet trotzdem, liefert aber keine Oberfläche aus.',
-        );
-      } else {
-        err('Build der Web-App fehlgeschlagen. Der Core liefert den bisherigen (älteren) Stand aus.');
-      }
-    } else {
-      err(`Web-App fehlt noch (Ticket T0-06, erwartet in ${cfg.webDir}). Core startet nur mit der API.`);
-    }
-  }
+  await ensureWebBuild(cfg, prepareIo(cfg), avail.web);
 
   if ((await migrate(cfg)) !== 0) return 1;
 

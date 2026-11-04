@@ -4,3 +4,5 @@ out/
 next-env.d.ts
 # Kopie von pdf.js-Beiwerk (scripts/copy-pdfjs-assets.mjs)
 public/pdfjs/
+# Fingerabdruck des letzten Builds durch sg start (infra/sg/src/webbuild.ts)
+.sg-build-stamp
