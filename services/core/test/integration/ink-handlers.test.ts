@@ -11,7 +11,7 @@ import { createDb, type DbHandle } from '../../src/db/client.ts';
 import { notebook, page, pageElement, photo, stroke, syncOp } from '../../src/db/schema/index.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { appendOp } from '../../src/sync/append.ts';
-import { deleteNotebook } from '../../src/services/notebooks.ts';
+import { deleteNotebook, updateNotebook } from '../../src/services/notebooks.ts';
 import { softDelete } from '../../src/services/trash.ts';
 import {
   createInkHandlers,
@@ -720,5 +720,31 @@ describe('Reihenfolge des Dispatchers: erst appendOp, dann Handler', () => {
     await Promise.all([dispatching, deleting]);
     const [p] = await handle.sql`SELECT deleted_at IS NOT NULL AS gone FROM page WHERE id = ${pc.page_id}`;
     expect(p?.gone).toBe(true);
+  });
+
+  it('PATCH /notebooks/{id} und page.create gleichzeitig: kein Deadlock', async () => {
+    const nb = notebookCreateData(seed.moduleId);
+    await run(makeOp('notebook.create', nbStream(nb.notebook_id), nb));
+    const pc = pageCreateData(nb.notebook_id);
+    const op = makeOp('page.create', nbStream(nb.notebook_id), pc);
+    const dispatching = handle.db.transaction(async (tx) => {
+      await appendOp(tx, op.stream, {
+        kind: op.kind,
+        data: op.data,
+        at: op.at,
+        clockUncertain: false,
+        origin: 'ipad',
+        opId: op.op_id,
+      });
+      await sleep(300); // REST-Umbenennen startet jetzt und muss auf den Strom warten
+      await createInkHandlers({ dataDir })['page.create'](tx, op, { deviceId: null, origin: 'ipad' });
+    });
+    await sleep(100);
+    const deleting = updateNotebook(handle.db, nb.notebook_id, { title: 'Umbenannt' });
+    await Promise.all([dispatching, deleting]);
+    const [p] = await handle.sql`SELECT count(*)::int AS n FROM page WHERE id = ${pc.page_id}`;
+    expect(p?.n).toBe(1);
+    const [n] = await handle.sql`SELECT title FROM notebook WHERE id = ${nb.notebook_id}`;
+    expect(n?.title).toBe('Umbenannt');
   });
 });
