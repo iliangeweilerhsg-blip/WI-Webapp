@@ -119,6 +119,8 @@ export interface FakeCore {
   idempotent: Map<string, { status: number; body: unknown }>;
   /** Setzt einen Foliensatz/ein Blatt auf `verarbeitet` und legt Folien an */
   finishIngest: (id: string, pages?: number) => void;
+  /** Setzt einen Foliensatz/ein Blatt auf `fehler` (Einlesen gescheitert, Datei bleibt gespeichert) */
+  failIngest: (id: string) => void;
   /** Solange true, scheitern alle Anfragen wie bei einem nicht laufenden Core */
   down: boolean;
   /** Verzögerung für POST in ms (Antworten kommen später als die nächste Eingabe) */
@@ -157,6 +159,9 @@ export function installFakeCore(
         sheet.ingest_state = 'verarbeitet';
         sheet.page_count = pages;
       }
+    },
+    failIngest(id) {
+      for (const item of [...core.decks, ...core.sheets]) if (item.id === id) item.ingest_state = 'fehler';
     },
     down: initial.down ?? false,
     latencyMs: initial.latencyMs ?? 0,
@@ -298,7 +303,8 @@ async function handleMaterial(core: FakeCore, call: MaterialCall): Promise<Respo
       let status = 200;
       let result = { id: existing?.id ?? '', duplicate: true };
       if (!existing) {
-        const title = file.name.replace(/\.pdf$/i, '');
+        const sent = form.get('title');
+        const title = typeof sent === 'string' && sent !== '' ? sent : file.name.replace(/\.pdf$/i, '');
         const id = call.newId();
         list.unshift(
           deck

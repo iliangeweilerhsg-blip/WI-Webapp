@@ -86,7 +86,8 @@ export async function checkPort(
   port: number,
   hosts: string[],
   what: string,
-  extraHint = '',
+  /** Satz(e), die zum Port passen; danach folgt immer der Hinweis auf "lsof" */
+  hint: string,
 ): Promise<CheckResult> {
   const name = `Port ${port} frei (${what})`;
   let free = true;
@@ -96,7 +97,7 @@ export async function checkPort(
     name,
     status: 'fail',
     detail: 'belegt',
-    hint: `Läuft sg schon? Dann zuerst "pnpm sg stop". ${extraHint}Sonst das Programm beenden, das Port ${port} nutzt (macOS: "lsof -i :${port}"). Für den Core lässt sich der Port mit SG_CORE_PORT ändern.`,
+    hint: `${hint} Sonst das Programm beenden, das Port ${port} nutzt (macOS: "lsof -i :${port}").`,
   };
 }
 
@@ -144,13 +145,19 @@ export async function runChecks(sys: System, cfg: SgConfig): Promise<CheckResult
       'uv installieren: "brew install uv" oder https://docs.astral.sh/uv/ (für den Python-Worker).',
     ),
     await checkDocker(sys),
-    await checkPort(sys, cfg.corePort, ['0.0.0.0', '127.0.0.1'], 'Core'),
+    await checkPort(
+      sys,
+      cfg.corePort,
+      ['0.0.0.0', '127.0.0.1'],
+      'Core',
+      'Läuft sg schon? Dann zuerst "pnpm sg stop". Für den Core lässt sich der Port mit SG_CORE_PORT ändern.',
+    ),
     await checkPort(
       sys,
       DB_PORT,
       ['127.0.0.1'],
       'Postgres',
-      'Belegt der Container "studiengehirn-db" den Port (docker ps), beenden Sie ihn mit "pnpm sg stop"; sonst muss eine andere Postgres-Instanz beendet werden. ',
+      'Läuft schon eine andere Datenbank oder Studien-Gehirn? Dann "pnpm sg stop".',
     ),
     checkDataDir(sys, cfg),
     checkAppleSilicon(sys),

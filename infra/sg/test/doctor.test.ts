@@ -87,6 +87,16 @@ describe('runChecks', () => {
     expect(byName(results, '5432').status).toBe('ok');
   });
 
+  it('der Port-Hinweis passt zum Port: SG_CORE_PORT nur beim Core', async () => {
+    const core = byName(await runChecks(fakeSystem({ portFree: async (p) => p !== 4710 }), cfg), '4710');
+    expect(core.hint).toMatch(/SG_CORE_PORT/);
+    const db = byName(await runChecks(fakeSystem({ portFree: async (p) => p !== 5432 }), cfg), '5432');
+    expect(db.status).toBe('fail');
+    expect(db.hint).not.toMatch(/SG_CORE_PORT/);
+    expect(db.hint).toMatch(/Läuft schon eine andere Datenbank oder Studien-Gehirn\? Dann "pnpm sg stop"\./);
+    expect(db.hint).toMatch(/lsof -i :5432/);
+  });
+
   it('erkennt nicht beschreibbaren Datenordner', async () => {
     const results = await runChecks(fakeSystem({ dirWritable: () => false }), cfg);
     expect(byName(results, 'Datenordner').status).toBe('fail');

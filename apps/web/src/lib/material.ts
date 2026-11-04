@@ -102,6 +102,48 @@ export function useSheets(moduleId: string) {
   });
 }
 
+/**
+ * Titel aus dem Dateinamen: ohne `.pdf`, ohne Steuerzeichen, NFC-normalisiert, Unterstriche und Mehrfach-Leerzeichen
+ * werden zu einem Leerzeichen, höchstens 300 Zeichen (Code Points, ein Emoji wird nicht zerschnitten).
+ */
+export function titleFromFile(filename: string): string {
+  const cleaned = [...filename.normalize('NFC')]
+    .filter((char) => {
+      const code = char.codePointAt(0) ?? 0;
+      return code > 0x1f && code !== 0x7f;
+    })
+    .join('')
+    .replace(/\.pdf$/i, '')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return [...cleaned].slice(0, 300).join('');
+}
+
+/** Einlese-Zustand und Titel eines Eintrags (teilt den Cache mit den Detailansichten). */
+export async function fetchIngest(
+  client: QueryClient,
+  kind: MaterialKind,
+  id: string,
+): Promise<{ state: SlideDeck['ingest_state']; title: string }> {
+  if (kind === 'folien') {
+    const { deck } = await client.fetchQuery({
+      queryKey: ['deck', id],
+      queryFn: ({ signal }) =>
+        apiGet(`/slide-decks/${encodeURIComponent(id)}`, SlideDeckDetailSchema, { signal }),
+      staleTime: 0,
+    });
+    return { state: deck.ingest_state, title: deck.title };
+  }
+  const sheet = await client.fetchQuery({
+    queryKey: ['sheet', id],
+    queryFn: ({ signal }) =>
+      apiGet(`/exercise-sheets/${encodeURIComponent(id)}`, ExerciseSheetSchema, { signal }),
+    staleTime: 0,
+  });
+  return { state: sheet.ingest_state, title: sheet.title };
+}
+
 /** Foliensatz mit allen Folien (für Vorschaubild und Viewer). Pollt, solange der Satz eingelesen wird. */
 export function useDeckDetail(id: string, options: { enabled?: boolean } = {}) {
   return useQuery({

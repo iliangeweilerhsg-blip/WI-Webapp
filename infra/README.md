@@ -18,7 +18,7 @@ Grundlage: Spezifikation 02 §3, `docs/VERTRAEGE.md`.
 | Befehl | Wirkung |
 |---|---|
 | `pnpm sg doctor` | Prüft Node, pnpm, uv, Docker, die Ports 4710 und 5432, den Datenordner und gibt bei Fehlern einen Lösungshinweis. Exit-Code 1, wenn etwas fehlt |
-| `pnpm sg start` | Legt den Datenordner an, startet Postgres, baut bei Bedarf die Web-App, führt die Migrationen aus, startet Core und Worker (Logs mit `[core]` / `[worker]`), wartet auf `/api/v1/health` und öffnet den Browser (macOS). Strg+C beendet Core und Worker sauber |
+| `pnpm sg start` | Legt den Datenordner an, startet Postgres, baut bei Bedarf die Web-App, führt die Migrationen aus, startet Core und Worker (Logs mit `[core]` / `[worker]`), wartet auf `/api/v1/health` und öffnet den Browser (macOS). Strg+C beendet Core und Worker sauber. Der Core startet direkt mit `node src/main.ts` im Ordner `services/core` (nicht über `pnpm start`), darum gibt es keine `[core]`-Fehlerzeilen von pnpm. Das äußere `pnpm sg start` kann beim Strg+C selbst noch ` ELIFECYCLE  Command failed.` ausgeben (pnpm meldet das bei jedem per Signal beendeten Skript); `node infra/sg/sg.mjs start` bleibt still. Exit-Code von sg: 0, beim zweiten Strg+C (SIGKILL) 130 |
 | `pnpm sg stop` | Beendet Core und Worker (über die PID-Dateien in `$SG_DATA_DIR/run/`) und hält Postgres an (`docker compose stop`). Die Daten bleiben erhalten |
 | `pnpm sg migrate` | `pnpm --filter @sg/core migrate` |
 | `pnpm sg backup` / `restore` | Platzhalter, kommen mit T1-18 (Exit-Code 2) |
