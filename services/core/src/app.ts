@@ -14,7 +14,9 @@ import { createSecurityGuard, registerSecurity, type DeviceTokenVerifier } from 
 import { registerWeb } from './plugins/web.ts';
 import { materialRoutes } from './routes/material.ts';
 import { organisationRoutes } from './routes/organisation.ts';
+import { sessionRoutes } from './routes/sessions.ts';
 import { systemRoutes } from './routes/system.ts';
+import { startSessionTicker, type SessionTicker } from './services/sessions.ts';
 
 export interface BuildAppOptions {
   config: Config;
@@ -22,6 +24,10 @@ export interface BuildAppOptions {
   logger: Logger;
   /** Prüft Geräte-Tokens. Standard (Phase 0): jedes Token wird abgewiesen. */
   verifyDeviceToken?: DeviceTokenVerifier;
+  /** Core-Takt für Sessions (VERTRAEGE §9.1). Standard: an. Tests schalten ihn mit `false` aus. */
+  sessionTicker?: boolean;
+  /** Uhr für die Session-Routen und den Takt. Standard: Systemzeit */
+  now?: () => Date;
 }
 
 function readVersion(): string {
@@ -96,9 +102,26 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(systemRoutes, { db, version });
       await api.register(materialRoutes, { db, config });
       await api.register(organisationRoutes, { db });
+      await api.register(sessionRoutes, { db, config, ...(options.now ? { now: options.now } : {}) });
     },
     { prefix: API_BASE },
   );
+
+  // Takt: geplant → bereit → verpasst und Auto-Stopp-Rückfallebene, beim Start einmal mit Absturz-Erkennung
+  if (options.sessionTicker !== false) {
+    let ticker: SessionTicker | undefined;
+    app.addHook('onReady', async () => {
+      ticker = startSessionTicker({
+        db,
+        config,
+        onError: (error) => logger.error({ err: error }, 'Session-Takt fehlgeschlagen'),
+        ...(options.now ? { now: options.now } : {}),
+      });
+    });
+    app.addHook('onClose', async () => {
+      await ticker?.stop();
+    });
+  }
 
   // Static Export der Web-App und Not-Found-Handler (muss nach den API-Routen kommen)
   await registerWeb(app, config);
