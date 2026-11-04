@@ -188,6 +188,7 @@ stroke(                 -- neutrales Strich-Format, Kap. 08 §4
 
 page_element(
   page_id → page, kind text,   -- text | image | shape | tape | stamp
+  frame jsonb,                 -- [x, y, w, h] in pt (PageElement.frame, VERTRAEGE §6.1)
   payload jsonb,               -- je nach kind, Kap. 08 §4.4
   t_ms int8 NULL, z int)
 ```

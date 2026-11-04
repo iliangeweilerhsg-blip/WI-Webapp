@@ -79,6 +79,16 @@ export function toApiModule(row: ModuleRow): Module {
  * bei gleichzeitigen Änderungen nicht gegenseitig überschreiben.
  */
 function mergeModuleSettings(update: ModuleSettingsUpdate): SQL {
+  if (update.column_widths) {
+    // Das Schema prüft drei Werte zwischen 0 und 100, die Summe prüft der Core (ColumnWidths, F-DSH-01)
+    const sum = update.column_widths.reduce((a, b) => a + b, 0);
+    if (Math.abs(sum - 100) > 0.01) {
+      throw new HttpError(400, 'validation_failed', 'Die Spaltenbreiten müssen zusammen 100 % ergeben.', {
+        field: 'settings.column_widths',
+        sum,
+      });
+    }
+  }
   const set: ModuleSettings = {};
   const remove: string[] = [];
   for (const [key, value] of Object.entries(update)) {

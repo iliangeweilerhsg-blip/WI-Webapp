@@ -383,6 +383,16 @@ describe('Module', () => {
       payload: { settings: { column_widths: [50, 50] } },
     });
     expect((await errorOf(twoColumns, 400)).code).toBe('validation_failed');
+    const wrongSum = await t.request({
+      method: 'PATCH',
+      url: `${API}/modules/${m.id}`,
+      payload: { settings: { column_widths: [50, 30, 30] } },
+    });
+    expect((await errorOf(wrongSum, 400)).code).toBe('validation_failed');
+    const thirds = await patch<Module>(`/modules/${m.id}`, {
+      settings: { column_widths: [33.33, 33.33, 33.34] },
+    });
+    expect(thirds.settings.column_widths).toEqual([33.33, 33.33, 33.34]);
   });
 
   it('GET /modules?semester_id filtert, ohne Filter kommen alle', async () => {

@@ -1,5 +1,5 @@
 // softDelete / restoreFromTrash mit den Kaskaden aus VERTRAEGE §13.
-import { eq as eqId } from 'drizzle-orm';
+import { eq as eqId, sql as dsql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SINGLE_USER_ID, type TrashKind } from '@sg/shared';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
@@ -423,5 +423,115 @@ describe('softDelete / restoreFromTrash', () => {
       statusCode: 404,
       code: 'trash_item_not_found',
     });
+  });
+
+  it('Semester: Ist inzwischen ein anderes aktuell, kommt das alte als nicht aktuell zurück', async () => {
+    const ids = await seed();
+    await handle.sql`UPDATE semester SET is_current = true WHERE id = ${ids.semester}`;
+    await del('semester', ids.semester);
+    const newer = uuidv7();
+    await handle.db.insert(semester).values({ id: newer, ...base, name: 'FS 2027', isCurrent: true });
+
+    await restore(ids.semester);
+    const rows = await handle.sql`SELECT id, is_current, deleted_at FROM semester ORDER BY name`;
+    expect(rows.map((r) => [r.id, r.is_current, r.deleted_at])).toEqual([
+      [newer, true, null],
+      [ids.semester, false, null],
+    ]);
+
+    // Ohne Konkurrenz bleibt es aktuell
+    await handle.sql`DELETE FROM semester WHERE id = ${newer}`;
+    await handle.sql`UPDATE semester SET is_current = true WHERE id = ${ids.semester}`;
+    await del('semester', ids.semester);
+    await restore(ids.semester);
+    const [again] = await handle.sql`SELECT is_current FROM semester WHERE id = ${ids.semester}`;
+    expect(again?.is_current).toBe(true);
+  });
+
+  it('409 restore_conflict, wenn der Termin inzwischen eine neue Session hat; nichts halb wiederhergestellt', async () => {
+    const ids = await seed();
+    await del('session', ids.plannedSession);
+    const replacement = uuidv7();
+    await handle.db.insert(session).values({
+      id: replacement,
+      ...base,
+      moduleId: ids.module,
+      calendarEventId: ids.event,
+      state: 'geplant',
+    });
+    const err = await errorOf(restore(ids.plannedSession));
+    expect(err).toMatchObject({ statusCode: 409, code: 'restore_conflict' });
+    expect(err.details).toEqual({ constraint: 'session_event_uq', conflicting_id: replacement });
+
+    // Auch als Teil einer Kaskade: Das Modul nimmt `replacement` mit, danach bekommt der Termin eine Session
+    // in einem anderen Modul. Prüfung vor dem UPDATE, die Transaktion des Aufrufers bleibt benutzbar.
+    await del('module', ids.module);
+    const otherModule = uuidv7();
+    await handle.db
+      .insert(courseModule)
+      .values({ id: otherModule, ...base, semesterId: ids.semester, name: 'Anderes', color: 'mod-02' });
+    const other = uuidv7();
+    await handle.db.insert(session).values({
+      id: other,
+      ...base,
+      moduleId: otherModule,
+      calendarEventId: ids.event,
+      state: 'geplant',
+    });
+    const result = await handle.db.transaction(async (tx) => {
+      const e = await restoreFromTrash(tx, ids.module).catch((x: unknown) => x);
+      // Nach dem Fehler läuft die Transaktion weiter (Savepoint bzw. Prüfung vor dem UPDATE)
+      const [{ n }] = (await tx.execute('SELECT 1 AS n')) as unknown as [{ n: number }];
+      return { e, n };
+    });
+    expect(result.n).toBe(1);
+    expect(result.e).toMatchObject({
+      code: 'restore_conflict',
+      details: { constraint: 'session_event_uq', conflicting_id: other },
+    });
+    expect(Object.values(await deletedAt('module', [ids.module]))[0]).not.toBeNull();
+    expect(Object.values(await deletedAt('slide_deck', [ids.deck]))[0]).not.toBeNull();
+  });
+
+  it('Savepoint: ein nicht vorab geprüfter Unique-Verstoß wird zu 409 restore_conflict', async () => {
+    const ids = await seed();
+    // Zwei gelöschte Sessions zum selben Termin mit demselben Zeitstempel: kollidieren erst untereinander
+    const twin = uuidv7();
+    await handle.db.insert(session).values({
+      id: twin,
+      ...base,
+      moduleId: ids.module,
+      calendarEventId: ids.event,
+      state: 'geplant',
+      deletedAt: new Date(),
+    });
+    await del('calendar_source', ids.source);
+    const [src] =
+      await handle.sql`SELECT deleted_at::text AS ts FROM calendar_source WHERE id = ${ids.source}`;
+    await handle.sql`UPDATE session SET deleted_at = ${src!.ts}::timestamptz WHERE id = ${twin}`;
+    const err = await errorOf(restore(ids.source));
+    expect(err).toMatchObject({ statusCode: 409, code: 'restore_conflict' });
+    expect(err.details).toEqual({ constraint: 'session_event_uq', conflicting_id: null });
+    expect(Object.values(await deletedAt('calendar_source', [ids.source]))[0]).not.toBeNull();
+  });
+
+  it('Modul löschen wartet auf einen gleichzeitigen Session-Start und lehnt dann ab (FOR UPDATE)', async () => {
+    const ids = await seed();
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    // Verbindung 1 startet die Session, committet aber erst später
+    const start = handle.db.transaction(async (tx) => {
+      await tx.execute(dsql`UPDATE session SET state = 'laeuft' WHERE id = ${ids.session}`);
+      await released;
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    // Verbindung 2 löscht das Modul und muss auf die Sperre warten
+    const deletion = del('module', ids.module).catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 100));
+    release();
+    await start;
+    expect(await deletion).toMatchObject({ statusCode: 409, code: 'session_active' });
+    expect(Object.values(await deletedAt('module', [ids.module]))).toEqual([null]);
+    await handle.sql`UPDATE session SET state = 'beendet' WHERE id = ${ids.session}`;
   });
 });

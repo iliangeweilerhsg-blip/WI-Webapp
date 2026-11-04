@@ -1,5 +1,5 @@
 {
-  "id": "f3c9f95b-3836-4eb2-be84-b33670f4fc45",
+  "id": "dcf396f1-7495-4f67-960d-93f743c8869d",
   "prevId": "cbc3c1b8-6aac-4017-81de-9414063de008",
   "version": "7",
   "dialect": "postgresql",
@@ -173,6 +173,34 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "calendar_event_sync_uq": {
+          "name": "calendar_event_sync_uq",
+          "columns": [
+            {
+              "expression": "source_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "external_uid",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "recurrence_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"calendar_event\".\"source_id\" IS NOT NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -196,13 +224,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "calendar_event_sync_uq": {
-          "name": "calendar_event_sync_uq",
-          "nullsNotDistinct": true,
-          "columns": ["source_id", "external_uid", "recurrence_id"]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {
         "calendar_event_kind_chk": {

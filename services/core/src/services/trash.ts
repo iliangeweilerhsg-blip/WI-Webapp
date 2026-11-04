@@ -40,7 +40,6 @@ interface Edge {
 
 /** Bei Sessions nie gestartet (VERTRAEGE §13, Zeile `calendar_source`) */
 const NEVER_STARTED = sql`state IN ('geplant','bereit','verpasst')`;
-const ACTIVE = sql`state IN ('laeuft','pausiert')`;
 
 /** Kaskaden nach VERTRAEGE §13. Was hier fehlt, bleibt unverändert (z. B. Kalendertermine eines Moduls, Seiten einer Session). */
 const CHILDREN: Record<Node, Edge[]> = {
@@ -125,12 +124,77 @@ const sessionActive = (ids: string[]) =>
 
 type Mode = { op: 'delete'; ts: Date } | { op: 'restore'; ts: string };
 
-function matchCondition(mode: Mode): SQL {
-  return mode.op === 'delete' ? sql`deleted_at IS NULL` : sql`deleted_at = ${mode.ts}::timestamptz`;
+/** Spalte, optional mit Tabellenalias (`r.module_id`) */
+function col(alias: string | null, name: string): SQL {
+  return alias ? sql`${sql.raw(alias)}.${sql.identifier(name)}` : sql`${sql.identifier(name)}`;
+}
+
+function matchCondition(mode: Mode, alias: string | null = null): SQL {
+  return mode.op === 'delete'
+    ? sql`${col(alias, 'deleted_at')} IS NULL`
+    : sql`${col(alias, 'deleted_at')} = ${mode.ts}::timestamptz`;
 }
 
 function newValue(mode: Mode): SQL {
   return mode.op === 'delete' ? sql`${mode.ts.toISOString()}::timestamptz` : sql`NULL`;
+}
+
+/**
+ * Partielle Unique-Indizes (`… WHERE deleted_at IS NULL`), die beim Wiederherstellen verletzt werden können.
+ * `semester_current_uq` regelt restoreFromTrash gesondert (Semester kommt dann als nicht aktuell zurück).
+ */
+const UNIQUE_CHECKS: Partial<
+  Record<Node, { constraint: string; cols: string[]; where?: (alias: string) => SQL }[]>
+> = {
+  session: [
+    {
+      constraint: 'session_event_uq',
+      cols: ['calendar_event_id'],
+      where: (a) => sql`${col(a, 'calendar_event_id')} IS NOT NULL`,
+    },
+    {
+      constraint: 'session_one_active_uq',
+      cols: ['user_id'],
+      where: (a) => sql`${col(a, 'state')} IN ('laeuft','pausiert')`,
+    },
+  ],
+  notebook: [
+    {
+      constraint: 'notebook_default_uq',
+      cols: ['module_id', 'kind'],
+      where: (a) => sql`${col(a, 'kind')} IN ('vorlesung','uebung')`,
+    },
+  ],
+  slide: [{ constraint: 'slide_deck_index_uq', cols: ['deck_id', 'index'] }],
+};
+
+const restoreConflict = (constraint: string, conflictingId: string | null) =>
+  new HttpError(
+    409,
+    'restore_conflict',
+    'Das Objekt lässt sich nicht wiederherstellen, weil inzwischen ein gleichwertiges existiert.',
+    { constraint, conflicting_id: conflictingId },
+  );
+
+/**
+ * Prüft vor dem Wiederherstellen der Zeilen `restored(r)` aus `table`, ob ein aktives Gegenstück den
+ * partiellen Unique-Index verletzen würde. Dann `409 restore_conflict`.
+ */
+async function checkRestoreConflicts(tx: Tx, table: Node, restored: (alias: string) => SQL): Promise<void> {
+  for (const check of UNIQUE_CHECKS[table] ?? []) {
+    const conditions: SQL[] = [
+      restored('r'),
+      sql`${col('a', 'deleted_at')} IS NULL`,
+      sql`${col('a', 'id')} <> ${col('r', 'id')}`,
+      ...check.cols.map((c) => sql`${col('a', c)} = ${col('r', c)}`),
+      ...(check.where ? [check.where('r'), check.where('a')] : []),
+    ];
+    const [hit] = await tx.execute<{ conflicting_id: string }>(
+      sql`SELECT a.id AS conflicting_id FROM ${sql.identifier(table)} r, ${sql.identifier(table)} a
+          WHERE ${sql.join(conditions, sql` AND `)} LIMIT 1`,
+    );
+    if (hit) throw restoreConflict(check.constraint, hit.conflicting_id);
+  }
 }
 
 /** Kinder von `node` mit den IDs `ids` löschen bzw. wiederherstellen, rekursiv. Rückgabe: Anzahl geänderter Zeilen */
@@ -138,21 +202,26 @@ async function cascade(tx: Tx, node: Node, ids: string[], mode: Mode): Promise<n
   if (ids.length === 0) return 0;
   let count = 0;
   for (const edge of CHILDREN[node]) {
-    const where: SQL[] = [inArray(sql.identifier(edge.fk), ids), matchCondition(mode)];
-    if (mode.op === 'delete' && edge.deleteFilter) where.push(edge.deleteFilter);
-    const condition = sql.join(where, sql` AND `);
+    const where = (alias: string | null): SQL => {
+      const parts: SQL[] = [inArray(col(alias, edge.fk), ids), matchCondition(mode, alias)];
+      if (mode.op === 'delete' && edge.deleteFilter) parts.push(edge.deleteFilter);
+      return sql.join(parts, sql` AND `);
+    };
 
     if (mode.op === 'delete' && edge.child === 'session') {
-      // Aktive Sessions werden nie mitgelöscht. Die Transaktion des Aufrufers bricht dann ab.
-      const active = await tx.execute<{ id: string }>(
-        sql`SELECT id FROM session WHERE ${condition} AND ${ACTIVE}`,
+      // Aktive Sessions werden nie mitgelöscht. FOR UPDATE sperrt die Sessions gegen einen gleichzeitigen Start:
+      // Ein laufender Start wird abgewartet und dann hier gesehen. Die Transaktion des Aufrufers bricht dann ab.
+      const sessions = await tx.execute<{ id: string; state: string }>(
+        sql`SELECT id, state FROM session WHERE ${where(null)} ORDER BY id FOR UPDATE`,
       );
+      const active = sessions.filter((s) => s.state === 'laeuft' || s.state === 'pausiert');
       if (active.length > 0) throw sessionActive(active.map((r) => r.id));
     }
+    if (mode.op === 'restore') await checkRestoreConflicts(tx, edge.child, where);
 
     const rows = await tx.execute<{ id: string }>(
       sql`UPDATE ${sql.identifier(edge.child)} SET deleted_at = ${newValue(mode)}
-          WHERE ${condition} RETURNING id`,
+          WHERE ${where(null)} RETURNING id`,
     );
     count += rows.length;
     if (CHILDREN[edge.child].length > 0) {
@@ -167,13 +236,24 @@ async function cascade(tx: Tx, node: Node, ids: string[], mode: Mode): Promise<n
   return count;
 }
 
+/** Name des verletzten Unique-Constraints, falls `error` (auch verpackt) ein 23505 ist */
+function uniqueViolation(error: unknown): string | null {
+  for (let e: unknown = error, depth = 0; e && depth < 3; depth += 1) {
+    const info = e as { code?: unknown; constraint_name?: unknown };
+    if (info.code === '23505')
+      return typeof info.constraint_name === 'string' ? info.constraint_name : 'unbekannt';
+    e = (e as { cause?: unknown }).cause;
+  }
+  return null;
+}
+
 /**
  * Objekt weich löschen, mit der Kaskade aus VERTRAEGE §13. Alle Teile bekommen denselben `deleted_at`.
  * Rückgabe: dieser Zeitstempel (Millisekunden-genau, damit ihn Handler unverändert weitergeben können).
  *
- * Fehler (HttpError): 404 `<kind>_not_found` (fehlt oder schon gelöscht), 409 `session_active`
- * (Session läuft oder ist pausiert, auch innerhalb der Kaskade eines Moduls oder Semesters),
- * 409 `notebook_default` (Notizbücher „Vorlesung“ und „Übung“ nur mit ihrem Modul).
+ * Fehler (HttpError): 404 `<kind>_not_found` (fehlt oder schon gelöscht), 409 `session_active` mit
+ * `details.session_ids` (Session läuft oder ist pausiert, auch innerhalb der Kaskade eines Moduls oder
+ * Semesters), 409 `notebook_default` (Notizbücher „Vorlesung“ und „Übung“ nur mit ihrem Modul).
  */
 export async function softDelete(tx: Tx, kind: TrashKind, id: string): Promise<Date> {
   const table = sql.identifier(kind);
@@ -201,8 +281,11 @@ export async function softDelete(tx: Tx, kind: TrashKind, id: string): Promise<D
 /**
  * Objekt aus dem Papierkorb holen, samt aller Teile mit genau seinem `deleted_at`.
  * Die ID ist die Objekt-ID (UUIDs sind tabellenübergreifend eindeutig).
+ * Ist beim Wiederherstellen eines aktuellen Semesters schon ein anderes aktuell, kommt es als nicht aktuell zurück.
  *
- * Fehler (HttpError): 404 `trash_item_not_found`, 409 `restore_parent_deleted` mit `details.parent` (`TrashParent`).
+ * Fehler (HttpError): 404 `trash_item_not_found`, 409 `restore_parent_deleted` mit `details.parent` (`TrashParent`),
+ * 409 `restore_conflict` mit `details: { constraint, conflicting_id }` (ein gleichwertiges Objekt ist inzwischen
+ * aktiv, z. B. eine neue Session zum selben Termin). Bei einem Fehler bleibt nichts halb wiederhergestellt.
  */
 export async function restoreFromTrash(tx: Tx, id: string): Promise<TrashRestoreResult> {
   const lookup = sql.join(
@@ -236,7 +319,26 @@ export async function restoreFromTrash(tx: Tx, id: string): Promise<TrashRestore
   }
 
   const mode: Mode = { op: 'restore', ts };
-  const restored = await cascade(tx, kind, [id], mode);
-  await tx.execute(sql`UPDATE ${sql.identifier(kind)} SET deleted_at = NULL WHERE id = ${id}`);
-  return { id, kind, restored_count: restored + 1 };
+  try {
+    // Savepoint: Ein unerwarteter Unique-Verstoß lässt die Transaktion des Aufrufers benutzbar
+    return await tx.transaction(async (sp) => {
+      await checkRestoreConflicts(sp, kind, (a) => sql`${col(a, 'id')} = ${id}`);
+      const restored = await cascade(sp, kind, [id], mode);
+      if (kind === 'semester') {
+        // Höchstens ein aktuelles Semester: Ist inzwischen ein anderes aktuell, kommt dieses als nicht aktuell zurück
+        await sp.execute(
+          sql`UPDATE semester SET deleted_at = NULL, is_current = is_current AND NOT EXISTS (
+                SELECT 1 FROM semester o WHERE o.is_current AND o.deleted_at IS NULL AND o.id <> ${id})
+              WHERE id = ${id}`,
+        );
+      } else {
+        await sp.execute(sql`UPDATE ${sql.identifier(kind)} SET deleted_at = NULL WHERE id = ${id}`);
+      }
+      return { id, kind, restored_count: restored + 1 };
+    });
+  } catch (error) {
+    const constraint = uniqueViolation(error);
+    if (constraint) throw restoreConflict(constraint, null);
+    throw error;
+  }
 }

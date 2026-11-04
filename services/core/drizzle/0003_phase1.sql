@@ -200,6 +200,8 @@ CREATE TABLE "sync_stream" (
 DROP INDEX "session_one_running_uq";--> statement-breakpoint
 ALTER TABLE "device" ALTER COLUMN "clock_offset_ms" DROP DEFAULT;--> statement-breakpoint
 ALTER TABLE "device" ALTER COLUMN "clock_offset_ms" DROP NOT NULL;--> statement-breakpoint
+-- Von Hand: Die 0 aus Phase 0 war kein Messwert. NULL = noch nicht gemessen (VERTRAEGE §11.5)
+UPDATE "device" SET "clock_offset_ms" = NULL;--> statement-breakpoint
 ALTER TABLE "calendar_event" ADD COLUMN "description" text;--> statement-breakpoint
 ALTER TABLE "calendar_event" ADD COLUMN "all_day" boolean DEFAULT false NOT NULL;--> statement-breakpoint
 ALTER TABLE "calendar_event" ADD COLUMN "assigned_by" text DEFAULT 'auto' NOT NULL;--> statement-breakpoint
@@ -235,12 +237,13 @@ CREATE UNIQUE INDEX "notebook_default_uq" ON "notebook" USING btree ("module_id"
 CREATE INDEX "page_notebook_idx" ON "page" USING btree ("notebook_id","index");--> statement-breakpoint
 CREATE INDEX "page_session_idx" ON "page" USING btree ("session_id");--> statement-breakpoint
 CREATE INDEX "page_element_page_idx" ON "page_element" USING btree ("page_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "calendar_event_sync_uq" ON "calendar_event" USING btree ("source_id","external_uid","recurrence_id") NULLS NOT DISTINCT WHERE "calendar_event"."source_id" IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX "session_one_active_uq" ON "session" USING btree ("user_id") WHERE "session"."state" IN ('laeuft','pausiert') AND "session"."deleted_at" IS NULL;--> statement-breakpoint
-ALTER TABLE "calendar_event" ADD CONSTRAINT "calendar_event_sync_uq" UNIQUE NULLS NOT DISTINCT("source_id","external_uid","recurrence_id");--> statement-breakpoint
 ALTER TABLE "calendar_event" ADD CONSTRAINT "calendar_event_assigned_by_chk" CHECK ("calendar_event"."assigned_by" IN ('auto','manuell'));--> statement-breakpoint
 ALTER TABLE "backup_run" ADD CONSTRAINT "backup_run_state_chk" CHECK ("backup_run"."state" IN ('laeuft','fertig','fehler'));--> statement-breakpoint
 ALTER TABLE "backup_run" ADD CONSTRAINT "backup_run_trigger_chk" CHECK ("backup_run"."trigger" IN ('zeitplan','manuell','vor_migration'));--> statement-breakpoint
 ALTER TABLE "device" ADD CONSTRAINT "device_kind_chk" CHECK ("device"."kind" IN ('ipad','iphone'));--> statement-breakpoint
+-- Von Hand: NULLS NOT DISTINCT im Index calendar_event_sync_uq (oben), Drizzle 0.45 kennt es nur bei Constraints.
 -- Von Hand: Epoche für welcome.db_epoch (VERTRAEGE §11.1). Genau eine Zeile, sg restore setzt sie neu.
 INSERT INTO "sync_meta" ("id", "db_epoch") VALUES (1, gen_random_uuid()) ON CONFLICT ("id") DO NOTHING;--> statement-breakpoint
 -- Von Hand: updated_at pflegt die Datenbank (wie 0002_updated_at_trigger)

@@ -1,5 +1,5 @@
 // appendOp (VERTRAEGE §11.2, §16.2): lückenlose seq, Idempotenz über op_id, Hook nach dem Commit.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import {
   appendOp,
@@ -25,6 +25,7 @@ beforeEach(async () => {
   await handle.sql`TRUNCATE sync_stream, sync_op`;
 });
 afterEach(() => {
+  vi.restoreAllMocks();
   setOnOpCommitted(null);
 });
 
@@ -39,14 +40,22 @@ const markerOp = (overrides: Partial<AppendOpInput> = {}): AppendOpInput => ({
 });
 
 const append = (stream: string, op: AppendOpInput) => handle.db.transaction((tx) => appendOp(tx, stream, op));
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Wartet, bis `predicate` stimmt (Hook läuft asynchron nach NOTIFY) */
-async function waitFor(predicate: () => boolean, timeoutMs = 3000): Promise<void> {
+async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
     if (Date.now() - start > timeoutMs) throw new Error('Zeitüberschreitung beim Warten');
-    await new Promise((r) => setTimeout(r, 10));
+    await sleep(10);
   }
+}
+
+/** Startet den Listener und setzt danach den Hook (Reihenfolge wie in T1-08) */
+async function listen(hook: (op: CommittedOp) => void | Promise<void>, onError?: (e: unknown) => void) {
+  const stop = await listenCommittedOps(handle.sql, handle.db, onError);
+  setOnOpCommitted(hook);
+  return stop;
 }
 
 describe('appendOp', () => {
@@ -54,7 +63,7 @@ describe('appendOp', () => {
     const a = sessionStream();
     const b = `notebook:${uuidv7()}`;
     const deviceId = uuidv7();
-    expect((await append(a, markerOp())).seq).toBe(1);
+    expect(await append(a, markerOp())).toMatchObject({ seq: 1, duplicate: false });
     expect((await append(a, markerOp())).seq).toBe(2);
     expect((await append(b, markerOp({ kind: 'page.delete', data: { page_id: uuidv7() } }))).seq).toBe(1);
     const third = await append(a, markerOp({ deviceId, clockUncertain: true, at: 42 }));
@@ -65,26 +74,29 @@ describe('appendOp', () => {
     expect(stored).toMatchObject({
       stream: a,
       seq: 3,
+      opId: third.opId,
       kind: 'marker.add',
       at: 42,
       clockUncertain: true,
       origin: 'ipad',
       deviceId,
     });
+    expect(await findOpById(handle.db, uuidv7())).toBeNull();
     const heads = await handle.sql`SELECT stream, head_seq FROM sync_stream ORDER BY stream`;
     expect(Object.fromEntries(heads.map((h) => [h.stream, Number(h.head_seq)]))).toEqual({ [a]: 3, [b]: 1 });
     await expect(append('notizbuch:1', markerOp())).rejects.toThrow(/Strom/);
     await expect(append(`session:${uuidv7().toUpperCase()}`, markerOp())).rejects.toThrow(/Strom/);
   });
 
-  it('ist idempotent über op_id; andere Daten, Art oder Strom ergeben op_id_reused', async () => {
+  it('ist idempotent über op_id (duplicate = true); andere Daten, Art oder Strom ergeben op_id_reused', async () => {
     const stream = sessionStream();
     const op = markerOp({ opId: uuidv7(), data: { b: 2, a: [1, { c: null }] } });
     const first = await append(stream, op);
+    expect(first.duplicate).toBe(false);
     await append(stream, markerOp());
     // Gleiche Daten in anderer Schlüsselreihenfolge, anderes at: das ursprüngliche ack
     const again = await append(stream, { ...op, data: { a: [1, { c: null }], b: 2 }, at: 1 });
-    expect(again).toEqual(first);
+    expect(again).toEqual({ ...first, duplicate: true });
     expect(await handle.sql`SELECT count(*)::int AS n FROM sync_op`).toEqual([{ n: 2 }]);
 
     for (const changed of [
@@ -97,6 +109,33 @@ describe('appendOp', () => {
     }
     await expect(append(sessionStream(), op)).rejects.toMatchObject({ code: 'op_id_reused' });
     expect((await append(stream, markerOp())).seq).toBe(3);
+  });
+
+  it('gleiche op_id gleichzeitig: im selben Strom ein Duplikat, in zwei Strömen internal_error (wiederholbar)', async () => {
+    const stream = sessionStream();
+    const op = markerOp({ opId: uuidv7() });
+    const same = await Promise.all([append(stream, op), append(stream, op)]);
+    expect(same.map((r) => r.seq)).toEqual([1, 1]);
+    expect(same.map((r) => r.duplicate).sort()).toEqual([false, true]);
+
+    // Zwei Ströme: die zweite Transaktion wartet auf den Unique-Index und scheitert dann
+    const other = markerOp({ opId: uuidv7() });
+    const results = await Promise.allSettled([
+      handle.db.transaction(async (tx) => {
+        const r = await appendOp(tx, sessionStream(), other);
+        await tx.execute('SELECT pg_sleep(0.1)');
+        return r;
+      }),
+      (async () => {
+        await sleep(30);
+        return append(sessionStream(), other);
+      })(),
+    ]);
+    expect(results[0]?.status).toBe('fulfilled');
+    expect(results[1]).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'internal_error', retryable: true },
+    });
   });
 
   it('Rollback verbraucht keine seq', async () => {
@@ -126,20 +165,21 @@ describe('appendOp', () => {
     const [head] = await handle.sql`SELECT head_seq FROM sync_stream WHERE stream = ${stream}`;
     expect(Number(head?.head_seq)).toBe(25);
   });
+});
 
+describe('listenCommittedOps', () => {
   it('ruft den Hook nach dem Commit auf, in seq-Reihenfolge und nie nach Rollback', async () => {
     const received: CommittedOp[] = [];
-    setOnOpCommitted((op) => {
+    const stop = await listen((op) => {
       received.push(op);
     });
-    const stop = await listenCommittedOps(handle.sql, handle.db);
     try {
       const stream = sessionStream();
       let seenInsideTx = -1;
       await handle.db.transaction(async (tx) => {
         await appendOp(tx, stream, markerOp());
         await appendOp(tx, stream, markerOp({ origin: 'server' }));
-        await new Promise((r) => setTimeout(r, 50));
+        await sleep(50);
         seenInsideTx = received.length; // vor dem Commit noch nichts
       });
       expect(seenInsideTx).toBe(0);
@@ -151,7 +191,7 @@ describe('appendOp', () => {
       ).rejects.toThrow('Rollback');
       await append(stream, markerOp({ origin: 'web' }));
       await waitFor(() => received.length >= 3);
-      await new Promise((r) => setTimeout(r, 50));
+      await sleep(50);
       expect(received.map((o) => [o.seq, o.origin])).toEqual([
         [1, 'ipad'],
         [2, 'server'],
@@ -162,10 +202,78 @@ describe('appendOp', () => {
       // Standard-Hook: nichts tun
       setOnOpCommitted(null);
       await append(stream, markerOp());
-      await new Promise((r) => setTimeout(r, 50));
+      await sleep(50);
       expect(received).toHaveLength(3);
     } finally {
       await stop();
     }
+  });
+
+  it('holt nach einem Abbruch der LISTEN-Verbindung Verpasstes nach (pg_terminate_backend)', async () => {
+    const received: string[] = [];
+    const stop = await listen((op) => {
+      received.push(`${op.stream}#${op.seq}`);
+    });
+    try {
+      const stream = sessionStream();
+      await append(stream, markerOp());
+      await waitFor(() => received.length === 1);
+
+      const listeners = await handle.sql`SELECT pid FROM pg_stat_activity
+        WHERE datname = current_database() AND query ILIKE 'listen %' AND pid <> pg_backend_pid()`;
+      expect(listeners.length).toBeGreaterThan(0);
+      for (const l of listeners) await handle.sql`SELECT pg_terminate_backend(${l.pid})`;
+      // Während der Unterbrechung: zwei Operationen, eine davon in einem neuen Strom
+      const fresh = sessionStream();
+      await append(stream, markerOp());
+      await append(fresh, markerOp());
+
+      await waitFor(() => received.length === 3, 15_000);
+      expect(received).toEqual([`${stream}#1`, `${stream}#2`, `${fresh}#1`]);
+      // Danach läuft der Listener normal weiter
+      await append(stream, markerOp());
+      await waitFor(() => received.length === 4, 5000);
+      expect(received[3]).toBe(`${stream}#3`);
+    } finally {
+      await stop();
+    }
+  }, 30_000);
+
+  it('schiebt den Cursor nicht weiter, wenn der Hook wirft, und liefert später lückenlos nach', async () => {
+    const received: number[] = [];
+    const errors: unknown[] = [];
+    let fail = true;
+    const stop = await listen(
+      (op) => {
+        if (fail && op.seq === 2) throw new Error('Versand gescheitert');
+        received.push(op.seq);
+      },
+      (e) => errors.push(e),
+    );
+    try {
+      const stream = sessionStream();
+      await append(stream, markerOp());
+      await append(stream, markerOp());
+      await append(stream, markerOp());
+      await waitFor(() => errors.length >= 1);
+      await sleep(50);
+      expect(received).toEqual([1]);
+      fail = false;
+      await append(stream, markerOp()); // nächste Benachrichtigung des Stroms
+      await waitFor(() => received.length === 4);
+      expect(received).toEqual([1, 2, 3, 4]);
+    } finally {
+      await stop();
+    }
+  });
+
+  it('warnt, wenn der Hook ohne laufenden Listener gesetzt wird', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    setOnOpCommitted(() => {});
+    expect(warn).toHaveBeenCalledTimes(1);
+    const stop = await listenCommittedOps(handle.sql, handle.db);
+    setOnOpCommitted(() => {});
+    expect(warn).toHaveBeenCalledTimes(1);
+    await stop();
   });
 });

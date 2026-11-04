@@ -1,5 +1,5 @@
 // Phase-1-Tabellen aus T1-DB (VERTRAEGE §6.1, 03 §3/§5/§6/§13): Spalten, Schlüssel, Fremdschlüssel, Trigger.
-import { eq } from 'drizzle-orm';
+import { eq, sql as dsql } from 'drizzle-orm';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SINGLE_USER_ID } from '@sg/shared';
@@ -173,6 +173,23 @@ describe('Phase-1-Schema', () => {
         .insert(calendarEvent)
         .values({ id: uuidv7(), ...event, externalUid: 'x', assignedBy: 'irgendwer' }),
     ).rejects.toThrow();
+    // Manuelle Termine (ohne Quelle) fallen nicht unter den Abgleichschlüssel
+    const manual = { ...event, sourceId: null, externalUid: null };
+    await handle.db.insert(calendarEvent).values({ id: uuidv7(), ...manual });
+    await handle.db.insert(calendarEvent).values({ id: uuidv7(), ...manual });
+    // Upsert über den partiellen Index (so nutzt ihn der Abgleich in T1-01)
+    const upsertId = uuidv7();
+    const [upserted] = await handle.db
+      .insert(calendarEvent)
+      .values({ id: upsertId, ...event, title: 'VL neu' })
+      .onConflictDoUpdate({
+        target: [calendarEvent.sourceId, calendarEvent.externalUid, calendarEvent.recurrenceId],
+        targetWhere: dsql`${calendarEvent.sourceId} IS NOT NULL`,
+        set: { title: 'VL neu' },
+      })
+      .returning();
+    expect(upserted?.id).not.toBe(upsertId);
+    expect(upserted?.title).toBe('VL neu');
   });
 
   it('Verweise über Stromgrenzen haben keinen Fremdschlüssel, Teile eines Ganzen CASCADE (VERTRAEGE §6)', async () => {

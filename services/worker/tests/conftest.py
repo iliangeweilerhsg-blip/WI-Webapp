@@ -37,7 +37,7 @@ CREATE TABLE job (
 CREATE INDEX job_pick_idx ON job (priority DESC, created_at) WHERE state = 'wartet' AND deleted_at IS NULL;
 """
 
-# Vereinfachte Kopie der Material-Tabellen aus dem Core (03 §4): ohne Fremdschlüssel auf
+# Vereinfachte Kopie der Material- und Aufnahme-Tabellen aus dem Core (03 §4, §5): ohne Fremdschlüssel auf
 # `module`/`session` und ohne `embedding`. Der Core besitzt das Schema.
 MATERIAL_TABLES_SQL = """
 CREATE TABLE slide_deck (
@@ -65,6 +65,30 @@ CREATE TABLE exercise_sheet (
   module_id uuid NOT NULL, title text NOT NULL, number integer, file_path text NOT NULL,
   sha256 text NOT NULL, page_count integer, due_at timestamptz, solution_file_path text,
   ingest_state text NOT NULL DEFAULT 'neu' CHECK (ingest_state IN ('neu','verarbeitet','fehler'))
+);
+-- Aufnahmen (Core-Migration 0003_phase1, für audio.finalize T1-06w). Ohne FK auf `session`.
+CREATE TABLE recording (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz,
+  session_id uuid NOT NULL, mime text NOT NULL,
+  codec text NOT NULL CHECK (codec IN ('opus','aac')),
+  started_ms bigint NOT NULL CHECK (started_ms >= 0), duration_ms bigint,
+  state text NOT NULL DEFAULT 'laeuft' CHECK (state IN ('laeuft','vollstaendig','mit_luecken')),
+  chunks_independent boolean NOT NULL DEFAULT false, completed_at timestamptz,
+  completed_last_seq integer CHECK (completed_last_seq IS NULL OR completed_last_seq >= 0),
+  completed_duration_ms bigint
+);
+CREATE TABLE audio_chunk (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz,
+  recording_id uuid NOT NULL REFERENCES recording(id) ON DELETE CASCADE,
+  seq integer NOT NULL CHECK (seq >= 0), start_ms bigint NOT NULL CHECK (start_ms >= 0),
+  duration_ms bigint NOT NULL CHECK (duration_ms >= 1), file_path text NOT NULL, sha256 text NOT NULL,
+  size_bytes bigint NOT NULL CHECK (size_bytes >= 1),
+  received_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT audio_chunk_recording_seq_uq UNIQUE (recording_id, seq)
 );
 """
 

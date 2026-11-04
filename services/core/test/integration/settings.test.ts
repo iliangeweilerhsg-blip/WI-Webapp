@@ -1,5 +1,5 @@
 // getSettings: Standards aus VERTRAEGE §14.1, gespeicherte Werte Feld für Feld darüber.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SettingsSchema, SINGLE_USER_ID } from '@sg/shared';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import { setting } from '../../src/db/schema/index.ts';
@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS, getSettings } from '../../src/services/settings.ts';
 import { testDatabaseUrl } from './helpers.ts';
 
 let handle: DbHandle;
-const savedDataDir = process.env.SG_DATA_DIR;
+const CONFIG = { dataDir: '/tmp/sg-einstellungen-test' };
 
 beforeAll(() => {
   handle = createDb(testDatabaseUrl());
@@ -18,11 +18,6 @@ afterAll(async () => {
 });
 beforeEach(async () => {
   await handle.sql`TRUNCATE setting`;
-  process.env.SG_DATA_DIR = '/tmp/sg-einstellungen-test';
-});
-afterEach(() => {
-  if (savedDataDir === undefined) delete process.env.SG_DATA_DIR;
-  else process.env.SG_DATA_DIR = savedDataDir;
 });
 
 const store = (key: string, value: unknown, deleted = false) =>
@@ -32,7 +27,7 @@ const store = (key: string, value: unknown, deleted = false) =>
 
 describe('getSettings', () => {
   it('liefert ohne gespeicherte Werte alle Standards (VERTRAEGE §14.1)', async () => {
-    const settings = SettingsSchema.parse(await getSettings(handle.db));
+    const settings = SettingsSchema.parse(await getSettings(handle.db, CONFIG));
     expect(settings).toEqual({
       general: { data_dir: '/tmp/sg-einstellungen-test', content_lang: 'de', appearance: 'system' },
       lecture: {
@@ -77,14 +72,14 @@ describe('getSettings', () => {
     await store('general', { appearance: 'dunkel', data_dir: '/woanders' });
     await store('data', 'kein Objekt');
     await store('ki', { modell: 'x' }); // späterer Bereich, gehört nicht zu Settings
-    const settings = SettingsSchema.parse(await getSettings(handle.db));
+    const settings = SettingsSchema.parse(await getSettings(handle.db, CONFIG));
     expect(settings.lecture).toEqual({
       ...DEFAULT_SETTINGS.lecture,
       auto_stop_silence_min: 20,
       microphone_id: 'mic-1',
     });
     expect(settings.pen).toEqual({ ...DEFAULT_SETTINGS.pen, favorite_colors: ['#FF0000FF'] });
-    // data_dir kommt immer aus SG_DATA_DIR
+    // data_dir kommt immer aus der App-Konfiguration (SG_DATA_DIR)
     expect(settings.general).toEqual({
       data_dir: '/tmp/sg-einstellungen-test',
       content_lang: 'de',
@@ -94,13 +89,13 @@ describe('getSettings', () => {
 
     await handle.sql`TRUNCATE setting`;
     await store('data', { backup_target: '/Volumes/Backup' }, true);
-    expect((await getSettings(handle.db)).data.backup_target).toBeNull();
+    expect((await getSettings(handle.db, CONFIG)).data.backup_target).toBeNull();
   });
 
   it('gibt die Standards nicht als geteilte Objekte heraus', async () => {
-    const a = await getSettings(handle.db);
+    const a = await getSettings(handle.db, CONFIG);
     a.pen.favorite_colors.push('#123456FF');
-    const b = await getSettings(handle.db);
+    const b = await getSettings(handle.db, CONFIG);
     expect(b.pen.favorite_colors).toHaveLength(8);
   });
 });

@@ -93,7 +93,7 @@ describe('Migration vom Phase-0-Stand', () => {
       await sql`SELECT state, start_offsets, auto_stop_extended_until FROM session WHERE id = ${sessionId}`;
     expect(sess).toEqual({ state: 'laeuft', start_offsets: [], auto_stop_extended_until: null });
     const [dev] = await sql`SELECT clock_offset_ms FROM device WHERE id = ${deviceId}`;
-    expect(dev?.clock_offset_ms).toBe(0);
+    expect(dev?.clock_offset_ms).toBeNull(); // 0 war kein Messwert
     const [backup] = await sql`SELECT trigger, stand FROM backup_run WHERE id = ${backupId}`;
     expect(backup).toEqual({ trigger: 'manuell', stand: null });
     expect(await sql`SELECT count(*)::int AS n FROM sync_meta`).toEqual([{ n: 1 }]);

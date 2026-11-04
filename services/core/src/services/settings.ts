@@ -15,7 +15,7 @@ import {
   type Settings,
 } from '@sg/shared';
 import type { z } from 'zod';
-import { loadConfig } from '../config.ts';
+import type { Config } from '../config.ts';
 import type { DbOrTx } from '../db/client.ts';
 import { notDeleted, setting } from '../db/schema/index.ts';
 
@@ -76,8 +76,11 @@ function mergeArea<T extends object>(defaults: T, stored: unknown, schema: z.Zod
   return result as T;
 }
 
-/** Alle Phase-1-Bereiche mit Standards aufgefüllt (`GET /settings`) */
-export async function getSettings(db: DbOrTx): Promise<Settings> {
+/**
+ * Alle Phase-1-Bereiche mit Standards aufgefüllt (`GET /settings`).
+ * `general.data_dir` kommt aus der App-Konfiguration (`SG_DATA_DIR`), nie aus der Datenbank.
+ */
+export async function getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): Promise<Settings> {
   const rows = await db
     .select({ key: setting.key, value: setting.value })
     .from(setting)
@@ -85,7 +88,7 @@ export async function getSettings(db: DbOrTx): Promise<Settings> {
   const stored = new Map(rows.map((r) => [r.key, r.value]));
   return {
     general: {
-      data_dir: loadConfig().dataDir,
+      data_dir: config.dataDir,
       ...mergeArea(DEFAULT_SETTINGS.general, stored.get('general'), GeneralSettingsUpdateSchema),
     },
     lecture: mergeArea(DEFAULT_SETTINGS.lecture, stored.get('lecture'), LectureSettingsUpdateSchema),

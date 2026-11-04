@@ -10,7 +10,6 @@ import {
   numeric,
   pgTable,
   text,
-  unique,
   uniqueIndex,
   uuid,
   type AnyPgColumn,
@@ -106,8 +105,12 @@ export const calendarEvent = pgTable(
     index('calendar_event_starts_idx').on(t.startsAt),
     index('calendar_event_module_idx').on(t.moduleId),
     index('calendar_event_source_uid_idx').on(t.sourceId, t.externalUid),
-    // Abgleichschlüssel (F-KAL-01, VERTRAEGE §6.1). Einzeltermine haben recurrence_id NULL.
-    unique('calendar_event_sync_uq').on(t.sourceId, t.externalUid, t.recurrenceId).nullsNotDistinct(),
+    // Abgleichschlüssel (F-KAL-01, VERTRAEGE §6.1), nur für Termine aus einer Quelle (manuelle haben source_id NULL).
+    // Einzeltermine haben recurrence_id NULL. NULLS NOT DISTINCT steht von Hand in 0003_phase1.sql, weil Drizzle 0.45
+    // es nur für Constraints kennt. Upsert: ON CONFLICT (source_id, external_uid, recurrence_id) WHERE source_id IS NOT NULL
+    uniqueIndex('calendar_event_sync_uq')
+      .on(t.sourceId, t.externalUid, t.recurrenceId)
+      .where(sql`${t.sourceId} IS NOT NULL`),
     check(
       'calendar_event_kind_chk',
       sql`${t.kind} IN ('vorlesung','uebung','tutorium','pruefung','fest','lernblock_export')`,
