@@ -409,7 +409,7 @@ Startet ein Gerät eine Session offline, während sie auf dem Server schon mit a
 
 ## 11. Sync-Protokoll (T1-08, T1-09)
 
-Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`. Eine Nachricht = ein Text-Frame mit einem JSON-Objekt, höchstens 1 MB.
+Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`. Eine Nachricht = ein Text-Frame mit einem JSON-Objekt, höchstens 1 MB. Der Server liest das als 1 MiB (1 048 576 Byte), damit beide Lesarten des Clients passen. Größere Nachrichten schließt er mit 1009, Binär-Frames mit `error message_invalid` und 1003.
 
 ### 11.1 Verbindung und Anmeldung
 
@@ -418,8 +418,9 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
   - Host-Prüfung (`421`) und **Origin-Prüfung** (`403`) wie §5. Browser senden beim Upgrade immer `Origin`. Eine fremde Webseite darf sich nicht über `localhost` verbinden (Cross-Site WebSocket Hijacking).
   - **Aus dem Netz:** `Authorization: Bearer <device_token>` ist Pflicht (`401 device_token_required|device_token_invalid`). `URLSessionWebSocketTask` setzt den Header über den `URLRequest`.
   - **Lokal** (Web-App): ohne Token.
-- **Kein Token in `hello`.** `hello.device_id` ist optional und dient nur als Gegenprobe. Passt sie nicht zum Token: `error device_token_invalid` (fatal), Code 4401.
-- **Erste Nachricht** muss innerhalb von 5 s `hello` sein, sonst `error hello_required` und Schließen mit Code 4408. `protocol` ≠ 1: `error protocol_unsupported` (fatal), Code 4426.
+  - Kommt die Verbindung aus dem Netz, ohne dass der Wächter ein Gerät gesetzt hat (`request.sgDevice` fehlt), sendet der Server `error device_token_invalid` (fatal) und schließt mit 4401.
+- **Kein Token in `hello`.** `hello.device_id` ist optional und dient nur als Gegenprobe. Passt sie nicht zum Token: `error device_token_invalid` (fatal), Code 4401. Lokal gibt es kein Token zum Vergleichen: Der Server ignoriert `hello.device_id`, und `welcome.device_id` ist `null`.
+- **Erste Nachricht** muss innerhalb von 5 s `hello` sein, sonst `error hello_required` und Schließen mit Code 4408. `protocol` ≠ 1: `error protocol_unsupported` (fatal), Code 4426. Verletzt `hello` das Schema: `error hello_invalid` (fatal), ebenfalls Code 4408 („kein gültiges `hello`“).
 - **Antwort** `welcome` mit `server_time`, `db_epoch` und je Strom einem `resume`-Eintrag. Danach sendet der Server:
   1. die fehlenden Operationen jedes Stroms ab `from_seq` bis `head_seq` in `seq`-Reihenfolge,
   2. die aktuellen `presence`- und `device.connection`-Ereignisse der anderen Clients.
@@ -430,6 +431,10 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
 | `last_seq = 0`, `last_op_id = null` | beliebig | `from_seq = 1`, `reset = false` |
 | `last_seq = n`, `last_op_id = x` | Operation `n` mit `op_id = x` | `from_seq = n + 1`, `reset = false` |
 | `last_seq = n` | `head_seq < n`, oder Operation `n` hat eine andere `op_id` | `from_seq = 1`, `reset = true`. Für diesen Strom sendet der Server **nichts** |
+| `last_seq = 0`, `last_op_id ≠ null` | beliebig | `from_seq = 1`, `reset = true` (passt zu keiner Zeile oben) |
+| `last_seq = n > 0`, `last_op_id = null` | beliebig | `from_seq = 1`, `reset = true` (zählt als „andere `op_id`“) |
+
+Bei `reset` legt der Server kein Abo an. Der Client abonniert nach dem REST-Abgleich neu.
 
 - **`last_seq = 0`** meldet ein Client nur für Ströme, die er selbst gerade anlegt (neues Notizbuch, neue Session) oder die nachweislich leer sind. Für einen bestehenden Strom ohne lokalen Stand lädt er **zuerst per REST** und abonniert dann mit `last_seq = stream_seq` und `last_op_id = stream_op_id`. Ein vollständiges Abspielen ab `seq = 1` ist so die Ausnahme. Der Server liefert es aber, wenn danach gefragt wird.
 - **`db_epoch`** ändert sich bei jeder Wiederherstellung (`sg restore` schreibt eine neue Zufalls-UUID in `sync_meta`). Weicht sie vom zuletzt gespeicherten Wert ab, behandelt der Client **alle** Ströme wie `reset`, auch solche, die er nicht in `hello` gemeldet hat.
@@ -454,6 +459,14 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
 - **Wartezeit nach 4503:** Der Client wartet vor dem Neuverbinden exponentiell (1 s, 2 s, 4 s … höchstens 30 s, mit Zufallsanteil). Nach einem `ack` beginnt die Folge von vorn.
 - **Giftige Operation:** Scheitert dieselbe `op_id` 5-mal mit `internal_error`, verschiebt der Client sie samt abhängigen Operationen in die Fehlerablage und zeigt das an. Danach sendet er die übrigen weiter. So blockiert eine Operation die Warteschlange nicht auf Dauer.
 - **Kein Zurückhalten.** Die Reihenfolge pro Verbindung ist garantiert, und der Client sendet Eltern immer vor Kindern (Notizbuch vor Seite vor Strich, `session.start` vor Markern).
+- **`origin`** einer Client-Operation ist `hello.client` der Verbindung. `device_id` kommt aus dem Token (lokal `null`).
+- **Kein Handler registriert** für eine bekannte `kind` (Lücke im Server, kein Fehler des Clients): `error internal_error` mit `details.reason = handler_missing`, wiederholbar, Code 4503. Nach 5 Versuchen greift die Regel für giftige Operationen.
+- **Fatale, nicht wiederholbare Fehler:** `session_superseded` schließt immer mit 4409. Setzt ein Handler `fatal` bei einem anderen Code (`SyncOpError`, §16.2), schließt der Server mit 1008, bei `device_token_invalid` mit 4401. Vor jedem fatalen `error` bekommen alle früher auf dieser Verbindung empfangenen Operationen ihre Antwort.
+- **`ack`-Watchdog:** Bleibt das `ack` einer committeten Operation 30 s aus (Auslieferung gestört), sendet der Server `error internal_error` (wiederholbar, `details.reason = ack_timeout`) und schließt mit 4503. Der Client sendet erneut und bekommt das Duplikat bestätigt.
+- **Schutzgrenzen pro Verbindung:**
+  - Rate-Limit nur für Nachrichten, die keine Operation sind (`ping`, `time.*`, `presence`, `subscribe` …): Eimer mit 200 Marken, 50 pro Sekunde nachgefüllt. Darüber: `error message_invalid` (fatal) und Code 1008.
+  - Operationen begrenzt das Pending-Limit (200). Zusätzlich pausiert der Server das Lesen, solange mehr als 8 MiB empfangene Operationen auf die Bearbeitung warten. Unter 2 MiB liest er weiter.
+  - Leerlauf (§11.4): Schließen mit 1001.
 - **Weich gelöschte Eltern** (Notizbuch, Seite, Session, Modul): Inhalts-Operationen werden **angenommen und bestätigt**. Das gilt auch für `notebook.create` in ein gelöschtes Modul. Das neue bzw. per Upsert geänderte Objekt bekommt den `deleted_at` des gelöschten Elternobjekts (auch ein `stroke.add` auf einer gelöschten Seite, nicht `NULL`) und kommt mit ihm aus dem Papierkorb zurück (§13).
 - **Eltern nicht (mehr) vorhanden**, also nie angelegt oder schon endgültig gelöscht: nicht wiederholbarer Fehler (`module_not_found`, `notebook_not_found`, `page_not_found`, `session_not_found`).
 - **Notizbuch-Strom:** `notebook.create` läuft im Strom des **neuen** Notizbuchs, also `notebook:<notebook_id>`. Darum stehen Anlegen und alle folgenden `page.create` dieses Notizbuchs im selben Strom, in fester Reihenfolge. Andere Clients erfahren neue Notizbücher, weil sie den Strom abonnieren, sobald sie die ID per REST (`GET /notebooks`) oder aus `presence` kennen.
@@ -467,6 +480,7 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
   - `page_version_conflict`: Seite per REST neu laden, die eigenen geänderten Felder auf den Serverstand legen und mit dessen `version` erneut senden. Mehrere Offline-Änderungen einer Seite zählen `version` lokal hoch, jede beruht auf der vorigen.
 - Die Fehlerablage wird **nie automatisch gelöscht**. Sie ist sichtbar: iPad unter Einstellungen → Sync, Web in der Statusleiste mit Zähler. Sie lässt sich als JSON exportieren (iPad über das Teilen-Menü an den Mac, Web als Datei-Download). **Bewusste Lücke in Phase 1:** Es gibt kein Wiedereinspielen. Ein Export wird bei Bedarf von Hand ausgewertet.
 - `error` mit `retryable = true` → Verbindung ist zu, nach der Wartezeit neu verbinden und ab dieser Operation erneut senden.
+- Schließen mit 1008, 1003 oder 1009 (Schutzgrenze, Binär-Frame, zu groß) → mit Wartezeit wie nach 4503 neu verbinden. Eine Operation, die selbst über der Grenze liegt (1009) oder nicht wiederholbar abgelehnt wurde, kommt in die Fehlerablage. Sonst entstünde eine Schleife.
 - **Unbekannte Server-Nachrichten:** Unbekannte Operationen (`kind`) und bekannte Operationen mit unbekannten Enum-Werten (neuere Server-Version) überspringt der Client, **zählt ihre `seq` aber als empfangen**. Sonst entstünde eine Lücke und ein endloses Neu-Abonnieren. Unbekannte Nachrichtentypen und Ereignisse ignoriert er.
 
 ### 11.3 Wirkung der Operationen
@@ -513,6 +527,8 @@ Der Client sendet alle 15 s `ping`, der Server antwortet mit `pong`. Bleibt die 
 - `session.updated` geht bei jeder Änderung einer Session raus, auch bei zeitgesteuerten und vom Worker gemeldeten (§3, `pg_notify('sg_session', …)`).
 - `pairing.requested` geht **nur an lokale Web-Clients** (§12).
 - Ereignisse werden nicht nachgeliefert. Wer neu verbindet, holt den Stand per REST (`GET /sessions`, `GET /devices` mit `connected`).
+- **Reihenfolge je Verbindung:** Ein Ereignis kommt nie vor den Operationen an, die vor ihm committet wurden. `publishAfterCommit` läuft dafür über dieselbe serielle Kette wie die Operationen (§16.2). Läuft für einen abonnierten Strom der Verbindung gerade eine Nachlieferung, warten Ereignisse hinter ihr. Spätere Operationen dürfen vor einem Ereignis ankommen.
+- Ereignisse gehen erst nach `welcome` an eine Verbindung. Die anderen Clients erfahren von einem neuen Client direkt nach dessen `welcome` (`device.connection`).
 
 ### 11.7 Swift (iPad): Pflichten und Hilfsschicht
 
@@ -660,6 +676,12 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 - 4426: Protokollversion
 - 4409: nach `session_superseded`, Warteschlange umschreiben und neu verbinden
 - 4503: nach einem wiederholbaren Fehler, mit Wartezeit neu verbinden und erneut senden
+- 4408 auch bei `hello_invalid`
+- 1001: Leerlauf (60 s ohne Nachricht) oder Herunterfahren des Core
+- 1003: Binär-Frame
+- 1008: Schutzgrenze verletzt (Rate-Limit, zu viele Nachrichten vor `welcome`) oder fataler, nicht wiederholbarer Fehler einer Operation (§11.2)
+- 1009: Nachricht über 1 MiB
+- Bei 1001, 1003, 1008 und 1009 verbindet der Client mit Wartezeit neu (§11.2, Client-Pflichten)
 
 ## 16. Phase-1-Ticketplan
 
@@ -679,15 +701,16 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 
 | Schnittstelle | Datei | Signatur | Füllt |
 |---|---|---|---|
-| Operation anhängen | `services/core/src/sync/append.ts` | `appendOp(tx: Tx, stream: string, op: { kind: SyncOp['kind']; data: unknown; at: number; clockUncertain: boolean; origin: SyncOrigin; opId?: string; deviceId?: string \| null }): Promise<{ seq: number; opId: string; duplicate: boolean }>`. Sperrt `sync_stream`, prüft unter der Sperre die `op_id`, schreibt `sync_op` und meldet die Operation per `pg_notify('sg_sync_op')`. Postgres stellt das erst nach dem Commit zu. `listenCommittedOps(sql, db, onError?)` ruft dann `onOpCommitted` auf, je Strom lückenlos in `seq`-Reihenfolge, auch nach einem Neuverbinden. Wirft der Hook, wiederholt er später ab derselben `seq`. Setter: `setOnOpCommitted(hook)`, Standard: nichts. `findOpById(db, opId)` liefert eine gespeicherte Operation | **T1-DB**. T1-08 startet `listenCommittedOps` beim Core-Start und setzt den Hook für Versand und `ack` (§11.2) |
-| Duplikate | Dispatcher in `services/core/src/sync/**` | Der Dispatcher von T1-08 ruft **zentral vor dem Handler** `findOpById` auf. Gleiche Operation (Strom, Art, Daten): ursprüngliches `ack` ohne Handler. Abweichende: `error op_id_reused`. Handler prüfen das nie selbst. Gleichzeitige Duplikate fängt `appendOp` ab (`duplicate = true` bzw. `internal_error`, wiederholbar) | T1-08 |
-| Op-Handler | `services/core/src/sync/handlers.ts` | `registerOpHandler(kind, (tx: Tx, op: SyncOp, ctx: { deviceId: string \| null; origin: SyncOrigin }) => Promise<void>)`. Fehler über `throw new SyncOpError(code: SyncErrorCode, retryable: boolean, details?)` | Registry T1-08, Handler die Fachtickets |
+| Operation anhängen | `services/core/src/sync/append.ts` | `appendOp(tx: Tx, stream: string, op: { kind: SyncOp['kind']; data: unknown; at: number; clockUncertain: boolean; origin: SyncOrigin; opId?: string; deviceId?: string \| null }): Promise<{ seq: number; opId: string; duplicate: boolean }>`. Sperrt `sync_stream`, prüft unter der Sperre die `op_id`, schreibt `sync_op` und meldet die Operation per `pg_notify('sg_sync_op')`. Postgres stellt das erst nach dem Commit zu. `listenCommittedOps(sql, db, onError?)` ruft dann `onOpCommitted` auf, je Strom lückenlos in `seq`-Reihenfolge, auch nach einem Neuverbinden. Wirft der Hook, wiederholt er später ab derselben `seq`. Gelesen und ausgeliefert wird in Paketen zu 500. Optional `listenCommittedOps(sql, db, onError?, { channels })`: weitere LISTEN-Kanäle (z. B. `sg_event`) auf derselben seriellen Kette. Setter: `setOnOpCommitted(hook)`, Standard: nichts. `findOpById(db, opId)` liefert eine gespeicherte Operation, `toCommitted(row)` macht aus einer `sync_op`-Zeile die Form des Hooks | **T1-DB**. T1-08 startet `listenCommittedOps` beim Core-Start und setzt den Hook für Versand und `ack` (§11.2) |
+| Duplikate | Dispatcher in `services/core/src/sync/**` | Der Dispatcher von T1-08 ruft **zentral vor dem Handler** `findOpById` auf, vor der Transaktion. Gleiche Operation (Strom, Art, Daten): ursprüngliches `ack` ohne Handler, erst wenn der Versand des Stroms die ursprüngliche `seq` erreicht hat. Abweichende: `error op_id_reused`. Handler prüfen das nie selbst. Gleichzeitige Duplikate fängt `appendOp` in der Transaktion ab (`duplicate = true` → Rollback und ursprüngliches `ack`, bzw. `internal_error`, wiederholbar) | T1-08 |
+| Op-Handler | `services/core/src/sync/handlers.ts` | `registerOpHandler(kind, handler: (tx: Tx, op: SyncOp, ctx: { deviceId: string \| null; origin: SyncOrigin }) => Promise<void>, opts?: { preLock?: (tx: Tx, op: SyncOp) => Promise<void> })`, ein Handler pro Art. Ablauf: `findOpById` (vor der Transaktion), dann in **einer** Transaktion `preLock`, `appendOp` (die Client-Operation steht vor allen Server-Operationen des Handlers), Handler. Fehler über `throw new SyncOpError(code: SyncErrorCode, retryable: boolean, details?, opts?: { fatal?: boolean })`: `retryable` → fatal, 4503. `session_superseded` → immer fatal, 4409. `fatal` bei anderen Codes → 1008 (`device_token_invalid` → 4401). Sonst nicht fatal | Registry T1-08, Handler die Fachtickets |
+| Sperr-Reihenfolge | alle Schreibwege mit `appendOp` | **Allgemein:** zuerst den Strom sperren (`appendOp`), dann die Fachzeilen. **Ausnahme:** Was ein Handler in `preLock` sperrt, wird in **allen** Wegen vor dem Strom gesperrt, z. B. `lockSessionTransitions` (T1-02). Session-Zeilen nur mit `FOR NO KEY UPDATE`. Wer Server-Operationen in **andere** Ströme schreibt, nimmt deren Sperren ebenfalls in `preLock`. Sonst droht ein Deadlock (40P01) | alle |
 | Ereignisse | `services/core/src/sync/events.ts` | `publishEvent(event: SyncEvent, opts?: { localOnly?: boolean }): void` und `publishAfterCommit(tx: Tx, event: SyncEvent): Promise<void>`. `publishAfterCommit` nutzt denselben Weg wie `appendOp`: `pg_notify('sg_event', <Event-JSON>)` in `tx`, das Ereignis vollständig in der Nutzlast, über 7000 Byte (UTF-8) wirft es. Ein Listener auf `sg_event` ruft `publishEvent` auf | T1-08 |
 | Verbindungen | `services/core/src/sync/connections.ts` | `closeDeviceConnections(deviceId: string, code: number): void`, `isDeviceConnected(deviceId: string): boolean` | T1-08 |
 | Session-Übergang | `services/core/src/services/sessions.ts` | `transitionSession(tx: Tx, sessionId: string, action: 'start' \| 'pause' \| 'resume' \| 'stop', input: { at: Date; origin: SyncOrigin; deviceId?: string \| null; startedFrom?: ClientDevice; reason?: StopReason; moduleId?: string; calendarEventId?: string \| null; slideDeckId?: string \| null }): Promise<{ session: Session; endedSession: Session \| null }>` (schreibt selbst die Server-Operationen) | T1-02 |
 | Kalender → Session | `services/core/src/services/sessions.ts` | `ensurePlannedSessions(tx: Tx, eventIds: string[]): Promise<void>` (anlegen, löschen, `module_id`, VL-Nummer neu) | T1-02, aufgerufen von T1-01 |
 | Token prüfen | `services/core/src/services/devices.ts` | `verifyDeviceToken(db: Db, token: string): Promise<{ deviceId: string } \| null>` | T1-10 |
-| Wächter → Route | `services/core/src/plugins/security.ts` | `DeviceTokenVerifier` liefert künftig `Promise<{ deviceId: string } \| null>`. Der Wächter setzt `request.sgDevice: { deviceId: string } \| null` (`null` = lokal). Für `GET /sync` mit `Upgrade: websocket` prüft er zusätzlich `Origin` wie bei zustandsändernden Anfragen | T1-10. T1-08 liest `request.sgDevice` beim Upgrade |
+| Wächter → Route | `services/core/src/plugins/security.ts` | `DeviceTokenVerifier` liefert künftig `Promise<{ deviceId: string } \| null>`. Der Wächter setzt `request.sgDevice: { deviceId: string } \| null` (`null` = lokal). Für `GET /sync` mit `Upgrade: websocket` prüft er zusätzlich `Origin` wie bei zustandsändernden Anfragen | T1-10. T1-08 liest `request.sgDevice` beim Upgrade, nur in `resolveDevice(request)` (`services/core/src/sync/server.ts`). Bis T1-10 prüft die Route `/sync` den `Origin` selbst (403 `origin_not_allowed`), danach doppelt |
 | Einstellungen | `services/core/src/services/settings.ts` | `getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): Promise<Settings>`. `general.data_dir` kommt aus der App-Konfiguration | **T1-DB**. T1-19 baut `PATCH`. Genutzt von T1-02 (Auto-Stopp) und T1-18 |
 | Papierkorb | `services/core/src/services/trash.ts` | `softDelete(tx: Tx, kind: TrashKind, id: string): Promise<Date>` (Kaskade §13; wirft `HttpError` 404 `<kind>_not_found`, 409 `session_active`, 409 `notebook_default`), `restoreFromTrash(tx: Tx, id: string): Promise<TrashRestoreResult>` (404 `trash_item_not_found`, 409 `restore_parent_deleted`, 409 `restore_conflict`) | **T1-DB**. T1-18 baut die Routen und schreibt Server-Operationen bei der Wiederherstellung. Alle Lösch-Routen rufen `softDelete` |
 | Fotos | `services/core/src/services/photos.ts` | `upsertPhotoMeta(tx: Tx, data: PhotoAddData): Promise<void>` und `storePhotoFile(id, stream, sha256, mime): Promise<FileReceipt>` prüfen sich gegenseitig (sha256, Typ) | Core-Ink (Handler `photo.add` und `PUT /photos`) |

@@ -15,8 +15,18 @@ export interface SyncLimits {
   /** Nicht-Op-Nachrichten (ping, presence, subscribe …): Eimer mit `controlBurst` Marken, `controlPerSecond` nachgefüllt */
   controlPerSecond: number;
   controlBurst: number;
-  /** Nachrichten, die während der Bearbeitung von `hello` ankommen und warten (Schutz) */
+  /** Nachrichten, die während der Bearbeitung von `hello` ankommen und warten (Schutz): Anzahl und Bytes */
   maxQueuedBeforeWelcome: number;
+  maxQueuedBytesBeforeWelcome: number;
+  /** Ereignisse, die pro Verbindung hinter einer laufenden Nachlieferung warten (§11.6). Darüber: Trennen */
+  maxDeferredEvents: number;
+  /** Gleichzeitige Abfragen der Nachlieferung: global und pro Verbindung (DB-Pool hat 10 Verbindungen) */
+  maxCatchUpQueries: number;
+  maxCatchUpQueriesPerConnection: number;
+  /** Längste Wartezeit, bis ein Client seinen Puffer während der Nachlieferung leert. Danach: Trennen */
+  maxDrainWaitMs: number;
+  /** `hello.app_version` wird auf diese Länge gekürzt gespeichert */
+  maxAppVersionLength: number;
   /** Empfangene, noch nicht bearbeitete Op-Bytes: darüber pausiert der Server das Lesen, darunter liest er weiter */
   inboundPauseBytes: number;
   inboundResumeBytes: number;
@@ -40,6 +50,12 @@ export const syncLimits: SyncLimits = {
   controlPerSecond: 50,
   controlBurst: 200,
   maxQueuedBeforeWelcome: 1_000,
+  maxQueuedBytesBeforeWelcome: 8 * 1024 * 1024,
+  maxDeferredEvents: 10_000,
+  maxCatchUpQueries: 4,
+  maxCatchUpQueriesPerConnection: 2,
+  maxDrainWaitMs: 30_000,
+  maxAppVersionLength: 64,
   inboundPauseBytes: 8 * 1024 * 1024,
   inboundResumeBytes: 2 * 1024 * 1024,
   maxBufferedBytes: 32 * 1024 * 1024,

@@ -10,6 +10,33 @@ import type { SyncEvent } from '@sg/shared';
 import type { Db } from '../db/client.ts';
 import type { CommittedOp } from './append.ts';
 import type { PendingEntry, SyncConnection } from './connection.ts';
+import { syncLimits } from './limits.ts';
+
+/** Einfache Zählsperre: höchstens `limit` gleichzeitig, die übrigen warten in Reihenfolge */
+export class Semaphore {
+  private active = 0;
+  private readonly waiting: (() => void)[] = [];
+  private readonly limit: () => number;
+
+  constructor(limit: () => number) {
+    this.limit = limit;
+  }
+
+  async run<T>(task: () => Promise<T>): Promise<T> {
+    if (this.active >= Math.max(1, this.limit())) {
+      await new Promise<void>((resolve) => this.waiting.push(resolve));
+    } else {
+      this.active += 1;
+    }
+    try {
+      return await task();
+    } finally {
+      const next = this.waiting.shift();
+      if (next) next();
+      else this.active -= 1;
+    }
+  }
+}
 
 export interface SyncHubOptions {
   db: Db;
@@ -37,6 +64,8 @@ export class SyncHub {
   /** Höchste `seq` je Strom, die der Hook ausgeliefert hat (bzw. beim Start schon da war) */
   private readonly delivered = new Map<string, number>();
   private readonly cursorWaiters = new Map<string, Set<CursorWaiter>>();
+  /** Abfragen der Nachlieferung über alle Verbindungen */
+  readonly catchUpQueries = new Semaphore(() => syncLimits.maxCatchUpQueries);
 
   constructor(options: SyncHubOptions) {
     this.db = options.db;
@@ -176,6 +205,7 @@ export class SyncHub {
         resolve,
         timer: setTimeout(() => {
           set.delete(waiter);
+          if (set.size === 0 && this.cursorWaiters.get(stream) === set) this.cursorWaiters.delete(stream);
           resolve(false);
         }, timeoutMs),
       };
@@ -191,7 +221,7 @@ export class SyncHub {
       if (conn === options.exclude) continue;
       if (options.localOnly && conn.deviceId !== null) continue;
       try {
-        conn.send(event);
+        conn.sendEvent(event);
       } catch (error) {
         this.logger.warn({ err: error }, 'Sync: Ereignis konnte nicht gesendet werden');
         conn.terminate();

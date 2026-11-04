@@ -24,7 +24,7 @@ import {
 import type { ZodError } from 'zod';
 import { appendOp, findOpById, type CommittedOp } from './append.ts';
 import { getOpRegistration, SERVER_ONLY_KINDS, SyncOpError } from './handlers.ts';
-import type { SyncHub } from './hub.ts';
+import { Semaphore, type SyncHub } from './hub.ts';
 import { CLOSE, syncLimits } from './limits.ts';
 import {
   canonicalJson,
@@ -146,6 +146,10 @@ export class SyncConnection {
   private opChain: Promise<void> = Promise.resolve();
   private subChain: Promise<void> = Promise.resolve();
   private readonly queuedBeforeWelcome: { msg: unknown; bytes: number }[] = [];
+  private queuedBytesBeforeWelcome = 0;
+  /** Ereignisse, die hinter einer laufenden Nachlieferung warten (§11.6) */
+  private readonly deferredEvents: SyncEvent[] = [];
+  private readonly catchUpQueries = new Semaphore(() => syncLimits.maxCatchUpQueriesPerConnection);
   private inboundBytes = 0;
   private paused = false;
   private tokens = syncLimits.controlBurst;
@@ -206,11 +210,56 @@ export class SyncConnection {
     });
   }
 
-  /** Wartet, bis der Puffer des Clients unter 1 MiB ist (Nachlieferung großer Ströme) */
-  private async drained(): Promise<void> {
+  /**
+   * Ereignis senden (§11.6). Läuft für einen Strom dieser Verbindung noch eine Nachlieferung, wartet es dahinter:
+   * Operationen, die vor dem Ereignis committet wurden, kommen so immer vor ihm an.
+   */
+  sendEvent(event: SyncEvent): void {
+    if (this.phase === 'closed') return;
+    if (!this.anyCatchingUp()) {
+      this.send(event);
+      return;
+    }
+    if (this.deferredEvents.length >= syncLimits.maxDeferredEvents) {
+      this.hub.logger.warn(
+        { deviceId: this.deviceId },
+        'Sync: zu viele wartende Ereignisse, Verbindung wird getrennt',
+      );
+      this.terminate();
+      return;
+    }
+    this.deferredEvents.push(event);
+  }
+
+  private anyCatchingUp(): boolean {
+    for (const sub of this.subs.values()) if (sub.catchingUp) return true;
+    return false;
+  }
+
+  /** Wartende Ereignisse senden, sobald keine Nachlieferung mehr läuft */
+  private flushDeferredEvents(): void {
+    if (this.deferredEvents.length === 0 || this.anyCatchingUp() || this.phase !== 'open') return;
+    for (const event of this.deferredEvents.splice(0)) this.send(event);
+  }
+
+  /**
+   * Wartet, bis der Puffer des Clients unter 1 MiB ist (Nachlieferung großer Ströme). Liest der Client länger als
+   * `maxDrainWaitMs` nicht, wird getrennt (`false`), er holt beim Neuverbinden nach.
+   */
+  private async drained(): Promise<boolean> {
+    const deadline = Date.now() + syncLimits.maxDrainWaitMs;
     while (this.phase !== 'closed' && this.socket.bufferedAmount > 1024 * 1024) {
+      if (Date.now() > deadline) {
+        this.hub.logger.warn(
+          { deviceId: this.deviceId },
+          'Sync: Client liest nicht, Verbindung wird getrennt',
+        );
+        this.terminate();
+        return false;
+      }
       await new Promise((r) => setTimeout(r, 10));
     }
+    return this.phase !== 'closed';
   }
 
   closeWith(code: number, reason: string): void {
@@ -335,13 +384,17 @@ export class SyncConnection {
       return;
     }
     if (this.phase === 'hello') {
-      if (this.queuedBeforeWelcome.length >= syncLimits.maxQueuedBeforeWelcome) {
+      if (
+        this.queuedBeforeWelcome.length >= syncLimits.maxQueuedBeforeWelcome ||
+        this.queuedBytesBeforeWelcome + bytes > syncLimits.maxQueuedBytesBeforeWelcome
+      ) {
         this.fatal('message_invalid', CLOSE.policyViolation, {
           message: 'Zu viele Nachrichten vor welcome.',
         });
         return;
       }
       this.queuedBeforeWelcome.push({ msg, bytes });
+      this.queuedBytesBeforeWelcome += bytes;
       return;
     }
     this.route(msg, bytes);
@@ -468,7 +521,11 @@ export class SyncConnection {
       resume = await computeResume(this.hub.db, positions);
       if (this.deviceId) {
         this.deviceName = await readDeviceName(this.hub.db, this.deviceId);
-        await storeAppVersion(this.hub.db, this.deviceId, hello.app_version);
+        await storeAppVersion(
+          this.hub.db,
+          this.deviceId,
+          hello.app_version.slice(0, syncLimits.maxAppVersionLength),
+        );
       }
     } catch (error) {
       this.hub.logger.error({ err: error }, 'Sync: hello gescheitert');
@@ -547,6 +604,7 @@ export class SyncConnection {
   private dropSubscription(stream: string): void {
     if (!this.subs.delete(stream)) return;
     this.hub.removeSubscriber(stream, this);
+    this.flushDeferredEvents();
   }
 
   private async handleSubscribe(streams: SyncStreamPosition[]): Promise<void> {
@@ -580,11 +638,18 @@ export class SyncConnection {
     try {
       for (;;) {
         if (!current()) return;
-        const rows = await loadOpsAfter(this.hub.db, sub.stream, sub.sentSeq, syncLimits.catchUpBatch);
-        if (!current()) return;
+        // Begrenzt pro Verbindung und global, damit viele Abos den DB-Pool nicht belegen
+        const rows = await this.catchUpQueries.run(() =>
+          this.hub.catchUpQueries.run(() =>
+            current()
+              ? loadOpsAfter(this.hub.db, sub.stream, sub.sentSeq, syncLimits.catchUpBatch)
+              : Promise.resolve(null),
+          ),
+        );
+        if (!rows || !current()) return;
         for (const row of rows) this.deliver(row, true);
         if (rows.length === syncLimits.catchUpBatch) {
-          await this.drained();
+          if (!(await this.drained())) return;
           continue;
         }
         sub.buffer.sort((a, b) => a.seq - b.seq);
@@ -596,6 +661,7 @@ export class SyncConnection {
         }
         if (sub.buffer.length === 0) {
           sub.catchingUp = false;
+          this.flushDeferredEvents();
           return;
         }
         // Lücke vor dem Puffer: Die fehlenden Operationen sind committet, die nächste Abfrage findet sie

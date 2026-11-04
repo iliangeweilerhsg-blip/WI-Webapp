@@ -18,6 +18,9 @@ import { SyncOpError } from './handlers.ts';
 /** Kanal für `pg_notify` nach dem Commit einer Operation. Payload: `{"stream":"…","seq":n}` */
 export const SYNC_OP_CHANNEL = 'sg_sync_op';
 
+/** Paketgröße, in der `listenCommittedOps` einen Strom liest und ausliefert */
+const DISPATCH_BATCH = 500;
+
 /** Strom-ID wie `SyncStreamId` im Schema */
 const STREAM_PATTERN =
   /^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$/;
@@ -220,16 +223,24 @@ export async function listenCommittedOps(
     chain = chain.then(task).catch(onError);
   };
 
-  /** Alle Operationen eines Stroms nach dem Cursor ausliefern. Wirft der Hook, bleibt der Cursor stehen */
+  /**
+   * Alle Operationen eines Stroms nach dem Cursor ausliefern, in Paketen zu `DISPATCH_BATCH` (großer Rückstand nach
+   * einem Abbruch belegt so weder Speicher noch Event-Loop am Stück). Wirft der Hook, bleibt der Cursor stehen
+   */
   async function dispatch(stream: string): Promise<void> {
-    const rows = await db
-      .select()
-      .from(syncOp)
-      .where(and(eq(syncOp.stream, stream), gt(syncOp.seq, cursors.get(stream) ?? 0)))
-      .orderBy(asc(syncOp.seq));
-    for (const row of rows) {
-      await onOpCommitted(toCommitted(row));
-      cursors.set(stream, row.seq);
+    for (;;) {
+      const rows = await db
+        .select()
+        .from(syncOp)
+        .where(and(eq(syncOp.stream, stream), gt(syncOp.seq, cursors.get(stream) ?? 0)))
+        .orderBy(asc(syncOp.seq))
+        .limit(DISPATCH_BATCH);
+      for (const row of rows) {
+        await onOpCommitted(toCommitted(row));
+        cursors.set(stream, row.seq);
+      }
+      if (rows.length < DISPATCH_BATCH) return;
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
   }
 

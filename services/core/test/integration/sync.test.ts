@@ -5,9 +5,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { SyncEvent } from '@sg/shared';
 import type { Tx } from '../../src/db/client.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
-import { appendOp, findOpById, type AppendOpInput } from '../../src/sync/append.ts';
+import { appendOp, findOpById, setOnOpCommitted, type AppendOpInput } from '../../src/sync/append.ts';
 import { publishAfterCommit, publishEvent } from '../../src/sync/events.ts';
 import { registerOpHandler, SyncOpError } from '../../src/sync/handlers.ts';
+import { getActiveHub } from '../../src/sync/hub.ts';
 import { syncLimits } from '../../src/sync/limits.ts';
 import {
   markerOp,
@@ -306,6 +307,26 @@ describe('Resume-Tabelle (§11.1)', () => {
     expect(client.of('op').filter((m) => m.stream === a)).toEqual([]);
   });
 
+  it('begrenzt parallele Nachlieferungen und liefert trotzdem alle Ströme vollständig', async () => {
+    syncLimits.maxCatchUpQueries = 1;
+    syncLimits.catchUpBatch = 2;
+    const streams = Array.from({ length: 20 }, () => sessionStream());
+    for (const s of streams) for (let i = 0; i < 5; i += 1) await append(s);
+    const client = await ready(...streams);
+    await waitFor(() => client.of('op').length === 100, 15_000, 'alle Ströme');
+    for (const s of streams) expect(seqsOf(client, s)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('liefert einen großen Rückstand aus einer Transaktion paketweise und lückenlos aus (Listener)', async () => {
+    const s = sessionStream();
+    const client = await ready(s);
+    await app.handle.db.transaction(async (tx) => {
+      for (let i = 0; i < 1200; i += 1) await appendOp(tx, s, serverOp());
+    });
+    await waitFor(() => seqsOf(client, s).length === 1200, 20_000, '1200 Operationen');
+    expect(seqsOf(client, s)).toEqual(Array.from({ length: 1200 }, (_, i) => i + 1));
+  }, 30_000);
+
   it('liefert große Ströme in Paketen lückenlos nach, auch wenn währenddessen neue Operationen kommen', async () => {
     syncLimits.catchUpBatch = 7;
     const s = sessionStream();
@@ -440,6 +461,76 @@ describe('Operationen, ack und Duplikate (§11.2, §16.2)', () => {
     expect(b.of('ack').filter((m) => m.stream === s)).toHaveLength(n);
   });
 
+  it('Duplikat-ack wartet auf den Cursor (Hook gebremst, aus dem Review von #66)', async () => {
+    const s = sessionStream();
+    const subscriber = await ready(s);
+    const sender = await ready();
+    const hub = getActiveHub()!;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    // Versand des Stroms bremsen: Die Operationen sind committet, aber noch nicht ausgeliefert
+    setOnOpCommitted(async (op) => {
+      if (op.stream === s) await gate;
+      hub.onOpCommitted(op);
+    });
+    try {
+      await append(s);
+      const op = markerOp(s);
+      sender.send(op);
+      for (let i = 0; i < 400; i += 1) {
+        if ((await app.handle.sql`SELECT 1 FROM sync_op WHERE op_id = ${op.op_id as string}`).length) break;
+        await sleep(2);
+      }
+      // Dieselbe Operation über die abonnierte Verbindung: findOpById findet sie, der Cursor steht aber bei 0
+      subscriber.send(op);
+      await sleep(300);
+      expect(seqsOf(subscriber, s)).toEqual([]);
+      release();
+      await waitFor(() => seqsOf(subscriber, s).length >= 2, 10_000);
+      await sleep(100);
+      expect(seqsOf(subscriber, s)).toEqual([1, 2]);
+      expect(subscriber.messages.filter((m) => m.stream === s).map((m) => m.type)).toEqual(['op', 'ack']);
+      expect(seqsOf(sender, s)).toEqual([2]);
+    } finally {
+      release();
+      setOnOpCommitted(hub.onOpCommitted);
+    }
+  }, 30_000);
+
+  it('Duplikat-ack ohne Abo wartet ebenfalls auf den Cursor', async () => {
+    const s = sessionStream();
+    const watcher = await ready(s);
+    const first = await ready();
+    const second = await ready();
+    const hub = getActiveHub()!;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    setOnOpCommitted(async (op) => {
+      if (op.stream === s) await gate;
+      hub.onOpCommitted(op);
+    });
+    try {
+      const op = markerOp(s);
+      first.send(op);
+      for (let i = 0; i < 400; i += 1) {
+        if ((await app.handle.sql`SELECT 1 FROM sync_op WHERE op_id = ${op.op_id as string}`).length) break;
+        await sleep(2);
+      }
+      second.send(op);
+      await sleep(300);
+      // Vor dem Versand von seq 1 darf kein ack raus (sonst käme es vor der Weitergabe beim Abonnenten an)
+      expect(second.of('ack')).toEqual([]);
+      expect(first.of('ack')).toEqual([]);
+      release();
+      await second.next((m) => m.type === 'ack');
+      await first.next((m) => m.type === 'ack');
+      await watcher.next((m) => m.type === 'op' && m.seq === 1);
+    } finally {
+      release();
+      setOnOpCommitted(hub.onOpCommitted);
+    }
+  }, 30_000);
+
   it('schließt nach einem wiederholbaren Fehler mit 4503 und bearbeitet danach nichts mehr', async () => {
     const s = sessionStream();
     const client = await ready();
@@ -450,22 +541,24 @@ describe('Operationen, ack und Duplikate (§11.2, §16.2)', () => {
     client.send(ok);
     client.send(failing);
     client.send(after);
-    const ack = await client.next((m) => m.type === 'ack');
-    expect(ack.op_id).toBe(ok.op_id);
-    expect(await client.next((m) => m.type === 'error')).toMatchObject({
-      code: 'internal_error',
-      op_id: failing.op_id,
-      stream: s,
-      retryable: true,
-      fatal: true,
-    });
     expect(await client.closed()).toBe(4503);
+    // Reihenfolge: erst das ack der früheren Operation, dann der fatale Fehler, sonst nichts
+    const answers = client.messages.filter((m) => m.type === 'ack' || m.type === 'error');
+    expect(answers).toEqual([
+      { type: 'ack', op_id: ok.op_id, stream: s, seq: 1 },
+      expect.objectContaining({
+        type: 'error',
+        code: 'internal_error',
+        op_id: failing.op_id,
+        stream: s,
+        retryable: true,
+        fatal: true,
+      }),
+    ]);
     // Rollback: weder Wirkung noch sync_op für die gescheiterte, nichts für die folgende
     expect(await effects(failing.op_id as string)).toBe(0);
     expect(await effects(after.op_id as string)).toBe(0);
     expect(await storedOps(s)).toBe(1);
-    // Index von ack vor error: ack kam zuerst (oben schon in Reihenfolge entnommen)
-    expect(client.messages.filter((m) => m.type === 'ack')).toEqual([]);
   });
 
   it('meldet nicht wiederholbare Fehler und lässt die Verbindung offen', async () => {
@@ -884,6 +977,33 @@ describe('Ereignisse (§11.6, §16.2)', () => {
     for (let i = 1; i <= 10; i += 1) {
       expect(sequence.indexOf(`op${i}`)).toBeLessThan(sequence.indexOf(`ev#${i}`));
     }
+  });
+
+  it('Ereignisse warten hinter einer laufenden Nachlieferung (aus dem Review von #66)', async () => {
+    syncLimits.catchUpBatch = 5;
+    const s = sessionStream();
+    for (let i = 0; i < 300; i += 1) await append(s);
+    const client = await ready();
+    client.send({ type: 'subscribe', streams: [{ stream: s, last_seq: 0, last_op_id: null }] });
+    await client.next((m) => m.type === 'subscribed');
+    const event: SyncEvent = {
+      type: 'event',
+      name: 'device.connection',
+      data: { client: 'ipad', device_id: uuidv7(), connected: true },
+    };
+    await app.handle.db.transaction(async (tx) => {
+      await appendOp(tx, s, serverOp());
+      await publishAfterCommit(tx, event);
+    });
+    const direct: SyncEvent = { ...event, data: { ...event.data, device_id: uuidv7() } } as SyncEvent;
+    publishEvent(direct);
+    await waitFor(() => seqsOf(client, s).length === 301, 10_000);
+    const same = (e: SyncEvent) => (m: Msg) => JSON.stringify(m) === JSON.stringify(e);
+    await waitFor(() => client.messages.some(same(event)) && client.messages.some(same(direct)));
+    const opIndex = client.messages.findIndex((m) => m.type === 'op' && m.seq === 301);
+    expect(client.messages.findIndex(same(event))).toBeGreaterThan(opIndex);
+    expect(client.messages.findIndex(same(direct))).toBeGreaterThan(opIndex);
+    expect(seqsOf(client, s)).toEqual(Array.from({ length: 301 }, (_, i) => i + 1));
   });
 
   it('publishAfterCommit wirft über 7000 Byte', async () => {
