@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { friendlyMessage } from '../lib/api.ts';
 import { moduleColorVar } from '../lib/modules.ts';
+import { FailedModules } from './FailedModules.tsx';
 import { useQuickModules } from '../lib/quick-modules.ts';
 import { suggestSemesterName, useCreateSemester } from '../lib/semesters.ts';
 
@@ -55,12 +56,7 @@ function ModuleStep({
 }) {
   const [name, setName] = useState('');
   const input = useRef<HTMLInputElement>(null);
-  const quick = useQuickModules({
-    semesterId,
-    keepDone: true,
-    // Nur bei Fehler kommt der Text zurück (und nur, wenn das Feld inzwischen leer ist)
-    onRestore: (text) => setName((current) => (current.trim() ? current : text)),
-  });
+  const quick = useQuickModules({ semesterId, keepDone: true });
 
   useEffect(() => input.current?.focus(), []);
 
@@ -72,7 +68,6 @@ function ModuleStep({
     input.current?.focus();
   }
 
-  const error = quick.error ?? outerError;
   return (
     <div className="mt-1">
       <h2 id="setup-title" className="text-xl font-semibold">
@@ -95,11 +90,17 @@ function ModuleStep({
           className="mt-1 w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md"
         />
       </form>
-      {error ? (
+      {outerError ? (
         <p role="alert" className="mt-2 text-sm text-text-muted">
-          {error}
+          {outerError}
         </p>
       ) : null}
+      <FailedModules
+        semesterId={semesterId}
+        message={quick.error}
+        onRetry={quick.retryFailed}
+        className="mt-2 text-sm text-text-muted"
+      />
       {quick.entries.length > 0 ? (
         <ul aria-label="Angelegte Module" className="mt-3 flex flex-col gap-1">
           {quick.entries.map((m) => (

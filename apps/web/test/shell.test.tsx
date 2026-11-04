@@ -77,12 +77,15 @@ describe('Navigation', () => {
   it('zeigt Module aus der API mit Modulfarbe und Query-Parameter-Link', async () => {
     installFakeCore({ semesters: [makeSemester()], modules: [MODULE] });
     nav.pathname = '/modul';
+    // Die Seitenleiste liest `?id=` aus der Adresse des Fensters (ohne Suspense, siehe hydrated.ts)
+    window.history.replaceState(null, '', `/modul?id=${MODULE.id}`);
     mount();
     const link = await screen.findByRole('link', { name: 'Datenbanksysteme' });
     expect(link).toHaveAttribute('href', `/modul?id=${MODULE.id}`);
     expect(link).toHaveAttribute('aria-current', 'page');
     const dot = link.querySelector('span[aria-hidden]') as HTMLElement;
     expect(dot.style.backgroundColor).toBe('var(--sg-mod-03)');
+    window.history.replaceState(null, '', '/');
   });
 
   it('stürzt ohne Core nicht ab, sondern zeigt „Core nicht erreichbar"', async () => {

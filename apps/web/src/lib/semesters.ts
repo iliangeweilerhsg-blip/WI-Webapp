@@ -9,14 +9,17 @@ import {
   type SemesterUpdate,
 } from '@sg/shared';
 import { apiGet, apiSend } from './api.ts';
+import { useHydrationSafe } from './hydrated.ts';
 
 /** Alle Semester aus `GET /semesters` (neueste zuerst, archivierte inklusive). */
 export function useSemesters() {
-  return useQuery({
+  const query = useQuery({
     queryKey: ['semesters'],
     queryFn: ({ signal }) => apiGet('/semesters?limit=100', SemesterListSchema, { signal }),
     select: (page) => page.items.filter((s) => s.deleted_at === null),
   });
+  // Bis zur Hydration wie im vorgerenderten HTML „lädt“ (sonst React #418, siehe hydrated.ts)
+  return useHydrationSafe(query);
 }
 
 /**
