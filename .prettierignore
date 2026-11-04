@@ -1,0 +1,11 @@
+pnpm-lock.yaml
+**/generated/**
+docs/
+**/.next/**
+**/out/**
+**/dist/**
+services/worker/
+apps/ipad/
+*.md
+.github/
+.claude/

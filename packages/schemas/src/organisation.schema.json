@@ -1,0 +1,365 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Organisation: Semester und Module (03 §3, F-ORG-01)",
+  "$defs": {
+    "Semester": {
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "name",
+        "starts_on",
+        "ends_on",
+        "is_current",
+        "archived_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "examples": ["HS 2026"]
+        },
+        "starts_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ends_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_current": {
+          "type": "boolean",
+          "description": "Höchstens ein Semester ist aktuell"
+        },
+        "archived_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Archiviert = nur in der Navigation ausgeblendet, bleibt durchsuchbar und lernbar (F-ORG-01). Ergänzung zu 03 §3."
+        }
+      }
+    },
+    "SemesterCreate": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "starts_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ends_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_current": {
+          "type": "boolean"
+        }
+      },
+      "description": "id ist optional und darf vom Client erzeugt werden (03 §1)."
+    },
+    "SemesterUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "starts_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ends_on": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_current": {
+          "type": "boolean"
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "true = archivieren, false = wiederherstellen"
+        }
+      }
+    },
+    "SemesterList": {
+      "type": "object",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Semester"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "Module": {
+      "type": "object",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "semester_id",
+        "name",
+        "short_name",
+        "color",
+        "ects",
+        "exam_type",
+        "lecturer",
+        "lang",
+        "description_md"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "semester_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "examples": ["Datenbanksysteme"]
+        },
+        "short_name": {
+          "type": ["string", "null"],
+          "examples": ["DBS"]
+        },
+        "color": {
+          "$ref": "#/$defs/ModuleColor"
+        },
+        "ects": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "exam_type": {
+          "type": ["string", "null"],
+          "examples": ["schriftlich", "mündlich", "Projekt"]
+        },
+        "lecturer": {
+          "type": ["string", "null"]
+        },
+        "lang": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Lang"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description_md": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "ModuleCreate": {
+      "type": "object",
+      "description": "Name genügt, alles andere optional (F-ORG-01). Ohne Farbe vergibt der Core die nächste freie Palettenfarbe. id ist optional und darf vom Client erzeugt werden (03 §1).",
+      "required": ["semester_id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "semester_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "short_name": {
+          "type": ["string", "null"]
+        },
+        "color": {
+          "$ref": "#/$defs/ModuleColor"
+        },
+        "ects": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "exam_type": {
+          "type": ["string", "null"]
+        },
+        "lecturer": {
+          "type": ["string", "null"]
+        },
+        "lang": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Lang"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description_md": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "ModuleUpdate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "semester_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "short_name": {
+          "type": ["string", "null"]
+        },
+        "color": {
+          "$ref": "#/$defs/ModuleColor"
+        },
+        "ects": {
+          "type": ["number", "null"],
+          "minimum": 0
+        },
+        "exam_type": {
+          "type": ["string", "null"]
+        },
+        "lecturer": {
+          "type": ["string", "null"]
+        },
+        "lang": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Lang"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description_md": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "ModuleList": {
+      "type": "object",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Module"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    }
+  }
+}

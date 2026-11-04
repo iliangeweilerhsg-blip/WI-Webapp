@@ -1,0 +1,19 @@
+{
+  "name": "@sg/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generierte TS-Typen und Zod-Validatoren (aus @sg/schemas) und gemeinsame Hilfsfunktionen",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}
