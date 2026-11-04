@@ -148,7 +148,8 @@ Siehe [`ERFAHRUNGSLOG.md`](ERFAHRUNGSLOG.md) (eigene Datei, damit es keine Merge
 2. Antigravity installieren, mit dem Google-Konto des Abos anmelden, Repo klonen und öffnen.
 3. GitHub CLI installieren. Sie ist **kein Teil von Antigravity**, sondern ein eigenes Programm, das Argon im Terminal von Antigravity benutzt.
    - Windows: im Terminal `winget install --id GitHub.cli` (dazu Git: `winget install --id Git.Git`)
-   - macOS: `brew install gh git` oder Installer von https://cli.github.com
+   - macOS ohne Homebrew: Git mit `xcode-select --install` (Dialog bestätigen), GitHub CLI als `.pkg`-Installer von https://cli.github.com
+   - macOS mit Homebrew: `brew install gh git`
    - Antigravity danach neu starten, dann im Antigravity-Terminal `gh auth login` (GitHub.com → HTTPS → „Login with a web browser“) und zum Prüfen `gh auth status`.
 4. Labels: legt Argon beim ersten Start automatisch an (laut Start-Prompt). Alternativ selbst: `bash scripts/setup-labels.sh`.
 5. In Antigravity erlauben, dass der Agent Terminal-Befehle ohne Einzelbestätigung ausführt.
