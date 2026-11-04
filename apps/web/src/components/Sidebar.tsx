@@ -13,6 +13,8 @@ interface SidebarProps {
   expanded: boolean;
   onToggle: () => void;
   onOpenSearch: () => void;
+  /** Öffnet den Einrichtungsdialog (Hinweis in der Modulliste, solange es kein Semester gibt) */
+  onOpenSetup?: () => void;
   /** Neutrale Inbox-Zahl (07 §2: grau, nie rot). Solange der Core keine Zahl liefert, leer. */
   inboxCount?: number | null;
 }
@@ -37,7 +39,7 @@ function NavLink({ item, count }: { item: NavItem; count?: number | null }) {
   );
 }
 
-export function Sidebar({ expanded, onToggle, onOpenSearch, inboxCount = null }: SidebarProps) {
+export function Sidebar({ expanded, onToggle, onOpenSearch, onOpenSetup, inboxCount = null }: SidebarProps) {
   return (
     <aside id="sidebar" className="flex shrink-0 flex-col border-r border-border bg-surface">
       <div className="flex items-center justify-between px-3 py-3">
@@ -63,7 +65,7 @@ export function Sidebar({ expanded, onToggle, onOpenSearch, inboxCount = null }:
           ))}
         </ul>
         <Suspense fallback={null}>
-          <ModuleNav />
+          <ModuleNav {...(onOpenSetup ? { onOpenSetup } : {})} />
         </Suspense>
         <ul className="mt-4 flex flex-col gap-1">
           {NAV_MAIN.map((item) => (

@@ -13,6 +13,7 @@ import { registerIdempotency } from './plugins/idempotency.ts';
 import { createSecurityGuard, registerSecurity, type DeviceTokenVerifier } from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
 import { materialRoutes } from './routes/material.ts';
+import { organisationRoutes } from './routes/organisation.ts';
 import { systemRoutes } from './routes/system.ts';
 
 export interface BuildAppOptions {
@@ -94,6 +95,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       api.get('/openapi.json', { schema: { hide: true } }, async () => api.swagger());
       await api.register(systemRoutes, { db, version });
       await api.register(materialRoutes, { db, config });
+      await api.register(organisationRoutes, { db });
     },
     { prefix: API_BASE },
   );
