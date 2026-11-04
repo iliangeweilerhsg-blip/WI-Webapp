@@ -15,37 +15,46 @@ export interface SearchHit {
 
 // ---------- Normalisierung ----------
 
-const DASHES = /[\u2010-\u2015\u2212\uFE58\uFE63\uFF0D]/gu;
-const DOUBLE_QUOTES = /[\u201C-\u201F\u2033\u00AB\u00BB]/gu;
-const SINGLE_QUOTES = /[\u2018-\u201B\u2032]/gu;
+const DASHES = /[‐-―−﹘﹣－]/gu;
+const DOUBLE_QUOTES = /[“-‟″«»]/gu;
+const SINGLE_QUOTES = /[‘-‛′´`]/gu;
+const INVISIBLE = new RegExp('^[\\u200B-\\u200D\\uFEFF]+$', 'u');
 const IS_SPACE = /^\s+$/u;
 const MARK = /\p{M}/u;
-const NON_ASCII = /[^\u0020-\u007e\t\n\r]/u;
+const NON_ASCII = /[^ -~\t\n\r]/u;
+const ALNUM = /^[\p{L}\p{N}]/u;
+const LETTER = /^\p{L}/u;
+const LOWER = /^\p{Ll}/u;
+
+function unify(text: string): string {
+  return text
+    .replace(DASHES, '-')
+    .replace(DOUBLE_QUOTES, '"')
+    .replace(SINGLE_QUOTES, "'")
+    .replaceAll('\u2044', '/')
+    .replaceAll('\u00AD', '');
+}
 
 /**
  * Normalform eines Zeichenclusters (Grundzeichen mit Akzenten): NFKC (löst Ligaturen, geschützte Leerzeichen und
  * zerlegte Umlaute auf), Kleinschreibung, einheitliche Striche und Anführungszeichen. Kann mehrere Zeichen ergeben
- * („ﬁ“ → „fi“, „İ“ → „i̇“); Weiche Trennzeichen ergeben nichts.
+ * („ﬁ“ → „fi“); weiche Trennzeichen und unsichtbare Zeichen (Breite null) ergeben nichts. „İ“ gilt wie „i“.
  */
 function normalizeCluster(cluster: string): string {
-  if (cluster === '\u00AD') return '';
-  let text = cluster;
+  if (cluster === '\u00AD' || INVISIBLE.test(cluster)) return '';
+  // Vor NFKC vereinheitlichen (U+00B4 würde dort zu „Leerzeichen + Akzent“), danach noch einmal für NFKC-Ergebnisse
+  let text = unify(cluster);
   for (let i = 0; i < text.length; i += 1) {
     if (text.charCodeAt(i) > 127) {
       text = text.normalize('NFKC');
       break;
     }
   }
-  text = text.toLocaleLowerCase('de').normalize('NFKC');
-  text = text
-    .replace(DASHES, '-')
-    .replace(DOUBLE_QUOTES, '"')
-    .replace(SINGLE_QUOTES, "'")
-    .replaceAll('\u00AD', '');
+  text = unify(text.toLocaleLowerCase('de').normalize('NFKC')).replaceAll('i\u0307', 'i');
   return IS_SPACE.test(text) ? ' ' : text;
 }
 
-/** Zerlegt in Cluster (Zeichen samt folgenden Akzenten) mit Anfang und Ende im Original. */
+/** Zerlegt in Cluster (Zeichen samt folgenden Akzenten) mit Anfang und Ende im Original (UTF-16-Einheiten). */
 function* clusters(text: string): Generator<{ text: string; from: number; to: number }> {
   let from = 0;
   let i = 0;
@@ -77,18 +86,26 @@ export function normalizeQuery(query: string): string {
 // ---------- Seitentext mit Zuordnung ----------
 
 /**
- * Normalisierter Suchtext einer Seite. Zu jedem Zeichen im Text steht, aus welchem Textstück es stammt
- * (`item`, -1 bei eingefügten Leerzeichen) und welchen Bereich es dort im Originaltext einnimmt.
+ * Normalisierter Suchtext einer Seite. Zu jeder UTF-16-Einheit im Text steht, aus welchem Textstück sie stammt
+ * (`item`, -1 bei eingefügten Leerzeichen) und welchen Bereich ihr Zeichen dort im Originaltext einnimmt.
+ * Zeichen über 65535 Einheiten Stücklänge werden begrenzt (praktisch nie).
  */
 export interface PageText {
   text: string;
   item: Int32Array;
-  from: Int32Array;
-  to: Int32Array;
+  from: Uint16Array;
+  to: Uint16Array;
 }
 
-/** Wie ein Zeilenende, das mit Trennstrich endet, behandelt wird. */
-type HyphenMode = 'join' | 'keep' | 'space';
+/**
+ * Wie ein Zeilenende behandelt wird:
+ * - `join`: Silbentrennung (Strich oder weiches Trennzeichen vor Kleinbuchstaben) wird verbunden, sonst Leerzeichen.
+ * - `keep`: Trennstrich bleibt stehen, ohne Leerzeichen („markt-gleich“).
+ * - `space`: Trennstrich bleibt stehen, mit Leerzeichen („markt- gleich“).
+ * - `glue`: wie `join`, zusätzlich Zeilenwechsel zwischen zwei Kleinbuchstaben ohne Strich verbunden
+ *   („möglichkei“ ↵ „ten“: Strich fehlt in der Textebene).
+ */
+type Mode = 'join' | 'keep' | 'space' | 'glue';
 
 /** Anteil der Schrifthöhe: Lücken darüber gelten als Wortzwischenraum (Kerning bleibt darunter). */
 const GAP_FACTOR = 0.18;
@@ -106,7 +123,15 @@ function isWordGap(prev: PdfTextItem, item: PdfTextItem): boolean {
   return gap > GAP_FACTOR * Math.max(prev.h, item.h, 1) || item.x < prev.x;
 }
 
-function build(items: readonly PdfTextItem[], mode: HyphenMode): { page: PageText; hyphens: number } {
+interface Built {
+  page: PageText;
+  /** Zeilenenden mit Trennstrich bzw. weichem Trennzeichen */
+  hyphens: number;
+  /** Zeilenwechsel zwischen zwei Kleinbuchstaben ohne Strich */
+  glues: number;
+}
+
+function build(items: readonly PdfTextItem[], mode: Mode): Built {
   const chars: string[] = [];
   const itemOf: number[] = [];
   const fromOf: number[] = [];
@@ -114,13 +139,21 @@ function build(items: readonly PdfTextItem[], mode: HyphenMode): { page: PageTex
   let prev: PdfTextItem | null = null;
   let pendingSpace = false;
   let pendingBreak = false;
+  let prevSoft = false;
   let hyphens = 0;
+  let glues = 0;
 
-  const push = (char: string, item: number, from: number, to: number) => {
-    chars.push(char);
+  const push = (unit: string, item: number, from: number, to: number) => {
+    chars.push(unit);
     itemOf.push(item);
-    fromOf.push(from);
-    toOf.push(to);
+    fromOf.push(Math.min(from, 0xffff));
+    toOf.push(Math.min(to, 0xffff));
+  };
+  const pop = () => {
+    chars.pop();
+    itemOf.pop();
+    fromOf.pop();
+    toOf.pop();
   };
 
   items.forEach((item, index) => {
@@ -129,7 +162,8 @@ function build(items: readonly PdfTextItem[], mode: HyphenMode): { page: PageTex
       // Schneller Weg (die meisten Stücke): ein Zeichen = ein Cluster, keine Unicode-Normalisierung nötig
       for (let i = 0; i < item.str.length; i += 1) {
         const orig = item.str.charAt(i);
-        pieces.push({ text: /\s/.test(orig) ? ' ' : orig.toLowerCase(), orig, from: i, to: i + 1 });
+        const text = /\s/.test(orig) ? ' ' : orig === '`' ? "'" : orig.toLowerCase();
+        pieces.push({ text, orig, from: i, to: i + 1 });
       }
     } else {
       for (const cluster of clusters(item.str)) {
@@ -144,52 +178,56 @@ function build(items: readonly PdfTextItem[], mode: HyphenMode): { page: PageTex
       if (item.eol) pendingBreak = true;
       return;
     }
-    const leading = pieces.slice(0, firstReal).length > 0;
+    const leading = firstReal > 0;
     const startPieces = pieces.slice(firstReal);
     if (prev) {
       const lineBreak = isLineBreak(prev, item, pendingBreak);
-      const last = chars[chars.length - 1];
-      const beforeHyphen = chars[chars.length - 2];
-      const nextChar = startPieces[0]?.text ?? '';
-      const hyphenated =
-        lineBreak &&
-        last === '-' &&
-        beforeHyphen !== undefined &&
-        /^\p{L}$/u.test(beforeHyphen) &&
-        /^\p{L}/u.test(nextChar);
-      if (hyphenated) {
+      const last = chars[chars.length - 1] ?? '';
+      const beforeLast = chars[chars.length - 2] ?? '';
+      const nextText = startPieces[0]?.text ?? '';
+      const nextOrig = startPieces[0]?.orig ?? '';
+      // Trennstrich am Zeilenende: Buchstabe oder Ziffer davor, Buchstabe oder Ziffer danach
+      const visible = lineBreak && last === '-' && ALNUM.test(beforeLast) && ALNUM.test(nextText);
+      // Weiches Trennzeichen am Ende des vorigen Stücks
+      const soft = lineBreak && prevSoft && last !== '-' && ALNUM.test(last) && LETTER.test(nextText);
+      if (visible || soft) {
         hyphens += 1;
-        // Nur vor Kleinbuchstaben (im Original) ist es Silbentrennung; „Input-“ ↵ „Output“ bleibt ein Bindestrich-Wort
-        const lower = /^\p{Ll}/u.test(startPieces[0]?.orig ?? '');
-        if (mode === 'join' && lower) {
-          // Silbentrennung am Zeilenende: Trennstrich und Umbruch entfallen („markt-“ ↵ „gleich“ → „marktgleich“)
-          chars.pop();
-          itemOf.pop();
-          fromOf.pop();
-          toOf.pop();
+        // Verbunden wird nur Buchstabe-Strich-Kleinbuchstabe: „Input-“ ↵ „Output“ und „1990-“ ↵ „2000“ bleiben stehen
+        const joinable = (soft || LETTER.test(beforeLast)) && LOWER.test(nextOrig);
+        if (soft) {
+          if (mode === 'space') push(' ', -1, 0, 0);
+        } else if ((mode === 'join' || mode === 'glue') && joinable) {
+          pop();
         } else if (mode === 'space') {
           push(' ', -1, 0, 0);
         }
-        // Sonst: echter Bindestrich, ohne Leerzeichen („markt-gleich“)
-      } else if (
-        (pendingSpace || lineBreak || leading || isWordGap(prev, item)) &&
-        chars.length > 0 &&
-        last !== ' '
-      ) {
-        push(' ', -1, 0, 0);
+        // Sonst: Strich bleibt, ohne Leerzeichen („markt-gleich“)
+      } else {
+        const glue = lineBreak && !leading && !pendingSpace && LOWER.test(last) && LOWER.test(nextOrig);
+        if (glue) glues += 1;
+        if (glue && mode === 'glue') {
+          // verbunden, kein Leerzeichen
+        } else if (
+          (pendingSpace || lineBreak || leading || isWordGap(prev, item)) &&
+          chars.length > 0 &&
+          last !== ' '
+        ) {
+          push(' ', -1, 0, 0);
+        }
       }
     }
     pendingSpace = false;
     pendingBreak = false;
-    // Innere Whitespace-Folgen zu einem Leerzeichen
+    // Innere Whitespace-Folgen zu einem Leerzeichen; jede UTF-16-Einheit einzeln (Emoji sind zwei)
     for (const piece of startPieces) {
       if (piece.text === ' ' && chars[chars.length - 1] === ' ') continue;
-      for (const char of piece.text) push(char, index, piece.from, piece.to);
+      for (let k = 0; k < piece.text.length; k += 1) push(piece.text.charAt(k), index, piece.from, piece.to);
     }
     // Leerzeichen am Ende des Stücks wirken als Wortgrenze zum nächsten
     if (chars[chars.length - 1] === ' ' && itemOf[itemOf.length - 1] === index) {
       pendingSpace = true;
     }
+    prevSoft = /­\s*$/u.test(item.str);
     if (item.eol) pendingBreak = true;
     prev = item;
   });
@@ -198,29 +236,54 @@ function build(items: readonly PdfTextItem[], mode: HyphenMode): { page: PageTex
     page: {
       text: chars.join(''),
       item: Int32Array.from(itemOf),
-      from: Int32Array.from(fromOf),
-      to: Int32Array.from(toOf),
+      from: Uint16Array.from(fromOf),
+      to: Uint16Array.from(toOf),
     },
     hyphens,
+    glues,
   };
 }
 
-const cache = new WeakMap<readonly PdfTextItem[], PageText[]>();
+interface PageIndex {
+  modes: Map<Mode, PageText>;
+  hyphens: number;
+  glues: number;
+}
+
+const cache = new WeakMap<readonly PdfTextItem[], PageIndex>();
+
+function indexOf(items: readonly PdfTextItem[]): PageIndex {
+  let index = cache.get(items);
+  if (!index) {
+    const first = build(items, 'join');
+    index = { modes: new Map([['join', first.page]]), hyphens: first.hyphens, glues: first.glues };
+    cache.set(items, index);
+  }
+  return index;
+}
+
+function textOf(items: readonly PdfTextItem[], index: PageIndex, mode: Mode): PageText {
+  let text = index.modes.get(mode);
+  if (!text) {
+    text = build(items, mode).page;
+    index.modes.set(mode, text);
+  }
+  return text;
+}
 
 /**
- * Suchtexte einer Seite (zwischengespeichert pro Textstück-Liste). Gibt es Silbentrennung am Zeilenende,
- * kommen Varianten dazu, damit sowohl „marktgleich…“ als auch „markt-gleich…“ und „markt- gleich…“ gefunden werden.
+ * Suchtexte einer Seite für diese Anfrage (je Seite und Modus zwischengespeichert, Modi nur bei Bedarf gebaut):
+ * - `join` immer.
+ * - `glue` nur, wenn die Seite Zeilenwechsel zwischen Kleinbuchstaben hat (sonst identisch mit `join`).
+ * - `keep` und `space` nur für Anfragen mit „-“ und Seiten mit Trennstrichen: Ohne „-“ in der Anfrage kann ein Treffer
+ *   nie über einen stehenden Strich reichen, alles andere trifft `join` schon.
  */
-export function pageTexts(items: readonly PdfTextItem[]): PageText[] {
-  const cached = cache.get(items);
-  if (cached) return cached;
-  const first = build(items, 'join');
-  const texts = [first.page];
-  if (first.hyphens > 0) {
-    texts.push(build(items, 'keep').page, build(items, 'space').page);
-  }
-  cache.set(items, texts);
-  return texts;
+export function pageTexts(items: readonly PdfTextItem[], needle = '-'): PageText[] {
+  const index = indexOf(items);
+  const modes: Mode[] = ['join'];
+  if (index.glues > 0) modes.push('glue');
+  if (index.hyphens > 0 && needle.includes('-')) modes.push('keep', 'space');
+  return modes.map((mode) => textOf(items, index, mode));
 }
 
 /** Rechnet einen Treffer im Suchtext in Bereiche der Originalstücke um (ein Teil je Textstück). */
@@ -243,10 +306,13 @@ function partsOf(page: PageText, begin: number, end: number): HitPart[] {
   return parts;
 }
 
-function overlaps(a: HitPart[], b: HitPart[]): boolean {
-  return a.some((p) =>
-    b.some((q) => p.item === q.item && p.start < q.start + q.length && q.start < p.start + p.length),
-  );
+/** Lage eines Treffers im Originaltext der Seite als Zahlenbereich (Stücke liegen in Lesereihenfolge). */
+const SLOT = 0x10000;
+function span(parts: readonly HitPart[]): [number, number] {
+  const first = parts[0];
+  const last = parts[parts.length - 1];
+  if (!first || !last) return [0, 0];
+  return [first.item * SLOT + first.start, last.item * SLOT + last.start + last.length];
 }
 
 /**
@@ -257,8 +323,9 @@ function overlaps(a: HitPart[], b: HitPart[]): boolean {
 export function findHits(page: number, items: readonly PdfTextItem[], query: string): SearchHit[] {
   const needle = normalizeQuery(query);
   if (needle === '') return [];
-  const hits: SearchHit[] = [];
-  pageTexts(items).forEach((variant, v) => {
+  let accepted: { hit: SearchHit; begin: number; end: number }[] = [];
+  pageTexts(items, needle).forEach((variant, v) => {
+    const fresh: typeof accepted = [];
     let from = 0;
     for (;;) {
       const at = variant.text.indexOf(needle, from);
@@ -266,16 +333,27 @@ export function findHits(page: number, items: readonly PdfTextItem[], query: str
       from = at + needle.length;
       const parts = partsOf(variant, at, at + needle.length);
       if (parts.length === 0) continue;
-      // Varianten mit Trennstrich liefern nur, was die erste nicht schon trifft
-      if (v > 0 && hits.some((h) => overlaps(h.parts, parts))) continue;
-      hits.push({ page, parts });
+      const [begin, end] = span(parts);
+      if (v > 0 && overlapsAny(accepted, begin, end)) continue;
+      fresh.push({ hit: { page, parts }, begin, end });
     }
+    if (v === 0) accepted = fresh;
+    else if (fresh.length > 0) accepted = accepted.concat(fresh).sort((a, b) => a.begin - b.begin);
   });
-  return hits.sort(
-    (a, b) =>
-      (a.parts[0]?.item ?? 0) - (b.parts[0]?.item ?? 0) ||
-      (a.parts[0]?.start ?? 0) - (b.parts[0]?.start ?? 0),
-  );
+  return accepted.map((a) => a.hit);
+}
+
+/** Binäre Suche in nach Anfang sortierten, in sich überlappungsfreien Bereichen. */
+function overlapsAny(sorted: readonly { begin: number; end: number }[], begin: number, end: number): boolean {
+  let lo = 0;
+  let hi = sorted.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((sorted[mid]?.end ?? 0) <= begin) lo = mid + 1;
+    else hi = mid;
+  }
+  const candidate = sorted[lo];
+  return candidate !== undefined && candidate.begin < end;
 }
 
 export interface HitRect {
@@ -327,4 +405,39 @@ export function hitRect(
     width: (item.w * hit.length) / total,
     height: item.h,
   };
+}
+
+/**
+ * Rechtecke eines Treffers, zusammengefasst je Zeile: Teile auf derselben Zeile (überlappende Höhe), die aneinander
+ * grenzen oder nur eine kleine Lücke haben, werden ein Rechteck. So bleibt ein Wort aus vielen Textstücken (jeder
+ * Buchstabe in eigener Schrift) ein einziger Rahmen.
+ */
+export function lineRects(
+  items: readonly PdfTextItem[],
+  parts: readonly HitPart[],
+  measure: Measure | null = null,
+): HitRect[] {
+  const out: HitRect[] = [];
+  for (const part of parts) {
+    const item = items[part.item];
+    if (!item) continue;
+    const rect = hitRect(item, part, measure);
+    const last = out[out.length - 1];
+    if (last) {
+      const overlap = Math.min(last.top + last.height, rect.top + rect.height) - Math.max(last.top, rect.top);
+      const gap = rect.left - (last.left + last.width);
+      const tall = Math.max(last.height, rect.height, 1);
+      if (overlap > 0.5 * Math.min(last.height, rect.height) && gap <= 0.5 * tall && gap >= -tall) {
+        const right = Math.max(last.left + last.width, rect.left + rect.width);
+        const bottom = Math.max(last.top + last.height, rect.top + rect.height);
+        last.left = Math.min(last.left, rect.left);
+        last.top = Math.min(last.top, rect.top);
+        last.width = right - last.left;
+        last.height = bottom - last.top;
+        continue;
+      }
+    }
+    out.push(rect);
+  }
+  return out;
 }

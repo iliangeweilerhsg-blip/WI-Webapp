@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findHits, hitRect, normalizeQuery } from '../src/lib/pdf-search.ts';
+import { findHits, hitRect, lineRects, normalizeQuery } from '../src/lib/pdf-search.ts';
 import type { PdfTextItem } from '../src/lib/pdf.ts';
 
 const item = (str: string): PdfTextItem => ({ str, x: 10, y: 20, w: 100, h: 10 });
@@ -236,5 +236,105 @@ describe('Suche im Text', () => {
     // Großzügige Schranken (CI-Rechner)
     expect(first).toBeLessThan(5000);
     expect(second).toBeLessThan(first);
+  });
+});
+
+describe('Suche: Nachbesserungen', () => {
+  it('Emoji (Surrogatpaare) verschieben die Zuordnung nicht', () => {
+    const one = [item('📌 Markt und Preis')];
+    const [hit] = findHits(1, one, 'markt');
+    expect(textOf(one, hit!)).toBe('Markt');
+    expect(hit?.parts).toEqual([{ item: 0, start: 3, length: 5 }]);
+    const many = [item('💡💡💡💡 Ende 💡 und Ende')];
+    const hits = findHits(1, many, 'ende');
+    expect(hits).toHaveLength(2);
+    expect(hits.map((h) => textOf(many, h))).toEqual(['Ende', 'Ende']);
+    // Emoji im Treffer selbst
+    expect(findHits(1, many, '💡 und')).toHaveLength(1);
+    expect(textOf(many, findHits(1, many, '💡 und')[0]!)).toBe('💡 und');
+    // Emoji am Ende eines Stücks, Wort im nächsten
+    const split = run(['Hallo 🎉', 'Welt']);
+    expect(textOf(split, findHits(1, split, 'welt')[0]!)).toBe('Welt');
+  });
+
+  it('Emoji mit Akzent-Zerlegung und Ligatur davor: Offsets bleiben richtig', () => {
+    const items = [item('📌 Deﬁnition Ma\u0308rkte')];
+    expect(textOf(items, findHits(1, items, 'märkte')[0]!)).toBe('Ma\u0308rkte');
+    expect(textOf(items, findHits(1, items, 'definition')[0]!)).toBe('Deﬁnition');
+  });
+
+  it('weiches Trennzeichen am Zeilenende wird verbunden', () => {
+    const items: PdfTextItem[] = [
+      { str: 'Markt\u00AD', x: 10, y: 20, w: 30, h: 10, eol: true },
+      { str: 'gleich', x: 10, y: 34, w: 30, h: 10 },
+    ];
+    expect(findHits(1, items, 'marktgleich')).toHaveLength(1);
+    expect(findHits(1, items, 'markt gleich')).toHaveLength(0);
+    // Mitten in der Zeile bleibt es unsichtbar
+    expect(findHits(1, [item('Markt\u00ADgleich')], 'marktgleich')).toHaveLength(1);
+  });
+
+  it('automatische Silbentrennung ohne Strich in der Textebene', () => {
+    const items: PdfTextItem[] = [
+      { str: 'Produktionsmöglichkei', x: 10, y: 20, w: 100, h: 10, eol: true },
+      { str: 'ten der Volkswirtschaft', x: 10, y: 34, w: 100, h: 10 },
+    ];
+    const [hit] = findHits(1, items, 'produktionsmöglichkeiten');
+    expect(textOf(items, hit!)).toBe('Produktionsmöglichkei|ten');
+    // Teilwörter zählen nicht doppelt
+    expect(findHits(1, items, 'produktion')).toHaveLength(1);
+    expect(findHits(1, items, 'ten')).toHaveLength(1);
+    // Gegenprobe: normale Wortgrenze am Zeilenende
+    const words: PdfTextItem[] = [
+      { str: 'Angebot und die', x: 10, y: 20, w: 100, h: 10, eol: true },
+      { str: 'kurve steigt', x: 10, y: 34, w: 100, h: 10 },
+    ];
+    expect(findHits(1, words, 'die kurve')).toHaveLength(1);
+    expect(findHits(1, words, 'diekurve')).toHaveLength(1);
+    expect(findHits(1, words, 'kurve')).toHaveLength(1);
+  });
+
+  it('Ziffer vor Strich am Zeilenende wird nicht verbunden, aber als „1990-2000“ gefunden', () => {
+    const items: PdfTextItem[] = [
+      { str: 'Zeitraum 1990-', x: 10, y: 20, w: 60, h: 10, eol: true },
+      { str: '2000 war', x: 10, y: 34, w: 40, h: 10 },
+    ];
+    expect(findHits(1, items, '1990-2000')).toHaveLength(1);
+    expect(findHits(1, items, '1990- 2000')).toHaveLength(1);
+    expect(findHits(1, items, '19902000')).toHaveLength(0);
+  });
+
+  it('kleine Normalisierungen: unsichtbare Zeichen, Akzent als Apostroph, Bruchstrich, İ', () => {
+    expect(findHits(1, [item('Markt\u200Bgleich\uFEFFgewicht')], 'marktgleichgewicht')).toHaveLength(1);
+    expect(findHits(1, [item('it\u00B4s und it`s')], "it's")).toHaveLength(2);
+    expect(findHits(1, [item('3\u20444 Liter')], '3/4')).toHaveLength(1);
+    const istanbul = [item('Reise nach İstanbul')];
+    expect(textOf(istanbul, findHits(1, istanbul, 'istanbul')[0]!)).toBe('İstanbul');
+    expect(findHits(1, [item('istanbul')], 'İstanbul')).toHaveLength(1);
+  });
+
+  it('Rechtecke werden je Zeile zusammengefasst', () => {
+    const letters = [...'Gleichgewicht'].map((str, i) => ({ str, x: 10 + i * 5, y: 20, w: 5, h: 10 }));
+    const [hit] = findHits(1, letters, 'gleichgewicht');
+    expect(hit?.parts).toHaveLength(13);
+    expect(lineRects(letters, hit!.parts)).toEqual([{ left: 10, top: 20, width: 65, height: 10 }]);
+    // Zwei Zeilen bleiben zwei Rechtecke
+    const wrapped: PdfTextItem[] = [
+      { str: 'Markt-', x: 10, y: 20, w: 30, h: 10, eol: true },
+      { str: 'gleich', x: 10, y: 34, w: 30, h: 10 },
+    ];
+    const [h2] = findHits(1, wrapped, 'markt-gleich');
+    expect(lineRects(wrapped, h2!.parts)).toHaveLength(2);
+    // Große Lücke auf derselben Zeile (Spalten): getrennt
+    const columns: PdfTextItem[] = [
+      { str: 'Preis', x: 10, y: 20, w: 25, h: 10 },
+      { str: 'Menge', x: 200, y: 20, w: 25, h: 10 },
+    ];
+    expect(
+      lineRects(columns, [
+        { item: 0, start: 0, length: 5 },
+        { item: 1, start: 0, length: 5 },
+      ]),
+    ).toHaveLength(2);
   });
 });
