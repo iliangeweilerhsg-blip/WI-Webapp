@@ -16,10 +16,13 @@ import { ApiRequestError, apiUpload, friendlyMessage } from './api.ts';
 import {
   KIND_WORDS,
   POLL_INTERVAL_MS,
+  cachedMaterialTitle,
   collectionPath,
   fetchIngest,
   invalidateMaterial,
   titleFromFile,
+  unscheduleMaterialDelete,
+  pendingMaterialDeleteCount,
   type MaterialKind,
 } from './material.ts';
 import { useToast } from './toast.tsx';
@@ -42,6 +45,8 @@ export interface UploadEntry {
   retryable?: boolean;
   /** ID des neuen bzw. schon vorhandenen Objekts */
   resultId?: string;
+  /** Die Datei war zum Löschen vorgemerkt (Rückgängig-Fenster) und ist wieder da: Titel des Eintrags */
+  restoredTitle?: string;
 }
 
 /** Wohin Dateien gehören, wenn sie irgendwo ins Fenster gezogen werden. */
@@ -81,14 +86,16 @@ interface Outcome {
   fresh: number;
   duplicate: number;
   failed: number;
+  restored: number;
   firstDuplicate?: UploadEntry;
   firstFailure?: UploadEntry;
 }
 
 function summarize(batch: readonly UploadEntry[]): { message: string; open?: UploadEntry } {
-  const outcome: Outcome = { fresh: 0, duplicate: 0, failed: 0 };
+  const outcome: Outcome = { fresh: 0, duplicate: 0, failed: 0, restored: 0 };
   for (const entry of batch) {
     if (entry.status === 'fertig') outcome.fresh += 1;
+    else if (entry.status === 'dublette' && entry.restoredTitle !== undefined) outcome.restored += 1;
     else if (entry.status === 'dublette') {
       outcome.duplicate += 1;
       outcome.firstDuplicate ??= entry;
@@ -100,6 +107,7 @@ function summarize(batch: readonly UploadEntry[]): { message: string; open?: Upl
   const kind = batch[0]?.kind ?? 'folien';
   const words = KIND_WORDS[kind];
   if (batch.length === 1) {
+    if (outcome.restored) return { message: `„${batch[0]?.restoredTitle}“ ist wieder da.` };
     if (outcome.fresh) return { message: words.added };
     if (outcome.duplicate) return { message: 'Schon vorhanden', open: outcome.firstDuplicate };
     return { message: outcome.firstFailure?.message ?? 'Das hat nicht geklappt.' };
@@ -108,6 +116,7 @@ function summarize(batch: readonly UploadEntry[]): { message: string; open?: Upl
   if (outcome.fresh) {
     parts.push(`${outcome.fresh} ${outcome.fresh === 1 ? words.one : words.many} hinzugefügt`);
   }
+  if (outcome.restored) parts.push(`${outcome.restored} wieder da`);
   if (outcome.duplicate) parts.push(`${outcome.duplicate} schon vorhanden`);
   if (outcome.failed) parts.push(`${outcome.failed} nicht hochgeladen`);
   return {
@@ -227,9 +236,11 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const watchIngest = useCallback(
     (kind: MaterialKind, id: string) => {
       watched.current.set(id, { kind, since: Date.now() });
-      // Läuft gerade eine Runde, plant sie die nächste selbst
-      if (!polling.current && !watchTimer.current) {
-        rounds.current = 0;
+      // Ein neuer Eintrag setzt die Pausen auf 2 s zurück (sonst wartet er auf eine Runde mit 10 s Abstand)
+      rounds.current = 0;
+      // Läuft gerade eine Runde, plant sie die nächste selbst (mit der zurückgesetzten Pause)
+      if (!polling.current) {
+        if (watchTimer.current) clearTimeout(watchTimer.current);
         watchTimer.current = setTimeout(() => void pollWatched(), nextDelay());
       }
     },
@@ -251,8 +262,21 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           fields,
           idempotencyKey: entry.key,
         });
+        // Dieselbe Datei im Rückgängig-Fenster erneut hochgeladen: Die Dublette ist die vorgemerkte Löschung.
+        // Sie wird zurückgenommen, sonst ginge das DELETE später raus und „Anzeigen“ zeigte auf ein gelöschtes Blatt.
+        const restoredTitle =
+          result.duplicate && unscheduleMaterialDelete(entry.kind, result.id)
+            ? (cachedMaterialTitle(client, entry.kind, entry.moduleId, result.id) ??
+              titleFromFile(entry.file.name))
+            : undefined;
+        if (restoredTitle !== undefined && pendingMaterialDeleteCount() === 0)
+          toast.dismissGroup('material-delete');
         await invalidateMaterial(client);
-        patch(id, { status: result.duplicate ? 'dublette' : 'fertig', resultId: result.id });
+        patch(id, {
+          status: result.duplicate ? 'dublette' : 'fertig',
+          resultId: result.id,
+          ...(restoredTitle !== undefined ? { restoredTitle } : {}),
+        });
         if (!result.duplicate) watchIngest(entry.kind, result.id);
       } catch (failure) {
         const retryable =
@@ -272,7 +296,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       }
       finishBatch(entry.batch);
     },
-    [client, finishBatch, patch, watchIngest],
+    [client, finishBatch, patch, watchIngest, toast],
   );
 
   const enqueue = useCallback<UploadApi['enqueue']>(

@@ -115,6 +115,8 @@ export interface FakeCore {
   failNextUpload: null | 'before' | 'after';
   /** Der nächste Upload wird mit diesem Fehler abgelehnt */
   rejectNextUpload: null | { status: number; code: string };
+  /** Der nächste Upload wird als Dublette dieses Eintrags gemeldet (ID) */
+  nextUploadDuplicateOf: string | null;
   /** Antworten auf POST mit Idempotency-Key (Replay wie beim echten Core) */
   idempotent: Map<string, { status: number; body: unknown }>;
   /** Setzt einen Foliensatz/ein Blatt auf `verarbeitet` und legt Folien an */
@@ -146,6 +148,7 @@ export function installFakeCore(
     requests: [],
     failNextUpload: null,
     rejectNextUpload: null,
+    nextUploadDuplicateOf: null,
     idempotent: new Map(),
     finishIngest(id, pages = 3) {
       const deck = core.decks.find((d) => d.id === id);
@@ -299,7 +302,11 @@ async function handleMaterial(core: FakeCore, call: MaterialCall): Promise<Respo
       const file = form.get('file') as File;
       const moduleId = String(form.get('module_id'));
       const sha256 = createHash('sha256').update(`${file.name}:${file.size}`).digest('hex');
-      const existing = list.find((x) => x.sha256 === sha256 && x.module_id === moduleId && !x.deleted_at);
+      const forced = core.nextUploadDuplicateOf;
+      core.nextUploadDuplicateOf = null;
+      const existing = forced
+        ? list.find((x) => x.id === forced)
+        : list.find((x) => x.sha256 === sha256 && x.module_id === moduleId && !x.deleted_at);
       let status = 200;
       let result = { id: existing?.id ?? '', duplicate: true };
       if (!existing) {

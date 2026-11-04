@@ -278,6 +278,30 @@ export function scheduleMaterialDelete(
   ensurePageHideFlush();
 }
 
+/**
+ * Nimmt die Vormerkung eines einzelnen Eintrags zurück (z. B. weil dieselbe Datei erneut hochgeladen wurde: Der Core
+ * meldet dann die ID der vorgemerkten Löschung als Dublette). `true`, wenn der Eintrag vorgemerkt war.
+ */
+export function unscheduleMaterialDelete(kind: MaterialKind, id: string): boolean {
+  const removed = pending.delete(keyOf(kind, id));
+  if (removed) publish();
+  return removed;
+}
+
+/** Titel eines Eintrags aus den geladenen Listen des Moduls (für Meldungen). */
+export function cachedMaterialTitle(
+  client: QueryClient,
+  kind: MaterialKind,
+  moduleId: string,
+  id: string,
+): string | null {
+  const data = client.getQueryData<{ items: { id: string; title: string }[] }>([
+    kind === 'folien' ? 'decks' : 'sheets',
+    moduleId,
+  ]);
+  return data?.items.find((item) => item.id === id)?.title ?? null;
+}
+
 export function undoMaterialDeletes(): void {
   pending.clear();
   publish();

@@ -301,6 +301,98 @@ describe('PDF-Anzeige (Nacharbeit)', () => {
     expect(screen.queryByText(/vorschaubilder bleiben nutzbar/i)).not.toBeInTheDocument();
   });
 
+  it('Ladefehler (Netz, Satz noch in Arbeit) ist nicht „beschädigt“: ruhig, genau eine Aktion „Erneut versuchen“', async () => {
+    installFakeCore({ decks: [makeDeck({ id: DECK.id, title: 'Frisch', ingest_state: 'neu' })] });
+    const network = new TypeError('Failed to fetch');
+    pdf.openPdf.mockRejectedValueOnce(network);
+    const user = userEvent.setup();
+    nav.search = `typ=folien&id=${DECK.id}`;
+    view();
+    expect(await screen.findByText('Konnte nicht geladen werden.')).toBeInTheDocument();
+    expect(screen.queryByText(/beschädigt/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Erneut versuchen' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Zurück zum Modul' })).not.toBeInTheDocument();
+    expect(pdf.openPdf).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
+    expect(pdf.openPdf).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Dokumentanzeige' })).toBeInTheDocument());
+    expect(screen.queryByText('Konnte nicht geladen werden.')).not.toBeInTheDocument();
+  });
+
+  it('pdf.js meldet ein unlesbares PDF: „beschädigt“, auch wenn der Core noch einliest', async () => {
+    installFakeCore({ decks: [makeDeck({ id: DECK.id, title: 'Frisch', ingest_state: 'neu' })] });
+    const invalid = Object.assign(new Error('Invalid PDF structure.'), { name: 'InvalidPDFException' });
+    pdf.openPdf.mockRejectedValueOnce(invalid);
+    nav.search = `typ=folien&id=${DECK.id}`;
+    view();
+    expect(await screen.findByText(/Vielleicht ist die Datei beschädigt/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).not.toBeInTheDocument();
+  });
+
+  it('Ladefehler bei noch nicht verarbeitetem Satz: versucht es von selbst noch einmal, sobald er fertig ist', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Frisch', ingest_state: 'neu' })],
+    });
+    pdf.openPdf.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    nav.search = `typ=folien&id=${DECK.id}`;
+    view();
+    expect(await screen.findByText('Konnte nicht geladen werden.')).toBeInTheDocument();
+    core.finishIngest(DECK.id, 5);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 300);
+    });
+    await waitFor(() => expect(pdf.openPdf).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText('Konnte nicht geladen werden.')).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('passwortgeschütztes PDF: eigener Text, keine Aktion zum Wiederholen', async () => {
+    installFakeCore({ decks: [makeDeck({ id: DECK.id, title: 'Geheim', ingest_state: 'neu' })] });
+    pdf.openPdf.mockRejectedValueOnce(
+      Object.assign(new Error('No password given'), { name: 'PasswordException' }),
+    );
+    nav.search = `typ=folien&id=${DECK.id}`;
+    view();
+    expect(
+      await screen.findByText(
+        'Dieses PDF ist passwortgeschützt. Speichere es ohne Passwort und zieh es noch einmal herein.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).not.toBeInTheDocument();
+  });
+
+  it('Core kennt die Seiten, pdf.js scheitert am Laden: Hinweis mit „Erneut versuchen“', async () => {
+    deckCore();
+    pdf.openPdf.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const user = userEvent.setup();
+    await openViewer();
+    expect(await screen.findByText(/nicht scharf anzeigen/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
+    expect(pdf.openPdf).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(screen.queryByText(/nicht scharf anzeigen/)).not.toBeInTheDocument());
+  });
+
+  it('Ladefehler, solange der Core weg war: versucht von selbst noch einmal, sobald er wieder erreichbar ist', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = deckCore();
+    pdf.openPdf.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await openViewer();
+    expect(await screen.findByText(/nicht scharf anzeigen/)).toBeInTheDocument();
+    core.down = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    core.down = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    await waitFor(() => expect(pdf.openPdf).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/nicht scharf anzeigen/)).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
   it('Suche zeigt „Sucht …“, solange pdf.js noch lädt, nicht „Kein Treffer“', async () => {
     deckCore();
     let release: (doc: typeof pdf.doc) => void = () => {};
@@ -450,6 +542,33 @@ describe('PDF-Anzeige während des Einlesens (F-ORG-02)', () => {
     await waitFor(() => expect(within(thumbs).getAllByRole('img')).toHaveLength(5));
     for (const img of within(thumbs).getAllByRole('img')) {
       expect((img as HTMLElement).style.aspectRatio.replace(/\s/g, '')).toBe('720/405');
+    }
+  });
+
+  it('früher Sprung auf eine ferne Seite: deren Größe wird sofort einzeln gelesen, die Seite wird gezeichnet', async () => {
+    installFakeCore({
+      decks: [makeDeck({ id: DECK.id, title: 'Lang Normalisierung', ingest_state: 'neu' })],
+    });
+    const requested: number[] = [];
+    // Die Runden ab Seite 1 hängen (langsamer Start); nur Seite 300 antwortet
+    pdf.doc.pageSize.mockImplementation((n: number) => {
+      requested.push(n);
+      return n === 300 ? Promise.resolve({ width: 720, height: 405 }) : new Promise(() => {});
+    });
+    pdf.doc.numPages = 300;
+    try {
+      const viewer = await openViewer();
+      await waitFor(() => expect(requested).toContain(1));
+      pdf.render.mockClear();
+      await act(async () => {
+        fireEvent.keyDown(viewer, { key: 'End' });
+      });
+      expect(pageRegion()).toHaveAccessibleName('Seite 300 von 300');
+      await waitFor(() => expect(requested).toContain(300));
+      await waitFor(() => expect(pdf.render.mock.calls.map((c) => c[0])).toContain(300));
+    } finally {
+      pdf.doc.numPages = 5;
+      pdf.doc.pageSize.mockImplementation(async () => ({ width: 720, height: 405 }));
     }
   });
 

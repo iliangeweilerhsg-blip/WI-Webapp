@@ -306,7 +306,6 @@ function ModuleView() {
       actionLabel: 'Rückgängig',
       onAction: undoModuleDeletes,
       onExpire: commitModuleDeletes,
-      onReplace: commitModuleDeletes,
       group: 'module-delete',
       focusAction: true,
       durationMs: UNDO_WINDOW_MS,

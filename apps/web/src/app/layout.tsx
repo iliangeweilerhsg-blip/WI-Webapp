@@ -2,7 +2,8 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { AppShell } from '../components/AppShell.tsx';
 import { QueryProvider } from '../lib/query.tsx';
-import { THEME_INIT_SCRIPT, ThemeProvider } from '../lib/theme.tsx';
+import { THEME_INIT_SCRIPT } from '../lib/theme-init.ts';
+import { ThemeProvider } from '../lib/theme.tsx';
 import './globals.css';
 
 export const metadata: Metadata = {
