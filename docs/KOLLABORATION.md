@@ -128,7 +128,7 @@ Das Gemini-Abo hat Nutzungslimits. Ist es aufgebraucht, macht Claude weiter, und
 **Morgens (Owner, ca. 10 Minuten):**
 1. Freigegebene PRs mergen: `gh pr list --label status:freigegeben`
 2. Fragen beantworten: `gh issue list --label status:blockiert`. Nach der Antwort das Label `status:blockiert` entfernen
-3. Antigravity öffnen, Modell wählen, Prompt aus [`docs/argon/START-PROMPT.md`](argon/START-PROMPT.md) einfügen. Argon arbeitet die Queue ab, während du etwas anderes machst
+3. Antigravity öffnen, Modell wählen, Prompt aus [`docs/argon/DAUERBETRIEB.md`](argon/DAUERBETRIEB.md) einfügen. Argon arbeitet die Queue ab und wartet danach selbstständig auf neue Aufgaben, solange der Mac an ist (einmal pro Tag starten reicht)
 4. Hängt ein Issue auf `status:in-arbeit`, ohne dass jemand daran arbeitet: `gh issue edit <nr> --remove-label status:in-arbeit`
 
 ## 7. Pilotphase: Argons Stärken im echten Projekt prüfen
