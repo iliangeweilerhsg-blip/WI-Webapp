@@ -99,6 +99,30 @@ Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so gü
 
 Claude markiert im Issue, welches Modell sinnvoll ist (Label `modell:flash` nur bei einfachen Tasks).
 
+## 4a. Token-Budget (Owner-Auftrag vom 05.11.2026)
+
+Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Qualität zu verschlechtern**. Claude verantwortet das als Orchestrator. Die Regeln:
+
+**Review-Tiefe nach Risiko.** Das erste Review jedes eigenen Code-PRs macht weiterhin ein frischer Opus-Subagent. Die Tiefe richtet sich nach dem Risiko:
+
+| Stufe | Wann | Review-Umfang |
+|---|---|---|
+| **A – kritisch** | Auth und Kopplung, Backup/Restore, Sync-Protokoll, Sperren und Nebenläufigkeit, Migrationen, alles mit Datenverlust- oder Sicherheitsrisiko | voll: Gegenproben (Mutanten) auf alle Kernpfade, echte Nachstellung gegen Postgres oder den echten Core, Angriffsszenarien |
+| **B – normal** | UI-Features, Darstellung, Einstellungen, Hilfsfunktionen | gezielt: Diff und direkt betroffene Dateien, 2–3 Gegenproben auf die Kernlogik, Browser-Check nur wenn die Tests das Verhalten nicht abdecken (z. B. Layout, echte Timer) |
+
+**Nachrunden.**
+- Eine kleine Nacharbeit (Stufe B, bis etwa 150 geänderte Zeilen) prüft Claude selbst anhand des Diffs.
+- Größere Nacharbeit und alles in Stufe A prüft **derselbe** Reviewer weiter, per Fortsetzen statt Neustart. Er hat den Kontext schon.
+- Darum werden Worktrees von Autoren und Reviewern **erst nach dem Merge** gelöscht.
+
+**Aufträge an Subagents.**
+- Konkrete Dateien und Abschnitte nennen, keine pauschalen Leselisten („lies die Spezifikation“).
+- Autoren führen die Tests der betroffenen Pakete aus. Die volle Suite läuft in der CI.
+- Screenshots nur bei UI-Änderungen.
+- Höchstens **2 Subagents gleichzeitig**, außer der Owner gibt mehr frei.
+
+**Lead-Session.** Ist der Verlauf sehr lang, übergibt Claude an eine neue Session. Den Stand findet die neue Session in offenen Issues und PRs sowie in einer kurzen Übergabe-Notiz, die Claude vorher als Issue mit dem Titel „Lead-Übergabe“ anlegt. PR-Abos werden nach dem Merge sofort beendet.
+
 ## 5. Parallele Features mit Claude-Subagents
 
 | Variante | Wie | Wann |
