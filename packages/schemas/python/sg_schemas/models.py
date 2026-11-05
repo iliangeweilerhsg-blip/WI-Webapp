@@ -94,6 +94,24 @@ class CalendarEventKind(StrEnum):
     lernblock_export = 'lernblock_export'
 
 
+class CalendarReassignResult(BaseModel):
+    """
+    Antwort auf POST /calendar/reassign (lokal): Neuzuordnung aller Termine mit assigned_by=auto, z. B. nach dem Anlegen eines Moduls.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    changed: StrictInt = Field(
+        ..., description='Termine, deren Modul oder Art sich geändert hat', ge=0
+    )
+    ohne_modul: StrictInt = Field(
+        ...,
+        description='Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach',
+        ge=0,
+    )
+
+
 class CalendarSourceKind(StrEnum):
     """
     google erst ab Phase 4 (F-KAL-03)
@@ -1369,6 +1387,12 @@ class IcsModuleSuggestion(BaseModel):
         min_length=1,
     )
     kind: CalendarEventKind
+    short: StrictStr | None = Field(
+        None,
+        description='Kürzel, wenn die Titel dasselbe Modul abgekürzt nennen (Stat I / Statistik I). Fehlt, wenn es keins gibt. Gehört in short_name des neuen Moduls, damit der Abgleich beide Schreibweisen zuordnet.',
+        max_length=12,
+        min_length=1,
+    )
     event_count: StrictInt = Field(..., ge=1)
     series_event_ids: list[Uuid] = Field(
         ...,
@@ -1443,7 +1467,9 @@ class LectureSettings(BaseModel):
         extra='forbid',
     )
     microphone_id: StrictStr | None = Field(
-        ..., description='deviceId aus MediaDevices, null = Standardmikrofon'
+        ...,
+        description='deviceId aus MediaDevices, null = Standardmikrofon',
+        max_length=256,
     )
     auto_stop_after_end_min: StrictInt = Field(
         ..., description='Regel 1: Kalenderende + X min … (Standard 10)', ge=1
@@ -1476,7 +1502,9 @@ class LectureSettingsUpdate(BaseModel):
         extra='forbid',
     )
     microphone_id: StrictStr | None = Field(
-        None, description='deviceId aus MediaDevices, null = Standardmikrofon'
+        None,
+        description='deviceId aus MediaDevices, null = Standardmikrofon',
+        max_length=256,
     )
     auto_stop_after_end_min: StrictInt | None = Field(
         None, description='Regel 1: Kalenderende + X min … (Standard 10)', ge=1
@@ -4238,6 +4266,9 @@ class SchemaBundle(BaseModel):
     )
     CalendarEventUpdate_1: CalendarEventUpdate | None = Field(
         None, alias='CalendarEventUpdate'
+    )
+    CalendarReassignResult_1: CalendarReassignResult | None = Field(
+        None, alias='CalendarReassignResult'
     )
     CalendarSource_1: CalendarSource | None = Field(None, alias='CalendarSource')
     CalendarSourceCreate_1: CalendarSourceCreate | None = Field(

@@ -12,6 +12,7 @@ export const NAV_TOP: NavItem[] = [{ href: '/', label: 'Heute', icon: 'today' }]
 export const NAV_MAIN: NavItem[] = [
   { href: '/bibliothek', label: 'Bibliothek', icon: 'library' },
   { href: '/lernen', label: 'Lernen', icon: 'learn' },
+  { href: '/kalender', label: 'Kalender', icon: 'calendar' },
   { href: '/planer', label: 'Planer', icon: 'planner' },
   { href: '/videos', label: 'Videos', icon: 'videos' },
   { href: '/inbox', label: 'Inbox', icon: 'inbox' },

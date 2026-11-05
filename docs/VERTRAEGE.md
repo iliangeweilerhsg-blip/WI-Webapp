@@ -110,6 +110,20 @@ Ein laufender Job erneuert `locked_at` alle 60 s (Heartbeat). Ergebnis und Fehle
 - **Ausführung (Worker):** Chunks nach `seq` lesen. Bei `chunks_independent = false` als ein Bytestrom aneinanderhängen, sonst jeden Chunk einzeln decodieren. Dann mit `ffmpeg` nach `full.m4a` (AAC, 48 kHz, mono) umwandeln. Lücken (fehlende `seq` oder Sprünge in `start_ms`) werden als Stille mit korrekter Länge eingefügt. Zum Schluss `recording.duration_ms` und `recording.state` (`vollstaendig` bzw. `mit_luecken`) setzen.
 - **Session-Fortschritt (Worker):** Nach jedem Job mit `session_id` setzt der Worker `session.processing[<job.type>] = <job.state>`. Hat die Session danach keinen Job mehr in `wartet` oder `laeuft` und ist sie `beendet`, setzt er `state = 'verarbeitet'`. Danach folgt `pg_notify('sg_session', '<session_id>')`. Der Core hört darauf und sendet das Ereignis `session.updated` (§11.6).
 
+**Ergänzungen zu `audio.finalize` im Worker (T1-06w):**
+
+- **Fehlend** ist ein Chunk, wenn seine `seq` fehlt, die Datei fehlt, Größe oder sha256 nicht zur Zeile passen oder `ffmpeg` ihn bzw. seinen Lauf nicht dekodieren kann. Er macht den Job nicht zum `fehler`, die Aufnahme wird `mit_luecken` und die `seq` steht in `missing_seqs`.
+- **Abhängige Chunks** (`chunks_independent = false`): Läufe mit lückenlosen `seq` und ohne Sprung in `start_ms` werden einzeln dekodiert, jeweils mit dem Init-Segment aus Chunk 0 davor (WebM bis zum ersten Cluster, MP4 `ftyp`+`moov`). Chunks müssen nicht an Cluster- oder Fragmentgrenzen beginnen: Bei Läufen mit `seq > 0` wird der angeschnittene Anfang bis zur nächsten Cluster- bzw. Fragmentgrenze verworfen, als Lücke `fehlender_chunk` gemeldet (ab 1 s Verlust) und der Lauf rechtsbündig ausgeglichen (Stille vorn). Ergibt ein Lauf 0 ms, gelten seine Chunks als fehlend. **Unabhängige Chunks:** jeder Chunk wird einzeln dekodiert.
+- **Platzierung:** Jedes Stück liegt bei seinem `start_ms` (relativ zu `recording.started_ms`) und wird auf seine angegebene Länge gebracht (Summe `duration_ms`): zu kurz mit Stille aufgefüllt, zu lang gekürzt, bei Überlappung entfällt der Anfang. Encoder-Priming und Rotationslücken summieren sich so nicht auf. Die **Toleranz von 50 ms** gilt nur für die Meldung in `gaps` (`zeitluecke`), nicht für die Platzierung.
+- **Ende:** Fehlen Chunks nach dem letzten verwendbaren, füllt der Worker bis `started_ms + completed_duration_ms` auf (nur mit `complete`). **Ohne `complete`** ist ein fehlendes Ende nicht erkennbar; ein beschädigter letzter Chunk liefert dann über seine `duration_ms` die Endlücke, sonst gilt die Aufnahme ohne erkennbare Lücke als `vollstaendig`.
+- **Null verwertbare Chunks**, oder bei abhängigen Chunks fehlender bzw. beschädigter Chunk 0: kein `full.m4a` (eine alte wird entfernt), `chunk_count = 0`, `state = mit_luecken`, Job `fertig`. Ein nachgelieferter Chunk 0 macht einen späteren Lauf möglich (§3, neuer Job durch den Core).
+- **Plausibilitätsgrenzen** führen zu `fehler` ohne Retry: mehr als 10000 fehlende `seq`, eine einzelne oder alle Lücken zusammen länger als `completed_duration_ms` plus 1 h (ohne `complete`: 12 h).
+- **Voraussetzung:** `ffmpeg` und `ffprobe` müssen auf dem Mac installiert sein (PATH). Aufrufe ohne Shell, mit Zeitlimit, festem Eingabeformat (`-f matroska` bzw. `mov`) und `-protocol_whitelist file`.
+- **`processing` bei mehreren Aufnahmen:** Eine Session kann mehrere Aufnahmen und damit mehrere `audio.finalize`-Jobs haben. `processing['audio.finalize']` fasst alle zusammen: `fehler`, sobald einer endgültig gescheitert ist, sonst `laeuft` bzw. `wartet`, solange einer offen ist, sonst `fertig` (`abgebrochen` zählt nicht mit).
+- **MP4-Läufe:** Ein Lauf wird vor dem Dekodieren auf die letzte vollständige Top-Level-Box gekürzt; eine unvollständige `moof`/`mdat` am Ende entfällt.
+- **Ignorierte Chunks:** Chunks mit `seq > completed_last_seq` (nach `complete` nicht mehr zu erwarten) ignoriert der Worker mit einer Warnung.
+- **Session-Fortschritt bei Fehlern:** Auch bei endgültigem Scheitern (`fehler`) setzt der Worker `processing['audio.finalize'] = 'fehler'` (Session über `recording.session_id`) und verfährt dann wie oben (`verarbeitet`, `pg_notify`). Umgesetzt ist das bisher nur für `audio.finalize` im Handler; die generische Lösung in der Job-Schleife folgt.
+
 ### IDs im Worker (ab Phase 1)
 
 `psycopg` liefert `uuid`-Spalten als `uuid.UUID`. Die Pydantic-Modelle aus `sg_schemas` erwarten IDs als `str` in Kleinbuchstaben (`Uuid`, `docs/ENTWICKLUNG.md`). Darum vor der Validierung bzw. beim Schreiben von `job.result` immer `str(value)` verwenden (T1-06w, T1-18).
@@ -204,14 +218,17 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | Methode und Pfad | Body | Antwort | Fehler |
 |---|---|---|---|
 | `GET /calendar/sources` | – | 200 `CalendarSourceList` | |
-| `POST /calendar/sources` | JSON `CalendarSourceCreate` (URL) **oder** multipart `file` (.ics, ≤ 5 MB), `name?` | 201 `IcsImportResult` | 409 `calendar_source_exists` (gleiche URL, `details.id`), 413 `file_too_large`, 422 `ics_invalid`, 502 `ics_fetch_failed` |
-| `POST /calendar/sources/{id}/sync` | URL-Quelle: leer. Datei-Quelle: multipart `file` (neue Fassung) | 200 `IcsImportResult` | 404 `calendar_source_not_found`, 422 `ics_invalid`, 502 `ics_fetch_failed` (setzt `last_error`) |
+| `POST /calendar/sources` | JSON `CalendarSourceCreate` (URL) **oder** multipart `file` (.ics, ≤ 5 MB), `name?` | 201 `IcsImportResult` | 400 `validation_failed` (u. a. ungültige URL, Zugangsdaten in der URL, ungültige `id`), 400 `file_missing`, 400 `unexpected_file`, 400 `upload_aborted`, 400 `ics_too_complex`, 409 `calendar_source_exists` (gleiche URL oder vergebene `id`, `details.id`), 413 `file_too_large`, 422 `ics_invalid`, 502 `ics_fetch_failed` |
+| `POST /calendar/sources/{id}/sync` | URL-Quelle: leer. Datei-Quelle: multipart `file` (neue Fassung) | 200 `IcsImportResult` | 400 `file_missing` (Datei-Quelle ohne Datei), 400 `unexpected_file` (Datei an eine URL-Quelle), 400 `source_not_syncable` (Art `google`), 400 `ics_too_complex`, 404 `calendar_source_not_found`, 422 `ics_invalid`, 502 `ics_fetch_failed`. Bei URL-Quellen setzt jeder Fehler `last_error` |
 | `DELETE /calendar/sources/{id}` | – | 204 (Kaskade §13) | 404 |
+| `POST /calendar/reassign` | – | 200 `{ changed, ohne_modul }` | 403 `local_only` (**lokal**) |
 | `GET /calendar/events?from&to&module_id&unassigned&include_cancelled` | – | 200 `CalendarEventList`, nach `starts_at` aufsteigend | 400 |
 | `GET /calendar/events/{id}` | – | 200 `CalendarEvent` | 404 `calendar_event_not_found` |
 | `PATCH /calendar/events/{id}` | `CalendarEventUpdate` | 200 `CalendarEventList` (alle geänderten Termine, ohne Cursor) | 404 `calendar_event_not_found`, 404 `module_not_found` |
 
-`from`/`to` sind ISO-Zeitpunkte. Ohne `include_cancelled=true` fehlen abgesagte Termine. `unassigned=true` liefert Termine ohne Modul.
+`POST /calendar/reassign` bestimmt Modul und Art aller Termine mit `assigned_by = auto` neu (wie beim Abgleich, ohne ICS) und ruft `ensurePlannedSessions` für die geänderten auf. `changed` = Termine mit neuem Modul oder neuer Art, `ohne_modul` = nicht abgesagte automatisch zugeordnete Termine ohne Modul danach. Manuelle Zuordnungen bleiben unangetastet, ein zweiter Aufruf ändert nichts (`changed = 0`). Die Route wartet auf laufende Abgleiche und Löschungen der Quellen (Sperre je Quelle). Antwort: `CalendarReassignResult`. Die Web-App ruft die Route nach „Modul anlegen“ (aus einem Vorschlag) auf. **Fehlerschlüssel `ics_too_complex`** (400): Die Datei hat das Zeitbudget (§8) überschritten.
+
+`from`/`to` sind ISO-Zeitpunkte. `from` ist einschließlich, `to` ausschließlich; ein Termin zählt, wenn er im Zeitraum liegt oder hineinreicht. Ohne `include_cancelled=true` fehlen abgesagte Termine. `unassigned=true` liefert Termine ohne Modul.
 
 ### 7.2 Sessions (T1-02)
 
@@ -283,7 +300,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `GET /trash?kind` | – | 200 `TrashList`, nach `deleted_at` absteigend | |
 | `POST /trash/{id}/restore` | – | 200 `TrashRestoreResult` | 404 `trash_item_not_found`, 409 `restore_parent_deleted` (`details.parent`), 409 `restore_conflict` (`details.constraint`, `details.conflicting_id`) |
 | `GET /settings` | – | 200 `Settings` | |
-| `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad nicht absolut oder nicht beschreibbar) |
+| `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad leer, nicht absolut, kein vorhandener beschreibbarer Ordner, `SG_DATA_DIR` oder darin, Systemordner), 403 `local_only` (**`data.backup_target` nur lokal**: jede Änderung dieses Feldes aus dem Netz, auch mit Geräte-Token) |
 
 Modul-Einstellungen laufen über `PATCH /modules/{id}` (§14.2).
 
@@ -298,13 +315,16 @@ Bibliothek: `ical.js` (Entscheidung des Leads), Begründung und Version im Lockf
 
 Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei neuem Upload.
 
-**URL-Abruf:** nur `http`/`https` (`webcal://` wird zu `https://`). Höchstens 5 MB, 15 s Gesamtzeit und 3 Weiterleitungen, und zwar nur auf `http`/`https`. Bei Verstoß: `502 ics_fetch_failed` mit `details.reason` (`too_large`, `timeout`, `too_many_redirects`, `status_<code>`).
+**URL-Abruf:** nur `http`/`https` (keine Zugangsdaten in der URL, keine Adressen im lokalen Netz) (`webcal://` wird zu `https://`). Höchstens 5 MB, 15 s Gesamtzeit und 3 Weiterleitungen, und zwar nur auf `http`/`https`. Bei Verstoß: `502 ics_fetch_failed` mit `details.reason` (`too_large`, `timeout`, `too_many_redirects`, `status_<code>`, `blocked_address` (Ziel ist eine private, Loopback-, Link-Local- oder sonst nicht öffentliche Adresse, auch nach der DNS-Auflösung und nach jeder Weiterleitung), `invalid_url` (Weiterleitung auf ein anderes Schema oder mit Zugangsdaten), `unsupported_encoding`, `network_error`).
 
 **Auflösen**
+- **Zeitbudget:** Das Auflösen läuft in einem eigenen Thread (höchstens 2 gleichzeitig, weitere warten; höchstens 256 MB Heap je Thread) und darf höchstens 5 s ab dem Start des Threads dauern (`ics_too_complex`, 400; bei URL-Quellen steht der Fehler in `last_error`). Der Core bleibt währenddessen ansprechbar. Mehrere `VCALENDAR` in einer Datei werden alle gelesen.
+- **Unterstützte Wiederholungen:** `FREQ` = `DAILY`, `WEEKLY`, `MONTHLY`, `YEARLY` mit den üblichen `BY…`-Regeln. `SECONDLY`, `MINUTELY` und `HOURLY` werden nicht aufgelöst (Warnung `rrule_unsupported`, nur der erste Termin zählt). Bei `RDATE` ohne `RRULE` ist auch `DTSTART` ein Vorkommen (RFC 5545).
 - RFC 5545 mit `RRULE`, `RDATE`, `EXDATE` und `RECURRENCE-ID` (verschobene Einzelvorkommen). `STATUS:CANCELLED` setzt `cancelled = true`.
 - `TZID` mit `VTIMEZONE`: deren Regeln. `TZID` ohne `VTIMEZONE`: als IANA-Name lesen. Unbekannte Zone: `TZ` des Systems, dazu eine Warnung `timezone_unknown`. Termine ohne Zone (floating) gelten in `TZ`.
 - `VALUE=DATE` ergibt `all_day = true`, `starts_at`/`ends_at` auf 00:00 UTC des Datums (Testfall ics/08).
-- Serien ohne `UNTIL`/`COUNT` werden bis heute + 180 Tage aufgelöst und bei jedem Abgleich fortgeschrieben. Höchstens 5000 Vorkommen pro Quelle, darüber Warnung `too_many_events`.
+- Serien ohne `UNTIL`/`COUNT` werden für den Zeitraum **heute − 1 Jahr bis heute + 180 Tage** aufgelöst und bei jedem Abgleich fortgeschrieben. Ältere Termine **solcher Serien** zählt der Abgleich nicht als „entfallen“; für endliche Serien gilt das Fenster nicht. Lange offene Serien (`DAILY`/`WEEKLY`) beginnen die Auflösung kurz vor dem Fenster, in derselben Phase wie `DTSTART`.
+- Mehrdeutige Ortszeit (Ende der Sommerzeit, z. B. 02:30) gilt als das **erste** Vorkommen, eine Zeit in der Lücke (Beginn der Sommerzeit) als die Zeit nach dem Sprung. Höchstens 5000 Vorkommen pro Quelle, darüber Warnung `too_many_events` (der Rest wird nicht mehr aufgelöst, und der Abgleich sagt dann **keine** Termine ab).
 - `recurrence_id` = ursprünglicher Beginn des Vorkommens: in der Zeitzone von `DTSTART` mit Offset (`2026-10-27T10:15:00+01:00`), bei UTC-Serien mit `Z`, bei ganztägigen Serien als Datum. Einzeltermine: `null`.
 
 **Abgleich** über `(source_id, external_uid, recurrence_id)`:
@@ -313,11 +333,16 @@ Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei
 - **entfallen** (fehlt in der Quelle): `cancelled = true`. Nie löschen.
 - Bei `assigned_by = auto` laufen Modul- und Artzuordnung neu, bei `manuell` nie.
 
+**Warnungen (`IcsImportResult.warnings`):** Codes `uid_missing`, `uid_duplicate`, `event_invalid`, `rrule_unsupported`, `timezone_unknown`, `too_many_events`. Je Code stehen höchstens 5 Einträge in der Liste. Gab es mehr, folgt eine Sammelzeile des Codes (`external_uid = null`, „n weitere Hinweise dieser Art (insgesamt m)“).
+
+**Zählweise:** `geaendert` zählt Änderungen an Titel, Ort, Beginn, Ende und ganztägig. Eine Änderung der **Beschreibung** wird übernommen, zählt aber nicht. Wird ein Termin abgesagt (`STATUS:CANCELLED`) oder fehlt er in der Quelle, zählt er als `entfallen`. Wird ein abgesagter Termin wieder aktiv, zählt er als `geaendert`. `zugeordnet` zählt nur automatische Zuordnungen in diesem Lauf.
+
 **Zuordnung (F-KAL-02)**
 - **Kandidaten** sind die Module, deren Semester den Termin enthält (`starts_on ≤ Datum ≤ ends_on`). Gibt es keins, die Module des aktuellen Semesters. Gelöschte und archivierte Semester zählen nicht.
 - **Modul:** Treffer über Name, Kürzel und Dozent in Titel, Ort oder Beschreibung, unabhängig von Groß-/Kleinschreibung und Umlautschreibweise. Nur ein **eindeutiger** Treffer wird gesetzt. Sonst bleibt `module_id` leer, und die Serie erscheint in `module_suggestions`.
 - **Art:** über Schlüsselwörter (Übung/UE/Ü, Tutorium/Tut, Prüfung/Klausur/Exam, Vorlesung/VL/Lecture). Ganztägig ohne Modul: `fest`. Sonst `vorlesung`.
-- **Manuell:** `PATCH /calendar/events/{id}` setzt `assigned_by = manuell`. Mit `scope = serie` (Standard) gilt das für alle Termine mit gleicher `source_id` und `external_uid`, auch für später hinzukommende Vorkommen.
+- **Manuell:** `PATCH /calendar/events/{id}` setzt `assigned_by = manuell` (mindestens `module_id` oder `kind` ist nötig, sonst 400). Mit `scope = serie` (Standard) gilt das für alle Termine mit gleicher `source_id` und `external_uid`. Später hinzukommende Vorkommen erben die Zuordnung, **wenn alle vorhandenen Termine der Serie manuell und gleich zugeordnet sind**. Wurde nur ein Termin einzeln geändert (`scope = einzeln`), erbt kein neues Vorkommen.
+- **Modulvorschläge (`IcsModuleSuggestion`):** Termine ohne Modul (nur `assigned_by = auto`, nicht abgesagt, nicht `fest`) werden nach dem bereinigten Titel gruppiert. Nennen Titel dasselbe Modul lang und abgekürzt (Stat I / Statistik I, WI / Wirtschaftsinformatik, OR / Operations Research, DBS / Datenbanksysteme), bilden sie **einen** Vorschlag mit dem Langnamen in `name` und dem Kürzel in `short` (nur wenn die Abkürzung zu genau einem Langnamen passt, höchstens 12 Zeichen). `short` gehört in `short_name` des neuen Moduls. Danach ordnet `POST /calendar/reassign` alle automatisch zugeordneten Termine neu zu, `series_event_ids` brauchen dann keinen `PATCH` mehr.
 - Nach jeder Änderung von Zuordnung oder Termin ruft der Kalender `ensurePlannedSessions` auf (§9.2, §16.2).
 
 ## 9. Sessions (T1-02)
@@ -336,7 +361,7 @@ Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei
 | `laeuft`, `pausiert` | Start einer **später** begonnenen Session | `beendet` | Core | `stop_reason = kalenderende`, `ended_at = min(planned_ends_at, started_at der neuen Session)` |
 | `laeuft`, `pausiert` | Core-Takt: Auto-Stopp-Regel 2 oder 4 greift, obwohl der Browser nicht gestoppt hat (§9.4) | `beendet` | Core | `stop_reason = kalenderende` bzw. `maximaldauer`. `ended_at` ist die **überschrittene Grenze** (bzw. `auto_stop_extended_until`, falls später), nicht die Zeit des Takts |
 | `laeuft`, `pausiert` | Core-Start, und die Grenze der vorigen Zeile lag in der Zeit, in der der Core nicht lief | `beendet` | Core | `stop_reason = absturz_wiederhergestellt`, `ended_at` = letzte Aktivität (Ende des letzten Chunks oder `at` der letzten Operation, mindestens `started_at`) |
-| `beendet` | alle Jobs der Session fertig | `verarbeitet` | Worker (§3) | Wurde beim Stopp kein Job angelegt, setzt der Core sofort `verarbeitet` |
+| `beendet` | alle Jobs vom Stopp durch (`fertig` oder `fehler`, kein Job mehr in `wartet`/`laeuft`) | `verarbeitet` | Worker (§3) | Wurde beim Stopp kein Job angelegt, setzt der Core sofort `verarbeitet`. Spätere `audio.finalize`-Jobs (Nachzügler, nachträgliche Offline-Aufnahme) ändern den Zustand nicht mehr, sie aktualisieren nur `processing` |
 
 - **Server-Operationen:** Jeder Übergang nach `laeuft`, `pausiert` oder `beendet`, den der Core selbst auslöst oder per REST ausführt, steht als `session.start`/`.pause`/`.resume`/`.stop` mit `origin = server` im Strom der Session. `bereit`, `verpasst` und `verarbeitet` haben keine Operation, sie kommen nur als Ereignis `session.updated`.
 - **Nachgelieferter Stopp korrigiert den Takt:** Kommt nach einem Stopp durch Core-Takt oder Core-Start (`kalenderende`, `maximaldauer`, `absturz_wiederhergestellt` mit `origin = server`) ein `session.stop` eines Geräts mit **früherem** `at`, übernimmt der Core dessen `ended_at` und `stop_reason`. Das ist eine Korrektur ohne Zustandswechsel, mit `session.updated`. Ein späterer `at` ändert nichts (gleicher Zielzustand).
@@ -392,7 +417,7 @@ Startet ein Gerät eine Session offline, während sie auf dem Server schon mit a
 - **Eine Aufnahme ist ein MediaRecorder-Strom.** Nach Neuladen oder Absturz legt die Web-App eine **neue** Aufnahme an (`started_ms` = aktuelle Sitzungszeit). Die Lücke dazwischen bleibt erhalten (02 §5).
 - Aufnahmen gibt es für Sessions in `laeuft` oder `pausiert`. Chunks und `complete` sind auch danach noch erlaubt (Nachlieferung aus IndexedDB).
 - **Nachträglich angelegte Aufnahme (T1-06, Lead-Entscheidung):** Hat die Web-App offline begonnen und erreicht den Core erst nach dem Ende der Session, ist `POST /sessions/{id}/recordings` auch in `beendet`/`verarbeitet` erlaubt, wenn `started_ms ≤ (Grenze − started_at) + 5 min` (`started_ms ≥ 0` gilt immer).
-  - **Grenze** = `ended_at`. Ist `auto_stop_extended_until` gesetzt und später, gilt dieses. Bei `stop_reason = absturz_wiederhergestellt` ist `ended_at` nur die letzte Aktivität; dort gilt `started_at + 12 h`. **Offene Lead-Frage:** Die Spezifikation nennt keine eindeutige Grenze (die Regeln 2 und 4 aus §9.4 hängen von Einstellungen und Kalender ab); die 12 h sind eine Ersatzgrenze.
+  - **Grenze** = `ended_at`. Ist `auto_stop_extended_until` gesetzt und später, gilt dieses. Bei `stop_reason = absturz_wiederhergestellt` ist `ended_at` nur die letzte Aktivität; dort gilt die Auto-Stopp-Grenze aus §9 (Lead-Entscheidung 05.11.): `G = max(min(planned_ends_at + lecture.auto_stop_hard_after_end_min, started_at + lecture.auto_stop_max_duration_min), auto_stop_extended_until)`, der erste Term nur bei Sessions mit Termin. Berechnet wird sie mit **derselben Funktion** wie der Core-Takt (T1-02). Bis T1-02 gemergt ist, gilt übergangsweise `started_at + 12 h`; die 12 h bleiben danach nur Rückfall, falls Werte fehlen.
   - Sonst `409 session_not_active` mit `details.ended_at`.
   - Der Core legt `audio.finalize` mit `run_after = jetzt + 10 min` an, sobald der erste Chunk kommt (§3, §10.2). `complete` und Nachzügler ziehen ihn wie gewohnt vor.
   - Der Sessionstatus und `ended_at` bleiben unverändert (Zustandsmaschine gehört T1-02). Offen für T1-04: ob die Weiterverarbeitung einer schon `verarbeitet`en Session danach neu läuft.
@@ -423,7 +448,7 @@ Startet ein Gerät eine Session offline, während sie auf dem Server schon mit a
 - Die Web-App löscht einen Chunk aus IndexedDB erst nach 200 oder 201. Bei 409 oder 422 versucht sie es **nicht** erneut, sondern verschiebt den Chunk in ihre Fehlerablage (§11.2) und meldet ihn. Bei 5xx und Netzfehlern wiederholt sie mit exponentiellem Warten bis 30 s.
 - **Nach `complete`:** Ein neuer Chunk mit `seq > completed_last_seq` wird mit `409 recording_completed` abgelehnt. Ein Chunk mit `seq ≤ last_seq` (Lücke füllen) und ein Duplikat bleiben erlaubt.
 - **Leere Aufnahme:** Eine Aufnahme ohne einen einzigen Chunk (Pause oder Stopp vor dem ersten Chunk) löscht die Web-App lokal und schließt sie **nicht** mit `complete` ab. Der Core legt für Aufnahmen ohne Chunks **keinen** `audio.finalize`-Job an, weder beim Stopp (`ensureFinalizeOnStop`) noch bei `complete`; die leere Zeile bleibt bestehen (`chunk_count = 0`, `state = laeuft`). Kommt später doch ein Chunk, entsteht der erste Job: sofort bei abgeschlossener Aufnahme, mit `run_after = jetzt + 10 min` bei beendeter Session, sonst keiner (§3). Der Rückfall des Workers (`mit_luecken` bei `chunk_count 0`) bleibt.
-- Nach dem letzten Chunk: `POST /recordings/{id}/complete` mit `last_seq` und `duration_ms`. Fehlt eine `seq ≤ last_seq` beim Finalisieren, wird die Aufnahme `mit_luecken`.
+- Nach dem letzten Chunk: `POST /recordings/{id}/complete` mit `last_seq` und `duration_ms`. Fehlt eine `seq ≤ last_seq` beim Finalisieren, wird die Aufnahme `mit_luecken`. Was sonst als fehlend gilt und wie `audio.finalize` Lücken behandelt, steht in §3.
 
 ## 11. Sync-Protokoll (T1-08, T1-09)
 
@@ -642,6 +667,10 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 - Speicherung in `setting` mit je einem Schlüssel pro Bereich (`general`, `lecture`, `pen`, `data`). Der Wert ist das Bereichsobjekt **ohne** Standardwerte.
 - `GET /settings` füllt fehlende Felder mit den Standards. `PATCH /settings` führt Feld für Feld zusammen.
 - `general.data_dir` ist nur lesbar (`SG_DATA_DIR`).
+- **Keine feldübergreifenden Regeln in Phase 1.** Es gelten nur die Schemaregeln je Feld (z. B. darf „Stopp spätestens“ vor „Stopp nach Kalenderende“ liegen).
+- **`data.backup_target`:** Der Core speichert den normalisierten Pfad (`path.resolve`, dann `realpath`). Abgelehnt werden `SG_DATA_DIR` und Ordner darin sowie `/proc`, `/sys`, `/dev`, unter macOS `/System` und `/private/var/db`. Symlinks sind erlaubt (gespeichert wird das Ziel); T1-18 prüft das Ziel beim Backup erneut. Änderungen nur lokal (§7.5).
+- `lecture.microphone_id`: höchstens 256 Zeichen.
+- **`general.appearance`** ist die Standard-Darstellung. Die Web-App wendet sie an, solange auf dem Gerät keine eigene Wahl („Hell“/„Dunkel“) gespeichert ist; „Wie Standard“ löscht die Geräte-Wahl.
 
 | Feld | Standard |
 |---|---|
@@ -681,6 +710,8 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `file_too_large`, `chunk_too_large` | 413 | Größe |
 | `unsupported_media_type`, `chunk_mime_mismatch` | 415 | Dateityp |
 | `ics_invalid`, `checksum_mismatch` | 422 | Inhalt ungültig |
+| `ics_too_complex` | 400 | ICS-Datei hat das Zeitbudget beim Auflösen überschritten (§8) |
+| `file_missing`, `unexpected_file`, `upload_aborted`, `source_not_syncable` | 400 | Upload: Datei fehlt, falsches Feld/mehrere Dateien bzw. Datei an eine URL-Quelle, Upload abgebrochen; Quelle nicht abgleichbar |
 | `pairing_locked` | 423 | Kopplung gesperrt, neues Fenster am Mac öffnen |
 | `pairing_rate_limited` | 429 | zu viele Versuche |
 | `pairing_requests_full` | 429 | 10 offene Kopplungsanfragen im Fenster, eine ablehnen oder neues Fenster öffnen (§12) |
@@ -730,7 +761,7 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 
 **Aufnahme-Job beim Stopp (T1-06, verbindlich für T1-02):** `ensureFinalizeOnStop(tx: Tx, recordingId: string, stoppedAt: Date): Promise<void>` in `services/core/src/services/recordings.ts`. Sie nimmt `lockRecording`, legt keinen Job an für Aufnahmen ohne Chunks und auch nicht, wenn einer in `wartet`, `laeuft` oder `fertig` existiert, sonst sofort (Aufnahme abgeschlossen) bzw. mit `run_after = stoppedAt + 10 min`. Der Stopp ruft sie für jede Aufnahme der Session auf, in aufsteigender ID-Reihenfolge.
 
-**Sperrreihenfolge** (gilt für Stopp, Sync-Handler und REST gleich, sonst droht ein Deadlock): `lockSessionTransitions` → Session-Zeile (`FOR NO KEY UPDATE` bzw. `FOR SHARE`) → `sync_stream` → `lockRecording` (nach ID sortiert) → Job-Zeilen. Die Aufnahme-Routen lesen die Session mit `FOR SHARE`, **bevor** sie `lockRecording` nehmen.
+**Sperrreihenfolge** (gilt für Stopp, Sync-Handler und REST gleich, sonst droht ein Deadlock): `lockSessionTransitions` → Session-Zeile (`FOR NO KEY UPDATE` bzw. `FOR SHARE`) → `sync_stream` → `lockRecording` (nach ID sortiert) → Job-Zeilen. Die Aufnahme-Routen sperren die Session **nie nach** `lockRecording`: Das Anlegen liest sie mit `FOR SHARE` davor; der Chunk-Upload liest sie ohne Sperre erst nach `lockRecording` (unter Read Committed sieht er dann entweder den committeten Stopp oder der Stopp zählt den Chunk mit).
 
 ### 16.3 Tickets und Besitz
 

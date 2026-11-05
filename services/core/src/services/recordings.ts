@@ -139,8 +139,9 @@ const FINALIZE_GRACE_MS = 10 * 60_000;
 
 /**
  * `POST /sessions/{id}/recordings`. Erlaubt in `laeuft` und `pausiert`. In `beendet`/`verarbeitet` nur, wenn
- * die Aufnahme innerhalb der Grenze der Session begann (offline gestartet, später nachgereicht, §10.1);
- * dann entsteht sofort ein `audio.finalize`-Job mit `run_after = jetzt + 10 min`. Der Sessionstatus bleibt
+ * die Aufnahme innerhalb der Grenze der Session begann (offline gestartet, später nachgereicht, §10.1).
+ * Der `audio.finalize`-Job entsteht erst mit dem ersten Chunk (leere Aufnahmen bekommen keinen, §10.2);
+ * der Aufruf von `ensureFinalizeOnStop` hier ist nur eine Absicherung. Der Sessionstatus bleibt
  * unverändert (Besitz T1-02). Sperrreihenfolge: Session-Zeile, dann `lockRecording`.
  */
 export async function createRecording(db: Db, sessionId: string, input: RecordingCreate): Promise<Recording> {
