@@ -481,7 +481,7 @@ def test_updated_at_stays_monotonic_when_worker_waits_for_core_stop(
                 worker_pid.append(wc.info.backend_pid)
                 with wc.transaction():
                     progress.refresh(wc, SID, ["transcribe"])
-        except BaseException as error:  # noqa: BLE001
+        except BaseException as error:
             errors.append(error)
 
     with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as core:
