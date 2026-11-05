@@ -1,7 +1,7 @@
 // Gemeinsamer Web-Sync-Client (VERTRAEGE §11, §16.2, Ticket T1-WS).
 //
-// Ein Client, eine Verbindung, eine globale Warteschlange. GitHub-unabhängig getestet gegen einen Fake-Server
-// (apps/web/test/sync-fake-server.ts), weil der Server-Teil (T1-08) noch fehlt.
+// Ein Client, eine Verbindung, eine globale Warteschlange. Unit-Tests laufen gegen einen Fake-Server
+// (apps/web/test/sync-fake-server.ts). Gegen den echten Server (T1-08) per E2E geprüft, siehe PR #66.
 import {
   SyncOpSchema,
   SyncServerMessageSchema,

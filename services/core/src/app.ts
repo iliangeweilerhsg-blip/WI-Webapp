@@ -27,6 +27,7 @@ import { trashRoutes } from './routes/trash.ts';
 import { LastSeenTracker, verifyDeviceToken } from './services/devices.ts';
 import { pickPairingHost } from './services/discovery.ts';
 import { PairingManager } from './services/pairing.ts';
+import { syncPlugin } from './sync/server.ts';
 
 export interface BuildAppOptions {
   config: Config;
@@ -106,6 +107,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerSecurity(app, guard);
   registerErrorHandler(app);
   registerIdempotency(app, db);
+  // WebSocket /sync (T1-08). Vor allen Routen, damit Upgrades auf andere Pfade geschlossen werden
+  await app.register(syncPlugin, { db, config, version });
 
   await app.register(cors, {
     // Nur die Entwicklungs-Web-App (SG_DEV_WEB_ORIGIN) bekommt CORS-Header
