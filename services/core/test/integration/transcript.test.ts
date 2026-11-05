@@ -1041,6 +1041,40 @@ describe('GET /sessions/{id}/transcript', () => {
       expect(ms, `Antwortzeit ${query || 'ohne Wörter'}`).toBeLessThan(1500);
     }
   });
+
+  it('[G10] chunk_count und last_seq der Aufnahme: 3 Chunks (+1 gelöschter) ergeben 3 und 2, in Transkript und Snapshot (#153)', async () => {
+    const id = await mkSession();
+    const rec = await mkRecording(id, { chunk: false, durationMs: 3000 });
+    const other = await mkRecording(id, { chunk: false, startedMs: 50_000 });
+    const chunk = (recordingId: string, seq: number, deletedAt: Date | null = null) =>
+      handle.db.insert(audioChunk).values({
+        id: uuidv7(),
+        ...base,
+        recordingId,
+        seq,
+        startMs: seq * 1000,
+        durationMs: 1000,
+        filePath: `media/recordings/${recordingId}/chunks/${seq}.webm`,
+        sha256: 'c'.repeat(64),
+        sizeBytes: 10,
+        deletedAt,
+      });
+    for (const seq of [0, 1, 2]) await chunk(rec, seq);
+    await chunk(rec, 3, T(2)); // gelöschter Chunk zählt nicht
+    await chunk(other, 0); // fremde Aufnahme zählt nicht
+    const want = [
+      { id: rec, chunk_count: 3, last_seq: 2 },
+      { id: other, chunk_count: 1, last_seq: 0 },
+    ];
+    const pick = (rs: { id: string; chunk_count: number; last_seq: number | null }[]) =>
+      rs.map(({ id: i, chunk_count, last_seq }) => ({ id: i, chunk_count, last_seq }));
+
+    const tr = SessionTranscriptSchema.parse((await getTranscript(id)).json());
+    expect(pick(tr.recordings)).toEqual(want);
+    const snap = await app.request({ method: 'GET', url: `${API}/sessions/${id}/snapshot` });
+    expect(snap.statusCode).toBe(200);
+    expect(pick(snap.json().recordings)).toEqual(want);
+  });
 });
 
 // --- Kaskade beim Löschen und Wiederherstellen (§13, §18.1) ---------------------------------------
