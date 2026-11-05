@@ -471,11 +471,16 @@ const scenarios = {
       },
       { sid, mod: env.moduleId },
     );
-    // Gibt es den Handler inzwischen (T1-02 / #65 gemergt), antwortet der Server mit einem anderen Fehler:
+    // Gibt es den Handler inzwischen (T1-02 / #65 gemergt), antwortet der Server mit ack oder einem anderen Fehler:
     // dann ist dieser 4503-Pfad nicht mehr erreichbar, das Szenario wird übersprungen statt zu scheitern.
     const otherAnswer = await waitFor(
       async () => {
         if (await page.evaluate(() => window.__h.client.shelved >= 1)) return 'shelved';
+        // Gültiger Handler: Der Server bestätigt die Operation (ack) statt eines Fehlers
+        const startIds = framesOf(sockets, 'out', 'op')
+          .filter((m) => m.kind === 'session.start')
+          .map((m) => m.op_id);
+        if (framesOf(sockets, 'in', 'ack').some((a) => startIds.includes(a.op_id))) return 'ack';
         const e = framesOf(sockets, 'in', 'error')[0];
         return e && !(e.code === 'internal_error' && e.details?.reason === 'handler_missing')
           ? e.code
