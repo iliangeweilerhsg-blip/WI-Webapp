@@ -139,19 +139,21 @@ function isWebSocketUpgrade(headers: IncomingHttpHeaders): boolean {
 const REJECTED_UPGRADE_GRACE_MS = 1000;
 
 /**
- * Abgelehnter WebSocket-Upgrade: `Connection: close` setzen und den Socket nach der Antwort schließen.
+ * Abgelehnter Upgrade (WebSocket oder jeder andere Upgrade-Header): `Connection: close` setzen und den Socket nach der Antwort schließen.
  * Der Socket gehört nach dem `upgrade`-Ereignis nicht mehr dem HTTP-Server, für ihn gelten weder
  * `keepAliveTimeout` noch `requestTimeout`. Erst `end()` (die Antwort kommt sicher an), dann nach einer
  * kurzen Frist `destroy()`, weil ein Angreifer seine Seite nie schließen würde.
  */
 export function closeRejectedUpgrade(
-  raw: { headers: IncomingHttpHeaders; socket?: unknown },
+  raw: { headers: IncomingHttpHeaders; socket?: unknown; upgrade?: boolean },
   response: {
     setHeader?: (name: string, value: string) => unknown;
     once: (event: 'finish', cb: () => void) => unknown;
   },
 ): void {
-  if (!isWebSocketUpgrade(raw.headers)) return;
+  // Node löst 'upgrade' für jeden Upgrade-Header aus (auch h2c, mehrfach, unbekannt), sobald `Connection: Upgrade`
+  // mitkommt. Dann gehört der Socket nicht mehr dem HTTP-Server, egal ob es ein WebSocket werden sollte
+  if (raw.upgrade !== true && !isWebSocketUpgrade(raw.headers)) return;
   const socket = raw.socket as { end?: () => void; destroy?: () => void; destroyed?: boolean } | undefined;
   try {
     response.setHeader?.('connection', 'close');
