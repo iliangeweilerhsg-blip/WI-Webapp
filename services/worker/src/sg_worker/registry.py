@@ -44,6 +44,12 @@ class JobContext:
             ctx.finish({"slides": 12})
         return {"slides": 12}
 
+    **Sperrreihenfolge (VERTRAEGE §16.2):** Betrifft der Job eine Session (`session_id`), sperrt
+    der Handler sie **zuerst** (`progress.lock_session(ctx.conn, ctx.session_id)` als erste
+    Anweisung der Transaktion), dann Fachzeilen und Job. `finish` zieht den Session-Fortschritt in
+    derselben Transaktion nach und sperrt die Session selbst; wer vorher Fachzeilen sperrt, kehrt
+    sonst die Reihenfolge zum Core um (Deadlock-Gefahr).
+
     Ohne `finish` schreibt der Worker `fertig` nach der Rückkehr des Handlers. Lässt ein
     Handler eine Transaktion offen oder schaltet autocommit ab, rollt der Worker zurück
     und lässt den Job fehlschlagen.
