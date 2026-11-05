@@ -249,7 +249,7 @@ describe('VoiceDetector', () => {
     const v = new VoiceDetector();
     expect(v.push(0.05)).toBe(true);
     for (let i = 0; i < 4; i++) expect(v.push(0)).toBe(true); // 1 s Pause
-    for (let i = 0; i < 20; i++) v.push(0); // lange Pause
+    for (let i = 0; i < 40; i++) v.push(0); // lange Pause
     expect(v.push(0)).toBe(false);
   });
   it('ungültige Werte zählen als Stille', () => {

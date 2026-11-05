@@ -411,6 +411,7 @@ Startet ein Gerät eine Session offline, während sie auf dem Server schon mit a
 
 - Spontane Sessions kennen nur die Regeln 3 und 4.
 - **Verlängern:** Der Tipp auf „weiter aufnehmen“ ruft `POST /sessions/{id}/extend` auf. Der Core setzt `auto_stop_extended_until = max(jetzt, bisheriger Wert) + minutes` (Standard `lecture.auto_stop_extend_min`). Vor diesem Zeitpunkt stoppt **keine** Regel, weder im Browser noch im Core-Takt. Danach gelten die Regeln normal weiter. Das Ereignis `session.updated` informiert die anderen Clients.
+- **`ended_at` bei Auto-Stopp aus dem Browser** ist der Zeitpunkt des Stopps, auch bei `stop_reason = stille` (kein Zurückdatieren auf den Beginn der Stille; `SessionStopRequest` kennt nur `reason`). Eine fälschlich erkannte Stille würde sonst echtes Audio aus dem Session-Zeitraum abschneiden (Lead-Entscheidung 05.11.).
 
 ## 10. Audio (T1-06)
 

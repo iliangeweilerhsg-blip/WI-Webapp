@@ -14,12 +14,12 @@ afterEach(() => {
 });
 
 describe('AutoStopHint', () => {
-  it('zeigt „Aufnahme endet in 0:42“ und den Knopf „Verlängern“, kein Dialog', () => {
+  it('zeigt „Stoppt gleich 0:42“ und den Knopf „weiter aufnehmen“, kein Dialog', () => {
     render(<AutoStopHint status={hinweis} extendMinutes={15} onExtend={() => undefined} />);
-    expect(screen.getByText('Aufnahme endet in 0:42')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Aufnahme um 15 Minuten verlängern' })).toHaveTextContent(
-      'Verlängern',
-    );
+    expect(screen.getByRole('status')).toHaveTextContent('Stoppt gleich 0:42');
+    expect(
+      screen.getByRole('button', { name: 'Weiter aufnehmen, Aufnahme um 15 Minuten verlängern' }),
+    ).toHaveTextContent('weiter aufnehmen');
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
@@ -41,8 +41,8 @@ describe('AutoStopHint', () => {
     expect(screen.queryByRole('button')).toBeNull();
     rerender(<AutoStopHint status={hinweis} extendMinutes={15} onExtend={() => undefined} />);
     const status = screen.getByRole('status');
-    expect(status.querySelector('[aria-hidden="true"]')).toHaveTextContent('Aufnahme endet in 0:42');
-    expect(status.querySelector('.sr-only')).toHaveTextContent('Aufnahme endet gleich.');
+    expect(status.querySelector('[aria-hidden="true"]')).toHaveTextContent('Stoppt gleich 0:42');
+    expect(status.querySelector('.sr-only')).toHaveTextContent('Aufnahme stoppt gleich.');
     rerender(
       <AutoStopHint
         status={{ ...hinweis, remainingMs: 41_000 }}
@@ -50,7 +50,7 @@ describe('AutoStopHint', () => {
         onExtend={() => undefined}
       />,
     );
-    expect(screen.getByRole('status').querySelector('.sr-only')).toHaveTextContent('Aufnahme endet gleich.');
+    expect(screen.getByRole('status').querySelector('.sr-only')).toHaveTextContent('Aufnahme stoppt gleich.');
     expect(document.querySelector('[aria-live]')).toBeNull();
   });
 
@@ -61,9 +61,9 @@ describe('AutoStopHint', () => {
     expect(screen.getByRole('button')).toBeInTheDocument();
     rerender(<AutoStopHint status={{ state: 'ok' }} extendMinutes={15} onExtend={() => undefined} />);
     expect(screen.queryByRole('button')).toBeNull();
-    expect(screen.queryByText(/Aufnahme endet/)).toBeNull();
+    expect(screen.queryByText(/Stoppt gleich/)).toBeNull();
     rerender(<AutoStopHint status={{ state: 'inaktiv' }} extendMinutes={15} onExtend={() => undefined} />);
-    expect(screen.queryByText(/Aufnahme endet/)).toBeNull();
+    expect(screen.queryByText(/Stoppt gleich/)).toBeNull();
   });
 
   it('zeigt die Meldung eines gescheiterten extend', () => {
@@ -87,7 +87,46 @@ describe('AutoStopHint', () => {
   });
 });
 
+describe('AutoStopHint Fokus', () => {
+  it('nach dem Tippen auf „weiter aufnehmen“ fällt der Fokus nicht auf body', async () => {
+    const { rerender } = render(
+      <AutoStopHint status={hinweis} extendMinutes={15} onExtend={() => undefined} />,
+    );
+    await userEvent.click(screen.getByRole('button'));
+    expect(screen.getByRole('button')).toHaveFocus();
+    // der Hinweis verschwindet, der Knopf wird entfernt (Fokus wäre auf body gefallen)
+    act(() => (document.activeElement as HTMLElement).blur());
+    rerender(<AutoStopHint status={{ state: 'ok' }} extendMinutes={15} onExtend={() => undefined} />);
+    expect(screen.getByRole('status')).toHaveFocus();
+  });
+});
+
 describe('useAutoStop', () => {
+  it('meldet sich bei einer erst nach dem Mount gelieferten Ereignisquelle an', () => {
+    const lecture = makeSettings().lecture;
+    const session = makeSession({ updated_at: new Date().toISOString() });
+    let handler: ((s: typeof session) => void) | null = null;
+    const events = {
+      onEvent: (_n: 'session.updated', fn: (s: typeof session) => void) => {
+        handler = fn;
+        return () => {
+          handler = null;
+        };
+      },
+    };
+    const { result, rerender } = renderHook(
+      ({ ev }: { ev: typeof events | undefined }) => useAutoStop({ session, lecture, events: ev }),
+      { initialProps: { ev: undefined as typeof events | undefined } },
+    );
+    expect(handler).toBeNull();
+    rerender({ ev: events });
+    expect(handler).not.toBeNull();
+    act(() =>
+      handler!({ ...session, state: 'beendet', updated_at: new Date(Date.now() + 1000).toISOString() }),
+    );
+    expect(result.current.status.state).toBe('inaktiv');
+  });
+
   it('liefert hinweis und extend, StrictMode-fest', async () => {
     vi.useFakeTimers();
     const T0 = Date.parse('2026-11-05T08:00:00Z');
@@ -110,7 +149,7 @@ describe('useAutoStop', () => {
     await act(async () => {
       await result.current.extend();
     });
-    expect(extend).toHaveBeenCalledWith(session.id, 15);
+    expect(extend).toHaveBeenCalledWith(session.id);
     expect(result.current.status.state).toBe('ok');
     expect(stop).not.toHaveBeenCalled();
   });

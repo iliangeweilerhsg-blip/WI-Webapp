@@ -165,7 +165,7 @@ describe('Auto-Stopp-Controller', () => {
     await advance(5000, level, 0.1);
     expect(controller.getSnapshot().status).toMatchObject({ state: 'hinweis', rule: 4 });
     await controller.extend();
-    expect(api.extend).toHaveBeenCalledWith(expect.any(String), 15);
+    expect(api.extend).toHaveBeenCalledWith(expect.any(String));
     expect(controller.getSnapshot().status.state).toBe('ok');
     expect(controller.getSnapshot().extending).toBe(false);
     await advance(14 * MIN, level, 0.1);
@@ -204,14 +204,16 @@ describe('Auto-Stopp-Controller', () => {
     expect(controller.getSnapshot().status.state).toBe('ok');
   });
 
-  it('extend scheitert: Meldung, kein Absturz; der Stopp kommt dann trotzdem', async () => {
+  it('extend scheitert: Meldung, kein Absturz; nach der Schonfrist kommt der Stopp', async () => {
     const { controller, level, api } = setup({ started_at: iso(T0 - 240 * MIN + 30_000) });
-    api.extend.mockRejectedValueOnce(
+    api.extend.mockRejectedValue(
       new ApiRequestError({ kind: 'unreachable', message: 'x', userMessage: 'Core nicht erreichbar' }),
     );
     await controller.extend();
     expect(controller.getSnapshot().extendError).toBe('Core nicht erreichbar');
     await advance(40_000, level, 0.1);
+    expect(api.stop).not.toHaveBeenCalled(); // Schonfrist
+    await advance(2 * MIN, level, 0.1);
     expect(api.stop).toHaveBeenCalledTimes(1);
   });
 
@@ -352,8 +354,94 @@ describe('Auto-Stopp-Controller', () => {
   });
 });
 
+describe('Nacharbeit aus dem Review', () => {
+  const netz = () =>
+    new ApiRequestError({ kind: 'unreachable', message: 'x', userMessage: 'Core nicht erreichbar' });
+
+  it('gescheitertes extend: Schonfrist ohne Stopp, Hinweis bleibt, einmal automatisch wiederholt', async () => {
+    const { controller, level, api } = setup({ started_at: iso(T0 - 240 * MIN + 10_000) });
+    api.extend.mockRejectedValueOnce(netz()).mockRejectedValueOnce(netz());
+    await advance(5000, level, 0.1);
+    await controller.extend(); // scheitert, die Grenze liegt in 5 s
+    await advance(30_000, level, 0.1); // Grenze überschritten
+    expect(api.stop).not.toHaveBeenCalled();
+    expect(api.extend).toHaveBeenCalledTimes(2); // genau ein automatischer Versuch
+    expect(controller.getSnapshot().status.state).toBe('hinweis');
+    expect(controller.getSnapshot().extendError).toBe('Core nicht erreichbar');
+    await advance(60_000, level, 0.1);
+    expect(api.stop).not.toHaveBeenCalled();
+    // Schonfrist (2 min) ist um: jetzt wird gestoppt
+    await advance(60_000, level, 0.1);
+    expect(api.stop).toHaveBeenCalledTimes(1);
+    expect(api.extend).toHaveBeenCalledTimes(2);
+  });
+
+  it('der automatische zweite Versuch gelingt: kein Stopp, Hinweis weg', async () => {
+    const { controller, level, api } = setup({ started_at: iso(T0 - 240 * MIN + 10_000) });
+    api.extend.mockRejectedValueOnce(netz());
+    await advance(5000, level, 0.1);
+    await controller.extend();
+    await advance(10_000, level, 0.1);
+    expect(api.extend).toHaveBeenCalledTimes(2);
+    expect(controller.getSnapshot().status.state).toBe('ok');
+    expect(controller.getSnapshot().extendError).toBeNull();
+    await advance(5 * MIN, level, 0.1);
+    expect(api.stop).not.toHaveBeenCalled();
+  });
+
+  it('Stopp scheitert nach dispose: kein neuer Timer', async () => {
+    const { controller, level, api } = setup({ started_at: iso(T0 - 240 * MIN + 1000) });
+    let fail!: (e: unknown) => void;
+    api.stop.mockImplementationOnce(() => new Promise<Session>((_, reject) => (fail = reject)));
+    await advance(3000, level, 0.1);
+    expect(api.stop).toHaveBeenCalledTimes(1);
+    controller.dispose();
+    fail(netz());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('andere 4xx beim Stopp sind endgültig: Meldung, kein Retry', async () => {
+    const { controller, level, api } = setup({ started_at: iso(T0 - 240 * MIN + 1000) });
+    api.stop.mockRejectedValueOnce(
+      new ApiRequestError({
+        kind: 'api',
+        status: 403,
+        code: 'x',
+        message: 'x',
+        userMessage: 'Nicht erlaubt',
+      }),
+    );
+    await advance(3000, level, 0.1);
+    await advance(2 * MIN, level, 0.1);
+    expect(api.stop).toHaveBeenCalledTimes(1);
+    expect(controller.getSnapshot().stopError).toBe('Nicht erlaubt');
+  });
+
+  it('leise Sprache gilt nicht als Stille, digitale Stille (stummes Mikrofon) auch nicht', async () => {
+    const quiet = setup();
+    await advance(20 * MIN, quiet.level, 0.004);
+    expect(quiet.api.stop).not.toHaveBeenCalled();
+    quiet.controller.dispose();
+    const muted = setup();
+    await advance(20 * MIN, muted.level, 0);
+    expect(muted.api.stop).not.toHaveBeenCalled();
+    expect(muted.controller.getSnapshot().status.state).toBe('ok');
+  });
+
+  it('setEvents ersetzt die Quelle: Ereignisse der alten kommen nicht mehr an', () => {
+    const { controller, events, session } = setup();
+    const second = eventSource();
+    controller.setEvents(second.source);
+    expect(events.count()).toBe(0);
+    expect(second.count()).toBe(1);
+    second.emit({ ...session(), state: 'beendet', updated_at: iso(Date.now() + 1) });
+    expect(controller.getSnapshot().status.state).toBe('inaktiv');
+  });
+});
+
 describe('Auto-Stopp gegen den Fake-Core (REST nach VERTRAEGE §7.2)', () => {
-  it('stop sendet POST /sessions/{id}/stop mit dem Grund, extend POST …/extend mit minutes', async () => {
+  it('stop sendet POST /sessions/{id}/stop mit dem Grund, extend POST …/extend ohne minutes (der Core nimmt seinen Wert)', async () => {
     const core = installFakeCore({ sessions: [makeSession({ started_at: iso(T0 - 240 * MIN + 30_000) })] });
     const level = levelSource();
     const events = eventSource();
@@ -366,7 +454,7 @@ describe('Auto-Stopp gegen den Fake-Core (REST nach VERTRAEGE §7.2)', () => {
     await advance(5000, level, 0.1);
     await controller.extend();
     const extend = core.requests.find((r) => r.path.endsWith('/extend'));
-    expect(extend).toMatchObject({ method: 'POST', body: { minutes: 15 } });
+    expect(extend).toMatchObject({ method: 'POST', body: {} });
     expect(controller.getSnapshot().status.state).toBe('ok');
 
     await advance(15 * MIN + 5000, level, 0.1);

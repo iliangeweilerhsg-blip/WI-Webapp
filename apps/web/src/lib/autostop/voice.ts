@@ -8,11 +8,14 @@
 //   Wortpausen bis etwa 1 s zählen so noch als Sprache.
 // - Schwellwert mit Hysterese: Sprache beginnt ab `onThreshold`, endet erst unter `offThreshold`. Das verhindert
 //   Flattern um die Schwelle.
-// - Werte: `onThreshold = 0.01` (ca. -40 dBFS), `offThreshold = 0.006` (ca. -44 dBFS). Raumrauschen im Hörsaal liegt
-//   meist bei -60 bis -50 dBFS (rms 0,001 bis 0,003), ein sprechender Dozent im Saal deutlich über -40 dBFS.
+// - Werte (Lead-Entscheidung): `onThreshold = 0.003` (ca. -50 dBFS), `offThreshold = 0.002` (ca. -54 dBFS). Bewusst
+//   niedrig: Leise Sprache (ferner Dozent, Flüstern) darf NIEMALS als Stille gelten, denn ein fälschlich beendeter
+//   Vortrag ist der schlimmere Fehler. Dafür darf lautes Raumrauschen fälschlich als Sprache zählen; dann stoppen
+//   nur noch die harten Grenzen (Regeln 2 und 4) die Aufnahme. Die Kalibrierung im Hörsaal bleibt offen (T1-20).
+// - Digitale Stille: `rms < 1e-6` (stummgeschaltetes Mikrofon, Gerät liefert Nullen) ist „unbekannt“, nicht Stille
+//   (siehe `SilenceTracker`). Ein stummes Mikrofon beweist nicht, dass nicht gesprochen wird.
 // - Fehlalarme gehen in die sichere Richtung: Ein lautes Geräusch (Tür, Husten) gilt als Sprache und schiebt den
-//   Stopp hinaus. Ein verpasster Stopp wird von den harten Grenzen (Regeln 2 und 4) aufgefangen, ein fälschlich
-//   beendeter Vortrag wäre schlimmer als eine spät beendete Aufnahme.
+//   Stopp hinaus.
 //
 // Alle Werte sind konfigurierbar (`VoiceActivityOptions`), denn Mikrofone und Browser-Verstärkung unterscheiden sich.
 
@@ -26,8 +29,8 @@ export interface VoiceActivityOptions {
 }
 
 export const DEFAULT_VOICE_OPTIONS: VoiceActivityOptions = {
-  onThreshold: 0.01,
-  offThreshold: 0.006,
+  onThreshold: 0.003,
+  offThreshold: 0.002,
   release: 0.9,
 };
 
@@ -78,6 +81,9 @@ export interface SilenceTrackerOptions extends Partial<VoiceActivityOptions> {
 
 export const DEFAULT_MAX_GAP_MS = 2000;
 
+/** Darunter liefert das Gerät digitale Stille (Nullen): kein Signal, also unbekannt statt still */
+export const DIGITAL_SILENCE_RMS = 1e-6;
+
 /**
  * Verfolgt, seit wann es ununterbrochen still ist.
  *
@@ -88,6 +94,7 @@ export const DEFAULT_MAX_GAP_MS = 2000;
  * - Eine Lücke zwischen zwei Messwerten (größer als `maxGapMs`) beginnt die Stille neu: Gezählt wird nur Stille,
  *   die lückenlos beobachtet wurde.
  * - Zu Beginn (noch kein Messwert) ist die Stille ebenfalls unbekannt. Vor dem ersten Messwert zählt nichts.
+ * - Digitale Stille (`rms < DIGITAL_SILENCE_RMS`) ist ebenfalls „unbekannt“ und setzt die Zählung zurück.
  */
 export class SilenceTracker {
   private readonly detector: VoiceDetector;
@@ -104,6 +111,11 @@ export class SilenceTracker {
   push(sample: LevelSample): void {
     const { at, rms } = sample;
     if (!Number.isFinite(at)) return;
+    if (!(rms >= DIGITAL_SILENCE_RMS)) {
+      // Nullen (stummes Mikrofon, NaN): keine Aussage über Sprache. Neu anfangen, sobald wieder Signal kommt.
+      this.reset();
+      return;
+    }
     const gap = this.lastSampleAt === null ? Infinity : at - this.lastSampleAt;
     // Lücke oder Zeitsprung rückwärts: neu anfangen, auch die Hüllkurve
     if (gap > this.maxGapMs || gap < 0) {

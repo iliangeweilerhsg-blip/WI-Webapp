@@ -26,6 +26,7 @@ const IDLE: AutoStopSnapshot = {
   extending: false,
   extendError: null,
   stopping: false,
+  stopError: null,
 };
 const noopSubscribe = () => () => undefined;
 
@@ -40,14 +41,7 @@ export function useAutoStop(options: UseAutoStopOptions): UseAutoStopResult {
 
   useEffect(() => {
     const { events, voice, api, now } = latest.current;
-    const instance = new AutoStopController({
-      events: events
-        ? { onEvent: (name, fn) => latest.current.events?.onEvent(name, fn) ?? (() => undefined) }
-        : undefined,
-      voice,
-      api,
-      now,
-    });
+    const instance = new AutoStopController({ events, voice, api, now });
     instance.setSettings(latest.current.lecture ?? null);
     instance.setSession(latest.current.session ?? null);
     setController(instance);
@@ -57,7 +51,9 @@ export function useAutoStop(options: UseAutoStopOptions): UseAutoStopResult {
     };
   }, []);
 
-  const { session, lecture } = options;
+  const { session, lecture, events } = options;
+  // Der Sync-Client kann nach dem Mount entstehen oder ersetzt werden: neu anmelden, sonst gehen Ereignisse verloren
+  useEffect(() => controller?.setEvents(events ?? null), [controller, events]);
   useEffect(() => controller?.setSettings(lecture ?? null), [controller, lecture]);
   useEffect(() => controller?.setSession(session ?? null), [controller, session]);
 

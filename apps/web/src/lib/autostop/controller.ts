@@ -34,6 +34,10 @@ export interface AutoStopControllerOptions {
   tickMs?: number;
   /** Wartezeit bis zum nächsten Stopp-Versuch nach einem Netz- oder Serverfehler, Standard 10 s */
   retryMs?: number;
+  /** Schonfrist nach einem gescheiterten `extend`: so lange wird nicht gestoppt, Standard 2 min */
+  extendGraceMs?: number;
+  /** Wartezeit bis zum einmaligen automatischen Wiederholen eines gescheiterten `extend`, Standard 5 s */
+  extendRetryMs?: number;
   /** Schwellwerte der Sprachaktivität (voice.ts) */
   voice?: SilenceTrackerOptions;
 }
@@ -46,6 +50,8 @@ export interface AutoStopSnapshot {
   extendError: string | null;
   /** `POST …/stop` wurde gesendet (läuft oder ist gelungen): kein zweiter Stopp */
   stopping: boolean;
+  /** Endgültig abgelehnter Stopp (andere 4xx als 404/409): Meldung, kein weiterer Versuch */
+  stopError: string | null;
 }
 
 const INACTIVE: AutoStopSnapshot = {
@@ -53,6 +59,7 @@ const INACTIVE: AutoStopSnapshot = {
   extending: false,
   extendError: null,
   stopping: false,
+  stopError: null,
 };
 
 function sameStatus(a: AutoStopStatus, b: AutoStopStatus): boolean {
@@ -70,12 +77,15 @@ export class AutoStopController {
   private readonly api: AutoStopApi;
   private readonly tickMs: number;
   private readonly retryMs: number;
+  private readonly extendGraceMs: number;
+  private readonly extendRetryMs: number;
   private readonly setTimer: (fn: () => void, ms: number) => unknown;
   private readonly clearTimer: (handle: unknown) => void;
   private readonly tracker: SilenceTracker;
   private readonly listeners = new Set<() => void>();
   private readonly offLevel: () => void;
-  private readonly offEvents: (() => void) | null;
+  private events: SessionEventSource | null = null;
+  private offEvents: (() => void) | null = null;
 
   private session: Session | null = null;
   private rules: AutoStopSession | null = null;
@@ -87,6 +97,11 @@ export class AutoStopController {
   /** Für diese Session ist ein Stopp unterwegs oder gelungen: nie ein zweiter */
   private stopSentFor: string | null = null;
   private retryAt = 0;
+  /** Bis hierher kein Stopp (nach gescheitertem `extend`), 0 = keine Schonfrist */
+  private graceUntil = 0;
+  /** Zeitpunkt des einmaligen automatischen Wiederholens, 0 = keins geplant */
+  private extendRetryAt = 0;
+  private stopError: string | null = null;
   private disposed = false;
 
   constructor(options: AutoStopControllerOptions = {}) {
@@ -94,13 +109,23 @@ export class AutoStopController {
     this.api = options.api ?? { stop: stopSession, extend: extendSession };
     this.tickMs = options.tickMs ?? 1000;
     this.retryMs = options.retryMs ?? 10_000;
+    this.extendGraceMs = options.extendGraceMs ?? 2 * 60_000;
+    this.extendRetryMs = options.extendRetryMs ?? 5000;
     this.setTimer = options.setInterval ?? ((fn, ms) => globalThis.setInterval(fn, ms));
     this.clearTimer =
       options.clearInterval ?? ((h) => globalThis.clearInterval(h as ReturnType<typeof setInterval>));
     this.tracker = new SilenceTracker(options.voice);
     this.offLevel = (options.subscribeLevel ?? subscribeAudioLevel)((sample) => this.tracker.push(sample));
+    this.setEvents(options.events ?? null);
+  }
+
+  /** Quelle für `session.updated` setzen oder ersetzen (der Sync-Client kann nach dem Mount erst entstehen) */
+  setEvents(events: SessionEventSource | null): void {
+    if (this.disposed || events === this.events) return;
+    this.offEvents?.();
+    this.events = events;
     this.offEvents =
-      options.events?.onEvent('session.updated', (s) => {
+      events?.onEvent('session.updated', (s) => {
         if (this.session && s.id === this.session.id) this.setSession(s);
       }) ?? null;
   }
@@ -122,6 +147,9 @@ export class AutoStopController {
       this.tracker.reset();
       this.stopSentFor = null;
       this.retryAt = 0;
+      this.graceUntil = 0;
+      this.extendRetryAt = 0;
+      this.stopError = null;
       this.extending = false;
       this.extendError = null;
     } else if (previous.state !== session.state) {
@@ -140,27 +168,44 @@ export class AutoStopController {
   }
 
   /**
-   * „Verlängern“ (+ `auto_stop_extend_min`, Standard 15). Der Core setzt `auto_stop_extended_until`; die Antwort
-   * (und `session.updated`) schiebt die Grenzen. Solange die Anfrage läuft, stoppt der Controller nicht.
+   * „Verlängern“. Ohne `minutes`, damit der Core seinen aktuellen Wert `lecture.auto_stop_extend_min` nimmt
+   * (`SessionExtendRequest` erlaubt höchstens 120, die Einstellung hat kein Maximum). Der Core setzt
+   * `auto_stop_extended_until`; die Antwort (und `session.updated`) schiebt die Grenzen. Solange die Anfrage läuft,
+   * stoppt der Controller nicht. Scheitert sie, gilt eine Schonfrist (kein Stopp, ein automatischer zweiter
+   * Versuch), damit ein Netzfehler beim Tippen nicht zum Stopp führt.
    */
   async extend(): Promise<void> {
+    await this.runExtend(false);
+  }
+
+  private async runExtend(isRetry: boolean): Promise<void> {
     const session = this.session;
-    const settings = this.settings;
-    if (this.disposed || !session || !settings || !this.rules || this.extending) return;
+    if (this.disposed || !session || !this.settings || !this.rules || this.extending) return;
     this.extending = true;
     this.extendError = null;
+    this.extendRetryAt = 0;
     this.update();
     try {
-      const updated = await this.api.extend(session.id, settings.auto_stop_extend_min);
-      if (this.session?.id === session.id) this.setSession(updated);
-    } catch (error) {
+      const updated = await this.api.extend(session.id);
+      if (this.disposed) return;
       if (this.session?.id === session.id) {
-        this.extendError =
-          error instanceof ApiRequestError ? error.userMessage : 'Verlängern hat nicht geklappt.';
+        this.graceUntil = 0;
+        this.setSession(updated);
+      }
+    } catch (error) {
+      if (this.disposed || this.session?.id !== session.id) return;
+      this.extendError =
+        error instanceof ApiRequestError ? error.userMessage : 'Verlängern hat nicht geklappt.';
+      const gone = error instanceof ApiRequestError && (error.status === 404 || error.status === 409);
+      if (!gone) {
+        this.graceUntil = this.now() + this.extendGraceMs;
+        if (!isRetry) this.extendRetryAt = this.now() + this.extendRetryMs;
       }
     } finally {
-      if (this.session?.id === session.id) this.extending = false;
-      if (!this.disposed) this.sync();
+      if (!this.disposed) {
+        if (this.session?.id === session.id) this.extending = false;
+        this.sync();
+      }
     }
   }
 
@@ -179,6 +224,7 @@ export class AutoStopController {
     this.disposed = true;
     this.offLevel();
     this.offEvents?.();
+    this.offEvents = null;
     this.stopTimer();
     this.listeners.clear();
   }
@@ -219,10 +265,24 @@ export class AutoStopController {
       now,
       silentSince: this.tracker.silentSince(now),
     });
-    if (status.state === 'stoppen' && !this.extending && now >= this.retryAt) {
+    if (this.extendRetryAt !== 0 && now >= this.extendRetryAt && !this.extending) {
+      void this.runExtend(true);
+    }
+    const held = this.extending || now < this.graceUntil;
+    if (status.state === 'stoppen' && !held && now >= this.retryAt) {
       this.stopSentFor = session.id;
       this.stopTimer();
       void this.sendStop(session.id, status.stopReason);
+    }
+    // Fällig, aber zurückgehalten (extend läuft oder Schonfrist): Der Hinweis bleibt sichtbar
+    if (status.state === 'stoppen' && held) {
+      this.update({
+        state: 'hinweis',
+        remainingMs: this.extending ? 0 : Math.max(0, this.graceUntil - now),
+        rule: status.rule,
+        stopReason: status.stopReason,
+      });
+      return;
     }
     this.update(status);
   }
@@ -233,10 +293,21 @@ export class AutoStopController {
       const ended = await this.api.stop(id, reason);
       if (this.session?.id === id) this.setSession(ended);
     } catch (error) {
-      if (this.session?.id !== id) return;
+      if (this.disposed || this.session?.id !== id) return;
       // 404 und 409 (z. B. schon beendet, gleicher Zielzustand ist 200): Es gibt nichts mehr zu stoppen.
       // Das `session.updated` bzw. der nächste Session-Stand räumt auf, ein weiterer Stopp wäre falsch.
       if (error instanceof ApiRequestError && (error.status === 404 || error.status === 409)) return;
+      // Andere 4xx (400/401/403 …) sind endgültig: Meldung zeigen, nicht alle 10 s neu versuchen
+      if (
+        error instanceof ApiRequestError &&
+        error.status !== null &&
+        error.status >= 400 &&
+        error.status < 500
+      ) {
+        this.stopError = error.userMessage;
+        this.update();
+        return;
+      }
       this.stopSentFor = null;
       this.retryAt = this.now() + this.retryMs;
       this.sync();
@@ -250,12 +321,14 @@ export class AutoStopController {
       extending: this.extending,
       extendError: this.extendError,
       stopping: this.session !== null && this.stopSentFor === this.session.id,
+      stopError: this.stopError,
     };
     if (
       sameStatus(current.status, next.status) &&
       current.extending === next.extending &&
       current.extendError === next.extendError &&
-      current.stopping === next.stopping
+      current.stopping === next.stopping &&
+      current.stopError === next.stopError
     ) {
       return;
     }
