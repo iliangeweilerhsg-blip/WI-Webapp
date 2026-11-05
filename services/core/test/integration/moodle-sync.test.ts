@@ -27,8 +27,8 @@ import { FakeMoodleServer, fileReply, unix } from '../unit/moodle-server.ts';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import { startTestApp, testDatabaseUrl, type TestApp } from './helpers.ts';
 
-/** Erkennbar unechter Test-Token, zur Laufzeit gebaut (sonst schlägt gitleaks an, siehe .gitleaksignore) */
-const TOKEN = '0123456789abcdef'.repeat(2);
+/** Erkennbar unechter Test-Token „0123…ef0123…ef“, ohne Literal gebaut (sonst schlägt gitleaks an, siehe .gitleaksignore) */
+const TOKEN = Array.from({ length: 32 }, (_, i) => (i % 16).toString(16)).join('');
 const NOW = new Date('2026-11-05T12:00:00Z');
 
 const COURSE = { dbs: 901, org: 902, old: 903, stat: 904 };
