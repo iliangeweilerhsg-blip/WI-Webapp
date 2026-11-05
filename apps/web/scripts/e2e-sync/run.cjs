@@ -471,6 +471,27 @@ const scenarios = {
       },
       { sid, mod: env.moduleId },
     );
+    // Gibt es den Handler inzwischen (T1-02 / #65 gemergt), antwortet der Server mit einem anderen Fehler:
+    // dann ist dieser 4503-Pfad nicht mehr erreichbar, das Szenario wird übersprungen statt zu scheitern.
+    const otherAnswer = await waitFor(
+      async () => {
+        if (await page.evaluate(() => window.__h.client.shelved >= 1)) return 'shelved';
+        const e = framesOf(sockets, 'in', 'error')[0];
+        return e && !(e.code === 'internal_error' && e.details?.reason === 'handler_missing')
+          ? e.code
+          : false;
+      },
+      90_000,
+      'erste Antwort auf session.start',
+    );
+    if (otherAnswer !== 'shelved') {
+      check(
+        `übersprungen: session.start hat einen Handler (Antwort ${otherAnswer}), kein 4503 über handler_missing`,
+        true,
+      );
+      await context.close();
+      return;
+    }
     await waitFor(
       () => page.evaluate(() => window.__h.client.shelved === 1),
       90_000,
@@ -601,13 +622,28 @@ const scenarios = {
 
 // ------------------------------------------------------------------ Lauf
 
+let browser;
+let tearingDown = null;
+/** Einmal aufräumen (Browser, Core über die eigene PID, DB, Temp-Verzeichnis), auch bei Strg+C und SIGTERM.
+ *  Alle Aufrufer warten auf dasselbe Aufräumen, damit der Prozess nicht davor endet. */
+function cleanupOnce() {
+  tearingDown ??= teardown(browser);
+  return tearingDown;
+}
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    console.log(`\n${sig}: räume auf …`);
+    cleanupOnce().finally(() => process.exit(sig === 'SIGINT' ? 130 : 143));
+  });
+}
+
 (async () => {
-  let browser;
   let failed = true;
   try {
     await setup();
     const { chromium } = loadPlaywright();
-    browser = await chromium.launch();
+    // Playwright würde sonst selbst auf SIGINT/SIGTERM beenden, bevor aufgeräumt ist
+    browser = await chromium.launch({ handleSIGINT: false, handleSIGTERM: false, handleSIGHUP: false });
     const ctx = { browser };
     const order = ['app', 'acks', 'resumeAndReset', 'backoff4503', 'leader'];
     for (const name of order) {
@@ -625,7 +661,7 @@ const scenarios = {
   } catch (e) {
     console.error('Lauf fehlgeschlagen:', e);
   } finally {
-    await teardown(browser);
+    await cleanupOnce();
   }
   process.exit(failed ? 1 : 0);
 })();

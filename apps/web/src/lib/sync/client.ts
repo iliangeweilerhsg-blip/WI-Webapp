@@ -1431,7 +1431,9 @@ export class SyncClient {
     }
     await this.locked(async () => {
       if (!this.isLeader) return;
-      const fresh = (await this.store.list()).filter((e) => !this.byOpId.has(e.op.op_id));
+      const fresh = (await this.store.list()).filter(
+        (e) => !this.byOpId.has(e.op.op_id) && !this.acked.has(e.op.op_id),
+      );
       if (fresh.length === 0) return;
       this.setQueue([...this.queue, ...fresh].sort((a, b) => a.key - b.key));
       this.emit('queue', { pending: this.queue.length });

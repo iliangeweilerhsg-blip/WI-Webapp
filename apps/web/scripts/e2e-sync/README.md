@@ -13,7 +13,8 @@ Postgres 16. Das Skript ist **nicht** Teil der CI.
 4. Core als eigener Prozess starten (`node src/main.ts`, Port 4731, ohne Bonjour), Semester und Modul per REST anlegen.
 5. Szenarien mit Playwright (Chromium). Die Operationen laufen über den `SyncClient` im Browser. Geprüft wird gegen die
    WebSocket-Rahmen (Playwright) und den Serverstand (REST).
-6. Aufräumen: Core über die eigene PID beenden (SIGTERM), Datenbank und Temp-Verzeichnis löschen.
+6. Aufräumen: Core über die eigene PID beenden (SIGTERM), Datenbank und Temp-Verzeichnis löschen. Das geschieht auch bei
+   Strg+C (`SIGINT`) und `SIGTERM` (Exit-Code 130 bzw. 143).
 
 | Szenario | Prüft |
 | --- | --- |
@@ -27,7 +28,9 @@ Postgres 16. Das Skript ist **nicht** Teil der CI.
 
 ```bash
 # Voraussetzung: Postgres 16 läuft auf 127.0.0.1:5432 (sg/sg), pnpm install ist gelaufen,
-# Playwright ist vorhanden (wird nicht installiert).
+# Playwright ist vorhanden (wird nicht installiert). Liegt es nicht im Modulpfad des Repos (z. B. global unter
+# /opt/node-tools), findet `require('playwright')` es nur mit NODE_PATH:
+#   NODE_PATH=/opt/node-tools/node_modules node apps/web/scripts/e2e-sync/run.cjs
 pg_lsclusters || pg_ctlcluster 16 main start
 node apps/web/scripts/e2e-sync/run.cjs                 # mit Build
 node apps/web/scripts/e2e-sync/run.cjs --skip-build    # vorhandenes apps/web/out nutzen
@@ -41,7 +44,10 @@ Exit-Code 1, wenn eine Prüfung fehlschlägt. Dauer: etwa 1 Minute ohne Build (4
 ## Grenzen
 
 - Der Verbindungsabbruch wird clientseitig ausgelöst (`WebSocket.close`), nicht durch einen Netzausfall.
-- 4503 entsteht über die fehlenden Session-Handler. Sobald `registerSessionHandlers` auf `main` liegt, braucht
-  `backoff4503` eine andere Quelle (z. B. `pg_terminate_backend` auf die LISTEN-Verbindung oder ein ungültiger Fachfall).
+- 4503 entsteht über die fehlenden Session-Handler (`session.start` ohne Handler: `handler_missing`). Sobald
+  `registerSessionHandlers` (#65) auf `main` liegt, gibt es keine Op-Art ohne Handler mehr, und das Schema lässt keine
+  erfundene `kind` zu. Das Szenario erkennt das an einer anderen Antwort und **überspringt** sich (grün, mit Hinweis).
+  Eine neue 4503-Quelle wäre dann nötig (kein einfacher Weg bekannt: `too_many_pending` setzt das Backoff über die
+  vorherigen `ack`s zurück).
 - Der Wettlauf beim Leader-Wechsel ist im Browser nicht zeitlich erzwingbar. Deterministisch deckt ihn
   `test/sync-leader-window.test.ts` ab; das E2E-Szenario `leader` ist der Stresstest dazu.

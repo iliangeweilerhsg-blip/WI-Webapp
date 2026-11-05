@@ -223,4 +223,36 @@ describe('Restfenster beim Leader-Wechsel', () => {
     g.open();
     await settle();
   });
+
+  it('Nachlesen sendet keine Operation erneut, die gerade bestätigt wurde und deren Entfernen noch wartet', async () => {
+    const shared = new MemoryQueueStore();
+    const storeB = new GatedStore(shared);
+    const locks = new Locks();
+    const a = tab(locks, shared);
+    const b = tab(locks, storeB);
+    await a.connect();
+    await b.connect();
+    await settle();
+
+    server.decide = () => ({ ignore: true });
+    void a.send(notebookCreate(1, uid(904))).catch(() => undefined);
+    await settle();
+    b.takeOver(); // b liest X aus dem Speicher und sendet sie
+    await settle();
+    expect(server.opLog).toEqual([uid(904), uid(904)]);
+
+    const g = gate();
+    storeB.gateAppend = g.promise; // ein zweites append hält den Lock von b
+    server.decide = () => ({ ack: true });
+    const py = b.send(notebookCreate(2, uid(905))).catch(() => undefined);
+    await settle();
+    locks.holder?.handlers?.onEnqueued?.(); // Nachlesen steht hinter dem append in der Reihe
+    server.sockets[1]!.push({ type: 'ack', op_id: uid(904), stream: nbStream(1), seq: 1 }); // ack für X, Entfernen dahinter
+    await settle();
+    g.open();
+    await settle();
+    await py;
+    expect(server.opLog.filter((id) => id === uid(904))).toHaveLength(2); // nicht ein drittes Mal
+    expect(b.pendingCount).toBe(0);
+  });
 });
