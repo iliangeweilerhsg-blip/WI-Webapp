@@ -202,12 +202,17 @@ describe('Kette beim Stopp', () => {
       dependsOn: [finalize!.id],
       payload: { session_id: id },
     });
-    expect(stopped.processing).toEqual({ transcribe: 'wartet', 'align.log': 'wartet' });
+    // Schrittliste: auch audio.finalize (in der Gnadenfrist wartend) steht in processing
+    expect(stopped.processing).toEqual({
+      'audio.finalize': 'wartet',
+      transcribe: 'wartet',
+      'align.log': 'wartet',
+    });
     // align.log hängt nicht von transcribe ab
     expect(align!.dependsOn).not.toContain(transcribe!.id);
     expect(events.filter((e) => e.name === 'session.updated').at(-1)?.data).toMatchObject({
       state: 'beendet',
-      processing: { transcribe: 'wartet', 'align.log': 'wartet' },
+      processing: { 'audio.finalize': 'wartet', transcribe: 'wartet', 'align.log': 'wartet' },
     });
   });
 
@@ -220,7 +225,11 @@ describe('Kette beim Stopp', () => {
       'audio.finalize',
       'transcribe',
     ]);
-    expect(stopped.processing).toEqual({ transcribe: 'wartet', 'align.log': 'wartet' });
+    expect(stopped.processing).toEqual({
+      'audio.finalize': 'wartet',
+      transcribe: 'wartet',
+      'align.log': 'wartet',
+    });
   });
 
   it('[K3] Stopp ohne Audio (Aufnahme ohne Chunk oder keine Aufnahme): keine Kette, sofort verarbeitet', async () => {
@@ -242,6 +251,11 @@ describe('Kette beim Stopp', () => {
     const [transcribe] = await jobsOf(id, 'transcribe');
     expect(transcribe).toMatchObject({ state: 'wartet', dependsOn: [] });
     expect(done).toBeTruthy();
+    expect(stopped.processing).toEqual({
+      'audio.finalize': 'fertig',
+      transcribe: 'wartet',
+      'align.log': 'wartet',
+    });
   });
 
   it('[K5] Nachzügler: Chunk nach dem Stopp legt nur audio.finalize an und setzt stale, keine neue Kette', async () => {
@@ -331,6 +345,42 @@ describe('ensurePipelineJobs', () => {
     const [t, a] = await ensure(id, 'transcribe');
     expect(t!.dependsOn).toEqual([runningT]);
     expect(a!.dependsOn).toEqual([runningA]);
+  });
+
+  it('[P7] wiederverwendeter wartender Job verliert Abhängigkeiten in fehler/abgebrochen/gelöscht/unbekannt, behält tragende', async () => {
+    const id = await mkSession();
+    const rec = await mkRecording(id);
+    const failed = await mkJob(id, 'audio.finalize', 'fehler', { recordingId: rec });
+    const cancelled = await mkJob(id, 'audio.finalize', 'abgebrochen', { recordingId: rec });
+    const deleted = await mkJob(id, 'audio.finalize', 'wartet', { recordingId: rec });
+    await handle.db
+      .update(job)
+      .set({ deletedAt: T(1) })
+      .where(eq(job.id, deleted));
+    const done = await mkJob(id, 'audio.finalize', 'fertig', { recordingId: rec });
+    const ghost = uuidv7();
+    const waitingT = await mkJob(id, 'transcribe', 'wartet', {
+      dependsOn: [failed, cancelled, deleted, done, ghost],
+    });
+    await ensure(id, 'transcribe');
+    const [t] = await jobsOf(id, 'transcribe');
+    expect(t!.id).toBe(waitingT);
+    // tragend bleibt nur der fertige Job; die gescheiterte ID darf nicht in depends_on stehen
+    expect(t!.dependsOn).toEqual([done]);
+    expect(t!.dependsOn).not.toContain(failed);
+  });
+
+  it('[P8] Reprocess-Route: wartender transcribe mit gescheitertem audio.finalize, danach from_step transcribe', async () => {
+    const id = await mkSession({ processing: { 'audio.finalize': 'fehler' } });
+    const rec = await mkRecording(id);
+    const failed = await mkJob(id, 'audio.finalize', 'fehler', { recordingId: rec });
+    await mkJob(id, 'transcribe', 'wartet', { dependsOn: [failed] });
+    const res = await post(id, { from_step: 'transcribe' });
+    expect(res.statusCode).toBe(202);
+    const transcribes = await jobsOf(id, 'transcribe');
+    expect(transcribes).toHaveLength(1);
+    expect(transcribes[0]!.dependsOn).not.toContain(failed);
+    expect(transcribes[0]!.dependsOn).toEqual([]);
   });
 
   it('[P3] Rückgabe in Ketten-Reihenfolge; align.log fasst transcribe nicht an', async () => {
@@ -852,14 +902,22 @@ describe('GET /sessions/{id}/transcript', () => {
       .set({ deletedAt: T(1) })
       .where(eq(slideSegment.id, manSeg));
     expect((await getTranscript(id)).json().slide_source).toBe('ausrichtung');
-    // gelöschte Folie: ihr Segment fehlt in der Liste
+    // gelöschte Folie: ihr Segment fällt weg, die Quelle wird NACH diesem Filter gewählt (hier: log)
     await handle.db
       .update(slide)
       .set({ deletedAt: T(2) })
       .where(eq(slide.id, s2!));
     body = (await getTranscript(id)).json();
+    expect(body.slide_source).toBe('log');
+    expect(body.slide_segments.map((s: { id: string }) => s.id)).toEqual([logSeg]);
+    // auch das log-Segment hängt an einer gelöschten Folie: keine Quelle mehr
+    await handle.db
+      .update(slide)
+      .set({ deletedAt: T(3) })
+      .where(eq(slide.id, s1!));
+    body = (await getTranscript(id)).json();
+    expect(body.slide_source).toBeNull();
     expect(body.slide_segments).toEqual([]);
-    expect(logSeg).toBeTruthy();
   });
 
   it('[G8] Zeilen nach (start_ms, recording_id, seq) über mehrere Aufnahmen; recordings und transcripts nach started_ms', async () => {
@@ -915,6 +973,23 @@ describe('GET /sessions/{id}/transcript', () => {
     await mkRecording(other, { durationMs: null });
     await mkRecording(other, { durationMs: 5000 }); // Dauer, aber kein fertiger Job
     expect((await getTranscript(other)).json().stale).toBe(false);
+  });
+
+  it('[G11] stale zählt nur Jobs der eigenen Session (job_session_idx), auch beim fehlenden Transkript', async () => {
+    const id = await mkSession();
+    const rec = await mkRecording(id, { durationMs: 10_000 });
+    const mine = await mkJob(id, 'audio.finalize', 'fertig', { recordingId: rec });
+    await mkTranscript(id, rec, [{ start: 0, end: 10, text: 'x' }], mine);
+    expect((await getTranscript(id)).json().stale).toBe(false);
+    // ein fertiger Job einer anderen Session mit derselben recording_id darf das Transkript nicht veralten lassen
+    const other = await mkSession();
+    await mkJob(other, 'audio.finalize', 'fertig', { recordingId: rec });
+    expect((await getTranscript(id)).json().stale).toBe(false);
+    // Aufnahme ohne Transkript: ein fertiger Job einer fremden Session zählt nicht als „Audio fertig“
+    const lone = await mkSession();
+    const loneRec = await mkRecording(lone, { durationMs: 5000 });
+    await mkJob(other, 'audio.finalize', 'fertig', { recordingId: loneRec });
+    expect((await getTranscript(lone)).json().stale).toBe(false);
   });
 
   it('[G10] Leistung: 90 min mit 450 Abschnitten und 11 700 Wörtern, mit und ohne Wörter', async () => {

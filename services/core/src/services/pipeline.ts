@@ -114,6 +114,19 @@ async function sessionJobs(tx: Tx, sessionId: string, type: string, states: JobS
 
 const union = (...lists: string[][]): string[] => [...new Set(lists.flat())];
 
+/** Die Abhängigkeiten, die noch tragen: Job vorhanden, nicht gelöscht und weder `fehler` noch `abgebrochen` (Reihenfolge bleibt) */
+async function usableDependencies(tx: Tx, ids: string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const rows = await tx
+    .select({ id: job.id })
+    .from(job)
+    .where(
+      and(inArray(job.id, ids), isNull(job.deletedAt), inArray(job.state, ['wartet', 'laeuft', 'fertig'])),
+    );
+  const alive = new Set(rows.map((r) => r.id));
+  return ids.filter((id) => alive.has(id));
+}
+
 /**
  * Schritte 2 und 3: `transcribe` bzw. `align.log` der Session. Ein wartender Job wird wiederverwendet (`depends_on`
  * um die offenen `audio.finalize`-Jobs ergänzt, bei `transcribe` wird `force` zu `alt ODER neu`). Sonst entsteht ein
@@ -129,9 +142,12 @@ async function ensureSessionJob(
   const [waiting] = await sessionJobs(tx, sessionId, type, ['wartet']);
   if (waiting) {
     const payload = type === 'transcribe' && force ? { ...waiting.payload, force: true } : waiting.payload;
+    // Abhängigkeiten in `fehler`/`abgebrochen` oder gelöscht (bzw. nicht mehr vorhanden) fallen weg, sonst bricht
+    // der Worker den Job ab und „Mit vorhandenem Audio fortfahren“ scheitert still (VERTRAEGE §18.2).
+    const kept = await usableDependencies(tx, waiting.dependsOn);
     const [updated] = await tx
       .update(job)
-      .set({ payload, dependsOn: union(waiting.dependsOn, openFinalizeIds), updatedAt: sql`now()` })
+      .set({ payload, dependsOn: union(kept, openFinalizeIds), updatedAt: sql`now()` })
       .where(eq(job.id, waiting.id))
       .returning();
     return updated ?? waiting;
@@ -155,7 +171,7 @@ async function ensureSessionJob(
  * Zusammenfassung des Fortschritts je Job-Typ (VERTRAEGE §18.2, Referenz-SQL): Je Einheit zählt nur der neueste
  * nicht gelöschte Job, ein laufender Job der Einheit macht sie `laeuft`. Einheit ist bei `audio.finalize` die
  * Aufnahme, sonst die Session. `null`, wenn es keinen Job des Typs gibt (der Schlüssel bleibt dann unverändert).
- * Muss mit `_SUMMARY_SQL` im Worker (`progress.py`) übereinstimmen.
+ * Muss mit `SUMMARY_SQL` im Worker (`progress.py`) übereinstimmen.
  */
 export async function summarizeProcessing(
   tx: Tx,
