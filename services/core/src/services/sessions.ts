@@ -42,7 +42,7 @@ import { uuidv7 } from '../lib/uuid7.ts';
 import { appendOp } from '../sync/append.ts';
 import { publishAfterCommit, publishEvent } from '../sync/events.ts';
 import { autoStopBoundary, autoStopReason, type AutoStopLimits, type AutoStopSession } from './auto-stop.ts';
-import { ensurePipelineJobs } from './pipeline.ts';
+import { ensurePipelineJobs, summarizeProcessing } from './pipeline.ts';
 import { ensureFinalizeOnStop } from './recordings.ts';
 import { getSettings } from './settings.ts';
 import { softDelete } from './trash.ts';
@@ -274,6 +274,16 @@ async function finishSession(
     )
     .limit(1);
   if (withAudio) await ensurePipelineJobs(tx, row.id, { fromStep: 'transcribe', force: false, emit: false });
+  // Schrittliste: auch `audio.finalize` (z. B. in der Gnadenfrist `wartet`) steht in `processing`
+  const audioState = await summarizeProcessing(tx, row.id, 'audio.finalize');
+  if (audioState) {
+    await tx
+      .update(session)
+      .set({
+        processing: sql`coalesce(${session.processing}, '{}'::jsonb) || ${JSON.stringify({ 'audio.finalize': audioState })}::jsonb`,
+      })
+      .where(eq(session.id, row.id));
+  }
   const [pending] = await tx
     .select({ id: job.id })
     .from(job)

@@ -164,7 +164,7 @@ export async function getSessionTranscript(
     async (tx) => {
       const loaded = await requireSession(tx, sessionId);
 
-      // Folienzuordnung: erste Quelle mit nicht gelöschten Segmenten, ohne Segmente gelöschter Folien
+      // Folienzuordnung: erst Segmente gelöschter Folien weglassen, dann die erste Quelle mit Segmenten wählen
       const segRows = await tx
         .select({
           seg: slideSegment,
@@ -173,8 +173,9 @@ export async function getSessionTranscript(
         .from(slideSegment)
         .where(and(eq(slideSegment.sessionId, sessionId), notDeleted(slideSegment)))
         .orderBy(asc(slideSegment.startMs), asc(slideSegment.id));
-      const slideSource = SLIDE_SOURCES.find((s) => segRows.some((r) => r.seg.source === s)) ?? null;
-      const chosen = segRows.filter((r) => r.seg.source === slideSource && r.slideAlive);
+      const liveRows = segRows.filter((r) => r.slideAlive);
+      const slideSource = SLIDE_SOURCES.find((s) => liveRows.some((r) => r.seg.source === s)) ?? null;
+      const chosen = liveRows.filter((r) => r.seg.source === slideSource);
       const slide_segments = chosen.map(({ seg }): SlideSegment => ({
         id: seg.id,
         user_id: seg.userId,
@@ -197,7 +198,8 @@ export async function getSessionTranscript(
           row: transcript,
           stale: sql<boolean>`COALESCE((
             SELECT j.id <> ${transcript.finalizeJobId} FROM job j
-            WHERE j.type = 'audio.finalize' AND j.payload->>'recording_id' = ${transcript.recordingId}::text
+            WHERE j.session_id = ${transcript.sessionId} AND j.type = 'audio.finalize'
+              AND j.payload->>'recording_id' = ${transcript.recordingId}::text
               AND j.state = 'fertig' AND j.deleted_at IS NULL
             ORDER BY j.created_at DESC, j.id DESC LIMIT 1), false)`,
         })
@@ -259,7 +261,7 @@ export async function getSessionTranscript(
         SELECT EXISTS (
           SELECT 1 FROM recording r
           WHERE r.session_id = ${sessionId} AND r.deleted_at IS NULL AND r.duration_ms > 0
-            AND EXISTS (SELECT 1 FROM job j WHERE j.type = 'audio.finalize'
+            AND EXISTS (SELECT 1 FROM job j WHERE j.session_id = r.session_id AND j.type = 'audio.finalize'
                         AND j.payload->>'recording_id' = r.id::text AND j.state = 'fertig' AND j.deleted_at IS NULL)
             AND NOT EXISTS (SELECT 1 FROM transcript t WHERE t.recording_id = r.id AND t.deleted_at IS NULL)
         ) AS missing`);
