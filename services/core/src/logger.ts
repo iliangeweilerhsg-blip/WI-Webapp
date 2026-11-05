@@ -48,6 +48,46 @@ export function rotateLogs(
   return day;
 }
 
+/** Größengrenzen für `core.log` (Issue #87): je Datei 50 MB, alle Logdateien zusammen 500 MB */
+export const LOG_MAX_FILE_BYTES = 50 * 1024 * 1024;
+export const LOG_MAX_TOTAL_BYTES = 500 * 1024 * 1024;
+
+export interface LogSizeLimits {
+  maxFileBytes: number;
+  maxTotalBytes: number;
+}
+
+/**
+ * Größengrenzen. Ist `core.log` größer als `maxFileBytes`, wird sie zu `core-<Tag>-<Zeitstempel>.log`
+ * rotiert. Übersteigen `core.log` und alle `core-*.log` zusammen `maxTotalBytes`, werden die ältesten Archive
+ * gelöscht (nie die aktuelle Datei). Rückgabe: `true`, wenn `core.log` rotiert wurde (Aufrufer öffnet sie neu).
+ */
+export function enforceLogSizeLimits(
+  logDir: string,
+  limits: LogSizeLimits = { maxFileBytes: LOG_MAX_FILE_BYTES, maxTotalBytes: LOG_MAX_TOTAL_BYTES },
+  now: Date = new Date(),
+): boolean {
+  mkdirSync(logDir, { recursive: true });
+  const current = join(logDir, 'core.log');
+  let rotated = false;
+  if (existsSync(current) && statSync(current).size >= limits.maxFileBytes) {
+    renameSync(current, join(logDir, `core-${dayString(now)}-${now.getTime()}.log`));
+    rotated = true;
+  }
+  const archives = readdirSync(logDir)
+    .filter((name) => /^core-\d{4}-\d{2}-\d{2}.*\.log$/.test(name))
+    .map((name) => ({ file: join(logDir, name), stat: statSync(join(logDir, name)) }))
+    .sort((a, b) => a.stat.mtime.getTime() - b.stat.mtime.getTime());
+  let total = archives.reduce((sum, a) => sum + a.stat.size, 0);
+  if (!rotated && existsSync(current)) total += statSync(current).size;
+  for (const archive of archives) {
+    if (total <= limits.maxTotalBytes) break;
+    unlinkSync(archive.file);
+    total -= archive.stat.size;
+  }
+  return rotated;
+}
+
 /** Tag, an dem eine vorhandene `core.log` begonnen wurde (Näherung beim Start: ihr mtime), sonst heute */
 export function initialLogDay(logDir: string, now: Date = new Date()): string {
   const current = join(logDir, 'core.log');
@@ -137,32 +177,52 @@ export function loggerOptions(config: Pick<Config, 'logLevel'>): pino.LoggerOpti
 /**
  * Strukturierte JSON-Logs nach stdout und (optional) `$SG_DATA_DIR/logs/core.log` (VERTRAEGE §4).
  * Die Datei wird synchron geschrieben, damit auch Fehler beim Start (z. B. Port belegt) im Log landen.
- * Rotation: beim Start und danach stündlich geprüft (siehe `rotateLogs`).
+ * Rotation: beim Start, stündlich und nach je etwa 1 MB geschriebener Zeilen geprüft (täglich: `rotateLogs`,
+ * Größe: `enforceLogSizeLimits`).
  */
 export function createLogger(
   config: Pick<Config, 'dataDir' | 'logLevel'>,
-  options: { file?: boolean } = {},
+  options: { file?: boolean; limits?: LogSizeLimits } = {},
 ): Logger {
   const streams: pino.StreamEntry[] = [{ stream: process.stdout }];
   if (options.file !== false) {
     const logDir = join(config.dataDir, 'logs');
+    const limits = options.limits ?? { maxFileBytes: LOG_MAX_FILE_BYTES, maxTotalBytes: LOG_MAX_TOTAL_BYTES };
     let openedDay = rotateLogs(logDir, initialLogDay(logDir));
+    enforceLogSizeLimits(logDir, limits);
     const destination = pino.destination({ dest: join(logDir, 'core.log'), mkdir: true, sync: true });
-    streams.push({ stream: destination });
-    setInterval(
-      () => {
-        try {
-          const day = rotateLogs(logDir, openedDay);
-          if (day !== openedDay) {
-            destination.reopen();
-            openedDay = day;
-          }
-        } catch {
-          // Rotation darf den Core nie stören
+    const maintain = (): void => {
+      try {
+        const day = rotateLogs(logDir, openedDay);
+        const sizeRotated = enforceLogSizeLimits(logDir, limits);
+        if (day !== openedDay || sizeRotated) {
+          destination.reopen();
+          // Die synchrone SonicBoom-Datei meldet „ready“ nach reopen() nie, jedes reopen() hinterlässt aber einen
+          // Listener (Warnung ab dem 11., bei häufiger Größenrotation sonst ein Leck)
+          destination.removeAllListeners('ready');
+          openedDay = day;
         }
+      } catch {
+        // Rotation darf den Core nie stören
+      }
+    };
+    // Größe nach jeweils etwa 1 MB (bzw. 1/8 der Dateigrenze) neu prüfen, nicht nur stündlich:
+    // So überschreitet auch eine Flut die Grenze nur um diese Spanne
+    const checkEvery = Math.max(1, Math.min(1024 * 1024, Math.floor(limits.maxFileBytes / 8)));
+    let sinceCheck = 0;
+    streams.push({
+      stream: {
+        write(chunk: string): void {
+          destination.write(chunk);
+          sinceCheck += Buffer.byteLength(chunk);
+          if (sinceCheck >= checkEvery) {
+            sinceCheck = 0;
+            maintain();
+          }
+        },
       },
-      60 * 60 * 1000,
-    ).unref();
+    });
+    setInterval(maintain, 60 * 60 * 1000).unref();
   }
   return pino(loggerOptions(config), pino.multistream(streams));
 }
