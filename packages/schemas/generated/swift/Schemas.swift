@@ -9,6 +9,9 @@ import Foundation
 /// GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
 // MARK: - SchemaBundle
 struct SchemaBundle: Codable {
+    let alignLogMode: AlignLogMode?
+    let alignLogPayload: AlignLogPayload?
+    let alignLogResult: AlignLogResult?
     let apiError: APIError?
     let apiErrorBody: APIErrorBody?
     let appearance: Appearance?
@@ -75,6 +78,7 @@ struct SchemaBundle: Codable {
     let jobState: JobState?
     let jobType: JobType?
     let lang: Lang?
+    let languageCode: String?
     let lectureSettings: LectureSettings?
     let lectureSettingsUpdate: LectureSettingsUpdate?
     let maintenanceNightlyPayload: MaintenanceNightlyPayload?
@@ -202,6 +206,7 @@ struct SchemaBundle: Codable {
     let photoAddOp: PhotoAddOp?
     let photoFileRef: PhotoFileRef?
     let photoMIME: PhotoMIME?
+    let pipelineStep: PipelineStep?
     let point2: [Double]?
     let recording: Recording?
     let recordingComplete: RecordingComplete?
@@ -224,6 +229,8 @@ struct SchemaBundle: Codable {
     let sessionPauseOp: SessionPauseOp?
     let sessionProcessing: [String: JobState]?
     let sessionRefData: SessionRefData?
+    let sessionReprocessRequest: SessionReprocessRequest?
+    let sessionReprocessResult: SessionReprocessResult?
     let sessionResumeOp: SessionResumeOp?
     let sessionSnapshot: SessionSnapshot?
     let sessionStartData: SessionStartData?
@@ -236,6 +243,7 @@ struct SchemaBundle: Codable {
     let sessionStopOp: SessionStopOp?
     let sessionStopRequest: SessionStopRequest?
     let sessionStreamID: String?
+    let sessionTranscript: SessionTranscript?
     let sessionUpdate: SessionUpdate?
     let settings: Settings?
     let settingsUpdate: SettingsUpdate?
@@ -252,6 +260,8 @@ struct SchemaBundle: Codable {
     let slideDeckUpdate: SlideDeckUpdate?
     let slideEvent: SlideEvent?
     let slideEventSource: SlideEventSource?
+    let slideSegment: SlideSegment?
+    let slideSegmentSource: SlideSegmentSource?
     let stampElement: StampElement?
     let stampElementPayload: StampElementPayload?
     let stopReason: StopReason?
@@ -300,6 +310,14 @@ struct SchemaBundle: Codable {
     let textSize: TextSize?
     let timestamp: Date?
     let toolbarSide: ToolbarSide?
+    let transcribeOutcome: TranscribeOutcome?
+    let transcribePayload: TranscribePayload?
+    let transcribeRecordingResult: TranscribeRecordingResult?
+    let transcribeResult: TranscribeResult?
+    let transcriptInfo: TranscriptInfo?
+    let transcriptLine: TranscriptLine?
+    let transcriptProvider: TranscriptProvider?
+    let transcriptWord: TranscriptWord?
     let transform: [Double]?
     let trashItem: TrashItem?
     let trashKind: TrashKind?
@@ -310,6 +328,9 @@ struct SchemaBundle: Codable {
     let uuid: String?
 
     enum CodingKeys: String, CodingKey {
+        case alignLogMode = "AlignLogMode"
+        case alignLogPayload = "AlignLogPayload"
+        case alignLogResult = "AlignLogResult"
         case apiError = "ApiError"
         case apiErrorBody = "ApiErrorBody"
         case appearance = "Appearance"
@@ -376,6 +397,7 @@ struct SchemaBundle: Codable {
         case jobState = "JobState"
         case jobType = "JobType"
         case lang = "Lang"
+        case languageCode = "LanguageCode"
         case lectureSettings = "LectureSettings"
         case lectureSettingsUpdate = "LectureSettingsUpdate"
         case maintenanceNightlyPayload = "MaintenanceNightlyPayload"
@@ -503,6 +525,7 @@ struct SchemaBundle: Codable {
         case photoAddOp = "PhotoAddOp"
         case photoFileRef = "PhotoFileRef"
         case photoMIME = "PhotoMime"
+        case pipelineStep = "PipelineStep"
         case point2 = "Point2"
         case recording = "Recording"
         case recordingComplete = "RecordingComplete"
@@ -525,6 +548,8 @@ struct SchemaBundle: Codable {
         case sessionPauseOp = "SessionPauseOp"
         case sessionProcessing = "SessionProcessing"
         case sessionRefData = "SessionRefData"
+        case sessionReprocessRequest = "SessionReprocessRequest"
+        case sessionReprocessResult = "SessionReprocessResult"
         case sessionResumeOp = "SessionResumeOp"
         case sessionSnapshot = "SessionSnapshot"
         case sessionStartData = "SessionStartData"
@@ -537,6 +562,7 @@ struct SchemaBundle: Codable {
         case sessionStopOp = "SessionStopOp"
         case sessionStopRequest = "SessionStopRequest"
         case sessionStreamID = "SessionStreamId"
+        case sessionTranscript = "SessionTranscript"
         case sessionUpdate = "SessionUpdate"
         case settings = "Settings"
         case settingsUpdate = "SettingsUpdate"
@@ -553,6 +579,8 @@ struct SchemaBundle: Codable {
         case slideDeckUpdate = "SlideDeckUpdate"
         case slideEvent = "SlideEvent"
         case slideEventSource = "SlideEventSource"
+        case slideSegment = "SlideSegment"
+        case slideSegmentSource = "SlideSegmentSource"
         case stampElement = "StampElement"
         case stampElementPayload = "StampElementPayload"
         case stopReason = "StopReason"
@@ -601,6 +629,14 @@ struct SchemaBundle: Codable {
         case textSize = "TextSize"
         case timestamp = "Timestamp"
         case toolbarSide = "ToolbarSide"
+        case transcribeOutcome = "TranscribeOutcome"
+        case transcribePayload = "TranscribePayload"
+        case transcribeRecordingResult = "TranscribeRecordingResult"
+        case transcribeResult = "TranscribeResult"
+        case transcriptInfo = "TranscriptInfo"
+        case transcriptLine = "TranscriptLine"
+        case transcriptProvider = "TranscriptProvider"
+        case transcriptWord = "TranscriptWord"
         case transform = "Transform"
         case trashItem = "TrashItem"
         case trashKind = "TrashKind"
@@ -631,6 +667,9 @@ extension SchemaBundle {
     }
 
     func with(
+        alignLogMode: AlignLogMode?? = nil,
+        alignLogPayload: AlignLogPayload?? = nil,
+        alignLogResult: AlignLogResult?? = nil,
         apiError: APIError?? = nil,
         apiErrorBody: APIErrorBody?? = nil,
         appearance: Appearance?? = nil,
@@ -697,6 +736,7 @@ extension SchemaBundle {
         jobState: JobState?? = nil,
         jobType: JobType?? = nil,
         lang: Lang?? = nil,
+        languageCode: String?? = nil,
         lectureSettings: LectureSettings?? = nil,
         lectureSettingsUpdate: LectureSettingsUpdate?? = nil,
         maintenanceNightlyPayload: MaintenanceNightlyPayload?? = nil,
@@ -824,6 +864,7 @@ extension SchemaBundle {
         photoAddOp: PhotoAddOp?? = nil,
         photoFileRef: PhotoFileRef?? = nil,
         photoMIME: PhotoMIME?? = nil,
+        pipelineStep: PipelineStep?? = nil,
         point2: [Double]?? = nil,
         recording: Recording?? = nil,
         recordingComplete: RecordingComplete?? = nil,
@@ -846,6 +887,8 @@ extension SchemaBundle {
         sessionPauseOp: SessionPauseOp?? = nil,
         sessionProcessing: [String: JobState]?? = nil,
         sessionRefData: SessionRefData?? = nil,
+        sessionReprocessRequest: SessionReprocessRequest?? = nil,
+        sessionReprocessResult: SessionReprocessResult?? = nil,
         sessionResumeOp: SessionResumeOp?? = nil,
         sessionSnapshot: SessionSnapshot?? = nil,
         sessionStartData: SessionStartData?? = nil,
@@ -858,6 +901,7 @@ extension SchemaBundle {
         sessionStopOp: SessionStopOp?? = nil,
         sessionStopRequest: SessionStopRequest?? = nil,
         sessionStreamID: String?? = nil,
+        sessionTranscript: SessionTranscript?? = nil,
         sessionUpdate: SessionUpdate?? = nil,
         settings: Settings?? = nil,
         settingsUpdate: SettingsUpdate?? = nil,
@@ -874,6 +918,8 @@ extension SchemaBundle {
         slideDeckUpdate: SlideDeckUpdate?? = nil,
         slideEvent: SlideEvent?? = nil,
         slideEventSource: SlideEventSource?? = nil,
+        slideSegment: SlideSegment?? = nil,
+        slideSegmentSource: SlideSegmentSource?? = nil,
         stampElement: StampElement?? = nil,
         stampElementPayload: StampElementPayload?? = nil,
         stopReason: StopReason?? = nil,
@@ -922,6 +968,14 @@ extension SchemaBundle {
         textSize: TextSize?? = nil,
         timestamp: Date?? = nil,
         toolbarSide: ToolbarSide?? = nil,
+        transcribeOutcome: TranscribeOutcome?? = nil,
+        transcribePayload: TranscribePayload?? = nil,
+        transcribeRecordingResult: TranscribeRecordingResult?? = nil,
+        transcribeResult: TranscribeResult?? = nil,
+        transcriptInfo: TranscriptInfo?? = nil,
+        transcriptLine: TranscriptLine?? = nil,
+        transcriptProvider: TranscriptProvider?? = nil,
+        transcriptWord: TranscriptWord?? = nil,
         transform: [Double]?? = nil,
         trashItem: TrashItem?? = nil,
         trashKind: TrashKind?? = nil,
@@ -932,6 +986,9 @@ extension SchemaBundle {
         uuid: String?? = nil
     ) -> SchemaBundle {
         return SchemaBundle(
+            alignLogMode: alignLogMode ?? self.alignLogMode,
+            alignLogPayload: alignLogPayload ?? self.alignLogPayload,
+            alignLogResult: alignLogResult ?? self.alignLogResult,
             apiError: apiError ?? self.apiError,
             apiErrorBody: apiErrorBody ?? self.apiErrorBody,
             appearance: appearance ?? self.appearance,
@@ -998,6 +1055,7 @@ extension SchemaBundle {
             jobState: jobState ?? self.jobState,
             jobType: jobType ?? self.jobType,
             lang: lang ?? self.lang,
+            languageCode: languageCode ?? self.languageCode,
             lectureSettings: lectureSettings ?? self.lectureSettings,
             lectureSettingsUpdate: lectureSettingsUpdate ?? self.lectureSettingsUpdate,
             maintenanceNightlyPayload: maintenanceNightlyPayload ?? self.maintenanceNightlyPayload,
@@ -1125,6 +1183,7 @@ extension SchemaBundle {
             photoAddOp: photoAddOp ?? self.photoAddOp,
             photoFileRef: photoFileRef ?? self.photoFileRef,
             photoMIME: photoMIME ?? self.photoMIME,
+            pipelineStep: pipelineStep ?? self.pipelineStep,
             point2: point2 ?? self.point2,
             recording: recording ?? self.recording,
             recordingComplete: recordingComplete ?? self.recordingComplete,
@@ -1147,6 +1206,8 @@ extension SchemaBundle {
             sessionPauseOp: sessionPauseOp ?? self.sessionPauseOp,
             sessionProcessing: sessionProcessing ?? self.sessionProcessing,
             sessionRefData: sessionRefData ?? self.sessionRefData,
+            sessionReprocessRequest: sessionReprocessRequest ?? self.sessionReprocessRequest,
+            sessionReprocessResult: sessionReprocessResult ?? self.sessionReprocessResult,
             sessionResumeOp: sessionResumeOp ?? self.sessionResumeOp,
             sessionSnapshot: sessionSnapshot ?? self.sessionSnapshot,
             sessionStartData: sessionStartData ?? self.sessionStartData,
@@ -1159,6 +1220,7 @@ extension SchemaBundle {
             sessionStopOp: sessionStopOp ?? self.sessionStopOp,
             sessionStopRequest: sessionStopRequest ?? self.sessionStopRequest,
             sessionStreamID: sessionStreamID ?? self.sessionStreamID,
+            sessionTranscript: sessionTranscript ?? self.sessionTranscript,
             sessionUpdate: sessionUpdate ?? self.sessionUpdate,
             settings: settings ?? self.settings,
             settingsUpdate: settingsUpdate ?? self.settingsUpdate,
@@ -1175,6 +1237,8 @@ extension SchemaBundle {
             slideDeckUpdate: slideDeckUpdate ?? self.slideDeckUpdate,
             slideEvent: slideEvent ?? self.slideEvent,
             slideEventSource: slideEventSource ?? self.slideEventSource,
+            slideSegment: slideSegment ?? self.slideSegment,
+            slideSegmentSource: slideSegmentSource ?? self.slideSegmentSource,
             stampElement: stampElement ?? self.stampElement,
             stampElementPayload: stampElementPayload ?? self.stampElementPayload,
             stopReason: stopReason ?? self.stopReason,
@@ -1223,6 +1287,14 @@ extension SchemaBundle {
             textSize: textSize ?? self.textSize,
             timestamp: timestamp ?? self.timestamp,
             toolbarSide: toolbarSide ?? self.toolbarSide,
+            transcribeOutcome: transcribeOutcome ?? self.transcribeOutcome,
+            transcribePayload: transcribePayload ?? self.transcribePayload,
+            transcribeRecordingResult: transcribeRecordingResult ?? self.transcribeRecordingResult,
+            transcribeResult: transcribeResult ?? self.transcribeResult,
+            transcriptInfo: transcriptInfo ?? self.transcriptInfo,
+            transcriptLine: transcriptLine ?? self.transcriptLine,
+            transcriptProvider: transcriptProvider ?? self.transcriptProvider,
+            transcriptWord: transcriptWord ?? self.transcriptWord,
             transform: transform ?? self.transform,
             trashItem: trashItem ?? self.trashItem,
             trashKind: trashKind ?? self.trashKind,
@@ -1231,6 +1303,143 @@ extension SchemaBundle {
             trashRestoreResult: trashRestoreResult ?? self.trashRestoreResult,
             uploadResult: uploadResult ?? self.uploadResult,
             uuid: uuid ?? self.uuid
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// log: aus Folienwechseln. ohne_wechsel: Foliensatz, aber kein verwertbarer Wechsel (ganze
+/// Session auf Folie 1). folienlos: kein Foliensatz, keine Segmente
+enum AlignLogMode: String, Codable {
+    case folienlos = "folienlos"
+    case log = "log"
+    case ohneWechsel = "ohne_wechsel"
+}
+
+/// align.log (08 §5, VERTRAEGE §18.3)
+// MARK: - AlignLogPayload
+struct AlignLogPayload: Codable {
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: AlignLogPayload convenience initializers and mutators
+
+extension AlignLogPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AlignLogPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        sessionID: String? = nil
+    ) -> AlignLogPayload {
+        return AlignLogPayload(
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// job.result von align.log
+// MARK: - AlignLogResult
+struct AlignLogResult: Codable {
+    /// Gelesene slide_event
+    let eventCount: Int
+    let jobDurationMS: Int
+    let mode: AlignLogMode
+    let segmentCount: Int
+    let sessionDeleted: Bool
+    let sessionID: String
+    /// Durchgänge (Standzeit unter 1,5 s)
+    let skippedEvents: Int
+    let slideDeckID: String?
+    let timelineEndMS: Int
+    /// slide_index ohne Folie im Foliensatz
+    let unresolvedEvents: Int
+
+    enum CodingKeys: String, CodingKey {
+        case eventCount = "event_count"
+        case jobDurationMS = "job_duration_ms"
+        case mode = "mode"
+        case segmentCount = "segment_count"
+        case sessionDeleted = "session_deleted"
+        case sessionID = "session_id"
+        case skippedEvents = "skipped_events"
+        case slideDeckID = "slide_deck_id"
+        case timelineEndMS = "timeline_end_ms"
+        case unresolvedEvents = "unresolved_events"
+    }
+}
+
+// MARK: AlignLogResult convenience initializers and mutators
+
+extension AlignLogResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AlignLogResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        eventCount: Int? = nil,
+        jobDurationMS: Int? = nil,
+        mode: AlignLogMode? = nil,
+        segmentCount: Int? = nil,
+        sessionDeleted: Bool? = nil,
+        sessionID: String? = nil,
+        skippedEvents: Int? = nil,
+        slideDeckID: String?? = nil,
+        timelineEndMS: Int? = nil,
+        unresolvedEvents: Int? = nil
+    ) -> AlignLogResult {
+        return AlignLogResult(
+            eventCount: eventCount ?? self.eventCount,
+            jobDurationMS: jobDurationMS ?? self.jobDurationMS,
+            mode: mode ?? self.mode,
+            segmentCount: segmentCount ?? self.segmentCount,
+            sessionDeleted: sessionDeleted ?? self.sessionDeleted,
+            sessionID: sessionID ?? self.sessionID,
+            skippedEvents: skippedEvents ?? self.skippedEvents,
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            timelineEndMS: timelineEndMS ?? self.timelineEndMS,
+            unresolvedEvents: unresolvedEvents ?? self.unresolvedEvents
         )
     }
 
@@ -11596,6 +11805,16 @@ enum PhotoAddOpKind: String, Codable {
     case photoAdd = "photo.add"
 }
 
+/// Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge =
+/// Anzeige-Reihenfolge
+///
+/// Standard transcribe. Alle späteren Schritte laufen mit
+enum PipelineStep: String, Codable {
+    case alignLog = "align.log"
+    case audioFinalize = "audio.finalize"
+    case transcribe = "transcribe"
+}
+
 /// Eine Aufnahme = ein MediaRecorder-Strom. Nach einem Neuladen beginnt eine neue Aufnahme
 /// derselben Session (F-SES-05).
 // MARK: - Recording
@@ -12552,6 +12771,107 @@ enum SessionPauseOpKind: String, Codable {
     case sessionPause = "session.pause"
 }
 
+/// POST /sessions/{id}/reprocess: Kette ab from_step neu anstoßen (VERTRAEGE §18.5)
+// MARK: - SessionReprocessRequest
+struct SessionReprocessRequest: Codable {
+    /// Standard false. true: auch unveränderte Eingaben neu verarbeiten
+    let force: Bool?
+    /// Standard transcribe. Alle späteren Schritte laufen mit
+    let fromStep: PipelineStep?
+
+    enum CodingKeys: String, CodingKey {
+        case force = "force"
+        case fromStep = "from_step"
+    }
+}
+
+// MARK: SessionReprocessRequest convenience initializers and mutators
+
+extension SessionReprocessRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionReprocessRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        force: Bool?? = nil,
+        fromStep: PipelineStep?? = nil
+    ) -> SessionReprocessRequest {
+        return SessionReprocessRequest(
+            force: force ?? self.force,
+            fromStep: fromStep ?? self.fromStep
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von POST /sessions/{id}/reprocess (202)
+// MARK: - SessionReprocessResult
+struct SessionReprocessResult: Codable {
+    /// Angelegte oder wiederverwendete Jobs in Ketten-Reihenfolge
+    let jobs: [Job]
+    let session: Session
+
+    enum CodingKeys: String, CodingKey {
+        case jobs = "jobs"
+        case session = "session"
+    }
+}
+
+// MARK: SessionReprocessResult convenience initializers and mutators
+
+extension SessionReprocessResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionReprocessResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        jobs: [Job]? = nil,
+        session: Session? = nil
+    ) -> SessionReprocessResult {
+        return SessionReprocessResult(
+            jobs: jobs ?? self.jobs,
+            session: session ?? self.session
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - SessionResumeOp
 struct SessionResumeOp: Codable {
     let at: Int
@@ -13215,6 +13535,444 @@ extension SessionStopRequest {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// GET /sessions/{id}/transcript: alles für den Rückblick einer Session (F-NAC-02). Listen
+/// nach start_ms sortiert
+// MARK: - SessionTranscript
+struct SessionTranscript: Codable {
+    let lines: [TranscriptLine]
+    let recordings: [Recording]
+    let sessionID: String
+    let slideDeckID: String?
+    let slideSegments: [SlideSegment]
+    /// Quelle der gelieferten slide_segments: manuell vor ausrichtung vor log. null = keine
+    /// Zuordnung
+    let slideSource: SlideSegmentSource?
+    /// true: mindestens eine Aufnahme mit fertigem audio.finalize hat kein oder ein veraltetes
+    /// Transkript
+    let stale: Bool
+    let transcripts: [TranscriptInfo]
+
+    enum CodingKeys: String, CodingKey {
+        case lines = "lines"
+        case recordings = "recordings"
+        case sessionID = "session_id"
+        case slideDeckID = "slide_deck_id"
+        case slideSegments = "slide_segments"
+        case slideSource = "slide_source"
+        case stale = "stale"
+        case transcripts = "transcripts"
+    }
+}
+
+// MARK: SessionTranscript convenience initializers and mutators
+
+extension SessionTranscript {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionTranscript.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        lines: [TranscriptLine]? = nil,
+        recordings: [Recording]? = nil,
+        sessionID: String? = nil,
+        slideDeckID: String?? = nil,
+        slideSegments: [SlideSegment]? = nil,
+        slideSource: SlideSegmentSource?? = nil,
+        stale: Bool? = nil,
+        transcripts: [TranscriptInfo]? = nil
+    ) -> SessionTranscript {
+        return SessionTranscript(
+            lines: lines ?? self.lines,
+            recordings: recordings ?? self.recordings,
+            sessionID: sessionID ?? self.sessionID,
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            slideSegments: slideSegments ?? self.slideSegments,
+            slideSource: slideSource ?? self.slideSource,
+            stale: stale ?? self.stale,
+            transcripts: transcripts ?? self.transcripts
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ein Transkript-Abschnitt bzw. sein Teil auf einer Folie (VERTRAEGE §18.4). Ein Abschnitt
+/// über eine Foliengrenze ergibt mehrere Zeilen mit gleicher segment_id
+// MARK: - TranscriptLine
+struct TranscriptLine: Codable {
+    let endMS: Int
+    let lang: String?
+    /// 0, 1, … innerhalb des Abschnitts
+    let part: Int
+    /// Aufnahme mit dem Audio. Position in full.m4a = start_ms − recording.started_ms
+    let recordingID: String
+    let segmentID: String
+    let slideID: String?
+    let slideIndex: Int?
+    let startMS: Int
+    let text: String
+    /// Nur mit include_words=true
+    let words: [TranscriptWord]?
+
+    enum CodingKeys: String, CodingKey {
+        case endMS = "end_ms"
+        case lang = "lang"
+        case part = "part"
+        case recordingID = "recording_id"
+        case segmentID = "segment_id"
+        case slideID = "slide_id"
+        case slideIndex = "slide_index"
+        case startMS = "start_ms"
+        case text = "text"
+        case words = "words"
+    }
+}
+
+// MARK: TranscriptLine convenience initializers and mutators
+
+extension TranscriptLine {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TranscriptLine.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        endMS: Int? = nil,
+        lang: String?? = nil,
+        part: Int? = nil,
+        recordingID: String? = nil,
+        segmentID: String? = nil,
+        slideID: String?? = nil,
+        slideIndex: Int?? = nil,
+        startMS: Int? = nil,
+        text: String? = nil,
+        words: [TranscriptWord]?? = nil
+    ) -> TranscriptLine {
+        return TranscriptLine(
+            endMS: endMS ?? self.endMS,
+            lang: lang ?? self.lang,
+            part: part ?? self.part,
+            recordingID: recordingID ?? self.recordingID,
+            segmentID: segmentID ?? self.segmentID,
+            slideID: slideID ?? self.slideID,
+            slideIndex: slideIndex ?? self.slideIndex,
+            startMS: startMS ?? self.startMS,
+            text: text ?? self.text,
+            words: words ?? self.words
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Wort mit Zeitstempel (05 §P4). Zeiten in Sitzungszeit. text ohne führende und
+/// abschließende Leerzeichen, Satzzeichen bleiben am Wort
+// MARK: - TranscriptWord
+struct TranscriptWord: Codable {
+    let endMS: Int
+    /// Wahrscheinlichkeit laut Whisper
+    let prob: Double
+    let startMS: Int
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case endMS = "end_ms"
+        case prob = "prob"
+        case startMS = "start_ms"
+        case text = "text"
+    }
+}
+
+// MARK: TranscriptWord convenience initializers and mutators
+
+extension TranscriptWord {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TranscriptWord.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        endMS: Int? = nil,
+        prob: Double? = nil,
+        startMS: Int? = nil,
+        text: String? = nil
+    ) -> TranscriptWord {
+        return TranscriptWord(
+            endMS: endMS ?? self.endMS,
+            prob: prob ?? self.prob,
+            startMS: startMS ?? self.startMS,
+            text: text ?? self.text
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Welche Folie lief wann (03 §5). Zeiten in Sitzungszeit, end_ms ausschließlich
+// MARK: - SlideSegment
+struct SlideSegment: Codable {
+    let confidence: Double
+    let createdAt: Date
+    let deletedAt: Date?
+    let endMS: Int
+    let id: String
+    let jobID: String?
+    let sessionID: String
+    let slideID: String
+    let slideIndex: Int
+    let source: SlideSegmentSource
+    let startMS: Int
+    let updatedAt: Date
+    let userID: String
+
+    enum CodingKeys: String, CodingKey {
+        case confidence = "confidence"
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case endMS = "end_ms"
+        case id = "id"
+        case jobID = "job_id"
+        case sessionID = "session_id"
+        case slideID = "slide_id"
+        case slideIndex = "slide_index"
+        case source = "source"
+        case startMS = "start_ms"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+    }
+}
+
+// MARK: SlideSegment convenience initializers and mutators
+
+extension SlideSegment {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SlideSegment.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        confidence: Double? = nil,
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        endMS: Int? = nil,
+        id: String? = nil,
+        jobID: String?? = nil,
+        sessionID: String? = nil,
+        slideID: String? = nil,
+        slideIndex: Int? = nil,
+        source: SlideSegmentSource? = nil,
+        startMS: Int? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil
+    ) -> SlideSegment {
+        return SlideSegment(
+            confidence: confidence ?? self.confidence,
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            endMS: endMS ?? self.endMS,
+            id: id ?? self.id,
+            jobID: jobID ?? self.jobID,
+            sessionID: sessionID ?? self.sessionID,
+            slideID: slideID ?? self.slideID,
+            slideIndex: slideIndex ?? self.slideIndex,
+            source: source ?? self.source,
+            startMS: startMS ?? self.startMS,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Herkunft (03 §5). Phase 2 erster Schnitt: nur log (align.log)
+enum SlideSegmentSource: String, Codable {
+    case ausrichtung = "ausrichtung"
+    case log = "log"
+    case manuell = "manuell"
+}
+
+/// Ein Transkript je Aufnahme (VERTRAEGE §18.1), ohne Segmente
+// MARK: - TranscriptInfo
+struct TranscriptInfo: Codable {
+    let audioDurationMS: Int
+    let createdAt: Date
+    let deletedAt: Date?
+    /// audio.finalize-Job, dessen full.m4a transkribiert wurde
+    let finalizeJobID: String
+    let id: String
+    /// transcribe-Job, der es geschrieben hat
+    let jobID: String
+    let language: String?
+    let model: String
+    let provider: TranscriptProvider
+    let recordingID: String
+    let segmentCount: Int
+    let sessionID: String
+    /// true: Der neueste fertige audio.finalize-Job der Aufnahme ist nicht finalize_job_id
+    /// (Audio wurde danach neu erzeugt)
+    let stale: Bool
+    let updatedAt: Date
+    let userID: String
+    let wordCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case audioDurationMS = "audio_duration_ms"
+        case createdAt = "created_at"
+        case deletedAt = "deleted_at"
+        case finalizeJobID = "finalize_job_id"
+        case id = "id"
+        case jobID = "job_id"
+        case language = "language"
+        case model = "model"
+        case provider = "provider"
+        case recordingID = "recording_id"
+        case segmentCount = "segment_count"
+        case sessionID = "session_id"
+        case stale = "stale"
+        case updatedAt = "updated_at"
+        case userID = "user_id"
+        case wordCount = "word_count"
+    }
+}
+
+// MARK: TranscriptInfo convenience initializers and mutators
+
+extension TranscriptInfo {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TranscriptInfo.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        audioDurationMS: Int? = nil,
+        createdAt: Date? = nil,
+        deletedAt: Date?? = nil,
+        finalizeJobID: String? = nil,
+        id: String? = nil,
+        jobID: String? = nil,
+        language: String?? = nil,
+        model: String? = nil,
+        provider: TranscriptProvider? = nil,
+        recordingID: String? = nil,
+        segmentCount: Int? = nil,
+        sessionID: String? = nil,
+        stale: Bool? = nil,
+        updatedAt: Date? = nil,
+        userID: String? = nil,
+        wordCount: Int? = nil
+    ) -> TranscriptInfo {
+        return TranscriptInfo(
+            audioDurationMS: audioDurationMS ?? self.audioDurationMS,
+            createdAt: createdAt ?? self.createdAt,
+            deletedAt: deletedAt ?? self.deletedAt,
+            finalizeJobID: finalizeJobID ?? self.finalizeJobID,
+            id: id ?? self.id,
+            jobID: jobID ?? self.jobID,
+            language: language ?? self.language,
+            model: model ?? self.model,
+            provider: provider ?? self.provider,
+            recordingID: recordingID ?? self.recordingID,
+            segmentCount: segmentCount ?? self.segmentCount,
+            sessionID: sessionID ?? self.sessionID,
+            stale: stale ?? self.stale,
+            updatedAt: updatedAt ?? self.updatedAt,
+            userID: userID ?? self.userID,
+            wordCount: wordCount ?? self.wordCount
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Transcriber im Worker (02 §7). fake nur für CI und Linux (VERTRAEGE §18.6).
+/// Cloud-Anbieter kommen als neue Werte
+enum TranscriptProvider: String, Codable {
+    case fake = "fake"
+    case mlxWhisper = "mlx-whisper"
 }
 
 /// PATCH /sessions/{id}
@@ -17329,6 +18087,217 @@ extension TextElementPayload {
     }
 }
 
+/// transkribiert: neu geschrieben. unveraendert: gleicher input_hash, übersprungen.
+/// ohne_audio: keine full.m4a (altes Transkript entfernt)
+enum TranscribeOutcome: String, Codable {
+    case ohneAudio = "ohne_audio"
+    case transkribiert = "transkribiert"
+    case unveraendert = "unveraendert"
+}
+
+/// transcribe (08 §5, VERTRAEGE §18.2). Den Anbieter wählt der Worker (SG_TRANSCRIBER)
+// MARK: - TranscribePayload
+struct TranscribePayload: Codable {
+    /// true: auch Aufnahmen mit unverändertem input_hash neu transkribieren
+    let force: Bool?
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case force = "force"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: TranscribePayload convenience initializers and mutators
+
+extension TranscribePayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TranscribePayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        force: Bool?? = nil,
+        sessionID: String? = nil
+    ) -> TranscribePayload {
+        return TranscribePayload(
+            force: force ?? self.force,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - TranscribeRecordingResult
+struct TranscribeRecordingResult: Codable {
+    let audioDurationMS: Int
+    let language: String?
+    let outcome: TranscribeOutcome
+    let recordingID: String
+    let segmentCount: Int
+    /// Laufzeit des Transcribers, 0 bei unveraendert
+    let transcribeMS: Int
+    let transcriptID: String?
+    let wordCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case audioDurationMS = "audio_duration_ms"
+        case language = "language"
+        case outcome = "outcome"
+        case recordingID = "recording_id"
+        case segmentCount = "segment_count"
+        case transcribeMS = "transcribe_ms"
+        case transcriptID = "transcript_id"
+        case wordCount = "word_count"
+    }
+}
+
+// MARK: TranscribeRecordingResult convenience initializers and mutators
+
+extension TranscribeRecordingResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TranscribeRecordingResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        audioDurationMS: Int? = nil,
+        language: String?? = nil,
+        outcome: TranscribeOutcome? = nil,
+        recordingID: String? = nil,
+        segmentCount: Int? = nil,
+        transcribeMS: Int? = nil,
+        transcriptID: String?? = nil,
+        wordCount: Int? = nil
+    ) -> TranscribeRecordingResult {
+        return TranscribeRecordingResult(
+            audioDurationMS: audioDurationMS ?? self.audioDurationMS,
+            language: language ?? self.language,
+            outcome: outcome ?? self.outcome,
+            recordingID: recordingID ?? self.recordingID,
+            segmentCount: segmentCount ?? self.segmentCount,
+            transcribeMS: transcribeMS ?? self.transcribeMS,
+            transcriptID: transcriptID ?? self.transcriptID,
+            wordCount: wordCount ?? self.wordCount
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// job.result von transcribe
+// MARK: - TranscribeResult
+struct TranscribeResult: Codable {
+    let jobDurationMS: Int
+    let model: String
+    let provider: TranscriptProvider
+    let recordings: [TranscribeRecordingResult]
+    /// Entfernte Transkripte gelöschter Aufnahmen bzw. von Aufnahmen ohne Audio
+    let removedTranscripts: Int
+    /// Summe über alle Transkripte der Session nach dem Lauf
+    let segmentCount: Int
+    /// true: Session war gelöscht, nichts geschrieben
+    let sessionDeleted: Bool
+    let sessionID: String
+    let wordCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case jobDurationMS = "job_duration_ms"
+        case model = "model"
+        case provider = "provider"
+        case recordings = "recordings"
+        case removedTranscripts = "removed_transcripts"
+        case segmentCount = "segment_count"
+        case sessionDeleted = "session_deleted"
+        case sessionID = "session_id"
+        case wordCount = "word_count"
+    }
+}
+
+// MARK: TranscribeResult convenience initializers and mutators
+
+extension TranscribeResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(TranscribeResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        jobDurationMS: Int? = nil,
+        model: String? = nil,
+        provider: TranscriptProvider? = nil,
+        recordings: [TranscribeRecordingResult]? = nil,
+        removedTranscripts: Int? = nil,
+        segmentCount: Int? = nil,
+        sessionDeleted: Bool? = nil,
+        sessionID: String? = nil,
+        wordCount: Int? = nil
+    ) -> TranscribeResult {
+        return TranscribeResult(
+            jobDurationMS: jobDurationMS ?? self.jobDurationMS,
+            model: model ?? self.model,
+            provider: provider ?? self.provider,
+            recordings: recordings ?? self.recordings,
+            removedTranscripts: removedTranscripts ?? self.removedTranscripts,
+            segmentCount: segmentCount ?? self.segmentCount,
+            sessionDeleted: sessionDeleted ?? self.sessionDeleted,
+            sessionID: sessionID ?? self.sessionID,
+            wordCount: wordCount ?? self.wordCount
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// Direkt gelöschtes Objekt im Papierkorb (F-DAT-04). Mitgelöschte Teile erscheinen nicht
 /// einzeln.
 // MARK: - TrashItem
@@ -17910,6 +18879,29 @@ class JSONAny: Codable {
 }
 
 // MARK: - Pflichtfelder explizit kodieren (auch null), siehe docs/VERTRAEGE.md §11.7
+
+extension AlignLogPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension AlignLogResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(eventCount, forKey: .eventCount)
+        try container.encode(jobDurationMS, forKey: .jobDurationMS)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(segmentCount, forKey: .segmentCount)
+        try container.encode(sessionDeleted, forKey: .sessionDeleted)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(skippedEvents, forKey: .skippedEvents)
+        try container.encode(slideDeckID, forKey: .slideDeckID)
+        try container.encode(timelineEndMS, forKey: .timelineEndMS)
+        try container.encode(unresolvedEvents, forKey: .unresolvedEvents)
+    }
+}
 
 extension APIError {
     func encode(to encoder: Encoder) throws {
@@ -19824,6 +20816,22 @@ extension SessionRefData {
     }
 }
 
+extension SessionReprocessRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(force, forKey: .force)
+        try container.encodeIfPresent(fromStep, forKey: .fromStep)
+    }
+}
+
+extension SessionReprocessResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(jobs, forKey: .jobs)
+        try container.encode(session, forKey: .session)
+    }
+}
+
 extension SessionResumeOp {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -19939,6 +20947,87 @@ extension SessionStopRequest {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(reason, forKey: .reason)
+    }
+}
+
+extension SessionTranscript {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(lines, forKey: .lines)
+        try container.encode(recordings, forKey: .recordings)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(slideDeckID, forKey: .slideDeckID)
+        try container.encode(slideSegments, forKey: .slideSegments)
+        try container.encode(slideSource, forKey: .slideSource)
+        try container.encode(stale, forKey: .stale)
+        try container.encode(transcripts, forKey: .transcripts)
+    }
+}
+
+extension TranscriptLine {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(endMS, forKey: .endMS)
+        try container.encode(lang, forKey: .lang)
+        try container.encode(part, forKey: .part)
+        try container.encode(recordingID, forKey: .recordingID)
+        try container.encode(segmentID, forKey: .segmentID)
+        try container.encode(slideID, forKey: .slideID)
+        try container.encode(slideIndex, forKey: .slideIndex)
+        try container.encode(startMS, forKey: .startMS)
+        try container.encode(text, forKey: .text)
+        try container.encodeIfPresent(words, forKey: .words)
+    }
+}
+
+extension TranscriptWord {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(endMS, forKey: .endMS)
+        try container.encode(prob, forKey: .prob)
+        try container.encode(startMS, forKey: .startMS)
+        try container.encode(text, forKey: .text)
+    }
+}
+
+extension SlideSegment {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(endMS, forKey: .endMS)
+        try container.encode(id, forKey: .id)
+        try container.encode(jobID, forKey: .jobID)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(slideID, forKey: .slideID)
+        try container.encode(slideIndex, forKey: .slideIndex)
+        try container.encode(source, forKey: .source)
+        try container.encode(startMS, forKey: .startMS)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension TranscriptInfo {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(audioDurationMS, forKey: .audioDurationMS)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(deletedAt, forKey: .deletedAt)
+        try container.encode(finalizeJobID, forKey: .finalizeJobID)
+        try container.encode(id, forKey: .id)
+        try container.encode(jobID, forKey: .jobID)
+        try container.encode(language, forKey: .language)
+        try container.encode(model, forKey: .model)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(recordingID, forKey: .recordingID)
+        try container.encode(segmentCount, forKey: .segmentCount)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(stale, forKey: .stale)
+        try container.encode(updatedAt, forKey: .updatedAt)
+        try container.encode(userID, forKey: .userID)
+        try container.encode(wordCount, forKey: .wordCount)
     }
 }
 
@@ -20432,6 +21521,43 @@ extension TextElementPayload {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(size, forKey: .size)
         try container.encode(text, forKey: .text)
+    }
+}
+
+extension TranscribePayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(force, forKey: .force)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension TranscribeRecordingResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(audioDurationMS, forKey: .audioDurationMS)
+        try container.encode(language, forKey: .language)
+        try container.encode(outcome, forKey: .outcome)
+        try container.encode(recordingID, forKey: .recordingID)
+        try container.encode(segmentCount, forKey: .segmentCount)
+        try container.encode(transcribeMS, forKey: .transcribeMS)
+        try container.encode(transcriptID, forKey: .transcriptID)
+        try container.encode(wordCount, forKey: .wordCount)
+    }
+}
+
+extension TranscribeResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(jobDurationMS, forKey: .jobDurationMS)
+        try container.encode(model, forKey: .model)
+        try container.encode(provider, forKey: .provider)
+        try container.encode(recordings, forKey: .recordings)
+        try container.encode(removedTranscripts, forKey: .removedTranscripts)
+        try container.encode(segmentCount, forKey: .segmentCount)
+        try container.encode(sessionDeleted, forKey: .sessionDeleted)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(wordCount, forKey: .wordCount)
     }
 }
 

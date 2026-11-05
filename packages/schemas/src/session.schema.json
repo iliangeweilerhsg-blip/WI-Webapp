@@ -18,7 +18,7 @@
     },
     "SessionProcessing": {
       "type": "object",
-      "description": "Fortschritt der Pipeline: Job-Typ → Zustand des letzten Jobs dieses Typs (03 §3 session.processing)",
+      "description": "Fortschritt der Pipeline (03 §3 session.processing): Job-Typ → Zusammenfassung aller Jobs dieses Typs der Session (VERTRAEGE §3). Schritte und Anzeige: VERTRAEGE §18.2",
       "additionalProperties": {
         "$ref": "#/$defs/JobState"
       }
