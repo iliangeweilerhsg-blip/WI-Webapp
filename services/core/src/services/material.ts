@@ -20,6 +20,7 @@ import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { enqueueJob } from './jobs.ts';
+import { softDeleteWithOps } from './trash-ops.ts';
 
 /** Eine fertig gespeicherte Upload-Datei (temporär, im Datenordner, damit `rename` atomar ist) */
 export interface StoredUpload {
@@ -381,15 +382,9 @@ export async function renameSlideDeck(db: Db, id: string, title: string): Promis
   return toApiDeck(row);
 }
 
-/** Soft-Delete (03 §1). Folien bleiben erhalten, sie sind nur über den Foliensatz erreichbar. */
+/** Soft-Delete mit Kaskade (03 §1, VERTRAEGE §13): die Folien bekommen denselben `deleted_at`. 404 `slide_deck_not_found` */
 export async function deleteSlideDeck(db: Db, id: string): Promise<void> {
-  const rows = await db
-    .update(slideDeck)
-    .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
-    .where(and(eq(slideDeck.id, id), notDeleted(slideDeck)))
-    .returning({ id: slideDeck.id });
-  if (rows.length === 0)
-    throw new HttpError(404, 'slide_deck_not_found', 'Der Foliensatz wurde nicht gefunden.');
+  await softDeleteWithOps(db, 'slide_deck', id);
 }
 
 export async function getSlideWithDeck(db: Db, slideId: string): Promise<{ slide: SlideRow; deck: DeckRow }> {
@@ -457,13 +452,7 @@ export async function updateExerciseSheet(
   return toApiSheet(row);
 }
 
+/** Soft-Delete mit Kaskade (VERTRAEGE §13): die Aufgaben bekommen denselben `deleted_at`. 404 `exercise_sheet_not_found` */
 export async function deleteExerciseSheet(db: Db, id: string): Promise<void> {
-  const rows = await db
-    .update(exerciseSheet)
-    .set({ deletedAt: sql`now()`, updatedAt: sql`now()` })
-    .where(and(eq(exerciseSheet.id, id), notDeleted(exerciseSheet)))
-    .returning({ id: exerciseSheet.id });
-  if (rows.length === 0) {
-    throw new HttpError(404, 'exercise_sheet_not_found', 'Das Übungsblatt wurde nicht gefunden.');
-  }
+  await softDeleteWithOps(db, 'exercise_sheet', id);
 }

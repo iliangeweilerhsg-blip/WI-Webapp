@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "sg-CLI: start, stop, migrate, doctor (Backup/Restore folgen mit T1-18)",
+  "description": "sg-CLI: start, stop, migrate, doctor, backup, restore",
   "bin": {
     "sg": "./sg.mjs"
   },

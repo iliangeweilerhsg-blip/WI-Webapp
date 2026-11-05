@@ -5,6 +5,7 @@ import { createDb } from './db/client.ts';
 import { createLogger } from './logger.ts';
 import { purgeIdempotencyKeys } from './plugins/idempotency.ts';
 import { startBonjour, type BonjourHandle } from './services/discovery.ts';
+import { startScheduler } from './services/scheduler.ts';
 
 /** Harte Frist fürs Herunterfahren, danach Exit 1 */
 const SHUTDOWN_DEADLINE_MS = 10_000;
@@ -27,6 +28,7 @@ const app = await buildApp({ config, db: handle.db, logger });
 
 let bonjour: BonjourHandle | null = null;
 let stopping = false;
+let stopScheduler: (() => void) | null = null;
 async function shutdown(signal: string): Promise<void> {
   // Ein zweites Signal (z. B. doppelt von der CLI) bricht das Herunterfahren nicht ab
   if (stopping) return;
@@ -38,6 +40,7 @@ async function shutdown(signal: string): Promise<void> {
   }, SHUTDOWN_DEADLINE_MS).unref();
   try {
     await bonjour?.stop();
+    stopScheduler?.();
     await app.close();
     await handle.close();
   } catch (error) {
@@ -61,6 +64,8 @@ try {
   if (config.bonjour && config.host !== '127.0.0.1' && config.host !== 'localhost' && config.host !== '::1') {
     bonjour = startBonjour({ port: config.port, logger });
   }
+  // Tägliches Backup und `maintenance.nightly` (VERTRAEGE §13)
+  stopScheduler = startScheduler({ db: handle.db, config, logger });
 } catch (error) {
   // Kein process.exit: so werden Logs vollständig geschrieben und Handles sauber geschlossen
   logger.error({ err: error }, 'Core konnte nicht starten');

@@ -20,6 +20,7 @@ import {
   createModule,
   createSemester,
   deleteModule,
+  deleteSemester,
   getModule,
   getSemester,
   listModules,
@@ -111,6 +112,28 @@ export async function organisationRoutes(app: FastifyInstance, deps: Organisatio
     async (request) => updateSemester(db, request.params.id, request.body),
   );
 
+  typed.delete(
+    '/semesters/:id',
+    {
+      schema: {
+        tags: ['Organisation'],
+        summary:
+          'Semester löschen (Soft-Delete mit allen Modulen, 204). 409 `session_active`, wenn eine Session läuft oder pausiert ist',
+        params: IdParams,
+        response: {
+          204: z.null().describe('Gelöscht'),
+          400: ApiErrorSchema,
+          404: ApiErrorSchema,
+          409: ApiErrorSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      await deleteSemester(db, request.params.id);
+      return reply.code(204).send(null);
+    },
+  );
+
   // --- Module ---------------------------------------------------------------------------------
 
   typed.get(
@@ -176,9 +199,15 @@ export async function organisationRoutes(app: FastifyInstance, deps: Organisatio
     {
       schema: {
         tags: ['Organisation'],
-        summary: 'Modul löschen (Soft-Delete, 204)',
+        summary:
+          'Modul löschen (Soft-Delete mit Kaskade, 204). 409 `session_active`, wenn eine Session läuft oder pausiert ist',
         params: IdParams,
-        response: { 204: z.null().describe('Gelöscht'), 400: ApiErrorSchema, 404: ApiErrorSchema },
+        response: {
+          204: z.null().describe('Gelöscht'),
+          400: ApiErrorSchema,
+          404: ApiErrorSchema,
+          409: ApiErrorSchema,
+        },
       },
     },
     async (request, reply) => {
