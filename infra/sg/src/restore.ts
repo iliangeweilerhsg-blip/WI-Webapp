@@ -76,16 +76,42 @@ export function listStandsText(target: string): string[] {
   return lines;
 }
 
-/** Stand finden und prüfen: Manifest da, Dump vorhanden, Prüfsumme stimmt */
-async function loadStand(target: string, stand: string): Promise<{ dir: string; manifest: Manifest }> {
+/** Ein Stand lässt sich nicht verwenden. `reason` entspricht `RestoreTestReason` (docs/VERTRAEGE.md §13). */
+export class StandError extends Error {
+  readonly reason: 'nicht_authentisch' | 'beschaedigt';
+  constructor(reason: 'nicht_authentisch' | 'beschaedigt', message: string) {
+    super(message);
+    this.name = 'StandError';
+    this.reason = reason;
+  }
+}
+
+/**
+ * Stand finden und prüfen: Manifest da, Dump vorhanden, Prüfsumme stimmt. Mit `expectedSha` (Prüfsumme aus
+ * `backup_run.dump_sha256`, der Vertrauensquelle) muss auch das Manifest genau diese Prüfsumme tragen: Ein Stand
+ * mit erfundenem Manifest samt passendem Dump wird so abgelehnt.
+ */
+export async function loadStand(
+  target: string,
+  stand: string,
+  expectedSha?: string,
+): Promise<{ dir: string; manifest: Manifest }> {
   if (!STAND_RE.test(stand)) throw new Error(`„${stand}“ ist kein Stand (erwartet z. B. 20261104T030012Z).`);
   const dir = join(target, stand);
   const manifest = readManifest(dir);
-  if (!manifest) throw new Error(`Der Stand ${stand} ist im Ziel nicht vorhanden oder unvollständig.`);
+  if (!manifest)
+    throw new StandError('beschaedigt', `Der Stand ${stand} ist im Ziel nicht vorhanden oder unvollständig.`);
+  if (manifest.stand !== stand || (expectedSha !== undefined && manifest.dump.sha256 !== expectedSha)) {
+    throw new StandError(
+      'nicht_authentisch',
+      `Das Manifest des Standes ${stand} passt nicht zum protokollierten Backup-Lauf. Der Stand wird nicht eingespielt.`,
+    );
+  }
   const dump = join(dir, DUMP_FILE);
-  if (!existsSync(dump)) throw new Error(`Im Stand ${stand} fehlt ${DUMP_FILE}.`);
+  if (!existsSync(dump)) throw new StandError('beschaedigt', `Im Stand ${stand} fehlt ${DUMP_FILE}.`);
   if ((await sha256File(dump)) !== manifest.dump.sha256) {
-    throw new Error(
+    throw new StandError(
+      'beschaedigt',
       `Die Prüfsumme von ${DUMP_FILE} im Stand ${stand} stimmt nicht. Der Stand ist beschädigt.`,
     );
   }
@@ -104,7 +130,7 @@ export function standFilesMatch(dir: string, manifest: Manifest): boolean {
   );
 }
 
-async function dropDatabase(pg: PgAccess, name: string): Promise<void> {
+export async function dropDatabase(pg: PgAccess, name: string): Promise<void> {
   await pg.query(`DROP DATABASE IF EXISTS ${safeIdent(name)} WITH (FORCE)`, {}, 'postgres');
 }
 
@@ -152,15 +178,27 @@ export interface RestoreTestReport {
   mediaOk: boolean;
 }
 
-async function testRestore(deps: RestoreDeps, dir: string, manifest: Manifest): Promise<number> {
+export const reportOk = (report: RestoreTestReport): boolean =>
+  report.missingTables.length === 0 && report.mediaOk;
+
+/**
+ * Spielt den Dump in eine Wegwerf-Datenbank ein, zählt die Objekte, vergleicht mit dem Manifest und löscht die
+ * Datenbank danach IMMER wieder (auch bei Fehlern). Gemeinsame Prüflogik von `restore --test` und dem
+ * automatischen Monatstest. `prefix` trennt die Namen (`restoretest` von Hand, `autotest` automatisch).
+ */
+export async function restoreIntoScratch(
+  deps: Pick<RestoreDeps, 'cfg' | 'pg' | 'log' | 'err' | 'random'>,
+  dir: string,
+  manifest: Manifest,
+  prefix = 'restoretest',
+): Promise<RestoreTestReport> {
   const { pg, log, err } = deps;
   const suffix = (deps.random ?? (() => Math.random().toString(36).slice(2, 8)))();
-  const name = safeIdent(`${pg.database}_restoretest_${suffix}`.toLowerCase());
+  const name = safeIdent(`${pg.database}_${prefix}_${suffix}`.toLowerCase());
   log(`Teste Stand ${manifest.stand} in der Wegwerf-Datenbank ${name} …`);
-  await dropDatabase(pg, name);
-  await pg.query(`CREATE DATABASE ${name}`, {}, 'postgres');
-  let report: RestoreTestReport;
   try {
+    await dropDatabase(pg, name);
+    await pg.query(`CREATE DATABASE ${name}`, {}, 'postgres');
     await pg.restore(name, join(dir, DUMP_FILE));
     const counts = await countObjects(pg, name);
     const missingTables = Object.keys(manifest.counts).filter((t) => !(t in counts));
@@ -168,12 +206,17 @@ async function testRestore(deps: RestoreDeps, dir: string, manifest: Manifest): 
       .filter(([table, expected]) => table in counts && counts[table] !== expected)
       .map(([table, expected]) => ({ table, expected, actual: counts[table] as number }));
     const mediaOk = standFilesMatch(dir, manifest);
-    report = { counts, differences, missingTables, mediaOk };
+    return { counts, differences, missingTables, mediaOk };
   } finally {
     await dropDatabase(pg, name).catch((e: unknown) =>
       err(`Wegwerf-Datenbank ${name} ließ sich nicht löschen: ${errorText(e, deps.cfg)}`),
     );
   }
+}
+
+async function testRestore(deps: RestoreDeps, dir: string, manifest: Manifest): Promise<number> {
+  const { log, err } = deps;
+  const report = await restoreIntoScratch(deps, dir, manifest);
 
   log('Objekte in der wiederhergestellten Datenbank:');
   for (const table of COUNT_TABLES) {
@@ -186,7 +229,7 @@ async function testRestore(deps: RestoreDeps, dir: string, manifest: Manifest): 
       `Hinweis: ${d.table} hat ${d.actual} statt ${d.expected} Zeilen (Schreibzugriffe während des Backups?).`,
     );
   }
-  const ok = report.missingTables.length === 0 && report.mediaOk;
+  const ok = reportOk(report);
   if (report.missingTables.length > 0) err(`Tabellen fehlen: ${report.missingTables.join(', ')}`);
   log(ok ? `Test bestanden: Stand ${manifest.stand} lässt sich wiederherstellen.` : 'Test NICHT bestanden.');
   return ok ? 0 : 1;

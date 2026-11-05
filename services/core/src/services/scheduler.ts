@@ -1,4 +1,4 @@
-// Zeitplan im Core (VERTRAEGE §13, T1-18): tägliches Backup und der Job `maintenance.nightly`.
+// Zeitplan im Core (VERTRAEGE §13, T1-18): tägliches Backup, monatlicher Restore-Test und der Job `maintenance.nightly`.
 // Beides wird auch nachgeholt, wenn der Mac zur Zeit aus war ("beim Start, falls der letzte Termin verpasst wurde"):
 // Der Takt prüft jede Minute, ob seit dem letzten geplanten Zeitpunkt schon ein Lauf angelegt wurde.
 import { and, eq, gte, or, sql } from 'drizzle-orm';
@@ -11,6 +11,7 @@ import { HttpError } from '../errors.ts';
 import { NIGHTLY_LOCK_KEY } from '../lib/locks.ts';
 import { latestOccurrence, startBackup, isBackupRunning } from './backups.ts';
 import { enqueueJob } from './jobs.ts';
+import { tickRestoreTest } from './restore-test.ts';
 import { getSettings } from './settings.ts';
 
 /** Ortszeit, zu der der Core `maintenance.nightly` anlegt (VERTRAEGE §13) */
@@ -91,6 +92,8 @@ export function startScheduler(options: {
       if (nightly) logger.info({ job_id: nightly }, 'maintenance.nightly angelegt');
       const backup = await tickBackup(db, config);
       if (backup) logger.info({ backup_run_id: backup }, 'Geplantes Backup gestartet');
+      // Monatlicher Restore-Test (F-DAT-02): fällig nach 30 Tagen, holt Verpasstes nach
+      if (await tickRestoreTest(db, config)) logger.info('Monatlicher Restore-Test gestartet');
     } catch (error) {
       logger.warn({ err: error }, 'Zeitplan-Durchlauf fehlgeschlagen');
     } finally {

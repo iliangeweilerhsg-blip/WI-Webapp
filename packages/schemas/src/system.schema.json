@@ -342,7 +342,7 @@
     },
     "BackupStatus": {
       "type": "object",
-      "required": ["target", "last_success_at", "next_run_at", "stale", "running"],
+      "required": ["target", "last_success_at", "next_run_at", "stale", "running", "restore_test"],
       "additionalProperties": false,
       "properties": {
         "target": {
@@ -375,6 +375,89 @@
         },
         "running": {
           "type": "boolean"
+        },
+        "restore_test": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RestoreTest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Letzter automatischer oder manueller Restore-Test (F-DAT-02), null = noch keiner gelaufen"
+        }
+      }
+    },
+    "RestoreTestState": {
+      "type": "string",
+      "enum": ["laeuft", "ok", "fehler"]
+    },
+    "RestoreTestTrigger": {
+      "type": "string",
+      "enum": ["zeitplan", "manuell"]
+    },
+    "RestoreTestReason": {
+      "type": "string",
+      "description": "Grund eines fehlgeschlagenen Restore-Tests, die Oberfläche leitet daraus die Handlungsempfehlung ab",
+      "enum": [
+        "kein_backup",
+        "ziel_nicht_erreichbar",
+        "nicht_authentisch",
+        "beschaedigt",
+        "dateien_abweichend",
+        "tabellen_fehlen",
+        "restore_fehlgeschlagen",
+        "abgebrochen",
+        "intern"
+      ]
+    },
+    "RestoreTest": {
+      "type": "object",
+      "description": "Ergebnis des Restore-Tests (F-DAT-02): Stand des eigenen Backups in eine Wegwerf-Datenbank einspielen, Objekte zählen, aufräumen",
+      "required": ["state", "trigger", "started_at", "finished_at", "stand", "reason", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/RestoreTestState"
+        },
+        "trigger": {
+          "$ref": "#/$defs/RestoreTestTrigger"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null solange der Test läuft"
+        },
+        "stand": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{8}T[0-9]{6}Z$",
+          "description": "Getesteter Stand, null wenn keiner gefunden wurde"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RestoreTestReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nur bei state = fehler"
+        },
+        "error": {
+          "type": ["string", "null"],
+          "maxLength": 500,
+          "description": "Technischer Fehlertext (ohne Zugangsdaten und Datenordner), nur bei state = fehler"
         }
       }
     },

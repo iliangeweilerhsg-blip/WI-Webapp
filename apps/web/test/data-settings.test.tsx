@@ -24,6 +24,7 @@ function backupOverview(target: string | null, extra: Record<string, unknown> = 
       next_run_at: target ? iso(3_600_000) : null,
       stale: true,
       running: false,
+      restore_test: null,
       ...extra,
     },
     items: target
@@ -141,6 +142,72 @@ describe('Hilfsfunktionen', () => {
   });
 });
 
+describe('Restore-Test (F-DAT-02)', () => {
+  const result = (over: Record<string, unknown>) => ({
+    state: 'ok',
+    trigger: 'zeitplan',
+    started_at: iso(-86_400_000),
+    finished_at: iso(-86_400_000 + 5000),
+    stand: '20261104T030012Z',
+    reason: null,
+    error: null,
+    ...over,
+  });
+  const core = (restore_test: unknown, calls?: (c: Call) => unknown) =>
+    stubCore((c) => {
+      const custom = calls?.(c);
+      if (custom !== undefined) return custom;
+      return c.path.startsWith('/backups')
+        ? backupOverview('/Volumes/B', { restore_test })
+        : settings('/Volumes/B');
+    });
+
+  it('noch kein Test: Erklärung, Knopf „Jetzt testen“ startet POST /restore-test', async () => {
+    const calls = core(null, (c) =>
+      c.method === 'POST' && c.path === '/restore-test'
+        ? result({ state: 'laeuft', finished_at: null })
+        : undefined,
+    );
+    const user = userEvent.setup();
+    mount(<DataSettings />);
+    expect(await screen.findByText(/Restore-Test: noch nicht gelaufen/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Jetzt testen' }));
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'POST' && c.path === '/restore-test')).toBe(true),
+    );
+  });
+
+  it('bestanden: „Letzter Restore-Test: <Datum>, erfolgreich“', async () => {
+    core(result({}));
+    mount(<DataSettings />);
+    const date = new Date(NOW - 86_400_000 + 5000).toLocaleString('de-DE');
+    expect(await screen.findByText(`Letzter Restore-Test: ${date}, erfolgreich`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Jetzt testen' })).toBeEnabled();
+  });
+
+  it('läuft: Hinweis und gesperrter Knopf', async () => {
+    core(result({ state: 'laeuft', finished_at: null }));
+    mount(<DataSettings />);
+    expect(await screen.findByText(/Restore-Test läuft/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Test läuft …' })).toBeDisabled();
+  });
+
+  it('Fehler: verständlicher Hinweis mit Handlungsempfehlung und technischem Text', async () => {
+    core(result({ state: 'fehler', reason: 'nicht_authentisch', error: 'Manifest passt nicht' }));
+    mount(<DataSettings />);
+    expect(await screen.findByText(/, fehlgeschlagen$/)).toBeInTheDocument();
+    expect(screen.getByText(/nicht zu deinem protokollierten Backup/)).toBeInTheDocument();
+    expect(screen.getByText(/Neues Backup|neues Backup an/)).toBeInTheDocument();
+    expect(screen.getByText('Technisch: Manifest passt nicht')).toBeInTheDocument();
+  });
+
+  it('ohne Ziel ist „Jetzt testen“ gesperrt', async () => {
+    stubCore((c) => (c.path.startsWith('/backups') ? backupOverview(null) : settings(null)));
+    mount(<DataSettings />);
+    expect(await screen.findByRole('button', { name: 'Jetzt testen' })).toBeDisabled();
+  });
+});
+
 describe('DataSettings', () => {
   it('ohne Ziel: Hinweis statt „veraltet“, „Jetzt sichern“ ist gesperrt', async () => {
     stubCore((c) => (c.path.startsWith('/backups') ? backupOverview(null) : settings(null)));
@@ -210,7 +277,7 @@ describe('DataSettings', () => {
     const user = userEvent.setup();
     mount(<DataSettings />);
     await user.click(await screen.findByRole('button', { name: 'Jetzt sichern' }));
-    expect(await screen.findByText(/Backup/i, { selector: '[role="status"], div, p' })).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('toast-live')).not.toBeEmptyDOMElement());
   });
 });
 

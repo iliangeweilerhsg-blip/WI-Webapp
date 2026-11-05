@@ -90,8 +90,14 @@ export const backupRun = pgTable(
     trigger: text('trigger').notNull(), // zeitplan | manuell | vor_migration
     /** Name des Stands für `sg restore <stand>`, z. B. 20261104T030012Z */
     stand: text('stand'),
+    /**
+     * SHA-256 des Dumps (hex), von `sg backup` beim Abschluss eingetragen. Der Restore-Test (F-DAT-02) vertraut nur
+     * Ständen, deren Manifest diese Prüfsumme trägt: Die Datenbank ist die Vertrauensquelle, nicht das Ziel.
+     */
+    dumpSha256: text('dump_sha256'),
   },
   (t) => [
+    check('backup_run_dump_sha256_chk', sql`${t.dumpSha256} IS NULL OR ${t.dumpSha256} ~ '^[0-9a-f]{64}$'`),
     check('backup_run_state_chk', sql`${t.state} IN ('laeuft','fertig','fehler')`),
     check('backup_run_trigger_chk', sql`${t.trigger} IN ('zeitplan','manuell','vor_migration')`),
   ],

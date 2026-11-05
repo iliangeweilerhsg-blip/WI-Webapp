@@ -192,6 +192,10 @@ struct SchemaBundle: Codable {
     let recordingComplete: RecordingComplete?
     let recordingCreate: RecordingCreate?
     let recordingState: RecordingState?
+    let restoreTest: RestoreTest?
+    let restoreTestReason: RestoreTestReason?
+    let restoreTestState: RestoreTestState?
+    let restoreTestTrigger: RestoreTestTrigger?
     let reviewState: ReviewState?
     let semester: Semester?
     let semesterCreate: SemesterCreate?
@@ -474,6 +478,10 @@ struct SchemaBundle: Codable {
         case recordingComplete = "RecordingComplete"
         case recordingCreate = "RecordingCreate"
         case recordingState = "RecordingState"
+        case restoreTest = "RestoreTest"
+        case restoreTestReason = "RestoreTestReason"
+        case restoreTestState = "RestoreTestState"
+        case restoreTestTrigger = "RestoreTestTrigger"
         case reviewState = "ReviewState"
         case semester = "Semester"
         case semesterCreate = "SemesterCreate"
@@ -776,6 +784,10 @@ extension SchemaBundle {
         recordingComplete: RecordingComplete?? = nil,
         recordingCreate: RecordingCreate?? = nil,
         recordingState: RecordingState?? = nil,
+        restoreTest: RestoreTest?? = nil,
+        restoreTestReason: RestoreTestReason?? = nil,
+        restoreTestState: RestoreTestState?? = nil,
+        restoreTestTrigger: RestoreTestTrigger?? = nil,
         reviewState: ReviewState?? = nil,
         semester: Semester?? = nil,
         semesterCreate: SemesterCreate?? = nil,
@@ -1058,6 +1070,10 @@ extension SchemaBundle {
             recordingComplete: recordingComplete ?? self.recordingComplete,
             recordingCreate: recordingCreate ?? self.recordingCreate,
             recordingState: recordingState ?? self.recordingState,
+            restoreTest: restoreTest ?? self.restoreTest,
+            restoreTestReason: restoreTestReason ?? self.restoreTestReason,
+            restoreTestState: restoreTestState ?? self.restoreTestState,
+            restoreTestTrigger: restoreTestTrigger ?? self.restoreTestTrigger,
             reviewState: reviewState ?? self.reviewState,
             semester: semester ?? self.semester,
             semesterCreate: semesterCreate ?? self.semesterCreate,
@@ -1757,6 +1773,8 @@ enum BackupTrigger: String, Codable {
 struct BackupStatus: Codable {
     let lastSuccessAt: Date?
     let nextRunAt: Date?
+    /// Letzter automatischer oder manueller Restore-Test (F-DAT-02), null = noch keiner gelaufen
+    let restoreTest: RestoreTest?
     let running: Bool
     /// Letztes erfolgreiches Backup älter als 3 Tage (F-DAT-01)
     let stale: Bool
@@ -1766,6 +1784,7 @@ struct BackupStatus: Codable {
     enum CodingKeys: String, CodingKey {
         case lastSuccessAt = "last_success_at"
         case nextRunAt = "next_run_at"
+        case restoreTest = "restore_test"
         case running = "running"
         case stale = "stale"
         case target = "target"
@@ -1793,6 +1812,7 @@ extension BackupStatus {
     func with(
         lastSuccessAt: Date?? = nil,
         nextRunAt: Date?? = nil,
+        restoreTest: RestoreTest?? = nil,
         running: Bool? = nil,
         stale: Bool? = nil,
         target: String?? = nil
@@ -1800,6 +1820,7 @@ extension BackupStatus {
         return BackupStatus(
             lastSuccessAt: lastSuccessAt ?? self.lastSuccessAt,
             nextRunAt: nextRunAt ?? self.nextRunAt,
+            restoreTest: restoreTest ?? self.restoreTest,
             running: running ?? self.running,
             stale: stale ?? self.stale,
             target: target ?? self.target
@@ -1813,6 +1834,105 @@ extension BackupStatus {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// Ergebnis des Restore-Tests (F-DAT-02): Stand des eigenen Backups in eine
+/// Wegwerf-Datenbank einspielen, Objekte zählen, aufräumen
+// MARK: - RestoreTest
+struct RestoreTest: Codable {
+    /// Technischer Fehlertext (ohne Zugangsdaten und Datenordner), nur bei state = fehler
+    let error: String?
+    /// null solange der Test läuft
+    let finishedAt: Date?
+    /// Nur bei state = fehler
+    let reason: RestoreTestReason?
+    /// Getesteter Stand, null wenn keiner gefunden wurde
+    let stand: String?
+    let startedAt: Date
+    let state: RestoreTestState
+    let trigger: RestoreTestTrigger
+
+    enum CodingKeys: String, CodingKey {
+        case error = "error"
+        case finishedAt = "finished_at"
+        case reason = "reason"
+        case stand = "stand"
+        case startedAt = "started_at"
+        case state = "state"
+        case trigger = "trigger"
+    }
+}
+
+// MARK: RestoreTest convenience initializers and mutators
+
+extension RestoreTest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(RestoreTest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        error: String?? = nil,
+        finishedAt: Date?? = nil,
+        reason: RestoreTestReason?? = nil,
+        stand: String?? = nil,
+        startedAt: Date? = nil,
+        state: RestoreTestState? = nil,
+        trigger: RestoreTestTrigger? = nil
+    ) -> RestoreTest {
+        return RestoreTest(
+            error: error ?? self.error,
+            finishedAt: finishedAt ?? self.finishedAt,
+            reason: reason ?? self.reason,
+            stand: stand ?? self.stand,
+            startedAt: startedAt ?? self.startedAt,
+            state: state ?? self.state,
+            trigger: trigger ?? self.trigger
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Grund eines fehlgeschlagenen Restore-Tests, die Oberfläche leitet daraus die
+/// Handlungsempfehlung ab
+enum RestoreTestReason: String, Codable {
+    case abgebrochen = "abgebrochen"
+    case beschaedigt = "beschaedigt"
+    case dateienAbweichend = "dateien_abweichend"
+    case intern = "intern"
+    case keinBackup = "kein_backup"
+    case nichtAuthentisch = "nicht_authentisch"
+    case restoreFehlgeschlagen = "restore_fehlgeschlagen"
+    case tabellenFehlen = "tabellen_fehlen"
+    case zielNichtErreichbar = "ziel_nicht_erreichbar"
+}
+
+enum RestoreTestState: String, Codable {
+    case fehler = "fehler"
+    case laeuft = "laeuft"
+    case ok = "ok"
+}
+
+enum RestoreTestTrigger: String, Codable {
+    case manuell = "manuell"
+    case zeitplan = "zeitplan"
 }
 
 /// auto: Modul und Art hat der Abgleich gesetzt und darf sie ändern. manuell: vom Nutzer
@@ -17047,9 +17167,23 @@ extension BackupStatus {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(lastSuccessAt, forKey: .lastSuccessAt)
         try container.encode(nextRunAt, forKey: .nextRunAt)
+        try container.encode(restoreTest, forKey: .restoreTest)
         try container.encode(running, forKey: .running)
         try container.encode(stale, forKey: .stale)
         try container.encode(target, forKey: .target)
+    }
+}
+
+extension RestoreTest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(error, forKey: .error)
+        try container.encode(finishedAt, forKey: .finishedAt)
+        try container.encode(reason, forKey: .reason)
+        try container.encode(stand, forKey: .stand)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encode(state, forKey: .state)
+        try container.encode(trigger, forKey: .trigger)
     }
 }
 

@@ -11,6 +11,7 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -33,6 +34,7 @@ import {
   type PgAccess,
 } from '../src/pg.ts';
 import { recoverRestore, runRestore, type RestoreDeps } from '../src/restore.ts';
+import { runAutoRestoreTest } from '../src/restore-auto.ts';
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -50,6 +52,7 @@ interface Run {
   error: string | null;
   stand: string | null;
   size: string | null;
+  sha: string | null;
   trigger: string;
   target: string;
 }
@@ -74,6 +77,9 @@ class FakePg implements PgAccess {
     ['setting', '0'],
   ];
   restored: { db: string; file: string }[] = [];
+  /** Ergebnis des Restore-Tests (`setting.restore_test`), zuletzt geschrieben */
+  testResult: Record<string, unknown> | null = null;
+  leftovers: string[] = [];
 
   async query(sql: string, vars: Record<string, string> = {}, db?: string): Promise<string[][]> {
     this.queries.push({ sql, vars, db });
@@ -92,6 +98,7 @@ class FakePg implements PgAccess {
         error: null,
         stand: null,
         size: null,
+        sha: null,
         trigger: vars.trigger as string,
         target: vars.target as string,
       });
@@ -103,7 +110,12 @@ class FakePg implements PgAccess {
     if (sql.includes("SET state = 'fertig'")) {
       const run = this.runs.get(vars.id as string);
       if (run)
-        Object.assign(run, { state: 'fertig', stand: vars.stand as string, size: vars.size as string });
+        Object.assign(run, {
+          state: 'fertig',
+          stand: vars.stand as string,
+          size: vars.size as string,
+          sha: vars.sha as string,
+        });
       return [];
     }
     if (sql.includes("SET state = 'fehler'")) {
@@ -115,6 +127,18 @@ class FakePg implements PgAccess {
     if (create) this.databases.add(create[1] as string);
     const drop = /^DROP DATABASE IF EXISTS (\w+)/.exec(sql);
     if (drop) this.databases.delete(drop[1] as string);
+    if (sql.includes('FROM backup_run') && sql.includes('dump_sha256 IS NOT NULL')) {
+      return [...this.runs.values()]
+        .filter((r) => r.state === 'fertig' && r.stand && r.sha && r.target === vars.target)
+        .reverse()
+        .map((r) => [r.stand as string, r.sha as string]);
+    }
+    if (sql.includes("INSERT INTO setting (key, value, user_id) VALUES ('restore_test'")) {
+      this.testResult = JSON.parse(vars.value as string) as Record<string, unknown>;
+      return [];
+    }
+    if (sql.includes("value->>'started_at'")) return [];
+    if (sql.includes('datname LIKE')) return this.leftovers.map((n) => [n]);
     if (sql.includes('FROM pg_database')) {
       return (vars.names ?? '')
         .split(',')
@@ -198,6 +222,7 @@ describe('runBackup', () => {
       error: null,
       stand: null,
       size: null,
+      sha: null,
       trigger: 'manuell',
       target: pg.target!,
     });
@@ -343,6 +368,20 @@ describe('Argumente', () => {
       target: '/z',
     });
     expect(parseRestoreArgs(['a', 'b']).ok).toBe(false);
+  });
+
+  it('restore --automatisch: nur Auslöser erlaubt, kein Stand und kein fremdes Ziel', () => {
+    expect(parseRestoreArgs(['--automatisch'])).toEqual({ ok: true, auto: true, trigger: 'manuell' });
+    expect(parseRestoreArgs(['--automatisch', '--trigger', 'zeitplan'])).toEqual({
+      ok: true,
+      auto: true,
+      trigger: 'zeitplan',
+    });
+    expect(parseRestoreArgs(['--automatisch', '--trigger', 'vor_migration']).ok).toBe(false);
+    expect(parseRestoreArgs(['--automatisch', '20261104T030012Z']).ok).toBe(false);
+    expect(parseRestoreArgs(['--automatisch', '--ziel', '/fremd']).ok).toBe(false);
+    expect(parseRestoreArgs(['--automatisch', '--test']).ok).toBe(false);
+    expect(parseRestoreArgs(['--trigger', 'zeitplan']).ok).toBe(false);
   });
 });
 
@@ -825,5 +864,121 @@ describe('Backup vor der Migration ist fail-closed', () => {
     spy.mockRestore();
     expect(errors.join('\n')).toContain('--ohne-backup');
     expect(errors.join('\n')).toContain('nicht ausgeführt');
+  });
+});
+
+describe('Automatischer Restore-Test (F-DAT-02)', () => {
+  const STAND = '20261104T030012Z';
+
+  async function prepared(over: Partial<FakePg> = {}) {
+    const s = restoreSetup(over);
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    return s;
+  }
+  const dropsOf = (pg: FakePg) =>
+    pg.queries.filter((q) => q.sql.startsWith('DROP DATABASE IF EXISTS sg_autotest_')).length;
+
+  it('eigener Stand: Test bestanden, Ergebnis gespeichert, Wegwerf-Datenbank wieder gelöscht', async () => {
+    const s = await prepared();
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
+    expect(s.pg.restored.map((r) => r.db)).toEqual(['sg_autotest_abc123']);
+    expect(s.pg.databases.has('sg_autotest_abc123')).toBe(false);
+    expect(s.pg.testResult).toMatchObject({
+      state: 'ok',
+      trigger: 'zeitplan',
+      stand: STAND,
+      reason: null,
+      error: null,
+      finished_at: '2026-11-10T08:00:00.000Z',
+    });
+  });
+
+  it('pg_restore scheitert: Ergebnis "fehler", Datenbank trotzdem gelöscht, Text ohne Passwort', async () => {
+    const s = await prepared();
+    s.pg.restoreImpl = async () => {
+      throw new Error('kaputt postgres://sg:geheim-pw@127.0.0.1/sg');
+    };
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'manuell' })).toBe(1);
+    expect(s.pg.databases.has('sg_autotest_abc123')).toBe(false);
+    expect(s.pg.testResult).toMatchObject({
+      state: 'fehler',
+      reason: 'restore_fehlgeschlagen',
+      stand: STAND,
+    });
+    expect(JSON.stringify(s.pg.testResult)).not.toContain('geheim-pw');
+  });
+
+  it('fremder Stand ohne Lauf-Eintrag wird nie eingespielt', async () => {
+    const s = await prepared();
+    s.pg.runs.clear(); // der Stand liegt im Ziel, aber es gibt keinen eigenen Lauf dazu
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.pg.testResult).toMatchObject({ state: 'fehler', reason: 'kein_backup' });
+  });
+
+  it('Lauf ohne Prüfsumme (Altbestand) und Lauf für anderes Ziel zählen nicht', async () => {
+    const s = await prepared();
+    for (const run of s.pg.runs.values()) run.sha = null;
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ reason: 'kein_backup' });
+    for (const run of s.pg.runs.values()) Object.assign(run, { sha: 'a'.repeat(64), target: '/anderes' });
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+  });
+
+  it('erfundenes Manifest samt passendem Dump: Prüfsumme weicht vom Lauf-Eintrag ab, nichts wird eingespielt', async () => {
+    const s = await prepared();
+    const dir = join(s.target, STAND);
+    writeFileSync(join(dir, 'db.dump'), 'PGDMP-boese');
+    const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as {
+      dump: { sha256: string; bytes: number };
+    };
+    manifest.dump.sha256 = createHash('sha256').update('PGDMP-boese').digest('hex');
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.pg.testResult).toMatchObject({ state: 'fehler', reason: 'nicht_authentisch', stand: STAND });
+  });
+
+  it('beschädigter Dump (Manifest stimmt, Datei nicht): "beschaedigt"', async () => {
+    const s = await prepared();
+    writeFileSync(join(s.target, STAND, 'db.dump'), 'verändert');
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.pg.testResult).toMatchObject({ reason: 'beschaedigt' });
+  });
+
+  it('fehlende Datei in media/: "dateien_abweichend"', async () => {
+    const s = await prepared();
+    rmSync(join(s.target, STAND, 'media', 'photos', 'a.jpg'));
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ reason: 'dateien_abweichend' });
+    expect(s.pg.databases.has('sg_autotest_abc123')).toBe(false);
+  });
+
+  it('Stand fehlt im Ziel: ältere eigene Stände werden versucht, sonst "kein_backup"', async () => {
+    const s = await prepared();
+    rmSync(join(s.target, STAND), { recursive: true });
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ reason: 'kein_backup' });
+  });
+
+  it('ohne Backup-Ziel und mit nicht erreichbarem Ziel', async () => {
+    const s = await prepared();
+    Object.assign(s.pg, { target: null });
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ reason: 'kein_backup' });
+    s.pg.target = join(s.target, 'gibt-es-nicht', 'tief');
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ reason: 'ziel_nicht_erreichbar' });
+  });
+
+  it('räumt übrig gebliebene Wegwerf-Datenbanken eines abgestürzten Tests auf', async () => {
+    const s = await prepared();
+    s.pg.databases.add('sg_autotest_alt999');
+    s.pg.leftovers = ['sg_autotest_alt999'];
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
+    expect(s.pg.databases.has('sg_autotest_alt999')).toBe(false);
+    expect(dropsOf(s.pg)).toBeGreaterThan(1);
   });
 });

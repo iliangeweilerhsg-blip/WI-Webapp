@@ -343,7 +343,14 @@ export function installFakeCore(
       // Daten/Papierkorb (T1-18): leere Antworten, damit das gerenderte Panel nicht ins Leere fragt
       if (path === '/backups' && method === 'GET') {
         return json({
-          status: { target: null, last_success_at: null, next_run_at: null, stale: false, running: false },
+          status: {
+            target: null,
+            last_success_at: null,
+            next_run_at: null,
+            stale: false,
+            running: false,
+            restore_test: null,
+          },
           items: [],
           next_cursor: null,
         });

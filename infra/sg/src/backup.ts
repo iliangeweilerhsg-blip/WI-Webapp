@@ -314,9 +314,9 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       if (runId) {
         await pg.query(
           `UPDATE backup_run SET state = 'fertig', finished_at = now(), updated_at = now(), error = NULL,
-                  size_bytes = :'size'::bigint, stand = :'stand'
+                  size_bytes = :'size'::bigint, stand = :'stand', dump_sha256 = :'sha'
             WHERE id = :'id'::uuid`,
-          { id: runId, size: String(size), stand },
+          { id: runId, size: String(size), stand, sha: dumpSha },
         );
       }
       log(`Backup ${stand} fertig (${size} Bytes).`);

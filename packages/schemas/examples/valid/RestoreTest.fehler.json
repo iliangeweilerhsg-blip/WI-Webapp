@@ -1,0 +1,9 @@
+{
+  "state": "fehler",
+  "trigger": "manuell",
+  "started_at": "2026-11-05T10:00:00Z",
+  "finished_at": "2026-11-05T10:00:02Z",
+  "stand": "20261104T020000Z",
+  "reason": "nicht_authentisch",
+  "error": "Das Manifest des Standes 20261104T020000Z passt nicht zum protokollierten Backup-Lauf."
+}
