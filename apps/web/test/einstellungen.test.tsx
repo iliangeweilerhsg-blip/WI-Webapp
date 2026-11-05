@@ -55,7 +55,19 @@ describe('Reiter', () => {
     expect(await screen.findByRole('heading', { name: 'Semester' })).toBeInTheDocument();
   });
 
-  it('wechselt per Klick und Pfeiltasten; Geräte und Daten zeigen „Kommt bald“', async () => {
+  it('mountet „Daten und Papierkorb“ erst beim ersten Öffnen (keine Anfragen vorher)', async () => {
+    const core = installFakeCore();
+    const user = userEvent.setup();
+    page();
+    expect(await screen.findByRole('heading', { name: 'Semester' })).toBeInTheDocument();
+    const dataRequests = () => core.requests.filter((r) => /^\/(backups|trash)/.test(r.path));
+    expect(dataRequests()).toEqual([]);
+    await user.click(screen.getByRole('tab', { name: 'Daten und Papierkorb' }));
+    expect(await screen.findByRole('heading', { name: 'Papierkorb' })).toBeInTheDocument();
+    expect(dataRequests().length).toBeGreaterThan(0);
+  });
+
+  it('wechselt per Klick und Pfeiltasten; Geräte zeigt „Kommt bald“, Daten die Bereiche Backups und Papierkorb', async () => {
     installFakeCore();
     const user = userEvent.setup();
     page();
@@ -63,7 +75,8 @@ describe('Reiter', () => {
     expect(screen.getByRole('heading', { name: 'Geräte' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Allgemein', hidden: true })).not.toBeVisible();
     await user.click(screen.getByRole('tab', { name: 'Daten und Papierkorb' }));
-    expect(screen.getByRole('heading', { name: 'Daten und Papierkorb' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Daten und Backups' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Papierkorb' })).toBeInTheDocument();
 
     screen.getByRole('tab', { name: 'Allgemein' }).focus();
     await user.keyboard('{ArrowRight}');
@@ -171,7 +184,7 @@ describe('Allgemein', () => {
   it('Core nicht erreichbar: ruhiger Hinweis, keine Felder', async () => {
     installFakeCore({ down: true });
     page();
-    expect(await screen.findAllByText('Core nicht erreichbar', {}, { timeout: 4000 })).not.toHaveLength(0);
+    expect(await screen.findAllByText('Core nicht erreichbar')).not.toHaveLength(0);
     expect(screen.queryByLabelText('Sprache der Inhalte')).not.toBeInTheDocument();
   });
 });

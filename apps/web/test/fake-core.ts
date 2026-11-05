@@ -154,8 +154,8 @@ export interface FakeCore {
   failIngest: (id: string) => void;
   /** Solange true, scheitern alle Anfragen wie bei einem nicht laufenden Core */
   down: boolean;
-  /** Verzögerung für POST in ms (Antworten kommen später als die nächste Eingabe) */
-  latencyMs: number;
+  /** Hält alle POSTs an, bis das Promise erfüllt ist (deterministisch statt Zeitfenster). `null` = nicht angehalten */
+  postGate: Promise<void> | null;
   /** Stand von GET/PATCH /settings (Standards aus VERTRAEGE §14.1) */
   settings: Settings;
   /** Das nächste PATCH /settings wird mit diesem Fehler abgelehnt */
@@ -205,9 +205,7 @@ const json = (body: unknown, status = 200) =>
  * (erstes Semester wird aktuell, is_current höchstens einmal, Farbvergabe, Soft-Delete). Ersetzt `fetch`.
  */
 export function installFakeCore(
-  initial: Partial<
-    Pick<FakeCore, 'semesters' | 'modules' | 'decks' | 'sheets' | 'sessions' | 'down' | 'latencyMs'>
-  > = {},
+  initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'decks' | 'sheets' | 'sessions' | 'down'>> = {},
 ) {
   const core: FakeCore = {
     semesters: structuredClone(initial.semesters ?? []),
@@ -238,7 +236,7 @@ export function installFakeCore(
       for (const item of [...core.decks, ...core.sheets]) if (item.id === id) item.ingest_state = 'fehler';
     },
     down: initial.down ?? false,
-    latencyMs: initial.latencyMs ?? 0,
+    postGate: null,
     settings: makeSettings(),
     rejectNextSettings: null,
   };
@@ -257,13 +255,22 @@ export function installFakeCore(
       const headers = (init?.headers ?? {}) as Record<string, string>;
       core.requests.push({ method, path: path + url.search, body, headers });
 
-      if (method === 'POST' && core.latencyMs) await new Promise((r) => setTimeout(r, core.latencyMs));
+      if (method === 'POST' && core.postGate) await core.postGate;
       if (core.down) throw new TypeError('Failed to fetch');
 
       const materialResponse = await handleMaterial(core, { path, method, url, body, form, headers, newId });
       if (materialResponse) return materialResponse;
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
+      // Daten/Papierkorb (T1-18): leere Antworten, damit das gerenderte Panel nicht ins Leere fragt
+      if (path === '/backups' && method === 'GET') {
+        return json({
+          status: { target: null, last_success_at: null, next_run_at: null, stale: false, running: false },
+          items: [],
+          next_cursor: null,
+        });
+      }
+      if (path === '/trash' && method === 'GET') return json({ items: [], next_cursor: null });
 
       if (path === '/settings' && method === 'GET') return json(core.settings);
       if (path === '/settings' && method === 'PATCH') {

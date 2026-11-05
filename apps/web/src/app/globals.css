@@ -102,24 +102,65 @@ main:focus {
     width: 240px;
     overflow: hidden;
   }
-  html[data-sidebar='collapsed'] #sidebar {
-    width: 56px;
+  @media (min-width: 768px) {
+    html[data-sidebar='collapsed'] #sidebar {
+      width: 56px;
+    }
+    /* Übergang erst nach dem Mount (data-ready), sonst „fährt" die Leiste beim Laden */
+    html[data-ready] #sidebar {
+      transition: width var(--sg-motion-base);
+    }
+    html[data-sidebar='collapsed'] .sg-collapsible {
+      display: none;
+    }
+    html[data-sidebar='collapsed'] #sidebar > div:first-child {
+      justify-content: center;
+      padding-inline: 0;
+    }
+    html[data-sidebar='collapsed'] #sidebar .sg-nav-link,
+    html[data-sidebar='collapsed'] #sidebar [role='status'] {
+      justify-content: center;
+      padding-inline: 0;
+    }
   }
-  /* Übergang erst nach dem Mount (data-ready), sonst „fährt" die Leiste beim Laden */
-  html[data-ready] #sidebar {
-    transition: width var(--sg-motion-base);
+  /* Schmal (< 768 px): Seitenleiste als Drawer über dem Inhalt (07 §2). Eingeklappt-Zustand gilt nur auf breiten Bildschirmen. */
+  @media (max-width: 767.98px) {
+    #sidebar {
+      position: fixed;
+      inset-block: 0;
+      left: 0;
+      z-index: 40;
+      width: min(280px, 85vw);
+      transform: translateX(-100%);
+      visibility: hidden;
+      transition:
+        transform var(--sg-motion-base),
+        visibility 0s linear var(--sg-motion-base);
+    }
+    #sidebar[data-drawer='open'] {
+      transform: none;
+      visibility: visible;
+      transition: transform var(--sg-motion-base);
+    }
   }
-  html[data-sidebar='collapsed'] .sg-collapsible {
-    display: none;
+  .sg-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgb(0 0 0 / 0.45);
   }
-  html[data-sidebar='collapsed'] #sidebar > div:first-child {
-    justify-content: center;
-    padding-inline: 0;
+  .sync-other-tab-banner,
+  .sync-error-shelf {
+    padding: var(--sg-space-2) var(--sg-space-4);
+    border-bottom: 1px solid var(--sg-color-border);
+    background: var(--sg-color-surface-raised);
+    color: var(--sg-color-text);
+    font-size: var(--sg-font-size-sm);
   }
-  html[data-sidebar='collapsed'] #sidebar .sg-nav-link,
-  html[data-sidebar='collapsed'] #sidebar [role='status'] {
-    justify-content: center;
-    padding-inline: 0;
+  .sync-other-tab-banner button,
+  .sync-error-shelf button {
+    text-decoration: underline;
+    min-height: 32px;
   }
   .sg-skip-link {
     position: absolute;
