@@ -2,6 +2,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { HealthSchema, type Health } from '@sg/shared';
+import {
+  backupBeforeMigrate,
+  backupCommand,
+  recoverRestoreIfOpen,
+  restoreCommand,
+} from './backup-commands.ts';
 import type { CommandName } from './cli.ts';
 import { appUrl, childEnv, CORE_STOP_TIMEOUT_S, healthUrl, type SgConfig } from './config.ts';
 import { doctorExitCode, formatChecks, runChecks } from './doctor.ts';
@@ -65,11 +71,18 @@ function runInherit(cmd: string, args: string[], cfg: SgConfig, cwd = cfg.repoRo
   });
 }
 
-export async function migrate(cfg: SgConfig): Promise<number> {
+export interface MigrateOptions {
+  /** Backup vor ausstehenden Migrationen überspringen (`--ohne-backup`) */
+  skipBackup?: boolean;
+}
+
+export async function migrate(cfg: SgConfig, options: MigrateOptions = {}): Promise<number> {
   if (!availability(cfg.repoRoot).core) {
     err('services/core fehlt noch (Ticket T0-04). Migrationen sind erst danach möglich.');
     return 1;
   }
+  // Backup mit trigger = vor_migration (VERTRAEGE §13), wenn Migrationen ausstehen und ein Ziel eingestellt ist
+  if (!options.skipBackup && !(await backupBeforeMigrate(cfg))) return 1;
   log('Führe Datenbank-Migrationen aus …');
   const code = await runInherit('pnpm', ['--filter', '@sg/core', 'migrate'], cfg);
   if (code !== 0)
@@ -235,6 +248,9 @@ export async function start(cfg: SgConfig): Promise<number> {
     return 1;
   }
 
+  // Ein unterbrochener Restore wird zuerst abgeschlossen oder zurückgebaut (Journal im Datenordner)
+  if (!(await recoverRestoreIfOpen(cfg))) return 1;
+
   await ensureWebBuild(cfg, prepareIo(cfg), avail.web);
 
   if ((await migrate(cfg)) !== 0) return 1;
@@ -392,23 +408,25 @@ export async function doctor(cfg: SgConfig): Promise<number> {
   return doctorExitCode(results);
 }
 
-export function placeholder(command: 'backup' | 'restore'): number {
-  err(`"sg ${command}" kommt mit T1-18.`);
-  return 2;
-}
-
-export async function dispatch(command: CommandName, cfg: SgConfig): Promise<number> {
+export async function dispatch(command: CommandName, cfg: SgConfig, rest: string[] = []): Promise<number> {
   switch (command) {
     case 'start':
       return start(cfg);
     case 'stop':
       return stop(cfg);
-    case 'migrate':
-      return migrate(cfg);
+    case 'migrate': {
+      const unknown = rest.filter((a) => a !== '--ohne-backup');
+      if (unknown.length > 0) {
+        err(`Unbekannte Option "${unknown[0]}". Erlaubt: --ohne-backup.`);
+        return 1;
+      }
+      return migrate(cfg, { skipBackup: rest.includes('--ohne-backup') });
+    }
     case 'doctor':
       return doctor(cfg);
     case 'backup':
+      return backupCommand(cfg, rest);
     case 'restore':
-      return placeholder(command);
+      return restoreCommand(cfg, rest);
   }
 }
