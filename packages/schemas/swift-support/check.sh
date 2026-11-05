@@ -19,4 +19,6 @@ if command -v xcrun >/dev/null 2>&1 && xcrun --sdk iphonesimulator --show-sdk-pa
   xcrun --sdk iphonesimulator swiftc -typecheck -swift-version 6 -target arm64-apple-ios17.0-simulator \
     "$here/../generated/swift/Schemas.swift" "$here"/Sources/*.swift
   echo "iOS-SDK (Swift 6): Typprüfung bestanden"
+else
+  echo "iOS-SDK-Typprüfung übersprungen (kein xcrun bzw. iphonesimulator-SDK, z. B. in der CI unter Linux)"
 fi
