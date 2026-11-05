@@ -2,13 +2,19 @@
 // Keine Datenbank, kein Netz, keine KI. Regexe und Umlaute im Code nur als ASCII-Escapes.
 import {
   isAbbreviation,
-  KIND_WORD_RE,
   matchModule,
   suggestionKey,
   tokenize,
   type ModuleCandidate,
 } from '../services/calendar-assign.ts';
 import type { CourseInfo } from './classify.ts';
+
+/**
+ * Terminarten, die aus dem Kursnamen fallen (Vorlesung, Übung, Tutorium). Bewusst ohne Prüfung, Klausur und Exam:
+ * Die sind oft Teil des Fachnamens („Prüfung und Revision“, Review #144).
+ */
+const SESSION_KIND_RE =
+  /(?<![\p{L}\p{N}])(vorlesung(en)?|vl|\u00fcbung(en)?|uebung(en)?|\u00fc|ue|tutorium|tutorien|tut|lecture)(?![\p{L}\p{N}])/giu;
 
 /** Längster Modulname, der automatisch entsteht (wie beim Vorschlag aus dem Kalender), in Zeichen (Codepoints) */
 export const MAX_AUTO_NAME_LENGTH = 120;
@@ -144,7 +150,7 @@ export function cleanCourseName(fullName: string): string {
   name = tidy(stripSemester(name));
   const withoutCode = tidy(name.replace(LEADING_CODE_RE, ''));
   if (withoutCode !== '') name = withoutCode;
-  name = tidy(tidyBrackets(name.replace(KIND_WORD_RE, ' ')));
+  name = tidy(tidyBrackets(name.replace(SESSION_KIND_RE, ' ')));
   name = name.replace(/\p{L}+/gu, restoreUmlauts);
   return truncate(name, MAX_AUTO_NAME_LENGTH);
 }

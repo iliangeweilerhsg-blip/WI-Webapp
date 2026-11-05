@@ -68,6 +68,12 @@ describe('cleanCourseName', () => {
     expect(cleanCourseName('Übungsfirma')).toBe('Übungsfirma');
   });
 
+  it('lässt Prüfung, Klausur und Exam im Fachnamen stehen (Review #144)', () => {
+    expect(cleanCourseName('Prüfung und Revision WiSe 26/27')).toBe('Prüfung und Revision');
+    expect(cleanCourseName('Exam Preparation English')).toBe('Exam Preparation English');
+    expect(cleanCourseName('Klausurenkurs Zivilrecht')).toBe('Klausurenkurs Zivilrecht');
+  });
+
   it('lässt Ähnliches stehen: Zahlenpaare, die keine Jahresfolge sind, WS/SS ohne Jahr, Kleinschreibung', () => {
     expect(cleanCourseName('Kapitel 10/12')).toBe('Kapitel 10/12');
     // Aufeinanderfolgend, aber außerhalb 2015–2040: kein Semester (B7)
