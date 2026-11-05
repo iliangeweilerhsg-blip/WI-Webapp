@@ -11,11 +11,29 @@ export const READY_LEAD_MS = 15 * 60_000;
 export type CardState =
   'bevorstehend' | 'bereit' | 'laeuft' | 'pausiert' | 'verpasst' | 'beendet' | 'verarbeitet';
 
-/** Zustand der Session, wie der Core ihn beim nächsten Takt melden wird: ein vorbeigegangenes Terminende gilt als `verpasst`. */
+/** So lange bleibt eine spontane `bereit`-Session ohne Terminende auf der Karte (ab `created_at`) */
+export const SPONTANEOUS_VISIBLE_MS = 2 * 60 * 60_000;
+
+/** Spontane Session (kein Termin), die nie gestartet wurde und schon lange `bereit` steht: nicht mehr auf der Karte */
+function isStaleSpontaneous(s: Session, now: number): boolean {
+  return (
+    s.state === 'bereit' &&
+    s.planned_ends_at === null &&
+    s.planned_starts_at === null &&
+    now - Date.parse(s.created_at) > SPONTANEOUS_VISIBLE_MS
+  );
+}
+
+/**
+ * Zustand der Session, wie der Core ihn beim nächsten Takt melden wird: ein vorbeigegangenes Terminende gilt als
+ * `verpasst`. Ein vom Core gemeldetes `verpasst` mit Terminende in der Zukunft lässt sich noch starten (§9.1:
+ * Start nur ab `started_at < Terminende`) und gilt darum als `bereit`.
+ */
 export function cardState(session: Session, now: number): CardState {
-  if (session.state === 'geplant' || session.state === 'bereit') {
+  if (session.state === 'geplant' || session.state === 'bereit' || session.state === 'verpasst') {
     const end = session.planned_ends_at ? Date.parse(session.planned_ends_at) : Number.NaN;
     if (!Number.isNaN(end) && end <= now) return 'verpasst';
+    if (session.state === 'verpasst') return 'bereit';
     return session.state === 'geplant' ? 'bevorstehend' : 'bereit';
   }
   return session.state;
@@ -27,28 +45,54 @@ function lastMoment(s: Session): number {
   return Date.parse(s.ended_at ?? s.planned_ends_at ?? s.planned_starts_at ?? s.created_at);
 }
 
+export interface CardPick {
+  session: Session;
+  /** Eine vergessene aktive Session (Terminende vorbei), die der Core beim Start beendet (§9.1) */
+  previousRunning: Session | null;
+}
+
 /**
- * Die Session für die Start-Karte: erst eine aktive (laeuft/pausiert), sonst die nächste bevorstehende bzw. bereite,
- * sonst die zuletzt vorbeigegangene (beendet, verarbeitet, nicht aufgenommen). Ohne Sessions `null`.
+ * Die Session für die Start-Karte: erst eine aktive (laeuft/pausiert), sonst die nächste bevorstehende bzw. bereite
+ * (terminierte vor spontanen), sonst die zuletzt vorbeigegangene (beendet, verarbeitet, nicht aufgenommen).
+ * Ist die aktive Session schon über ihr Terminende hinaus und eine andere ist `bereit`, zeigt die Karte die bereite;
+ * `previousRunning` nennt dann die alte. Ohne Sessions `null`.
  */
-export function pickCardSession(sessions: readonly Session[], now: number): Session | null {
+export function pickCard(sessions: readonly Session[], now: number): CardPick | null {
   const active = sessions
     .filter(isActive)
     .sort((a, b) => Date.parse(b.started_at ?? '') - Date.parse(a.started_at ?? ''));
-  if (active[0]) return active[0];
 
   const upcoming = sessions
     .filter((s) => {
+      if (isActive(s) || isStaleSpontaneous(s, now)) return false;
       const state = cardState(s, now);
       return state === 'bevorstehend' || state === 'bereit';
     })
-    .sort((a, b) => plannedStart(a) - plannedStart(b) || a.id.localeCompare(b.id));
-  if (upcoming[0]) return upcoming[0];
+    .sort(
+      (a, b) =>
+        Number(a.planned_starts_at === null) - Number(b.planned_starts_at === null) ||
+        plannedStart(a) - plannedStart(b) ||
+        a.id.localeCompare(b.id),
+    );
+
+  const current = active[0];
+  if (current) {
+    const end = current.planned_ends_at ? Date.parse(current.planned_ends_at) : Number.NaN;
+    const forgotten = !Number.isNaN(end) && end <= now;
+    const ready = upcoming.find((s) => cardState(s, now) === 'bereit');
+    if (forgotten && ready) return { session: ready, previousRunning: current };
+    return { session: current, previousRunning: null };
+  }
+  if (upcoming[0]) return { session: upcoming[0], previousRunning: null };
 
   const past = sessions
-    .filter((s) => !isActive(s))
+    .filter((s) => !isActive(s) && !isStaleSpontaneous(s, now))
     .sort((a, b) => lastMoment(b) - lastMoment(a) || a.id.localeCompare(b.id));
-  return past[0] ?? null;
+  return past[0] ? { session: past[0], previousRunning: null } : null;
+}
+
+export function pickCardSession(sessions: readonly Session[], now: number): Session | null {
+  return pickCard(sessions, now)?.session ?? null;
 }
 
 /** Eintrag der Tagesliste: ein Termin, eine Session oder beides (verknüpft über `calendar_event_id`/`session_id`). */
@@ -135,7 +179,11 @@ export function buildEntries(
       session,
     });
   }
-  const order = (e: TodayEntry): number => e.start ?? Date.parse(e.session?.created_at ?? '') ?? 0;
+  const order = (e: TodayEntry): number => {
+    if (e.start !== null) return e.start;
+    const created = Date.parse(e.session?.created_at ?? '');
+    return Number.isNaN(created) ? 0 : created;
+  };
   return entries.sort(
     (a, b) => Number(b.allDay) - Number(a.allDay) || order(a) - order(b) || a.key.localeCompare(b.key),
   );

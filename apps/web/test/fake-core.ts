@@ -382,24 +382,38 @@ export function installFakeCore(
           core.rejectNextSession = null;
           return json({ error: { code, message: 'x' } }, status);
         }
-        const target = core.sessions.find((x) => x.id === sessionMatch[1]);
+        const target = core.sessions.find((x) => x.id === sessionMatch[1] && !x.deleted_at);
         if (!target) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
         const active = target.state === 'laeuft' || target.state === 'pausiert';
         const now = Date.now();
         const invalid = () => json({ error: { code: 'session_transition_invalid', message: 'x' } }, 409);
         const touch = () => (target.updated_at = new Date(now).toISOString());
         if (sessionMatch[2] === 'start') {
-          if (target.state === 'laeuft') return json({ session: target, ended_session: null });
+          // Gleicher Zielzustand ist kein Fehler (§9.1)
+          if (target.state === 'laeuft' || target.state === 'pausiert') {
+            return json({ session: target, ended_session: null });
+          }
           if (target.state !== 'geplant' && target.state !== 'bereit' && target.state !== 'verpasst') {
             return invalid();
           }
-          // Eine andere aktive Session endet vorher (VERTRAEGE §9.1)
+          // Wie der Core: ein verpasster Termin lässt sich nur vor dem Terminende starten
+          if (
+            target.state === 'verpasst' &&
+            target.planned_ends_at &&
+            now >= Date.parse(target.planned_ends_at)
+          ) {
+            return invalid();
+          }
+          // Eine andere aktive Session endet vorher am Kalenderende, spätestens jetzt (§9.1)
           const other = core.sessions.find(
-            (x) => x.id !== target.id && (x.state === 'laeuft' || x.state === 'pausiert'),
+            (x) => x.id !== target.id && !x.deleted_at && (x.state === 'laeuft' || x.state === 'pausiert'),
           );
           if (other) {
+            const plannedEnd = other.planned_ends_at
+              ? Date.parse(other.planned_ends_at)
+              : Number.POSITIVE_INFINITY;
             other.state = 'beendet';
-            other.ended_at = new Date(now).toISOString();
+            other.ended_at = new Date(Math.min(plannedEnd, now)).toISOString();
             other.stop_reason = 'kalenderende';
             other.updated_at = new Date(now).toISOString();
           }

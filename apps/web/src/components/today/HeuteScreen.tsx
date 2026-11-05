@@ -6,7 +6,7 @@ import { CoreHint } from '../CoreHint.tsx';
 import { EmptyState } from '../Placeholder.tsx';
 import { StartCard } from './StartCard.tsx';
 import { TodayList } from './TodayList.tsx';
-import { buildEntries, formatClock, pickCardSession } from './model.ts';
+import { buildEntries, formatClock, pickCard } from './model.ts';
 import { useNow, useTodayData } from './use-today.ts';
 
 const dateFormat = new Intl.DateTimeFormat('de-DE', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -19,14 +19,14 @@ export function HeuteScreen() {
   const { sessions, events, modules } = data;
 
   const entries = useMemo(() => buildEntries(events, sessions, modules), [events, sessions, modules]);
-  const cardSession = now === null ? null : pickCardSession(sessions, now);
-  const cardEntry = cardSession ? (entries.find((e) => e.session?.id === cardSession.id) ?? null) : null;
+  const pick = now === null ? null : pickCard(sessions, now);
+  const cardEntry = pick ? (entries.find((e) => e.session?.id === pick.session.id) ?? null) : null;
 
-  const hasData = data.updatedAt > 0;
+  const hasData = data.hasData;
   const offline = data.error !== null && data.error !== undefined;
   // Mit altem Stand: ruhiger Hinweis. Ohne jeden Stand: der Core-Hinweis wie auf den anderen Bildschirmen.
   const note =
-    hasData && (offline || !data.live)
+    hasData && (offline || data.hint)
       ? `Keine Live-Verbindung. Du siehst den Stand von ${formatClock(data.updatedAt)} Uhr. Er aktualisiert sich, sobald die Verbindung wieder steht.`
       : null;
 
@@ -53,8 +53,14 @@ export function HeuteScreen() {
           </p>
         ) : null}
 
-        {now !== null && cardSession && cardEntry ? (
-          <StartCard entry={cardEntry} now={now} onSession={data.apply} onRefetch={data.refetch} />
+        {now !== null && pick && cardEntry ? (
+          <StartCard
+            entry={cardEntry}
+            now={now}
+            previousRunning={pick.previousRunning !== null}
+            onSession={data.apply}
+            onRefetch={data.refetch}
+          />
         ) : null}
 
         {now !== null && entries.length > 0 ? <TodayList entries={entries} now={now} /> : null}

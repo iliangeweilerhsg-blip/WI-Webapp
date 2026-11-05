@@ -15,6 +15,7 @@ import {
   cardState,
   formatElapsed,
   formatUntil,
+  pickCard,
   pickCardSession,
 } from '../src/components/today/model.ts';
 import { friendlyMessage } from '../src/lib/api.ts';
@@ -341,12 +342,14 @@ describe('Heute: Aktionen', () => {
     const user = userEvent.setup();
     boot();
     await user.click(await screen.findByRole('button', { name: 'Start' }));
-    expect(await screen.findByRole('link', { name: 'Zur Vorlesung' })).toHaveAttribute(
-      'href',
-      sessionHref(SESSION_ID),
-    );
-    expect(card()).toHaveAttribute('data-state', 'laeuft');
+    await waitFor(() => expect(card()).toHaveAttribute('data-state', 'laeuft'));
+    // Kein Link ins 404: nur Pause und Beenden, der Fokus geht auf die Überschrift der Karte
+    expect(screen.queryByRole('link', { name: 'Zur Vorlesung' })).toBeNull();
+    expect(within(card()).getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+    expect(within(card()).getByRole('button', { name: 'Beenden' })).toBeInTheDocument();
+    expect(within(card()).getByText(/Seit 08:10 Uhr/)).toBeInTheDocument();
     expect(push).not.toHaveBeenCalled();
+    await waitFor(() => expect(within(card()).getByRole('heading', { level: 2 })).toHaveFocus());
   });
 
   it('Beenden steht abgesetzt von Pause', async () => {
@@ -432,8 +435,12 @@ describe('Heute: Aktionen', () => {
     let release: () => void = () => undefined;
     core.postGate = new Promise<void>((resolve) => (release = resolve));
     await user.click(start);
-    expect(await screen.findByRole('button', { name: 'Startet …' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Startet …' }));
+    // aria-disabled statt disabled: Der Fokus bleibt auf dem Knopf
+    const busy = await screen.findByRole('button', { name: 'Wird gestartet …' });
+    expect(busy).toHaveAttribute('aria-disabled', 'true');
+    expect(busy).not.toBeDisabled();
+    expect(busy).toHaveFocus();
+    await user.click(busy);
     release();
     await waitFor(() => expect(push).toHaveBeenCalled());
     expect(calls(/start$/)).toHaveLength(1);
@@ -745,5 +752,261 @@ describe('friendlyMessage (Sessions)', () => {
     expect(await failWith('session_active', 409)).toMatch(/Beende sie zuerst/);
     expect(await failWith('session_exists', 409)).toMatch(/schon eine Session/);
     expect(friendlyMessage(new Error('x'))).toBe('Das hat nicht geklappt.');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Nacharbeit nach dem Review
+// ---------------------------------------------------------------------------------------------
+
+/** Hält `GET /sessions` an, bis `release()` kommt; die Antwort bleibt der Stand zum Zeitpunkt der Anfrage. */
+function gateSessionReads() {
+  const underlying = globalThis.fetch;
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let armed = true;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string, init?: RequestInit) => {
+      const response = await underlying(input, init);
+      const isRead = (init?.method ?? 'GET') === 'GET' && String(input).includes('/sessions?');
+      if (armed && isRead) await gate;
+      return response;
+    }),
+  );
+  return {
+    release: () => {
+      armed = false;
+      release();
+    },
+  };
+}
+
+describe('Heute: Puffer und Rennen', () => {
+  it('eine inzwischen gelöschte Session kommt nicht über alte Ereignisse zurück', async () => {
+    const user = userEvent.setup();
+    boot({ now: '2026-11-04T07:20:00Z', sessions: [planned({ state: 'bereit' })] });
+    await screen.findByRole('button', { name: 'Jetzt starten' });
+    // Ein Ereignis: die Session läuft
+    act(() =>
+      sync.emit(
+        'session.updated',
+        planned({ state: 'laeuft', started_at: '2026-11-04T07:19:00Z', updated_at: '2026-11-04T07:19:00Z' }),
+      ),
+    );
+    await waitFor(() => expect(card()).toHaveAttribute('data-state', 'laeuft'));
+    // Im Core ist sie danach weich gelöscht (kein Ereignis angekommen); die nächste Abfrage kennt sie nicht mehr
+    core.sessions.find((s) => s.id === SESSION_ID)!.deleted_at = '2026-11-04T07:19:30Z';
+    await user.click(screen.getByRole('button', { name: 'Pause' }));
+    // Pause liefert 404; das Neuladen zeigt den Core-Stand: keine laufende Karte mehr
+    await waitFor(() => expect(screen.queryByRole('region', { name: /Datenbanksysteme/ })).toBeNull());
+    // und es bleibt so (keine Endlosschleife aus Fehler und Neuladen)
+    const pauses = calls(/pause$/).length;
+    await act(async () => undefined);
+    expect(calls(/pause$/).length).toBe(pauses);
+    expect(screen.queryByRole('region', { name: /Datenbanksysteme/ })).toBeNull();
+  });
+
+  it('Gegenprobe: ein Ereignis während des Abrufs wird eingemischt', async () => {
+    boot({ now: '2026-11-04T07:20:00Z' });
+    await screen.findByRole('button', { name: 'Jetzt starten' });
+    const gated = gateSessionReads();
+    act(() => sync.emit('leader.changed', {}));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+    // Der Abruf läuft (angehalten, mit altem Stand); jetzt kommt das Ereignis
+    act(() =>
+      sync.emit(
+        'session.updated',
+        planned({ state: 'laeuft', started_at: '2026-11-04T07:19:00Z', updated_at: '2026-11-04T07:19:00Z' }),
+      ),
+    );
+    gated.release();
+    await waitFor(() => expect(card()).toHaveAttribute('data-state', 'laeuft'));
+    await act(async () => undefined);
+    expect(card()).toHaveAttribute('data-state', 'laeuft');
+  });
+
+  it('die Antwort einer Aktion wird von einem älteren, noch laufenden Abruf nicht überschrieben', async () => {
+    const user = userEvent.setup();
+    boot({
+      now: '2026-11-04T07:20:00Z',
+      sessions: [
+        planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z', updated_at: '2026-11-04T07:16:00Z' }),
+      ],
+    });
+    await screen.findByRole('button', { name: 'Pause' });
+    const gated = gateSessionReads();
+    act(() => sync.emit('leader.changed', {}));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: 'Pause' }));
+    await screen.findByRole('button', { name: 'Fortsetzen' });
+    gated.release();
+    await act(async () => undefined);
+    await act(async () => undefined);
+    expect(card()).toHaveAttribute('data-state', 'pausiert');
+  });
+});
+
+describe('Heute: Karte, Fokus, Hinweise', () => {
+  it('nach dem Start geht der Fokus auf die Überschrift, wenn „Start“ verschwindet', async () => {
+    const user = userEvent.setup();
+    boot();
+    await user.click(await screen.findByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(push).toHaveBeenCalled());
+    await waitFor(() => expect(within(card()).getByRole('heading', { level: 2 })).toHaveFocus());
+  });
+
+  it('Pause behält den Fokus auf demselben Knopf', async () => {
+    const user = userEvent.setup();
+    boot({
+      now: '2026-11-04T07:20:00Z',
+      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
+    });
+    await user.click(await screen.findByRole('button', { name: 'Pause' }));
+    const resume = await screen.findByRole('button', { name: 'Fortsetzen' });
+    expect(resume).toHaveFocus();
+  });
+
+  it('pausiert: „Fortsetzen“ ist die Hauptaktion', async () => {
+    boot({
+      now: '2026-11-04T07:20:00Z',
+      sessions: [planned({ state: 'pausiert', started_at: '2026-11-04T07:15:00Z' })],
+    });
+    expect(await screen.findByRole('button', { name: 'Fortsetzen' })).toHaveClass('bg-accent');
+  });
+
+  it('laufend ohne Dashboard-Route: kein Link „Zur Vorlesung“', async () => {
+    dashboard.available = false;
+    boot({
+      now: '2026-11-04T07:20:00Z',
+      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
+    });
+    await screen.findByRole('button', { name: 'Pause' });
+    expect(screen.queryByRole('link', { name: 'Zur Vorlesung' })).toBeNull();
+    expect(screen.getByText(/Seit 08:15 Uhr/)).toBeInTheDocument();
+  });
+
+  it('vergessene aktive Session: die bereite Vorlesung bekommt „Start“ und einen ruhigen Hinweis', async () => {
+    const user = userEvent.setup();
+    const forgotten = planned({
+      id: '0190f6a2-0000-7000-8000-0000000000c9',
+      module_id: STAT.id,
+      calendar_event_id: null,
+      state: 'laeuft',
+      started_at: '2026-11-04T05:00:00Z',
+      planned_starts_at: '2026-11-04T05:00:00Z',
+      planned_ends_at: '2026-11-04T06:30:00Z',
+      updated_at: '2026-11-04T05:00:00Z',
+    });
+    boot({ now: '2026-11-04T07:10:00Z', sessions: [forgotten, planned()], events: [EVENT_DBS] });
+    const c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
+    expect(
+      within(c).getByText('Vorherige Vorlesung läuft noch und wird beim Start beendet.'),
+    ).toBeInTheDocument();
+    await user.click(within(c).getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(card()).toHaveAttribute('data-state', 'laeuft'));
+    expect(within(card()).getByText('Die vorherige Session wurde beendet.')).toBeInTheDocument();
+    const old = core.sessions.find((s) => s.id === forgotten.id)!;
+    expect(old.state).toBe('beendet');
+    expect(old.ended_at).toBe('2026-11-04T06:30:00.000Z');
+    expect(old.stop_reason).toBe('kalenderende');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('Core-„verpasst“ mit Terminende in der Zukunft bietet Start an', async () => {
+    const user = userEvent.setup();
+    boot({ now: '2026-11-04T07:20:00Z', sessions: [planned({ state: 'verpasst' })] });
+    await user.click(await screen.findByRole('button', { name: 'Jetzt starten' }));
+    await waitFor(() => expect(core.sessions.find((s) => s.id === SESSION_ID)?.state).toBe('laeuft'));
+  });
+
+  it('Folge-Tab: kein Hinweis „Keine Live-Verbindung“ (das Banner der Shell genügt)', async () => {
+    boot();
+    await screen.findByRole('button', { name: 'Start' });
+    act(() => sync.setState('other_tab'));
+    await act(async () => undefined);
+    expect(screen.queryByText(/Keine Live-Verbindung/)).toBeNull();
+  });
+
+  it('hängender Verbindungsaufbau gilt nach 10 s wie offline', async () => {
+    boot({ syncState: 'connecting' });
+    await screen.findByRole('button', { name: 'Start' });
+    expect(screen.queryByText(/Keine Live-Verbindung/)).toBeNull();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    setNow('2026-11-04T07:10:00Z');
+    act(() => sync.setState('syncing'));
+    act(() => sync.setState('connecting'));
+    act(() => {
+      vi.advanceTimersByTime(10_001);
+    });
+    expect(screen.getByText(/Keine Live-Verbindung/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start' })).toBeInTheDocument();
+  });
+});
+
+describe('Heute: spontane Sessions und Auswahl', () => {
+  const spontaneous = (created: string, id = '0190f6a2-0000-7000-8000-0000000000d1') =>
+    makeSession({
+      id,
+      module_id: STAT.id,
+      state: 'bereit',
+      started_at: null,
+      planned_starts_at: null,
+      planned_ends_at: null,
+      created_at: created,
+      updated_at: created,
+    });
+
+  it('terminierte Sessions gehen vor spontanen', () => {
+    const now = Date.parse('2026-11-04T07:10:00Z');
+    const spont = spontaneous('2026-11-04T06:00:00Z');
+    expect(pickCard([spont, planned()], now)?.session.id).toBe(SESSION_ID);
+    expect(pickCard([spont], now)?.session.id).toBe(spont.id);
+  });
+
+  it('eine spontane Session verschwindet nach 2 Stunden von der Karte', () => {
+    const spont = spontaneous('2026-11-04T06:00:00Z');
+    expect(pickCard([spont], Date.parse('2026-11-04T07:59:00Z'))).not.toBeNull();
+    expect(pickCard([spont], Date.parse('2026-11-04T08:01:00Z'))).toBeNull();
+  });
+
+  it('vergessene aktive Session ohne bereite andere bleibt die Karte', () => {
+    const old = planned({
+      state: 'laeuft',
+      started_at: '2026-11-04T05:00:00Z',
+      planned_ends_at: '2026-11-04T06:30:00Z',
+    });
+    const pick = pickCard([old, SECOND], Date.parse('2026-11-04T07:10:00Z'));
+    expect(pick?.session.id).toBe(old.id);
+    expect(pick?.previousRunning).toBeNull();
+  });
+});
+
+describe('Fake-Core gleicht dem echten Core', () => {
+  async function post(path: string, body: unknown = {}) {
+    const res = await fetch(`/api/v1${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: (await res.json()) as { session?: { state: string } } };
+  }
+
+  it('Start auf pausiert: 200 ohne Änderung; auf verpasst nach Terminende: 409; weich gelöscht: 404', async () => {
+    setNow('2026-11-04T09:00:00Z'); // nach dem Terminende
+    core = installCalendarCore({
+      semesters: [makeSemester()],
+      modules: [DBS],
+      sessions: [
+        planned({ state: 'pausiert', started_at: '2026-11-04T07:15:00Z' }),
+        makeSession({ id: 'v', state: 'verpasst', started_at: null, planned_ends_at: EVENT_DBS.ends_at }),
+        makeSession({ id: 'g', state: 'bereit', started_at: null, deleted_at: '2026-11-04T08:00:00Z' }),
+      ],
+    });
+    const paused = await post(`/sessions/${SESSION_ID}/start`, { started_from: 'mac' });
+    expect(paused.status).toBe(200);
+    expect(paused.body.session?.state).toBe('pausiert');
+    expect((await post('/sessions/v/start', { started_from: 'mac' })).status).toBe(409);
+    expect((await post('/sessions/g/start', { started_from: 'mac' })).status).toBe(404);
   });
 });

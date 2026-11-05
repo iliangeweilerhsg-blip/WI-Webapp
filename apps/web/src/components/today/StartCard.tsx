@@ -4,7 +4,7 @@
 // Kein Dialog zwischen Tipp und laufender Session. Fehler stehen ruhig in der Karte.
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@sg/shared';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import { moduleHref } from '../../lib/nav.ts';
@@ -16,7 +16,6 @@ import {
   startSession,
   stopSession,
 } from '../../lib/sessions.ts';
-import { useToast } from '../../lib/toast.tsx';
 import { moduleColorVar } from '../../lib/modules.ts';
 import { useNow } from './use-today.ts';
 import {
@@ -30,12 +29,12 @@ import {
 } from './model.ts';
 
 const primary =
-  'inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-6 py-2 text-md font-medium text-accent-contrast disabled:opacity-50';
+  'inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-6 py-2 text-md font-medium text-accent-contrast aria-disabled:opacity-50';
 const secondary =
-  'inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong px-4 py-2 text-md hover:bg-surface-raised disabled:opacity-50';
+  'inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong px-4 py-2 text-md hover:bg-surface-raised aria-disabled:opacity-50';
 
 const ghost =
-  'inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2 text-md text-text-muted underline-offset-4 hover:bg-surface-raised hover:text-text hover:underline disabled:opacity-50';
+  'inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2 text-md text-text-muted underline-offset-4 hover:bg-surface-raised hover:text-text hover:underline aria-disabled:opacity-50';
 
 type Action = 'start' | 'pause' | 'resume' | 'stop';
 
@@ -63,22 +62,43 @@ function Elapsed({ since }: { since: number }) {
 export interface StartCardProps {
   entry: TodayEntry;
   now: number;
+  /** Eine vergessene aktive Session läuft noch; der Core beendet sie beim Start (§9.1) */
+  previousRunning?: boolean;
   /** Neue Fassung der Session aus einer Antwort des Core übernehmen */
   onSession: (session: Session) => void;
   /** Liste neu laden (z. B. nach `session_transition_invalid`) */
   onRefetch: () => void;
 }
 
-export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) {
+export function StartCard({ entry, now, previousRunning = false, onSession, onRefetch }: StartCardProps) {
   const session = entry.session;
   const router = useRouter();
-  const toast = useToast();
   const [busy, setBusy] = useState<Action | null>(null);
+  // Doppel-Tipp im selben Render-Takt abfangen (der Zustand `busy` kommt erst im nächsten)
+  const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  const [ended, setEnded] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const hadFocus = useRef(false);
+  const stateAtRun = useRef<string | null>(null);
 
   const state = session ? cardState(session, now) : null;
   // Eine neue Lage macht die alte Fehlermeldung hinfällig
   useEffect(() => setError(null), [session?.id, session?.state]);
+  useEffect(() => setEnded(false), [session?.id]);
+  // Verschwindet der Knopf, der den Fokus hatte (z. B. „Start“), geht der Fokus auf die Überschrift der Karte
+  useEffect(() => {
+    if (busy !== null || !hadFocus.current) return;
+    const active = document.activeElement;
+    if (!active || active === document.body) {
+      headingRef.current?.focus();
+      hadFocus.current = false;
+    } else if (session?.state !== stateAtRun.current) {
+      hadFocus.current = false; // der Fokus ist noch auf einem Knopf der Karte
+    }
+    // sonst: Die neue Fassung der Session ist noch nicht angekommen, nächster Durchlauf
+  }, [busy, session?.state]);
   if (!session || !state) return null;
 
   const plannedStart = session.planned_starts_at ? Date.parse(session.planned_starts_at) : null;
@@ -96,7 +116,10 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
       : null;
 
   async function run(action: Action) {
-    if (!session || busy) return;
+    if (!session || busyRef.current) return;
+    busyRef.current = true;
+    hadFocus.current = cardRef.current?.contains(document.activeElement) ?? false;
+    stateAtRun.current = session.state;
     setBusy(action);
     setError(null);
     try {
@@ -105,7 +128,7 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
         onSession(result.session);
         if (result.ended_session) {
           onSession(result.ended_session);
-          toast.show({ message: 'Die vorherige Session wurde beendet.' });
+          setEnded(true);
         }
         // F-SES-02: Das Live-Dashboard öffnet sich mit dem Start. Erst, wenn die Route existiert (T1-04, siehe Schalter)
         if (isDashboardAvailable()) router.push(sessionHref(session.id));
@@ -119,6 +142,7 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
             : await stopSession(session.id);
       onSession(updated);
     } catch (cause) {
+      hadFocus.current = false;
       setError(friendlyMessage(cause));
       // Der Zustand im Core ist ein anderer als gedacht: Ansicht auffrischen
       if (
@@ -130,6 +154,7 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
         onRefetch();
       }
     } finally {
+      busyRef.current = false;
       setBusy(null);
     }
   }
@@ -144,6 +169,7 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
   const titleId = `start-card-${session.id}`;
   return (
     <section
+      ref={cardRef}
       aria-labelledby={titleId}
       data-state={state}
       className={`rounded-lg border bg-surface ${big ? 'border-border-strong px-4 py-5 sm:px-6' : 'border-border px-4 py-4'}`}
@@ -159,7 +185,12 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
 
       <div className="mt-2 flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
         <div className="min-w-0 flex-1 basis-60">
-          <h2 id={titleId} className={`${big ? 'text-xl' : 'text-lg'} flex items-center gap-2 font-semibold`}>
+          <h2
+            id={titleId}
+            ref={headingRef}
+            tabIndex={-1}
+            className={`${big ? 'text-xl' : 'text-lg'} flex items-center gap-2 font-semibold outline-offset-4`}
+          >
             {entry.module ? (
               <span
                 aria-hidden="true"
@@ -175,6 +206,14 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
           <p className="mt-2 text-md">
             {detail(state, { now, startsInMs, plannedStart, startedAt, session })}
           </p>
+          {previousRunning && canStart ? (
+            <p className="mt-1 text-sm text-text-muted">
+              Vorherige Vorlesung läuft noch und wird beim Start beendet.
+            </p>
+          ) : null}
+          {ended ? (
+            <p className="mt-1 text-sm text-text-muted">Die vorherige Session wurde beendet.</p>
+          ) : null}
           {state === 'laeuft' && startedAt !== null ? (
             <p className="mt-1 text-lg">
               <span className="sr-only">Dauer seit Start </span>
@@ -188,12 +227,12 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
             <button
               type="button"
               className={state === 'bereit' ? primary : secondary}
-              disabled={busy !== null}
+              aria-disabled={busy !== null}
               aria-busy={busy === 'start'}
               onClick={() => void run('start')}
             >
               {busy === 'start'
-                ? 'Startet …'
+                ? 'Wird gestartet …'
                 : state === 'bevorstehend'
                   ? 'Früher starten'
                   : earlyReady
@@ -203,31 +242,34 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
           ) : null}
           {state === 'laeuft' || state === 'pausiert' ? (
             <>
-              <Link href={sessionHref(session.id)} className={primary}>
-                Zur Vorlesung
-              </Link>
+              {/* Der Link erst, wenn die Route existiert (T1-04, siehe `SESSION_DASHBOARD_AVAILABLE`) */}
+              {isDashboardAvailable() ? (
+                <Link href={sessionHref(session.id)} className={state === 'laeuft' ? primary : secondary}>
+                  Zur Vorlesung
+                </Link>
+              ) : null}
               <button
                 type="button"
-                className={secondary}
-                disabled={busy !== null}
+                className={state === 'pausiert' ? primary : secondary}
+                aria-disabled={busy !== null}
                 onClick={() => void run(state === 'laeuft' ? 'pause' : 'resume')}
               >
                 {state === 'laeuft'
                   ? busy === 'pause'
-                    ? 'Pausiert …'
+                    ? 'Wird pausiert …'
                     : 'Pause'
                   : busy === 'resume'
-                    ? 'Setzt fort …'
+                    ? 'Wird fortgesetzt …'
                     : 'Fortsetzen'}
               </button>
               {/* Mit Abstand und ohne Rahmen, damit „Beenden“ nicht versehentlich statt „Pause“ getroffen wird */}
               <button
                 type="button"
                 className={`${ghost} ml-4 sm:ml-8`}
-                disabled={busy !== null}
+                aria-disabled={busy !== null}
                 onClick={() => void run('stop')}
               >
-                {busy === 'stop' ? 'Beende …' : 'Beenden'}
+                {busy === 'stop' ? 'Wird beendet …' : 'Beenden'}
               </button>
             </>
           ) : null}
