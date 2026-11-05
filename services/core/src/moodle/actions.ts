@@ -232,13 +232,19 @@ const completionSet: MoodleActionHandler<MoodleActionParamsMap['completion.set']
     };
   },
   async execute(ctx, params) {
-    const response = await ctx.client.write<{ status?: unknown }>(
+    // Antwort nicht blind vertrauen: `null` oder ein Nicht-Objekt von Moodle darf nicht zum 500 führen
+    const response = await ctx.client.write<{ status?: unknown } | null | undefined>(
       'core_completion_update_activity_completion_status_manually',
       { cmid: params.cmid, completed: params.completed },
     );
+    const status = response?.status === true;
     return {
-      summary: params.completed ? 'Als erledigt markiert.' : 'Als nicht erledigt markiert.',
-      result: { status: response.status === true },
+      summary: !status
+        ? 'Moodle hat die Änderung nicht bestätigt.'
+        : params.completed
+          ? 'Als erledigt markiert.'
+          : 'Als nicht erledigt markiert.',
+      result: { status },
     };
   },
 };
@@ -251,9 +257,12 @@ const notificationsMarkRead: MoodleActionHandler<MoodleActionParamsMap['notifica
     const response = await ctx.client.write<unknown>('core_message_mark_all_notifications_as_read', {
       useridto: await ctx.userId(),
     });
+    const done = response === true;
     return {
-      summary: 'Alle Benachrichtigungen sind als gelesen markiert.',
-      result: { done: response === true },
+      summary: done
+        ? 'Alle Benachrichtigungen sind als gelesen markiert.'
+        : 'Moodle hat die Änderung nicht bestätigt.',
+      result: { done },
     };
   },
 };

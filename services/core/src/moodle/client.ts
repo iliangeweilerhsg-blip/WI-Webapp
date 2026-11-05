@@ -47,6 +47,10 @@ export interface MoodleDownload {
   stream: Readable;
   contentType: string;
   contentLength: number | null;
+  /**
+   * Bereinigt mit `sanitizeFilename`, ohne Pfad und Steuerzeichen. Nicht roh in einen Header
+   * einsetzen. Ausgabe nur als `filename*=UTF-8''<RFC-5987-kodiert>` plus ASCII-Ersatz.
+   */
   filename: string | null;
 }
 
@@ -88,8 +92,29 @@ export function moodleNotConfigured(): HttpError {
 }
 
 /**
+ * Formularfelder, die nur `call()` selbst setzt. Kein Parameter darf sie überschreiben (auch nicht
+ * verschachtelt): PHP nimmt bei doppelten Feldern das letzte Vorkommen.
+ */
+export const RESERVED_FIELDS: ReadonlySet<string> = new Set(['wstoken', 'wsfunction', 'moodlewsrestformat']);
+
+/**
+ * Erlaubte Schlüssel in Parametern. Moodle-Parameter sind immer Bezeichner. Alles andere könnte die
+ * Klammerschreibweise aufbrechen (`a]`, `wstoken[x]`) oder von PHP umgedeutet werden (` wstoken`).
+ */
+const PARAM_KEY = /^[A-Za-z0-9_]+$/;
+
+function checkParamKey(key: string): void {
+  if (!PARAM_KEY.test(key) || RESERVED_FIELDS.has(key.toLowerCase())) {
+    // Programmierfehler im Core, kein Fehler der Nutzerin: darum kein HttpError
+    throw new Error(`Unzulässiger Moodle-Parameter ${JSON.stringify(key)}`);
+  }
+}
+
+/**
  * Wandelt verschachtelte Parameter in Moodles Formularschreibweise um:
  * `{ a: [{ b: 1 }], c: true }` → `a[0][b]=1`, `c=1`.
+ * Wirft bei reservierten Feldern (`RESERVED_FIELDS`) und bei Schlüsseln, die keine Bezeichner sind,
+ * auf jeder Ebene.
  */
 export function flattenParams(params: MoodleParams): [string, string][] {
   const out: [string, string][] = [];
@@ -99,6 +124,7 @@ export function flattenParams(params: MoodleParams): [string, string][] {
       value.forEach((item: MoodleParamValue, index) => walk(`${prefix}[${index}]`, item));
     } else if (typeof value === 'object') {
       for (const [key, item] of Object.entries(value as Record<string, MoodleParamValue>)) {
+        checkParamKey(key);
         walk(`${prefix}[${key}]`, item);
       }
     } else if (typeof value === 'boolean') {
@@ -108,7 +134,10 @@ export function flattenParams(params: MoodleParams): [string, string][] {
     }
   };
   // Oberste Ebene ohne eckige Klammern um den Schlüssel
-  for (const [key, value] of Object.entries(params)) walk(key, value);
+  for (const [key, value] of Object.entries(params)) {
+    checkParamKey(key);
+    walk(key, value);
+  }
   return out;
 }
 
@@ -242,18 +271,57 @@ function isMoodleException(value: unknown): value is MoodleException {
   );
 }
 
-function filenameFrom(disposition: string | null): string | null {
+/**
+ * Steuerzeichen, die nie in einen Dateinamen gehören: C0, DEL, C1 sowie unsichtbare Format- und
+ * Richtungszeichen (z. B. U+202E, das `fdp.exe` als `exe.pdf` anzeigt): weiches Trennzeichen U+00AD,
+ * arabisches Richtungszeichen U+061C, mongolischer Vokaltrenner U+180E, U+200B–200F, U+2028–202E,
+ * U+2060–2064, U+2066–206F, BOM U+FEFF und die Interlinear-Zeichen U+FFF9–FFFB.
+ */
+const FILENAME_CONTROL =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]/g;
+
+/** Unter Windows und macOS unzulässige Zeichen (Zeichenliste wie 08 §8.1), werden zu `_` */
+const FILENAME_RESERVED = /["<>|:*?]/g;
+
+/**
+ * Macht aus einem Dateinamen von Moodle einen reinen Namen ohne Pfad: Steuerzeichen raus, nur der
+ * Teil nach dem letzten `/` oder `\`, führende Punkte und Leerzeichen raus (also nie `.`/`..`),
+ * `" < > | : * ?` werden zu `_`. Bleibt nichts übrig: null.
+ *
+ * Der Name kann weiter `;`, `%`, `'` und Zeichen über U+00FF enthalten. Nicht roh in einen Header
+ * einsetzen. Ausgabe nur als `filename*=UTF-8''<RFC-5987-kodiert>` plus ASCII-Ersatz.
+ */
+export function sanitizeFilename(raw: string): string | null {
+  const withoutControls = raw.replace(FILENAME_CONTROL, '');
+  const base = withoutControls.split(/[/\\]/).pop() ?? '';
+  const name = base
+    .replace(/^[.\s]+/, '')
+    .trimEnd()
+    .replace(FILENAME_RESERVED, '_');
+  return name === '' ? null : name;
+}
+
+/**
+ * Dateiname aus `Content-Disposition` (RFC 6266). `filename*` (RFC 5987) hat Vorrang, sonst
+ * `filename`. Das Ergebnis ist immer mit `sanitizeFilename` bereinigt (Hinweis 1 aus #93).
+ */
+export function filenameFrom(disposition: string | null): string | null {
   if (!disposition) return null;
-  const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(disposition);
+  const star = /filename\*\s*=\s*([^;]+)/i.exec(disposition);
   if (star?.[1]) {
+    const value = star[1].trim().replace(/^"|"$/g, '');
+    // charset'sprache'wert, z. B. UTF-8''Skript%20A.pdf oder UTF-8'de'…
+    const encoded = /^[^']*'[^']*'(.*)$/.exec(value)?.[1] ?? value;
     try {
-      return decodeURIComponent(star[1].trim().replace(/^"|"$/g, ''));
+      const name = sanitizeFilename(decodeURIComponent(encoded));
+      if (name !== null) return name;
     } catch {
-      // weiter mit filename=
+      // ungültige Kodierung: weiter mit filename=
     }
   }
-  const plain = /filename="?([^";]+)"?/i.exec(disposition);
-  return plain?.[1] ?? null;
+  const plain = /(?:^|;)\s*filename\s*=\s*"?([^";]*)"?/i.exec(disposition);
+  return plain?.[1] ? sanitizeFilename(plain[1]) : null;
 }
 
 /** Weiterleitung oder (im Browser) undurchsichtige Weiterleitung */
@@ -334,10 +402,12 @@ export class MoodleClient {
   private async call<T>(wsfunction: string, params: MoodleParams, write: boolean): Promise<T> {
     const token = await this.requireToken();
     const body = new URLSearchParams([
+      ...flattenParams(params),
+      // Reservierte Felder zuletzt: PHP nimmt bei doppelten Feldern das letzte Vorkommen. Zusammen mit
+      // der Prüfung in flattenParams kann kein Parameter Token, Funktion oder Format überschreiben.
       ['wstoken', token],
       ['wsfunction', wsfunction],
       ['moodlewsrestformat', 'json'],
-      ...flattenParams(params),
     ]).toString();
 
     const data = await this.withRetries(wsfunction, write, async () => {

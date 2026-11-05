@@ -203,6 +203,8 @@ export interface FakeCore {
   streamOpId: string | null;
   /** Die nächste Anfrage an eine Session-Aktion wird mit diesem Fehler abgelehnt */
   rejectNextSession: null | { status: number; code: string };
+  /** Lässt das nächste `POST /sessions` (Anlegen) mit diesem Fehler scheitern */
+  rejectNextCreate: null | { status: number; code: string };
   requests: RecordedRequest[];
   /** Der nächste Upload scheitert wie bei einer abgerissenen Verbindung; `after` = der Core hat ihn davor verarbeitet */
   failNextUpload: null | 'before' | 'after';
@@ -300,6 +302,7 @@ export function installFakeCore(
     streamSeq: 0,
     streamOpId: null,
     rejectNextSession: null,
+    rejectNextCreate: null,
     requests: [],
     failNextUpload: null,
     rejectNextUpload: null,
@@ -503,6 +506,34 @@ export function installFakeCore(
         return json({ items, next_cursor: null });
       }
 
+      // POST /sessions (§7.2): spontane Session im Zustand `bereit`
+      if (path === '/sessions' && method === 'POST') {
+        if (core.rejectNextCreate) {
+          const { status, code } = core.rejectNextCreate;
+          core.rejectNextCreate = null;
+          return json({ error: { code, message: 'x' } }, status);
+        }
+        const moduleId = body?.module_id as string | undefined;
+        if (!core.modules.some((m) => m.id === moduleId && !m.deleted_at)) {
+          return json({ error: { code: 'module_not_found', message: 'x' } }, 404);
+        }
+        const id = (body?.id as string | undefined) ?? crypto.randomUUID();
+        if (core.sessions.some((x) => x.id === id)) {
+          return json({ error: { code: 'session_exists', message: 'x' } }, 409);
+        }
+        const stamp = new Date().toISOString();
+        const created = makeSession({
+          id,
+          module_id: moduleId as string,
+          state: 'bereit',
+          started_at: null,
+          created_at: stamp,
+          updated_at: stamp,
+        });
+        core.sessions.push(created);
+        return json(created, 201);
+      }
+
       // GET /sessions/{id}/snapshot (§7.2)
       const snapshotOne = /^\/sessions\/([^/]+)\/snapshot$/.exec(path);
       if (snapshotOne && method === 'GET') {
@@ -537,6 +568,17 @@ export function installFakeCore(
         return found
           ? json(structuredClone(found))
           : json({ error: { code: 'calendar_event_not_found', message: 'x' } }, 404);
+      }
+
+      // DELETE /sessions/{id} (§7.2): weich löschen; 409 `session_active`, wenn sie läuft oder pausiert
+      if (sessionOne && method === 'DELETE') {
+        const found = core.sessions.find((x) => x.id === sessionOne[1] && !x.deleted_at);
+        if (!found) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        if (found.state === 'laeuft' || found.state === 'pausiert') {
+          return json({ error: { code: 'session_active', message: 'x' } }, 409);
+        }
+        found.deleted_at = new Date().toISOString();
+        return new Response(null, { status: 204 });
       }
 
       // GET /notebooks?module_id (§7.4)
