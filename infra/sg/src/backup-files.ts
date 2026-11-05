@@ -127,7 +127,8 @@ export interface CopyStats {
 
 /** Namen, die nie ins Backup gehören: halbe Uploads und Zwischenordner */
 export function skipped(name: string): boolean {
-  return name.endsWith('.part') || name === '.tmp' || name === '.DS_Store';
+  // `*.partial`: ein halber Stand (zweite Schutzlinie, falls ein Ziel doch im Quellbaum liegt)
+  return name.endsWith('.part') || name.endsWith('.partial') || name === '.tmp' || name === '.DS_Store';
 }
 
 /**

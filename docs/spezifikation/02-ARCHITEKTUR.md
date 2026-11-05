@@ -30,7 +30,7 @@
 │  │ Datenordner ~/StudienGehirn/                   │◄─┤                      │ │
 │  │ media/ (PDF, Folienbilder, Audio, Fotos, Video)│  └──────────┬───────────┘ │
 │  │ vault/ (Markdown, Obsidian-kompatibel)         │             │             │
-│  │ backups/                                       │             │ HTTPS       │
+│  │                                                │             │ HTTPS       │
 │  └───────────────────────────────────────────────┘             ▼             │
 └────────────────────────────────────────────── Cloud-KI (optional, abschaltbar)┘
                                                   Claude API · ggf. Whisper/TTS-API
