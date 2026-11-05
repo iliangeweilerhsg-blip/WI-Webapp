@@ -42,6 +42,7 @@ import { uuidv7 } from '../lib/uuid7.ts';
 import { appendOp } from '../sync/append.ts';
 import { publishAfterCommit, publishEvent } from '../sync/events.ts';
 import { autoStopBoundary, autoStopReason, type AutoStopLimits, type AutoStopSession } from './auto-stop.ts';
+import { ensurePipelineJobs } from './pipeline.ts';
 import { ensureFinalizeOnStop } from './recordings.ts';
 import { getSettings } from './settings.ts';
 import { softDelete } from './trash.ts';
@@ -235,6 +236,7 @@ async function appendServerOp(
 
 /**
  * Session beenden: Server-Operation (`serverOp`), Jobs über `ensureFinalizeOnStop` (T1-06, je Aufnahme in ID-Reihenfolge),
+ * danach die Kette `transcribe`/`align.log` über `ensurePipelineJobs` (T2-02b, §18.2),
  * Zeile aktualisieren, Ereignis senden. `ended_at` ist nie vor `started_at`.
  * Sperrreihenfolge (§16.2): Session-Zeile (`FOR NO KEY UPDATE`) → `sync_stream` → `lockRecording` → Job-Zeilen.
  * Zielzustand: `beendet`, solange danach ein Job der Session in `wartet`/`laeuft` ist, sonst gleich `verarbeitet`
@@ -257,6 +259,21 @@ async function finishSession(
     .where(and(eq(recording.sessionId, row.id), notDeleted(recording)))
     .orderBy(asc(recording.id));
   for (const rec of recordings) await ensureFinalizeOnStop(tx, rec.id, now);
+  // Kette nach dem Stopp (§18.2): nur mit Audio, d. h. mit mindestens einem `audio.finalize`-Job in wartet/laeuft/fertig.
+  // Ohne Audio bleibt es bei `verarbeitet`. Das `session.updated` sendet diese Funktion unten selbst.
+  const [withAudio] = await tx
+    .select({ id: job.id })
+    .from(job)
+    .where(
+      and(
+        eq(job.sessionId, row.id),
+        eq(job.type, 'audio.finalize'),
+        inArray(job.state, ['wartet', 'laeuft', 'fertig']),
+        notDeleted(job),
+      ),
+    )
+    .limit(1);
+  if (withAudio) await ensurePipelineJobs(tx, row.id, { fromStep: 'transcribe', force: false, emit: false });
   const [pending] = await tx
     .select({ id: job.id })
     .from(job)

@@ -33,6 +33,7 @@ import { sessionRoutes } from './routes/sessions.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { systemRoutes } from './routes/system.ts';
 import { trashRoutes } from './routes/trash.ts';
+import { transcriptRoutes } from './routes/transcript.ts';
 import { LastSeenTracker, verifyDeviceToken } from './services/devices.ts';
 import { pickPairingHost } from './services/discovery.ts';
 import { PairingManager } from './services/pairing.ts';
@@ -182,6 +183,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(calendarRoutes, { db });
       await api.register(inkRoutes, { db, config });
       await api.register(recordingRoutes, { db, config });
+      await api.register(transcriptRoutes, { db });
       await api.register(backupRoutes, { db, config });
       await api.register(trashRoutes, { db, config });
       await api.register(settingsRoutes, { db, config });
