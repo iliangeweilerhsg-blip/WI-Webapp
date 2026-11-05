@@ -8,7 +8,7 @@
 //   (`<db>_vor_restore_<zeit>`, `media.vor-restore-<zeit>`), nichts wird gelöscht. Backup-Hardlinks werden nie
 //   übernommen: Der Datenordner bekommt echte Kopien, sonst würden spätere Änderungen den Stand verändern.
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   copyTree,
   DUMP_FILE,
@@ -21,6 +21,7 @@ import {
 } from './backup-files.ts';
 import { COUNT_TABLES, countObjects, errorText, readBackupSettings, type BackupIo } from './backup.ts';
 import type { SgConfig } from './config.ts';
+import { NoFollowReader, UnsafeTargetError } from './nofollow.ts';
 import { safeIdent, type PgAccess } from './pg.ts';
 import { StandError, withVerifiedDump } from './staging.ts';
 
@@ -110,10 +111,54 @@ export function withStandDump<T>(
   return withVerifiedDump(deps.cfg.dataDir, join(dir, DUMP_FILE), manifest.dump.sha256, manifest.stand, fn);
 }
 
-/** Dateianzahl und Größen des Standes gegen das Manifest (.DS_Store u. Ä. zählen auf beiden Seiten nie) */
+/** Ein Verstoß beim Lesen des Standes (Symlink, Sonderdatei, Tausch) ist ein beschädigter Stand */
+function asStandError<T>(dir: string, fn: () => T): T {
+  try {
+    return fn();
+  } catch (error) {
+    if (error instanceof UnsafeTargetError) {
+      throw new StandError(
+        'beschaedigt',
+        `Im Stand ${basename(dir)} liegt ein Symlink oder eine Sonderdatei, oder es wurde während des Lesens etwas ausgetauscht (${error.message}). Der Stand ist beschädigt.`,
+      );
+    }
+    throw error;
+  }
+}
+
+export interface StandTree {
+  reader: NoFollowReader;
+  media: string | null;
+  vault: string | null;
+}
+
+/**
+ * Stand im Ziel verankert öffnen (#119): Der Stand-Ordner, `media/` und `vault/` werden ohne Symlink-Folgen betreten
+ * (`NoFollowReader`). Ein Symlink an ihrer Stelle oder darunter ergibt `StandError('beschaedigt')`.
+ */
+export function openStandTree(dir: string): StandTree {
+  return asStandError(dir, () => {
+    const reader = new NoFollowReader();
+    const parent = dirname(dir);
+    reader.adopt(parent);
+    const standDir = reader.child(parent, basename(dir));
+    if (!standDir) throw new UnsafeTargetError(`${dir} fehlt.`);
+    return { reader, media: reader.child(standDir, 'media'), vault: reader.child(standDir, 'vault') };
+  });
+}
+
+/**
+ * Dateianzahl und Größen des Standes gegen das Manifest (.DS_Store u. Ä. zählen auf beiden Seiten nie). Gelesen wird
+ * verankert ohne Symlink-Folgen; ein Symlink im Stand ergibt `StandError('beschaedigt')`.
+ */
 export function standFilesMatch(dir: string, manifest: Manifest): boolean {
-  const media = existsSync(join(dir, 'media')) ? treeSize(join(dir, 'media')) : { files: 0, bytes: 0 };
-  const vault = existsSync(join(dir, 'vault')) ? treeSize(join(dir, 'vault')) : { files: 0, bytes: 0 };
+  const tree = openStandTree(dir);
+  const size = (path: string | null) =>
+    path
+      ? asStandError(dir, () => treeSize(path, { reader: tree.reader, strict: true }))
+      : { files: 0, bytes: 0 };
+  const media = size(tree.media);
+  const vault = size(tree.vault);
   return (
     media.files === manifest.media.files &&
     media.bytes === manifest.media.bytes &&
@@ -377,6 +422,8 @@ async function fullRestore(
   const live = safeIdent(pg.database);
   const fresh = safeIdent(`${live}_restore_${stamp}`);
   const old = safeIdent(`${live}_vor_restore_${stamp}`);
+  // media/ und vault/ des Standes verankert, ohne Symlink-Folgen (#119)
+  const tree = openStandTree(dir);
   const journal: RestoreJournal = {
     version: 1,
     stand: manifest.stand,
@@ -385,7 +432,7 @@ async function fullRestore(
     old,
     phase: 'preparing',
     dirs: (['media', 'vault'] as const)
-      .filter((name) => existsSync(join(dir, name)))
+      .filter((name) => tree[name] !== null)
       .map((name) => ({
         name,
         staged: join(cfg.dataDir, `${name}.neu-${stamp}`),
@@ -394,13 +441,13 @@ async function fullRestore(
       })),
   };
   for (const name of ['media', 'vault'] as const) {
-    if (!existsSync(join(dir, name))) {
+    if (tree[name] === null) {
       log(`Der Stand enthält kein ${name}/. Das aktuelle ${name}/ bleibt unverändert.`);
     }
   }
   // Erst die Kopie des Dumps prüfen (Prüfsumme über dieselben Bytes, die `pg_restore` liest), dann ändern
   return withStandDump(deps, dir, manifest, (verifiedDump) =>
-    swapIn(deps, dir, manifest, journal, stamp, live, fresh, old, verifiedDump),
+    swapIn(deps, dir, manifest, journal, stamp, live, fresh, old, verifiedDump, tree),
   );
 }
 
@@ -414,6 +461,7 @@ async function swapIn(
   fresh: string,
   old: string,
   verifiedDump: string,
+  tree: StandTree,
 ): Promise<number> {
   const { cfg, pg, log, err } = deps;
   // Das Journal steht vor der ersten Änderung: Bricht der Prozess ab, räumt der nächste Start auf
@@ -449,7 +497,12 @@ async function swapIn(
 
     for (const d of journal.dirs) {
       log(`Kopiere ${d.name}/ aus dem Stand …`);
-      copyTree(join(dir, d.name), d.staged, null); // ohne vorigen Stand: echte Kopien, keine Hardlinks ins Backup
+      // Ohne vorigen Stand: echte Kopien, keine Hardlinks ins Backup. Die Quelle wird verankert gelesen, ein Symlink
+      // oder ein Tausch im Stand bricht ab (#119)
+      const source = tree[d.name] as string;
+      asStandError(dir, () =>
+        copyTree(source, d.staged, null, undefined, { reader: tree.reader, strictSource: true }),
+      );
     }
 
     journal.phase = 'swapping';
