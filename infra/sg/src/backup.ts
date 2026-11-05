@@ -36,6 +36,7 @@ import {
 } from './backup-files.ts';
 import type { SgConfig } from './config.ts';
 import { scrubSecrets, type PgAccess } from './pg.ts';
+import { copyAndHash, makePrivateDir } from './staging.ts';
 
 export const BACKUP_TRIGGERS = ['zeitplan', 'manuell', 'vor_migration'] as const;
 export type BackupTrigger = (typeof BACKUP_TRIGGERS)[number];
@@ -162,6 +163,19 @@ export async function migrationCount(pg: PgAccess, db?: string): Promise<number 
   return Number(n?.[0] ?? 0);
 }
 
+/** Läuft gerade ein Restore-Test? (Schlüssel `restore_test`, älter als 2 Stunden gilt als abgestürzt, wie im Core) */
+export async function restoreTestActive(pg: PgAccess): Promise<boolean> {
+  const rows = await pg.query(
+    `SELECT count(*) FROM setting
+      WHERE key = 'restore_test' AND deleted_at IS NULL AND value->>'state' = 'laeuft'
+        AND (value->>'started_at')::timestamptz > now() - interval '2 hours'`,
+  );
+  return Number(rows[0]?.[0] ?? 0) > 0;
+}
+
+export const RESTORE_TEST_RUNNING_MESSAGE =
+  'Es läuft gerade ein Restore-Test. Backup und Restore-Test laufen nie gleichzeitig (das Ausdünnen könnte den getesteten Stand löschen). Versuche es in ein paar Minuten erneut.';
+
 /** Läufe im Zustand `laeuft`, die älter als 6 Stunden sind, gelten als abgestürzt */
 async function markStaleRuns(pg: PgAccess): Promise<void> {
   await pg.query(
@@ -223,6 +237,12 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
 
   try {
     await markStaleRuns(pg);
+    if (await restoreTestActive(pg)) {
+      // Mit Zeile vom Core: als Fehler eintragen, damit „läuft“ nicht stehen bleibt
+      if (runId) return await fail(RESTORE_TEST_RUNNING_MESSAGE, 4);
+      err(RESTORE_TEST_RUNNING_MESSAGE);
+      return 4;
+    }
     if (!options.runId && (await otherRunActive(pg, null))) {
       err('Es läuft bereits ein Backup.');
       return 4;
@@ -272,11 +292,12 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       log(`Backup ${stand} nach ${target} (${options.trigger}) …`);
 
       log('Sichere die Datenbank (pg_dump) …');
+      // Der Dump entsteht in einem privaten Ordner, nicht im Ziel: Dort kann ihn niemand austauschen, während
+      // `pg_dump` schreibt. Die Prüfsumme (`dump_sha256`, Manifest) entsteht aus genau diesen Bytes. Das Ziel
+      // bekommt nur eine Kopie; wird sie dort verändert, stimmt die Prüfsumme nicht mehr und der Stand wird
+      // nie eingespielt (VERTRAEGE §13).
       const dumpFile = join(partial, DUMP_FILE);
-      await pg.dump(dumpFile);
-      const dumpBytes = statSync(dumpFile).size;
-      if (dumpBytes === 0) throw new Error('pg_dump hat keine Daten geliefert.');
-      const dumpSha = await sha256File(dumpFile);
+      const { bytes: dumpBytes, sha: dumpSha } = await dumpPrivately(deps, dumpFile);
       const counts = await countObjects(pg);
       const [version] = await pg.query(`SHOW server_version`);
       const migrations = await migrationCount(pg);
@@ -314,9 +335,9 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       if (runId) {
         await pg.query(
           `UPDATE backup_run SET state = 'fertig', finished_at = now(), updated_at = now(), error = NULL,
-                  size_bytes = :'size'::bigint, stand = :'stand'
+                  size_bytes = :'size'::bigint, stand = :'stand', dump_sha256 = :'sha'
             WHERE id = :'id'::uuid`,
-          { id: runId, size: String(size), stand },
+          { id: runId, size: String(size), stand, sha: dumpSha },
         );
       }
       log(`Backup ${stand} fertig (${size} Bytes).`);
@@ -334,6 +355,28 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     return 0;
   } catch (error) {
     return fail(errorText(error, cfg), 1);
+  }
+}
+
+/**
+ * `pg_dump` in einen privaten Ordner (0700 im Datenordner), dabei Prüfsumme bilden, dann ins Ziel kopieren.
+ * Der private Ordner wird immer gelöscht.
+ */
+async function dumpPrivately(
+  deps: Pick<BackupDeps, 'cfg' | 'pg'>,
+  destination: string,
+): Promise<{ bytes: number; sha: string }> {
+  const dir = makePrivateDir(deps.cfg.dataDir, 'backup');
+  try {
+    const privateDump = join(dir, DUMP_FILE);
+    await deps.pg.dump(privateDump);
+    const bytes = statSync(privateDump).size;
+    if (bytes === 0) throw new Error('pg_dump hat keine Daten geliefert.');
+    // Eine Lesung: die Kopie ins Ziel und ihre Prüfsumme stammen aus denselben Bytes
+    const sha = await copyAndHash(privateDump, destination);
+    return { bytes, sha };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 

@@ -15,6 +15,7 @@ import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage } from '../lib
 import { BACKUP_LOCK_KEY } from '../lib/locks.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { getSettings } from './settings.ts';
+import { getRestoreTest } from './restore-test.ts';
 
 type BackupRunRow = typeof backupRun.$inferSelect;
 export type BackupTrigger = BackupRun['trigger'];
@@ -109,6 +110,7 @@ export async function getBackupStatus(
     // Ohne erfolgreiches Backup gilt der Stand als veraltet, damit das Tagesbriefing zur Einrichtung rät
     stale: lastSuccess === null || now.getTime() - lastSuccess.getTime() > BACKUP_STALE_AFTER_MS,
     running: await isBackupRunning(db, now),
+    restore_test: await getRestoreTest(db, now),
   };
 }
 
@@ -162,13 +164,21 @@ async function markFailed(db: Db, runId: string, message: string): Promise<void>
     .where(and(eq(backupRun.id, runId), eq(backupRun.state, 'laeuft')));
 }
 
-/** Standard: `node infra/sg/src/main.ts backup …` im Hintergrund, Ausgabe nach `logs/backup.log` */
-const spawnCli: BackupLauncher = async ({ runId, trigger, config, db }) => {
+/**
+ * Startet die CLI im Hintergrund (Ausgabe nach `logs/<logFile>`). Rückkehr, sobald der Prozess läuft. Endet sie mit
+ * einem Fehlercode, ohne ihr Ergebnis geschrieben zu haben, ruft `onFailure` mit dem Exit-Code auf.
+ */
+export async function spawnSg(
+  config: BackupConfig,
+  args: string[],
+  logFile: string,
+  onFailure: (code: number | null) => void,
+): Promise<void> {
   const logDir = join(config.dataDir, 'logs');
   mkdirSync(logDir, { recursive: true });
-  const fd = openSync(join(logDir, 'backup.log'), 'a');
+  const fd = openSync(join(logDir, logFile), 'a');
   try {
-    const child = spawn(process.execPath, [CLI_ENTRY, 'backup', '--trigger', trigger, '--run-id', runId], {
+    const child = spawn(process.execPath, [CLI_ENTRY, ...args], {
       stdio: ['ignore', fd, fd],
       detached: true,
       env: {
@@ -184,16 +194,20 @@ const spawnCli: BackupLauncher = async ({ runId, trigger, config, db }) => {
     });
     // Beendet sich die CLI, ohne den Lauf abzuschließen (Absturz vor dem ersten Schreiben), nicht ewig „läuft“
     child.once('exit', (code) => {
-      if (code !== 0) {
-        const message = `Der Backup-Prozess endete mit Code ${code ?? 'unbekannt'} (siehe logs/backup.log).`;
-        void markFailed(db, runId, message).catch(() => {});
-      }
+      if (code !== 0) onFailure(code);
     });
     child.unref();
   } finally {
     closeSync(fd);
   }
-};
+}
+
+/** Standard: `node infra/sg/src/main.ts backup …` im Hintergrund, Ausgabe nach `logs/backup.log` */
+const spawnCli: BackupLauncher = async ({ runId, trigger, config, db }) =>
+  spawnSg(config, ['backup', '--trigger', trigger, '--run-id', runId], 'backup.log', (code) => {
+    const message = `Der Backup-Prozess endete mit Code ${code ?? 'unbekannt'} (siehe logs/backup.log).`;
+    void markFailed(db, runId, message).catch(() => {});
+  });
 
 let launcher: BackupLauncher = spawnCli;
 
@@ -224,6 +238,14 @@ export async function startBackup(
     }
     if (await isBackupRunning(tx, now)) {
       throw new HttpError(409, 'backup_running', 'Es läuft bereits ein Backup.');
+    }
+    // Backup und Restore-Test laufen nie gleichzeitig: das Ausdünnen könnte den getesteten Stand löschen
+    if ((await getRestoreTest(tx, now))?.state === 'laeuft') {
+      throw new HttpError(
+        409,
+        'restore_test_running',
+        'Es läuft gerade ein Restore-Test. Warte, bis er fertig ist, und starte das Backup dann erneut.',
+      );
     }
     const [created] = await tx
       .insert(backupRun)

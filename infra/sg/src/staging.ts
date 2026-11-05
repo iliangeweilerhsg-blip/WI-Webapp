@@ -1,0 +1,109 @@
+// Private Zwischenablage für Dumps (Sicherheit, docs/VERTRAEGE.md §13).
+//
+// Das Backup-Ziel kann für Dritte beschreibbar sein (externer Datenträger, iCloud-Ordner, Netzlaufwerk). Wer die
+// Prüfsumme einer Datei über ihren Pfad bildet und die Datei danach über denselben Pfad erneut öffnet (`pg_restore`,
+// Kopie), lässt eine Lücke, in der die Datei getauscht werden kann (TOCTOU). `pg_restore` führt SQL als Superuser aus.
+// Darum gilt überall:
+//   - Eine Datei wird **einmal** geöffnet. Aus diesem einen Lesevorgang entstehen Prüfsumme und Kopie.
+//   - Die Kopie liegt in einem privaten Ordner (`<Datenordner>/tmp/…`, Ordner 0700, Datei 0600), den kein Dritter
+//     beschreiben kann. Erst nach dem Vergleich der Prüfsumme wird **genau diese Kopie** weiterverwendet.
+//   - Die Kopie wird danach immer gelöscht.
+import { createHash, randomBytes } from 'node:crypto';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { open } from 'node:fs/promises';
+import { join } from 'node:path';
+
+/** Ein Stand lässt sich nicht verwenden. `reason` entspricht `RestoreTestReason` (docs/VERTRAEGE.md §13). */
+export class StandError extends Error {
+  readonly reason: 'nicht_authentisch' | 'beschaedigt';
+  constructor(reason: 'nicht_authentisch' | 'beschaedigt', message: string) {
+    super(message);
+    this.name = 'StandError';
+    this.reason = reason;
+  }
+}
+
+export const STAGE_ROOT = 'tmp';
+const STALE_MS = 86_400_000;
+
+/** Legt einen privaten Ordner an (0700) und räumt alte, übrig gebliebene Ordner desselben Zwecks auf */
+export function makePrivateDir(dataDir: string, purpose: 'restore' | 'backup'): string {
+  const root = join(dataDir, STAGE_ROOT);
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  chmodSync(root, 0o700);
+  try {
+    for (const name of readdirSync(root)) {
+      if (!name.startsWith(`${purpose}-`)) continue;
+      const path = join(root, name);
+      if (Date.now() - statSync(path).mtimeMs > STALE_MS) rmSync(path, { recursive: true, force: true });
+    }
+  } catch {
+    // Aufräumen ist nur eine Zugabe
+  }
+  const dir = mkdtempSync(join(root, `${purpose}-`));
+  chmodSync(dir, 0o700);
+  return dir;
+}
+
+/**
+ * Liest `src` genau einmal und schreibt dabei die Kopie `dst` (0600, darf noch nicht existieren). Rückgabe: SHA-256
+ * der gelesenen Bytes, also derselben Bytes, die in der Kopie stehen.
+ */
+export async function copyAndHash(src: string, dst: string): Promise<string> {
+  const hash = createHash('sha256');
+  const input = await open(src, 'r');
+  try {
+    const output = await open(dst, 'wx', 0o600);
+    try {
+      const buffer = Buffer.allocUnsafe(1024 * 1024);
+      for (;;) {
+        const { bytesRead } = await input.read(buffer, 0, buffer.length, null);
+        if (bytesRead === 0) break;
+        const chunk = buffer.subarray(0, bytesRead);
+        hash.update(chunk);
+        await output.write(chunk);
+      }
+    } finally {
+      await output.close();
+    }
+  } finally {
+    await input.close();
+  }
+  return hash.digest('hex');
+}
+
+/**
+ * Kopiert den Dump in einen privaten Ordner, vergleicht dabei die Prüfsumme mit `expectedSha` und ruft `fn` mit
+ * dem Pfad der **Kopie** auf. Stimmt die Prüfsumme nicht, wird `fn` nicht aufgerufen (`StandError`). Die Kopie
+ * wird in jedem Fall gelöscht.
+ */
+export async function withVerifiedDump<T>(
+  dataDir: string,
+  src: string,
+  expectedSha: string,
+  label: string,
+  fn: (verifiedCopy: string) => Promise<T>,
+): Promise<T> {
+  const dir = makePrivateDir(dataDir, 'restore');
+  try {
+    const copy = join(dir, `dump-${randomBytes(4).toString('hex')}.dump`);
+    let sha: string;
+    try {
+      sha = await copyAndHash(src, copy);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT')
+        throw new StandError('beschaedigt', `Im Stand ${label} fehlt ${src.split('/').pop()}.`);
+      throw error;
+    }
+    if (sha !== expectedSha) {
+      throw new StandError(
+        'beschaedigt',
+        `Die Prüfsumme von ${src.split('/').pop()} im Stand ${label} stimmt nicht. Der Stand ist beschädigt.`,
+      );
+    }
+    return await fn(copy);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}

@@ -3,5 +3,6 @@
   "last_success_at": null,
   "next_run_at": null,
   "stale": true,
-  "running": false
+  "running": false,
+  "restore_test": null
 }
