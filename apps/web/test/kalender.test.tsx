@@ -326,7 +326,7 @@ describe('Kalender: Woche', () => {
     installCalendarCore({ down: true });
     mount();
     // Ein Wiederholungsversuch nach 1 s, dann der Hinweis
-    await screen.findAllByText('Core nicht erreichbar', {}, { timeout: 4000 });
+    await screen.findAllByText('Core nicht erreichbar');
     expect(within(screen.getByRole('main')).getAllByText('Core nicht erreichbar').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Kalender' })).toBeInTheDocument();
   });

@@ -151,7 +151,10 @@ describe('Semester wiederherstellen (Nachtrag 2)', () => {
 
 describe('Mehrere gescheiterte Module (Nachtrag 3)', () => {
   it('alle Namen bleiben erhalten, auch wenn das Feld während der Warteschlange geschlossen wird', async () => {
-    const core = installFakeCore({ semesters: [makeSemester()], modules: [], latencyMs: 150 });
+    const core = installFakeCore({ semesters: [makeSemester()], modules: [] });
+    // POSTs hängen, bis wir sie freigeben – kein Zeitfenster, das unter Last verrutscht
+    let release: () => void = () => {};
+    core.postGate = new Promise<void>((r) => (release = r));
     const user = userEvent.setup();
     nav.pathname = '/';
     nav.search = '';
@@ -163,8 +166,9 @@ describe('Mehrere gescheiterte Module (Nachtrag 3)', () => {
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('textbox', { name: 'Modulname' })).not.toBeInTheDocument();
     core.down = true;
+    release();
 
-    const failed = await screen.findByRole('list', { name: 'Nicht angelegt' }, { timeout: 4000 });
+    const failed = await screen.findByRole('list', { name: 'Nicht angelegt' });
     await waitFor(() => expect(within(failed).getAllByRole('listitem')).toHaveLength(3));
     expect(
       within(failed)
@@ -177,7 +181,7 @@ describe('Mehrere gescheiterte Module (Nachtrag 3)', () => {
     core.down = false;
     await user.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
     const sidebar = screen.getByRole('navigation', { name: 'Hauptnavigation' });
-    await within(sidebar).findByRole('link', { name: 'Gamma' }, { timeout: 4000 });
+    await within(sidebar).findByRole('link', { name: 'Gamma' });
     expect(core.modules.map((m) => m.name)).toEqual(['Alpha', 'Beta', 'Gamma']);
     expect(screen.queryByRole('list', { name: 'Nicht angelegt' })).not.toBeInTheDocument();
   });
