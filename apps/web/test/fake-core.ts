@@ -6,15 +6,20 @@ import type {
   ExerciseSheet,
   Marker,
   Module,
+  Recording,
   Notebook,
   PairingCode,
   PairingRequest,
   Semester,
   Session,
+  SessionTranscript,
   Settings,
   Slide,
   SlideDeck,
   SlideEvent,
+  SlideSegment,
+  TranscriptInfo,
+  TranscriptLine,
 } from '@sg/shared';
 
 const USER = '0190f6a2-0000-7000-8000-000000000000';
@@ -139,6 +144,116 @@ export function makeSlides(deckId: string, count: number): Slide[] {
   }));
 }
 
+const SEG_ID = (n: number) => `0190f6a2-0000-7000-8000-${String(9000 + n).padStart(12, '0')}`;
+
+/** Aufnahme für den Rückblick (VERTRAEGE §18.4): `full.m4a` beginnt bei `started_ms` (Sitzungszeit) */
+export function makeRecording(overrides: Partial<Recording> = {}): Recording {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000f1',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    session_id: '0190f6a2-0000-7000-8000-0000000000e1',
+    mime: 'audio/webm;codecs=opus',
+    codec: 'opus',
+    started_ms: 0,
+    duration_ms: 600_000,
+    state: 'vollstaendig',
+    chunks_independent: false,
+    chunk_count: 20,
+    last_seq: 19,
+    completed_at: NOW,
+    ...overrides,
+  };
+}
+
+/** Eine Transkriptzeile (`TranscriptLine`): Abschnitt `n`, Folie und Zeit in Sitzungszeit */
+export function makeLine(
+  n: number,
+  startMs: number,
+  endMs: number,
+  text: string,
+  slide: { id: string; index: number } | null,
+  overrides: Partial<TranscriptLine> = {},
+): TranscriptLine {
+  return {
+    segment_id: SEG_ID(n),
+    part: 0,
+    recording_id: '0190f6a2-0000-7000-8000-0000000000f1',
+    slide_id: slide?.id ?? null,
+    slide_index: slide?.index ?? null,
+    start_ms: startMs,
+    end_ms: endMs,
+    text,
+    lang: 'de',
+    ...overrides,
+  };
+}
+
+export function makeSlideSegment(
+  n: number,
+  slide: { id: string; index: number },
+  startMs: number,
+  endMs: number,
+  overrides: Partial<SlideSegment> = {},
+): SlideSegment {
+  return {
+    id: SEG_ID(500 + n),
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    session_id: '0190f6a2-0000-7000-8000-0000000000e1',
+    slide_id: slide.id,
+    slide_index: slide.index,
+    start_ms: startMs,
+    end_ms: endMs,
+    source: 'log',
+    confidence: 1,
+    job_id: null,
+    ...overrides,
+  };
+}
+
+/** `TranscriptInfo` zu einer Aufnahme */
+export function makeTranscriptInfo(overrides: Partial<TranscriptInfo> = {}): TranscriptInfo {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000f2',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    session_id: '0190f6a2-0000-7000-8000-0000000000e1',
+    recording_id: '0190f6a2-0000-7000-8000-0000000000f1',
+    job_id: '0190f6a2-0000-7000-8000-0000000000f3',
+    finalize_job_id: '0190f6a2-0000-7000-8000-0000000000f4',
+    provider: 'fake',
+    model: 'fake',
+    language: 'de',
+    segment_count: 0,
+    word_count: 0,
+    audio_duration_ms: 600_000,
+    stale: false,
+    ...overrides,
+  };
+}
+
+/** Antwort von `GET /sessions/{id}/transcript` ohne Inhalt: noch nichts transkribiert, keine Folienzuordnung */
+export function makeTranscript(overrides: Partial<SessionTranscript> = {}): SessionTranscript {
+  return {
+    session_id: '0190f6a2-0000-7000-8000-0000000000e1',
+    slide_deck_id: null,
+    slide_source: null,
+    slide_segments: [],
+    transcripts: [],
+    recordings: [],
+    lines: [],
+    stale: false,
+    ...overrides,
+  };
+}
+
 export function makeDevice(overrides: Partial<Device> = {}): Device {
   return {
     id: '0190f6a2-0000-7000-8000-0000000000c1',
@@ -196,6 +311,10 @@ export interface FakeCore {
   events: CalendarEvent[];
   /** GET /notebooks scheitert mit 500, solange true */
   failNotebooks: boolean;
+  /** Antwort von GET /sessions/{id}/transcript je Session (VERTRAEGE §18.4); ohne Eintrag ein leeres Transkript */
+  transcripts: Record<string, SessionTranscript>;
+  /** GET /sessions/{id}/transcript scheitert mit 500, solange true */
+  failTranscript: boolean;
   /** Für GET /sessions/{id}/snapshot (VERTRAEGE §7.2): Folienwechsel und Marker, `stream_seq`/`stream_op_id` */
   slideEvents: SlideEvent[];
   markers: Marker[];
@@ -297,6 +416,8 @@ export function installFakeCore(
     notebooks: [],
     events: [],
     failNotebooks: false,
+    transcripts: {},
+    failTranscript: false,
     slideEvents: [],
     markers: [],
     streamSeq: 0,
@@ -532,6 +653,43 @@ export function installFakeCore(
         });
         core.sessions.push(created);
         return json(created, 201);
+      }
+
+      // GET /sessions/{id}/transcript (§18.4): `slide_id` filtert, Wörter nur mit `include_words=true`
+      const transcriptOne = /^\/sessions\/([^/]+)\/transcript$/.exec(path);
+      if (transcriptOne && method === 'GET') {
+        const found = core.sessions.find((x) => x.id === transcriptOne[1] && !x.deleted_at);
+        if (!found) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        if (core.failTranscript) return json({ error: { code: 'internal', message: 'x' } }, 500);
+        const stored = core.transcripts[found.id] ?? makeTranscript({ session_id: found.id });
+        const result = structuredClone(stored);
+        const slideId = url.searchParams.get('slide_id');
+        if (slideId) result.lines = result.lines.filter((l) => l.slide_id === slideId);
+        if (url.searchParams.get('include_words') !== 'true') for (const l of result.lines) delete l.words;
+        return json(result);
+      }
+
+      // POST /sessions/{id}/reprocess (§18.5): die Schritte ab `from_step` stehen danach auf `wartet`
+      const reprocessOne = /^\/sessions\/([^/]+)\/reprocess$/.exec(path);
+      if (reprocessOne && method === 'POST') {
+        const found = core.sessions.find((x) => x.id === reprocessOne[1] && !x.deleted_at);
+        if (!found) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        if (found.state !== 'beendet' && found.state !== 'verarbeitet') {
+          return json(
+            { error: { code: 'session_not_ended', message: 'x', details: { state: found.state } } },
+            409,
+          );
+        }
+        const steps = ['audio.finalize', 'transcribe', 'align.log'];
+        const from = (body?.from_step as string | undefined) ?? 'transcribe';
+        if (!steps.includes(from)) return json({ error: { code: 'validation_failed', message: 'x' } }, 400);
+        const recordings = core.transcripts[found.id]?.recordings ?? [];
+        if (from !== 'align.log' && !recordings.some((r) => r.chunk_count > 0)) {
+          return json({ error: { code: 'session_no_audio', message: 'x' } }, 409);
+        }
+        for (const step of steps.slice(steps.indexOf(from))) found.processing[step] = 'wartet';
+        found.updated_at = new Date().toISOString();
+        return json({ session: structuredClone(found), jobs: [] }, 202);
       }
 
       // GET /sessions/{id}/snapshot (§7.2)
