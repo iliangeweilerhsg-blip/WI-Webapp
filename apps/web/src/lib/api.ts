@@ -141,7 +141,7 @@ export async function apiGet<T>(
   return parseBody(res, schema);
 }
 
-export type SendMethod = 'POST' | 'PATCH' | 'DELETE';
+export type SendMethod = 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 export interface SendOptions {
   /** Request-Body (JSON). Bei DELETE weglassen. */
@@ -156,7 +156,7 @@ function newIdempotencyKey(): string {
 }
 
 /**
- * Schreibender Aufruf (POST, PATCH, DELETE). Antwort wird mit `schema` geprüft;
+ * Schreibender Aufruf (POST, PUT, PATCH, DELETE). Antwort wird mit `schema` geprüft;
  * ohne Schema (z. B. DELETE → 204) wird nichts gelesen. POST sendet einen `Idempotency-Key`,
  * damit ein Wiederholen nichts doppelt anlegt.
  */

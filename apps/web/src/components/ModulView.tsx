@@ -22,6 +22,7 @@ import { useUploadTarget } from '../lib/uploads.tsx';
 import { CoreHint } from './CoreHint.tsx';
 import { ModuleSessionButton } from './today/SpontaneousStart.tsx';
 import { MaterialPanel } from './MaterialPanel.tsx';
+import { ModuleMoodle } from './ModuleMoodle.tsx';
 import { EmptyState } from './Placeholder.tsx';
 
 const TABS = [
@@ -362,6 +363,8 @@ function ModuleView() {
       ) : null}
 
       {!editing ? <ModuleSessionButton moduleId={module.id} /> : null}
+
+      <ModuleMoodle moduleId={module.id} />
 
       <ModuleTabs moduleId={module.id} />
     </>

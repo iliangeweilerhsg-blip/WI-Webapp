@@ -6,6 +6,7 @@ import { SettingsTabContext, type TabMark } from './settings/form.tsx';
 import { DataSettings } from './settings/DataSettings.tsx';
 import { GeneralSettingsForm } from './settings/GeneralSettings.tsx';
 import { LectureSettingsForm } from './settings/LectureSettings.tsx';
+import { MoodleSettings } from './settings/MoodleSettings.tsx';
 import { PenSettingsForm } from './settings/PenSettings.tsx';
 import { TrashSettings } from './settings/TrashSettings.tsx';
 import { SemesterSettings } from './SemesterSettings.tsx';
@@ -49,6 +50,7 @@ const TABS: readonly SettingsTab[] = [
   { id: 'vorlesung', label: 'Vorlesung', panel: () => <LectureSettingsForm /> },
   { id: 'stift', label: 'Stift', panel: () => <PenSettingsForm /> },
   { id: 'geraete', label: 'Geräte', lazy: true, panel: () => <DevicesSettings /> },
+  { id: 'moodle', label: 'Moodle', lazy: true, panel: () => <MoodleSettings /> },
   {
     id: 'daten',
     lazy: true,
@@ -118,6 +120,12 @@ export function SettingsView() {
     if (el && typeof el.scrollIntoView === 'function')
       el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [active]);
+
+  // Direkt in einen Bereich springen: /einstellungen?bereich=moodle (z. B. aus der Inbox)
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('bereich');
+    if (wanted && TABS.some((tab) => tab.id === wanted)) setActive(wanted);
+  }, []);
 
   const report = useCallback((tabId: string, mark: TabMark) => {
     setMarks((current) => {
