@@ -69,6 +69,8 @@ export const COUNT_TABLES = [
   'moodle_course_link',
   'moodle_item',
   'moodle_deadline',
+  // Automatische Kurszuordnung (#141)
+  'moodle_course_decided',
 ] as const;
 
 export interface BackupIo {

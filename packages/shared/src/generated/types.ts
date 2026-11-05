@@ -1826,6 +1826,22 @@ export interface MoodleAssignmentList {
 items: MoodleAssignment[]
 }
 /**
+ * Antwort von POST /moodle/auto-assign (#141): was die automatische Kurszuordnung in diesem Lauf getan hat
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleAutoAssignResult".
+ */
+export interface MoodleAutoAssignResult {
+/**
+ * Kurse, die einem bestehenden Modul zugeordnet wurden
+ */
+assigned: number
+/**
+ * Neu angelegte Module
+ */
+created: number
+}
+/**
  * Kurs, in den der Nutzer eingeschrieben ist. module_id: Zuordnung zu einem Modul, von Hand oder automatisch (F-MDL-03, T1-23, #141)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema

@@ -113,6 +113,7 @@ struct SchemaBundle: Codable {
     let moodleActivity: MoodleActivity?
     let moodleAssignment: MoodleAssignment?
     let moodleAssignmentList: MoodleAssignmentList?
+    let moodleAutoAssignResult: MoodleAutoAssignResult?
     let moodleCompletion: MoodleCompletion?
     let moodleConnectionState: MoodleConnectionState?
     let moodleCourse: MoodleCourse?
@@ -415,6 +416,7 @@ struct SchemaBundle: Codable {
         case moodleActivity = "MoodleActivity"
         case moodleAssignment = "MoodleAssignment"
         case moodleAssignmentList = "MoodleAssignmentList"
+        case moodleAutoAssignResult = "MoodleAutoAssignResult"
         case moodleCompletion = "MoodleCompletion"
         case moodleConnectionState = "MoodleConnectionState"
         case moodleCourse = "MoodleCourse"
@@ -737,6 +739,7 @@ extension SchemaBundle {
         moodleActivity: MoodleActivity?? = nil,
         moodleAssignment: MoodleAssignment?? = nil,
         moodleAssignmentList: MoodleAssignmentList?? = nil,
+        moodleAutoAssignResult: MoodleAutoAssignResult?? = nil,
         moodleCompletion: MoodleCompletion?? = nil,
         moodleConnectionState: MoodleConnectionState?? = nil,
         moodleCourse: MoodleCourse?? = nil,
@@ -1039,6 +1042,7 @@ extension SchemaBundle {
             moodleActivity: moodleActivity ?? self.moodleActivity,
             moodleAssignment: moodleAssignment ?? self.moodleAssignment,
             moodleAssignmentList: moodleAssignmentList ?? self.moodleAssignmentList,
+            moodleAutoAssignResult: moodleAutoAssignResult ?? self.moodleAutoAssignResult,
             moodleCompletion: moodleCompletion ?? self.moodleCompletion,
             moodleConnectionState: moodleConnectionState ?? self.moodleConnectionState,
             moodleCourse: moodleCourse ?? self.moodleCourse,
@@ -6726,6 +6730,58 @@ extension MoodleAssignmentList {
     ) -> MoodleAssignmentList {
         return MoodleAssignmentList(
             items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von POST /moodle/auto-assign (#141): was die automatische Kurszuordnung in diesem
+/// Lauf getan hat
+// MARK: - MoodleAutoAssignResult
+struct MoodleAutoAssignResult: Codable {
+    /// Kurse, die einem bestehenden Modul zugeordnet wurden
+    let assigned: Int
+    /// Neu angelegte Module
+    let created: Int
+
+    enum CodingKeys: String, CodingKey {
+        case assigned = "assigned"
+        case created = "created"
+    }
+}
+
+// MARK: MoodleAutoAssignResult convenience initializers and mutators
+
+extension MoodleAutoAssignResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleAutoAssignResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        assigned: Int? = nil,
+        created: Int? = nil
+    ) -> MoodleAutoAssignResult {
+        return MoodleAutoAssignResult(
+            assigned: assigned ?? self.assigned,
+            created: created ?? self.created
         )
     }
 
@@ -18846,6 +18902,14 @@ extension MoodleAssignmentList {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleAutoAssignResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(assigned, forKey: .assigned)
+        try container.encode(created, forKey: .created)
     }
 }
 

@@ -317,6 +317,9 @@
     "MoodleAssignmentList": {
       "$ref": "#/$defs/MoodleAssignmentList"
     },
+    "MoodleAutoAssignResult": {
+      "$ref": "#/$defs/MoodleAutoAssignResult"
+    },
     "MoodleCompletion": {
       "$ref": "#/$defs/MoodleCompletion"
     },
@@ -4312,6 +4315,28 @@
           "items": {
             "$ref": "#/$defs/MoodleAssignment"
           }
+        }
+      }
+    },
+    "MoodleAutoAssignResult": {
+      "title": "MoodleAutoAssignResult",
+      "type": "object",
+      "description": "Antwort von POST /moodle/auto-assign (#141): was die automatische Kurszuordnung in diesem Lauf getan hat",
+      "required": [
+        "assigned",
+        "created"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "assigned": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Kurse, die einem bestehenden Modul zugeordnet wurden"
+        },
+        "created": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Neu angelegte Module"
         }
       }
     },

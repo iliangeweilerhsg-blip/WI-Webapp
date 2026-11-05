@@ -216,6 +216,24 @@
       "enum": ["aktuell", "organisatorisch", "alt"],
       "description": "aktuell = wird vorgeschlagen. organisatorisch (z. B. „Klausurtermine …“) und alt (Start vor dem aktuellen Semester) werden standardmäßig nicht vorgeschlagen (F-MDL-03)"
     },
+    "MoodleAutoAssignResult": {
+      "type": "object",
+      "description": "Antwort von POST /moodle/auto-assign (#141): was die automatische Kurszuordnung in diesem Lauf getan hat",
+      "required": ["assigned", "created"],
+      "additionalProperties": false,
+      "properties": {
+        "assigned": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Kurse, die einem bestehenden Modul zugeordnet wurden"
+        },
+        "created": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Neu angelegte Module"
+        }
+      }
+    },
     "MoodleLinkAuto": {
       "type": "string",
       "enum": ["zugeordnet", "angelegt"],

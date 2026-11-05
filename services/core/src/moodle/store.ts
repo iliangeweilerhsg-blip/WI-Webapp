@@ -13,7 +13,7 @@ import { notDeleted } from '../db/schema/common.ts';
 import {
   courseModule,
   moodleCourseLink,
-  moodleCourseManual,
+  moodleCourseDecided,
   moodleDeadline,
   moodleItem,
   semester,
@@ -105,10 +105,31 @@ export async function lockAutoAssign(tx: Tx): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${MOODLE_AUTO_LOCK_KEY})`);
 }
 
+export type CourseDecision = 'auto' | 'manuell' | 'geloest' | 'entfernt';
+
+/**
+ * Entscheidung über einen Kurs festhalten (#141): Danach behandelt die Automatik ihn nie wieder. `overwrite`: eine
+ * frühere Entscheidung ersetzen („Lösen“, „Modul entfernen“), sonst bleibt sie stehen.
+ */
+export async function recordDecision(
+  tx: Tx,
+  courseId: number,
+  reason: CourseDecision,
+  overwrite = true,
+): Promise<void> {
+  const insert = tx
+    .insert(moodleCourseDecided)
+    .values({ id: uuidv7(), userId: SINGLE_USER_ID, moodleCourseId: courseId, reason });
+  await (overwrite
+    ? insert.onConflictDoUpdate({ target: moodleCourseDecided.moodleCourseId, set: { reason } })
+    : insert.onConflictDoNothing({ target: moodleCourseDecided.moodleCourseId }));
+}
+
 /**
  * Lässt sich das Modul der Zuordnung mit „Modul entfernen“ in den Papierkorb legen (#141)? Nur ein automatisch
  * angelegtes Modul, das noch leer ist: keine Session, keine beschriebene Seite, kein eigenes Notizbuch, kein Material
- * außer dem aus Moodle übernommenen und kein weiterer Moodle-Kurs. Für Abfragen mit `moodle_course_link`.
+ * außer dem aus Moodle übernommenen, kein von Hand zugeordneter Termin und kein weiterer Moodle-Kurs. Für Abfragen
+ * mit `moodle_course_link`.
  */
 export function linkRemovable(): SQL<boolean> {
   const moduleId = moodleCourseLink.moduleId;
@@ -121,6 +142,8 @@ export function linkRemovable(): SQL<boolean> {
       AND NOT EXISTS (SELECT 1 FROM moodle_item i WHERE i.slide_deck_id = d.id))
     AND NOT EXISTS (SELECT 1 FROM exercise_sheet e WHERE e.module_id = ${moduleId} AND e.deleted_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM moodle_item i WHERE i.exercise_sheet_id = e.id))
+    AND NOT EXISTS (SELECT 1 FROM calendar_event c WHERE c.module_id = ${moduleId}
+      AND c.assigned_by = 'manuell' AND c.deleted_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM moodle_course_link o WHERE o.module_id = ${moduleId}
       AND o.moodle_course_id <> ${moodleCourseLink.moodleCourseId}))`;
 }
@@ -186,6 +209,9 @@ export async function putLink(
       })
       .returning();
     if (!row) throw new Error('Zuordnung wurde nicht gespeichert');
+    // Von Hand zugeordnet: die Automatik fasst den Kurs nie an, auch wenn das Modul später endgültig gelöscht wird.
+    // Eine frühere Entscheidung (auto, geloest, entfernt) bleibt stehen
+    await recordDecision(tx, courseId, 'manuell', false);
     const [removable] = await tx
       .select({ value: linkRemovable() })
       .from(moodleCourseLink)
@@ -213,10 +239,7 @@ export async function deleteLink(db: Db, courseId: number): Promise<void> {
       throw new HttpError(404, 'moodle_link_not_found', 'Dieser Kurs ist keinem Modul zugeordnet.');
     }
     await tx.delete(moodleDeadline).where(eq(moodleDeadline.moodleCourseId, courseId));
-    await tx
-      .insert(moodleCourseManual)
-      .values({ id: uuidv7(), userId: SINGLE_USER_ID, moodleCourseId: courseId })
-      .onConflictDoNothing({ target: moodleCourseManual.moodleCourseId });
+    await recordDecision(tx, courseId, 'geloest');
   });
 }
 

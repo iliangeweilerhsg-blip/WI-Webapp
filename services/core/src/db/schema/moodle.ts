@@ -37,16 +37,22 @@ export const moodleCourseLink = pgTable(
 );
 
 /**
- * Kurse, über die der Nutzer selbst entschieden hat (#141): „Lösen“ bzw. „Modul entfernen“. Die automatische
- * Zuordnung fasst sie nicht mehr an, von Hand zuordnen geht weiter. Einstellung, kein Inhalt (kein Papierkorb).
+ * Kurse, über die schon entschieden ist (#141): Die automatische Zuordnung behandelt jeden Kurs genau einmal und fasst
+ * ihn danach nie wieder an, auch wenn das Modul endgültig gelöscht wird. `reason`: `auto` (automatisch zugeordnet
+ * bzw. angelegt), `manuell` (von Hand zugeordnet), `geloest` („Lösen“), `entfernt` („Modul entfernen“). Von Hand
+ * zuordnen geht immer. Einstellung, kein Inhalt (kein Papierkorb).
  */
-export const moodleCourseManual = pgTable(
-  'moodle_course_manual',
+export const moodleCourseDecided = pgTable(
+  'moodle_course_decided',
   {
     ...baseColumns(),
     moodleCourseId: moodleId('moodle_course_id').notNull(),
+    reason: text('reason').notNull(),
   },
-  (t) => [uniqueIndex('moodle_course_manual_course_uq').on(t.moodleCourseId)],
+  (t) => [
+    uniqueIndex('moodle_course_decided_course_uq').on(t.moodleCourseId),
+    check('moodle_course_decided_reason_chk', sql`${t.reason} IN ('auto','manuell','geloest','entfernt')`),
+  ],
 );
 
 /**

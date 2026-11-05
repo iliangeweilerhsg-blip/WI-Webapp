@@ -556,6 +556,20 @@ class SubmissionType(StrEnum):
     onlinetext = 'onlinetext'
 
 
+class MoodleAutoAssignResult(BaseModel):
+    """
+    Antwort von POST /moodle/auto-assign (#141): was die automatische Kurszuordnung in diesem Lauf getan hat
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    assigned: StrictInt = Field(
+        ..., description='Kurse, die einem bestehenden Modul zugeordnet wurden', ge=0
+    )
+    created: StrictInt = Field(..., description='Neu angelegte Module', ge=0)
+
+
 class MoodleCompletion(StrEnum):
     """
     Erledigt-Status einer Aktivität
@@ -5513,6 +5527,9 @@ class SchemaBundle(BaseModel):
     MoodleAssignment_1: MoodleAssignment | None = Field(None, alias='MoodleAssignment')
     MoodleAssignmentList_1: MoodleAssignmentList | None = Field(
         None, alias='MoodleAssignmentList'
+    )
+    MoodleAutoAssignResult_1: MoodleAutoAssignResult | None = Field(
+        None, alias='MoodleAutoAssignResult'
     )
     MoodleCompletion_1: MoodleCompletion | None = Field(None, alias='MoodleCompletion')
     MoodleConnectionState_1: MoodleConnectionState | None = Field(

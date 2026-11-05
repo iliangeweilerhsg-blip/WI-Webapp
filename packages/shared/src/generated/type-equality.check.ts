@@ -110,6 +110,7 @@ const _MoodleActionRisk: Equal<z.infer<typeof Z.MoodleActionRiskSchema>, T.Moodl
 const _MoodleActivity: Equal<z.infer<typeof Z.MoodleActivitySchema>, T.MoodleActivity> = true;
 const _MoodleAssignment: Equal<z.infer<typeof Z.MoodleAssignmentSchema>, T.MoodleAssignment> = true;
 const _MoodleAssignmentList: Equal<z.infer<typeof Z.MoodleAssignmentListSchema>, T.MoodleAssignmentList> = true;
+const _MoodleAutoAssignResult: Equal<z.infer<typeof Z.MoodleAutoAssignResultSchema>, T.MoodleAutoAssignResult> = true;
 const _MoodleCompletion: Equal<z.infer<typeof Z.MoodleCompletionSchema>, T.MoodleCompletion> = true;
 const _MoodleConnectionState: Equal<z.infer<typeof Z.MoodleConnectionStateSchema>, T.MoodleConnectionState> = true;
 const _MoodleCourse: Equal<z.infer<typeof Z.MoodleCourseSchema>, T.MoodleCourse> = true;

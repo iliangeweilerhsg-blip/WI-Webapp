@@ -10,6 +10,7 @@ import {
   MoodleActionRequestSchema,
   MoodleActionResultSchema,
   MoodleAssignmentListSchema,
+  MoodleAutoAssignResultSchema,
   MoodleCourseContentsSchema,
   MoodleCourseLinkListSchema,
   MoodleCourseLinkSchema,
@@ -137,25 +138,15 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
       schema: {
         tags: ['Moodle'],
         summary:
-          'Kurse des Nutzers (core_enrol_get_users_courses). Ordnet neue aktuelle Kurse vorher automatisch zu (#141)',
+          'Kurse des Nutzers (core_enrol_get_users_courses). Nur lesend: zugeordnet wird über POST /moodle/auto-assign',
         response: { 200: MoodleCourseListSchema, ...errorResponses },
       },
     },
-    async (request) => {
+    async () => {
       const list = await reader.courses();
       if (!deps.db) return list;
       const now = deps.now?.() ?? new Date();
-      const options = { timeZone: reader.timeZone, now };
-      try {
-        const result = await autoAssignCourses(deps.db, list.items, options);
-        if (result.assigned > 0 || result.created > 0) {
-          request.log.info(result, 'Moodle-Kurse automatisch zugeordnet');
-        }
-      } catch (error) {
-        // Die Kursliste kommt trotzdem, die Automatik versucht es beim nächsten Laden bzw. Abgleich wieder
-        request.log.warn({ err: error }, 'Automatische Kurszuordnung fehlgeschlagen');
-      }
-      return { items: await annotateCourses(deps.db, list.items, options) };
+      return { items: await annotateCourses(deps.db, list.items, { timeZone: reader.timeZone, now }) };
     },
   );
 
@@ -433,6 +424,31 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
       return { action_id: id, summary: outcome.summary, result: outcome.result };
     },
   );
+
+  const db = deps.db;
+  if (db) {
+    typed.post(
+      '/moodle/auto-assign',
+      {
+        schema: {
+          tags: ['Moodle'],
+          summary:
+            'Automatische Kurszuordnung (#141): neue aktuelle Kurse sicher passenden Modulen zuordnen bzw. Module anlegen',
+          response: { 200: MoodleAutoAssignResultSchema, ...errorResponses },
+        },
+      },
+      async (request) => {
+        if (!(await client.isConfigured())) throw moodleNotConfigured();
+        const list = await reader.courses();
+        const now = deps.now?.() ?? new Date();
+        const result = await autoAssignCourses(db, list.items, { timeZone: reader.timeZone, now });
+        if (result.assigned > 0 || result.created > 0) {
+          request.log.info(result, 'Moodle-Kurse automatisch zugeordnet');
+        }
+        return result;
+      },
+    );
+  }
 
   if (deps.db && deps.sync) registerSyncRoutes(app, { db: deps.db, sync: deps.sync, client, now: deps.now });
 }
