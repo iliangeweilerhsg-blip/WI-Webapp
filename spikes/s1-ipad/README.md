@@ -25,6 +25,7 @@ node spikes/s1-ipad/mac/server.mjs
 ```
 
 1. **macOS-Firewall-Dialog bestätigen:** Falls macOS beim Start fragt *„Möchtest du, dass das Programm ‚node‘ eingehende Netzwerkverbindungen akzeptiert?"*, klicke auf **Erlauben**, damit dein iPad den Mac im WLAN erreichen kann.
+   - **iPad erreicht den Mac nicht?** Siehe [`docs/anleitungen/IPAD-VERBINDUNG.md`](../../docs/anleitungen/IPAD-VERBINDUNG.md). Bekannte Ursache: der Socket Filter von Cisco Secure Client.
 2. Der Server gibt deine lokale WLAN-IP-Adresse (z. B. `192.168.178.42:4797`) aus und kündigt sich per Bonjour (`dns-sd -R "StudienGehirn-Mac" _studiengehirn._tcp local 4797`) im WLAN an.
 3. Öffne auf deinem Mac im Browser:
    **`http://localhost:4797`**
