@@ -17,6 +17,7 @@ import {
   stopSession,
 } from '../../lib/sessions.ts';
 import { moduleColorVar } from '../../lib/modules.ts';
+import { rueckblickHref } from '../../lib/transcript.ts';
 import { useNow } from './use-today.ts';
 import {
   READY_LEAD_MS,
@@ -272,6 +273,11 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
                 {busy === 'stop' ? 'Wird beendet …' : 'Beenden'}
               </button>
             </>
+          ) : null}
+          {state === 'verarbeitet' || state === 'beendet' ? (
+            <Link href={rueckblickHref(session.id)} className={secondary}>
+              Rückblick
+            </Link>
           ) : null}
           {state === 'verarbeitet' || state === 'beendet' ? (
             <Link href={moduleHref(session.module_id)} className={secondary}>

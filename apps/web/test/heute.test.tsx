@@ -238,11 +238,16 @@ describe('Heute: Start-Karte nach Zustand', () => {
     let c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
     expect(c).toHaveAttribute('data-state', 'beendet');
     expect(within(c).getByRole('link', { name: 'Zum Modul' })).toHaveAttribute('href', `/modul?id=${DBS.id}`);
+    expect(within(c).getByRole('link', { name: 'Rückblick' })).toHaveAttribute(
+      'href',
+      `/rueckblick?id=${ended.id}`,
+    );
     unmount();
     boot({ now: '2026-11-04T08:50:00Z', sessions: [{ ...ended, state: 'verarbeitet' }] });
     c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
     expect(c).toHaveAttribute('data-state', 'verarbeitet');
     expect(within(c).getByText('Alles ist verarbeitet.')).toBeInTheDocument();
+    expect(within(c).getByRole('link', { name: 'Rückblick' })).toBeInTheDocument();
   });
 
   it('eine laufende Session vom Vortag bleibt die Karte', async () => {

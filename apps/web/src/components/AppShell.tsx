@@ -41,7 +41,7 @@ function Shell({ children }: { children: ReactNode }) {
   const [setupRequested, setSetupRequested] = useState(0);
   // Die PDF-Anzeige (F-ORG-04) und das Live-Dashboard (T1-04) nutzen die ganze Fläche und scrollen selbst
   const pathname = usePathname();
-  const fullBleed = pathname === '/dokument' || pathname === '/session';
+  const fullBleed = pathname === '/dokument' || pathname === '/session' || pathname === '/rueckblick';
 
   const modal = drawerOpen && isNarrow;
 
