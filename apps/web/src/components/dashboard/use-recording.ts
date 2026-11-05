@@ -59,6 +59,8 @@ export interface RecordingEnv {
   permission?: () => Promise<Permission>;
   /** Nach so vielen ms Warten auf die Aufnahme-Sperre erscheint der Hinweis (Standard 1500) */
   waitHintMs?: number;
+  /** So lange lädt der Unmount höchstens noch hoch, bevor der Rest dem app-weiten Uploader bleibt (Standard 8000) */
+  flushMs?: number;
 }
 export const RecordingEnvContext = createContext<RecordingEnv>({});
 
@@ -157,18 +159,17 @@ export function useSessionRecording(session: Session, client: SyncClient | null)
       control.dispose();
       void control
         .idle()
+        .then(() => recorder.flushUploads(envRef.current.flushMs ?? 8000))
         .then(() => {
-          // Ex-Leader: der Leader holt die letzten Chunks aus IndexedDB; sonst hier noch kurz hochladen
-          if (!leaderRef.current) notifyUploadsPending();
-          return recorder.flushUploads(8000);
+          // Bleibt etwas liegen (Core weg, langer Rückstau), holt der app-weite Uploader des Leaders es ab. Die Nachricht
+          // erreicht auch andere Instanzen im selben Tab.
+          notifyUploadsPending();
         })
         .then(() => recorder.dispose());
       setParts(null);
     };
   }, [sessionId]);
 
-  const leaderRef = useRef(leader);
-  leaderRef.current = leader;
   const recorder = parts?.recorder ?? null;
   const control = parts?.control ?? null;
   const status = useSyncExternalStore(

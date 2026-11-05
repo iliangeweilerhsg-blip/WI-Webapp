@@ -1,7 +1,8 @@
 // App-weit ungesendete Chunks nachholen, nur im Leader-Tab (Issue #115)
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { MemoryRecorderStore, useResumePendingUploads } from '../src/lib/recorder/index.ts';
+import { AudioRecorder, MemoryRecorderStore, useResumePendingUploads } from '../src/lib/recorder/index.ts';
+import { fakeRecording } from './recording-fakes.ts';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 
 function fakeClient(state: string) {
@@ -150,5 +151,65 @@ describe('useResumePendingUploads: nur der Leader lädt hoch', () => {
     ch.postMessage('kick');
     ch.close();
     await waitFor(() => expect(calls).toContain(`POST /recordings/${REC}/complete`));
+  });
+
+  it('das regelmäßige kick holt Reste nach einer verlorenen Nachricht ab', async () => {
+    const store = new MemoryRecorderStore();
+    const calls: string[] = [];
+    const c = fakeClient('online');
+    renderHook(() =>
+      useResumePendingUploads(c.client, {
+        store,
+        channelName: `t-${Math.random()}`,
+        kickIntervalMs: 40,
+        uploader: {
+          baseUrl: 'http://core/api/v1',
+          fetch: (async (url: string, init?: RequestInit) => {
+            calls.push(`${init?.method} ${new URL(url).pathname.replace('/api/v1', '')}`);
+            return Response.json({}, { status: 201 });
+          }) as unknown as typeof fetch,
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 60));
+    await seed(store); // niemand meldet es
+    await waitFor(() => expect(calls).toContain(`POST /recordings/${REC}/complete`));
+  });
+
+  it('ein zweiter Uploader schließt die laufende Aufnahme dieses Tabs nicht als verwaist ab', async () => {
+    const base = fakeRecording();
+    const recorder = new AudioRecorder({
+      ...base.env.recorder,
+      sessionId: '0190f6a2-0000-7000-8000-0000000000e1',
+      sessionMs: () => 0,
+    });
+    await recorder.start();
+    base.mr.instances[0]?.emit(16);
+    await waitFor(async () => expect((await base.store.listRecordings())[0]?.nextSeq).toBe(1));
+
+    const calls: string[] = [];
+    const c = fakeClient('online');
+    renderHook(() =>
+      useResumePendingUploads(c.client, {
+        store: base.store,
+        channelName: `t-${Math.random()}`,
+        kickIntervalMs: 30,
+        uploader: {
+          baseUrl: 'http://core/api/v1',
+          // Uhr zehn Stunden vor: ohne `isActive` gälte die laufende Aufnahme als verwaist
+          now: () => Date.now() + 10 * 3600_000,
+          fetch: (async (url: string, init?: RequestInit) => {
+            calls.push(`${init?.method} ${new URL(url).pathname.replace('/api/v1', '')}`);
+            return Response.json({}, { status: 201 });
+          }) as unknown as typeof fetch,
+        },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 250));
+    expect(calls.filter((x) => x.endsWith('/complete'))).toEqual([]);
+    const [meta] = await base.store.listRecordings();
+    expect(meta?.complete).toBeNull();
+    await recorder.stop();
+    recorder.dispose();
   });
 });

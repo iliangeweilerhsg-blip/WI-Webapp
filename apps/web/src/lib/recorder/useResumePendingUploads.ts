@@ -29,11 +29,13 @@ export interface ResumeUploadsOptions {
   store?: RecorderStore;
   uploader?: Omit<UploaderOptions, 'store' | 'isActive'>;
   channelName?: string;
+  /** Abstand des regelmäßigen Anstoßes, falls eine Nachricht verloren ging (Standard 45 s) */
+  kickIntervalMs?: number;
 }
 
 export function useResumePendingUploads(client: SyncClient | null, options: ResumeUploadsOptions = {}): void {
   const leader = isLeaderState(useConnectionState(client));
-  const { store, uploader: uploaderOptions, channelName } = options;
+  const { store, uploader: uploaderOptions, channelName, kickIntervalMs } = options;
   useEffect(() => {
     if (!leader) return;
     const uploader = new ChunkUploader({
@@ -51,12 +53,15 @@ export function useResumePendingUploads(client: SyncClient | null, options: Resu
     } catch {
       channel = null;
     }
+    // Sicherheitsnetz: verlorene Nachricht, Core war weg, Abschluss als verwaist (`abandonAfterMs`)
+    const timer = setInterval(() => uploader.kick(), kickIntervalMs ?? 45_000);
     const onOnline = () => uploader.retryNow();
     window.addEventListener('online', onOnline);
     return () => {
+      clearInterval(timer);
       window.removeEventListener('online', onOnline);
       channel?.close();
       uploader.dispose();
     };
-  }, [leader, store, uploaderOptions, channelName]);
+  }, [leader, store, uploaderOptions, channelName, kickIntervalMs]);
 }

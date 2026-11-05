@@ -1,7 +1,7 @@
 // Aufnahme im Live-Dashboard (Issue #106): Statusleiste, Leader-Regel, Mikrofon-Berechtigung, Pegel für den Auto-Stopp.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Session } from '@sg/shared';
 import { SessionView } from '../src/components/dashboard/SessionView.tsx';
@@ -11,7 +11,7 @@ import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { FakeWebLocks, fakeRecording, fakeStream, type FakeRecording } from './recording-fakes.ts';
-import { MemoryRecorderStore } from '../src/lib/recorder/index.ts';
+import { MemoryRecorderStore, useResumePendingUploads } from '../src/lib/recorder/index.ts';
 import { installFakeCore, makeModule, makeSemester, makeSession, type FakeCore } from './fake-core.ts';
 
 const nav = vi.hoisted(() => ({ search: '' }));
@@ -371,6 +371,66 @@ describe('Aufnahme im Dashboard: Seite verlassen', () => {
     expect(rec.mr.instances[0]?.state).toBe('inactive');
     expect(rec.tracks.length).toBeGreaterThan(0);
     for (const t of rec.tracks) expect(t.stop).toHaveBeenCalled();
+  });
+});
+
+const chunkSeqs = () =>
+  new Set(uploads(/^PUT .*\/chunks\/\d+$/).map(([url]) => Number(String(url).split('/').pop())));
+
+describe('Aufnahme im Dashboard: Rückstau beim Verlassen', () => {
+  const slowCore = (ms: number) =>
+    rec.fetch.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, ms));
+      return Response.json({}, { status: 201 });
+    });
+
+  it('Unmount mit offenem Rückstau: der Flush lädt alle Chunks und complete noch hoch', async () => {
+    const view = boot();
+    slowCore(40);
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    act(() => {
+      for (let i = 0; i < 3; i++) rec.mr.instances[0]?.emit(16);
+    });
+    view.unmount();
+    await waitFor(() => expect(uploads(/^POST .*\/complete$/)).toHaveLength(1), { timeout: 5000 });
+    // 3 laufende Chunks und der Chunk beim Stopp
+    expect([...chunkSeqs()].sort()).toEqual([0, 1, 2, 3]);
+  });
+
+  it('dauert der Rückstau länger als der Flush, holt der app-weite Uploader des Leaders den Rest ab', async () => {
+    const view = boot({ env: { flushMs: 1 } });
+    slowCore(100);
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    renderHook(() =>
+      useResumePendingUploads(sync.client, {
+        store: rec.store,
+        uploader: { baseUrl: 'http://core/api/v1', fetch: rec.fetch as unknown as typeof fetch },
+      }),
+    );
+    act(() => {
+      for (let i = 0; i < 3; i++) rec.mr.instances[0]?.emit(16);
+    });
+    view.unmount();
+    await waitFor(() => expect(uploads(/^POST .*\/complete$/).length).toBeGreaterThanOrEqual(1), {
+      timeout: 5000,
+    });
+    expect([...chunkSeqs()].sort()).toEqual([0, 1, 2, 3]);
+  });
+
+  it('der Rollenverlust meldet „Chunks liegen bereit“ auf dem Kanal', async () => {
+    const seen: unknown[] = [];
+    const channel = new BroadcastChannel('sg-recorder-uploads');
+    channel.onmessage = (ev) => seen.push(ev.data);
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    expect(seen).toEqual([]);
+    act(() => sync.setState('other_tab'));
+    await within(b).findByText('Aufnahme in anderem Tab');
+    await waitFor(() => expect(seen).toContain('kick'));
+    channel.close();
   });
 });
 
