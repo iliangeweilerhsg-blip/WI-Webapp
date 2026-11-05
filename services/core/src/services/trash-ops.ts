@@ -14,6 +14,7 @@ import { SEMESTER_LOCK_KEY } from '../lib/locks.ts';
 import { decodeCursor, encodeCursor, type CursorKey } from '../lib/pagination.ts';
 import { appendOp } from '../sync/append.ts';
 import { resolveDataPath } from './material.ts';
+import { emitSessionUpdated } from './sessions.ts';
 import { CHILDREN, PARENT, restoreFromTrash, softDelete, TITLE, TRASH_KINDS, type Node } from './trash.ts';
 
 /** Aufbewahrung im Papierkorb in Tagen (F-DAT-04). Der Worker (`maintenance.nightly`) nutzt denselben Standard */
@@ -198,6 +199,8 @@ export async function softDeleteWithOps(
         await appendServerOp(tx, notebookId, 'notebook.delete', { notebook_id: notebookId });
       }
     }
+    // Clients erfahren gelöschte Sessions als `session.updated` mit `deleted_at`
+    for (const sessionId of affected.sessions) await emitSessionUpdated(tx, sessionId);
     return ts;
   });
 }
@@ -270,6 +273,7 @@ export async function restoreWithOps(db: Db, id: string): Promise<TrashRestoreRe
         await appendServerOp(tx, notebookId, 'notebook.restore', { notebook_id: notebookId });
       }
     }
+    for (const sessionId of affected.sessions) await emitSessionUpdated(tx, sessionId);
     return result;
   });
 }

@@ -105,6 +105,8 @@ func same(_ a: Any, _ b: Any, _ path: String) -> String? {
     }
 }
 
+// Top-Level-Code läuft im Swift-6-Modus auf dem MainActor, die Zähler darum auch
+@MainActor
 func check(_ label: String, _ original: Data, _ convert: (Data) throws -> Data) {
     checked += 1
     do {

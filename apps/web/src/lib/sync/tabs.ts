@@ -11,6 +11,11 @@ export interface LeaderLockHandlers {
   onLost(): void;
   /** Ein anderer Tab meldet einen Leader-Wechsel (Zustand neu laden) */
   onChanged(): void;
+  /**
+   * Der bisherige Leader hat nach dem Verlust der Rolle noch eine Operation in die Warteschlange geschrieben
+   * (Restfenster beim Wechsel). Nur der Leader bekommt das; er liest die Warteschlange nach.
+   */
+  onEnqueued?(): void;
 }
 
 export interface LeaderLock {
@@ -18,6 +23,8 @@ export interface LeaderLock {
   start(handlers: LeaderLockHandlers): void;
   /** Holt die Leader-Rolle sofort von einem anderen Tab. */
   steal(): void;
+  /** Meldet dem Leader, dass dieser Tab nach dem Rollenverlust noch in die Warteschlange geschrieben hat. */
+  notifyEnqueued?(): void;
   /** Gibt Lock und Kanal frei. Danach ist dieses Objekt tot; `connect()` legt ein neues an. */
   stop(): void;
 }
@@ -105,11 +112,23 @@ export function createWebLocksLeader(name = 'sg-sync'): LeaderLock | null {
       handlers = h;
       if (typeof BroadcastChannel !== 'undefined') {
         channel = new BroadcastChannel(name);
-        channel.onmessage = () => {
-          if (!stopped && !held) handlers?.onChanged();
+        channel.onmessage = (ev: MessageEvent) => {
+          if (stopped) return;
+          if (ev.data === 'enqueued') {
+            if (held) handlers?.onEnqueued?.();
+            return;
+          }
+          if (!held) handlers?.onChanged();
         };
       }
       first();
+    },
+    notifyEnqueued() {
+      try {
+        channel?.postMessage('enqueued');
+      } catch {
+        // Kanal zu
+      }
     },
     steal() {
       if (stopped || held) return;

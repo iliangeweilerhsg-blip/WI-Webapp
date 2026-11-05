@@ -1,6 +1,6 @@
-// Vertrag des QueueStore: läuft gegen Memory immer, gegen IndexedDB nur, wenn indexedDB vorhanden ist.
-// OFFEN: IndexedDB-Implementierung mit fake-indexeddb testen, sobald T1-DB gemergt ist.
-import { describe, expect, it } from 'vitest';
+// Vertrag des QueueStore: derselbe Satz Tests gegen Memory und gegen IndexedDB (fake-indexeddb, je Test eine frische Fabrik).
+import { IDBFactory } from 'fake-indexeddb';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IndexedDbQueueStore, MemoryQueueStore, type QueueStore } from '../src/lib/sync/store.ts';
 import type { QueuedOp } from '../src/lib/sync/types.ts';
 import { dependentsOf, correctClock, rewriteSessionId } from '../src/lib/sync/ops.ts';
@@ -54,10 +54,112 @@ function contract(name: string, create: () => QueueStore) {
 }
 
 contract('Memory', () => new MemoryQueueStore());
-if (typeof indexedDB !== 'undefined') {
-  let i = 0;
-  contract('IndexedDB', () => new IndexedDbQueueStore(`sg-sync-test-${i++}`));
-}
+contract('IndexedDB (fake-indexeddb)', () => new IndexedDbQueueStore('sg-sync-test', new IDBFactory()));
+
+describe('IndexedDbQueueStore: Besonderheiten von IndexedDB', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('übersteht eine neue Instanz (Neuladen): Warteschlange, Zähler, Ablage und Meta bleiben', async () => {
+    const factory = new IDBFactory();
+    const a = new IndexedDbQueueStore('p', factory);
+    const e1 = await a.append(op(1));
+    const e2 = await a.append(op(2));
+    await a.putMany([{ ...e2, failures: 4, sent: true }]);
+    await a.shelve(
+      [e1.key],
+      [{ shelvedAt: 7, op: e1.op, reason: { kind: 'rejected', code: 'c', message: 'm', causedBy: null } }],
+    );
+    await a.setMeta('db_epoch', 'E');
+    await a.close();
+
+    const b = new IndexedDbQueueStore('p', factory);
+    expect(await b.list()).toMatchObject([{ key: e2.key, failures: 4, sent: true, op: { op_id: uid(2) } }]);
+    expect(await b.listShelf()).toMatchObject([{ id: 1, shelvedAt: 7, op: { op_id: uid(1) } }]);
+    expect(await b.getMeta('db_epoch')).toBe('E');
+    // Schlüssel laufen über Instanzen hinweg weiter und werden nicht wiederverwendet
+    expect((await b.append(op(3))).key).toBeGreaterThan(e2.key);
+  });
+
+  it('zwei Instanzen derselben Datenbank (zwei Tabs) sehen die Einträge des anderen', async () => {
+    const factory = new IDBFactory();
+    const a = new IndexedDbQueueStore('p', factory);
+    const b = new IndexedDbQueueStore('p', factory);
+    await a.append(op(1));
+    await b.append(op(2));
+    expect((await a.list()).map((e) => e.op.op_id)).toEqual([uid(1), uid(2)]);
+  });
+
+  it('onversionchange: gibt die Verbindung frei, ein deleteDatabase eines anderen Tabs wird nicht blockiert', async () => {
+    const factory = new IDBFactory();
+    const s = new IndexedDbQueueStore('p', factory);
+    await s.append(op(1));
+    await new Promise<void>((resolve, reject) => {
+      const del = factory.deleteDatabase('p');
+      del.onblocked = () => reject(new Error('deleteDatabase wurde blockiert'));
+      del.onsuccess = () => resolve();
+      del.onerror = () => reject(del.error);
+    });
+    // Beim nächsten Zugriff öffnet der Store neu (leere Datenbank), statt an der toten Verbindung zu scheitern
+    expect(await s.list()).toEqual([]);
+    expect((await s.append(op(2))).key).toBe(1);
+  });
+
+  it('onversionchange: ein Versions-Upgrade eines anderen Tabs läuft durch; der Store scheitert dann sauber und erholt sich nicht still', async () => {
+    const factory = new IDBFactory();
+    const s = new IndexedDbQueueStore('p', factory);
+    await s.append(op(1));
+    const blocked = vi.fn();
+    await new Promise<void>((resolve, reject) => {
+      const up = factory.open('p', 2);
+      up.onblocked = blocked;
+      up.onsuccess = () => {
+        up.result.close();
+        resolve();
+      };
+      up.onerror = () => reject(up.error);
+    });
+    expect(blocked).not.toHaveBeenCalled();
+    // Die Datenbank ist jetzt neuer als der Store (Version 1): VersionError, aber nicht dauerhaft zwischengespeichert
+    await expect(s.list()).rejects.toMatchObject({ name: 'VersionError' });
+    const s2 = new IndexedDbQueueStore('p', factory, 2);
+    expect((await s2.list()).map((e) => e.op.op_id)).toEqual([uid(1)]);
+  });
+
+  it('onblocked: wartet auf den Tab mit der alten Version, warnt und läuft nach dessen Schließen weiter', async () => {
+    const factory = new IDBFactory();
+    // Alter Tab: hält Version 1 offen und gibt bei versionchange nicht frei
+    const old = await new Promise<IDBDatabase>((resolve, reject) => {
+      const req = factory.open('p', 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore('queue', { keyPath: 'key', autoIncrement: true });
+        req.result.createObjectStore('shelf', { keyPath: 'id', autoIncrement: true });
+        req.result.createObjectStore('meta', { keyPath: 'name' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const s = new IndexedDbQueueStore('p', factory, 2);
+    let settled = false;
+    const pending = s.append(op(1)).then((e) => {
+      settled = true;
+      return e;
+    });
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('blockiert')));
+    expect(settled).toBe(false);
+    old.close();
+    expect((await pending).op.op_id).toBe(uid(1));
+    expect(await s.list()).toHaveLength(1);
+  });
+
+  it('close() gibt die Verbindung frei; danach öffnet der nächste Zugriff neu', async () => {
+    const s = new IndexedDbQueueStore('p', new IDBFactory());
+    await s.append(op(1));
+    await s.close();
+    await s.close(); // doppelt ist harmlos
+    expect(await s.list()).toHaveLength(1);
+  });
+});
 
 describe('Operations-Hilfen', () => {
   it('findet abhängige Operationen transitiv', () => {

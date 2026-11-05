@@ -41,7 +41,14 @@ export async function startTestApp(
 ): Promise<TestApp> {
   const config = testConfig(overrides);
   const handle = createDb(config.databaseUrl);
-  const app = await buildApp({ config, db: handle.db, logger: pino({ level: 'silent' }), ...extra });
+  const app = await buildApp({
+    config,
+    db: handle.db,
+    logger: pino({ level: 'silent' }),
+    // Der Session-Takt läuft in Tests nur, wenn ein Test ihn ausdrücklich einschaltet
+    sessionTicker: false,
+    ...extra,
+  });
   await app.ready();
   return {
     app,

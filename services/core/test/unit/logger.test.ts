@@ -3,15 +3,26 @@ import {
   chmodSync,
   existsSync,
   mkdtempSync,
+  readdirSync,
+  statSync,
   readFileSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
+import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { hasOpenPermissions } from '../../src/config.ts';
-import { createLogger, initialLogDay, rotateLogs } from '../../src/logger.ts';
+import {
+  createLogger,
+  enforceLogSizeLimits,
+  initialLogDay,
+  loggerOptions,
+  redactUrl,
+  rotateLogs,
+} from '../../src/logger.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -90,6 +101,76 @@ describe('hasOpenPermissions', () => {
   });
 });
 
+describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
+  const SECRET = '00000000-0000-4000-8000-000000000091';
+
+  it('redactUrl: nur geheime Namen, Rest und Reihenfolge bleiben', () => {
+    expect(redactUrl('/devices/pairings?pairing_id=abc')).toBe('/devices/pairings?pairing_id=[Redacted]');
+    expect(redactUrl('/x?limit=5&Token=a&code=1&cursor=z')).toBe(
+      '/x?limit=5&Token=[Redacted]&code=[Redacted]&cursor=z',
+    );
+    expect(redactUrl('/x?pairing%5Fid=a&device_token=b')).toBe(
+      '/x?pairing%5Fid=[Redacted]&device_token=[Redacted]',
+    );
+    expect(redactUrl('/x?pairing_id=a&pairing_id=b#f')).toBe(
+      '/x?pairing_id=[Redacted]&pairing_id=[Redacted]#f',
+    );
+    expect(redactUrl('/devices')).toBe('/devices');
+    expect(redactUrl('/x?')).toBe('/x?');
+  });
+
+  it('Namensgrenzen: harmlose Parameter bleiben lesbar, geheime werden geschwärzt', () => {
+    for (const name of ['author', 'keyword', 'sort_key', 'session_id', 'limit', 'codec', 'tokens']) {
+      expect(redactUrl(`/x?${name}=v`)).toBe(`/x?${name}=v`);
+    }
+    for (const name of [
+      'pairing_id',
+      'PAIRING_ID',
+      'pairing%5Fid',
+      'token',
+      'access_token',
+      'wstoken',
+      'device-token',
+      'code',
+      'api_key',
+      'secret',
+    ]) {
+      expect(redactUrl(`/x?a=1&${name}=v`)).toBe(`/x?a=1&${name}=[Redacted]`);
+    }
+  });
+
+  it('printf-Argumente und Fehlerobjekte werden geschwärzt', () => {
+    const lines: string[] = [];
+    const logger = pino(loggerOptions({ logLevel: 'trace' }), { write: (c: string) => void lines.push(c) });
+    logger.info('Route %s', '/x?pairing_id=GEHEIM1');
+    logger.info({ a: 1 }, 'Route %s und %s', 'ok', '/y?token=GEHEIM2');
+    logger.error(new Error('kaputt bei /z?pairing_id=GEHEIM3'));
+    logger.error({ err: new Error('bei /z?access_token=GEHEIM4') }, 'Fehler');
+    const log = lines.join('');
+    expect(log).not.toMatch(/GEHEIM/);
+    expect(log).toContain('"msg":"Route /x?pairing_id=[Redacted]"');
+  });
+
+  it('die pairing_id taucht im echten Log-Strom nicht auf (Request- und Fehlerzeilen)', async () => {
+    const lines: string[] = [];
+    const stream = { write: (chunk: string) => void lines.push(chunk) };
+    const logger = pino(loggerOptions({ logLevel: 'trace' }), stream);
+    const app = Fastify({ loggerInstance: logger });
+    app.delete('/devices/pairings', async (request) => {
+      request.log.info('handler');
+      return {};
+    });
+    await app.inject({ method: 'DELETE', url: `/devices/pairings?pairing_id=${SECRET}&x=1` });
+    await app.inject({ method: 'GET', url: `/unbekannt?pairing_id=${SECRET}` });
+    await app.close();
+    const log = lines.join('');
+    expect(log).toContain('incoming request');
+    expect(log).toContain('request completed');
+    expect(log).not.toContain(SECRET);
+    expect(log).toContain('pairing_id=[Redacted]&x=1');
+  });
+});
+
 describe('Log-Schwärzung Moodle-Token (08 §9.1)', () => {
   it('schwärzt wstoken und token, auch eine Ebene tiefer', () => {
     const dir = mkdtempSync(join(tmpdir(), 'sg-log-'));
@@ -98,5 +179,58 @@ describe('Log-Schwärzung Moodle-Token (08 §9.1)', () => {
     const text = readFileSync(join(dir, 'logs', 'core.log'), 'utf8');
     expect(text).toContain('[Redacted]');
     expect(text).not.toMatch(/geheim-/);
+  });
+});
+
+describe('Größengrenzen für core.log (Issue #87)', () => {
+  const now = new Date('2026-11-04T12:00:00Z');
+  const limits = { maxFileBytes: 1000, maxTotalBytes: 2500 };
+
+  it('rotiert core.log ab der Dateigrenze, darunter nicht', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-core-log-'));
+    writeFileSync(join(dir, 'core.log'), 'x'.repeat(999));
+    expect(enforceLogSizeLimits(dir, limits, now)).toBe(false);
+    expect(existsSync(join(dir, 'core.log'))).toBe(true);
+    writeFileSync(join(dir, 'core.log'), 'x'.repeat(1000));
+    expect(enforceLogSizeLimits(dir, limits, now)).toBe(true);
+    expect(existsSync(join(dir, 'core.log'))).toBe(false);
+    expect(existsSync(join(dir, `core-2026-11-04-${now.getTime()}.log`))).toBe(true);
+  });
+
+  it('löscht die ältesten Archive, bis die Gesamtgrenze eingehalten ist, und lässt core.log in Ruhe', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-core-log-'));
+    for (const [name, age] of [
+      ['core-2026-11-01.log', 3],
+      ['core-2026-11-02.log', 2],
+      ['core-2026-11-03.log', 1],
+    ] as const) {
+      writeFileSync(join(dir, name), 'x'.repeat(900));
+      utimesSync(join(dir, name), new Date(now.getTime() - age * DAY), new Date(now.getTime() - age * DAY));
+    }
+    writeFileSync(join(dir, 'core.log'), 'x'.repeat(500));
+    writeFileSync(join(dir, 'worker.log'), 'x'.repeat(5000)); // fremde Datei zählt nicht
+    expect(enforceLogSizeLimits(dir, limits, now)).toBe(false);
+    // 3 x 900 + 500 = 3200 > 2500: das älteste Archiv geht, dann sind es 2300
+    expect(existsSync(join(dir, 'core-2026-11-01.log'))).toBe(false);
+    expect(existsSync(join(dir, 'core-2026-11-02.log'))).toBe(true);
+    expect(existsSync(join(dir, 'core-2026-11-03.log'))).toBe(true);
+    expect(existsSync(join(dir, 'core.log'))).toBe(true);
+    expect(existsSync(join(dir, 'worker.log'))).toBe(true);
+  });
+
+  it('createLogger hält Datei und Gesamtgröße beim Schreiben ein', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-log-'));
+    const logger = createLogger(
+      { dataDir: dir, logLevel: 'info' },
+      { limits: { maxFileBytes: 20_000, maxTotalBytes: 60_000 } },
+    );
+    for (let i = 0; i < 2000; i++) logger.info({ i }, 'x'.repeat(100));
+    const logs = join(dir, 'logs');
+    const files = readdirSync(logs).filter((name) => /^core.*\.log$/.test(name));
+    const sizes = files.map((name) => statSync(join(logs, name)).size);
+    expect(files.length).toBeGreaterThan(1);
+    // Je Datei höchstens Grenze plus die Prüfspanne (1/8 der Grenze), insgesamt etwa die Gesamtgrenze
+    for (const size of sizes) expect(size).toBeLessThanOrEqual(20_000 * 1.25);
+    expect(sizes.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(60_000 + 20_000 * 1.25);
   });
 });

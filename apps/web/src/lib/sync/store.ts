@@ -94,20 +94,25 @@ export class IndexedDbQueueStore implements QueueStore {
 
   private readonly name: string;
   private readonly factory: IDBFactory;
+  private readonly version: number;
 
-  constructor(name = 'sg-sync', factory: IDBFactory = globalThis.indexedDB) {
+  /** `version` ist nur für Tests gedacht (Upgrade-Pfad, `onblocked`); im Betrieb gilt `DB_VERSION`. */
+  constructor(name = 'sg-sync', factory: IDBFactory = globalThis.indexedDB, version = DB_VERSION) {
     this.name = name;
     this.factory = factory;
+    this.version = version;
   }
 
   private db(): Promise<IDBDatabase> {
     this.dbPromise ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const req = this.factory.open(this.name, DB_VERSION);
+      const req = this.factory.open(this.name, this.version);
       req.onupgradeneeded = () => {
         const db = req.result;
-        db.createObjectStore('queue', { keyPath: 'key', autoIncrement: true });
-        db.createObjectStore('shelf', { keyPath: 'id', autoIncrement: true });
-        db.createObjectStore('meta', { keyPath: 'name' });
+        if (!db.objectStoreNames.contains('queue'))
+          db.createObjectStore('queue', { keyPath: 'key', autoIncrement: true });
+        if (!db.objectStoreNames.contains('shelf'))
+          db.createObjectStore('shelf', { keyPath: 'id', autoIncrement: true });
+        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'name' });
       };
       req.onblocked = () => {
         // Ein anderer Tab hält eine ältere Version offen; die Anfrage wartet, bis er schließt
@@ -125,7 +130,10 @@ export class IndexedDbQueueStore implements QueueStore {
         };
         resolve(db);
       };
-      req.onerror = () => reject(req.error ?? new Error('IndexedDB lässt sich nicht öffnen'));
+      req.onerror = () => {
+        this.dbPromise = null; // nicht für immer den Fehler merken (z. B. Version von einem anderen Tab erhöht)
+        reject(req.error ?? new Error('IndexedDB lässt sich nicht öffnen'));
+      };
     });
     return this.dbPromise;
   }
