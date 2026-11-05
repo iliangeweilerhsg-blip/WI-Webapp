@@ -132,8 +132,11 @@ export async function recordDecision(
  * mit `moodle_course_link`.
  */
 export function linkRemovable(): SQL<boolean> {
-  const moduleId = moodleCourseLink.moduleId;
-  return sql<boolean>`(${moodleCourseLink.auto} IS NOT DISTINCT FROM 'angelegt'
+  // Ausdrücklich mit Tabellennamen: Drizzle schreibt Spalten ohne Join unqualifiziert, und in den Unterabfragen
+  // bezöge sich `"module_id"` dann auf die innere Tabelle (#158). Mit Join wäre `${spalte}` schon qualifiziert
+  const outer = (column: { name: string }) => sql.raw(`"moodle_course_link"."${column.name}"`);
+  const moduleId = outer(moodleCourseLink.moduleId);
+  return sql<boolean>`(${outer(moodleCourseLink.auto)} IS NOT DISTINCT FROM 'angelegt'
     AND NOT EXISTS (SELECT 1 FROM session s WHERE s.module_id = ${moduleId} AND s.deleted_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM notebook n WHERE n.module_id = ${moduleId} AND n.deleted_at IS NULL AND n.kind = 'frei')
     AND NOT EXISTS (SELECT 1 FROM page p JOIN notebook n ON n.id = p.notebook_id
@@ -145,7 +148,7 @@ export function linkRemovable(): SQL<boolean> {
     AND NOT EXISTS (SELECT 1 FROM calendar_event c WHERE c.module_id = ${moduleId}
       AND c.assigned_by = 'manuell' AND c.deleted_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM moodle_course_link o WHERE o.module_id = ${moduleId}
-      AND o.moodle_course_id <> ${moodleCourseLink.moodleCourseId}))`;
+      AND o.moodle_course_id <> ${outer(moodleCourseLink.moodleCourseId)}))`;
 }
 
 /** Alle Zuordnungen, auch zu gelöschten Modulen nicht (die fallen weg, bis das Modul wiederhergestellt ist) */
