@@ -77,6 +77,8 @@ export class ChunkUploader {
 
   private running: Promise<void> | null = null;
   private disposed = false;
+  /** Nur der Leader-Tab lädt hoch (Issue #115): ausgeschaltet läuft nichts, bis es wieder eingeschaltet wird */
+  private enabled = true;
   private dirty = false;
   private wake: (() => void) | null = null;
   private status: UploaderStatus = { pendingChunks: 0, shelvedChunks: 0, offline: false, retryInMs: null };
@@ -105,7 +107,7 @@ export class ChunkUploader {
 
   /** Startet die Schleife, falls sie nicht läuft. Läuft sie schon, sieht sie neue Chunks im nächsten Durchgang. */
   kick(): void {
-    if (this.disposed) return;
+    if (this.disposed || !this.enabled) return;
     if (this.running) {
       // Neue Arbeit, während die Schleife ausläuft: noch ein Durchgang
       this.dirty = true;
@@ -125,6 +127,18 @@ export class ChunkUploader {
   /** Wartet, bis die Schleife nichts mehr zu tun hat */
   async drain(): Promise<void> {
     while (this.running) await this.running;
+  }
+
+  /** Schaltet das Hochladen ein oder aus (Leader-Rolle). Ein laufender Durchgang endet vor dem nächsten Chunk. */
+  setEnabled(on: boolean): void {
+    if (this.enabled === on) return;
+    this.enabled = on;
+    if (on) this.kick();
+    else this.wake?.();
+  }
+
+  get isEnabled(): boolean {
+    return this.enabled;
   }
 
   dispose(): void {
@@ -149,7 +163,7 @@ export class ChunkUploader {
 
   private async loop(): Promise<void> {
     let attempt = 0;
-    while (!this.disposed) {
+    while (!this.disposed && this.enabled) {
       this.dirty = false;
       let result: 'idle' | 'progress' | 'retry';
       try {
@@ -191,7 +205,7 @@ export class ChunkUploader {
     let progress = false;
     const recordings = (await this.store.listRecordings()).sort((a, b) => a.startedMs - b.startedMs);
     for (const listed of recordings) {
-      if (this.disposed) return progress ? 'progress' : 'idle';
+      if (this.disposed || !this.enabled) return progress ? 'progress' : 'idle';
       const outcome = await this.processRecording(listed.id);
       if (outcome === 'retry') return 'retry';
       if (outcome === 'progress') progress = true;
@@ -218,6 +232,7 @@ export class ChunkUploader {
     }
 
     for (const chunk of await this.store.listChunks(id)) {
+      if (this.disposed || !this.enabled) return progress ? 'progress' : 'idle';
       const outcome = await this.uploadChunk(meta, chunk);
       if (outcome === 'retry') return 'retry';
       if (outcome === 'progress') progress = true;

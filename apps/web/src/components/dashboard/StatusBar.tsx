@@ -55,6 +55,7 @@ export function useIpadConnected(client: SyncClient | null): boolean {
 const RUNNING_LABEL: Record<RecordingKind, string> = {
   rec: 'REC',
   starting: 'Startet',
+  waiting: 'Wartet auf anderen Tab',
   paused: 'Pausiert',
   'needs-start': 'Mikrofon aus',
   'mic-denied': 'Zugriff verweigert',

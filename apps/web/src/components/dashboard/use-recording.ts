@@ -18,17 +18,20 @@ import {
   AudioRecorder,
   LeaderRecording,
   createWebLocksRecordingLock,
+  isLeaderState,
+  notifyUploadsPending,
+  useConnectionState,
   type AcquireRecordingLock,
   type RecorderOptions,
   type RecorderStatus,
 } from '../../lib/recorder';
 import type { SyncClient } from '../../lib/sync/client.ts';
-import type { ConnectionState } from '../../lib/sync/types.ts';
 
 /** Anzeige-Zustand der Aufnahme für die Statusleiste */
 export type RecordingKind =
   | 'rec' // nimmt auf
-  | 'starting' // Mikrofon wird geöffnet bzw. wartet auf den bisherigen Aufnahme-Tab
+  | 'starting' // Mikrofon wird geöffnet
+  | 'waiting' // wartet darauf, dass der bisherige Aufnahme-Tab fertig wird
   | 'paused' // Session pausiert
   | 'needs-start' // Nutzeraktion nötig, um das Mikrofon zu öffnen
   | 'mic-denied'
@@ -54,6 +57,8 @@ export interface RecordingEnv {
   acquireLock?: AcquireRecordingLock;
   /** Standard: `navigator.permissions.query({ name: 'microphone' })` */
   permission?: () => Promise<Permission>;
+  /** Nach so vielen ms Warten auf die Aufnahme-Sperre erscheint der Hinweis (Standard 1500) */
+  waitHintMs?: number;
 }
 export const RecordingEnvContext = createContext<RecordingEnv>({});
 
@@ -71,20 +76,7 @@ const IDLE_STATUS: RecorderStatus = {
 };
 const noopSubscribe = () => () => undefined;
 
-/** Leader ist, wer verbunden ist oder es versucht; `idle`, `acquiring`, `other_tab` und `closed` sind es nicht */
-export function isLeaderState(state: ConnectionState): boolean {
-  return state !== 'idle' && state !== 'acquiring' && state !== 'other_tab' && state !== 'closed';
-}
-
-function useConnectionState(client: SyncClient | null): ConnectionState {
-  const [state, setState] = useState<ConnectionState>(client?.connectionState ?? 'idle');
-  useEffect(() => {
-    if (!client) return;
-    setState(client.connectionState);
-    return client.onEvent('connection', (c) => setState(c.state));
-  }, [client]);
-  return client ? state : 'idle';
-}
+export { isLeaderState };
 
 function usePermission(query: RecordingEnv['permission']): Permission {
   const [permission, setPermission] = useState<Permission>('unknown');
@@ -123,6 +115,8 @@ const MESSAGES = {
   missing: 'Kein Mikrofon gefunden. Die Session läuft weiter, Notizen gehen. Schließe ein Mikrofon an.',
   needsStart: 'Mikrofon noch nicht freigegeben. „Aufnahme starten“ öffnet die Browser-Abfrage.',
   otherTab: 'Die Aufnahme läuft in einem anderen Tab.',
+  waiting:
+    'Wartet auf den anderen Tab: Dort ist die Aufnahme noch offen (Mikrofon-Abfrage?). Schließe sie dort oder den Tab.',
 };
 
 /**
@@ -148,10 +142,11 @@ export function useSessionRecording(session: Session, client: SyncClient | null)
     const e = envRef.current;
     const recorder = new AudioRecorder({
       ...e.recorder,
+      // Hochladen darf nur der Leader (Issue #115); der Effekt unten schaltet es mit der Rolle ein
+      uploadsEnabled: false,
       sessionId,
       sessionMs: () => Math.max(0, Date.now() - (startedRef.current ?? Date.now())),
     });
-    recorder.resumeUploads();
     const control = new LeaderRecording({
       recorder,
       acquireLock: e.acquireLock ?? createWebLocksRecordingLock(),
@@ -160,11 +155,20 @@ export function useSessionRecording(session: Session, client: SyncClient | null)
     return () => {
       // Erst sauber beenden (letzter Chunk, `complete`), dann den Recorder entsorgen
       control.dispose();
-      void control.idle().then(() => recorder.dispose());
+      void control
+        .idle()
+        .then(() => {
+          // Ex-Leader: der Leader holt die letzten Chunks aus IndexedDB; sonst hier noch kurz hochladen
+          if (!leaderRef.current) notifyUploadsPending();
+          return recorder.flushUploads(8000);
+        })
+        .then(() => recorder.dispose());
       setParts(null);
     };
   }, [sessionId]);
 
+  const leaderRef = useRef(leader);
+  leaderRef.current = leader;
   const recorder = parts?.recorder ?? null;
   const control = parts?.control ?? null;
   const status = useSyncExternalStore(
@@ -178,6 +182,42 @@ export function useSessionRecording(session: Session, client: SyncClient | null)
   useEffect(() => {
     control?.set({ leader, phase, allowed });
   }, [control, leader, phase, allowed]);
+
+  // Nur der Leader lädt hoch. Wer die Rolle verliert, meldet nach dem Stopp, dass Chunks bereitliegen.
+  const wasLeader = useRef(false);
+  useEffect(() => {
+    if (!recorder || !control) return;
+    recorder.setUploading(leader);
+    if (leader) {
+      wasLeader.current = true;
+      return;
+    }
+    if (!wasLeader.current) return;
+    wasLeader.current = false;
+    let alive = true;
+    void control.idle().then(() => {
+      if (alive) notifyUploadsPending();
+    });
+    return () => {
+      alive = false;
+    };
+  }, [recorder, control, leader]);
+
+  const waiting = useSyncExternalStore(
+    control ? control.subscribe : noopSubscribe,
+    () => control?.isWaiting() ?? false,
+    () => false,
+  );
+  const [waitingLong, setWaitingLong] = useState(false);
+  const waitHintMs = env.waitHintMs ?? 1500;
+  useEffect(() => {
+    if (!waiting) {
+      setWaitingLong(false);
+      return;
+    }
+    const timer = setTimeout(() => setWaitingLong(true), waitHintMs);
+    return () => clearTimeout(timer);
+  }, [waiting, waitHintMs]);
 
   const start = useCallback(() => {
     setUserStarted(true);
@@ -193,7 +233,10 @@ export function useSessionRecording(session: Session, client: SyncClient | null)
     kind = 'other-tab';
     message = MESSAGES.otherTab;
   } else if (!decided) kind = 'starting';
-  else if (status.state === 'recording') kind = 'rec';
+  else if (waitingLong && status.state !== 'recording') {
+    kind = 'waiting';
+    message = MESSAGES.waiting;
+  } else if (status.state === 'recording') kind = 'rec';
   else if (status.state === 'error' || status.state === 'unsupported') {
     if (status.micIssue === 'denied') {
       kind = 'mic-denied';
