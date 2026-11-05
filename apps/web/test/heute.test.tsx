@@ -605,6 +605,28 @@ describe('Heute: ohne Verbindung', () => {
     );
   });
 
+  it('ohne Live-Verbindung fragt die Liste alle 30 s nach, auch wenn der Zustand hin und her springt', async () => {
+    boot();
+    await screen.findByRole('button', { name: 'Start' });
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    setNow('2026-11-04T07:10:00Z');
+    const count = () => core.requests.filter((r) => r.path.startsWith('/sessions?')).length;
+    const before = count();
+    // Blockierter WebSocket: `connecting` und `backoff` wechseln sich ab, nie `online`
+    act(() => sync.setState('backoff'));
+    for (let i = 0; i < 6; i++) {
+      act(() => sync.setState(i % 2 === 0 ? 'connecting' : 'backoff'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(count()).toBeGreaterThan(before);
+  });
+
   it('Core aus beim Öffnen: Core-Hinweis statt Absturz', async () => {
     setNow('2026-11-04T07:10:00Z');
     core = installCalendarCore({ semesters: [makeSemester()], modules: [DBS], down: true });

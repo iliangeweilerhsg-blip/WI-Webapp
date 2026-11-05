@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import type {
   Device,
   ExerciseSheet,
+  Marker,
   Module,
+  Notebook,
   PairingCode,
   PairingRequest,
   Semester,
@@ -11,6 +13,7 @@ import type {
   Settings,
   Slide,
   SlideDeck,
+  SlideEvent,
 } from '@sg/shared';
 
 const USER = '0190f6a2-0000-7000-8000-000000000000';
@@ -186,6 +189,13 @@ export interface FakeCore {
   slides: Record<string, Slide[]>;
   /** Sessions für GET /sessions und POST /sessions/{id}/start|pause|resume|stop|extend (VERTRAEGE §7.2, §9.4) */
   sessions: Session[];
+  /** Notizbücher für GET /notebooks?module_id (VERTRAEGE §7.4) */
+  notebooks: Notebook[];
+  /** Für GET /sessions/{id}/snapshot (VERTRAEGE §7.2): Folienwechsel und Marker, `stream_seq`/`stream_op_id` */
+  slideEvents: SlideEvent[];
+  markers: Marker[];
+  streamSeq: number;
+  streamOpId: string | null;
   /** Die nächste Anfrage an eine Session-Aktion wird mit diesem Fehler abgelehnt */
   rejectNextSession: null | { status: number; code: string };
   requests: RecordedRequest[];
@@ -203,6 +213,8 @@ export interface FakeCore {
   failIngest: (id: string) => void;
   /** Solange true, scheitern alle Anfragen wie bei einem nicht laufenden Core */
   down: boolean;
+  /** Hält `GET /sessions/{id}` an, bis das Promise erfüllt ist; die Antwort zeigt den Stand von vorher. `null` = nicht angehalten */
+  getGate: Promise<void> | null;
   /** Hält alle POSTs an, bis das Promise erfüllt ist (deterministisch statt Zeitfenster). `null` = nicht angehalten */
   postGate: Promise<void> | null;
   /** Stand von GET/PATCH /settings (Standards aus VERTRAEGE §14.1) */
@@ -272,6 +284,11 @@ export function installFakeCore(
     sheets: structuredClone(initial.sheets ?? []),
     slides: {},
     sessions: structuredClone(initial.sessions ?? []),
+    notebooks: [],
+    slideEvents: [],
+    markers: [],
+    streamSeq: 0,
+    streamOpId: null,
     rejectNextSession: null,
     requests: [],
     failNextUpload: null,
@@ -296,6 +313,7 @@ export function installFakeCore(
     },
     down: initial.down ?? false,
     postGate: null,
+    getGate: null,
     settings: makeSettings(),
     rejectNextSettings: null,
     devices: [],
@@ -433,7 +451,17 @@ export function installFakeCore(
       if (moduleMatch && method === 'PATCH') {
         const target = core.modules.find((m) => m.id === moduleMatch[1] && !m.deleted_at);
         if (!target) return json({ error: { code: 'module_not_found', message: 'x' } }, 404);
-        Object.assign(target, body, { updated_at: new Date().toISOString() });
+        // `settings` wird Schlüssel für Schlüssel zusammengeführt, `null` entfernt einen Schlüssel (VERTRAEGE §14.2)
+        const { settings: patchSettings, ...rest } = (body ?? {}) as { settings?: Record<string, unknown> };
+        Object.assign(target, rest, { updated_at: new Date().toISOString() });
+        if (patchSettings) {
+          const merged: Record<string, unknown> = { ...target.settings };
+          for (const [k, v] of Object.entries(patchSettings)) {
+            if (v === null) delete merged[k];
+            else merged[k] = v;
+          }
+          target.settings = merged as Module['settings'];
+        }
         return json(target);
       }
       if (moduleMatch && method === 'DELETE') {
@@ -458,6 +486,41 @@ export function installFakeCore(
           .filter((x) => !to || anchor(x) < Date.parse(to))
           .sort((a, b) => anchor(a) - anchor(b) || a.id.localeCompare(b.id));
         return json({ items, next_cursor: null });
+      }
+
+      // GET /sessions/{id}/snapshot (§7.2)
+      const snapshotOne = /^\/sessions\/([^/]+)\/snapshot$/.exec(path);
+      if (snapshotOne && method === 'GET') {
+        const found = core.sessions.find((x) => x.id === snapshotOne[1] && !x.deleted_at);
+        if (!found) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        return json({
+          session: structuredClone(found),
+          slide_events: structuredClone(core.slideEvents.filter((e) => e.session_id === found.id)),
+          markers: structuredClone(core.markers.filter((m) => m.session_id === found.id && !m.deleted_at)),
+          photos: [],
+          recordings: [],
+          stream_seq: core.streamSeq,
+          stream_op_id: core.streamOpId,
+        });
+      }
+
+      // GET /sessions/{id}
+      const sessionOne = /^\/sessions\/([^/]+)$/.exec(path);
+      if (sessionOne && method === 'GET') {
+        const found = core.sessions.find((x) => x.id === sessionOne[1] && !x.deleted_at);
+        // Die Antwort zeigt den Stand beim EINGANG der Anfrage (wie ein langsames Netz), auch wenn sie später kommt
+        const snapshot = found ? structuredClone(found) : undefined;
+        if (core.getGate) await core.getGate;
+        return snapshot ? json(snapshot) : json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+      }
+
+      // GET /notebooks?module_id (§7.4)
+      if (path === '/notebooks' && method === 'GET') {
+        const moduleId = url.searchParams.get('module_id');
+        return json({
+          items: core.notebooks.filter((n) => !moduleId || n.module_id === moduleId),
+          next_cursor: null,
+        });
       }
 
       const sessionMatch = /^\/sessions\/([^/]+)\/(start|pause|resume|stop|extend)$/.exec(path);

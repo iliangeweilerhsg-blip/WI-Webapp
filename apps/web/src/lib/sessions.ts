@@ -27,11 +27,10 @@ export function extendSession(id: string, minutes?: number): Promise<Session> {
 }
 
 /**
- * SCHALTER FÜR T1-04: Solange die Route `/session` nicht existiert, bleibt die Start-Karte nach dem Start auf
- * „läuft“ und zeigt nur den Link „Zur Vorlesung“. T1-04 setzt das auf `true`; dann leitet der Start (F-SES-02:
- * „Dashboard öffnet sich im Live-Layout“) automatisch weiter.
+ * Schalter für das Live-Dashboard (T1-04, Route `/session`). Mit `true` zeigt die Start-Karte den Link „Zur Vorlesung“
+ * und leitet der Start (F-SES-02: „Dashboard öffnet sich im Live-Layout“) automatisch weiter.
  */
-export const SESSION_DASHBOARD_AVAILABLE = false;
+export const SESSION_DASHBOARD_AVAILABLE = true;
 
 /** Wird von Tests überschrieben; sonst gilt `SESSION_DASHBOARD_AVAILABLE` */
 export function isDashboardAvailable(): boolean {
@@ -41,6 +40,11 @@ export function isDashboardAvailable(): boolean {
 /** Pfad des Live-Dashboards (T1-04, `apps/web/src/app/session/**`). Query-Parameter statt dynamischem Segment (§5). */
 export function sessionHref(id: string): string {
   return `/session?id=${encodeURIComponent(id)}`;
+}
+
+/** `GET /sessions/{id}`: 404 `session_not_found` kommt als `ApiRequestError` mit `status` 404. */
+export function getSession(id: string, signal?: AbortSignal): Promise<Session> {
+  return apiGet(`/sessions/${encodeURIComponent(id)}`, SessionSchema, { signal });
 }
 
 /** `GET /sessions` mit Zeitraum (`from` einschließlich, `to` ausschließlich) und/oder Zuständen (§7.2). Eine Seite. */
@@ -107,4 +111,14 @@ export function mergeSession(
   const anchor = sessionAnchor(incoming);
   const inRange = anchor >= range.from.getTime() && anchor < range.to.getTime();
   return isActive(incoming) || inRange ? [...list, incoming] : (list as Session[]);
+}
+
+/**
+ * Übernimmt eine neue Fassung EINER Session (Ereignis `session.updated` oder Antwort einer Aktion): Eine ältere
+ * Fassung (`updated_at` kleiner als die bekannte) wird verworfen, Gleichstand angenommen (wie `mergeSession`).
+ * Ohne bekannte Fassung gilt die neue.
+ */
+export function newerSession(known: Session | undefined | null, incoming: Session): Session {
+  if (!known || known.id !== incoming.id) return incoming;
+  return time(incoming.updated_at) < time(known.updated_at) ? known : incoming;
 }

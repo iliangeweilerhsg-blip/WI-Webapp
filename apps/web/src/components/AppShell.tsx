@@ -4,13 +4,13 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { usePathname } from 'next/navigation';
 import { isMacPlatform, matchShortcut } from '../lib/shortcuts.ts';
 import { SIDEBAR_KEY } from '../lib/theme.tsx';
+import { SIDEBAR_AUTO_ATTR } from '../lib/theme-init.ts';
 import { ErrorShelf } from '../lib/sync/ErrorShelf.tsx';
 import { OtherTabBanner } from '../lib/sync/OtherTabBanner.tsx';
 import { SyncProvider, useSyncClient } from '../lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../lib/sync/client.ts';
 import { ToastProvider } from '../lib/toast.tsx';
 import { UploadProvider } from '../lib/uploads.tsx';
-import { InkColumn } from './ink';
 import { Icon } from './Icon.tsx';
 import { SearchDialog } from './SearchDialog.tsx';
 import { SetupHost } from './SetupHost.tsx';
@@ -18,36 +18,6 @@ import { Sidebar } from './Sidebar.tsx';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const NARROW_QUERY = '(max-width: 767.98px)';
-/** Ab `lg` (Tailwind, 1024 px) ist Platz für die Notizen-Spalte */
-const WIDE_QUERY = '(min-width: 1024px)';
-
-function useMediaMatch(query: string): boolean {
-  const [matches, setMatches] = useState(false);
-  useEffect(() => {
-    if (typeof window.matchMedia !== 'function') return;
-    const mq = window.matchMedia(query);
-    const update = (e: { matches: boolean }) => setMatches(e.matches);
-    update(mq);
-    mq.addEventListener?.('change', update);
-    return () => mq.removeEventListener?.('change', update);
-  }, [query]);
-  return matches;
-}
-
-/**
- * ZWISCHENLÖSUNG: Es gibt noch keine Quelle für das „aktive Notizbuch“. Bis dahin steuert der Query-Parameter
- * `?notebook=<id>` die Notizen-Spalte (07 §3: rechts neben dem Inhalt); ohne Parameter bleibt sie ausgeblendet.
- */
-function useActiveNotebookId(pathname: string): string | null {
-  const [id, setId] = useState<string | null>(null);
-  useEffect(() => {
-    const read = () => setId(new URLSearchParams(window.location.search).get('notebook') || null);
-    read();
-    window.addEventListener('popstate', read);
-    return () => window.removeEventListener('popstate', read);
-  }, [pathname]);
-  return id;
-}
 
 /** App-Rahmen (07 §2): Seitenleiste (breit einklappbar, schmal als Drawer), Inhalt, Sync-Hinweise, globale Kürzel. */
 export function AppShell({ children, syncClient }: { children: ReactNode; syncClient?: SyncClient }) {
@@ -66,13 +36,40 @@ function Shell({ children }: { children: ReactNode }) {
   const [expanded, setExpanded] = useState(true);
   const [searchOpen, setSearchOpen] = useState(false);
   const [setupRequested, setSetupRequested] = useState(0);
-  // Die PDF-Anzeige (F-ORG-04) nutzt die ganze Fläche und scrollt selbst
+  // Die PDF-Anzeige (F-ORG-04) und das Live-Dashboard (T1-04) nutzen die ganze Fläche und scrollen selbst
   const pathname = usePathname();
-  const fullBleed = pathname === '/dokument';
-  const notebookId = useActiveNotebookId(pathname);
+  const fullBleed = pathname === '/dokument' || pathname === '/session';
 
-  const isWide = useMediaMatch(WIDE_QUERY);
   const modal = drawerOpen && isNarrow;
+
+  // Live-Dashboard: Die Seitenleiste klappt ein, damit die Folie genug Platz hat. Nichts davon wird gespeichert
+  // (kein localStorage). Beim Verlassen kommt der alte Zustand zurück, außer der Nutzer hat selbst umgeschaltet.
+  // Beim direkten Laden hat das Init-Skript schon eingeklappt (`data-sidebar-auto`), damit nichts springt.
+  const autoCollapsed = useRef(false);
+  const userToggled = useRef(false);
+  const onSession = /^\/session\/?$/.test(pathname);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (root.hasAttribute(SIDEBAR_AUTO_ATTR)) {
+      autoCollapsed.current = true;
+      root.removeAttribute(SIDEBAR_AUTO_ATTR);
+    }
+    if (onSession && !isNarrow) {
+      if (!autoCollapsed.current && root.getAttribute('data-sidebar') !== 'collapsed') {
+        root.setAttribute('data-sidebar', 'collapsed');
+        autoCollapsed.current = true;
+        userToggled.current = false;
+      }
+      if (autoCollapsed.current && !userToggled.current) setExpanded(false);
+    } else if (autoCollapsed.current) {
+      autoCollapsed.current = false;
+      if (!userToggled.current) {
+        root.removeAttribute('data-sidebar');
+        setExpanded(true);
+      }
+      userToggled.current = false;
+    }
+  }, [onSession, isNarrow]);
 
   // Fokus erst nach dem Schließen setzen: Solange der Drawer offen ist, ist der Rest `inert`
   const returnFocus = useRef<'menu' | 'main' | null>(null);
@@ -160,6 +157,7 @@ function Shell({ children }: { children: ReactNode }) {
       return;
     }
     const root = document.documentElement;
+    if (autoCollapsed.current) userToggled.current = true;
     const collapse = root.getAttribute('data-sidebar') !== 'collapsed';
     if (collapse) root.setAttribute('data-sidebar', 'collapsed');
     else root.removeAttribute('data-sidebar');
@@ -249,15 +247,6 @@ function Shell({ children }: { children: ReactNode }) {
                   <div className="mx-auto max-w-3xl">{children}</div>
                 )}
               </main>
-              {/* Nur mounten, wenn Platz ist: sonst Anfragen und Abo ohne sichtbare Spalte */}
-              {sync && notebookId && isWide && (
-                <aside
-                  aria-label="Notizen"
-                  className="w-[360px] shrink-0 overflow-y-auto border-l border-border bg-surface p-3"
-                >
-                  <InkColumn notebookId={notebookId} client={sync} />
-                </aside>
-              )}
             </div>
           </div>
           <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />

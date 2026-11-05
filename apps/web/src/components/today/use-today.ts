@@ -46,13 +46,25 @@ export function dayRange(dayStart: number): DayRange {
   return { from, to: addDays(from, 1), key: dayKey(from) };
 }
 
+/** So oft fragt eine Ansicht ohne Live-Verbindung nach (Ereignisse kommen dann nicht an) */
+export const POLL_MS = 30_000;
+
 /**
- * Verbindungszustand des Sync-Clients. `live`: Ereignisse kommen an (sonst fragt die Ansicht alle 30 s nach).
- * `hint`: Der letzte Stand ist womöglich veraltet, das sagt die Ansicht. Ein anderer Tab als Leader (`other_tab`)
- * ist nicht live, braucht aber keinen Hinweis (das zeigt `OtherTabBanner`). Ein Verbindungsaufbau, der länger als
- * `CONNECT_STALL_MS` hängt, gilt wie offline.
+ * Verbindungszustand des Sync-Clients. `live`: Ereignisse kommen an. `hint`: Der letzte Stand ist womöglich veraltet,
+ * das sagt die Ansicht. Ein anderer Tab als Leader (`other_tab`) ist nicht live, braucht aber keinen Hinweis (das zeigt
+ * `OtherTabBanner`); `otherTab` ist dann `true`. Ein Verbindungsaufbau, der länger als `CONNECT_STALL_MS` hängt, gilt wie
+ * offline.
+ *
+ * `online` ist der STABILE Wert für das Nachfragen (`refetchInterval`): Er ändert sich nur beim Wechsel von/nach
+ * `online`. `live` springt bei blockiertem WebSocket zwischen `connecting` und `backoff` und würde den Timer immer
+ * wieder neu starten, sodass nie nachgefragt wird.
  */
-export function useLiveState(client: SyncClient | null): { live: boolean; hint: boolean } {
+export function useLiveState(client: SyncClient | null): {
+  live: boolean;
+  hint: boolean;
+  online: boolean;
+  otherTab: boolean;
+} {
   const [state, setState] = useState<ConnectionState>(client?.connectionState ?? 'idle');
   const [stalled, setStalled] = useState(false);
   useEffect(() => {
@@ -66,12 +78,13 @@ export function useLiveState(client: SyncClient | null): { live: boolean; hint: 
     const timer = window.setTimeout(() => setStalled(true), CONNECT_STALL_MS);
     return () => window.clearTimeout(timer);
   }, [state]);
-  // Ohne Client (Server-Render, erster Paint) gibt es noch nichts zu melden
-  if (client === null) return { live: true, hint: false };
-  if (stalled) return { live: false, hint: true };
-  if (state === 'other_tab') return { live: false, hint: false };
+  // Ohne Client (Server-Render, erster Paint) gibt es noch nichts zu melden und nichts nachzufragen
+  if (client === null) return { live: true, hint: false, online: true, otherTab: false };
+  const online = state === 'online';
+  if (stalled) return { live: false, hint: true, online, otherTab: false };
+  if (state === 'other_tab') return { live: false, hint: false, online, otherTab: true };
   const live = LIVE_OR_PENDING.includes(state);
-  return { live, hint: !live };
+  return { live, hint: !live, online, otherTab: false };
 }
 
 export interface TodayData {
@@ -114,7 +127,7 @@ function useEvents(range: DayRange | null) {
 export function useTodayData(now: number | null): TodayData {
   const client = useQueryClient();
   const sync = useSyncClient();
-  const { live, hint } = useLiveState(sync);
+  const { live, hint, online } = useLiveState(sync);
   const dayStart = now === null ? null : startOfDay(new Date(now)).getTime();
   const range = useMemo(() => (dayStart === null ? null : dayRange(dayStart)), [dayStart]);
   const modules = useModules();
@@ -129,8 +142,8 @@ export function useTodayData(now: number | null): TodayData {
     queryKey: [...SESSIONS_KEY, range?.key ?? null],
     enabled: range !== null,
     placeholderData: keepPreviousData,
-    // Ohne Live-Verbindung kommen keine Ereignisse; dann alle 30 s nachfragen
-    refetchInterval: live ? false : 30_000,
+    // Ohne Live-Verbindung kommen keine Ereignisse; dann alle 30 s nachfragen (an `online` gebunden, siehe useLiveState)
+    refetchInterval: online ? false : POLL_MS,
     queryFn: async ({ signal }) => {
       if (!range) return [];
       const during = new Map<string, Session>();

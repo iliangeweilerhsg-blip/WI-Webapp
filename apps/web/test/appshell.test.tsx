@@ -251,21 +251,12 @@ describe('AppShell: SyncClient', () => {
     expect(await screen.findByRole('button', { name: /Sync-Fehlerablage \(1\)/ })).toBeVisible();
   });
 
-  it('mountet die Notizen-Spalte schmal nicht, auch nicht mit ?notebook=<id>', () => {
-    stubNarrow(true);
+  it('hängt keine Notizen-Spalte mehr an die Shell, auch nicht mit ?notebook=<id> (liegt im Dashboard)', async () => {
+    stubNarrow(false);
     window.history.replaceState(null, '', '/?notebook=nb-1');
     mount(fakeClient().client);
+    expect(await screen.findByText('Inhalt')).toBeVisible();
     expect(screen.queryByTestId('ink-column')).toBeNull();
-  });
-
-  it('blendet die Notizen-Spalte nur mit ?notebook=<id> ein', async () => {
-    stubNarrow(false);
-    const { client } = fakeClient();
-    const first = mount(client);
-    expect(screen.queryByTestId('ink-column')).toBeNull();
-    first.unmount();
-    window.history.replaceState(null, '', '/?notebook=nb-1');
-    mount(client);
-    expect(await screen.findByTestId('ink-column')).toHaveTextContent('nb-1');
+    expect(screen.queryByRole('complementary', { name: 'Notizen' })).toBeNull();
   });
 });
