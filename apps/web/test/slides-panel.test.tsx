@@ -6,7 +6,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import type { SlideEvent, SyncOp } from '@sg/shared';
 import { SlidesPanel, slideStep } from '../src/components/dashboard/slides/SlidesPanel.tsx';
 import { makeQueryClient } from '../src/lib/query.tsx';
-import type { SyncClient } from '../src/lib/sync/client.ts';
+import { SyncHandedOverError, type SyncClient } from '../src/lib/sync/client.ts';
 import {
   installFakeCore,
   makeDeck,
@@ -33,10 +33,17 @@ function fakeClient() {
     sent.push(input);
     return { type: 'ack', op_id: 'x', seq: sent.length };
   });
+  const listeners = new Map<string, Set<(data: unknown) => void>>();
   const client = {
     connectionState: 'online',
+    clockOffsetMs: null as number | null,
     send,
-    onEvent: vi.fn(() => () => undefined),
+    onEvent: vi.fn((name: string, fn: (data: unknown) => void) => {
+      const set = listeners.get(name) ?? new Set();
+      set.add(fn);
+      listeners.set(name, set);
+      return () => void set.delete(fn);
+    }),
     subscribe: vi.fn(
       (_stream: string, pos: { lastSeq: number; lastOpId: string | null }, cb: (op: SyncOp) => void) => {
         from = pos;
@@ -50,6 +57,8 @@ function fakeClient() {
     send,
     sent,
     unsubscribe,
+    raw: client,
+    emit: (name: string, data: unknown) => act(() => listeners.get(name)?.forEach((fn) => fn(data))),
     deliver: (op: SyncOp) => act(() => onOp?.(op)),
     get from() {
       return from;
@@ -317,9 +326,10 @@ describe('SlidesPanel: fremde Wechsel und Cache', () => {
     unmount();
     expect(sync.unsubscribe).toHaveBeenCalled();
     // Der Core kennt den Wechsel noch nicht (noch nicht bestätigt): der lokale Stand bleibt
-    render(panel(fakeClient()));
+    const again = fakeClient();
+    render(panel(again));
     expect(await screen.findByTestId('slide-counter')).toHaveTextContent('Folie 3 / 20');
-    await waitFor(() => expect(core.requests.filter((r) => r.path.endsWith('/snapshot'))).toHaveLength(2));
+    await waitFor(() => expect(again.subscribe).toHaveBeenCalled());
     await showing('Folie 3 / 20');
   });
 
@@ -344,5 +354,54 @@ describe('SlidesPanel: fremde Wechsel und Cache', () => {
       lastOpId: '0190f6a2-0000-7000-8000-000000000ccc',
     });
     await waitFor(() => expect(counter()).toHaveTextContent('Folie 6 / 20'));
+  });
+
+  it('ein lokaler, noch unbestätigter Wechsel schlägt beim Wiedereinhängen einen älteren Snapshot', async () => {
+    const { unmount } = await open();
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' }); // Folie 2, t_ms 60 000
+    await showing('Folie 2 / 20');
+    unmount();
+    // Der Core kennt nur einen älteren Wechsel (t_ms 5 000), den eigenen noch nicht
+    core.slideEvents = [slideEvent(9, 5_000)];
+    const again = fakeClient();
+    render(panel(again));
+    // Abonniert wird erst, wenn der Snapshot übernommen ist
+    await waitFor(() => expect(again.subscribe).toHaveBeenCalled());
+    await showing('Folie 2 / 20');
+  });
+
+  it('scheitert das Laden bei reset, wird der Strom bei der nächsten Verbindung neu aufgebaut', async () => {
+    const sync = fakeClient();
+    await open(sync);
+    expect(sync.subscribe).toHaveBeenCalledTimes(1);
+    const opts = (sync.subscribe.mock.calls[0] as unknown[])[3] as { onReset: () => Promise<unknown> };
+    core.down = true;
+    await expect(opts.onReset()).rejects.toBeDefined();
+    core.down = false;
+    core.slideEvents = [slideEvent(8, 900_000)];
+    await sync.emit('connection', { state: 'online', retryInMs: null, closeCode: null });
+    await waitFor(() => expect(sync.subscribe).toHaveBeenCalledTimes(2));
+    await showing('Folie 8 / 20');
+    expect(sync.unsubscribe).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SlidesPanel: Uhrabgleich und Meldungen', () => {
+  it('rechnet t_ms in synchronisierter Zeit (lokale Uhr + Versatz)', async () => {
+    const sync = fakeClient();
+    sync.raw.clockOffsetMs = 2_500;
+    await open(sync);
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    expect(events(sync)[0]?.t_ms).toBe(62_500);
+  });
+
+  it('meldet nichts, wenn ein anderer Tab die Operation übernimmt', async () => {
+    const sync = fakeClient();
+    sync.send.mockRejectedValueOnce(new SyncHandedOverError('x'));
+    await open(sync);
+    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
+    await showing('Folie 2 / 20');
+    await act(async () => undefined);
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });

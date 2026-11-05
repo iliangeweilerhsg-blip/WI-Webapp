@@ -6,7 +6,12 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import type { Marker, SyncOp } from '@sg/shared';
 import { MarkerControls, markerKeyAction } from '../src/components/dashboard/markers/MarkerControls.tsx';
 import { makeQueryClient } from '../src/lib/query.tsx';
-import { SyncNotLeaderError, type SyncClient } from '../src/lib/sync/client.ts';
+import {
+  SyncHandedOverError,
+  SyncNotLeaderError,
+  SyncRejectedError,
+  type SyncClient,
+} from '../src/lib/sync/client.ts';
 import { installFakeCore, makeSession, type FakeCore } from './fake-core.ts';
 
 const SESSION_ID = '0190f6a2-0000-7000-8000-0000000000e1';
@@ -28,12 +33,34 @@ function fakeClient() {
       return () => undefined;
     },
   );
-  const client = { connectionState: 'online', send, subscribe, onEvent: vi.fn(() => () => undefined) };
+  const listeners = new Map<string, Set<(data: unknown) => void>>();
+  const unsubscribe = vi.fn();
+  subscribe.mockImplementation(
+    (_s: string, _p: { lastSeq: number; lastOpId: string | null }, cb: (op: SyncOp) => void) => {
+      onOp = cb;
+      return unsubscribe;
+    },
+  );
+  const client = {
+    connectionState: 'online',
+    clockOffsetMs: null as number | null,
+    send,
+    subscribe,
+    onEvent: vi.fn((name: string, fn: (data: unknown) => void) => {
+      const set = listeners.get(name) ?? new Set();
+      set.add(fn);
+      listeners.set(name, set);
+      return () => void set.delete(fn);
+    }),
+  };
   return {
     client: client as unknown as SyncClient,
     send,
     sent,
     subscribe,
+    unsubscribe,
+    raw: client,
+    emit: (name: string, data: unknown) => act(() => listeners.get(name)?.forEach((fn) => fn(data))),
     deliver: (op: SyncOp) => act(() => onOp?.(op)),
   };
 }
@@ -338,5 +365,53 @@ describe('MarkerControls: Snapshot, Strom und Cache', () => {
     await open();
     await waitFor(() => expect(core.requests.filter((r) => r.path.endsWith('/snapshot'))).toHaveLength(2));
     expect(counts()).toEqual(['0', '0', '0']);
+  });
+});
+
+describe('MarkerControls: Reset, Uhrabgleich, Meldungen', () => {
+  it('scheitert das Laden bei reset, wird der Strom bei der nächsten Verbindung neu aufgebaut', async () => {
+    core.markers = [marker(1, 'frage')];
+    const sync = fakeClient();
+    await open(sync);
+    await waitFor(() => expect(counts()).toEqual(['1', '0', '0']));
+    const opts = (sync.subscribe.mock.calls[0] as unknown[])[3] as { onReset: () => Promise<unknown> };
+    core.down = true;
+    await expect(opts.onReset()).rejects.toBeDefined();
+    core.down = false;
+    core.markers = [marker(1, 'frage'), marker(2, 'klausur')];
+    await sync.emit('connection', { state: 'online', retryInMs: null, closeCode: null });
+    await waitFor(() => expect(sync.subscribe).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(counts()).toEqual(['1', '1', '0']));
+  });
+
+  it('rechnet t_ms in synchronisierter Zeit (lokale Uhr + Versatz)', async () => {
+    const sync = fakeClient();
+    sync.raw.clockOffsetMs = 2_000;
+    await open(sync);
+    press({ key: 'f' });
+    expect(sync.sent[0]?.data.t_ms).toBe(127_000);
+  });
+
+  it('meldet nichts und behält den Marker, wenn ein anderer Tab die Operation übernimmt', async () => {
+    const sync = fakeClient();
+    sync.send.mockRejectedValueOnce(new SyncHandedOverError('x'));
+    await open(sync);
+    press({ key: 'f' });
+    await act(async () => undefined);
+    expect(counts()).toEqual(['1', '0', '0']);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('nimmt einen vom Core abgelehnten Marker aus Zähler und Rückgängig-Liste', async () => {
+    const sync = fakeClient();
+    sync.send.mockRejectedValueOnce(
+      new SyncRejectedError({ code: 'message_invalid', message: 'x', opId: 'x', kind: 'rejected' }),
+    );
+    await open(sync);
+    press({ key: 'f' });
+    await waitFor(() => expect(counts()).toEqual(['0', '0', '0']));
+    expect(await screen.findByRole('status')).toHaveTextContent('Nicht gesendet');
+    press({ key: 'z', ctrlKey: true });
+    expect(sync.sent).toEqual([]);
   });
 });

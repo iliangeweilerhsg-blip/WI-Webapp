@@ -6,9 +6,15 @@
 // `marker.remove` zurück.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { MarkerKind } from '@sg/shared';
-import { sessionStreamId, sessionTimeMs } from '../../../lib/session-stream.ts';
+import { sessionStreamId, sessionTimeMs, syncedNowMs } from '../../../lib/session-stream.ts';
 import { isEditableTarget, isMacPlatform } from '../../../lib/shortcuts.ts';
-import { SyncNotConnectedError, SyncNotLeaderError, type SyncClient } from '../../../lib/sync/client.ts';
+import {
+  SyncHandedOverError,
+  SyncNotConnectedError,
+  SyncNotLeaderError,
+  SyncRejectedError,
+  type SyncClient,
+} from '../../../lib/sync/client.ts';
 import { uuidv7 } from '../../../lib/uuid.ts';
 import { UNDO_WINDOW_MS, addMarker, countByKind, removeMarker, useMarkers } from './use-markers.ts';
 
@@ -70,7 +76,7 @@ export function MarkerControls({ sessionId, active, startedAt, client }: MarkerC
     (kind: MarkerKind) => {
       const { enabled: ok, startedAt: start, client: sync } = live.current;
       if (!ok || start === null || !sync) return;
-      const eventAt = Date.now();
+      const eventAt = syncedNowMs(sync);
       const id = uuidv7(eventAt);
       update((s) => addMarker(s, { id, kind }, { at: eventAt }));
       setFlash(kind);
@@ -93,8 +99,15 @@ export function MarkerControls({ sessionId, active, startedAt, client }: MarkerC
         })
         .then(() => setFailed(false))
         .catch((error: unknown) => {
-          // Nicht in die Warteschlange gekommen (kein Leader, keine Verbindung): der Marker gilt nicht
-          if (error instanceof SyncNotLeaderError || error instanceof SyncNotConnectedError) {
+          // Übergeben: Der neue Leader sendet die Operation, der Marker gilt weiter
+          if (error instanceof SyncHandedOverError) return;
+          // Nicht in die Warteschlange gekommen (kein Leader, keine Verbindung) oder abgelehnt (liegt in der
+          // Fehlerablage): Der Marker gilt nicht, aus Zähler und Rückgängig-Liste
+          if (
+            error instanceof SyncNotLeaderError ||
+            error instanceof SyncNotConnectedError ||
+            error instanceof SyncRejectedError
+          ) {
             update((s) => removeMarker(s, id));
           }
           setFailed(true);
@@ -107,13 +120,15 @@ export function MarkerControls({ sessionId, active, startedAt, client }: MarkerC
   const undo = useCallback((): boolean => {
     const { client: sync } = live.current;
     if (!sync) return false;
-    const now = Date.now();
+    const now = syncedNowMs(sync);
     const last = get().own.at(-1);
     if (!last || now - last.at > UNDO_WINDOW_MS) return false;
     update((s) => removeMarker(s, last.id));
     sync
       .send({ stream: sessionStreamId(sessionId), kind: 'marker.remove', data: { marker_id: last.id } })
-      .catch(() => setFailed(true));
+      .catch((error: unknown) => {
+        if (!(error instanceof SyncHandedOverError)) setFailed(true);
+      });
     return true;
   }, [get, update, sessionId]);
 
@@ -140,6 +155,10 @@ export function MarkerControls({ sessionId, active, startedAt, client }: MarkerC
         <button
           key={m.kind}
           type="button"
+          // Kein Fokus per Maus oder Tab: Sonst löste die Leertaste danach diese Schaltfläche aus (zweiter Marker)
+          // statt die Folie weiterzuschalten. Per Tastatur setzt man Marker mit F, K, L.
+          tabIndex={-1}
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => add(m.kind)}
           disabled={!enabled}
           aria-label={`${m.label} markieren, ${counts[m.kind]}`}

@@ -129,7 +129,18 @@ function followMarkers(queryClient: QueryClient, sessionId: string, client: Sync
       const from = await load();
       if (cancelled) return;
       unsubscribe?.();
-      unsubscribe = client.subscribe(stream, from, onOp, { onReset: () => load() }) ?? null;
+      unsubscribe =
+        client.subscribe(stream, from, onOp, {
+          // Scheitert das Laden, bleibt der Strom stumm: neu aufbauen, sobald die Verbindung wieder steht
+          onReset: async () => {
+            try {
+              return await load();
+            } catch (error) {
+              needsReload = true;
+              throw error;
+            }
+          },
+        }) ?? null;
       needsReload = false;
     } catch {
       needsReload = true;

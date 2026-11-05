@@ -28,3 +28,11 @@ export function fetchSessionSnapshot(queryClient: QueryClient, sessionId: string
 export function sessionTimeMs(startedAt: number, eventAt: number): number {
   return Math.max(0, Math.round(eventAt - startedAt));
 }
+
+/**
+ * Jetzt in synchronisierter Zeit (VERTRAEGE §11.5): lokale Uhr + gemessener Versatz des Sync-Clients. `started_at`
+ * stammt von der Uhr des Cores, `t_ms` muss darum gegen diese Zeit gerechnet werden. Ohne Messung gilt Versatz 0.
+ */
+export function syncedNowMs(client: { clockOffsetMs?: number | null } | null): number {
+  return Date.now() + (client?.clockOffsetMs ?? 0);
+}
