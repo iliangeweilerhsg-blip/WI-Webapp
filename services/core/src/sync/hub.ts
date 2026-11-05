@@ -10,7 +10,7 @@ import type { SyncEvent } from '@sg/shared';
 import type { Db } from '../db/client.ts';
 import type { CommittedOp } from './append.ts';
 import type { PendingEntry, SyncConnection } from './connection.ts';
-import { syncLimits } from './limits.ts';
+import { CLOSE, syncLimits } from './limits.ts';
 
 /** Einfache Zählsperre: höchstens `limit` gleichzeitig, die übrigen warten in Reihenfolge */
 export class Semaphore {
@@ -64,6 +64,8 @@ export class SyncHub {
   /** Höchste `seq` je Strom, die der Hook ausgeliefert hat (bzw. beim Start schon da war) */
   private readonly delivered = new Map<string, number>();
   private readonly cursorWaiters = new Map<string, Set<CursorWaiter>>();
+  /** Widerrufene Geräte (über `onDeviceRevoked`), für die Lücke zwischen Wächter und `add` (§11.1) */
+  private readonly revoked = new Set<string>();
   /** Abfragen der Nachlieferung über alle Verbindungen */
   readonly catchUpQueries = new Semaphore(() => syncLimits.maxCatchUpQueries);
 
@@ -81,6 +83,16 @@ export class SyncHub {
   }
 
   // ---- Verbindungen --------------------------------------------------------------------------------------
+
+  markRevoked(deviceId: string): void {
+    this.revoked.add(deviceId);
+    // Auch Verbindungen, die closeDeviceConnections knapp verpasst haben
+    this.closeDeviceConnections(deviceId, CLOSE.tokenInvalid);
+  }
+
+  isRevoked(deviceId: string): boolean {
+    return this.revoked.has(deviceId);
+  }
 
   add(conn: SyncConnection): void {
     this.connections.add(conn);

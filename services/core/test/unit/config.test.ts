@@ -35,6 +35,13 @@ describe('loadConfig', () => {
     });
   });
 
+  it('Bonjour ist standardmäßig an und lässt sich mit SG_BONJOUR=0 abschalten (VERTRAEGE §12)', () => {
+    expect(loadConfig({}).bonjour).toBe(true);
+    expect(loadConfig({ SG_BONJOUR: '1' }).bonjour).toBe(true);
+    for (const off of ['0', 'false', 'OFF', ' nein '])
+      expect(loadConfig({ SG_BONJOUR: off }).bonjour).toBe(false);
+  });
+
   it('weist ungültige Ports und Log-Level ab', () => {
     expect(() => loadConfig({ SG_CORE_PORT: 'abc' })).toThrow(/SG_CORE_PORT/);
     expect(() => loadConfig({ SG_CORE_PORT: '70000' })).toThrow(/SG_CORE_PORT/);

@@ -27,6 +27,7 @@ const _CalendarEvent: Equal<z.infer<typeof Z.CalendarEventSchema>, T.CalendarEve
 const _CalendarEventKind: Equal<z.infer<typeof Z.CalendarEventKindSchema>, T.CalendarEventKind> = true;
 const _CalendarEventList: Equal<z.infer<typeof Z.CalendarEventListSchema>, T.CalendarEventList> = true;
 const _CalendarEventUpdate: Equal<z.infer<typeof Z.CalendarEventUpdateSchema>, T.CalendarEventUpdate> = true;
+const _CalendarReassignResult: Equal<z.infer<typeof Z.CalendarReassignResultSchema>, T.CalendarReassignResult> = true;
 const _CalendarSource: Equal<z.infer<typeof Z.CalendarSourceSchema>, T.CalendarSource> = true;
 const _CalendarSourceCreate: Equal<z.infer<typeof Z.CalendarSourceCreateSchema>, T.CalendarSourceCreate> = true;
 const _CalendarSourceKind: Equal<z.infer<typeof Z.CalendarSourceKindSchema>, T.CalendarSourceKind> = true;
@@ -125,6 +126,7 @@ const _PairStartRequest: Equal<z.infer<typeof Z.PairStartRequestSchema>, T.PairS
 const _PairStartResponse: Equal<z.infer<typeof Z.PairStartResponseSchema>, T.PairStartResponse> = true;
 const _PairingCode: Equal<z.infer<typeof Z.PairingCodeSchema>, T.PairingCode> = true;
 const _PairingRequest: Equal<z.infer<typeof Z.PairingRequestSchema>, T.PairingRequest> = true;
+const _PairingRequestList: Equal<z.infer<typeof Z.PairingRequestListSchema>, T.PairingRequestList> = true;
 const _PdfIngestDeckPayload: Equal<z.infer<typeof Z.PdfIngestDeckPayloadSchema>, T.PdfIngestDeckPayload> = true;
 const _PdfIngestPayload: Equal<z.infer<typeof Z.PdfIngestPayloadSchema>, T.PdfIngestPayload> = true;
 const _PdfIngestResult: Equal<z.infer<typeof Z.PdfIngestResultSchema>, T.PdfIngestResult> = true;

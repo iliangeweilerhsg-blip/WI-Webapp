@@ -1,3 +1,3 @@
 """Job-Handler. Importieren registriert sie in der Standard-Registry."""
 
-from . import internal, pdf_ingest  # noqa: F401
+from . import audio_finalize, internal, maintenance, pdf_ingest  # noqa: F401

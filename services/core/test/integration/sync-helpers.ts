@@ -2,7 +2,6 @@
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { networkInterfaces } from 'node:os';
-import type { FastifyRequest } from 'fastify';
 import { pino } from 'pino';
 import { buildApp, type BuildAppOptions } from '../../src/app.ts';
 import type { Config } from '../../src/config.ts';
@@ -70,31 +69,17 @@ export interface SyncTestApp {
   close: () => Promise<void>;
 }
 
-/** Echte App, die auf `host` lauscht. `devices`: Token → Gerät (simuliert T1-10 über `request.sgDevice`) */
+/** Echte App mit dem echten Wächter (T1-10), die auf `host` lauscht. Geräte-Tokens prüft die Datenbank */
 export async function startSyncApp(
-  options: { host?: string; devices?: Record<string, string | null>; extra?: Partial<BuildAppOptions> } = {},
+  options: { host?: string; extra?: Partial<BuildAppOptions> } = {},
 ): Promise<SyncTestApp> {
   const port = await freePort();
   const config = testConfig({ port });
   const handle = createDb(config.databaseUrl);
-  const devices = options.devices;
   const app = await buildApp({
     config,
     db: handle.db,
     logger: pino({ level: 'silent' }),
-    ...(devices
-      ? {
-          // So wird T1-10 den Wächter verdrahten: gültiges Token → request.sgDevice
-          verifyDeviceToken: async (token: string, request: FastifyRequest) => {
-            if (!(token in devices)) return false;
-            const deviceId = devices[token];
-            if (deviceId !== null && deviceId !== undefined) {
-              (request as FastifyRequest & { sgDevice?: unknown }).sgDevice = { deviceId };
-            }
-            return true;
-          },
-        }
-      : {}),
     ...options.extra,
   });
   await app.listen({ port, host: options.host ?? '127.0.0.1' });

@@ -323,6 +323,13 @@ export class SyncConnection {
     this.closeWith(closeCode, code);
   }
 
+  /** Gerät widerrufen: `error device_token_invalid` (fatal) und 4401 (§11.1) */
+  rejectRevoked(): void {
+    this.fatal('device_token_invalid', CLOSE.tokenInvalid, {
+      message: 'Das Gerät wurde entfernt. Bitte neu koppeln.',
+    });
+  }
+
   /** Unerwarteter Fehler im Server: nie abstürzen, Verbindung mit 4503 neu aufbauen lassen */
   private unexpected(error: unknown): void {
     this.hub.logger.error({ err: error }, 'Sync: unerwarteter Fehler');
@@ -516,11 +523,16 @@ export class SyncConnection {
 
     let dbEpoch: string;
     let resume: SyncResume[];
+    let deviceActive = true;
     try {
       dbEpoch = await readDbEpoch(this.hub.db);
       resume = await computeResume(this.hub.db, positions);
       if (this.deviceId) {
+        // null: Gerät gelöscht oder unbekannt, das Token ist also nicht mehr gültig
         this.deviceName = await readDeviceName(this.hub.db, this.deviceId);
+        deviceActive = this.deviceName !== null;
+      }
+      if (this.deviceId && deviceActive) {
         await storeAppVersion(
           this.hub.db,
           this.deviceId,
@@ -532,6 +544,10 @@ export class SyncConnection {
       return this.fatal('internal_error', CLOSE.retry, { retryable: true });
     }
     if (this.isClosed()) return;
+    // Seit dem Upgrade widerrufen (auch über einen Neustart des Core hinweg): nicht anmelden (§11.1)
+    if (this.deviceId !== null && (!deviceActive || this.hub.isRevoked(this.deviceId))) {
+      return this.rejectRevoked();
+    }
 
     this.client = hello.client;
     const started = this.applyResume(resume);

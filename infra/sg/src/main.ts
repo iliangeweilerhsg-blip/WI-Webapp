@@ -25,7 +25,7 @@ async function main(argv: string[]): Promise<number> {
     console.error(`[sg] ${(e as Error).message}`);
     return 1;
   }
-  return dispatch(parsed.command, cfg);
+  return dispatch(parsed.command, cfg, parsed.rest);
 }
 
 process.exitCode = await main(process.argv.slice(2));

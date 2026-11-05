@@ -12,8 +12,7 @@ import postgres from 'postgres';
 import type { SyncOp } from '@sg/shared';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
-import { HttpError } from '../errors.ts';
-import { isLoopbackAddress } from '../plugins/security.ts';
+import { onDeviceRevoked } from '../services/devices.ts';
 import { listenCommittedOps, setOnOpCommitted } from './append.ts';
 import { SyncConnection, type SyncSocket } from './connection.ts';
 import { handleEventNotification, SYNC_EVENT_CHANNEL } from './events.ts';
@@ -36,43 +35,31 @@ export const SYNC_PATH = '/sync';
 export type ResolvedDevice = { deviceId: string } | null | 'reject';
 
 /**
- * **Einzige Stelle**, an der der Sync-Server das Gerät einer Verbindung bestimmt.
+ * **Einzige Stelle**, an der der Sync-Server das Gerät einer Verbindung bestimmt (§16.2).
  *
- * Ab T1-10 setzt der Sicherheits-Wächter `request.sgDevice: { deviceId } | null` (`null` = lokal) und prüft dabei
- * Token und Origin. Bis dahin (Fallback): Loopback gilt als lokal, eine Verbindung aus dem Netz ohne
- * `sgDevice` wird mit 4401 geschlossen. Nach T1-10 bleibt der Fallback als Schutz bestehen.
+ * Host, Origin und Token prüft der Wächter (`plugins/security.ts`, T1-10) beim Upgrade und setzt
+ * `request.sgDevice`: `null` = lokal, `{ deviceId }` = gekoppeltes Gerät. Fehlt `sgDevice` (darf für `/sync` nicht
+ * vorkommen, nur Kopplungsrouten aus dem Netz haben es nicht), wird die Verbindung abgelehnt.
  */
-export function resolveDevice(request: FastifyRequest): ResolvedDevice {
-  const sgDevice = (request as FastifyRequest & { sgDevice?: { deviceId: string } | null }).sgDevice;
+export function resolveDevice(request: Pick<FastifyRequest, 'sgDevice'>): ResolvedDevice {
+  const sgDevice = request.sgDevice;
   if (sgDevice === null) return null;
-  if (sgDevice !== undefined) {
-    return typeof sgDevice.deviceId === 'string' ? { deviceId: sgDevice.deviceId } : 'reject';
-  }
-  return isLoopbackAddress(request.socket.remoteAddress) ? null : 'reject';
+  if (sgDevice && typeof sgDevice.deviceId === 'string') return { deviceId: sgDevice.deviceId };
+  return 'reject';
 }
 
 /**
- * Origin-Prüfung beim Upgrade (§11.1, Schutz gegen Cross-Site WebSocket Hijacking). Laut §16.2 macht das
- * künftig der Wächter (T1-10). Bis dahin prüft der Sync-Server selbst, danach doppelt (harmlos).
- * Ohne `Origin` (iPad-App) gilt nur die Token-Regel.
+ * Nur für Tests: wird vor dem Annehmen einer Verbindung abgewartet (nach dem Wächter, vor `hub.add`), um den
+ * Widerruf genau in dieser Lücke zu prüfen. In Produktion `null`.
  */
-function checkOrigin(request: FastifyRequest, config: Config): void {
-  const origin = request.headers.origin;
-  if (origin === undefined) return;
-  const allowed = new Set(['localhost', '127.0.0.1', '[::1]'].map((h) => `http://${h}:${config.port}`));
-  if (config.devWebOrigin) allowed.add(config.devWebOrigin);
-  if (!isLoopbackAddress(request.socket.remoteAddress) && request.headers.host) {
-    allowed.add(`http://${request.headers.host.toLowerCase()}`);
-  }
-  if (!allowed.has(origin)) {
-    throw new HttpError(403, 'origin_not_allowed', 'Der Origin dieser Anfrage ist nicht erlaubt.');
-  }
-}
+export const syncTestHooks: { beforeAccept: (() => Promise<void>) | null } = { beforeAccept: null };
 
 async function syncPluginImpl(app: FastifyInstance, options: SyncPluginOptions): Promise<void> {
   const { db, config, version } = options;
   const hub = new SyncHub({ db, logger: app.log, version });
   setActiveHub(hub);
+  // Widerrufene Geräte merken (T1-10 ruft das nach dem Commit von DELETE /devices/{id} auf)
+  const offRevoked = onDeviceRevoked((deviceId) => hub.markRevoked(deviceId));
 
   // Eigene Verbindung für LISTEN (die App-Verbindungen bleiben frei)
   const listenSql = postgres(config.databaseUrl, { max: 1, connect_timeout: 5, onnotice: () => {} });
@@ -145,6 +132,7 @@ async function syncPluginImpl(app: FastifyInstance, options: SyncPluginOptions):
   });
   app.addHook('onClose', async () => {
     closing = true;
+    offRevoked();
     for (const [kind, handler] of ownHandlers) unregisterOpHandler(kind, handler);
     if (retryTimer) clearTimeout(retryTimer);
     hub.listenerReady = false;
@@ -177,14 +165,11 @@ async function syncPluginImpl(app: FastifyInstance, options: SyncPluginOptions):
 
   app.get(
     SYNC_PATH,
-    {
-      websocket: true,
-      onRequest: async (request) => {
-        checkOrigin(request, config);
-      },
-    },
-    (socket, request) => {
+    // Host, Origin und Token prüft der Wächter (T1-10) im onRequest-Hook, bevor es hier ankommt
+    { websocket: true },
+    async (socket, request) => {
       const ws = socket as unknown as SyncSocket;
+      if (syncTestHooks.beforeAccept) await syncTestHooks.beforeAccept();
       const device = resolveDevice(request);
       if (device === 'reject') {
         ws.send(
@@ -199,7 +184,11 @@ async function syncPluginImpl(app: FastifyInstance, options: SyncPluginOptions):
         ws.close(CLOSE.tokenInvalid, 'device_token_invalid');
         return;
       }
-      new SyncConnection(hub, ws, device?.deviceId ?? null).start();
+      const conn = new SyncConnection(hub, ws, device?.deviceId ?? null);
+      conn.start();
+      // Widerruf zwischen Wächter und hub.add (§11.1): closeDeviceConnections hat diese Verbindung nicht gesehen.
+      // Direkt nach hub.add (in start) synchron prüfen. Vor welcome prüft die Verbindung noch einmal per DB.
+      if (device !== null && hub.isRevoked(device.deviceId)) conn.rejectRevoked();
     },
   );
 }

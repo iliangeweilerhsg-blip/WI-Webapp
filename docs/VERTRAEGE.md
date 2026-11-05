@@ -100,9 +100,29 @@ Ein laufender Job erneuert `locked_at` alle 60 s (Heartbeat). Ergebnis und Fehle
   - Beim Stopp der Session je Aufnahme ein Job. Ist die Aufnahme schon abgeschlossen (`POST /recordings/{id}/complete`), sofort; sonst mit `run_after = Stopp + 10 min`, weil der Browser noch Chunks aus IndexedDB nachliefern kann.
   - Kommt `complete`, während dieser Job noch `wartet`, setzt der Core `run_after = now()`. Es entsteht kein zweiter Job.
   - Kommt nach einem fertigen `audio.finalize` noch ein Chunk an, legt der Core einen neuen Job an. Das gilt nicht, wenn für die Aufnahme schon einer `wartet`. Der Job ist idempotent und erzeugt `full.m4a` neu.
+- **Ergänzung T1-06 (Anlegen und Nachzügler, verbindlich für Core):**
+  - Aufnahmen ohne Chunks bekommen keinen Job (§10.2).
+  - `complete` ohne vorhandenen Job legt (bei mindestens einem Chunk) einen Job an, auch solange die Session `laeuft`. Der Stopp legt nur dann einen an, wenn für die Aufnahme noch keiner existiert (`ensureFinalizeOnStop`, §16.2). Ein Job in `wartet`, `laeuft` oder `fertig` bleibt unberührt, nach `fehler` oder `abgebrochen` entsteht ein neuer.
+  - Chunk nach einem Job, der nicht mehr `wartet` (`laeuft`, `fertig`, `fehler`, `abgebrochen`): neuer Job. Ist die Aufnahme noch nicht abgeschlossen, mit `run_after = jetzt + 60 s`, damit ein Rückstau aus IndexedDB nicht jedes Mal die ganze Datei neu erzeugt. Ein Job, der `laeuft`, wird als `depends_on` des neuen eingetragen.
+  - Eine nachträglich angelegte Aufnahme (§10.1, Session schon `beendet`) ist beim Anlegen leer und bekommt ihren Job mit dem ersten Chunk, mit `run_after = jetzt + 10 min`.
+  - Der Core entscheidet unter `lockRecording` und liest den letzten Job mit `FOR UPDATE`. Der Worker holt Jobs mit `FOR UPDATE SKIP LOCKED`.
 - **Ergebnis** enthält `job_duration_ms` (Laufzeit des Jobs) getrennt von `audio_duration_ms` (Länge der Datei).
 - **Ausführung (Worker):** Chunks nach `seq` lesen. Bei `chunks_independent = false` als ein Bytestrom aneinanderhängen, sonst jeden Chunk einzeln decodieren. Dann mit `ffmpeg` nach `full.m4a` (AAC, 48 kHz, mono) umwandeln. Lücken (fehlende `seq` oder Sprünge in `start_ms`) werden als Stille mit korrekter Länge eingefügt. Zum Schluss `recording.duration_ms` und `recording.state` (`vollstaendig` bzw. `mit_luecken`) setzen.
-- **Session-Fortschritt (Worker):** Nach jedem Job mit `session_id` setzt der Worker `session.processing[<job.type>] = <job.state>`. Hat die Session danach keinen Job mehr in `wartet` oder `laeuft` und ist sie `beendet`, setzt er `state = 'verarbeitet'`. Danach folgt `pg_notify('sg_session', '<session_id>')`. Der Core hört darauf und sendet das Ereignis `session.updated` (§11.6).
+- **Session-Fortschritt (Worker):** Die Job-Schleife zieht den Fortschritt nach jedem Job mit `session_id` nach, in **derselben Transaktion**, in der der Job final wird (`fertig`, endgültig `fehler`, `abgebrochen` durch `depends_on`; bei Retry `wartet`; auch für abgestürzte Jobs). Handler schreiben ihn nicht selbst. Ablauf: (1) Session-Zeile `FOR NO KEY UPDATE` sperren, **bevor** Jobs gezählt werden, damit zwei gleichzeitig endende Jobs nacheinander laufen und der zweite den ersten sieht. (2) `session.processing[<job.type>]` aus **allen** Jobs dieses Typs der Session setzen: `fehler`, sobald einer endgültig gescheitert ist, sonst `laeuft`, dann `wartet`, sonst `fertig`; `abgebrochen` zählt nicht mit, nur abgebrochene Jobs ergeben `abgebrochen`. (3) Ist die Session `beendet` und hat sie keinen Job mehr in `wartet` oder `laeuft`, setzt der Worker `state = 'verarbeitet'`, auch wenn Jobs `fehler` sind; eine `verarbeitet`e Session ändert ihren Zustand nicht mehr, nur `processing`. (4) `pg_notify('sg_session', '<session_id>')`. Der Core hört darauf und sendet das Ereignis `session.updated` (§11.6). Doppelte Läufe sind harmlos.
+
+**Ergänzungen zu `audio.finalize` im Worker (T1-06w):**
+
+- **Fehlend** ist ein Chunk, wenn seine `seq` fehlt, die Datei fehlt, Größe oder sha256 nicht zur Zeile passen oder `ffmpeg` ihn bzw. seinen Lauf nicht dekodieren kann. Er macht den Job nicht zum `fehler`, die Aufnahme wird `mit_luecken` und die `seq` steht in `missing_seqs`.
+- **Abhängige Chunks** (`chunks_independent = false`): Läufe mit lückenlosen `seq` und ohne Sprung in `start_ms` werden einzeln dekodiert, jeweils mit dem Init-Segment aus Chunk 0 davor (WebM bis zum ersten Cluster, MP4 `ftyp`+`moov`). Chunks müssen nicht an Cluster- oder Fragmentgrenzen beginnen: Bei Läufen mit `seq > 0` wird der angeschnittene Anfang bis zur nächsten Cluster- bzw. Fragmentgrenze verworfen, als Lücke `fehlender_chunk` gemeldet (ab 1 s Verlust) und der Lauf rechtsbündig ausgeglichen (Stille vorn). Ergibt ein Lauf 0 ms, gelten seine Chunks als fehlend. **Unabhängige Chunks:** jeder Chunk wird einzeln dekodiert.
+- **Platzierung:** Jedes Stück liegt bei seinem `start_ms` (relativ zu `recording.started_ms`) und wird auf seine angegebene Länge gebracht (Summe `duration_ms`): zu kurz mit Stille aufgefüllt, zu lang gekürzt, bei Überlappung entfällt der Anfang. Encoder-Priming und Rotationslücken summieren sich so nicht auf. Die **Toleranz von 50 ms** gilt nur für die Meldung in `gaps` (`zeitluecke`), nicht für die Platzierung.
+- **Ende:** Fehlen Chunks nach dem letzten verwendbaren, füllt der Worker bis `started_ms + completed_duration_ms` auf (nur mit `complete`). **Ohne `complete`** ist ein fehlendes Ende nicht erkennbar; ein beschädigter letzter Chunk liefert dann über seine `duration_ms` die Endlücke, sonst gilt die Aufnahme ohne erkennbare Lücke als `vollstaendig`.
+- **Null verwertbare Chunks**, oder bei abhängigen Chunks fehlender bzw. beschädigter Chunk 0: kein `full.m4a` (eine alte wird entfernt), `chunk_count = 0`, `state = mit_luecken`, Job `fertig`. Ein nachgelieferter Chunk 0 macht einen späteren Lauf möglich (§3, neuer Job durch den Core).
+- **Plausibilitätsgrenzen** führen zu `fehler` ohne Retry: mehr als 10000 fehlende `seq`, eine einzelne oder alle Lücken zusammen länger als `completed_duration_ms` plus 1 h (ohne `complete`: 12 h).
+- **Voraussetzung:** `ffmpeg` und `ffprobe` müssen auf dem Mac installiert sein (PATH). Aufrufe ohne Shell, mit Zeitlimit, festem Eingabeformat (`-f matroska` bzw. `mov`) und `-protocol_whitelist file`.
+- **`processing` bei mehreren Aufnahmen:** Eine Session kann mehrere Aufnahmen und damit mehrere `audio.finalize`-Jobs haben. `processing['audio.finalize']` fasst alle zusammen: `fehler`, sobald einer endgültig gescheitert ist, sonst `laeuft` bzw. `wartet`, solange einer offen ist, sonst `fertig` (`abgebrochen` zählt nicht mit).
+- **MP4-Läufe:** Ein Lauf wird vor dem Dekodieren auf die letzte vollständige Top-Level-Box gekürzt; eine unvollständige `moof`/`mdat` am Ende entfällt.
+- **Ignorierte Chunks:** Chunks mit `seq > completed_last_seq` (nach `complete` nicht mehr zu erwarten) ignoriert der Worker mit einer Warnung.
+- **Session-Fortschritt bei Fehlern:** Gilt generisch für jeden Jobtyp (siehe „Session-Fortschritt (Worker)“ oben), auch bei endgültigem Scheitern von `audio.finalize`.
 
 ### IDs im Worker (ab Phase 1)
 
@@ -138,6 +158,14 @@ In der DB steht `file_path` relativ zu `SG_DATA_DIR`. So lässt sich der Datenor
 - **Ab Phase 1 (T1-10):** Der Core vergleicht `sha256(token)` mit `device.token_hash` gekoppelter, nicht gelöschter Geräte. Fehlt das Token: `401 device_token_required`. Ist es unbekannt oder widerrufen: `401 device_token_invalid`. Bei Erfolg setzt der Core `device.last_seen_at`, höchstens einmal pro Minute. Ohne Token aus dem Netz erreichbar sind nur `POST /devices/pair/start` und `POST /devices/pair/confirm`. Der WebSocket `/sync` ist eine Netzroute wie alle anderen: Token im `Authorization`-Header des Upgrades (§11.1). Für alle anderen Routen gelten lokale Anfragen und Anfragen mit gültigem Token gleich, außer den als **lokal** markierten (§7).
 - **Schutz gegen DNS-Rebinding:** Gilt nur für Anfragen über Loopback, also lokale Anfragen. Ist ihr `Host` nicht `localhost`, `127.0.0.1` oder `[::1]` (jeweils mit `SG_CORE_PORT`), antwortet der Core mit `421 host_not_allowed`. Anfragen aus dem Netz, etwa vom iPad über die IP oder `<rechnername>.local`, prüft er stattdessen über das Geräte-Token.
 - **Schutz gegen CSRF:** Zustandsändernde Anfragen (`POST`, `PUT`, `PATCH`, `DELETE`) mit `Origin`-Header werden mit `403 origin_not_allowed` abgelehnt. Ausgenommen sind die eigene Herkunft (`http://<erlaubter Host>:<SG_CORE_PORT>`) und `SG_DEV_WEB_ORIGIN`. Ohne `Origin`-Header (z. B. `curl`, iPad-App) gilt nur die Token-Regel.
+- **Nachtrag T1-10 (Umsetzung):**
+  - Ob eine Route lokal ist bzw. ohne Token erreichbar, steht an der Route (`config.sgAccess = 'local' | 'pairing'`) und wird nach dem Routing gelesen, nie per Textvergleich mit der URL. Unbekannte Pfade brauchen aus dem Netz immer ein Token.
+  - Reihenfolge aus dem Netz: Token fehlt → `401 device_token_required`, Token ungültig → `401 device_token_invalid`, erst danach `403 local_only`. Bei `pair/start` und `pair/confirm` (nur `POST`) wird ein mitgesendetes Token ignoriert.
+  - Ein Token, das nicht dem Format aus `PairResponse` entspricht (43 Zeichen base64url), gilt ohne Datenbankabfrage als ungültig. Die Prüfung liest ohne Cache: Ein widerrufenes Gerät ist mit dem Commit von `DELETE /devices/{id}` ungültig.
+  - Abgelehnte WebSocket-Upgrades bekommen `Connection: close`, der Core schließt den Socket nach der Antwort.
+  - **Schutz gegen DNS-Rebinding auf die LAN-IP** (Security-Review zu T1-10): Eine Webseite kann ihren Namen auf die IP des Macs umbiegen und dann mit eigenem `Host` und passendem `Origin` Anfragen „aus dem Netz“ stellen.
+    - **Host aus dem Netz:** Erlaubt sind nur IP-Literale (IPv4 bzw. `[IPv6]`, jeweils mit optionalem Port) und `<name>.local`. Alles andere, auch `localhost`, ergibt `421 host_not_allowed`. Das gilt für alle Netzanfragen, mit und ohne Token, und für den WebSocket. Das iPad verbindet sich über die IP aus dem QR-Code oder den `.local`-Namen aus Bonjour. Damit kann die Origin-Regel „eigene Herkunft `http://<Host>`“ für Geräte mit Token bleiben: Eine IP oder ein `.local`-Name lässt sich über öffentliches DNS nicht umbiegen.
+    - **`pair/start` und `pair/confirm` mit `Origin`-Header** (egal welcher) ergeben `403 origin_not_allowed`. Die iPad-App sendet keinen `Origin`, ein Browser immer. Keine Webseite kann so eine Anfrage anlegen oder Codes raten. Abgewiesene Aufrufe zählen nicht zum Budget aus §12.
 - Statische Web-App unter `/`. Unbekannte Pfade außerhalb von `/api` liefern `index.html` bzw. die passende `.html`-Datei aus dem Export.
 - Die Web-App nutzt Routen mit Query-Parametern statt dynamischer Segmente (`/modul?id=<uuid>`), weil der Static Export die IDs beim Build nicht kennt.
 
@@ -191,21 +219,24 @@ Abgeleitete Felder der API, etwa `event_count`, `session_id` am Termin, `planned
 Basis `/api/v1`, Konventionen aus §5 und 08 §1. Fehlerkörper immer `ApiError`. Für alle Routen gelten außerdem `400 validation_failed`, `401 device_token_required|device_token_invalid` (aus dem Netz), `403 origin_not_allowed` und `421 host_not_allowed`. Mit **lokal** markierte Routen lehnen Anfragen aus dem Netz mit `403 local_only` ab, auch mit gültigem Token.
 Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 
-**Lösch-Routen aus Phase 0:** `DELETE /modules/{id}` und `DELETE /semesters/{id}` antworten ab T1-18 (Umstellung auf `softDelete`) mit `409 session_active` und `details.session_ids`, wenn die Kaskade eine laufende oder pausierte Session enthält. Dann wird nichts gelöscht.
+**Lösch-Routen aus Phase 0:** `DELETE /semesters/{id}` (neu mit T1-18), `DELETE /modules/{id}`, `/slide-decks/{id}`, `/exercise-sheets/{id}` rufen `softDelete` (Kaskade §13). `DELETE /modules/{id}` und `DELETE /semesters/{id}` antworten ab T1-18 (Umstellung auf `softDelete`) mit `409 session_active` und `details.session_ids`, wenn die Kaskade eine laufende oder pausierte Session enthält. Dann wird nichts gelöscht.
 
 ### 7.1 Kalender (T1-01)
 
 | Methode und Pfad | Body | Antwort | Fehler |
 |---|---|---|---|
 | `GET /calendar/sources` | – | 200 `CalendarSourceList` | |
-| `POST /calendar/sources` | JSON `CalendarSourceCreate` (URL) **oder** multipart `file` (.ics, ≤ 5 MB), `name?` | 201 `IcsImportResult` | 409 `calendar_source_exists` (gleiche URL, `details.id`), 413 `file_too_large`, 422 `ics_invalid`, 502 `ics_fetch_failed` |
-| `POST /calendar/sources/{id}/sync` | URL-Quelle: leer. Datei-Quelle: multipart `file` (neue Fassung) | 200 `IcsImportResult` | 404 `calendar_source_not_found`, 422 `ics_invalid`, 502 `ics_fetch_failed` (setzt `last_error`) |
+| `POST /calendar/sources` | JSON `CalendarSourceCreate` (URL) **oder** multipart `file` (.ics, ≤ 5 MB), `name?` | 201 `IcsImportResult` | 400 `validation_failed` (u. a. ungültige URL, Zugangsdaten in der URL, ungültige `id`), 400 `file_missing`, 400 `unexpected_file`, 400 `upload_aborted`, 400 `ics_too_complex`, 409 `calendar_source_exists` (gleiche URL oder vergebene `id`, `details.id`), 413 `file_too_large`, 422 `ics_invalid`, 502 `ics_fetch_failed` |
+| `POST /calendar/sources/{id}/sync` | URL-Quelle: leer. Datei-Quelle: multipart `file` (neue Fassung) | 200 `IcsImportResult` | 400 `file_missing` (Datei-Quelle ohne Datei), 400 `unexpected_file` (Datei an eine URL-Quelle), 400 `source_not_syncable` (Art `google`), 400 `ics_too_complex`, 404 `calendar_source_not_found`, 422 `ics_invalid`, 502 `ics_fetch_failed`. Bei URL-Quellen setzt jeder Fehler `last_error` |
 | `DELETE /calendar/sources/{id}` | – | 204 (Kaskade §13) | 404 |
+| `POST /calendar/reassign` | – | 200 `{ changed, ohne_modul }` | 403 `local_only` (**lokal**) |
 | `GET /calendar/events?from&to&module_id&unassigned&include_cancelled` | – | 200 `CalendarEventList`, nach `starts_at` aufsteigend | 400 |
 | `GET /calendar/events/{id}` | – | 200 `CalendarEvent` | 404 `calendar_event_not_found` |
 | `PATCH /calendar/events/{id}` | `CalendarEventUpdate` | 200 `CalendarEventList` (alle geänderten Termine, ohne Cursor) | 404 `calendar_event_not_found`, 404 `module_not_found` |
 
-`from`/`to` sind ISO-Zeitpunkte. Ohne `include_cancelled=true` fehlen abgesagte Termine. `unassigned=true` liefert Termine ohne Modul.
+`POST /calendar/reassign` bestimmt Modul und Art aller Termine mit `assigned_by = auto` neu (wie beim Abgleich, ohne ICS) und ruft `ensurePlannedSessions` für die geänderten auf. `changed` = Termine mit neuem Modul oder neuer Art, `ohne_modul` = nicht abgesagte automatisch zugeordnete Termine ohne Modul danach. Manuelle Zuordnungen bleiben unangetastet, ein zweiter Aufruf ändert nichts (`changed = 0`). Die Route wartet auf laufende Abgleiche und Löschungen der Quellen (Sperre je Quelle). Antwort: `CalendarReassignResult`. Die Web-App ruft die Route nach „Modul anlegen“ (aus einem Vorschlag) auf. **Fehlerschlüssel `ics_too_complex`** (400): Die Datei hat das Zeitbudget (§8) überschritten.
+
+`from`/`to` sind ISO-Zeitpunkte. `from` ist einschließlich, `to` ausschließlich; ein Termin zählt, wenn er im Zeitraum liegt oder hineinreicht. Ohne `include_cancelled=true` fehlen abgesagte Termine. `unassigned=true` liefert Termine ohne Modul.
 
 ### 7.2 Sessions (T1-02)
 
@@ -268,17 +299,29 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `GET /devices` | – | 200 `DeviceList` | |
 | `DELETE /devices/{id}` | – | 204. Token sofort ungültig, offene WebSockets des Geräts werden mit Code 4401 geschlossen | 404 `device_not_found` |
 | `POST /devices/pairings` (**lokal**) | – | 201 `PairingCode`, öffnet das Kopplungsfenster (§12) | |
-| `POST /devices/pair/start` (Netz ohne Token) | `PairStartRequest` | 201 `PairStartResponse` | 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited` |
+| `POST /devices/pair/start` (Netz ohne Token) | `PairStartRequest` | 201 `PairStartResponse` | 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited`, 429 `pairing_requests_full` |
+| `GET /devices/pairings/requests` (**lokal**) | – | 200 `PairingRequestList`, offene Anfragen des aktuellen Fensters (leer ohne Fenster) | |
 | `DELETE /devices/pairings/requests/{request_id}` (**lokal**) | – | 204, Anfrage abgelehnt | 404 `pairing_request_not_found` |
 | `POST /devices/pair/confirm` (Netz ohne Token) | `PairConfirmRequest` | 201 `PairResponse` | 403 `pairing_code_invalid`, 403 `pairing_request_rejected`, 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited` |
 | `GET /backups` | – | 200 `BackupOverview` | |
 | `POST /backup` | – | 202 `BackupRun` | 409 `backup_running`, 409 `backup_target_missing` |
-| `GET /trash?kind` | – | 200 `TrashList`, nach `deleted_at` absteigend | |
+| `GET /trash?kind&cursor&limit` | – | 200 `TrashList`, nach `deleted_at` absteigend | |
+| `DELETE /trash/{id}` | – | 204. Löscht das direkt gelöschte Objekt samt Teilbaum, Strömen (`sync_op`) und Dateien endgültig | 404 `trash_item_not_found` (auch für mitgelöschte Teile), 409 `session_active` |
+| `DELETE /trash?kind` | – | 200 `{ purged_count }` (inline in der Route, kein Schema): leert den Papierkorb, optional nur eine Art | 409 `session_active` |
 | `POST /trash/{id}/restore` | – | 200 `TrashRestoreResult` | 404 `trash_item_not_found`, 409 `restore_parent_deleted` (`details.parent`), 409 `restore_conflict` (`details.constraint`, `details.conflicting_id`) |
 | `GET /settings` | – | 200 `Settings` | |
-| `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad nicht absolut oder nicht beschreibbar) |
+| `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad leer, nicht absolut, kein vorhandener beschreibbarer Ordner, `SG_DATA_DIR` oder darin, Systemordner), 403 `local_only` (**`data.backup_target` nur lokal**: jede Änderung dieses Feldes aus dem Netz, auch mit Geräte-Token) |
 
 Modul-Einstellungen laufen über `PATCH /modules/{id}` (§14.2).
+
+**Nachtrag T1-10:**
+- `GET /devices` liefert gekoppelte, nicht entfernte Geräte, älteste zuerst. Entfernte Geräte kommen **nicht** in den Papierkorb: Ein Wiederherstellen würde ein widerrufenes Token wieder gültig machen.
+- `DELETE /devices/{id}`: Lokal ist jedes Gerät entfernbar. **Aus dem Netz darf ein Gerät nur sich selbst entfernen** (ID = Gerät des Tokens), sonst `403 local_only`. Geprüft wird vor der Suche, auch eine unbekannte ID ergibt 403.
+- **Neu:** `DELETE /devices/pairings` (**lokal**, optional `?pairing_id=<uuid>`) → 204. Schließt das offene Kopplungsfenster sofort und verwirft seine offenen Anfragen. Danach antworten `pair/start` und `pair/confirm` mit `409 pairing_window_closed`. Idempotent: ohne offenes Fenster ebenfalls 204. Mit `pairing_id` nur, wenn es genau dieses Fenster ist; ein anderswo neu geöffnetes bleibt offen. Ein Code, der gerade eingelöst wird, läuft zu Ende. Sperre und Zähler bleiben bis zum nächsten `POST /devices/pairings`. Die Web-App ruft die Route bei „Schließen“, beim Verlassen der Ansicht und beim Schließen des Tabs (`pagehide`, `keepalive`) auf.
+- `GET /devices/pairings/requests` setzt zusätzlich zwei Header für die Web-App (das Schema `PairingRequestList` bleibt unverändert):
+  - `SG-Pairing-State`: `none` (kein Fenster seit dem Start), `open`, `qr_only` (zu viele Fehlversuche über `pair/start`, §12 Schritt 4), `expired`, `paired`, `closed_failures` (zu viele Fehlversuche über den QR-Weg), `closed` (am Mac mit `DELETE /devices/pairings` geschlossen), `locked` (`423`)
+  - `SG-Pairing-Id`: `pairing_id` des aktuellen Fensters. Weicht sie von der eigenen ab, wurde das Fenster an anderer Stelle ersetzt.
+- `POST /devices/pairings`, `pair/start` und `pair/confirm` speichern **keine** Antwort unter einem `Idempotency-Key` (08 §1), der Header wird ignoriert. Sonst stünden Code bzw. Geräte-Token im Klartext in `idempotency_key`. Antworten mit Code oder Token tragen `Cache-Control: no-store`.
 
 ## 8. Kalender: Import und Abgleich (T1-01)
 
@@ -291,13 +334,16 @@ Bibliothek: `ical.js` (Entscheidung des Leads), Begründung und Version im Lockf
 
 Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei neuem Upload.
 
-**URL-Abruf:** nur `http`/`https` (`webcal://` wird zu `https://`). Höchstens 5 MB, 15 s Gesamtzeit und 3 Weiterleitungen, und zwar nur auf `http`/`https`. Bei Verstoß: `502 ics_fetch_failed` mit `details.reason` (`too_large`, `timeout`, `too_many_redirects`, `status_<code>`).
+**URL-Abruf:** nur `http`/`https` (keine Zugangsdaten in der URL, keine Adressen im lokalen Netz) (`webcal://` wird zu `https://`). Höchstens 5 MB, 15 s Gesamtzeit und 3 Weiterleitungen, und zwar nur auf `http`/`https`. Bei Verstoß: `502 ics_fetch_failed` mit `details.reason` (`too_large`, `timeout`, `too_many_redirects`, `status_<code>`, `blocked_address` (Ziel ist eine private, Loopback-, Link-Local- oder sonst nicht öffentliche Adresse, auch nach der DNS-Auflösung und nach jeder Weiterleitung), `invalid_url` (Weiterleitung auf ein anderes Schema oder mit Zugangsdaten), `unsupported_encoding`, `network_error`).
 
 **Auflösen**
+- **Zeitbudget:** Das Auflösen läuft in einem eigenen Thread (höchstens 2 gleichzeitig, weitere warten; höchstens 256 MB Heap je Thread) und darf höchstens 5 s ab dem Start des Threads dauern (`ics_too_complex`, 400; bei URL-Quellen steht der Fehler in `last_error`). Der Core bleibt währenddessen ansprechbar. Mehrere `VCALENDAR` in einer Datei werden alle gelesen.
+- **Unterstützte Wiederholungen:** `FREQ` = `DAILY`, `WEEKLY`, `MONTHLY`, `YEARLY` mit den üblichen `BY…`-Regeln. `SECONDLY`, `MINUTELY` und `HOURLY` werden nicht aufgelöst (Warnung `rrule_unsupported`, nur der erste Termin zählt). Bei `RDATE` ohne `RRULE` ist auch `DTSTART` ein Vorkommen (RFC 5545).
 - RFC 5545 mit `RRULE`, `RDATE`, `EXDATE` und `RECURRENCE-ID` (verschobene Einzelvorkommen). `STATUS:CANCELLED` setzt `cancelled = true`.
 - `TZID` mit `VTIMEZONE`: deren Regeln. `TZID` ohne `VTIMEZONE`: als IANA-Name lesen. Unbekannte Zone: `TZ` des Systems, dazu eine Warnung `timezone_unknown`. Termine ohne Zone (floating) gelten in `TZ`.
 - `VALUE=DATE` ergibt `all_day = true`, `starts_at`/`ends_at` auf 00:00 UTC des Datums (Testfall ics/08).
-- Serien ohne `UNTIL`/`COUNT` werden bis heute + 180 Tage aufgelöst und bei jedem Abgleich fortgeschrieben. Höchstens 5000 Vorkommen pro Quelle, darüber Warnung `too_many_events`.
+- Serien ohne `UNTIL`/`COUNT` werden für den Zeitraum **heute − 1 Jahr bis heute + 180 Tage** aufgelöst und bei jedem Abgleich fortgeschrieben. Ältere Termine **solcher Serien** zählt der Abgleich nicht als „entfallen“; für endliche Serien gilt das Fenster nicht. Lange offene Serien (`DAILY`/`WEEKLY`) beginnen die Auflösung kurz vor dem Fenster, in derselben Phase wie `DTSTART`.
+- Mehrdeutige Ortszeit (Ende der Sommerzeit, z. B. 02:30) gilt als das **erste** Vorkommen, eine Zeit in der Lücke (Beginn der Sommerzeit) als die Zeit nach dem Sprung. Höchstens 5000 Vorkommen pro Quelle, darüber Warnung `too_many_events` (der Rest wird nicht mehr aufgelöst, und der Abgleich sagt dann **keine** Termine ab).
 - `recurrence_id` = ursprünglicher Beginn des Vorkommens: in der Zeitzone von `DTSTART` mit Offset (`2026-10-27T10:15:00+01:00`), bei UTC-Serien mit `Z`, bei ganztägigen Serien als Datum. Einzeltermine: `null`.
 
 **Abgleich** über `(source_id, external_uid, recurrence_id)`:
@@ -306,11 +352,16 @@ Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei
 - **entfallen** (fehlt in der Quelle): `cancelled = true`. Nie löschen.
 - Bei `assigned_by = auto` laufen Modul- und Artzuordnung neu, bei `manuell` nie.
 
+**Warnungen (`IcsImportResult.warnings`):** Codes `uid_missing`, `uid_duplicate`, `event_invalid`, `rrule_unsupported`, `timezone_unknown`, `too_many_events`. Je Code stehen höchstens 5 Einträge in der Liste. Gab es mehr, folgt eine Sammelzeile des Codes (`external_uid = null`, „n weitere Hinweise dieser Art (insgesamt m)“).
+
+**Zählweise:** `geaendert` zählt Änderungen an Titel, Ort, Beginn, Ende und ganztägig. Eine Änderung der **Beschreibung** wird übernommen, zählt aber nicht. Wird ein Termin abgesagt (`STATUS:CANCELLED`) oder fehlt er in der Quelle, zählt er als `entfallen`. Wird ein abgesagter Termin wieder aktiv, zählt er als `geaendert`. `zugeordnet` zählt nur automatische Zuordnungen in diesem Lauf.
+
 **Zuordnung (F-KAL-02)**
 - **Kandidaten** sind die Module, deren Semester den Termin enthält (`starts_on ≤ Datum ≤ ends_on`). Gibt es keins, die Module des aktuellen Semesters. Gelöschte und archivierte Semester zählen nicht.
 - **Modul:** Treffer über Name, Kürzel und Dozent in Titel, Ort oder Beschreibung, unabhängig von Groß-/Kleinschreibung und Umlautschreibweise. Nur ein **eindeutiger** Treffer wird gesetzt. Sonst bleibt `module_id` leer, und die Serie erscheint in `module_suggestions`.
 - **Art:** über Schlüsselwörter (Übung/UE/Ü, Tutorium/Tut, Prüfung/Klausur/Exam, Vorlesung/VL/Lecture). Ganztägig ohne Modul: `fest`. Sonst `vorlesung`.
-- **Manuell:** `PATCH /calendar/events/{id}` setzt `assigned_by = manuell`. Mit `scope = serie` (Standard) gilt das für alle Termine mit gleicher `source_id` und `external_uid`, auch für später hinzukommende Vorkommen.
+- **Manuell:** `PATCH /calendar/events/{id}` setzt `assigned_by = manuell` (mindestens `module_id` oder `kind` ist nötig, sonst 400). Mit `scope = serie` (Standard) gilt das für alle Termine mit gleicher `source_id` und `external_uid`. Später hinzukommende Vorkommen erben die Zuordnung, **wenn alle vorhandenen Termine der Serie manuell und gleich zugeordnet sind**. Wurde nur ein Termin einzeln geändert (`scope = einzeln`), erbt kein neues Vorkommen.
+- **Modulvorschläge (`IcsModuleSuggestion`):** Termine ohne Modul (nur `assigned_by = auto`, nicht abgesagt, nicht `fest`) werden nach dem bereinigten Titel gruppiert. Nennen Titel dasselbe Modul lang und abgekürzt (Stat I / Statistik I, WI / Wirtschaftsinformatik, OR / Operations Research, DBS / Datenbanksysteme), bilden sie **einen** Vorschlag mit dem Langnamen in `name` und dem Kürzel in `short` (nur wenn die Abkürzung zu genau einem Langnamen passt, höchstens 12 Zeichen). `short` gehört in `short_name` des neuen Moduls. Danach ordnet `POST /calendar/reassign` alle automatisch zugeordneten Termine neu zu, `series_event_ids` brauchen dann keinen `PATCH` mehr.
 - Nach jeder Änderung von Zuordnung oder Termin ruft der Kalender `ensurePlannedSessions` auf (§9.2, §16.2).
 
 ## 9. Sessions (T1-02)
@@ -329,7 +380,7 @@ Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei
 | `laeuft`, `pausiert` | Start einer **später** begonnenen Session | `beendet` | Core | `stop_reason = kalenderende`, `ended_at = min(planned_ends_at, started_at der neuen Session)` |
 | `laeuft`, `pausiert` | Core-Takt: Auto-Stopp-Regel 2 oder 4 greift, obwohl der Browser nicht gestoppt hat (§9.4) | `beendet` | Core | `stop_reason = kalenderende` bzw. `maximaldauer`. `ended_at` ist die **überschrittene Grenze** (bzw. `auto_stop_extended_until`, falls später), nicht die Zeit des Takts |
 | `laeuft`, `pausiert` | Core-Start, und die Grenze der vorigen Zeile lag in der Zeit, in der der Core nicht lief | `beendet` | Core | `stop_reason = absturz_wiederhergestellt`, `ended_at` = letzte Aktivität (Ende des letzten Chunks oder `at` der letzten Operation, mindestens `started_at`) |
-| `beendet` | alle Jobs der Session fertig | `verarbeitet` | Worker (§3) | Wurde beim Stopp kein Job angelegt, setzt der Core sofort `verarbeitet` |
+| `beendet` | alle Jobs vom Stopp durch (`fertig` oder `fehler`, kein Job mehr in `wartet`/`laeuft`) | `verarbeitet` | Worker (§3) | Wurde beim Stopp kein Job angelegt, setzt der Core sofort `verarbeitet`. Spätere `audio.finalize`-Jobs (Nachzügler, nachträgliche Offline-Aufnahme) ändern den Zustand nicht mehr, sie aktualisieren nur `processing` |
 
 - **Server-Operationen:** Jeder Übergang nach `laeuft`, `pausiert` oder `beendet`, den der Core selbst auslöst oder per REST ausführt, steht als `session.start`/`.pause`/`.resume`/`.stop` mit `origin = server` im Strom der Session. `bereit`, `verpasst` und `verarbeitet` haben keine Operation, sie kommen nur als Ereignis `session.updated`.
 - **Nachgelieferter Stopp korrigiert den Takt:** Kommt nach einem Stopp durch Core-Takt oder Core-Start (`kalenderende`, `maximaldauer`, `absturz_wiederhergestellt` mit `origin = server`) ein `session.stop` eines Geräts mit **früherem** `at`, übernimmt der Core dessen `ended_at` und `stop_reason`. Das ist eine Korrektur ohne Zustandswechsel, mit `session.updated`. Ein späterer `at` ändert nichts (gleicher Zielzustand).
@@ -338,6 +389,7 @@ Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei
 - **Invariante 1** gilt für `laeuft` **und** `pausiert` zusammen: höchstens eine aktive Session.
 - `beendet` und `verarbeitet` lassen sich nicht wieder starten. Eine verpasste Vorlesung ohne Offline-Start bekommt Aufnahmen über den Import (F-SES-06, Phase 2).
 - **Core-Neustart:** `laeuft` bleibt `laeuft` (F-SES-05), solange die Grenzen aus Auto-Stopp-Regel 2 und 4 nicht überschritten sind. Der Core-Takt prüft sie beim Start und danach jede Minute.
+- **Pause und Aufnahme (T1-06):** Bei `pausiert` schließt die Web-App die laufende Aufnahme ab (`complete`), das Mikrofon bleibt offen, `MediaRecorder.pause()` wird nicht benutzt. Bei `resume` beginnt sie eine **neue** Aufnahme mit `started_ms` = aktuelle Sitzungszeit. Die Pause bleibt so als Lücke auf der Zeitachse (§10.1).
 - **Session-Daten in jedem Zustand:** `slide.change`, `marker.add` und `photo.add` nimmt der Core in **jedem** Zustand an, auch nach `beendet` (verspätet gesendete Daten aus der Warteschlange). Ist die Session weich gelöscht, gilt §11.2 (Speichern mit Löschzustand).
 
 ### 9.2 Woher Sessions kommen
@@ -376,13 +428,20 @@ Startet ein Gerät eine Session offline, während sie auf dem Server schon mit a
 
 - Spontane Sessions kennen nur die Regeln 3 und 4.
 - **Verlängern:** Der Tipp auf „weiter aufnehmen“ ruft `POST /sessions/{id}/extend` auf. Der Core setzt `auto_stop_extended_until = max(jetzt, bisheriger Wert) + minutes` (Standard `lecture.auto_stop_extend_min`). Vor diesem Zeitpunkt stoppt **keine** Regel, weder im Browser noch im Core-Takt. Danach gelten die Regeln normal weiter. Das Ereignis `session.updated` informiert die anderen Clients.
+- **`ended_at` bei Auto-Stopp aus dem Browser** ist der Zeitpunkt des Stopps, auch bei `stop_reason = stille` (kein Zurückdatieren auf den Beginn der Stille; `SessionStopRequest` kennt nur `reason`). Eine fälschlich erkannte Stille würde sonst echtes Audio aus dem Session-Zeitraum abschneiden (Lead-Entscheidung 05.11.).
 
 ## 10. Audio (T1-06)
 
 ### 10.1 Aufnahmen
 
 - **Eine Aufnahme ist ein MediaRecorder-Strom.** Nach Neuladen oder Absturz legt die Web-App eine **neue** Aufnahme an (`started_ms` = aktuelle Sitzungszeit). Die Lücke dazwischen bleibt erhalten (02 §5).
-- Aufnahmen gibt es nur für Sessions in `laeuft` oder `pausiert` (`409 session_not_active`). Chunks und `complete` sind auch danach noch erlaubt (Nachlieferung aus IndexedDB).
+- Aufnahmen gibt es für Sessions in `laeuft` oder `pausiert`. Chunks und `complete` sind auch danach noch erlaubt (Nachlieferung aus IndexedDB).
+- **Nachträglich angelegte Aufnahme (T1-06, Lead-Entscheidung):** Hat die Web-App offline begonnen und erreicht den Core erst nach dem Ende der Session, ist `POST /sessions/{id}/recordings` auch in `beendet`/`verarbeitet` erlaubt, wenn `started_ms ≤ (Grenze − started_at) + 5 min` (`started_ms ≥ 0` gilt immer).
+  - **Grenze** = `ended_at`. Ist `auto_stop_extended_until` gesetzt und später, gilt dieses. Bei `stop_reason = absturz_wiederhergestellt` ist `ended_at` nur die letzte Aktivität; dort gilt die Auto-Stopp-Grenze aus §9 (Lead-Entscheidung 05.11.): `G = max(min(planned_ends_at + lecture.auto_stop_hard_after_end_min, started_at + lecture.auto_stop_max_duration_min), auto_stop_extended_until)`, der erste Term nur bei Sessions mit Termin. Berechnet wird sie mit **derselben Funktion** wie der Core-Takt (T1-02). Bis T1-02 gemergt ist, gilt übergangsweise `started_at + 12 h`; die 12 h bleiben danach nur Rückfall, falls Werte fehlen.
+  - Sonst `409 session_not_active` mit `details.ended_at`.
+  - Der Core legt `audio.finalize` mit `run_after = jetzt + 10 min` an, sobald der erste Chunk kommt (§3, §10.2). `complete` und Nachzügler ziehen ihn wie gewohnt vor.
+  - Der Sessionstatus und `ended_at` bleiben unverändert (Zustandsmaschine gehört T1-02). Offen für T1-04: ob die Weiterverarbeitung einer schon `verarbeitet`en Session danach neu läuft.
+- **Pause:** Siehe §9.1. Jede Pause beendet die Aufnahme, das Fortsetzen beginnt eine neue.
 - `chunks_independent` legt die Web-App nach Spike S4 fest. Der Worker muss beide Fälle können (§3).
 
 ### 10.2 Chunk-Upload `PUT /recordings/{id}/chunks/{seq}`
@@ -407,7 +466,9 @@ Startet ein Gerät eine Session offline, während sie auf dem Server schon mit a
 | Aufnahme unbekannt | 404 | `recording_not_found` |
 
 - Die Web-App löscht einen Chunk aus IndexedDB erst nach 200 oder 201. Bei 409 oder 422 versucht sie es **nicht** erneut, sondern verschiebt den Chunk in ihre Fehlerablage (§11.2) und meldet ihn. Bei 5xx und Netzfehlern wiederholt sie mit exponentiellem Warten bis 30 s.
-- Nach dem letzten Chunk: `POST /recordings/{id}/complete` mit `last_seq` und `duration_ms`. Fehlt eine `seq ≤ last_seq` beim Finalisieren, wird die Aufnahme `mit_luecken`.
+- **Nach `complete`:** Ein neuer Chunk mit `seq > completed_last_seq` wird mit `409 recording_completed` abgelehnt. Ein Chunk mit `seq ≤ last_seq` (Lücke füllen) und ein Duplikat bleiben erlaubt.
+- **Leere Aufnahme:** Eine Aufnahme ohne einen einzigen Chunk (Pause oder Stopp vor dem ersten Chunk) löscht die Web-App lokal und schließt sie **nicht** mit `complete` ab. Der Core legt für Aufnahmen ohne Chunks **keinen** `audio.finalize`-Job an, weder beim Stopp (`ensureFinalizeOnStop`) noch bei `complete`; die leere Zeile bleibt bestehen (`chunk_count = 0`, `state = laeuft`). Kommt später doch ein Chunk, entsteht der erste Job: sofort bei abgeschlossener Aufnahme, mit `run_after = jetzt + 10 min` bei beendeter Session, sonst keiner (§3). Der Rückfall des Workers (`mit_luecken` bei `chunk_count 0`) bleibt.
+- Nach dem letzten Chunk: `POST /recordings/{id}/complete` mit `last_seq` und `duration_ms`. Fehlt eine `seq ≤ last_seq` beim Finalisieren, wird die Aufnahme `mit_luecken`. Was sonst als fehlend gilt und wie `audio.finalize` Lücken behandelt, steht in §3.
 
 ## 11. Sync-Protokoll (T1-08, T1-09)
 
@@ -416,11 +477,14 @@ Ergänzt 08 §2. Alle Nachrichten: `SyncClientMessage` bzw. `SyncServerMessage`.
 ### 11.1 Verbindung und Anmeldung
 
 - **Pfad:** `ws://<mac>:4710/sync`, außerhalb von `/api/v1`, aber eine **Netzroute** wie alle anderen (§5).
-- **Prüfung beim Upgrade** (vor dem Wechsel auf WebSocket, Ablehnung als HTTP-Antwort):
+- **Prüfung beim Upgrade** (vor dem Wechsel auf WebSocket, Ablehnung als HTTP-Antwort). Das erledigt allein der Wächter (§5, `plugins/security.ts`, T1-10). Der Sync-Server liest nur `request.sgDevice` (§16.2):
   - Host-Prüfung (`421`) und **Origin-Prüfung** (`403`) wie §5. Browser senden beim Upgrade immer `Origin`. Eine fremde Webseite darf sich nicht über `localhost` verbinden (Cross-Site WebSocket Hijacking).
   - **Aus dem Netz:** `Authorization: Bearer <device_token>` ist Pflicht (`401 device_token_required|device_token_invalid`). `URLSessionWebSocketTask` setzt den Header über den `URLRequest`.
   - **Lokal** (Web-App): ohne Token.
-  - Kommt die Verbindung aus dem Netz, ohne dass der Wächter ein Gerät gesetzt hat (`request.sgDevice` fehlt), sendet der Server `error device_token_invalid` (fatal) und schließt mit 4401.
+  - Fehlt `request.sgDevice` (darf für `/sync` nicht vorkommen), sendet der Server `error device_token_invalid` (fatal) und schließt mit 4401.
+- **Widerruf während des Upgrades:** `DELETE /devices/{id}` schließt offene Verbindungen des Geräts mit 4401 (§7.5). Eine Verbindung, deren Upgrade den Wächter kurz vor dem Widerruf passiert hat und erst danach beim Sync-Server ankommt, sieht `closeDeviceConnections` nicht. Darum:
+  1. Der Sync-Server merkt sich widerrufene Geräte im Speicher (über `onDeviceRevoked`, §16.2) und prüft das direkt nach dem Annehmen der Verbindung, synchron. Treffer: `error device_token_invalid` (fatal), 4401.
+  2. Vor `welcome` prüft er das Gerät noch einmal in der Datenbank (`device.deleted_at`). Das deckt auch einen Widerruf ab, den der Speicher nicht kennt (z. B. über einen Neustart hinweg). Treffer: wie oben.
 - **Kein Token in `hello`.** `hello.device_id` ist optional und dient nur als Gegenprobe. Passt sie nicht zum Token: `error device_token_invalid` (fatal), Code 4401. Lokal gibt es kein Token zum Vergleichen: Der Server ignoriert `hello.device_id`, und `welcome.device_id` ist `null`.
 - **Erste Nachricht** muss innerhalb von 5 s `hello` sein, sonst `error hello_required` und Schließen mit Code 4408. `protocol` ≠ 1: `error protocol_unsupported` (fatal), Code 4426. Verletzt `hello` das Schema: `error hello_invalid` (fatal), ebenfalls Code 4408 („kein gültiges `hello`“).
 - **Antwort** `welcome` mit `server_time`, `db_epoch` und je Strom einem `resume`-Eintrag. Danach sendet der Server:
@@ -565,7 +629,10 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 2. **Bonjour-Weg:** Der Core kündigt `_studiengehirn._tcp` an (TXT `v=1`, `name=<Macname>`). Das iPad ruft `POST /devices/pair/start` auf.
    - Das geht nur bei offenem Fenster, sonst `409 pairing_window_closed`. Es belegt das Fenster **nicht exklusiv**: Mehrere Anfragen sind möglich.
    - Der Core legt eine Anfrage (`PairingRequest`) mit `device_name` und `public_nonce` an und antwortet mit `request_id` und `pairing_id`. Der Code steht **nicht** in der Antwort.
-   - Die Web-App bekommt `pairing.requested` und listet die Anfragen. Eine fremde Anfrage kann der Nutzer ablehnen (`DELETE /devices/pairings/requests/{request_id}`, nur lokal).
+   - **Höchstens 10 offene Anfragen pro Fenster.** Offen heißt: nicht abgelehnt. Die elfte `pair/start`-Anfrage bekommt `429 pairing_requests_full`. Lehnt der Nutzer eine Anfrage ab, wird ein Platz frei.
+   - Die Web-App bekommt `pairing.requested` (Nutzlast `PairingRequest`) und listet die Anfragen. Nach dem Neuladen holt sie sich die offenen Anfragen über `GET /devices/pairings/requests` (nur lokal, `PairingRequestList`). Das ist eine eigene Route statt einer Erweiterung von `POST /devices/pairings`: Die Antwort des POST gibt es nur einmal beim Öffnen, Anfragen kommen aber erst danach, und das Neuladen darf kein neues Fenster öffnen (das würde das alte ersetzen, Schritt 1).
+   - Eine fremde Anfrage kann der Nutzer ablehnen (`DELETE /devices/pairings/requests/{request_id}`, nur lokal).
+   - **Phishing:** `device_name` ist frei wählbar, jeder im Netz kann sich „iPad von Ilian“ nennen. Die Web-App empfiehlt darum den **QR-Weg** und zeigt bei Anfragen aus dem Bonjour-Weg einen Hinweis, dass Name und Absender nicht geprüft sind. Der Code bleibt das Geheimnis.
 3. **Bestätigen:** Der Nutzer tippt den Code am iPad ein, oder der QR-Scan liefert `pairing_id` und Code. Das iPad ruft `POST /devices/pair/confirm` auf.
    - `pairing_id` muss das offene Fenster sein. **Das Geheimnis ist der Code.** Die Nonce wird nicht gegen fremde `pair/start`-Anfragen geprüft, ein QR-Scan klappt also auch, wenn sich vorher jemand anderes angemeldet hat.
    - Gehört `public_nonce` zu einer **abgelehnten** Anfrage: `403 pairing_request_rejected`.
@@ -574,13 +641,32 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
    - **Pro Nonce:** Nach 5 falschen Codes wird diese Nonce abgewiesen (`pairing_code_invalid`). Andere Geräte sind nicht betroffen.
    - **Pro Fenster:** Nach 20 falschen Codes ist das Fenster geschlossen (`pairing_window_closed`). Die Web-App zeigt „Viele Fehlversuche“.
    - **Global:** Bei mehr als 20 falschen Codes pro Stunde sind alle `pair/*`-Aufrufe gesperrt (`423 pairing_locked`), bis am Mac ein neues Fenster geöffnet wird.
-   - **Restrisiko:** Ein Angreifer im selben WLAN kann die Kopplung durch Raten **verzögern**, aber ohne Code nicht übernehmen. Ein neues Fenster am Mac hebt jede Sperre auf.
+   - **Neues Fenster setzt zurück:** Ein neues, **lokal** geöffnetes Fenster (`POST /devices/pairings`) setzt den globalen Stundenzähler und die Sperre zurück, ebenso die Zähler pro Nonce und pro Fenster. Sonst reichte ein falscher Code pro neuem Fenster, um wieder mit `423` zu sperren. Da nur der Nutzer am Mac das Fenster öffnen kann (`local_only`), kann ein Angreifer die Zähler nicht selbst zurücksetzen.
+   - **Restrisiko (DoS):** Ein Angreifer im selben WLAN kann die Kopplung durch Raten oder durch Anfragen **blockieren, solange er im Netz ist**: Er verbraucht das Budget (20 falsche Codes schließen das Fenster) und kann nach jedem neuen Fenster erneut raten. Ohne Code übernehmen kann er sie nicht. Abhilfe: in einem anderen Netz koppeln (Heim-WLAN oder Hotspot). Ein neues Fenster am Mac hebt die Sperre auf, hilft aber nicht gegen einen Angreifer, der weiter raten darf.
    - **Pro Absenderadresse:** höchstens 10 `pair/*`-Aufrufe pro Minute (`429 pairing_rate_limited`).
 5. **Speicherung des Codes:** nur **im Speicher** des Core-Prozesses, nie in der Datenbank. Der Code wird mit `crypto.randomInt` erzeugt und mit `crypto.timingSafeEqual` verglichen.
    - Gründe: Er lebt höchstens 5 min, und es gibt genau einen Core-Prozess.
    - Ein Hash eines 6-stelligen Codes wäre offline in Sekunden durchprobiert. HMAC bräuchte ein weiteres Server-Geheimnis, das verwaltet werden müsste.
    - Folge: Ein Neustart des Core schließt das Fenster, der Nutzer öffnet es neu.
 6. Gerät entfernen (`DELETE /devices/{id}`) widerruft das Token sofort und schließt seine Verbindungen (08 §3).
+7. **Nachtrag T1-10: Schutz gegen Blockade (DoS) und Präzisierungen.**
+   - **Problem:** `pair/start` gibt jedem im WLAN die `pairing_id`. Damit konnte ein Angreifer mit 20 falschen Codes das ganze Fenster schließen, nach jedem neuen Fenster wieder (Restrisiko aus Schritt 4). Das echte iPad kam so auch per QR-Code nicht durch.
+   - **Lösung: zwei Kennungen pro Fenster.**
+     - Die `pairing_id` aus `PairingCode` und dem QR-Code ist **geheim**: eine zufällige UUID (v4, 122 Bit). Sie steht nur im QR-Code und in der lokalen Web-App, nie in einer Antwort an das Netz.
+     - `pair/start` antwortet mit einer zweiten, **öffentlichen** `pairing_id` desselben Fensters. Diese steht auch in `PairingRequest.pairing_id`. Für das iPad ändert sich nichts: Es schickt bei `confirm` die `pairing_id`, die es hat (QR oder `pair/start`).
+     - Fehlversuche zählen **je Weg**: 20 falsche Codes über die öffentliche Kennung schließen nur den Weg über `pair/start` (Bonjour und manuelle Eingabe: `409 pairing_window_closed`, Zustand `qr_only`). Der QR-Weg bleibt offen. 20 falsche Codes über die geheime Kennung schließen das Fenster (`closed_failures`), das kann nur, wer den QR-Code sieht.
+     - Pro Nonce (5) und global (mehr als 20 pro Stunde → `423`) gelten wie in Schritt 4, gezählt über beide Wege. Ein Angreifer ohne QR-Code kommt pro Fenster auf höchstens 20 Fehlversuche und löst die Sperre darum nicht allein aus.
+     - Brute-Force bleibt bei höchstens 20 Versuchen pro Fenster (Trefferchance ≤ 2·10⁻⁵). Die geheime Kennung zu raten ist aussichtslos. Unbekannte Kennungen zählen weiterhin nicht zum Budget.
+     - **Restrisiko:** Den Weg über `pair/start` (Bonjour, manuelle Eingabe) kann ein Angreifer im selben WLAN weiter blockieren, solange er dort ist. Die Web-App empfiehlt dann den QR-Code bzw. ein anderes Netz.
+   - **Ablauf im Core:** Alle Prüfungen und Zähler ändern sich synchron im Speicher. Ein richtiger Code schließt das Fenster sofort für alle anderen, bevor das Gerät angelegt wird. Von gleichzeitigen `confirm`-Aufrufen gewinnt genau einer, die anderen bekommen `409 pairing_window_closed`. Scheitert das Anlegen, ist das Fenster wieder offen.
+   - **Nonce:** `pair/start` mit einer Nonce, die im Fenster schon eine Anfrage hat, liefert dieselbe Anfrage (auch eine abgelehnte, sie wird nicht wieder geöffnet). Eine abgelehnte Nonce wird auch über den QR-Weg abgewiesen (`403 pairing_request_rejected`).
+   - **Rate-Limit:** „Absenderadresse“ ist die Socket-Adresse. IPv4-mapped (`::ffff:a.b.c.d`) zählt wie IPv4, IPv6 je /64-Netz. Abgewiesene Aufrufe zählen nicht mit. Der Core merkt sich höchstens 4096 Adressen. Heute lauscht der Core nur auf IPv4 (`SG_CORE_HOST=0.0.0.0`). Wird er auf `::` umgestellt, muss die /64-Regel neu bewertet werden: Ein Angreifer mit einem eigenen Präfix hat viele /64-Netze, ein Heimnetz teilt sich eins.
+   - **Gerätename und `app_version`:** NFKC-normalisiert. Leerraum wird zu einem Leerzeichen. Entfernt werden alle Zeichen der Kategorien Cc, Cf, Zl und Zp, also auch Bidi-Steuerung, U+200B–U+200D, U+061C, U+2060, U+FEFF und Tag-Zeichen. Der Name hat höchstens 64 Zeichen, `app_version` wird auf 64 Zeichen gekürzt (wie `maxAppVersionLength` in T1-08). Bleibt vom Namen nichts übrig: „Unbenanntes Gerät“.
+   - **Unbemerkte Übernahme** (jemand fotografiert Code oder QR-Code ab und koppelt schneller): Die Web-App meldet jede Kopplung mit Name und Art („‚X‘ (iPad) wurde gekoppelt. Nicht du?“) und bietet direkt „Entfernen“ an. Geräte, die jünger als 24 h sind, sind in der Liste als „Neu gekoppelt“ markiert. Wird die Ansicht verlassen, schließt die Web-App das Fenster (`DELETE /devices/pairings`), ein Code gilt dann nicht mehr bis zum Ablauf weiter.
+   - **Host:** IPv4 der Schnittstelle `en0`, sonst einer anderen `en*`, sonst einer sonstigen. VPN-Tunnel, Docker, Bridges und AirDrop zählen nicht, Link-Local (169.254.x.x) nur als letzter Ausweg. Ohne Netz: `127.0.0.1`.
+   - **Bonjour:** Name `Studien-Gehirn (<Macname>)`, TXT `v=1`, `name=<Macname>` (Rechnername ohne `.local`). Startet nur, wenn `SG_CORE_HOST` nicht Loopback ist. `SG_BONJOUR=0` schaltet die Ankündigung ab. Fehler (kein Multicast) werden nur protokolliert.
+   - Code und Token stehen in keinem Log und in keiner Fehlermeldung. Jeder falsche Code bekommt dieselbe Antwort.
+   - **Restrisiko Klartext:** Token, Code und Sync laufen in Phase 1 unverschlüsselt über HTTP bzw. WS. In einem offenen WLAN oder einem WLAN mit gemeinsamem Passwort (WPA2-PSK) kann jemand im selben Netz mitlesen und ein Token übernehmen. Abhilfe bis dahin: Gerät entfernen und neu koppeln, sensible Arbeit im Heimnetz oder über den Hotspot. TLS kommt in Phase 2.
 
 ## 13. Backups, Papierkorb, Aufräumen (F-DAT-01/02/04, T1-18)
 
@@ -618,10 +704,31 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
   - Ausnahme Semester: Ist inzwischen ein anderes Semester aktuell, kommt das wiederhergestellte mit `is_current = false` zurück. Das ist kein Fehler.
 - „Rückgängig“ im Toast (10 s, F-DAT-04) nutzt denselben Endpunkt. Für Marker nutzt die Web-App stattdessen `marker.remove` im Sync.
 - Dateien (Fotos, Chunks, `pkdrawing`, PDFs) bleiben bis zum endgültigen Löschen liegen.
-- **Offene Punkte für T1-18:**
-  - `task_slide_link` gehört zu keiner Kaskade. Verknüpfungen gelöschter Folien oder Aufgaben bleiben stehen und müssen beim Lesen gefiltert werden.
-  - Sessions, die mit ihrer `calendar_source` gelöscht wurden, haben die Quelle nicht als Elternobjekt. `restore_parent_deleted` prüft nur das Modul. Sie kommen nur über die Quelle zurück.
-  - `softDelete` setzt `deleted_at` millisekundengenau aus der Uhr des Core. Zwei Löschvorgänge in derselben Millisekunde im selben Teilbaum würden zusammen wiederhergestellt. Das ist bei einem Nutzer praktisch ausgeschlossen. Mikrosekunden aus `clock_timestamp()` gingen verloren, sobald Handler den Wert als JS-`Date` weitergeben (§11.2).
+- **Entscheidungen T1-18 (vormals offene Punkte):**
+  - `task_slide_link`: keine Kaskade. Verknüpfungen gelöschter Folien oder Aufgaben bleiben stehen, Leser filtern über Join auf nicht gelöschte `slide` und `task` (heute liest sie niemand). Endgültig gelöscht werden sie per Fremdschlüssel (CASCADE).
+  - Sessions, die mit ihrer `calendar_source` gelöscht wurden: Elternobjekt ist für Liste und Wiederherstellen die Quelle (über den Termin mit gleichem `deleted_at`). Sie stehen nicht einzeln in `GET /trash`, `POST /trash/{session}/restore` liefert `409 restore_parent_deleted` mit `details.parent` (Art `calendar_source`), einzeln endgültig löschen ist `404`.
+  - Gleiches `deleted_at` in derselben Millisekunde: nur dokumentiert, nicht behoben (bei einem Nutzer praktisch ausgeschlossen).
+  - **Server-Operationen:** Löschen eines Moduls/Semesters schreibt `notebook.delete` für jedes mitgelöschte Notizbuch, Wiederherstellen `notebook.restore` je Notizbuch bzw. `page.restore` für eine einzelne Seite. Vorher werden die Ströme der betroffenen Notizbücher und Sessions gesperrt (Strom vor Zeile, §16.2), ebenso beim endgültigen Löschen.
+  - **Endgültig löschen** entfernt den ganzen Teilbaum unabhängig vom `deleted_at` der Kinder (ein früher gelöschtes Kind geht mit, wenn sein Elternobjekt endgültig geht) sowie `sync_stream`/`sync_op` der Notizbücher und Sessions. Dateien (Foliensatz-, Blatt-, Aufnahme-Ordner, Fotos, `pkdrawing`) gehen nach dem Commit weg, nur über `resolveDataPath`.
+- **Backup-Ablauf (T1-18):**
+  - Aufbau eines Standes: `<ziel>/<stand>/{db.dump, media/, vault/, manifest.json}`. Unveränderte Dateien sind Hardlinks auf den vorigen Stand. Geschrieben wird nach `.<stand>.partial` und erst am Ende umbenannt.
+  - `POST /backup` legt die `backup_run`-Zeile selbst an und startet `node infra/sg/src/main.ts backup --trigger … --run-id …` (Ausgabe in `logs/backup.log`). Ein `laeuft` älter als 6 Stunden gilt als abgestürzt.
+  - `stale` ist auch ohne jedes erfolgreiche Backup `true`.
+  - Der Zeitplan (Backup und `maintenance.nightly` um 03:30) läuft minütlich im Core und holt Verpasstes nach. Ein fehlgeschlagener geplanter Lauf wird am selben Tag nicht wiederholt.
+  - `backup_encryption = true` lässt den Lauf mit Hinweis scheitern (`age` ist P1, nie unverschlüsselt sichern, wenn Verschlüsselung gewünscht ist).
+  - `sg migrate`/`sg start` sichern vor ausstehenden Migrationen (`vor_migration`), wenn ein Ziel gesetzt ist; scheitert es, wird nicht migriert (`--ohne-backup` übergeht das).
+  - `sg restore` (ohne Stand: Liste) spielt in eine neue Datenbank und neue Ordner ein und tauscht danach. Die alte Datenbank (`<db>_vor_restore_<zeit>`) und Ordner (`media.vor-restore-<zeit>`) bleiben liegen. Der monatliche automatische Test (`sg restore --test`) ist noch nicht eingeplant.
+
+- **Restore im Detail (T1-18):**
+  - Vor jeder Änderung prüft `sg restore` Prüfsumme des Dumps, Dateianzahl und Größen gegen das Manifest (`.DS_Store`, `*.part`, `.tmp` zählen nie) und die Schemaversion: Ist der Stand **neuer** als der Code (`manifest.migrations` > Migrationen im Repo), bricht er ab (erst die App aktualisieren), **älter** ist erlaubt, die Migration läuft danach beim nächsten `sg start`/`sg migrate`.
+  - Der Tausch ist atomar: Die beiden `ALTER DATABASE … RENAME` laufen in **einer** Transaktion (der Commit-Punkt), davor liegen die neue Datenbank und die Ordner `*.neu-<zeit>` bereit. Vor der ersten Änderung steht `restore.journal.json` im Datenordner (Phase, Namen).
+  - `sg start` und `sg restore` erkennen ein offenes Journal: Ist die Datenbank getauscht, werden die Ordner fertig getauscht, sonst wird alles zurückgebaut. Beides ist beliebig wiederholbar.
+  - Backups sind nicht signiert oder authentifiziert: Eingespielt werden dürfen nur eigene Backups (steht auch in `pnpm sg --help`).
+- **Backup-Details (T1-18):**
+  - Aufbewahrung: Zusätzlich zu 14/8/6 bleiben die **letzten 3 Stände mit `trigger = vor_migration`** unabhängig von der Ausdünnung erhalten.
+  - Dateien, die während des Kopierens verschwinden, werden übersprungen und als Hinweis gezählt. Das Ziel wird per `realpath` aufgelöst, bevor geprüft wird, ob es in `media/` oder `vault/` liegt.
+  - Das Backup vor einer Migration ist fail-closed: Lässt es sich nicht ausführen oder scheitert es, wird **nicht** migriert (`pnpm sg migrate --ohne-backup` überspringt es ausdrücklich). Ausnahme ohne Fehler: Es ist kein Backup-Ziel eingestellt (dann nur ein Hinweis) oder es steht keine Migration an.
+- **`purged_count` / `DELETE /trash`:** `DELETE /trash` zählt direkt gelöschte Objekte wie in der Liste (auch solche, die als Teil eines anderen Objekts verschwinden) und prüft vorab, dass keine laufende Session im Teilbaum liegt (`409 session_active`, dann wird nichts gelöscht). `MaintenanceNightlyResult.purged_count` dagegen zählt gelöschte **Zeilen** der Papierkorb-Tabellen (ohne Folien, Striche, Chunks usw.), `purged_by_kind` je Tabelle.
 
 **`maintenance.nightly`** (Worker, T1-18)
 - **Anlegen:** Der Core legt den Job täglich um 03:30 Ortszeit an, mit Payload `MaintenanceNightlyPayload` (Standard `{}` = 30 Tage, ohne `dry_run`). Ergebnis: `MaintenanceNightlyResult`.
@@ -629,6 +736,7 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
   1. Objekte mit `deleted_at` älter als `purge_older_than_days` endgültig löschen, Kinder vor Eltern, samt ihrer Dateien.
   2. `sync_op` und `sync_stream` der dabei gelöschten Notizbücher und Sessions entfernen. Sonst bleibt `sync_op` erhalten, solange das Objekt des Stroms existiert, auch im Papierkorb.
   3. Verwaiste Dateien entfernen: Fotos ohne `photo`-Zeile nach 30 Tagen, `*.part`-Dateien älter als 1 Tag.
+- **Ablauf je Wurzel:** eine eigene Transaktion pro Wurzel. Zuerst die Ströme sperren, dann die Wurzelzeile `FOR UPDATE` und unter der Sperre erneut prüfen (`deleted_at IS NOT NULL` und älter als die Frist): Eine inzwischen wiederhergestellte Wurzel wird übersprungen. Ebenso eine Wurzel mit laufender oder pausierter Session (Meldung im Log). Dateien gehen erst nach dem Commit der jeweiligen Wurzel weg. Dasselbe gilt für `purgeTrashItems` im Core.
 - Spätere Phasen ergänzen Schnappschüsse und Dubletten-Vorschläge (08 §5).
 
 ## 14. Einstellungen (F-EIN-01, T1-19)
@@ -638,6 +746,10 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 - Speicherung in `setting` mit je einem Schlüssel pro Bereich (`general`, `lecture`, `pen`, `data`). Der Wert ist das Bereichsobjekt **ohne** Standardwerte.
 - `GET /settings` füllt fehlende Felder mit den Standards. `PATCH /settings` führt Feld für Feld zusammen.
 - `general.data_dir` ist nur lesbar (`SG_DATA_DIR`).
+- **Keine feldübergreifenden Regeln in Phase 1.** Es gelten nur die Schemaregeln je Feld (z. B. darf „Stopp spätestens“ vor „Stopp nach Kalenderende“ liegen).
+- **`data.backup_target`:** Der Core speichert den normalisierten Pfad (`path.resolve`, dann `realpath`). Abgelehnt werden `SG_DATA_DIR` und Ordner darin sowie `/proc`, `/sys`, `/dev`, unter macOS `/System` und `/private/var/db`. Symlinks sind erlaubt (gespeichert wird das Ziel); T1-18 prüft das Ziel beim Backup erneut. Änderungen nur lokal (§7.5).
+- `lecture.microphone_id`: höchstens 256 Zeichen.
+- **`general.appearance`** ist die Standard-Darstellung. Die Web-App wendet sie an, solange auf dem Gerät keine eigene Wahl („Hell“/„Dunkel“) gespeichert ist; „Wie Standard“ löscht die Geräte-Wahl.
 
 | Feld | Standard |
 |---|---|
@@ -667,6 +779,8 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `notebook_default` | 409 | Standard-Notizbuch lässt sich nicht löschen |
 | `session_transition_invalid`, `session_not_active`, `session_active` | 409 | Zustandsautomat (§9.1) |
 | `chunk_conflict`, `recording_seq_conflict`, `photo_file_conflict` | 409 | Gleiche ID, anderer Inhalt |
+| `recording_completed` | 409 | Chunk hinter `last_seq` einer abgeschlossenen Aufnahme (§10.2) |
+| `range_not_satisfiable` | 416 | `Range` liegt außerhalb der Datei (`GET …/file`, `GET …/audio`) |
 | `backup_running`, `backup_target_missing`, `restore_parent_deleted`, `restore_conflict` | 409 | Daten (§13) |
 | `pairing_window_closed` | 409 | Kopplungsfenster zu oder abgelaufen (§12) |
 | `chunk_header_invalid`, `backup_target_invalid`, `upload_aborted` | 400 | Anfrage ungültig (`upload_aborted`: der Client hat den Upload abgebrochen) |
@@ -675,9 +789,14 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `file_too_large`, `chunk_too_large` | 413 | Größe |
 | `unsupported_media_type`, `chunk_mime_mismatch` | 415 | Dateityp |
 | `ics_invalid`, `checksum_mismatch` | 422 | Inhalt ungültig |
+| `ics_too_complex` | 400 | ICS-Datei hat das Zeitbudget beim Auflösen überschritten (§8) |
+| `file_missing`, `unexpected_file`, `upload_aborted`, `source_not_syncable` | 400 | Upload: Datei fehlt, falsches Feld/mehrere Dateien bzw. Datei an eine URL-Quelle, Upload abgebrochen; Quelle nicht abgleichbar |
 | `pairing_locked` | 423 | Kopplung gesperrt, neues Fenster am Mac öffnen |
 | `pairing_rate_limited` | 429 | zu viele Versuche |
+| `pairing_requests_full` | 429 | 10 offene Kopplungsanfragen im Fenster, eine ablehnen oder neues Fenster öffnen (§12) |
 | `ics_fetch_failed` | 502 | ICS-URL nicht erreichbar oder über den Grenzen |
+
+**Nachtrag T1-10:** Keine neuen Codes. `device_token_invalid` (401) aus §5 gehört in diese Liste: Token unbekannt oder widerrufen.
 
 **Sync-Fehler:** `SyncErrorCode` im Schema.
 
@@ -721,12 +840,19 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 | Session-Übergang | `services/core/src/services/sessions.ts` | `transitionSession(tx: Tx, sessionId: string, action: 'start' \| 'pause' \| 'resume' \| 'stop', input: { at: Date; origin: SyncOrigin; deviceId?: string \| null; startedFrom?: ClientDevice; reason?: StopReason; moduleId?: string; calendarEventId?: string \| null; slideDeckId?: string \| null }): Promise<{ session: Session; endedSession: Session \| null }>` (schreibt selbst die Server-Operationen) | T1-02 |
 | Kalender → Session | `services/core/src/services/sessions.ts` | `ensurePlannedSessions(tx: Tx, eventIds: string[]): Promise<void>` (anlegen, löschen, `module_id`, VL-Nummer neu) | T1-02, aufgerufen von T1-01 |
 | Token prüfen | `services/core/src/services/devices.ts` | `verifyDeviceToken(db: Db, token: string): Promise<{ deviceId: string } \| null>` | T1-10 |
-| Wächter → Route | `services/core/src/plugins/security.ts` | `DeviceTokenVerifier` liefert künftig `Promise<{ deviceId: string } \| null>`. Der Wächter setzt `request.sgDevice: { deviceId: string } \| null` (`null` = lokal). Für `GET /sync` mit `Upgrade: websocket` prüft er zusätzlich `Origin` wie bei zustandsändernden Anfragen | T1-10. T1-08 liest `request.sgDevice` beim Upgrade, nur in `resolveDevice(request)` (`services/core/src/sync/server.ts`). Bis T1-10 prüft die Route `/sync` den `Origin` selbst (403 `origin_not_allowed`), danach doppelt |
+| Wächter → Route | `services/core/src/plugins/security.ts` | `DeviceTokenVerifier` liefert `Promise<{ deviceId: string } \| null>`. Der Wächter setzt `request.sgDevice: { deviceId: string } \| null` (`null` = lokal). Für `GET /sync` mit `Upgrade: websocket` prüft er zusätzlich `Origin` wie bei zustandsändernden Anfragen | T1-10. T1-08 liest `request.sgDevice` beim Upgrade, nur in `resolveDevice(request)` (`services/core/src/sync/server.ts`). Host, Origin und Token prüft allein der Wächter |
+| Widerruf (Nachtrag T1-10) | `services/core/src/services/devices.ts` | `onDeviceRevoked(listener: (deviceId: string) => void): () => void`. Wird nach dem Commit von `DELETE /devices/{id}` synchron aufgerufen, Rückgabe meldet ab. Die Route ruft außerdem selbst `closeDeviceConnections(id, 4401)` auf. Fehler eines Zuhörers werden protokolliert und stören die Antwort nicht | T1-10. Der Sync-Server hängt sich ein und merkt sich widerrufene Geräte (§11.1, Widerruf während des Upgrades) |
+| Upgrade prüfen (Nachtrag T1-10) | `services/core/src/plugins/security.ts` | Der Wächter läuft als `onRequest`-Hook auch für Upgrades über `@fastify/websocket` und setzt `request.sgDevice`. Bei `pair/*` aus dem Netz bleibt `sgDevice` **undefiniert**. Für einen rohen `server.on('upgrade')`-Handler: `app.authenticateUpgrade(req: IncomingMessage): Promise<{ deviceId } \| null>` (wirft `HttpError` 421/403/401, ohne Ausnahmen für Routen) | T1-10 |
 | Einstellungen | `services/core/src/services/settings.ts` | `getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): Promise<Settings>`. `general.data_dir` kommt aus der App-Konfiguration | **T1-DB**. T1-19 baut `PATCH`. Genutzt von T1-02 (Auto-Stopp) und T1-18 |
 | Papierkorb | `services/core/src/services/trash.ts` | `softDelete(tx: Tx, kind: TrashKind, id: string): Promise<Date>` (Kaskade §13; wirft `HttpError` 404 `<kind>_not_found`, 409 `session_active`, 409 `notebook_default`), `restoreFromTrash(tx: Tx, id: string): Promise<TrashRestoreResult>` (404 `trash_item_not_found`, 409 `restore_parent_deleted`, 409 `restore_conflict`) | **T1-DB**. T1-18 baut die Routen und schreibt Server-Operationen bei der Wiederherstellung. Alle Lösch-Routen rufen `softDelete` |
+| Papierkorb-Hülle | `services/core/src/services/trash-ops.ts` | `softDeleteWithOps(db, kind, id, before?)`, `restoreWithOps(db, id)`, `purgeTrashItems(db, dataDir, roots)`, `lockStreams(tx, streams)`, außerdem `listTrash`, `emptyTrash`, `purgeOne`. Sperrt vor `softDelete`/`restoreFromTrash` die Ströme der betroffenen Notizbücher und Sessions (sortiert), beim Löschen von Modul/Semester danach die Modulzeilen `FOR UPDATE`, und schreibt `notebook.delete`/`.restore`, `page.restore`. **Künftige Lösch-Routen rufen `softDeleteWithOps`** (Ausnahme: ein Op-Handler, der den Strom schon hält, ruft `softDelete` direkt). `DELETE /calendar/sources` (T1-01) und `DELETE /sessions` (T1-02) stellt der Lead um, Tickets fassen sie nicht an | **T1-18** |
 | Fotos | `services/core/src/services/photos.ts` | `upsertPhotoMeta(tx: Tx, data: PhotoAddData, env: { dataDir: string }): Promise<void>` und `storePhotoFile(id, stream, sha256, mime, env: { db: Db; dataDir: string }): Promise<FileReceipt>` (der letzte Parameter `env` ist nötig, weil beide Datenordner bzw. Datenbank brauchen) prüfen sich gegenseitig (sha256, Typ) | Core-Ink (Handler `photo.add` und `PUT /photos`) |
 | Recorder → Auto-Stopp | `apps/web/src/lib/recorder/level.ts` | `subscribeAudioLevel(fn: (s: { at: number; rms: number }) => void): () => void`, alle 250 ms während der Aufnahme. Die Spracherkennung baut T1-07 darauf. Der Stopp läuft per `POST /sessions/{id}/stop`. Der Recorder reagiert auf `session.updated` (`beendet`) und schließt die Aufnahme ab (`complete`) | T1-06 liefert, T1-07 nutzt |
 | Web-Sync-Client | `apps/web/src/lib/sync/client.ts` | `class SyncClient { connect(); subscribe(stream: string, from: { lastSeq: number; lastOpId: string \| null }, onOp: (op: SyncOp) => void); send(op): Promise<SyncAck>; onEvent(name, fn); }`. `from` stammt aus `stream_seq`/`stream_op_id` des REST-Stands. Dazu Warteschlange in IndexedDB, Uhrabgleich, Wartezeit nach 4503, Fehlerablage | T1-WS |
+
+**Aufnahme-Job beim Stopp (T1-06, verbindlich für T1-02):** `ensureFinalizeOnStop(tx: Tx, recordingId: string, stoppedAt: Date): Promise<void>` in `services/core/src/services/recordings.ts`. Sie nimmt `lockRecording`, legt keinen Job an für Aufnahmen ohne Chunks und auch nicht, wenn einer in `wartet`, `laeuft` oder `fertig` existiert, sonst sofort (Aufnahme abgeschlossen) bzw. mit `run_after = stoppedAt + 10 min`. Der Stopp ruft sie für jede Aufnahme der Session auf, in aufsteigender ID-Reihenfolge.
+
+**Sperrreihenfolge** (gilt für Stopp, Sync-Handler und REST gleich, sonst droht ein Deadlock): `lockSessionTransitions` → Session-Zeile (`FOR NO KEY UPDATE` bzw. `FOR SHARE`) → `sync_stream` → `lockRecording` (nach ID sortiert) → Job-Zeilen. Die Aufnahme-Routen sperren die Session **nie nach** `lockRecording`: Das Anlegen liest sie mit `FOR SHARE` davor; der Chunk-Upload liest sie ohne Sperre erst nach `lockRecording` (unter Read Committed sieht er dann entweder den committeten Stopp oder der Stopp zählt den Chunk mit).
 
 ### 16.3 Tickets und Besitz
 

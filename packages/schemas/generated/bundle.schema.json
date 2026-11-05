@@ -68,6 +68,9 @@
     "CalendarEventUpdate": {
       "$ref": "#/$defs/CalendarEventUpdate"
     },
+    "CalendarReassignResult": {
+      "$ref": "#/$defs/CalendarReassignResult"
+    },
     "CalendarSource": {
       "$ref": "#/$defs/CalendarSource"
     },
@@ -361,6 +364,9 @@
     },
     "PairingRequest": {
       "$ref": "#/$defs/PairingRequest"
+    },
+    "PairingRequestList": {
+      "$ref": "#/$defs/PairingRequestList"
     },
     "PdfIngestDeckPayload": {
       "$ref": "#/$defs/PdfIngestDeckPayload"
@@ -1328,6 +1334,28 @@
         },
         "scope": {
           "$ref": "#/$defs/CalendarUpdateScope"
+        }
+      }
+    },
+    "CalendarReassignResult": {
+      "title": "CalendarReassignResult",
+      "type": "object",
+      "description": "Antwort auf POST /calendar/reassign (lokal): Neuzuordnung aller Termine mit assigned_by=auto, z. B. nach dem Anlegen eines Moduls.",
+      "required": [
+        "changed",
+        "ohne_modul"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "changed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Termine, deren Modul oder Art sich geändert hat"
+        },
+        "ohne_modul": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach"
         }
       }
     },
@@ -2299,6 +2327,12 @@
         "kind": {
           "$ref": "#/$defs/CalendarEventKind"
         },
+        "short": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12,
+          "description": "Kürzel, wenn die Titel dasselbe Modul abgekürzt nennen (Stat I / Statistik I). Fehlt, wenn es keins gibt. Gehört in short_name des neuen Moduls, damit der Abgleich beide Schreibweisen zuordnet."
+        },
         "event_count": {
           "type": "integer",
           "minimum": 1
@@ -2664,6 +2698,7 @@
             "string",
             "null"
           ],
+          "maxLength": 256,
           "description": "deviceId aus MediaDevices, null = Standardmikrofon"
         },
         "auto_stop_after_end_min": {
@@ -2722,6 +2757,7 @@
             "string",
             "null"
           ],
+          "maxLength": 256,
           "description": "deviceId aus MediaDevices, null = Standardmikrofon"
         },
         "auto_stop_after_end_min": {
@@ -4559,7 +4595,7 @@
     "PairingCode": {
       "title": "PairingCode",
       "type": "object",
-      "description": "Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur lokal; Ereignis pairing.requested)",
+      "description": "Offenes Kopplungsfenster für die Anzeige in der Web-App (Antwort von POST /devices/pairings, nur lokal). Anfragen von Geräten liefern das Ereignis pairing.requested und GET /devices/pairings/requests (PairingRequestList)",
       "required": [
         "pairing_id",
         "code",
@@ -4606,7 +4642,7 @@
     "PairingRequest": {
       "title": "PairingRequest",
       "type": "object",
-      "description": "Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id})",
+      "description": "Anfrage eines Geräts über pair/start (Nutzlast des Ereignisses pairing.requested). Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App empfiehlt darum den QR-Weg",
       "required": [
         "request_id",
         "pairing_id",
@@ -4632,6 +4668,24 @@
         },
         "requested_at": {
           "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "PairingRequestList": {
+      "title": "PairingRequestList",
+      "type": "object",
+      "description": "GET /devices/pairings/requests (nur lokal): offene (nicht abgelehnte) Anfragen des aktuellen Kopplungsfensters, älteste zuerst. Ohne offenes Fenster leer. Höchstens 10, danach antwortet pair/start mit 429 pairing_requests_full",
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/PairingRequest"
+          }
         }
       }
     },

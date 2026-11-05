@@ -1,14 +1,16 @@
-// Sync-Server mit gekoppelten Geräten aus dem Netz (T1-08): resolveDevice, Gegenprobe der device_id,
-// time.offset, localOnly-Ereignisse, closeDeviceConnections/isDeviceConnected.
-// Braucht eine IPv4-Adresse, die nicht Loopback ist. T1-10 wird `request.sgDevice` setzen, hier simuliert das
-// der Token-Prüfer der Test-App.
+// Sync-Server mit gekoppelten Geräten aus dem Netz, gegen den echten Wächter (T1-10): request.sgDevice,
+// Gegenprobe der device_id, time.offset, localOnly-Ereignisse, pairing.requested, Widerruf
+// (closeDeviceConnections, Lücke zwischen Wächter und hub.add, Prüfung vor welcome), Device.connected.
+// Braucht eine IPv4-Adresse, die nicht Loopback ist.
 import { randomBytes } from 'node:crypto';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { SINGLE_USER_ID, type SyncEvent } from '@sg/shared';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { SyncEvent } from '@sg/shared';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
+import { createDevice } from '../../src/services/devices.ts';
 import { closeDeviceConnections, isDeviceConnected } from '../../src/sync/connections.ts';
 import { publishEvent } from '../../src/sync/events.ts';
 import { registerOpHandler } from '../../src/sync/handlers.ts';
+import { syncTestHooks } from '../../src/sync/server.ts';
 import {
   markerOp,
   networkAddress,
@@ -16,13 +18,11 @@ import {
   sleep,
   startSyncApp,
   TestClient,
+  waitFor,
   type SyncTestApp,
 } from './sync-helpers.ts';
 
 const address = networkAddress();
-const deviceId = uuidv7();
-const TOKEN = 'EXAMPLEdevicetoken0000000000000000000000001';
-const TOKEN_WITHOUT_DEVICE = 'EXAMPLEdevicetoken0000000000000000000000002';
 
 let app: SyncTestApp;
 const clients: TestClient[] = [];
@@ -33,24 +33,39 @@ registerOpHandler('marker.add', async (_tx, _op, ctx) => {
 });
 
 describe.skipIf(address === null)('Sync mit Geräten aus dem Netz', () => {
+  let deviceId: string;
+  let token: string;
+
   beforeAll(async () => {
-    app = await startSyncApp({
-      host: '0.0.0.0',
-      devices: { [TOKEN]: deviceId, [TOKEN_WITHOUT_DEVICE]: null },
+    app = await startSyncApp({ host: '0.0.0.0' });
+  });
+  beforeEach(async () => {
+    const created = await createDevice(app.handle.db, {
+      name: 'iPad von Test',
+      kind: 'ipad',
+      appVersion: null,
     });
-    await app.handle.sql`INSERT INTO device (id, user_id, name, kind, token_hash)
-      VALUES (${deviceId}, ${SINGLE_USER_ID}, 'iPad von Test', 'ipad', ${randomBytes(32).toString('hex')})`;
+    deviceId = created.device.id;
+    token = created.token;
   });
   afterEach(() => {
+    syncTestHooks.beforeAccept = null;
     for (const c of clients.splice(0)) c.close();
   });
   afterAll(async () => {
-    await app.handle.sql`DELETE FROM device WHERE id = ${deviceId}`;
     await app.close();
   });
 
   const netUrl = () => `ws://${address}:${app.port}/sync`;
   const localUrl = () => `ws://127.0.0.1:${app.port}/sync`;
+
+  /** REST-Aufruf am Mac (lokal, ohne Token) */
+  const localRest = (method: string, path: string, body?: unknown) =>
+    fetch(`http://127.0.0.1:${app.port}/api/v1${path}`, {
+      method,
+      headers: { ...(body ? { 'content-type': 'application/json' } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
 
   async function open(url: string, headers: Record<string, string> = {}): Promise<TestClient> {
     const client = await TestClient.open(url, headers);
@@ -58,8 +73,7 @@ describe.skipIf(address === null)('Sync mit Geräten aus dem Netz', () => {
     return client;
   }
 
-  async function device(extra: Record<string, unknown> = {}): Promise<TestClient> {
-    const client = await open(netUrl(), { authorization: `Bearer ${TOKEN}` });
+  const helloAsDevice = (client: TestClient, extra: Record<string, unknown> = {}) =>
     client.send({
       type: 'hello',
       protocol: 1,
@@ -69,6 +83,10 @@ describe.skipIf(address === null)('Sync mit Geräten aus dem Netz', () => {
       device_id: deviceId,
       ...extra,
     });
+
+  async function device(extra: Record<string, unknown> = {}): Promise<TestClient> {
+    const client = await open(netUrl(), { authorization: `Bearer ${token}` });
+    helloAsDevice(client, extra);
     return client;
   }
 
@@ -78,20 +96,31 @@ describe.skipIf(address === null)('Sync mit Geräten aus dem Netz', () => {
     return client;
   }
 
-  it('lehnt Verbindungen aus dem Netz ohne Token per HTTP ab (Wächter, 401)', async () => {
-    const client = new TestClient(netUrl());
-    clients.push(client);
-    await client.closed();
-    expect(client.httpStatus).toBe(401);
-  });
+  /** Hält das Annehmen der nächsten Verbindung nach dem Wächter an, bis `release` aufgerufen wird */
+  function holdAccept(): { reached: Promise<void>; release: () => void } {
+    let release!: () => void;
+    let reached!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const reachedP = new Promise<void>((r) => (reached = r));
+    syncTestHooks.beforeAccept = async () => {
+      syncTestHooks.beforeAccept = null;
+      reached();
+      await gate;
+    };
+    return { reached: reachedP, release };
+  }
 
-  it('schließt eine Netzverbindung ohne request.sgDevice mit 4401 (Fallback in resolveDevice)', async () => {
-    const client = await open(netUrl(), { authorization: `Bearer ${TOKEN_WITHOUT_DEVICE}` });
-    expect(await client.next((m) => m.type === 'error')).toMatchObject({
-      code: 'device_token_invalid',
-      fatal: true,
+  it('lehnt Verbindungen aus dem Netz ohne bzw. mit unbekanntem Token per HTTP ab (Wächter, 401)', async () => {
+    const none = new TestClient(netUrl());
+    clients.push(none);
+    await none.closed();
+    expect(none.httpStatus).toBe(401);
+    const unknown = new TestClient(netUrl(), {
+      authorization: `Bearer EXAMPLEunbekannt${randomBytes(4).toString('hex')}`,
     });
-    expect(await client.closed()).toBe(4401);
+    clients.push(unknown);
+    await unknown.closed();
+    expect(unknown.httpStatus).toBe(401);
   });
 
   it('meldet das Gerät an, speichert app_version und time.offset und gibt das Gerät an den Handler', async () => {
@@ -188,6 +217,28 @@ describe.skipIf(address === null)('Sync mit Geräten aus dem Netz', () => {
     expect(client.messages.some(same(pairing))).toBe(false);
   });
 
+  it('pair/start aus dem Netz (T1-10) erzeugt pairing.requested nur für lokale Clients', async () => {
+    const watcher = await local();
+    const client = await device();
+    await client.next((m) => m.type === 'welcome');
+    const opened = await localRest('POST', '/devices/pairings');
+    expect(opened.status).toBe(201);
+    const started = await fetch(`http://${address}:${app.port}/api/v1/devices/pair/start`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        device_name: 'Neues iPad',
+        kind: 'ipad',
+        public_nonce: `EXAMPLEnonce${randomBytes(6).toString('hex')}`,
+      }),
+    });
+    expect(started.status).toBe(201);
+    const event = await watcher.next((m) => m.type === 'event' && m.name === 'pairing.requested');
+    expect(event.data).toMatchObject({ device_name: 'Neues iPad', kind: 'ipad' });
+    await sleep(100);
+    expect(client.messages.some((m) => m.type === 'event' && m.name === 'pairing.requested')).toBe(false);
+  });
+
   it('closeDeviceConnections schließt alle Verbindungen des Geräts mit dem Code', async () => {
     const watcher = await local();
     const first = await device();
@@ -205,5 +256,56 @@ describe.skipIf(address === null)('Sync mit Geräten aus dem Netz', () => {
         (m.data as { connected: boolean; device_id: string }).connected === false,
     );
     expect(watcher.closeCode).toBeNull();
+  });
+
+  it('DELETE /devices/{id} schließt die Verbindung mit 4401, Device.connected stimmt', async () => {
+    const client = await device();
+    await client.next((m) => m.type === 'welcome');
+    const listed = async () => {
+      const res = await localRest('GET', '/devices');
+      const body = (await res.json()) as { items: { id: string; connected: boolean }[] };
+      return body.items.find((d) => d.id === deviceId)?.connected;
+    };
+    expect(await listed()).toBe(true);
+    expect((await localRest('DELETE', `/devices/${deviceId}`)).status).toBe(204);
+    expect(await client.closed()).toBe(4401);
+    await waitFor(() => !isDeviceConnected(deviceId));
+    // Neuer Upgrade mit dem widerrufenen Token: 401 vom Wächter
+    const again = new TestClient(netUrl(), { authorization: `Bearer ${token}` });
+    clients.push(again);
+    await again.closed();
+    expect(again.httpStatus).toBe(401);
+  });
+
+  it('Widerruf zwischen Wächter und hub.add: Verbindung wird sofort mit 4401 geschlossen (Security-Review #83, S3)', async () => {
+    const gate = holdAccept();
+    const client = await open(netUrl(), { authorization: `Bearer ${token}` });
+    await gate.reached;
+    // Der Wächter hat das Token schon akzeptiert. Jetzt widerrufen: closeDeviceConnections sieht die Verbindung nicht
+    expect((await localRest('DELETE', `/devices/${deviceId}`)).status).toBe(204);
+    gate.release();
+    // Geschlossen, ohne dass der Client etwas gesendet hat (die Prüfung direkt nach hub.add greift)
+    expect(await client.closed(2000)).toBe(4401);
+    expect(client.messages).toEqual([
+      expect.objectContaining({ type: 'error', code: 'device_token_invalid' }),
+    ]);
+    expect(isDeviceConnected(deviceId)).toBe(false);
+  });
+
+  it('Widerruf ohne Benachrichtigung (z. B. vor einem Neustart): Prüfung vor welcome per Datenbank', async () => {
+    const gate = holdAccept();
+    const client = await open(netUrl(), { authorization: `Bearer ${token}` });
+    await gate.reached;
+    // Direkt in der Datenbank: onDeviceRevoked feuert nicht, das Set im Speicher kennt den Widerruf nicht
+    await app.handle.sql`UPDATE device SET deleted_at = now() WHERE id = ${deviceId}`;
+    gate.release();
+    await sleep(50);
+    helloAsDevice(client);
+    expect(await client.next((m) => m.type === 'error')).toMatchObject({
+      code: 'device_token_invalid',
+      fatal: true,
+    });
+    expect(await client.closed()).toBe(4401);
+    expect(client.messages.some((m) => m.type === 'welcome')).toBe(false);
   });
 });

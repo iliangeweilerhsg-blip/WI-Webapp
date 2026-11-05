@@ -151,14 +151,22 @@ where file.hasSuffix(".json") && file.first!.isNumber {
 var logged: [String] = []
 SGSync.log = { logged.append($0) }
 let futureOp = #"{"type":"op","op_id":"019a4e14-0000-7000-8000-000000000999","stream":"user","kind":"plan.update","at":1,"clock_uncertain":false,"data":{}}"#
-if case .op(.unknown(let kind, _, _)) = try SGServerMessage.decode(Data(futureOp.utf8)), kind == "plan.update" {} else {
+if case .op(.unknown(let kind, _, _, _)) = try SGServerMessage.decode(Data(futureOp.utf8)), kind == "plan.update" {} else {
     failures.append("Unbekannte Operation wurde nicht als .unknown erkannt")
 }
 // Bekannte Operation mit neuem Enum-Wert: überspringen, aber seq weitergeben
 let futureEnum = #"{"type":"op","seq":42,"origin":"ipad","op_id":"019a4e14-0000-7000-8000-000000000998","stream":"session:019a4e14-0000-7000-8000-000000000030","kind":"marker.add","at":1,"clock_uncertain":false,"data":{"marker_id":"019a4e14-0000-7000-8000-000000000060","session_id":"019a4e14-0000-7000-8000-000000000030","kind":"idee","t_ms":1,"page_id":null,"position":null,"note":null,"source":"ipad"}}"#
-if case .op(.unknown(let kind, let stream, let seq)) = try SGServerMessage.decode(Data(futureEnum.utf8)),
-   kind == "marker.add", seq == 42, stream?.hasPrefix("session:") == true {} else {
+if case .op(.unknown(let kind, let stream, let seq, let opID)) = try SGServerMessage.decode(Data(futureEnum.utf8)),
+   kind == "marker.add", seq == 42, stream?.hasPrefix("session:") == true,
+   opID == "019a4e14-0000-7000-8000-000000000998" {} else {
     failures.append("Neuer Enum-Wert in bekannter Operation wurde nicht als .unknown mit seq erkannt")
+}
+// element.upsert mit neuem Elementtyp (SGSyncError.unknownElement): .unknown mit seq und op_id
+let futureElement = #"{"type":"op","seq":43,"origin":"web","op_id":"019a4e14-0000-7000-8000-000000000997","stream":"notebook:019a4e14-0000-7000-8000-000000000040","kind":"element.upsert","at":1,"clock_uncertain":false,"data":{"page_id":"019a4e14-0000-7000-8000-000000000050","element":{"kind":"hologram","element_id":"019a4e14-0000-7000-8000-000000000051"}}}"#
+if case .op(.unknown(let kind, let stream, let seq, let opID)) = try SGServerMessage.decode(Data(futureElement.utf8)),
+   kind == "element.upsert", seq == 43, stream?.hasPrefix("notebook:") == true,
+   opID == "019a4e14-0000-7000-8000-000000000997" {} else {
+    failures.append("element.upsert mit unbekanntem Elementtyp wurde nicht als .unknown mit seq und op_id erkannt")
 }
 let futureError = #"{"type":"error","code":"quota_exceeded","message":"x","op_id":"019a4e14-0000-7000-8000-000000000999","retryable":true,"fatal":true}"#
 if case .unknownError(let e) = try SGServerMessage.decode(Data(futureError.utf8)), e.retryable, e.code == "quota_exceeded" {} else {
@@ -167,8 +175,9 @@ if case .unknownError(let e) = try SGServerMessage.decode(Data(futureError.utf8)
 if case .unknown = try SGServerMessage.decode(Data(#"{"type":"bye"}"#.utf8)) {} else {
     failures.append("Unbekannter Nachrichtentyp wurde nicht ignoriert")
 }
-if logged.count != 4 { failures.append("Erwartet 4 Protokolleinträge, erhalten \(logged.count)") }
-checked += 4
+// futureElement protokolliert zweimal (SGPageElement und SGSyncOp.decode)
+if logged.count != 6 { failures.append("Erwartet 6 Protokolleinträge, erhalten \(logged.count)") }
+checked += 5
 
 if failures.isEmpty {
     print("Swift-Contract: \(checked) Prüfungen bestanden")
