@@ -93,7 +93,7 @@ describe('hasOpenPermissions', () => {
 });
 
 describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
-  const SECRET = '3f2b8c1e-aaaa-4bbb-8ccc-0123456789ab';
+  const SECRET = '00000000-0000-4000-8000-000000000091';
 
   it('redactUrl: nur geheime Namen, Rest und Reihenfolge bleiben', () => {
     expect(redactUrl('/devices/pairings?pairing_id=abc')).toBe('/devices/pairings?pairing_id=[Redacted]');
