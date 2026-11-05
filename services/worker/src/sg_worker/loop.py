@@ -113,9 +113,11 @@ class Worker:
             self._reconnect_delay = 1.0
             # Beim Verbinden kann kein eigener Job laufen: Locks aus einer abgebrochenen
             # Verbindung (auch Claim ohne Handler-Start, "unbekannter Job-Typ") freigeben.
-            with work.transaction():
-                orphaned = jobs.fail_own_running(work, self.worker_id, ORPHAN_ERROR)
-                progress.refresh_jobs(work, orphaned)
+            orphaned = progress.run_per_session(
+                work,
+                jobs.own_running_sessions(work, self.worker_id),
+                lambda sid: jobs.fail_own_running(work, self.worker_id, ORPHAN_ERROR, sid),
+            )
             if orphaned:
                 self.log.warning(
                     "Verwaiste eigene Jobs zurückgesetzt", extra={"count": len(orphaned)}
@@ -139,9 +141,11 @@ class Worker:
     def _recover(self, conn: psycopg.Connection[Any]) -> int:
         """Abgestürzte Jobs fremder Worker freigeben (Start und danach jede Minute)."""
         self._last_recover = time.monotonic()
-        with conn.transaction():
-            rows = jobs.recover_stuck(conn, self.stuck_after)
-            progress.refresh_jobs(conn, rows)
+        rows = progress.run_per_session(
+            conn,
+            jobs.stuck_sessions(conn, self.stuck_after),
+            lambda sid: jobs.recover_stuck(conn, self.stuck_after, sid),
+        )
         if rows:
             self.log.warning("Hängende Jobs freigegeben", extra={"count": len(rows)})
             self._run_failure_hooks(conn, rows)
@@ -176,14 +180,23 @@ class Worker:
         """Arbeitet alle fälligen Jobs ab. Gibt die Anzahl bearbeiteter Jobs zurück."""
         count = 0
         while not self.stopping:
-            with conn.transaction():
-                progress.refresh_jobs(conn, jobs.cancel_dependents(conn))
+            self._cancel_dependents(conn)
             job = jobs.claim_next(conn, self.worker_id)
             if job is None:
                 break
             self._execute(conn, job)
             count += 1
         return count
+
+    def _cancel_dependents(self, conn: psycopg.Connection[Any]) -> None:
+        """Bricht Jobs mit gescheiterter Abhängigkeit ab, kaskadierend in Runden. Je Session eine
+        Transaktion mit Fortschritt; ohne Kandidaten nur eine einzelne Abfrage."""
+        while sessions := jobs.cancel_candidate_sessions(conn):
+            cancelled = progress.run_per_session(
+                conn, sessions, lambda sid: jobs.cancel_dependents(conn, sid)
+            )
+            if not cancelled:
+                return
 
     def _finish_failed(
         self, conn: psycopg.Connection[Any], job: jobs.Job, error: str, *, retry: bool = True

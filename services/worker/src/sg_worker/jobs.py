@@ -36,6 +36,8 @@ WHERE state = 'wartet' AND deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM job dj
               WHERE dj.id = ANY(job.depends_on) AND dj.deleted_at IS NULL
                 AND dj.state IN ('fehler', 'abgebrochen'))
+  AND (%(all)s OR session_id IS NOT DISTINCT FROM %(sid)s::uuid)
+RETURNING id, type, session_id
 """
 
 # Abhängigkeit existiert nicht oder ist soft-gelöscht -> abhängigen Job abbrechen (§3).
@@ -50,7 +52,33 @@ UPDATE job SET state = 'abgebrochen',
 WHERE state = 'wartet' AND deleted_at IS NULL
   AND EXISTS (SELECT 1 FROM unnest(job.depends_on) AS d(id)
               WHERE NOT EXISTS (SELECT 1 FROM job dj WHERE dj.id = d.id AND dj.deleted_at IS NULL))
+  AND (%(all)s OR session_id IS NOT DISTINCT FROM %(sid)s::uuid)
+RETURNING id, type, session_id
 """
+
+# Sessions mit abzubrechenden Jobs (ohne Sperre gelesen, nur Kandidaten).
+_CANCEL_CANDIDATES_SQL = """
+SELECT DISTINCT session_id FROM job
+WHERE state = 'wartet' AND deleted_at IS NULL
+  AND (EXISTS (SELECT 1 FROM job dj
+               WHERE dj.id = ANY(job.depends_on) AND dj.deleted_at IS NULL
+                 AND dj.state IN ('fehler', 'abgebrochen'))
+       OR EXISTS (SELECT 1 FROM unnest(job.depends_on) AS d(id)
+                  WHERE NOT EXISTS (SELECT 1 FROM job dj
+                                    WHERE dj.id = d.id AND dj.deleted_at IS NULL)))
+"""
+
+_STUCK_WHERE = "state = 'laeuft' AND locked_at < now() - make_interval(secs => %(after)s)"
+_OWN_WHERE = "state = 'laeuft' AND locked_by = %(worker)s"
+_SESSION_FILTER = "(%(all)s OR session_id IS NOT DISTINCT FROM %(sid)s::uuid)"
+
+#: Marker für "alle Sessions" (Standard der Sammelfunktionen)
+ALL_SESSIONS: Any = object()
+
+
+def _scope(session: Any) -> dict[str, Any]:
+    return {"all": session is ALL_SESSIONS, "sid": None if session is ALL_SESSIONS else session}
+
 
 _CLAIM_SQL = """
 WITH next AS (
@@ -72,73 +100,100 @@ RETURNING job.*
 """
 
 
-def recover_stuck(conn: Conn, after_seconds: float = STUCK_AFTER_SECONDS) -> list[Job]:
+def stuck_sessions(conn: Conn, after_seconds: float = STUCK_AFTER_SECONDS) -> list[Any]:
+    """Sessions (auch `None`) mit abgestürzten Jobs. Liest ohne Sperre, nur Kandidaten."""
+    rows = conn.execute(
+        f"SELECT DISTINCT session_id FROM job WHERE {_STUCK_WHERE}", {"after": after_seconds}
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def own_running_sessions(conn: Conn, worker_id: str) -> list[Any]:
+    """Sessions (auch `None`) mit Jobs, die dieser Worker hält. Liest ohne Sperre."""
+    rows = conn.execute(
+        f"SELECT DISTINCT session_id FROM job WHERE {_OWN_WHERE}", {"worker": worker_id}
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def recover_stuck(
+    conn: Conn, after_seconds: float = STUCK_AFTER_SECONDS, session: Any = ALL_SESSIONS
+) -> list[Job]:
     """Abgestürzte Jobs (`laeuft`, `locked_at` älter als `after_seconds`): mit
     `attempts >= max_attempts` -> `fehler`, sonst zurück auf `wartet`.
 
-    Gibt die betroffenen Jobs (id, type, payload, state) zurück, damit der Aufrufer für endgültig
-    gescheiterte die Fehler-Hooks ausführen kann.
+    Gibt die betroffenen Jobs (id, type, payload, state, session_id) zurück, damit der Aufrufer für
+    endgültig gescheiterte die Fehler-Hooks ausführen kann. Mit `session` nur Jobs dieser Session
+    (`None` = ohne Session); der Aufrufer sperrt die Session vorher.
     """
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            """
+            f"""
             UPDATE job SET
               state = CASE WHEN attempts >= max_attempts THEN 'fehler' ELSE 'wartet' END,
               error = CASE WHEN attempts >= max_attempts
                       THEN 'Worker abgestürzt oder Lock verloren (zu viele Versuche)' ELSE error END,
               locked_by = NULL, locked_at = NULL, updated_at = now()
-            WHERE state = 'laeuft' AND locked_at < now() - make_interval(secs => %s)
-            RETURNING id, type, payload, state
+            WHERE {_STUCK_WHERE} AND {_SESSION_FILTER}
+            RETURNING id, type, payload, state, session_id
             """,
-            (after_seconds,),
+            {"after": after_seconds, **_scope(session)},
         )
         return cur.fetchall()
 
 
-def fail_own_running(conn: Conn, worker_id: str, error: str) -> list[Job]:
+def fail_own_running(
+    conn: Conn, worker_id: str, error: str, session: Any = ALL_SESSIONS
+) -> list[Job]:
     """Lässt alle Jobs, die dieser Worker hält (`laeuft`, `locked_by = worker_id`), mit Retry
     fehlschlagen. Beim (Wieder-)Verbinden aufrufen: Ein eigener Job kann dann nicht mehr laufen,
     der Lock stammt aus einer abgebrochenen Verbindung. Backoff und `fehler` wie bei `fail`.
     """
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
-            """
+            f"""
             UPDATE job SET
               state = CASE WHEN attempts < max_attempts THEN 'wartet' ELSE 'fehler' END,
               run_after = CASE WHEN attempts < max_attempts
                           THEN now() + make_interval(secs => %(base)s * power(2, attempts - 1))
                           ELSE run_after END,
               error = %(error)s, locked_by = NULL, locked_at = NULL, updated_at = now()
-            WHERE state = 'laeuft' AND locked_by = %(worker)s
-            RETURNING id, type, payload, state
+            WHERE state = 'laeuft' AND locked_by = %(worker)s AND {_SESSION_FILTER}
+            RETURNING id, type, payload, state, session_id
             """,
-            {"base": BACKOFF_BASE_SECONDS, "error": error, "worker": worker_id},
+            {"base": BACKOFF_BASE_SECONDS, "error": error, "worker": worker_id, **_scope(session)},
         )
         return cur.fetchall()
 
 
-def cancel_dependents(conn: Conn) -> list[Job]:
-    """Bricht wartende Jobs mit gescheiterter oder unbekannter Abhängigkeit ab (kaskadierend).
+def cancel_candidate_sessions(conn: Conn) -> list[Any]:
+    """Sessions (auch `None`) mit wartenden Jobs, deren Abhängigkeit gescheitert oder unbekannt
+    ist. Liest ohne Sperre, nur Kandidaten."""
+    return [r[0] for r in conn.execute(_CANCEL_CANDIDATES_SQL).fetchall()]
 
-    Gibt die abgebrochenen Jobs (id, type, session_id) zurück, damit der Aufrufer den
-    Session-Fortschritt in derselben Transaktion nachziehen kann.
+
+def cancel_dependents(conn: Conn, session: Any = ALL_SESSIONS) -> list[Job]:
+    """Ein Durchgang: bricht wartende Jobs mit gescheiterter oder unbekannter Abhängigkeit ab
+    (mit `session` nur die dieser Session, `None` = ohne Session; der Aufrufer sperrt sie vorher).
+    Die Kaskade ergibt sich durch Wiederholen, solange etwas abgebrochen wird.
+
+    Gibt die abgebrochenen Jobs (id, type, session_id) zurück.
     """
     cancelled: list[Job] = []
     with conn.cursor(row_factory=dict_row) as cur:
-        while True:
-            changed = 0
-            for sql in (_CANCEL_UNKNOWN_SQL, _CANCEL_FAILED_SQL):
-                cur.execute(sql + " RETURNING id, type, session_id")
-                rows = cur.fetchall()
-                cancelled.extend(rows)
-                changed += len(rows)
-            if changed == 0:
-                return cancelled
+        for sql in (_CANCEL_UNKNOWN_SQL, _CANCEL_FAILED_SQL):
+            cur.execute(sql, _scope(session))
+            cancelled.extend(cur.fetchall())
+    return cancelled
 
 
 def cancel_failed_dependents(conn: Conn) -> int:
-    """Wie `cancel_dependents`, gibt nur die Anzahl zurück."""
-    return len(cancel_dependents(conn))
+    """Kaskadierend für alle Sessions ohne Session-Sperre (nur für Tests/Wartung); die Schleife
+    nutzt `cancel_dependents` je Session mit Fortschritt."""
+    total = 0
+    while cancelled := cancel_dependents(conn):
+        total += len(cancelled)
+    return total
 
 
 def claim_next(conn: Conn, worker_id: str) -> Job | None:

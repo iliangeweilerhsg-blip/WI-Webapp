@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import threading
+import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -226,10 +228,11 @@ def test_two_connections_finishing_together_end_verarbeitet(
     tmp_path: Path,
     conn: psycopg.Connection[Any],
 ) -> None:
-    """Zwei Worker beenden die letzten zwei Jobs gleichzeitig. Ohne Sperre vor dem Zählen sähe
-    jeder den anderen noch als `laeuft`, und die Session bliebe `beendet`."""
+    """Zwei Aufnahmen derselben Session (gleicher Jobtyp) enden gleichzeitig (#73). Ohne Sperre
+    der Session vor dem Zählen sähe jeder Abschluss den anderen noch als `laeuft`
+    (`processing = laeuft`) und die Session bliebe `beendet`."""
     add_session(conn)
-    ids = {"slow": add_job(conn, "slow"), "fast": add_job(conn, "fast")}
+    ids = {"slow": add_job(conn, "t"), "fast": add_job(conn, "t")}
     for name, job_id in ids.items():
         conn.execute(
             "UPDATE job SET state = 'laeuft', attempts = 1, locked_by = %s, locked_at = now() "
@@ -253,7 +256,7 @@ def test_two_connections_finishing_together_end_verarbeitet(
 
     def run(name: str, fn: Any) -> None:
         reg = Registry()
-        reg.register(name, fn)
+        reg.register("t", fn)
         w = Worker(
             database_url,
             tmp_path,
@@ -263,8 +266,7 @@ def test_two_connections_finishing_together_end_verarbeitet(
             connect_kwargs=connect_kwargs,
         )
         with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as c:
-            row = get_job(conn, ids[name])
-            w._execute(c, row)
+            w._execute(c, get_job(conn, ids[name]))
 
     threads = [
         threading.Thread(target=run, args=("slow", slow)),
@@ -275,7 +277,122 @@ def test_two_connections_finishing_together_end_verarbeitet(
     for t in threads:
         t.join(30)
         assert not t.is_alive()
-    assert session_row(conn) == ("verarbeitet", {"slow": "fertig", "fast": "fertig"})
+    assert session_row(conn) == ("verarbeitet", {"t": "fertig"})
+
+
+# ---------- Sammelwege gegen den Core-Stopp: kein Deadlock ----------
+
+
+def _core_stop_vs_worker(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    conn: psycopg.Connection[Any],
+    worker_call: Callable[[psycopg.Connection[Any]], None],
+) -> None:
+    """Der Core hält die Session (`FOR NO KEY UPDATE`) und liest danach den Job `FOR UPDATE`
+    (ensureFinalizeOnStop). Der Worker-Sammelweg läuft währenddessen. Hielte der Worker erst die
+    Job-Zeile und wollte dann die Session, gäbe es einen Deadlock (40P01), und der Core könnte das
+    Opfer sein."""
+    result: dict[str, str] = {}
+
+    def worker() -> None:
+        try:
+            with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as wc:
+                wc.execute("SET deadlock_timeout = '300ms'")
+                worker_call(wc)
+            result["worker"] = "ok"
+        except psycopg.errors.DeadlockDetected:
+            result["worker"] = "deadlock"
+
+    with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as core:
+        core.execute("SET deadlock_timeout = '300ms'")
+        core.execute("BEGIN")
+        core.execute("SELECT 1 FROM session WHERE id = %s FOR NO KEY UPDATE", (SID,))
+        thread = threading.Thread(target=worker)
+        thread.start()
+        time.sleep(0.5)  # Worker ist jetzt bei der Session angekommen
+        try:
+            core.execute("SELECT id FROM job WHERE session_id = %s FOR UPDATE", (SID,)).fetchall()
+            core.execute("UPDATE session SET updated_at = now() WHERE id = %s", (SID,))
+            core.execute("COMMIT")
+            result["core"] = "ok"
+        except psycopg.errors.DeadlockDetected:
+            core.execute("ROLLBACK")
+            result["core"] = "deadlock"
+        thread.join(30)
+        assert not thread.is_alive()
+    assert result == {"core": "ok", "worker": "ok"}
+
+
+def test_recover_stuck_does_not_deadlock_with_core_stop(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    worker: Worker,
+    conn: psycopg.Connection[Any],
+) -> None:
+    add_session(conn)
+    job = add_job(conn, state="laeuft", max_attempts=1)
+    conn.execute(
+        "UPDATE job SET attempts = 1, locked_by = 'tot', locked_at = now() - interval '1 hour' "
+        "WHERE id = %s",
+        (job,),
+    )
+    _core_stop_vs_worker(database_url, connect_kwargs, conn, lambda c: worker._recover(c))
+    assert session_row(conn) == ("verarbeitet", {"transcribe": "fehler"})
+
+
+def test_fail_own_running_does_not_deadlock_with_core_stop(
+    database_url: str, connect_kwargs: dict[str, Any], conn: psycopg.Connection[Any]
+) -> None:
+    add_session(conn)
+    job = add_job(conn, state="laeuft", max_attempts=1)
+    conn.execute(
+        "UPDATE job SET attempts = 1, locked_by = 'ich', locked_at = now() WHERE id = %s", (job,)
+    )
+
+    def call(c: psycopg.Connection[Any]) -> None:
+        progress.run_per_session(
+            c,
+            jobs.own_running_sessions(c, "ich"),
+            lambda sid: jobs.fail_own_running(c, "ich", "weg", sid),
+        )
+
+    _core_stop_vs_worker(database_url, connect_kwargs, conn, call)
+    assert session_row(conn) == ("verarbeitet", {"transcribe": "fehler"})
+
+
+def test_cancel_dependents_does_not_deadlock_with_core_stop(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    worker: Worker,
+    conn: psycopg.Connection[Any],
+) -> None:
+    add_session(conn)
+    dep = add_job(conn, state="fehler")
+    add_job(conn, "summarize", depends_on=[dep])
+    _core_stop_vs_worker(database_url, connect_kwargs, conn, lambda c: worker._cancel_dependents(c))
+    assert session_row(conn) == ("verarbeitet", {"summarize": "abgebrochen"})
+
+
+def test_cascading_cancel_over_rounds(worker: Worker, conn: psycopg.Connection[Any]) -> None:
+    add_session(conn)
+    first = add_job(conn, "transcribe", state="fehler")
+    second = add_job(conn, "summarize", depends_on=[first])
+    add_job(conn, "other", depends_on=[second])
+    worker._cancel_dependents(conn)
+    states = conn.execute("SELECT type, state FROM job ORDER BY type").fetchall()
+    assert states == [
+        ("other", "abgebrochen"),
+        ("summarize", "abgebrochen"),
+        ("transcribe", "fehler"),
+    ]
+
+
+def test_no_transaction_for_empty_drain_round(
+    worker: Worker, conn: psycopg.Connection[Any]
+) -> None:
+    worker._cancel_dependents(conn)  # nichts zu tun: kein Fehler, Verbindung bleibt idle
+    assert conn.info.transaction_status == psycopg.pq.TransactionStatus.IDLE
 
 
 def test_cancel_dependents_returns_rows(conn: psycopg.Connection[Any]) -> None:

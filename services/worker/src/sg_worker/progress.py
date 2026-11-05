@@ -13,18 +13,17 @@ Ablauf je Session (`refresh`):
    Eine `verarbeitet`e Session ändert ihren Zustand nicht mehr, nur `processing`.
 4. `pg_notify('sg_session', <session_id>)`.
 
-Sperrreihenfolge (§16.2): Session zuerst, dann Job-Zeilen. Darum sperrt die Schleife die Session
-**vor** dem Schreiben des Job-Ergebnisses (`lock_session`). Nur die Wartungswege (abgestürzte und
-abgebrochene Jobs, Mehrfach-Updates) kennen ihre Sessions erst nach dem Update; dort ist die
-Reihenfolge Job, dann Session (aufsteigend nach ID). Ein Deadlock ist dort denkbar, aber
-selten; Postgres bricht ihn ab, die Schleife verbindet neu und holt den Rest nach.
+Sperrreihenfolge (§16.2): Session zuerst, dann Job-Zeilen, überall. Einzelne Jobs sperren die
+Session vor dem Schreiben des Ergebnisses (`lock_session`). Die Sammelwege (abgestürzte Jobs,
+eigene verwaiste Jobs, Abbruch über `depends_on`) lesen zuerst die Kandidaten-Sessions ohne
+Sperre und arbeiten dann je Session in einer eigenen Transaktion (`run_per_session`).
 Alle Funktionen setzen eine offene Transaktion voraus und sind idempotent.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import psycopg
@@ -89,23 +88,24 @@ def refresh(conn: Conn, session_id: Any, job_types: Iterable[str]) -> None:
     conn.execute("SELECT pg_notify('sg_session', %s)", (str(sid),))
 
 
-def refresh_jobs(conn: Conn, jobs: Iterable[Mapping[str, Any] | Any]) -> None:
-    """Fortschritt für Jobs, die ein Sammel-Update verändert hat. Einträge sind Zeilen mit `type`
-    und `session_id` bzw. (nur) einer `id`; dann werden beide aus der Tabelle gelesen."""
-    wanted: dict[uuid.UUID, set[str]] = {}
-    ids: list[Any] = []
-    for item in jobs:
-        if isinstance(item, Mapping) and "session_id" in item and "type" in item:
-            if item["session_id"] is not None and (sid := _as_uuid(item["session_id"])):
-                wanted.setdefault(sid, set()).add(item["type"])
-        else:
-            ids.append(item["id"] if isinstance(item, Mapping) else item)
-    if ids:
-        for sid, job_type in conn.execute(
-            "SELECT DISTINCT session_id, type FROM job WHERE id = ANY(%s) "
-            "AND session_id IS NOT NULL",
-            (ids,),
-        ).fetchall():
-            wanted.setdefault(sid, set()).add(job_type)
-    for sid in sorted(wanted, key=str):
-        refresh(conn, sid, wanted[sid])
+def run_per_session(
+    conn: Conn, sessions: Iterable[Any], step: Callable[[Any], list[dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    """Führt `step(session_id)` je Session in einer **eigenen Transaktion** aus: Session sperren,
+    Jobs ändern (`step` liefert die Zeilen mit `type`), Fortschritt nachziehen. Reihenfolge
+    sortiert, Jobs ohne Session (`None`) zuerst. Es hält nie mehr als eine Session gleichzeitig,
+    und die Session wird immer vor den Job-Zeilen gesperrt (§16.2).
+
+    `sessions` kommt aus einer Abfrage ohne Sperre (nur Kandidaten); `step` prüft die Bedingung
+    unter der Sperre erneut.
+    """
+    done: list[dict[str, Any]] = []
+    for sid in sorted(set(sessions), key=lambda s: (s is not None, str(s))):
+        with conn.transaction():
+            if sid is not None:
+                lock_session(conn, sid)
+            rows = step(sid)
+            if sid is not None and rows:
+                refresh(conn, sid, {r["type"] for r in rows})
+            done.extend(rows)
+    return done
