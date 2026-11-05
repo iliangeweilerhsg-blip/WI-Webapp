@@ -1,7 +1,14 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
-import { type Dirent, existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, readdirSync, type Stats } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { NoFollowWriter, readSmallRegularFile } from './nofollow.ts';
+import {
+  NoFollowReader,
+  NoFollowRemover,
+  NoFollowWriter,
+  readSmallRegularFile,
+  UnsafeTargetError,
+  type NoFollowHooks,
+} from './nofollow.ts';
 
 /** Standname `YYYYMMDDTHHMMSSZ` (UTC), so auch `BackupRun.stand` im Schema */
 export const STAND_RE = /^[0-9]{8}T[0-9]{6}Z$/;
@@ -121,103 +128,197 @@ export function skipped(name: string): boolean {
   return name.endsWith('.part') || name.endsWith('.partial') || name === '.tmp' || name === '.DS_Store';
 }
 
+export interface CopyTreeOptions {
+  /** Nur für Tests: läuft vor dem Kopieren jeder Datei */
+  beforeCopy?: (path: string) => void;
+  /** Schreiber für `dst` (sonst ein eigener, der den Elternordner von `dst` übernimmt) */
+  out?: NoFollowWriter;
+  /**
+   * Liest `src` und `prev` verankert (#119). Beide müssen ihm bekannt sein; ohne `reader` übernimmt `copyTree` sie als
+   * vertrauenswürdig (Datenordner, Tests).
+   */
+  reader?: NoFollowReader;
+  /**
+   * Quelle ist ein Stand im Ziel (Restore): Ein Symlink, eine Sonderdatei oder ein unterwegs verschwundener oder
+   * ausgetauschter Eintrag ist ein Fehler (`UnsafeTargetError`), statt übersprungen zu werden.
+   */
+  strictSource?: boolean;
+}
+
 /**
  * Kopiert den Baum `src` nach `dst`. Unveränderte Dateien (gleiche Größe und Änderungszeit wie im vorigen Stand
  * `prev`) werden dorthin verlinkt statt kopiert: so entsteht aus jedem Lauf ein vollständiger Stand, der nur
  * die Änderungen belegt (inkrementell). Geht ein Hardlink nicht (anderes Dateisystem), wird kopiert.
- * Symbolische Links und Sonderdateien werden übersprungen.
+ * Symbolische Links und Sonderdateien werden übersprungen (mit `strictSource`: Fehler).
  *
- * `dst` darf noch nicht existieren. Geschrieben wird nur über `out` (`NoFollowWriter`): Ordner einzeln neu,
- * Dateien exklusiv, nie einem Symlink im Ziel folgend (#113). Ohne `out` legt `copyTree` einen eigenen an, der den
- * Elternordner von `dst` als vertrauenswürdig übernimmt (Restore in den Datenordner).
+ * `dst` darf noch nicht existieren. Geschrieben wird nur über den `NoFollowWriter` (#113), gelesen nur über den
+ * `NoFollowReader` (#119): Jeder Ordner von `src` und `prev` wird verankert betreten, Dateien werden relativ mit
+ * `O_NOFOLLOW` geöffnet. Ein Symlink in der Quelle wird nie verfolgt.
  */
 export function copyTree(
   src: string,
   dst: string,
   prev: string | null,
   stats?: CopyStats,
-  /** Nur für Tests: läuft vor dem Kopieren jeder Datei */
-  hooks?: { beforeCopy?: (path: string) => void },
-  writer?: NoFollowWriter,
+  options: CopyTreeOptions = {},
 ): CopyStats {
   const result = stats ?? { files: 0, bytes: 0, linked: 0, copied: 0, vanished: 0 };
-  let out = writer;
+  const strict = options.strictSource === true;
+  let out = options.out;
   if (!out) {
     out = new NoFollowWriter();
     out.adopt(dirname(dst));
   }
-  out.mkdir(dst);
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(src, { withFileTypes: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-      result.vanished += 1;
-      return result;
-    }
-    throw error;
-  }
-  for (const entry of entries) {
-    if (skipped(entry.name)) continue;
-    const from = join(src, entry.name);
-    const to = join(dst, entry.name);
-    const before = prev ? join(prev, entry.name) : null;
-    if (entry.isDirectory()) {
-      copyTree(from, to, before && existsSync(before) ? before : null, result, hooks, out);
-      continue;
-    }
-    if (!entry.isFile()) continue;
+  let reader = options.reader;
+  if (!reader) {
+    reader = new NoFollowReader({}, !strict);
     try {
-      hooks?.beforeCopy?.(from);
-      const info = lstatSync(from);
-      if (!info.isFile()) throw Object.assign(new Error('keine Datei mehr'), { code: 'ENOENT' });
-      let how: 'linked' | 'copied' = 'copied';
-      if (before) {
-        const old = lstatSync(before, { throwIfNoEntry: false });
-        if (old?.isFile() && old.size === info.size && Math.abs(old.mtimeMs - info.mtimeMs) < 2) {
-          // kein Hardlink möglich (anderes Dateisystem, inzwischen ausgetauscht): kopieren
-          if (out.link(before, to, old)) how = 'linked';
-        }
-      }
-      if (how === 'copied') out.copyFile(from, to, info);
-      result.files += 1;
-      result.bytes += info.size;
-      result[how] += 1;
+      reader.adopt(src);
     } catch (error) {
-      // Datei ist zwischen Auflisten und Kopieren verschwunden (z. B. .part → umbenannt): überspringen
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      out.removeOwnFile(to);
-      result.vanished += 1;
     }
+    if (prev && existsSync(prev)) reader.adopt(prev);
   }
+  copyLevel(src, dst, prev && reader.knows(prev) ? prev : null, result, { ...options, out, reader, strict });
   return result;
 }
 
-/** Summe der Dateigrößen unterhalb von `dir` */
-export function treeSize(dir: string): { files: number; bytes: number } {
-  let files = 0;
-  let bytes = 0;
-  let entries: Dirent[];
+interface Level {
+  beforeCopy?: ((path: string) => void) | undefined;
+  out: NoFollowWriter;
+  reader: NoFollowReader;
+  strict: boolean;
+}
+
+function unsafe(message: string): UnsafeTargetError {
+  return new UnsafeTargetError(message);
+}
+
+/** Voriger Stand: Fehler beim Nachsehen heißen nur „nicht verlinken“ (kopiert wird dann immer) */
+function prevChild(reader: NoFollowReader, prev: string | null, name: string): string | null {
+  if (!prev) return null;
   try {
-    entries = readdirSync(dir, { withFileTypes: true });
+    return reader.child(prev, name, 'skip');
+  } catch {
+    return null;
+  }
+}
+
+function prevFile(reader: NoFollowReader, prev: string | null, name: string): Stats | undefined {
+  if (!prev) return undefined;
+  try {
+    const info = reader.stat(prev, name);
+    return info?.isFile() ? info : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function copyLevel(src: string, dst: string, prev: string | null, result: CopyStats, level: Level): void {
+  const { out, reader, strict } = level;
+  out.mkdir(dst);
+  let entries: { name: string; info: Stats }[];
+  try {
+    entries = reader.list(src);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { files, bytes };
+    if (!strict && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+      result.vanished += 1;
+      return;
+    }
     throw error;
   }
-  for (const entry of entries) {
-    if (skipped(entry.name)) continue; // wie beim Kopieren: .DS_Store, *.part, .tmp zählen nie
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      const sub = treeSize(full);
+  for (const { name, info } of entries) {
+    if (skipped(name)) continue;
+    const from = join(src, name);
+    const to = join(dst, name);
+    if (!info.isSymbolicLink() && info.isDirectory()) {
+      copyLevel(reader.enter(src, name, info), to, prevChild(reader, prev, name), result, level);
+      continue;
+    }
+    if (info.isSymbolicLink() || !info.isFile()) {
+      if (strict) throw unsafe(`${from} ist ein Symlink oder eine Sonderdatei.`);
+      continue;
+    }
+    let opened: { fd: number; info: Stats };
+    try {
+      level.beforeCopy?.(from);
+      opened = reader.open(src, name);
+    } catch (error) {
+      const vanished = (error as NodeJS.ErrnoException).code === 'ENOENT';
+      // Im Datenordner: inzwischen verschwunden oder kein reguläre Datei mehr → überspringen und zählen
+      if (!strict && (vanished || error instanceof UnsafeTargetError)) {
+        result.vanished += 1;
+        continue;
+      }
+      if (strict && vanished) throw unsafe(`${from} ist während des Lesens verschwunden.`);
+      throw error;
+    }
+    try {
+      const real = opened.info;
+      if (strict && (real.dev !== info.dev || real.ino !== info.ino)) {
+        throw unsafe(`${from} wurde während des Lesens ausgetauscht.`);
+      }
+      let how: 'linked' | 'copied' = 'copied';
+      const old = prevFile(reader, prev, name);
+      if (old && old.size === real.size && Math.abs(old.mtimeMs - real.mtimeMs) < 2) {
+        // `old` stammt aus dem verankerten Ordner des vorigen Standes: der Link wird nur behalten, wenn er genau auf
+        // diese Datei zeigt (N2). Kein Hardlink möglich: kopieren.
+        if (out.link(join(prev as string, name), to, old)) how = 'linked';
+      }
+      if (how === 'copied') out.copyFromFd(opened.fd, to, real);
+      result.files += 1;
+      result.bytes += real.size;
+      result[how] += 1;
+    } finally {
+      closeSync(opened.fd);
+    }
+  }
+}
+
+/**
+ * Summe der Dateigrößen unterhalb von `dir`, verankert gelesen (#119). Mit `strict` (Stand im Ziel) ist ein Symlink
+ * oder eine Sonderdatei ein Fehler (`UnsafeTargetError`), sonst wird sie nicht gezählt. `reader` muss `dir` kennen;
+ * ohne `reader` wird `dir` als vertrauenswürdig übernommen.
+ */
+export function treeSize(
+  dir: string,
+  options: { reader?: NoFollowReader; strict?: boolean } = {},
+): { files: number; bytes: number } {
+  const strict = options.strict === true;
+  let reader = options.reader;
+  if (!reader) {
+    reader = new NoFollowReader({}, !strict);
+    try {
+      reader.adopt(dir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { files: 0, bytes: 0 };
+      throw error;
+    }
+  }
+  return sizeLevel(reader, dir, strict);
+}
+
+function sizeLevel(reader: NoFollowReader, dir: string, strict: boolean): { files: number; bytes: number } {
+  let files = 0;
+  let bytes = 0;
+  let entries: { name: string; info: Stats }[];
+  try {
+    entries = reader.list(dir);
+  } catch (error) {
+    if (!strict && (error as NodeJS.ErrnoException).code === 'ENOENT') return { files, bytes };
+    throw error;
+  }
+  for (const { name, info } of entries) {
+    if (skipped(name)) continue; // wie beim Kopieren: .DS_Store, *.part, .tmp zählen nie
+    if (!info.isSymbolicLink() && info.isDirectory()) {
+      const sub = sizeLevel(reader, reader.enter(dir, name, info), strict);
       files += sub.files;
       bytes += sub.bytes;
-    } else if (entry.isFile()) {
-      try {
-        bytes += lstatSync(full).size;
-        files += 1;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
+    } else if (!info.isSymbolicLink() && info.isFile()) {
+      bytes += info.size;
+      files += 1;
+    } else if (strict) {
+      throw unsafe(`${join(dir, name)} ist ein Symlink oder eine Sonderdatei.`);
     }
   }
   return { files, bytes };
@@ -275,25 +376,37 @@ export function listStands(target: string): string[] {
     .reverse();
 }
 
-/** Löscht nur Ordner, die wirklich ein Stand sind (Name passt, Manifest vorhanden) */
-export function removeStand(target: string, stand: string): boolean {
+/**
+ * Löscht nur Ordner, die wirklich ein Stand sind (Name passt, Manifest vorhanden). Gelöscht wird verankert, ohne je
+ * einem Symlink zu folgen, auch wenn während des Löschens Ordner ausgetauscht werden (`NoFollowRemover`, #119).
+ * Rückgabe: `true` = entfernt, `false` = kein Stand, `'teilweise'` = es bleibt etwas stehen (Tausch erkannt,
+ * fail-closed).
+ */
+export function removeStand(target: string, stand: string, hooks?: NoFollowHooks): boolean | 'teilweise' {
   if (!STAND_RE.test(stand)) return false;
   const dir = join(target, stand);
   if (readManifest(dir) === null) return false;
-  rmSync(dir, { recursive: true, force: true });
-  return true;
+  const remover = new NoFollowRemover(hooks);
+  remover.adopt(target);
+  return remover.removeTree(target, stand).length === 0 ? true : 'teilweise';
 }
 
-/** Halbfertige Läufe (`.<stand>.partial`) löschen, die älter als `olderThanMs` sind */
-export function removeStalePartials(target: string, now: number, olderThanMs: number): string[] {
+/** Halbfertige Läufe (`.<stand>.partial`) löschen, die älter als `olderThanMs` sind (verankert wie `removeStand`) */
+export function removeStalePartials(
+  target: string,
+  now: number,
+  olderThanMs: number,
+  hooks?: NoFollowHooks,
+): string[] {
   const removed: string[] = [];
   if (!existsSync(target)) return removed;
+  const remover = new NoFollowRemover(hooks);
+  remover.adopt(target);
   for (const entry of readdirSync(target, { withFileTypes: true })) {
     const match = /^\.([0-9]{8}T[0-9]{6}Z)\.partial$/.exec(entry.name);
     if (!entry.isDirectory() || !match) continue;
     if (now - standDate(match[1] as string).getTime() < olderThanMs) continue;
-    rmSync(join(target, entry.name), { recursive: true, force: true });
-    removed.push(entry.name);
+    if (remover.removeTree(target, entry.name).length === 0) removed.push(entry.name);
   }
   return removed;
 }

@@ -28,6 +28,7 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readSync,
   renameSync,
   rmdirSync,
@@ -36,7 +37,7 @@ import {
   writeSync,
   type Stats,
 } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 /** Neue Datei: nur schreiben, muss neu entstehen, ein Symlink an ihrer Stelle wird nie verfolgt */
 export const NEW_FILE_FLAGS =
@@ -65,7 +66,8 @@ function sameNode(a: Identity, b: Identity): boolean {
   return a.dev === b.dev && a.ino === b.ino;
 }
 
-export type NoFollowOp = 'mkdir' | 'create' | 'link' | 'rename' | 'unlink' | 'rmdir';
+export type NoFollowOp =
+  'mkdir' | 'create' | 'link' | 'rename' | 'unlink' | 'rmdir' | 'readdir' | 'open' | 'lstat';
 
 export interface NoFollowHooks {
   /**
@@ -81,13 +83,14 @@ function exists(name: string): Stats | undefined {
   return lstatSync(name, { throwIfNoEntry: false });
 }
 
-/** Schreiber für einen Baum, den ein Lauf neu anlegt (`.<stand>.partial` im Ziel, Restore-Ordner im Datenordner) */
-export class NoFollowWriter {
-  private readonly dirs = new Map<string, Identity>();
-  private readonly adopted = new Set<string>();
-  private readonly files = new Map<string, Identity>();
-
-  private readonly hooks: NoFollowHooks;
+/**
+ * Gemeinsame Grundlage: Ordner mit gespeicherter Identität und der verankerte Zugriff `inDir` (`chdir` plus
+ * `lstat('.')`). Schreiber, Leser und Löschen bauen darauf auf.
+ */
+export class AnchoredDirs {
+  protected readonly dirs = new Map<string, Identity>();
+  protected readonly adopted = new Set<string>();
+  protected readonly hooks: NoFollowHooks;
 
   constructor(hooks: NoFollowHooks = {}) {
     this.hooks = hooks;
@@ -104,14 +107,24 @@ export class NoFollowWriter {
     this.adopted.add(dir);
   }
 
-  /** `fn` mit `dir` als Arbeitsverzeichnis, nachdem geprüft ist, dass es genau der eigene Ordner ist */
-  private inDir<T>(dir: string, fn: () => T): T {
+  /** Ist `dir` bekannt (übernommen, angelegt oder verankert betreten)? */
+  knows(dir: string): boolean {
+    return this.dirs.has(dir);
+  }
+
+  /**
+   * `fn` mit `dir` als Arbeitsverzeichnis, nachdem geprüft ist, dass es genau der bekannte Ordner ist. Mit
+   * `missing = 'enoent'` wird ein verschwundener Ordner als `ENOENT` gemeldet (Datenordner: wie verschwunden zählen),
+   * sonst ist er ein Verstoß.
+   */
+  protected inDir<T>(dir: string, fn: () => T, missing: 'unsafe' | 'enoent' = 'unsafe'): T {
     const expected = this.dirs.get(dir);
     if (!expected) throw new UnsafeTargetError(`${dir} wurde nicht von diesem Lauf angelegt.`);
     const back = process.cwd();
     try {
       process.chdir(dir);
-    } catch {
+    } catch (error) {
+      if (missing === 'enoent' && (error as NodeJS.ErrnoException).code === 'ENOENT') throw error;
       throw new UnsafeTargetError(
         `${dir} wurde während des Laufs ersetzt oder entfernt. Der Lauf bricht ab.`,
       );
@@ -128,9 +141,14 @@ export class NoFollowWriter {
     }
   }
 
-  private step(op: NoFollowOp, phase: 'before' | 'after', dir: string, name: string): void {
+  protected step(op: NoFollowOp, phase: 'before' | 'after', dir: string, name: string): void {
     this.hooks.step?.(op, phase, dir, name);
   }
+}
+
+/** Schreiber für einen Baum, den ein Lauf neu anlegt (`.<stand>.partial` im Ziel, Restore-Ordner im Datenordner) */
+export class NoFollowWriter extends AnchoredDirs {
+  private readonly files = new Map<string, Identity>();
 
   /** Legt den Ordner `path` neu an. Sein Elternordner muss von diesem Schreiber sein (angelegt oder übernommen). */
   mkdir(path: string): void {
@@ -193,41 +211,20 @@ export class NoFollowWriter {
     }
   }
 
-  /**
-   * Kopiert die reguläre Datei `from` (absoluter Pfad im vertrauenswürdigen Datenordner) nach `to` (neu, exklusiv) mit
-   * Rechten und Zeiten von `info`. `from` wird ohne Symlink-Folgen geöffnet; ist sie inzwischen keine reguläre Datei
-   * mehr, ergibt das `ENOENT` (wie verschwunden).
-   */
-  copyFile(from: string, to: string, info: Stats): void {
-    let input: number;
+  /** Kopiert aus dem offenen Deskriptor `input` (verankert geöffnet) nach `to` (neu, exklusiv), Rechte und Zeiten von `info` */
+  copyFromFd(input: number, to: string, info: Stats): void {
+    const output = this.openNew(to, info.mode & 0o777);
     try {
-      input = openSync(from, READ_FLAGS);
-    } catch (error) {
-      // Inzwischen ein Symlink: wie eine verschwundene Datei behandeln (übersprungen und gezählt)
-      if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
-        throw Object.assign(new Error(`${from} ist keine reguläre Datei mehr.`), { code: 'ENOENT' });
+      const buffer = Buffer.allocUnsafe(CHUNK);
+      for (;;) {
+        const n = readSync(input, buffer, 0, buffer.length, null);
+        if (n === 0) break;
+        let offset = 0;
+        while (offset < n) offset += writeSync(output, buffer, offset, n - offset);
       }
-      throw error;
-    }
-    try {
-      if (!fstatSync(input).isFile()) {
-        throw Object.assign(new Error(`${from} ist keine reguläre Datei mehr.`), { code: 'ENOENT' });
-      }
-      const output = this.openNew(to, info.mode & 0o777);
-      try {
-        const buffer = Buffer.allocUnsafe(CHUNK);
-        for (;;) {
-          const n = readSync(input, buffer, 0, buffer.length, null);
-          if (n === 0) break;
-          let offset = 0;
-          while (offset < n) offset += writeSync(output, buffer, offset, n - offset);
-        }
-        futimesSync(output, info.atime, info.mtime);
-      } finally {
-        closeSync(output);
-      }
+      futimesSync(output, info.atime, info.mtime);
     } finally {
-      closeSync(input);
+      closeSync(output);
     }
   }
 
@@ -360,6 +357,161 @@ export class NoFollowWriter {
     this.step('unlink', 'before', dir, name);
     unlinkSync(name);
     return true;
+  }
+}
+
+/**
+ * Liest einen Baum im Ziel (Stand beim Restore, voriger Stand beim Backup) oder im Datenordner, ohne Symlinks zu
+ * folgen (#119). Jeder Ordner wird verankert betreten (`chdir` plus Identität aus dem `lstat`, mit dem er gesehen
+ * wurde), Einträge werden relativ mit `readdir('.')`/`lstat` gelesen und Dateien relativ mit `O_NOFOLLOW` geöffnet.
+ * Ein Ordner, der beim Betreten nicht mehr der gesehene ist, ist ein Verstoß (`UnsafeTargetError`).
+ */
+export class NoFollowReader extends AnchoredDirs {
+  private readonly missing: 'unsafe' | 'enoent';
+
+  /** `missingIsVanished`: im Datenordner gilt ein inzwischen fehlender Ordner als verschwunden (`ENOENT`) */
+  constructor(hooks: NoFollowHooks = {}, missingIsVanished = false) {
+    super(hooks);
+    this.missing = missingIsVanished ? 'enoent' : 'unsafe';
+  }
+
+  /** `lstat` von `name` im verankerten Ordner `dir` (`undefined`, wenn es fehlt) */
+  stat(dir: string, name: string): Stats | undefined {
+    return this.inDir(dir, () => exists(name), this.missing);
+  }
+
+  /**
+   * Unterordner `name` von `dir`: `null`, wenn es ihn nicht gibt. Ist er ein Symlink oder kein Ordner, wirft das
+   * `UnsafeTargetError` (oder bei `optional = 'skip'` ebenfalls `null`). Sonst wird er mit der gesehenen Identität
+   * bekannt gemacht und sein Pfad zurückgegeben.
+   */
+  child(dir: string, name: string, other: 'fail' | 'skip' = 'fail'): string | null {
+    const info = this.stat(dir, name);
+    if (!info) return null;
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      if (other === 'skip') return null;
+      throw new UnsafeTargetError(`${join(dir, name)} ist kein echter Ordner (Symlink oder Sonderdatei).`);
+    }
+    return this.enter(dir, name, info);
+  }
+
+  /** Unterordner aus `list` bekannt machen (Identität aus dem `lstat` beim Auflisten) */
+  enter(dir: string, name: string, info: Identity): string {
+    const path = join(dir, name);
+    this.dirs.set(path, identity(info));
+    return path;
+  }
+
+  /** Einträge von `dir` mit ihrem `lstat`, beides relativ im verankerten Ordner */
+  list(dir: string): { name: string; info: Stats }[] {
+    return this.inDir(
+      dir,
+      () => {
+        this.step('readdir', 'before', dir, '.');
+        const result: { name: string; info: Stats }[] = [];
+        for (const name of readdirSync('.')) {
+          this.step('lstat', 'before', dir, name);
+          const info = exists(name);
+          if (info) result.push({ name, info });
+        }
+        return result;
+      },
+      this.missing,
+    );
+  }
+
+  /**
+   * Öffnet die reguläre Datei `name` in `dir` relativ (`O_NOFOLLOW | O_NONBLOCK`). Ist sie ein Symlink, eine FIFO
+   * oder ein Gerät, wirft das `UnsafeTargetError`; fehlt sie, `ENOENT`. Rückgabe: Deskriptor und `fstat`.
+   */
+  open(dir: string, name: string): { fd: number; info: Stats } {
+    return this.inDir(
+      dir,
+      () => {
+        this.step('open', 'before', dir, name);
+        let fd: number;
+        try {
+          fd = openSync(name, READ_FLAGS);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
+            throw new UnsafeTargetError(`${join(dir, name)} ist ein Symlink.`);
+          }
+          throw error;
+        }
+        const info = fstatSync(fd);
+        if (!info.isFile()) {
+          closeSync(fd);
+          throw new UnsafeTargetError(`${join(dir, name)} ist keine reguläre Datei.`);
+        }
+        return { fd, info };
+      },
+      this.missing,
+    );
+  }
+}
+
+/**
+ * Löscht `<parent>/<name>` samt Inhalt, ohne je einem Symlink zu folgen (Ausdünnen im Ziel, #119). `parent` muss
+ * bekannt sein (übernommen). Jede Ebene wird verankert betreten (`chdir` plus Vergleich mit dem `lstat`, mit dem sie
+ * gesehen wurde), gelöscht wird nur relativ (`unlink`, `rmdir`). Symlinks werden als Eintrag entfernt, nie verfolgt.
+ * Weicht ein Ordner beim Betreten ab (Tausch), wird dort nicht weiter abgestiegen: Der Rest bleibt stehen
+ * (fail-closed). Rückgabe: Pfade, die stehen bleiben.
+ */
+export class NoFollowRemover extends AnchoredDirs {
+  removeTree(parent: string, name: string): string[] {
+    const left: string[] = [];
+    this.removeEntry(parent, name, left);
+    return left;
+  }
+
+  private removeEntry(parent: string, name: string, left: string[]): void {
+    const path = join(parent, name);
+    let info: Stats | undefined;
+    try {
+      info = this.inDir(parent, () => exists(name));
+    } catch {
+      left.push(path);
+      return;
+    }
+    if (!info) return;
+    if (info.isSymbolicLink() || !info.isDirectory()) {
+      try {
+        this.inDir(parent, () => {
+          const now = exists(name);
+          if (!now || now.isDirectory()) return; // inzwischen ein Ordner: nicht hier
+          this.step('unlink', 'before', parent, name);
+          unlinkSync(name);
+        });
+      } catch {
+        left.push(path);
+      }
+      return;
+    }
+    this.dirs.set(path, identity(info));
+    let entries: string[];
+    try {
+      entries = this.inDir(path, () => {
+        this.step('readdir', 'before', path, '.');
+        return readdirSync('.');
+      });
+    } catch {
+      left.push(path); // ausgetauscht: nicht weiter absteigen
+      return;
+    }
+    for (const entry of entries) this.removeEntry(path, entry, left);
+    try {
+      this.inDir(parent, () => {
+        const now = exists(name);
+        if (!now || now.isSymbolicLink() || !now.isDirectory() || !sameNode(now, info)) {
+          left.push(path);
+          return;
+        }
+        this.step('rmdir', 'before', parent, name);
+        rmdirSync(name);
+      });
+    } catch {
+      left.push(path);
+    }
   }
 }
 
