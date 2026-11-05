@@ -1305,3 +1305,35 @@ def test_real_ffconcat_chunk_is_not_read_as_concat_list(
     res = result_of(conn, job)
     assert [m.root for m in res.missing_seqs] == [2]
     assert_m4a(full_path(tmp_path, rid), 10.0)
+
+
+def test_chunks_beyond_completed_last_seq_are_ignored(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    rid = add_recording(conn, tmp_path, five(), dur=10, last_seq=2, completed_ms=30)
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert (res.state.value, res.chunk_count, res.missing_seqs) == ("vollstaendig", 3, [])
+    assert res.audio_duration_ms == 30
+
+
+def test_empty_recording_without_complete_ends_cleanly(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    sid = add_session(conn, "beendet")
+    rid = add_recording(conn, tmp_path, [], dur=10, session_id=sid)
+    job = add_job(conn, rid, session_id=sid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert (res.state.value, res.chunk_count, res.missing_seqs, res.gaps) == (
+        "mit_luecken",
+        0,
+        [],
+        [],
+    )
+    assert (res.audio_duration_ms, res.file_size_bytes) == (0, 0)
+    assert not full_path(tmp_path, rid).exists()
+    assert recording_row(conn, rid) == (0, "mit_luecken")
+    state = conn.execute("SELECT state FROM session WHERE id = %s", (sid,)).fetchone()
+    assert state == ("verarbeitet",)

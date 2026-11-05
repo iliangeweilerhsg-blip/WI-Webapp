@@ -572,6 +572,9 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
     final = rec_dir / "full.m4a"
     _cleanup_old_work(rec_dir)
     chunks = _load_chunks(ctx.conn, recording_id)
+    if last_seq is not None and any(c.seq > last_seq for c in chunks):
+        log.warning("Chunks jenseits von completed_last_seq=%d werden ignoriert", last_seq)
+        chunks = [c for c in chunks if c.seq <= last_seq]
 
     work: Path | None = None
     audio_ms = 0
