@@ -16,6 +16,8 @@ interface SidebarProps {
   onOpenSetup?: () => void;
   /** Neutrale Inbox-Zahl (07 §2: grau, nie rot). Solange der Core keine Zahl liefert, leer. */
   inboxCount?: number | null;
+  /** Drawer-Zustand für schmale Bildschirme (< 768 px). Breit ignoriert das CSS ihn. */
+  drawerOpen?: boolean;
 }
 
 function NavLink({ item, count }: { item: NavItem; count?: number | null }) {
@@ -38,9 +40,20 @@ function NavLink({ item, count }: { item: NavItem; count?: number | null }) {
   );
 }
 
-export function Sidebar({ expanded, onToggle, onOpenSearch, onOpenSetup, inboxCount = null }: SidebarProps) {
+export function Sidebar({
+  expanded,
+  onToggle,
+  onOpenSearch,
+  onOpenSetup,
+  inboxCount = null,
+  drawerOpen = false,
+}: SidebarProps) {
   return (
-    <aside id="sidebar" className="flex shrink-0 flex-col border-r border-border bg-surface">
+    <aside
+      id="sidebar"
+      data-drawer={drawerOpen ? 'open' : 'closed'}
+      className="flex shrink-0 flex-col border-r border-border bg-surface"
+    >
       <div className="flex items-center justify-between px-3 py-3">
         <span className="sg-collapsible text-sm font-semibold">Studien-Gehirn</span>
         <button
