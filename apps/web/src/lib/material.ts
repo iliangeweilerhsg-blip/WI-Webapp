@@ -207,6 +207,9 @@ interface PendingDelete {
 }
 
 const pending = new Map<string, PendingDelete>();
+/** Gerade gelöschte Einträge (Schlüssel → Zeitpunkt): Eine verspätete Dubletten-Antwort darauf gilt als erledigtes DELETE */
+const recentlyDeleted = new Map<string, number>();
+export const RECENT_DELETE_MS = 60_000;
 const listeners = new Set<() => void>();
 const EMPTY: ReadonlySet<string> = new Set();
 let snapshot: ReadonlySet<string> = EMPTY;
@@ -277,9 +280,23 @@ function commitDelete(key: string): Promise<void> {
  * der Core die Datei nicht mehr und ein neuer Upload wird angenommen), sonst `false` (nichts zu warten).
  */
 export async function awaitMaterialDelete(kind: MaterialKind, id: string): Promise<boolean> {
-  const entry = pending.get(keyOf(kind, id));
-  if (!entry?.sending || !entry.done) return false;
-  await entry.done;
+  const key = keyOf(kind, id);
+  const entry = pending.get(key);
+  if (entry?.sending && entry.done) {
+    await entry.done;
+    return recentlyDeletedNow(key);
+  }
+  // DELETE und Neuladen der Liste waren schon fertig, bevor die Dubletten-Antwort kam (#57)
+  return recentlyDeletedNow(key);
+}
+
+function recentlyDeletedNow(key: string): boolean {
+  const at = recentlyDeleted.get(key);
+  if (at === undefined) return false;
+  if (Date.now() - at > RECENT_DELETE_MS) {
+    recentlyDeleted.delete(key);
+    return false;
+  }
   return true;
 }
 
@@ -292,6 +309,7 @@ async function runDelete(key: string, entry: PendingDelete): Promise<void> {
     entry.onFailed();
     return;
   }
+  recentlyDeleted.set(key, Date.now());
   // Erst nach dem Neuladen der Listen wieder „freigeben“, sonst blitzt der Eintrag kurz auf
   await invalidateMaterial(entry.client);
   pending.delete(key);
@@ -365,6 +383,7 @@ function ensurePageHideFlush(): void {
 /** Nur für Tests. */
 export function resetPendingMaterialDeletes(): void {
   pending.clear();
+  recentlyDeleted.clear();
   publish();
 }
 

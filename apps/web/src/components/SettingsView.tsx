@@ -108,6 +108,18 @@ export function SettingsView() {
   const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set([TABS[0]?.id ?? '']));
   if (!visited.has(active)) setVisited(new Set(visited).add(active));
 
+  // Der aktive Reiter rollt ins Bild (schmale Bildschirme, falls die Leiste doch scrollt). Nicht beim ersten Rendern.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false;
+      return;
+    }
+    const el = refs.current[active];
+    if (el && typeof el.scrollIntoView === 'function')
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [active]);
+
   const report = useCallback((tabId: string, mark: TabMark) => {
     setMarks((current) => {
       const old = current[tabId];
@@ -149,7 +161,7 @@ export function SettingsView() {
           aria-label="Bereiche der Einstellungen"
           aria-orientation={vertical ? 'vertical' : 'horizontal'}
           onKeyDown={onKeyDown}
-          className="flex max-w-full gap-1 overflow-x-auto border-b border-border md:w-56 md:shrink-0 md:flex-col md:overflow-visible md:border-b-0"
+          className="flex max-w-full flex-wrap gap-x-1 border-b border-border md:w-56 md:shrink-0 md:flex-col md:flex-nowrap md:border-b-0"
         >
           {TABS.map((tab) => {
             const selected = tab.id === active;
