@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Page, PageElement, Stroke, SyncOp } from '@sg/shared';
-import { InkColumn, type InkSyncSource } from '../src/components/ink/InkColumn.tsx';
+import { InkColumn, RETRY_START_MS, type InkSyncSource } from '../src/components/ink/InkColumn.tsx';
 import { SyncClient } from '../src/lib/sync/client.ts';
 import { MemoryQueueStore } from '../src/lib/sync/store.ts';
 import { installCanvasMock, type CanvasLog } from './canvas-mock.ts';
@@ -565,6 +565,56 @@ describe('<InkColumn> Abo und Reset', () => {
     await sleep(30);
     expect(subscribe).not.toHaveBeenCalled();
     expect(internals().subs.size).toBe(0);
+  });
+
+  it('Seitenwechsel: Abort-Listener sammeln sich nicht an', async () => {
+    let net = 0;
+    const add = AbortSignal.prototype.addEventListener;
+    const remove = AbortSignal.prototype.removeEventListener;
+    vi.spyOn(AbortSignal.prototype, 'addEventListener').mockImplementation(function (
+      this: AbortSignal,
+      type: string,
+      ...rest: [EventListenerOrEventListenerObject, (boolean | AddEventListenerOptions)?]
+    ) {
+      if (type === 'abort') net++;
+      return add.call(this, type, ...rest);
+    } as typeof add);
+    vi.spyOn(AbortSignal.prototype, 'removeEventListener').mockImplementation(function (
+      this: AbortSignal,
+      type: string,
+      ...rest: [EventListenerOrEventListenerObject, (boolean | EventListenerOptions)?]
+    ) {
+      if (type === 'abort') net--;
+      return remove.call(this, type, ...rest);
+    } as typeof remove);
+    await mount();
+    await waitFor(() => expect(strokeCount()).toBe(strokesB.length));
+    const baseline = net;
+    for (let i = 0; i < 4; i++) {
+      await userEvent.click(screen.getByRole('button', { name: 'Vorherige Seite' }));
+      await waitFor(() => expect(strokeCount()).toBe(strokesA.length));
+      await userEvent.click(screen.getByRole('button', { name: 'Nächste Seite' }));
+      await waitFor(() => expect(strokeCount()).toBe(strokesB.length));
+    }
+    expect(core.calls.filter((c) => c.endsWith('/strokes')).length).toBeGreaterThan(8);
+    expect(net).toBe(baseline);
+  });
+
+  it('Abbruch während der Wiederholung: nach dem Unmount entsteht kein neuer Timer', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => (release = r));
+    core.before = async (path) => {
+      if (path.endsWith('/pages')) {
+        await gate;
+        throw new TypeError('Failed to fetch');
+      }
+    };
+    const view = render(<InkColumn notebookId={uid(NB)} client={client} />);
+    view.unmount();
+    const timeout = vi.spyOn(globalThis, 'setTimeout');
+    release();
+    await sleep(30);
+    expect(timeout.mock.calls.filter((c) => c[1] === RETRY_START_MS)).toHaveLength(0);
   });
 
   it('Notizbuchwechsel: nur das neue ist abonniert, keine fremden Striche, Folgen/Presence zurückgesetzt', async () => {

@@ -175,8 +175,10 @@ export interface FakeCore {
   decks: SlideDeck[];
   sheets: ExerciseSheet[];
   slides: Record<string, Slide[]>;
-  /** Sessions für POST /sessions/{id}/stop und /extend (VERTRAEGE §7.2, §9.4) */
+  /** Sessions für GET /sessions und POST /sessions/{id}/start|pause|resume|stop|extend (VERTRAEGE §7.2, §9.4) */
   sessions: Session[];
+  /** Die nächste Anfrage an eine Session-Aktion wird mit diesem Fehler abgelehnt */
+  rejectNextSession: null | { status: number; code: string };
   requests: RecordedRequest[];
   /** Der nächste Upload scheitert wie bei einer abgerissenen Verbindung; `after` = der Core hat ihn davor verarbeitet */
   failNextUpload: null | 'before' | 'after';
@@ -261,6 +263,7 @@ export function installFakeCore(
     sheets: structuredClone(initial.sheets ?? []),
     slides: {},
     sessions: structuredClone(initial.sessions ?? []),
+    rejectNextSession: null,
     requests: [],
     failNextUpload: null,
     rejectNextUpload: null,
@@ -424,12 +427,82 @@ export function installFakeCore(
         return new Response(null, { status: 204 });
       }
 
-      const sessionMatch = /^\/sessions\/([^/]+)\/(stop|extend)$/.exec(path);
+      // GET /sessions?from&to&state&module_id (VERTRAEGE §7.2): from/to filtern auf coalesce(started_at, planned_starts_at, created_at)
+      if (path === '/sessions' && method === 'GET') {
+        const from = url.searchParams.get('from');
+        const to = url.searchParams.get('to');
+        const states = url.searchParams.get('state')?.split(',');
+        const moduleId = url.searchParams.get('module_id');
+        const anchor = (x: Session) => Date.parse(x.started_at ?? x.planned_starts_at ?? x.created_at);
+        const items = core.sessions
+          .filter((x) => !x.deleted_at)
+          .filter((x) => !states || states.includes(x.state))
+          .filter((x) => !moduleId || x.module_id === moduleId)
+          .filter((x) => !from || anchor(x) >= Date.parse(from))
+          .filter((x) => !to || anchor(x) < Date.parse(to))
+          .sort((a, b) => anchor(a) - anchor(b) || a.id.localeCompare(b.id));
+        return json({ items, next_cursor: null });
+      }
+
+      const sessionMatch = /^\/sessions\/([^/]+)\/(start|pause|resume|stop|extend)$/.exec(path);
       if (sessionMatch && method === 'POST') {
-        const target = core.sessions.find((x) => x.id === sessionMatch[1]);
+        if (core.rejectNextSession) {
+          const { status, code } = core.rejectNextSession;
+          core.rejectNextSession = null;
+          return json({ error: { code, message: 'x' } }, status);
+        }
+        const target = core.sessions.find((x) => x.id === sessionMatch[1] && !x.deleted_at);
         if (!target) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
         const active = target.state === 'laeuft' || target.state === 'pausiert';
         const now = Date.now();
+        const invalid = () => json({ error: { code: 'session_transition_invalid', message: 'x' } }, 409);
+        const touch = () => (target.updated_at = new Date(now).toISOString());
+        if (sessionMatch[2] === 'start') {
+          // Gleicher Zielzustand ist kein Fehler (§9.1)
+          if (target.state === 'laeuft' || target.state === 'pausiert') {
+            return json({ session: target, ended_session: null });
+          }
+          if (target.state !== 'geplant' && target.state !== 'bereit' && target.state !== 'verpasst') {
+            return invalid();
+          }
+          // Wie der Core: ein verpasster Termin lässt sich nur vor dem Terminende starten
+          if (
+            target.state === 'verpasst' &&
+            target.planned_ends_at &&
+            now >= Date.parse(target.planned_ends_at)
+          ) {
+            return invalid();
+          }
+          // Eine andere aktive Session endet vorher am Kalenderende, spätestens jetzt (§9.1)
+          const other = core.sessions.find(
+            (x) => x.id !== target.id && !x.deleted_at && (x.state === 'laeuft' || x.state === 'pausiert'),
+          );
+          if (other) {
+            const plannedEnd = other.planned_ends_at
+              ? Date.parse(other.planned_ends_at)
+              : Number.POSITIVE_INFINITY;
+            other.state = 'beendet';
+            other.ended_at = new Date(Math.min(plannedEnd, now)).toISOString();
+            other.stop_reason = 'kalenderende';
+            other.updated_at = new Date(now).toISOString();
+          }
+          target.state = 'laeuft';
+          target.started_at = new Date(now).toISOString();
+          target.started_from = (body?.started_from as Session['started_from'] | undefined) ?? 'mac';
+          touch();
+          return json({ session: target, ended_session: other ?? null });
+        }
+        if (sessionMatch[2] === 'pause' || sessionMatch[2] === 'resume') {
+          const [from, next] =
+            sessionMatch[2] === 'pause'
+              ? (['laeuft', 'pausiert'] as const)
+              : (['pausiert', 'laeuft'] as const);
+          if (target.state === next) return json(target);
+          if (target.state !== from) return invalid();
+          target.state = next;
+          touch();
+          return json(target);
+        }
         if (sessionMatch[2] === 'stop') {
           if (active) {
             target.state = 'beendet';

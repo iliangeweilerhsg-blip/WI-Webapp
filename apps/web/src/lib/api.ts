@@ -44,6 +44,11 @@ const CODE_MESSAGES: Record<string, string> = {
   validation_failed: 'Das passt so nicht. Prüfe deine Eingabe.',
   invalid_pdf: 'Das ist kein gültiges PDF. Wähle eine andere Datei.',
   file_too_large: 'Die Datei ist zu groß (höchstens 200 MB).',
+  session_transition_invalid: 'Das geht bei dieser Session gerade nicht. Die Ansicht wird aktualisiert.',
+  session_not_active: 'Diese Session läuft nicht mehr.',
+  session_not_found: 'Diese Session gibt es nicht mehr.',
+  session_active: 'Eine laufende Session lässt sich nicht löschen. Beende sie zuerst.',
+  session_exists: 'Zu diesem Termin gibt es schon eine Session.',
   idempotency_key_in_progress: 'Die Datei wird gerade schon hochgeladen.',
 };
 

@@ -193,8 +193,9 @@ export function InkPage({
 
   const waiting = width === undefined && fitWidth === null;
   const wanted = Math.max(1, width ?? (fitWidth ?? widthPt) * zoom);
-  // Höchstens MAX_CANVAS_SIDE Pixel in der Höhe; darunter bleibt es bei mindestens 1 Pixel je CSS-Pixel
-  const cssWidth = Math.min(wanted, (MAX_CANVAS_SIDE * widthPt) / heightPt);
+  // Höchstens MAX_CANVAS_SIDE Pixel auf der LÄNGEREN Seite (Hoch- wie Querformat); darunter bleibt es bei mindestens
+  // 1 Pixel je CSS-Pixel
+  const cssWidth = Math.min(wanted, (MAX_CANVAS_SIDE * widthPt) / Math.max(widthPt, heightPt));
   const cssHeight = (cssWidth * heightPt) / widthPt;
   const k = cssWidth / widthPt;
   const pixelRatio = Math.max(1, Math.min(dpr, MAX_CANVAS_SIDE / Math.max(cssWidth, cssHeight)));

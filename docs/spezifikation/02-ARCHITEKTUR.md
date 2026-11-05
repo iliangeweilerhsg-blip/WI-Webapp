@@ -30,7 +30,7 @@
 │  │ Datenordner ~/StudienGehirn/                   │◄─┤                      │ │
 │  │ media/ (PDF, Folienbilder, Audio, Fotos, Video)│  └──────────┬───────────┘ │
 │  │ vault/ (Markdown, Obsidian-kompatibel)         │             │             │
-│  │ backups/                                       │             │ HTTPS       │
+│  │                                                │             │ HTTPS       │
 │  └───────────────────────────────────────────────┘             ▼             │
 └────────────────────────────────────────────── Cloud-KI (optional, abschaltbar)┘
                                                   Claude API · ggf. Whisper/TTS-API
@@ -61,7 +61,7 @@
 | Ports | Core: `4710` (HTTP + WebSocket) auf allen Interfaces, damit das iPad ihn erreicht. Postgres: `5432` nur `127.0.0.1`. |
 | Erreichbarkeit fürs iPad | Der Core kündigt sich per **Bonjour** als `_studiengehirn._tcp` an. Fallback: Die Web-App zeigt einen **QR-Code** mit Adresse und Kopplungs-Token (Kap. 08 §3). |
 | Datenordner | `~/StudienGehirn/` (konfigurierbar). Struktur siehe [08 §7](08-SCHNITTSTELLEN.md#7-dateiablage). |
-| Geheimnisse | API-Schlüssel in `~/StudienGehirn/config/.env` (Rechte 600), nie im Repo. P1: macOS-Schlüsselbund. |
+| Geheimnisse | API-Schlüssel in `~/StudienGehirn/config/.env` (Rechte 600), nie im Repo. Der Moodle-Token liegt im macOS-Schlüsselbund (08 §9.1), weitere Schlüssel folgen in P1. |
 | Updates | `git pull && pnpm sg migrate && pnpm sg start`. Datenbank-Migrationen mit Drizzle, rückwärtskompatibel. |
 | Ruhezustand des Macs | Core und Worker überstehen den Ruhezustand. Jobs werden danach fortgesetzt. Läuft eine Aufnahme, verhindert die Web-App den Ruhezustand über die Screen Wake Lock API (solange der Deckel offen ist). |
 
