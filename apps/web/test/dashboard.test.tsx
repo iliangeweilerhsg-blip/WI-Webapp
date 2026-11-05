@@ -13,7 +13,7 @@ import { makeEvent } from './calendar-core.ts';
 import { fakeRecording } from './recording-fakes.ts';
 import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
-import { ThemeProvider } from '../src/lib/theme.tsx';
+import { AppearanceDefault, ThemeProvider } from '../src/lib/theme.tsx';
 import {
   installFakeCore,
   makeDevice,
@@ -123,6 +123,7 @@ function boot(
     events?: CalendarEvent[];
     appearance?: 'system' | 'hell' | 'dunkel';
     extra?: ReactNode;
+    hold?: { settings?: Promise<void>; event?: Promise<void> };
     devices?: ReturnType<typeof makeDevice>[];
     now?: string;
     search?: string;
@@ -140,12 +141,15 @@ function boot(
   core.events = opts.events ?? [];
   core.settings.general.appearance = opts.appearance ?? 'system';
   core.devices = opts.devices ?? [];
+  core.settingsGate = opts.hold?.settings ?? null;
+  core.eventGate = opts.hold?.event ?? null;
   sync = fakeSync(opts.syncState);
   return render(
     <ThemeProvider>
       <QueryProvider>
         <RecordingEnvContext.Provider value={fakeRecording().env}>
           <SyncProvider client={sync.client}>
+            <AppearanceDefault />
             <SessionView />
             {opts.extra}
           </SyncProvider>
@@ -967,5 +971,85 @@ describe('Dashboard: Verbindung, iPad-Punkt und Abfragen (Punkte 9 bis 11)', () 
       await new Promise((r) => setTimeout(r, 80));
     });
     expect(pairingFetches).toBe(1);
+  });
+});
+
+describe('Dashboard: Nachschärfungen aus dem Review (PR #126)', () => {
+  it('H1: dunkel schon vor den Einstellungen und nach ThemeProvider bzw. AppearanceDefault', async () => {
+    root.removeAttribute('data-theme');
+    window.localStorage.clear();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    boot({ hold: { settings: gate } });
+    await within(await screenBar()).findByText('REC');
+    // Einstellungen hängen noch: das Attribut ist trotzdem schon gesetzt (ThemeProvider hat „System“ angewendet)
+    await waitFor(() => expect(root).toHaveAttribute('data-theme', 'dark'));
+    expect(gets('/settings')).toBe(1);
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 80));
+    });
+    // Einstellungen da, AppearanceDefault hat „System“ angewendet: weiter dunkel
+    expect(root).toHaveAttribute('data-theme', 'dark');
+    root.removeAttribute('data-theme');
+    window.localStorage.clear();
+  });
+
+  it('H2: solange der Termin lädt, rendert die Ink-Spalte nicht', async () => {
+    const EVENT_ID = '0190f6a2-0000-7000-8000-0000000000f2';
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    boot({
+      session: running({ calendar_event_id: EVENT_ID }),
+      events: [makeEvent({ id: EVENT_ID, kind: 'uebung' })],
+      hold: { event: gate },
+    });
+    const col = await screen.findByRole('group', { name: 'Notizen' });
+    await waitFor(() => expect(gets(`/calendar/events/${EVENT_ID}`)).toBe(1));
+    await waitFor(() => expect(gets(`/notebooks?module_id=${DBS.id}`)).toBe(1));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
+    expect(within(col).queryByTestId('ink-column')).toBeNull();
+    expect(within(col).getByText('Notizen werden geladen …')).toBeVisible();
+    await act(async () => release());
+    // Erst jetzt, mit dem Termin, steht das richtige Notizbuch da (kein Umschalten von „Vorlesung“)
+    expect(await within(col).findByTestId('ink-column')).toHaveTextContent(NB_UEBUNG.id);
+  });
+
+  it('H3: öffnet die Ansicht bei getrennter Verbindung, lädt das erste „online“ neu', async () => {
+    boot({ syncState: 'backoff', devices: [makeDevice({ kind: 'ipad', connected: false })] });
+    await within(await screenBar()).findByText('REC');
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
+    expect(gets(`/sessions/${SESSION_ID}`)).toBe(1);
+    act(() => sync.setState('online'));
+    await waitFor(() => expect(gets(`/sessions/${SESSION_ID}`)).toBe(2));
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(2));
+  });
+
+  it('S1: Esc schließt die Rückfrage auch bei Fokus außerhalb; Tab kreist zwischen den Knöpfen', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot();
+    await within(await screenBar()).findByText('REC');
+    const stopKeys = { key: 'S', code: 'KeyS', ctrlKey: true, shiftKey: true };
+    fireEvent.keyDown(window, stopKeys);
+    const dialog = await screen.findByRole('alertdialog');
+    const keep = within(dialog).getByRole('button', { name: 'Weiter aufnehmen' });
+    const end = within(dialog).getByRole('button', { name: 'Session beenden' });
+    expect(keep).toHaveFocus();
+    await user.tab();
+    expect(end).toHaveFocus();
+    await user.tab();
+    expect(keep).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(end).toHaveFocus();
+    // Fokus außerhalb der Leiste: Esc wirkt trotzdem
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
+    fireEvent.keyDown(outside, { key: 'Escape', code: 'Escape', bubbles: true });
+    outside.remove();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(posts(/\/stop$/)).toHaveLength(0);
   });
 });

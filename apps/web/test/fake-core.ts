@@ -220,6 +220,9 @@ export interface FakeCore {
   down: boolean;
   /** Hält `GET /sessions/{id}` an, bis das Promise erfüllt ist; die Antwort zeigt den Stand von vorher. `null` = nicht angehalten */
   getGate: Promise<void> | null;
+  /** Halten GET /settings bzw. GET /calendar/events/{id} an, bis das Promise erfüllt ist. `null` = nicht angehalten */
+  settingsGate: Promise<void> | null;
+  eventGate: Promise<void> | null;
   /** Hält alle POSTs an, bis das Promise erfüllt ist (deterministisch statt Zeitfenster). `null` = nicht angehalten */
   postGate: Promise<void> | null;
   /** Stand von GET/PATCH /settings (Standards aus VERTRAEGE §14.1) */
@@ -321,6 +324,8 @@ export function installFakeCore(
     down: initial.down ?? false,
     postGate: null,
     getGate: null,
+    settingsGate: null,
+    eventGate: null,
     settings: makeSettings(),
     rejectNextSettings: null,
     devices: [],
@@ -385,7 +390,10 @@ export function installFakeCore(
       const devicesResponse = handleDevices(core, path, method, url);
       if (devicesResponse) return devicesResponse;
 
-      if (path === '/settings' && method === 'GET') return json(core.settings);
+      if (path === '/settings' && method === 'GET') {
+        if (core.settingsGate) await core.settingsGate;
+        return json(core.settings);
+      }
       if (path === '/settings' && method === 'PATCH') {
         if (core.rejectNextSettings) {
           const { status, code, message } = core.rejectNextSettings;
@@ -524,6 +532,7 @@ export function installFakeCore(
       // GET /calendar/events/{id} (§7.3)
       const eventOne = /^\/calendar\/events\/([^/]+)$/.exec(path);
       if (eventOne && method === 'GET') {
+        if (core.eventGate) await core.eventGate;
         const found = core.events.find((x) => x.id === eventOne[1] && !x.deleted_at);
         return found
           ? json(structuredClone(found))
