@@ -8,7 +8,14 @@ import { QueryProvider } from '../src/lib/query.tsx';
 import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
-import { installFakeCore, makeModule, makeSemester, makeSession, type FakeCore } from './fake-core.ts';
+import {
+  installFakeCore,
+  makeDevice,
+  makeModule,
+  makeSemester,
+  makeSession,
+  type FakeCore,
+} from './fake-core.ts';
 
 const nav = vi.hoisted(() => ({ search: '' }));
 vi.mock('next/navigation', () => ({
@@ -107,6 +114,7 @@ function boot(
     wide?: boolean;
     syncState?: string;
     notebooks?: Notebook[];
+    devices?: ReturnType<typeof makeDevice>[];
     now?: string;
     search?: string;
   } = {},
@@ -120,6 +128,7 @@ function boot(
     sessions: opts.session === null ? [] : [opts.session ?? running()],
   });
   core.notebooks = opts.notebooks ?? [NB_UEBUNG, NB_VL];
+  core.devices = opts.devices ?? [];
   sync = fakeSync(opts.syncState);
   return render(
     <ThemeProvider>
@@ -135,6 +144,7 @@ function boot(
 const posts = (path: RegExp) => core.requests.filter((r) => r.method === 'POST' && path.test(r.path));
 const patches = () => core.requests.filter((r) => r.method === 'PATCH' && /^\/modules\//.test(r.path));
 const bar = () => screen.getByLabelText('Statusleiste');
+const gets = (path: string) => core.requests.filter((r) => r.method === 'GET' && r.path === path).length;
 const grid = () => screen.getByTestId('dashboard-grid');
 
 beforeEach(() => {
@@ -251,16 +261,20 @@ describe('Dashboard: Live-Aktualisierung (session.updated)', () => {
     );
     await within(b).findByText('Pausiert');
 
-    // älter: ignoriert
-    act(() => sync.emit('session.updated', running({ state: 'laeuft', updated_at: '2026-11-04T08:05:00Z' })));
+    // älter: ignoriert (erst nach dem Rendern prüfen, sonst sähe die Prüfung den alten Stand auch bei Fehlern)
+    await act(async () => {
+      sync.emit('session.updated', running({ state: 'laeuft', updated_at: '2026-11-04T08:05:00Z' }));
+      await new Promise((r) => setTimeout(r, 50));
+    });
     expect(within(b).getByText('Pausiert')).toBeVisible();
+    expect(within(b).queryByText('REC')).toBeNull();
 
     // gleich alt: angenommen
     act(() => sync.emit('session.updated', running({ state: 'laeuft', updated_at: '2026-11-04T08:10:00Z' })));
     await within(b).findByText('REC');
 
     // andere Session: ignoriert
-    act(() =>
+    await act(async () => {
       sync.emit(
         'session.updated',
         running({
@@ -268,8 +282,9 @@ describe('Dashboard: Live-Aktualisierung (session.updated)', () => {
           state: 'beendet',
           updated_at: '2026-11-04T09:00:00Z',
         }),
-      ),
-    );
+      );
+      await new Promise((r) => setTimeout(r, 50));
+    });
     expect(within(b).getByText('REC')).toBeVisible();
 
     act(() =>
@@ -290,13 +305,128 @@ describe('Dashboard: Live-Aktualisierung (session.updated)', () => {
     await waitFor(() => expect(within(b).getByTestId('live-status')).toHaveTextContent('Live'));
   });
 
-  it('iPad-Punkt folgt device.connection', async () => {
+  it('ein Ereignis während eines laufenden Abrufs wird nicht von der älteren Antwort überschrieben', async () => {
     boot();
     const b = await screenBar();
+    await within(b).findByText('REC');
+    const before = gets(`/sessions/${SESSION_ID}`);
+    let release!: () => void;
+    core.getGate = new Promise<void>((r) => (release = r));
+    // Verbindung bricht ab und kommt wieder: Neuladen startet, die Antwort (Stand „läuft“) hängt
+    act(() => sync.setState('backoff'));
+    act(() => sync.setState('online'));
+    await waitFor(() => expect(gets(`/sessions/${SESSION_ID}`)).toBe(before + 1));
+    act(() =>
+      sync.emit('session.updated', running({ state: 'pausiert', updated_at: '2026-11-04T08:10:00Z' })),
+    );
+    await within(b).findByText('Pausiert');
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(within(b).getByText('Pausiert')).toBeVisible();
+    expect(within(b).queryByText('REC')).toBeNull();
+  });
+
+  it('nach einem Verbindungsabbruch lädt die Ansicht neu, sobald es wieder online ist', async () => {
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    const before = gets(`/sessions/${SESSION_ID}`);
+    act(() => sync.setState('backoff'));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(gets(`/sessions/${SESSION_ID}`)).toBe(before);
+    act(() => sync.setState('online'));
+    await waitFor(() => expect(gets(`/sessions/${SESSION_ID}`)).toBe(before + 1));
+  });
+
+  it('ohne Live-Verbindung fragt die Ansicht alle 30 s nach, auch wenn der Zustand hin und her springt', async () => {
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    // Ab hier laufen die Intervalle auf der Fake-Uhr
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(new Date(NOW));
+    const before = gets(`/sessions/${SESSION_ID}`);
+    // Blockierter WebSocket: `connecting` und `backoff` wechseln sich ab, nie `online`
+    act(() => sync.setState('backoff'));
+    for (let i = 0; i < 6; i++) {
+      act(() => sync.setState(i % 2 === 0 ? 'connecting' : 'backoff'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(gets(`/sessions/${SESSION_ID}`)).toBeGreaterThanOrEqual(before + 2);
+  });
+
+  it('online wird nicht nachgefragt', async () => {
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(new Date(NOW));
+    const before = gets(`/sessions/${SESSION_ID}`);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90_000);
+    });
+    expect(gets(`/sessions/${SESSION_ID}`)).toBe(before);
+  });
+
+  it('Folge-Tab: „Anderer Tab“ statt „Live“', async () => {
+    boot({ syncState: 'other_tab' });
+    const b = await screenBar();
+    expect(within(b).getByTestId('live-status')).toHaveTextContent('Anderer Tab');
+    expect(within(b).getByTestId('live-status')).not.toHaveTextContent('Live');
+    expect(screen.queryByText(/Keine Live-Verbindung –/)).toBeNull();
+  });
+});
+
+describe('Dashboard: iPad-Punkt (nur aus REST)', () => {
+  const ipad = (connected: boolean) => makeDevice({ kind: 'ipad', connected });
+
+  it('device.connection löst nur ein Neuladen aus und der Punkt folgt dem REST-Stand', async () => {
+    boot({ devices: [ipad(false)] });
+    const b = await screenBar();
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
     expect(within(b).getByTestId('ipad-status')).toHaveTextContent('nicht verbunden');
+    core.devices[0]!.connected = true;
     act(() => sync.emit('device.connection', { client: 'ipad', connected: true }));
-    await waitFor(() => expect(within(b).getByTestId('ipad-status')).toHaveTextContent(/verbunden/));
-    expect(within(b).getByTestId('ipad-status')).not.toHaveTextContent('nicht verbunden');
+    await waitFor(() =>
+      expect(within(b).getByTestId('ipad-status')).not.toHaveTextContent('nicht verbunden'),
+    );
+    expect(gets('/devices?limit=200')).toBe(2);
+  });
+
+  it('das Ereignis allein überschreibt den REST-Stand nicht', async () => {
+    boot({ devices: [ipad(false)] });
+    const b = await screenBar();
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
+    // Ein anderes iPad meldet „verbunden“, das gekoppelte ist es laut Core nicht
+    await act(async () => {
+      sync.emit('device.connection', { client: 'ipad', connected: true });
+      await new Promise((r) => setTimeout(r, 80));
+    });
+    expect(gets('/devices?limit=200')).toBe(2);
+    expect(within(b).getByTestId('ipad-status')).toHaveTextContent('nicht verbunden');
+  });
+
+  it('nach einem Verbindungsabbruch wird neu geladen (Ereignisse kommen nicht nach)', async () => {
+    boot({ devices: [ipad(false)] });
+    const b = await screenBar();
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
+    core.devices[0]!.connected = true;
+    act(() => sync.setState('backoff'));
+    act(() => sync.setState('online'));
+    await waitFor(() =>
+      expect(within(b).getByTestId('ipad-status')).not.toHaveTextContent('nicht verbunden'),
+    );
   });
 });
 
@@ -344,21 +474,63 @@ describe('Dashboard: Layout pro Modul', () => {
     expect(grid().style.gridTemplateColumns).toMatch(/^minmax\(0, 50fr\)/);
   });
 
-  it('Spaltenbreite per Tastatur an der Trennlinie ändern wird als column_widths gespeichert', async () => {
+  it('Spaltenbreite per Tastatur: Anzeige sofort, mehrere Tasten ergeben einen verzögerten PATCH mit layout', async () => {
     const user = userEvent.setup({ advanceTimers: () => undefined });
     boot();
     await screen.findByTestId('dashboard-grid');
     const sep = screen.getByRole('separator', { name: 'Breite von Folie und Übung' });
     expect(sep).toHaveAttribute('aria-valuenow', '50');
+    expect(sep).toHaveAttribute('aria-valuetext', 'Folie 50 %');
     sep.focus();
-    await user.keyboard('{ArrowRight}');
+    await user.keyboard('{ArrowRight}{ArrowRight}');
+    expect(grid().style.gridTemplateColumns).toMatch(/^minmax\(0, 54fr\)/);
+    expect(patches()).toHaveLength(0);
+    const after = screen.getByRole('separator', { name: 'Breite von Folie und Übung' });
+    expect(after).toHaveAttribute('aria-valuenow', '54');
+    expect(after).toHaveAttribute('aria-valuetext', 'Folie 54 %');
     await waitFor(() => expect(patches()).toHaveLength(1));
-    expect(patches()[0]?.body).toEqual({ settings: { column_widths: [52, 23, 25] } });
-    expect(grid().style.gridTemplateColumns).toMatch(/^minmax\(0, 52fr\)/);
-    expect(screen.getByRole('separator', { name: 'Breite von Folie und Übung' })).toHaveAttribute(
-      'aria-valuenow',
-      '52',
+    expect(patches()[0]?.body).toEqual({ settings: { layout: 'standard', column_widths: [54, 21, 25] } });
+    await new Promise((r) => setTimeout(r, 600));
+    expect(patches()).toHaveLength(1);
+  });
+
+  it('Home und End setzen die Trennlinie auf Minimum bzw. Maximum', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot();
+    await screen.findByTestId('dashboard-grid');
+    const sep = screen.getByRole('separator', { name: 'Breite von Folie und Übung' });
+    sep.focus();
+    await user.keyboard('{Home}');
+    expect(grid().style.gridTemplateColumns).toMatch(/^minmax\(0, 25fr\) 12px minmax\(0, 50fr\)/);
+    await user.keyboard('{End}');
+    expect(grid().style.gridTemplateColumns).toMatch(/^minmax\(0, 67fr\) 12px minmax\(0, 8fr\)/);
+    await waitFor(() => expect(patches()).toHaveLength(1));
+    expect(patches()[0]?.body).toEqual({ settings: { layout: 'standard', column_widths: [67, 8, 25] } });
+    expect(screen.getByRole('separator', { name: 'Breite von Übung und Notizen' })).toHaveAttribute(
+      'aria-valuetext',
+      'Übung 8 %',
     );
+  });
+
+  it('Tasten 1 bis 4 gelten nach der physischen Taste (code), nicht nach dem Zeichen', async () => {
+    boot();
+    await screen.findByTestId('dashboard-grid');
+    fireEvent.keyDown(window, { key: 'é', code: 'Digit4' });
+    await waitFor(() => expect(screen.queryByTestId('dashboard-grid')).toBeNull());
+  });
+
+  it('unbrauchbare gespeicherte Breiten (Spalte zu schmal, Folie zu schmal) gelten nicht', async () => {
+    const { unmount } = boot({
+      module: makeModule({ ...DBS, settings: { column_widths: [60, 38, 2] } }),
+    });
+    await screen.findByTestId('dashboard-grid');
+    await waitFor(() => expect(core.requests.some((r) => r.path === '/modules?limit=100')).toBe(true));
+    await within(await screenBar()).findByText('REC');
+    expect(grid().style.gridTemplateColumns).toMatch(/^minmax\(0, 50fr\) 12px minmax\(0, 25fr\)/);
+    unmount();
+    boot({ module: makeModule({ ...DBS, settings: { column_widths: [20, 40, 40] } }) });
+    await within(await screenBar()).findByText('REC');
+    await waitFor(() => expect(grid().style.gridTemplateColumns).toMatch(/^minmax\(0, 50fr\)/));
   });
 
   it('Ziehen mit der Maus: Vorschau beim Bewegen, Speichern beim Loslassen', async () => {
@@ -375,7 +547,7 @@ describe('Dashboard: Layout pro Modul', () => {
     expect(patches()).toHaveLength(0);
     fireEvent.pointerUp(sep, { clientX: 1120, pointerId: 1 });
     await waitFor(() => expect(patches()).toHaveLength(1));
-    expect(patches()[0]?.body).toEqual({ settings: { column_widths: [50, 35, 15] } });
+    expect(patches()[0]?.body).toEqual({ settings: { layout: 'standard', column_widths: [50, 35, 15] } });
   });
 
   it('scheitert das Speichern, bleibt die Wahl und ein Hinweis steht da', async () => {

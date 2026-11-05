@@ -5,7 +5,7 @@
 // Keine Farbe außer dem roten Aufnahmepunkt, kein Text länger als drei Wörter, keine Animationen.
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import type { Session } from '@sg/shared';
 import { useAutoStop } from '../../lib/autostop';
 import { DEVICES_KEY, useDevices } from '../../lib/devices.ts';
@@ -26,21 +26,29 @@ const primary =
 const ghost =
   'inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2 text-md text-text-muted underline-offset-4 hover:bg-surface-raised hover:text-text hover:underline aria-disabled:opacity-50';
 
-/** Ist ein gekoppeltes iPad gerade verbunden? Start aus `GET /devices`, danach `device.connection` (§11.6). */
+/**
+ * Ist ein gekoppeltes iPad gerade verbunden? Nur aus `GET /devices`. Ereignisse (`device.connection`, `online`,
+ * `leader.changed`) lösen nur ein neues Laden aus: Sie sagen nicht, welches von mehreren iPads gemeint ist, und
+ * kommen nach einem Verbindungsabbruch nicht nach (§11.6).
+ */
 export function useIpadConnected(client: SyncClient | null): boolean {
   const devices = useDevices();
-  const [live, setLive] = useState<boolean | null>(null);
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!client) return;
-    return client.onEvent('device.connection', (d) => {
-      if (d.client !== 'ipad') return;
-      setLive(d.connected);
-      void queryClient.invalidateQueries({ queryKey: DEVICES_KEY });
-    });
+    const refetch = () => void queryClient.invalidateQueries({ queryKey: DEVICES_KEY });
+    const offs = [
+      client.onEvent('device.connection', (d) => {
+        if (d.client === 'ipad') refetch();
+      }),
+      client.onEvent('connection', (c) => {
+        if (c.state === 'online') refetch();
+      }),
+      client.onEvent('leader.changed', refetch),
+    ];
+    return () => offs.forEach((off) => off());
   }, [client, queryClient]);
-  const fromRest = devices.data?.some((d) => d.kind === 'ipad' && d.connected) ?? false;
-  return live ?? fromRest;
+  return devices.data?.some((d) => d.kind === 'ipad' && d.connected) ?? false;
 }
 
 function Dot({ filled, record = false }: { filled: boolean; record?: boolean }) {
@@ -60,10 +68,12 @@ export interface StatusBarProps {
   moduleId: string;
   /** `GET /sessions/{id}` hat einen Stand, aber die Live-Verbindung steht nicht */
   offline: boolean;
+  /** Dieser Tab folgt einem anderen (Leader): kein eigener Live-Strom */
+  otherTab?: boolean;
   actions: SessionActions;
 }
 
-export function StatusBar({ session, client, moduleId, offline, actions }: StatusBarProps) {
+export function StatusBar({ session, client, moduleId, offline, otherTab = false, actions }: StatusBarProps) {
   const now = useNow(1000);
   const ipad = useIpadConnected(client);
   const settings = useSettings();
@@ -139,10 +149,14 @@ export function StatusBar({ session, client, moduleId, offline, actions }: Statu
           <span className="sr-only">{ipad ? 'verbunden' : 'nicht verbunden'}</span>
         </p>
         <p className="flex items-center gap-2 text-text-muted" data-testid="live-status">
-          <Dot filled={!offline} />
-          <span>{offline ? 'Offline' : 'Live'}</span>
+          <Dot filled={!offline && !otherTab} />
+          <span>{otherTab ? 'Anderer Tab' : offline ? 'Offline' : 'Live'}</span>
           <span className="sr-only">
-            {offline ? 'Keine Live-Verbindung, Stand womöglich veraltet' : 'Live-Verbindung'}
+            {otherTab
+              ? 'Ein anderer Tab hält die Verbindung'
+              : offline
+                ? 'Keine Live-Verbindung, Stand womöglich veraltet'
+                : 'Live-Verbindung'}
           </span>
         </p>
 

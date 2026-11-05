@@ -10,7 +10,7 @@ import { friendlyMessage } from '../../lib/api.ts';
 import { useHydrationSafe } from '../../lib/hydrated.ts';
 import { getSession, newerSession, pauseSession, resumeSession, stopSession } from '../../lib/sessions.ts';
 import { useSyncClient } from '../../lib/sync/SyncProvider.tsx';
-import { useLiveState } from '../today/use-today.ts';
+import { POLL_MS, useLiveState } from '../today/use-today.ts';
 
 const key = (id: string) => ['sessions', 'dashboard', id] as const;
 
@@ -22,6 +22,8 @@ export interface SessionData {
   live: boolean;
   /** Der letzte Stand ist womöglich veraltet */
   hint: boolean;
+  /** Dieser Tab folgt einem anderen (Leader) */
+  otherTab: boolean;
   apply: (session: Session) => void;
   refetch: () => void;
 }
@@ -29,13 +31,13 @@ export interface SessionData {
 export function useSessionData(id: string | null): SessionData {
   const client = useQueryClient();
   const sync = useSyncClient();
-  const { live, hint } = useLiveState(sync);
+  const { live, hint, online, otherTab } = useLiveState(sync);
 
   const query = useQuery({
     queryKey: key(id ?? ''),
     enabled: id !== null,
-    // Ohne Live-Verbindung kommen keine Ereignisse; dann alle 30 s nachfragen
-    refetchInterval: live ? false : 30_000,
+    // Ohne Live-Verbindung kommen keine Ereignisse; dann alle 30 s nachfragen (an `online` gebunden, siehe useLiveState)
+    refetchInterval: online ? false : POLL_MS,
     queryFn: async ({ signal }) => {
       const fetched = await getSession(id ?? '', signal);
       // Ein Ereignis, das während des Abrufs eintraf, darf die ältere Antwort nicht überschreiben
@@ -83,6 +85,7 @@ export function useSessionData(id: string | null): SessionData {
     error: safe.error,
     live,
     hint,
+    otherTab,
     apply,
     refetch,
   };

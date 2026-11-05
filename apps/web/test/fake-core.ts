@@ -197,6 +197,8 @@ export interface FakeCore {
   failIngest: (id: string) => void;
   /** Solange true, scheitern alle Anfragen wie bei einem nicht laufenden Core */
   down: boolean;
+  /** Hält `GET /sessions/{id}` an, bis das Promise erfüllt ist; die Antwort zeigt den Stand von vorher. `null` = nicht angehalten */
+  getGate: Promise<void> | null;
   /** Hält alle POSTs an, bis das Promise erfüllt ist (deterministisch statt Zeitfenster). `null` = nicht angehalten */
   postGate: Promise<void> | null;
   /** Stand von GET/PATCH /settings (Standards aus VERTRAEGE §14.1) */
@@ -291,6 +293,7 @@ export function installFakeCore(
     },
     down: initial.down ?? false,
     postGate: null,
+    getGate: null,
     settings: makeSettings(),
     rejectNextSettings: null,
     devices: [],
@@ -462,7 +465,10 @@ export function installFakeCore(
       const sessionOne = /^\/sessions\/([^/]+)$/.exec(path);
       if (sessionOne && method === 'GET') {
         const found = core.sessions.find((x) => x.id === sessionOne[1] && !x.deleted_at);
-        return found ? json(found) : json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        // Die Antwort zeigt den Stand beim EINGANG der Anfrage (wie ein langsames Netz), auch wenn sie später kommt
+        const snapshot = found ? structuredClone(found) : undefined;
+        if (core.getGate) await core.getGate;
+        return snapshot ? json(snapshot) : json({ error: { code: 'session_not_found', message: 'x' } }, 404);
       }
 
       // GET /notebooks?module_id (§7.4)

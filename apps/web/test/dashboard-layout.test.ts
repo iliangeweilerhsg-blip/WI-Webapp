@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_LAYOUT,
   LAYOUTS,
+  MIN_FOLIE_WIDTH,
   MIN_WIDTH,
   dragWidths,
   resolveLayout,
@@ -34,6 +35,13 @@ describe('Dashboard-Layout: Vorlagen und Auflösung', () => {
 
   it('unbrauchbare Breiten werden ignoriert; in „Fokus“ gelten gezogene Breiten nicht', () => {
     expect(resolveLayout({ column_widths: [10, 10, 10] }, 'standard').widths).toEqual([50, 25, 25]);
+    // jede Spalte mindestens MIN_WIDTH, die Folie mindestens MIN_FOLIE_WIDTH
+    expect(validWidths([60, 35, 5])).toBe(false);
+    expect(validWidths([60, 32, MIN_WIDTH])).toBe(true);
+    expect(validWidths([MIN_FOLIE_WIDTH - 1, 40, 36])).toBe(false);
+    expect(validWidths([MIN_FOLIE_WIDTH, 40, 35])).toBe(true);
+    expect(resolveLayout({ column_widths: [20, 40, 40] }, 'standard').widths).toEqual([50, 25, 25]);
+    expect(resolveLayout({ column_widths: [60, 38, 2] }, 'standard').widths).toEqual([50, 25, 25]);
     expect(validWidths([50, 25, 25])).toBe(true);
     expect(validWidths([60, 50, -10])).toBe(false);
     expect(validWidths([50, 50])).toBe(false);
@@ -65,6 +73,8 @@ describe('Dashboard-Layout: Ziehen', () => {
       }
     }
     expect(dragWidths(start, 0, 500)).toEqual([67, 8, 25]);
+    // die Folie wird nicht schmaler als MIN_FOLIE_WIDTH
+    expect(dragWidths(start, 0, -500)).toEqual([MIN_FOLIE_WIDTH, 50, 25]);
     expect(dragWidths(start, 1, 500)).toEqual([50, 42, 8]);
   });
 });

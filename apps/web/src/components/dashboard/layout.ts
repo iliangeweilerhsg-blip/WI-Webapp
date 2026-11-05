@@ -29,6 +29,8 @@ export const LAYOUTS: readonly LayoutPreset[] = [
 export const DEFAULT_LAYOUT: LayoutId = 'standard';
 /** Schmalste Breite (%), auf die sich eine sichtbare Spalte ziehen lässt */
 export const MIN_WIDTH = 8;
+/** Die Folie bleibt mindestens so breit (%): schmaler ist sie nicht mehr lesbar */
+export const MIN_FOLIE_WIDTH = 25;
 
 export function presetOf(id: LayoutId | undefined | null): LayoutPreset {
   return LAYOUTS.find((l) => l.id === id) ?? LAYOUTS[0]!;
@@ -36,10 +38,14 @@ export function presetOf(id: LayoutId | undefined | null): LayoutPreset {
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
-/** Prüft gespeicherte Breiten: genau drei Zahlen 0..100, Summe 100 (±0,5). Alles andere gilt als unbrauchbar. */
+/**
+ * Prüft gespeicherte Breiten: genau drei Zahlen, Summe 100 (±0,5), jede Spalte mindestens `MIN_WIDTH`, die Folie
+ * mindestens `MIN_FOLIE_WIDTH`. Alles andere gilt als unbrauchbar (dann gilt die Vorlage).
+ */
 export function validWidths(value: readonly number[] | undefined | null): value is Widths {
   if (!value || value.length !== 3) return false;
-  if (!value.every((n) => Number.isFinite(n) && n >= 0 && n <= 100)) return false;
+  if (!value.every((n) => Number.isFinite(n) && n >= MIN_WIDTH && n <= 100)) return false;
+  if (value[0]! < MIN_FOLIE_WIDTH) return false;
   return Math.abs(value[0]! + value[1]! + value[2]! - 100) <= 0.5;
 }
 
@@ -65,13 +71,16 @@ export function resolveLayout(
 
 /**
  * Zieht die Trennlinie `handle` um `deltaPct` Prozent: 0 = zwischen Folie und Übung (Notizen bleiben), 1 = zwischen
- * Übung und Notizen (Folie bleibt). Keine Spalte wird schmaler als `MIN_WIDTH`; die Summe bleibt 100.
+ * Übung und Notizen (Folie bleibt). Keine Spalte wird schmaler als `MIN_WIDTH`, die Folie nicht als `MIN_FOLIE_WIDTH`; die Summe bleibt 100.
  */
 export function dragWidths(start: Widths, handle: HandleIndex, deltaPct: number): Widths {
   const [a, b, c] = start;
   if (handle === 0) {
     const total = a + b;
-    const next = Math.min(Math.max(a + deltaPct, MIN_WIDTH), Math.max(total - MIN_WIDTH, MIN_WIDTH));
+    const next = Math.min(
+      Math.max(a + deltaPct, MIN_FOLIE_WIDTH),
+      Math.max(total - MIN_WIDTH, MIN_FOLIE_WIDTH),
+    );
     const left = round1(next);
     return [left, round1(total - left), c];
   }

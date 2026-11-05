@@ -8,6 +8,7 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect } from 'react';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import { moduleColorVar, useModules } from '../../lib/modules.ts';
+import { isEditableTarget } from '../../lib/shortcuts.ts';
 import { useSyncClient } from '../../lib/sync/SyncProvider.tsx';
 import { EmptyState } from '../Placeholder.tsx';
 import { Columns, useIsWide } from './Columns.tsx';
@@ -19,11 +20,6 @@ import { SlidesPanel } from './slides/SlidesPanel.tsx';
 import { useDashboardLayout } from './use-layout.ts';
 import { useSessionActions, useSessionData } from './use-session.ts';
 import { isActive } from '../../lib/sessions.ts';
-
-function isEditable(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  return target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
-}
 
 function Missing({ children, retry }: { children: string; retry?: () => void }) {
   return (
@@ -78,8 +74,9 @@ function SessionScreen() {
     if (!wide) return;
     function onKeyDown(e: KeyboardEvent) {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if (isEditable(e.target)) return;
-      const preset = LAYOUTS.find((l) => l.key === e.key);
+      if (isEditableTarget(e.target)) return;
+      // Physische Taste (`Digit1` bis `Digit4`): gilt auch bei anderen Tastaturbelegungen
+      const preset = LAYOUTS.find((l) => e.code === `Digit${l.key}`);
       if (!preset) return;
       e.preventDefault();
       choose(preset.id);
@@ -176,6 +173,7 @@ function SessionScreen() {
                 moduleId={session.module_id}
                 slideDeckId={session.slide_deck_id}
                 active={active}
+                startedAt={session.started_at ? Date.parse(session.started_at) : null}
                 client={sync}
               />
             ),
@@ -190,6 +188,7 @@ function SessionScreen() {
         client={sync}
         moduleId={session.module_id}
         offline={data.hint}
+        otherTab={data.otherTab}
         actions={actions}
       />
     </section>

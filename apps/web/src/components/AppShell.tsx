@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { usePathname } from 'next/navigation';
 import { isMacPlatform, matchShortcut } from '../lib/shortcuts.ts';
 import { SIDEBAR_KEY } from '../lib/theme.tsx';
+import { SIDEBAR_AUTO_ATTR } from '../lib/theme-init.ts';
 import { ErrorShelf } from '../lib/sync/ErrorShelf.tsx';
 import { OtherTabBanner } from '../lib/sync/OtherTabBanner.tsx';
 import { SyncProvider, useSyncClient } from '../lib/sync/SyncProvider.tsx';
@@ -40,6 +41,35 @@ function Shell({ children }: { children: ReactNode }) {
   const fullBleed = pathname === '/dokument' || pathname === '/session';
 
   const modal = drawerOpen && isNarrow;
+
+  // Live-Dashboard: Die Seitenleiste klappt ein, damit die Folie genug Platz hat. Nichts davon wird gespeichert
+  // (kein localStorage). Beim Verlassen kommt der alte Zustand zurück, außer der Nutzer hat selbst umgeschaltet.
+  // Beim direkten Laden hat das Init-Skript schon eingeklappt (`data-sidebar-auto`), damit nichts springt.
+  const autoCollapsed = useRef(false);
+  const userToggled = useRef(false);
+  const onSession = /^\/session\/?$/.test(pathname);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (root.hasAttribute(SIDEBAR_AUTO_ATTR)) {
+      autoCollapsed.current = true;
+      root.removeAttribute(SIDEBAR_AUTO_ATTR);
+    }
+    if (onSession && !isNarrow) {
+      if (!autoCollapsed.current && root.getAttribute('data-sidebar') !== 'collapsed') {
+        root.setAttribute('data-sidebar', 'collapsed');
+        autoCollapsed.current = true;
+        userToggled.current = false;
+      }
+      if (autoCollapsed.current && !userToggled.current) setExpanded(false);
+    } else if (autoCollapsed.current) {
+      autoCollapsed.current = false;
+      if (!userToggled.current) {
+        root.removeAttribute('data-sidebar');
+        setExpanded(true);
+      }
+      userToggled.current = false;
+    }
+  }, [onSession, isNarrow]);
 
   // Fokus erst nach dem Schließen setzen: Solange der Drawer offen ist, ist der Rest `inert`
   const returnFocus = useRef<'menu' | 'main' | null>(null);
@@ -127,6 +157,7 @@ function Shell({ children }: { children: ReactNode }) {
       return;
     }
     const root = document.documentElement;
+    if (autoCollapsed.current) userToggled.current = true;
     const collapse = root.getAttribute('data-sidebar') !== 'collapsed';
     if (collapse) root.setAttribute('data-sidebar', 'collapsed');
     else root.removeAttribute('data-sidebar');

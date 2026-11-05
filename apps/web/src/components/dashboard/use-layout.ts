@@ -80,7 +80,7 @@ export function useDashboardLayout(module: Module | undefined): DashboardLayoutS
   const commit = useCallback(
     (widths: Widths) => {
       if (layoutRef.current === 'fokus') return;
-      save({ layout: layoutRef.current, widths }, { column_widths: widths });
+      save({ layout: layoutRef.current, widths }, { layout: layoutRef.current, column_widths: widths });
     },
     [save],
   );

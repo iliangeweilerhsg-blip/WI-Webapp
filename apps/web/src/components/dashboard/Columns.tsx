@@ -3,7 +3,7 @@
 // Die drei Spalten des Live-Dashboards (07 §3.3): Folie | Übung | Notizen. Ab `lg` nebeneinander mit ziehbaren
 // Trennlinien (F-DSH-01), darunter als Reiter, jeweils eine Spalte. Keine Animationen (07 §3.3).
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
-import { dragWidths, MIN_WIDTH, type HandleIndex, type Widths } from './layout.ts';
+import { dragWidths, MIN_FOLIE_WIDTH, MIN_WIDTH, type HandleIndex, type Widths } from './layout.ts';
 
 export type ColumnId = 'folie' | 'uebung' | 'notizen';
 const COLUMNS: readonly { id: ColumnId; label: string }[] = [
@@ -16,6 +16,8 @@ const COLUMNS: readonly { id: ColumnId; label: string }[] = [
 const SPLITTER_PX = 12;
 const KEY_STEP = 2;
 const KEY_STEP_BIG = 10;
+/** Ruhezeit nach der letzten Taste bis zum Speichern */
+const KEY_COMMIT_MS = 400;
 
 /** Ab `lg` (Tailwind, 1024 px) passen drei Spalten nebeneinander */
 const WIDE_QUERY = '(min-width: 1024px)';
@@ -152,21 +154,35 @@ function Splitter({ index, grid, widths, onPreview, onCommit }: SplitterProps) {
     if (d.latest.some((n, i) => n !== d.start[i])) onCommit(d.latest);
   }
 
-  const keyChanged = useRef(false);
+  // Pfeiltasten, Home und End: Anzeige sofort, Speichern erst nach einer kurzen Ruhe (mehrere Tasten = ein PATCH)
+  const timer = useRef<number | null>(null);
+  const pending = useRef(false);
+  const onCommitRef = useRef(onCommit);
+  onCommitRef.current = onCommit;
+  const flush = () => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    if (!pending.current) return;
+    pending.current = false;
+    onCommitRef.current(widthsRef.current);
+  };
+  // Beim Entfernen (z. B. Layoutwechsel) noch nicht gespeicherte Breiten sichern
+  useEffect(() => () => flush(), []);
+
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    let delta: number;
+    if (e.key === 'ArrowLeft') delta = -(e.shiftKey ? KEY_STEP_BIG : KEY_STEP);
+    else if (e.key === 'ArrowRight') delta = e.shiftKey ? KEY_STEP_BIG : KEY_STEP;
+    else if (e.key === 'Home') delta = -1000;
+    else if (e.key === 'End') delta = 1000;
+    else return;
     e.preventDefault();
-    const step = e.shiftKey ? KEY_STEP_BIG : KEY_STEP;
-    const next = dragWidths(widthsRef.current, index, e.key === 'ArrowRight' ? step : -step);
-    keyChanged.current = true;
+    const next = dragWidths(widthsRef.current, index, delta);
     onPreview(next);
     widthsRef.current = next;
-  }
-  function onKeyUp(e: KeyboardEvent<HTMLDivElement>) {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    if (!keyChanged.current) return;
-    keyChanged.current = false;
-    onCommit(widthsRef.current);
+    pending.current = true;
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(flush, KEY_COMMIT_MS);
   }
 
   return (
@@ -175,7 +191,8 @@ function Splitter({ index, grid, widths, onPreview, onCommit }: SplitterProps) {
       aria-orientation="vertical"
       aria-label={SPLITTER_LABEL[index]}
       aria-valuenow={Math.round(now)}
-      aria-valuemin={MIN_WIDTH}
+      aria-valuetext={`${index === 0 ? 'Folie' : 'Übung'} ${Math.round(now)} %`}
+      aria-valuemin={index === 0 ? MIN_FOLIE_WIDTH : MIN_WIDTH}
       aria-valuemax={Math.round(max)}
       tabIndex={0}
       onPointerDown={onPointerDown}
@@ -183,7 +200,6 @@ function Splitter({ index, grid, widths, onPreview, onCommit }: SplitterProps) {
       onPointerUp={end}
       onPointerCancel={end}
       onKeyDown={onKeyDown}
-      onKeyUp={onKeyUp}
       className="group flex cursor-col-resize touch-none items-stretch justify-center outline-offset-[-2px]"
     >
       <span

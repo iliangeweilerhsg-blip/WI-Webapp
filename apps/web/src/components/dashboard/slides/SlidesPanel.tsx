@@ -10,6 +10,8 @@ export interface SlidesPanelProps {
   slideDeckId: string | null;
   /** Die Session läuft oder ist pausiert (sonst nur ansehen, nicht blättern) */
   active: boolean;
+  /** `session.started_at` in ms; `slide.change` braucht `t_ms` = Ereigniszeit − `started_at`. `null` = nicht gestartet */
+  startedAt: number | null;
   /** Sync-Client dieses Tabs; `null` vor dem ersten Effekt */
   client: SyncClient | null;
 }

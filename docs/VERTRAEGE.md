@@ -897,10 +897,15 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 
 | Ticket | Datei | Export und Props | Sitz im Dashboard |
 |---|---|---|---|
-| T1-05 | `dashboard/slides/SlidesPanel.tsx` | `SlidesPanel({ sessionId: string; moduleId: string; slideDeckId: string \| null; active: boolean; client: SyncClient \| null })` | Spalte „Folie“, füllt sie ganz (`h-full`). `slideDeckId === null`: folienloser Modus. `active`: Session läuft oder ist pausiert. |
+| T1-05 | `dashboard/slides/SlidesPanel.tsx` | `SlidesPanel({ sessionId: string; moduleId: string; slideDeckId: string \| null; active: boolean; startedAt: number \| null; client: SyncClient \| null })` | Spalte „Folie“, füllt sie ganz (`h-full`). `slideDeckId === null`: folienloser Modus. `active`: Session läuft oder ist pausiert. `startedAt` = `session.started_at` in ms; `slide.change` braucht `t_ms` = Ereigniszeit − `startedAt`. |
 | T1-17 | `dashboard/markers/MarkerControls.tsx` | `MarkerControls({ sessionId: string; active: boolean; startedAt: number \| null; client: SyncClient \| null })` | Statusleiste, nach der Aufnahmeanzeige (Zähler ❓ ⚠️ 🔗, Tasten F, K, L). `startedAt` = `session.started_at` in ms. Einzeilig, höchstens drei Wörter Text. |
 
 `SyncClient` kommt aus `apps/web/src/lib/sync/client.ts` (`useSyncClient()` des Dashboards, `null` vor dem ersten Effekt). Tastenkürzel setzen die Komponenten selbst (T1-05: `←` `→` Leertaste; T1-17: `F` `K` `L`); das Dashboard belegt nur `1` bis `4` (Layout) und lässt Tasten in Eingabefeldern in Ruhe.
+
+**Regeln für die Platzhalter-Komponenten:**
+- Das Dashboard belegt die Tasten `1` bis `4` (nach `e.code`, also `Digit1` bis `Digit4`) und die Pfeiltasten, Home und End auf den Trennlinien (`role="separator"`). Eigene Tastenkürzel prüfen `e.defaultPrevented` und ignorieren Fokus auf Eingabefeldern (`isEditableTarget` aus `lib/shortcuts.ts`) sowie auf `role="separator"` und `role="tab"`; dort gehören die Pfeiltasten dem Element.
+- Unter `lg` (1024 px) zeigt das Dashboard nur eine Spalte (Reiter) und hängt die anderen Panels aus. Zustand, der den Wechsel überleben muss (aktuelle Folie, Zähler, Entwürfe), gehört darum in den Query-Cache (`@tanstack/react-query`) bzw. an die Session, nicht in den lokalen State der Komponente. Die Komponente muss beim erneuten Einhängen ohne Flackern denselben Stand zeigen.
+- Das Dashboard klappt die Seitenleiste auf `/session` ein (ohne `localStorage`) und stellt sie beim Verlassen wieder her; die Folienspalte soll im Standard-Layout bei 1440 px mindestens 640 px breit sein.
 
 **Gemeinsam genutzte Core- und Worker-Dateien**
 - `services/core/src/services/organisation.ts` und `material.ts`: T1-DB (`Module.settings`), T1-18 (`delete*`), Core-Ink (`createModule`) und T1-02 (`createSlideDeck`) ändern je **nur ihre Funktion**. Merge-Reihenfolge: T1-DB, dann T1-18, dann Core-Ink, dann T1-02. Wer später kommt, rebased.
