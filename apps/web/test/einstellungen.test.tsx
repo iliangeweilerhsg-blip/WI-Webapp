@@ -67,7 +67,7 @@ describe('Reiter', () => {
     expect(dataRequests().length).toBeGreaterThan(0);
   });
 
-  it('wechselt per Klick und Pfeiltasten; Geräte zeigt „Kommt bald“, Daten die Bereiche Backups und Papierkorb', async () => {
+  it('wechselt per Klick und Pfeiltasten; Geräte zeigt die Geräteverwaltung, Daten die Bereiche Backups und Papierkorb', async () => {
     installFakeCore();
     const user = userEvent.setup();
     page();

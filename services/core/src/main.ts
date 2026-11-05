@@ -4,6 +4,7 @@ import { hasOpenPermissions, loadConfig, loadDotEnv } from './config.ts';
 import { createDb } from './db/client.ts';
 import { createLogger } from './logger.ts';
 import { purgeIdempotencyKeys } from './plugins/idempotency.ts';
+import { startBonjour, type BonjourHandle } from './services/discovery.ts';
 import { startScheduler } from './services/scheduler.ts';
 
 /** Harte Frist fürs Herunterfahren, danach Exit 1 */
@@ -25,6 +26,7 @@ if (dotEnvFile) {
 const handle = createDb(config.databaseUrl);
 const app = await buildApp({ config, db: handle.db, logger });
 
+let bonjour: BonjourHandle | null = null;
 let stopping = false;
 let stopScheduler: (() => void) | null = null;
 async function shutdown(signal: string): Promise<void> {
@@ -37,6 +39,7 @@ async function shutdown(signal: string): Promise<void> {
     process.exit(1);
   }, SHUTDOWN_DEADLINE_MS).unref();
   try {
+    await bonjour?.stop();
     stopScheduler?.();
     await app.close();
     await handle.close();
@@ -57,6 +60,10 @@ setInterval(() => void purge(), 60 * 60 * 1000).unref();
 try {
   await purge();
   await app.listen({ port: config.port, host: config.host });
+  // Nur wenn der Core aus dem Netz erreichbar ist, hilft die Ankündigung dem iPad (§12)
+  if (config.bonjour && config.host !== '127.0.0.1' && config.host !== 'localhost' && config.host !== '::1') {
+    bonjour = startBonjour({ port: config.port, logger });
+  }
   // Tägliches Backup und `maintenance.nightly` (VERTRAEGE §13)
   stopScheduler = startScheduler({ db: handle.db, config, logger });
 } catch (error) {

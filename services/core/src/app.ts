@@ -14,6 +14,7 @@ import { createSecurityGuard, registerSecurity, type DeviceTokenVerifier } from 
 import { registerWeb } from './plugins/web.ts';
 import { backupRoutes } from './routes/backups.ts';
 import { calendarRoutes } from './routes/calendar.ts';
+import { devicesRoutes } from './routes/devices.ts';
 import { materialRoutes } from './routes/material.ts';
 import { inkRoutes } from './routes/notebooks.ts';
 import { organisationRoutes } from './routes/organisation.ts';
@@ -21,13 +22,20 @@ import { recordingRoutes } from './routes/recordings.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { systemRoutes } from './routes/system.ts';
 import { trashRoutes } from './routes/trash.ts';
+import { LastSeenTracker, verifyDeviceToken } from './services/devices.ts';
+import { pickPairingHost } from './services/discovery.ts';
+import { PairingManager } from './services/pairing.ts';
 
 export interface BuildAppOptions {
   config: Config;
   db: Db;
   logger: Logger;
-  /** Prüft Geräte-Tokens. Standard (Phase 0): jedes Token wird abgewiesen. */
+  /** Prüft Geräte-Tokens. Standard: gegen `device.token_hash` (T1-10), mit `last_seen_at` höchstens einmal pro Minute */
   verifyDeviceToken?: DeviceTokenVerifier;
+  /** Kopplungsfenster im Speicher (§12). Standard: ein eigenes pro App. Tests geben eins mit gestellter Uhr vor */
+  pairing?: PairingManager;
+  /** IPv4 für `PairingCode.host`. Standard: aktive Schnittstelle, bevorzugt `en0` */
+  pairingHost?: () => string;
 }
 
 function readVersion(): string {
@@ -43,10 +51,22 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const { config, db, logger } = options;
   const version = readVersion();
 
-  const guard = createSecurityGuard({
-    config,
-    ...(options.verifyDeviceToken ? { verifyDeviceToken: options.verifyDeviceToken } : {}),
-  });
+  const lastSeen = new LastSeenTracker(db);
+  const verifyToken: DeviceTokenVerifier =
+    options.verifyDeviceToken ??
+    (async (token) => {
+      const verified = await verifyDeviceToken(db, token);
+      if (verified) {
+        // Nicht abwarten: die Anfrage soll nicht auf das Schreiben von last_seen_at warten
+        lastSeen.touch(verified.deviceId).catch((error: unknown) => {
+          logger.warn({ err: error }, 'last_seen_at konnte nicht gesetzt werden');
+        });
+      }
+      return verified;
+    });
+  const guard = createSecurityGuard({ config, verifyDeviceToken: verifyToken });
+  const pairing = options.pairing ?? new PairingManager();
+  const pairingHost = options.pairingHost ?? (() => pickPairingHost());
 
   const app: FastifyInstance = Fastify({
     loggerInstance: logger as FastifyBaseLogger,
@@ -108,6 +128,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(backupRoutes, { db, config });
       await api.register(trashRoutes, { db, config });
       await api.register(settingsRoutes, { db, config });
+      await api.register(devicesRoutes, { db, config, pairing, pairingHost });
     },
     { prefix: API_BASE },
   );

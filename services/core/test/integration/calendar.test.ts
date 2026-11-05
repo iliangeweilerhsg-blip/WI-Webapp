@@ -1159,7 +1159,13 @@ describe('Neu zuordnen: POST /calendar/reassign', () => {
   });
 
   it('nur lokal: aus dem Netz wird die Route abgewiesen', async () => {
-    const res = await reassign('192.168.1.20');
+    // Aus dem Netz mit dem Host des Macs (ein fremder Host wäre schon 421, VERTRAEGE §5)
+    const res = await t.request({
+      method: 'POST',
+      url: `${API}/calendar/reassign`,
+      remoteAddress: '192.168.1.20',
+      headers: { host: '192.168.1.5:4710' },
+    });
     expect([401, 403]).toContain(res.statusCode);
   });
 

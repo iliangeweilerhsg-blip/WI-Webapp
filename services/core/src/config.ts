@@ -17,6 +17,8 @@ export interface Config {
   /** Erlaubter CORS-Origin der Entwicklungs-Web-App, leer = kein CORS */
   devWebOrigin: string;
   logLevel: LogLevel;
+  /** Bonjour-Ankündigung `_studiengehirn._tcp` (VERTRAEGE §12). `SG_BONJOUR=0` schaltet sie ab */
+  bonjour: boolean;
 }
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'];
@@ -68,5 +70,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webDir: resolve(expandHome(env.SG_WEB_DIR || join(repoRoot, 'apps', 'web', 'out'))),
     devWebOrigin: (env.SG_DEV_WEB_ORIGIN || '').replace(/\/+$/, ''),
     logLevel: logLevel as LogLevel,
+    bonjour: !['0', 'false', 'off', 'nein'].includes((env.SG_BONJOUR ?? '').trim().toLowerCase()),
   };
 }
