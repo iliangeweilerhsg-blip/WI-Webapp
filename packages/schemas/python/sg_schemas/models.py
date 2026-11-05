@@ -20,6 +20,16 @@ from pydantic import (
 )
 
 
+class AlignLogMode(StrEnum):
+    """
+    log: aus Folienwechseln. ohne_wechsel: Foliensatz, aber kein verwertbarer Wechsel (ganze Session auf Folie 1). folienlos: kein Foliensatz, keine Segmente
+    """
+
+    log = 'log'
+    ohne_wechsel = 'ohne_wechsel'
+    folienlos = 'folienlos'
+
+
 class ApiErrorBody(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -336,6 +346,16 @@ class Lang(StrEnum):
     de = 'de'
     en = 'en'
     mixed = 'mixed'
+
+
+class LanguageCode(RootModel[StrictStr]):
+    root: StrictStr = Field(
+        ...,
+        description='Von Whisper erkannte Sprache, ISO 639-1 (z. B. de, en)',
+        examples=['de'],
+        pattern='^[a-z]{2,3}$',
+        title='LanguageCode',
+    )
 
 
 class MaintenanceNightlyPayload(BaseModel):
@@ -829,6 +849,16 @@ class PhotoMime(StrEnum):
     image_jpeg = 'image/jpeg'
 
 
+class PipelineStep(StrEnum):
+    """
+    Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge = Anzeige-Reihenfolge
+    """
+
+    audio_finalize = 'audio.finalize'
+    transcribe = 'transcribe'
+    align_log = 'align.log'
+
+
 class Point2(RootModel[list[StrictFloat]]):
     """
     [x, y] in pt
@@ -930,6 +960,24 @@ class SessionMs(RootModel[StrictInt]):
     )
 
 
+class SessionReprocessRequest(BaseModel):
+    """
+    POST /sessions/{id}/reprocess: Kette ab from_step neu anstoßen (VERTRAEGE §18.5)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    from_step: PipelineStep | None = Field(
+        None,
+        description='Standard transcribe. Alle späteren Schritte laufen mit (VERTRAEGE §18.2)',
+    )
+    force: StrictBool | None = Field(
+        None,
+        description='Standard false. true: auch unveränderte Eingaben neu verarbeiten',
+    )
+
+
 class SessionState(StrEnum):
     """
     Zustandsautomat F-SES-01, Übergänge in docs/VERTRAEGE.md
@@ -968,6 +1016,16 @@ class SlideEventSource(StrEnum):
     manuell_mac = 'manuell_mac'
     manuell_ipad = 'manuell_ipad'
     korrektur = 'korrektur'
+
+
+class SlideSegmentSource(StrEnum):
+    """
+    Herkunft (03 §5). Phase 2 erster Schnitt: nur log (align.log)
+    """
+
+    log = 'log'
+    ausrichtung = 'ausrichtung'
+    manuell = 'manuell'
 
 
 class StopReason(StrEnum):
@@ -1140,6 +1198,51 @@ class ToolbarSide(StrEnum):
     rechts = 'rechts'
 
 
+class TranscribeOutcome(StrEnum):
+    """
+    transkribiert: neu geschrieben. unveraendert: gleicher input_hash, übersprungen. ohne_audio: keine full.m4a (altes Transkript entfernt)
+    """
+
+    transkribiert = 'transkribiert'
+    unveraendert = 'unveraendert'
+    ohne_audio = 'ohne_audio'
+
+
+class TranscriptProvider(StrEnum):
+    """
+    Transcriber im Worker (02 §7). fake nur für CI und Linux (VERTRAEGE §18.6). Cloud-Anbieter kommen als neue Werte
+    """
+
+    mlx_whisper = 'mlx-whisper'
+    fake = 'fake'
+
+
+class TranscriptWord(BaseModel):
+    """
+    Wort mit Zeitstempel (05 §P4). Zeiten in Sitzungszeit. text ohne führende und abschließende Leerzeichen, Satzzeichen bleiben am Wort
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    text: StrictStr = Field(..., min_length=1)
+    start_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    end_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    prob: StrictFloat = Field(
+        ..., description='Wahrscheinlichkeit laut Whisper', ge=0.0, le=1.0
+    )
+
+
 class TrashKind(StrEnum):
     semester = 'semester'
     module = 'module'
@@ -1160,6 +1263,56 @@ class Uuid(RootModel[StrictStr]):
         pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
         title='Uuid',
     )
+
+
+class AlignLogPayload(BaseModel):
+    """
+    align.log (08 §5, VERTRAEGE §18.3)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+
+
+class AlignLogResult(BaseModel):
+    """
+    job.result von align.log
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_deck_id: Uuid | None
+    mode: AlignLogMode
+    timeline_end_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    event_count: StrictInt = Field(..., description='Gelesene slide_event', ge=0)
+    skipped_events: StrictInt = Field(
+        ..., description='Durchgänge (Standzeit unter 1,5 s)', ge=0
+    )
+    unresolved_events: StrictInt = Field(
+        ..., description='slide_index ohne Folie im Foliensatz', ge=0
+    )
+    segment_count: StrictInt = Field(..., ge=0)
+    session_deleted: StrictBool
+    job_duration_ms: StrictInt = Field(..., ge=0)
 
 
 class ApiError(BaseModel):
@@ -4006,6 +4159,63 @@ class SlideEvent(BaseModel):
     source: SlideEventSource
 
 
+class SlideSegment(BaseModel):
+    """
+    Welche Folie lief wann (03 §5). Zeiten in Sitzungszeit, end_ms ausschließlich
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_index: StrictInt = Field(..., ge=1)
+    start_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    end_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    source: SlideSegmentSource
+    confidence: StrictFloat = Field(..., ge=0.0, le=1.0)
+    job_id: Uuid | None
+
+
 class StampElementPayload(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -4403,6 +4613,187 @@ class TextElementPayload(BaseModel):
     )
     text: StrictStr
     size: TextSize
+
+
+class TranscribePayload(BaseModel):
+    """
+    transcribe (08 §5, VERTRAEGE §18.2). Den Anbieter wählt der Worker (SG_TRANSCRIBER)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    force: StrictBool | None = Field(
+        None,
+        description='true: auch Aufnahmen mit unverändertem input_hash neu transkribieren',
+    )
+
+
+class TranscribeRecordingResult(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    recording_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    transcript_id: Uuid | None
+    outcome: TranscribeOutcome
+    segment_count: StrictInt = Field(..., ge=0)
+    word_count: StrictInt = Field(..., ge=0)
+    audio_duration_ms: StrictInt = Field(..., ge=0)
+    language: LanguageCode | None
+    transcribe_ms: StrictInt = Field(
+        ..., description='Laufzeit des Transcribers, 0 bei unveraendert', ge=0
+    )
+
+
+class TranscribeResult(BaseModel):
+    """
+    job.result von transcribe
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    provider: TranscriptProvider
+    model: StrictStr = Field(..., min_length=1)
+    recordings: list[TranscribeRecordingResult]
+    removed_transcripts: StrictInt = Field(
+        ...,
+        description='Entfernte Transkripte gelöschter Aufnahmen bzw. von Aufnahmen ohne Audio',
+        ge=0,
+    )
+    segment_count: StrictInt = Field(
+        ..., description='Summe über alle Transkripte der Session nach dem Lauf', ge=0
+    )
+    word_count: StrictInt = Field(..., ge=0)
+    session_deleted: StrictBool = Field(
+        ..., description='true: Session war gelöscht, nichts geschrieben'
+    )
+    job_duration_ms: StrictInt = Field(..., ge=0)
+
+
+class TranscriptInfo(BaseModel):
+    """
+    Ein Transkript je Aufnahme (VERTRAEGE §18.1), ohne Segmente
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    user_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    deleted_at: AwareDatetime | None
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    recording_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    job_id: StrictStr = Field(
+        ...,
+        description='transcribe-Job, der es geschrieben hat',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    finalize_job_id: StrictStr = Field(
+        ...,
+        description='audio.finalize-Job, dessen full.m4a transkribiert wurde',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    provider: TranscriptProvider
+    model: StrictStr = Field(
+        ..., examples=['mlx-community/whisper-large-v3-turbo'], min_length=1
+    )
+    language: LanguageCode | None
+    segment_count: StrictInt = Field(..., ge=0)
+    word_count: StrictInt = Field(..., ge=0)
+    audio_duration_ms: StrictInt = Field(..., ge=0)
+    stale: StrictBool = Field(
+        ...,
+        description='true: Der neueste fertige audio.finalize-Job der Aufnahme ist nicht finalize_job_id (Audio wurde danach neu erzeugt)',
+    )
+
+
+class TranscriptLine(BaseModel):
+    """
+    Ein Transkript-Abschnitt bzw. sein Teil auf einer Folie (VERTRAEGE §18.4). Ein Abschnitt über eine Foliengrenze ergibt mehrere Zeilen mit gleicher segment_id
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    segment_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    part: StrictInt = Field(..., description='0, 1, … innerhalb des Abschnitts', ge=0)
+    recording_id: StrictStr = Field(
+        ...,
+        description='Aufnahme mit dem Audio. Position in full.m4a = start_ms − recording.started_ms',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_id: Uuid | None
+    slide_index: StrictInt | None = Field(..., ge=1)
+    start_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    end_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    text: StrictStr
+    lang: LanguageCode | None
+    words: list[TranscriptWord] | None = Field(
+        None,
+        description='Nur mit include_words=true: genau die Wörter dieser Zeile, [] wenn der Abschnitt keine Wort-Zeitstempel hat (VERTRAEGE §18.4)',
+    )
 
 
 class TrashParent(BaseModel):
@@ -4991,6 +5382,20 @@ class SessionPauseOp(BaseModel):
     origin: SyncOrigin | None = None
 
 
+class SessionReprocessResult(BaseModel):
+    """
+    Antwort von POST /sessions/{id}/reprocess (202)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session: Session
+    jobs: list[Job] = Field(
+        ..., description='Angelegte oder wiederverwendete Jobs in Ketten-Reihenfolge'
+    )
+
+
 class SessionSnapshot(BaseModel):
     """
     GET /sessions/{id}/snapshot: Live-Stand für Dashboard und iPad (ohne gelöschte Objekte, nach t_ms sortiert)
@@ -5025,6 +5430,35 @@ class SessionStartResult(BaseModel):
     )
     session: Session
     ended_session: Session | None
+
+
+class SessionTranscript(BaseModel):
+    """
+    GET /sessions/{id}/transcript: alles für den Rückblick einer Session (F-NAC-02). Listen nach start_ms sortiert
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_deck_id: Uuid | None
+    slide_source: SlideSegmentSource | None = Field(
+        ...,
+        description='Quelle der gelieferten slide_segments: manuell vor ausrichtung vor log. null = keine Zuordnung',
+    )
+    slide_segments: list[SlideSegment]
+    transcripts: list[TranscriptInfo]
+    recordings: list[Recording]
+    lines: list[TranscriptLine]
+    stale: StrictBool = Field(
+        ...,
+        description='true: mindestens eine Aufnahme mit fertigem audio.finalize hat kein oder ein veraltetes Transkript',
+    )
 
 
 class ShapeElement(BaseModel):
@@ -5296,6 +5730,9 @@ class SchemaBundle(BaseModel):
     GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
     """
 
+    AlignLogMode_1: AlignLogMode | None = Field(None, alias='AlignLogMode')
+    AlignLogPayload_1: AlignLogPayload | None = Field(None, alias='AlignLogPayload')
+    AlignLogResult_1: AlignLogResult | None = Field(None, alias='AlignLogResult')
     ApiError_1: ApiError | None = Field(None, alias='ApiError')
     ApiErrorBody_1: ApiErrorBody | None = Field(None, alias='ApiErrorBody')
     Appearance_1: Appearance | None = Field(None, alias='Appearance')
@@ -5423,6 +5860,13 @@ class SchemaBundle(BaseModel):
     JobState_1: JobState | None = Field(None, alias='JobState')
     JobType_1: JobType | None = Field(None, alias='JobType')
     Lang_1: Lang | None = Field(None, alias='Lang')
+    LanguageCode: StrictStr | None = Field(
+        None,
+        description='Von Whisper erkannte Sprache, ISO 639-1 (z. B. de, en)',
+        examples=['de'],
+        pattern='^[a-z]{2,3}$',
+        title='LanguageCode',
+    )
     LectureSettings_1: LectureSettings | None = Field(None, alias='LectureSettings')
     LectureSettingsUpdate_1: LectureSettingsUpdate | None = Field(
         None, alias='LectureSettingsUpdate'
@@ -5650,6 +6094,7 @@ class SchemaBundle(BaseModel):
     PhotoAddOp_1: PhotoAddOp | None = Field(None, alias='PhotoAddOp')
     PhotoFileRef_1: PhotoFileRef | None = Field(None, alias='PhotoFileRef')
     PhotoMime_1: PhotoMime | None = Field(None, alias='PhotoMime')
+    PipelineStep_1: PipelineStep | None = Field(None, alias='PipelineStep')
     Point2: list[StrictFloat] | None = Field(
         None, description='[x, y] in pt', max_length=2, min_length=2, title='Point2'
     )
@@ -5687,6 +6132,12 @@ class SchemaBundle(BaseModel):
     SessionPauseOp_1: SessionPauseOp | None = Field(None, alias='SessionPauseOp')
     SessionProcessing: dict[str, JobState] | None = None
     SessionRefData_1: SessionRefData | None = Field(None, alias='SessionRefData')
+    SessionReprocessRequest_1: SessionReprocessRequest | None = Field(
+        None, alias='SessionReprocessRequest'
+    )
+    SessionReprocessResult_1: SessionReprocessResult | None = Field(
+        None, alias='SessionReprocessResult'
+    )
     SessionResumeOp_1: SessionResumeOp | None = Field(None, alias='SessionResumeOp')
     SessionSnapshot_1: SessionSnapshot | None = Field(None, alias='SessionSnapshot')
     SessionStartData_1: SessionStartData | None = Field(None, alias='SessionStartData')
@@ -5711,6 +6162,9 @@ class SchemaBundle(BaseModel):
         pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
         title='SessionStreamId',
     )
+    SessionTranscript_1: SessionTranscript | None = Field(
+        None, alias='SessionTranscript'
+    )
     SessionUpdate_1: SessionUpdate | None = Field(None, alias='SessionUpdate')
     Settings_1: Settings | None = Field(None, alias='Settings')
     SettingsUpdate_1: SettingsUpdate | None = Field(None, alias='SettingsUpdate')
@@ -5734,6 +6188,10 @@ class SchemaBundle(BaseModel):
     SlideDeckUpdate_1: SlideDeckUpdate | None = Field(None, alias='SlideDeckUpdate')
     SlideEvent_1: SlideEvent | None = Field(None, alias='SlideEvent')
     SlideEventSource_1: SlideEventSource | None = Field(None, alias='SlideEventSource')
+    SlideSegment_1: SlideSegment | None = Field(None, alias='SlideSegment')
+    SlideSegmentSource_1: SlideSegmentSource | None = Field(
+        None, alias='SlideSegmentSource'
+    )
     StampElement_1: StampElement | None = Field(None, alias='StampElement')
     StampElementPayload_1: StampElementPayload | None = Field(
         None, alias='StampElementPayload'
@@ -5897,6 +6355,22 @@ class SchemaBundle(BaseModel):
         None, description='ISO 8601, UTC', title='Timestamp'
     )
     ToolbarSide_1: ToolbarSide | None = Field(None, alias='ToolbarSide')
+    TranscribeOutcome_1: TranscribeOutcome | None = Field(
+        None, alias='TranscribeOutcome'
+    )
+    TranscribePayload_1: TranscribePayload | None = Field(
+        None, alias='TranscribePayload'
+    )
+    TranscribeRecordingResult_1: TranscribeRecordingResult | None = Field(
+        None, alias='TranscribeRecordingResult'
+    )
+    TranscribeResult_1: TranscribeResult | None = Field(None, alias='TranscribeResult')
+    TranscriptInfo_1: TranscriptInfo | None = Field(None, alias='TranscriptInfo')
+    TranscriptLine_1: TranscriptLine | None = Field(None, alias='TranscriptLine')
+    TranscriptProvider_1: TranscriptProvider | None = Field(
+        None, alias='TranscriptProvider'
+    )
+    TranscriptWord_1: TranscriptWord | None = Field(None, alias='TranscriptWord')
     Transform: list[StrictFloat] | None = Field(
         None,
         description="Affine Transformation [a, b, c, d, e, f] (CGAffineTransform): x' = a·x + c·y + e, y' = b·x + d·y + f",

@@ -1,0 +1,74 @@
+{
+  "session": {
+    "id": "019a4e14-0000-7000-8000-000000000031",
+    "user_id": "019a4e14-0000-7000-8000-000000000001",
+    "created_at": "2026-11-04T07:15:00Z",
+    "updated_at": "2026-11-05T10:02:11.250Z",
+    "deleted_at": null,
+    "calendar_event_id": "019a4e14-0000-7000-8000-000000000021",
+    "module_id": "019a4e14-0000-7000-8000-000000000010",
+    "slide_deck_id": "019a4e14-0000-7000-8000-000000000040",
+    "number": 7,
+    "title": null,
+    "state": "verarbeitet",
+    "started_at": "2026-11-04T07:16:02Z",
+    "ended_at": "2026-11-04T09:01:00Z",
+    "stop_reason": "kalenderende",
+    "started_from": "mac",
+    "processing": {
+      "audio.finalize": "fertig",
+      "transcribe": "wartet",
+      "align.log": "wartet"
+    },
+    "review_state": "offen",
+    "planned_starts_at": "2026-11-04T07:15:00Z",
+    "planned_ends_at": "2026-11-04T09:00:00Z",
+    "auto_stop_extended_until": null
+  },
+  "jobs": [
+    {
+      "id": "019a4e14-0000-7000-8000-000000000153",
+      "user_id": "019a4e14-0000-7000-8000-000000000001",
+      "created_at": "2026-11-05T10:02:11.250Z",
+      "updated_at": "2026-11-05T10:02:11.250Z",
+      "deleted_at": null,
+      "type": "transcribe",
+      "payload": {
+        "session_id": "019a4e14-0000-7000-8000-000000000031"
+      },
+      "state": "wartet",
+      "priority": 20,
+      "attempts": 0,
+      "max_attempts": 3,
+      "depends_on": [],
+      "session_id": "019a4e14-0000-7000-8000-000000000031",
+      "locked_by": null,
+      "locked_at": null,
+      "error": null,
+      "result": null,
+      "run_after": null
+    },
+    {
+      "id": "019a4e14-0000-7000-8000-000000000154",
+      "user_id": "019a4e14-0000-7000-8000-000000000001",
+      "created_at": "2026-11-05T10:02:11.250Z",
+      "updated_at": "2026-11-05T10:02:11.250Z",
+      "deleted_at": null,
+      "type": "align.log",
+      "payload": {
+        "session_id": "019a4e14-0000-7000-8000-000000000031"
+      },
+      "state": "wartet",
+      "priority": 10,
+      "attempts": 0,
+      "max_attempts": 3,
+      "depends_on": ["019a4e14-0000-7000-8000-000000000153"],
+      "session_id": "019a4e14-0000-7000-8000-000000000031",
+      "locked_by": null,
+      "locked_at": null,
+      "error": null,
+      "result": null,
+      "run_after": null
+    }
+  ]
+}

@@ -5,6 +5,15 @@
   "description": "GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen",
   "type": "object",
   "properties": {
+    "AlignLogMode": {
+      "$ref": "#/$defs/AlignLogMode"
+    },
+    "AlignLogPayload": {
+      "$ref": "#/$defs/AlignLogPayload"
+    },
+    "AlignLogResult": {
+      "$ref": "#/$defs/AlignLogResult"
+    },
     "ApiError": {
       "$ref": "#/$defs/ApiError"
     },
@@ -202,6 +211,9 @@
     },
     "Lang": {
       "$ref": "#/$defs/Lang"
+    },
+    "LanguageCode": {
+      "$ref": "#/$defs/LanguageCode"
     },
     "LectureSettings": {
       "$ref": "#/$defs/LectureSettings"
@@ -584,6 +596,9 @@
     "PhotoMime": {
       "$ref": "#/$defs/PhotoMime"
     },
+    "PipelineStep": {
+      "$ref": "#/$defs/PipelineStep"
+    },
     "Point2": {
       "$ref": "#/$defs/Point2"
     },
@@ -650,6 +665,12 @@
     "SessionRefData": {
       "$ref": "#/$defs/SessionRefData"
     },
+    "SessionReprocessRequest": {
+      "$ref": "#/$defs/SessionReprocessRequest"
+    },
+    "SessionReprocessResult": {
+      "$ref": "#/$defs/SessionReprocessResult"
+    },
     "SessionResumeOp": {
       "$ref": "#/$defs/SessionResumeOp"
     },
@@ -685,6 +706,9 @@
     },
     "SessionStreamId": {
       "$ref": "#/$defs/SessionStreamId"
+    },
+    "SessionTranscript": {
+      "$ref": "#/$defs/SessionTranscript"
     },
     "SessionUpdate": {
       "$ref": "#/$defs/SessionUpdate"
@@ -733,6 +757,12 @@
     },
     "SlideEventSource": {
       "$ref": "#/$defs/SlideEventSource"
+    },
+    "SlideSegment": {
+      "$ref": "#/$defs/SlideSegment"
+    },
+    "SlideSegmentSource": {
+      "$ref": "#/$defs/SlideSegmentSource"
     },
     "StampElement": {
       "$ref": "#/$defs/StampElement"
@@ -878,6 +908,30 @@
     "ToolbarSide": {
       "$ref": "#/$defs/ToolbarSide"
     },
+    "TranscribeOutcome": {
+      "$ref": "#/$defs/TranscribeOutcome"
+    },
+    "TranscribePayload": {
+      "$ref": "#/$defs/TranscribePayload"
+    },
+    "TranscribeRecordingResult": {
+      "$ref": "#/$defs/TranscribeRecordingResult"
+    },
+    "TranscribeResult": {
+      "$ref": "#/$defs/TranscribeResult"
+    },
+    "TranscriptInfo": {
+      "$ref": "#/$defs/TranscriptInfo"
+    },
+    "TranscriptLine": {
+      "$ref": "#/$defs/TranscriptLine"
+    },
+    "TranscriptProvider": {
+      "$ref": "#/$defs/TranscriptProvider"
+    },
+    "TranscriptWord": {
+      "$ref": "#/$defs/TranscriptWord"
+    },
     "Transform": {
       "$ref": "#/$defs/Transform"
     },
@@ -904,6 +958,95 @@
     }
   },
   "$defs": {
+    "AlignLogMode": {
+      "title": "AlignLogMode",
+      "type": "string",
+      "enum": [
+        "log",
+        "ohne_wechsel",
+        "folienlos"
+      ],
+      "description": "log: aus Folienwechseln. ohne_wechsel: Foliensatz, aber kein verwertbarer Wechsel (ganze Session auf Folie 1). folienlos: kein Foliensatz, keine Segmente"
+    },
+    "AlignLogPayload": {
+      "title": "AlignLogPayload",
+      "type": "object",
+      "description": "align.log (08 §5, VERTRAEGE §18.3)",
+      "required": [
+        "session_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "AlignLogResult": {
+      "title": "AlignLogResult",
+      "type": "object",
+      "description": "job.result von align.log",
+      "required": [
+        "session_id",
+        "slide_deck_id",
+        "mode",
+        "timeline_end_ms",
+        "event_count",
+        "skipped_events",
+        "unresolved_events",
+        "segment_count",
+        "session_deleted",
+        "job_duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/AlignLogMode"
+        },
+        "timeline_end_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Gelesene slide_event"
+        },
+        "skipped_events": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Durchgänge (Standzeit unter 1,5 s)"
+        },
+        "unresolved_events": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "slide_index ohne Folie im Foliensatz"
+        },
+        "segment_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "session_deleted": {
+          "type": "boolean"
+        },
+        "job_duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
     "ApiError": {
       "title": "ApiError",
       "type": "object",
@@ -2874,6 +3017,15 @@
         "de",
         "en",
         "mixed"
+      ]
+    },
+    "LanguageCode": {
+      "title": "LanguageCode",
+      "type": "string",
+      "pattern": "^[a-z]{2,3}$",
+      "description": "Von Whisper erkannte Sprache, ISO 639-1 (z. B. de, en)",
+      "examples": [
+        "de"
       ]
     },
     "LectureSettings": {
@@ -7432,6 +7584,16 @@
         "image/jpeg"
       ]
     },
+    "PipelineStep": {
+      "title": "PipelineStep",
+      "type": "string",
+      "enum": [
+        "audio.finalize",
+        "transcribe",
+        "align.log"
+      ],
+      "description": "Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge = Anzeige-Reihenfolge"
+    },
     "Point2": {
       "title": "Point2",
       "type": "array",
@@ -8202,7 +8364,7 @@
     "SessionProcessing": {
       "title": "SessionProcessing",
       "type": "object",
-      "description": "Fortschritt der Pipeline: Job-Typ → Zustand des letzten Jobs dieses Typs (03 §3 session.processing)",
+      "description": "Fortschritt der Pipeline (03 §3 session.processing): Job-Typ → Zusammenfassung aller Jobs dieses Typs der Session (VERTRAEGE §3). Schritte und Anzeige: VERTRAEGE §18.2",
       "additionalProperties": {
         "$ref": "#/$defs/JobState"
       }
@@ -8218,6 +8380,45 @@
       "properties": {
         "session_id": {
           "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "SessionReprocessRequest": {
+      "title": "SessionReprocessRequest",
+      "type": "object",
+      "description": "POST /sessions/{id}/reprocess: Kette ab from_step neu anstoßen (VERTRAEGE §18.5)",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "from_step": {
+          "$ref": "#/$defs/PipelineStep",
+          "description": "Standard transcribe. Alle späteren Schritte laufen mit (VERTRAEGE §18.2)"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "Standard false. true: auch unveränderte Eingaben neu verarbeiten"
+        }
+      }
+    },
+    "SessionReprocessResult": {
+      "title": "SessionReprocessResult",
+      "type": "object",
+      "description": "Antwort von POST /sessions/{id}/reprocess (202)",
+      "required": [
+        "session",
+        "jobs"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        },
+        "jobs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Job"
+          },
+          "description": "Angelegte oder wiederverwendete Jobs in Ketten-Reihenfolge"
         }
       }
     },
@@ -8576,6 +8777,76 @@
       "title": "SessionStreamId",
       "type": "string",
       "pattern": "^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "SessionTranscript": {
+      "title": "SessionTranscript",
+      "type": "object",
+      "description": "GET /sessions/{id}/transcript: alles für den Rückblick einer Session (F-NAC-02). Listen nach start_ms sortiert",
+      "required": [
+        "session_id",
+        "slide_deck_id",
+        "slide_source",
+        "slide_segments",
+        "transcripts",
+        "recordings",
+        "lines",
+        "stale"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slide_source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SlideSegmentSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Quelle der gelieferten slide_segments: manuell vor ausrichtung vor log. null = keine Zuordnung"
+        },
+        "slide_segments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SlideSegment"
+          }
+        },
+        "transcripts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TranscriptInfo"
+          }
+        },
+        "recordings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Recording"
+          }
+        },
+        "lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TranscriptLine"
+          }
+        },
+        "stale": {
+          "type": "boolean",
+          "description": "true: mindestens eine Aufnahme mit fertigem audio.finalize hat kein oder ein veraltetes Transkript"
+        }
+      }
     },
     "SessionUpdate": {
       "title": "SessionUpdate",
@@ -9117,6 +9388,95 @@
         "manuell_ipad",
         "korrektur"
       ]
+    },
+    "SlideSegment": {
+      "title": "SlideSegment",
+      "type": "object",
+      "description": "Welche Folie lief wann (03 §5). Zeiten in Sitzungszeit, end_ms ausschließlich",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "slide_id",
+        "slide_index",
+        "start_ms",
+        "end_ms",
+        "source",
+        "confidence",
+        "job_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "start_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "end_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "source": {
+          "$ref": "#/$defs/SlideSegmentSource"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SlideSegmentSource": {
+      "title": "SlideSegmentSource",
+      "type": "string",
+      "enum": [
+        "log",
+        "ausrichtung",
+        "manuell"
+      ],
+      "description": "Herkunft (03 §5). Phase 2 erster Schnitt: nur log (align.log)"
     },
     "StampElement": {
       "title": "StampElement",
@@ -10435,6 +10795,362 @@
         "rechts"
       ],
       "description": "Händigkeit: Seite der Werkzeugleiste auf dem iPad"
+    },
+    "TranscribeOutcome": {
+      "title": "TranscribeOutcome",
+      "type": "string",
+      "enum": [
+        "transkribiert",
+        "unveraendert",
+        "ohne_audio"
+      ],
+      "description": "transkribiert: neu geschrieben. unveraendert: gleicher input_hash, übersprungen. ohne_audio: keine full.m4a (altes Transkript entfernt)"
+    },
+    "TranscribePayload": {
+      "title": "TranscribePayload",
+      "type": "object",
+      "description": "transcribe (08 §5, VERTRAEGE §18.2). Den Anbieter wählt der Worker (SG_TRANSCRIBER)",
+      "required": [
+        "session_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "true: auch Aufnahmen mit unverändertem input_hash neu transkribieren"
+        }
+      }
+    },
+    "TranscribeRecordingResult": {
+      "title": "TranscribeRecordingResult",
+      "type": "object",
+      "required": [
+        "recording_id",
+        "transcript_id",
+        "outcome",
+        "segment_count",
+        "word_count",
+        "audio_duration_ms",
+        "language",
+        "transcribe_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "recording_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "transcript_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "$ref": "#/$defs/TranscribeOutcome"
+        },
+        "segment_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "word_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "audio_duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "language": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LanguageCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transcribe_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Laufzeit des Transcribers, 0 bei unveraendert"
+        }
+      }
+    },
+    "TranscribeResult": {
+      "title": "TranscribeResult",
+      "type": "object",
+      "description": "job.result von transcribe",
+      "required": [
+        "session_id",
+        "provider",
+        "model",
+        "recordings",
+        "removed_transcripts",
+        "segment_count",
+        "word_count",
+        "session_deleted",
+        "job_duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "provider": {
+          "$ref": "#/$defs/TranscriptProvider"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recordings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TranscribeRecordingResult"
+          }
+        },
+        "removed_transcripts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Entfernte Transkripte gelöschter Aufnahmen bzw. von Aufnahmen ohne Audio"
+        },
+        "segment_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Summe über alle Transkripte der Session nach dem Lauf"
+        },
+        "word_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "session_deleted": {
+          "type": "boolean",
+          "description": "true: Session war gelöscht, nichts geschrieben"
+        },
+        "job_duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "TranscriptInfo": {
+      "title": "TranscriptInfo",
+      "type": "object",
+      "description": "Ein Transkript je Aufnahme (VERTRAEGE §18.1), ohne Segmente",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "session_id",
+        "recording_id",
+        "job_id",
+        "finalize_job_id",
+        "provider",
+        "model",
+        "language",
+        "segment_count",
+        "word_count",
+        "audio_duration_ms",
+        "stale"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "recording_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "job_id": {
+          "$ref": "#/$defs/Uuid",
+          "description": "transcribe-Job, der es geschrieben hat"
+        },
+        "finalize_job_id": {
+          "$ref": "#/$defs/Uuid",
+          "description": "audio.finalize-Job, dessen full.m4a transkribiert wurde"
+        },
+        "provider": {
+          "$ref": "#/$defs/TranscriptProvider"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "examples": [
+            "mlx-community/whisper-large-v3-turbo"
+          ]
+        },
+        "language": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LanguageCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "segment_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "word_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "audio_duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "stale": {
+          "type": "boolean",
+          "description": "true: Der neueste fertige audio.finalize-Job der Aufnahme ist nicht finalize_job_id (Audio wurde danach neu erzeugt)"
+        }
+      }
+    },
+    "TranscriptLine": {
+      "title": "TranscriptLine",
+      "type": "object",
+      "description": "Ein Transkript-Abschnitt bzw. sein Teil auf einer Folie (VERTRAEGE §18.4). Ein Abschnitt über eine Foliengrenze ergibt mehrere Zeilen mit gleicher segment_id",
+      "required": [
+        "segment_id",
+        "part",
+        "recording_id",
+        "slide_id",
+        "slide_index",
+        "start_ms",
+        "end_ms",
+        "text",
+        "lang"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "segment_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0, 1, … innerhalb des Abschnitts"
+        },
+        "recording_id": {
+          "$ref": "#/$defs/Uuid",
+          "description": "Aufnahme mit dem Audio. Position in full.m4a = start_ms − recording.started_ms"
+        },
+        "slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slide_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "start_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "end_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "text": {
+          "type": "string"
+        },
+        "lang": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LanguageCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "words": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TranscriptWord"
+          },
+          "description": "Nur mit include_words=true: genau die Wörter dieser Zeile, [] wenn der Abschnitt keine Wort-Zeitstempel hat (VERTRAEGE §18.4)"
+        }
+      }
+    },
+    "TranscriptProvider": {
+      "title": "TranscriptProvider",
+      "type": "string",
+      "enum": [
+        "mlx-whisper",
+        "fake"
+      ],
+      "description": "Transcriber im Worker (02 §7). fake nur für CI und Linux (VERTRAEGE §18.6). Cloud-Anbieter kommen als neue Werte"
+    },
+    "TranscriptWord": {
+      "title": "TranscriptWord",
+      "type": "object",
+      "description": "Wort mit Zeitstempel (05 §P4). Zeiten in Sitzungszeit. text ohne führende und abschließende Leerzeichen, Satzzeichen bleiben am Wort",
+      "required": [
+        "text",
+        "start_ms",
+        "end_ms",
+        "prob"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "end_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "prob": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Wahrscheinlichkeit laut Whisper"
+        }
+      }
     },
     "Transform": {
       "title": "Transform",

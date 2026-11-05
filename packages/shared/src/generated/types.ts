@@ -1,10 +1,12 @@
 /* GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen */
 
 /**
+ * log: aus Folienwechseln. ohne_wechsel: Foliensatz, aber kein verwertbarer Wechsel (ganze Session auf Folie 1). folienlos: kein Foliensatz, keine Segmente
+ * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "Appearance".
+ * via the `definition` "AlignLogMode".
  */
-export type Appearance = ("hell" | "dunkel" | "system")
+export type AlignLogMode = ("log" | "ohne_wechsel" | "folienlos")
 /**
  * UUIDv7 (03 §1), Kleinbuchstaben
  * 
@@ -19,6 +21,11 @@ export type Uuid = string
  * via the `definition` "SessionMs".
  */
 export type SessionMs = number
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "Appearance".
+ */
+export type Appearance = ("hell" | "dunkel" | "system")
 /**
  * SHA-256, hex, Kleinbuchstaben
  * 
@@ -233,6 +240,13 @@ export type JobType = ("pdf.ingest" | "embed.slides" | "embed.tasks" | "sheet.sp
  */
 export type JobState = ("wartet" | "laeuft" | "fertig" | "fehler" | "abgebrochen")
 /**
+ * Von Whisper erkannte Sprache, ISO 639-1 (z. B. de, en)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "LanguageCode".
+ */
+export type LanguageCode = string
+/**
  * Händigkeit: Seite der Werkzeugleiste auf dem iPad
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -372,6 +386,13 @@ export type PencilSqueezeAction = ("werkzeugpalette" | "radierer" | "system" | "
  */
 export type PhotoMime = ("image/heic" | "image/jpeg")
 /**
+ * Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge = Anzeige-Reihenfolge
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "PipelineStep".
+ */
+export type PipelineStep = ("audio.finalize" | "transcribe" | "align.log")
+/**
  * Nacharbeitung (F-NAC-05, Phase 2)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -391,10 +412,40 @@ export type SessionState = ("geplant" | "bereit" | "laeuft" | "pausiert" | "been
  */
 export type StopReason = ("manuell" | "kalenderende" | "stille" | "maximaldauer" | "absturz_wiederhergestellt")
 /**
+ * Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge = Anzeige-Reihenfolge
+ */
+export type PipelineStep1 = ("audio.finalize" | "transcribe" | "align.log")
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SlideEventSource".
  */
 export type SlideEventSource = ("manuell_mac" | "manuell_ipad" | "korrektur")
+/**
+ * Herkunft (03 §5). Phase 2 erster Schnitt: nur log (align.log)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SlideSegmentSource".
+ */
+export type SlideSegmentSource = ("log" | "ausrichtung" | "manuell")
+/**
+ * UUIDv7 (03 §1), Kleinbuchstaben
+ */
+export type Uuid1 = string
+/**
+ * UUIDv7 (03 §1), Kleinbuchstaben
+ */
+export type Uuid2 = string
+/**
+ * Transcriber im Worker (02 §7). fake nur für CI und Linux (VERTRAEGE §18.6). Cloud-Anbieter kommen als neue Werte
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "TranscriptProvider".
+ */
+export type TranscriptProvider = ("mlx-whisper" | "fake")
+/**
+ * UUIDv7 (03 §1), Kleinbuchstaben
+ */
+export type Uuid3 = string
 /**
  * Strom (08 §2.2): notebook:<id>, session:<id> oder user
  * 
@@ -441,6 +492,13 @@ export type SyncEvent = (SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConne
  */
 export type SyncServerMessage = (SyncWelcome | SyncSubscribed | SyncAck | SyncOp | SyncTimePong | SyncPong | SyncError | SyncEvent)
 /**
+ * transkribiert: neu geschrieben. unveraendert: gleicher input_hash, übersprungen. ohne_audio: keine full.m4a (altes Transkript entfernt)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "TranscribeOutcome".
+ */
+export type TranscribeOutcome = ("transkribiert" | "unveraendert" | "ohne_audio")
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "TrashKind".
  */
@@ -449,6 +507,42 @@ export type TrashKind = ("semester" | "module" | "slide_deck" | "exercise_sheet"
 /**
  * GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
  */
+/**
+ * align.log (08 §5, VERTRAEGE §18.3)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "AlignLogPayload".
+ */
+export interface AlignLogPayload {
+session_id: Uuid
+}
+/**
+ * job.result von align.log
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "AlignLogResult".
+ */
+export interface AlignLogResult {
+session_id: Uuid
+slide_deck_id: (Uuid | null)
+mode: AlignLogMode
+timeline_end_ms: SessionMs
+/**
+ * Gelesene slide_event
+ */
+event_count: number
+/**
+ * Durchgänge (Standzeit unter 1,5 s)
+ */
+skipped_events: number
+/**
+ * slide_index ohne Folie im Foliensatz
+ */
+unresolved_events: number
+segment_count: number
+session_deleted: boolean
+job_duration_ms: number
+}
 /**
  * Fehlerformat der REST-API (08 §1)
  * 
@@ -3139,7 +3233,7 @@ auto_stop_extended_until: (Timestamp | null)
 start_offsets?: SessionStartOffset[]
 }
 /**
- * Fortschritt der Pipeline: Job-Typ → Zustand des letzten Jobs dieses Typs (03 §3 session.processing)
+ * Fortschritt der Pipeline (03 §3 session.processing): Job-Typ → Zusammenfassung aller Jobs dieses Typs der Session (VERTRAEGE §3). Schritte und Anzeige: VERTRAEGE §18.2
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SessionProcessing".
@@ -3212,6 +3306,32 @@ origin?: SyncOrigin
  */
 export interface SessionRefData {
 session_id: Uuid
+}
+/**
+ * POST /sessions/{id}/reprocess: Kette ab from_step neu anstoßen (VERTRAEGE §18.5)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionReprocessRequest".
+ */
+export interface SessionReprocessRequest {
+from_step?: PipelineStep1
+/**
+ * Standard false. true: auch unveränderte Eingaben neu verarbeiten
+ */
+force?: boolean
+}
+/**
+ * Antwort von POST /sessions/{id}/reprocess (202)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionReprocessResult".
+ */
+export interface SessionReprocessResult {
+session: Session
+/**
+ * Angelegte oder wiederverwendete Jobs in Ketten-Reihenfolge
+ */
+jobs: Job[]
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -3355,6 +3475,115 @@ origin?: SyncOrigin
  */
 export interface SessionStopRequest {
 reason?: StopReason
+}
+/**
+ * GET /sessions/{id}/transcript: alles für den Rückblick einer Session (F-NAC-02). Listen nach start_ms sortiert
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionTranscript".
+ */
+export interface SessionTranscript {
+session_id: Uuid
+slide_deck_id: (Uuid | null)
+/**
+ * Quelle der gelieferten slide_segments: manuell vor ausrichtung vor log. null = keine Zuordnung
+ */
+slide_source: (SlideSegmentSource | null)
+slide_segments: SlideSegment[]
+transcripts: TranscriptInfo[]
+recordings: Recording[]
+lines: TranscriptLine[]
+/**
+ * true: mindestens eine Aufnahme mit fertigem audio.finalize hat kein oder ein veraltetes Transkript
+ */
+stale: boolean
+}
+/**
+ * Welche Folie lief wann (03 §5). Zeiten in Sitzungszeit, end_ms ausschließlich
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SlideSegment".
+ */
+export interface SlideSegment {
+id: Uuid
+user_id: Uuid
+created_at: Timestamp
+updated_at: Timestamp
+deleted_at: (Timestamp | null)
+session_id: Uuid
+slide_id: Uuid
+slide_index: number
+start_ms: SessionMs
+end_ms: SessionMs
+source: SlideSegmentSource
+confidence: number
+job_id: (Uuid | null)
+}
+/**
+ * Ein Transkript je Aufnahme (VERTRAEGE §18.1), ohne Segmente
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "TranscriptInfo".
+ */
+export interface TranscriptInfo {
+id: Uuid
+user_id: Uuid
+created_at: Timestamp
+updated_at: Timestamp
+deleted_at: (Timestamp | null)
+session_id: Uuid
+recording_id: Uuid
+job_id: Uuid1
+finalize_job_id: Uuid2
+provider: TranscriptProvider
+model: string
+language: (LanguageCode | null)
+segment_count: number
+word_count: number
+audio_duration_ms: number
+/**
+ * true: Der neueste fertige audio.finalize-Job der Aufnahme ist nicht finalize_job_id (Audio wurde danach neu erzeugt)
+ */
+stale: boolean
+}
+/**
+ * Ein Transkript-Abschnitt bzw. sein Teil auf einer Folie (VERTRAEGE §18.4). Ein Abschnitt über eine Foliengrenze ergibt mehrere Zeilen mit gleicher segment_id
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "TranscriptLine".
+ */
+export interface TranscriptLine {
+segment_id: Uuid
+/**
+ * 0, 1, … innerhalb des Abschnitts
+ */
+part: number
+recording_id: Uuid3
+slide_id: (Uuid | null)
+slide_index: (number | null)
+start_ms: SessionMs
+end_ms: SessionMs
+text: string
+lang: (LanguageCode | null)
+/**
+ * Nur mit include_words=true: genau die Wörter dieser Zeile, [] wenn der Abschnitt keine Wort-Zeitstempel hat (VERTRAEGE §18.4)
+ */
+words?: TranscriptWord[]
+}
+/**
+ * Wort mit Zeitstempel (05 §P4). Zeiten in Sitzungszeit. text ohne führende und abschließende Leerzeichen, Satzzeichen bleiben am Wort
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "TranscriptWord".
+ */
+export interface TranscriptWord {
+text: string
+start_ms: SessionMs
+end_ms: SessionMs
+/**
+ * Wahrscheinlichkeit laut Whisper
+ */
+prob: number
 }
 /**
  * PATCH /sessions/{id}
@@ -3833,6 +4062,62 @@ page_index: number
 bbox: (BBox | null)
 text: string
 solution_text: (string | null)
+}
+/**
+ * transcribe (08 §5, VERTRAEGE §18.2). Den Anbieter wählt der Worker (SG_TRANSCRIBER)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "TranscribePayload".
+ */
+export interface TranscribePayload {
+session_id: Uuid
+/**
+ * true: auch Aufnahmen mit unverändertem input_hash neu transkribieren
+ */
+force?: boolean
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "TranscribeRecordingResult".
+ */
+export interface TranscribeRecordingResult {
+recording_id: Uuid
+transcript_id: (Uuid | null)
+outcome: TranscribeOutcome
+segment_count: number
+word_count: number
+audio_duration_ms: number
+language: (LanguageCode | null)
+/**
+ * Laufzeit des Transcribers, 0 bei unveraendert
+ */
+transcribe_ms: number
+}
+/**
+ * job.result von transcribe
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "TranscribeResult".
+ */
+export interface TranscribeResult {
+session_id: Uuid
+provider: TranscriptProvider
+model: string
+recordings: TranscribeRecordingResult[]
+/**
+ * Entfernte Transkripte gelöschter Aufnahmen bzw. von Aufnahmen ohne Audio
+ */
+removed_transcripts: number
+/**
+ * Summe über alle Transkripte der Session nach dem Lauf
+ */
+segment_count: number
+word_count: number
+/**
+ * true: Session war gelöscht, nichts geschrieben
+ */
+session_deleted: boolean
+job_duration_ms: number
 }
 /**
  * Direkt gelöschtes Objekt im Papierkorb (F-DAT-04). Mitgelöschte Teile erscheinen nicht einzeln.

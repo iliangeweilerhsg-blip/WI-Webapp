@@ -43,6 +43,13 @@
       "when": 1793896534546,
       "tag": "0005_moodle",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793906646873,
+      "tag": "0006_transcript",
+      "breakpoints": true
     }
   ]
 }
