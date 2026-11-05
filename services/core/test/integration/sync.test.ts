@@ -1,7 +1,7 @@
 // Sync-Server (T1-08, VERTRAEGE §11, §16.2): Anmeldung, Resume, Dispatcher, Reihenfolge, Grenzen, Ereignisse.
 // Echte App auf einem freien Port, echter WebSocket-Client, Test-Handler statt der Fach-Handler.
 import { sql } from 'drizzle-orm';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { SyncEvent } from '@sg/shared';
 import type { Tx } from '../../src/db/client.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
@@ -1056,30 +1056,54 @@ describe('Ereignisse (§11.6, §16.2)', () => {
   });
 
   it('Ereignisse warten hinter einer laufenden Nachlieferung (aus dem Review von #66)', async () => {
+    // Die Nachlieferung bleibt an der globalen Zählsperre stehen, bis Operation 301 und beide Ereignisse beim
+    // Server sind. Sonst hängt der Test vom Timing ab (#118): Ist die Nachlieferung schon vorbei, wenn
+    // `publishEvent` läuft, geht das direkte Ereignis sofort raus und darf eine Operation überholen, deren
+    // Weitergabe über den Listener noch unterwegs ist (§11.6)
     syncLimits.catchUpBatch = 5;
-    const s = sessionStream();
-    for (let i = 0; i < 300; i += 1) await append(s);
-    const client = await ready();
-    client.send({ type: 'subscribe', streams: [{ stream: s, last_seq: 0, last_op_id: null }] });
-    await client.next((m) => m.type === 'subscribed');
-    const event: SyncEvent = {
-      type: 'event',
-      name: 'device.connection',
-      data: { client: 'ipad', device_id: uuidv7(), connected: true },
-    };
-    await app.handle.db.transaction(async (tx) => {
-      await appendOp(tx, s, serverOp());
-      await publishAfterCommit(tx, event);
-    });
-    const direct: SyncEvent = { ...event, data: { ...event.data, device_id: uuidv7() } } as SyncEvent;
-    publishEvent(direct);
-    await waitFor(() => seqsOf(client, s).length === 301, 10_000);
-    const same = (e: SyncEvent) => (m: Msg) => JSON.stringify(m) === JSON.stringify(e);
-    await waitFor(() => client.messages.some(same(event)) && client.messages.some(same(direct)));
-    const opIndex = client.messages.findIndex((m) => m.type === 'op' && m.seq === 301);
-    expect(client.messages.findIndex(same(event))).toBeGreaterThan(opIndex);
-    expect(client.messages.findIndex(same(direct))).toBeGreaterThan(opIndex);
-    expect(seqsOf(client, s)).toEqual(Array.from({ length: 301 }, (_, i) => i + 1));
+    syncLimits.maxCatchUpQueries = 1;
+    const hub = getActiveHub()!;
+    let release = () => {};
+    const held = hub.catchUpQueries.run(() => new Promise<void>((resolve) => (release = resolve)));
+    const broadcast = vi.spyOn(hub, 'broadcastEvent');
+    try {
+      const s = sessionStream();
+      for (let i = 0; i < 300; i += 1) await append(s);
+      const client = await ready();
+      client.send({ type: 'subscribe', streams: [{ stream: s, last_seq: 0, last_op_id: null }] });
+      await client.next((m) => m.type === 'subscribed');
+      const event: SyncEvent = {
+        type: 'event',
+        name: 'device.connection',
+        data: { client: 'ipad', device_id: uuidv7(), connected: true },
+      };
+      await app.handle.db.transaction(async (tx) => {
+        await appendOp(tx, s, serverOp());
+        await publishAfterCommit(tx, event);
+      });
+      const direct: SyncEvent = { ...event, data: { ...event.data, device_id: uuidv7() } } as SyncEvent;
+      publishEvent(direct);
+      const same = (e: SyncEvent) => (m: unknown) => JSON.stringify(m) === JSON.stringify(e);
+      // Beide Ereignisse sind durch den Versand gelaufen (`event` über den Listener nach Operation 301), während
+      // die Nachlieferung noch stand: Beim Client ist davon noch nichts angekommen
+      await waitFor(() => {
+        const sent = broadcast.mock.calls.map(([e]) => e);
+        return sent.some(same(event)) && sent.some(same(direct));
+      });
+      expect(client.messages.some((m) => m.type === 'op' || same(event)(m) || same(direct)(m))).toBe(false);
+      release();
+      await held;
+      await waitFor(() => seqsOf(client, s).length === 301, 10_000);
+      await waitFor(() => client.messages.some(same(event)) && client.messages.some(same(direct)));
+      const opIndex = client.messages.findIndex((m) => m.type === 'op' && m.seq === 301);
+      expect(client.messages.findIndex(same(event))).toBeGreaterThan(opIndex);
+      expect(client.messages.findIndex(same(direct))).toBeGreaterThan(opIndex);
+      expect(seqsOf(client, s)).toEqual(Array.from({ length: 301 }, (_, i) => i + 1));
+    } finally {
+      release();
+      await held;
+      broadcast.mockRestore();
+    }
   });
 
   it('publishAfterCommit wirft über 7000 Byte', async () => {
