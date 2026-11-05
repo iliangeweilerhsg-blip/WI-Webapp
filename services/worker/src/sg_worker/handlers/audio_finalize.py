@@ -262,6 +262,24 @@ def first_boundary(data: bytes, ext: str) -> int | None:
     return None
 
 
+def trim_mp4_boxes(data: bytes) -> bytes:
+    """Kürzt MP4-Daten auf die letzte vollständige Top-Level-Box. Eine am Chunk-Ende
+    abgeschnittene `moof`/`mdat` lässt ffmpeg schon beim Öffnen scheitern."""
+    pos = 0
+    while pos + 8 <= len(data):
+        (size,) = struct.unpack(">I", data[pos : pos + 4])
+        if size == 0:  # Box reicht bis zum Ende
+            return data
+        if size == 1:  # 64-Bit-Größe
+            if pos + 16 > len(data):
+                break
+            (size,) = struct.unpack(">Q", data[pos + 8 : pos + 16])
+        if size < 8 or pos + size > len(data):
+            break
+        pos += size
+    return data[:pos]
+
+
 # ---------- ffmpeg ----------
 
 
@@ -427,15 +445,28 @@ def _read_verified(path: Path, chunk: ChunkRow) -> bytes | None:
     return data
 
 
-def update_session(conn: psycopg.Connection[Any], session_id: uuid.UUID, outcome: str) -> None:
-    """Session-Fortschritt (§3): `processing['audio.finalize'] = outcome` (`fertig`/`fehler`).
-    Ist die Session `beendet` und läuft kein weiterer Job mehr, wird sie `verarbeitet`.
-    Danach `sg_session`."""
+#: Fasst alle `audio.finalize`-Jobs einer Session zusammen (mehrere Aufnahmen): `fehler`, sobald
+#: einer endgültig gescheitert ist, sonst `laeuft`/`wartet`, solange einer offen ist, sonst
+#: `fertig`.
+_SUMMARY_SQL = """
+SELECT CASE WHEN bool_or(state = 'fehler') THEN 'fehler'
+            WHEN bool_or(state = 'laeuft') THEN 'laeuft'
+            WHEN bool_or(state = 'wartet') THEN 'wartet'
+            WHEN bool_or(state = 'fertig') THEN 'fertig'
+            ELSE 'abgebrochen' END
+FROM job WHERE session_id = session.id AND type = 'audio.finalize' AND deleted_at IS NULL
+"""
+
+
+def update_session(conn: psycopg.Connection[Any], session_id: uuid.UUID) -> None:
+    """Session-Fortschritt (§3): `processing['audio.finalize']` aus allen Jobs der Session
+    (`_SUMMARY_SQL`). Ist die Session `beendet` und läuft kein weiterer Job mehr, wird sie
+    `verarbeitet`; spätere Jobs ändern den Zustand nicht mehr. Danach `sg_session`."""
     row = conn.execute(
         "UPDATE session SET processing = COALESCE(processing, '{}'::jsonb) "
-        "|| jsonb_build_object('audio.finalize', %s::text), updated_at = now() "
-        "WHERE id = %s AND deleted_at IS NULL RETURNING state",
-        (outcome, session_id),
+        f"|| jsonb_build_object('audio.finalize', COALESCE(({_SUMMARY_SQL}), 'fertig')), "
+        "updated_at = now() WHERE id = %s AND deleted_at IS NULL RETURNING state",
+        (session_id,),
     ).fetchone()
     if row is None:
         return
@@ -459,7 +490,7 @@ def mark_session_failed(conn: psycopg.Connection[Any], payload: dict[str, Any]) 
         return
     row = conn.execute("SELECT session_id FROM recording WHERE id = %s", (recording_id,)).fetchone()
     if row is not None:
-        update_session(conn, row[0], "fehler")
+        update_session(conn, row[0])
 
 
 def _cleanup_old_work(rec_dir: Path) -> None:
@@ -537,7 +568,7 @@ def _decode_pieces(
                 continue
             data = init + body[offset:]
         stream = work / f"run{n}.{ext}"
-        stream.write_bytes(data)
+        stream.write_bytes(trim_mp4_boxes(data) if ext == "mp4" else data)
         dst = work / f"p{n}.pcm"
         try:
             decode_to_pcm(stream, dst, ext, data_dir, DECODE_TIMEOUT_S)
@@ -664,5 +695,5 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
             except ValueError:
                 session_uuid = None
             if session_uuid is not None:
-                update_session(ctx.conn, session_uuid, "fertig")
+                update_session(ctx.conn, session_uuid)
     return result

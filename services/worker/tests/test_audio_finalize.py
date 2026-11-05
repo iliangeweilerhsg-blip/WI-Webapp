@@ -1337,3 +1337,132 @@ def test_empty_recording_without_complete_ends_cleanly(
     assert recording_row(conn, rid) == (0, "mit_luecken")
     state = conn.execute("SELECT state FROM session WHERE id = %s", (sid,)).fetchone()
     assert state == ("verarbeitet",)
+
+
+# ---------- Nacharbeit 3: MP4 mitten in der Box, processing bei mehreren Aufnahmen ----------
+
+
+def test_trim_mp4_boxes() -> None:
+    def box(kind: bytes, n: int) -> bytes:
+        return struct.pack(">I", 8 + n) + kind + bytes(n)
+
+    whole = box(b"ftyp", 8) + box(b"moov", 20) + box(b"moof", 30) + box(b"mdat", 50)
+    assert af.trim_mp4_boxes(whole) == whole
+    assert af.trim_mp4_boxes(whole + box(b"moof", 30)[:20]) == whole  # moof halb
+    assert af.trim_mp4_boxes(whole + box(b"moof", 30)[:5]) == whole  # nicht einmal der Kopf
+    assert af.trim_mp4_boxes(whole + box(b"moof", 30) + box(b"mdat", 50)[:-1]) == (
+        whole + box(b"moof", 30)
+    )
+    assert af.trim_mp4_boxes(b"") == b""
+
+
+@pytest.fixture(scope="session")
+def mp4_fragments(tmp_path_factory: pytest.TempPathFactory) -> tuple[bytes, list[int]]:
+    """20 s Rauschbursts als fMP4 mit 1-s-Fragmenten und die Byte-Positionen der `moof`-Boxen."""
+    if not HAVE_FFMPEG:
+        pytest.skip("ffmpeg fehlt")
+    out = tmp_path_factory.mktemp("frags") / "s.mp4"
+    src = "aevalsrc=if(lt(mod(t\\,2)\\,0.5)\\,(random(0)*2-1)*0.6\\,0):s=48000:d=20"
+    _sh(
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", src, "-c:a", "aac", "-b:a", "96k",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "1000000",
+        "-f", "mp4", str(out),
+    )  # fmt: skip
+    data = out.read_bytes()
+    moofs = [m.start() - 4 for m in re.finditer(b"moof(?=.{4}mfhd)", data, re.S)]
+    assert len(moofs) >= 20
+    return data, moofs
+
+
+@needs_ffmpeg
+def test_real_mp4_run_ending_inside_moof_box_is_kept(
+    worker: Worker,
+    conn: psycopg.Connection[Any],
+    tmp_path: Path,
+    mp4_fragments: tuple[bytes, list[int]],
+) -> None:
+    """Chunk 3 endet 100 Bytes in einer `moof`-Box; Chunk 1 und 4 fehlen. Der Lauf [2, 3] mit
+    rund 8 s Ton darf nicht verschwinden (ffmpeg scheitert sonst schon beim Öffnen)."""
+    data, moofs = mp4_fragments
+    cuts = [
+        (moofs[4] + moofs[5]) // 2,
+        (moofs[8] + moofs[9]) // 2,
+        (moofs[12] + moofs[13]) // 2,
+        moofs[16] + 100,
+    ]
+    parts = _split_at(data, cuts)
+    chunks = [c for c in enumerate(parts) if c[0] not in (1, 4)]
+    mime = "audio/mp4;codecs=mp4a.40.2"
+    rid = add_recording(conn, tmp_path, chunks, mime=mime, dur=4000, last_seq=4, completed_ms=20000)
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert [m.root for m in res.missing_seqs] == [1, 4]
+    assert res.chunk_count == 3
+    out = full_path(tmp_path, rid)
+    assert_m4a(out, 20.0, tolerance=0.3)
+    onsets = burst_onsets(out)
+    assert all(any(abs(o - t) <= 0.06 for o in onsets) for t in (10.0, 12.0, 14.0)), onsets
+
+
+# ---- processing über mehrere audio.finalize-Jobs ----
+
+
+def add_other_job(
+    conn: psycopg.Connection[Any], sid: uuid.UUID, state: str, run_after: str | None = None
+) -> None:
+    conn.execute(
+        "INSERT INTO job (id, user_id, type, session_id, state, run_after) "
+        "VALUES (%s, %s, 'audio.finalize', %s, %s, %s::timestamptz)",
+        (uuid7(), USER_ID, sid, state, run_after),
+    )
+
+
+def session_row(conn: psycopg.Connection[Any], sid: uuid.UUID) -> tuple[Any, ...]:
+    row = conn.execute("SELECT state, processing FROM session WHERE id = %s", (sid,)).fetchone()
+    assert row is not None
+    return row
+
+
+def test_processing_failed_sibling_wins_over_later_success(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    sid = add_session(conn, "beendet")
+    add_other_job(conn, sid, "fehler")  # andere Aufnahme ist endgültig gescheitert
+    rid = add_recording(conn, tmp_path, five(), dur=10, last_seq=4, session_id=sid)
+    add_job(conn, rid, session_id=sid)
+    worker.drain(conn)
+    # "verarbeitet" heißt: alle Jobs sind durch, auch mit fehler
+    assert session_row(conn, sid) == ("verarbeitet", {"audio.finalize": "fehler"})
+
+
+def test_processing_open_sibling_keeps_session_open(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    sid = add_session(conn, "beendet")
+    add_other_job(conn, sid, "wartet", run_after="2099-01-01")
+    rid = add_recording(conn, tmp_path, five(), dur=10, last_seq=4, session_id=sid)
+    add_job(conn, rid, session_id=sid)
+    worker.drain(conn)
+    assert session_row(conn, sid) == ("beendet", {"audio.finalize": "wartet"})
+
+
+def test_two_recordings_end_with_fertig(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    sid = add_session(conn, "beendet")
+    for _ in range(2):
+        rid = add_recording(conn, tmp_path, five(), dur=10, last_seq=4, session_id=sid)
+        add_job(conn, rid, session_id=sid)
+    assert worker.drain(conn) == 2
+    assert session_row(conn, sid) == ("verarbeitet", {"audio.finalize": "fertig"})
+
+
+def test_late_job_updates_processing_but_not_state(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    sid = add_session(conn, "verarbeitet")
+    rid = add_recording(conn, tmp_path, five(), dur=10, last_seq=4, session_id=sid)
+    add_job(conn, rid, session_id=sid)
+    worker.drain(conn)
+    assert session_row(conn, sid) == ("verarbeitet", {"audio.finalize": "fertig"})
