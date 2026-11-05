@@ -10,7 +10,13 @@ import type { Db } from './db/client.ts';
 import { apiErrorBody, HttpError } from './errors.ts';
 import { registerErrorHandler } from './plugins/errors.ts';
 import { registerIdempotency } from './plugins/idempotency.ts';
-import { createSecurityGuard, registerSecurity, type DeviceTokenVerifier } from './plugins/security.ts';
+import { createRejectionLog, RequestLogController } from './plugins/rejection-log.ts';
+import {
+  createSecurityGuard,
+  isLocalRequest,
+  registerSecurity,
+  type DeviceTokenVerifier,
+} from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
 import { createMoodleServices, type MoodleServices } from './moodle/index.ts';
 import { backupRoutes } from './routes/backups.ts';
@@ -79,6 +85,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     loggerInstance: logger as FastifyBaseLogger,
     // Lokal oder Netz entscheidet allein die Socket-Adresse (VERTRAEGE §5): kein trustProxy
     trustProxy: false,
+    // Abgelehnte Netzanfragen werden zusammengefasst statt einzeln geloggt (#87)
+    logController: new RequestLogController(),
     // Fehler, die Fastify vor den Hooks abfängt (kaputte URL, ungültiger Content-Type …):
     // auch sie bekommen die Sicherheitsprüfung und das Format ApiError
     frameworkErrors: (error, request, rawReply) => {
@@ -88,6 +96,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           await guard(request);
         } catch (denied) {
           if (denied instanceof HttpError) {
+            if (!isLocalRequest(request) && !request.sgRejectionCounted) {
+              rejections.record(request.socket.remoteAddress, denied.statusCode);
+              request.sgRejectionCounted = true;
+            }
             return reply.code(denied.statusCode).send(apiErrorBody(denied.code, denied.message));
           }
         }
@@ -100,11 +112,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   });
 
+  const rejections = createRejectionLog(app);
+
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
   // Reihenfolge: Sicherheitsprüfung vor allem anderen (auch vor CORS-Preflight)
-  registerSecurity(app, guard);
+  registerSecurity(app, guard, rejections);
   registerErrorHandler(app);
   registerIdempotency(app, db);
   // WebSocket /sync (T1-08). Vor allen Routen, damit Upgrades auf andere Pfade geschlossen werden
