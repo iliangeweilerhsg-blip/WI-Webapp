@@ -208,7 +208,10 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
       activeLoad?.controller.abort();
       const load: PageLoad = { pageId: id, ops: [], controller: new AbortController() };
       activeLoad = load;
-      rootController.signal.addEventListener('abort', () => load.controller.abort(), { once: true });
+      // Abbruch des Notizbuchs gilt auch für diesen Ladevorgang. Der Listener wird nach dem Laden wieder entfernt,
+      // sonst bliebe je Seitenwechsel einer am `rootController` hängen (`AbortSignal.any` fehlt in Safari < 17.4).
+      const onRootAbort = () => load.controller.abort();
+      rootController.signal.addEventListener('abort', onRootAbort, { once: true });
       setLoadingPage(true);
       try {
         const [strokes, detail] = await Promise.all([
@@ -243,6 +246,8 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
         setPageError(e);
         setLoadingPage(false);
         throw e;
+      } finally {
+        rootController.signal.removeEventListener('abort', onRootAbort);
       }
     };
     loadPageRef.current = loadPage;
@@ -321,6 +326,7 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
             setLiveFailed(false);
             return;
           } catch {
+            if (cancelled) return; // nach dem Abbruch keinen neuen Timer mehr anlegen
             await sleep(delay);
             delay = Math.min(delay * 2, RETRY_MAX_MS);
           }

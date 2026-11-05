@@ -208,13 +208,20 @@ export function unionRect(a: Rect | null, b: Rect): Rect {
 const intersects = (a: Rect, b: Rect) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
 
 let scratch: HTMLCanvasElement | null = null;
+/** Ab dieser Fläche (Pixel) wird der Zwischen-Canvas nach Gebrauch freigegeben (1 Mio. Pixel = 4 MB) */
+export const SCRATCH_KEEP_PX = 1_000_000;
 
 /**
  * Zeichnet nur einen Ausschnitt der Tinte-Ebene neu: Die Striche, die den Ausschnitt berühren, werden in einem kleinen
  * Zwischenspeicher gezeichnet und dann pixelgenau an die Stelle kopiert. Ein Zeichnen mit `clip()` ergäbe an den
  * Strichrändern leicht andere Kantenglättung als die Vollzeichnung (gemessen: bis 20 % Helligkeit).
  *
- * `scale` = Geräte-Pixel je pt, `size` = Pixelmaße der Ebene. Das Ergebnis ist pixelgleich zur Vollzeichnung.
+ * `scale` = Geräte-Pixel je pt, `size` = Pixelmaße der Ebene. Das Ergebnis entspricht der Vollzeichnung, ist aber nicht
+ * strikt pixelgleich: An fast transparenten Randpixeln gibt es Abweichungen, an der Ausschnittsgrenze vereinzelt bis
+ * etwa 80/255, ohne sichtbare Nähte.
+ *
+ * Der Zwischen-Canvas ist global und wächst nur bei Bedarf. Nach Gebrauch wird er auf 0×0 gesetzt, wenn er größer als
+ * `SCRATCH_KEEP_PX` ist, damit ein einmaliger großer Ausschnitt keinen Speicher dauerhaft belegt.
  */
 export function redrawRegion(
   ctx: CanvasRenderingContext2D,
@@ -246,6 +253,10 @@ export function redrawRegion(
   ctx.clearRect(x0, y0, w, h);
   ctx.drawImage(scratch, 0, 0, w, h, x0, y0, w, h);
   ctx.restore();
+  if (scratch.width * scratch.height > SCRATCH_KEEP_PX) {
+    scratch.width = 0;
+    scratch.height = 0;
+  }
 }
 
 export function drawStrokes(ctx: CanvasRenderingContext2D, strokes: readonly DecodedStroke[]): void {
