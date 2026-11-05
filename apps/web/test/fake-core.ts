@@ -1,6 +1,17 @@
 import { vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import type { ExerciseSheet, Module, Semester, Slide, SlideDeck } from '@sg/shared';
+import type {
+  Device,
+  ExerciseSheet,
+  Module,
+  PairingCode,
+  PairingRequest,
+  Semester,
+  Session,
+  Settings,
+  Slide,
+  SlideDeck,
+} from '@sg/shared';
 
 const USER = '0190f6a2-0000-7000-8000-000000000000';
 const NOW = '2026-11-04T08:00:00Z';
@@ -17,6 +28,32 @@ export function makeSemester(overrides: Partial<Semester> = {}): Semester {
     ends_on: null,
     is_current: true,
     archived_at: null,
+    ...overrides,
+  };
+}
+
+export function makeSession(overrides: Partial<Session> = {}): Session {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000e1',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    calendar_event_id: null,
+    module_id: '0190f6a2-0000-7000-8000-0000000000a1',
+    slide_deck_id: null,
+    number: null,
+    title: null,
+    state: 'laeuft',
+    started_at: NOW,
+    ended_at: null,
+    stop_reason: null,
+    started_from: null,
+    processing: {},
+    review_state: 'offen',
+    planned_starts_at: null,
+    planned_ends_at: null,
+    auto_stop_extended_until: null,
     ...overrides,
   };
 }
@@ -98,6 +135,33 @@ export function makeSlides(deckId: string, count: number): Slide[] {
   }));
 }
 
+export function makeDevice(overrides: Partial<Device> = {}): Device {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000c1',
+    user_id: USER,
+    // Älter als 24 h: nicht „neu gekoppelt“
+    created_at: '2026-10-01T08:00:00Z',
+    updated_at: NOW,
+    deleted_at: null,
+    name: 'iPad von Ilian',
+    kind: 'ipad',
+    last_seen_at: NOW,
+    clock_offset_ms: null,
+    app_version: '1.0',
+    connected: false,
+    ...overrides,
+  };
+}
+
+/** Kopplung im Fake-Core (VERTRAEGE §12): Fenster, Anfragen und Zustand wie der Header `SG-Pairing-State` */
+export interface FakePairing {
+  window: PairingCode | null;
+  state: 'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'closed' | 'locked';
+  requests: PairingRequest[];
+  /** Laufende Nummer für Code und IDs */
+  opened: number;
+}
+
 export interface RecordedRequest {
   method: string;
   path: string;
@@ -111,6 +175,10 @@ export interface FakeCore {
   decks: SlideDeck[];
   sheets: ExerciseSheet[];
   slides: Record<string, Slide[]>;
+  /** Sessions für GET /sessions und POST /sessions/{id}/start|pause|resume|stop|extend (VERTRAEGE §7.2, §9.4) */
+  sessions: Session[];
+  /** Die nächste Anfrage an eine Session-Aktion wird mit diesem Fehler abgelehnt */
+  rejectNextSession: null | { status: number; code: string };
   requests: RecordedRequest[];
   /** Der nächste Upload scheitert wie bei einer abgerissenen Verbindung; `after` = der Core hat ihn davor verarbeitet */
   failNextUpload: null | 'before' | 'after';
@@ -126,8 +194,54 @@ export interface FakeCore {
   failIngest: (id: string) => void;
   /** Solange true, scheitern alle Anfragen wie bei einem nicht laufenden Core */
   down: boolean;
-  /** Verzögerung für POST in ms (Antworten kommen später als die nächste Eingabe) */
-  latencyMs: number;
+  /** Hält alle POSTs an, bis das Promise erfüllt ist (deterministisch statt Zeitfenster). `null` = nicht angehalten */
+  postGate: Promise<void> | null;
+  /** Stand von GET/PATCH /settings (Standards aus VERTRAEGE §14.1) */
+  settings: Settings;
+  /** Das nächste PATCH /settings wird mit diesem Fehler abgelehnt */
+  rejectNextSettings: null | { status: number; code: string; message: string };
+  /** Gekoppelte Geräte (GET/DELETE /devices) */
+  devices: Device[];
+  pairing: FakePairing;
+  /** Ein Gerät fragt über pair/start an (Bonjour-Weg) */
+  addPairingRequest: (name: string) => PairingRequest;
+  /** Das iPad bestätigt mit dem richtigen Code: Gerät anlegen, Fenster `paired` */
+  completePairing: (name?: string) => Device;
+}
+
+export function makeSettings(): Settings {
+  return {
+    general: { data_dir: '/Users/ich/Studien-Gehirn', content_lang: 'de', appearance: 'system' },
+    lecture: {
+      microphone_id: null,
+      auto_stop_after_end_min: 10,
+      auto_stop_quiet_window_min: 3,
+      auto_stop_hard_after_end_min: 30,
+      auto_stop_silence_min: 15,
+      auto_stop_max_duration_min: 240,
+      auto_stop_warning_s: 60,
+      auto_stop_extend_min: 15,
+      default_layout: 'standard',
+      default_ink_mode: 'freie_seite',
+      toolbar_side: 'rechts',
+    },
+    pen: {
+      double_tap: 'radierer',
+      squeeze: 'werkzeugpalette',
+      shape_recognition: false,
+      favorite_colors: [
+        '#1E2A44FF',
+        '#C92A2AFF',
+        '#1864ABFF',
+        '#2B8A3EFF',
+        '#E67700FF',
+        '#5F3DC4FF',
+        '#495057FF',
+        '#000000FF',
+      ],
+    },
+    data: { backup_target: null, backup_encryption: false, backup_time: '03:00' },
+  };
 }
 
 const json = (body: unknown, status = 200) =>
@@ -138,14 +252,18 @@ const json = (body: unknown, status = 200) =>
  * (erstes Semester wird aktuell, is_current höchstens einmal, Farbvergabe, Soft-Delete). Ersetzt `fetch`.
  */
 export function installFakeCore(
-  initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'decks' | 'sheets' | 'down' | 'latencyMs'>> = {},
+  initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'decks' | 'sheets' | 'sessions' | 'down'>> = {},
 ) {
+  let counter = 100;
+  const newId = () => `0190f6a2-0000-7000-8000-${String(++counter).padStart(12, '0')}`;
   const core: FakeCore = {
     semesters: structuredClone(initial.semesters ?? []),
     modules: structuredClone(initial.modules ?? []),
     decks: structuredClone(initial.decks ?? []),
     sheets: structuredClone(initial.sheets ?? []),
     slides: {},
+    sessions: structuredClone(initial.sessions ?? []),
+    rejectNextSession: null,
     requests: [],
     failNextUpload: null,
     rejectNextUpload: null,
@@ -168,10 +286,31 @@ export function installFakeCore(
       for (const item of [...core.decks, ...core.sheets]) if (item.id === id) item.ingest_state = 'fehler';
     },
     down: initial.down ?? false,
-    latencyMs: initial.latencyMs ?? 0,
+    postGate: null,
+    settings: makeSettings(),
+    rejectNextSettings: null,
+    devices: [],
+    pairing: { window: null, state: 'none', requests: [], opened: 0 },
+    addPairingRequest(name) {
+      const request: PairingRequest = {
+        request_id: newId(),
+        pairing_id: '0190f6a2-0000-7000-8000-00000000ffff',
+        device_name: name,
+        kind: 'ipad',
+        requested_at: new Date().toISOString(),
+      };
+      core.pairing.requests.push(request);
+      return request;
+    },
+    completePairing(name = 'Neues iPad') {
+      const now = new Date().toISOString();
+      const created = makeDevice({ id: newId(), name, created_at: now, last_seen_at: now });
+      core.devices.push(created);
+      core.pairing.state = 'paired';
+      core.pairing.requests = [];
+      return created;
+    },
   };
-  let counter = 100;
-  const newId = () => `0190f6a2-0000-7000-8000-${String(++counter).padStart(12, '0')}`;
 
   vi.stubGlobal(
     'fetch',
@@ -185,13 +324,38 @@ export function installFakeCore(
       const headers = (init?.headers ?? {}) as Record<string, string>;
       core.requests.push({ method, path: path + url.search, body, headers });
 
-      if (method === 'POST' && core.latencyMs) await new Promise((r) => setTimeout(r, core.latencyMs));
+      if (method === 'POST' && core.postGate) await core.postGate;
       if (core.down) throw new TypeError('Failed to fetch');
 
       const materialResponse = await handleMaterial(core, { path, method, url, body, form, headers, newId });
       if (materialResponse) return materialResponse;
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
+      // Daten/Papierkorb (T1-18): leere Antworten, damit das gerenderte Panel nicht ins Leere fragt
+      if (path === '/backups' && method === 'GET') {
+        return json({
+          status: { target: null, last_success_at: null, next_run_at: null, stale: false, running: false },
+          items: [],
+          next_cursor: null,
+        });
+      }
+      if (path === '/trash' && method === 'GET') return json({ items: [], next_cursor: null });
+
+      const devicesResponse = handleDevices(core, path, method, url);
+      if (devicesResponse) return devicesResponse;
+
+      if (path === '/settings' && method === 'GET') return json(core.settings);
+      if (path === '/settings' && method === 'PATCH') {
+        if (core.rejectNextSettings) {
+          const { status, code, message } = core.rejectNextSettings;
+          core.rejectNextSettings = null;
+          return json({ error: { code, message } }, status);
+        }
+        for (const [area, patch] of Object.entries(body ?? {})) {
+          Object.assign((core.settings as unknown as Record<string, object>)[area] ?? {}, patch);
+        }
+        return json(core.settings);
+      }
 
       if (path === '/semesters' && method === 'GET') {
         return json({ items: core.semesters.filter((s) => !s.deleted_at), next_cursor: null });
@@ -261,6 +425,101 @@ export function installFakeCore(
         if (!target) return json({ error: { code: 'module_not_found', message: 'x' } }, 404);
         target.deleted_at = new Date().toISOString();
         return new Response(null, { status: 204 });
+      }
+
+      // GET /sessions?from&to&state&module_id (VERTRAEGE §7.2): from/to filtern auf coalesce(started_at, planned_starts_at, created_at)
+      if (path === '/sessions' && method === 'GET') {
+        const from = url.searchParams.get('from');
+        const to = url.searchParams.get('to');
+        const states = url.searchParams.get('state')?.split(',');
+        const moduleId = url.searchParams.get('module_id');
+        const anchor = (x: Session) => Date.parse(x.started_at ?? x.planned_starts_at ?? x.created_at);
+        const items = core.sessions
+          .filter((x) => !x.deleted_at)
+          .filter((x) => !states || states.includes(x.state))
+          .filter((x) => !moduleId || x.module_id === moduleId)
+          .filter((x) => !from || anchor(x) >= Date.parse(from))
+          .filter((x) => !to || anchor(x) < Date.parse(to))
+          .sort((a, b) => anchor(a) - anchor(b) || a.id.localeCompare(b.id));
+        return json({ items, next_cursor: null });
+      }
+
+      const sessionMatch = /^\/sessions\/([^/]+)\/(start|pause|resume|stop|extend)$/.exec(path);
+      if (sessionMatch && method === 'POST') {
+        if (core.rejectNextSession) {
+          const { status, code } = core.rejectNextSession;
+          core.rejectNextSession = null;
+          return json({ error: { code, message: 'x' } }, status);
+        }
+        const target = core.sessions.find((x) => x.id === sessionMatch[1] && !x.deleted_at);
+        if (!target) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        const active = target.state === 'laeuft' || target.state === 'pausiert';
+        const now = Date.now();
+        const invalid = () => json({ error: { code: 'session_transition_invalid', message: 'x' } }, 409);
+        const touch = () => (target.updated_at = new Date(now).toISOString());
+        if (sessionMatch[2] === 'start') {
+          // Gleicher Zielzustand ist kein Fehler (§9.1)
+          if (target.state === 'laeuft' || target.state === 'pausiert') {
+            return json({ session: target, ended_session: null });
+          }
+          if (target.state !== 'geplant' && target.state !== 'bereit' && target.state !== 'verpasst') {
+            return invalid();
+          }
+          // Wie der Core: ein verpasster Termin lässt sich nur vor dem Terminende starten
+          if (
+            target.state === 'verpasst' &&
+            target.planned_ends_at &&
+            now >= Date.parse(target.planned_ends_at)
+          ) {
+            return invalid();
+          }
+          // Eine andere aktive Session endet vorher am Kalenderende, spätestens jetzt (§9.1)
+          const other = core.sessions.find(
+            (x) => x.id !== target.id && !x.deleted_at && (x.state === 'laeuft' || x.state === 'pausiert'),
+          );
+          if (other) {
+            const plannedEnd = other.planned_ends_at
+              ? Date.parse(other.planned_ends_at)
+              : Number.POSITIVE_INFINITY;
+            other.state = 'beendet';
+            other.ended_at = new Date(Math.min(plannedEnd, now)).toISOString();
+            other.stop_reason = 'kalenderende';
+            other.updated_at = new Date(now).toISOString();
+          }
+          target.state = 'laeuft';
+          target.started_at = new Date(now).toISOString();
+          target.started_from = (body?.started_from as Session['started_from'] | undefined) ?? 'mac';
+          touch();
+          return json({ session: target, ended_session: other ?? null });
+        }
+        if (sessionMatch[2] === 'pause' || sessionMatch[2] === 'resume') {
+          const [from, next] =
+            sessionMatch[2] === 'pause'
+              ? (['laeuft', 'pausiert'] as const)
+              : (['pausiert', 'laeuft'] as const);
+          if (target.state === next) return json(target);
+          if (target.state !== from) return invalid();
+          target.state = next;
+          touch();
+          return json(target);
+        }
+        if (sessionMatch[2] === 'stop') {
+          if (active) {
+            target.state = 'beendet';
+            target.ended_at = new Date(now).toISOString();
+            target.stop_reason = (body?.reason as Session['stop_reason'] | undefined) ?? 'manuell';
+            target.updated_at = new Date(now).toISOString();
+          } else if (target.state !== 'beendet' && target.state !== 'verarbeitet') {
+            return json({ error: { code: 'session_transition_invalid', message: 'x' } }, 409);
+          }
+          return json(target);
+        }
+        if (!active) return json({ error: { code: 'session_not_active', message: 'x' } }, 409);
+        const base = Math.max(now, Date.parse(target.auto_stop_extended_until ?? '') || 0);
+        const minutes = (body?.minutes as number | undefined) ?? core.settings.lecture.auto_stop_extend_min;
+        target.auto_stop_extended_until = new Date(base + minutes * 60_000).toISOString();
+        target.updated_at = new Date(now).toISOString();
+        return json(target);
       }
 
       return json({ error: { code: 'not_found', message: 'x' } }, 404);
@@ -352,6 +611,73 @@ async function handleMaterial(core: FakeCore, call: MaterialCall): Promise<Respo
         return new Response(null, { status: 204 });
       }
     }
+  }
+  return null;
+}
+
+/** /devices und /devices/pairings* des Fake-Core (VERTRAEGE §7.5, §12) */
+function handleDevices(core: FakeCore, path: string, method: string, url: URL): Response | null {
+  if (path === '/devices/pairings' && method === 'DELETE') {
+    const only = url.searchParams.get('pairing_id');
+    const open = core.pairing.state === 'open' || core.pairing.state === 'qr_only';
+    if (open && (!only || only === core.pairing.window?.pairing_id)) {
+      core.pairing.state = 'closed';
+      core.pairing.requests = [];
+    }
+    return new Response(null, { status: 204 });
+  }
+  if (path === '/devices' && method === 'GET') {
+    return json({ items: core.devices.filter((d) => !d.deleted_at), next_cursor: null });
+  }
+  const deviceMatch = /^\/devices\/([0-9a-f-]{36})$/.exec(path);
+  if (deviceMatch && method === 'DELETE') {
+    const target = core.devices.find((d) => d.id === deviceMatch[1] && !d.deleted_at);
+    if (!target) return json({ error: { code: 'device_not_found', message: 'x' } }, 404);
+    target.deleted_at = new Date().toISOString();
+    return new Response(null, { status: 204 });
+  }
+  if (path === '/devices/pairings' && method === 'POST') {
+    const n = ++core.pairing.opened;
+    // Zufälliger Teil: ein Schließen aus einem vorigen Test trifft so nie das Fenster dieses Tests
+    const random = Math.floor(Math.random() * 0xffffffff)
+      .toString(16)
+      .padStart(8, '0');
+    const pairingId = `0190f6a2-0000-4000-8000-${random}${String(n).padStart(4, '0')}`;
+    const code = String(482913 + n)
+      .padStart(6, '0')
+      .slice(-6);
+    const window: PairingCode = {
+      pairing_id: pairingId,
+      code,
+      expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+      host: '192.168.1.20',
+      port: 4710,
+      qr_url: `sg://pair?v=1&host=192.168.1.20&port=4710&pairing_id=${pairingId}&code=${code}`,
+    };
+    core.pairing.window = window;
+    core.pairing.state = 'open';
+    core.pairing.requests = [];
+    return json(window, 201);
+  }
+  if (path === '/devices/pairings/requests' && method === 'GET') {
+    const open = core.pairing.state === 'open' || core.pairing.state === 'qr_only';
+    return new Response(JSON.stringify({ items: open ? core.pairing.requests : [] }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'SG-Pairing-State': core.pairing.state,
+        ...(core.pairing.window ? { 'SG-Pairing-Id': core.pairing.window.pairing_id } : {}),
+      },
+    });
+  }
+  const requestMatch = /^\/devices\/pairings\/requests\/([0-9a-f-]{36})$/.exec(path);
+  if (requestMatch && method === 'DELETE') {
+    const before = core.pairing.requests.length;
+    core.pairing.requests = core.pairing.requests.filter((r) => r.request_id !== requestMatch[1]);
+    if (core.pairing.requests.length === before) {
+      return json({ error: { code: 'pairing_request_not_found', message: 'x' } }, 404);
+    }
+    return new Response(null, { status: 204 });
   }
   return null;
 }

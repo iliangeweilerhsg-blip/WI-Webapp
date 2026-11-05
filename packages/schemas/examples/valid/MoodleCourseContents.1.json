@@ -1,0 +1,33 @@
+{
+  "course_id": 501,
+  "sections": [
+    {
+      "moodle_id": 9001,
+      "index": 1,
+      "name": "Woche 1",
+      "visible": true,
+      "activities": [
+        {
+          "cmid": 7001,
+          "type": "resource",
+          "name": "Folien Einführung",
+          "url": "https://moodle.example.org/mod/resource/view.php?id=7001",
+          "visible": true,
+          "description_html": null,
+          "completion": "offen",
+          "completion_manual": true,
+          "instance_id": 3001,
+          "files": [
+            {
+              "ref": "/123/mod_resource/content/4/01-Einfuehrung.pdf",
+              "filename": "01-Einfuehrung.pdf",
+              "mime_type": "application/pdf",
+              "size_bytes": 759624,
+              "modified_at": "2026-10-12T15:23:00Z"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

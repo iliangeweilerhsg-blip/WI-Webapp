@@ -77,6 +77,7 @@
       "properties": {
         "microphone_id": {
           "type": ["string", "null"],
+          "maxLength": 256,
           "description": "deviceId aus MediaDevices, null = Standardmikrofon"
         },
         "auto_stop_after_end_min": {
@@ -207,6 +208,7 @@
       "properties": {
         "microphone_id": {
           "type": ["string", "null"],
+          "maxLength": 256,
           "description": "deviceId aus MediaDevices, null = Standardmikrofon"
         },
         "auto_stop_after_end_min": {

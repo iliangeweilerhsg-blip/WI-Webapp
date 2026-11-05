@@ -54,6 +54,7 @@ Diese Spezifikation beschreibt das Produkt so vollständig, dass ein Team ohne w
 |---|---|
 | ORG | Organisation: Semester, Module, Uploads |
 | KAL | Stundenplan & Kalender |
+| MDL | Moodle-Anbindung: Inhalte lesen, Abgleich, Aktionen |
 | SES | Vorlesungs-Session (Start, Stopp, Zustände) |
 | DSH | Dashboard auf dem Mac |
 | INK | Schreib-App auf dem iPad |

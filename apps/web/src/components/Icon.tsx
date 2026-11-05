@@ -1,7 +1,17 @@
 import type { ReactElement } from 'react';
 
 export type IconName =
-  'today' | 'library' | 'learn' | 'planner' | 'videos' | 'inbox' | 'settings' | 'search' | 'menu' | 'plus';
+  | 'today'
+  | 'calendar'
+  | 'library'
+  | 'learn'
+  | 'planner'
+  | 'videos'
+  | 'inbox'
+  | 'settings'
+  | 'search'
+  | 'menu'
+  | 'plus';
 
 /** Eigene, eindeutige Symbole (24er Raster, Linie). Rein dekorativ: Beschriftung steht am Link. */
 const PATHS: Record<IconName, ReactElement> = {
@@ -9,6 +19,17 @@ const PATHS: Record<IconName, ReactElement> = {
     <>
       <circle cx="12" cy="12" r="8" />
       <circle cx="12" cy="12" r="2.5" fill="currentColor" />
+    </>
+  ),
+  calendar: (
+    <>
+      <rect x="4" y="5" width="16" height="15" rx="2" />
+      <path d="M4 9.5h16M8.5 3v3M15.5 3v3" />
+      <path
+        d="M8 13h.01M12 13h.01M16 13h.01M8 16.5h.01M12 16.5h.01"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
     </>
   ),
   library: (

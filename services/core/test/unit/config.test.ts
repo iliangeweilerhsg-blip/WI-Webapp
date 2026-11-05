@@ -14,6 +14,23 @@ describe('loadConfig', () => {
     expect(config.webDir.endsWith(join('apps', 'web', 'out'))).toBe(true);
     expect(config.devWebOrigin).toBe('');
     expect(config.logLevel).toBe('info');
+    expect(config.moodleUrl).toBe('');
+  });
+
+  it('liest SG_MOODLE_URL und lehnt unsichere Adressen ab', () => {
+    expect(loadConfig({ SG_MOODLE_URL: 'https://moodle.example.org/' }).moodleUrl).toBe(
+      'https://moodle.example.org',
+    );
+    expect(loadConfig({ SG_MOODLE_URL: 'https://lms.example.org/moodle' }).moodleUrl).toBe(
+      'https://lms.example.org/moodle',
+    );
+    expect(() => loadConfig({ SG_MOODLE_URL: 'http://moodle.example.org' })).toThrow(/https/);
+    expect(() => loadConfig({ SG_MOODLE_URL: 'https://u:p@moodle.example.org' })).toThrow(/https/);
+    expect(() => loadConfig({ SG_MOODLE_URL: 'https://nutzer:geheim@moodle.example.org' })).not.toThrow(
+      /geheim/,
+    );
+    expect(() => loadConfig({ SG_MOODLE_URL: 'https://moodle.example.org/?x=1' })).toThrow(/https/);
+    expect(() => loadConfig({ SG_MOODLE_URL: 'kein url' })).toThrow(/gültige/);
   });
 
   it('liest Umgebungsvariablen und entfernt den Schrägstrich am Ende des Dev-Origins', () => {
@@ -33,6 +50,13 @@ describe('loadConfig', () => {
       logLevel: 'debug',
       databaseUrl: 'postgres://x',
     });
+  });
+
+  it('Bonjour ist standardmäßig an und lässt sich mit SG_BONJOUR=0 abschalten (VERTRAEGE §12)', () => {
+    expect(loadConfig({}).bonjour).toBe(true);
+    expect(loadConfig({ SG_BONJOUR: '1' }).bonjour).toBe(true);
+    for (const off of ['0', 'false', 'OFF', ' nein '])
+      expect(loadConfig({ SG_BONJOUR: off }).bonjour).toBe(false);
   });
 
   it('weist ungültige Ports und Log-Level ab', () => {

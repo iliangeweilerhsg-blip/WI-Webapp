@@ -79,6 +79,13 @@ CREATE TABLE recording (
   completed_last_seq integer CHECK (completed_last_seq IS NULL OR completed_last_seq >= 0),
   completed_duration_ms bigint
 );
+-- Session (nur die Spalten, die audio.finalize anfasst). Ohne FK.
+CREATE TABLE session (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz,
+  state text NOT NULL DEFAULT 'geplant', processing jsonb
+);
 CREATE TABLE audio_chunk (
   id uuid PRIMARY KEY, user_id uuid NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),

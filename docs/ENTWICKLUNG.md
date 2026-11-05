@@ -34,7 +34,7 @@ Python-Contract-Tests: `cd packages/schemas && uv run --project python pytest py
 
 - Migrationen erzeugt `drizzle-kit` aus `services/core/src/db/schema/`, abgelegt unter `services/core/drizzle/`. Danach muss `drizzle-kit generate` „No schema changes“ melden.
 - **Nur vorwärts:** Drizzle kennt keine Down-Migrationen. Änderungen werden rückwärtskompatibel gebaut: erst Spalte hinzufügen, später alte entfernen.
-- Vor jeder Migration auf dem Mac des Owners wird ein Backup gemacht. `sg backup` folgt mit T1-18, bis dahin von Hand mit `pg_dump`.
+- Vor jeder Migration auf dem Mac des Owners wird ein Backup gemacht. `sg migrate` legt es selbst an (`pnpm sg backup`, VERTRAEGE §13), sofern ein Backup-Ziel eingestellt ist.
 - **Ausgerollte Migrationen nie ändern.** Solange eine Migration nur auf Branches existiert, darf sie neu erzeugt werden.
 - **Fremdschlüssel:**
   - CASCADE für Teile eines Ganzen, z. B. `slide` → `slide_deck`.
@@ -105,6 +105,7 @@ Die Phase-1-Schemas (Kalender, Session, Handschrift, Sync, Geräte, Backups, Ein
 | `ExerciseSheet` (API) | `page_count` neu, `has_solution` statt `solution_file_path` | Der Dateipfad ist intern, die API meldet nur, ob eine Lösung da ist |
 | `GET /slides/{id}/thumb` | Neuer Endpunkt | Die Seitenleiste der PDF-Anzeige braucht kleine Vorschaubilder (F-ORG-04) |
 | `Health` | Neues Schema | Antwort von `GET /api/v1/health`, die CLI wartet darauf |
+| Bereich `MDL` (F-MDL-01 bis -06, 08 §9) | Neu | Owner-Entscheidung vom 04.11.2026: Moodle lesen und Aktionen ausführen statt nur Drag & Drop |
 | `module.settings` | W-06 Option A übernommen, in 03 §3 eingetragen | Layout und Schreibmodus pro Modul (F-DSH-01, F-INK-03) |
 | `calendar_source.name`, `.last_error`; `calendar_event.description`, `.all_day`, `.assigned_by` | Neue Felder | Anzeige, URL-Fehler, Zuordnung über die Beschreibung, ganztägige Termine, manuelle Zuordnung überlebt den Abgleich (VERTRAEGE §6.1) |
 | `Session.planned_starts_at/ends_at` | Abgeleitete Felder | Start-Karte und Auto-Stopp brauchen die Terminzeiten |

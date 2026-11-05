@@ -17,6 +17,10 @@ export interface Config {
   /** Erlaubter CORS-Origin der Entwicklungs-Web-App, leer = kein CORS */
   devWebOrigin: string;
   logLevel: LogLevel;
+  /** Moodle-Instanz (SG_MOODLE_URL, 08 §9.1), leer = Moodle-Anbindung aus. Ohne Schrägstrich am Ende */
+  moodleUrl: string;
+  /** Bonjour-Ankündigung `_studiengehirn._tcp` (VERTRAEGE §12). `SG_BONJOUR=0` schaltet sie ab */
+  bonjour: boolean;
 }
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'];
@@ -60,6 +64,22 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   if (!LOG_LEVELS.includes(logLevel)) {
     throw new Error(`SG_LOG_LEVEL ist ungültig: ${logLevel} (erlaubt: ${LOG_LEVELS.join(', ')})`);
   }
+  const moodleUrl = (env.SG_MOODLE_URL || '').trim().replace(/\/+$/, '');
+  if (moodleUrl) {
+    let parsed: URL;
+    try {
+      parsed = new URL(moodleUrl);
+    } catch {
+      throw new Error('SG_MOODLE_URL ist keine gültige Adresse.');
+    }
+    // Der Token geht an diese Adresse: nur HTTPS, ohne Zugangsdaten, Query oder Fragment
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      // Nur Host und Pfad nennen: Die Adresse könnte Zugangsdaten enthalten
+      throw new Error(
+        `SG_MOODLE_URL muss eine reine https-Adresse sein (ohne Zugangsdaten, Query und Fragment): ${parsed.host}${parsed.pathname}`,
+      );
+    }
+  }
   return {
     dataDir: resolve(expandHome(env.SG_DATA_DIR || join(homedir(), 'StudienGehirn'))),
     databaseUrl: env.DATABASE_URL || 'postgres://sg:sg@127.0.0.1:5432/sg',
@@ -68,5 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webDir: resolve(expandHome(env.SG_WEB_DIR || join(repoRoot, 'apps', 'web', 'out'))),
     devWebOrigin: (env.SG_DEV_WEB_ORIGIN || '').replace(/\/+$/, ''),
     logLevel: logLevel as LogLevel,
+    moodleUrl,
+    bonjour: !['0', 'false', 'off', 'nein'].includes((env.SG_BONJOUR ?? '').trim().toLowerCase()),
   };
 }

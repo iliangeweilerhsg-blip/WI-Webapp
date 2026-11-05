@@ -18,6 +18,9 @@ import { SyncOpError } from './handlers.ts';
 /** Kanal für `pg_notify` nach dem Commit einer Operation. Payload: `{"stream":"…","seq":n}` */
 export const SYNC_OP_CHANNEL = 'sg_sync_op';
 
+/** Paketgröße, in der `listenCommittedOps` einen Strom liest und ausliefert */
+const DISPATCH_BATCH = 500;
+
 /** Strom-ID wie `SyncStreamId` im Schema */
 const STREAM_PATTERN =
   /^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$/;
@@ -76,7 +79,8 @@ export function setOnOpCommitted(hook: OpCommittedHook | null): void {
 
 type SyncOpRow = typeof syncOp.$inferSelect;
 
-function toCommitted(row: SyncOpRow): CommittedOp {
+/** Zeile aus `sync_op` in die Form des Hooks bringen (auch für die Nachlieferung in T1-08) */
+export function toCommitted(row: SyncOpRow): CommittedOp {
   return {
     stream: row.stream,
     seq: row.seq,
@@ -183,6 +187,15 @@ export async function appendOp(tx: Tx, stream: string, op: AppendOpInput): Promi
   return { seq, opId, duplicate: false };
 }
 
+/** Weitere LISTEN-Kanäle, deren Benachrichtigungen über dieselbe serielle Kette laufen wie die Operationen */
+export interface ListenCommittedOpsOptions {
+  /**
+   * Kanal → Handler, z. B. `sg_event` (T1-08, VERTRAEGE §16.2). Benachrichtigungen aus derselben Transaktion
+   * kommen so nie vor den Operationen davor beim Client an. Wirft ein Handler, geht das an `onError`.
+   */
+  channels?: Record<string, (payload: string) => void | Promise<void>>;
+}
+
 /**
  * Hört auf committete Operationen und ruft für jede den Hook `onOpCommitted` auf, je Strom lückenlos in
  * `seq`-Reihenfolge und nacheinander.
@@ -200,6 +213,7 @@ export async function listenCommittedOps(
   sqlClient: postgres.Sql,
   db: DbOrTx,
   onError: (error: unknown) => void = () => {},
+  options: ListenCommittedOpsOptions = {},
 ): Promise<() => Promise<void>> {
   const cursors = new Map<string, number>();
   for (const h of await db.select().from(syncStream)) cursors.set(h.stream, h.headSeq);
@@ -209,16 +223,24 @@ export async function listenCommittedOps(
     chain = chain.then(task).catch(onError);
   };
 
-  /** Alle Operationen eines Stroms nach dem Cursor ausliefern. Wirft der Hook, bleibt der Cursor stehen */
+  /**
+   * Alle Operationen eines Stroms nach dem Cursor ausliefern, in Paketen zu `DISPATCH_BATCH` (großer Rückstand nach
+   * einem Abbruch belegt so weder Speicher noch Event-Loop am Stück). Wirft der Hook, bleibt der Cursor stehen
+   */
   async function dispatch(stream: string): Promise<void> {
-    const rows = await db
-      .select()
-      .from(syncOp)
-      .where(and(eq(syncOp.stream, stream), gt(syncOp.seq, cursors.get(stream) ?? 0)))
-      .orderBy(asc(syncOp.seq));
-    for (const row of rows) {
-      await onOpCommitted(toCommitted(row));
-      cursors.set(stream, row.seq);
+    for (;;) {
+      const rows = await db
+        .select()
+        .from(syncOp)
+        .where(and(eq(syncOp.stream, stream), gt(syncOp.seq, cursors.get(stream) ?? 0)))
+        .orderBy(asc(syncOp.seq))
+        .limit(DISPATCH_BATCH);
+      for (const row of rows) {
+        await onOpCommitted(toCommitted(row));
+        cursors.set(stream, row.seq);
+      }
+      if (rows.length < DISPATCH_BATCH) return;
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
   }
 
@@ -245,9 +267,21 @@ export async function listenCommittedOps(
     // Beim ersten LISTEN und nach jedem Neuverbinden
     () => enqueue(catchUp),
   );
+  // Dieselbe LISTEN-Verbindung (postgres.js teilt sie) und dieselbe Kette: Reihenfolge wie bei Postgres
+  const extra: { unlisten: () => Promise<void> }[] = [];
+  try {
+    for (const [channel, handler] of Object.entries(options.channels ?? {})) {
+      extra.push(await sqlClient.listen(channel, (payload) => enqueue(async () => handler(payload))));
+    }
+  } catch (error) {
+    for (const e of extra) await e.unlisten().catch(() => {});
+    await subscription.unlisten().catch(() => {});
+    throw error;
+  }
   activeListeners += 1;
   return async () => {
     activeListeners -= 1;
+    for (const e of extra) await e.unlisten();
     await subscription.unlisten();
     await chain;
   };

@@ -2,8 +2,9 @@
 //
 // Gespeichert ist je Bereich (`general`, `lecture`, `pen`, `data`) eine Zeile in `setting` mit dem Bereichsobjekt
 // OHNE Standardwerte. getSettings füllt fehlende oder ungültige Felder mit den Standards auf.
-import { and, inArray } from 'drizzle-orm';
+import { and, inArray, sql } from 'drizzle-orm';
 import {
+  SINGLE_USER_ID,
   DataSettingsUpdateSchema,
   GeneralSettingsUpdateSchema,
   LectureSettingsUpdateSchema,
@@ -13,11 +14,14 @@ import {
   type LectureSettings,
   type PenSettings,
   type Settings,
+  type SettingsUpdate,
 } from '@sg/shared';
+import { BackupTargetError, checkBackupTargetAsync } from '@sg/shared/backup-target';
 import type { z } from 'zod';
 import type { Config } from '../config.ts';
-import type { DbOrTx } from '../db/client.ts';
+import type { Db, DbOrTx } from '../db/client.ts';
 import { notDeleted, setting } from '../db/schema/index.ts';
+import { HttpError } from '../errors.ts';
 
 export const SETTING_KEYS = ['general', 'lecture', 'pen', 'data'] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
@@ -95,4 +99,67 @@ export async function getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): 
     pen: mergeArea(DEFAULT_SETTINGS.pen, stored.get('pen'), PenSettingsUpdateSchema),
     data: mergeArea(DEFAULT_SETTINGS.data, stored.get('data'), DataSettingsUpdateSchema),
   };
+}
+
+/**
+ * Zielordner für Backups (VERTRAEGE §7.5, §14.1): absoluter Pfad eines vorhandenen, beschreibbaren Ordners.
+ * Gespeichert wird der normalisierte Pfad (`resolve` + `realpath`). Die Prüfung teilt sich der Core mit der CLI
+ * (`@sg/shared/backup-target`). Abgelehnt werden `SG_DATA_DIR` samt Inhalt und Systemordner. Symlinks sind erlaubt,
+ * das Backup (T1-18) prüft das Ziel beim Lauf erneut.
+ */
+async function normalizeBackupTarget(target: string, config: Pick<Config, 'dataDir'>): Promise<string> {
+  try {
+    return await checkBackupTargetAsync(target, config.dataDir, { createMissing: false });
+  } catch (failure) {
+    const message =
+      failure instanceof BackupTargetError
+        ? failure.message
+        : 'Der Backup-Ordner ist nicht vorhanden oder nicht beschreibbar.';
+    throw new HttpError(400, 'backup_target_invalid', message, { path: target });
+  }
+}
+
+/**
+ * `PATCH /settings`: führt die angegebenen Felder je Bereich zusammen (VERTRAEGE §14.1) und liefert den neuen Stand.
+ * `general.data_dir` ist nicht änderbar (das Update-Schema kennt das Feld nicht). Das Zusammenführen geschieht
+ * atomar in der Datenbank (`jsonb ||`), parallele Änderungen verschiedener Felder überschreiben sich nicht.
+ */
+export async function updateSettings(
+  db: Db,
+  config: Pick<Config, 'dataDir'>,
+  update: SettingsUpdate,
+): Promise<Settings> {
+  // Verschlüsselung (age) ist nicht eingebunden: Einschalten wird abgelehnt (VERTRAEGE §14.1). Ausschalten geht immer.
+  if (update.data?.backup_encryption === true) {
+    throw new HttpError(
+      400,
+      'backup_encryption_unavailable',
+      'Verschlüsselte Backups sind noch nicht verfügbar. Die Option lässt sich nicht einschalten.',
+    );
+  }
+  const target = update.data?.backup_target;
+  if (target !== undefined && target !== null) {
+    update = {
+      ...update,
+      data: { ...update.data, backup_target: await normalizeBackupTarget(target, config) },
+    };
+  }
+  return db.transaction(async (tx) => {
+    for (const key of SETTING_KEYS) {
+      const patch = update[key];
+      if (!patch || Object.keys(patch).length === 0) continue;
+      await tx
+        .insert(setting)
+        .values({ key, value: patch, userId: SINGLE_USER_ID })
+        .onConflictDoUpdate({
+          target: setting.key,
+          set: {
+            value: sql`(CASE WHEN jsonb_typeof(${setting.value}) = 'object' AND ${setting.deletedAt} IS NULL THEN ${setting.value} ELSE '{}'::jsonb END) || excluded.value`,
+            deletedAt: null,
+            updatedAt: sql`now()`,
+          },
+        });
+    }
+    return getSettings(tx, config);
+  });
 }

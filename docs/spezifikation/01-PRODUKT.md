@@ -88,7 +88,8 @@ Jede Funktion, jeder Bildschirm und jede technische Entscheidung wird gegen dies
 | Live-Auto-Folienverfolgung | Vom Nutzer abgelehnt (Aufwand für Live-Betrieb). Ersatz: nachträgliche Korrektur ([F-NAC-03](04-FUNKTIONEN.md#f-nac-03--folienzuordnung-nachträglich-korrigieren)) |
 | Streaks, Punkte, Gamification | Widerspricht LP9 |
 | Community-Lernsets | Eigenes Material ist die Quelle |
-| Automatischer LMS-Download | P2, Upload per Drag & Drop reicht |
+| Zweites Moodle (eigene Abgaben, Noten, Foren) | Moodle bleibt der Ort dafür. Die App liest Moodle und bietet einzelne Aktionen an ([F-MDL](04-FUNKTIONEN.md#mdl--moodle-anbindung)). Seit 04.11.2026 ist der automatische Abgleich mit Moodle kein Nicht-Ziel mehr (Owner-Entscheidung) |
+| Automatische Quiz-Versuche in Moodle | Prüfungs- bzw. Studienleistung, wird nie automatisiert |
 | Android-, Windows-Tablets | Strich-Format ist geräteneutral, aber v1 nur iPad |
 | KI-Avatare, „Hollywood"-Videos | Erzählte, animierte Folien reichen didaktisch |
 | Laserpointer, Präsentationsmodus, Lernspiele | Kein Lerneffekt im Alltag |

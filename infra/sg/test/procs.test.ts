@@ -59,7 +59,7 @@ describe('ensureDataDir', () => {
     const cfg = testCfg();
     ensureDataDir(cfg);
     ensureDataDir(cfg); // idempotent
-    for (const sub of ['config', 'media/decks', 'media/sheets', 'vault', 'backups', 'logs', 'run']) {
+    for (const sub of ['config', 'media/decks', 'media/sheets', 'vault', 'logs', 'run']) {
       expect(statSync(join(cfg.dataDir, sub)).isDirectory()).toBe(true);
     }
     expect(statSync(cfg.dataDir).mode & 0o777).toBe(0o700);
