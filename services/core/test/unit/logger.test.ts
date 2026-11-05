@@ -3,6 +3,8 @@ import {
   chmodSync,
   existsSync,
   mkdtempSync,
+  readdirSync,
+  statSync,
   readFileSync,
   utimesSync,
   writeFileSync,
@@ -13,7 +15,14 @@ import Fastify from 'fastify';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { hasOpenPermissions } from '../../src/config.ts';
-import { createLogger, initialLogDay, loggerOptions, redactUrl, rotateLogs } from '../../src/logger.ts';
+import {
+  createLogger,
+  enforceLogSizeLimits,
+  initialLogDay,
+  loggerOptions,
+  redactUrl,
+  rotateLogs,
+} from '../../src/logger.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -170,5 +179,58 @@ describe('Log-Schwärzung Moodle-Token (08 §9.1)', () => {
     const text = readFileSync(join(dir, 'logs', 'core.log'), 'utf8');
     expect(text).toContain('[Redacted]');
     expect(text).not.toMatch(/geheim-/);
+  });
+});
+
+describe('Größengrenzen für core.log (Issue #87)', () => {
+  const now = new Date('2026-11-04T12:00:00Z');
+  const limits = { maxFileBytes: 1000, maxTotalBytes: 2500 };
+
+  it('rotiert core.log ab der Dateigrenze, darunter nicht', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-core-log-'));
+    writeFileSync(join(dir, 'core.log'), 'x'.repeat(999));
+    expect(enforceLogSizeLimits(dir, limits, now)).toBe(false);
+    expect(existsSync(join(dir, 'core.log'))).toBe(true);
+    writeFileSync(join(dir, 'core.log'), 'x'.repeat(1000));
+    expect(enforceLogSizeLimits(dir, limits, now)).toBe(true);
+    expect(existsSync(join(dir, 'core.log'))).toBe(false);
+    expect(existsSync(join(dir, `core-2026-11-04-${now.getTime()}.log`))).toBe(true);
+  });
+
+  it('löscht die ältesten Archive, bis die Gesamtgrenze eingehalten ist, und lässt core.log in Ruhe', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-core-log-'));
+    for (const [name, age] of [
+      ['core-2026-11-01.log', 3],
+      ['core-2026-11-02.log', 2],
+      ['core-2026-11-03.log', 1],
+    ] as const) {
+      writeFileSync(join(dir, name), 'x'.repeat(900));
+      utimesSync(join(dir, name), new Date(now.getTime() - age * DAY), new Date(now.getTime() - age * DAY));
+    }
+    writeFileSync(join(dir, 'core.log'), 'x'.repeat(500));
+    writeFileSync(join(dir, 'worker.log'), 'x'.repeat(5000)); // fremde Datei zählt nicht
+    expect(enforceLogSizeLimits(dir, limits, now)).toBe(false);
+    // 3 x 900 + 500 = 3200 > 2500: das älteste Archiv geht, dann sind es 2300
+    expect(existsSync(join(dir, 'core-2026-11-01.log'))).toBe(false);
+    expect(existsSync(join(dir, 'core-2026-11-02.log'))).toBe(true);
+    expect(existsSync(join(dir, 'core-2026-11-03.log'))).toBe(true);
+    expect(existsSync(join(dir, 'core.log'))).toBe(true);
+    expect(existsSync(join(dir, 'worker.log'))).toBe(true);
+  });
+
+  it('createLogger hält Datei und Gesamtgröße beim Schreiben ein', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-log-'));
+    const logger = createLogger(
+      { dataDir: dir, logLevel: 'info' },
+      { limits: { maxFileBytes: 20_000, maxTotalBytes: 60_000 } },
+    );
+    for (let i = 0; i < 2000; i++) logger.info({ i }, 'x'.repeat(100));
+    const logs = join(dir, 'logs');
+    const files = readdirSync(logs).filter((name) => /^core.*\.log$/.test(name));
+    const sizes = files.map((name) => statSync(join(logs, name)).size);
+    expect(files.length).toBeGreaterThan(1);
+    // Je Datei höchstens Grenze plus die Prüfspanne (1/8 der Grenze), insgesamt etwa die Gesamtgrenze
+    for (const size of sizes) expect(size).toBeLessThanOrEqual(20_000 * 1.25);
+    expect(sizes.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(60_000 + 20_000 * 1.25);
   });
 });

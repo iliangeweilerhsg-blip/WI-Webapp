@@ -3,6 +3,7 @@ import { isIP } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.ts';
 import { HttpError } from '../errors.ts';
+import type { RejectionLog } from './rejection-log.ts';
 
 /**
  * Sicherheitsregeln des Core (docs/VERTRAEGE.md §5, §7, §11.1, §16.2, 09 §4):
@@ -214,7 +215,15 @@ export function createSecurityGuard(options: SecurityOptions): SecurityGuard {
   };
 }
 
-export function registerSecurity(app: FastifyInstance, guard: SecurityGuard): void {
+/**
+ * `rejections`: Zähler für abgelehnte Netzanfragen (#87). Ohne ihn loggt jede Anfrage einzeln, wie Fastify es tut.
+ * Mit ihm muss Fastify den `RequestLogController` bekommen, der abgelehnte Netzanfragen still lässt.
+ */
+export function registerSecurity(
+  app: FastifyInstance,
+  guard: SecurityGuard,
+  rejections?: RejectionLog,
+): void {
   app.decorateRequest('sgDevice', undefined);
   app.decorate('authenticateUpgrade', async (request: GuardRequest) => {
     // Ohne Routing gibt es keine Ausnahme: Kopplungs-Routen sind keine Upgrades
@@ -227,6 +236,9 @@ export function registerSecurity(app: FastifyInstance, guard: SecurityGuard): vo
     try {
       device = await guard(request);
     } catch (error) {
+      if (rejections && !isLocalRequest(request) && error instanceof HttpError) {
+        rejections.record(request.socket.remoteAddress, error.statusCode);
+      }
       // Abgelehnter WebSocket-Upgrade: Die Antwort geht direkt auf den Socket, den der HTTP-Server nach dem
       // `upgrade`-Ereignis nicht mehr verwaltet. Ohne eigenes Schließen bliebe er serverseitig halb offen hängen
       // (je abgelehntem Versuch ein Socket, Ressourcen-Leck).
@@ -240,5 +252,10 @@ export function registerSecurity(app: FastifyInstance, guard: SecurityGuard): vo
       throw error;
     }
     if (device !== undefined) request.sgDevice = device;
+    if (rejections) {
+      request.sgAdmitted = true;
+      // Angenommene Netzanfragen loggen wie bisher; der Request-Log-Controller hat die Zeile bis hierhin zurückgehalten
+      if (!isLocalRequest(request)) request.log.info({ req: request }, 'incoming request');
+    }
   });
 }
