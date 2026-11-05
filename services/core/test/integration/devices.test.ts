@@ -784,4 +784,46 @@ describe('WebSocket-Upgrade (§11.1) und Widerruf', () => {
       }
     },
   );
+
+  it.skipIf(!lanAddress)(
+    'Upgrade mit kaputter URL aus dem Netz: Ablehnung schließt den Socket (Gegen-Review #84, S-1)',
+    async () => {
+      const port = await freePort();
+      const config = testConfig({ port });
+      const handle = createDb(config.databaseUrl);
+      const server = await buildApp({ config, db: handle.db, logger: pino({ level: 'silent' }) });
+      await server.listen({ host: '0.0.0.0', port });
+      const { connect } = await import('node:net');
+      try {
+        // Kaputte URLs landen in frameworkErrors, nicht im onRequest-Hook. Ohne Token aus dem Netz
+        for (const path of ['/%', '/sync%zz']) {
+          const result = await new Promise<{ head: string; closedMs: number }>((resolve, reject) => {
+            const started = Date.now();
+            let head = '';
+            const sock = connect({ host: lanAddress as string, port }, () => {
+              sock.write(
+                `GET ${path} HTTP/1.1\r\nHost: ${lanAddress}:${port}\r\nConnection: Upgrade\r\n` +
+                  `Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n` +
+                  `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n\r\n`,
+              );
+            });
+            sock.on('data', (chunk: Buffer) => (head += chunk.toString()));
+            // Der Client schließt seine Seite nie: Nur der Server kann die Verbindung beenden
+            sock.on('close', () => resolve({ head, closedMs: Date.now() - started }));
+            sock.on('error', reject);
+            setTimeout(() => {
+              sock.destroy();
+              resolve({ head, closedMs: Number.POSITIVE_INFINITY });
+            }, 5000);
+          });
+          expect(result.head).toMatch(/^HTTP\/1\.1 4\d\d/);
+          expect(result.head.toLowerCase()).toContain('connection: close');
+          expect(result.closedMs).toBeLessThan(3000);
+        }
+      } finally {
+        await server.close();
+        await handle.close();
+      }
+    },
+  );
 });
