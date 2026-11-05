@@ -7,6 +7,7 @@ from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import (
+    AnyUrl,
     AwareDatetime,
     BaseModel,
     ConfigDict,
@@ -441,6 +442,216 @@ class ModuleSettingsUpdate(BaseModel):
     layout: DashboardLayout | None = None
     column_widths: ColumnWidths | None = None
     ink_mode: InkMode | None = None
+
+
+class ConfirmationToken(RootModel[StrictStr]):
+    root: StrictStr = Field(..., min_length=16)
+
+
+class MoodleActionExecute(BaseModel):
+    """
+    Body von POST /moodle/actions/{action_id}/execute
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    params: dict[str, Any]
+    confirmation_token: ConfirmationToken | None = None
+
+
+class MoodleActionId(StrEnum):
+    """
+    Aktionskatalog (F-MDL-05, 08 §9.3)
+    """
+
+    assign_save_draft = 'assign.save_draft'
+    assign_submit = 'assign.submit'
+    forum_create_discussion = 'forum.create_discussion'
+    forum_reply = 'forum.reply'
+    completion_set = 'completion.set'
+    calendar_create_event = 'calendar.create_event'
+    message_send = 'message.send'
+    notifications_mark_read = 'notifications.mark_read'
+    files_upload_private = 'files.upload_private'
+
+
+class MoodleActionParamsAssignSubmit(BaseModel):
+    """
+    assign.submit
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    assignment_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    accept_statement: StrictBool
+
+
+class MoodleActionParamsCompletionSet(BaseModel):
+    """
+    completion.set
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    cmid: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    completed: StrictBool
+
+
+class MoodleActionParamsMessageSend(BaseModel):
+    """
+    message.send
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    to_user_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    text: StrictStr = Field(..., max_length=4096, min_length=1)
+
+
+class MoodleActionRequest(BaseModel):
+    """
+    Body von POST /moodle/actions/{action_id}/preview. params nach MoodleActionParams<Name>
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    params: dict[str, Any]
+
+
+class MoodleActionResult(BaseModel):
+    """
+    Antwort von execute bei Erfolg
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    action_id: MoodleActionId
+    summary: StrictStr
+    result: dict[str, Any]
+
+
+class MoodleActionRisk(StrEnum):
+    """
+    endgueltig und oeffentlich brauchen eine Bestätigung (F-MDL-06)
+    """
+
+    harmlos = 'harmlos'
+    aenderbar = 'aenderbar'
+    endgueltig = 'endgueltig'
+    oeffentlich = 'oeffentlich'
+
+
+class InstanceId(RootModel[StrictInt]):
+    root: StrictInt = Field(..., description='Moodle-ID', ge=1)
+
+
+class SubmissionType(StrEnum):
+    file = 'file'
+    onlinetext = 'onlinetext'
+
+
+class MoodleCompletion(StrEnum):
+    """
+    Erledigt-Status einer Aktivität
+    """
+
+    offen = 'offen'
+    erledigt = 'erledigt'
+
+
+class MoodleConnectionState(StrEnum):
+    """
+    Zustand des Moodle-Zugangs (F-MDL-01)
+    """
+
+    nicht_eingerichtet = 'nicht_eingerichtet'
+    ok = 'ok'
+    laeuft_bald_ab = 'laeuft_bald_ab'
+    abgelaufen = 'abgelaufen'
+    ungueltig = 'ungueltig'
+    nicht_erreichbar = 'nicht_erreichbar'
+
+
+class CourseId(RootModel[StrictInt]):
+    root: StrictInt = Field(..., description='Moodle-ID', ge=1)
+
+
+class Cmid(RootModel[StrictInt]):
+    root: StrictInt = Field(..., description='Moodle-ID', ge=1)
+
+
+class MoodleForum(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    moodle_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    cmid: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    course_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    name: StrictStr
+    type: StrictStr = Field(
+        ..., description='Moodle-Forumtyp, z. B. news, general, qanda'
+    )
+    can_post: StrictBool
+
+
+class MoodleForumList(BaseModel):
+    """
+    Antwort von GET /moodle/forums
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleForum]
+
+
+class MoodleGradeItem(BaseModel):
+    """
+    Zeile aus der Notenübersicht. Werte als Text, wie Moodle sie formatiert
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    course_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    name: StrictStr
+    item_type: StrictStr = Field(..., description='course, mod, category, manual')
+    cmid: Cmid | None
+    grade: StrictStr | None
+    range: StrictStr | None
+    percentage: StrictStr | None
+    feedback_html: StrictStr | None
+
+
+class MoodleGradeList(BaseModel):
+    """
+    Antwort von GET /moodle/grades
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleGradeItem]
+
+
+class ParentId(RootModel[StrictInt]):
+    root: StrictInt = Field(..., description='Moodle-ID', ge=1)
+
+
+class TimeLimitMinutes(RootModel[StrictInt]):
+    root: StrictInt = Field(..., ge=0)
+
+
+class MoodleSubmissionState(StrEnum):
+    keine = 'keine'
+    entwurf = 'entwurf'
+    eingereicht = 'eingereicht'
 
 
 class NotebookKind(StrEnum):
@@ -1785,6 +1996,356 @@ class ModuleUpdate(BaseModel):
     lang: Lang | None = None
     description_md: StrictStr | None = None
     settings: ModuleSettingsUpdate | None = None
+
+
+class MoodleActionInfo(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: MoodleActionId
+    label: StrictStr
+    description: StrictStr
+    risk: MoodleActionRisk
+    needs_confirmation: StrictBool
+    available: StrictBool = Field(
+        ..., description='false = nötige wsfunction für den Token nicht freigegeben'
+    )
+
+
+class MoodleActionParamsAssignSaveDraft(BaseModel):
+    """
+    assign.save_draft: mindestens upload_ids oder online_text_html
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    assignment_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    upload_ids: list[Uuid] | None = Field(None, max_length=20, min_length=1)
+    online_text_html: StrictStr | None = Field(None, max_length=100000, min_length=1)
+
+
+class MoodleActionParamsCalendarCreateEvent(BaseModel):
+    """
+    calendar.create_event (Nutzertermin)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    name: StrictStr = Field(..., max_length=255, min_length=1)
+    start_at: AwareDatetime = Field(..., description='ISO 8601, UTC', title='Timestamp')
+    duration_minutes: StrictInt | None = Field(None, ge=1, le=1440)
+    description_html: StrictStr | None = Field(None, max_length=100000, min_length=1)
+
+
+class MoodleActionParamsFilesUploadPrivate(BaseModel):
+    """
+    files.upload_private
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    upload_ids: list[Uuid] = Field(..., max_length=20, min_length=1)
+
+
+class MoodleActionParamsForumCreateDiscussion(BaseModel):
+    """
+    forum.create_discussion
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    forum_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    subject: StrictStr = Field(..., max_length=255, min_length=1)
+    message_html: StrictStr = Field(..., max_length=100000, min_length=1)
+    upload_ids: list[Uuid] | None = Field(None, max_length=20, min_length=1)
+
+
+class MoodleActionParamsForumReply(BaseModel):
+    """
+    forum.reply
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    post_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    subject: StrictStr | None = Field(None, max_length=255, min_length=1)
+    message_html: StrictStr = Field(..., max_length=100000, min_length=1)
+    upload_ids: list[Uuid] | None = Field(None, max_length=20, min_length=1)
+
+
+class MoodleActionPreview(BaseModel):
+    """
+    Antwort der Vorschau. confirmation_token nur bei needs_confirmation
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    action_id: MoodleActionId
+    risk: MoodleActionRisk
+    needs_confirmation: StrictBool
+    summary: StrictStr = Field(
+        ..., description='Ein Satz in Klartext, was passieren wird'
+    )
+    warnings: list[StrictStr]
+    details: dict[str, Any]
+    confirmation_token: StrictStr | None
+    expires_at: AwareDatetime | None
+
+
+class MoodleCourse(BaseModel):
+    """
+    Kurs, in den der Nutzer eingeschrieben ist. module_id: zugeordnetes Modul (F-MDL-03)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    moodle_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    short_name: StrictStr
+    full_name: StrictStr
+    start_date: date | None
+    end_date: date | None
+    url: AnyUrl
+    last_access_at: AwareDatetime | None
+    module_id: Uuid | None
+
+
+class MoodleCourseList(BaseModel):
+    """
+    Antwort von GET /moodle/courses
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleCourse]
+
+
+class MoodleDeadline(BaseModel):
+    """
+    Kommende Frist aus dem Moodle-Kalender
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    event_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    course_id: CourseId | None
+    cmid: Cmid | None
+    activity_type: StrictStr | None
+    name: StrictStr
+    due_at: AwareDatetime = Field(..., description='ISO 8601, UTC', title='Timestamp')
+    url: AnyUrl | None
+    action_required: StrictBool = Field(
+        ..., description='Moodle erwartet noch eine Handlung (z. B. Abgabe fehlt)'
+    )
+
+
+class MoodleDeadlineList(BaseModel):
+    """
+    Antwort von GET /moodle/deadlines
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleDeadline]
+
+
+class MoodleDiscussion(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    moodle_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    forum_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    first_post_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    subject: StrictStr
+    author_name: StrictStr | None
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    modified_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    reply_count: StrictInt = Field(..., ge=0)
+    pinned: StrictBool
+
+
+class MoodleDiscussionList(BaseModel):
+    """
+    Antwort von GET /moodle/forums/{forum_id}/discussions
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleDiscussion]
+
+
+class MoodleFile(BaseModel):
+    """
+    Datei in Moodle (Aktivität, Anhang, Abgabe)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    ref: StrictStr = Field(
+        ...,
+        description='Pfad hinter webservice/pluginfile.php, für GET /moodle/file?ref',
+        pattern='^/',
+    )
+    filename: StrictStr
+    mime_type: StrictStr | None
+    size_bytes: StrictInt = Field(..., ge=0)
+    modified_at: AwareDatetime | None
+
+
+class MoodleNotification(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    moodle_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    subject: StrictStr
+    text: StrictStr
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    read: StrictBool
+    url: AnyUrl | None
+
+
+class MoodleNotificationList(BaseModel):
+    """
+    Antwort von GET /moodle/notifications
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleNotification]
+    unread_count: StrictInt = Field(..., ge=0)
+
+
+class MoodlePost(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    moodle_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    discussion_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    parent_id: ParentId | None
+    subject: StrictStr
+    message_html: StrictStr
+    author_name: StrictStr | None
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    can_reply: StrictBool
+    attachments: list[MoodleFile]
+
+
+class MoodlePostList(BaseModel):
+    """
+    Antwort von GET /moodle/discussions/{discussion_id}/posts
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodlePost]
+
+
+class MoodleQuiz(BaseModel):
+    """
+    Quiz, nur zur Anzeige. Versuche laufen nie über die App (F-MDL-05)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    moodle_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    cmid: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    course_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    name: StrictStr
+    opens_at: AwareDatetime | None
+    closes_at: AwareDatetime | None
+    attempts_allowed: StrictInt = Field(..., description='0 = unbegrenzt', ge=0)
+    time_limit_minutes: TimeLimitMinutes | None
+    url: AnyUrl
+
+
+class MoodleQuizList(BaseModel):
+    """
+    Antwort von GET /moodle/quizzes
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleQuiz]
+
+
+class MoodleStatus(BaseModel):
+    """
+    Antwort von GET /moodle/status (08 §9.2)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    state: MoodleConnectionState
+    site_url: AnyUrl | None
+    site_name: StrictStr | None
+    user_fullname: StrictStr | None
+    token_valid_until: date | None
+    checked_at: AwareDatetime | None
+
+
+class MoodleSubmissionStatus(BaseModel):
+    """
+    Antwort von GET /moodle/assignments/{assignment_id}/submission
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    assignment_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    state: MoodleSubmissionState
+    graded: StrictBool
+    grade: StrictStr | None
+    feedback_html: StrictStr | None
+    last_modified_at: AwareDatetime | None
+    can_edit: StrictBool
+    can_submit: StrictBool
+    files: list[MoodleFile]
+    online_text_html: StrictStr | None
+
+
+class MoodleUpload(BaseModel):
+    """
+    Antwort von POST /moodle/uploads
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    upload_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    filename: StrictStr
+    size_bytes: StrictInt = Field(..., ge=0)
+    expires_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
 
 
 class Notebook(BaseModel):
@@ -3627,6 +4188,93 @@ class ImageElement(BaseModel):
     payload: ImageElementPayload
 
 
+class MoodleActionCatalog(BaseModel):
+    """
+    Antwort von GET /moodle/actions
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleActionInfo]
+
+
+class MoodleActivity(BaseModel):
+    """
+    Element eines Kursabschnitts
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    cmid: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    type: StrictStr = Field(
+        ...,
+        description='Moodle-modname, z. B. resource, folder, assign, forum, quiz, url, page, label',
+    )
+    name: StrictStr
+    url: AnyUrl | None
+    visible: StrictBool
+    description_html: StrictStr | None
+    completion: MoodleCompletion | None
+    completion_manual: StrictBool = Field(
+        ...,
+        description='true = der Nutzer darf den Status selbst setzen (completion.set)',
+    )
+    instance_id: InstanceId | None
+    files: list[MoodleFile]
+
+
+class MoodleAssignment(BaseModel):
+    """
+    Aufgabe mit Abgabe
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    moodle_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    cmid: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    course_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    name: StrictStr
+    due_at: AwareDatetime | None
+    cutoff_at: AwareDatetime | None
+    opens_at: AwareDatetime | None
+    intro_html: StrictStr | None
+    intro_files: list[MoodleFile]
+    submission_types: list[SubmissionType]
+    requires_statement: StrictBool = Field(
+        ...,
+        description='Einreichen verlangt die Erklärung zur Eigenständigkeit (accept_statement)',
+    )
+    requires_submit: StrictBool = Field(
+        ...,
+        description='true = Entwurf muss ausdrücklich eingereicht werden (assign.submit)',
+    )
+
+
+class MoodleAssignmentList(BaseModel):
+    """
+    Antwort von GET /moodle/assignments
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleAssignment]
+
+
+class MoodleSection(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    moodle_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    index: StrictInt = Field(..., ge=0)
+    name: StrictStr
+    visible: StrictBool
+    activities: list[MoodleActivity]
+
+
 class NotebookDeleteOp(BaseModel):
     """
     Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb
@@ -4162,6 +4810,18 @@ class TrashList(BaseModel):
     next_cursor: StrictStr | None
 
 
+class MoodleCourseContents(BaseModel):
+    """
+    Antwort von GET /moodle/courses/{course_id}/contents
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    course_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    sections: list[MoodleSection]
+
+
 class ElementUpsertData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -4386,6 +5046,94 @@ class SchemaBundle(BaseModel):
         None, alias='ModuleSettingsUpdate'
     )
     ModuleUpdate_1: ModuleUpdate | None = Field(None, alias='ModuleUpdate')
+    MoodleActionCatalog_1: MoodleActionCatalog | None = Field(
+        None, alias='MoodleActionCatalog'
+    )
+    MoodleActionExecute_1: MoodleActionExecute | None = Field(
+        None, alias='MoodleActionExecute'
+    )
+    MoodleActionId_1: MoodleActionId | None = Field(None, alias='MoodleActionId')
+    MoodleActionInfo_1: MoodleActionInfo | None = Field(None, alias='MoodleActionInfo')
+    MoodleActionParamsAssignSaveDraft_1: MoodleActionParamsAssignSaveDraft | None = (
+        Field(None, alias='MoodleActionParamsAssignSaveDraft')
+    )
+    MoodleActionParamsAssignSubmit_1: MoodleActionParamsAssignSubmit | None = Field(
+        None, alias='MoodleActionParamsAssignSubmit'
+    )
+    MoodleActionParamsCalendarCreateEvent_1: (
+        MoodleActionParamsCalendarCreateEvent | None
+    ) = Field(None, alias='MoodleActionParamsCalendarCreateEvent')
+    MoodleActionParamsCompletionSet_1: MoodleActionParamsCompletionSet | None = Field(
+        None, alias='MoodleActionParamsCompletionSet'
+    )
+    MoodleActionParamsFilesUploadPrivate_1: (
+        MoodleActionParamsFilesUploadPrivate | None
+    ) = Field(None, alias='MoodleActionParamsFilesUploadPrivate')
+    MoodleActionParamsForumCreateDiscussion_1: (
+        MoodleActionParamsForumCreateDiscussion | None
+    ) = Field(None, alias='MoodleActionParamsForumCreateDiscussion')
+    MoodleActionParamsForumReply_1: MoodleActionParamsForumReply | None = Field(
+        None, alias='MoodleActionParamsForumReply'
+    )
+    MoodleActionParamsMessageSend_1: MoodleActionParamsMessageSend | None = Field(
+        None, alias='MoodleActionParamsMessageSend'
+    )
+    MoodleActionPreview_1: MoodleActionPreview | None = Field(
+        None, alias='MoodleActionPreview'
+    )
+    MoodleActionRequest_1: MoodleActionRequest | None = Field(
+        None, alias='MoodleActionRequest'
+    )
+    MoodleActionResult_1: MoodleActionResult | None = Field(
+        None, alias='MoodleActionResult'
+    )
+    MoodleActionRisk_1: MoodleActionRisk | None = Field(None, alias='MoodleActionRisk')
+    MoodleActivity_1: MoodleActivity | None = Field(None, alias='MoodleActivity')
+    MoodleAssignment_1: MoodleAssignment | None = Field(None, alias='MoodleAssignment')
+    MoodleAssignmentList_1: MoodleAssignmentList | None = Field(
+        None, alias='MoodleAssignmentList'
+    )
+    MoodleCompletion_1: MoodleCompletion | None = Field(None, alias='MoodleCompletion')
+    MoodleConnectionState_1: MoodleConnectionState | None = Field(
+        None, alias='MoodleConnectionState'
+    )
+    MoodleCourse_1: MoodleCourse | None = Field(None, alias='MoodleCourse')
+    MoodleCourseContents_1: MoodleCourseContents | None = Field(
+        None, alias='MoodleCourseContents'
+    )
+    MoodleCourseList_1: MoodleCourseList | None = Field(None, alias='MoodleCourseList')
+    MoodleDeadline_1: MoodleDeadline | None = Field(None, alias='MoodleDeadline')
+    MoodleDeadlineList_1: MoodleDeadlineList | None = Field(
+        None, alias='MoodleDeadlineList'
+    )
+    MoodleDiscussion_1: MoodleDiscussion | None = Field(None, alias='MoodleDiscussion')
+    MoodleDiscussionList_1: MoodleDiscussionList | None = Field(
+        None, alias='MoodleDiscussionList'
+    )
+    MoodleFile_1: MoodleFile | None = Field(None, alias='MoodleFile')
+    MoodleForum_1: MoodleForum | None = Field(None, alias='MoodleForum')
+    MoodleForumList_1: MoodleForumList | None = Field(None, alias='MoodleForumList')
+    MoodleGradeItem_1: MoodleGradeItem | None = Field(None, alias='MoodleGradeItem')
+    MoodleGradeList_1: MoodleGradeList | None = Field(None, alias='MoodleGradeList')
+    MoodleNotification_1: MoodleNotification | None = Field(
+        None, alias='MoodleNotification'
+    )
+    MoodleNotificationList_1: MoodleNotificationList | None = Field(
+        None, alias='MoodleNotificationList'
+    )
+    MoodlePost_1: MoodlePost | None = Field(None, alias='MoodlePost')
+    MoodlePostList_1: MoodlePostList | None = Field(None, alias='MoodlePostList')
+    MoodleQuiz_1: MoodleQuiz | None = Field(None, alias='MoodleQuiz')
+    MoodleQuizList_1: MoodleQuizList | None = Field(None, alias='MoodleQuizList')
+    MoodleSection_1: MoodleSection | None = Field(None, alias='MoodleSection')
+    MoodleStatus_1: MoodleStatus | None = Field(None, alias='MoodleStatus')
+    MoodleSubmissionState_1: MoodleSubmissionState | None = Field(
+        None, alias='MoodleSubmissionState'
+    )
+    MoodleSubmissionStatus_1: MoodleSubmissionStatus | None = Field(
+        None, alias='MoodleSubmissionStatus'
+    )
+    MoodleUpload_1: MoodleUpload | None = Field(None, alias='MoodleUpload')
     Notebook_1: Notebook | None = Field(None, alias='Notebook')
     NotebookCreate_1: NotebookCreate | None = Field(None, alias='NotebookCreate')
     NotebookCreateData_1: NotebookCreateData | None = Field(

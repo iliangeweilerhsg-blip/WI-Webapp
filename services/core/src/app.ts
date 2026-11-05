@@ -12,10 +12,12 @@ import { registerErrorHandler } from './plugins/errors.ts';
 import { registerIdempotency } from './plugins/idempotency.ts';
 import { createSecurityGuard, registerSecurity, type DeviceTokenVerifier } from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
+import { createMoodleServices, type MoodleServices } from './moodle/index.ts';
 import { backupRoutes } from './routes/backups.ts';
 import { calendarRoutes } from './routes/calendar.ts';
 import { devicesRoutes } from './routes/devices.ts';
 import { materialRoutes } from './routes/material.ts';
+import { moodleRoutes } from './routes/moodle.ts';
 import { inkRoutes } from './routes/notebooks.ts';
 import { organisationRoutes } from './routes/organisation.ts';
 import { recordingRoutes } from './routes/recordings.ts';
@@ -32,6 +34,8 @@ export interface BuildAppOptions {
   logger: Logger;
   /** Prüft Geräte-Tokens. Standard: gegen `device.token_hash` (T1-10), mit `last_seen_at` höchstens einmal pro Minute */
   verifyDeviceToken?: DeviceTokenVerifier;
+  /** Moodle-Anbindung (08 §9). Standard: aus `SG_MOODLE_URL` und dem Schlüsselbund */
+  moodle?: MoodleServices;
   /** Kopplungsfenster im Speicher (§12). Standard: ein eigenes pro App. Tests geben eins mit gestellter Uhr vor */
   pairing?: PairingManager;
   /** IPv4 für `PairingCode.host`. Standard: aktive Schnittstelle, bevorzugt `en0` */
@@ -50,6 +54,8 @@ function readVersion(): string {
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
   const { config, db, logger } = options;
   const version = readVersion();
+  const moodle =
+    options.moodle ?? createMoodleServices({ config, logger: logger.child({ module: 'moodle' }) });
 
   const lastSeen = new LastSeenTracker(db);
   const verifyToken: DeviceTokenVerifier =
@@ -111,7 +117,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     openapi: {
       openapi: '3.1.0',
       info: { title: 'Studien-Gehirn Core', version, description: 'REST-API des Core (08 §1)' },
-      tags: [{ name: 'System' }],
+      tags: [{ name: 'System' }, { name: 'Moodle' }],
     },
     transform: jsonSchemaTransform,
   });
@@ -122,6 +128,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(systemRoutes, { db, version });
       await api.register(materialRoutes, { db, config });
       await api.register(organisationRoutes, { db });
+      await api.register(moodleRoutes, { moodle });
       await api.register(calendarRoutes, { db });
       await api.register(inkRoutes, { db, config });
       await api.register(recordingRoutes, { db, config });

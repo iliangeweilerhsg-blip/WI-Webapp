@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { hasOpenPermissions } from '../../src/config.ts';
-import { initialLogDay, rotateLogs } from '../../src/logger.ts';
+import { createLogger, initialLogDay, rotateLogs } from '../../src/logger.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -87,5 +87,16 @@ describe('hasOpenPermissions', () => {
     expect(hasOpenPermissions(file)).toBe(false);
     chmodSync(file, 0o644);
     expect(hasOpenPermissions(file)).toBe(true);
+  });
+});
+
+describe('Log-Schwärzung Moodle-Token (08 §9.1)', () => {
+  it('schwärzt wstoken und token, auch eine Ebene tiefer', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-log-'));
+    const logger = createLogger({ dataDir: dir, logLevel: 'info' });
+    logger.info({ wstoken: 'geheim-eins', token: 'geheim-zwei', req: { token: 'geheim-drei' } }, 'test');
+    const text = readFileSync(join(dir, 'logs', 'core.log'), 'utf8');
+    expect(text).toContain('[Redacted]');
+    expect(text).not.toMatch(/geheim-/);
   });
 });
