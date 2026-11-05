@@ -206,6 +206,10 @@ export interface ListenCommittedOpsOptions {
  *   Nach jedem (Neu-)Aufbau der LISTEN-Verbindung gleicht der Listener alle Ströme mit `head_seq` ab und
  *   holt Verpasstes nach. Benachrichtigungen während einer Unterbrechung gehen so nicht verloren.
  * - Wirft der Hook, bleibt der Cursor stehen. Die nächste Benachrichtigung bzw. der nächste Abgleich versucht es erneut.
+ * - Über Ströme hinweg gibt es keine Reihenfolge. Nach einem Neuverbinden kann eine Benachrichtigung der neuen
+ *   Verbindung vor dem Abgleich laufen: Postgres schickt Benachrichtigungen, die während des LISTEN committet
+ *   werden, vor dessen ReadyForQuery, und postgres.js ruft `onlisten` erst danach auf (#143). Ein anderer Strom kann
+ *   so vor den verpassten Operationen eines Stroms ankommen, innerhalb eines Stroms bleibt es lückenlos.
  *
  * `sqlClient` öffnet dafür eine eigene LISTEN-Verbindung. Rückgabe: Funktion zum Beenden.
  */

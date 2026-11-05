@@ -370,6 +370,29 @@ describe('ensurePipelineJobs', () => {
     expect(t!.dependsOn).not.toContain(failed);
   });
 
+  it('[P9] wiederverwendeter wartender Job behält die Abhängigkeit auf einen laufenden Job, nach ensure und reprocess', async () => {
+    // Die laufenden Jobs sind vom selben Typ: Ein laufender audio.finalize käme über die offenen
+    // audio.finalize-Jobs ohnehin wieder hinzu und würde einen Verlust in usableDependencies verdecken.
+    const id = await mkSession();
+    const rec = await mkRecording(id);
+    await mkJob(id, 'audio.finalize', 'fertig', { recordingId: rec });
+    const runningT = await mkJob(id, 'transcribe', 'laeuft');
+    const runningA = await mkJob(id, 'align.log', 'laeuft');
+    const waitingT = await mkJob(id, 'transcribe', 'wartet', { dependsOn: [runningT] });
+    const waitingA = await mkJob(id, 'align.log', 'wartet', { dependsOn: [runningA] });
+
+    const [t, a] = await ensure(id, 'transcribe');
+    expect(t).toMatchObject({ id: waitingT, dependsOn: [runningT] });
+    expect(a).toMatchObject({ id: waitingA, dependsOn: [runningA] });
+
+    const res = await post(id, { from_step: 'transcribe' });
+    expect(res.statusCode).toBe(202);
+    const byId = new Map((await jobsOf(id)).map((j) => [j.id, j]));
+    expect(byId.size).toBe(5); // nichts neu angelegt
+    expect(byId.get(waitingT)).toMatchObject({ state: 'wartet', dependsOn: [runningT] });
+    expect(byId.get(waitingA)).toMatchObject({ state: 'wartet', dependsOn: [runningA] });
+  });
+
   it('[P8] Reprocess-Route: wartender transcribe mit gescheitertem audio.finalize, danach from_step transcribe', async () => {
     const id = await mkSession({ processing: { 'audio.finalize': 'fehler' } });
     const rec = await mkRecording(id);

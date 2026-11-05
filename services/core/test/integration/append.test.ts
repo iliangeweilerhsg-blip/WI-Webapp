@@ -1,4 +1,6 @@
 // appendOp (VERTRAEGE §11.2, §16.2): lückenlose seq, Idempotenz über op_id, Hook nach dem Commit.
+import net from 'node:net';
+import postgres from 'postgres';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import {
@@ -49,6 +51,99 @@ async function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void
     if (Date.now() - start > timeoutMs) throw new Error('Zeitüberschreitung beim Warten');
     await sleep(10);
   }
+}
+
+/** Ausgelieferte Operationen (`<stream>#<seq>`) eines Stroms, in Auslieferungsreihenfolge */
+const ofStream = (received: string[], stream: string) => received.filter((r) => r.startsWith(`${stream}#`));
+
+interface Gate {
+  promise: Promise<void>;
+  open: () => void;
+}
+function gate(): Gate {
+  let open = () => {};
+  const promise = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { promise, open };
+}
+
+/**
+ * Eigene LISTEN-Verbindung mit zwei Schleusen, um den Wettlauf beim Neuverbinden (#143) gezielt herzustellen:
+ * - `holdConnect()`: Der nächste Verbindungsaufbau wartet (`connectRequested`), bis `releaseConnect()` kommt.
+ *   Solange ist der Listener sicher getrennt, Benachrichtigungen gehen verloren.
+ * - `holdOnlisten()`: postgres.js meldet das erneute LISTEN (`onlistenRequested`), der Rückruf `onlisten` läuft aber
+ *   erst nach `releaseOnlisten()`. Das bildet ab, was ohne Schleuse von selbst passiert: Postgres schickt
+ *   Benachrichtigungen, die während des LISTEN committet werden, vor dessen ReadyForQuery, und postgres.js ruft
+ *   `onlisten` erst nach dem Ergebnis des LISTEN auf. Gemessen: unter Dauerlast in etwa jedem zweiten Neuverbinden.
+ * `terminate()` beendet nur das Backend dieser Verbindung (eigener `application_name`).
+ */
+function gatedListenClient(url: string) {
+  const target = new URL(url);
+  const appName = `sg-it-listen-${uuidv7().slice(-12)}`;
+  let connectGate: Gate | null = null;
+  let connectSeen = gate();
+  let onlistenGate: Gate | null = null;
+  let onlistenSeen = gate();
+
+  const sql = postgres(url, {
+    max: 1,
+    onnotice: () => {},
+    connection: { application_name: appName },
+    socket: async () => {
+      if (connectGate) {
+        connectSeen.open();
+        await connectGate.promise;
+      }
+      return new Promise<postgres.SocketLike>((resolve, reject) => {
+        const socket = net.connect({ host: target.hostname, port: Number(target.port || 5432) });
+        socket.once('error', reject);
+        socket.once('connect', () => {
+          socket.off('error', reject);
+          // net.Socket erfüllt SocketLike, nur die Überladungen von `end` passen nicht zum Typ
+          resolve(socket as unknown as postgres.SocketLike);
+        });
+      });
+    },
+  });
+  // listenCommittedOps braucht von der Verbindung nur `listen`
+  const client = {
+    listen: (channel: string, fn: (payload: string) => void, onlisten?: () => void) =>
+      sql.listen(channel, fn, () => {
+        const held = onlistenGate;
+        if (!held) return onlisten?.();
+        onlistenSeen.open();
+        void held.promise.then(() => onlisten?.());
+      }),
+  } as unknown as postgres.Sql;
+
+  return {
+    client,
+    holdConnect() {
+      connectGate = gate();
+      connectSeen = gate();
+    },
+    connectRequested: () => connectSeen.promise,
+    releaseConnect() {
+      connectGate?.open();
+      connectGate = null;
+    },
+    holdOnlisten() {
+      onlistenGate = gate();
+      onlistenSeen = gate();
+    },
+    onlistenRequested: () => onlistenSeen.promise,
+    releaseOnlisten() {
+      onlistenGate?.open();
+      onlistenGate = null;
+    },
+    async terminate(): Promise<number> {
+      const rows = await handle.sql`SELECT pg_terminate_backend(pid) AS ok FROM pg_stat_activity
+        WHERE datname = current_database() AND application_name = ${appName}`;
+      return rows.length;
+    },
+    end: () => sql.end({ timeout: 1 }),
+  };
 }
 
 /** Startet den Listener und setzt danach den Hook (Reihenfolge wie in T1-08) */
@@ -229,13 +324,62 @@ describe('listenCommittedOps', () => {
       await append(fresh, markerOp());
 
       await waitFor(() => received.length === 3, 15_000);
-      expect(received).toEqual([`${stream}#1`, `${stream}#2`, `${fresh}#1`]);
+      // Zugesagt ist die Reihenfolge je Strom (VERTRAEGE §16.2), nicht über Ströme hinweg: Je nachdem, wann das
+      // erneute LISTEN steht, kommt `fresh#1` per Benachrichtigung vor oder per Abgleich nach `stream#2` (#143,
+      // gezielt hergestellt im nächsten Test)
+      expect(ofStream(received, stream)).toEqual([`${stream}#1`, `${stream}#2`]);
+      expect(ofStream(received, fresh)).toEqual([`${fresh}#1`]);
       // Danach läuft der Listener normal weiter
       await append(stream, markerOp());
       await waitFor(() => received.length === 4, 5000);
       expect(received[3]).toBe(`${stream}#3`);
     } finally {
       await stop();
+    }
+  }, 30_000);
+
+  it('Neuverbinden: Benachrichtigung der neuen Verbindung vor dem Abgleich, je Strom trotzdem lückenlos (#143)', async () => {
+    const listener = gatedListenClient(testDatabaseUrl());
+    const received: string[] = [];
+    const stop = await listenCommittedOps(listener.client, handle.db);
+    setOnOpCommitted((op) => {
+      received.push(`${op.stream}#${op.seq}`);
+    });
+    try {
+      const stream = sessionStream();
+      await append(stream, markerOp());
+      await waitFor(() => received.length === 1);
+
+      // 1. Verbindung trennen und den Neuaufbau anhalten: stream#2 wird ohne Zuhörer committet
+      listener.holdConnect();
+      listener.holdOnlisten();
+      expect(await listener.terminate()).toBe(1);
+      await listener.connectRequested();
+      await append(stream, markerOp());
+
+      // 2. Neu verbinden. Das LISTEN steht, der Abgleich (onlisten) ist noch nicht eingereiht
+      listener.releaseConnect();
+      await listener.onlistenRequested();
+      const fresh = sessionStream();
+      await append(fresh, markerOp());
+      await waitFor(() => received.length === 2);
+
+      // 3. Abgleich: holt stream#2 nach, nachdem fresh#1 schon ausgeliefert ist
+      listener.releaseOnlisten();
+      await waitFor(() => received.length === 3);
+      expect(received).toEqual([`${stream}#1`, `${fresh}#1`, `${stream}#2`]);
+      expect(ofStream(received, stream)).toEqual([`${stream}#1`, `${stream}#2`]);
+
+      await append(stream, markerOp());
+      await append(fresh, markerOp());
+      await waitFor(() => received.length === 5);
+      expect(ofStream(received, stream)).toEqual([`${stream}#1`, `${stream}#2`, `${stream}#3`]);
+      expect(ofStream(received, fresh)).toEqual([`${fresh}#1`, `${fresh}#2`]);
+    } finally {
+      listener.releaseConnect();
+      listener.releaseOnlisten();
+      await stop();
+      await listener.end();
     }
   }, 30_000);
 
