@@ -218,7 +218,16 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
       if (itemMatch && method === 'PATCH') {
         const target = fake.items.find((i) => i.id === itemMatch[1]);
         if (!target) return json({ error: { code: 'moodle_item_not_found', message: 'x' } }, 404);
-        Object.assign(target, { kind: body?.kind, kind_source: body?.kind === 'offen' ? 'auto' : 'manuell' });
+        // Wie im Core: eine Entscheidung gilt für die ganze Aktivität (gleiche cmid), das Zurücknehmen nur für die Datei
+        const affected =
+          body?.kind === 'offen'
+            ? [target]
+            : fake.items.filter(
+                (i) => i.cmid === target.cmid && i.moodle_course_id === target.moodle_course_id,
+              );
+        for (const i of affected) {
+          Object.assign(i, { kind: body?.kind, kind_source: body?.kind === 'offen' ? 'auto' : 'manuell' });
+        }
         return json(target);
       }
       if (path === '/moodle/synced-deadlines') {
@@ -449,6 +458,39 @@ describe('Einstellungen › Moodle (F-MDL-03)', () => {
     expect(loginHints()).toHaveLength(0);
     expect(screen.queryByText(/gültig bis/)).toBeNull();
     expect(await screen.findByText('Moodle-Kurs 901')).toBeInTheDocument();
+    expect(screen.getByText('Zugeordnete Kurse:')).toBeInTheDocument();
+  });
+
+  it('Kursliste lädt noch: kein Zwischenstand „Zugeordnete Kurse“, erst die Kurse (#135)', async () => {
+    installMoodle(core, {
+      courses: [course({ module_id: DBS.id })],
+      links: [LINK],
+      coursesDelayMs: 150,
+    });
+    await openMoodleTab();
+    expect(await screen.findByText('Lädt die Kurse aus Moodle …')).toBeInTheDocument();
+    // Die Zuordnungen sind schon da, die Ersatzansicht darf trotzdem nicht aufblitzen
+    await waitFor(() => expect(core.requests.some((r) => r.path === '/moodle/links')).toBe(true));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText('Zugeordnete Kurse:')).toBeNull();
+    expect(screen.queryByText('Moodle-Kurs 901')).toBeNull();
+    expect(await screen.findByText('Datenbanksysteme (Beispielkurs)')).toBeInTheDocument();
+    expect(screen.queryByText('Zugeordnete Kurse:')).toBeNull();
+  });
+
+  it('Fokus auf die Auswahl erst, wenn sie nicht mehr gesperrt ist (#135)', async () => {
+    // Synchroner Frame: ein Fokus im Erfolgs-Callback träfe die noch gesperrte Auswahl (disabled nimmt keinen Fokus)
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+      cb(0);
+      return 0;
+    });
+    const fake = installMoodle(core, { courses: [course({ suggested_module_id: DBS.id })], delayMs: 50 });
+    await openMoodleTab();
+    const row = () => screen.getByText('Datenbanksysteme (Beispielkurs)').closest('li') as HTMLElement;
+    await screen.findByText('Datenbanksysteme (Beispielkurs)');
+    await userEvent.setup().click(within(row()).getByRole('button', { name: 'Zuordnen' }));
+    await waitFor(() => expect(fake.links).toHaveLength(1));
+    await waitFor(() => expect(document.activeElement).toBe(within(row()).getByRole('combobox')));
   });
 
   it('Doppelklick auf Zuordnen, Schalter und Lösen ergibt je eine Anfrage (Review N1); Fokus danach auf der Auswahl (N3)', async () => {
@@ -708,8 +750,10 @@ describe('Inbox (F-MDL-04)', () => {
         item({}),
         item({
           id: '0190f6a2-0000-7000-8000-000000000302',
+          cmid: 5004,
+          activity_name: 'Übung',
           filename: 'Anhang.pdf',
-          file_ref: '/5003/x/Anhang.pdf',
+          file_ref: '/5004/x/Anhang.pdf',
         }),
       ],
       delayMs: 50,
@@ -725,6 +769,55 @@ describe('Inbox (F-MDL-04)', () => {
 
     await user.click(within(second).getByRole('button', { name: 'Als Übung' }));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toHaveFocus());
+  });
+
+  it('Fokus nach der Entscheidung: Dateien derselben Aktivität verschwinden mit, Ziel ist die nächste andere Aktivität (#135)', async () => {
+    installMoodle(core, {
+      items: [
+        item({}),
+        item({
+          id: '0190f6a2-0000-7000-8000-000000000302',
+          filename: 'Anhang.pdf',
+          file_ref: '/5003/x/Anhang.pdf',
+        }),
+        item({
+          id: '0190f6a2-0000-7000-8000-000000000303',
+          cmid: 5004,
+          activity_name: 'Übung',
+          filename: 'Blatt.pdf',
+          file_ref: '/5004/x/Blatt.pdf',
+        }),
+      ],
+    });
+    inboxPage();
+    const user = userEvent.setup();
+    const first = (await screen.findByText('Skript.pdf')).closest('li') as HTMLElement;
+    await user.click(within(first).getByRole('button', { name: 'Als Folien' }));
+    await waitFor(() => expect(screen.queryByText('Skript.pdf')).toBeNull());
+    // Anhang.pdf (gleiche cmid) ist mit verschwunden: der Fokus liegt auf Blatt.pdf, nicht auf BODY
+    expect(screen.queryByText('Anhang.pdf')).toBeNull();
+    const target = screen.getByText('Blatt.pdf').closest('li') as HTMLElement;
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(target).getByRole('button', { name: 'Als Folien' })),
+    );
+  });
+
+  it('Fokus nach der Entscheidung: gibt es nur Dateien derselben Aktivität, landet er auf der Überschrift (#135)', async () => {
+    installMoodle(core, {
+      items: [
+        item({}),
+        item({
+          id: '0190f6a2-0000-7000-8000-000000000302',
+          filename: 'Anhang.pdf',
+          file_ref: '/5003/x/Anhang.pdf',
+        }),
+      ],
+    });
+    inboxPage();
+    const first = (await screen.findByText('Skript.pdf')).closest('li') as HTMLElement;
+    await userEvent.setup().click(within(first).getByRole('button', { name: 'Als Folien' }));
+    await screen.findByText(/Nichts zu entscheiden/);
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Inbox' })));
   });
 
   it('zeigt offene Dateien nach Modul und schickt die Entscheidung', async () => {
@@ -883,6 +976,37 @@ describe('Fristen', () => {
     await userEvent.setup().click(within(list).getByRole('button', { name: 'Alle anzeigen' }));
     await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(7));
     expect(within(list).queryByRole('button', { name: 'Alle anzeigen' })).toBeNull();
+  });
+
+  it('Modulseite: nach „Alle anzeigen“ liegt der Fokus auf der ersten neu angezeigten Frist (#135)', async () => {
+    search.value = `id=${DBS.id}`;
+    installMoodle(core, {
+      links: [
+        {
+          moodle_course_id: 901,
+          module_id: DBS.id,
+          sync_enabled: true,
+          last_synced_at: null,
+          auto: null,
+          module_removable: false,
+          created_at: NOW,
+          updated_at: NOW,
+        },
+      ],
+      deadlines: Array.from({ length: 7 }, (_, i) =>
+        deadline({
+          id: `0190f6a2-0000-7000-8000-00000000041${i}`,
+          name: `Abgabe Übungsblatt ${i + 1}`,
+          due_at: `2026-11-${String(10 + i).padStart(2, '0')}T22:59:00Z`,
+        }),
+      ),
+    });
+    wrap(<ModulView />);
+    const list = await screen.findByRole('region', { name: 'Fristen' });
+    await userEvent.setup().click(within(list).getByRole('button', { name: 'Alle anzeigen' }));
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(7));
+    const sixth = within(list).getByText('Abgabe Übungsblatt 6').closest('li');
+    await waitFor(() => expect(document.activeElement).toBe(sixth));
   });
 
   it('formatDue: heute, morgen, sonst Wochentag und Datum', () => {
