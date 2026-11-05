@@ -4,7 +4,14 @@
 import 'fake-indexeddb/auto';
 import { describe, expect, it, vi } from 'vitest';
 import { AudioRecorder, LeaderRecording, MemoryRecorderStore } from '../src/lib/recorder/index.ts';
-import { FakeWebLocks, fakeStream, makeFakeMediaRecorder, type SharedRunning } from './recording-fakes.ts';
+import {
+  FakeWebLocks,
+  fakeStream,
+  makeFakeMediaRecorder,
+  type FakeStream,
+  type FakeTrack,
+  type SharedRunning,
+} from './recording-fakes.ts';
 
 const SESSION = '0190f6a2-0000-7000-8000-0000000000e1';
 
@@ -19,11 +26,16 @@ function makeTab(shared: SharedRunning, locks: FakeWebLocks, opts: { slowStop?: 
   }
   const store = new MemoryRecorderStore();
   const calls: string[] = [];
+  const tracks: FakeTrack[] = [];
   const recorder = new AudioRecorder({
     sessionId: SESSION,
     sessionMs: () => 0,
     store,
-    getUserMedia: async () => fakeStream(),
+    getUserMedia: async () => {
+      const stream: FakeStream = fakeStream();
+      tracks.push(...stream.tracks);
+      return stream;
+    },
     MediaRecorder: mr,
     level: { createContext: () => null },
     navigator: {},
@@ -36,7 +48,7 @@ function makeTab(shared: SharedRunning, locks: FakeWebLocks, opts: { slowStop?: 
     },
   });
   const control = new LeaderRecording({ recorder, acquireLock: locks.acquire });
-  return { mr, store, recorder, control, calls };
+  return { mr, store, recorder, control, calls, tracks };
 }
 
 const lead = (tab: ReturnType<typeof makeTab>, leader: boolean) =>
@@ -161,5 +173,63 @@ describe('Aufnahme nur im Leader-Tab', () => {
     control.retry();
     await control.idle();
     expect(getUserMedia).toHaveBeenCalledTimes(2);
+  });
+
+  describe('Mikrofon wird freigegeben (track.stop)', () => {
+    it('nach dem Stopp der Session', async () => {
+      const a = makeTab({ running: new Set(), maxRunning: 0 }, new FakeWebLocks());
+      lead(a, true);
+      await a.control.idle();
+      expect(a.tracks).toHaveLength(1);
+      expect(a.tracks[0]?.stop).not.toHaveBeenCalled();
+      a.control.set({ phase: 'andere' });
+      await a.control.idle();
+      expect(a.tracks[0]?.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('nach dem Verlust der Leader-Rolle', async () => {
+      const a = makeTab({ running: new Set(), maxRunning: 0 }, new FakeWebLocks());
+      lead(a, true);
+      await a.control.idle();
+      lead(a, false);
+      await a.control.idle();
+      expect(a.tracks[0]?.stop).toHaveBeenCalledTimes(1);
+    });
+
+    it('nach dem Entfernen (Unmount): sauberer Stopp, dann Aufräumen', async () => {
+      const a = makeTab({ running: new Set(), maxRunning: 0 }, new FakeWebLocks());
+      lead(a, true);
+      await a.control.idle();
+      a.control.dispose();
+      await a.control.idle();
+      expect(a.tracks[0]?.stop).toHaveBeenCalled();
+      a.recorder.dispose();
+    });
+
+    it('bei Pause bleibt es offen (§9.1), erst der Stopp gibt frei', async () => {
+      const a = makeTab({ running: new Set(), maxRunning: 0 }, new FakeWebLocks());
+      lead(a, true);
+      await a.control.idle();
+      a.control.set({ phase: 'pausiert' });
+      await a.control.idle();
+      expect(a.tracks).toHaveLength(1);
+      expect(a.tracks[0]?.stop).not.toHaveBeenCalled();
+    });
+  });
+
+  it('wartender neuer Leader: isWaiting, solange ein anderer Tab die Aufnahme-Sperre hält', async () => {
+    const locks = new FakeWebLocks();
+    const holder = await locks.acquire(new AbortController().signal);
+    const b = makeTab({ running: new Set(), maxRunning: 0 }, locks);
+    const seen: boolean[] = [];
+    b.control.subscribe(() => seen.push(b.control.isWaiting()));
+    lead(b, true);
+    await vi.waitFor(() => expect(b.control.isWaiting()).toBe(true));
+    expect(b.recorder.getStatus().state).toBe('idle');
+    holder?.();
+    await b.control.idle();
+    expect(b.control.isWaiting()).toBe(false);
+    expect(b.recorder.getStatus().state).toBe('recording');
+    expect(seen).toEqual([true, false]);
   });
 });

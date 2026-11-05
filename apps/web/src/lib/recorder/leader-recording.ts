@@ -63,6 +63,8 @@ export class LeaderRecording {
   private release: (() => void) | null = null;
   /** Nach einem Fehler nicht von selbst erneut öffnen (sonst Schleife); `retry()` erlaubt einen neuen Versuch */
   private failed = false;
+  private waiting = false;
+  private readonly listeners = new Set<() => void>();
   private readonly off: () => void;
   private disposed = false;
 
@@ -74,6 +76,22 @@ export class LeaderRecording {
       const s = this.recorder.getStatus().state;
       if (s === 'error' || s === 'stopped' || s === 'unsupported' || s === 'idle') this.releaseLock();
     });
+  }
+
+  /** Dieser Tab wartet darauf, dass ein anderer Tab die Aufnahme-Sperre freigibt (z. B. Mikrofon-Dialog dort offen) */
+  isWaiting = (): boolean => this.waiting;
+
+  subscribe = (fn: () => void): (() => void) => {
+    this.listeners.add(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
+  };
+
+  private setWaiting(on: boolean): void {
+    if (this.waiting === on) return;
+    this.waiting = on;
+    for (const fn of [...this.listeners]) fn();
   }
 
   /** Neuer Soll-Zustand */
@@ -153,7 +171,13 @@ export class LeaderRecording {
     if (!allowed || this.failed) return;
     const controller = new AbortController();
     this.abort = controller;
-    const release = await this.acquireLock(controller.signal);
+    this.setWaiting(true);
+    let release: (() => void) | null;
+    try {
+      release = await this.acquireLock(controller.signal);
+    } finally {
+      this.setWaiting(false);
+    }
     if (this.abort === controller) this.abort = null;
     if (!release) return; // abgebrochen: der neue Soll-Zustand ist bereits eingeplant
     if (this.epoch !== epoch) {

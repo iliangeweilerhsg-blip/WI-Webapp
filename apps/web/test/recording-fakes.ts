@@ -41,10 +41,16 @@ export function makeFakeMediaRecorder(shared: SharedRunning) {
   };
 }
 
-export function fakeStream(): MediaStream {
-  return {
-    getTracks: () => [{ readyState: 'live', stop: vi.fn(), onended: null }],
-  } as unknown as MediaStream;
+export interface FakeTrack {
+  readyState: string;
+  stop: ReturnType<typeof vi.fn>;
+  onended: (() => void) | null;
+}
+export type FakeStream = MediaStream & { tracks: FakeTrack[] };
+
+export function fakeStream(): FakeStream {
+  const tracks: FakeTrack[] = [{ readyState: 'live', stop: vi.fn(), onended: null }];
+  return { getTracks: () => tracks, tracks } as unknown as FakeStream;
 }
 
 /** Eine Web-Lock-Sperre mit Warteschlange (FIFO), abbrechbar; geteilt zwischen mehreren „Tabs“ */
@@ -78,6 +84,8 @@ export interface FakeRecording {
   env: RecordingEnv;
   mr: ReturnType<typeof makeFakeMediaRecorder>;
   getUserMedia: ReturnType<typeof vi.fn>;
+  /** Alle geöffneten Mikrofon-Spuren dieses Tabs */
+  tracks: FakeTrack[];
   store: MemoryRecorderStore;
   fetch: ReturnType<typeof vi.fn>;
 }
@@ -92,13 +100,20 @@ export function fakeRecording(
 ): FakeRecording {
   const shared = opts.shared ?? { running: new Set<object>(), maxRunning: 0 };
   const mr = makeFakeMediaRecorder(shared);
-  const getUserMedia = vi.fn(opts.getUserMedia ?? (async () => fakeStream()));
+  const tracks: FakeTrack[] = [];
+  const open = opts.getUserMedia ?? (async () => fakeStream());
+  const getUserMedia = vi.fn(async () => {
+    const stream = await open();
+    tracks.push(...((stream as Partial<FakeStream>).tracks ?? []));
+    return stream;
+  });
   const store = new MemoryRecorderStore();
   const fetch = vi.fn(async () => Response.json({}, { status: 201 }));
   const locks = opts.locks ?? new FakeWebLocks();
   return {
     mr,
     getUserMedia,
+    tracks,
     store,
     fetch,
     env: {
