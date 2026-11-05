@@ -8,6 +8,7 @@ import socket
 import threading
 import time
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ import psycopg
 from psycopg import sql
 from psycopg.pq import TransactionStatus
 
-from . import jobs
+from . import jobs, progress
 from .logging_setup import LOGGER_NAME, job_log_context
 from .registry import JobContext, LockLostError, NonRetryableError, Registry, default_registry
 
@@ -29,6 +30,24 @@ _WAKE_SLICE_SECONDS = 0.5  # So schnell reagiert die Schleife auf stop()
 ORPHAN_ERROR = "Verbindung während des Jobs verloren"
 
 _CONNECTION_ERRORS = (psycopg.OperationalError, psycopg.InterfaceError)
+
+
+@dataclass
+class _ProgressContext(JobContext):
+    """`JobContext`, dessen `finish` den Session-Fortschritt (§3) in derselben Transaktion
+    nachzieht. Die Session wird vor dem Job-Update gesperrt (Sperrreihenfolge §16.2)."""
+
+    job_type: str = ""
+
+    def finish(self, result: dict[str, Any]) -> None:
+        if not self.session_id:
+            super().finish(result)
+            return
+        with self.conn.transaction():
+            progress.lock_session(self.conn, self.session_id)
+            super().finish(result)
+            if self.lock_ok:
+                progress.refresh(self.conn, self.session_id, [self.job_type])
 
 
 class Worker:
@@ -94,7 +113,9 @@ class Worker:
             self._reconnect_delay = 1.0
             # Beim Verbinden kann kein eigener Job laufen: Locks aus einer abgebrochenen
             # Verbindung (auch Claim ohne Handler-Start, "unbekannter Job-Typ") freigeben.
-            orphaned = jobs.fail_own_running(work, self.worker_id, ORPHAN_ERROR)
+            with work.transaction():
+                orphaned = jobs.fail_own_running(work, self.worker_id, ORPHAN_ERROR)
+                progress.refresh_jobs(work, orphaned)
             if orphaned:
                 self.log.warning(
                     "Verwaiste eigene Jobs zurückgesetzt", extra={"count": len(orphaned)}
@@ -118,7 +139,9 @@ class Worker:
     def _recover(self, conn: psycopg.Connection[Any]) -> int:
         """Abgestürzte Jobs fremder Worker freigeben (Start und danach jede Minute)."""
         self._last_recover = time.monotonic()
-        rows = jobs.recover_stuck(conn, self.stuck_after)
+        with conn.transaction():
+            rows = jobs.recover_stuck(conn, self.stuck_after)
+            progress.refresh_jobs(conn, rows)
         if rows:
             self.log.warning("Hängende Jobs freigegeben", extra={"count": len(rows)})
             self._run_failure_hooks(conn, rows)
@@ -153,7 +176,8 @@ class Worker:
         """Arbeitet alle fälligen Jobs ab. Gibt die Anzahl bearbeiteter Jobs zurück."""
         count = 0
         while not self.stopping:
-            jobs.cancel_failed_dependents(conn)
+            with conn.transaction():
+                progress.refresh_jobs(conn, jobs.cancel_dependents(conn))
             job = jobs.claim_next(conn, self.worker_id)
             if job is None:
                 break
@@ -164,7 +188,13 @@ class Worker:
     def _finish_failed(
         self, conn: psycopg.Connection[Any], job: jobs.Job, error: str, *, retry: bool = True
     ) -> None:
-        state = jobs.fail(conn, job["id"], self.worker_id, error, retry=retry)
+        session_id = job["session_id"]
+        with conn.transaction():
+            if session_id:
+                progress.lock_session(conn, session_id)
+            state = jobs.fail(conn, job["id"], self.worker_id, error, retry=retry)
+            if state is not None and session_id:
+                progress.refresh(conn, session_id, [job["type"]])
         if state is None:
             self.log.warning("Lock verloren, Fehler verworfen", extra={"error": error})
         elif state == "fehler":
@@ -187,11 +217,17 @@ class Worker:
             beat.start()
             try:
                 payload = spec.validate(job["payload"])
-                ctx = JobContext(
-                    conn, self.data_dir, self.log, str(job_id), session_id, self.worker_id
+                ctx = _ProgressContext(
+                    conn,
+                    self.data_dir,
+                    self.log,
+                    str(job_id),
+                    session_id,
+                    self.worker_id,
+                    job_type=job["type"],
                 )
                 result = spec.fn(payload, ctx)
-                ok = self._complete(conn, ctx, job_id, result)
+                ok = self._complete(conn, ctx, job, result)
                 if ok:
                     self.log.info("Job fertig")
                 else:
@@ -213,7 +249,7 @@ class Worker:
                 beat.join(timeout=5)
 
     def _complete(
-        self, conn: psycopg.Connection[Any], ctx: JobContext, job_id: Any, result: dict[str, Any]
+        self, conn: psycopg.Connection[Any], ctx: JobContext, job: jobs.Job, result: dict[str, Any]
     ) -> bool:
         """Schreibt `fertig`. Ist die Verbindung nach der Berechnung weg, einmal auf frischer
         Verbindung wiederholen, damit lange Jobs nicht komplett neu laufen. Hat der Handler
@@ -224,12 +260,25 @@ class Worker:
         if not self._connection_lost(conn):
             try:
                 self._ensure_clean_connection(conn)
-                return jobs.complete(conn, job_id, self.worker_id, result)
+                return self._write_fertig(conn, job, result)
             except _CONNECTION_ERRORS:
                 pass
         self.log.warning("Verbindung nach der Berechnung verloren, schreibe Ergebnis neu")
         with self._connect() as fresh:
-            return jobs.complete(fresh, job_id, self.worker_id, result)
+            return self._write_fertig(fresh, job, result)
+
+    def _write_fertig(
+        self, conn: psycopg.Connection[Any], job: jobs.Job, result: dict[str, Any]
+    ) -> bool:
+        """`fertig` und Session-Fortschritt in einer Transaktion (Session zuerst gesperrt)."""
+        session_id = job["session_id"]
+        with conn.transaction():
+            if session_id:
+                progress.lock_session(conn, session_id)
+            ok = jobs.complete(conn, job["id"], self.worker_id, result)
+            if ok and session_id:
+                progress.refresh(conn, session_id, [job["type"]])
+            return ok
 
     @staticmethod
     def _connection_lost(conn: psycopg.Connection[Any]) -> bool:

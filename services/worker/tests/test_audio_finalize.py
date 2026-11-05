@@ -148,12 +148,7 @@ def worker(
     database_url: str, connect_kwargs: dict[str, Any], tmp_path: Path, schema: str
 ) -> Worker:
     reg = Registry()
-    reg.register(
-        "audio.finalize",
-        audio_finalize,
-        AudioFinalizePayload,
-        on_final_failure=af.mark_session_failed,
-    )
+    reg.register("audio.finalize", audio_finalize, AudioFinalizePayload)
     return Worker(
         database_url,
         tmp_path,

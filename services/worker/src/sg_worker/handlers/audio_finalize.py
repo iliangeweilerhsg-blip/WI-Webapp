@@ -50,6 +50,7 @@ from typing import Any
 import psycopg
 from sg_schemas.models import AudioFinalizePayload
 
+from .. import progress
 from ..registry import JobContext, LockLostError, NonRetryableError, PayloadError, handler
 from .pdf_ingest import sanitize_error
 
@@ -445,54 +446,6 @@ def _read_verified(path: Path, chunk: ChunkRow) -> bytes | None:
     return data
 
 
-#: Fasst alle `audio.finalize`-Jobs einer Session zusammen (mehrere Aufnahmen): `fehler`, sobald
-#: einer endgültig gescheitert ist, sonst `laeuft`/`wartet`, solange einer offen ist, sonst
-#: `fertig`.
-_SUMMARY_SQL = """
-SELECT CASE WHEN bool_or(state = 'fehler') THEN 'fehler'
-            WHEN bool_or(state = 'laeuft') THEN 'laeuft'
-            WHEN bool_or(state = 'wartet') THEN 'wartet'
-            WHEN bool_or(state = 'fertig') THEN 'fertig'
-            ELSE 'abgebrochen' END
-FROM job WHERE session_id = session.id AND type = 'audio.finalize' AND deleted_at IS NULL
-"""
-
-
-def update_session(conn: psycopg.Connection[Any], session_id: uuid.UUID) -> None:
-    """Session-Fortschritt (§3): `processing['audio.finalize']` aus allen Jobs der Session
-    (`_SUMMARY_SQL`). Ist die Session `beendet` und läuft kein weiterer Job mehr, wird sie
-    `verarbeitet`; spätere Jobs ändern den Zustand nicht mehr. Danach `sg_session`."""
-    row = conn.execute(
-        "UPDATE session SET processing = COALESCE(processing, '{}'::jsonb) "
-        f"|| jsonb_build_object('audio.finalize', COALESCE(({_SUMMARY_SQL}), 'fertig')), "
-        "updated_at = now() WHERE id = %s AND deleted_at IS NULL RETURNING state",
-        (session_id,),
-    ).fetchone()
-    if row is None:
-        return
-    if row[0] == "beendet":
-        conn.execute(
-            "UPDATE session SET state = 'verarbeitet', updated_at = now() "
-            "WHERE id = %s AND state = 'beendet' AND NOT EXISTS ("
-            "  SELECT 1 FROM job WHERE session_id = %s AND deleted_at IS NULL "
-            "  AND state IN ('wartet', 'laeuft'))",
-            (session_id, session_id),
-        )
-    conn.execute("SELECT pg_notify('sg_session', %s)", (str(session_id),))
-
-
-def mark_session_failed(conn: psycopg.Connection[Any], payload: dict[str, Any]) -> None:
-    """Hook `on_final_failure`: Session-Fortschritt auch bei endgültigem Scheitern. Die Session
-    kommt aus `recording.session_id` (der Job ist schon `fehler`)."""
-    try:
-        recording_id = uuid.UUID(str(payload.get("recording_id")))
-    except ValueError:
-        return
-    row = conn.execute("SELECT session_id FROM recording WHERE id = %s", (recording_id,)).fetchone()
-    if row is not None:
-        update_session(conn, row[0])
-
-
 def _cleanup_old_work(rec_dir: Path) -> None:
     """Reste abgebrochener Läufe entfernen."""
     if rec_dir.is_dir():
@@ -582,7 +535,7 @@ def _decode_pieces(
     return kept, bad, pieces, losses
 
 
-@handler("audio.finalize", payload_type=AudioFinalizePayload, on_final_failure=mark_session_failed)
+@handler("audio.finalize", payload_type=AudioFinalizePayload)
 def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, Any]:
     started = time.monotonic()
     recording_id = uuid.UUID(payload.recording_id)
@@ -682,6 +635,10 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
         "job_duration_ms": int((time.monotonic() - started) * 1000),
     }
     with ctx.conn.transaction():
+        # Sperrreihenfolge §16.2: Session vor Aufnahme. Den Session-Fortschritt zieht
+        # `ctx.finish` in derselben Transaktion nach (Job-Schleife, progress.py).
+        if ctx.session_id:
+            progress.lock_session(ctx.conn, ctx.session_id)
         ctx.conn.execute(
             "UPDATE recording SET duration_ms = %s, state = %s, updated_at = now() WHERE id = %s",
             (audio_ms, state, recording_id),
@@ -689,11 +646,4 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
         ctx.finish(result)
         if not ctx.lock_ok:
             raise LockLostError(ctx.job_id)
-        if ctx.session_id:
-            try:
-                session_uuid = uuid.UUID(ctx.session_id)
-            except ValueError:
-                session_uuid = None
-            if session_uuid is not None:
-                update_session(ctx.conn, session_uuid)
     return result

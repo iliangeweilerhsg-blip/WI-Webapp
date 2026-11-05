@@ -117,18 +117,28 @@ def fail_own_running(conn: Conn, worker_id: str, error: str) -> list[Job]:
         return cur.fetchall()
 
 
-def cancel_failed_dependents(conn: Conn) -> int:
-    """Bricht wartende Jobs mit gescheiterter oder unbekannter Abhängigkeit ab (kaskadierend)."""
-    total = 0
-    with conn.cursor() as cur:
+def cancel_dependents(conn: Conn) -> list[Job]:
+    """Bricht wartende Jobs mit gescheiterter oder unbekannter Abhängigkeit ab (kaskadierend).
+
+    Gibt die abgebrochenen Jobs (id, type, session_id) zurück, damit der Aufrufer den
+    Session-Fortschritt in derselben Transaktion nachziehen kann.
+    """
+    cancelled: list[Job] = []
+    with conn.cursor(row_factory=dict_row) as cur:
         while True:
             changed = 0
             for sql in (_CANCEL_UNKNOWN_SQL, _CANCEL_FAILED_SQL):
-                cur.execute(sql)
-                changed += cur.rowcount
+                cur.execute(sql + " RETURNING id, type, session_id")
+                rows = cur.fetchall()
+                cancelled.extend(rows)
+                changed += len(rows)
             if changed == 0:
-                return total
-            total += changed
+                return cancelled
+
+
+def cancel_failed_dependents(conn: Conn) -> int:
+    """Wie `cancel_dependents`, gibt nur die Anzahl zurück."""
+    return len(cancel_dependents(conn))
 
 
 def claim_next(conn: Conn, worker_id: str) -> Job | None:
