@@ -698,7 +698,8 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
   - `POST /backup` legt die `backup_run`-Zeile selbst an und startet `node infra/sg/src/main.ts backup --trigger … --run-id …` (Ausgabe in `logs/backup.log`). Ein `laeuft` älter als 6 Stunden gilt als abgestürzt.
   - `stale` ist auch ohne jedes erfolgreiche Backup `true`.
   - Der Zeitplan (Backup und `maintenance.nightly` um 03:30) läuft minütlich im Core und holt Verpasstes nach. Ein fehlgeschlagener geplanter Lauf wird am selben Tag nicht wiederholt.
-  - `backup_encryption = true` lässt den Lauf mit Hinweis scheitern (`age` ist P1, nie unverschlüsselt sichern, wenn Verschlüsselung gewünscht ist).
+  - `backup_encryption = true` lässt den Lauf mit Hinweis scheitern (`age` ist P1, nie unverschlüsselt sichern, wenn Verschlüsselung gewünscht ist). Neu setzen lässt es sich nicht mehr (`PATCH /settings` → `400 backup_encryption_unavailable`, §14.1). Ein Altbestand `true` bleibt bewusst fail-closed: Der Lauf scheitert mit klarer Meldung, die Oberfläche zeigt einen Hinweis mit Knopf „Ohne Verschlüsselung sichern“ (setzt ausdrücklich `false`).
+  - **Backup-Ziel:** `sg backup` prüft das Ziel mit demselben Helfer wie der Core (`@sg/shared/backup-target`, §14.1): absoluter Pfad, `realpath`, kein Systemordner, **der ganze Datenordner ist gesperrt** (auch `backups/` darin und `sg backup --ziel <datenordner>/backups`; ein Backup dort schützt nicht gegen Plattendefekt). Einziger Unterschied: Die CLI legt einen fehlenden Zielordner an (Elternordner muss existieren). `copyTree` überspringt zusätzlich `*.partial` als zweite Schutzlinie. Der Datenordner enthält kein `backups/` mehr.
   - `sg migrate`/`sg start` sichern vor ausstehenden Migrationen (`vor_migration`), wenn ein Ziel gesetzt ist; scheitert es, wird nicht migriert (`--ohne-backup` übergeht das).
   - `sg restore` (ohne Stand: Liste) spielt in eine neue Datenbank und neue Ordner ein und tauscht danach. Die alte Datenbank (`<db>_vor_restore_<zeit>`) und Ordner (`media.vor-restore-<zeit>`) bleiben liegen. Der monatliche automatische Test (`sg restore --test`) ist noch nicht eingeplant.
 
@@ -730,7 +731,8 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 - `GET /settings` füllt fehlende Felder mit den Standards. `PATCH /settings` führt Feld für Feld zusammen.
 - `general.data_dir` ist nur lesbar (`SG_DATA_DIR`).
 - **Keine feldübergreifenden Regeln in Phase 1.** Es gelten nur die Schemaregeln je Feld (z. B. darf „Stopp spätestens“ vor „Stopp nach Kalenderende“ liegen).
-- **`data.backup_target`:** Der Core speichert den normalisierten Pfad (`path.resolve`, dann `realpath`). Abgelehnt werden `SG_DATA_DIR` und Ordner darin sowie `/proc`, `/sys`, `/dev`, unter macOS `/System` und `/private/var/db`. Symlinks sind erlaubt (gespeichert wird das Ziel); T1-18 prüft das Ziel beim Backup erneut. Änderungen nur lokal (§7.5).
+- **`data.backup_encryption`:** `true` ist nicht setzbar, solange Verschlüsselung (`age`) nicht eingebunden ist: `400 backup_encryption_unavailable`. `false` ist immer erlaubt. Die Oberfläche bietet die Option nicht an. Altbestand `true`: siehe §13 (Backup scheitert klar, Hinweis mit Umschalter in der Oberfläche; keine stille Migration, damit nie unbemerkt unverschlüsselt gesichert wird).
+- **`data.backup_target`:** Die Prüfung liegt im gemeinsamen Helfer `packages/shared/src/backup-target.ts` (Import `@sg/shared/backup-target`, nicht im Barrel, weil er `node:fs` nutzt und die Web-App den Barrel bündelt). Der Core prüft asynchron (`checkBackupTargetAsync`, blockiert die Event-Loop bei hängenden Netz-/iCloud-Laufwerken nicht), die CLI synchron (`checkBackupTarget`), beide mit denselben Regeln. Der Core speichert den normalisierten Pfad (`path.resolve`, dann natives `realpath`, `..` wird erst nach dem Auflösen von Symlinks ausgewertet). Zusätzlich werden `dev`/`ino` aller vorhandenen Vorfahren mit Datenordner, `media/` und `vault/` verglichen (Groß-/Kleinschreibung und NFD auf macOS, Bind-Mounts, Firmlinks). Abgelehnt werden `SG_DATA_DIR` und Ordner darin sowie `/proc`, `/sys`, `/dev`, unter macOS `/System` und `/private/var/db`. Symlinks sind erlaubt (gespeichert wird das Ziel); T1-18 prüft das Ziel beim Backup erneut. Änderungen nur lokal (§7.5).
 - `lecture.microphone_id`: höchstens 256 Zeichen.
 - **`general.appearance`** ist die Standard-Darstellung. Die Web-App wendet sie an, solange auf dem Gerät keine eigene Wahl („Hell“/„Dunkel“) gespeichert ist; „Wie Standard“ löscht die Geräte-Wahl.
 
@@ -766,7 +768,7 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `range_not_satisfiable` | 416 | `Range` liegt außerhalb der Datei (`GET …/file`, `GET …/audio`) |
 | `backup_running`, `backup_target_missing`, `restore_parent_deleted`, `restore_conflict` | 409 | Daten (§13) |
 | `pairing_window_closed` | 409 | Kopplungsfenster zu oder abgelaufen (§12) |
-| `chunk_header_invalid`, `backup_target_invalid`, `upload_aborted` | 400 | Anfrage ungültig (`upload_aborted`: der Client hat den Upload abgebrochen) |
+| `chunk_header_invalid`, `backup_target_invalid`, `backup_encryption_unavailable`, `upload_aborted` | 400 | Anfrage ungültig (`upload_aborted`: der Client hat den Upload abgebrochen; `backup_encryption_unavailable`: Backup-Verschlüsselung lässt sich nicht einschalten, §14.1) |
 | `pairing_code_invalid`, `pairing_request_rejected`, `local_only` | 403 | Code falsch, Anfrage abgelehnt bzw. Route nur lokal |
 | `pairing_request_not_found` | 404 | Kopplungsanfrage unbekannt |
 | `file_too_large`, `chunk_too_large` | 413 | Größe |

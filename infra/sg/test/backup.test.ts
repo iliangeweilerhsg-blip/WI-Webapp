@@ -8,6 +8,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  realpathSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -287,9 +288,10 @@ describe('Ziel prüfen', () => {
     expect(() => validateTarget('relativ/pfad', dataDir)).toThrow(/absolut/);
     expect(() => validateTarget(join(dataDir, 'media'), dataDir)).toThrow(/media/);
     expect(() => validateTarget(join(dataDir, 'vault', 'x'), dataDir)).toThrow(/vault/);
-    // backups/ im Datenordner ist erlaubt (08 §7)
+    // der ganze Datenordner ist gesperrt, auch backups/ darin
     mkdirSync(join(dataDir, 'backups'));
-    expect(validateTarget(join(dataDir, 'backups'), dataDir)).toBe(join(dataDir, 'backups'));
+    expect(() => validateTarget(join(dataDir, 'backups'), dataDir)).toThrow(/Datenordner.*externe/s);
+    expect(() => validateTarget(dataDir, dataDir)).toThrow(/Datenordner/);
   });
 });
 
@@ -732,6 +734,35 @@ describe('recoverRestore (Journal)', () => {
     renameSync(join(s.dataDir, 'media'), join(s.dataDir, `media.vor-restore-${s.stamp}`));
     expect(await recoverRestore(s.deps)).toBe('zurueckgebaut');
     expect(readFileSync(join(s.dataDir, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+  });
+});
+
+describe('Ziel prüfen: gemeinsame Regeln mit dem Core', () => {
+  it('lehnt Systemordner ab', () => {
+    const dataDir = tmp();
+    expect(() => validateTarget('/proc', dataDir)).toThrow(/System/);
+    expect(() => validateTarget('/dev/shm', dataDir)).toThrow(/System/);
+  });
+
+  it('legt fehlenden Zielordner an, wenn der Elternordner existiert; sonst Fehler', () => {
+    const dataDir = tmp();
+    const parent = tmp();
+    expect(validateTarget(join(parent, 'neu'), dataDir)).toBe(join(realpathSync(parent), 'neu'));
+    expect(() => validateTarget(join(parent, 'a', 'b'), dataDir)).toThrow(/nicht vorhanden/);
+  });
+
+  it('löst Symlinks auf: Ergebnis ist der echte Pfad', () => {
+    const dataDir = tmp();
+    const real = tmp();
+    const link = join(tmp(), 'link');
+    symlinkSync(real, link);
+    expect(validateTarget(link, dataDir)).toBe(realpathSync(real));
+  });
+
+  it('lehnt eine Datei als Ziel ab', () => {
+    const file = join(tmp(), 'datei');
+    writeFileSync(file, 'x');
+    expect(() => validateTarget(file, tmp())).toThrow(/kein Ordner/);
   });
 });
 

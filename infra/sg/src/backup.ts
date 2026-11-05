@@ -13,14 +13,14 @@ import {
   createReadStream,
   existsSync,
   mkdirSync,
-  realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { join } from 'node:path';
 import { SINGLE_USER_ID } from '@sg/shared';
+import { checkBackupTarget } from '@sg/shared/backup-target';
 import {
   copyTree,
   DUMP_FILE,
@@ -130,40 +130,13 @@ export async function readBackupSettings(pg: PgAccess): Promise<BackupSettings> 
 }
 
 /**
- * Prüft das Ziel: absoluter Pfad, nicht in `media/` oder `vault/` (sonst kopiert sich das Backup in sich selbst),
- * Ordner vorhanden oder wenigstens der Elternordner (ein nicht eingehängter Datenträger legt keinen Ordner an).
+ * Prüft das Ziel mit der gemeinsamen Regel aus `@sg/shared/backup-target` (wie `PATCH /settings`): absoluter Pfad,
+ * Symlinks aufgelöst, nicht im Datenordner (auch nicht in `media/` oder `vault/`: sonst kopiert sich das Backup in
+ * sich selbst), kein Systemordner. Ein fehlender Ordner wird angelegt, wenn der Elternordner existiert (ein nicht eingehängter
+ * Datenträger legt keinen Ordner an).
  */
-/** `realpath` des tiefsten vorhandenen Elternordners plus der noch fehlende Rest */
-function realResolve(path: string): string {
-  const rest: string[] = [];
-  let current = resolve(path);
-  while (!existsSync(current)) {
-    rest.unshift(current.slice(resolve(current, '..').length + 1));
-    const parent = resolve(current, '..');
-    if (parent === current) break;
-    current = parent;
-  }
-  return join(realpathSync(current), ...rest);
-}
-
 export function validateTarget(target: string, dataDir: string): string {
-  if (!isAbsolute(target)) throw new Error('Das Backup-Ziel muss ein absoluter Pfad sein.');
-  // Symbolische Links auflösen, bevor geprüft wird, ob das Ziel in media/ oder vault/ liegt
-  const full = realResolve(target);
-  for (const sub of ['media', 'vault']) {
-    const inside = relative(realResolve(join(dataDir, sub)), full);
-    if (inside === '' || (!inside.startsWith('..') && !isAbsolute(inside))) {
-      throw new Error(`Das Backup-Ziel darf nicht in „${sub}“ des Datenordners liegen.`);
-    }
-  }
-  if (!existsSync(full)) {
-    if (!existsSync(resolve(full, '..'))) {
-      throw new Error('Das Backup-Ziel ist nicht vorhanden (Datenträger nicht angeschlossen?).');
-    }
-    mkdirSync(full);
-  }
-  if (!statSync(full).isDirectory()) throw new Error('Das Backup-Ziel ist kein Ordner.');
-  return full;
+  return checkBackupTarget(target, dataDir, { createMissing: true });
 }
 
 export async function countObjects(pg: PgAccess, db?: string): Promise<Record<string, number>> {
@@ -281,7 +254,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     if (!targetSetting) return await fail('Es ist kein Backup-Ziel eingestellt (Einstellungen → Daten).', 2);
     if (settings.encryption) {
       return await fail(
-        'Verschlüsselte Backups (age) sind noch nicht umgesetzt. Schalte „Backup verschlüsseln“ aus, um unverschlüsselt zu sichern.',
+        'Verschlüsselte Backups (age) sind noch nicht umgesetzt. Wähle in den Einstellungen → Daten „Ohne Verschlüsselung sichern“, um unverschlüsselt zu sichern.',
         2,
       );
     }

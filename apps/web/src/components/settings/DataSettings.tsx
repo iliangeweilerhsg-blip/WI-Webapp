@@ -88,6 +88,34 @@ export function DataSettings() {
         {status.next_run_at ? ` · nächstes: ${new Date(status.next_run_at).toLocaleString('de-DE')}` : ''}
       </p>
 
+      {data.backup_encryption && data.backup_target !== null ? (
+        <div role="status" className="space-y-2 rounded-md border border-border bg-accent-soft p-3 text-sm">
+          <p>
+            „Backup verschlüsseln“ ist noch eingeschaltet, Verschlüsselung ist aber noch nicht verfügbar.
+            Deshalb schlagen Backups fehl, es wird nie unverschlüsselt gesichert, solange die Option an ist.
+          </p>
+          <button
+            type="button"
+            disabled={update.isPending}
+            className={smallButton}
+            onClick={() =>
+              update.mutate(
+                { data: { backup_encryption: false } },
+                {
+                  onSuccess: () =>
+                    toast.show({
+                      message: 'Backups laufen jetzt unverschlüsselt',
+                    }),
+                  onError: fail,
+                },
+              )
+            }
+          >
+            Ohne Verschlüsselung sichern
+          </button>
+        </div>
+      ) : null}
+
       <form onSubmit={save} className="flex flex-wrap items-end gap-3">
         <label className="flex min-w-64 flex-1 flex-col gap-1 text-sm">
           Backup-Ziel (absoluter Ordnerpfad)

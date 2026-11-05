@@ -253,7 +253,6 @@ Texte in Markdown mit LaTeX (`$…$`, `$$…$$`).
 │   ├── imports/<session_id>/…
 │   └── videos/<video_id>.mp4, <video_id>.vtt
 ├── vault/             (§8)
-├── backups/           (falls lokales Ziel)
 ├── tmp/moodle-uploads/<upload_id>  (Uploads für Moodle-Aktionen, verfallen nach 24 h, §9.3)
 └── logs/              core.log, worker.log (rotierend, 14 Tage)
 ```
