@@ -13,7 +13,7 @@ import Fastify from 'fastify';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { hasOpenPermissions } from '../../src/config.ts';
-import { initialLogDay, loggerOptions, redactUrl, rotateLogs } from '../../src/logger.ts';
+import { createLogger, initialLogDay, loggerOptions, redactUrl, rotateLogs } from '../../src/logger.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -110,6 +110,38 @@ describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
     expect(redactUrl('/x?')).toBe('/x?');
   });
 
+  it('Namensgrenzen: harmlose Parameter bleiben lesbar, geheime werden geschwärzt', () => {
+    for (const name of ['author', 'keyword', 'sort_key', 'session_id', 'limit', 'codec', 'tokens']) {
+      expect(redactUrl(`/x?${name}=v`)).toBe(`/x?${name}=v`);
+    }
+    for (const name of [
+      'pairing_id',
+      'PAIRING_ID',
+      'pairing%5Fid',
+      'token',
+      'access_token',
+      'wstoken',
+      'device-token',
+      'code',
+      'api_key',
+      'secret',
+    ]) {
+      expect(redactUrl(`/x?a=1&${name}=v`)).toBe(`/x?a=1&${name}=[Redacted]`);
+    }
+  });
+
+  it('printf-Argumente und Fehlerobjekte werden geschwärzt', () => {
+    const lines: string[] = [];
+    const logger = pino(loggerOptions({ logLevel: 'trace' }), { write: (c: string) => void lines.push(c) });
+    logger.info('Route %s', '/x?pairing_id=GEHEIM1');
+    logger.info({ a: 1 }, 'Route %s und %s', 'ok', '/y?token=GEHEIM2');
+    logger.error(new Error('kaputt bei /z?pairing_id=GEHEIM3'));
+    logger.error({ err: new Error('bei /z?access_token=GEHEIM4') }, 'Fehler');
+    const log = lines.join('');
+    expect(log).not.toMatch(/GEHEIM/);
+    expect(log).toContain('"msg":"Route /x?pairing_id=[Redacted]"');
+  });
+
   it('die pairing_id taucht im echten Log-Strom nicht auf (Request- und Fehlerzeilen)', async () => {
     const lines: string[] = [];
     const stream = { write: (chunk: string) => void lines.push(chunk) };
@@ -127,5 +159,16 @@ describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
     expect(log).toContain('request completed');
     expect(log).not.toContain(SECRET);
     expect(log).toContain('pairing_id=[Redacted]&x=1');
+  });
+});
+
+describe('Log-Schwärzung Moodle-Token (08 §9.1)', () => {
+  it('schwärzt wstoken und token, auch eine Ebene tiefer', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-log-'));
+    const logger = createLogger({ dataDir: dir, logLevel: 'info' });
+    logger.info({ wstoken: 'geheim-eins', token: 'geheim-zwei', req: { token: 'geheim-drei' } }, 'test');
+    const text = readFileSync(join(dir, 'logs', 'core.log'), 'utf8');
+    expect(text).toContain('[Redacted]');
+    expect(text).not.toMatch(/geheim-/);
   });
 });

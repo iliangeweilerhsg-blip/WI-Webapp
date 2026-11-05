@@ -1,0 +1,8 @@
+{
+  "state": "ok",
+  "site_url": "https://moodle.example.org",
+  "site_name": "Moodle Beispiel",
+  "user_fullname": "Erika Muster",
+  "token_valid_until": "2027-01-27",
+  "checked_at": "2026-11-04T12:00:00Z"
+}

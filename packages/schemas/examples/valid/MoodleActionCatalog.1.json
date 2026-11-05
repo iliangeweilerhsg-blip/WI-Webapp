@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "id": "completion.set",
+      "label": "Als erledigt markieren",
+      "description": "Setzt den Erledigt-Status einer Aktivität in Moodle.",
+      "risk": "aenderbar",
+      "needs_confirmation": false,
+      "available": true
+    }
+  ]
+}

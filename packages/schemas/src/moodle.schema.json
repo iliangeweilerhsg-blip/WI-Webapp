@@ -1,0 +1,1431 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Moodle-Anbindung (F-MDL-01..06, 08 §9)",
+  "$defs": {
+    "MoodleConnectionState": {
+      "type": "string",
+      "enum": ["nicht_eingerichtet", "ok", "laeuft_bald_ab", "abgelaufen", "ungueltig", "nicht_erreichbar"],
+      "description": "Zustand des Moodle-Zugangs (F-MDL-01)"
+    },
+    "MoodleStatus": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/status (08 §9.2)",
+      "required": ["state", "site_url", "site_name", "user_fullname", "token_valid_until", "checked_at"],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/MoodleConnectionState"
+        },
+        "site_url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "site_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "user_fullname": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "token_valid_until": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checked_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MoodleFile": {
+      "type": "object",
+      "description": "Datei in Moodle (Aktivität, Anhang, Abgabe)",
+      "required": ["ref", "filename", "mime_type", "size_bytes", "modified_at"],
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Pfad hinter webservice/pluginfile.php, für GET /moodle/file?ref"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "mime_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modified_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MoodleCourse": {
+      "type": "object",
+      "description": "Kurs, in den der Nutzer eingeschrieben ist. module_id: zugeordnetes Modul (F-MDL-03)",
+      "required": [
+        "moodle_id",
+        "short_name",
+        "full_name",
+        "start_date",
+        "end_date",
+        "url",
+        "last_access_at",
+        "module_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "moodle_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "short_name": {
+          "type": "string"
+        },
+        "full_name": {
+          "type": "string"
+        },
+        "start_date": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "end_date": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "last_access_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "module_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MoodleCourseList": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/courses",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleCourse"
+          }
+        }
+      }
+    },
+    "MoodleCompletion": {
+      "type": "string",
+      "enum": ["offen", "erledigt"],
+      "description": "Erledigt-Status einer Aktivität"
+    },
+    "MoodleActivity": {
+      "type": "object",
+      "description": "Element eines Kursabschnitts",
+      "required": [
+        "cmid",
+        "type",
+        "name",
+        "url",
+        "visible",
+        "description_html",
+        "completion",
+        "completion_manual",
+        "instance_id",
+        "files"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "cmid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "type": {
+          "type": "string",
+          "description": "Moodle-modname, z. B. resource, folder, assign, forum, quiz, url, page, label"
+        },
+        "name": {
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "description_html": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MoodleCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "completion_manual": {
+          "type": "boolean",
+          "description": "true = der Nutzer darf den Status selbst setzen (completion.set)"
+        },
+        "instance_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Moodle-ID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleFile"
+          }
+        }
+      }
+    },
+    "MoodleSection": {
+      "type": "object",
+      "required": ["moodle_id", "index", "name", "visible", "activities"],
+      "additionalProperties": false,
+      "properties": {
+        "moodle_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "visible": {
+          "type": "boolean"
+        },
+        "activities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleActivity"
+          }
+        }
+      }
+    },
+    "MoodleCourseContents": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/courses/{course_id}/contents",
+      "required": ["course_id", "sections"],
+      "additionalProperties": false,
+      "properties": {
+        "course_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleSection"
+          }
+        }
+      }
+    },
+    "MoodleAssignment": {
+      "type": "object",
+      "description": "Aufgabe mit Abgabe",
+      "required": [
+        "moodle_id",
+        "cmid",
+        "course_id",
+        "name",
+        "due_at",
+        "cutoff_at",
+        "opens_at",
+        "intro_html",
+        "intro_files",
+        "submission_types",
+        "requires_statement",
+        "requires_submit"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "moodle_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "cmid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "course_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "name": {
+          "type": "string"
+        },
+        "due_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cutoff_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opens_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intro_html": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "intro_files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleFile"
+          }
+        },
+        "submission_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["file", "onlinetext"]
+          }
+        },
+        "requires_statement": {
+          "type": "boolean",
+          "description": "Einreichen verlangt die Erklärung zur Eigenständigkeit (accept_statement)"
+        },
+        "requires_submit": {
+          "type": "boolean",
+          "description": "true = Entwurf muss ausdrücklich eingereicht werden (assign.submit)"
+        }
+      }
+    },
+    "MoodleAssignmentList": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/assignments",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleAssignment"
+          }
+        }
+      }
+    },
+    "MoodleSubmissionState": {
+      "type": "string",
+      "enum": ["keine", "entwurf", "eingereicht"]
+    },
+    "MoodleSubmissionStatus": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/assignments/{assignment_id}/submission",
+      "required": [
+        "assignment_id",
+        "state",
+        "graded",
+        "grade",
+        "feedback_html",
+        "last_modified_at",
+        "can_edit",
+        "can_submit",
+        "files",
+        "online_text_html"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "assignment_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "state": {
+          "$ref": "#/$defs/MoodleSubmissionState"
+        },
+        "graded": {
+          "type": "boolean"
+        },
+        "grade": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feedback_html": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "last_modified_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "can_edit": {
+          "type": "boolean"
+        },
+        "can_submit": {
+          "type": "boolean"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleFile"
+          }
+        },
+        "online_text_html": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MoodleForum": {
+      "type": "object",
+      "required": ["moodle_id", "cmid", "course_id", "name", "type", "can_post"],
+      "additionalProperties": false,
+      "properties": {
+        "moodle_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "cmid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "course_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "description": "Moodle-Forumtyp, z. B. news, general, qanda"
+        },
+        "can_post": {
+          "type": "boolean"
+        }
+      }
+    },
+    "MoodleForumList": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/forums",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleForum"
+          }
+        }
+      }
+    },
+    "MoodleDiscussion": {
+      "type": "object",
+      "required": [
+        "moodle_id",
+        "forum_id",
+        "first_post_id",
+        "subject",
+        "author_name",
+        "created_at",
+        "modified_at",
+        "reply_count",
+        "pinned"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "moodle_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "forum_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "first_post_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "author_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "modified_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "reply_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pinned": {
+          "type": "boolean"
+        }
+      }
+    },
+    "MoodleDiscussionList": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/forums/{forum_id}/discussions",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleDiscussion"
+          }
+        }
+      }
+    },
+    "MoodlePost": {
+      "type": "object",
+      "required": [
+        "moodle_id",
+        "discussion_id",
+        "parent_id",
+        "subject",
+        "message_html",
+        "author_name",
+        "created_at",
+        "can_reply",
+        "attachments"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "moodle_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "discussion_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Moodle-ID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "type": "string"
+        },
+        "message_html": {
+          "type": "string"
+        },
+        "author_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "can_reply": {
+          "type": "boolean"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleFile"
+          }
+        }
+      }
+    },
+    "MoodlePostList": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/discussions/{discussion_id}/posts",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodlePost"
+          }
+        }
+      }
+    },
+    "MoodleDeadline": {
+      "type": "object",
+      "description": "Kommende Frist aus dem Moodle-Kalender",
+      "required": [
+        "event_id",
+        "course_id",
+        "cmid",
+        "activity_type",
+        "name",
+        "due_at",
+        "url",
+        "action_required"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "course_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Moodle-ID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cmid": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Moodle-ID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "activity_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "due_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_required": {
+          "type": "boolean",
+          "description": "Moodle erwartet noch eine Handlung (z. B. Abgabe fehlt)"
+        }
+      }
+    },
+    "MoodleDeadlineList": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/deadlines",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleDeadline"
+          }
+        }
+      }
+    },
+    "MoodleGradeItem": {
+      "type": "object",
+      "description": "Zeile aus der Notenübersicht. Werte als Text, wie Moodle sie formatiert",
+      "required": ["course_id", "name", "item_type", "cmid", "grade", "range", "percentage", "feedback_html"],
+      "additionalProperties": false,
+      "properties": {
+        "course_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "name": {
+          "type": "string"
+        },
+        "item_type": {
+          "type": "string",
+          "description": "course, mod, category, manual"
+        },
+        "cmid": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Moodle-ID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "grade": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "range": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "percentage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "feedback_html": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MoodleGradeList": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/grades",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleGradeItem"
+          }
+        }
+      }
+    },
+    "MoodleQuiz": {
+      "type": "object",
+      "description": "Quiz, nur zur Anzeige. Versuche laufen nie über die App (F-MDL-05)",
+      "required": [
+        "moodle_id",
+        "cmid",
+        "course_id",
+        "name",
+        "opens_at",
+        "closes_at",
+        "attempts_allowed",
+        "time_limit_minutes",
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "moodle_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "cmid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "course_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "name": {
+          "type": "string"
+        },
+        "opens_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "closes_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempts_allowed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "0 = unbegrenzt"
+        },
+        "time_limit_minutes": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri"
+        }
+      }
+    },
+    "MoodleQuizList": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/quizzes",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleQuiz"
+          }
+        }
+      }
+    },
+    "MoodleNotification": {
+      "type": "object",
+      "required": ["moodle_id", "subject", "text", "created_at", "read", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "moodle_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "subject": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "read": {
+          "type": "boolean"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MoodleNotificationList": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/notifications",
+      "required": ["items", "unread_count"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleNotification"
+          }
+        },
+        "unread_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "MoodleActionId": {
+      "type": "string",
+      "enum": [
+        "assign.save_draft",
+        "assign.submit",
+        "forum.create_discussion",
+        "forum.reply",
+        "completion.set",
+        "calendar.create_event",
+        "message.send",
+        "notifications.mark_read",
+        "files.upload_private"
+      ],
+      "description": "Aktionskatalog (F-MDL-05, 08 §9.3)"
+    },
+    "MoodleActionRisk": {
+      "type": "string",
+      "enum": ["harmlos", "aenderbar", "endgueltig", "oeffentlich"],
+      "description": "endgueltig und oeffentlich brauchen eine Bestätigung (F-MDL-06)"
+    },
+    "MoodleActionInfo": {
+      "type": "object",
+      "required": ["id", "label", "description", "risk", "needs_confirmation", "available"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/MoodleActionId"
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "risk": {
+          "$ref": "#/$defs/MoodleActionRisk"
+        },
+        "needs_confirmation": {
+          "type": "boolean"
+        },
+        "available": {
+          "type": "boolean",
+          "description": "false = nötige wsfunction für den Token nicht freigegeben"
+        }
+      }
+    },
+    "MoodleActionCatalog": {
+      "type": "object",
+      "description": "Antwort von GET /moodle/actions",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleActionInfo"
+          }
+        }
+      }
+    },
+    "MoodleActionRequest": {
+      "type": "object",
+      "description": "Body von POST /moodle/actions/{action_id}/preview. params nach MoodleActionParams<Name>",
+      "required": ["params"],
+      "additionalProperties": false,
+      "properties": {
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "MoodleActionExecute": {
+      "type": "object",
+      "description": "Body von POST /moodle/actions/{action_id}/execute",
+      "required": ["params"],
+      "additionalProperties": false,
+      "properties": {
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "confirmation_token": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 16
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MoodleActionPreview": {
+      "type": "object",
+      "description": "Antwort der Vorschau. confirmation_token nur bei needs_confirmation",
+      "required": [
+        "action_id",
+        "risk",
+        "needs_confirmation",
+        "summary",
+        "warnings",
+        "details",
+        "confirmation_token",
+        "expires_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "$ref": "#/$defs/MoodleActionId"
+        },
+        "risk": {
+          "$ref": "#/$defs/MoodleActionRisk"
+        },
+        "needs_confirmation": {
+          "type": "boolean"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Ein Satz in Klartext, was passieren wird"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "confirmation_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MoodleActionResult": {
+      "type": "object",
+      "description": "Antwort von execute bei Erfolg",
+      "required": ["action_id", "summary", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "action_id": {
+          "$ref": "#/$defs/MoodleActionId"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "result": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "MoodleUpload": {
+      "type": "object",
+      "description": "Antwort von POST /moodle/uploads",
+      "required": ["upload_id", "filename", "size_bytes", "expires_at"],
+      "additionalProperties": false,
+      "properties": {
+        "upload_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "filename": {
+          "type": "string"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "MoodleActionParamsAssignSaveDraft": {
+      "type": "object",
+      "description": "assign.save_draft: mindestens upload_ids oder online_text_html",
+      "required": ["assignment_id"],
+      "additionalProperties": false,
+      "properties": {
+        "assignment_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "upload_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "online_text_html": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        }
+      }
+    },
+    "MoodleActionParamsAssignSubmit": {
+      "type": "object",
+      "description": "assign.submit",
+      "required": ["assignment_id", "accept_statement"],
+      "additionalProperties": false,
+      "properties": {
+        "assignment_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "accept_statement": {
+          "type": "boolean"
+        }
+      }
+    },
+    "MoodleActionParamsForumCreateDiscussion": {
+      "type": "object",
+      "description": "forum.create_discussion",
+      "required": ["forum_id", "subject", "message_html"],
+      "additionalProperties": false,
+      "properties": {
+        "forum_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "message_html": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "upload_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1,
+          "maxItems": 20
+        }
+      }
+    },
+    "MoodleActionParamsForumReply": {
+      "type": "object",
+      "description": "forum.reply",
+      "required": ["post_id", "message_html"],
+      "additionalProperties": false,
+      "properties": {
+        "post_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "message_html": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        },
+        "upload_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1,
+          "maxItems": 20
+        }
+      }
+    },
+    "MoodleActionParamsCompletionSet": {
+      "type": "object",
+      "description": "completion.set",
+      "required": ["cmid", "completed"],
+      "additionalProperties": false,
+      "properties": {
+        "cmid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "completed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "MoodleActionParamsCalendarCreateEvent": {
+      "type": "object",
+      "description": "calendar.create_event (Nutzertermin)",
+      "required": ["name", "start_at"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "start_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "duration_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "description_html": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100000
+        }
+      }
+    },
+    "MoodleActionParamsMessageSend": {
+      "type": "object",
+      "description": "message.send",
+      "required": ["to_user_id", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "to_user_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      }
+    },
+    "MoodleActionParamsFilesUploadPrivate": {
+      "type": "object",
+      "description": "files.upload_private",
+      "required": ["upload_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "upload_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1,
+          "maxItems": 20
+        }
+      }
+    }
+  }
+}

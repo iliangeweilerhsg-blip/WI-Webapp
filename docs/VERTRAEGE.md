@@ -17,9 +17,11 @@ Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammen
 | `SG_DEV_WEB_ORIGIN` | leer. In der Entwicklung `http://localhost:3000` | Core (CORS nur für diesen Origin) |
 | `NEXT_PUBLIC_SG_API_BASE` | `/api/v1`. In der Entwicklung `http://localhost:4710/api/v1` | Web-App |
 | `SG_LOG_LEVEL` | `info` | Core, Worker |
+| `SG_MOODLE_URL` | leer (Moodle-Anbindung aus). Beim Owner `https://moodle2.uni-potsdam.de` | Core, CLI |
 | `TZ` | Zeitzone des Systems | Core (Ortszeit für ICS-Termine ohne Zeitzone, Backup-Uhrzeit). Tests laufen mit `TZ=Europe/Zurich` |
 
 Geheimnisse wie API-Schlüssel stehen in `$SG_DATA_DIR/config/.env` mit Rechten 600 (02 §3). Die Prozesse lesen diese Datei beim Start.
+**Ausnahme Moodle:** Der Moodle-Token liegt nur im macOS-Schlüsselbund (Dienst `studiengehirn-moodle`), nie in `.env`. Nur der Core liest ihn (08 §9.1).
 
 ## 2. Befehle, die jeder Baustein anbietet
 
@@ -256,7 +258,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 
 - `state` ist eine Komma-Liste, z. B. `state=laeuft,pausiert` für die aktive Session nach einem Neuladen (F-SES-05).
 - Sortierung: aufsteigend nach `coalesce(started_at, planned_starts_at, created_at)`, bei Gleichstand nach `id`.
-- `from`/`to` filtern auf denselben Zeitpunkt. Der Heute-Bildschirm (T1-03) fragt `from=<heute 00:00>&to=<morgen 00:00>` ab.
+- `from`/`to` filtern auf denselben Zeitpunkt. Der Heute-Bildschirm (T1-03) fragt `from=<heute 00:00>&to=<morgen 00:00>` ab. Zusätzlich holt er `GET /sessions?state=laeuft,pausiert` (eine laufende Session vom Vortag) und `GET /calendar/events?from&to` für den Raum (`location`), verknüpft über `calendar_event_id`; danach hält `session.updated` die Liste aktuell. Das ist kein neuer Endpunkt.
 
 ### 7.3 Audio (T1-06)
 
@@ -646,7 +648,7 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
    - **Unbemerkte Übernahme** (jemand fotografiert Code oder QR-Code ab und koppelt schneller): Die Web-App meldet jede Kopplung mit Name und Art („‚X‘ (iPad) wurde gekoppelt. Nicht du?“) und bietet direkt „Entfernen“ an. Geräte, die jünger als 24 h sind, sind in der Liste als „Neu gekoppelt“ markiert. Wird die Ansicht verlassen, schließt die Web-App das Fenster (`DELETE /devices/pairings`), ein Code gilt dann nicht mehr bis zum Ablauf weiter.
    - **Host:** IPv4 der Schnittstelle `en0`, sonst einer anderen `en*`, sonst einer sonstigen. VPN-Tunnel, Docker, Bridges und AirDrop zählen nicht, Link-Local (169.254.x.x) nur als letzter Ausweg. Ohne Netz: `127.0.0.1`.
    - **Bonjour:** Name `Studien-Gehirn (<Macname>)`, TXT `v=1`, `name=<Macname>` (Rechnername ohne `.local`). Startet nur, wenn `SG_CORE_HOST` nicht Loopback ist. `SG_BONJOUR=0` schaltet die Ankündigung ab. Fehler (kein Multicast) werden nur protokolliert.
-   - Code und Token stehen in keinem Log und in keiner Fehlermeldung. Das Request-Log schwärzt Query-Parameter, deren Name `pairing`, `token`, `code`, `secret`, `password`, `nonce`, `key`, `auth` oder `session` enthält, auf allen Routen (`[Redacted]`, auch in Meldungstexten wie „Route … not found“); die Kennung bleibt darum in `DELETE /devices/pairings?pairing_id=` (#91). Jeder falsche Code bekommt dieselbe Antwort.
+   - Code und Token stehen in keinem Log und in keiner Fehlermeldung. Das Request-Log schwärzt Query-Parameter, deren Name an Namensgrenzen (`_`, `-`) `pairing_id`, `token`, `wstoken`, `access_token`, `secret`, `password`, `nonce`, `code`, `api_key` oder `auth` entspricht (`author`, `sort_key`, `session_id` bleiben lesbar), auf allen Routen (`[Redacted]`, auch in Meldungstexten wie „Route … not found“); die Kennung bleibt darum in `DELETE /devices/pairings?pairing_id=` (#91). Jeder falsche Code bekommt dieselbe Antwort.
    - **Restrisiko Klartext:** Token, Code und Sync laufen in Phase 1 unverschlüsselt über HTTP bzw. WS. In einem offenen WLAN oder einem WLAN mit gemeinsamem Passwort (WPA2-PSK) kann jemand im selben Netz mitlesen und ein Token übernehmen. Abhilfe bis dahin: Gerät entfernen und neu koppeln, sensible Arbeit im Heimnetz oder über den Hotspot. TLS kommt in Phase 2.
 
 ## 13. Backups, Papierkorb, Aufräumen (F-DAT-01/02/04, T1-18)

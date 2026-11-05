@@ -56,9 +56,12 @@ export function initialLogDay(logDir: string, now: Date = new Date()): string {
 
 /**
  * Query-Parameter, deren Wert ein Geheimnis sein kann (z. B. `pairing_id` an `DELETE /devices/pairings`,
- * VERTRAEGE §7.5). Gilt für alle Routen, nach Namensbestandteil und ohne Beachtung der Groß-/Kleinschreibung.
+ * VERTRAEGE §7.5). Gilt für alle Routen. Der Name muss an Namensgrenzen (`_`, `-`, Anfang, Ende) passen, damit
+ * `author`, `keyword`, `sort_key` oder `session_id` nicht getroffen werden; Groß-/Kleinschreibung egal. Ein
+ * nacktes `key` fehlt bewusst (`sort_key` ist ein normaler Parameter), API-Schlüssel deckt `api_key` u. ä. ab.
  */
-const SECRET_PARAM = /pairing|token|code|secret|password|passwd|nonce|key|auth|session/i;
+const SECRET_PARAM =
+  /(^|[_-])(pairing_id|token|wstoken|access_token|secret|password|passwd|nonce|code|api_key|apikey|access_key|private_key|auth)($|[_-])/i;
 
 /**
  * Ersetzt in einer URL oder einem Logtext (z. B. Fastifys „Route GET:/x?… not found“) die Werte geheimer
@@ -74,6 +77,18 @@ export function redactUrl(text: string): string {
     }
     return SECRET_PARAM.test(name) ? `${sep}${rawName}=[Redacted]` : match;
   });
+}
+
+/** `err`-Serializer: wie pino, aber `message` und `stack` laufen durch `redactUrl` */
+export function serializeError(err: unknown): unknown {
+  const serialized = pino.stdSerializers.err(err as Error);
+  if (serialized && typeof serialized === 'object') {
+    const out = serialized as unknown as Record<string, unknown>;
+    for (const field of ['message', 'stack']) {
+      if (typeof out[field] === 'string') out[field] = redactUrl(out[field]);
+    }
+  }
+  return serialized;
 }
 
 /** `req`-Serializer für das Request-Log: wie der von Fastify, aber mit geschwärzter Query */
@@ -101,15 +116,19 @@ export function loggerOptions(config: Pick<Config, 'logLevel'>): pino.LoggerOpti
     level: config.logLevel,
     base: { service: 'core' },
     timestamp: pino.stdTimeFunctions.isoTime,
-    // Geheimnisse nie loggen (09 §4)
-    redact: ['req.headers.authorization', 'req.headers.cookie'],
-    serializers: { req: serializeRequest },
+    // Geheimnisse nie loggen (09 §4). Moodle-Token (08 §9.1) zur Sicherheit auch, falls er je in ein Log-Objekt gerät
+    redact: ['req.headers.authorization', 'req.headers.cookie', 'wstoken', 'token', '*.wstoken', '*.token'],
+    serializers: { req: serializeRequest, err: serializeError },
     hooks: {
       // Auch Meldungstexte schwärzen, in denen eine URL steht („Route … not found“)
       logMethod(args, method) {
-        const i = typeof args[0] === 'string' ? 0 : 1;
-        if (typeof args[i] === 'string') args[i] = redactUrl(args[i]);
-        return method.apply(this, args);
+        // Formatstring und alle printf-Argumente (`log.info('Route %s', url)`)
+        const list: unknown[] = [...args];
+        // `log.error(err)`: pino übernimmt `err.message` als Meldung am Hook vorbei, darum selbst setzen
+        if (list[0] instanceof Error)
+          list.splice(0, 1, { err: list[0] }, ...(list.length === 1 ? [list[0].message] : []));
+        const redacted = list.map((arg) => (typeof arg === 'string' ? redactUrl(arg) : arg));
+        return method.apply(this, redacted as unknown as Parameters<typeof method>);
       },
     },
   };

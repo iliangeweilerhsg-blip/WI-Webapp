@@ -1,0 +1,7 @@
+{
+  "params": {
+    "assignment_id": 42,
+    "accept_statement": true
+  },
+  "confirmation_token": "beispiel-bestaetigungscode"
+}

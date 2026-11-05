@@ -44,7 +44,8 @@
 | Netzwerk | Core nur im lokalen Netz erreichbar, Geräte-Token-Pflicht für Nicht-localhost. Kein Port-Forwarding, kein UPnP. |
 | Cloud-KI | Gesendet werden nur die für die Aufgabe nötigen Ausschnitte (Texte, Folienbilder, eigene Antworten). Audio nur bei gewählter Cloud-Transkription. Jeder Aufruf ist im Kostenzähler mit Aufgabe und Datenumfang nachvollziehbar. |
 | Modus „nur lokal" | Schaltet alle Cloud-Aufrufe ab. Die App bleibt nutzbar (Aufnahme, Notizen, Transkript, Suche, Wiederholung vorhandener Karten). |
-| Geheimnisse | API-Schlüssel in `config/.env` (600) bzw. Schlüsselbund. Nie in Logs, nie im Repo (Secret-Scanning im CI). |
+| Geheimnisse | API-Schlüssel in `config/.env` (600) bzw. Schlüsselbund. Der Moodle-Token nur im Schlüsselbund (08 §9.1). Nie in Logs, nie im Repo (Secret-Scanning im CI). |
+| Moodle | Nur der Core spricht mit Moodle. Schonende Drosselung (08 §9.1), schreibende Aktionen nur auf Klick und mit Bestätigung bei endgültigen/öffentlichen Aktionen (F-MDL-06). Tests sprechen nie mit dem echten Moodle. |
 | Backups | Optional verschlüsselt (`age`). Bei Ziel iCloud-Drive **empfohlen** verschlüsselt. |
 | Aufnahmen Dritter | Für eine spätere Weitergabe der Software: Hinweis beim ersten Start, dass Aufnahmen die Einwilligung der Sprechenden voraussetzen (DE § 201 StGB, CH Art. 179bis ff. StGB). |
 | Fremde Inhalte | Folien und Übungen bleiben lokal und werden nicht geteilt (Urheberrecht). Export ist für den Eigengebrauch gedacht. |

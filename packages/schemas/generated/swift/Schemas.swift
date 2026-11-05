@@ -94,6 +94,50 @@ struct SchemaBundle: Codable {
     let moduleSettings: ModuleSettings?
     let moduleSettingsUpdate: ModuleSettingsUpdate?
     let moduleUpdate: ModuleUpdate?
+    let moodleActionCatalog: MoodleActionCatalog?
+    let moodleActionExecute: MoodleActionExecute?
+    let moodleActionID: MoodleActionID?
+    let moodleActionInfo: MoodleActionInfo?
+    let moodleActionParamsAssignSaveDraft: MoodleActionParamsAssignSaveDraft?
+    let moodleActionParamsAssignSubmit: MoodleActionParamsAssignSubmit?
+    let moodleActionParamsCalendarCreateEvent: MoodleActionParamsCalendarCreateEvent?
+    let moodleActionParamsCompletionSet: MoodleActionParamsCompletionSet?
+    let moodleActionParamsFilesUploadPrivate: MoodleActionParamsFilesUploadPrivate?
+    let moodleActionParamsForumCreateDiscussion: MoodleActionParamsForumCreateDiscussion?
+    let moodleActionParamsForumReply: MoodleActionParamsForumReply?
+    let moodleActionParamsMessageSend: MoodleActionParamsMessageSend?
+    let moodleActionPreview: MoodleActionPreview?
+    let moodleActionRequest: MoodleActionRequest?
+    let moodleActionResult: MoodleActionResult?
+    let moodleActionRisk: MoodleActionRisk?
+    let moodleActivity: MoodleActivity?
+    let moodleAssignment: MoodleAssignment?
+    let moodleAssignmentList: MoodleAssignmentList?
+    let moodleCompletion: MoodleCompletion?
+    let moodleConnectionState: MoodleConnectionState?
+    let moodleCourse: MoodleCourse?
+    let moodleCourseContents: MoodleCourseContents?
+    let moodleCourseList: MoodleCourseList?
+    let moodleDeadline: MoodleDeadline?
+    let moodleDeadlineList: MoodleDeadlineList?
+    let moodleDiscussion: MoodleDiscussion?
+    let moodleDiscussionList: MoodleDiscussionList?
+    let moodleFile: MoodleFile?
+    let moodleForum: MoodleForum?
+    let moodleForumList: MoodleForumList?
+    let moodleGradeItem: MoodleGradeItem?
+    let moodleGradeList: MoodleGradeList?
+    let moodleNotification: MoodleNotification?
+    let moodleNotificationList: MoodleNotificationList?
+    let moodlePost: MoodlePost?
+    let moodlePostList: MoodlePostList?
+    let moodleQuiz: MoodleQuiz?
+    let moodleQuizList: MoodleQuizList?
+    let moodleSection: MoodleSection?
+    let moodleStatus: MoodleStatus?
+    let moodleSubmissionState: MoodleSubmissionState?
+    let moodleSubmissionStatus: MoodleSubmissionStatus?
+    let moodleUpload: MoodleUpload?
     let notebook: Notebook?
     let notebookCreate: NotebookCreate?
     let notebookCreateData: NotebookCreateData?
@@ -332,6 +376,50 @@ struct SchemaBundle: Codable {
         case moduleSettings = "ModuleSettings"
         case moduleSettingsUpdate = "ModuleSettingsUpdate"
         case moduleUpdate = "ModuleUpdate"
+        case moodleActionCatalog = "MoodleActionCatalog"
+        case moodleActionExecute = "MoodleActionExecute"
+        case moodleActionID = "MoodleActionId"
+        case moodleActionInfo = "MoodleActionInfo"
+        case moodleActionParamsAssignSaveDraft = "MoodleActionParamsAssignSaveDraft"
+        case moodleActionParamsAssignSubmit = "MoodleActionParamsAssignSubmit"
+        case moodleActionParamsCalendarCreateEvent = "MoodleActionParamsCalendarCreateEvent"
+        case moodleActionParamsCompletionSet = "MoodleActionParamsCompletionSet"
+        case moodleActionParamsFilesUploadPrivate = "MoodleActionParamsFilesUploadPrivate"
+        case moodleActionParamsForumCreateDiscussion = "MoodleActionParamsForumCreateDiscussion"
+        case moodleActionParamsForumReply = "MoodleActionParamsForumReply"
+        case moodleActionParamsMessageSend = "MoodleActionParamsMessageSend"
+        case moodleActionPreview = "MoodleActionPreview"
+        case moodleActionRequest = "MoodleActionRequest"
+        case moodleActionResult = "MoodleActionResult"
+        case moodleActionRisk = "MoodleActionRisk"
+        case moodleActivity = "MoodleActivity"
+        case moodleAssignment = "MoodleAssignment"
+        case moodleAssignmentList = "MoodleAssignmentList"
+        case moodleCompletion = "MoodleCompletion"
+        case moodleConnectionState = "MoodleConnectionState"
+        case moodleCourse = "MoodleCourse"
+        case moodleCourseContents = "MoodleCourseContents"
+        case moodleCourseList = "MoodleCourseList"
+        case moodleDeadline = "MoodleDeadline"
+        case moodleDeadlineList = "MoodleDeadlineList"
+        case moodleDiscussion = "MoodleDiscussion"
+        case moodleDiscussionList = "MoodleDiscussionList"
+        case moodleFile = "MoodleFile"
+        case moodleForum = "MoodleForum"
+        case moodleForumList = "MoodleForumList"
+        case moodleGradeItem = "MoodleGradeItem"
+        case moodleGradeList = "MoodleGradeList"
+        case moodleNotification = "MoodleNotification"
+        case moodleNotificationList = "MoodleNotificationList"
+        case moodlePost = "MoodlePost"
+        case moodlePostList = "MoodlePostList"
+        case moodleQuiz = "MoodleQuiz"
+        case moodleQuizList = "MoodleQuizList"
+        case moodleSection = "MoodleSection"
+        case moodleStatus = "MoodleStatus"
+        case moodleSubmissionState = "MoodleSubmissionState"
+        case moodleSubmissionStatus = "MoodleSubmissionStatus"
+        case moodleUpload = "MoodleUpload"
         case notebook = "Notebook"
         case notebookCreate = "NotebookCreate"
         case notebookCreateData = "NotebookCreateData"
@@ -590,6 +678,50 @@ extension SchemaBundle {
         moduleSettings: ModuleSettings?? = nil,
         moduleSettingsUpdate: ModuleSettingsUpdate?? = nil,
         moduleUpdate: ModuleUpdate?? = nil,
+        moodleActionCatalog: MoodleActionCatalog?? = nil,
+        moodleActionExecute: MoodleActionExecute?? = nil,
+        moodleActionID: MoodleActionID?? = nil,
+        moodleActionInfo: MoodleActionInfo?? = nil,
+        moodleActionParamsAssignSaveDraft: MoodleActionParamsAssignSaveDraft?? = nil,
+        moodleActionParamsAssignSubmit: MoodleActionParamsAssignSubmit?? = nil,
+        moodleActionParamsCalendarCreateEvent: MoodleActionParamsCalendarCreateEvent?? = nil,
+        moodleActionParamsCompletionSet: MoodleActionParamsCompletionSet?? = nil,
+        moodleActionParamsFilesUploadPrivate: MoodleActionParamsFilesUploadPrivate?? = nil,
+        moodleActionParamsForumCreateDiscussion: MoodleActionParamsForumCreateDiscussion?? = nil,
+        moodleActionParamsForumReply: MoodleActionParamsForumReply?? = nil,
+        moodleActionParamsMessageSend: MoodleActionParamsMessageSend?? = nil,
+        moodleActionPreview: MoodleActionPreview?? = nil,
+        moodleActionRequest: MoodleActionRequest?? = nil,
+        moodleActionResult: MoodleActionResult?? = nil,
+        moodleActionRisk: MoodleActionRisk?? = nil,
+        moodleActivity: MoodleActivity?? = nil,
+        moodleAssignment: MoodleAssignment?? = nil,
+        moodleAssignmentList: MoodleAssignmentList?? = nil,
+        moodleCompletion: MoodleCompletion?? = nil,
+        moodleConnectionState: MoodleConnectionState?? = nil,
+        moodleCourse: MoodleCourse?? = nil,
+        moodleCourseContents: MoodleCourseContents?? = nil,
+        moodleCourseList: MoodleCourseList?? = nil,
+        moodleDeadline: MoodleDeadline?? = nil,
+        moodleDeadlineList: MoodleDeadlineList?? = nil,
+        moodleDiscussion: MoodleDiscussion?? = nil,
+        moodleDiscussionList: MoodleDiscussionList?? = nil,
+        moodleFile: MoodleFile?? = nil,
+        moodleForum: MoodleForum?? = nil,
+        moodleForumList: MoodleForumList?? = nil,
+        moodleGradeItem: MoodleGradeItem?? = nil,
+        moodleGradeList: MoodleGradeList?? = nil,
+        moodleNotification: MoodleNotification?? = nil,
+        moodleNotificationList: MoodleNotificationList?? = nil,
+        moodlePost: MoodlePost?? = nil,
+        moodlePostList: MoodlePostList?? = nil,
+        moodleQuiz: MoodleQuiz?? = nil,
+        moodleQuizList: MoodleQuizList?? = nil,
+        moodleSection: MoodleSection?? = nil,
+        moodleStatus: MoodleStatus?? = nil,
+        moodleSubmissionState: MoodleSubmissionState?? = nil,
+        moodleSubmissionStatus: MoodleSubmissionStatus?? = nil,
+        moodleUpload: MoodleUpload?? = nil,
         notebook: Notebook?? = nil,
         notebookCreate: NotebookCreate?? = nil,
         notebookCreateData: NotebookCreateData?? = nil,
@@ -828,6 +960,50 @@ extension SchemaBundle {
             moduleSettings: moduleSettings ?? self.moduleSettings,
             moduleSettingsUpdate: moduleSettingsUpdate ?? self.moduleSettingsUpdate,
             moduleUpdate: moduleUpdate ?? self.moduleUpdate,
+            moodleActionCatalog: moodleActionCatalog ?? self.moodleActionCatalog,
+            moodleActionExecute: moodleActionExecute ?? self.moodleActionExecute,
+            moodleActionID: moodleActionID ?? self.moodleActionID,
+            moodleActionInfo: moodleActionInfo ?? self.moodleActionInfo,
+            moodleActionParamsAssignSaveDraft: moodleActionParamsAssignSaveDraft ?? self.moodleActionParamsAssignSaveDraft,
+            moodleActionParamsAssignSubmit: moodleActionParamsAssignSubmit ?? self.moodleActionParamsAssignSubmit,
+            moodleActionParamsCalendarCreateEvent: moodleActionParamsCalendarCreateEvent ?? self.moodleActionParamsCalendarCreateEvent,
+            moodleActionParamsCompletionSet: moodleActionParamsCompletionSet ?? self.moodleActionParamsCompletionSet,
+            moodleActionParamsFilesUploadPrivate: moodleActionParamsFilesUploadPrivate ?? self.moodleActionParamsFilesUploadPrivate,
+            moodleActionParamsForumCreateDiscussion: moodleActionParamsForumCreateDiscussion ?? self.moodleActionParamsForumCreateDiscussion,
+            moodleActionParamsForumReply: moodleActionParamsForumReply ?? self.moodleActionParamsForumReply,
+            moodleActionParamsMessageSend: moodleActionParamsMessageSend ?? self.moodleActionParamsMessageSend,
+            moodleActionPreview: moodleActionPreview ?? self.moodleActionPreview,
+            moodleActionRequest: moodleActionRequest ?? self.moodleActionRequest,
+            moodleActionResult: moodleActionResult ?? self.moodleActionResult,
+            moodleActionRisk: moodleActionRisk ?? self.moodleActionRisk,
+            moodleActivity: moodleActivity ?? self.moodleActivity,
+            moodleAssignment: moodleAssignment ?? self.moodleAssignment,
+            moodleAssignmentList: moodleAssignmentList ?? self.moodleAssignmentList,
+            moodleCompletion: moodleCompletion ?? self.moodleCompletion,
+            moodleConnectionState: moodleConnectionState ?? self.moodleConnectionState,
+            moodleCourse: moodleCourse ?? self.moodleCourse,
+            moodleCourseContents: moodleCourseContents ?? self.moodleCourseContents,
+            moodleCourseList: moodleCourseList ?? self.moodleCourseList,
+            moodleDeadline: moodleDeadline ?? self.moodleDeadline,
+            moodleDeadlineList: moodleDeadlineList ?? self.moodleDeadlineList,
+            moodleDiscussion: moodleDiscussion ?? self.moodleDiscussion,
+            moodleDiscussionList: moodleDiscussionList ?? self.moodleDiscussionList,
+            moodleFile: moodleFile ?? self.moodleFile,
+            moodleForum: moodleForum ?? self.moodleForum,
+            moodleForumList: moodleForumList ?? self.moodleForumList,
+            moodleGradeItem: moodleGradeItem ?? self.moodleGradeItem,
+            moodleGradeList: moodleGradeList ?? self.moodleGradeList,
+            moodleNotification: moodleNotification ?? self.moodleNotification,
+            moodleNotificationList: moodleNotificationList ?? self.moodleNotificationList,
+            moodlePost: moodlePost ?? self.moodlePost,
+            moodlePostList: moodlePostList ?? self.moodlePostList,
+            moodleQuiz: moodleQuiz ?? self.moodleQuiz,
+            moodleQuizList: moodleQuizList ?? self.moodleQuizList,
+            moodleSection: moodleSection ?? self.moodleSection,
+            moodleStatus: moodleStatus ?? self.moodleStatus,
+            moodleSubmissionState: moodleSubmissionState ?? self.moodleSubmissionState,
+            moodleSubmissionStatus: moodleSubmissionStatus ?? self.moodleSubmissionStatus,
+            moodleUpload: moodleUpload ?? self.moodleUpload,
             notebook: notebook ?? self.notebook,
             notebookCreate: notebookCreate ?? self.notebookCreate,
             notebookCreateData: notebookCreateData ?? self.notebookCreateData,
@@ -5286,6 +5462,2366 @@ extension ModuleUpdate {
             semesterID: semesterID ?? self.semesterID,
             settings: settings ?? self.settings,
             shortName: shortName ?? self.shortName
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/actions
+// MARK: - MoodleActionCatalog
+struct MoodleActionCatalog: Codable {
+    let items: [MoodleActionInfo]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleActionCatalog convenience initializers and mutators
+
+extension MoodleActionCatalog {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionCatalog.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleActionInfo]? = nil
+    ) -> MoodleActionCatalog {
+        return MoodleActionCatalog(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MoodleActionInfo
+struct MoodleActionInfo: Codable {
+    /// false = nötige wsfunction für den Token nicht freigegeben
+    let available: Bool
+    let description: String
+    let id: MoodleActionID
+    let label: String
+    let needsConfirmation: Bool
+    let risk: MoodleActionRisk
+
+    enum CodingKeys: String, CodingKey {
+        case available = "available"
+        case description = "description"
+        case id = "id"
+        case label = "label"
+        case needsConfirmation = "needs_confirmation"
+        case risk = "risk"
+    }
+}
+
+// MARK: MoodleActionInfo convenience initializers and mutators
+
+extension MoodleActionInfo {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionInfo.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        available: Bool? = nil,
+        description: String? = nil,
+        id: MoodleActionID? = nil,
+        label: String? = nil,
+        needsConfirmation: Bool? = nil,
+        risk: MoodleActionRisk? = nil
+    ) -> MoodleActionInfo {
+        return MoodleActionInfo(
+            available: available ?? self.available,
+            description: description ?? self.description,
+            id: id ?? self.id,
+            label: label ?? self.label,
+            needsConfirmation: needsConfirmation ?? self.needsConfirmation,
+            risk: risk ?? self.risk
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Aktionskatalog (F-MDL-05, 08 §9.3)
+enum MoodleActionID: String, Codable {
+    case assignSaveDraft = "assign.save_draft"
+    case assignSubmit = "assign.submit"
+    case calendarCreateEvent = "calendar.create_event"
+    case completionSet = "completion.set"
+    case filesUploadPrivate = "files.upload_private"
+    case forumCreateDiscussion = "forum.create_discussion"
+    case forumReply = "forum.reply"
+    case messageSend = "message.send"
+    case notificationsMarkRead = "notifications.mark_read"
+}
+
+/// endgueltig und oeffentlich brauchen eine Bestätigung (F-MDL-06)
+enum MoodleActionRisk: String, Codable {
+    case aenderbar = "aenderbar"
+    case endgueltig = "endgueltig"
+    case harmlos = "harmlos"
+    case oeffentlich = "oeffentlich"
+}
+
+/// Body von POST /moodle/actions/{action_id}/execute
+// MARK: - MoodleActionExecute
+struct MoodleActionExecute: Codable {
+    let confirmationToken: String?
+    let params: [String: JSONAny]
+
+    enum CodingKeys: String, CodingKey {
+        case confirmationToken = "confirmation_token"
+        case params = "params"
+    }
+}
+
+// MARK: MoodleActionExecute convenience initializers and mutators
+
+extension MoodleActionExecute {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionExecute.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        confirmationToken: String?? = nil,
+        params: [String: JSONAny]? = nil
+    ) -> MoodleActionExecute {
+        return MoodleActionExecute(
+            confirmationToken: confirmationToken ?? self.confirmationToken,
+            params: params ?? self.params
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// assign.save_draft: mindestens upload_ids oder online_text_html
+// MARK: - MoodleActionParamsAssignSaveDraft
+struct MoodleActionParamsAssignSaveDraft: Codable {
+    /// Moodle-ID
+    let assignmentID: Int
+    let onlineTextHTML: String?
+    let uploadIDS: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentID = "assignment_id"
+        case onlineTextHTML = "online_text_html"
+        case uploadIDS = "upload_ids"
+    }
+}
+
+// MARK: MoodleActionParamsAssignSaveDraft convenience initializers and mutators
+
+extension MoodleActionParamsAssignSaveDraft {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionParamsAssignSaveDraft.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        assignmentID: Int? = nil,
+        onlineTextHTML: String?? = nil,
+        uploadIDS: [String]?? = nil
+    ) -> MoodleActionParamsAssignSaveDraft {
+        return MoodleActionParamsAssignSaveDraft(
+            assignmentID: assignmentID ?? self.assignmentID,
+            onlineTextHTML: onlineTextHTML ?? self.onlineTextHTML,
+            uploadIDS: uploadIDS ?? self.uploadIDS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// assign.submit
+// MARK: - MoodleActionParamsAssignSubmit
+struct MoodleActionParamsAssignSubmit: Codable {
+    let acceptStatement: Bool
+    /// Moodle-ID
+    let assignmentID: Int
+
+    enum CodingKeys: String, CodingKey {
+        case acceptStatement = "accept_statement"
+        case assignmentID = "assignment_id"
+    }
+}
+
+// MARK: MoodleActionParamsAssignSubmit convenience initializers and mutators
+
+extension MoodleActionParamsAssignSubmit {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionParamsAssignSubmit.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        acceptStatement: Bool? = nil,
+        assignmentID: Int? = nil
+    ) -> MoodleActionParamsAssignSubmit {
+        return MoodleActionParamsAssignSubmit(
+            acceptStatement: acceptStatement ?? self.acceptStatement,
+            assignmentID: assignmentID ?? self.assignmentID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// calendar.create_event (Nutzertermin)
+// MARK: - MoodleActionParamsCalendarCreateEvent
+struct MoodleActionParamsCalendarCreateEvent: Codable {
+    let descriptionHTML: String?
+    let durationMinutes: Int?
+    let name: String
+    let startAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case descriptionHTML = "description_html"
+        case durationMinutes = "duration_minutes"
+        case name = "name"
+        case startAt = "start_at"
+    }
+}
+
+// MARK: MoodleActionParamsCalendarCreateEvent convenience initializers and mutators
+
+extension MoodleActionParamsCalendarCreateEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionParamsCalendarCreateEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        descriptionHTML: String?? = nil,
+        durationMinutes: Int?? = nil,
+        name: String? = nil,
+        startAt: Date? = nil
+    ) -> MoodleActionParamsCalendarCreateEvent {
+        return MoodleActionParamsCalendarCreateEvent(
+            descriptionHTML: descriptionHTML ?? self.descriptionHTML,
+            durationMinutes: durationMinutes ?? self.durationMinutes,
+            name: name ?? self.name,
+            startAt: startAt ?? self.startAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// completion.set
+// MARK: - MoodleActionParamsCompletionSet
+struct MoodleActionParamsCompletionSet: Codable {
+    /// Moodle-ID
+    let cmid: Int
+    let completed: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case cmid = "cmid"
+        case completed = "completed"
+    }
+}
+
+// MARK: MoodleActionParamsCompletionSet convenience initializers and mutators
+
+extension MoodleActionParamsCompletionSet {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionParamsCompletionSet.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cmid: Int? = nil,
+        completed: Bool? = nil
+    ) -> MoodleActionParamsCompletionSet {
+        return MoodleActionParamsCompletionSet(
+            cmid: cmid ?? self.cmid,
+            completed: completed ?? self.completed
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// files.upload_private
+// MARK: - MoodleActionParamsFilesUploadPrivate
+struct MoodleActionParamsFilesUploadPrivate: Codable {
+    let uploadIDS: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case uploadIDS = "upload_ids"
+    }
+}
+
+// MARK: MoodleActionParamsFilesUploadPrivate convenience initializers and mutators
+
+extension MoodleActionParamsFilesUploadPrivate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionParamsFilesUploadPrivate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        uploadIDS: [String]? = nil
+    ) -> MoodleActionParamsFilesUploadPrivate {
+        return MoodleActionParamsFilesUploadPrivate(
+            uploadIDS: uploadIDS ?? self.uploadIDS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// forum.create_discussion
+// MARK: - MoodleActionParamsForumCreateDiscussion
+struct MoodleActionParamsForumCreateDiscussion: Codable {
+    /// Moodle-ID
+    let forumID: Int
+    let messageHTML: String
+    let subject: String
+    let uploadIDS: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case forumID = "forum_id"
+        case messageHTML = "message_html"
+        case subject = "subject"
+        case uploadIDS = "upload_ids"
+    }
+}
+
+// MARK: MoodleActionParamsForumCreateDiscussion convenience initializers and mutators
+
+extension MoodleActionParamsForumCreateDiscussion {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionParamsForumCreateDiscussion.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        forumID: Int? = nil,
+        messageHTML: String? = nil,
+        subject: String? = nil,
+        uploadIDS: [String]?? = nil
+    ) -> MoodleActionParamsForumCreateDiscussion {
+        return MoodleActionParamsForumCreateDiscussion(
+            forumID: forumID ?? self.forumID,
+            messageHTML: messageHTML ?? self.messageHTML,
+            subject: subject ?? self.subject,
+            uploadIDS: uploadIDS ?? self.uploadIDS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// forum.reply
+// MARK: - MoodleActionParamsForumReply
+struct MoodleActionParamsForumReply: Codable {
+    let messageHTML: String
+    /// Moodle-ID
+    let postID: Int
+    let subject: String?
+    let uploadIDS: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case messageHTML = "message_html"
+        case postID = "post_id"
+        case subject = "subject"
+        case uploadIDS = "upload_ids"
+    }
+}
+
+// MARK: MoodleActionParamsForumReply convenience initializers and mutators
+
+extension MoodleActionParamsForumReply {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionParamsForumReply.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        messageHTML: String? = nil,
+        postID: Int? = nil,
+        subject: String?? = nil,
+        uploadIDS: [String]?? = nil
+    ) -> MoodleActionParamsForumReply {
+        return MoodleActionParamsForumReply(
+            messageHTML: messageHTML ?? self.messageHTML,
+            postID: postID ?? self.postID,
+            subject: subject ?? self.subject,
+            uploadIDS: uploadIDS ?? self.uploadIDS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// message.send
+// MARK: - MoodleActionParamsMessageSend
+struct MoodleActionParamsMessageSend: Codable {
+    let text: String
+    /// Moodle-ID
+    let toUserID: Int
+
+    enum CodingKeys: String, CodingKey {
+        case text = "text"
+        case toUserID = "to_user_id"
+    }
+}
+
+// MARK: MoodleActionParamsMessageSend convenience initializers and mutators
+
+extension MoodleActionParamsMessageSend {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionParamsMessageSend.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        text: String? = nil,
+        toUserID: Int? = nil
+    ) -> MoodleActionParamsMessageSend {
+        return MoodleActionParamsMessageSend(
+            text: text ?? self.text,
+            toUserID: toUserID ?? self.toUserID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort der Vorschau. confirmation_token nur bei needs_confirmation
+// MARK: - MoodleActionPreview
+struct MoodleActionPreview: Codable {
+    let actionID: MoodleActionID
+    let confirmationToken: String?
+    let details: [String: JSONAny]
+    let expiresAt: Date?
+    let needsConfirmation: Bool
+    let risk: MoodleActionRisk
+    /// Ein Satz in Klartext, was passieren wird
+    let summary: String
+    let warnings: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case actionID = "action_id"
+        case confirmationToken = "confirmation_token"
+        case details = "details"
+        case expiresAt = "expires_at"
+        case needsConfirmation = "needs_confirmation"
+        case risk = "risk"
+        case summary = "summary"
+        case warnings = "warnings"
+    }
+}
+
+// MARK: MoodleActionPreview convenience initializers and mutators
+
+extension MoodleActionPreview {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionPreview.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        actionID: MoodleActionID? = nil,
+        confirmationToken: String?? = nil,
+        details: [String: JSONAny]? = nil,
+        expiresAt: Date?? = nil,
+        needsConfirmation: Bool? = nil,
+        risk: MoodleActionRisk? = nil,
+        summary: String? = nil,
+        warnings: [String]? = nil
+    ) -> MoodleActionPreview {
+        return MoodleActionPreview(
+            actionID: actionID ?? self.actionID,
+            confirmationToken: confirmationToken ?? self.confirmationToken,
+            details: details ?? self.details,
+            expiresAt: expiresAt ?? self.expiresAt,
+            needsConfirmation: needsConfirmation ?? self.needsConfirmation,
+            risk: risk ?? self.risk,
+            summary: summary ?? self.summary,
+            warnings: warnings ?? self.warnings
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Body von POST /moodle/actions/{action_id}/preview. params nach MoodleActionParams<Name>
+// MARK: - MoodleActionRequest
+struct MoodleActionRequest: Codable {
+    let params: [String: JSONAny]
+
+    enum CodingKeys: String, CodingKey {
+        case params = "params"
+    }
+}
+
+// MARK: MoodleActionRequest convenience initializers and mutators
+
+extension MoodleActionRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        params: [String: JSONAny]? = nil
+    ) -> MoodleActionRequest {
+        return MoodleActionRequest(
+            params: params ?? self.params
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von execute bei Erfolg
+// MARK: - MoodleActionResult
+struct MoodleActionResult: Codable {
+    let actionID: MoodleActionID
+    let result: [String: JSONAny]
+    let summary: String
+
+    enum CodingKeys: String, CodingKey {
+        case actionID = "action_id"
+        case result = "result"
+        case summary = "summary"
+    }
+}
+
+// MARK: MoodleActionResult convenience initializers and mutators
+
+extension MoodleActionResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActionResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        actionID: MoodleActionID? = nil,
+        result: [String: JSONAny]? = nil,
+        summary: String? = nil
+    ) -> MoodleActionResult {
+        return MoodleActionResult(
+            actionID: actionID ?? self.actionID,
+            result: result ?? self.result,
+            summary: summary ?? self.summary
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Element eines Kursabschnitts
+// MARK: - MoodleActivity
+struct MoodleActivity: Codable {
+    /// Moodle-ID
+    let cmid: Int
+    let completion: MoodleCompletion?
+    /// true = der Nutzer darf den Status selbst setzen (completion.set)
+    let completionManual: Bool
+    let descriptionHTML: String?
+    let files: [MoodleFile]
+    let instanceID: Int?
+    let name: String
+    /// Moodle-modname, z. B. resource, folder, assign, forum, quiz, url, page, label
+    let type: String
+    let url: String?
+    let visible: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case cmid = "cmid"
+        case completion = "completion"
+        case completionManual = "completion_manual"
+        case descriptionHTML = "description_html"
+        case files = "files"
+        case instanceID = "instance_id"
+        case name = "name"
+        case type = "type"
+        case url = "url"
+        case visible = "visible"
+    }
+}
+
+// MARK: MoodleActivity convenience initializers and mutators
+
+extension MoodleActivity {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleActivity.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cmid: Int? = nil,
+        completion: MoodleCompletion?? = nil,
+        completionManual: Bool? = nil,
+        descriptionHTML: String?? = nil,
+        files: [MoodleFile]? = nil,
+        instanceID: Int?? = nil,
+        name: String? = nil,
+        type: String? = nil,
+        url: String?? = nil,
+        visible: Bool? = nil
+    ) -> MoodleActivity {
+        return MoodleActivity(
+            cmid: cmid ?? self.cmid,
+            completion: completion ?? self.completion,
+            completionManual: completionManual ?? self.completionManual,
+            descriptionHTML: descriptionHTML ?? self.descriptionHTML,
+            files: files ?? self.files,
+            instanceID: instanceID ?? self.instanceID,
+            name: name ?? self.name,
+            type: type ?? self.type,
+            url: url ?? self.url,
+            visible: visible ?? self.visible
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Erledigt-Status einer Aktivität
+enum MoodleCompletion: String, Codable {
+    case erledigt = "erledigt"
+    case offen = "offen"
+}
+
+/// Datei in Moodle (Aktivität, Anhang, Abgabe)
+// MARK: - MoodleFile
+struct MoodleFile: Codable {
+    let filename: String
+    let mimeType: String?
+    let modifiedAt: Date?
+    /// Pfad hinter webservice/pluginfile.php, für GET /moodle/file?ref
+    let ref: String
+    let sizeBytes: Int
+
+    enum CodingKeys: String, CodingKey {
+        case filename = "filename"
+        case mimeType = "mime_type"
+        case modifiedAt = "modified_at"
+        case ref = "ref"
+        case sizeBytes = "size_bytes"
+    }
+}
+
+// MARK: MoodleFile convenience initializers and mutators
+
+extension MoodleFile {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleFile.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        filename: String? = nil,
+        mimeType: String?? = nil,
+        modifiedAt: Date?? = nil,
+        ref: String? = nil,
+        sizeBytes: Int? = nil
+    ) -> MoodleFile {
+        return MoodleFile(
+            filename: filename ?? self.filename,
+            mimeType: mimeType ?? self.mimeType,
+            modifiedAt: modifiedAt ?? self.modifiedAt,
+            ref: ref ?? self.ref,
+            sizeBytes: sizeBytes ?? self.sizeBytes
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Aufgabe mit Abgabe
+// MARK: - MoodleAssignment
+struct MoodleAssignment: Codable {
+    /// Moodle-ID
+    let cmid: Int
+    /// Moodle-ID
+    let courseID: Int
+    let cutoffAt: Date?
+    let dueAt: Date?
+    let introFiles: [MoodleFile]
+    let introHTML: String?
+    /// Moodle-ID
+    let moodleID: Int
+    let name: String
+    let opensAt: Date?
+    /// Einreichen verlangt die Erklärung zur Eigenständigkeit (accept_statement)
+    let requiresStatement: Bool
+    /// true = Entwurf muss ausdrücklich eingereicht werden (assign.submit)
+    let requiresSubmit: Bool
+    let submissionTypes: [SubmissionType]
+
+    enum CodingKeys: String, CodingKey {
+        case cmid = "cmid"
+        case courseID = "course_id"
+        case cutoffAt = "cutoff_at"
+        case dueAt = "due_at"
+        case introFiles = "intro_files"
+        case introHTML = "intro_html"
+        case moodleID = "moodle_id"
+        case name = "name"
+        case opensAt = "opens_at"
+        case requiresStatement = "requires_statement"
+        case requiresSubmit = "requires_submit"
+        case submissionTypes = "submission_types"
+    }
+}
+
+// MARK: MoodleAssignment convenience initializers and mutators
+
+extension MoodleAssignment {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleAssignment.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cmid: Int? = nil,
+        courseID: Int? = nil,
+        cutoffAt: Date?? = nil,
+        dueAt: Date?? = nil,
+        introFiles: [MoodleFile]? = nil,
+        introHTML: String?? = nil,
+        moodleID: Int? = nil,
+        name: String? = nil,
+        opensAt: Date?? = nil,
+        requiresStatement: Bool? = nil,
+        requiresSubmit: Bool? = nil,
+        submissionTypes: [SubmissionType]? = nil
+    ) -> MoodleAssignment {
+        return MoodleAssignment(
+            cmid: cmid ?? self.cmid,
+            courseID: courseID ?? self.courseID,
+            cutoffAt: cutoffAt ?? self.cutoffAt,
+            dueAt: dueAt ?? self.dueAt,
+            introFiles: introFiles ?? self.introFiles,
+            introHTML: introHTML ?? self.introHTML,
+            moodleID: moodleID ?? self.moodleID,
+            name: name ?? self.name,
+            opensAt: opensAt ?? self.opensAt,
+            requiresStatement: requiresStatement ?? self.requiresStatement,
+            requiresSubmit: requiresSubmit ?? self.requiresSubmit,
+            submissionTypes: submissionTypes ?? self.submissionTypes
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SubmissionType: String, Codable {
+    case file = "file"
+    case onlinetext = "onlinetext"
+}
+
+/// Antwort von GET /moodle/assignments
+// MARK: - MoodleAssignmentList
+struct MoodleAssignmentList: Codable {
+    let items: [MoodleAssignment]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleAssignmentList convenience initializers and mutators
+
+extension MoodleAssignmentList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleAssignmentList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleAssignment]? = nil
+    ) -> MoodleAssignmentList {
+        return MoodleAssignmentList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Zustand des Moodle-Zugangs (F-MDL-01)
+enum MoodleConnectionState: String, Codable {
+    case abgelaufen = "abgelaufen"
+    case laeuftBaldAb = "laeuft_bald_ab"
+    case nichtEingerichtet = "nicht_eingerichtet"
+    case nichtErreichbar = "nicht_erreichbar"
+    case ok = "ok"
+    case ungueltig = "ungueltig"
+}
+
+/// Kurs, in den der Nutzer eingeschrieben ist. module_id: zugeordnetes Modul (F-MDL-03)
+// MARK: - MoodleCourse
+struct MoodleCourse: Codable {
+    let endDate: String?
+    let fullName: String
+    let lastAccessAt: Date?
+    let moduleID: String?
+    /// Moodle-ID
+    let moodleID: Int
+    let shortName: String
+    let startDate: String?
+    let url: String
+
+    enum CodingKeys: String, CodingKey {
+        case endDate = "end_date"
+        case fullName = "full_name"
+        case lastAccessAt = "last_access_at"
+        case moduleID = "module_id"
+        case moodleID = "moodle_id"
+        case shortName = "short_name"
+        case startDate = "start_date"
+        case url = "url"
+    }
+}
+
+// MARK: MoodleCourse convenience initializers and mutators
+
+extension MoodleCourse {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleCourse.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        endDate: String?? = nil,
+        fullName: String? = nil,
+        lastAccessAt: Date?? = nil,
+        moduleID: String?? = nil,
+        moodleID: Int? = nil,
+        shortName: String? = nil,
+        startDate: String?? = nil,
+        url: String? = nil
+    ) -> MoodleCourse {
+        return MoodleCourse(
+            endDate: endDate ?? self.endDate,
+            fullName: fullName ?? self.fullName,
+            lastAccessAt: lastAccessAt ?? self.lastAccessAt,
+            moduleID: moduleID ?? self.moduleID,
+            moodleID: moodleID ?? self.moodleID,
+            shortName: shortName ?? self.shortName,
+            startDate: startDate ?? self.startDate,
+            url: url ?? self.url
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/courses/{course_id}/contents
+// MARK: - MoodleCourseContents
+struct MoodleCourseContents: Codable {
+    /// Moodle-ID
+    let courseID: Int
+    let sections: [MoodleSection]
+
+    enum CodingKeys: String, CodingKey {
+        case courseID = "course_id"
+        case sections = "sections"
+    }
+}
+
+// MARK: MoodleCourseContents convenience initializers and mutators
+
+extension MoodleCourseContents {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleCourseContents.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        courseID: Int? = nil,
+        sections: [MoodleSection]? = nil
+    ) -> MoodleCourseContents {
+        return MoodleCourseContents(
+            courseID: courseID ?? self.courseID,
+            sections: sections ?? self.sections
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MoodleSection
+struct MoodleSection: Codable {
+    let activities: [MoodleActivity]
+    let index: Int
+    /// Moodle-ID
+    let moodleID: Int
+    let name: String
+    let visible: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case activities = "activities"
+        case index = "index"
+        case moodleID = "moodle_id"
+        case name = "name"
+        case visible = "visible"
+    }
+}
+
+// MARK: MoodleSection convenience initializers and mutators
+
+extension MoodleSection {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleSection.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        activities: [MoodleActivity]? = nil,
+        index: Int? = nil,
+        moodleID: Int? = nil,
+        name: String? = nil,
+        visible: Bool? = nil
+    ) -> MoodleSection {
+        return MoodleSection(
+            activities: activities ?? self.activities,
+            index: index ?? self.index,
+            moodleID: moodleID ?? self.moodleID,
+            name: name ?? self.name,
+            visible: visible ?? self.visible
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/courses
+// MARK: - MoodleCourseList
+struct MoodleCourseList: Codable {
+    let items: [MoodleCourse]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleCourseList convenience initializers and mutators
+
+extension MoodleCourseList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleCourseList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleCourse]? = nil
+    ) -> MoodleCourseList {
+        return MoodleCourseList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Kommende Frist aus dem Moodle-Kalender
+// MARK: - MoodleDeadline
+struct MoodleDeadline: Codable {
+    /// Moodle erwartet noch eine Handlung (z. B. Abgabe fehlt)
+    let actionRequired: Bool
+    let activityType: String?
+    let cmid: Int?
+    let courseID: Int?
+    let dueAt: Date
+    /// Moodle-ID
+    let eventID: Int
+    let name: String
+    let url: String?
+
+    enum CodingKeys: String, CodingKey {
+        case actionRequired = "action_required"
+        case activityType = "activity_type"
+        case cmid = "cmid"
+        case courseID = "course_id"
+        case dueAt = "due_at"
+        case eventID = "event_id"
+        case name = "name"
+        case url = "url"
+    }
+}
+
+// MARK: MoodleDeadline convenience initializers and mutators
+
+extension MoodleDeadline {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleDeadline.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        actionRequired: Bool? = nil,
+        activityType: String?? = nil,
+        cmid: Int?? = nil,
+        courseID: Int?? = nil,
+        dueAt: Date? = nil,
+        eventID: Int? = nil,
+        name: String? = nil,
+        url: String?? = nil
+    ) -> MoodleDeadline {
+        return MoodleDeadline(
+            actionRequired: actionRequired ?? self.actionRequired,
+            activityType: activityType ?? self.activityType,
+            cmid: cmid ?? self.cmid,
+            courseID: courseID ?? self.courseID,
+            dueAt: dueAt ?? self.dueAt,
+            eventID: eventID ?? self.eventID,
+            name: name ?? self.name,
+            url: url ?? self.url
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/deadlines
+// MARK: - MoodleDeadlineList
+struct MoodleDeadlineList: Codable {
+    let items: [MoodleDeadline]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleDeadlineList convenience initializers and mutators
+
+extension MoodleDeadlineList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleDeadlineList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleDeadline]? = nil
+    ) -> MoodleDeadlineList {
+        return MoodleDeadlineList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MoodleDiscussion
+struct MoodleDiscussion: Codable {
+    let authorName: String?
+    let createdAt: Date
+    /// Moodle-ID
+    let firstPostID: Int
+    /// Moodle-ID
+    let forumID: Int
+    let modifiedAt: Date
+    /// Moodle-ID
+    let moodleID: Int
+    let pinned: Bool
+    let replyCount: Int
+    let subject: String
+
+    enum CodingKeys: String, CodingKey {
+        case authorName = "author_name"
+        case createdAt = "created_at"
+        case firstPostID = "first_post_id"
+        case forumID = "forum_id"
+        case modifiedAt = "modified_at"
+        case moodleID = "moodle_id"
+        case pinned = "pinned"
+        case replyCount = "reply_count"
+        case subject = "subject"
+    }
+}
+
+// MARK: MoodleDiscussion convenience initializers and mutators
+
+extension MoodleDiscussion {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleDiscussion.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        authorName: String?? = nil,
+        createdAt: Date? = nil,
+        firstPostID: Int? = nil,
+        forumID: Int? = nil,
+        modifiedAt: Date? = nil,
+        moodleID: Int? = nil,
+        pinned: Bool? = nil,
+        replyCount: Int? = nil,
+        subject: String? = nil
+    ) -> MoodleDiscussion {
+        return MoodleDiscussion(
+            authorName: authorName ?? self.authorName,
+            createdAt: createdAt ?? self.createdAt,
+            firstPostID: firstPostID ?? self.firstPostID,
+            forumID: forumID ?? self.forumID,
+            modifiedAt: modifiedAt ?? self.modifiedAt,
+            moodleID: moodleID ?? self.moodleID,
+            pinned: pinned ?? self.pinned,
+            replyCount: replyCount ?? self.replyCount,
+            subject: subject ?? self.subject
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/forums/{forum_id}/discussions
+// MARK: - MoodleDiscussionList
+struct MoodleDiscussionList: Codable {
+    let items: [MoodleDiscussion]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleDiscussionList convenience initializers and mutators
+
+extension MoodleDiscussionList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleDiscussionList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleDiscussion]? = nil
+    ) -> MoodleDiscussionList {
+        return MoodleDiscussionList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MoodleForum
+struct MoodleForum: Codable {
+    let canPost: Bool
+    /// Moodle-ID
+    let cmid: Int
+    /// Moodle-ID
+    let courseID: Int
+    /// Moodle-ID
+    let moodleID: Int
+    let name: String
+    /// Moodle-Forumtyp, z. B. news, general, qanda
+    let type: String
+
+    enum CodingKeys: String, CodingKey {
+        case canPost = "can_post"
+        case cmid = "cmid"
+        case courseID = "course_id"
+        case moodleID = "moodle_id"
+        case name = "name"
+        case type = "type"
+    }
+}
+
+// MARK: MoodleForum convenience initializers and mutators
+
+extension MoodleForum {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleForum.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        canPost: Bool? = nil,
+        cmid: Int? = nil,
+        courseID: Int? = nil,
+        moodleID: Int? = nil,
+        name: String? = nil,
+        type: String? = nil
+    ) -> MoodleForum {
+        return MoodleForum(
+            canPost: canPost ?? self.canPost,
+            cmid: cmid ?? self.cmid,
+            courseID: courseID ?? self.courseID,
+            moodleID: moodleID ?? self.moodleID,
+            name: name ?? self.name,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/forums
+// MARK: - MoodleForumList
+struct MoodleForumList: Codable {
+    let items: [MoodleForum]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleForumList convenience initializers and mutators
+
+extension MoodleForumList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleForumList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleForum]? = nil
+    ) -> MoodleForumList {
+        return MoodleForumList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Zeile aus der Notenübersicht. Werte als Text, wie Moodle sie formatiert
+// MARK: - MoodleGradeItem
+struct MoodleGradeItem: Codable {
+    let cmid: Int?
+    /// Moodle-ID
+    let courseID: Int
+    let feedbackHTML: String?
+    let grade: String?
+    /// course, mod, category, manual
+    let itemType: String
+    let name: String
+    let percentage: String?
+    let range: String?
+
+    enum CodingKeys: String, CodingKey {
+        case cmid = "cmid"
+        case courseID = "course_id"
+        case feedbackHTML = "feedback_html"
+        case grade = "grade"
+        case itemType = "item_type"
+        case name = "name"
+        case percentage = "percentage"
+        case range = "range"
+    }
+}
+
+// MARK: MoodleGradeItem convenience initializers and mutators
+
+extension MoodleGradeItem {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleGradeItem.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cmid: Int?? = nil,
+        courseID: Int? = nil,
+        feedbackHTML: String?? = nil,
+        grade: String?? = nil,
+        itemType: String? = nil,
+        name: String? = nil,
+        percentage: String?? = nil,
+        range: String?? = nil
+    ) -> MoodleGradeItem {
+        return MoodleGradeItem(
+            cmid: cmid ?? self.cmid,
+            courseID: courseID ?? self.courseID,
+            feedbackHTML: feedbackHTML ?? self.feedbackHTML,
+            grade: grade ?? self.grade,
+            itemType: itemType ?? self.itemType,
+            name: name ?? self.name,
+            percentage: percentage ?? self.percentage,
+            range: range ?? self.range
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/grades
+// MARK: - MoodleGradeList
+struct MoodleGradeList: Codable {
+    let items: [MoodleGradeItem]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleGradeList convenience initializers and mutators
+
+extension MoodleGradeList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleGradeList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleGradeItem]? = nil
+    ) -> MoodleGradeList {
+        return MoodleGradeList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MoodleNotification
+struct MoodleNotification: Codable {
+    let createdAt: Date
+    /// Moodle-ID
+    let moodleID: Int
+    let read: Bool
+    let subject: String
+    let text: String
+    let url: String?
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case moodleID = "moodle_id"
+        case read = "read"
+        case subject = "subject"
+        case text = "text"
+        case url = "url"
+    }
+}
+
+// MARK: MoodleNotification convenience initializers and mutators
+
+extension MoodleNotification {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleNotification.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        moodleID: Int? = nil,
+        read: Bool? = nil,
+        subject: String? = nil,
+        text: String? = nil,
+        url: String?? = nil
+    ) -> MoodleNotification {
+        return MoodleNotification(
+            createdAt: createdAt ?? self.createdAt,
+            moodleID: moodleID ?? self.moodleID,
+            read: read ?? self.read,
+            subject: subject ?? self.subject,
+            text: text ?? self.text,
+            url: url ?? self.url
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/notifications
+// MARK: - MoodleNotificationList
+struct MoodleNotificationList: Codable {
+    let items: [MoodleNotification]
+    let unreadCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case unreadCount = "unread_count"
+    }
+}
+
+// MARK: MoodleNotificationList convenience initializers and mutators
+
+extension MoodleNotificationList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleNotificationList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleNotification]? = nil,
+        unreadCount: Int? = nil
+    ) -> MoodleNotificationList {
+        return MoodleNotificationList(
+            items: items ?? self.items,
+            unreadCount: unreadCount ?? self.unreadCount
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - MoodlePost
+struct MoodlePost: Codable {
+    let attachments: [MoodleFile]
+    let authorName: String?
+    let canReply: Bool
+    let createdAt: Date
+    /// Moodle-ID
+    let discussionID: Int
+    let messageHTML: String
+    /// Moodle-ID
+    let moodleID: Int
+    let parentID: Int?
+    let subject: String
+
+    enum CodingKeys: String, CodingKey {
+        case attachments = "attachments"
+        case authorName = "author_name"
+        case canReply = "can_reply"
+        case createdAt = "created_at"
+        case discussionID = "discussion_id"
+        case messageHTML = "message_html"
+        case moodleID = "moodle_id"
+        case parentID = "parent_id"
+        case subject = "subject"
+    }
+}
+
+// MARK: MoodlePost convenience initializers and mutators
+
+extension MoodlePost {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodlePost.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        attachments: [MoodleFile]? = nil,
+        authorName: String?? = nil,
+        canReply: Bool? = nil,
+        createdAt: Date? = nil,
+        discussionID: Int? = nil,
+        messageHTML: String? = nil,
+        moodleID: Int? = nil,
+        parentID: Int?? = nil,
+        subject: String? = nil
+    ) -> MoodlePost {
+        return MoodlePost(
+            attachments: attachments ?? self.attachments,
+            authorName: authorName ?? self.authorName,
+            canReply: canReply ?? self.canReply,
+            createdAt: createdAt ?? self.createdAt,
+            discussionID: discussionID ?? self.discussionID,
+            messageHTML: messageHTML ?? self.messageHTML,
+            moodleID: moodleID ?? self.moodleID,
+            parentID: parentID ?? self.parentID,
+            subject: subject ?? self.subject
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/discussions/{discussion_id}/posts
+// MARK: - MoodlePostList
+struct MoodlePostList: Codable {
+    let items: [MoodlePost]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodlePostList convenience initializers and mutators
+
+extension MoodlePostList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodlePostList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodlePost]? = nil
+    ) -> MoodlePostList {
+        return MoodlePostList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Quiz, nur zur Anzeige. Versuche laufen nie über die App (F-MDL-05)
+// MARK: - MoodleQuiz
+struct MoodleQuiz: Codable {
+    /// 0 = unbegrenzt
+    let attemptsAllowed: Int
+    let closesAt: Date?
+    /// Moodle-ID
+    let cmid: Int
+    /// Moodle-ID
+    let courseID: Int
+    /// Moodle-ID
+    let moodleID: Int
+    let name: String
+    let opensAt: Date?
+    let timeLimitMinutes: Int?
+    let url: String
+
+    enum CodingKeys: String, CodingKey {
+        case attemptsAllowed = "attempts_allowed"
+        case closesAt = "closes_at"
+        case cmid = "cmid"
+        case courseID = "course_id"
+        case moodleID = "moodle_id"
+        case name = "name"
+        case opensAt = "opens_at"
+        case timeLimitMinutes = "time_limit_minutes"
+        case url = "url"
+    }
+}
+
+// MARK: MoodleQuiz convenience initializers and mutators
+
+extension MoodleQuiz {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleQuiz.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        attemptsAllowed: Int? = nil,
+        closesAt: Date?? = nil,
+        cmid: Int? = nil,
+        courseID: Int? = nil,
+        moodleID: Int? = nil,
+        name: String? = nil,
+        opensAt: Date?? = nil,
+        timeLimitMinutes: Int?? = nil,
+        url: String? = nil
+    ) -> MoodleQuiz {
+        return MoodleQuiz(
+            attemptsAllowed: attemptsAllowed ?? self.attemptsAllowed,
+            closesAt: closesAt ?? self.closesAt,
+            cmid: cmid ?? self.cmid,
+            courseID: courseID ?? self.courseID,
+            moodleID: moodleID ?? self.moodleID,
+            name: name ?? self.name,
+            opensAt: opensAt ?? self.opensAt,
+            timeLimitMinutes: timeLimitMinutes ?? self.timeLimitMinutes,
+            url: url ?? self.url
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/quizzes
+// MARK: - MoodleQuizList
+struct MoodleQuizList: Codable {
+    let items: [MoodleQuiz]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleQuizList convenience initializers and mutators
+
+extension MoodleQuizList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleQuizList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleQuiz]? = nil
+    ) -> MoodleQuizList {
+        return MoodleQuizList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/status (08 §9.2)
+// MARK: - MoodleStatus
+struct MoodleStatus: Codable {
+    let checkedAt: Date?
+    let siteName: String?
+    let siteURL: String?
+    let state: MoodleConnectionState
+    let tokenValidUntil: String?
+    let userFullname: String?
+
+    enum CodingKeys: String, CodingKey {
+        case checkedAt = "checked_at"
+        case siteName = "site_name"
+        case siteURL = "site_url"
+        case state = "state"
+        case tokenValidUntil = "token_valid_until"
+        case userFullname = "user_fullname"
+    }
+}
+
+// MARK: MoodleStatus convenience initializers and mutators
+
+extension MoodleStatus {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleStatus.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        checkedAt: Date?? = nil,
+        siteName: String?? = nil,
+        siteURL: String?? = nil,
+        state: MoodleConnectionState? = nil,
+        tokenValidUntil: String?? = nil,
+        userFullname: String?? = nil
+    ) -> MoodleStatus {
+        return MoodleStatus(
+            checkedAt: checkedAt ?? self.checkedAt,
+            siteName: siteName ?? self.siteName,
+            siteURL: siteURL ?? self.siteURL,
+            state: state ?? self.state,
+            tokenValidUntil: tokenValidUntil ?? self.tokenValidUntil,
+            userFullname: userFullname ?? self.userFullname
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum MoodleSubmissionState: String, Codable {
+    case eingereicht = "eingereicht"
+    case entwurf = "entwurf"
+    case keine = "keine"
+}
+
+/// Antwort von GET /moodle/assignments/{assignment_id}/submission
+// MARK: - MoodleSubmissionStatus
+struct MoodleSubmissionStatus: Codable {
+    /// Moodle-ID
+    let assignmentID: Int
+    let canEdit: Bool
+    let canSubmit: Bool
+    let feedbackHTML: String?
+    let files: [MoodleFile]
+    let grade: String?
+    let graded: Bool
+    let lastModifiedAt: Date?
+    let onlineTextHTML: String?
+    let state: MoodleSubmissionState
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentID = "assignment_id"
+        case canEdit = "can_edit"
+        case canSubmit = "can_submit"
+        case feedbackHTML = "feedback_html"
+        case files = "files"
+        case grade = "grade"
+        case graded = "graded"
+        case lastModifiedAt = "last_modified_at"
+        case onlineTextHTML = "online_text_html"
+        case state = "state"
+    }
+}
+
+// MARK: MoodleSubmissionStatus convenience initializers and mutators
+
+extension MoodleSubmissionStatus {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleSubmissionStatus.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        assignmentID: Int? = nil,
+        canEdit: Bool? = nil,
+        canSubmit: Bool? = nil,
+        feedbackHTML: String?? = nil,
+        files: [MoodleFile]? = nil,
+        grade: String?? = nil,
+        graded: Bool? = nil,
+        lastModifiedAt: Date?? = nil,
+        onlineTextHTML: String?? = nil,
+        state: MoodleSubmissionState? = nil
+    ) -> MoodleSubmissionStatus {
+        return MoodleSubmissionStatus(
+            assignmentID: assignmentID ?? self.assignmentID,
+            canEdit: canEdit ?? self.canEdit,
+            canSubmit: canSubmit ?? self.canSubmit,
+            feedbackHTML: feedbackHTML ?? self.feedbackHTML,
+            files: files ?? self.files,
+            grade: grade ?? self.grade,
+            graded: graded ?? self.graded,
+            lastModifiedAt: lastModifiedAt ?? self.lastModifiedAt,
+            onlineTextHTML: onlineTextHTML ?? self.onlineTextHTML,
+            state: state ?? self.state
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von POST /moodle/uploads
+// MARK: - MoodleUpload
+struct MoodleUpload: Codable {
+    let expiresAt: Date
+    let filename: String
+    let sizeBytes: Int
+    let uploadID: String
+
+    enum CodingKeys: String, CodingKey {
+        case expiresAt = "expires_at"
+        case filename = "filename"
+        case sizeBytes = "size_bytes"
+        case uploadID = "upload_id"
+    }
+}
+
+// MARK: MoodleUpload convenience initializers and mutators
+
+extension MoodleUpload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleUpload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        expiresAt: Date? = nil,
+        filename: String? = nil,
+        sizeBytes: Int? = nil,
+        uploadID: String? = nil
+    ) -> MoodleUpload {
+        return MoodleUpload(
+            expiresAt: expiresAt ?? self.expiresAt,
+            filename: filename ?? self.filename,
+            sizeBytes: sizeBytes ?? self.sizeBytes,
+            uploadID: uploadID ?? self.uploadID
         )
     }
 
@@ -15126,6 +17662,410 @@ extension ModuleUpdate {
         try container.encodeIfPresent(semesterID, forKey: .semesterID)
         try container.encodeIfPresent(settings, forKey: .settings)
         try container.encodeIfPresent(shortName, forKey: .shortName)
+    }
+}
+
+extension MoodleActionCatalog {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleActionInfo {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(available, forKey: .available)
+        try container.encode(description, forKey: .description)
+        try container.encode(id, forKey: .id)
+        try container.encode(label, forKey: .label)
+        try container.encode(needsConfirmation, forKey: .needsConfirmation)
+        try container.encode(risk, forKey: .risk)
+    }
+}
+
+extension MoodleActionExecute {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(confirmationToken, forKey: .confirmationToken)
+        try container.encode(params, forKey: .params)
+    }
+}
+
+extension MoodleActionParamsAssignSaveDraft {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(assignmentID, forKey: .assignmentID)
+        try container.encodeIfPresent(onlineTextHTML, forKey: .onlineTextHTML)
+        try container.encodeIfPresent(uploadIDS, forKey: .uploadIDS)
+    }
+}
+
+extension MoodleActionParamsAssignSubmit {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(acceptStatement, forKey: .acceptStatement)
+        try container.encode(assignmentID, forKey: .assignmentID)
+    }
+}
+
+extension MoodleActionParamsCalendarCreateEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(descriptionHTML, forKey: .descriptionHTML)
+        try container.encodeIfPresent(durationMinutes, forKey: .durationMinutes)
+        try container.encode(name, forKey: .name)
+        try container.encode(startAt, forKey: .startAt)
+    }
+}
+
+extension MoodleActionParamsCompletionSet {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cmid, forKey: .cmid)
+        try container.encode(completed, forKey: .completed)
+    }
+}
+
+extension MoodleActionParamsFilesUploadPrivate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(uploadIDS, forKey: .uploadIDS)
+    }
+}
+
+extension MoodleActionParamsForumCreateDiscussion {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(forumID, forKey: .forumID)
+        try container.encode(messageHTML, forKey: .messageHTML)
+        try container.encode(subject, forKey: .subject)
+        try container.encodeIfPresent(uploadIDS, forKey: .uploadIDS)
+    }
+}
+
+extension MoodleActionParamsForumReply {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(messageHTML, forKey: .messageHTML)
+        try container.encode(postID, forKey: .postID)
+        try container.encodeIfPresent(subject, forKey: .subject)
+        try container.encodeIfPresent(uploadIDS, forKey: .uploadIDS)
+    }
+}
+
+extension MoodleActionParamsMessageSend {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(text, forKey: .text)
+        try container.encode(toUserID, forKey: .toUserID)
+    }
+}
+
+extension MoodleActionPreview {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(actionID, forKey: .actionID)
+        try container.encode(confirmationToken, forKey: .confirmationToken)
+        try container.encode(details, forKey: .details)
+        try container.encode(expiresAt, forKey: .expiresAt)
+        try container.encode(needsConfirmation, forKey: .needsConfirmation)
+        try container.encode(risk, forKey: .risk)
+        try container.encode(summary, forKey: .summary)
+        try container.encode(warnings, forKey: .warnings)
+    }
+}
+
+extension MoodleActionRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(params, forKey: .params)
+    }
+}
+
+extension MoodleActionResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(actionID, forKey: .actionID)
+        try container.encode(result, forKey: .result)
+        try container.encode(summary, forKey: .summary)
+    }
+}
+
+extension MoodleActivity {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cmid, forKey: .cmid)
+        try container.encode(completion, forKey: .completion)
+        try container.encode(completionManual, forKey: .completionManual)
+        try container.encode(descriptionHTML, forKey: .descriptionHTML)
+        try container.encode(files, forKey: .files)
+        try container.encode(instanceID, forKey: .instanceID)
+        try container.encode(name, forKey: .name)
+        try container.encode(type, forKey: .type)
+        try container.encode(url, forKey: .url)
+        try container.encode(visible, forKey: .visible)
+    }
+}
+
+extension MoodleFile {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(filename, forKey: .filename)
+        try container.encode(mimeType, forKey: .mimeType)
+        try container.encode(modifiedAt, forKey: .modifiedAt)
+        try container.encode(ref, forKey: .ref)
+        try container.encode(sizeBytes, forKey: .sizeBytes)
+    }
+}
+
+extension MoodleAssignment {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cmid, forKey: .cmid)
+        try container.encode(courseID, forKey: .courseID)
+        try container.encode(cutoffAt, forKey: .cutoffAt)
+        try container.encode(dueAt, forKey: .dueAt)
+        try container.encode(introFiles, forKey: .introFiles)
+        try container.encode(introHTML, forKey: .introHTML)
+        try container.encode(moodleID, forKey: .moodleID)
+        try container.encode(name, forKey: .name)
+        try container.encode(opensAt, forKey: .opensAt)
+        try container.encode(requiresStatement, forKey: .requiresStatement)
+        try container.encode(requiresSubmit, forKey: .requiresSubmit)
+        try container.encode(submissionTypes, forKey: .submissionTypes)
+    }
+}
+
+extension MoodleAssignmentList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleCourse {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(endDate, forKey: .endDate)
+        try container.encode(fullName, forKey: .fullName)
+        try container.encode(lastAccessAt, forKey: .lastAccessAt)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(moodleID, forKey: .moodleID)
+        try container.encode(shortName, forKey: .shortName)
+        try container.encode(startDate, forKey: .startDate)
+        try container.encode(url, forKey: .url)
+    }
+}
+
+extension MoodleCourseContents {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(courseID, forKey: .courseID)
+        try container.encode(sections, forKey: .sections)
+    }
+}
+
+extension MoodleSection {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(activities, forKey: .activities)
+        try container.encode(index, forKey: .index)
+        try container.encode(moodleID, forKey: .moodleID)
+        try container.encode(name, forKey: .name)
+        try container.encode(visible, forKey: .visible)
+    }
+}
+
+extension MoodleCourseList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleDeadline {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(actionRequired, forKey: .actionRequired)
+        try container.encode(activityType, forKey: .activityType)
+        try container.encode(cmid, forKey: .cmid)
+        try container.encode(courseID, forKey: .courseID)
+        try container.encode(dueAt, forKey: .dueAt)
+        try container.encode(eventID, forKey: .eventID)
+        try container.encode(name, forKey: .name)
+        try container.encode(url, forKey: .url)
+    }
+}
+
+extension MoodleDeadlineList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleDiscussion {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(authorName, forKey: .authorName)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(firstPostID, forKey: .firstPostID)
+        try container.encode(forumID, forKey: .forumID)
+        try container.encode(modifiedAt, forKey: .modifiedAt)
+        try container.encode(moodleID, forKey: .moodleID)
+        try container.encode(pinned, forKey: .pinned)
+        try container.encode(replyCount, forKey: .replyCount)
+        try container.encode(subject, forKey: .subject)
+    }
+}
+
+extension MoodleDiscussionList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleForum {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(canPost, forKey: .canPost)
+        try container.encode(cmid, forKey: .cmid)
+        try container.encode(courseID, forKey: .courseID)
+        try container.encode(moodleID, forKey: .moodleID)
+        try container.encode(name, forKey: .name)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension MoodleForumList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleGradeItem {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cmid, forKey: .cmid)
+        try container.encode(courseID, forKey: .courseID)
+        try container.encode(feedbackHTML, forKey: .feedbackHTML)
+        try container.encode(grade, forKey: .grade)
+        try container.encode(itemType, forKey: .itemType)
+        try container.encode(name, forKey: .name)
+        try container.encode(percentage, forKey: .percentage)
+        try container.encode(range, forKey: .range)
+    }
+}
+
+extension MoodleGradeList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleNotification {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(moodleID, forKey: .moodleID)
+        try container.encode(read, forKey: .read)
+        try container.encode(subject, forKey: .subject)
+        try container.encode(text, forKey: .text)
+        try container.encode(url, forKey: .url)
+    }
+}
+
+extension MoodleNotificationList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(unreadCount, forKey: .unreadCount)
+    }
+}
+
+extension MoodlePost {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(attachments, forKey: .attachments)
+        try container.encode(authorName, forKey: .authorName)
+        try container.encode(canReply, forKey: .canReply)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(discussionID, forKey: .discussionID)
+        try container.encode(messageHTML, forKey: .messageHTML)
+        try container.encode(moodleID, forKey: .moodleID)
+        try container.encode(parentID, forKey: .parentID)
+        try container.encode(subject, forKey: .subject)
+    }
+}
+
+extension MoodlePostList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleQuiz {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(attemptsAllowed, forKey: .attemptsAllowed)
+        try container.encode(closesAt, forKey: .closesAt)
+        try container.encode(cmid, forKey: .cmid)
+        try container.encode(courseID, forKey: .courseID)
+        try container.encode(moodleID, forKey: .moodleID)
+        try container.encode(name, forKey: .name)
+        try container.encode(opensAt, forKey: .opensAt)
+        try container.encode(timeLimitMinutes, forKey: .timeLimitMinutes)
+        try container.encode(url, forKey: .url)
+    }
+}
+
+extension MoodleQuizList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleStatus {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(checkedAt, forKey: .checkedAt)
+        try container.encode(siteName, forKey: .siteName)
+        try container.encode(siteURL, forKey: .siteURL)
+        try container.encode(state, forKey: .state)
+        try container.encode(tokenValidUntil, forKey: .tokenValidUntil)
+        try container.encode(userFullname, forKey: .userFullname)
+    }
+}
+
+extension MoodleSubmissionStatus {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(assignmentID, forKey: .assignmentID)
+        try container.encode(canEdit, forKey: .canEdit)
+        try container.encode(canSubmit, forKey: .canSubmit)
+        try container.encode(feedbackHTML, forKey: .feedbackHTML)
+        try container.encode(files, forKey: .files)
+        try container.encode(grade, forKey: .grade)
+        try container.encode(graded, forKey: .graded)
+        try container.encode(lastModifiedAt, forKey: .lastModifiedAt)
+        try container.encode(onlineTextHTML, forKey: .onlineTextHTML)
+        try container.encode(state, forKey: .state)
+    }
+}
+
+extension MoodleUpload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(expiresAt, forKey: .expiresAt)
+        try container.encode(filename, forKey: .filename)
+        try container.encode(sizeBytes, forKey: .sizeBytes)
+        try container.encode(uploadID, forKey: .uploadID)
     }
 }
 
