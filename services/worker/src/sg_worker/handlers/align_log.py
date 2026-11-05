@@ -55,7 +55,8 @@ def build_timeline(
     changes: Sequence[Change], slides: Mapping[int, uuid.UUID], timeline_end_ms: int
 ) -> Timeline:
     """Schritte 5 bis 8 aus §18.3. `changes` ist nach `(t, created_at, id)` sortiert und geklemmt,
-    `slides` bildet `slide_index` auf die Folie des Foliensatzes ab."""
+    `slides` bildet `slide_index` auf die Folie des Foliensatzes ab. Die erste stabile Folie
+    beginnt bei 0. Fällt alles als Durchgang weg, gilt der letzte Eintrag ab 0."""
     resolved = [c for c in changes if c.slide_index in slides]
     unresolved = len(changes) - len(resolved)
     # (Folie, Zeit, echt?): gedachter Wechsel auf Folie 1 bei t = 0 vorn, wenn es sie gibt
@@ -70,6 +71,15 @@ def build_timeline(
             skipped += entry[2]
         else:
             kept.append(entry)
+    if not kept and entries and timeline_end_ms > 0:
+        # Alles Durchgänge: Der letzte Eintrag gilt für die ganze Zeitleiste
+        last = entries[-1]
+        skipped -= last[2]
+        kept.append(last)
+    if kept:
+        # Lead-Entscheidung (Review #148): Die Zeit vom Aufnahmestart bis zur ersten stabilen
+        # Folie gehört zu dieser Folie
+        kept[0] = (kept[0][0], 0, kept[0][2])
     segments: list[Seg] = []
     for i, (index, t, _real) in enumerate(kept):
         end = kept[i + 1][1] if i + 1 < len(kept) else timeline_end_ms

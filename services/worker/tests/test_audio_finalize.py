@@ -648,8 +648,9 @@ def test_session_becomes_verarbeitet_and_notifies(
     with psycopg.connect(database_url, autocommit=True) as listener:
         listener.execute("LISTEN sg_session")
         worker.drain(conn)
-        got = [n.payload for n in listener.notifies(timeout=2, stop_after=1)]
-    assert got == [str(sid)]
+        # Alle sammeln: eine Meldung beim Abholen (`laeuft`, §18.2), eine beim Abschluss
+        got = [n.payload for n in listener.notifies(timeout=1)]
+    assert got == [str(sid)] * 2
     state, processing = conn.execute(
         "SELECT state, processing FROM session WHERE id = %s", (sid,)
     ).fetchone() or (None, None)

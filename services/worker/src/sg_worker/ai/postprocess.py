@@ -3,7 +3,8 @@
 In dieser Reihenfolge:
 
 1. Abschnitte mit `no_speech_prob > 0,6` verwerfen, ebenso Abschnitte mit leerem Text.
-2. Wiederholung verwerfen: normierter Text gleich dem des zuletzt behaltenen Abschnitts.
+2. Wiederholung verwerfen: normierter Text gleich dem des zuletzt behaltenen Abschnitts und die
+   Lücke dazu höchstens 2 s (Lead-Entscheidung im Review von #148: ein „Okay.“ nach 10 min bleibt).
 3. Zusammenführen auf Satzgrenzen (5 bis 30 s), siehe `_joins`.
 4. Je Gruppe Text, nach Dauer gewichtetes `avg_logprob`, maximales `no_speech_prob`, Sprache der
    Aufnahme und die Wörter (oder `None`, wenn der Transcriber keine liefert).
@@ -147,11 +148,11 @@ def postprocess(
         if not _keep(seg):  # Regel 1
             continue
         norm = normalize(seg.text)
-        if last_norm is not None and norm == last_norm:  # Regel 2
-            continue
-        last_norm = norm
         start = to_session_ms(started_ms, seg.start)
         end = max(to_session_ms(started_ms, seg.end), start)
+        if parts and norm == last_norm and start - parts[-1].end_ms <= MAX_GAP_MS:  # Regel 2
+            continue
+        last_norm = norm
         parts.append(_Part(start, end, seg.text.strip(), seg))
 
     groups: list[list[_Part]] = []

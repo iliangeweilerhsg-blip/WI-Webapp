@@ -65,10 +65,21 @@ def test_dwell_exactly_one_and_a_half_seconds_is_kept() -> None:
 
 def test_dwell_times_are_computed_once_from_the_list() -> None:
     """Die Standzeiten kommen aus der Liste nach Schritt 5, nicht erneut nach dem Wegfallen.
-    Der gedachte Start (Folie 1 bis 1 000 ms) fällt darum ebenfalls weg, ohne gezählt zu werden."""
+    Der gedachte Start (Folie 1 bis 1 000 ms) fällt darum ebenfalls weg, ohne gezählt zu werden.
+    Die Zeit bis zur ersten stabilen Folie gehört zu ihr (Lead-Entscheidung im Review von #148)."""
     tl = build_timeline([ch(1_000, 2, 1), ch(2_000, 3, 2)], SLIDES, 30_000)
-    assert spans(tl.segments) == [(3, 2_000, 30_000)]
+    assert spans(tl.segments) == [(3, 0, 30_000)]
     assert tl.skipped == 1
+
+
+def test_all_passes_last_entry_covers_timeline() -> None:
+    """Randfall: Fällt alles als Durchgang weg, gilt der letzte Eintrag ab 0."""
+    tl = build_timeline([ch(1_000, 2, 1), ch(2_000, 3, 2)], SLIDES, 2_500)
+    assert spans(tl.segments) == [(3, 0, 2_500)]
+    assert (tl.skipped, tl.real_changes) == (1, 1)
+    short = build_timeline([], SLIDES, 1_000)  # nur der gedachte Start, zu kurz
+    assert spans(short.segments) == [(1, 0, 1_000)]
+    assert (short.skipped, short.real_changes) == (0, 0)
 
 
 def test_first_change_at_zero_replaces_virtual_start() -> None:
@@ -94,7 +105,7 @@ def test_unknown_index_is_unresolved_and_dropped() -> None:
 def test_without_slide_one_no_virtual_start() -> None:
     slides = {k: v for k, v in SLIDES.items() if k != 1}
     tl = build_timeline([ch(5_000, 2, 1)], slides, 20_000)
-    assert spans(tl.segments) == [(2, 5_000, 20_000)]
+    assert spans(tl.segments) == [(2, 0, 20_000)]  # erste stabile Folie ab 0
     assert build_timeline([], slides, 20_000).segments == []
 
 
@@ -242,11 +253,16 @@ def test_negative_offset_is_clamped_to_zero_and_end(
         ended_at="2026-11-05 10:01:00+00",
         start_offsets=[{"device_id": str(ipad), "offset_ms": -5_000}],
     )
+    # Geklemmt: Folie 2 steht 1 s (0 → 1 000), Folie 4 steht 1 s (59 000 → 60 000), Folie 2 am
+    # Ende 0 s. Nur Folie 3 ist stabil. Ungeklemmt stünde Folie 2 vier Sekunden (ab -3 000) und
+    # Folie 4 zwei Sekunden (bis 61 000), beide blieben.
     add_event(conn, 2_000, 2, device="ipad", device_id=ipad)  # → -3 000 → 0
-    add_event(conn, 90_000, 3)  # → 60 000, Standzeit 0: Durchgang
+    add_event(conn, 1_000, 3)
+    add_event(conn, 59_000, 4)
+    add_event(conn, 66_000, 2, device="ipad", device_id=ipad)  # → 61 000 → 60 000
     job = run_align(worker, conn)
-    assert stored(conn) == [(2, 0, 60_000)]
-    assert job["result"]["skipped_events"] == 1
+    assert stored(conn) == [(3, 0, 60_000)]
+    assert job["result"]["skipped_events"] == 3
 
 
 def test_timeline_end_from_recordings(

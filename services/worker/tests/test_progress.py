@@ -213,8 +213,9 @@ def test_notify(worker: Worker, conn: psycopg.Connection[Any], database_url: str
     with psycopg.connect(database_url, autocommit=True) as listener:
         listener.execute("LISTEN sg_session")
         worker.drain(conn)
-        got = [n.payload for n in listener.notifies(timeout=2, stop_after=1)]
-    assert got == [str(SID)]
+        # Alle sammeln: eine Meldung beim Abholen (`laeuft`, §18.2), eine beim Abschluss
+        got = [n.payload for n in listener.notifies(timeout=1)]
+    assert got == [str(SID)] * 2
 
 
 def test_idempotent_double_run(conn: psycopg.Connection[Any]) -> None:

@@ -475,3 +475,27 @@ def test_postprocessing_is_applied(
         (10_000, 16_000, "Ein Satz."),
     ]
     assert all(r["words"] is None for r in rows)
+
+
+@pytest.mark.usefixtures("base")
+@pytest.mark.parametrize(("body", "state"), [("kill -9 $$", "wartet"), ("exit 1", "fehler")])
+def test_ffmpeg_signal_retries_exit_code_fails(
+    worker: Worker,
+    conn: Conn,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    body: str,
+    state: str,
+) -> None:
+    """mlx-Adapter mit `ffmpeg`-Ersatz: Signal → Retry (§18.2), Fehlercode → sofort `fehler`."""
+    add_recording(conn, tmp_path)
+    script = tmp_path / "ffmpeg-ersatz"
+    script.write_text(f"#!/bin/sh\n{body}\n")
+    script.chmod(0o755)
+    monkeypatch.setattr(tr, "FFMPEG", str(script))
+    monkeypatch.setattr(tr.MlxWhisperTranscriber, "_import", staticmethod(lambda: (None, None)))
+    monkeypatch.setattr(tr.MlxWhisperTranscriber, "count_tokens", lambda self, text: 1)
+    use(monkeypatch, tr.MlxWhisperTranscriber())
+    job = run_job(worker, conn)
+    assert (job["state"], job["attempts"]) == (state, 1)
+    assert transcripts(conn) == []

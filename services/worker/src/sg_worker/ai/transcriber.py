@@ -222,6 +222,9 @@ def decode_pcm16(audio: Path, timeout: float = DECODE_TIMEOUT_S) -> bytes:
         raise RuntimeError(f"ffmpeg: Zeitlimit von {int(timeout)} s überschritten") from exc
     except FileNotFoundError as exc:
         raise RuntimeError("ffmpeg nicht gefunden") from exc
+    if done.returncode < 0:
+        # Abbruch per Signal (Speicher, Neustart): kein Befund über die Datei, Retry nach §18.2
+        raise RuntimeError(f"ffmpeg durch Signal {-done.returncode} beendet")
     if done.returncode != 0:
         raise AudioDecodeError(f"ffmpeg endete mit Code {done.returncode}")
     return done.stdout

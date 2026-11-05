@@ -53,11 +53,21 @@ def test_repetition_of_last_kept_is_dropped() -> None:
     rows = run(
         [
             seg(0, 6, "Danke fürs Zuhören."),
-            seg(10, 16, "danke  fürs zuhören"),  # normiert gleich
-            seg(20, 26, "Danke, fürs Zuhören!"),  # auch
+            seg(7, 7.5, "danke  fürs zuhören"),  # normiert gleich, Lücke 1 s
+            seg(8, 9, "Danke, fürs Zuhören!"),  # auch, Lücke zum behaltenen 2 s
         ]
     )
     assert [r.text for r in rows] == ["Danke fürs Zuhören."]
+
+
+def test_repetition_only_within_two_seconds() -> None:
+    """Gleicher Text mit größerer Lücke ist keine Halluzination (Review von #148)."""
+    rows = run([seg(0, 1, "Okay."), seg(600, 601, "Okay."), seg(603, 604, "okay")])
+    assert [(r.start_ms, r.text) for r in rows] == [(0, "Okay."), (600_000, "Okay.")]
+    rows = run([seg(0, 1, "Okay."), seg(3, 4, "Okay.")])  # Lücke genau 2 s: verworfen
+    assert [r.text for r in rows] == ["Okay."]
+    rows = run([seg(0, 1, "Okay."), seg(3.001, 4, "Okay.")])  # 2,001 s: bleibt
+    assert len(rows) == 2
 
 
 def test_repetition_compares_only_with_last_kept() -> None:
@@ -68,7 +78,7 @@ def test_repetition_compares_only_with_last_kept() -> None:
 def test_repetition_after_dropped_silence_is_still_detected() -> None:
     """Regel 2 vergleicht mit dem zuletzt *behaltenen*, nicht mit dem verworfenen Abschnitt."""
     rows = run(
-        [seg(0, 6, "Satz A."), seg(10, 16, "Satz X.", nsp=0.9), seg(20, 26, "Satz A.")],
+        [seg(0, 6, "Satz A."), seg(6.5, 7.5, "Satz X.", nsp=0.9), seg(8, 14, "Satz A.")],
     )
     assert [r.text for r in rows] == ["Satz A."]
 
@@ -467,3 +477,26 @@ def test_bench_with_fake(
     assert "Abschnitte:   3 roh, 3 nach der Nachbearbeitung" in out
     assert "Testabschnitt 1" in out
     assert bench.main([str(tmp_path / "fehlt.m4a")]) == 2
+
+
+def _fake_ffmpeg(tmp_path: Path, body: str) -> str:
+    script = tmp_path / "ffmpeg-ersatz"
+    script.write_text(f"#!/bin/sh\n{body}\n")
+    script.chmod(0o755)
+    return str(script)
+
+
+def test_decode_killed_by_signal_is_retryable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§18.2: Ein Abbruch per Signal sagt nichts über die Datei, darum Retry statt `fehler`."""
+    monkeypatch.setattr(tr, "FFMPEG", _fake_ffmpeg(tmp_path, "kill -9 $$"))
+    with pytest.raises(RuntimeError, match="Signal 9") as info:
+        tr.decode_pcm16(tmp_path / "full.m4a")
+    assert not isinstance(info.value, tr.AudioDecodeError)
+
+
+def test_decode_exit_code_is_decode_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tr, "FFMPEG", _fake_ffmpeg(tmp_path, "exit 1"))
+    with pytest.raises(tr.AudioDecodeError, match="Code 1"):
+        tr.decode_pcm16(tmp_path / "full.m4a")
