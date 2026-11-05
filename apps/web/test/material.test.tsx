@@ -440,3 +440,94 @@ describe('Nacharbeit', () => {
     expect(core.requests.some((r) => r.method === 'DELETE')).toBe(false);
   });
 });
+
+describe('Rest-Toast und Race beim Wiederherstellen (#43)', () => {
+  it('Dublette im Fenster bei zwei offenen Löschungen: Zahl wird nachgezogen, „wieder da“ steht im offenen Toast, Fokus bleibt', async () => {
+    const user = userEvent.setup();
+    const one = makeDeck({ title: 'VL 01', ingest_state: 'verarbeitet', page_count: 3 });
+    const two = makeDeck({
+      id: '0190f6a2-0000-7000-8000-0000000000d2',
+      title: 'VL 02',
+      ingest_state: 'verarbeitet',
+      page_count: 3,
+    });
+    const core = await openModule({ decks: [one, two] });
+    const list = await screen.findByRole('list', { name: 'Foliensätze' });
+    await user.click(within(list).getByRole('button', { name: 'VL 01 löschen' }));
+    await user.click(within(list).getByRole('button', { name: 'VL 02 löschen' }));
+    expect(screen.getByText('2 Dateien gelöscht')).toBeInTheDocument();
+
+    // Der Fokus liegt woanders; ein asynchron fertiger Upload darf ihn nicht an sich reißen
+    const tab = screen.getByRole('tab', { name: 'Übungen' });
+    tab.focus();
+    core.nextUploadDuplicateOf = one.id;
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    expect(await screen.findByText(/Foliensatz gelöscht · „VL 01“ ist wieder da\./)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Rückgängig' })).toBeInTheDocument();
+    expect(tab).toHaveFocus();
+    expect(screen.queryByText('2 Dateien gelöscht')).not.toBeInTheDocument();
+    expect(core.requests.some((r) => r.method === 'DELETE')).toBe(false);
+  });
+
+  it('Dublette, während das DELETE schon unterwegs ist: wartet ab und lädt mit neuem Schlüssel neu hoch', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const deck = makeDeck({ title: 'VL 01', ingest_state: 'verarbeitet', page_count: 3 });
+    const core = await openModule({ decks: [deck] });
+    const inner = globalThis.fetch;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') await gate;
+      return inner(input, init);
+    });
+    const list = await screen.findByRole('list', { name: 'Foliensätze' });
+    await user.click(within(list).getByRole('button', { name: 'VL 01 löschen' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS + 500);
+    });
+    // Das DELETE hängt. Der Core kennt die Datei noch und meldet eine Dublette.
+    core.nextUploadDuplicateOf = deck.id;
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    await waitFor(() => expect(posts(core, '/slide-decks')).toHaveLength(1));
+    expect(screen.queryByText(/wieder da/)).not.toBeInTheDocument();
+    release();
+    expect(await screen.findByText('Foliensatz hinzugefügt')).toBeInTheDocument();
+    const sent = posts(core, '/slide-decks');
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.headers['Idempotency-Key']).not.toBe(sent[0]?.headers['Idempotency-Key']);
+    expect(screen.queryByText(/wieder da/)).not.toBeInTheDocument();
+  });
+
+  it('scheitert der Neu-Upload nach dem DELETE, nutzt „Erneut versuchen“ den neuen Schlüssel', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const deck = makeDeck({ title: 'VL 01', ingest_state: 'verarbeitet', page_count: 3 });
+    const core = await openModule({ decks: [deck] });
+    const inner = globalThis.fetch;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'DELETE') await gate;
+      return inner(input, init);
+    });
+    const list = await screen.findByRole('list', { name: 'Foliensätze' });
+    await user.click(within(list).getByRole('button', { name: 'VL 01 löschen' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS + 500);
+    });
+    core.nextUploadDuplicateOf = deck.id;
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    await waitFor(() => expect(posts(core, '/slide-decks')).toHaveLength(1));
+    core.failNextUpload = 'before';
+    release();
+    const uploads = await screen.findByRole('list', { name: 'Uploads' });
+    await user.click(await within(uploads).findByRole('button', { name: 'Erneut versuchen' }));
+    expect(await screen.findByText('Foliensatz hinzugefügt')).toBeInTheDocument();
+    const keys = posts(core, '/slide-decks').map((r) => r.headers['Idempotency-Key']);
+    expect(keys).toHaveLength(3);
+    expect(keys[1]).not.toBe(keys[0]);
+    expect(keys[2]).toBe(keys[1]);
+    expect(await screen.findByRole('link', { name: 'VL 01' })).toBeInTheDocument();
+  });
+});

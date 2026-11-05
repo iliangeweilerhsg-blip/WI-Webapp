@@ -1,0 +1,11 @@
+{
+  "type": "op",
+  "op_id": "abc",
+  "stream": "session:019a4e14-0000-7000-8000-000000000030",
+  "kind": "marker.remove",
+  "at": 1762240562123,
+  "clock_uncertain": false,
+  "data": {
+    "marker_id": "019a4e14-0000-7000-8000-000000000060"
+  }
+}

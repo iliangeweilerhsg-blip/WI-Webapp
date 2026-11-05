@@ -1,0 +1,1928 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Sync-Protokoll über WebSocket /sync (08 §2, F-SYN-01..03)",
+  "$defs": {
+    "SyncStreamId": {
+      "type": "string",
+      "pattern": "^((notebook|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|user)$",
+      "description": "Strom (08 §2.2): notebook:<id>, session:<id> oder user"
+    },
+    "NotebookStreamId": {
+      "type": "string",
+      "pattern": "^notebook:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "SessionStreamId": {
+      "type": "string",
+      "pattern": "^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "SyncClientKind": {
+      "type": "string",
+      "enum": ["ipad", "web"]
+    },
+    "SyncOrigin": {
+      "type": "string",
+      "enum": ["ipad", "web", "server"],
+      "description": "Wer die Operation erzeugt hat (vom Server gesetzt)"
+    },
+    "SyncStreamPosition": {
+      "type": "object",
+      "required": ["stream", "last_seq", "last_op_id"],
+      "additionalProperties": false,
+      "properties": {
+        "stream": {
+          "$ref": "#/$defs/SyncStreamId"
+        },
+        "last_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Höchste lückenlos empfangene und angewandte seq, 0 = nichts"
+        },
+        "last_op_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "op_id der Operation mit last_seq, null bei last_seq = 0. Der Server prüft das Paar, sonst reset"
+        }
+      }
+    },
+    "SyncResume": {
+      "type": "object",
+      "required": ["stream", "from_seq", "head_seq", "reset"],
+      "additionalProperties": false,
+      "properties": {
+        "stream": {
+          "$ref": "#/$defs/SyncStreamId"
+        },
+        "from_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Ab dieser seq sendet der Server die fehlenden Operationen"
+        },
+        "head_seq": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Aktuell höchste seq des Stroms. Ergänzung zu 08 §2.1"
+        },
+        "reset": {
+          "type": "boolean",
+          "description": "true: der Server kennt die gemeldete Position nicht (last_op_id passt nicht, seq zu hoch, z. B. nach einer Wiederherstellung) und sendet für diesen Strom nichts. Der Client verwirft seine Daten NICHT, sondern gleicht per REST ab, sendet fehlende eigene Daten erneut und abonniert ab stream_seq/stream_op_id (VERTRAEGE §11.1)."
+        }
+      }
+    },
+    "SyncHello": {
+      "type": "object",
+      "description": "Erste Nachricht des Clients (08 §2.1). Das Gerätetoken steht nicht hier, sondern beim Upgrade im Header Authorization: Bearer (VERTRAEGE §11.1). device_id nur zur Gegenprobe.",
+      "required": ["type", "protocol", "client", "app_version", "streams"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "hello"
+        },
+        "protocol": {
+          "const": 1
+        },
+        "client": {
+          "$ref": "#/$defs/SyncClientKind"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "app_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncStreamPosition"
+          }
+        }
+      }
+    },
+    "SyncWelcome": {
+      "type": "object",
+      "required": ["type", "protocol", "server_time", "server_version", "db_epoch", "device_id", "resume"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "welcome"
+        },
+        "protocol": {
+          "const": 1
+        },
+        "server_time": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "server_version": {
+          "type": "string"
+        },
+        "db_epoch": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "device_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resume": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncResume"
+          }
+        }
+      },
+      "description": "db_epoch ändert sich bei jeder Wiederherstellung der Datenbank. Weicht sie vom gespeicherten Wert ab, behandelt der Client alle Ströme wie reset (VERTRAEGE §11.1)."
+    },
+    "SyncSubscribe": {
+      "type": "object",
+      "description": "Weitere Ströme abonnieren, ohne neu zu verbinden. Antwort: subscribed. Ergänzung zu 08 §2",
+      "required": ["type", "streams"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "subscribe"
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncStreamPosition"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "SyncSubscribed": {
+      "type": "object",
+      "required": ["type", "resume"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "subscribed"
+        },
+        "resume": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncResume"
+          }
+        }
+      }
+    },
+    "SyncUnsubscribe": {
+      "type": "object",
+      "required": ["type", "streams"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "unsubscribe"
+        },
+        "streams": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SyncStreamId"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "SyncTimePing": {
+      "type": "object",
+      "description": "t0 = lokale Uhr des Clients beim Senden (F-SYN-02)",
+      "required": ["type", "t0"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "time.ping"
+        },
+        "t0": {
+          "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "SyncTimePong": {
+      "type": "object",
+      "description": "ts = Serveruhr beim Antworten. Versatz = Median über 5 Runden von ts − (t0 + t1) / 2",
+      "required": ["type", "t0", "ts"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "time.pong"
+        },
+        "t0": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "ts": {
+          "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "SyncTimeOffset": {
+      "type": "object",
+      "description": "Ergebnis des Uhrabgleichs an den Server (device.clock_offset_ms). Ergänzung zu 08 §2.1",
+      "required": ["type", "offset_ms", "rtt_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "time.offset"
+        },
+        "offset_ms": {
+          "type": "integer",
+          "description": "Gemessener Versatz Server − Client"
+        },
+        "rtt_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Median der Umlaufzeit"
+        }
+      }
+    },
+    "SyncPing": {
+      "type": "object",
+      "description": "Keepalive des Clients alle 15 s",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ping"
+        }
+      }
+    },
+    "SyncPong": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "pong"
+        }
+      }
+    },
+    "SyncPresence": {
+      "type": "object",
+      "description": "Was der Client gerade zeigt (ersetzt den vorigen Stand). Das iPad sendet sie bei jedem Seitenwechsel, die Notizen-Spalte folgt ihr (F-DSH-04). Ergänzung zu 08 §2",
+      "required": ["type", "session_id", "notebook_id", "page_id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "presence"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notebook_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SyncAck": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "seq"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ack"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SyncStreamId"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "SyncErrorCode": {
+      "type": "string",
+      "enum": [
+        "protocol_unsupported",
+        "hello_required",
+        "hello_invalid",
+        "device_token_invalid",
+        "message_invalid",
+        "too_many_pending",
+        "op_id_reused",
+        "stream_mismatch",
+        "module_not_found",
+        "session_not_found",
+        "session_transition_invalid",
+        "notebook_not_found",
+        "notebook_kind_exists",
+        "page_not_found",
+        "page_version_conflict",
+        "op_not_allowed",
+        "session_superseded",
+        "internal_error"
+      ]
+    },
+    "SyncError": {
+      "type": "object",
+      "required": ["type", "code", "message", "retryable", "fatal"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "error"
+        },
+        "code": {
+          "$ref": "#/$defs/SyncErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SyncStreamId"
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Nur mit op_id: true = Verbindung wird geschlossen, neu verbinden und ab dieser Operation erneut senden. false = endgültig abgelehnt: Operation samt abhängigen in die Fehlerablage (VERTRAEGE §11.2). Ausnahmen: session_superseded (umschreiben) und page_version_conflict (neu laden)"
+        },
+        "fatal": {
+          "type": "boolean",
+          "description": "true: der Server schließt die Verbindung direkt danach und verarbeitet keine weitere Nachricht"
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "PageUpdateFields": {
+      "type": "object",
+      "description": "Alle änderbaren Felder der Seite mit ihrem neuen Stand. Kein Teil-Update: im Sync gibt es keine optionalen nullbaren Felder (VERTRAEGE §11.7)",
+      "additionalProperties": false,
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "template": {
+          "$ref": "#/$defs/PageTemplate"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "background_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attached_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": ["index", "template", "session_id", "background_slide_id", "attached_slide_id"]
+    },
+    "PageCreateData": {
+      "type": "object",
+      "required": [
+        "page_id",
+        "notebook_id",
+        "session_id",
+        "index",
+        "template",
+        "width_pt",
+        "height_pt",
+        "background_slide_id",
+        "attached_slide_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "template": {
+          "$ref": "#/$defs/PageTemplate"
+        },
+        "width_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height_pt": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "background_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attached_slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "PageUpdateData": {
+      "type": "object",
+      "required": ["page_id", "fields", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "fields": {
+          "$ref": "#/$defs/PageUpdateFields"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version, auf der die Änderung beruht. Der Core setzt danach version + 1"
+        }
+      }
+    },
+    "PageDeleteData": {
+      "type": "object",
+      "required": ["page_id"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "StrokeAddData": {
+      "type": "object",
+      "required": ["page_id", "stroke"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stroke": {
+          "$ref": "#/$defs/Stroke"
+        }
+      }
+    },
+    "StrokeRemoveData": {
+      "type": "object",
+      "required": ["page_id", "client_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "client_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1
+        }
+      }
+    },
+    "ElementUpsertData": {
+      "type": "object",
+      "required": ["page_id", "element"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "element": {
+          "$ref": "#/$defs/PageElement"
+        }
+      }
+    },
+    "ElementRemoveData": {
+      "type": "object",
+      "required": ["page_id", "element_id"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "element_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "DrawingSnapshotData": {
+      "type": "object",
+      "description": "Datei vorher per PUT /pages/{id}/pkdrawing hochgeladen, nur fürs iPad",
+      "required": ["page_id", "pkdrawing_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "pkdrawing_ref": {
+          "$ref": "#/$defs/FileRef"
+        }
+      }
+    },
+    "SessionStartData": {
+      "type": "object",
+      "description": "Unbekannte session_id: der Core legt die Session an (Start offline auf dem iPad, F-SES-02 Schritt 3)",
+      "required": [
+        "session_id",
+        "module_id",
+        "calendar_event_id",
+        "slide_deck_id",
+        "started_from",
+        "started_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "calendar_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_from": {
+          "$ref": "#/$defs/ClientDevice"
+        },
+        "started_at": {
+          "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "SessionRefData": {
+      "type": "object",
+      "description": "session.pause / session.resume",
+      "required": ["session_id"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "SessionStopData": {
+      "type": "object",
+      "required": ["session_id"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "reason": {
+          "$ref": "#/$defs/StopReason"
+        }
+      }
+    },
+    "SlideChangeData": {
+      "type": "object",
+      "required": ["event_id", "session_id", "slide_id", "slide_index", "t_ms", "device"],
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slide_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "device": {
+          "$ref": "#/$defs/ClientDevice"
+        }
+      }
+    },
+    "MarkerAddData": {
+      "type": "object",
+      "description": "Marker vom iPad (F-INK-05) und vom Mac (F-DSH-05, source=mac)",
+      "required": ["marker_id", "session_id", "kind", "t_ms", "page_id", "position", "note", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "marker_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/MarkerKind"
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MarkerPosition"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "type": ["string", "null"]
+        },
+        "source": {
+          "$ref": "#/$defs/ClientDevice"
+        }
+      }
+    },
+    "MarkerRemoveData": {
+      "type": "object",
+      "description": "Rückgängig (⌘Z, F-DSH-05) bzw. Löschen",
+      "required": ["marker_id"],
+      "additionalProperties": false,
+      "properties": {
+        "marker_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "PhotoAddData": {
+      "type": "object",
+      "description": "Datei per PUT /photos/{photo_id}/file, Reihenfolge egal",
+      "required": ["photo_id", "session_id", "t_ms", "page_id", "file_ref"],
+      "additionalProperties": false,
+      "properties": {
+        "photo_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "file_ref": {
+          "$ref": "#/$defs/PhotoFileRef"
+        }
+      }
+    },
+    "NotebookCreateOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "notebook.create"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookCreateData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "PageCreateOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "page.create"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PageCreateData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "PageUpdateOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "page.update"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PageUpdateData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "PageDeleteOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "page.delete"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PageDeleteData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "NotebookUpdateOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "notebook.update"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookUpdateData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      },
+      "description": "Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb"
+    },
+    "NotebookDeleteOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "notebook.delete"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      },
+      "description": "Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb"
+    },
+    "NotebookRestoreOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "notebook.restore"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      },
+      "description": "Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb"
+    },
+    "PageRestoreOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "page.restore"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PageRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      },
+      "description": "Nur vom Server (origin = server) nach REST-Änderung oder Wiederherstellung aus dem Papierkorb"
+    },
+    "StrokeAddOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "stroke.add"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/StrokeAddData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "StrokeRemoveOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "stroke.remove"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/StrokeRemoveData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "ElementUpsertOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "element.upsert"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/ElementUpsertData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "ElementRemoveOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "element.remove"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/ElementRemoveData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "DrawingSnapshotOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/NotebookStreamId"
+        },
+        "kind": {
+          "const": "drawing.snapshot"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/DrawingSnapshotData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SessionStartOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "session.start"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SessionStartData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SessionPauseOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "session.pause"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SessionRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SessionResumeOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "session.resume"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SessionRefData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SessionStopOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "session.stop"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SessionStopData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SlideChangeOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "slide.change"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/SlideChangeData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "MarkerAddOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "marker.add"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/MarkerAddData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "MarkerRemoveOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "marker.remove"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/MarkerRemoveData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "PhotoAddOp": {
+      "type": "object",
+      "required": ["type", "op_id", "stream", "kind", "at", "clock_uncertain", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "op"
+        },
+        "op_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stream": {
+          "$ref": "#/$defs/SessionStreamId"
+        },
+        "kind": {
+          "const": "photo.add"
+        },
+        "at": {
+          "$ref": "#/$defs/EpochMs"
+        },
+        "clock_uncertain": {
+          "type": "boolean"
+        },
+        "data": {
+          "$ref": "#/$defs/PhotoAddData"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Nur Server → Client"
+        },
+        "origin": {
+          "$ref": "#/$defs/SyncOrigin"
+        }
+      }
+    },
+    "SyncOp": {
+      "description": "Operation (08 §2.3), unterschieden über kind. Client → Server ohne seq/origin, Server → Client mit seq und origin.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NotebookCreateOp"
+        },
+        {
+          "$ref": "#/$defs/PageCreateOp"
+        },
+        {
+          "$ref": "#/$defs/PageUpdateOp"
+        },
+        {
+          "$ref": "#/$defs/PageDeleteOp"
+        },
+        {
+          "$ref": "#/$defs/NotebookUpdateOp"
+        },
+        {
+          "$ref": "#/$defs/NotebookDeleteOp"
+        },
+        {
+          "$ref": "#/$defs/NotebookRestoreOp"
+        },
+        {
+          "$ref": "#/$defs/PageRestoreOp"
+        },
+        {
+          "$ref": "#/$defs/StrokeAddOp"
+        },
+        {
+          "$ref": "#/$defs/StrokeRemoveOp"
+        },
+        {
+          "$ref": "#/$defs/ElementUpsertOp"
+        },
+        {
+          "$ref": "#/$defs/ElementRemoveOp"
+        },
+        {
+          "$ref": "#/$defs/DrawingSnapshotOp"
+        },
+        {
+          "$ref": "#/$defs/SessionStartOp"
+        },
+        {
+          "$ref": "#/$defs/SessionPauseOp"
+        },
+        {
+          "$ref": "#/$defs/SessionResumeOp"
+        },
+        {
+          "$ref": "#/$defs/SessionStopOp"
+        },
+        {
+          "$ref": "#/$defs/SlideChangeOp"
+        },
+        {
+          "$ref": "#/$defs/MarkerAddOp"
+        },
+        {
+          "$ref": "#/$defs/MarkerRemoveOp"
+        },
+        {
+          "$ref": "#/$defs/PhotoAddOp"
+        }
+      ]
+    },
+    "SyncPresenceInfo": {
+      "type": "object",
+      "required": ["client", "device_id", "device_name", "session_id", "notebook_id", "page_id"],
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/SyncClientKind"
+        },
+        "device_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "device_name": {
+          "type": ["string", "null"]
+        },
+        "session_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notebook_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SyncConnectionInfo": {
+      "type": "object",
+      "required": ["client", "device_id", "connected"],
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/SyncClientKind"
+        },
+        "device_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connected": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SyncSessionUpdatedEvent": {
+      "type": "object",
+      "description": "Zustand oder Felder einer Session haben sich geändert (auch zeitgesteuert: bereit, verpasst, verarbeitet)",
+      "required": ["type", "name", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "session.updated"
+        },
+        "data": {
+          "$ref": "#/$defs/Session"
+        }
+      }
+    },
+    "SyncPresenceEvent": {
+      "type": "object",
+      "description": "Weitergabe von presence eines anderen Clients",
+      "required": ["type", "name", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "presence"
+        },
+        "data": {
+          "$ref": "#/$defs/SyncPresenceInfo"
+        }
+      }
+    },
+    "SyncConnectionEvent": {
+      "type": "object",
+      "description": "Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)",
+      "required": ["type", "name", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "device.connection"
+        },
+        "data": {
+          "$ref": "#/$defs/SyncConnectionInfo"
+        }
+      }
+    },
+    "SyncPairingEvent": {
+      "type": "object",
+      "description": "Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)",
+      "required": ["type", "name", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "pairing.requested"
+        },
+        "data": {
+          "$ref": "#/$defs/PairingRequest"
+        }
+      }
+    },
+    "SyncEvent": {
+      "description": "Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SyncSessionUpdatedEvent"
+        },
+        {
+          "$ref": "#/$defs/SyncPresenceEvent"
+        },
+        {
+          "$ref": "#/$defs/SyncConnectionEvent"
+        },
+        {
+          "$ref": "#/$defs/SyncPairingEvent"
+        }
+      ]
+    },
+    "SyncClientMessage": {
+      "description": "Alle Nachrichten Client → Server",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SyncHello"
+        },
+        {
+          "$ref": "#/$defs/SyncSubscribe"
+        },
+        {
+          "$ref": "#/$defs/SyncUnsubscribe"
+        },
+        {
+          "$ref": "#/$defs/SyncTimePing"
+        },
+        {
+          "$ref": "#/$defs/SyncTimeOffset"
+        },
+        {
+          "$ref": "#/$defs/SyncPing"
+        },
+        {
+          "$ref": "#/$defs/SyncPresence"
+        },
+        {
+          "$ref": "#/$defs/SyncOp"
+        }
+      ]
+    },
+    "SyncServerMessage": {
+      "description": "Alle Nachrichten Server → Client",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SyncWelcome"
+        },
+        {
+          "$ref": "#/$defs/SyncSubscribed"
+        },
+        {
+          "$ref": "#/$defs/SyncAck"
+        },
+        {
+          "$ref": "#/$defs/SyncOp"
+        },
+        {
+          "$ref": "#/$defs/SyncTimePong"
+        },
+        {
+          "$ref": "#/$defs/SyncPong"
+        },
+        {
+          "$ref": "#/$defs/SyncError"
+        },
+        {
+          "$ref": "#/$defs/SyncEvent"
+        }
+      ]
+    },
+    "NotebookCreateData": {
+      "type": "object",
+      "description": "Freies Notizbuch offline anlegen (F-INK-02, F-INK-14). Strom notebook:<notebook_id>, idempotent über notebook_id.",
+      "required": ["notebook_id", "module_id", "title", "created_at"],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "const": "frei",
+          "description": "Nur frei. Die Notizbücher vorlesung/uebung legt der Core an"
+        },
+        "created_at": {
+          "$ref": "#/$defs/EpochMs"
+        }
+      }
+    },
+    "PhotoFileRef": {
+      "type": "object",
+      "description": "Datei eines Tafel-Fotos, hochgeladen per PUT /photos/{photo_id}/file",
+      "required": ["sha256", "mime", "size_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "mime": {
+          "$ref": "#/$defs/PhotoMime"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "NotebookUpdateFields": {
+      "type": "object",
+      "description": "Aktueller Stand der per REST änderbaren Felder",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      },
+      "required": ["title", "module_id"]
+    },
+    "NotebookUpdateData": {
+      "type": "object",
+      "required": ["notebook_id", "fields"],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "fields": {
+          "$ref": "#/$defs/NotebookUpdateFields"
+        }
+      }
+    },
+    "NotebookRefData": {
+      "type": "object",
+      "required": ["notebook_id"],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "PageRefData": {
+      "type": "object",
+      "required": ["page_id"],
+      "additionalProperties": false,
+      "properties": {
+        "page_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    }
+  }
+}

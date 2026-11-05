@@ -1,0 +1,20 @@
+{
+  "type": "hello",
+  "protocol": 1,
+  "client": "ipad",
+  "device_id": "019a4e14-0000-7000-8000-000000000080",
+  "app_version": "1.0.0",
+  "streams": [
+    {
+      "stream": "notebook:019a4e14-0000-7000-8000-000000000050",
+      "last_seq": 1832,
+      "last_op_id": "019a4e14-0000-7000-8000-000000001832"
+    },
+    {
+      "stream": "session:019a4e14-0000-7000-8000-000000000030",
+      "last_seq": 77,
+      "last_op_id": "019a4e14-0000-7000-8000-000000000077"
+    }
+  ],
+  "token": "EXAMPLEdevicetoken0000000000000000000000000"
+}

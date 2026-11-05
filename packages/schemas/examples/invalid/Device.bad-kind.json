@@ -1,0 +1,13 @@
+{
+  "id": "019a4e14-0000-7000-8000-000000000080",
+  "user_id": "019a4e14-0000-7000-8000-000000000001",
+  "created_at": "2026-11-04T07:15:00Z",
+  "updated_at": "2026-11-04T07:15:00Z",
+  "deleted_at": null,
+  "name": "iPad von Ilian",
+  "kind": "android",
+  "last_seen_at": "2026-11-04T07:15:00Z",
+  "clock_offset_ms": -312,
+  "app_version": "1.0.0",
+  "connected": true
+}

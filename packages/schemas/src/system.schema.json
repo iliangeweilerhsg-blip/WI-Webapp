@@ -1,0 +1,506 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "System: Geräte und Kopplung, Backups, Papierkorb (03 §13, 08 §3, F-INK-13, F-DAT-01/02/04)",
+  "$defs": {
+    "DeviceKind": {
+      "type": "string",
+      "enum": ["ipad", "iphone"]
+    },
+    "Device": {
+      "type": "object",
+      "description": "Gekoppeltes Gerät. Das Token selbst gibt die API nie aus (gespeichert nur token_hash).",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "name",
+        "kind",
+        "last_seen_at",
+        "clock_offset_ms",
+        "app_version",
+        "connected"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "last_seen_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clock_offset_ms": {
+          "type": ["integer", "null"]
+        },
+        "app_version": {
+          "type": ["string", "null"]
+        },
+        "connected": {
+          "type": "boolean",
+          "description": "Abgeleitet: hat gerade eine Sync-Verbindung"
+        }
+      }
+    },
+    "DeviceList": {
+      "type": "object",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Device"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "PairStartRequest": {
+      "type": "object",
+      "description": "POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur bei offenem Kopplungsfenster; belegt es nicht exklusiv",
+      "required": ["device_name", "kind", "public_nonce"],
+      "additionalProperties": false,
+      "properties": {
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "public_nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22,128}$",
+          "description": "Zufallswert des iPads (base64url, ≥ 128 Bit)"
+        }
+      }
+    },
+    "PairStartResponse": {
+      "type": "object",
+      "description": "pair/start: request_id der eigenen Anfrage und pairing_id des offenen Fensters. Der Code steht NICHT in der Antwort",
+      "required": ["request_id", "pairing_id", "expires_at"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "pairing_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "PairingCode": {
+      "type": "object",
+      "description": "Offenes Kopplungsfenster für die Anzeige in der Web-App (Antwort von POST /devices/pairings, nur lokal). Anfragen von Geräten liefern das Ereignis pairing.requested und GET /devices/pairings/requests (PairingRequestList)",
+      "required": ["pairing_id", "code", "expires_at", "host", "port", "qr_url"],
+      "additionalProperties": false,
+      "properties": {
+        "pairing_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Adresse des Macs im lokalen Netz (IPv4 der aktiven Schnittstelle), zur Anzeige und für die manuelle Eingabe",
+          "examples": ["192.168.1.20"]
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "qr_url": {
+          "type": "string",
+          "pattern": "^sg://pair\\?v=1&host=[^&]+&port=[0-9]+&pairing_id=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}&code=[0-9]{6}$",
+          "examples": [
+            "sg://pair?v=1&host=192.168.1.20&port=4710&pairing_id=019a4e14-0000-7000-8000-000000000081&code=482913"
+          ],
+          "description": "Inhalt des QR-Codes: dieselben Daten wie host, port, pairing_id und code"
+        }
+      }
+    },
+    "PairingRequest": {
+      "type": "object",
+      "description": "Anfrage eines Geräts über pair/start (Nutzlast des Ereignisses pairing.requested). Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App empfiehlt darum den QR-Weg",
+      "required": ["request_id", "pairing_id", "device_name", "kind", "requested_at"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "pairing_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "requested_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "PairingRequestList": {
+      "type": "object",
+      "description": "GET /devices/pairings/requests (nur lokal): offene (nicht abgelehnte) Anfragen des aktuellen Kopplungsfensters, älteste zuerst. Ohne offenes Fenster leer. Höchstens 10, danach antwortet pair/start mit 429 pairing_requests_full",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "$ref": "#/$defs/PairingRequest"
+          }
+        }
+      }
+    },
+    "PairConfirmRequest": {
+      "type": "object",
+      "description": "POST /devices/pair/confirm (aus dem Netz ohne Token erlaubt). Geheimnis ist der Code. public_nonce verknüpft die Bestätigung mit einer eigenen pair/start-Anfrage; gehört sie zu einer abgelehnten Anfrage, wird abgelehnt.",
+      "required": ["pairing_id", "code", "device_name", "kind", "public_nonce"],
+      "additionalProperties": false,
+      "properties": {
+        "pairing_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[0-9]{6}$"
+        },
+        "device_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "public_nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22,128}$"
+        },
+        "app_version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "PairResponse": {
+      "type": "object",
+      "description": "Antwort auf POST /devices/pair/confirm (201)",
+      "required": ["device", "device_token"],
+      "additionalProperties": false,
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/Device"
+        },
+        "device_token": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "256 Bit Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben"
+        }
+      }
+    },
+    "BackupState": {
+      "type": "string",
+      "enum": ["laeuft", "fertig", "fehler"]
+    },
+    "BackupTrigger": {
+      "type": "string",
+      "enum": ["zeitplan", "manuell", "vor_migration"]
+    },
+    "BackupRun": {
+      "type": "object",
+      "description": "Ein Backup-Lauf (03 §13 backup_run)",
+      "required": [
+        "id",
+        "user_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+        "started_at",
+        "finished_at",
+        "target",
+        "size_bytes",
+        "state",
+        "error",
+        "trigger",
+        "stand"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "user_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "deleted_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target": {
+          "type": "string",
+          "description": "Absoluter Pfad des Ziels"
+        },
+        "size_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "state": {
+          "$ref": "#/$defs/BackupState"
+        },
+        "error": {
+          "type": ["string", "null"]
+        },
+        "trigger": {
+          "$ref": "#/$defs/BackupTrigger"
+        },
+        "stand": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9]{8}T[0-9]{6}Z$",
+          "description": "Name des Stands für sg restore <stand>, z. B. 20261104T030012Z. null solange er läuft oder bei Fehler"
+        }
+      }
+    },
+    "BackupStatus": {
+      "type": "object",
+      "required": ["target", "last_success_at", "next_run_at", "stale", "running"],
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": ["string", "null"],
+          "description": "null = kein Ziel eingestellt, Backups pausieren"
+        },
+        "last_success_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_run_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stale": {
+          "type": "boolean",
+          "description": "Letztes erfolgreiches Backup älter als 3 Tage (F-DAT-01)"
+        },
+        "running": {
+          "type": "boolean"
+        }
+      }
+    },
+    "BackupOverview": {
+      "type": "object",
+      "description": "GET /backups: Status und Läufe, neueste zuerst",
+      "required": ["status", "items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/BackupStatus"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackupRun"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "TrashKind": {
+      "type": "string",
+      "enum": [
+        "semester",
+        "module",
+        "slide_deck",
+        "exercise_sheet",
+        "calendar_source",
+        "session",
+        "notebook",
+        "page",
+        "marker",
+        "photo"
+      ]
+    },
+    "TrashParent": {
+      "type": "object",
+      "required": ["id", "kind", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/TrashKind"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "TrashItem": {
+      "type": "object",
+      "description": "Direkt gelöschtes Objekt im Papierkorb (F-DAT-04). Mitgelöschte Teile erscheinen nicht einzeln.",
+      "required": ["id", "kind", "title", "deleted_at", "purge_at", "parent", "dependent_count"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/TrashKind"
+        },
+        "title": {
+          "type": "string",
+          "description": "Anzeigename (Titel, Name oder z. B. „Seite 3\")"
+        },
+        "deleted_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "purge_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrashParent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dependent_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Mitgelöschte abhängige Objekte, die mit wiederhergestellt werden"
+        }
+      }
+    },
+    "TrashList": {
+      "type": "object",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TrashItem"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "TrashRestoreResult": {
+      "type": "object",
+      "description": "POST /trash/{id}/restore, auch für „Rückgängig\" im Toast",
+      "required": ["id", "kind", "restored_count"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/TrashKind"
+        },
+        "restored_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

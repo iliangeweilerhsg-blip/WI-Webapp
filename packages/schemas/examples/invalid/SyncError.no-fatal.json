@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "code": "internal_error",
+  "message": "x",
+  "retryable": true
+}

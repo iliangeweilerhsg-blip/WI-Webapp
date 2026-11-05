@@ -1,0 +1,22 @@
+{
+  "type": "welcome",
+  "protocol": 1,
+  "server_time": 1762240562123,
+  "server_version": "0.1.0",
+  "db_epoch": "019a4e10-0000-7000-8000-00000000e001",
+  "device_id": "019a4e14-0000-7000-8000-000000000080",
+  "resume": [
+    {
+      "stream": "notebook:019a4e14-0000-7000-8000-000000000050",
+      "from_seq": 1833,
+      "head_seq": 1840,
+      "reset": false
+    },
+    {
+      "stream": "session:019a4e14-0000-7000-8000-000000000030",
+      "from_seq": 1,
+      "head_seq": 12,
+      "reset": true
+    }
+  ]
+}

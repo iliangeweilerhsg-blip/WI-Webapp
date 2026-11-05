@@ -1,0 +1,13 @@
+{
+  "element_id": "019a4e14-0000-7000-8000-000000000054",
+  "kind": "shape",
+  "frame": [100, 100, 80, 40],
+  "z": 2,
+  "t_ms": null,
+  "payload": {
+    "shape": "arrow",
+    "points": [[1, 2]],
+    "color": "#1E2A44FF",
+    "width": 2
+  }
+}

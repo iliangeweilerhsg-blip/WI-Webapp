@@ -45,7 +45,20 @@ const TABLES = [
   'device',
   'backup_run',
   'cost_entry',
+  // Phase 1 (T1-DB, VERTRAEGE §6.1)
+  'slide_event',
+  'marker',
+  'photo',
+  'recording',
+  'audio_chunk',
+  'notebook',
+  'page',
+  'stroke',
+  'page_element',
 ];
+
+/** Phase-1-Tabellen ohne die Pflichtfelder aus 03 §1 (Struktur genau nach VERTRAEGE §6.1) */
+const SYNC_TABLES = ['sync_stream', 'sync_op', 'sync_meta'];
 
 describe('Migrationen', () => {
   it('haben Erweiterungen und alle Tabellen angelegt', async () => {
@@ -53,7 +66,7 @@ describe('Migrationen', () => {
     expect(ext.map((r) => r.extname).sort()).toEqual(['pgcrypto', 'vector']);
 
     const tables = await sql`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`;
-    for (const table of TABLES) expect(tables.map((r) => r.tablename)).toContain(table);
+    for (const table of [...TABLES, ...SYNC_TABLES]) expect(tables.map((r) => r.tablename)).toContain(table);
   });
 
   it('sind idempotent (zweiter Lauf ändert nichts und wirft nicht)', async () => {
@@ -170,7 +183,7 @@ describe('Migrationen', () => {
     );
   });
 
-  it('erlaubt höchstens eine laufende Session (03 §14.1)', async () => {
+  it('erlaubt höchstens eine aktive Session, laeuft und pausiert zusammen (03 §14.1, VERTRAEGE §9.1)', async () => {
     const semesterId = uuidv7();
     const moduleId = uuidv7();
     await handle.db.insert(semester).values({ id: semesterId, userId: SINGLE_USER_ID, name: 'Invariante' });
@@ -183,16 +196,21 @@ describe('Migrationen', () => {
     });
     const base = { userId: SINGLE_USER_ID, moduleId };
 
-    await handle.db.insert(session).values({ id: uuidv7(), ...base, state: 'laeuft' });
-    // weitere Sessions in anderen Zuständen sind fein
+    const running = uuidv7();
+    await handle.db.insert(session).values({ id: running, ...base, state: 'laeuft' });
+    // weitere Sessions in nicht aktiven Zuständen sind fein
     await handle.db.insert(session).values({ id: uuidv7(), ...base, state: 'geplant' });
-    await handle.db.insert(session).values({ id: uuidv7(), ...base, state: 'pausiert' });
-    // eine zweite laufende nicht
+    await handle.db.insert(session).values({ id: uuidv7(), ...base, state: 'beendet' });
+    // eine zweite laufende oder pausierte nicht
     await expect(
       handle.db.insert(session).values({ id: uuidv7(), ...base, state: 'laeuft' }),
     ).rejects.toThrow();
+    await expect(
+      handle.db.insert(session).values({ id: uuidv7(), ...base, state: 'pausiert' }),
+    ).rejects.toThrow();
     // eine weich gelöschte laufende Session zählt nicht
     await handle.db.insert(session).values({ id: uuidv7(), ...base, state: 'laeuft', deletedAt: new Date() });
+    await sql`UPDATE session SET state = 'beendet' WHERE id = ${running}`;
   });
 
   it('erlaubt höchstens ein aktuelles Semester und prüft Modulfarben', async () => {

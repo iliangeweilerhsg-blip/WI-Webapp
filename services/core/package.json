@@ -18,10 +18,13 @@
     "@fastify/multipart": "10.1.4",
     "@fastify/static": "10.1.8",
     "@fastify/swagger": "9.9.3",
+    "@fastify/websocket": "11.3.4",
     "@sg/shared": "workspace:*",
+    "bonjour-service": "1.4.4",
     "drizzle-orm": "0.45.4",
     "fastify": "5.12.8",
     "fastify-type-provider-zod": "7.0.0",
+    "ical.js": "2.2.1",
     "pino": "10.4.0",
     "postgres": "4.0.0",
     "zod": "4.6.7"

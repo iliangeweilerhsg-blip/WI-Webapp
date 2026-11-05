@@ -1,0 +1,16 @@
+{
+  "type": "op",
+  "op_id": "019a4e14-0000-7000-8000-000000000908",
+  "stream": "notebook:019a4e14-0000-7000-8000-000000000050",
+  "kind": "drawing.snapshot",
+  "at": 1762240562123,
+  "clock_uncertain": false,
+  "data": {
+    "page_id": "019a4e14-0000-7000-8000-000000000051",
+    "pkdrawing_ref": {
+      "sha256": "3f2c9a1bcccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "mime": "application/octet-stream",
+      "size_bytes": 48213
+    }
+  }
+}

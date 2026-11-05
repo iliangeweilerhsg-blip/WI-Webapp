@@ -82,14 +82,17 @@ describe('Hilfsfunktionen', () => {
 
 describe('Einrichtungsdialog (Nachbesserung)', () => {
   it('schnelles Anlegen: Feld leert sich sofort, nichts geht verloren oder verklebt, Reihenfolge bleibt', async () => {
-    const core = installFakeCore({ latencyMs: 150 });
+    const core = installFakeCore();
+    let release: () => void = () => {};
     const user = userEvent.setup();
     render(app());
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByLabelText('Semester'), '{Enter}');
     const input = await within(dialog).findByLabelText('Modulname');
 
-    // weitere Namen tippen, bevor der erste POST fertig ist
+    // weitere Namen tippen, bevor der erste POST fertig ist: die POSTs hängen, bis wir sie freigeben
+    // (kein Zeitfenster, das unter Last verrutscht)
+    core.postGate = new Promise<void>((r) => (release = r));
     await user.type(input, 'Alpha{Enter}');
     expect(input).toHaveValue('');
     expect(within(dialog).getByText('Alpha')).toBeInTheDocument();
@@ -100,9 +103,8 @@ describe('Einrichtungsdialog (Nachbesserung)', () => {
 
     const list = within(dialog).getByRole('list', { name: 'Angelegte Module' });
     expect(within(list).getAllByRole('listitem')).toHaveLength(3);
-    await waitFor(() => expect(within(list).queryByText('wird angelegt …')).not.toBeInTheDocument(), {
-      timeout: 3000,
-    });
+    release();
+    await waitFor(() => expect(within(list).queryByText('wird angelegt …')).not.toBeInTheDocument());
     const posts = writes(core).filter((r) => r.path === '/modules');
     expect(posts.map((r) => (r.body as { name: string }).name)).toEqual(['Alpha', 'Beta', 'Gamma']);
     expect(new Set(posts.map((r) => (r.body as { id: string }).id)).size).toBe(3);
@@ -156,7 +158,10 @@ describe('Einrichtungsdialog (Nachbesserung)', () => {
 
 describe('Seitenleiste (Nachbesserung)', () => {
   it('nennt das Semester und legt Module inline an (Enter, Feld leert sich sofort)', async () => {
-    const core = installFakeCore({ semesters: [makeSemester()], latencyMs: 120 });
+    const core = installFakeCore({ semesters: [makeSemester()] });
+    // POSTs hängen, bis wir sie freigeben – kein Zeitfenster, das unter Last verrutscht
+    let release: () => void = () => {};
+    core.postGate = new Promise<void>((r) => (release = r));
     const user = userEvent.setup();
     render(app());
     const list = await screen.findByRole('list', { name: /Module\s*·\s*HS 2026/ });
@@ -171,6 +176,7 @@ describe('Seitenleiste (Nachbesserung)', () => {
     await user.type(input, 'Beta{Enter}');
     expect(input).toHaveValue('');
     expect(within(list).getByText('Alpha …')).toBeInTheDocument();
+    release();
 
     const sidebar = screen.getByRole('navigation', { name: 'Hauptnavigation' });
     await within(sidebar).findByRole('link', { name: 'Alpha' });
@@ -292,7 +298,7 @@ describe('Modulseite (Nachbesserung)', () => {
     await screen.findByRole('heading', { level: 1, name: /Datenbanksysteme/ });
     await user.click(screen.getByRole('button', { name: 'Löschen' }));
     blurActive();
-    const toast = screen.getByText('Modul gelöscht').closest('[role="status"]') as HTMLElement;
+    const toast = screen.getByText('Modul gelöscht').parentElement as HTMLElement;
     await user.hover(toast);
     await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS + 5000);
     expect(writes(core)).toEqual([]);

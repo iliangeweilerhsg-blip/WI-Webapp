@@ -4,8 +4,8 @@
   "$defs": {
     "Uuid": {
       "type": "string",
-      "format": "uuid",
-      "description": "UUIDv7 (03 §1)"
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "UUIDv7 (03 §1), Kleinbuchstaben"
     },
     "Timestamp": {
       "type": "string",
@@ -93,6 +93,86 @@
         },
         "version": {
           "type": "string"
+        }
+      }
+    },
+    "EpochMs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1)."
+    },
+    "SessionMs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0."
+    },
+    "HexColor": {
+      "type": "string",
+      "pattern": "^#[0-9A-Fa-f]{8}$",
+      "description": "RGBA als #RRGGBBAA",
+      "examples": ["#1E2A44FF"]
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256, hex, Kleinbuchstaben"
+    },
+    "ClientDevice": {
+      "type": "string",
+      "enum": ["mac", "ipad"],
+      "description": "Gerät, auf dem ein Ereignis entstanden ist"
+    },
+    "Point2": {
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 2,
+      "maxItems": 2,
+      "description": "[x, y] in pt"
+    },
+    "FileRef": {
+      "type": "object",
+      "description": "Verweis auf eine Datei, die getrennt per HTTP hochgeladen wird (08 §2.3 file_ref / pkdrawing_ref). Der Core prüft sha256 beim Upload.",
+      "required": ["sha256", "mime", "size_bytes"],
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "mime": {
+          "type": "string",
+          "minLength": 1,
+          "examples": ["image/heic"]
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "FileReceipt": {
+      "type": "object",
+      "description": "Antwort auf PUT /photos/{id}/file und PUT /pages/{id}/pkdrawing",
+      "required": ["id", "sha256", "size_bytes", "received_at", "duplicate"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "sha256": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "received_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "duplicate": {
+          "type": "boolean",
+          "description": "true: dieselbe Datei (gleiches sha256) lag schon vor, nichts geändert"
         }
       }
     }

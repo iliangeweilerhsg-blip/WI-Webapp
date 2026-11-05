@@ -1,0 +1,14 @@
+{
+  "type": "hello",
+  "protocol": 1,
+  "client": "ipad",
+  "device_id": "019a4e14-0000-7000-8000-000000000080",
+  "app_version": "1.0.0",
+  "streams": [
+    {
+      "stream": "user",
+      "last_seq": -1,
+      "last_op_id": null
+    }
+  ]
+}

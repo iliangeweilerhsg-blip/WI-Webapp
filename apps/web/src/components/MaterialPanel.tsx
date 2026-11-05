@@ -12,7 +12,7 @@ import {
   formatDate,
   pageThumbUrl,
   pagesLabel,
-  pendingMaterialDeleteCount,
+  pendingDeleteMessage,
   scheduleMaterialDelete,
   undoMaterialDeletes,
   useDeckDetail,
@@ -213,9 +213,8 @@ function MaterialRow({ row, thumb }: { row: RowModel; thumb: React.ReactNode }) 
     scheduleMaterialDelete(client, row.kind, row.id, () =>
       toast.show({ message: `„${row.title}“ konnte nicht gelöscht werden. Es ist wieder da.` }),
     );
-    const count = pendingMaterialDeleteCount();
     toast.show({
-      message: count === 1 ? `${words.one} gelöscht` : `${count} Dateien gelöscht`,
+      message: pendingDeleteMessage() ?? `${words.one} gelöscht`,
       actionLabel: 'Rückgängig',
       onAction: undoMaterialDeletes,
       onExpire: commitMaterialDeletes,

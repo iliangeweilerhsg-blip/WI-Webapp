@@ -1,0 +1,13 @@
+{
+  "client_id": "019a4e14-c58c-77cb-8cbc-9997fe9e949d",
+  "tool": "pen",
+  "layer": "ink",
+  "color": "#1E2A44FF",
+  "width": 2.4,
+  "created_at": 1762246575500,
+  "t_start_ms": 375500,
+  "t_end_ms": 375516,
+  "transform": [1, 0, 0, 1, 0, 0],
+  "bbox": [118.8, 88.8, 67.4, 2.4],
+  "points": "AADwQgAAtEIAAAAAZmbmPs3MzD4zM5M/AAA5QwAAtEIAAIBBMzMzP83MzD4zM5M/"
+}

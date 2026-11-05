@@ -1,8 +1,13 @@
 import { isNull, type SQL } from 'drizzle-orm';
-import { timestamp, uuid, vector, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { customType, timestamp, uuid, vector, type AnyPgColumn } from 'drizzle-orm/pg-core';
 
 /** Zeitstempel mit Zeitzone (UTC, 03 §1) */
 export const timestamptz = (name: string) => timestamp(name, { withTimezone: true });
+
+/** `bytea` (Drizzle 0.45 hat keinen eigenen Typ). postgres.js liefert und nimmt `Buffer`. */
+export const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => 'bytea',
+});
 
 /** `embedding vector(1024)` (bge-m3, 03 §1). Index dazu: HNSW mit Cosinus (`vector_cosine_ops`). */
 export const embedding = () => vector('embedding', { dimensions: 1024 });

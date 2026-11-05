@@ -1,0 +1,7 @@
+export * from './client.ts';
+export * from './store.ts';
+export * from './types.ts';
+export { ErrorShelf, downloadShelf, shelfToJson } from './ErrorShelf.tsx';
+export { createWebLocksLeader, type LeaderLock, type LeaderLockHandlers } from './tabs.ts';
+export { OtherTabBanner } from './OtherTabBanner.tsx';
+export { SyncProvider, useSyncClient, type SyncProviderProps } from './SyncProvider.tsx';

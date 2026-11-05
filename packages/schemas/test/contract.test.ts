@@ -53,6 +53,27 @@ describe('Contract: ungültige Beispiele', () => {
   }
 });
 
+// Referenz-Striche aus tests/fixtures/strokes (08 §4, PR #39): jeder Strich muss ein gültiger `Stroke` sein
+const strokeDir = join(root, '..', '..', 'tests', 'fixtures', 'strokes');
+const strokeFixtures = readdirSync(strokeDir)
+  .filter((f) => /^\d{2}-.*\.json$/.test(f))
+  .map((file) => ({ file, strokes: JSON.parse(readFileSync(join(strokeDir, file), 'utf8')) as unknown[] }));
+
+describe('Contract: Strich-Testdaten (tests/fixtures/strokes)', () => {
+  it('Testdaten sind vorhanden', () => {
+    expect(strokeFixtures.length).toBeGreaterThanOrEqual(7);
+  });
+  for (const { file, strokes } of strokeFixtures) {
+    it(`${file}: alle ${strokes.length} Striche sind gültige Stroke (JSON Schema + Zod)`, () => {
+      const validate = ajv.getSchema(`${bundle.$id}#/$defs/Stroke`)!;
+      for (const stroke of strokes) {
+        expect(validate(stroke), JSON.stringify(validate.errors)).toBe(true);
+        expect(zodFor('Stroke').safeParse(stroke).success).toBe(true);
+      }
+    });
+  }
+});
+
 describe('Bundle', () => {
   it('enthält jeden Typ, für den es Beispiele gibt', () => {
     for (const { type } of [...examples('valid'), ...examples('invalid')]) {

@@ -16,7 +16,7 @@ import {
 import { openPdf, type PdfDoc, type PdfTextItem } from '../lib/pdf.ts';
 import { classifyPdfError, type PdfFailure } from '../lib/pdf-errors.ts';
 import { useCoreHealth } from './CoreStatus.tsx';
-import { findHits, hitRect, makeMeasurer, type SearchHit } from '../lib/pdf-search.ts';
+import { findHits, lineRects, makeMeasurer, type SearchHit } from '../lib/pdf-search.ts';
 import {
   isMaterialKind,
   pageImageUrl,
@@ -39,6 +39,10 @@ const ZOOM_STEP = 1.25;
 const PAGE_MARGIN = 32;
 const DEFAULT_PAGE = { w: 595, h: 842 };
 const SEARCH_DEBOUNCE_MS = 150;
+/** Längste Rechenzeit am Stück bei der Suche, danach bekommt die Oberfläche Luft */
+const SEARCH_SLICE_MS = 12;
+/** Teilergebnisse der Suche höchstens so oft an die Oberfläche geben */
+const SEARCH_PUBLISH_MS = 100;
 /** So viele Seitenköpfe liest pdf.js gleichzeitig vorab */
 const SIZE_BATCH = 8;
 
@@ -104,12 +108,16 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [active, setActive] = useState(0);
   const [searching, setSearching] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  /** Die Anfrage, für die die Suche vollständig durchgelaufen ist (vorher kein „Kein Treffer“) */
+  const [doneQuery, setDoneQuery] = useState('');
   const [pageItems, setPageItems] = useState<{ page: number; items: PdfTextItem[] } | null>(null);
 
   const rootRef = useRef<HTMLDivElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const textCache = useRef(new Map<number, PdfTextItem[]>());
+  const textCache = useRef(new Map<number, Promise<PdfTextItem[]>>());
+  const textQueue = useRef<Promise<unknown>>(Promise.resolve());
   const measurer = useMemo(() => makeMeasurer(), []);
   const { ref: areaRef, size: area } = useElementSize<HTMLDivElement>();
   const ready = meta.state === 'verarbeitet';
@@ -121,6 +129,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     let cancelled = false;
     let opened: PdfDoc | null = null;
     textCache.current = new Map();
+    textQueue.current = Promise.resolve();
     setPdf(null);
     setPdfFailed(false);
     setPdfKind('load');
@@ -163,11 +172,18 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     }
   }, [health.isError, coreOk, retryable]);
   const refetchHealth = health.refetch;
+  // Das Abfragen endet: Bei gesundem Core (Datei selbst dauerhaft 404/500) nach {@link HEALTH_GRACE_MS}, sonst nach
+  // {@link HEALTH_MAX_MS}. Danach genügt der Takt des Statusfelds (30 s).
+  const coreDown = health.isError;
   useEffect(() => {
     if (!retryable) return;
     const timer = setInterval(() => void refetchHealth(), 5_000);
-    return () => clearInterval(timer);
-  }, [retryable, refetchHealth]);
+    const stop = setTimeout(() => clearInterval(timer), coreDown ? HEALTH_MAX_MS : HEALTH_GRACE_MS);
+    return () => {
+      clearInterval(timer);
+      clearTimeout(stop);
+    };
+  }, [retryable, coreDown, refetchHealth]);
 
   const pageCount = meta.pageCount ?? pdf?.numPages ?? 0;
   const current = pageCount > 0 ? clamp(page, 1, pageCount) : page;
@@ -305,49 +321,115 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
 
   // ---------- Suche ----------
 
+  // Textextraktion: genau eine Seite gleichzeitig (das Zeichnen leidet sonst), das Ergebnis ist ein zwischengespeichertes
+  // Promise, damit Suche und Vorab-Extraktion nichts doppelt lesen.
   const itemsOf = useCallback(
-    async (number: number): Promise<PdfTextItem[]> => {
+    (number: number): Promise<PdfTextItem[]> => {
+      if (!pdf) return Promise.resolve([]);
       const cached = textCache.current.get(number);
       if (cached) return cached;
-      const items = (await pdf?.textItems(number)) ?? [];
-      textCache.current.set(number, items);
-      return items;
+      const promise = textQueue.current.then(() => pdf.textItems(number));
+      textQueue.current = promise.catch(() => {});
+      textCache.current.set(number, promise);
+      // Ein Fehler wird nicht festgehalten: Beim nächsten Versuch wird neu gelesen
+      promise.catch(() => {
+        if (textCache.current.get(number) === promise) textCache.current.delete(number);
+      });
+      return promise;
     },
     [pdf],
   );
 
   const currentRef = useRef(current);
   currentRef.current = current;
+  const activeHitRef = useRef<SearchHit | null>(null);
+
+  // Sobald die Suche offen ist, wird der Text aller Seiten vorab gelesen, ab der aktuellen Seite
+  useEffect(() => {
+    if (!pdf || !searchOpen) return;
+    let cancelled = false;
+    void (async () => {
+      const total = pdf.numPages;
+      const start = currentRef.current;
+      for (let k = 0; k < total && !cancelled; k += 1) {
+        try {
+          await itemsOf(((start - 1 + k) % total) + 1);
+        } catch {
+          // Seite nicht lesbar: weiter mit der nächsten
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pdf, searchOpen, itemsOf]);
 
   useEffect(() => {
     if (!pdf || !searchOpen || query.trim() === '') {
       setHits([]);
       setActive(0);
       setSearching(false);
+      setProgress(null);
+      setDoneQuery('');
+      activeHitRef.current = null;
       return;
     }
     let cancelled = false;
     setSearching(true);
+    setHits([]);
+    setActive(0);
+    activeHitRef.current = null;
     const timer = setTimeout(async () => {
-      const all: SearchHit[] = [];
+      const total = pdf.numPages;
+      const start = currentRef.current;
+      const byPage = new Map<number, SearchHit[]>();
+      let jumped = false;
+      let lastPublish = performance.now();
+      let sliceStart = lastPublish;
+      // Teilergebnisse: Trefferliste und Fortschritt, die aktive Markierung bleibt am selben Treffer
+      const publish = (done: number) => {
+        const all = [...byPage.keys()].sort((a, b) => a - b).flatMap((n) => byPage.get(n) ?? []);
+        setHits(all);
+        setProgress({ done, total });
+        const current = activeHitRef.current;
+        setActive(current ? Math.max(all.indexOf(current), 0) : 0);
+        lastPublish = performance.now();
+      };
+      setProgress({ done: 0, total });
       try {
-        for (let n = 1; n <= pdf.numPages; n += 1) {
+        // Ab der aktuellen Seite, danach der Rest: Der erste Treffer kommt so früh wie möglich
+        for (let k = 0; k < total; k += 1) {
+          const n = ((start - 1 + k) % total) + 1;
           const items = await itemsOf(n);
           if (cancelled) return;
-          all.push(...findHits(n, items, query));
+          const found = findHits(n, items, query);
+          if (found.length > 0) {
+            byPage.set(n, found);
+            if (!jumped) {
+              // Sofort zum ersten Treffer springen
+              jumped = true;
+              activeHitRef.current = found[0] ?? null;
+              publish(k + 1);
+              setPage(n);
+            }
+          }
+          if (performance.now() - lastPublish > SEARCH_PUBLISH_MS) publish(k + 1);
+          // Lange Dokumente in Häppchen: Die Oberfläche bleibt bedienbar (Eingabe, Blättern)
+          if (performance.now() - sliceStart > SEARCH_SLICE_MS) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+            sliceStart = performance.now();
+            if (cancelled) return;
+          }
         }
       } catch {
         // Text nicht lesbar: wie „kein Treffer“
       }
       if (cancelled) return;
-      setHits(all);
+      publish(total);
+      setProgress(null);
       setSearching(false);
-      // Der erste Treffer ab der aktuellen Seite
-      const first = all.findIndex((h) => h.page >= currentRef.current);
-      const index = all.length === 0 ? 0 : first === -1 ? 0 : first;
-      setActive(index);
-      const target = all[index];
-      if (target) setPage(target.page);
+      setDoneQuery(query);
     }, SEARCH_DEBOUNCE_MS);
     return () => {
       cancelled = true;
@@ -378,6 +460,7 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
     const next = (active + direction + hits.length) % hits.length;
     setActive(next);
     const target = hits[next];
+    activeHitRef.current = target ?? null;
     if (target) goTo(target.page);
   }
 
@@ -467,22 +550,26 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
   const slideId = meta.slideIds[current - 1] ?? null;
   const pageHitsRects =
     pageItems && pageItems.page === current
-      ? pageHits.flatMap((hit, i) => {
-          const item = pageItems.items[hit.item];
-          return item
-            ? [{ key: `${hit.item}-${hit.start}-${i}`, hit, rect: hitRect(item, hit, measurer) }]
-            : [];
-        })
+      ? pageHits.flatMap((hit, i) =>
+          // Ein Rahmen je Zeile, auch wenn der Treffer aus vielen Textstücken besteht
+          lineRects(pageItems.items, hit.parts, measurer).map((rect, r) => ({ key: `${i}-${r}`, hit, rect })),
+        )
       : [];
   const activeHit = hits[active];
   const searchSummary =
-    searching || (query.trim() !== '' && !pdf && !pdfFailed)
-      ? 'Sucht …'
-      : query.trim() === ''
-        ? ''
-        : hits.length === 0
-          ? 'Kein Treffer'
-          : `${active + 1} von ${hits.length}`;
+    query.trim() === ''
+      ? ''
+      : searching || (!pdf && !pdfFailed)
+        ? hits.length > 0
+          ? `${active + 1} von ${hits.length}, sucht … ${progress?.done ?? 0}/${progress?.total ?? ''}`
+          : progress && progress.done > 0
+            ? `Sucht … Seite ${progress.done} von ${progress.total}`
+            : 'Sucht …'
+        : doneQuery !== query
+          ? 'Sucht …'
+          : hits.length === 0
+            ? 'Kein Treffer'
+            : `${active + 1} von ${hits.length}`;
 
   // pdf.js kann das Dokument nicht lesen und der Core kennt keine Seiten: nichts zu zeigen. „Beschädigt“ gilt nur,
   // wenn das Einlesen gescheitert ist oder pdf.js die Datei als unlesbar meldet; ein Ladefehler (Netz, Core, Satz
@@ -693,20 +780,23 @@ function Viewer({ kind, id, meta }: { kind: MaterialKind; id: string; meta: Docu
           Dieses PDF konnte nicht vollständig verarbeitet werden. Lesen kannst du es trotzdem.
         </p>
       ) : null}
-      {pdfFailed ? (
-        <p role="status" className="border-b border-border px-4 py-2 text-sm text-text-muted">
-          Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.
-          {retryable ? (
-            <button
-              type="button"
-              onClick={() => setAttempt((n) => n + 1)}
-              className="ml-3 font-medium text-accent hover:underline"
-            >
-              Erneut versuchen
-            </button>
-          ) : null}
-        </p>
-      ) : null}
+      {/* Der Hinweis ist ein dauerhaftes Live-Element, nur sein Inhalt wechselt; der Knopf liegt daneben, nicht darin */}
+      <div className={pdfFailed ? 'border-b border-border px-4 py-2 text-sm text-text-muted' : undefined}>
+        <span role="status">
+          {pdfFailed
+            ? 'Das PDF lässt sich gerade nicht scharf anzeigen. Die Vorschaubilder bleiben nutzbar.'
+            : null}
+        </span>
+        {pdfFailed && retryable ? (
+          <button
+            type="button"
+            onClick={() => setAttempt((n) => n + 1)}
+            className="ml-3 font-medium text-accent hover:underline"
+          >
+            Erneut versuchen
+          </button>
+        ) : null}
+      </div>
 
       <div className="relative flex min-h-0 flex-1">
         {meta.state === 'neu' ? (
@@ -914,6 +1004,11 @@ function DocumentScreen() {
   }
   return <Viewer key={`${kind}:${id}`} kind={kind} id={id} meta={meta} />;
 }
+
+/** So lange wird nach einem Ladefehler bei gesundem Core noch schnell nach dem Core gefragt. */
+export const HEALTH_GRACE_MS = 30_000;
+/** Längste Dauer der schnellen Abfrage, solange der Core nicht antwortet. */
+export const HEALTH_MAX_MS = 5 * 60_000;
 
 /** PDF-Anzeige (F-ORG-04) – Route mit Query-Parametern `?typ=folien|blatt&id=…&seite=…` (VERTRAEGE §5). */
 export function DocumentView() {

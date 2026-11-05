@@ -1,0 +1,13 @@
+{
+  "type": "error",
+  "code": "session_transition_invalid",
+  "message": "Session ist schon beendet",
+  "op_id": "019a4e14-0000-7000-8000-000000000912",
+  "stream": "session:019a4e14-0000-7000-8000-000000000030",
+  "retryable": false,
+  "fatal": false,
+  "details": {
+    "state": "beendet",
+    "action": "stop"
+  }
+}

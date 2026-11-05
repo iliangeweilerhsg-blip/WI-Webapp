@@ -1,0 +1,5 @@
+{
+  "type": "time.offset",
+  "offset_ms": 4,
+  "rtt_ms": -1
+}

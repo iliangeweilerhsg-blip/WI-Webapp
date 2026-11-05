@@ -9,6 +9,8 @@ export interface PdfTextItem {
   y: number;
   w: number;
   h: number;
+  /** Zeilenende laut pdf.js (`hasEOL`): Danach beginnt eine neue Zeile. */
+  eol?: boolean;
 }
 
 export interface PdfDoc {
@@ -33,25 +35,69 @@ function assetBase(version: string): string {
   return `${basePath.replace(/\/+$/, '')}/pdfjs/${version}/`;
 }
 
+/** Wie oft das Anlegen des Workers schon gescheitert ist (Zähler für den Cache-Buster). */
+let workerFailures = 0;
+
+/** Adresse des Workers. Nach einem gescheiterten Start mit Cache-Buster: Chrome cacht einen gescheiterten Modul-Import. */
+export function workerSource(failures: number): string {
+  // Der Bundler ersetzt `new URL(…, import.meta.url)` durch ein eigenes Objekt, dessen `searchParams` die Adresse nicht
+  // ändern: Der Cache-Buster wird darum an den fertigen Text gehängt.
+  const href = new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url).toString();
+  return failures > 0 ? `${href}${href.includes('?') ? '&' : '?'}retry=${failures}` : href;
+}
+
+/**
+ * Legt den Worker selbst an und wartet, bis er meldet, dass er läuft. pdf.js würde bei einem Worker, der nicht startet,
+ * dauerhaft in den „Fake-Worker“-Modus fallen und `workerSrc` danach nie mehr lesen: Ein Neuversuch käme nie an.
+ * Scheitert der Start, merken wir uns das für den Cache-Buster des nächsten Versuchs.
+ */
+function startWorker(
+  pdfjs: typeof import('pdfjs-dist'),
+): Promise<{ worker: Worker; pdfWorker: InstanceType<typeof import('pdfjs-dist').PDFWorker> }> {
+  const worker = new Worker(workerSource(workerFailures), { type: 'module' });
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onError);
+    };
+    const onMessage = () => {
+      cleanup();
+      resolve({ worker, pdfWorker });
+    };
+    const onError = (event: Event) => {
+      cleanup();
+      pdfWorker.destroy();
+      worker.terminate();
+      workerFailures += 1;
+      reject(Object.assign(new Error('Der PDF-Worker ist nicht gestartet.'), { cause: event }));
+    };
+    // Zuerst unser Zuhörer, dann erst pdf.js: Die „bereit“-Nachricht erreicht beide
+    worker.addEventListener('message', onMessage);
+    worker.addEventListener('error', onError);
+    const pdfWorker = pdfjs.PDFWorker.create({ port: worker });
+  });
+}
+
 export async function openPdf(url: string): Promise<PdfDoc> {
   const pdfjs = await import('pdfjs-dist');
-  if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-    pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-      'pdfjs-dist/build/pdf.worker.min.mjs',
-      import.meta.url,
-    ).toString();
-  }
+  const { worker, pdfWorker } = await startWorker(pdfjs);
   const base = assetBase(pdfjs.version);
   const task = pdfjs.getDocument({
     url,
+    worker: pdfWorker,
     wasmUrl: `${base}wasm/`,
     standardFontDataUrl: `${base}standard_fonts/`,
     cMapUrl: `${base}cmaps/`,
     cMapPacked: true,
     iccUrl: `${base}iccs/`,
   });
+  const stop = () => {
+    pdfWorker.destroy();
+    worker.terminate();
+  };
   const doc = await task.promise.catch((error: unknown) => {
     void task.destroy();
+    stop();
     throw error;
   });
 
@@ -117,9 +163,15 @@ export async function openPdf(url: string): Promise<PdfDoc> {
       const content = await page.getTextContent();
       const items: PdfTextItem[] = [];
       for (const item of content.items) {
-        if (!('str' in item) || item.str.trim() === '') continue;
+        if (!('str' in item)) continue;
+        // Leere Stücke und Leerzeichen bleiben erhalten: Sie sind die einzigen Hinweise auf Wort- und Zeilengrenzen
+        // (die Suche braucht sie, Treffer darauf gibt es nicht). Schrift-Normalisierung (Ligaturen, NFKC) macht
+        // pdf.js selbst: `disableNormalization` bleibt auf dem Standard `false`.
+        if (item.str === '' && !item.hasEOL) continue;
         const [, , , , x = 0, y = 0] = pdfjs.Util.transform(view.transform, item.transform);
-        items.push({ str: item.str, x, y: y - item.height, w: item.width, h: item.height });
+        const entry: PdfTextItem = { str: item.str, x, y: y - item.height, w: item.width, h: item.height };
+        if (item.hasEOL) entry.eol = true;
+        items.push(entry);
       }
       return items;
     },
@@ -134,6 +186,7 @@ export async function openPdf(url: string): Promise<PdfDoc> {
     destroy() {
       active?.cancel();
       void task.destroy();
+      stop();
     },
   };
 }

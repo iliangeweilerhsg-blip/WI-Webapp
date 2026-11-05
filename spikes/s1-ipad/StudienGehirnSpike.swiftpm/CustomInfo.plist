@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_studiengehirn._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Studien-Gehirn Spike S1/S3 sucht die Mac-Gegenstelle per Bonjour im lokalen WLAN.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Studien-Gehirn Spike S1 nimmt Tafel-Fotos in der Vorlesung auf.</string>
+</dict>
+</plist>

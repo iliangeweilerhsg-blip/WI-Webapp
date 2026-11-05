@@ -5,6 +5,8 @@ import {
   type Module,
   type ModuleColor,
   type ModuleCreate,
+  type ModuleSettings,
+  type ModuleSettingsUpdate,
   type ModuleUpdate,
   type Semester,
   type SemesterCreate,
@@ -15,7 +17,10 @@ import { courseModule, semester } from '../db/schema/index.ts';
 import { notDeleted } from '../db/schema/common.ts';
 import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage, type Page } from '../lib/pagination.ts';
+import { SEMESTER_LOCK_KEY } from '../lib/locks.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
+import { ensureDefaultNotebooks } from './notebooks.ts';
+import { softDeleteWithOps } from './trash-ops.ts';
 
 /** Feste Palette (07 §8), Reihenfolge der automatischen Farbvergabe */
 export const MODULE_COLORS: readonly ModuleColor[] = [
@@ -67,7 +72,36 @@ export function toApiModule(row: ModuleRow): Module {
     lecturer: row.lecturer,
     lang: row.lang as Module['lang'],
     description_md: row.descriptionMd,
+    settings: row.settings,
   };
+}
+
+/**
+ * `module.settings` Schlüssel für Schlüssel zusammenführen, `null` entfernt einen Schlüssel (VERTRAEGE §14.2).
+ * Läuft in SQL auf dem aktuellen Wert, damit sich Web-App (`layout`, `column_widths`) und iPad (`ink_mode`)
+ * bei gleichzeitigen Änderungen nicht gegenseitig überschreiben.
+ */
+function mergeModuleSettings(update: ModuleSettingsUpdate): SQL {
+  if (update.column_widths) {
+    // Das Schema prüft drei Werte zwischen 0 und 100, die Summe prüft der Core (ColumnWidths, F-DSH-01)
+    const sum = update.column_widths.reduce((a, b) => a + b, 0);
+    if (Math.abs(sum - 100) > 0.01) {
+      throw new HttpError(400, 'validation_failed', 'Die Spaltenbreiten müssen zusammen 100 % ergeben.', {
+        field: 'settings.column_widths',
+        sum,
+      });
+    }
+  }
+  const set: ModuleSettings = {};
+  const remove: string[] = [];
+  for (const [key, value] of Object.entries(update)) {
+    if (value === undefined) continue;
+    if (value === null) remove.push(key);
+    else (set as Record<string, unknown>)[key] = value;
+  }
+  let merged = sql`(${courseModule.settings} || ${JSON.stringify(set)}::jsonb)`;
+  for (const key of remove) merged = sql`(${merged} - ${key}::text)`;
+  return merged;
 }
 
 const semesterNotFound = () => new HttpError(404, 'semester_not_found', 'Dieses Semester gibt es nicht.');
@@ -88,7 +122,6 @@ function isPrimaryKeyViolation(error: unknown, table: string): boolean {
  * Serialisiert alle Änderungen an Semestern (`is_current`): letzter Schreiber gewinnt, kein Unique-Fehler.
  * Die Sperre gilt bis zum Ende der Transaktion.
  */
-const SEMESTER_LOCK_KEY = 70070001;
 async function lockSemesters(tx: Tx): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${SEMESTER_LOCK_KEY})`);
 }
@@ -326,6 +359,8 @@ export async function createModule(db: Db, input: ModuleCreate): Promise<Module>
           descriptionMd: input.description_md ?? null,
         })
         .returning();
+      // Notizbücher „Vorlesung“ und „Übung“ (VERTRAEGE §7.4)
+      await ensureDefaultNotebooks(tx, id);
       return toApiModule(row as ModuleRow);
     });
   } catch (error) {
@@ -348,17 +383,26 @@ export async function updateModule(db: Db, id: string, input: ModuleUpdate): Pro
     if (input.lecturer !== undefined) patch.lecturer = input.lecturer;
     if (input.lang !== undefined) patch.lang = input.lang;
     if (input.description_md !== undefined) patch.descriptionMd = input.description_md;
+    if (input.settings !== undefined)
+      patch.settings = mergeModuleSettings(input.settings) as unknown as ModuleSettings;
     const [row] = await tx.update(courseModule).set(patch).where(eq(courseModule.id, id)).returning();
     return toApiModule(row as ModuleRow);
   });
 }
 
-/** Soft-Delete (03 §1): setzt `deleted_at`, Inhalte bleiben für den Papierkorb (F-DAT-04) erhalten */
+/**
+ * Soft-Delete mit Kaskade (03 §1, VERTRAEGE §13): Foliensätze, Übungsblätter, Sessions und Notizbücher des Moduls
+ * bekommen denselben `deleted_at`, der Papierkorb stellt sie zusammen wieder her (F-DAT-04).
+ * 404 `module_not_found`, 409 `session_active` (laufende oder pausierte Session im Modul, dann bleibt alles).
+ */
 export async function deleteModule(db: Db, id: string): Promise<void> {
-  const rows = await db
-    .update(courseModule)
-    .set({ deletedAt: now(), updatedAt: now() })
-    .where(and(eq(courseModule.id, id), notDeleted(courseModule)))
-    .returning({ id: courseModule.id });
-  if (rows.length === 0) throw moduleNotFound();
+  await softDeleteWithOps(db, 'module', id);
+}
+
+/**
+ * Soft-Delete eines Semesters mit allen Modulen und deren Kaskade. Serialisiert mit den übrigen Änderungen an
+ * Semestern (`is_current`). 404 `semester_not_found`, 409 `session_active`.
+ */
+export async function deleteSemester(db: Db, id: string): Promise<void> {
+  await softDeleteWithOps(db, 'semester', id, lockSemesters);
 }

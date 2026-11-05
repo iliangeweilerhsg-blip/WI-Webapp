@@ -1,0 +1,13 @@
+{
+  "type": "op",
+  "op_id": "019a4e14-0000-7000-8000-000000000930",
+  "stream": "notebook:019a4e14-0000-7000-8000-000000000050",
+  "kind": "page.restore",
+  "at": 1762240562123,
+  "clock_uncertain": false,
+  "data": {
+    "page_id": "019a4e14-0000-7000-8000-000000000051"
+  },
+  "seq": 1844,
+  "origin": "server"
+}

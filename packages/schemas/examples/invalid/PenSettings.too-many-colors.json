@@ -1,0 +1,16 @@
+{
+  "double_tap": "radierer",
+  "squeeze": "werkzeugpalette",
+  "shape_recognition": false,
+  "favorite_colors": [
+    "#000000FF",
+    "#000000FF",
+    "#000000FF",
+    "#000000FF",
+    "#000000FF",
+    "#000000FF",
+    "#000000FF",
+    "#000000FF",
+    "#000000FF"
+  ]
+}

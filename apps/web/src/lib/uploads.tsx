@@ -22,7 +22,8 @@ import {
   invalidateMaterial,
   titleFromFile,
   unscheduleMaterialDelete,
-  pendingMaterialDeleteCount,
+  awaitMaterialDelete,
+  pendingDeleteMessage,
   type MaterialKind,
 } from './material.ts';
 import { useToast } from './toast.tsx';
@@ -158,10 +159,15 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       const { message, open } = summarize(group);
       const open_ = openers.current.get(batch);
       const opener = open && open.resultId && open_ ? () => open_(open.kind, open.resultId as string) : null;
-      toast.show({
-        message,
-        ...(opener ? { actionLabel: 'Anzeigen', onAction: opener } : {}),
-      });
+      // „Ist wieder da“ geht in den noch offenen „Rückgängig“-Toast, statt hinter ihm bis zu seinem Ablauf zu warten
+      const rest = pendingDeleteMessage();
+      const allRestored = group.every((e) => e.status === 'dublette' && e.restoredTitle !== undefined);
+      const merged = allRestored && rest !== null && toast.amend('material-delete', `${rest} · ${message}`);
+      if (!merged)
+        toast.show({
+          message,
+          ...(opener ? { actionLabel: 'Anzeigen', onAction: opener } : {}),
+        });
       // Fertige Einträge verschwinden aus der Fortschrittsliste (die Liste des Moduls zeigt sie jetzt);
       // Fehler bleiben stehen, bis man sie schließt.
       commit(entriesRef.current.filter((e) => e.batch !== batch || e.status === 'fehler'));
@@ -257,11 +263,21 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         // Lesbarer Titel statt Dateiname: „Mikro_Vorlesung_70.pdf“ → „Mikro Vorlesung 70“
         const title = titleFromFile(entry.file.name);
         if (title) fields.title = title;
-        const result = await apiUpload(collectionPath(entry.kind), UploadResultSchema, {
-          file: entry.file,
-          fields,
-          idempotencyKey: entry.key,
-        });
+        const upload = (idempotencyKey: string) =>
+          apiUpload(collectionPath(entry.kind), UploadResultSchema, {
+            file: entry.file,
+            fields,
+            idempotencyKey,
+          });
+        let result = await upload(entry.key);
+        // Die Dublette ist eine Löschung, deren DELETE schon unterwegs ist: abwarten, dann ist die Datei dem Core
+        // unbekannt und derselbe Inhalt wird als neuer Eintrag angenommen (neuer Schlüssel, der alte gilt der Dublette).
+        if (result.duplicate && (await awaitMaterialDelete(entry.kind, result.id))) {
+          // Der neue Schlüssel wird gemerkt: „Erneut versuchen“ nach einem Fehler spielt sonst die alte Dublette ab
+          const fresh = globalThis.crypto.randomUUID();
+          patch(id, { key: fresh });
+          result = await upload(fresh);
+        }
         // Dieselbe Datei im Rückgängig-Fenster erneut hochgeladen: Die Dublette ist die vorgemerkte Löschung.
         // Sie wird zurückgenommen, sonst ginge das DELETE später raus und „Anzeigen“ zeigte auf ein gelöschtes Blatt.
         const restoredTitle =
@@ -269,8 +285,12 @@ export function UploadProvider({ children }: { children: ReactNode }) {
             ? (cachedMaterialTitle(client, entry.kind, entry.moduleId, result.id) ??
               titleFromFile(entry.file.name))
             : undefined;
-        if (restoredTitle !== undefined && pendingMaterialDeleteCount() === 0)
-          toast.dismissGroup('material-delete');
+        if (restoredTitle !== undefined) {
+          const rest = pendingDeleteMessage();
+          // Letzte Löschung zurückgenommen: Toast weg. Sonst die Zahl im Rest-Toast nachziehen (Timer und Fokus bleiben).
+          if (rest === null) toast.dismissGroup('material-delete');
+          else toast.amend('material-delete', rest);
+        }
         await invalidateMaterial(client);
         patch(id, {
           status: result.duplicate ? 'dublette' : 'fertig',

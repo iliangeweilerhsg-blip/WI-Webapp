@@ -19,6 +19,8 @@ export interface Config {
   logLevel: LogLevel;
   /** Moodle-Instanz (SG_MOODLE_URL, 08 §9.1), leer = Moodle-Anbindung aus. Ohne Schrägstrich am Ende */
   moodleUrl: string;
+  /** Bonjour-Ankündigung `_studiengehirn._tcp` (VERTRAEGE §12). `SG_BONJOUR=0` schaltet sie ab */
+  bonjour: boolean;
 }
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'];
@@ -87,5 +89,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     devWebOrigin: (env.SG_DEV_WEB_ORIGIN || '').replace(/\/+$/, ''),
     logLevel: logLevel as LogLevel,
     moodleUrl,
+    bonjour: !['0', 'false', 'off', 'nein'].includes((env.SG_BONJOUR ?? '').trim().toLowerCase()),
   };
 }

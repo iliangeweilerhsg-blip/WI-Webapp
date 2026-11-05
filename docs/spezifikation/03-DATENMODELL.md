@@ -4,7 +4,7 @@
 
 | Regel | Festlegung |
 |---|---|
-| IDs | **UUIDv7** (zeitlich sortierbar). Clients (iPad, Web) dürfen IDs selbst erzeugen, damit offline angelegte Objekte sofort referenzierbar sind. |
+| IDs | **UUIDv7** (zeitlich sortierbar). Clients (iPad, Web) dürfen IDs selbst erzeugen, damit offline angelegte Objekte sofort referenzierbar sind. Immer in Kleinbuchstaben mit Bindestrichen; der Server normalisiert nicht. |
 | Pflichtfelder jeder Tabelle | `id`, `user_id`, `created_at`, `updated_at`, `deleted_at` (NULL = aktiv) |
 | Löschen | Immer **weich** (`deleted_at` setzen). Endgültiges Löschen nach 30 Tagen durch einen nächtlichen Job (Papierkorb, F-DAT-04). |
 | Zeitstempel | `timestamptz` in UTC. Zeitpunkte innerhalb einer Session zusätzlich als `t_ms` (Sitzungszeit, `int8`). |
@@ -47,7 +47,9 @@ module(              -- Lehrveranstaltung
   color text,                                               -- Token aus der Palette, nicht frei
   ects numeric, exam_type text,                             -- schriftlich|mündlich|Projekt|…
   lecturer text, lang text,
-  description_md text)                                      -- aus Modulbeschreibung (F-KAL-04)
+  description_md text,                                      -- aus Modulbeschreibung (F-KAL-04)
+  settings jsonb default '{}')                              -- Modul-Einstellungen (W-06): Layout und Spaltenbreiten (F-DSH-01),
+                                                            -- Schreibmodus (F-INK-03); Schema ModuleSettings in packages/schemas
 
 calendar_source(
   kind text,            -- ics_file | ics_url | google
@@ -73,7 +75,9 @@ session(              -- Durchführung eines Termins
   stop_reason text,    -- manuell | kalenderende | stille | maximaldauer | absturz_wiederhergestellt
   started_from text,   -- mac | ipad
   processing jsonb,    -- Fortschritt der Pipeline-Schritte {step: status}
-  review_state text)   -- offen | in_arbeit | erledigt   (Nacharbeitung, F-NAC-05)
+  review_state text,   -- offen | in_arbeit | erledigt   (Nacharbeitung, F-NAC-05)
+  start_offsets jsonb default '[]',   -- [{device_id, offset_ms}]: abweichender Offline-Start (VERTRAEGE §9.3)
+  auto_stop_extended_until timestamptz NULL)   -- „weiter aufnehmen“ (F-SES-03)
 ```
 
 ## 4. Material
@@ -184,7 +188,8 @@ stroke(                 -- neutrales Strich-Format, Kap. 08 §4
 
 page_element(
   page_id → page, kind text,   -- text | image | shape | tape | stamp
-  payload jsonb,               -- je nach kind, Kap. 08 §4.3
+  frame jsonb,                 -- [x, y, w, h] in pt (PageElement.frame, VERTRAEGE §6.1)
+  payload jsonb,               -- je nach kind, Kap. 08 §4.4
   t_ms int8 NULL, z int)
 ```
 
@@ -363,7 +368,7 @@ setting(key text primary key, value jsonb)
 
 ## 14. Invarianten (MÜSSEN durch Code und Tests abgesichert sein)
 
-1. Eine Session im Zustand `laeuft` existiert höchstens einmal gleichzeitig.
+1. Eine Session im Zustand `laeuft` oder `pausiert` existiert höchstens einmal gleichzeitig.
 2. `audio_chunk.seq` ist pro Aufnahme lückenlos aufsteigend. Fehlende Nummern werden als Lücke im `recording.state = mit_luecken` sichtbar.
 3. Jede `card` hat mindestens einen Eintrag in `source_evidence_ids` (LP8).
 4. Jeder `concept_relation` vom Typ `baut_auf` erzeugt keinen Zyklus. Beim Anlegen wird geprüft. Ein Zyklus wird als Inbox-Konflikt gemeldet, nicht gespeichert.
