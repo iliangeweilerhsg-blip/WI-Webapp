@@ -97,7 +97,7 @@ export async function recordingRoutes(app: FastifyInstance, deps: RecordingRoute
       },
     },
     async (request, reply) =>
-      reply.code(201).send(await createRecording(db, request.params.id, request.body)),
+      reply.code(201).send(await createRecording(db, request.params.id, request.body, deps.config)),
   );
 
   typed.get(

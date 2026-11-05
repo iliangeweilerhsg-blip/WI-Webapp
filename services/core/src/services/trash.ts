@@ -135,6 +135,16 @@ function matchCondition(mode: Mode, alias: string | null = null): SQL {
     : sql`${col(alias, 'deleted_at')} = ${mode.ts}::timestamptz`;
 }
 
+/**
+ * Sessions: `updated_at` streng monoton anheben, damit das `session.updated` nach Löschen und Wiederherstellen einen
+ * neueren Stand trägt (Clients verwerfen ältere Fassungen über `updated_at`, VERTRAEGE §11.6). Andere Tabellen: unverändert.
+ */
+function touch(table: string): SQL {
+  return table === 'session'
+    ? sql`, updated_at = greatest(clock_timestamp(), updated_at + interval '1 millisecond')`
+    : sql``;
+}
+
 function newValue(mode: Mode): SQL {
   return mode.op === 'delete' ? sql`${mode.ts.toISOString()}::timestamptz` : sql`NULL`;
 }
@@ -220,7 +230,7 @@ async function cascade(tx: Tx, node: Node, ids: string[], mode: Mode): Promise<n
     if (mode.op === 'restore') await checkRestoreConflicts(tx, edge.child, where);
 
     const rows = await tx.execute<{ id: string }>(
-      sql`UPDATE ${sql.identifier(edge.child)} SET deleted_at = ${newValue(mode)}
+      sql`UPDATE ${sql.identifier(edge.child)} SET deleted_at = ${newValue(mode)}${touch(edge.child)}
           WHERE ${where(null)} RETURNING id`,
     );
     count += rows.length;
@@ -273,7 +283,7 @@ export async function softDelete(tx: Tx, kind: TrashKind, id: string): Promise<D
   }
 
   const mode: Mode = { op: 'delete', ts: new Date() };
-  await tx.execute(sql`UPDATE ${table} SET deleted_at = ${newValue(mode)} WHERE id = ${id}`);
+  await tx.execute(sql`UPDATE ${table} SET deleted_at = ${newValue(mode)}${touch(kind)} WHERE id = ${id}`);
   await cascade(tx, kind, [id], mode);
   return mode.ts;
 }
@@ -332,7 +342,9 @@ export async function restoreFromTrash(tx: Tx, id: string): Promise<TrashRestore
               WHERE id = ${id}`,
         );
       } else {
-        await sp.execute(sql`UPDATE ${sql.identifier(kind)} SET deleted_at = NULL WHERE id = ${id}`);
+        await sp.execute(
+          sql`UPDATE ${sql.identifier(kind)} SET deleted_at = NULL${touch(kind)} WHERE id = ${id}`,
+        );
       }
       return { id, kind, restored_count: restored + 1 };
     });

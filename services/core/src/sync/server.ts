@@ -13,11 +13,13 @@ import type { SyncOp } from '@sg/shared';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
 import { onDeviceRevoked } from '../services/devices.ts';
+import { notifySessionUpdated, SESSION_NOTIFY_CHANNEL } from '../services/sessions.ts';
 import { listenCommittedOps, setOnOpCommitted } from './append.ts';
 import { SyncConnection, type SyncSocket } from './connection.ts';
 import { handleEventNotification, SYNC_EVENT_CHANNEL } from './events.ts';
 import { registeredOpHandlers, unregisterOpHandler, type OpHandler } from './handlers.ts';
 import { registerInkHandlers } from './handlers/ink.ts';
+import { registerSessionHandlers } from './handlers/session.ts';
 import { getActiveHub, setActiveHub, SyncHub } from './hub.ts';
 import { CLOSE, syncLimits } from './limits.ts';
 import { readStreamHeads } from './store.ts';
@@ -73,7 +75,13 @@ async function syncPluginImpl(app: FastifyInstance, options: SyncPluginOptions):
       listenSql,
       db,
       (error) => app.log.error({ err: error }, 'Sync: Fehler im Listener'),
-      { channels: { [SYNC_EVENT_CHANNEL]: handleEventNotification } },
+      {
+        channels: {
+          [SYNC_EVENT_CHANNEL]: handleEventNotification,
+          // Der Worker meldet Fortschritt (`processing`, `verarbeitet`) per pg_notify('sg_session', <id>), §3
+          [SESSION_NOTIFY_CHANNEL]: (payload) => notifySessionUpdated(db, payload),
+        },
+      },
     );
     if (closing) {
       await stop();
@@ -122,9 +130,8 @@ async function syncPluginImpl(app: FastifyInstance, options: SyncPluginOptions):
   };
   // Core-Ink: notebook.*, page.*, stroke.*, element.*, drawing.snapshot, photo.add
   registerForApp('ink', () => registerInkHandlers({ dataDir: config.dataDir }));
-  // T1-02 (#65): Session-Handler (session.*, slide.change, marker.*) mit preLock. Sobald registerSessionHandlers
-  // auf main liegt, hier einhängen:
-  //   registerForApp('session', () => registerSessionHandlers());
+  // T1-02: session.*, slide.change, marker.* (session.* mit preLock, VERTRAEGE §16.2)
+  registerForApp('session', () => registerSessionHandlers());
 
   // Vor dem preClose von @fastify/websocket: eigene Verbindungen mit 1001 schließen
   app.addHook('preClose', async () => {

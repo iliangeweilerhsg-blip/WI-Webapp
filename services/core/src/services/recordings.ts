@@ -14,13 +14,16 @@ import {
   type RecordingCreate,
   type RecordingState,
 } from '@sg/shared';
+import type { Config } from '../config.ts';
 import type { Db, Tx } from '../db/client.ts';
-import { audioChunk, job, recording, session } from '../db/schema/index.ts';
+import { audioChunk, calendarEvent, job, recording, session } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
+import { autoStopBoundary } from './auto-stop.ts';
 import { enqueueJob, JOB_NOTIFY_CHANNEL } from './jobs.ts';
 import { resolveDataPath } from './material.ts';
 import { sha256OfFile, writePartFile } from './pages.ts';
+import { getSettings } from './settings.ts';
 
 type RecordingRow = typeof recording.$inferSelect;
 
@@ -144,7 +147,12 @@ const FINALIZE_GRACE_MS = 10 * 60_000;
  * der Aufruf von `ensureFinalizeOnStop` hier ist nur eine Absicherung. Der Sessionstatus bleibt
  * unverändert (Besitz T1-02). Sperrreihenfolge: Session-Zeile, dann `lockRecording`.
  */
-export async function createRecording(db: Db, sessionId: string, input: RecordingCreate): Promise<Recording> {
+export async function createRecording(
+  db: Db,
+  sessionId: string,
+  input: RecordingCreate,
+  config: Pick<Config, 'dataDir'> = { dataDir: '' },
+): Promise<Recording> {
   try {
     return await db.transaction(async (tx) => {
       const [parent] = await tx
@@ -154,14 +162,17 @@ export async function createRecording(db: Db, sessionId: string, input: Recordin
           endedAt: session.endedAt,
           stopReason: session.stopReason,
           extendedUntil: session.autoStopExtendedUntil,
+          plannedEndsAt: calendarEvent.endsAt,
         })
         .from(session)
+        .leftJoin(calendarEvent, eq(calendarEvent.id, session.calendarEventId))
         .where(and(eq(session.id, sessionId), isNull(session.deletedAt)))
         // Lesesperre: ein gleichzeitiger Stopp wird abgewartet
-        .for('share');
+        .for('share', { of: session });
       if (!parent) throw new HttpError(404, 'session_not_found', 'Diese Session gibt es nicht.');
       const live = parent.state === 'laeuft' || parent.state === 'pausiert';
-      if (!live && !isLateStartAllowed(parent, input.started_ms)) {
+      const lecture = live ? null : (await getSettings(tx, config)).lecture;
+      if (!live && !isLateStartAllowed(parent, input.started_ms, lecture)) {
         throw new HttpError(
           409,
           'session_not_active',
@@ -200,16 +211,30 @@ function isLateStartAllowed(
     endedAt: Date | null;
     stopReason: string | null;
     extendedUntil: Date | null;
+    plannedEndsAt: Date | null;
   },
   startedMs: number,
+  lecture: { auto_stop_hard_after_end_min: number; auto_stop_max_duration_min: number } | null,
 ): boolean {
   if ((s.state !== 'beendet' && s.state !== 'verarbeitet') || !s.startedAt) return false;
-  let limit = s.endedAt?.getTime() ?? s.startedAt.getTime() + CRASH_RECORDING_LIMIT_MS;
+  const started = s.startedAt.getTime();
+  let limit = s.endedAt?.getTime() ?? started + CRASH_RECORDING_LIMIT_MS;
   if (s.stopReason === 'absturz_wiederhergestellt') {
-    limit = Math.max(limit, s.startedAt.getTime() + CRASH_RECORDING_LIMIT_MS);
+    // `ended_at` ist hier nur die letzte Aktivität: es gilt die Auto-Stopp-Grenze (VERTRAEGE §10.1, wie der Core-Takt).
+    // Die 12 h bleiben nur als Rückfall, falls Werte fehlen
+    const boundary = lecture
+      ? autoStopBoundary(
+          { startedAt: s.startedAt, plannedEndsAt: s.plannedEndsAt, extendedUntil: s.extendedUntil },
+          {
+            hardAfterEndMin: lecture.auto_stop_hard_after_end_min,
+            maxDurationMin: lecture.auto_stop_max_duration_min,
+          },
+        ).getTime()
+      : Number.NaN;
+    limit = Math.max(limit, Number.isFinite(boundary) ? boundary : started + CRASH_RECORDING_LIMIT_MS);
   }
   if (s.extendedUntil) limit = Math.max(limit, s.extendedUntil.getTime());
-  return startedMs <= limit - s.startedAt.getTime() + LATE_START_TOLERANCE_MS;
+  return startedMs <= limit - started + LATE_START_TOLERANCE_MS;
 }
 
 type JobRow = typeof job.$inferSelect;
