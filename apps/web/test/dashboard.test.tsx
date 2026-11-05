@@ -1,11 +1,15 @@
 // Live-Dashboard (T1-04): Layout und Vorlagen, Statusleiste, Aktionen, Live-Aktualisierung, Notizen, Auto-Stopp.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { Notebook, Session } from '@sg/shared';
+import { useQuery } from '@tanstack/react-query';
+import type { CalendarEvent, Notebook, Session } from '@sg/shared';
+import { PAIRING_REQUESTS_KEY } from '../src/lib/devices.ts';
 import { SessionView } from '../src/components/dashboard/SessionView.tsx';
 import { RecordingEnvContext } from '../src/components/dashboard/use-recording.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
+import { makeEvent } from './calendar-core.ts';
 import { fakeRecording } from './recording-fakes.ts';
 import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
@@ -116,6 +120,9 @@ function boot(
     wide?: boolean;
     syncState?: string;
     notebooks?: Notebook[];
+    events?: CalendarEvent[];
+    appearance?: 'system' | 'hell' | 'dunkel';
+    extra?: ReactNode;
     devices?: ReturnType<typeof makeDevice>[];
     now?: string;
     search?: string;
@@ -130,6 +137,8 @@ function boot(
     sessions: opts.session === null ? [] : [opts.session ?? running()],
   });
   core.notebooks = opts.notebooks ?? [NB_UEBUNG, NB_VL];
+  core.events = opts.events ?? [];
+  core.settings.general.appearance = opts.appearance ?? 'system';
   core.devices = opts.devices ?? [];
   sync = fakeSync(opts.syncState);
   return render(
@@ -138,6 +147,7 @@ function boot(
         <RecordingEnvContext.Provider value={fakeRecording().env}>
           <SyncProvider client={sync.client}>
             <SessionView />
+            {opts.extra}
           </SyncProvider>
         </RecordingEnvContext.Provider>
       </QueryProvider>
@@ -369,18 +379,20 @@ describe('Dashboard: Live-Aktualisierung (session.updated)', () => {
     expect(gets(`/sessions/${SESSION_ID}`)).toBeGreaterThanOrEqual(before + 2);
   });
 
-  it('online wird nicht nachgefragt', async () => {
+  it('online wird nicht nachgefragt (weder Session noch iPad-Punkt)', async () => {
+    // Die Fake-Uhr läuft schon beim Aufbau, sonst entstünde das Intervall auf der echten Uhr und der Test sähe es nie
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     boot();
     const b = await screenBar();
     await within(b).findByText('REC');
-    vi.useRealTimers();
-    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
-    vi.setSystemTime(new Date(NOW));
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
     const before = gets(`/sessions/${SESSION_ID}`);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(90_000);
     });
     expect(gets(`/sessions/${SESSION_ID}`)).toBe(before);
+    expect(gets('/devices?limit=200')).toBe(1);
   });
 
   it('Folge-Tab: „Anderer Tab“ statt „Live“', async () => {
@@ -606,5 +618,354 @@ describe('Dashboard: Auto-Stopp-Hinweis', () => {
     const b = await screenBar();
     await within(b).findByText('REC');
     expect(within(b).queryByText(/Stoppt gleich/)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Folgepunkte aus T1-04 (Issue #107)
+// ---------------------------------------------------------------------------------------------
+
+const root = document.documentElement;
+
+describe('Dashboard: Notizbuch nach Termintyp (Punkt 1)', () => {
+  const EVENT_ID = '0190f6a2-0000-7000-8000-0000000000f1';
+  const pick = async (kind: CalendarEvent['kind'] | 'fehlt' | 'ohne') => {
+    const events = kind === 'fehlt' || kind === 'ohne' ? [] : [makeEvent({ id: EVENT_ID, kind })];
+    boot({
+      session: running({ calendar_event_id: kind === 'ohne' ? null : EVENT_ID }),
+      events,
+    });
+    const col = await screen.findByRole('group', { name: 'Notizen' });
+    return (await within(col).findByTestId('ink-column')).textContent;
+  };
+
+  it('Übung und Tutorium zeigen das Notizbuch „Übung“', async () => {
+    expect(await pick('uebung')).toBe(NB_UEBUNG.id);
+    expect(core.requests.some((r) => r.path === `/calendar/events/${EVENT_ID}`)).toBe(true);
+    cleanup();
+    expect(await pick('tutorium')).toBe(NB_UEBUNG.id);
+  });
+
+  it('Vorlesung, anderer Typ, Session ohne Termin und nicht erreichbarer Termin zeigen „Vorlesung“', async () => {
+    expect(await pick('vorlesung')).toBe(NB_VL.id);
+    cleanup();
+    expect(await pick('pruefung')).toBe(NB_VL.id);
+    cleanup();
+    expect(await pick('ohne')).toBe(NB_VL.id);
+    expect(core.requests.some((r) => r.path.startsWith('/calendar/events/'))).toBe(false);
+    cleanup();
+    // Der Termin gibt es nicht (404): die Notizen hängen nicht daran
+    expect(await pick('fehlt')).toBe(NB_VL.id);
+  });
+
+  it('fehlt das Notizbuch „Übung“, gilt „Vorlesung“', async () => {
+    boot({
+      session: running({ calendar_event_id: EVENT_ID }),
+      events: [makeEvent({ id: EVENT_ID, kind: 'uebung' })],
+      notebooks: [NB_VL],
+    });
+    const col = await screen.findByRole('group', { name: 'Notizen' });
+    expect(await within(col).findByTestId('ink-column')).toHaveTextContent(NB_VL.id);
+  });
+});
+
+describe('Dashboard: Notizen-Spalte im Fehlerfall (Punkt 4)', () => {
+  it('„Erneut versuchen“ lädt die Notizbücher neu', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot();
+    core.failNotebooks = true;
+    const col = await screen.findByRole('group', { name: 'Notizen' });
+    expect(await within(col).findByText(/Notizen nicht erreichbar/)).toBeVisible();
+    core.failNotebooks = false;
+    await user.click(within(col).getByRole('button', { name: 'Erneut versuchen' }));
+    expect(await within(col).findByTestId('ink-column')).toHaveTextContent(NB_VL.id);
+    expect(within(col).queryByRole('button', { name: 'Erneut versuchen' })).toBeNull();
+  });
+});
+
+describe('Dashboard: Reiter unter lg (Punkt 5)', () => {
+  it('aria-controls steht nur am aktiven Reiter und zeigt auf ein vorhandenes Panel', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot({ wide: false });
+    await screen.findByRole('tablist', { name: 'Spalten' });
+    for (const name of ['Folie', 'Übung', 'Notizen']) {
+      const tab = screen.getByRole('tab', { name });
+      const active = tab.getAttribute('aria-selected') === 'true';
+      const controls = tab.getAttribute('aria-controls');
+      if (active) {
+        expect(controls).not.toBeNull();
+        expect(document.getElementById(controls!)).toBe(screen.getByRole('tabpanel'));
+      } else {
+        expect(controls).toBeNull();
+      }
+    }
+    await user.click(screen.getByRole('tab', { name: 'Übung' }));
+    expect(screen.getByRole('tab', { name: 'Übung' })).toHaveAttribute('aria-controls', 'dash-panel-uebung');
+    expect(screen.getByRole('tab', { name: 'Folie' })).not.toHaveAttribute('aria-controls');
+    expect(document.getElementById('dash-panel-uebung')).toBe(screen.getByRole('tabpanel'));
+  });
+});
+
+describe('Dashboard: Tastenkürzel P und Stopp (Punkt 3)', () => {
+  const stopKeys = { key: 'S', code: 'KeyS', ctrlKey: true, shiftKey: true };
+
+  it('P pausiert und setzt fort', async () => {
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    fireEvent.keyDown(window, { key: 'p', code: 'KeyP' });
+    await within(b).findByText('Pausiert');
+    expect(posts(/\/pause$/)).toHaveLength(1);
+    fireEvent.keyDown(window, { key: 'P', code: 'KeyP' });
+    await within(b).findByText('REC');
+    expect(posts(/\/resume$/)).toHaveLength(1);
+  });
+
+  it('P löst in Eingabefeldern, mit Modifikator und bei gehaltener Taste nichts aus', async () => {
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    fireEvent.keyDown(input, { key: 'p', code: 'KeyP' });
+    input.remove();
+    fireEvent.keyDown(window, { key: 'p', code: 'KeyP', metaKey: true });
+    fireEvent.keyDown(window, { key: 'p', code: 'KeyP', ctrlKey: true });
+    fireEvent.keyDown(window, { key: 'p', code: 'KeyP', repeat: true });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
+    expect(posts(/\/pause$/)).toHaveLength(0);
+    expect(within(b).getByText('REC')).toBeVisible();
+  });
+
+  it('P wirkt nur bei laufender oder pausierter Session', async () => {
+    boot({ session: running({ state: 'bereit', started_at: null }) });
+    const b = await screenBar();
+    await within(b).findByText('Nicht gestartet');
+    fireEvent.keyDown(window, { key: 'p', code: 'KeyP' });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
+    expect(posts(/\/sessions\//)).toHaveLength(0);
+  });
+
+  it('Strg+Umschalt+S fragt nach; „Weiter aufnehmen“ und Esc brechen ab, „Session beenden“ stoppt', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    fireEvent.keyDown(window, stopKeys);
+    const dialog = await screen.findByRole('alertdialog', { name: 'Session beenden?' });
+    expect(within(dialog).getByRole('button', { name: 'Weiter aufnehmen' })).toHaveFocus();
+    expect(posts(/\/stop$/)).toHaveLength(0);
+    await user.click(within(dialog).getByRole('button', { name: 'Weiter aufnehmen' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+
+    fireEvent.keyDown(window, stopKeys);
+    await screen.findByRole('alertdialog');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(posts(/\/stop$/)).toHaveLength(0);
+
+    fireEvent.keyDown(window, stopKeys);
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Session beenden' }),
+    );
+    await within(b).findByText('Beendet');
+    expect(posts(/\/stop$/)).toHaveLength(1);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('am Mac gilt ⌘⇧S, nicht Strg+Umschalt+S; ohne Umschalt nichts', async () => {
+    vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    fireEvent.keyDown(window, stopKeys);
+    fireEvent.keyDown(window, { key: 's', code: 'KeyS', metaKey: true });
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    fireEvent.keyDown(window, { key: 'S', code: 'KeyS', metaKey: true, shiftKey: true });
+    expect(await screen.findByRole('alertdialog')).toBeVisible();
+    vi.restoreAllMocks();
+  });
+
+  it('Stopp-Kürzel löst in Eingabefeldern nichts aus', async () => {
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    const input = document.createElement('input');
+    document.body.append(input);
+    input.focus();
+    fireEvent.keyDown(input, stopKeys);
+    input.remove();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('P wird während der Rückfrage nicht ausgeführt', async () => {
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    fireEvent.keyDown(window, stopKeys);
+    await screen.findByRole('alertdialog');
+    fireEvent.keyDown(window, { key: 'p', code: 'KeyP' });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
+    expect(posts(/\/pause$/)).toHaveLength(0);
+  });
+});
+
+describe('Dashboard: dunkles Erscheinungsbild als Standard (Punkt 2)', () => {
+  beforeEach(() => {
+    root.removeAttribute('data-theme');
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    root.removeAttribute('data-theme');
+    window.localStorage.clear();
+  });
+
+  it('ist die Session dunkel, solange nichts anderes gilt; beim Verlassen kommt der alte Zustand zurück', async () => {
+    const view = boot();
+    await screenBar();
+    await waitFor(() => expect(root).toHaveAttribute('data-theme', 'dark'));
+    view.unmount();
+    expect(root).not.toHaveAttribute('data-theme');
+  });
+
+  it('eine eigene Wahl „Hell“ auf diesem Gerät bleibt, auch in der Session', async () => {
+    window.localStorage.setItem('sg-theme', 'light');
+    const view = boot();
+    await screenBar();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(root).toHaveAttribute('data-theme', 'light');
+    view.unmount();
+    expect(root).toHaveAttribute('data-theme', 'light');
+  });
+
+  it('die Standard-Darstellung „hell“ aus den Einstellungen bleibt hell', async () => {
+    boot({ appearance: 'hell' });
+    await within(await screenBar()).findByText('REC');
+    await waitFor(() => expect(core.requests.some((r) => r.path === '/settings')).toBe(true));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    expect(root).not.toHaveAttribute('data-theme', 'dark');
+  });
+});
+
+describe('Dashboard: Speichern und Verwerfen der Breiten (Punkte 7 und 8)', () => {
+  it('Speichern beim Unmount: Tasten, dann sofort weg (vor Ablauf der Ruhezeit) sichert die Breiten', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    const view = boot();
+    await screen.findByTestId('dashboard-grid');
+    screen.getByRole('separator', { name: 'Breite von Folie und Übung' }).focus();
+    await user.keyboard('{ArrowRight}{ArrowRight}');
+    expect(patches()).toHaveLength(0);
+    view.unmount();
+    // Ruhezeit ist 400 ms: Wer erst danach speichert, hat den Unmount nicht gesichert
+    await waitFor(() => expect(patches()).toHaveLength(1), { timeout: 300 });
+    expect(patches()[0]?.body).toEqual({ settings: { layout: 'standard', column_widths: [54, 21, 25] } });
+    // Der Timer ist mit erledigt: kein zweiter PATCH
+    await new Promise((r) => setTimeout(r, 600));
+    expect(patches()).toHaveLength(1);
+  });
+
+  it('Pfeiltaste, dann innerhalb der Ruhezeit eine Vorlagen-Taste: nur der PATCH der Vorlage', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot();
+    await screen.findByTestId('dashboard-grid');
+    screen.getByRole('separator', { name: 'Breite von Folie und Übung' }).focus();
+    await user.keyboard('{ArrowRight}');
+    await user.keyboard('2');
+    await waitFor(() => expect(patches()).toHaveLength(1));
+    expect(patches()[0]?.body).toEqual({ settings: { layout: 'folie_gross', column_widths: null } });
+    await new Promise((r) => setTimeout(r, 700));
+    expect(patches()).toHaveLength(1);
+    expect(grid().style.gridTemplateColumns).toMatch(/^minmax\(0, 70fr\)/);
+  });
+});
+
+describe('Dashboard: Verbindung, iPad-Punkt und Abfragen (Punkte 9 bis 11)', () => {
+  it('der erste Verbindungsaufbau lädt Session und Geräte nicht doppelt', async () => {
+    boot({ syncState: 'connecting', devices: [makeDevice({ kind: 'ipad', connected: false })] });
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
+    act(() => sync.setState('online'));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+    expect(gets(`/sessions/${SESSION_ID}`)).toBe(1);
+    expect(gets('/devices?limit=200')).toBe(1);
+    // Ein echter Abbruch danach lädt weiterhin neu
+    act(() => sync.setState('backoff'));
+    act(() => sync.setState('online'));
+    await waitFor(() => expect(gets(`/sessions/${SESSION_ID}`)).toBe(2));
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(2));
+  });
+
+  it('ohne Live-Verbindung fragt auch der iPad-Punkt alle 30 s nach', async () => {
+    boot({ devices: [makeDevice({ kind: 'ipad', connected: false })] });
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(new Date(NOW));
+    core.devices[0]!.connected = true;
+    act(() => sync.setState('backoff'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(65_000);
+    });
+    expect(gets('/devices?limit=200')).toBeGreaterThanOrEqual(3);
+    await waitFor(() =>
+      expect(within(b).getByTestId('ipad-status')).not.toHaveTextContent('nicht verbunden'),
+    );
+  });
+
+  it('im Folge-Tab fragt der iPad-Punkt ebenfalls nach', async () => {
+    boot({ devices: [makeDevice({ kind: 'ipad', connected: false })] });
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    vi.setSystemTime(new Date(NOW));
+    act(() => sync.setState('other_tab'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(65_000);
+    });
+    expect(gets('/devices?limit=200')).toBeGreaterThanOrEqual(3);
+  });
+
+  it('device.connection lädt nur die Geräteliste neu, nicht die Kopplungsanfragen', async () => {
+    let pairingFetches = 0;
+    function PairingProbe() {
+      useQuery({
+        queryKey: PAIRING_REQUESTS_KEY,
+        queryFn: () => {
+          pairingFetches += 1;
+          return [];
+        },
+      });
+      return null;
+    }
+    boot({ devices: [makeDevice({ kind: 'ipad', connected: false })], extra: <PairingProbe /> });
+    await screenBar();
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
+    await waitFor(() => expect(pairingFetches).toBe(1));
+    act(() => sync.emit('device.connection', { client: 'ipad', connected: true }));
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(2));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 80));
+    });
+    expect(pairingFetches).toBe(1);
   });
 });

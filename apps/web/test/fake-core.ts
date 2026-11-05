@@ -1,6 +1,7 @@
 import { vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import type {
+  CalendarEvent,
   Device,
   ExerciseSheet,
   Marker,
@@ -191,6 +192,10 @@ export interface FakeCore {
   sessions: Session[];
   /** Notizbücher für GET /notebooks?module_id (VERTRAEGE §7.4) */
   notebooks: Notebook[];
+  /** Termine für GET /calendar/events/{id} (VERTRAEGE §7.3) */
+  events: CalendarEvent[];
+  /** GET /notebooks scheitert mit 500, solange true */
+  failNotebooks: boolean;
   /** Für GET /sessions/{id}/snapshot (VERTRAEGE §7.2): Folienwechsel und Marker, `stream_seq`/`stream_op_id` */
   slideEvents: SlideEvent[];
   markers: Marker[];
@@ -285,6 +290,8 @@ export function installFakeCore(
     slides: {},
     sessions: structuredClone(initial.sessions ?? []),
     notebooks: [],
+    events: [],
+    failNotebooks: false,
     slideEvents: [],
     markers: [],
     streamSeq: 0,
@@ -514,8 +521,18 @@ export function installFakeCore(
         return snapshot ? json(snapshot) : json({ error: { code: 'session_not_found', message: 'x' } }, 404);
       }
 
+      // GET /calendar/events/{id} (§7.3)
+      const eventOne = /^\/calendar\/events\/([^/]+)$/.exec(path);
+      if (eventOne && method === 'GET') {
+        const found = core.events.find((x) => x.id === eventOne[1] && !x.deleted_at);
+        return found
+          ? json(structuredClone(found))
+          : json({ error: { code: 'calendar_event_not_found', message: 'x' } }, 404);
+      }
+
       // GET /notebooks?module_id (§7.4)
       if (path === '/notebooks' && method === 'GET') {
+        if (core.failNotebooks) return json({ error: { code: 'internal', message: 'x' } }, 500);
         const moduleId = url.searchParams.get('module_id');
         return json({
           items: core.notebooks.filter((n) => !moduleId || n.module_id === moduleId),
