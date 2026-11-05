@@ -1,62 +1,68 @@
 # Ink-Leistungsmessung (Issue #79)
 
-`measure.cjs` misst die Frame-Zeit (p50, p95, max) des Ink-Renderers bei **Zoom 1** und **Zoom 2** mit vielen Strichen.
-Es bündelt `harness.tsx` (rendert `<InkPage>`) mit esbuild, öffnet es in Playwright und liest die Abstände zwischen
-`requestAnimationFrame`-Aufrufen. Zwei Fälle je Zoom:
+Das Skript `measure.cjs` misst, wie flüssig der Ink-Renderer bei **Zoom 1** und **Zoom 2** mit vielen Strichen (1500) läuft.
+Gemessen wird die Zeit pro Frame (p50, p95, max). Zwei Fälle je Zoom:
 
-- `append`: pro Frame kommt ein Strich dazu (Live-Schreiben, inkrementelle Zeichnung der Tinte-Ebene).
-- `idle`: nichts ändert sich, es wird nur komponiert (die drei Canvas-Ebenen).
+- `append`: pro Frame kommt ein Strich dazu (Live-Schreiben).
+- `idle`: nichts ändert sich, es wird nur komponiert.
 
-Ziel laut Issue: p95 bei Zoom 2 höchstens 16,7 ms (60 Hz). Liegt der Wert darüber, entscheidet der Owner/Claude, ob die
-Ebenen zusammengelegt werden. Die Architektur wird nicht auf Verdacht geändert.
+**Was ist „gut“?** Der p95-Wert bei Zoom 2 soll höchstens **16,7 ms** betragen (60 Bilder pro Sekunde). Liegt er darüber,
+entscheiden wir danach, ob die Ebenen zusammengelegt werden. Die Architektur wird nicht auf Verdacht geändert.
 
-## Auf dem Mac starten
+## 1. Einfachster Weg: im eigenen Browser, ohne Playwright
 
-Voraussetzung: Node 22 und `pnpm install` im Repo-Wurzelordner. Playwright muss einmalig vorhanden sein:
+Voraussetzung: Node und `pnpm install` im Repo-Ordner (ist schon erledigt, wenn die App bei dir läuft).
 
-```bash
-cd WI-Webapp
-pnpm install
-npx playwright install chromium webkit   # lädt die Browser, einmalig
-```
+1. **Mac auf hellen Modus stellen** (Systemeinstellungen > Erscheinungsbild > Hell). Die Messseite erzwingt zwar das
+   helle Theme, aber so sind die Werte sicher vergleichbar.
+2. Im Terminal, im Repo-Ordner:
 
-Falls `require('playwright')` nicht gefunden wird: `npm install --no-save playwright` im Repo-Wurzelordner (nicht
-committen) oder global `npm i -g playwright` mit `export NODE_PATH=$(npm root -g)`.
+   ```bash
+   node apps/web/scripts/ink-perf/measure.cjs --serve
+   ```
 
-### Einfache Variante: im echten Browser per Knopfdruck (empfohlen für Mac-GPU)
+3. Die ausgegebene Adresse öffnen, normalerweise **http://127.0.0.1:8123/#manual**, zuerst in **Chrome**, danach in
+   **Safari**. Das Fenster normal groß und im Vordergrund lassen, keine anderen schweren Programme laufen lassen.
+4. Oben rechts auf **„Zoom 1 messen“** klicken, kurz warten. Dann die Seite neu laden (Cmd+R) und **„Zoom 2 messen“**
+   klicken. Pro Messung erscheint eine Zeile mit p50, p95 und max in Millisekunden, für `append` und `idle`.
+5. Mit **ctrl+C** im Terminal beenden.
 
-```bash
-node apps/web/scripts/ink-perf/measure.cjs --serve
-```
+Ist der Port belegt, kommt eine Meldung. Dann einen anderen nehmen: `--serve --port 8124`.
 
-Das Skript bündelt die Harness und startet einen kleinen Server. Dann **http://localhost:8123/#manual** öffnen, und zwar
-nacheinander in **Chrome** und in **Safari** (Safari-Fenster normal groß lassen, nicht im Hintergrund-Tab messen). Oben
-rechts auf „Zoom 1 messen“ klicken, danach auf einer frisch geladenen Seite „Zoom 2 messen“ (Seite zwischen den Messungen
-neu laden, damit sich nichts überlagert). Die Zeile zeigt p50, p95 und max in Millisekunden. Beenden mit Strg+C.
-Das ist die aussagekräftigste Messung, weil sie die echte GPU und den echten Compositor nutzt.
+## 2. Optional: automatisch mit Playwright
 
-### Automatisch per Playwright
+Nur nötig, wenn du die Werte ohne Klicken (headless) willst. Playwright kommt in einen **eigenen Ordner**, nicht ins Repo
+(kein `npm install` im Repo-Ordner, das kann pnpm-Pakete entfernen):
 
 ```bash
-node apps/web/scripts/ink-perf/measure.cjs --browser chromium   # Chrome-Engine, headless
-node apps/web/scripts/ink-perf/measure.cjs --browser webkit     # Safari-Engine, headless
+mkdir ~/ink-perf && cd ~/ink-perf && npm i playwright && npx playwright install chromium webkit
 ```
 
-Headless läuft ohne echte GPU und ist deshalb nur ein Vergleich Zoom 1 gegen Zoom 2, kein Absolutwert.
+Danach im Repo-Ordner:
+
+```bash
+NODE_PATH=~/ink-perf/node_modules node apps/web/scripts/ink-perf/measure.cjs --browser chromium   # Chrome-Engine
+NODE_PATH=~/ink-perf/node_modules node apps/web/scripts/ink-perf/measure.cjs --browser webkit     # Safari-Engine
+```
+
+Headless läuft ohne echte GPU. Diese Werte taugen nur zum Vergleich Zoom 1 gegen Zoom 2, nicht als Absolutwert. Für die
+echte Mac-GPU zählt Weg 1.
 
 ## Optionen
 
 | Option | Standard | Bedeutung |
 |---|---|---|
-| `--browser` | `chromium` | `chromium`, `webkit` oder `firefox` |
+| `--serve` | aus | Handbetrieb im eigenen Browser (kein Playwright nötig) |
+| `--port` | `8123` | Port für `--serve` |
+| `--browser` | `chromium` | `chromium`, `webkit` oder `firefox` (Playwright) |
 | `--strokes` | `1500` | Striche auf der Seite vor der Messung |
 | `--frames` | `120` | gemessene Frames je Fall |
 | `--throttle` | `1` | CPU-Drosselung (nur Chromium); `4` entspricht der Messung in Issue #79 |
 | `--dpr` | `2` | Geräte-Pixel-Verhältnis (Retina) |
 | `--width` | `700` | CSS-Breite der Seite bei Zoom 1 (bei Zoom 2 doppelt) |
 | `--json` | aus | Ausgabe als JSON |
-| `--serve` | aus | Handbetrieb im eigenen Browser (Port 8123) |
 
-## Lesen der Ausgabe
+## Was zurückmelden?
 
-`p95 ms` ist der Wert, der unter 16,7 liegen soll. `Frames>25ms` zählt deutlich verpasste Frames. Bitte die Ausgabe (Chrome und Safari, Zoom 1 und Zoom 2) ins Issue #79 kopieren.
+Bitte die Werte (Chrome und Safari, Zoom 1 und Zoom 2, jeweils `append` und `idle`) als **Kommentar in Issue #79**
+eintragen, am besten als Tabelle, dazu Mac-Modell und Browser-Version. Ein Foto oder Screenshot der Messzeilen reicht auch.

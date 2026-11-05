@@ -64,7 +64,7 @@ const navButton =
   'rounded-md border border-border px-2 py-1 text-sm hover:bg-surface disabled:opacity-40 disabled:hover:bg-transparent';
 
 /** Wartezeit bei Fehlern beim Laden: 1 s, 2 s, 4 s … höchstens 15 s */
-const RETRY_START_MS = 1_000;
+export const RETRY_START_MS = 1_000;
 const RETRY_MAX_MS = 15_000;
 
 /** Sammelzeit für Seiten-Operationen, bevor die Seitenliste neu geladen wird */

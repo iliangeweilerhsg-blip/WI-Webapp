@@ -259,6 +259,11 @@ export function redrawRegion(
   }
 }
 
+/** Nur für Tests: verwirft den globalen Zwischen-Canvas, damit der Zustand nicht von der Testreihenfolge abhängt. */
+export function resetScratchCanvas(): void {
+  scratch = null;
+}
+
 export function drawStrokes(ctx: CanvasRenderingContext2D, strokes: readonly DecodedStroke[]): void {
   for (const s of strokes) drawStroke(ctx, s);
 }

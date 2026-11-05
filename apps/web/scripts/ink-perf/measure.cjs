@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports, no-empty, no-undef -- CommonJS-Messskript (Node + Browser-Kontext) */
 // Frame-Messung für den Ink-Renderer (Issue #79): p95 pro Frame bei Zoom 1 und Zoom 2 mit vielen Strichen.
 // Aufruf: node apps/web/scripts/ink-perf/measure.cjs [--browser chromium|webkit|firefox] [--strokes 1500]
-//         [--frames 120] [--throttle 1] [--dpr 2] [--width 700] [--json]
+//         [--serve [--port 8123]] [--frames 120] [--throttle 1] [--dpr 2] [--width 700] [--json]
 // Siehe README.md. Playwright muss vorhanden sein (wird nicht installiert).
 'use strict';
 const fs = require('node:fs');
@@ -23,6 +23,7 @@ const dpr = Number(opt('dpr', 2));
 const width = Number(opt('width', 700)); // CSS-Breite bei Zoom 1
 const asJson = args.includes('--json');
 const serve = args.includes('--serve');
+const port = Number(opt('port', 8123));
 const BUDGET_MS = 16.7;
 
 const webRoot = path.resolve(__dirname, '../..');
@@ -47,10 +48,9 @@ function loadPlaywright() {
   try {
     return require('playwright');
   } catch {}
-  try {
-    return createRequire('/opt/node-tools/x.js')('playwright');
-  } catch {}
-  throw new Error('playwright nicht gefunden. Siehe README.md.');
+  throw new Error(
+    'playwright nicht gefunden. Siehe README.md (Abschnitt „Optional: Playwright“) oder starte mit --serve ohne Playwright.',
+  );
 }
 
 function loadStrokes() {
@@ -123,7 +123,7 @@ async function runCase(browser, url, data, zoom, mode) {
   };
 }
 
-/** Handbetrieb: Bundle über http://localhost:8123 ausliefern (file:// würde fetch blockieren). */
+/** Handbetrieb: Bundle über http://127.0.0.1 ausliefern (file:// würde fetch blockieren). */
 async function serveManual(outDir) {
   const http = require('node:http');
   const data = loadStrokes();
@@ -137,8 +137,17 @@ async function serveManual(outDir) {
       .writeHead(200, { 'Content-Type': types[path.extname(file)] || 'text/plain' })
       .end(fs.readFileSync(file));
   });
-  await new Promise((r) => server.listen(8123, '127.0.0.1', r));
-  console.log('Öffne http://localhost:8123/#manual in Chrome oder Safari. Beenden mit Strg+C.');
+  await new Promise((resolve, reject) => {
+    server.once('error', (e) =>
+      reject(
+        e.code === 'EADDRINUSE'
+          ? new Error(`Port ${port} ist belegt. Anderen Port wählen: --serve --port 8124`)
+          : e,
+      ),
+    );
+    server.listen(port, '127.0.0.1', resolve);
+  });
+  console.log(`Öffne http://127.0.0.1:${port}/#manual in Chrome oder Safari. Beenden mit ctrl+C.`);
   await new Promise((r) => process.on('SIGINT', r));
   server.close();
 }

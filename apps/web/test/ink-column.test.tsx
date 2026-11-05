@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Page, PageElement, Stroke, SyncOp } from '@sg/shared';
-import { InkColumn, type InkSyncSource } from '../src/components/ink/InkColumn.tsx';
+import { InkColumn, RETRY_START_MS, type InkSyncSource } from '../src/components/ink/InkColumn.tsx';
 import { SyncClient } from '../src/lib/sync/client.ts';
 import { MemoryQueueStore } from '../src/lib/sync/store.ts';
 import { installCanvasMock, type CanvasLog } from './canvas-mock.ts';
@@ -614,7 +614,7 @@ describe('<InkColumn> Abo und Reset', () => {
     const timeout = vi.spyOn(globalThis, 'setTimeout');
     release();
     await sleep(30);
-    expect(timeout.mock.calls.filter((c) => c[1] === 1_000)).toHaveLength(0);
+    expect(timeout.mock.calls.filter((c) => c[1] === RETRY_START_MS)).toHaveLength(0);
   });
 
   it('Notizbuchwechsel: nur das neue ist abonniert, keine fremden Striche, Folgen/Presence zurückgesetzt', async () => {

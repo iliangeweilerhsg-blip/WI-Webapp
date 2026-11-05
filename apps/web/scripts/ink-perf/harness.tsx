@@ -18,6 +18,9 @@ declare global {
   }
 }
 
+// Immer helles Theme, sonst misst der Dunkel-Filter mit
+document.documentElement.setAttribute('data-theme', 'light');
+
 window.__start = (cfg) => {
   const host = document.getElementById('host')!;
   const root = createRoot(host);
