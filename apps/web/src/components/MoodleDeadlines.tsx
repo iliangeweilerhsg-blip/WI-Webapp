@@ -4,7 +4,7 @@ import Link from 'next/link';
 import type { Module } from '@sg/shared';
 import { documentHref } from '../lib/material.ts';
 import { moduleColorVar } from '../lib/modules.ts';
-import { formatDue, useSyncedDeadlines } from '../lib/moodle.ts';
+import { formatDue, isWebUrl, useSyncedDeadlines } from '../lib/moodle.ts';
 
 /**
  * Fristen aus Moodle (F-MDL-04 Schritt 3): ruhige Liste nach Datum, ohne Countdown und ohne rote Farbe (R11).
@@ -15,6 +15,8 @@ export function MoodleDeadlines({
   modules,
   days,
   limit,
+  visible,
+  onShowAll,
   headingId,
 }: {
   /** Nur Fristen dieses Moduls (Modulseite). Ohne: alle (Heute) */
@@ -24,6 +26,9 @@ export function MoodleDeadlines({
   /** Nur Fristen der nächsten Tage */
   days?: number;
   limit?: number;
+  /** Nur so viele zeigen; liefert der Core mehr, erscheint „Alle anzeigen“ (Modulseite) */
+  visible?: number;
+  onShowAll?: () => void;
   headingId: string;
 }) {
   const { data } = useSyncedDeadlines({
@@ -32,6 +37,8 @@ export function MoodleDeadlines({
     ...(limit ? { limit } : {}),
   });
   if (!data || data.length === 0) return null;
+  const more = visible !== undefined && data.length > visible;
+  const shown = more ? data.slice(0, visible) : data;
   const moduleOf = new Map((modules ?? []).map((m) => [m.id, m]));
 
   return (
@@ -40,7 +47,7 @@ export function MoodleDeadlines({
         Fristen
       </h2>
       <ul className="mt-2 divide-y divide-border rounded-lg border border-border">
-        {data.map((deadline) => {
+        {shown.map((deadline) => {
           const module = moduleOf.get(deadline.module_id);
           return (
             <li key={deadline.id} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3">
@@ -76,7 +83,7 @@ export function MoodleDeadlines({
                     Blatt
                   </Link>
                 ) : null}
-                {deadline.url ? (
+                {isWebUrl(deadline.url) ? (
                   <a
                     href={deadline.url}
                     target="_blank"
@@ -91,6 +98,15 @@ export function MoodleDeadlines({
           );
         })}
       </ul>
+      {more && onShowAll ? (
+        <button
+          type="button"
+          onClick={onShowAll}
+          className="mt-2 min-h-9 rounded-md px-2 text-sm text-text-muted hover:bg-surface hover:text-text"
+        >
+          Alle anzeigen
+        </button>
+      ) : null}
     </section>
   );
 }

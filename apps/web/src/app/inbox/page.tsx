@@ -7,7 +7,7 @@ export const metadata: Metadata = { title: 'Inbox' };
 export default function InboxPage() {
   return (
     <section aria-labelledby="screen-title">
-      <h1 id="screen-title" className="text-xxl font-semibold">
+      <h1 id="screen-title" tabIndex={-1} className="text-xxl font-semibold focus:outline-none">
         Inbox
       </h1>
       <div className="mt-6">

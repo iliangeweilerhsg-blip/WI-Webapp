@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useMemo } from 'react';
 import { CoreHint } from '../CoreHint.tsx';
+import { MoodleAccessHint } from '../MoodleAccessHint.tsx';
 import { MoodleDeadlines } from '../MoodleDeadlines.tsx';
 import { EmptyState } from '../Placeholder.tsx';
 import { SpontaneousStartCard } from './SpontaneousStart.tsx';
@@ -90,6 +91,9 @@ export function HeuteScreen() {
         {now !== null ? (
           <MoodleDeadlines modules={modules} days={14} limit={5} headingId="heute-fristen" />
         ) : null}
+
+        {/* Dezenter Hinweis zum Moodle-Zugang ab 7 Tagen vor Ablauf (F-MDL-01). Sonst nichts */}
+        {now !== null ? <MoodleAccessHint withLink /> : null}
       </div>
     </section>
   );

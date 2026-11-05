@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import type { Module, MoodleItem } from '@sg/shared';
 import { apiBase } from '../lib/api.ts';
 import { moduleColorVar, useVisibleModules } from '../lib/modules.ts';
 import { moduleHref } from '../lib/nav.ts';
-import { moodleErrorMessage, useDecideItem, useMoodleItems } from '../lib/moodle.ts';
+import { moodleErrorMessage, useDecideItem, useMoodleItems, useSingleFlight } from '../lib/moodle.ts';
 import { useToast } from '../lib/toast.tsx';
 import { CoreHint } from './CoreHint.tsx';
 import { EmptyState } from './Placeholder.tsx';
@@ -26,11 +27,50 @@ function formatSize(bytes: number): string {
   return `${sizeFormat.format(bytes / (1024 * 1024))} MB`;
 }
 
-function ItemRow({ item }: { item: MoodleItem }) {
+function ItemRow({
+  item,
+  onDecided,
+  onUndo,
+}: {
+  item: MoodleItem;
+  onDecided: (item: MoodleItem) => void;
+  onUndo: (item: MoodleItem) => void;
+}) {
   const decide = useDecideItem();
+  const once = useSingleFlight();
   const toast = useToast();
+
+  function choose(decision: (typeof DECISIONS)[number]) {
+    once((done) =>
+      decide.mutate(
+        { id: item.id, kind: decision.kind },
+        {
+          onSettled: done,
+          onSuccess: () => {
+            onDecided(item);
+            const message = `${decision.done}. Gilt auch für weitere Dateien in „${item.activity_name}“.`;
+            if (decision.kind !== 'ignoriert') {
+              toast.show({ message });
+              return;
+            }
+            // „Ignorieren“ lässt sich zurücknehmen (R15): zurück auf offen
+            toast.show({
+              message,
+              actionLabel: 'Rückgängig',
+              onAction: () => onUndo(item),
+            });
+          },
+          onError: (error) => toast.show({ message: moodleErrorMessage(error) }),
+        },
+      ),
+    );
+  }
+
   return (
-    <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+    <li
+      className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3"
+      data-moodle-item={item.id}
+    >
       <div className="min-w-0 flex-1 basis-60">
         <p className="break-words">
           <span aria-hidden="true" className="mr-2 text-text-muted">
@@ -57,18 +97,7 @@ function ItemRow({ item }: { item: MoodleItem }) {
             type="button"
             className={button}
             disabled={decide.isPending}
-            onClick={() =>
-              decide.mutate(
-                { id: item.id, kind: decision.kind },
-                {
-                  onSuccess: () =>
-                    toast.show({
-                      message: `${decision.done}. Gilt auch für weitere Dateien in „${item.activity_name}“.`,
-                    }),
-                  onError: (error) => toast.show({ message: moodleErrorMessage(error) }),
-                },
-              )
-            }
+            onClick={() => choose(decision)}
           >
             {decision.label}
           </button>
@@ -96,6 +125,36 @@ function group(items: readonly MoodleItem[], modules: readonly Module[]) {
 export function MoodleInbox() {
   const items = useMoodleItems({ kind: 'offen' });
   const { modules } = useVisibleModules();
+  // Nach einer Entscheidung: Fokus auf die nächste Datei, sonst auf die Überschrift (Review #134, N3)
+  const [focusAfter, setFocusAfter] = useState<{ next: string | null } | null>(null);
+  const data = items.data;
+  useEffect(() => {
+    if (!focusAfter || !data) return;
+    const next = focusAfter.next;
+    if (next !== null && data.some((i) => i.id === next)) {
+      document.querySelector<HTMLButtonElement>(`[data-moodle-item="${next}"] button`)?.focus();
+    } else {
+      document.getElementById('screen-title')?.focus();
+    }
+    setFocusAfter(null);
+  }, [focusAfter, data]);
+
+  // Auf Listenebene: die Zeile ist nach der Entscheidung schon verschwunden, wenn „Rückgängig“ kommt
+  const undo = useDecideItem();
+  const toast = useToast();
+  function onUndo(item: MoodleItem) {
+    undo.mutate(
+      { id: item.id, kind: 'offen' },
+      { onError: (error) => toast.show({ message: moodleErrorMessage(error) }) },
+    );
+  }
+
+  function onDecided(item: MoodleItem) {
+    const list = data ?? [];
+    const index = list.findIndex((i) => i.id === item.id);
+    const next = list[index + 1] ?? list[index - 1] ?? null;
+    setFocusAfter({ next: next?.id ?? null });
+  }
 
   if (items.isError) return <CoreHint error={items.error} />;
   if (!items.data) {
@@ -117,8 +176,7 @@ export function MoodleInbox() {
           </Link>
         }
       >
-        Nichts zu entscheiden. Unklare Dateien aus Moodle landen hier, Vorschläge aus deinen Vorlesungen ab
-        Phase 2.
+        Nichts zu entscheiden. Dateien aus Moodle, die sich nicht sicher einordnen lassen, landen hier.
       </EmptyState>
     );
   }
@@ -152,7 +210,7 @@ export function MoodleInbox() {
           </h2>
           <ul className="mt-2 divide-y divide-border rounded-lg border border-border px-4">
             {entry.items.map((item) => (
-              <ItemRow key={item.id} item={item} />
+              <ItemRow key={item.id} item={item} onDecided={onDecided} onUndo={onUndo} />
             ))}
           </ul>
         </section>

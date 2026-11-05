@@ -1,11 +1,13 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { Module, MoodleCourse, MoodleCourseLink, MoodleSyncStatus } from '@sg/shared';
 import { useVisibleModules } from '../../lib/modules.ts';
 import {
   formatSyncedAt,
+  formatValidUntil,
   isMoodleNotConfigured,
+  isMoodleTokenInvalid,
   moodleErrorMessage,
   useLinkCourse,
   useMoodleCourses,
@@ -13,19 +15,19 @@ import {
   useMoodleStatus,
   useMoodleSync,
   useMoodleSyncWithRefresh,
+  useSingleFlight,
   useStartSync,
   useUnlinkCourse,
 } from '../../lib/moodle.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { CoreHint } from '../CoreHint.tsx';
+import { MoodleAccessHint } from '../MoodleAccessHint.tsx';
 
 const smallButton =
   'min-h-9 rounded-md border border-border px-3 py-1 text-sm hover:bg-surface disabled:opacity-50 sg-transition';
 const primaryButton =
   'min-h-9 rounded-md bg-accent px-3 py-1 text-sm font-medium text-accent-contrast disabled:opacity-50 sg-transition';
 const selectClass = 'min-h-9 max-w-full rounded-md border border-border-strong bg-bg px-2 py-1 text-sm';
-
-const dateFormat = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'numeric', year: 'numeric' });
 
 /** Ruhiger Satz zum letzten Abgleich (R13: sachlich, ohne Alarm) */
 function lastRunText(status: MoodleSyncStatus): string {
@@ -46,6 +48,7 @@ function lastRunText(status: MoodleSyncStatus): string {
 function SyncPanel() {
   const sync = useMoodleSyncWithRefresh();
   const start = useStartSync();
+  const once = useSingleFlight();
   const toast = useToast();
   const status = sync.data;
   if (!status) return null;
@@ -58,11 +61,8 @@ function SyncPanel() {
           <p role="status" className="mt-1 text-sm text-text-muted">
             {lastRunText(status)}
           </p>
-          {paused ? (
-            <p className="mt-1 text-sm">
-              Pausiert, bis der Zugang erneuert ist: <code className="font-mono">pnpm sg moodle login</code>
-            </p>
-          ) : (
+          {/* Pausiert: der Hinweis zum Zugang steht schon oben, hier kein zweiter (Review #134, M1) */}
+          {paused ? null : (
             <p className="mt-1 text-sm text-text-muted">
               Läuft beim Start und alle 2 Stunden. Neue Folien und Übungsblätter landen im zugeordneten Modul.
             </p>
@@ -73,9 +73,12 @@ function SyncPanel() {
           className={primaryButton}
           disabled={status.state !== 'bereit' || start.isPending}
           onClick={() =>
-            start.mutate(undefined, {
-              onError: (error) => toast.show({ message: moodleErrorMessage(error) }),
-            })
+            once((done) =>
+              start.mutate(undefined, {
+                onSettled: done,
+                onError: (error) => toast.show({ message: moodleErrorMessage(error) }),
+              }),
+            )
           }
         >
           {status.state === 'laeuft' ? 'Gleicht ab …' : 'Jetzt abgleichen'}
@@ -100,6 +103,9 @@ function CourseRow({
   const unlink = useUnlinkCourse();
   const toast = useToast();
   const selectId = useId();
+  const selectRef = useRef<HTMLSelectElement>(null);
+  // Eine Sperre für alle Aktionen der Zeile: Zuordnen, Schalter, Lösen (Review #134, N1)
+  const once = useSingleFlight();
   const busy = linkMutation.isPending || unlink.isPending;
   const onError = (error: unknown) => toast.show({ message: moodleErrorMessage(error) });
   const suggested = !linked && course.suggested_module_id && choice === course.suggested_module_id;
@@ -107,9 +113,19 @@ function CourseRow({
   function assign() {
     if (!choice) return;
     const name = modules.find((m) => m.id === choice)?.name ?? 'Modul';
-    linkMutation.mutate(
-      { courseId: course.moodle_id, moduleId: choice },
-      { onError, onSuccess: () => toast.show({ message: `Zugeordnet zu ${name}. Der Abgleich startet.` }) },
+    once((done) =>
+      linkMutation.mutate(
+        { courseId: course.moodle_id, moduleId: choice },
+        {
+          onSettled: done,
+          onError,
+          onSuccess: () => {
+            toast.show({ message: `Zugeordnet zu ${name}. Der Abgleich startet.` });
+            // Der Knopf verschwindet: Fokus auf die Auswahl der Zeile (Review #134, N3)
+            requestAnimationFrame(() => selectRef.current?.focus());
+          },
+        },
+      ),
     );
   }
 
@@ -133,6 +149,7 @@ function CourseRow({
             Modul für {course.full_name || course.short_name}
           </label>
           <select
+            ref={selectRef}
             id={selectId}
             className={selectClass}
             value={choice}
@@ -163,12 +180,15 @@ function CourseRow({
                   type="checkbox"
                   checked={link?.sync_enabled ?? true}
                   disabled={busy}
-                  onChange={(e) =>
-                    linkMutation.mutate(
-                      { courseId: course.moodle_id, moduleId: linked, syncEnabled: e.target.checked },
-                      { onError },
-                    )
-                  }
+                  onChange={(e) => {
+                    const syncEnabled = e.target.checked;
+                    once((done) =>
+                      linkMutation.mutate(
+                        { courseId: course.moodle_id, moduleId: linked, syncEnabled },
+                        { onSettled: done, onError },
+                      ),
+                    );
+                  }}
                 />
                 Abgleichen
               </label>
@@ -177,13 +197,17 @@ function CourseRow({
                 className={smallButton}
                 disabled={busy}
                 onClick={() =>
-                  unlink.mutate(course.moodle_id, {
-                    onError,
-                    onSuccess: () => {
-                      setChoice('');
-                      toast.show({ message: 'Zuordnung gelöst. Übernommenes Material bleibt im Modul.' });
-                    },
-                  })
+                  once((done) =>
+                    unlink.mutate(course.moodle_id, {
+                      onSettled: done,
+                      onError,
+                      onSuccess: () => {
+                        setChoice('');
+                        toast.show({ message: 'Zuordnung gelöst. Übernommenes Material bleibt im Modul.' });
+                        requestAnimationFrame(() => selectRef.current?.focus());
+                      },
+                    }),
+                  )
                 }
               >
                 Lösen
@@ -209,7 +233,7 @@ function CourseList({
     <ul className="divide-y divide-border">
       {courses.map((course) => (
         <CourseRow
-          key={`${course.moodle_id}:${course.module_id ?? ''}`}
+          key={course.moodle_id}
           course={course}
           link={links.get(course.moodle_id)}
           modules={modules}
@@ -240,6 +264,11 @@ export function MoodleSettings() {
   const state = status.data;
   const current = (courses.data ?? []).filter((c) => c.category === 'aktuell' || c.module_id !== null);
   const other = (courses.data ?? []).filter((c) => c.category !== 'aktuell' && c.module_id === null);
+  // Ohne Kursliste (Moodle lehnt ab oder antwortet nicht): die bestehenden Zuordnungen aus /moodle/links,
+  // damit Schalter und „Lösen“ erreichbar bleiben (Review #134, M1)
+  const linkedOnly: MoodleCourse[] = courses.data ? [] : (linkList.data ?? []).map(courseFromLink);
+  const showValidUntil =
+    (state.state === 'ok' || state.state === 'laeuft_bald_ab') && state.token_valid_until;
 
   return (
     <div>
@@ -258,13 +287,14 @@ export function MoodleSettings() {
             {[
               state.site_name,
               state.user_fullname,
-              state.token_valid_until
-                ? `Zugang gültig bis ${dateFormat.format(new Date(`${state.token_valid_until}T12:00:00`))}`
-                : null,
+              showValidUntil ? `Zugang gültig bis ${formatValidUntil(showValidUntil)}` : null,
             ]
               .filter(Boolean)
               .join(' · ')}
           </p>
+          <div className="mt-3 empty:hidden">
+            <MoodleAccessHint />
+          </div>
           {sync.data ? <SyncPanel /> : null}
 
           <div className="mt-6">
@@ -272,12 +302,15 @@ export function MoodleSettings() {
             <p className="mt-1 text-sm text-text-muted">
               Jeder Kurs gehört zu höchstens einem Modul. Abgeglichen werden nur zugeordnete Kurse.
             </p>
-            {courses.isError && !isMoodleNotConfigured(courses.error) ? (
+            {/* Bei abgelehntem Zugang steht der Grund schon im Hinweis oben */}
+            {courses.isError &&
+            !isMoodleNotConfigured(courses.error) &&
+            !isMoodleTokenInvalid(courses.error) ? (
               <p role="status" className="mt-3 text-sm text-text-muted">
                 {moodleErrorMessage(courses.error)} Die Kursliste kommt, sobald Moodle antwortet.
               </p>
             ) : null}
-            {courses.isPending ? (
+            {courses.isPending && courses.fetchStatus !== 'idle' ? (
               <p role="status" aria-busy="true" className="mt-3 text-sm text-text-muted">
                 Lädt die Kurse aus Moodle …
               </p>
@@ -288,6 +321,12 @@ export function MoodleSettings() {
             {current.length > 0 ? (
               <div className="mt-2">
                 <CourseList courses={current} links={links} modules={modules ?? []} />
+              </div>
+            ) : null}
+            {linkedOnly.length > 0 ? (
+              <div className="mt-2">
+                <p className="text-sm text-text-muted">Zugeordnete Kurse:</p>
+                <CourseList courses={linkedOnly} links={links} modules={modules ?? []} />
               </div>
             ) : null}
             {other.length > 0 ? (
@@ -303,4 +342,20 @@ export function MoodleSettings() {
       )}
     </div>
   );
+}
+
+/** Platzhalter-Kurs aus einer Zuordnung, wenn Moodle die Kursliste gerade nicht liefert */
+function courseFromLink(link: MoodleCourseLink): MoodleCourse {
+  return {
+    moodle_id: link.moodle_course_id,
+    short_name: '',
+    full_name: `Moodle-Kurs ${link.moodle_course_id}`,
+    start_date: null,
+    end_date: null,
+    url: '',
+    last_access_at: null,
+    module_id: link.module_id,
+    suggested_module_id: null,
+    category: 'aktuell',
+  };
 }

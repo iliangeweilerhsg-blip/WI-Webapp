@@ -1,7 +1,7 @@
 'use client';
 
 // Moodle in der Web-App (T1-23, F-MDL-03/-04, VERTRAEGE §17): Kurszuordnung, Abgleich, Inbox, Fristen.
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef } from 'react';
 import {
   MoodleCourseLinkListSchema,
@@ -31,6 +31,7 @@ const MESSAGES: Record<string, string> = {
   moodle_token_invalid: 'Moodle lehnt den Zugang ab. Erneuere ihn mit pnpm sg moodle login.',
   moodle_unreachable: 'Moodle ist gerade nicht erreichbar.',
   moodle_item_not_found: 'Diese Datei gibt es nicht mehr.',
+  moodle_link_not_found: 'Dieser Kurs ist keinem Modul mehr zugeordnet.',
   module_not_found: 'Dieses Modul gibt es nicht mehr.',
 };
 
@@ -38,6 +39,49 @@ export function moodleErrorMessage(error: unknown): string {
   if (error instanceof ApiRequestError && error.code && MESSAGES[error.code])
     return MESSAGES[error.code] ?? '';
   return friendlyMessage(error);
+}
+
+export function isMoodleTokenInvalid(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.code === 'moodle_token_invalid';
+}
+
+/**
+ * Sperre gegen Doppelklicks (Review #134, N1): `run` startet nur, wenn kein Aufruf derselben Stelle läuft. Die
+ * Sperre gilt sofort (Ref), nicht erst nach dem nächsten Rendern wie `isPending`.
+ */
+export function useSingleFlight() {
+  const busy = useRef(false);
+  return useCallback((start: (done: () => void) => void) => {
+    if (busy.current) return;
+    busy.current = true;
+    start(() => {
+      busy.current = false;
+    });
+  }, []);
+}
+
+/** Zustände, in denen der Zugang erneuert werden muss bzw. bald sollte (F-MDL-01) */
+export type AccessHintState = 'laeuft_bald_ab' | 'abgelaufen' | 'ungueltig';
+
+export function needsRenewal(state: string | undefined): state is AccessHintState {
+  return state === 'laeuft_bald_ab' || state === 'abgelaufen' || state === 'ungueltig';
+}
+
+const dueDateFormat = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'numeric', year: 'numeric' });
+
+/** „31.1.2027“ aus `YYYY-MM-DD` (Mittag, damit keine Zeitzone den Tag verschiebt) */
+export function formatValidUntil(date: string): string {
+  return dueDateFormat.format(new Date(`${date}T12:00:00`));
+}
+
+/** Ein ruhiger Satz zum Zugang, ohne den Befehl (der steht daneben) */
+export function accessHintText(state: AccessHintState, validUntil: string | null): string {
+  if (state === 'laeuft_bald_ab') {
+    return validUntil
+      ? `Der Moodle-Zugang läuft am ${formatValidUntil(validUntil)} ab. Erneuere ihn vorher mit`
+      : 'Der Moodle-Zugang läuft bald ab. Erneuere ihn vorher mit';
+  }
+  return 'Moodle nimmt den Zugang nicht mehr an, der Abgleich pausiert. Erneuere ihn mit';
 }
 
 export function isMoodleNotConfigured(error: unknown): boolean {
@@ -59,7 +103,8 @@ export function useMoodleCourses(enabled = true) {
     queryFn: async ({ signal }) =>
       (await apiGet('/moodle/courses', MoodleCourseListSchema, { signal })).items,
     enabled,
-    retry: (count, error) => !isMoodleNotConfigured(error) && count < 2,
+    // Ohne Einrichtung oder bei abgelehntem Zugang hilft ein erneuter Versuch nicht
+    retry: (count, error) => !isMoodleNotConfigured(error) && !isMoodleTokenInvalid(error) && count < 2,
   });
 }
 
@@ -163,7 +208,7 @@ export function useMoodleItems(filter: { kind?: MoodleItem['kind']; moduleId?: s
 export function useDecideItem() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (input: { id: string; kind: 'folien' | 'uebung' | 'ignoriert' }) =>
+    mutationFn: (input: { id: string; kind: 'folien' | 'uebung' | 'ignoriert' | 'offen' }) =>
       apiSend('PATCH', `/moodle/items/${encodeURIComponent(input.id)}`, MoodleItemSchema, {
         body: { kind: input.kind },
       }),
@@ -191,7 +236,14 @@ export function useSyncedDeadlines(filter: { moduleId?: string; days?: number; l
       ).items;
     },
     staleTime: 60_000,
+    // „Alle anzeigen“: die bisherigen Fristen bleiben stehen, bis die längere Liste da ist (kein Flackern)
+    placeholderData: keepPreviousData,
   });
+}
+
+/** Nur http(s)-Adressen werden als Link gezeigt */
+export function isWebUrl(url: string | null): url is string {
+  return url !== null && /^https?:\/\//i.test(url);
 }
 
 const dayFormat = new Intl.DateTimeFormat('de-DE', { weekday: 'short', day: 'numeric', month: 'numeric' });

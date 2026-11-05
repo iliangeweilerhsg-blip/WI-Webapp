@@ -1,8 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import { formatSyncedAt, useMoodleItems, useMoodleLinks } from '../lib/moodle.ts';
 import { MoodleDeadlines } from './MoodleDeadlines.tsx';
+
+/** So viele Fristen zeigt die Modulseite zunächst */
+const MODULE_DEADLINES = 5;
 
 /**
  * Moodle auf der Modulseite (07 §3.2, T1-23): eine ruhige Zeile zum Abgleich, offene Dateien als Hinweis auf die
@@ -10,6 +14,8 @@ import { MoodleDeadlines } from './MoodleDeadlines.tsx';
  */
 export function ModuleMoodle({ moduleId }: { moduleId: string }) {
   const links = useMoodleLinks();
+  // Höchstens 5 Fristen, „Alle anzeigen“ lädt bis zu 200 (Review #134, N4)
+  const [all, setAll] = useState(false);
   const open = useMoodleItems({ kind: 'offen', moduleId });
   const mine = (links.data ?? []).filter((link) => link.module_id === moduleId);
   if (mine.length === 0) return null;
@@ -39,7 +45,12 @@ export function ModuleMoodle({ moduleId }: { moduleId: string }) {
           Zuordnung
         </Link>
       </p>
-      <MoodleDeadlines moduleId={moduleId} headingId={`fristen-${moduleId}`} />
+      <MoodleDeadlines
+        moduleId={moduleId}
+        headingId={`fristen-${moduleId}`}
+        limit={all ? 200 : MODULE_DEADLINES + 1}
+        {...(all ? {} : { visible: MODULE_DEADLINES, onShowAll: () => setAll(true) })}
+      />
     </div>
   );
 }

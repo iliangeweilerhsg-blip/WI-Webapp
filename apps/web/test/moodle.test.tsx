@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.TZ = 'Europe/Zurich';
 });
 
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import type {
@@ -24,6 +24,7 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+import { HeuteView } from '../src/components/HeuteView.tsx';
 import { MoodleDeadlines } from '../src/components/MoodleDeadlines.tsx';
 import { MoodleInbox } from '../src/components/MoodleInbox.tsx';
 import { ModulView } from '../src/components/ModulView.tsx';
@@ -91,6 +92,8 @@ interface MoodleFake {
   links: MoodleCourseLink[];
   items: MoodleItem[];
   deadlines: MoodleSyncedDeadline[];
+  /** Verzögert schreibende Anfragen (Doppelklick-Tests) */
+  delayMs: number;
 }
 
 /** Moodle-Endpunkte (VERTRAEGE §17) über dem Fake-Core */
@@ -109,6 +112,7 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
     links: [],
     items: [],
     deadlines: [],
+    delayMs: 0,
     ...initial,
   };
   const inner = globalThis.fetch;
@@ -129,9 +133,16 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
         fake.sync = { ...fake.sync, state: 'laeuft' };
         return json(fake.sync, 202);
       }
+      if (fake.delayMs > 0 && method !== 'GET') await new Promise((r) => setTimeout(r, fake.delayMs));
       if (path === '/moodle/courses') {
         if (fake.status.state === 'nicht_eingerichtet') {
           return json({ error: { code: 'moodle_not_configured', message: 'x' } }, 503);
+        }
+        if (fake.status.state === 'ungueltig' || fake.status.state === 'abgelaufen') {
+          return json({ error: { code: 'moodle_token_invalid', message: 'x' } }, 409);
+        }
+        if (fake.status.state === 'nicht_erreichbar') {
+          return json({ error: { code: 'moodle_unreachable', message: 'x' } }, 502);
         }
         return json({ items: fake.courses });
       }
@@ -172,12 +183,15 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
       if (itemMatch && method === 'PATCH') {
         const target = fake.items.find((i) => i.id === itemMatch[1]);
         if (!target) return json({ error: { code: 'moodle_item_not_found', message: 'x' } }, 404);
-        Object.assign(target, { kind: body?.kind, kind_source: 'manuell' });
+        Object.assign(target, { kind: body?.kind, kind_source: body?.kind === 'offen' ? 'auto' : 'manuell' });
         return json(target);
       }
       if (path === '/moodle/synced-deadlines') {
         const moduleId = url.searchParams.get('module_id');
-        return json({ items: fake.deadlines.filter((d) => !moduleId || d.module_id === moduleId) });
+        const limit = Number(url.searchParams.get('limit') ?? 50);
+        return json({
+          items: fake.deadlines.filter((d) => !moduleId || d.module_id === moduleId).slice(0, limit),
+        });
       }
       return json({ error: { code: 'not_found', message: 'x' } }, 404);
     }),
@@ -213,6 +227,12 @@ function deadline(overrides: Partial<MoodleSyncedDeadline>): MoodleSyncedDeadlin
     removed_in_moodle_at: null,
     ...overrides,
   };
+}
+
+/** Zwei Klicks ohne Rendern dazwischen (Doppelklick-Sperre per Ref, Review #134 N1) */
+function twice(element: HTMLElement) {
+  fireEvent.click(element);
+  fireEvent.click(element);
 }
 
 let core: FakeCore;
@@ -321,21 +341,109 @@ describe('Einstellungen › Moodle (F-MDL-03)', () => {
     expect(fake.sync.state).toBe('laeuft');
   });
 
-  it('pausiert: Hinweis zum Erneuern statt Fehlermeldung', async () => {
+  const LINK: MoodleCourseLink = {
+    moodle_course_id: 901,
+    module_id: DBS.id,
+    sync_enabled: true,
+    last_synced_at: '2026-11-05T11:00:00Z',
+    created_at: NOW,
+    updated_at: NOW,
+  };
+  const status = (state: MoodleStatus['state']): MoodleStatus => ({
+    state,
+    site_url: 'https://moodle.example.org',
+    site_name: 'Beispiel-Moodle',
+    user_fullname: 'Erika Beispiel',
+    token_valid_until: '2026-11-10',
+    checked_at: NOW,
+  });
+  const loginHints = () =>
+    screen.queryAllByText((_, el) => el?.tagName === 'CODE' && el.textContent === 'pnpm sg moodle login');
+
+  it('Zugang ok: „gültig bis“, kein Hinweis zum Erneuern', async () => {
+    installMoodle(core, { status: status('ok'), courses: [course({ module_id: DBS.id })], links: [LINK] });
+    await openMoodleTab();
+    expect(await screen.findByText(/Zugang gültig bis 10\.11\.2026/)).toBeInTheDocument();
+    expect(loginHints()).toHaveLength(0);
+  });
+
+  it('läuft bald ab: „gültig bis“ und genau ein ruhiger Hinweis', async () => {
     installMoodle(core, {
-      status: {
-        state: 'ungueltig',
-        site_url: 'https://moodle.example.org',
-        site_name: 'Beispiel-Moodle',
-        user_fullname: null,
-        token_valid_until: '2027-01-31',
-        checked_at: NOW,
-      },
-      sync: { state: 'pausiert', connection: 'ungueltig', last_run: null, next_run_at: null },
+      status: status('laeuft_bald_ab'),
+      courses: [course({ module_id: DBS.id })],
+      links: [LINK],
     });
     await openMoodleTab();
-    expect(await screen.findByText(/Pausiert, bis der Zugang erneuert ist/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Jetzt abgleichen' })).toBeDisabled();
+    expect(await screen.findByText(/Zugang gültig bis 10\.11\.2026/)).toBeInTheDocument();
+    expect(await screen.findByText(/läuft am 10\.11\.2026 ab/)).toBeInTheDocument();
+    expect(loginHints()).toHaveLength(1);
+  });
+
+  it.each(['abgelaufen', 'ungueltig'] as const)(
+    '%s: ein Hinweis, kein „gültig bis“, Zuordnungen aus /moodle/links bleiben bedienbar',
+    async (state) => {
+      const fake = installMoodle(core, {
+        status: status(state),
+        sync: { state: 'pausiert', connection: state, last_run: null, next_run_at: null },
+        links: [LINK],
+      });
+      await openMoodleTab();
+      expect(await screen.findByText(/nimmt den Zugang nicht mehr an/)).toBeInTheDocument();
+      // Die Kursliste ist beantwortet (abgelehnt), erst dann zählt das Fehlen des Satzes
+      await waitFor(() => expect(core.requests.some((r) => r.path === '/moodle/courses')).toBe(true));
+      await new Promise((r) => setTimeout(r, 50));
+      expect(loginHints()).toHaveLength(1);
+      expect(screen.queryByText(/gültig bis/)).toBeNull();
+      expect(screen.queryByText(/sobald Moodle antwortet/)).toBeNull();
+      expect(screen.getByRole('button', { name: 'Jetzt abgleichen' })).toBeDisabled();
+      // Ohne Kursliste: die Zuordnung mit Modul, Schalter und „Lösen“
+      const row = (await screen.findByText('Moodle-Kurs 901')).closest('li') as HTMLElement;
+      expect(within(row).getByRole('combobox')).toHaveValue(DBS.id);
+      expect(within(row).getByRole('checkbox', { name: 'Abgleichen' })).toBeChecked();
+      await userEvent.setup().click(within(row).getByRole('button', { name: 'Lösen' }));
+      await waitFor(() => expect(fake.links).toHaveLength(0));
+    },
+  );
+
+  it('nicht erreichbar: kein Hinweis zum Erneuern, Kursliste kommt später', async () => {
+    installMoodle(core, { status: status('nicht_erreichbar'), links: [LINK] });
+    await openMoodleTab();
+    expect(await screen.findByText(/sobald Moodle antwortet/)).toBeInTheDocument();
+    expect(loginHints()).toHaveLength(0);
+    expect(screen.queryByText(/gültig bis/)).toBeNull();
+    expect(await screen.findByText('Moodle-Kurs 901')).toBeInTheDocument();
+  });
+
+  it('Doppelklick auf Zuordnen, Schalter und Lösen ergibt je eine Anfrage (Review N1); Fokus danach auf der Auswahl (N3)', async () => {
+    const fake = installMoodle(core, { courses: [course({ suggested_module_id: DBS.id })], delayMs: 50 });
+    await openMoodleTab();
+    const row = () => screen.getByText('Datenbanksysteme (Beispielkurs)').closest('li') as HTMLElement;
+    await screen.findByText('Datenbanksysteme (Beispielkurs)');
+    const assign = within(row()).getByRole('button', { name: 'Zuordnen' });
+    // Zwei Klicks im selben Takt, bevor React neu rendert (isPending bzw. disabled greifen dann noch nicht)
+    twice(assign);
+    await waitFor(() => expect(fake.links).toHaveLength(1));
+    expect(core.requests.filter((r) => r.method === 'PUT')).toHaveLength(1);
+    await waitFor(() => expect(within(row()).getByRole('combobox')).toHaveFocus());
+
+    const toggle = await within(row()).findByRole('checkbox', { name: 'Abgleichen' });
+    twice(toggle);
+    await waitFor(() => expect(core.requests.filter((r) => r.method === 'PUT')).toHaveLength(2));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(core.requests.filter((r) => r.method === 'PUT')).toHaveLength(2);
+
+    twice(within(row()).getByRole('button', { name: 'Lösen' }));
+    await waitFor(() => expect(fake.links).toHaveLength(0));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(core.requests.filter((r) => r.method === 'DELETE')).toHaveLength(1);
+  });
+
+  it('„Jetzt abgleichen“: Doppelklick startet einen Abgleich (Review N1)', async () => {
+    installMoodle(core, { delayMs: 50 });
+    await openMoodleTab();
+    twice(await screen.findByRole('button', { name: 'Jetzt abgleichen' }));
+    await new Promise((r) => setTimeout(r, 120));
+    expect(core.requests.filter((r) => r.method === 'POST' && r.path === '/moodle/sync')).toHaveLength(1);
   });
 
   it('nicht eingerichtet: ein Satz, wie es geht', async () => {
@@ -356,6 +464,60 @@ describe('Einstellungen › Moodle (F-MDL-03)', () => {
 });
 
 describe('Inbox (F-MDL-04)', () => {
+  function inboxPage() {
+    return wrap(
+      <section>
+        <h1 id="screen-title" tabIndex={-1}>
+          Inbox
+        </h1>
+        <MoodleInbox />
+      </section>,
+    );
+  }
+
+  it('„Ignorieren“ hat „Rückgängig“: zurück auf offen (Review M2)', async () => {
+    const fake = installMoodle(core, { items: [item({})] });
+    inboxPage();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Ignorieren' }));
+    expect(await screen.findByText(/Nichts zu entscheiden/)).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Rückgängig' }));
+    await waitFor(() =>
+      expect(core.requests.filter((r) => r.method === 'PATCH').map((r) => r.body)).toEqual([
+        { kind: 'ignoriert' },
+        { kind: 'offen' },
+      ]),
+    );
+    expect(fake.items[0]?.kind).toBe('offen');
+    expect(await screen.findByText('Skript.pdf')).toBeInTheDocument();
+    expect(screen.queryByText(/ab Phase 2/)).toBeNull();
+  });
+
+  it('Doppelklick ergibt eine Entscheidung (N1); Fokus auf die nächste Datei, dann auf die Überschrift (N3)', async () => {
+    installMoodle(core, {
+      items: [
+        item({}),
+        item({
+          id: '0190f6a2-0000-7000-8000-000000000302',
+          filename: 'Anhang.pdf',
+          file_ref: '/5003/x/Anhang.pdf',
+        }),
+      ],
+      delayMs: 50,
+    });
+    inboxPage();
+    const user = userEvent.setup();
+    const first = (await screen.findByText('Skript.pdf')).closest('li') as HTMLElement;
+    twice(within(first).getByRole('button', { name: 'Als Folien' }));
+    await waitFor(() => expect(screen.queryByText('Skript.pdf')).toBeNull());
+    expect(core.requests.filter((r) => r.method === 'PATCH')).toHaveLength(1);
+    const second = screen.getByText('Anhang.pdf').closest('li') as HTMLElement;
+    await waitFor(() => expect(within(second).getByRole('button', { name: 'Als Folien' })).toHaveFocus());
+
+    await user.click(within(second).getByRole('button', { name: 'Als Übung' }));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Inbox' })).toHaveFocus());
+  });
+
   it('zeigt offene Dateien nach Modul und schickt die Entscheidung', async () => {
     const fake = installMoodle(core, { items: [item({})] });
     wrap(<MoodleInbox />);
@@ -406,6 +568,43 @@ describe('Fristen', () => {
     expect(core.requests.find((r) => r.path.startsWith('/moodle/synced-deadlines'))?.path).toContain('to=');
   });
 
+  it('Heute fragt höchstens 5 Fristen der nächsten 14 Tage an (Review N2) und zeigt den Zugangshinweis', async () => {
+    installMoodle(core, {
+      status: {
+        state: 'laeuft_bald_ab',
+        site_url: 'https://moodle.example.org',
+        site_name: 'Beispiel-Moodle',
+        user_fullname: null,
+        token_valid_until: '2026-11-10',
+        checked_at: NOW,
+      },
+      deadlines: [deadline({})],
+    });
+    const before = Date.now();
+    wrap(<HeuteView />);
+    await screen.findByRole('region', { name: 'Fristen' });
+    const request = core.requests.find((r) => r.path.startsWith('/moodle/synced-deadlines'));
+    const params = new URL(`http://x${request?.path ?? ''}`).searchParams;
+    expect(params.get('limit')).toBe('5');
+    const to = Date.parse(params.get('to') ?? '');
+    const days14 = 14 * 86_400_000;
+    expect(Math.abs(to - (before + days14))).toBeLessThan(60_000);
+    expect(await screen.findByText(/läuft am 10\.11\.2026 ab/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Moodle-Einstellungen' })).toHaveAttribute(
+      'href',
+      '/einstellungen?bereich=moodle',
+    );
+  });
+
+  it('Links nach Moodle nur für http(s)', async () => {
+    installMoodle(core, {
+      deadlines: [deadline({ url: 'javascript:alert(1)' })],
+    });
+    wrap(<MoodleDeadlines headingId="f" />);
+    const list = await screen.findByRole('region', { name: 'Fristen' });
+    expect(within(list).queryByRole('link', { name: 'In Moodle' })).toBeNull();
+  });
+
   it('ohne Fristen zeigt die Liste nichts', async () => {
     installMoodle(core);
     wrap(<MoodleDeadlines headingId="f" />);
@@ -442,6 +641,35 @@ describe('Fristen', () => {
     expect(list).toHaveTextContent('Abgabe Übungsblatt 1');
     // Auf der Modulseite ohne Modulname
     expect(list).not.toHaveTextContent('Datenbanksysteme');
+  });
+
+  it('Modulseite: höchstens 5 Fristen, „Alle anzeigen“ lädt den Rest (Review N4)', async () => {
+    search.value = `id=${DBS.id}`;
+    installMoodle(core, {
+      links: [
+        {
+          moodle_course_id: 901,
+          module_id: DBS.id,
+          sync_enabled: true,
+          last_synced_at: null,
+          created_at: NOW,
+          updated_at: NOW,
+        },
+      ],
+      deadlines: Array.from({ length: 7 }, (_, i) =>
+        deadline({
+          id: `0190f6a2-0000-7000-8000-00000000041${i}`,
+          name: `Abgabe Übungsblatt ${i + 1}`,
+          due_at: `2026-11-${String(10 + i).padStart(2, '0')}T22:59:00Z`,
+        }),
+      ),
+    });
+    wrap(<ModulView />);
+    const list = await screen.findByRole('region', { name: 'Fristen' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(5);
+    await userEvent.setup().click(within(list).getByRole('button', { name: 'Alle anzeigen' }));
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(7));
+    expect(within(list).queryByRole('button', { name: 'Alle anzeigen' })).toBeNull();
   });
 
   it('formatDue: heute, morgen, sonst Wochentag und Datum', () => {
