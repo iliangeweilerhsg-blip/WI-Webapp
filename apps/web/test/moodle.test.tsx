@@ -119,6 +119,8 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
     delayMs: 0,
     ...initial,
   };
+  const decidedAt = new Map<string, number>();
+  let decisionClock = 0;
   const inner = globalThis.fetch;
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -218,15 +220,24 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
       if (itemMatch && method === 'PATCH') {
         const target = fake.items.find((i) => i.id === itemMatch[1]);
         if (!target) return json({ error: { code: 'moodle_item_not_found', message: 'x' } }, 404);
-        // Wie im Core: eine Entscheidung gilt für die ganze Aktivität (gleiche cmid), das Zurücknehmen nur für die Datei
-        const affected =
-          body?.kind === 'offen'
-            ? [target]
-            : fake.items.filter(
-                (i) => i.cmid === target.cmid && i.moodle_course_id === target.moodle_course_id,
-              );
+        // Wie im Core (decideItem): eine Entscheidung erfasst die Datei und die noch OFFENEN Dateien derselben
+        // Aktivität; „offen“ nimmt die Datei und alle mit derselben Entscheidung (gleicher Zeitstempel) zurück
+        const sameActivity = (i: MoodleItem) =>
+          i.cmid === target.cmid && i.moodle_course_id === target.moodle_course_id;
+        const stamp = decidedAt.get(target.id);
+        const revert = body?.kind === 'offen';
+        const affected = revert
+          ? fake.items.filter(
+              (i) =>
+                i.id === target.id ||
+                (stamp !== undefined && sameActivity(i) && decidedAt.get(i.id) === stamp),
+            )
+          : fake.items.filter((i) => i.id === target.id || (sameActivity(i) && i.kind === 'offen'));
+        decisionClock += 1;
         for (const i of affected) {
-          Object.assign(i, { kind: body?.kind, kind_source: body?.kind === 'offen' ? 'auto' : 'manuell' });
+          Object.assign(i, { kind: body?.kind, kind_source: revert ? 'auto' : 'manuell' });
+          if (revert) decidedAt.delete(i.id);
+          else decidedAt.set(i.id, decisionClock);
         }
         return json(target);
       }
@@ -476,6 +487,23 @@ describe('Einstellungen › Moodle (F-MDL-03)', () => {
     expect(screen.queryByText('Moodle-Kurs 901')).toBeNull();
     expect(await screen.findByText('Datenbanksysteme (Beispielkurs)')).toBeInTheDocument();
     expect(screen.queryByText('Zugeordnete Kurse:')).toBeNull();
+  });
+
+  it('Neuladen der Kurse schlägt fehl: keine doppelte Ersatzliste, die alten Kurse bleiben (#135)', async () => {
+    const fake = installMoodle(core, {
+      courses: [course({ module_id: DBS.id })],
+      links: [LINK],
+    });
+    await openMoodleTab();
+    const row = () => screen.getByText('Datenbanksysteme (Beispielkurs)').closest('li') as HTMLElement;
+    await screen.findByText('Datenbanksysteme (Beispielkurs)');
+    // Moodle fällt aus; das Umschalten löst ein Neuladen der Kursliste aus
+    fake.status = { ...fake.status, state: 'nicht_erreichbar' };
+    await userEvent.setup().click(within(row()).getByRole('checkbox', { name: 'Abgleichen' }));
+    await screen.findByText(/sobald Moodle antwortet/);
+    expect(screen.queryByText('Zugeordnete Kurse:')).toBeNull();
+    expect(screen.getAllByText('Datenbanksysteme (Beispielkurs)')).toHaveLength(1);
+    expect(screen.queryByText('Moodle-Kurs 901')).toBeNull();
   });
 
   it('Fokus auf die Auswahl erst, wenn sie nicht mehr gesperrt ist (#135)', async () => {

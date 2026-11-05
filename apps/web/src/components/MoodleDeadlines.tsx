@@ -43,10 +43,15 @@ export function MoodleDeadlines({
   const more = data !== undefined && visible !== undefined && data.length > visible;
   const shownCount = data ? (more ? (visible ?? 0) : data.length) : 0;
   useEffect(() => {
-    if (focusIndex === null || shownCount <= focusIndex) return;
-    sectionRef.current?.querySelectorAll<HTMLElement>('ul > li')[focusIndex]?.focus();
-    setFocusIndex(null);
-  }, [focusIndex, shownCount]);
+    if (focusIndex === null) return;
+    if (shownCount > focusIndex) {
+      sectionRef.current?.querySelectorAll<HTMLElement>('ul > li')[focusIndex]?.focus();
+      setFocusIndex(null);
+    } else if (data !== undefined && !more) {
+      // Alles geladen, aber nichts Neues: den Wunsch verwerfen, sonst stiehlt ein späteres Update den Fokus
+      setFocusIndex(null);
+    }
+  }, [focusIndex, shownCount, data, more]);
   if (!data || data.length === 0) return null;
   const shown = more ? data.slice(0, visible) : data;
   const moduleOf = new Map((modules ?? []).map((m) => [m.id, m]));

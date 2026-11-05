@@ -354,8 +354,10 @@ export function MoodleSettings() {
   const other = (courses.data ?? []).filter((c) => c.category !== 'aktuell' && c.module_id === null);
   // Ohne Kursliste (Moodle lehnt ab oder antwortet nicht): die bestehenden Zuordnungen aus /moodle/links,
   // damit Schalter und „Lösen“ erreichbar bleiben (Review #134, M1)
-  // Nur bei Fehler: solange die Liste lädt, kein Zwischenstand „Zugeordnete Kurse“ (#135)
-  const linkedOnly: MoodleCourse[] = courses.isError ? (linkList.data ?? []).map(courseFromLink) : [];
+  // Nur bei Fehler ohne Kursliste: solange sie lädt, kein Zwischenstand „Zugeordnete Kurse“; schlägt ein Neuladen
+  // fehl, bleiben die alten Daten stehen (TanStack behält `data`) und die Kurse erscheinen nicht doppelt (#135)
+  const linkedOnly: MoodleCourse[] =
+    courses.isError && !courses.data ? (linkList.data ?? []).map(courseFromLink) : [];
   const noCurrentSemester = semesters.data !== undefined && !hasCurrentSemester(semesters.data);
   const showValidUntil =
     (state.state === 'ok' || state.state === 'laeuft_bald_ab') && state.token_valid_until;
