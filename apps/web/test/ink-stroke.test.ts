@@ -1,13 +1,17 @@
 // Strich-Dekodierung gegen die Testdaten (08 §4.2): Punktzahl, Werte, bbox.
 import { describe, expect, it } from 'vitest';
-import { PageStrokesSchema } from '@sg/shared';
+import { PageStrokesSchema, type Stroke } from '@sg/shared';
 import {
+  MAX_POINTS,
+  MAX_STROKE_WIDTH,
   decodePoints,
   decodeStroke,
+  decodeStrokeCached,
   matrixScale,
   parseColor,
   toPoints,
 } from '../src/components/ink/stroke.ts';
+import { LenientPageStrokesSchema } from '../src/lib/ink.ts';
 import { loadFixtures } from './ink-fixtures.ts';
 
 const files = loadFixtures();
@@ -157,5 +161,79 @@ describe('parseColor', () => {
     const hl = parseColor('#FFE06666');
     expect(hl).toMatchObject({ r: 255, g: 224, b: 102 });
     expect(hl.a).toBeCloseTo(0.4, 5);
+  });
+});
+
+describe('robuste Dekodierung (kaputte oder böswillige Daten)', () => {
+  const base = files[0]!.strokes[0]!;
+  const f32 = (vals: number[]) => {
+    const b = Buffer.alloc(vals.length * 4);
+    vals.forEach((v, i) => b.writeFloatLE(v, i * 4));
+    return b.toString('base64');
+  };
+  const good = [1, 1, 0, 0.5, 0, 1, 2, 2, 1, 0.5, 0, 1];
+
+  it('lehnt NaN/Unendlich in Punkten, transform und width ab, ohne zu werfen (Cache liefert null)', () => {
+    const bad: Stroke[] = [
+      { ...base, points: f32([NaN, ...good.slice(1)]) },
+      { ...base, points: f32([...good.slice(0, 6), 2, -Infinity, 1, 0.5, 0, 1]) },
+      { ...base, points: f32([1, 1, 0, NaN, 0, 1, 2, 2, 1, Infinity, 0, 1]) },
+      { ...base, transform: [NaN, 0, 0, 1, 0, 0] },
+      { ...base, transform: [Infinity, 0, 0, 1, 0, 0] },
+      { ...base, width: NaN },
+      { ...base, width: 0 },
+      { ...base, width: -2 },
+      { ...base, points: f32([1e30, 1, 0, 0.5, 0, 1]) },
+      { ...base, points: base.points.slice(0, 31) },
+      { ...base, points: base.points.slice(0, 30) },
+      { ...base, points: '' },
+      { ...base, points: '!!!!' },
+    ] as Stroke[];
+    for (const s of bad) {
+      expect(() => decodeStroke(s)).toThrow();
+      expect(decodeStrokeCached({ ...s })).toBeNull();
+    }
+    expect(decodeStrokeCached({ ...base, points: f32(good) })).not.toBeNull();
+  });
+
+  it('begrenzt absurde Breiten und lehnt zu viele Punkte ab', () => {
+    const wide = decodeStroke({ ...base, points: f32(good), width: 1e30 } as Stroke);
+    expect(wide.width).toBe(MAX_STROKE_WIDTH);
+    const many = f32(Array.from({ length: (MAX_POINTS + 1) * 6 }, () => 1));
+    expect(() => decodeStroke({ ...base, points: many } as Stroke)).toThrow(RangeError);
+  });
+});
+
+describe('PageStrokes nachsichtig lesen', () => {
+  const id = (n: number) => `019a4e14-0000-7000-8000-${String(n).padStart(12, '0')}`;
+  const envelope = { page_id: id(1), stream_seq: 5, stream_op_id: id(2) };
+  const good = files[0]!.strokes;
+
+  it('überspringt Striche mit unbekanntem Enum-Wert oder kaputten Feldern, behält den Rest', () => {
+    const res = LenientPageStrokesSchema.safeParse({
+      ...envelope,
+      strokes: [
+        good[0],
+        { ...good[1], tool: 'brush' },
+        { ...good[2], layer: 'neu' },
+        { ...good[3], points: 'kein base64' },
+        { ...good[4], bbox: [1, 2] },
+        'quatsch',
+        good[5],
+      ],
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.strokes.map((s) => s.client_id)).toEqual([good[0]!.client_id, good[5]!.client_id]);
+      expect(res.data.stream_seq).toBe(5);
+    }
+  });
+
+  it('ein kaputter Umschlag bleibt ein Fehler', () => {
+    expect(LenientPageStrokesSchema.safeParse({ ...envelope, stream_seq: -1, strokes: good }).success).toBe(
+      false,
+    );
+    expect(LenientPageStrokesSchema.safeParse({ ...envelope }).success).toBe(false);
+    expect(LenientPageStrokesSchema.safeParse(null).success).toBe(false);
   });
 });

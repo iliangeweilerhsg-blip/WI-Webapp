@@ -2,12 +2,11 @@
 
 // Notizen-Spalte (F-DSH-04): zeigt die Seite des iPads live. Lädt Seiten und Striche per REST (VERTRAEGE §7.4),
 // hält sie über den Sync-Strom `notebook:<id>` aktuell (§11.1) und sendet selbst nichts.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Page, PageElement, Stroke, SyncOp } from '@sg/shared';
 import { friendlyMessage } from '../../lib/api.ts';
 import { fetchNotebookPages, fetchPageDetail, fetchPageStrokes, notebookStream } from '../../lib/ink.ts';
 import type { SyncClient } from '../../lib/sync/client.ts';
-import type { StreamPosition } from '../../lib/sync/types.ts';
 import { InkPage } from './InkPage.tsx';
 
 /** Was die Spalte vom Sync-Client braucht (der echte `SyncClient` passt). */
@@ -64,6 +63,45 @@ const PAGE_KINDS = new Set(['page.create', 'page.update', 'page.delete', 'page.r
 const navButton =
   'rounded-md border border-border px-2 py-1 text-sm hover:bg-surface disabled:opacity-40 disabled:hover:bg-transparent';
 
+/** Wartezeit bei Fehlern beim Laden: 1 s, 2 s, 4 s … höchstens 15 s */
+const RETRY_START_MS = 1_000;
+const RETRY_MAX_MS = 15_000;
+
+/** Sammelzeit für Seiten-Operationen, bevor die Seitenliste neu geladen wird */
+const PAGES_DEBOUNCE_MS = 50;
+
+/** Der ältere von zwei Ständen. Nur ab dort ist garantiert, dass keine Operation zwischen den Ständen fehlt. */
+function olderSnapshot(a: Snapshot, b: Snapshot): Snapshot {
+  return b.seq < a.seq ? b : a;
+}
+
+interface Selection {
+  selected: string | null;
+  following: boolean;
+  presencePage: string | null;
+}
+
+/** Welche Seite angezeigt wird: iPad-Seite (wenn gefolgt), sonst die gewählte, sonst die neueste. */
+function chooseId(pages: readonly Page[] | null, sel: Selection): string | null {
+  if (!pages || pages.length === 0) return null;
+  const has = (id: string | null) => id !== null && pages.some((p) => p.id === id);
+  if (sel.following && has(sel.presencePage)) return sel.presencePage;
+  if (has(sel.selected)) return sel.selected;
+  return pages[pages.length - 1]!.id;
+}
+
+/** Laufendes Laden einer Seite: Operationen, die währenddessen eintreffen, werden danach angewendet. */
+interface PageLoad {
+  pageId: string;
+  ops: SyncOp[];
+  controller: AbortController;
+}
+
+interface PagesResult {
+  snap: Snapshot;
+  pages: Page[];
+}
+
 export function InkColumn({ notebookId, client, className }: InkColumnProps) {
   const [pages, setPages] = useState<Page[] | null>(null);
   const [error, setError] = useState<unknown>(null);
@@ -74,95 +112,236 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
   const [syncState, setSyncState] = useState(client.connectionState);
   const [loadingPage, setLoadingPage] = useState(false);
   const [pageError, setPageError] = useState<unknown>(null);
+  const [liveFailed, setLiveFailed] = useState(false);
   const [rev, setRev] = useState(0);
 
   const dataRef = useRef<PageData | null>(null);
-  /** Ops, die während des Ladens einer Seite eintreffen */
-  const bufferRef = useRef<{ pageId: string; ops: SyncOp[] } | null>(null);
-  const snapshotRef = useRef<Snapshot>({ seq: 0, opId: null });
-  const loadPagesRef = useRef<() => Promise<void>>(async () => undefined);
-  const loadPageRef = useRef<(pageId: string) => Promise<void>>(async () => undefined);
+  const loadPageRef = useRef<(pageId: string) => Promise<Snapshot | null>>(async () => null);
+  const reloadRef = useRef<() => void>(() => undefined);
   const currentPageRef = useRef<string | null>(null);
   const lastPresenceRef = useRef<string | null>(null);
+  const selectionRef = useRef<Selection>({ selected: null, following: true, presencePage: null });
+  selectionRef.current = { selected, following, presencePage };
 
-  const effectivePageId = useMemo(() => {
-    if (!pages || pages.length === 0) return null;
-    const has = (id: string | null) => id !== null && pages.some((p) => p.id === id);
-    if (following && has(presencePage)) return presencePage;
-    if (has(selected)) return selected;
-    return pages[pages.length - 1]!.id;
-  }, [pages, selected, following, presencePage]);
+  const effectivePageId = useMemo(
+    () => chooseId(pages, { selected, following, presencePage }),
+    [pages, selected, following, presencePage],
+  );
   currentPageRef.current = effectivePageId;
-
-  const keepSnapshot = useCallback((s: Snapshot) => {
-    if (s.seq >= snapshotRef.current.seq) snapshotRef.current = s;
-  }, []);
 
   // Seiten laden und den Strom abonnieren
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | null = null;
+    let recovering = false;
+    /** Ein Laden ist gescheitert: bei der nächsten funktionierenden Verbindung neu laden */
+    let needsReload = false;
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const rootController = new AbortController();
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => {
+        const t = setTimeout(() => {
+          timers.delete(t);
+          resolve();
+        }, ms);
+        timers.add(t);
+      });
+
+    // Alles zurücksetzen, was zum vorigen Notizbuch gehörte
     dataRef.current = null;
-    bufferRef.current = null;
+    lastPresenceRef.current = null;
     setPages(null);
     setSelected(null);
+    setFollowing(true);
+    setPresencePage(null);
     setError(null);
+    setPageError(null);
+    setLiveFailed(false);
+    setRev((r) => r + 1);
 
-    const loadPages = async (): Promise<void> => {
+    // ---- Seitenliste: höchstens eine Anfrage gleichzeitig, danach eine einzige Folgeanfrage für alle, die
+    // währenddessen etwas geändert haben (40 `page.update` ergeben so 2 statt 40 Anfragen).
+    let inflight: Promise<PagesResult> | null = null;
+    let queued: Promise<PagesResult> | null = null;
+    const runPages = async (): Promise<PagesResult> => {
       try {
-        const res = await fetchNotebookPages(notebookId);
-        if (cancelled) return;
-        setPages([...res.items].sort((a, b) => a.index - b.index));
-        setError(null);
-        keepSnapshot({ seq: res.stream_seq, opId: res.stream_op_id });
+        const res = await fetchNotebookPages(notebookId, rootController.signal);
+        const list = [...res.items].sort((a, b) => a.index - b.index);
+        if (!cancelled) {
+          setPages(list);
+          setError(null);
+          needsReload = false;
+        }
+        return { snap: { seq: res.stream_seq, opId: res.stream_op_id }, pages: list };
       } catch (e) {
-        if (!cancelled) setError(e);
+        if (!cancelled) {
+          setError(e);
+          needsReload = true;
+        }
         throw e;
       }
     };
-    loadPagesRef.current = () => loadPages().catch(() => undefined);
+    const startRun = (): Promise<PagesResult> => {
+      const run: Promise<PagesResult> = runPages().finally(() => {
+        if (inflight === run) inflight = null;
+      });
+      inflight = run;
+      return run;
+    };
+    /** Liefert das Ergebnis einer Anfrage, die NACH diesem Aufruf gestartet wurde. */
+    const refreshPages = (): Promise<PagesResult> => {
+      if (!inflight) return startRun();
+      if (!queued) {
+        queued = inflight
+          .catch(() => undefined)
+          .then(() => {
+            queued = null;
+            return startRun();
+          });
+      }
+      return queued;
+    };
+
+    // ---- Eine Seite laden (Striche und Elemente). Nur die jüngste Anfrage gilt.
+    let activeLoad: PageLoad | null = null;
+    const loadPage = async (id: string): Promise<Snapshot | null> => {
+      activeLoad?.controller.abort();
+      const load: PageLoad = { pageId: id, ops: [], controller: new AbortController() };
+      activeLoad = load;
+      rootController.signal.addEventListener('abort', () => load.controller.abort(), { once: true });
+      setLoadingPage(true);
+      try {
+        const [strokes, detail] = await Promise.all([
+          fetchPageStrokes(id, load.controller.signal),
+          fetchPageDetail(id, load.controller.signal),
+        ]);
+        if (cancelled || activeLoad !== load) return null; // überholt
+        const data: PageData = {
+          pageId: id,
+          strokes: new Map(strokes.strokes.map((s) => [s.client_id, s])),
+          elements: new Map(detail.elements.map((e) => [e.element_id, e])),
+          strokesSeq: strokes.stream_seq,
+          elementsSeq: detail.stream_seq,
+        };
+        for (const op of load.ops) applyOp(data, op);
+        activeLoad = null;
+        dataRef.current = data;
+        setPageError(null);
+        setRev((r) => r + 1);
+        setLoadingPage(false);
+        // Der ÄLTERE der beiden Stände ist der sichere Anker für das Abonnement (Operationen dazwischen werden
+        // erneut geliefert und über `seq` aussortiert)
+        return olderSnapshot(
+          { seq: strokes.stream_seq, opId: strokes.stream_op_id },
+          { seq: detail.stream_seq, opId: detail.stream_op_id },
+        );
+      } catch (e) {
+        if (cancelled || activeLoad !== load || (e instanceof DOMException && e.name === 'AbortError'))
+          return null;
+        activeLoad = null;
+        needsReload = true;
+        setPageError(e);
+        setLoadingPage(false);
+        throw e;
+      }
+    };
+    loadPageRef.current = loadPage;
+
+    // Seiten-Operationen kommen oft gebündelt (Replay nach Neuverbinden): kurz sammeln, dann einmal laden
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleRefresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = null;
+        timers.delete(timer);
+        refreshPages().catch(() => undefined);
+      }, PAGES_DEBOUNCE_MS);
+      const timer = refreshTimer;
+      timers.add(timer);
+    };
 
     const onOp = (op: SyncOp) => {
       if (PAGE_KINDS.has(op.kind)) {
-        void loadPagesRef.current();
+        scheduleRefresh();
         return;
       }
-      const buf = bufferRef.current;
-      if (buf) {
-        buf.ops.push(op);
+      if (activeLoad) {
+        activeLoad.ops.push(op);
         return;
       }
       const data = dataRef.current;
       if (data && applyOp(data, op)) setRev((r) => r + 1);
     };
 
-    const start = async () => {
-      snapshotRef.current = { seq: 0, opId: null };
-      try {
-        await loadPages();
-      } catch {
-        // Fehler steht im State; der Strom wird trotzdem abonniert (Position 0), damit nichts verloren geht
+    /** Seitenliste (und, wenn gewünscht, die angezeigte Seite) neu laden; liefert den sicheren Abo-Anker. */
+    const reloadAll = async (withPage: boolean): Promise<Snapshot> => {
+      const { snap, pages: list } = await refreshPages();
+      let anchor = snap;
+      if (withPage) {
+        const id = chooseId(list, selectionRef.current);
+        if (id) {
+          const s = await loadPage(id);
+          if (s) anchor = olderSnapshot(anchor, s);
+        }
       }
-      if (cancelled) return;
-      const from: StreamPosition = { lastSeq: snapshotRef.current.seq, lastOpId: snapshotRef.current.opId };
-      unsubscribe = client.subscribe(notebookStream(notebookId), from, onOp, {
-        // Bei `reset` den REST-Stand neu laden und dessen Position melden (§11.1)
-        onReset: async () => {
-          snapshotRef.current = { seq: 0, opId: null };
-          await loadPages();
-          const id = currentPageRef.current;
-          if (id) await loadPageRef.current(id);
-          return { lastSeq: snapshotRef.current.seq, lastOpId: snapshotRef.current.opId };
-        },
-      });
+      return anchor;
     };
-    void start();
+
+    const subscribeFrom = (anchor: Snapshot) => {
+      unsubscribe = client.subscribe(
+        notebookStream(notebookId),
+        { lastSeq: anchor.seq, lastOpId: anchor.opId },
+        onOp,
+        {
+          // Bei `reset` den REST-Stand neu laden und dessen Position melden (§11.1)
+          onReset: async () => {
+            const a = await reloadAll(true);
+            return { lastSeq: a.seq, lastOpId: a.opId };
+          },
+        },
+      );
+    };
+
+    /**
+     * Erst laden, dann abonnieren; bei Fehlern mit Wartezeit wiederholen. Nie mit `last_seq = 0` abonnieren, das
+     * würde den ganzen Strom abspielen.
+     */
+    const establish = async (withPage: boolean): Promise<void> => {
+      if (recovering) return;
+      recovering = true;
+      unsubscribe?.();
+      unsubscribe = null;
+      let delay = RETRY_START_MS;
+      try {
+        while (!cancelled) {
+          try {
+            const anchor = await reloadAll(withPage);
+            if (cancelled) return;
+            subscribeFrom(anchor);
+            setLiveFailed(false);
+            return;
+          } catch {
+            await sleep(delay);
+            delay = Math.min(delay * 2, RETRY_MAX_MS);
+          }
+        }
+      } finally {
+        recovering = false;
+      }
+    };
+    void establish(false);
+
+    reloadRef.current = () => {
+      refreshPages().catch(() => undefined);
+      const id = currentPageRef.current;
+      if (id) loadPage(id).catch(() => undefined);
+    };
 
     const offs = [
       client.onEvent('connection', (c) => {
         setSyncState(c.state);
-        // Nach einem Verbindungsfehler beim Start (Core war nicht da) neu laden, sobald es wieder geht
-        if (c.state === 'online') void loadPagesRef.current();
+        // Nach einem Verbindungsfehler (Core war nicht da) neu laden, sobald es wieder geht
+        if (c.state === 'online' && needsReload && !recovering) reloadRef.current();
       }),
       client.onEvent('device.connection', (d) => {
         if (d.client === 'ipad') setIpadConnected(d.connected);
@@ -175,78 +354,34 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
           setFollowing(true); // „bis zum nächsten Seitenwechsel auf dem iPad“ (F-DSH-04)
         }
       }),
-      client.onEvent('leader.changed', () => {
-        void loadPagesRef.current();
-        const id = currentPageRef.current;
-        if (id) void loadPageRef.current(id);
+      client.onEvent('leader.changed', () => reloadRef.current()),
+      // Der Abgleich nach einem `reset` ist gescheitert: der Strom bleibt stumm, bis neu abonniert wird
+      client.onEvent('reset.failed', (f) => {
+        if (f.stream !== notebookStream(notebookId)) return;
+        setLiveFailed(true);
+        void establish(true);
       }),
     ];
     setSyncState(client.connectionState);
 
     return () => {
       cancelled = true;
+      rootController.abort();
+      for (const t of timers) clearTimeout(t);
       unsubscribe?.();
       for (const off of offs) off();
     };
-  }, [notebookId, client, keepSnapshot]);
+  }, [notebookId, client]);
 
   // Strich- und Elementestand der angezeigten Seite laden
   useEffect(() => {
-    const pageId = effectivePageId;
-    if (!pageId) {
+    if (!effectivePageId) {
       dataRef.current = null;
       setRev((r) => r + 1);
       return;
     }
-    let cancelled = false;
-    const controller = new AbortController();
-
-    const load = async (id: string): Promise<void> => {
-      bufferRef.current = { pageId: id, ops: [] };
-      setLoadingPage(true);
-      try {
-        const [strokes, detail] = await Promise.all([
-          fetchPageStrokes(id, controller.signal),
-          fetchPageDetail(id, controller.signal),
-        ]);
-        if (cancelled) return;
-        const data: PageData = {
-          pageId: id,
-          strokes: new Map(strokes.strokes.map((s) => [s.client_id, s])),
-          elements: new Map(detail.elements.map((e) => [e.element_id, e])),
-          strokesSeq: strokes.stream_seq,
-          elementsSeq: detail.stream_seq,
-        };
-        // Der Stand mit der höheren `seq` ist der neuere Anker für das Abonnement
-        keepSnapshot(
-          strokes.stream_seq >= detail.stream_seq
-            ? { seq: strokes.stream_seq, opId: strokes.stream_op_id }
-            : { seq: detail.stream_seq, opId: detail.stream_op_id },
-        );
-        const buffered = bufferRef.current?.pageId === id ? bufferRef.current.ops : [];
-        bufferRef.current = null;
-        for (const op of buffered) applyOp(data, op);
-        dataRef.current = data;
-        setPageError(null);
-        setRev((r) => r + 1);
-      } catch (e) {
-        if (cancelled || (e instanceof DOMException && e.name === 'AbortError')) return;
-        bufferRef.current = null;
-        setPageError(e);
-        throw e;
-      } finally {
-        if (!cancelled) setLoadingPage(false);
-      }
-    };
-    loadPageRef.current = (id) => load(id).catch(() => undefined);
-    void loadPageRef.current(pageId);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      if (bufferRef.current?.pageId === pageId) bufferRef.current = null;
-    };
-  }, [effectivePageId, keepSnapshot]);
+    loadPageRef.current(effectivePageId).catch(() => undefined);
+  }, [effectivePageId]);
 
   const strokes = useMemo(() => {
     void rev;
@@ -279,7 +414,7 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
   const noLive = syncState !== 'online' && syncState !== 'syncing';
 
   return (
-    <section aria-label="Notizen" className={`flex min-h-0 flex-col gap-2 ${className ?? ''}`}>
+    <section aria-label="Notizen" className={`flex w-full min-w-0 min-h-0 flex-col gap-2 ${className ?? ''}`}>
       <header className="flex items-center gap-2 text-sm">
         <button
           type="button"
@@ -309,7 +444,11 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
         ) : null}
       </header>
 
-      {offline || noLive ? (
+      {liveFailed ? (
+        <p role="status" className="text-xs text-text-muted">
+          Live-Abgleich gescheitert – wird erneut versucht
+        </p>
+      ) : offline || noLive ? (
         <p role="status" className="text-xs text-text-muted">
           {offline ? 'iPad nicht verbunden – letzter Stand' : 'Keine Live-Verbindung – letzter Stand'}
         </p>

@@ -97,6 +97,11 @@ export const TOOL_STYLES: Record<DecodedStroke['tool'], ToolStyle> = {
   },
 };
 
+/** Unbekanntes Werkzeug (neuerer Core) wird wie `pen` gezeichnet. */
+function styleOf(d: DecodedStroke): ToolStyle {
+  return TOOL_STYLES[d.tool] ?? TOOL_STYLES.pen;
+}
+
 type Outline = readonly number[][];
 const outlines = new WeakMap<DecodedStroke, Outline>();
 
@@ -104,7 +109,7 @@ const outlines = new WeakMap<DecodedStroke, Outline>();
 export function strokeOutline(d: DecodedStroke): Outline {
   let o = outlines.get(d);
   if (o) return o;
-  const s = TOOL_STYLES[d.tool];
+  const s = styleOf(d);
   const input: number[][] = [];
   for (let i = 0; i < d.count; i++) {
     const o5 = i * DECODED_STRIDE;
@@ -136,7 +141,7 @@ function rgba(c: { r: number; g: number; b: number }, a: number): string {
 export function drawStroke(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
   const pts = strokeOutline(d);
   if (pts.length < 2) return;
-  ctx.fillStyle = rgba(d.color, d.color.a * TOOL_STYLES[d.tool].alpha);
+  ctx.fillStyle = rgba(d.color, d.color.a * styleOf(d).alpha);
   ctx.beginPath();
   const first = pts[0]!;
   const last = pts[pts.length - 1]!;
@@ -156,6 +161,91 @@ export function strokesInPaintOrder(strokes: readonly DecodedStroke[]): DecodedS
     ...strokes.filter((s) => s.layer === 'highlight'),
     ...strokes.filter((s) => s.layer !== 'highlight'),
   ];
+}
+
+export interface Rect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+const bounds = new WeakMap<DecodedStroke, Rect>();
+
+/** Umschließendes Rechteck eines Strichs in Seitenkoordinaten, mit Rand für die größte mögliche Strichbreite. */
+export function strokeBounds(d: DecodedStroke): Rect {
+  let r = bounds.get(d);
+  if (r) return r;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let i = 0; i < d.count; i++) {
+    const x = d.pts[i * DECODED_STRIDE]!;
+    const y = d.pts[i * DECODED_STRIDE + 1]!;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  const pad = d.width * Math.max(styleOf(d).size * 2, 1) + 2;
+  r = { x0: x0 - pad, y0: y0 - pad, x1: x1 + pad, y1: y1 + pad };
+  bounds.set(d, r);
+  return r;
+}
+
+export function unionRect(a: Rect | null, b: Rect): Rect {
+  return a
+    ? {
+        x0: Math.min(a.x0, b.x0),
+        y0: Math.min(a.y0, b.y0),
+        x1: Math.max(a.x1, b.x1),
+        y1: Math.max(a.y1, b.y1),
+      }
+    : b;
+}
+
+const intersects = (a: Rect, b: Rect) => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+
+let scratch: HTMLCanvasElement | null = null;
+
+/**
+ * Zeichnet nur einen Ausschnitt der Tinte-Ebene neu: Die Striche, die den Ausschnitt berühren, werden in einem kleinen
+ * Zwischenspeicher gezeichnet und dann pixelgenau an die Stelle kopiert. Ein Zeichnen mit `clip()` ergäbe an den
+ * Strichrändern leicht andere Kantenglättung als die Vollzeichnung (gemessen: bis 20 % Helligkeit).
+ *
+ * `scale` = Geräte-Pixel je pt, `size` = Pixelmaße der Ebene. Das Ergebnis ist pixelgleich zur Vollzeichnung.
+ */
+export function redrawRegion(
+  ctx: CanvasRenderingContext2D,
+  strokes: readonly DecodedStroke[],
+  region: Rect,
+  scale: number,
+  size: { width: number; height: number },
+): void {
+  const x0 = Math.max(0, Math.floor(region.x0 * scale));
+  const y0 = Math.max(0, Math.floor(region.y0 * scale));
+  const w = Math.min(size.width, Math.ceil(region.x1 * scale)) - x0;
+  const h = Math.min(size.height, Math.ceil(region.y1 * scale)) - y0;
+  if (w <= 0 || h <= 0) return;
+  scratch ??= document.createElement('canvas');
+  if (scratch.width < w || scratch.height < h) {
+    scratch.width = Math.max(scratch.width, w);
+    scratch.height = Math.max(scratch.height, h);
+  }
+  const tctx = scratch.getContext('2d');
+  if (!tctx) return;
+  tctx.setTransform(1, 0, 0, 1, 0, 0);
+  tctx.clearRect(0, 0, w, h);
+  // Ganzzahlige Verschiebung in Geräte-Pixeln: die Geometrie bleibt dieselbe wie in der Vollzeichnung
+  tctx.setTransform(scale, 0, 0, scale, -x0, -y0);
+  const area: Rect = { x0: x0 / scale, y0: y0 / scale, x1: (x0 + w) / scale, y1: (y0 + h) / scale };
+  for (const s of strokes) if (intersects(strokeBounds(s), area)) drawStroke(tctx, s);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(x0, y0, w, h);
+  ctx.drawImage(scratch, 0, 0, w, h, x0, y0, w, h);
+  ctx.restore();
 }
 
 export function drawStrokes(ctx: CanvasRenderingContext2D, strokes: readonly DecodedStroke[]): void {
@@ -343,17 +433,46 @@ export function splitElements(elements: readonly PageElement[]): {
   };
 }
 
+/** Untere Ebene: Papier, Vorlage, Fotos und Textmarker (alles, was unter der Schrift liegt). */
+export function paintUnder(
+  ctx: CanvasRenderingContext2D,
+  page: PageGeometry,
+  images: readonly PageElement[],
+  highlights: readonly DecodedStroke[],
+): void {
+  drawPaper(ctx, page);
+  for (const e of images) drawElement(ctx, e);
+  drawStrokes(ctx, highlights);
+}
+
+/** Löscht eine transparente Ebene (Tinte, Elemente). */
+export function clearLayer(ctx: CanvasRenderingContext2D, page: PageGeometry): void {
+  ctx.clearRect(0, 0, page.width_pt, page.height_pt);
+}
+
+/** Obere Ebene: Elemente, die über der Tinte liegen (Formen, Text, Klebeband, Stempel). */
+export function paintTop(ctx: CanvasRenderingContext2D, above: readonly PageElement[]): void {
+  for (const e of above) drawElement(ctx, e);
+}
+
 export interface Scene {
   page: PageGeometry;
   strokes: readonly DecodedStroke[];
   elements: readonly PageElement[];
 }
 
-/** Zeichnet die ganze Seite (Papier, Fotos, Textmarker, Tinte, übrige Elemente). */
+/** Zeichnet die ganze Seite auf einen Canvas (Papier, Fotos, Textmarker, Tinte, übrige Elemente). Für Tests und Export. */
 export function paintScene(ctx: CanvasRenderingContext2D, scene: Scene): void {
-  drawPaper(ctx, scene.page);
   const { below, above } = splitElements(scene.elements);
-  for (const e of below) drawElement(ctx, e);
-  drawStrokes(ctx, strokesInPaintOrder(scene.strokes));
-  for (const e of above) drawElement(ctx, e);
+  paintUnder(
+    ctx,
+    scene.page,
+    below,
+    scene.strokes.filter((s) => s.layer === 'highlight'),
+  );
+  drawStrokes(
+    ctx,
+    scene.strokes.filter((s) => s.layer !== 'highlight'),
+  );
+  paintTop(ctx, above);
 }

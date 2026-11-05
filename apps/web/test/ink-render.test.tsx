@@ -134,43 +134,89 @@ describe('<InkPage>', () => {
     expect(log.transform![3]).toBeCloseTo(scale, 5);
   });
 
-  it('zeichnet nur Neues nach, wenn Tinte dazukommt', () => {
+  const layer = (c: HTMLElement, name: 'under' | 'ink' | 'top') =>
+    c.querySelector<HTMLCanvasElement>(`canvas[data-layer="${name}"]`)!;
+
+  it('zeichnet nur Neues nach, wenn Tinte dazukommt (auch mit Stempel über der Tinte)', () => {
     const first = page07.filter((s) => s.layer === 'ink').slice(0, 50);
     const more = page07.filter((s) => s.layer === 'ink').slice(50, 53);
-    const { container, rerender } = render(<InkPage strokes={first} width={300} />);
-    const canvas = container.querySelector('canvas')!;
-    expect(canvas.dataset.paint).toBe('full');
+    const stamp = el('stamp', {
+      payload: { marker_id: '019a4e14-0000-7000-8000-0000000000e2', marker_kind: 'frage' },
+    });
+    const elements = [stamp];
+    const { container, rerender } = render(<InkPage strokes={first} elements={elements} width={300} />);
+    expect(layer(container, 'ink').dataset.paint).toBe('full');
     log.reset();
-    rerender(<InkPage strokes={[...first, ...more]} width={300} />);
-    expect(canvas.dataset.paint).toBe('incremental');
+    rerender(<InkPage strokes={[...first, ...more]} elements={[...elements]} width={300} />);
+    expect(layer(container, 'ink').dataset.paint).toBe('incremental');
+    // genau drei Füllpfade; Papier/Textmarker und Elemente werden nicht angefasst
     expect(log.fills).toHaveLength(3);
     expect(log.count('fillRect')).toBe(0);
+    expect(log.count('fillText')).toBe(0);
+    expect(log.count('clearRect')).toBe(0);
   });
 
-  it('zeichnet vollständig neu bei Änderung (Lasso), Entfernen, neuer Textmarker und Größenwechsel', () => {
+  it('jede Änderung trifft nur ihre Ebene', () => {
     const ink = page07.filter((s) => s.layer === 'ink').slice(0, 10);
-    const highlight = page07.find((s) => s.layer === 'highlight')!;
-    const { container, rerender } = render(<InkPage strokes={ink} width={300} />);
-    const canvas = container.querySelector('canvas')!;
+    const highlights = page07.filter((s) => s.layer === 'highlight');
+    const { container, rerender } = render(<InkPage strokes={[...ink, highlights[0]!]} width={300} />);
+    const paints = () => ({
+      under: layer(container, 'under').dataset.paint,
+      ink: layer(container, 'ink').dataset.paint,
+    });
+    const countOf = (name: string) => log.count(name);
 
+    // Neuer Textmarker: nur die untere Ebene (Papier + Textmarker), die Tinte bleibt liegen
     log.reset();
-    rerender(<InkPage strokes={ink.slice(1)} width={300} />);
-    expect(canvas.dataset.paint).toBe('full');
+    rerender(<InkPage strokes={[...ink, highlights[0]!, highlights[1]!]} width={300} />);
+    expect(log.fills).toHaveLength(2); // zwei Textmarker
+    expect(countOf('clearRect')).toBe(0);
+    expect(countOf('fillRect')).toBe(1); // Papier
 
+    // Strich entfernt: nur die Tinte-Ebene, und nur der betroffene Ausschnitt; Papier bleibt
     log.reset();
-    rerender(<InkPage strokes={[...ink.slice(1), highlight]} width={300} />);
-    expect(canvas.dataset.paint).toBe('full');
-    expect(log.fills).toHaveLength(10);
+    rerender(<InkPage strokes={[...ink.slice(1), highlights[0]!, highlights[1]!]} width={300} />);
+    expect(paints().ink).toBe('partial');
+    expect(log.fills.length).toBeLessThanOrEqual(9);
+    expect(log.count('drawImage')).toBe(1);
+    expect(countOf('fillRect')).toBe(0);
 
+    // Lasso (gleiche client_id, neue transform): wieder nur die Tinte-Ebene
     const moved = { ...ink[1]!, transform: [1, 0, 0, 1, 10, 10] } as Stroke;
     log.reset();
-    rerender(<InkPage strokes={[moved, ...ink.slice(2), highlight]} width={300} />);
-    expect(canvas.dataset.paint).toBe('full');
+    rerender(<InkPage strokes={[moved, ...ink.slice(2), highlights[0]!, highlights[1]!]} width={300} />);
+    expect(paints().ink).toBe('partial');
+    expect(log.fills.length).toBeLessThanOrEqual(9);
+    expect(countOf('fillRect')).toBe(0);
 
+    // Viele Änderungen auf einmal: dann lohnt der Ausschnitt nicht, die Ebene wird ganz neu gezeichnet
     log.reset();
-    rerender(<InkPage strokes={[moved, ...ink.slice(2), highlight]} width={500} />);
-    expect(canvas.dataset.paint).toBe('full');
-    expect(canvas.width).toBe(500);
+    rerender(<InkPage strokes={page07.filter((s) => s.layer === 'ink').slice(20, 40)} width={300} />);
+    expect(paints().ink).toBe('full');
+
+    // Größenwechsel: alles neu, in der richtigen Größe
+    log.reset();
+    rerender(<InkPage strokes={[moved, ...ink.slice(2), highlights[0]!, highlights[1]!]} width={500} />);
+    expect(layer(container, 'under').width).toBe(500);
+    expect(layer(container, 'ink').width).toBe(500);
+    expect(layer(container, 'top').width).toBe(500);
+    expect(log.fills).toHaveLength(11);
+  });
+
+  it('Elemente über der Tinte liegen auf einer eigenen Ebene und ändern die Tinte nicht', () => {
+    const ink = page07.filter((s) => s.layer === 'ink').slice(0, 20);
+    const { container, rerender } = render(<InkPage strokes={ink} width={300} />);
+    log.reset();
+    rerender(
+      <InkPage
+        strokes={ink}
+        elements={[el('tape', { payload: { color: '#9AA0A6FF', covered: true, card_id: null } })]}
+        width={300}
+      />,
+    );
+    expect(layer(container, 'top').dataset.paint).toBe('full');
+    expect(log.fills).toHaveLength(0); // keine Strichfüllung
+    expect(log.count('fillRect')).toBe(1); // nur das Klebeband
   });
 
   it('300 Striche: Neuzeichnen bleibt weit unter einem Frame-Budget-Vielfachen', () => {
@@ -180,6 +226,28 @@ describe('<InkPage>', () => {
     rerender(<InkPage strokes={[...all]} width={601} />); // Größenwechsel erzwingt volles Neuzeichnen aus dem Cache
     const warm = performance.now() - t0;
     expect(warm).toBeLessThan(250);
+  });
+
+  it('zeichnet ein unbekanntes Werkzeug wie den Stift und begrenzt absurde Breiten', () => {
+    const odd = {
+      ...page07[0]!,
+      client_id: '019a4e14-0000-7000-8000-0000000000f1',
+      tool: 'brush',
+    } as unknown as Stroke;
+    const huge = { ...page07[1]!, client_id: '019a4e14-0000-7000-8000-0000000000f2', width: 1e30 } as Stroke;
+    render(<InkPage strokes={[odd, huge]} width={200} />);
+    expect(log.fills).toHaveLength(2);
+  });
+
+  it('begrenzt den Zoom: nie mehr als 4096 Pixel Höhe, nie unter 1 Pixel je CSS-Pixel', () => {
+    vi.stubGlobal('devicePixelRatio', 3);
+    const { container } = render(<InkPage strokes={[]} width={9000} />);
+    const c = container.querySelector<HTMLCanvasElement>('canvas[data-layer="under"]')!;
+    expect(c.height).toBeLessThanOrEqual(4096);
+    expect(c.width / parseFloat(c.style.width)).toBeGreaterThan(0.99);
+    // normaler Fall: Retina bleibt erhalten
+    const { container: c2 } = render(<InkPage strokes={[]} width={400} />);
+    expect(c2.querySelector<HTMLCanvasElement>('canvas[data-layer="under"]')!.width).toBe(1200);
   });
 
   it('übersteht kaputte Striche und leere Seiten', () => {
@@ -192,15 +260,15 @@ describe('<InkPage>', () => {
   it('dimmt das Blatt nur im dunklen Theme, die Farben bleiben unverändert', () => {
     document.documentElement.setAttribute('data-theme', 'dark');
     const { container, unmount } = render(<InkPage strokes={[]} width={200} />);
-    expect(container.querySelector('canvas')!.style.filter).toMatch(/brightness/);
+    expect(container.querySelector<HTMLElement>('canvas')!.parentElement!.style.filter).toMatch(/brightness/);
     unmount();
     document.documentElement.setAttribute('data-theme', 'light');
     const { container: c2, unmount: u2 } = render(<InkPage strokes={[]} width={200} />);
-    expect(c2.querySelector('canvas')!.style.filter).toBe('');
+    expect(c2.querySelector<HTMLElement>('canvas')!.parentElement!.style.filter).toBe('');
     u2();
     document.documentElement.setAttribute('data-theme', 'dark');
     const { container: c3 } = render(<InkPage strokes={[]} width={200} dim="off" />);
-    expect(c3.querySelector('canvas')!.style.filter).toBe('');
+    expect(c3.querySelector<HTMLElement>('canvas')!.parentElement!.style.filter).toBe('');
     document.documentElement.removeAttribute('data-theme');
   });
 });

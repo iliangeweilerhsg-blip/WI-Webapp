@@ -5,12 +5,13 @@ import {
   NotebookPagesSchema,
   PageDetailSchema,
   PageStrokesSchema,
+  StrokeSchema,
   type NotebookList,
   type NotebookPages,
   type PageDetail,
   type PageStrokes,
 } from '@sg/shared';
-import { apiGet } from './api.ts';
+import { apiGet, type Parser } from './api.ts';
 
 /** `GET /notebooks?module_id` – Notizbücher eines Moduls (ohne gelöschte). */
 export function fetchNotebooks(moduleId?: string, signal?: AbortSignal): Promise<NotebookList> {
@@ -28,9 +29,29 @@ export function fetchPageDetail(pageId: string, signal?: AbortSignal): Promise<P
   return apiGet(`/pages/${encodeURIComponent(pageId)}`, PageDetailSchema, { signal });
 }
 
-/** `GET /pages/{id}/strokes` – alle nicht gelöschten Striche der Seite. */
+/**
+ * Nachsichtige Prüfung von `PageStrokes`: Der Umschlag muss stimmen, ein einzelner Strich, der nicht zum Schema passt
+ * (z. B. unbekannter Enum-Wert eines neueren Cores), wird übersprungen statt die ganze Seite zu verwerfen.
+ */
+export const LenientPageStrokesSchema: Parser<PageStrokes> = {
+  safeParse(value) {
+    const raw = value as { strokes?: unknown } | null;
+    if (typeof raw !== 'object' || raw === null || !Array.isArray(raw.strokes)) {
+      return PageStrokesSchema.safeParse(value);
+    }
+    const head = PageStrokesSchema.safeParse({ ...raw, strokes: [] });
+    if (!head.success) return head;
+    const strokes = raw.strokes.flatMap((s) => {
+      const r = StrokeSchema.safeParse(s);
+      return r.success ? [r.data] : [];
+    });
+    return { success: true, data: { ...head.data, strokes } };
+  },
+};
+
+/** `GET /pages/{id}/strokes` – alle nicht gelöschten Striche der Seite (unbrauchbare Striche werden übersprungen). */
 export function fetchPageStrokes(pageId: string, signal?: AbortSignal): Promise<PageStrokes> {
-  return apiGet(`/pages/${encodeURIComponent(pageId)}/strokes`, PageStrokesSchema, { signal });
+  return apiGet(`/pages/${encodeURIComponent(pageId)}/strokes`, LenientPageStrokesSchema, { signal });
 }
 
 /** Strom eines Notizbuchs (08 §2.2). */

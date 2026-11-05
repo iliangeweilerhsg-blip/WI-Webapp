@@ -95,11 +95,23 @@ export interface DecodedStroke {
   bbox: readonly [number, number, number, number];
 }
 
-/** Dekodiert einen Strich und wendet `transform` an. */
+/** Obergrenzen gegen kaputte oder böswillige Daten (der Core erlaubt höchstens 750 000 Byte = 31 250 Punkte). */
+export const MAX_POINTS = 50_000;
+/** Größte sinnvolle Grundbreite in pt (eine Seite ist 595 pt breit) */
+export const MAX_STROKE_WIDTH = 200;
+const MAX_COORD = 1e6;
+
+/**
+ * Dekodiert einen Strich und wendet `transform` an. Wirft bei unbrauchbaren Daten (Länge, NaN/Unendlich,
+ * absurde Koordinaten, Breite ≤ 0); die Breite wird auf `MAX_STROKE_WIDTH` begrenzt.
+ */
 export function decodeStroke(stroke: Stroke): DecodedStroke {
   const raw = decodePoints(stroke.points);
   const m = stroke.transform as unknown as Matrix;
   const count = raw.length / FLOATS_PER_POINT;
+  if (count > MAX_POINTS) throw new RangeError(`points: ${count} Punkte sind zu viel`);
+  if (!m.every(Number.isFinite)) throw new RangeError('transform ist nicht endlich');
+  if (!Number.isFinite(stroke.width) || stroke.width <= 0) throw new RangeError('width ist unbrauchbar');
   const pts = new Float32Array(count * DECODED_STRIDE);
   for (let i = 0; i < count; i++) {
     const [x, y] = applyMatrix(m, raw[i * 6]!, raw[i * 6 + 1]!);
@@ -108,13 +120,18 @@ export function decodeStroke(stroke: Stroke): DecodedStroke {
     pts[i * 5 + 2] = raw[i * 6 + 3]!;
     pts[i * 5 + 3] = raw[i * 6 + 4]!;
     pts[i * 5 + 4] = raw[i * 6 + 5]!;
+    for (let j = 0; j < 5; j++) {
+      const v = pts[i * 5 + j]!;
+      if (!Number.isFinite(v) || Math.abs(v) > MAX_COORD)
+        throw new RangeError('Punktwert ist nicht brauchbar');
+    }
   }
   return {
     id: stroke.client_id,
     tool: stroke.tool,
     layer: stroke.layer,
     color: parseColor(stroke.color),
-    width: stroke.width * matrixScale(m),
+    width: Math.min(MAX_STROKE_WIDTH, stroke.width * matrixScale(m)),
     count,
     pts,
     bbox: stroke.bbox as unknown as readonly [number, number, number, number],
