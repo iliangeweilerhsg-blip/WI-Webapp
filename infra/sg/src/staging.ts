@@ -9,7 +9,17 @@
 //     beschreiben kann. Erst nach dem Vergleich der Prüfsumme wird **genau diese Kopie** weiterverwendet.
 //   - Die Kopie wird danach immer gelöscht.
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NEW_FILE_FLAGS, READ_FLAGS } from './nofollow.ts';
@@ -55,14 +65,11 @@ export const NOT_REGULAR = 'SG_NOT_REGULAR';
  *
  * Weder `src` noch `dst` werden über einen Symlink geöffnet (`O_NOFOLLOW`, Fehler `ELOOP`). `src` muss eine reguläre
  * Datei sein: Eine FIFO oder ein Gerät im Ziel blockiert `open` nicht (`O_NONBLOCK`) und wird per `fstat`
- * abgewiesen (Fehlercode `NOT_REGULAR`). `dst` entsteht exklusiv (`O_EXCL`). `guard` (vom `NoFollowWriter`) prüft den
- * Zielordner vor dem Anlegen und danach.
+ * abgewiesen (Fehlercode `NOT_REGULAR`). `dst` entsteht exklusiv (`O_EXCL`), synchron über `openDst`, wenn
+ * angegeben (`NoFollowWriter.openNew`: im verankerten Ordner, nie über einen Pfad im Ziel). Geschrieben wird nur über
+ * den Deskriptor.
  */
-export async function copyAndHash(
-  src: string,
-  dst: string,
-  guard?: { before: () => void; after: (info: { dev: number; ino: number }) => void },
-): Promise<string> {
+export async function copyAndHash(src: string, dst: string, openDst?: () => number): Promise<string> {
   const hash = createHash('sha256');
   const input = await open(src, READ_FLAGS);
   try {
@@ -71,20 +78,19 @@ export async function copyAndHash(
         code: NOT_REGULAR,
       });
     }
-    guard?.before();
-    const output = await open(dst, NEW_FILE_FLAGS, 0o600);
+    const output = openDst ? openDst() : openSync(dst, NEW_FILE_FLAGS, 0o600);
     try {
-      guard?.after(await output.stat());
       const buffer = Buffer.allocUnsafe(1024 * 1024);
       for (;;) {
         const { bytesRead } = await input.read(buffer, 0, buffer.length, null);
         if (bytesRead === 0) break;
         const chunk = buffer.subarray(0, bytesRead);
         hash.update(chunk);
-        await output.write(chunk);
+        let offset = 0;
+        while (offset < chunk.length) offset += writeSync(output, chunk, offset, chunk.length - offset);
       }
     } finally {
-      await output.close();
+      closeSync(output);
     }
   } finally {
     await input.close();

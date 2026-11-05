@@ -1301,10 +1301,11 @@ describe('B2: Prüfsumme nie aus der Datei im Ziel (#113)', () => {
 });
 
 describe('Hängendes „läuft“ nach einem Absturz (#113)', () => {
-  const pidFile = (dataDir: string, name: string) => join(dataDir, 'tmp', `lauf-${name}.json`);
+  const pidFile = (dataDir: string, name: string, pid = 999_999) =>
+    join(dataDir, 'tmp', `lauf-${name}.${pid}.json`);
   function writePid(dataDir: string, name: string, run: string, pid = 999_999) {
     mkdirSync(join(dataDir, 'tmp'), { recursive: true });
-    writeFileSync(pidFile(dataDir, name), JSON.stringify({ pid, run }));
+    writeFileSync(pidFile(dataDir, name, pid), JSON.stringify({ pid, run }));
   }
 
   it('Restore-Test „läuft“, sein Prozess lebt nicht mehr: sofort abgebrochen, Backup läuft', async () => {
@@ -1343,6 +1344,26 @@ describe('Hängendes „läuft“ nach einem Absturz (#113)', () => {
     expect(existsSync(pidFile(dataDir, `backup-${id}`))).toBe(false);
   });
 
+  it('H1: zwei Prozesse desselben Restore-Tests, einer per kill -9 beendet: der andere blockiert weiter', async () => {
+    const { pg, deps, dataDir } = setup({ testRunning: true });
+    writePid(dataDir, 'restore-test', pg.testStartedAt, 1001);
+    writePid(dataDir, 'restore-test', pg.testStartedAt, 1002);
+    deps.alive = (pid) => pid === 1002;
+    expect(await runBackup(deps, { trigger: 'vor_migration' })).toBe(4);
+    expect(pg.testAborted).toBeNull();
+    expect(existsSync(pidFile(dataDir, 'restore-test', 1002))).toBe(true);
+  });
+
+  it('H2: verwaiste Dateien toter Prozesse räumt das nächste Backup auf, lebende bleiben', async () => {
+    const { deps, dataDir } = setup();
+    writePid(dataDir, 'backup-019a4e14-0000-7000-8000-0000000000e1', 'x', 3001);
+    writePid(dataDir, 'restore-test', 'alt', 3002);
+    writePid(dataDir, 'restore-test', 'lebt', 3003);
+    deps.alive = (pid) => pid === 3003;
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(0);
+    expect(readdirSync(join(dataDir, 'tmp'))).toEqual(['lauf-restore-test.3003.json']);
+  });
+
   it('anderes Backup ohne PID-Datei: weiter Exit 4, Meldung mit Ausweg', async () => {
     const { deps, errs } = setup({ otherActive: 1 });
     deps.alive = () => false;
@@ -1356,18 +1377,18 @@ describe('Hängendes „läuft“ nach einem Absturz (#113)', () => {
     const runId = '019a4e14-0000-7000-8000-0000000000aa';
     s.pg.dumpImpl = async (file) => {
       writeFileSync(file, 'PGDMP-test');
-      seen.push(readFileSync(pidFile(s.dataDir, `backup-${runId}`), 'utf8'));
+      seen.push(readFileSync(pidFile(s.dataDir, `backup-${runId}`, process.pid), 'utf8'));
     };
     expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
     expect(JSON.parse(seen[0] as string)).toEqual({ pid: process.pid, run: runId });
-    expect(existsSync(pidFile(s.dataDir, `backup-${runId}`))).toBe(false);
+    expect(existsSync(pidFile(s.dataDir, `backup-${runId}`, process.pid))).toBe(false);
 
     s.pg.restoreImpl = async () => {
-      seen.push(readFileSync(pidFile(s.dataDir, 'restore-test'), 'utf8'));
+      seen.push(readFileSync(pidFile(s.dataDir, 'restore-test', process.pid), 'utf8'));
     };
     expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
     // Ohne Eintrag vom Core ist die Kennung der eigene Beginn
     expect(JSON.parse(seen[1] as string)).toEqual({ pid: process.pid, run: '2026-11-10T08:00:00.000Z' });
-    expect(existsSync(pidFile(s.dataDir, 'restore-test'))).toBe(false);
+    expect(existsSync(pidFile(s.dataDir, 'restore-test', process.pid))).toBe(false);
   });
 });

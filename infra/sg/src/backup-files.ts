@@ -1,6 +1,6 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
 import { type Dirent, existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { NoFollowWriter, readSmallRegularFile } from './nofollow.ts';
 
 /** Standname `YYYYMMDDTHHMMSSZ` (UTC), so auch `BackupRun.stand` im Schema */
@@ -128,7 +128,8 @@ export function skipped(name: string): boolean {
  * Symbolische Links und Sonderdateien werden übersprungen.
  *
  * `dst` darf noch nicht existieren. Geschrieben wird nur über `out` (`NoFollowWriter`): Ordner einzeln neu,
- * Dateien exklusiv, nie einem Symlink im Ziel folgend (#113). Ohne `out` legt `copyTree` einen eigenen an.
+ * Dateien exklusiv, nie einem Symlink im Ziel folgend (#113). Ohne `out` legt `copyTree` einen eigenen an, der den
+ * Elternordner von `dst` als vertrauenswürdig übernimmt (Restore in den Datenordner).
  */
 export function copyTree(
   src: string,
@@ -137,9 +138,14 @@ export function copyTree(
   stats?: CopyStats,
   /** Nur für Tests: läuft vor dem Kopieren jeder Datei */
   hooks?: { beforeCopy?: (path: string) => void },
-  out: NoFollowWriter = new NoFollowWriter(),
+  writer?: NoFollowWriter,
 ): CopyStats {
   const result = stats ?? { files: 0, bytes: 0, linked: 0, copied: 0, vanished: 0 };
+  let out = writer;
+  if (!out) {
+    out = new NoFollowWriter();
+    out.adopt(dirname(dst));
+  }
   out.mkdir(dst);
   let entries: Dirent[];
   try {

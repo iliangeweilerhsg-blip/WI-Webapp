@@ -27,8 +27,8 @@ import {
   type Manifest,
 } from './backup-files.ts';
 import type { SgConfig } from './config.ts';
-import { runLiveness, runPidPath, writeRunPid } from './liveness.ts';
-import { NoFollowWriter } from './nofollow.ts';
+import { removeRunPids, runLiveness, sweepDeadRunPids, writeRunPid } from './liveness.ts';
+import { NoFollowWriter, type NoFollowHooks } from './nofollow.ts';
 import { scrubSecrets, type PgAccess } from './pg.ts';
 import { copyAndHash, makePrivateDir } from './staging.ts';
 
@@ -81,6 +81,8 @@ export interface BackupDeps extends BackupIo {
   alive?: (pid: number) => boolean;
   /** Nur für Tests: läuft direkt nachdem der Dump ins Ziel kopiert wurde (Austausch durch einen Angreifer) */
   hooks?: { afterDumpCopy?: (destination: string) => void | Promise<void> };
+  /** Nur für Tests: Tausch zwischen Prüfung und Systemaufruf im Ziel (`NoFollowWriter`) */
+  targetHooks?: NoFollowHooks;
 }
 
 export interface BackupOptions {
@@ -198,7 +200,7 @@ export async function runningRestoreTest(
       }),
     },
   );
-  rmSync(runPidPath(dataDir, RESTORE_TEST_PID_NAME), { force: true });
+  removeRunPids(dataDir, RESTORE_TEST_PID_NAME, started);
   return null;
 }
 
@@ -252,7 +254,7 @@ async function otherRunActive(
         WHERE id = :'id'::uuid AND state = 'laeuft'`,
       { id },
     );
-    rmSync(runPidPath(dataDir, `backup-${id}`), { force: true });
+    removeRunPids(dataDir, `backup-${id}`, id);
   }
   return active > 0;
 }
@@ -338,6 +340,8 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       );
     }
 
+    // Nach den Prüfungen oben braucht kein `laeuft` mehr die Dateien toter Prozesse: verwaiste aufräumen (H2)
+    sweepDeadRunPids(cfg.dataDir, deps.alive);
     // PID-Datei: stürzt dieser Prozess ab, erkennt der nächste Lauf das sofort statt erst nach 6 Stunden
     if (runId) removePid = writeRunPid(cfg.dataDir, `backup-${runId}`, runId);
 
@@ -356,7 +360,8 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     // Das Ziel ist nicht vertrauenswürdig (#113): nichts darin wird überschrieben oder über einen Symlink erreicht.
     // Ein schon vorhandener Stand oder `.partial` gleichen Namens lässt den Lauf scheitern, gelöscht wird dabei nichts.
     if (lstatSync(finalDir, { throwIfNoEntry: false })) throw new Error(`Den Stand ${stand} gibt es schon.`);
-    const out = new NoFollowWriter();
+    const out = new NoFollowWriter(deps.targetHooks);
+    out.adopt(target);
     out.mkdir(partial);
 
     try {
@@ -462,7 +467,7 @@ async function dumpPrivately(
     if (bytes === 0) throw new Error('pg_dump hat keine Daten geliefert.');
     // Eine Lesung: die Kopie ins Ziel und ihre Prüfsumme stammen aus denselben Bytes. Die Datei im Ziel wird danach
     // nie wieder gelesen (sie kann dort jederzeit ausgetauscht werden, B2).
-    const sha = await copyAndHash(privateDump, destination, out.guard(destination));
+    const sha = await copyAndHash(privateDump, destination, () => out.openNew(destination, 0o600));
     await deps.hooks?.afterDumpCopy?.(destination);
     return { bytes, sha };
   } finally {

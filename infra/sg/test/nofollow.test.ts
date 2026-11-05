@@ -13,11 +13,16 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { copyTree, readManifest } from '../src/backup-files.ts';
-import { runLiveness, runPidPath, writeRunPid } from '../src/liveness.ts';
-import { NoFollowWriter, readSmallRegularFile, UnsafeTargetError } from '../src/nofollow.ts';
+import { removeRunPids, runLiveness, runPidPath, sweepDeadRunPids, writeRunPid } from '../src/liveness.ts';
+import {
+  NoFollowWriter,
+  readSmallRegularFile,
+  UnsafeTargetError,
+  type NoFollowHooks,
+} from '../src/nofollow.ts';
 import { copyAndHash, NOT_REGULAR, StandError, withVerifiedDump } from '../src/staging.ts';
 
 const dirs: string[] = [];
@@ -43,11 +48,32 @@ function mkfifo(path: string): void {
   execFileSync('mkfifo', [path]);
 }
 
+/** Schreiber, der beim ersten `mkdir` dessen Elternordner übernimmt (wie `sg backup` das geprüfte Ziel) */
+function writer(hooks?: NoFollowHooks): NoFollowWriter {
+  const w = new NoFollowWriter(hooks);
+  const mkdir = w.mkdir.bind(w);
+  let first = true;
+  w.mkdir = (path: string) => {
+    if (first) w.adopt(dirname(path));
+    first = false;
+    mkdir(path);
+  };
+  return w;
+}
+
+/** Angreifer: Ordner `dir` beiseiteschieben und an seiner Stelle einen Symlink auf `to` anlegen */
+function swapForLink(dir: string, to: string): string {
+  const aside = `${dir}-weg`;
+  renameSync(dir, aside);
+  symlinkSync(to, dir);
+  return aside;
+}
+
 describe('NoFollowWriter', () => {
   it('Symlink an der Stelle einer neuen Datei: Fehler, die fremde Datei bleibt unverändert', () => {
     const root = join(tmp(), '.x.partial');
     const { file } = victim();
-    const out = new NoFollowWriter();
+    const out = writer();
     out.mkdir(root);
     symlinkSync(file, join(root, 'manifest.json'));
     expect(() => out.writeFile(join(root, 'manifest.json'), 'BACKUP')).toThrow(UnsafeTargetError);
@@ -56,7 +82,7 @@ describe('NoFollowWriter', () => {
 
   it('vorhandene Datei wird nie überschrieben', () => {
     const root = join(tmp(), 'r');
-    const out = new NoFollowWriter();
+    const out = writer();
     out.mkdir(root);
     writeFileSync(join(root, 'a'), 'FREMD');
     expect(() => out.writeFile(join(root, 'a'), 'NEU')).toThrow(UnsafeTargetError);
@@ -67,7 +93,7 @@ describe('NoFollowWriter', () => {
     const base = tmp();
     const { dir, file } = victim();
     symlinkSync(dir, join(base, '.x.partial'));
-    expect(() => new NoFollowWriter().mkdir(join(base, '.x.partial'))).toThrow(UnsafeTargetError);
+    expect(() => writer().mkdir(join(base, '.x.partial'))).toThrow(UnsafeTargetError);
     expect(lstatSync(join(base, '.x.partial')).isSymbolicLink()).toBe(true);
     expect(readFileSync(file, 'utf8')).toBe('GEHEIM');
   });
@@ -76,7 +102,7 @@ describe('NoFollowWriter', () => {
     const base = tmp();
     const root = join(base, '.x.partial');
     const { dir } = victim();
-    const out = new NoFollowWriter();
+    const out = writer();
     out.mkdir(root);
     renameSync(root, join(base, 'weg'));
     symlinkSync(dir, root);
@@ -90,7 +116,7 @@ describe('NoFollowWriter', () => {
     const root = join(base, 'r');
     const { dir } = victim();
     mkdirSync(join(dir, 'photos'));
-    const out = new NoFollowWriter();
+    const out = writer();
     out.mkdir(root);
     out.mkdir(join(root, 'media'));
     out.mkdir(join(root, 'media', 'photos'));
@@ -106,7 +132,7 @@ describe('NoFollowWriter', () => {
     const root = join(base, 'r');
     const { dir, file } = victim();
     writeFileSync(join(dir, 'a.txt'), 'BENUTZER');
-    const out = new NoFollowWriter();
+    const out = writer();
     out.mkdir(root);
     out.mkdir(join(root, 'media'));
     out.writeFile(join(root, 'media', 'a.txt'), 'BACKUP');
@@ -127,7 +153,7 @@ describe('NoFollowWriter', () => {
 
   it('Aufräumen ohne Fremdes entfernt den ganzen eigenen Baum', () => {
     const root = join(tmp(), 'r');
-    const out = new NoFollowWriter();
+    const out = writer();
     out.mkdir(root);
     out.mkdir(join(root, 'vault'));
     out.writeFile(join(root, 'vault', 'n.md'), '#');
@@ -137,7 +163,7 @@ describe('NoFollowWriter', () => {
 
   it('Umbenennen: Ziel vorhanden oder Wurzel ausgetauscht → Fehler, nichts gelöscht', () => {
     const base = tmp();
-    const out = new NoFollowWriter();
+    const out = writer();
     out.mkdir(join(base, '.s.partial'));
     mkdirSync(join(base, 's'));
     expect(() => out.renameDir(join(base, '.s.partial'), join(base, 's'))).toThrow(UnsafeTargetError);
@@ -151,7 +177,7 @@ describe('NoFollowWriter', () => {
 
   it('Hardlink: zeigt der neue Eintrag nicht auf die geprüfte Datei, wird er entfernt (false)', () => {
     const base = tmp();
-    const out = new NoFollowWriter();
+    const out = writer();
     out.mkdir(join(base, 'r'));
     writeFileSync(join(base, 'alt'), 'A');
     writeFileSync(join(base, 'anders'), 'B');
@@ -260,6 +286,131 @@ describe('Lesen aus dem Ziel: FIFO, Gerät, Symlink', () => {
   });
 });
 
+describe('Tausch zwischen Prüfung und Systemaufruf (S1, B1)', () => {
+  // Der Hook läuft nach der Identitätsprüfung des Ordners, unmittelbar vor bzw. nach dem Systemaufruf. Ein Angreifer
+  // tauscht dort den Ordner gegen einen Symlink auf einen fremden Ordner. Weil alles relativ zum verankerten
+  // Arbeitsverzeichnis läuft, trifft der Aufruf trotzdem den eigenen Ordner.
+
+  it('Aufräumen (B1): Tausch direkt vor unlink löscht nie die gleichnamige fremde Datei', () => {
+    const base = tmp();
+    const root = join(base, '.s.partial');
+    const { dir } = victim();
+    writeFileSync(join(dir, 'db.dump'), 'OPFER');
+    let aside = '';
+    const out = writer({
+      step: (op, phase, d) => {
+        if (op === 'unlink' && phase === 'before' && !aside) aside = swapForLink(d, dir);
+      },
+    });
+    out.mkdir(root);
+    out.writeFile(join(root, 'db.dump'), 'DUMP');
+    out.cleanup();
+    expect(readFileSync(join(dir, 'db.dump'), 'utf8')).toBe('OPFER');
+    expect(existsSync(join(aside, 'db.dump'))).toBe(false); // die eigene Datei ist weg
+  });
+
+  it('Aufräumen: Tausch direkt vor rmdir entfernt keinen fremden Ordner', () => {
+    const base = tmp();
+    const root = join(base, 'r');
+    const { dir } = victim();
+    mkdirSync(join(dir, 'media'));
+    let aside = '';
+    const out = writer({
+      step: (op, phase, d) => {
+        if (op === 'rmdir' && phase === 'before' && d === root && !aside) aside = swapForLink(d, dir);
+      },
+    });
+    out.mkdir(root);
+    out.mkdir(join(root, 'media'));
+    out.cleanup();
+    expect(existsSync(join(dir, 'media'))).toBe(true);
+    expect(existsSync(join(aside, 'media'))).toBe(false);
+  });
+
+  it('Schreiben: Tausch direkt vor open legt keine Datei im fremden Ordner an', () => {
+    const base = tmp();
+    const root = join(base, 'r');
+    const { dir } = victim();
+    let aside = '';
+    const out = writer({
+      step: (op, phase, d) => {
+        if (op === 'create' && phase === 'before') aside = swapForLink(d, dir);
+      },
+    });
+    out.mkdir(root);
+    out.writeFile(join(root, 'manifest.json'), 'BACKUP');
+    expect(readdirSync(dir)).toEqual(['wichtig.txt']);
+    expect(readFileSync(join(aside, 'manifest.json'), 'utf8')).toBe('BACKUP');
+  });
+
+  it('mkdir: Tausch direkt vor mkdir legt keinen Ordner im fremden Ordner an', () => {
+    const base = tmp();
+    const root = join(base, 'r');
+    const { dir } = victim();
+    let aside = '';
+    const out = writer({
+      step: (op, phase, d) => {
+        if (op === 'mkdir' && phase === 'before' && d === root) aside = swapForLink(d, dir);
+      },
+    });
+    out.mkdir(root);
+    out.mkdir(join(root, 'media'));
+    expect(readdirSync(dir)).toEqual(['wichtig.txt']);
+    expect(lstatSync(join(aside, 'media')).isDirectory()).toBe(true);
+  });
+
+  it('mkdir: der neue Ordner wird direkt danach gegen einen Symlink getauscht → Fehler', () => {
+    const base = tmp();
+    const { dir } = victim();
+    const out = writer({
+      step: (op, phase, d, name) => {
+        if (op === 'mkdir' && phase === 'after' && name === 'media') swapForLink(join(d, name), dir);
+      },
+    });
+    out.mkdir(join(base, 'r'));
+    expect(() => out.mkdir(join(base, 'r', 'media'))).toThrow(UnsafeTargetError);
+  });
+
+  it('Umbenennen: .partial wird direkt vor rename getauscht → Fehler (der Stand ist nicht der eigene Ordner)', () => {
+    const base = tmp();
+    const { dir } = victim();
+    const out = writer({
+      step: (op, phase, d, name) => {
+        if (op === 'rename' && phase === 'before') swapForLink(join(d, name), dir);
+      },
+    });
+    out.mkdir(join(base, '.s.partial'));
+    expect(() => out.renameDir(join(base, '.s.partial'), join(base, 's'))).toThrow(UnsafeTargetError);
+    expect(readdirSync(dir)).toEqual(['wichtig.txt']);
+  });
+
+  it('Hardlink: der neue Eintrag wird direkt danach ausgetauscht → kein Link behalten', () => {
+    const base = tmp();
+    writeFileSync(join(base, 'alt'), 'A');
+    const out = writer({
+      step: (op, phase, d, name) => {
+        if (op === 'link' && phase === 'after') {
+          rmSync(join(d, name));
+          writeFileSync(join(d, name), 'FREMD');
+        }
+      },
+    });
+    out.mkdir(join(base, 'r'));
+    expect(out.link(join(base, 'alt'), join(base, 'r', 'x'), lstatSync(join(base, 'alt')))).toBe(false);
+    expect(existsSync(join(base, 'r', 'x'))).toBe(false);
+  });
+
+  it('das Arbeitsverzeichnis ist danach wieder das alte, auch nach einem Fehler', () => {
+    const before = process.cwd();
+    const base = tmp();
+    const out = writer();
+    out.mkdir(join(base, 'r'));
+    writeFileSync(join(base, 'r', 'a'), 'x');
+    expect(() => out.writeFile(join(base, 'r', 'a'), 'y')).toThrow(UnsafeTargetError);
+    expect(process.cwd()).toBe(before);
+  });
+});
+
 describe('PID-Datei eines Laufs (liveness)', () => {
   it('lebt / tot / unbekannt; Entfernen nur der eigenen Datei', () => {
     const dataDir = tmp();
@@ -268,12 +419,39 @@ describe('PID-Datei eines Laufs (liveness)', () => {
     expect(runLiveness(dataDir, 'restore-test', 'T1', () => true)).toBe('lebt');
     expect(runLiveness(dataDir, 'restore-test', 'T1', () => false)).toBe('tot');
     expect(runLiveness(dataDir, 'restore-test', 'T2', () => false)).toBe('unbekannt'); // anderer Lauf
-    // Ein neuer Lauf hat die Datei überschrieben: der alte entfernt sie nicht
-    writeRunPid(dataDir, 'restore-test', 'T3', 4343);
     remove();
-    expect(existsSync(runPidPath(dataDir, 'restore-test'))).toBe(true);
-    writeFileSync(runPidPath(dataDir, 'restore-test'), 'kaputt');
+    expect(existsSync(runPidPath(dataDir, 'restore-test', 4242))).toBe(false);
+    writeRunPid(dataDir, 'restore-test', 'T3', 4343);
+    writeFileSync(runPidPath(dataDir, 'restore-test', 4343), 'kaputt');
     expect(runLiveness(dataDir, 'restore-test', 'T3', () => false)).toBe('unbekannt');
+  });
+
+  it('H1: zwei Prozesse desselben Laufs haben je eine Datei; stirbt einer, lebt der Lauf weiter', () => {
+    const dataDir = tmp();
+    const removeA = writeRunPid(dataDir, 'restore-test', 'T', 1001);
+    writeRunPid(dataDir, 'restore-test', 'T', 1002);
+    const alive = (pid: number) => pid === 1002; // 1001 ist per kill -9 beendet
+    expect(runLiveness(dataDir, 'restore-test', 'T', alive)).toBe('lebt');
+    expect(runLiveness(dataDir, 'restore-test', 'T', () => false)).toBe('tot');
+    removeA(); // A räumt nur die eigene Datei weg
+    expect(existsSync(runPidPath(dataDir, 'restore-test', 1002))).toBe(true);
+    removeRunPids(dataDir, 'restore-test', 'T');
+    expect(runLiveness(dataDir, 'restore-test', 'T', alive)).toBe('unbekannt');
+  });
+
+  it('H2: verwaiste Dateien toter Prozesse werden aufgeräumt, lebende und der eigene bleiben', () => {
+    const dataDir = tmp();
+    writeRunPid(dataDir, 'backup-a', 'a', 2001);
+    writeRunPid(dataDir, 'backup-b', 'b', 2002);
+    writeRunPid(dataDir, 'restore-test', 'T', process.pid);
+    writeFileSync(join(dataDir, 'tmp', 'lauf-kaputt.2003.json'), 'x');
+    writeFileSync(join(dataDir, 'tmp', 'anderes.json'), 'x');
+    expect(sweepDeadRunPids(dataDir, (pid) => pid === 2002)).toBe(2);
+    expect(readdirSync(join(dataDir, 'tmp')).sort()).toEqual([
+      'anderes.json',
+      `lauf-backup-b.2002.json`,
+      `lauf-restore-test.${process.pid}.json`,
+    ]);
   });
 
   it('der eigene Prozess lebt (echtes process.kill), eine sicher freie PID nicht', () => {

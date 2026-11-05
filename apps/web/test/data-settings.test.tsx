@@ -306,6 +306,23 @@ describe('DataSettings', () => {
     await user.click(await screen.findByRole('button', { name: 'Jetzt sichern' }));
     await waitFor(() => expect(screen.getByTestId('toast-live')).not.toBeEmptyDOMElement());
   });
+
+  it('von einem gekoppelten Gerät: 403 local_only ergibt einen verständlichen Hinweis (#113)', async () => {
+    stubCore((c) => {
+      if (c.method === 'POST')
+        return new Response(JSON.stringify({ error: { code: 'local_only', message: 'nur lokal' } }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      return c.path.startsWith('/backups') ? backupOverview('/x') : settings('/x');
+    });
+    const user = userEvent.setup();
+    mount(<DataSettings />);
+    await user.click(await screen.findByRole('button', { name: 'Jetzt sichern' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('toast-live')).toHaveTextContent('Das geht nur direkt am Mac.'),
+    );
+  });
 });
 
 describe('TrashSettings', () => {
