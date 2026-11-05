@@ -55,6 +55,8 @@ export interface BuildAppOptions {
   moodleSync?: MoodleSync;
   /** Abgleich beim Start und alle 2 h (F-MDL-04). Standard: aus; `main.ts` schaltet ihn ein */
   moodleSchedule?: boolean;
+  /** Höchstens so lange wartet das Beenden auf einen laufenden Abgleich. Standard: `SHUTDOWN_WAIT_MS` (7 s) */
+  moodleShutdownWaitMs?: number;
   /** Kopplungsfenster im Speicher (§12). Standard: ein eigenes pro App. Tests geben eins mit gestellter Uhr vor */
   pairing?: PairingManager;
   /** IPv4 für `PairingCode.host`. Standard: aktive Schnittstelle, bevorzugt `en0` */
@@ -213,7 +215,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   }
   app.addHook('onClose', async () => {
     stopMoodleSchedule?.();
-    await moodleSync.idle();
+    // Laufenden Abgleich an der nächsten Stelle abbrechen und höchstens kurz warten (Review #133, S3)
+    await moodleSync.stop(options.moodleShutdownWaitMs);
   });
 
   // Static Export der Web-App und Not-Found-Handler (muss nach den API-Routen kommen)

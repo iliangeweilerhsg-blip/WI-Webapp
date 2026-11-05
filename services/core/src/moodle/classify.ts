@@ -4,9 +4,15 @@ import { isAbbreviation, matchModule, tokenize, type ModuleCandidate } from '../
 
 export type FileKind = 'folien' | 'uebung';
 
-/** Zerlegt Wörter zusätzlich an Grenzen zwischen Buchstaben und Ziffern: „vl07“ → „vl“, „07“ */
+/**
+ * Zerlegt Wörter zusätzlich an Grenzen zwischen Buchstaben und Ziffern: „vl07“ → „vl“, „07“. Vorher NFC: Namen aus
+ * macOS kommen oft zerlegt (NFD), „ö“ als „o“ plus Trema. Nur NFC, nie NFKC (Review #125, #133 S1). Ziffern nur
+ * ASCII `[0-9]` (H4), sonst würden z. B. arabisch-indische Ziffern als Blattnummer gelten
+ */
 function words(text: string): string[] {
-  return tokenize(text).flatMap((token) => token.split(/(?<=\p{L})(?=\p{N})|(?<=\p{N})(?=\p{L})/u));
+  return tokenize(text.normalize('NFC')).flatMap((token) =>
+    token.split(/(?<=\p{L})(?=[0-9])|(?<=[0-9])(?=\p{L})/u),
+  );
 }
 
 /** Ganze Wörter, die auf Folien bzw. eine Übung hindeuten (08 §9.4, F-MDL-04), normalisiert (ü → ue) */
@@ -58,7 +64,7 @@ function hints(text: string): Set<FileKind> {
       }
     }
     // Muster wie `u05.pdf`, `ue3`, `Ü 05`
-    if ((token === 'u' || token === 'ue') && /^\p{N}{1,3}$/u.test(tokens[index + 1] ?? ''))
+    if ((token === 'u' || token === 'ue') && /^[0-9]{1,3}$/.test(tokens[index + 1] ?? ''))
       found.add('uebung');
   }
   return found;
@@ -92,7 +98,7 @@ export function sheetNumber(text: string): number | null {
       token === 'ue' ||
       EXACT.uebung.has(token) ||
       PART.uebung.some((part) => token.includes(part));
-    if (isKeyword && /^\p{N}{1,3}$/u.test(next)) {
+    if (isKeyword && /^[0-9]{1,3}$/.test(next)) {
       const number = Number(next);
       if (number >= 1 && number <= 999) return number;
     }

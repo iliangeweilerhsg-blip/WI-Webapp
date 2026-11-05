@@ -83,11 +83,27 @@ export function syncDeps(repoRoot, run = defaultRun(repoRoot)) {
   return true;
 }
 
-/** @param {string} cwd */
-function defaultRun(cwd) {
+/**
+ * Startet Befehle im Vordergrund. Mit `stdin = 'ignore'` erbt der Kindprozess die Standardeingabe nicht
+ * (für `moodle`: dort trägt stdin Passwort oder Token, die kein anderer Prozess lesen darf).
+ * @param {string} cwd
+ * @param {'inherit' | 'ignore'} [stdin]
+ * @returns {(cmd: string, args: string[]) => number}
+ */
+export function defaultRun(cwd, stdin = 'inherit') {
   return (cmd, args) => {
-    const r = spawnSync(cmd, args, { cwd, stdio: 'inherit' });
+    const r = spawnSync(cmd, args, { cwd, stdio: [stdin, 'inherit', 'inherit'] });
     if (r.error) console.error(`[sg] "${cmd}" konnte nicht gestartet werden: ${r.error.message}`);
     return r.status ?? 1;
   };
+}
+
+/**
+ * stdin für das automatische `pnpm install`: Bei `moodle` trägt die Standardeingabe Geheimnisse
+ * (`--token-stdin`, verdeckt getipptes Passwort), darum erbt der Install-Prozess sie dort nicht.
+ * @param {string | undefined} command
+ * @returns {'inherit' | 'ignore'}
+ */
+export function installStdin(command) {
+  return command === 'moodle' ? 'ignore' : 'inherit';
 }

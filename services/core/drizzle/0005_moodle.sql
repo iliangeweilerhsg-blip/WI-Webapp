@@ -47,6 +47,7 @@ CREATE TABLE "moodle_item" (
 	"sha256" text,
 	"kind" text NOT NULL,
 	"kind_source" text DEFAULT 'auto' NOT NULL,
+	"kind_decided_at" timestamp with time zone,
 	"slide_deck_id" uuid,
 	"exercise_sheet_id" uuid,
 	"removed_in_moodle_at" timestamp with time zone,

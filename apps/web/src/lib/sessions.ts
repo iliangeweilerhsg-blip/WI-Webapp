@@ -1,4 +1,6 @@
 // REST-Funktionen für Sessions (VERTRAEGE §7.2): Stopp und Verlängerung (T1-07), Liste und Zustandswechsel (T1-03).
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import {
   SessionListSchema,
   SessionSchema,
@@ -7,7 +9,9 @@ import {
   type SessionStartResult,
   type StopReason,
 } from '@sg/shared';
-import { apiGet, apiSend } from './api.ts';
+import { ApiRequestError, apiGet, apiSend } from './api.ts';
+import { useSyncClient } from './sync/SyncProvider.tsx';
+import { uuidv7 } from './uuid.ts';
 
 /** `POST /sessions/{id}/stop`. Ohne Grund gilt `manuell`. Gleicher Zielzustand ist kein Fehler (§9.1). */
 export function stopSession(id: string, reason?: StopReason): Promise<Session> {
@@ -111,6 +115,104 @@ export function mergeSession(
   const anchor = sessionAnchor(incoming);
   const inRange = anchor >= range.from.getTime() && anchor < range.to.getTime();
   return isActive(incoming) || inRange ? [...list, incoming] : (list as Session[]);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Spontane Session ohne Termin (F-SES-04, Issue #120): `POST /sessions`, danach `POST /sessions/{id}/start`
+// ---------------------------------------------------------------------------------------------
+
+/** `POST /sessions` (§7.2): spontane Session im Zustand `bereit`. Die Client-ID macht Wiederholungen sicher. */
+export function createSession(moduleId: string, id: string = uuidv7()): Promise<Session> {
+  return apiSend('POST', '/sessions', SessionSchema, { body: { id, module_id: moduleId } });
+}
+
+/**
+ * Legt eine spontane Session an und startet sie. Ist die ID schon vergeben (`session_exists`, z. B. nach einem
+ * gescheiterten Start und erneutem Tipp), wird nur noch gestartet. Der Core beendet eine andere aktive Session dabei (§9.1).
+ */
+export async function createAndStartSession(
+  moduleId: string,
+  id: string = uuidv7(),
+): Promise<SessionStartResult> {
+  try {
+    await createSession(moduleId, id);
+  } catch (cause) {
+    if (!(cause instanceof ApiRequestError && cause.code === 'session_exists')) throw cause;
+  }
+  return startSession(id);
+}
+
+/** Die laufende oder pausierte Session, falls es eine gibt (`GET /sessions?state=laeuft,pausiert`) */
+export async function findActiveSession(signal?: AbortSignal): Promise<Session | null> {
+  const active = await listSessions({ states: ['laeuft', 'pausiert'], limit: 10 }, signal);
+  return active.find(isActive) ?? null;
+}
+
+export const ACTIVE_SESSION_KEY = ['sessions', 'active'] as const;
+
+/** `DELETE /sessions/{id}` (Papierkorb; 409 `session_active`, wenn sie läuft oder pausiert) */
+export function deleteSession(id: string): Promise<void> {
+  return apiSend('DELETE', `/sessions/${encodeURIComponent(id)}`, null);
+}
+
+/**
+ * Abfrage der aktiven Session für die Modulseite, live gehalten durch `session.updated` (z. B. ein Start vom iPad).
+ * Ältere Fassungen (`updated_at`) ändern nichts. Nach einer Unterbrechung der Verbindung wird neu geladen.
+ */
+export function useActiveSession() {
+  const client = useQueryClient();
+  const sync = useSyncClient();
+  useEffect(() => {
+    if (!sync) return;
+    const offUpdated = sync.onEvent('session.updated', (incoming) => {
+      client.setQueryData<Session | null>(ACTIVE_SESSION_KEY, (old) => {
+        if (old === undefined) return old; // noch nicht geladen: der Abruf liefert den Stand
+        if (old && old.id === incoming.id) {
+          const next = newerSession(old, incoming);
+          if (next !== incoming) return old;
+          return isActive(incoming) && incoming.deleted_at === null ? incoming : null;
+        }
+        return isActive(incoming) && incoming.deleted_at === null ? incoming : old;
+      });
+    });
+    let wasDown = sync.connectionState !== 'online';
+    const offConnection = sync.onEvent('connection', (c) => {
+      if (c.state === 'online') {
+        if (wasDown) void client.invalidateQueries({ queryKey: ACTIVE_SESSION_KEY });
+        wasDown = false;
+      } else if (c.state !== 'syncing') {
+        wasDown = true;
+      }
+    });
+    return () => {
+      offUpdated();
+      offConnection();
+    };
+  }, [sync, client]);
+  return useQuery({
+    queryKey: ACTIVE_SESSION_KEY,
+    queryFn: ({ signal }) => findActiveSession(signal),
+    refetchInterval: 30_000,
+  });
+}
+
+const LAST_MODULE_KEY = 'sg.session.lastModule';
+
+/** Modul der zuletzt gestarteten Session (nur dieser Browser; ohne Speicher `null`) */
+export function readLastModuleId(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_MODULE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function rememberLastModuleId(moduleId: string): void {
+  try {
+    window.localStorage.setItem(LAST_MODULE_KEY, moduleId);
+  } catch {
+    // Speicher gesperrt: Die Vorauswahl fällt auf die Sessions des Tages zurück
+  }
 }
 
 /**

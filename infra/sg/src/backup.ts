@@ -28,7 +28,7 @@ import {
 } from './backup-files.ts';
 import type { SgConfig } from './config.ts';
 import { removeRunPids, runLiveness, sweepDeadRunPids, writeRunPid } from './liveness.ts';
-import { NoFollowWriter, type NoFollowHooks } from './nofollow.ts';
+import { NoFollowReader, NoFollowWriter, type NoFollowHooks } from './nofollow.ts';
 import { scrubSecrets, type PgAccess } from './pg.ts';
 import { copyAndHash, makePrivateDir } from './staging.ts';
 
@@ -65,6 +65,10 @@ export const COUNT_TABLES = [
   'sync_op',
   'setting',
   'device',
+  // Moodle-Abgleich (T1-23, 08 §9.4)
+  'moodle_course_link',
+  'moodle_item',
+  'moodle_deadline',
 ] as const;
 
 export interface BackupIo {
@@ -383,18 +387,23 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         media: { files: 0, bytes: 0, linked: 0, copied: 0, vanished: 0 },
         vault: { files: 0, bytes: 0, linked: 0, copied: 0, vanished: 0 },
       };
+      // Gelesen wird verankert (#119): der Datenordner als vertrauenswürdige Quelle (Verschwundenes zählt nur), der
+      // vorige Stand im Ziel ohne Symlink-Folgen. Nur Dateien, die dort genau so liegen, werden verlinkt.
+      const reader = new NoFollowReader(deps.targetHooks, true);
+      reader.adopt(target);
+      const previousDir = previous ? reader.child(target, previous, 'skip') : null;
       for (const sub of ['media', 'vault'] as const) {
         const source = join(cfg.dataDir, sub);
         if (!existsSync(source)) continue;
         log(`Kopiere ${sub}/ …`);
-        copyTree(
-          source,
-          join(partial, sub),
-          previous ? join(target, previous, sub) : null,
-          stats[sub],
-          undefined,
-          out,
-        );
+        reader.adopt(source);
+        let prevSub: string | null = null;
+        try {
+          prevSub = previousDir ? reader.child(previousDir, sub, 'skip') : null;
+        } catch {
+          prevSub = null; // voriger Stand nicht lesbar: alles kopieren
+        }
+        copyTree(source, join(partial, sub), prevSub, stats[sub], { out, reader });
         log(
           `  ${stats[sub].files} Dateien, ${stats[sub].copied} neu kopiert, ${stats[sub].linked} unverändert`,
         );
@@ -494,9 +503,14 @@ export function thin(target: string, nowMs: number, log: (message: string) => vo
   const removed: string[] = [];
   for (const stand of remove) {
     if (protectedStands.has(stand)) continue;
-    if (removeStand(target, stand)) {
+    const result = removeStand(target, stand);
+    if (result === true) {
       removed.push(stand);
       log(`Alten Stand ${stand} entfernt.`);
+    } else if (result === 'teilweise') {
+      log(
+        `Alten Stand ${stand} nicht vollständig entfernt: Im Ziel wurde während des Löschens etwas ausgetauscht. Der Rest bleibt stehen.`,
+      );
     }
   }
   return removed;

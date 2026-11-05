@@ -1,5 +1,5 @@
 {
-  "id": "8be3ff8b-33a5-431e-99cc-bf0e38cfc204",
+  "id": "4e8d4b9d-8a66-4d38-b9d7-8c3757e52dc4",
   "prevId": "285cc72c-bbc8-45f9-b4b2-d00647fadc7a",
   "version": "7",
   "dialect": "postgresql",
@@ -3984,6 +3984,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'auto'"
+        },
+        "kind_decided_at": {
+          "name": "kind_decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "slide_deck_id": {
           "name": "slide_deck_id",

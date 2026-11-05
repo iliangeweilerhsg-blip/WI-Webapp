@@ -38,6 +38,7 @@ const REF = {
   skript: '/5003/mod_folder/content/1/Skript.pdf',
   notes: '/5003/mod_folder/content/1/notizen.txt',
   hidden: '/5004/mod_resource/content/1/VL02_versteckt.pdf',
+  section: '/5006/mod_resource/content/1/VL03_Abschnitt.pdf',
   later: '/5003/mod_folder/content/1/Anhang.pdf',
   unlinked: '/6001/mod_resource/content/1/VL01_Statistik.pdf',
 };
@@ -71,6 +72,9 @@ interface CourseState {
   blatt01: FakeFile | null;
   folder: FakeFile[];
   hiddenFile: FakeFile;
+  /** Abschnitt „Woche 3“ mit einer Folien-PDF, sichtbar oder versteckt */
+  sectionFile: FakeFile;
+  sectionVisible: boolean;
 }
 
 function initialState(): CourseState {
@@ -105,6 +109,14 @@ function initialState(): CourseState {
         modified: '2026-10-22T10:00:00Z',
       },
     ],
+    sectionFile: {
+      ref: REF.section,
+      name: 'VL03_Abschnitt.pdf',
+      mime: 'application/pdf',
+      body: pdf('abschnitt'),
+      modified: '2026-10-24T10:00:00Z',
+    },
+    sectionVisible: false,
     hiddenFile: {
       ref: REF.hidden,
       name: 'VL02_versteckt.pdf',
@@ -230,7 +242,25 @@ function installFixtures(): void {
           contents: [file(state.hiddenFile, base)],
         },
       ];
-      return [{ id: 10, name: 'Woche 1', visible: 1, section: 1, modules: activities }];
+      return [
+        { id: 10, name: 'Woche 1', visible: 1, section: 1, modules: activities },
+        {
+          id: 11,
+          name: 'Woche 3',
+          // Versteckter Abschnitt: die Aktivität selbst ist sichtbar, zählt aber nicht (F-MDL-04 Schritt 4)
+          visible: state.sectionVisible ? 1 : 0,
+          section: 3,
+          modules: [
+            {
+              id: 5006,
+              name: 'Folien Woche 3',
+              modname: 'resource',
+              visible: 1,
+              contents: [file(state.sectionFile, base)],
+            },
+          ],
+        },
+      ];
     },
     mod_assign_get_assignments: {
       courses: [
@@ -296,7 +326,7 @@ function installFixtures(): void {
     },
   };
   fake.files.clear();
-  for (const f of [state.vl01, state.blatt01, ...state.folder, state.hiddenFile]) {
+  for (const f of [state.vl01, state.blatt01, ...state.folder, state.hiddenFile, state.sectionFile]) {
     if (f)
       fake.files.set(
         f.ref,
@@ -608,7 +638,7 @@ describe('Moodle-Abgleich (T1-23)', () => {
     expect(
       (await req('PATCH', `/moodle/items/0190f6a2-0000-7000-8000-00000000dead`, { kind: 'uebung' })).status,
     ).toBe(404);
-    expect((await req('PATCH', `/moodle/items/${skript.id}`, { kind: 'offen' })).status).toBe(400);
+    expect((await req('PATCH', `/moodle/items/${skript.id}`, { kind: 'entfernt' })).status).toBe(400);
   });
 
   it('neue Fassung: neuer Foliensatz, der alte bleibt. Entfernt: nur markiert, nie gelöscht', async () => {
@@ -722,5 +752,207 @@ describe('Moodle-Abgleich (T1-23)', () => {
     expect(MoodleSyncStatusSchema.parse((await req('GET', '/moodle/sync')).body).last_run?.trigger).toBe(
       'manuell',
     );
+  });
+
+  it('versteckter Abschnitt zählt nicht; wieder sichtbar bzw. wieder da hebt die Markierung auf (Review H1)', async () => {
+    await start();
+    await linkDbs();
+    // Abschnitt versteckt: Datei weder gelistet noch geladen
+    await expect(itemByRef(REF.section)).rejects.toThrow();
+    expect(fake.calls('pluginfile').map((r) => r.path)).not.toContain(
+      `/webservice/pluginfile.php${REF.section}`,
+    );
+
+    // Abschnitt sichtbar: wird übernommen
+    state.sectionVisible = true;
+    installFixtures();
+    await sync.run('manuell');
+    expect(await itemByRef(REF.section)).toMatchObject({ kind: 'folien', removed_in_moodle_at: null });
+
+    // Wieder versteckt: nur markiert
+    state.sectionVisible = false;
+    installFixtures();
+    await sync.run('manuell');
+    const hidden = await itemByRef(REF.section);
+    expect(hidden.removed_in_moodle_at).not.toBeNull();
+    expect(hidden.slide_deck_id).not.toBeNull();
+
+    // Wieder sichtbar und eine gelöschte Datei wieder da: Markierung weg, nichts doppelt
+    state.sectionVisible = true;
+    const blatt = state.blatt01;
+    state.blatt01 = null;
+    installFixtures();
+    await sync.run('manuell');
+    expect((await itemByRef(REF.blatt01)).removed_in_moodle_at).not.toBeNull();
+    state.blatt01 = blatt;
+    installFixtures();
+    const before = await tableCounts();
+    const run = await sync.run('manuell');
+    expect(run).toMatchObject({ files_new: 0, files_imported: 0 });
+    expect((await itemByRef(REF.section)).removed_in_moodle_at).toBeNull();
+    expect((await itemByRef(REF.blatt01)).removed_in_moodle_at).toBeNull();
+    expect(await tableCounts()).toEqual(before);
+  });
+
+  it('schreibt beim zweiten Abgleich ohne Änderungen keine Datei-Zeile neu (Review S5)', async () => {
+    await start();
+    await linkDbs();
+    const stamps = async () =>
+      (await t.handle.db.select({ id: moodleItem.id, updatedAt: moodleItem.updatedAt }).from(moodleItem))
+        .map((row) => `${row.id}:${row.updatedAt.toISOString()}`)
+        .sort();
+    const before = await stamps();
+    await new Promise((r) => setTimeout(r, 20));
+    await sync.run('manuell');
+    expect(await stamps()).toEqual(before);
+  });
+
+  it('kein PDF: nur gelistet; eine neue Fassung wird neu geprüft (Review H5)', async () => {
+    await start();
+    const fakePdf = {
+      ref: '/5003/mod_folder/content/1/Folien_Kapitel4.pdf',
+      name: 'Folien_Kapitel4.pdf',
+      mime: 'application/pdf',
+      body: Buffer.from('<html>kein PDF</html>'),
+      modified: '2026-10-25T10:00:00Z',
+    };
+    state.folder.push(fakePdf);
+    installFixtures();
+    await linkDbs();
+    expect(await itemByRef(fakePdf.ref)).toMatchObject({ kind: 'ignoriert', last_error: 'kein_pdf' });
+    const downloads = fake.calls('pluginfile').length;
+
+    // Unverändert: nicht erneut laden
+    await sync.run('manuell');
+    expect(fake.calls('pluginfile')).toHaveLength(downloads);
+
+    // Neue Fassung, jetzt ein echtes PDF
+    state.folder[state.folder.length - 1] = {
+      ...fakePdf,
+      body: pdf('kapitel4'),
+      modified: '2026-10-29T10:00:00Z',
+    };
+    installFixtures();
+    const run = await sync.run('manuell');
+    expect(run).toMatchObject({ files_changed: 1, files_imported: 1 });
+    const item = await itemByRef(fakePdf.ref);
+    expect(item).toMatchObject({ kind: 'folien', last_error: null, modified_at: '2026-10-29T10:00:00Z' });
+    expect(item.slide_deck_id).not.toBeNull();
+  });
+
+  it('Inbox, Dateien und Fristen nur aus zugeordneten Kursen mit Abgleich an (Review S4, H7, H6)', async () => {
+    await start();
+    await linkDbs();
+    expect((await items()).length).toBeGreaterThan(0);
+    const deadlinesOf = async () =>
+      MoodleSyncedDeadlineListSchema.parse((await req('GET', '/moodle/synced-deadlines')).body).items;
+    expect(await deadlinesOf()).toHaveLength(2);
+    expect(await items('?limit=1')).toHaveLength(1);
+
+    await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id, sync_enabled: false });
+    expect(await items()).toEqual([]);
+    expect(await items('?kind=offen')).toEqual([]);
+    expect(await deadlinesOf()).toEqual([]);
+    // Die Zeilen bleiben erhalten und sind nach dem Einschalten wieder da
+    await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id, sync_enabled: true });
+    await sync.idle();
+    expect((await items('?kind=offen')).map((i) => i.file_ref)).toEqual([REF.skript]);
+
+    // „Jetzt abgleichen“ für einen nicht zugeordneten Kurs
+    const missing = await req<{ error: { code: string } }>('POST', '/moodle/sync', {
+      course_id: COURSE.stat,
+    });
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('moodle_link_not_found');
+    expect((await req('POST', '/moodle/sync', { course_id: COURSE.dbs })).status).toBe(202);
+  });
+
+  it('Beenden während eines Abgleichs: bricht zwischen zwei Dateien ab und wartet nicht lange (Review S3)', async () => {
+    await start();
+    // Jede Datei braucht 300 ms
+    const slow = Array.from({ length: 8 }, (_, i) => ({
+      ref: `/5003/mod_folder/content/1/VL1${i}_Langsam.pdf`,
+      name: `VL1${i}_Langsam.pdf`,
+      mime: 'application/pdf',
+      body: pdf(`langsam ${i}`),
+      modified: '2026-10-26T10:00:00Z',
+    }));
+    state.folder.push(...slow);
+    installFixtures();
+    for (const f of slow) {
+      const reply = fileReply({ body: f.body });
+      fake.files.set(f.ref, async (res, req) => {
+        await new Promise((r) => setTimeout(r, 300));
+        await reply(res, req);
+      });
+    }
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const res = await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id });
+      expect(res.status).toBe(200);
+      // Warten, bis die erste langsame Datei angefragt ist
+      while (!fake.calls('pluginfile').some((r) => r.path.includes('Langsam'))) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      const before = Date.now();
+      await t.close();
+      expect(Date.now() - before).toBeLessThan(3_000);
+      const status = await sync.status();
+      expect(status.last_run).toMatchObject({ ok: false, error_code: 'abgebrochen' });
+      expect(status.last_run?.files_imported ?? 0).toBeLessThan(10);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(unhandled).toEqual([]);
+      expect(process.exitCode ?? 0).toBe(0);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      // Für das Aufräumen eine frische App auf derselben Datenbank
+      t = await startTestApp(
+        { moodleUrl: fake.baseUrl, dataDir: t.config.dataDir },
+        { moodle, now: () => NOW },
+      );
+    }
+  });
+
+  it('„Ignorieren“ lässt sich rückgängig machen: zurück auf offen, ohne Abgleich (Review #134, M2)', async () => {
+    await start();
+    state.folder.push({
+      ref: REF.later,
+      name: 'Anhang.pdf',
+      mime: 'application/pdf',
+      body: pdf('anhang'),
+      modified: '2026-10-30T10:00:00Z',
+    });
+    installFixtures();
+    await linkDbs();
+    expect((await items('?kind=offen')).map((i) => i.file_ref).sort()).toEqual(
+      [REF.later, REF.skript].sort(),
+    );
+    const skript = await itemByRef(REF.skript);
+    expect((await req('PATCH', `/moodle/items/${skript.id}`, { kind: 'ignoriert' })).status).toBe(200);
+    // Dieselbe Entscheidung hat auch „Anhang“ (gleiche Aktivität) erfasst
+    expect(await items('?kind=offen')).toEqual([]);
+    fake.requests.length = 0;
+
+    const undo = await req('PATCH', `/moodle/items/${skript.id}`, { kind: 'offen' });
+    expect(undo.status).toBe(200);
+    expect(MoodleItemSchema.parse(undo.body)).toMatchObject({ kind: 'offen', kind_source: 'auto' });
+    expect((await items('?kind=offen')).map((i) => i.file_ref).sort()).toEqual(
+      [REF.later, REF.skript].sort(),
+    );
+    // Rückgängig startet keinen Abgleich und lädt nichts
+    await sync.idle();
+    expect(fake.calls('core_course_get_contents')).toHaveLength(0);
+    // Ohne manuelle Entscheidung gilt für die Aktivität wieder die Regel: neue Dateien landen in der Inbox
+    state.folder.push({
+      ref: '/5003/mod_folder/content/1/Notiz2.pdf',
+      name: 'Notiz2.pdf',
+      mime: 'application/pdf',
+      body: pdf('notiz2'),
+      modified: '2026-10-31T10:00:00Z',
+    });
+    installFixtures();
+    expect(await sync.run('manuell')).toMatchObject({ files_new: 1, inbox_new: 1 });
   });
 });

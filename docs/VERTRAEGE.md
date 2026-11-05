@@ -21,7 +21,7 @@ Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammen
 | `TZ` | Zeitzone des Systems | Core (Ortszeit für ICS-Termine ohne Zeitzone, Backup-Uhrzeit). Tests laufen mit `TZ=Europe/Zurich` |
 
 Geheimnisse wie API-Schlüssel stehen in `$SG_DATA_DIR/config/.env` mit Rechten 600 (02 §3). Die Prozesse lesen diese Datei beim Start.
-**Ausnahme Moodle:** Der Moodle-Token liegt nur im macOS-Schlüsselbund (Dienst `studiengehirn-moodle`), nie in `.env`. Nur der Core liest ihn (08 §9.1).
+**Ausnahme Moodle:** Der Moodle-Token liegt nur im macOS-Schlüsselbund (Dienst `studiengehirn-moodle`), nie in `.env`. Nur der Core liest ihn (08 §9.1). Einzige Ausnahme: `pnpm sg moodle login` liest den Eintrag direkt nach dem Speichern einmal zurück, um zu prüfen, dass der Core genau diesen Token findet. `pnpm sg moodle status` und `logout` lesen den Token nie.
 
 ## 2. Befehle, die jeder Baustein anbietet
 
@@ -756,8 +756,15 @@ Im Live-Dashboard nimmt **nur der Sync-Leader-Tab** auf (F-AUD-01). Das gilt zus
     - Dateien (`db.dump`, `manifest.json`, Kopien aus `media/` und `vault/`) entstehen exklusiv mit `O_CREAT | O_EXCL | O_NOFOLLOW`, Zeiten werden über den Deskriptor gesetzt (`futimes`). Ein Hardlink auf den vorigen Stand wird nur behalten, wenn er danach genau auf die geprüfte Datei zeigt, sonst wird kopiert.
     - Neu angelegte Ordner werden direkt nach `mkdir` per `lstat` geprüft (echter Ordner, kein Symlink). Die Umbenennung `.partial` → `<stand>` prüft vorher, dass `.partial` der eigene Ordner ist, und danach, dass unter `<stand>` genau dieser Ordner liegt.
     - **Fail-closed:** Jeder Verstoß beendet den Lauf als `fehler`. Aufgeräumt wird nur, was der Lauf selbst angelegt hat und `lstat` im verankerten Ordner unverändert zeigt (Dateien per `unlink`, Ordner per `rmdir`, nur leere). Fremde Einträge und ausgetauschte Ordner bleiben liegen (das Ausdünnen entfernt alte `.partial` nach einem Tag).
-    - Grenzen: Die Quelle eines Hardlinks (Datei im vorigen Stand) wird über ihren absoluten Pfad im Ziel angesprochen. Zeigt der neue Link danach nicht auf die geprüfte Datei, wird er im verankerten Ordner wieder entfernt. Das Ausdünnen (`removeStand`, `removeStalePartials`) löscht weiterhin mit `rm -r`, das Symlinks nicht folgt, aber nicht gegen einen gleichzeitigen Austausch während des Löschens geschützt ist (eigenes Issue).
+    - **Ausdünnen ohne Symlink-Folgen (#119):** `removeStand` und `removeStalePartials` löschen verankert (`NoFollowRemover`): Jede Ebene wird per `chdir` betreten und mit `lstat('.')` gegen den zuvor im Elternordner per `lstat` gesehenen Eintrag geprüft, Einträge werden mit `readdir('.')` gelesen und nur relativ entfernt (`unlink`, `rmdir`). Ein Symlink wird als Eintrag gelöscht, nie verfolgt. Weicht ein Ordner beim Betreten ab (Tausch, etwa `<alter Stand>/media/photos` gegen einen Link per `renameat2(RENAME_EXCHANGE)`), steigt das Löschen dort nicht weiter ab: Der Rest bleibt stehen (fail-closed), das Log meldet „nicht vollständig entfernt“. `manifest.json` eines Standes wird zuletzt gelöscht und nur, wenn bis dahin nichts stehen blieb: Ein abgebrochener Rest bleibt so ein gültiger Stand und wird beim nächsten Ausdünnen erneut verankert gelöscht, statt als Waise ohne Manifest liegen zu bleiben.
+    - **Hardlink-Quelle (#119, N2):** Ob eine Datei im vorigen Stand unverändert ist (Größe, Zeit), wird verankert im vorigen Stand nachgesehen (`NoFollowReader`). Der Hardlink selbst nennt die Quelle über ihren absoluten Pfad (`link` mit zwei Ordnern geht ohne `linkat` nicht verankert). Zeigt der neue Link danach nicht genau auf die verankert gesehene Datei, wird er im verankerten Zielordner sofort wieder entfernt und kopiert.
   - **Lesen aus dem Ziel:** `db.dump` (Prüfen und Kopieren, siehe Punkt 3 unten) und `manifest.json` werden mit `O_NOFOLLOW | O_NONBLOCK` geöffnet und per `fstat` geprüft. Ein Symlink, eine FIFO oder ein Gerät an ihrer Stelle blockiert nicht, sondern gilt als `beschaedigt` bzw. als fehlendes Manifest (höchstens 1 MB).
+  - **Restore liest den Stand ohne Symlink-Folgen (#119):** `sg restore` (von Hand, `--test` und `--automatisch`) betritt den Stand-Ordner, `media/`, `vault/` und alles darunter verankert (`NoFollowReader`: `chdir` plus Identität, `readdir('.')`, `lstat`, Dateien relativ mit `O_NOFOLLOW | O_NONBLOCK` und Vergleich von `fstat` mit dem gesehenen `lstat`). Das gilt für das Zählen gegen das Manifest und für das Kopieren in den Datenordner. Ein Symlink oder eine Sonderdatei im Stand, ein Stand-Ordner als Symlink oder ein Tausch während des Lesens ergibt `beschaedigt` (Restore-Test: `reason = beschaedigt`, von Hand: Abbruch vor jeder Änderung bzw. Rückbau). Vorher folgte das Lesen einem Symlink `<stand>/media` und holte mit passend gefälschtem Manifest fremde Dateien vom Mac in den Datenordner.
+  - **Dateisysteme des Ziels (vom Owner auf dem Mac zu prüfen, #119 N3):** Die Verankerung setzt voraus, dass `dev`/`ino` eines Ordners stabil sind (gleicher Wert über den Pfad und nach `chdir` über `.`). Getestet ist das bisher nur unter Linux (ext4); APFS ist sehr wahrscheinlich stabil, gehört aber in dieselbe Prüfung. Auf **exFAT, FAT32 und SMB-Freigaben (NAS)** unter macOS erzeugt der Kernel die Inode-Nummern selbst bzw. übernimmt sie vom Server. Ist sie dort nicht stabil, scheitert jedes Backup sicher (fail-closed), aber Backups wären dann unmöglich. Prüfung je Ziel-Dateisystem:
+    1. Ziel einhängen und einen Testordner anlegen, z. B. `mkdir /Volumes/USB/sg-test/a`.
+    2. Identität prüfen: `node -e "const fs=require('fs');const d=process.argv[1];const a=fs.lstatSync(d);process.chdir(d);const b=fs.lstatSync('.');console.log(a.dev===b.dev&&a.ino===b.ino?'OK':'ABWEICHUNG',a.dev,a.ino,b.dev,b.ino)" /Volumes/USB/sg-test/a`. Erwartet: `OK`. Danach Datenträger aus- und wieder einhängen und dasselbe noch einmal: wieder `OK` (die Nummern dürfen sich ändern, müssen aber in sich gleich sein).
+    3. Ziel in den Einstellungen auf diesen Datenträger setzen, zweimal `pnpm sg backup` ausführen: beide mit „fertig“. Danach `pnpm sg restore --test <stand>`: „Test bestanden“.
+    4. Ausdünnen prüfen: Unter dem Ziel zwei alte Stände am selben Tag anlegen lassen (oder vorhandene alte Stände abwarten) und im Log nach „Alten Stand … entfernt“ bzw. „nicht vollständig entfernt“ sehen. „nicht vollständig“ ohne Angreifer heißt: Identität auf diesem Dateisystem nicht stabil, bitte als Issue melden.
   - **Hängendes `laeuft` (#113):** Ein abgestürzter Restore-Test (2 Stunden) oder ein abgestürztes Backup (6 Stunden) würde bis zur Frist das Backup vor Migrationen und damit `sg start` blockieren. Darum legt jeder CLI-Prozess für die Dauer seines Laufs eine eigene PID-Datei in den Datenordner: `<Datenordner>/tmp/lauf-restore-test.<pid>.json` mit `started_at` aus `setting.restore_test` bzw. `lauf-backup-<id>.<pid>.json` mit der ID aus `backup_run`. Die PID steht im Namen, so teilen sich zwei von Hand parallel gestartete Prozesse nie eine Datei. Findet `sg backup` ein `laeuft` und gehört **keiner** der Prozesse mit einer Datei zu genau diesem Lauf mehr zu den lebenden (`kill(pid, 0)` → `ESRCH`), setzt es den Eintrag sofort auf `fehler` (Restore-Test: `reason = abgebrochen`) und läuft weiter. Fehlt jede Datei oder lebt einer der Prozesse, gilt wie bisher die Frist. Nach diesen Prüfungen räumt `sg backup` die Dateien toter Prozesse weg (verwaiste nach `kill -9`). Die Meldung nennt dann den Zeitpunkt, ab dem der Lauf als abgebrochen gilt, und den Ausweg `pnpm sg migrate --ohne-backup`. Grenze: Eine nach einem Neustart wiederverwendete PID gilt als lebend (vorsichtige Richtung).
   - `sg migrate`/`sg start` sichern vor ausstehenden Migrationen (`vor_migration`), wenn ein Ziel gesetzt ist; scheitert es, wird nicht migriert (`--ohne-backup` übergeht das).
   - `sg restore` (ohne Stand: Liste) spielt in eine neue Datenbank und neue Ordner ein und tauscht danach. Die alte Datenbank (`<db>_vor_restore_<zeit>`) und Ordner (`media.vor-restore-<zeit>`) bleiben liegen.
@@ -968,7 +975,7 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 
 ## 17. Moodle: Kurszuordnung und Abgleich (T1-23, F-MDL-03/-04)
 
-Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabellen aus 08 §9.4 in der Migration `0005_moodle`.
+Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabellen aus 08 §9.4 in der Migration `0005_moodle`. Die Lead-Entscheidungen aus dem Review von #133 sind hier und in 08 §9.1, §9.2 und §9.4 eingearbeitet.
 
 ### 17.1 Festlegungen aus PR #128 (Lead-Entscheidungen in #127)
 
@@ -987,14 +994,18 @@ Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabe
 | Tabelle | Ergänzung | Grund |
 |---|---|---|
 | `moodle_course_link` | `module_id` mit `ON DELETE CASCADE`, eindeutig über `moodle_course_id`. Lösen löscht die Zeile hart | Einstellung, kein Inhalt. Ein Modul kann mehrere Kurse haben |
-| `moodle_item` | `activity_name`, `filename` (Anzeige, ≤ 255 Byte UTF-8, Endung bleibt), `mime_type`, `kind_source` (`auto`/`manuell`), `last_error` (`kein_pdf`, `zu_gross`, `nicht_gefunden`, `download_fehlgeschlagen`). `sha256` ist `NULL`, solange die Datei nicht geladen wurde. `slide_deck_id`/`exercise_sheet_id` mit `ON DELETE SET NULL` | Anzeige, Inbox-Regel je Aktivität, Wiederholung nach Fehlern |
+| `moodle_item` | `activity_name`, `filename` (Anzeige, ≤ 255 Byte UTF-8, Endung bleibt), `mime_type`, `kind_source` (`auto`/`manuell`), `kind_decided_at` (Zeitpunkt der Inbox-Entscheidung, die jüngste gilt für die Aktivität), `last_error` (`kein_pdf`, `zu_gross`, `nicht_gefunden`, `download_fehlgeschlagen`). `sha256` ist `NULL`, solange die Datei nicht geladen wurde. `slide_deck_id`/`exercise_sheet_id` mit `ON DELETE SET NULL` | Anzeige, Inbox-Regel je Aktivität, Wiederholung nach Fehlern |
 | `moodle_deadline` | `source` (`aufgabe`/`termin`), `moodle_course_id`, `cmid`, `url`, `removed_in_moodle_at`. Eindeutig je `moodle_assignment_id` bzw. `moodle_event_id` (Teilindex) | Upsert beim Abgleich, keine Dublette Aufgabe ↔ Kalenderereignis |
 
 Die Dateien selbst liegen nur unter der ID des Materials (`media/decks/<id>/original.pdf`, `media/sheets/<id>/original.pdf`, 08 §7), nie unter dem Moodle-Namen. Der Moodle-Name wird nur bereinigt (`sanitizeFilename`) und gekürzt angezeigt bzw. als Titel genutzt.
 
 ### 17.3 Endpunkte
 
-Basis `/api/v1`. Lokale Daten (`links`, `items`, `synced-deadlines`, `GET /moodle/sync`) antworten auch ohne eingerichtetes Moodle. Listen ohne Cursor (die Menge ist durch die Kursinhalte begrenzt).
+Basis `/api/v1`. Die Pfade sind festgelegt (Lead, Review #133).
+- **Lokale Endpunkte antworten immer**, auch ohne eingerichtetes Moodle: `GET /moodle/links`, `PUT`/`DELETE /moodle/links/{course_id}`, `GET`/`PATCH /moodle/items`, `GET /moodle/sync`, `GET /moodle/synced-deadlines`. Nur Endpunkte, die Moodle aufrufen, antworten ohne Zugang mit `503 moodle_not_configured` (08 §9.1).
+- **Listen** ohne Cursor, mit `limit` (die Menge ist durch die Kursinhalte begrenzt).
+- **Inbox:** vorerst `GET /moodle/items?kind=offen` und `PATCH /moodle/items/{id}`. Mit Phase 2 wechseln die offenen Moodle-Dateien zu `inbox_item` (03 §8).
+- `items` und `synced-deadlines` zeigen nur Einträge **zugeordneter Kurse mit `sync_enabled`** und nicht gelöschtem Modul. Die Zeilen gelöster oder ausgeschalteter Kurse bleiben in der Datenbank.
 
 | Endpunkt | Body / Query | Antwort | Fehler |
 |---|---|---|---|
@@ -1002,21 +1013,23 @@ Basis `/api/v1`. Lokale Daten (`links`, `items`, `synced-deadlines`, `GET /moodl
 | `GET /moodle/links` | – | `MoodleCourseLinkList` | – |
 | `PUT /moodle/links/{course_id}` | `MoodleCourseLinkUpdate` | `MoodleCourseLink`. Startet einen Abgleich des Kurses im Hintergrund | `404 module_not_found` |
 | `DELETE /moodle/links/{course_id}` | – | `204`. Fristen des Kurses fallen weg, Dateien und Material bleiben | `404 moodle_link_not_found` |
-| `GET /moodle/items` | `course_id?`, `module_id?`, `kind?`, `include_removed?` | `MoodleItemList`, neueste zuerst. `kind=offen` = Einträge der Inbox | – |
-| `PATCH /moodle/items/{id}` | `MoodleItemUpdate` (`folien`/`uebung`/`ignoriert`) | `MoodleItem`. Startet bei Folien/Übung einen Abgleich des Kurses | `404 moodle_item_not_found` |
+| `GET /moodle/items` | `course_id?`, `module_id?`, `kind?`, `include_removed?`, `limit?` (1–1000, Standard 500) | `MoodleItemList`, neueste zuerst. `kind=offen` = Einträge der Inbox | – |
+| `PATCH /moodle/items/{id}` | `MoodleItemUpdate` (`folien`/`uebung`/`ignoriert`, `offen` = rückgängig) | `MoodleItem`. Startet bei Folien/Übung einen Abgleich des Kurses. `offen` setzt die Datei und alle mit derselben Entscheidung eingeordneten Dateien der Aktivität zurück (R15), schon angelegtes Material bleibt | `404 moodle_item_not_found` |
 | `GET /moodle/sync` | – | `MoodleSyncStatus` | – |
-| `POST /moodle/sync` | `MoodleSyncRequest` (`course_id?`) | `202 MoodleSyncStatus`. Läuft schon ein Abgleich, wird genau einer danach angehängt | `503 moodle_not_configured` |
+| `POST /moodle/sync` | `MoodleSyncRequest` (`course_id?`) | `202 MoodleSyncStatus`. Läuft schon ein Abgleich oder wartet einer, wird genau einer danach angehängt | `404 moodle_link_not_found` (Kurs nicht zugeordnet), `503 moodle_not_configured` |
 | `GET /moodle/synced-deadlines` | `module_id?`, `from?` (Standard jetzt), `to?`, `limit?` (1–200, Standard 50) | `MoodleSyncedDeadlineList` nach `due_at`, ohne in Moodle entfernte | – |
 
 ### 17.4 Ablauf des Abgleichs
 
-- **Wann:** beim Start des Core, danach alle 2 h, auf Knopfdruck (`POST /moodle/sync`), nach dem Bestätigen einer Zuordnung und nach einer Entscheidung in der Inbox. Immer nur ein Lauf gleichzeitig.
+- **Wann:** beim Start des Core, danach alle 2 h, auf Knopfdruck (`POST /moodle/sync`), nach dem Bestätigen einer Zuordnung und nach einer Entscheidung in der Inbox. Immer nur ein Lauf gleichzeitig. Direkt gestartet wird nur, wenn weder einer läuft noch einer wartet. Sonst geht die Anfrage im angehängten Lauf auf (Kurse zusammengefasst).
+- **Beenden des Core:** Neue Läufe starten nicht mehr, der angehängte wird verworfen. Der laufende bricht zwischen zwei Dateien bzw. Kursen ab (`error_code = abgebrochen`). Das Beenden wartet höchstens `SHUTDOWN_WAIT_MS` (7 s, unter der harten Frist von 10 s in `main.ts`).
 - **Zugang:** `nicht_eingerichtet` → kein Lauf (`MoodleSyncStatus.state = aus`). `ungueltig`/`abgelaufen` oder `moodle_token_invalid` während des Laufs → Lauf endet sofort mit `error_code = moodle_token_invalid`, `state = pausiert` (F-MDL-01).
 - **Kurse:** nur Zuordnungen mit `sync_enabled` zu nicht gelöschten Modulen. Ein Fehler in einem Kurs (z. B. `moodle_unreachable`) beendet nur diesen Kurs (`failed_courses`), `last_synced_at` bleibt dann stehen.
 - **Dateien:** sichtbare Dateien sichtbarer Abschnitte und Aktivitäten, wiedererkannt über `file_ref`.
-  - Neu: Einordnung nach 17.5, dann laden und anlegen. Nicht-PDF → `ignoriert` (nur gelistet).
+  - Neu: Einordnung nach 17.5, dann laden und anlegen. Nicht-PDF → `ignoriert` (nur gelistet). Eine `.pdf` ohne `%PDF` im Inhalt → `ignoriert` mit `last_error = kein_pdf`. Das gilt nur für diese Fassung: Ändern sich `timemodified` oder Größe, wird neu eingeordnet und geprüft.
+  - Eine neue Revision im Pfad (`…/content/<rev>/…`) ergibt einen neuen `file_ref` und damit eine neue Datei. Die alte wird als „in Moodle entfernt“ markiert.
   - Geändert (`timemodified` oder Größe): bei Folien/Übung neu laden. Gleicher `sha256` → nur Metadaten. Anderer → neuer Foliensatz bzw. neues Blatt, das alte bleibt. Die Abbildung von Notizen auf die neue Fassung (F-ORG-02) ist noch nicht umgesetzt.
-  - Unverändert: nichts laden.
+  - Unverändert: nichts laden und keine Zeile schreiben.
   - Weg oder versteckt: `removed_in_moodle_at` setzen, lokal nichts löschen. Taucht die Datei wieder auf, wird die Markierung entfernt.
 - **Anlegen** über `createSlideDeck` bzw. `createExerciseSheet` (wie beim Upload, mit `pdf.ingest`). Gleicher `sha256` schon im Modul → keine Kopie, nur Verknüpfung. Titel = Dateiname ohne `.pdf`, Blattnummer aus dem Namen.
 - **Fristen:** Aufgaben der Kurse mit `duedate` (`aufgabe`) und kommende Kalenderereignisse (`termin`, höchstens 50), außer Ereignissen zu einer schon übernommenen Aufgabe (gleiche `cmid`). Weggefallene Aufgaben bzw. kommende Ereignisse → `removed_in_moodle_at`.
@@ -1024,15 +1037,17 @@ Basis `/api/v1`. Lokale Daten (`links`, `items`, `synced-deadlines`, `GET /moodl
 
 ### 17.5 Einordnung (08 §9.4, F-MDL-04)
 
-Zuerst der Dateiname, dann der Name der Aktivität. Normalisiert (ü → ue), an Buchstaben-Ziffern-Grenzen getrennt.
+Zuerst der Dateiname, dann der Name der Aktivität. Vorher NFC (Namen aus macOS kommen oft als NFD, nie NFKC), dann normalisiert (ü → ue) und an Grenzen zwischen Buchstaben und ASCII-Ziffern `[0-9]` getrennt.
 - **Folien:** Folie(n), Vorlesung(en), VL, Slide(s), Lecture(s), auch in Zusammensetzungen („Vorlesungsfolien“).
 - **Übung:** Übung(en), Blatt/Blätter, Aufgabe(n), Exercise(s), Sheet(s), Muster `u05`, `ue3`, `Ü 05`, auch in Zusammensetzungen („Übungsblatt“, „Hausaufgabe“).
-- **Inbox (`offen`):** keine oder beide Arten, oder ein Hinweis auf eine Lösung („Lösung“, „Solution“).
+- **Inbox (`offen`):** keine oder beide Arten, oder ein Hinweis auf eine Lösung („Lösung“, „Solution“). Musterlösungen landen so bewusst in der Inbox, nicht als Übungsblatt (Lead, Review #133).
 - Eine Entscheidung in der Inbox (`kind_source = manuell`) gilt für die Datei, alle offenen Dateien derselben Aktivität und künftige Dateien der Aktivität.
 
 ### 17.6 Kurszuordnung (F-MDL-03)
 
-- `category`: `organisatorisch` bei Wortteilen wie „Klausurtermin“, „Prüfungsamt“, „Fachschaft“, „Informationen“. `alt`, wenn der Kurs mehr als 30 Tage vor dem Beginn des aktuellen Semesters startet (ohne Semesterbeginn: schon beendet). Sonst `aktuell`.
+- `category`: `organisatorisch` bei Wortteilen wie „Klausurtermin“, „Prüfungsamt“, „Fachschaft“, „Informationen“. `alt`, wenn der Kurs mehr als `SEMESTER_START_TOLERANCE_DAYS` = 30 Tage vor dem Beginn des aktuellen Semesters startet (Konstante in `services/core/src/moodle/classify.ts`; ohne Semesterbeginn: schon beendet). Sonst `aktuell`.
 - `suggested_module_id` nur für `aktuell` ohne Zuordnung: Name bzw. Kürzel eines Moduls des aktuellen Semesters im Kursnamen (wie F-KAL-02), sonst eindeutige Abkürzung. Ein Vorschlag ist keine Zuordnung, abgeglichen wird erst nach `PUT /moodle/links/{course_id}`.
 
-**Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404).
+**Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404). `MoodleSyncRun.error_code` kann außerdem `abgebrochen` sein (Beenden des Core).
+
+**Zeitformat:** Die neuen Antworten liefern Zeiten nach §6 (ohne `.000`). Die Lese-Endpunkte aus T1-22 liefern noch `.000Z`, das gleicht Folge-Issue #129 an.

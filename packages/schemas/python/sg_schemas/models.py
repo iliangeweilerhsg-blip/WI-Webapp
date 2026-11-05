@@ -685,11 +685,12 @@ class Kind(StrEnum):
     folien = 'folien'
     uebung = 'uebung'
     ignoriert = 'ignoriert'
+    offen = 'offen'
 
 
 class MoodleItemUpdate(BaseModel):
     """
-    Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“). Gilt für die ganze Aktivität
+    Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“, gilt für die ganze Aktivität). offen = Entscheidung rückgängig machen (R15)
     """
 
     model_config = ConfigDict(
@@ -2599,7 +2600,8 @@ class MoodleSyncRun(BaseModel):
         description='false = mindestens ein Kurs oder die Fristen konnten nicht abgeglichen werden',
     )
     error_code: StrictStr | None = Field(
-        ..., description='Fehlercode des Core (08 §9.1), z. B. moodle_unreachable'
+        ...,
+        description='Fehlercode des Core (08 §9.1), z. B. moodle_unreachable, oder abgebrochen (Core wurde beendet)',
     )
     courses: StrictInt = Field(..., description='Abgeglichene Kurse', ge=0)
     files_new: StrictInt = Field(..., ge=0)

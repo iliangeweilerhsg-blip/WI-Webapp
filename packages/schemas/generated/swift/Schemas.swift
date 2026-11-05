@@ -7823,10 +7823,10 @@ extension MoodleItemList {
 }
 
 /// Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung /
-/// ignorieren“). Gilt für die ganze Aktivität
+/// ignorieren“, gilt für die ganze Aktivität). offen = Entscheidung rückgängig machen (R15)
 // MARK: - MoodleItemUpdate
 struct MoodleItemUpdate: Codable {
-    let kind: MoodleItemUpdateKind
+    let kind: MoodleItemKind
 
     enum CodingKeys: String, CodingKey {
         case kind = "kind"
@@ -7852,7 +7852,7 @@ extension MoodleItemUpdate {
     }
 
     func with(
-        kind: MoodleItemUpdateKind? = nil
+        kind: MoodleItemKind? = nil
     ) -> MoodleItemUpdate {
         return MoodleItemUpdate(
             kind: kind ?? self.kind
@@ -7866,12 +7866,6 @@ extension MoodleItemUpdate {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
-}
-
-enum MoodleItemUpdateKind: String, Codable {
-    case folien = "folien"
-    case ignoriert = "ignoriert"
-    case uebung = "uebung"
 }
 
 // MARK: - MoodleNotification
@@ -8443,7 +8437,8 @@ struct MoodleSyncRun: Codable {
     let courses: Int
     /// Aktuelle Fristen nach dem Abgleich
     let deadlines: Int
-    /// Fehlercode des Core (08 §9.1), z. B. moodle_unreachable
+    /// Fehlercode des Core (08 §9.1), z. B. moodle_unreachable, oder abgebrochen (Core wurde
+    /// beendet)
     let errorCode: String?
     let failedCourses: [Int]
     let filesChanged: Int

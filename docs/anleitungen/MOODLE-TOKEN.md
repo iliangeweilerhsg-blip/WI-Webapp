@@ -1,7 +1,7 @@
 # Moodle-Token einrichten oder erneuern
 
 Gilt für Moodle.UP (`https://moodle2.uni-potsdam.de`, Anmeldung über UP-SSO/Shibboleth). Der Token gilt **12 Wochen**. Danach diese Schritte wiederholen. Dauer: etwa 2 Minuten.
-Hintergrund: F-MDL-01 (Kap. 04), 08 §9.1. Bis `pnpm sg moodle login` (T1-26) fertig ist, geht es von Hand.
+Hintergrund: F-MDL-01 (Kap. 04), 08 §9.1. Das ist der Weg, wenn `pnpm sg moodle login` mit Benutzername und Passwort nicht geht (SSO-Konto). Überblick: [MOODLE.md](MOODLE.md).
 
 > Der Token hat dieselben Rechte wie dein Moodle-Konto. Nicht in Chats, Issues, PRs oder Dateien einfügen. Bei Verdacht: in Moodle unter *Profil → Einstellungen → Sicherheitsschlüssel* zurücksetzen.
 
@@ -27,19 +27,23 @@ Safari kopiert Links mit `moodlemobile://` nicht per Rechtsklick. Darum:
 ## 3. Im Schlüsselbund ablegen
 
 ```bash
-security add-generic-password -a "$USER" -s studiengehirn-moodle -U -w "$(pbpaste)" && pbcopy < /dev/null && echo "gespeichert"
+pnpm sg moodle login --token-stdin
 ```
 
-Danach das Ablaufdatum unter *Profil → Einstellungen → Sicherheitsschlüssel* („Gültig bis“) in `~/StudienGehirn/config/moodle.json` eintragen:
+Bei der Frage nach dem Token mit `Cmd+V` einfügen (es erscheint nichts) und Enter drücken. Die CLI prüft den Token bei Moodle, legt ihn im Schlüsselbund ab (Dienst `studiengehirn-moodle`) und trägt das Ablaufdatum (heute + 12 Wochen) in `~/StudienGehirn/config/moodle.json` ein. Der Token steht dabei nie in der Befehlszeile.
 
-```json
-{ "site_url": "https://moodle2.uni-potsdam.de", "token_valid_until": "2027-01-27" }
+Danach die Zwischenablage leeren:
+
+```bash
+pbcopy < /dev/null
 ```
+
+Zeigt Moodle unter _Profil → Einstellungen → Sicherheitsschlüssel_ („Gültig bis“) ein anderes Datum, den Befehl mit `--gueltig-bis JJJJ-MM-TT` wiederholen.
 
 ## 4. Prüfen
 
 ```bash
-printf '%s' "wstoken=$(security find-generic-password -s studiengehirn-moodle -w)&wsfunction=core_webservice_get_site_info&moodlewsrestformat=json" | curl -s --data-binary @- https://moodle2.uni-potsdam.de/webservice/rest/server.php | python3 -m json.tool | grep -E '"(sitename|fullname)"'
+pnpm sg moodle status
 ```
 
-Erscheinen `Moodle.UP` und dein Name, ist alles fertig.
+Läuft der Core, erscheint `Zustand (laut Core): ok`, dazu Moodle.UP und dein Name.

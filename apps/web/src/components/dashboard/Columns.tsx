@@ -168,6 +168,16 @@ function Splitter({ index, grid, widths, onPreview, onCommit }: SplitterProps) {
   };
   // Beim Entfernen (z. B. Layoutwechsel) noch nicht gespeicherte Breiten sichern
   useEffect(() => () => flush(), []);
+  // Wählt der Nutzer innerhalb der Ruhezeit eine Vorlage, ersetzen deren Breiten die Tastenbreiten: der offene Commit
+  // verfällt (sonst ginge ein zweiter PATCH mit der Kopie der Vorlage als „gezogene Breiten“ hinaus)
+  const shown = useRef<Widths | null>(null);
+  useEffect(() => {
+    if (!pending.current) return;
+    if (shown.current && widths.every((n, i) => n === shown.current?.[i])) return;
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    pending.current = false;
+  }, [widths]);
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     let delta: number;
@@ -180,6 +190,7 @@ function Splitter({ index, grid, widths, onPreview, onCommit }: SplitterProps) {
     const next = dragWidths(widthsRef.current, index, delta);
     onPreview(next);
     widthsRef.current = next;
+    shown.current = next;
     pending.current = true;
     if (timer.current !== null) window.clearTimeout(timer.current);
     timer.current = window.setTimeout(flush, KEY_COMMIT_MS);
@@ -237,7 +248,8 @@ function Tabbed({ panels }: { panels: Record<ColumnId, ReactNode> }) {
             type="button"
             role="tab"
             aria-selected={active === col.id}
-            aria-controls={`dash-panel-${col.id}`}
+            // Nur der aktive Reiter hat ein Panel im DOM; inaktive würden auf eine fehlende ID zeigen
+            aria-controls={active === col.id ? `dash-panel-${col.id}` : undefined}
             tabIndex={active === col.id ? 0 : -1}
             onClick={() => setActive(col.id)}
             onKeyDown={(e) => onKeyDown(e, i)}

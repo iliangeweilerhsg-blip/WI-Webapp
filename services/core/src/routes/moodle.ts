@@ -46,6 +46,7 @@ import {
   decideItem,
   deleteLink,
   isKnownFileRef,
+  isLinked,
   listItems,
   listLinks,
   listSyncedDeadlines,
@@ -418,6 +419,7 @@ const ItemsQuery = z.object({
   module_id: UuidSchema.optional(),
   kind: MoodleItemKindSchema.optional(),
   include_removed: z.enum(['true', 'false']).optional(),
+  limit: z.coerce.number().int().min(1).max(1000).optional(),
 });
 const DeadlineListQuery = z.object({
   module_id: UuidSchema.optional(),
@@ -488,7 +490,8 @@ function registerSyncRoutes(
     {
       schema: {
         tags: ['Moodle'],
-        summary: 'Dateien aus zugeordneten Kursen. kind=offen sind die Einträge für die Inbox',
+        summary:
+          'Dateien aus zugeordneten Kursen mit Abgleich an, neueste zuerst (limit 1–1000, Standard 500). kind=offen: Inbox',
         querystring: ItemsQuery,
         response: { 200: MoodleItemListSchema },
       },
@@ -499,6 +502,7 @@ function registerSyncRoutes(
         moduleId: request.query.module_id,
         kind: request.query.kind,
         includeRemoved: request.query.include_removed === 'true',
+        limit: request.query.limit ?? 500,
       }),
     }),
   );
@@ -517,7 +521,9 @@ function registerSyncRoutes(
     },
     async (request) => {
       const { item, courseId } = await decideItem(db, request.params.item_id, request.body.kind);
-      if (item.kind !== 'ignoriert' && (await client.isConfigured())) kick('entscheidung', courseId);
+      if ((item.kind === 'folien' || item.kind === 'uebung') && (await client.isConfigured())) {
+        kick('entscheidung', courseId);
+      }
       return item;
     },
   );
@@ -541,12 +547,15 @@ function registerSyncRoutes(
         tags: ['Moodle'],
         summary: '„Jetzt abgleichen“: startet einen Abgleich im Hintergrund (läuft schon einer, danach)',
         body: MoodleSyncRequestSchema.optional(),
-        response: { 202: MoodleSyncStatusSchema, 503: ApiErrorSchema },
+        response: { 202: MoodleSyncStatusSchema, 404: ApiErrorSchema, 503: ApiErrorSchema },
       },
     },
     async (request, reply) => {
       if (!(await client.isConfigured())) throw moodleNotConfigured();
       const courseId = request.body?.course_id;
+      if (courseId && !(await isLinked(db, courseId))) {
+        throw new HttpError(404, 'moodle_link_not_found', 'Dieser Kurs ist keinem Modul zugeordnet.');
+      }
       void sync.run('manuell', courseId ? [courseId] : undefined).catch(() => {});
       return reply.code(202).send(await sync.status());
     },

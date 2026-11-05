@@ -72,6 +72,10 @@ interface Queued {
 }
 
 class TokenInvalid extends Error {}
+class SyncStopped extends Error {}
+
+/** So lange wartet das Herunterfahren höchstens auf einen laufenden Abgleich (main.ts beendet hart nach 10 s) */
+export const SHUTDOWN_WAIT_MS = 7_000;
 
 function codeOf(error: unknown): string {
   return error instanceof HttpError ? error.code : 'internal_error';
@@ -138,6 +142,7 @@ export class MoodleSync {
   private current: Promise<MoodleSyncRun> | null = null;
   private queued: Queued | null = null;
   private lastRun: MoodleSyncRun | null = null;
+  private stopped = false;
   private nextRunAt: Date | null = null;
 
   constructor(options: MoodleSyncOptions) {
@@ -173,7 +178,10 @@ export class MoodleSync {
    */
   run(trigger: MoodleSyncTrigger, courseIds?: readonly number[]): Promise<MoodleSyncRun> {
     const scope = courseIds ? new Set(courseIds) : null;
-    if (this.current === null) {
+    if (this.stopped) return Promise.resolve(this.abortedRun(trigger));
+    // Direkt nur, wenn weder einer läuft noch einer wartet: Zwischen dem Ende des laufenden und dem Start des
+    // angehängten Laufs ist `current` kurz leer (Review #133, S2)
+    if (this.current === null && this.queued === null) {
       return this.begin(trigger, scope);
     }
     if (this.queued) {
@@ -185,8 +193,10 @@ export class MoodleSync {
       return queued.promise;
     }
     const entry: Partial<Queued> & Pick<Queued, 'trigger' | 'scope'> = { trigger, scope };
-    entry.promise = this.current.then(() => {
+    entry.promise = (this.current ?? Promise.resolve()).then(() => {
       this.queued = null;
+      // Nach stop(): der angehängte Lauf wird verworfen
+      if (this.stopped) return this.abortedRun(entry.trigger);
       return this.begin(entry.trigger, entry.scope);
     });
     this.queued = entry as Queued;
@@ -196,6 +206,35 @@ export class MoodleSync {
   /** Wartet, bis kein Abgleich mehr läuft (Tests, Herunterfahren) */
   async idle(): Promise<void> {
     while (this.current || this.queued) await (this.queued?.promise ?? this.current);
+  }
+
+  /**
+   * Herunterfahren (Review #133, S3): keine neuen Läufe, der angehängte wird verworfen, der laufende bricht an der
+   * nächsten Stelle zwischen zwei Dateien bzw. Kursen ab (`error_code = abgebrochen`). Wartet höchstens `waitMs`,
+   * damit der Core vor seiner harten Frist (`SHUTDOWN_DEADLINE_MS` in main.ts) sauber endet.
+   */
+  async stop(waitMs: number = SHUTDOWN_WAIT_MS): Promise<void> {
+    this.stopped = true;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs);
+      timer.unref();
+    });
+    await Promise.race([this.idle(), timeout]);
+    clearTimeout(timer);
+  }
+
+  private abortedRun(trigger: MoodleSyncTrigger): MoodleSyncRun {
+    const run = emptyRun(trigger, this.now());
+    run.ok = false;
+    run.error_code = 'abgebrochen';
+    run.finished_at = run.started_at;
+    return run;
+  }
+
+  /** Zwischen Dateien und Kursen: nach stop() nicht weitermachen */
+  private checkStopped(): void {
+    if (this.stopped) throw new SyncStopped();
   }
 
   /** Abgleich beim Start und danach alle 2 h. Rückgabe stoppt den Zeitplan */
@@ -227,7 +266,12 @@ export class MoodleSync {
       await this.syncAll(run, scope);
     } catch (error) {
       run.ok = false;
-      run.error_code = error instanceof TokenInvalid ? 'moodle_token_invalid' : codeOf(error);
+      run.error_code =
+        error instanceof TokenInvalid
+          ? 'moodle_token_invalid'
+          : error instanceof SyncStopped
+            ? 'abgebrochen'
+            : codeOf(error);
       this.logger?.warn({ err: error, trigger }, 'Moodle-Abgleich abgebrochen');
     }
     run.finished_at = iso(this.now());
@@ -258,6 +302,7 @@ export class MoodleSync {
 
     const links = await activeLinks(this.db, scope ? [...scope] : null);
     for (const link of links) {
+      this.checkStopped();
       try {
         await this.syncCourse(link, run);
         await this.db
@@ -267,6 +312,7 @@ export class MoodleSync {
         run.courses += 1;
       } catch (error) {
         if (codeOfToken(error)) throw new TokenInvalid();
+        if (error instanceof SyncStopped) throw error;
         run.ok = false;
         run.error_code ??= codeOf(error);
         run.failed_courses.push(link.moodleCourseId);
@@ -274,6 +320,7 @@ export class MoodleSync {
       }
     }
     if (links.length === 0) return;
+    this.checkStopped();
     try {
       run.deadlines = await this.syncDeadlines(links);
     } catch (error) {
@@ -305,14 +352,16 @@ export class MoodleSync {
     // Entscheidung aus der Inbox gilt für die ganze Aktivität: die jüngste manuelle Einordnung je cmid
     const decided = new Map<number, { kind: string; at: number }>();
     for (const row of existing) {
-      if (row.kindSource !== 'manuell') continue;
+      if (row.kindSource !== 'manuell' || row.kindDecidedAt === null) continue;
       const previous = decided.get(row.cmid);
-      if (!previous || row.updatedAt.getTime() > previous.at) {
-        decided.set(row.cmid, { kind: row.kind, at: row.updatedAt.getTime() });
-      }
+      const at = row.kindDecidedAt.getTime();
+      if (!previous || at > previous.at) decided.set(row.cmid, { kind: row.kind, at });
     }
+    const classify = (filename: string, activity: string, cmid: number) =>
+      decided.get(cmid)?.kind ?? classifyFile(filename, activity) ?? 'offen';
 
     for (const { file, cmid, activity } of seen.values()) {
+      this.checkStopped();
       const filename = displayFilename(file.filename);
       const modified = file.modified_at ? new Date(file.modified_at) : null;
       let row = byRef.get(file.ref);
@@ -320,7 +369,7 @@ export class MoodleSync {
       if (!row) {
         const kind = !looksLikePdf(file.mime_type, filename)
           ? 'ignoriert'
-          : (decided.get(cmid)?.kind ?? classifyFile(filename, activity) ?? 'offen');
+          : classify(filename, activity, cmid);
         const [inserted] = await this.db
           .insert(moodleItem)
           .values({
@@ -348,19 +397,29 @@ export class MoodleSync {
           row.sizeBytes !== file.size_bytes;
         if (changed) run.files_changed += 1;
         const kindIsMaterial = row.kind === 'folien' || row.kind === 'uebung';
-        const [updated] = await this.db
-          .update(moodleItem)
-          .set({
-            activityName: activity,
-            filename,
-            mimeType: file.mime_type,
-            removedInMoodleAt: null,
-            // Material: die Fassung gilt erst nach dem Laden als verarbeitet. Sonst nur Metadaten
-            ...(changed && !kindIsMaterial ? { timemodified: modified, sizeBytes: file.size_bytes } : {}),
-          })
-          .where(eq(moodleItem.id, row.id))
-          .returning();
-        if (updated) row = updated;
+        const set: Partial<typeof moodleItem.$inferInsert> = {};
+        if (row.activityName !== activity) set.activityName = activity;
+        if (row.filename !== filename) set.filename = filename;
+        if (row.mimeType !== file.mime_type) set.mimeType = file.mime_type;
+        if (row.removedInMoodleAt !== null) set.removedInMoodleAt = null;
+        if (changed && row.lastError === 'kein_pdf' && looksLikePdf(file.mime_type, filename)) {
+          // „Kein PDF“ gilt nur für die geprüfte Fassung: eine neue wird neu eingeordnet und geprüft (Review #133, H5)
+          const kind = classify(filename, activity, row.cmid);
+          Object.assign(set, { kind, kindSource: 'auto', lastError: null, sha256: null });
+          if (kind === 'offen') run.inbox_new += 1;
+        } else if (changed && !kindIsMaterial) {
+          // Material: die Fassung gilt erst nach dem Laden als verarbeitet. Sonst nur Metadaten
+          Object.assign(set, { timemodified: modified, sizeBytes: file.size_bytes });
+        }
+        // Nur schreiben, wenn sich etwas ändert (Review #133, S5)
+        if (Object.keys(set).length > 0) {
+          const [updated] = await this.db
+            .update(moodleItem)
+            .set(set)
+            .where(eq(moodleItem.id, row.id))
+            .returning();
+          if (updated) row = updated;
+        }
       }
       if (this.needsImport(row, changed)) await this.importFile(row, file, modified, link.moduleId, run);
     }
@@ -455,7 +514,8 @@ export class MoodleSync {
         .where(eq(moodleItem.id, row.id));
       run.files_imported += 1;
     } finally {
-      // Bei einer Dublette (gleiche Datei schon im Modul) bleibt die temporäre Datei liegen
+      // Nach dem Anlegen ist die temporäre Datei verschoben, `rm` bleibt dann ohne Wirkung. Bei einer Dublette
+      // (gleiche Datei schon im Modul) oder einem Fehler liegt sie noch da und wird hier entfernt
       await rm(stored.tmpPath, { force: true });
     }
   }

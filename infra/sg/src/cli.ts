@@ -8,6 +8,8 @@ export const COMMANDS = {
   backup: 'Datensicherung in das Ziel aus den Einstellungen (pg_dump + media/ + vault/)',
   restore:
     'Stand wiederherstellen: restore <stand> | restore --test <stand> | restore --automatisch (Monatstest, nur eigene Stände) | restore (Liste)',
+  moodle:
+    'Moodle-Zugang: moodle login [--token-stdin] [--gueltig-bis JJJJ-MM-TT] | moodle status | moodle logout (Token im Schlüsselbund)',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;
@@ -44,7 +46,7 @@ export function helpText(): string {
     'Befehle:',
     ...lines,
     '',
-    'Umgebungsvariablen: SG_DATA_DIR (Standard ~/StudienGehirn), DATABASE_URL, SG_CORE_PORT (Standard 4710), SG_WEB_DIR',
+    'Umgebungsvariablen: SG_DATA_DIR (Standard ~/StudienGehirn), DATABASE_URL, SG_CORE_PORT (Standard 4710), SG_WEB_DIR, SG_MOODLE_URL',
     'Hinweis: Backups sind nicht signiert. Spiele mit "restore" nur eigene Backups ein, einem fremden Stand wird vertraut.',
     'Hilfe: pnpm sg --help',
   ].join('\n');

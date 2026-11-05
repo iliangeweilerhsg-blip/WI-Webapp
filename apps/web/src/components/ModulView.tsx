@@ -20,6 +20,7 @@ import { documentHref, type MaterialKind } from '../lib/material.ts';
 import { useToast } from '../lib/toast.tsx';
 import { useUploadTarget } from '../lib/uploads.tsx';
 import { CoreHint } from './CoreHint.tsx';
+import { ModuleSessionButton } from './today/SpontaneousStart.tsx';
 import { MaterialPanel } from './MaterialPanel.tsx';
 import { ModuleMoodle } from './ModuleMoodle.tsx';
 import { EmptyState } from './Placeholder.tsx';
@@ -360,6 +361,8 @@ function ModuleView() {
       {editing ? (
         <ModuleEditForm key={module.updated_at} module={module} onClose={() => setEditing(false)} />
       ) : null}
+
+      {!editing ? <ModuleSessionButton moduleId={module.id} /> : null}
 
       <ModuleMoodle moduleId={module.id} />
 
