@@ -450,6 +450,80 @@ describe('Nacharbeit Review: Bestätigung über die Route', () => {
   });
 });
 
+describe('Härtung #93: defensive Zugriffe auf Moodle-Antworten', () => {
+  it.each([null, 'ok', 1, []])(
+    'completion.set: Antwort %j → 200 mit status false, kein 500',
+    async (body) => {
+      const { app: a } = await setup({
+        responses: { core_completion_update_activity_completion_status_manually: body },
+      });
+      const res = await a.inject({
+        method: 'POST',
+        url: '/moodle/actions/completion.set/execute',
+        payload: { params: { cmid: 5, completed: true } },
+      });
+      expect(res.statusCode).toBe(200);
+      const result = MoodleActionResultSchema.parse(res.json());
+      expect(result).toMatchObject({
+        result: { status: false },
+        summary: 'Moodle hat die Änderung nicht bestätigt.',
+      });
+    },
+  );
+
+  it.each([null, {}, 'true'])(
+    'notifications.mark_read: Antwort %j → 200 mit done false, kein 500',
+    async (body) => {
+      const { app: a } = await setup({
+        responses: { core_message_mark_all_notifications_as_read: body },
+      });
+      const res = await a.inject({
+        method: 'POST',
+        url: '/moodle/actions/notifications.mark_read/execute',
+        payload: { params: {} },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(MoodleActionResultSchema.parse(res.json())).toMatchObject({
+        result: { done: false },
+        summary: 'Moodle hat die Änderung nicht bestätigt.',
+      });
+    },
+  );
+
+  it('functions: [null] in der Seiteninfo → Status und Katalog antworten mit 200', async () => {
+    const fake = fakeFetch(
+      restHandler({
+        core_webservice_get_site_info: {
+          ...siteInfo([]),
+          functions: [null, { name: 'core_completion_update_activity_completion_status_manually' }],
+        },
+      }),
+    );
+    const moodle = createMoodleServices({
+      config: { moodleUrl: FAKE_BASE, dataDir: '/gibt/es/nicht' },
+      tokens: new StaticTokenStore(FAKE_TOKEN),
+      fetch: fake.fetch,
+      handlers: DEFAULT_ACTION_HANDLERS,
+      readMeta: async () => ({ token_valid_until: '2027-01-27' }),
+    });
+    app = Fastify({ logger: false });
+    app.setValidatorCompiler(validatorCompiler);
+    app.setSerializerCompiler(serializerCompiler);
+    registerErrorHandler(app);
+    await app.register(moodleRoutes, { moodle });
+    await app.ready();
+
+    const status = await app.inject({ method: 'GET', url: '/moodle/status' });
+    expect(status.statusCode).toBe(200);
+    expect(MoodleStatusSchema.parse(status.json()).state).toBe('ok');
+    const catalog = await app.inject({ method: 'GET', url: '/moodle/actions' });
+    expect(catalog.statusCode).toBe(200);
+    const items = MoodleActionCatalogSchema.parse(catalog.json()).items;
+    expect(items.find((i) => i.id === 'completion.set')?.available).toBe(true);
+    expect(items.find((i) => i.id === 'notifications.mark_read')?.available).toBe(false);
+  });
+});
+
 describe('Schreibende Moodle-Funktionen', () => {
   it('jede schreibende Funktion aus dem Aktionskatalog steht in WRITE_WSFUNCTIONS', () => {
     const fromCatalog = Object.values(MOODLE_ACTION_SPECS)

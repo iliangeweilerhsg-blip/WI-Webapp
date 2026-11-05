@@ -2,7 +2,10 @@
 // Der Token steht nur im Body der Anfragen, nie in URL, Log oder Fehlermeldung.
 import { Readable } from 'node:stream';
 import { HttpError } from '../errors.ts';
+import { filenameFrom } from './content-disposition.ts';
 import type { MoodleTokenStore } from './token-store.ts';
+
+export { filenameFrom, sanitizeFilename } from './content-disposition.ts';
 
 /** Werte, die als Moodle-Parameter erlaubt sind. `null`/`undefined` werden weggelassen */
 export type MoodleParamValue =
@@ -39,6 +42,10 @@ export interface MoodleClientOptions {
   fileTimeoutMs?: number;
   /** Wartezeiten vor Wiederholungen lesender Aufrufe (Standard 1 s, 4 s) */
   retryDelaysMs?: readonly number[];
+  /** Größte JSON-Antwort der REST-Schnittstelle in Byte (Standard `MAX_RESPONSE_BYTES`) */
+  maxResponseBytes?: number;
+  /** Größte Datei beim Download in Byte (Standard `MAX_FILE_BYTES`) */
+  maxFileBytes?: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -47,6 +54,10 @@ export interface MoodleDownload {
   stream: Readable;
   contentType: string;
   contentLength: number | null;
+  /**
+   * Bereinigt mit `sanitizeFilename`, ohne Pfad und Steuerzeichen. Nicht roh in einen Header
+   * einsetzen. Ausgabe nur als `filename*=UTF-8''<RFC-5987-kodiert>` plus ASCII-Ersatz.
+   */
   filename: string | null;
 }
 
@@ -56,6 +67,64 @@ const REST_PATH = '/webservice/rest/server.php';
 const PLUGINFILE_PATH = '/webservice/pluginfile.php';
 /** Größte JSON-Antwort, die beim Datei-Download als mögliche Fehlermeldung gelesen wird */
 const MAX_JSON_ERROR_BYTES = 64 * 1024;
+/** Obergrenze für JSON-Antworten der REST-Schnittstelle (Review #125: `response.text()` begrenzen) */
+export const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
+/** Obergrenze für einen Datei-Download. Größere Dateien bricht der Core ab */
+export const MAX_FILE_BYTES = 512 * 1024 * 1024;
+/** Ersatz für den Token, falls Moodle ihn in einer Antwort zurückschickt */
+const REDACTED = '[Redacted]';
+
+/**
+ * Ersetzt den Token in allen Texten einer Moodle-Antwort (auch in Schlüsseln). Moodle hängt ihn
+ * z. B. an Download-Adressen (`?token=…`), ein Proxy oder eine Fehlermeldung könnte ihn zurückgeben.
+ * So erreicht er weder Web-App noch Log.
+ */
+export function scrubToken<T>(value: T, token: string): T {
+  if (token === '') return value;
+  // Groß-/Kleinschreibung egal: Moodle-Tokens sind Hex, ein Proxy könnte sie in Großbuchstaben spiegeln
+  const pattern = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  const walk = (item: unknown): unknown => {
+    if (typeof item === 'string') return item.replace(pattern, REDACTED);
+    if (Array.isArray(item)) return item.map(walk);
+    if (typeof item === 'object' && item !== null) {
+      const out: Record<string, unknown> = {};
+      for (const [key, entry] of Object.entries(item)) out[walk(key) as string] = walk(entry);
+      return out;
+    }
+    return item;
+  };
+  return walk(value) as T;
+}
+
+/** Interner Fehler: Antwort größer als erlaubt. Wird nicht wiederholt */
+class TooLargeError extends Error {}
+
+/**
+ * Liest den Body als UTF-8-Text, höchstens `maxBytes`. Ein größerer `Content-Length` oder mehr
+ * Daten brechen sofort ab (`TooLargeError`), ohne den Rest zu lesen.
+ */
+async function readTextLimited(response: Response, maxBytes: number): Promise<string> {
+  const declared = response.headers.get('content-length');
+  if (declared && /^\d+$/.test(declared) && Number(declared) > maxBytes) {
+    await discard(response);
+    throw new TooLargeError();
+  }
+  const reader = response.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    size += chunk.value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new TooLargeError();
+    }
+    chunks.push(chunk.value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
 
 /**
  * Moodle-Funktionen, die schreiben. `read()` verweigert sie, damit ein Schreibaufruf nie aus Versehen
@@ -88,8 +157,29 @@ export function moodleNotConfigured(): HttpError {
 }
 
 /**
+ * Formularfelder, die nur `call()` selbst setzt. Kein Parameter darf sie überschreiben (auch nicht
+ * verschachtelt): PHP nimmt bei doppelten Feldern das letzte Vorkommen.
+ */
+export const RESERVED_FIELDS: ReadonlySet<string> = new Set(['wstoken', 'wsfunction', 'moodlewsrestformat']);
+
+/**
+ * Erlaubte Schlüssel in Parametern. Moodle-Parameter sind immer Bezeichner. Alles andere könnte die
+ * Klammerschreibweise aufbrechen (`a]`, `wstoken[x]`) oder von PHP umgedeutet werden (` wstoken`).
+ */
+const PARAM_KEY = /^[A-Za-z0-9_]+$/;
+
+function checkParamKey(key: string): void {
+  if (!PARAM_KEY.test(key) || RESERVED_FIELDS.has(key.toLowerCase())) {
+    // Programmierfehler im Core, kein Fehler der Nutzerin: darum kein HttpError
+    throw new Error(`Unzulässiger Moodle-Parameter ${JSON.stringify(key)}`);
+  }
+}
+
+/**
  * Wandelt verschachtelte Parameter in Moodles Formularschreibweise um:
  * `{ a: [{ b: 1 }], c: true }` → `a[0][b]=1`, `c=1`.
+ * Wirft bei reservierten Feldern (`RESERVED_FIELDS`) und bei Schlüsseln, die keine Bezeichner sind,
+ * auf jeder Ebene.
  */
 export function flattenParams(params: MoodleParams): [string, string][] {
   const out: [string, string][] = [];
@@ -99,6 +189,7 @@ export function flattenParams(params: MoodleParams): [string, string][] {
       value.forEach((item: MoodleParamValue, index) => walk(`${prefix}[${index}]`, item));
     } else if (typeof value === 'object') {
       for (const [key, item] of Object.entries(value as Record<string, MoodleParamValue>)) {
+        checkParamKey(key);
         walk(`${prefix}[${key}]`, item);
       }
     } else if (typeof value === 'boolean') {
@@ -108,7 +199,10 @@ export function flattenParams(params: MoodleParams): [string, string][] {
     }
   };
   // Oberste Ebene ohne eckige Klammern um den Schlüssel
-  for (const [key, value] of Object.entries(params)) walk(key, value);
+  for (const [key, value] of Object.entries(params)) {
+    checkParamKey(key);
+    walk(key, value);
+  }
   return out;
 }
 
@@ -242,20 +336,6 @@ function isMoodleException(value: unknown): value is MoodleException {
   );
 }
 
-function filenameFrom(disposition: string | null): string | null {
-  if (!disposition) return null;
-  const star = /filename\*=(?:UTF-8'')?([^;]+)/i.exec(disposition);
-  if (star?.[1]) {
-    try {
-      return decodeURIComponent(star[1].trim().replace(/^"|"$/g, ''));
-    } catch {
-      // weiter mit filename=
-    }
-  }
-  const plain = /filename="?([^";]+)"?/i.exec(disposition);
-  return plain?.[1] ?? null;
-}
-
 /** Weiterleitung oder (im Browser) undurchsichtige Weiterleitung */
 function isRedirect(response: Response): boolean {
   return response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400);
@@ -274,6 +354,8 @@ export class MoodleClient {
   private readonly timeoutMs: number;
   private readonly fileTimeoutMs: number;
   private readonly retryDelaysMs: readonly number[];
+  private readonly maxResponseBytes: number;
+  private readonly maxFileBytes: number;
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly tokenRejectedListeners: (() => void)[] = [];
@@ -294,6 +376,8 @@ export class MoodleClient {
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.fileTimeoutMs = options.fileTimeoutMs ?? 120_000;
     this.retryDelaysMs = options.retryDelaysMs ?? [1000, 4000];
+    this.maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
+    this.maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
   }
 
   /** Wird aufgerufen, wenn Moodle den Token ablehnt (z. B. um den Status neu zu prüfen) */
@@ -334,10 +418,12 @@ export class MoodleClient {
   private async call<T>(wsfunction: string, params: MoodleParams, write: boolean): Promise<T> {
     const token = await this.requireToken();
     const body = new URLSearchParams([
+      ...flattenParams(params),
+      // Reservierte Felder zuletzt: PHP nimmt bei doppelten Feldern das letzte Vorkommen. Zusammen mit
+      // der Prüfung in flattenParams kann kein Parameter Token, Funktion oder Format überschreiben.
       ['wstoken', token],
       ['wsfunction', wsfunction],
       ['moodlewsrestformat', 'json'],
-      ...flattenParams(params),
     ]).toString();
 
     const data = await this.withRetries(wsfunction, write, async () => {
@@ -369,13 +455,15 @@ export class MoodleClient {
       }
       let text: string;
       try {
-        text = await response.text();
+        text = await readTextLimited(response, this.maxResponseBytes);
       } catch (error) {
+        if (error instanceof TooLargeError) throw this.unreachable(wsfunction, 'too_large', write);
         throw transientFrom(error);
       }
       this.logger?.debug({ wsfunction, duration_ms: this.now() - started }, 'Moodle-Aufruf');
       try {
-        return JSON.parse(text) as unknown;
+        // Token aus der Antwort entfernen, bevor sie irgendwo weiterverarbeitet oder geloggt wird
+        return scrubToken(JSON.parse(text) as unknown, token);
       } catch {
         throw this.unreachable(wsfunction, 'no_json', write);
       }
@@ -389,6 +477,10 @@ export class MoodleClient {
    * Lädt eine Datei über `webservice/pluginfile.php`. Der Token geht als Formularfeld `token` per POST
    * mit. Der Platz in der Drosselung bleibt belegt, bis der Stream endet, zerstört wird oder das
    * Zeitlimit (120 s) abläuft. Danach wird der Stream mit Fehler beendet.
+   *
+   * Größenlimit (`maxFileBytes`): Ein größerer `Content-Length` → `502 moodle_unreachable` mit
+   * `details.reason = "too_large"`, ohne die Datei zu lesen. Ohne oder mit falschem `Content-Length`
+   * bricht der Stream mit Fehler ab, sobald mehr Byte ankommen als erlaubt bzw. angekündigt.
    */
   async downloadFile(ref: string): Promise<MoodleDownload> {
     if (!isValidFileRef(ref)) {
@@ -408,7 +500,8 @@ export class MoodleClient {
       try {
         response = await this.fetchFn(target.toString(), {
           method: 'POST',
-          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          // Ohne Kompression: Content-Length gilt dann für die gelieferten Byte (Limit, Weitergabe)
+          headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept-encoding': 'identity' },
           body: new URLSearchParams([['token', token]]).toString(),
           redirect: 'manual',
           signal: AbortSignal.timeout(this.fileTimeoutMs),
@@ -435,16 +528,31 @@ export class MoodleClient {
 
       const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
       const lengthHeader = response.headers.get('content-length');
-      const contentLength = lengthHeader && /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : null;
-      const filename = filenameFrom(response.headers.get('content-disposition'));
+      // Komprimiert Moodle trotzdem, entpackt fetch: Content-Length nennt dann die komprimierte Größe
+      // und gilt weder fürs Limit noch für die Antwort an die Web-App
+      const encoding = (response.headers.get('content-encoding') ?? 'identity').trim().toLowerCase();
+      const contentLength =
+        encoding === 'identity' && lengthHeader && /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : null;
+      const disposition = response.headers.get('content-disposition');
+      const rawName = filenameFrom(disposition);
+      // Auch ein Dateiname von Moodle darf den Token nicht weitertragen (Header an die Web-App)
+      const filename = rawName === null ? null : scrubToken(rawName, token);
+      if (contentLength !== null && contentLength > this.maxFileBytes) {
+        await discard(response);
+        throw this.unreachable(label, 'too_large', false);
+      }
+      // Höchstens so viele Byte gehen durch: Limit bzw. angekündigte Länge, falls kleiner
+      const limit = Math.min(this.maxFileBytes, contentLength ?? Number.POSITIVE_INFINITY);
       const reader = response.body?.getReader();
       if (!reader) return { stream: Readable.from([]), contentType, contentLength, filename };
       const body = reader;
 
-      // Fehler meldet pluginfile.php als kleines JSON mit HTTP 200. Höchstens 64 KB davon lesen
+      // Fehler meldet pluginfile.php als kleines JSON mit HTTP 200. Höchstens 64 KB davon lesen.
+      // Eine echte Datei kommt mit Content-Disposition: Dann ist JSON Inhalt (z. B. ein Forenanhang
+      // eines Dritten mit `errorcode: invalidtoken`) und wird nie als Fehlermeldung gedeutet
       const head: Uint8Array[] = [];
       let done = false;
-      if (contentType.toLowerCase().startsWith('application/json')) {
+      if (disposition === null && contentType.toLowerCase().startsWith('application/json')) {
         let size = 0;
         try {
           while (size <= MAX_JSON_ERROR_BYTES) {
@@ -466,6 +574,7 @@ export class MoodleClient {
           } catch {
             // keine Fehlermeldung, sondern eine JSON-Datei
           }
+          parsed = scrubToken(parsed, token);
           if (isMoodleException(parsed)) {
             if (parsed.errorcode === 'filenotfound') {
               throw new HttpError(404, 'moodle_file_not_found', 'Moodle findet die Datei nicht.');
@@ -474,6 +583,31 @@ export class MoodleClient {
           }
         }
       }
+
+      // Das erste Stück noch hier lesen: Bricht Moodle direkt nach den Headern ab oder bleibt stehen,
+      // läuft das über Wiederholung bzw. 502, bevor die Web-App Header bekommt
+      if (!done && head.length === 0) {
+        try {
+          const chunk = await reader.read();
+          if (chunk.done) done = true;
+          else head.push(chunk.value);
+        } catch (error) {
+          throw transientFrom(error);
+        }
+      }
+
+      // Schon der gelesene Anfang ist zu groß bzw. unvollständig: abbrechen, solange withRetries den
+      // Platz noch freigibt
+      let received = head.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+      if (received > limit) {
+        await body.cancel().catch(() => {});
+        throw this.unreachable(label, 'too_large', false);
+      }
+      if (done && contentLength !== null && received < contentLength) {
+        throw this.unreachable(label, 'incomplete', false);
+      }
+      // Fehler im laufenden Stream: wie alle Moodle-Fehler als 502 mit Grund
+      const fail = (reason: string) => this.unreachable(label, reason, false);
 
       // Ab hier gibt der Stream den Platz frei: am Ende, bei destroy() oder spätestens nach dem
       // Zeitlimit, auch wenn niemand den Stream liest
@@ -501,10 +635,22 @@ export class MoodleClient {
           }
           body.read().then(
             (chunk) => {
-              if (chunk.done) this.push(null);
-              else this.push(chunk.value);
+              if (chunk.done) {
+                if (contentLength !== null && received < contentLength) {
+                  this.destroy(fail('incomplete'));
+                } else {
+                  this.push(null);
+                }
+                return;
+              }
+              received += chunk.value.byteLength;
+              if (received > limit) {
+                this.destroy(fail('too_large'));
+                return;
+              }
+              this.push(chunk.value);
             },
-            (error: unknown) => this.destroy(error instanceof Error ? error : new Error(String(error))),
+            (error: unknown) => this.destroy(fail(transientFrom(error).reason)),
           );
         },
         destroy(error, callback) {
@@ -516,10 +662,7 @@ export class MoodleClient {
       // (Zeitlimit oder Netzfehler). Aufrufer mit pipeline/for await bekommen den Fehler trotzdem.
       stream.on('error', () => {});
       // finish() läuft frühestens im nächsten Tick, timer ist dann gesetzt
-      const timer = setTimeout(
-        () => stream.destroy(new Error('Zeitlimit beim Datei-Download überschritten')),
-        this.fileTimeoutMs,
-      );
+      const timer = setTimeout(() => stream.destroy(fail('timeout')), this.fileTimeoutMs);
       timer.unref();
       return { stream, contentType, contentLength, filename };
     });
@@ -585,6 +728,13 @@ export class MoodleClient {
         'Die nötige Moodle-Funktion ist für diesen Zugang nicht freigegeben.',
         { wsfunctions: [wsfunction], moodle_errorcode: errorcode },
       );
+    }
+    // pluginfile.php: Der Text kann aus einer fremden Datei stammen, darum nicht an die Web-App
+    if (wsfunction === 'pluginfile') {
+      return new HttpError(502, 'moodle_error', 'Moodle meldet einen Fehler.', {
+        wsfunction,
+        moodle_errorcode: errorcode,
+      });
     }
     return new HttpError(502, 'moodle_error', message || 'Moodle meldet einen Fehler.', {
       wsfunction,
