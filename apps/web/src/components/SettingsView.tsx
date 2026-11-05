@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ComingSoon } from './settings/ComingSoon.tsx';
+import { DevicesSettings } from './settings/DevicesSettings.tsx';
 import { SettingsTabContext, type TabMark } from './settings/form.tsx';
 import { GeneralSettingsForm } from './settings/GeneralSettings.tsx';
 import { LectureSettingsForm } from './settings/LectureSettings.tsx';
@@ -44,7 +45,7 @@ const TABS: readonly SettingsTab[] = [
   { id: 'allgemein', label: 'Allgemein', panel: () => <GeneralTab /> },
   { id: 'vorlesung', label: 'Vorlesung', panel: () => <LectureSettingsForm /> },
   { id: 'stift', label: 'Stift', panel: () => <PenSettingsForm /> },
-  { id: 'geraete', label: 'Geräte', panel: () => <ComingSoon title="Geräte" ticket="T1-10" /> },
+  { id: 'geraete', label: 'Geräte', panel: () => <DevicesSettings /> },
   {
     id: 'daten',
     label: 'Daten und Papierkorb',

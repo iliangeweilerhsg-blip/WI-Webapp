@@ -248,7 +248,12 @@ describe('PATCH /settings', () => {
   describe('nur lokal ändern', () => {
     let remote: TestApp;
     beforeAll(async () => {
-      remote = await startTestApp({}, { verifyDeviceToken: async () => true });
+      remote = await startTestApp(
+        {},
+        {
+          verifyDeviceToken: async () => ({ deviceId: '0190f6a2-0000-7000-8000-0000000000f1' }),
+        },
+      );
     });
     afterAll(async () => {
       await remote.close();

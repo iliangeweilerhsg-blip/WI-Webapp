@@ -27,6 +27,14 @@ export const STALE_RESERVATION_MINUTES = 5;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 declare module 'fastify' {
+  interface FastifyContextConfig {
+    /**
+     * `false`: Die Route speichert keine Antworten unter einem `Idempotency-Key` (der Header wird ignoriert).
+     * Pflicht für Antworten mit Geheimnissen (Kopplungscode, Geräte-Token, VERTRAEGE §12): Sie dürfen nie in
+     * der Datenbank landen.
+     */
+    idempotency?: boolean;
+  }
   interface FastifyRequest {
     idempotency?: { key: string; method: string; path: string };
     /**
@@ -67,6 +75,7 @@ export async function purgeIdempotencyKeys(db: Db): Promise<number> {
 export function registerIdempotency(app: FastifyInstance, db: Db): void {
   app.addHook('preHandler', async (request, reply) => {
     if (request.method !== 'POST' || request.is404) return;
+    if (request.routeOptions.config.idempotency === false) return;
     const header = request.headers['idempotency-key'];
     if (header === undefined) return;
     if (typeof header !== 'string' || !UUID_RE.test(header)) {

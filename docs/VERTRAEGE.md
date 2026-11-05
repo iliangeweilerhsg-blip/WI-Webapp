@@ -138,6 +138,11 @@ In der DB steht `file_path` relativ zu `SG_DATA_DIR`. So lässt sich der Datenor
 - **Ab Phase 1 (T1-10):** Der Core vergleicht `sha256(token)` mit `device.token_hash` gekoppelter, nicht gelöschter Geräte. Fehlt das Token: `401 device_token_required`. Ist es unbekannt oder widerrufen: `401 device_token_invalid`. Bei Erfolg setzt der Core `device.last_seen_at`, höchstens einmal pro Minute. Ohne Token aus dem Netz erreichbar sind nur `POST /devices/pair/start` und `POST /devices/pair/confirm`. Der WebSocket `/sync` ist eine Netzroute wie alle anderen: Token im `Authorization`-Header des Upgrades (§11.1). Für alle anderen Routen gelten lokale Anfragen und Anfragen mit gültigem Token gleich, außer den als **lokal** markierten (§7).
 - **Schutz gegen DNS-Rebinding:** Gilt nur für Anfragen über Loopback, also lokale Anfragen. Ist ihr `Host` nicht `localhost`, `127.0.0.1` oder `[::1]` (jeweils mit `SG_CORE_PORT`), antwortet der Core mit `421 host_not_allowed`. Anfragen aus dem Netz, etwa vom iPad über die IP oder `<rechnername>.local`, prüft er stattdessen über das Geräte-Token.
 - **Schutz gegen CSRF:** Zustandsändernde Anfragen (`POST`, `PUT`, `PATCH`, `DELETE`) mit `Origin`-Header werden mit `403 origin_not_allowed` abgelehnt. Ausgenommen sind die eigene Herkunft (`http://<erlaubter Host>:<SG_CORE_PORT>`) und `SG_DEV_WEB_ORIGIN`. Ohne `Origin`-Header (z. B. `curl`, iPad-App) gilt nur die Token-Regel.
+- **Nachtrag T1-10 (Umsetzung):**
+  - Ob eine Route lokal ist bzw. ohne Token erreichbar, steht an der Route (`config.sgAccess = 'local' | 'pairing'`) und wird nach dem Routing gelesen, nie per Textvergleich mit der URL. Unbekannte Pfade brauchen aus dem Netz immer ein Token.
+  - Reihenfolge aus dem Netz: Token fehlt → `401 device_token_required`, Token ungültig → `401 device_token_invalid`, erst danach `403 local_only`. Bei `pair/start` und `pair/confirm` (nur `POST`) wird ein mitgesendetes Token ignoriert.
+  - Ein Token, das nicht dem Format aus `PairResponse` entspricht (43 Zeichen base64url), gilt ohne Datenbankabfrage als ungültig. Die Prüfung liest ohne Cache: Ein widerrufenes Gerät ist mit dem Commit von `DELETE /devices/{id}` ungültig.
+  - Abgelehnte WebSocket-Upgrades bekommen `Connection: close`, der Core schließt den Socket nach der Antwort.
 - Statische Web-App unter `/`. Unbekannte Pfade außerhalb von `/api` liefern `index.html` bzw. die passende `.html`-Datei aus dem Export.
 - Die Web-App nutzt Routen mit Query-Parametern statt dynamischer Segmente (`/modul?id=<uuid>`), weil der Static Export die IDs beim Build nicht kennt.
 
@@ -283,6 +288,14 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad leer, nicht absolut, kein vorhandener beschreibbarer Ordner, `SG_DATA_DIR` oder darin, Systemordner), 403 `local_only` (**`data.backup_target` nur lokal**: jede Änderung dieses Feldes aus dem Netz, auch mit Geräte-Token) |
 
 Modul-Einstellungen laufen über `PATCH /modules/{id}` (§14.2).
+
+**Nachtrag T1-10:**
+- `GET /devices` liefert gekoppelte, nicht entfernte Geräte, älteste zuerst. Entfernte Geräte kommen **nicht** in den Papierkorb: Ein Wiederherstellen würde ein widerrufenes Token wieder gültig machen.
+- `DELETE /devices/{id}` ist eine normale Netzroute: Ein Gerät darf sich mit seinem Token auch selbst entfernen.
+- `GET /devices/pairings/requests` setzt zusätzlich zwei Header für die Web-App (das Schema `PairingRequestList` bleibt unverändert):
+  - `SG-Pairing-State`: `none` (kein Fenster seit dem Start), `open`, `qr_only` (zu viele Fehlversuche über `pair/start`, §12 Schritt 4), `expired`, `paired`, `closed_failures` (zu viele Fehlversuche über den QR-Weg), `locked` (`423`)
+  - `SG-Pairing-Id`: `pairing_id` des aktuellen Fensters. Weicht sie von der eigenen ab, wurde das Fenster an anderer Stelle ersetzt.
+- `POST /devices/pairings`, `pair/start` und `pair/confirm` speichern **keine** Antwort unter einem `Idempotency-Key` (08 §1), der Header wird ignoriert. Sonst stünden Code bzw. Geräte-Token im Klartext in `idempotency_key`. Antworten mit Code oder Token tragen `Cache-Control: no-store`.
 
 ## 8. Kalender: Import und Abgleich (T1-01)
 
@@ -581,6 +594,22 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
    - Ein Hash eines 6-stelligen Codes wäre offline in Sekunden durchprobiert. HMAC bräuchte ein weiteres Server-Geheimnis, das verwaltet werden müsste.
    - Folge: Ein Neustart des Core schließt das Fenster, der Nutzer öffnet es neu.
 6. Gerät entfernen (`DELETE /devices/{id}`) widerruft das Token sofort und schließt seine Verbindungen (08 §3).
+7. **Nachtrag T1-10: Schutz gegen Blockade (DoS) und Präzisierungen.**
+   - **Problem:** `pair/start` gibt jedem im WLAN die `pairing_id`. Damit konnte ein Angreifer mit 20 falschen Codes das ganze Fenster schließen, nach jedem neuen Fenster wieder (Restrisiko aus Schritt 4). Das echte iPad kam so auch per QR-Code nicht durch.
+   - **Lösung: zwei Kennungen pro Fenster.**
+     - Die `pairing_id` aus `PairingCode` und dem QR-Code ist **geheim**: eine zufällige UUID (v4, 122 Bit). Sie steht nur im QR-Code und in der lokalen Web-App, nie in einer Antwort an das Netz.
+     - `pair/start` antwortet mit einer zweiten, **öffentlichen** `pairing_id` desselben Fensters. Diese steht auch in `PairingRequest.pairing_id`. Für das iPad ändert sich nichts: Es schickt bei `confirm` die `pairing_id`, die es hat (QR oder `pair/start`).
+     - Fehlversuche zählen **je Weg**: 20 falsche Codes über die öffentliche Kennung schließen nur den Weg über `pair/start` (Bonjour und manuelle Eingabe: `409 pairing_window_closed`, Zustand `qr_only`). Der QR-Weg bleibt offen. 20 falsche Codes über die geheime Kennung schließen das Fenster (`closed_failures`), das kann nur, wer den QR-Code sieht.
+     - Pro Nonce (5) und global (mehr als 20 pro Stunde → `423`) gelten wie in Schritt 4, gezählt über beide Wege. Ein Angreifer ohne QR-Code kommt pro Fenster auf höchstens 20 Fehlversuche und löst die Sperre darum nicht allein aus.
+     - Brute-Force bleibt bei höchstens 20 Versuchen pro Fenster (Trefferchance ≤ 2·10⁻⁵). Die geheime Kennung zu raten ist aussichtslos. Unbekannte Kennungen zählen weiterhin nicht zum Budget.
+     - **Restrisiko:** Den Weg über `pair/start` (Bonjour, manuelle Eingabe) kann ein Angreifer im selben WLAN weiter blockieren, solange er dort ist. Die Web-App empfiehlt dann den QR-Code bzw. ein anderes Netz.
+   - **Ablauf im Core:** Alle Prüfungen und Zähler ändern sich synchron im Speicher. Ein richtiger Code schließt das Fenster sofort für alle anderen, bevor das Gerät angelegt wird. Von gleichzeitigen `confirm`-Aufrufen gewinnt genau einer, die anderen bekommen `409 pairing_window_closed`. Scheitert das Anlegen, ist das Fenster wieder offen.
+   - **Nonce:** `pair/start` mit einer Nonce, die im Fenster schon eine Anfrage hat, liefert dieselbe Anfrage (auch eine abgelehnte, sie wird nicht wieder geöffnet). Eine abgelehnte Nonce wird auch über den QR-Weg abgewiesen (`403 pairing_request_rejected`).
+   - **Rate-Limit:** „Absenderadresse“ ist die Socket-Adresse. IPv4-mapped (`::ffff:a.b.c.d`) zählt wie IPv4, IPv6 je /64-Netz. Abgewiesene Aufrufe zählen nicht mit. Der Core merkt sich höchstens 4096 Adressen.
+   - **Gerätename:** Steuerzeichen und Bidi-Steuerzeichen werden entfernt. Bleibt nichts übrig: „Unbenanntes Gerät“.
+   - **Host:** IPv4 der Schnittstelle `en0`, sonst einer anderen `en*`, sonst einer sonstigen. VPN-Tunnel, Docker, Bridges und AirDrop zählen nicht, Link-Local (169.254.x.x) nur als letzter Ausweg. Ohne Netz: `127.0.0.1`.
+   - **Bonjour:** Name `Studien-Gehirn (<Macname>)`, TXT `v=1`, `name=<Macname>` (Rechnername ohne `.local`). Startet nur, wenn `SG_CORE_HOST` nicht Loopback ist. `SG_BONJOUR=0` schaltet die Ankündigung ab. Fehler (kein Multicast) werden nur protokolliert.
+   - Code und Token stehen in keinem Log und in keiner Fehlermeldung. Jeder falsche Code bekommt dieselbe Antwort.
 
 ## 13. Backups, Papierkorb, Aufräumen (F-DAT-01/02/04, T1-18)
 
@@ -686,6 +715,8 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `pairing_requests_full` | 429 | 10 offene Kopplungsanfragen im Fenster, eine ablehnen oder neues Fenster öffnen (§12) |
 | `ics_fetch_failed` | 502 | ICS-URL nicht erreichbar oder über den Grenzen |
 
+**Nachtrag T1-10:** Keine neuen Codes. `device_token_invalid` (401) aus §5 gehört in diese Liste: Token unbekannt oder widerrufen.
+
 **Sync-Fehler:** `SyncErrorCode` im Schema.
 
 **WebSocket-Schließcodes:**
@@ -722,6 +753,8 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 | Kalender → Session | `services/core/src/services/sessions.ts` | `ensurePlannedSessions(tx: Tx, eventIds: string[]): Promise<void>` (anlegen, löschen, `module_id`, VL-Nummer neu) | T1-02, aufgerufen von T1-01 |
 | Token prüfen | `services/core/src/services/devices.ts` | `verifyDeviceToken(db: Db, token: string): Promise<{ deviceId: string } \| null>` | T1-10 |
 | Wächter → Route | `services/core/src/plugins/security.ts` | `DeviceTokenVerifier` liefert künftig `Promise<{ deviceId: string } \| null>`. Der Wächter setzt `request.sgDevice: { deviceId: string } \| null` (`null` = lokal). Für `GET /sync` mit `Upgrade: websocket` prüft er zusätzlich `Origin` wie bei zustandsändernden Anfragen | T1-10. T1-08 liest `request.sgDevice` beim Upgrade |
+| Widerruf (Nachtrag T1-10) | `services/core/src/services/devices.ts` | `onDeviceRevoked(listener: (deviceId: string) => void): () => void`. Wird nach dem Commit von `DELETE /devices/{id}` synchron aufgerufen, Rückgabe meldet ab. Die Route ruft außerdem selbst `closeDeviceConnections(id, 4401)` auf; der Hook ist für weitere Zuhörer (z. B. Aufräumen im Hub). Fehler eines Zuhörers werden protokolliert und stören die Antwort nicht | T1-10. T1-08 kann sich einhängen |
+| Upgrade prüfen (Nachtrag T1-10) | `services/core/src/plugins/security.ts` | Der Wächter läuft als `onRequest`-Hook auch für Upgrades über `@fastify/websocket` und setzt `request.sgDevice`. Bei `pair/*` aus dem Netz bleibt `sgDevice` **undefiniert**. Für einen rohen `server.on('upgrade')`-Handler: `app.authenticateUpgrade(req: IncomingMessage): Promise<{ deviceId } \| null>` (wirft `HttpError` 421/403/401, ohne Ausnahmen für Routen) | T1-10 |
 | Einstellungen | `services/core/src/services/settings.ts` | `getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): Promise<Settings>`. `general.data_dir` kommt aus der App-Konfiguration | **T1-DB**. T1-19 baut `PATCH`. Genutzt von T1-02 (Auto-Stopp) und T1-18 |
 | Papierkorb | `services/core/src/services/trash.ts` | `softDelete(tx: Tx, kind: TrashKind, id: string): Promise<Date>` (Kaskade §13; wirft `HttpError` 404 `<kind>_not_found`, 409 `session_active`, 409 `notebook_default`), `restoreFromTrash(tx: Tx, id: string): Promise<TrashRestoreResult>` (404 `trash_item_not_found`, 409 `restore_parent_deleted`, 409 `restore_conflict`) | **T1-DB**. T1-18 baut die Routen und schreibt Server-Operationen bei der Wiederherstellung. Alle Lösch-Routen rufen `softDelete` |
 | Fotos | `services/core/src/services/photos.ts` | `upsertPhotoMeta(tx: Tx, data: PhotoAddData, env: { dataDir: string }): Promise<void>` und `storePhotoFile(id, stream, sha256, mime, env: { db: Db; dataDir: string }): Promise<FileReceipt>` (der letzte Parameter `env` ist nötig, weil beide Datenordner bzw. Datenbank brauchen) prüfen sich gegenseitig (sha256, Typ) | Core-Ink (Handler `photo.add` und `PUT /photos`) |

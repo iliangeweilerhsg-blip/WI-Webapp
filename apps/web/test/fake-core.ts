@@ -1,6 +1,16 @@
 import { vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import type { ExerciseSheet, Module, Semester, Settings, Slide, SlideDeck } from '@sg/shared';
+import type {
+  Device,
+  ExerciseSheet,
+  Module,
+  PairingCode,
+  PairingRequest,
+  Semester,
+  Settings,
+  Slide,
+  SlideDeck,
+} from '@sg/shared';
 
 const USER = '0190f6a2-0000-7000-8000-000000000000';
 const NOW = '2026-11-04T08:00:00Z';
@@ -98,6 +108,32 @@ export function makeSlides(deckId: string, count: number): Slide[] {
   }));
 }
 
+export function makeDevice(overrides: Partial<Device> = {}): Device {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000c1',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    name: 'iPad von Ilian',
+    kind: 'ipad',
+    last_seen_at: NOW,
+    clock_offset_ms: null,
+    app_version: '1.0',
+    connected: false,
+    ...overrides,
+  };
+}
+
+/** Kopplung im Fake-Core (VERTRAEGE §12): Fenster, Anfragen und Zustand wie der Header `SG-Pairing-State` */
+export interface FakePairing {
+  window: PairingCode | null;
+  state: 'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'locked';
+  requests: PairingRequest[];
+  /** Laufende Nummer für Code und IDs */
+  opened: number;
+}
+
 export interface RecordedRequest {
   method: string;
   path: string;
@@ -132,6 +168,13 @@ export interface FakeCore {
   settings: Settings;
   /** Das nächste PATCH /settings wird mit diesem Fehler abgelehnt */
   rejectNextSettings: null | { status: number; code: string; message: string };
+  /** Gekoppelte Geräte (GET/DELETE /devices) */
+  devices: Device[];
+  pairing: FakePairing;
+  /** Ein Gerät fragt über pair/start an (Bonjour-Weg) */
+  addPairingRequest: (name: string) => PairingRequest;
+  /** Das iPad bestätigt mit dem richtigen Code: Gerät anlegen, Fenster `paired` */
+  completePairing: (name?: string) => Device;
 }
 
 export function makeSettings(): Settings {
@@ -179,6 +222,8 @@ const json = (body: unknown, status = 200) =>
 export function installFakeCore(
   initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'decks' | 'sheets' | 'down' | 'latencyMs'>> = {},
 ) {
+  let counter = 100;
+  const newId = () => `0190f6a2-0000-7000-8000-${String(++counter).padStart(12, '0')}`;
   const core: FakeCore = {
     semesters: structuredClone(initial.semesters ?? []),
     modules: structuredClone(initial.modules ?? []),
@@ -210,9 +255,27 @@ export function installFakeCore(
     latencyMs: initial.latencyMs ?? 0,
     settings: makeSettings(),
     rejectNextSettings: null,
+    devices: [],
+    pairing: { window: null, state: 'none', requests: [], opened: 0 },
+    addPairingRequest(name) {
+      const request: PairingRequest = {
+        request_id: newId(),
+        pairing_id: '0190f6a2-0000-7000-8000-00000000ffff',
+        device_name: name,
+        kind: 'ipad',
+        requested_at: new Date().toISOString(),
+      };
+      core.pairing.requests.push(request);
+      return request;
+    },
+    completePairing(name = 'Neues iPad') {
+      const created = makeDevice({ id: newId(), name, last_seen_at: new Date().toISOString() });
+      core.devices.push(created);
+      core.pairing.state = 'paired';
+      core.pairing.requests = [];
+      return created;
+    },
   };
-  let counter = 100;
-  const newId = () => `0190f6a2-0000-7000-8000-${String(++counter).padStart(12, '0')}`;
 
   vi.stubGlobal(
     'fetch',
@@ -233,6 +296,9 @@ export function installFakeCore(
       if (materialResponse) return materialResponse;
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
+
+      const devicesResponse = handleDevices(core, path, method);
+      if (devicesResponse) return devicesResponse;
 
       if (path === '/settings' && method === 'GET') return json(core.settings);
       if (path === '/settings' && method === 'PATCH') {
@@ -406,6 +472,60 @@ async function handleMaterial(core: FakeCore, call: MaterialCall): Promise<Respo
         return new Response(null, { status: 204 });
       }
     }
+  }
+  return null;
+}
+
+/** /devices und /devices/pairings* des Fake-Core (VERTRAEGE §7.5, §12) */
+function handleDevices(core: FakeCore, path: string, method: string): Response | null {
+  if (path === '/devices' && method === 'GET') {
+    return json({ items: core.devices.filter((d) => !d.deleted_at), next_cursor: null });
+  }
+  const deviceMatch = /^\/devices\/([0-9a-f-]{36})$/.exec(path);
+  if (deviceMatch && method === 'DELETE') {
+    const target = core.devices.find((d) => d.id === deviceMatch[1] && !d.deleted_at);
+    if (!target) return json({ error: { code: 'device_not_found', message: 'x' } }, 404);
+    target.deleted_at = new Date().toISOString();
+    return new Response(null, { status: 204 });
+  }
+  if (path === '/devices/pairings' && method === 'POST') {
+    const n = ++core.pairing.opened;
+    const pairingId = `0190f6a2-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const code = String(482913 + n)
+      .padStart(6, '0')
+      .slice(-6);
+    const window: PairingCode = {
+      pairing_id: pairingId,
+      code,
+      expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
+      host: '192.168.1.20',
+      port: 4710,
+      qr_url: `sg://pair?v=1&host=192.168.1.20&port=4710&pairing_id=${pairingId}&code=${code}`,
+    };
+    core.pairing.window = window;
+    core.pairing.state = 'open';
+    core.pairing.requests = [];
+    return json(window, 201);
+  }
+  if (path === '/devices/pairings/requests' && method === 'GET') {
+    const open = core.pairing.state === 'open' || core.pairing.state === 'qr_only';
+    return new Response(JSON.stringify({ items: open ? core.pairing.requests : [] }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'SG-Pairing-State': core.pairing.state,
+        ...(core.pairing.window ? { 'SG-Pairing-Id': core.pairing.window.pairing_id } : {}),
+      },
+    });
+  }
+  const requestMatch = /^\/devices\/pairings\/requests\/([0-9a-f-]{36})$/.exec(path);
+  if (requestMatch && method === 'DELETE') {
+    const before = core.pairing.requests.length;
+    core.pairing.requests = core.pairing.requests.filter((r) => r.request_id !== requestMatch[1]);
+    if (core.pairing.requests.length === before) {
+      return json({ error: { code: 'pairing_request_not_found', message: 'x' } }, 404);
+    }
+    return new Response(null, { status: 204 });
   }
   return null;
 }

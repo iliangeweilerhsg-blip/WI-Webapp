@@ -55,7 +55,7 @@ describe('Reiter', () => {
     expect(await screen.findByRole('heading', { name: 'Semester' })).toBeInTheDocument();
   });
 
-  it('wechselt per Klick und Pfeiltasten; Geräte und Daten zeigen „Kommt bald“', async () => {
+  it('wechselt per Klick und Pfeiltasten; Geräte zeigt die Geräteverwaltung, Daten „Kommt bald“', async () => {
     installFakeCore();
     const user = userEvent.setup();
     page();

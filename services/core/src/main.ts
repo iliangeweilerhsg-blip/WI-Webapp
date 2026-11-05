@@ -4,6 +4,7 @@ import { hasOpenPermissions, loadConfig, loadDotEnv } from './config.ts';
 import { createDb } from './db/client.ts';
 import { createLogger } from './logger.ts';
 import { purgeIdempotencyKeys } from './plugins/idempotency.ts';
+import { startBonjour, type BonjourHandle } from './services/discovery.ts';
 
 /** Harte Frist fürs Herunterfahren, danach Exit 1 */
 const SHUTDOWN_DEADLINE_MS = 10_000;
@@ -24,6 +25,7 @@ if (dotEnvFile) {
 const handle = createDb(config.databaseUrl);
 const app = await buildApp({ config, db: handle.db, logger });
 
+let bonjour: BonjourHandle | null = null;
 let stopping = false;
 async function shutdown(signal: string): Promise<void> {
   // Ein zweites Signal (z. B. doppelt von der CLI) bricht das Herunterfahren nicht ab
@@ -35,6 +37,7 @@ async function shutdown(signal: string): Promise<void> {
     process.exit(1);
   }, SHUTDOWN_DEADLINE_MS).unref();
   try {
+    await bonjour?.stop();
     await app.close();
     await handle.close();
   } catch (error) {
@@ -54,6 +57,10 @@ setInterval(() => void purge(), 60 * 60 * 1000).unref();
 try {
   await purge();
   await app.listen({ port: config.port, host: config.host });
+  // Nur wenn der Core aus dem Netz erreichbar ist, hilft die Ankündigung dem iPad (§12)
+  if (config.bonjour && config.host !== '127.0.0.1' && config.host !== 'localhost' && config.host !== '::1') {
+    bonjour = startBonjour({ port: config.port, logger });
+  }
 } catch (error) {
   // Kein process.exit: so werden Logs vollständig geschrieben und Handles sauber geschlossen
   logger.error({ err: error }, 'Core konnte nicht starten');

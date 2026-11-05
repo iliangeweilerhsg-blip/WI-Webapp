@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ApiErrorSchema } from '@sg/shared';
 import { startTestApp, TEST_PORT, type TestApp } from './helpers.ts';
 
+const DEVICE_ID = '0190f6a2-0000-7000-8000-0000000000f1';
+
 let t: TestApp;
 beforeAll(async () => {
   t = await startTestApp({ devWebOrigin: 'http://localhost:3000' });
@@ -25,14 +27,14 @@ describe('Netz ohne Token (VERTRAEGE §5)', () => {
     expect(errorCode(res.json())).toBe('device_token_required');
   });
 
-  it('auch mit Bearer-Token (es gibt in Phase 0 keine Kopplung)', async () => {
+  it('mit unbekanntem Bearer-Token → 401 device_token_invalid', async () => {
     const res = await t.app.inject({
       url: '/api/v1/health',
       remoteAddress: '192.168.1.23',
       headers: { host: `192.168.1.5:${TEST_PORT}`, authorization: 'Bearer abc' },
     });
     expect(res.statusCode).toBe(401);
-    expect(errorCode(res.json())).toBe('device_token_required');
+    expect(errorCode(res.json())).toBe('device_token_invalid');
   });
 
   it('gilt für alle Pfade, auch Web-App und unbekannte', async () => {
@@ -61,7 +63,12 @@ describe('Netz ohne Token (VERTRAEGE §5)', () => {
   });
 
   it('mit gültigem Token (Prüfer eingehängt) kommt die Anfrage durch', async () => {
-    const ok = await startTestApp({}, { verifyDeviceToken: async (token) => token === 'gueltig' });
+    const ok = await startTestApp(
+      {},
+      {
+        verifyDeviceToken: async (token) => (token === 'gueltig' ? { deviceId: DEVICE_ID } : null),
+      },
+    );
     try {
       const headers = { host: `192.168.1.5:${TEST_PORT}` };
       const good = await ok.app.inject({
@@ -182,7 +189,7 @@ describe('Origin-Prüfung gegen CSRF', () => {
   });
 
   it('Netz-Anfrage mit Token, aber fremdem Origin → 403', async () => {
-    const ok = await startTestApp({}, { verifyDeviceToken: async () => true });
+    const ok = await startTestApp({}, { verifyDeviceToken: async () => ({ deviceId: DEVICE_ID }) });
     try {
       const res = await ok.app.inject({
         method: 'POST',
