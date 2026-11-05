@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import type { ExerciseSheet, Module, Semester, Slide, SlideDeck } from '@sg/shared';
+import type { ExerciseSheet, Module, Semester, Settings, Slide, SlideDeck } from '@sg/shared';
 
 const USER = '0190f6a2-0000-7000-8000-000000000000';
 const NOW = '2026-11-04T08:00:00Z';
@@ -128,6 +128,45 @@ export interface FakeCore {
   down: boolean;
   /** Verzögerung für POST in ms (Antworten kommen später als die nächste Eingabe) */
   latencyMs: number;
+  /** Stand von GET/PATCH /settings (Standards aus VERTRAEGE §14.1) */
+  settings: Settings;
+  /** Das nächste PATCH /settings wird mit diesem Fehler abgelehnt */
+  rejectNextSettings: null | { status: number; code: string; message: string };
+}
+
+export function makeSettings(): Settings {
+  return {
+    general: { data_dir: '/Users/ich/Studien-Gehirn', content_lang: 'de', appearance: 'system' },
+    lecture: {
+      microphone_id: null,
+      auto_stop_after_end_min: 10,
+      auto_stop_quiet_window_min: 3,
+      auto_stop_hard_after_end_min: 30,
+      auto_stop_silence_min: 15,
+      auto_stop_max_duration_min: 240,
+      auto_stop_warning_s: 60,
+      auto_stop_extend_min: 15,
+      default_layout: 'standard',
+      default_ink_mode: 'freie_seite',
+      toolbar_side: 'rechts',
+    },
+    pen: {
+      double_tap: 'radierer',
+      squeeze: 'werkzeugpalette',
+      shape_recognition: false,
+      favorite_colors: [
+        '#1E2A44FF',
+        '#C92A2AFF',
+        '#1864ABFF',
+        '#2B8A3EFF',
+        '#E67700FF',
+        '#5F3DC4FF',
+        '#495057FF',
+        '#000000FF',
+      ],
+    },
+    data: { backup_target: null, backup_encryption: false, backup_time: '03:00' },
+  };
 }
 
 const json = (body: unknown, status = 200) =>
@@ -169,6 +208,8 @@ export function installFakeCore(
     },
     down: initial.down ?? false,
     latencyMs: initial.latencyMs ?? 0,
+    settings: makeSettings(),
+    rejectNextSettings: null,
   };
   let counter = 100;
   const newId = () => `0190f6a2-0000-7000-8000-${String(++counter).padStart(12, '0')}`;
@@ -192,6 +233,19 @@ export function installFakeCore(
       if (materialResponse) return materialResponse;
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
+
+      if (path === '/settings' && method === 'GET') return json(core.settings);
+      if (path === '/settings' && method === 'PATCH') {
+        if (core.rejectNextSettings) {
+          const { status, code, message } = core.rejectNextSettings;
+          core.rejectNextSettings = null;
+          return json({ error: { code, message } }, status);
+        }
+        for (const [area, patch] of Object.entries(body ?? {})) {
+          Object.assign((core.settings as unknown as Record<string, object>)[area] ?? {}, patch);
+        }
+        return json(core.settings);
+      }
 
       if (path === '/semesters' && method === 'GET') {
         return json({ items: core.semesters.filter((s) => !s.deleted_at), next_cursor: null });

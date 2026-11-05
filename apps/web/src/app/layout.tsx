@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { AppShell } from '../components/AppShell.tsx';
 import { QueryProvider } from '../lib/query.tsx';
 import { THEME_INIT_SCRIPT } from '../lib/theme-init.ts';
-import { ThemeProvider } from '../lib/theme.tsx';
+import { AppearanceDefault, ThemeProvider } from '../lib/theme.tsx';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -24,6 +24,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <ThemeProvider>
           <QueryProvider>
+            <AppearanceDefault />
             <AppShell>{children}</AppShell>
           </QueryProvider>
         </ThemeProvider>
