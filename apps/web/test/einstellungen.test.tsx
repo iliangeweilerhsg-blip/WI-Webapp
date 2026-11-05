@@ -55,6 +55,21 @@ describe('Reiter', () => {
     expect(await screen.findByRole('heading', { name: 'Semester' })).toBeInTheDocument();
   });
 
+  it('schmale Leiste bricht um statt abzuschneiden; der aktive Reiter rollt ins Bild (#86)', async () => {
+    installFakeCore();
+    // jsdom kennt scrollIntoView nicht: erst anlegen, dann ausspionieren (afterEach stellt es wieder her)
+    Element.prototype.scrollIntoView ??= () => {};
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
+    page();
+    const tabs = screen.getByRole('tablist', { name: 'Bereiche der Einstellungen' });
+    expect(tabs.className).toContain('flex-wrap');
+    expect(tabs.className).not.toMatch(/(^|\s)overflow-x-auto/);
+    expect(scroll).not.toHaveBeenCalled();
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'Daten und Papierkorb' }));
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
+    expect(scroll.mock.contexts.at(-1)).toBe(screen.getByRole('tab', { name: 'Daten und Papierkorb' }));
+  });
+
   it('mountet „Daten und Papierkorb“ erst beim ersten Öffnen (keine Anfragen vorher)', async () => {
     const core = installFakeCore();
     const user = userEvent.setup();

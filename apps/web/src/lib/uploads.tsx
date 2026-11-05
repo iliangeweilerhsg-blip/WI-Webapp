@@ -205,7 +205,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     let failedTitle = '';
     for (const [id, { kind, since }] of [...watched.current]) {
       try {
-        const { state, title } = await fetchIngest(client, kind, id);
+        const { state, title } = await fetchIngest(kind, id);
         if (state === 'neu') {
           if (Date.now() - since > WATCH_MAX_MS) watched.current.delete(id);
           continue;

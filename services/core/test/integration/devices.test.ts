@@ -878,4 +878,58 @@ describe('WebSocket-Upgrade (§11.1) und Widerruf', () => {
       }
     },
   );
+
+  it.skipIf(!lanAddress)(
+    'Upgrade mit kaputter URL aus dem Netz: Ablehnung schließt den Socket, auch bei h2c (Gegen-Review #84, S-1)',
+    async () => {
+      const port = await freePort();
+      const config = testConfig({ port });
+      const handle = createDb(config.databaseUrl);
+      const server = await buildApp({ config, db: handle.db, logger: pino({ level: 'silent' }) });
+      await server.listen({ host: '0.0.0.0', port });
+      // Gemessen wird am Server-Socket: Der Client hält seine Seite offen (allowHalfOpen), nur der Server kann schließen
+      const serverSockets = new Set<Socket>();
+      server.server.on('connection', (sock: Socket) => {
+        serverSockets.add(sock);
+        sock.on('close', () => serverSockets.delete(sock));
+      });
+      const { connect } = await import('node:net');
+      const cases = [
+        { path: '/%', upgrade: 'Upgrade: websocket' },
+        { path: '/sync%zz', upgrade: 'Upgrade: websocket' },
+        // Nicht-WebSocket-Upgrades: Node löst 'upgrade' trotzdem aus
+        { path: '/%', upgrade: 'Upgrade: h2c' },
+        { path: '/%', upgrade: 'Upgrade: websocket\r\nUpgrade: websocket' },
+      ];
+      const clients: Socket[] = [];
+      try {
+        for (const c of cases) {
+          const head = await new Promise<string>((resolve, reject) => {
+            let data = '';
+            const sock = connect({ host: lanAddress as string, port, allowHalfOpen: true }, () => {
+              sock.write(
+                `GET ${c.path} HTTP/1.1\r\nHost: ${lanAddress}:${port}\r\nConnection: Upgrade\r\n` +
+                  `${c.upgrade}\r\nSec-WebSocket-Version: 13\r\n` +
+                  `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n\r\n`,
+              );
+            });
+            clients.push(sock);
+            sock.on('data', (chunk: Buffer) => (data += chunk.toString()));
+            sock.on('end', () => resolve(data));
+            sock.on('error', reject);
+            setTimeout(() => resolve(data), 3000);
+          });
+          expect(head, c.upgrade).toMatch(/^HTTP\/1\.1 4\d\d/);
+          expect(head.toLowerCase(), c.upgrade).toContain('connection: close');
+        }
+        // Spätestens nach der Frist (1 s) zerstört der Server alle Sockets, obwohl die Clients offen bleiben
+        for (let i = 0; i < 60 && serverSockets.size > 0; i++) await new Promise((r) => setTimeout(r, 50));
+        expect(serverSockets.size).toBe(0);
+      } finally {
+        for (const sock of clients) sock.destroy();
+        await server.close();
+        await handle.close();
+      }
+    },
+  );
 });

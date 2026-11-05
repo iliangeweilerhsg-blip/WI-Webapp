@@ -136,6 +136,40 @@ function isWebSocketUpgrade(headers: IncomingHttpHeaders): boolean {
   return (headers.upgrade ?? '').toLowerCase() === 'websocket';
 }
 
+/** Frist, nach der ein abgelehnter Upgrade-Socket hart geschlossen wird, falls der Client seine Seite offen hält */
+const REJECTED_UPGRADE_GRACE_MS = 1000;
+
+/**
+ * Abgelehnter Upgrade (WebSocket oder jeder andere Upgrade-Header): `Connection: close` setzen und den Socket nach der Antwort schließen.
+ * Der Socket gehört nach dem `upgrade`-Ereignis nicht mehr dem HTTP-Server, für ihn gelten weder
+ * `keepAliveTimeout` noch `requestTimeout`. Erst `end()` (die Antwort kommt sicher an), dann nach einer
+ * kurzen Frist `destroy()`, weil ein Angreifer seine Seite nie schließen würde.
+ */
+export function closeRejectedUpgrade(
+  raw: { headers: IncomingHttpHeaders; socket?: unknown; upgrade?: boolean },
+  response: {
+    setHeader?: (name: string, value: string) => unknown;
+    once: (event: 'finish', cb: () => void) => unknown;
+  },
+): void {
+  // Node löst 'upgrade' für jeden Upgrade-Header aus (auch h2c, mehrfach, unbekannt), sobald `Connection: Upgrade`
+  // mitkommt. Dann gehört der Socket nicht mehr dem HTTP-Server, egal ob es ein WebSocket werden sollte
+  if (raw.upgrade !== true && !isWebSocketUpgrade(raw.headers)) return;
+  const socket = raw.socket as { end?: () => void; destroy?: () => void; destroyed?: boolean } | undefined;
+  try {
+    response.setHeader?.('connection', 'close');
+  } catch {
+    // Header schon gesendet: dann nur schließen
+  }
+  response.once('finish', () => {
+    if (!socket || socket.destroyed) return;
+    socket.end?.();
+    setTimeout(() => {
+      if (!socket.destroyed) socket.destroy?.();
+    }, REJECTED_UPGRADE_GRACE_MS).unref();
+  });
+}
+
 export interface SecurityOptions {
   config: Pick<Config, 'port' | 'devWebOrigin'>;
   verifyDeviceToken?: DeviceTokenVerifier;
@@ -243,13 +277,7 @@ export function registerSecurity(
       // Abgelehnter WebSocket-Upgrade: Die Antwort geht direkt auf den Socket, den der HTTP-Server nach dem
       // `upgrade`-Ereignis nicht mehr verwaltet. Ohne eigenes Schließen bliebe er serverseitig halb offen hängen
       // (je abgelehntem Versuch ein Socket, Ressourcen-Leck).
-      if (isWebSocketUpgrade(request.headers)) {
-        reply.header('connection', 'close');
-        const socket = request.raw.socket as { end?: () => void; destroyed?: boolean } | undefined;
-        reply.raw.once('finish', () => {
-          if (socket && typeof socket.end === 'function' && !socket.destroyed) socket.end();
-        });
-      }
+      closeRejectedUpgrade(request.raw, reply.raw);
       throw error;
     }
     if (device !== undefined) request.sgDevice = device;
