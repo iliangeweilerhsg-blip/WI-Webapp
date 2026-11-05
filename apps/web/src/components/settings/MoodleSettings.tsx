@@ -139,9 +139,16 @@ function CourseRow({
   const toast = useToast();
   const selectId = useId();
   const selectRef = useRef<HTMLSelectElement>(null);
+  // Fokus auf die Auswahl erst, wenn sie nicht mehr gesperrt ist (#135); ein gesperrtes Feld nimmt keinen Fokus an
+  const [focusSelect, setFocusSelect] = useState(false);
   // Eine Sperre für alle Aktionen der Zeile: Zuordnen, Schalter, Lösen (Review #134, N1)
   const once = useSingleFlight();
   const busy = linkMutation.isPending || unlink.isPending || removeModule.isPending;
+  useEffect(() => {
+    if (!focusSelect || busy) return;
+    selectRef.current?.focus();
+    setFocusSelect(false);
+  }, [focusSelect, busy]);
   const onError = (error: unknown) => toast.show({ message: moodleErrorMessage(error) });
   const suggested = !linked && course.suggested_module_id && choice === course.suggested_module_id;
   // Die Zuordnung aus /moodle/links passt nur, solange sie dasselbe Modul meint wie die Kursliste
@@ -164,7 +171,7 @@ function CourseRow({
             durationMs: 10_000,
             onAction: () => restore.mutate(moduleId, { onError }),
           });
-          requestAnimationFrame(() => selectRef.current?.focus());
+          setFocusSelect(true);
         },
       }),
     );
@@ -182,7 +189,7 @@ function CourseRow({
           onSuccess: () => {
             toast.show({ message: `Zugeordnet zu ${name}. Der Abgleich startet.` });
             // Der Knopf verschwindet: Fokus auf die Auswahl der Zeile (Review #134, N3)
-            requestAnimationFrame(() => selectRef.current?.focus());
+            setFocusSelect(true);
           },
         },
       ),
@@ -268,7 +275,7 @@ function CourseRow({
                           message:
                             'Zuordnung gelöst. Übernommenes Material bleibt im Modul, automatisch wird der Kurs nicht wieder zugeordnet.',
                         });
-                        requestAnimationFrame(() => selectRef.current?.focus());
+                        setFocusSelect(true);
                       },
                     }),
                   )
@@ -347,7 +354,10 @@ export function MoodleSettings() {
   const other = (courses.data ?? []).filter((c) => c.category !== 'aktuell' && c.module_id === null);
   // Ohne Kursliste (Moodle lehnt ab oder antwortet nicht): die bestehenden Zuordnungen aus /moodle/links,
   // damit Schalter und „Lösen“ erreichbar bleiben (Review #134, M1)
-  const linkedOnly: MoodleCourse[] = courses.data ? [] : (linkList.data ?? []).map(courseFromLink);
+  // Nur bei Fehler ohne Kursliste: solange sie lädt, kein Zwischenstand „Zugeordnete Kurse“; schlägt ein Neuladen
+  // fehl, bleiben die alten Daten stehen (TanStack behält `data`) und die Kurse erscheinen nicht doppelt (#135)
+  const linkedOnly: MoodleCourse[] =
+    courses.isError && !courses.data ? (linkList.data ?? []).map(courseFromLink) : [];
   const noCurrentSemester = semesters.data !== undefined && !hasCurrentSemester(semesters.data);
   const showValidUntil =
     (state.state === 'ok' || state.state === 'laeuft_bald_ab') && state.token_valid_until;

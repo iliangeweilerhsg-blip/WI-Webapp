@@ -152,7 +152,11 @@ export function MoodleInbox() {
   function onDecided(item: MoodleItem) {
     const list = data ?? [];
     const index = list.findIndex((i) => i.id === item.id);
-    const next = list[index + 1] ?? list[index - 1] ?? null;
+    // Die Entscheidung gilt für die ganze Aktivität (gleiche cmid): diese Dateien verschwinden mit. Als Ziel nur eine
+    // Datei einer anderen Aktivität, sonst die Überschrift (#135)
+    const other = (i: MoodleItem | undefined) =>
+      i !== undefined && !(i.cmid === item.cmid && i.moodle_course_id === item.moodle_course_id);
+    const next = list.slice(index + 1).find(other) ?? list.slice(0, Math.max(index, 0)).reverse().find(other);
     setFocusAfter({ next: next?.id ?? null });
   }
 
