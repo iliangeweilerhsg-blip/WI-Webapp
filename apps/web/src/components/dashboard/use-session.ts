@@ -11,6 +11,7 @@ import { useHydrationSafe } from '../../lib/hydrated.ts';
 import { getSession, newerSession, pauseSession, resumeSession, stopSession } from '../../lib/sessions.ts';
 import { useSyncClient } from '../../lib/sync/SyncProvider.tsx';
 import { POLL_MS, useLiveState } from '../today/use-today.ts';
+import { watchReconnect } from './reconnect.ts';
 
 const key = (id: string) => ['sessions', 'dashboard', id] as const;
 
@@ -58,15 +59,8 @@ export function useSessionData(id: string | null): SessionData {
     if (!sync || id === null) return;
     const refetch = () => void client.invalidateQueries({ queryKey: key(id) });
     const offUpdated = sync.onEvent('session.updated', apply);
-    let wasDown = sync.connectionState !== 'online';
-    const offConnection = sync.onEvent('connection', (c) => {
-      if (c.state === 'online') {
-        if (wasDown) refetch();
-        wasDown = false;
-      } else if (c.state !== 'syncing') {
-        wasDown = true;
-      }
-    });
+    // Nur nach einem Abbruch neu laden, nicht beim ersten Verbindungsaufbau (der Abruf beim Öffnen ist frisch)
+    const offConnection = watchReconnect(sync, refetch);
     const offLeader = sync.onEvent('leader.changed', refetch);
     return () => {
       offUpdated();

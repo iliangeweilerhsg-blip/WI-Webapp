@@ -15,8 +15,9 @@ import { useSettings } from '../../lib/settings.ts';
 import type { SyncClient } from '../../lib/sync/client.ts';
 import { AutoStopHint } from '../autostop';
 import { formatElapsed } from '../today/model.ts';
-import { useNow } from '../today/use-today.ts';
+import { POLL_MS, useLiveState, useNow } from '../today/use-today.ts';
 import { MarkerControls } from './markers/MarkerControls.tsx';
+import { watchReconnect } from './reconnect.ts';
 import { useSessionRecording, type RecordingKind } from './use-recording.ts';
 import type { SessionActions } from './use-session.ts';
 
@@ -33,18 +34,19 @@ const ghost =
  * kommen nach einem Verbindungsabbruch nicht nach (§11.6).
  */
 export function useIpadConnected(client: SyncClient | null): boolean {
-  const devices = useDevices();
+  // Ohne Live-Verbindung (auch im Folge-Tab) kommen keine Ereignisse: dann alle 30 s nachfragen
+  const { online } = useLiveState(client);
+  const devices = useDevices({ refetchIntervalMs: online ? false : POLL_MS });
   const queryClient = useQueryClient();
   useEffect(() => {
     if (!client) return;
-    const refetch = () => void queryClient.invalidateQueries({ queryKey: DEVICES_KEY });
+    // `exact`: sonst trifft es auch `['devices', 'pairing-requests']`
+    const refetch = () => void queryClient.invalidateQueries({ queryKey: DEVICES_KEY, exact: true });
     const offs = [
       client.onEvent('device.connection', (d) => {
         if (d.client === 'ipad') refetch();
       }),
-      client.onEvent('connection', (c) => {
-        if (c.state === 'online') refetch();
-      }),
+      watchReconnect(client, refetch),
       client.onEvent('leader.changed', refetch),
     ];
     return () => offs.forEach((off) => off());

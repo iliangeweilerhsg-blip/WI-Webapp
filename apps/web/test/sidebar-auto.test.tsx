@@ -1,7 +1,7 @@
 // Seitenleiste im Live-Dashboard (T1-04): klappt auf /session automatisch ein, ohne etwas zu speichern, und
 // stellt beim Verlassen den alten Zustand wieder her (außer der Nutzer hat selbst umgeschaltet).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 
@@ -83,6 +83,17 @@ describe('Seitenleiste auf /session', () => {
     await navigate(view, '/');
     expect(collapsed()).toBe(false);
     expect(window.localStorage.getItem(SIDEBAR_KEY)).toBeNull();
+  });
+
+  it('aria-expanded des Umschalters folgt dem Einklappen bei der Client-Navigation auf /session und zurück', async () => {
+    const view = render(tree());
+    await act(async () => undefined);
+    const toggle = () => screen.getByRole('button', { name: 'Seitenleiste ein- oder ausklappen' });
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+    await navigate(view, '/session');
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    await navigate(view, '/');
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('war sie schon vom Nutzer eingeklappt, bleibt sie es nach dem Verlassen', async () => {

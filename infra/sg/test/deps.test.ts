@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 // @ts-expect-error -- reines JavaScript ohne Typdeklaration (läuft vor dem Laden der TS-Module)
-import { depsInSync, syncDeps } from '../deps.mjs';
+import { defaultRun, depsInSync, installStdin, syncDeps } from '../deps.mjs';
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -91,4 +91,19 @@ describe('syncDeps', () => {
     writeFileSync(join(r, 'node_modules', '.pnpm', 'lock.yaml'), 'lock: alt\n');
     expect(depsInSync(r)).toBe(false);
   });
+});
+
+describe('installStdin', () => {
+  it('gibt bei moodle die Standardeingabe (Passwort, Token) nicht an pnpm install weiter', () => {
+    expect(installStdin('moodle')).toBe('ignore');
+    expect(installStdin('start')).toBe('inherit');
+  });
+
+  it.runIf(process.platform === 'linux')(
+    'defaultRun mit ignore: stdin des Kindprozesses ist /dev/null',
+    () => {
+      const check = "process.exit(require('fs').realpathSync('/proc/self/fd/0') === '/dev/null' ? 0 : 3)";
+      expect(defaultRun(tmp(), 'ignore')(process.execPath, ['-e', check])).toBe(0);
+    },
+  );
 });
