@@ -632,6 +632,16 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 | `SyncHandedOverError` | Liegt in der Warteschlange und wird von einem anderen Tab gesendet. | **nicht** neu senden |
 | `SyncNotLeaderError`, `SyncNotConnectedError` | **Nicht** gespeichert (Folge-Tab bzw. kein `connect()`). | nur im Leader-Tab bzw. nach `connect()` erneut versuchen |
 
+#### Aufnahme nur im Leader-Tab (Issue #106, Lead-Entscheidung)
+
+Im Live-Dashboard nimmt **nur der Sync-Leader-Tab** auf (F-AUD-01). Das gilt zusätzlich zu §9.1 (Pause) und §10.1 (Aufnahmen); REST und Sync-Verträge ändern sich nicht.
+- **Leader** heißt hier: Der Verbindungszustand des `SyncClient` ist nicht `idle`, `acquiring`, `other_tab` oder `closed`. Auch offline (`backoff`, `failed`) bleibt der Leader-Tab Aufnahme-Tab.
+- **Start und Fortsetzen:** Läuft die Session (`laeuft`) und der Tab ist Leader, öffnet er das Mikrofon und beginnt eine Aufnahme. Der Browser-Dialog erscheint nur nach einer Nutzeraktion („Aufnahme starten“); ist die Berechtigung schon erteilt (`navigator.permissions`), startet die Aufnahme von selbst. `pausiert` beendet die Aufnahme (`complete`, Mikrofon bleibt offen), `beendet` stoppt sie samt letztem Chunk.
+- **Leader-Wechsel (`takeOver`, Tab geschlossen):** Der alte Tab beendet seine Aufnahme sauber (letzter Chunk, `complete`) und gibt das Mikrofon frei. Der neue Leader beginnt eine **neue** Aufnahme mit `started_ms` = aktuelle Sitzungszeit. Die Lücke dazwischen gilt als Stille (F-AUD-01).
+- **Nie zwei Tabs gleichzeitig:** Vor `start()` holt der Tab die Aufnahme-Sperre `sg-recording` (Web Locks) und gibt sie erst nach dem Stopp frei. Ein neuer Leader wartet also, bis der alte Tab fertig ist; schließt der alte Tab, gibt der Browser die Sperre frei. Ohne Web Locks gilt nur die Leader-Regel.
+- **Folge-Tabs** nehmen nicht auf und zeigen in der Statusleiste „Aufnahme in anderem Tab“. Ohne Mikrofon (verweigert, fehlt) läuft die Session weiter, Notizen gehen weiter; die Statusleiste zeigt „Zugriff verweigert“ bzw. „Mikrofon fehlt“.
+- **Auto-Stopp:** Die Pegel (§16.2) stammen nur vom aufnehmenden Tab. Folge-Tabs und Tabs ohne Mikrofon liefern keine Pegel; dort gelten nur die harten Grenzen (§9.4).
+
 ## 12. Kopplung (F-INK-13, T1-10)
 
 1. **Kopplungsfenster öffnen (nur am Mac):** Die Web-App (Einstellungen → Geräte) ruft `POST /devices/pairings` auf. Das geht **nur lokal**.

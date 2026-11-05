@@ -110,6 +110,7 @@ export class AudioRecorder {
     wakeLock: 'inactive',
     upload: INITIAL,
     error: null,
+    micIssue: null,
   };
 
   private stream: MediaStream | null = null;
@@ -181,7 +182,7 @@ export class AudioRecorder {
   async start(): Promise<void> {
     if (this.status.state !== 'idle' && this.status.state !== 'stopped' && this.status.state !== 'error')
       return;
-    this.patch({ state: 'starting', error: null, restarts: 0 });
+    this.patch({ state: 'starting', error: null, micIssue: null, restarts: 0 });
     const Ctor =
       this.o.MediaRecorder ?? (globalThis.MediaRecorder as unknown as MediaRecorderCtorLike | undefined);
     this.format = pickRecorderFormat(Ctor ? (m) => Ctor.isTypeSupported?.(m) ?? false : undefined);
@@ -190,7 +191,13 @@ export class AudioRecorder {
     }
     try {
       this.adoptStream(await this.getUserMedia());
-    } catch {
+    } catch (cause) {
+      const name = (cause as { name?: string } | null)?.name;
+      if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+        this.patch({ micIssue: 'missing' });
+        this.fail('error', 'Es wurde kein Mikrofon gefunden. Schließe eines an.');
+      }
+      if (name === 'NotAllowedError' || name === 'SecurityError') this.patch({ micIssue: 'denied' });
       this.fail(
         'error',
         'Das Mikrofon ist nicht freigegeben. Erlaube den Zugriff in den Browser-Einstellungen.',
