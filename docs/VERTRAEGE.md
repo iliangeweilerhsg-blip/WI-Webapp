@@ -280,7 +280,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `GET /trash?kind` | – | 200 `TrashList`, nach `deleted_at` absteigend | |
 | `POST /trash/{id}/restore` | – | 200 `TrashRestoreResult` | 404 `trash_item_not_found`, 409 `restore_parent_deleted` (`details.parent`), 409 `restore_conflict` (`details.constraint`, `details.conflicting_id`) |
 | `GET /settings` | – | 200 `Settings` | |
-| `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad nicht absolut oder nicht beschreibbar) |
+| `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad leer, nicht absolut, kein vorhandener beschreibbarer Ordner, `SG_DATA_DIR` oder darin, Systemordner), 403 `local_only` (**`data.backup_target` nur lokal**: jede Änderung dieses Feldes aus dem Netz, auch mit Geräte-Token) |
 
 Modul-Einstellungen laufen über `PATCH /modules/{id}` (§14.2).
 
@@ -638,6 +638,10 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 - Speicherung in `setting` mit je einem Schlüssel pro Bereich (`general`, `lecture`, `pen`, `data`). Der Wert ist das Bereichsobjekt **ohne** Standardwerte.
 - `GET /settings` füllt fehlende Felder mit den Standards. `PATCH /settings` führt Feld für Feld zusammen.
 - `general.data_dir` ist nur lesbar (`SG_DATA_DIR`).
+- **Keine feldübergreifenden Regeln in Phase 1.** Es gelten nur die Schemaregeln je Feld (z. B. darf „Stopp spätestens“ vor „Stopp nach Kalenderende“ liegen).
+- **`data.backup_target`:** Der Core speichert den normalisierten Pfad (`path.resolve`, dann `realpath`). Abgelehnt werden `SG_DATA_DIR` und Ordner darin sowie `/proc`, `/sys`, `/dev`, unter macOS `/System` und `/private/var/db`. Symlinks sind erlaubt (gespeichert wird das Ziel); T1-18 prüft das Ziel beim Backup erneut. Änderungen nur lokal (§7.5).
+- `lecture.microphone_id`: höchstens 256 Zeichen.
+- **`general.appearance`** ist die Standard-Darstellung. Die Web-App wendet sie an, solange auf dem Gerät keine eigene Wahl („Hell“/„Dunkel“) gespeichert ist; „Wie Standard“ löscht die Geräte-Wahl.
 
 | Feld | Standard |
 |---|---|

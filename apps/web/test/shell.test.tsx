@@ -169,12 +169,12 @@ describe('Darstellung (nur in den Einstellungen)', () => {
         </QueryProvider>
       </ThemeProvider>,
     );
-    expect(screen.getByRole('button', { name: 'System' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Wie Standard' })).toHaveAttribute('aria-pressed', 'true');
     await user.click(screen.getByRole('button', { name: 'Dunkel' }));
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
     expect(window.localStorage.getItem('sg-theme')).toBe('dark');
     expect(screen.getByRole('button', { name: 'Dunkel' })).toHaveAttribute('aria-pressed', 'true');
-    await user.click(screen.getByRole('button', { name: 'System' }));
+    await user.click(screen.getByRole('button', { name: 'Wie Standard' }));
     expect(document.documentElement).not.toHaveAttribute('data-theme');
   });
 });
