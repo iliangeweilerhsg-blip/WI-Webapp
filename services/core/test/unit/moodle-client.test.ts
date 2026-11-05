@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { HttpError } from '../../src/errors.ts';
-import { fileRefFromUrl, flattenParams, isValidFileRef, MoodleClient } from '../../src/moodle/client.ts';
+import {
+  fileRefFromUrl,
+  filenameFrom,
+  flattenParams,
+  isValidFileRef,
+  MoodleClient,
+  RESERVED_FIELDS,
+  sanitizeFilename,
+} from '../../src/moodle/client.ts';
 import { StaticTokenStore } from '../../src/moodle/token-store.ts';
 import { FAKE_BASE, FAKE_TOKEN, fakeFetch, json, restHandler } from './moodle-fake.ts';
 
@@ -489,5 +497,134 @@ describe('Nacharbeit Review: Weiterleitungen, read/write, Zeitlimits, Downloads'
     const chunks: Buffer[] = [];
     for await (const chunk of file.stream) chunks.push(Buffer.from(chunk as Uint8Array));
     expect(Buffer.concat(chunks).toString()).toBe(big);
+  });
+});
+
+describe('Härtung #93: Dateiname aus Content-Disposition', () => {
+  it.each([
+    // [Header, erwarteter Name]
+    ['attachment; filename="../../etc/passwd"', 'passwd'],
+    ['attachment; filename="..\\..\\windows\\win.ini"', 'win.ini'],
+    ['attachment; filename="a\\b"', 'b'],
+    ['attachment; filename="/etc/passwd"', 'passwd'],
+    ["attachment; filename*=UTF-8''..%2F..%2Ftest.pdf", 'test.pdf'],
+    ["attachment; filename*=UTF-8''%2e%2e%2F%2e%2e%2Fsecret.txt", 'secret.txt'],
+    ["attachment; filename*=UTF-8''%2e%2e%5C%2e%2e%5Cboot.ini", 'boot.ini'],
+    ["attachment; filename*=UTF-8''%2E%2E", null],
+    ["attachment; filename*=UTF-8''%2e%2e%2F", null],
+    ["attachment; filename*=UTF-8''bericht%0D%0ASet-Cookie%3A%20x.pdf", 'berichtSet-Cookie: x.pdf'],
+    ["attachment; filename*=UTF-8''a%00b%07c%1Fd%7F%C2%85.pdf", 'abcd.pdf'],
+    ["attachment; filename*=UTF-8''rechnung%E2%80%AEfdp.exe", 'rechnungfdp.exe'],
+    ['attachment; filename="..."', null],
+    ['attachment; filename=". . ."', null],
+    ['attachment; filename="   "', null],
+    ['attachment; filename="/"', null],
+    ['attachment; filename=""', null],
+    ['attachment; filename=".bashrc"', 'bashrc'],
+    ["attachment; filename*=UTF-8'de'Skript%20%C3%84.pdf", 'Skript Ä.pdf'],
+    // filename* ist nach dem Bereinigen leer → bereinigtes filename= als Ersatz
+    ['attachment; filename*=UTF-8\'\'%2e%2e; filename="ersatz.pdf"', 'ersatz.pdf'],
+    ['attachment; filename*=UTF-8\'\'%2e%2e; filename="../.."', null],
+    // ungültige Prozent-Kodierung → filename=, ebenfalls bereinigt
+    ['attachment; filename*=UTF-8\'\'%E0%A4%A; filename="x/../y.pdf"', 'y.pdf'],
+    ['inline', null],
+  ])('%s → %s', (header, expected) => {
+    expect(filenameFrom(header)).toBe(expected);
+  });
+
+  it('sanitizeFilename: Steuerzeichen, nur Punkte, nur Leerzeichen; normale Namen bleiben', () => {
+    expect(sanitizeFilename('a\u0000\r\n\tb.pdf')).toBe('ab.pdf');
+    expect(sanitizeFilename('..')).toBeNull();
+    expect(sanitizeFilename('.')).toBeNull();
+    expect(sanitizeFilename('....')).toBeNull();
+    expect(sanitizeFilename('    ')).toBeNull();
+    expect(sanitizeFilename('.\u0000.')).toBeNull();
+    expect(sanitizeFilename('Übung 3 – Lösung (v2).pdf')).toBe('Übung 3 – Lösung (v2).pdf');
+  });
+
+  it('downloadFile liefert nur den bereinigten Namen', async () => {
+    const { client: c } = client(
+      () =>
+        new Response('x', {
+          status: 200,
+          headers: {
+            'content-type': 'application/pdf',
+            'content-disposition': "attachment; filename*=UTF-8''..%2F..%2F.ssh%2Fauthorized_keys%0A",
+          },
+        }),
+    );
+    const file = await c.downloadFile('/12/mod_forum/attachment/3/anhang.pdf');
+    expect(file.filename).toBe('authorized_keys');
+    file.stream.destroy();
+  });
+
+  it('downloadFile: Name nur aus Pfadanteilen → filename null', async () => {
+    const { client: c } = client(
+      () =>
+        new Response('x', {
+          status: 200,
+          headers: {
+            'content-type': 'application/pdf',
+            'content-disposition': "attachment; filename*=UTF-8''%2e%2e%2F%2e%2e%2F",
+          },
+        }),
+    );
+    const file = await c.downloadFile('/12/mod_forum/attachment/3/anhang.pdf');
+    expect(file.filename).toBeNull();
+    file.stream.destroy();
+  });
+});
+
+describe('Härtung #93: reservierte Formularfelder', () => {
+  it('RESERVED_FIELDS enthält genau die drei Felder aus call()', () => {
+    expect([...RESERVED_FIELDS].sort()).toEqual(['moodlewsrestformat', 'wsfunction', 'wstoken']);
+  });
+
+  it.each([
+    ['oben', { wstoken: 'x' }],
+    ['oben, andere Schreibweise', { WSFunction: 'core_user_delete_users' }],
+    ['oben, Format', { moodlewsrestformat: 'xml' }],
+    ['im Unterobjekt', { options: { wstoken: 'x' } }],
+    ['tief im Unterobjekt', { a: { b: { wsfunction: 'core_user_delete_users' } } }],
+    ['im Array', { options: [{ name: 'x', wstoken: 'x' }] }],
+    ['im Array im Array', { a: [[{ moodlewsrestformat: 'xml' }]] }],
+    ['führendes Leerzeichen (PHP entfernt es)', { ' wstoken': 'x' }],
+    ['Klammern im Schlüssel', { 'wstoken[0]': 'x' }],
+    ['Klammer bricht die Schreibweise auf', { a: { 'b][wstoken': 'x' } }],
+    ['Gleichheitszeichen und Und im Schlüssel', { 'a&wstoken=x': 1 }],
+    ['leerer Schlüssel', { '': 1 }],
+  ])('flattenParams weist ab: %s', (_name, params) => {
+    expect(() => flattenParams(params)).toThrow(/Unzulässiger Moodle-Parameter/);
+  });
+
+  it('Fehlermeldung nennt nur den Schlüssel, nie den Wert', () => {
+    let message = '';
+    try {
+      flattenParams({ a: { wstoken: FAKE_TOKEN } });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('"wstoken"');
+    expect(message).not.toContain(FAKE_TOKEN);
+  });
+
+  it('call() mit reserviertem Feld in den Parametern schickt nichts an Moodle', async () => {
+    const { client: c, requests } = client(restHandler({ core_user_get_users: [] }));
+    await expect(c.read('core_user_get_users', { criteria: [{ key: 'id', wstoken: 'x' }] })).rejects.toThrow(
+      /Unzulässiger Moodle-Parameter/,
+    );
+    await expect(
+      c.write('mod_forum_add_discussion', { wsfunction: 'core_user_delete_users' }),
+    ).rejects.toThrow(/Unzulässiger Moodle-Parameter/);
+    expect(requests).toHaveLength(0);
+  });
+
+  it('reservierte Felder stehen genau einmal und am Ende des Bodys', async () => {
+    const { client: c, requests } = client(restHandler({ core_course_get_contents: [] }));
+    await c.read('core_course_get_contents', { courseid: 5, options: [{ name: 'x', value: true }] });
+    const keys = [...new URLSearchParams(String(requests[0]?.init.body)).keys()];
+    expect(keys.slice(-3)).toEqual(['wstoken', 'wsfunction', 'moodlewsrestformat']);
+    for (const field of RESERVED_FIELDS) expect(keys.filter((k) => k === field)).toHaveLength(1);
+    expect(keys.slice(0, -3)).toEqual(['courseid', 'options[0][name]', 'options[0][value]']);
   });
 });

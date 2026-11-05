@@ -45,6 +45,10 @@ interface SiteInfo {
   functions?: unknown;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 interface CachedCheck {
   check: MoodleCheckResult;
   siteName: string | null;
@@ -135,22 +139,29 @@ export class MoodleStatusService {
     }
     let result: CachedCheck;
     try {
-      const info = await this.client.read<SiteInfo>('core_webservice_get_site_info');
-      const functions = Array.isArray(info.functions)
-        ? new Set(
-            info.functions
-              .map((entry: unknown) => (entry as { name?: unknown }).name)
-              .filter((name): name is string => typeof name === 'string'),
-          )
-        : null;
-      result = {
-        check: 'ok',
-        siteName: typeof info.sitename === 'string' ? info.sitename : null,
-        userFullname: typeof info.fullname === 'string' ? info.fullname : null,
-        userId: typeof info.userid === 'number' ? info.userid : null,
-        functions,
-        checkedAt,
-      };
+      const raw = await this.client.read<unknown>('core_webservice_get_site_info');
+      if (!isRecord(raw)) {
+        // Keine Seiteninfo (z. B. `null` von einem Proxy): wie nicht erreichbar, nur kurz gemerkt
+        result = { check: 'unreachable', ...empty, checkedAt };
+      } else {
+        const info = raw as SiteInfo;
+        // Einträge defensiv lesen: `[null]` oder Zahlen in der Liste dürfen nicht zum 500 führen
+        const functions = Array.isArray(info.functions)
+          ? new Set(
+              info.functions
+                .map((entry: unknown) => (isRecord(entry) ? entry.name : undefined))
+                .filter((name): name is string => typeof name === 'string'),
+            )
+          : null;
+        result = {
+          check: 'ok',
+          siteName: typeof info.sitename === 'string' ? info.sitename : null,
+          userFullname: typeof info.fullname === 'string' ? info.fullname : null,
+          userId: typeof info.userid === 'number' ? info.userid : null,
+          functions,
+          checkedAt,
+        };
+      }
     } catch (error) {
       if (!(error instanceof HttpError)) throw error;
       const check: MoodleCheckResult =
