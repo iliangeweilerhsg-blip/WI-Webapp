@@ -126,19 +126,20 @@ export async function fetchIngest(
   kind: MaterialKind,
   id: string,
 ): Promise<{ state: SlideDeck['ingest_state']; title: string }> {
+  // Bewusst ohne `signal` von TanStack: Meldet sich der letzte Beobachter von ['deck'|'sheet', id] ab (Karte
+  // verschwindet nach dem Refetch der Liste), bricht TanStack sonst die laufende Abfrage ab. pollWatched sähe dann
+  // einen Abbruch statt der Antwort (z. B. 404), ließe den Eintrag beobachtet und fragte eine Runde später erneut.
   if (kind === 'folien') {
     const { deck } = await client.fetchQuery({
       queryKey: ['deck', id],
-      queryFn: ({ signal }) =>
-        apiGet(`/slide-decks/${encodeURIComponent(id)}`, SlideDeckDetailSchema, { signal }),
+      queryFn: () => apiGet(`/slide-decks/${encodeURIComponent(id)}`, SlideDeckDetailSchema),
       staleTime: 0,
     });
     return { state: deck.ingest_state, title: deck.title };
   }
   const sheet = await client.fetchQuery({
     queryKey: ['sheet', id],
-    queryFn: ({ signal }) =>
-      apiGet(`/exercise-sheets/${encodeURIComponent(id)}`, ExerciseSheetSchema, { signal }),
+    queryFn: () => apiGet(`/exercise-sheets/${encodeURIComponent(id)}`, ExerciseSheetSchema),
     staleTime: 0,
   });
   return { state: sheet.ingest_state, title: sheet.title };

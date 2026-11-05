@@ -31,6 +31,7 @@ from PIL import Image
 from psycopg.types.json import Jsonb
 from sg_schemas.models import PdfIngestDeckPayload, PdfIngestPayload, PdfIngestSheetPayload
 
+from .. import progress
 from ..registry import JobContext, LockLostError, NonRetryableError, PayloadError, handler
 from ..uuid7 import uuid7
 
@@ -319,6 +320,9 @@ def pdf_ingest(
             "duration_ms": int((time.monotonic() - started) * 1000),
         }
         with ctx.conn.transaction():
+            # Sperrreihenfolge §16.2: Session vor Fachzeilen (`ctx.finish` sperrt sie ebenfalls)
+            if ctx.session_id:
+                progress.lock_session(ctx.conn, ctx.session_id)
             if kind == "decks":
                 with ctx.conn.cursor() as cur:
                     cur.executemany(

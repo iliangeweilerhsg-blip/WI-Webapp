@@ -181,7 +181,7 @@ describe('Einrichtungsdialog', () => {
 
     installFakeCore({ down: true });
     shell();
-    await screen.findAllByText('Core nicht erreichbar', {}, { timeout: 4000 });
+    await screen.findAllByText('Core nicht erreichbar');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 

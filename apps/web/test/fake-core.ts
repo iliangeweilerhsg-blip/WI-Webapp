@@ -7,6 +7,7 @@ import type {
   PairingCode,
   PairingRequest,
   Semester,
+  Session,
   Settings,
   Slide,
   SlideDeck,
@@ -27,6 +28,32 @@ export function makeSemester(overrides: Partial<Semester> = {}): Semester {
     ends_on: null,
     is_current: true,
     archived_at: null,
+    ...overrides,
+  };
+}
+
+export function makeSession(overrides: Partial<Session> = {}): Session {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000e1',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    calendar_event_id: null,
+    module_id: '0190f6a2-0000-7000-8000-0000000000a1',
+    slide_deck_id: null,
+    number: null,
+    title: null,
+    state: 'laeuft',
+    started_at: NOW,
+    ended_at: null,
+    stop_reason: null,
+    started_from: null,
+    processing: {},
+    review_state: 'offen',
+    planned_starts_at: null,
+    planned_ends_at: null,
+    auto_stop_extended_until: null,
     ...overrides,
   };
 }
@@ -148,6 +175,8 @@ export interface FakeCore {
   decks: SlideDeck[];
   sheets: ExerciseSheet[];
   slides: Record<string, Slide[]>;
+  /** Sessions für POST /sessions/{id}/stop und /extend (VERTRAEGE §7.2, §9.4) */
+  sessions: Session[];
   requests: RecordedRequest[];
   /** Der nächste Upload scheitert wie bei einer abgerissenen Verbindung; `after` = der Core hat ihn davor verarbeitet */
   failNextUpload: null | 'before' | 'after';
@@ -163,8 +192,8 @@ export interface FakeCore {
   failIngest: (id: string) => void;
   /** Solange true, scheitern alle Anfragen wie bei einem nicht laufenden Core */
   down: boolean;
-  /** Verzögerung für POST in ms (Antworten kommen später als die nächste Eingabe) */
-  latencyMs: number;
+  /** Hält alle POSTs an, bis das Promise erfüllt ist (deterministisch statt Zeitfenster). `null` = nicht angehalten */
+  postGate: Promise<void> | null;
   /** Stand von GET/PATCH /settings (Standards aus VERTRAEGE §14.1) */
   settings: Settings;
   /** Das nächste PATCH /settings wird mit diesem Fehler abgelehnt */
@@ -221,7 +250,7 @@ const json = (body: unknown, status = 200) =>
  * (erstes Semester wird aktuell, is_current höchstens einmal, Farbvergabe, Soft-Delete). Ersetzt `fetch`.
  */
 export function installFakeCore(
-  initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'decks' | 'sheets' | 'down' | 'latencyMs'>> = {},
+  initial: Partial<Pick<FakeCore, 'semesters' | 'modules' | 'decks' | 'sheets' | 'sessions' | 'down'>> = {},
 ) {
   let counter = 100;
   const newId = () => `0190f6a2-0000-7000-8000-${String(++counter).padStart(12, '0')}`;
@@ -231,6 +260,7 @@ export function installFakeCore(
     decks: structuredClone(initial.decks ?? []),
     sheets: structuredClone(initial.sheets ?? []),
     slides: {},
+    sessions: structuredClone(initial.sessions ?? []),
     requests: [],
     failNextUpload: null,
     rejectNextUpload: null,
@@ -253,7 +283,7 @@ export function installFakeCore(
       for (const item of [...core.decks, ...core.sheets]) if (item.id === id) item.ingest_state = 'fehler';
     },
     down: initial.down ?? false,
-    latencyMs: initial.latencyMs ?? 0,
+    postGate: null,
     settings: makeSettings(),
     rejectNextSettings: null,
     devices: [],
@@ -291,13 +321,22 @@ export function installFakeCore(
       const headers = (init?.headers ?? {}) as Record<string, string>;
       core.requests.push({ method, path: path + url.search, body, headers });
 
-      if (method === 'POST' && core.latencyMs) await new Promise((r) => setTimeout(r, core.latencyMs));
+      if (method === 'POST' && core.postGate) await core.postGate;
       if (core.down) throw new TypeError('Failed to fetch');
 
       const materialResponse = await handleMaterial(core, { path, method, url, body, form, headers, newId });
       if (materialResponse) return materialResponse;
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
+      // Daten/Papierkorb (T1-18): leere Antworten, damit das gerenderte Panel nicht ins Leere fragt
+      if (path === '/backups' && method === 'GET') {
+        return json({
+          status: { target: null, last_success_at: null, next_run_at: null, stale: false, running: false },
+          items: [],
+          next_cursor: null,
+        });
+      }
+      if (path === '/trash' && method === 'GET') return json({ items: [], next_cursor: null });
 
       const devicesResponse = handleDevices(core, path, method, url);
       if (devicesResponse) return devicesResponse;
@@ -383,6 +422,31 @@ export function installFakeCore(
         if (!target) return json({ error: { code: 'module_not_found', message: 'x' } }, 404);
         target.deleted_at = new Date().toISOString();
         return new Response(null, { status: 204 });
+      }
+
+      const sessionMatch = /^\/sessions\/([^/]+)\/(stop|extend)$/.exec(path);
+      if (sessionMatch && method === 'POST') {
+        const target = core.sessions.find((x) => x.id === sessionMatch[1]);
+        if (!target) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        const active = target.state === 'laeuft' || target.state === 'pausiert';
+        const now = Date.now();
+        if (sessionMatch[2] === 'stop') {
+          if (active) {
+            target.state = 'beendet';
+            target.ended_at = new Date(now).toISOString();
+            target.stop_reason = (body?.reason as Session['stop_reason'] | undefined) ?? 'manuell';
+            target.updated_at = new Date(now).toISOString();
+          } else if (target.state !== 'beendet' && target.state !== 'verarbeitet') {
+            return json({ error: { code: 'session_transition_invalid', message: 'x' } }, 409);
+          }
+          return json(target);
+        }
+        if (!active) return json({ error: { code: 'session_not_active', message: 'x' } }, 409);
+        const base = Math.max(now, Date.parse(target.auto_stop_extended_until ?? '') || 0);
+        const minutes = (body?.minutes as number | undefined) ?? core.settings.lecture.auto_stop_extend_min;
+        target.auto_stop_extended_until = new Date(base + minutes * 60_000).toISOString();
+        target.updated_at = new Date(now).toISOString();
+        return json(target);
       }
 
       return json({ error: { code: 'not_found', message: 'x' } }, 404);

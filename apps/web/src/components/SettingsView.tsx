@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { ComingSoon } from './settings/ComingSoon.tsx';
 import { DevicesSettings } from './settings/DevicesSettings.tsx';
 import { SettingsTabContext, type TabMark } from './settings/form.tsx';
+import { DataSettings } from './settings/DataSettings.tsx';
 import { GeneralSettingsForm } from './settings/GeneralSettings.tsx';
 import { LectureSettingsForm } from './settings/LectureSettings.tsx';
 import { PenSettingsForm } from './settings/PenSettings.tsx';
+import { TrashSettings } from './settings/TrashSettings.tsx';
 import { SemesterSettings } from './SemesterSettings.tsx';
 import { ThemeToggle } from './ThemeToggle.tsx';
 
@@ -34,6 +35,8 @@ interface SettingsTab {
   id: string;
   label: string;
   panel: () => ReactNode;
+  /** Erst beim ersten Aktivieren mounten (vermeidet Anfragen/Polling für nie geöffnete Reiter) */
+  lazy?: boolean;
 }
 
 /**
@@ -45,11 +48,17 @@ const TABS: readonly SettingsTab[] = [
   { id: 'allgemein', label: 'Allgemein', panel: () => <GeneralTab /> },
   { id: 'vorlesung', label: 'Vorlesung', panel: () => <LectureSettingsForm /> },
   { id: 'stift', label: 'Stift', panel: () => <PenSettingsForm /> },
-  { id: 'geraete', label: 'Geräte', panel: () => <DevicesSettings /> },
+  { id: 'geraete', label: 'Geräte', lazy: true, panel: () => <DevicesSettings /> },
   {
     id: 'daten',
+    lazy: true,
     label: 'Daten und Papierkorb',
-    panel: () => <ComingSoon title="Daten und Papierkorb" ticket="T1-18" />,
+    panel: () => (
+      <div className="space-y-8">
+        <DataSettings />
+        <TrashSettings />
+      </div>
+    ),
   },
 ];
 
@@ -96,6 +105,8 @@ export function SettingsView() {
   const [marks, setMarks] = useState<Record<string, TabMark>>({});
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   const vertical = useVerticalTabs();
+  const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set([TABS[0]?.id ?? '']));
+  if (!visited.has(active)) setVisited(new Set(visited).add(active));
 
   const report = useCallback((tabId: string, mark: TabMark) => {
     setMarks((current) => {
@@ -190,7 +201,7 @@ export function SettingsView() {
               className="min-w-0"
             >
               <PanelScope tabId={tab.id} active={tab.id === active} onReport={report}>
-                {tab.panel()}
+                {tab.lazy && !visited.has(tab.id) && tab.id !== active ? null : tab.panel()}
               </PanelScope>
             </div>
           ))}

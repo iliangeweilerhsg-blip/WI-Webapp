@@ -8,5 +8,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./test/setup.ts'],
     include: ['test/**/*.test.{ts,tsx}'],
+    // Obergrenzen nur für den Fehlerfall: unter Last (parallele Worker, pdf.js) dauert das erste Rendern länger als 5 s
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });
