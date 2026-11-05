@@ -1,4 +1,4 @@
-// Die Befehle start, stop, migrate, doctor, backup, restore.
+// Die Befehle start, stop, migrate, doctor, backup, restore, moodle.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { HealthSchema, type Health } from '@sg/shared';
@@ -11,6 +11,7 @@ import {
 import type { CommandName } from './cli.ts';
 import { appUrl, childEnv, CORE_STOP_TIMEOUT_S, healthUrl, type SgConfig } from './config.ts';
 import { doctorExitCode, formatChecks, runChecks } from './doctor.ts';
+import { moodleCommand, realMoodleDeps } from './moodle.ts';
 import {
   clearStopMarker,
   createLinePrefixer,
@@ -428,5 +429,7 @@ export async function dispatch(command: CommandName, cfg: SgConfig, rest: string
       return backupCommand(cfg, rest);
     case 'restore':
       return restoreCommand(cfg, rest);
+    case 'moodle':
+      return moodleCommand(cfg, rest, realMoodleDeps());
   }
 }

@@ -27,9 +27,9 @@ const isHelp =
 if (!isHelp && command !== 'stop' && command !== 'backup') {
   const { dirname, resolve } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
-  const { syncDeps } = await import('./deps.mjs');
+  const { defaultRun, installStdin, syncDeps } = await import('./deps.mjs');
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  if (!syncDeps(repoRoot)) {
+  if (!syncDeps(repoRoot, defaultRun(repoRoot, installStdin(command)))) {
     if (command === 'start' || command === 'migrate') process.exit(1);
     console.error('[sg] Weiter mit den bisher installierten Paketen.');
   }
