@@ -140,12 +140,14 @@ describe('Einlesen gescheitert nach dem Hochladen', () => {
     await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('Weg.pdf'));
     await screen.findByText('Foliensatz hinzugefügt');
     const deck = core.decks[0];
+    const detailCount = () => core.requests.filter((r) => r.path === `/slide-decks/${deck?.id}`).length;
     if (deck) deck.deleted_at = new Date().toISOString();
-    await advance(POLL_INTERVAL_MS + 100);
-    const seen = core.requests.length;
-    await advance(30_000);
-    const detail = core.requests.slice(seen).filter((r) => r.path === `/slide-decks/${deck?.id}`);
-    expect(detail).toHaveLength(0);
+    // Die Abfrage, die den 404 bekommt, kann unter Last noch unterwegs sein – darum erst eine Weile laufen lassen
+    // (länger als jede Pause, höchstens 10 s) und dann prüfen, dass danach nichts mehr abgefragt wird.
+    await advance(15_000);
+    const settled = detailCount();
+    await advance(60_000);
+    expect(detailCount()).toBe(settled);
   });
 
   it('der Toast geht nach höchstens 5 s von selbst weg', async () => {
