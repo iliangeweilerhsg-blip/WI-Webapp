@@ -4,6 +4,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef } from 'react';
 import {
+  MoodleAutoAssignResultSchema,
   MoodleCourseLinkListSchema,
   MoodleCourseLinkSchema,
   MoodleCourseListSchema,
@@ -12,8 +13,6 @@ import {
   MoodleStatusSchema,
   MoodleSyncedDeadlineListSchema,
   MoodleSyncStatusSchema,
-  type MoodleCourse,
-  type MoodleCourseLink,
   type MoodleItem,
   type MoodleSyncStatus,
   type Semester,
@@ -103,41 +102,33 @@ export function useMoodleStatus() {
   });
 }
 
-/**
- * Hat der Core beim Laden der Kursliste Kurse automatisch zugeordnet (#141)? Dann stimmen die gemerkten Zuordnungen
- * nicht mehr, und es kann neue Module geben.
- */
-export function linksOutdated(
-  courses: readonly MoodleCourse[],
-  links: readonly MoodleCourseLink[] | undefined,
-): boolean {
-  const known = new Map((links ?? []).map((link) => [link.moodle_course_id, link.module_id]));
-  return courses.some(
-    (course) => course.module_id !== null && known.get(course.moodle_id) !== course.module_id,
-  );
-}
-
 /** Gibt es ein aktuelles Semester? Ohne legt die automatische Zuordnung keine Module an (#141) */
 export function hasCurrentSemester(semesters: readonly Semester[]): boolean {
   return semesters.some((s) => s.is_current && s.archived_at === null && s.deleted_at === null);
 }
 
 /**
- * Kurse aus Moodle mit Zuordnung und Vorschlag. Braucht Moodle; ohne Einrichtung kein erneuter Versuch. Beim Laden
- * ordnet der Core neue Kurse automatisch zu (#141): Danach Zuordnungen und Module neu laden
+ * Automatische Kurszuordnung anstoßen (#141, `POST /moodle/auto-assign`). Hat sie etwas zugeordnet oder angelegt,
+ * werden Kurse, Zuordnungen und Module neu geladen. Ohne Einrichtung bzw. bei abgelehntem Zugang still.
  */
-export function useMoodleCourses(enabled = true) {
+export function useAutoAssign() {
   const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/moodle/auto-assign', MoodleAutoAssignResultSchema, { body: {} }),
+    onSuccess: (result) => {
+      if (result.assigned === 0 && result.created === 0) return;
+      void client.invalidateQueries({ queryKey: MOODLE_KEY });
+      void client.invalidateQueries({ queryKey: ['modules'] });
+    },
+  });
+}
+
+/** Kurse aus Moodle mit Zuordnung und Vorschlag. Braucht Moodle; ohne Einrichtung kein erneuter Versuch */
+export function useMoodleCourses(enabled = true) {
   return useQuery({
     queryKey: COURSES_KEY,
-    queryFn: async ({ signal }) => {
-      const items = (await apiGet('/moodle/courses', MoodleCourseListSchema, { signal })).items;
-      if (linksOutdated(items, client.getQueryData<MoodleCourseLink[]>(LINKS_KEY))) {
-        void client.invalidateQueries({ queryKey: LINKS_KEY });
-        void client.invalidateQueries({ queryKey: ['modules'] });
-      }
-      return items;
-    },
+    queryFn: async ({ signal }) =>
+      (await apiGet('/moodle/courses', MoodleCourseListSchema, { signal })).items,
     enabled,
     // Ohne Einrichtung oder bei abgelehntem Zugang hilft ein erneuter Versuch nicht
     retry: (count, error) => !isMoodleNotConfigured(error) && !isMoodleTokenInvalid(error) && count < 2,

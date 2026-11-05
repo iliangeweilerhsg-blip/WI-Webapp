@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { Module, MoodleCourse, MoodleCourseLink, MoodleSyncStatus } from '@sg/shared';
 import { useRestoreTrashItem } from '../../lib/data.ts';
 import { useVisibleModules } from '../../lib/modules.ts';
@@ -11,6 +11,7 @@ import {
   isMoodleNotConfigured,
   isMoodleTokenInvalid,
   moodleErrorMessage,
+  useAutoAssign,
   useLinkCourse,
   useMoodleCourses,
   useMoodleLinks,
@@ -327,6 +328,16 @@ export function MoodleSettings() {
   // Die Zuordnung steckt schon in course.module_id; Abgleich-Schalter und Zeitpunkt kommen aus /moodle/links
   const linkList = useMoodleLinks();
   const links = new Map((linkList.data ?? []).map((link) => [link.moodle_course_id, link]));
+  // Beim Öffnen einmal die automatische Zuordnung anstoßen (#141). Der Abgleich im Core macht das zusätzlich beim
+  // Start und alle 2 h. Fehler bleiben still: Zugang und Erreichbarkeit zeigt die Seite ohnehin an
+  const autoAssign = useAutoAssign();
+  const autoStarted = useRef(false);
+  const autoState = status.data?.state;
+  useEffect(() => {
+    if (autoStarted.current || !autoState || autoState === 'nicht_eingerichtet') return;
+    autoStarted.current = true;
+    autoAssign.mutate();
+  }, [autoState, autoAssign]);
 
   if (status.isError) return <CoreHint error={status.error} />;
   if (!status.data) return null;

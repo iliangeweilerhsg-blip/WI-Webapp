@@ -8,8 +8,10 @@ import { sql } from 'drizzle-orm';
 import { pino } from 'pino';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
+  MoodleAutoAssignResultSchema,
   MoodleCourseLinkListSchema,
   MoodleCourseListSchema,
+  SINGLE_USER_ID,
   type Module,
   type MoodleCourse,
   type MoodleCourseLink,
@@ -207,18 +209,29 @@ afterEach(async () => {
   await sync.idle();
   const db = t.handle.db;
   await db.execute(
-    sql`TRUNCATE moodle_item, moodle_deadline, moodle_course_link, moodle_course_manual, slide_deck, exercise_sheet CASCADE`,
+    sql`TRUNCATE moodle_item, moodle_deadline, moodle_course_link, moodle_course_decided, slide_deck, exercise_sheet CASCADE`,
   );
   await db.execute(sql`DELETE FROM job`);
+  await db.execute(
+    sql`UPDATE calendar_event SET deleted_at = now() WHERE module_id IN (SELECT id FROM module WHERE semester_id = ${semester.id})`,
+  );
   await db.execute(sql`UPDATE module SET deleted_at = now() WHERE semester_id = ${semester.id}`);
   await db.execute(sql`UPDATE semester SET deleted_at = now(), is_current = false WHERE id = ${semester.id}`);
   await t.close();
   await syncHandle.close();
 });
 
+/** POST /moodle/auto-assign wie die Web-App beim Öffnen von Einstellungen › Moodle */
+async function autoAssign(): Promise<{ assigned: number; created: number }> {
+  const res = await req<{ assigned: number; created: number }>('POST', '/moodle/auto-assign');
+  expect(res.status).toBe(200);
+  return MoodleAutoAssignResultSchema.parse(res.body);
+}
+
 describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
   it('legt aus den Kursen des Screenshots die Module an und ordnet den WI-Kurs dem bestehenden Modul zu', async () => {
     await start();
+    expect(await autoAssign()).toEqual({ assigned: 1, created: 5 });
     const byId = await listCourses();
 
     const modules = await semesterModules();
@@ -237,12 +250,8 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
     // Organisatorisch und alt: nichts
     expect(byId.get(C.pruefungsamt)).toMatchObject({ category: 'organisatorisch', module_id: null });
     expect(byId.get(C.alt)).toMatchObject({ category: 'alt', module_id: null });
-
-    // Kürzel aus Moodle, ohne Semesterzusatz
-    expect(moduleOf(C.marketing)?.short_name).toBe('EiM');
-    expect(moduleOf(C.bwl)?.short_name).toBe('BMBWL110');
-    expect(moduleOf(C.mathe)?.short_name).toBe('MathWI');
-    expect(moduleOf(C.programmierung)?.short_name).toBe('GdP');
+    // Kein Kürzel aus Moodle: Die Seitenleiste zeigt den bereinigten Namen (Lead-Review #144)
+    expect(modules.map((m) => m.short_name)).toEqual([null, null, null, null, null, null]);
 
     // Vermerk und „Modul entfernen“
     const links = await listLinks();
@@ -250,11 +259,34 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
     for (const id of [C.marketing, C.programmierung, C.mathe, C.bwl, C.praktikum]) {
       expect(links.get(id), String(id)).toMatchObject({ auto: 'angelegt', module_removable: true });
     }
-    // Neue Module bekommen wie von Hand angelegte die Notizbücher „Vorlesung“ und „Übung“ und eigene Farben
+    // Jeder behandelte Kurs ist entschieden
+    const decided = (await t.handle.db.execute(
+      sql`SELECT moodle_course_id::int AS id, reason FROM moodle_course_decided ORDER BY moodle_course_id`,
+    )) as unknown as { id: number; reason: string }[];
+    expect(decided).toEqual(
+      [C.marketing, C.programmierung, C.mathe, C.bwl, C.wi, C.praktikum].map((id) => ({
+        id,
+        reason: 'auto',
+      })),
+    );
+    // Neue Module bekommen wie von Hand angelegte die Notizbücher „Vorlesung“ und „Übung“
     const notebooks = (await t.handle.db.execute(
       sql`SELECT count(*)::int AS n FROM notebook WHERE module_id = ${moduleOf(C.marketing)?.id ?? ''}`,
     )) as unknown as { n: number }[];
     expect(notebooks[0]?.n).toBe(2);
+  });
+
+  it('GET /moodle/courses schreibt nichts, auch nicht mit fremdem Origin; POST mit fremdem Origin wird abgelehnt', async () => {
+    await start();
+    const evil = { origin: 'https://evil.example' };
+    const get = await t.request({ method: 'GET', url: '/api/v1/moodle/courses', headers: evil });
+    expect([200, 403]).toContain(get.statusCode);
+    expect((await listCourses()).get(C.marketing)?.module_id).toBeNull();
+    const post = await t.request({ method: 'POST', url: '/api/v1/moodle/auto-assign', headers: evil });
+    expect(post.statusCode).toBe(403);
+    expect(post.json().error.code).toBe('origin_not_allowed');
+    expect(await semesterModules()).toHaveLength(1);
+    expect((await listLinks()).size).toBe(0);
   });
 
   it('ist idempotent: nacheinander und bei vier gleichzeitigen Läufen keine doppelten Module', async () => {
@@ -271,8 +303,8 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
       await Promise.all(handles.map((handle) => handle.close()));
     }
     expect(await semesterModules()).toHaveLength(6);
-    // Abgleich, Kursliste und Abgleich gleichzeitig: nichts Neues
-    await Promise.all([sync.run('manuell'), listCourses(), sync.run('zeitplan')]);
+    // Abgleich, Anstoß der Web-App und Abgleich gleichzeitig: nichts Neues
+    await Promise.all([sync.run('manuell'), autoAssign(), sync.run('zeitplan')]);
     await sync.idle();
     expect(await semesterModules()).toHaveLength(6);
     expect((await listLinks()).size).toBe(6);
@@ -290,12 +322,12 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
 
   it('„Lösen“ verhindert eine erneute Automatik, von Hand zuordnen geht weiter', async () => {
     await start();
-    await listCourses();
+    await autoAssign();
     expect((await req('DELETE', `/moodle/links/${C.marketing}`)).status).toBe(204);
     expect((await req('DELETE', `/moodle/links/${C.wi}`)).status).toBe(204);
 
-    // Weder das nächste Laden der Kursliste noch der nächste Abgleich ordnen wieder zu
-    expect((await listCourses()).get(C.marketing)?.module_id).toBeNull();
+    // Weder der nächste Anstoß noch der nächste Abgleich ordnen wieder zu
+    expect(await autoAssign()).toEqual({ assigned: 0, created: 0 });
     await sync.run('manuell');
     const byId = await listCourses();
     expect(byId.get(C.marketing)?.module_id).toBeNull();
@@ -312,7 +344,7 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
 
   it('Modul wechseln von Hand löscht den Vermerk, der Schalter „Abgleichen“ nicht', async () => {
     await start();
-    await listCourses();
+    await autoAssign();
     const links = await listLinks();
     const own = links.get(C.marketing)?.module_id ?? '';
     const off = await req<MoodleCourseLink>('PUT', `/moodle/links/${C.marketing}`, {
@@ -328,7 +360,7 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
 
   it('„Modul entfernen“ legt ein leeres automatisch angelegtes Modul in den Papierkorb, ohne erneute Automatik', async () => {
     await start();
-    await listCourses();
+    await autoAssign();
     const moduleId = (await listLinks()).get(C.programmierung)?.module_id ?? '';
     expect((await req('DELETE', `/moodle/links/${C.programmierung}/module`)).status).toBe(204);
     expect((await req<Module>('GET', `/modules/${moduleId}`)).status).toBe(404);
@@ -336,6 +368,7 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
     expect(trash.body.items.map((item) => item.id)).toContain(moduleId);
 
     await sync.run('manuell');
+    await autoAssign();
     const byId = await listCourses();
     expect(byId.get(C.programmierung)?.module_id).toBeNull();
     expect((await semesterModules()).map((m) => m.name)).not.toContain('Grundlagen der Programmierung');
@@ -348,13 +381,27 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
     expect((await req('DELETE', `/moodle/links/${C.programmierung}/module`)).status).toBe(204);
     expect((await req('DELETE', `/trash/${moduleId}`)).status).toBe(204);
     await sync.run('manuell');
+    await autoAssign();
     expect((await listCourses()).get(C.programmierung)?.module_id).toBeNull();
     expect((await semesterModules()).map((m) => m.name)).not.toContain('Grundlagen der Programmierung');
   });
 
+  it('ein endgültig gelöschtes Modul kommt nie zurück, auch ohne „Modul entfernen“ (B3)', async () => {
+    await start();
+    await autoAssign();
+    const moduleId = (await listLinks()).get(C.marketing)?.module_id ?? '';
+    // Über die Modulseite gelöscht und den Papierkorb geleert
+    expect((await req('DELETE', `/modules/${moduleId}`)).status).toBe(204);
+    expect((await req('DELETE', `/trash/${moduleId}`)).status).toBe(204);
+    expect(await autoAssign()).toEqual({ assigned: 0, created: 0 });
+    await sync.run('manuell');
+    expect((await listCourses()).get(C.marketing)?.module_id).toBeNull();
+    expect((await semesterModules()).map((m) => m.name)).not.toContain('Einführung in das Marketing');
+  });
+
   it('„Modul entfernen“ nur für automatisch angelegte, leere Module', async () => {
     await start();
-    await listCourses();
+    await autoAssign();
     // Zugeordnet, nicht angelegt
     const assigned = await req<{ error: { code: string } }>('DELETE', `/moodle/links/${C.wi}/module`);
     expect(assigned.status).toBe(409);
@@ -362,50 +409,101 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
     // Mit eigenem Inhalt (ein freies Notizbuch)
     const moduleId = (await listLinks()).get(C.mathe)?.module_id ?? '';
     await t.handle.db.execute(
-      sql`INSERT INTO notebook (id, user_id, module_id, title, kind) VALUES (gen_random_uuid(), '0190f6a2-0000-7000-8000-000000000000', ${moduleId}, 'Eigene Notizen', 'frei')`,
+      sql`INSERT INTO notebook (id, user_id, module_id, title, kind) VALUES (gen_random_uuid(), ${SINGLE_USER_ID}, ${moduleId}, 'Eigene Notizen', 'frei')`,
     );
     expect((await listLinks()).get(C.mathe)?.module_removable).toBe(false);
     expect((await req('DELETE', `/moodle/links/${C.mathe}/module`)).status).toBe(409);
-    // Zwei Kurse im selben Modul
-    expect(
-      (
-        await req('PUT', `/moodle/links/${C.marketing}`, {
-          module_id: (await listLinks()).get(C.bwl)?.module_id,
-        })
-      ).status,
-    ).toBe(200);
+    // Mit einem von Hand zugeordneten Termin (B5); ein automatisch zugeordneter zählt nicht
+    const bwlModule = (await listLinks()).get(C.bwl)?.module_id ?? '';
+    const event = (assignedBy: string) =>
+      t.handle.db.execute(
+        sql`INSERT INTO calendar_event (id, user_id, module_id, title, starts_at, ends_at, all_day, kind, assigned_by)
+            VALUES (gen_random_uuid(), ${SINGLE_USER_ID}, ${bwlModule}, 'Vorlesung', now(), now() + interval '1 hour', false, 'vorlesung', ${assignedBy})`,
+      );
+    await event('auto');
+    expect((await listLinks()).get(C.bwl)?.module_removable).toBe(true);
+    await event('manuell');
     expect((await listLinks()).get(C.bwl)?.module_removable).toBe(false);
+    expect((await req('DELETE', `/moodle/links/${C.bwl}/module`)).status).toBe(409);
+    // Zwei Kurse im selben Modul
+    const praktikumModule = (await listLinks()).get(C.praktikum)?.module_id;
+    expect((await req('PUT', `/moodle/links/${C.marketing}`, { module_id: praktikumModule })).status).toBe(
+      200,
+    );
+    expect((await listLinks()).get(C.praktikum)?.module_removable).toBe(false);
     // Nicht zugeordnet
     expect((await req('DELETE', `/moodle/links/${C.pruefungsamt}/module`)).status).toBe(404);
   });
 
-  it('mehrdeutige Kurse und Kurse mit anderer Stufe werden nicht automatisch zugeordnet', async () => {
-    await start([
-      { id: C.mehrdeutig, fullname: 'Marketing und Controlling WiSe 26/27', shortname: 'MC' },
-      { id: C.stufe, fullname: 'Statistik II WiSe 26/27', shortname: 'ST2' },
-    ]);
-    for (const name of ['Marketing', 'Controlling', 'Statistik']) {
-      expect((await req('POST', '/modules', { semester_id: semester.id, name })).status).toBe(201);
+  it('unsichere Treffer, Mehrdeutiges und andere Stufen bleiben Vorschlag, ohne neues Modul (B1)', async () => {
+    const fixture: FakeCourse[] = [
+      { id: 2101, fullname: 'Marketing und Controlling WiSe 26/27', shortname: 'MC' },
+      { id: 2102, fullname: 'Statistik II WiSe 26/27', shortname: 'ST2' },
+      { id: 2103, fullname: 'Statistik Teil B', shortname: 'STB' },
+      { id: 2104, fullname: 'Bilanzierung', shortname: 'BIL' },
+      { id: 2105, fullname: 'Wirtschaftsrecht', shortname: 'REC' },
+      { id: 2106, fullname: 'Statik', shortname: 'STA' },
+      { id: 2107, fullname: 'Mikrobiologie', shortname: 'MB' },
+      { id: 2108, fullname: 'Infrastrukturrecht', shortname: 'IR' },
+    ];
+    await start(fixture);
+    for (const [name, short_name] of [
+      ['Marketing', null],
+      ['Controlling', null],
+      ['Statistik', null],
+      ['Betriebswirtschaftslehre', null],
+      ['Rechnungswesen', null],
+      ['Mikroökonomie', 'Mikro'],
+      ['Informatik', 'Inf'],
+    ]) {
+      expect((await req('POST', '/modules', { semester_id: semester.id, name, short_name })).status).toBe(
+        201,
+      );
     }
+    expect(await autoAssign()).toEqual({ assigned: 0, created: 0 });
     const byId = await listCourses();
-    expect(byId.get(C.mehrdeutig)).toMatchObject({ module_id: null, suggested_module_id: null });
-    // „Statistik II“ ist ein anderes Modul als „Statistik“: bleibt ein Vorschlag, kein neues Modul
+    for (const course of fixture) {
+      expect(byId.get(course.id)?.module_id, course.fullname).toBeNull();
+    }
+    // Der Vorschlag bleibt, wo er vorher war
     const statistik = (await semesterModules()).find((m) => m.name === 'Statistik');
-    expect(byId.get(C.stufe)).toMatchObject({ module_id: null, suggested_module_id: statistik?.id });
-    expect(await semesterModules()).toHaveLength(4);
+    expect(byId.get(2102)?.suggested_module_id).toBe(statistik?.id);
+    expect(await semesterModules()).toHaveLength(8);
+    expect((await listLinks()).size).toBe(0);
+  });
+
+  it('Terminarten zählen nicht: „Statistik“ und „Übung Statistik“ ergeben ein Modul (B6)', async () => {
+    await start([
+      { id: 2201, fullname: 'Statistik WiSe 26/27', shortname: 'STAT' },
+      { id: 2202, fullname: 'Übung Statistik WiSe 26/27', shortname: 'STAT-UE' },
+      { id: 2203, fullname: 'Tutorium Statistik (WiSe 26/27)', shortname: 'STAT-TUT' },
+    ]);
+    expect(await autoAssign()).toEqual({ assigned: 0, created: 1 });
+    const byId = await listCourses();
+    const statistik = (await semesterModules()).find((m) => m.name === 'Statistik');
+    expect(statistik).toBeDefined();
+    for (const id of [2201, 2202, 2203]) expect(byId.get(id)?.module_id, String(id)).toBe(statistik?.id);
+  });
+
+  it('bleibt nach der Bereinigung nichts übrig, entsteht kein Modul (B2)', async () => {
+    await start([
+      { id: 2301, fullname: '-', shortname: 'X1' },
+      { id: 2302, fullname: '.', shortname: 'X2' },
+      { id: 2303, fullname: '–', shortname: 'X3' },
+      { id: 2304, fullname: '???', shortname: 'X4' },
+      { id: 2305, fullname: 'Übung WiSe 26/27', shortname: 'X5' },
+    ]);
+    expect(await autoAssign()).toEqual({ assigned: 0, created: 0 });
+    expect(await semesterModules()).toHaveLength(1);
     expect((await listLinks()).size).toBe(0);
   });
 
   it('ohne aktuelles Semester entstehen keine Module und nichts wird zugeordnet', async () => {
     await start();
     expect((await req('PATCH', `/semesters/${semester.id}`, { is_current: false })).status).toBe(200);
-    await listCourses();
+    expect(await autoAssign()).toEqual({ assigned: 0, created: 0 });
     await sync.run('manuell');
     expect(await semesterModules()).toHaveLength(1);
     expect((await listLinks()).size).toBe(0);
-    const modules = (await t.handle.db.execute(
-      sql`SELECT count(*)::int AS n FROM module WHERE created_at >= ${semester.created_at}::timestamptz AND deleted_at IS NULL`,
-    )) as unknown as { n: number }[];
-    expect(modules[0]?.n).toBe(1);
   });
 });

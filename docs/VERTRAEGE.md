@@ -977,7 +977,7 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 
 ## 17. Moodle: Kurszuordnung und Abgleich (T1-23, F-MDL-03/-04)
 
-Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabellen aus 08 §9.4 in der Migration `0005_moodle`, die automatische Zuordnung (#141, §17.7) in `0006_moodle_auto`. Die Lead-Entscheidungen aus dem Review von #133 sind hier und in 08 §9.1, §9.2 und §9.4 eingearbeitet.
+Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabellen aus 08 §9.4 in der Migration `0005_moodle`, die automatische Zuordnung (#141, §17.7) in `0007_moodle_auto`. Die Lead-Entscheidungen aus dem Review von #133 sind hier und in 08 §9.1, §9.2 und §9.4 eingearbeitet.
 
 ### 17.1 Festlegungen aus PR #128 (Lead-Entscheidungen in #127)
 
@@ -996,7 +996,7 @@ Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabe
 | Tabelle | Ergänzung | Grund |
 |---|---|---|
 | `moodle_course_link` | `module_id` mit `ON DELETE CASCADE`, eindeutig über `moodle_course_id`. Lösen löscht die Zeile hart. `auto` (`zugeordnet`/`angelegt`, `NULL` = von Hand, #141) | Einstellung, kein Inhalt. Ein Modul kann mehrere Kurse haben |
-| `moodle_course_manual` | `moodle_course_id` (eindeutig). Kurse, über die der Nutzer selbst entschieden hat („Lösen“, „Modul entfernen“). Kein Papierkorb (#141) | Die Automatik fasst diese Kurse nicht mehr an |
+| `moodle_course_decided` | `moodle_course_id` (eindeutig), `reason` (`auto`/`manuell`/`geloest`/`entfernt`). Kurse, über die schon entschieden ist. Kein Papierkorb (#141). Die Migration trägt bestehende Zuordnungen als `manuell` ein | Die Automatik behandelt jeden Kurs genau einmal, auch nach endgültigem Löschen des Moduls nie wieder |
 | `moodle_item` | `activity_name`, `filename` (Anzeige, ≤ 255 Byte UTF-8, Endung bleibt), `mime_type`, `kind_source` (`auto`/`manuell`), `kind_decided_at` (Zeitpunkt der Inbox-Entscheidung, die jüngste gilt für die Aktivität), `last_error` (`kein_pdf`, `zu_gross`, `nicht_gefunden`, `download_fehlgeschlagen`). `sha256` ist `NULL`, solange die Datei nicht geladen wurde. `slide_deck_id`/`exercise_sheet_id` mit `ON DELETE SET NULL` | Anzeige, Inbox-Regel je Aktivität, Wiederholung nach Fehlern |
 | `moodle_deadline` | `source` (`aufgabe`/`termin`), `moodle_course_id`, `cmid`, `url`, `removed_in_moodle_at`. Eindeutig je `moodle_assignment_id` bzw. `moodle_event_id` (Teilindex) | Upsert beim Abgleich, keine Dublette Aufgabe ↔ Kalenderereignis |
 
@@ -1012,7 +1012,8 @@ Basis `/api/v1`. Die Pfade sind festgelegt (Lead, Review #133).
 
 | Endpunkt | Body / Query | Antwort | Fehler |
 |---|---|---|---|
-| `GET /moodle/courses` | – | `MoodleCourseList` mit `module_id`, `suggested_module_id`, `category`. Ordnet vorher neue Kurse automatisch zu (§17.7) | wie 08 §9.2 |
+| `GET /moodle/courses` | – | `MoodleCourseList` mit `module_id`, `suggested_module_id`, `category`. Nur lesend | wie 08 §9.2 |
+| `POST /moodle/auto-assign` | – | `MoodleAutoAssignResult` (`assigned`, `created`). Automatische Zuordnung (§17.7). Origin-Schutz wie alle POSTs | `503 moodle_not_configured`, Fehler der Kursliste wie 08 §9.2 |
 | `GET /moodle/links` | – | `MoodleCourseLinkList` mit `auto` und `module_removable` | – |
 | `PUT /moodle/links/{course_id}` | `MoodleCourseLinkUpdate` | `MoodleCourseLink`. Startet einen Abgleich des Kurses im Hintergrund. Anderes Modul → `auto = null` | `404 module_not_found` |
 | `DELETE /moodle/links/{course_id}` | – | `204`. Fristen des Kurses fallen weg, Dateien und Material bleiben. Danach keine Automatik mehr für den Kurs | `404 moodle_link_not_found` |
@@ -1057,23 +1058,26 @@ Zuerst der Dateiname, dann der Name der Aktivität. Vorher NFC (Namen aus macOS 
 
 Bewusste Abweichung von F-MDL-03 („jede Zuordnung bestätigen“): Kurse werden ohne Handarbeit zugeordnet, sichtbar und umkehrbar (R15). Keine KI. Code: `services/core/src/moodle/auto.ts` und `course-name.ts`.
 
-- **Wann:** beim vollen Abgleich (§17.4) und bei jedem `GET /moodle/courses`. Behandelt wird jeder Kurs der Art `aktuell`, der weder eine Zuordnung hat (auch keine zu einem gelöschten Modul) noch in `moodle_course_manual` steht.
+- **Wann:** beim vollen Abgleich (§17.4) und auf `POST /moodle/auto-assign`. Die Web-App ruft ihn beim Öffnen von Einstellungen › Moodle auf, wenn Moodle eingerichtet ist. `GET /moodle/courses` schreibt nie.
+- **Wer:** jeder Kurs der Art `aktuell` ohne Zuordnung (auch keine zu einem gelöschten Modul) und ohne Eintrag in `moodle_course_decided`. Jeder behandelte Kurs bekommt dort sofort `auto`: Die Automatik behandelt ihn genau einmal. Ein endgültig gelöschtes Modul kommt nie zurück.
 - **Ohne aktuelles Semester** (nicht gelöscht, nicht archiviert): nichts, auch keine Zuordnung zu bestehenden Modulen. Die Web-App zeigt in Einstellungen › Moodle „Lege zuerst das Semester an.“ (gibt es Semester, aber keines ist aktuell: „Wähle zuerst das aktuelle Semester.“) mit Link zu den Semestern.
-- **Treffer** gegen die Module des aktuellen Semesters, mit denselben Regeln wie der Vorschlag (§17.6):
-  - genau ein Modul → zuordnen, `auto = zugeordnet`
-  - kein Modul → neues Modul im aktuellen Semester über `createModule` (Farbe, Notizbücher wie von Hand), `auto = angelegt`. Kurse mit gleichem bereinigtem Namen teilen sich ein Modul. Module desselben Laufs zählen beim Treffer nicht mit, so entscheidet die Reihenfolge der Kurse nichts.
-  - mehrdeutig → nichts, der Kurs bleibt wie bisher (Vorschlag bzw. keiner). Mehrdeutig ist auch eine andere Stufe: „Statistik II“ passt dem Wortlaut nach zu „Statistik“, wird aber nicht automatisch zugeordnet (römische Zahl oder Zahl als eigenes Wort, die das Modul nicht hat).
+- **Treffer** gegen die Module des aktuellen Semesters. Automatisch zählen nur zwei sichere Wege:
+  - Name bzw. Kürzel des Moduls als ganze Wortfolge im Kursnamen (Stufe 1 aus F-KAL-02, der genauere Treffer gewinnt)
+  - Moodle-Kürzel gleich dem Kürzel des Moduls
+
+  Genau ein Modul → zuordnen, `auto = zugeordnet`. Alles Unsichere, das der Vorschlag (§17.6) noch findet (Abkürzungen wie „STA“ → „Statistik“, Wortanfänge, Ort), und mehrere Treffer gelten als mehrdeutig: keine Automatik, kein neues Modul, der Kurs bleibt Vorschlag. Mehrdeutig ist auch eine andere Stufe: römische Zahl, Zahl oder Buchstabe A–F als eigenes Wort, die das Modul nicht hat („Statistik II“, „Statistik Teil B“ ↛ „Statistik“).
+- **Kein Treffer:** neues Modul im aktuellen Semester über `createModule` (Farbe, Notizbücher wie von Hand), `auto = angelegt`, nur mit dem bereinigten Namen, **ohne Kürzel** (die Seitenleiste zeigt das Kürzel statt des Namens). Kurse mit gleichem bereinigtem Namen teilen sich ein Modul („Statistik“ und „Übung Statistik“). Module desselben Laufs zählen beim Treffer nicht mit, so entscheidet die Reihenfolge der Kurse nichts. Bleibt nach der Bereinigung kein Name bzw. kein Schlüssel übrig („-“, „???“), entsteht kein Modul.
 - **Modulname** aus dem Kursnamen (NFC, nie NFKC):
-  - Semesterzusätze weg: WiSe/SoSe/Wintersemester/Sommersemester mit oder ohne Jahr, WS/SS nur mit Jahr, `JJ/JJ`, `JJJJ/JJ`, `JJJJ/JJJJ` (nur aufeinanderfolgende Jahre), auch in Klammern. Groß- und Kleinschreibung zählt.
+  - Semesterzusätze weg: WiSe/SoSe/Wintersemester/Sommersemester mit oder ohne Jahr, WS/SS/Winter/Sommer nur mit Jahr. Jahresfolgen (`JJ/JJ`, `JJJJ/JJ`, `JJJJ/JJJJ`, auch länger wie `2026/2027/2028`) nur, wenn die Jahre aufeinanderfolgen und zwischen 2015 und 2040 liegen („Kapitel 12/13“ bleibt). Groß- und Kleinschreibung zählt. Klammern werden aufgeräumt: „Marketing (WiSe 26/27, Gruppe 1)“ → „Marketing (Gruppe 1)“.
+  - Terminarten weg (`KIND_WORD_RE` aus F-KAL-02: Vorlesung, VL, Übung, Ü, Tutorium, Tut, Prüfung, Klausur, Exam, Lecture), nur als ganze Wörter.
   - Unterstriche → Leerzeichen. Führender Kurs-Code (Großbuchstaben mit Ziffern, z. B. `BMBWL110`) weg, wenn danach noch Text kommt.
   - `ae/oe/ue` → Umlaut nur in Wörtern ohne Umlaut und nur für die Wortstämme in `UMLAUT_STEMS` (Einführung, Führung, Übung, Prüfung, Ökonom…, Geschäft, künstlich, öffentlich, Gründung, Überblick, Übersicht).
-  - Sonst bleibt der Name, wie Moodle ihn schreibt, auch mit Tippfehlern. Höchstens 120 Zeichen.
-- **Kürzel:** das Moodle-`shortname` ohne Semesterzusatz (auch kompakt wie `-2627`), nur bis 20 Zeichen und nur, wenn es nicht schon der Name ist.
-- **Idempotent:** Der ganze Lauf ist eine Transaktion unter der Advisory-Sperre `MOODLE_AUTO_LOCK_KEY` (`lib/locks.ts`). `PUT`/`DELETE /moodle/links/{course_id}` nehmen dieselbe Sperre. Gleichzeitige Läufe ergeben keine doppelten Module.
+  - Sonst bleibt der Name, wie Moodle ihn schreibt, auch mit Tippfehlern. Höchstens 120 Zeichen (Codepoints, kein Surrogat-Paar wird zerschnitten).
+- **Idempotent:** Der ganze Lauf ist eine Transaktion unter der Advisory-Sperre `MOODLE_AUTO_LOCK_KEY` (`lib/locks.ts`). `PUT`/`DELETE /moodle/links/{course_id}` und „Modul entfernen“ nehmen dieselbe Sperre. Gleichzeitige Läufe ergeben keine doppelten Module.
 - **Umkehrbar:**
-  - „Lösen“ (`DELETE /moodle/links/{course_id}`) trägt den Kurs in `moodle_course_manual` ein: Er wird nicht wieder automatisch zugeordnet, von Hand zuordnen geht weiter.
+  - „Lösen“ (`DELETE /moodle/links/{course_id}`) setzt `reason = geloest`. Von Hand zuordnen geht weiter (`PUT` trägt `manuell` ein, wenn noch keine Entscheidung besteht).
   - Wechselt das Modul von Hand, wird `auto = null`. Der Schalter „Abgleichen“ lässt den Vermerk stehen.
-  - „Modul entfernen“ (`DELETE /moodle/links/{course_id}/module`) nur bei `auto = angelegt` und leerem Modul (`module_removable`): keine Session, keine Seite, kein freies Notizbuch, kein Material außer dem aus Moodle übernommenen, kein weiterer Kurs. Das Modul kommt per Soft-Delete in den Papierkorb, die Zuordnung bleibt und lebt mit dem Wiederherstellen wieder auf. Der Kurs steht danach in `moodle_course_manual`.
+  - „Modul entfernen“ (`DELETE /moodle/links/{course_id}/module`) nur bei `auto = angelegt` und leerem Modul (`module_removable`): keine Session, keine Seite, kein freies Notizbuch, kein Material außer dem aus Moodle übernommenen, kein von Hand zugeordneter Termin (`calendar_event.assigned_by = manuell`), kein weiterer Kurs. Prüfen, Soft-Delete und `reason = entfernt` laufen in einer Transaktion unter der Sperre. Die Zuordnung bleibt und lebt mit dem Wiederherstellen aus dem Papierkorb wieder auf.
 - **Web-App:** Jede automatisch zugeordnete Zeile trägt „automatisch zugeordnet“ bzw. „Modul automatisch angelegt“. Nach „Modul entfernen“ bietet ein Toast „Rückgängig“ (`POST /trash/{id}/restore`).
 
 **Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404), `moodle_link_disabled` (409), `moodle_module_not_removable` (409, #141). `MoodleSyncRun.error_code` kann außerdem `abgebrochen` sein (Beenden des Core).

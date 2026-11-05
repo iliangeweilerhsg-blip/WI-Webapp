@@ -94,8 +94,8 @@ interface MoodleFake {
   deadlines: MoodleSyncedDeadline[];
   /** Verzögert schreibende Anfragen (Doppelklick-Tests) */
   delayMs: number;
-  /** Läuft beim ersten GET /moodle/courses, wie die automatische Zuordnung im Core (#141) */
-  onFirstCourses?: () => void;
+  /** POST /moodle/auto-assign wie im Core (#141): ändert den Stand und liefert, was geschah */
+  onAutoAssign?: () => { assigned: number; created: number };
   /** Verzögert GET /moodle/courses (Moodle ist langsamer als die lokalen Endpunkte) */
   coursesDelayMs?: number;
 }
@@ -147,9 +147,6 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
       if (fake.delayMs > 0 && method !== 'GET') await new Promise((r) => setTimeout(r, fake.delayMs));
       if (path === '/moodle/courses') {
         if (fake.coursesDelayMs) await new Promise((r) => setTimeout(r, fake.coursesDelayMs));
-        const automatic = fake.onFirstCourses;
-        fake.onFirstCourses = undefined;
-        automatic?.();
         if (fake.status.state === 'nicht_eingerichtet') {
           return json({ error: { code: 'moodle_not_configured', message: 'x' } }, 503);
         }
@@ -160,6 +157,11 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
           return json({ error: { code: 'moodle_unreachable', message: 'x' } }, 502);
         }
         return json({ items: fake.courses });
+      }
+      if (path === '/moodle/auto-assign' && method === 'POST') {
+        const automatic = fake.onAutoAssign;
+        fake.onAutoAssign = undefined;
+        return json(automatic?.() ?? { assigned: 0, created: 0 });
       }
       if (path === '/moodle/links') return json({ items: fake.links });
       const removeModule = /^\/moodle\/links\/(\d+)\/module$/.exec(path);
@@ -582,13 +584,14 @@ describe('Einstellungen › Moodle: automatische Zuordnung (#141)', () => {
     );
   });
 
-  it('lädt nach der Automatik beim ersten Laden Zuordnungen und Module neu', async () => {
+  it('stößt beim Öffnen einmal die Automatik an und lädt danach Zuordnungen und Module neu', async () => {
     const fake = installMoodle(core, { courses: [{ ...marketing, module_id: null }] });
-    // Wie der Core: beim ersten GET /moodle/courses entsteht das Modul samt Zuordnung
-    fake.onFirstCourses = () => {
+    // Wie der Core: POST /moodle/auto-assign legt das Modul samt Zuordnung an
+    fake.onAutoAssign = () => {
       core.modules.push(MARKETING);
       fake.links = [autoLink({})];
       fake.courses = [marketing];
+      return { assigned: 0, created: 1 };
     };
     await openMoodleTab();
     await screen.findByText(marketing.full_name);
@@ -602,6 +605,28 @@ describe('Einstellungen › Moodle: automatische Zuordnung (#141)', () => {
     );
     expect(within(rowOf(marketing.full_name)).getByRole('combobox')).toHaveValue(MARKETING.id);
     expect(within(rowOf(marketing.full_name)).queryByRole('button', { name: 'Zuordnen' })).toBeNull();
+    expect(core.requests.filter((r) => r.path === '/moodle/auto-assign')).toHaveLength(1);
+    // Die Kursliste selbst schreibt nichts: Sie ist ein reines GET
+    expect(core.requests.filter((r) => r.path === '/moodle/courses').every((r) => r.method === 'GET')).toBe(
+      true,
+    );
+  });
+
+  it('ohne Einrichtung kein Anstoß der Automatik', async () => {
+    installMoodle(core, {
+      status: {
+        state: 'nicht_eingerichtet',
+        site_url: null,
+        site_name: null,
+        user_fullname: null,
+        token_valid_until: null,
+        checked_at: null,
+      },
+    });
+    await openMoodleTab();
+    expect(await screen.findByText('Moodle ist noch nicht eingerichtet')).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(core.requests.some((r) => r.path === '/moodle/auto-assign')).toBe(false);
   });
 
   it('ordnet der Abgleich zu, während die Seite offen ist, folgt die Zeile', async () => {

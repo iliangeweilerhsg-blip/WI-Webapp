@@ -50,6 +50,13 @@
       "when": 1793906646873,
       "tag": "0006_transcript",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793907676364,
+      "tag": "0007_moodle_auto",
+      "breakpoints": true
     }
   ]
 }

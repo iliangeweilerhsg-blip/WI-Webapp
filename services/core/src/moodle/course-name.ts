@@ -180,7 +180,10 @@ function containsSequence(haystack: readonly string[], needle: readonly string[]
  * Stufe 1 aus F-KAL-02: Name bzw. Kürzel des Moduls als ganze Wortfolge im Kursnamen. Bei mehreren Treffern gewinnt
  * der genauere („Statistik“ steckt in „Statistik II“). `null` = kein Treffer, `mehrdeutig` = mehrere.
  */
-function nameInTitle(title: readonly string[], candidates: readonly ModuleCandidate[]): string | 'mehrdeutig' | null {
+function nameInTitle(
+  title: readonly string[],
+  candidates: readonly ModuleCandidate[],
+): string | 'mehrdeutig' | null {
   const hits: { id: string; words: string[] }[] = [];
   for (const candidate of candidates) {
     let best: string[] | null = null;

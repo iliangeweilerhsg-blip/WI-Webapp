@@ -4,8 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { courseCategory } from '../../src/moodle/classify.ts';
 import {
   cleanCourseName,
-  cleanShortName,
   matchForAuto,
+  moduleNameKey,
   restoreUmlauts,
   UMLAUT_STEMS,
 } from '../../src/moodle/course-name.ts';
@@ -45,10 +45,35 @@ describe('cleanCourseName', () => {
     expect(cleanCourseName('Statistik Wintersemester 2026/27')).toBe('Statistik');
     expect(cleanCourseName('Statistik 2026/27')).toBe('Statistik');
     expect(cleanCourseName('Statistik (2026/2027)')).toBe('Statistik');
+    expect(cleanCourseName('Ethik 2026/2027/2028')).toBe('Ethik');
+    expect(cleanCourseName('Ethik Winter 2026/27')).toBe('Ethik');
+    expect(cleanCourseName('Ethik Sommer 2027')).toBe('Ethik');
+  });
+
+  it('räumt Klammern auf, statt Reste stehen zu lassen (B7)', () => {
+    expect(cleanCourseName('Marketing (WiSe 26/27, Gruppe 1)')).toBe('Marketing (Gruppe 1)');
+    expect(cleanCourseName('Marketing (Gruppe 1; SoSe 2027)')).toBe('Marketing (Gruppe 1)');
+    expect(cleanCourseName('Marketing [WS 26/27 - ]')).toBe('Marketing');
+  });
+
+  it('entfernt Terminarten, damit Vorlesung, Übung und Tutorium zusammenfallen (B6)', () => {
+    expect(cleanCourseName('Übung Statistik WiSe 26/27')).toBe('Statistik');
+    expect(cleanCourseName('Statistik - Tutorium')).toBe('Statistik');
+    expect(cleanCourseName('Statistik (Vorlesung)')).toBe('Statistik');
+    expect(cleanCourseName('Uebung_Statistik')).toBe('Statistik');
+    expect(moduleNameKey(cleanCourseName('Übung Statistik'))).toBe(
+      moduleNameKey(cleanCourseName('Statistik')),
+    );
+    // Nur ganze Wörter: „Übungsfirma“ bleibt
+    expect(cleanCourseName('Übungsfirma')).toBe('Übungsfirma');
   });
 
   it('lässt Ähnliches stehen: Zahlenpaare, die keine Jahresfolge sind, WS/SS ohne Jahr, Kleinschreibung', () => {
     expect(cleanCourseName('Kapitel 10/12')).toBe('Kapitel 10/12');
+    // Aufeinanderfolgend, aber außerhalb 2015–2040: kein Semester (B7)
+    expect(cleanCourseName('Kapitel 12/13')).toBe('Kapitel 12/13');
+    expect(cleanCourseName('Geschichte 1914/1915')).toBe('Geschichte 1914/1915');
+    expect(cleanCourseName('Geschichte 2026/2028')).toBe('Geschichte 2026/2028');
     expect(cleanCourseName('Geschichte 26/2027')).toBe('Geschichte 26/2027');
     expect(cleanCourseName('Grundlagen WS')).toBe('Grundlagen WS');
     expect(cleanCourseName('Otherwise wise')).toBe('Otherwise wise');
@@ -70,12 +95,21 @@ describe('cleanCourseName', () => {
     expect(cleanCourseName('Analysis²')).toBe('Analysis²');
   });
 
-  it('fällt auf den ursprünglichen Namen zurück, wenn nichts übrig bleibt', () => {
-    expect(cleanCourseName('WiSe 26/27')).toBe('WiSe 26/27');
+  it('liefert leeren Namen bzw. Schlüssel, wenn nichts Brauchbares übrig bleibt (B2)', () => {
+    for (const name of ['-', '.', '–', 'WiSe 26/27', 'Übung', '  ']) {
+      expect(cleanCourseName(name), name).toBe('');
+    }
+    // Satzzeichen ohne Buchstaben: Name ja, Schlüssel leer
+    expect(moduleNameKey(cleanCourseName('???'))).toBe('');
   });
 
-  it('kürzt sehr lange Namen auf 120 Zeichen', () => {
+  it('kürzt sehr lange Namen auf 120 Zeichen, ohne Surrogat-Paare zu zerschneiden (B7)', () => {
     expect(cleanCourseName('A'.repeat(300))).toHaveLength(120);
+    const emoji = cleanCourseName(`${'A'.repeat(119)}\u{1F4DA}\u{1F4DA}`);
+    expect(Array.from(emoji)).toHaveLength(120);
+    expect(emoji.endsWith('\u{1F4DA}')).toBe(true);
+    // Ein einzelnes Surrogat wäre kein gültiges UTF-16: encodeURIComponent wirft dann URIError
+    expect(() => encodeURIComponent(emoji)).not.toThrow();
   });
 });
 
@@ -101,24 +135,6 @@ describe('restoreUmlauts', () => {
   it('die Liste ist klein und hat in jedem Stamm genau einen Umlaut', () => {
     expect(UMLAUT_STEMS.length).toBeLessThanOrEqual(12);
     for (const stem of UMLAUT_STEMS) expect(stem.match(/[äöü]/gu), stem).toHaveLength(1);
-  });
-});
-
-describe('cleanShortName', () => {
-  it('übernimmt das Moodle-Kürzel ohne Semesterzusatz', () => {
-    expect(cleanShortName('EiM-WS2627', 'Einführung in das Marketing')).toBe('EiM');
-    expect(cleanShortName('MathWI WS26/27', 'Mathematik')).toBe('MathWI');
-    expect(cleanShortName('BMBWL110', 'Einführung in die Betriebswirtschaftslehre')).toBe('BMBWL110');
-    expect(cleanShortName('GdP-2627', 'Grundlagen der Programmierung')).toBe('GdP');
-    // Keine Jahresfolge: bleibt
-    expect(cleanShortName('Labor-1830', 'Labor')).toBe('Labor-1830');
-  });
-
-  it('kein Kürzel, wenn es leer, zu lang oder schon der Name ist', () => {
-    expect(cleanShortName('', 'Statistik')).toBeNull();
-    expect(cleanShortName('WiSe 26/27', 'Statistik')).toBeNull();
-    expect(cleanShortName('BMBWL110_Einfuehrung_in_die_BWL', 'Einführung in die BWL')).toBeNull();
-    expect(cleanShortName('statistik', 'Statistik')).toBeNull();
   });
 });
 
@@ -154,6 +170,25 @@ describe('matchForAuto', () => {
     expect(matchForAuto(course('DBS'), candidates)).toEqual({ kind: 'mehrdeutig' });
   });
 
+  it.each([
+    ['Bilanzierung', 'BIL', module('m', 'Betriebswirtschaftslehre')],
+    ['Wirtschaftsrecht', 'REC', module('m', 'Rechnungswesen')],
+    ['Statik', 'STA', module('m', 'Statistik')],
+    ['Mikrobiologie', 'MB', module('m', 'Mikroökonomie', 'Mikro')],
+    ['Infrastrukturrecht', 'IR', module('m', 'Informatik', 'Inf')],
+  ])(
+    'unsicherer Treffer (B1): %s (%s) wird nicht automatisch zugeordnet und bekommt kein Modul',
+    (name, short, candidate) => {
+      expect(matchForAuto(course(name, short), [candidate])).toEqual({ kind: 'mehrdeutig' });
+    },
+  );
+
+  it('sicher: Kürzel des Moduls als Wort im Kursnamen oder gleiches Moodle-Kürzel', () => {
+    const dbs = module('m-dbs', 'Datenbanksysteme', 'DBS');
+    expect(matchForAuto(course('DBS Übung WiSe 26/27'), [dbs])).toEqual({ kind: 'eindeutig', id: 'm-dbs' });
+    expect(matchForAuto(course('Datenhaltung', 'DBS'), [dbs])).toEqual({ kind: 'eindeutig', id: 'm-dbs' });
+  });
+
   it('der genauere Treffer gewinnt wie beim Vorschlag („Statistik“ steckt in „Statistik II“)', () => {
     const candidates = [module('m-1', 'Statistik'), module('m-2', 'Statistik II')];
     expect(matchForAuto(course('Statistik II WiSe 26/27'), candidates)).toEqual({
@@ -165,6 +200,15 @@ describe('matchForAuto', () => {
   it('andere Stufe: „Statistik II“ wird nicht automatisch „Statistik“ zugeordnet', () => {
     expect(matchForAuto(course('Statistik II WiSe 26/27'), [module('m-1', 'Statistik')])).toEqual({
       kind: 'mehrdeutig',
+    });
+    // Buchstaben-Stufen
+    expect(matchForAuto(course('Statistik A'), [module('m-1', 'Statistik')])).toEqual({ kind: 'mehrdeutig' });
+    expect(matchForAuto(course('Statistik Teil B'), [module('m-1', 'Statistik')])).toEqual({
+      kind: 'mehrdeutig',
+    });
+    expect(matchForAuto(course('Statistik Teil B'), [module('m-1', 'Statistik Teil B')])).toEqual({
+      kind: 'eindeutig',
+      id: 'm-1',
     });
     // Das Semester („26/27“) ist keine Stufe
     expect(matchForAuto(course('Statistik WiSe 26/27'), [module('m-1', 'Statistik')])).toEqual({

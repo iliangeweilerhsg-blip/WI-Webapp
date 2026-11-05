@@ -437,7 +437,7 @@ async function start(): Promise<void> {
   // Zuordnung (#141, eigene Tests in moodle-auto.test.ts) fasst sie nicht an
   for (const id of Object.values(COURSE)) {
     await t.handle.db.execute(
-      sql`INSERT INTO moodle_course_manual (id, user_id, moodle_course_id) VALUES (gen_random_uuid(), ${SINGLE_USER_ID}, ${id})`,
+      sql`INSERT INTO moodle_course_decided (id, user_id, moodle_course_id, reason) VALUES (gen_random_uuid(), ${SINGLE_USER_ID}, ${id}, 'manuell')`,
     );
   }
 }
@@ -445,7 +445,7 @@ async function start(): Promise<void> {
 async function cleanup(): Promise<void> {
   await sync.idle();
   const db = t.handle.db;
-  await db.execute(sql`TRUNCATE moodle_item, moodle_deadline, moodle_course_link, moodle_course_manual`);
+  await db.execute(sql`TRUNCATE moodle_item, moodle_deadline, moodle_course_link, moodle_course_decided`);
   await db.execute(sql`DELETE FROM job`);
   await db.execute(sql`DELETE FROM slide_deck`);
   await db.execute(sql`DELETE FROM exercise_sheet`);
