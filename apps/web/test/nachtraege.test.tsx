@@ -178,11 +178,10 @@ describe('Mehrere gescheiterte Module (Nachtrag 3)', () => {
     expect(screen.getByText('Core nicht erreichbar', { selector: 'p' })).toBeInTheDocument();
 
     // Erneut versuchen: alle drei, in Reihenfolge, die Liste verschwindet
-    core.postGate = null;
     core.down = false;
     await user.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
     const sidebar = screen.getByRole('navigation', { name: 'Hauptnavigation' });
-    await within(sidebar).findByRole('link', { name: 'Gamma' }, { timeout: 4000 });
+    await within(sidebar).findByRole('link', { name: 'Gamma' });
     expect(core.modules.map((m) => m.name)).toEqual(['Alpha', 'Beta', 'Gamma']);
     expect(screen.queryByRole('list', { name: 'Nicht angelegt' })).not.toBeInTheDocument();
   });

@@ -92,7 +92,7 @@ describe('Navigation', () => {
   it('stürzt ohne Core nicht ab, sondern zeigt „Core nicht erreichbar"', async () => {
     coreOffline();
     mount();
-    expect(await screen.findAllByText('Core nicht erreichbar', {}, { timeout: 4000 })).not.toHaveLength(0);
+    expect(await screen.findAllByText('Core nicht erreichbar')).not.toHaveLength(0);
     expect(screen.getByText('Inhalt')).toBeInTheDocument();
   });
 

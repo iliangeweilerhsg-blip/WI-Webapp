@@ -142,13 +142,52 @@ describe('Einlesen gescheitert nach dem Hochladen', () => {
     const deck = core.decks[0];
     const detailCount = () => core.requests.filter((r) => r.path === `/slide-decks/${deck?.id}`).length;
     if (deck) deck.deleted_at = new Date().toISOString();
-    // Die Abfrage, die den 404 bekommt, kann unter Last noch unterwegs sein – darum erst eine Weile laufen lassen
-    // (länger als jede Pause, höchstens 10 s) und dann prüfen, dass danach nichts mehr abgefragt wird.
+    const atDelete = detailCount();
+    // Genau eine Abfrage bekommt den 404, danach wird nichts mehr beobachtet
     await advance(15_000);
-    const settled = detailCount();
+    expect(detailCount() - atDelete).toBe(1);
     await advance(60_000);
-    expect(detailCount()).toBe(settled);
+    expect(detailCount() - atDelete).toBe(1);
   });
+
+  it.each([
+    [1500, 2500],
+    [1500, 1000],
+    [3000, 2100],
+  ])(
+    'langsame Antworten (%i ms), Löschen nach %i ms: eine laufende Abfrage wird nicht abgebrochen und nach dem 404 nicht wiederholt',
+    async (latency, deleteAfter) => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const core = await openModule();
+      // Detail-Abfragen antworten verzögert; Status wird erst bei der Antwort bestimmt (wie bei einem echten Server)
+      const inner = globalThis.fetch as (i: string, init?: RequestInit) => Promise<Response>;
+      const done: { path: string; status: number; at: number }[] = [];
+      const starts: { path: string; at: number }[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: string, init?: RequestInit) => {
+          const path = new URL(String(input), 'http://localhost').pathname.replace(/^\/api\/v1/, '');
+          if (!/^\/slide-decks\/[^/]+$/.test(path) || (init?.method ?? 'GET') !== 'GET')
+            return inner(input, init);
+          starts.push({ path, at: Date.now() });
+          await new Promise((r) => setTimeout(r, latency));
+          const res = await inner(input, init);
+          done.push({ path, status: res.status, at: Date.now() });
+          return res;
+        }),
+      );
+      await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('Weg.pdf'));
+      await screen.findByText('Foliensatz hinzugefügt');
+      const deck = core.decks[0];
+      await advance(deleteAfter);
+      if (deck) deck.deleted_at = new Date().toISOString();
+      await advance(120_000);
+      const first404 = done.find((d) => d.status === 404);
+      expect(first404).toBeDefined();
+      // Nach der ersten 404-Antwort beginnt keine Abfrage dieses Eintrags mehr
+      expect(starts.filter((s) => s.at > (first404?.at ?? 0))).toHaveLength(0);
+    },
+  );
 
   it('der Toast geht nach höchstens 5 s von selbst weg', async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
