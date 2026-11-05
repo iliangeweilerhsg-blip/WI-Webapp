@@ -1,6 +1,7 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
 import {
   copyFileSync,
+  type Dirent,
   existsSync,
   linkSync,
   lstatSync,
@@ -120,10 +121,12 @@ export interface CopyStats {
   /** Per Hardlink aus dem vorigen Stand übernommen (unverändert) */
   linked: number;
   copied: number;
+  /** Dateien, die während des Kopierens verschwunden sind (Upload-Abschluss, Löschen) */
+  vanished: number;
 }
 
 /** Namen, die nie ins Backup gehören: halbe Uploads und Zwischenordner */
-function skipped(name: string): boolean {
+export function skipped(name: string): boolean {
   return name.endsWith('.part') || name === '.tmp' || name === '.DS_Store';
 }
 
@@ -133,37 +136,64 @@ function skipped(name: string): boolean {
  * die Änderungen belegt (inkrementell). Geht ein Hardlink nicht (anderes Dateisystem), wird kopiert.
  * Symbolische Links und Sonderdateien werden übersprungen.
  */
-export function copyTree(src: string, dst: string, prev: string | null, stats?: CopyStats): CopyStats {
-  const result = stats ?? { files: 0, bytes: 0, linked: 0, copied: 0 };
+export function copyTree(
+  src: string,
+  dst: string,
+  prev: string | null,
+  stats?: CopyStats,
+  /** Nur für Tests: läuft vor dem Kopieren jeder Datei */
+  hooks?: { beforeCopy?: (path: string) => void },
+): CopyStats {
+  const result = stats ?? { files: 0, bytes: 0, linked: 0, copied: 0, vanished: 0 };
   mkdirSync(dst, { recursive: true });
-  for (const entry of readdirSync(src, { withFileTypes: true })) {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(src, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      result.vanished += 1;
+      return result;
+    }
+    throw error;
+  }
+  for (const entry of entries) {
     if (skipped(entry.name)) continue;
     const from = join(src, entry.name);
     const to = join(dst, entry.name);
     const before = prev ? join(prev, entry.name) : null;
     if (entry.isDirectory()) {
-      copyTree(from, to, before && existsSync(before) ? before : null, result);
+      copyTree(from, to, before && existsSync(before) ? before : null, result, hooks);
       continue;
     }
     if (!entry.isFile()) continue;
-    const info = lstatSync(from);
-    result.files += 1;
-    result.bytes += info.size;
-    if (before) {
-      const old = lstatSync(before, { throwIfNoEntry: false });
-      if (old?.isFile() && old.size === info.size && Math.abs(old.mtimeMs - info.mtimeMs) < 2) {
-        try {
-          linkSync(before, to);
-          result.linked += 1;
-          continue;
-        } catch {
-          // kein Hardlink möglich: kopieren
+    try {
+      hooks?.beforeCopy?.(from);
+      const info = lstatSync(from);
+      let how: 'linked' | 'copied' = 'copied';
+      if (before) {
+        const old = lstatSync(before, { throwIfNoEntry: false });
+        if (old?.isFile() && old.size === info.size && Math.abs(old.mtimeMs - info.mtimeMs) < 2) {
+          try {
+            linkSync(before, to);
+            how = 'linked';
+          } catch {
+            // kein Hardlink möglich: kopieren
+          }
         }
       }
+      if (how === 'copied') {
+        copyFileSync(from, to);
+        utimesSync(to, info.atime, info.mtime);
+      }
+      result.files += 1;
+      result.bytes += info.size;
+      result[how] += 1;
+    } catch (error) {
+      // Datei ist zwischen Auflisten und Kopieren verschwunden (z. B. .part → umbenannt): überspringen
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      rmSync(to, { force: true });
+      result.vanished += 1;
     }
-    copyFileSync(from, to);
-    utimesSync(to, info.atime, info.mtime);
-    result.copied += 1;
   }
   return result;
 }
@@ -172,15 +202,27 @@ export function copyTree(src: string, dst: string, prev: string | null, stats?: 
 export function treeSize(dir: string): { files: number; bytes: number } {
   let files = 0;
   let bytes = 0;
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { files, bytes };
+    throw error;
+  }
+  for (const entry of entries) {
+    if (skipped(entry.name)) continue; // wie beim Kopieren: .DS_Store, *.part, .tmp zählen nie
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       const sub = treeSize(full);
       files += sub.files;
       bytes += sub.bytes;
     } else if (entry.isFile()) {
-      files += 1;
-      bytes += lstatSync(full).size;
+      try {
+        bytes += lstatSync(full).size;
+        files += 1;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
     }
   }
   return { files, bytes };
@@ -194,6 +236,8 @@ export interface Manifest {
   created_at: string;
   trigger: string;
   pg_server_version: string | null;
+  /** Anzahl angewendeter Drizzle-Migrationen beim Backup (Schemaversion), `null` = unbekannt */
+  migrations?: number | null;
   dump: { file: string; bytes: number; sha256: string };
   /** Zeilen je Tabelle in der Live-Datenbank kurz nach dem Dump (Richtwert für `restore --test`) */
   counts: Record<string, number>;

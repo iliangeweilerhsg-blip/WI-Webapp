@@ -13,7 +13,7 @@ import {
 import { healthUrl, type SgConfig } from './config.ts';
 import { openPg, realExec, type Exec, type PgAccess } from './pg.ts';
 import { readService } from './procs.ts';
-import { runRestore } from './restore.ts';
+import { readJournal, recoverRestore, runRestore } from './restore.ts';
 
 const log = (msg: string): void => console.log(`[sg] ${msg}`);
 const err = (msg: string): void => console.error(`[sg] ${msg}`);
@@ -161,7 +161,14 @@ export async function restoreCommand(cfg: SgConfig, rest: string[]): Promise<num
     return 1;
   }
   return runRestore(
-    { cfg, pg, ...io, servicesRunning: () => runningServices(cfg), confirm: askYesNo },
+    {
+      cfg,
+      pg,
+      ...io,
+      servicesRunning: () => runningServices(cfg),
+      confirm: askYesNo,
+      codeMigrations: journalCount(cfg.repoRoot),
+    },
     { stand: args.stand, test: args.test, target: args.target, yes: args.yes },
   );
 }
@@ -211,14 +218,37 @@ export function journalCount(repoRoot: string): number {
   }
 }
 
-/** Echte Variante für `sg migrate` und `sg start`: Rückgabe `false` = Migration abbrechen */
-export async function backupBeforeMigrate(cfg: SgConfig): Promise<boolean> {
+/**
+ * Schließt einen unterbrochenen Restore ab bzw. baut ihn zurück (Journal im Datenordner). Wird von `sg start`
+ * vor allem anderen aufgerufen. Rückgabe `false` = es ging schief, nicht weiterstarten.
+ */
+export async function recoverRestoreIfOpen(cfg: SgConfig): Promise<boolean> {
+  if (readJournal(cfg.dataDir) === null) return true;
+  try {
+    const pg = await openPg(cfg, realExec);
+    await recoverRestore({ cfg, pg, ...io });
+    return true;
+  } catch (e) {
+    err(`Ein unterbrochener Restore ließ sich nicht abschließen: ${(e as Error).message}`);
+    err('Starte die Datenbank und führe "pnpm sg restore" erneut aus, dann wird er wiederholt.');
+    return false;
+  }
+}
+
+/**
+ * Echte Variante für `sg migrate` und `sg start`: Rückgabe `false` = Migration abbrechen.
+ * Fail-closed: Lässt sich das Backup nicht ausführen oder scheitert es, wird nicht migriert. Ausnahmen sind
+ * nur ein nicht eingestelltes Backup-Ziel (Hinweis, dokumentiert) und das ausdrückliche `--ohne-backup`.
+ */
+export async function backupBeforeMigrate(cfg: SgConfig, exec: Exec = realExec): Promise<boolean> {
+  const hint = 'Mit "pnpm sg migrate --ohne-backup" lässt sich die Migration trotzdem ausführen.';
   let pg: PgAccess;
   try {
-    pg = await openPg(cfg, realExec);
+    pg = await openPg(cfg, exec, undefined);
   } catch (e) {
-    err(`Kein Backup vor der Migration möglich: ${(e as Error).message.split('.')[0]}.`);
-    return true;
+    err(`Ein Backup vor der Migration ist nicht möglich: ${(e as Error).message}`);
+    err(`Die Migration wird nicht ausgeführt. ${hint}`);
+    return false;
   }
   try {
     const result = await preMigrationBackup({
@@ -228,14 +258,13 @@ export async function backupBeforeMigrate(cfg: SgConfig): Promise<boolean> {
       run: (trigger) => runBackup({ cfg, pg, ...io }, { trigger }),
     });
     if (result === 'failed') {
-      err('Das Backup vor der Migration ist fehlgeschlagen, die Migration wird nicht ausgeführt.');
-      err('Mit "pnpm sg migrate --ohne-backup" lässt sie sich trotzdem starten.');
+      err(`Das Backup vor der Migration ist fehlgeschlagen. Die Migration wird nicht ausgeführt. ${hint}`);
       return false;
     }
     return true;
   } catch (e) {
-    // Datenbank nicht erreichbar o. Ä.: die Migration meldet das selbst
-    err(`Prüfung für das Backup vor der Migration übersprungen: ${(e as Error).message.slice(0, 200)}`);
-    return true;
+    err(`Das Backup vor der Migration ließ sich nicht prüfen: ${(e as Error).message.slice(0, 300)}`);
+    err(`Die Migration wird nicht ausgeführt. ${hint}`);
+    return false;
   }
 }

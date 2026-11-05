@@ -76,11 +76,11 @@ export function DataSettings() {
       </h2>
       <p className="text-sm" role="status">
         {status.target === null
-          ? 'Kein Backup-Ziel eingestellt: Es werden keine Backups angelegt.'
+          ? 'Kein Backup-Ziel eingerichtet: Es werden keine Backups angelegt.'
           : status.last_success_at
             ? `Letztes Backup: ${new Date(status.last_success_at).toLocaleString('de-DE')}`
             : 'Noch kein Backup gelaufen.'}
-        {status.stale ? (
+        {status.stale && status.target !== null ? (
           <span className="ml-2 rounded-sm bg-accent-soft px-2 py-0.5 text-xs">
             veraltet (älter als 3 Tage)
           </span>

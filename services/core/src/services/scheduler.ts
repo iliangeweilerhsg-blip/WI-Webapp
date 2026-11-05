@@ -8,6 +8,7 @@ import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
 import { backupRun, job } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
+import { NIGHTLY_LOCK_KEY } from '../lib/locks.ts';
 import { latestOccurrence, startBackup, isBackupRunning } from './backups.ts';
 import { enqueueJob } from './jobs.ts';
 import { getSettings } from './settings.ts';
@@ -15,8 +16,6 @@ import { getSettings } from './settings.ts';
 /** Ortszeit, zu der der Core `maintenance.nightly` anlegt (VERTRAEGE §13) */
 export const NIGHTLY_TIME = '03:30';
 export const SCHEDULER_INTERVAL_MS = 60_000;
-
-const NIGHTLY_LOCK_KEY = 70070003;
 
 /**
  * Legt den Job `maintenance.nightly` an, wenn seit dem letzten Termin (03:30 Ortszeit) noch keiner angelegt wurde.

@@ -44,6 +44,7 @@ export function helpText(): string {
     ...lines,
     '',
     'Umgebungsvariablen: SG_DATA_DIR (Standard ~/StudienGehirn), DATABASE_URL, SG_CORE_PORT (Standard 4710), SG_WEB_DIR',
+    'Hinweis: Backups sind nicht signiert. Spiele mit "restore" nur eigene Backups ein, einem fremden Stand wird vertraut.',
     'Hilfe: pnpm sg --help',
   ].join('\n');
 }

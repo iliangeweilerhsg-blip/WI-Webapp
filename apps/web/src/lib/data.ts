@@ -1,7 +1,7 @@
 'use client';
 
 // Daten und Papierkorb (T1-18, VERTRAEGE §7.5): Hooks für Backups und Papierkorb
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BackupOverviewSchema,
   BackupRunSchema,
@@ -62,13 +62,19 @@ export function useUpdateSettings() {
   });
 }
 
+/** Papierkorb seitenweise (`next_cursor`). Der Aufrufer zeigt bis zur Hydration „lädt“ (siehe hydrated.ts). */
 export function useTrash(kind?: TrashKind) {
-  const query = useQuery({
+  return useInfiniteQuery({
     queryKey: ['trash', kind ?? 'alle'],
-    queryFn: ({ signal }) =>
-      apiGet(`/trash?limit=200${kind ? `&kind=${kind}` : ''}`, TrashListSchema, { signal }),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam, signal }) =>
+      apiGet(
+        `/trash?limit=50${kind ? `&kind=${kind}` : ''}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`,
+        TrashListSchema,
+        { signal },
+      ),
+    getNextPageParam: (page) => page.next_cursor ?? undefined,
   });
-  return useHydrationSafe(query);
 }
 
 export function useRestoreTrashItem() {

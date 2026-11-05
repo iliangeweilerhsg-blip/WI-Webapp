@@ -12,6 +12,7 @@ import type { Db, DbOrTx } from '../db/client.ts';
 import { backupRun } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage } from '../lib/pagination.ts';
+import { BACKUP_LOCK_KEY } from '../lib/locks.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { getSettings } from './settings.ts';
 
@@ -200,8 +201,6 @@ let launcher: BackupLauncher = spawnCli;
 export function setBackupLauncher(fn: BackupLauncher | null): void {
   launcher = fn ?? spawnCli;
 }
-
-const BACKUP_LOCK_KEY = 70070002;
 
 /**
  * Legt den Lauf an und startet die CLI. Fehler: 409 `backup_target_missing` (kein Ziel in den Einstellungen),

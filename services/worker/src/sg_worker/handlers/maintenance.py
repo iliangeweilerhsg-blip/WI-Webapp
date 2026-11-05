@@ -13,6 +13,7 @@ zuerst die Ströme (nach Namen sortiert), dann die Zeilen. Dateien werden erst n
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import time
@@ -225,10 +226,23 @@ def _lock_streams(conn: psycopg.Connection[Any], t: dict[str, list[str]]) -> lis
     return streams
 
 
+class SkipRoot(Exception):
+    """Wurzel wird in diesem Lauf nicht gelöscht (Grund steht in der Meldung)."""
+
+
 def purge_roots(
-    conn: psycopg.Connection[Any], roots: list[tuple[str, str]], *, dry_run: bool
+    conn: psycopg.Connection[Any],
+    roots: list[tuple[str, str]],
+    *,
+    dry_run: bool,
+    days: int = DEFAULT_RETENTION_DAYS,
 ) -> tuple[dict[str, int], set[str], int]:
-    """Teilbaum der Wurzeln löschen. Rückgabe: Zeilen je Tabelle, Dateien, entfernte sync_op."""
+    """Teilbaum der Wurzeln löschen. Rückgabe: Zeilen je Tabelle, Dateien, entfernte sync_op.
+
+    Muss in einer eigenen Transaktion laufen. Reihenfolge der Sperren: Ströme, dann die Wurzelzeilen (mit
+    erneuter Prüfung, dass sie noch im Papierkorb und alt genug sind). Wurde eine Wurzel inzwischen
+    wiederhergestellt, wird sie übersprungen (`SkipRoot`).
+    """
     t = _subtree(conn, roots)
     streams = [f"notebook:{i}" for i in t["notebook"]] + [f"session:{i}" for i in t["session"]]
     ops = 0
@@ -241,6 +255,14 @@ def purge_roots(
     if dry_run:
         return by_kind, set(), ops
     _lock_streams(conn, t)
+    for kind, rid in roots:
+        row = conn.execute(
+            f"SELECT 1 FROM {kind} WHERE id = %s AND deleted_at IS NOT NULL"
+            " AND deleted_at < now() - make_interval(days => %s) FOR UPDATE",
+            (rid, days),
+        ).fetchone()
+        if row is None:
+            raise SkipRoot(f"{kind} {rid} liegt nicht mehr (lange genug) im Papierkorb")
     t = _subtree(conn, roots)  # unter der Sperre erneut lesen
     files = _files(conn, t)
     active = conn.execute(
@@ -248,7 +270,7 @@ def purge_roots(
         (t["session"],),
     ).fetchone()
     if active and int(active[0]) > 0:
-        raise RuntimeError("aktive Session im Teilbaum")
+        raise SkipRoot("aktive Session im Teilbaum")
     if streams:
         conn.execute(
             "DELETE FROM sync_stream WHERE stream = ANY(%s)",
@@ -361,28 +383,36 @@ def sweep_orphans(
 
 
 def run_nightly(
-    conn: psycopg.Connection[Any], data_dir: Path, payload: MaintenanceNightlyPayload
+    conn: psycopg.Connection[Any],
+    data_dir: Path,
+    payload: MaintenanceNightlyPayload,
+    logger: logging.Logger | None = None,
 ) -> dict[str, Any]:
     started = time.monotonic()
+    log = logger or logging.getLogger(__name__)
     days = payload.purge_older_than_days or DEFAULT_RETENTION_DAYS
     dry = bool(payload.dry_run)
     by_kind: dict[str, int] = {}
     sync_ops = 0
-    all_files: set[str] = set()
-    with conn.transaction():
-        for root in _find_roots(conn, days):
-            try:
-                with conn.transaction():
-                    counted, files, ops = purge_roots(conn, [root], dry_run=dry)
-            except psycopg.errors.ForeignKeyViolation:
-                continue  # Rest-Verweis: beim nächsten Lauf erneut
-            for k, n in counted.items():
-                by_kind[k] = by_kind.get(k, 0) + n
-            sync_ops += ops
-            all_files |= files
-    if not dry:
-        for relative in sorted(all_files):
-            _remove(data_dir, relative)
+    for root in _find_roots(conn, days):
+        # Eine Transaktion pro Wurzel: Fehler, Deadlocks und Stromsperren bleiben auf sie beschränkt
+        try:
+            with conn.transaction():
+                counted, files, ops = purge_roots(conn, [root], dry_run=dry, days=days)
+        except SkipRoot as skip:
+            log.warning("maintenance.nightly: %s übersprungen: %s", root[0], skip)
+            continue
+        except (psycopg.errors.ForeignKeyViolation, psycopg.errors.DeadlockDetected) as exc:
+            log.warning(
+                "maintenance.nightly: %s %s übersprungen: %s", root[0], root[1], type(exc).__name__
+            )
+            continue
+        for k, n in counted.items():
+            by_kind[k] = by_kind.get(k, 0) + n
+        sync_ops += ops
+        if not dry:  # Dateien erst nach dem Commit der Wurzel
+            for relative in sorted(files):
+                _remove(data_dir, relative)
     orphans = sweep_orphans(conn, data_dir, dry_run=dry)
     result = MaintenanceNightlyResult(
         purged_count=sum(by_kind.values()),
@@ -396,6 +426,6 @@ def run_nightly(
 
 @handler("maintenance.nightly", payload_type=MaintenanceNightlyPayload)
 def maintenance_nightly(payload: MaintenanceNightlyPayload, ctx: JobContext) -> dict[str, Any]:
-    result = run_nightly(ctx.conn, ctx.data_dir, payload)
+    result = run_nightly(ctx.conn, ctx.data_dir, payload, ctx.logger)
     ctx.logger.info("maintenance.nightly: %s", result)
     return result

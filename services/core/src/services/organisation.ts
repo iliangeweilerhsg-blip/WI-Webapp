@@ -17,6 +17,7 @@ import { courseModule, semester } from '../db/schema/index.ts';
 import { notDeleted } from '../db/schema/common.ts';
 import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage, type Page } from '../lib/pagination.ts';
+import { SEMESTER_LOCK_KEY } from '../lib/locks.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { ensureDefaultNotebooks } from './notebooks.ts';
 import { softDeleteWithOps } from './trash-ops.ts';
@@ -121,7 +122,6 @@ function isPrimaryKeyViolation(error: unknown, table: string): boolean {
  * Serialisiert alle Änderungen an Semestern (`is_current`): letzter Schreiber gewinnt, kein Unique-Fehler.
  * Die Sperre gilt bis zum Ende der Transaktion.
  */
-const SEMESTER_LOCK_KEY = 70070001;
 async function lockSemesters(tx: Tx): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${SEMESTER_LOCK_KEY})`);
 }

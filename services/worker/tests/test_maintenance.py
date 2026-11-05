@@ -72,7 +72,11 @@ def count(conn: psycopg.Connection[Any], table: str) -> int:
 
 def seed(conn: psycopg.Connection[Any], data_dir: Path, deleted_days: int | None) -> dict[str, str]:
     """Semester, Modul mit Foliensatz, Notizbuch (mit Strom), Session mit Foto. `deleted_days`: Alter der Löschung."""
-    d = None if deleted_days is None else f"now() - interval '{deleted_days} days'"
+    d = None
+    if deleted_days is not None:  # ein Zeitstempel für alle Zeilen (Kaskade: gleiches deleted_at)
+        row = conn.execute("SELECT now() - make_interval(days => %s)", (deleted_days,)).fetchone()
+        assert row is not None
+        d = row[0]
     ids: dict[str, str] = {}
     ids["sem"] = ins(conn, "semester", name="HS")
     ids["mod"] = ins(conn, "module", semester_id=ids["sem"], name="DBS", color="mod-01")
@@ -143,8 +147,9 @@ def seed(conn: psycopg.Connection[Any], data_dir: Path, deleted_days: int | None
             "semester",
         ):
             conn.execute(
-                f"UPDATE {table} SET deleted_at = {d} WHERE id = %s", (ids[key.get(table, table)],)
-            )  # type: ignore[call-overload]
+                f"UPDATE {table} SET deleted_at = %s WHERE id = %s",  # type: ignore[call-overload]
+                (d, ids[key.get(table, table)]),
+            )
     return ids
 
 
@@ -237,3 +242,40 @@ def test_handler_via_job_context(core: psycopg.Connection[Any], tmp_path: Path) 
     )
     result = maintenance_nightly(MaintenanceNightlyPayload(), ctx)
     assert result["purged_count"] > 0
+
+
+def test_restored_root_is_not_purged(core: psycopg.Connection[Any], tmp_path: Path) -> None:
+    """Wurzel gefunden, dann wiederhergestellt: der Purge überspringt sie (Review B1)."""
+    from sg_worker.handlers import maintenance as m
+
+    ids = seed(core, tmp_path, 40)
+    roots = m._find_roots(core, 30)
+    assert ("semester", ids["sem"]) in roots
+    for table in (
+        "semester",
+        "module",
+        "slide_deck",
+        "slide",
+        "notebook",
+        "page",
+        "session",
+        "photo",
+    ):
+        core.execute(f"UPDATE {table} SET deleted_at = NULL")
+    with pytest.raises(m.SkipRoot), core.transaction():
+        m.purge_roots(core, [("semester", ids["sem"])], dry_run=False)
+    assert count(core, "semester") == 1 and count(core, "notebook") == 1
+    assert (tmp_path / "media" / "decks" / ids["deck"] / "original.pdf").exists()
+
+
+def test_active_session_skips_only_its_root(core: psycopg.Connection[Any], tmp_path: Path) -> None:
+    ids = seed(core, tmp_path, 40)
+    core.execute(
+        "INSERT INTO semester (id, user_id, name, deleted_at)"
+        " VALUES (gen_random_uuid(), %s, 'X', now() - interval '40 days')",
+        (str(USER_ID),),
+    )
+    core.execute("UPDATE session SET state = 'laeuft' WHERE id = %s", (ids["sess"],))
+    result = run_nightly(core, tmp_path, MaintenanceNightlyPayload())
+    assert result["purged_by_kind"] == {"semester": 1}
+    assert count(core, "session") == 1

@@ -5,14 +5,22 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
-import { listStands, readManifest } from '../src/backup-files.ts';
-import { parseBackupArgs, parseRestoreArgs, preMigrationBackup } from '../src/backup-commands.ts';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { resolveConfig } from '../src/config.ts';
+import { copyTree, listStands, readManifest, standName, treeSize } from '../src/backup-files.ts';
+import {
+  backupBeforeMigrate,
+  parseBackupArgs,
+  parseRestoreArgs,
+  preMigrationBackup,
+} from '../src/backup-commands.ts';
 import { errorText, runBackup, validateTarget, type BackupDeps } from '../src/backup.ts';
 import {
   createPg,
@@ -23,7 +31,7 @@ import {
   type Exec,
   type PgAccess,
 } from '../src/pg.ts';
-import { runRestore, type RestoreDeps } from '../src/restore.ts';
+import { recoverRestore, runRestore, type RestoreDeps } from '../src/restore.ts';
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -57,6 +65,7 @@ class FakePg implements PgAccess {
   dumpImpl: (file: string) => Promise<void> = async (file) => writeFileSync(file, 'PGDMP-test');
   restoreImpl: (db: string, file: string) => Promise<void> = async () => {};
   renameFailsFor: string | null = null;
+  databases = new Set(['sg']);
   tables = ['semester', 'module', 'setting'];
   counts: [string, string][] = [
     ['semester', '1'],
@@ -101,8 +110,22 @@ class FakePg implements PgAccess {
       if (run) Object.assign(run, { state: 'fehler', error: vars.error as string });
       return [];
     }
-    if (sql.includes('RENAME TO') && this.renameFailsFor && sql.includes(this.renameFailsFor)) {
-      throw new Error('rename kaputt');
+    const create = /^CREATE DATABASE (\w+)/.exec(sql);
+    if (create) this.databases.add(create[1] as string);
+    const drop = /^DROP DATABASE IF EXISTS (\w+)/.exec(sql);
+    if (drop) this.databases.delete(drop[1] as string);
+    if (sql.includes('FROM pg_database')) {
+      return (vars.names ?? '')
+        .split(',')
+        .filter((n) => this.databases.has(n))
+        .map((n) => [n]);
+    }
+    if (sql.startsWith('BEGIN;')) {
+      if (this.renameFailsFor) throw new Error('rename kaputt');
+      for (const m of sql.matchAll(/ALTER DATABASE (\w+) RENAME TO (\w+)/g)) {
+        this.databases.delete(m[1] as string);
+        this.databases.add(m[2] as string);
+      }
     }
     if (sql.includes("to_regclass('sync_meta')")) return [['t']];
     return [];
@@ -424,7 +447,7 @@ describe('pg (Docker und lokal)', () => {
       };
     };
     const pg = createPg(cfg, exec, 'local');
-    await expect(pg.dump('/tmp/x')).rejects.toThrow(/pg_dump fehlgeschlagen/);
+    await expect(pg.dump('/tmp/x')).rejects.toThrow(/Sicherung der Datenbank/);
     await expect(pg.dump('/tmp/x')).rejects.not.toThrow(/geheim/);
     expect(calls[0]?.options.env).toEqual({ PGPASSWORD: 'geheim' });
     expect(JSON.stringify(calls[0]?.args)).not.toContain('geheim');
@@ -548,14 +571,16 @@ describe('runRestore', () => {
     ]);
     const sqls = s.pg.queries.map((q) => q.sql);
     const epoch = sqls.findIndex((q) => q.includes('SET db_epoch = gen_random_uuid()'));
-    const renameOld = sqls.findIndex((q) =>
-      q.includes(`ALTER DATABASE sg RENAME TO sg_vor_restore_${stamp}`),
-    );
-    const renameNew = sqls.findIndex((q) => q.includes(`ALTER DATABASE sg_restore_${stamp} RENAME TO sg`));
+    const swap = sqls.findIndex((q) => q.startsWith('BEGIN;'));
     expect(epoch).toBeGreaterThan(-1);
-    expect(renameOld).toBeGreaterThan(epoch);
-    expect(renameNew).toBeGreaterThan(renameOld);
+    expect(swap).toBeGreaterThan(epoch);
+    // Beide Umbenennungen in EINER Transaktion
+    expect(sqls[swap]).toContain(`ALTER DATABASE sg RENAME TO sg_vor_restore_${stamp};`);
+    expect(sqls[swap]).toContain(`ALTER DATABASE sg_restore_${stamp} RENAME TO sg;`);
+    expect(sqls[swap]).toMatch(/COMMIT;$/);
     expect(s.pg.queries[epoch]?.db).toBe(`sg_restore_${stamp}`);
+    expect([...s.pg.databases].sort()).toEqual(['sg', `sg_vor_restore_${stamp}`]);
+    expect(existsSync(join(s.dataDir, 'restore.journal.json'))).toBe(false);
 
     // Dateien: Stand wiederhergestellt, Altes daneben
     expect(readFileSync(join(s.dataDir, 'vault', 'n.md'), 'utf8')).toBe('# Notiz');
@@ -573,27 +598,201 @@ describe('runRestore', () => {
     const s = restoreSetup();
     await runBackup(s.backupDeps, { trigger: 'manuell' });
     writeFileSync(join(s.dataDir, 'vault', 'n.md'), '# aktuell');
-    // Erstes Umbenennen klappt, das zweite (neu → sg) nicht; danach muss sg zurückbenannt werden
-    let renames = 0;
-    const original = s.pg.query.bind(s.pg);
-    s.pg.query = async (sql, vars, db) => {
-      if (sql.includes('RENAME TO')) {
-        renames += 1;
-        if (renames === 2) throw new Error('rename kaputt');
-      }
-      return original(sql, vars, db);
-    };
-    await expect(runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: true })).resolves.toBe(1);
+    s.pg.renameFailsFor = 'ja';
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(1);
     expect(readFileSync(join(s.dataDir, 'vault', 'n.md'), 'utf8')).toBe('# aktuell');
     expect(readdirSync(s.dataDir).filter((n) => n.includes('vor-restore') || n.includes('.neu-'))).toEqual(
       [],
     );
-    const sqls = s.pg.queries.map((q) => q.sql);
+    expect([...s.pg.databases]).toEqual(['sg']);
+    expect(existsSync(join(s.dataDir, 'restore.journal.json'))).toBe(false);
+  });
+
+  it('vollständig: Dateien weichen vom Manifest ab → nichts wird verändert', async () => {
+    const s = restoreSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    writeFileSync(join(s.target, '20261104T030012Z', 'media', 'photos', 'extra.jpg'), 'x');
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.errs.join('\n')).toContain('Manifest');
+    expect(existsSync(join(s.dataDir, 'restore.journal.json'))).toBe(false);
+  });
+
+  it('.DS_Store im Stand und im Datenordner zählt nie', async () => {
+    const s = restoreSetup();
+    writeFileSync(join(s.dataDir, 'media', '.DS_Store'), 'x');
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    writeFileSync(join(s.target, '20261104T030012Z', 'media', '.DS_Store'), 'y');
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: true, yes: false })).toBe(0);
+  });
+
+  it('Schemaversion: neuerer Dump bricht ab, älterer ist erlaubt', async () => {
+    const s = restoreSetup();
+    const original = s.pg.query.bind(s.pg);
+    s.pg.query = async (sql, vars, db) =>
+      sql.includes('drizzle.__drizzle_migrations') && sql.includes('count')
+        ? [['5']]
+        : sql.includes("to_regclass('drizzle.__drizzle_migrations')")
+          ? [['t']]
+          : original(sql, vars, db);
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    expect(readManifest(join(s.target, '20261104T030012Z'))?.migrations).toBe(5);
+
     expect(
-      sqls.some(
-        (q) => q.includes('RENAME TO sg\n') || /ALTER DATABASE sg_vor_restore_\w+ RENAME TO sg$/.test(q),
+      await runRestore(
+        { ...s.deps, codeMigrations: 4 },
+        { stand: '20261104T030012Z', test: false, yes: true },
       ),
-    ).toBe(true);
-    expect(sqls.some((q) => q.includes('DROP DATABASE IF EXISTS sg_restore_'))).toBe(true);
+    ).toBe(1);
+    expect(s.errs.join('\n')).toContain('neueren Version');
+    expect(s.pg.restored).toEqual([]);
+
+    expect(
+      await runRestore(
+        { ...s.deps, codeMigrations: 6 },
+        { stand: '20261104T030012Z', test: false, yes: true },
+      ),
+    ).toBe(0);
+    expect(s.logs.join('\n')).toContain('älteres Schema');
+  });
+
+  it('Restore setzt den Quelllauf auf fertig, andere offene Läufe auf Fehler', async () => {
+    const s = restoreSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: true });
+    const q = s.pg.queries.find((x) => x.sql.includes("THEN 'fertig' ELSE 'fehler'"));
+    expect(q?.vars).toEqual({ stand: '20261104T030012Z' });
+  });
+});
+
+describe('recoverRestore (Journal)', () => {
+  function journalSetup(dbs: string[], swappedDirs: boolean) {
+    const s = restoreSetup();
+    s.pg.databases = new Set(dbs);
+    const stamp = '20261110t080000z';
+    const dirs = (['media', 'vault'] as const).map((name) => ({
+      name,
+      staged: join(s.dataDir, `${name}.neu-${stamp}`),
+      previous: join(s.dataDir, `${name}.vor-restore-${stamp}`),
+      hadLive: true,
+    }));
+    for (const d of dirs) {
+      mkdirSync(d.staged, { recursive: true });
+      writeFileSync(join(d.staged, 'neu.txt'), 'wiederhergestellt');
+      if (swappedDirs) {
+        renameSync(join(s.dataDir, d.name), d.previous);
+        renameSync(d.staged, join(s.dataDir, d.name));
+      }
+    }
+    writeFileSync(
+      join(s.dataDir, 'restore.journal.json'),
+      JSON.stringify({
+        version: 1,
+        stand: '20261104T030012Z',
+        live: 'sg',
+        fresh: `sg_restore_${stamp}`,
+        old: `sg_vor_restore_${stamp}`,
+        phase: 'swapping',
+        dirs,
+      }),
+    );
+    return { ...s, stamp };
+  }
+
+  it('Abbruch vor dem Datenbank-Commit mit getauschten Ordnern: alles zurück', async () => {
+    const s = journalSetup(['sg', 'sg_restore_20261110t080000z'], true);
+    expect(await recoverRestore(s.deps)).toBe('zurueckgebaut');
+    expect(readFileSync(join(s.dataDir, 'vault', 'n.md'), 'utf8')).toBe('# Notiz');
+    expect(readdirSync(s.dataDir).filter((n) => n.includes('.neu-') || n.includes('vor-restore'))).toEqual(
+      [],
+    );
+    expect([...s.pg.databases]).toEqual(['sg']);
+    expect(existsSync(join(s.dataDir, 'restore.journal.json'))).toBe(false);
+    // Idempotent: ohne Journal passiert nichts
+    expect(await recoverRestore(s.deps)).toBeNull();
+  });
+
+  it('Abbruch während des Kopierens (nichts getauscht): gestagte Ordner und neue Datenbank weg', async () => {
+    const s = journalSetup(['sg', 'sg_restore_20261110t080000z'], false);
+    expect(await recoverRestore(s.deps)).toBe('zurueckgebaut');
+    expect(readFileSync(join(s.dataDir, 'vault', 'n.md'), 'utf8')).toBe('# Notiz');
+    expect([...s.pg.databases]).toEqual(['sg']);
+  });
+
+  it('Abbruch nach dem Datenbank-Commit, Ordner noch nicht getauscht: wird abgeschlossen', async () => {
+    const s = journalSetup(['sg', 'sg_vor_restore_20261110t080000z'], false);
+    expect(await recoverRestore(s.deps)).toBe('abgeschlossen');
+    expect(readFileSync(join(s.dataDir, 'vault', 'neu.txt'), 'utf8')).toBe('wiederhergestellt');
+    expect(readFileSync(join(s.dataDir, `vault.vor-restore-${s.stamp}`, 'n.md'), 'utf8')).toBe('# Notiz');
+    expect(existsSync(join(s.dataDir, 'restore.journal.json'))).toBe(false);
+  });
+
+  it('Abbruch zwischen zwei Ordner-Umbenennungen (Live-Ordner fehlt kurz): wird zurückgebaut', async () => {
+    const s = journalSetup(['sg', 'sg_restore_20261110t080000z'], false);
+    renameSync(join(s.dataDir, 'media'), join(s.dataDir, `media.vor-restore-${s.stamp}`));
+    expect(await recoverRestore(s.deps)).toBe('zurueckgebaut');
+    expect(readFileSync(join(s.dataDir, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+  });
+});
+
+describe('Backup: Robustheit', () => {
+  it('Symlink als Ziel auf media/ wird abgelehnt', () => {
+    const dataDir = tmp();
+    mkdirSync(join(dataDir, 'media'));
+    const link = join(tmp(), 'ziel-link');
+    symlinkSync(join(dataDir, 'media'), link);
+    expect(() => validateTarget(link, dataDir)).toThrow(/media/);
+    // auch ein Unterordner hinter dem Link
+    mkdirSync(join(dataDir, 'media', 'x'));
+    expect(() => validateTarget(join(link, 'x'), dataDir)).toThrow(/media/);
+  });
+
+  it('Dateien, die beim Kopieren verschwinden, werden übersprungen und gezählt', () => {
+    const root = tmp();
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src', 'a.txt'), 'A');
+    writeFileSync(join(root, 'src', 'weg.txt'), 'W');
+    const stats = copyTree(join(root, 'src'), join(root, 'dst'), null, undefined, {
+      beforeCopy: (path) => path.endsWith('weg.txt') && rmSync(path),
+    });
+    expect(stats).toMatchObject({ files: 1, bytes: 1, vanished: 1 });
+    expect(existsSync(join(root, 'dst', 'weg.txt'))).toBe(false);
+    // treeSize eines verschwundenen Ordners wirft nicht
+    expect(treeSize(join(root, 'gibt-es-nicht'))).toEqual({ files: 0, bytes: 0 });
+  });
+
+  it('die letzten 3 vor_migration-Stände bleiben trotz Ausdünnung', async () => {
+    const s = setup();
+    // 6 Migrations-Stände an 6 Tagen weit in der Vergangenheit (alle würden sonst ausgedünnt), dazu 14 neuere tägliche
+    for (let i = 0; i < 6; i += 1) {
+      const date = new Date(Date.UTC(2025, 0, 1 + i * 40, 3));
+      expect(await runBackup({ ...s.deps, now: () => date }, { trigger: 'vor_migration' })).toBe(0);
+    }
+    for (let i = 0; i < 20; i += 1) {
+      const date = new Date(Date.UTC(2026, 9, 1 + i, 3));
+      expect(await runBackup({ ...s.deps, now: () => date }, { trigger: 'zeitplan' })).toBe(0);
+    }
+    const migStands = listStands(s.target).filter(
+      (st) => readManifest(join(s.target, st))?.trigger === 'vor_migration',
+    );
+    expect(migStands.length).toBeGreaterThanOrEqual(3);
+    // Die 3 neuesten Migrations-Stände sind alle noch da
+    for (const i of [3, 4, 5]) {
+      const stand = standName(new Date(Date.UTC(2025, 0, 1 + i * 40, 3)));
+      expect(existsSync(join(s.target, stand)), stand).toBe(true);
+    }
+  });
+});
+
+describe('Backup vor der Migration ist fail-closed', () => {
+  it('ohne Docker und pg_dump wird nicht migriert (Hinweis auf --ohne-backup)', async () => {
+    const errors: string[] = [];
+    const spy = vi.spyOn(console, 'error').mockImplementation((m: string) => void errors.push(m));
+    const exec: Exec = async () => ({ code: 127, stdout: '', stderr: 'nicht gefunden' });
+    const cfg = resolveConfig({ SG_DATA_DIR: tmp() }, '/h', '/repo');
+    expect(await backupBeforeMigrate(cfg, exec)).toBe(false);
+    spy.mockRestore();
+    expect(errors.join('\n')).toContain('--ohne-backup');
+    expect(errors.join('\n')).toContain('nicht ausgeführt');
   });
 });

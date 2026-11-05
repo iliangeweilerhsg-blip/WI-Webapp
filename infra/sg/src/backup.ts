@@ -13,6 +13,7 @@ import {
   createReadStream,
   existsSync,
   mkdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
@@ -25,6 +26,7 @@ import {
   DUMP_FILE,
   listStands,
   MANIFEST_FILE,
+  readManifest,
   removeStalePartials,
   removeStand,
   selectRetention,
@@ -131,18 +133,31 @@ export async function readBackupSettings(pg: PgAccess): Promise<BackupSettings> 
  * Prüft das Ziel: absoluter Pfad, nicht in `media/` oder `vault/` (sonst kopiert sich das Backup in sich selbst),
  * Ordner vorhanden oder wenigstens der Elternordner (ein nicht eingehängter Datenträger legt keinen Ordner an).
  */
+/** `realpath` des tiefsten vorhandenen Elternordners plus der noch fehlende Rest */
+function realResolve(path: string): string {
+  const rest: string[] = [];
+  let current = resolve(path);
+  while (!existsSync(current)) {
+    rest.unshift(current.slice(resolve(current, '..').length + 1));
+    const parent = resolve(current, '..');
+    if (parent === current) break;
+    current = parent;
+  }
+  return join(realpathSync(current), ...rest);
+}
+
 export function validateTarget(target: string, dataDir: string): string {
   if (!isAbsolute(target)) throw new Error('Das Backup-Ziel muss ein absoluter Pfad sein.');
-  const full = resolve(target);
+  // Symbolische Links auflösen, bevor geprüft wird, ob das Ziel in media/ oder vault/ liegt
+  const full = realResolve(target);
   for (const sub of ['media', 'vault']) {
-    const inside = relative(join(dataDir, sub), full);
+    const inside = relative(realResolve(join(dataDir, sub)), full);
     if (inside === '' || (!inside.startsWith('..') && !isAbsolute(inside))) {
       throw new Error(`Das Backup-Ziel darf nicht in „${sub}“ des Datenordners liegen.`);
     }
   }
   if (!existsSync(full)) {
-    const parent = resolve(full, '..');
-    if (!existsSync(parent)) {
+    if (!existsSync(resolve(full, '..'))) {
       throw new Error('Das Backup-Ziel ist nicht vorhanden (Datenträger nicht angeschlossen?).');
     }
     mkdirSync(full);
@@ -164,6 +179,14 @@ export async function countObjects(pg: PgAccess, db?: string): Promise<Record<st
   const sql = tables.map((t) => `SELECT '${t}', count(*) FROM ${t}`).join(' UNION ALL ');
   for (const [name, n] of await pg.query(sql, {}, db)) counts[name as string] = Number(n);
   return counts;
+}
+
+/** Angewendete Migrationen (Schemaversion des Dumps), `null` wenn die Tabelle fehlt */
+export async function migrationCount(pg: PgAccess, db?: string): Promise<number | null> {
+  const [has] = await pg.query(`SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL`, {}, db);
+  if (has?.[0] !== 't') return null;
+  const [n] = await pg.query(`SELECT count(*) FROM drizzle.__drizzle_migrations`, {}, db);
+  return Number(n?.[0] ?? 0);
 }
 
 /** Läufe im Zustand `laeuft`, die älter als 6 Stunden sind, gelten als abgestürzt */
@@ -283,10 +306,11 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       const dumpSha = await sha256File(dumpFile);
       const counts = await countObjects(pg);
       const [version] = await pg.query(`SHOW server_version`);
+      const migrations = await migrationCount(pg);
 
       const stats: Record<'media' | 'vault', CopyStats> = {
-        media: { files: 0, bytes: 0, linked: 0, copied: 0 },
-        vault: { files: 0, bytes: 0, linked: 0, copied: 0 },
+        media: { files: 0, bytes: 0, linked: 0, copied: 0, vanished: 0 },
+        vault: { files: 0, bytes: 0, linked: 0, copied: 0, vanished: 0 },
       };
       for (const sub of ['media', 'vault'] as const) {
         const source = join(cfg.dataDir, sub);
@@ -304,6 +328,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         created_at: started.toISOString(),
         trigger: options.trigger,
         pg_server_version: version?.[0] ?? null,
+        migrations,
         dump: { file: DUMP_FILE, bytes: dumpBytes, sha256: dumpSha },
         counts,
         media: { files: stats.media.files, bytes: stats.media.bytes },
@@ -339,12 +364,25 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
   }
 }
 
-/** Alte Stände nach 14/8/6 entfernen und alte `.partial`-Ordner (älter als 1 Tag) aufräumen */
+/** So viele Stände vor Migrationen bleiben unabhängig von der Ausdünnung erhalten */
+export const KEEP_PRE_MIGRATION = 3;
+
+/**
+ * Alte Stände nach 14/8/6 entfernen und alte `.partial`-Ordner (älter als 1 Tag) aufräumen.
+ * Die letzten 3 Stände mit `trigger = vor_migration` bleiben zusätzlich immer erhalten.
+ */
 export function thin(target: string, nowMs: number, log: (message: string) => void = () => {}): string[] {
   removeStalePartials(target, nowMs, 86_400_000);
-  const { remove } = selectRetention(listStands(target));
+  const stands = listStands(target); // neueste zuerst
+  const protectedStands = new Set(
+    stands
+      .filter((s) => readManifest(join(target, s))?.trigger === 'vor_migration')
+      .slice(0, KEEP_PRE_MIGRATION),
+  );
+  const { remove } = selectRetention(stands);
   const removed: string[] = [];
   for (const stand of remove) {
+    if (protectedStands.has(stand)) continue;
     if (removeStand(target, stand)) {
       removed.push(stand);
       log(`Alten Stand ${stand} entfernt.`);

@@ -10,6 +10,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import type { TrashItem, TrashKind, TrashList, TrashParent, TrashRestoreResult } from '@sg/shared';
 import type { Db, DbOrTx, Tx } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
+import { SEMESTER_LOCK_KEY } from '../lib/locks.ts';
 import { decodeCursor, encodeCursor, type CursorKey } from '../lib/pagination.ts';
 import { appendOp } from '../sync/append.ts';
 import { resolveDataPath } from './material.ts';
@@ -30,8 +31,6 @@ const deletedMatch = (mode: Mode, column = sql`deleted_at`): SQL =>
 // Sperren
 // ---------------------------------------------------------------------------------------------
 
-/** Dieselbe Sperre wie `lockSemesters` in organisation.ts (`is_current` ändert sich nur unter ihr) */
-const SEMESTER_LOCK_KEY = 70070001;
 async function lockSemesters(tx: Tx): Promise<void> {
   await tx.execute(sql`SELECT pg_advisory_xact_lock(${SEMESTER_LOCK_KEY})`);
 }
@@ -116,18 +115,45 @@ async function affectedBy(tx: DbOrTx, kind: TrashKind, id: string, mode: Mode): 
   }
 }
 
-/** Sperrt die Ströme der betroffenen Notizbücher und Sessions und gibt sie zurück (Strom vor Zeile) */
+/** Module, deren Zeilen beim Löschen von `kind` berührt werden (für die Modulsperre) */
+async function modulesOf(tx: DbOrTx, kind: TrashKind, id: string, mode: Mode): Promise<string[]> {
+  if (kind === 'module') return [id];
+  if (kind !== 'semester') return [];
+  const rows = await tx.execute<{ id: string }>(
+    sql`SELECT id FROM module WHERE semester_id = ${id} AND ${deletedMatch(mode)} ORDER BY id`,
+  );
+  return rows.map((r) => r.id);
+}
+
+/**
+ * Sperrt die Ströme der betroffenen Notizbücher und Sessions und gibt sie zurück (Strom vor Zeile).
+ * Beim Löschen von Modul/Semester werden danach die Modulzeilen `FOR UPDATE` gesperrt: Das wartet auf
+ * gleichzeitige `notebook.create`/PATCH-Verschieben (sie halten `FOR KEY SHARE` am Modul) und hält weitere
+ * davon ab. Danach wird neu gelesen, damit auch ein dazwischen entstandenes Notizbuch eine `notebook.delete`-Op
+ * bekommt und mitgelöscht wird. Die Reihenfolge bleibt global: Ströme (sortiert), dann Zeilen.
+ */
 async function lockAffected(tx: Tx, kind: TrashKind, id: string, mode: Mode): Promise<Affected> {
   const locked = new Set<string>();
+  let modulesLocked = false;
   let affected: Affected = { notebooks: [], sessions: [] };
-  // Nach dem Sperren neu lesen: Zwischendurch angelegte Notizbücher/Sessions kommen noch dazu
-  for (let round = 0; round < 3; round += 1) {
+  for (let round = 0; round < 4; round += 1) {
     affected = await affectedBy(tx, kind, id, mode);
     const streams = [...affected.notebooks.map(notebookStream), ...affected.sessions.map(sessionStream)];
     const fresh = streams.filter((s) => !locked.has(s));
-    if (fresh.length === 0) break;
-    await lockStreams(tx, fresh);
-    for (const s of fresh) locked.add(s);
+    if (fresh.length > 0) {
+      await lockStreams(tx, fresh);
+      for (const s of fresh) locked.add(s);
+      continue;
+    }
+    if (!modulesLocked && mode.op === 'delete') {
+      const modules = await modulesOf(tx, kind, id, mode);
+      if (modules.length > 0) {
+        await tx.execute(sql`SELECT id FROM module WHERE id IN (${idList(modules)}) ORDER BY id FOR UPDATE`);
+      }
+      modulesLocked = true;
+      continue; // neu lesen: Notizbücher, die auf die Sperre gewartet haben
+    }
+    break;
   }
   return affected;
 }
@@ -641,8 +667,10 @@ export async function purgeTrashItems(
 
   let filesRemoved = 0;
   for (const relative of outcome.files) {
+    // Nur Dateien unter media/ (VERTRAEGE §4): ein manipulierter Pfad in der DB löscht nie anderswo
+    if (!relative.startsWith('media/')) continue;
     const full = resolveDataPath(dataDir, relative);
-    if (!full) continue;
+    if (!full || full === resolveDataPath(dataDir, 'media')) continue;
     try {
       await rm(full, { recursive: true, force: true });
       filesRemoved += 1;
@@ -658,18 +686,43 @@ export async function purgeTrashItems(
  * Rückgabe: Anzahl der direkten Objekte (wie in der Liste).
  */
 export async function emptyTrash(db: Db, dataDir: string, kind?: TrashKind): Promise<number> {
+  // Aktive Sessions vorher prüfen: lieber nichts löschen als die Hälfte (409 session_active)
+  const all = await listTrashRoots(db, kind);
+  if (all.length > 0) {
+    const sessions = (await collectSubtree(db, all)).sessions;
+    if (sessions.length > 0) {
+      const active = await db.execute<{ id: string }>(
+        sql`SELECT id FROM session WHERE state IN ('laeuft','pausiert') AND id IN (${idList(sessions)})`,
+      );
+      if (active.length > 0) {
+        throw new HttpError(
+          409,
+          'session_active',
+          'Eine laufende oder pausierte Session lässt sich nicht endgültig löschen.',
+          { session_ids: active.map((r) => r.id) },
+        );
+      }
+    }
+  }
   const counted = new Set<string>();
+  const seen = new Set<string>();
   for (;;) {
-    const roots = (await listTrashRoots(db, kind)).filter((r) => !counted.has(r.id));
+    const roots = (await listTrashRoots(db, kind)).filter((r) => !seen.has(r.id));
     if (roots.length === 0) break;
     for (const root of roots) {
+      seen.add(root.id);
       try {
         await purgeTrashItems(db, dataDir, [root]);
+        counted.add(root.id);
       } catch (error) {
-        // Schon als Teil eines anderen Objekts gelöscht (Teilbaum): zählt trotzdem als direktes Objekt
         if (!(error instanceof HttpError && error.code === 'trash_item_not_found')) throw error;
+        // Weg, weil Teil eines anderen gelöschten Objekts: zählt als direktes Objekt.
+        // Zwischendurch wiederhergestellt: bleibt, zählt nicht.
+        const [still] = await db.execute<{ id: string }>(
+          sql`SELECT id FROM ${sql.identifier(root.kind)} WHERE id = ${root.id}`,
+        );
+        if (!still) counted.add(root.id);
       }
-      counted.add(root.id);
     }
   }
   return counted.size;

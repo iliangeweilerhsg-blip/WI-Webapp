@@ -145,10 +145,21 @@ export function createPg(
   const url = parseDatabaseUrl(cfg.databaseUrl);
   const compose = (...rest: string[]) => composeArgs(cfg, 'exec', '-T', 'db', ...rest);
   const secrets = [url.password];
-  const fail = (what: string, result: ExecResult): Error =>
-    new Error(
-      `${what} (Exit-Code ${result.code}): ${scrubSecrets(result.stderr.trim(), secrets).slice(-500)}`,
+  const fail = (what: string, result: ExecResult): Error => {
+    const raw = result.stderr.trim();
+    let reason = '';
+    if (/could not connect|connection refused|Connection refused|server closed the connection/i.test(raw)) {
+      reason = ' Die Datenbank ist nicht erreichbar (läuft sie? "pnpm sg start" startet sie).';
+    } else if (/password authentication failed|authentication failed/i.test(raw)) {
+      reason =
+        ' Die Anmeldung an der Datenbank wurde abgelehnt (Benutzer oder Passwort in DATABASE_URL prüfen).';
+    } else if (result.code === 127) {
+      reason = ' Das Programm wurde nicht gefunden.';
+    }
+    return new Error(
+      `${what}.${reason} Technische Details (Exit-Code ${result.code}): ${scrubSecrets(raw, secrets).slice(-400)}`,
     );
+  };
   const env = mode === 'local' ? { PGPASSWORD: url.password } : undefined;
   const connArgs = (db: string): string[] =>
     mode === 'docker'
@@ -179,7 +190,7 @@ export function createPg(
         mode === 'docker'
           ? await exec('docker', compose(...base), { input: sql })
           : await exec(base[0] as string, base.slice(1), { input: sql, ...(env ? { env } : {}) });
-      if (result.code !== 0) throw fail('psql fehlgeschlagen', result);
+      if (result.code !== 0) throw fail('Die Datenbank-Abfrage (psql) ist fehlgeschlagen', result);
       return result.stdout
         .split('\n')
         .filter((line) => line !== '')
@@ -191,7 +202,7 @@ export function createPg(
         mode === 'docker'
           ? await exec('docker', compose(...base), { stdoutFile: file })
           : await exec(base[0] as string, base.slice(1), { stdoutFile: file, ...(env ? { env } : {}) });
-      if (result.code !== 0) throw fail('pg_dump fehlgeschlagen', result);
+      if (result.code !== 0) throw fail('Die Sicherung der Datenbank (pg_dump) ist fehlgeschlagen', result);
     },
     async restore(db, file) {
       const flags = ['--no-owner', '--exit-on-error'];
@@ -199,10 +210,10 @@ export function createPg(
         const result = await exec('docker', compose('pg_restore', ...connArgs(db), ...flags), {
           stdinFile: file,
         });
-        if (result.code !== 0) throw fail('pg_restore fehlgeschlagen', result);
+        if (result.code !== 0) throw fail('Das Einspielen des Dumps (pg_restore) ist fehlgeschlagen', result);
       } else {
         const result = await exec('pg_restore', [...connArgs(db), ...flags, file], { env: env ?? {} });
-        if (result.code !== 0) throw fail('pg_restore fehlgeschlagen', result);
+        if (result.code !== 0) throw fail('Das Einspielen des Dumps (pg_restore) ist fehlgeschlagen', result);
       }
     },
   };

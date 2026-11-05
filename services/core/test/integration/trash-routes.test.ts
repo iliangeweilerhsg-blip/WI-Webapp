@@ -8,7 +8,7 @@ import { SINGLE_USER_ID } from '@sg/shared';
 import { stroke } from '../../src/db/schema/index.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { appendOp } from '../../src/sync/append.ts';
-import { restoreWithOps, softDeleteWithOps } from '../../src/services/trash-ops.ts';
+import { purgeTrashItems, restoreWithOps, softDeleteWithOps } from '../../src/services/trash-ops.ts';
 import { softDelete } from '../../src/services/trash.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
@@ -605,5 +605,70 @@ describe('Sperrreihenfolge: Strom vor Zeile (§16.2)', () => {
     const [, res] = await Promise.all([handler, purging]);
     expect(res.statusCode).toBe(204);
     expect(await count('module')).toBe(0);
+  });
+});
+
+describe('Review-Nacharbeit (Race, Prüfungen)', () => {
+  it('purgeTrashItems prüft die Wurzel unter der Sperre: eine wiederhergestellte (aktive) Wurzel wird nie gelöscht', async () => {
+    const ids = await seed();
+    const files = seedFiles(ids);
+    await softDeleteWithOps(t.handle.db, 'module', ids.module);
+    await restoreWithOps(t.handle.db, ids.module);
+    await expect(
+      purgeTrashItems(t.handle.db, t.config.dataDir, [{ kind: 'module', id: ids.module }]),
+    ).rejects.toMatchObject({ code: 'trash_item_not_found' });
+    expect(await count('module', ids.module)).toBe(1);
+    expect(await count('notebook')).toBe(2);
+    for (const f of files) expect(existsSync(f), f).toBe(true);
+  });
+
+  it('Notizbuch, das gleichzeitig angelegt wird, wird mitgelöscht und bekommt notebook.delete', async () => {
+    const ids = await seed();
+    const late = uuidv7();
+    let commitLate!: () => void;
+    const gate = new Promise<void>((resolve) => (commitLate = resolve));
+    // Wie notebook.create: Modul FOR KEY SHARE (FK), Notizbuch eingefügt, noch nicht committet
+    const creating = t.handle.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM module WHERE id = ${ids.module} FOR SHARE`);
+      await tx.execute(
+        sql`INSERT INTO notebook (id, user_id, module_id, title) VALUES (${late}, ${SINGLE_USER_ID}, ${ids.module}, 'Spät')`,
+      );
+      await gate;
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    const deleting = softDeleteWithOps(t.handle.db, 'module', ids.module);
+    await new Promise((r) => setTimeout(r, 300));
+    commitLate();
+    await Promise.all([creating, deleting]);
+    const [row] = await t.handle.sql`SELECT deleted_at IS NOT NULL AS gone FROM notebook WHERE id = ${late}`;
+    expect(row?.gone).toBe(true);
+    expect((await ops(`notebook:${late}`)).map((o) => o.kind)).toEqual(['notebook.delete']);
+  });
+
+  it('DELETE /trash: aktive Session im Papierkorb gibt 409, bevor irgendetwas gelöscht wird', async () => {
+    const ids = await seed();
+    const other = uuidv7();
+    await t.handle
+      .sql`INSERT INTO exercise_sheet ${t.handle.sql({ id: other, ...base, module_id: ids.module, title: 'Z', file_path: 'p', sha256: 'e'.repeat(64) })}`;
+    await del(`/exercise-sheets/${other}`);
+    await del(`/modules/${ids.module}`);
+    await t.handle.sql`UPDATE session SET state = 'laeuft' WHERE id = ${ids.session}`;
+    const res = await del('/trash');
+    expect(res.statusCode).toBe(409);
+    expect(res.json<{ error: { code: string } }>().error.code).toBe('session_active');
+    expect(await count('exercise_sheet', other)).toBe(1);
+    expect(await count('module', ids.module)).toBe(1);
+  });
+
+  it('Dateien außerhalb von media/ werden nie gelöscht, auch nicht über einen DB-Pfad', async () => {
+    const ids = await seed();
+    const secret = dataFile('config/.env', 'GEHEIM');
+    await t.handle.sql`UPDATE photo SET file_path = 'config/.env' WHERE id = ${ids.photo}`;
+    await t.handle.sql`UPDATE slide SET image_path = 'media' WHERE id = ${ids.slide}`;
+    seedFiles(ids);
+    await del(`/modules/${ids.module}`);
+    expect((await del(`/trash/${ids.module}`)).statusCode).toBe(204);
+    expect(existsSync(secret)).toBe(true);
+    expect(existsSync(join(t.config.dataDir, 'media'))).toBe(true);
   });
 });

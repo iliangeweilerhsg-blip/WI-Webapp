@@ -2,7 +2,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { HealthSchema, type Health } from '@sg/shared';
-import { backupBeforeMigrate, backupCommand, restoreCommand } from './backup-commands.ts';
+import {
+  backupBeforeMigrate,
+  backupCommand,
+  recoverRestoreIfOpen,
+  restoreCommand,
+} from './backup-commands.ts';
 import type { CommandName } from './cli.ts';
 import { appUrl, childEnv, CORE_STOP_TIMEOUT_S, healthUrl, type SgConfig } from './config.ts';
 import { doctorExitCode, formatChecks, runChecks } from './doctor.ts';
@@ -242,6 +247,9 @@ export async function start(cfg: SgConfig): Promise<number> {
     err('Datenbank konnte nicht gestartet werden. Läuft Docker? Prüfen mit "pnpm sg doctor".');
     return 1;
   }
+
+  // Ein unterbrochener Restore wird zuerst abgeschlossen oder zurückgebaut (Journal im Datenordner)
+  if (!(await recoverRestoreIfOpen(cfg))) return 1;
 
   await ensureWebBuild(cfg, prepareIo(cfg), avail.web);
 

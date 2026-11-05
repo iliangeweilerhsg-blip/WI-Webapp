@@ -2,6 +2,7 @@
 
 import type { TrashItem, TrashKind } from '@sg/shared';
 import { friendlyMessage } from '../../lib/api.ts';
+import { useHydrated } from '../../lib/hydrated.ts';
 import { useEmptyTrash, usePurgeTrashItem, useRestoreTrashItem, useTrash } from '../../lib/data.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { CoreHint } from '../CoreHint.tsx';
@@ -83,9 +84,10 @@ export function TrashSettings() {
   const busy = restore.isPending || purge.isPending || empty.isPending;
   const fail = (error: unknown) => toast.show({ message: friendlyMessage(error) });
 
-  if (trash.isPending) return <p className="text-sm text-text-muted">Lädt …</p>;
+  const hydrated = useHydrated();
+  if (!hydrated || trash.isPending) return <p className="text-sm text-text-muted">Lädt …</p>;
   if (trash.isError) return <CoreHint error={trash.error} />;
-  const items = trash.data.items;
+  const items = trash.data.pages.flatMap((page) => page.items);
 
   return (
     <section aria-labelledby="trash-title" className="space-y-3">
@@ -100,7 +102,10 @@ export function TrashSettings() {
           onClick={() => {
             // Unumkehrbar (R18): mit Bestätigung
             if (window.confirm('Den Papierkorb leeren? Das lässt sich nicht rückgängig machen.')) {
-              empty.mutate(undefined, { onError: fail });
+              empty.mutate(undefined, {
+                onSuccess: (r) => toast.show({ message: `Papierkorb geleert (${r.purged_count})` }),
+                onError: fail,
+              });
             }
           }}
         >
@@ -129,13 +134,26 @@ export function TrashSettings() {
                 if (
                   window.confirm(`„${item.title}“ endgültig löschen? Das lässt sich nicht rückgängig machen.`)
                 ) {
-                  purge.mutate(item.id, { onError: fail });
+                  purge.mutate(item.id, {
+                    onSuccess: () => toast.show({ message: `${item.title} endgültig gelöscht` }),
+                    onError: fail,
+                  });
                 }
               }}
             />
           ))}
         </ul>
       )}
+      {trash.hasNextPage ? (
+        <button
+          type="button"
+          disabled={trash.isFetchingNextPage}
+          className={smallButton}
+          onClick={() => void trash.fetchNextPage()}
+        >
+          Mehr laden
+        </button>
+      ) : null}
     </section>
   );
 }
