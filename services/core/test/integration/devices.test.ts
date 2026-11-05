@@ -4,7 +4,6 @@ import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { Writable } from 'node:stream';
-import websocket from '@fastify/websocket';
 import { eq, sql } from 'drizzle-orm';
 import type { InjectOptions, LightMyRequestResponse } from 'fastify';
 import { pino } from 'pino';
@@ -686,8 +685,8 @@ describe('WebSocket-Upgrade (§11.1) und Widerruf', () => {
     ).rejects.toMatchObject({ code: 'origin_not_allowed' });
   });
 
-  // Echter WebSocket über eine Nicht-Loopback-Adresse dieses Rechners. Der Sync-Server (T1-08) ist hier
-  // nachgebaut: Er liest `request.sgDevice` und schließt bei `onDeviceRevoked` mit 4401.
+  // Echter WebSocket über eine Nicht-Loopback-Adresse dieses Rechners, gegen den echten Sync-Server (T1-08):
+  // DELETE /devices/{id} ruft closeDeviceConnections(id, 4401) auf.
   const lanAddress = Object.values(networkInterfaces())
     .flat()
     .find((i) => i && i.family === 'IPv4' && !i.internal)?.address;
@@ -699,19 +698,6 @@ describe('WebSocket-Upgrade (§11.1) und Widerruf', () => {
       const config = testConfig({ port });
       const handle = createDb(config.databaseUrl);
       const server = await buildApp({ config, db: handle.db, logger: pino({ level: 'silent' }) });
-      await server.register(websocket);
-      const sockets = new Map<string, Set<{ close: (code: number, reason: string) => void }>>();
-      const off = onDeviceRevoked((deviceId) => {
-        for (const s of sockets.get(deviceId) ?? []) s.close(4401, 'device_token_invalid');
-      });
-      server.get('/sync', { websocket: true }, (socket, request) => {
-        const deviceId = request.sgDevice?.deviceId;
-        if (!deviceId) return;
-        const set = sockets.get(deviceId) ?? new Set();
-        set.add(socket);
-        sockets.set(deviceId, set);
-        socket.on('close', () => set.delete(socket));
-      });
       await server.listen({ host: '0.0.0.0', port });
       // Alle Sockets des Servers, um zu prüfen, dass ein abgelehnter Upgrade nicht offen hängen bleibt
       const open = new Set<Socket>();
@@ -793,7 +779,6 @@ describe('WebSocket-Upgrade (§11.1) und Widerruf', () => {
         for (let i = 0; i < 40 && open.size > 0; i++) await new Promise((r) => setTimeout(r, 50));
         expect(open.size).toBe(0);
       } finally {
-        off();
         await server.close();
         await handle.close();
       }
