@@ -1,17 +1,7 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
-import {
-  copyFileSync,
-  type Dirent,
-  existsSync,
-  linkSync,
-  lstatSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  utimesSync,
-} from 'node:fs';
-import { join } from 'node:path';
+import { type Dirent, existsSync, lstatSync, readdirSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { NoFollowWriter, readSmallRegularFile } from './nofollow.ts';
 
 /** Standname `YYYYMMDDTHHMMSSZ` (UTC), so auch `BackupRun.stand` im Schema */
 export const STAND_RE = /^[0-9]{8}T[0-9]{6}Z$/;
@@ -136,6 +126,10 @@ export function skipped(name: string): boolean {
  * `prev`) werden dorthin verlinkt statt kopiert: so entsteht aus jedem Lauf ein vollständiger Stand, der nur
  * die Änderungen belegt (inkrementell). Geht ein Hardlink nicht (anderes Dateisystem), wird kopiert.
  * Symbolische Links und Sonderdateien werden übersprungen.
+ *
+ * `dst` darf noch nicht existieren. Geschrieben wird nur über `out` (`NoFollowWriter`): Ordner einzeln neu,
+ * Dateien exklusiv, nie einem Symlink im Ziel folgend (#113). Ohne `out` legt `copyTree` einen eigenen an, der den
+ * Elternordner von `dst` als vertrauenswürdig übernimmt (Restore in den Datenordner).
  */
 export function copyTree(
   src: string,
@@ -144,9 +138,15 @@ export function copyTree(
   stats?: CopyStats,
   /** Nur für Tests: läuft vor dem Kopieren jeder Datei */
   hooks?: { beforeCopy?: (path: string) => void },
+  writer?: NoFollowWriter,
 ): CopyStats {
   const result = stats ?? { files: 0, bytes: 0, linked: 0, copied: 0, vanished: 0 };
-  mkdirSync(dst, { recursive: true });
+  let out = writer;
+  if (!out) {
+    out = new NoFollowWriter();
+    out.adopt(dirname(dst));
+  }
+  out.mkdir(dst);
   let entries: Dirent[];
   try {
     entries = readdirSync(src, { withFileTypes: true });
@@ -163,36 +163,30 @@ export function copyTree(
     const to = join(dst, entry.name);
     const before = prev ? join(prev, entry.name) : null;
     if (entry.isDirectory()) {
-      copyTree(from, to, before && existsSync(before) ? before : null, result, hooks);
+      copyTree(from, to, before && existsSync(before) ? before : null, result, hooks, out);
       continue;
     }
     if (!entry.isFile()) continue;
     try {
       hooks?.beforeCopy?.(from);
       const info = lstatSync(from);
+      if (!info.isFile()) throw Object.assign(new Error('keine Datei mehr'), { code: 'ENOENT' });
       let how: 'linked' | 'copied' = 'copied';
       if (before) {
         const old = lstatSync(before, { throwIfNoEntry: false });
         if (old?.isFile() && old.size === info.size && Math.abs(old.mtimeMs - info.mtimeMs) < 2) {
-          try {
-            linkSync(before, to);
-            how = 'linked';
-          } catch {
-            // kein Hardlink möglich: kopieren
-          }
+          // kein Hardlink möglich (anderes Dateisystem, inzwischen ausgetauscht): kopieren
+          if (out.link(before, to, old)) how = 'linked';
         }
       }
-      if (how === 'copied') {
-        copyFileSync(from, to);
-        utimesSync(to, info.atime, info.mtime);
-      }
+      if (how === 'copied') out.copyFile(from, to, info);
       result.files += 1;
       result.bytes += info.size;
       result[how] += 1;
     } catch (error) {
       // Datei ist zwischen Auflisten und Kopieren verschwunden (z. B. .part → umbenannt): überspringen
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      rmSync(to, { force: true });
+      out.removeOwnFile(to);
       result.vanished += 1;
     }
   }
@@ -248,10 +242,14 @@ export interface Manifest {
 
 export const MANIFEST_FILE = 'manifest.json';
 export const DUMP_FILE = 'db.dump';
+const MANIFEST_MAX_BYTES = 1024 * 1024;
 
 export function readManifest(standDir: string): Manifest | null {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(join(standDir, MANIFEST_FILE), 'utf8'));
+    // Das Ziel ist nicht vertrauenswürdig: kein Symlink, keine FIFO (würde hängen), höchstens 1 MB
+    const raw = readSmallRegularFile(join(standDir, MANIFEST_FILE), MANIFEST_MAX_BYTES);
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw.toString('utf8'));
     if (
       typeof parsed === 'object' &&
       parsed !== null &&

@@ -33,10 +33,13 @@ export async function backupRoutes(app: FastifyInstance, deps: BackupRouteDeps):
   typed.post(
     '/backup',
     {
+      // Nur am Mac selbst: ein gekoppeltes Gerät soll keine Backups in Folge auslösen (sie verdrängen auch den
+      // monatlichen Restore-Test, der einem laufenden Backup ausweicht; VERTRAEGE §13, #113)
+      config: { sgAccess: 'local' },
       schema: {
         tags: ['Daten'],
         summary:
-          'Backup jetzt starten (`pnpm sg backup` im Hintergrund). 409 `backup_running` / `backup_target_missing`',
+          'Backup jetzt starten (`pnpm sg backup` im Hintergrund, nur lokal). 403 `local_only`, 409 `backup_running` / `backup_target_missing` / `restore_test_running`',
         response: { 202: BackupRunSchema, 409: ApiErrorSchema },
       },
     },

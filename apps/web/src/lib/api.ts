@@ -50,6 +50,8 @@ const CODE_MESSAGES: Record<string, string> = {
   session_active: 'Eine laufende Session lässt sich nicht löschen. Beende sie zuerst.',
   session_exists: 'Zu diesem Termin gibt es schon eine Session.',
   idempotency_key_in_progress: 'Die Datei wird gerade schon hochgeladen.',
+  // Nur am Mac selbst erlaubt (z. B. „Jetzt sichern“, „Jetzt testen“ von einem gekoppelten Gerät, #113)
+  local_only: 'Das geht nur direkt am Mac.',
 };
 
 function messageForStatus(status: number): string {

@@ -83,11 +83,18 @@ class FakePg implements PgAccess {
   leftovers: string[] = [];
   /** Läuft ein Restore-Test? (`setting.restore_test`) */
   testRunning = false;
+  testStartedAt = '2026-11-04T02:59:00.000Z';
+  /** Vom Backup als abgebrochen markierter Restore-Test (#113) */
+  testAborted: Record<string, unknown> | null = null;
 
   async query(sql: string, vars: Record<string, string> = {}, db?: string): Promise<string[][]> {
     this.queries.push({ sql, vars, db });
     if (sql.includes('Abgebrochen: kein Abschluss')) return [];
-    if (sql.includes("NULLIF(:'id'")) return [[String(this.otherActive)]];
+    if (sql.includes("NULLIF(:'id'")) {
+      return Array.from({ length: this.otherActive }, (_, i) => [
+        `019a4e14-0000-7000-8000-0000000000${String(i).padStart(2, '0')}`,
+      ]);
+    }
     if (sql.includes("value->>'backup_target'")) {
       return this.target === null && !this.encryption ? [] : [[this.target ?? '', String(this.encryption)]];
     }
@@ -140,8 +147,15 @@ class FakePg implements PgAccess {
       this.testResult = JSON.parse(vars.value as string) as Record<string, unknown>;
       return [];
     }
-    if (sql.includes("key = 'restore_test'") && sql.includes('count(*)')) {
-      return [[this.testRunning ? '1' : '0']];
+    if (sql.includes("key = 'restore_test'") && sql.includes('now() - interval')) {
+      return this.testRunning ? [[this.testStartedAt]] : [];
+    }
+    if (sql.includes("UPDATE setting SET value = value || :'patch'")) {
+      if (this.testRunning && vars.started === this.testStartedAt) {
+        this.testRunning = false;
+        this.testAborted = JSON.parse(vars.patch as string) as Record<string, unknown>;
+      }
+      return [];
     }
     if (sql.includes('SELECT stand FROM backup_run')) {
       const newest = [...this.runs.values()]
@@ -1156,5 +1170,225 @@ describe('Automatischer Restore-Test (F-DAT-02)', () => {
     expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
     expect(s.pg.databases.has('sg_autotest_alt999')).toBe(false);
     expect(dropsOf(s.pg)).toBeGreaterThan(1);
+  });
+});
+
+describe('Backup-Ziel ohne Symlink-Folgen (#113)', () => {
+  const STAND = '20261104T030012Z';
+  const PARTIAL = `.${STAND}.partial`;
+  function outside(): { dir: string; file: string } {
+    const dir = join(tmp(), 'benutzer');
+    mkdirSync(dir);
+    const file = join(dir, 'wichtig.txt');
+    writeFileSync(file, 'GEHEIM');
+    return { dir, file };
+  }
+
+  it('.partial/manifest.json als Symlink auf eine fremde Datei: wird nicht überschrieben, Lauf scheitert, Eigenes weg', async () => {
+    const { pg, deps, target, errs } = setup();
+    const { file } = outside();
+    pg.dumpImpl = async (f) => {
+      writeFileSync(f, 'PGDMP-x');
+      symlinkSync(file, join(target, PARTIAL, 'manifest.json'));
+    };
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(1);
+    expect(readFileSync(file, 'utf8')).toBe('GEHEIM');
+    expect([...pg.runs.values()][0]).toMatchObject({ state: 'fehler', sha: null });
+    expect(existsSync(join(target, STAND))).toBe(false);
+    // Aufgeräumt wurde nur Eigenes: db.dump, media/ und vault/ sind weg, der fremde Link bleibt liegen
+    expect(readdirSync(join(target, PARTIAL))).toEqual(['manifest.json']);
+    expect(lstatSync(join(target, PARTIAL, 'manifest.json')).isSymbolicLink()).toBe(true);
+    expect(errs.join('\n')).toContain('liegen');
+  });
+
+  it('.partial/db.dump als Symlink: Lauf scheitert, fremde Datei unverändert', async () => {
+    const { pg, deps, target } = setup();
+    const { file } = outside();
+    pg.dumpImpl = async (f) => {
+      writeFileSync(f, 'PGDMP-x');
+      symlinkSync(file, join(target, PARTIAL, 'db.dump'));
+    };
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(1);
+    expect(readFileSync(file, 'utf8')).toBe('GEHEIM');
+  });
+
+  it('vorhandenes .partial (auch als Symlink auf einen fremden Ordner): Lauf scheitert, nichts gelöscht oder geschrieben', async () => {
+    const { pg, deps, target } = setup();
+    const { dir, file } = outside();
+    symlinkSync(dir, join(target, PARTIAL));
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(1);
+    expect(readdirSync(dir)).toEqual(['wichtig.txt']);
+    expect(readFileSync(file, 'utf8')).toBe('GEHEIM');
+    expect(lstatSync(join(target, PARTIAL)).isSymbolicLink()).toBe(true);
+    expect([...pg.runs.values()][0]?.state).toBe('fehler');
+  });
+
+  it('.partial wird während des Laufs gegen einen Symlink getauscht: nichts landet außerhalb, nichts wird dort gelöscht', async () => {
+    const { pg, deps, target } = setup();
+    const { dir } = outside();
+    mkdirSync(join(dir, 'media'));
+    writeFileSync(join(dir, 'db.dump'), 'BENUTZER');
+    pg.dumpImpl = async (f) => {
+      writeFileSync(f, 'PGDMP-x');
+      renameSync(join(target, PARTIAL), join(target, 'versteckt'));
+      symlinkSync(dir, join(target, PARTIAL));
+    };
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(1);
+    expect(readdirSync(dir).sort()).toEqual(['db.dump', 'media', 'wichtig.txt']);
+    expect(readFileSync(join(dir, 'db.dump'), 'utf8')).toBe('BENUTZER');
+    expect(readdirSync(join(dir, 'media'))).toEqual([]);
+  });
+
+  it('media/ im .partial wird vor dem Kopieren durch einen Symlink ersetzt: Lauf scheitert, fremder Ordner unverändert', async () => {
+    const { pg, deps, target, dataDir } = setup();
+    const { dir } = outside();
+    writeFileSync(join(dataDir, 'media', 'wichtig.txt'), 'BACKUP-INHALT');
+    pg.dumpImpl = async (f) => {
+      writeFileSync(f, 'PGDMP-x');
+      symlinkSync(dir, join(target, PARTIAL, 'media'));
+    };
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(1);
+    expect(readFileSync(join(dir, 'wichtig.txt'), 'utf8')).toBe('GEHEIM');
+    expect(readdirSync(dir)).toEqual(['wichtig.txt']);
+  });
+
+  it('Stand gleichen Namens existiert schon (auch als Symlink): Fehler, nichts angefasst', async () => {
+    const { pg, deps, target } = setup();
+    const { dir } = outside();
+    symlinkSync(dir, join(target, STAND));
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(1);
+    expect(readdirSync(dir)).toEqual(['wichtig.txt']);
+    expect(existsSync(join(target, PARTIAL))).toBe(false);
+    expect([...pg.runs.values()][0]?.state).toBe('fehler');
+  });
+
+  it('Hardlink-Quelle im vorigen Stand ist ein Symlink: nicht verlinkt, sondern kopiert', async () => {
+    const { deps, target } = setup();
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+    const { file } = outside();
+    const prev = join(target, STAND, 'vault', 'n.md');
+    rmSync(prev);
+    symlinkSync(file, prev);
+    const second = { ...deps, now: () => new Date('2026-11-05T03:00:00Z') };
+    expect(await runBackup(second, { trigger: 'zeitplan' })).toBe(0);
+    const copy = join(target, '20261105T030000Z', 'vault', 'n.md');
+    expect(lstatSync(copy).isFile()).toBe(true);
+    expect(readFileSync(copy, 'utf8')).toBe('# Notiz');
+    expect(lstatSync(copy).ino).not.toBe(lstatSync(file).ino);
+  });
+});
+
+describe('B2: Prüfsumme nie aus der Datei im Ziel (#113)', () => {
+  it('Zieldatei wird direkt nach dem Kopieren ausgetauscht: Prüfsumme in Lauf und Manifest = Bytes von pg_dump', async () => {
+    // Gegenprobe: Ein Rückfall auf `sha256File(destination)` in dumpPrivately macht diesen Test rot
+    const { pg, deps, target } = setup();
+    pg.dumpImpl = async (file) => writeFileSync(file, 'PGDMP-echt');
+    let swapped = '';
+    deps.hooks = {
+      afterDumpCopy: (destination) => {
+        swapped = destination;
+        writeFileSync(destination, 'PGDMP-evil'); // derselbe Pfad, andere Bytes
+      },
+    };
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+    const echt = createHash('sha256').update('PGDMP-echt').digest('hex');
+    expect(swapped).toBe(join(target, '.20261104T030012Z.partial', 'db.dump'));
+    expect([...pg.runs.values()][0]?.sha).toBe(echt);
+    expect(readManifest(join(target, '20261104T030012Z'))?.dump.sha256).toBe(echt);
+    // Der Austausch ist wirklich passiert: der Stand trägt die fremden Bytes und fällt beim Einspielen auf
+    expect(readFileSync(join(target, '20261104T030012Z', 'db.dump'), 'utf8')).toBe('PGDMP-evil');
+  });
+});
+
+describe('Hängendes „läuft“ nach einem Absturz (#113)', () => {
+  const pidFile = (dataDir: string, name: string, pid = 999_999) =>
+    join(dataDir, 'tmp', `lauf-${name}.${pid}.json`);
+  function writePid(dataDir: string, name: string, run: string, pid = 999_999) {
+    mkdirSync(join(dataDir, 'tmp'), { recursive: true });
+    writeFileSync(pidFile(dataDir, name, pid), JSON.stringify({ pid, run }));
+  }
+
+  it('Restore-Test „läuft“, sein Prozess lebt nicht mehr: sofort abgebrochen, Backup läuft', async () => {
+    const { pg, deps, dataDir } = setup({ testRunning: true });
+    writePid(dataDir, 'restore-test', pg.testStartedAt);
+    deps.alive = () => false;
+    expect(await runBackup(deps, { trigger: 'vor_migration' })).toBe(0);
+    expect(pg.testAborted).toMatchObject({ state: 'fehler', reason: 'abgebrochen' });
+    expect(existsSync(pidFile(dataDir, 'restore-test'))).toBe(false);
+  });
+
+  it('Prozess lebt, PID-Datei fehlt oder gehört zu einem anderen Lauf: Exit 4 mit Ausweg', async () => {
+    for (const variant of ['lebt', 'fehlt', 'anderer'] as const) {
+      const { pg, deps, dataDir, errs } = setup({ testRunning: true });
+      if (variant !== 'fehlt') {
+        writePid(dataDir, 'restore-test', variant === 'lebt' ? pg.testStartedAt : 'anders');
+      }
+      deps.alive = () => variant === 'lebt';
+      expect(await runBackup(deps, { trigger: 'vor_migration' })).toBe(4);
+      expect(pg.testAborted).toBeNull();
+      const text = errs.join('\n');
+      expect(text).toContain('Restore-Test');
+      expect(text).toContain('spätestens ab');
+      expect(text).toContain('--ohne-backup');
+    }
+  });
+
+  it('anderes Backup „läuft“, sein Prozess lebt nicht mehr: als Fehler eingetragen, neues Backup läuft', async () => {
+    const { pg, deps, dataDir } = setup({ otherActive: 1 });
+    const id = '019a4e14-0000-7000-8000-000000000000';
+    writePid(dataDir, `backup-${id}`, id);
+    deps.alive = () => false;
+    expect(await runBackup(deps, { trigger: 'vor_migration' })).toBe(0);
+    const update = pg.queries.find((q) => q.sql.includes('lebt nicht mehr') && q.sql.includes('backup_run'));
+    expect(update?.vars.id).toBe(id);
+    expect(existsSync(pidFile(dataDir, `backup-${id}`))).toBe(false);
+  });
+
+  it('H1: zwei Prozesse desselben Restore-Tests, einer per kill -9 beendet: der andere blockiert weiter', async () => {
+    const { pg, deps, dataDir } = setup({ testRunning: true });
+    writePid(dataDir, 'restore-test', pg.testStartedAt, 1001);
+    writePid(dataDir, 'restore-test', pg.testStartedAt, 1002);
+    deps.alive = (pid) => pid === 1002;
+    expect(await runBackup(deps, { trigger: 'vor_migration' })).toBe(4);
+    expect(pg.testAborted).toBeNull();
+    expect(existsSync(pidFile(dataDir, 'restore-test', 1002))).toBe(true);
+  });
+
+  it('H2: verwaiste Dateien toter Prozesse räumt das nächste Backup auf, lebende bleiben', async () => {
+    const { deps, dataDir } = setup();
+    writePid(dataDir, 'backup-019a4e14-0000-7000-8000-0000000000e1', 'x', 3001);
+    writePid(dataDir, 'restore-test', 'alt', 3002);
+    writePid(dataDir, 'restore-test', 'lebt', 3003);
+    deps.alive = (pid) => pid === 3003;
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(0);
+    expect(readdirSync(join(dataDir, 'tmp'))).toEqual(['lauf-restore-test.3003.json']);
+  });
+
+  it('anderes Backup ohne PID-Datei: weiter Exit 4, Meldung mit Ausweg', async () => {
+    const { deps, errs } = setup({ otherActive: 1 });
+    deps.alive = () => false;
+    expect(await runBackup(deps, { trigger: 'vor_migration' })).toBe(4);
+    expect(errs.join('\n')).toContain('--ohne-backup');
+  });
+
+  it('Backup und Restore-Test legen ihre PID-Datei während des Laufs an und entfernen sie danach', async () => {
+    const s = restoreSetup();
+    const seen: string[] = [];
+    const runId = '019a4e14-0000-7000-8000-0000000000aa';
+    s.pg.dumpImpl = async (file) => {
+      writeFileSync(file, 'PGDMP-test');
+      seen.push(readFileSync(pidFile(s.dataDir, `backup-${runId}`, process.pid), 'utf8'));
+    };
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    expect(JSON.parse(seen[0] as string)).toEqual({ pid: process.pid, run: runId });
+    expect(existsSync(pidFile(s.dataDir, `backup-${runId}`, process.pid))).toBe(false);
+
+    s.pg.restoreImpl = async () => {
+      seen.push(readFileSync(pidFile(s.dataDir, 'restore-test', process.pid), 'utf8'));
+    };
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
+    // Ohne Eintrag vom Core ist die Kennung der eigene Beginn
+    expect(JSON.parse(seen[1] as string)).toEqual({ pid: process.pid, run: '2026-11-10T08:00:00.000Z' });
+    expect(existsSync(pidFile(s.dataDir, 'restore-test', process.pid))).toBe(false);
   });
 });
