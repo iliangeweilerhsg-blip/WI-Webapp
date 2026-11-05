@@ -120,28 +120,20 @@ export function titleFromFile(filename: string): string {
   return [...cleaned].slice(0, 300).join('');
 }
 
-/** Einlese-Zustand und Titel eines Eintrags (teilt den Cache mit den Detailansichten). */
+/**
+ * Einlese-Zustand und Titel eines Eintrags. Bewusst direkt über `apiGet` und nicht über `fetchQuery` auf
+ * ['deck'|'sheet', id]: Sonst hängt sich die Abfrage an die laufende eines Observers (DocumentView). Meldet der sich ab,
+ * setzt TanStack die Query zurück und liefert die alten Daten (z. B. `neu`) statt der Antwort des Cores (#86).
+ */
 export async function fetchIngest(
-  client: QueryClient,
   kind: MaterialKind,
   id: string,
 ): Promise<{ state: SlideDeck['ingest_state']; title: string }> {
-  // Bewusst ohne `signal` von TanStack: Meldet sich der letzte Beobachter von ['deck'|'sheet', id] ab (Karte
-  // verschwindet nach dem Refetch der Liste), bricht TanStack sonst die laufende Abfrage ab. pollWatched sähe dann
-  // einen Abbruch statt der Antwort (z. B. 404), ließe den Eintrag beobachtet und fragte eine Runde später erneut.
   if (kind === 'folien') {
-    const { deck } = await client.fetchQuery({
-      queryKey: ['deck', id],
-      queryFn: () => apiGet(`/slide-decks/${encodeURIComponent(id)}`, SlideDeckDetailSchema),
-      staleTime: 0,
-    });
+    const { deck } = await apiGet(`/slide-decks/${encodeURIComponent(id)}`, SlideDeckDetailSchema);
     return { state: deck.ingest_state, title: deck.title };
   }
-  const sheet = await client.fetchQuery({
-    queryKey: ['sheet', id],
-    queryFn: () => apiGet(`/exercise-sheets/${encodeURIComponent(id)}`, ExerciseSheetSchema),
-    staleTime: 0,
-  });
+  const sheet = await apiGet(`/exercise-sheets/${encodeURIComponent(id)}`, ExerciseSheetSchema);
   return { state: sheet.ingest_state, title: sheet.title };
 }
 
@@ -207,6 +199,9 @@ interface PendingDelete {
 }
 
 const pending = new Map<string, PendingDelete>();
+/** Gerade gelöschte Einträge (Schlüssel → Zeitpunkt): Eine verspätete Dubletten-Antwort darauf gilt als erledigtes DELETE */
+const recentlyDeleted = new Map<string, number>();
+export const RECENT_DELETE_MS = 60_000;
 const listeners = new Set<() => void>();
 const EMPTY: ReadonlySet<string> = new Set();
 let snapshot: ReadonlySet<string> = EMPTY;
@@ -277,9 +272,23 @@ function commitDelete(key: string): Promise<void> {
  * der Core die Datei nicht mehr und ein neuer Upload wird angenommen), sonst `false` (nichts zu warten).
  */
 export async function awaitMaterialDelete(kind: MaterialKind, id: string): Promise<boolean> {
-  const entry = pending.get(keyOf(kind, id));
-  if (!entry?.sending || !entry.done) return false;
-  await entry.done;
+  const key = keyOf(kind, id);
+  const entry = pending.get(key);
+  if (entry?.sending && entry.done) {
+    await entry.done;
+    return recentlyDeletedNow(key);
+  }
+  // DELETE und Neuladen der Liste waren schon fertig, bevor die Dubletten-Antwort kam (#57)
+  return recentlyDeletedNow(key);
+}
+
+function recentlyDeletedNow(key: string): boolean {
+  const at = recentlyDeleted.get(key);
+  if (at === undefined) return false;
+  if (Date.now() - at > RECENT_DELETE_MS) {
+    recentlyDeleted.delete(key);
+    return false;
+  }
   return true;
 }
 
@@ -292,6 +301,7 @@ async function runDelete(key: string, entry: PendingDelete): Promise<void> {
     entry.onFailed();
     return;
   }
+  recentlyDeleted.set(key, Date.now());
   // Erst nach dem Neuladen der Listen wieder „freigeben“, sonst blitzt der Eintrag kurz auf
   await invalidateMaterial(entry.client);
   pending.delete(key);
@@ -365,6 +375,7 @@ function ensurePageHideFlush(): void {
 /** Nur für Tests. */
 export function resetPendingMaterialDeletes(): void {
   pending.clear();
+  recentlyDeleted.clear();
   publish();
 }
 

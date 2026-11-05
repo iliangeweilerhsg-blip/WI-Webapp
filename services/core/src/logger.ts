@@ -103,20 +103,36 @@ export function initialLogDay(logDir: string, now: Date = new Date()): string {
 const SECRET_PARAM =
   /(^|[_-])(pairing_id|token|wstoken|access_token|secret|password|passwd|nonce|code|api_key|apikey|access_key|private_key|auth)($|[_-])/i;
 
+/** Ein Paar `name=wert` der Query: geheimer Name → Wert `[Redacted]`. Der Name wird vor dem Vergleich dekodiert */
+function redactQueryPair(pair: string): string {
+  const eq = pair.indexOf('=');
+  if (eq <= 0) return pair;
+  const rawName = pair.slice(0, eq);
+  let name = rawName;
+  try {
+    name = decodeURIComponent(rawName.replace(/\+/g, ' '));
+  } catch {
+    // kaputte Kodierung: den Rohnamen prüfen
+  }
+  // `/p#?pairing_id=…`: Fastify liest den Schlüssel `?pairing_id`. Kein Geheimnis für den Core, aber
+  // vermutlich eines für den Absender, darum führende `?`/`#` beim Vergleich ignorieren (lieber zu viel schwärzen)
+  return SECRET_PARAM.test(name.replace(/^[?#]+/, '')) ? `${rawName}=[Redacted]` : pair;
+}
+
 /**
  * Ersetzt in einer URL oder einem Logtext (z. B. Fastifys „Route GET:/x?… not found“) die Werte geheimer
- * Query-Parameter durch `[Redacted]`. Der Name wird vor dem Vergleich URL-dekodiert.
+ * Query-Parameter durch `[Redacted]`. Zerlegt wird wie Fastify (find-my-way `url-sanitizer` und Query-Parser,
+ * Issue #100): Die Query beginnt beim ersten `?` **oder** `#`, je nachdem, was zuerst kommt
+ * (`DELETE /devices/pairings#pairing_id=…` liest Fastify als Query), und reicht bis zum nächsten Leerraum. Paare
+ * trennt nur `&`, ein Wert reicht bis zum nächsten `&` (auch über weitere `#` und `?` hinweg). So bleibt weder
+ * ein Rest des Werts (`?pairing_id=…#x`) noch ein Parameter hinter einem `&` im Pfad (`/a&b=c?pairing_id=…`)
+ * stehen.
  */
 export function redactUrl(text: string): string {
-  return text.replace(/([?&])([^=&#\s]+)=([^&#\s]*)/g, (match, sep: string, rawName: string) => {
-    let name = rawName;
-    try {
-      name = decodeURIComponent(rawName.replace(/\+/g, ' '));
-    } catch {
-      // kaputte Kodierung: den Rohnamen prüfen
-    }
-    return SECRET_PARAM.test(name) ? `${sep}${rawName}=[Redacted]` : match;
-  });
+  return text.replace(
+    /([?#])(\S*)/g,
+    (_match, sep: string, query: string) => `${sep}${query.split('&').map(redactQueryPair).join('&')}`,
+  );
 }
 
 /** `err`-Serializer: wie pino, aber `message` und `stack` laufen durch `redactUrl` */

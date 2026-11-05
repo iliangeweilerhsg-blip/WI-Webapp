@@ -12,6 +12,7 @@ import { registerErrorHandler } from './plugins/errors.ts';
 import { registerIdempotency } from './plugins/idempotency.ts';
 import { createRejectionLog, RequestLogController } from './plugins/rejection-log.ts';
 import {
+  closeRejectedUpgrade,
   createSecurityGuard,
   isLocalRequest,
   registerSecurity,
@@ -97,6 +98,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     // auch sie bekommen die Sicherheitsprüfung und das Format ApiError
     frameworkErrors: (error, request, rawReply) => {
       const reply = rawReply as unknown as FastifyReply;
+      // Hier laufen weder onRequest- noch onResponse-Hooks. Ein abgelehnter WebSocket-Upgrade (z. B. kaputte URL)
+      // muss darum selbst geschlossen werden, sonst bleibt sein Socket offen (VERTRAEGE §5, Gegen-Review #84 S-1)
+      closeRejectedUpgrade(request.raw, reply.raw);
       void (async () => {
         try {
           await guard(request);

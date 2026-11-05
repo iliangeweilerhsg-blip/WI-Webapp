@@ -1,7 +1,7 @@
 // Geräte und Kopplung (VERTRAEGE §5, §7.5, §11.1, §12, T1-10): Routen, Wächter, Widerruf (REST und WS)
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
-import type { AddressInfo, Socket } from 'node:net';
+import { connect, type AddressInfo, type Socket } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { Writable } from 'node:stream';
 import { eq, sql } from 'drizzle-orm';
@@ -22,13 +22,16 @@ import { LastSeenTracker, onDeviceRevoked, verifyDeviceToken } from '../../src/s
 import { PairingManager } from '../../src/services/pairing.ts';
 import { buildApp } from '../../src/app.ts';
 import { createDb } from '../../src/db/client.ts';
+import { loggerOptions } from '../../src/logger.ts';
 import { startTestApp, TEST_PORT, testConfig, type TestApp } from './helpers.ts';
 
 const MAC_IP = '192.168.1.5';
 const clock = { now: Date.now() };
 
-/** Gesammelte Log-Zeilen aller Tests dieser Datei (Prüfung: Code und Token tauchen nie auf) */
+/** Gesammelte Log-Zeilen aller Tests dieser Datei (Prüfung: Code, Token und geheime `pairing_id` tauchen nie auf) */
 const logLines: string[] = [];
+/** Geheime `pairing_id` aller in dieser Datei geöffneten Fenster (#100, H-1) */
+const secretPairingIds = new Set<string>();
 const logStream = new Writable({
   write(chunk: Buffer, _enc, done) {
     logLines.push(chunk.toString('utf8'));
@@ -42,11 +45,16 @@ beforeAll(async () => {
   pairing = new PairingManager({ now: () => clock.now });
   t = await startTestApp(
     {},
-    { pairing, pairingHost: () => MAC_IP, logger: pino({ level: 'trace' }, logStream) },
+    // Dieselben Logger-Optionen wie im Betrieb (Serializer mit Schwärzung), sonst prüft der Log-Test nichts Echtes
+    { pairing, pairingHost: () => MAC_IP, logger: pino(loggerOptions({ logLevel: 'trace' }), logStream) },
   );
 });
 afterAll(async () => {
   await t.close();
+  // Über alle Tests dieser Datei: keine geheime pairing_id im Log (auch nicht aus DELETE ?pairing_id=)
+  const all = logLines.join('\n');
+  expect(secretPairingIds.size).toBeGreaterThan(0);
+  for (const id of secretPairingIds) expect(all).not.toContain(id);
 });
 afterEach(() => {
   clock.now = Date.now();
@@ -79,7 +87,9 @@ const nonce = () => randomBytes(18).toString('base64url');
 async function openWindow(): Promise<PairingCode> {
   const res = await t.request({ method: 'POST', url: '/api/v1/devices/pairings' });
   expect(res.statusCode).toBe(201);
-  return PairingCodeSchema.parse(res.json());
+  const code = PairingCodeSchema.parse(res.json());
+  secretPairingIds.add(code.pairing_id);
+  return code;
 }
 
 async function confirm(
@@ -385,6 +395,90 @@ describe('Fenster am Mac schließen (DELETE /devices/pairings)', () => {
     expect(del.statusCode).toBe(204);
     const c = await confirm({ pairing_id: current.pairing_id, code: current.code });
     expect(c.statusCode).toBe(201);
+  });
+
+  it('die geheime pairing_id aus ?pairing_id steht nicht im Log (#100, H-1)', async () => {
+    const w = await openWindow();
+    const before = logLines.length;
+    const del = await t.request({
+      method: 'DELETE',
+      url: `/api/v1/devices/pairings?pairing_id=${w.pairing_id}`,
+    });
+    expect(del.statusCode).toBe(204);
+    // Ungültige Kennung (400) und unbekannter Pfad (404) laufen über andere Logzeilen
+    const bad = await t.request({
+      method: 'DELETE',
+      url: `/api/v1/devices/pairings?pairing_id=${w.pairing_id}x`,
+    });
+    expect(bad.statusCode).toBe(400);
+    const missing = await t.request({
+      method: 'DELETE',
+      url: `/api/v1/gibt-es-nicht?pairing_id=${w.pairing_id}`,
+    });
+    expect(missing.statusCode).toBe(404);
+    const list = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(list.headers['sg-pairing-state']).toBe('closed');
+
+    const lines = logLines.slice(before).join('\n');
+    expect(lines).toContain('incoming request');
+    expect(lines).toContain('/api/v1/devices/pairings?pairing_id=[Redacted]');
+    expect(lines).not.toContain(w.pairing_id);
+  });
+
+  it('auch nach # liest Fastify die Query; die Kennung steht trotzdem nicht im Log (#100, H-1)', async () => {
+    // Roh über TCP an einen echten Server: `inject` schneidet `#…` vorher ab
+    await t.app.listen({ port: 0, host: '127.0.0.1' });
+    const { port } = t.app.server.address() as AddressInfo;
+    const rawDelete = (path: string) =>
+      new Promise<number>((resolve, reject) => {
+        const socket = connect(port, '127.0.0.1', () =>
+          socket.write(
+            `DELETE ${path} HTTP/1.1\r\nHost: localhost:${TEST_PORT}\r\nConnection: close\r\n\r\n`,
+          ),
+        );
+        let data = '';
+        socket.on('data', (chunk: Buffer) => (data += chunk.toString('utf8')));
+        socket.on('error', reject);
+        socket.on('end', () => resolve(Number(data.split(' ')[1])));
+      });
+
+    const old = await openWindow();
+    const current = await openWindow();
+    const before = logLines.length;
+    // Fremde Kennung hinter #: Fastify liest sie als pairing_id, darum bleibt das aktuelle Fenster offen
+    expect(await rawDelete(`/api/v1/devices/pairings#pairing_id=${old.pairing_id}`)).toBe(204);
+    const stillOpen = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(stillOpen.headers['sg-pairing-state']).toBe('open');
+    expect(await rawDelete(`/api/v1/devices/pairings#x=1&pairing_id=${current.pairing_id}`)).toBe(204);
+    const closed = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(closed.headers['sg-pairing-state']).toBe('closed');
+
+    const lines = logLines.slice(before).join('\n');
+    expect(lines).toContain('/api/v1/devices/pairings#pairing_id=[Redacted]');
+    expect(lines).toContain('/api/v1/devices/pairings#x=1&pairing_id=[Redacted]');
+    expect(lines).not.toContain(old.pairing_id);
+    expect(lines).not.toContain(current.pairing_id);
+  });
+});
+
+describe('Zustand während des Einlösens (#100, H-4)', () => {
+  it('SG-Pairing-State ist confirming, solange ein richtiger Code eingelöst wird', async () => {
+    const w = await openWindow();
+    const grant = pairing.beginConfirm(
+      { pairing_id: w.pairing_id, code: w.code, public_nonce: nonce() },
+      freshIp(),
+    );
+    try {
+      const during = await t.request({ url: '/api/v1/devices/pairings/requests' });
+      expect(during.headers['sg-pairing-state']).toBe('confirming');
+      expect(during.headers['sg-pairing-id']).toBe(w.pairing_id);
+      const c = await confirm({ pairing_id: w.pairing_id, code: w.code });
+      expect(errorCode(c)).toBe('pairing_window_closed');
+    } finally {
+      grant.abort();
+    }
+    const after = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(after.headers['sg-pairing-state']).toBe('open');
   });
 });
 
@@ -779,6 +873,60 @@ describe('WebSocket-Upgrade (§11.1) und Widerruf', () => {
         for (let i = 0; i < 40 && open.size > 0; i++) await new Promise((r) => setTimeout(r, 50));
         expect(open.size).toBe(0);
       } finally {
+        await server.close();
+        await handle.close();
+      }
+    },
+  );
+
+  it.skipIf(!lanAddress)(
+    'Upgrade mit kaputter URL aus dem Netz: Ablehnung schließt den Socket, auch bei h2c (Gegen-Review #84, S-1)',
+    async () => {
+      const port = await freePort();
+      const config = testConfig({ port });
+      const handle = createDb(config.databaseUrl);
+      const server = await buildApp({ config, db: handle.db, logger: pino({ level: 'silent' }) });
+      await server.listen({ host: '0.0.0.0', port });
+      // Gemessen wird am Server-Socket: Der Client hält seine Seite offen (allowHalfOpen), nur der Server kann schließen
+      const serverSockets = new Set<Socket>();
+      server.server.on('connection', (sock: Socket) => {
+        serverSockets.add(sock);
+        sock.on('close', () => serverSockets.delete(sock));
+      });
+      const { connect } = await import('node:net');
+      const cases = [
+        { path: '/%', upgrade: 'Upgrade: websocket' },
+        { path: '/sync%zz', upgrade: 'Upgrade: websocket' },
+        // Nicht-WebSocket-Upgrades: Node löst 'upgrade' trotzdem aus
+        { path: '/%', upgrade: 'Upgrade: h2c' },
+        { path: '/%', upgrade: 'Upgrade: websocket\r\nUpgrade: websocket' },
+      ];
+      const clients: Socket[] = [];
+      try {
+        for (const c of cases) {
+          const head = await new Promise<string>((resolve, reject) => {
+            let data = '';
+            const sock = connect({ host: lanAddress as string, port, allowHalfOpen: true }, () => {
+              sock.write(
+                `GET ${c.path} HTTP/1.1\r\nHost: ${lanAddress}:${port}\r\nConnection: Upgrade\r\n` +
+                  `${c.upgrade}\r\nSec-WebSocket-Version: 13\r\n` +
+                  `Sec-WebSocket-Key: ${randomBytes(16).toString('base64')}\r\n\r\n`,
+              );
+            });
+            clients.push(sock);
+            sock.on('data', (chunk: Buffer) => (data += chunk.toString()));
+            sock.on('end', () => resolve(data));
+            sock.on('error', reject);
+            setTimeout(() => resolve(data), 3000);
+          });
+          expect(head, c.upgrade).toMatch(/^HTTP\/1\.1 4\d\d/);
+          expect(head.toLowerCase(), c.upgrade).toContain('connection: close');
+        }
+        // Spätestens nach der Frist (1 s) zerstört der Server alle Sockets, obwohl die Clients offen bleiben
+        for (let i = 0; i < 60 && serverSockets.size > 0; i++) await new Promise((r) => setTimeout(r, 50));
+        expect(serverSockets.size).toBe(0);
+      } finally {
+        for (const sock of clients) sock.destroy();
         await server.close();
         await handle.close();
       }

@@ -17,15 +17,26 @@ export const PAIRING_REQUESTS_KEY = ['devices', 'pairing-requests'] as const;
 
 /**
  * Zustand des Kopplungsfensters laut Core (Header `SG-Pairing-State` an `GET /devices/pairings/requests`,
- * VERTRAEGE §12). `unknown`: Header fehlt (älterer Core).
+ * VERTRAEGE §7.5/§12). `confirming`: ein richtiger Code wird gerade eingelöst, die Anzeige bleibt wie bei `open`
+ * (#100). `unknown`: Header fehlt oder unbekannt (älterer bzw. neuerer Core).
  */
 export type PairingState =
-  'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'closed' | 'locked' | 'unknown';
+  | 'none'
+  | 'open'
+  | 'qr_only'
+  | 'confirming'
+  | 'expired'
+  | 'paired'
+  | 'closed_failures'
+  | 'closed'
+  | 'locked'
+  | 'unknown';
 
 const STATES: readonly PairingState[] = [
   'none',
   'open',
   'qr_only',
+  'confirming',
   'expired',
   'paired',
   'closed_failures',

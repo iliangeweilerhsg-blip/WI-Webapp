@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
 const nav = vi.hoisted(() => ({ pathname: '/modul', search: '', push: vi.fn() }));
@@ -293,6 +294,89 @@ describe('Verarbeitung', () => {
     expect(gets(core, '/slide-decks?').length).toBe(settled);
   });
 
+  it('pollWatched: ein abgebrochener Fetch wird sofort wiederholt, ohne Backoff und ohne zusätzliche Runde (#86)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = installFakeCore({ semesters: [makeSemester()], modules: [MOD] });
+    let client: QueryClient | undefined;
+    function Grab() {
+      client = useQueryClient();
+      return null;
+    }
+    page(
+      <>
+        <Grab />
+        <ModulView />
+      </>,
+    );
+    await screen.findByRole('heading', { level: 1, name: /Datenbanksysteme/ });
+    const inner = globalThis.fetch;
+    const detail = /\/slide-decks\/[^/?]+$/;
+    let detailGets = 0;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (detail.test(String(input)) && (init?.method ?? 'GET') === 'GET') {
+        detailGets += 1;
+        // Erste Abfrage: Ein Observer meldet sich ab, TanStack bricht die laufende Abfrage ab
+        if (detailGets === 1) void client?.cancelQueries({ queryKey: ['deck'] });
+      }
+      return inner(input, init);
+    });
+    await userEvent
+      .setup({ advanceTimers: vi.advanceTimersByTime })
+      .upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    expect(await screen.findByText('Foliensatz hinzugefügt')).toBeInTheDocument();
+    const added = core.decks.at(-1);
+    if (!added) throw new Error('kein Foliensatz angelegt');
+    core.failIngest(added.id);
+    // Nur pollWatched meldet das Scheitern als Toast. Mit Abbruch in der ersten Runde muss er trotzdem schon nach
+    // dieser Runde (POLL_INTERVAL_MS) da sein, nicht erst nach einer zweiten mit Backoff.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 300);
+    });
+    expect(detailGets).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByText(/ließ sich nicht lesen/, {}, { timeout: 500 })).toBeInTheDocument();
+  });
+
+  it('pollWatched: Abbruch bei vorhandenen Cache-Daten liefert nicht die alten Daten, sondern die Antwort des Cores (#86)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = installFakeCore({ semesters: [makeSemester()], modules: [MOD] });
+    let client: QueryClient | undefined;
+    function Grab() {
+      client = useQueryClient();
+      return null;
+    }
+    page(
+      <>
+        <Grab />
+        <ModulView />
+      </>,
+    );
+    await screen.findByRole('heading', { level: 1, name: /Datenbanksysteme/ });
+    const inner = globalThis.fetch;
+    const detail = /\/slide-decks\/[^/?]+$/;
+    let cancelled = false;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      // Ein DocumentView-Observer mit Daten meldet sich ab: TanStack bricht ab und gibt die alten Daten zurück
+      if (!cancelled && detail.test(String(input)) && (init?.method ?? 'GET') === 'GET') {
+        cancelled = true;
+        void client?.cancelQueries({ queryKey: ['deck'] });
+      }
+      return inner(input, init);
+    });
+    await userEvent
+      .setup({ advanceTimers: vi.advanceTimersByTime })
+      .upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    expect(await screen.findByText('Foliensatz hinzugefügt')).toBeInTheDocument();
+    const added = core.decks.at(-1);
+    if (!added) throw new Error('kein Foliensatz angelegt');
+    client?.setQueryData(['deck', added.id], { deck: { ...added, ingest_state: 'neu' }, slides: [] });
+    core.failIngest(added.id);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 300);
+    });
+    expect(cancelled).toBe(true);
+    expect(await screen.findByText(/ließ sich nicht lesen/, {}, { timeout: 500 })).toBeInTheDocument();
+  });
+
   it('bei einem Fehler: ruhiger Hinweis ohne Knopf, kein Polling', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const deck = makeDeck({ title: 'VL 01', ingest_state: 'fehler' });
@@ -529,5 +613,29 @@ describe('Rest-Toast und Race beim Wiederherstellen (#43)', () => {
     expect(keys[1]).not.toBe(keys[0]);
     expect(keys[2]).toBe(keys[1]);
     expect(await screen.findByRole('link', { name: 'VL 01' })).toBeInTheDocument();
+  });
+
+  it('Dublette kommt erst, nachdem DELETE und Neuladen der Liste durch sind (#57): Neu-Upload mit neuem Schlüssel', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const deck = makeDeck({ title: 'VL 01', ingest_state: 'verarbeitet', page_count: 3 });
+    const core = await openModule({ decks: [deck] });
+    const list = await screen.findByRole('list', { name: 'Foliensätze' });
+    await user.click(within(list).getByRole('button', { name: 'VL 01 löschen' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(UNDO_WINDOW_MS + 500);
+    });
+    await waitFor(() => expect(core.requests.some((r) => r.method === 'DELETE')).toBe(true));
+    // Alles ist durch (DELETE, Neuladen): Der Eintrag ist nicht mehr vorgemerkt. Erst jetzt meldet der Core die Dublette.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+    core.nextUploadDuplicateOf = deck.id;
+    await user.upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    expect(await screen.findByText('Foliensatz hinzugefügt')).toBeInTheDocument();
+    expect(screen.queryByText('Schon vorhanden')).not.toBeInTheDocument();
+    const sent = posts(core, '/slide-decks');
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.headers['Idempotency-Key']).not.toBe(sent[0]?.headers['Idempotency-Key']);
   });
 });
