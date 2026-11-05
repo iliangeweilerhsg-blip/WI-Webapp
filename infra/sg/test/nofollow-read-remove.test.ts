@@ -116,6 +116,26 @@ describe('Ausdünnen ohne Symlink-Folgen (N1)', () => {
     expect(readdirSync(opfer)).toHaveLength(5);
   });
 
+  it('S1b: neue Datei im Stand-Ordner während des Löschens: manifest.json bleibt, der nächste Lauf entfernt alles', () => {
+    const target = tmp();
+    const dir = stand(target);
+    writeFileSync(join(dir, 'db.dump'), 'DUMP');
+    let planted = false;
+    const first = removeStand(target, '20261101T030000Z', {
+      step: (op, phase, d, name) => {
+        if (op === 'unlink' && phase === 'before' && d === dir && name === 'db.dump' && !planted) {
+          planted = true;
+          writeFileSync(join(dir, 'neu-vom-angreifer.txt'), 'X');
+        }
+      },
+    });
+    expect(planted).toBe(true);
+    expect(first).toBe('teilweise');
+    expect(readManifest(dir)).not.toBeNull(); // keine Waise
+    expect(removeStand(target, '20261101T030000Z')).toBe(true);
+    expect(existsSync(dir)).toBe(false);
+  });
+
   it('Tausch des Elternordners direkt vor unlink: gelöscht wird nur im eigenen Ordner', () => {
     const target = tmp();
     const opfer = victim();

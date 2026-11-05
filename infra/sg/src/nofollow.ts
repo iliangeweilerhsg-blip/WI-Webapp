@@ -510,6 +510,19 @@ export class NoFollowRemover extends AnchoredDirs {
         left.push(path); // abgebrochen: `last` bleibt, der Rest gilt weiter als das, was er war
         return;
       }
+      // Unmittelbar davor im verankerten Ordner erneut nachsehen: Hat jemand inzwischen etwas angelegt, bliebe nach
+      // dem Löschen von `last` ein Ordner ohne Manifest (Waise). Dann bleibt `last` stehen.
+      let remaining: string[];
+      try {
+        remaining = this.inDir(path, () => readdirSync('.'));
+      } catch {
+        left.push(path);
+        return;
+      }
+      if (remaining.length !== 1 || remaining[0] !== last) {
+        left.push(path);
+        return;
+      }
       this.removeEntry(path, last, left);
     }
     try {
