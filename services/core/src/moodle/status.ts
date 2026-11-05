@@ -157,7 +157,11 @@ export class MoodleStatusService {
           check: 'ok',
           siteName: typeof info.sitename === 'string' ? info.sitename : null,
           userFullname: typeof info.fullname === 'string' ? info.fullname : null,
-          userId: typeof info.userid === 'number' ? info.userid : null,
+          // Nur echte Moodle-Nutzer-IDs: ganze Zahl > 0 (kein 0, -1, 1.5, NaN, Text)
+          userId:
+            typeof info.userid === 'number' && Number.isInteger(info.userid) && info.userid > 0
+              ? info.userid
+              : null,
           functions,
           checkedAt,
         };

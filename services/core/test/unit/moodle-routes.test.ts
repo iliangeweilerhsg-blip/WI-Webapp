@@ -483,7 +483,10 @@ describe('Härtung #93: defensive Zugriffe auf Moodle-Antworten', () => {
         payload: { params: {} },
       });
       expect(res.statusCode).toBe(200);
-      expect(MoodleActionResultSchema.parse(res.json())).toMatchObject({ result: { done: false } });
+      expect(MoodleActionResultSchema.parse(res.json())).toMatchObject({
+        result: { done: false },
+        summary: 'Moodle hat die Änderung nicht bestätigt.',
+      });
     },
   );
 

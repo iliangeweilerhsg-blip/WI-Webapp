@@ -47,6 +47,10 @@ export interface MoodleDownload {
   stream: Readable;
   contentType: string;
   contentLength: number | null;
+  /**
+   * Bereinigt mit `sanitizeFilename`, ohne Pfad und Steuerzeichen. Nicht roh in einen Header
+   * einsetzen. Ausgabe nur als `filename*=UTF-8''<RFC-5987-kodiert>` plus ASCII-Ersatz.
+   */
   filename: string | null;
 }
 
@@ -269,21 +273,32 @@ function isMoodleException(value: unknown): value is MoodleException {
 
 /**
  * Steuerzeichen, die nie in einen Dateinamen gehören: C0, DEL, C1 sowie unsichtbare Format- und
- * Richtungszeichen (z. B. U+202E, das `fdp.exe` als `exe.pdf` anzeigt).
+ * Richtungszeichen (z. B. U+202E, das `fdp.exe` als `exe.pdf` anzeigt): weiches Trennzeichen U+00AD,
+ * arabisches Richtungszeichen U+061C, mongolischer Vokaltrenner U+180E, U+200B–200F, U+2028–202E,
+ * U+2060–2064, U+2066–206F, BOM U+FEFF und die Interlinear-Zeichen U+FFF9–FFFB.
  */
 const FILENAME_CONTROL =
   // eslint-disable-next-line no-control-regex
-  /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff]/g;
+  /[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u2064\u2066-\u206f\ufeff\ufff9-\ufffb]/g;
+
+/** Unter Windows und macOS unzulässige Zeichen (Zeichenliste wie 08 §8.1), werden zu `_` */
+const FILENAME_RESERVED = /["<>|:*?]/g;
 
 /**
  * Macht aus einem Dateinamen von Moodle einen reinen Namen ohne Pfad: Steuerzeichen raus, nur der
- * Teil nach dem letzten `/` oder `\`, führende Punkte und Leerzeichen raus (also nie `.`/`..`).
- * Bleibt nichts übrig: null.
+ * Teil nach dem letzten `/` oder `\`, führende Punkte und Leerzeichen raus (also nie `.`/`..`),
+ * `" < > | : * ?` werden zu `_`. Bleibt nichts übrig: null.
+ *
+ * Der Name kann weiter `;`, `%`, `'` und Zeichen über U+00FF enthalten. Nicht roh in einen Header
+ * einsetzen. Ausgabe nur als `filename*=UTF-8''<RFC-5987-kodiert>` plus ASCII-Ersatz.
  */
 export function sanitizeFilename(raw: string): string | null {
   const withoutControls = raw.replace(FILENAME_CONTROL, '');
   const base = withoutControls.split(/[/\\]/).pop() ?? '';
-  const name = base.replace(/^[.\s]+/, '').trimEnd();
+  const name = base
+    .replace(/^[.\s]+/, '')
+    .trimEnd()
+    .replace(FILENAME_RESERVED, '_');
   return name === '' ? null : name;
 }
 

@@ -512,9 +512,26 @@ describe('Härtung #93: Dateiname aus Content-Disposition', () => {
     ["attachment; filename*=UTF-8''%2e%2e%5C%2e%2e%5Cboot.ini", 'boot.ini'],
     ["attachment; filename*=UTF-8''%2E%2E", null],
     ["attachment; filename*=UTF-8''%2e%2e%2F", null],
-    ["attachment; filename*=UTF-8''bericht%0D%0ASet-Cookie%3A%20x.pdf", 'berichtSet-Cookie: x.pdf'],
+    ["attachment; filename*=UTF-8''bericht%0D%0ASet-Cookie%3A%20x.pdf", 'berichtSet-Cookie_ x.pdf'],
     ["attachment; filename*=UTF-8''a%00b%07c%1Fd%7F%C2%85.pdf", 'abcd.pdf'],
     ["attachment; filename*=UTF-8''rechnung%E2%80%AEfdp.exe", 'rechnungfdp.exe'],
+    // Unsichtbare Zeichen (Review S3): U+2066, U+200B, U+FEFF
+    ["attachment; filename*=UTF-8''a%E2%81%A6b%E2%80%8Bc%EF%BB%BF.pdf", 'abc.pdf'],
+    // U+200E, U+200F, U+2067, U+2068, U+2069
+    ["attachment; filename*=UTF-8''x%E2%80%8Ey%E2%80%8Fz%E2%81%A7%E2%81%A8%E2%81%A9.pdf", 'xyz.pdf'],
+    // U+00AD, U+061C, U+180E, U+FFF9, U+FFFA, U+FFFB
+    [
+      "attachment; filename*=UTF-8''s%C2%ADo%D8%9Cf%E1%A0%8Et%EF%BF%B9w%EF%BF%BAa%EF%BF%BBre.pdf",
+      'software.pdf',
+    ],
+    // Leerzeichen am Ende fallen weg
+    ["attachment; filename*=UTF-8''a.pdf%20%20", 'a.pdf'],
+    ['attachment; filename="a.pdf   "', 'a.pdf'],
+    // Zeichen aus 08 §8.1 werden zu _ (Review S2): kein zweites filename= im späteren Header
+    ["attachment; filename*=UTF-8''a%22%3B%20filename%3Dx.html", 'a_; filename=x.html'],
+    ["attachment; filename*=UTF-8''%3C%3E%7C%3A%2A%3F%22.pdf", '_______.pdf'],
+    ["attachment; filename*=UTF-8''C%3Avorlesung.pdf", 'C_vorlesung.pdf'],
+    ["attachment; filename*=UTF-8''%3F", '_'],
     ['attachment; filename="..."', null],
     ['attachment; filename=". . ."', null],
     ['attachment; filename="   "', null],
@@ -540,6 +557,12 @@ describe('Härtung #93: Dateiname aus Content-Disposition', () => {
     expect(sanitizeFilename('    ')).toBeNull();
     expect(sanitizeFilename('.\u0000.')).toBeNull();
     expect(sanitizeFilename('Übung 3 – Lösung (v2).pdf')).toBe('Übung 3 – Lösung (v2).pdf');
+  });
+
+  it('sanitizeFilename: nie " < > | : * ? im Ergebnis; ; % und Umlaute bleiben (für RFC 5987)', () => {
+    const name = sanitizeFilename('a"b<c>d|e:f*g?h;i%j ä€.pdf');
+    expect(name).toBe('a_b_c_d_e_f_g_h;i%j ä€.pdf');
+    expect(name).not.toMatch(/["<>|:*?]/);
   });
 
   it('downloadFile liefert nur den bereinigten Namen', async () => {

@@ -166,6 +166,25 @@ describe('MoodleStatusService', () => {
     expect(await service.availableFunctions()).toEqual(new Set());
   });
 
+  it.each([0, -1, 1.5, 0.5, '4711', null])(
+    'Härtung #93 (H4): userid %j ist keine Nutzer-ID → userId() wirft, Status bleibt ok',
+    async (userid) => {
+      const { service } = setup(FAKE_TOKEN, {
+        core_webservice_get_site_info: { ...siteInfo([]), userid },
+      });
+      expect((await service.getStatus()).state).toBe('ok');
+      await expect(service.userId()).rejects.toMatchObject({
+        code: 'moodle_unreachable',
+        details: { reason: 'no_site_info' },
+      });
+    },
+  );
+
+  it('Härtung #93 (H4): userid 1 ist gültig', async () => {
+    const { service } = setup(FAKE_TOKEN, { core_webservice_get_site_info: { ...siteInfo([]), userid: 1 } });
+    expect(await service.userId()).toBe(1);
+  });
+
   it.each([null, 'ok', 42, ['x']])(
     'Härtung #93: Seiteninfo %j statt Objekt → nicht_erreichbar, kein Absturz',
     async (body) => {
