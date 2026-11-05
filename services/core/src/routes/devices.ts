@@ -17,11 +17,15 @@ import {
 } from '@sg/shared';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
+import { HttpError } from '../errors.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
 import { createDevice, emitDeviceRevoked, listDevices, revokeDevice } from '../services/devices.ts';
-import { cleanDeviceName, type PairingManager } from '../services/pairing.ts';
+import { cleanDeviceName, cleanDeviceText, type PairingManager } from '../services/pairing.ts';
 import { closeDeviceConnections, isDeviceConnected } from '../sync/connections.ts';
 import { publishEvent } from '../sync/events.ts';
+
+/** `device.app_version` wird auf so viele Zeichen gekürzt (wie `maxAppVersionLength` in T1-08) */
+export const MAX_APP_VERSION_LENGTH = 64;
 
 /** WebSocket-Schließcode für ein widerrufenes Token (§15) */
 export const CLOSE_TOKEN_REVOKED = 4401;
@@ -81,11 +85,17 @@ export async function devicesRoutes(app: FastifyInstance, deps: DevicesRouteDeps
         tags: ['Geräte'],
         summary: 'Gerät entfernen: Token sofort ungültig, offene WebSockets werden mit 4401 geschlossen',
         params: IdParams,
-        response: { 204: z.null(), 400: ApiErrorSchema, 404: ApiErrorSchema },
+        response: { 204: z.null(), 400: ApiErrorSchema, 403: ApiErrorSchema, 404: ApiErrorSchema },
       },
     },
     async (request, reply) => {
       const { id } = request.params;
+      // Aus dem Netz darf ein Gerät nur sich selbst entfernen (Nachtrag §7.5). Geprüft vor der Suche, damit die
+      // Antwort nicht verrät, ob es die ID gibt.
+      const caller = request.sgDevice;
+      if (caller && caller.deviceId !== id) {
+        throw new HttpError(403, 'local_only', 'Andere Geräte lassen sich nur am Mac entfernen.');
+      }
       await revokeDevice(db, id);
       // Nach dem Commit: Verbindungen des Geräts schließen (§7.5) und weitere Zuhörer benachrichtigen
       callSync(request.log, undefined, () => closeDeviceConnections(id, CLOSE_TOKEN_REVOKED));
@@ -120,6 +130,24 @@ export async function devicesRoutes(app: FastifyInstance, deps: DevicesRouteDeps
       };
       // Der Code darf in keinem Zwischenspeicher landen
       return reply.code(201).header('cache-control', 'no-store').send(body);
+    },
+  );
+
+  typed.delete(
+    '/devices/pairings',
+    {
+      config: { sgAccess: 'local' },
+      schema: {
+        tags: ['Geräte'],
+        summary:
+          'Kopplungsfenster sofort schließen (nur lokal), offene Anfragen verwerfen. Idempotent. Mit ?pairing_id nur dieses Fenster',
+        querystring: z.object({ pairing_id: UuidSchema.optional() }),
+        response: { 204: z.null(), 400: ApiErrorSchema, 403: ApiErrorSchema },
+      },
+    },
+    async (request, reply) => {
+      pairing.close(request.query.pairing_id);
+      return reply.code(204).send(null);
     },
   );
 
@@ -215,7 +243,9 @@ export async function devicesRoutes(app: FastifyInstance, deps: DevicesRouteDeps
         created = await createDevice(db, {
           name: cleanDeviceName(body.device_name) ?? 'Unbenanntes Gerät',
           kind: body.kind,
-          appVersion: body.app_version ?? null,
+          // Wie der Sync-Server (T1-08, `maxAppVersionLength`): höchstens 64 Zeichen, ohne unsichtbare Zeichen
+          appVersion:
+            body.app_version === undefined ? null : cleanDeviceText(body.app_version, MAX_APP_VERSION_LENGTH),
         });
       } catch (error) {
         grant.abort();

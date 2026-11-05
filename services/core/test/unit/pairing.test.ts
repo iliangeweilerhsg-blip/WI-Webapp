@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { HttpError } from '../../src/errors.ts';
 import {
   cleanDeviceName,
+  cleanDeviceText,
   generatePairingCode,
   MAX_TRACKED_ADDRESSES,
   PAIRING_WINDOW_MS,
@@ -321,6 +322,51 @@ describe('Anfragen (Bonjour-Weg)', () => {
     pm.start({ device_name: '‎‪', kind: 'ipad', public_nonce: NONCE(2) }, freshIp());
     expect(pm.listRequests()[1]?.device_name).toBe('Unbenanntes Gerät');
     expect(cleanDeviceName('  ')).toBeNull();
+  });
+
+  it('entfernt alle unsichtbaren Zeichen (Cc, Cf, Zl, Zp) und normalisiert NFKC (K1)', () => {
+    // U+061C, U+200B, „iʀad“, Leerzeichen, U+2060, U+FEFF, Tag-Zeichen U+E0041
+    expect(cleanDeviceName('\u061C\u200Bi\u0280ad \u2060\uFEFF\u{E0041}')).toBe('i\u0280ad');
+    expect(cleanDeviceName('iPad\u200C\u200D\u2028von\u2029Ilian')).toBe('iPad von Ilian');
+    // NFKC: Vollbreiten- und Ligaturformen werden zu normalen Zeichen
+    expect(cleanDeviceName('\uFF49\uFF30\uFF41\uFF44 \uFB01')).toBe('iPad fi');
+    expect(cleanDeviceName('iPad   von\tIlian')).toBe('iPad von Ilian');
+    expect(cleanDeviceName('\u200B\uFEFF')).toBeNull();
+    expect(cleanDeviceText('x'.repeat(100), 64)).toHaveLength(64);
+    expect([...(cleanDeviceText('\u{1F600}'.repeat(70), 64) ?? '')]).toHaveLength(64);
+  });
+});
+
+describe('Fenster schließen (DELETE /devices/pairings)', () => {
+  it('schließt sofort, verwirft Anfragen, ist idempotent', () => {
+    const { pm } = setup();
+    const w = pm.open();
+    startPublic(pm);
+    pm.close();
+    expect(pm.status().state).toBe('closed');
+    expect(pm.listRequests()).toEqual([]);
+    expect(fails(() => startPublic(pm, NONCE(3)))).toBe('409 pairing_window_closed');
+    expect(
+      fails(() =>
+        pm.beginConfirm({ pairing_id: w.pairingId, code: w.code, public_nonce: NONCE(4) }, freshIp()),
+      ),
+    ).toBe('409 pairing_window_closed');
+    pm.close();
+    expect(pm.status().state).toBe('closed');
+  });
+
+  it('mit fremder pairing_id passiert nichts; ein laufendes confirm wird nicht abgebrochen', () => {
+    const { pm } = setup();
+    const w = pm.open();
+    pm.close(crypto.randomUUID());
+    expect(pm.status().state).toBe('open');
+    const grant = pm.beginConfirm(
+      { pairing_id: w.pairingId, code: w.code, public_nonce: NONCE(1) },
+      freshIp(),
+    );
+    pm.close(w.pairingId);
+    grant.commit();
+    expect(pm.status().state).toBe('paired');
   });
 });
 

@@ -95,12 +95,13 @@ async function confirm(
   });
 }
 
-async function start(body: Record<string, unknown> = {}, ip?: string) {
+async function start(body: Record<string, unknown> = {}, ip?: string, headers?: Record<string, string>) {
   return net({
     method: 'POST',
     url: '/api/v1/devices/pair/start',
     payload: { device_name: 'iPad', kind: 'ipad', public_nonce: nonce(), ...body },
     ...(ip ? { ip } : {}),
+    ...(headers ? { headers } : {}),
   });
 }
 
@@ -157,13 +158,18 @@ describe('Kopplungsfenster öffnen (nur lokal)', () => {
   it('Host-Header-Spoofing: „Host: localhost“ von einer Netz-IP bleibt eine Netz-Anfrage', async () => {
     const { token } = await pairDevice();
     const spoofed = { host: `localhost:${TEST_PORT}`, 'x-forwarded-for': '127.0.0.1' };
-    const anon = await net({ method: 'POST', url: '/api/v1/devices/pairings', headers: spoofed });
-    expect(anon.statusCode).toBe(401);
-    const withToken = await net({ method: 'POST', url: '/api/v1/devices/pairings', headers: spoofed, token });
+    // Aus dem Netz ist „localhost“ als Host gar nicht erlaubt (421), lokal wird die Anfrage nie
+    for (const extra of [{}, { token }]) {
+      const res = await net({ method: 'POST', url: '/api/v1/devices/pairings', headers: spoofed, ...extra });
+      expect(res.statusCode).toBe(421);
+      expect(errorCode(res)).toBe('host_not_allowed');
+    }
+    const list = await net({ url: '/api/v1/devices/pairings/requests', headers: spoofed, token });
+    expect(list.statusCode).toBe(421);
+    // Mit erlaubtem Host und gültigem Token: lokale Route → 403 local_only
+    const withToken = await net({ method: 'POST', url: '/api/v1/devices/pairings', token });
     expect(withToken.statusCode).toBe(403);
     expect(errorCode(withToken)).toBe('local_only');
-    const list = await net({ url: '/api/v1/devices/pairings/requests', headers: spoofed });
-    expect(list.statusCode).toBe(401);
   });
 });
 
@@ -258,6 +264,23 @@ describe('QR-Weg', () => {
   });
 });
 
+describe('Gerätedaten', () => {
+  it('app_version wird auf 64 Zeichen gekürzt, Name und Version ohne unsichtbare Zeichen (K1, K2)', async () => {
+    const w = await openWindow();
+    const res = await confirm({
+      pairing_id: w.pairing_id,
+      code: w.code,
+      device_name: '\u202eiPad\u200b von Ilian\ufeff',
+      app_version: `1.0\u200b-${'x'.repeat(200)}`,
+    });
+    expect(res.statusCode).toBe(201);
+    const d = PairResponseSchema.parse(res.json()).device;
+    expect(d.name).toBe('iPad von Ilian');
+    expect(d.app_version).toHaveLength(64);
+    expect(d.app_version?.startsWith('1.0-xx')).toBe(true);
+  });
+});
+
 describe('Bonjour-Weg (pair/start)', () => {
   it('Anfrage erscheint in der Liste (nur lokal), Bestätigung mit der Kennung aus pair/start klappt', async () => {
     const w = await openWindow();
@@ -331,6 +354,112 @@ describe('Bonjour-Weg (pair/start)', () => {
     const full = await start();
     expect(full.statusCode).toBe(429);
     expect(errorCode(full)).toBe('pairing_requests_full');
+  });
+});
+
+describe('Fenster am Mac schließen (DELETE /devices/pairings)', () => {
+  it('schließt sofort und verwirft Anfragen; idempotent; nur lokal', async () => {
+    const w = await openWindow();
+    expect((await start({ device_name: 'Wartet' })).statusCode).toBe(201);
+    const del = await t.request({ method: 'DELETE', url: '/api/v1/devices/pairings' });
+    expect(del.statusCode).toBe(204);
+    const list = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(list.headers['sg-pairing-state']).toBe('closed');
+    expect(PairingRequestListSchema.parse(list.json()).items).toEqual([]);
+    const c = await confirm({ pairing_id: w.pairing_id, code: w.code });
+    expect(errorCode(c)).toBe('pairing_window_closed');
+    expect((await t.request({ method: 'DELETE', url: '/api/v1/devices/pairings' })).statusCode).toBe(204);
+
+    const { token } = await pairDevice();
+    const remote = await net({ method: 'DELETE', url: '/api/v1/devices/pairings', token });
+    expect(remote.statusCode).toBe(403);
+    expect(errorCode(remote)).toBe('local_only');
+  });
+
+  it('?pairing_id eines anderen Fensters lässt das aktuelle offen', async () => {
+    const old = await openWindow();
+    const current = await openWindow();
+    const del = await t.request({
+      method: 'DELETE',
+      url: `/api/v1/devices/pairings?pairing_id=${old.pairing_id}`,
+    });
+    expect(del.statusCode).toBe(204);
+    const c = await confirm({ pairing_id: current.pairing_id, code: current.code });
+    expect(c.statusCode).toBe(201);
+  });
+});
+
+describe('DNS-Rebinding auf die LAN-IP (S1)', () => {
+  const evil = { host: `evil.example:${TEST_PORT}`, origin: `http://evil.example:${TEST_PORT}` };
+
+  it('(b) fremder Host aus dem Netz → 421, für pair/*, Routen mit Token und den WebSocket', async () => {
+    const w = await openWindow();
+    const { token } = await pairDevice();
+    const s = await start({}, undefined, evil);
+    expect(s.statusCode).toBe(421);
+    expect(errorCode(s)).toBe('host_not_allowed');
+    const c = await confirm({ pairing_id: w.pairing_id, code: wrongCode(w.code) }, { headers: evil });
+    expect(c.statusCode).toBe(421);
+    const withToken = await net({ url: '/api/v1/devices', token, headers: evil });
+    expect(withToken.statusCode).toBe(421);
+    const ws = await net({
+      url: '/sync',
+      token,
+      headers: { ...evil, connection: 'Upgrade', upgrade: 'websocket' },
+    });
+    expect(ws.statusCode).toBe(421);
+    // Ohne Origin, nur mit fremdem Host: ebenfalls 421
+    const plain = await start({}, undefined, { host: 'evil.example' });
+    expect(plain.statusCode).toBe(421);
+    const w2 = await openWindow();
+    expect((await start({}, undefined, evil)).statusCode).toBe(421);
+    expect(
+      PairingRequestListSchema.parse((await t.request({ url: '/api/v1/devices/pairings/requests' })).json())
+        .items,
+    ).toEqual([]);
+    expect((await confirm({ pairing_id: w2.pairing_id, code: w2.code })).statusCode).toBe(201);
+  });
+
+  it('(a) pair/* mit Origin-Header → 403, auch bei erlaubtem Host; nichts wird angelegt oder gezählt', async () => {
+    const w = await openWindow();
+    const sameHost = { origin: `http://${MAC_IP}:${TEST_PORT}` };
+    const s = await start({}, undefined, sameHost);
+    expect(s.statusCode).toBe(403);
+    expect(errorCode(s)).toBe('origin_not_allowed');
+    for (let i = 0; i < 25; i++) {
+      const c = await confirm({ pairing_id: w.pairing_id, code: wrongCode(w.code) }, { headers: sameHost });
+      expect(errorCode(c)).toBe('origin_not_allowed');
+    }
+    const nullOrigin = await confirm(
+      { pairing_id: w.pairing_id, code: w.code },
+      { headers: { origin: 'null' } },
+    );
+    expect(errorCode(nullOrigin)).toBe('origin_not_allowed');
+    const list = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(list.headers['sg-pairing-state']).toBe('open');
+    expect(PairingRequestListSchema.parse(list.json()).items).toEqual([]);
+    // Das iPad (ohne Origin) koppelt danach normal
+    expect((await confirm({ pairing_id: w.pairing_id, code: w.code })).statusCode).toBe(201);
+  });
+
+  it('erlaubt bleiben IP-Literale und .local-Namen; Routen mit Token behalten ihre Origin-Regel', async () => {
+    await openWindow();
+    expect((await start({}, undefined, { host: `ilians-macbook-air.local:${TEST_PORT}` })).statusCode).toBe(
+      201,
+    );
+    expect((await start({}, undefined, { host: `[fe80::1]:${TEST_PORT}` })).statusCode).toBe(201);
+    expect((await start({}, undefined, { host: MAC_IP })).statusCode).toBe(201);
+    const { token } = await pairDevice();
+    const read = await net({ url: '/api/v1/devices', token, headers: { origin: 'http://evil.example' } });
+    expect(read.statusCode).toBe(200);
+    const own = await net({
+      method: 'DELETE',
+      url: `/api/v1/devices/pairings/requests/${crypto.randomUUID()}`,
+      token,
+      headers: { origin: `http://${MAC_IP}:${TEST_PORT}` },
+    });
+    // Origin der eigenen Adresse ist erlaubt, die Route bleibt lokal
+    expect(errorCode(own)).toBe('local_only');
   });
 });
 
@@ -478,6 +607,24 @@ describe('Gerät entfernen (REST)', () => {
     }
   });
 
+  it('aus dem Netz darf ein Gerät nur sich selbst entfernen (K4)', async () => {
+    const a = await pairDevice('Gerät A');
+    const b = await pairDevice('Gerät B');
+    const other = await net({ method: 'DELETE', url: `/api/v1/devices/${b.id}`, token: a.token });
+    expect(other.statusCode).toBe(403);
+    expect(errorCode(other)).toBe('local_only');
+    // Unbekannte ID: ebenfalls 403, die Antwort verrät nicht, ob es sie gibt
+    const unknown = await net({
+      method: 'DELETE',
+      url: `/api/v1/devices/${crypto.randomUUID()}`,
+      token: a.token,
+    });
+    expect(errorCode(unknown)).toBe('local_only');
+    expect((await net({ url: '/api/v1/health', token: b.token })).statusCode).toBe(200);
+    // Lokal geht es weiterhin
+    expect((await t.request({ method: 'DELETE', url: `/api/v1/devices/${b.id}` })).statusCode).toBe(204);
+  });
+
   it('ein Gerät kann sich mit seinem Token selbst entfernen (Netzroute)', async () => {
     const { id, token } = await pairDevice();
     const del = await net({ method: 'DELETE', url: `/api/v1/devices/${id}`, token });
@@ -524,6 +671,11 @@ describe('WebSocket-Upgrade (§11.1) und Widerruf', () => {
     ).resolves.toBeNull();
     await expect(
       t.app.authenticateUpgrade(raw({ host: `localhost:${TEST_PORT}` }, '10.0.0.2')),
+    ).rejects.toMatchObject({
+      code: 'host_not_allowed',
+    });
+    await expect(
+      t.app.authenticateUpgrade(raw({ host: `${MAC_IP}:${TEST_PORT}` }, '10.0.0.2')),
     ).rejects.toMatchObject({
       code: 'device_token_required',
     });

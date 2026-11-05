@@ -39,9 +39,11 @@ const HOUR_MS = 60 * MINUTE_MS;
  * - `expired`: 5 min abgelaufen
  * - `paired`: ein Gerät wurde gekoppelt, Fenster geschlossen
  * - `closed_failures`: zu viele Fehlversuche über den QR-Weg, Fenster geschlossen
+ * - `closed`: am Mac geschlossen (`DELETE /devices/pairings`)
  * - `locked`: globale Sperre (423), bis ein neues Fenster geöffnet wird
  */
-export type PairingState = 'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'locked';
+export type PairingState =
+  'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'closed' | 'locked';
 
 /** Weg einer Bestätigung: über die geheime Kennung (QR) oder die öffentliche (`pair/start`) */
 export type PairingPath = 'qr' | 'public';
@@ -62,7 +64,7 @@ interface PairingWindow {
   openedAt: number;
   expiresAt: number;
   /** `confirming`: ein richtiger Code wird gerade eingelöst (Gerät wird angelegt) */
-  closed: null | 'confirming' | 'paired' | 'failures';
+  closed: null | 'confirming' | 'paired' | 'failures' | 'cancelled';
   publicClosed: boolean;
   failures: Record<PairingPath, number>;
   nonceFailures: Map<string, number>;
@@ -146,13 +148,30 @@ export function rateLimitKey(address: string | undefined): string {
 }
 
 /** Zeichen, die einen Gerätenamen in der Anzeige verfälschen (Steuerzeichen, Bidi-Steuerung) */
-// eslint-disable-next-line no-control-regex
-const UNSAFE_NAME_CHARS = /[\u0000-\u001f\u007f-\u009f‎‏‪-‮⁦-⁩]/g;
+/**
+ * Zeichen, die einen Gerätenamen in der Anzeige verfälschen oder unsichtbar verlängern: Steuerzeichen (Cc), Format-
+ * zeichen (Cf: Bidi-Steuerung, U+200B–U+200D, U+061C, U+2060, U+FEFF, Tag-Zeichen) sowie Zeilen- und
+ * Absatztrenner (Zl, Zp).
+ */
+const UNSAFE_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 
-/** Gerätename für Anzeige und Speicherung: ohne Steuer- und Bidi-Zeichen, getrimmt. Leer → null */
+/** Freitext eines Geräts für Anzeige und Speicherung: NFKC, ohne unsichtbare Zeichen, Leerraum zusammengefasst, gekürzt */
+export function cleanDeviceText(text: string, maxLength: number): string | null {
+  // Erst Leerraum (auch Tab und Zeilentrenner) zu einem Leerzeichen, dann unsichtbare Zeichen entfernen
+  const cleaned = text
+    .normalize('NFKC')
+    .replace(/\s+/gu, ' ')
+    .replace(UNSAFE_NAME_CHARS, '')
+    .replace(/ {2,}/g, ' ')
+    .trim();
+  if (cleaned.length === 0) return null;
+  // Nach Codepoints kürzen, damit kein halbes Surrogat-Paar übrig bleibt
+  return [...cleaned].slice(0, maxLength).join('').trim();
+}
+
+/** Gerätename (höchstens 64 Zeichen wie im Schema). Leer → null */
 export function cleanDeviceName(name: string): string | null {
-  const cleaned = name.replace(UNSAFE_NAME_CHARS, '').trim();
-  return cleaned.length > 0 ? cleaned : null;
+  return cleanDeviceText(name, 64);
 }
 
 export interface PairingManagerOptions {
@@ -199,6 +218,21 @@ export class PairingManager {
     };
   }
 
+  /**
+   * `DELETE /devices/pairings` (nur lokal): schließt das offene Fenster sofort und verwirft seine Anfragen.
+   * Idempotent. Mit `pairingId` nur, wenn es genau dieses Fenster ist (ein anderer Tab hat evtl. ein neues
+   * geöffnet). Ein Code, der gerade eingelöst wird (`confirming`), läuft zu Ende. Sperre und Zähler bleiben.
+   */
+  close(pairingId?: string): void {
+    const w = this.window;
+    if (!w || w.closed !== null) return;
+    if (pairingId !== undefined && !safeEqual(pairingId, w.pairingId)) return;
+    w.closed = 'cancelled';
+    w.code = '';
+    w.requests.clear();
+    w.requestByNonce.clear();
+  }
+
   /** Zustand für die Web-App (siehe `PairingState`) und die geheime Kennung des aktuellen Fensters */
   status(): { state: PairingState; pairingId: string | null } {
     const w = this.window;
@@ -207,6 +241,7 @@ export class PairingManager {
     if (!w) return { state: 'none', pairingId };
     if (w.closed === 'paired') return { state: 'paired', pairingId };
     if (w.closed === 'failures') return { state: 'closed_failures', pairingId };
+    if (w.closed === 'cancelled') return { state: 'closed', pairingId };
     if (this.now() >= w.expiresAt) {
       w.code = '';
       return { state: 'expired', pairingId };

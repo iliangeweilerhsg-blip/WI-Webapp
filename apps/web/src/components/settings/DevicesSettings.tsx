@@ -1,14 +1,18 @@
 'use client';
 
 import { useContext, useEffect, useId, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Device, PairingCode, PairingRequest } from '@sg/shared';
 import {
+  closePairingWindow,
   devicesErrorMessage,
   formatAbsolute,
   formatLastSeen,
   formatRemaining,
   groupCode,
+  isNewDevice,
   remainingAnnouncement,
+  removeDeviceNow,
   useDevices,
   useOpenPairing,
   usePairingSnapshot,
@@ -70,6 +74,11 @@ function DeviceRow({
         <div className="min-w-0 flex-1">
           <span className="font-medium break-words">{device.name}</span>
           <span className="ml-2 text-sm text-text-muted">{KIND_LABEL[device.kind]}</span>
+          {isNewDevice(device) ? (
+            <span className="ml-2 inline-block rounded-sm border border-border-strong px-1.5 text-xs font-medium">
+              Neu gekoppelt
+            </span>
+          ) : null}
           {device.connected ? (
             <span className="ml-2 inline-flex items-center gap-1 text-sm">
               <span aria-hidden="true" className="inline-block size-2 rounded-full bg-accent" />
@@ -86,6 +95,15 @@ function DeviceRow({
               'noch nie'
             )}
           </p>
+          {isNewDevice(device) ? (
+            <p className="mt-0.5 text-sm text-text-muted">
+              Gekoppelt{' '}
+              <time dateTime={device.created_at} title={formatAbsolute(device.created_at)}>
+                {formatLastSeen(device.created_at)}
+              </time>
+              . Kennst du es nicht? Entferne es.
+            </p>
+          ) : null}
         </div>
         <div
           className="flex flex-wrap justify-end gap-2"
@@ -180,6 +198,7 @@ function problemOf(
 ): PanelProblem {
   if (snapshot?.state === 'locked' || snapshot?.state === 'closed_failures') return 'failures';
   if (snapshot && snapshot.state !== 'unknown' && snapshot.pairingId !== code.pairing_id) return 'replaced';
+  if (snapshot?.state === 'closed') return 'replaced';
   if (remainingMs <= 0 || snapshot?.state === 'expired') return 'expired';
   if (snapshot?.state === 'qr_only') return 'qr_only';
   return null;
@@ -403,8 +422,36 @@ export function DevicesSettings() {
   const remove = useRemoveDevice();
   const open = useOpenPairing();
   const toast = useToast();
+  const client = useQueryClient();
   const [code, setCode] = useState<PairingCode | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Geräte-IDs beim Öffnen des Fensters: so ist nach der Kopplung klar, welches Gerät neu ist */
+  const knownIds = useRef<Set<string>>(new Set());
+  /** Fenster, die schon gekoppelt haben (nicht mehr schließen) */
+  const pairedIds = useRef<Set<string>>(new Set());
+
+  // Ein offenes Fenster wird am Core geschlossen, sobald es hier nicht mehr angezeigt wird: beim Ersetzen durch
+  // einen neuen Code (dann ist es dort schon ersetzt, der Aufruf ist harmlos), beim Verlassen der Ansicht und beim
+  // Schließen oder Neuladen des Tabs. So bleibt kein abfotografierter Code bis zum Ablauf gültig.
+  const pairingId = code?.pairing_id ?? null;
+  const pendingClose = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  useEffect(() => {
+    if (!pairingId) return;
+    // React (Strict Mode) baut Effekte in der Entwicklung einmal ab und sofort wieder auf: ein dafür geplantes
+    // Schließen desselben Fensters wird hier wieder verworfen
+    if (pendingClose.current?.id === pairingId) {
+      clearTimeout(pendingClose.current.timer);
+      pendingClose.current = null;
+    }
+    const close = () => {
+      if (!pairedIds.current.has(pairingId)) void closePairingWindow(pairingId).catch(() => {});
+    };
+    window.addEventListener('pagehide', close);
+    return () => {
+      window.removeEventListener('pagehide', close);
+      pendingClose.current = { id: pairingId, timer: setTimeout(close, 0) };
+    };
+  }, [pairingId]);
   const pairButton = useRef<HTMLButtonElement>(null);
   const listHeading = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
@@ -413,6 +460,7 @@ export function DevicesSettings() {
   async function startPairing() {
     setError(null);
     try {
+      knownIds.current = new Set((devices.data ?? []).map((d) => d.id));
       setCode(await open.mutateAsync());
     } catch (failure) {
       setError(devicesErrorMessage(failure));
@@ -420,16 +468,37 @@ export function DevicesSettings() {
   }
 
   function closePanel() {
+    // Das Schließen am Core übernimmt der Effekt oben (Fenster wird nicht mehr angezeigt)
     setCode(null);
     requestAnimationFrame(() => pairButton.current?.focus());
   }
 
   const onPaired = useRef(() => {});
   onPaired.current = () => {
+    if (code) pairedIds.current.add(code.pairing_id);
     setCode(null);
-    void devices.refetch();
-    toast.show({ message: 'Gerät gekoppelt' });
     requestAnimationFrame(() => listHeading.current?.focus());
+    void (async () => {
+      const list = (await devices.refetch()).data ?? [];
+      const added = list.filter((d) => !knownIds.current.has(d.id));
+      const device = added.at(-1);
+      if (!device) {
+        toast.show({ message: 'Gerät gekoppelt' });
+        return;
+      }
+      // Name und Art nennen und das Entfernen direkt anbieten: Wer Code oder QR-Code abfotografiert hat, soll
+      // nicht unbemerkt gekoppelt bleiben
+      toast.show({
+        message: `„${device.name}“ (${KIND_LABEL[device.kind]}) wurde gekoppelt. Nicht du?`,
+        actionLabel: 'Entfernen',
+        durationMs: 20_000,
+        onAction: () => {
+          removeDeviceNow(client, device.id)
+            .then(() => toast.show({ message: `${device.name} entfernt` }))
+            .catch((failure: unknown) => toast.show({ message: devicesErrorMessage(failure) }));
+        },
+      });
+    })();
   };
 
   async function onRemove(device: Device) {

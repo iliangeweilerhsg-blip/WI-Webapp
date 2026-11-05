@@ -1,4 +1,5 @@
 import type { IncomingHttpHeaders } from 'node:http';
+import { isIP } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.ts';
 import { HttpError } from '../errors.ts';
@@ -11,11 +12,16 @@ import { HttpError } from '../errors.ts';
  * 2. Lokale Anfragen brauchen kein Token, werden aber gegen DNS-Rebinding geprüft: der `Host`-Header
  *    muss `localhost`, `127.0.0.1` oder `[::1]` mit dem Core-Port sein, sonst 421 `host_not_allowed`.
  *    Der Wächter setzt `request.sgDevice = null`.
- * 3. Anfragen aus dem Netz brauchen `Authorization: Bearer <device_token>`. Fehlt es: 401
+ * 3. Anfragen aus dem Netz (Schutz vor DNS-Rebinding auf die LAN-IP): Der `Host` muss ein IP-Literal (IPv4 oder
+ *    `[IPv6]`, Port optional) oder ein `*.local`-Name sein, sonst 421 `host_not_allowed`. Eine Webseite, die ihren
+ *    Namen auf die IP des Macs umbiegt, sendet ihren eigenen Namen als `Host` und wird so abgewiesen.
+ *    Anfragen aus dem Netz brauchen `Authorization: Bearer <device_token>`. Fehlt es: 401
  *    `device_token_required`. Ist es unbekannt oder widerrufen: 401 `device_token_invalid`. Bei Erfolg
  *    setzt der Wächter `request.sgDevice = { deviceId }`.
  *    Ausnahme: Routen mit `config.sgAccess = 'pairing'` (nur `POST /devices/pair/start|confirm`) sind aus dem
- *    Netz ohne Token erreichbar. Dort bleibt `request.sgDevice` **undefiniert** (weder lokal noch Gerät).
+ *    Netz ohne Token erreichbar. Dort bleibt `request.sgDevice` **undefiniert** (weder lokal noch Gerät). Diese
+ *    Routen lehnen jeden `Origin`-Header mit 403 `origin_not_allowed` ab: Die iPad-App sendet keinen, ein Browser
+ *    immer. So kann keine Webseite die Kopplung anstoßen oder Codes raten.
  * 4. Routen mit `config.sgAccess = 'local'` lehnen Anfragen aus dem Netz mit 403 `local_only` ab, auch mit
  *    gültigem Token. Ohne Token gilt vorher Regel 3 (401).
  * 5. Zustandsändernde Anfragen (POST, PUT, PATCH, DELETE) und WebSocket-Upgrades mit `Origin`-Header (Browser)
@@ -95,6 +101,36 @@ function bearerToken(header: string | undefined): string | null {
   return match?.[1] ?? null;
 }
 
+const LOCAL_NAME_RE =
+  /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.local\.?$/;
+const PORT_RE = /^[0-9]{1,5}$/;
+
+/**
+ * `Host` einer Anfrage aus dem Netz: nur IP-Literal (`192.168.1.20`, `[fe80::1]`, jeweils mit optionalem Port)
+ * oder `<name>.local` (Bonjour). Erwartet den Header schon in Kleinbuchstaben.
+ */
+export function isAllowedNetworkHost(host: string | undefined): boolean {
+  if (!host) return false;
+  let name: string;
+  let port: string | undefined;
+  if (host.startsWith('[')) {
+    const end = host.indexOf(']');
+    if (end < 0) return false;
+    name = host.slice(1, end);
+    const rest = host.slice(end + 1);
+    if (rest !== '' && !rest.startsWith(':')) return false;
+    port = rest ? rest.slice(1) : undefined;
+    if (isIP(name) !== 6) return false;
+  } else {
+    const colon = host.lastIndexOf(':');
+    name = colon >= 0 ? host.slice(0, colon) : host;
+    port = colon >= 0 ? host.slice(colon + 1) : undefined;
+    if (name.includes(':')) return false;
+    if (isIP(name) !== 4 && !LOCAL_NAME_RE.test(name)) return false;
+  }
+  return port === undefined || PORT_RE.test(port);
+}
+
 function isWebSocketUpgrade(headers: IncomingHttpHeaders): boolean {
   return (headers.upgrade ?? '').toLowerCase() === 'websocket';
 }
@@ -129,9 +165,20 @@ export function createSecurityGuard(options: SecurityOptions): SecurityGuard {
       }
       device = null;
     } else {
+      if (!isAllowedNetworkHost(host)) {
+        throw new HttpError(
+          421,
+          'host_not_allowed',
+          'Aus dem Netz ist der Core nur über seine IP-Adresse oder seinen .local-Namen erreichbar (Schutz vor DNS-Rebinding).',
+        );
+      }
       // Kopplung (§12): nur POST auf genau diese Routen, ohne Token. Ein mitgesendetes Token wird ignoriert.
       const pairing =
         access === 'pairing' && request.method === 'POST' && !isWebSocketUpgrade(request.headers);
+      if (pairing && request.headers.origin !== undefined) {
+        // Die iPad-App sendet keinen Origin, ein Browser immer: keine Webseite darf koppeln oder raten
+        throw new HttpError(403, 'origin_not_allowed', 'Kopplung aus dem Browser ist nicht erlaubt.');
+      }
       if (!pairing) {
         const token = bearerToken(request.headers.authorization);
         if (!token) {

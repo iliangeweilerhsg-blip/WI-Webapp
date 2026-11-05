@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   ApiErrorSchema,
   DeviceListSchema,
@@ -20,7 +20,7 @@ export const PAIRING_REQUESTS_KEY = ['devices', 'pairing-requests'] as const;
  * VERTRAEGE §12). `unknown`: Header fehlt (älterer Core).
  */
 export type PairingState =
-  'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'locked' | 'unknown';
+  'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'closed' | 'locked' | 'unknown';
 
 const STATES: readonly PairingState[] = [
   'none',
@@ -29,8 +29,16 @@ const STATES: readonly PairingState[] = [
   'expired',
   'paired',
   'closed_failures',
+  'closed',
   'locked',
 ];
+
+/** Geräte, die jünger sind, gelten in der Liste als „neu gekoppelt“ (Hinweis auf eine unbemerkte Übernahme) */
+export const NEW_DEVICE_MS = 24 * 60 * 60 * 1000;
+
+export function isNewDevice(device: Pick<Device, 'created_at'>, now: number = Date.now()): boolean {
+  return now - Date.parse(device.created_at) < NEW_DEVICE_MS;
+}
 
 export interface PairingSnapshot {
   state: PairingState;
@@ -81,6 +89,23 @@ export function useOpenPairing() {
     mutationFn: (): Promise<PairingCode> => apiSend('POST', '/devices/pairings', PairingCodeSchema),
     onSuccess: () => void client.invalidateQueries({ queryKey: PAIRING_REQUESTS_KEY }),
   });
+}
+
+/**
+ * `DELETE /devices/pairings?pairing_id=…`: schließt genau dieses Kopplungsfenster sofort (idempotent; ein
+ * anderswo neu geöffnetes Fenster bleibt offen). `keepalive`, damit es auch beim Verlassen der Seite ankommt.
+ */
+export function closePairingWindow(pairingId: string): Promise<void> {
+  return apiSend('DELETE', `/devices/pairings?pairing_id=${encodeURIComponent(pairingId)}`, null, {
+    keepalive: true,
+  });
+}
+
+/** Gerät entfernen ohne Hook (z. B. aus einem Toast, dessen Ansicht schon geschlossen ist) */
+export async function removeDeviceNow(client: QueryClient, id: string): Promise<void> {
+  await apiSend('DELETE', `/devices/${encodeURIComponent(id)}`, null);
+  client.setQueryData<Device[]>(DEVICES_KEY, (list) => list?.filter((d) => d.id !== id));
+  void client.invalidateQueries({ queryKey: DEVICES_KEY, exact: true });
 }
 
 /** `DELETE /devices/pairings/requests/{id}`: eine fremde Anfrage ablehnen */

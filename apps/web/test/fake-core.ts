@@ -112,7 +112,8 @@ export function makeDevice(overrides: Partial<Device> = {}): Device {
   return {
     id: '0190f6a2-0000-7000-8000-0000000000c1',
     user_id: USER,
-    created_at: NOW,
+    // Älter als 24 h: nicht „neu gekoppelt“
+    created_at: '2026-10-01T08:00:00Z',
     updated_at: NOW,
     deleted_at: null,
     name: 'iPad von Ilian',
@@ -128,7 +129,7 @@ export function makeDevice(overrides: Partial<Device> = {}): Device {
 /** Kopplung im Fake-Core (VERTRAEGE §12): Fenster, Anfragen und Zustand wie der Header `SG-Pairing-State` */
 export interface FakePairing {
   window: PairingCode | null;
-  state: 'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'locked';
+  state: 'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'closed' | 'locked';
   requests: PairingRequest[];
   /** Laufende Nummer für Code und IDs */
   opened: number;
@@ -269,7 +270,8 @@ export function installFakeCore(
       return request;
     },
     completePairing(name = 'Neues iPad') {
-      const created = makeDevice({ id: newId(), name, last_seen_at: new Date().toISOString() });
+      const now = new Date().toISOString();
+      const created = makeDevice({ id: newId(), name, created_at: now, last_seen_at: now });
       core.devices.push(created);
       core.pairing.state = 'paired';
       core.pairing.requests = [];
@@ -297,7 +299,7 @@ export function installFakeCore(
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
 
-      const devicesResponse = handleDevices(core, path, method);
+      const devicesResponse = handleDevices(core, path, method, url);
       if (devicesResponse) return devicesResponse;
 
       if (path === '/settings' && method === 'GET') return json(core.settings);
@@ -477,7 +479,16 @@ async function handleMaterial(core: FakeCore, call: MaterialCall): Promise<Respo
 }
 
 /** /devices und /devices/pairings* des Fake-Core (VERTRAEGE §7.5, §12) */
-function handleDevices(core: FakeCore, path: string, method: string): Response | null {
+function handleDevices(core: FakeCore, path: string, method: string, url: URL): Response | null {
+  if (path === '/devices/pairings' && method === 'DELETE') {
+    const only = url.searchParams.get('pairing_id');
+    const open = core.pairing.state === 'open' || core.pairing.state === 'qr_only';
+    if (open && (!only || only === core.pairing.window?.pairing_id)) {
+      core.pairing.state = 'closed';
+      core.pairing.requests = [];
+    }
+    return new Response(null, { status: 204 });
+  }
   if (path === '/devices' && method === 'GET') {
     return json({ items: core.devices.filter((d) => !d.deleted_at), next_cursor: null });
   }
@@ -490,7 +501,11 @@ function handleDevices(core: FakeCore, path: string, method: string): Response |
   }
   if (path === '/devices/pairings' && method === 'POST') {
     const n = ++core.pairing.opened;
-    const pairingId = `0190f6a2-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    // Zufälliger Teil: ein Schließen aus einem vorigen Test trifft so nie das Fenster dieses Tests
+    const random = Math.floor(Math.random() * 0xffffffff)
+      .toString(16)
+      .padStart(8, '0');
+    const pairingId = `0190f6a2-0000-4000-8000-${random}${String(n).padStart(4, '0')}`;
     const code = String(482913 + n)
       .padStart(6, '0')
       .slice(-6);

@@ -1,7 +1,8 @@
 // Einstellungen → Geräte (T1-10): Liste, Entfernen mit Bestätigung, Kopplung per QR/Code, Anfragen, Zustände
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
 import qrcode from 'qrcode-generator';
 
 vi.mock('next/navigation', () => ({
@@ -155,15 +156,89 @@ describe('iPad koppeln', () => {
     expect(calls(core, 'DELETE', `/devices/pairings/requests/${request.request_id}`)).toHaveLength(1);
   });
 
-  it('nach erfolgreicher Kopplung: Fenster zu, Gerät in der Liste, Meldung', async () => {
+  it('nach erfolgreicher Kopplung: Meldung mit Name und Art und „Entfernen“, Gerät als neu markiert', async () => {
+    const core = installFakeCore();
+    core.devices.push(makeDevice());
+    const { user, panel } = await openDevicesTab();
+    await within(panel).findByText('iPad von Ilian');
+    await user.click(within(panel).getByRole('button', { name: 'iPad koppeln' }));
+    await within(panel).findByRole('heading', { name: 'iPad koppeln' });
+    const windowId = core.pairing.window?.pairing_id ?? '';
+    const created = core.completePairing('Neues iPad');
+    expect(
+      await screen.findByText('„Neues iPad“ (iPad) wurde gekoppelt. Nicht du?', {}, { timeout: 4_000 }),
+    ).toBeInTheDocument();
+    expect(within(panel).queryByRole('heading', { name: 'iPad koppeln' })).not.toBeInTheDocument();
+    const list = await within(panel).findByRole('list', { name: 'Gekoppelte Geräte' });
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(2));
+    const [old, fresh] = within(list).getAllByRole('listitem');
+    expect(fresh).toHaveTextContent('Neues iPad');
+    expect(fresh).toHaveTextContent('Neu gekoppelt');
+    expect(old).not.toHaveTextContent('Neu gekoppelt');
+    // Ein gekoppeltes Fenster wird nicht noch einmal geschlossen
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls(core, 'DELETE', `/devices/pairings?pairing_id=${windowId}`)).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: 'Entfernen' }));
+    await waitFor(() => expect(calls(core, 'DELETE', `/devices/${created.id}`)).toHaveLength(1));
+    expect(await screen.findByText('Neues iPad entfernt')).toBeInTheDocument();
+  });
+
+  it('„Schließen“ schließt das Fenster auch am Core (DELETE /devices/pairings?pairing_id=…)', async () => {
     const core = installFakeCore();
     const { user, panel } = await openDevicesTab();
     await user.click(within(panel).getByRole('button', { name: 'iPad koppeln' }));
     await within(panel).findByRole('heading', { name: 'iPad koppeln' });
-    core.completePairing('Neues iPad');
-    expect(await screen.findByText('Gerät gekoppelt', {}, { timeout: 4_000 })).toBeInTheDocument();
-    expect(within(panel).queryByRole('heading', { name: 'iPad koppeln' })).not.toBeInTheDocument();
-    expect(await within(panel).findByText('Neues iPad')).toBeInTheDocument();
+    const id = core.pairing.window?.pairing_id ?? '';
+    await user.click(within(panel).getByRole('button', { name: 'Schließen' }));
+    await waitFor(() => expect(calls(core, 'DELETE', `/devices/pairings?pairing_id=${id}`)).toHaveLength(1));
+    expect(core.pairing.state).toBe('closed');
+  });
+
+  it('Strict Mode (Effekte doppelt) schließt das gerade geöffnete Fenster nicht', async () => {
+    const core = installFakeCore();
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <ThemeProvider>
+          <QueryProvider>
+            <AppShell>
+              <SettingsView />
+            </AppShell>
+          </QueryProvider>
+        </ThemeProvider>
+      </StrictMode>,
+    );
+    await user.click(screen.getByRole('tab', { name: 'Geräte' }));
+    const panel = screen.getByRole('tabpanel', { name: 'Geräte' });
+    await user.click(within(panel).getByRole('button', { name: 'iPad koppeln' }));
+    await within(panel).findByRole('heading', { name: 'iPad koppeln' });
+    const id = core.pairing.window?.pairing_id ?? '';
+    await new Promise((r) => setTimeout(r, 100));
+    expect(calls(core, 'DELETE', `/devices/pairings?pairing_id=${id}`)).toHaveLength(0);
+    expect(core.pairing.state).toBe('open');
+  });
+
+  it('Verlassen der Ansicht und Schließen des Tabs schließen das Fenster am Core', async () => {
+    const core = installFakeCore();
+    const { user, panel } = await openDevicesTab();
+    await user.click(within(panel).getByRole('button', { name: 'iPad koppeln' }));
+    await within(panel).findByRole('heading', { name: 'iPad koppeln' });
+    const first = core.pairing.window?.pairing_id ?? '';
+    window.dispatchEvent(new Event('pagehide'));
+    await waitFor(() =>
+      expect(calls(core, 'DELETE', `/devices/pairings?pairing_id=${first}`)).toHaveLength(1),
+    );
+
+    // Neues Fenster, dann die ganze Seite abbauen (Navigation)
+    core.pairing.state = 'open';
+    await user.click(within(panel).getByRole('button', { name: 'Neuen Code erzeugen' }));
+    await waitFor(() => expect(calls(core, 'POST', '/devices/pairings')).toHaveLength(2));
+    const second = core.pairing.window?.pairing_id ?? '';
+    cleanup();
+    await waitFor(() =>
+      expect(calls(core, 'DELETE', `/devices/pairings?pairing_id=${second}`)).toHaveLength(1),
+    );
   });
 
   it('viele Fehlversuche über das Netzwerk: Hinweis, QR-Code bleibt sichtbar', async () => {

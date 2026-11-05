@@ -39,7 +39,7 @@ describe('Netz ohne Token (VERTRAEGE §5)', () => {
 
   it('gilt für alle Pfade, auch Web-App und unbekannte', async () => {
     for (const url of ['/', '/modul', '/api/v1/jobs', '/api/v1/openapi.json', '/api/v1/gibt-es-nicht']) {
-      const res = await t.app.inject({ url, remoteAddress: '10.0.0.7' });
+      const res = await t.app.inject({ url, remoteAddress: '10.0.0.7', headers: { host: '10.0.0.1:4710' } });
       expect(res.statusCode, url).toBe(401);
     }
   });
@@ -50,7 +50,9 @@ describe('Netz ohne Token (VERTRAEGE §5)', () => {
       remoteAddress: '203.0.113.9',
       headers: { host: `localhost:${TEST_PORT}`, 'x-forwarded-for': '127.0.0.1' },
     });
-    expect(res.statusCode).toBe(401);
+    // Aus dem Netz ist nur ein IP- oder .local-Host erlaubt (Schutz vor DNS-Rebinding), „localhost“ also nie
+    expect(res.statusCode).toBe(421);
+    expect(errorCode(res.json())).toBe('host_not_allowed');
   });
 
   it('X-Forwarded-For: 127.0.0.1 macht eine Netz-Anfrage nicht lokal (trustProxy aus)', async () => {
