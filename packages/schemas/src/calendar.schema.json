@@ -290,6 +290,24 @@
         }
       }
     },
+    "CalendarReassignResult": {
+      "type": "object",
+      "description": "Antwort auf POST /calendar/reassign (lokal): Neuzuordnung aller Termine mit assigned_by=auto, z. B. nach dem Anlegen eines Moduls.",
+      "required": ["changed", "ohne_modul"],
+      "additionalProperties": false,
+      "properties": {
+        "changed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Termine, deren Modul oder Art sich geändert hat"
+        },
+        "ohne_modul": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach"
+        }
+      }
+    },
     "IcsEventRef": {
       "type": "object",
       "description": "Termin in einem Abgleichergebnis (Schlüssel wie tests/fixtures/ics/11-abgleich-erwartung.json)",

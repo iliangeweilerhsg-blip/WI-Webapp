@@ -660,6 +660,7 @@ async function applyParsed(tx: Tx, source: SourceRow, parsed: ParseResult): Prom
     }
   }
 
+  const openEnded = new Set(parsed.openEndedUids);
   // Fehlt in der Quelle: abgesagt, nie gelöscht. Bei abgeschnittener Quelle (zu viele Termine) fehlt Wissen: nichts absagen.
   const vanished = parsed.truncated
     ? []
@@ -667,7 +668,7 @@ async function applyParsed(tx: Tx, source: SourceRow, parsed: ParseResult): Prom
         (row) =>
           !row.cancelled &&
           // Offene Serien liefern nur Vorkommen ab heute − 1 Jahr: Ältere fehlen nicht „in der Quelle“
-          row.startsAt >= parsed.windowStart &&
+          !(row.startsAt < parsed.windowStart && openEnded.has(row.externalUid ?? '')) &&
           !seen.has(keyOf(row.externalUid, row.recurrenceId)),
       );
   for (const row of vanished) {
@@ -818,8 +819,15 @@ function suggestModules(rows: EventRow[]): IcsModuleSuggestion[] {
  */
 export async function reassignAutoEvents(db: Db): Promise<{ changed: number; ohne_modul: number }> {
   return db.transaction(async (tx) => {
-    // Eine gemeinsame Sperre: zwei Neuzuordnungen laufen nacheinander
+    // Zwei Neuzuordnungen laufen nacheinander. Danach warten wir auf laufende Abgleiche und Änderungen der Quellen
+    // (immer in dieser Reihenfolge: erst 'reassign', dann die Quellen nach id, nie umgekehrt)
     await lockKey(tx, 'reassign');
+    const sources = await tx
+      .select({ id: calendarSource.id })
+      .from(calendarSource)
+      .where(isNull(calendarSource.deletedAt))
+      .orderBy(asc(calendarSource.id));
+    for (const source of sources) await lockKey(tx, `source:${source.id}`);
     const timeZone = calendarHooks.defaultTimeZone();
     const scope = await loadModuleScope(tx);
     const rows = await tx

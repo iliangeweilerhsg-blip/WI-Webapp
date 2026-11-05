@@ -7,6 +7,7 @@ import {
   ApiErrorSchema,
   CalendarEventListSchema,
   CalendarEventSchema,
+  CalendarReassignResultSchema,
   CalendarSourceListSchema,
   IcsImportResultSchema,
   SINGLE_USER_ID,
@@ -1163,7 +1164,10 @@ describe('Neu zuordnen: POST /calendar/reassign', () => {
   });
 
   it('ohne Termine: changed 0', async () => {
-    expect((await reassign()).json()).toEqual({ changed: 0, ohne_modul: 0 });
+    expect(CalendarReassignResultSchema.parse((await reassign()).json())).toEqual({
+      changed: 0,
+      ohne_modul: 0,
+    });
   });
 });
 
@@ -1197,22 +1201,61 @@ describe('Review-Nachträge: Grenzen und Rennen', () => {
     expect((await allEvents()).filter((e) => !e.cancelled)).toHaveLength(2);
   });
 
-  it('Löschen und Abgleich laufen nacheinander: keine Termine einer gelöschten Quelle bleiben sichtbar', async () => {
-    const created = await importFile(weekly('race@t', 'Statistik I', 20));
-    const body = multipart([filePart(weekly('race@t', 'Statistik I', 25))]);
-    const results = await Promise.all([
-      t.request({ method: 'DELETE', url: `${API}/calendar/sources/${created.source.id}` }),
-      t.request({
-        method: 'POST',
-        url: `${API}/calendar/sources/${created.source.id}/sync`,
-        payload: body.payload,
-        headers: body.headers,
-      }),
+  /** Hält die Sperre `source:<id>` aus einer zweiten Verbindung (wie ein laufender Abgleich) bis `release()` */
+  async function holdSourceLock(sourceId: string) {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let locked: () => void = () => {};
+    const ready = new Promise<void>((resolve) => (locked = resolve));
+    const holder = t.handle.sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(70070010, hashtext(${`source:${sourceId}`}))`;
+      locked();
+      await gate;
+    });
+    await ready;
+    return { release, done: holder };
+  }
+
+  const pending = async (promise: Promise<unknown>, ms = 400) =>
+    Promise.race([
+      promise.then(() => 'fertig'),
+      new Promise((resolve) => setTimeout(() => resolve('wartet'), ms)),
     ]);
-    for (const r of results) expect([200, 204, 404]).toContain(r.statusCode);
+
+  it('DELETE wartet auf die Quellen-Sperre (ein laufender Abgleich), erst danach wird gelöscht', async () => {
+    const created = await importFile(weekly('race@t', 'Statistik I', 3));
+    const lock = await holdSourceLock(created.source.id);
+    const deleting = t.request({ method: 'DELETE', url: `${API}/calendar/sources/${created.source.id}` });
+    expect(await pending(deleting)).toBe('wartet');
+    const mid = await t.handle.sql`SELECT deleted_at FROM calendar_source WHERE id = ${created.source.id}`;
+    expect(mid[0]?.deleted_at).toBeNull();
+    lock.release();
+    await lock.done;
+    expect((await deleting).statusCode).toBe(204);
     const rows = await t.handle.sql`SELECT count(*)::int AS orphans FROM calendar_event e
       JOIN calendar_source s ON s.id = e.source_id WHERE s.deleted_at IS NOT NULL AND e.deleted_at IS NULL`;
     expect(rows[0]?.orphans).toBe(0);
+  });
+
+  it('POST /calendar/reassign wartet ebenfalls auf laufende Abgleiche', async () => {
+    const created = await importFile(weekly('race2@t', 'Statistik I', 2));
+    const lock = await holdSourceLock(created.source.id);
+    const reassigning = t.request({ method: 'POST', url: `${API}/calendar/reassign` });
+    expect(await pending(reassigning)).toBe('wartet');
+    lock.release();
+    await lock.done;
+    const res = await reassigning;
+    expect(res.statusCode).toBe(200);
+    expect(CalendarReassignResultSchema.parse(res.json())).toEqual({ changed: 0, ohne_modul: 2 });
+  });
+
+  it('Termine endlicher Serien, die in der Quelle fehlen, werden auch vor dem Fenster abgesagt', async () => {
+    const created = await importFile(weekly('alt2@t', 'Statistik I', 3));
+    await t.handle
+      .sql`UPDATE calendar_event SET starts_at = starts_at - interval '3 years', ends_at = ends_at - interval '3 years'`;
+    const second = await syncFile(created.source.id, weekly('alt2@t', 'Statistik I', 1));
+    // Das erste Vorkommen steht noch in der Quelle, die beiden anderen fehlen (und liegen vor dem Fenster)
+    expect(second.counts.entfallen).toBe(2);
   });
 
   it('dieselbe id gleichzeitig: einmal 201, sonst 409 calendar_source_exists (kein 500)', async () => {

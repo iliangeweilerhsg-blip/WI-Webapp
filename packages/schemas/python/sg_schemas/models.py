@@ -94,6 +94,24 @@ class CalendarEventKind(StrEnum):
     lernblock_export = 'lernblock_export'
 
 
+class CalendarReassignResult(BaseModel):
+    """
+    Antwort auf POST /calendar/reassign (lokal): Neuzuordnung aller Termine mit assigned_by=auto, z. B. nach dem Anlegen eines Moduls.
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    changed: StrictInt = Field(
+        ..., description='Termine, deren Modul oder Art sich geändert hat', ge=0
+    )
+    ohne_modul: StrictInt = Field(
+        ...,
+        description='Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach',
+        ge=0,
+    )
+
+
 class CalendarSourceKind(StrEnum):
     """
     google erst ab Phase 4 (F-KAL-03)
@@ -4233,6 +4251,9 @@ class SchemaBundle(BaseModel):
     )
     CalendarEventUpdate_1: CalendarEventUpdate | None = Field(
         None, alias='CalendarEventUpdate'
+    )
+    CalendarReassignResult_1: CalendarReassignResult | None = Field(
+        None, alias='CalendarReassignResult'
     )
     CalendarSource_1: CalendarSource | None = Field(None, alias='CalendarSource')
     CalendarSourceCreate_1: CalendarSourceCreate | None = Field(

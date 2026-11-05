@@ -1,6 +1,6 @@
 // Auflösen: Laufzeit-Grenzen, Sonderfälle der Zeit und Warnungen (Review PR #67)
 import { describe, expect, it } from 'vitest';
-import { parseIcsIsolated } from '../../src/services/calendar-parse.ts';
+import { MAX_PARALLEL_WORKERS, parseIcsIsolated, parseLoad } from '../../src/services/calendar-parse.ts';
 import {
   IcsParseError,
   IcsTooComplexError,
@@ -176,5 +176,90 @@ describe('Warnungen', () => {
       message: '45 weitere Hinweise dieser Art (insgesamt 50).',
       external_uid: null,
     });
+  });
+});
+
+describe('Worker-Begrenzung', () => {
+  it(`höchstens ${MAX_PARALLEL_WORKERS} Worker gleichzeitig, der Rest wartet; das Budget zählt ab dem Start`, async () => {
+    const never = wrap(vevent('n@t', 'RRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30\r\n'));
+    let peak = 0;
+    let waitingPeak = 0;
+    const watcher = setInterval(() => {
+      const load = parseLoad();
+      peak = Math.max(peak, load.running);
+      waitingPeak = Math.max(waitingPeak, load.waiting);
+    }, 5);
+    const results = await Promise.allSettled(
+      Array.from({ length: 6 }, () => parseIcsIsolated(never, { ...opts, deadlineMs: 200 })),
+    );
+    clearInterval(watcher);
+    // Alle scheitern am eigenen Budget (nicht, weil sie in der Schlange zu lange gewartet hätten) …
+    for (const r of results) {
+      expect(r.status).toBe('rejected');
+      if (r.status === 'rejected') expect(r.reason).toBeInstanceOf(IcsTooComplexError);
+    }
+    // … aber nie mehr als zwei liefen zugleich
+    expect(peak).toBe(MAX_PARALLEL_WORKERS);
+    expect(waitingPeak).toBeGreaterThanOrEqual(4);
+    expect(parseLoad()).toEqual({ running: 0, waiting: 0 });
+  });
+
+  it('eine normale Datei kommt hinter blockierten Dateien noch dran', async () => {
+    const never = wrap(vevent('n@t', 'RRULE:FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30\r\n'));
+    const fine = wrap(vevent('ok@t', ''));
+    const [, , ok] = await Promise.allSettled([
+      parseIcsIsolated(never, { ...opts, deadlineMs: 200 }),
+      parseIcsIsolated(never, { ...opts, deadlineMs: 200 }),
+      parseIcsIsolated(fine, opts),
+    ]);
+    expect(ok.status).toBe('fulfilled');
+  });
+});
+
+describe('Offene Serien ab 1970', () => {
+  it('DAILY ab 1970: Termine im Fenster (heute − 1 Jahr bis heute + 180 Tage)', () => {
+    const ics = wrap(vevent('alt@t', 'RRULE:FREQ=DAILY\r\n', '19700101T100000Z'));
+    const result = parseIcs(ics, opts);
+    expect(result.events.length).toBeGreaterThan(500);
+    expect(result.events.length).toBeLessThan(560);
+    const first = result.events[0]?.startsAt.getTime() ?? 0;
+    expect(first).toBeGreaterThanOrEqual(result.windowStart.getTime());
+    expect(first).toBeLessThan(result.windowStart.getTime() + 2 * 86_400_000);
+    expect(result.warnings).toEqual([]);
+    expect(result.openEndedUids).toEqual(['alt@t']);
+  });
+
+  it('WEEKLY mit INTERVAL=3 ab 1970 behält die Phase (alle Termine 21 Tage auseinander, ab DTSTART gezählt)', () => {
+    const ics = wrap(vevent('w@t', 'RRULE:FREQ=WEEKLY;INTERVAL=3\r\n', '19700105T080000Z'));
+    const events = parseIcs(ics, opts).events;
+    expect(events.length).toBeGreaterThan(20);
+    const origin = Date.UTC(1970, 0, 5, 8, 0, 0);
+    for (const event of events) {
+      expect((event.startsAt.getTime() - origin) % (21 * 86_400_000)).toBe(0);
+    }
+  });
+
+  it('WEEKLY mit BYDAY und Zone: Ortszeit bleibt über die Zeitumstellung gleich', () => {
+    const ics = wrap(
+      vevent('z@t', 'RRULE:FREQ=WEEKLY;BYDAY=MO,TH\r\n', '20150105T081500').replace(
+        'DTSTART:20150105T081500',
+        'DTSTART;TZID=Europe/Zurich:20150105T081500',
+      ),
+    );
+    const events = parseIcs(ics, opts).events;
+    expect(events.length).toBeGreaterThan(100);
+    expect(new Set(events.map((e) => e.recurrenceId?.slice(11, 19))).size).toBe(1);
+    // Montag und Donnerstag
+    expect(new Set(events.map((e) => e.startsAt.getUTCDay()))).toEqual(new Set([1, 4]));
+  });
+
+  it('endliche und monatliche Serien sind unberührt', () => {
+    const monthly = wrap(vevent('m@t', 'RRULE:FREQ=MONTHLY;BYMONTHDAY=15\r\n', '20200115T100000Z'));
+    const result = parseIcs(monthly, opts);
+    expect(result.events.length).toBe(18);
+    const finite = wrap(vevent('f@t', 'RRULE:FREQ=DAILY;COUNT=5\r\n', '19700101T100000Z'));
+    const f = parseIcs(finite, opts);
+    expect(f.events).toHaveLength(5);
+    expect(f.openEndedUids).toEqual([]);
   });
 });

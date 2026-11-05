@@ -579,6 +579,22 @@ kind?: CalendarEventKind
 scope?: CalendarUpdateScope
 }
 /**
+ * Antwort auf POST /calendar/reassign (lokal): Neuzuordnung aller Termine mit assigned_by=auto, z. B. nach dem Anlegen eines Moduls.
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CalendarReassignResult".
+ */
+export interface CalendarReassignResult {
+/**
+ * Termine, deren Modul oder Art sich geändert hat
+ */
+changed: number
+/**
+ * Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach
+ */
+ohne_modul: number
+}
+/**
  * Kalenderquelle
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema

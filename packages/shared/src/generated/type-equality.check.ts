@@ -27,6 +27,7 @@ const _CalendarEvent: Equal<z.infer<typeof Z.CalendarEventSchema>, T.CalendarEve
 const _CalendarEventKind: Equal<z.infer<typeof Z.CalendarEventKindSchema>, T.CalendarEventKind> = true;
 const _CalendarEventList: Equal<z.infer<typeof Z.CalendarEventListSchema>, T.CalendarEventList> = true;
 const _CalendarEventUpdate: Equal<z.infer<typeof Z.CalendarEventUpdateSchema>, T.CalendarEventUpdate> = true;
+const _CalendarReassignResult: Equal<z.infer<typeof Z.CalendarReassignResultSchema>, T.CalendarReassignResult> = true;
 const _CalendarSource: Equal<z.infer<typeof Z.CalendarSourceSchema>, T.CalendarSource> = true;
 const _CalendarSourceCreate: Equal<z.infer<typeof Z.CalendarSourceCreateSchema>, T.CalendarSourceCreate> = true;
 const _CalendarSourceKind: Equal<z.infer<typeof Z.CalendarSourceKindSchema>, T.CalendarSourceKind> = true;

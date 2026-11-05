@@ -9,6 +9,7 @@ import {
   CalendarEventListSchema,
   CalendarEventSchema,
   CalendarEventUpdateSchema,
+  CalendarReassignResultSchema,
   CalendarSourceCreateSchema,
   CalendarSourceListSchema,
   IcsImportResultSchema,
@@ -17,6 +18,7 @@ import {
 } from '@sg/shared';
 import type { Db } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
+import { isLoopbackAddress } from '../plugins/security.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
 import {
   createFileSource,
@@ -55,19 +57,6 @@ declare module 'fastify' {
 }
 
 const IdParams = z.object({ id: UuidSchema });
-const ReassignResultSchema = z.object({
-  changed: z.number().int().min(0).describe('Termine, deren Modul oder Art sich geändert hat'),
-  ohne_modul: z
-    .number()
-    .int()
-    .min(0)
-    .describe('Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach'),
-});
-
-/** Lokal heißt: Die Socket-Adresse ist Loopback (VERTRAEGE §5), nie `Host` oder `X-Forwarded-For` */
-function isLoopback(address: string | undefined): boolean {
-  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
-}
 const SourcesQuery = PageQuerySchema;
 const flag = z.enum(['true', 'false']).optional();
 const EventsQuery = PageQuerySchema.extend({
@@ -338,11 +327,11 @@ export async function calendarRoutes(app: FastifyInstance, deps: CalendarRouteDe
         summary: 'Automatische Zuordnung aller Termine neu berechnen (lokal)',
         description:
           'Bestimmt Modul und Art aller Termine mit `assigned_by = auto` neu, etwa nach dem Anlegen eines Moduls. Manuelle Zuordnungen bleiben unangetastet, ein zweiter Aufruf ändert nichts. Nur lokale Anfragen.',
-        response: { 200: ReassignResultSchema, 403: ApiErrorSchema },
+        response: { 200: CalendarReassignResultSchema, 403: ApiErrorSchema },
       },
     },
     async (request) => {
-      if (!isLoopback(request.socket.remoteAddress)) {
+      if (!isLoopbackAddress(request.socket.remoteAddress)) {
         throw new HttpError(
           403,
           'local_only',

@@ -50,6 +50,8 @@ export interface ParseResult {
    * nicht als „entfallen“.
    */
   windowStart: Date;
+  /** UIDs der Serien ohne UNTIL/COUNT: nur für sie gilt `windowStart` */
+  openEndedUids: string[];
 }
 
 /** Die Datei braucht zu lange zum Auflösen (→ 400 `ics_too_complex`) */
@@ -187,6 +189,7 @@ interface Context {
   warnCounts: Map<string, number>;
   /** Absolute Frist (ms seit Epoche) */
   deadline: number;
+  openEnded: Set<string>;
 }
 
 function checkDeadline(ctx: Context): void {
@@ -293,6 +296,7 @@ export function parseIcs(text: string, options: ParseOptions): ParseResult {
     warnedZones: new Set(),
     warnCounts: new Map(),
     deadline: Date.now() + (options.deadlineMs ?? DEFAULT_DEADLINE_MS),
+    openEnded: new Set(),
   };
   let calendars: IcalComponent[];
   try {
@@ -379,7 +383,7 @@ export function parseIcs(text: string, options: ParseOptions): ParseResult {
       });
     }
   }
-  return { events, warnings: ctx.warnings, truncated, windowStart };
+  return { events, warnings: ctx.warnings, truncated, windowStart, openEndedUids: [...ctx.openEnded] };
 }
 
 /** Termin aus Komponente und (bereits berechneter) Start-/Endzeit */
@@ -429,6 +433,30 @@ function isExcluded(event: IcalEvent, time: IcalTime): boolean {
     .some((prop) => prop.getValues().some((value: IcalTime) => value.compare(time) === 0));
 }
 
+/**
+ * Neuer Anfang der Auflösung für offene Serien, damit sie nicht in 1970 beginnt: DTSTART plus ein Vielfaches der
+ * Wiederholung (`INTERVAL` Tage bzw. Wochen), also in derselben Phase, eine Wiederholung vor dem Fenster. Nur für eine
+ * einzelne RRULE mit `FREQ=DAILY|WEEKLY`; sonst `null` (MONTHLY und YEARLY brauchen nur wenige Schritte).
+ */
+function fastForwardStart(
+  event: IcalEvent,
+  rules: ({ freq?: string; interval?: number } | null)[],
+  windowStart: number,
+): IcalTime | null {
+  const rule = rules.length === 1 ? rules[0] : null;
+  if (!rule || (rule.freq !== 'DAILY' && rule.freq !== 'WEEKLY')) return null;
+  const start = event.startDate;
+  const stepDays = Math.max(1, Number(rule.interval ?? 1)) * (rule.freq === 'WEEKLY' ? 7 : 1);
+  // Wanduhr als UTC gerechnet: ein Tag Ungenauigkeit durch die Zone fängt die eine Wiederholung Vorlauf ab
+  const startMs = Date.UTC(start.year, start.month - 1, start.day);
+  const days = Math.floor((windowStart - startMs) / DAY_MS);
+  const skip = (Math.floor(days / stepDays) - 1) * stepDays;
+  if (skip <= 0) return null;
+  const moved = start.clone();
+  moved.adjust(skip, 0, 0, 0);
+  return moved;
+}
+
 interface Window {
   /** Offene Serien enden hier (heute + 180 Tage) */
   horizonMs: number;
@@ -463,6 +491,8 @@ function resolveSeries(
     } else {
       const masterTzid = tzidOf(master, 'dtstart');
       const openEnded = rules.some((rule) => !rule || (!rule.until && !rule.count));
+      if (openEnded) ctx.openEnded.add(uid);
+      const fastStart = openEnded ? fastForwardStart(event, rules, window.windowStart) : null;
       const emit = (next: IcalTime): boolean => {
         const details = event.getOccurrenceDetails(next);
         const occurrenceInstant = instantOf(next, masterTzid, ctx, uid);
@@ -490,7 +520,8 @@ function resolveSeries(
       try {
         // RFC 5545: Bei RDATE ohne RRULE ist auch DTSTART selbst ein Vorkommen (ical.js liefert es nicht)
         if (rules.length === 0 && !isExcluded(event, event.startDate) && !emit(event.startDate)) return;
-        const iterator = event.iterator();
+        // Lange offene Serien (DTSTART 1970) beginnen kurz vor dem Fenster, sonst reicht das Schrittlimit nicht bis heute
+        const iterator = fastStart ? event.iterator(fastStart) : event.iterator();
         let steps = 0;
         let next: IcalTime | null;
         while ((next = iterator.next())) {
@@ -528,6 +559,8 @@ function resolveSeries(
     const recurrenceTime = item.getFirstPropertyValue('recurrence-id') as IcalTime | null;
     if (!recurrenceTime) continue;
     const instant = instantOf(recurrenceTime, tzidOf(item, 'recurrence-id'), ctx, uid);
+    // Bei offenen Serien kennt der Lauf nur das Fenster: ältere Ausnahmen sind keine Termine dieses Laufs
+    if (ctx.openEnded.has(uid) && instant < window.windowStart) continue;
     if (!push(standalone(item, uid, recurrenceKey(recurrenceTime, instant), ctx))) return;
   }
 }

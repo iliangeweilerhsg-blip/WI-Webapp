@@ -30,6 +30,7 @@ struct SchemaBundle: Codable {
     let calendarEventKind: CalendarEventKind?
     let calendarEventList: CalendarEventList?
     let calendarEventUpdate: CalendarEventUpdate?
+    let calendarReassignResult: CalendarReassignResult?
     let calendarSource: CalendarSource?
     let calendarSourceCreate: CalendarSourceCreate?
     let calendarSourceKind: CalendarSourceKind?
@@ -266,6 +267,7 @@ struct SchemaBundle: Codable {
         case calendarEventKind = "CalendarEventKind"
         case calendarEventList = "CalendarEventList"
         case calendarEventUpdate = "CalendarEventUpdate"
+        case calendarReassignResult = "CalendarReassignResult"
         case calendarSource = "CalendarSource"
         case calendarSourceCreate = "CalendarSourceCreate"
         case calendarSourceKind = "CalendarSourceKind"
@@ -522,6 +524,7 @@ extension SchemaBundle {
         calendarEventKind: CalendarEventKind?? = nil,
         calendarEventList: CalendarEventList?? = nil,
         calendarEventUpdate: CalendarEventUpdate?? = nil,
+        calendarReassignResult: CalendarReassignResult?? = nil,
         calendarSource: CalendarSource?? = nil,
         calendarSourceCreate: CalendarSourceCreate?? = nil,
         calendarSourceKind: CalendarSourceKind?? = nil,
@@ -758,6 +761,7 @@ extension SchemaBundle {
             calendarEventKind: calendarEventKind ?? self.calendarEventKind,
             calendarEventList: calendarEventList ?? self.calendarEventList,
             calendarEventUpdate: calendarEventUpdate ?? self.calendarEventUpdate,
+            calendarReassignResult: calendarReassignResult ?? self.calendarReassignResult,
             calendarSource: calendarSource ?? self.calendarSource,
             calendarSourceCreate: calendarSourceCreate ?? self.calendarSourceCreate,
             calendarSourceKind: calendarSourceKind ?? self.calendarSourceKind,
@@ -1878,6 +1882,58 @@ extension CalendarEventUpdate {
 enum CalendarUpdateScope: String, Codable {
     case einzeln = "einzeln"
     case serie = "serie"
+}
+
+/// Antwort auf POST /calendar/reassign (lokal): Neuzuordnung aller Termine mit
+/// assigned_by=auto, z. B. nach dem Anlegen eines Moduls.
+// MARK: - CalendarReassignResult
+struct CalendarReassignResult: Codable {
+    /// Termine, deren Modul oder Art sich geändert hat
+    let changed: Int
+    /// Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach
+    let ohneModul: Int
+
+    enum CodingKeys: String, CodingKey {
+        case changed = "changed"
+        case ohneModul = "ohne_modul"
+    }
+}
+
+// MARK: CalendarReassignResult convenience initializers and mutators
+
+extension CalendarReassignResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CalendarReassignResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        changed: Int? = nil,
+        ohneModul: Int? = nil
+    ) -> CalendarReassignResult {
+        return CalendarReassignResult(
+            changed: changed ?? self.changed,
+            ohneModul: ohneModul ?? self.ohneModul
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
 }
 
 /// Kalenderquelle
@@ -14442,6 +14498,14 @@ extension CalendarEventUpdate {
         try container.encodeIfPresent(kind, forKey: .kind)
         try container.encodeIfPresent(moduleID, forKey: .moduleID)
         try container.encodeIfPresent(scope, forKey: .scope)
+    }
+}
+
+extension CalendarReassignResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(changed, forKey: .changed)
+        try container.encode(ohneModul, forKey: .ohneModul)
     }
 }
 

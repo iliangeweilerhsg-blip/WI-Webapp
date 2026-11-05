@@ -40,7 +40,7 @@ function EventEditor({
 }: {
   event: CalendarEvent;
   modules: readonly Module[];
-  /** `restoreFocus`: Der Fokus geht zurück auf den Knopf, der den Editor geöffnet hat */
+  /** Schließt den Editor (der Aufrufer setzt den Fokus zurück auf den Auslöser) */
   onClose: () => void;
 }) {
   const update = useUpdateEvent();

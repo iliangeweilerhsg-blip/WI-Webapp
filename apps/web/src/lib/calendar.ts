@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CalendarEventListSchema,
+  CalendarReassignResultSchema,
   CalendarSourceListSchema,
   IcsImportResultSchema,
   type CalendarEvent,
@@ -11,7 +12,7 @@ import {
   type CalendarSource,
   type IcsImportResult,
 } from '@sg/shared';
-import { ApiRequestError, apiGet, apiSend, apiUpload, friendlyMessage, type Parser } from './api.ts';
+import { ApiRequestError, apiGet, apiSend, apiUpload, friendlyMessage } from './api.ts';
 import { useHydrationSafe } from './hydrated.ts';
 import { uuidv7 } from './uuid.ts';
 
@@ -258,7 +259,6 @@ export function useImportUrl() {
   });
 }
 
-/** ICS-Datei importieren (multipart). Der Schlüssel gilt für diese Datei, ein Wiederholen legt nichts doppelt an. */
 /** Ein Schlüssel je Datei: Wiederholt der Nutzer nach einem Netzfehler, legt der Core nichts doppelt an (08 §1) */
 const uploadKeys = new WeakMap<File, string>();
 function keyFor(file: File): string {
@@ -307,26 +307,11 @@ export function useDeleteSource() {
   });
 }
 
-export interface ReassignResult {
-  changed: number;
-  ohne_modul: number;
-}
-
-const ReassignParser: Parser<ReassignResult> = {
-  safeParse(value) {
-    const v = value as Partial<ReassignResult> | null;
-    if (v && Number.isInteger(v.changed) && Number.isInteger(v.ohne_modul)) {
-      return { success: true, data: v as ReassignResult };
-    }
-    return { success: false, error: { message: 'Antwort von /calendar/reassign passt nicht' } };
-  },
-};
-
 /** Automatische Zuordnung aller Termine neu berechnen, nach dem Anlegen von Modulen (VERTRAEGE §7.1) */
 export function useReassign() {
   const invalidate = useInvalidateCalendar();
   return useMutation({
-    mutationFn: () => apiSend('POST', '/calendar/reassign', ReassignParser),
+    mutationFn: () => apiSend('POST', '/calendar/reassign', CalendarReassignResultSchema),
     onSuccess: invalidate,
   });
 }
