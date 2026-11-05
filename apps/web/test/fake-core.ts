@@ -156,7 +156,16 @@ export function makeDevice(overrides: Partial<Device> = {}): Device {
 /** Kopplung im Fake-Core (VERTRAEGE §12): Fenster, Anfragen und Zustand wie der Header `SG-Pairing-State` */
 export interface FakePairing {
   window: PairingCode | null;
-  state: 'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'closed' | 'locked';
+  state:
+    | 'none'
+    | 'open'
+    | 'qr_only'
+    | 'confirming'
+    | 'expired'
+    | 'paired'
+    | 'closed_failures'
+    | 'closed'
+    | 'locked';
   requests: PairingRequest[];
   /** Laufende Nummer für Code und IDs */
   opened: number;

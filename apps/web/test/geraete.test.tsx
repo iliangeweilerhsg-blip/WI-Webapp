@@ -14,7 +14,12 @@ vi.mock('next/navigation', () => ({
 import { AppShell } from '../src/components/AppShell.tsx';
 import { SettingsView } from '../src/components/SettingsView.tsx';
 import { PairingQr } from '../src/components/settings/PairingQr.tsx';
-import { formatRemaining, groupCode, remainingAnnouncement } from '../src/lib/devices.ts';
+import {
+  fetchPairingSnapshot,
+  formatRemaining,
+  groupCode,
+  remainingAnnouncement,
+} from '../src/lib/devices.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { installFakeCore, makeDevice, type FakeCore } from './fake-core.ts';
@@ -284,6 +289,21 @@ describe('iPad koppeln', () => {
     if (core.pairing.window)
       core.pairing.window = { ...core.pairing.window, pairing_id: '0190f6a2-0000-4000-8000-0000000000aa' };
     expect(await within(panel).findByText(/gilt nicht mehr/, {}, { timeout: 4_000 })).toBeInTheDocument();
+  });
+
+  it('während ein Code eingelöst wird (confirming): Zustand erkannt, Anzeige bleibt wie bei open (#100)', async () => {
+    const core = installFakeCore();
+    const { user, panel } = await openDevicesTab();
+    await user.click(within(panel).getByRole('button', { name: 'iPad koppeln' }));
+    await within(panel).findByRole('heading', { name: 'iPad koppeln' });
+    core.pairing.state = 'confirming';
+    expect((await fetchPairingSnapshot()).state).toBe('confirming');
+    await waitFor(
+      () => expect(calls(core, 'GET', '/devices/pairings/requests').length).toBeGreaterThanOrEqual(2),
+      { timeout: 4_000 },
+    );
+    expect(within(panel).getByRole('img', { name: 'QR-Code zum Koppeln des iPads' })).toBeInTheDocument();
+    expect(within(panel).queryByText(/abgelaufen|gilt nicht mehr|Fehlversuche/)).not.toBeInTheDocument();
   });
 
   it('„Schließen“ gibt den Fokus an „iPad koppeln“ zurück', async () => {
