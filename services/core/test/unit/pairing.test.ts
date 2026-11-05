@@ -337,6 +337,41 @@ describe('Anfragen (Bonjour-Weg)', () => {
   });
 });
 
+describe('Gerätename: unsichtbare Zeichen und Zalgo (Issue #91)', () => {
+  it.each([
+    ['U+3164 (Hangul Filler)', '\u3164'],
+    ['U+FFA0 (Halfwidth Hangul Filler)', '\uFFA0\uFFA0'],
+    ['U+2800 (Braille leer)', '\u2800 \u2800'],
+    ['Variation Selectors', '\uFE0F\uFE00\u{E0100}'],
+    ['reine Kombinationszeichen', '\u0301\u0302\u0303'],
+    ['Mischung ohne sichtbares Zeichen', '\u3164\u2800\u0301 \uFE0F'],
+  ])('%s ergibt null', (_label, name) => {
+    expect(cleanDeviceName(name)).toBeNull();
+  });
+
+  it('startet als Unbenanntes Gerät, wenn nichts Sichtbares bleibt', () => {
+    const { pm } = setup();
+    pm.open();
+    pm.start({ device_name: '\u3164\uFFA0\u2800', kind: 'ipad', public_nonce: NONCE(1) }, freshIp());
+    expect(pm.listRequests()[0]?.device_name).toBe('Unbenanntes Gerät');
+  });
+
+  it('entfernt unsichtbare Zeichen neben sichtbaren, Symbole und Ziffern zählen als sichtbar', () => {
+    expect(cleanDeviceName('iPad\u3164\u2800\uFE0F 2')).toBe('iPad 2');
+    expect(cleanDeviceName('\u3164\u2800\u2122')).toBe('TM');
+    expect(cleanDeviceName('\u2800!')).toBe('!');
+    expect(cleanDeviceName('7\u3164')).toBe('7');
+  });
+
+  it('Zalgo: höchstens 2 Kombinationszeichen pro Basiszeichen', () => {
+    const marks = Array.from({ length: 60 }, (_, i) => String.fromCodePoint(0x300 + (i % 50))).join('');
+    const cleaned = cleanDeviceName(`Z${marks}a${marks}`) ?? '';
+    expect(cleaned.normalize('NFD')).toMatch(/^Z\p{M}{1,3}a\p{M}{1,3}$/u);
+    expect(cleanDeviceName('Ilians iPad é')).toBe('Ilians iPad é');
+    expect(cleanDeviceName('e\u0301\u0323')).toBe('e\u0301\u0323'.normalize('NFKC'));
+  });
+});
+
 describe('Fenster schließen (DELETE /devices/pairings)', () => {
   it('schließt sofort, verwirft Anfragen, ist idempotent', () => {
     const { pm } = setup();
@@ -367,6 +402,37 @@ describe('Fenster schließen (DELETE /devices/pairings)', () => {
     pm.close(w.pairingId);
     grant.commit();
     expect(pm.status().state).toBe('paired');
+  });
+
+  it('Schließen während confirming geht nicht verloren: abort() lässt das Fenster zu (Issue #91)', () => {
+    const { pm } = setup();
+    const w = pm.open();
+    startPublic(pm);
+    const grant = pm.beginConfirm(
+      { pairing_id: w.pairingId, code: w.code, public_nonce: NONCE(1) },
+      freshIp(),
+    );
+    pm.close();
+    grant.abort(); // createDevice ist gescheitert
+    expect(pm.status().state).toBe('closed');
+    expect(pm.listRequests()).toEqual([]);
+    expect(
+      fails(() =>
+        pm.beginConfirm({ pairing_id: w.pairingId, code: w.code, public_nonce: NONCE(2) }, freshIp()),
+      ),
+    ).toBe('409 pairing_window_closed');
+  });
+
+  it('ein Schließen mit fremder pairing_id während confirming wird nicht gemerkt', () => {
+    const { pm } = setup();
+    const w = pm.open();
+    const grant = pm.beginConfirm(
+      { pairing_id: w.pairingId, code: w.code, public_nonce: NONCE(1) },
+      freshIp(),
+    );
+    pm.close(crypto.randomUUID());
+    grant.abort();
+    expect(pm.status().state).toBe('open');
   });
 });
 
