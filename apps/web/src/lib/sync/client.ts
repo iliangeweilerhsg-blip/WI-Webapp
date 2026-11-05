@@ -282,6 +282,11 @@ export class SyncClient {
   // Mehrere Tabs: nur der Leader synchronisiert
   private leaderLock: LeaderLock | null = null;
   private isLeader = true;
+  private enqueuedSeen = false;
+  /** Operationen, deren `store.append` gerade läuft (siehe `loseLeadership`) */
+  private appending = new Set<string>();
+  /** Bestätigte Operationen, deren Entfernen aus dem Speicher noch läuft */
+  private acked = new Map<string, SyncAck>();
   /** Aktive Sitzung zwischen `connect()` und `disconnect()`; `decided` löst auf, sobald die Rolle feststeht */
   private session: { decided: Promise<void>; resolve: () => void } | null = null;
 
@@ -340,6 +345,7 @@ export class SyncClient {
       },
       onLost: () => this.loseLeadership(lock),
       onChanged: () => this.emit('leader.changed', {}),
+      onEnqueued: () => void this.adoptEnqueued(lock),
     });
     return decided;
   }
@@ -469,10 +475,18 @@ export class SyncClient {
       this.pending.set(op.op_id, { resolve, reject });
       this.locked(async () => {
         if (!this.isLeader) throw new SyncNotLeaderError();
-        const entry = await this.store.append(op);
+        this.appending.add(op.op_id);
+        let entry: QueueEntry;
+        try {
+          entry = await this.store.append(op);
+        } finally {
+          this.appending.delete(op.op_id);
+        }
         if (!this.isLeader) {
           // Leader-Rolle während des Schreibens verloren: die Operation liegt im Speicher, der neue Leader sendet sie
           this.pending.delete(op.op_id);
+          // Restfenster: Hat der neue Leader die Warteschlange schon gelesen, sieht er die Operation nicht. Darum melden
+          this.leaderLock?.notifyEnqueued?.();
           reject(new SyncHandedOverError(op.op_id));
           return;
         }
@@ -1194,7 +1208,13 @@ export class SyncClient {
     this.releaseSuspect(ack.op_id);
     // Im Arbeitsspeicher sofort entfernen, damit `pump` die Operation nicht noch einmal sendet
     this.dropEntries([entry]);
-    await this.write(() => this.store.removeMany([entry.key]));
+    // Bis das Entfernen im Speicher durch ist, gilt die Operation als bestätigt (siehe `loseLeadership`)
+    this.acked.set(ack.op_id, ack);
+    try {
+      await this.write(() => this.store.removeMany([entry.key]));
+    } finally {
+      this.acked.delete(ack.op_id);
+    }
     this.pending.get(ack.op_id)?.resolve(ack);
     this.pending.delete(ack.op_id);
     this.emit('queue', { pending: this.queue.length });
@@ -1384,12 +1404,39 @@ export class SyncClient {
   /** Dieser Tab hat das Lock bekommen: Warteschlange vollständig aus dem Speicher lesen, dann verbinden. */
   private async becomeLeader(lock: LeaderLock, session: { resolve: () => void }): Promise<void> {
     await this.ready;
-    await this.locked(() => this.reloadQueue()).catch(() => undefined);
+    await this.locked(() => {
+      this.enqueuedSeen = false;
+      return this.reloadQueue();
+    }).catch(() => undefined);
     if (this.leaderLock !== lock || !this.wanted) return; // inzwischen getrennt
     this.isLeader = true;
     this.emit('queue', { pending: this.queue.length });
     if (!this.ws) this.openSocket();
     session.resolve();
+    // Meldung des alten Leaders kam, während wir noch lasen: nachlesen
+    if (this.enqueuedSeen) await this.adoptEnqueued(lock);
+  }
+
+  /**
+   * Restfenster beim Leader-Wechsel (VERTRAEGE §11.8): Der alte Leader hat nach dem Verlust der Rolle noch ein
+   * `append` beendet und meldet das über den BroadcastChannel (`enqueued`). Der Leader liest die Warteschlange dann
+   * erneut und hängt unbekannte Einträge an (laufende Einträge bleiben unberührt). Ein zweites Lesen nach festem
+   * Abstand wäre eine Wette auf die Zeit; die Meldung kommt genau dann, wenn es etwas nachzulesen gibt.
+   */
+  private async adoptEnqueued(lock: LeaderLock): Promise<void> {
+    if (this.leaderLock !== lock) return;
+    if (!this.isLeader) {
+      this.enqueuedSeen = true; // Rolle wird gerade übernommen, becomeLeader liest danach nach
+      return;
+    }
+    await this.locked(async () => {
+      if (!this.isLeader) return;
+      const fresh = (await this.store.list()).filter((e) => !this.byOpId.has(e.op.op_id));
+      if (fresh.length === 0) return;
+      this.setQueue([...this.queue, ...fresh].sort((a, b) => a.key - b.key));
+      this.emit('queue', { pending: this.queue.length });
+      this.pump();
+    }).catch(() => undefined);
   }
 
   /**
@@ -1414,6 +1461,16 @@ export class SyncClient {
     }
     // Operationen in der Warteschlange sendet der neue Leader: der Fachcode darf sie nicht neu senden
     for (const [id, p] of this.pending) {
+      // `append` läuft noch: Die Operation landet gleich im Speicher. `send()` meldet dann selbst `SyncHandedOverError`
+      // (und `notifyEnqueued`), sonst bekäme der Fachcode „nicht gespeichert“ und sendete sie doppelt.
+      if (this.appending.has(id)) continue;
+      // Vom Server schon bestätigt, nur das Entfernen aus dem Speicher steht noch aus: als bestätigt melden
+      const ack = this.acked.get(id);
+      if (ack) {
+        p.resolve(ack);
+        this.pending.delete(id);
+        continue;
+      }
       p.reject(this.byOpId.has(id) ? new SyncHandedOverError(id) : new SyncNotLeaderError());
       this.pending.delete(id);
     }
