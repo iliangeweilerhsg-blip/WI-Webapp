@@ -1105,10 +1105,10 @@ export async function getSessionSnapshot(db: Db, id: string): Promise<SessionSna
       const recordings = await tx
         .select({
           row: recording,
-          chunkCount: sql<number>`(SELECT count(*)::int FROM audio_chunk c WHERE c.recording_id = ${recording.id} AND c.deleted_at IS NULL)`,
+          chunkCount: sql<number>`(SELECT count(*)::int FROM audio_chunk c WHERE c.recording_id = ${recording}.${recording.id} AND c.deleted_at IS NULL)`,
           lastSeq: sql<
             number | null
-          >`(SELECT max(c.seq)::int FROM audio_chunk c WHERE c.recording_id = ${recording.id} AND c.deleted_at IS NULL)`,
+          >`(SELECT max(c.seq)::int FROM audio_chunk c WHERE c.recording_id = ${recording}.${recording.id} AND c.deleted_at IS NULL)`,
         })
         .from(recording)
         .where(and(eq(recording.sessionId, id), notDeleted(recording)))
