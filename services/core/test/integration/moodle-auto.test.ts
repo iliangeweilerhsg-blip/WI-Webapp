@@ -342,6 +342,31 @@ describe('Moodle: Module automatisch anlegen und zuordnen (#141)', () => {
     expect(put.body).toMatchObject({ auto: null, module_removable: false });
   });
 
+  it('module_removable in PUT /moodle/links/{id} ignoriert fremde Sessions und zählt weitere Kurse des Moduls (#158)', async () => {
+    await start();
+    await autoAssign();
+    const marketing = (await listLinks()).get(C.marketing);
+    const own = marketing?.module_id ?? '';
+    // Eine Session eines ANDEREN Moduls: darf das automatisch angelegte, leere Modul nicht blockieren
+    const [foreign] = await t.handle.db.execute<{ id: string }>(
+      sql`INSERT INTO session (id, user_id, module_id) VALUES (gen_random_uuid(), ${SINGLE_USER_ID}, ${wiModule.id}) RETURNING id`,
+    );
+    try {
+      const same = await req<MoodleCourseLink>('PUT', `/moodle/links/${C.marketing}`, { module_id: own });
+      expect(same.status).toBe(200);
+      expect(same.body).toMatchObject({ auto: 'angelegt', module_removable: true });
+
+      // Ein zweiter Kurs im selben Modul: für ihn (von Hand) und für den ersten ist es nicht mehr entfernbar
+      const second = await req<MoodleCourseLink>('PUT', `/moodle/links/${C.mathe}`, { module_id: own });
+      expect(second.body).toMatchObject({ auto: null, module_removable: false });
+      expect((await listLinks()).get(C.marketing)?.module_removable).toBe(false);
+      const again = await req<MoodleCourseLink>('PUT', `/moodle/links/${C.marketing}`, { module_id: own });
+      expect(again.body).toMatchObject({ auto: 'angelegt', module_removable: false });
+    } finally {
+      await t.handle.db.execute(sql`DELETE FROM session WHERE id = ${foreign?.id ?? null}`);
+    }
+  });
+
   it('Modul wechseln von Hand löscht den Vermerk, der Schalter „Abgleichen“ nicht', async () => {
     await start();
     await autoAssign();

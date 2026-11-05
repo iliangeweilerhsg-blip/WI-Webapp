@@ -168,7 +168,7 @@ export async function getSessionTranscript(
       const segRows = await tx
         .select({
           seg: slideSegment,
-          slideAlive: sql<boolean>`EXISTS (SELECT 1 FROM slide s WHERE s.id = ${slideSegment.slideId} AND s.deleted_at IS NULL)`,
+          slideAlive: sql<boolean>`EXISTS (SELECT 1 FROM slide s WHERE s.id = ${slideSegment}.${slideSegment.slideId} AND s.deleted_at IS NULL)`,
         })
         .from(slideSegment)
         .where(and(eq(slideSegment.sessionId, sessionId), notDeleted(slideSegment)))
