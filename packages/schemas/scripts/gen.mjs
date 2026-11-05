@@ -195,6 +195,12 @@ func sgFormatTimestamp(_ date: Date) -> String {
     throw new Error('quicktype-Ausgabe: Encoder/Decoder-Hilfsfunktionen nicht gefunden');
   text = `${text.slice(0, start)}${coders}\n\n${text.slice(end)}`;
 
+  // Swift 6: CodingKey verlangt Sendable, eine nicht-finale Klasse darf das nicht erfüllen.
+  // Ohne `final` bricht jeder Build im Swift-6-Sprachmodus ab (Standard in neuen Xcode-Projekten, #56)
+  const codingKey = 'class JSONCodingKey: CodingKey {';
+  if (!text.includes(codingKey)) throw new Error('quicktype-Ausgabe: JSONCodingKey nicht gefunden');
+  text = text.replace(codingKey, `final ${codingKey}`);
+
   const schemas = Object.entries(bundle.$defs)
     .filter(([, d]) => d.type === 'object' && d.properties)
     .map(([n, d]) => ({
