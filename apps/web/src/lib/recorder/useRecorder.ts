@@ -8,6 +8,8 @@ export interface UseRecorderResult {
   status: RecorderStatus;
   start: () => Promise<void>;
   stop: () => Promise<void>;
+  pause: () => Promise<void>;
+  resume: () => Promise<void>;
 }
 
 const IDLE: RecorderStatus = {
@@ -20,6 +22,7 @@ const IDLE: RecorderStatus = {
   wakeLock: 'inactive',
   upload: { pendingChunks: 0, shelvedChunks: 0, offline: false, retryInMs: null },
   error: null,
+  micIssue: null,
 };
 const noopSubscribe = () => () => undefined;
 
@@ -58,5 +61,7 @@ export function useRecorder(options: RecorderOptions): UseRecorderResult {
   const status = useSyncExternalStore(subscribe, getSnapshot, () => IDLE);
   const start = useCallback(async () => recorder?.start(), [recorder]);
   const stop = useCallback(async () => recorder?.stop(), [recorder]);
-  return { status, start, stop };
+  const pause = useCallback(async () => recorder?.pause(), [recorder]);
+  const resume = useCallback(async () => recorder?.resume(), [recorder]);
+  return { status, start, stop, pause, resume };
 }

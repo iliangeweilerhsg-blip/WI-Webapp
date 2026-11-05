@@ -1,7 +1,7 @@
 'use client';
 
 // Statusleiste des Live-Dashboards (F-DSH-06, 07 §3.3), von links nach rechts:
-// Aufnahme (● REC und Laufzeit), Marker (T1-17), iPad-Status, Live-Verbindung, Stopp-Hinweis, Pause und Beenden.
+// Aufnahme (● REC und Laufzeit, oder der Mikrofonzustand: Pausiert, Mikrofon fehlt, Aufnahme in anderem Tab), Marker (T1-17), iPad-Status, Live-Verbindung, Stopp-Hinweis, Pause und Beenden.
 // Keine Farbe außer dem roten Aufnahmepunkt, kein Text länger als drei Wörter, keine Animationen.
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
@@ -17,6 +17,7 @@ import { AutoStopHint } from '../autostop';
 import { formatElapsed } from '../today/model.ts';
 import { useNow } from '../today/use-today.ts';
 import { MarkerControls } from './markers/MarkerControls.tsx';
+import { useSessionRecording, type RecordingKind } from './use-recording.ts';
 import type { SessionActions } from './use-session.ts';
 
 const secondary =
@@ -50,6 +51,18 @@ export function useIpadConnected(client: SyncClient | null): boolean {
   }, [client, queryClient]);
   return devices.data?.some((d) => d.kind === 'ipad' && d.connected) ?? false;
 }
+
+const RUNNING_LABEL: Record<RecordingKind, string> = {
+  rec: 'REC',
+  starting: 'Startet',
+  paused: 'Pausiert',
+  'needs-start': 'Mikrofon aus',
+  'mic-denied': 'Zugriff verweigert',
+  'mic-missing': 'Mikrofon fehlt',
+  error: 'Aufnahme gestört',
+  'other-tab': 'Aufnahme in anderem Tab',
+  inactive: 'Nicht gestartet',
+};
 
 function Dot({ filled, record = false }: { filled: boolean; record?: boolean }) {
   return (
@@ -90,13 +103,19 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
     events: client ?? undefined,
   });
 
+  // Aufnahme (Issue #106): nur der Sync-Leader-Tab nimmt auf. REC steht nur, wenn wirklich aufgenommen wird.
+  const rec = useSessionRecording(session, client);
+  const needsMic = running && rec.kind !== 'rec';
+
   let record: { label: string; time: string | null; dot: 'rec' | 'hollow' | 'filled' };
-  if (running) {
+  if (running && rec.kind === 'rec') {
     record = {
       label: 'REC',
       time: now !== null && startedAt !== null ? formatElapsed(now - startedAt) : null,
       dot: 'rec',
     };
+  } else if (running) {
+    record = { label: RUNNING_LABEL[rec.kind], time: null, dot: 'hollow' };
   } else if (paused) {
     // Die Pause kennt der Core nicht als Zeitraum, darum zeigt sie keine Dauer (wie die Start-Karte)
     record = { label: 'Pausiert', time: null, dot: 'hollow' };
@@ -132,7 +151,9 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
           {/* Zustand für Screenreader als ruhige Statusmeldung */}
           <span role="status" className="sr-only">
             {running
-              ? 'Die Session läuft.'
+              ? rec.kind === 'rec'
+                ? 'Die Session läuft und wird aufgenommen.'
+                : `Die Session läuft. ${rec.message ?? ''}`.trim()
               : paused
                 ? 'Die Session ist pausiert.'
                 : record.label === 'Beendet'
@@ -140,6 +161,16 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
                   : 'Die Session läuft nicht.'}
           </span>
         </p>
+
+        {needsMic &&
+        (rec.kind === 'needs-start' ||
+          rec.kind === 'mic-denied' ||
+          rec.kind === 'mic-missing' ||
+          rec.kind === 'error') ? (
+          <button type="button" className={secondary} onClick={rec.start}>
+            {rec.kind === 'needs-start' ? 'Aufnahme starten' : 'Erneut versuchen'}
+          </button>
+        ) : null}
 
         <MarkerControls sessionId={session.id} active={active} startedAt={startedAt} client={client} />
 
@@ -209,6 +240,11 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
           )}
         </div>
       </div>
+      {needsMic && rec.message && rec.kind !== 'other-tab' ? (
+        <p role="status" className="px-3 pb-2 text-sm text-text-muted" data-testid="recording-hint">
+          {rec.message}
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="px-3 pb-2 text-sm text-danger">
           {error}

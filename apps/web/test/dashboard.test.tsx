@@ -4,7 +4,9 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import type { Notebook, Session } from '@sg/shared';
 import { SessionView } from '../src/components/dashboard/SessionView.tsx';
+import { RecordingEnvContext } from '../src/components/dashboard/use-recording.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
+import { fakeRecording } from './recording-fakes.ts';
 import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
@@ -133,9 +135,11 @@ function boot(
   return render(
     <ThemeProvider>
       <QueryProvider>
-        <SyncProvider client={sync.client}>
-          <SessionView />
-        </SyncProvider>
+        <RecordingEnvContext.Provider value={fakeRecording().env}>
+          <SyncProvider client={sync.client}>
+            <SessionView />
+          </SyncProvider>
+        </RecordingEnvContext.Provider>
       </QueryProvider>
     </ThemeProvider>,
   );

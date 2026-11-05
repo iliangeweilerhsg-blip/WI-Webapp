@@ -1,4 +1,5 @@
 export * from './codec.ts';
+export * from './leader-recording.ts';
 export * from './level.ts';
 export * from './recorder.ts';
 export * from './store.ts';

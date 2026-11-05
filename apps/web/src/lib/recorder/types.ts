@@ -94,6 +94,9 @@ export interface UploaderStatus {
 export type RecorderState =
   'idle' | 'starting' | 'recording' | 'paused' | 'stopping' | 'stopped' | 'error' | 'unsupported';
 
+/** Warum das Mikrofon nicht geöffnet werden konnte (für eine verständliche Anzeige) */
+export type MicIssue = 'denied' | 'missing';
+
 export interface RecorderStatus {
   state: RecorderState;
   /** Aktuelle bzw. zuletzt laufende Aufnahme */
@@ -110,4 +113,6 @@ export interface RecorderStatus {
   upload: UploaderStatus;
   /** Verständliche Fehlermeldung, wenn `state = 'error'` oder ein Teilproblem vorliegt */
   error: string | null;
+  /** Gesetzt, wenn `getUserMedia` scheiterte: Zugriff verweigert bzw. kein Mikrofon da */
+  micIssue: MicIssue | null;
 }
