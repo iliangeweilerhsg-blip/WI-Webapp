@@ -13,6 +13,12 @@ In `~/StudienGehirn/config/.env` diese Zeile ergänzen (falls noch nicht vorhand
 SG_MOODLE_URL=https://moodle2.uni-potsdam.de
 ```
 
+Den Core liest diese Datei nur **beim Start**. Läuft er schon, danach einmal neu starten, sonst bleibt die Adresse unbekannt und `pnpm sg moodle status` meldet weiter „nicht eingerichtet“:
+
+```bash
+pnpm sg stop && pnpm sg start
+```
+
 ## 2. Anmelden
 
 Im Terminal im Repo-Ordner:
@@ -58,6 +64,8 @@ pnpm sg moodle status
 ```
 
 Läuft der Core, steht dort `Zustand (laut Core): ok`, dazu Name und Seite. Direkt nach der Anmeldung kann der Core bis zu einer Minute lang noch den alten Zustand melden. Läuft der Core nicht, zeigt der Befehl nur, ob ein Eintrag im Schlüsselbund liegt.
+
+Meldet der Befehl trotz Token weiter `nicht eingerichtet` (und `Seite:` fehlt), kennt der laufende Core die Adresse aus Schritt 1 noch nicht: einmal `pnpm sg stop && pnpm sg start`, dann erneut prüfen.
 
 ## Abmelden
 
