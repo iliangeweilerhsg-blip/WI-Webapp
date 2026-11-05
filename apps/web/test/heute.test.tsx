@@ -16,16 +16,21 @@ import {
   formatElapsed,
   formatUntil,
   pickCardSession,
-} from '../src/components/heute/model.ts';
-import { ApiRequestError } from '../src/lib/api.ts';
+} from '../src/components/today/model.ts';
+import { friendlyMessage } from '../src/lib/api.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
-import { mergeSession, sessionErrorMessage, sessionHref } from '../src/lib/sessions.ts';
+import { mergeSession, sessionHref, stopSession } from '../src/lib/sessions.ts';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { installCalendarCore, makeEvent, type CalendarCore } from './calendar-core.ts';
 import { makeModule, makeSemester, makeSession } from './fake-core.ts';
 
 const push = vi.fn();
+const dashboard = vi.hoisted(() => ({ available: true }));
+vi.mock('../src/lib/sessions.ts', async (original) => ({
+  ...(await original<typeof import('../src/lib/sessions.ts')>()),
+  isDashboardAvailable: () => dashboard.available,
+}));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/',
   useSearchParams: () => new URLSearchParams(''),
@@ -152,6 +157,7 @@ const card = () => screen.getByRole('region', { name: /Datenbanksysteme/ });
 const calls = (path: RegExp) => core.requests.filter((r) => r.method === 'POST' && path.test(r.path));
 
 beforeEach(() => {
+  dashboard.available = true;
   vi.useFakeTimers({ toFake: ['Date'] });
   push.mockClear();
 });
@@ -196,7 +202,7 @@ describe('Heute: Start-Karte nach Zustand', () => {
       sessionHref(SESSION_ID),
     );
     expect(within(c).getByRole('button', { name: 'Pause' })).toBeInTheDocument();
-    expect(within(c).getByRole('button', { name: 'Stopp' })).toBeInTheDocument();
+    expect(within(c).getByRole('button', { name: 'Beenden' })).toBeInTheDocument();
   });
 
   it('pausiert: „Fortsetzen“, keine laufende Dauer', async () => {
@@ -330,6 +336,28 @@ describe('Heute: Aktionen', () => {
     expect(await screen.findByRole('link', { name: 'Zur Vorlesung' })).toBeInTheDocument();
   });
 
+  it('Start ohne Dashboard-Route: keine Weiterleitung, Karte zeigt läuft mit Link', async () => {
+    dashboard.available = false;
+    const user = userEvent.setup();
+    boot();
+    await user.click(await screen.findByRole('button', { name: 'Start' }));
+    expect(await screen.findByRole('link', { name: 'Zur Vorlesung' })).toHaveAttribute(
+      'href',
+      sessionHref(SESSION_ID),
+    );
+    expect(card()).toHaveAttribute('data-state', 'laeuft');
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it('Beenden steht abgesetzt von Pause', async () => {
+    boot({
+      now: '2026-11-04T07:20:00Z',
+      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
+    });
+    expect(await screen.findByRole('button', { name: 'Beenden' })).toHaveClass('ml-4');
+    expect(screen.queryByRole('button', { name: 'Stopp' })).toBeNull();
+  });
+
   it('Start beendet eine inzwischen laufende andere Session und sagt das ruhig', async () => {
     const user = userEvent.setup();
     boot({ sessions: [planned()], events: [EVENT_DBS] });
@@ -361,7 +389,7 @@ describe('Heute: Aktionen', () => {
     expect(card()).toHaveAttribute('data-state', 'pausiert');
     await user.click(screen.getByRole('button', { name: 'Fortsetzen' }));
     expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Stopp' }));
+    await user.click(screen.getByRole('button', { name: 'Beenden' }));
     await waitFor(() => expect(card()).toHaveAttribute('data-state', 'beendet'));
     expect(calls(/pause$/)).toHaveLength(1);
     expect(calls(/resume$/)).toHaveLength(1);
@@ -701,17 +729,21 @@ describe('mergeSession', () => {
   });
 });
 
-describe('sessionErrorMessage', () => {
-  const api = (code: string, status = 409) =>
-    new ApiRequestError({ kind: 'api', status, code, message: `${code}: x`, userMessage: 'allgemein' });
+describe('friendlyMessage (Sessions)', () => {
+  async function failWith(code: string, status: number) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ error: { code, message: 'x' } }), { status })),
+    );
+    return friendlyMessage(await stopSession(SESSION_ID).catch((e: unknown) => e));
+  }
 
-  it('übersetzt die Fehlercodes der Sessions', () => {
-    expect(sessionErrorMessage(api('session_transition_invalid'))).toMatch(/gerade nicht/);
-    expect(sessionErrorMessage(api('session_not_active'))).toMatch(/läuft nicht mehr/);
-    expect(sessionErrorMessage(api('session_not_found', 404))).toMatch(/gibt es nicht mehr/);
-    expect(sessionErrorMessage(api('session_active'))).toMatch(/Beende sie zuerst/);
-    expect(sessionErrorMessage(api('session_exists'))).toMatch(/schon eine Session/);
-    expect(sessionErrorMessage(api('anderes'))).toBe('allgemein');
-    expect(sessionErrorMessage(new Error('x'))).toBe('Das hat nicht geklappt.');
+  it('übersetzt die Fehlercodes der Sessions', async () => {
+    expect(await failWith('session_transition_invalid', 409)).toMatch(/gerade nicht/);
+    expect(await failWith('session_not_active', 409)).toMatch(/läuft nicht mehr/);
+    expect(await failWith('session_not_found', 404)).toMatch(/gibt es nicht mehr/);
+    expect(await failWith('session_active', 409)).toMatch(/Beende sie zuerst/);
+    expect(await failWith('session_exists', 409)).toMatch(/schon eine Session/);
+    expect(friendlyMessage(new Error('x'))).toBe('Das hat nicht geklappt.');
   });
 });

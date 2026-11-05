@@ -7,7 +7,7 @@ import {
   type SessionStartResult,
   type StopReason,
 } from '@sg/shared';
-import { ApiRequestError, apiGet, apiSend, friendlyMessage } from './api.ts';
+import { apiGet, apiSend } from './api.ts';
 
 /** `POST /sessions/{id}/stop`. Ohne Grund gilt `manuell`. Gleicher Zielzustand ist kein Fehler (§9.1). */
 export function stopSession(id: string, reason?: StopReason): Promise<Session> {
@@ -24,6 +24,18 @@ export function extendSession(id: string, minutes?: number): Promise<Session> {
   return apiSend('POST', `/sessions/${id}/extend`, SessionSchema, {
     body: minutes === undefined ? {} : { minutes },
   });
+}
+
+/**
+ * SCHALTER FÜR T1-04: Solange die Route `/session` nicht existiert, bleibt die Start-Karte nach dem Start auf
+ * „läuft“ und zeigt nur den Link „Zur Vorlesung“. T1-04 setzt das auf `true`; dann leitet der Start (F-SES-02:
+ * „Dashboard öffnet sich im Live-Layout“) automatisch weiter.
+ */
+export const SESSION_DASHBOARD_AVAILABLE = false;
+
+/** Wird von Tests überschrieben; sonst gilt `SESSION_DASHBOARD_AVAILABLE` */
+export function isDashboardAvailable(): boolean {
+  return SESSION_DASHBOARD_AVAILABLE;
 }
 
 /** Pfad des Live-Dashboards (T1-04, `apps/web/src/app/session/**`). Query-Parameter statt dynamischem Segment (§5). */
@@ -63,28 +75,6 @@ export function pauseSession(id: string): Promise<Session> {
 /** `POST /sessions/{id}/resume` */
 export function resumeSession(id: string): Promise<Session> {
   return apiSend('POST', `/sessions/${id}/resume`, SessionSchema);
-}
-
-/** Ruhige Texte zu den Fehlercodes der Sessions (VERTRAEGE §15). Alles andere läuft über `friendlyMessage`. */
-export function sessionErrorMessage(error: unknown): string {
-  if (error instanceof ApiRequestError && error.kind === 'api') {
-    switch (error.code) {
-      case 'session_transition_invalid':
-        return 'Das geht bei dieser Session gerade nicht. Die Ansicht wird aktualisiert.';
-      case 'session_not_active':
-        return 'Diese Session läuft nicht mehr.';
-      case 'session_not_found':
-        return 'Diese Session gibt es nicht mehr.';
-      case 'session_active':
-        return 'Eine laufende Session lässt sich nicht löschen. Beende sie zuerst.';
-      case 'session_exists':
-        return 'Zu diesem Termin gibt es schon eine Session.';
-      case 'module_not_found':
-        return 'Dieses Modul gibt es nicht mehr.';
-      default:
-    }
-  }
-  return friendlyMessage(error);
 }
 
 const time = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : Number.NaN);

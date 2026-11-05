@@ -6,12 +6,12 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { Session } from '@sg/shared';
-import { ApiRequestError } from '../../lib/api.ts';
+import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import { moduleHref } from '../../lib/nav.ts';
 import {
+  isDashboardAvailable,
   pauseSession,
   resumeSession,
-  sessionErrorMessage,
   sessionHref,
   startSession,
   stopSession,
@@ -33,6 +33,9 @@ const primary =
   'inline-flex min-h-11 items-center justify-center rounded-md bg-accent px-6 py-2 text-md font-medium text-accent-contrast disabled:opacity-50';
 const secondary =
   'inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong px-4 py-2 text-md hover:bg-surface-raised disabled:opacity-50';
+
+const ghost =
+  'inline-flex min-h-11 items-center justify-center rounded-md px-4 py-2 text-md text-text-muted underline-offset-4 hover:bg-surface-raised hover:text-text hover:underline disabled:opacity-50';
 
 type Action = 'start' | 'pause' | 'resume' | 'stop';
 
@@ -104,8 +107,8 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
           onSession(result.ended_session);
           toast.show({ message: 'Die vorherige Session wurde beendet.' });
         }
-        // F-SES-02: Das Live-Dashboard öffnet sich mit dem Start (T1-04)
-        router.push(sessionHref(session.id));
+        // F-SES-02: Das Live-Dashboard öffnet sich mit dem Start. Erst, wenn die Route existiert (T1-04, siehe Schalter)
+        if (isDashboardAvailable()) router.push(sessionHref(session.id));
         return;
       }
       const updated =
@@ -116,7 +119,7 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
             : await stopSession(session.id);
       onSession(updated);
     } catch (cause) {
-      setError(sessionErrorMessage(cause));
+      setError(friendlyMessage(cause));
       // Der Zustand im Core ist ein anderer als gedacht: Ansicht auffrischen
       if (
         cause instanceof ApiRequestError &&
@@ -217,13 +220,14 @@ export function StartCard({ entry, now, onSession, onRefetch }: StartCardProps) 
                     ? 'Setzt fort …'
                     : 'Fortsetzen'}
               </button>
+              {/* Mit Abstand und ohne Rahmen, damit „Beenden“ nicht versehentlich statt „Pause“ getroffen wird */}
               <button
                 type="button"
-                className={secondary}
+                className={`${ghost} ml-4 sm:ml-8`}
                 disabled={busy !== null}
                 onClick={() => void run('stop')}
               >
-                {busy === 'stop' ? 'Beendet …' : 'Stopp'}
+                {busy === 'stop' ? 'Beende …' : 'Beenden'}
               </button>
             </>
           ) : null}
