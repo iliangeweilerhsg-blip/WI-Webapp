@@ -88,8 +88,8 @@ export function DataSettings() {
         {status.next_run_at ? ` · nächstes: ${new Date(status.next_run_at).toLocaleString('de-DE')}` : ''}
       </p>
 
-      {data.backup_encryption ? (
-        <div role="alert" className="space-y-2 rounded-md border border-border bg-accent-soft p-3 text-sm">
+      {data.backup_encryption && data.backup_target !== null ? (
+        <div role="status" className="space-y-2 rounded-md border border-border bg-accent-soft p-3 text-sm">
           <p>
             „Backup verschlüsseln“ ist noch eingeschaltet, Verschlüsselung ist aber noch nicht verfügbar.
             Deshalb schlagen Backups fehl, es wird nie unverschlüsselt gesichert, solange die Option an ist.
@@ -102,7 +102,10 @@ export function DataSettings() {
               update.mutate(
                 { data: { backup_encryption: false } },
                 {
-                  onSuccess: () => toast.show({ message: 'Backups laufen jetzt unverschlüsselt' }),
+                  onSuccess: () =>
+                    toast.show({
+                      message: 'Backups laufen jetzt unverschlüsselt',
+                    }),
                   onError: fail,
                 },
               )

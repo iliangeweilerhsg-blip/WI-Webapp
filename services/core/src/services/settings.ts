@@ -16,7 +16,7 @@ import {
   type Settings,
   type SettingsUpdate,
 } from '@sg/shared';
-import { BackupTargetError, checkBackupTarget } from '@sg/shared/backup-target';
+import { BackupTargetError, checkBackupTargetAsync } from '@sg/shared/backup-target';
 import type { z } from 'zod';
 import type { Config } from '../config.ts';
 import type { Db, DbOrTx } from '../db/client.ts';
@@ -107,9 +107,9 @@ export async function getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): 
  * (`@sg/shared/backup-target`). Abgelehnt werden `SG_DATA_DIR` samt Inhalt und Systemordner. Symlinks sind erlaubt,
  * das Backup (T1-18) prüft das Ziel beim Lauf erneut.
  */
-function normalizeBackupTarget(target: string, config: Pick<Config, 'dataDir'>): string {
+async function normalizeBackupTarget(target: string, config: Pick<Config, 'dataDir'>): Promise<string> {
   try {
-    return checkBackupTarget(target, config.dataDir, { dataDirPolicy: 'whole', createMissing: false });
+    return await checkBackupTargetAsync(target, config.dataDir, { createMissing: false });
   } catch (failure) {
     const message =
       failure instanceof BackupTargetError
@@ -141,7 +141,7 @@ export async function updateSettings(
   if (target !== undefined && target !== null) {
     update = {
       ...update,
-      data: { ...update.data, backup_target: normalizeBackupTarget(target, config) },
+      data: { ...update.data, backup_target: await normalizeBackupTarget(target, config) },
     };
   }
   return db.transaction(async (tx) => {

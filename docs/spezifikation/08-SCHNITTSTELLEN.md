@@ -252,7 +252,6 @@ Texte in Markdown mit LaTeX (`$…$`, `$$…$$`).
 │   ├── imports/<session_id>/…
 │   └── videos/<video_id>.mp4, <video_id>.vtt
 ├── vault/             (§8)
-├── backups/           (falls lokales Ziel)
 └── logs/              core.log, worker.log (rotierend, 14 Tage)
 ```
 

@@ -131,12 +131,12 @@ export async function readBackupSettings(pg: PgAccess): Promise<BackupSettings> 
 
 /**
  * Prüft das Ziel mit der gemeinsamen Regel aus `@sg/shared/backup-target` (wie `PATCH /settings`): absoluter Pfad,
- * Symlinks aufgelöst, nicht in `media/` oder `vault/` (sonst kopiert sich das Backup in sich selbst), kein
- * Systemordner. Ein fehlender Ordner wird angelegt, wenn der Elternordner existiert (ein nicht eingehängter
+ * Symlinks aufgelöst, nicht im Datenordner (auch nicht in `media/` oder `vault/`: sonst kopiert sich das Backup in
+ * sich selbst), kein Systemordner. Ein fehlender Ordner wird angelegt, wenn der Elternordner existiert (ein nicht eingehängter
  * Datenträger legt keinen Ordner an).
  */
 export function validateTarget(target: string, dataDir: string): string {
-  return checkBackupTarget(target, dataDir, { dataDirPolicy: 'media-vault', createMissing: true });
+  return checkBackupTarget(target, dataDir, { createMissing: true });
 }
 
 export async function countObjects(pg: PgAccess, db?: string): Promise<Record<string, number>> {
@@ -254,7 +254,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     if (!targetSetting) return await fail('Es ist kein Backup-Ziel eingestellt (Einstellungen → Daten).', 2);
     if (settings.encryption) {
       return await fail(
-        'Verschlüsselte Backups (age) sind noch nicht umgesetzt. Schalte „Backup verschlüsseln“ aus, um unverschlüsselt zu sichern.',
+        'Verschlüsselte Backups (age) sind noch nicht umgesetzt. Wähle in den Einstellungen → Daten „Ohne Verschlüsselung sichern“, um unverschlüsselt zu sichern.',
         2,
       );
     }

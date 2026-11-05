@@ -288,9 +288,10 @@ describe('Ziel prüfen', () => {
     expect(() => validateTarget('relativ/pfad', dataDir)).toThrow(/absolut/);
     expect(() => validateTarget(join(dataDir, 'media'), dataDir)).toThrow(/media/);
     expect(() => validateTarget(join(dataDir, 'vault', 'x'), dataDir)).toThrow(/vault/);
-    // backups/ im Datenordner ist erlaubt (08 §7)
+    // der ganze Datenordner ist gesperrt, auch backups/ darin
     mkdirSync(join(dataDir, 'backups'));
-    expect(validateTarget(join(dataDir, 'backups'), dataDir)).toBe(join(dataDir, 'backups'));
+    expect(() => validateTarget(join(dataDir, 'backups'), dataDir)).toThrow(/Datenordner.*externe/s);
+    expect(() => validateTarget(dataDir, dataDir)).toThrow(/Datenordner/);
   });
 });
 

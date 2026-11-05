@@ -32,7 +32,6 @@ export const DATA_SUBDIRS = [
   'media/imports',
   'media/videos',
   'vault',
-  'backups',
   'logs',
   'run',
 ] as const;

@@ -179,7 +179,7 @@ describe('DataSettings', () => {
     stubCore((c) => (c.path.startsWith('/backups') ? backupOverview('/x') : settings('/x')));
     mount(<DataSettings />);
     await screen.findByText(/Letztes Backup:/);
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText(/noch nicht verfügbar/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/verschlüsseln/i)).not.toBeInTheDocument();
   });
 
@@ -192,7 +192,7 @@ describe('DataSettings', () => {
     });
     const user = userEvent.setup();
     mount(<DataSettings />);
-    expect(await screen.findByRole('alert')).toHaveTextContent(/noch nicht verfügbar/);
+    expect(await screen.findByText(/noch nicht verfügbar/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Ohne Verschlüsselung sichern' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ data: { backup_encryption: false } });
