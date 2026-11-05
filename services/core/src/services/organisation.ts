@@ -18,6 +18,7 @@ import { notDeleted } from '../db/schema/common.ts';
 import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage, type Page } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
+import { ensureDefaultNotebooks } from './notebooks.ts';
 
 /** Feste Palette (07 §8), Reihenfolge der automatischen Farbvergabe */
 export const MODULE_COLORS: readonly ModuleColor[] = [
@@ -357,6 +358,8 @@ export async function createModule(db: Db, input: ModuleCreate): Promise<Module>
           descriptionMd: input.description_md ?? null,
         })
         .returning();
+      // Notizbücher „Vorlesung“ und „Übung“ (VERTRAEGE §7.4)
+      await ensureDefaultNotebooks(tx, id);
       return toApiModule(row as ModuleRow);
     });
   } catch (error) {

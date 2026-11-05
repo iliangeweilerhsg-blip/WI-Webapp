@@ -126,6 +126,7 @@ struct SchemaBundle: Codable {
     let pairConfirmRequest: PairConfirmRequest?
     let pairingCode: PairingCode?
     let pairingRequest: PairingRequest?
+    let pairingRequestList: PairingRequestList?
     let pairResponse: PairResponse?
     let pairStartRequest: PairStartRequest?
     let pairStartResponse: PairStartResponse?
@@ -363,6 +364,7 @@ struct SchemaBundle: Codable {
         case pairConfirmRequest = "PairConfirmRequest"
         case pairingCode = "PairingCode"
         case pairingRequest = "PairingRequest"
+        case pairingRequestList = "PairingRequestList"
         case pairResponse = "PairResponse"
         case pairStartRequest = "PairStartRequest"
         case pairStartResponse = "PairStartResponse"
@@ -620,6 +622,7 @@ extension SchemaBundle {
         pairConfirmRequest: PairConfirmRequest?? = nil,
         pairingCode: PairingCode?? = nil,
         pairingRequest: PairingRequest?? = nil,
+        pairingRequestList: PairingRequestList?? = nil,
         pairResponse: PairResponse?? = nil,
         pairStartRequest: PairStartRequest?? = nil,
         pairStartResponse: PairStartResponse?? = nil,
@@ -857,6 +860,7 @@ extension SchemaBundle {
             pairConfirmRequest: pairConfirmRequest ?? self.pairConfirmRequest,
             pairingCode: pairingCode ?? self.pairingCode,
             pairingRequest: pairingRequest ?? self.pairingRequest,
+            pairingRequestList: pairingRequestList ?? self.pairingRequestList,
             pairResponse: pairResponse ?? self.pairResponse,
             pairStartRequest: pairStartRequest ?? self.pairStartRequest,
             pairStartResponse: pairStartResponse ?? self.pairStartResponse,
@@ -7294,8 +7298,9 @@ extension PairStartResponse {
     }
 }
 
-/// Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur
-/// lokal; Ereignis pairing.requested)
+/// Offenes Kopplungsfenster für die Anzeige in der Web-App (Antwort von POST
+/// /devices/pairings, nur lokal). Anfragen von Geräten liefern das Ereignis
+/// pairing.requested und GET /devices/pairings/requests (PairingRequestList)
 // MARK: - PairingCode
 struct PairingCode: Codable {
     let code: String
@@ -7363,8 +7368,10 @@ extension PairingCode {
     }
 }
 
-/// Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen
-/// (DELETE /devices/pairings/requests/{request_id})
+/// Anfrage eines Geräts über pair/start (Nutzlast des Ereignisses pairing.requested). Die
+/// Web-App listet sie und kann sie ablehnen (DELETE
+/// /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App
+/// empfiehlt darum den QR-Weg
 // MARK: - PairingRequest
 struct PairingRequest: Codable {
     let deviceName: String
@@ -7413,6 +7420,53 @@ extension PairingRequest {
             pairingID: pairingID ?? self.pairingID,
             requestID: requestID ?? self.requestID,
             requestedAt: requestedAt ?? self.requestedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /devices/pairings/requests (nur lokal): offene (nicht abgelehnte) Anfragen des
+/// aktuellen Kopplungsfensters, älteste zuerst. Ohne offenes Fenster leer. Höchstens 10,
+/// danach antwortet pair/start mit 429 pairing_requests_full
+// MARK: - PairingRequestList
+struct PairingRequestList: Codable {
+    let items: [PairingRequest]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: PairingRequestList convenience initializers and mutators
+
+extension PairingRequestList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(PairingRequestList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [PairingRequest]? = nil
+    ) -> PairingRequestList {
+        return PairingRequestList(
+            items: items ?? self.items
         )
     }
 
@@ -11730,8 +11784,10 @@ extension SyncEvent {
 /// Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem
 /// Kalendertermin (null bei spontanen Sessions).
 ///
-/// Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen
-/// (DELETE /devices/pairings/requests/{request_id})
+/// Anfrage eines Geräts über pair/start (Nutzlast des Ereignisses pairing.requested). Die
+/// Web-App listet sie und kann sie ablehnen (DELETE
+/// /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App
+/// empfiehlt darum den QR-Weg
 // MARK: - SyncEventData
 struct SyncEventData: Codable {
     let autoStopExtendedUntil: Date?
@@ -12632,8 +12688,10 @@ extension SyncServerMessage {
 /// Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem
 /// Kalendertermin (null bei spontanen Sessions).
 ///
-/// Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen
-/// (DELETE /devices/pairings/requests/{request_id})
+/// Anfrage eines Geräts über pair/start (Nutzlast des Ereignisses pairing.requested). Die
+/// Web-App listet sie und kann sie ablehnen (DELETE
+/// /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App
+/// empfiehlt darum den QR-Weg
 // MARK: - SyncServerMessageData
 struct SyncServerMessageData: Codable {
     let createdAt: CreatedAt?
@@ -15441,6 +15499,13 @@ extension PairingRequest {
         try container.encode(pairingID, forKey: .pairingID)
         try container.encode(requestID, forKey: .requestID)
         try container.encode(requestedAt, forKey: .requestedAt)
+    }
+}
+
+extension PairingRequestList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
     }
 }
 
