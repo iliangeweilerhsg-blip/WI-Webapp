@@ -75,11 +75,12 @@ def refresh(conn: Conn, session_id: Any, job_types: Iterable[str]) -> None:
             continue
         conn.execute(
             "UPDATE session SET processing = COALESCE(processing, '{}'::jsonb) || %s, "
-            "updated_at = now() WHERE id = %s",
+            "updated_at = greatest(clock_timestamp(), updated_at + interval '1 millisecond') WHERE id = %s",
             (Jsonb({job_type: row[0]}), sid),
         )
     conn.execute(
-        "UPDATE session SET state = 'verarbeitet', updated_at = now() "
+        "UPDATE session SET state = 'verarbeitet', "
+        "updated_at = greatest(clock_timestamp(), updated_at + interval '1 millisecond') "
         "WHERE id = %s AND state = 'beendet' AND NOT EXISTS ("
         "  SELECT 1 FROM job WHERE session_id = %s AND deleted_at IS NULL "
         "  AND state IN ('wartet', 'laeuft'))",

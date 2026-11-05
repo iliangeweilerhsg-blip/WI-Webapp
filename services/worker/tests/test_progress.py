@@ -462,3 +462,45 @@ def test_failure_hooks_run_per_session_right_after_commit(
     with pytest.raises(psycopg.OperationalError):
         w._recover(conn)
     assert seen == [{"n": 0}]
+
+
+def test_updated_at_stays_monotonic_when_worker_waits_for_core_stop(
+    database_url: str, connect_kwargs: dict[str, Any], conn: psycopg.Connection[Any]
+) -> None:
+    """Die Worker-Transaktion beginnt, während der Stopp die Session hält, und schreibt danach.
+    Mit `now()` (Transaktionsbeginn) läge `updated_at` vor dem des Stopps, und Web-Clients
+    verwürfen `session.updated` mit `verarbeitet` (Prüfung auf `<`)."""
+    add_session(conn)
+    add_job(conn, state="fertig")
+    worker_pid: list[int] = []
+    errors: list[BaseException] = []
+
+    def worker() -> None:
+        try:
+            with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as wc:
+                worker_pid.append(wc.info.backend_pid)
+                with wc.transaction():
+                    progress.refresh(wc, SID, ["transcribe"])
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as core:
+        core.execute("BEGIN")
+        core.execute("SELECT 1 FROM session WHERE id = %s FOR NO KEY UPDATE", (SID,))
+        thread = threading.Thread(target=worker)
+        thread.start()
+        _wait_until_lock_wait(core, worker_pid)
+        time.sleep(0.3)  # der Worker wartet nachweislich eine Weile
+        row = core.execute(
+            "UPDATE session SET updated_at = clock_timestamp() WHERE id = %s RETURNING updated_at",
+            (SID,),
+        ).fetchone()
+        assert row is not None
+        core_updated_at = row[0]
+        core.execute("COMMIT")
+        thread.join(30)
+    assert not thread.is_alive() and errors == []
+    final = conn.execute("SELECT state, updated_at FROM session WHERE id = %s", (SID,)).fetchone()
+    assert final is not None
+    assert final[0] == "verarbeitet"
+    assert final[1] > core_updated_at

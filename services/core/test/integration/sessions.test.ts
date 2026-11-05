@@ -49,6 +49,8 @@ import {
   type TransitionInput,
 } from '../../src/services/sessions.ts';
 import { completeRecording, createRecording, storeChunk } from '../../src/services/recordings.ts';
+import { deleteModule, deleteSemester } from '../../src/services/organisation.ts';
+import { restoreWithOps } from '../../src/services/trash-ops.ts';
 import { autoStopBoundary } from '../../src/services/auto-stop.ts';
 import { startTestApp, testConfig, testDatabaseUrl, type TestApp } from './helpers.ts';
 
@@ -2065,5 +2067,78 @@ describe('Papierkorb und Termine', () => {
     const stamps = updatedEventFor(id).map((e) => new Date(e.updated_at).getTime());
     expect(stamps.length).toBe(13);
     for (let i = 1; i < stamps.length; i += 1) expect(stamps[i]).toBeGreaterThan(stamps[i - 1]!);
+  });
+});
+
+// --- Löschen von Modul/Semester gegen Zustandswechsel, Papierkorb-Ereignisse -----------------------------------
+
+describe('Kaskaden und Sperrreihenfolge', () => {
+  /** Eigenes Semester mit Modul und einer Session in `state` */
+  async function mkTree(state: 'bereit' | 'laeuft') {
+    const semesterId = uuidv7();
+    const mod = uuidv7();
+    await handle.db.insert(semester).values({ id: semesterId, ...base, name: `S ${semesterId}` });
+    await handle.db.insert(courseModule).values({ id: mod, ...base, semesterId, name: 'M', color: 'mod-02' });
+    const id = await mkSession({
+      moduleId: mod,
+      state,
+      ...(state === 'laeuft' ? { startedAt: T(0), startedFrom: 'mac' as const } : {}),
+    });
+    return { semesterId, moduleId: mod, id };
+  }
+
+  const settled = (rs: PromiseSettledResult<unknown>[]) =>
+    rs.map((r) =>
+      r.status === 'fulfilled' ? 'ok' : r.reason instanceof HttpError ? r.reason.code : String(r.reason),
+    );
+
+  it.each([
+    ['Modul', 'start'],
+    ['Modul', 'stop'],
+    ['Semester', 'start'],
+    ['Semester', 'stop'],
+  ] as const)('%s löschen gegen REST-%s: kein Deadlock (40P01)', async (what, action) => {
+    for (let round = 0; round < 10; round += 1) {
+      const tree = await mkTree(action === 'stop' ? 'laeuft' : 'bereit');
+      const del = () =>
+        what === 'Modul'
+          ? deleteModule(handle.db, tree.moduleId)
+          : deleteSemester(handle.db, tree.semesterId);
+      const change = () => transition(tree.id, action, { at: T(30), startedFrom: 'mac' });
+      const outcomes = settled(
+        await Promise.allSettled([
+          new Promise((r) => setTimeout(r, Math.random() * 4)).then(del),
+          new Promise((r) => setTimeout(r, Math.random() * 4)).then(change),
+        ]),
+      );
+      for (const outcome of outcomes) {
+        expect(['ok', 'session_active', 'session_not_found'], outcome).toContain(outcome);
+      }
+      await handle.sql`DELETE FROM sync_op`;
+    }
+  });
+
+  it('Löschen einer Session hebt updated_at an und sendet session.updated; Wiederherstellen ebenso', async () => {
+    const id = await mkSession({ state: 'beendet', startedAt: T(0), endedAt: T(5), stopReason: 'manuell' });
+    const before = (await row(id)).updatedAt.getTime();
+    await deleteSession(handle.db, id);
+    const deleted = updatedEventFor(id).at(-1)!;
+    expect(deleted.deleted_at).not.toBeNull();
+    expect(new Date(deleted.updated_at).getTime()).toBeGreaterThan(before);
+    events = [];
+    await restoreWithOps(handle.db, id);
+    const restored = updatedEventFor(id).at(-1)!;
+    expect(restored.deleted_at).toBeNull();
+    expect(new Date(restored.updated_at).getTime()).toBeGreaterThan(new Date(deleted.updated_at).getTime());
+  });
+
+  it('Modul löschen und wiederherstellen sendet session.updated für die Sessions des Moduls', async () => {
+    const tree = await mkTree('bereit');
+    events = [];
+    await deleteModule(handle.db, tree.moduleId);
+    expect(updatedEventFor(tree.id).map((e) => e.deleted_at !== null)).toEqual([true]);
+    events = [];
+    await restoreWithOps(handle.db, tree.moduleId);
+    expect(updatedEventFor(tree.id).map((e) => e.deleted_at)).toEqual([null]);
   });
 });

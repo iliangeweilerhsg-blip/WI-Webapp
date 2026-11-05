@@ -183,6 +183,10 @@ export async function notifySessionUpdated(db: Db, payload: string): Promise<voi
 }
 
 /** `session.updated` für den aktuellen Stand der Session (auch gelöscht) nach dem Commit senden */
+export async function emitSessionUpdated(tx: Tx, id: string): Promise<void> {
+  await emitUpdated(tx, id);
+}
+
 async function emitUpdated(tx: Tx, id: string): Promise<void> {
   const loaded = await loadSession(tx, id);
   if (loaded) await publisher(tx, { type: 'event', name: 'session.updated', data: toApiSession(loaded) });
@@ -300,7 +304,7 @@ export async function attachDeckToSession(tx: Tx, sessionId: string, deckId: str
   await linkDeckToSession(tx, deckId, sessionId);
   const changed = await tx
     .update(session)
-    .set({ slideDeckId: deckId, updatedAt: sql`now()` })
+    .set({ slideDeckId: deckId, updatedAt: bumpedAt() })
     .where(and(eq(session.id, sessionId), isNull(session.slideDeckId), notDeleted(session)))
     .returning({ id: session.id });
   if (changed.length > 0) await emitUpdated(tx, sessionId);
@@ -1044,7 +1048,6 @@ export async function updateSession(
  */
 export async function deleteSession(db: Db, id: string): Promise<void> {
   await softDeleteWithOps(db, 'session', id, lockSessionTransitions);
-  await db.transaction((tx) => emitUpdated(tx, id));
 }
 
 // --- Snapshot (§7.2, §11.1) ---------------------------------------------------------------------------------
