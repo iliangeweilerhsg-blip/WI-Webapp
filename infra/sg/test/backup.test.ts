@@ -1392,3 +1392,54 @@ describe('Hängendes „läuft“ nach einem Absturz (#113)', () => {
     expect(existsSync(pidFile(s.dataDir, 'restore-test', process.pid))).toBe(false);
   });
 });
+
+describe('Restore liest den Stand ohne Symlink-Folgen (#119)', () => {
+  const STAND = '20261104T030012Z';
+  /** media/photos im Stand gegen einen Link auf einen fremden Ordner mit passend großer Datei tauschen */
+  function plantLink(target: string): string {
+    const fremd = join(tmp(), 'fremd');
+    mkdirSync(fremd);
+    writeFileSync(join(fremd, 'a.jpg'), 'GEHE'); // gleiche Größe wie 'JPEG': das Manifest passt weiter
+    const photos = join(target, STAND, 'media', 'photos');
+    rmSync(photos, { recursive: true });
+    symlinkSync(fremd, photos);
+    return fremd;
+  }
+
+  it('automatischer Test: Symlink unter media/ ergibt "beschaedigt"', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    plantLink(s.target);
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ state: 'fehler', reason: 'beschaedigt' });
+  });
+
+  it('vollständiger Restore: Symlink unter media/ bricht vor jeder Änderung ab, keine fremde Datei im Datenordner', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    plantLink(s.target);
+    expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(1);
+    expect(s.errs.join('\n')).toContain('beschädigt');
+    expect(s.pg.restored).toEqual([]);
+    expect(readFileSync(join(s.dataDir, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+    expect(existsSync(join(s.dataDir, 'restore.journal.json'))).toBe(false);
+  });
+
+  it('restore --test: ebenso "beschädigt"', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    plantLink(s.target);
+    expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(1);
+    expect(s.errs.join('\n')).toContain('beschädigt');
+  });
+
+  it('Stand-Ordner selbst als Symlink: "beschaedigt"', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    const echt = join(tmp(), 'echt');
+    renameSync(join(s.target, STAND), echt);
+    symlinkSync(echt, join(s.target, STAND));
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ reason: 'beschaedigt' });
+  });
+});
