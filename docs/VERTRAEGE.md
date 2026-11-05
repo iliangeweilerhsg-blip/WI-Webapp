@@ -104,6 +104,20 @@ Ein laufender Job erneuert `locked_at` alle 60 s (Heartbeat). Ergebnis und Fehle
 - **Ausführung (Worker):** Chunks nach `seq` lesen. Bei `chunks_independent = false` als ein Bytestrom aneinanderhängen, sonst jeden Chunk einzeln decodieren. Dann mit `ffmpeg` nach `full.m4a` (AAC, 48 kHz, mono) umwandeln. Lücken (fehlende `seq` oder Sprünge in `start_ms`) werden als Stille mit korrekter Länge eingefügt. Zum Schluss `recording.duration_ms` und `recording.state` (`vollstaendig` bzw. `mit_luecken`) setzen.
 - **Session-Fortschritt (Worker):** Nach jedem Job mit `session_id` setzt der Worker `session.processing[<job.type>] = <job.state>`. Hat die Session danach keinen Job mehr in `wartet` oder `laeuft` und ist sie `beendet`, setzt er `state = 'verarbeitet'`. Danach folgt `pg_notify('sg_session', '<session_id>')`. Der Core hört darauf und sendet das Ereignis `session.updated` (§11.6).
 
+**Ergänzungen zu `audio.finalize` im Worker (T1-06w):**
+
+- **Fehlend** ist ein Chunk, wenn seine `seq` fehlt, die Datei fehlt, Größe oder sha256 nicht zur Zeile passen oder `ffmpeg` ihn bzw. seinen Lauf nicht dekodieren kann. Er macht den Job nicht zum `fehler`, die Aufnahme wird `mit_luecken` und die `seq` steht in `missing_seqs`.
+- **Abhängige Chunks** (`chunks_independent = false`): Läufe mit lückenlosen `seq` und ohne Sprung in `start_ms` werden einzeln dekodiert, jeweils mit dem Init-Segment aus Chunk 0 davor (WebM bis zum ersten Cluster, MP4 `ftyp`+`moov`). Chunks müssen nicht an Cluster- oder Fragmentgrenzen beginnen: Bei Läufen mit `seq > 0` wird der angeschnittene Anfang bis zur nächsten Cluster- bzw. Fragmentgrenze verworfen, als Lücke `fehlender_chunk` gemeldet (ab 1 s Verlust) und der Lauf rechtsbündig ausgeglichen (Stille vorn). Ergibt ein Lauf 0 ms, gelten seine Chunks als fehlend. **Unabhängige Chunks:** jeder Chunk wird einzeln dekodiert.
+- **Platzierung:** Jedes Stück liegt bei seinem `start_ms` (relativ zu `recording.started_ms`) und wird auf seine angegebene Länge gebracht (Summe `duration_ms`): zu kurz mit Stille aufgefüllt, zu lang gekürzt, bei Überlappung entfällt der Anfang. Encoder-Priming und Rotationslücken summieren sich so nicht auf. Die **Toleranz von 50 ms** gilt nur für die Meldung in `gaps` (`zeitluecke`), nicht für die Platzierung.
+- **Ende:** Fehlen Chunks nach dem letzten verwendbaren, füllt der Worker bis `started_ms + completed_duration_ms` auf (nur mit `complete`). **Ohne `complete`** ist ein fehlendes Ende nicht erkennbar; ein beschädigter letzter Chunk liefert dann über seine `duration_ms` die Endlücke, sonst gilt die Aufnahme ohne erkennbare Lücke als `vollstaendig`.
+- **Null verwertbare Chunks**, oder bei abhängigen Chunks fehlender bzw. beschädigter Chunk 0: kein `full.m4a` (eine alte wird entfernt), `chunk_count = 0`, `state = mit_luecken`, Job `fertig`. Ein nachgelieferter Chunk 0 macht einen späteren Lauf möglich (§3, neuer Job durch den Core).
+- **Plausibilitätsgrenzen** führen zu `fehler` ohne Retry: mehr als 10000 fehlende `seq`, eine einzelne oder alle Lücken zusammen länger als `completed_duration_ms` plus 1 h (ohne `complete`: 12 h).
+- **Voraussetzung:** `ffmpeg` und `ffprobe` müssen auf dem Mac installiert sein (PATH). Aufrufe ohne Shell, mit Zeitlimit, festem Eingabeformat (`-f matroska` bzw. `mov`) und `-protocol_whitelist file`.
+- **`processing` bei mehreren Aufnahmen:** Eine Session kann mehrere Aufnahmen und damit mehrere `audio.finalize`-Jobs haben. `processing['audio.finalize']` fasst alle zusammen: `fehler`, sobald einer endgültig gescheitert ist, sonst `laeuft` bzw. `wartet`, solange einer offen ist, sonst `fertig` (`abgebrochen` zählt nicht mit).
+- **MP4-Läufe:** Ein Lauf wird vor dem Dekodieren auf die letzte vollständige Top-Level-Box gekürzt; eine unvollständige `moof`/`mdat` am Ende entfällt.
+- **Ignorierte Chunks:** Chunks mit `seq > completed_last_seq` (nach `complete` nicht mehr zu erwarten) ignoriert der Worker mit einer Warnung.
+- **Session-Fortschritt bei Fehlern:** Auch bei endgültigem Scheitern (`fehler`) setzt der Worker `processing['audio.finalize'] = 'fehler'` (Session über `recording.session_id`) und verfährt dann wie oben (`verarbeitet`, `pg_notify`). Umgesetzt ist das bisher nur für `audio.finalize` im Handler; die generische Lösung in der Job-Schleife folgt.
+
 ### IDs im Worker (ab Phase 1)
 
 `psycopg` liefert `uuid`-Spalten als `uuid.UUID`. Die Pydantic-Modelle aus `sg_schemas` erwarten IDs als `str` in Kleinbuchstaben (`Uuid`, `docs/ENTWICKLUNG.md`). Darum vor der Validierung bzw. beim Schreiben von `job.result` immer `str(value)` verwenden (T1-06w, T1-18).
@@ -198,14 +212,17 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | Methode und Pfad | Body | Antwort | Fehler |
 |---|---|---|---|
 | `GET /calendar/sources` | – | 200 `CalendarSourceList` | |
-| `POST /calendar/sources` | JSON `CalendarSourceCreate` (URL) **oder** multipart `file` (.ics, ≤ 5 MB), `name?` | 201 `IcsImportResult` | 409 `calendar_source_exists` (gleiche URL, `details.id`), 413 `file_too_large`, 422 `ics_invalid`, 502 `ics_fetch_failed` |
-| `POST /calendar/sources/{id}/sync` | URL-Quelle: leer. Datei-Quelle: multipart `file` (neue Fassung) | 200 `IcsImportResult` | 404 `calendar_source_not_found`, 422 `ics_invalid`, 502 `ics_fetch_failed` (setzt `last_error`) |
+| `POST /calendar/sources` | JSON `CalendarSourceCreate` (URL) **oder** multipart `file` (.ics, ≤ 5 MB), `name?` | 201 `IcsImportResult` | 400 `validation_failed` (u. a. ungültige URL, Zugangsdaten in der URL, ungültige `id`), 400 `file_missing`, 400 `unexpected_file`, 400 `upload_aborted`, 400 `ics_too_complex`, 409 `calendar_source_exists` (gleiche URL oder vergebene `id`, `details.id`), 413 `file_too_large`, 422 `ics_invalid`, 502 `ics_fetch_failed` |
+| `POST /calendar/sources/{id}/sync` | URL-Quelle: leer. Datei-Quelle: multipart `file` (neue Fassung) | 200 `IcsImportResult` | 400 `file_missing` (Datei-Quelle ohne Datei), 400 `unexpected_file` (Datei an eine URL-Quelle), 400 `source_not_syncable` (Art `google`), 400 `ics_too_complex`, 404 `calendar_source_not_found`, 422 `ics_invalid`, 502 `ics_fetch_failed`. Bei URL-Quellen setzt jeder Fehler `last_error` |
 | `DELETE /calendar/sources/{id}` | – | 204 (Kaskade §13) | 404 |
+| `POST /calendar/reassign` | – | 200 `{ changed, ohne_modul }` | 403 `local_only` (**lokal**) |
 | `GET /calendar/events?from&to&module_id&unassigned&include_cancelled` | – | 200 `CalendarEventList`, nach `starts_at` aufsteigend | 400 |
 | `GET /calendar/events/{id}` | – | 200 `CalendarEvent` | 404 `calendar_event_not_found` |
 | `PATCH /calendar/events/{id}` | `CalendarEventUpdate` | 200 `CalendarEventList` (alle geänderten Termine, ohne Cursor) | 404 `calendar_event_not_found`, 404 `module_not_found` |
 
-`from`/`to` sind ISO-Zeitpunkte. Ohne `include_cancelled=true` fehlen abgesagte Termine. `unassigned=true` liefert Termine ohne Modul.
+`POST /calendar/reassign` bestimmt Modul und Art aller Termine mit `assigned_by = auto` neu (wie beim Abgleich, ohne ICS) und ruft `ensurePlannedSessions` für die geänderten auf. `changed` = Termine mit neuem Modul oder neuer Art, `ohne_modul` = nicht abgesagte automatisch zugeordnete Termine ohne Modul danach. Manuelle Zuordnungen bleiben unangetastet, ein zweiter Aufruf ändert nichts (`changed = 0`). Die Route wartet auf laufende Abgleiche und Löschungen der Quellen (Sperre je Quelle). Antwort: `CalendarReassignResult`. Die Web-App ruft die Route nach „Modul anlegen“ (aus einem Vorschlag) auf. **Fehlerschlüssel `ics_too_complex`** (400): Die Datei hat das Zeitbudget (§8) überschritten.
+
+`from`/`to` sind ISO-Zeitpunkte. `from` ist einschließlich, `to` ausschließlich; ein Termin zählt, wenn er im Zeitraum liegt oder hineinreicht. Ohne `include_cancelled=true` fehlen abgesagte Termine. `unassigned=true` liefert Termine ohne Modul.
 
 ### 7.2 Sessions (T1-02)
 
@@ -268,7 +285,8 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `GET /devices` | – | 200 `DeviceList` | |
 | `DELETE /devices/{id}` | – | 204. Token sofort ungültig, offene WebSockets des Geräts werden mit Code 4401 geschlossen | 404 `device_not_found` |
 | `POST /devices/pairings` (**lokal**) | – | 201 `PairingCode`, öffnet das Kopplungsfenster (§12) | |
-| `POST /devices/pair/start` (Netz ohne Token) | `PairStartRequest` | 201 `PairStartResponse` | 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited` |
+| `POST /devices/pair/start` (Netz ohne Token) | `PairStartRequest` | 201 `PairStartResponse` | 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited`, 429 `pairing_requests_full` |
+| `GET /devices/pairings/requests` (**lokal**) | – | 200 `PairingRequestList`, offene Anfragen des aktuellen Fensters (leer ohne Fenster) | |
 | `DELETE /devices/pairings/requests/{request_id}` (**lokal**) | – | 204, Anfrage abgelehnt | 404 `pairing_request_not_found` |
 | `POST /devices/pair/confirm` (Netz ohne Token) | `PairConfirmRequest` | 201 `PairResponse` | 403 `pairing_code_invalid`, 403 `pairing_request_rejected`, 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited` |
 | `GET /backups` | – | 200 `BackupOverview` | |
@@ -278,7 +296,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `DELETE /trash?kind` | – | 200 `{ purged_count }` (inline in der Route, kein Schema): leert den Papierkorb, optional nur eine Art | 409 `session_active` |
 | `POST /trash/{id}/restore` | – | 200 `TrashRestoreResult` | 404 `trash_item_not_found`, 409 `restore_parent_deleted` (`details.parent`), 409 `restore_conflict` (`details.constraint`, `details.conflicting_id`) |
 | `GET /settings` | – | 200 `Settings` | |
-| `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad nicht absolut oder nicht beschreibbar) |
+| `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad leer, nicht absolut, kein vorhandener beschreibbarer Ordner, `SG_DATA_DIR` oder darin, Systemordner), 403 `local_only` (**`data.backup_target` nur lokal**: jede Änderung dieses Feldes aus dem Netz, auch mit Geräte-Token) |
 
 Modul-Einstellungen laufen über `PATCH /modules/{id}` (§14.2).
 
@@ -293,13 +311,16 @@ Bibliothek: `ical.js` (Entscheidung des Leads), Begründung und Version im Lockf
 
 Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei neuem Upload.
 
-**URL-Abruf:** nur `http`/`https` (`webcal://` wird zu `https://`). Höchstens 5 MB, 15 s Gesamtzeit und 3 Weiterleitungen, und zwar nur auf `http`/`https`. Bei Verstoß: `502 ics_fetch_failed` mit `details.reason` (`too_large`, `timeout`, `too_many_redirects`, `status_<code>`).
+**URL-Abruf:** nur `http`/`https` (keine Zugangsdaten in der URL, keine Adressen im lokalen Netz) (`webcal://` wird zu `https://`). Höchstens 5 MB, 15 s Gesamtzeit und 3 Weiterleitungen, und zwar nur auf `http`/`https`. Bei Verstoß: `502 ics_fetch_failed` mit `details.reason` (`too_large`, `timeout`, `too_many_redirects`, `status_<code>`, `blocked_address` (Ziel ist eine private, Loopback-, Link-Local- oder sonst nicht öffentliche Adresse, auch nach der DNS-Auflösung und nach jeder Weiterleitung), `invalid_url` (Weiterleitung auf ein anderes Schema oder mit Zugangsdaten), `unsupported_encoding`, `network_error`).
 
 **Auflösen**
+- **Zeitbudget:** Das Auflösen läuft in einem eigenen Thread (höchstens 2 gleichzeitig, weitere warten; höchstens 256 MB Heap je Thread) und darf höchstens 5 s ab dem Start des Threads dauern (`ics_too_complex`, 400; bei URL-Quellen steht der Fehler in `last_error`). Der Core bleibt währenddessen ansprechbar. Mehrere `VCALENDAR` in einer Datei werden alle gelesen.
+- **Unterstützte Wiederholungen:** `FREQ` = `DAILY`, `WEEKLY`, `MONTHLY`, `YEARLY` mit den üblichen `BY…`-Regeln. `SECONDLY`, `MINUTELY` und `HOURLY` werden nicht aufgelöst (Warnung `rrule_unsupported`, nur der erste Termin zählt). Bei `RDATE` ohne `RRULE` ist auch `DTSTART` ein Vorkommen (RFC 5545).
 - RFC 5545 mit `RRULE`, `RDATE`, `EXDATE` und `RECURRENCE-ID` (verschobene Einzelvorkommen). `STATUS:CANCELLED` setzt `cancelled = true`.
 - `TZID` mit `VTIMEZONE`: deren Regeln. `TZID` ohne `VTIMEZONE`: als IANA-Name lesen. Unbekannte Zone: `TZ` des Systems, dazu eine Warnung `timezone_unknown`. Termine ohne Zone (floating) gelten in `TZ`.
 - `VALUE=DATE` ergibt `all_day = true`, `starts_at`/`ends_at` auf 00:00 UTC des Datums (Testfall ics/08).
-- Serien ohne `UNTIL`/`COUNT` werden bis heute + 180 Tage aufgelöst und bei jedem Abgleich fortgeschrieben. Höchstens 5000 Vorkommen pro Quelle, darüber Warnung `too_many_events`.
+- Serien ohne `UNTIL`/`COUNT` werden für den Zeitraum **heute − 1 Jahr bis heute + 180 Tage** aufgelöst und bei jedem Abgleich fortgeschrieben. Ältere Termine **solcher Serien** zählt der Abgleich nicht als „entfallen“; für endliche Serien gilt das Fenster nicht. Lange offene Serien (`DAILY`/`WEEKLY`) beginnen die Auflösung kurz vor dem Fenster, in derselben Phase wie `DTSTART`.
+- Mehrdeutige Ortszeit (Ende der Sommerzeit, z. B. 02:30) gilt als das **erste** Vorkommen, eine Zeit in der Lücke (Beginn der Sommerzeit) als die Zeit nach dem Sprung. Höchstens 5000 Vorkommen pro Quelle, darüber Warnung `too_many_events` (der Rest wird nicht mehr aufgelöst, und der Abgleich sagt dann **keine** Termine ab).
 - `recurrence_id` = ursprünglicher Beginn des Vorkommens: in der Zeitzone von `DTSTART` mit Offset (`2026-10-27T10:15:00+01:00`), bei UTC-Serien mit `Z`, bei ganztägigen Serien als Datum. Einzeltermine: `null`.
 
 **Abgleich** über `(source_id, external_uid, recurrence_id)`:
@@ -308,11 +329,16 @@ Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei
 - **entfallen** (fehlt in der Quelle): `cancelled = true`. Nie löschen.
 - Bei `assigned_by = auto` laufen Modul- und Artzuordnung neu, bei `manuell` nie.
 
+**Warnungen (`IcsImportResult.warnings`):** Codes `uid_missing`, `uid_duplicate`, `event_invalid`, `rrule_unsupported`, `timezone_unknown`, `too_many_events`. Je Code stehen höchstens 5 Einträge in der Liste. Gab es mehr, folgt eine Sammelzeile des Codes (`external_uid = null`, „n weitere Hinweise dieser Art (insgesamt m)“).
+
+**Zählweise:** `geaendert` zählt Änderungen an Titel, Ort, Beginn, Ende und ganztägig. Eine Änderung der **Beschreibung** wird übernommen, zählt aber nicht. Wird ein Termin abgesagt (`STATUS:CANCELLED`) oder fehlt er in der Quelle, zählt er als `entfallen`. Wird ein abgesagter Termin wieder aktiv, zählt er als `geaendert`. `zugeordnet` zählt nur automatische Zuordnungen in diesem Lauf.
+
 **Zuordnung (F-KAL-02)**
 - **Kandidaten** sind die Module, deren Semester den Termin enthält (`starts_on ≤ Datum ≤ ends_on`). Gibt es keins, die Module des aktuellen Semesters. Gelöschte und archivierte Semester zählen nicht.
 - **Modul:** Treffer über Name, Kürzel und Dozent in Titel, Ort oder Beschreibung, unabhängig von Groß-/Kleinschreibung und Umlautschreibweise. Nur ein **eindeutiger** Treffer wird gesetzt. Sonst bleibt `module_id` leer, und die Serie erscheint in `module_suggestions`.
 - **Art:** über Schlüsselwörter (Übung/UE/Ü, Tutorium/Tut, Prüfung/Klausur/Exam, Vorlesung/VL/Lecture). Ganztägig ohne Modul: `fest`. Sonst `vorlesung`.
-- **Manuell:** `PATCH /calendar/events/{id}` setzt `assigned_by = manuell`. Mit `scope = serie` (Standard) gilt das für alle Termine mit gleicher `source_id` und `external_uid`, auch für später hinzukommende Vorkommen.
+- **Manuell:** `PATCH /calendar/events/{id}` setzt `assigned_by = manuell` (mindestens `module_id` oder `kind` ist nötig, sonst 400). Mit `scope = serie` (Standard) gilt das für alle Termine mit gleicher `source_id` und `external_uid`. Später hinzukommende Vorkommen erben die Zuordnung, **wenn alle vorhandenen Termine der Serie manuell und gleich zugeordnet sind**. Wurde nur ein Termin einzeln geändert (`scope = einzeln`), erbt kein neues Vorkommen.
+- **Modulvorschläge (`IcsModuleSuggestion`):** Termine ohne Modul (nur `assigned_by = auto`, nicht abgesagt, nicht `fest`) werden nach dem bereinigten Titel gruppiert. Nennen Titel dasselbe Modul lang und abgekürzt (Stat I / Statistik I, WI / Wirtschaftsinformatik, OR / Operations Research, DBS / Datenbanksysteme), bilden sie **einen** Vorschlag mit dem Langnamen in `name` und dem Kürzel in `short` (nur wenn die Abkürzung zu genau einem Langnamen passt, höchstens 12 Zeichen). `short` gehört in `short_name` des neuen Moduls. Danach ordnet `POST /calendar/reassign` alle automatisch zugeordneten Termine neu zu, `series_event_ids` brauchen dann keinen `PATCH` mehr.
 - Nach jeder Änderung von Zuordnung oder Termin ruft der Kalender `ensurePlannedSessions` auf (§9.2, §16.2).
 
 ## 9. Sessions (T1-02)
@@ -331,7 +357,7 @@ Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei
 | `laeuft`, `pausiert` | Start einer **später** begonnenen Session | `beendet` | Core | `stop_reason = kalenderende`, `ended_at = min(planned_ends_at, started_at der neuen Session)` |
 | `laeuft`, `pausiert` | Core-Takt: Auto-Stopp-Regel 2 oder 4 greift, obwohl der Browser nicht gestoppt hat (§9.4) | `beendet` | Core | `stop_reason = kalenderende` bzw. `maximaldauer`. `ended_at` ist die **überschrittene Grenze** (bzw. `auto_stop_extended_until`, falls später), nicht die Zeit des Takts |
 | `laeuft`, `pausiert` | Core-Start, und die Grenze der vorigen Zeile lag in der Zeit, in der der Core nicht lief | `beendet` | Core | `stop_reason = absturz_wiederhergestellt`, `ended_at` = letzte Aktivität (Ende des letzten Chunks oder `at` der letzten Operation, mindestens `started_at`) |
-| `beendet` | alle Jobs der Session fertig | `verarbeitet` | Worker (§3) | Wurde beim Stopp kein Job angelegt, setzt der Core sofort `verarbeitet` |
+| `beendet` | alle Jobs vom Stopp durch (`fertig` oder `fehler`, kein Job mehr in `wartet`/`laeuft`) | `verarbeitet` | Worker (§3) | Wurde beim Stopp kein Job angelegt, setzt der Core sofort `verarbeitet`. Spätere `audio.finalize`-Jobs (Nachzügler, nachträgliche Offline-Aufnahme) ändern den Zustand nicht mehr, sie aktualisieren nur `processing` |
 
 - **Server-Operationen:** Jeder Übergang nach `laeuft`, `pausiert` oder `beendet`, den der Core selbst auslöst oder per REST ausführt, steht als `session.start`/`.pause`/`.resume`/`.stop` mit `origin = server` im Strom der Session. `bereit`, `verpasst` und `verarbeitet` haben keine Operation, sie kommen nur als Ereignis `session.updated`.
 - **Nachgelieferter Stopp korrigiert den Takt:** Kommt nach einem Stopp durch Core-Takt oder Core-Start (`kalenderende`, `maximaldauer`, `absturz_wiederhergestellt` mit `origin = server`) ein `session.stop` eines Geräts mit **früherem** `at`, übernimmt der Core dessen `ended_at` und `stop_reason`. Das ist eine Korrektur ohne Zustandswechsel, mit `session.updated`. Ein späterer `at` ändert nichts (gleicher Zielzustand).
@@ -409,7 +435,7 @@ Startet ein Gerät eine Session offline, während sie auf dem Server schon mit a
 | Aufnahme unbekannt | 404 | `recording_not_found` |
 
 - Die Web-App löscht einen Chunk aus IndexedDB erst nach 200 oder 201. Bei 409 oder 422 versucht sie es **nicht** erneut, sondern verschiebt den Chunk in ihre Fehlerablage (§11.2) und meldet ihn. Bei 5xx und Netzfehlern wiederholt sie mit exponentiellem Warten bis 30 s.
-- Nach dem letzten Chunk: `POST /recordings/{id}/complete` mit `last_seq` und `duration_ms`. Fehlt eine `seq ≤ last_seq` beim Finalisieren, wird die Aufnahme `mit_luecken`.
+- Nach dem letzten Chunk: `POST /recordings/{id}/complete` mit `last_seq` und `duration_ms`. Fehlt eine `seq ≤ last_seq` beim Finalisieren, wird die Aufnahme `mit_luecken`. Was sonst als fehlend gilt und wie `audio.finalize` Lücken behandelt, steht in §3.
 
 ## 11. Sync-Protokoll (T1-08, T1-09)
 
@@ -551,7 +577,10 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 2. **Bonjour-Weg:** Der Core kündigt `_studiengehirn._tcp` an (TXT `v=1`, `name=<Macname>`). Das iPad ruft `POST /devices/pair/start` auf.
    - Das geht nur bei offenem Fenster, sonst `409 pairing_window_closed`. Es belegt das Fenster **nicht exklusiv**: Mehrere Anfragen sind möglich.
    - Der Core legt eine Anfrage (`PairingRequest`) mit `device_name` und `public_nonce` an und antwortet mit `request_id` und `pairing_id`. Der Code steht **nicht** in der Antwort.
-   - Die Web-App bekommt `pairing.requested` und listet die Anfragen. Eine fremde Anfrage kann der Nutzer ablehnen (`DELETE /devices/pairings/requests/{request_id}`, nur lokal).
+   - **Höchstens 10 offene Anfragen pro Fenster.** Offen heißt: nicht abgelehnt. Die elfte `pair/start`-Anfrage bekommt `429 pairing_requests_full`. Lehnt der Nutzer eine Anfrage ab, wird ein Platz frei.
+   - Die Web-App bekommt `pairing.requested` (Nutzlast `PairingRequest`) und listet die Anfragen. Nach dem Neuladen holt sie sich die offenen Anfragen über `GET /devices/pairings/requests` (nur lokal, `PairingRequestList`). Das ist eine eigene Route statt einer Erweiterung von `POST /devices/pairings`: Die Antwort des POST gibt es nur einmal beim Öffnen, Anfragen kommen aber erst danach, und das Neuladen darf kein neues Fenster öffnen (das würde das alte ersetzen, Schritt 1).
+   - Eine fremde Anfrage kann der Nutzer ablehnen (`DELETE /devices/pairings/requests/{request_id}`, nur lokal).
+   - **Phishing:** `device_name` ist frei wählbar, jeder im Netz kann sich „iPad von Ilian“ nennen. Die Web-App empfiehlt darum den **QR-Weg** und zeigt bei Anfragen aus dem Bonjour-Weg einen Hinweis, dass Name und Absender nicht geprüft sind. Der Code bleibt das Geheimnis.
 3. **Bestätigen:** Der Nutzer tippt den Code am iPad ein, oder der QR-Scan liefert `pairing_id` und Code. Das iPad ruft `POST /devices/pair/confirm` auf.
    - `pairing_id` muss das offene Fenster sein. **Das Geheimnis ist der Code.** Die Nonce wird nicht gegen fremde `pair/start`-Anfragen geprüft, ein QR-Scan klappt also auch, wenn sich vorher jemand anderes angemeldet hat.
    - Gehört `public_nonce` zu einer **abgelehnten** Anfrage: `403 pairing_request_rejected`.
@@ -560,7 +589,8 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
    - **Pro Nonce:** Nach 5 falschen Codes wird diese Nonce abgewiesen (`pairing_code_invalid`). Andere Geräte sind nicht betroffen.
    - **Pro Fenster:** Nach 20 falschen Codes ist das Fenster geschlossen (`pairing_window_closed`). Die Web-App zeigt „Viele Fehlversuche“.
    - **Global:** Bei mehr als 20 falschen Codes pro Stunde sind alle `pair/*`-Aufrufe gesperrt (`423 pairing_locked`), bis am Mac ein neues Fenster geöffnet wird.
-   - **Restrisiko:** Ein Angreifer im selben WLAN kann die Kopplung durch Raten **verzögern**, aber ohne Code nicht übernehmen. Ein neues Fenster am Mac hebt jede Sperre auf.
+   - **Neues Fenster setzt zurück:** Ein neues, **lokal** geöffnetes Fenster (`POST /devices/pairings`) setzt den globalen Stundenzähler und die Sperre zurück, ebenso die Zähler pro Nonce und pro Fenster. Sonst reichte ein falscher Code pro neuem Fenster, um wieder mit `423` zu sperren. Da nur der Nutzer am Mac das Fenster öffnen kann (`local_only`), kann ein Angreifer die Zähler nicht selbst zurücksetzen.
+   - **Restrisiko (DoS):** Ein Angreifer im selben WLAN kann die Kopplung durch Raten oder durch Anfragen **blockieren, solange er im Netz ist**: Er verbraucht das Budget (20 falsche Codes schließen das Fenster) und kann nach jedem neuen Fenster erneut raten. Ohne Code übernehmen kann er sie nicht. Abhilfe: in einem anderen Netz koppeln (Heim-WLAN oder Hotspot). Ein neues Fenster am Mac hebt die Sperre auf, hilft aber nicht gegen einen Angreifer, der weiter raten darf.
    - **Pro Absenderadresse:** höchstens 10 `pair/*`-Aufrufe pro Minute (`429 pairing_rate_limited`).
 5. **Speicherung des Codes:** nur **im Speicher** des Core-Prozesses, nie in der Datenbank. Der Code wird mit `crypto.randomInt` erzeugt und mit `crypto.timingSafeEqual` verglichen.
    - Gründe: Er lebt höchstens 5 min, und es gibt genau einen Core-Prozess.
@@ -646,6 +676,10 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 - Speicherung in `setting` mit je einem Schlüssel pro Bereich (`general`, `lecture`, `pen`, `data`). Der Wert ist das Bereichsobjekt **ohne** Standardwerte.
 - `GET /settings` füllt fehlende Felder mit den Standards. `PATCH /settings` führt Feld für Feld zusammen.
 - `general.data_dir` ist nur lesbar (`SG_DATA_DIR`).
+- **Keine feldübergreifenden Regeln in Phase 1.** Es gelten nur die Schemaregeln je Feld (z. B. darf „Stopp spätestens“ vor „Stopp nach Kalenderende“ liegen).
+- **`data.backup_target`:** Der Core speichert den normalisierten Pfad (`path.resolve`, dann `realpath`). Abgelehnt werden `SG_DATA_DIR` und Ordner darin sowie `/proc`, `/sys`, `/dev`, unter macOS `/System` und `/private/var/db`. Symlinks sind erlaubt (gespeichert wird das Ziel); T1-18 prüft das Ziel beim Backup erneut. Änderungen nur lokal (§7.5).
+- `lecture.microphone_id`: höchstens 256 Zeichen.
+- **`general.appearance`** ist die Standard-Darstellung. Die Web-App wendet sie an, solange auf dem Gerät keine eigene Wahl („Hell“/„Dunkel“) gespeichert ist; „Wie Standard“ löscht die Geräte-Wahl.
 
 | Feld | Standard |
 |---|---|
@@ -683,8 +717,11 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `file_too_large`, `chunk_too_large` | 413 | Größe |
 | `unsupported_media_type`, `chunk_mime_mismatch` | 415 | Dateityp |
 | `ics_invalid`, `checksum_mismatch` | 422 | Inhalt ungültig |
+| `ics_too_complex` | 400 | ICS-Datei hat das Zeitbudget beim Auflösen überschritten (§8) |
+| `file_missing`, `unexpected_file`, `upload_aborted`, `source_not_syncable` | 400 | Upload: Datei fehlt, falsches Feld/mehrere Dateien bzw. Datei an eine URL-Quelle, Upload abgebrochen; Quelle nicht abgleichbar |
 | `pairing_locked` | 423 | Kopplung gesperrt, neues Fenster am Mac öffnen |
 | `pairing_rate_limited` | 429 | zu viele Versuche |
+| `pairing_requests_full` | 429 | 10 offene Kopplungsanfragen im Fenster, eine ablehnen oder neues Fenster öffnen (§12) |
 | `ics_fetch_failed` | 502 | ICS-URL nicht erreichbar oder über den Grenzen |
 
 **Sync-Fehler:** `SyncErrorCode` im Schema.

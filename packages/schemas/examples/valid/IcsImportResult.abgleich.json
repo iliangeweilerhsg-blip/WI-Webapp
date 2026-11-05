@@ -68,6 +68,7 @@
   "module_suggestions": [
     {
       "name": "Statistik II",
+      "short": "Stat II",
       "kind": "uebung",
       "event_count": 7,
       "series_event_ids": ["019a4e14-0000-7000-8000-000000000023"]

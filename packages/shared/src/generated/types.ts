@@ -579,6 +579,22 @@ kind?: CalendarEventKind
 scope?: CalendarUpdateScope
 }
 /**
+ * Antwort auf POST /calendar/reassign (lokal): Neuzuordnung aller Termine mit assigned_by=auto, z. B. nach dem Anlegen eines Moduls.
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CalendarReassignResult".
+ */
+export interface CalendarReassignResult {
+/**
+ * Termine, deren Modul oder Art sich geändert hat
+ */
+changed: number
+/**
+ * Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach
+ */
+ohne_modul: number
+}
+/**
  * Kalenderquelle
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1047,6 +1063,10 @@ export interface IcsModuleSuggestion {
  */
 name: string
 kind: CalendarEventKind
+/**
+ * Kürzel, wenn die Titel dasselbe Modul abgekürzt nennen (Stat I / Statistik I). Fehlt, wenn es keins gibt. Gehört in short_name des neuen Moduls, damit der Abgleich beide Schreibweisen zuordnet.
+ */
+short?: string
 event_count: number
 /**
  * Je Serie ein Termin. Nach POST /modules: PATCH /calendar/events/{id} mit module_id, scope=serie
@@ -1848,7 +1868,7 @@ pairing_id: Uuid
 expires_at: Timestamp
 }
 /**
- * Offenes Kopplungsfenster für die Anzeige in der Web-App (POST /devices/pairings, nur lokal; Ereignis pairing.requested)
+ * Offenes Kopplungsfenster für die Anzeige in der Web-App (Antwort von POST /devices/pairings, nur lokal). Anfragen von Geräten liefern das Ereignis pairing.requested und GET /devices/pairings/requests (PairingRequestList)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PairingCode".
@@ -1868,7 +1888,7 @@ port: number
 qr_url: string
 }
 /**
- * Anfrage eines Geräts über pair/start. Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id})
+ * Anfrage eines Geräts über pair/start (Nutzlast des Ereignisses pairing.requested). Die Web-App listet sie und kann sie ablehnen (DELETE /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App empfiehlt darum den QR-Weg
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PairingRequest".
@@ -1879,6 +1899,18 @@ pairing_id: Uuid
 device_name: string
 kind: DeviceKind
 requested_at: Timestamp
+}
+/**
+ * GET /devices/pairings/requests (nur lokal): offene (nicht abgelehnte) Anfragen des aktuellen Kopplungsfensters, älteste zuerst. Ohne offenes Fenster leer. Höchstens 10, danach antwortet pair/start mit 429 pairing_requests_full
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "PairingRequestList".
+ */
+export interface PairingRequestList {
+/**
+ * @maxItems 10
+ */
+items: PairingRequest[]
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema

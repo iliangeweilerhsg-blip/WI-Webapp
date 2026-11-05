@@ -13,9 +13,11 @@ import { registerIdempotency } from './plugins/idempotency.ts';
 import { createSecurityGuard, registerSecurity, type DeviceTokenVerifier } from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
 import { backupRoutes } from './routes/backups.ts';
+import { calendarRoutes } from './routes/calendar.ts';
 import { materialRoutes } from './routes/material.ts';
 import { inkRoutes } from './routes/notebooks.ts';
 import { organisationRoutes } from './routes/organisation.ts';
+import { settingsRoutes } from './routes/settings.ts';
 import { systemRoutes } from './routes/system.ts';
 import { trashRoutes } from './routes/trash.ts';
 
@@ -99,9 +101,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(systemRoutes, { db, version });
       await api.register(materialRoutes, { db, config });
       await api.register(organisationRoutes, { db });
+      await api.register(calendarRoutes, { db });
       await api.register(inkRoutes, { db, config });
       await api.register(backupRoutes, { db, config });
       await api.register(trashRoutes, { db, config });
+      await api.register(settingsRoutes, { db, config });
     },
     { prefix: API_BASE },
   );
