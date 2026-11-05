@@ -15,3 +15,6 @@ c0167947743c814a184fe84bc4b52dada1d21a94:services/core/test/unit/moodle-fake.ts:
 
 # Falsch-Positiv in Commit 149536f (PR #95): künstliche Test-UUID in logger.test.ts, in späterem Commit durch einen eindeutig künstlichen Wert ersetzt.
 149536f6489cac81b95f9bcc89434515918667b9:services/core/test/unit/logger.test.ts:generic-api-key:96
+
+# Falsch-Positiv in Commit c5d5bfe (PR #133): erkennbar unechter Test-Token im Moodle-Integrationstest, in späterem Commit zur Laufzeit gebaut.
+c5d5bfe9db5b1cdb64ca9642b5c65f2029461416:services/core/test/integration/moodle-sync.test.ts:generic-api-key:31
