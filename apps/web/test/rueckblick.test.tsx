@@ -154,6 +154,7 @@ const reprocessPosts = () => core.requests.filter((r) => r.method === 'POST' && 
 const transcriptGets = () =>
   core.requests.filter((r) => r.method === 'GET' && /\/transcript/.test(r.path)).length;
 const key = (target: Element | Window, k: string) => fireEvent.keyDown(target, { key: k });
+const HINT = 'Die Aufnahme lässt sich gerade nicht abspielen.';
 const counter = () => screen.getByTestId('review-slide-counter');
 const activeLines = () => lineEls().filter((el) => el.getAttribute('aria-current') === 'true');
 
@@ -608,11 +609,11 @@ describe('Rückblick: Zustände', () => {
 
   it('unbekannte Session und fehlende ID', async () => {
     boot({ session: null });
-    expect(await screen.findByText('Diese Vorlesung gibt es nicht.')).toBeVisible();
+    expect(await screen.findByText('Diese Session gibt es nicht (mehr).')).toBeVisible();
     cleanup();
     boot({ search: 'id=kaputt' });
     // Ungültige ID: der Core antwortet mit 400, die Meldung ist dieselbe, ohne „Erneut versuchen“
-    expect(await screen.findByText('Diese Vorlesung gibt es nicht.')).toBeVisible();
+    expect(await screen.findByText('Diese Session gibt es nicht (mehr).')).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).toBeNull();
     cleanup();
     boot({ search: '' });
@@ -642,28 +643,114 @@ describe('Rückblick: Player nach Pausen und Fehlern', () => {
     expect(stub.started.at(-1)).toMatchObject({ id: R1, at: 585 });
   });
 
-  it('ein Abspielfehler sperrt weder Abspielen noch Pause noch Springen; ein neuer Versuch hebt ihn auf', async () => {
+  it('ein Abspielfehler sperrt weder Abspielen noch Pause noch Springen', async () => {
     boot();
     await screen.findAllByTestId('transcript-line');
-    act(() => {
-      fireEvent.error(audio(R1));
-    });
-    expect(await screen.findByText('Die Aufnahme lässt sich gerade nicht abspielen.')).toBeVisible();
+    stub.unavailable.add(R1);
+    fireEvent.click(lineEls()[0] as HTMLElement);
+    expect(await screen.findByText(HINT)).toBeVisible();
     for (const name of ['Abspielen', '15 Sekunden vor', '15 Sekunden zurück']) {
       expect(screen.getByRole('button', { name })).toBeEnabled();
     }
     expect(screen.getByRole('slider', { name: 'Position' })).toBeEnabled();
-    // Ein Klick auf einen Abschnitt versucht es erneut und nimmt den Hinweis weg
+  });
+
+  it('neuer Versuch mit wieder verfügbarer Datei: lädt neu, spielt, der Hinweis verschwindet erst dann', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    stub.unavailable.add(R1);
     fireEvent.click(lineEls()[0] as HTMLElement);
-    expect(stub.started.at(-1)).toMatchObject({ id: R1, at: 10 });
-    expect(screen.queryByText('Die Aufnahme lässt sich gerade nicht abspielen.')).toBeNull();
-    // Fehlt eine andere Aufnahme, bleibt R1 bedienbar
+    expect(await screen.findByText(HINT)).toBeVisible();
+    expect(stub.load).not.toHaveBeenCalled();
+    stub.unavailable.delete(R1);
+    fireEvent.click(lineEls()[1] as HTMLElement);
+    expect(stub.load).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.queryByText(HINT)).toBeNull());
+    expect(audio(R1).paused).toBe(false);
+    expect(stub.started.at(-1)).toMatchObject({ id: R1, at: 20 });
+  });
+
+  it('der Hinweis verschwindet erst, wenn die Wiedergabe wirklich läuft, nicht schon beim Versuch', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    stub.unavailable.add(R1);
+    fireEvent.click(lineEls()[0] as HTMLElement);
+    await screen.findByText(HINT);
+    stub.unavailable.delete(R1);
+    stub.stall.value = true; // `play` feuert, `playing` noch nicht
+    fireEvent.click(lineEls()[1] as HTMLElement);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByText(HINT)).toBeVisible();
+    stub.stall.value = false;
     act(() => {
-      fireEvent.error(audio(R2));
+      fireEvent(audio(R1), new Event('playing'));
     });
-    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
-    expect(stub.pause).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText(HINT)).toBeNull());
+  });
+
+  it('ein Ladefehler während der Wiedergabe zeigt den Hinweis (Ereignis error)', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    fireEvent.click(lineEls()[0] as HTMLElement);
+    expect(screen.queryByText(HINT)).toBeNull();
+    act(() => {
+      fireEvent.error(audio(R1));
+    });
+    expect(await screen.findByText(HINT)).toBeVisible();
+  });
+
+  it('nicht verfügbare Datei: der Hinweis bleibt nach einem neuen Versuch stehen', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    stub.unavailable.add(R1);
+    fireEvent.click(lineEls()[0] as HTMLElement);
+    expect(await screen.findByText(HINT)).toBeVisible();
+    fireEvent.click(lineEls()[1] as HTMLElement);
+    // Der Versuch scheitert wieder: die Wiedergabe steht, die Schaltfläche bietet „Abspielen“
+    fireEvent.click(await screen.findByRole('button', { name: 'Abspielen' }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByText(HINT)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Abspielen' })).toBeEnabled();
+  });
+
+  it('eine abgelehnte Wiedergabe markiert die Aufnahme wieder als gescheitert', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    stub.unavailable.add(R1);
+    fireEvent.click(lineEls()[0] as HTMLElement);
+    await screen.findByText(HINT);
+    // Datei wieder da, der Versuch gelingt: Hinweis weg. Dann lehnt der Browser den nächsten Versuch ab.
+    stub.unavailable.delete(R1);
+    fireEvent.click(lineEls()[1] as HTMLElement);
+    await waitFor(() => expect(screen.queryByText(HINT)).toBeNull());
+    stub.play.mockImplementationOnce(() =>
+      Promise.reject(Object.assign(new Error('x'), { name: 'NotAllowedError' })),
+    );
+    fireEvent.click(lineEls()[0] as HTMLElement);
+    expect(await screen.findByText(HINT)).toBeVisible();
+  });
+
+  it('ein unterbrochener Versuch (AbortError) ist kein Fehler', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    stub.play.mockImplementationOnce(() =>
+      Promise.reject(Object.assign(new Error('x'), { name: 'AbortError' })),
+    );
+    fireEvent.click(lineEls()[0] as HTMLElement);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('spielt eine andere Aufnahme fehlerfrei, steht kein Hinweis da', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    stub.unavailable.add(R1);
+    fireEvent.click(lineEls()[0] as HTMLElement);
+    await screen.findByText(HINT);
+    fireEvent.click(screen.getByRole('button', { name: 'Ohne Folie' }));
+    fireEvent.click(lineEls()[1] as HTMLElement); // R2, die Datei ist da
+    await waitFor(() => expect(screen.queryByText(HINT)).toBeNull());
+    expect(stub.started.at(-1)).toMatchObject({ id: R2 });
   });
 });
 

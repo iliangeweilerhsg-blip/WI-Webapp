@@ -16,8 +16,7 @@ export interface Player {
   t: number;
   playing: boolean;
   rate: number;
-  /** Eine Aufnahme ließ sich nicht laden oder abspielen */
-  /** Mindestens eine Aufnahme ließ sich nicht laden oder abspielen (Abspielen und Pause bleiben bedienbar) */
+  /** Die aktuelle Aufnahme ließ sich nicht laden oder abspielen (Abspielen, Pause und Springen bleiben bedienbar) */
   failed: boolean;
   bounds: { start: number; end: number } | null;
   /** Springt zu `t` (Sitzungszeit); mit `play` läuft die Wiedergabe von dort. Ohne Angabe bleibt es beim bisherigen Zustand. */
@@ -31,6 +30,7 @@ export interface Player {
     onEnded: () => void;
     onPlay: () => void;
     onPause: () => void;
+    onPlaying: () => void;
     onError: () => void;
   };
 }
@@ -59,16 +59,31 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
   const live = useRef({ recordings, rate, t, playing });
   live.current = { recordings, rate, t, playing };
 
-  const startPlayback = useCallback((el: HTMLAudioElement) => {
-    el.playbackRate = live.current.rate;
-    try {
-      const result = el.play() as Promise<void> | undefined;
-      // Der Browser kann das Abspielen ablehnen (z. B. ohne vorherige Eingabe): dann bleibt die Wiedergabe aus
-      result?.catch(() => setPlaying(false));
-    } catch {
-      setPlaying(false);
-    }
-  }, []);
+  const markFailed = useCallback(
+    (id: string) => setFailedIds((old) => (old.has(id) ? old : new Set(old).add(id))),
+    [],
+  );
+
+  const startPlayback = useCallback(
+    (el: HTMLAudioElement, id: string) => {
+      el.playbackRate = live.current.rate;
+      const failed = () => {
+        markFailed(id);
+        setPlaying(false);
+      };
+      try {
+        const result = el.play() as Promise<void> | undefined;
+        // Lehnt der Browser ab, ist die Aufnahme gescheitert, bis ein Versuch gelingt (`playing`). Ein unterbrochener
+        // Versuch (`AbortError`, etwa durch Pause oder Sprung) ist kein Fehler.
+        result?.catch((error: unknown) => {
+          if ((error as { name?: string } | null)?.name !== 'AbortError') failed();
+        });
+      } catch {
+        failed();
+      }
+    },
+    [markFailed],
+  );
 
   const seek = useCallback(
     (target: number, play?: boolean, direction: 'vor' | 'zurueck' = 'vor') => {
@@ -81,19 +96,20 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
         if (id !== spot.recording.id && !other.paused) other.pause();
       }
       currentId.current = spot.recording.id;
-      // Ein neuer Versuch (Sprung, Abspielen) hebt eine frühere Fehlermeldung zu dieser Aufnahme auf
-      clearFailed(spot.recording.id);
+      // Ein `<audio>` im Fehlerzustand lädt bei `play()` nichts nach: für den neuen Versuch neu laden. Der Hinweis
+      // verschwindet erst, wenn die Wiedergabe wirklich läuft (`onPlaying`).
+      if (el.error) el.load();
       el.currentTime = spot.offsetS;
       setT(spot.recording.started_ms + Math.round(spot.offsetS * 1000));
       if (wantPlay) {
         setPlaying(true);
-        startPlayback(el);
+        startPlayback(el, spot.recording.id);
       } else {
         el.pause();
         setPlaying(false);
       }
     },
-    [startPlayback, clearFailed],
+    [startPlayback],
   );
 
   const toggle = useCallback(() => {
@@ -160,9 +176,10 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
         const el = elements.current.get(recording.id);
         if (currentId.current === recording.id && !el?.ended) setPlaying(false);
       },
-      onError: () => setFailedIds((old) => new Set(old).add(recording.id)),
+      onPlaying: () => clearFailed(recording.id),
+      onError: () => markFailed(recording.id),
     }),
-    [seek, clearFailed],
+    [seek, clearFailed, markFailed],
   );
 
   return {
@@ -170,7 +187,7 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
     t,
     playing,
     rate,
-    failed: failedIds.size > 0,
+    failed: currentId.current !== null && failedIds.has(currentId.current),
     bounds,
     seek,
     toggle,

@@ -109,7 +109,7 @@ function ReviewScreen() {
       data.error.kind === 'api' &&
       (data.error.status === 404 || data.error.status === 400)
     ) {
-      return <Notice>Diese Vorlesung gibt es nicht.</Notice>;
+      return <Notice>Diese Session gibt es nicht (mehr).</Notice>;
     }
     return <Notice retry={data.refetch}>{`Session nicht erreichbar: ${friendlyMessage(data.error)}`}</Notice>;
   }
