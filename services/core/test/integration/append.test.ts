@@ -73,9 +73,11 @@ function gate(): Gate {
  * - `holdConnect()`: Der nächste Verbindungsaufbau wartet (`connectRequested`), bis `releaseConnect()` kommt.
  *   Solange ist der Listener sicher getrennt, Benachrichtigungen gehen verloren.
  * - `holdOnlisten()`: postgres.js meldet das erneute LISTEN (`onlistenRequested`), der Rückruf `onlisten` läuft aber
- *   erst nach `releaseOnlisten()`. Das bildet ab, was ohne Schleuse von selbst passiert: Postgres schickt
- *   Benachrichtigungen, die während des LISTEN committet werden, vor dessen ReadyForQuery, und postgres.js ruft
- *   `onlisten` erst nach dem Ergebnis des LISTEN auf. Gemessen: unter Dauerlast in etwa jedem zweiten Neuverbinden.
+ *   erst nach `releaseOnlisten()`. Das bildet ab, was ohne Schleuse von selbst passiert: Benachrichtigungen kommen
+ *   vor oder im selben Lesevorgang wie das ReadyForQuery des LISTEN an, und postgres.js ruft `onlisten` erst nach
+ *   dem Ergebnis des LISTEN auf. Gemessen: unter Dauerlast in etwa jedem zweiten Neuverbinden.
+ *   Der Test, der diese Schleusen nutzt, schreibt den Wettlauf bewusst fest (`[s#1, f#1, s#2]`). Wer die Reihenfolge
+ *   über Ströme hinweg später herstellt, passt seine erste Erwartung an, die Prüfung je Strom bleibt.
  * `terminate()` beendet nur das Backend dieser Verbindung (eigener `application_name`).
  */
 function gatedListenClient(url: string) {
