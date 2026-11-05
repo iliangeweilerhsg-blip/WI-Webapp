@@ -621,6 +621,16 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
 - **Folge-Tabs synchronisieren nicht.** Sie schreiben nichts in die Warteschlange und abonnieren nichts. `send()` wirft dort `SyncNotLeaderError`, ohne `connect()` `SyncNotConnectedError`.
 - **Hier übernehmen** (`takeOver()`, Web Locks `steal`): Der alte Leader trennt sauber und zeigt `other_tab`. Seine offenen `send()`-Aufrufe enden mit `SyncHandedOverError` (die Operation liegt in der Warteschlange und wird vom neuen Leader gesendet, **nicht neu senden**) bzw. `SyncNotLeaderError` (noch nicht gespeichert). Der neue Leader liest die Warteschlange vollständig aus der IndexedDB. Schließt der Leader-Tab, übernimmt der wartende Tab.
 - Der `BroadcastChannel` meldet nur „Leader hat gewechselt“ (Client-Ereignis `leader.changed`; der Fachcode lädt seinen Stand per REST neu). Operationen werden nicht zwischen Tabs weitergeleitet.
+- **Restfenster beim Wechsel:** Hat der alte Leader ein `append` gestartet, bevor er den Verlust der Rolle bemerkt, und der neue Leader die Warteschlange schon gelesen, würde die Operation bis zur nächsten Übernahme liegen bleiben. Darum sendet der alte Tab nach einem solchen `append` den Hinweis `enqueued` über denselben `BroadcastChannel`. Nur der Leader wertet ihn aus: Er liest die Warteschlange erneut und hängt unbekannte Einträge an (Einträge im Speicher und gerade bestätigte bleiben unberührt). Kommt der Hinweis, während er noch liest, liest er nach, sobald er Leader ist. Das ist ein Hinweis zum Nachlesen, keine weitergeleitete Operation.
+- **Rückfälle:** Ohne `BroadcastChannel` bleibt das Restfenster bis zur nächsten Übernahme bestehen (die Operation geht nicht verloren, sie wird dann beim Lesen gefunden). Ohne Web Locks ist jeder Tab Leader (kein Hinweis nötig, aber auch keine Abstimmung).
+- **Bedeutung der Ergebnisse von `send()`** (für den Fachcode):
+
+| Ergebnis | Bedeutung | Fachcode |
+|---|---|---|
+| `ack` | Der Server hat die Operation angenommen. Auch bei einem Wechsel mitten in der Bestätigung. | fertig |
+| `SyncRejectedError` | Endgültig abgelehnt, liegt in der Fehlerablage. | nicht neu senden, Fehlerablage zeigt es |
+| `SyncHandedOverError` | Liegt in der Warteschlange und wird von einem anderen Tab gesendet. | **nicht** neu senden |
+| `SyncNotLeaderError`, `SyncNotConnectedError` | **Nicht** gespeichert (Folge-Tab bzw. kein `connect()`). | nur im Leader-Tab bzw. nach `connect()` erneut versuchen |
 
 ## 12. Kopplung (F-INK-13, T1-10)
 
