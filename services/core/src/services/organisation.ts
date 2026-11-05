@@ -20,6 +20,7 @@ import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage, type Page } f
 import { SEMESTER_LOCK_KEY } from '../lib/locks.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { ensureDefaultNotebooks } from './notebooks.ts';
+import { lockSessionTransitions } from './sessions.ts';
 import { softDeleteWithOps } from './trash-ops.ts';
 
 /** Feste Palette (07 §8), Reihenfolge der automatischen Farbvergabe */
@@ -396,7 +397,8 @@ export async function updateModule(db: Db, id: string, input: ModuleUpdate): Pro
  * 404 `module_not_found`, 409 `session_active` (laufende oder pausierte Session im Modul, dann bleibt alles).
  */
 export async function deleteModule(db: Db, id: string): Promise<void> {
-  await softDeleteWithOps(db, 'module', id);
+  // Zuerst die Sperre für Zustandswechsel: Die Kaskade sperrt Session-Zeilen (§16.2)
+  await softDeleteWithOps(db, 'module', id, lockSessionTransitions);
 }
 
 /**
@@ -404,5 +406,8 @@ export async function deleteModule(db: Db, id: string): Promise<void> {
  * Semestern (`is_current`). 404 `semester_not_found`, 409 `session_active`.
  */
 export async function deleteSemester(db: Db, id: string): Promise<void> {
-  await softDeleteWithOps(db, 'semester', id, lockSemesters);
+  await softDeleteWithOps(db, 'semester', id, async (tx) => {
+    await lockSemesters(tx);
+    await lockSessionTransitions(tx);
+  });
 }

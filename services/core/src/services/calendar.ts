@@ -33,7 +33,8 @@ import { fetchIcs, IcsFetchError, InvalidIcsUrlError, normalizeIcsUrl } from './
 import { IcsParseError, IcsTooComplexError, type ParsedEvent, type ParseResult } from './calendar-ics.ts';
 import { parseIcsIsolated } from './calendar-parse.ts';
 import { ensurePlannedSessions as ensureSessionsImpl } from './sessions.ts';
-import { softDelete } from './trash.ts';
+import { lockSessionTransitions } from './sessions.ts';
+import { softDeleteWithOps } from './trash-ops.ts';
 
 type SourceRow = typeof calendarSource.$inferSelect;
 type EventRow = typeof calendarEvent.$inferSelect;
@@ -185,10 +186,10 @@ export async function listSources(
 
 /** Quelle weich löschen. Die Kaskade (Termine, nie gestartete Sessions) macht `softDelete` (VERTRAEGE §13). */
 export async function deleteSource(db: Db, id: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    // Sperre wie beim Abgleich: Löschen und gleichzeitiger Abgleich laufen nacheinander
+  // Mit Server-Operationen (§16.2): Sperre wie beim Abgleich, damit Löschen und gleichzeitiger Abgleich nacheinander laufen
+  await softDeleteWithOps(db, 'calendar_source', id, async (tx) => {
     await lockKey(tx, `source:${id}`);
-    await softDelete(tx, 'calendar_source', id);
+    await lockSessionTransitions(tx);
   });
 }
 

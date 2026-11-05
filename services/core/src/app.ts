@@ -27,12 +27,14 @@ import { moodleRoutes } from './routes/moodle.ts';
 import { inkRoutes } from './routes/notebooks.ts';
 import { organisationRoutes } from './routes/organisation.ts';
 import { recordingRoutes } from './routes/recordings.ts';
+import { sessionRoutes } from './routes/sessions.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { systemRoutes } from './routes/system.ts';
 import { trashRoutes } from './routes/trash.ts';
 import { LastSeenTracker, verifyDeviceToken } from './services/devices.ts';
 import { pickPairingHost } from './services/discovery.ts';
 import { PairingManager } from './services/pairing.ts';
+import { startSessionTicker, type SessionTicker } from './services/sessions.ts';
 import { syncPlugin } from './sync/server.ts';
 
 export interface BuildAppOptions {
@@ -41,6 +43,10 @@ export interface BuildAppOptions {
   logger: Logger;
   /** Prüft Geräte-Tokens. Standard: gegen `device.token_hash` (T1-10), mit `last_seen_at` höchstens einmal pro Minute */
   verifyDeviceToken?: DeviceTokenVerifier;
+  /** Core-Takt für Sessions (VERTRAEGE §9.1). Standard: an. Tests schalten ihn mit `false` aus. */
+  sessionTicker?: boolean;
+  /** Uhr für die Session-Routen und den Takt. Standard: Systemzeit */
+  now?: () => Date;
   /** Moodle-Anbindung (08 §9). Standard: aus `SG_MOODLE_URL` und dem Schlüsselbund */
   moodle?: MoodleServices;
   /** Kopplungsfenster im Speicher (§12). Standard: ein eigenes pro App. Tests geben eins mit gestellter Uhr vor */
@@ -145,6 +151,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(systemRoutes, { db, version });
       await api.register(materialRoutes, { db, config });
       await api.register(organisationRoutes, { db });
+      await api.register(sessionRoutes, { db, config, ...(options.now ? { now: options.now } : {}) });
       await api.register(moodleRoutes, { moodle });
       await api.register(calendarRoutes, { db });
       await api.register(inkRoutes, { db, config });
@@ -156,6 +163,22 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
     { prefix: API_BASE },
   );
+
+  // Takt: geplant → bereit → verpasst und Auto-Stopp-Rückfallebene, beim Start einmal mit Absturz-Erkennung
+  if (options.sessionTicker !== false) {
+    let ticker: SessionTicker | undefined;
+    app.addHook('onReady', async () => {
+      ticker = startSessionTicker({
+        db,
+        config,
+        onError: (error) => logger.error({ err: error }, 'Session-Takt fehlgeschlagen'),
+        ...(options.now ? { now: options.now } : {}),
+      });
+    });
+    app.addHook('onClose', async () => {
+      await ticker?.stop();
+    });
+  }
 
   // Static Export der Web-App und Not-Found-Handler (muss nach den API-Routen kommen)
   await registerWeb(app, config);

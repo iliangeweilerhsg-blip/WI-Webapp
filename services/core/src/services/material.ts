@@ -20,6 +20,7 @@ import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { enqueueJob } from './jobs.ts';
+import { attachDeckToSession } from './sessions.ts';
 import { softDeleteWithOps } from './trash-ops.ts';
 
 /** Eine fertig gespeicherte Upload-Datei (temporär, im Datenordner, damit `rename` atomar ist) */
@@ -245,6 +246,8 @@ export async function createSlideDeck(
         filePath,
         sha256: upload.sha256,
       });
+      // Session ohne Foliensatz bekommt ihn (VERTRAEGE §9.2)
+      if (input.sessionId) await attachDeckToSession(tx, input.sessionId, id);
     },
     async (tx) => {
       const [row] = await tx
@@ -258,6 +261,8 @@ export async function createSlideDeck(
           ),
         )
         .limit(1);
+      // Dublette zu einer Session hochgeladen: auch sie bekommt den vorhandenen Foliensatz
+      if (row && input.sessionId) await attachDeckToSession(tx, input.sessionId, row.id);
       return row && { id: row.id, failed: row.state === 'fehler' };
     },
     async (tx, id) => {
