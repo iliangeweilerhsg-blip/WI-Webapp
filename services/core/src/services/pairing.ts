@@ -65,6 +65,8 @@ interface PairingWindow {
   expiresAt: number;
   /** `confirming`: ein richtiger Code wird gerade eingelöst (Gerät wird angelegt) */
   closed: null | 'confirming' | 'paired' | 'failures' | 'cancelled';
+  /** `close()` kam während `confirming`: `abort()` lässt das Fenster dann zu, statt es zu öffnen */
+  closePending: boolean;
   publicClosed: boolean;
   failures: Record<PairingPath, number>;
   nonceFailures: Map<string, number>;
@@ -147,13 +149,17 @@ export function rateLimitKey(address: string | undefined): string {
   return `${prefix.join(':')}::/64`;
 }
 
-/** Zeichen, die einen Gerätenamen in der Anzeige verfälschen (Steuerzeichen, Bidi-Steuerung) */
 /**
  * Zeichen, die einen Gerätenamen in der Anzeige verfälschen oder unsichtbar verlängern: Steuerzeichen (Cc), Format-
  * zeichen (Cf: Bidi-Steuerung, U+200B–U+200D, U+061C, U+2060, U+FEFF, Tag-Zeichen) sowie Zeilen- und
- * Absatztrenner (Zl, Zp).
+ * Absatztrenner (Zl, Zp). Dazu Default_Ignorable_Code_Point (U+3164, U+FFA0 nach NFKC U+1160, Variation Selectors …)
+ * und U+2800 (Braille-Leerzeichen).
  */
-const UNSAFE_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+const UNSAFE_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Default_Ignorable_Code_Point}\u2800]/gu;
+/** Ein Name braucht mindestens ein sichtbares Zeichen: Buchstabe, Ziffer, Satz- oder sonstiges Symbol */
+const VISIBLE_CHAR = /[\p{L}\p{N}\p{P}\p{S}]/u;
+/** Mehr als 2 Kombinationszeichen hintereinander („Zalgo“) werden auf 2 gekürzt */
+const EXCESS_MARKS = /(\p{M}{2})\p{M}+/gu;
 
 /** Freitext eines Geräts für Anzeige und Speicherung: NFKC, ohne unsichtbare Zeichen, Leerraum zusammengefasst, gekürzt */
 export function cleanDeviceText(text: string, maxLength: number): string | null {
@@ -162,9 +168,10 @@ export function cleanDeviceText(text: string, maxLength: number): string | null 
     .normalize('NFKC')
     .replace(/\s+/gu, ' ')
     .replace(UNSAFE_NAME_CHARS, '')
+    .replace(EXCESS_MARKS, '$1')
     .replace(/ {2,}/g, ' ')
     .trim();
-  if (cleaned.length === 0) return null;
+  if (!VISIBLE_CHAR.test(cleaned)) return null;
   // Nach Codepoints kürzen, damit kein halbes Surrogat-Paar übrig bleibt
   return [...cleaned].slice(0, maxLength).join('').trim();
 }
@@ -202,6 +209,7 @@ export class PairingManager {
       openedAt: now,
       expiresAt: now + PAIRING_WINDOW_MS,
       closed: null,
+      closePending: false,
       publicClosed: false,
       failures: { qr: 0, public: 0 },
       nonceFailures: new Map(),
@@ -225,8 +233,13 @@ export class PairingManager {
    */
   close(pairingId?: string): void {
     const w = this.window;
-    if (!w || w.closed !== null) return;
+    if (!w || (w.closed !== null && w.closed !== 'confirming')) return;
     if (pairingId !== undefined && !safeEqual(pairingId, w.pairingId)) return;
+    if (w.closed === 'confirming') {
+      // Das Schließen nicht verlieren: scheitert das Anlegen, schließt `abort()` das Fenster
+      w.closePending = true;
+      return;
+    }
     w.closed = 'cancelled';
     w.code = '';
     w.requests.clear();
@@ -345,7 +358,15 @@ export class PairingManager {
         }
       },
       abort: () => {
-        if (w.closed === 'confirming') w.closed = null;
+        if (w.closed !== 'confirming') return;
+        if (w.closePending) {
+          w.closed = 'cancelled';
+          w.code = '';
+          w.requests.clear();
+          w.requestByNonce.clear();
+        } else {
+          w.closed = null;
+        }
       },
     };
   }

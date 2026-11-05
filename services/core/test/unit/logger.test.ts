@@ -9,9 +9,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
+import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { hasOpenPermissions } from '../../src/config.ts';
-import { initialLogDay, rotateLogs } from '../../src/logger.ts';
+import { initialLogDay, loggerOptions, redactUrl, rotateLogs } from '../../src/logger.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -87,5 +89,43 @@ describe('hasOpenPermissions', () => {
     expect(hasOpenPermissions(file)).toBe(false);
     chmodSync(file, 0o644);
     expect(hasOpenPermissions(file)).toBe(true);
+  });
+});
+
+describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
+  const SECRET = '3f2b8c1e-aaaa-4bbb-8ccc-0123456789ab';
+
+  it('redactUrl: nur geheime Namen, Rest und Reihenfolge bleiben', () => {
+    expect(redactUrl('/devices/pairings?pairing_id=abc')).toBe('/devices/pairings?pairing_id=[Redacted]');
+    expect(redactUrl('/x?limit=5&Token=a&code=1&cursor=z')).toBe(
+      '/x?limit=5&Token=[Redacted]&code=[Redacted]&cursor=z',
+    );
+    expect(redactUrl('/x?pairing%5Fid=a&device_token=b')).toBe(
+      '/x?pairing%5Fid=[Redacted]&device_token=[Redacted]',
+    );
+    expect(redactUrl('/x?pairing_id=a&pairing_id=b#f')).toBe(
+      '/x?pairing_id=[Redacted]&pairing_id=[Redacted]#f',
+    );
+    expect(redactUrl('/devices')).toBe('/devices');
+    expect(redactUrl('/x?')).toBe('/x?');
+  });
+
+  it('die pairing_id taucht im echten Log-Strom nicht auf (Request- und Fehlerzeilen)', async () => {
+    const lines: string[] = [];
+    const stream = { write: (chunk: string) => void lines.push(chunk) };
+    const logger = pino(loggerOptions({ logLevel: 'trace' }), stream);
+    const app = Fastify({ loggerInstance: logger });
+    app.delete('/devices/pairings', async (request) => {
+      request.log.info('handler');
+      return {};
+    });
+    await app.inject({ method: 'DELETE', url: `/devices/pairings?pairing_id=${SECRET}&x=1` });
+    await app.inject({ method: 'GET', url: `/unbekannt?pairing_id=${SECRET}` });
+    await app.close();
+    const log = lines.join('');
+    expect(log).toContain('incoming request');
+    expect(log).toContain('request completed');
+    expect(log).not.toContain(SECRET);
+    expect(log).toContain('pairing_id=[Redacted]&x=1');
   });
 });
