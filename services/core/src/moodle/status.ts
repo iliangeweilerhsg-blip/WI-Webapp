@@ -1,7 +1,7 @@
 // Zustand des Moodle-Zugangs (F-MDL-01, GET /moodle/status)
 import type { MoodleConnectionState, MoodleStatus } from '@sg/shared';
 import { HttpError } from '../errors.ts';
-import type { MoodleClient } from './client.ts';
+import { moodleNotConfigured, type MoodleClient } from './client.ts';
 import type { MoodleMeta } from './meta.ts';
 
 /** Ab so vielen Resttagen gilt der Token als „läuft bald ab“ */
@@ -109,6 +109,15 @@ export class MoodleStatusService {
   /** Moodle-Nutzer-ID aus `core_webservice_get_site_info` */
   async userId(): Promise<number> {
     const check = await this.check();
+    // Gleiche Fehler wie ein direkter Moodle-Aufruf, nicht pauschal „nicht erreichbar“
+    if (check.check === 'not_configured') throw moodleNotConfigured();
+    if (check.check === 'invalid') {
+      throw new HttpError(
+        409,
+        'moodle_token_invalid',
+        'Moodle lehnt den Token ab. Bitte den Token erneuern (docs/anleitungen/MOODLE-TOKEN.md).',
+      );
+    }
     if (check.userId === null) {
       throw new HttpError(502, 'moodle_unreachable', 'Moodle ist nicht erreichbar.', {
         reason: 'no_site_info',
