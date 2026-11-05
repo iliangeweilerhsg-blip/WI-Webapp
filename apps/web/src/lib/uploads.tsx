@@ -1,6 +1,6 @@
 'use client';
 
-import { CancelledError, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   createContext,
   useCallback,
@@ -205,17 +205,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     let failedTitle = '';
     for (const [id, { kind, since }] of [...watched.current]) {
       try {
-        // Hängt sich die Abfrage an eine laufende eines Observers und wird diese abgebrochen, ist das keine Antwort
-        // des Cores: sofort neu fragen, ohne Backoff und ohne zusätzliche Runde (#86).
-        let answer: Awaited<ReturnType<typeof fetchIngest>> | undefined;
-        for (let attempt = 0; answer === undefined; attempt += 1) {
-          try {
-            answer = await fetchIngest(client, kind, id);
-          } catch (failure) {
-            if (!(failure instanceof CancelledError) || attempt >= 2) throw failure;
-          }
-        }
-        const { state, title } = answer;
+        const { state, title } = await fetchIngest(kind, id);
         if (state === 'neu') {
           if (Date.now() - since > WATCH_MAX_MS) watched.current.delete(id);
           continue;
@@ -227,8 +217,6 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           failedTitle = title;
         }
       } catch (failure) {
-        // Wiederholt abgebrochen: Eintrag bleibt beobachtet, aber ohne die Frist zu verkürzen
-        if (failure instanceof CancelledError) continue;
         // Gelöscht (404): nichts mehr zu beobachten. Sonst Core gerade nicht erreichbar: nach Ablauf der Frist aufgeben
         const gone = failure instanceof ApiRequestError && failure.status === 404;
         if (gone || Date.now() - since > WATCH_MAX_MS) watched.current.delete(id);

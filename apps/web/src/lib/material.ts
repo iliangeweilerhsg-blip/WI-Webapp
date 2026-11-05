@@ -120,28 +120,20 @@ export function titleFromFile(filename: string): string {
   return [...cleaned].slice(0, 300).join('');
 }
 
-/** Einlese-Zustand und Titel eines Eintrags (teilt den Cache mit den Detailansichten). */
+/**
+ * Einlese-Zustand und Titel eines Eintrags. Bewusst direkt über `apiGet` und nicht über `fetchQuery` auf
+ * ['deck'|'sheet', id]: Sonst hängt sich die Abfrage an die laufende eines Observers (DocumentView). Meldet der sich ab,
+ * setzt TanStack die Query zurück und liefert die alten Daten (z. B. `neu`) statt der Antwort des Cores (#86).
+ */
 export async function fetchIngest(
-  client: QueryClient,
   kind: MaterialKind,
   id: string,
 ): Promise<{ state: SlideDeck['ingest_state']; title: string }> {
-  // Bewusst ohne `signal` von TanStack: Meldet sich der letzte Beobachter von ['deck'|'sheet', id] ab (Karte
-  // verschwindet nach dem Refetch der Liste), bricht TanStack sonst die laufende Abfrage ab. pollWatched sähe dann
-  // einen Abbruch statt der Antwort (z. B. 404), ließe den Eintrag beobachtet und fragte eine Runde später erneut.
   if (kind === 'folien') {
-    const { deck } = await client.fetchQuery({
-      queryKey: ['deck', id],
-      queryFn: () => apiGet(`/slide-decks/${encodeURIComponent(id)}`, SlideDeckDetailSchema),
-      staleTime: 0,
-    });
+    const { deck } = await apiGet(`/slide-decks/${encodeURIComponent(id)}`, SlideDeckDetailSchema);
     return { state: deck.ingest_state, title: deck.title };
   }
-  const sheet = await client.fetchQuery({
-    queryKey: ['sheet', id],
-    queryFn: () => apiGet(`/exercise-sheets/${encodeURIComponent(id)}`, ExerciseSheetSchema),
-    staleTime: 0,
-  });
+  const sheet = await apiGet(`/exercise-sheets/${encodeURIComponent(id)}`, ExerciseSheetSchema);
   return { state: sheet.ingest_state, title: sheet.title };
 }
 

@@ -57,9 +57,9 @@ describe('Reiter', () => {
 
   it('schmale Leiste bricht um statt abzuschneiden; der aktive Reiter rollt ins Bild (#86)', async () => {
     installFakeCore();
-    const scroll = vi.fn();
-    vi.stubGlobal('Element', Element);
-    Element.prototype.scrollIntoView = scroll;
+    // jsdom kennt scrollIntoView nicht: erst anlegen, dann ausspionieren (afterEach stellt es wieder her)
+    Element.prototype.scrollIntoView ??= () => {};
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {});
     page();
     const tabs = screen.getByRole('tablist', { name: 'Bereiche der Einstellungen' });
     expect(tabs.className).toContain('flex-wrap');
@@ -68,8 +68,6 @@ describe('Reiter', () => {
     await userEvent.setup().click(screen.getByRole('tab', { name: 'Daten und Papierkorb' }));
     expect(scroll).toHaveBeenCalledWith({ block: 'nearest', inline: 'nearest' });
     expect(scroll.mock.contexts.at(-1)).toBe(screen.getByRole('tab', { name: 'Daten und Papierkorb' }));
-    // @ts-expect-error Aufräumen des Test-Stubs
-    delete Element.prototype.scrollIntoView;
   });
 
   it('mountet „Daten und Papierkorb“ erst beim ersten Öffnen (keine Anfragen vorher)', async () => {

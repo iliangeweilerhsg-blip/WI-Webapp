@@ -108,13 +108,12 @@ export function SettingsView() {
   const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set([TABS[0]?.id ?? '']));
   if (!visited.has(active)) setVisited(new Set(visited).add(active));
 
-  // Der aktive Reiter rollt ins Bild (schmale Bildschirme, falls die Leiste doch scrollt). Nicht beim ersten Rendern.
-  const firstRender = useRef(true);
+  // Der aktive Reiter rollt ins Bild (schmale Bildschirme, falls die Leiste doch scrollt). Nur bei einem Wechsel,
+  // nicht beim ersten Rendern (auch nicht im StrictMode, der Effekte doppelt ausführt).
+  const previous = useRef(active);
   useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
-      return;
-    }
+    if (previous.current === active) return;
+    previous.current = active;
     const el = refs.current[active];
     if (el && typeof el.scrollIntoView === 'function')
       el.scrollIntoView({ block: 'nearest', inline: 'nearest' });

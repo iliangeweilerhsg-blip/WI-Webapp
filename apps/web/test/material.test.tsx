@@ -332,7 +332,48 @@ describe('Verarbeitung', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 300);
     });
-    await waitFor(() => expect(detailGets).toBeGreaterThanOrEqual(1));
+    expect(detailGets).toBeGreaterThanOrEqual(1);
+    expect(await screen.findByText(/ließ sich nicht lesen/, {}, { timeout: 500 })).toBeInTheDocument();
+  });
+
+  it('pollWatched: Abbruch bei vorhandenen Cache-Daten liefert nicht die alten Daten, sondern die Antwort des Cores (#86)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const core = installFakeCore({ semesters: [makeSemester()], modules: [MOD] });
+    let client: QueryClient | undefined;
+    function Grab() {
+      client = useQueryClient();
+      return null;
+    }
+    page(
+      <>
+        <Grab />
+        <ModulView />
+      </>,
+    );
+    await screen.findByRole('heading', { level: 1, name: /Datenbanksysteme/ });
+    const inner = globalThis.fetch;
+    const detail = /\/slide-decks\/[^/?]+$/;
+    let cancelled = false;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      // Ein DocumentView-Observer mit Daten meldet sich ab: TanStack bricht ab und gibt die alten Daten zurück
+      if (!cancelled && detail.test(String(input)) && (init?.method ?? 'GET') === 'GET') {
+        cancelled = true;
+        void client?.cancelQueries({ queryKey: ['deck'] });
+      }
+      return inner(input, init);
+    });
+    await userEvent
+      .setup({ advanceTimers: vi.advanceTimersByTime })
+      .upload(screen.getByLabelText('PDF-Dateien auswählen'), pdf('VL 01.pdf'));
+    expect(await screen.findByText('Foliensatz hinzugefügt')).toBeInTheDocument();
+    const added = core.decks.at(-1);
+    if (!added) throw new Error('kein Foliensatz angelegt');
+    client?.setQueryData(['deck', added.id], { deck: { ...added, ingest_state: 'neu' }, slides: [] });
+    core.failIngest(added.id);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS + 300);
+    });
+    expect(cancelled).toBe(true);
     expect(await screen.findByText(/ließ sich nicht lesen/, {}, { timeout: 500 })).toBeInTheDocument();
   });
 
