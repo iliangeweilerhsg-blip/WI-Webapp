@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { KeychainTokenStore } from '../../../services/core/src/moodle/token-store.ts';
 import { resolveConfig, type SgConfig } from '../src/config.ts';
-import { SecurityKeychain, type Keychain } from '../src/keychain.ts';
+import { SecurityKeychain, spawnSecurity, type Keychain } from '../src/keychain.ts';
+import { InputError } from '../src/secret-input.ts';
 import {
   DEFAULT_MOODLE_URL,
   KEYCHAIN_SERVICE,
@@ -15,12 +16,14 @@ import {
   parseLoginArgs,
   parseTokenInput,
   printable,
+  realMoodleDeps,
   resolveMoodleUrl,
+  validateMoodleUrl,
   TOKEN_VALIDITY_DAYS,
   type FetchFn,
   type MoodleDeps,
 } from '../src/moodle.ts';
-import { installFakeSecurity } from './fixtures/fake-security.ts';
+import { installFakeSecurity, TEST_SERVICE } from './fixtures/fake-security.ts';
 
 // Testwerte zur Laufzeit gebaut und offensichtlich unecht (öffentliches Repo, Secret-Scanner)
 const TOKEN = 'ab'.repeat(16);
@@ -129,6 +132,7 @@ function makeDeps(
     answers?: string[];
     hidden?: string[];
     stdin?: string;
+    stdinError?: Error;
     tty?: boolean;
   } = {},
 ): { deps: MoodleDeps; io: TestIo; keychain: Keychain } {
@@ -142,6 +146,8 @@ function makeDeps(
     env: overrides.env ?? { SG_MOODLE_URL: MOODLE },
     now: () => NOW,
     account: 'anna',
+    // Nie der echte Dienst: Tests dürfen den Token des Owners nicht berühren
+    service: TEST_SERVICE,
     io: {
       out: (line) => io.lines.push(line),
       err: (line) => io.lines.push(line),
@@ -153,7 +159,10 @@ function makeDeps(
         io.hiddenPrompts.push(question);
         return hidden.shift() ?? '';
       },
-      readStdin: async () => overrides.stdin ?? '',
+      readStdin: async () => {
+        if (overrides.stdinError) throw overrides.stdinError;
+        return overrides.stdin ?? '';
+      },
       stdinIsTty: overrides.tty ?? true,
     },
   };
@@ -231,7 +240,7 @@ describe('moodle login mit Benutzername und Passwort', () => {
     }
 
     // Token im Schlüsselbund unter der Kennung des Core
-    await expect(keychain.read(KEYCHAIN_SERVICE)).resolves.toBe(TOKEN);
+    await expect(keychain.read(TEST_SERVICE)).resolves.toBe(TOKEN);
 
     // Metadaten ohne Token, Rechte 600
     const metaFile = join(dataDir, 'config', 'moodle.json');
@@ -271,7 +280,7 @@ describe('moodle login mit Benutzername und Passwort', () => {
     // Gegenprobe: Moodle wiederholt das Passwort im Fehlertext
     expect(output).not.toContain('Ungültige Anmeldung');
     expectNoSecrets(io, [wrong]);
-    await expect(keychain.read(KEYCHAIN_SERVICE)).resolves.toBeNull();
+    await expect(keychain.read(TEST_SERVICE)).resolves.toBeNull();
   });
 
   it('folgt keiner Weiterleitung, das Passwort geht nicht an ein anderes Ziel', async () => {
@@ -291,7 +300,18 @@ describe('moodle login mit Benutzername und Passwort', () => {
     expect(moodle.requests.map((r) => r.url)).toEqual(['/login/token.php']);
     expect(io.lines.join('\n')).toContain('leitet');
     expectNoSecrets(io);
-    await expect(keychain.read(KEYCHAIN_SERVICE)).resolves.toBeNull();
+    await expect(keychain.read(TEST_SERVICE)).resolves.toBeNull();
+  });
+
+  it('lehnt einen Token ab, den login/token.php nicht im Token-Format liefert', async () => {
+    moodle.handlers['/login/token.php'] = (_req, res) =>
+      json(res, { token: `${TOKEN}\nadd-generic-password -s x`, privatetoken: PRIVATE_TOKEN });
+    const { deps, io, keychain } = makeDeps({ fetch: moodle.fetch });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(1);
+    expect(io.lines.join('\n')).toContain('keinen gültigen Token');
+    expect(moodle.requests.map((r) => r.url)).toEqual(['/login/token.php']);
+    await expect(keychain.read(TEST_SERVICE)).resolves.toBeNull();
+    expectNoSecrets(io);
   });
 
   it('verbindet sich nur per https und nur zur konfigurierten Instanz', async () => {
@@ -320,7 +340,7 @@ describe('moodle login mit Benutzername und Passwort', () => {
     expect(await moodleCommand(cfg, ['login'], deps)).toBe(1);
     expect(io.lines.join('\n')).toContain('invalidtoken');
     expectNoSecrets(io);
-    await expect(keychain.read(KEYCHAIN_SERVICE)).resolves.toBeNull();
+    await expect(keychain.read(TEST_SERVICE)).resolves.toBeNull();
     expect(existsSync(join(dataDir, 'config', 'moodle.json'))).toBe(false);
   });
 
@@ -349,11 +369,11 @@ describe('moodle login mit Benutzername und Passwort', () => {
 
   it('räumt einen fremden Eintrag zum selben Dienst auf, damit der Core den neuen Token liest', async () => {
     const keychain = new MemoryKeychain();
-    await keychain.store(KEYCHAIN_SERVICE, 'altes-konto', 'a'.repeat(32));
+    await keychain.store(TEST_SERVICE, 'altes-konto', 'a'.repeat(32));
     const { deps } = makeDeps({ fetch: moodle.fetch, keychain });
     expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
-    await expect(keychain.read(KEYCHAIN_SERVICE)).resolves.toBe(TOKEN);
-    expect(keychain.items).toEqual([{ service: KEYCHAIN_SERVICE, account: 'anna', secret: TOKEN }]);
+    await expect(keychain.read(TEST_SERVICE)).resolves.toBe(TOKEN);
+    expect(keychain.items).toEqual([{ service: TEST_SERVICE, account: 'anna', secret: TOKEN }]);
   });
 
   it('fragt ohne Terminal kein Passwort ab', async () => {
@@ -370,7 +390,7 @@ describe('moodle login --token-stdin', () => {
     const { deps, io, keychain } = makeDeps({ fetch: moodle.fetch, tty: false, stdin: `${TOKEN}\n` });
     expect(await moodleCommand(cfg, ['login', '--token-stdin'], deps)).toBe(0);
     expect(moodle.requests.map((r) => r.url)).toEqual(['/webservice/rest/server.php']);
-    await expect(keychain.read(KEYCHAIN_SERVICE)).resolves.toBe(TOKEN);
+    await expect(keychain.read(TEST_SERVICE)).resolves.toBe(TOKEN);
     expectNoSecrets(io);
   });
 
@@ -380,7 +400,7 @@ describe('moodle login --token-stdin', () => {
     expect(await moodleCommand(cfg, ['login', '--token-stdin'], deps)).toBe(0);
     expect(io.hiddenPrompts).toHaveLength(1);
     expect(io.prompts).toEqual([]);
-    await expect(keychain.read(KEYCHAIN_SERVICE)).resolves.toBe(TOKEN);
+    await expect(keychain.read(TEST_SERVICE)).resolves.toBe(TOKEN);
     expectNoSecrets(io, [link]);
   });
 
@@ -399,19 +419,19 @@ describe('moodle login --token-stdin', () => {
         fetch: moodle.fetch,
         tty: false,
         stdin: TOKEN,
-        keychain: new SecurityKeychain(),
+        keychain: new SecurityKeychain(spawnSecurity(fake.bin)),
       });
       expect(await moodleCommand(cfg, ['login', '--token-stdin'], deps)).toBe(0);
       expectNoSecrets(io);
       const calls = fake.calls();
       expect(calls.length).toBeGreaterThan(0);
       for (const argv of calls) expect(argv.join(' ')).not.toContain(TOKEN);
-      await expect(new KeychainTokenStore().getToken()).resolves.toBe(TOKEN);
+      await expect(new KeychainTokenStore({ service: TEST_SERVICE }).getToken()).resolves.toBe(TOKEN);
 
       // logout löscht den Eintrag, der Core findet danach nichts mehr
       expect(await moodleCommand(cfg, ['logout'], deps)).toBe(0);
       expect(fake.items()).toEqual([]);
-      await expect(new KeychainTokenStore().getToken()).resolves.toBeNull();
+      await expect(new KeychainTokenStore({ service: TEST_SERVICE }).getToken()).resolves.toBeNull();
     } finally {
       fake.restore();
     }
@@ -458,7 +478,7 @@ describe('moodle status und logout', () => {
     const { deps, io } = makeDeps({ fetch: (url, init) => fetch(url, init), keychain });
     expect(await moodleCommand(cfg, ['status'], deps)).toBe(1);
     expect(io.lines.join('\n')).toContain('kein Eintrag');
-    await keychain.store(KEYCHAIN_SERVICE, 'anna', TOKEN);
+    await keychain.store(TEST_SERVICE, 'anna', TOKEN);
     expect(await moodleCommand(cfg, ['status'], deps)).toBe(0);
     expect(io.lines.join('\n')).toContain('Eintrag vorhanden');
     expect(reads).toBe(0);
@@ -467,14 +487,14 @@ describe('moodle status und logout', () => {
 
   it('logout löscht alle Einträge zum Dienst und config/moodle.json', async () => {
     const keychain = new MemoryKeychain();
-    await keychain.store(KEYCHAIN_SERVICE, 'anna', TOKEN);
-    await keychain.store(KEYCHAIN_SERVICE, 'alt', 'b'.repeat(32));
+    await keychain.store(TEST_SERVICE, 'anna', TOKEN);
+    await keychain.store(TEST_SERVICE, 'alt', 'b'.repeat(32));
     await keychain.store('anderer-dienst', 'anna', 'c'.repeat(32));
     mkdirSync(join(dataDir, 'config'), { recursive: true });
     writeFileSync(join(dataDir, 'config', 'moodle.json'), '{}');
     const { deps, io } = makeDeps({ keychain });
     expect(await moodleCommand(cfg, ['logout'], deps)).toBe(0);
-    expect(await keychain.exists(KEYCHAIN_SERVICE)).toBe(false);
+    expect(await keychain.exists(TEST_SERVICE)).toBe(false);
     expect(await keychain.exists('anderer-dienst')).toBe(true);
     expect(existsSync(join(dataDir, 'config', 'moodle.json'))).toBe(false);
     expect(io.lines.join('\n')).toContain('2 Eintrag');
@@ -485,6 +505,30 @@ describe('moodle status und logout', () => {
     expect(await moodleCommand(cfg, ['loginn'], deps)).toBe(1);
     expect(await moodleCommand(cfg, [], deps)).toBe(1);
     expect(io.lines.join('\n')).toContain('moodle login');
+  });
+
+  it('wiederholt einen Token nicht, der versehentlich als Unterbefehl getippt wurde (pnpm sg moodle <token>)', async () => {
+    const { deps, io } = makeDeps();
+    expect(await moodleCommand(cfg, [TOKEN], deps)).toBe(1);
+    expect(await moodleCommand(cfg, [PASSWORD, TOKEN], deps)).toBe(1);
+    expect(io.lines.join('\n')).toContain('Unbekannter Unterbefehl');
+    expectNoSecrets(io);
+  });
+
+  it('meldet zu lange Eingaben verständlich, ohne die Eingabe', async () => {
+    const { deps, io } = makeDeps({
+      fetch: moodle.fetch,
+      tty: false,
+      stdinError: new InputError('Eingabe ist zu lang (höchstens 4096 Zeichen).'),
+    });
+    expect(await moodleCommand(cfg, ['login', '--token-stdin'], deps)).toBe(1);
+    const output = io.lines.join('\n');
+    expect(output).toContain('Eingabe ist zu lang');
+    expect(output).not.toContain('Unerwarteter Fehler');
+  });
+
+  it('die echten Abhängigkeiten nutzen den Dienst des Core', () => {
+    expect(realMoodleDeps().service).toBe(KEYCHAIN_SERVICE);
   });
 });
 
@@ -529,6 +573,29 @@ describe('Hilfsfunktionen', () => {
   it('printable entfernt Steuerzeichen aus Moodle-Texten (keine Terminal-Steuerfolgen)', () => {
     expect(printable('Moodle\x1b]0;x\x07.UP\r\n\x9b2J')).toBe('Moodle]0;x.UP2J');
     expect(printable(42)).toBe('');
+  });
+
+  it('validateMoodleUrl lehnt täuschende Rohwerte ab und gibt nur die normalisierte Form zurück', () => {
+    // Backslash: der Parser macht daraus "/", der Host wäre evil.test
+    expect(() => validateMoodleUrl('https://evil.test\\@moodle2.uni-potsdam.de')).toThrow('Backslash');
+    expect(() => validateMoodleUrl('https://moodle2.uni-potsdam.de\t.evil.test')).toThrow('Steuerzeichen');
+    expect(() => validateMoodleUrl('https://moodle2.uni-potsdam.de\n')).not.toThrow(); // nur außen, wird abgeschnitten
+    expect(() => validateMoodleUrl('https://moodle2 .uni-potsdam.de')).toThrow('Leer');
+    expect(validateMoodleUrl('HTTPS://Moodle2.Uni-Potsdam.DE/')).toBe('https://moodle2.uni-potsdam.de');
+    expect(validateMoodleUrl('https://moodle.test:443/lernen/')).toBe('https://moodle.test/lernen');
+    expect(validateMoodleUrl('https://moodle.test/a/../b')).toBe('https://moodle.test/b');
+  });
+
+  it('zeigt bei login nur die normalisierte Adresse an', async () => {
+    const { deps, io } = makeDeps({ fetch: moodle.fetch, env: { SG_MOODLE_URL: 'HTTPS://MOODLE.test/' } });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    expect(io.lines[0]).toBe('Moodle-Instanz: https://moodle.test');
+    const { deps: deps2, io: io2 } = makeDeps({
+      fetch: moodle.fetch,
+      env: { SG_MOODLE_URL: 'https://evil.test\\@moodle.test' },
+    });
+    expect(await moodleCommand(cfg, ['login'], deps2)).toBe(1);
+    expect(io2.lines.join('\n')).not.toContain('@moodle.test');
   });
 
   it('keychainAccount nimmt den Kurznamen, sonst einen festen Namen', () => {

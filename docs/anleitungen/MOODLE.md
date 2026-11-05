@@ -21,7 +21,7 @@ Im Terminal im Repo-Ordner:
 pnpm sg moodle login
 ```
 
-1. Den Benutzernamen eingeben (wie bei Moodle.UP), Enter.
+1. Den Benutzernamen eingeben (wie bei Moodle.UP), Enter. Benutzername und Passwort einzeln eingeben, nicht zusammen in einem Rutsch einfügen.
 2. Das Passwort eingeben. **Es erscheint nichts, auch keine Sternchen.** Enter.
 3. Die CLI holt den Token, prüft ihn bei Moodle und legt ihn im Schlüsselbund ab. Am Ende steht z. B.
    `Verbunden mit Moodle.UP (https://moodle2.uni-potsdam.de) als Anna Muster.`

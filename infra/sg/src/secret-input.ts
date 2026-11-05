@@ -12,6 +12,14 @@ export interface OutputStream {
   write(chunk: string): unknown;
 }
 
+/** Eingabefehler mit einer Meldung, die gefahrlos ausgegeben werden kann (enthält nie die Eingabe) */
+export class InputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InputError';
+  }
+}
+
 /** Abbruch durch Strg+C oder Strg+D bei leerer Eingabe */
 export class InputAborted extends Error {
   constructor() {
@@ -22,6 +30,7 @@ export class InputAborted extends Error {
 
 /** Höchstlänge einer Eingabe. Länger ist kein Passwort und kein Token, sondern ein Versehen */
 export const MAX_INPUT_CHARS = 4096;
+const TOO_LONG = `Eingabe ist zu lang (höchstens ${MAX_INPUT_CHARS} Zeichen).`;
 
 const CTRL_C = '\x03';
 const CTRL_D = '\x04';
@@ -43,7 +52,7 @@ export function readLineFromTty(
   options: { echo: boolean },
 ): Promise<string> {
   if (input.isTTY !== true || typeof input.setRawMode !== 'function') {
-    return Promise.reject(new Error('Keine Terminal-Eingabe verfügbar.'));
+    return Promise.reject(new InputError('Keine Terminal-Eingabe verfügbar.'));
   }
   const setRawMode = input.setRawMode.bind(input);
   return new Promise<string>((resolve, reject) => {
@@ -64,7 +73,7 @@ export function readLineFromTty(
       if (error) reject(error);
       else resolve(value);
     };
-    const onError = (): void => finish(new Error('Eingabe konnte nicht gelesen werden.'));
+    const onError = (): void => finish(new InputError('Eingabe konnte nicht gelesen werden.'));
     const onEnd = (): void => finish(value === '' ? new InputAborted() : null);
     const onData = (chunk: Buffer | string): void => {
       const text = (typeof chunk === 'string' ? chunk : chunk.toString('utf8')).replace(ESCAPE_SEQUENCE, '');
@@ -86,7 +95,7 @@ export function readLineFromTty(
         }
         // Übrige Steuerzeichen ignorieren
         if (char < ' ') continue;
-        if (value.length >= MAX_INPUT_CHARS) return finish(new Error('Eingabe ist zu lang.'));
+        if (value.length >= MAX_INPUT_CHARS) return finish(new InputError(TOO_LONG));
         value += char;
         if (options.echo) output.write(char);
       }
@@ -114,7 +123,7 @@ export function readAll(input: InputStream): Promise<string> {
       if (value.length > MAX_INPUT_CHARS) {
         cleanup();
         input.pause();
-        reject(new Error('Eingabe ist zu lang.'));
+        reject(new InputError(TOO_LONG));
       }
     };
     const onEnd = (): void => {
@@ -123,7 +132,7 @@ export function readAll(input: InputStream): Promise<string> {
     };
     const onError = (): void => {
       cleanup();
-      reject(new Error('Eingabe konnte nicht gelesen werden.'));
+      reject(new InputError('Eingabe konnte nicht gelesen werden.'));
     };
     input.on('data', onData);
     input.once('end', onEnd);

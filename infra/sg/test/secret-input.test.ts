@@ -2,6 +2,7 @@ import { PassThrough } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import {
   InputAborted,
+  InputError,
   MAX_INPUT_CHARS,
   readAll,
   readLineFromTty,
@@ -102,5 +103,6 @@ describe('readAll', () => {
     const pending = readAll(input);
     input.write('x'.repeat(MAX_INPUT_CHARS + 1));
     await expect(pending).rejects.toThrow('zu lang');
+    await expect(pending).rejects.toBeInstanceOf(InputError);
   });
 });

@@ -21,7 +21,7 @@ Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammen
 | `TZ` | Zeitzone des Systems | Core (Ortszeit für ICS-Termine ohne Zeitzone, Backup-Uhrzeit). Tests laufen mit `TZ=Europe/Zurich` |
 
 Geheimnisse wie API-Schlüssel stehen in `$SG_DATA_DIR/config/.env` mit Rechten 600 (02 §3). Die Prozesse lesen diese Datei beim Start.
-**Ausnahme Moodle:** Der Moodle-Token liegt nur im macOS-Schlüsselbund (Dienst `studiengehirn-moodle`), nie in `.env`. Nur der Core liest ihn (08 §9.1).
+**Ausnahme Moodle:** Der Moodle-Token liegt nur im macOS-Schlüsselbund (Dienst `studiengehirn-moodle`), nie in `.env`. Nur der Core liest ihn (08 §9.1). Einzige Ausnahme: `pnpm sg moodle login` liest den Eintrag direkt nach dem Speichern einmal zurück, um zu prüfen, dass der Core genau diesen Token findet. `pnpm sg moodle status` und `logout` lesen den Token nie.
 
 ## 2. Befehle, die jeder Baustein anbietet
 

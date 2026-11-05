@@ -14,7 +14,7 @@ import { parseEnv } from 'node:util';
 import { MoodleStatusSchema, type MoodleStatus } from '@sg/shared';
 import type { SgConfig } from './config.ts';
 import { KeychainError, SecurityKeychain, type Keychain } from './keychain.ts';
-import { InputAborted, readAll, readLineFromTty } from './secret-input.ts';
+import { InputAborted, InputError, readAll, readLineFromTty } from './secret-input.ts';
 
 /** Dienstname im Schlüsselbund. Muss gleich `KEYCHAIN_SERVICE` in services/core/src/moodle/token-store.ts sein */
 export const KEYCHAIN_SERVICE = 'studiengehirn-moodle';
@@ -60,6 +60,8 @@ export interface MoodleDeps {
   now: () => Date;
   /** Konto des Schlüsselbund-Eintrags (macOS-Benutzername, wie in der bisherigen Anleitung) */
   account: string;
+  /** Dienst des Schlüsselbund-Eintrags. Echt immer `KEYCHAIN_SERVICE`, Tests nutzen einen eigenen Namen */
+  service: string;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -70,9 +72,20 @@ export interface MoodleUrl {
   source: 'env' | 'dotenv' | 'default';
 }
 
-/** Prüft die Adresse wie der Core (services/core/src/config.ts): nur https, ohne Zugangsdaten, Query, Fragment */
+/**
+ * Prüft die Adresse wie der Core (services/core/src/config.ts): nur https, ohne Zugangsdaten, Query, Fragment.
+ * Zusätzlich verboten: Backslash, Leer- und Steuerzeichen im Rohwert. Der URL-Parser deutet sie stillschweigend um
+ * (`https://evil.test\@moodle…` hat den Host `evil.test`, ein Tab wird entfernt), die Anzeige des Rohwerts
+ * würde also über das echte Ziel täuschen. Rückgabe ist immer die normalisierte Form `origin + pathname`.
+ */
 export function validateMoodleUrl(raw: string): string {
-  const trimmed = raw.trim().replace(/\/+$/, '');
+  const trimmed = raw.trim();
+  // eslint-disable-next-line no-control-regex -- genau diese Zeichen sollen abgelehnt werden
+  if (/[\x00-\x20\x7f-\x9f\\]/.test(trimmed)) {
+    throw new MoodleCliError(
+      'SG_MOODLE_URL enthält Backslash, Leer- oder Steuerzeichen. Bitte die Adresse ohne diese Zeichen eintragen.',
+    );
+  }
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
@@ -85,7 +98,7 @@ export function validateMoodleUrl(raw: string): string {
       `SG_MOODLE_URL muss eine reine https-Adresse sein (ohne Zugangsdaten, Query und Fragment): ${parsed.host}${parsed.pathname}`,
     );
   }
-  return trimmed;
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
 }
 
 /** `SG_MOODLE_URL` aus der Umgebung, sonst aus `$SG_DATA_DIR/config/.env`, sonst Moodle.UP */
@@ -380,12 +393,12 @@ async function obtainToken(deps: MoodleDeps, url: string, options: LoginOptions)
 
 /** Speichert und liest zurück, genau wie der Core liest (nur Dienst). Räumt fremde Einträge zum Dienst auf */
 async function storeToken(deps: MoodleDeps, token: string): Promise<void> {
-  await deps.keychain.store(KEYCHAIN_SERVICE, deps.account, token);
-  if ((await deps.keychain.read(KEYCHAIN_SERVICE)) === token) return;
+  await deps.keychain.store(deps.service, deps.account, token);
+  if ((await deps.keychain.read(deps.service)) === token) return;
   // Ein anderer Eintrag zum selben Dienst (z. B. anderes Konto) überdeckt den neuen: alle löschen, neu anlegen
-  await deps.keychain.removeAll(KEYCHAIN_SERVICE);
-  await deps.keychain.store(KEYCHAIN_SERVICE, deps.account, token);
-  if ((await deps.keychain.read(KEYCHAIN_SERVICE)) !== token) {
+  await deps.keychain.removeAll(deps.service);
+  await deps.keychain.store(deps.service, deps.account, token);
+  if ((await deps.keychain.read(deps.service)) !== token) {
     throw new MoodleCliError('Der Token ließ sich nicht im Schlüsselbund ablegen (Rücklesen stimmt nicht).');
   }
 }
@@ -414,7 +427,7 @@ export async function moodleLogin(cfg: SgConfig, args: string[], deps: MoodleDep
   io.out(
     `Verbunden mit ${info.siteName || '(ohne Namen)'} (${info.siteUrl || url}) als ${info.fullName || '?'}.`,
   );
-  io.out(`Token im Schlüsselbund gespeichert (Dienst ${KEYCHAIN_SERVICE}), gültig bis etwa ${validUntil}.`);
+  io.out(`Token im Schlüsselbund gespeichert (Dienst ${deps.service}), gültig bis etwa ${validUntil}.`);
   if (!options.validUntil) {
     io.out(
       'Zeigt Moodle unter Profil → Einstellungen → Sicherheitsschlüssel ein anderes Datum, erneut mit --gueltig-bis.',
@@ -472,10 +485,10 @@ export async function moodleStatus(cfg: SgConfig, args: string[], deps: MoodleDe
     return status.state === 'ok' || status.state === 'laeuft_bald_ab' ? 0 : 1;
   }
   // Core läuft nicht: nur nachsehen, ob es einen Eintrag gibt. Den Token liest allein der Core (VERTRAEGE §1)
-  const exists = await deps.keychain.exists(KEYCHAIN_SERVICE);
+  const exists = await deps.keychain.exists(deps.service);
   const meta = await readMoodleMeta(cfg.dataDir);
   io.out('Der Core läuft nicht, darum ohne Prüfung bei Moodle.');
-  io.out(`Schlüsselbund (Dienst ${KEYCHAIN_SERVICE}): ${exists ? 'Eintrag vorhanden' : 'kein Eintrag'}`);
+  io.out(`Schlüsselbund (Dienst ${deps.service}): ${exists ? 'Eintrag vorhanden' : 'kein Eintrag'}`);
   if (exists && typeof meta.token_valid_until === 'string')
     io.out(`Token gültig bis: ${printable(meta.token_valid_until)}`);
   if (!exists) io.out(`Einrichten: pnpm sg moodle login (${GUIDE})`);
@@ -488,12 +501,12 @@ export async function moodleLogout(cfg: SgConfig, args: string[], deps: MoodleDe
     io.err('moodle logout kennt keine Optionen.');
     return 1;
   }
-  const removed = await deps.keychain.removeAll(KEYCHAIN_SERVICE);
+  const removed = await deps.keychain.removeAll(deps.service);
   await unlink(moodleMetaPath(cfg.dataDir)).catch(() => {});
   io.out(
     removed > 0
-      ? `Token aus dem Schlüsselbund gelöscht (${removed} Eintrag/Einträge, Dienst ${KEYCHAIN_SERVICE}).`
-      : `Kein Eintrag im Schlüsselbund (Dienst ${KEYCHAIN_SERVICE}).`,
+      ? `Token aus dem Schlüsselbund gelöscht (${removed} Eintrag/Einträge, Dienst ${deps.service}).`
+      : `Kein Eintrag im Schlüsselbund (Dienst ${deps.service}).`,
   );
   io.out('Ein laufender Core nutzt den Token bis zum Neustart weiter: pnpm sg stop && pnpm sg start.');
   io.out(
@@ -525,7 +538,7 @@ export async function moodleCommand(cfg: SgConfig, rest: string[], deps: MoodleD
       deps.io.err('Abgebrochen.');
       return 130;
     }
-    if (error instanceof MoodleCliError || error instanceof KeychainError) {
+    if (error instanceof MoodleCliError || error instanceof KeychainError || error instanceof InputError) {
       deps.io.err(error.message);
       return 1;
     }
@@ -555,6 +568,7 @@ export function realMoodleDeps(): MoodleDeps {
     env: process.env,
     now: () => new Date(),
     account: keychainAccount(safeUsername()),
+    service: KEYCHAIN_SERVICE,
   };
 }
 
