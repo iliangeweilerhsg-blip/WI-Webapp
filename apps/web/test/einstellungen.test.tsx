@@ -55,7 +55,7 @@ describe('Reiter', () => {
     expect(await screen.findByRole('heading', { name: 'Semester' })).toBeInTheDocument();
   });
 
-  it('wechselt per Klick und Pfeiltasten; Geräte und Daten zeigen „Kommt bald“', async () => {
+  it('wechselt per Klick und Pfeiltasten; Geräte zeigt „Kommt bald“, Daten die Bereiche Backups und Papierkorb', async () => {
     installFakeCore();
     const user = userEvent.setup();
     page();
@@ -63,7 +63,8 @@ describe('Reiter', () => {
     expect(screen.getByRole('heading', { name: 'Geräte' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Allgemein', hidden: true })).not.toBeVisible();
     await user.click(screen.getByRole('tab', { name: 'Daten und Papierkorb' }));
-    expect(screen.getByRole('heading', { name: 'Daten und Papierkorb' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Daten und Backups' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Papierkorb' })).toBeInTheDocument();
 
     screen.getByRole('tab', { name: 'Allgemein' }).focus();
     await user.keyboard('{ArrowRight}');

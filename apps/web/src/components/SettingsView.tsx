@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ComingSoon } from './settings/ComingSoon.tsx';
 import { SettingsTabContext, type TabMark } from './settings/form.tsx';
+import { DataSettings } from './settings/DataSettings.tsx';
 import { GeneralSettingsForm } from './settings/GeneralSettings.tsx';
 import { LectureSettingsForm } from './settings/LectureSettings.tsx';
 import { PenSettingsForm } from './settings/PenSettings.tsx';
+import { TrashSettings } from './settings/TrashSettings.tsx';
 import { SemesterSettings } from './SemesterSettings.tsx';
 import { ThemeToggle } from './ThemeToggle.tsx';
 
@@ -48,7 +50,12 @@ const TABS: readonly SettingsTab[] = [
   {
     id: 'daten',
     label: 'Daten und Papierkorb',
-    panel: () => <ComingSoon title="Daten und Papierkorb" ticket="T1-18" />,
+    panel: () => (
+      <div className="space-y-8">
+        <DataSettings />
+        <TrashSettings />
+      </div>
+    ),
   },
 ];
 
