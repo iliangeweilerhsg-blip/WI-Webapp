@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMemo } from 'react';
 import { CoreHint } from '../CoreHint.tsx';
 import { EmptyState } from '../Placeholder.tsx';
+import { SpontaneousStartCard } from './SpontaneousStart.tsx';
 import { StartCard } from './StartCard.tsx';
 import { TodayList } from './TodayList.tsx';
 import { buildEntries, formatClock, pickCard } from './model.ts';
@@ -61,6 +62,10 @@ export function HeuteScreen() {
             onSession={data.apply}
             onRefetch={data.refetch}
           />
+        ) : null}
+
+        {hasData ? (
+          <SpontaneousStartCard modules={modules} sessions={sessions} onSession={data.apply} />
         ) : null}
 
         {now !== null && entries.length > 0 ? <TodayList entries={entries} now={now} /> : null}
