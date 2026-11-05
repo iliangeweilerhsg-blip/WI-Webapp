@@ -107,11 +107,13 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 
 | Stufe | Wann | Review-Umfang |
 |---|---|---|
-| **A – kritisch** | Auth und Kopplung, Backup/Restore, Sync-Protokoll, Sperren und Nebenläufigkeit, Migrationen, alles mit Datenverlust- oder Sicherheitsrisiko | voll: Gegenproben (Mutanten) auf alle Kernpfade, echte Nachstellung gegen Postgres oder den echten Core, Angriffsszenarien |
-| **B – normal** | UI-Features, Darstellung, Einstellungen, Hilfsfunktionen | gezielt: Diff und direkt betroffene Dateien, 2–3 Gegenproben auf die Kernlogik, Browser-Check nur wenn die Tests das Verhalten nicht abdecken (z. B. Layout, echte Timer) |
+| **A – kritisch** | Anmeldung und Geräte-Kopplung (Tokens, Auth-Wächter), Moodle-Zugangsdaten und andere Geheimnisse, Dateipfade und Uploads, Löschen/Papierkorb/Wiederherstellen, Backup/Restore, Sync-Protokoll, Sperren und Nebenläufigkeit, Migrationen, alles mit Datenverlust- oder Sicherheitsrisiko | voll: Gegenproben auf alle Kernpfade (gezielt eingebaute Fehler, die die Tests finden müssen), echte Nachstellung gegen Postgres oder den echten Core, Angriffsszenarien |
+| **B – normal** | UI-Features, Darstellung, Einstellungen (ohne Zugangsdaten und Berechtigungen), Hilfsfunktionen | gezielt: Diff und direkt betroffene Dateien, 2–3 Gegenproben auf die Kernlogik, Browser-Check nur wenn die Tests das Verhalten nicht abdecken (z. B. Layout, echte Timer) |
 
-**Nachrunden.**
-- Eine kleine Nacharbeit (Stufe B, bis etwa 150 geänderte Zeilen) prüft Claude selbst anhand des Diffs.
+**Im Zweifel gilt Stufe A.** Stufe B nur, wenn der PR keinen Bereich aus A berührt, auch nicht indirekt. Doku-PRs prüft ein frischer Sonnet-Subagent im Umfang von Stufe B.
+
+**Nachrunden.** Das Erst-Review macht immer ein frischer Subagent. Die folgenden Nachrunden erfüllen die Regel „unabhängiges Review“ weiterhin.
+- Eine kleine Nacharbeit (Stufe B, bis 150 geänderte Zeilen und ohne Berührung von Bereichen aus Stufe A) prüft Claude selbst anhand des Diffs.
 - Größere Nacharbeit und alles in Stufe A prüft **derselbe** Reviewer weiter, per Fortsetzen statt Neustart. Er hat den Kontext schon.
 - Darum werden Worktrees von Autoren und Reviewern **erst nach dem Merge** gelöscht.
 
@@ -119,7 +121,7 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 - Konkrete Dateien und Abschnitte nennen, keine pauschalen Leselisten („lies die Spezifikation“).
 - Autoren führen die Tests der betroffenen Pakete aus. Die volle Suite läuft in der CI.
 - Screenshots nur bei UI-Änderungen.
-- Höchstens **2 Subagents gleichzeitig**, außer der Owner gibt mehr frei.
+- Höchstens **2 Subagents gleichzeitig** (Autoren und Reviewer zusammengezählt), außer der Owner gibt mehr frei.
 
 **Lead-Session.** Ist der Verlauf sehr lang, übergibt Claude an eine neue Session. Den Stand findet die neue Session in offenen Issues und PRs sowie in einer kurzen Übergabe-Notiz, die Claude vorher als Issue mit dem Titel „Lead-Übergabe“ anlegt. PR-Abos werden nach dem Merge sofort beendet.
 
@@ -127,7 +129,7 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 
 | Variante | Wie | Wann |
 |---|---|---|
-| **Subagent mit eigenem Worktree** | Eigene Git-Arbeitskopie und eigener Branch (`feat/…`) pro Subagent | 2–4 kleinere Features gleichzeitig |
+| **Subagent mit eigenem Worktree** | Eigene Git-Arbeitskopie und eigener Branch (`feat/…`) pro Subagent | 2 kleinere Features gleichzeitig (mehr nur mit Owner-Freigabe, siehe §4a) |
 | **Eigene Cloud-Session pro Feature** | Claude startet eine separate Claude-Code-Session mit eigenem Container und Ziel-Branch und überwacht sie | Größere, länger laufende Features |
 | **Workflow (Multi-Agent)** | Orchestrierung mehrerer Agenten per Skript, Modell pro Agent nach Abschnitt 4 | Vom Owner freigegeben; für größere Pakete, z. B. nachts |
 
