@@ -55,6 +55,86 @@ export function initialLogDay(logDir: string, now: Date = new Date()): string {
 }
 
 /**
+ * Query-Parameter, deren Wert ein Geheimnis sein kann (z. B. `pairing_id` an `DELETE /devices/pairings`,
+ * VERTRAEGE §7.5). Gilt für alle Routen. Der Name muss an Namensgrenzen (`_`, `-`, Anfang, Ende) passen, damit
+ * `author`, `keyword`, `sort_key` oder `session_id` nicht getroffen werden; Groß-/Kleinschreibung egal. Ein
+ * nacktes `key` fehlt bewusst (`sort_key` ist ein normaler Parameter), API-Schlüssel deckt `api_key` u. ä. ab.
+ */
+const SECRET_PARAM =
+  /(^|[_-])(pairing_id|token|wstoken|access_token|secret|password|passwd|nonce|code|api_key|apikey|access_key|private_key|auth)($|[_-])/i;
+
+/**
+ * Ersetzt in einer URL oder einem Logtext (z. B. Fastifys „Route GET:/x?… not found“) die Werte geheimer
+ * Query-Parameter durch `[Redacted]`. Der Name wird vor dem Vergleich URL-dekodiert.
+ */
+export function redactUrl(text: string): string {
+  return text.replace(/([?&])([^=&#\s]+)=([^&#\s]*)/g, (match, sep: string, rawName: string) => {
+    let name = rawName;
+    try {
+      name = decodeURIComponent(rawName.replace(/\+/g, ' '));
+    } catch {
+      // kaputte Kodierung: den Rohnamen prüfen
+    }
+    return SECRET_PARAM.test(name) ? `${sep}${rawName}=[Redacted]` : match;
+  });
+}
+
+/** `err`-Serializer: wie pino, aber `message` und `stack` laufen durch `redactUrl` */
+export function serializeError(err: unknown): unknown {
+  const serialized = pino.stdSerializers.err(err as Error);
+  if (serialized && typeof serialized === 'object') {
+    const out = serialized as unknown as Record<string, unknown>;
+    for (const field of ['message', 'stack']) {
+      if (typeof out[field] === 'string') out[field] = redactUrl(out[field]);
+    }
+  }
+  return serialized;
+}
+
+/** `req`-Serializer für das Request-Log: wie der von Fastify, aber mit geschwärzter Query */
+export function serializeRequest(req: {
+  method?: string;
+  url?: string;
+  headers?: Record<string, unknown>;
+  host?: string;
+  hostname?: string;
+  ip?: string;
+  socket?: { remoteAddress?: string; remotePort?: number };
+}): Record<string, unknown> {
+  return {
+    method: req.method,
+    url: typeof req.url === 'string' ? redactUrl(req.url) : req.url,
+    host: req.host ?? req.hostname,
+    remoteAddress: req.ip ?? req.socket?.remoteAddress,
+    remotePort: req.socket?.remotePort,
+  };
+}
+
+/** Gemeinsame pino-Optionen (auch für Tests über den echten Log-Strom) */
+export function loggerOptions(config: Pick<Config, 'logLevel'>): pino.LoggerOptions {
+  return {
+    level: config.logLevel,
+    base: { service: 'core' },
+    timestamp: pino.stdTimeFunctions.isoTime,
+    // Geheimnisse nie loggen (09 §4). Moodle-Token (08 §9.1) zur Sicherheit auch, falls er je in ein Log-Objekt gerät
+    redact: ['req.headers.authorization', 'req.headers.cookie', 'wstoken', 'token', '*.wstoken', '*.token'],
+    serializers: { req: serializeRequest, err: serializeError },
+    hooks: {
+      // Auch Meldungstexte schwärzen, in denen eine URL steht („Route … not found“)
+      logMethod(args, method) {
+        // Formatstring und alle printf-Argumente (`log.info('Route %s', url)`)
+        const list: unknown[] = [...args];
+        // `log.error(err)`: pino übernimmt `err.message` als Meldung am Hook vorbei, darum selbst setzen
+        if (list[0] instanceof Error)
+          list.splice(0, 1, { err: list[0] }, ...(list.length === 1 ? [list[0].message] : []));
+        const redacted = list.map((arg) => (typeof arg === 'string' ? redactUrl(arg) : arg));
+        return method.apply(this, redacted as unknown as Parameters<typeof method>);
+      },
+    },
+  };
+}
+
+/**
  * Strukturierte JSON-Logs nach stdout und (optional) `$SG_DATA_DIR/logs/core.log` (VERTRAEGE §4).
  * Die Datei wird synchron geschrieben, damit auch Fehler beim Start (z. B. Port belegt) im Log landen.
  * Rotation: beim Start und danach stündlich geprüft (siehe `rotateLogs`).
@@ -84,14 +164,5 @@ export function createLogger(
       60 * 60 * 1000,
     ).unref();
   }
-  return pino(
-    {
-      level: config.logLevel,
-      base: { service: 'core' },
-      timestamp: pino.stdTimeFunctions.isoTime,
-      // Geheimnisse nie loggen (09 §4). Moodle-Token (08 §9.1) zur Sicherheit auch, falls er je in ein Log-Objekt gerät
-      redact: ['req.headers.authorization', 'req.headers.cookie', 'wstoken', 'token', '*.wstoken', '*.token'],
-    },
-    pino.multistream(streams),
-  );
+  return pino(loggerOptions(config), pino.multistream(streams));
 }

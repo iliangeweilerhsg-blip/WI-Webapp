@@ -9,9 +9,11 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
+import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { hasOpenPermissions } from '../../src/config.ts';
-import { createLogger, initialLogDay, rotateLogs } from '../../src/logger.ts';
+import { createLogger, initialLogDay, loggerOptions, redactUrl, rotateLogs } from '../../src/logger.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -87,6 +89,76 @@ describe('hasOpenPermissions', () => {
     expect(hasOpenPermissions(file)).toBe(false);
     chmodSync(file, 0o644);
     expect(hasOpenPermissions(file)).toBe(true);
+  });
+});
+
+describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
+  const SECRET = '00000000-0000-4000-8000-000000000091';
+
+  it('redactUrl: nur geheime Namen, Rest und Reihenfolge bleiben', () => {
+    expect(redactUrl('/devices/pairings?pairing_id=abc')).toBe('/devices/pairings?pairing_id=[Redacted]');
+    expect(redactUrl('/x?limit=5&Token=a&code=1&cursor=z')).toBe(
+      '/x?limit=5&Token=[Redacted]&code=[Redacted]&cursor=z',
+    );
+    expect(redactUrl('/x?pairing%5Fid=a&device_token=b')).toBe(
+      '/x?pairing%5Fid=[Redacted]&device_token=[Redacted]',
+    );
+    expect(redactUrl('/x?pairing_id=a&pairing_id=b#f')).toBe(
+      '/x?pairing_id=[Redacted]&pairing_id=[Redacted]#f',
+    );
+    expect(redactUrl('/devices')).toBe('/devices');
+    expect(redactUrl('/x?')).toBe('/x?');
+  });
+
+  it('Namensgrenzen: harmlose Parameter bleiben lesbar, geheime werden geschwärzt', () => {
+    for (const name of ['author', 'keyword', 'sort_key', 'session_id', 'limit', 'codec', 'tokens']) {
+      expect(redactUrl(`/x?${name}=v`)).toBe(`/x?${name}=v`);
+    }
+    for (const name of [
+      'pairing_id',
+      'PAIRING_ID',
+      'pairing%5Fid',
+      'token',
+      'access_token',
+      'wstoken',
+      'device-token',
+      'code',
+      'api_key',
+      'secret',
+    ]) {
+      expect(redactUrl(`/x?a=1&${name}=v`)).toBe(`/x?a=1&${name}=[Redacted]`);
+    }
+  });
+
+  it('printf-Argumente und Fehlerobjekte werden geschwärzt', () => {
+    const lines: string[] = [];
+    const logger = pino(loggerOptions({ logLevel: 'trace' }), { write: (c: string) => void lines.push(c) });
+    logger.info('Route %s', '/x?pairing_id=GEHEIM1');
+    logger.info({ a: 1 }, 'Route %s und %s', 'ok', '/y?token=GEHEIM2');
+    logger.error(new Error('kaputt bei /z?pairing_id=GEHEIM3'));
+    logger.error({ err: new Error('bei /z?access_token=GEHEIM4') }, 'Fehler');
+    const log = lines.join('');
+    expect(log).not.toMatch(/GEHEIM/);
+    expect(log).toContain('"msg":"Route /x?pairing_id=[Redacted]"');
+  });
+
+  it('die pairing_id taucht im echten Log-Strom nicht auf (Request- und Fehlerzeilen)', async () => {
+    const lines: string[] = [];
+    const stream = { write: (chunk: string) => void lines.push(chunk) };
+    const logger = pino(loggerOptions({ logLevel: 'trace' }), stream);
+    const app = Fastify({ loggerInstance: logger });
+    app.delete('/devices/pairings', async (request) => {
+      request.log.info('handler');
+      return {};
+    });
+    await app.inject({ method: 'DELETE', url: `/devices/pairings?pairing_id=${SECRET}&x=1` });
+    await app.inject({ method: 'GET', url: `/unbekannt?pairing_id=${SECRET}` });
+    await app.close();
+    const log = lines.join('');
+    expect(log).toContain('incoming request');
+    expect(log).toContain('request completed');
+    expect(log).not.toContain(SECRET);
+    expect(log).toContain('pairing_id=[Redacted]&x=1');
   });
 });
 
