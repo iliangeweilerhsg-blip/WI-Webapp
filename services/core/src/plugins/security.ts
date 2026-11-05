@@ -238,6 +238,7 @@ export function registerSecurity(
     } catch (error) {
       if (rejections && !isLocalRequest(request) && error instanceof HttpError) {
         rejections.record(request.socket.remoteAddress, error.statusCode);
+        request.sgRejectionCounted = true;
       }
       // Abgelehnter WebSocket-Upgrade: Die Antwort geht direkt auf den Socket, den der HTTP-Server nach dem
       // `upgrade`-Ereignis nicht mehr verwaltet. Ohne eigenes Schließen bliebe er serverseitig halb offen hängen
@@ -252,10 +253,25 @@ export function registerSecurity(
       throw error;
     }
     if (device !== undefined) request.sgDevice = device;
-    if (rejections) {
+    // Kopplungsrouten aus dem Netz (`device` undefiniert) sind ohne Token offen: nicht vorab freigeben, sonst
+    // flutet jede Anfrage (auch 400/409/429) das Log. Siehe `onResponse` unten.
+    if (rejections && device !== undefined) {
       request.sgAdmitted = true;
       // Angenommene Netzanfragen loggen wie bisher; der Request-Log-Controller hat die Zeile bis hierhin zurückgehalten
       if (!isLocalRequest(request)) request.log.info({ req: request }, 'incoming request');
     }
   });
+  if (rejections) {
+    app.addHook('onResponse', async (request, reply) => {
+      if (request.sgAdmitted || request.sgRejectionCounted || isLocalRequest(request)) return;
+      // Netzanfrage ohne Freigabe (Kopplungsroute): ab 4xx nur zählen, sonst einzeln loggen wie bisher
+      if (reply.statusCode >= 400) {
+        rejections.record(request.socket.remoteAddress, reply.statusCode);
+        request.sgRejectionCounted = true;
+      } else {
+        request.log.info({ req: request }, 'incoming request');
+        request.log.info({ res: reply, responseTime: reply.elapsedTime }, 'request completed');
+      }
+    });
+  }
 }

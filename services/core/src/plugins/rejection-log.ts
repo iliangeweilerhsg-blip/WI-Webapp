@@ -77,6 +77,8 @@ export interface RejectionLogOptions {
 export class RejectionLog {
   private readonly buckets = new Map<string, Bucket>();
   private overflow: (Bucket & { sources: number }) | null = null;
+  private budgetStart = Number.NEGATIVE_INFINITY;
+  private budgetUsed = 0;
   private readonly logger: RejectionLogOptions['logger'];
   private readonly maxSources: number;
   private readonly maxLines: number;
@@ -101,13 +103,13 @@ export class RejectionLog {
     const key = sourceKey(address);
     let bucket = this.buckets.get(key);
     if (bucket && now - bucket.windowStart >= this.windowMs) {
-      // Fenster dieser Quelle ist um: Zusammenfassung schreiben, neues Fenster beginnen
-      this.emit(key, bucket);
+      // Fenster dieser Quelle ist um: zusammenfassen (unter dem Zeilenbudget), neues Fenster beginnen
       this.buckets.delete(key);
+      this.settle(key, bucket, now);
       bucket = undefined;
     }
     if (!bucket) {
-      if (this.buckets.size >= this.maxSources) this.evictOldest();
+      if (this.buckets.size >= this.maxSources) this.evictOldest(now);
       bucket = newBucket(now);
       this.buckets.set(key, bucket);
     }
@@ -120,47 +122,53 @@ export class RejectionLog {
   /** Schreibt alle abgelaufenen Fenster (`force`: auch laufende, z. B. beim Beenden) */
   flush(force = false): void {
     const now = this.clock();
-    let lines = 0;
-    const rest: Bucket & { sources: number } = { ...newBucket(now), sources: 0 };
     for (const [key, bucket] of [...this.buckets]) {
       if (!force && now - bucket.windowStart < this.windowMs) continue;
       this.buckets.delete(key);
-      if (lines < this.maxLines) {
-        this.emit(key, bucket);
-        lines += 1;
-      } else {
-        merge(rest, bucket);
-        rest.sources += 1;
-      }
+      this.settle(key, bucket, now);
     }
     const overflow = this.overflow;
     if (overflow && (force || now - overflow.windowStart >= this.windowMs)) {
-      merge(rest, overflow);
-      rest.sources += overflow.sources;
       this.overflow = null;
-    }
-    if (rest.sources > 0) {
       this.logger.info(
         {
-          sources: rest.sources,
-          count: rest.count,
-          statuses: rest.statuses,
-          first: new Date(rest.first).toISOString(),
-          last: new Date(rest.last).toISOString(),
+          sources: overflow.sources,
+          count: overflow.count,
+          statuses: overflow.statuses,
+          first: new Date(overflow.first).toISOString(),
+          last: new Date(overflow.last).toISOString(),
         },
         'Abgelehnte Netzanfragen weiterer Quellen (zusammengefasst)',
       );
     }
   }
 
-  private evictOldest(): void {
+  /** Schreibt die Zeile einer Quelle, solange das Zeilenbudget der Minute reicht, sonst in den Sammelzähler */
+  private settle(source: string, bucket: Bucket, now: number): void {
+    if (now - this.budgetStart >= this.windowMs) {
+      this.budgetStart = now;
+      this.budgetUsed = 0;
+    }
+    if (this.budgetUsed < this.maxLines) {
+      this.budgetUsed += 1;
+      this.emit(source, bucket);
+    } else {
+      this.toOverflow(bucket, now);
+    }
+  }
+
+  private toOverflow(bucket: Bucket, now: number): void {
+    this.overflow ??= { ...newBucket(now), sources: 0 };
+    merge(this.overflow, bucket);
+    this.overflow.sources += 1;
+  }
+
+  private evictOldest(now: number): void {
     const oldest = this.buckets.entries().next().value;
     if (!oldest) return;
     const [key, bucket] = oldest;
     this.buckets.delete(key);
-    this.overflow ??= { ...newBucket(bucket.first), sources: 0 };
-    merge(this.overflow, bucket);
-    this.overflow.sources += 1;
+    this.toOverflow(bucket, now);
   }
 
   private emit(source: string, bucket: Bucket): void {
@@ -181,6 +189,8 @@ declare module 'fastify' {
   interface FastifyRequest {
     /** Der Wächter hat diese Anfrage durchgelassen (Netzanfragen werden nur dann einzeln geloggt) */
     sgAdmitted?: boolean;
+    /** Die Ablehnung wurde schon gezählt (nicht noch einmal in `onResponse`) */
+    sgRejectionCounted?: boolean;
   }
 }
 

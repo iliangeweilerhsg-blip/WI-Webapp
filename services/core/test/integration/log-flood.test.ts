@@ -71,6 +71,35 @@ describe('Log-Flut durch abgelehnte Netzanfragen (#87)', () => {
     });
   });
 
+  it('Kopplungsrouten ohne Token: 10.000 Anfragen mit 4xx (400, 429) ergeben nur eine Zusammenfassung', async () => {
+    await withLoggedApp(async (t, lines) => {
+      lines.length = 0;
+      const seen = new Set<number>();
+      for (let i = 0; i < 10_000; i++) {
+        const res = await t.app.inject({
+          method: 'POST',
+          url: i % 2 ? '/api/v1/devices/pair/start' : '/api/v1/devices/pair/confirm',
+          remoteAddress: '192.168.1.24',
+          headers: netHeaders({ 'content-type': 'application/json' }),
+          // Gültiger Body bei start (Fenster zu → 423, danach Rate-Limit → 429), leerer bei confirm (400)
+          payload: i % 2 ? { device_name: 'TEST-iPad', kind: 'ipad', public_nonce: 'A'.repeat(24) } : {},
+        });
+        seen.add(res.statusCode);
+        expect(res.statusCode).toBeGreaterThanOrEqual(400);
+      }
+      // Das Rate-Limit (§12) greift: neben 400 kommt 429 vor
+      expect(seen.has(429)).toBe(true);
+      expect(lines).toEqual([]);
+      await t.app.close();
+      expect(lines.length).toBeLessThanOrEqual(3);
+      const summary = JSON.parse(lines.find((l) => l.includes('Abgelehnte Netzanfragen')) as string) as {
+        count: number;
+        source: string;
+      };
+      expect(summary).toMatchObject({ source: '192.168.1.24', count: 10_000 });
+    });
+  });
+
   it('lokale und angenommene Netzanfragen loggen wie bisher, geheime Query-Werte bleiben geschwärzt', async () => {
     await withLoggedApp(async (t, lines) => {
       lines.length = 0;

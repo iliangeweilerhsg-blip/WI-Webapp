@@ -96,7 +96,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           await guard(request);
         } catch (denied) {
           if (denied instanceof HttpError) {
-            if (!isLocalRequest(request)) rejections.record(request.socket.remoteAddress, denied.statusCode);
+            if (!isLocalRequest(request) && !request.sgRejectionCounted) {
+              rejections.record(request.socket.remoteAddress, denied.statusCode);
+              request.sgRejectionCounted = true;
+            }
             return reply.code(denied.statusCode).send(apiErrorBody(denied.code, denied.message));
           }
         }

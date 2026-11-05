@@ -63,6 +63,20 @@ describe('RejectionLog', () => {
     expect(lines[0]?.obj).toMatchObject({ source: '2001:db8:1:2::/64', count: 50 });
   });
 
+  it('abgelaufene Fenster vieler Quellen: höchstens maxLinesPerFlush Zeilen je Minute, nichts geht verloren', () => {
+    const { log, lines, advance } = setup({ maxLinesPerFlush: 10 });
+    const sources = Array.from({ length: 3000 }, (_, i) => `10.${i >> 8}.${i & 255}.1`);
+    for (const source of sources) log.record(source, 401);
+    advance(61_000);
+    // Jede Quelle meldet sich nach Ablauf ihres Fensters erneut: record() darf nicht je Quelle eine Zeile schreiben
+    for (const source of sources) log.record(source, 401);
+    expect(lines.length).toBeLessThanOrEqual(10);
+    log.flush(true);
+    const total = lines.reduce((sum, line) => sum + (line.obj.count as number), 0);
+    expect(total).toBe(6000);
+    expect(lines.length).toBeLessThanOrEqual(10 + 1 + 10 + 1);
+  });
+
   it('die Tabelle bleibt begrenzt, nichts geht verloren und die Zeilenzahl bleibt klein', () => {
     const { log, lines } = setup({ maxSources: 100, maxLinesPerFlush: 10 });
     for (let i = 0; i < 5000; i++) log.record(`10.${i >> 8}.${i & 255}.1`, 401);
