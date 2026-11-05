@@ -851,7 +851,10 @@ describe('Core-Takt', () => {
         endedAt: T(50),
         state: 'beendet', // Aufnahme vorhanden → audio.finalize-Job
       });
-      expect(await handle.db.select().from(job).where(eq(job.sessionId, id))).toHaveLength(1);
+      // audio.finalize plus die Kette nach dem Stopp (transcribe, align.log; VERTRAEGE §18.2)
+      expect(
+        (await handle.db.select().from(job).where(eq(job.sessionId, id))).map((j) => j.type).sort(),
+      ).toEqual(['align.log', 'audio.finalize', 'transcribe']);
     });
 
     it('Core-Start ohne Aktivität: ended_at = started_at; Grenze nicht überschritten: läuft weiter (F-SES-05)', async () => {
@@ -1791,7 +1794,7 @@ describe('Stopp und Aufnahmen', () => {
     expect(await finalizeJobs(rec)).toHaveLength(1);
   });
 
-  it('schon fertiger Job: kein neuer, die Session geht gleich auf verarbeitet (der Worker zieht sie nicht mehr nach)', async () => {
+  it('schon fertiger Job: kein neuer audio.finalize, aber die Kette (§18.2); die Session bleibt beendet, bis sie durch ist', async () => {
     const id = await mkSession({ state: 'laeuft', startedAt: T(0) });
     const rec = await mkRecording(id);
     await handle.db.insert(job).values({
@@ -1803,8 +1806,11 @@ describe('Stopp und Aufnahmen', () => {
       sessionId: id,
     });
     const result = await transition(id, 'stop', { at: T(30), now: T(30) });
-    expect(result.session.state).toBe('verarbeitet');
+    expect(result.session.state).toBe('beendet');
     expect(await finalizeJobs(rec)).toHaveLength(1);
+    expect(
+      (await handle.db.select().from(job).where(eq(job.sessionId, id))).map((j) => j.type).sort(),
+    ).toEqual(['align.log', 'audio.finalize', 'transcribe']);
   });
 
   it('wartender oder laufender Job: Session bleibt beendet', async () => {

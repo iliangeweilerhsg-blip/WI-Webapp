@@ -25,6 +25,9 @@ export type Node =
   | 'photo'
   | 'recording'
   | 'audio_chunk'
+  | 'transcript'
+  | 'transcript_segment'
+  | 'slide_segment'
   | 'notebook'
   | 'page'
   | 'stroke'
@@ -61,12 +64,20 @@ export const CHILDREN: Record<Node, Edge[]> = {
     { child: 'marker', fk: 'session_id' },
     { child: 'photo', fk: 'session_id' },
     { child: 'recording', fk: 'session_id' },
+    // Phase 2 (§18.1): Maschinenausgaben der Session, gleicher Zeitstempel. `transcript_segment` hängt am Transkript
+    // und an der Session; der Fremdschlüssel `session_id` genügt, die Kante vom Transkript braucht es nicht.
+    { child: 'transcript', fk: 'session_id' },
+    { child: 'transcript_segment', fk: 'session_id' },
+    { child: 'slide_segment', fk: 'session_id' },
   ],
   slide_event: [],
   marker: [],
   photo: [],
   recording: [{ child: 'audio_chunk', fk: 'recording_id' }],
   audio_chunk: [],
+  transcript: [],
+  transcript_segment: [],
+  slide_segment: [],
   notebook: [{ child: 'page', fk: 'notebook_id' }],
   page: [
     { child: 'stroke', fk: 'page_id' },

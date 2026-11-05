@@ -1,6 +1,15 @@
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 import type { ZodType } from 'zod';
-import { PdfIngestPayloadSchema, SINGLE_USER_ID, type Job, type JobState, type JobType } from '@sg/shared';
+import {
+  AlignLogPayloadSchema,
+  AudioFinalizePayloadSchema,
+  PdfIngestPayloadSchema,
+  SINGLE_USER_ID,
+  TranscribePayloadSchema,
+  type Job,
+  type JobState,
+  type JobType,
+} from '@sg/shared';
 import type { DbOrTx, Tx } from '../db/client.ts';
 import { job } from '../db/schema/index.ts';
 import { notDeleted } from '../db/schema/common.ts';
@@ -17,6 +26,9 @@ export const JOB_NOTIFY_CHANNEL = 'sg_jobs';
  */
 export const JOB_PAYLOAD_SCHEMAS: Partial<Record<JobType, ZodType>> = {
   'pdf.ingest': PdfIngestPayloadSchema,
+  'audio.finalize': AudioFinalizePayloadSchema,
+  transcribe: TranscribePayloadSchema,
+  'align.log': AlignLogPayloadSchema,
 };
 
 export interface EnqueueJobInput {
