@@ -5,7 +5,8 @@
   "type": "module",
   "description": "Generierte TS-Typen und Zod-Validatoren (aus @sg/schemas) und gemeinsame Hilfsfunktionen",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./backup-target": "./src/backup-target.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p ."

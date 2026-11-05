@@ -175,6 +175,29 @@ describe('DataSettings', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/backup')).toBe(true));
   });
 
+  it('ohne Altbestand gibt es keinen Verschlüsselungs-Hinweis und keine Option', async () => {
+    stubCore((c) => (c.path.startsWith('/backups') ? backupOverview('/x') : settings('/x')));
+    mount(<DataSettings />);
+    await screen.findByText(/Letztes Backup:/);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/verschlüsseln/i)).not.toBeInTheDocument();
+  });
+
+  it('Altbestand backup_encryption=true: Hinweis, Knopf schickt backup_encryption=false', async () => {
+    const legacy = settings('/x');
+    legacy.data.backup_encryption = true;
+    const calls = stubCore((c) => {
+      if (c.method === 'PATCH') return settings('/x');
+      return c.path.startsWith('/backups') ? backupOverview('/x') : legacy;
+    });
+    const user = userEvent.setup();
+    mount(<DataSettings />);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/noch nicht verfügbar/);
+    await user.click(screen.getByRole('button', { name: 'Ohne Verschlüsselung sichern' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ data: { backup_encryption: false } });
+  });
+
   it('zeigt den Fehler des Core als Meldung (backup_running)', async () => {
     stubCore((c) => {
       if (c.method === 'POST')

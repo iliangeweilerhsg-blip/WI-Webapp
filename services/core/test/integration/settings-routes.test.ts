@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFile
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { ApiErrorSchema, SettingsSchema, type Settings } from '@sg/shared';
+import { ApiErrorSchema, SettingsSchema, SINGLE_USER_ID, type Settings } from '@sg/shared';
 import { DEFAULT_SETTINGS } from '../../src/services/settings.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
@@ -91,16 +91,34 @@ describe('PATCH /settings', () => {
   it('ändert den Bereich „data“ mit gültigem Backup-Ordner', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sg-backup-'));
     const settings = await patchOk({
-      data: { backup_target: dir, backup_encryption: true, backup_time: '04:30' },
+      data: { backup_target: dir, backup_encryption: false, backup_time: '04:30' },
     });
     expect(settings.data).toEqual({
       backup_target: realpathSync(dir),
-      backup_encryption: true,
+      backup_encryption: false,
       backup_time: '04:30',
     });
     const cleared = await patchOk({ data: { backup_target: null } });
     expect(cleared.data.backup_target).toBeNull();
     expect(cleared.data.backup_time).toBe('04:30');
+  });
+
+  it('backup_encryption: true ergibt 400 backup_encryption_unavailable und ändert nichts', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-backup-'));
+    const res = await patch({ data: { backup_target: dir, backup_encryption: true } });
+    expect(res.statusCode).toBe(400);
+    expect(errorOf(res).code).toBe('backup_encryption_unavailable');
+    expect((await get()).data).toEqual(DEFAULT_SETTINGS.data);
+    // Ausschalten bleibt erlaubt
+    expect((await patchOk({ data: { backup_encryption: false } })).data.backup_encryption).toBe(false);
+  });
+
+  it('Altbestand backup_encryption=true bleibt lesbar und lässt sich ausschalten', async () => {
+    await t.handle
+      .sql`INSERT INTO setting (key, value, user_id) VALUES ('data', '{"backup_encryption": true}'::jsonb, ${SINGLE_USER_ID})`;
+    expect((await get()).data.backup_encryption).toBe(true);
+    expect((await patchOk({ data: { backup_time: '05:00' } })).data.backup_encryption).toBe(true);
+    expect((await patchOk({ data: { backup_encryption: false } })).data.backup_encryption).toBe(false);
   });
 
   it('Teil-Update lässt alle anderen Felder und Bereiche unverändert', async () => {
