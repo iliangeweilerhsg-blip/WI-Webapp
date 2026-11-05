@@ -4,8 +4,10 @@
 //
 // Regeln (für beide gleich):
 // - absoluter Pfad, ohne NUL
-// - Symlinks aufgelöst. `..` wird erst NACH dem Auflösen von Symlinks ausgewertet (wie das Betriebssystem), nicht
-//   textuell vorher: `/link/../x` meint den Elternordner des Link-ZIELS.
+// - Symlinks aufgelöst, Komponente für Komponente (relative Links gegen den echten Ordner des Links). `..` wird dabei
+//   für den vorhandenen Teil des Pfads erst NACH dem Auflösen eines davor liegenden Symlinks ausgewertet (wie der
+//   Kernel): `/link/../x` meint den Elternordner des Link-ZIELS. Ab der ersten nicht vorhandenen Komponente gibt es
+//   keinen Symlink mehr, dort wird `..` rein textlich ausgewertet.
 // - Schreibweise vom Dateisystem (`realpath` native), damit Groß-/Kleinschreibung und NFD/NFC auf macOS nicht täuschen
 // - zusätzlich Identität (`dev`/`ino`) aller vorhandenen Vorfahren gegen Datenordner, `media/` und `vault/`: erkennt
 //   dasselbe Verzeichnis auch über Bind-Mounts, Firmlinks oder abweichende Schreibweise
@@ -22,7 +24,7 @@ import {
   type Stats,
 } from 'node:fs';
 import { access, lstat, mkdir, readlink, realpath, stat } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 
 /** Systemordner, die nie Backup-Ziel sein dürfen (Linux und macOS) */
 export const FORBIDDEN_TARGET_PREFIXES = ['/proc', '/sys', '/dev', '/System', '/private/var/db'];
@@ -121,30 +123,54 @@ function checkInput(target: string): string {
   if (target === '' || target.includes('\0') || !isAbsolute(target)) {
     throw new BackupTargetError('Der Backup-Ordner muss ein absoluter Pfad sein.');
   }
-  return resolve(target);
+  // bewusst NICHT `resolve(target)`: das würde `..` textlich vor den Symlinks auswerten
+  return target;
+}
+
+const splitParts = (path: string) => path.split(sep).filter((part) => part !== '' && part !== '.');
+const rawParts = (path: string) => splitParts(path.slice(parse(path).root.length));
+
+/** Nächster Stand nach einer Komponente: bei einem Symlink werden dessen Komponenten vorangestellt */
+function stepFor(current: string, part: string, link: string | undefined) {
+  if (link === undefined) return { current: join(current, part), prepend: [] as string[] };
+  return { current: isAbsolute(link) ? parse(current).root : current, prepend: splitParts(link) };
 }
 
 // ---------------------------------------------------------------- synchron (CLI)
 
 /**
- * `realpath` (native: Schreibweise des Dateisystems) des tiefsten vorhandenen Vorfahren plus der noch fehlende Rest.
- * Ein Symlink ins Leere wird über sein Linkziel weiterverfolgt.
+ * Löst `path` auf wie der Kernel: Komponente für Komponente, `..` nach einem Symlink gilt für dessen Ziel, relative
+ * Links werden gegen den echten Ordner des Links aufgelöst, Symlinks ins Leere über ihr Linkziel. Danach liefert
+ * `realpath` (native: Schreibweise des Dateisystems) den tiefsten vorhandenen Vorfahren plus den fehlenden Rest.
  */
 function realResolveSync(path: string): string {
-  const rest: string[] = [];
-  let current = resolve(path);
+  const queue = rawParts(path);
+  let current = parse(path).root;
   let hops = 0;
+  while (queue.length > 0) {
+    const part = queue.shift() as string;
+    if (part === '..') {
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, part);
+    let link: string | undefined;
+    try {
+      if (lstatSync(next).isSymbolicLink()) link = readlinkSync(next);
+    } catch (error) {
+      if (codeOf(error) !== 'ENOENT') throw fsError(error);
+    }
+    if (link !== undefined && ++hops > MAX_LINK_HOPS) throw fsError({ code: 'ELOOP' });
+    const step = stepFor(current, part, link);
+    current = step.current;
+    queue.unshift(...step.prepend);
+  }
+  const rest: string[] = [];
   for (;;) {
     try {
       return join(realpathSync.native(current), ...rest);
     } catch (error) {
       if (codeOf(error) !== 'ENOENT') throw fsError(error);
-    }
-    const info = lstatSync(current, { throwIfNoEntry: false });
-    if (info?.isSymbolicLink()) {
-      if (++hops > MAX_LINK_HOPS) throw fsError({ code: 'ELOOP' });
-      current = resolve(dirname(current), readlinkSync(current));
-      continue;
     }
     const parent = dirname(current);
     if (parent === current) throw fsError({ code: 'ENOENT' });
@@ -173,7 +199,7 @@ export function checkBackupTarget(target: string, dataDir: string, options: Back
       name,
       paths: [...new Set([resolve(path), realResolveSync(path)])],
     }));
-    checkPaths(full, resolved, folders);
+    checkPaths(full, full, folders);
     // Identität: jeder vorhandene Vorfahre darf nicht derselbe Ordner wie Datenordner, media/ oder vault/ sein
     const guarded = protectedFolders(dataDir).map(({ path, name }) => ({
       name,
@@ -212,21 +238,35 @@ export function checkBackupTarget(target: string, dataDir: string, options: Back
 
 // ---------------------------------------------------------------- asynchron (Core)
 
+/** Wie `realResolveSync`, asynchron */
 async function realResolve(path: string): Promise<string> {
-  const rest: string[] = [];
-  let current = resolve(path);
+  const queue = rawParts(path);
+  let current = parse(path).root;
   let hops = 0;
+  while (queue.length > 0) {
+    const part = queue.shift() as string;
+    if (part === '..') {
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, part);
+    let link: string | undefined;
+    try {
+      if ((await lstat(next)).isSymbolicLink()) link = await readlink(next);
+    } catch (error) {
+      if (codeOf(error) !== 'ENOENT') throw fsError(error);
+    }
+    if (link !== undefined && ++hops > MAX_LINK_HOPS) throw fsError({ code: 'ELOOP' });
+    const step = stepFor(current, part, link);
+    current = step.current;
+    queue.unshift(...step.prepend);
+  }
+  const rest: string[] = [];
   for (;;) {
     try {
       return join(await realpath(current), ...rest);
     } catch (error) {
       if (codeOf(error) !== 'ENOENT') throw fsError(error);
-    }
-    const info = await lstat(current).catch(() => undefined);
-    if (info?.isSymbolicLink()) {
-      if (++hops > MAX_LINK_HOPS) throw fsError({ code: 'ELOOP' });
-      current = resolve(dirname(current), await readlink(current));
-      continue;
     }
     const parent = dirname(current);
     if (parent === current) throw fsError({ code: 'ENOENT' });
@@ -255,7 +295,7 @@ export async function checkBackupTargetAsync(
         paths: [...new Set([resolve(path), await realResolve(path)])],
       })),
     );
-    checkPaths(full, resolved, folders);
+    checkPaths(full, full, folders);
     const guarded = await Promise.all(
       protectedFolders(dataDir).map(async ({ path, name }) => ({ name, info: await statAsync(path) })),
     );
