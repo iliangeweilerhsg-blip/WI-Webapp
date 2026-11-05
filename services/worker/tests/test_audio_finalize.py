@@ -48,7 +48,7 @@ def rows(*spec: tuple[int, int, int]) -> list[ChunkRow]:
 def test_analyze_gapless() -> None:
     a = analyze(
         rows((0, 0, 1000), (1, 1000, 1000), (2, 2000, 500)),
-        set(),
+        [],
         started_ms=0,
         last_seq=2,
         completed_duration_ms=2500,
@@ -60,7 +60,7 @@ def test_analyze_gapless() -> None:
 def test_analyze_tolerates_clock_jitter() -> None:
     a = analyze(
         rows((0, 0, 1000), (1, 1030, 1000)),
-        set(),
+        [],
         started_ms=0,
         last_seq=None,
         completed_duration_ms=None,
@@ -71,7 +71,7 @@ def test_analyze_tolerates_clock_jitter() -> None:
 def test_analyze_missing_chunk_and_time_jump() -> None:
     a = analyze(
         rows((0, 0, 1000), (1, 1000, 1000), (3, 3000, 1000), (4, 5000, 1000)),
-        set(),
+        [],
         started_ms=0,
         last_seq=4,
         completed_duration_ms=6000,
@@ -86,7 +86,7 @@ def test_analyze_missing_chunk_and_time_jump() -> None:
 def test_analyze_missing_tail_and_head() -> None:
     a = analyze(
         rows((1, 1000, 1000), (2, 2000, 1000)),
-        {0},
+        rows((0, 0, 1000)),
         started_ms=0,
         last_seq=4,
         completed_duration_ms=5000,
@@ -101,7 +101,7 @@ def test_analyze_missing_tail_and_head() -> None:
 def test_analyze_not_completed_does_not_invent_tail() -> None:
     a = analyze(
         rows((0, 0, 1000), (1, 1000, 1000)),
-        set(),
+        [],
         started_ms=0,
         last_seq=None,
         completed_duration_ms=None,
@@ -114,12 +114,12 @@ def test_analyze_rejects_absurd_input() -> None:
 
     with pytest.raises(NonRetryableError):
         analyze(
-            rows((0, 0, 1000)), set(), started_ms=0, last_seq=2_000_000_000, completed_duration_ms=1
+            rows((0, 0, 1000)), [], started_ms=0, last_seq=2_000_000_000, completed_duration_ms=1
         )
     with pytest.raises(NonRetryableError):
         analyze(
             rows((0, 0, 1000), (2, 10**10, 1000)),
-            set(),
+            [],
             started_ms=0,
             last_seq=None,
             completed_duration_ms=None,
@@ -147,7 +147,12 @@ def worker(
     database_url: str, connect_kwargs: dict[str, Any], tmp_path: Path, schema: str
 ) -> Worker:
     reg = Registry()
-    reg.register("audio.finalize", audio_finalize, AudioFinalizePayload)
+    reg.register(
+        "audio.finalize",
+        audio_finalize,
+        AudioFinalizePayload,
+        on_final_failure=af.mark_session_failed,
+    )
     return Worker(
         database_url,
         tmp_path,
@@ -263,10 +268,10 @@ def pcm(tag: int, ms: int = 10) -> bytes:
 
 @pytest.fixture
 def fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> None:
-    def decode(src: Path, dst: Path, data_dir: Path) -> None:
+    def decode(src: Path, dst: Path, ext: str, data_dir: Path, timeout: float) -> None:
         data = src.read_bytes()
         if data.startswith(b"KAPUTT"):
-            raise af.ChunkDecodeError("ffmpeg (Dekodieren) endete mit Code 1")
+            raise af.DecodeError("ffmpeg (Dekodieren) endete mit Code 1")
         dst.write_bytes(data)
 
     def encode(src: Path, dst: Path, data_dir: Path) -> None:
@@ -275,8 +280,8 @@ def fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> None:
     def probe(path: Path, data_dir: Path) -> int:
         return path.stat().st_size // MS
 
-    monkeypatch.setattr(af, "decode_chunk_to_pcm", decode)
-    monkeypatch.setattr(af, "decode_stream_to_pcm", decode)
+    monkeypatch.setattr(af, "decode_to_pcm", decode)
+    monkeypatch.setattr(af, "init_segment", lambda data, ext: b"")
     monkeypatch.setattr(af, "encode_m4a", encode)
     monkeypatch.setattr(af, "probe_duration_ms", probe)
 
@@ -441,17 +446,20 @@ def test_undecodable_independent_chunk_becomes_gap(
     assert len(full_path(tmp_path, rid).read_bytes()) == 50 * MS
 
 
-def test_dependent_without_init_chunk_fails_without_retry(
+def test_dependent_without_init_chunk_is_mit_luecken(
     worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
 ) -> None:
-    rid = add_recording(conn, tmp_path, five()[1:], dur=10, independent=False, last_seq=4)
+    """Ohne seq 0 ist der Strom nicht dekodierbar: keine Datei, aber auch kein Fehler. Ein später
+    nachgelieferter seq 0 macht den nächsten Lauf möglich."""
+    chunks = five()
+    rid = add_recording(conn, tmp_path, chunks[1:], dur=10, independent=False, last_seq=4)
     job = add_job(conn, rid)
     worker.drain(conn)
-    row = get_job(conn, job)
-    assert row["state"] == "fehler"
-    assert row["attempts"] == 1
-    assert "Init-Chunk" in row["error"]
+    res = result_of(conn, job)
+    assert (res.state.value, res.chunk_count, res.file_size_bytes) == ("mit_luecken", 0, 0)
+    assert [m.root for m in res.missing_seqs] == [0, 1, 2, 3, 4]
     assert not full_path(tmp_path, rid).exists()
+    assert recording_row(conn, rid) == (0, "mit_luecken")
 
 
 def test_independent_without_first_chunk_pads_the_start(
@@ -921,4 +929,256 @@ def test_real_garbage_independent_chunk_is_skipped(
     worker.drain(conn)
     res = result_of(conn, job)
     assert [m.root for m in res.missing_seqs] == [3]
+    assert_m4a(full_path(tmp_path, rid), 10.0)
+
+
+# ---------- Nacharbeit aus dem Review ----------
+
+
+def test_independent_priming_does_not_drift(
+    worker: Worker,
+    conn: psycopg.Connection[Any],
+    tmp_path: Path,
+    fake_ffmpeg: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """180 Chunks à 100 ms. Jeder Decoder liefert 37 ms Priming zu viel, alle zehn Chunks gibt es
+    20 ms Rotationslücke. Naives Aneinanderhängen wäre 180 * 37 ms zu lang, hier zählt start_ms."""
+    real_decode = af.decode_to_pcm
+
+    def decode_with_priming(src: Path, dst: Path, ext: str, data_dir: Path, timeout: float) -> None:
+        real_decode(src, dst, ext, data_dir, timeout)
+        with dst.open("ab") as fh:
+            fh.write(bytes(37 * MS))
+
+    monkeypatch.setattr(af, "decode_to_pcm", decode_with_priming)
+    starts = {i: i * 100 + 20 * (i // 10) for i in range(180)}
+    chunks = [(i, pcm(1 + i % 200, 100)) for i in range(180)]
+    rid = add_recording(
+        conn, tmp_path, chunks, dur=100, independent=True, starts=starts, last_seq=179
+    )
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert res.missing_seqs == []
+    assert res.audio_duration_ms == starts[179] + 100
+    out = full_path(tmp_path, rid).read_bytes()
+    # Jeder Chunk liegt exakt an seinem start_ms (Inhalt: Kennbyte)
+    for i in (0, 9, 10, 99, 179):
+        assert out[starts[i] * MS] == 1 + i % 200
+
+
+def test_overlap_drops_head_of_next_piece(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    rid = add_recording(
+        conn,
+        tmp_path,
+        [(0, pcm(1, 100)), (1, pcm(2, 100))],
+        dur=100,
+        independent=True,
+        starts={1: 60},  # 40 ms Überlappung
+        last_seq=1,
+    )
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert res.audio_duration_ms == 160
+    out = full_path(tmp_path, rid).read_bytes()
+    assert out == pcm(1, 100) + pcm(2, 100)[40 * MS :]
+
+
+def test_short_decoded_run_is_padded_to_declared_length(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    """Liefert der Decoder für einen Lauf zu wenig (angeschnittener Anfang), wird aufgefüllt."""
+    chunks = five()
+    chunks[4] = (4, pcm(ord("E"), 4))  # nur 4 von 10 ms
+    rid = add_recording(conn, tmp_path, chunks, dur=10, last_seq=4, completed_ms=50)
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert res.audio_duration_ms == 50
+    assert len(full_path(tmp_path, rid).read_bytes()) == 50 * MS
+
+
+def test_corrupt_last_chunk_without_complete_gives_tail_gap(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    rid = add_recording(conn, tmp_path, five(), dur=10, sha_override={4: "e" * 64})
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert [m.root for m in res.missing_seqs] == [4]
+    assert [(g.start_ms, g.duration_ms) for g in res.gaps] == [(40, 10)]
+    assert res.audio_duration_ms == 50
+
+
+def test_old_work_folders_are_removed(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, fake_ffmpeg: None
+) -> None:
+    rid = add_recording(conn, tmp_path, five(), dur=10, last_seq=4)
+    old = af.recording_dir(tmp_path, rid) / ".work-abgebrochen"
+    old.mkdir()
+    (old / "x.pcm").write_bytes(b"1234")
+    (af.recording_dir(tmp_path, rid) / "full.m4a.part").write_bytes(b"halb")
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    result_of(conn, job)
+    assert leftovers(tmp_path, rid) == ["full.m4a"]
+
+
+def test_final_failure_marks_session(
+    worker: Worker,
+    conn: psycopg.Connection[Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(af, "FFMPEG", "/nicht/vorhanden/ffmpeg")
+    sid = add_session(conn, "beendet")
+    rid = add_recording(conn, tmp_path, five(), dur=10, last_seq=4, session_id=sid)
+    job = add_job(conn, rid, session_id=sid, max_attempts=1)
+    worker.drain(conn)
+    assert get_job(conn, job)["state"] == "fehler"
+    row = conn.execute("SELECT state, processing FROM session WHERE id = %s", (sid,)).fetchone()
+    assert row == ("verarbeitet", {"audio.finalize": "fehler"})
+
+
+def test_init_segment_detection() -> None:
+    webm = b"\x1a\x45\xdf\xa3HEADER\x1f\x43\xb6\x75CLUSTER"
+    assert af.init_segment(webm, "webm") == b"\x1a\x45\xdf\xa3HEADER"
+    assert af.init_segment(b"nothing", "webm") is None
+
+    def box(kind: bytes, n: int) -> bytes:
+        return struct.pack(">I", 8 + n) + kind + bytes(n)
+
+    mp4 = box(b"ftyp", 8) + box(b"moov", 20) + box(b"moof", 4) + box(b"mdat", 9)
+    assert af.init_segment(mp4, "mp4") == box(b"ftyp", 8) + box(b"moov", 20)
+    assert af.init_segment(box(b"moof", 4), "mp4") is None
+
+
+def test_silence_limit_follows_recording_length() -> None:
+    from sg_worker.registry import NonRetryableError
+
+    assert af.silence_limit_ms(None) == af.SILENCE_LIMIT_FALLBACK_MS
+    assert af.silence_limit_ms(90 * 60_000) == 90 * 60_000 + af.SILENCE_LIMIT_BUFFER_MS
+    with pytest.raises(NonRetryableError):
+        analyze(
+            rows((0, 0, 1000), (1, 2 * 3_600_000, 1000)),
+            [],
+            started_ms=0,
+            last_seq=1,
+            completed_duration_ms=60_000,
+        )
+
+
+# ---------- Nacharbeit: echtes ffmpeg ----------
+
+
+@pytest.fixture(scope="session")
+def cut_streams(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[bytes]]:
+    """20 s Sinuston, in 5 gleich große Byte-Stücke geschnitten (mitten in Cluster/Fragment)."""
+    if not HAVE_FFMPEG:
+        pytest.skip("ffmpeg fehlt")
+    folder = tmp_path_factory.mktemp("cut")
+    sine = "sine=frequency=440:sample_rate=48000:duration=20"
+    _sh(
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", sine, "-c:a", "libopus",
+        "-f", "webm", str(folder / "s.webm"),
+    )  # fmt: skip
+    _sh(
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", sine, "-c:a", "aac", "-b:a", "64k",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "1000000",
+        "-f", "mp4", str(folder / "s.mp4"),
+    )  # fmt: skip
+    out: dict[str, list[bytes]] = {}
+    for kind in ("webm", "mp4"):
+        data = (folder / f"s.{kind}").read_bytes()
+        size = len(data) // 5
+        out[kind] = [data[i * size : (i + 1) * size if i < 4 else len(data)] for i in range(5)]
+    return out
+
+
+@needs_ffmpeg
+@pytest.mark.parametrize("kind", ["webm", "mp4"])
+@pytest.mark.parametrize("drop", [None, 2])
+def test_real_cut_mid_cluster_keeps_length(
+    worker: Worker,
+    conn: psycopg.Connection[Any],
+    tmp_path: Path,
+    kind: str,
+    drop: int | None,
+    cut_streams: dict[str, list[bytes]],
+) -> None:
+    """Chunks beginnen nicht an Cluster-/Fragmentgrenzen (echte timeslice-Blobs)."""
+    mime = "audio/webm;codecs=opus" if kind == "webm" else "audio/mp4;codecs=mp4a.40.2"
+    chunks = [c for c in enumerate(cut_streams[kind]) if c[0] != drop]
+    rid = add_recording(conn, tmp_path, chunks, mime=mime, dur=4000, last_seq=4, completed_ms=20000)
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    out = full_path(tmp_path, rid)
+    assert_m4a(out, 20.0, tolerance=0.3)
+    assert abs(res.audio_duration_ms - 20000) < 300
+    if drop is None:
+        assert res.state.value == "vollstaendig"
+    else:
+        # Die fehlenden 8 bis 12 s sind still (der angeschnittene Anfang des zweiten Laufs
+        # kann die Stille vergrößern, aber nie verkleinern)
+        assert [m.root for m in res.missing_seqs] == [drop]
+        assert any(s <= 8.2 and s + d >= 11.8 for s, d in silences(out))
+    assert leftovers(tmp_path, rid) == ["full.m4a"]
+
+
+@pytest.fixture(scope="session")
+def independent_1s(tmp_path_factory: pytest.TempPathFactory) -> list[bytes]:
+    """20 eigenständige Opus-Dateien à 1 s (jede mit Encoder-Priming)."""
+    if not HAVE_FFMPEG:
+        pytest.skip("ffmpeg fehlt")
+    folder = tmp_path_factory.mktemp("indep1")
+    chunks = []
+    for i in range(20):
+        out = folder / f"{i}.webm"
+        _sh(
+            "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+            "sine=frequency=440:sample_rate=48000:duration=1", "-c:a", "libopus",
+            "-f", "webm", str(out),
+        )  # fmt: skip
+        chunks.append(out.read_bytes())
+    return chunks
+
+
+@needs_ffmpeg
+def test_real_independent_chunks_do_not_drift(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, independent_1s: list[bytes]
+) -> None:
+    rid = add_recording(
+        conn,
+        tmp_path,
+        list(enumerate(independent_1s)),
+        independent=True,
+        dur=1000,
+        last_seq=19,
+        completed_ms=20000,
+    )
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert res.state.value == "vollstaendig"
+    assert_m4a(full_path(tmp_path, rid), 20.0, tolerance=0.1)
+    assert abs(res.audio_duration_ms - 20000) < 100
+
+
+@needs_ffmpeg
+def test_real_ffconcat_chunk_is_not_read_as_concat_list(
+    worker: Worker, conn: psycopg.Connection[Any], tmp_path: Path, independent_webm: list[bytes]
+) -> None:
+    evil = b"ffconcat version 1.0\nfile '/etc/passwd'\n"
+    chunks = list(enumerate(independent_webm))
+    chunks[2] = (2, evil)
+    rid = add_recording(conn, tmp_path, chunks, independent=True, last_seq=4, completed_ms=10000)
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert [m.root for m in res.missing_seqs] == [2]
     assert_m4a(full_path(tmp_path, rid), 10.0)

@@ -3,30 +3,33 @@
 
 Ablauf:
 
-1. Chunks der Aufnahme nach `seq` lesen. Der Dateipfad entsteht nur aus IDs und `seq`
+1. Chunks nach `seq` lesen. Der Dateipfad entsteht nur aus IDs und `seq`
    (`media/recordings/<id>/chunks/<seq>.<ext>`, §4), nie aus der Spalte `file_path`.
-   Jeder Chunk wird gegen sha256 und Größe aus `audio_chunk` geprüft. Fehlende oder beschädigte
+   Jeder Chunk wird gegen sha256 und Größe aus `audio_chunk` geprüft und als geprüfte Kopie in
+   den Arbeitsordner geschrieben (ffmpeg liest nur diese Kopien). Fehlende oder beschädigte
    Chunks zählen als fehlend (`mit_luecken`), der Job scheitert deshalb nicht.
-2. Lücken bestimmen: fehlende `seq` (`fehlender_chunk`) und Sprünge in `start_ms`
-   (`zeitluecke`, Toleranz `GAP_TOLERANCE_MS`). Chunks am Ende, die der Client mit `last_seq`
-   angekündigt hat, aber nie geliefert hat, zählen auch.
-3. Dekodieren nach rohem PCM (s16le, 48 kHz, mono):
-   - `chunks_independent = false`: Die Chunks sind ein Bytestrom (Init-Chunk plus Fortsetzungen).
-     Sie werden binär aneinandergehängt und als Ganzes dekodiert.
-   - `chunks_independent = true`: Jeder Chunk ist eine eigene Datei und wird einzeln dekodiert.
-   Lücken füllt der Handler mit Nullbytes (Stille) in der Länge der Lücke.
-4. Das PCM wird nach `full.m4a` kodiert (AAC, 48 kHz, mono, 64 kbit/s), zuerst nach
-   `full.m4a.part`, dann atomar umbenannt.
+2. Dekodieren nach rohem PCM (s16le, 48 kHz, mono) in "Stücke" mit Beginn und Soll-Länge:
+   - `chunks_independent = true`: ein Stück je Chunk.
+   - `chunks_independent = false`: Die Chunks sind ein Bytestrom. Zusammenhängende Läufe (lückenlose
+     `seq`, kein Sprung in `start_ms`) werden einzeln dekodiert, jeweils mit dem Init-Segment aus
+     Chunk 0 davor (EBML bis zum ersten Cluster bzw. `ftyp`+`moov`). Ohne Chunk 0 ist nichts
+     dekodierbar (`mit_luecken`, keine Datei). Chunks, die nicht an Cluster- oder Fragmentgrenzen
+     beginnen, kosten nur den angeschnittenen Anfang eines Laufs; seine Länge bleibt richtig.
+3. Platzieren: Jedes Stück liegt bei seinem `start_ms` (relativ zu `recording.started_ms`) und ist
+   auf seine Soll-Länge (Summe `duration_ms`) gebracht: zu kurz -> Stille, zu lang -> gekürzt,
+   Überlappung mit dem Vorgänger -> der Anfang entfällt. So summieren sich Encoder-Priming und
+   Rotationslücken nicht auf. Die Toleranz `GAP_TOLERANCE_MS` gilt nur für die Meldung in `gaps`.
+4. Das PCM wird nach `full.m4a` kodiert (AAC, 48 kHz, mono, 64 kbit/s), nach `.part` im
+   Arbeitsordner geschrieben, mit fsync gesichert und atomar nach `full.m4a` verschoben.
 
-`ffmpeg` läuft per `subprocess` mit Argumentliste (ohne Shell) und Zeitlimit.
+`ffmpeg` läuft per `subprocess` mit Argumentliste (ohne Shell), mit Zeitlimit, `-threads 1`,
+erzwungenem Eingabeformat und `-protocol_whitelist file`.
 
-Idempotent: Der Handler liest nur die Chunks und überschreibt `full.m4a` atomar. Ein erneuter Lauf
-liefert dieselbe Datei und dasselbe Ergebnis (bis auf `job_duration_ms`); Arbeitsdateien liegen in
-einem eigenen Ordner, der immer wieder entfernt wird.
+Idempotent: Ein erneuter Lauf liefert dieselbe Datei und dasselbe Ergebnis (bis auf
+`job_duration_ms`). Alte Arbeitsordner (`.work-*`) werden beim Start entfernt.
 
-Ist die Aufnahme beim Start nicht abgeschlossen (`completed_at` leer, etwa weil der Browser nie
-`complete` gesendet hat), arbeitet der Handler mit den vorhandenen Chunks: Der Core plant den Job
-erst 10 min nach dem Stopp ein (§3). Ohne `last_seq` lässt sich ein fehlendes Ende nicht erkennen.
+Ist die Aufnahme beim Start nicht abgeschlossen (`completed_at` leer), arbeitet der Handler mit den
+vorhandenen Chunks; ohne `last_seq` lässt sich ein fehlendes Ende nicht erkennen.
 """
 
 from __future__ import annotations
@@ -35,6 +38,7 @@ import hashlib
 import logging
 import os
 import shutil
+import struct
 import subprocess
 import tempfile
 import time
@@ -55,35 +59,36 @@ SAMPLE_RATE = 48_000
 BYTES_PER_MS = SAMPLE_RATE * 2 // 1000  # s16le, mono: 96 Bytes je ms
 AAC_BITRATE = "64k"
 
-#: Sprünge in `start_ms` bis zu dieser Größe sind Jitter der Browseruhr und keine Lücke
+#: Sprünge in `start_ms` bis zu dieser Größe sind Jitter der Browseruhr und keine gemeldete Lücke
 GAP_TOLERANCE_MS = 50
-#: Obergrenzen gegen unsinnige Angaben (kaputte Uhr, riesiges `last_seq`): sonst wüchse die
-#: Stille ins Unermessliche
-MAX_GAP_MS = 6 * 3_600_000
-MAX_TOTAL_SILENCE_MS = 12 * 3_600_000
+#: Obergrenzen gegen unsinnige Angaben (kaputte Uhr, riesiges `last_seq`). Ist die Länge laut
+#: Client bekannt, gilt sie plus Puffer, sonst der feste Wert.
+SILENCE_LIMIT_FALLBACK_MS = 12 * 3_600_000
+SILENCE_LIMIT_BUFFER_MS = 3_600_000
 MAX_MISSING_SEQS = 10_000
 
 #: Zeitlimits in Sekunden
-DECODE_CHUNK_TIMEOUT_S = 120
-DECODE_STREAM_TIMEOUT_S = 900
+DECODE_TIMEOUT_S = 900
 ENCODE_TIMEOUT_S = 1800
 PROBE_TIMEOUT_S = 60
+STDERR_TAIL_BYTES = 2000
 
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
 
 _EXT_BY_MIME = {"audio/webm": "webm", "audio/mp4": "mp4"}
+_DEMUXER_BY_EXT = {"webm": "matroska", "mp4": "mov"}
 
 GAP_MISSING = "fehlender_chunk"
 GAP_JUMP = "zeitluecke"
 
 
 class FfmpegError(Exception):
-    """ffmpeg/ffprobe scheitert. Meldung ohne absolute Pfade."""
+    """ffmpeg/ffprobe scheitert (Zeitlimit, nicht installiert, ...). Wiederholbar."""
 
 
-class ChunkDecodeError(FfmpegError):
-    """Ein einzelner (unabhängiger) Chunk lässt sich nicht dekodieren."""
+class DecodeError(Exception):
+    """ffmpeg kann die Daten nicht dekodieren (deterministisch). Meldung ohne absolute Pfade."""
 
 
 @dataclass(frozen=True)
@@ -107,6 +112,16 @@ class Gap:
 class Analysis:
     missing_seqs: list[int]
     gaps: list[Gap]
+    tail_end_ms: int | None  # Sitzungszeit, bis zu der am Ende Stille aufzufüllen ist
+
+
+@dataclass(frozen=True)
+class Piece:
+    """Dekodiertes Stück: liegt ab `start_ms` (Sitzungszeit) und ist `length_ms` lang."""
+
+    start_ms: int
+    length_ms: int
+    pcm: Path
 
 
 # ---------- reine Logik (ohne ffmpeg, ohne DB) ----------
@@ -128,114 +143,153 @@ def chunk_path(data_dir: Path, recording_id: uuid.UUID, seq: int, ext: str) -> P
     return recording_dir(data_dir, recording_id) / "chunks" / f"{seq}.{ext}"
 
 
+def silence_limit_ms(completed_duration_ms: int | None) -> int:
+    if completed_duration_ms is None:
+        return SILENCE_LIMIT_FALLBACK_MS
+    return completed_duration_ms + SILENCE_LIMIT_BUFFER_MS
+
+
+def _boundary_gap(prev: ChunkRow, cur: ChunkRow) -> tuple[int, str] | None:
+    """Lücke zwischen zwei aufeinanderfolgenden verwendbaren Chunks (Dauer, Grund) oder None."""
+    gap = cur.start_ms - (prev.start_ms + prev.duration_ms)
+    if cur.seq != prev.seq + 1:
+        return (gap, GAP_MISSING) if gap >= 1 else None
+    return (gap, GAP_JUMP) if gap > GAP_TOLERANCE_MS else None
+
+
 def analyze(
     usable: list[ChunkRow],
-    bad_seqs: set[int],
+    bad: list[ChunkRow],
     *,
     started_ms: int,
     last_seq: int | None,
     completed_duration_ms: int | None,
 ) -> Analysis:
-    """Fehlende `seq` und Lücken bestimmen. `usable` ist nach `seq` sortiert."""
+    """Fehlende `seq` und Lücken bestimmen. `usable` ist nach `seq` sortiert; `bad` sind Chunks
+    mit Zeile, aber ohne verwendbare Daten (ihre Zeiten dienen nur für das Ende)."""
     present = {c.seq for c in usable}
-    upper = max([*present, *bad_seqs, last_seq if last_seq is not None else -1])
+    upper = max([*present, *(c.seq for c in bad), last_seq if last_seq is not None else -1])
     if upper + 1 - len(present) > MAX_MISSING_SEQS:
         raise NonRetryableError("unplausibel viele fehlende Chunks")
     missing = [s for s in range(upper + 1) if s not in present]
+    limit = silence_limit_ms(completed_duration_ms)
 
     gaps: list[Gap] = []
+    tail_end: int | None = None
+    announced_end = (
+        started_ms + completed_duration_ms
+        if last_seq is not None and completed_duration_ms is not None
+        else None
+    )
     if not usable:
-        if last_seq is not None and (completed_duration_ms or 0) >= 1:
-            gaps.append(Gap(started_ms, completed_duration_ms or 0, GAP_MISSING, 0))
-        return Analysis(missing, gaps)
-
-    first = usable[0]
-    lead = first.start_ms - started_ms
-    if first.seq > 0 and lead >= 1:
-        gaps.append(Gap(started_ms, lead, GAP_MISSING, 0))
-    elif first.seq == 0 and lead > GAP_TOLERANCE_MS:
-        gaps.append(Gap(started_ms, lead, GAP_JUMP, 0))
-
-    for i in range(1, len(usable)):
-        prev, cur = usable[i - 1], usable[i]
-        prev_end = prev.start_ms + prev.duration_ms
-        gap = cur.start_ms - prev_end
-        if cur.seq != prev.seq + 1:
-            if gap >= 1:
-                gaps.append(Gap(prev_end, gap, GAP_MISSING, i))
-        elif gap > GAP_TOLERANCE_MS:
-            gaps.append(Gap(prev_end, gap, GAP_JUMP, i))
-
-    last = usable[-1]
-    if last_seq is not None and last_seq > last.seq and completed_duration_ms is not None:
+        ends = [e for e in (announced_end, *(c.start_ms + c.duration_ms for c in bad)) if e]
+        if ends and max(ends) - started_ms >= 1:
+            gaps.append(Gap(started_ms, max(ends) - started_ms, GAP_MISSING, 0))
+            tail_end = max(ends)
+    else:
+        first = usable[0]
+        lead = first.start_ms - started_ms
+        if first.seq > 0 and lead >= 1:
+            gaps.append(Gap(started_ms, lead, GAP_MISSING, 0))
+        elif first.seq == 0 and lead > GAP_TOLERANCE_MS:
+            gaps.append(Gap(started_ms, lead, GAP_JUMP, 0))
+        for i in range(1, len(usable)):
+            found = _boundary_gap(usable[i - 1], usable[i])
+            if found is not None:
+                prev_end = usable[i - 1].start_ms + usable[i - 1].duration_ms
+                gaps.append(Gap(prev_end, found[0], found[1], i))
+        last = usable[-1]
         last_end = last.start_ms + last.duration_ms
-        tail = started_ms + completed_duration_ms - last_end
-        if tail >= 1:
-            gaps.append(Gap(last_end, tail, GAP_MISSING, len(usable)))
+        candidates = [c.start_ms + c.duration_ms for c in bad if c.seq > last.seq]
+        if announced_end is not None and last_seq is not None and last_seq > last.seq:
+            candidates.append(announced_end)
+        if candidates and max(candidates) - last_end >= 1:
+            tail_end = max(candidates)
+            gaps.append(Gap(last_end, tail_end - last_end, GAP_MISSING, len(usable)))
     total = 0
     for g in gaps:
-        if g.duration_ms > MAX_GAP_MS:
+        if g.duration_ms > limit:
             raise NonRetryableError("unplausibel lange Lücke in der Aufnahme")
         total += g.duration_ms
-    if total > MAX_TOTAL_SILENCE_MS:
+    if total > limit:
         raise NonRetryableError("unplausibel viel Stille in der Aufnahme")
-    return Analysis(missing, gaps)
+    return Analysis(missing, gaps, tail_end)
 
 
-def _silence_bytes(duration_ms: int) -> int:
-    return duration_ms * BYTES_PER_MS
+def split_runs(usable: list[ChunkRow]) -> list[list[ChunkRow]]:
+    """Zusammenhängende Läufe: lückenlose `seq` und kein gemeldeter Sprung in `start_ms`."""
+    runs: list[list[ChunkRow]] = []
+    for c in usable:
+        if runs and _boundary_gap(runs[-1][-1], c) is None and c.seq == runs[-1][-1].seq + 1:
+            runs[-1].append(c)
+        else:
+            runs.append([c])
+    return runs
+
+
+def init_segment(data: bytes, ext: str) -> bytes | None:
+    """Init-Segment aus dem ersten Chunk: WebM bis zum ersten Cluster, MP4 bis zum ersten `moof`."""
+    if ext == "webm":
+        i = data.find(b"\x1f\x43\xb6\x75")
+        return data[:i] if i > 0 else None
+    pos = 0
+    while pos + 8 <= len(data):
+        (size,) = struct.unpack(">I", data[pos : pos + 4])
+        if data[pos + 4 : pos + 8] in (b"moof", b"mdat"):
+            return data[:pos] if pos > 0 else None
+        if size < 8:
+            return None
+        pos += size
+    return None
 
 
 # ---------- ffmpeg ----------
 
 
-def _run(args: list[str], timeout: float) -> subprocess.CompletedProcess[bytes]:
-    """Ohne Shell, mit Zeitlimit. Meldungen ohne absolute Pfade."""
+@dataclass(frozen=True)
+class Proc:
+    returncode: int
+    stderr: bytes
+
+
+def _run(args: list[str], timeout: float) -> Proc:
+    """Ohne Shell, mit Zeitlimit; stderr wird nur als Ende (begrenzt) behalten."""
     try:
-        proc = subprocess.run(
-            args,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            check=False,
-        )
+        with tempfile.TemporaryFile() as err:
+            done = subprocess.run(
+                args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err,
+                timeout=timeout, check=False,
+            )  # fmt: skip
+            size = err.seek(0, os.SEEK_END)
+            err.seek(max(0, size - STDERR_TAIL_BYTES))
+            tail = err.read()
     except subprocess.TimeoutExpired as exc:
         raise FfmpegError(f"{args[0]}: Zeitlimit von {int(timeout)} s überschritten") from exc
     except FileNotFoundError as exc:
         raise FfmpegError(f"{args[0]} nicht gefunden") from exc
-    return proc
+    return Proc(done.returncode, tail)
 
 
-def _fail_message(name: str, proc: subprocess.CompletedProcess[bytes], data_dir: Path) -> str:
+def _fail_message(name: str, proc: Proc, data_dir: Path) -> str:
     tail = proc.stderr.decode("utf-8", "replace").strip()[-300:]
     return sanitize_error(f"{name} endete mit Code {proc.returncode}: {tail}", data_dir)
 
 
-def _decode(src: Path, dst: Path, timeout: float, data_dir: Path) -> None:
-    """Dekodiert nach s16le/48 kHz/mono. `asetpts=N/SR/TB` macht die Zeitstempel lückenlos:
-    Lücken füllt der Handler selbst, ffmpeg soll nichts dazuerfinden."""
+def decode_to_pcm(src: Path, dst: Path, ext: str, data_dir: Path, timeout: float) -> None:
+    """Dekodiert nach s16le/48 kHz/mono. Das Eingabeformat ist fest (kein Raten, so wird ein
+    Chunk mit `ffconcat`-Inhalt nicht als Concat-Liste gelesen), nur das Protokoll `file`.
+    `asetpts=N/SR/TB` macht die Zeitstempel lückenlos: Lücken füllt der Handler selbst."""
     args = [
         FFMPEG, "-nostdin", "-v", "error", "-y",
+        "-protocol_whitelist", "file", "-f", _DEMUXER_BY_EXT[ext], "-threads", "1",
         "-i", str(src),
         "-vn", "-af", "asetpts=N/SR/TB",
         "-ar", str(SAMPLE_RATE), "-ac", "1", "-f", "s16le", str(dst),
     ]  # fmt: skip
     proc = _run(args, timeout)
     if proc.returncode != 0:
-        raise FfmpegError(_fail_message("ffmpeg (Dekodieren)", proc, data_dir))
-
-
-def decode_chunk_to_pcm(src: Path, dst: Path, data_dir: Path) -> None:
-    try:
-        _decode(src, dst, DECODE_CHUNK_TIMEOUT_S, data_dir)
-    except FfmpegError as exc:
         dst.unlink(missing_ok=True)
-        raise ChunkDecodeError(str(exc)) from exc
-
-
-def decode_stream_to_pcm(src: Path, dst: Path, data_dir: Path) -> None:
-    _decode(src, dst, DECODE_STREAM_TIMEOUT_S, data_dir)
+        raise DecodeError(_fail_message("ffmpeg (Dekodieren)", proc, data_dir))
 
 
 def encode_m4a(pcm: Path, dst: Path, data_dir: Path) -> None:
@@ -243,7 +297,7 @@ def encode_m4a(pcm: Path, dst: Path, data_dir: Path) -> None:
     args = [
         FFMPEG, "-nostdin", "-v", "error", "-y",
         "-f", "s16le", "-ar", str(SAMPLE_RATE), "-ac", "1", "-i", str(pcm),
-        "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact",
+        "-threads", "1", "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact",
         "-c:a", "aac", "-b:a", AAC_BITRATE, "-ar", str(SAMPLE_RATE), "-ac", "1",
         "-movflags", "+faststart", "-f", "mp4", str(dst),
     ]  # fmt: skip
@@ -259,18 +313,19 @@ def probe_duration_ms(path: Path, data_dir: Path) -> int:
     ]  # fmt: skip
     try:
         proc = subprocess.run(
-            args,
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=PROBE_TIMEOUT_S,
+            args, stdin=subprocess.DEVNULL, capture_output=True, timeout=PROBE_TIMEOUT_S,
             check=False,
-        )
+        )  # fmt: skip
     except subprocess.TimeoutExpired as exc:
         raise FfmpegError("ffprobe: Zeitlimit überschritten") from exc
     except FileNotFoundError as exc:
         raise FfmpegError("ffprobe nicht gefunden") from exc
     if proc.returncode != 0:
-        raise FfmpegError(_fail_message("ffprobe", proc, data_dir))
+        raise FfmpegError(
+            _fail_message(
+                "ffprobe", Proc(proc.returncode, proc.stderr[-STDERR_TAIL_BYTES:]), data_dir
+            )
+        )
     try:
         return max(0, round(float(proc.stdout.decode().strip()) * 1000))
     except ValueError as exc:
@@ -288,11 +343,10 @@ def _write_zeros(dst: Any, count: int) -> None:
         count -= n
 
 
-def _copy_range(src: Any, dst: Any, count: int | None = None) -> int:
+def _copy_range(src: Any, dst: Any, count: int) -> int:
     done = 0
-    while count is None or done < count:
-        want = 1 << 20 if count is None else min(1 << 20, count - done)
-        buf = src.read(want)
+    while done < count:
+        buf = src.read(min(1 << 20, count - done))
         if not buf:
             break
         dst.write(buf)
@@ -300,36 +354,29 @@ def _copy_range(src: Any, dst: Any, count: int | None = None) -> int:
     return done
 
 
-def assemble_independent(pcm_files: list[Path], gaps: list[Gap], out: Path) -> None:
-    """Pro Chunk ein fertiges PCM; Stille vor dem Chunk `before_index`."""
-    by_index: dict[int, list[Gap]] = {}
-    for g in gaps:
-        by_index.setdefault(g.before_index, []).append(g)
+def assemble(pieces: list[Piece], started_ms: int, tail_end_ms: int | None, out: Path) -> int:
+    """Legt die Stücke bei ihrem `start_ms` ab und gibt die Länge in ms zurück.
+
+    Jedes Stück wird auf `length_ms` gebracht (Stille oder Kürzen). Beginnt es vor dem Ende des
+    Vorgängers (Überlappung), entfällt sein Anfang. Verbrauchte PCM-Dateien werden gelöscht."""
+    cursor = 0  # Bytes
     with out.open("wb") as dst:
-        for i, pcm in enumerate(pcm_files):
-            for g in by_index.get(i, []):
-                _write_zeros(dst, _silence_bytes(g.duration_ms))
-            with pcm.open("rb") as src:
-                _copy_range(src, dst)
-            pcm.unlink(missing_ok=True)
-        for g in by_index.get(len(pcm_files), []):
-            _write_zeros(dst, _silence_bytes(g.duration_ms))
-
-
-def assemble_stream(pcm: Path, usable: list[ChunkRow], gaps: list[Gap], out: Path) -> None:
-    """Ein dekodierter Strom; die Stille kommt an die Stelle, die die angegebenen Längen der
-    davor liegenden Chunks bestimmen (die dekodierte Länge weicht höchstens um Millisekunden ab)."""
-    offsets = [0]
-    for c in usable:
-        offsets.append(offsets[-1] + c.duration_ms)
-    inserts = sorted(((offsets[g.before_index] * BYTES_PER_MS) & ~1, g.duration_ms) for g in gaps)
-    with pcm.open("rb") as src, out.open("wb") as dst:
-        pos = 0
-        for offset, duration in inserts:
-            if offset > pos:
-                pos += _copy_range(src, dst, offset - pos)
-            _write_zeros(dst, _silence_bytes(duration))
-        _copy_range(src, dst)
+        for piece in sorted(pieces, key=lambda p: p.start_ms):
+            target = max(0, piece.start_ms - started_ms) * BYTES_PER_MS
+            skip = max(0, cursor - target)
+            want = piece.length_ms * BYTES_PER_MS - skip
+            if want > 0:
+                _write_zeros(dst, max(0, target - cursor))
+                with piece.pcm.open("rb") as src:
+                    src.seek(skip)
+                    got = _copy_range(src, dst, want)
+                _write_zeros(dst, want - got)
+                cursor = max(cursor, target) + want
+            piece.pcm.unlink(missing_ok=True)
+        if tail_end_ms is not None:
+            _write_zeros(dst, max(0, (tail_end_ms - started_ms) * BYTES_PER_MS - cursor))
+            cursor = max(cursor, (tail_end_ms - started_ms) * BYTES_PER_MS)
+    return cursor // BYTES_PER_MS
 
 
 # ---------- Handler ----------
@@ -357,18 +404,15 @@ def _read_verified(path: Path, chunk: ChunkRow) -> bytes | None:
     return data
 
 
-def _update_session(conn: psycopg.Connection[Any], session_id: str) -> None:
-    """Session-Fortschritt (§3): `processing['audio.finalize'] = 'fertig'`. Ist die Session
-    `beendet` und läuft kein weiterer Job mehr, wird sie `verarbeitet`. Danach `sg_session`."""
-    try:
-        sid = uuid.UUID(session_id)
-    except ValueError:
-        return
+def update_session(conn: psycopg.Connection[Any], session_id: uuid.UUID, outcome: str) -> None:
+    """Session-Fortschritt (§3): `processing['audio.finalize'] = outcome` (`fertig`/`fehler`).
+    Ist die Session `beendet` und läuft kein weiterer Job mehr, wird sie `verarbeitet`.
+    Danach `sg_session`."""
     row = conn.execute(
         "UPDATE session SET processing = COALESCE(processing, '{}'::jsonb) "
-        "|| jsonb_build_object('audio.finalize', 'fertig'), updated_at = now() "
+        "|| jsonb_build_object('audio.finalize', %s::text), updated_at = now() "
         "WHERE id = %s AND deleted_at IS NULL RETURNING state",
-        (sid,),
+        (outcome, session_id),
     ).fetchone()
     if row is None:
         return
@@ -378,12 +422,93 @@ def _update_session(conn: psycopg.Connection[Any], session_id: str) -> None:
             "WHERE id = %s AND state = 'beendet' AND NOT EXISTS ("
             "  SELECT 1 FROM job WHERE session_id = %s AND deleted_at IS NULL "
             "  AND state IN ('wartet', 'laeuft'))",
-            (sid, sid),
+            (session_id, session_id),
         )
-    conn.execute("SELECT pg_notify('sg_session', %s)", (str(sid),))
+    conn.execute("SELECT pg_notify('sg_session', %s)", (str(session_id),))
 
 
-@handler("audio.finalize", payload_type=AudioFinalizePayload)
+def mark_session_failed(conn: psycopg.Connection[Any], payload: dict[str, Any]) -> None:
+    """Hook `on_final_failure`: Session-Fortschritt auch bei endgültigem Scheitern. Die Session
+    kommt aus `recording.session_id` (der Job ist schon `fehler`)."""
+    try:
+        recording_id = uuid.UUID(str(payload.get("recording_id")))
+    except ValueError:
+        return
+    row = conn.execute("SELECT session_id FROM recording WHERE id = %s", (recording_id,)).fetchone()
+    if row is not None:
+        update_session(conn, row[0], "fehler")
+
+
+def _cleanup_old_work(rec_dir: Path) -> None:
+    """Reste abgebrochener Läufe entfernen."""
+    if rec_dir.is_dir():
+        for old in rec_dir.glob(".work-*"):
+            shutil.rmtree(old, ignore_errors=True)
+        (rec_dir / "full.m4a.part").unlink(missing_ok=True)
+
+
+def _fsync(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _decode_pieces(
+    work: Path,
+    ext: str,
+    usable: list[ChunkRow],
+    independent: bool,
+    data_dir: Path,
+) -> tuple[list[ChunkRow], list[ChunkRow], list[Piece]]:
+    """Gibt (behaltene Chunks, nicht dekodierbare Chunks, Stücke) zurück.
+    Die geprüften Kopien liegen als `c<seq>.<ext>` im Arbeitsordner."""
+    kept: list[ChunkRow] = []
+    bad: list[ChunkRow] = []
+    pieces: list[Piece] = []
+    if independent:
+        for c in usable:
+            dst = work / f"p{c.seq}.pcm"
+            try:
+                decode_to_pcm(work / f"c{c.seq}.{ext}", dst, ext, data_dir, DECODE_TIMEOUT_S)
+            except DecodeError:
+                log.warning("Chunk %d nicht dekodierbar", c.seq)
+                bad.append(c)
+                continue
+            kept.append(c)
+            pieces.append(Piece(c.start_ms, c.duration_ms, dst))
+        return kept, bad, pieces
+
+    if not usable or usable[0].seq != 0:
+        # Ohne Init-Chunk ist kein Strom dekodierbar. Nachgelieferter seq 0 macht es später gut.
+        return [], list(usable), []
+    init = init_segment((work / f"c0.{ext}").read_bytes(), ext)
+    for n, run in enumerate(split_runs(usable)):
+        prefix = b"" if run[0].seq == 0 else init
+        if prefix is None:
+            bad.extend(run)
+            continue
+        stream = work / f"run{n}.{ext}"
+        with stream.open("wb") as fh:
+            fh.write(prefix)
+            for c in run:
+                fh.write((work / f"c{c.seq}.{ext}").read_bytes())
+        dst = work / f"p{n}.pcm"
+        try:
+            decode_to_pcm(stream, dst, ext, data_dir, DECODE_TIMEOUT_S)
+        except DecodeError:
+            log.warning("Lauf ab Chunk %d nicht dekodierbar", run[0].seq)
+            bad.extend(run)
+            continue
+        finally:
+            stream.unlink(missing_ok=True)
+        kept.extend(run)
+        pieces.append(Piece(run[0].start_ms, sum(c.duration_ms for c in run), dst))
+    return kept, bad, pieces
+
+
+@handler("audio.finalize", payload_type=AudioFinalizePayload, on_final_failure=mark_session_failed)
 def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, Any]:
     started = time.monotonic()
     recording_id = uuid.UUID(payload.recording_id)
@@ -394,92 +519,61 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
     ).fetchone()
     if rec is None:
         raise PayloadError(f"recording {recording_id} nicht gefunden")
-    mime, started_ms, independent, last_seq, completed_ms = rec
+    mime, started_raw, independent, last_raw, completed_raw = rec
     ext = chunk_ext(str(mime))
+    started_ms = int(started_raw)
+    last_seq = None if last_raw is None else int(last_raw)
+    completed_ms = None if completed_raw is None else int(completed_raw)
 
     rec_dir = recording_dir(ctx.data_dir, recording_id)
     final = rec_dir / "full.m4a"
+    _cleanup_old_work(rec_dir)
     chunks = _load_chunks(ctx.conn, recording_id)
-
-    # 1. Chunks prüfen
-    usable: list[ChunkRow] = []
-    bad: set[int] = set()
-    payloads: dict[int, bytes] = {}
-    for c in chunks:
-        data = _read_verified(chunk_path(ctx.data_dir, recording_id, c.seq, ext), c)
-        if data is None:
-            bad.add(c.seq)
-        else:
-            usable.append(c)
-            if not independent:
-                payloads[c.seq] = data
-    if not independent and usable and usable[0].seq != 0:
-        raise NonRetryableError("Init-Chunk (seq 0) fehlt oder ist beschädigt")
 
     work: Path | None = None
     audio_ms = 0
     size = 0
     try:
-        if usable:
+        usable: list[ChunkRow] = []
+        bad: list[ChunkRow] = []
+        pieces: list[Piece] = []
+        if chunks:
             rec_dir.mkdir(parents=True, exist_ok=True)
             work = Path(tempfile.mkdtemp(prefix=".work-", dir=rec_dir))
-            pcm_in = work / "in.pcm"
-            if independent:
-                pcm_files: list[Path] = []
-                kept: list[ChunkRow] = []
-                for c in usable:
-                    src = chunk_path(ctx.data_dir, recording_id, c.seq, ext)
-                    dst = work / f"{c.seq}.pcm"
-                    try:
-                        decode_chunk_to_pcm(src, dst, ctx.data_dir)
-                    except ChunkDecodeError:
-                        log.warning("Chunk %d nicht dekodierbar", c.seq)
-                        bad.add(c.seq)
-                        continue
-                    kept.append(c)
-                    pcm_files.append(dst)
-                usable = kept
-            analysis = analyze(
-                usable,
-                bad,
-                started_ms=int(started_ms),
-                last_seq=None if last_seq is None else int(last_seq),
-                completed_duration_ms=None if completed_ms is None else int(completed_ms),
+            for c in chunks:
+                data = _read_verified(chunk_path(ctx.data_dir, recording_id, c.seq, ext), c)
+                if data is None:
+                    bad.append(c)
+                else:
+                    (work / f"c{c.seq}.{ext}").write_bytes(data)  # geprüfte Kopie
+                    usable.append(c)
+            usable, undecodable, pieces = _decode_pieces(
+                work, ext, usable, bool(independent), ctx.data_dir
             )
+            bad.extend(undecodable)
+        analysis = analyze(
+            usable,
+            bad,
+            started_ms=started_ms,
+            last_seq=last_seq,
+            completed_duration_ms=completed_ms,
+        )
+        if usable:
+            assert work is not None
             pcm_out = work / "out.pcm"
-            if not usable:
-                pcm_out.write_bytes(b"")
-            elif independent:
-                assemble_independent(pcm_files, analysis.gaps, pcm_out)
-            else:
-                stream = work / f"stream.{ext}"
-                with stream.open("wb") as fh:
-                    for c in usable:
-                        fh.write(payloads[c.seq])
-                payloads.clear()
-                decode_stream_to_pcm(stream, pcm_in, ctx.data_dir)
-                stream.unlink(missing_ok=True)
-                assemble_stream(pcm_in, usable, analysis.gaps, pcm_out)
-            if usable:
-                part = rec_dir / "full.m4a.part"
-                try:
-                    encode_m4a(pcm_out, part, ctx.data_dir)
-                    try:
-                        audio_ms = probe_duration_ms(part, ctx.data_dir)
-                    except FfmpegError:
-                        audio_ms = pcm_out.stat().st_size // BYTES_PER_MS
-                    os.replace(part, final)
-                finally:
-                    part.unlink(missing_ok=True)
-                size = final.stat().st_size
+            pcm_ms = assemble(pieces, started_ms, analysis.tail_end_ms, pcm_out)
+            part = work / "full.m4a.part"
+            encode_m4a(pcm_out, part, ctx.data_dir)
+            pcm_out.unlink(missing_ok=True)
+            try:
+                audio_ms = probe_duration_ms(part, ctx.data_dir)
+            except FfmpegError:
+                audio_ms = pcm_ms
+            _fsync(part)
+            os.replace(part, final)
+            size = final.stat().st_size
         else:
-            analysis = analyze(
-                [],
-                bad,
-                started_ms=int(started_ms),
-                last_seq=None if last_seq is None else int(last_seq),
-                completed_duration_ms=None if completed_ms is None else int(completed_ms),
-            )
+            final.unlink(missing_ok=True)  # kein verwertbares Audio: keine alte Datei stehen lassen
     except (NonRetryableError, LockLostError, psycopg.OperationalError, psycopg.InterfaceError):
         raise
     except FfmpegError as exc:
@@ -492,8 +586,6 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
 
     complete = bool(usable) and not analysis.missing_seqs and not analysis.gaps
     state = "vollstaendig" if complete else "mit_luecken"
-    if not usable:
-        final.unlink(missing_ok=True)  # kein verwertbares Audio: keine alte Datei stehen lassen
     result: dict[str, Any] = {
         "recording_id": str(recording_id),
         "state": state,
@@ -516,5 +608,10 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
         if not ctx.lock_ok:
             raise LockLostError(ctx.job_id)
         if ctx.session_id:
-            _update_session(ctx.conn, ctx.session_id)
+            try:
+                session_uuid = uuid.UUID(ctx.session_id)
+            except ValueError:
+                session_uuid = None
+            if session_uuid is not None:
+                update_session(ctx.conn, session_uuid, "fertig")
     return result
