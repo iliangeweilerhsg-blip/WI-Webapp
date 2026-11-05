@@ -12,14 +12,18 @@ import {
   MoodleStatusSchema,
   MoodleSyncedDeadlineListSchema,
   MoodleSyncStatusSchema,
+  type MoodleCourse,
+  type MoodleCourseLink,
   type MoodleItem,
   type MoodleSyncStatus,
+  type Semester,
 } from '@sg/shared';
 import { ApiRequestError, apiGet, apiSend, friendlyMessage } from './api.ts';
 
 export const MOODLE_KEY = ['moodle'] as const;
 const SYNC_KEY = ['moodle', 'sync'] as const;
 const COURSES_KEY = ['moodle', 'courses'] as const;
+const LINKS_KEY = ['moodle', 'links'] as const;
 const ITEMS_KEY = ['moodle', 'items'] as const;
 const DEADLINES_KEY = ['moodle', 'deadlines'] as const;
 
@@ -34,6 +38,8 @@ const MESSAGES: Record<string, string> = {
   moodle_link_not_found: 'Dieser Kurs ist keinem Modul mehr zugeordnet.',
   moodle_link_disabled: 'Der Abgleich für diesen Kurs ist ausgeschaltet. Schalte ihn zuerst ein.',
   module_not_found: 'Dieses Modul gibt es nicht mehr.',
+  moodle_module_not_removable: 'Das Modul enthält schon Inhalte und bleibt. Löse stattdessen die Zuordnung.',
+  session_active: 'In diesem Modul läuft gerade eine Session. Beende sie zuerst.',
 };
 
 export function moodleErrorMessage(error: unknown): string {
@@ -97,12 +103,41 @@ export function useMoodleStatus() {
   });
 }
 
-/** Kurse aus Moodle mit Zuordnung und Vorschlag. Braucht Moodle; ohne Einrichtung kein erneuter Versuch */
+/**
+ * Hat der Core beim Laden der Kursliste Kurse automatisch zugeordnet (#141)? Dann stimmen die gemerkten Zuordnungen
+ * nicht mehr, und es kann neue Module geben.
+ */
+export function linksOutdated(
+  courses: readonly MoodleCourse[],
+  links: readonly MoodleCourseLink[] | undefined,
+): boolean {
+  const known = new Map((links ?? []).map((link) => [link.moodle_course_id, link.module_id]));
+  return courses.some(
+    (course) => course.module_id !== null && known.get(course.moodle_id) !== course.module_id,
+  );
+}
+
+/** Gibt es ein aktuelles Semester? Ohne legt die automatische Zuordnung keine Module an (#141) */
+export function hasCurrentSemester(semesters: readonly Semester[]): boolean {
+  return semesters.some((s) => s.is_current && s.archived_at === null && s.deleted_at === null);
+}
+
+/**
+ * Kurse aus Moodle mit Zuordnung und Vorschlag. Braucht Moodle; ohne Einrichtung kein erneuter Versuch. Beim Laden
+ * ordnet der Core neue Kurse automatisch zu (#141): Danach Zuordnungen und Module neu laden
+ */
 export function useMoodleCourses(enabled = true) {
+  const client = useQueryClient();
   return useQuery({
     queryKey: COURSES_KEY,
-    queryFn: async ({ signal }) =>
-      (await apiGet('/moodle/courses', MoodleCourseListSchema, { signal })).items,
+    queryFn: async ({ signal }) => {
+      const items = (await apiGet('/moodle/courses', MoodleCourseListSchema, { signal })).items;
+      if (linksOutdated(items, client.getQueryData<MoodleCourseLink[]>(LINKS_KEY))) {
+        void client.invalidateQueries({ queryKey: LINKS_KEY });
+        void client.invalidateQueries({ queryKey: ['modules'] });
+      }
+      return items;
+    },
     enabled,
     // Ohne Einrichtung oder bei abgelehntem Zugang hilft ein erneuter Versuch nicht
     retry: (count, error) => !isMoodleNotConfigured(error) && !isMoodleTokenInvalid(error) && count < 2,
@@ -112,7 +147,7 @@ export function useMoodleCourses(enabled = true) {
 /** Kurszuordnungen (lokal, auch ohne Moodle) */
 export function useMoodleLinks() {
   return useQuery({
-    queryKey: ['moodle', 'links'],
+    queryKey: LINKS_KEY,
     queryFn: async ({ signal }) =>
       (await apiGet('/moodle/links', MoodleCourseLinkListSchema, { signal })).items,
   });
@@ -127,11 +162,12 @@ export function useMoodleSync() {
   });
 }
 
-/** Nach einem Abgleich: Kurse, Dateien, Fristen und Material neu laden */
+/** Nach einem Abgleich: Kurse, Dateien, Fristen, Material und (automatisch angelegte, #141) Module neu laden */
 function useRefreshAfterSync() {
   const client = useQueryClient();
   return useCallback(() => {
     void client.invalidateQueries({ queryKey: MOODLE_KEY });
+    void client.invalidateQueries({ queryKey: ['modules'] });
     void client.invalidateQueries({ queryKey: ['decks'] });
     void client.invalidateQueries({ queryKey: ['sheets'] });
   }, [client]);
@@ -189,6 +225,21 @@ export function useUnlinkCourse() {
     mutationFn: (courseId: number) => apiSend('DELETE', `/moodle/links/${courseId}`, null),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: MOODLE_KEY });
+    },
+  });
+}
+
+/**
+ * „Modul entfernen“ (#141): automatisch angelegtes, leeres Modul in den Papierkorb. Der Kurs wird danach nicht wieder
+ * automatisch zugeordnet. Rückgängig über den Papierkorb (`POST /trash/{id}/restore`)
+ */
+export function useRemoveAutoModule() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (courseId: number) => apiSend('DELETE', `/moodle/links/${courseId}/module`, null),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: MOODLE_KEY });
+      void client.invalidateQueries({ queryKey: ['modules'] });
     },
   });
 }

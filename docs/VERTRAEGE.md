@@ -975,7 +975,7 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 
 ## 17. Moodle: Kurszuordnung und Abgleich (T1-23, F-MDL-03/-04)
 
-Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabellen aus 08 §9.4 in der Migration `0005_moodle`. Die Lead-Entscheidungen aus dem Review von #133 sind hier und in 08 §9.1, §9.2 und §9.4 eingearbeitet.
+Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabellen aus 08 §9.4 in der Migration `0005_moodle`, die automatische Zuordnung (#141, §17.7) in `0006_moodle_auto`. Die Lead-Entscheidungen aus dem Review von #133 sind hier und in 08 §9.1, §9.2 und §9.4 eingearbeitet.
 
 ### 17.1 Festlegungen aus PR #128 (Lead-Entscheidungen in #127)
 
@@ -985,7 +985,7 @@ Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabe
 | Zu große Antwort bzw. Datei | `502 moodle_unreachable`, `details.reason = "too_large"` |
 | Grenzen | JSON 16 MiB, Datei 512 MiB (Übernahme als Material: 200 MB wie beim Upload), `limit` 1–50 (Standard 20), `from` Standard „jetzt“ |
 | „Bekannte“ Dateien für `GET /moodle/file` | aus Kursinhalt, Aufgaben-Intro, eigener Abgabe und Forenanhängen (im Speicher) **und** dauerhaft alle `moodle_item.file_ref` |
-| `MoodleCourse.module_id` | bestätigte Zuordnung aus `moodle_course_link`, sonst `null` |
+| `MoodleCourse.module_id` | Zuordnung aus `moodle_course_link` (von Hand oder automatisch, §17.7), sonst `null` |
 | `MoodleNotification.text` | Klartext (`smallmessage`, sonst `fullmessage`), nie HTML |
 | Kurs- und Kategoriesumme | leerer Name erlaubt, die Web-App zeigt „Kurs gesamt“ |
 
@@ -993,7 +993,8 @@ Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabe
 
 | Tabelle | Ergänzung | Grund |
 |---|---|---|
-| `moodle_course_link` | `module_id` mit `ON DELETE CASCADE`, eindeutig über `moodle_course_id`. Lösen löscht die Zeile hart | Einstellung, kein Inhalt. Ein Modul kann mehrere Kurse haben |
+| `moodle_course_link` | `module_id` mit `ON DELETE CASCADE`, eindeutig über `moodle_course_id`. Lösen löscht die Zeile hart. `auto` (`zugeordnet`/`angelegt`, `NULL` = von Hand, #141) | Einstellung, kein Inhalt. Ein Modul kann mehrere Kurse haben |
+| `moodle_course_manual` | `moodle_course_id` (eindeutig). Kurse, über die der Nutzer selbst entschieden hat („Lösen“, „Modul entfernen“). Kein Papierkorb (#141) | Die Automatik fasst diese Kurse nicht mehr an |
 | `moodle_item` | `activity_name`, `filename` (Anzeige, ≤ 255 Byte UTF-8, Endung bleibt), `mime_type`, `kind_source` (`auto`/`manuell`), `kind_decided_at` (Zeitpunkt der Inbox-Entscheidung, die jüngste gilt für die Aktivität), `last_error` (`kein_pdf`, `zu_gross`, `nicht_gefunden`, `download_fehlgeschlagen`). `sha256` ist `NULL`, solange die Datei nicht geladen wurde. `slide_deck_id`/`exercise_sheet_id` mit `ON DELETE SET NULL` | Anzeige, Inbox-Regel je Aktivität, Wiederholung nach Fehlern |
 | `moodle_deadline` | `source` (`aufgabe`/`termin`), `moodle_course_id`, `cmid`, `url`, `removed_in_moodle_at`. Eindeutig je `moodle_assignment_id` bzw. `moodle_event_id` (Teilindex) | Upsert beim Abgleich, keine Dublette Aufgabe ↔ Kalenderereignis |
 
@@ -1002,17 +1003,18 @@ Die Dateien selbst liegen nur unter der ID des Materials (`media/decks/<id>/orig
 ### 17.3 Endpunkte
 
 Basis `/api/v1`. Die Pfade sind festgelegt (Lead, Review #133).
-- **Lokale Endpunkte antworten immer**, auch ohne eingerichtetes Moodle: `GET /moodle/links`, `PUT`/`DELETE /moodle/links/{course_id}`, `GET`/`PATCH /moodle/items`, `GET /moodle/sync`, `GET /moodle/synced-deadlines`. Nur Endpunkte, die Moodle aufrufen, antworten ohne Zugang mit `503 moodle_not_configured` (08 §9.1).
+- **Lokale Endpunkte antworten immer**, auch ohne eingerichtetes Moodle: `GET /moodle/links`, `PUT`/`DELETE /moodle/links/{course_id}`, `DELETE /moodle/links/{course_id}/module`, `GET`/`PATCH /moodle/items`, `GET /moodle/sync`, `GET /moodle/synced-deadlines`. Nur Endpunkte, die Moodle aufrufen, antworten ohne Zugang mit `503 moodle_not_configured` (08 §9.1).
 - **Listen** ohne Cursor, mit `limit` (die Menge ist durch die Kursinhalte begrenzt).
 - **Inbox:** vorerst `GET /moodle/items?kind=offen` und `PATCH /moodle/items/{id}`. Mit Phase 2 wechseln die offenen Moodle-Dateien zu `inbox_item` (03 §8).
 - `items` und `synced-deadlines` zeigen nur Einträge **zugeordneter Kurse mit `sync_enabled`** und nicht gelöschtem Modul. Die Zeilen gelöster oder ausgeschalteter Kurse bleiben in der Datenbank.
 
 | Endpunkt | Body / Query | Antwort | Fehler |
 |---|---|---|---|
-| `GET /moodle/courses` | – | `MoodleCourseList` mit `module_id`, `suggested_module_id`, `category` | wie 08 §9.2 |
-| `GET /moodle/links` | – | `MoodleCourseLinkList` | – |
-| `PUT /moodle/links/{course_id}` | `MoodleCourseLinkUpdate` | `MoodleCourseLink`. Startet einen Abgleich des Kurses im Hintergrund | `404 module_not_found` |
-| `DELETE /moodle/links/{course_id}` | – | `204`. Fristen des Kurses fallen weg, Dateien und Material bleiben | `404 moodle_link_not_found` |
+| `GET /moodle/courses` | – | `MoodleCourseList` mit `module_id`, `suggested_module_id`, `category`. Ordnet vorher neue Kurse automatisch zu (§17.7) | wie 08 §9.2 |
+| `GET /moodle/links` | – | `MoodleCourseLinkList` mit `auto` und `module_removable` | – |
+| `PUT /moodle/links/{course_id}` | `MoodleCourseLinkUpdate` | `MoodleCourseLink`. Startet einen Abgleich des Kurses im Hintergrund. Anderes Modul → `auto = null` | `404 module_not_found` |
+| `DELETE /moodle/links/{course_id}` | – | `204`. Fristen des Kurses fallen weg, Dateien und Material bleiben. Danach keine Automatik mehr für den Kurs | `404 moodle_link_not_found` |
+| `DELETE /moodle/links/{course_id}/module` | – | `204`. „Modul entfernen“: automatisch angelegtes, leeres Modul per Soft-Delete in den Papierkorb (§17.7) | `404 moodle_link_not_found`, `409 moodle_module_not_removable`, `409 session_active` |
 | `GET /moodle/items` | `course_id?`, `module_id?`, `kind?`, `include_removed?`, `limit?` (1–1000, Standard 500) | `MoodleItemList`, neueste zuerst. `kind=offen` = Einträge der Inbox | – |
 | `PATCH /moodle/items/{id}` | `MoodleItemUpdate` (`folien`/`uebung`/`ignoriert`, `offen` = rückgängig) | `MoodleItem`. Startet bei Folien/Übung einen Abgleich des Kurses. `offen` setzt die Datei und alle mit derselben Entscheidung eingeordneten Dateien der Aktivität zurück (R15), schon angelegtes Material bleibt | `404 moodle_item_not_found` |
 | `GET /moodle/sync` | – | `MoodleSyncStatus` | – |
@@ -1024,6 +1026,7 @@ Basis `/api/v1`. Die Pfade sind festgelegt (Lead, Review #133).
 - **Wann:** beim Start des Core, danach alle 2 h, auf Knopfdruck (`POST /moodle/sync`), nach dem Bestätigen einer Zuordnung und nach einer Entscheidung in der Inbox. Immer nur ein Lauf gleichzeitig. Direkt gestartet wird nur, wenn weder einer läuft noch einer wartet. Sonst geht die Anfrage im angehängten Lauf auf (Kurse zusammengefasst).
 - **Beenden des Core:** Neue Läufe starten nicht mehr, der angehängte wird verworfen. Der laufende bricht zwischen zwei Dateien bzw. Kursen ab (`error_code = abgebrochen`). Das Beenden wartet höchstens `SHUTDOWN_WAIT_MS` (7 s, unter der harten Frist von 10 s in `main.ts`).
 - **Zugang:** `nicht_eingerichtet` → kein Lauf (`MoodleSyncStatus.state = aus`). `ungueltig`/`abgelaufen` oder `moodle_token_invalid` während des Laufs → Lauf endet sofort mit `error_code = moodle_token_invalid`, `state = pausiert` (F-MDL-01).
+- **Automatik:** Ein voller Lauf (Start, Zeitplan, „Jetzt abgleichen“ ohne `course_id`) ordnet zuerst neue Kurse automatisch zu (§17.7). Die neuen Zuordnungen gleicht derselbe Lauf schon ab. Scheitert die Automatik, gleicht der Lauf die bestehenden Zuordnungen trotzdem ab (`ok = false`).
 - **Kurse:** nur Zuordnungen mit `sync_enabled` zu nicht gelöschten Modulen. Ein Fehler in einem Kurs (z. B. `moodle_unreachable`) beendet nur diesen Kurs (`failed_courses`), `last_synced_at` bleibt dann stehen.
 - **Dateien:** sichtbare Dateien sichtbarer Abschnitte und Aktivitäten, wiedererkannt über `file_ref`.
   - Neu: Einordnung nach 17.5, dann laden und anlegen. Nicht-PDF → `ignoriert` (nur gelistet). Eine `.pdf` ohne `%PDF` im Inhalt → `ignoriert` mit `last_error = kein_pdf`. Das gilt nur für diese Fassung: Ändern sich `timemodified` oder Größe, wird neu eingeordnet und geprüft.
@@ -1046,8 +1049,31 @@ Zuerst der Dateiname, dann der Name der Aktivität. Vorher NFC (Namen aus macOS 
 ### 17.6 Kurszuordnung (F-MDL-03)
 
 - `category`: `organisatorisch` bei Wortteilen wie „Klausurtermin“, „Prüfungsamt“, „Fachschaft“, „Informationen“. `alt`, wenn der Kurs mehr als `SEMESTER_START_TOLERANCE_DAYS` = 30 Tage vor dem Beginn des aktuellen Semesters startet (Konstante in `services/core/src/moodle/classify.ts`; ohne Semesterbeginn: schon beendet). Sonst `aktuell`.
-- `suggested_module_id` nur für `aktuell` ohne Zuordnung: Name bzw. Kürzel eines Moduls des aktuellen Semesters im Kursnamen (wie F-KAL-02), sonst eindeutige Abkürzung. Ein Vorschlag ist keine Zuordnung, abgeglichen wird erst nach `PUT /moodle/links/{course_id}`.
+- `suggested_module_id` nur für `aktuell` ohne Zuordnung: Name bzw. Kürzel eines Moduls des aktuellen Semesters im Kursnamen (wie F-KAL-02), sonst eindeutige Abkürzung. Ein Vorschlag ist keine Zuordnung, abgeglichen wird erst nach `PUT /moodle/links/{course_id}` bzw. nach der automatischen Zuordnung (§17.7).
 
-**Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404), `moodle_link_disabled` (409). `MoodleSyncRun.error_code` kann außerdem `abgebrochen` sein (Beenden des Core).
+### 17.7 Automatische Zuordnung (#141, Owner-Wunsch vom 05.11.2026)
+
+Bewusste Abweichung von F-MDL-03 („jede Zuordnung bestätigen“): Kurse werden ohne Handarbeit zugeordnet, sichtbar und umkehrbar (R15). Keine KI. Code: `services/core/src/moodle/auto.ts` und `course-name.ts`.
+
+- **Wann:** beim vollen Abgleich (§17.4) und bei jedem `GET /moodle/courses`. Behandelt wird jeder Kurs der Art `aktuell`, der weder eine Zuordnung hat (auch keine zu einem gelöschten Modul) noch in `moodle_course_manual` steht.
+- **Ohne aktuelles Semester** (nicht gelöscht, nicht archiviert): nichts, auch keine Zuordnung zu bestehenden Modulen. Die Web-App zeigt in Einstellungen › Moodle „Lege zuerst das Semester an.“ (gibt es Semester, aber keines ist aktuell: „Wähle zuerst das aktuelle Semester.“) mit Link zu den Semestern.
+- **Treffer** gegen die Module des aktuellen Semesters, mit denselben Regeln wie der Vorschlag (§17.6):
+  - genau ein Modul → zuordnen, `auto = zugeordnet`
+  - kein Modul → neues Modul im aktuellen Semester über `createModule` (Farbe, Notizbücher wie von Hand), `auto = angelegt`. Kurse mit gleichem bereinigtem Namen teilen sich ein Modul. Module desselben Laufs zählen beim Treffer nicht mit, so entscheidet die Reihenfolge der Kurse nichts.
+  - mehrdeutig → nichts, der Kurs bleibt wie bisher (Vorschlag bzw. keiner). Mehrdeutig ist auch eine andere Stufe: „Statistik II“ passt dem Wortlaut nach zu „Statistik“, wird aber nicht automatisch zugeordnet (römische Zahl oder Zahl als eigenes Wort, die das Modul nicht hat).
+- **Modulname** aus dem Kursnamen (NFC, nie NFKC):
+  - Semesterzusätze weg: WiSe/SoSe/Wintersemester/Sommersemester mit oder ohne Jahr, WS/SS nur mit Jahr, `JJ/JJ`, `JJJJ/JJ`, `JJJJ/JJJJ` (nur aufeinanderfolgende Jahre), auch in Klammern. Groß- und Kleinschreibung zählt.
+  - Unterstriche → Leerzeichen. Führender Kurs-Code (Großbuchstaben mit Ziffern, z. B. `BMBWL110`) weg, wenn danach noch Text kommt.
+  - `ae/oe/ue` → Umlaut nur in Wörtern ohne Umlaut und nur für die Wortstämme in `UMLAUT_STEMS` (Einführung, Führung, Übung, Prüfung, Ökonom…, Geschäft, künstlich, öffentlich, Gründung, Überblick, Übersicht).
+  - Sonst bleibt der Name, wie Moodle ihn schreibt, auch mit Tippfehlern. Höchstens 120 Zeichen.
+- **Kürzel:** das Moodle-`shortname` ohne Semesterzusatz (auch kompakt wie `-2627`), nur bis 20 Zeichen und nur, wenn es nicht schon der Name ist.
+- **Idempotent:** Der ganze Lauf ist eine Transaktion unter der Advisory-Sperre `MOODLE_AUTO_LOCK_KEY` (`lib/locks.ts`). `PUT`/`DELETE /moodle/links/{course_id}` nehmen dieselbe Sperre. Gleichzeitige Läufe ergeben keine doppelten Module.
+- **Umkehrbar:**
+  - „Lösen“ (`DELETE /moodle/links/{course_id}`) trägt den Kurs in `moodle_course_manual` ein: Er wird nicht wieder automatisch zugeordnet, von Hand zuordnen geht weiter.
+  - Wechselt das Modul von Hand, wird `auto = null`. Der Schalter „Abgleichen“ lässt den Vermerk stehen.
+  - „Modul entfernen“ (`DELETE /moodle/links/{course_id}/module`) nur bei `auto = angelegt` und leerem Modul (`module_removable`): keine Session, keine Seite, kein freies Notizbuch, kein Material außer dem aus Moodle übernommenen, kein weiterer Kurs. Das Modul kommt per Soft-Delete in den Papierkorb, die Zuordnung bleibt und lebt mit dem Wiederherstellen wieder auf. Der Kurs steht danach in `moodle_course_manual`.
+- **Web-App:** Jede automatisch zugeordnete Zeile trägt „automatisch zugeordnet“ bzw. „Modul automatisch angelegt“. Nach „Modul entfernen“ bietet ein Toast „Rückgängig“ (`POST /trash/{id}/restore`).
+
+**Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404), `moodle_link_disabled` (409), `moodle_module_not_removable` (409, #141). `MoodleSyncRun.error_code` kann außerdem `abgebrochen` sein (Beenden des Core).
 
 **Zeitformat:** Die neuen Antworten liefern Zeiten nach §6 (ohne `.000`). Die Lese-Endpunkte aus T1-22 liefern noch `.000Z`, das gleicht Folge-Issue #129 an.

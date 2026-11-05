@@ -2,10 +2,12 @@
 
 import { useId, useRef, useState } from 'react';
 import type { Module, MoodleCourse, MoodleCourseLink, MoodleSyncStatus } from '@sg/shared';
+import { useRestoreTrashItem } from '../../lib/data.ts';
 import { useVisibleModules } from '../../lib/modules.ts';
 import {
   formatSyncedAt,
   formatValidUntil,
+  hasCurrentSemester,
   isMoodleNotConfigured,
   isMoodleTokenInvalid,
   moodleErrorMessage,
@@ -15,10 +17,12 @@ import {
   useMoodleStatus,
   useMoodleSync,
   useMoodleSyncWithRefresh,
+  useRemoveAutoModule,
   useSingleFlight,
   useStartSync,
   useUnlinkCourse,
 } from '../../lib/moodle.ts';
+import { useSemesters } from '../../lib/semesters.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { CoreHint } from '../CoreHint.tsx';
 import { MoodleAccessHint } from '../MoodleAccessHint.tsx';
@@ -28,6 +32,28 @@ const smallButton =
 const primaryButton =
   'min-h-9 rounded-md bg-accent px-3 py-1 text-sm font-medium text-accent-contrast disabled:opacity-50 sg-transition';
 const selectClass = 'min-h-9 max-w-full rounded-md border border-border-strong bg-bg px-2 py-1 text-sm';
+const textLink = 'whitespace-nowrap text-text-muted underline underline-offset-2 hover:text-text';
+
+/** Vermerk der automatischen Zuordnung (#141, R15: sichtbar und umkehrbar) */
+const AUTO_NOTE = { zugeordnet: 'automatisch zugeordnet', angelegt: 'Modul automatisch angelegt' } as const;
+
+/**
+ * Ohne aktuelles Semester legt die automatische Zuordnung keine Module an (#141). Ein ruhiger Hinweis mit Link zu den
+ * Semestern (Einstellungen › Allgemein). Bewusst ein normaler Link: Die Einstellungen lesen `bereich` beim Laden
+ */
+function SemesterHint({ empty }: { empty: boolean }) {
+  return (
+    <p role="status" className="mt-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
+      {empty ? 'Lege zuerst das Semester an.' : 'Wähle zuerst das aktuelle Semester.'}{' '}
+      <a href="/einstellungen?bereich=allgemein" className={textLink}>
+        Zu den Semestern
+      </a>
+      <span className="mt-1 block text-text-muted">
+        Danach ordnet die App deine Kurse automatisch Modulen zu und legt fehlende Module an.
+      </span>
+    </p>
+  );
+}
 
 /** Ruhiger Satz zum letzten Abgleich (R13: sachlich, ohne Alarm) */
 function lastRunText(status: MoodleSyncStatus): string {
@@ -99,16 +125,49 @@ function CourseRow({
 }) {
   const linked = course.module_id;
   const [choice, setChoice] = useState<string>(linked ?? course.suggested_module_id ?? '');
+  // Ändert sich die Zuordnung von außen (Automatik beim Abgleich, #141), folgt die Auswahl
+  const [shownLink, setShownLink] = useState(linked);
+  if (shownLink !== linked) {
+    setShownLink(linked);
+    setChoice(linked ?? course.suggested_module_id ?? '');
+  }
   const linkMutation = useLinkCourse();
   const unlink = useUnlinkCourse();
+  const removeModule = useRemoveAutoModule();
+  const restore = useRestoreTrashItem();
   const toast = useToast();
   const selectId = useId();
   const selectRef = useRef<HTMLSelectElement>(null);
   // Eine Sperre für alle Aktionen der Zeile: Zuordnen, Schalter, Lösen (Review #134, N1)
   const once = useSingleFlight();
-  const busy = linkMutation.isPending || unlink.isPending;
+  const busy = linkMutation.isPending || unlink.isPending || removeModule.isPending;
   const onError = (error: unknown) => toast.show({ message: moodleErrorMessage(error) });
   const suggested = !linked && course.suggested_module_id && choice === course.suggested_module_id;
+  // Die Zuordnung aus /moodle/links passt nur, solange sie dasselbe Modul meint wie die Kursliste
+  const current = linked && link?.module_id === linked ? link : undefined;
+  const autoNote = current?.auto ? AUTO_NOTE[current.auto] : null;
+
+  function remove() {
+    if (!linked) return;
+    const moduleId = linked;
+    const name = modules.find((m) => m.id === moduleId)?.name ?? 'Das Modul';
+    once((done) =>
+      removeModule.mutate(course.moodle_id, {
+        onSettled: done,
+        onError,
+        onSuccess: () => {
+          setChoice('');
+          toast.show({
+            message: `${name} entfernt. Das Modul liegt im Papierkorb.`,
+            actionLabel: 'Rückgängig',
+            durationMs: 10_000,
+            onAction: () => restore.mutate(moduleId, { onError }),
+          });
+          requestAnimationFrame(() => selectRef.current?.focus());
+        },
+      }),
+    );
+  }
 
   function assign() {
     if (!choice) return;
@@ -137,6 +196,7 @@ function CourseRow({
           <p className="text-sm text-text-muted">
             {[
               course.short_name,
+              autoNote,
               link?.last_synced_at ? `abgeglichen ${formatSyncedAt(link.last_synced_at)}` : null,
               link && !link.sync_enabled ? 'Abgleich aus' : null,
             ]
@@ -203,7 +263,10 @@ function CourseRow({
                       onError,
                       onSuccess: () => {
                         setChoice('');
-                        toast.show({ message: 'Zuordnung gelöst. Übernommenes Material bleibt im Modul.' });
+                        toast.show({
+                          message:
+                            'Zuordnung gelöst. Übernommenes Material bleibt im Modul, automatisch wird der Kurs nicht wieder zugeordnet.',
+                        });
                         requestAnimationFrame(() => selectRef.current?.focus());
                       },
                     }),
@@ -212,6 +275,11 @@ function CourseRow({
               >
                 Lösen
               </button>
+              {current?.module_removable ? (
+                <button type="button" className={smallButton} disabled={busy} onClick={remove}>
+                  Modul entfernen
+                </button>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -244,9 +312,10 @@ function CourseList({
 }
 
 /**
- * Einstellungen › Moodle (F-MDL-03/-04): Zugang, Abgleich und Zuordnung der Kurse zu Modulen. Vorschläge kommen
- * über die Titelähnlichkeit, abgeglichen wird erst nach „Zuordnen“. Organisatorische und alte Kurse stehen
- * eingeklappt unter „Weitere Kurse“.
+ * Einstellungen › Moodle (F-MDL-03/-04, #141): Zugang, Abgleich und Zuordnung der Kurse zu Modulen. Neue Kurse des
+ * aktuellen Semesters ordnet der Core automatisch zu bzw. legt das Modul an, mit Vermerk in der Zeile. Mehrdeutige
+ * bleiben Vorschläge, abgeglichen wird erst nach „Zuordnen“. Organisatorische und alte Kurse stehen eingeklappt unter
+ * „Weitere Kurse“.
  */
 export function MoodleSettings() {
   const status = useMoodleStatus();
@@ -254,6 +323,7 @@ export function MoodleSettings() {
   const courses = useMoodleCourses(configured);
   const sync = useMoodleSync();
   const { modules } = useVisibleModules();
+  const semesters = useSemesters();
   // Die Zuordnung steckt schon in course.module_id; Abgleich-Schalter und Zeitpunkt kommen aus /moodle/links
   const linkList = useMoodleLinks();
   const links = new Map((linkList.data ?? []).map((link) => [link.moodle_course_id, link]));
@@ -267,6 +337,7 @@ export function MoodleSettings() {
   // Ohne Kursliste (Moodle lehnt ab oder antwortet nicht): die bestehenden Zuordnungen aus /moodle/links,
   // damit Schalter und „Lösen“ erreichbar bleiben (Review #134, M1)
   const linkedOnly: MoodleCourse[] = courses.data ? [] : (linkList.data ?? []).map(courseFromLink);
+  const noCurrentSemester = semesters.data !== undefined && !hasCurrentSemester(semesters.data);
   const showValidUntil =
     (state.state === 'ok' || state.state === 'laeuft_bald_ab') && state.token_valid_until;
 
@@ -300,8 +371,10 @@ export function MoodleSettings() {
           <div className="mt-6">
             <h3 className="font-medium">Kurse und Module</h3>
             <p className="mt-1 text-sm text-text-muted">
-              Jeder Kurs gehört zu höchstens einem Modul. Abgeglichen werden nur zugeordnete Kurse.
+              Jeder Kurs gehört zu höchstens einem Modul. Neue Kurse ordnet die App automatisch zu und legt
+              fehlende Module an. Nach „Lösen“ bleibt es bei deiner Entscheidung.
             </p>
+            {noCurrentSemester ? <SemesterHint empty={semesters.data?.length === 0} /> : null}
             {/* Bei abgelehntem Zugang steht der Grund schon im Hinweis oben */}
             {courses.isError &&
             !isMoodleNotConfigured(courses.error) &&

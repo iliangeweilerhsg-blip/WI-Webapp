@@ -41,6 +41,7 @@ import { isMoodleActionId, needsConfirmation, type MoodleActionContext } from '.
 import { abortWhenClosed } from '../moodle/abort.ts';
 import { isValidFileRef, moodleNotConfigured, RequestAbortedError } from '../moodle/client.ts';
 import { FILE_ONLY_HEADERS, fileResponseHeaders } from '../moodle/file-headers.ts';
+import { autoAssignCourses, removeAutoModule } from '../moodle/auto.ts';
 import type { MoodleServices } from '../moodle/index.ts';
 import {
   annotateCourses,
@@ -135,15 +136,26 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     {
       schema: {
         tags: ['Moodle'],
-        summary: 'Kurse des Nutzers (core_enrol_get_users_courses)',
+        summary:
+          'Kurse des Nutzers (core_enrol_get_users_courses). Ordnet neue aktuelle Kurse vorher automatisch zu (#141)',
         response: { 200: MoodleCourseListSchema, ...errorResponses },
       },
     },
-    async () => {
+    async (request) => {
       const list = await reader.courses();
       if (!deps.db) return list;
       const now = deps.now?.() ?? new Date();
-      return { items: await annotateCourses(deps.db, list.items, { timeZone: reader.timeZone, now }) };
+      const options = { timeZone: reader.timeZone, now };
+      try {
+        const result = await autoAssignCourses(deps.db, list.items, options);
+        if (result.assigned > 0 || result.created > 0) {
+          request.log.info(result, 'Moodle-Kurse automatisch zugeordnet');
+        }
+      } catch (error) {
+        // Die Kursliste kommt trotzdem, die Automatik versucht es beim nächsten Laden bzw. Abgleich wieder
+        request.log.warn({ err: error }, 'Automatische Kurszuordnung fehlgeschlagen');
+      }
+      return { items: await annotateCourses(deps.db, list.items, options) };
     },
   );
 
@@ -494,6 +506,23 @@ function registerSyncRoutes(
     },
     async (request, reply) => {
       await deleteLink(db, request.params.course_id);
+      return reply.code(204).send(null);
+    },
+  );
+
+  app.delete(
+    '/moodle/links/:course_id/module',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary:
+          '„Modul entfernen“: automatisch angelegtes, leeres Modul in den Papierkorb. Danach keine Automatik mehr für den Kurs',
+        params: z.object({ course_id: MoodleIdParam }),
+        response: { 204: z.null(), 404: ApiErrorSchema, 409: ApiErrorSchema },
+      },
+    },
+    async (request, reply) => {
+      await removeAutoModule(db, request.params.course_id);
       return reply.code(204).send(null);
     },
   );

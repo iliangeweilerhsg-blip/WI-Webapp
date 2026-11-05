@@ -15,6 +15,7 @@ import {
   MoodleItemSchema,
   MoodleSyncedDeadlineListSchema,
   MoodleSyncStatusSchema,
+  SINGLE_USER_ID,
   type Module,
   type MoodleItem,
   type Semester,
@@ -432,12 +433,19 @@ async function start(): Promise<void> {
     statModule = (await req<Module>('POST', '/modules', { semester_id: semester.id, name: 'Statistik' }))
       .body;
   }
+  // Diese Tests prüfen Vorschlag und Zuordnung von Hand: Die Kurse gelten als von Hand entschieden, die automatische
+  // Zuordnung (#141, eigene Tests in moodle-auto.test.ts) fasst sie nicht an
+  for (const id of Object.values(COURSE)) {
+    await t.handle.db.execute(
+      sql`INSERT INTO moodle_course_manual (id, user_id, moodle_course_id) VALUES (gen_random_uuid(), ${SINGLE_USER_ID}, ${id})`,
+    );
+  }
 }
 
 async function cleanup(): Promise<void> {
   await sync.idle();
   const db = t.handle.db;
-  await db.execute(sql`TRUNCATE moodle_item, moodle_deadline, moodle_course_link`);
+  await db.execute(sql`TRUNCATE moodle_item, moodle_deadline, moodle_course_link, moodle_course_manual`);
   await db.execute(sql`DELETE FROM job`);
   await db.execute(sql`DELETE FROM slide_deck`);
   await db.execute(sql`DELETE FROM exercise_sheet`);

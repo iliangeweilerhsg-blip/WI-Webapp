@@ -132,6 +132,7 @@ const _MoodleItem: Equal<z.infer<typeof Z.MoodleItemSchema>, T.MoodleItem> = tru
 const _MoodleItemKind: Equal<z.infer<typeof Z.MoodleItemKindSchema>, T.MoodleItemKind> = true;
 const _MoodleItemList: Equal<z.infer<typeof Z.MoodleItemListSchema>, T.MoodleItemList> = true;
 const _MoodleItemUpdate: Equal<z.infer<typeof Z.MoodleItemUpdateSchema>, T.MoodleItemUpdate> = true;
+const _MoodleLinkAuto: Equal<z.infer<typeof Z.MoodleLinkAutoSchema>, T.MoodleLinkAuto> = true;
 const _MoodleNotification: Equal<z.infer<typeof Z.MoodleNotificationSchema>, T.MoodleNotification> = true;
 const _MoodleNotificationList: Equal<z.infer<typeof Z.MoodleNotificationListSchema>, T.MoodleNotificationList> = true;
 const _MoodlePost: Equal<z.infer<typeof Z.MoodlePostSchema>, T.MoodlePost> = true;

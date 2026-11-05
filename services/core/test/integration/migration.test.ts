@@ -59,6 +59,8 @@ const TABLES = [
   'moodle_course_link',
   'moodle_item',
   'moodle_deadline',
+  // Automatische Kurszuordnung (#141)
+  'moodle_course_manual',
 ];
 
 /** Phase-1-Tabellen ohne die Pflichtfelder aus 03 §1 (Struktur genau nach VERTRAEGE §6.1) */

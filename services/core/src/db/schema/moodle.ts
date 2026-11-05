@@ -23,11 +23,30 @@ export const moodleCourseLink = pgTable(
     syncEnabled: boolean('sync_enabled').notNull().default(true),
     /** Letzter erfolgreicher Abgleich dieses Kurses */
     lastSyncedAt: timestamptz('last_synced_at'),
+    /**
+     * Automatische Zuordnung (#141): `zugeordnet` = eindeutig passendes Modul, `angelegt` = Modul aus dem Kursnamen
+     * angelegt. NULL = von Hand. Wechselt das Modul von Hand, wird es NULL
+     */
+    auto: text('auto'),
   },
   (t) => [
     uniqueIndex('moodle_course_link_course_uq').on(t.moodleCourseId),
     index('moodle_course_link_module_idx').on(t.moduleId),
+    check('moodle_course_link_auto_chk', sql`${t.auto} IS NULL OR ${t.auto} IN ('zugeordnet','angelegt')`),
   ],
+);
+
+/**
+ * Kurse, über die der Nutzer selbst entschieden hat (#141): „Lösen“ bzw. „Modul entfernen“. Die automatische
+ * Zuordnung fasst sie nicht mehr an, von Hand zuordnen geht weiter. Einstellung, kein Inhalt (kein Papierkorb).
+ */
+export const moodleCourseManual = pgTable(
+  'moodle_course_manual',
+  {
+    ...baseColumns(),
+    moodleCourseId: moodleId('moodle_course_id').notNull(),
+  },
+  (t) => [uniqueIndex('moodle_course_manual_course_uq').on(t.moodleCourseId)],
 );
 
 /**

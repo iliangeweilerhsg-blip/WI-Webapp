@@ -144,6 +144,8 @@ Die Endpunkte liefern **eigene, normalisierte Formate** (`Moodle*` in `packages/
 
 Jeder Moodle-Kurs kann genau einem Modul zugeordnet werden. Vorschlag über Titelähnlichkeit (wie F-KAL-02). Kurse ohne Zuordnung werden nicht abgeglichen. Organisatorische Kurse wie „Klausurtermine …“ oder alte Kurse (Start vor dem aktuellen Semester) werden standardmäßig nicht vorgeschlagen.
 
+**Automatische Zuordnung (Owner-Wunsch vom 05.11.2026, #141, bewusste Abweichung von der Bestätigung jeder Zuordnung):** Aktuelle Kurse ohne Zuordnung werden beim Abgleich und beim Laden der Kursliste automatisch zugeordnet. Passt genau ein Modul des aktuellen Semesters, wird der Kurs ihm zugeordnet. Passt keins, legt die App ein Modul mit bereinigtem Kursnamen an. Mehrdeutige Kurse bleiben ein Vorschlag. Ohne aktuelles Semester passiert nichts, Einstellungen › Moodle weist darauf hin. Jede automatische Zuordnung ist als solche markiert und umkehrbar: „Lösen“ gilt dauerhaft, ein leeres automatisch angelegtes Modul lässt sich in den Papierkorb legen. Details: VERTRAEGE §17.7.
+
 ### F-MDL-04 · Abgleich: Material und Fristen automatisch übernehmen
 `P1` · Phase 1 · M2, M8, M10
 
