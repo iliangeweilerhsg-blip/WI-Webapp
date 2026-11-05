@@ -754,6 +754,7 @@ class RestoreTestReason(StrEnum):
     Grund eines fehlgeschlagenen Restore-Tests, die Oberfläche leitet daraus die Handlungsempfehlung ab
     """
 
+    kein_ziel = 'kein_ziel'
     kein_backup = 'kein_backup'
     ziel_nicht_erreichbar = 'ziel_nicht_erreichbar'
     nicht_authentisch = 'nicht_authentisch'
@@ -3126,6 +3127,10 @@ class RestoreTest(BaseModel):
         ...,
         description='Getesteter Stand, null wenn keiner gefunden wurde',
         pattern='^[0-9]{8}T[0-9]{6}Z$',
+    )
+    is_latest: StrictBool | None = Field(
+        ...,
+        description='true = der getestete Stand war zum Testzeitpunkt der jüngste erfolgreiche Lauf, false = ein älterer (der jüngste ließ sich nicht testen), null = unbekannt (läuft noch oder kein Stand gewählt)',
     )
     reason: RestoreTestReason | None = Field(..., description='Nur bei state = fehler')
     error: StrictStr | None = Field(

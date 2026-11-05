@@ -76,7 +76,7 @@ export type RestoreTestTrigger = ("zeitplan" | "manuell")
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "RestoreTestReason".
  */
-export type RestoreTestReason = ("kein_backup" | "ziel_nicht_erreichbar" | "nicht_authentisch" | "beschaedigt" | "dateien_abweichend" | "tabellen_fehlen" | "restore_fehlgeschlagen" | "abgebrochen" | "intern")
+export type RestoreTestReason = ("kein_ziel" | "kein_backup" | "ziel_nicht_erreichbar" | "nicht_authentisch" | "beschaedigt" | "dateien_abweichend" | "tabellen_fehlen" | "restore_fehlgeschlagen" | "abgebrochen" | "intern")
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "BackupState".
@@ -565,6 +565,10 @@ finished_at: (Timestamp | null)
  * Getesteter Stand, null wenn keiner gefunden wurde
  */
 stand: (string | null)
+/**
+ * true = der getestete Stand war zum Testzeitpunkt der jüngste erfolgreiche Lauf, false = ein älterer (der jüngste ließ sich nicht testen), null = unbekannt (läuft noch oder kein Stand gewählt)
+ */
+is_latest: (boolean | null)
 /**
  * Nur bei state = fehler
  */

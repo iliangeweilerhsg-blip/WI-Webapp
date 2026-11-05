@@ -239,6 +239,14 @@ export async function startBackup(
     if (await isBackupRunning(tx, now)) {
       throw new HttpError(409, 'backup_running', 'Es läuft bereits ein Backup.');
     }
+    // Backup und Restore-Test laufen nie gleichzeitig: das Ausdünnen könnte den getesteten Stand löschen
+    if ((await getRestoreTest(tx, now))?.state === 'laeuft') {
+      throw new HttpError(
+        409,
+        'restore_test_running',
+        'Es läuft gerade ein Restore-Test. Warte, bis er fertig ist, und starte das Backup dann erneut.',
+      );
+    }
     const [created] = await tx
       .insert(backupRun)
       .values({

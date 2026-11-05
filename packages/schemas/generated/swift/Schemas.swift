@@ -1844,6 +1844,10 @@ struct RestoreTest: Codable {
     let error: String?
     /// null solange der Test läuft
     let finishedAt: Date?
+    /// true = der getestete Stand war zum Testzeitpunkt der jüngste erfolgreiche Lauf, false =
+    /// ein älterer (der jüngste ließ sich nicht testen), null = unbekannt (läuft noch oder kein
+    /// Stand gewählt)
+    let isLatest: Bool?
     /// Nur bei state = fehler
     let reason: RestoreTestReason?
     /// Getesteter Stand, null wenn keiner gefunden wurde
@@ -1855,6 +1859,7 @@ struct RestoreTest: Codable {
     enum CodingKeys: String, CodingKey {
         case error = "error"
         case finishedAt = "finished_at"
+        case isLatest = "is_latest"
         case reason = "reason"
         case stand = "stand"
         case startedAt = "started_at"
@@ -1884,6 +1889,7 @@ extension RestoreTest {
     func with(
         error: String?? = nil,
         finishedAt: Date?? = nil,
+        isLatest: Bool?? = nil,
         reason: RestoreTestReason?? = nil,
         stand: String?? = nil,
         startedAt: Date? = nil,
@@ -1893,6 +1899,7 @@ extension RestoreTest {
         return RestoreTest(
             error: error ?? self.error,
             finishedAt: finishedAt ?? self.finishedAt,
+            isLatest: isLatest ?? self.isLatest,
             reason: reason ?? self.reason,
             stand: stand ?? self.stand,
             startedAt: startedAt ?? self.startedAt,
@@ -1918,6 +1925,7 @@ enum RestoreTestReason: String, Codable {
     case dateienAbweichend = "dateien_abweichend"
     case intern = "intern"
     case keinBackup = "kein_backup"
+    case keinZiel = "kein_ziel"
     case nichtAuthentisch = "nicht_authentisch"
     case restoreFehlgeschlagen = "restore_fehlgeschlagen"
     case tabellenFehlen = "tabellen_fehlen"
@@ -17179,6 +17187,7 @@ extension RestoreTest {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(error, forKey: .error)
         try container.encode(finishedAt, forKey: .finishedAt)
+        try container.encode(isLatest, forKey: .isLatest)
         try container.encode(reason, forKey: .reason)
         try container.encode(stand, forKey: .stand)
         try container.encode(startedAt, forKey: .startedAt)

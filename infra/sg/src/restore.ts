@@ -19,16 +19,12 @@ import {
   treeSize,
   type Manifest,
 } from './backup-files.ts';
-import {
-  COUNT_TABLES,
-  countObjects,
-  errorText,
-  readBackupSettings,
-  sha256File,
-  type BackupIo,
-} from './backup.ts';
+import { COUNT_TABLES, countObjects, errorText, readBackupSettings, type BackupIo } from './backup.ts';
 import type { SgConfig } from './config.ts';
 import { safeIdent, type PgAccess } from './pg.ts';
+import { StandError, withVerifiedDump } from './staging.ts';
+
+export { StandError };
 
 export interface RestoreDeps extends BackupIo {
   cfg: Pick<SgConfig, 'dataDir' | 'databaseUrl'>;
@@ -76,20 +72,11 @@ export function listStandsText(target: string): string[] {
   return lines;
 }
 
-/** Ein Stand lässt sich nicht verwenden. `reason` entspricht `RestoreTestReason` (docs/VERTRAEGE.md §13). */
-export class StandError extends Error {
-  readonly reason: 'nicht_authentisch' | 'beschaedigt';
-  constructor(reason: 'nicht_authentisch' | 'beschaedigt', message: string) {
-    super(message);
-    this.name = 'StandError';
-    this.reason = reason;
-  }
-}
-
 /**
- * Stand finden und prüfen: Manifest da, Dump vorhanden, Prüfsumme stimmt. Mit `expectedSha` (Prüfsumme aus
- * `backup_run.dump_sha256`, der Vertrauensquelle) muss auch das Manifest genau diese Prüfsumme tragen: Ein Stand
- * mit erfundenem Manifest samt passendem Dump wird so abgelehnt.
+ * Stand finden und prüfen: Manifest da, Dump vorhanden. Mit `expectedSha` (Prüfsumme aus `backup_run.dump_sha256`,
+ * der Vertrauensquelle) muss auch das Manifest genau diese Prüfsumme tragen: Ein Stand mit erfundenem Manifest samt
+ * passendem Dump wird so abgelehnt. Die Prüfsumme des Dumps selbst wird erst beim Einspielen gebildet
+ * (`withVerifiedDump`): Prüfen und Einspielen betreffen so dieselben Bytes (kein Austausch dazwischen, TOCTOU).
  */
 export async function loadStand(
   target: string,
@@ -99,23 +86,28 @@ export async function loadStand(
   if (!STAND_RE.test(stand)) throw new Error(`„${stand}“ ist kein Stand (erwartet z. B. 20261104T030012Z).`);
   const dir = join(target, stand);
   const manifest = readManifest(dir);
-  if (!manifest)
+  if (!manifest) {
     throw new StandError('beschaedigt', `Der Stand ${stand} ist im Ziel nicht vorhanden oder unvollständig.`);
+  }
   if (manifest.stand !== stand || (expectedSha !== undefined && manifest.dump.sha256 !== expectedSha)) {
     throw new StandError(
       'nicht_authentisch',
       `Das Manifest des Standes ${stand} passt nicht zum protokollierten Backup-Lauf. Der Stand wird nicht eingespielt.`,
     );
   }
-  const dump = join(dir, DUMP_FILE);
-  if (!existsSync(dump)) throw new StandError('beschaedigt', `Im Stand ${stand} fehlt ${DUMP_FILE}.`);
-  if ((await sha256File(dump)) !== manifest.dump.sha256) {
-    throw new StandError(
-      'beschaedigt',
-      `Die Prüfsumme von ${DUMP_FILE} im Stand ${stand} stimmt nicht. Der Stand ist beschädigt.`,
-    );
-  }
+  if (!existsSync(join(dir, DUMP_FILE)))
+    throw new StandError('beschaedigt', `Im Stand ${stand} fehlt ${DUMP_FILE}.`);
   return { dir, manifest };
+}
+
+/** Dump des Standes in den privaten Ordner kopieren, dabei prüfen, dann mit genau dieser Kopie weitermachen */
+export function withStandDump<T>(
+  deps: Pick<RestoreDeps, 'cfg'>,
+  dir: string,
+  manifest: Manifest,
+  fn: (verifiedCopy: string) => Promise<T>,
+): Promise<T> {
+  return withVerifiedDump(deps.cfg.dataDir, join(dir, DUMP_FILE), manifest.dump.sha256, manifest.stand, fn);
 }
 
 /** Dateianzahl und Größen des Standes gegen das Manifest (.DS_Store u. Ä. zählen auf beiden Seiten nie) */
@@ -195,23 +187,27 @@ export async function restoreIntoScratch(
   const { pg, log, err } = deps;
   const suffix = (deps.random ?? (() => Math.random().toString(36).slice(2, 8)))();
   const name = safeIdent(`${pg.database}_${prefix}_${suffix}`.toLowerCase());
-  log(`Teste Stand ${manifest.stand} in der Wegwerf-Datenbank ${name} …`);
-  try {
-    await dropDatabase(pg, name);
-    await pg.query(`CREATE DATABASE ${name}`, {}, 'postgres');
-    await pg.restore(name, join(dir, DUMP_FILE));
-    const counts = await countObjects(pg, name);
-    const missingTables = Object.keys(manifest.counts).filter((t) => !(t in counts));
-    const differences = Object.entries(manifest.counts)
-      .filter(([table, expected]) => table in counts && counts[table] !== expected)
-      .map(([table, expected]) => ({ table, expected, actual: counts[table] as number }));
-    const mediaOk = standFilesMatch(dir, manifest);
-    return { counts, differences, missingTables, mediaOk };
-  } finally {
-    await dropDatabase(pg, name).catch((e: unknown) =>
-      err(`Wegwerf-Datenbank ${name} ließ sich nicht löschen: ${errorText(e, deps.cfg)}`),
-    );
-  }
+  // Erst die Kopie prüfen (Prüfsumme), dann die Wegwerf-Datenbank anlegen: Ein beschädigter oder ausgetauschter
+  // Dump kostet keine Datenbank und wird nie eingespielt. Eingespielt wird nur die geprüfte Kopie.
+  return withStandDump(deps, dir, manifest, async (verifiedDump) => {
+    log(`Teste Stand ${manifest.stand} in der Wegwerf-Datenbank ${name} …`);
+    try {
+      await dropDatabase(pg, name);
+      await pg.query(`CREATE DATABASE ${name}`, {}, 'postgres');
+      await pg.restore(name, verifiedDump);
+      const counts = await countObjects(pg, name);
+      const missingTables = Object.keys(manifest.counts).filter((t) => !(t in counts));
+      const differences = Object.entries(manifest.counts)
+        .filter(([table, expected]) => table in counts && counts[table] !== expected)
+        .map(([table, expected]) => ({ table, expected, actual: counts[table] as number }));
+      const mediaOk = standFilesMatch(dir, manifest);
+      return { counts, differences, missingTables, mediaOk };
+    } finally {
+      await dropDatabase(pg, name).catch((e: unknown) =>
+        err(`Wegwerf-Datenbank ${name} ließ sich nicht löschen: ${errorText(e, deps.cfg)}`),
+      );
+    }
+  });
 }
 
 async function testRestore(deps: RestoreDeps, dir: string, manifest: Manifest): Promise<number> {
@@ -402,6 +398,24 @@ async function fullRestore(
       log(`Der Stand enthält kein ${name}/. Das aktuelle ${name}/ bleibt unverändert.`);
     }
   }
+  // Erst die Kopie des Dumps prüfen (Prüfsumme über dieselben Bytes, die `pg_restore` liest), dann ändern
+  return withStandDump(deps, dir, manifest, (verifiedDump) =>
+    swapIn(deps, dir, manifest, journal, stamp, live, fresh, old, verifiedDump),
+  );
+}
+
+async function swapIn(
+  deps: RestoreDeps,
+  dir: string,
+  manifest: Manifest,
+  journal: RestoreJournal,
+  stamp: string,
+  live: string,
+  fresh: string,
+  old: string,
+  verifiedDump: string,
+): Promise<number> {
+  const { cfg, pg, log, err } = deps;
   // Das Journal steht vor der ersten Änderung: Bricht der Prozess ab, räumt der nächste Start auf
   writeJournal(cfg.dataDir, journal);
 
@@ -409,7 +423,7 @@ async function fullRestore(
     log(`Spiele den Dump in die neue Datenbank ${fresh} ein …`);
     await dropDatabase(pg, fresh);
     await pg.query(`CREATE DATABASE ${fresh}`, {}, 'postgres');
-    await pg.restore(fresh, join(dir, DUMP_FILE));
+    await pg.restore(fresh, verifiedDump);
 
     // Neue Epoche: verbundene Clients erkennen die Wiederherstellung und laden neu (§11.1)
     const [hasMeta] = await pg.query(`SELECT to_regclass('sync_meta') IS NOT NULL`, {}, fresh);

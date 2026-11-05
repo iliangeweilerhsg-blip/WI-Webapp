@@ -142,6 +142,7 @@ export async function startRestoreTest(
       started_at: now.toISOString(),
       finished_at: null,
       stand: null,
+      is_latest: null,
       reason: null,
       error: null,
     };

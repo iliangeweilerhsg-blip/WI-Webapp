@@ -24,6 +24,8 @@ const STATE_LABEL: Record<BackupRun['state'], string> = {
 
 /** Verständlicher Hinweis mit Handlungsempfehlung je Fehlergrund des Restore-Tests (F-DAT-02) */
 const RESTORE_ADVICE: Record<NonNullable<RestoreTest['reason']>, string> = {
+  kein_ziel:
+    'Es ist kein Backup-Ziel eingestellt, darum gibt es nichts zu testen. Lege unten einen Ordner als Backup-Ziel fest und sichere einmal.',
   kein_backup:
     'Es gab noch kein Backup, das sich testen lässt. Lege mit „Jetzt sichern“ ein Backup an und teste danach erneut.',
   ziel_nicht_erreichbar:
@@ -42,6 +44,14 @@ const RESTORE_ADVICE: Record<NonNullable<RestoreTest['reason']>, string> = {
     'Der Test wurde nicht beendet (Mac ausgeschaltet oder Programm beendet). Starte ihn mit „Jetzt testen“ erneut.',
   intern: 'Der Test konnte nicht ausgeführt werden. Starte ihn mit „Jetzt testen“ erneut.',
 };
+
+/** `20261104T030012Z` → Datum (UTC) für die Anzeige, sonst der Name selbst */
+export function standLabel(stand: string): string {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(stand);
+  if (!m) return stand;
+  const date = new Date(Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +m[6]!));
+  return date.toLocaleString('de-DE');
+}
 
 export function formatSize(bytes: number | null): string {
   if (bytes === null) return '–';
@@ -238,6 +248,16 @@ function RestoreTestStatus(props: { test: RestoreTest | null; disabled: boolean;
           {running ? 'Test läuft …' : 'Jetzt testen'}
         </button>
       </p>
+      {test?.stand && test.state !== 'laeuft' ? (
+        <p className="text-xs text-text-muted">Getesteter Stand: {standLabel(test.stand)}</p>
+      ) : null}
+      {test?.state === 'ok' && test.is_latest === false ? (
+        <p className="rounded-md border border-border bg-accent-soft p-3">
+          Achtung: Getestet wurde nicht dein jüngstes Backup, sondern ein älterer Stand, weil sich das jüngste
+          nicht prüfen ließ (zum Beispiel fehlt es im Ziel). Lege mit „Jetzt sichern“ ein neues Backup an und
+          teste danach erneut.
+        </p>
+      ) : null}
       {test?.state === 'fehler' && test.reason ? (
         <div className="rounded-md border border-border bg-accent-soft p-3">
           <p>{RESTORE_ADVICE[test.reason]}</p>

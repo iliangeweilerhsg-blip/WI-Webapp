@@ -2,12 +2,14 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SINGLE_USER_ID, type BackupOverview, type RestoreTest } from '@sg/shared';
 import { setting } from '../../src/db/schema/index.ts';
+import { setBackupLauncher } from '../../src/services/backups.ts';
 import {
   restoreTestDue,
   setRestoreTestLauncher,
   tickRestoreTest,
   RESTORE_TEST_INTERVAL_MS,
 } from '../../src/services/restore-test.ts';
+import { tickBackup } from '../../src/services/scheduler.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
 const API = '/api/v1';
@@ -74,6 +76,7 @@ const test = (over: Partial<RestoreTest> = {}): RestoreTest => ({
   started_at: new Date(Date.now() - 40 * 86_400_000).toISOString(),
   finished_at: new Date(Date.now() - 40 * 86_400_000 + 5000).toISOString(),
   stand: '20261004T030012Z',
+  is_latest: true,
   reason: null,
   error: null,
   ...over,
@@ -165,6 +168,87 @@ describe('POST /restore-test', () => {
     expect(res.statusCode).toBe(202);
     expect(res.json<RestoreTest>()).toMatchObject({ state: 'fehler', reason: 'intern' });
     expect(await overview()).toMatchObject({ state: 'fehler', reason: 'intern' });
+  });
+});
+
+describe('POST /restore-test ist nur lokal (S1)', () => {
+  it('aus dem Netz: 401 ohne Token, 403 local_only mit gültigem Geräte-Token, nichts gestartet', async () => {
+    await setData({ backup_target: '/ziel' });
+    await insertRun();
+    const remote = await startTestApp(
+      {},
+      { verifyDeviceToken: async () => ({ deviceId: '0190f6a2-0000-7000-8000-0000000000f1' }) },
+    );
+    try {
+      const call = (headers: Record<string, string> = {}) =>
+        remote.app.inject({
+          method: 'POST',
+          url: `${API}/restore-test`,
+          remoteAddress: '192.168.1.20',
+          headers: { host: 'mac.local:4710', ...headers },
+        });
+      expect((await call()).statusCode).toBe(401);
+      const res = await call({ authorization: 'Bearer EXAMPLEdevicetoken000' });
+      expect(res.statusCode).toBe(403);
+      expect(res.json<{ error: { code: string } }>().error.code).toBe('local_only');
+      expect(launched).toHaveLength(0);
+      expect(await overview()).toBeNull();
+    } finally {
+      await remote.close();
+    }
+  });
+});
+
+describe('Backup und Restore-Test schließen sich aus (S2)', () => {
+  const now = new Date();
+
+  it('POST /backup: 409 restore_test_running, solange ein Test läuft, nichts gestartet', async () => {
+    await setData({ backup_target: '/ziel' });
+    await setResult(test({ state: 'laeuft', finished_at: null, started_at: now.toISOString() }));
+    const backupStarts: unknown[] = [];
+    setBackupLauncher(async (input) => void backupStarts.push(input));
+    try {
+      const res = await t.request({ method: 'POST', url: `${API}/backup` });
+      expect(res.statusCode).toBe(409);
+      expect(res.json<{ error: { code: string } }>().error.code).toBe('restore_test_running');
+      expect(backupStarts).toHaveLength(0);
+      expect(Number((await t.handle.sql`SELECT count(*) FROM backup_run`)[0]?.count)).toBe(0);
+    } finally {
+      setBackupLauncher(null);
+    }
+  });
+
+  it('Zeitplan: tickBackup wartet während des Tests und startet danach', async () => {
+    await setData({ backup_target: '/ziel', backup_time: '03:00' });
+    await setResult(test({ state: 'laeuft', finished_at: null, started_at: now.toISOString() }));
+    const backupStarts: unknown[] = [];
+    setBackupLauncher(async (input) => void backupStarts.push(input));
+    try {
+      expect(await tickBackup(t.handle.db, t.config, now)).toBeNull();
+      expect(backupStarts).toHaveLength(0);
+      await setResult(test({ finished_at: now.toISOString() }));
+      expect(await tickBackup(t.handle.db, t.config, now)).not.toBeNull();
+      expect(backupStarts).toHaveLength(1);
+    } finally {
+      setBackupLauncher(null);
+    }
+  });
+
+  it('ein abgestürzter Test (älter als 2 Stunden) blockiert das Backup nicht', async () => {
+    await setData({ backup_target: '/ziel' });
+    await setResult(
+      test({
+        state: 'laeuft',
+        finished_at: null,
+        started_at: new Date(now.getTime() - 3 * 3600_000).toISOString(),
+      }),
+    );
+    setBackupLauncher(async () => {});
+    try {
+      expect((await t.request({ method: 'POST', url: `${API}/backup` })).statusCode).toBe(202);
+    } finally {
+      setBackupLauncher(null);
+    }
   });
 });
 

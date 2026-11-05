@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  statSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -13,7 +14,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '../src/config.ts';
 import { copyTree, listStands, readManifest, standName, treeSize } from '../src/backup-files.ts';
@@ -80,6 +81,8 @@ class FakePg implements PgAccess {
   /** Ergebnis des Restore-Tests (`setting.restore_test`), zuletzt geschrieben */
   testResult: Record<string, unknown> | null = null;
   leftovers: string[] = [];
+  /** Läuft ein Restore-Test? (`setting.restore_test`) */
+  testRunning = false;
 
   async query(sql: string, vars: Record<string, string> = {}, db?: string): Promise<string[][]> {
     this.queries.push({ sql, vars, db });
@@ -136,6 +139,15 @@ class FakePg implements PgAccess {
     if (sql.includes("INSERT INTO setting (key, value, user_id) VALUES ('restore_test'")) {
       this.testResult = JSON.parse(vars.value as string) as Record<string, unknown>;
       return [];
+    }
+    if (sql.includes("key = 'restore_test'") && sql.includes('count(*)')) {
+      return [[this.testRunning ? '1' : '0']];
+    }
+    if (sql.includes('SELECT stand FROM backup_run')) {
+      const newest = [...this.runs.values()]
+        .filter((r) => r.state === 'fertig' && r.stand && r.target === vars.target)
+        .reverse()[0];
+      return newest ? [[newest.stand as string]] : [];
     }
     if (sql.includes("value->>'started_at'")) return [];
     if (sql.includes('datname LIKE')) return this.leftovers.map((n) => [n]);
@@ -250,6 +262,79 @@ describe('runBackup', () => {
     expect(await runBackup(deps, { trigger: 'manuell' })).toBe(2);
     expect(pg.runs.size).toBe(0);
     expect(errs.join()).toContain('kein Backup-Ziel');
+  });
+
+  it('B2: Manipulation des Ziels während des Dumps ergibt nie eine Prüfsumme fremder Bytes (Lauf scheitert, kein Stand)', async () => {
+    const { pg, deps, target } = setup();
+    pg.dumpImpl = async (file) => {
+      writeFileSync(file, 'PGDMP-echt');
+      // Angreifer mit Schreibrecht im Ziel legt/ersetzt die Dump-Datei im .partial-Ordner
+      for (const name of readdirSync(target)) {
+        if (name.endsWith('.partial')) writeFileSync(join(target, name, 'db.dump'), 'PGDMP-evil');
+      }
+    };
+    const code = await runBackup(deps, { trigger: 'zeitplan' });
+    const evil = createHash('sha256').update('PGDMP-evil').digest('hex');
+    const echt = createHash('sha256').update('PGDMP-echt').digest('hex');
+    for (const run of pg.runs.values()) expect(run.sha).not.toBe(evil);
+    if (code === 0) {
+      // Wenn der Lauf gelingt, gehören Prüfsumme, Manifest und Datei im Stand zu den Bytes von pg_dump
+      expect([...pg.runs.values()][0]?.sha).toBe(echt);
+      expect(readManifest(join(target, '20261104T030012Z'))?.dump.sha256).toBe(echt);
+      expect(readFileSync(join(target, '20261104T030012Z', 'db.dump'), 'utf8')).toBe('PGDMP-echt');
+    } else {
+      expect([...pg.runs.values()][0]?.state).toBe('fehler');
+      expect(existsSync(join(target, '20261104T030012Z'))).toBe(false);
+    }
+  });
+
+  it('B2: Prüfsumme im Lauf und im Manifest = Bytes von pg_dump (Normalfall)', async () => {
+    const { pg, deps, target } = setup();
+    pg.dumpImpl = async (file) => writeFileSync(file, 'PGDMP-echt');
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+    const echt = createHash('sha256').update('PGDMP-echt').digest('hex');
+    expect([...pg.runs.values()][0]?.sha).toBe(echt);
+    expect(readManifest(join(target, '20261104T030012Z'))?.dump.sha256).toBe(echt);
+  });
+
+  it('B2: der Dump entsteht im privaten Ordner (nicht im Ziel), der danach gelöscht ist', async () => {
+    const { pg, deps, dataDir, target } = setup();
+    const seen: string[] = [];
+    pg.dumpImpl = async (file) => {
+      seen.push(file);
+      writeFileSync(file, 'PGDMP-x');
+    };
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+    expect(seen[0]?.startsWith(join(dataDir, 'tmp'))).toBe(true);
+    expect(seen[0]?.startsWith(target)).toBe(false);
+    expect(existsSync(dirname(seen[0] as string))).toBe(false);
+  });
+
+  it('S2: läuft ein Restore-Test, startet kein Backup (Exit 4, klare Meldung, kein Dump)', async () => {
+    const { pg, deps, errs } = setup();
+    pg.testRunning = true;
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(4);
+    expect(errs.join('\n')).toContain('Restore-Test');
+    expect(pg.runs.size).toBe(0);
+  });
+
+  it('S2: mit Zeile vom Core wird sie als Fehler eingetragen statt auf „läuft“ zu bleiben', async () => {
+    const { pg, deps } = setup();
+    const id = '019a4e14-0000-7000-8000-0000000000dd';
+    pg.runs.set(id, {
+      id,
+      state: 'laeuft',
+      error: null,
+      stand: null,
+      size: null,
+      sha: null,
+      trigger: 'zeitplan',
+      target: pg.target as string,
+    });
+    pg.testRunning = true;
+    expect(await runBackup(deps, { trigger: 'zeitplan', runId: id })).toBe(4);
+    expect(pg.runs.get(id)).toMatchObject({ state: 'fehler' });
+    expect(pg.runs.get(id)?.error).toContain('Restore-Test');
   });
 
   it('Verschlüsselung eingeschaltet: Lauf scheitert mit Hinweis, es entsteht kein unverschlüsselter Stand', async () => {
@@ -607,9 +692,9 @@ describe('runRestore', () => {
     s.state.answer = true;
     expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: false })).toBe(0);
     const stamp = '20261110t080000z';
-    expect(s.pg.restored).toEqual([
-      { db: `sg_restore_${stamp}`, file: join(s.target, '20261104T030012Z', 'db.dump') },
-    ]);
+    // Eingespielt wird die geprüfte private Kopie im Datenordner, nie der Pfad im Ziel (B1)
+    expect(s.pg.restored.map((r) => r.db)).toEqual([`sg_restore_${stamp}`]);
+    expect(s.pg.restored[0]?.file.startsWith(join(s.dataDir, 'tmp'))).toBe(true);
     const sqls = s.pg.queries.map((q) => q.sql);
     const epoch = sqls.findIndex((q) => q.includes('SET db_epoch = gen_random_uuid()'));
     const swap = sqls.findIndex((q) => q.startsWith('BEGIN;'));
@@ -887,6 +972,7 @@ describe('Automatischer Restore-Test (F-DAT-02)', () => {
       state: 'ok',
       trigger: 'zeitplan',
       stand: STAND,
+      is_latest: true,
       reason: null,
       error: null,
       finished_at: '2026-11-10T08:00:00.000Z',
@@ -967,10 +1053,100 @@ describe('Automatischer Restore-Test (F-DAT-02)', () => {
     const s = await prepared();
     Object.assign(s.pg, { target: null });
     expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
-    expect(s.pg.testResult).toMatchObject({ reason: 'kein_backup' });
+    expect(s.pg.testResult).toMatchObject({ reason: 'kein_ziel' });
     s.pg.target = join(s.target, 'gibt-es-nicht', 'tief');
     expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
     expect(s.pg.testResult).toMatchObject({ reason: 'ziel_nicht_erreichbar' });
+  });
+
+  it('is_latest: false, wenn der jüngste Lauf keinen Stand mehr im Ziel hat (älterer wird getestet)', async () => {
+    const s = await prepared();
+    const newer = '019a4e14-0000-7000-8000-0000000000cc';
+    s.pg.runs.set(newer, {
+      id: newer,
+      state: 'fertig',
+      error: null,
+      stand: '20261105T030000Z',
+      size: '1',
+      sha: 'b'.repeat(64),
+      trigger: 'zeitplan',
+      target: s.pg.target as string,
+    });
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
+    expect(s.pg.testResult).toMatchObject({ state: 'ok', stand: STAND, is_latest: false });
+  });
+
+  /**
+   * B1 (TOCTOU): Zwischen Prüfsumme und `pg_restore` tauscht ein Angreifer die Datei im Ziel aus. Eingespielt werden
+   * muss die geprüfte, private Kopie, nie der Pfad im Ziel.
+   */
+  async function swapDuringRestore(s: Awaited<ReturnType<typeof prepared>>) {
+    const seen: { path: string; content: string; fileMode: number; dirMode: number; inTarget: boolean }[] =
+      [];
+    const targetDump = join(s.target, STAND, 'db.dump');
+    const original = readFileSync(targetDump, 'utf8');
+    s.pg.restoreImpl = async (_db, file) => {
+      writeFileSync(targetDump, 'EVIL-DUMP'); // Angreifer, kurz bevor pg_restore die Datei öffnet
+      seen.push({
+        path: file,
+        content: readFileSync(file, 'utf8'),
+        fileMode: statSync(file).mode & 0o777,
+        dirMode: statSync(dirname(file)).mode & 0o777,
+        inTarget: file.startsWith(s.target),
+      });
+    };
+    return { seen, original, targetDump };
+  }
+
+  it('B1: automatischer Test spielt die geprüfte private Kopie ein, nicht den (ausgetauschten) Pfad im Ziel', async () => {
+    const s = await prepared();
+    const { seen, original } = await swapDuringRestore(s);
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.content).toBe(original);
+    expect(seen[0]?.inTarget).toBe(false);
+    expect(seen[0]?.path.startsWith(join(s.dataDir, 'tmp'))).toBe(true);
+    expect(seen[0]?.fileMode).toBe(0o600);
+    expect(seen[0]?.dirMode).toBe(0o700);
+    // Die Kopie ist danach gelöscht
+    expect(existsSync(dirname(seen[0]?.path as string))).toBe(false);
+  });
+
+  it('B1: dasselbe bei `restore --test <stand>` von Hand', async () => {
+    const s = await prepared();
+    const { seen, original } = await swapDuringRestore(s);
+    expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(0);
+    expect(seen[0]?.content).toBe(original);
+    expect(seen[0]?.inTarget).toBe(false);
+  });
+
+  it('B1: dasselbe beim vollständigen `restore <stand>`', async () => {
+    const s = await prepared();
+    const { seen, original } = await swapDuringRestore(s);
+    expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(0);
+    expect(seen[0]?.content).toBe(original);
+    expect(seen[0]?.inTarget).toBe(false);
+    expect(existsSync(dirname(seen[0]?.path as string))).toBe(false);
+  });
+
+  it('B1: Austausch VOR dem Kopieren: Prüfsumme der Kopie stimmt nicht, pg_restore wird nie aufgerufen, Kopie weg', async () => {
+    const s = await prepared();
+    writeFileSync(join(s.target, STAND, 'db.dump'), 'EVIL-DUMP');
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.pg.testResult).toMatchObject({ reason: 'beschaedigt' });
+    const stage = join(s.dataDir, 'tmp');
+    expect(existsSync(stage) ? readdirSync(stage) : []).toEqual([]);
+  });
+
+  it('B1: die private Kopie wird auch bei einem Fehler von pg_restore gelöscht', async () => {
+    const s = await prepared();
+    s.pg.restoreImpl = async () => {
+      throw new Error('kaputt');
+    };
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    const stage = join(s.dataDir, 'tmp');
+    expect(existsSync(stage) ? readdirSync(stage) : []).toEqual([]);
   });
 
   it('räumt übrig gebliebene Wegwerf-Datenbanken eines abgestürzten Tests auf', async () => {

@@ -11,7 +11,7 @@ import { HttpError } from '../errors.ts';
 import { NIGHTLY_LOCK_KEY } from '../lib/locks.ts';
 import { latestOccurrence, startBackup, isBackupRunning } from './backups.ts';
 import { enqueueJob } from './jobs.ts';
-import { tickRestoreTest } from './restore-test.ts';
+import { getRestoreTest, tickRestoreTest } from './restore-test.ts';
 import { getSettings } from './settings.ts';
 
 /** Ortszeit, zu der der Core `maintenance.nightly` anlegt (VERTRAEGE §13) */
@@ -51,6 +51,8 @@ export async function tickBackup(
   const { data } = await getSettings(db, config);
   if (!data.backup_target) return null;
   if (await isBackupRunning(db, now)) return null;
+  // Läuft ein Restore-Test, wartet das Backup (ein späterer Takt holt es nach, kein Fehlschlag)
+  if ((await getRestoreTest(db, now))?.state === 'laeuft') return null;
   const due = latestOccurrence(now, data.backup_time);
   const [since] = await db
     .select({ id: backupRun.id })

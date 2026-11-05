@@ -25,6 +25,7 @@ export const RESTORE_TEST_TRIGGERS = ['zeitplan', 'manuell'] as const;
 export type RestoreTestTrigger = (typeof RESTORE_TEST_TRIGGERS)[number];
 
 export type RestoreTestReason =
+  | 'kein_ziel'
   | 'kein_backup'
   | 'ziel_nicht_erreichbar'
   | 'nicht_authentisch'
@@ -42,6 +43,8 @@ export interface RestoreTestValue {
   started_at: string;
   finished_at: string | null;
   stand: string | null;
+  /** true = jüngster erfolgreicher Lauf, false = älterer, null = unbekannt */
+  is_latest: boolean | null;
   reason: RestoreTestReason | null;
   error: string | null;
 }
@@ -100,6 +103,7 @@ export async function runAutoRestoreTest(deps: RestoreDeps, options: AutoRestore
       state: result.state,
       finished_at: now().toISOString(),
       stand: result.stand,
+      is_latest: isLatest,
       reason: result.state === 'fehler' ? result.reason : null,
       error: result.state === 'fehler' ? result.error.slice(0, 500) : null,
     };
@@ -117,13 +121,14 @@ export async function runAutoRestoreTest(deps: RestoreDeps, options: AutoRestore
   };
 
   let currentStand: string | null = null;
+  let isLatest: boolean | null = null;
   try {
     await dropLeftovers(deps).catch((e: unknown) =>
       err(`Übrig gebliebene Wegwerf-Datenbanken ließen sich nicht entfernen: ${errorText(e, cfg)}`),
     );
 
     const { target } = await readBackupSettings(pg);
-    if (!target) return await fail(null, 'kein_backup', 'Es ist kein Backup-Ziel eingestellt.');
+    if (!target) return await fail(null, 'kein_ziel', 'Es ist kein Backup-Ziel eingestellt.');
     let resolved: string;
     try {
       resolved = checkBackupTarget(target, cfg.dataDir, { createMissing: false });
@@ -153,6 +158,14 @@ export async function runAutoRestoreTest(deps: RestoreDeps, options: AutoRestore
     }
     const [stand, sha] = candidate as [string, string];
     currentStand = stand;
+    // War es der jüngste erfolgreiche Lauf? (Sonst lag der jüngste nicht mehr im Ziel oder hatte keine Prüfsumme.)
+    const newest = await pg.query(
+      `SELECT stand FROM backup_run
+        WHERE state = 'fertig' AND deleted_at IS NULL AND stand IS NOT NULL AND target = :'target'
+        ORDER BY started_at DESC, id DESC LIMIT 1`,
+      { target },
+    );
+    isLatest = newest[0]?.[0] === undefined ? null : newest[0][0] === stand;
 
     let loaded;
     try {
@@ -161,13 +174,14 @@ export async function runAutoRestoreTest(deps: RestoreDeps, options: AutoRestore
       if (e instanceof StandError) return await fail(stand, e.reason, e.message);
       throw e;
     }
-    // Der Dump wird erst nach beiden Prüfsummen-Prüfungen angefasst
+    // Der Dump wird in eine private Kopie gelesen und dabei geprüft; eingespielt wird nur diese Kopie (B1)
     const report = await restoreIntoScratch(
       { ...deps, random: deps.random ?? (() => Math.random().toString(36).slice(2, 8)) },
       loaded.dir,
       loaded.manifest,
       'autotest',
     ).catch((e: unknown) => {
+      if (e instanceof StandError) throw e; // Prüfsumme der Kopie stimmt nicht: wird unten wie oben gemeldet
       throw new RestoreRunError(errorText(e, cfg));
     });
 
@@ -194,6 +208,7 @@ export async function runAutoRestoreTest(deps: RestoreDeps, options: AutoRestore
     log(`Restore-Test bestanden: Stand ${stand} lässt sich wiederherstellen.`);
     return await finish({ state: 'ok', stand });
   } catch (e) {
+    if (e instanceof StandError) return fail(currentStand, e.reason, e.message);
     if (e instanceof RestoreRunError) return fail(currentStand, 'restore_fehlgeschlagen', e.message);
     return fail(currentStand, 'intern', errorText(e, cfg));
   }

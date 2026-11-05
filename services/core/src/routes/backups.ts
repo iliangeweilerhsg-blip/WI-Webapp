@@ -46,10 +46,12 @@ export async function backupRoutes(app: FastifyInstance, deps: BackupRouteDeps):
   typed.post(
     '/restore-test',
     {
+      // Nur am Mac selbst: der Test spielt einen Dump als Datenbank-Superuser ein (VERTRAEGE §13)
+      config: { sgAccess: 'local' },
       schema: {
         tags: ['Daten'],
         summary:
-          'Restore-Test jetzt starten (`pnpm sg restore --automatisch` im Hintergrund, nur eigene Stände). 409 `restore_test_running` / `backup_running` / `backup_target_missing` / `restore_test_no_backup`',
+          'Restore-Test jetzt starten (`pnpm sg restore --automatisch` im Hintergrund, nur eigene Stände, nur lokal). 403 `local_only`, 409 `restore_test_running` / `backup_running` / `backup_target_missing` / `restore_test_no_backup`',
         response: { 202: RestoreTestSchema, 409: ApiErrorSchema },
       },
     },

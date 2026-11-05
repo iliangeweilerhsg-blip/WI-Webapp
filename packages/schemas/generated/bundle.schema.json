@@ -6958,6 +6958,7 @@
         "started_at",
         "finished_at",
         "stand",
+        "is_latest",
         "reason",
         "error"
       ],
@@ -6991,6 +6992,13 @@
           "pattern": "^[0-9]{8}T[0-9]{6}Z$",
           "description": "Getesteter Stand, null wenn keiner gefunden wurde"
         },
+        "is_latest": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "true = der getestete Stand war zum Testzeitpunkt der jüngste erfolgreiche Lauf, false = ein älterer (der jüngste ließ sich nicht testen), null = unbekannt (läuft noch oder kein Stand gewählt)"
+        },
         "reason": {
           "anyOf": [
             {
@@ -7017,6 +7025,7 @@
       "type": "string",
       "description": "Grund eines fehlgeschlagenen Restore-Tests, die Oberfläche leitet daraus die Handlungsempfehlung ab",
       "enum": [
+        "kein_ziel",
         "kein_backup",
         "ziel_nicht_erreichbar",
         "nicht_authentisch",

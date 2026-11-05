@@ -149,6 +149,7 @@ describe('Restore-Test (F-DAT-02)', () => {
     started_at: iso(-86_400_000),
     finished_at: iso(-86_400_000 + 5000),
     stand: '20261104T030012Z',
+    is_latest: true,
     reason: null,
     error: null,
     ...over,
@@ -199,6 +200,32 @@ describe('Restore-Test (F-DAT-02)', () => {
     expect(screen.getByText(/nicht zu deinem protokollierten Backup/)).toBeInTheDocument();
     expect(screen.getByText(/Neues Backup|neues Backup an/)).toBeInTheDocument();
     expect(screen.getByText('Technisch: Manifest passt nicht')).toBeInTheDocument();
+  });
+
+  it('zeigt den getesteten Stand und warnt, wenn es nicht der jüngste war', async () => {
+    core(result({ is_latest: true }));
+    const first = mount(<DataSettings />);
+    expect(await screen.findByText(/Getesteter Stand:/)).toBeInTheDocument();
+    expect(screen.queryByText(/nicht dein jüngstes Backup/)).not.toBeInTheDocument();
+    first.unmount();
+    core(result({ is_latest: false }));
+    mount(<DataSettings />);
+    expect(await screen.findByText(/nicht dein jüngstes Backup/)).toBeInTheDocument();
+  });
+
+  it('kein Ziel: eigener Hinweis statt „kein Backup“', async () => {
+    core(
+      result({
+        state: 'fehler',
+        reason: 'kein_ziel',
+        stand: null,
+        error: 'Es ist kein Backup-Ziel eingestellt.',
+      }),
+    );
+    mount(<DataSettings />);
+    expect(
+      await screen.findByText(/kein Backup-Ziel eingestellt, darum gibt es nichts zu testen/),
+    ).toBeInTheDocument();
   });
 
   it('ohne Ziel ist „Jetzt testen“ gesperrt', async () => {
