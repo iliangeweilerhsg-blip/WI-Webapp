@@ -27,8 +27,8 @@ import { FakeMoodleServer, fileReply, unix } from '../unit/moodle-server.ts';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import { startTestApp, testDatabaseUrl, type TestApp } from './helpers.ts';
 
-/** Erkennbar unechter Test-Token */
-const TOKEN = '0123456789abcdef0123456789abcdef';
+/** Erkennbar unechter Test-Token, zur Laufzeit gebaut (sonst schlägt gitleaks an, siehe .gitleaksignore) */
+const TOKEN = '0123456789abcdef'.repeat(2);
 const NOW = new Date('2026-11-05T12:00:00Z');
 
 const COURSE = { dbs: 901, org: 902, old: 903, stat: 904 };
@@ -418,6 +418,9 @@ async function start(): Promise<void> {
         ends_on: '2027-03-31',
       })
     ).body;
+    // Unser Semester ist das aktuelle: Vorschläge kommen nur aus dessen Modulen. Andere Testdateien lassen eigene
+    // Semester und Module (auch „Datenbanksysteme“) in derselben Datenbank zurück
+    expect((await req('PATCH', `/semesters/${semester.id}`, { is_current: true })).status).toBe(200);
     dbsModule = (
       await req<Module>('POST', '/modules', {
         semester_id: semester.id,
