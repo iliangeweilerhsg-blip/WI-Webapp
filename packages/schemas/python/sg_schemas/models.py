@@ -1443,7 +1443,9 @@ class LectureSettings(BaseModel):
         extra='forbid',
     )
     microphone_id: StrictStr | None = Field(
-        ..., description='deviceId aus MediaDevices, null = Standardmikrofon'
+        ...,
+        description='deviceId aus MediaDevices, null = Standardmikrofon',
+        max_length=256,
     )
     auto_stop_after_end_min: StrictInt = Field(
         ..., description='Regel 1: Kalenderende + X min … (Standard 10)', ge=1
@@ -1476,7 +1478,9 @@ class LectureSettingsUpdate(BaseModel):
         extra='forbid',
     )
     microphone_id: StrictStr | None = Field(
-        None, description='deviceId aus MediaDevices, null = Standardmikrofon'
+        None,
+        description='deviceId aus MediaDevices, null = Standardmikrofon',
+        max_length=256,
     )
     auto_stop_after_end_min: StrictInt | None = Field(
         None, description='Regel 1: Kalenderende + X min … (Standard 10)', ge=1

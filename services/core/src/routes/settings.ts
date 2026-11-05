@@ -4,6 +4,8 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { ApiErrorSchema, SettingsSchema, SettingsUpdateSchema } from '@sg/shared';
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
+import { HttpError } from '../errors.ts';
+import { isLoopbackAddress } from '../plugins/security.ts';
 import { getSettings, updateSettings } from '../services/settings.ts';
 
 export interface SettingsRouteDeps {
@@ -34,9 +36,18 @@ export async function settingsRoutes(app: FastifyInstance, deps: SettingsRouteDe
         tags: ['Einstellungen'],
         summary: 'Einstellungen ändern: nur die angegebenen Felder, Bereich für Bereich zusammengeführt',
         body: SettingsUpdateSchema,
-        response: { 200: SettingsSchema, 400: ApiErrorSchema },
+        response: { 200: SettingsSchema, 400: ApiErrorSchema, 403: ApiErrorSchema },
       },
     },
-    async (request) => updateSettings(db, config, request.body),
+    async (request) => {
+      // Das Backup-Ziel bestimmt, wohin der Core schreibt: nur vom Mac selbst (VERTRAEGE §7.5)
+      if (
+        request.body.data?.backup_target !== undefined &&
+        !isLoopbackAddress(request.socket.remoteAddress)
+      ) {
+        throw new HttpError(403, 'local_only', 'Das Backup-Ziel lässt sich nur am Mac selbst ändern.');
+      }
+      return updateSettings(db, config, request.body);
+    },
   );
 }

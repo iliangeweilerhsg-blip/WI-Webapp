@@ -2664,6 +2664,7 @@
             "string",
             "null"
           ],
+          "maxLength": 256,
           "description": "deviceId aus MediaDevices, null = Standardmikrofon"
         },
         "auto_stop_after_end_min": {
@@ -2722,6 +2723,7 @@
             "string",
             "null"
           ],
+          "maxLength": 256,
           "description": "deviceId aus MediaDevices, null = Standardmikrofon"
         },
         "auto_stop_after_end_min": {

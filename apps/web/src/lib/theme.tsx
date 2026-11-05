@@ -1,6 +1,8 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import type { Appearance } from '@sg/shared';
+import { useSettings } from './settings.ts';
 import { SIDEBAR_KEY, STORAGE_KEY } from './theme-init.ts';
 
 export type ThemeChoice = 'system' | 'light' | 'dark';
@@ -56,8 +58,24 @@ export function useTheme() {
   return useContext(ThemeContext);
 }
 
+const APPEARANCE_THEME: Record<Appearance, ThemeChoice> = { system: 'system', hell: 'light', dunkel: 'dark' };
+
+/**
+ * Wendet `general.appearance` (Standard-Darstellung, VERTRAEGE §14.1) an, solange auf diesem Gerät keine eigene
+ * Wahl gilt („Wie Standard“). Sie wartet nie auf den Core: bis die Einstellungen geladen sind, gilt das System.
+ */
+export function AppearanceDefault() {
+  const { choice } = useTheme();
+  const appearance = useSettings().data?.general.appearance;
+  useEffect(() => {
+    if (choice !== 'system' || appearance === undefined) return;
+    apply(APPEARANCE_THEME[appearance]);
+  }, [choice, appearance]);
+  return null;
+}
+
 export const THEME_LABELS: Record<ThemeChoice, string> = {
-  system: 'System',
+  system: 'Wie Standard',
   light: 'Hell',
   dark: 'Dunkel',
 };

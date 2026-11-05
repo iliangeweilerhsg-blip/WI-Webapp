@@ -12,13 +12,14 @@ vi.mock('next/navigation', () => ({
 import { AppShell } from '../src/components/AppShell.tsx';
 import { SettingsView } from '../src/components/SettingsView.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
-import { ThemeProvider } from '../src/lib/theme.tsx';
-import { installFakeCore, type FakeCore } from './fake-core.ts';
+import { AppearanceDefault, ThemeProvider } from '../src/lib/theme.tsx';
+import { installFakeCore, makeSemester, type FakeCore } from './fake-core.ts';
 
 function page() {
   return render(
     <ThemeProvider>
       <QueryProvider>
+        <AppearanceDefault />
         <AppShell>
           <SettingsView />
         </AppShell>
@@ -32,6 +33,7 @@ const patches = (core: FakeCore) =>
 
 beforeEach(() => {
   document.documentElement.removeAttribute('data-theme');
+  window.localStorage.clear();
 });
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -58,7 +60,8 @@ describe('Reiter', () => {
     const user = userEvent.setup();
     page();
     await user.click(screen.getByRole('tab', { name: 'Geräte' }));
-    expect(screen.getByText(/Kommt bald/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Geräte' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Allgemein', hidden: true })).not.toBeVisible();
     await user.click(screen.getByRole('tab', { name: 'Daten und Papierkorb' }));
     expect(screen.getByRole('heading', { name: 'Daten und Papierkorb' })).toBeInTheDocument();
 
@@ -84,19 +87,54 @@ describe('Allgemein', () => {
     expect(dataDir).toHaveAttribute('readonly');
   });
 
-  it('speichert nur geänderte Felder, zeigt einen Toast und übernimmt die Darstellung', async () => {
+  it('speichert nur geänderte Felder und zeigt einen Toast', async () => {
     const core = installFakeCore();
     const user = userEvent.setup();
     page();
     const save = await screen.findByRole('button', { name: 'Speichern' });
     expect(save).toBeDisabled();
-    await user.selectOptions(screen.getByLabelText('Standard-Darstellung'), 'dunkel');
+    expect(save).toHaveAccessibleDescription('Keine Änderungen zu speichern.');
+    await user.selectOptions(screen.getByLabelText('Sprache der Inhalte'), 'en');
     expect(save).toBeEnabled();
     await user.click(save);
     expect(await screen.findByText('Allgemeine Einstellungen gespeichert')).toBeInTheDocument();
-    expect(patches(core).map((r) => r.body)).toEqual([{ general: { appearance: 'dunkel' } }]);
-    expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
+    expect(patches(core).map((r) => r.body)).toEqual([{ general: { content_lang: 'en' } }]);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Speichern' })).toBeDisabled());
+  });
+
+  it('Standard-Darstellung gilt ohne Geräte-Wahl und wirkt nach dem Speichern', async () => {
+    installFakeCore();
+    const user = userEvent.setup();
+    page();
+    await user.selectOptions(await screen.findByLabelText('Standard-Darstellung'), 'dunkel');
+    await user.click(screen.getByRole('button', { name: 'Speichern' }));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'dark'));
+    expect(window.localStorage.getItem('sg-theme')).toBeNull();
+  });
+
+  it('Speichern anderer Felder setzt die Geräte-Wahl nicht zurück', async () => {
+    window.localStorage.setItem('sg-theme', 'light');
+    installFakeCore();
+    const user = userEvent.setup();
+    page();
+    await user.selectOptions(await screen.findByLabelText('Sprache der Inhalte'), 'en');
+    await user.click(screen.getByRole('button', { name: 'Speichern' }));
+    await screen.findByText('Allgemeine Einstellungen gespeichert');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    expect(window.localStorage.getItem('sg-theme')).toBe('light');
+  });
+
+  it('Geräte-Wahl hat Vorrang vor der Standard-Darstellung; „Wie Standard“ folgt ihr wieder', async () => {
+    const core = installFakeCore();
+    core.settings.general.appearance = 'dunkel';
+    window.localStorage.setItem('sg-theme', 'light');
+    const user = userEvent.setup();
+    page();
+    await screen.findByLabelText('Sprache der Inhalte');
+    expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+    await user.click(screen.getByRole('button', { name: 'Wie Standard' }));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'dark'));
+    expect(window.localStorage.getItem('sg-theme')).toBeNull();
   });
 
   it('verwirft Änderungen', async () => {
@@ -248,5 +286,75 @@ describe('Stift', () => {
     expect(patches(core)[0]?.body).toEqual({
       pen: { favorite_colors: core.settings.pen.favorite_colors },
     });
+  });
+});
+
+describe('Reiter bleiben erhalten', () => {
+  it('ungespeicherte Eingaben überstehen den Reiterwechsel und markieren den Reiter', async () => {
+    installFakeCore();
+    const user = userEvent.setup();
+    page();
+    const max = await screen.findByLabelText('Höchstdauer (Minuten)');
+    await user.click(screen.getByRole('tab', { name: 'Vorlesung' }));
+    await user.clear(max);
+    await user.type(max, '120');
+    await user.click(screen.getByRole('tab', { name: 'Stift' }));
+    expect(screen.getByRole('tab', { name: /Vorlesung/ })).toHaveAccessibleName(
+      'Vorlesung (ungespeicherte Änderungen)',
+    );
+    await user.click(screen.getByRole('tab', { name: /Vorlesung/ }));
+    expect(screen.getByLabelText('Höchstdauer (Minuten)')).toHaveValue('120');
+  });
+
+  it('jedes Panel hat eine eigene ID passend zu aria-controls', async () => {
+    installFakeCore();
+    page();
+    for (const tab of screen.getAllByRole('tab')) {
+      const id = tab.getAttribute('aria-controls');
+      expect(id).toMatch(/^settings-panel-/);
+      expect(document.getElementById(id ?? '')).toHaveAttribute('role', 'tabpanel');
+    }
+  });
+
+  it('Speicherfehler eines verborgenen Reiters: Toast und Markierung am Reiter', async () => {
+    const core = installFakeCore();
+    const user = userEvent.setup();
+    page();
+    await screen.findByLabelText('Sprache der Inhalte');
+    await user.click(screen.getByRole('tab', { name: 'Stift' }));
+    await user.selectOptions(screen.getByLabelText('Doppeltippen'), 'aus');
+    core.rejectNextSettings = {
+      status: 400,
+      code: 'validation_failed',
+      message: 'Die Anfrage ist ungültig.',
+    };
+    // Auf den Reiter wechseln, während das Speichern läuft
+    await user.click(screen.getByRole('button', { name: 'Speichern' }));
+    await user.click(screen.getByRole('tab', { name: 'Allgemein' }));
+    expect(await screen.findByText(/Nicht gespeichert/)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Stift/ })).toHaveAccessibleName(
+      'Stift (nicht gespeichert, Fehler)',
+    );
+  });
+
+  it('ab md: senkrechte Tabliste, Pfeil hoch und runter', async () => {
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })),
+    );
+    window.matchMedia = globalThis.matchMedia;
+    installFakeCore({ semesters: [makeSemester()] });
+    const user = userEvent.setup();
+    page();
+    const list = screen.getByRole('tablist');
+    await waitFor(() => expect(list).toHaveAttribute('aria-orientation', 'vertical'));
+    screen.getByRole('tab', { name: 'Allgemein' }).focus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('tab', { name: 'Vorlesung' })).toHaveFocus();
+    await user.keyboard('{ArrowUp}{ArrowUp}');
+    expect(screen.getByRole('tab', { name: 'Daten und Papierkorb' })).toHaveFocus();
+    // Pfeil rechts gehört zur waagerechten Liste
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: 'Daten und Papierkorb' })).toHaveFocus();
   });
 });

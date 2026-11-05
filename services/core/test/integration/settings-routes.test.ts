@@ -1,5 +1,5 @@
 // GET/PATCH /settings (VERTRAEGE §7.5, §14)
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -93,7 +93,11 @@ describe('PATCH /settings', () => {
     const settings = await patchOk({
       data: { backup_target: dir, backup_encryption: true, backup_time: '04:30' },
     });
-    expect(settings.data).toEqual({ backup_target: dir, backup_encryption: true, backup_time: '04:30' });
+    expect(settings.data).toEqual({
+      backup_target: realpathSync(dir),
+      backup_encryption: true,
+      backup_time: '04:30',
+    });
     const cleared = await patchOk({ data: { backup_target: null } });
     expect(cleared.data.backup_target).toBeNull();
     expect(cleared.data.backup_time).toBe('04:30');
@@ -143,6 +147,7 @@ describe('PATCH /settings', () => {
       ['unbekanntes Feld', { lecture: { gibt_es_nicht: 1 } }],
       ['Aufzählung', { general: { appearance: 'bunt' } }],
       ['Sprache', { general: { content_lang: 'fr' } }],
+      ['Mikrofon-ID zu lang', { lecture: { microphone_id: 'x'.repeat(257) } }],
       ['Minuten 0', { lecture: { auto_stop_after_end_min: 0 } }],
       ['Minuten keine ganze Zahl', { lecture: { auto_stop_silence_min: 1.5 } }],
       ['Hinweis negativ', { lecture: { auto_stop_warning_s: -1 } }],
@@ -195,10 +200,121 @@ describe('PATCH /settings', () => {
       expect(errorOf(res).code).toBe('backup_target_invalid');
     });
 
+    const expectInvalid = async (target: string) => {
+      const res = await patch({ data: { backup_target: target } });
+      expect(res.statusCode, res.body).toBe(400);
+      expect(errorOf(res).code).toBe('backup_target_invalid');
+    };
+
+    it('leerer Pfad', () => expectInvalid(''));
+
+    it('Datenordner und Ordner darin', async () => {
+      const inner = join(t.config.dataDir, 'backups');
+      mkdirSync(inner, { recursive: true });
+      await expectInvalid(t.config.dataDir);
+      await expectInvalid(inner);
+      const link = join(mkdtempSync(join(tmpdir(), 'sg-backup-')), 'zum-datenordner');
+      symlinkSync(inner, link);
+      await expectInvalid(link);
+    });
+
+    it('Systemordner', async () => {
+      for (const path of ['/proc', '/sys', '/dev', '/proc/self']) await expectInvalid(path);
+    });
+
+    it('nicht beschreibbarer Ordner', async (ctx) => {
+      if (process.getuid?.() === 0) return ctx.skip();
+      const dir = mkdtempSync(join(tmpdir(), 'sg-backup-'));
+      chmodSync(dir, 0o555);
+      await expectInvalid(dir);
+    });
+
     it('bei ungültigem Ziel wird auch der Rest der Anfrage nicht gespeichert', async () => {
       const res = await patch({ data: { backup_target: 'relativ' }, lecture: { toolbar_side: 'links' } });
       expect(res.statusCode).toBe(400);
       expect((await get()).lecture.toolbar_side).toBe('rechts');
     });
+
+    it('speichert den normalisierten Pfad (realpath, ohne „..“ und Symlink)', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sg-backup-'));
+      mkdirSync(join(dir, 'ziel'));
+      const link = join(dir, 'link');
+      symlinkSync(join(dir, 'ziel'), link);
+      const settings = await patchOk({ data: { backup_target: `${link}/../ziel/.` } });
+      expect(settings.data.backup_target).toBe(realpathSync(join(dir, 'ziel')));
+    });
+  });
+
+  describe('nur lokal ändern', () => {
+    let remote: TestApp;
+    beforeAll(async () => {
+      remote = await startTestApp({}, { verifyDeviceToken: async () => true });
+    });
+    afterAll(async () => {
+      await remote.close();
+    });
+    const fromNetwork = (payload: object) =>
+      remote.app.inject({
+        method: 'PATCH',
+        url: URL,
+        remoteAddress: '192.168.1.20',
+        headers: { host: 'mac.local:4710', authorization: 'Bearer EXAMPLEdevicetoken000' },
+        payload,
+      });
+
+    it('backup_target aus dem Netz: 403 local_only, nichts gespeichert', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'sg-backup-'));
+      for (const target of [dir, null]) {
+        const res = await fromNetwork({
+          lecture: { toolbar_side: 'links' },
+          data: { backup_target: target },
+        });
+        expect(res.statusCode, res.body).toBe(403);
+        expect(errorOf(res).code).toBe('local_only');
+      }
+      expect((await get()).lecture.toolbar_side).toBe('rechts');
+    });
+
+    it('andere Einstellungen aus dem Netz sind erlaubt', async () => {
+      const res = await fromNetwork({ data: { backup_time: '05:00' }, pen: { double_tap: 'aus' } });
+      expect(res.statusCode, res.body).toBe(200);
+      expect((await get()).data.backup_time).toBe('05:00');
+    });
+  });
+
+  it('parallele PATCHes verschiedener Felder gehen nicht verloren (15 Runden à 24)', async () => {
+    const fields = Array.from({ length: 24 }, (_, i) => i);
+    for (let round = 0; round < 15; round += 1) {
+      await t.handle.sql`TRUNCATE setting`;
+      const values = fields.map((i) => 1 + ((round * 7 + i * 13) % 500));
+      const names = [
+        'auto_stop_after_end_min',
+        'auto_stop_quiet_window_min',
+        'auto_stop_hard_after_end_min',
+        'auto_stop_silence_min',
+        'auto_stop_max_duration_min',
+        'auto_stop_extend_min',
+      ] as const;
+      const sends = fields.map((i) => {
+        const name = names[i % names.length] as (typeof names)[number];
+        // Mehrere PATCHes je Feld: der letzte Wert je Feld ist unbestimmt, alle Werte sind gültig
+        return patch(
+          i < 6
+            ? { lecture: { [name]: values[i] } }
+            : i < 12
+              ? { pen: { double_tap: 'aus' } }
+              : i < 18
+                ? { general: { content_lang: 'en' } }
+                : { data: { backup_time: '04:00' } },
+        );
+      });
+      const responses = await Promise.all(sends);
+      for (const res of responses) expect(res.statusCode, res.body).toBe(200);
+      const settings = await get();
+      names.forEach((name, i) => expect(settings.lecture[name]).toBe(values[i]));
+      expect(settings.pen.double_tap).toBe('aus');
+      expect(settings.general.content_lang).toBe('en');
+      expect(settings.data.backup_time).toBe('04:00');
+    }
   });
 });

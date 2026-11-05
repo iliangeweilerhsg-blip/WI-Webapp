@@ -1,5 +1,6 @@
 'use client';
 
+import { useId } from 'react';
 import type { HexColor, PencilDoubleTapAction, PencilSqueezeAction } from '@sg/shared';
 import { AreaForm, CheckboxField, SelectField, useAreaForm } from './form.tsx';
 
@@ -28,6 +29,7 @@ const alphaOf = (hex: HexColor) => hex.slice(7, 9);
 /** Einstellungen → Stift (F-EIN-01, F-INK-09): Apple-Pencil-Gesten, Formerkennung, Lieblingsfarben. */
 export function PenSettingsForm() {
   const form = useAreaForm('pen', 'Stift-Einstellungen gespeichert');
+  const hintId = useId();
   const v = form.values;
   const colors = v?.favorite_colors ?? [];
   const setColor = (index: number, rgb: string) =>
@@ -63,12 +65,12 @@ export function PenSettingsForm() {
             checked={v.shape_recognition}
             onChange={(x) => form.set('shape_recognition', x)}
           />
-          <fieldset className="min-w-0 sm:col-span-2">
+          <fieldset aria-describedby={hintId} className="min-w-0 sm:col-span-2">
             <legend className="text-sm font-medium">Lieblingsfarben</legend>
-            <p id="pen-colors-hint" className="mt-1 text-xs text-text-muted">
+            <p id={hintId} className="mt-1 text-xs text-text-muted">
               Bis zu {MAX_COLORS} Farben, die du auf dem iPad mit einem Tipp erreichst.
             </p>
-            <ul className="mt-2 flex flex-wrap gap-3" aria-describedby="pen-colors-hint">
+            <ul className="mt-2 flex flex-wrap gap-3">
               {colors.map((color, index) => (
                 <li key={index} className="flex items-center gap-1 rounded-md border border-border p-1">
                   <input

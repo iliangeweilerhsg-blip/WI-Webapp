@@ -1,7 +1,6 @@
 'use client';
 
 import type { Appearance, Lang } from '@sg/shared';
-import { useTheme, type ThemeChoice } from '../../lib/theme.tsx';
 import { AreaForm, SelectField, TextReadOnlyField, useAreaForm } from './form.tsx';
 
 const LANGS: readonly { value: Lang; label: string }[] = [
@@ -16,14 +15,10 @@ const APPEARANCES: readonly { value: Appearance; label: string }[] = [
   { value: 'dunkel', label: 'Dunkel' },
 ];
 
-const THEME_OF: Record<Appearance, ThemeChoice> = { system: 'system', hell: 'light', dunkel: 'dark' };
-
 /** Einstellungen → Allgemein (F-EIN-01): Inhaltssprache, Standard-Darstellung, Datenordner (nur lesbar). */
 export function GeneralSettingsForm() {
-  const { setChoice } = useTheme();
-  const form = useAreaForm('general', 'Allgemeine Einstellungen gespeichert', (saved) =>
-    setChoice(THEME_OF[saved.general.appearance]),
-  );
+  // Die Standard-Darstellung wendet `AppearanceDefault` an, solange das Gerät keine eigene Wahl hat
+  const form = useAreaForm('general', 'Allgemeine Einstellungen gespeichert');
   const v = form.values;
   return (
     <AreaForm title="Allgemein" intro="Sprache der Inhalte, Darstellung und Ort deiner Daten." form={form}>
@@ -38,7 +33,7 @@ export function GeneralSettingsForm() {
           />
           <SelectField
             label="Standard-Darstellung"
-            hint="Gilt auch für das iPad. Beim Speichern übernimmt dieses Gerät sie ebenfalls."
+            hint="Gilt für alle Geräte. Ein Gerät kann unter „Darstellung auf diesem Gerät“ davon abweichen."
             value={v.appearance}
             options={APPEARANCES}
             onChange={(x) => form.set('appearance', x)}

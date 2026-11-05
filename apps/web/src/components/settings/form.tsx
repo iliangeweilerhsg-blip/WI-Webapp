@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
 import type { Settings, SettingsUpdate } from '@sg/shared';
 import { friendlyMessage } from '../../lib/api.ts';
 import { useSettings, useUpdateSettings } from '../../lib/settings.ts';
@@ -10,7 +10,7 @@ import { CoreHint } from '../CoreHint.tsx';
 export type AreaKey = 'general' | 'lecture' | 'pen';
 
 const inputClass =
-  'mt-1 w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md font-normal aria-[invalid=true]:border-text';
+  'mt-1 w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md font-normal aria-[invalid=true]:border-2 aria-[invalid=true]:border-text';
 
 /**
  * Zustand eines Formulars für einen Einstellungsbereich: Entwurf über dem Stand vom Core, Speichern sendet
@@ -72,7 +72,10 @@ export function useAreaForm<K extends AreaKey>(
       toast.show({ message: successMessage });
       onSaved?.(saved);
     } catch (failure) {
-      setError(friendlyMessage(failure));
+      const message = friendlyMessage(failure);
+      setError(message);
+      // Auch auf einem verborgenen Reiter sichtbar machen
+      toast.show({ message: `Nicht gespeichert: ${message}` });
     }
   }
 
@@ -82,6 +85,21 @@ export function useAreaForm<K extends AreaKey>(
     setError(null);
   }
 
+  const dirty = changed.length > 0 || invalid;
+  const hasError = error !== null;
+  const { report } = useContext(SettingsTabContext);
+  useEffect(() => {
+    report({ error: hasError, dirty });
+  }, [report, hasError, dirty]);
+
+  const disabledReason = update.isPending
+    ? null
+    : invalid
+      ? 'Bitte zuerst die markierten Felder korrigieren.'
+      : changed.length === 0
+        ? 'Keine Änderungen zu speichern.'
+        : null;
+
   return {
     query,
     values,
@@ -90,11 +108,21 @@ export function useAreaForm<K extends AreaKey>(
     save,
     discard,
     saving: update.isPending,
-    dirty: changed.length > 0 || invalid,
+    dirty,
     canSave: changed.length > 0 && !invalid && !update.isPending,
+    disabledReason,
     error,
   };
 }
+
+/** Meldung eines Formulars an seinen Reiter: ungespeicherte Änderungen und Speicherfehler */
+export interface TabMark {
+  error: boolean;
+  dirty: boolean;
+}
+
+/** Der Reiter, in dem ein Formular steht. Ohne Reiter (z. B. in Tests) passiert nichts. */
+export const SettingsTabContext = createContext<{ report: (mark: TabMark) => void }>({ report: () => {} });
 
 function withoutKey(record: Record<string, string>, key: string) {
   const { [key]: _removed, ...rest } = record;
@@ -117,6 +145,8 @@ export interface AreaFormState {
   saving: boolean;
   dirty: boolean;
   canSave: boolean;
+  /** Warum „Speichern“ gesperrt ist (null, wenn es nicht gesperrt ist oder gerade gespeichert wird) */
+  disabledReason: string | null;
   error: string | null;
 }
 
@@ -133,6 +163,7 @@ export function AreaForm({
   children: ReactNode;
 }) {
   const headingId = useId();
+  const reasonId = useId();
   return (
     <form
       onSubmit={form.save}
@@ -161,6 +192,7 @@ export function AreaForm({
             <button
               type="submit"
               disabled={!form.canSave}
+              aria-describedby={form.disabledReason ? reasonId : undefined}
               className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-accent-contrast disabled:opacity-50"
             >
               {form.saving ? 'Speichert …' : 'Speichern'}
@@ -173,11 +205,17 @@ export function AreaForm({
             >
               Änderungen verwerfen
             </button>
+            {form.disabledReason ? (
+              <p id={reasonId} className="text-xs text-text-muted">
+                {form.disabledReason}
+              </p>
+            ) : null}
           </div>
         </>
       ) : null}
       {form.error ? (
         <p role="alert" className="mt-3 text-sm font-medium">
+          <span aria-hidden="true">⚠ </span>
           {form.error}
         </p>
       ) : null}
@@ -210,6 +248,7 @@ function FieldShell({ label, hint, error, wide, children }: FieldShellProps) {
       </p>
       {error ? (
         <p id={errorId} className="mt-1 text-xs font-medium">
+          <span aria-hidden="true">⚠ </span>
           {error}
         </p>
       ) : null}
