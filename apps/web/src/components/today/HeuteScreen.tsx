@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useMemo } from 'react';
 import { CoreHint } from '../CoreHint.tsx';
+import { MoodleDeadlines } from '../MoodleDeadlines.tsx';
 import { EmptyState } from '../Placeholder.tsx';
 import { StartCard } from './StartCard.tsx';
 import { TodayList } from './TodayList.tsx';
@@ -78,6 +79,11 @@ export function HeuteScreen() {
           >
             Heute steht nichts an. Im Kalender siehst du die ganze Woche.
           </EmptyState>
+        ) : null}
+
+        {/* Fristen aus Moodle der nächsten 14 Tage, höchstens 5 (F-MDL-04). Ohne Fristen: nichts */}
+        {now !== null ? (
+          <MoodleDeadlines modules={modules} days={14} limit={5} headingId="heute-fristen" />
         ) : null}
       </div>
     </section>

@@ -21,6 +21,7 @@ import { useToast } from '../lib/toast.tsx';
 import { useUploadTarget } from '../lib/uploads.tsx';
 import { CoreHint } from './CoreHint.tsx';
 import { MaterialPanel } from './MaterialPanel.tsx';
+import { ModuleMoodle } from './ModuleMoodle.tsx';
 import { EmptyState } from './Placeholder.tsx';
 
 const TABS = [
@@ -359,6 +360,8 @@ function ModuleView() {
       {editing ? (
         <ModuleEditForm key={module.updated_at} module={module} onClose={() => setEditing(false)} />
       ) : null}
+
+      <ModuleMoodle moduleId={module.id} />
 
       <ModuleTabs moduleId={module.id} />
     </>
