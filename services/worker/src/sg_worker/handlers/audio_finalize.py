@@ -43,7 +43,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +66,8 @@ GAP_TOLERANCE_MS = 50
 SILENCE_LIMIT_FALLBACK_MS = 12 * 3_600_000
 SILENCE_LIMIT_BUFFER_MS = 3_600_000
 MAX_MISSING_SEQS = 10_000
+#: Fehlt einem Lauf mehr als das an Dekodiertem, wird der Verlust als Lücke gemeldet
+LOSS_REPORT_MS = 1000
 
 #: Zeitlimits in Sekunden
 DECODE_TIMEOUT_S = 900
@@ -122,6 +124,9 @@ class Piece:
     start_ms: int
     length_ms: int
     pcm: Path
+    #: Läufe ab `seq > 0` verlieren ihren Anfang (bis zur nächsten Grenze): Das Defizit kommt als
+    #: Stille nach vorn. Läufe ab `seq 0` verlieren höchstens ihr Ende: Defizit hinten.
+    align_right: bool = False
 
 
 # ---------- reine Logik (ohne ffmpeg, ohne DB) ----------
@@ -240,6 +245,20 @@ def init_segment(data: bytes, ext: str) -> bytes | None:
         if size < 8:
             return None
         pos += size
+    return None
+
+
+def first_boundary(data: bytes, ext: str) -> int | None:
+    """Erste Cluster- bzw. Fragmentgrenze in `data` (Byte-Index) oder None.
+    WebM: Cluster-ID `1F 43 B6 75`. MP4: `moof`-Box, auf die direkt `mfhd` folgt."""
+    if ext == "webm":
+        i = data.find(b"\x1f\x43\xb6\x75")
+        return i if i >= 0 else None
+    i = data.find(b"moof")
+    while i >= 0:
+        if i >= 4 and data[i + 8 : i + 12] == b"mfhd":
+            return i - 4
+        i = data.find(b"moof", i + 1)
     return None
 
 
@@ -364,13 +383,17 @@ def assemble(pieces: list[Piece], started_ms: int, tail_end_ms: int | None, out:
         for piece in sorted(pieces, key=lambda p: p.start_ms):
             target = max(0, piece.start_ms - started_ms) * BYTES_PER_MS
             skip = max(0, cursor - target)
-            want = piece.length_ms * BYTES_PER_MS - skip
+            total = piece.length_ms * BYTES_PER_MS
+            want = total - skip
             if want > 0:
-                _write_zeros(dst, max(0, target - cursor))
+                actual = piece.pcm.stat().st_size
+                front = max(0, total - actual) if piece.align_right else 0
+                front_zeros = max(0, front - skip)
+                _write_zeros(dst, max(0, target - cursor) + front_zeros)
                 with piece.pcm.open("rb") as src:
-                    src.seek(skip)
-                    got = _copy_range(src, dst, want)
-                _write_zeros(dst, want - got)
+                    src.seek(max(0, skip - front))
+                    got = _copy_range(src, dst, want - front_zeros)
+                _write_zeros(dst, want - front_zeros - got)
                 cursor = max(cursor, target) + want
             piece.pcm.unlink(missing_ok=True)
         if tail_end_ms is not None:
@@ -461,12 +484,31 @@ def _decode_pieces(
     usable: list[ChunkRow],
     independent: bool,
     data_dir: Path,
-) -> tuple[list[ChunkRow], list[ChunkRow], list[Piece]]:
-    """Gibt (behaltene Chunks, nicht dekodierbare Chunks, Stücke) zurück.
+) -> tuple[list[ChunkRow], list[ChunkRow], list[Piece], list[Gap]]:
+    """Gibt (behaltene Chunks, nicht dekodierbare Chunks, Stücke, gemeldete Verluste) zurück.
     Die geprüften Kopien liegen als `c<seq>.<ext>` im Arbeitsordner."""
     kept: list[ChunkRow] = []
     bad: list[ChunkRow] = []
     pieces: list[Piece] = []
+    losses: list[Gap] = []
+
+    def accept(group: list[ChunkRow], dst: Path, *, right: bool) -> None:
+        """Stück übernehmen. 0 ms Dekodiertes: Chunks gelten als fehlend. Fehlt mehr als
+        `LOSS_REPORT_MS` gegenüber der Soll-Länge, wird der Verlust als Lücke gemeldet."""
+        declared = sum(c.duration_ms for c in group)
+        actual = dst.stat().st_size // BYTES_PER_MS
+        if actual == 0:
+            log.warning("Lauf ab Chunk %d ergibt kein Audio", group[0].seq)
+            dst.unlink(missing_ok=True)
+            bad.extend(group)
+            return
+        loss = declared - actual
+        if loss > LOSS_REPORT_MS:
+            at = group[0].start_ms if right else group[0].start_ms + actual
+            losses.append(Gap(at, loss, GAP_MISSING, 0))
+        kept.extend(group)
+        pieces.append(Piece(group[0].start_ms, declared, dst, align_right=right))
+
     if independent:
         for c in usable:
             dst = work / f"p{c.seq}.pcm"
@@ -476,24 +518,26 @@ def _decode_pieces(
                 log.warning("Chunk %d nicht dekodierbar", c.seq)
                 bad.append(c)
                 continue
-            kept.append(c)
-            pieces.append(Piece(c.start_ms, c.duration_ms, dst))
-        return kept, bad, pieces
+            accept([c], dst, right=False)
+        return kept, bad, pieces, losses
 
     if not usable or usable[0].seq != 0:
         # Ohne Init-Chunk ist kein Strom dekodierbar. Nachgelieferter seq 0 macht es später gut.
-        return [], list(usable), []
+        return [], list(usable), [], []
     init = init_segment((work / f"c0.{ext}").read_bytes(), ext)
     for n, run in enumerate(split_runs(usable)):
-        prefix = b"" if run[0].seq == 0 else init
-        if prefix is None:
-            bad.extend(run)
-            continue
+        body = b"".join((work / f"c{c.seq}.{ext}").read_bytes() for c in run)
+        if run[0].seq == 0:
+            data = body
+        else:
+            # Der Lauf beginnt mitten im Strom: erst ab der ersten Grenze dekodierbar
+            offset = first_boundary(body, ext)
+            if init is None or offset is None:
+                bad.extend(run)
+                continue
+            data = init + body[offset:]
         stream = work / f"run{n}.{ext}"
-        with stream.open("wb") as fh:
-            fh.write(prefix)
-            for c in run:
-                fh.write((work / f"c{c.seq}.{ext}").read_bytes())
+        stream.write_bytes(data)
         dst = work / f"p{n}.pcm"
         try:
             decode_to_pcm(stream, dst, ext, data_dir, DECODE_TIMEOUT_S)
@@ -503,9 +547,8 @@ def _decode_pieces(
             continue
         finally:
             stream.unlink(missing_ok=True)
-        kept.extend(run)
-        pieces.append(Piece(run[0].start_ms, sum(c.duration_ms for c in run), dst))
-    return kept, bad, pieces
+        accept(run, dst, right=run[0].seq > 0)
+    return kept, bad, pieces, losses
 
 
 @handler("audio.finalize", payload_type=AudioFinalizePayload, on_final_failure=mark_session_failed)
@@ -537,6 +580,7 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
         usable: list[ChunkRow] = []
         bad: list[ChunkRow] = []
         pieces: list[Piece] = []
+        losses: list[Gap] = []
         if chunks:
             rec_dir.mkdir(parents=True, exist_ok=True)
             work = Path(tempfile.mkdtemp(prefix=".work-", dir=rec_dir))
@@ -547,7 +591,7 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
                 else:
                     (work / f"c{c.seq}.{ext}").write_bytes(data)  # geprüfte Kopie
                     usable.append(c)
-            usable, undecodable, pieces = _decode_pieces(
+            usable, undecodable, pieces, losses = _decode_pieces(
                 work, ext, usable, bool(independent), ctx.data_dir
             )
             bad.extend(undecodable)
@@ -558,6 +602,10 @@ def audio_finalize(payload: AudioFinalizePayload, ctx: JobContext) -> dict[str, 
             last_seq=last_seq,
             completed_duration_ms=completed_ms,
         )
+        if losses:
+            analysis = replace(
+                analysis, gaps=sorted([*analysis.gaps, *losses], key=lambda g: g.start_ms)
+            )
         if usable:
             assert work is not None
             pcm_out = work / "out.pcm"

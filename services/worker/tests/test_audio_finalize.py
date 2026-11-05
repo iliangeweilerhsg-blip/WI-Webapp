@@ -11,6 +11,7 @@ Zwei Gruppen:
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import re
 import shutil
@@ -282,6 +283,7 @@ def fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(af, "decode_to_pcm", decode)
     monkeypatch.setattr(af, "init_segment", lambda data, ext: b"")
+    monkeypatch.setattr(af, "first_boundary", lambda data, ext: 0)
     monkeypatch.setattr(af, "encode_m4a", encode)
     monkeypatch.setattr(af, "probe_duration_ms", probe)
 
@@ -1057,6 +1059,84 @@ def test_init_segment_detection() -> None:
     assert af.init_segment(box(b"moof", 4), "mp4") is None
 
 
+def test_first_boundary() -> None:
+    assert af.first_boundary(b"abc\x1f\x43\xb6\x75zz", "webm") == 3
+    assert af.first_boundary(b"abc", "webm") is None
+
+    def box(kind: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I", 8 + len(payload)) + kind + payload
+
+    frag = box(b"moof", box(b"mfhd", bytes(8))) + box(b"mdat", b"x" * 5)
+    assert af.first_boundary(b"zzmoofzz" + frag, "mp4") == 8  # "moof" im Rauschen ohne mfhd
+    assert af.first_boundary(frag, "mp4") == 0
+    assert af.first_boundary(b"mdat-bytes-only", "mp4") is None
+
+
+def test_right_aligned_run_gets_silence_in_front(tmp_path: Path) -> None:
+    pcm_file = tmp_path / "p.pcm"
+    pcm_file.write_bytes(pcm(7, 6))  # 6 von 10 ms dekodiert
+    out = tmp_path / "o.pcm"
+    n = af.assemble([af.Piece(0, 10, pcm_file, align_right=True)], 0, None, out)
+    assert n == 10
+    assert out.read_bytes() == bytes(4 * MS) + pcm(7, 6)
+    pcm_file.write_bytes(pcm(7, 6))
+    n = af.assemble([af.Piece(0, 10, pcm_file)], 0, None, out)
+    assert out.read_bytes() == pcm(7, 6) + bytes(4 * MS)
+
+
+def test_run_deficit_over_one_second_is_reported(
+    worker: Worker,
+    conn: psycopg.Connection[Any],
+    tmp_path: Path,
+    fake_ffmpeg: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Chunks à 2 s; der Decoder liefert für jeden Lauf nur 2,5 s statt 4 s."""
+    real_decode = af.decode_to_pcm
+
+    def decode_short(src: Path, dst: Path, ext: str, data_dir: Path, timeout: float) -> None:
+        real_decode(src, dst, ext, data_dir, timeout)
+        if src.name.startswith("run"):
+            dst.write_bytes(dst.read_bytes()[: 2500 * MS])  # 1,5 s von 4 s fehlen
+
+    monkeypatch.setattr(af, "decode_to_pcm", decode_short)
+    chunks = [(i, pcm(1 + i, 2000)) for i in range(5) if i != 2]
+    rid = add_recording(conn, tmp_path, chunks, dur=2000, last_seq=4, completed_ms=10000)
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert res.state.value == "mit_luecken"
+    assert any(
+        g.reason.value == "fehlender_chunk" and g.duration_ms == 1500 and g.start_ms == 6000
+        for g in res.gaps
+    )
+    assert res.audio_duration_ms == 10000
+
+
+def test_zero_ms_run_counts_as_missing(
+    worker: Worker,
+    conn: psycopg.Connection[Any],
+    tmp_path: Path,
+    fake_ffmpeg: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_decode = af.decode_to_pcm
+
+    def decode_empty(src: Path, dst: Path, ext: str, data_dir: Path, timeout: float) -> None:
+        real_decode(src, dst, ext, data_dir, timeout)
+        if src.name.startswith("run") and src.read_bytes()[:1] == bytes([ord("D")]):
+            dst.write_bytes(b"")
+
+    monkeypatch.setattr(af, "decode_to_pcm", decode_empty)
+    chunks = [c for c in five() if c[0] != 2]
+    rid = add_recording(conn, tmp_path, chunks, dur=10, last_seq=4, completed_ms=50)
+    job = add_job(conn, rid)
+    worker.drain(conn)
+    res = result_of(conn, job)
+    assert [m.root for m in res.missing_seqs] == [2, 3, 4]
+    assert res.chunk_count == 2
+
+
 def test_silence_limit_follows_recording_length() -> None:
     from sg_worker.registry import NonRetryableError
 
@@ -1077,32 +1157,64 @@ def test_silence_limit_follows_recording_length() -> None:
 
 @pytest.fixture(scope="session")
 def cut_streams(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list[bytes]]:
-    """20 s Sinuston, in 5 gleich große Byte-Stücke geschnitten (mitten in Cluster/Fragment)."""
+    """20 s Rauschbursts (0,5 s Rauschen am Anfang jeder geraden Sekunde, sonst Stille), in 5
+    gleich große Byte-Stücke geschnitten (mitten in Cluster/Fragment)."""
     if not HAVE_FFMPEG:
         pytest.skip("ffmpeg fehlt")
     folder = tmp_path_factory.mktemp("cut")
-    sine = "sine=frequency=440:sample_rate=48000:duration=20"
+    src = "aevalsrc=if(lt(mod(t\\,2)\\,0.5)\\,(random(0)*2-1)*0.6\\,0):s=48000:d=20"
     _sh(
-        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", sine, "-c:a", "libopus",
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", src, "-c:a", "libopus",
         "-f", "webm", str(folder / "s.webm"),
     )  # fmt: skip
     _sh(
-        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", sine, "-c:a", "aac", "-b:a", "64k",
+        "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", src, "-c:a", "aac", "-b:a", "96k",
         "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-frag_duration", "1000000",
         "-f", "mp4", str(folder / "s.mp4"),
     )  # fmt: skip
     out: dict[str, list[bytes]] = {}
-    for kind in ("webm", "mp4"):
-        data = (folder / f"s.{kind}").read_bytes()
-        size = len(data) // 5
-        out[kind] = [data[i * size : (i + 1) * size if i < 4 else len(data)] for i in range(5)]
+    # Schnitte nach Zeit (Chunk i beginnt bei 4 s * i), aber mitten in einem Cluster/Fragment
+    webm = (folder / "s.webm").read_bytes()
+    clusters = [m.start() for m in re.finditer(b"\x1f\x43\xb6\x75", webm)] + [len(webm)]
+    unit_s = 5.0  # ffmpeg schreibt Cluster à 5 s
+    cuts = []
+    for i in range(1, 5):
+        t = 4.0 * i
+        j = int(t // unit_s)
+        cuts.append(clusters[j] + int((clusters[j + 1] - clusters[j]) * (t - j * unit_s) / unit_s))
+    out["webm"] = _split_at(webm, cuts)
+    mp4 = (folder / "s.mp4").read_bytes()
+    moofs = [m.start() - 4 for m in re.finditer(b"moof(?=.{4}mfhd)", mp4, re.S)] + [len(mp4)]
+    cuts = [(moofs[4 * i] + moofs[4 * i + 1]) // 2 for i in range(1, 5)]  # Mitte des Fragments
+    out["mp4"] = _split_at(mp4, cuts)
     return out
+
+
+def _split_at(data: bytes, cuts: list[int]) -> list[bytes]:
+    edges = [0, *cuts, len(data)]
+    return [data[a:b] for a, b in itertools.pairwise(edges)]
+
+
+def burst_onsets(path: Path) -> list[float]:
+    """Zeitpunkte (s), an denen die Lautstärke (20-ms-Fenster) von still auf laut springt."""
+    raw = subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-f", "s16le", "-ar", "48000",
+         "-ac", "1", "-"],
+        capture_output=True, check=True, timeout=120,
+    ).stdout  # fmt: skip
+    samples = struct.unpack(f"<{len(raw) // 2}h", raw)
+    win = 960
+    loud = []
+    for i in range(0, len(samples) - win, win):
+        chunk = samples[i : i + win]
+        loud.append((sum(x * x for x in chunk) / win) ** 0.5 > 2000)
+    return [i * 0.02 for i in range(len(loud)) if loud[i] and (i == 0 or not loud[i - 1])]
 
 
 @needs_ffmpeg
 @pytest.mark.parametrize("kind", ["webm", "mp4"])
 @pytest.mark.parametrize("drop", [None, 2])
-def test_real_cut_mid_cluster_keeps_length(
+def test_real_cut_mid_cluster_places_audio_correctly(
     worker: Worker,
     conn: psycopg.Connection[Any],
     tmp_path: Path,
@@ -1110,7 +1222,8 @@ def test_real_cut_mid_cluster_keeps_length(
     drop: int | None,
     cut_streams: dict[str, list[bytes]],
 ) -> None:
-    """Chunks beginnen nicht an Cluster-/Fragmentgrenzen (echte timeslice-Blobs)."""
+    """Chunks beginnen nicht an Cluster-/Fragmentgrenzen (echte timeslice-Blobs). Nach der Lücke
+    muss der Ton an der richtigen Stelle liegen (Rauschbursts bei geraden Sekunden, +-60 ms)."""
     mime = "audio/webm;codecs=opus" if kind == "webm" else "audio/mp4;codecs=mp4a.40.2"
     chunks = [c for c in enumerate(cut_streams[kind]) if c[0] != drop]
     rid = add_recording(conn, tmp_path, chunks, mime=mime, dur=4000, last_seq=4, completed_ms=20000)
@@ -1120,13 +1233,23 @@ def test_real_cut_mid_cluster_keeps_length(
     out = full_path(tmp_path, rid)
     assert_m4a(out, 20.0, tolerance=0.3)
     assert abs(res.audio_duration_ms - 20000) < 300
+    onsets = burst_onsets(out)
+    print(kind, drop, "Einsätze:", [round(o, 2) for o in onsets], "gaps:", res.gaps)
+
+    def has(t: float) -> bool:
+        return any(abs(o - t) <= 0.06 for o in onsets)
+
     if drop is None:
         assert res.state.value == "vollstaendig"
+        assert all(has(float(t)) for t in range(0, 20, 2))
     else:
-        # Die fehlenden 8 bis 12 s sind still (der angeschnittene Anfang des zweiten Laufs
-        # kann die Stille vergrößern, aber nie verkleinern)
         assert [m.root for m in res.missing_seqs] == [drop]
-        assert any(s <= 8.2 and s + d >= 11.8 for s, d in silences(out))
+        assert all(has(float(t)) for t in (0, 2, 4, 6))
+        assert all(has(t) for t in (16.0, 18.0)), "Ton nach der Lücke liegt an falscher Stelle"
+        assert not any(8.1 <= o <= 11.9 for o in onsets)
+        assert res.state.value == "mit_luecken"
+        if kind == "webm":  # Verlust bis zum nächsten Cluster wird gemeldet
+            assert any(g.start_ms == 12000 and g.duration_ms > 1000 for g in res.gaps)
     assert leftovers(tmp_path, rid) == ["full.m4a"]
 
 
