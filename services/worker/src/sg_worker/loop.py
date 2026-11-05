@@ -117,12 +117,12 @@ class Worker:
                 work,
                 jobs.own_running_sessions(work, self.worker_id),
                 lambda sid: jobs.fail_own_running(work, self.worker_id, ORPHAN_ERROR, sid),
+                lambda rows: self._run_failure_hooks(work, rows),
             )
             if orphaned:
                 self.log.warning(
                     "Verwaiste eigene Jobs zurückgesetzt", extra={"count": len(orphaned)}
                 )
-                self._run_failure_hooks(work, orphaned)
             recovered = self._recover(work)
             self.log.info(
                 "Worker verbunden",
@@ -145,10 +145,10 @@ class Worker:
             conn,
             jobs.stuck_sessions(conn, self.stuck_after),
             lambda sid: jobs.recover_stuck(conn, self.stuck_after, sid),
+            lambda done: self._run_failure_hooks(conn, done),
         )
         if rows:
             self.log.warning("Hängende Jobs freigegeben", extra={"count": len(rows)})
-            self._run_failure_hooks(conn, rows)
         return len(rows)
 
     def _run_failure_hooks(self, conn: psycopg.Connection[Any], rows: list[jobs.Job]) -> None:

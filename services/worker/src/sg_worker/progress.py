@@ -89,7 +89,10 @@ def refresh(conn: Conn, session_id: Any, job_types: Iterable[str]) -> None:
 
 
 def run_per_session(
-    conn: Conn, sessions: Iterable[Any], step: Callable[[Any], list[dict[str, Any]]]
+    conn: Conn,
+    sessions: Iterable[Any],
+    step: Callable[[Any], list[dict[str, Any]]],
+    after_commit: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Führt `step(session_id)` je Session in einer **eigenen Transaktion** aus: Session sperren,
     Jobs ändern (`step` liefert die Zeilen mit `type`), Fortschritt nachziehen. Reihenfolge
@@ -97,7 +100,8 @@ def run_per_session(
     und die Session wird immer vor den Job-Zeilen gesperrt (§16.2).
 
     `sessions` kommt aus einer Abfrage ohne Sperre (nur Kandidaten); `step` prüft die Bedingung
-    unter der Sperre erneut.
+    unter der Sperre erneut. `after_commit(rows)` läuft je Session direkt nach deren Commit (z. B.
+    Fehler-Hooks), damit eine spätere Ausnahme die Hooks committeter Sessions nicht verhindert.
     """
     done: list[dict[str, Any]] = []
     for sid in sorted(set(sessions), key=lambda s: (s is not None, str(s))):
@@ -108,4 +112,6 @@ def run_per_session(
             if sid is not None and rows:
                 refresh(conn, sid, {r["type"] for r in rows})
             done.extend(rows)
+        if after_commit is not None and rows:
+            after_commit(rows)
     return done

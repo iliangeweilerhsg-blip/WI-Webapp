@@ -283,6 +283,23 @@ def test_two_connections_finishing_together_end_verarbeitet(
 # ---------- Sammelwege gegen den Core-Stopp: kein Deadlock ----------
 
 
+def _wait_until_lock_wait(
+    watcher: psycopg.Connection[Any], pids: list[int], timeout: float = 15.0
+) -> None:
+    """Wartet, bis die Worker-Verbindung auf eine Sperre wartet (`pg_stat_activity`)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pids:
+            row = watcher.execute(
+                "SELECT 1 FROM pg_stat_activity WHERE pid = %s AND wait_event_type = 'Lock'",
+                (pids[0],),
+            ).fetchone()
+            if row is not None:
+                return
+        time.sleep(0.02)
+    raise AssertionError("Worker wartet nicht auf eine Sperre")
+
+
 def _core_stop_vs_worker(
     database_url: str,
     connect_kwargs: dict[str, Any],
@@ -294,11 +311,13 @@ def _core_stop_vs_worker(
     Job-Zeile und wollte dann die Session, gäbe es einen Deadlock (40P01), und der Core könnte das
     Opfer sein."""
     result: dict[str, str] = {}
+    worker_pid: list[int] = []
 
     def worker() -> None:
         try:
             with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as wc:
                 wc.execute("SET deadlock_timeout = '300ms'")
+                worker_pid.append(wc.info.backend_pid)
                 worker_call(wc)
             result["worker"] = "ok"
         except psycopg.errors.DeadlockDetected:
@@ -310,7 +329,7 @@ def _core_stop_vs_worker(
         core.execute("SELECT 1 FROM session WHERE id = %s FOR NO KEY UPDATE", (SID,))
         thread = threading.Thread(target=worker)
         thread.start()
-        time.sleep(0.5)  # Worker ist jetzt bei der Session angekommen
+        _wait_until_lock_wait(core, worker_pid)  # Worker wartet auf die Session
         try:
             core.execute("SELECT id FROM job WHERE session_id = %s FOR UPDATE", (SID,)).fetchall()
             core.execute("UPDATE session SET updated_at = now() WHERE id = %s", (SID,))
@@ -401,3 +420,45 @@ def test_cancel_dependents_returns_rows(conn: psycopg.Connection[Any]) -> None:
     add_job(conn, "summarize", depends_on=[dep])
     rows = jobs.cancel_dependents(conn)
     assert [(r["type"], r["session_id"]) for r in rows] == [("summarize", SID)]
+
+
+def test_failure_hooks_run_per_session_right_after_commit(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    tmp_path: Path,
+    conn: psycopg.Connection[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Wirft die zweite Session, sind die Hooks der ersten (schon committeten) trotzdem gelaufen."""
+    seen: list[dict[str, Any]] = []
+    reg = Registry()
+    reg.register("transcribe", lambda p, c: {}, None, lambda c, payload: seen.append(payload))
+    w = Worker(
+        database_url,
+        tmp_path,
+        registry=reg,
+        channel=f"sg_jobs_{uuid.uuid4().hex[:8]}",
+        connect_kwargs=connect_kwargs,
+    )
+    first, second = sorted([uuid.uuid4(), uuid.uuid4()], key=str)
+    for n, sid in enumerate((first, second)):
+        conn.execute(
+            "INSERT INTO session (id, user_id, state) VALUES (%s, %s, 'beendet')", (sid, USER_ID)
+        )
+        conn.execute(
+            "INSERT INTO job (id, user_id, type, payload, state, session_id, attempts, "
+            "max_attempts, locked_by, locked_at) VALUES (%s, %s, 'transcribe', %s::jsonb, "
+            "'laeuft', %s, 1, 1, 'tot', now() - interval '1 hour')",
+            (uuid.uuid4(), USER_ID, f'{{"n": {n}}}', sid),
+        )
+    real = jobs.recover_stuck
+
+    def flaky(c: Any, after: float, sid: Any) -> Any:
+        if sid == second:
+            raise psycopg.OperationalError("Verbindung weg")
+        return real(c, after, sid)
+
+    monkeypatch.setattr(jobs, "recover_stuck", flaky)
+    with pytest.raises(psycopg.OperationalError):
+        w._recover(conn)
+    assert seen == [{"n": 0}]
