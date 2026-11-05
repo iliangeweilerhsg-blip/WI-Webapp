@@ -37,6 +37,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.ruff.lint.per-file-ignores]
 "src/sg_worker/jobs.py" = ["E501"]  # SQL-Texte
 "tests/conftest.py" = ["E501"]  # SQL aus VERTRAEGE §3
+"src/sg_worker/handlers/maintenance.py" = ["E501"]  # SQL-Texte
+"tests/test_maintenance.py" = ["E501"]
 
 [tool.mypy]
 files = ["src"]

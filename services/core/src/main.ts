@@ -4,6 +4,7 @@ import { hasOpenPermissions, loadConfig, loadDotEnv } from './config.ts';
 import { createDb } from './db/client.ts';
 import { createLogger } from './logger.ts';
 import { purgeIdempotencyKeys } from './plugins/idempotency.ts';
+import { startScheduler } from './services/scheduler.ts';
 
 /** Harte Frist fürs Herunterfahren, danach Exit 1 */
 const SHUTDOWN_DEADLINE_MS = 10_000;
@@ -25,6 +26,7 @@ const handle = createDb(config.databaseUrl);
 const app = await buildApp({ config, db: handle.db, logger });
 
 let stopping = false;
+let stopScheduler: (() => void) | null = null;
 async function shutdown(signal: string): Promise<void> {
   // Ein zweites Signal (z. B. doppelt von der CLI) bricht das Herunterfahren nicht ab
   if (stopping) return;
@@ -35,6 +37,7 @@ async function shutdown(signal: string): Promise<void> {
     process.exit(1);
   }, SHUTDOWN_DEADLINE_MS).unref();
   try {
+    stopScheduler?.();
     await app.close();
     await handle.close();
   } catch (error) {
@@ -54,6 +57,8 @@ setInterval(() => void purge(), 60 * 60 * 1000).unref();
 try {
   await purge();
   await app.listen({ port: config.port, host: config.host });
+  // Tägliches Backup und `maintenance.nightly` (VERTRAEGE §13)
+  stopScheduler = startScheduler({ db: handle.db, config, logger });
 } catch (error) {
   // Kein process.exit: so werden Logs vollständig geschrieben und Handles sauber geschlossen
   logger.error({ err: error }, 'Core konnte nicht starten');
