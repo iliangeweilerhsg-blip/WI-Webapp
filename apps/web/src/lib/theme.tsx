@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Appearance } from '@sg/shared';
 import { useSettings } from './settings.ts';
-import { SIDEBAR_KEY, STORAGE_KEY } from './theme-init.ts';
+import { DEFAULT_KEY, SIDEBAR_KEY, STORAGE_KEY } from './theme-init.ts';
 
 export type ThemeChoice = 'system' | 'light' | 'dark';
 
@@ -69,7 +69,14 @@ export function AppearanceDefault() {
   const appearance = useSettings().data?.general.appearance;
   useEffect(() => {
     if (choice !== 'system' || appearance === undefined) return;
-    apply(APPEARANCE_THEME[appearance]);
+    const theme = APPEARANCE_THEME[appearance];
+    apply(theme);
+    try {
+      if (theme === 'system') window.localStorage.removeItem(DEFAULT_KEY);
+      else window.localStorage.setItem(DEFAULT_KEY, theme);
+    } catch {
+      // Speicher nicht verfügbar – dann gilt der Standard erst nach dem Laden
+    }
   }, [choice, appearance]);
   return null;
 }

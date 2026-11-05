@@ -1,6 +1,15 @@
 'use client';
 
-import { createContext, useContext, useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from 'react';
 import type { Settings, SettingsUpdate } from '@sg/shared';
 import { friendlyMessage } from '../../lib/api.ts';
 import { useSettings, useUpdateSettings } from '../../lib/settings.ts';
@@ -74,8 +83,8 @@ export function useAreaForm<K extends AreaKey>(
     } catch (failure) {
       const message = friendlyMessage(failure);
       setError(message);
-      // Auch auf einem verborgenen Reiter sichtbar machen
-      toast.show({ message: `Nicht gespeichert: ${message}` });
+      // Auf einem verborgenen Reiter per Toast melden. Ist das Panel sichtbar, sagt `role=alert` es schon an.
+      if (!activeRef.current) toast.show({ message: `Nicht gespeichert: ${message}` });
     }
   }
 
@@ -87,7 +96,9 @@ export function useAreaForm<K extends AreaKey>(
 
   const dirty = changed.length > 0 || invalid;
   const hasError = error !== null;
-  const { report } = useContext(SettingsTabContext);
+  const { report, active } = useContext(SettingsTabContext);
+  const activeRef = useRef(active);
+  activeRef.current = active;
   useEffect(() => {
     report({ error: hasError, dirty });
   }, [report, hasError, dirty]);
@@ -122,7 +133,10 @@ export interface TabMark {
 }
 
 /** Der Reiter, in dem ein Formular steht. Ohne Reiter (z. B. in Tests) passiert nichts. */
-export const SettingsTabContext = createContext<{ report: (mark: TabMark) => void }>({ report: () => {} });
+export const SettingsTabContext = createContext<{ report: (mark: TabMark) => void; active: boolean }>({
+  report: () => {},
+  active: true,
+});
 
 function withoutKey(record: Record<string, string>, key: string) {
   const { [key]: _removed, ...rest } = record;
@@ -206,7 +220,8 @@ export function AreaForm({
               Änderungen verwerfen
             </button>
             {form.disabledReason ? (
-              <p id={reasonId} className="text-xs text-text-muted">
+              // Im Ruhezustand nur für Screenreader (per aria-describedby), sichtbar erst bei Korrekturbedarf
+              <p id={reasonId} className={form.dirty ? 'text-xs text-text-muted' : 'sr-only'}>
                 {form.disabledReason}
               </p>
             ) : null}

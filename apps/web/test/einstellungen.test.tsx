@@ -1,6 +1,6 @@
 // Einstellungen (T1-19): Reiter, Formulare je Bereich, Speichern mit Toast, Fehleranzeige
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 vi.mock('next/navigation', () => ({
@@ -110,6 +110,7 @@ describe('Allgemein', () => {
     await user.click(screen.getByRole('button', { name: 'Speichern' }));
     await waitFor(() => expect(document.documentElement).toHaveAttribute('data-theme', 'dark'));
     expect(window.localStorage.getItem('sg-theme')).toBeNull();
+    expect(window.localStorage.getItem('sg-theme-default')).toBe('dark');
   });
 
   it('Speichern anderer Felder setzt die Geräte-Wahl nicht zurück', async () => {
@@ -160,6 +161,8 @@ describe('Allgemein', () => {
     await user.click(screen.getByRole('button', { name: 'Speichern' }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByText('Allgemeine Einstellungen gespeichert')).not.toBeInTheDocument();
+    // Ist das Panel sichtbar, sagt nur `role=alert` den Fehler an (kein zweiter Toast)
+    expect(screen.queryByText(/Nicht gespeichert/)).not.toBeInTheDocument();
     // Eingabe bleibt erhalten und lässt sich erneut speichern
     expect(screen.getByLabelText('Sprache der Inhalte')).toHaveValue('en');
     expect(screen.getByRole('button', { name: 'Speichern' })).toBeEnabled();
@@ -329,8 +332,8 @@ describe('Reiter bleiben erhalten', () => {
       message: 'Die Anfrage ist ungültig.',
     };
     // Auf den Reiter wechseln, während das Speichern läuft
-    await user.click(screen.getByRole('button', { name: 'Speichern' }));
-    await user.click(screen.getByRole('tab', { name: 'Allgemein' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Speichern' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Allgemein' }));
     expect(await screen.findByText(/Nicht gespeichert/)).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /Stift/ })).toHaveAccessibleName(
       'Stift (nicht gespeichert, Fehler)',

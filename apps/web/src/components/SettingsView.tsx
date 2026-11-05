@@ -69,14 +69,19 @@ function useVerticalTabs(): boolean {
 /** Stellt einem Panel die Meldung an „seinen“ Reiter bereit (Speicherfehler, ungespeicherte Änderungen). */
 function PanelScope({
   tabId,
+  active,
   onReport,
   children,
 }: {
   tabId: string;
+  active: boolean;
   onReport: (tabId: string, mark: TabMark) => void;
   children: ReactNode;
 }) {
-  const value = useMemo(() => ({ report: (mark: TabMark) => onReport(tabId, mark) }), [tabId, onReport]);
+  const value = useMemo(
+    () => ({ report: (mark: TabMark) => onReport(tabId, mark), active }),
+    [tabId, active, onReport],
+  );
   return <SettingsTabContext.Provider value={value}>{children}</SettingsTabContext.Provider>;
 }
 
@@ -183,7 +188,7 @@ export function SettingsView() {
               hidden={tab.id !== active}
               className="min-w-0"
             >
-              <PanelScope tabId={tab.id} onReport={report}>
+              <PanelScope tabId={tab.id} active={tab.id === active} onReport={report}>
                 {tab.panel()}
               </PanelScope>
             </div>
