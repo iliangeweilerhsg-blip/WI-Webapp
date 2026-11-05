@@ -1,6 +1,6 @@
 """KI-Anbieter-Schnittstellen."""
 
-from .interfaces import LLM, Embedder, Msg, Result, Segment, Speech, Tier, Transcriber
+from .interfaces import LLM, Embedder, Msg, Result, Segment, Speech, Tier, Transcriber, Word
 from .tiers import DEFAULT_TIER_MODELS, model_for, tier_models
 
 __all__ = [
@@ -13,6 +13,7 @@ __all__ = [
     "Speech",
     "Tier",
     "Transcriber",
+    "Word",
     "model_for",
     "tier_models",
 ]

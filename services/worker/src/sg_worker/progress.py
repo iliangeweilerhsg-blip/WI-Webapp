@@ -1,14 +1,15 @@
 """Session-Fortschritt (docs/VERTRAEGE.md §3), generisch für jeden Job mit `session_id`.
 
 Wird von der Job-Schleife in **derselben Transaktion** aufgerufen, in der ein Job final wird
-(`fertig`, endgültig `fehler`, `abgebrochen`; bei Retry auch `wartet`).
+(`fertig`, endgültig `fehler`, `abgebrochen`; bei Retry auch `wartet`), und in einer eigenen
+Transaktion direkt nach dem Abholen (`laeuft`, §18.2).
 
 Ablauf je Session (`refresh`):
 
 1. Session-Zeile `FOR NO KEY UPDATE` sperren (`lock_session`), **bevor** Jobs gezählt werden.
    Zwei gleichzeitig endende Jobs derselben Session laufen so nacheinander: der zweite sieht
    nach dem Warten (READ COMMITTED, neuer Snapshot je Anweisung) den Abschluss des ersten.
-2. `processing[<job_type>]` aus allen Jobs dieses Typs der Session zusammenfassen.
+2. `processing[<job_type>]` nach `SUMMARY_SQL` zusammenfassen (je Einheit nur der neueste Job).
 3. Ist die Session `beendet` und kein Job der Session mehr `wartet`/`laeuft`: `verarbeitet`.
    Eine `verarbeitet`e Session ändert ihren Zustand nicht mehr, nur `processing`.
 4. `pg_notify('sg_session', <session_id>)`.
@@ -31,16 +32,28 @@ from psycopg.types.json import Jsonb
 
 Conn = psycopg.Connection[Any]
 
-#: Fasst alle Jobs eines Typs einer Session zusammen. `abgebrochen` zählt nicht mit, es sei denn,
-#: es gibt nur abgebrochene Jobs. Kein Job (alle gelöscht): NULL.
-_SUMMARY_SQL = """
+#: Zusammenfassung je Job-Typ (VERTRAEGE §18.2, verbindlich für Core und Worker): In jeder Einheit
+#: zählt nur der neueste nicht gelöschte Job (`created_at`, dann `id`). Läuft in der Einheit ein Job,
+#: gilt sie als `laeuft`. Einheit ist bei `audio.finalize` die Aufnahme, sonst die Session. Über die
+#: Einheiten: `fehler` vor `laeuft` vor `wartet` vor `fertig`, `abgebrochen` nur, wenn alle
+#: Einheiten `abgebrochen` sind. Kein Job: NULL (Schlüssel bleibt unverändert).
+SUMMARY_SQL = """
+WITH j AS (
+  SELECT state, created_at, id,
+         CASE WHEN type = 'audio.finalize' THEN payload->>'recording_id' ELSE '' END AS unit
+  FROM job WHERE session_id = %(sid)s AND type = %(type)s AND deleted_at IS NULL
+), u AS (
+  SELECT DISTINCT ON (unit)
+         CASE WHEN bool_or(state = 'laeuft') OVER (PARTITION BY unit) THEN 'laeuft' ELSE state END AS state
+  FROM j ORDER BY unit, created_at DESC, id DESC
+)
 SELECT CASE WHEN count(*) = 0 THEN NULL
             WHEN bool_or(state = 'fehler') THEN 'fehler'
             WHEN bool_or(state = 'laeuft') THEN 'laeuft'
             WHEN bool_or(state = 'wartet') THEN 'wartet'
             WHEN bool_or(state = 'fertig') THEN 'fertig'
             ELSE 'abgebrochen' END
-FROM job WHERE session_id = %s AND type = %s AND deleted_at IS NULL
+FROM u
 """
 
 
@@ -70,7 +83,7 @@ def refresh(conn: Conn, session_id: Any, job_types: Iterable[str]) -> None:
     if sid is None or not lock_session(conn, sid):
         return
     for job_type in sorted(set(job_types)):
-        row = conn.execute(_SUMMARY_SQL, (sid, job_type)).fetchone()
+        row = conn.execute(SUMMARY_SQL, {"sid": sid, "type": job_type}).fetchone()
         if row is None or row[0] is None:
             continue
         conn.execute(

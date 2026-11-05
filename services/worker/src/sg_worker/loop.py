@@ -184,6 +184,10 @@ class Worker:
             job = jobs.claim_next(conn, self.worker_id)
             if job is None:
                 break
+            if job["session_id"]:
+                # Fortschritt beim Abholen (§18.2): `laeuft` sichtbar machen, eigene Transaktion
+                with conn.transaction():
+                    progress.refresh(conn, job["session_id"], [job["type"]])
             self._execute(conn, job)
             count += 1
         return count

@@ -8,6 +8,8 @@ dependencies = [
     "psycopg[binary]==3.3.7",
     "pymupdf==1.28.2",
     "pillow==13.0.0",
+    # Transkription (VERTRAEGE §18.6): nur auf Apple Silicon. Linux und CI nutzen den Fake.
+    "mlx-whisper==0.4.3; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
 
 [project.scripts]
@@ -39,6 +41,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 "tests/conftest.py" = ["E501"]  # SQL aus VERTRAEGE §3
 "src/sg_worker/handlers/maintenance.py" = ["E501"]  # SQL-Texte
 "tests/test_maintenance.py" = ["E501"]
+"src/sg_worker/progress.py" = ["E501"]  # Referenz-SQL aus VERTRAEGE §18.2
 
 [tool.mypy]
 files = ["src"]
