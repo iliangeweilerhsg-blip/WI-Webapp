@@ -578,6 +578,16 @@ class MoodleConnectionState(StrEnum):
     nicht_erreichbar = 'nicht_erreichbar'
 
 
+class MoodleCourseCategory(StrEnum):
+    """
+    aktuell = wird vorgeschlagen. organisatorisch (z. B. „Klausurtermine …“) und alt (Start vor dem aktuellen Semester) werden standardmäßig nicht vorgeschlagen (F-MDL-03)
+    """
+
+    aktuell = 'aktuell'
+    organisatorisch = 'organisatorisch'
+    alt = 'alt'
+
+
 class CourseId(RootModel[StrictInt]):
     root: StrictInt = Field(..., description='Moodle-ID', ge=1)
 
@@ -640,6 +650,55 @@ class MoodleGradeList(BaseModel):
     items: list[MoodleGradeItem]
 
 
+class KindSource(StrEnum):
+    """
+    manuell = Entscheidung in der Inbox, gilt für die ganze Aktivität
+    """
+
+    auto = 'auto'
+    manuell = 'manuell'
+
+
+class LastError(StrEnum):
+    """
+    Warum die Datei zuletzt nicht übernommen wurde. Ein späterer Abgleich versucht es erneut (außer kein_pdf)
+    """
+
+    kein_pdf = 'kein_pdf'
+    zu_gross = 'zu_gross'
+    nicht_gefunden = 'nicht_gefunden'
+    download_fehlgeschlagen = 'download_fehlgeschlagen'
+
+
+class MoodleItemKind(StrEnum):
+    """
+    Einordnung einer Datei aus Moodle (F-MDL-04). offen = wartet auf die Entscheidung in der Inbox
+    """
+
+    folien = 'folien'
+    uebung = 'uebung'
+    ignoriert = 'ignoriert'
+    offen = 'offen'
+
+
+class Kind(StrEnum):
+    folien = 'folien'
+    uebung = 'uebung'
+    ignoriert = 'ignoriert'
+    offen = 'offen'
+
+
+class MoodleItemUpdate(BaseModel):
+    """
+    Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“, gilt für die ganze Aktivität). offen = Entscheidung rückgängig machen (R15)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Kind
+
+
 class ParentId(RootModel[StrictInt]):
     root: StrictInt = Field(..., description='Moodle-ID', ge=1)
 
@@ -652,6 +711,57 @@ class MoodleSubmissionState(StrEnum):
     keine = 'keine'
     entwurf = 'entwurf'
     eingereicht = 'eingereicht'
+
+
+class MoodleSyncRequest(BaseModel):
+    """
+    Body von POST /moodle/sync („Jetzt abgleichen“). Ohne course_id alle zugeordneten Kurse
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    course_id: StrictInt | None = Field(None, description='Moodle-ID', ge=1)
+
+
+class FailedCourse(RootModel[StrictInt]):
+    root: StrictInt = Field(..., description='Moodle-ID', ge=1)
+
+
+class MoodleSyncState(StrEnum):
+    """
+    aus = Moodle nicht eingerichtet. pausiert = Token ungültig oder abgelaufen (F-MDL-01), der Abgleich wartet auf einen neuen Token
+    """
+
+    aus = 'aus'
+    bereit = 'bereit'
+    laeuft = 'laeuft'
+    pausiert = 'pausiert'
+
+
+class MoodleSyncTrigger(StrEnum):
+    """
+    Anlass eines Abgleichs
+    """
+
+    start = 'start'
+    zeitplan = 'zeitplan'
+    manuell = 'manuell'
+    entscheidung = 'entscheidung'
+    zuordnung = 'zuordnung'
+
+
+class Source(StrEnum):
+    aufgabe = 'aufgabe'
+    termin = 'termin'
+
+
+class AssignmentId(RootModel[StrictInt]):
+    root: StrictInt = Field(..., description='Moodle-ID', ge=1)
+
+
+class EventId(RootModel[StrictInt]):
+    root: StrictInt = Field(..., description='Moodle-ID', ge=1)
 
 
 class NotebookKind(StrEnum):
@@ -2113,7 +2223,7 @@ class MoodleActionPreview(BaseModel):
 
 class MoodleCourse(BaseModel):
     """
-    Kurs, in den der Nutzer eingeschrieben ist. module_id: zugeordnetes Modul (F-MDL-03)
+    Kurs, in den der Nutzer eingeschrieben ist. module_id: bestätigte Zuordnung zu einem Modul (F-MDL-03, T1-23)
     """
 
     model_config = ConfigDict(
@@ -2127,6 +2237,70 @@ class MoodleCourse(BaseModel):
     url: AnyUrl
     last_access_at: AwareDatetime | None
     module_id: Uuid | None
+    suggested_module_id: Uuid | None = Field(
+        ...,
+        description='Vorschlag über Titelähnlichkeit, nur ohne bestätigte Zuordnung und nur für aktuelle Kurse (F-MDL-03)',
+    )
+    category: MoodleCourseCategory
+
+
+class MoodleCourseLink(BaseModel):
+    """
+    Bestätigte Zuordnung Moodle-Kurs → Modul (F-MDL-03, 08 §9.4 moodle_course_link)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    moodle_course_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    sync_enabled: StrictBool = Field(
+        ..., description='false = Kurs bleibt zugeordnet, wird aber nicht abgeglichen'
+    )
+    last_synced_at: AwareDatetime | None = Field(
+        ..., description='Letzter erfolgreicher Abgleich dieses Kurses'
+    )
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+
+
+class MoodleCourseLinkList(BaseModel):
+    """
+    Antwort von GET /moodle/links
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleCourseLink]
+
+
+class MoodleCourseLinkUpdate(BaseModel):
+    """
+    Body von PUT /moodle/links/{course_id}: Zuordnung bestätigen oder ändern
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    sync_enabled: StrictBool | None = Field(
+        None, description='Standard: true beim Anlegen, sonst unverändert'
+    )
 
 
 class MoodleCourseList(BaseModel):
@@ -2218,6 +2392,74 @@ class MoodleFile(BaseModel):
     mime_type: StrictStr | None
     size_bytes: StrictInt = Field(..., ge=0)
     modified_at: AwareDatetime | None
+
+
+class MoodleItem(BaseModel):
+    """
+    Datei aus einem zugeordneten Kurs (08 §9.4 moodle_item). Wiedererkannt über file_ref
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    moodle_course_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    module_id: Uuid | None = Field(
+        ..., description='Modul aus der aktuellen Kurszuordnung, null ohne Zuordnung'
+    )
+    cmid: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    activity_name: StrictStr
+    filename: StrictStr = Field(
+        ...,
+        description='Bereinigter Moodle-Dateiname, höchstens 255 Byte (UTF-8), Endung bleibt. Nur zur Anzeige',
+    )
+    file_ref: StrictStr = Field(
+        ..., description='Für GET /moodle/file?ref', pattern='^/'
+    )
+    mime_type: StrictStr | None
+    is_pdf: StrictBool = Field(
+        ..., description='Nur PDFs werden übernommen, andere Dateien nur aufgelistet'
+    )
+    size_bytes: StrictInt = Field(..., ge=0)
+    modified_at: AwareDatetime | None = Field(
+        ..., description='timemodified der zuletzt verarbeiteten Fassung'
+    )
+    kind: MoodleItemKind
+    kind_source: KindSource = Field(
+        ...,
+        description='manuell = Entscheidung in der Inbox, gilt für die ganze Aktivität',
+    )
+    slide_deck_id: Uuid | None
+    exercise_sheet_id: Uuid | None
+    removed_in_moodle_at: AwareDatetime | None = Field(
+        ..., description='In Moodle gelöscht oder versteckt. Lokal wird nie gelöscht'
+    )
+    last_error: LastError | None = Field(
+        ...,
+        description='Warum die Datei zuletzt nicht übernommen wurde. Ein späterer Abgleich versucht es erneut (außer kein_pdf)',
+    )
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+
+
+class MoodleItemList(BaseModel):
+    """
+    Antwort von GET /moodle/items
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleItem]
 
 
 class MoodleNotification(BaseModel):
@@ -2338,6 +2580,103 @@ class MoodleSubmissionStatus(BaseModel):
     can_submit: StrictBool
     files: list[MoodleFile]
     online_text_html: StrictStr | None
+
+
+class MoodleSyncRun(BaseModel):
+    """
+    Ergebnis eines Abgleichs (F-MDL-04)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    trigger: MoodleSyncTrigger
+    started_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    finished_at: AwareDatetime | None
+    ok: StrictBool = Field(
+        ...,
+        description='false = mindestens ein Kurs oder die Fristen konnten nicht abgeglichen werden',
+    )
+    error_code: StrictStr | None = Field(
+        ...,
+        description='Fehlercode des Core (08 §9.1), z. B. moodle_unreachable, oder abgebrochen (Core wurde beendet)',
+    )
+    courses: StrictInt = Field(..., description='Abgeglichene Kurse', ge=0)
+    files_new: StrictInt = Field(..., ge=0)
+    files_changed: StrictInt = Field(..., ge=0)
+    files_imported: StrictInt = Field(
+        ...,
+        description='Als Foliensatz oder Übungsblatt übernommen (inkl. Verknüpfung mit schon vorhandener Datei)',
+        ge=0,
+    )
+    inbox_new: StrictInt = Field(..., description='Neue Dateien mit kind = offen', ge=0)
+    deadlines: StrictInt = Field(
+        ..., description='Aktuelle Fristen nach dem Abgleich', ge=0
+    )
+    failed_courses: list[FailedCourse]
+
+
+class MoodleSyncStatus(BaseModel):
+    """
+    Antwort von GET und POST /moodle/sync
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    state: MoodleSyncState
+    connection: MoodleConnectionState
+    last_run: MoodleSyncRun | None
+    next_run_at: AwareDatetime | None = Field(
+        ..., description='Nächster geplanter Abgleich (alle 2 h), null ohne Zeitplan'
+    )
+
+
+class MoodleSyncedDeadline(BaseModel):
+    """
+    Frist aus dem Abgleich (08 §9.4 moodle_deadline). aufgabe = Moodle-Aufgabe mit Abgabedatum, termin = Kalenderereignis
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    source: Source
+    moodle_course_id: StrictInt = Field(..., description='Moodle-ID', ge=1)
+    module_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    assignment_id: AssignmentId | None
+    event_id: EventId | None
+    cmid: Cmid | None
+    name: StrictStr
+    due_at: AwareDatetime = Field(..., description='ISO 8601, UTC', title='Timestamp')
+    url: AnyUrl | None
+    exercise_sheet_id: Uuid | None = Field(
+        ..., description='Übungsblatt, das dieses Abgabedatum bekommen hat'
+    )
+    removed_in_moodle_at: AwareDatetime | None
+
+
+class MoodleSyncedDeadlineList(BaseModel):
+    """
+    Antwort von GET /moodle/synced-deadlines
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[MoodleSyncedDeadline]
 
 
 class MoodleUpload(BaseModel):
@@ -5163,8 +5502,18 @@ class SchemaBundle(BaseModel):
         None, alias='MoodleConnectionState'
     )
     MoodleCourse_1: MoodleCourse | None = Field(None, alias='MoodleCourse')
+    MoodleCourseCategory_1: MoodleCourseCategory | None = Field(
+        None, alias='MoodleCourseCategory'
+    )
     MoodleCourseContents_1: MoodleCourseContents | None = Field(
         None, alias='MoodleCourseContents'
+    )
+    MoodleCourseLink_1: MoodleCourseLink | None = Field(None, alias='MoodleCourseLink')
+    MoodleCourseLinkList_1: MoodleCourseLinkList | None = Field(
+        None, alias='MoodleCourseLinkList'
+    )
+    MoodleCourseLinkUpdate_1: MoodleCourseLinkUpdate | None = Field(
+        None, alias='MoodleCourseLinkUpdate'
     )
     MoodleCourseList_1: MoodleCourseList | None = Field(None, alias='MoodleCourseList')
     MoodleDeadline_1: MoodleDeadline | None = Field(None, alias='MoodleDeadline')
@@ -5180,6 +5529,10 @@ class SchemaBundle(BaseModel):
     MoodleForumList_1: MoodleForumList | None = Field(None, alias='MoodleForumList')
     MoodleGradeItem_1: MoodleGradeItem | None = Field(None, alias='MoodleGradeItem')
     MoodleGradeList_1: MoodleGradeList | None = Field(None, alias='MoodleGradeList')
+    MoodleItem_1: MoodleItem | None = Field(None, alias='MoodleItem')
+    MoodleItemKind_1: MoodleItemKind | None = Field(None, alias='MoodleItemKind')
+    MoodleItemList_1: MoodleItemList | None = Field(None, alias='MoodleItemList')
+    MoodleItemUpdate_1: MoodleItemUpdate | None = Field(None, alias='MoodleItemUpdate')
     MoodleNotification_1: MoodleNotification | None = Field(
         None, alias='MoodleNotification'
     )
@@ -5197,6 +5550,21 @@ class SchemaBundle(BaseModel):
     )
     MoodleSubmissionStatus_1: MoodleSubmissionStatus | None = Field(
         None, alias='MoodleSubmissionStatus'
+    )
+    MoodleSyncRequest_1: MoodleSyncRequest | None = Field(
+        None, alias='MoodleSyncRequest'
+    )
+    MoodleSyncRun_1: MoodleSyncRun | None = Field(None, alias='MoodleSyncRun')
+    MoodleSyncState_1: MoodleSyncState | None = Field(None, alias='MoodleSyncState')
+    MoodleSyncStatus_1: MoodleSyncStatus | None = Field(None, alias='MoodleSyncStatus')
+    MoodleSyncTrigger_1: MoodleSyncTrigger | None = Field(
+        None, alias='MoodleSyncTrigger'
+    )
+    MoodleSyncedDeadline_1: MoodleSyncedDeadline | None = Field(
+        None, alias='MoodleSyncedDeadline'
+    )
+    MoodleSyncedDeadlineList_1: MoodleSyncedDeadlineList | None = Field(
+        None, alias='MoodleSyncedDeadlineList'
     )
     MoodleUpload_1: MoodleUpload | None = Field(None, alias='MoodleUpload')
     Notebook_1: Notebook | None = Field(None, alias='Notebook')

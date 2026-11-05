@@ -65,6 +65,10 @@ export const COUNT_TABLES = [
   'sync_op',
   'setting',
   'device',
+  // Moodle-Abgleich (T1-23, 08 §9.4)
+  'moodle_course_link',
+  'moodle_item',
+  'moodle_deadline',
 ] as const;
 
 export interface BackupIo {

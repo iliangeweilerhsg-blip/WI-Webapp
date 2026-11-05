@@ -285,10 +285,38 @@ export type MoodleCompletion = ("offen" | "erledigt")
  */
 export type MoodleConnectionState = ("nicht_eingerichtet" | "ok" | "laeuft_bald_ab" | "abgelaufen" | "ungueltig" | "nicht_erreichbar")
 /**
+ * aktuell = wird vorgeschlagen. organisatorisch (z. B. „Klausurtermine …“) und alt (Start vor dem aktuellen Semester) werden standardmäßig nicht vorgeschlagen (F-MDL-03)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleCourseCategory".
+ */
+export type MoodleCourseCategory = ("aktuell" | "organisatorisch" | "alt")
+/**
+ * Einordnung einer Datei aus Moodle (F-MDL-04). offen = wartet auf die Entscheidung in der Inbox
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleItemKind".
+ */
+export type MoodleItemKind = ("folien" | "uebung" | "ignoriert" | "offen")
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "MoodleSubmissionState".
  */
 export type MoodleSubmissionState = ("keine" | "entwurf" | "eingereicht")
+/**
+ * Anlass eines Abgleichs
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSyncTrigger".
+ */
+export type MoodleSyncTrigger = ("start" | "zeitplan" | "manuell" | "entscheidung" | "zuordnung")
+/**
+ * aus = Moodle nicht eingerichtet. pausiert = Token ungültig oder abgelaufen (F-MDL-01), der Abgleich wartet auf einen neuen Token
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSyncState".
+ */
+export type MoodleSyncState = ("aus" | "bereit" | "laeuft" | "pausiert")
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "NotebookKind".
@@ -1791,7 +1819,7 @@ export interface MoodleAssignmentList {
 items: MoodleAssignment[]
 }
 /**
- * Kurs, in den der Nutzer eingeschrieben ist. module_id: zugeordnetes Modul (F-MDL-03)
+ * Kurs, in den der Nutzer eingeschrieben ist. module_id: bestätigte Zuordnung zu einem Modul (F-MDL-03, T1-23)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "MoodleCourse".
@@ -1808,6 +1836,11 @@ end_date: (IsoDate | null)
 url: string
 last_access_at: (Timestamp | null)
 module_id: (Uuid | null)
+/**
+ * Vorschlag über Titelähnlichkeit, nur ohne bestätigte Zuordnung und nur für aktuelle Kurse (F-MDL-03)
+ */
+suggested_module_id: (Uuid | null)
+category: MoodleCourseCategory
 }
 /**
  * Antwort von GET /moodle/courses/{course_id}/contents
@@ -1835,6 +1868,51 @@ index: number
 name: string
 visible: boolean
 activities: MoodleActivity[]
+}
+/**
+ * Bestätigte Zuordnung Moodle-Kurs → Modul (F-MDL-03, 08 §9.4 moodle_course_link)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleCourseLink".
+ */
+export interface MoodleCourseLink {
+/**
+ * Moodle-ID
+ */
+moodle_course_id: number
+module_id: Uuid
+/**
+ * false = Kurs bleibt zugeordnet, wird aber nicht abgeglichen
+ */
+sync_enabled: boolean
+/**
+ * Letzter erfolgreicher Abgleich dieses Kurses
+ */
+last_synced_at: (Timestamp | null)
+created_at: Timestamp
+updated_at: Timestamp
+}
+/**
+ * Antwort von GET /moodle/links
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleCourseLinkList".
+ */
+export interface MoodleCourseLinkList {
+items: MoodleCourseLink[]
+}
+/**
+ * Body von PUT /moodle/links/{course_id}: Zuordnung bestätigen oder ändern
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleCourseLinkUpdate".
+ */
+export interface MoodleCourseLinkUpdate {
+module_id: Uuid
+/**
+ * Standard: true beim Anlegen, sonst unverändert
+ */
+sync_enabled?: boolean
 }
 /**
  * Antwort von GET /moodle/courses
@@ -1974,6 +2052,81 @@ export interface MoodleGradeList {
 items: MoodleGradeItem[]
 }
 /**
+ * Datei aus einem zugeordneten Kurs (08 §9.4 moodle_item). Wiedererkannt über file_ref
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleItem".
+ */
+export interface MoodleItem {
+id: Uuid
+/**
+ * Moodle-ID
+ */
+moodle_course_id: number
+/**
+ * Modul aus der aktuellen Kurszuordnung, null ohne Zuordnung
+ */
+module_id: (Uuid | null)
+/**
+ * Moodle-ID
+ */
+cmid: number
+activity_name: string
+/**
+ * Bereinigter Moodle-Dateiname, höchstens 255 Byte (UTF-8), Endung bleibt. Nur zur Anzeige
+ */
+filename: string
+/**
+ * Für GET /moodle/file?ref
+ */
+file_ref: string
+mime_type: (string | null)
+/**
+ * Nur PDFs werden übernommen, andere Dateien nur aufgelistet
+ */
+is_pdf: boolean
+size_bytes: number
+/**
+ * timemodified der zuletzt verarbeiteten Fassung
+ */
+modified_at: (Timestamp | null)
+kind: MoodleItemKind
+/**
+ * manuell = Entscheidung in der Inbox, gilt für die ganze Aktivität
+ */
+kind_source: ("auto" | "manuell")
+slide_deck_id: (Uuid | null)
+exercise_sheet_id: (Uuid | null)
+/**
+ * In Moodle gelöscht oder versteckt. Lokal wird nie gelöscht
+ */
+removed_in_moodle_at: (Timestamp | null)
+/**
+ * Warum die Datei zuletzt nicht übernommen wurde. Ein späterer Abgleich versucht es erneut (außer kein_pdf)
+ */
+last_error: (("kein_pdf" | "zu_gross" | "nicht_gefunden" | "download_fehlgeschlagen") | null)
+created_at: Timestamp
+updated_at: Timestamp
+}
+/**
+ * Antwort von GET /moodle/items
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleItemList".
+ */
+export interface MoodleItemList {
+items: MoodleItem[]
+}
+/**
+ * Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“, gilt für die ganze Aktivität). offen = Entscheidung rückgängig machen (R15)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleItemUpdate".
+ */
+export interface MoodleItemUpdate {
+kind: ("folien" | "uebung" | "ignoriert" | "offen")
+}
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "MoodleNotification".
  */
@@ -2100,6 +2253,109 @@ can_edit: boolean
 can_submit: boolean
 files: MoodleFile[]
 online_text_html: (string | null)
+}
+/**
+ * Body von POST /moodle/sync („Jetzt abgleichen“). Ohne course_id alle zugeordneten Kurse
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSyncRequest".
+ */
+export interface MoodleSyncRequest {
+/**
+ * Moodle-ID
+ */
+course_id?: number
+}
+/**
+ * Ergebnis eines Abgleichs (F-MDL-04)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSyncRun".
+ */
+export interface MoodleSyncRun {
+trigger: MoodleSyncTrigger
+started_at: Timestamp
+finished_at: (Timestamp | null)
+/**
+ * false = mindestens ein Kurs oder die Fristen konnten nicht abgeglichen werden
+ */
+ok: boolean
+/**
+ * Fehlercode des Core (08 §9.1), z. B. moodle_unreachable, oder abgebrochen (Core wurde beendet)
+ */
+error_code: (string | null)
+/**
+ * Abgeglichene Kurse
+ */
+courses: number
+files_new: number
+files_changed: number
+/**
+ * Als Foliensatz oder Übungsblatt übernommen (inkl. Verknüpfung mit schon vorhandener Datei)
+ */
+files_imported: number
+/**
+ * Neue Dateien mit kind = offen
+ */
+inbox_new: number
+/**
+ * Aktuelle Fristen nach dem Abgleich
+ */
+deadlines: number
+/**
+ * Items: Moodle-ID
+ */
+failed_courses: number[]
+}
+/**
+ * Antwort von GET und POST /moodle/sync
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSyncStatus".
+ */
+export interface MoodleSyncStatus {
+state: MoodleSyncState
+connection: MoodleConnectionState
+last_run: (MoodleSyncRun | null)
+/**
+ * Nächster geplanter Abgleich (alle 2 h), null ohne Zeitplan
+ */
+next_run_at: (Timestamp | null)
+}
+/**
+ * Frist aus dem Abgleich (08 §9.4 moodle_deadline). aufgabe = Moodle-Aufgabe mit Abgabedatum, termin = Kalenderereignis
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSyncedDeadline".
+ */
+export interface MoodleSyncedDeadline {
+id: Uuid
+source: ("aufgabe" | "termin")
+/**
+ * Moodle-ID
+ */
+moodle_course_id: number
+module_id: Uuid
+assignment_id: (number | null)
+event_id: (number | null)
+cmid: (number | null)
+name: string
+due_at: Timestamp
+url: (string | null)
+/**
+ * Übungsblatt, das dieses Abgabedatum bekommen hat
+ */
+exercise_sheet_id: (Uuid | null)
+removed_in_moodle_at: (Timestamp | null)
+}
+/**
+ * Antwort von GET /moodle/synced-deadlines
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleSyncedDeadlineList".
+ */
+export interface MoodleSyncedDeadlineList {
+items: MoodleSyncedDeadline[]
 }
 /**
  * Antwort von POST /moodle/uploads

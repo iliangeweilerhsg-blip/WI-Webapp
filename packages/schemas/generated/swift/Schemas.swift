@@ -116,7 +116,11 @@ struct SchemaBundle: Codable {
     let moodleCompletion: MoodleCompletion?
     let moodleConnectionState: MoodleConnectionState?
     let moodleCourse: MoodleCourse?
+    let moodleCourseCategory: MoodleCourseCategory?
     let moodleCourseContents: MoodleCourseContents?
+    let moodleCourseLink: MoodleCourseLink?
+    let moodleCourseLinkList: MoodleCourseLinkList?
+    let moodleCourseLinkUpdate: MoodleCourseLinkUpdate?
     let moodleCourseList: MoodleCourseList?
     let moodleDeadline: MoodleDeadline?
     let moodleDeadlineList: MoodleDeadlineList?
@@ -127,6 +131,10 @@ struct SchemaBundle: Codable {
     let moodleForumList: MoodleForumList?
     let moodleGradeItem: MoodleGradeItem?
     let moodleGradeList: MoodleGradeList?
+    let moodleItem: MoodleItem?
+    let moodleItemKind: MoodleItemKind?
+    let moodleItemList: MoodleItemList?
+    let moodleItemUpdate: MoodleItemUpdate?
     let moodleNotification: MoodleNotification?
     let moodleNotificationList: MoodleNotificationList?
     let moodlePost: MoodlePost?
@@ -137,6 +145,13 @@ struct SchemaBundle: Codable {
     let moodleStatus: MoodleStatus?
     let moodleSubmissionState: MoodleSubmissionState?
     let moodleSubmissionStatus: MoodleSubmissionStatus?
+    let moodleSyncedDeadline: MoodleSyncedDeadline?
+    let moodleSyncedDeadlineList: MoodleSyncedDeadlineList?
+    let moodleSyncRequest: MoodleSyncRequest?
+    let moodleSyncRun: MoodleSyncRun?
+    let moodleSyncState: MoodleSyncState?
+    let moodleSyncStatus: MoodleSyncStatus?
+    let moodleSyncTrigger: MoodleSyncTrigger?
     let moodleUpload: MoodleUpload?
     let notebook: Notebook?
     let notebookCreate: NotebookCreate?
@@ -402,7 +417,11 @@ struct SchemaBundle: Codable {
         case moodleCompletion = "MoodleCompletion"
         case moodleConnectionState = "MoodleConnectionState"
         case moodleCourse = "MoodleCourse"
+        case moodleCourseCategory = "MoodleCourseCategory"
         case moodleCourseContents = "MoodleCourseContents"
+        case moodleCourseLink = "MoodleCourseLink"
+        case moodleCourseLinkList = "MoodleCourseLinkList"
+        case moodleCourseLinkUpdate = "MoodleCourseLinkUpdate"
         case moodleCourseList = "MoodleCourseList"
         case moodleDeadline = "MoodleDeadline"
         case moodleDeadlineList = "MoodleDeadlineList"
@@ -413,6 +432,10 @@ struct SchemaBundle: Codable {
         case moodleForumList = "MoodleForumList"
         case moodleGradeItem = "MoodleGradeItem"
         case moodleGradeList = "MoodleGradeList"
+        case moodleItem = "MoodleItem"
+        case moodleItemKind = "MoodleItemKind"
+        case moodleItemList = "MoodleItemList"
+        case moodleItemUpdate = "MoodleItemUpdate"
         case moodleNotification = "MoodleNotification"
         case moodleNotificationList = "MoodleNotificationList"
         case moodlePost = "MoodlePost"
@@ -423,6 +446,13 @@ struct SchemaBundle: Codable {
         case moodleStatus = "MoodleStatus"
         case moodleSubmissionState = "MoodleSubmissionState"
         case moodleSubmissionStatus = "MoodleSubmissionStatus"
+        case moodleSyncedDeadline = "MoodleSyncedDeadline"
+        case moodleSyncedDeadlineList = "MoodleSyncedDeadlineList"
+        case moodleSyncRequest = "MoodleSyncRequest"
+        case moodleSyncRun = "MoodleSyncRun"
+        case moodleSyncState = "MoodleSyncState"
+        case moodleSyncStatus = "MoodleSyncStatus"
+        case moodleSyncTrigger = "MoodleSyncTrigger"
         case moodleUpload = "MoodleUpload"
         case notebook = "Notebook"
         case notebookCreate = "NotebookCreate"
@@ -708,7 +738,11 @@ extension SchemaBundle {
         moodleCompletion: MoodleCompletion?? = nil,
         moodleConnectionState: MoodleConnectionState?? = nil,
         moodleCourse: MoodleCourse?? = nil,
+        moodleCourseCategory: MoodleCourseCategory?? = nil,
         moodleCourseContents: MoodleCourseContents?? = nil,
+        moodleCourseLink: MoodleCourseLink?? = nil,
+        moodleCourseLinkList: MoodleCourseLinkList?? = nil,
+        moodleCourseLinkUpdate: MoodleCourseLinkUpdate?? = nil,
         moodleCourseList: MoodleCourseList?? = nil,
         moodleDeadline: MoodleDeadline?? = nil,
         moodleDeadlineList: MoodleDeadlineList?? = nil,
@@ -719,6 +753,10 @@ extension SchemaBundle {
         moodleForumList: MoodleForumList?? = nil,
         moodleGradeItem: MoodleGradeItem?? = nil,
         moodleGradeList: MoodleGradeList?? = nil,
+        moodleItem: MoodleItem?? = nil,
+        moodleItemKind: MoodleItemKind?? = nil,
+        moodleItemList: MoodleItemList?? = nil,
+        moodleItemUpdate: MoodleItemUpdate?? = nil,
         moodleNotification: MoodleNotification?? = nil,
         moodleNotificationList: MoodleNotificationList?? = nil,
         moodlePost: MoodlePost?? = nil,
@@ -729,6 +767,13 @@ extension SchemaBundle {
         moodleStatus: MoodleStatus?? = nil,
         moodleSubmissionState: MoodleSubmissionState?? = nil,
         moodleSubmissionStatus: MoodleSubmissionStatus?? = nil,
+        moodleSyncedDeadline: MoodleSyncedDeadline?? = nil,
+        moodleSyncedDeadlineList: MoodleSyncedDeadlineList?? = nil,
+        moodleSyncRequest: MoodleSyncRequest?? = nil,
+        moodleSyncRun: MoodleSyncRun?? = nil,
+        moodleSyncState: MoodleSyncState?? = nil,
+        moodleSyncStatus: MoodleSyncStatus?? = nil,
+        moodleSyncTrigger: MoodleSyncTrigger?? = nil,
         moodleUpload: MoodleUpload?? = nil,
         notebook: Notebook?? = nil,
         notebookCreate: NotebookCreate?? = nil,
@@ -994,7 +1039,11 @@ extension SchemaBundle {
             moodleCompletion: moodleCompletion ?? self.moodleCompletion,
             moodleConnectionState: moodleConnectionState ?? self.moodleConnectionState,
             moodleCourse: moodleCourse ?? self.moodleCourse,
+            moodleCourseCategory: moodleCourseCategory ?? self.moodleCourseCategory,
             moodleCourseContents: moodleCourseContents ?? self.moodleCourseContents,
+            moodleCourseLink: moodleCourseLink ?? self.moodleCourseLink,
+            moodleCourseLinkList: moodleCourseLinkList ?? self.moodleCourseLinkList,
+            moodleCourseLinkUpdate: moodleCourseLinkUpdate ?? self.moodleCourseLinkUpdate,
             moodleCourseList: moodleCourseList ?? self.moodleCourseList,
             moodleDeadline: moodleDeadline ?? self.moodleDeadline,
             moodleDeadlineList: moodleDeadlineList ?? self.moodleDeadlineList,
@@ -1005,6 +1054,10 @@ extension SchemaBundle {
             moodleForumList: moodleForumList ?? self.moodleForumList,
             moodleGradeItem: moodleGradeItem ?? self.moodleGradeItem,
             moodleGradeList: moodleGradeList ?? self.moodleGradeList,
+            moodleItem: moodleItem ?? self.moodleItem,
+            moodleItemKind: moodleItemKind ?? self.moodleItemKind,
+            moodleItemList: moodleItemList ?? self.moodleItemList,
+            moodleItemUpdate: moodleItemUpdate ?? self.moodleItemUpdate,
             moodleNotification: moodleNotification ?? self.moodleNotification,
             moodleNotificationList: moodleNotificationList ?? self.moodleNotificationList,
             moodlePost: moodlePost ?? self.moodlePost,
@@ -1015,6 +1068,13 @@ extension SchemaBundle {
             moodleStatus: moodleStatus ?? self.moodleStatus,
             moodleSubmissionState: moodleSubmissionState ?? self.moodleSubmissionState,
             moodleSubmissionStatus: moodleSubmissionStatus ?? self.moodleSubmissionStatus,
+            moodleSyncedDeadline: moodleSyncedDeadline ?? self.moodleSyncedDeadline,
+            moodleSyncedDeadlineList: moodleSyncedDeadlineList ?? self.moodleSyncedDeadlineList,
+            moodleSyncRequest: moodleSyncRequest ?? self.moodleSyncRequest,
+            moodleSyncRun: moodleSyncRun ?? self.moodleSyncRun,
+            moodleSyncState: moodleSyncState ?? self.moodleSyncState,
+            moodleSyncStatus: moodleSyncStatus ?? self.moodleSyncStatus,
+            moodleSyncTrigger: moodleSyncTrigger ?? self.moodleSyncTrigger,
             moodleUpload: moodleUpload ?? self.moodleUpload,
             notebook: notebook ?? self.notebook,
             notebookCreate: notebookCreate ?? self.notebookCreate,
@@ -1945,6 +2005,8 @@ enum RestoreTestTrigger: String, Codable {
 
 /// auto: Modul und Art hat der Abgleich gesetzt und darf sie ändern. manuell: vom Nutzer
 /// gesetzt, der Abgleich ändert module_id und kind nie mehr (F-KAL-02).
+///
+/// manuell = Entscheidung in der Inbox, gilt für die ganze Aktivität
 enum CalendarAssignment: String, Codable {
     case auto = "auto"
     case manuell = "manuell"
@@ -6682,9 +6744,11 @@ enum MoodleConnectionState: String, Codable {
     case ungueltig = "ungueltig"
 }
 
-/// Kurs, in den der Nutzer eingeschrieben ist. module_id: zugeordnetes Modul (F-MDL-03)
+/// Kurs, in den der Nutzer eingeschrieben ist. module_id: bestätigte Zuordnung zu einem
+/// Modul (F-MDL-03, T1-23)
 // MARK: - MoodleCourse
 struct MoodleCourse: Codable {
+    let category: MoodleCourseCategory
     let endDate: String?
     let fullName: String
     let lastAccessAt: Date?
@@ -6693,9 +6757,13 @@ struct MoodleCourse: Codable {
     let moodleID: Int
     let shortName: String
     let startDate: String?
+    /// Vorschlag über Titelähnlichkeit, nur ohne bestätigte Zuordnung und nur für aktuelle Kurse
+    /// (F-MDL-03)
+    let suggestedModuleID: String?
     let url: String
 
     enum CodingKeys: String, CodingKey {
+        case category = "category"
         case endDate = "end_date"
         case fullName = "full_name"
         case lastAccessAt = "last_access_at"
@@ -6703,6 +6771,7 @@ struct MoodleCourse: Codable {
         case moodleID = "moodle_id"
         case shortName = "short_name"
         case startDate = "start_date"
+        case suggestedModuleID = "suggested_module_id"
         case url = "url"
     }
 }
@@ -6726,6 +6795,7 @@ extension MoodleCourse {
     }
 
     func with(
+        category: MoodleCourseCategory? = nil,
         endDate: String?? = nil,
         fullName: String? = nil,
         lastAccessAt: Date?? = nil,
@@ -6733,9 +6803,11 @@ extension MoodleCourse {
         moodleID: Int? = nil,
         shortName: String? = nil,
         startDate: String?? = nil,
+        suggestedModuleID: String?? = nil,
         url: String? = nil
     ) -> MoodleCourse {
         return MoodleCourse(
+            category: category ?? self.category,
             endDate: endDate ?? self.endDate,
             fullName: fullName ?? self.fullName,
             lastAccessAt: lastAccessAt ?? self.lastAccessAt,
@@ -6743,6 +6815,7 @@ extension MoodleCourse {
             moodleID: moodleID ?? self.moodleID,
             shortName: shortName ?? self.shortName,
             startDate: startDate ?? self.startDate,
+            suggestedModuleID: suggestedModuleID ?? self.suggestedModuleID,
             url: url ?? self.url
         )
     }
@@ -6754,6 +6827,14 @@ extension MoodleCourse {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// aktuell = wird vorgeschlagen. organisatorisch (z. B. „Klausurtermine …“) und alt (Start
+/// vor dem aktuellen Semester) werden standardmäßig nicht vorgeschlagen (F-MDL-03)
+enum MoodleCourseCategory: String, Codable {
+    case aktuell = "aktuell"
+    case alt = "alt"
+    case organisatorisch = "organisatorisch"
 }
 
 /// Antwort von GET /moodle/courses/{course_id}/contents
@@ -6855,6 +6936,169 @@ extension MoodleSection {
             moodleID: moodleID ?? self.moodleID,
             name: name ?? self.name,
             visible: visible ?? self.visible
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Bestätigte Zuordnung Moodle-Kurs → Modul (F-MDL-03, 08 §9.4 moodle_course_link)
+// MARK: - MoodleCourseLink
+struct MoodleCourseLink: Codable {
+    let createdAt: Date
+    /// Letzter erfolgreicher Abgleich dieses Kurses
+    let lastSyncedAt: Date?
+    let moduleID: String
+    /// Moodle-ID
+    let moodleCourseID: Int
+    /// false = Kurs bleibt zugeordnet, wird aber nicht abgeglichen
+    let syncEnabled: Bool
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case lastSyncedAt = "last_synced_at"
+        case moduleID = "module_id"
+        case moodleCourseID = "moodle_course_id"
+        case syncEnabled = "sync_enabled"
+        case updatedAt = "updated_at"
+    }
+}
+
+// MARK: MoodleCourseLink convenience initializers and mutators
+
+extension MoodleCourseLink {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleCourseLink.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        lastSyncedAt: Date?? = nil,
+        moduleID: String? = nil,
+        moodleCourseID: Int? = nil,
+        syncEnabled: Bool? = nil,
+        updatedAt: Date? = nil
+    ) -> MoodleCourseLink {
+        return MoodleCourseLink(
+            createdAt: createdAt ?? self.createdAt,
+            lastSyncedAt: lastSyncedAt ?? self.lastSyncedAt,
+            moduleID: moduleID ?? self.moduleID,
+            moodleCourseID: moodleCourseID ?? self.moodleCourseID,
+            syncEnabled: syncEnabled ?? self.syncEnabled,
+            updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von GET /moodle/links
+// MARK: - MoodleCourseLinkList
+struct MoodleCourseLinkList: Codable {
+    let items: [MoodleCourseLink]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleCourseLinkList convenience initializers and mutators
+
+extension MoodleCourseLinkList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleCourseLinkList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleCourseLink]? = nil
+    ) -> MoodleCourseLinkList {
+        return MoodleCourseLinkList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Body von PUT /moodle/links/{course_id}: Zuordnung bestätigen oder ändern
+// MARK: - MoodleCourseLinkUpdate
+struct MoodleCourseLinkUpdate: Codable {
+    let moduleID: String
+    /// Standard: true beim Anlegen, sonst unverändert
+    let syncEnabled: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case moduleID = "module_id"
+        case syncEnabled = "sync_enabled"
+    }
+}
+
+// MARK: MoodleCourseLinkUpdate convenience initializers and mutators
+
+extension MoodleCourseLinkUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleCourseLinkUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        moduleID: String? = nil,
+        syncEnabled: Bool?? = nil
+    ) -> MoodleCourseLinkUpdate {
+        return MoodleCourseLinkUpdate(
+            moduleID: moduleID ?? self.moduleID,
+            syncEnabled: syncEnabled ?? self.syncEnabled
         )
     }
 
@@ -7389,6 +7633,241 @@ extension MoodleGradeList {
     }
 }
 
+/// Datei aus einem zugeordneten Kurs (08 §9.4 moodle_item). Wiedererkannt über file_ref
+// MARK: - MoodleItem
+struct MoodleItem: Codable {
+    let activityName: String
+    /// Moodle-ID
+    let cmid: Int
+    let createdAt: Date
+    let exerciseSheetID: String?
+    /// Für GET /moodle/file?ref
+    let fileRef: String
+    /// Bereinigter Moodle-Dateiname, höchstens 255 Byte (UTF-8), Endung bleibt. Nur zur Anzeige
+    let filename: String
+    let id: String
+    /// Nur PDFs werden übernommen, andere Dateien nur aufgelistet
+    let isPDF: Bool
+    let kind: MoodleItemKind
+    /// manuell = Entscheidung in der Inbox, gilt für die ganze Aktivität
+    let kindSource: CalendarAssignment
+    /// Warum die Datei zuletzt nicht übernommen wurde. Ein späterer Abgleich versucht es erneut
+    /// (außer kein_pdf)
+    let lastError: LastError?
+    let mimeType: String?
+    /// timemodified der zuletzt verarbeiteten Fassung
+    let modifiedAt: Date?
+    /// Modul aus der aktuellen Kurszuordnung, null ohne Zuordnung
+    let moduleID: String?
+    /// Moodle-ID
+    let moodleCourseID: Int
+    /// In Moodle gelöscht oder versteckt. Lokal wird nie gelöscht
+    let removedInMoodleAt: Date?
+    let sizeBytes: Int
+    let slideDeckID: String?
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case activityName = "activity_name"
+        case cmid = "cmid"
+        case createdAt = "created_at"
+        case exerciseSheetID = "exercise_sheet_id"
+        case fileRef = "file_ref"
+        case filename = "filename"
+        case id = "id"
+        case isPDF = "is_pdf"
+        case kind = "kind"
+        case kindSource = "kind_source"
+        case lastError = "last_error"
+        case mimeType = "mime_type"
+        case modifiedAt = "modified_at"
+        case moduleID = "module_id"
+        case moodleCourseID = "moodle_course_id"
+        case removedInMoodleAt = "removed_in_moodle_at"
+        case sizeBytes = "size_bytes"
+        case slideDeckID = "slide_deck_id"
+        case updatedAt = "updated_at"
+    }
+}
+
+// MARK: MoodleItem convenience initializers and mutators
+
+extension MoodleItem {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleItem.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        activityName: String? = nil,
+        cmid: Int? = nil,
+        createdAt: Date? = nil,
+        exerciseSheetID: String?? = nil,
+        fileRef: String? = nil,
+        filename: String? = nil,
+        id: String? = nil,
+        isPDF: Bool? = nil,
+        kind: MoodleItemKind? = nil,
+        kindSource: CalendarAssignment? = nil,
+        lastError: LastError?? = nil,
+        mimeType: String?? = nil,
+        modifiedAt: Date?? = nil,
+        moduleID: String?? = nil,
+        moodleCourseID: Int? = nil,
+        removedInMoodleAt: Date?? = nil,
+        sizeBytes: Int? = nil,
+        slideDeckID: String?? = nil,
+        updatedAt: Date? = nil
+    ) -> MoodleItem {
+        return MoodleItem(
+            activityName: activityName ?? self.activityName,
+            cmid: cmid ?? self.cmid,
+            createdAt: createdAt ?? self.createdAt,
+            exerciseSheetID: exerciseSheetID ?? self.exerciseSheetID,
+            fileRef: fileRef ?? self.fileRef,
+            filename: filename ?? self.filename,
+            id: id ?? self.id,
+            isPDF: isPDF ?? self.isPDF,
+            kind: kind ?? self.kind,
+            kindSource: kindSource ?? self.kindSource,
+            lastError: lastError ?? self.lastError,
+            mimeType: mimeType ?? self.mimeType,
+            modifiedAt: modifiedAt ?? self.modifiedAt,
+            moduleID: moduleID ?? self.moduleID,
+            moodleCourseID: moodleCourseID ?? self.moodleCourseID,
+            removedInMoodleAt: removedInMoodleAt ?? self.removedInMoodleAt,
+            sizeBytes: sizeBytes ?? self.sizeBytes,
+            slideDeckID: slideDeckID ?? self.slideDeckID,
+            updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Einordnung einer Datei aus Moodle (F-MDL-04). offen = wartet auf die Entscheidung in der
+/// Inbox
+enum MoodleItemKind: String, Codable {
+    case folien = "folien"
+    case ignoriert = "ignoriert"
+    case offen = "offen"
+    case uebung = "uebung"
+}
+
+enum LastError: String, Codable {
+    case downloadFehlgeschlagen = "download_fehlgeschlagen"
+    case keinPDF = "kein_pdf"
+    case nichtGefunden = "nicht_gefunden"
+    case zuGross = "zu_gross"
+}
+
+/// Antwort von GET /moodle/items
+// MARK: - MoodleItemList
+struct MoodleItemList: Codable {
+    let items: [MoodleItem]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleItemList convenience initializers and mutators
+
+extension MoodleItemList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleItemList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleItem]? = nil
+    ) -> MoodleItemList {
+        return MoodleItemList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung /
+/// ignorieren“, gilt für die ganze Aktivität). offen = Entscheidung rückgängig machen (R15)
+// MARK: - MoodleItemUpdate
+struct MoodleItemUpdate: Codable {
+    let kind: MoodleItemKind
+
+    enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+    }
+}
+
+// MARK: MoodleItemUpdate convenience initializers and mutators
+
+extension MoodleItemUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleItemUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: MoodleItemKind? = nil
+    ) -> MoodleItemUpdate {
+        return MoodleItemUpdate(
+            kind: kind ?? self.kind
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - MoodleNotification
 struct MoodleNotification: Codable {
     let createdAt: Date
@@ -7893,6 +8372,366 @@ extension MoodleSubmissionStatus {
             lastModifiedAt: lastModifiedAt ?? self.lastModifiedAt,
             onlineTextHTML: onlineTextHTML ?? self.onlineTextHTML,
             state: state ?? self.state
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Body von POST /moodle/sync („Jetzt abgleichen“). Ohne course_id alle zugeordneten Kurse
+// MARK: - MoodleSyncRequest
+struct MoodleSyncRequest: Codable {
+    /// Moodle-ID
+    let courseID: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case courseID = "course_id"
+    }
+}
+
+// MARK: MoodleSyncRequest convenience initializers and mutators
+
+extension MoodleSyncRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleSyncRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        courseID: Int?? = nil
+    ) -> MoodleSyncRequest {
+        return MoodleSyncRequest(
+            courseID: courseID ?? self.courseID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ergebnis eines Abgleichs (F-MDL-04)
+// MARK: - MoodleSyncRun
+struct MoodleSyncRun: Codable {
+    /// Abgeglichene Kurse
+    let courses: Int
+    /// Aktuelle Fristen nach dem Abgleich
+    let deadlines: Int
+    /// Fehlercode des Core (08 §9.1), z. B. moodle_unreachable, oder abgebrochen (Core wurde
+    /// beendet)
+    let errorCode: String?
+    let failedCourses: [Int]
+    let filesChanged: Int
+    /// Als Foliensatz oder Übungsblatt übernommen (inkl. Verknüpfung mit schon vorhandener Datei)
+    let filesImported: Int
+    let filesNew: Int
+    let finishedAt: Date?
+    /// Neue Dateien mit kind = offen
+    let inboxNew: Int
+    /// false = mindestens ein Kurs oder die Fristen konnten nicht abgeglichen werden
+    let ok: Bool
+    let startedAt: Date
+    let trigger: MoodleSyncTrigger
+
+    enum CodingKeys: String, CodingKey {
+        case courses = "courses"
+        case deadlines = "deadlines"
+        case errorCode = "error_code"
+        case failedCourses = "failed_courses"
+        case filesChanged = "files_changed"
+        case filesImported = "files_imported"
+        case filesNew = "files_new"
+        case finishedAt = "finished_at"
+        case inboxNew = "inbox_new"
+        case ok = "ok"
+        case startedAt = "started_at"
+        case trigger = "trigger"
+    }
+}
+
+// MARK: MoodleSyncRun convenience initializers and mutators
+
+extension MoodleSyncRun {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleSyncRun.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        courses: Int? = nil,
+        deadlines: Int? = nil,
+        errorCode: String?? = nil,
+        failedCourses: [Int]? = nil,
+        filesChanged: Int? = nil,
+        filesImported: Int? = nil,
+        filesNew: Int? = nil,
+        finishedAt: Date?? = nil,
+        inboxNew: Int? = nil,
+        ok: Bool? = nil,
+        startedAt: Date? = nil,
+        trigger: MoodleSyncTrigger? = nil
+    ) -> MoodleSyncRun {
+        return MoodleSyncRun(
+            courses: courses ?? self.courses,
+            deadlines: deadlines ?? self.deadlines,
+            errorCode: errorCode ?? self.errorCode,
+            failedCourses: failedCourses ?? self.failedCourses,
+            filesChanged: filesChanged ?? self.filesChanged,
+            filesImported: filesImported ?? self.filesImported,
+            filesNew: filesNew ?? self.filesNew,
+            finishedAt: finishedAt ?? self.finishedAt,
+            inboxNew: inboxNew ?? self.inboxNew,
+            ok: ok ?? self.ok,
+            startedAt: startedAt ?? self.startedAt,
+            trigger: trigger ?? self.trigger
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Anlass eines Abgleichs
+enum MoodleSyncTrigger: String, Codable {
+    case entscheidung = "entscheidung"
+    case manuell = "manuell"
+    case start = "start"
+    case zeitplan = "zeitplan"
+    case zuordnung = "zuordnung"
+}
+
+/// aus = Moodle nicht eingerichtet. pausiert = Token ungültig oder abgelaufen (F-MDL-01),
+/// der Abgleich wartet auf einen neuen Token
+enum MoodleSyncState: String, Codable {
+    case aus = "aus"
+    case bereit = "bereit"
+    case laeuft = "laeuft"
+    case pausiert = "pausiert"
+}
+
+/// Antwort von GET und POST /moodle/sync
+// MARK: - MoodleSyncStatus
+struct MoodleSyncStatus: Codable {
+    let connection: MoodleConnectionState
+    let lastRun: MoodleSyncRun?
+    /// Nächster geplanter Abgleich (alle 2 h), null ohne Zeitplan
+    let nextRunAt: Date?
+    let state: MoodleSyncState
+
+    enum CodingKeys: String, CodingKey {
+        case connection = "connection"
+        case lastRun = "last_run"
+        case nextRunAt = "next_run_at"
+        case state = "state"
+    }
+}
+
+// MARK: MoodleSyncStatus convenience initializers and mutators
+
+extension MoodleSyncStatus {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleSyncStatus.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        connection: MoodleConnectionState? = nil,
+        lastRun: MoodleSyncRun?? = nil,
+        nextRunAt: Date?? = nil,
+        state: MoodleSyncState? = nil
+    ) -> MoodleSyncStatus {
+        return MoodleSyncStatus(
+            connection: connection ?? self.connection,
+            lastRun: lastRun ?? self.lastRun,
+            nextRunAt: nextRunAt ?? self.nextRunAt,
+            state: state ?? self.state
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Frist aus dem Abgleich (08 §9.4 moodle_deadline). aufgabe = Moodle-Aufgabe mit
+/// Abgabedatum, termin = Kalenderereignis
+// MARK: - MoodleSyncedDeadline
+struct MoodleSyncedDeadline: Codable {
+    let assignmentID: Int?
+    let cmid: Int?
+    let dueAt: Date
+    let eventID: Int?
+    /// Übungsblatt, das dieses Abgabedatum bekommen hat
+    let exerciseSheetID: String?
+    let id: String
+    let moduleID: String
+    /// Moodle-ID
+    let moodleCourseID: Int
+    let name: String
+    let removedInMoodleAt: Date?
+    let source: Source
+    let url: String?
+
+    enum CodingKeys: String, CodingKey {
+        case assignmentID = "assignment_id"
+        case cmid = "cmid"
+        case dueAt = "due_at"
+        case eventID = "event_id"
+        case exerciseSheetID = "exercise_sheet_id"
+        case id = "id"
+        case moduleID = "module_id"
+        case moodleCourseID = "moodle_course_id"
+        case name = "name"
+        case removedInMoodleAt = "removed_in_moodle_at"
+        case source = "source"
+        case url = "url"
+    }
+}
+
+// MARK: MoodleSyncedDeadline convenience initializers and mutators
+
+extension MoodleSyncedDeadline {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleSyncedDeadline.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        assignmentID: Int?? = nil,
+        cmid: Int?? = nil,
+        dueAt: Date? = nil,
+        eventID: Int?? = nil,
+        exerciseSheetID: String?? = nil,
+        id: String? = nil,
+        moduleID: String? = nil,
+        moodleCourseID: Int? = nil,
+        name: String? = nil,
+        removedInMoodleAt: Date?? = nil,
+        source: Source? = nil,
+        url: String?? = nil
+    ) -> MoodleSyncedDeadline {
+        return MoodleSyncedDeadline(
+            assignmentID: assignmentID ?? self.assignmentID,
+            cmid: cmid ?? self.cmid,
+            dueAt: dueAt ?? self.dueAt,
+            eventID: eventID ?? self.eventID,
+            exerciseSheetID: exerciseSheetID ?? self.exerciseSheetID,
+            id: id ?? self.id,
+            moduleID: moduleID ?? self.moduleID,
+            moodleCourseID: moodleCourseID ?? self.moodleCourseID,
+            name: name ?? self.name,
+            removedInMoodleAt: removedInMoodleAt ?? self.removedInMoodleAt,
+            source: source ?? self.source,
+            url: url ?? self.url
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum Source: String, Codable {
+    case aufgabe = "aufgabe"
+    case termin = "termin"
+}
+
+/// Antwort von GET /moodle/synced-deadlines
+// MARK: - MoodleSyncedDeadlineList
+struct MoodleSyncedDeadlineList: Codable {
+    let items: [MoodleSyncedDeadline]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: MoodleSyncedDeadlineList convenience initializers and mutators
+
+extension MoodleSyncedDeadlineList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleSyncedDeadlineList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [MoodleSyncedDeadline]? = nil
+    ) -> MoodleSyncedDeadlineList {
+        return MoodleSyncedDeadlineList(
+            items: items ?? self.items
         )
     }
 
@@ -17990,6 +18829,7 @@ extension MoodleAssignmentList {
 extension MoodleCourse {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(category, forKey: .category)
         try container.encode(endDate, forKey: .endDate)
         try container.encode(fullName, forKey: .fullName)
         try container.encode(lastAccessAt, forKey: .lastAccessAt)
@@ -17997,6 +18837,7 @@ extension MoodleCourse {
         try container.encode(moodleID, forKey: .moodleID)
         try container.encode(shortName, forKey: .shortName)
         try container.encode(startDate, forKey: .startDate)
+        try container.encode(suggestedModuleID, forKey: .suggestedModuleID)
         try container.encode(url, forKey: .url)
     }
 }
@@ -18017,6 +18858,33 @@ extension MoodleSection {
         try container.encode(moodleID, forKey: .moodleID)
         try container.encode(name, forKey: .name)
         try container.encode(visible, forKey: .visible)
+    }
+}
+
+extension MoodleCourseLink {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(lastSyncedAt, forKey: .lastSyncedAt)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(moodleCourseID, forKey: .moodleCourseID)
+        try container.encode(syncEnabled, forKey: .syncEnabled)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+extension MoodleCourseLinkList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleCourseLinkUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encodeIfPresent(syncEnabled, forKey: .syncEnabled)
     }
 }
 
@@ -18110,6 +18978,45 @@ extension MoodleGradeList {
     }
 }
 
+extension MoodleItem {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(activityName, forKey: .activityName)
+        try container.encode(cmid, forKey: .cmid)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(exerciseSheetID, forKey: .exerciseSheetID)
+        try container.encode(fileRef, forKey: .fileRef)
+        try container.encode(filename, forKey: .filename)
+        try container.encode(id, forKey: .id)
+        try container.encode(isPDF, forKey: .isPDF)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(kindSource, forKey: .kindSource)
+        try container.encode(lastError, forKey: .lastError)
+        try container.encode(mimeType, forKey: .mimeType)
+        try container.encode(modifiedAt, forKey: .modifiedAt)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(moodleCourseID, forKey: .moodleCourseID)
+        try container.encode(removedInMoodleAt, forKey: .removedInMoodleAt)
+        try container.encode(sizeBytes, forKey: .sizeBytes)
+        try container.encode(slideDeckID, forKey: .slideDeckID)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+extension MoodleItemList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension MoodleItemUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+    }
+}
+
 extension MoodleNotification {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -18199,6 +19106,66 @@ extension MoodleSubmissionStatus {
         try container.encode(lastModifiedAt, forKey: .lastModifiedAt)
         try container.encode(onlineTextHTML, forKey: .onlineTextHTML)
         try container.encode(state, forKey: .state)
+    }
+}
+
+extension MoodleSyncRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(courseID, forKey: .courseID)
+    }
+}
+
+extension MoodleSyncRun {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(courses, forKey: .courses)
+        try container.encode(deadlines, forKey: .deadlines)
+        try container.encode(errorCode, forKey: .errorCode)
+        try container.encode(failedCourses, forKey: .failedCourses)
+        try container.encode(filesChanged, forKey: .filesChanged)
+        try container.encode(filesImported, forKey: .filesImported)
+        try container.encode(filesNew, forKey: .filesNew)
+        try container.encode(finishedAt, forKey: .finishedAt)
+        try container.encode(inboxNew, forKey: .inboxNew)
+        try container.encode(ok, forKey: .ok)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encode(trigger, forKey: .trigger)
+    }
+}
+
+extension MoodleSyncStatus {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(connection, forKey: .connection)
+        try container.encode(lastRun, forKey: .lastRun)
+        try container.encode(nextRunAt, forKey: .nextRunAt)
+        try container.encode(state, forKey: .state)
+    }
+}
+
+extension MoodleSyncedDeadline {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(assignmentID, forKey: .assignmentID)
+        try container.encode(cmid, forKey: .cmid)
+        try container.encode(dueAt, forKey: .dueAt)
+        try container.encode(eventID, forKey: .eventID)
+        try container.encode(exerciseSheetID, forKey: .exerciseSheetID)
+        try container.encode(id, forKey: .id)
+        try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(moodleCourseID, forKey: .moodleCourseID)
+        try container.encode(name, forKey: .name)
+        try container.encode(removedInMoodleAt, forKey: .removedInMoodleAt)
+        try container.encode(source, forKey: .source)
+        try container.encode(url, forKey: .url)
+    }
+}
+
+extension MoodleSyncedDeadlineList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
     }
 }
 

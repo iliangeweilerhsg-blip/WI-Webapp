@@ -11,27 +11,55 @@ import {
   MoodleActionResultSchema,
   MoodleAssignmentListSchema,
   MoodleCourseContentsSchema,
+  MoodleCourseLinkListSchema,
+  MoodleCourseLinkSchema,
+  MoodleCourseLinkUpdateSchema,
   MoodleCourseListSchema,
   MoodleDeadlineListSchema,
   MoodleDiscussionListSchema,
   MoodleForumListSchema,
   MoodleGradeListSchema,
+  MoodleItemKindSchema,
+  MoodleItemListSchema,
+  MoodleItemSchema,
+  MoodleItemUpdateSchema,
   MoodleNotificationListSchema,
   MoodlePostListSchema,
   MoodleQuizListSchema,
   MoodleStatusSchema,
   MoodleSubmissionStatusSchema,
+  MoodleSyncedDeadlineListSchema,
+  MoodleSyncRequestSchema,
+  MoodleSyncStatusSchema,
   TimestampSchema,
+  UuidSchema,
   type MoodleActionId,
 } from '@sg/shared';
+import type { Db } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
 import { isMoodleActionId, needsConfirmation, type MoodleActionContext } from '../moodle/actions.ts';
 import { isValidFileRef, moodleNotConfigured } from '../moodle/client.ts';
 import { FILE_ONLY_HEADERS, fileResponseHeaders } from '../moodle/file-headers.ts';
 import type { MoodleServices } from '../moodle/index.ts';
+import {
+  annotateCourses,
+  decideItem,
+  deleteLink,
+  isKnownFileRef,
+  isLinked,
+  listItems,
+  listLinks,
+  listSyncedDeadlines,
+  putLink,
+} from '../moodle/store.ts';
+import type { MoodleSync } from '../moodle/sync.ts';
 
 export interface MoodleRouteDeps {
   moodle: MoodleServices;
+  /** Kurszuordnung und Abgleich (T1-23). Ohne: nur Lese-Endpunkte und Aktionen (Unit-Tests) */
+  db?: Db;
+  sync?: MoodleSync;
+  now?: () => Date;
 }
 
 const ActionParamsSchema = z.object({ action_id: z.string().min(1).max(64) });
@@ -111,7 +139,12 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
         response: { 200: MoodleCourseListSchema, ...errorResponses },
       },
     },
-    async () => reader.courses(),
+    async () => {
+      const list = await reader.courses();
+      if (!deps.db) return list;
+      const now = deps.now?.() ?? new Date();
+      return { items: await annotateCourses(deps.db, list.items, { timeZone: reader.timeZone, now }) };
+    },
   );
 
   typed.get(
@@ -281,7 +314,8 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
       }
       if (!(await client.isConfigured())) throw moodleNotConfigured();
       // Kein Proxy für beliebige Pfade: nur Dateien aus Kursinhalten, Aufgaben und Foren des Nutzers
-      if (!files.has(ref)) {
+      // Dauerhafte Quelle seit T1-23: Dateien aus abgeglichenen Kursen (moodle_item.file_ref)
+      if (!files.has(ref) && !(deps.db && (await isKnownFileRef(deps.db, ref)))) {
         throw new HttpError(
           404,
           'moodle_file_not_found',
@@ -372,6 +406,182 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
       request.log.info({ action_id: id }, 'Moodle-Aktion wird ausgeführt');
       const outcome = await handler.execute(context, params);
       return { action_id: id, summary: outcome.summary, result: outcome.result };
+    },
+  );
+
+  if (deps.db && deps.sync) registerSyncRoutes(app, { db: deps.db, sync: deps.sync, client, now: deps.now });
+}
+
+// ---------- Kurszuordnung und Abgleich (F-MDL-03/-04, T1-23) ----------
+
+const ItemsQuery = z.object({
+  course_id: MoodleIdParam.optional(),
+  module_id: UuidSchema.optional(),
+  kind: MoodleItemKindSchema.optional(),
+  include_removed: z.enum(['true', 'false']).optional(),
+  limit: z.coerce.number().int().min(1).max(1000).optional(),
+});
+const DeadlineListQuery = z.object({
+  module_id: UuidSchema.optional(),
+  from: TimestampSchema.optional(),
+  to: TimestampSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+
+function registerSyncRoutes(
+  fastify: FastifyInstance,
+  deps: { db: Db; sync: MoodleSync; client: MoodleServices['client']; now?: (() => Date) | undefined },
+): void {
+  const { db, sync, client } = deps;
+  const app = fastify.withTypeProvider<ZodTypeProvider>();
+  /** Abgleich im Hintergrund anstoßen. Ergebnis zeigt GET /moodle/sync */
+  const kick = (trigger: 'zuordnung' | 'entscheidung', courseId: number) => {
+    void sync.run(trigger, [courseId]).catch(() => {});
+  };
+
+  app.get(
+    '/moodle/links',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary: 'Kurszuordnungen (F-MDL-03). Lokal, ohne Moodle-Aufruf',
+        response: { 200: MoodleCourseLinkListSchema },
+      },
+    },
+    async () => ({ items: await listLinks(db) }),
+  );
+
+  app.put(
+    '/moodle/links/:course_id',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary: 'Zuordnung Kurs → Modul bestätigen oder ändern. Startet einen Abgleich des Kurses',
+        params: z.object({ course_id: MoodleIdParam }),
+        body: MoodleCourseLinkUpdateSchema,
+        response: { 200: MoodleCourseLinkSchema, 400: ApiErrorSchema, 404: ApiErrorSchema },
+      },
+    },
+    async (request) => {
+      const link = await putLink(db, request.params.course_id, request.body);
+      if (link.sync_enabled && (await client.isConfigured())) kick('zuordnung', link.moodle_course_id);
+      return link;
+    },
+  );
+
+  app.delete(
+    '/moodle/links/:course_id',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary: 'Zuordnung lösen. Übernommenes Material bleibt, die Fristen des Kurses fallen weg',
+        params: z.object({ course_id: MoodleIdParam }),
+        response: { 204: z.null(), 404: ApiErrorSchema },
+      },
+    },
+    async (request, reply) => {
+      await deleteLink(db, request.params.course_id);
+      return reply.code(204).send(null);
+    },
+  );
+
+  app.get(
+    '/moodle/items',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary:
+          'Dateien aus zugeordneten Kursen mit Abgleich an, neueste zuerst (limit 1–1000, Standard 500). kind=offen: Inbox',
+        querystring: ItemsQuery,
+        response: { 200: MoodleItemListSchema },
+      },
+    },
+    async (request) => ({
+      items: await listItems(db, {
+        courseId: request.query.course_id,
+        moduleId: request.query.module_id,
+        kind: request.query.kind,
+        includeRemoved: request.query.include_removed === 'true',
+        limit: request.query.limit ?? 500,
+      }),
+    }),
+  );
+
+  app.patch(
+    '/moodle/items/:item_id',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary:
+          'Entscheidung aus der Inbox: als Folien, Übung oder ignorieren. Gilt für die ganze Aktivität',
+        params: z.object({ item_id: UuidSchema }),
+        body: MoodleItemUpdateSchema,
+        response: { 200: MoodleItemSchema, 400: ApiErrorSchema, 404: ApiErrorSchema },
+      },
+    },
+    async (request) => {
+      const { item, courseId } = await decideItem(db, request.params.item_id, request.body.kind);
+      if ((item.kind === 'folien' || item.kind === 'uebung') && (await client.isConfigured())) {
+        kick('entscheidung', courseId);
+      }
+      return item;
+    },
+  );
+
+  app.get(
+    '/moodle/sync',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary: 'Stand des Abgleichs (F-MDL-04): läuft, pausiert, letzter Lauf, nächster Termin',
+        response: { 200: MoodleSyncStatusSchema },
+      },
+    },
+    async () => sync.status(),
+  );
+
+  app.post(
+    '/moodle/sync',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary: '„Jetzt abgleichen“: startet einen Abgleich im Hintergrund (läuft schon einer, danach)',
+        body: MoodleSyncRequestSchema.optional(),
+        response: { 202: MoodleSyncStatusSchema, 404: ApiErrorSchema, 503: ApiErrorSchema },
+      },
+    },
+    async (request, reply) => {
+      if (!(await client.isConfigured())) throw moodleNotConfigured();
+      const courseId = request.body?.course_id;
+      if (courseId && !(await isLinked(db, courseId))) {
+        throw new HttpError(404, 'moodle_link_not_found', 'Dieser Kurs ist keinem Modul zugeordnet.');
+      }
+      void sync.run('manuell', courseId ? [courseId] : undefined).catch(() => {});
+      return reply.code(202).send(await sync.status());
+    },
+  );
+
+  app.get(
+    '/moodle/synced-deadlines',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary:
+          'Fristen aus dem Abgleich nach Datum (Standard ab jetzt, höchstens 50). Lokal, ohne Moodle-Aufruf',
+        querystring: DeadlineListQuery,
+        response: { 200: MoodleSyncedDeadlineListSchema },
+      },
+    },
+    async (request) => {
+      const { module_id, from, to, limit } = request.query;
+      return {
+        items: await listSyncedDeadlines(db, {
+          moduleId: module_id,
+          from: from ? new Date(from) : (deps.now?.() ?? new Date()),
+          to: to ? new Date(to) : undefined,
+          limit: limit ?? 50,
+        }),
+      };
     },
   );
 }

@@ -20,6 +20,7 @@ import {
 } from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
 import { createMoodleServices, type MoodleServices } from './moodle/index.ts';
+import { MoodleSync } from './moodle/sync.ts';
 import { backupRoutes } from './routes/backups.ts';
 import { calendarRoutes } from './routes/calendar.ts';
 import { devicesRoutes } from './routes/devices.ts';
@@ -50,6 +51,12 @@ export interface BuildAppOptions {
   now?: () => Date;
   /** Moodle-Anbindung (08 §9). Standard: aus `SG_MOODLE_URL` und dem Schlüsselbund */
   moodle?: MoodleServices;
+  /** Moodle-Abgleich (T1-23). Standard: einer auf `moodle` und der Datenbank */
+  moodleSync?: MoodleSync;
+  /** Abgleich beim Start und alle 2 h (F-MDL-04). Standard: aus; `main.ts` schaltet ihn ein */
+  moodleSchedule?: boolean;
+  /** Höchstens so lange wartet das Beenden auf einen laufenden Abgleich. Standard: `SHUTDOWN_WAIT_MS` (7 s) */
+  moodleShutdownWaitMs?: number;
   /** Kopplungsfenster im Speicher (§12). Standard: ein eigenes pro App. Tests geben eins mit gestellter Uhr vor */
   pairing?: PairingManager;
   /** IPv4 für `PairingCode.host`. Standard: aktive Schnittstelle, bevorzugt `en0` */
@@ -70,6 +77,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const version = readVersion();
   const moodle =
     options.moodle ?? createMoodleServices({ config, logger: logger.child({ module: 'moodle' }) });
+
+  const moodleSync =
+    options.moodleSync ??
+    new MoodleSync({
+      db,
+      dataDir: config.dataDir,
+      moodle,
+      logger: logger.child({ module: 'moodle-sync' }),
+      ...(options.now ? { now: options.now } : {}),
+    });
 
   const lastSeen = new LastSeenTracker(db);
   const verifyToken: DeviceTokenVerifier =
@@ -156,7 +173,12 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(materialRoutes, { db, config });
       await api.register(organisationRoutes, { db });
       await api.register(sessionRoutes, { db, config, ...(options.now ? { now: options.now } : {}) });
-      await api.register(moodleRoutes, { moodle });
+      await api.register(moodleRoutes, {
+        moodle,
+        db,
+        sync: moodleSync,
+        ...(options.now ? { now: options.now } : {}),
+      });
       await api.register(calendarRoutes, { db });
       await api.register(inkRoutes, { db, config });
       await api.register(recordingRoutes, { db, config });
@@ -183,6 +205,19 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await ticker?.stop();
     });
   }
+
+  // Moodle-Abgleich: beim Start und alle 2 h (F-MDL-04). Beim Beenden den laufenden Abgleich abwarten
+  let stopMoodleSchedule: (() => void) | undefined;
+  if (options.moodleSchedule) {
+    app.addHook('onReady', async () => {
+      stopMoodleSchedule = moodleSync.startSchedule();
+    });
+  }
+  app.addHook('onClose', async () => {
+    stopMoodleSchedule?.();
+    // Laufenden Abgleich an der nächsten Stelle abbrechen und höchstens kurz warten (Review #133, S3)
+    await moodleSync.stop(options.moodleShutdownWaitMs);
+  });
 
   // Static Export der Web-App und Not-Found-Handler (muss nach den API-Routen kommen)
   await registerWeb(app, config);

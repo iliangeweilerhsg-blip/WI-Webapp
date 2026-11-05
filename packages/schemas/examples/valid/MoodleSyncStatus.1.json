@@ -1,0 +1,19 @@
+{
+  "state": "bereit",
+  "connection": "ok",
+  "last_run": {
+    "trigger": "zeitplan",
+    "started_at": "2026-11-05T10:00:00Z",
+    "finished_at": "2026-11-05T10:00:12Z",
+    "ok": true,
+    "error_code": null,
+    "courses": 2,
+    "files_new": 3,
+    "files_changed": 0,
+    "files_imported": 2,
+    "inbox_new": 1,
+    "deadlines": 4,
+    "failed_courses": []
+  },
+  "next_run_at": "2026-11-05T12:00:00Z"
+}

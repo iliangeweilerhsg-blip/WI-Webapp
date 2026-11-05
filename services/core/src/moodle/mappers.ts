@@ -169,7 +169,10 @@ function compact<T>(items: (T | null)[]): T[] {
 
 // ---------- Kurse ----------
 
-/** `core_enrol_get_users_courses` → MoodleCourse. `module_id` kommt mit der Kurszuordnung (T1-23) */
+/**
+ * `core_enrol_get_users_courses` → MoodleCourse. `module_id`, `suggested_module_id` und `category` ergänzt die
+ * Route aus der Kurszuordnung (T1-23, `annotateCourses`), hier nur die Standardwerte
+ */
 export function mapCourse(raw: unknown, ctx: MapContext): MoodleCourse | null {
   const r = rec(raw);
   const id = moodleId(r?.id);
@@ -183,6 +186,8 @@ export function mapCourse(raw: unknown, ctx: MapContext): MoodleCourse | null {
     url: `${ctx.baseUrl}/course/view.php?id=${id}`,
     last_access_at: timestamp(r.lastaccess),
     module_id: null,
+    suggested_module_id: null,
+    category: 'aktuell',
   };
 }
 

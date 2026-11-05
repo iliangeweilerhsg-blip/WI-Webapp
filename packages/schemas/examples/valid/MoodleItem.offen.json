@@ -1,0 +1,21 @@
+{
+  "id": "019a4e14-0000-7000-8000-000000000301",
+  "moodle_course_id": 901,
+  "module_id": "019a4e14-0000-7000-8000-0000000000a1",
+  "cmid": 5003,
+  "activity_name": "Material",
+  "filename": "Skript.pdf",
+  "file_ref": "/5003/mod_folder/content/1/Skript.pdf",
+  "mime_type": "application/pdf",
+  "is_pdf": true,
+  "size_bytes": 182344,
+  "modified_at": "2026-10-22T10:00:00Z",
+  "kind": "offen",
+  "kind_source": "auto",
+  "slide_deck_id": null,
+  "exercise_sheet_id": null,
+  "removed_in_moodle_at": null,
+  "last_error": null,
+  "created_at": "2026-11-05T10:00:05Z",
+  "updated_at": "2026-11-05T10:00:05Z"
+}
