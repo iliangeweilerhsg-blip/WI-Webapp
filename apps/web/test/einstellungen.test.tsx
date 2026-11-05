@@ -171,7 +171,7 @@ describe('Allgemein', () => {
   it('Core nicht erreichbar: ruhiger Hinweis, keine Felder', async () => {
     installFakeCore({ down: true });
     page();
-    expect(await screen.findAllByText('Core nicht erreichbar', {}, { timeout: 4000 })).not.toHaveLength(0);
+    expect(await screen.findAllByText('Core nicht erreichbar')).not.toHaveLength(0);
     expect(screen.queryByLabelText('Sprache der Inhalte')).not.toBeInTheDocument();
   });
 });
