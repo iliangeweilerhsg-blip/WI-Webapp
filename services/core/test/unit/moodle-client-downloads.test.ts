@@ -1,8 +1,11 @@
 // Issue #129: Download-Pool, Leerlauf-Zeitlimit, kein Wiederholen bei Stillstand, Abbruch per AbortSignal.
 // Kein echtes Moodle: Die Antworten kommen aus selbst gesteuerten Streams. Gleichzeitigkeit und Reihenfolge
 // werden über Zähler und Gates belegt, nicht über gemessene Zeit.
+import { IncomingMessage, ServerResponse } from 'node:http';
+import { Socket } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpError } from '../../src/errors.ts';
+import { abortWhenClosed } from '../../src/moodle/abort.ts';
 import { MoodleClient, RequestAbortedError } from '../../src/moodle/client.ts';
 import { StaticTokenStore } from '../../src/moodle/token-store.ts';
 import { FAKE_BASE, FAKE_TOKEN, fakeFetch, json, type FakeHandler } from './moodle-fake.ts';
@@ -326,5 +329,153 @@ describe('Abbruch per AbortSignal (Issue #129, H5)', () => {
     // Der einzige Platz ist frei
     (await client.downloadFile(REF)).stream.resume();
     expect(calls).toBe(2);
+  });
+});
+
+/** Körper, der alle `everyMs` `bytes` Byte liefert (Fake-Timer), ohne je zu enden */
+function trickle(everyMs: number, bytes: number, init: RequestInit): Response {
+  return new Response(
+    new ReadableStream({
+      async pull(controller) {
+        await new Promise((resolve) => setTimeout(resolve, everyMs));
+        controller.enqueue(new Uint8Array(bytes).fill(0x41));
+      },
+      start: (controller) => abortable(init.signal, controller),
+    }),
+    { status: 200, headers: PDF },
+  );
+}
+
+describe('Mindestrate gegen Slow Loris (Issue #129)', () => {
+  it('alle 29 s ein Byte: kein Leerlauf, aber unter 64 KiB je 60 s -> 502 too_slow, Platz frei', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    let calls = 0;
+    const { client } = makeClient(
+      (request) => {
+        calls += 1;
+        return calls === 1
+          ? trickle(29_000, 1, request.init)
+          : new Response('%PDF', { status: 200, headers: PDF });
+      },
+      { maxConcurrentDownloads: 1 },
+    );
+    const pending = client.downloadFile(REF);
+    await vi.advanceTimersByTimeAsync(29_000);
+    const file = await pending;
+    const failure = failureOf(
+      (async () => {
+        for await (const chunk of file.stream) void chunk;
+      })(),
+    );
+    // Der Leerlauf-Zeitlimit (30 s) schlägt nie an: alle 29 s kommt ein Byte. Das Zeitfenster endet bei 60 s
+    await vi.advanceTimersByTimeAsync(30_999);
+    expect(file.stream.destroyed).toBe(false);
+    await vi.advanceTimersByTimeAsync(2);
+    const error = (await failure) as HttpError;
+    expect([error.statusCode, error.code, error.details]).toEqual([
+      502,
+      'moodle_unreachable',
+      { reason: 'too_slow' },
+    ]);
+    // Der einzige Platz ist wieder frei
+    (await client.downloadFile(REF)).stream.resume();
+    expect(calls).toBe(2);
+  });
+
+  it('Gegenstück: genug Daten je Zeitfenster bleiben unbehelligt', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    const { client } = makeClient((request) => trickle(400, 5, request.init), {
+      idleTimeoutMs: 500,
+      minRateBytes: 10,
+      rateWindowMs: 1000,
+    });
+    const pending = client.downloadFile(REF);
+    await vi.advanceTimersByTimeAsync(400);
+    const file = await pending;
+    file.stream.resume();
+    // 5 Byte alle 400 ms = 12 oder 13 Byte je 1000 ms: über der Mindestrate, auch nach vielen Fenstern
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(file.stream.destroyed).toBe(false);
+    file.stream.destroy();
+  });
+});
+
+describe('Retry-Pause und Pacer-Wartezeit sind abbrechbar (Issue #129)', () => {
+  it('Abbruch während der Pause nach einem 503: das Promise endet sofort, kein zweiter Versuch', async () => {
+    // sleep hängt für immer: Nur der Abbruch kann die Pause beenden
+    const { client, requests } = makeClient(() => new Response('weg', { status: 503 }), {
+      sleep: () => new Promise<void>(() => {}),
+    });
+    const controller = new AbortController();
+    const pending = client.downloadFile(REF, { signal: controller.signal });
+    const outcome = failureOf(pending);
+    await settle();
+    expect(requests).toHaveLength(1);
+    controller.abort();
+    expect(await outcome).toBeInstanceOf(RequestAbortedError);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('Abbruch während der Pacer-Wartezeit: Moodle wird nicht angefragt, der Platz bleibt frei', async () => {
+    let sleeps = 0;
+    let openGate: () => void = () => {};
+    const sleep = (): Promise<void> => {
+      sleeps += 1;
+      // Nur das erste Warten (Abstand zum ersten Start) hängt an einem Gate
+      return sleeps === 1 ? new Promise<void>((resolve) => (openGate = resolve)) : Promise.resolve();
+    };
+    const { client, requests } = makeClient(() => new Response('%PDF', { status: 200, headers: PDF }), {
+      sleep,
+      minIntervalMs: 40,
+      maxConcurrentDownloads: 1,
+      // virtuelle Uhr: der Abstand wird nie verstreichen
+      now: () => 0,
+    });
+    // Erster Download startet ohne Wartezeit, danach gibt er den Platz frei
+    const first = await client.downloadFile(REF);
+    first.stream.destroy();
+    expect(requests).toHaveLength(1);
+
+    const controller = new AbortController();
+    const second = failureOf(client.downloadFile(REF, { signal: controller.signal }));
+    await settle();
+    expect(sleeps).toBe(1);
+    controller.abort();
+    openGate();
+    expect(await second).toBeInstanceOf(RequestAbortedError);
+    expect(requests).toHaveLength(1);
+
+    // Platz wurde zurückgegeben: der nächste Download geht durch
+    (await client.downloadFile(REF)).stream.resume();
+    expect(requests).toHaveLength(2);
+  });
+});
+
+describe('abortWhenClosed (GET /moodle/file, Issue #129)', () => {
+  const response = () => new ServerResponse(new IncomingMessage(new Socket()));
+
+  it('Verbindung schließt sich vor dem Ende der Antwort: Abbruch', () => {
+    const res = response();
+    const closed = abortWhenClosed(res);
+    expect(closed.signal.aborted).toBe(false);
+    res.emit('close');
+    expect(closed.signal.aborted).toBe(true);
+  });
+
+  it('auf dem Erfolgsweg: stop() entfernt den Listener, ein spätes close löst nichts aus', () => {
+    const res = response();
+    const closed = abortWhenClosed(res);
+    expect(res.listenerCount('close')).toBe(1);
+    closed.stop();
+    expect(res.listenerCount('close')).toBe(0);
+    res.emit('close');
+    expect(closed.signal.aborted).toBe(false);
+  });
+
+  it('Verbindung war beim Registrieren schon zu: sofort abgebrochen', () => {
+    const res = response();
+    res.destroy();
+    expect(res.destroyed).toBe(true);
+    expect(abortWhenClosed(res).signal.aborted).toBe(true);
   });
 });

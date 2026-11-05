@@ -45,6 +45,13 @@ export interface MoodleClientOptions {
    * bis zu den Headern wie danach. Es gibt kein Limit für die ganze Übertragung.
    */
   idleTimeoutMs?: number;
+  /**
+   * Mindestrate für Datei-Downloads als Reserve zum Leerlauf-Zeitlimit (Standard: 64 KiB je 60 s). Ein Server,
+   * der alle 29 s ein Byte schickt, hielte sonst seinen Platz für immer. Zu langsam: `reason = "too_slow"`.
+   */
+  minRateBytes?: number;
+  /** Länge des Zeitfensters für `minRateBytes` in ms (Standard 60 s) */
+  rateWindowMs?: number;
   /** Wartezeiten vor Wiederholungen lesender Aufrufe (Standard 1 s, 4 s) */
   retryDelaysMs?: readonly number[];
   /** Größte JSON-Antwort der REST-Schnittstelle in Byte (Standard `MAX_RESPONSE_BYTES`) */
@@ -404,6 +411,8 @@ export class MoodleClient {
   private readonly downloadThrottle: Throttle;
   private readonly timeoutMs: number;
   private readonly idleTimeoutMs: number;
+  private readonly minRateBytes: number;
+  private readonly rateWindowMs: number;
   private readonly retryDelaysMs: readonly number[];
   private readonly maxResponseBytes: number;
   private readonly maxFileBytes: number;
@@ -424,6 +433,8 @@ export class MoodleClient {
     this.downloadThrottle = new Throttle(options.maxConcurrentDownloads ?? 2, pacer, this.sleep);
     this.timeoutMs = options.timeoutMs ?? 30_000;
     this.idleTimeoutMs = options.idleTimeoutMs ?? 30_000;
+    this.minRateBytes = options.minRateBytes ?? 64 * 1024;
+    this.rateWindowMs = options.rateWindowMs ?? 60_000;
     this.retryDelaysMs = options.retryDelaysMs ?? [1000, 4000];
     this.maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
     this.maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
@@ -565,10 +576,28 @@ export class MoodleClient {
         timer = setTimeout(() => onIdle(), this.idleTimeoutMs);
         timer.unref();
       };
+      // Mindestrate: Je Zeitfenster müssen `minRateBytes` ankommen, sonst ist der Server zu langsam (Slow Loris)
+      let windowBytes = 0;
+      let onSlow = () => idle.abort(new DOMException('Moodle liefert zu langsam', 'TooSlowError'));
+      const rateTimer = setInterval(() => {
+        if (windowBytes < this.minRateBytes) onSlow();
+        windowBytes = 0;
+      }, this.rateWindowMs);
+      rateTimer.unref();
+      const stopTimers = () => {
+        clearTimeout(timer);
+        clearInterval(rateTimer);
+      };
+      const tooSlow = () =>
+        idle.signal.aborted && (idle.signal.reason as Error | undefined)?.name === 'TooSlowError';
       const signal = external ? AbortSignal.any([idle.signal, external]) : idle.signal;
       // Abbruch durch den Aufrufer ist kein Netzwerkfehler und wird nicht wiederholt
       const failure = (error: unknown): Error =>
-        external?.aborted ? new RequestAbortedError() : transientFrom(error);
+        external?.aborted
+          ? new RequestAbortedError()
+          : tooSlow()
+            ? this.unreachable(label, 'too_slow', false)
+            : transientFrom(error);
       arm();
       let streaming = false;
       try {
@@ -621,7 +650,7 @@ export class MoodleClient {
         const limit = Math.min(this.maxFileBytes, contentLength ?? Number.POSITIVE_INFINITY);
         const reader = response.body?.getReader();
         if (!reader) {
-          clearTimeout(timer);
+          stopTimers();
           return { stream: Readable.from([]), contentType, contentLength, filename };
         }
         const body = reader;
@@ -641,6 +670,7 @@ export class MoodleClient {
                 done = true;
                 break;
               }
+              windowBytes += chunk.value.byteLength;
               head.push(chunk.value);
               size += chunk.value.byteLength;
             }
@@ -671,7 +701,10 @@ export class MoodleClient {
             const chunk = await reader.read();
             arm();
             if (chunk.done) done = true;
-            else head.push(chunk.value);
+            else {
+              windowBytes += chunk.value.byteLength;
+              head.push(chunk.value);
+            }
           } catch (error) {
             throw failure(error);
           }
@@ -705,7 +738,7 @@ export class MoodleClient {
         const finish = () => {
           if (finished) return;
           finished = true;
-          clearTimeout(timer);
+          stopTimers();
           external?.removeEventListener('abort', onAbort);
           release();
           void body.cancel().catch(() => {});
@@ -734,6 +767,7 @@ export class MoodleClient {
                   return;
                 }
                 received += chunk.value.byteLength;
+                windowBytes += chunk.value.byteLength;
                 if (received > limit) {
                   this.destroy(fail('too_large'));
                   return;
@@ -742,7 +776,9 @@ export class MoodleClient {
               },
               (error: unknown) =>
                 this.destroy(
-                  external?.aborted ? new RequestAbortedError() : fail(transientFrom(error).reason),
+                  external?.aborted
+                    ? new RequestAbortedError()
+                    : fail(tooSlow() ? 'too_slow' : transientFrom(error).reason),
                 ),
             );
           },
@@ -759,12 +795,16 @@ export class MoodleClient {
           idle.abort(new DOMException('Moodle liefert keine Daten mehr', 'TimeoutError'));
           stream.destroy(fail('timeout'));
         };
+        onSlow = () => {
+          idle.abort(new DOMException('Moodle liefert zu langsam', 'TooSlowError'));
+          stream.destroy(fail('too_slow'));
+        };
         external?.addEventListener('abort', onAbort, { once: true });
         arm();
         return { stream, contentType, contentLength, filename };
       } catch (error) {
         // Nach dem Start des Streams gehört der Timer dem Stream
-        if (!streaming) clearTimeout(timer);
+        if (!streaming) stopTimers();
         throw error;
       }
     };
@@ -800,10 +840,26 @@ export class MoodleClient {
           'Moodle-Aufruf wird wiederholt',
         );
         release();
-        await this.sleep(delay);
+        await this.pause(delay, options.signal);
       } finally {
         if (!kept) release();
       }
+    }
+  }
+
+  /** Wartet `ms`. Ein Abbruch beendet die Pause sofort (`RequestAbortedError`) */
+  private async pause(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) return this.sleep(ms);
+    if (signal.aborted) throw new RequestAbortedError();
+    let onAbort: (() => void) | undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(new RequestAbortedError());
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      await Promise.race([this.sleep(ms), aborted]);
+    } finally {
+      if (onAbort) signal.removeEventListener('abort', onAbort);
     }
   }
 

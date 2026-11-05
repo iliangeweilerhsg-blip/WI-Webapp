@@ -262,11 +262,6 @@ export async function listItems(db: DbOrTx, filter: ItemFilter): Promise<MoodleI
   return rows.map((row) => toApiItem(row.item, row.moduleId));
 }
 
-/** Ist der Kurs einem (nicht gelöschten) Modul zugeordnet? */
-export async function isLinked(db: DbOrTx, courseId: number): Promise<boolean> {
-  return (await listLinks(db)).some((link) => link.moodle_course_id === courseId);
-}
-
 /** Ist der Verweis eine Datei aus einem abgeglichenen Kurs? (dauerhafte Quelle für GET /moodle/file, Lead #127) */
 export async function isKnownFileRef(db: DbOrTx, ref: string): Promise<boolean> {
   const [row] = await db

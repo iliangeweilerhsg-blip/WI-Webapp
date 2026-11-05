@@ -38,6 +38,7 @@ import {
 import type { Db } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
 import { isMoodleActionId, needsConfirmation, type MoodleActionContext } from '../moodle/actions.ts';
+import { abortWhenClosed } from '../moodle/abort.ts';
 import { isValidFileRef, moodleNotConfigured, RequestAbortedError } from '../moodle/client.ts';
 import { FILE_ONLY_HEADERS, fileResponseHeaders } from '../moodle/file-headers.ts';
 import type { MoodleServices } from '../moodle/index.ts';
@@ -324,20 +325,18 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
       }
       // Bricht die Web-App ab, bevor die Antwort fertig ist (auch während die Anfrage noch auf einen
       // Download-Platz wartet), wird Moodle nicht mehr angefragt bzw. die Verbindung geschlossen
-      const aborted = new AbortController();
-      const onClose = () => {
-        if (!reply.raw.writableFinished) aborted.abort();
-      };
-      reply.raw.once('close', onClose);
+      const closed = abortWhenClosed(reply.raw);
       let download: Awaited<ReturnType<typeof client.downloadFile>>;
       try {
-        download = await client.downloadFile(ref, { signal: aborted.signal });
+        download = await client.downloadFile(ref, { signal: closed.signal });
       } catch (error) {
-        reply.raw.off('close', onClose);
+        closed.stop();
         // Niemand wartet mehr auf die Antwort
         if (error instanceof RequestAbortedError) return reply.code(499).send();
         throw error;
       }
+      // Erfolgsweg: Ab hier zerstört Fastify den Stream, wenn die Web-App abbricht
+      closed.stop();
       // Stream direkt durchreichen, nie die ganze Datei puffern. Bricht die Web-App ab, zerstört
       // Fastify den Stream, und der Client gibt Moodle-Verbindung und Platz in der Drosselung frei
       return reply.headers(fileResponseHeaders(download, ref)).send(download.stream);

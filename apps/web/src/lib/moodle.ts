@@ -32,6 +32,7 @@ const MESSAGES: Record<string, string> = {
   moodle_unreachable: 'Moodle ist gerade nicht erreichbar.',
   moodle_item_not_found: 'Diese Datei gibt es nicht mehr.',
   moodle_link_not_found: 'Dieser Kurs ist keinem Modul mehr zugeordnet.',
+  moodle_link_disabled: 'Der Abgleich für diesen Kurs ist ausgeschaltet. Schalte ihn zuerst ein.',
   module_not_found: 'Dieses Modul gibt es nicht mehr.',
 };
 

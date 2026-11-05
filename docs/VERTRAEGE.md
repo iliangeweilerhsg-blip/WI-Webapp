@@ -1016,7 +1016,7 @@ Basis `/api/v1`. Die Pfade sind festgelegt (Lead, Review #133).
 | `GET /moodle/items` | `course_id?`, `module_id?`, `kind?`, `include_removed?`, `limit?` (1–1000, Standard 500) | `MoodleItemList`, neueste zuerst. `kind=offen` = Einträge der Inbox | – |
 | `PATCH /moodle/items/{id}` | `MoodleItemUpdate` (`folien`/`uebung`/`ignoriert`, `offen` = rückgängig) | `MoodleItem`. Startet bei Folien/Übung einen Abgleich des Kurses. `offen` setzt die Datei und alle mit derselben Entscheidung eingeordneten Dateien der Aktivität zurück (R15), schon angelegtes Material bleibt | `404 moodle_item_not_found` |
 | `GET /moodle/sync` | – | `MoodleSyncStatus` | – |
-| `POST /moodle/sync` | `MoodleSyncRequest` (`course_id?`) | `202 MoodleSyncStatus`. Läuft schon ein Abgleich oder wartet einer, wird genau einer danach angehängt | `404 moodle_link_not_found` (Kurs nicht zugeordnet), `503 moodle_not_configured` |
+| `POST /moodle/sync` | `MoodleSyncRequest` (`course_id?`) | `202 MoodleSyncStatus`. Läuft schon ein Abgleich oder wartet einer, wird genau einer danach angehängt | `404 moodle_link_not_found` (Kurs nicht zugeordnet), `409 moodle_link_disabled` (zugeordnet, aber `sync_enabled = false`), `503 moodle_not_configured` |
 | `GET /moodle/synced-deadlines` | `module_id?`, `from?` (Standard jetzt), `to?`, `limit?` (1–200, Standard 50) | `MoodleSyncedDeadlineList` nach `due_at`, ohne in Moodle entfernte | – |
 
 ### 17.4 Ablauf des Abgleichs
@@ -1048,6 +1048,6 @@ Zuerst der Dateiname, dann der Name der Aktivität. Vorher NFC (Namen aus macOS 
 - `category`: `organisatorisch` bei Wortteilen wie „Klausurtermin“, „Prüfungsamt“, „Fachschaft“, „Informationen“. `alt`, wenn der Kurs mehr als `SEMESTER_START_TOLERANCE_DAYS` = 30 Tage vor dem Beginn des aktuellen Semesters startet (Konstante in `services/core/src/moodle/classify.ts`; ohne Semesterbeginn: schon beendet). Sonst `aktuell`.
 - `suggested_module_id` nur für `aktuell` ohne Zuordnung: Name bzw. Kürzel eines Moduls des aktuellen Semesters im Kursnamen (wie F-KAL-02), sonst eindeutige Abkürzung. Ein Vorschlag ist keine Zuordnung, abgeglichen wird erst nach `PUT /moodle/links/{course_id}`.
 
-**Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404). `MoodleSyncRun.error_code` kann außerdem `abgebrochen` sein (Beenden des Core).
+**Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404), `moodle_link_disabled` (409). `MoodleSyncRun.error_code` kann außerdem `abgebrochen` sein (Beenden des Core).
 
 **Zeitformat:** Die neuen Antworten liefern Zeiten nach §6 (ohne `.000`). Die Lese-Endpunkte aus T1-22 liefern noch `.000Z`, das gleicht Folge-Issue #129 an.

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { pino } from 'pino';
@@ -949,6 +950,35 @@ describe('Moodle-Abgleich (T1-23)', () => {
     // Moodle-Verbindung ist zu, und im temporären Ordner liegt nichts
     for (let i = 0; i < 100 && !upstreamClosed; i += 1) await new Promise((r) => setTimeout(r, 10));
     expect(upstreamClosed).toBe(true);
+    expect(await listFiles(uploadTmpDir(t.config.dataDir)).catch(() => [])).toEqual([]);
+  });
+
+  it('stop() genau nach dem Ende des Downloads: kein Material, keine Restdatei (Issue #129, Wettlauf)', async () => {
+    await start();
+    // Der Download ist vollständig und der Abbruch-Listener des Clients schon weg, wenn stop() kommt:
+    // Das Signal kann den Stream nicht mehr treffen, nur die Prüfung nach storeDownload fängt es ab.
+    const original = moodle.client.downloadFile.bind(moodle.client);
+    let stops = 0;
+    moodle.client.downloadFile = async (ref, options) => {
+      const real = await original(ref, options);
+      const chunks: Buffer[] = [];
+      for await (const chunk of real.stream) chunks.push(Buffer.from(chunk as Uint8Array));
+      const stream = Readable.from([Buffer.concat(chunks)]);
+      // 'end' kommt vor dem Abschluss der Pipeline in storeDownload
+      stream.once('end', () => {
+        stops += 1;
+        void sync.stop();
+      });
+      return { ...real, stream };
+    };
+    const before = await tableCounts();
+    expect((await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id })).status).toBe(200);
+    await sync.idle();
+    expect(stops).toBe(1);
+    expect((await sync.status()).last_run).toMatchObject({ ok: false, error_code: 'abgebrochen' });
+    const after = await tableCounts();
+    expect([after.decks, after.sheets, after.jobs]).toEqual([before.decks, before.sheets, before.jobs]);
+    expect((await itemByRef(REF.vl01)).last_error).toBeNull();
     expect(await listFiles(uploadTmpDir(t.config.dataDir)).catch(() => [])).toEqual([]);
   });
 
