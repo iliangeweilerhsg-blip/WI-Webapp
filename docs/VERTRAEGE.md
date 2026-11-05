@@ -191,7 +191,7 @@ Abgeleitete Felder der API, etwa `event_count`, `session_id` am Termin, `planned
 Basis `/api/v1`, Konventionen aus §5 und 08 §1. Fehlerkörper immer `ApiError`. Für alle Routen gelten außerdem `400 validation_failed`, `401 device_token_required|device_token_invalid` (aus dem Netz), `403 origin_not_allowed` und `421 host_not_allowed`. Mit **lokal** markierte Routen lehnen Anfragen aus dem Netz mit `403 local_only` ab, auch mit gültigem Token.
 Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 
-**Lösch-Routen aus Phase 0:** `DELETE /modules/{id}` und `DELETE /semesters/{id}` antworten ab T1-18 (Umstellung auf `softDelete`) mit `409 session_active` und `details.session_ids`, wenn die Kaskade eine laufende oder pausierte Session enthält. Dann wird nichts gelöscht.
+**Lösch-Routen aus Phase 0:** `DELETE /semesters/{id}` (neu mit T1-18), `DELETE /modules/{id}`, `/slide-decks/{id}`, `/exercise-sheets/{id}` rufen `softDelete` (Kaskade §13). `DELETE /modules/{id}` und `DELETE /semesters/{id}` antworten ab T1-18 (Umstellung auf `softDelete`) mit `409 session_active` und `details.session_ids`, wenn die Kaskade eine laufende oder pausierte Session enthält. Dann wird nichts gelöscht.
 
 ### 7.1 Kalender (T1-01)
 
@@ -273,7 +273,9 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `POST /devices/pair/confirm` (Netz ohne Token) | `PairConfirmRequest` | 201 `PairResponse` | 403 `pairing_code_invalid`, 403 `pairing_request_rejected`, 409 `pairing_window_closed`, 423 `pairing_locked`, 429 `pairing_rate_limited` |
 | `GET /backups` | – | 200 `BackupOverview` | |
 | `POST /backup` | – | 202 `BackupRun` | 409 `backup_running`, 409 `backup_target_missing` |
-| `GET /trash?kind` | – | 200 `TrashList`, nach `deleted_at` absteigend | |
+| `GET /trash?kind&cursor&limit` | – | 200 `TrashList`, nach `deleted_at` absteigend | |
+| `DELETE /trash/{id}` | – | 204. Löscht das direkt gelöschte Objekt samt Teilbaum, Strömen (`sync_op`) und Dateien endgültig | 404 `trash_item_not_found` (auch für mitgelöschte Teile), 409 `session_active` |
+| `DELETE /trash?kind` | – | 200 `{ purged_count }` (inline in der Route, kein Schema): leert den Papierkorb, optional nur eine Art | 409 `session_active` |
 | `POST /trash/{id}/restore` | – | 200 `TrashRestoreResult` | 404 `trash_item_not_found`, 409 `restore_parent_deleted` (`details.parent`), 409 `restore_conflict` (`details.constraint`, `details.conflicting_id`) |
 | `GET /settings` | – | 200 `Settings` | |
 | `PATCH /settings` | `SettingsUpdate` | 200 `Settings` | 400 `backup_target_invalid` (Pfad nicht absolut oder nicht beschreibbar) |
@@ -602,10 +604,20 @@ Nur **ein** Tab synchronisiert: Er hält die Verbindung, sendet die Warteschlang
   - Ausnahme Semester: Ist inzwischen ein anderes Semester aktuell, kommt das wiederhergestellte mit `is_current = false` zurück. Das ist kein Fehler.
 - „Rückgängig“ im Toast (10 s, F-DAT-04) nutzt denselben Endpunkt. Für Marker nutzt die Web-App stattdessen `marker.remove` im Sync.
 - Dateien (Fotos, Chunks, `pkdrawing`, PDFs) bleiben bis zum endgültigen Löschen liegen.
-- **Offene Punkte für T1-18:**
-  - `task_slide_link` gehört zu keiner Kaskade. Verknüpfungen gelöschter Folien oder Aufgaben bleiben stehen und müssen beim Lesen gefiltert werden.
-  - Sessions, die mit ihrer `calendar_source` gelöscht wurden, haben die Quelle nicht als Elternobjekt. `restore_parent_deleted` prüft nur das Modul. Sie kommen nur über die Quelle zurück.
-  - `softDelete` setzt `deleted_at` millisekundengenau aus der Uhr des Core. Zwei Löschvorgänge in derselben Millisekunde im selben Teilbaum würden zusammen wiederhergestellt. Das ist bei einem Nutzer praktisch ausgeschlossen. Mikrosekunden aus `clock_timestamp()` gingen verloren, sobald Handler den Wert als JS-`Date` weitergeben (§11.2).
+- **Entscheidungen T1-18 (vormals offene Punkte):**
+  - `task_slide_link`: keine Kaskade. Verknüpfungen gelöschter Folien oder Aufgaben bleiben stehen, Leser filtern über Join auf nicht gelöschte `slide` und `task` (heute liest sie niemand). Endgültig gelöscht werden sie per Fremdschlüssel (CASCADE).
+  - Sessions, die mit ihrer `calendar_source` gelöscht wurden: Elternobjekt ist für Liste und Wiederherstellen die Quelle (über den Termin mit gleichem `deleted_at`). Sie stehen nicht einzeln in `GET /trash`, `POST /trash/{session}/restore` liefert `409 restore_parent_deleted` mit `details.parent` (Art `calendar_source`), einzeln endgültig löschen ist `404`.
+  - Gleiches `deleted_at` in derselben Millisekunde: nur dokumentiert, nicht behoben (bei einem Nutzer praktisch ausgeschlossen).
+  - **Server-Operationen:** Löschen eines Moduls/Semesters schreibt `notebook.delete` für jedes mitgelöschte Notizbuch, Wiederherstellen `notebook.restore` je Notizbuch bzw. `page.restore` für eine einzelne Seite. Vorher werden die Ströme der betroffenen Notizbücher und Sessions gesperrt (Strom vor Zeile, §16.2), ebenso beim endgültigen Löschen.
+  - **Endgültig löschen** entfernt den ganzen Teilbaum unabhängig vom `deleted_at` der Kinder (ein früher gelöschtes Kind geht mit, wenn sein Elternobjekt endgültig geht) sowie `sync_stream`/`sync_op` der Notizbücher und Sessions. Dateien (Foliensatz-, Blatt-, Aufnahme-Ordner, Fotos, `pkdrawing`) gehen nach dem Commit weg, nur über `resolveDataPath`.
+- **Backup-Ablauf (T1-18):**
+  - Aufbau eines Standes: `<ziel>/<stand>/{db.dump, media/, vault/, manifest.json}`. Unveränderte Dateien sind Hardlinks auf den vorigen Stand. Geschrieben wird nach `.<stand>.partial` und erst am Ende umbenannt.
+  - `POST /backup` legt die `backup_run`-Zeile selbst an und startet `node infra/sg/src/main.ts backup --trigger … --run-id …` (Ausgabe in `logs/backup.log`). Ein `laeuft` älter als 6 Stunden gilt als abgestürzt.
+  - `stale` ist auch ohne jedes erfolgreiche Backup `true`.
+  - Der Zeitplan (Backup und `maintenance.nightly` um 03:30) läuft minütlich im Core und holt Verpasstes nach. Ein fehlgeschlagener geplanter Lauf wird am selben Tag nicht wiederholt.
+  - `backup_encryption = true` lässt den Lauf mit Hinweis scheitern (`age` ist P1, nie unverschlüsselt sichern, wenn Verschlüsselung gewünscht ist).
+  - `sg migrate`/`sg start` sichern vor ausstehenden Migrationen (`vor_migration`), wenn ein Ziel gesetzt ist; scheitert es, wird nicht migriert (`--ohne-backup` übergeht das).
+  - `sg restore` (ohne Stand: Liste) spielt in eine neue Datenbank und neue Ordner ein und tauscht danach. Die alte Datenbank (`<db>_vor_restore_<zeit>`) und Ordner (`media.vor-restore-<zeit>`) bleiben liegen. Der monatliche automatische Test (`sg restore --test`) ist noch nicht eingeplant.
 
 **`maintenance.nightly`** (Worker, T1-18)
 - **Anlegen:** Der Core legt den Job täglich um 03:30 Ortszeit an, mit Payload `MaintenanceNightlyPayload` (Standard `{}` = 30 Tage, ohne `dry_run`). Ergebnis: `MaintenanceNightlyResult`.

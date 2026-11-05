@@ -3,10 +3,10 @@
 export const COMMANDS = {
   start: 'Datenbank, Core und Worker starten und die Web-App öffnen',
   stop: 'Core, Worker und Datenbank anhalten',
-  migrate: 'Datenbank-Migrationen ausführen (pnpm --filter @sg/core migrate)',
+  migrate: 'Datenbank-Migrationen ausführen, vorher Backup (--ohne-backup überspringt es)',
   doctor: 'Voraussetzungen prüfen (Node, pnpm, uv, Docker, Ports, Datenordner)',
-  backup: 'Datensicherung (kommt mit T1-18)',
-  restore: 'Wiederherstellung (kommt mit T1-18)',
+  backup: 'Datensicherung in das Ziel aus den Einstellungen (pg_dump + media/ + vault/)',
+  restore: 'Stand wiederherstellen: restore <stand> | restore --test <stand> | restore (Liste)',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;

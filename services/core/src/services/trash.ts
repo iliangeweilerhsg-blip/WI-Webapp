@@ -10,7 +10,7 @@ import type { Tx } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
 
 /** Tabellen der Kaskade. Der Knotenname ist der Tabellenname. */
-type Node =
+export type Node =
   | 'semester'
   | 'module'
   | 'slide_deck'
@@ -30,7 +30,7 @@ type Node =
   | 'stroke'
   | 'page_element';
 
-interface Edge {
+export interface Edge {
   child: Node;
   /** Fremdschlüssel im Kind */
   fk: string;
@@ -39,10 +39,10 @@ interface Edge {
 }
 
 /** Bei Sessions nie gestartet (VERTRAEGE §13, Zeile `calendar_source`) */
-const NEVER_STARTED = sql`state IN ('geplant','bereit','verpasst')`;
+export const NEVER_STARTED = sql`state IN ('geplant','bereit','verpasst')`;
 
 /** Kaskaden nach VERTRAEGE §13. Was hier fehlt, bleibt unverändert (z. B. Kalendertermine eines Moduls, Seiten einer Session). */
-const CHILDREN: Record<Node, Edge[]> = {
+export const CHILDREN: Record<Node, Edge[]> = {
   semester: [{ child: 'module', fk: 'semester_id' }],
   module: [
     { child: 'slide_deck', fk: 'module_id' },
@@ -77,7 +77,7 @@ const CHILDREN: Record<Node, Edge[]> = {
 };
 
 /** Direktes Elternobjekt je Papierkorb-Art (für `restore_parent_deleted`) */
-const PARENT: Partial<Record<TrashKind, { kind: TrashKind; fk: string }>> = {
+export const PARENT: Partial<Record<TrashKind, { kind: TrashKind; fk: string }>> = {
   module: { kind: 'semester', fk: 'semester_id' },
   slide_deck: { kind: 'module', fk: 'module_id' },
   exercise_sheet: { kind: 'module', fk: 'module_id' },
@@ -89,7 +89,7 @@ const PARENT: Partial<Record<TrashKind, { kind: TrashKind; fk: string }>> = {
 };
 
 /** Anzeigename je Art (SQL-Ausdruck über die Zeile) */
-const TITLE: Record<TrashKind, SQL> = {
+export const TITLE: Record<TrashKind, SQL> = {
   semester: sql`name`,
   module: sql`name`,
   slide_deck: sql`title`,

@@ -15,7 +15,8 @@ if (major < MIN_MAJOR || (major === MIN_MAJOR && minor < MIN_MINOR)) {
 
 // Pakete vor dem ersten Import aus node_modules aktualisieren (nach git pull).
 // start/migrate brauchen aktuelle Pakete und brechen sonst ab. stop braucht keine neuen Pakete und
-// muss auch offline funktionieren (kein Install, während die App läuft). Übrige Befehle (doctor …)
+// muss auch offline funktionieren (kein Install, während die App läuft). `backup` läuft auch vom laufenden Core aus
+// gestartet und installiert darum nichts. Übrige Befehle (doctor …)
 // versuchen es und laufen bei einem Fehlschlag mit Warnung weiter.
 const [command] = process.argv.slice(2);
 const isHelp =
@@ -23,7 +24,7 @@ const isHelp =
   command === 'help' ||
   process.argv.includes('--help') ||
   process.argv.includes('-h');
-if (!isHelp && command !== 'stop') {
+if (!isHelp && command !== 'stop' && command !== 'backup') {
   const { dirname, resolve } = await import('node:path');
   const { fileURLToPath } = await import('node:url');
   const { syncDeps } = await import('./deps.mjs');
