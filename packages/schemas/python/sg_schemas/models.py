@@ -969,7 +969,8 @@ class SessionReprocessRequest(BaseModel):
         extra='forbid',
     )
     from_step: PipelineStep | None = Field(
-        None, description='Standard transcribe. Alle späteren Schritte laufen mit'
+        None,
+        description='Standard transcribe. Alle späteren Schritte laufen mit (VERTRAEGE §18.2)',
     )
     force: StrictBool | None = Field(
         None,
@@ -4790,7 +4791,8 @@ class TranscriptLine(BaseModel):
     text: StrictStr
     lang: LanguageCode | None
     words: list[TranscriptWord] | None = Field(
-        None, description='Nur mit include_words=true'
+        None,
+        description='Nur mit include_words=true: genau die Wörter dieser Zeile, [] wenn der Abschnitt keine Wort-Zeitstempel hat (VERTRAEGE §18.4)',
     )
 
 

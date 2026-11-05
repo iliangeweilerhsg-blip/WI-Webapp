@@ -11808,7 +11808,7 @@ enum PhotoAddOpKind: String, Codable {
 /// Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge =
 /// Anzeige-Reihenfolge
 ///
-/// Standard transcribe. Alle späteren Schritte laufen mit
+/// Standard transcribe. Alle späteren Schritte laufen mit (VERTRAEGE §18.2)
 enum PipelineStep: String, Codable {
     case alignLog = "align.log"
     case audioFinalize = "audio.finalize"
@@ -12776,7 +12776,7 @@ enum SessionPauseOpKind: String, Codable {
 struct SessionReprocessRequest: Codable {
     /// Standard false. true: auch unveränderte Eingaben neu verarbeiten
     let force: Bool?
-    /// Standard transcribe. Alle späteren Schritte laufen mit
+    /// Standard transcribe. Alle späteren Schritte laufen mit (VERTRAEGE §18.2)
     let fromStep: PipelineStep?
 
     enum CodingKeys: String, CodingKey {
@@ -13630,7 +13630,8 @@ struct TranscriptLine: Codable {
     let slideIndex: Int?
     let startMS: Int
     let text: String
-    /// Nur mit include_words=true
+    /// Nur mit include_words=true: genau die Wörter dieser Zeile, [] wenn der Abschnitt keine
+    /// Wort-Zeitstempel hat (VERTRAEGE §18.4)
     let words: [TranscriptWord]?
 
     enum CodingKeys: String, CodingKey {

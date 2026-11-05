@@ -38,9 +38,10 @@ CREATE TABLE "transcript" (
 	"segment_count" integer NOT NULL,
 	"word_count" integer NOT NULL,
 	CONSTRAINT "transcript_recording_uq" UNIQUE("recording_id"),
+	CONSTRAINT "transcript_id_recording_session_uq" UNIQUE("id","recording_id","session_id"),
 	CONSTRAINT "transcript_provider_chk" CHECK ("transcript"."provider" IN ('mlx-whisper','fake')),
 	CONSTRAINT "transcript_language_chk" CHECK ("transcript"."language" IS NULL OR "transcript"."language" ~ '^[a-z]{2,3}$'),
-	CONSTRAINT "transcript_initial_prompt_chk" CHECK ("transcript"."initial_prompt" IS NULL OR char_length("transcript"."initial_prompt") <= 600),
+	CONSTRAINT "transcript_initial_prompt_chk" CHECK ("transcript"."initial_prompt" IS NULL OR char_length("transcript"."initial_prompt") <= 2000),
 	CONSTRAINT "transcript_input_hash_chk" CHECK ("transcript"."input_hash" ~ '^[0-9a-f]{64}$'),
 	CONSTRAINT "transcript_audio_sha256_chk" CHECK ("transcript"."audio_sha256" ~ '^[0-9a-f]{64}$'),
 	CONSTRAINT "transcript_duration_chk" CHECK ("transcript"."audio_duration_ms" >= 0),
@@ -75,8 +76,8 @@ CREATE TABLE "transcript_segment" (
 ALTER TABLE "slide_segment" ADD CONSTRAINT "slide_segment_session_id_session_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."session"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transcript" ADD CONSTRAINT "transcript_session_id_session_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."session"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transcript" ADD CONSTRAINT "transcript_recording_id_recording_id_fk" FOREIGN KEY ("recording_id") REFERENCES "public"."recording"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "transcript_segment" ADD CONSTRAINT "transcript_segment_transcript_id_transcript_id_fk" FOREIGN KEY ("transcript_id") REFERENCES "public"."transcript"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "transcript_segment" ADD CONSTRAINT "transcript_segment_session_id_session_id_fk" FOREIGN KEY ("session_id") REFERENCES "public"."session"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "transcript_segment" ADD CONSTRAINT "transcript_segment_transcript_fk" FOREIGN KEY ("transcript_id","recording_id","session_id") REFERENCES "public"."transcript"("id","recording_id","session_id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "slide_segment_session_idx" ON "slide_segment" USING btree ("session_id","source","start_ms");--> statement-breakpoint
 CREATE INDEX "transcript_session_idx" ON "transcript" USING btree ("session_id");--> statement-breakpoint
 CREATE INDEX "transcript_segment_session_idx" ON "transcript_segment" USING btree ("session_id","start_ms");--> statement-breakpoint

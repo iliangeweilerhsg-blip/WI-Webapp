@@ -125,6 +125,44 @@ describe('Migration vom Phase-1-Stand (0006_transcript)', () => {
         VALUES (${uuidv7()}, ${u}, ${sessionId}, ${slideId}, 1, 0, 10, 'korrektur', 1)`,
     ).rejects.toThrow(/slide_segment_source_chk/);
 
+    // Negativ-Inserts mit Gegenprobe: dieselbe Zeile mit gültigem Wert geht durch (L4)
+    const slideSegmentWith = (confidence: number) =>
+      sql`INSERT INTO slide_segment (id, user_id, session_id, slide_id, slide_index, start_ms, end_ms, source, confidence)
+        VALUES (${uuidv7()}, ${u}, ${sessionId}, ${slideId}, 1, 0, 10, 'ausrichtung', ${confidence})`;
+    await expect(slideSegmentWith(1.5)).rejects.toThrow(/slide_segment_confidence_chk/);
+    await expect(slideSegmentWith(-0.1)).rejects.toThrow(/slide_segment_confidence_chk/);
+    await slideSegmentWith(0.5);
+
+    // Zweite Aufnahme, damit die Gegenproben für transcript nicht an transcript_recording_uq scheitern
+    const recording2Id = uuidv7();
+    await sql`INSERT INTO recording (id, user_id, session_id, mime, codec, started_ms, duration_ms, state)
+      VALUES (${recording2Id}, ${u}, ${sessionId}, 'audio/webm;codecs=opus', 'opus', 5400000, 60000, 'vollstaendig')`;
+    const transcriptWith = (id: string, recId: string, inputHash: string, language: string | null) =>
+      sql`INSERT INTO transcript (id, user_id, session_id, recording_id, job_id, finalize_job_id, provider, model,
+          language, input_hash, audio_sha256, audio_duration_ms, segment_count, word_count)
+        VALUES (${id}, ${u}, ${sessionId}, ${recId}, ${jobId}, ${finalizeJobId}, 'fake', 'fake-1',
+          ${language}, ${inputHash}, ${HEX}, 60000, 0, 0)`;
+    await expect(transcriptWith(uuidv7(), recording2Id, 'A'.repeat(64), 'en')).rejects.toThrow(
+      /transcript_input_hash_chk/,
+    );
+    await expect(transcriptWith(uuidv7(), recording2Id, 'a'.repeat(63), 'en')).rejects.toThrow(
+      /transcript_input_hash_chk/,
+    );
+    await expect(transcriptWith(uuidv7(), recording2Id, HEX, 'Deutsch')).rejects.toThrow(
+      /transcript_language_chk/,
+    );
+    const transcript2Id = uuidv7();
+    await transcriptWith(transcript2Id, recording2Id, 'b'.repeat(64), 'en');
+
+    // Zusammengesetzter FK (L5): Abschnitt muss zu Aufnahme und Session seines Transkripts passen
+    const segmentWith = (recId: string, sessId: string) =>
+      sql`INSERT INTO transcript_segment (id, user_id, transcript_id, session_id, recording_id, seq, start_ms, end_ms, text)
+        VALUES (${uuidv7()}, ${u}, ${transcript2Id}, ${sessId}, ${recId}, 0, 5400000, 5401000, 'Gegenprobe.')`;
+    await expect(segmentWith(recordingId, sessionId)).rejects.toThrow(/transcript_segment_transcript_fk/);
+    await segmentWith(recording2Id, sessionId);
+    await sql`DELETE FROM transcript WHERE id = ${transcript2Id}`;
+    await sql`DELETE FROM slide_segment WHERE source = 'ausrichtung'`;
+
     // updated_at pflegt die Datenbank (Trigger wie 0002)
     const triggers = await sql`SELECT tgname FROM pg_trigger WHERE tgname LIKE '%_touch_updated_at'
       AND tgrelid IN ('transcript'::regclass, 'transcript_segment'::regclass, 'slide_segment'::regclass)`;

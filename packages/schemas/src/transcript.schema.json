@@ -281,7 +281,7 @@
           "items": {
             "$ref": "#/$defs/TranscriptWord"
           },
-          "description": "Nur mit include_words=true"
+          "description": "Nur mit include_words=true: genau die Wörter dieser Zeile, [] wenn der Abschnitt keine Wort-Zeitstempel hat (VERTRAEGE §18.4)"
         }
       }
     },
@@ -367,7 +367,7 @@
       "properties": {
         "from_step": {
           "$ref": "#/$defs/PipelineStep",
-          "description": "Standard transcribe. Alle späteren Schritte laufen mit"
+          "description": "Standard transcribe. Alle späteren Schritte laufen mit (VERTRAEGE §18.2)"
         },
         "force": {
           "type": "boolean",

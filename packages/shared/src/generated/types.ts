@@ -3566,7 +3566,7 @@ end_ms: SessionMs
 text: string
 lang: (LanguageCode | null)
 /**
- * Nur mit include_words=true
+ * Nur mit include_words=true: genau die Wörter dieser Zeile, [] wenn der Abschnitt keine Wort-Zeitstempel hat (VERTRAEGE §18.4)
  */
 words?: TranscriptWord[]
 }

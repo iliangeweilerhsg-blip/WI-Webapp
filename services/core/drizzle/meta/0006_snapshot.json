@@ -1,5 +1,5 @@
 {
-  "id": "5852b2d6-d3a4-4250-ae25-49e9ebb54965",
+  "id": "b50e9d2e-4a9e-4b26-a0e5-f92daca82b9c",
   "prevId": "4e8d4b9d-8a66-4d38-b9d7-8c3757e52dc4",
   "version": "7",
   "dialect": "postgresql",
@@ -4399,6 +4399,11 @@
           "name": "transcript_recording_uq",
           "nullsNotDistinct": false,
           "columns": ["recording_id"]
+        },
+        "transcript_id_recording_session_uq": {
+          "name": "transcript_id_recording_session_uq",
+          "nullsNotDistinct": false,
+          "columns": ["id", "recording_id", "session_id"]
         }
       },
       "policies": {},
@@ -4413,7 +4418,7 @@
         },
         "transcript_initial_prompt_chk": {
           "name": "transcript_initial_prompt_chk",
-          "value": "\"transcript\".\"initial_prompt\" IS NULL OR char_length(\"transcript\".\"initial_prompt\") <= 600"
+          "value": "\"transcript\".\"initial_prompt\" IS NULL OR char_length(\"transcript\".\"initial_prompt\") <= 2000"
         },
         "transcript_input_hash_chk": {
           "name": "transcript_input_hash_chk",
@@ -4573,21 +4578,21 @@
         }
       },
       "foreignKeys": {
-        "transcript_segment_transcript_id_transcript_id_fk": {
-          "name": "transcript_segment_transcript_id_transcript_id_fk",
-          "tableFrom": "transcript_segment",
-          "tableTo": "transcript",
-          "columnsFrom": ["transcript_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
         "transcript_segment_session_id_session_id_fk": {
           "name": "transcript_segment_session_id_session_id_fk",
           "tableFrom": "transcript_segment",
           "tableTo": "session",
           "columnsFrom": ["session_id"],
           "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "transcript_segment_transcript_fk": {
+          "name": "transcript_segment_transcript_fk",
+          "tableFrom": "transcript_segment",
+          "tableTo": "transcript",
+          "columnsFrom": ["transcript_id", "recording_id", "session_id"],
+          "columnsTo": ["id", "recording_id", "session_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }

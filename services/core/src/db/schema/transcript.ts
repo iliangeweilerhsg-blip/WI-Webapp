@@ -3,7 +3,19 @@
 // `slide_id` bleibt ohne Fremdschlüssel (wie `slide_event`, VERTRAEGE §6): Folien werden weich gelöscht,
 // Leser filtern über einen Join auf nicht gelöschte `slide`.
 import { sql } from 'drizzle-orm';
-import { bigint, check, index, integer, jsonb, pgTable, real, text, unique, uuid } from 'drizzle-orm/pg-core';
+import {
+  bigint,
+  check,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  real,
+  text,
+  unique,
+  uuid,
+} from 'drizzle-orm/pg-core';
 import type { TranscriptWord } from '@sg/shared';
 import { baseColumns, embedding } from './common.ts';
 import { session } from './organisation.ts';
@@ -32,7 +44,7 @@ export const transcript = pgTable(
     provider: text('provider').notNull(), // mlx-whisper | fake
     model: text('model').notNull(),
     language: text('language'), // erkannte Sprache (ISO 639-1), NULL = unbekannt
-    initialPrompt: text('initial_prompt'), // Vokabular-Hinweis (05 §P4), höchstens 600 Zeichen
+    initialPrompt: text('initial_prompt'), // Vokabular-Hinweis (05 §P4), ≤ 200 Whisper-Tokens (§18.6), Schutzgrenze 2000 Zeichen
     inputHash: text('input_hash').notNull(),
     audioSha256: text('audio_sha256').notNull(),
     audioDurationMs: int8('audio_duration_ms').notNull(),
@@ -42,11 +54,13 @@ export const transcript = pgTable(
   (t) => [
     index('transcript_session_idx').on(t.sessionId),
     unique('transcript_recording_uq').on(t.recordingId),
+    // Ziel des zusammengesetzten Fremdschlüssels aus transcript_segment (Abschnitt passt zu Aufnahme und Session)
+    unique('transcript_id_recording_session_uq').on(t.id, t.recordingId, t.sessionId),
     check('transcript_provider_chk', sql`${t.provider} IN ('mlx-whisper','fake')`),
     check('transcript_language_chk', sql`${t.language} IS NULL OR ${t.language} ~ '^[a-z]{2,3}$'`),
     check(
       'transcript_initial_prompt_chk',
-      sql`${t.initialPrompt} IS NULL OR char_length(${t.initialPrompt}) <= 600`,
+      sql`${t.initialPrompt} IS NULL OR char_length(${t.initialPrompt}) <= 2000`,
     ),
     check('transcript_input_hash_chk', sql`${t.inputHash} ~ '^[0-9a-f]{64}$'`),
     check('transcript_audio_sha256_chk', sql`${t.audioSha256} ~ '^[0-9a-f]{64}$'`),
@@ -63,13 +77,11 @@ export const transcriptSegment = pgTable(
   'transcript_segment',
   {
     ...baseColumns(),
-    transcriptId: uuid('transcript_id')
-      .notNull()
-      .references(() => transcript.id, { onDelete: 'cascade' }),
+    transcriptId: uuid('transcript_id').notNull(), // FK zusammengesetzt, siehe unten
     sessionId: uuid('session_id')
       .notNull()
       .references(() => session.id, { onDelete: 'cascade' }),
-    recordingId: uuid('recording_id').notNull(), // = transcript.recording_id (für Abfragen ohne Join)
+    recordingId: uuid('recording_id').notNull(), // = transcript.recording_id (FK unten), für Abfragen ohne Join
     seq: integer('seq').notNull(), // Reihenfolge im Transkript, ab 0
     startMs: int8('start_ms').notNull(),
     endMs: int8('end_ms').notNull(),
@@ -83,6 +95,11 @@ export const transcriptSegment = pgTable(
   },
   (t) => [
     unique('transcript_segment_seq_uq').on(t.transcriptId, t.seq),
+    foreignKey({
+      name: 'transcript_segment_transcript_fk',
+      columns: [t.transcriptId, t.recordingId, t.sessionId],
+      foreignColumns: [transcript.id, transcript.recordingId, transcript.sessionId],
+    }).onDelete('cascade'),
     index('transcript_segment_session_idx').on(t.sessionId, t.startMs),
     check('transcript_segment_seq_chk', sql`${t.seq} >= 0`),
     check('transcript_segment_time_chk', sql`${t.startMs} >= 0 AND ${t.endMs} >= ${t.startMs}`),
