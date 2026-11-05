@@ -749,6 +749,34 @@ class RecordingState(StrEnum):
     mit_luecken = 'mit_luecken'
 
 
+class RestoreTestReason(StrEnum):
+    """
+    Grund eines fehlgeschlagenen Restore-Tests, die Oberfläche leitet daraus die Handlungsempfehlung ab
+    """
+
+    kein_ziel = 'kein_ziel'
+    kein_backup = 'kein_backup'
+    ziel_nicht_erreichbar = 'ziel_nicht_erreichbar'
+    nicht_authentisch = 'nicht_authentisch'
+    beschaedigt = 'beschaedigt'
+    dateien_abweichend = 'dateien_abweichend'
+    tabellen_fehlen = 'tabellen_fehlen'
+    restore_fehlgeschlagen = 'restore_fehlgeschlagen'
+    abgebrochen = 'abgebrochen'
+    intern = 'intern'
+
+
+class RestoreTestState(StrEnum):
+    laeuft = 'laeuft'
+    ok = 'ok'
+    fehler = 'fehler'
+
+
+class RestoreTestTrigger(StrEnum):
+    zeitplan = 'zeitplan'
+    manuell = 'manuell'
+
+
 class ReviewState(StrEnum):
     """
     Nacharbeitung (F-NAC-05, Phase 2)
@@ -1169,21 +1197,6 @@ class BackupRun(BaseModel):
         description='Name des Stands für sg restore <stand>, z. B. 20261104T030012Z. null solange er läuft oder bei Fehler',
         pattern='^[0-9]{8}T[0-9]{6}Z$',
     )
-
-
-class BackupStatus(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    target: StrictStr | None = Field(
-        ..., description='null = kein Ziel eingestellt, Backups pausieren'
-    )
-    last_success_at: AwareDatetime | None
-    next_run_at: AwareDatetime | None
-    stale: StrictBool = Field(
-        ..., description='Letztes erfolgreiches Backup älter als 3 Tage (F-DAT-01)'
-    )
-    running: StrictBool
 
 
 class CalendarEvent(BaseModel):
@@ -3094,6 +3107,39 @@ class RecordingCreate(BaseModel):
     chunks_independent: StrictBool | None = None
 
 
+class RestoreTest(BaseModel):
+    """
+    Ergebnis des Restore-Tests (F-DAT-02): Stand des eigenen Backups in eine Wegwerf-Datenbank einspielen, Objekte zählen, aufräumen
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    state: RestoreTestState
+    trigger: RestoreTestTrigger
+    started_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    finished_at: AwareDatetime | None = Field(
+        ..., description='null solange der Test läuft'
+    )
+    stand: StrictStr | None = Field(
+        ...,
+        description='Getesteter Stand, null wenn keiner gefunden wurde',
+        pattern='^[0-9]{8}T[0-9]{6}Z$',
+    )
+    is_latest: StrictBool | None = Field(
+        ...,
+        description='true = der getestete Stand war zum Testzeitpunkt der jüngste erfolgreiche Lauf, false = ein älterer (der jüngste ließ sich nicht testen), null = unbekannt (läuft noch oder kein Stand gewählt)',
+    )
+    reason: RestoreTestReason | None = Field(..., description='Nur bei state = fehler')
+    error: StrictStr | None = Field(
+        ...,
+        description='Technischer Fehlertext (ohne Zugangsdaten und Datenordner), nur bei state = fehler',
+        max_length=500,
+    )
+
+
 class Semester(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -4092,17 +4138,23 @@ class AudioFinalizeResult(BaseModel):
     job_duration_ms: StrictInt = Field(..., description='Laufzeit des Jobs', ge=0)
 
 
-class BackupOverview(BaseModel):
-    """
-    GET /backups: Status und Läufe, neueste zuerst
-    """
-
+class BackupStatus(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    status: BackupStatus
-    items: list[BackupRun]
-    next_cursor: StrictStr | None
+    target: StrictStr | None = Field(
+        ..., description='null = kein Ziel eingestellt, Backups pausieren'
+    )
+    last_success_at: AwareDatetime | None
+    next_run_at: AwareDatetime | None
+    stale: StrictBool = Field(
+        ..., description='Letztes erfolgreiches Backup älter als 3 Tage (F-DAT-01)'
+    )
+    running: StrictBool
+    restore_test: RestoreTest | None = Field(
+        ...,
+        description='Letzter automatischer oder manueller Restore-Test (F-DAT-02), null = noch keiner gelaufen',
+    )
 
 
 class DrawingSnapshotData(BaseModel):
@@ -4810,6 +4862,19 @@ class TrashList(BaseModel):
     next_cursor: StrictStr | None
 
 
+class BackupOverview(BaseModel):
+    """
+    GET /backups: Status und Läufe, neueste zuerst
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    status: BackupStatus
+    items: list[BackupRun]
+    next_cursor: StrictStr | None
+
+
 class MoodleCourseContents(BaseModel):
     """
     Antwort von GET /moodle/courses/{course_id}/contents
@@ -5226,6 +5291,14 @@ class SchemaBundle(BaseModel):
     )
     RecordingCreate_1: RecordingCreate | None = Field(None, alias='RecordingCreate')
     RecordingState_1: RecordingState | None = Field(None, alias='RecordingState')
+    RestoreTest_1: RestoreTest | None = Field(None, alias='RestoreTest')
+    RestoreTestReason_1: RestoreTestReason | None = Field(
+        None, alias='RestoreTestReason'
+    )
+    RestoreTestState_1: RestoreTestState | None = Field(None, alias='RestoreTestState')
+    RestoreTestTrigger_1: RestoreTestTrigger | None = Field(
+        None, alias='RestoreTestTrigger'
+    )
     ReviewState_1: ReviewState | None = Field(None, alias='ReviewState')
     Semester_1: Semester | None = Field(None, alias='Semester')
     SemesterCreate_1: SemesterCreate | None = Field(None, alias='SemesterCreate')

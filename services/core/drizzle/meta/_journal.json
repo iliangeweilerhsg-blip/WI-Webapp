@@ -29,6 +29,13 @@
       "when": 1793822034505,
       "tag": "0003_phase1",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793864974283,
+      "tag": "0004_restore_test",
+      "breakpoints": true
     }
   ]
 }

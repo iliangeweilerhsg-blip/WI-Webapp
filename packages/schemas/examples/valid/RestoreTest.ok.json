@@ -1,0 +1,10 @@
+{
+  "state": "ok",
+  "trigger": "zeitplan",
+  "started_at": "2026-11-01T09:00:00Z",
+  "finished_at": "2026-11-01T09:00:41Z",
+  "stand": "20261104T020000Z",
+  "is_latest": true,
+  "reason": null,
+  "error": null
+}

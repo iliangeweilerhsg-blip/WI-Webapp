@@ -14,6 +14,7 @@ import { healthUrl, type SgConfig } from './config.ts';
 import { openPg, realExec, type Exec, type PgAccess } from './pg.ts';
 import { readService } from './procs.ts';
 import { readJournal, recoverRestore, runRestore } from './restore.ts';
+import { RESTORE_TEST_TRIGGERS, runAutoRestoreTest, type RestoreTestTrigger } from './restore-auto.ts';
 
 const log = (msg: string): void => console.log(`[sg] ${msg}`);
 const err = (msg: string): void => console.error(`[sg] ${msg}`);
@@ -56,16 +57,28 @@ export function parseBackupArgs(rest: string[]): BackupArgs {
 }
 
 export type RestoreArgs =
-  { ok: true; stand?: string; test: boolean; target?: string; yes: boolean } | { ok: false; message: string };
+  | { ok: true; auto?: undefined; stand?: string; test: boolean; target?: string; yes: boolean }
+  | { ok: true; auto: true; trigger: RestoreTestTrigger }
+  | { ok: false; message: string };
 
 export function parseRestoreArgs(rest: string[]): RestoreArgs {
   let stand: string | undefined;
   let target: string | undefined;
   let test = false;
   let yes = false;
+  let auto = false;
+  let trigger: RestoreTestTrigger = 'manuell';
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i] as string;
-    if (arg === '--test') test = true;
+    if (arg === '--automatisch') auto = true;
+    else if (arg === '--trigger') {
+      const value = rest[i + 1];
+      if (!RESTORE_TEST_TRIGGERS.includes(value as RestoreTestTrigger)) {
+        return { ok: false, message: `--trigger erwartet ${RESTORE_TEST_TRIGGERS.join(' | ')}.` };
+      }
+      trigger = value as RestoreTestTrigger;
+      i += 1;
+    } else if (arg === '--test') test = true;
     else if (arg === '--ja' || arg === '--yes') yes = true;
     else if (arg === '--ziel' || arg === '--target') {
       const value = rest[i + 1];
@@ -73,10 +86,21 @@ export function parseRestoreArgs(rest: string[]): RestoreArgs {
       target = value;
       i += 1;
     } else if (arg.startsWith('-')) {
-      return { ok: false, message: `Unbekannte Option "${arg}". Erlaubt: --test, --ziel, --ja.` };
+      return {
+        ok: false,
+        message: `Unbekannte Option "${arg}". Erlaubt: --test, --ziel, --ja, --automatisch, --trigger.`,
+      };
     } else if (stand === undefined) stand = arg;
     else return { ok: false, message: 'Es darf nur ein Stand angegeben werden.' };
   }
+  if (auto) {
+    // Der Automatiktest nimmt nur das eigene Ziel und den jüngsten eigenen Stand (kein fremdes Backup)
+    if (stand || target || yes || test)
+      return { ok: false, message: '--automatisch erlaubt weder Stand noch --ziel, --test oder --ja.' };
+    return { ok: true, auto: true, trigger };
+  }
+  if (trigger !== 'manuell' || rest.includes('--trigger'))
+    return { ok: false, message: '--trigger gehört nur zu --automatisch.' };
   if (test && !stand)
     return { ok: false, message: '--test braucht einen Stand: pnpm sg restore --test <stand>' };
   return { ok: true, test, yes, ...(stand ? { stand } : {}), ...(target ? { target } : {}) };
@@ -160,17 +184,16 @@ export async function restoreCommand(cfg: SgConfig, rest: string[]): Promise<num
     err((e as Error).message);
     return 1;
   }
-  return runRestore(
-    {
-      cfg,
-      pg,
-      ...io,
-      servicesRunning: () => runningServices(cfg),
-      confirm: askYesNo,
-      codeMigrations: journalCount(cfg.repoRoot),
-    },
-    { stand: args.stand, test: args.test, target: args.target, yes: args.yes },
-  );
+  const deps = {
+    cfg,
+    pg,
+    ...io,
+    servicesRunning: () => runningServices(cfg),
+    confirm: askYesNo,
+    codeMigrations: journalCount(cfg.repoRoot),
+  };
+  if (args.auto) return runAutoRestoreTest(deps, { trigger: args.trigger });
+  return runRestore(deps, { stand: args.stand, test: args.test, target: args.target, yes: args.yes });
 }
 
 // ---------------------------------------------------------------- Backup vor Migrationen

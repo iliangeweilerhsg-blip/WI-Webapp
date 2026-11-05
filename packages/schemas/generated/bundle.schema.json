@@ -554,6 +554,18 @@
     "RecordingState": {
       "$ref": "#/$defs/RecordingState"
     },
+    "RestoreTest": {
+      "$ref": "#/$defs/RestoreTest"
+    },
+    "RestoreTestReason": {
+      "$ref": "#/$defs/RestoreTestReason"
+    },
+    "RestoreTestState": {
+      "$ref": "#/$defs/RestoreTestState"
+    },
+    "RestoreTestTrigger": {
+      "$ref": "#/$defs/RestoreTestTrigger"
+    },
     "ReviewState": {
       "$ref": "#/$defs/ReviewState"
     },
@@ -1222,7 +1234,8 @@
         "last_success_at",
         "next_run_at",
         "stale",
-        "running"
+        "running",
+        "restore_test"
       ],
       "additionalProperties": false,
       "properties": {
@@ -1259,6 +1272,17 @@
         },
         "running": {
           "type": "boolean"
+        },
+        "restore_test": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RestoreTest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Letzter automatischer oder manueller Restore-Test (F-DAT-02), null = noch keiner gelaufen"
         }
       }
     },
@@ -6922,6 +6946,112 @@
         "laeuft",
         "vollstaendig",
         "mit_luecken"
+      ]
+    },
+    "RestoreTest": {
+      "title": "RestoreTest",
+      "type": "object",
+      "description": "Ergebnis des Restore-Tests (F-DAT-02): Stand des eigenen Backups in eine Wegwerf-Datenbank einspielen, Objekte zählen, aufräumen",
+      "required": [
+        "state",
+        "trigger",
+        "started_at",
+        "finished_at",
+        "stand",
+        "is_latest",
+        "reason",
+        "error"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/RestoreTestState"
+        },
+        "trigger": {
+          "$ref": "#/$defs/RestoreTestTrigger"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "null solange der Test läuft"
+        },
+        "stand": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{8}T[0-9]{6}Z$",
+          "description": "Getesteter Stand, null wenn keiner gefunden wurde"
+        },
+        "is_latest": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "true = der getestete Stand war zum Testzeitpunkt der jüngste erfolgreiche Lauf, false = ein älterer (der jüngste ließ sich nicht testen), null = unbekannt (läuft noch oder kein Stand gewählt)"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RestoreTestReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nur bei state = fehler"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500,
+          "description": "Technischer Fehlertext (ohne Zugangsdaten und Datenordner), nur bei state = fehler"
+        }
+      }
+    },
+    "RestoreTestReason": {
+      "title": "RestoreTestReason",
+      "type": "string",
+      "description": "Grund eines fehlgeschlagenen Restore-Tests, die Oberfläche leitet daraus die Handlungsempfehlung ab",
+      "enum": [
+        "kein_ziel",
+        "kein_backup",
+        "ziel_nicht_erreichbar",
+        "nicht_authentisch",
+        "beschaedigt",
+        "dateien_abweichend",
+        "tabellen_fehlen",
+        "restore_fehlgeschlagen",
+        "abgebrochen",
+        "intern"
+      ]
+    },
+    "RestoreTestState": {
+      "title": "RestoreTestState",
+      "type": "string",
+      "enum": [
+        "laeuft",
+        "ok",
+        "fehler"
+      ]
+    },
+    "RestoreTestTrigger": {
+      "title": "RestoreTestTrigger",
+      "type": "string",
+      "enum": [
+        "zeitplan",
+        "manuell"
       ]
     },
     "ReviewState": {

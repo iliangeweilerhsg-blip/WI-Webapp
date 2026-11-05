@@ -74,7 +74,14 @@ describe('GET /backups', () => {
     const res = await t.request({ method: 'GET', url: `${API}/backups` });
     expect(res.statusCode).toBe(200);
     expect(res.json<BackupOverview>()).toEqual({
-      status: { target: null, last_success_at: null, next_run_at: null, stale: true, running: false },
+      status: {
+        target: null,
+        last_success_at: null,
+        next_run_at: null,
+        stale: true,
+        running: false,
+        restore_test: null,
+      },
       items: [],
       next_cursor: null,
     });

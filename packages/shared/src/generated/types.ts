@@ -62,6 +62,23 @@ export type AudioGapReason = ("fehlender_chunk" | "zeitluecke")
 export type BBox = number[]
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "RestoreTestState".
+ */
+export type RestoreTestState = ("laeuft" | "ok" | "fehler")
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "RestoreTestTrigger".
+ */
+export type RestoreTestTrigger = ("zeitplan" | "manuell")
+/**
+ * Grund eines fehlgeschlagenen Restore-Tests, die Oberfläche leitet daraus die Handlungsempfehlung ab
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "RestoreTestReason".
+ */
+export type RestoreTestReason = ("kein_ziel" | "kein_backup" | "ziel_nicht_erreichbar" | "nicht_authentisch" | "beschaedigt" | "dateien_abweichend" | "tabellen_fehlen" | "restore_fehlgeschlagen" | "abgebrochen" | "intern")
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "BackupState".
  */
 export type BackupState = ("laeuft" | "fertig" | "fehler")
@@ -525,6 +542,41 @@ next_run_at: (Timestamp | null)
  */
 stale: boolean
 running: boolean
+/**
+ * Letzter automatischer oder manueller Restore-Test (F-DAT-02), null = noch keiner gelaufen
+ */
+restore_test: (RestoreTest | null)
+}
+/**
+ * Ergebnis des Restore-Tests (F-DAT-02): Stand des eigenen Backups in eine Wegwerf-Datenbank einspielen, Objekte zählen, aufräumen
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "RestoreTest".
+ */
+export interface RestoreTest {
+state: RestoreTestState
+trigger: RestoreTestTrigger
+started_at: Timestamp
+/**
+ * null solange der Test läuft
+ */
+finished_at: (Timestamp | null)
+/**
+ * Getesteter Stand, null wenn keiner gefunden wurde
+ */
+stand: (string | null)
+/**
+ * true = der getestete Stand war zum Testzeitpunkt der jüngste erfolgreiche Lauf, false = ein älterer (der jüngste ließ sich nicht testen), null = unbekannt (läuft noch oder kein Stand gewählt)
+ */
+is_latest: (boolean | null)
+/**
+ * Nur bei state = fehler
+ */
+reason: (RestoreTestReason | null)
+/**
+ * Technischer Fehlertext (ohne Zugangsdaten und Datenordner), nur bei state = fehler
+ */
+error: (string | null)
 }
 /**
  * Ein Backup-Lauf (03 §13 backup_run)

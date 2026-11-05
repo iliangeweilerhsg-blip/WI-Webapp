@@ -1,9 +1,15 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import type { BackupRun } from '@sg/shared';
+import type { BackupRun, RestoreTest } from '@sg/shared';
 import { friendlyMessage } from '../../lib/api.ts';
-import { useBackups, useSettings, useStartBackup, useUpdateSettings } from '../../lib/data.ts';
+import {
+  useBackups,
+  useSettings,
+  useStartBackup,
+  useStartRestoreTest,
+  useUpdateSettings,
+} from '../../lib/data.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { CoreHint } from '../CoreHint.tsx';
 
@@ -15,6 +21,37 @@ const STATE_LABEL: Record<BackupRun['state'], string> = {
   fertig: 'fertig',
   fehler: 'Fehler',
 };
+
+/** Verständlicher Hinweis mit Handlungsempfehlung je Fehlergrund des Restore-Tests (F-DAT-02) */
+const RESTORE_ADVICE: Record<NonNullable<RestoreTest['reason']>, string> = {
+  kein_ziel:
+    'Es ist kein Backup-Ziel eingestellt, darum gibt es nichts zu testen. Lege unten einen Ordner als Backup-Ziel fest und sichere einmal.',
+  kein_backup:
+    'Es gab noch kein Backup, das sich testen lässt. Lege mit „Jetzt sichern“ ein Backup an und teste danach erneut.',
+  ziel_nicht_erreichbar:
+    'Das Backup-Ziel ist nicht erreichbar. Schließe den Datenträger an bzw. prüfe den Ordnerpfad und teste erneut.',
+  nicht_authentisch:
+    'Der Stand im Backup-Ziel passt nicht zu deinem protokollierten Backup und wurde aus Sicherheitsgründen nicht geprüft. Jemand oder etwas hat das Ziel verändert. Prüfe das Ziel und lege mit „Jetzt sichern“ ein neues Backup an.',
+  beschaedigt:
+    'Der Stand im Backup-Ziel ist beschädigt. Lege mit „Jetzt sichern“ ein neues Backup an und prüfe den Datenträger.',
+  dateien_abweichend:
+    'Fotos, Aufnahmen oder Notizen im Backup sind unvollständig. Lege mit „Jetzt sichern“ ein neues Backup an und prüfe den Datenträger.',
+  tabellen_fehlen:
+    'Im Backup fehlen Daten der Datenbank. Lege mit „Jetzt sichern“ ein neues Backup an. Tritt es erneut auf, melde es.',
+  restore_fehlgeschlagen:
+    'Das Backup ließ sich nicht einspielen. Lege mit „Jetzt sichern“ ein neues Backup an und teste erneut. Prüfe, ob PostgreSQL läuft und genug Platz frei ist.',
+  abgebrochen:
+    'Der Test wurde nicht beendet (Mac ausgeschaltet oder Programm beendet). Starte ihn mit „Jetzt testen“ erneut.',
+  intern: 'Der Test konnte nicht ausgeführt werden. Starte ihn mit „Jetzt testen“ erneut.',
+};
+
+/** `20261104T030012Z` → Datum (UTC) für die Anzeige, sonst der Name selbst */
+export function standLabel(stand: string): string {
+  const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(stand);
+  if (!m) return stand;
+  const date = new Date(Date.UTC(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +m[6]!));
+  return date.toLocaleString('de-DE');
+}
 
 export function formatSize(bytes: number | null): string {
   if (bytes === null) return '–';
@@ -34,6 +71,7 @@ export function DataSettings() {
   const backups = useBackups();
   const settings = useSettings();
   const start = useStartBackup();
+  const startTest = useStartRestoreTest();
   const update = useUpdateSettings();
   const toast = useToast();
   const [target, setTarget] = useState<string | null>(null);
@@ -87,6 +125,12 @@ export function DataSettings() {
         ) : null}
         {status.next_run_at ? ` · nächstes: ${new Date(status.next_run_at).toLocaleString('de-DE')}` : ''}
       </p>
+
+      <RestoreTestStatus
+        test={status.restore_test}
+        disabled={startTest.isPending || status.running || status.target === null}
+        onStart={() => startTest.mutate(undefined, { onError: fail })}
+      />
 
       {data.backup_encryption && data.backup_target !== null ? (
         <div role="status" className="space-y-2 rounded-md border border-border bg-accent-soft p-3 text-sm">
@@ -178,5 +222,48 @@ export function DataSettings() {
         </table>
       ) : null}
     </section>
+  );
+}
+
+function RestoreTestStatus(props: { test: RestoreTest | null; disabled: boolean; onStart: () => void }) {
+  const { test } = props;
+  const running = test?.state === 'laeuft';
+  const date = test ? new Date(test.finished_at ?? test.started_at).toLocaleString('de-DE') : '';
+  return (
+    <div className="space-y-1 text-sm" role="status" aria-label="Restore-Test">
+      <p>
+        {test === null
+          ? 'Restore-Test: noch nicht gelaufen. Er prüft einmal im Monat automatisch, ob sich dein jüngstes Backup wiederherstellen lässt.'
+          : test.state === 'laeuft'
+            ? 'Restore-Test läuft …'
+            : test.state === 'ok'
+              ? `Letzter Restore-Test: ${date}, erfolgreich`
+              : `Letzter Restore-Test: ${date}, fehlgeschlagen`}
+        <button
+          type="button"
+          disabled={props.disabled || running}
+          className={`${smallButton} ml-3`}
+          onClick={props.onStart}
+        >
+          {running ? 'Test läuft …' : 'Jetzt testen'}
+        </button>
+      </p>
+      {test?.stand && test.state !== 'laeuft' ? (
+        <p className="text-xs text-text-muted">Getesteter Stand: {standLabel(test.stand)}</p>
+      ) : null}
+      {test?.state === 'ok' && test.is_latest === false ? (
+        <p className="rounded-md border border-border bg-accent-soft p-3">
+          Achtung: Getestet wurde nicht dein jüngstes Backup, sondern ein älterer Stand, weil sich das jüngste
+          nicht prüfen ließ (zum Beispiel fehlt es im Ziel). Lege mit „Jetzt sichern“ ein neues Backup an und
+          teste danach erneut.
+        </p>
+      ) : null}
+      {test?.state === 'fehler' && test.reason ? (
+        <div className="rounded-md border border-border bg-accent-soft p-3">
+          <p>{RESTORE_ADVICE[test.reason]}</p>
+          {test.error ? <p className="mt-1 text-xs text-text-muted">Technisch: {test.error}</p> : null}
+        </div>
+      ) : null}
+    </div>
   );
 }

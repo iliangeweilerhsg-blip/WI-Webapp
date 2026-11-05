@@ -3,5 +3,15 @@
   "last_success_at": "2026-11-04T02:02:12Z",
   "next_run_at": "2026-11-05T02:00:00Z",
   "stale": false,
-  "running": false
+  "running": false,
+  "restore_test": {
+    "state": "ok",
+    "trigger": "zeitplan",
+    "started_at": "2026-11-01T09:00:00Z",
+    "finished_at": "2026-11-01T09:00:41Z",
+    "stand": "20261104T020000Z",
+    "is_latest": true,
+    "reason": null,
+    "error": null
+  }
 }

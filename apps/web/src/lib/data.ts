@@ -5,6 +5,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import {
   BackupOverviewSchema,
   BackupRunSchema,
+  RestoreTestSchema,
   SettingsSchema,
   TrashListSchema,
   TrashRestoreResultSchema,
@@ -29,7 +30,8 @@ export function useBackups() {
     queryKey: ['backups'],
     queryFn: ({ signal }) => apiGet('/backups?limit=10', BackupOverviewSchema, { signal }),
     // Solange ein Lauf läuft, regelmäßig nachsehen
-    refetchInterval: (q) => (q.state.data?.status.running ? 3_000 : false),
+    refetchInterval: (q) =>
+      q.state.data?.status.running || q.state.data?.status.restore_test?.state === 'laeuft' ? 3_000 : false,
   });
   return useHydrationSafe(query);
 }
@@ -38,6 +40,14 @@ export function useStartBackup() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: () => apiSend('POST', '/backup', BackupRunSchema),
+    onSettled: () => client.invalidateQueries({ queryKey: ['backups'] }),
+  });
+}
+
+export function useStartRestoreTest() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiSend('POST', '/restore-test', RestoreTestSchema),
     onSettled: () => client.invalidateQueries({ queryKey: ['backups'] }),
   });
 }
