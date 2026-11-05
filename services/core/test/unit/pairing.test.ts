@@ -157,6 +157,24 @@ describe('Fenster', () => {
     }
   });
 
+  it('läuft das Fenster während confirming ab und scheitert das Anlegen: expired', () => {
+    const { clock, pm } = setup();
+    const w = pm.open();
+    const grant = pm.beginConfirm(
+      { pairing_id: w.pairingId, code: w.code, public_nonce: NONCE(1) },
+      freshIp(),
+    );
+    clock.now += PAIRING_WINDOW_MS;
+    expect(pm.status().state).toBe('confirming');
+    grant.abort();
+    expect(pm.status().state).toBe('expired');
+    expect(
+      fails(() =>
+        pm.beginConfirm({ pairing_id: w.pairingId, code: w.code, public_nonce: NONCE(2) }, freshIp()),
+      ),
+    ).toBe('409 pairing_window_closed');
+  });
+
   it('confirming im Zustand qr_only und mit gemerktem Schließen', () => {
     const { pm } = setup();
     const w = pm.open();

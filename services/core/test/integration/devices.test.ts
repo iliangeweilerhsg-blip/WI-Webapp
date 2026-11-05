@@ -1,7 +1,7 @@
 // Geräte und Kopplung (VERTRAEGE §5, §7.5, §11.1, §12, T1-10): Routen, Wächter, Widerruf (REST und WS)
 import { createHash, randomBytes } from 'node:crypto';
 import { createServer, request as httpRequest } from 'node:http';
-import type { AddressInfo, Socket } from 'node:net';
+import { connect, type AddressInfo, type Socket } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { Writable } from 'node:stream';
 import { eq, sql } from 'drizzle-orm';
@@ -423,6 +423,41 @@ describe('Fenster am Mac schließen (DELETE /devices/pairings)', () => {
     expect(lines).toContain('incoming request');
     expect(lines).toContain('/api/v1/devices/pairings?pairing_id=[Redacted]');
     expect(lines).not.toContain(w.pairing_id);
+  });
+
+  it('auch nach # liest Fastify die Query; die Kennung steht trotzdem nicht im Log (#100, H-1)', async () => {
+    // Roh über TCP an einen echten Server: `inject` schneidet `#…` vorher ab
+    await t.app.listen({ port: 0, host: '127.0.0.1' });
+    const { port } = t.app.server.address() as AddressInfo;
+    const rawDelete = (path: string) =>
+      new Promise<number>((resolve, reject) => {
+        const socket = connect(port, '127.0.0.1', () =>
+          socket.write(
+            `DELETE ${path} HTTP/1.1\r\nHost: localhost:${TEST_PORT}\r\nConnection: close\r\n\r\n`,
+          ),
+        );
+        let data = '';
+        socket.on('data', (chunk: Buffer) => (data += chunk.toString('utf8')));
+        socket.on('error', reject);
+        socket.on('end', () => resolve(Number(data.split(' ')[1])));
+      });
+
+    const old = await openWindow();
+    const current = await openWindow();
+    const before = logLines.length;
+    // Fremde Kennung hinter #: Fastify liest sie als pairing_id, darum bleibt das aktuelle Fenster offen
+    expect(await rawDelete(`/api/v1/devices/pairings#pairing_id=${old.pairing_id}`)).toBe(204);
+    const stillOpen = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(stillOpen.headers['sg-pairing-state']).toBe('open');
+    expect(await rawDelete(`/api/v1/devices/pairings#x=1&pairing_id=${current.pairing_id}`)).toBe(204);
+    const closed = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(closed.headers['sg-pairing-state']).toBe('closed');
+
+    const lines = logLines.slice(before).join('\n');
+    expect(lines).toContain('/api/v1/devices/pairings#pairing_id=[Redacted]');
+    expect(lines).toContain('/api/v1/devices/pairings#x=1&pairing_id=[Redacted]');
+    expect(lines).not.toContain(old.pairing_id);
+    expect(lines).not.toContain(current.pairing_id);
   });
 });
 

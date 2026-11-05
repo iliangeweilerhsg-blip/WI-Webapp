@@ -9,6 +9,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
+import { connect, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
@@ -134,6 +135,68 @@ describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
     );
     // Ohne = und mit leerem Namen bleibt alles, wie es ist
     expect(redactUrl('/p?pairing_id&=x')).toBe('/p?pairing_id&=x');
+  });
+
+  it('die Query beginnt auch bei einem # vor dem ersten ? (find-my-way, Issue #100)', () => {
+    expect(redactUrl('/p#pairing_id=GEHEIM')).toBe('/p#pairing_id=[Redacted]');
+    expect(redactUrl('/p#x=1&pairing_id=GEHEIM')).toBe('/p#x=1&pairing_id=[Redacted]');
+    expect(redactUrl('/p#?pairing_id=GEHEIM')).toBe('/p#?pairing_id=[Redacted]');
+    expect(redactUrl('/p#a?pairing_id=GEHEIM&token=GEHEIM2')).toBe('/p#a?pairing_id=GEHEIM&token=[Redacted]');
+  });
+
+  it('zerlegt genauso wie Fastify: was Fastify als geheimen Parameter liest, ist geschwärzt (Issue #100)', async () => {
+    const lines: string[] = [];
+    const app = Fastify({
+      loggerInstance: pino(loggerOptions({ logLevel: 'info' }), { write: (c: string) => void lines.push(c) }),
+    });
+    app.delete('/p', async (request) => ({ query: request.query, url: request.url }));
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const { port } = app.server.address() as AddressInfo;
+    // Roh über TCP: inject bzw. ein HTTP-Client könnten `#` vorher abschneiden
+    const send = (path: string) =>
+      new Promise<{ query: Record<string, string>; url: string }>((resolve, reject) => {
+        const socket = connect(port, '127.0.0.1', () =>
+          socket.write(`DELETE ${path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`),
+        );
+        let data = '';
+        socket.on('data', (chunk) => (data += chunk.toString('utf8')));
+        socket.on('error', reject);
+        socket.on('end', () => {
+          const body = data.slice(data.indexOf('\r\n\r\n') + 4);
+          resolve(JSON.parse(body) as { query: Record<string, string>; url: string });
+        });
+      });
+    const cases: { path: string; secret: string | null }[] = [
+      { path: `/p?pairing_id=${SECRET}`, secret: SECRET },
+      { path: `/p#pairing_id=${SECRET}`, secret: SECRET },
+      { path: `/p#x=1&pairing_id=${SECRET}`, secret: SECRET },
+      { path: `/p#?pairing_id=${SECRET}`, secret: null }, // Fastify-Schlüssel ist `?pairing_id`
+      { path: `/p?x=1#&pairing_id=${SECRET}`, secret: SECRET },
+      { path: `/p?pairing_id=${SECRET}#frag`, secret: `${SECRET}#frag` },
+      { path: `/p?pairing_id=${SECRET}?x=1&y=2`, secret: `${SECRET}?x=1` },
+      { path: `/p#pairing_id=${SECRET}?x=1`, secret: `${SECRET}?x=1` },
+    ];
+    try {
+      for (const { path, secret } of cases) {
+        const res = await send(path);
+        expect(res.url).toBe(path);
+        expect(res.query.pairing_id ?? null).toBe(secret);
+        if (secret !== null) {
+          const redacted = redactUrl(path);
+          expect(redacted).not.toContain(SECRET);
+          // Auch der Rest des Werts, den Fastify liest (`#frag`, `?x=1`), ist weg
+          const rest = secret.slice(SECRET.length);
+          if (rest) expect(redacted).not.toContain(rest);
+          expect(redacted).toContain('pairing_id=[Redacted]');
+        }
+      }
+    } finally {
+      await app.close();
+    }
+    const log = lines.join('');
+    expect(log).toContain('incoming request');
+    // Auch `?pairing_id` (kein geheimer Name für Fastify) wird geschwärzt: lieber zu viel als zu wenig
+    expect(log).not.toContain(SECRET);
   });
 
   it('Namensgrenzen: harmlose Parameter bleiben lesbar, geheime werden geschwärzt', () => {

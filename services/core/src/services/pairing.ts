@@ -36,8 +36,9 @@ const HOUR_MS = 60 * MINUTE_MS;
  * - `none`: nie geöffnet (seit dem Start des Core)
  * - `open`: offen, beide Wege
  * - `qr_only`: zu viele Fehlversuche über `pair/start`, nur noch der QR-Weg ist offen
- * - `confirming`: ein richtiger Code wird gerade eingelöst, das Fenster ist für alle anderen zu. Danach `paired`,
- *   scheitert das Anlegen, wieder `open` bzw. `qr_only` (oder `closed`, falls währenddessen geschlossen wurde)
+ * - `confirming`: ein richtiger Code wird gerade eingelöst, das Fenster ist für alle anderen zu. Danach `paired`;
+ *   scheitert das Anlegen, wieder `open` bzw. `qr_only`, `closed` (währenddessen geschlossen) oder `expired`
+ *   (währenddessen abgelaufen)
  * - `expired`: 5 min abgelaufen
  * - `paired`: ein Gerät wurde gekoppelt, Fenster geschlossen
  * - `closed_failures`: zu viele Fehlversuche über den QR-Weg, Fenster geschlossen

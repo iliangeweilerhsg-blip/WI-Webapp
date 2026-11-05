@@ -114,20 +114,24 @@ function redactQueryPair(pair: string): string {
   } catch {
     // kaputte Kodierung: den Rohnamen prüfen
   }
-  return SECRET_PARAM.test(name) ? `${rawName}=[Redacted]` : pair;
+  // `/p#?pairing_id=…`: Fastify liest den Schlüssel `?pairing_id`. Kein Geheimnis für den Core, aber
+  // vermutlich eines für den Absender, darum führende `?`/`#` beim Vergleich ignorieren (lieber zu viel schwärzen)
+  return SECRET_PARAM.test(name.replace(/^[?#]+/, '')) ? `${rawName}=[Redacted]` : pair;
 }
 
 /**
  * Ersetzt in einer URL oder einem Logtext (z. B. Fastifys „Route GET:/x?… not found“) die Werte geheimer
- * Query-Parameter durch `[Redacted]`. Zerlegt wird wie Fastifys Query-Parser (Issue #100): Die Query beginnt
- * beim ersten `?` und reicht bis zum nächsten Leerraum, Paare trennt nur `&`, ein Wert reicht bis zum nächsten
- * `&` (auch über `#` und weitere `?` hinweg). So bleibt weder ein Rest des Werts (`?pairing_id=…#x`) noch ein
- * Parameter hinter einem `&` im Pfad (`/a&b=c?pairing_id=…`) stehen.
+ * Query-Parameter durch `[Redacted]`. Zerlegt wird wie Fastify (find-my-way `url-sanitizer` und Query-Parser,
+ * Issue #100): Die Query beginnt beim ersten `?` **oder** `#`, je nachdem, was zuerst kommt
+ * (`DELETE /devices/pairings#pairing_id=…` liest Fastify als Query), und reicht bis zum nächsten Leerraum. Paare
+ * trennt nur `&`, ein Wert reicht bis zum nächsten `&` (auch über weitere `#` und `?` hinweg). So bleibt weder
+ * ein Rest des Werts (`?pairing_id=…#x`) noch ein Parameter hinter einem `&` im Pfad (`/a&b=c?pairing_id=…`)
+ * stehen.
  */
 export function redactUrl(text: string): string {
   return text.replace(
-    /\?(\S*)/g,
-    (_match, query: string) => `?${query.split('&').map(redactQueryPair).join('&')}`,
+    /([?#])(\S*)/g,
+    (_match, sep: string, query: string) => `${sep}${query.split('&').map(redactQueryPair).join('&')}`,
   );
 }
 
