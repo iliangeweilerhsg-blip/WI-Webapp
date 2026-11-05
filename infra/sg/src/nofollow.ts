@@ -458,13 +458,18 @@ export class NoFollowReader extends AnchoredDirs {
  * (fail-closed). Rückgabe: Pfade, die stehen bleiben.
  */
 export class NoFollowRemover extends AnchoredDirs {
-  removeTree(parent: string, name: string): string[] {
+  /**
+   * `last`: Eintrag der obersten Ebene, der als letzter gelöscht wird, und nur, wenn bis dahin nichts stehen blieb
+   * (`manifest.json` eines Standes): Bricht das Löschen ab, bleibt der Rest ein gültiger Stand und wird beim nächsten
+   * Ausdünnen erneut verankert gelöscht, statt als Waise ohne Manifest liegen zu bleiben.
+   */
+  removeTree(parent: string, name: string, last?: string): string[] {
     const left: string[] = [];
-    this.removeEntry(parent, name, left);
+    this.removeEntry(parent, name, left, last);
     return left;
   }
 
-  private removeEntry(parent: string, name: string, left: string[]): void {
+  private removeEntry(parent: string, name: string, left: string[], last?: string): void {
     const path = join(parent, name);
     let info: Stats | undefined;
     try {
@@ -498,7 +503,15 @@ export class NoFollowRemover extends AnchoredDirs {
       left.push(path); // ausgetauscht: nicht weiter absteigen
       return;
     }
-    for (const entry of entries) this.removeEntry(path, entry, left);
+    const before = left.length;
+    for (const entry of entries) if (entry !== last) this.removeEntry(path, entry, left);
+    if (last !== undefined && entries.includes(last)) {
+      if (left.length > before) {
+        left.push(path); // abgebrochen: `last` bleibt, der Rest gilt weiter als das, was er war
+        return;
+      }
+      this.removeEntry(path, last, left);
+    }
     try {
       this.inDir(parent, () => {
         const now = exists(name);

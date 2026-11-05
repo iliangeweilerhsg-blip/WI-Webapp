@@ -15,7 +15,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { copyTree, removeStalePartials, removeStand, treeSize } from '../src/backup-files.ts';
+import { copyTree, readManifest, removeStalePartials, removeStand, treeSize } from '../src/backup-files.ts';
 import { NoFollowReader, NoFollowRemover, NoFollowWriter, UnsafeTargetError } from '../src/nofollow.ts';
 
 const dirs: string[] = [];
@@ -88,6 +88,32 @@ describe('Ausdünnen ohne Symlink-Folgen (N1)', () => {
     // Fail-closed: Der Ordner ist beim Betreten der Einträge nicht mehr der gesehene, der Rest bleibt stehen
     expect(readdirSync(`${photos}-weg`)).toHaveLength(5);
     expect(result).toBe('teilweise');
+  });
+
+  it('S1: Abbruch mitten im Löschen lässt manifest.json stehen, der nächste Lauf entfernt den Rest', () => {
+    const target = tmp();
+    const opfer = victim();
+    const dir = stand(target);
+    writeFileSync(join(dir, 'db.dump'), 'DUMP');
+    const media = join(dir, 'media');
+    let swapped = false;
+    const first = removeStand(target, '20261101T030000Z', {
+      step: (op, phase, d) => {
+        if (op === 'readdir' && phase === 'before' && d === media && !swapped) {
+          swapped = true;
+          swapForLink(media, opfer);
+        }
+      },
+    });
+    expect(swapped).toBe(true);
+    expect(first).toBe('teilweise');
+    // Der Rest ist weiter ein Stand (mit Manifest), keine Waise
+    expect(readManifest(dir)).not.toBeNull();
+    expect(readdirSync(opfer)).toHaveLength(5);
+    // Der Angreifer hört auf; der nächste Lauf löscht den Rest verankert (den Link nur als Eintrag)
+    expect(removeStand(target, '20261101T030000Z')).toBe(true);
+    expect(existsSync(dir)).toBe(false);
+    expect(readdirSync(opfer)).toHaveLength(5);
   });
 
   it('Tausch des Elternordners direkt vor unlink: gelöscht wird nur im eigenen Ordner', () => {

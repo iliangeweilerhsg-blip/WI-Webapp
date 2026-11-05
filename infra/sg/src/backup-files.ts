@@ -388,7 +388,8 @@ export function removeStand(target: string, stand: string, hooks?: NoFollowHooks
   if (readManifest(dir) === null) return false;
   const remover = new NoFollowRemover(hooks);
   remover.adopt(target);
-  return remover.removeTree(target, stand).length === 0 ? true : 'teilweise';
+  // Das Manifest geht zuletzt: Ein abgebrochener Rest bleibt ein Stand und wird beim nächsten Lauf weiter gelöscht
+  return remover.removeTree(target, stand, MANIFEST_FILE).length === 0 ? true : 'teilweise';
 }
 
 /** Halbfertige Läufe (`.<stand>.partial`) löschen, die älter als `olderThanMs` sind (verankert wie `removeStand`) */
