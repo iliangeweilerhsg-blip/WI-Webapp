@@ -1,5 +1,5 @@
 // Datenbank-Seite des Moodle-Abgleichs (08 §9.4, T1-23): Kurszuordnung, Dateien, Fristen.
-import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or } from 'drizzle-orm';
 import {
   SINGLE_USER_ID,
   type MoodleCourse,
@@ -232,23 +232,39 @@ export interface ItemFilter {
   kind?: MoodleItemKind | undefined;
   /** Auch in Moodle entfernte Dateien. Standard: nein */
   includeRemoved?: boolean | undefined;
+  /** Höchstens so viele Einträge (VERTRAEGE §17.3: Listen ohne Cursor, mit `limit`) */
+  limit: number;
 }
 
-/** Dateien aus zugeordneten Kursen, neueste zuerst. Ohne Zuordnung bleibt `module_id` leer */
+/**
+ * Dateien aus zugeordneten Kursen mit eingeschaltetem Abgleich und nicht gelöschtem Modul, neueste zuerst
+ * (Review #133, S4). Dateien gelöster oder ausgeschalteter Kurse bleiben in der Datenbank, erscheinen aber
+ * weder hier noch in der Inbox.
+ */
 export async function listItems(db: DbOrTx, filter: ItemFilter): Promise<MoodleItem[]> {
-  const conditions: (SQL | undefined)[] = [
-    filter.courseId ? eq(moodleItem.moodleCourseId, filter.courseId) : undefined,
-    filter.kind ? eq(moodleItem.kind, filter.kind) : undefined,
-    filter.includeRemoved ? undefined : isNull(moodleItem.removedInMoodleAt),
-    filter.moduleId ? eq(moodleCourseLink.moduleId, filter.moduleId) : undefined,
-  ];
   const rows = await db
     .select({ item: moodleItem, moduleId: moodleCourseLink.moduleId })
     .from(moodleItem)
-    .leftJoin(moodleCourseLink, eq(moodleCourseLink.moodleCourseId, moodleItem.moodleCourseId))
-    .where(and(...conditions))
-    .orderBy(desc(moodleItem.createdAt), desc(moodleItem.id));
+    .innerJoin(moodleCourseLink, eq(moodleCourseLink.moodleCourseId, moodleItem.moodleCourseId))
+    .innerJoin(courseModule, eq(courseModule.id, moodleCourseLink.moduleId))
+    .where(
+      and(
+        eq(moodleCourseLink.syncEnabled, true),
+        notDeleted(courseModule),
+        filter.courseId ? eq(moodleItem.moodleCourseId, filter.courseId) : undefined,
+        filter.kind ? eq(moodleItem.kind, filter.kind) : undefined,
+        filter.includeRemoved ? undefined : isNull(moodleItem.removedInMoodleAt),
+        filter.moduleId ? eq(moodleCourseLink.moduleId, filter.moduleId) : undefined,
+      ),
+    )
+    .orderBy(desc(moodleItem.createdAt), desc(moodleItem.id))
+    .limit(filter.limit);
   return rows.map((row) => toApiItem(row.item, row.moduleId));
+}
+
+/** Ist der Kurs einem (nicht gelöschten) Modul zugeordnet? */
+export async function isLinked(db: DbOrTx, courseId: number): Promise<boolean> {
+  return (await listLinks(db)).some((link) => link.moodle_course_id === courseId);
 }
 
 /** Ist der Verweis eine Datei aus einem abgeglichenen Kurs? (dauerhafte Quelle für GET /moodle/file, Lead #127) */
@@ -262,26 +278,39 @@ export async function isKnownFileRef(db: DbOrTx, ref: string): Promise<boolean> 
 }
 
 /**
- * Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“, F-MDL-04). Gilt für die Datei und alle noch
+ * Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“, F-MDL-04), `offen` macht sie rückgängig. Gilt für die Datei und alle noch
  * offenen Dateien derselben Aktivität, künftige Dateien der Aktivität übernehmen sie beim Abgleich. Fehlt danach das
  * Material der gewählten Art, lädt der nächste Abgleich die Datei.
  */
 export async function decideItem(
   db: Db,
   id: string,
-  kind: 'folien' | 'uebung' | 'ignoriert',
+  kind: 'folien' | 'uebung' | 'ignoriert' | 'offen',
 ): Promise<{ item: MoodleItem; courseId: number }> {
   return db.transaction(async (tx) => {
     const [row] = await tx.select().from(moodleItem).where(eq(moodleItem.id, id)).for('update');
     if (!row) throw new HttpError(404, 'moodle_item_not_found', 'Diese Moodle-Datei ist nicht bekannt.');
+    const sameActivity = and(
+      eq(moodleItem.moodleCourseId, row.moodleCourseId),
+      eq(moodleItem.cmid, row.cmid),
+    );
+    // Zurück auf „offen“ (Rückgängig, R15): die Datei und alle, die mit derselben Entscheidung eingeordnet wurden
+    const revert = kind === 'offen';
+    const sameDecision =
+      row.kindSource === 'manuell' && row.kindDecidedAt !== null
+        ? and(eq(moodleItem.kindSource, 'manuell'), eq(moodleItem.kindDecidedAt, row.kindDecidedAt))
+        : undefined;
     const affected = await tx
       .select({ id: moodleItem.id })
       .from(moodleItem)
       .where(
         and(
-          eq(moodleItem.moodleCourseId, row.moodleCourseId),
-          eq(moodleItem.cmid, row.cmid),
-          or(eq(moodleItem.id, id), eq(moodleItem.kind, 'offen')),
+          sameActivity,
+          revert
+            ? sameDecision
+              ? or(eq(moodleItem.id, id), sameDecision)
+              : eq(moodleItem.id, id)
+            : or(eq(moodleItem.id, id), eq(moodleItem.kind, 'offen')),
         ),
       )
       .for('update');
@@ -289,9 +318,16 @@ export async function decideItem(
       moodleItem.id,
       affected.map((entry) => entry.id),
     );
-    await tx.update(moodleItem).set({ kind, kindSource: 'manuell' }).where(targets);
+    await tx
+      .update(moodleItem)
+      .set(
+        revert
+          ? { kind, kindSource: 'auto', kindDecidedAt: null }
+          : { kind, kindSource: 'manuell', kindDecidedAt: new Date() },
+      )
+      .where(targets);
     // Fehlt das Material der neuen Art, wird die Datei neu geladen (sha256 leer = noch nicht verarbeitet)
-    if (kind !== 'ignoriert') {
+    if (kind === 'folien' || kind === 'uebung') {
       const missing = kind === 'folien' ? isNull(moodleItem.slideDeckId) : isNull(moodleItem.exerciseSheetId);
       await tx.update(moodleItem).set({ sha256: null, lastError: null }).where(and(targets, missing));
     }
@@ -314,7 +350,7 @@ export interface DeadlineFilter {
   limit: number;
 }
 
-/** Fristen aus dem Abgleich, nach Datum. Ohne in Moodle entfernte und ohne Fristen gelöschter Module */
+/** Fristen aus dem Abgleich, nach Datum. Ohne in Moodle entfernte, ohne gelöste bzw. ausgeschaltete Kurse und ohne Fristen gelöschter Module */
 export async function listSyncedDeadlines(
   db: DbOrTx,
   filter: DeadlineFilter,
@@ -326,6 +362,8 @@ export async function listSyncedDeadlines(
     .innerJoin(moodleCourseLink, eq(moodleCourseLink.moodleCourseId, moodleDeadline.moodleCourseId))
     .where(
       and(
+        // Nur Fristen zugeordneter Kurse mit eingeschaltetem Abgleich (Review #133, H7)
+        eq(moodleCourseLink.syncEnabled, true),
         notDeleted(courseModule),
         isNull(moodleDeadline.removedInMoodleAt),
         filter.moduleId ? eq(moodleDeadline.moduleId, filter.moduleId) : undefined,

@@ -54,6 +54,8 @@ export const moodleItem = pgTable(
     kind: text('kind').notNull(),
     /** auto: Regel aus 08 bzw. Entscheidung der Aktivität. manuell: Entscheidung in der Inbox */
     kindSource: text('kind_source').notNull().default('auto'),
+    /** Zeitpunkt der Entscheidung in der Inbox (`kind_source = manuell`). Die jüngste gilt für die Aktivität */
+    kindDecidedAt: timestamptz('kind_decided_at'),
     slideDeckId: uuid('slide_deck_id').references(() => slideDeck.id, { onDelete: 'set null' }),
     exerciseSheetId: uuid('exercise_sheet_id').references(() => exerciseSheet.id, { onDelete: 'set null' }),
     removedInMoodleAt: timestamptz('removed_in_moodle_at'),

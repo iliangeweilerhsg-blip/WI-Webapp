@@ -32,7 +32,7 @@ Ein Formatwechsel ist erst fertig, wenn alle drei Generate-Schritte und Contract
 | Planer | `GET /plan?from&to` · `GET /plan/now` · `PATCH /study-blocks/{id}` (verschieben, pin, skip) · `POST /study-blocks` · `GET/PATCH /preferences` |
 | Suche & Fragen | `GET /search?q&filters` · `POST /ask` (Frag deine Vorlesung, Antwort per Server-Sent Events) |
 | Videos | `GET /videos?concept_id` · `POST /videos` (anfordern) · `GET /videos/{id}/file` |
-| Moodle (§9) | `GET /moodle/status` · `GET /moodle/courses` · `GET /moodle/courses/{id}/contents` · `GET /moodle/assignments` · `GET /moodle/deadlines` · `GET /moodle/file?ref` · `GET /moodle/actions` · `POST /moodle/uploads` · `POST /moodle/actions/{id}/preview` · `POST /moodle/actions/{id}/execute` |
+| Moodle (§9) | `GET /moodle/status` · `GET /moodle/courses` · `GET /moodle/courses/{id}/contents` · `GET /moodle/assignments` · `GET /moodle/deadlines` · `GET /moodle/file?ref` · `GET /moodle/actions` · `POST /moodle/uploads` · `POST /moodle/actions/{id}/preview` · `POST /moodle/actions/{id}/execute` · Abgleich (§9.4): `GET /moodle/links` · `PUT/DELETE /moodle/links/{course_id}` · `GET /moodle/items` · `PATCH /moodle/items/{id}` · `GET/POST /moodle/sync` · `GET /moodle/synced-deadlines` |
 | System | `GET /jobs?session_id` · `POST /jobs/{id}/retry` · `GET /costs?month` · `POST /backup` · `GET /backups` · `POST /export` · `GET/PATCH /settings` · `GET/DELETE /devices` · `POST /devices/pairings` · `GET /devices/pairings/requests` · `POST /devices/pair/start` · `POST /devices/pair/confirm` · `GET /trash` · `POST /trash/{id}/restore` |
 
 ## 2. Sync-Protokoll (WebSocket)
@@ -336,7 +336,7 @@ Funktionen: F-MDL-01 bis F-MDL-06 (Kap. 04). Datenformate: `packages/schemas/src
 
 | Thema | Festlegung |
 |---|---|
-| Instanz | `SG_MOODLE_URL`, z. B. `https://moodle2.uni-potsdam.de`. Leer = Moodle-Anbindung aus (`GET /moodle/status` → `nicht_eingerichtet`, `GET /moodle/actions` → alle Aktionen `available: false`, alle anderen Moodle-Endpunkte → `503 moodle_not_configured`). |
+| Instanz | `SG_MOODLE_URL`, z. B. `https://moodle2.uni-potsdam.de`. Leer = Moodle-Anbindung aus (`GET /moodle/status` → `nicht_eingerichtet`, `GET /moodle/actions` → alle Aktionen `available: false`, Endpunkte, die Moodle aufrufen → `503 moodle_not_configured`; lokale Endpunkte (§9.4) antworten immer). |
 | Token | macOS-Schlüsselbund, Dienst `studiengehirn-moodle`. Der Core liest ihn mit `security find-generic-password -s studiengehirn-moodle -w` und hält ihn nur im Speicher. |
 | Metadaten | `config/moodle.json`: `{ "site_url", "user_id", "token_valid_until" (Datum), "created_at" }`. Enthält keinen Token. |
 | Moodle-API | `POST <SG_MOODLE_URL>/webservice/rest/server.php` mit `wstoken`, `wsfunction`, `moodlewsrestformat=json`, Parameter im Body (`application/x-www-form-urlencoded`, verschachtelt als `a[0][b]=…`). Der Token steht **nie** in einer URL. |
@@ -351,7 +351,7 @@ Funktionen: F-MDL-01 bis F-MDL-06 (Kap. 04). Datenformate: `packages/schemas/src
 
 | HTTP | `code` | Wann |
 |---|---|---|
-| 503 | `moodle_not_configured` | `SG_MOODLE_URL` leer oder kein Token im Schlüsselbund |
+| 503 | `moodle_not_configured` | `SG_MOODLE_URL` leer oder kein Token im Schlüsselbund (nur Endpunkte, die Moodle aufrufen) |
 | 409 | `moodle_token_invalid` | Moodle meldet `invalidtoken` oder `invalidtimedtoken` (Token unbekannt oder abgelaufen) |
 | 502 | `moodle_unreachable` | Netzwerkfehler, Zeitlimit, Antwort ist kein JSON |
 | 502 | `moodle_error` | Moodle meldet eine Ausnahme. `details.moodle_errorcode` und `details.moodle_message` |
@@ -362,6 +362,8 @@ Funktionen: F-MDL-01 bis F-MDL-06 (Kap. 04). Datenformate: `packages/schemas/src
 | 404 | `moodle_action_not_found` | Unbekannte Aktionskennung |
 | 409 | `moodle_confirmation_required` | Aktion braucht Bestätigung, Code fehlt |
 | 409 | `moodle_confirmation_invalid` | Code abgelaufen, schon benutzt oder für andere Aktion/Parameter |
+| 404 | `moodle_link_not_found` | Kurs ist keinem Modul zugeordnet (`DELETE /moodle/links/{course_id}`, `POST /moodle/sync` mit `course_id`) |
+| 404 | `moodle_item_not_found` | Unbekannte Moodle-Datei (`PATCH /moodle/items/{id}`) |
 
 ### 9.2 Lese-Endpunkte
 
@@ -384,6 +386,11 @@ Alle unter `/api/v1/moodle`. Antworten in eigenen Formaten (Schema-Namen in Klam
 | `GET /moodle/file?ref` | Datei (Stream, `Content-Length` von Moodle, Sicherheits-Header siehe unten) | `webservice/pluginfile.php` |
 
 `ref` ist der Pfad hinter `pluginfile.php`, wie er in `MoodleFile.ref` steht, z. B. `/123/mod_resource/content/4/01-Einfuehrung.pdf`. Ohne `course_id` gelten Listen für alle Kurse des Nutzers.
+
+**Ergänzungen (T1-22/T1-23, VERTRAEGE §17.1):**
+- `GET /moodle/file` liefert nur bekannte Dateien: aus Kursinhalt, Aufgaben-Intro, eigener Abgabe und Forenanhängen (im Speicher) sowie dauerhaft alle `moodle_item.file_ref`. Ein unbekannter `ref` → `404 moodle_file_not_found` mit `details.reason = "unknown_ref"`.
+- Zu große Antworten → `502 moodle_unreachable` mit `details.reason = "too_large"`. Grenzen: JSON 16 MiB, Datei 512 MiB, `limit` 1–50 (Standard 20), `from` Standard „jetzt“.
+- `MoodleCourse.module_id` ist die bestätigte Zuordnung. Dazu kommen `suggested_module_id` und `category` (`aktuell`/`organisatorisch`/`alt`, §9.4).
 
 **Sicherheits-Header für `GET /moodle/file`:** Dateien aus Moodle stammen auch von anderen Personen (z. B. Forenanhänge). Sie dürfen nie als aktive Inhalte im Origin des Core laufen, sonst könnte ein Skript Vorschau und Ausführen ohne Klick auslösen. Darum immer `X-Content-Type-Options: nosniff` und `Content-Security-Policy: sandbox`. `Content-Type` wird nur für eine Allowlist übernommen (`application/pdf`, `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `text/plain`). Alles andere, ausdrücklich auch HTML und SVG, geht als `application/octet-stream` mit `Content-Disposition: attachment`.
 
@@ -426,3 +433,12 @@ Der Abgleich läuft **im Core** (er braucht den Token), nicht im Worker. Für je
 | `moodle_course_link` | `module_id`, `moodle_course_id` (eindeutig), `sync_enabled`, `last_synced_at` |
 | `moodle_item` | `moodle_course_id`, `cmid`, `file_ref` (eindeutig), `timemodified`, `size_bytes`, `sha256`, `kind` (`folien`/`uebung`/`ignoriert`/`offen`), `slide_deck_id?`, `exercise_sheet_id?`, `removed_in_moodle_at?` |
 | `moodle_deadline` | `moodle_event_id` bzw. `assignment_id`, `module_id`, `name`, `due_at`, `exercise_sheet_id?` |
+
+Ergänzende Spalten, Endpunkte und Ablauf: VERTRAEGE §17. Kurz:
+- **Zuordnung (F-MDL-03):** `GET /moodle/links`, `PUT`/`DELETE /moodle/links/{course_id}`. Ein Vorschlag ist keine Zuordnung. Kurse, die mehr als 30 Tage vor dem Beginn des aktuellen Semesters starten (`SEMESTER_START_TOLERANCE_DAYS`), gelten als `alt` und werden wie organisatorische Kurse nicht vorgeschlagen.
+- **Abgleich:** `GET`/`POST /moodle/sync`, Ergebnis `MoodleSyncStatus`. Immer nur ein Lauf gleichzeitig. Beim Beenden des Core bricht er zwischen zwei Dateien ab.
+- **Inbox:** bis Phase 2 über `moodle_item.kind = offen` (`GET /moodle/items?kind=offen`, Entscheidung per `PATCH /moodle/items/{id}`). Danach wechselt sie zu `inbox_item`. Musterlösungen landen in der Inbox, nicht als Übungsblatt.
+- **Fristen:** `GET /moodle/synced-deadlines`.
+- **Sichtbarkeit:** Dateien und Fristen erscheinen nur für zugeordnete Kurse mit eingeschaltetem Abgleich.
+- **Listen und Zugang:** Listen ohne Cursor, mit `limit`. Diese Endpunkte sind lokal und antworten auch ohne Moodle-Zugang (§9.1).
+- **Neue Revision:** Eine neue Revision im Dateipfad (`…/content/<rev>/…`) ergibt einen neuen `file_ref` und damit eine neue Datei. Die alte gilt dann als „in Moodle entfernt“.

@@ -968,7 +968,7 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 
 ## 17. Moodle: Kurszuordnung und Abgleich (T1-23, F-MDL-03/-04)
 
-Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabellen aus 08 §9.4 in der Migration `0005_moodle`.
+Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabellen aus 08 §9.4 in der Migration `0005_moodle`. Die Lead-Entscheidungen aus dem Review von #133 sind hier und in 08 §9.1, §9.2 und §9.4 eingearbeitet.
 
 ### 17.1 Festlegungen aus PR #128 (Lead-Entscheidungen in #127)
 
@@ -987,14 +987,18 @@ Ergänzt 08 §9. Datenformate in `packages/schemas/src/moodle.schema.json`. Tabe
 | Tabelle | Ergänzung | Grund |
 |---|---|---|
 | `moodle_course_link` | `module_id` mit `ON DELETE CASCADE`, eindeutig über `moodle_course_id`. Lösen löscht die Zeile hart | Einstellung, kein Inhalt. Ein Modul kann mehrere Kurse haben |
-| `moodle_item` | `activity_name`, `filename` (Anzeige, ≤ 255 Byte UTF-8, Endung bleibt), `mime_type`, `kind_source` (`auto`/`manuell`), `last_error` (`kein_pdf`, `zu_gross`, `nicht_gefunden`, `download_fehlgeschlagen`). `sha256` ist `NULL`, solange die Datei nicht geladen wurde. `slide_deck_id`/`exercise_sheet_id` mit `ON DELETE SET NULL` | Anzeige, Inbox-Regel je Aktivität, Wiederholung nach Fehlern |
+| `moodle_item` | `activity_name`, `filename` (Anzeige, ≤ 255 Byte UTF-8, Endung bleibt), `mime_type`, `kind_source` (`auto`/`manuell`), `kind_decided_at` (Zeitpunkt der Inbox-Entscheidung, die jüngste gilt für die Aktivität), `last_error` (`kein_pdf`, `zu_gross`, `nicht_gefunden`, `download_fehlgeschlagen`). `sha256` ist `NULL`, solange die Datei nicht geladen wurde. `slide_deck_id`/`exercise_sheet_id` mit `ON DELETE SET NULL` | Anzeige, Inbox-Regel je Aktivität, Wiederholung nach Fehlern |
 | `moodle_deadline` | `source` (`aufgabe`/`termin`), `moodle_course_id`, `cmid`, `url`, `removed_in_moodle_at`. Eindeutig je `moodle_assignment_id` bzw. `moodle_event_id` (Teilindex) | Upsert beim Abgleich, keine Dublette Aufgabe ↔ Kalenderereignis |
 
 Die Dateien selbst liegen nur unter der ID des Materials (`media/decks/<id>/original.pdf`, `media/sheets/<id>/original.pdf`, 08 §7), nie unter dem Moodle-Namen. Der Moodle-Name wird nur bereinigt (`sanitizeFilename`) und gekürzt angezeigt bzw. als Titel genutzt.
 
 ### 17.3 Endpunkte
 
-Basis `/api/v1`. Lokale Daten (`links`, `items`, `synced-deadlines`, `GET /moodle/sync`) antworten auch ohne eingerichtetes Moodle. Listen ohne Cursor (die Menge ist durch die Kursinhalte begrenzt).
+Basis `/api/v1`. Die Pfade sind festgelegt (Lead, Review #133).
+- **Lokale Endpunkte antworten immer**, auch ohne eingerichtetes Moodle: `GET /moodle/links`, `PUT`/`DELETE /moodle/links/{course_id}`, `GET`/`PATCH /moodle/items`, `GET /moodle/sync`, `GET /moodle/synced-deadlines`. Nur Endpunkte, die Moodle aufrufen, antworten ohne Zugang mit `503 moodle_not_configured` (08 §9.1).
+- **Listen** ohne Cursor, mit `limit` (die Menge ist durch die Kursinhalte begrenzt).
+- **Inbox:** vorerst `GET /moodle/items?kind=offen` und `PATCH /moodle/items/{id}`. Mit Phase 2 wechseln die offenen Moodle-Dateien zu `inbox_item` (03 §8).
+- `items` und `synced-deadlines` zeigen nur Einträge **zugeordneter Kurse mit `sync_enabled`** und nicht gelöschtem Modul. Die Zeilen gelöster oder ausgeschalteter Kurse bleiben in der Datenbank.
 
 | Endpunkt | Body / Query | Antwort | Fehler |
 |---|---|---|---|
@@ -1002,21 +1006,23 @@ Basis `/api/v1`. Lokale Daten (`links`, `items`, `synced-deadlines`, `GET /moodl
 | `GET /moodle/links` | – | `MoodleCourseLinkList` | – |
 | `PUT /moodle/links/{course_id}` | `MoodleCourseLinkUpdate` | `MoodleCourseLink`. Startet einen Abgleich des Kurses im Hintergrund | `404 module_not_found` |
 | `DELETE /moodle/links/{course_id}` | – | `204`. Fristen des Kurses fallen weg, Dateien und Material bleiben | `404 moodle_link_not_found` |
-| `GET /moodle/items` | `course_id?`, `module_id?`, `kind?`, `include_removed?` | `MoodleItemList`, neueste zuerst. `kind=offen` = Einträge der Inbox | – |
-| `PATCH /moodle/items/{id}` | `MoodleItemUpdate` (`folien`/`uebung`/`ignoriert`) | `MoodleItem`. Startet bei Folien/Übung einen Abgleich des Kurses | `404 moodle_item_not_found` |
+| `GET /moodle/items` | `course_id?`, `module_id?`, `kind?`, `include_removed?`, `limit?` (1–1000, Standard 500) | `MoodleItemList`, neueste zuerst. `kind=offen` = Einträge der Inbox | – |
+| `PATCH /moodle/items/{id}` | `MoodleItemUpdate` (`folien`/`uebung`/`ignoriert`, `offen` = rückgängig) | `MoodleItem`. Startet bei Folien/Übung einen Abgleich des Kurses. `offen` setzt die Datei und alle mit derselben Entscheidung eingeordneten Dateien der Aktivität zurück (R15), schon angelegtes Material bleibt | `404 moodle_item_not_found` |
 | `GET /moodle/sync` | – | `MoodleSyncStatus` | – |
-| `POST /moodle/sync` | `MoodleSyncRequest` (`course_id?`) | `202 MoodleSyncStatus`. Läuft schon ein Abgleich, wird genau einer danach angehängt | `503 moodle_not_configured` |
+| `POST /moodle/sync` | `MoodleSyncRequest` (`course_id?`) | `202 MoodleSyncStatus`. Läuft schon ein Abgleich oder wartet einer, wird genau einer danach angehängt | `404 moodle_link_not_found` (Kurs nicht zugeordnet), `503 moodle_not_configured` |
 | `GET /moodle/synced-deadlines` | `module_id?`, `from?` (Standard jetzt), `to?`, `limit?` (1–200, Standard 50) | `MoodleSyncedDeadlineList` nach `due_at`, ohne in Moodle entfernte | – |
 
 ### 17.4 Ablauf des Abgleichs
 
-- **Wann:** beim Start des Core, danach alle 2 h, auf Knopfdruck (`POST /moodle/sync`), nach dem Bestätigen einer Zuordnung und nach einer Entscheidung in der Inbox. Immer nur ein Lauf gleichzeitig.
+- **Wann:** beim Start des Core, danach alle 2 h, auf Knopfdruck (`POST /moodle/sync`), nach dem Bestätigen einer Zuordnung und nach einer Entscheidung in der Inbox. Immer nur ein Lauf gleichzeitig. Direkt gestartet wird nur, wenn weder einer läuft noch einer wartet. Sonst geht die Anfrage im angehängten Lauf auf (Kurse zusammengefasst).
+- **Beenden des Core:** Neue Läufe starten nicht mehr, der angehängte wird verworfen. Der laufende bricht zwischen zwei Dateien bzw. Kursen ab (`error_code = abgebrochen`). Das Beenden wartet höchstens `SHUTDOWN_WAIT_MS` (7 s, unter der harten Frist von 10 s in `main.ts`).
 - **Zugang:** `nicht_eingerichtet` → kein Lauf (`MoodleSyncStatus.state = aus`). `ungueltig`/`abgelaufen` oder `moodle_token_invalid` während des Laufs → Lauf endet sofort mit `error_code = moodle_token_invalid`, `state = pausiert` (F-MDL-01).
 - **Kurse:** nur Zuordnungen mit `sync_enabled` zu nicht gelöschten Modulen. Ein Fehler in einem Kurs (z. B. `moodle_unreachable`) beendet nur diesen Kurs (`failed_courses`), `last_synced_at` bleibt dann stehen.
 - **Dateien:** sichtbare Dateien sichtbarer Abschnitte und Aktivitäten, wiedererkannt über `file_ref`.
-  - Neu: Einordnung nach 17.5, dann laden und anlegen. Nicht-PDF → `ignoriert` (nur gelistet).
+  - Neu: Einordnung nach 17.5, dann laden und anlegen. Nicht-PDF → `ignoriert` (nur gelistet). Eine `.pdf` ohne `%PDF` im Inhalt → `ignoriert` mit `last_error = kein_pdf`. Das gilt nur für diese Fassung: Ändern sich `timemodified` oder Größe, wird neu eingeordnet und geprüft.
+  - Eine neue Revision im Pfad (`…/content/<rev>/…`) ergibt einen neuen `file_ref` und damit eine neue Datei. Die alte wird als „in Moodle entfernt“ markiert.
   - Geändert (`timemodified` oder Größe): bei Folien/Übung neu laden. Gleicher `sha256` → nur Metadaten. Anderer → neuer Foliensatz bzw. neues Blatt, das alte bleibt. Die Abbildung von Notizen auf die neue Fassung (F-ORG-02) ist noch nicht umgesetzt.
-  - Unverändert: nichts laden.
+  - Unverändert: nichts laden und keine Zeile schreiben.
   - Weg oder versteckt: `removed_in_moodle_at` setzen, lokal nichts löschen. Taucht die Datei wieder auf, wird die Markierung entfernt.
 - **Anlegen** über `createSlideDeck` bzw. `createExerciseSheet` (wie beim Upload, mit `pdf.ingest`). Gleicher `sha256` schon im Modul → keine Kopie, nur Verknüpfung. Titel = Dateiname ohne `.pdf`, Blattnummer aus dem Namen.
 - **Fristen:** Aufgaben der Kurse mit `duedate` (`aufgabe`) und kommende Kalenderereignisse (`termin`, höchstens 50), außer Ereignissen zu einer schon übernommenen Aufgabe (gleiche `cmid`). Weggefallene Aufgaben bzw. kommende Ereignisse → `removed_in_moodle_at`.
@@ -1024,15 +1030,17 @@ Basis `/api/v1`. Lokale Daten (`links`, `items`, `synced-deadlines`, `GET /moodl
 
 ### 17.5 Einordnung (08 §9.4, F-MDL-04)
 
-Zuerst der Dateiname, dann der Name der Aktivität. Normalisiert (ü → ue), an Buchstaben-Ziffern-Grenzen getrennt.
+Zuerst der Dateiname, dann der Name der Aktivität. Vorher NFC (Namen aus macOS kommen oft als NFD, nie NFKC), dann normalisiert (ü → ue) und an Grenzen zwischen Buchstaben und ASCII-Ziffern `[0-9]` getrennt.
 - **Folien:** Folie(n), Vorlesung(en), VL, Slide(s), Lecture(s), auch in Zusammensetzungen („Vorlesungsfolien“).
 - **Übung:** Übung(en), Blatt/Blätter, Aufgabe(n), Exercise(s), Sheet(s), Muster `u05`, `ue3`, `Ü 05`, auch in Zusammensetzungen („Übungsblatt“, „Hausaufgabe“).
-- **Inbox (`offen`):** keine oder beide Arten, oder ein Hinweis auf eine Lösung („Lösung“, „Solution“).
+- **Inbox (`offen`):** keine oder beide Arten, oder ein Hinweis auf eine Lösung („Lösung“, „Solution“). Musterlösungen landen so bewusst in der Inbox, nicht als Übungsblatt (Lead, Review #133).
 - Eine Entscheidung in der Inbox (`kind_source = manuell`) gilt für die Datei, alle offenen Dateien derselben Aktivität und künftige Dateien der Aktivität.
 
 ### 17.6 Kurszuordnung (F-MDL-03)
 
-- `category`: `organisatorisch` bei Wortteilen wie „Klausurtermin“, „Prüfungsamt“, „Fachschaft“, „Informationen“. `alt`, wenn der Kurs mehr als 30 Tage vor dem Beginn des aktuellen Semesters startet (ohne Semesterbeginn: schon beendet). Sonst `aktuell`.
+- `category`: `organisatorisch` bei Wortteilen wie „Klausurtermin“, „Prüfungsamt“, „Fachschaft“, „Informationen“. `alt`, wenn der Kurs mehr als `SEMESTER_START_TOLERANCE_DAYS` = 30 Tage vor dem Beginn des aktuellen Semesters startet (Konstante in `services/core/src/moodle/classify.ts`; ohne Semesterbeginn: schon beendet). Sonst `aktuell`.
 - `suggested_module_id` nur für `aktuell` ohne Zuordnung: Name bzw. Kürzel eines Moduls des aktuellen Semesters im Kursnamen (wie F-KAL-02), sonst eindeutige Abkürzung. Ein Vorschlag ist keine Zuordnung, abgeglichen wird erst nach `PUT /moodle/links/{course_id}`.
 
-**Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404).
+**Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404). `MoodleSyncRun.error_code` kann außerdem `abgebrochen` sein (Beenden des Core).
+
+**Zeitformat:** Die neuen Antworten liefern Zeiten nach §6 (ohne `.000`). Die Lese-Endpunkte aus T1-22 liefern noch `.000Z`, das gleicht Folge-Issue #129 an.

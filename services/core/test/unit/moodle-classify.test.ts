@@ -51,6 +51,36 @@ describe('classifyFile (08 §9.4, F-MDL-04)', () => {
   });
 });
 
+describe('Namen in NFD (macOS) und fremde Ziffern (Review #133, S1/H4)', () => {
+  const nfd = (text: string) => text.normalize('NFD');
+
+  it('NFD-Namen werden wie NFC eingeordnet', () => {
+    expect(nfd('Musterlösung Blatt 4.pdf')).not.toBe('Musterlösung Blatt 4.pdf');
+    expect(classifyFile(nfd('Musterlösung Blatt 4.pdf'), 'Material')).toBeNull();
+    expect(classifyFile('Blatt 4.pdf', nfd('Lösungen'))).toBeNull();
+    expect(classifyFile(nfd('Übungsblatt 4.pdf'), 'Woche 4')).toBe('uebung');
+    expect(classifyFile(nfd('Ü 05.pdf'), 'Woche 5')).toBe('uebung');
+    expect(sheetNumber(nfd('Übungsblatt 7'))).toBe(7);
+  });
+
+  it('nur ASCII-Ziffern zählen als Nummer', () => {
+    // Arabisch-indische bzw. Devanagari-Ziffern, als Escape geschrieben
+    expect(sheetNumber('Blatt ٣')).toBeNull();
+    expect(classifyFile('u\u0967\u0968.pdf', 'Material')).toBeNull();
+    expect(sheetNumber('Blatt 3')).toBe(3);
+  });
+
+  it('organisatorische Kurse auch in NFD', () => {
+    expect(
+      courseCategory(
+        { full_name: nfd('Prüfungsamt Beispielfakultät'), short_name: '', start_date: null, end_date: null },
+        null,
+        '2026-11-05',
+      ),
+    ).toBe('organisatorisch');
+  });
+});
+
 describe('sheetNumber', () => {
   it.each([
     ['Blatt 03.pdf', 3],

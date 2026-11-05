@@ -5117,7 +5117,7 @@
     "MoodleItemUpdate": {
       "title": "MoodleItemUpdate",
       "type": "object",
-      "description": "Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“). Gilt für die ganze Aktivität",
+      "description": "Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“, gilt für die ganze Aktivität). offen = Entscheidung rückgängig machen (R15)",
       "required": [
         "kind"
       ],
@@ -5128,7 +5128,8 @@
           "enum": [
             "folien",
             "uebung",
-            "ignoriert"
+            "ignoriert",
+            "offen"
           ]
         }
       }
@@ -5636,7 +5637,7 @@
               "type": "null"
             }
           ],
-          "description": "Fehlercode des Core (08 §9.1), z. B. moodle_unreachable"
+          "description": "Fehlercode des Core (08 §9.1), z. B. moodle_unreachable, oder abgebrochen (Core wurde beendet)"
         },
         "courses": {
           "type": "integer",

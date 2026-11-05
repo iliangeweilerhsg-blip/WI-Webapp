@@ -2118,13 +2118,13 @@ export interface MoodleItemList {
 items: MoodleItem[]
 }
 /**
- * Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“). Gilt für die ganze Aktivität
+ * Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“, gilt für die ganze Aktivität). offen = Entscheidung rückgängig machen (R15)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "MoodleItemUpdate".
  */
 export interface MoodleItemUpdate {
-kind: ("folien" | "uebung" | "ignoriert")
+kind: ("folien" | "uebung" | "ignoriert" | "offen")
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -2281,7 +2281,7 @@ finished_at: (Timestamp | null)
  */
 ok: boolean
 /**
- * Fehlercode des Core (08 §9.1), z. B. moodle_unreachable
+ * Fehlercode des Core (08 §9.1), z. B. moodle_unreachable, oder abgebrochen (Core wurde beendet)
  */
 error_code: (string | null)
 /**
