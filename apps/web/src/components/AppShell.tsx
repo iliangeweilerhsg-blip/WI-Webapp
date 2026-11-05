@@ -18,6 +18,21 @@ import { Sidebar } from './Sidebar.tsx';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const NARROW_QUERY = '(max-width: 767.98px)';
+/** Ab `lg` (Tailwind, 1024 px) ist Platz für die Notizen-Spalte */
+const WIDE_QUERY = '(min-width: 1024px)';
+
+function useMediaMatch(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const mq = window.matchMedia(query);
+    const update = (e: { matches: boolean }) => setMatches(e.matches);
+    update(mq);
+    mq.addEventListener?.('change', update);
+    return () => mq.removeEventListener?.('change', update);
+  }, [query]);
+  return matches;
+}
 
 /**
  * ZWISCHENLÖSUNG: Es gibt noch keine Quelle für das „aktive Notizbuch“. Bis dahin steuert der Query-Parameter
@@ -56,18 +71,31 @@ function Shell({ children }: { children: ReactNode }) {
   const fullBleed = pathname === '/dokument';
   const notebookId = useActiveNotebookId(pathname);
 
-  const closeDrawer = useCallback(() => {
-    setDrawerOpen(false);
-    menuButton.current?.focus();
-  }, []);
+  const isWide = useMediaMatch(WIDE_QUERY);
+  const modal = drawerOpen && isNarrow;
 
-  // Navigation schließt den Drawer
+  // Fokus erst nach dem Schließen setzen: Solange der Drawer offen ist, ist der Rest `inert`
+  const returnFocus = useRef<'menu' | 'main' | null>(null);
+  const closeDrawer = useCallback((target: 'menu' | 'main' | null = 'menu') => {
+    returnFocus.current = target;
+    setDrawerOpen(false);
+  }, []);
+  useEffect(() => {
+    if (drawerOpen || !returnFocus.current) return;
+    const target = returnFocus.current === 'menu' ? menuButton.current : document.getElementById('main');
+    returnFocus.current = null;
+    target?.focus();
+  }, [drawerOpen]);
+
+  // Navigation schließt den Drawer, der Fokus geht in den Inhalt
   const firstPath = useRef(pathname);
+  const drawerOpenRef = useRef(drawerOpen);
+  drawerOpenRef.current = drawerOpen;
   useEffect(() => {
     if (firstPath.current === pathname) return;
     firstPath.current = pathname;
-    setDrawerOpen(false);
-  }, [pathname]);
+    if (drawerOpenRef.current) closeDrawer('main');
+  }, [pathname, closeDrawer]);
 
   // Wechsel auf einen breiten Bildschirm schließt ihn
   useEffect(() => {
@@ -90,6 +118,8 @@ function Shell({ children }: { children: ReactNode }) {
     items()[0]?.focus();
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        // Behandelt ein Element im Drawer Esc selbst, bleibt der Drawer offen
+        if (e.defaultPrevented) return;
         e.preventDefault();
         closeDrawer();
         return;
@@ -147,8 +177,11 @@ function Shell({ children }: { children: ReactNode }) {
       const action = matchShortcut(e, mac);
       if (!action) return;
       e.preventDefault();
-      if (action === 'search') setSearchOpen((o) => !o);
-      else if (action === 'toggleSidebar') toggleSidebar();
+      if (action === 'search') {
+        // Der Suchdialog übernimmt den Fokus; ein offener Drawer würde ihn per Fokusfalle zurückholen
+        setDrawerOpen(false);
+        setSearchOpen((o) => !o);
+      } else if (action === 'toggleSidebar') toggleSidebar();
       else if (action === 'back') window.history.back();
       else window.history.forward();
     }
@@ -164,17 +197,18 @@ function Shell({ children }: { children: ReactNode }) {
             Zum Inhalt springen
           </a>
           {drawerOpen && (
-            <div className="sg-drawer-backdrop md:hidden" aria-hidden="true" onClick={closeDrawer} />
+            <div className="sg-drawer-backdrop md:hidden" aria-hidden="true" onClick={() => closeDrawer()} />
           )}
           <div
             className="contents"
             onClick={(e) => {
-              if (drawerOpen && (e.target as HTMLElement).closest('#sidebar a[href]')) closeDrawer();
+              if (drawerOpen && (e.target as HTMLElement).closest('#sidebar a[href]')) closeDrawer('main');
             }}
           >
             <Sidebar
               expanded={isNarrow ? drawerOpen : expanded}
               drawerOpen={drawerOpen}
+              modal={modal}
               onToggle={() => (drawerOpen ? closeDrawer() : toggleSidebar())}
               onOpenSearch={() => {
                 setDrawerOpen(false);
@@ -186,7 +220,7 @@ function Shell({ children }: { children: ReactNode }) {
               }}
             />
           </div>
-          <div className="flex min-w-0 flex-1 flex-col">
+          <div className="flex min-w-0 flex-1 flex-col" inert={modal}>
             <header className="flex items-center gap-2 border-b border-border bg-surface px-2 py-1 md:hidden">
               <button
                 ref={menuButton}
@@ -194,7 +228,7 @@ function Shell({ children }: { children: ReactNode }) {
                 onClick={() => setDrawerOpen((o) => !o)}
                 aria-expanded={drawerOpen}
                 aria-controls="sidebar"
-                aria-label="Menü öffnen"
+                aria-label={drawerOpen ? 'Menü schließen' : 'Menü öffnen'}
                 className="sg-nav-link w-auto"
               >
                 <Icon name="menu" />
@@ -215,10 +249,11 @@ function Shell({ children }: { children: ReactNode }) {
                   <div className="mx-auto max-w-3xl">{children}</div>
                 )}
               </main>
-              {sync && notebookId && (
+              {/* Nur mounten, wenn Platz ist: sonst Anfragen und Abo ohne sichtbare Spalte */}
+              {sync && notebookId && isWide && (
                 <aside
                   aria-label="Notizen"
-                  className="hidden w-[360px] shrink-0 overflow-y-auto border-l border-border bg-surface lg:block"
+                  className="w-[360px] shrink-0 overflow-y-auto border-l border-border bg-surface p-3"
                 >
                   <InkColumn notebookId={notebookId} client={sync} />
                 </aside>

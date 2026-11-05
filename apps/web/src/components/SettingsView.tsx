@@ -35,6 +35,8 @@ interface SettingsTab {
   id: string;
   label: string;
   panel: () => ReactNode;
+  /** Erst beim ersten Aktivieren mounten (vermeidet Anfragen/Polling für nie geöffnete Reiter) */
+  lazy?: boolean;
 }
 
 /**
@@ -49,6 +51,7 @@ const TABS: readonly SettingsTab[] = [
   { id: 'geraete', label: 'Geräte', panel: () => <ComingSoon title="Geräte" ticket="T1-10" /> },
   {
     id: 'daten',
+    lazy: true,
     label: 'Daten und Papierkorb',
     panel: () => (
       <div className="space-y-8">
@@ -102,6 +105,8 @@ export function SettingsView() {
   const [marks, setMarks] = useState<Record<string, TabMark>>({});
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   const vertical = useVerticalTabs();
+  const [visited, setVisited] = useState<ReadonlySet<string>>(() => new Set([TABS[0]?.id ?? '']));
+  if (!visited.has(active)) setVisited(new Set(visited).add(active));
 
   const report = useCallback((tabId: string, mark: TabMark) => {
     setMarks((current) => {
@@ -196,7 +201,7 @@ export function SettingsView() {
               className="min-w-0"
             >
               <PanelScope tabId={tab.id} active={tab.id === active} onReport={report}>
-                {tab.panel()}
+                {tab.lazy && !visited.has(tab.id) && tab.id !== active ? null : tab.panel()}
               </PanelScope>
             </div>
           ))}

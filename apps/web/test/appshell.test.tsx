@@ -23,8 +23,9 @@ function stubNarrow(narrow: boolean) {
   const listeners = new Set<Listener>();
   vi.stubGlobal(
     'matchMedia',
-    vi.fn(() => ({
-      matches: narrow,
+    vi.fn((query: string) => ({
+      // schmal: nur die max-width-Abfrage trifft; breit: die min-width-Abfragen
+      matches: query.includes('max-width') ? narrow : !narrow,
       addEventListener: (_: string, l: Listener) => listeners.add(l),
       removeEventListener: (_: string, l: Listener) => listeners.delete(l),
     })),
@@ -131,6 +132,55 @@ describe('AppShell: Drawer unter 768 px', () => {
     link.addEventListener('click', (e) => e.preventDefault());
     await user.click(link);
     expect(aside).toHaveAttribute('data-drawer', 'closed');
+    // Nach Navigation geht der Fokus in den Inhalt
+    expect(document.getElementById('main')).toHaveFocus();
+  });
+
+  it('schirmt den Hintergrund ab: Dialog, aria-modal, Rest inert', async () => {
+    stubNarrow(true);
+    const user = userEvent.setup();
+    mount(fakeClient().client);
+    const aside = document.getElementById('sidebar')!;
+    expect(aside).not.toHaveAttribute('role');
+    const menu = screen.getByRole('button', { name: 'Menü öffnen' });
+    await user.click(menu);
+    expect(aside).toHaveAttribute('role', 'dialog');
+    expect(aside).toHaveAttribute('aria-modal', 'true');
+    expect(aside).toHaveAttribute('aria-label', 'Hauptmenü');
+    expect(screen.getByText('Inhalt').closest('[inert]')).not.toBeNull();
+    expect(menu.closest('[inert]')).not.toBeNull();
+    expect(aside.closest('[inert]')).toBeNull();
+    expect(menu).toHaveAccessibleName('Menü schließen');
+    await user.keyboard('{Escape}');
+    expect(document.querySelector('[inert]')).toBeNull();
+    expect(menu).toHaveAccessibleName('Menü öffnen');
+    expect(menu).toHaveFocus();
+  });
+
+  it('Esc, das ein Element im Drawer selbst behandelt, schließt ihn nicht', async () => {
+    stubNarrow(true);
+    const user = userEvent.setup();
+    mount(fakeClient().client);
+    await user.click(screen.getByRole('button', { name: 'Menü öffnen' }));
+    const aside = document.getElementById('sidebar')!;
+    const own = (e: KeyboardEvent) => e.preventDefault();
+    aside.addEventListener('keydown', own);
+    await user.keyboard('{Escape}');
+    expect(aside).toHaveAttribute('data-drawer', 'open');
+    aside.removeEventListener('keydown', own);
+  });
+
+  it('Strg+K schließt den Drawer und öffnet die Suche ohne Fokusfalle', async () => {
+    stubNarrow(true);
+    const user = userEvent.setup();
+    mount(fakeClient().client);
+    await user.click(screen.getByRole('button', { name: 'Menü öffnen' }));
+    await user.keyboard('{Control>}k{/Control}');
+    expect(document.getElementById('sidebar')).toHaveAttribute('data-drawer', 'closed');
+    expect(document.querySelector('[inert]')).toBeNull();
+    const dialog = await screen.findByRole('dialog', { name: /such/i });
+    await user.tab();
+    expect(dialog.contains(document.activeElement)).toBe(true);
   });
 
   it('schließt, wenn der Bildschirm breit wird', async () => {
@@ -199,6 +249,13 @@ describe('AppShell: SyncClient', () => {
     mount(client);
     expect(await screen.findByText('Studien-Gehirn ist in einem anderen Tab aktiv.')).toBeVisible();
     expect(await screen.findByRole('button', { name: /Sync-Fehlerablage \(1\)/ })).toBeVisible();
+  });
+
+  it('mountet die Notizen-Spalte schmal nicht, auch nicht mit ?notebook=<id>', () => {
+    stubNarrow(true);
+    window.history.replaceState(null, '', '/?notebook=nb-1');
+    mount(fakeClient().client);
+    expect(screen.queryByTestId('ink-column')).toBeNull();
   });
 
   it('blendet die Notizen-Spalte nur mit ?notebook=<id> ein', async () => {

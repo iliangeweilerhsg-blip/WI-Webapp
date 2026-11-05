@@ -55,6 +55,18 @@ describe('Reiter', () => {
     expect(await screen.findByRole('heading', { name: 'Semester' })).toBeInTheDocument();
   });
 
+  it('mountet „Daten und Papierkorb“ erst beim ersten Öffnen (keine Anfragen vorher)', async () => {
+    const core = installFakeCore();
+    const user = userEvent.setup();
+    page();
+    expect(await screen.findByRole('heading', { name: 'Semester' })).toBeInTheDocument();
+    const dataRequests = () => core.requests.filter((r) => /^\/(backups|trash)/.test(r.path));
+    expect(dataRequests()).toEqual([]);
+    await user.click(screen.getByRole('tab', { name: 'Daten und Papierkorb' }));
+    expect(await screen.findByRole('heading', { name: 'Papierkorb' })).toBeInTheDocument();
+    expect(dataRequests().length).toBeGreaterThan(0);
+  });
+
   it('wechselt per Klick und Pfeiltasten; Geräte zeigt „Kommt bald“, Daten die Bereiche Backups und Papierkorb', async () => {
     installFakeCore();
     const user = userEvent.setup();
