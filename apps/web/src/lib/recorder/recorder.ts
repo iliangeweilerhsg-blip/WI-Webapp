@@ -1,6 +1,7 @@
 // Browser-Recorder (VERTRAEGE §10, Spike S4 Variante A): ein MediaRecorder mit `timeslice` je Aufnahme,
-// Chunks in IndexedDB puffern, hochladen mit Wiederholung. Nach Fehler oder Ruhezustand beginnt eine NEUE Aufnahme
-// derselben Session (jede mit eigenem Init-Chunk, `chunks_independent = false`).
+// Chunks in IndexedDB puffern, hochladen mit Wiederholung. Eine Aufnahme ist ein MediaRecorder-Strom. Eine NEUE
+// Aufnahme derselben Session beginnt nach einem Fehler, nach dem Ruhezustand und nach einer Pause der Session
+// (jede mit eigenem Init-Chunk, `chunks_independent = false`).
 import type { Session } from '@sg/shared';
 import { uuidv7 } from '../uuid.ts';
 import { pickRecorderFormat, type RecorderFormat } from './codec.ts';
@@ -10,7 +11,6 @@ import { createDefaultRecorderStore } from './store.ts';
 import { ChunkUploader, type UploaderOptions } from './uploader.ts';
 import {
   TIMESLICE_MS,
-  type RecorderState,
   type RecorderStatus,
   type RecorderStore,
   type RecordingMeta,
@@ -36,17 +36,27 @@ export interface MediaRecorderLike {
   onerror: ((ev: unknown) => void) | null;
   start(timeslice?: number): void;
   stop(): void;
+  requestData?(): void;
 }
 export interface MediaRecorderCtorLike {
-  new (stream: MediaStream, options?: { mimeType?: string }): MediaRecorderLike;
+  new (stream: MediaStream, options?: { mimeType?: string; audioBitsPerSecond?: number }): MediaRecorderLike;
   isTypeSupported?(mime: string): boolean;
+}
+
+/** Sprachtauglich und klein: 48 kbit/s, mono. `echoCancellation`/`noiseSuppression` bleiben Standard (Spike S4). */
+export const AUDIO_BITS_PER_SECOND = 48_000;
+const AUDIO_CONSTRAINTS: MediaStreamConstraints = { audio: { channelCount: 1 } };
+
+export interface RecorderDocumentLike extends VisibilityDocumentLike {
+  addEventListener(type: 'visibilitychange', fn: () => void): void;
+  removeEventListener(type: 'visibilitychange', fn: () => void): void;
 }
 
 export interface RecorderOptions {
   sessionId: string;
   /** Aktuelle Sitzungszeit in ms (`SessionMs`). Bestimmt `started_ms` jeder Aufnahme. */
   sessionMs: () => number;
-  /** Quelle für `session.updated` (`SyncClient`). `beendet` schließt die Aufnahme ab. Kein globaler Zustand. */
+  /** Quelle für `session.updated` (`SyncClient`). `beendet` schließt ab, `pausiert`/`laeuft` trennen/öffnen Aufnahmen. */
   events?: SessionEventSource;
   store?: RecorderStore;
   uploader?: Omit<UploaderOptions, 'store' | 'isActive' | 'onChange'>;
@@ -55,7 +65,7 @@ export interface RecorderOptions {
   MediaRecorder?: MediaRecorderCtorLike;
   level?: LevelMeterOptions;
   navigator?: WakeLockNavigatorLike;
-  document?: VisibilityDocumentLike;
+  document?: RecorderDocumentLike;
   /** Monotone Uhr in ms (`performance.now`) */
   clock?: () => number;
   /** Wanduhr in Epochen-ms (`Date.now`) */
@@ -74,6 +84,8 @@ interface Run {
   lastBoundary: number;
   nextSeq: number;
   recordedMs: number;
+  /** Wird vom Recorder selbst beendet (kein unerwarteter Stopp) */
+  ending: boolean;
   stopped: Promise<void>;
   resolveStopped: () => void;
 }
@@ -102,15 +114,17 @@ export class AudioRecorder {
 
   private stream: MediaStream | null = null;
   private run: Run | null = null;
+  /** Chunk-Verarbeitung und Schreiben der Metadaten der Reihe nach */
   private chain: Promise<void> = Promise.resolve();
+  /** Zustandswechsel (Neustart, Pause, Fortsetzen, Stopp) der Reihe nach */
+  private transitions: Promise<void> = Promise.resolve();
   private format: RecorderFormat | null = null;
   private stopLevel: (() => void) | null = null;
   private offEvents: (() => void) | null = null;
   private driftTimer: unknown = null;
   private lastWall = 0;
   private lastClock = 0;
-  private restarting: Promise<void> | null = null;
-  private finishing = false;
+  private visibilityHandler: (() => void) | null = null;
   /** Aufnahmen, die laufen oder gerade abgeschlossen werden: nie als verwaist behandeln */
   private readonly activeIds = new Set<string>();
 
@@ -146,14 +160,27 @@ export class AudioRecorder {
     for (const fn of [...this.listeners]) fn();
   }
 
-  private fail(state: RecorderState, error: string): never {
+  private fail(state: 'error' | 'unsupported', error: string): never {
     this.patch({ state, error });
     throw new Error(error);
   }
 
-  /** Mikrofon öffnen, Aufnahme beim Core anlegen (offline erlaubt) und aufnehmen */
+  private serialize(fn: () => Promise<void>): Promise<void> {
+    const next = this.transitions.then(fn, fn);
+    this.transitions = next.catch(() => undefined);
+    return next;
+  }
+
+  private getUserMedia(): Promise<MediaStream> {
+    const get =
+      this.o.getUserMedia ?? ((c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c));
+    return get(AUDIO_CONSTRAINTS);
+  }
+
+  /** Mikrofon öffnen und aufnehmen. Die Aufnahme wird beim Core angelegt, auch erst später (offline erlaubt). */
   async start(): Promise<void> {
-    if (this.status.state === 'starting' || this.status.state === 'recording') return;
+    if (this.status.state !== 'idle' && this.status.state !== 'stopped' && this.status.state !== 'error')
+      return;
     this.patch({ state: 'starting', error: null, restarts: 0 });
     const Ctor =
       this.o.MediaRecorder ?? (globalThis.MediaRecorder as unknown as MediaRecorderCtorLike | undefined);
@@ -161,10 +188,8 @@ export class AudioRecorder {
     if (!Ctor || !this.format) {
       this.fail('unsupported', 'Dieser Browser kann nicht aufnehmen (kein Opus/WebM und kein AAC/MP4).');
     }
-    const getUserMedia =
-      this.o.getUserMedia ?? ((c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c));
     try {
-      this.stream = await getUserMedia({ audio: true });
+      this.adoptStream(await this.getUserMedia());
     } catch {
       this.fail(
         'error',
@@ -174,36 +199,71 @@ export class AudioRecorder {
     try {
       await this.beginRun(true);
     } catch (error) {
-      this.releaseStream();
+      this.teardown();
       throw error;
     }
-    this.stopLevel = startLevelMeter(this.stream, this.o.level);
+    const stream = this.stream;
+    if (stream) this.stopLevel = startLevelMeter(stream, this.o.level);
     void this.wake.acquire();
-    this.offEvents =
-      this.o.events?.onEvent('session.updated', (s) => {
-        if (s.id === this.o.sessionId && (s.state === 'beendet' || s.state === 'verarbeitet'))
-          void this.stop();
-      }) ?? null;
+    this.offEvents = this.o.events?.onEvent('session.updated', (s) => this.onSessionUpdated(s)) ?? null;
     this.lastWall = this.wall();
     this.lastClock = this.clock();
     const every = this.o.setInterval ?? ((fn, ms) => globalThis.setInterval(fn, ms));
     this.driftTimer = every(() => this.checkSleep(), 1000);
+    const doc = this.o.document ?? (typeof document !== 'undefined' ? document : undefined);
+    if (doc) {
+      // Ein Tab im Hintergrund kann gedrosselt oder beendet werden: gepufferte Daten jetzt herausgeben
+      this.visibilityHandler = () => {
+        if (doc.visibilityState === 'hidden') this.run?.recorder.requestData?.();
+      };
+      doc.addEventListener('visibilitychange', this.visibilityHandler);
+    }
     this.patch({ state: 'recording' });
   }
 
-  /** Beendet die Aufnahme, gibt das Mikrofon frei und stößt den Abschluss an (`complete`) */
-  async stop(): Promise<void> {
-    if (this.finishing || (this.status.state !== 'recording' && this.status.state !== 'starting')) return;
-    this.finishing = true;
-    this.patch({ state: 'stopping' });
-    try {
-      await this.restarting?.catch(() => undefined);
+  private onSessionUpdated(s: Session): void {
+    if (s.id !== this.o.sessionId) return;
+    if (s.state === 'beendet' || s.state === 'verarbeitet') void this.stop();
+    else if (s.state === 'pausiert') void this.pause();
+    else if (s.state === 'laeuft') void this.resume();
+  }
+
+  /** Session pausiert: Aufnahme abschließen (`complete`). Das Mikrofon bleibt offen, kein `MediaRecorder.pause()`. */
+  pause(): Promise<void> {
+    return this.serialize(async () => {
+      if (this.status.state !== 'recording') return;
       await this.endRun();
-    } finally {
-      this.teardown();
-      this.finishing = false;
-      this.patch({ state: 'stopped' });
-    }
+      this.patch({ state: 'paused' });
+    });
+  }
+
+  /** Session läuft weiter: neue Aufnahme, `started_ms` = aktuelle Sitzungszeit (die Lücke bleibt auf der Zeitachse) */
+  resume(): Promise<void> {
+    return this.serialize(async () => {
+      if (this.status.state !== 'paused') return;
+      try {
+        await this.ensureStream();
+        await this.beginRun(false);
+        this.patch({ state: 'recording' });
+      } catch {
+        this.failRunning('Die Aufnahme konnte nicht fortgesetzt werden.');
+      }
+    });
+  }
+
+  /** Beendet die Aufnahme, gibt das Mikrofon frei und stößt den Abschluss an (`complete`) */
+  stop(): Promise<void> {
+    return this.serialize(async () => {
+      const { state } = this.status;
+      if (state !== 'recording' && state !== 'paused' && state !== 'starting') return;
+      this.patch({ state: 'stopping' });
+      try {
+        await this.endRun();
+      } finally {
+        this.teardown();
+        this.patch({ state: 'stopped' });
+      }
+    });
   }
 
   /** Sofort verwerfen, ohne Abschluss (Seite wird zerstört). Gepufferte Chunks bleiben für die Wiederaufnahme. */
@@ -222,6 +282,11 @@ export class AudioRecorder {
     this.uploader.retryNow();
   }
 
+  private failRunning(message: string): void {
+    this.teardown();
+    this.patch({ state: 'error', error: message });
+  }
+
   private teardown(): void {
     this.offEvents?.();
     this.offEvents = null;
@@ -231,15 +296,43 @@ export class AudioRecorder {
       );
       this.driftTimer = null;
     }
+    const doc = this.o.document ?? (typeof document !== 'undefined' ? document : undefined);
+    if (doc && this.visibilityHandler) doc.removeEventListener('visibilitychange', this.visibilityHandler);
+    this.visibilityHandler = null;
     this.stopLevel?.();
     this.stopLevel = null;
     void this.wake.release();
     this.releaseStream();
   }
 
+  private adoptStream(stream: MediaStream): void {
+    this.stream = stream;
+    for (const track of stream.getTracks()) {
+      // Mikrofon weg (abgesteckt, Berechtigung entzogen, Ruhezustand): neu beginnen oder sichtbar scheitern
+      track.onended = () => {
+        if (this.stream === stream)
+          void this.restart('Das Mikrofon wurde getrennt. Die Aufnahme wurde neu begonnen.');
+      };
+    }
+  }
+
   private releaseStream(): void {
-    for (const track of this.stream?.getTracks() ?? []) track.stop();
+    for (const track of this.stream?.getTracks() ?? []) {
+      track.onended = null;
+      track.stop();
+    }
     this.stream = null;
+  }
+
+  /** Mikrofon bei Bedarf neu öffnen (Spur beendet) */
+  private async ensureStream(): Promise<void> {
+    const alive = this.stream?.getTracks().some((t) => t.readyState === 'live');
+    if (alive) return;
+    this.stopLevel?.();
+    this.stopLevel = null;
+    this.releaseStream();
+    this.adoptStream(await this.getUserMedia());
+    if (this.stream) this.stopLevel = startLevelMeter(this.stream, this.o.level);
   }
 
   private async beginRun(first: boolean): Promise<void> {
@@ -247,12 +340,22 @@ export class AudioRecorder {
     const format = this.format;
     const Ctor = this.o.MediaRecorder ?? (globalThis.MediaRecorder as unknown as MediaRecorderCtorLike);
     if (!stream || !format) throw new Error('Kein Mikrofon');
+    let resolveStopped!: () => void;
+    const stopped = new Promise<void>((r) => {
+      resolveStopped = r;
+    });
+    // Zuerst aufnehmen, dann anlegen: der Core darf langsam oder offline sein, es geht kein Ton verloren.
+    // `started_ms` gehört zum tatsächlichen Beginn der Aufnahme.
+    const recorder = new Ctor(stream, { mimeType: format.mime, audioBitsPerSecond: AUDIO_BITS_PER_SECOND });
+    const startedMs = Math.max(0, Math.round(this.o.sessionMs()));
+    const now = this.clock();
+    recorder.start(this.o.timesliceMs ?? TIMESLICE_MS);
     const meta: RecordingMeta = {
       id: uuidv7(this.wall()),
       sessionId: this.o.sessionId,
       mime: format.mime,
       codec: format.codec,
-      startedMs: Math.max(0, Math.round(this.o.sessionMs())),
+      startedMs,
       chunksIndependent: false,
       created: false,
       nextSeq: 0,
@@ -260,22 +363,6 @@ export class AudioRecorder {
       lastActivityAt: this.wall(),
       complete: null,
     };
-    await this.store.putRecording(meta);
-    if (first) {
-      // Beim Start sofort wissen, ob der Core die Aufnahme ablehnt (Session läuft nicht). Offline ist erlaubt.
-      const created = await this.uploader.tryCreate(meta);
-      if (created === 'permanent') {
-        await this.store.deleteRecording(meta.id);
-        this.fail('error', 'Der Core hat die Aufnahme abgelehnt. Läuft die Session?');
-      }
-      if (created === 'ok') await this.store.patchRecording(meta.id, { created: true });
-    }
-    let resolveStopped!: () => void;
-    const stopped = new Promise<void>((r) => {
-      resolveStopped = r;
-    });
-    const recorder = new Ctor(stream, { mimeType: format.mime });
-    const now = this.clock();
     const run: Run = {
       meta,
       recorder,
@@ -283,16 +370,44 @@ export class AudioRecorder {
       lastBoundary: now,
       nextSeq: 0,
       recordedMs: 0,
+      ending: false,
       stopped,
       resolveStopped,
     };
     recorder.ondataavailable = (ev) => this.onData(run, ev.data);
-    recorder.onstop = () => run.resolveStopped();
-    recorder.onerror = () => void this.restart('Die Aufnahme wurde vom Browser unterbrochen.');
+    recorder.onstop = () => {
+      run.resolveStopped();
+      // Der Browser hat den Recorder von sich aus beendet (nicht über endRun): neu beginnen
+      if (!run.ending && this.run === run) void this.restart('Die Aufnahme wurde vom Browser beendet.');
+    };
+    recorder.onerror = () => {
+      if (!run.ending && this.run === run) void this.restart('Die Aufnahme wurde vom Browser unterbrochen.');
+    };
     this.run = run;
     this.activeIds.add(meta.id);
-    recorder.start(this.o.timesliceMs ?? TIMESLICE_MS);
     this.patch({ recordingId: meta.id, chunkCount: 0, recordedMs: 0 });
+    // Chunk-Verarbeitung wartet, bis die Metadaten in IndexedDB stehen
+    this.chain = this.chain.then(() => this.store.putRecording(meta)).catch(() => undefined);
+    await this.chain;
+
+    if (first) {
+      // Beim Start sofort wissen, ob der Core die Aufnahme ablehnt (Session läuft nicht). Offline ist erlaubt.
+      const created = await this.uploader.tryCreate(meta);
+      if (created === 'permanent') {
+        run.ending = true;
+        this.run = null;
+        try {
+          recorder.stop();
+        } catch {
+          // schon beendet
+        }
+        this.activeIds.delete(meta.id);
+        await this.chain;
+        await this.store.deleteRecording(meta.id);
+        this.fail('error', 'Der Core hat die Aufnahme abgelehnt. Läuft die Session?');
+      }
+      if (created === 'ok') await this.store.patchRecording(meta.id, { created: true });
+    }
     this.uploader.kick();
   }
 
@@ -309,19 +424,37 @@ export class AudioRecorder {
         const data = await readBlob(blob);
         const sha256 = await sha256Hex(data);
         run.recordedMs += durationMs;
-        await this.store.addChunk(
-          {
-            recordingId: run.meta.id,
-            seq,
-            startMs: Math.max(0, Math.round(run.meta.startedMs + startRel)),
-            durationMs,
-            sha256,
-            data,
-            attempts: 0,
-          },
-          { nextSeq: seq + 1, recordedMs: run.recordedMs, lastActivityAt: this.wall() },
-        );
-        if (this.run === run) this.patch({ chunkCount: seq + 1, recordedMs: run.recordedMs });
+        const chunk = {
+          recordingId: run.meta.id,
+          seq,
+          startMs: Math.max(0, Math.round(run.meta.startedMs + startRel)),
+          durationMs,
+          sha256,
+          data,
+          attempts: 0,
+        };
+        const stored = await this.store.addChunk(chunk, {
+          nextSeq: seq + 1,
+          recordedMs: run.recordedMs,
+          lastActivityAt: this.wall(),
+        });
+        if (!stored) {
+          // Die Aufnahme wurde im Zwischenspeicher gelöscht: Daten nicht still verwerfen
+          await this.store.shelveChunk({
+            ...chunk,
+            status: null,
+            code: 'recording_missing',
+            message: 'Die Aufnahme fehlt im Zwischenspeicher.',
+            shelvedAt: this.wall(),
+          });
+          this.patch({
+            error: 'Die Aufnahme fehlt im Zwischenspeicher. Neue Teile liegen in der Fehlerablage.',
+          });
+          return;
+        }
+        if (this.status.recordingId === run.meta.id) {
+          this.patch({ chunkCount: seq + 1, recordedMs: run.recordedMs });
+        }
         this.uploader.kick();
       } catch (error) {
         console.warn('Recorder: Chunk konnte nicht gepuffert werden', error);
@@ -336,6 +469,7 @@ export class AudioRecorder {
   private async endRun(): Promise<void> {
     const run = this.run;
     if (!run) return;
+    run.ending = true;
     this.run = null;
     if (run.recorder.state !== 'inactive') {
       try {
@@ -365,32 +499,19 @@ export class AudioRecorder {
     }
   }
 
-  /** Aktuelle Aufnahme abschließen und eine neue beginnen (Fehler, Ruhezustand) */
+  /** Aktuelle Aufnahme abschließen und eine neue beginnen (Fehler, Ruhezustand, Mikrofon weg) */
   private restart(reason: string): Promise<void> {
-    if (this.restarting || this.finishing || this.status.state !== 'recording')
-      return this.restarting ?? Promise.resolve();
-    this.restarting = (async () => {
+    return this.serialize(async () => {
+      if (this.status.state !== 'recording') return;
       try {
         await this.endRun();
-        const alive = this.stream?.getTracks().some((t) => t.readyState === 'live');
-        if (!alive) {
-          const getUserMedia =
-            this.o.getUserMedia ?? ((c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c));
-          this.releaseStream();
-          this.stopLevel?.();
-          this.stream = await getUserMedia({ audio: true });
-          this.stopLevel = startLevelMeter(this.stream, this.o.level);
-        }
+        await this.ensureStream();
         await this.beginRun(false);
         this.patch({ restarts: this.status.restarts + 1, error: reason });
       } catch {
-        this.teardown();
-        this.patch({ state: 'error', error: 'Die Aufnahme konnte nicht fortgesetzt werden.' });
-      } finally {
-        this.restarting = null;
+        this.failRunning('Die Aufnahme konnte nicht fortgesetzt werden (kein Mikrofon?).');
       }
-    })();
-    return this.restarting;
+    });
   }
 }
 

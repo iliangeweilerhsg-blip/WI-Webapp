@@ -13,6 +13,9 @@ import type { ChunkRecord, RecorderStore, RecordingMeta, UploaderStatus } from '
 export const BACKOFF_START_MS = 1_000;
 export const BACKOFF_MAX_MS = 30_000;
 /** Eine Aufnahme ohne neuen Chunk und ohne laufenden Recorder gilt danach als verwaist (Neuladen, Absturz) */
+export const CREATE_TIMEOUT_MS = 5_000;
+export const CHUNK_TIMEOUT_MS = 60_000;
+export const COMPLETE_TIMEOUT_MS = 15_000;
 export const ABANDON_AFTER_MS = 120_000;
 
 export interface UploaderOptions {
@@ -74,6 +77,7 @@ export class ChunkUploader {
 
   private running: Promise<void> | null = null;
   private disposed = false;
+  private dirty = false;
   private wake: (() => void) | null = null;
   private status: UploaderStatus = { pendingChunks: 0, shelvedChunks: 0, offline: false, retryInMs: null };
   /** Chunks bzw. Aufnahmen, die der Core schon einmal als unbekannt (404) gemeldet hat */
@@ -101,7 +105,12 @@ export class ChunkUploader {
 
   /** Startet die Schleife, falls sie nicht läuft. Läuft sie schon, sieht sie neue Chunks im nächsten Durchgang. */
   kick(): void {
-    if (this.disposed || this.running) return;
+    if (this.disposed) return;
+    if (this.running) {
+      // Neue Arbeit, während die Schleife ausläuft: noch ein Durchgang
+      this.dirty = true;
+      return;
+    }
     this.running = this.loop().finally(() => {
       this.running = null;
     });
@@ -141,6 +150,7 @@ export class ChunkUploader {
   private async loop(): Promise<void> {
     let attempt = 0;
     while (!this.disposed) {
+      this.dirty = false;
       let result: 'idle' | 'progress' | 'retry';
       try {
         result = await this.pass();
@@ -150,6 +160,10 @@ export class ChunkUploader {
         result = 'retry';
       }
       await this.refreshCounts().catch(() => undefined);
+      if (result === 'idle' && this.dirty) {
+        this.dirty = false;
+        continue;
+      }
       if (result === 'idle') {
         this.setStatus({ offline: false, retryInMs: null });
         return;
@@ -187,15 +201,16 @@ export class ChunkUploader {
 
   private async processRecording(id: string): Promise<'idle' | 'progress' | 'retry'> {
     let meta = await this.store.getRecording(id);
-    if (!meta) return 'idle';
+    if (!meta || meta.rejected) return 'idle';
     let progress = false;
 
     if (!meta.created) {
       const created = await this.tryCreate(meta);
       if (created === 'retry') return 'retry';
       if (created === 'permanent') {
+        // Die Metadaten bleiben (mime, codec, started_ms), damit die Ablage später hochladbar bleibt
         await this.shelveAll(meta, 'Die Aufnahme konnte auf dem Core nicht angelegt werden.');
-        await this.store.deleteRecording(id);
+        await this.store.patchRecording(id, { rejected: 'recording_rejected' });
         return 'progress';
       }
       meta = (await this.store.patchRecording(id, { created: true })) ?? meta;
@@ -244,6 +259,7 @@ export class ChunkUploader {
           started_ms: meta.startedMs,
           chunks_independent: meta.chunksIndependent,
         }),
+        signal: AbortSignal.timeout(CREATE_TIMEOUT_MS),
       });
     } catch {
       return 'retry';
@@ -269,6 +285,7 @@ export class ChunkUploader {
           'X-Sha256': chunk.sha256,
         },
         body: chunk.data,
+        signal: AbortSignal.timeout(CHUNK_TIMEOUT_MS),
       });
     } catch {
       await this.store.putChunk({ ...chunk, attempts: chunk.attempts + 1 }).catch(() => undefined);
@@ -328,8 +345,8 @@ export class ChunkUploader {
     meta: RecordingMeta,
     complete: { lastSeq: number; durationMs: number },
   ): Promise<'ok' | 'retry'> {
-    // Aufnahme ohne einen einzigen Chunk, die der Core nie sah: nichts abzuschließen
-    if (!meta.created) {
+    // Eine Aufnahme ohne Chunk wird nicht abgeschlossen (VERTRAEGE §10.2): der Core verarbeitet sie mit dem Stopp
+    if (meta.nextSeq === 0 || !meta.created) {
       await this.store.deleteRecording(meta.id);
       return 'ok';
     }
@@ -339,6 +356,7 @@ export class ChunkUploader {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ last_seq: complete.lastSeq, duration_ms: Math.round(complete.durationMs) }),
+        signal: AbortSignal.timeout(COMPLETE_TIMEOUT_MS),
       });
     } catch {
       return 'retry';
@@ -372,6 +390,7 @@ export class ChunkUploader {
     try {
       const res = await this.doFetch(this.url(`/recordings/${id}`), {
         headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(CREATE_TIMEOUT_MS),
       });
       if (!res.ok) return null;
       const body = (await res.json()) as { last_seq?: unknown };

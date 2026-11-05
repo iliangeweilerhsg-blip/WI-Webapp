@@ -1,8 +1,8 @@
 // Gemeinsame Typen des Recorders (VERTRAEGE §10, §16.2, Ticket T1-06).
 import type { AudioCodec } from '@sg/shared';
 
-/** Länge eines Chunks (`MediaRecorder.start(timeslice)`, Spike S4) */
-export const TIMESLICE_MS = 30_000;
+/** Länge eines Chunks (`MediaRecorder.start(timeslice)`). Spike S4 empfahl 30 s; 10 s begrenzt den Verlust beim Neuladen */
+export const TIMESLICE_MS = 10_000;
 
 /** Aufnahme-Metadaten in IndexedDB. Bleibt, bis die Aufnahme auf dem Core abgeschlossen ist. */
 export interface RecordingMeta {
@@ -23,6 +23,8 @@ export interface RecordingMeta {
   lastActivityAt: number;
   /** Gesetzt, sobald die Aufnahme zu Ende ist. Dann folgt `POST …/complete`, sobald alle Chunks hochgeladen sind. */
   complete: { lastSeq: number; durationMs: number } | null;
+  /** Der Core hat die Aufnahme abgelehnt (Session zu alt). Die Chunks liegen in der Fehlerablage, die Metadaten bleiben. */
+  rejected?: string;
 }
 
 /** Ein gepufferter Chunk. Die Daten liegen als `ArrayBuffer` in IndexedDB (Blobs sind in Safari unzuverlässig). */
@@ -90,7 +92,7 @@ export interface UploaderStatus {
 }
 
 export type RecorderState =
-  'idle' | 'starting' | 'recording' | 'stopping' | 'stopped' | 'error' | 'unsupported';
+  'idle' | 'starting' | 'recording' | 'paused' | 'stopping' | 'stopped' | 'error' | 'unsupported';
 
 export interface RecorderStatus {
   state: RecorderState;

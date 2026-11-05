@@ -14,7 +14,7 @@ import {
 } from '@sg/shared';
 import { job, recording, session } from '../../src/db/schema/index.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
-import { MAX_CHUNK_BYTES } from '../../src/services/recordings.ts';
+import { ensureFinalizeOnStop, MAX_CHUNK_BYTES } from '../../src/services/recordings.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 import { seedModule } from './ink-helpers.ts';
 
@@ -420,7 +420,12 @@ describe('POST /recordings/{id}/complete', () => {
   it('Aufnahme ohne Chunks lässt sich abschließen (last_seq 0)', async () => {
     const rec = await newRecording();
     expect((await complete(rec.id, { last_seq: 0, duration_ms: 0 })).statusCode).toBe(200);
-    expect(await finalizeJobs()).toHaveLength(1);
+    expect(await finalizeJobs()).toHaveLength(0);
+    // Kommt doch ein Chunk, entsteht der Job (Aufnahme ist abgeschlossen: sofort)
+    expect((await putChunk(rec.id, 0, bytes(10))).statusCode).toBe(201);
+    const jobs = await finalizeJobs();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.runAfter).toBeNull();
   });
 
   it('prüft den Body und die ID', async () => {
@@ -477,6 +482,188 @@ describe('POST /recordings/{id}/complete', () => {
       .from(recording)
       .where(and(eq(recording.id, rec.id), sql`true`));
     expect(completed[0]).toEqual({ last: 1, dur: 60_000 });
+  });
+});
+
+describe('Nachträglich angelegte Aufnahme (offline gestartet, Session schon beendet)', () => {
+  const START = new Date('2026-11-04T10:00:00Z');
+  const END = new Date('2026-11-04T11:30:00Z'); // 90 min
+  async function endedSession(extra: Partial<typeof session.$inferInsert> = {}) {
+    const id = uuidv7();
+    await t.handle.db.insert(session).values({
+      id,
+      userId: SINGLE_USER_ID,
+      moduleId,
+      state: 'beendet',
+      startedFrom: 'ipad',
+      startedAt: START,
+      endedAt: END,
+      stopReason: 'manuell',
+      ...extra,
+    } as typeof session.$inferInsert);
+    return id;
+  }
+
+  it('erlaubt started_ms bis Ende + 5 min und legt den Job beim ersten Chunk mit run_after = jetzt + 10 min an', async () => {
+    const sid = await endedSession();
+    const before = Date.now();
+    const res = await createRec({ started_ms: 90 * 60_000 + 5 * 60_000 }, sid);
+    expect(res.statusCode).toBe(201);
+    const id = RecordingSchema.parse(res.json()).id;
+    expect(await finalizeJobs()).toHaveLength(0); // leer: noch kein Job
+    const upload = Date.now();
+    expect((await putChunk(id, 0, bytes(10))).statusCode).toBe(201);
+    const jobs = await finalizeJobs();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ state: 'wartet', sessionId: sid });
+    expect((jobs[0]?.payload as { recording_id: string }).recording_id).toBe(id);
+    const delay = (jobs[0]?.runAfter?.getTime() ?? 0) - upload;
+    expect(before).toBeLessThanOrEqual(upload);
+    expect(delay).toBeGreaterThan(9.9 * 60_000);
+    expect(delay).toBeLessThan(10.5 * 60_000);
+    // Sessionstatus bleibt unverändert
+    const [row] = await t.handle.db.select().from(session).where(eq(session.id, sid));
+    expect(row?.state).toBe('beendet');
+    expect(row?.endedAt?.toISOString()).toBe(END.toISOString());
+  });
+
+  it('complete zieht den Job vor, es bleibt bei einem', async () => {
+    const sid = await endedSession();
+    const rec = RecordingSchema.parse((await createRec({ started_ms: 1000 }, sid)).json());
+    await putChunk(rec.id, 0, bytes(10));
+    expect(
+      (
+        await t.request({
+          method: 'POST',
+          url: `${API}/recordings/${rec.id}/complete`,
+          payload: { last_seq: 0, duration_ms: 30_000 },
+        })
+      ).statusCode,
+    ).toBe(200);
+    const jobs = await finalizeJobs();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.runAfter?.getTime()).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('lehnt started_ms hinter der Grenze mit 409 session_not_active und details.ended_at ab', async () => {
+    const sid = await endedSession();
+    const res = await createRec({ started_ms: 90 * 60_000 + 5 * 60_000 + 1 }, sid);
+    expect(res.statusCode).toBe(409);
+    const err = ApiErrorSchema.parse(res.json()).error;
+    expect(err.code).toBe('session_not_active');
+    expect(err.details).toEqual({ ended_at: END.toISOString() });
+    expect(await finalizeJobs()).toHaveLength(0);
+  });
+
+  it('auto_stop_extended_until verschiebt die Grenze', async () => {
+    const sid = await endedSession({ autoStopExtendedUntil: new Date(END.getTime() + 30 * 60_000) });
+    expect((await createRec({ started_ms: 120 * 60_000 }, sid)).statusCode).toBe(201);
+  });
+
+  it('absturz_wiederhergestellt: Grenze started_at + 12 h (offene Lead-Frage)', async () => {
+    const sid = await endedSession({
+      stopReason: 'absturz_wiederhergestellt',
+      endedAt: new Date(START.getTime() + 60_000),
+    });
+    expect((await createRec({ started_ms: 11 * 3_600_000 }, sid)).statusCode).toBe(201);
+    expect((await createRec({ started_ms: 12 * 3_600_000 + 5 * 60_000 + 1 }, sid)).statusCode).toBe(409);
+  });
+
+  it('Sessions ohne started_at oder im Zustand bereit/geplant bleiben abgelehnt', async () => {
+    for (const state of ['bereit', 'geplant', 'verpasst']) {
+      expect((await createRec({}, await seedSession(state))).statusCode, state).toBe(409);
+    }
+  });
+});
+
+describe('ensureFinalizeOnStop (T1-02)', () => {
+  const stopAt = new Date('2026-11-04T11:00:00Z');
+  const run = (id: string) => t.handle.db.transaction((tx) => ensureFinalizeOnStop(tx, id, stopAt));
+
+  it('legt ohne Job einen mit run_after = Stopp + 10 min an, ein zweiter Aufruf nichts', async () => {
+    const rec = await newRecording();
+    await putChunk(rec.id, 0, bytes(10));
+    await run(rec.id);
+    await run(rec.id);
+    const jobs = await finalizeJobs();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.runAfter?.toISOString()).toBe('2026-11-04T11:10:00.000Z');
+  });
+
+  it('sofort, wenn die Aufnahme schon abgeschlossen ist; kein zweiter Job nach complete', async () => {
+    const rec = await newRecording();
+    await putChunk(rec.id, 0, bytes(10));
+    await t.request({
+      method: 'POST',
+      url: `${API}/recordings/${rec.id}/complete`,
+      payload: { last_seq: 0, duration_ms: 1 },
+    });
+    await run(rec.id);
+    expect(await finalizeJobs()).toHaveLength(1);
+  });
+
+  it('Stopp mit einer leeren und einer nicht leeren Aufnahme ergibt genau einen Job', async () => {
+    const empty = await newRecording();
+    const full = await newRecording();
+    await putChunk(full.id, 0, bytes(10));
+    for (const id of [empty.id, full.id].sort()) await run(id);
+    const jobs = await finalizeJobs();
+    expect(jobs).toHaveLength(1);
+    expect((jobs[0]?.payload as { recording_id: string }).recording_id).toBe(full.id);
+    // Kommt später doch ein Chunk der leeren Aufnahme (Session ist nicht mehr aktiv): normale Logik legt den Job an
+    await t.handle.db.update(session).set({ state: 'beendet' }).where(eq(session.id, sessionId));
+    await putChunk(empty.id, 0, bytes(10, 5));
+    expect(await finalizeJobs()).toHaveLength(2);
+  });
+
+  it('laufender oder fertiger Job: nichts; fehlgeschlagener oder abgebrochener: neuer Job', async () => {
+    const rec = await newRecording();
+    await putChunk(rec.id, 0, bytes(10));
+    await run(rec.id);
+    for (const state of ['laeuft', 'fertig']) {
+      await t.handle.db.update(job).set({ state }).where(eq(job.type, 'audio.finalize'));
+      await run(rec.id);
+      expect(await finalizeJobs()).toHaveLength(1);
+    }
+    await t.handle.db.update(job).set({ state: 'abgebrochen' }).where(eq(job.type, 'audio.finalize'));
+    await run(rec.id);
+    expect(await finalizeJobs()).toHaveLength(2);
+  });
+
+  it('Chunk nach abgebrochenem Job löst einen neuen aus', async () => {
+    const rec = await newRecording();
+    await putChunk(rec.id, 0, bytes(10));
+    await run(rec.id);
+    await t.handle.db.update(job).set({ state: 'abgebrochen' }).where(eq(job.type, 'audio.finalize'));
+    await putChunk(rec.id, 1, bytes(10, 2));
+    expect((await finalizeJobs()).filter((j) => j.state === 'wartet')).toHaveLength(1);
+  });
+});
+
+describe('Chunks nach complete', () => {
+  it('seq hinter last_seq: 409 recording_completed; gleiche seq mit gleichem sha256 bleibt Duplikat', async () => {
+    const rec = await newRecording();
+    const data = bytes(10);
+    await putChunk(rec.id, 0, data);
+    await t.request({
+      method: 'POST',
+      url: `${API}/recordings/${rec.id}/complete`,
+      payload: { last_seq: 0, duration_ms: 1 },
+    });
+    const late = await putChunk(rec.id, 1, bytes(10, 2));
+    expect(late.statusCode).toBe(409);
+    expect(errorCode(late)).toBe('recording_completed');
+    const dup = await putChunk(rec.id, 0, data);
+    expect(dup.statusCode).toBe(200);
+    // Lücke innerhalb von last_seq darf nachgeliefert werden
+    const rec2 = await newRecording();
+    await putChunk(rec2.id, 1, bytes(10, 3));
+    await t.request({
+      method: 'POST',
+      url: `${API}/recordings/${rec2.id}/complete`,
+      payload: { last_seq: 1, duration_ms: 1 },
+    });
+    expect((await putChunk(rec2.id, 0, bytes(10, 4))).statusCode).toBe(201);
   });
 });
 

@@ -28,8 +28,8 @@ class FakeMediaRecorder implements MediaRecorderLike {
   onerror: ((ev: unknown) => void) | null = null;
   timeslice: number | undefined;
   readonly stream: MediaStream;
-  readonly options: { mimeType?: string } | undefined;
-  constructor(stream: MediaStream, options?: { mimeType?: string }) {
+  readonly options: { mimeType?: string; audioBitsPerSecond?: number } | undefined;
+  constructor(stream: MediaStream, options?: { mimeType?: string; audioBitsPerSecond?: number }) {
     this.stream = stream;
     this.options = options;
     FakeMediaRecorder.instances.push(this);
@@ -46,11 +46,24 @@ class FakeMediaRecorder implements MediaRecorderLike {
     this.emit([9, 9]); // letzter Rest
     this.onstop?.();
   }
+  requestData() {
+    this.emit([5]);
+  }
+  /** Der Browser beendet den Recorder von sich aus */
+  die() {
+    this.state = 'inactive';
+    this.onstop?.();
+  }
 }
 
-function fakeStream(): MediaStream {
-  const track = { readyState: 'live', stop: vi.fn() };
-  return { getTracks: () => [track] } as unknown as MediaStream;
+interface FakeTrack {
+  readyState: string;
+  stop: () => void;
+  onended: (() => void) | null;
+}
+function fakeStream(): MediaStream & { track: FakeTrack } {
+  const track: FakeTrack = { readyState: 'live', stop: vi.fn(), onended: null };
+  return { track, getTracks: () => [track] } as unknown as MediaStream & { track: FakeTrack };
 }
 
 interface Call {
@@ -93,6 +106,9 @@ interface Harness {
   mr: () => FakeMediaRecorder;
   clock: { t: number; wall: number };
   tick: () => void;
+  streams: (MediaStream & { track: FakeTrack })[];
+  media: { fail: boolean; constraints: unknown[] };
+  visibility: { state: string; fire: () => void };
 }
 
 function setup(
@@ -104,6 +120,10 @@ function setup(
   const sleeps: number[] = [];
   const clock = { t: 0, wall: 1_000_000 };
   let tickFn: () => void = () => undefined;
+  const streams: (MediaStream & { track: FakeTrack })[] = [];
+  const media = { fail: false, constraints: [] as unknown[] };
+  const handlers = new Set<() => void>();
+  const visibility = { state: 'visible', fire: () => handlers.forEach((fn) => fn()) };
   const recorder = new AudioRecorder({
     sessionId: '01a1a874-0759-7058-a15c-e5d0adae8e74',
     sessionMs: () => 5_000,
@@ -118,14 +138,22 @@ function setup(
       },
       random: () => 0.5,
     },
-    getUserMedia: async () => fakeStream(),
+    getUserMedia: async (c) => {
+      media.constraints.push(c);
+      if (media.fail) throw new Error('kein Mikrofon');
+      const stream = fakeStream();
+      streams.push(stream);
+      return stream;
+    },
     MediaRecorder: FakeMediaRecorder,
     level: { createContext: () => null },
     navigator: {},
     document: {
-      visibilityState: 'visible',
-      addEventListener: () => undefined,
-      removeEventListener: () => undefined,
+      get visibilityState() {
+        return visibility.state;
+      },
+      addEventListener: (_t: string, fn: () => void) => handlers.add(fn),
+      removeEventListener: (_t: string, fn: () => void) => handlers.delete(fn),
     },
     clock: () => clock.t,
     wallClock: () => clock.wall,
@@ -143,6 +171,9 @@ function setup(
     clock,
     mr: () => FakeMediaRecorder.instances.at(-1)!,
     tick: () => tickFn(),
+    streams,
+    media,
+    visibility,
   };
 }
 
@@ -214,10 +245,12 @@ describe('IndexedDbRecorderStore', () => {
 });
 
 describe('AudioRecorder', () => {
-  it('startet mit timeslice 30 s, legt die Aufnahme an und lädt Chunks der Reihe nach hoch', async () => {
+  it('startet mit timeslice 10 s, 48 kbit/s mono, legt die Aufnahme an und lädt Chunks der Reihe nach hoch', async () => {
     const h = setup();
     await h.recorder.start();
-    expect(h.mr().timeslice).toBe(30_000);
+    expect(h.mr().timeslice).toBe(10_000);
+    expect(h.mr().options?.audioBitsPerSecond).toBe(48_000);
+    expect(h.media.constraints[0]).toEqual({ audio: { channelCount: 1 } });
     expect(h.mr().options?.mimeType).toBe('audio/webm;codecs=opus');
     const create = h.calls[0]!;
     expect(create).toMatchObject({ method: 'POST' });
@@ -274,8 +307,8 @@ describe('AudioRecorder', () => {
     const h = setup({ events });
     await h.recorder.start();
     const base = { id: '01a1a874-0759-7058-a15c-e5d0adae8e74', state: 'laeuft' } as Session;
-    handler!({ ...base, state: 'pausiert' });
     handler!({ ...base, id: 'other', state: 'beendet' });
+    handler!({ ...base, id: 'other', state: 'pausiert' });
     expect(h.recorder.getStatus().state).toBe('recording');
     handler!({ ...base, state: 'beendet' });
     await settle(h);
@@ -516,6 +549,199 @@ describe('AudioRecorder', () => {
       { last_seq: 0, duration_ms: 10 },
       { last_seq: 3, duration_ms: 10 },
     ]);
+  });
+});
+
+describe('AudioRecorder: Mikrofon, Pause, Verlust', () => {
+  const SID = '01a1a874-0759-7058-a15c-e5d0adae8e74';
+  const sessionEvents = () => {
+    let handler: ((s: Session) => void) | undefined;
+    const events: SessionEventSource = {
+      onEvent: (_n, fn) => {
+        handler = fn;
+        return () => undefined;
+      },
+    };
+    return { events, send: (state: string) => handler!({ id: SID, state } as Session) };
+  };
+
+  it('B1: Mikrofon-Spur endet, neues Mikrofon: neue Aufnahme, restarts = 1', async () => {
+    const h = setup();
+    await h.recorder.start();
+    const first = h.recorder.getStatus().recordingId;
+    h.streams[0]!.track.readyState = 'ended';
+    h.streams[0]!.track.onended?.();
+    await vi.waitFor(() => expect(h.recorder.getStatus().restarts).toBe(1));
+    expect(h.recorder.getStatus().state).toBe('recording');
+    expect(h.recorder.getStatus().recordingId).not.toBe(first);
+    expect(h.streams).toHaveLength(2);
+    await h.recorder.stop();
+  });
+
+  it('B1: Spur endet und kein Mikrofon mehr: sichtbarer Fehlerzustand', async () => {
+    const h = setup();
+    await h.recorder.start();
+    h.media.fail = true;
+    h.streams[0]!.track.readyState = 'ended';
+    h.streams[0]!.track.onended?.();
+    await vi.waitFor(() => expect(h.recorder.getStatus().state).toBe('error'));
+    expect(h.recorder.getStatus().error).toMatch(/Mikrofon/);
+  });
+
+  it('B1: unerwarteter Stopp des MediaRecorders löst einen Neustart aus', async () => {
+    const h = setup();
+    await h.recorder.start();
+    h.clock.t = 10_000;
+    h.mr().emit([1]);
+    h.mr().die();
+    await vi.waitFor(() => expect(h.recorder.getStatus().restarts).toBe(1));
+    expect(FakeMediaRecorder.instances).toHaveLength(2);
+    expect(h.mr().state).toBe('recording');
+    await h.recorder.stop();
+  });
+
+  it('B3: Pause schließt die Aufnahme ab, Fortsetzen beginnt eine neue mit aktueller Sitzungszeit', async () => {
+    const { events, send } = sessionEvents();
+    const h = setup({ events });
+    await h.recorder.start();
+    const first = h.recorder.getStatus().recordingId!;
+    h.clock.t = 10_000;
+    h.mr().emit([1]);
+    send('pausiert');
+    await vi.waitFor(() => expect(h.recorder.getStatus().state).toBe('paused'));
+    await settle(h);
+    expect(h.streams[0]!.track.readyState).toBe('live'); // Mikrofon bleibt offen
+    expect(h.calls.some((c) => c.path === `/recordings/${first}/complete`)).toBe(true);
+    send('laeuft');
+    await vi.waitFor(() => expect(h.recorder.getStatus().state).toBe('recording'));
+    expect(h.recorder.getStatus().recordingId).not.toBe(first);
+    expect(FakeMediaRecorder.instances).toHaveLength(2);
+    expect(h.streams).toHaveLength(1);
+    await settle(h);
+    const creates = h.calls.filter((c) => c.method === 'POST' && c.path.endsWith('/recordings'));
+    expect(creates.length).toBeGreaterThanOrEqual(1);
+    await h.recorder.stop();
+  });
+
+  it('Aufnahme ohne Chunk wird nicht per complete abgeschlossen', async () => {
+    const h = setup();
+    await h.recorder.start();
+    h.mr().stop = function () {
+      this.state = 'inactive';
+      this.onstop?.();
+    };
+    await h.recorder.stop();
+    await settle(h);
+    expect(h.calls.some((c) => c.path.endsWith('/complete'))).toBe(false);
+    expect(await h.store.listRecordings()).toEqual([]);
+  });
+
+  it('chunkCount nach stop() zählt den letzten Chunk mit', async () => {
+    const h = setup();
+    await h.recorder.start();
+    h.clock.t = 10_000;
+    h.mr().emit([1]);
+    await h.recorder.stop();
+    expect(h.recorder.getStatus().chunkCount).toBe(2);
+  });
+
+  it('Tab im Hintergrund: requestData holt den laufenden Chunk heraus', async () => {
+    const h = setup();
+    await h.recorder.start();
+    h.visibility.state = 'hidden';
+    h.visibility.fire();
+    await settle(h);
+    expect(h.calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+    await h.recorder.stop();
+  });
+
+  it('Aufnahme aus IndexedDB gelöscht: neue Chunks kommen in die Fehlerablage statt verloren zu gehen', async () => {
+    const h = setup();
+    await h.recorder.start();
+    await h.store.deleteRecording(h.recorder.getStatus().recordingId!);
+    h.clock.t = 10_000;
+    h.mr().emit([1, 2]);
+    await settle(h);
+    const shelf = await h.store.listShelf();
+    expect(shelf.length).toBeGreaterThanOrEqual(1);
+    expect(shelf[0]).toMatchObject({ code: 'recording_missing', seq: 0 });
+    expect(h.recorder.getStatus().error).toMatch(/Zwischenspeicher/);
+    await h.recorder.stop();
+  });
+
+  it('B2: abgelehnte Aufnahme (session_not_active beim Nachreichen) behält die Metadaten, Chunks liegen in der Ablage', async () => {
+    const store = new MemoryRecorderStore();
+    await store.putRecording({
+      id: 'rec-late',
+      sessionId: 's',
+      mime: 'audio/webm;codecs=opus',
+      codec: 'opus',
+      startedMs: 1234,
+      chunksIndependent: false,
+      created: false,
+      nextSeq: 1,
+      recordedMs: 10,
+      lastActivityAt: 1,
+      complete: { lastSeq: 0, durationMs: 10 },
+    });
+    await store.addChunk(
+      {
+        recordingId: 'rec-late',
+        seq: 0,
+        startMs: 1234,
+        durationMs: 10,
+        sha256: 'a'.repeat(64),
+        data: new Uint8Array([1]).buffer,
+        attempts: 0,
+      },
+      {},
+    );
+    const { calls, fetchFn } = fakeCore((c) =>
+      c.method === 'POST' ? apiError(409, 'session_not_active') : undefined,
+    );
+    const uploader = resumePendingUploads({ store, baseUrl: 'http://core/api/v1', fetch: fetchFn });
+    await uploader.drain();
+    const meta = await store.getRecording('rec-late');
+    expect(meta).toMatchObject({
+      mime: 'audio/webm;codecs=opus',
+      codec: 'opus',
+      startedMs: 1234,
+      rejected: 'recording_rejected',
+    });
+    expect((await store.listShelf()).map((e) => e.seq)).toEqual([0]);
+    expect(await store.listChunks('rec-late')).toEqual([]);
+    expect(calls).toHaveLength(1);
+    uploader.kick();
+    await uploader.drain();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('Pegel: ein angehaltener AudioContext meldet nichts (statt 0)', () => {
+    let tick: () => void = () => undefined;
+    const ctx = {
+      state: 'suspended',
+      createMediaStreamSource: () => ({ connect: () => undefined, disconnect: () => undefined }),
+      createAnalyser: () => ({ fftSize: 0, getFloatTimeDomainData: (a: Float32Array) => a.fill(0) }),
+      resume: vi.fn(async () => undefined),
+      close: async () => undefined,
+    };
+    const stop = startLevelMeter({} as MediaStream, {
+      createContext: () => ctx,
+      setInterval: (fn) => {
+        tick = fn;
+        return 1;
+      },
+      clearInterval: () => undefined,
+    });
+    const fn = vi.fn();
+    const off = subscribeAudioLevel(fn);
+    tick();
+    expect(fn).not.toHaveBeenCalled();
+    ctx.state = 'running';
+    tick();
+    expect(fn).toHaveBeenCalledWith(expect.objectContaining({ rms: 0 }));
+    off();
+    stop();
   });
 });
 

@@ -130,19 +130,43 @@ function isPrimaryKeyViolation(error: unknown): boolean {
   return e?.cause !== undefined && e.cause !== error ? isPrimaryKeyViolation(e.cause) : false;
 }
 
-/** `POST /sessions/{id}/recordings`. Nur für Sessions in `laeuft` oder `pausiert` (§10.1) */
+/** Toleranz für `started_ms` einer nachträglich angelegten Aufnahme (VERTRAEGE §10.1) */
+const LATE_START_TOLERANCE_MS = 5 * 60_000;
+/** Ersatzgrenze nach `absturz_wiederhergestellt` (offene Lead-Frage, VERTRAEGE §10.1) */
+const CRASH_RECORDING_LIMIT_MS = 12 * 3_600_000;
+/** Wartezeit des Jobs nach dem Stopp, solange `complete` fehlt (VERTRAEGE §3) */
+const FINALIZE_GRACE_MS = 10 * 60_000;
+
+/**
+ * `POST /sessions/{id}/recordings`. Erlaubt in `laeuft` und `pausiert`. In `beendet`/`verarbeitet` nur, wenn
+ * die Aufnahme innerhalb der Grenze der Session begann (offline gestartet, später nachgereicht, §10.1);
+ * dann entsteht sofort ein `audio.finalize`-Job mit `run_after = jetzt + 10 min`. Der Sessionstatus bleibt
+ * unverändert (Besitz T1-02). Sperrreihenfolge: Session-Zeile, dann `lockRecording`.
+ */
 export async function createRecording(db: Db, sessionId: string, input: RecordingCreate): Promise<Recording> {
   try {
     return await db.transaction(async (tx) => {
       const [parent] = await tx
-        .select({ state: session.state })
+        .select({
+          state: session.state,
+          startedAt: session.startedAt,
+          endedAt: session.endedAt,
+          stopReason: session.stopReason,
+          extendedUntil: session.autoStopExtendedUntil,
+        })
         .from(session)
         .where(and(eq(session.id, sessionId), isNull(session.deletedAt)))
         // Lesesperre: ein gleichzeitiger Stopp wird abgewartet
         .for('share');
       if (!parent) throw new HttpError(404, 'session_not_found', 'Diese Session gibt es nicht.');
-      if (parent.state !== 'laeuft' && parent.state !== 'pausiert') {
-        throw new HttpError(409, 'session_not_active', 'Die Session läuft nicht (mehr).');
+      const live = parent.state === 'laeuft' || parent.state === 'pausiert';
+      if (!live && !isLateStartAllowed(parent, input.started_ms)) {
+        throw new HttpError(
+          409,
+          'session_not_active',
+          'Die Session läuft nicht (mehr).',
+          parent.endedAt ? { ended_at: parent.endedAt.toISOString() } : undefined,
+        );
       }
       const id = input.id ?? uuidv7();
       const [taken] = await tx.select({ id: recording.id }).from(recording).where(eq(recording.id, id));
@@ -159,12 +183,32 @@ export async function createRecording(db: Db, sessionId: string, input: Recordin
           chunksIndependent: input.chunks_independent ?? false,
         })
         .returning();
+      if (!live) await ensureFinalizeOnStop(tx, id, new Date());
       return toApiRecording(row as RecordingRow, { count: 0, lastSeq: null });
     });
   } catch (error) {
     if (isPrimaryKeyViolation(error)) throw existsError();
     throw error;
   }
+}
+
+function isLateStartAllowed(
+  s: {
+    state: string;
+    startedAt: Date | null;
+    endedAt: Date | null;
+    stopReason: string | null;
+    extendedUntil: Date | null;
+  },
+  startedMs: number,
+): boolean {
+  if ((s.state !== 'beendet' && s.state !== 'verarbeitet') || !s.startedAt) return false;
+  let limit = s.endedAt?.getTime() ?? s.startedAt.getTime() + CRASH_RECORDING_LIMIT_MS;
+  if (s.stopReason === 'absturz_wiederhergestellt') {
+    limit = Math.max(limit, s.startedAt.getTime() + CRASH_RECORDING_LIMIT_MS);
+  }
+  if (s.extendedUntil) limit = Math.max(limit, s.extendedUntil.getTime());
+  return startedMs <= limit - s.startedAt.getTime() + LATE_START_TOLERANCE_MS;
 }
 
 type JobRow = typeof job.$inferSelect;
@@ -182,7 +226,9 @@ async function latestFinalizeJob(tx: Tx, recordingId: string): Promise<JobRow | 
       ),
     )
     .orderBy(desc(job.createdAt), desc(job.id))
-    .limit(1);
+    .limit(1)
+    // Der Worker holt Jobs mit FOR UPDATE SKIP LOCKED: während wir entscheiden, kann er den Job nicht übernehmen
+    .for('update');
   return row ?? null;
 }
 
@@ -224,14 +270,57 @@ export async function requestFinalizeNow(tx: Tx, rec: RecordingRow): Promise<voi
 }
 
 /**
- * Ein neuer Chunk traf ein (VERTRAEGE §3): Gibt es schon einen `audio.finalize`-Job, der nicht mehr wartet
+ * Für den Stopp einer Session (T1-02, VERTRAEGE §3, §16.2): nimmt `lockRecording` und legt den Job an, wenn
+ * noch keiner existiert (oder der letzte `fehler`/`abgebrochen` ist). Sofort, wenn die Aufnahme schon
+ * abgeschlossen ist, sonst mit `run_after = stoppedAt + 10 min`. Aufnahmen ohne Chunks bekommen keinen Job. Ein Job in `wartet`, `laeuft` oder `fertig`
+ * bleibt unberührt. Mehrere Aufnahmen: in sortierter ID-Reihenfolge aufrufen (Sperrreihenfolge §16.2).
+ */
+export async function ensureFinalizeOnStop(
+  tx: Tx,
+  recordingId: string,
+  stoppedAt: Date,
+  graceMs: number = FINALIZE_GRACE_MS,
+): Promise<void> {
+  await lockRecording(tx, recordingId);
+  const [rec] = await tx
+    .select()
+    .from(recording)
+    .where(and(eq(recording.id, recordingId), isNull(recording.deletedAt)));
+  if (!rec) return;
+  // Eine Aufnahme ohne Chunks bekommt keinen Job (Pause vor dem ersten Chunk). Der erste Chunk legt ihn an.
+  if ((await chunkStats(tx, recordingId)).count === 0) return;
+  const latest = await latestFinalizeJob(tx, recordingId);
+  if (latest && latest.state !== 'fehler' && latest.state !== 'abgebrochen') return;
+  await insertFinalizeJob(
+    tx,
+    rec,
+    rec.completedAt ? {} : { runAfter: new Date(stoppedAt.getTime() + graceMs) },
+  );
+}
+
+/**
+ * Ein neuer Chunk traf ein (VERTRAEGE §3): Gibt es keinen Job (leere Aufnahme beim Stopp), entsteht der erste:
+ * sofort bei abgeschlossener Aufnahme, nach 10 min bei beendeter Session, sonst keiner. Gibt es schon einen `audio.finalize`-Job, der nicht mehr wartet
  * (laufend, fertig oder fehlgeschlagen), und wartet keiner, entsteht ein neuer. Ohne bisherigen Job (die
  * Aufnahme läuft noch) passiert nichts. Fehlt `complete` noch, startet der Job erst nach 60 s, damit ein
  * Rückstau aus IndexedDB nicht jedes Mal die ganze Datei neu erzeugt.
  */
 async function requestFinalizeForLateChunk(tx: Tx, rec: RecordingRow): Promise<void> {
   const latest = await latestFinalizeJob(tx, rec.id);
-  if (!latest || latest.state === 'wartet' || latest.state === 'abgebrochen') return;
+  if (!latest) {
+    // Erster Job der Aufnahme (sie war leer, als die Session stoppte bzw. `complete` kam)
+    if (rec.completedAt) return void (await insertFinalizeJob(tx, rec, {}));
+    const [parent] = await tx
+      .select({ state: session.state })
+      .from(session)
+      .where(eq(session.id, rec.sessionId));
+    const live = parent?.state === 'laeuft' || parent?.state === 'pausiert';
+    if (!live) {
+      await insertFinalizeJob(tx, rec, { runAfter: new Date(Date.now() + FINALIZE_GRACE_MS) });
+    }
+    return;
+  }
+  if (latest.state === 'wartet') return;
   await insertFinalizeJob(tx, rec, {
     ...(rec.completedAt ? {} : { runAfter: new Date(Date.now() + LATE_CHUNK_DELAY_MS) }),
     ...(latest.state === 'laeuft' ? { dependsOn: [latest.id] } : {}),
@@ -316,6 +405,14 @@ export async function storeChunk(
         }
         return toApiChunk(existing, true);
       }
+      if (current.completedAt && current.completedLastSeq !== null && meta.seq > current.completedLastSeq) {
+        throw new HttpError(
+          409,
+          'recording_completed',
+          'Die Aufnahme ist abgeschlossen; diese seq liegt hinter last_seq.',
+          { seq: meta.seq, last_seq: current.completedLastSeq },
+        );
+      }
       const [row] = await tx
         .insert(audioChunk)
         .values({
@@ -379,7 +476,7 @@ export async function completeRecording(db: Db, id: string, input: RecordingComp
       })
       .where(eq(recording.id, id))
       .returning();
-    await requestFinalizeNow(tx, updated as RecordingRow);
+    if (stats.count > 0) await requestFinalizeNow(tx, updated as RecordingRow);
     return toApiRecording(updated as RecordingRow, stats);
   });
 }

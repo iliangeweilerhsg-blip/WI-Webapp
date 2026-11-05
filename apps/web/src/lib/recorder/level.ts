@@ -55,6 +55,8 @@ export interface AnalyserLike {
 export interface AudioContextLike {
   createMediaStreamSource(stream: MediaStream): { connect(node: unknown): void; disconnect(): void };
   createAnalyser(): AnalyserLike;
+  /** `running`, `suspended` oder `closed`. Nur bei `running` liefert der Analysator echte Werte. */
+  state?: string;
   resume?(): Promise<void>;
   close(): Promise<void>;
 }
@@ -98,6 +100,12 @@ export function startLevelMeter(stream: MediaStream, options: LevelMeterOptions 
     options.clearInterval ?? ((h) => globalThis.clearInterval(h as ReturnType<typeof setInterval>));
 
   const handle = set(() => {
+    // Ein angehaltener AudioContext (Autoplay-Regel, Hintergrund) liefert nur Nullen: das wäre keine Stille,
+    // sondern „unbekannt“. Dann wird nichts gemeldet und erneut versucht zu starten.
+    if (context.state !== undefined && context.state !== 'running') {
+      void context.resume?.().catch(() => undefined);
+      return;
+    }
     analyser.getFloatTimeDomainData(buffer);
     publishAudioLevel({ at: now(), rms: rmsOf(buffer) });
   }, LEVEL_INTERVAL_MS);
