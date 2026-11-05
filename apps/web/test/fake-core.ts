@@ -711,6 +711,10 @@ export function installFakeCore(
       // GET /sessions/{id}
       const sessionOne = /^\/sessions\/([^/]+)$/.exec(path);
       if (sessionOne && method === 'GET') {
+        // Wie der echte Core: eine ID, die keine UUID ist, ergibt 400
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(sessionOne[1] ?? '')) {
+          return json({ error: { code: 'validation_failed', message: 'x' } }, 400);
+        }
         const found = core.sessions.find((x) => x.id === sessionOne[1] && !x.deleted_at);
         // Die Antwort zeigt den Stand beim EINGANG der Anfrage (wie ein langsames Netz), auch wenn sie später kommt
         const snapshot = found ? structuredClone(found) : undefined;

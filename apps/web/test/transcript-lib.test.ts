@@ -5,6 +5,7 @@ import {
   activeLineIndex,
   canContinueWithAudio,
   clockAt,
+  isoAt,
   formatElapsed,
   locatePlayback,
   recordingAudioUrl,
@@ -82,6 +83,29 @@ describe('locatePlayback', () => {
   it('in der Lücke zwischen Aufnahmen beginnt die nächste', () => {
     expect(locatePlayback([R1, R2], 200_000)).toMatchObject({ recording: { id: R2.id }, offsetS: 0 });
   });
+  it('rückwärts aus einer Lücke: 15 s vor dem Ende der vorherigen Aufnahme, nie in die nächste', () => {
+    // Lücke 100 s bis 300 s; Zeit im Loch und der Anfang von R2 (so steht die Position nach einer Pause)
+    expect(locatePlayback([R1, R2], 200_000, 'zurueck')).toMatchObject({
+      recording: { id: R1.id },
+      offsetS: 85,
+    });
+    expect(locatePlayback([R1, R2], 300_000 - 15_000, 'zurueck')).toMatchObject({
+      recording: { id: R1.id },
+      offsetS: 85,
+    });
+    // Kurze vorherige Aufnahme: höchstens bis zu deren Anfang
+    const short = makeRecording({ id: R1.id, started_ms: 0, duration_ms: 10_000 });
+    expect(locatePlayback([short, R2], 200_000, 'zurueck')).toMatchObject({
+      recording: { id: short.id },
+      offsetS: 0,
+    });
+    // Innerhalb einer Aufnahme und vorwärts ändert die Richtung nichts
+    expect(locatePlayback([R1, R2], 40_000, 'zurueck')).toMatchObject({
+      recording: { id: R1.id },
+      offsetS: 40,
+    });
+    expect(locatePlayback([R1, R2], 200_000, 'vor')).toMatchObject({ recording: { id: R2.id }, offsetS: 0 });
+  });
   it('vor der ersten Aufnahme deren Anfang, hinter der letzten deren Ende', () => {
     const late = makeRecording({ id: R2.id, started_ms: 50_000, duration_ms: 10_000 });
     expect(locatePlayback([late], 0)).toMatchObject({ offsetS: 0 });
@@ -114,6 +138,13 @@ describe('Zeitangaben', () => {
     expect(clockAt('2026-11-04T08:00:00Z', 754_000, true)).toBe(local(754_000));
     expect(clockAt('2026-11-04T08:00:00Z', 754_000)).toBe(local(754_000).slice(0, 5));
     expect(clockAt(null, 754_000)).toBe('12:34');
+  });
+});
+
+describe('isoAt', () => {
+  it('ISO-Zeitpunkt aus started_at + t, ohne started_at null', () => {
+    expect(isoAt('2026-11-04T08:00:00Z', 754_000)).toBe('2026-11-04T08:12:34.000Z');
+    expect(isoAt(null, 1)).toBeNull();
   });
 });
 

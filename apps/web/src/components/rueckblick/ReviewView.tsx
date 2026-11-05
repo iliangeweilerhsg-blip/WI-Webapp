@@ -103,8 +103,13 @@ function ReviewScreen() {
   if (id === null) return <Notice>Keine Session ausgewählt.</Notice>;
   if (!session) {
     if (data.loading) return <Loading />;
-    if (data.error instanceof ApiRequestError && data.error.kind === 'api' && data.error.status === 404) {
-      return <Notice>Diese Session gibt es nicht (mehr).</Notice>;
+    // Eine ungültige ID beantwortet der Core mit 400, eine unbekannte mit 404: beides ruhig, ohne „Erneut versuchen“
+    if (
+      data.error instanceof ApiRequestError &&
+      data.error.kind === 'api' &&
+      (data.error.status === 404 || data.error.status === 400)
+    ) {
+      return <Notice>Diese Vorlesung gibt es nicht.</Notice>;
     }
     return <Notice retry={data.refetch}>{`Session nicht erreichbar: ${friendlyMessage(data.error)}`}</Notice>;
   }

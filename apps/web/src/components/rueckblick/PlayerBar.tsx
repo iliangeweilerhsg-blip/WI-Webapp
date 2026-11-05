@@ -10,7 +10,8 @@ const icon =
 
 export function PlayerBar({ player, startedAt }: { player: Player; startedAt: string | null }) {
   const { bounds, t } = player;
-  const disabled = bounds === null || player.failed;
+  // Nur ohne Aufnahme gesperrt: Ein Abspielfehler sperrt nie Abspielen, Pause oder Springen (neuer Versuch möglich)
+  const disabled = bounds === null;
   return (
     <div
       role="group"

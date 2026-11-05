@@ -1,13 +1,13 @@
 // Rückblick einer Vorlesung (T2-03, F-NAC-02, VERTRAEGE §18.9): Zustände, Transkript je Folie, Abspielen ab einem
 // Abschnitt, Markierung und Folie folgen der Position, Tasten, Live-Fortschritt über `session.updated`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import type { Session, SessionTranscript } from '@sg/shared';
 import { ReviewView } from '../src/components/rueckblick/ReviewView.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
-import { clockAt } from '../src/lib/transcript.ts';
+import { clockAt, isoAt, useReprocess } from '../src/lib/transcript.ts';
 import { installAudioStub, type AudioStub } from './audio-stub.ts';
 import {
   installFakeCore,
@@ -193,6 +193,7 @@ describe('Rückblick: Folie und Transkript', () => {
     const first = lineEls()[0] as HTMLElement;
     expect(first).toHaveTextContent('Heute geht es um Normalformen.');
     // Uhrzeit der Vorlesung (Ortszeit) mit Sekunden
+    expect(first.querySelector('time')).toHaveAttribute('datetime', isoAt(STARTED, 10_000));
     expect(within(first).getByText(/^\d{2}:\d{2}:\d{2}$/)).toHaveTextContent(clockAt(STARTED, 10_000, true));
   });
 
@@ -492,6 +493,8 @@ describe('Rückblick: Zustände', () => {
   it('keine Aufnahme: Transkript fertig, aber leer', async () => {
     boot({ transcript: makeTranscript({ session_id: SESSION_ID, recordings: [makeRecording({ id: R1 })] }) });
     expect(await screen.findByText('Zu dieser Session gibt es keine Aufnahme.')).toBeVisible();
+    // Auch mit abspielbarer Aufnahme: Ohne Transkript gibt es keinen Player
+    expect(screen.queryByTestId('review-player')).toBeNull();
   });
 
   it('Fehler: „Erneut versuchen“ startet ab dem ersten Schritt in fehler/abgebrochen', async () => {
@@ -605,7 +608,12 @@ describe('Rückblick: Zustände', () => {
 
   it('unbekannte Session und fehlende ID', async () => {
     boot({ session: null });
-    expect(await screen.findByText('Diese Session gibt es nicht (mehr).')).toBeVisible();
+    expect(await screen.findByText('Diese Vorlesung gibt es nicht.')).toBeVisible();
+    cleanup();
+    boot({ search: 'id=kaputt' });
+    // Ungültige ID: der Core antwortet mit 400, die Meldung ist dieselbe, ohne „Erneut versuchen“
+    expect(await screen.findByText('Diese Vorlesung gibt es nicht.')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).toBeNull();
     cleanup();
     boot({ search: '' });
     expect(await screen.findByText('Keine Session ausgewählt.')).toBeVisible();
@@ -617,6 +625,78 @@ describe('Rückblick: Zustände', () => {
     core.failTranscript = false;
     fireEvent.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
     expect(await screen.findAllByTestId('transcript-line')).toHaveLength(2);
+  });
+});
+
+describe('Rückblick: Player nach Pausen und Fehlern', () => {
+  it('J springt aus dem Anfang einer späteren Aufnahme 15 s vor das Ende der vorherigen', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    key(lineEls()[0] as HTMLElement, 'Enter');
+    act(() => {
+      fireEvent.ended(audio(R1));
+    });
+    expect(audio(R2).currentTime).toBe(0); // 700 s, Lücke von 100 s davor
+    key(document.body, 'j');
+    expect(audio(R1).currentTime).toBe(585);
+    expect(stub.started.at(-1)).toMatchObject({ id: R1, at: 585 });
+  });
+
+  it('ein Abspielfehler sperrt weder Abspielen noch Pause noch Springen; ein neuer Versuch hebt ihn auf', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    act(() => {
+      fireEvent.error(audio(R1));
+    });
+    expect(await screen.findByText('Die Aufnahme lässt sich gerade nicht abspielen.')).toBeVisible();
+    for (const name of ['Abspielen', '15 Sekunden vor', '15 Sekunden zurück']) {
+      expect(screen.getByRole('button', { name })).toBeEnabled();
+    }
+    expect(screen.getByRole('slider', { name: 'Position' })).toBeEnabled();
+    // Ein Klick auf einen Abschnitt versucht es erneut und nimmt den Hinweis weg
+    fireEvent.click(lineEls()[0] as HTMLElement);
+    expect(stub.started.at(-1)).toMatchObject({ id: R1, at: 10 });
+    expect(screen.queryByText('Die Aufnahme lässt sich gerade nicht abspielen.')).toBeNull();
+    // Fehlt eine andere Aufnahme, bleibt R1 bedienbar
+    act(() => {
+      fireEvent.error(audio(R2));
+    });
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(stub.pause).toHaveBeenCalled();
+  });
+});
+
+describe('Rückblick: Neuladen und Doppelklick', () => {
+  it('lädt nur beim Übergang auf fertig neu, nicht bei jeder anderen Änderung von processing', async () => {
+    const running: Session['processing'] = { ...ALL_DONE, 'align.log': 'laeuft' };
+    boot({ session: { processing: running } });
+    await screen.findAllByTestId('transcript-line');
+    expect(transcriptGets()).toBe(1);
+    const current = core.sessions[0] as Session;
+    // Ein anderer Schritt wechselt (läuft → nicht fertig), `transcribe` steht schon auf fertig: kein Neuladen
+    sync.emit('session.updated', {
+      ...current,
+      processing: { ...ALL_DONE, 'align.log': 'fehler' },
+      updated_at: '2026-11-04T09:11:00Z',
+    });
+    await screen.findByText('nicht fertig');
+    // Ein Neuladen liefe asynchron: kurz warten, damit es sich zeigen würde
+    await new Promise((r) => setTimeout(r, 50));
+    expect(transcriptGets()).toBe(1);
+  });
+
+  it('zwei Klicks im selben Takt ergeben einen Request (Doppelklick-Schutz)', async () => {
+    boot();
+    await screen.findAllByTestId('transcript-line');
+    const onSession = vi.fn();
+    const { result } = renderHook(() => useReprocess(SESSION_ID, onSession));
+    await act(async () => {
+      void result.current.run('transcribe');
+      void result.current.run('transcribe');
+    });
+    expect(reprocessPosts()).toHaveLength(1);
+    expect(onSession).toHaveBeenCalledTimes(1);
   });
 });
 

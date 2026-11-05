@@ -5,7 +5,7 @@
 // Abspielposition ist dezent markiert (`aria-current`, Randlinie und Hintergrund, nicht nur Farbe).
 import { memo, useEffect, useRef } from 'react';
 import type { TranscriptLine } from '@sg/shared';
-import { clockAt } from '../../lib/transcript.ts';
+import { clockAt, isoAt } from '../../lib/transcript.ts';
 
 /** Eine Zeile ist durch Abschnitt und Teil bestimmt (VERTRAEGE §18.4) */
 export const lineKey = (line: Pick<TranscriptLine, 'segment_id' | 'part'>): string =>
@@ -50,7 +50,7 @@ const LineRow = memo(function LineRow({ line, startedAt, active, lang, onPlay }:
       >
         <time
           className="w-16 shrink-0 pt-px text-sm tabular-nums text-text-muted"
-          dateTime={`PT${Math.floor(line.start_ms / 1000)}S`}
+          dateTime={isoAt(startedAt, line.start_ms) ?? undefined}
         >
           {clockAt(startedAt, line.start_ms, true)}
         </time>

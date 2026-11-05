@@ -225,6 +225,12 @@ export function clockAt(startedAt: string | null, tMs: number, seconds = false):
   return seconds ? `${hm}:${pad(d.getSeconds())}` : hm;
 }
 
+/** Zeitpunkt (ISO 8601) zu einer Sitzungszeit für `<time dateTime>`; ohne `started_at` `null` */
+export function isoAt(startedAt: string | null, tMs: number): string | null {
+  const base = startedAt ? Date.parse(startedAt) : Number.NaN;
+  return Number.isNaN(base) ? null : new Date(base + tMs).toISOString();
+}
+
 /** Schlüssel der Gruppe einer Zeile: Folien-ID, oder `none` für Zeilen ohne Folie */
 export const NO_SLIDE = 'none';
 export const lineSlideKey = (line: Pick<TranscriptLine, 'slide_id'>): string => line.slide_id ?? NO_SLIDE;
@@ -256,6 +262,8 @@ export function slideAt(segments: readonly SlideSegment[], t: number): SlideSegm
   return found;
 }
 
+const SKIP_BACK_MS = 15_000;
+
 export interface PlaybackSpot {
   recording: Recording;
   /** Position in der Datei in Sekunden (`t − recording.started_ms`) */
@@ -272,9 +280,14 @@ export function playableRecordings(recordings: readonly Recording[]): Recording[
 /**
  * Wo `t` (Sitzungszeit) in den Aufnahmen liegt: in der letzten Aufnahme, die vor `t` beginnt. Liegt `t` hinter deren
  * Ende, beginnt die nächste Aufnahme (zwischen Aufnahmen ist Stille), hinter der letzten gilt deren Ende. Vor der
- * ersten Aufnahme gilt deren Anfang.
+ * ersten Aufnahme gilt deren Anfang. Rückwärts (`zurueck`) landet eine Zeit in einer Lücke 15 s vor dem Ende der
+ * vorherigen Aufnahme, höchstens bis zu deren Anfang.
  */
-export function locatePlayback(recordings: readonly Recording[], t: number): PlaybackSpot | null {
+export function locatePlayback(
+  recordings: readonly Recording[],
+  t: number,
+  direction: 'vor' | 'zurueck' = 'vor',
+): PlaybackSpot | null {
   const list = playableRecordings(recordings);
   if (list.length === 0) return null;
   let index = -1;
@@ -286,6 +299,8 @@ export function locatePlayback(recordings: readonly Recording[], t: number): Pla
   const duration = recording.duration_ms ?? 0;
   const offsetMs = t - recording.started_ms;
   if (offsetMs >= duration) {
+    // Rückwärts aus einer Lücke: 15 s vor dem Ende der vorherigen Aufnahme (nicht in die nächste, sonst hängt „zurück“)
+    if (direction === 'zurueck') return { recording, offsetS: Math.max(0, duration - SKIP_BACK_MS) / 1000 };
     const next = list[index + 1];
     if (next) return { recording: next, offsetS: 0 };
     return { recording, offsetS: duration / 1000 };

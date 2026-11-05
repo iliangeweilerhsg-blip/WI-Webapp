@@ -17,10 +17,11 @@ export interface Player {
   playing: boolean;
   rate: number;
   /** Eine Aufnahme ließ sich nicht laden oder abspielen */
+  /** Mindestens eine Aufnahme ließ sich nicht laden oder abspielen (Abspielen und Pause bleiben bedienbar) */
   failed: boolean;
   bounds: { start: number; end: number } | null;
   /** Springt zu `t` (Sitzungszeit); mit `play` läuft die Wiedergabe von dort. Ohne Angabe bleibt es beim bisherigen Zustand. */
-  seek: (t: number, play?: boolean) => void;
+  seek: (t: number, play?: boolean, direction?: 'vor' | 'zurueck') => void;
   toggle: () => void;
   skip: (deltaMs: number) => void;
   setRate: (rate: number) => void;
@@ -42,7 +43,17 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
   const [t, setT] = useState(initialT);
   const [playing, setPlaying] = useState(false);
   const [rate, setRateState] = useState(1);
-  const [failed, setFailed] = useState(false);
+  const [failedIds, setFailedIds] = useState<ReadonlySet<string>>(new Set());
+  const clearFailed = useCallback(
+    (id: string) =>
+      setFailedIds((old) => {
+        if (!old.has(id)) return old;
+        const next = new Set(old);
+        next.delete(id);
+        return next;
+      }),
+    [],
+  );
 
   // Zustand für Handler, die nicht bei jedem Rendern neu entstehen sollen
   const live = useRef({ recordings, rate, t, playing });
@@ -60,8 +71,8 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
   }, []);
 
   const seek = useCallback(
-    (target: number, play?: boolean) => {
-      const spot = locatePlayback(live.current.recordings, target);
+    (target: number, play?: boolean, direction: 'vor' | 'zurueck' = 'vor') => {
+      const spot = locatePlayback(live.current.recordings, target, direction);
       if (!spot) return;
       const wantPlay = play ?? live.current.playing;
       const el = elements.current.get(spot.recording.id);
@@ -70,6 +81,8 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
         if (id !== spot.recording.id && !other.paused) other.pause();
       }
       currentId.current = spot.recording.id;
+      // Ein neuer Versuch (Sprung, Abspielen) hebt eine frühere Fehlermeldung zu dieser Aufnahme auf
+      clearFailed(spot.recording.id);
       el.currentTime = spot.offsetS;
       setT(spot.recording.started_ms + Math.round(spot.offsetS * 1000));
       if (wantPlay) {
@@ -80,7 +93,7 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
         setPlaying(false);
       }
     },
-    [startPlayback],
+    [startPlayback, clearFailed],
   );
 
   const toggle = useCallback(() => {
@@ -99,7 +112,11 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
       const { recordings: list, t: now } = live.current;
       const edges = timelineBounds(list);
       if (!edges) return;
-      seek(Math.min(Math.max(now + deltaMs, edges.start), edges.end));
+      seek(
+        Math.min(Math.max(now + deltaMs, edges.start), edges.end),
+        undefined,
+        deltaMs < 0 ? 'zurueck' : 'vor',
+      );
     },
     [seek],
   );
@@ -143,10 +160,22 @@ export function usePlayer(allRecordings: readonly Recording[], initialT: number)
         const el = elements.current.get(recording.id);
         if (currentId.current === recording.id && !el?.ended) setPlaying(false);
       },
-      onError: () => setFailed(true),
+      onError: () => setFailedIds((old) => new Set(old).add(recording.id)),
     }),
-    [seek],
+    [seek, clearFailed],
   );
 
-  return { recordings, t, playing, rate, failed, bounds, seek, toggle, skip, setRate, audioProps };
+  return {
+    recordings,
+    t,
+    playing,
+    rate,
+    failed: failedIds.size > 0,
+    bounds,
+    seek,
+    toggle,
+    skip,
+    setRate,
+    audioProps,
+  };
 }
