@@ -8,6 +8,7 @@ from collections.abc import Callable
 from types import FrameType
 
 from . import handlers  # noqa: F401  (registriert die Handler)
+from .ai.transcriber import config_error
 from .config import Settings, load_env_file
 from .logging_setup import setup_logging
 from .loop import Worker
@@ -50,6 +51,9 @@ def main() -> int:
         logger=log,
     )
     install_signal_handlers(worker)
+    if (problem := config_error()) is not None:
+        # §18.6: Der Worker startet trotzdem, `transcribe`-Jobs enden mit `fehler`
+        log.error("Transkription nicht verfügbar", extra={"error": problem})
     try:
         worker.run()
     except KeyboardInterrupt:

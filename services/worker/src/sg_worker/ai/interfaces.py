@@ -1,7 +1,7 @@
 """KI-Anbieter-Schnittstellen (docs/spezifikation/02-ARCHITEKTUR.md §7).
 
-Nur Protokolle und Typen. Echte Implementierungen (mlx-whisper, bge-m3, Claude API,
-macOS-Stimmen) folgen mit den Pipeline-Tickets.
+Nur Protokolle und Typen. Transcriber-Implementierungen stehen in `transcriber.py`, die übrigen
+(bge-m3, Claude API, macOS-Stimmen) folgen mit den Pipeline-Tickets.
 """
 
 from __future__ import annotations
@@ -18,13 +18,27 @@ Role = Literal["system", "user", "assistant"]
 
 
 @dataclass(frozen=True)
+class Word:
+    """Ein Wort mit Zeitstempel (VERTRAEGE §18.6). Zeiten in Sekunden ab Dateibeginn."""
+
+    start: float
+    end: float
+    text: str
+    prob: float
+
+
+@dataclass(frozen=True)
 class Segment:
-    """Ein transkribierter Abschnitt. Zeiten in Sekunden ab Audio-Beginn."""
+    """Ein transkribierter Abschnitt (VERTRAEGE §18.6). Zeiten in Sekunden ab Dateibeginn.
+    `language` ist die erkannte Sprache (ISO 639-1)."""
 
     start: float
     end: float
     text: str
     language: str | None = None
+    avg_logprob: float | None = None
+    no_speech_prob: float | None = None
+    words: tuple[Word, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -45,7 +59,16 @@ class Result:
 
 
 class Transcriber(Protocol):
-    def transcribe(self, audio: Path, language_hint: list[str]) -> list[Segment]: ...
+    """Transkription einer Audiodatei (VERTRAEGE §18.6, Abweichung von 02 §7: `language` statt
+    `language_hint`, dazu `initial_prompt` und `duration_ms`). Implementierungen in
+    `ai/transcriber.py`: `mlx-whisper` (nur macOS arm64) und `fake` (CI, Linux)."""
+
+    provider: str  # "mlx-whisper" | "fake" (TranscriptProvider)
+    model: str
+
+    def transcribe(
+        self, audio: Path, *, language: str | None, initial_prompt: str | None, duration_ms: int
+    ) -> list[Segment]: ...
 
 
 class Embedder(Protocol):

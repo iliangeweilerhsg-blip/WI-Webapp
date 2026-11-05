@@ -6,6 +6,7 @@ import json
 import os
 import uuid
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import psycopg
@@ -99,6 +100,54 @@ CREATE TABLE audio_chunk (
 );
 """
 
+# Phase 2 (T2-02a): Spalten und Tabellen, die `transcribe` und `align.log` lesen. Vereinfachte Kopien
+# aus 0001/0003 (ohne FK auf `semester`, `module_id` nullbar).
+PHASE2_TABLES_SQL = """
+ALTER TABLE session ADD COLUMN module_id uuid, ADD COLUMN slide_deck_id uuid,
+  ADD COLUMN started_at timestamptz, ADD COLUMN ended_at timestamptz,
+  ADD COLUMN start_offsets jsonb NOT NULL DEFAULT '[]'::jsonb;
+CREATE TABLE module (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz,
+  name text NOT NULL, lang text CHECK (lang IS NULL OR lang IN ('de','en','mixed'))
+);
+CREATE TABLE slide_event (
+  id uuid PRIMARY KEY, user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  deleted_at timestamptz,
+  session_id uuid NOT NULL, slide_id uuid, slide_index integer NOT NULL CHECK (slide_index >= 1),
+  t_ms bigint NOT NULL CHECK (t_ms >= 0), device text NOT NULL CHECK (device IN ('mac','ipad')),
+  source text NOT NULL CHECK (source IN ('manuell_mac','manuell_ipad','korrektur'))
+);
+CREATE TABLE sync_op (
+  stream text NOT NULL, seq bigint NOT NULL CHECK (seq >= 1), op_id uuid NOT NULL UNIQUE,
+  kind text NOT NULL, at bigint NOT NULL, clock_uncertain boolean NOT NULL, data jsonb NOT NULL,
+  origin text NOT NULL CHECK (origin IN ('ipad','web','server')), device_id uuid,
+  received_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (stream, seq)
+);
+CREATE OR REPLACE FUNCTION sg_touch_updated_at() RETURNS trigger AS $$
+BEGIN
+  IF NEW.updated_at IS NOT DISTINCT FROM OLD.updated_at THEN
+    NEW.updated_at := now();
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+"""
+
+#: `transcript`, `transcript_segment`, `slide_segment` kommen unverändert aus der Core-Migration
+#: (T2-01). Nur das Schema `public` und der Typ `vector` (Embeddings, vom Worker noch ungenutzt)
+#: werden ersetzt, damit die Tabellen im Test-Schema ohne pgvector entstehen.
+MIGRATION_0006 = Path(__file__).resolve().parents[3] / "services/core/drizzle/0006_transcript.sql"
+
+
+def migration_0006_statements() -> list[str]:
+    text = MIGRATION_0006.read_text(encoding="utf-8")
+    text = text.replace('"public".', "").replace("vector(1024)", "text")
+    return [stmt for stmt in text.split("--> statement-breakpoint") if stmt.strip()]
+
+
 USER_ID = uuid.UUID("00000000-0000-7000-8000-000000000001")
 
 
@@ -119,6 +168,9 @@ def schema(database_url: str) -> Iterator[str]:
         admin.execute(f'SET search_path TO "{name}"')
         admin.execute(JOB_TABLE_SQL)
         admin.execute(MATERIAL_TABLES_SQL)
+        admin.execute(PHASE2_TABLES_SQL)
+        for stmt in migration_0006_statements():
+            admin.execute(stmt)
         try:
             yield name
         finally:

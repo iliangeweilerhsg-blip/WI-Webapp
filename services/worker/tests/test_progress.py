@@ -11,6 +11,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 
 from conftest import USER_ID, get_job
 from sg_worker import jobs, progress
@@ -77,6 +78,34 @@ def add_job(
     return job_id
 
 
+REC_A, REC_B, REC_C, REC_D = (
+    uuid.UUID(f"00000000-0000-7000-8000-0000000000b{i}") for i in range(4)
+)
+
+
+def add_at(
+    conn: psycopg.Connection[Any],
+    job_type: str,
+    state: str,
+    minute: int,
+    *,
+    rec: uuid.UUID | None = None,
+    deleted: bool = False,
+    job_id: uuid.UUID | None = None,
+) -> uuid.UUID:
+    """Job mit festem `created_at` (Minute `minute` eines festen Tages)."""
+    job_id = job_id or uuid.uuid4()
+    payload = {"recording_id": str(rec)} if rec is not None else {"session_id": str(SID)}
+    conn.execute(
+        "INSERT INTO job (id, user_id, type, payload, state, session_id, created_at, deleted_at) "
+        "VALUES (%s, %s, %s, %s, %s, %s, "
+        "timestamptz '2026-11-05 10:00:00+00' + make_interval(mins => %s), "
+        "CASE WHEN %s THEN now() END)",
+        (job_id, USER_ID, job_type, Jsonb(payload), state, SID, minute, deleted),
+    )
+    return job_id
+
+
 def refresh(conn: psycopg.Connection[Any], *types: str) -> None:
     with conn.transaction():
         progress.refresh(conn, SID, types or ["transcribe"])
@@ -126,25 +155,27 @@ def test_only_cancelled_jobs_give_abgebrochen(
 
 
 def test_cancelled_does_not_count_next_to_fertig(conn: psycopg.Connection[Any]) -> None:
+    """Zwei Einheiten (Aufnahmen): `abgebrochen` zählt nur, wenn alle Einheiten abgebrochen sind."""
     add_session(conn)
-    add_job(conn, state="fertig")
-    add_job(conn, state="abgebrochen")
-    refresh(conn)
-    assert session_row(conn)[1] == {"transcribe": "fertig"}
+    add_at(conn, "audio.finalize", "fertig", 0, rec=REC_A)
+    add_at(conn, "audio.finalize", "abgebrochen", 1, rec=REC_B)
+    refresh(conn, "audio.finalize")
+    assert session_row(conn)[1] == {"audio.finalize": "fertig"}
 
 
 def test_summary_priority_for_several_jobs_of_one_type(conn: psycopg.Connection[Any]) -> None:
+    """Über die Einheiten: `fehler` vor `laeuft` vor `wartet` vor `fertig`."""
     add_session(conn, "laeuft")
-    add_job(conn, state="fertig")
-    add_job(conn, state="wartet")
-    refresh(conn)
-    assert session_row(conn)[1] == {"transcribe": "wartet"}
-    add_job(conn, state="laeuft")
-    refresh(conn)
-    assert session_row(conn)[1] == {"transcribe": "laeuft"}
-    add_job(conn, state="fehler")
-    refresh(conn)
-    assert session_row(conn)[1] == {"transcribe": "fehler"}
+    add_at(conn, "audio.finalize", "fertig", 0, rec=REC_A)
+    add_at(conn, "audio.finalize", "wartet", 0, rec=REC_B)
+    refresh(conn, "audio.finalize")
+    assert session_row(conn)[1] == {"audio.finalize": "wartet"}
+    add_at(conn, "audio.finalize", "laeuft", 0, rec=REC_C)
+    refresh(conn, "audio.finalize")
+    assert session_row(conn)[1] == {"audio.finalize": "laeuft"}
+    add_at(conn, "audio.finalize", "fehler", 0, rec=REC_D)
+    refresh(conn, "audio.finalize")
+    assert session_row(conn)[1] == {"audio.finalize": "fehler"}
 
 
 def test_several_job_types_and_open_job_blocks_verarbeitet(
@@ -182,8 +213,9 @@ def test_notify(worker: Worker, conn: psycopg.Connection[Any], database_url: str
     with psycopg.connect(database_url, autocommit=True) as listener:
         listener.execute("LISTEN sg_session")
         worker.drain(conn)
-        got = [n.payload for n in listener.notifies(timeout=2, stop_after=1)]
-    assert got == [str(SID)]
+        # Alle sammeln: eine Meldung beim Abholen (`laeuft`, §18.2), eine beim Abschluss
+        got = [n.payload for n in listener.notifies(timeout=1)]
+    assert got == [str(SID)] * 2
 
 
 def test_idempotent_double_run(conn: psycopg.Connection[Any]) -> None:
@@ -504,3 +536,135 @@ def test_updated_at_stays_monotonic_when_worker_waits_for_core_stop(
     assert final is not None
     assert final[0] == "verarbeitet"
     assert final[1] > core_updated_at
+
+
+# ---------- Zusammenfassung „neuester Job je Einheit“ (VERTRAEGE §18.2, Review von #142) ----------
+
+
+def summary(conn: psycopg.Connection[Any], job_type: str = "transcribe") -> str | None:
+    refresh(conn, job_type)
+    processing = session_row(conn)[1] or {}
+    return processing.get(job_type)
+
+
+@pytest.mark.parametrize(
+    ("states", "expected"),
+    [
+        (["fehler", "fertig"], "fertig"),  # H1: „Erneut versuchen“ erfolgreich
+        (["fehler", "wartet"], "wartet"),  # reprocess angelegt
+        (["fehler", "laeuft"], "laeuft"),
+        (["fertig", "fehler"], "fehler"),
+        (["laeuft", "wartet"], "laeuft"),  # laufender Job und neuer wartender
+        (["laeuft", "fehler"], "laeuft"),  # in der Einheit läuft noch einer
+        (["fertig", "abgebrochen"], "abgebrochen"),  # der neueste zählt, auch abgebrochen
+        (["abgebrochen", "fertig"], "fertig"),
+        (["fehler", "abgebrochen", "fertig"], "fertig"),
+        (["fertig"], "fertig"),
+    ],
+)
+def test_newest_job_per_session_unit(
+    conn: psycopg.Connection[Any], states: list[str], expected: str
+) -> None:
+    add_session(conn)
+    for minute, state in enumerate(states):
+        add_at(conn, "transcribe", state, minute)
+    assert summary(conn) == expected
+
+
+def test_finalize_units_are_recordings(conn: psycopg.Connection[Any]) -> None:
+    """Je Aufnahme der neueste Job: A fehler→fertig, B laeuft. Ergebnis `laeuft`, nicht `fehler`."""
+    add_session(conn)
+    add_at(conn, "audio.finalize", "fehler", 0, rec=REC_A)
+    add_at(conn, "audio.finalize", "fertig", 5, rec=REC_A)
+    add_at(conn, "audio.finalize", "laeuft", 1, rec=REC_B)
+    assert summary(conn, "audio.finalize") == "laeuft"
+
+
+def test_finalize_one_unit_failed_wins(conn: psycopg.Connection[Any]) -> None:
+    add_session(conn)
+    add_at(conn, "audio.finalize", "fertig", 0, rec=REC_A)
+    add_at(conn, "audio.finalize", "fertig", 1, rec=REC_B)
+    add_at(conn, "audio.finalize", "fehler", 2, rec=REC_B)
+    assert summary(conn, "audio.finalize") == "fehler"
+
+
+def test_all_units_cancelled_gives_abgebrochen(conn: psycopg.Connection[Any]) -> None:
+    add_session(conn)
+    add_at(conn, "audio.finalize", "abgebrochen", 0, rec=REC_A)
+    add_at(conn, "audio.finalize", "abgebrochen", 1, rec=REC_B)
+    assert summary(conn, "audio.finalize") == "abgebrochen"
+
+
+def test_deleted_newest_job_is_ignored(conn: psycopg.Connection[Any]) -> None:
+    add_session(conn)
+    add_at(conn, "transcribe", "fertig", 0)
+    add_at(conn, "transcribe", "fehler", 1, deleted=True)
+    assert summary(conn) == "fertig"
+
+
+def test_tie_on_created_at_is_broken_by_id(conn: psycopg.Connection[Any]) -> None:
+    add_session(conn)
+    low = uuid.UUID("00000000-0000-7000-8000-000000000c01")
+    high = uuid.UUID("00000000-0000-7000-8000-000000000c02")
+    add_at(conn, "transcribe", "fertig", 0, job_id=high)
+    add_at(conn, "transcribe", "fehler", 0, job_id=low)
+    assert summary(conn) == "fertig"
+
+
+def test_no_job_keeps_key_unchanged(conn: psycopg.Connection[Any]) -> None:
+    add_session(conn)
+    conn.execute(
+        'UPDATE session SET processing = \'{"transcribe": "wartet"}\'::jsonb WHERE id = %s',
+        (SID,),
+    )
+    add_at(conn, "transcribe", "fertig", 0, deleted=True)
+    assert summary(conn) == "wartet"
+
+
+def test_reprocess_after_failure_lets_session_become_verarbeitet(
+    worker: Worker, conn: psycopg.Connection[Any]
+) -> None:
+    """H1 aus dem Review von #142 über die Job-Schleife: gescheiterter Job, danach ein neuer."""
+    add_session(conn)
+    add_job(conn, payload='{"fail": true}', max_attempts=1)
+    worker.drain(conn)
+    assert session_row(conn) == ("verarbeitet", {"transcribe": "fehler"})
+    add_job(conn)
+    worker.drain(conn)
+    assert session_row(conn) == ("verarbeitet", {"transcribe": "fertig"})
+
+
+def test_summary_sql_matches_contract() -> None:
+    """Das SQL in progress.py ist wörtlich die Referenz aus VERTRAEGE §18.2 (wie im Core)."""
+    doc = (Path(__file__).resolve().parents[3] / "docs/VERTRAEGE.md").read_text(encoding="utf-8")
+    section = doc[doc.index("### 18.2") : doc.index("### 18.3")]
+    reference = section.split("```sql", 1)[1].split("```", 1)[0]
+    assert " ".join(progress.SUMMARY_SQL.split()) == " ".join(reference.split()).rstrip(";")
+
+
+def test_claim_sets_laeuft_before_handler_runs(
+    database_url: str, connect_kwargs: dict[str, Any], tmp_path: Path, conn: psycopg.Connection[Any]
+) -> None:
+    """Fortschritt beim Abholen (§18.2): Während der Handler läuft, steht dort `laeuft`."""
+    seen: list[Any] = []
+    reg = Registry()
+
+    def work(payload: Any, ctx: JobContext) -> dict[str, Any]:
+        with psycopg.connect(database_url, autocommit=True, **connect_kwargs) as other:
+            row = other.execute("SELECT processing FROM session WHERE id = %s", (SID,)).fetchone()
+        seen.append(row[0] if row else None)
+        return {}
+
+    reg.register("transcribe", work)
+    w = Worker(
+        database_url,
+        tmp_path,
+        registry=reg,
+        channel=f"sg_jobs_{uuid.uuid4().hex[:8]}",
+        connect_kwargs=connect_kwargs,
+    )
+    add_session(conn)
+    add_job(conn)
+    w.drain(conn)
+    assert seen == [{"transcribe": "laeuft"}]
+    assert session_row(conn) == ("verarbeitet", {"transcribe": "fertig"})
