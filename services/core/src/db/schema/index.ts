@@ -6,3 +6,4 @@ export * from './session-data.ts';
 export * from './ink.ts';
 export * from './sync.ts';
 export * from './system.ts';
+export * from './moodle.ts';

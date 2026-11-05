@@ -55,6 +55,10 @@ const TABLES = [
   'page',
   'stroke',
   'page_element',
+  // Moodle-Abgleich (T1-23, 08 §9.4)
+  'moodle_course_link',
+  'moodle_item',
+  'moodle_deadline',
 ];
 
 /** Phase-1-Tabellen ohne die Pflichtfelder aus 03 §1 (Struktur genau nach VERTRAEGE §6.1) */

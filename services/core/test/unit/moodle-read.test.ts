@@ -467,6 +467,8 @@ describe('Lese-Endpunkte (F-MDL-02): Erfolg, Antwort nach Schema', () => {
         url: `${s.moodle.baseUrl}/course/view.php?id=101`,
         last_access_at: '2026-11-04T08:15:00.000Z',
         module_id: null,
+        suggested_module_id: null,
+        category: 'aktuell',
       },
       {
         moodle_id: 102,
@@ -477,6 +479,8 @@ describe('Lese-Endpunkte (F-MDL-02): Erfolg, Antwort nach Schema', () => {
         url: `${s.moodle.baseUrl}/course/view.php?id=102`,
         last_access_at: null,
         module_id: null,
+        suggested_module_id: null,
+        category: 'aktuell',
       },
     ]);
     expect(s.moodle.calls('core_enrol_get_users_courses')[0]?.params.get('userid')).toBe('4711');

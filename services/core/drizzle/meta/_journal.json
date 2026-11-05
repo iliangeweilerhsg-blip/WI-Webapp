@@ -36,6 +36,13 @@
       "when": 1793864974283,
       "tag": "0004_restore_test",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793893585716,
+      "tag": "0005_moodle",
+      "breakpoints": true
     }
   ]
 }

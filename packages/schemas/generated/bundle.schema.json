@@ -326,8 +326,20 @@
     "MoodleCourse": {
       "$ref": "#/$defs/MoodleCourse"
     },
+    "MoodleCourseCategory": {
+      "$ref": "#/$defs/MoodleCourseCategory"
+    },
     "MoodleCourseContents": {
       "$ref": "#/$defs/MoodleCourseContents"
+    },
+    "MoodleCourseLink": {
+      "$ref": "#/$defs/MoodleCourseLink"
+    },
+    "MoodleCourseLinkList": {
+      "$ref": "#/$defs/MoodleCourseLinkList"
+    },
+    "MoodleCourseLinkUpdate": {
+      "$ref": "#/$defs/MoodleCourseLinkUpdate"
     },
     "MoodleCourseList": {
       "$ref": "#/$defs/MoodleCourseList"
@@ -359,6 +371,18 @@
     "MoodleGradeList": {
       "$ref": "#/$defs/MoodleGradeList"
     },
+    "MoodleItem": {
+      "$ref": "#/$defs/MoodleItem"
+    },
+    "MoodleItemKind": {
+      "$ref": "#/$defs/MoodleItemKind"
+    },
+    "MoodleItemList": {
+      "$ref": "#/$defs/MoodleItemList"
+    },
+    "MoodleItemUpdate": {
+      "$ref": "#/$defs/MoodleItemUpdate"
+    },
     "MoodleNotification": {
       "$ref": "#/$defs/MoodleNotification"
     },
@@ -388,6 +412,27 @@
     },
     "MoodleSubmissionStatus": {
       "$ref": "#/$defs/MoodleSubmissionStatus"
+    },
+    "MoodleSyncRequest": {
+      "$ref": "#/$defs/MoodleSyncRequest"
+    },
+    "MoodleSyncRun": {
+      "$ref": "#/$defs/MoodleSyncRun"
+    },
+    "MoodleSyncState": {
+      "$ref": "#/$defs/MoodleSyncState"
+    },
+    "MoodleSyncStatus": {
+      "$ref": "#/$defs/MoodleSyncStatus"
+    },
+    "MoodleSyncTrigger": {
+      "$ref": "#/$defs/MoodleSyncTrigger"
+    },
+    "MoodleSyncedDeadline": {
+      "$ref": "#/$defs/MoodleSyncedDeadline"
+    },
+    "MoodleSyncedDeadlineList": {
+      "$ref": "#/$defs/MoodleSyncedDeadlineList"
     },
     "MoodleUpload": {
       "$ref": "#/$defs/MoodleUpload"
@@ -4292,7 +4337,7 @@
     "MoodleCourse": {
       "title": "MoodleCourse",
       "type": "object",
-      "description": "Kurs, in den der Nutzer eingeschrieben ist. module_id: zugeordnetes Modul (F-MDL-03)",
+      "description": "Kurs, in den der Nutzer eingeschrieben ist. module_id: bestätigte Zuordnung zu einem Modul (F-MDL-03, T1-23)",
       "required": [
         "moodle_id",
         "short_name",
@@ -4301,7 +4346,9 @@
         "end_date",
         "url",
         "last_access_at",
-        "module_id"
+        "module_id",
+        "suggested_module_id",
+        "category"
       ],
       "additionalProperties": false,
       "properties": {
@@ -4359,8 +4406,32 @@
               "type": "null"
             }
           ]
+        },
+        "suggested_module_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Vorschlag über Titelähnlichkeit, nur ohne bestätigte Zuordnung und nur für aktuelle Kurse (F-MDL-03)"
+        },
+        "category": {
+          "$ref": "#/$defs/MoodleCourseCategory"
         }
       }
+    },
+    "MoodleCourseCategory": {
+      "title": "MoodleCourseCategory",
+      "type": "string",
+      "enum": [
+        "aktuell",
+        "organisatorisch",
+        "alt"
+      ],
+      "description": "aktuell = wird vorgeschlagen. organisatorisch (z. B. „Klausurtermine …“) und alt (Start vor dem aktuellen Semester) werden standardmäßig nicht vorgeschlagen (F-MDL-03)"
     },
     "MoodleCourseContents": {
       "title": "MoodleCourseContents",
@@ -4382,6 +4453,86 @@
           "items": {
             "$ref": "#/$defs/MoodleSection"
           }
+        }
+      }
+    },
+    "MoodleCourseLink": {
+      "title": "MoodleCourseLink",
+      "type": "object",
+      "description": "Bestätigte Zuordnung Moodle-Kurs → Modul (F-MDL-03, 08 §9.4 moodle_course_link)",
+      "required": [
+        "moodle_course_id",
+        "module_id",
+        "sync_enabled",
+        "last_synced_at",
+        "created_at",
+        "updated_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "moodle_course_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "sync_enabled": {
+          "type": "boolean",
+          "description": "false = Kurs bleibt zugeordnet, wird aber nicht abgeglichen"
+        },
+        "last_synced_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Letzter erfolgreicher Abgleich dieses Kurses"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "MoodleCourseLinkList": {
+      "title": "MoodleCourseLinkList",
+      "type": "object",
+      "description": "Antwort von GET /moodle/links",
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleCourseLink"
+          }
+        }
+      }
+    },
+    "MoodleCourseLinkUpdate": {
+      "title": "MoodleCourseLinkUpdate",
+      "type": "object",
+      "description": "Body von PUT /moodle/links/{course_id}: Zuordnung bestätigen oder ändern",
+      "required": [
+        "module_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "sync_enabled": {
+          "type": "boolean",
+          "description": "Standard: true beim Anlegen, sonst unverändert"
         }
       }
     },
@@ -4773,6 +4924,212 @@
           "items": {
             "$ref": "#/$defs/MoodleGradeItem"
           }
+        }
+      }
+    },
+    "MoodleItem": {
+      "title": "MoodleItem",
+      "type": "object",
+      "description": "Datei aus einem zugeordneten Kurs (08 §9.4 moodle_item). Wiedererkannt über file_ref",
+      "required": [
+        "id",
+        "moodle_course_id",
+        "module_id",
+        "cmid",
+        "activity_name",
+        "filename",
+        "file_ref",
+        "mime_type",
+        "is_pdf",
+        "size_bytes",
+        "modified_at",
+        "kind",
+        "kind_source",
+        "slide_deck_id",
+        "exercise_sheet_id",
+        "removed_in_moodle_at",
+        "last_error",
+        "created_at",
+        "updated_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "moodle_course_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "module_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Modul aus der aktuellen Kurszuordnung, null ohne Zuordnung"
+        },
+        "cmid": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "activity_name": {
+          "type": "string"
+        },
+        "filename": {
+          "type": "string",
+          "description": "Bereinigter Moodle-Dateiname, höchstens 255 Byte (UTF-8), Endung bleibt. Nur zur Anzeige"
+        },
+        "file_ref": {
+          "type": "string",
+          "pattern": "^/",
+          "description": "Für GET /moodle/file?ref"
+        },
+        "mime_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_pdf": {
+          "type": "boolean",
+          "description": "Nur PDFs werden übernommen, andere Dateien nur aufgelistet"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "modified_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "timemodified der zuletzt verarbeiteten Fassung"
+        },
+        "kind": {
+          "$ref": "#/$defs/MoodleItemKind"
+        },
+        "kind_source": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "manuell"
+          ],
+          "description": "manuell = Entscheidung in der Inbox, gilt für die ganze Aktivität"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exercise_sheet_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "removed_in_moodle_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "In Moodle gelöscht oder versteckt. Lokal wird nie gelöscht"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "kein_pdf",
+                "zu_gross",
+                "nicht_gefunden",
+                "download_fehlgeschlagen"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Warum die Datei zuletzt nicht übernommen wurde. Ein späterer Abgleich versucht es erneut (außer kein_pdf)"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "MoodleItemKind": {
+      "title": "MoodleItemKind",
+      "type": "string",
+      "enum": [
+        "folien",
+        "uebung",
+        "ignoriert",
+        "offen"
+      ],
+      "description": "Einordnung einer Datei aus Moodle (F-MDL-04). offen = wartet auf die Entscheidung in der Inbox"
+    },
+    "MoodleItemList": {
+      "title": "MoodleItemList",
+      "type": "object",
+      "description": "Antwort von GET /moodle/items",
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleItem"
+          }
+        }
+      }
+    },
+    "MoodleItemUpdate": {
+      "title": "MoodleItemUpdate",
+      "type": "object",
+      "description": "Body von PATCH /moodle/items/{id}: Entscheidung aus der Inbox („Als Folien / Übung / ignorieren“). Gilt für die ganze Aktivität",
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "folien",
+            "uebung",
+            "ignoriert"
+          ]
         }
       }
     },
@@ -5214,6 +5571,303 @@
               "type": "null"
             }
           ]
+        }
+      }
+    },
+    "MoodleSyncRequest": {
+      "title": "MoodleSyncRequest",
+      "type": "object",
+      "description": "Body von POST /moodle/sync („Jetzt abgleichen“). Ohne course_id alle zugeordneten Kurse",
+      "additionalProperties": false,
+      "properties": {
+        "course_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        }
+      }
+    },
+    "MoodleSyncRun": {
+      "title": "MoodleSyncRun",
+      "type": "object",
+      "description": "Ergebnis eines Abgleichs (F-MDL-04)",
+      "required": [
+        "trigger",
+        "started_at",
+        "finished_at",
+        "ok",
+        "error_code",
+        "courses",
+        "files_new",
+        "files_changed",
+        "files_imported",
+        "inbox_new",
+        "deadlines",
+        "failed_courses"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "trigger": {
+          "$ref": "#/$defs/MoodleSyncTrigger"
+        },
+        "started_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean",
+          "description": "false = mindestens ein Kurs oder die Fristen konnten nicht abgeglichen werden"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Fehlercode des Core (08 §9.1), z. B. moodle_unreachable"
+        },
+        "courses": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Abgeglichene Kurse"
+        },
+        "files_new": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_changed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "files_imported": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Als Foliensatz oder Übungsblatt übernommen (inkl. Verknüpfung mit schon vorhandener Datei)"
+        },
+        "inbox_new": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Neue Dateien mit kind = offen"
+        },
+        "deadlines": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Aktuelle Fristen nach dem Abgleich"
+        },
+        "failed_courses": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Moodle-ID"
+          }
+        }
+      }
+    },
+    "MoodleSyncState": {
+      "title": "MoodleSyncState",
+      "type": "string",
+      "enum": [
+        "aus",
+        "bereit",
+        "laeuft",
+        "pausiert"
+      ],
+      "description": "aus = Moodle nicht eingerichtet. pausiert = Token ungültig oder abgelaufen (F-MDL-01), der Abgleich wartet auf einen neuen Token"
+    },
+    "MoodleSyncStatus": {
+      "title": "MoodleSyncStatus",
+      "type": "object",
+      "description": "Antwort von GET und POST /moodle/sync",
+      "required": [
+        "state",
+        "connection",
+        "last_run",
+        "next_run_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/MoodleSyncState"
+        },
+        "connection": {
+          "$ref": "#/$defs/MoodleConnectionState"
+        },
+        "last_run": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MoodleSyncRun"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "next_run_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nächster geplanter Abgleich (alle 2 h), null ohne Zeitplan"
+        }
+      }
+    },
+    "MoodleSyncTrigger": {
+      "title": "MoodleSyncTrigger",
+      "type": "string",
+      "enum": [
+        "start",
+        "zeitplan",
+        "manuell",
+        "entscheidung",
+        "zuordnung"
+      ],
+      "description": "Anlass eines Abgleichs"
+    },
+    "MoodleSyncedDeadline": {
+      "title": "MoodleSyncedDeadline",
+      "type": "object",
+      "description": "Frist aus dem Abgleich (08 §9.4 moodle_deadline). aufgabe = Moodle-Aufgabe mit Abgabedatum, termin = Kalenderereignis",
+      "required": [
+        "id",
+        "source",
+        "moodle_course_id",
+        "module_id",
+        "assignment_id",
+        "event_id",
+        "cmid",
+        "name",
+        "due_at",
+        "url",
+        "exercise_sheet_id",
+        "removed_in_moodle_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "aufgabe",
+            "termin"
+          ]
+        },
+        "moodle_course_id": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Moodle-ID"
+        },
+        "module_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "assignment_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Moodle-ID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_id": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Moodle-ID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cmid": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Moodle-ID"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "due_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "uri"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exercise_sheet_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Übungsblatt, das dieses Abgabedatum bekommen hat"
+        },
+        "removed_in_moodle_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "MoodleSyncedDeadlineList": {
+      "title": "MoodleSyncedDeadlineList",
+      "type": "object",
+      "description": "Antwort von GET /moodle/synced-deadlines",
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MoodleSyncedDeadline"
+          }
         }
       }
     },

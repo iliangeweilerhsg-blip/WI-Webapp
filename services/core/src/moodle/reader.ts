@@ -93,7 +93,7 @@ export class MoodleReader {
   private readonly client: MoodleClient;
   private readonly status: MoodleStatusService;
   private readonly files: MoodleFileRegistry;
-  private readonly timeZone: string;
+  readonly timeZone: string;
 
   constructor(options: MoodleReaderOptions) {
     this.client = options.client;
