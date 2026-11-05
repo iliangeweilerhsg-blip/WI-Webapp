@@ -7,9 +7,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Slide } from '@sg/shared';
 import { pageImageUrl, pageThumbUrl, useDeckDetail } from '../../../lib/material.ts';
-import { sessionStreamId, sessionTimeMs } from '../../../lib/session-stream.ts';
+import { sessionStreamId, sessionTimeMs, syncedNowMs } from '../../../lib/session-stream.ts';
 import { isEditableTarget } from '../../../lib/shortcuts.ts';
-import type { SyncClient } from '../../../lib/sync/client.ts';
+import { SyncHandedOverError, type SyncClient } from '../../../lib/sync/client.ts';
 import { uuidv7 } from '../../../lib/uuid.ts';
 import { useSlidePosition } from './use-slide-position.ts';
 
@@ -80,7 +80,7 @@ export function SlidesPanel({ sessionId, slideDeckId, active, startedAt, client 
       const now = Math.min(Math.max(getPosition()?.index ?? 1, 1), count);
       const next = Math.min(Math.max(target, 1), count);
       if (next === now) return;
-      const eventAt = Date.now();
+      const eventAt = syncedNowMs(sync);
       const slide = list[next - 1];
       // Die Anzeige wechselt sofort; ohne `started_at` gibt es keine Sitzungszeit, dann wird nichts gesendet
       setPosition({ index: next, tMs: start === null ? 0 : sessionTimeMs(start, eventAt) });
@@ -99,7 +99,10 @@ export function SlidesPanel({ sessionId, slideDeckId, active, startedAt, client 
           },
         })
         .then(() => setSendHint(false))
-        .catch(() => setSendHint(true));
+        .catch((error: unknown) => {
+          // Übergeben: Der neue Leader sendet die Operation
+          if (!(error instanceof SyncHandedOverError)) setSendHint(true);
+        });
     },
     [sessionId, setPosition, getPosition],
   );

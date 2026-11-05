@@ -98,7 +98,15 @@ function followSlides(queryClient: QueryClient, sessionId: string, client: SyncS
       unsubscribe =
         client.subscribe(stream, from, onOp, {
           // Bei `reset` den REST-Stand neu laden und dessen Position melden (§11.1)
-          onReset: () => load(),
+          // Scheitert das Laden, bleibt der Strom stumm: neu aufbauen, sobald die Verbindung wieder steht
+          onReset: async () => {
+            try {
+              return await load();
+            } catch (error) {
+              needsReload = true;
+              throw error;
+            }
+          },
         }) ?? null;
       needsReload = false;
     } catch {
