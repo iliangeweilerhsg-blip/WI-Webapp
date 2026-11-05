@@ -306,6 +306,13 @@ export type MoodleConnectionState = ("nicht_eingerichtet" | "ok" | "laeuft_bald_
  */
 export type MoodleCourseCategory = ("aktuell" | "organisatorisch" | "alt")
 /**
+ * Automatische Zuordnung (#141): zugeordnet = eindeutig passendes Modul, angelegt = Modul aus dem Kursnamen angelegt
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleLinkAuto".
+ */
+export type MoodleLinkAuto = ("zugeordnet" | "angelegt")
+/**
  * Einordnung einer Datei aus Moodle (F-MDL-04). offen = wartet auf die Entscheidung in der Inbox
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1913,7 +1920,23 @@ export interface MoodleAssignmentList {
 items: MoodleAssignment[]
 }
 /**
- * Kurs, in den der Nutzer eingeschrieben ist. module_id: bestätigte Zuordnung zu einem Modul (F-MDL-03, T1-23)
+ * Antwort von POST /moodle/auto-assign (#141): was die automatische Kurszuordnung in diesem Lauf getan hat
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MoodleAutoAssignResult".
+ */
+export interface MoodleAutoAssignResult {
+/**
+ * Kurse, die einem bestehenden Modul zugeordnet wurden
+ */
+assigned: number
+/**
+ * Neu angelegte Module
+ */
+created: number
+}
+/**
+ * Kurs, in den der Nutzer eingeschrieben ist. module_id: Zuordnung zu einem Modul, von Hand oder automatisch (F-MDL-03, T1-23, #141)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "MoodleCourse".
@@ -1964,7 +1987,7 @@ visible: boolean
 activities: MoodleActivity[]
 }
 /**
- * Bestätigte Zuordnung Moodle-Kurs → Modul (F-MDL-03, 08 §9.4 moodle_course_link)
+ * Zuordnung Moodle-Kurs → Modul, von Hand bestätigt oder automatisch (F-MDL-03, #141, 08 §9.4 moodle_course_link)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "MoodleCourseLink".
@@ -1983,6 +2006,14 @@ sync_enabled: boolean
  * Letzter erfolgreicher Abgleich dieses Kurses
  */
 last_synced_at: (Timestamp | null)
+/**
+ * Wie die Zuordnung entstand: null = von Hand, sonst automatisch (#141)
+ */
+auto: (MoodleLinkAuto | null)
+/**
+ * true nur bei auto = angelegt, solange das Modul leer ist: DELETE /moodle/links/{course_id}/module legt es in den Papierkorb
+ */
+module_removable: boolean
 created_at: Timestamp
 updated_at: Timestamp
 }

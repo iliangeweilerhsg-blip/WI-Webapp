@@ -31,6 +31,7 @@ import {
   uploadTmpDir,
   type StoredUpload,
 } from '../services/material.ts';
+import { autoAssignCourses } from './auto.ts';
 import { classifyFile, displayFilename, sheetNumber, type FileKind } from './classify.ts';
 import type { MoodleServices } from './index.ts';
 import { activeLinks, iso, looksLikePdf } from './store.ts';
@@ -308,6 +309,8 @@ export class MoodleSync {
     }
     if (connection === 'ungueltig' || connection === 'abgelaufen') throw new TokenInvalid();
 
+    // Voller Lauf: zuerst neue Kurse automatisch zuordnen (#141), damit sie gleich mit abgeglichen werden
+    if (scope === null) await this.autoAssign(run);
     const links = await activeLinks(this.db, scope ? [...scope] : null);
     for (const link of links) {
       this.checkStopped();
@@ -336,6 +339,25 @@ export class MoodleSync {
       run.ok = false;
       run.error_code ??= codeOf(error);
       this.logger?.warn({ err: error }, 'Moodle-Fristen nicht abgeglichen');
+    }
+  }
+
+  /** Automatische Kurszuordnung (#141). Scheitert sie, gleicht der Lauf die bestehenden Zuordnungen trotzdem ab */
+  private async autoAssign(run: MoodleSyncRun): Promise<void> {
+    try {
+      const courses = await this.moodle.reader.courses();
+      const result = await autoAssignCourses(this.db, courses.items, {
+        timeZone: this.moodle.reader.timeZone,
+        now: this.now(),
+      });
+      if (result.assigned > 0 || result.created > 0) {
+        this.logger?.info(result, 'Moodle-Kurse automatisch zugeordnet');
+      }
+    } catch (error) {
+      if (codeOfToken(error)) throw new TokenInvalid();
+      run.ok = false;
+      run.error_code ??= codeOf(error);
+      this.logger?.warn({ err: error }, 'Automatische Kurszuordnung fehlgeschlagen');
     }
   }
 

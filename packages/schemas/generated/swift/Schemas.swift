@@ -117,6 +117,7 @@ struct SchemaBundle: Codable {
     let moodleActivity: MoodleActivity?
     let moodleAssignment: MoodleAssignment?
     let moodleAssignmentList: MoodleAssignmentList?
+    let moodleAutoAssignResult: MoodleAutoAssignResult?
     let moodleCompletion: MoodleCompletion?
     let moodleConnectionState: MoodleConnectionState?
     let moodleCourse: MoodleCourse?
@@ -139,6 +140,7 @@ struct SchemaBundle: Codable {
     let moodleItemKind: MoodleItemKind?
     let moodleItemList: MoodleItemList?
     let moodleItemUpdate: MoodleItemUpdate?
+    let moodleLinkAuto: MoodleLinkAuto?
     let moodleNotification: MoodleNotification?
     let moodleNotificationList: MoodleNotificationList?
     let moodlePost: MoodlePost?
@@ -436,6 +438,7 @@ struct SchemaBundle: Codable {
         case moodleActivity = "MoodleActivity"
         case moodleAssignment = "MoodleAssignment"
         case moodleAssignmentList = "MoodleAssignmentList"
+        case moodleAutoAssignResult = "MoodleAutoAssignResult"
         case moodleCompletion = "MoodleCompletion"
         case moodleConnectionState = "MoodleConnectionState"
         case moodleCourse = "MoodleCourse"
@@ -458,6 +461,7 @@ struct SchemaBundle: Codable {
         case moodleItemKind = "MoodleItemKind"
         case moodleItemList = "MoodleItemList"
         case moodleItemUpdate = "MoodleItemUpdate"
+        case moodleLinkAuto = "MoodleLinkAuto"
         case moodleNotification = "MoodleNotification"
         case moodleNotificationList = "MoodleNotificationList"
         case moodlePost = "MoodlePost"
@@ -775,6 +779,7 @@ extension SchemaBundle {
         moodleActivity: MoodleActivity?? = nil,
         moodleAssignment: MoodleAssignment?? = nil,
         moodleAssignmentList: MoodleAssignmentList?? = nil,
+        moodleAutoAssignResult: MoodleAutoAssignResult?? = nil,
         moodleCompletion: MoodleCompletion?? = nil,
         moodleConnectionState: MoodleConnectionState?? = nil,
         moodleCourse: MoodleCourse?? = nil,
@@ -797,6 +802,7 @@ extension SchemaBundle {
         moodleItemKind: MoodleItemKind?? = nil,
         moodleItemList: MoodleItemList?? = nil,
         moodleItemUpdate: MoodleItemUpdate?? = nil,
+        moodleLinkAuto: MoodleLinkAuto?? = nil,
         moodleNotification: MoodleNotification?? = nil,
         moodleNotificationList: MoodleNotificationList?? = nil,
         moodlePost: MoodlePost?? = nil,
@@ -1094,6 +1100,7 @@ extension SchemaBundle {
             moodleActivity: moodleActivity ?? self.moodleActivity,
             moodleAssignment: moodleAssignment ?? self.moodleAssignment,
             moodleAssignmentList: moodleAssignmentList ?? self.moodleAssignmentList,
+            moodleAutoAssignResult: moodleAutoAssignResult ?? self.moodleAutoAssignResult,
             moodleCompletion: moodleCompletion ?? self.moodleCompletion,
             moodleConnectionState: moodleConnectionState ?? self.moodleConnectionState,
             moodleCourse: moodleCourse ?? self.moodleCourse,
@@ -1116,6 +1123,7 @@ extension SchemaBundle {
             moodleItemKind: moodleItemKind ?? self.moodleItemKind,
             moodleItemList: moodleItemList ?? self.moodleItemList,
             moodleItemUpdate: moodleItemUpdate ?? self.moodleItemUpdate,
+            moodleLinkAuto: moodleLinkAuto ?? self.moodleLinkAuto,
             moodleNotification: moodleNotification ?? self.moodleNotification,
             moodleNotificationList: moodleNotificationList ?? self.moodleNotificationList,
             moodlePost: moodlePost ?? self.moodlePost,
@@ -6943,6 +6951,58 @@ extension MoodleAssignmentList {
     }
 }
 
+/// Antwort von POST /moodle/auto-assign (#141): was die automatische Kurszuordnung in diesem
+/// Lauf getan hat
+// MARK: - MoodleAutoAssignResult
+struct MoodleAutoAssignResult: Codable {
+    /// Kurse, die einem bestehenden Modul zugeordnet wurden
+    let assigned: Int
+    /// Neu angelegte Module
+    let created: Int
+
+    enum CodingKeys: String, CodingKey {
+        case assigned = "assigned"
+        case created = "created"
+    }
+}
+
+// MARK: MoodleAutoAssignResult convenience initializers and mutators
+
+extension MoodleAutoAssignResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(MoodleAutoAssignResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        assigned: Int? = nil,
+        created: Int? = nil
+    ) -> MoodleAutoAssignResult {
+        return MoodleAutoAssignResult(
+            assigned: assigned ?? self.assigned,
+            created: created ?? self.created
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// Zustand des Moodle-Zugangs (F-MDL-01)
 enum MoodleConnectionState: String, Codable {
     case abgelaufen = "abgelaufen"
@@ -6953,8 +7013,8 @@ enum MoodleConnectionState: String, Codable {
     case ungueltig = "ungueltig"
 }
 
-/// Kurs, in den der Nutzer eingeschrieben ist. module_id: bestätigte Zuordnung zu einem
-/// Modul (F-MDL-03, T1-23)
+/// Kurs, in den der Nutzer eingeschrieben ist. module_id: Zuordnung zu einem Modul, von Hand
+/// oder automatisch (F-MDL-03, T1-23, #141)
 // MARK: - MoodleCourse
 struct MoodleCourse: Codable {
     let category: MoodleCourseCategory
@@ -7157,13 +7217,19 @@ extension MoodleSection {
     }
 }
 
-/// Bestätigte Zuordnung Moodle-Kurs → Modul (F-MDL-03, 08 §9.4 moodle_course_link)
+/// Zuordnung Moodle-Kurs → Modul, von Hand bestätigt oder automatisch (F-MDL-03, #141, 08
+/// §9.4 moodle_course_link)
 // MARK: - MoodleCourseLink
 struct MoodleCourseLink: Codable {
+    /// Wie die Zuordnung entstand: null = von Hand, sonst automatisch (#141)
+    let auto: MoodleLinkAuto?
     let createdAt: Date
     /// Letzter erfolgreicher Abgleich dieses Kurses
     let lastSyncedAt: Date?
     let moduleID: String
+    /// true nur bei auto = angelegt, solange das Modul leer ist: DELETE
+    /// /moodle/links/{course_id}/module legt es in den Papierkorb
+    let moduleRemovable: Bool
     /// Moodle-ID
     let moodleCourseID: Int
     /// false = Kurs bleibt zugeordnet, wird aber nicht abgeglichen
@@ -7171,9 +7237,11 @@ struct MoodleCourseLink: Codable {
     let updatedAt: Date
 
     enum CodingKeys: String, CodingKey {
+        case auto = "auto"
         case createdAt = "created_at"
         case lastSyncedAt = "last_synced_at"
         case moduleID = "module_id"
+        case moduleRemovable = "module_removable"
         case moodleCourseID = "moodle_course_id"
         case syncEnabled = "sync_enabled"
         case updatedAt = "updated_at"
@@ -7199,17 +7267,21 @@ extension MoodleCourseLink {
     }
 
     func with(
+        auto: MoodleLinkAuto?? = nil,
         createdAt: Date? = nil,
         lastSyncedAt: Date?? = nil,
         moduleID: String? = nil,
+        moduleRemovable: Bool? = nil,
         moodleCourseID: Int? = nil,
         syncEnabled: Bool? = nil,
         updatedAt: Date? = nil
     ) -> MoodleCourseLink {
         return MoodleCourseLink(
+            auto: auto ?? self.auto,
             createdAt: createdAt ?? self.createdAt,
             lastSyncedAt: lastSyncedAt ?? self.lastSyncedAt,
             moduleID: moduleID ?? self.moduleID,
+            moduleRemovable: moduleRemovable ?? self.moduleRemovable,
             moodleCourseID: moodleCourseID ?? self.moodleCourseID,
             syncEnabled: syncEnabled ?? self.syncEnabled,
             updatedAt: updatedAt ?? self.updatedAt
@@ -7223,6 +7295,13 @@ extension MoodleCourseLink {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// Automatische Zuordnung (#141): zugeordnet = eindeutig passendes Modul, angelegt = Modul
+/// aus dem Kursnamen angelegt
+enum MoodleLinkAuto: String, Codable {
+    case angelegt = "angelegt"
+    case zugeordnet = "zugeordnet"
 }
 
 /// Antwort von GET /moodle/links
@@ -19819,6 +19898,14 @@ extension MoodleAssignmentList {
     }
 }
 
+extension MoodleAutoAssignResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(assigned, forKey: .assigned)
+        try container.encode(created, forKey: .created)
+    }
+}
+
 extension MoodleCourse {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -19857,9 +19944,11 @@ extension MoodleSection {
 extension MoodleCourseLink {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(auto, forKey: .auto)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(lastSyncedAt, forKey: .lastSyncedAt)
         try container.encode(moduleID, forKey: .moduleID)
+        try container.encode(moduleRemovable, forKey: .moduleRemovable)
         try container.encode(moodleCourseID, forKey: .moodleCourseID)
         try container.encode(syncEnabled, forKey: .syncEnabled)
         try container.encode(updatedAt, forKey: .updatedAt)

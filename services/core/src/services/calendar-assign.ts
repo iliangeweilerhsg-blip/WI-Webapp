@@ -214,7 +214,7 @@ export function matchModule(event: EventText, candidates: readonly ModuleCandida
 /** Wortgrenzen für Unicode (`\b` kennt nur ASCII) */
 const WB_START = '(?<![\\p{L}\\p{N}])';
 const WB_END = '(?![\\p{L}\\p{N}])';
-const KIND_WORD_RE = new RegExp(
+export const KIND_WORD_RE = new RegExp(
   `${WB_START}(vorlesung(en)?|vl|übung(en)?|uebung(en)?|ü|ue|tutorium|tutorien|tut|prüfung|pruefung|klausur|exam|lecture)${WB_END}`,
   'giu',
 );

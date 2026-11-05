@@ -10,6 +10,7 @@ import {
   MoodleActionRequestSchema,
   MoodleActionResultSchema,
   MoodleAssignmentListSchema,
+  MoodleAutoAssignResultSchema,
   MoodleCourseContentsSchema,
   MoodleCourseLinkListSchema,
   MoodleCourseLinkSchema,
@@ -41,6 +42,7 @@ import { isMoodleActionId, needsConfirmation, type MoodleActionContext } from '.
 import { abortWhenClosed } from '../moodle/abort.ts';
 import { isValidFileRef, moodleNotConfigured, RequestAbortedError } from '../moodle/client.ts';
 import { FILE_ONLY_HEADERS, fileResponseHeaders } from '../moodle/file-headers.ts';
+import { autoAssignCourses, removeAutoModule } from '../moodle/auto.ts';
 import type { MoodleServices } from '../moodle/index.ts';
 import {
   annotateCourses,
@@ -135,7 +137,8 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     {
       schema: {
         tags: ['Moodle'],
-        summary: 'Kurse des Nutzers (core_enrol_get_users_courses)',
+        summary:
+          'Kurse des Nutzers (core_enrol_get_users_courses). Nur lesend: zugeordnet wird über POST /moodle/auto-assign',
         response: { 200: MoodleCourseListSchema, ...errorResponses },
       },
     },
@@ -422,6 +425,31 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     },
   );
 
+  const db = deps.db;
+  if (db) {
+    typed.post(
+      '/moodle/auto-assign',
+      {
+        schema: {
+          tags: ['Moodle'],
+          summary:
+            'Automatische Kurszuordnung (#141): neue aktuelle Kurse sicher passenden Modulen zuordnen bzw. Module anlegen',
+          response: { 200: MoodleAutoAssignResultSchema, ...errorResponses },
+        },
+      },
+      async (request) => {
+        if (!(await client.isConfigured())) throw moodleNotConfigured();
+        const list = await reader.courses();
+        const now = deps.now?.() ?? new Date();
+        const result = await autoAssignCourses(db, list.items, { timeZone: reader.timeZone, now });
+        if (result.assigned > 0 || result.created > 0) {
+          request.log.info(result, 'Moodle-Kurse automatisch zugeordnet');
+        }
+        return result;
+      },
+    );
+  }
+
   if (deps.db && deps.sync) registerSyncRoutes(app, { db: deps.db, sync: deps.sync, client, now: deps.now });
 }
 
@@ -494,6 +522,23 @@ function registerSyncRoutes(
     },
     async (request, reply) => {
       await deleteLink(db, request.params.course_id);
+      return reply.code(204).send(null);
+    },
+  );
+
+  app.delete(
+    '/moodle/links/:course_id/module',
+    {
+      schema: {
+        tags: ['Moodle'],
+        summary:
+          '„Modul entfernen“: automatisch angelegtes, leeres Modul in den Papierkorb. Danach keine Automatik mehr für den Kurs',
+        params: z.object({ course_id: MoodleIdParam }),
+        response: { 204: z.null(), 404: ApiErrorSchema, 409: ApiErrorSchema },
+      },
+    },
+    async (request, reply) => {
+      await removeAutoModule(db, request.params.course_id);
       return reply.code(204).send(null);
     },
   );

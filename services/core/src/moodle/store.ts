@@ -1,5 +1,5 @@
 // Datenbank-Seite des Moodle-Abgleichs (08 §9.4, T1-23): Kurszuordnung, Dateien, Fristen.
-import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import {
   SINGLE_USER_ID,
   type MoodleCourse,
@@ -8,10 +8,18 @@ import {
   type MoodleItemKind,
   type MoodleSyncedDeadline,
 } from '@sg/shared';
-import type { Db, DbOrTx } from '../db/client.ts';
+import type { Db, DbOrTx, Tx } from '../db/client.ts';
 import { notDeleted } from '../db/schema/common.ts';
-import { courseModule, moodleCourseLink, moodleDeadline, moodleItem, semester } from '../db/schema/index.ts';
+import {
+  courseModule,
+  moodleCourseLink,
+  moodleCourseDecided,
+  moodleDeadline,
+  moodleItem,
+  semester,
+} from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
+import { MOODLE_AUTO_LOCK_KEY } from '../lib/locks.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { courseCategory, suggestModule } from './classify.ts';
 
@@ -23,12 +31,14 @@ type DeadlineRow = typeof moodleDeadline.$inferSelect;
 export const iso = (date: Date): string => date.toISOString().replace(/\.000Z$/, 'Z');
 const isoOrNull = (date: Date | null): string | null => (date ? iso(date) : null);
 
-export function toApiLink(row: LinkRow): MoodleCourseLink {
+export function toApiLink(row: LinkRow, removable = false): MoodleCourseLink {
   return {
     moodle_course_id: row.moodleCourseId,
     module_id: row.moduleId,
     sync_enabled: row.syncEnabled,
     last_synced_at: isoOrNull(row.lastSyncedAt),
+    auto: (row.auto as MoodleCourseLink['auto']) ?? null,
+    module_removable: removable,
     created_at: iso(row.createdAt),
     updated_at: iso(row.updatedAt),
   };
@@ -90,15 +100,63 @@ async function requireModule(db: DbOrTx, moduleId: string): Promise<void> {
 
 // ---------- Kurszuordnung (F-MDL-03) ----------
 
+/** Automatik (#141) und Zuordnung von Hand laufen nacheinander. Die Sperre gilt bis zum Ende der Transaktion */
+export async function lockAutoAssign(tx: Tx): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(${MOODLE_AUTO_LOCK_KEY})`);
+}
+
+export type CourseDecision = 'auto' | 'manuell' | 'geloest' | 'entfernt';
+
+/**
+ * Entscheidung über einen Kurs festhalten (#141): Danach behandelt die Automatik ihn nie wieder. `overwrite`: eine
+ * frühere Entscheidung ersetzen („Lösen“, „Modul entfernen“), sonst bleibt sie stehen.
+ */
+export async function recordDecision(
+  tx: Tx,
+  courseId: number,
+  reason: CourseDecision,
+  overwrite = true,
+): Promise<void> {
+  const insert = tx
+    .insert(moodleCourseDecided)
+    .values({ id: uuidv7(), userId: SINGLE_USER_ID, moodleCourseId: courseId, reason });
+  await (overwrite
+    ? insert.onConflictDoUpdate({ target: moodleCourseDecided.moodleCourseId, set: { reason } })
+    : insert.onConflictDoNothing({ target: moodleCourseDecided.moodleCourseId }));
+}
+
+/**
+ * Lässt sich das Modul der Zuordnung mit „Modul entfernen“ in den Papierkorb legen (#141)? Nur ein automatisch
+ * angelegtes Modul, das noch leer ist: keine Session, keine beschriebene Seite, kein eigenes Notizbuch, kein Material
+ * außer dem aus Moodle übernommenen, kein von Hand zugeordneter Termin und kein weiterer Moodle-Kurs. Für Abfragen
+ * mit `moodle_course_link`.
+ */
+export function linkRemovable(): SQL<boolean> {
+  const moduleId = moodleCourseLink.moduleId;
+  return sql<boolean>`(${moodleCourseLink.auto} IS NOT DISTINCT FROM 'angelegt'
+    AND NOT EXISTS (SELECT 1 FROM session s WHERE s.module_id = ${moduleId} AND s.deleted_at IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM notebook n WHERE n.module_id = ${moduleId} AND n.deleted_at IS NULL AND n.kind = 'frei')
+    AND NOT EXISTS (SELECT 1 FROM page p JOIN notebook n ON n.id = p.notebook_id
+      WHERE n.module_id = ${moduleId} AND p.deleted_at IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM slide_deck d WHERE d.module_id = ${moduleId} AND d.deleted_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM moodle_item i WHERE i.slide_deck_id = d.id))
+    AND NOT EXISTS (SELECT 1 FROM exercise_sheet e WHERE e.module_id = ${moduleId} AND e.deleted_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM moodle_item i WHERE i.exercise_sheet_id = e.id))
+    AND NOT EXISTS (SELECT 1 FROM calendar_event c WHERE c.module_id = ${moduleId}
+      AND c.assigned_by = 'manuell' AND c.deleted_at IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM moodle_course_link o WHERE o.module_id = ${moduleId}
+      AND o.moodle_course_id <> ${moodleCourseLink.moodleCourseId}))`;
+}
+
 /** Alle Zuordnungen, auch zu gelöschten Modulen nicht (die fallen weg, bis das Modul wiederhergestellt ist) */
 export async function listLinks(db: DbOrTx): Promise<MoodleCourseLink[]> {
   const rows = await db
-    .select({ link: moodleCourseLink })
+    .select({ link: moodleCourseLink, removable: linkRemovable() })
     .from(moodleCourseLink)
     .innerJoin(courseModule, eq(courseModule.id, moodleCourseLink.moduleId))
     .where(notDeleted(courseModule))
     .orderBy(asc(moodleCourseLink.moodleCourseId));
-  return rows.map((row) => toApiLink(row.link));
+  return rows.map((row) => toApiLink(row.link, row.removable === true));
 }
 
 /** Zuordnungen, die abgeglichen werden: Abgleich an, Modul nicht gelöscht. Optional nur bestimmte Kurse */
@@ -120,7 +178,8 @@ export async function activeLinks(db: DbOrTx, courseIds: readonly number[] | nul
 
 /**
  * Zuordnung bestätigen oder ändern. Wechselt das Modul, ziehen die Fristen des Kurses mit. Schon übernommene
- * Foliensätze und Blätter bleiben im alten Modul (sie gehören dem Nutzer).
+ * Foliensätze und Blätter bleiben im alten Modul (sie gehören dem Nutzer). Wechselt das Modul, gilt die Zuordnung
+ * als von Hand (`auto = NULL`). Nur der Schalter „Abgleichen“ lässt den Vermerk der Automatik stehen.
  */
 export async function putLink(
   db: Db,
@@ -128,6 +187,7 @@ export async function putLink(
   input: { module_id: string; sync_enabled?: boolean | undefined },
 ): Promise<MoodleCourseLink> {
   return db.transaction(async (tx) => {
+    await lockAutoAssign(tx);
     await requireModule(tx, input.module_id);
     const [row] = await tx
       .insert(moodleCourseLink)
@@ -142,22 +202,35 @@ export async function putLink(
         target: moodleCourseLink.moodleCourseId,
         set: {
           moduleId: input.module_id,
+          // Beide Ausdrücke sehen die alte Zeile: gleiches Modul → Vermerk bleibt, anderes → von Hand
+          auto: sql`CASE WHEN ${moodleCourseLink.moduleId} = ${input.module_id}::uuid THEN ${moodleCourseLink.auto} ELSE NULL END`,
           ...(input.sync_enabled === undefined ? {} : { syncEnabled: input.sync_enabled }),
         },
       })
       .returning();
     if (!row) throw new Error('Zuordnung wurde nicht gespeichert');
+    // Von Hand zugeordnet: die Automatik fasst den Kurs nie an, auch wenn das Modul später endgültig gelöscht wird.
+    // Eine frühere Entscheidung (auto, geloest, entfernt) bleibt stehen
+    await recordDecision(tx, courseId, 'manuell', false);
+    const [removable] = await tx
+      .select({ value: linkRemovable() })
+      .from(moodleCourseLink)
+      .where(eq(moodleCourseLink.id, row.id));
     await tx
       .update(moodleDeadline)
       .set({ moduleId: input.module_id, exerciseSheetId: null })
       .where(and(eq(moodleDeadline.moodleCourseId, courseId), ne(moodleDeadline.moduleId, input.module_id)));
-    return toApiLink(row);
+    return toApiLink(row, removable?.value === true);
   });
 }
 
-/** Zuordnung lösen. Die Fristen des Kurses fallen weg, Dateien und übernommenes Material bleiben */
+/**
+ * Zuordnung lösen. Die Fristen des Kurses fallen weg, Dateien und übernommenes Material bleiben. Die Entscheidung
+ * gilt: Die Automatik ordnet den Kurs danach nicht wieder zu (#141), von Hand geht es weiter.
+ */
 export async function deleteLink(db: Db, courseId: number): Promise<void> {
   await db.transaction(async (tx) => {
+    await lockAutoAssign(tx);
     const removed = await tx
       .delete(moodleCourseLink)
       .where(eq(moodleCourseLink.moodleCourseId, courseId))
@@ -166,11 +239,12 @@ export async function deleteLink(db: Db, courseId: number): Promise<void> {
       throw new HttpError(404, 'moodle_link_not_found', 'Dieser Kurs ist keinem Modul zugeordnet.');
     }
     await tx.delete(moodleDeadline).where(eq(moodleDeadline.moodleCourseId, courseId));
+    await recordDecision(tx, courseId, 'geloest');
   });
 }
 
 /** Heute als `YYYY-MM-DD` in der Zeitzone der Kursdaten */
-function todayIn(timeZone: string, now: Date): string {
+export function todayIn(timeZone: string, now: Date): string {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',

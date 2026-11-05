@@ -63,6 +63,8 @@ const TABLES = [
   'transcript',
   'transcript_segment',
   'slide_segment',
+  // Automatische Kurszuordnung (#141)
+  'moodle_course_decided',
 ];
 
 /** Phase-1-Tabellen ohne die Pflichtfelder aus 03 §1 (Struktur genau nach VERTRAEGE §6.1) */

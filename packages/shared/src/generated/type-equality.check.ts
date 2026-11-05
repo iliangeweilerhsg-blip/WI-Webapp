@@ -114,6 +114,7 @@ const _MoodleActionRisk: Equal<z.infer<typeof Z.MoodleActionRiskSchema>, T.Moodl
 const _MoodleActivity: Equal<z.infer<typeof Z.MoodleActivitySchema>, T.MoodleActivity> = true;
 const _MoodleAssignment: Equal<z.infer<typeof Z.MoodleAssignmentSchema>, T.MoodleAssignment> = true;
 const _MoodleAssignmentList: Equal<z.infer<typeof Z.MoodleAssignmentListSchema>, T.MoodleAssignmentList> = true;
+const _MoodleAutoAssignResult: Equal<z.infer<typeof Z.MoodleAutoAssignResultSchema>, T.MoodleAutoAssignResult> = true;
 const _MoodleCompletion: Equal<z.infer<typeof Z.MoodleCompletionSchema>, T.MoodleCompletion> = true;
 const _MoodleConnectionState: Equal<z.infer<typeof Z.MoodleConnectionStateSchema>, T.MoodleConnectionState> = true;
 const _MoodleCourse: Equal<z.infer<typeof Z.MoodleCourseSchema>, T.MoodleCourse> = true;
@@ -136,6 +137,7 @@ const _MoodleItem: Equal<z.infer<typeof Z.MoodleItemSchema>, T.MoodleItem> = tru
 const _MoodleItemKind: Equal<z.infer<typeof Z.MoodleItemKindSchema>, T.MoodleItemKind> = true;
 const _MoodleItemList: Equal<z.infer<typeof Z.MoodleItemListSchema>, T.MoodleItemList> = true;
 const _MoodleItemUpdate: Equal<z.infer<typeof Z.MoodleItemUpdateSchema>, T.MoodleItemUpdate> = true;
+const _MoodleLinkAuto: Equal<z.infer<typeof Z.MoodleLinkAutoSchema>, T.MoodleLinkAuto> = true;
 const _MoodleNotification: Equal<z.infer<typeof Z.MoodleNotificationSchema>, T.MoodleNotification> = true;
 const _MoodleNotificationList: Equal<z.infer<typeof Z.MoodleNotificationListSchema>, T.MoodleNotificationList> = true;
 const _MoodlePost: Equal<z.infer<typeof Z.MoodlePostSchema>, T.MoodlePost> = true;

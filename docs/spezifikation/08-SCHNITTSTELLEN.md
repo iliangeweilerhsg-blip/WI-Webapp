@@ -443,12 +443,14 @@ Der Abgleich läuft **im Core** (er braucht den Token), nicht im Worker. Für je
 
 | Tabelle | Inhalt |
 |---|---|
-| `moodle_course_link` | `module_id`, `moodle_course_id` (eindeutig), `sync_enabled`, `last_synced_at` |
+| `moodle_course_link` | `module_id`, `moodle_course_id` (eindeutig), `sync_enabled`, `last_synced_at`, `auto` (#141) |
+| `moodle_course_decided` | `moodle_course_id` (eindeutig), `reason`: schon entschieden, die Automatik behandelt jeden Kurs genau einmal (#141) |
 | `moodle_item` | `moodle_course_id`, `cmid`, `file_ref` (eindeutig), `timemodified`, `size_bytes`, `sha256`, `kind` (`folien`/`uebung`/`ignoriert`/`offen`), `slide_deck_id?`, `exercise_sheet_id?`, `removed_in_moodle_at?` |
 | `moodle_deadline` | `moodle_event_id` bzw. `assignment_id`, `module_id`, `name`, `due_at`, `exercise_sheet_id?` |
 
 Ergänzende Spalten, Endpunkte und Ablauf: VERTRAEGE §17. Kurz:
-- **Zuordnung (F-MDL-03):** `GET /moodle/links`, `PUT`/`DELETE /moodle/links/{course_id}`. Ein Vorschlag ist keine Zuordnung. Kurse, die mehr als 30 Tage vor dem Beginn des aktuellen Semesters starten (`SEMESTER_START_TOLERANCE_DAYS`), gelten als `alt` und werden wie organisatorische Kurse nicht vorgeschlagen.
+- **Zuordnung (F-MDL-03):** `GET /moodle/links`, `PUT`/`DELETE /moodle/links/{course_id}`, `DELETE /moodle/links/{course_id}/module` („Modul entfernen“), `POST /moodle/auto-assign` (automatische Zuordnung). Ein Vorschlag ist keine Zuordnung.
+- **Automatische Zuordnung (#141, Abweichung von F-MDL-03 auf Wunsch des Owners):** Beim Abgleich und auf `POST /moodle/auto-assign` (Web-App beim Öffnen von Einstellungen › Moodle) werden aktuelle Kurse ohne Zuordnung sicher passenden Modulen zugeordnet bzw. bekommen ein neues Modul im aktuellen Semester. Unsicher oder mehrdeutig: keine Automatik. Jeder Kurs wird genau einmal behandelt. Ohne aktuelles Semester: nichts. „Lösen“ gilt dauerhaft. Details: VERTRAEGE §17.7. Kurse, die mehr als 30 Tage vor dem Beginn des aktuellen Semesters starten (`SEMESTER_START_TOLERANCE_DAYS`), gelten als `alt` und werden wie organisatorische Kurse nicht vorgeschlagen.
 - **Abgleich:** `GET`/`POST /moodle/sync`, Ergebnis `MoodleSyncStatus`. Immer nur ein Lauf gleichzeitig. Beim Beenden des Core bricht er zwischen zwei Dateien ab.
 - **Inbox:** bis Phase 2 über `moodle_item.kind = offen` (`GET /moodle/items?kind=offen`, Entscheidung per `PATCH /moodle/items/{id}`). Danach wechselt sie zu `inbox_item`. Musterlösungen landen in der Inbox, nicht als Übungsblatt.
 - **Fristen:** `GET /moodle/synced-deadlines`.

@@ -576,6 +576,20 @@ class SubmissionType(StrEnum):
     onlinetext = 'onlinetext'
 
 
+class MoodleAutoAssignResult(BaseModel):
+    """
+    Antwort von POST /moodle/auto-assign (#141): was die automatische Kurszuordnung in diesem Lauf getan hat
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    assigned: StrictInt = Field(
+        ..., description='Kurse, die einem bestehenden Modul zugeordnet wurden', ge=0
+    )
+    created: StrictInt = Field(..., description='Neu angelegte Module', ge=0)
+
+
 class MoodleCompletion(StrEnum):
     """
     Erledigt-Status einer Aktivität
@@ -717,6 +731,15 @@ class MoodleItemUpdate(BaseModel):
         extra='forbid',
     )
     kind: Kind
+
+
+class MoodleLinkAuto(StrEnum):
+    """
+    Automatische Zuordnung (#141): zugeordnet = eindeutig passendes Modul, angelegt = Modul aus dem Kursnamen angelegt
+    """
+
+    zugeordnet = 'zugeordnet'
+    angelegt = 'angelegt'
 
 
 class ParentId(RootModel[StrictInt]):
@@ -2376,7 +2399,7 @@ class MoodleActionPreview(BaseModel):
 
 class MoodleCourse(BaseModel):
     """
-    Kurs, in den der Nutzer eingeschrieben ist. module_id: bestätigte Zuordnung zu einem Modul (F-MDL-03, T1-23)
+    Kurs, in den der Nutzer eingeschrieben ist. module_id: Zuordnung zu einem Modul, von Hand oder automatisch (F-MDL-03, T1-23, #141)
     """
 
     model_config = ConfigDict(
@@ -2399,7 +2422,7 @@ class MoodleCourse(BaseModel):
 
 class MoodleCourseLink(BaseModel):
     """
-    Bestätigte Zuordnung Moodle-Kurs → Modul (F-MDL-03, 08 §9.4 moodle_course_link)
+    Zuordnung Moodle-Kurs → Modul, von Hand bestätigt oder automatisch (F-MDL-03, #141, 08 §9.4 moodle_course_link)
     """
 
     model_config = ConfigDict(
@@ -2417,6 +2440,14 @@ class MoodleCourseLink(BaseModel):
     )
     last_synced_at: AwareDatetime | None = Field(
         ..., description='Letzter erfolgreicher Abgleich dieses Kurses'
+    )
+    auto: MoodleLinkAuto | None = Field(
+        ...,
+        description='Wie die Zuordnung entstand: null = von Hand, sonst automatisch (#141)',
+    )
+    module_removable: StrictBool = Field(
+        ...,
+        description='true nur bei auto = angelegt, solange das Modul leer ist: DELETE /moodle/links/{course_id}/module legt es in den Papierkorb',
     )
     created_at: AwareDatetime = Field(
         ..., description='ISO 8601, UTC', title='Timestamp'
@@ -5941,6 +5972,9 @@ class SchemaBundle(BaseModel):
     MoodleAssignmentList_1: MoodleAssignmentList | None = Field(
         None, alias='MoodleAssignmentList'
     )
+    MoodleAutoAssignResult_1: MoodleAutoAssignResult | None = Field(
+        None, alias='MoodleAutoAssignResult'
+    )
     MoodleCompletion_1: MoodleCompletion | None = Field(None, alias='MoodleCompletion')
     MoodleConnectionState_1: MoodleConnectionState | None = Field(
         None, alias='MoodleConnectionState'
@@ -5977,6 +6011,7 @@ class SchemaBundle(BaseModel):
     MoodleItemKind_1: MoodleItemKind | None = Field(None, alias='MoodleItemKind')
     MoodleItemList_1: MoodleItemList | None = Field(None, alias='MoodleItemList')
     MoodleItemUpdate_1: MoodleItemUpdate | None = Field(None, alias='MoodleItemUpdate')
+    MoodleLinkAuto_1: MoodleLinkAuto | None = Field(None, alias='MoodleLinkAuto')
     MoodleNotification_1: MoodleNotification | None = Field(
         None, alias='MoodleNotification'
     )

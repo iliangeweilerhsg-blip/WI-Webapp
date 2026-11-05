@@ -94,6 +94,10 @@ interface MoodleFake {
   deadlines: MoodleSyncedDeadline[];
   /** Verzögert schreibende Anfragen (Doppelklick-Tests) */
   delayMs: number;
+  /** POST /moodle/auto-assign wie im Core (#141): ändert den Stand und liefert, was geschah */
+  onAutoAssign?: () => { assigned: number; created: number };
+  /** Verzögert GET /moodle/courses (Moodle ist langsamer als die lokalen Endpunkte) */
+  coursesDelayMs?: number;
 }
 
 /** Moodle-Endpunkte (VERTRAEGE §17) über dem Fake-Core */
@@ -124,6 +128,13 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
       const url = new URL(String(input), 'http://localhost');
       const path = url.pathname.replace(/^\/api\/v1/, '');
       const method = init?.method ?? 'GET';
+      const restore = /^\/trash\/([0-9a-f-]{36})\/restore$/.exec(path);
+      if (restore && method === 'POST') {
+        core.requests.push({ method, path, body: null, headers: {} });
+        const module = core.modules.find((m) => m.id === restore[1]);
+        if (module) module.deleted_at = null;
+        return json({ id: restore[1], kind: 'module', restored_count: 1 });
+      }
       if (!path.startsWith('/moodle/')) return inner(input, init);
       const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null;
       core.requests.push({ method, path: path + url.search, body, headers: {} });
@@ -135,6 +146,7 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
       }
       if (fake.delayMs > 0 && method !== 'GET') await new Promise((r) => setTimeout(r, fake.delayMs));
       if (path === '/moodle/courses') {
+        if (fake.coursesDelayMs) await new Promise((r) => setTimeout(r, fake.coursesDelayMs));
         if (fake.status.state === 'nicht_eingerichtet') {
           return json({ error: { code: 'moodle_not_configured', message: 'x' } }, 503);
         }
@@ -146,15 +158,38 @@ function installMoodle(core: FakeCore, initial: Partial<MoodleFake> = {}): Moodl
         }
         return json({ items: fake.courses });
       }
+      if (path === '/moodle/auto-assign' && method === 'POST') {
+        const automatic = fake.onAutoAssign;
+        fake.onAutoAssign = undefined;
+        return json(automatic?.() ?? { assigned: 0, created: 0 });
+      }
       if (path === '/moodle/links') return json({ items: fake.links });
+      const removeModule = /^\/moodle\/links\/(\d+)\/module$/.exec(path);
+      if (removeModule && method === 'DELETE') {
+        const id = Number(removeModule[1]);
+        const target = fake.links.find((l) => l.moodle_course_id === id);
+        if (!target?.module_removable) {
+          return json({ error: { code: 'moodle_module_not_removable', message: 'x' } }, 409);
+        }
+        // Wie im Core: Modul in den Papierkorb, die Zuordnung bleibt (unsichtbar) stehen
+        const removed = core.modules.find((m) => m.id === target.module_id);
+        if (removed) removed.deleted_at = NOW;
+        fake.links = fake.links.filter((l) => l.moodle_course_id !== id);
+        fake.courses = fake.courses.map((c) => (c.moodle_id === id ? { ...c, module_id: null } : c));
+        return new Response(null, { status: 204 });
+      }
       const link = /^\/moodle\/links\/(\d+)$/.exec(path);
       if (link && method === 'PUT') {
         const id = Number(link[1]);
+        const before = fake.links.find((l) => l.moodle_course_id === id);
+        const same = before?.module_id === body?.module_id;
         const created: MoodleCourseLink = {
           moodle_course_id: id,
           module_id: String(body?.module_id),
           sync_enabled: body?.sync_enabled === undefined ? true : Boolean(body.sync_enabled),
           last_synced_at: null,
+          auto: same ? (before?.auto ?? null) : null,
+          module_removable: same ? (before?.module_removable ?? false) : false,
           created_at: NOW,
           updated_at: NOW,
         };
@@ -346,6 +381,8 @@ describe('Einstellungen › Moodle (F-MDL-03)', () => {
     module_id: DBS.id,
     sync_enabled: true,
     last_synced_at: '2026-11-05T11:00:00Z',
+    auto: null,
+    module_removable: false,
     created_at: NOW,
     updated_at: NOW,
   };
@@ -460,6 +497,178 @@ describe('Einstellungen › Moodle (F-MDL-03)', () => {
     await openMoodleTab();
     expect(await screen.findByText('Moodle ist noch nicht eingerichtet')).toBeInTheDocument();
     expect(core.requests.some((r) => r.path === '/moodle/courses')).toBe(false);
+  });
+});
+
+describe('Einstellungen › Moodle: automatische Zuordnung (#141)', () => {
+  const MARKETING = makeModule({
+    id: '0190f6a2-0000-7000-8000-0000000000c1',
+    name: 'Einführung in das Marketing',
+    short_name: 'EiM',
+    color: 'mod-04',
+  });
+  const autoLink = (overrides: Partial<MoodleCourseLink>): MoodleCourseLink => ({
+    moodle_course_id: 2001,
+    module_id: MARKETING.id,
+    sync_enabled: true,
+    last_synced_at: null,
+    auto: 'angelegt',
+    module_removable: true,
+    created_at: NOW,
+    updated_at: NOW,
+    ...overrides,
+  });
+  const marketing = course({
+    moodle_id: 2001,
+    full_name: 'Einführung in das Marketing WiSe 26/27',
+    short_name: 'EiM-WS2627',
+    module_id: MARKETING.id,
+  });
+  const wi = course({
+    moodle_id: 2005,
+    full_name: 'Einführung in die Wirtschaftsinformatik WiSe 26/27',
+    short_name: 'EWI WS26/27',
+    module_id: DBS.id,
+  });
+  const rowOf = (name: string) => screen.getByText(name).closest('li') as HTMLElement;
+
+  it('zeigt den Vermerk je Zeile, „Modul entfernen“ nur bei leeren, automatisch angelegten Modulen', async () => {
+    core.modules.push(MARKETING);
+    installMoodle(core, {
+      courses: [marketing, wi],
+      links: [
+        autoLink({}),
+        autoLink({ moodle_course_id: 2005, module_id: DBS.id, auto: 'zugeordnet', module_removable: false }),
+      ],
+    });
+    await openMoodleTab();
+    await screen.findByText(marketing.full_name);
+    await waitFor(() =>
+      expect(within(rowOf(marketing.full_name)).getByText(/Modul automatisch angelegt/)).toBeInTheDocument(),
+    );
+    expect(within(rowOf(marketing.full_name)).getByRole('combobox')).toHaveValue(MARKETING.id);
+    expect(
+      within(rowOf(marketing.full_name)).getByRole('button', { name: 'Modul entfernen' }),
+    ).toBeInTheDocument();
+    expect(within(rowOf(wi.full_name)).getByText(/automatisch zugeordnet/)).toBeInTheDocument();
+    expect(within(rowOf(wi.full_name)).queryByRole('button', { name: 'Modul entfernen' })).toBeNull();
+    expect(within(rowOf(wi.full_name)).getByRole('button', { name: 'Lösen' })).toBeInTheDocument();
+    // Mit aktuellem Semester kein Hinweis
+    expect(screen.queryByText(/zuerst das/)).toBeNull();
+  });
+
+  it('„Modul entfernen“ legt das Modul in den Papierkorb, „Rückgängig“ holt es zurück', async () => {
+    core.modules.push(MARKETING);
+    const fake = installMoodle(core, { courses: [marketing], links: [autoLink({})] });
+    await openMoodleTab();
+    const user = userEvent.setup();
+    await screen.findByText(marketing.full_name);
+    await user.click(
+      await within(rowOf(marketing.full_name)).findByRole('button', { name: 'Modul entfernen' }),
+    );
+    await waitFor(() =>
+      expect(core.requests.some((r) => r.method === 'DELETE' && r.path === '/moodle/links/2001/module')).toBe(
+        true,
+      ),
+    );
+    expect(fake.links).toHaveLength(0);
+    expect(
+      await screen.findByText(/Einführung in das Marketing entfernt\. Das Modul liegt im Papierkorb/),
+    ).toBeInTheDocument();
+    await waitFor(() => expect(within(rowOf(marketing.full_name)).getByRole('combobox')).toHaveValue(''));
+    await user.click(screen.getByRole('button', { name: 'Rückgängig' }));
+    await waitFor(() =>
+      expect(
+        core.requests.some((r) => r.method === 'POST' && r.path === `/trash/${MARKETING.id}/restore`),
+      ).toBe(true),
+    );
+  });
+
+  it('stößt beim Öffnen einmal die Automatik an und lädt danach Zuordnungen und Module neu', async () => {
+    const fake = installMoodle(core, { courses: [{ ...marketing, module_id: null }] });
+    // Wie der Core: POST /moodle/auto-assign legt das Modul samt Zuordnung an
+    fake.onAutoAssign = () => {
+      core.modules.push(MARKETING);
+      fake.links = [autoLink({})];
+      fake.courses = [marketing];
+      return { assigned: 0, created: 1 };
+    };
+    await openMoodleTab();
+    await screen.findByText(marketing.full_name);
+    await waitFor(() =>
+      expect(within(rowOf(marketing.full_name)).getByText(/Modul automatisch angelegt/)).toBeInTheDocument(),
+    );
+    await waitFor(() =>
+      expect(
+        within(rowOf(marketing.full_name)).getByRole('option', { name: MARKETING.name }),
+      ).toBeInTheDocument(),
+    );
+    expect(within(rowOf(marketing.full_name)).getByRole('combobox')).toHaveValue(MARKETING.id);
+    expect(within(rowOf(marketing.full_name)).queryByRole('button', { name: 'Zuordnen' })).toBeNull();
+    expect(core.requests.filter((r) => r.path === '/moodle/auto-assign')).toHaveLength(1);
+    // Die Kursliste selbst schreibt nichts: Sie ist ein reines GET
+    expect(core.requests.filter((r) => r.path === '/moodle/courses').every((r) => r.method === 'GET')).toBe(
+      true,
+    );
+  });
+
+  it('ohne Einrichtung kein Anstoß der Automatik', async () => {
+    installMoodle(core, {
+      status: {
+        state: 'nicht_eingerichtet',
+        site_url: null,
+        site_name: null,
+        user_fullname: null,
+        token_valid_until: null,
+        checked_at: null,
+      },
+    });
+    await openMoodleTab();
+    expect(await screen.findByText('Moodle ist noch nicht eingerichtet')).toBeInTheDocument();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(core.requests.some((r) => r.path === '/moodle/auto-assign')).toBe(false);
+  });
+
+  it('ordnet der Abgleich zu, während die Seite offen ist, folgt die Zeile', async () => {
+    const fake = installMoodle(core, { courses: [{ ...marketing, module_id: null }] });
+    await openMoodleTab();
+    await screen.findByText(marketing.full_name);
+    expect(within(rowOf(marketing.full_name)).getByRole('combobox')).toHaveValue('');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Jetzt abgleichen' }));
+    await screen.findByRole('button', { name: 'Gleicht ab …' });
+    // Der Abgleich legt das Modul an und ordnet zu, danach lädt die Seite neu (Abfrage alle 2 s). Moodle antwortet
+    // langsamer als die lokalen Zuordnungen: Die neuen Module müssen trotzdem nachgeladen werden
+    fake.coursesDelayMs = 150;
+    core.modules.push(MARKETING);
+    fake.links = [autoLink({})];
+    fake.courses = [marketing];
+    fake.sync = { ...fake.sync, state: 'bereit' };
+    await waitFor(
+      () =>
+        expect(
+          within(rowOf(marketing.full_name)).getByText(/Modul automatisch angelegt/),
+        ).toBeInTheDocument(),
+      { timeout: 4000 },
+    );
+    await waitFor(() =>
+      expect(within(rowOf(marketing.full_name)).getByRole('combobox')).toHaveValue(MARKETING.id),
+    );
+    expect(within(rowOf(marketing.full_name)).queryByRole('button', { name: 'Zuordnen' })).toBeNull();
+  }, 10_000);
+
+  it.each([
+    ['ohne Semester', [], 'Lege zuerst das Semester an.'],
+    ['ohne aktuelles Semester', [makeSemester({ is_current: false })], 'Wähle zuerst das aktuelle Semester.'],
+  ])('%s: ruhiger Hinweis mit Link zu den Semestern', async (_, semesters, text) => {
+    core.semesters = semesters;
+    installMoodle(core, { courses: [{ ...marketing, module_id: null }] });
+    await openMoodleTab();
+    const hint = (await screen.findByText(text)).closest('p') as HTMLElement;
+    expect(hint).toHaveAttribute('role', 'status');
+    expect(within(hint).getByRole('link', { name: 'Zu den Semestern' })).toHaveAttribute(
+      'href',
+      '/einstellungen?bereich=allgemein',
+    );
   });
 });
 
@@ -624,6 +833,8 @@ describe('Fristen', () => {
           module_id: DBS.id,
           sync_enabled: true,
           last_synced_at: '2026-11-05T11:00:00Z',
+          auto: null,
+          module_removable: false,
           created_at: NOW,
           updated_at: NOW,
         },
@@ -652,6 +863,8 @@ describe('Fristen', () => {
           module_id: DBS.id,
           sync_enabled: true,
           last_synced_at: null,
+          auto: null,
+          module_removable: false,
           created_at: NOW,
           updated_at: NOW,
         },

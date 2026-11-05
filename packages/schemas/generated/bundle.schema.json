@@ -329,6 +329,9 @@
     "MoodleAssignmentList": {
       "$ref": "#/$defs/MoodleAssignmentList"
     },
+    "MoodleAutoAssignResult": {
+      "$ref": "#/$defs/MoodleAutoAssignResult"
+    },
     "MoodleCompletion": {
       "$ref": "#/$defs/MoodleCompletion"
     },
@@ -394,6 +397,9 @@
     },
     "MoodleItemUpdate": {
       "$ref": "#/$defs/MoodleItemUpdate"
+    },
+    "MoodleLinkAuto": {
+      "$ref": "#/$defs/MoodleLinkAuto"
     },
     "MoodleNotification": {
       "$ref": "#/$defs/MoodleNotification"
@@ -4464,6 +4470,28 @@
         }
       }
     },
+    "MoodleAutoAssignResult": {
+      "title": "MoodleAutoAssignResult",
+      "type": "object",
+      "description": "Antwort von POST /moodle/auto-assign (#141): was die automatische Kurszuordnung in diesem Lauf getan hat",
+      "required": [
+        "assigned",
+        "created"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "assigned": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Kurse, die einem bestehenden Modul zugeordnet wurden"
+        },
+        "created": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Neu angelegte Module"
+        }
+      }
+    },
     "MoodleCompletion": {
       "title": "MoodleCompletion",
       "type": "string",
@@ -4489,7 +4517,7 @@
     "MoodleCourse": {
       "title": "MoodleCourse",
       "type": "object",
-      "description": "Kurs, in den der Nutzer eingeschrieben ist. module_id: bestätigte Zuordnung zu einem Modul (F-MDL-03, T1-23)",
+      "description": "Kurs, in den der Nutzer eingeschrieben ist. module_id: Zuordnung zu einem Modul, von Hand oder automatisch (F-MDL-03, T1-23, #141)",
       "required": [
         "moodle_id",
         "short_name",
@@ -4611,12 +4639,14 @@
     "MoodleCourseLink": {
       "title": "MoodleCourseLink",
       "type": "object",
-      "description": "Bestätigte Zuordnung Moodle-Kurs → Modul (F-MDL-03, 08 §9.4 moodle_course_link)",
+      "description": "Zuordnung Moodle-Kurs → Modul, von Hand bestätigt oder automatisch (F-MDL-03, #141, 08 §9.4 moodle_course_link)",
       "required": [
         "moodle_course_id",
         "module_id",
         "sync_enabled",
         "last_synced_at",
+        "auto",
+        "module_removable",
         "created_at",
         "updated_at"
       ],
@@ -4644,6 +4674,21 @@
             }
           ],
           "description": "Letzter erfolgreicher Abgleich dieses Kurses"
+        },
+        "auto": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MoodleLinkAuto"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Wie die Zuordnung entstand: null = von Hand, sonst automatisch (#141)"
+        },
+        "module_removable": {
+          "type": "boolean",
+          "description": "true nur bei auto = angelegt, solange das Modul leer ist: DELETE /moodle/links/{course_id}/module legt es in den Papierkorb"
         },
         "created_at": {
           "$ref": "#/$defs/Timestamp"
@@ -5285,6 +5330,15 @@
           ]
         }
       }
+    },
+    "MoodleLinkAuto": {
+      "title": "MoodleLinkAuto",
+      "type": "string",
+      "enum": [
+        "zugeordnet",
+        "angelegt"
+      ],
+      "description": "Automatische Zuordnung (#141): zugeordnet = eindeutig passendes Modul, angelegt = Modul aus dem Kursnamen angelegt"
     },
     "MoodleNotification": {
       "title": "MoodleNotification",

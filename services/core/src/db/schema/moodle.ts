@@ -23,10 +23,35 @@ export const moodleCourseLink = pgTable(
     syncEnabled: boolean('sync_enabled').notNull().default(true),
     /** Letzter erfolgreicher Abgleich dieses Kurses */
     lastSyncedAt: timestamptz('last_synced_at'),
+    /**
+     * Automatische Zuordnung (#141): `zugeordnet` = eindeutig passendes Modul, `angelegt` = Modul aus dem Kursnamen
+     * angelegt. NULL = von Hand. Wechselt das Modul von Hand, wird es NULL
+     */
+    auto: text('auto'),
   },
   (t) => [
     uniqueIndex('moodle_course_link_course_uq').on(t.moodleCourseId),
     index('moodle_course_link_module_idx').on(t.moduleId),
+    check('moodle_course_link_auto_chk', sql`${t.auto} IS NULL OR ${t.auto} IN ('zugeordnet','angelegt')`),
+  ],
+);
+
+/**
+ * Kurse, über die schon entschieden ist (#141): Die automatische Zuordnung behandelt jeden Kurs genau einmal und fasst
+ * ihn danach nie wieder an, auch wenn das Modul endgültig gelöscht wird. `reason`: `auto` (automatisch zugeordnet
+ * bzw. angelegt), `manuell` (von Hand zugeordnet), `geloest` („Lösen“), `entfernt` („Modul entfernen“). Von Hand
+ * zuordnen geht immer. Einstellung, kein Inhalt (kein Papierkorb).
+ */
+export const moodleCourseDecided = pgTable(
+  'moodle_course_decided',
+  {
+    ...baseColumns(),
+    moodleCourseId: moodleId('moodle_course_id').notNull(),
+    reason: text('reason').notNull(),
+  },
+  (t) => [
+    uniqueIndex('moodle_course_decided_course_uq').on(t.moodleCourseId),
+    check('moodle_course_decided_reason_chk', sql`${t.reason} IN ('auto','manuell','geloest','entfernt')`),
   ],
 );
 
