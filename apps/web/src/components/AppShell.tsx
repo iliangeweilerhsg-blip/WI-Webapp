@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { isMacPlatform, matchShortcut } from '../lib/shortcuts.ts';
 import { SIDEBAR_KEY } from '../lib/theme.tsx';
 import { SIDEBAR_AUTO_ATTR } from '../lib/theme-init.ts';
+import { useResumePendingUploads } from '../lib/recorder/useResumePendingUploads.ts';
 import { ErrorShelf } from '../lib/sync/ErrorShelf.tsx';
 import { OtherTabBanner } from '../lib/sync/OtherTabBanner.tsx';
 import { SyncProvider, useSyncClient } from '../lib/sync/SyncProvider.tsx';
@@ -30,6 +31,8 @@ export function AppShell({ children, syncClient }: { children: ReactNode; syncCl
 
 function Shell({ children }: { children: ReactNode }) {
   const sync = useSyncClient();
+  // Ungesendete Aufnahme-Chunks nachholen, ab dem App-Start und nur im Leader-Tab (Issue #115)
+  useResumePendingUploads(sync);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);

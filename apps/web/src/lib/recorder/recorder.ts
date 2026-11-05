@@ -73,6 +73,10 @@ export interface RecorderOptions {
   setInterval?: (fn: () => void, ms: number) => unknown;
   clearInterval?: (handle: unknown) => void;
   timesliceMs?: number;
+  /** Standard `true`. Nur der Leader-Tab lädt hoch (Issue #115): Folge-Tabs starten mit `false` (`setUploading`). */
+  uploadsEnabled?: boolean;
+  /** So lange wartet `getUserMedia` auf den Mikrofon-Dialog (Standard 30 s), danach gilt das Mikrofon als fehlend */
+  getUserMediaTimeoutMs?: number;
   /** Sprung zwischen Wanduhr und monotoner Uhr, ab dem ein Ruhezustand angenommen wird */
   sleepGapMs?: number;
 }
@@ -89,6 +93,10 @@ interface Run {
   stopped: Promise<void>;
   resolveStopped: () => void;
 }
+
+/** Aufnahmen, die in diesem Tab laufen (alle Recorder): der app-weite Nachlader darf sie nicht abschließen */
+const ACTIVE_RECORDINGS = new Set<string>();
+export const isRecordingActive = (id: string): boolean => ACTIVE_RECORDINGS.has(id);
 
 const INITIAL: UploaderStatus = { pendingChunks: 0, shelvedChunks: 0, offline: false, retryInMs: null };
 
@@ -140,6 +148,7 @@ export class AudioRecorder {
       isActive: (id) => this.activeIds.has(id),
       onChange: (upload) => this.patch({ upload }),
     });
+    if (options.uploadsEnabled === false) this.uploader.setEnabled(false);
     this.wake = createWakeLockHolder({
       navigator: options.navigator ?? (typeof navigator !== 'undefined' ? navigator : undefined),
       document: options.document ?? (typeof document !== 'undefined' ? document : undefined),
@@ -175,7 +184,33 @@ export class AudioRecorder {
   private getUserMedia(): Promise<MediaStream> {
     const get =
       this.o.getUserMedia ?? ((c: MediaStreamConstraints) => navigator.mediaDevices.getUserMedia(c));
-    return get(AUDIO_CONSTRAINTS);
+    const limit = this.o.getUserMediaTimeoutMs ?? 30_000;
+    return new Promise<MediaStream>((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        reject(Object.assign(new Error('Das Mikrofon antwortet nicht.'), { name: 'TimeoutError' }));
+      }, limit);
+      get(AUDIO_CONSTRAINTS).then(
+        (stream) => {
+          clearTimeout(timer);
+          if (settled) {
+            // Der Dialog wurde erst nach der Zeitgrenze beantwortet: Mikrofon sofort wieder freigeben
+            for (const track of stream.getTracks()) track.stop();
+            return;
+          }
+          settled = true;
+          resolve(stream);
+        },
+        (error) => {
+          clearTimeout(timer);
+          if (!settled) {
+            settled = true;
+            reject(error);
+          }
+        },
+      );
+    });
   }
 
   /** Mikrofon öffnen und aufnehmen. Die Aufnahme wird beim Core angelegt, auch erst später (offline erlaubt). */
@@ -193,9 +228,14 @@ export class AudioRecorder {
       this.adoptStream(await this.getUserMedia());
     } catch (cause) {
       const name = (cause as { name?: string } | null)?.name;
-      if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+      if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'TimeoutError') {
         this.patch({ micIssue: 'missing' });
-        this.fail('error', 'Es wurde kein Mikrofon gefunden. Schließe eines an.');
+        this.fail(
+          'error',
+          name === 'TimeoutError'
+            ? 'Das Mikrofon hat nicht geantwortet (Browser-Abfrage offen?).'
+            : 'Es wurde kein Mikrofon gefunden. Schließe eines an.',
+        );
       }
       if (name === 'NotAllowedError' || name === 'SecurityError') this.patch({ micIssue: 'denied' });
       this.fail(
@@ -283,6 +323,17 @@ export class AudioRecorder {
   /** Nach dem Neuladen: übrig gebliebene Aufnahmen weiter hochladen und abschließen */
   resumeUploads(): void {
     this.uploader.kick();
+  }
+
+  /** Leader-Rolle gewonnen bzw. verloren: nur der Leader lädt hoch */
+  setUploading(on: boolean): void {
+    this.uploader.setEnabled(on);
+  }
+
+  /** Stößt das Hochladen an und wartet höchstens `maxMs`, bis nichts mehr ansteht (beim Verlassen der Seite) */
+  async flushUploads(maxMs: number): Promise<void> {
+    this.uploader.kick();
+    await Promise.race([this.uploader.drain(), new Promise<void>((r) => setTimeout(r, maxMs))]);
   }
 
   retryUploadNow(): void {
@@ -392,6 +443,7 @@ export class AudioRecorder {
     };
     this.run = run;
     this.activeIds.add(meta.id);
+    ACTIVE_RECORDINGS.add(meta.id);
     this.patch({ recordingId: meta.id, chunkCount: 0, recordedMs: 0 });
     // Chunk-Verarbeitung wartet, bis die Metadaten in IndexedDB stehen
     this.chain = this.chain.then(() => this.store.putRecording(meta)).catch(() => undefined);
@@ -409,6 +461,7 @@ export class AudioRecorder {
           // schon beendet
         }
         this.activeIds.delete(meta.id);
+        ACTIVE_RECORDINGS.delete(meta.id);
         await this.chain;
         await this.store.deleteRecording(meta.id);
         this.fail('error', 'Der Core hat die Aufnahme abgelehnt. Läuft die Session?');
@@ -492,6 +545,7 @@ export class AudioRecorder {
       complete: { lastSeq: Math.max(0, (last?.nextSeq ?? 1) - 1), durationMs: last?.recordedMs ?? 0 },
     });
     this.activeIds.delete(run.meta.id);
+    ACTIVE_RECORDINGS.delete(run.meta.id);
     this.uploader.kick();
   }
 
