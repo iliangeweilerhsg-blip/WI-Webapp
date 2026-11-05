@@ -68,6 +68,9 @@
     "CalendarEventUpdate": {
       "$ref": "#/$defs/CalendarEventUpdate"
     },
+    "CalendarReassignResult": {
+      "$ref": "#/$defs/CalendarReassignResult"
+    },
     "CalendarSource": {
       "$ref": "#/$defs/CalendarSource"
     },
@@ -1334,6 +1337,28 @@
         }
       }
     },
+    "CalendarReassignResult": {
+      "title": "CalendarReassignResult",
+      "type": "object",
+      "description": "Antwort auf POST /calendar/reassign (lokal): Neuzuordnung aller Termine mit assigned_by=auto, z. B. nach dem Anlegen eines Moduls.",
+      "required": [
+        "changed",
+        "ohne_modul"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "changed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Termine, deren Modul oder Art sich geändert hat"
+        },
+        "ohne_modul": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Nicht abgesagte automatisch zugeordnete Termine ohne Modul danach"
+        }
+      }
+    },
     "CalendarSource": {
       "title": "CalendarSource",
       "type": "object",
@@ -2301,6 +2326,12 @@
         },
         "kind": {
           "$ref": "#/$defs/CalendarEventKind"
+        },
+        "short": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12,
+          "description": "Kürzel, wenn die Titel dasselbe Modul abgekürzt nennen (Stat I / Statistik I). Fehlt, wenn es keins gibt. Gehört in short_name des neuen Moduls, damit der Abgleich beide Schreibweisen zuordnet."
         },
         "event_count": {
           "type": "integer",

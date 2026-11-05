@@ -59,6 +59,7 @@ describe('Navigation', () => {
       'Heute',
       'Bibliothek',
       'Lernen',
+      'Kalender',
       'Planer',
       'Videos',
       'Inbox',
