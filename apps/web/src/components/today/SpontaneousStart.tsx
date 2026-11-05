@@ -11,6 +11,7 @@ import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import {
   ACTIVE_SESSION_KEY,
   createAndStartSession,
+  deleteSession,
   findActiveSession,
   isActive,
   readLastModuleId,
@@ -19,6 +20,7 @@ import {
   sessionHref,
   useActiveSession,
 } from '../../lib/sessions.ts';
+import { useToast } from '../../lib/toast.tsx';
 import { uuidv7 } from '../../lib/uuid.ts';
 
 const primary =
@@ -33,17 +35,30 @@ const secondary =
 function useSpontaneousStart(onSession?: (session: Session) => void) {
   const router = useRouter();
   const client = useQueryClient();
+  const toast = useToast();
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   // Dieselbe ID bei Wiederholung nach einem Fehler, damit keine verwaiste Session zurückbleibt
   const pending = useRef<{ moduleId: string; id: string } | null>(null);
 
+  // Eine angelegte, aber nie gestartete Session (Start gescheitert) räumt der Hook best effort wieder weg
+  function discard(entry: { id: string } | null) {
+    if (entry) void deleteSession(entry.id).catch(() => undefined);
+  }
+  useEffect(
+    () => () => {
+      if (!busyRef.current) discard(pending.current);
+    },
+    [],
+  );
+
   async function start(moduleId: string) {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
+    if (pending.current && pending.current.moduleId !== moduleId) discard(pending.current);
     const id = pending.current?.moduleId === moduleId ? pending.current.id : uuidv7();
     pending.current = { moduleId, id };
     try {
@@ -51,14 +66,24 @@ function useSpontaneousStart(onSession?: (session: Session) => void) {
       pending.current = null;
       rememberLastModuleId(moduleId);
       onSession?.(result.session);
-      if (result.ended_session) onSession?.(result.ended_session);
+      if (result.ended_session) {
+        onSession?.(result.ended_session);
+        toast.show({ message: 'Die laufende Session wurde beendet.' });
+      }
       void client.invalidateQueries({ queryKey: ACTIVE_SESSION_KEY });
       router.push(sessionHref(result.session.id));
     } catch (cause) {
-      if (cause instanceof ApiRequestError && cause.status === 409) {
+      // Die Session gibt es nicht (mehr): Beim nächsten Versuch mit neuer ID anlegen
+      if (cause instanceof ApiRequestError && cause.status === 404) pending.current = null;
+      if (
+        cause instanceof ApiRequestError &&
+        cause.status === 409 &&
+        cause.code !== 'session_transition_invalid'
+      ) {
         // Es läuft schon eine Session (session_one_active): dorthin führen statt einen Fehler zu zeigen
         const active = await findActiveSession().catch(() => null);
         if (active) {
+          discard(pending.current);
           pending.current = null;
           void client.invalidateQueries({ queryKey: ACTIVE_SESSION_KEY });
           router.push(sessionHref(active.id));

@@ -545,6 +545,17 @@ export function installFakeCore(
         return snapshot ? json(snapshot) : json({ error: { code: 'session_not_found', message: 'x' } }, 404);
       }
 
+      // DELETE /sessions/{id} (§7.2): weich löschen; 409 `session_active`, wenn sie läuft oder pausiert
+      if (sessionOne && method === 'DELETE') {
+        const found = core.sessions.find((x) => x.id === sessionOne[1] && !x.deleted_at);
+        if (!found) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        if (found.state === 'laeuft' || found.state === 'pausiert') {
+          return json({ error: { code: 'session_active', message: 'x' } }, 409);
+        }
+        found.deleted_at = new Date().toISOString();
+        return new Response(null, { status: 204 });
+      }
+
       // GET /notebooks?module_id (§7.4)
       if (path === '/notebooks' && method === 'GET') {
         const moduleId = url.searchParams.get('module_id');
