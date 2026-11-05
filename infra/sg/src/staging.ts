@@ -12,6 +12,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
+import { NEW_FILE_FLAGS, READ_FLAGS } from './nofollow.ts';
 
 /** Ein Stand lässt sich nicht verwenden. `reason` entspricht `RestoreTestReason` (docs/VERTRAEGE.md §13). */
 export class StandError extends Error {
@@ -45,16 +46,35 @@ export function makePrivateDir(dataDir: string, purpose: 'restore' | 'backup'): 
   return dir;
 }
 
+/** `src` ist keine reguläre Datei (FIFO, Gerät, Ordner): Fehlercode für `withVerifiedDump` */
+export const NOT_REGULAR = 'SG_NOT_REGULAR';
+
 /**
  * Liest `src` genau einmal und schreibt dabei die Kopie `dst` (0600, darf noch nicht existieren). Rückgabe: SHA-256
  * der gelesenen Bytes, also derselben Bytes, die in der Kopie stehen.
+ *
+ * Weder `src` noch `dst` werden über einen Symlink geöffnet (`O_NOFOLLOW`, Fehler `ELOOP`). `src` muss eine reguläre
+ * Datei sein: Eine FIFO oder ein Gerät im Ziel blockiert `open` nicht (`O_NONBLOCK`) und wird per `fstat`
+ * abgewiesen (Fehlercode `NOT_REGULAR`). `dst` entsteht exklusiv (`O_EXCL`). `guard` (vom `NoFollowWriter`) prüft den
+ * Zielordner vor dem Anlegen und danach.
  */
-export async function copyAndHash(src: string, dst: string): Promise<string> {
+export async function copyAndHash(
+  src: string,
+  dst: string,
+  guard?: { before: () => void; after: (info: { dev: number; ino: number }) => void },
+): Promise<string> {
   const hash = createHash('sha256');
-  const input = await open(src, 'r');
+  const input = await open(src, READ_FLAGS);
   try {
-    const output = await open(dst, 'wx', 0o600);
+    if (!(await input.stat()).isFile()) {
+      throw Object.assign(new Error(`${src.split('/').pop()} ist keine reguläre Datei.`), {
+        code: NOT_REGULAR,
+      });
+    }
+    guard?.before();
+    const output = await open(dst, NEW_FILE_FLAGS, 0o600);
     try {
+      guard?.after(await output.stat());
       const buffer = Buffer.allocUnsafe(1024 * 1024);
       for (;;) {
         const { bytesRead } = await input.read(buffer, 0, buffer.length, null);
@@ -94,6 +114,13 @@ export async function withVerifiedDump<T>(
       const code = (error as NodeJS.ErrnoException).code;
       if (code === 'ENOENT')
         throw new StandError('beschaedigt', `Im Stand ${label} fehlt ${src.split('/').pop()}.`);
+      // Symlink, FIFO oder Gerät statt Datei: so legt `sg backup` nie einen Stand an
+      if (code === 'ELOOP' || code === NOT_REGULAR) {
+        throw new StandError(
+          'beschaedigt',
+          `Im Stand ${label} ist ${src.split('/').pop()} keine reguläre Datei. Der Stand ist beschädigt.`,
+        );
+      }
       throw error;
     }
     if (sha !== expectedSha) {

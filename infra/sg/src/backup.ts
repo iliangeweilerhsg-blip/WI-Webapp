@@ -9,15 +9,7 @@
 // Der Lauf schreibt zuerst nach <ziel>/.<stand>.partial und benennt erst am Ende um: Ein Stand ohne Manifest gibt
 // es nie unter seinem endgültigen Namen.
 import { createHash, randomBytes } from 'node:crypto';
-import {
-  createReadStream,
-  existsSync,
-  mkdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { createReadStream, existsSync, lstatSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { SINGLE_USER_ID } from '@sg/shared';
 import { checkBackupTarget } from '@sg/shared/backup-target';
@@ -35,6 +27,8 @@ import {
   type Manifest,
 } from './backup-files.ts';
 import type { SgConfig } from './config.ts';
+import { runLiveness, runPidPath, writeRunPid } from './liveness.ts';
+import { NoFollowWriter } from './nofollow.ts';
 import { scrubSecrets, type PgAccess } from './pg.ts';
 import { copyAndHash, makePrivateDir } from './staging.ts';
 
@@ -43,6 +37,10 @@ export type BackupTrigger = (typeof BACKUP_TRIGGERS)[number];
 
 /** Ein Lauf im Zustand `laeuft`, der älter ist, gilt als abgestürzt (wie im Core) */
 export const STALE_RUN_HOURS = 6;
+/** Ein Restore-Test im Zustand `laeuft`, der älter ist, gilt als abgebrochen (wie im Core) */
+export const RESTORE_TEST_STALE_HOURS = 2;
+/** Name der PID-Datei des automatischen Restore-Tests (`liveness.ts`) */
+export const RESTORE_TEST_PID_NAME = 'restore-test';
 
 /** Tabellen, deren Zeilenzahl ins Manifest kommt (Richtwert für den Restore-Test) */
 export const COUNT_TABLES = [
@@ -79,6 +77,10 @@ export interface BackupDeps extends BackupIo {
   pg: PgAccess;
   now?: () => Date;
   newId?: () => string;
+  /** Lebt dieser Prozess noch? (Tests; Standard: `process.kill(pid, 0)`) */
+  alive?: (pid: number) => boolean;
+  /** Nur für Tests: läuft direkt nachdem der Dump ins Ziel kopiert wurde (Austausch durch einen Angreifer) */
+  hooks?: { afterDumpCopy?: (destination: string) => void | Promise<void> };
 }
 
 export interface BackupOptions {
@@ -163,18 +165,54 @@ export async function migrationCount(pg: PgAccess, db?: string): Promise<number 
   return Number(n?.[0] ?? 0);
 }
 
-/** Läuft gerade ein Restore-Test? (Schlüssel `restore_test`, älter als 2 Stunden gilt als abgestürzt, wie im Core) */
-export async function restoreTestActive(pg: PgAccess): Promise<boolean> {
+/**
+ * Läuft gerade ein Restore-Test? (Schlüssel `restore_test`, älter als 2 Stunden gilt als abgestürzt, wie im Core.)
+ * Rückgabe: `started_at` des laufenden Tests oder `null`. Lebt der Prozess des Tests nachweislich nicht mehr
+ * (PID-Datei, `liveness.ts`), wird der Eintrag sofort auf `fehler`/`abgebrochen` gesetzt und blockiert nicht (#113).
+ */
+export async function runningRestoreTest(
+  pg: PgAccess,
+  dataDir: string,
+  alive?: (pid: number) => boolean,
+): Promise<string | null> {
   const rows = await pg.query(
-    `SELECT count(*) FROM setting
+    `SELECT value->>'started_at' FROM setting
       WHERE key = 'restore_test' AND deleted_at IS NULL AND value->>'state' = 'laeuft'
-        AND (value->>'started_at')::timestamptz > now() - interval '2 hours'`,
+        AND (value->>'started_at')::timestamptz > now() - interval '${RESTORE_TEST_STALE_HOURS} hours'`,
   );
-  return Number(rows[0]?.[0] ?? 0) > 0;
+  const started = rows[0]?.[0];
+  if (started === undefined) return null;
+  if (runLiveness(dataDir, RESTORE_TEST_PID_NAME, started, alive) !== 'tot') return started;
+  // Nur genau diesen Lauf beenden (gleicher Beginn, noch `laeuft`): ein inzwischen neu gestarteter bleibt
+  await pg.query(
+    `UPDATE setting SET value = value || :'patch'::jsonb, updated_at = now()
+      WHERE key = 'restore_test' AND deleted_at IS NULL AND value->>'state' = 'laeuft'
+        AND value->>'started_at' = :'started'`,
+    {
+      started,
+      patch: JSON.stringify({
+        state: 'fehler',
+        finished_at: new Date().toISOString(),
+        reason: 'abgebrochen',
+        error: 'Der Restore-Test wurde unterbrochen (der Prozess lebt nicht mehr, etwa nach einem Absturz).',
+      }),
+    },
+  );
+  rmSync(runPidPath(dataDir, RESTORE_TEST_PID_NAME), { force: true });
+  return null;
 }
 
 export const RESTORE_TEST_RUNNING_MESSAGE =
   'Es läuft gerade ein Restore-Test. Backup und Restore-Test laufen nie gleichzeitig (das Ausdünnen könnte den getesteten Stand löschen). Versuche es in ein paar Minuten erneut.';
+
+/** Meldung mit Ausweg: wann der Eintrag spätestens als abgebrochen gilt */
+export function restoreTestRunningMessage(startedAt: string): string {
+  const until = new Date(Date.parse(startedAt) + RESTORE_TEST_STALE_HOURS * 3600_000);
+  const when = Number.isNaN(until.getTime())
+    ? `${RESTORE_TEST_STALE_HOURS} Stunden nach dem Start`
+    : until.toLocaleString('de-CH');
+  return `${RESTORE_TEST_RUNNING_MESSAGE} Läuft keiner mehr (etwa nach einem Absturz, ohne dass sich das feststellen ließ), gilt der Test spätestens ab ${when} als abgebrochen. Vor einer Migration hilft sofort: "pnpm sg migrate --ohne-backup".`;
+}
 
 /** Läufe im Zustand `laeuft`, die älter als 6 Stunden sind, gelten als abgestürzt */
 async function markStaleRuns(pg: PgAccess): Promise<void> {
@@ -185,14 +223,38 @@ async function markStaleRuns(pg: PgAccess): Promise<void> {
   );
 }
 
-async function otherRunActive(pg: PgAccess, exceptId: string | null): Promise<boolean> {
+/**
+ * Läuft schon ein anderes Backup? Läufe, deren Prozess nachweislich nicht mehr lebt (PID-Datei), werden dabei
+ * sofort als abgebrochen eingetragen und zählen nicht (#113).
+ */
+async function otherRunActive(
+  pg: PgAccess,
+  exceptId: string | null,
+  dataDir: string,
+  alive?: (pid: number) => boolean,
+): Promise<boolean> {
   const rows = await pg.query(
-    `SELECT count(*) FROM backup_run
+    `SELECT id FROM backup_run
       WHERE state = 'laeuft' AND started_at >= now() - interval '${STALE_RUN_HOURS} hours'
         AND (:'id' = '' OR id <> NULLIF(:'id', '')::uuid)`,
     { id: exceptId ?? '' },
   );
-  return Number(rows[0]?.[0] ?? 0) > 0;
+  let active = 0;
+  for (const [id] of rows) {
+    if (!id) continue;
+    if (runLiveness(dataDir, `backup-${id}`, id, alive) !== 'tot') {
+      active += 1;
+      continue;
+    }
+    await pg.query(
+      `UPDATE backup_run SET state = 'fehler', finished_at = now(), updated_at = now(),
+              error = 'Abgebrochen: der Backup-Prozess lebt nicht mehr (etwa nach einem Absturz)'
+        WHERE id = :'id'::uuid AND state = 'laeuft'`,
+      { id },
+    );
+    rmSync(runPidPath(dataDir, `backup-${id}`), { force: true });
+  }
+  return active > 0;
 }
 
 /** Fehlertext für `backup_run.error`: ohne Zugangsdaten, ohne absolute Pfade des Datenordners, höchstens 500 Zeichen */
@@ -235,16 +297,21 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     return code;
   };
 
+  let removePid = (): void => {};
   try {
     await markStaleRuns(pg);
-    if (await restoreTestActive(pg)) {
+    const testStarted = await runningRestoreTest(pg, cfg.dataDir, deps.alive);
+    if (testStarted !== null) {
+      const message = restoreTestRunningMessage(testStarted);
       // Mit Zeile vom Core: als Fehler eintragen, damit „läuft“ nicht stehen bleibt
-      if (runId) return await fail(RESTORE_TEST_RUNNING_MESSAGE, 4);
-      err(RESTORE_TEST_RUNNING_MESSAGE);
+      if (runId) return await fail(message, 4);
+      err(message);
       return 4;
     }
-    if (!options.runId && (await otherRunActive(pg, null))) {
-      err('Es läuft bereits ein Backup.');
+    if (!options.runId && (await otherRunActive(pg, null, cfg.dataDir, deps.alive))) {
+      err(
+        `Es läuft bereits ein Backup. Läuft keines mehr (etwa nach einem Absturz, ohne dass sich das feststellen ließ), gilt es spätestens ${STALE_RUN_HOURS} Stunden nach seinem Start als abgebrochen. Vor einer Migration hilft sofort: "pnpm sg migrate --ohne-backup".`,
+      );
       return 4;
     }
     const settings = await readBackupSettings(pg);
@@ -271,6 +338,9 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       );
     }
 
+    // PID-Datei: stürzt dieser Prozess ab, erkennt der nächste Lauf das sofort statt erst nach 6 Stunden
+    if (runId) removePid = writeRunPid(cfg.dataDir, `backup-${runId}`, runId);
+
     if (!targetSetting) return await fail('Es ist kein Backup-Ziel eingestellt (Einstellungen → Daten).', 2);
     if (settings.encryption) {
       return await fail(
@@ -283,9 +353,11 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     const stand = standName(started);
     const finalDir = join(target, stand);
     const partial = join(target, `.${stand}.partial`);
-    if (existsSync(finalDir)) throw new Error(`Der Stand ${stand} gibt es schon.`);
-    rmSync(partial, { recursive: true, force: true });
-    mkdirSync(partial, { recursive: true });
+    // Das Ziel ist nicht vertrauenswürdig (#113): nichts darin wird überschrieben oder über einen Symlink erreicht.
+    // Ein schon vorhandener Stand oder `.partial` gleichen Namens lässt den Lauf scheitern, gelöscht wird dabei nichts.
+    if (lstatSync(finalDir, { throwIfNoEntry: false })) throw new Error(`Den Stand ${stand} gibt es schon.`);
+    const out = new NoFollowWriter();
+    out.mkdir(partial);
 
     try {
       const previous = listStands(target)[0] ?? null;
@@ -297,7 +369,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       // bekommt nur eine Kopie; wird sie dort verändert, stimmt die Prüfsumme nicht mehr und der Stand wird
       // nie eingespielt (VERTRAEGE §13).
       const dumpFile = join(partial, DUMP_FILE);
-      const { bytes: dumpBytes, sha: dumpSha } = await dumpPrivately(deps, dumpFile);
+      const { bytes: dumpBytes, sha: dumpSha } = await dumpPrivately(deps, dumpFile, out);
       const counts = await countObjects(pg);
       const [version] = await pg.query(`SHOW server_version`);
       const migrations = await migrationCount(pg);
@@ -310,7 +382,14 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         const source = join(cfg.dataDir, sub);
         if (!existsSync(source)) continue;
         log(`Kopiere ${sub}/ …`);
-        copyTree(source, join(partial, sub), previous ? join(target, previous, sub) : null, stats[sub]);
+        copyTree(
+          source,
+          join(partial, sub),
+          previous ? join(target, previous, sub) : null,
+          stats[sub],
+          undefined,
+          out,
+        );
         log(
           `  ${stats[sub].files} Dateien, ${stats[sub].copied} neu kopiert, ${stats[sub].linked} unverändert`,
         );
@@ -328,8 +407,8 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         media: { files: stats.media.files, bytes: stats.media.bytes },
         vault: { files: stats.vault.files, bytes: stats.vault.bytes },
       };
-      writeFileSync(join(partial, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
-      renameSync(partial, finalDir);
+      out.writeFile(join(partial, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
+      out.renameDir(partial, finalDir);
       const size = dumpBytes + stats.media.bytes + stats.vault.bytes;
 
       if (runId) {
@@ -342,7 +421,13 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       }
       log(`Backup ${stand} fertig (${size} Bytes).`);
     } catch (error) {
-      rmSync(partial, { recursive: true, force: true });
+      // Nur Eigenes entfernen, nie einem Symlink folgend; Fremdes bleibt liegen (Ausdünnen räumt alte .partial weg)
+      const left = out.cleanup();
+      if (left.length > 0) {
+        err(
+          `Im Ziel bleiben ${left.length} Einträge liegen, die nicht von diesem Lauf stammen oder ersetzt wurden.`,
+        );
+      }
       throw error;
     }
 
@@ -354,7 +439,9 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     }
     return 0;
   } catch (error) {
-    return fail(errorText(error, cfg), 1);
+    return await fail(errorText(error, cfg), 1);
+  } finally {
+    removePid();
   }
 }
 
@@ -363,8 +450,9 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
  * Der private Ordner wird immer gelöscht.
  */
 async function dumpPrivately(
-  deps: Pick<BackupDeps, 'cfg' | 'pg'>,
+  deps: Pick<BackupDeps, 'cfg' | 'pg' | 'hooks'>,
   destination: string,
+  out: NoFollowWriter,
 ): Promise<{ bytes: number; sha: string }> {
   const dir = makePrivateDir(deps.cfg.dataDir, 'backup');
   try {
@@ -372,8 +460,10 @@ async function dumpPrivately(
     await deps.pg.dump(privateDump);
     const bytes = statSync(privateDump).size;
     if (bytes === 0) throw new Error('pg_dump hat keine Daten geliefert.');
-    // Eine Lesung: die Kopie ins Ziel und ihre Prüfsumme stammen aus denselben Bytes
-    const sha = await copyAndHash(privateDump, destination);
+    // Eine Lesung: die Kopie ins Ziel und ihre Prüfsumme stammen aus denselben Bytes. Die Datei im Ziel wird danach
+    // nie wieder gelesen (sie kann dort jederzeit ausgetauscht werden, B2).
+    const sha = await copyAndHash(privateDump, destination, out.guard(destination));
+    await deps.hooks?.afterDumpCopy?.(destination);
     return { bytes, sha };
   } finally {
     rmSync(dir, { recursive: true, force: true });

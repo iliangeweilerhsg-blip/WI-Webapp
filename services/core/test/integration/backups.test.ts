@@ -176,6 +176,42 @@ describe('POST /backup', () => {
   });
 });
 
+describe('POST /backup ist nur lokal (#113)', () => {
+  it('aus dem Netz: 401 ohne Token, 403 local_only mit gültigem Geräte-Token, kein Lauf, nichts gestartet', async () => {
+    await setData({ backup_target: '/ziel' });
+    const remote = await startTestApp(
+      {},
+      { verifyDeviceToken: async () => ({ deviceId: '0190f6a2-0000-7000-8000-0000000000f1' }) },
+    );
+    try {
+      const call = (headers: Record<string, string> = {}) =>
+        remote.app.inject({
+          method: 'POST',
+          url: `${API}/backup`,
+          remoteAddress: '192.168.1.20',
+          headers: { host: 'mac.local:4710', ...headers },
+        });
+      expect((await call()).statusCode).toBe(401);
+      const res = await call({ authorization: 'Bearer EXAMPLEdevicetoken000' });
+      expect(res.statusCode).toBe(403);
+      expect(res.json<{ error: { code: string } }>().error.code).toBe('local_only');
+      expect(launched).toHaveLength(0);
+      const [row] = await t.handle.sql`SELECT count(*)::int AS n FROM backup_run`;
+      expect(row?.n).toBe(0);
+      // GET /backups bleibt aus dem Netz lesbar (nur das Auslösen ist lokal)
+      const list = await remote.app.inject({
+        method: 'GET',
+        url: `${API}/backups`,
+        remoteAddress: '192.168.1.20',
+        headers: { host: 'mac.local:4710', authorization: 'Bearer EXAMPLEdevicetoken000' },
+      });
+      expect(list.statusCode).toBe(200);
+    } finally {
+      await remote.close();
+    }
+  });
+});
+
 describe('Zeitplan: Backup', () => {
   const config = () => ({
     dataDir: t.config.dataDir,
