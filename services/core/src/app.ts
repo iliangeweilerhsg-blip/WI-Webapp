@@ -17,6 +17,7 @@ import { calendarRoutes } from './routes/calendar.ts';
 import { materialRoutes } from './routes/material.ts';
 import { inkRoutes } from './routes/notebooks.ts';
 import { organisationRoutes } from './routes/organisation.ts';
+import { recordingRoutes } from './routes/recordings.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { systemRoutes } from './routes/system.ts';
 import { trashRoutes } from './routes/trash.ts';
@@ -103,6 +104,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(organisationRoutes, { db });
       await api.register(calendarRoutes, { db });
       await api.register(inkRoutes, { db, config });
+      await api.register(recordingRoutes, { db, config });
       await api.register(backupRoutes, { db, config });
       await api.register(trashRoutes, { db, config });
       await api.register(settingsRoutes, { db, config });

@@ -100,6 +100,12 @@ Ein laufender Job erneuert `locked_at` alle 60 s (Heartbeat). Ergebnis und Fehle
   - Beim Stopp der Session je Aufnahme ein Job. Ist die Aufnahme schon abgeschlossen (`POST /recordings/{id}/complete`), sofort; sonst mit `run_after = Stopp + 10 min`, weil der Browser noch Chunks aus IndexedDB nachliefern kann.
   - Kommt `complete`, während dieser Job noch `wartet`, setzt der Core `run_after = now()`. Es entsteht kein zweiter Job.
   - Kommt nach einem fertigen `audio.finalize` noch ein Chunk an, legt der Core einen neuen Job an. Das gilt nicht, wenn für die Aufnahme schon einer `wartet`. Der Job ist idempotent und erzeugt `full.m4a` neu.
+- **Ergänzung T1-06 (Anlegen und Nachzügler, verbindlich für Core):**
+  - Aufnahmen ohne Chunks bekommen keinen Job (§10.2).
+  - `complete` ohne vorhandenen Job legt (bei mindestens einem Chunk) einen Job an, auch solange die Session `laeuft`. Der Stopp legt nur dann einen an, wenn für die Aufnahme noch keiner existiert (`ensureFinalizeOnStop`, §16.2). Ein Job in `wartet`, `laeuft` oder `fertig` bleibt unberührt, nach `fehler` oder `abgebrochen` entsteht ein neuer.
+  - Chunk nach einem Job, der nicht mehr `wartet` (`laeuft`, `fertig`, `fehler`, `abgebrochen`): neuer Job. Ist die Aufnahme noch nicht abgeschlossen, mit `run_after = jetzt + 60 s`, damit ein Rückstau aus IndexedDB nicht jedes Mal die ganze Datei neu erzeugt. Ein Job, der `laeuft`, wird als `depends_on` des neuen eingetragen.
+  - Eine nachträglich angelegte Aufnahme (§10.1, Session schon `beendet`) ist beim Anlegen leer und bekommt ihren Job mit dem ersten Chunk, mit `run_after = jetzt + 10 min`.
+  - Der Core entscheidet unter `lockRecording` und liest den letzten Job mit `FOR UPDATE`. Der Worker holt Jobs mit `FOR UPDATE SKIP LOCKED`.
 - **Ergebnis** enthält `job_duration_ms` (Laufzeit des Jobs) getrennt von `audio_duration_ms` (Länge der Datei).
 - **Ausführung (Worker):** Chunks nach `seq` lesen. Bei `chunks_independent = false` als ein Bytestrom aneinanderhängen, sonst jeden Chunk einzeln decodieren. Dann mit `ffmpeg` nach `full.m4a` (AAC, 48 kHz, mono) umwandeln. Lücken (fehlende `seq` oder Sprünge in `start_ms`) werden als Stille mit korrekter Länge eingefügt. Zum Schluss `recording.duration_ms` und `recording.state` (`vollstaendig` bzw. `mit_luecken`) setzen.
 - **Session-Fortschritt (Worker):** Nach jedem Job mit `session_id` setzt der Worker `session.processing[<job.type>] = <job.state>`. Hat die Session danach keinen Job mehr in `wartet` oder `laeuft` und ist sie `beendet`, setzt er `state = 'verarbeitet'`. Danach folgt `pg_notify('sg_session', '<session_id>')`. Der Core hört darauf und sendet das Ereignis `session.updated` (§11.6).
@@ -366,6 +372,7 @@ Zeitplan: URL-Quellen beim Core-Start und danach alle 6 h. Datei-Quellen nur bei
 - **Invariante 1** gilt für `laeuft` **und** `pausiert` zusammen: höchstens eine aktive Session.
 - `beendet` und `verarbeitet` lassen sich nicht wieder starten. Eine verpasste Vorlesung ohne Offline-Start bekommt Aufnahmen über den Import (F-SES-06, Phase 2).
 - **Core-Neustart:** `laeuft` bleibt `laeuft` (F-SES-05), solange die Grenzen aus Auto-Stopp-Regel 2 und 4 nicht überschritten sind. Der Core-Takt prüft sie beim Start und danach jede Minute.
+- **Pause und Aufnahme (T1-06):** Bei `pausiert` schließt die Web-App die laufende Aufnahme ab (`complete`), das Mikrofon bleibt offen, `MediaRecorder.pause()` wird nicht benutzt. Bei `resume` beginnt sie eine **neue** Aufnahme mit `started_ms` = aktuelle Sitzungszeit. Die Pause bleibt so als Lücke auf der Zeitachse (§10.1).
 - **Session-Daten in jedem Zustand:** `slide.change`, `marker.add` und `photo.add` nimmt der Core in **jedem** Zustand an, auch nach `beendet` (verspätet gesendete Daten aus der Warteschlange). Ist die Session weich gelöscht, gilt §11.2 (Speichern mit Löschzustand).
 
 ### 9.2 Woher Sessions kommen
@@ -410,7 +417,13 @@ Startet ein Gerät eine Session offline, während sie auf dem Server schon mit a
 ### 10.1 Aufnahmen
 
 - **Eine Aufnahme ist ein MediaRecorder-Strom.** Nach Neuladen oder Absturz legt die Web-App eine **neue** Aufnahme an (`started_ms` = aktuelle Sitzungszeit). Die Lücke dazwischen bleibt erhalten (02 §5).
-- Aufnahmen gibt es nur für Sessions in `laeuft` oder `pausiert` (`409 session_not_active`). Chunks und `complete` sind auch danach noch erlaubt (Nachlieferung aus IndexedDB).
+- Aufnahmen gibt es für Sessions in `laeuft` oder `pausiert`. Chunks und `complete` sind auch danach noch erlaubt (Nachlieferung aus IndexedDB).
+- **Nachträglich angelegte Aufnahme (T1-06, Lead-Entscheidung):** Hat die Web-App offline begonnen und erreicht den Core erst nach dem Ende der Session, ist `POST /sessions/{id}/recordings` auch in `beendet`/`verarbeitet` erlaubt, wenn `started_ms ≤ (Grenze − started_at) + 5 min` (`started_ms ≥ 0` gilt immer).
+  - **Grenze** = `ended_at`. Ist `auto_stop_extended_until` gesetzt und später, gilt dieses. Bei `stop_reason = absturz_wiederhergestellt` ist `ended_at` nur die letzte Aktivität; dort gilt die Auto-Stopp-Grenze aus §9 (Lead-Entscheidung 05.11.): `G = max(min(planned_ends_at + lecture.auto_stop_hard_after_end_min, started_at + lecture.auto_stop_max_duration_min), auto_stop_extended_until)`, der erste Term nur bei Sessions mit Termin. Berechnet wird sie mit **derselben Funktion** wie der Core-Takt (T1-02). Bis T1-02 gemergt ist, gilt übergangsweise `started_at + 12 h`; die 12 h bleiben danach nur Rückfall, falls Werte fehlen.
+  - Sonst `409 session_not_active` mit `details.ended_at`.
+  - Der Core legt `audio.finalize` mit `run_after = jetzt + 10 min` an, sobald der erste Chunk kommt (§3, §10.2). `complete` und Nachzügler ziehen ihn wie gewohnt vor.
+  - Der Sessionstatus und `ended_at` bleiben unverändert (Zustandsmaschine gehört T1-02). Offen für T1-04: ob die Weiterverarbeitung einer schon `verarbeitet`en Session danach neu läuft.
+- **Pause:** Siehe §9.1. Jede Pause beendet die Aufnahme, das Fortsetzen beginnt eine neue.
 - `chunks_independent` legt die Web-App nach Spike S4 fest. Der Worker muss beide Fälle können (§3).
 
 ### 10.2 Chunk-Upload `PUT /recordings/{id}/chunks/{seq}`
@@ -435,6 +448,8 @@ Startet ein Gerät eine Session offline, während sie auf dem Server schon mit a
 | Aufnahme unbekannt | 404 | `recording_not_found` |
 
 - Die Web-App löscht einen Chunk aus IndexedDB erst nach 200 oder 201. Bei 409 oder 422 versucht sie es **nicht** erneut, sondern verschiebt den Chunk in ihre Fehlerablage (§11.2) und meldet ihn. Bei 5xx und Netzfehlern wiederholt sie mit exponentiellem Warten bis 30 s.
+- **Nach `complete`:** Ein neuer Chunk mit `seq > completed_last_seq` wird mit `409 recording_completed` abgelehnt. Ein Chunk mit `seq ≤ last_seq` (Lücke füllen) und ein Duplikat bleiben erlaubt.
+- **Leere Aufnahme:** Eine Aufnahme ohne einen einzigen Chunk (Pause oder Stopp vor dem ersten Chunk) löscht die Web-App lokal und schließt sie **nicht** mit `complete` ab. Der Core legt für Aufnahmen ohne Chunks **keinen** `audio.finalize`-Job an, weder beim Stopp (`ensureFinalizeOnStop`) noch bei `complete`; die leere Zeile bleibt bestehen (`chunk_count = 0`, `state = laeuft`). Kommt später doch ein Chunk, entsteht der erste Job: sofort bei abgeschlossener Aufnahme, mit `run_after = jetzt + 10 min` bei beendeter Session, sonst keiner (§3). Der Rückfall des Workers (`mit_luecken` bei `chunk_count 0`) bleibt.
 - Nach dem letzten Chunk: `POST /recordings/{id}/complete` mit `last_seq` und `duration_ms`. Fehlt eine `seq ≤ last_seq` beim Finalisieren, wird die Aufnahme `mit_luecken`. Was sonst als fehlend gilt und wie `audio.finalize` Lücken behandelt, steht in §3.
 
 ## 11. Sync-Protokoll (T1-08, T1-09)
@@ -709,6 +724,8 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `notebook_default` | 409 | Standard-Notizbuch lässt sich nicht löschen |
 | `session_transition_invalid`, `session_not_active`, `session_active` | 409 | Zustandsautomat (§9.1) |
 | `chunk_conflict`, `recording_seq_conflict`, `photo_file_conflict` | 409 | Gleiche ID, anderer Inhalt |
+| `recording_completed` | 409 | Chunk hinter `last_seq` einer abgeschlossenen Aufnahme (§10.2) |
+| `range_not_satisfiable` | 416 | `Range` liegt außerhalb der Datei (`GET …/file`, `GET …/audio`) |
 | `backup_running`, `backup_target_missing`, `restore_parent_deleted`, `restore_conflict` | 409 | Daten (§13) |
 | `pairing_window_closed` | 409 | Kopplungsfenster zu oder abgelaufen (§12) |
 | `chunk_header_invalid`, `backup_target_invalid`, `upload_aborted` | 400 | Anfrage ungültig (`upload_aborted`: der Client hat den Upload abgebrochen) |
@@ -766,6 +783,10 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 | Fotos | `services/core/src/services/photos.ts` | `upsertPhotoMeta(tx: Tx, data: PhotoAddData, env: { dataDir: string }): Promise<void>` und `storePhotoFile(id, stream, sha256, mime, env: { db: Db; dataDir: string }): Promise<FileReceipt>` (der letzte Parameter `env` ist nötig, weil beide Datenordner bzw. Datenbank brauchen) prüfen sich gegenseitig (sha256, Typ) | Core-Ink (Handler `photo.add` und `PUT /photos`) |
 | Recorder → Auto-Stopp | `apps/web/src/lib/recorder/level.ts` | `subscribeAudioLevel(fn: (s: { at: number; rms: number }) => void): () => void`, alle 250 ms während der Aufnahme. Die Spracherkennung baut T1-07 darauf. Der Stopp läuft per `POST /sessions/{id}/stop`. Der Recorder reagiert auf `session.updated` (`beendet`) und schließt die Aufnahme ab (`complete`) | T1-06 liefert, T1-07 nutzt |
 | Web-Sync-Client | `apps/web/src/lib/sync/client.ts` | `class SyncClient { connect(); subscribe(stream: string, from: { lastSeq: number; lastOpId: string \| null }, onOp: (op: SyncOp) => void); send(op): Promise<SyncAck>; onEvent(name, fn); }`. `from` stammt aus `stream_seq`/`stream_op_id` des REST-Stands. Dazu Warteschlange in IndexedDB, Uhrabgleich, Wartezeit nach 4503, Fehlerablage | T1-WS |
+
+**Aufnahme-Job beim Stopp (T1-06, verbindlich für T1-02):** `ensureFinalizeOnStop(tx: Tx, recordingId: string, stoppedAt: Date): Promise<void>` in `services/core/src/services/recordings.ts`. Sie nimmt `lockRecording`, legt keinen Job an für Aufnahmen ohne Chunks und auch nicht, wenn einer in `wartet`, `laeuft` oder `fertig` existiert, sonst sofort (Aufnahme abgeschlossen) bzw. mit `run_after = stoppedAt + 10 min`. Der Stopp ruft sie für jede Aufnahme der Session auf, in aufsteigender ID-Reihenfolge.
+
+**Sperrreihenfolge** (gilt für Stopp, Sync-Handler und REST gleich, sonst droht ein Deadlock): `lockSessionTransitions` → Session-Zeile (`FOR NO KEY UPDATE` bzw. `FOR SHARE`) → `sync_stream` → `lockRecording` (nach ID sortiert) → Job-Zeilen. Die Aufnahme-Routen sperren die Session **nie nach** `lockRecording`: Das Anlegen liest sie mit `FOR SHARE` davor; der Chunk-Upload liest sie ohne Sperre erst nach `lockRecording` (unter Read Committed sieht er dann entweder den committeten Stopp oder der Stopp zählt den Chunk mit).
 
 ### 16.3 Tickets und Besitz
 
