@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type {
   Device,
   ExerciseSheet,
+  Marker,
   Module,
   Notebook,
   PairingCode,
@@ -12,6 +13,7 @@ import type {
   Settings,
   Slide,
   SlideDeck,
+  SlideEvent,
 } from '@sg/shared';
 
 const USER = '0190f6a2-0000-7000-8000-000000000000';
@@ -189,6 +191,11 @@ export interface FakeCore {
   sessions: Session[];
   /** Notizbücher für GET /notebooks?module_id (VERTRAEGE §7.4) */
   notebooks: Notebook[];
+  /** Für GET /sessions/{id}/snapshot (VERTRAEGE §7.2): Folienwechsel und Marker, `stream_seq`/`stream_op_id` */
+  slideEvents: SlideEvent[];
+  markers: Marker[];
+  streamSeq: number;
+  streamOpId: string | null;
   /** Die nächste Anfrage an eine Session-Aktion wird mit diesem Fehler abgelehnt */
   rejectNextSession: null | { status: number; code: string };
   requests: RecordedRequest[];
@@ -278,6 +285,10 @@ export function installFakeCore(
     slides: {},
     sessions: structuredClone(initial.sessions ?? []),
     notebooks: [],
+    slideEvents: [],
+    markers: [],
+    streamSeq: 0,
+    streamOpId: null,
     rejectNextSession: null,
     requests: [],
     failNextUpload: null,
@@ -468,6 +479,22 @@ export function installFakeCore(
           .filter((x) => !to || anchor(x) < Date.parse(to))
           .sort((a, b) => anchor(a) - anchor(b) || a.id.localeCompare(b.id));
         return json({ items, next_cursor: null });
+      }
+
+      // GET /sessions/{id}/snapshot (§7.2)
+      const snapshotOne = /^\/sessions\/([^/]+)\/snapshot$/.exec(path);
+      if (snapshotOne && method === 'GET') {
+        const found = core.sessions.find((x) => x.id === snapshotOne[1] && !x.deleted_at);
+        if (!found) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        return json({
+          session: structuredClone(found),
+          slide_events: structuredClone(core.slideEvents.filter((e) => e.session_id === found.id)),
+          markers: structuredClone(core.markers.filter((m) => m.session_id === found.id && !m.deleted_at)),
+          photos: [],
+          recordings: [],
+          stream_seq: core.streamSeq,
+          stream_op_id: core.streamOpId,
+        });
       }
 
       // GET /sessions/{id}
