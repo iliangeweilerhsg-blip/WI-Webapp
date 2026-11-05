@@ -1,6 +1,8 @@
 // Sessions (T1-02): Zustandsautomat, Offline-Fälle, Takt und Auto-Stopp, Sessions aus dem Kalender, Op-Handler, REST.
 // Die Handler laufen direkt als `handler(tx, op, ctx)` in einer Transaktion. `publishAfterCommit` (T1-08) ist durch
 // `setSessionEventPublisher` ersetzt und sammelt die Ereignisse.
+import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { asc, eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -19,6 +21,7 @@ import { createDb, type DbHandle } from '../../src/db/client.ts';
 import {
   audioChunk,
   calendarEvent,
+  calendarSource,
   courseModule,
   job,
   marker,
@@ -36,6 +39,7 @@ import { SyncOpError } from '../../src/sync/handlers.ts';
 import { appendOp } from '../../src/sync/append.ts';
 import { SESSION_HANDLERS, SESSION_PRELOCKS } from '../../src/sync/handlers/session.ts';
 import {
+  deleteSession,
   ensurePlannedSessions,
   runSessionTick,
   setSessionEventPublisher,
@@ -44,6 +48,8 @@ import {
   type SessionAction,
   type TransitionInput,
 } from '../../src/services/sessions.ts';
+import { completeRecording, createRecording, storeChunk } from '../../src/services/recordings.ts';
+import { autoStopBoundary } from '../../src/services/auto-stop.ts';
 import { startTestApp, testConfig, testDatabaseUrl, type TestApp } from './helpers.ts';
 
 let handle: DbHandle;
@@ -51,6 +57,8 @@ const base = { userId: SINGLE_USER_ID };
 const config = { dataDir: '/tmp/sg-sessions-test' };
 const API = '/api/v1';
 const DEVICE = '0190f6a2-0000-7000-8000-0000000000d1';
+/** weit in der Zukunft (Minuten ab T(0)), unabhängig vom aktuellen Datum */
+const FAR = 3_000_000;
 const DEVICE_2 = '0190f6a2-0000-7000-8000-0000000000d2';
 
 let events: SyncEvent[] = [];
@@ -114,6 +122,44 @@ async function mkEvent(
   });
   return id;
 }
+
+/** Aufnahme der Session, optional mit einem Chunk (ohne Chunk legt der Stopp keinen Job an) */
+async function mkRecording(
+  sessionId: string,
+  over: { chunk?: boolean; completedAt?: Date | null } = {},
+): Promise<string> {
+  const id = uuidv7();
+  await handle.db.insert(recording).values({
+    id,
+    ...base,
+    sessionId,
+    mime: 'audio/webm',
+    codec: 'opus',
+    startedMs: 0,
+    completedAt: over.completedAt ?? null,
+  });
+  if (over.chunk !== false) {
+    await handle.db.insert(audioChunk).values({
+      id: uuidv7(),
+      ...base,
+      recordingId: id,
+      seq: 0,
+      startMs: 0,
+      durationMs: 1000,
+      filePath: `media/recordings/${id}/chunks/0.webm`,
+      sha256: 'c'.repeat(64),
+      sizeBytes: 10,
+    });
+  }
+  return id;
+}
+
+const finalizeJobs = (recordingId: string) =>
+  handle.db
+    .select()
+    .from(job)
+    .where(eq(job.type, 'audio.finalize'))
+    .then((rows) => rows.filter((j) => (j.payload as { recording_id: string }).recording_id === recordingId));
 
 async function row(id: string) {
   const [found] = await handle.db.select().from(session).where(eq(session.id, id));
@@ -242,34 +288,16 @@ describe('Zustandsautomat (§9.1)', () => {
     expect(stopped).toMatchObject({ stop_reason: 'stille', ended_at: '2026-11-04T09:00:00Z' });
   });
 
-  it('Stopp mit Aufnahmen legt je Aufnahme einen audio.finalize-Job an und bleibt beendet', async () => {
+  it('Stopp mit Aufnahmen: je Aufnahme mit Chunk ein audio.finalize-Job, Session bleibt beendet', async () => {
     const id = await mkSession();
-    const done = uuidv7();
-    const open = uuidv7();
-    for (const [rid, completedAt] of [
-      [done, T(1)],
-      [open, null],
-    ] as const) {
-      await handle.db.insert(recording).values({
-        id: rid,
-        ...base,
-        sessionId: id,
-        mime: 'audio/webm',
-        codec: 'opus',
-        startedMs: 0,
-        completedAt,
-      });
-    }
+    const done = await mkRecording(id, { completedAt: T(1) });
+    const open = await mkRecording(id);
     await transition(id, 'start', { at: T(0), startedFrom: 'mac' });
-    const before = Date.now();
-    expect((await transition(id, 'stop', { at: T(30) })).session.state).toBe('beendet');
-    const jobs = await handle.db.select().from(job).where(eq(job.sessionId, id));
-    expect(jobs).toHaveLength(2);
-    const byRecording = new Map(jobs.map((j) => [(j.payload as { recording_id: string }).recording_id, j]));
-    expect(byRecording.get(done)).toMatchObject({ type: 'audio.finalize', runAfter: null });
-    const delayed = byRecording.get(open)!.runAfter!.getTime();
-    expect(delayed - before).toBeGreaterThanOrEqual(10 * 60_000 - 1000);
-    expect(delayed - before).toBeLessThan(10 * 60_000 + 10_000);
+    expect((await transition(id, 'stop', { at: T(30), now: T(30) })).session.state).toBe('beendet');
+    const doneJobs = await finalizeJobs(done);
+    expect(doneJobs).toHaveLength(1);
+    expect(doneJobs[0]).toMatchObject({ runAfter: null, sessionId: id });
+    expect((await finalizeJobs(open)).map((j) => j.runAfter)).toEqual([T(40)]);
   });
 
   // Zustand × Aktion: change = Übergang, noop = gleicher Zielzustand, invalid = 409
@@ -904,15 +932,15 @@ describe('ensurePlannedSessions (§9.2)', () => {
 
   it('legt für Vorlesung, Übung, Tutorium mit Modul eine Session an; sonst nicht; idempotent', async () => {
     const future = [
-      await mkEvent(1000, 1090, { kind: 'vorlesung' }),
-      await mkEvent(1100, 1190, { kind: 'uebung' }),
-      await mkEvent(1200, 1290, { kind: 'tutorium' }),
+      await mkEvent(FAR + 1000, FAR + 1090, { kind: 'vorlesung' }),
+      await mkEvent(FAR + 1100, FAR + 1190, { kind: 'uebung' }),
+      await mkEvent(FAR + 1200, FAR + 1290, { kind: 'tutorium' }),
     ];
     const none = [
-      await mkEvent(1300, 1390, { kind: 'pruefung' }),
-      await mkEvent(1400, 1490, { kind: 'fest' }),
-      await mkEvent(1500, 1590, { moduleId: null }),
-      await mkEvent(1600, 1690, { cancelled: true }),
+      await mkEvent(FAR + 1300, FAR + 1390, { kind: 'pruefung' }),
+      await mkEvent(FAR + 1400, FAR + 1490, { kind: 'fest' }),
+      await mkEvent(FAR + 1500, FAR + 1590, { moduleId: null }),
+      await mkEvent(FAR + 1600, FAR + 1690, { cancelled: true }),
     ];
     await ensure([...future, ...none]);
     await ensure([...future, ...none, ...future]);
@@ -1690,13 +1718,10 @@ describe('Nacharbeit (Review PR #65)', () => {
 
   it('Job-Verzögerung nutzt die übergebene Uhr', async () => {
     const id = await mkSession();
-    await handle.db
-      .insert(recording)
-      .values({ id: uuidv7(), ...base, sessionId: id, mime: 'audio/webm', codec: 'opus', startedMs: 0 });
+    const rec = await mkRecording(id);
     await transition(id, 'start', { at: T(0), startedFrom: 'mac' });
     await transition(id, 'stop', { at: T(30), now: T(30) });
-    const [j] = await handle.db.select().from(job).where(eq(job.sessionId, id));
-    expect(j!.runAfter).toEqual(T(40));
+    expect((await finalizeJobs(rec)).map((j) => j.runAfter)).toEqual([T(40)]);
   });
 
   // N1: Ops mit FK auf die Session sperren erst den Strom (appendOp), dann KEY SHARE auf die Session-Zeile.
@@ -1744,4 +1769,301 @@ describe('Nacharbeit (Review PR #65)', () => {
       }
     },
   );
+});
+
+// --- Stopp und Aufnahmen (VERTRAEGE §16.2 „Aufnahme-Job beim Stopp“) ------------------------------------------
+
+describe('Stopp und Aufnahmen', () => {
+  it('leere Aufnahme (ohne Chunk): kein Job, Session gleich verarbeitet', async () => {
+    const id = await mkSession({ state: 'laeuft', startedAt: T(0) });
+    const rec = await mkRecording(id, { chunk: false });
+    const result = await transition(id, 'stop', { at: T(30), now: T(30) });
+    expect(result.session.state).toBe('verarbeitet');
+    expect(await finalizeJobs(rec)).toHaveLength(0);
+  });
+
+  it('Aufnahme mit Chunk: ein Job, Session beendet', async () => {
+    const id = await mkSession({ state: 'laeuft', startedAt: T(0) });
+    const rec = await mkRecording(id);
+    expect((await transition(id, 'stop', { at: T(30), now: T(30) })).session.state).toBe('beendet');
+    expect(await finalizeJobs(rec)).toHaveLength(1);
+  });
+
+  it('schon fertiger Job: kein neuer, die Session geht gleich auf verarbeitet (der Worker zieht sie nicht mehr nach)', async () => {
+    const id = await mkSession({ state: 'laeuft', startedAt: T(0) });
+    const rec = await mkRecording(id);
+    await handle.db.insert(job).values({
+      id: uuidv7(),
+      ...base,
+      type: 'audio.finalize',
+      payload: { recording_id: rec },
+      state: 'fertig',
+      sessionId: id,
+    });
+    const result = await transition(id, 'stop', { at: T(30), now: T(30) });
+    expect(result.session.state).toBe('verarbeitet');
+    expect(await finalizeJobs(rec)).toHaveLength(1);
+  });
+
+  it('wartender oder laufender Job: Session bleibt beendet', async () => {
+    for (const state of ['wartet', 'laeuft'] as const) {
+      await handle.sql`TRUNCATE session, job, recording CASCADE`;
+      const id = await mkSession({ state: 'laeuft', startedAt: T(0) });
+      const rec = await mkRecording(id);
+      await handle.db.insert(job).values({
+        id: uuidv7(),
+        ...base,
+        type: 'audio.finalize',
+        payload: { recording_id: rec },
+        state,
+        sessionId: id,
+      });
+      expect((await transition(id, 'stop', { at: T(30), now: T(30) })).session.state).toBe('beendet');
+      expect(await finalizeJobs(rec)).toHaveLength(1);
+    }
+  });
+
+  // Jeder Stopp-Pfad ruft ensureFinalizeOnStop (Job, run_after = Stopp + 10 min) und prüft danach den Zielzustand
+  describe.each([
+    ['REST-Stopp', 'rest'],
+    ['Sync-Operation session.stop', 'sync'],
+    ['Core-Takt (Auto-Stopp)', 'tick'],
+    ['Start einer späteren Session', 'next'],
+    ['Wiederherstellung beim Core-Start', 'startup'],
+  ] as const)('%s', (_name, path) => {
+    it('legt den Job an und lässt die Session beendet', async () => {
+      const eventId = await mkEvent(0, 60);
+      const id = await mkSession({ state: 'laeuft', startedAt: T(0), calendarEventId: eventId });
+      const rec = await mkRecording(id);
+      const early = await mkRecording(id, { chunk: false });
+      const before = Date.now();
+      let expectedRunAfter: Date | null = null;
+      if (path === 'rest') {
+        await transition(id, 'stop', { at: T(30), now: T(30) });
+        expectedRunAfter = T(40);
+      } else if (path === 'sync') {
+        await runHandler(clientOp('session.stop', id, { session_id: id }, T(30).getTime()));
+      } else if (path === 'tick') {
+        await runSessionTick(handle.db, config, T(95));
+        expectedRunAfter = T(105);
+      } else if (path === 'next') {
+        await transition(await mkSession(), 'start', { at: T(5), now: T(5), startedFrom: 'mac' });
+        expectedRunAfter = T(15);
+      } else {
+        await runSessionTick(handle.db, config, T(500), { startup: true });
+        expectedRunAfter = T(510);
+      }
+      expect((await row(id)).state).toBe('beendet');
+      const jobs = await finalizeJobs(rec);
+      expect(jobs).toHaveLength(1);
+      if (expectedRunAfter) expect(jobs[0]!.runAfter).toEqual(expectedRunAfter);
+      else expect(jobs[0]!.runAfter!.getTime()).toBeGreaterThanOrEqual(before + 10 * 60_000 - 1000);
+      expect(await finalizeJobs(early)).toHaveLength(0);
+    });
+
+    it('ohne Aufnahme: gleich verarbeitet', async () => {
+      const eventId = await mkEvent(0, 60);
+      const id = await mkSession({ state: 'laeuft', startedAt: T(0), calendarEventId: eventId });
+      if (path === 'rest') await transition(id, 'stop', { at: T(30) });
+      else if (path === 'sync')
+        await runHandler(clientOp('session.stop', id, { session_id: id }, T(30).getTime()));
+      else if (path === 'tick') await runSessionTick(handle.db, config, T(95));
+      else if (path === 'next')
+        await transition(await mkSession(), 'start', { at: T(5), startedFrom: 'mac' });
+      else await runSessionTick(handle.db, config, T(500), { startup: true });
+      expect((await row(id)).state).toBe('verarbeitet');
+    });
+  });
+
+  describe('Nebenläufigkeit mit Chunk-Upload und complete', () => {
+    const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+    const cfg = testConfig();
+    const chunk = (recId: string, seq: number) => {
+      const buf = Buffer.from(`chunk-${recId}-${seq}-${Math.random()}`);
+      return storeChunk(
+        handle.db,
+        recId,
+        { seq, start_ms: 1000 + seq * 10_000, duration_ms: 10_000, sha256: sha(buf) },
+        'audio/webm',
+        Readable.from([buf]),
+        { dataDir: cfg.dataDir },
+      );
+    };
+    const jitter = () => new Promise((r) => setTimeout(r, Math.random() * 6));
+    const stop = (id: string, via: 'rest' | 'sync'): Promise<unknown> =>
+      via === 'rest'
+        ? transition(id, 'stop', { at: T(30), now: T(30) })
+        : handle.db.transaction(async (tx) => {
+            const op = clientOp('session.stop', id, { session_id: id }, T(30).getTime());
+            await SESSION_PRELOCKS[op.kind]!(tx, op);
+            await appendOp(tx, op.stream, {
+              kind: op.kind,
+              data: op.data,
+              at: op.at,
+              clockUncertain: false,
+              origin: 'ipad',
+              opId: op.op_id,
+              deviceId: DEVICE,
+            });
+            await SESSION_HANDLERS[op.kind]!(tx, op, { deviceId: DEVICE, origin: 'ipad' });
+          });
+
+    it.each(['rest', 'sync'] as const)(
+      'Stopp (%s) gegen ersten Chunk: kein Deadlock, genau ein Job',
+      async (via) => {
+        for (let round = 0; round < 12; round += 1) {
+          await handle.sql`TRUNCATE session, sync_op, sync_stream, job, recording CASCADE`;
+          const id = await mkSession({ state: 'laeuft', startedAt: T(0), startedFrom: 'mac' });
+          const rec = await mkRecording(id, { chunk: false });
+          const rs = await Promise.allSettled([
+            jitter().then(() => stop(id, via)),
+            jitter().then(() => chunk(rec, 0)),
+          ]);
+          expect(rs.map((r) => (r.status === 'rejected' ? String(r.reason) : 'ok'))).toEqual(['ok', 'ok']);
+          expect(await finalizeJobs(rec)).toHaveLength(1);
+        }
+      },
+    );
+
+    it('Stopp gegen complete (Aufnahme mit Chunk): kein Deadlock, genau ein sofort fälliger Job', async () => {
+      for (let round = 0; round < 12; round += 1) {
+        await handle.sql`TRUNCATE session, sync_op, sync_stream, job, recording CASCADE`;
+        const id = await mkSession({ state: 'laeuft', startedAt: T(0), startedFrom: 'mac' });
+        const rec = await mkRecording(id);
+        const rs = await Promise.allSettled([
+          jitter().then(() => stop(id, 'rest')),
+          jitter().then(() => completeRecording(handle.db, rec, { last_seq: 0, duration_ms: 1000 })),
+        ]);
+        expect(rs.map((r) => (r.status === 'rejected' ? String(r.reason) : 'ok'))).toEqual(['ok', 'ok']);
+        const jobs = await finalizeJobs(rec);
+        expect(jobs).toHaveLength(1);
+        expect(jobs[0]!.runAfter === null || jobs[0]!.runAfter.getTime() <= Date.now() + 1000).toBe(true);
+      }
+    });
+  });
+});
+
+// --- Gemeinsame Auto-Stopp-Grenze (§9.4, §10.1) ----------------------------------------------------------------
+
+describe('autoStopBoundary und nachträgliche Aufnahmen', () => {
+  const limits = { hardAfterEndMin: 30, maxDurationMin: 240 };
+
+  it('G = max(min(Terminende + Hardlimit, started_at + Maximaldauer), extended_until)', () => {
+    const base = { startedAt: T(0), plannedEndsAt: T(60), extendedUntil: null };
+    expect(autoStopBoundary(base, limits)).toEqual(T(90));
+    expect(autoStopBoundary({ ...base, plannedEndsAt: T(300) }, limits)).toEqual(T(240));
+    expect(autoStopBoundary({ ...base, plannedEndsAt: null }, limits)).toEqual(T(240));
+    expect(autoStopBoundary({ ...base, extendedUntil: T(100) }, limits)).toEqual(T(100));
+    expect(autoStopBoundary({ ...base, extendedUntil: T(50) }, limits)).toEqual(T(90));
+  });
+
+  it('absturz_wiederhergestellt: createRecording nutzt G statt der 12 h (Toleranz 5 min)', async () => {
+    const eventId = await mkEvent(0, 60); // G = T(90)
+    const id = await mkSession({
+      state: 'verarbeitet',
+      startedAt: T(0),
+      endedAt: T(10),
+      stopReason: 'absturz_wiederhergestellt',
+      calendarEventId: eventId,
+    });
+    const input = (started_ms: number) => ({ mime: 'audio/webm', codec: 'opus' as const, started_ms });
+    const limit = 95 * 60_000;
+    await expect(createRecording(handle.db, id, input(limit), config)).resolves.toBeTruthy();
+    const error = await createRecording(handle.db, id, input(limit + 1), config).catch((e: unknown) => e);
+    expect(error).toMatchObject({ statusCode: 409, code: 'session_not_active' });
+    // Verlängerung schiebt die Grenze
+    await handle.db
+      .update(session)
+      .set({ autoStopExtendedUntil: T(200) })
+      .where(eq(session.id, id));
+    await expect(createRecording(handle.db, id, input(205 * 60_000), config)).resolves.toBeTruthy();
+  });
+});
+
+// --- Papierkorb, verschobene Termine, updated_at -------------------------------------------------------------------
+
+describe('Papierkorb und Termine', () => {
+  it('DELETE einer Session geht über softDeleteWithOps (Kaskade, Ereignis, Strom angelegt)', async () => {
+    const id = await mkSession({ state: 'beendet', startedAt: T(0), endedAt: T(5), stopReason: 'manuell' });
+    await runHandler(
+      clientOp(
+        'marker.add',
+        id,
+        {
+          marker_id: uuidv7(),
+          session_id: id,
+          kind: 'frage',
+          t_ms: 1,
+          page_id: null,
+          position: null,
+          note: null,
+          source: 'mac',
+        },
+        1,
+      ),
+    );
+    events = [];
+    await deleteSession(handle.db, id);
+    const [m] = await handle.db.select().from(marker);
+    expect(m!.deletedAt).toEqual((await row(id)).deletedAt);
+    expect(updatedEventFor(id).at(-1)?.deleted_at).not.toBeNull();
+    const streams = await handle.sql`SELECT stream FROM sync_stream WHERE stream = ${`session:${id}`}`;
+    expect(streams).toHaveLength(1);
+    // aktive Session: 409, nichts gelöscht
+    const active = await mkSession({ state: 'laeuft', startedAt: T(0) });
+    await expect(deleteSession(handle.db, active)).rejects.toMatchObject({ code: 'session_active' });
+    expect((await row(active)).deletedAt).toBeNull();
+  });
+
+  it('DELETE /calendar/sources/{id} löscht nie gestartete Sessions, gestartete bleiben', async () => {
+    const t = await startTestApp();
+    try {
+      const sourceId = uuidv7();
+      await handle.db
+        .insert(calendarSource)
+        .values({ id: sourceId, ...base, kind: 'ics_file', name: 'x', readonly: true });
+      const e1 = await mkEvent(FAR, FAR + 60, { sourceId, externalUid: 'a' });
+      const e2 = await mkEvent(0, 60, { sourceId, externalUid: 'b' });
+      const planned = await mkSession({ state: 'geplant', calendarEventId: e1 });
+      const started = await mkSession({
+        state: 'beendet',
+        startedAt: T(0),
+        endedAt: T(5),
+        calendarEventId: e2,
+      });
+      const res = await t.request({ method: 'DELETE', url: `${API}/calendar/sources/${sourceId}` });
+      expect(res.statusCode).toBe(204);
+      expect((await row(planned)).deletedAt).not.toBeNull();
+      expect((await row(started)).deletedAt).toBeNull();
+    } finally {
+      await t.close();
+    }
+  });
+
+  it('verschobener Termin einer gestarteten Session: session.updated mit neuem planned_ends_at, updated_at wächst', async () => {
+    const eventId = await mkEvent(0, 60);
+    const id = await mkSession({ state: 'laeuft', startedAt: T(0), calendarEventId: eventId });
+    const before = await row(id);
+    await handle.db
+      .update(calendarEvent)
+      .set({ endsAt: T(120) })
+      .where(eq(calendarEvent.id, eventId));
+    await handle.db.transaction((tx) => ensurePlannedSessions(tx, [eventId]));
+    const last = updatedEventFor(id).at(-1)!;
+    expect(last.planned_ends_at).toBe('2026-11-04T11:00:00Z');
+    expect(new Date(last.updated_at).getTime()).toBeGreaterThan(before.updatedAt.getTime());
+    expect(last.state).toBe('laeuft');
+  });
+
+  it('updated_at ist über schnelle Änderungen strikt monoton (Millisekunden der API)', async () => {
+    const id = await mkSession();
+    await transition(id, 'start', { at: T(0), startedFrom: 'mac' });
+    for (let i = 0; i < 6; i += 1) {
+      await transition(id, 'pause', { at: T(1) });
+      await transition(id, 'resume', { at: T(2) });
+    }
+    const stamps = updatedEventFor(id).map((e) => new Date(e.updated_at).getTime());
+    expect(stamps.length).toBe(13);
+    for (let i = 1; i < stamps.length; i += 1) expect(stamps[i]).toBeGreaterThan(stamps[i - 1]!);
+  });
 });

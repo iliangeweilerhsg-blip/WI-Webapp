@@ -24,7 +24,6 @@ import { createDb } from '../../src/db/client.ts';
 import { registerErrorHandler } from '../../src/plugins/errors.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { materialRoutes, parseRange, sweepOrphanFolders } from '../../src/routes/material.ts';
-import { setSessionEventPublisher } from '../../src/services/sessions.ts';
 import { startTestApp, testDatabaseUrl, type TestApp } from './helpers.ts';
 
 let t: TestApp;
@@ -35,8 +34,6 @@ let sessionOfOtherModule: string;
 const API = '/api/v1';
 
 beforeAll(async () => {
-  // Folien-Upload an eine Session meldet `session.updated`; der Versand (T1-08) ist hier nicht Gegenstand
-  setSessionEventPublisher(async () => {});
   t = await startTestApp();
   const sql = t.handle.sql;
   const semesterId = uuidv7();
@@ -53,7 +50,6 @@ beforeAll(async () => {
   await sql`INSERT INTO session (id, user_id, module_id) VALUES (${sessionOfOtherModule}, ${SINGLE_USER_ID}, ${otherModuleId})`;
 });
 afterAll(async () => {
-  setSessionEventPublisher(null);
   await t.close();
 });
 beforeEach(async () => {

@@ -154,7 +154,7 @@ export async function sessionRoutes(app: FastifyInstance, deps: SessionRouteDeps
       },
     },
     async (request, reply) => {
-      await db.transaction((tx) => deleteSession(tx, request.params.id));
+      await deleteSession(db, request.params.id);
       return reply.code(204).send(null);
     },
   );

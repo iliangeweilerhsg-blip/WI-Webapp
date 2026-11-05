@@ -560,13 +560,14 @@ describe('Nachträglich angelegte Aufnahme (offline gestartet, Session schon bee
     expect((await createRec({ started_ms: 120 * 60_000 }, sid)).statusCode).toBe(201);
   });
 
-  it('absturz_wiederhergestellt: Grenze started_at + 12 h (offene Lead-Frage)', async () => {
+  it('absturz_wiederhergestellt: Grenze ist die Auto-Stopp-Grenze G (hier started_at + 240 min, §10.1)', async () => {
     const sid = await endedSession({
       stopReason: 'absturz_wiederhergestellt',
       endedAt: new Date(START.getTime() + 60_000),
     });
-    expect((await createRec({ started_ms: 11 * 3_600_000 }, sid)).statusCode).toBe(201);
-    expect((await createRec({ started_ms: 12 * 3_600_000 + 5 * 60_000 + 1 }, sid)).statusCode).toBe(409);
+    expect((await createRec({ started_ms: 4 * 3_600_000 }, sid)).statusCode).toBe(201);
+    expect((await createRec({ started_ms: 4 * 3_600_000 + 5 * 60_000 }, sid)).statusCode).toBe(201);
+    expect((await createRec({ started_ms: 4 * 3_600_000 + 5 * 60_000 + 1 }, sid)).statusCode).toBe(409);
   });
 
   it('Sessions ohne started_at oder im Zustand bereit/geplant bleiben abgelehnt', async () => {

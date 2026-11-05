@@ -28,6 +28,7 @@ import {
   marker,
   notDeleted,
   photo,
+  job,
   recording,
   session,
   slideDeck,
@@ -39,10 +40,12 @@ import { HttpError } from '../errors.ts';
 import { decodeCursor, toPage, type Page } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { appendOp } from '../sync/append.ts';
-import { publishAfterCommit } from '../sync/events.ts';
-import { enqueueJob } from './jobs.ts';
+import { publishAfterCommit, publishEvent } from '../sync/events.ts';
+import { autoStopBoundary, autoStopReason, type AutoStopLimits, type AutoStopSession } from './auto-stop.ts';
+import { ensureFinalizeOnStop } from './recordings.ts';
 import { getSettings } from './settings.ts';
 import { softDelete } from './trash.ts';
+import { softDeleteWithOps } from './trash-ops.ts';
 
 export type SessionAction = 'start' | 'pause' | 'resume' | 'stop';
 
@@ -71,8 +74,6 @@ interface Loaded {
 const MINUTE_MS = 60_000;
 /** `geplant` → `bereit` so lange vor dem geplanten Beginn (§9.1) */
 const READY_BEFORE_START_MS = 15 * MINUTE_MS;
-/** Wartezeit für `audio.finalize`, solange der Browser noch Chunks nachliefern kann (§3) */
-const FINALIZE_DELAY_MS = 10 * MINUTE_MS;
 
 const NEVER_STARTED_STATES = ['geplant', 'bereit', 'verpasst'] as const;
 const ACTIVE_STATES = ['laeuft', 'pausiert'] as const;
@@ -148,6 +149,12 @@ async function loadSession(tx: DbOrTx, id: string, lock = false): Promise<Loaded
   return found ?? null;
 }
 
+/**
+ * `updated_at` einer Session strikt monoton: Clients verwerfen ältere Fassungen über `updated_at`. Zwei Änderungen
+ * innerhalb derselben Millisekunde (die API gibt Millisekunden aus) hätten sonst denselben Wert.
+ */
+const bumpedAt = (): SQL => sql`greatest(clock_timestamp(), ${session.updatedAt} + interval '1 millisecond')`;
+
 const notFound = () => new HttpError(404, 'session_not_found', 'Die Session wurde nicht gefunden.');
 
 /** Nicht gelöschte Session oder 404 (REST) */
@@ -159,6 +166,20 @@ export async function requireSession(tx: DbOrTx, id: string): Promise<Loaded> {
 
 export async function getSession(db: DbOrTx, id: string): Promise<Session> {
   return toApiSession(await requireSession(db, id));
+}
+
+/** Kanal, auf dem der Worker Änderungen am Fortschritt meldet: `pg_notify('sg_session', <session_id>)` (§3) */
+export const SESSION_NOTIFY_CHANNEL = 'sg_session';
+
+/**
+ * Meldung des Workers auf `sg_session`: `session.updated` mit dem aktuellen Stand an alle Clients (§11.6).
+ * Nutzlast ungültig oder Session endgültig gelöscht: nichts senden.
+ */
+export async function notifySessionUpdated(db: Db, payload: string): Promise<void> {
+  const id = payload.trim();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) return;
+  const loaded = await loadSession(db, id);
+  if (loaded) publishEvent({ type: 'event', name: 'session.updated', data: toApiSession(loaded) });
 }
 
 /** `session.updated` für den aktuellen Stand der Session (auch gelöscht) nach dem Commit senden */
@@ -208,28 +229,12 @@ async function appendServerOp(
 
 // --- Stopp -----------------------------------------------------------------------------------
 
-/** Je Aufnahme ein Job `audio.finalize` (§3). Gibt zurück, wie viele angelegt wurden */
-async function enqueueFinalizeJobs(tx: Tx, sessionId: string, now: Date): Promise<number> {
-  const recordings = await tx
-    .select({ id: recording.id, completedAt: recording.completedAt })
-    .from(recording)
-    .where(and(eq(recording.sessionId, sessionId), notDeleted(recording)))
-    .orderBy(asc(recording.createdAt), asc(recording.id));
-  for (const rec of recordings) {
-    await enqueueJob(tx, {
-      type: 'audio.finalize',
-      payload: { recording_id: rec.id },
-      sessionId,
-      // Abgeschlossene Aufnahme sofort, sonst Stopp + 10 min (der Browser liefert noch Chunks nach)
-      ...(rec.completedAt ? {} : { runAfter: new Date(now.getTime() + FINALIZE_DELAY_MS) }),
-    });
-  }
-  return recordings.length;
-}
-
 /**
- * Session beenden: Zeile aktualisieren, Jobs anlegen, Server-Operation schreiben (`serverOp`), Ereignis senden.
- * `ended_at` ist nie vor `started_at`. Ohne Job setzt der Core sofort `verarbeitet` (§9.1).
+ * Session beenden: Server-Operation (`serverOp`), Jobs über `ensureFinalizeOnStop` (T1-06, je Aufnahme in ID-Reihenfolge),
+ * Zeile aktualisieren, Ereignis senden. `ended_at` ist nie vor `started_at`.
+ * Sperrreihenfolge (§16.2): Session-Zeile (`FOR NO KEY UPDATE`) → `sync_stream` → `lockRecording` → Job-Zeilen.
+ * Zielzustand: `beendet`, solange danach ein Job der Session in `wartet`/`laeuft` ist, sonst gleich `verarbeitet`
+ * (geprüft NACH den Aufrufen: ein Job, der kurz vorher fertig wurde, lässt die Session nicht auf `beendet` hängen).
  */
 async function finishSession(
   tx: Tx,
@@ -241,17 +246,27 @@ async function finishSession(
 ): Promise<void> {
   const { row } = loaded;
   const ended = row.startedAt && endedAt < row.startedAt ? row.startedAt : endedAt;
-  const jobs = await enqueueFinalizeJobs(tx, row.id, now);
+  if (serverOp) await appendServerOp(tx, row.id, 'session.stop', { reason }, ended);
+  const recordings = await tx
+    .select({ id: recording.id })
+    .from(recording)
+    .where(and(eq(recording.sessionId, row.id), notDeleted(recording)))
+    .orderBy(asc(recording.id));
+  for (const rec of recordings) await ensureFinalizeOnStop(tx, rec.id, now);
+  const [pending] = await tx
+    .select({ id: job.id })
+    .from(job)
+    .where(and(eq(job.sessionId, row.id), inArray(job.state, ['wartet', 'laeuft']), notDeleted(job)))
+    .limit(1);
   await tx
     .update(session)
     .set({
-      state: jobs > 0 ? 'beendet' : 'verarbeitet',
+      state: pending ? 'beendet' : 'verarbeitet',
       endedAt: ended,
       stopReason: reason,
-      updatedAt: sql`now()`,
+      updatedAt: bumpedAt(),
     })
     .where(eq(session.id, row.id));
-  if (serverOp) await appendServerOp(tx, row.id, 'session.stop', { reason }, ended);
   await emitUpdated(tx, row.id);
 }
 
@@ -408,7 +423,7 @@ async function recordStartOffset(tx: Tx, row: SessionRow, input: TransitionInput
     .update(session)
     .set({
       startOffsets: [...row.startOffsets, { device_id: input.deviceId, offset_ms: offsetMs }],
-      updatedAt: sql`now()`,
+      updatedAt: bumpedAt(),
     })
     .where(eq(session.id, row.id));
   return true;
@@ -454,7 +469,7 @@ async function startSession(
     startedAt: at,
     startedFrom: input.startedFrom ?? row.startedFrom,
     slideDeckId,
-    updatedAt: sql`now()`,
+    updatedAt: bumpedAt(),
   };
 
   // Ein REST-Start ist immer „jetzt“; nur Geräte liefern Starts nach
@@ -554,7 +569,7 @@ export async function transitionSession(
       }
       await tx
         .update(session)
-        .set({ state: 'pausiert', updatedAt: sql`now()` })
+        .set({ state: 'pausiert', updatedAt: bumpedAt() })
         .where(eq(session.id, row.id));
       if (input.origin === 'server') await appendServerOp(tx, row.id, 'session.pause', {}, input.at);
       await emitUpdated(tx, row.id);
@@ -566,10 +581,7 @@ export async function transitionSession(
         if (lateAfterCoreStop(row, input)) return result();
         throw transitionInvalid(row.state, action);
       }
-      await tx
-        .update(session)
-        .set({ state: 'laeuft', updatedAt: sql`now()` })
-        .where(eq(session.id, row.id));
+      await tx.update(session).set({ state: 'laeuft', updatedAt: bumpedAt() }).where(eq(session.id, row.id));
       if (input.origin === 'server') await appendServerOp(tx, row.id, 'session.resume', {}, input.at);
       await emitUpdated(tx, row.id);
       return result();
@@ -592,7 +604,7 @@ export async function transitionSession(
           const corrected = row.startedAt && input.at < row.startedAt ? row.startedAt : input.at;
           await tx
             .update(session)
-            .set({ endedAt: corrected, stopReason: reason, updatedAt: sql`now()` })
+            .set({ endedAt: corrected, stopReason: reason, updatedAt: bumpedAt() })
             .where(eq(session.id, row.id));
           await emitUpdated(tx, row.id);
         }
@@ -628,36 +640,20 @@ async function finalResult(
 
 // --- Auto-Stopp (§9.4) ----------------------------------------------------------------------------
 
-export interface AutoStopLimits {
-  hardAfterEndMin: number;
-  maxDurationMin: number;
-}
+export { autoStopBoundary, type AutoStopLimits } from './auto-stop.ts';
 
 /**
- * Greift Auto-Stopp-Regel 2 (Kalenderende + Hardlimit) oder 4 (Maximaldauer)? `at` ist die überschrittene Grenze,
- * bzw. `auto_stop_extended_until`, falls später. Vor `auto_stop_extended_until` stoppt keine Regel.
- * Sind beide überschritten, gilt die zuerst erreichte; bei Gleichstand das Kalenderende.
+ * Greift Auto-Stopp-Regel 2 (Kalenderende + Hardlimit) oder 4 (Maximaldauer)? `at` ist die Grenze `G`
+ * (`autoStopBoundary`, bei Verlängerung `auto_stop_extended_until`, falls später). Vor `G` stoppt keine Regel.
+ * Sind beide Regeln fällig, gilt die zuerst erreichte; bei Gleichstand das Kalenderende.
  */
 export function autoStopDecision(
-  s: { startedAt: Date; plannedEndsAt: Date | null; extendedUntil: Date | null },
+  s: AutoStopSession,
   limits: AutoStopLimits,
   now: Date,
 ): { at: Date; reason: 'kalenderende' | 'maximaldauer' } | null {
-  const effective = (boundary: Date): Date =>
-    s.extendedUntil && s.extendedUntil > boundary ? s.extendedUntil : boundary;
-  const candidates: { at: Date; reason: 'kalenderende' | 'maximaldauer' }[] = [];
-  if (s.plannedEndsAt) {
-    candidates.push({
-      at: effective(new Date(s.plannedEndsAt.getTime() + limits.hardAfterEndMin * MINUTE_MS)),
-      reason: 'kalenderende',
-    });
-  }
-  candidates.push({
-    at: effective(new Date(s.startedAt.getTime() + limits.maxDurationMin * MINUTE_MS)),
-    reason: 'maximaldauer',
-  });
-  const due = candidates.filter((c) => c.at <= now).sort((a, b) => a.at.getTime() - b.at.getTime());
-  return due[0] ?? null;
+  const at = autoStopBoundary(s, limits);
+  return at <= now ? { at, reason: autoStopReason(s, limits) } : null;
 }
 
 /** Letzte Aktivität einer Session: Ende des letzten Chunks oder `at` der letzten Operation, mindestens `started_at` */
@@ -709,10 +705,7 @@ export async function runSessionTick(
     for (const p of planned) {
       const next = plannedState(now, p.plannedStartsAt, p.plannedEndsAt);
       if (next !== p.row.state) {
-        await tx
-          .update(session)
-          .set({ state: next, updatedAt: sql`now()` })
-          .where(eq(session.id, p.row.id));
+        await tx.update(session).set({ state: next, updatedAt: bumpedAt() }).where(eq(session.id, p.row.id));
         await emitUpdated(tx, p.row.id);
       }
     }
@@ -832,7 +825,7 @@ export async function extendSession(
   const base = previous && previous > now ? previous : now;
   await tx
     .update(session)
-    .set({ autoStopExtendedUntil: new Date(base.getTime() + add * MINUTE_MS), updatedAt: sql`now()` })
+    .set({ autoStopExtendedUntil: new Date(base.getTime() + add * MINUTE_MS), updatedAt: bumpedAt() })
     .where(eq(session.id, sessionId));
   await emitUpdated(tx, sessionId);
   return toApiSession((await loadSession(tx, sessionId)) as Loaded);
@@ -890,6 +883,13 @@ export async function ensurePlannedSessions(
     const neverStarted = (s: SessionRow) =>
       s.startedAt === null && (NEVER_STARTED_STATES as readonly string[]).includes(s.state);
 
+    // Gestartete Session: Der Termin kann verschoben worden sein (`planned_*` stammen aus dem Termin). Clients
+    // verwerfen ältere Fassungen über `updated_at`, darum wird es mit angehoben und `session.updated` gesendet
+    if (existing && !neverStarted(existing)) {
+      await tx.update(session).set({ updatedAt: bumpedAt() }).where(eq(session.id, existing.id));
+      touched.add(existing.id);
+    }
+
     if (!qualifies) {
       if (existing && neverStarted(existing)) {
         await softDelete(tx, 'session', existing.id);
@@ -915,7 +915,7 @@ export async function ensurePlannedSessions(
     } else if (neverStarted(existing) && (existing.moduleId !== event.moduleId || existing.state !== state)) {
       await tx
         .update(session)
-        .set({ moduleId: event.moduleId as string, state, updatedAt: sql`now()` })
+        .set({ moduleId: event.moduleId as string, state, updatedAt: bumpedAt() })
         .where(eq(session.id, existing.id));
       touched.add(existing.id);
     }
@@ -928,13 +928,13 @@ export async function ensurePlannedSessions(
         SELECT id, row_number() OVER (ORDER BY starts_at, id)::int AS n FROM calendar_event
         WHERE module_id = ${moduleId} AND kind = 'vorlesung' AND NOT cancelled AND deleted_at IS NULL
       )
-      UPDATE session s SET number = r.n, updated_at = now() FROM ranked r
+      UPDATE session s SET number = r.n, updated_at = greatest(clock_timestamp(), s.updated_at + interval '1 millisecond') FROM ranked r
       WHERE s.calendar_event_id = r.id AND s.deleted_at IS NULL AND s.started_at IS NULL
         AND s.state IN ('geplant','bereit','verpasst') AND s.number IS DISTINCT FROM r.n
       RETURNING s.id`);
     for (const r of renumbered) touched.add(r.id);
     const cleared = await tx.execute<{ id: string }>(sql`
-      UPDATE session s SET number = NULL, updated_at = now() FROM calendar_event e
+      UPDATE session s SET number = NULL, updated_at = greatest(clock_timestamp(), s.updated_at + interval '1 millisecond') FROM calendar_event e
       WHERE s.calendar_event_id = e.id AND s.module_id = ${moduleId} AND s.deleted_at IS NULL
         AND s.started_at IS NULL AND s.state IN ('geplant','bereit','verpasst') AND s.number IS NOT NULL
         AND (e.kind <> 'vorlesung' OR e.cancelled OR e.deleted_at IS NOT NULL)
@@ -1030,7 +1030,7 @@ export async function updateSession(
   if (Object.keys(set).length > 0) {
     await tx
       .update(session)
-      .set({ ...set, updatedAt: sql`now()` })
+      .set({ ...set, updatedAt: bumpedAt() })
       .where(eq(session.id, id));
     if (set.slideDeckId) await linkDeckToSession(tx, set.slideDeckId, id);
     await emitUpdated(tx, id);
@@ -1038,11 +1038,13 @@ export async function updateSession(
   return toApiSession((await loadSession(tx, id)) as Loaded);
 }
 
-/** `DELETE /sessions/{id}`: Papierkorb mit Kaskade (404, 409 `session_active` aus `softDelete`) */
-export async function deleteSession(tx: Tx, id: string): Promise<void> {
-  await lockSessionTransitions(tx);
-  await softDelete(tx, 'session', id);
-  await emitUpdated(tx, id);
+/**
+ * `DELETE /sessions/{id}`: Papierkorb mit Kaskade über `softDeleteWithOps` (§16.2). Zuerst `lockSessionTransitions`,
+ * dann der Strom, dann die Zeilen. 404, 409 `session_active` kommen aus `softDelete`.
+ */
+export async function deleteSession(db: Db, id: string): Promise<void> {
+  await softDeleteWithOps(db, 'session', id, lockSessionTransitions);
+  await db.transaction((tx) => emitUpdated(tx, id));
 }
 
 // --- Snapshot (§7.2, §11.1) ---------------------------------------------------------------------------------
