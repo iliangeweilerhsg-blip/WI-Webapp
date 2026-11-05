@@ -1,0 +1,32 @@
+{
+  "session_id": "019a4e14-0000-7000-8000-000000000031",
+  "provider": "mlx-whisper",
+  "model": "mlx-community/whisper-large-v3-turbo",
+  "recordings": [
+    {
+      "recording_id": "019a4e14-0000-7000-8000-000000000070",
+      "transcript_id": "019a4e14-0000-7000-8000-000000000160",
+      "outcome": "transkribiert",
+      "segment_count": 412,
+      "word_count": 11873,
+      "audio_duration_ms": 5400000,
+      "language": "de",
+      "transcribe_ms": 512340
+    },
+    {
+      "recording_id": "019a4e14-0000-7000-8000-000000000071",
+      "transcript_id": null,
+      "outcome": "ohne_audio",
+      "segment_count": 0,
+      "word_count": 0,
+      "audio_duration_ms": 0,
+      "language": null,
+      "transcribe_ms": 0
+    }
+  ],
+  "removed_transcripts": 0,
+  "segment_count": 412,
+  "word_count": 11873,
+  "session_deleted": false,
+  "job_duration_ms": 518220
+}

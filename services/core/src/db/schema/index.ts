@@ -7,3 +7,4 @@ export * from './ink.ts';
 export * from './sync.ts';
 export * from './system.ts';
 export * from './moodle.ts';
+export * from './transcript.ts';

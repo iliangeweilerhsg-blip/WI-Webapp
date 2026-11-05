@@ -1,9 +1,9 @@
-# Laufzeit-Verträge zwischen den Bausteinen (Phase 0 und 1)
+# Laufzeit-Verträge zwischen den Bausteinen (Phase 0 bis 2)
 
 Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammenspielen. So können die Teile parallel gebaut werden (`AGENTS.md`, Regel 4).
 Änderungen nur durch den Lead. Datenformate selbst stehen in `packages/schemas`.
 
-§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1.
+§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1, §17 ist der Moodle-Abgleich. Ab §18 folgt Phase 2.
 
 ## 1. Umgebungsvariablen
 
@@ -19,6 +19,8 @@ Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammen
 | `SG_LOG_LEVEL` | `info` | Core, Worker |
 | `SG_MOODLE_URL` | leer (Moodle-Anbindung aus). Beim Owner `https://moodle2.uni-potsdam.de` | Core, CLI |
 | `TZ` | Zeitzone des Systems | Core (Ortszeit für ICS-Termine ohne Zeitzone, Backup-Uhrzeit). Tests laufen mit `TZ=Europe/Zurich` |
+| `SG_TRANSCRIBER` | `mlx-whisper`. In CI und auf Linux `fake` | Worker (§18.6) |
+| `SG_WHISPER_MODEL` | `mlx-community/whisper-large-v3-turbo` | Worker (§18.6) |
 
 Geheimnisse wie API-Schlüssel stehen in `$SG_DATA_DIR/config/.env` mit Rechten 600 (02 §3). Die Prozesse lesen diese Datei beim Start.
 **Ausnahme Moodle:** Der Moodle-Token liegt nur im macOS-Schlüsselbund (Dienst `studiengehirn-moodle`), nie in `.env`. Nur der Core liest ihn (08 §9.1). Einzige Ausnahme: `pnpm sg moodle login` liest den Eintrag direkt nach dem Speichern einmal zurück, um zu prüfen, dass der Core genau diesen Token findet. `pnpm sg moodle status` und `logout` lesen den Token nie.
@@ -110,7 +112,7 @@ Ein laufender Job erneuert `locked_at` alle 60 s (Heartbeat). Ergebnis und Fehle
   - Der Core entscheidet unter `lockRecording` und liest den letzten Job mit `FOR UPDATE`. Der Worker holt Jobs mit `FOR UPDATE SKIP LOCKED`.
 - **Ergebnis** enthält `job_duration_ms` (Laufzeit des Jobs) getrennt von `audio_duration_ms` (Länge der Datei).
 - **Ausführung (Worker):** Chunks nach `seq` lesen. Bei `chunks_independent = false` als ein Bytestrom aneinanderhängen, sonst jeden Chunk einzeln decodieren. Dann mit `ffmpeg` nach `full.m4a` (AAC, 48 kHz, mono) umwandeln. Lücken (fehlende `seq` oder Sprünge in `start_ms`) werden als Stille mit korrekter Länge eingefügt. Zum Schluss `recording.duration_ms` und `recording.state` (`vollstaendig` bzw. `mit_luecken`) setzen.
-- **Session-Fortschritt (Worker):** Die Job-Schleife zieht den Fortschritt nach jedem Job mit `session_id` nach, in **derselben Transaktion**, in der der Job final wird (`fertig`, endgültig `fehler`, `abgebrochen` durch `depends_on`; bei Retry `wartet`; auch für abgestürzte Jobs). Handler schreiben ihn nicht selbst. Ablauf: (1) Session-Zeile `FOR NO KEY UPDATE` sperren, **bevor** Jobs gezählt werden, damit zwei gleichzeitig endende Jobs nacheinander laufen und der zweite den ersten sieht. (2) `session.processing[<job.type>]` aus **allen** Jobs dieses Typs der Session setzen: `fehler`, sobald einer endgültig gescheitert ist, sonst `laeuft`, dann `wartet`, sonst `fertig`; `abgebrochen` zählt nicht mit, nur abgebrochene Jobs ergeben `abgebrochen`. (3) Ist die Session `beendet` und hat sie keinen Job mehr in `wartet` oder `laeuft`, setzt der Worker `state = 'verarbeitet'`, auch wenn Jobs `fehler` sind; eine `verarbeitet`e Session ändert ihren Zustand nicht mehr, nur `processing`. (4) `pg_notify('sg_session', '<session_id>')`. Der Core hört darauf und sendet das Ereignis `session.updated` (§11.6). Doppelte Läufe sind harmlos.
+- **Session-Fortschritt (Worker):** Die Job-Schleife zieht den Fortschritt nach jedem Job mit `session_id` nach, in **derselben Transaktion**, in der der Job final wird (`fertig`, endgültig `fehler`, `abgebrochen` durch `depends_on`; bei Retry `wartet`; auch für abgestürzte Jobs). Handler schreiben ihn nicht selbst. Ablauf: (1) Session-Zeile `FOR NO KEY UPDATE` sperren, **bevor** Jobs gezählt werden, damit zwei gleichzeitig endende Jobs nacheinander laufen und der zweite den ersten sieht. (2) `session.processing[<job.type>]` aus **allen** Jobs dieses Typs der Session setzen: `fehler`, sobald einer endgültig gescheitert ist, sonst `laeuft`, dann `wartet`, sonst `fertig`; `abgebrochen` zählt nicht mit, nur abgebrochene Jobs ergeben `abgebrochen`. **Ab T2-02a gilt stattdessen die Zusammenfassung über den jeweils neuesten Job aus §18.2.** (3) Ist die Session `beendet` und hat sie keinen Job mehr in `wartet` oder `laeuft`, setzt der Worker `state = 'verarbeitet'`, auch wenn Jobs `fehler` sind; eine `verarbeitet`e Session ändert ihren Zustand nicht mehr, nur `processing`. (4) `pg_notify('sg_session', '<session_id>')`. Der Core hört darauf und sendet das Ereignis `session.updated` (§11.6). Doppelte Läufe sind harmlos.
 
 **Ergänzungen zu `audio.finalize` im Worker (T1-06w):**
 
@@ -726,7 +728,7 @@ Im Live-Dashboard nimmt **nur der Sync-Leader-Tab** auf (F-AUD-01). Das gilt zus
 | `slide_deck` | Folien | Sessions mit `slide_deck_id` (Verweis bleibt, Anzeige ohne Folien) |
 | `exercise_sheet` | Aufgaben | – |
 | `calendar_source` | ihre Termine. Dazu die nie gestarteten Sessions dieser Termine (`geplant`, `bereit`, `verpasst`) | gestartete Sessions. Ihr `calendar_event_id` zeigt auf den gelöschten Termin, `planned_*` bleiben lesbar |
-| `session` (nur nicht aktiv) | Folienwechsel, Marker, Fotos, Aufnahmen mit Chunks | Seiten mit `session_id` (gehören zum Notizbuch) |
+| `session` (nur nicht aktiv) | Folienwechsel, Marker, Fotos, Aufnahmen mit Chunks. Ab Phase 2 auch `transcript`, `transcript_segment` und `slide_segment` (§18.1) | Seiten mit `session_id` (gehören zum Notizbuch) |
 | `notebook` (nicht `vorlesung`/`uebung`) | Seiten, Striche, Seitenelemente | – |
 | `page` | Striche, Seitenelemente | – |
 | `marker`, `photo` | – | Stempel- bzw. Bildelemente, die darauf verweisen (Anzeige als Platzhalter) |
@@ -1077,3 +1079,251 @@ Bewusste Abweichung von F-MDL-03 („jede Zuordnung bestätigen“): Kurse werde
 **Neue Fehlercodes:** `moodle_link_not_found`, `moodle_item_not_found` (404), `moodle_link_disabled` (409), `moodle_module_not_removable` (409, #141). `MoodleSyncRun.error_code` kann außerdem `abgebrochen` sein (Beenden des Core).
 
 **Zeitformat:** Die neuen Antworten liefern Zeiten nach §6 (ohne `.000`). Die Lese-Endpunkte aus T1-22 liefern noch `.000Z`, das gleicht Folge-Issue #129 an.
+
+---
+
+# Phase 2
+
+## 18. Transkription und Rückblick (T2-01, F-NAC-01/-02)
+
+Erster Schnitt von Phase 2: **Aufnahme → Transkript → Folienzuordnung → Rückblick**. Ergänzt 03 §5, 05 §2, P4 und P5a, 08 §1 und §5.
+Datenformate in `packages/schemas/src/transcript.schema.json` und `jobs.schema.json`, Tabellen in der Migration `0006_transcript`.
+Nicht Teil dieses Schnitts: `align.content` (F-NAC-03), Konzepte, Karten, Suche, `GET /sessions/{id}/timeline`.
+
+### 18.1 Tabellen
+
+| Tabelle | Inhalt | Schreiber |
+|---|---|---|
+| `transcript` | Ein Transkript **je Aufnahme**: `session_id`, `recording_id` (eindeutig), `job_id` (schreibender `transcribe`-Job), `finalize_job_id` (der `audio.finalize`-Job, dessen `full.m4a` transkribiert wurde), `provider` (`mlx-whisper` \| `fake`), `model`, `language` (erkannt, ISO 639-1, nullbar), `initial_prompt` (≤ 200 Whisper-Tokens nach §18.6, die Datenbank prüft nur ≤ 2 000 Zeichen), `input_hash`, `audio_sha256`, `audio_duration_ms`, `segment_count`, `word_count` | Worker (`transcribe`) |
+| `transcript_segment` | Abschnitt nach der Nachbearbeitung (§18.2): `transcript_id`, `session_id`, `recording_id`, `seq` (ab 0, eindeutig je Transkript), `start_ms`, `end_ms` (Sitzungszeit, `end_ms ≥ start_ms`), `text`, `lang`, `speaker` (Phase 2: immer `NULL`), `avg_logprob`, `no_speech_prob`, `words jsonb` (`TranscriptWord[]` oder `NULL`), `embedding vector(1024)` (bis zu einem späteren Ticket `NULL`, noch ohne Index) | Worker (`transcribe`) |
+| `slide_segment` | Welche Folie wann lief: `session_id`, `slide_id` (ohne FK, wie §6), `slide_index`, `start_ms`, `end_ms` (ausschließlich, `end_ms > start_ms`), `source` (`log` \| `ausrichtung` \| `manuell`), `confidence` (0..1), `job_id` (nullbar) | Worker (`align.log`, später `align.content`), später Core (`manuell`) |
+
+- Alle drei Tabellen haben die Pflichtfelder aus 03 §1 und den `updated_at`-Trigger. Fremdschlüssel auf `session` und `transcript` → `recording` mit `ON DELETE CASCADE`: Endgültiges Löschen der Session (§13) nimmt alles mit.
+- `transcript_segment` zeigt mit einem **zusammengesetzten** Fremdschlüssel `(transcript_id, recording_id, session_id)` → `transcript(id, recording_id, session_id)` (Unique-Constraint `transcript_id_recording_session_uq`, `ON DELETE CASCADE`). Ein Abschnitt kann so nie zu einer anderen Aufnahme oder Session gehören als sein Transkript.
+- **Speicherform: DB-Zeilen je Abschnitt, Wörter als `jsonb` am Abschnitt** (03 §5 sieht das so vor). Keine JSON-Datei mit Index. Gründe: Lesen einer Folie ist eine Indexabfrage `(session_id, start_ms)`; Backup, Papierkorb und Wiederherstellung funktionieren ohne Sonderweg; Belege und Suche können später auf Zeilen zeigen.
+- **Größe (gemessen, Migration 0006, Postgres 16):** 90 min mit 450 Abschnitten und 11 700 Wörtern belegen ≈ 0,6 MB (Tabelle mit TOAST). Die Wörter allein ≈ 0,27 MB komprimiert, als JSON-Text ≈ 0,84 MB, der reine Text ≈ 80 KB. Die Testdaten waren sehr gleichförmig. Bei echtem Text komprimiert `jsonb` schlechter, gerechnet wird darum mit **≤ 1 MB je Vorlesung** (≈ 100 MB für 100 Vorlesungen). Die API liefert Wörter nur auf Anfrage (§18.4).
+- **Ersetzen ist hart, Löschen weich.** `transcribe` und `align.log` ersetzen ihre eigenen früheren Ergebnisse mit `DELETE` (05 §1, kein Papierkorb für Maschinenausgaben). Das weiche Löschen einer Session setzt auf allen drei Tabellen **denselben** `deleted_at` (Kaskade §13). Die Wiederherstellung holt sie mit zurück.
+- **Segment-IDs sind nicht stabil.** Ein neuer `transcribe`-Lauf vergibt neue IDs. Spätere Belege auf das Transkript verweisen darum auf Session und Zeitraum: Bei `evidence.kind = transcript` ist `ref_id` die `session_id`, dazu `t_start_ms` und `t_end_ms` (03 §7). Nie `transcript_segment.id`.
+
+### 18.2 Kette, Fortschritt und `transcribe`
+
+**Kette nach dem Session-Ende** (05 §2): `audio.finalize → transcribe` und `audio.finalize → align.log`. `align.log` hängt **nicht** von `transcribe` ab (Lead-Entscheidung im Review von #142). Die Folienzuordnung kommt so auch dann, wenn die Transkription scheitert.
+
+| Job | Payload | `priority` | `depends_on` | Ergebnis (`job.result`) |
+|---|---|---|---|---|
+| `audio.finalize` | `AudioFinalizePayload` (§3, unverändert) | 0 | §3 | `AudioFinalizeResult` |
+| `transcribe` | `TranscribePayload` `{ session_id, force? }` | 20 | alle `audio.finalize`-Jobs der Session in `wartet`/`laeuft`, dazu ein laufender `transcribe` der Session | `TranscribeResult` |
+| `align.log` | `AlignLogPayload` `{ session_id }` | 10 | alle `audio.finalize`-Jobs der Session in `wartet`/`laeuft`, dazu ein laufender `align.log` der Session | `AlignLogResult` |
+
+`job.session_id` ist immer gesetzt. `max_attempts` bleibt 3. `transcribe` (20) wird bei freiem Worker vor `align.log` (10) geholt. **Ein neuer Job erbt den Fehlschlag eines gleichzeitig laufenden:** Er hängt von ihm ab und wird nach §3 `abgebrochen`, wenn jener scheitert. Abweichung von 08 §5: `transcribe` hat kein `provider` im Payload, den Anbieter wählt der Worker (`SG_TRANSCRIBER`, §18.6).
+
+**Kette anlegen (Core):** `ensurePipelineJobs(tx, sessionId, { fromStep, force })` in `services/core/src/services/pipeline.ts`. Der Aufrufer hält die Session-Zeile (`FOR NO KEY UPDATE`). Sperrreihenfolge wie §16.2: Session → `lockRecording` (nur bei `fromStep = audio.finalize`, nach ID sortiert) → Job-Zeilen.
+
+1. **`audio.finalize`** (nur bei `fromStep = audio.finalize`): für jede nicht gelöschte Aufnahme mit mindestens einem Chunk der neueste `audio.finalize`-Job. `wartet` → wiederverwenden, `run_after = now()`. `laeuft` → wiederverwenden. `fertig` → nur mit `force` ein neuer Job. `fehler`, `abgebrochen` oder keiner → neuer Job ohne Wartezeit.
+2. **`transcribe`** (bei `fromStep` `audio.finalize` oder `transcribe`): Wartet schon ein `transcribe` der Session, wird er wiederverwendet. `payload.force` wird dann zu `alter Wert ODER force`, die `depends_on` werden um die offenen `audio.finalize`-Jobs ergänzt. Sonst entsteht ein neuer Job mit `depends_on` laut Tabelle.
+3. **`align.log`** (immer): Wartet schon einer, wird er wiederverwendet, die `depends_on` werden um die offenen `audio.finalize`-Jobs ergänzt. Sonst entsteht ein neuer Job mit `depends_on` laut Tabelle.
+4. **Fortschritt:** Für jeden Typ, zu dem ein Job angelegt oder wiederverwendet wurde, `session.processing[<typ>]` mit **derselben Zusammenfassung wie der Worker** neu berechnen (unten, „Zusammenfassung“). Nie pauschal `wartet` setzen: Ein laufender Job bleibt `laeuft`. Danach `updated_at` anheben und `session.updated` senden (wie §11.6).
+
+Rückgabe: die Jobs in Ketten-Reihenfolge. Aufgerufen wird die Funktion an zwei Stellen:
+- **Beim Stopp** (`finishSession`, §9.1) nach den `ensureFinalizeOnStop`-Aufrufen mit `fromStep = transcribe`. Das gilt nur, wenn die Session danach mindestens einen `audio.finalize`-Job in `wartet`, `laeuft` oder `fertig` hat. Dann ist ein Job offen, die Session wird `beendet` und erst `verarbeitet`, wenn `transcribe` und `align.log` fertig oder gescheitert sind (§3). Ohne Audio entsteht keine Kette, und die Session wird wie bisher sofort `verarbeitet`.
+- **Bei `POST /sessions/{id}/reprocess`** (§18.5).
+
+**Nachzügler:** Audio, das erst nach dem Stopp kommt (eine nachträglich angelegte Aufnahme oder ein später Chunk), setzt nur `stale` und löst **keine** automatische Kette aus. Es entsteht nur `audio.finalize` wie bisher (§3). Das Transkript gilt dann als veraltet (`stale`, §18.4), und der Rückblick bietet „Transkript aktualisieren“ an. Damit ist die offene Frage aus §10.1 („Offen für T1-04“) beantwortet.
+
+**Fortschritt (`session.processing`):**
+- **Zusammenfassung (verbindlich für Core und Worker, ersetzt Schritt 2 in §3):** Je Job-Typ zählt in jeder **Einheit** nur der neueste nicht gelöschte Job (`created_at`, dann `id`, absteigend). Läuft in der Einheit ein Job, gilt sie als `laeuft`, auch wenn dahinter ein neuerer wartet. Einheit ist bei `audio.finalize` die Aufnahme (`payload->>'recording_id'`), bei `transcribe` und `align.log` die Session. Über die Einheiten hinweg gilt: `fehler` vor `laeuft` vor `wartet` vor `fertig`, `abgebrochen` nur, wenn alle Einheiten `abgebrochen` sind. Ohne Job bleibt der Schlüssel unverändert. Ein gescheiterter Job, dem ein neuer folgt (`reprocess`), zählt so nicht mehr. Referenz-SQL (`%(sid)s` = Session, `%(type)s` = Job-Typ):
+
+```sql
+WITH j AS (
+  SELECT state, created_at, id,
+         CASE WHEN type = 'audio.finalize' THEN payload->>'recording_id' ELSE '' END AS unit
+  FROM job WHERE session_id = %(sid)s AND type = %(type)s AND deleted_at IS NULL
+), u AS (
+  SELECT DISTINCT ON (unit)
+         CASE WHEN bool_or(state = 'laeuft') OVER (PARTITION BY unit) THEN 'laeuft' ELSE state END AS state
+  FROM j ORDER BY unit, created_at DESC, id DESC
+)
+SELECT CASE WHEN count(*) = 0 THEN NULL
+            WHEN bool_or(state = 'fehler') THEN 'fehler'
+            WHEN bool_or(state = 'laeuft') THEN 'laeuft'
+            WHEN bool_or(state = 'wartet') THEN 'wartet'
+            WHEN bool_or(state = 'fertig') THEN 'fertig'
+            ELSE 'abgebrochen' END
+FROM u;
+```
+
+- Der Core rechnet beim Anlegen nach dieser Regel (oben, Schritt 4). Der Worker zieht den Stand nach jedem Endzustand nach (§3) und ersetzt dafür `_SUMMARY_SQL` in `progress.py` durch diese Regel (T2-02a).
+- **Neu (T2-02a):** Der Worker zieht den Stand auch beim Abholen nach. Direkt nach dem Commit von `claim_next` folgt in einer eigenen Transaktion `progress.refresh(conn, session_id, [type])` (Session zuerst gesperrt). So erscheint `laeuft`. Gilt für jeden Job mit `session_id`.
+- **Anzeige** (07 §6 „ruhige Schrittliste“): Schritte in der Reihenfolge von `PipelineStep`, nur die, die als Schlüssel in `processing` stehen. Texte: `audio.finalize` „Audio“, `transcribe` „Transkript“, `align.log` „Folien zuordnen“. Zustände: `fertig` „✓“, `laeuft` „…“, `wartet` „–“, `fehler` und `abgebrochen` „nicht fertig“ mit „Erneut versuchen“ (§18.5, `from_step` = erster Schritt in `fehler`/`abgebrochen`). Steht `audio.finalize` auf `fehler`, gibt es zusätzlich „Mit vorhandenem Audio fortfahren“ (`from_step: "transcribe"`). Keine Prozentangaben, keine Benachrichtigungen.
+
+**`transcribe` im Worker** (`services/worker/src/sg_worker/handlers/transcribe.py`):
+
+1. Payload mit `TranscribePayload` prüfen (`PayloadError` → `fehler` ohne Retry).
+2. Ohne Sperre lesen: Session (fehlt die Zeile ganz → `NonRetryableError("Session unbekannt")`. Ist sie weich gelöscht → `fertig` mit `session_deleted = true`, nichts schreiben), Modul (`name`, `lang`), Foliensatz der Session, nicht gelöschte Aufnahmen nach `started_ms`, `id`. Je Aufnahme der neueste `audio.finalize`-Job in `fertig`.
+3. `initial_prompt` und Sprache nach §18.6 bilden.
+4. Je Aufnahme:
+   - **Ohne Audio:** Kein fertiger `audio.finalize`, `recording.duration_ms` ist `NULL` oder 0, oder `media/recordings/<recording_id>/full.m4a` fehlt (Pfad nur aus der ID, nie aus einer Spalte). Ergebnis `ohne_audio`, ein vorhandenes Transkript wird entfernt.
+   - `audio_sha256` = SHA-256 der Datei. `input_hash` = SHA-256 (hex) über UTF-8 von `pipeline_version \n audio_sha256 \n provider \n model \n sprache \n initial_prompt`, fehlende Werte als leere Zeichenkette. `pipeline_version` ist eine Konstante im Worker (`PIPELINE_VERSION = "p4-v1"`). Sie steigt, wenn sich Nachbearbeitung, Prompt-Regeln oder die Fensterung ändern. Dann wird beim nächsten Lauf neu transkribiert.
+   - **Unverändert:** Gibt es ein Transkript mit gleichem `input_hash` und ist `force` nicht gesetzt, wird nichts transkribiert. Nur `finalize_job_id` wird auf den aktuellen Job gesetzt (Ergebnis `unveraendert`).
+   - **Sonst:** Transcriber aufrufen (§18.6), **außerhalb** einer Transaktion. Der Heartbeat läuft weiter. Danach die Nachbearbeitung (unten). Dann **eine Transaktion je Aufnahme**: Session sperren (`progress.lock_session`, gelöscht → wie Schritt 2), prüfen, dass der Job noch diesem Worker gehört (`SELECT … FROM job WHERE id = … AND state = 'laeuft' AND locked_by = … FOR UPDATE`, sonst `LockLostError`), altes Transkript der Aufnahme löschen (Segmente per Kaskade), neues mit Segmenten einfügen, Commit. Ein Abbruch danach verliert so keine fertige Aufnahme, der nächste Versuch überspringt sie über `input_hash`.
+5. Abschluss in einer Transaktion: Session sperren, Transkripte der Session zu gelöschten Aufnahmen und zu Aufnahmen `ohne_audio` löschen (`removed_transcripts`), `ctx.finish(TranscribeResult)`.
+
+**Zeiten:** Whisper liefert Sekunden ab Dateibeginn. `full.m4a` beginnt bei `recording.started_ms` (§3, Lücken sind Stille). Darum gilt Sitzungszeit = `recording.started_ms + round(s · 1000)`, für Abschnitte und Wörter.
+
+**Nachbearbeitung (05 §P4), in dieser Reihenfolge:**
+1. Abschnitte mit `no_speech_prob > 0,6` verwerfen, ebenso Abschnitte mit leerem Text (nach `trim`).
+2. Wiederholung verwerfen: Abschnitt, dessen normierter Text (klein, Satzzeichen entfernt, Leerraum zusammengefasst) dem des zuletzt behaltenen gleicht.
+3. Zusammenführen: Der nächste Abschnitt wird an die laufende Gruppe angehängt, wenn alle drei Bedingungen gelten. (a) Die Lücke ist ≤ 2 000 ms. (b) Die Gruppe ist kürzer als 5 000 ms oder ihr Text endet nicht auf `.`, `?`, `!` oder `…`. (c) Die Gruppe wird dadurch nicht länger als 30 000 ms. Sonst beginnt eine neue Gruppe.
+4. Je Gruppe: `text` = Texte mit einem Leerzeichen verbunden, `avg_logprob` = nach Dauer gewichtetes Mittel, `no_speech_prob` = Maximum, `lang` = erkannte Sprache der Aufnahme, `words` = Wörter der Gruppe oder `NULL`, wenn der Transcriber keine liefert.
+5. Wörter: `text` ohne Leerraum am Rand (Whisper liefert führende Leerzeichen), leere Wörter verwerfen, `prob` auf 0..1 begrenzen, Zeiten in den Abschnitt klemmen, `end_ms ≥ start_ms`.
+
+**Fehler und Wiederholung:**
+
+| Fall | Ergebnis |
+|---|---|
+| Payload ungültig | `fehler` sofort (§3) |
+| Session-Zeile fehlt | `fehler` sofort (`NonRetryableError`) |
+| Session weich gelöscht | `fertig`, `session_deleted = true`, nichts geschrieben |
+| Keine Aufnahme mit Audio | `fertig`, alle Aufnahmen `ohne_audio`. Der Rückblick zeigt „Keine Aufnahme“ |
+| Transcriber nicht verfügbar (`mlx_whisper` lässt sich nicht importieren, unbekannter `SG_TRANSCRIBER`) | `fehler` sofort, `error = "Transkription nicht verfügbar: <Grund>"` |
+| Audiodatei lässt sich nicht dekodieren | `fehler` sofort, `error` nennt die `recording_id`, keinen Pfad |
+| Alles andere (Speicher, Modell-Download ohne Netz, Absturz) | Retry nach §3 (30 s, 60 s), danach `fehler` |
+| Lock verloren | `LockLostError`, nichts mehr schreiben. Schon geschriebene Aufnahmen bleiben |
+
+`fehler` in `transcribe` lässt `align.log` unberührt (keine Abhängigkeit). Die Session wird trotzdem `verarbeitet`. Der Rückblick zeigt die Folien mit „Transkript nicht fertig · Erneut versuchen“. `fehler` in `audio.finalize` bricht beide über `depends_on` ab (§3).
+
+### 18.3 `align.log` (05 §P5a)
+
+`services/worker/src/sg_worker/handlers/align_log.py`. Der ganze Job läuft in **einer** Transaktion (schnell, keine KI), Session zuerst gesperrt.
+
+1. Payload prüfen. Fehlt die Session-Zeile: `fehler` sofort. Ist sie weich gelöscht: `fertig` mit `session_deleted = true`.
+2. **Ende der Zeitleiste** `timeline_end_ms` = Maximum aus `ended_at − started_at` (wenn beide gesetzt) und, über alle nicht gelöschten Aufnahmen, `started_ms + coalesce(duration_ms, completed_duration_ms, 0)`.
+3. **Kein Foliensatz** (`session.slide_deck_id` leer oder gelöscht): alte `log`-Segmente löschen, `mode = folienlos`, fertig.
+4. **Folienwechsel:** nicht gelöschte `slide_event` der Session. Zeit `t = t_ms + offset_ms`. Den Versatz gibt es nur für `device = ipad`: Das Gerät findet sich über `sync_op` (Strom `session:<id>`, `kind = slide.change`, `data->>'event_id' = slide_event.id`), `offset_ms` dann aus `session.start_offsets` (§9.3). Sonst ist der Versatz 0. `t` auf `[0, timeline_end_ms]` klemmen und nach `(t, created_at, id)` sortieren.
+5. **Folie bestimmen** immer über den Foliensatz der Session und `slide_index` (nicht gelöschte `slide` mit diesem `index`), nicht über `slide_event.slide_id`. Gibt es die Folie nicht, fällt der Wechsel weg (`unresolved_events`).
+6. **Start:** Vor dem ersten Wechsel gilt Folie 1, wie im Dashboard ohne Wechsel. Dafür steht ein gedachter Wechsel bei `t = 0` vorn, wenn Folie 1 existiert. Er zählt nicht in `event_count` und nicht in `skipped_events`.
+7. **Durchgänge:** Ein Wechsel, dessen Standzeit (bis zum nächsten Wechsel bzw. bis `timeline_end_ms`) unter 1 500 ms liegt, fällt weg (`skipped_events`). Die Standzeiten werden einmal aus der Liste von Schritt 5 berechnet, nicht wiederholt.
+8. **Segmente:** Jeder verbleibende Wechsel gilt bis zum nächsten, der letzte bis `timeline_end_ms`. Aufeinanderfolgende Segmente derselben Folie werden verschmolzen, leere entfallen. `source = log`, `confidence = 1`, `job_id` = dieser Job.
+9. **Ersetzen:** `DELETE FROM slide_segment WHERE session_id = … AND source = 'log'`, neue Zeilen einfügen, `ctx.finish(AlignLogResult)`. `mode = log`, wenn mindestens ein echter Wechsel übrig ist, sonst `ohne_wechsel` (ganze Session auf Folie 1).
+
+`align.log` nutzt das Transkript nicht. Die Teilung eines Abschnitts an der Foliengrenze (05 §P5a) passiert beim Lesen (§18.4). So bleiben Transkript und Ausrichtung unabhängig, und `align.content` (später) muss das Transkript nicht umschreiben.
+
+### 18.4 `GET /sessions/{id}/transcript`
+
+| Query | Bedeutung |
+|---|---|
+| `slide_id` (optional, `Uuid`) | nur Zeilen dieser Folie. Eine unbekannte Folie ergibt leere `lines`, keinen Fehler |
+| `include_words` (optional, `true`/`false`, Standard `false`) | `words` an jeder Zeile mitliefern, genau die Wörter dieser Zeile (bei Regel 4 alle des Abschnitts, bei Regel 3 die des Teils), `[]` ohne Wort-Zeitstempel (≈ 0,9 MB je 90 min statt ≈ 0,2 MB) |
+
+Antwort 200 `SessionTranscript`. Fehler: `404 session_not_found` (auch weich gelöscht), `400 validation_failed`. Keine Route nur für lokal.
+
+- **`slide_source`:** die erste Quelle aus `manuell`, `ausrichtung`, `log`, die nicht gelöschte Segmente hat, sonst `null`. `slide_segments` enthält nur Segmente dieser Quelle, ohne Segmente gelöschter Folien, nach `start_ms` sortiert.
+- **`transcripts`:** nicht gelöschte `transcript` der Session als `TranscriptInfo`. `stale` ist `true`, wenn der neueste `audio.finalize`-Job der Aufnahme in `fertig` nicht `finalize_job_id` ist.
+- **`recordings`:** nicht gelöschte Aufnahmen als `Recording` (wie im Snapshot), nach `started_ms`. Audio liefert `GET /recordings/{id}/audio` (§7.3, mit `Range`). `from_ms`/`to_ms` bleiben ungenutzt.
+- **`stale` (oben):** `true`, wenn ein Transkript `stale` ist oder eine Aufnahme mit `duration_ms > 0` und fertigem `audio.finalize` kein Transkript hat.
+- **`lines`:** aus den nicht gelöschten Abschnitten, sortiert nach `(start_ms, recording_id, seq)`. **Teilung an Foliengrenzen**, für jeden Abschnitt `G` mit den Segmenten `S` aus `slide_segments`:
+  1. Überlappend sind die `s` mit `s.start_ms < G.end_ms` und `G.start_ms < s.end_ms`. Bei `G.start_ms = G.end_ms` gilt `s.start_ms ≤ G.start_ms < s.end_ms`.
+  2. Kein überlappendes Segment: eine Zeile mit `slide_id = null`.
+  3. Mindestens zwei überlappende Segmente **und** `words` vorhanden (nicht `NULL` und nicht leer): Jedes Wort gehört zum Segment, das `floor((start_ms + end_ms) / 2)` enthält. Liegt der Punkt in keinem, gehört es zum nächstgelegenen überlappenden Segment (bei Gleichstand zum früheren). Aufeinanderfolgende Wörter derselben Folie bilden eine Zeile: `text` = Wörter mit Leerzeichen, `start_ms`/`end_ms` = erstes bzw. letztes Wort.
+  4. Sonst eine Zeile mit dem ganzen Abschnitt, Folie = Segment, das die Mitte von `G` enthält, ersatzweise das mit der größten Überlappung (bei Gleichstand das frühere).
+  5. `part` zählt die Zeilen eines Abschnitts ab 0. `lang` kommt vom Abschnitt.
+- **Leistung:** Der Rückblick lädt die Antwort einmal je Session (ohne `slide_id`) und filtert je Folie lokal. Ziel: Antwort für 90 min in < 300 ms, Folienwechsel im Rückblick < 500 ms (F-NAC-02, 09 §1).
+
+### 18.5 `POST /sessions/{id}/reprocess`
+
+| Body | Antwort | Fehler |
+|---|---|---|
+| `SessionReprocessRequest` `{ from_step?, force? }` (Standard `transcribe`, `false`) | 202 `SessionReprocessResult` (`session` nach der Änderung, `jobs` aus `ensurePipelineJobs`) | `404 session_not_found`, `409 session_not_ended` (`details.state`, Session nicht `beendet`/`verarbeitet`), `409 session_no_audio` (bei `from_step` `audio.finalize` oder `transcribe`: keine nicht gelöschte Aufnahme mit mindestens einem Chunk), `400 validation_failed` |
+
+- Sperrt die Session (`FOR NO KEY UPDATE`) und ruft `ensurePipelineJobs` (§18.2). Wiederholt man den Aufruf, entstehen keine doppelten wartenden Jobs. Zusätzlich gilt `Idempotency-Key` (08 §1).
+- `from_step = align.log` braucht kein Audio (Folienzuordnung ohne Transkript).
+- Der Zustand der Session ändert sich nicht. Eine `verarbeitet`e Session bleibt `verarbeitet`, nur `processing` zeigt die neuen Schritte (§3).
+- Die Web-App schickt bei „Erneut versuchen“ den ersten Schritt in `fehler`/`abgebrochen`, bei „Transkript aktualisieren“ (`stale`) `{ from_step: "transcribe" }`. Steht `audio.finalize` auf `fehler`, bietet sie zusätzlich „Mit vorhandenem Audio fortfahren“ an (`{ from_step: "transcribe" }`). Transkribiert werden dann die Aufnahmen, die schon ein `full.m4a` haben. Gibt es keine Aufnahme mit Chunks, antwortet der Core mit `409 session_no_audio`. `force` setzt sie nur bei einer ausdrücklichen Aktion „Neu transkribieren“.
+- Ersetzt für diese Schritte das allgemeine `POST /jobs/{id}/retry` aus 08 §1, das es noch nicht gibt.
+
+### 18.6 Worker ↔ Core
+
+**Datenfluss.** Der Worker spricht nicht per HTTP mit dem Core. Er liest Postgres und den Datenordner und schreibt seine Tabellen direkt (wie `audio.finalize`):
+
+| Was | Quelle |
+|---|---|
+| Audio | `media/recordings/<recording_id>/full.m4a` (§4), eine Datei je Aufnahme, Zeitbezug `recording.started_ms` |
+| Folientitel | `slide.title` der nicht gelöschten Folien des Foliensatzes der Session, nach `index` |
+| Fachbegriffe | Titel und `slide.text` aller nicht gelöschten Folien aller nicht gelöschten Foliensätze des Moduls |
+| Sprache | `module.lang`: `de` → `de`, `en` → `en`, `mixed` oder leer → automatisch (`None`) |
+| Ergebnis | `transcript`, `transcript_segment`, `slide_segment`, `job.result`. Fortschritt über `session.processing` und `pg_notify('sg_session')` (§3) |
+
+**`initial_prompt`** (05 §P4: Folientitel und die 50 häufigsten Fachbegriffe des Moduls):
+- **Ziel:** Der Hinweis wirkt in **jedem** 30-s-Fenster, nicht nur im ersten. Mit `condition_on_previous_text=False` übergibt `mlx-whisper` `initial_prompt` nur dem ersten Fenster. Wie T2-02a das erreicht (etwa mit einer eigenen Fensterschleife, die den Hinweis je Fenster mitgibt), entscheidet T2-02a. Das Ergebnis muss die Zeiten weiter auf die ganze Datei beziehen.
+- **Grenze: ≤ 200 Tokens** des Whisper-Tokenizers (multilingual). Whisper behält von einem längeren Hinweis nur die letzten ≈ 223 Tokens. Darum steht das Wichtigste **am Ende**. Ohne Tokenizer (Fake, Linux) gilt die Schätzung `ceil(UTF-8-Bytes / 3)` Tokens.
+- **Form** Deutsch (und `mixed`): `Vorlesung <Modulname>. Begriffe: <Begriff>, …, <Begriff>. Folien: <Titel>, …, <Titel>.` Englisch: `Lecture <name>. Terms: …. Slides: ….` Leere Teile entfallen samt Überschrift.
+- **Titel** in Folienreihenfolge: getrimmt, leere weg, Dubletten (ohne Groß-/Kleinschreibung) weg, der erste gewinnt.
+- **Fachbegriffe:** Wörter nach dem Muster `[^\W\d_][\w-]{3,}` (Unicode, also mindestens 4 Zeichen, beginnend mit einem Buchstaben), gezählt ohne Groß-/Kleinschreibung. Angezeigt wird die häufigste Schreibweise. Ausgeschlossen sind eine feste Stoppwortliste (Deutsch und Englisch, im Worker) und Wörter, die schon in einem Titel des Prompts vorkommen. Nur Begriffe, die mindestens zweimal vorkommen, höchstens 50. Sie stehen **aufsteigend nach Häufigkeit** im Prompt (der häufigste zuletzt), bei Gleichstand alphabetisch absteigend.
+- **Kürzen**, solange die Grenze überschritten ist: zuerst Begriffe vom Anfang der Liste entfernen (die seltensten), dann Titel vom Anfang, zuletzt den Modulteil.
+- Später (Konzepte, Phase 2) ersetzen die Konzeptnamen des Moduls die gezählten Begriffe. Der Prompt landet in `transcript.initial_prompt` und geht in den `input_hash` ein.
+
+**Transcriber-Schnittstelle** (`services/worker/src/sg_worker/ai/interfaces.py`, erweitert 02 §7):
+
+```python
+@dataclass(frozen=True)
+class Word:
+    start: float          # Sekunden ab Dateibeginn
+    end: float
+    text: str
+    prob: float
+
+@dataclass(frozen=True)
+class Segment:
+    start: float
+    end: float
+    text: str
+    language: str | None = None
+    avg_logprob: float | None = None
+    no_speech_prob: float | None = None
+    words: tuple[Word, ...] = ()
+
+class Transcriber(Protocol):
+    provider: str         # "mlx-whisper" | "fake" (TranscriptProvider)
+    model: str
+    def transcribe(self, audio: Path, *, language: str | None, initial_prompt: str | None,
+                   duration_ms: int) -> list[Segment]: ...
+```
+
+- Abweichung von 02 §7: `language: str | None` statt `language_hint: list[str]`, dazu `initial_prompt` und `duration_ms` (= `recording.duration_ms`. Der Fake braucht sie, echte Anbieter dürfen sie ignorieren). Die erkannte Sprache steht in `Segment.language`.
+- **`mlx-whisper`** (Standard, Spike S5): `mlx_whisper.transcribe(audio, path_or_hf_repo=SG_WHISPER_MODEL, language=…, initial_prompt=…, word_timestamps=True, condition_on_previous_text=False, hallucination_silence_threshold=2.0, no_speech_threshold=0.6, compression_ratio_threshold=2.4)`. Ob in 10-Minuten-Stücken gearbeitet wird (Speicher) und wie der Hinweis jedes Fenster erreicht (oben), entscheidet T2-02a nach der S5-Messung. Die Zeiten müssen danach trotzdem auf die ganze Datei bezogen sein. `mlx-whisper` kommt als Abhängigkeit nur für `sys_platform == 'darwin' and platform_machine == 'arm64'` dazu (Begründung im PR von T2-02a). Beim ersten Lauf lädt es das Modell (≈ 1,6 GB) von Hugging Face. Audio verlässt den Mac nie.
+- **Fake** (`SG_TRANSCRIBER=fake`, für CI und Linux): deterministisch, ohne `ffmpeg`, liest die Datei nicht. `provider = "fake"`, `model = "fake-1"`. Für `n = ceil(duration_ms / 10 000)` Abschnitte: Abschnitt `k` (ab 0) von `10·k` s bis `min(10·k + 10, duration_ms / 1000)` s, Text `Testabschnitt <k+1> mit erfundenem Inhalt.`. Die Wörter sind die durch Leerzeichen getrennten Teile, gleichmäßig über den Abschnitt verteilt, `prob = 1.0`. Dazu `avg_logprob = -0.1`, `no_speech_prob = 0.0`, `language` = übergebene Sprache oder `de`. Nach der Nachbearbeitung bleibt jeder Abschnitt einzeln (10 s, endet mit Punkt).
+- Unbekannter Wert in `SG_TRANSCRIBER`: Der Worker protokolliert den Fehler beim Start, `transcribe`-Jobs enden mit `fehler` (§18.2).
+
+### 18.7 Sync-Ereignisse
+
+Es gibt **kein neues Ereignis**. Den Fortschritt trägt `session.updated` (§11.6), denn `Session.processing` ist darin enthalten und der Worker meldet jede Änderung über `sg_session`. Das in 08 §2.4 geplante `session.processing` entfällt.
+Die Web-App lädt `GET /sessions/{id}/transcript` neu, wenn in `session.updated` `processing.transcribe` oder `processing['align.log']` auf `fertig` wechselt. Nach einem Neuverbinden lädt sie ohnehin per REST neu (§11.6). Das iPad ist nicht betroffen.
+
+### 18.8 Neue Fehlercodes
+
+| Code | HTTP | Bedeutung |
+|---|---|---|
+| `session_not_ended` | 409 | `reprocess` nur für `beendet`/`verarbeitet` (`details.state`) |
+| `session_no_audio` | 409 | `reprocess` ab `audio.finalize`/`transcribe` ohne Aufnahme mit Chunks |
+
+### 18.9 Tickets und Besitz
+
+| Ticket | Inhalt | Besitzt (Dateien) | Abhängig von |
+|---|---|---|---|
+| **T2-01** | Diese Verträge, Schemas, Migration `0006_transcript` | `packages/schemas/src/**`, `services/core/src/db/schema/transcript.ts`, `services/core/drizzle/0006_*`, dieser Abschnitt | – |
+| **T2-02a** (Worker) | `transcribe`, `align.log`, Transcriber (`mlx-whisper`, Fake), Zusammenfassung des Fortschritts nach §18.2 in `progress.py`, Fortschritt beim Abholen | `services/worker/src/sg_worker/handlers/{transcribe,align_log}.py`, `services/worker/src/sg_worker/ai/**`, `services/worker/src/sg_worker/progress.py`, in `services/worker/src/sg_worker/loop.py` nur der Fortschritt beim Abholen, `services/worker/pyproject.toml`, `services/worker/uv.lock`, je eine Zeile in `handlers/__init__.py`, Tests unter `services/worker/tests/` | T2-01 |
+| **T2-02b** (Core) | `ensurePipelineJobs` mit derselben Zusammenfassung, Aufruf in `finishSession`, `GET /sessions/{id}/transcript` (mit `stale` und Teilung an Foliengrenzen), `POST /sessions/{id}/reprocess`, Kaskade der Session beim Löschen und Wiederherstellen, Payload-Schemas in `JOB_PAYLOAD_SCHEMAS` | `services/core/src/services/pipeline.ts`, `services/core/src/{routes,services}/transcript.ts`, in `services/core/src/services/sessions.ts` nur `finishSession`, in `services/core/src/services/trash.ts` nur die Kaskade der Session, in `services/core/src/services/jobs.ts` nur `JOB_PAYLOAD_SCHEMAS`, eine Zeile in `app.ts`, Tests unter `services/core/test/` | T2-01. Parallel zu T2-02a. Die Routen lassen sich mit Zeilen testen, die der Test selbst schreibt |
+| **T2-03** (Web) | Rückblick (F-NAC-02, 07 §3.4), Schrittliste, „Erneut versuchen“, „Transkript aktualisieren“ | `apps/web/src/app/rueckblick/**`, `apps/web/src/components/rueckblick/**`, `apps/web/src/components/processing/**`, `apps/web/src/lib/transcript.ts`, höchstens je eine Zeile für Link und Schrittliste in `apps/web/src/components/today/**` | T2-01. Gegen die Beispiele in `packages/schemas/examples/valid` bauen, gegen T2-02a und T2-02b mit `SG_TRANSCRIBER=fake` testen. Darf `apps/web/src/components/ink/**` lesend mitbenutzen (Notizseiten rendern), ändert dort nichts |
+
+**Rückblick (T2-03), verbindliche Eckpunkte:**
+- Route `/rueckblick?id=<session_id>` (Query statt Segment, §5). Erreichbar aus dem Heute-Bildschirm für Sessions in `beendet`/`verarbeitet` (weitere Einstiege, etwa die Modulseite, später).
+- Daten: `GET /sessions/{id}`, `GET /sessions/{id}/transcript` (einmal, im Query-Cache), `GET /sessions/{id}/snapshot` (Marker, Fotos), Folien wie im Dashboard (`GET /slide-decks/{id}`, PDF-Darstellung aus `dashboard/slides`). Für die Notizen gilt: `GET /notebooks?module_id`, dann `GET /notebooks/{id}/pages` je Notizbuch, Seiten mit `session_id` = Session und `attached_slide_id` = aktuelle Folie.
+- Wiedergabe: ein `<audio>` je Aufnahme mit `src = /api/v1/recordings/{id}/audio`, Position in der Datei = `t − recording.started_ms`. Zwischen Aufnahmen springt der Player zum Beginn der nächsten. Tipp auf eine Zeile spielt ab `line.start_ms`. Hervorgehoben ist die Zeile mit `start_ms ≤ t < end_ms`. Die aktive Folie ist das Segment, das `t` enthält, und folgt beim Abspielen automatisch (F-NAC-02). Geschwindigkeit 1–2×, ±15 s, Tasten Leertaste, `J`, `L` (07 §10).
+- Zustände (in dieser Reihenfolge geprüft):
+  - **Verarbeitung offen:** Ein `PipelineStep` steht in `processing` auf `wartet` oder `laeuft`. Dann die Schrittliste und „Transkript kommt noch“. Vorhandene Folien und Zeilen werden trotzdem gezeigt.
+  - **Keine Aufnahme:** Keine Aufnahme in `recordings` hat `duration_ms > 0`, oder `transcribe` ist `fertig` und `transcripts` ist leer.
+  - **Fehler:** Ein Schritt steht auf `fehler` oder `abgebrochen` → „Erneut versuchen“ (`from_step` = erster solcher Schritt). Bei `audio.finalize` auf `fehler` zusätzlich „Mit vorhandenem Audio fortfahren“ (`from_step: "transcribe"`, §18.5).
+  - **Veraltet:** `stale` → Hinweis mit „Transkript aktualisieren“ (`from_step: "transcribe"`).
+  - **Ohne Folienzuordnung:** `slide_source = null` → Transkript als eine Liste.
+
+**Nur der Owner kann testen:** `mlx-whisper` auf dem Mac (Laufzeit ≤ 15 min für 90 min, Speicher, Qualität des Vokabular-Hinweises, S5) und den Rückblick mit einer echten Vorlesung.

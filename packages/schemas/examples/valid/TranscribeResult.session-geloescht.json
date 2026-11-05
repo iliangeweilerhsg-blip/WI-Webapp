@@ -1,0 +1,11 @@
+{
+  "session_id": "019a4e14-0000-7000-8000-000000000031",
+  "provider": "fake",
+  "model": "fake-1",
+  "recordings": [],
+  "removed_transcripts": 0,
+  "segment_count": 0,
+  "word_count": 0,
+  "session_deleted": true,
+  "job_duration_ms": 12
+}

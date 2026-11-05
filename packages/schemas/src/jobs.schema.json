@@ -372,6 +372,221 @@
           "minimum": 0
         }
       }
+    },
+    "TranscribePayload": {
+      "type": "object",
+      "description": "transcribe (08 §5, VERTRAEGE §18.2). Den Anbieter wählt der Worker (SG_TRANSCRIBER)",
+      "required": ["session_id"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "true: auch Aufnahmen mit unverändertem input_hash neu transkribieren"
+        }
+      }
+    },
+    "TranscribeOutcome": {
+      "type": "string",
+      "enum": ["transkribiert", "unveraendert", "ohne_audio"],
+      "description": "transkribiert: neu geschrieben. unveraendert: gleicher input_hash, übersprungen. ohne_audio: keine full.m4a (altes Transkript entfernt)"
+    },
+    "TranscribeRecordingResult": {
+      "type": "object",
+      "required": [
+        "recording_id",
+        "transcript_id",
+        "outcome",
+        "segment_count",
+        "word_count",
+        "audio_duration_ms",
+        "language",
+        "transcribe_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "recording_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "transcript_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "$ref": "#/$defs/TranscribeOutcome"
+        },
+        "segment_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "word_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "audio_duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "language": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LanguageCode"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "transcribe_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Laufzeit des Transcribers, 0 bei unveraendert"
+        }
+      }
+    },
+    "TranscribeResult": {
+      "type": "object",
+      "description": "job.result von transcribe",
+      "required": [
+        "session_id",
+        "provider",
+        "model",
+        "recordings",
+        "removed_transcripts",
+        "segment_count",
+        "word_count",
+        "session_deleted",
+        "job_duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "provider": {
+          "$ref": "#/$defs/TranscriptProvider"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recordings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/TranscribeRecordingResult"
+          }
+        },
+        "removed_transcripts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Entfernte Transkripte gelöschter Aufnahmen bzw. von Aufnahmen ohne Audio"
+        },
+        "segment_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Summe über alle Transkripte der Session nach dem Lauf"
+        },
+        "word_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "session_deleted": {
+          "type": "boolean",
+          "description": "true: Session war gelöscht, nichts geschrieben"
+        },
+        "job_duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "AlignLogPayload": {
+      "type": "object",
+      "description": "align.log (08 §5, VERTRAEGE §18.3)",
+      "required": ["session_id"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "AlignLogMode": {
+      "type": "string",
+      "enum": ["log", "ohne_wechsel", "folienlos"],
+      "description": "log: aus Folienwechseln. ohne_wechsel: Foliensatz, aber kein verwertbarer Wechsel (ganze Session auf Folie 1). folienlos: kein Foliensatz, keine Segmente"
+    },
+    "AlignLogResult": {
+      "type": "object",
+      "description": "job.result von align.log",
+      "required": [
+        "session_id",
+        "slide_deck_id",
+        "mode",
+        "timeline_end_ms",
+        "event_count",
+        "skipped_events",
+        "unresolved_events",
+        "segment_count",
+        "session_deleted",
+        "job_duration_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_deck_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "mode": {
+          "$ref": "#/$defs/AlignLogMode"
+        },
+        "timeline_end_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "event_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Gelesene slide_event"
+        },
+        "skipped_events": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Durchgänge (Standzeit unter 1,5 s)"
+        },
+        "unresolved_events": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "slide_index ohne Folie im Foliensatz"
+        },
+        "segment_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "session_deleted": {
+          "type": "boolean"
+        },
+        "job_duration_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   }
 }

@@ -59,8 +59,12 @@ const TABLES = [
   'moodle_course_link',
   'moodle_item',
   'moodle_deadline',
+  // Transkript und Rückblick (T2-01, VERTRAEGE §18.1)
+  'transcript',
+  'transcript_segment',
+  'slide_segment',
   // Automatische Kurszuordnung (#141)
-  'moodle_course_manual',
+  'moodle_course_decided',
 ];
 
 /** Phase-1-Tabellen ohne die Pflichtfelder aus 03 §1 (Struktur genau nach VERTRAEGE §6.1) */
@@ -159,7 +163,11 @@ describe('Migrationen', () => {
   it('speichert Embeddings als vector(1024)', async () => {
     const cols = await sql`SELECT table_name, udt_name FROM information_schema.columns
       WHERE column_name = 'embedding' AND table_schema = 'public' ORDER BY table_name`;
-    expect(cols.map((c) => `${c.table_name}:${c.udt_name}`)).toEqual(['slide:vector', 'task:vector']);
+    expect(cols.map((c) => `${c.table_name}:${c.udt_name}`)).toEqual([
+      'slide:vector',
+      'task:vector',
+      'transcript_segment:vector', // T2-01, noch ohne Index (VERTRAEGE §18.1)
+    ]);
     const [dim] =
       await sql`SELECT atttypmod FROM pg_attribute WHERE attrelid = 'slide'::regclass AND attname = 'embedding'`;
     expect(dim?.atttypmod).toBe(1024);

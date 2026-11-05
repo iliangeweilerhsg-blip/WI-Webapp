@@ -6,6 +6,9 @@ import type * as Z from './zod.ts';
 
 type Equal<A, B> = (<X>() => X extends A ? 1 : 2) extends <X>() => X extends B ? 1 : 2 ? true : false;
 
+const _AlignLogMode: Equal<z.infer<typeof Z.AlignLogModeSchema>, T.AlignLogMode> = true;
+const _AlignLogPayload: Equal<z.infer<typeof Z.AlignLogPayloadSchema>, T.AlignLogPayload> = true;
+const _AlignLogResult: Equal<z.infer<typeof Z.AlignLogResultSchema>, T.AlignLogResult> = true;
 const _ApiError: Equal<z.infer<typeof Z.ApiErrorSchema>, T.ApiError> = true;
 const _ApiErrorBody: Equal<z.infer<typeof Z.ApiErrorBodySchema>, T.ApiErrorBody> = true;
 const _Appearance: Equal<z.infer<typeof Z.AppearanceSchema>, T.Appearance> = true;
@@ -72,6 +75,7 @@ const _JobList: Equal<z.infer<typeof Z.JobListSchema>, T.JobList> = true;
 const _JobState: Equal<z.infer<typeof Z.JobStateSchema>, T.JobState> = true;
 const _JobType: Equal<z.infer<typeof Z.JobTypeSchema>, T.JobType> = true;
 const _Lang: Equal<z.infer<typeof Z.LangSchema>, T.Lang> = true;
+const _LanguageCode: Equal<z.infer<typeof Z.LanguageCodeSchema>, T.LanguageCode> = true;
 const _LectureSettings: Equal<z.infer<typeof Z.LectureSettingsSchema>, T.LectureSettings> = true;
 const _LectureSettingsUpdate: Equal<z.infer<typeof Z.LectureSettingsUpdateSchema>, T.LectureSettingsUpdate> = true;
 const _MaintenanceNightlyPayload: Equal<z.infer<typeof Z.MaintenanceNightlyPayloadSchema>, T.MaintenanceNightlyPayload> = true;
@@ -201,6 +205,7 @@ const _PhotoAddData: Equal<z.infer<typeof Z.PhotoAddDataSchema>, T.PhotoAddData>
 const _PhotoAddOp: Equal<z.infer<typeof Z.PhotoAddOpSchema>, T.PhotoAddOp> = true;
 const _PhotoFileRef: Equal<z.infer<typeof Z.PhotoFileRefSchema>, T.PhotoFileRef> = true;
 const _PhotoMime: Equal<z.infer<typeof Z.PhotoMimeSchema>, T.PhotoMime> = true;
+const _PipelineStep: Equal<z.infer<typeof Z.PipelineStepSchema>, T.PipelineStep> = true;
 const _Point2: Equal<z.infer<typeof Z.Point2Schema>, T.Point2> = true;
 const _Recording: Equal<z.infer<typeof Z.RecordingSchema>, T.Recording> = true;
 const _RecordingComplete: Equal<z.infer<typeof Z.RecordingCompleteSchema>, T.RecordingComplete> = true;
@@ -223,6 +228,8 @@ const _SessionMs: Equal<z.infer<typeof Z.SessionMsSchema>, T.SessionMs> = true;
 const _SessionPauseOp: Equal<z.infer<typeof Z.SessionPauseOpSchema>, T.SessionPauseOp> = true;
 const _SessionProcessing: Equal<z.infer<typeof Z.SessionProcessingSchema>, T.SessionProcessing> = true;
 const _SessionRefData: Equal<z.infer<typeof Z.SessionRefDataSchema>, T.SessionRefData> = true;
+const _SessionReprocessRequest: Equal<z.infer<typeof Z.SessionReprocessRequestSchema>, T.SessionReprocessRequest> = true;
+const _SessionReprocessResult: Equal<z.infer<typeof Z.SessionReprocessResultSchema>, T.SessionReprocessResult> = true;
 const _SessionResumeOp: Equal<z.infer<typeof Z.SessionResumeOpSchema>, T.SessionResumeOp> = true;
 const _SessionSnapshot: Equal<z.infer<typeof Z.SessionSnapshotSchema>, T.SessionSnapshot> = true;
 const _SessionStartData: Equal<z.infer<typeof Z.SessionStartDataSchema>, T.SessionStartData> = true;
@@ -235,6 +242,7 @@ const _SessionStopData: Equal<z.infer<typeof Z.SessionStopDataSchema>, T.Session
 const _SessionStopOp: Equal<z.infer<typeof Z.SessionStopOpSchema>, T.SessionStopOp> = true;
 const _SessionStopRequest: Equal<z.infer<typeof Z.SessionStopRequestSchema>, T.SessionStopRequest> = true;
 const _SessionStreamId: Equal<z.infer<typeof Z.SessionStreamIdSchema>, T.SessionStreamId> = true;
+const _SessionTranscript: Equal<z.infer<typeof Z.SessionTranscriptSchema>, T.SessionTranscript> = true;
 const _SessionUpdate: Equal<z.infer<typeof Z.SessionUpdateSchema>, T.SessionUpdate> = true;
 const _Settings: Equal<z.infer<typeof Z.SettingsSchema>, T.Settings> = true;
 const _SettingsUpdate: Equal<z.infer<typeof Z.SettingsUpdateSchema>, T.SettingsUpdate> = true;
@@ -251,6 +259,8 @@ const _SlideDeckList: Equal<z.infer<typeof Z.SlideDeckListSchema>, T.SlideDeckLi
 const _SlideDeckUpdate: Equal<z.infer<typeof Z.SlideDeckUpdateSchema>, T.SlideDeckUpdate> = true;
 const _SlideEvent: Equal<z.infer<typeof Z.SlideEventSchema>, T.SlideEvent> = true;
 const _SlideEventSource: Equal<z.infer<typeof Z.SlideEventSourceSchema>, T.SlideEventSource> = true;
+const _SlideSegment: Equal<z.infer<typeof Z.SlideSegmentSchema>, T.SlideSegment> = true;
+const _SlideSegmentSource: Equal<z.infer<typeof Z.SlideSegmentSourceSchema>, T.SlideSegmentSource> = true;
 const _StampElement: Equal<z.infer<typeof Z.StampElementSchema>, T.StampElement> = true;
 const _StampElementPayload: Equal<z.infer<typeof Z.StampElementPayloadSchema>, T.StampElementPayload> = true;
 const _StopReason: Equal<z.infer<typeof Z.StopReasonSchema>, T.StopReason> = true;
@@ -299,6 +309,14 @@ const _TextElementPayload: Equal<z.infer<typeof Z.TextElementPayloadSchema>, T.T
 const _TextSize: Equal<z.infer<typeof Z.TextSizeSchema>, T.TextSize> = true;
 const _Timestamp: Equal<z.infer<typeof Z.TimestampSchema>, T.Timestamp> = true;
 const _ToolbarSide: Equal<z.infer<typeof Z.ToolbarSideSchema>, T.ToolbarSide> = true;
+const _TranscribeOutcome: Equal<z.infer<typeof Z.TranscribeOutcomeSchema>, T.TranscribeOutcome> = true;
+const _TranscribePayload: Equal<z.infer<typeof Z.TranscribePayloadSchema>, T.TranscribePayload> = true;
+const _TranscribeRecordingResult: Equal<z.infer<typeof Z.TranscribeRecordingResultSchema>, T.TranscribeRecordingResult> = true;
+const _TranscribeResult: Equal<z.infer<typeof Z.TranscribeResultSchema>, T.TranscribeResult> = true;
+const _TranscriptInfo: Equal<z.infer<typeof Z.TranscriptInfoSchema>, T.TranscriptInfo> = true;
+const _TranscriptLine: Equal<z.infer<typeof Z.TranscriptLineSchema>, T.TranscriptLine> = true;
+const _TranscriptProvider: Equal<z.infer<typeof Z.TranscriptProviderSchema>, T.TranscriptProvider> = true;
+const _TranscriptWord: Equal<z.infer<typeof Z.TranscriptWordSchema>, T.TranscriptWord> = true;
 const _Transform: Equal<z.infer<typeof Z.TransformSchema>, T.Transform> = true;
 const _TrashItem: Equal<z.infer<typeof Z.TrashItemSchema>, T.TrashItem> = true;
 const _TrashKind: Equal<z.infer<typeof Z.TrashKindSchema>, T.TrashKind> = true;

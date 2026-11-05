@@ -69,6 +69,10 @@ export const COUNT_TABLES = [
   'moodle_course_link',
   'moodle_item',
   'moodle_deadline',
+  // Transkript und Rückblick (T2-01, VERTRAEGE §18.1)
+  'transcript',
+  'transcript_segment',
+  'slide_segment',
   // Automatische Kurszuordnung (#141)
   'moodle_course_decided',
 ] as const;
