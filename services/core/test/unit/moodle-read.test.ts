@@ -1066,7 +1066,7 @@ describe('GET /moodle/file: Stream, Header, nur bekannte Dateien', () => {
   });
 
   it('Größenlimit: JSON-Datei ohne Content-Length schon im geprüften Anfang zu groß → 502, Platz wieder frei', async () => {
-    const s = await withContents({ tuning: { maxFileBytes: 1000, maxConcurrent: 1 } });
+    const s = await withContents({ tuning: { maxFileBytes: 1000, maxConcurrentDownloads: 1 } });
     s.moodle.files.set(
       REF.big,
       fileReply({
@@ -1081,9 +1081,12 @@ describe('GET /moodle/file: Stream, Header, nur bekannte Dateien', () => {
       'moodle_unreachable',
       'too_large',
     ]);
-    // Mit nur einem Platz hinge diese Anfrage, wenn der Fehlerpfad den Platz behalten hätte
+    // Mit nur einem Download-Platz hinge diese Anfrage, wenn der Fehlerpfad den Platz behalten hätte
     const started = Date.now();
-    expect((await s.json('/moodle/quizzes')).status).toBe(200);
+    s.moodle.files.set(REF.slides, fileReply({ body: '%PDF-1.7 Inhalt' }));
+    const next = await s.get(fileUrl(REF.slides));
+    expect(next.status).toBe(200);
+    await readAll(next);
     expect(Date.now() - started).toBeLessThan(2000);
   });
 
@@ -1159,7 +1162,7 @@ describe('GET /moodle/file: Stream, Header, nur bekannte Dateien', () => {
   });
 
   it('Abbruch durch die Web-App gibt den Platz in der Drosselung sofort frei', async () => {
-    const s = await withContents({ tuning: { maxConcurrent: 1, fileTimeoutMs: 30_000 } });
+    const s = await withContents({ tuning: { maxConcurrentDownloads: 1, idleTimeoutMs: 30_000 } });
     let upstreamClosed = false;
     s.moodle.files.set(REF.slow, async (res) => {
       res.on('close', () => (upstreamClosed = true));
@@ -1171,11 +1174,42 @@ describe('GET /moodle/file: Stream, Header, nur bekannte Dateien', () => {
     const response = await s.get(fileUrl(REF.slow), { signal: controller.signal });
     await response.body?.getReader().read();
     controller.abort();
-    // Mit nur einem Platz ginge diese Anfrage erst nach dem Zeitlimit (30 s) durch
+    // Mit nur einem Download-Platz ginge diese Anfrage erst nach dem Leerlauf-Zeitlimit (30 s) durch
     const started = Date.now();
-    expect((await s.json('/moodle/quizzes')).status).toBe(200);
+    s.moodle.files.set(REF.slides, fileReply({ body: '%PDF-1.7 Inhalt' }));
+    const next = await s.get(fileUrl(REF.slides));
+    expect(next.status).toBe(200);
+    await readAll(next);
     expect(Date.now() - started).toBeLessThan(2000);
     expect(upstreamClosed).toBe(true);
+  });
+
+  it('Abbruch, während die Anfrage auf einen Download-Platz wartet: Moodle wird nicht mehr angefragt (Issue #129, H5)', async () => {
+    const s = await withContents({ tuning: { maxConcurrentDownloads: 1, idleTimeoutMs: 30_000 } });
+    s.moodle.files.set(REF.slow, async (res) => {
+      res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': 1_000_000 });
+      res.write(Buffer.alloc(1024, 0x41));
+      // Rest kommt nie
+    });
+    s.moodle.files.set(REF.slides, fileReply({ body: '%PDF-1.7 Inhalt' }));
+    const holder = new AbortController();
+    const first = await s.get(fileUrl(REF.slow), { signal: holder.signal });
+    await first.body?.getReader().read();
+
+    // Zweite Anfrage wartet auf den einzigen Download-Platz und wird dann abgebrochen
+    const waiting = new AbortController();
+    const second = s.get(fileUrl(REF.slides), { signal: waiting.signal }).catch(() => null);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    waiting.abort();
+    expect(await second).toBeNull();
+
+    // Platz frei geben; die dritte Anfrage reiht sich hinter der abgebrochenen ein und läuft durch
+    holder.abort();
+    const third = await s.get(fileUrl(REF.slides));
+    expect(third.status).toBe(200);
+    await readAll(third);
+    // Moodle sah nur die langsame und die dritte Anfrage, nie die abgebrochene
+    expect(s.moodle.calls('pluginfile')).toHaveLength(2);
   });
 });
 
@@ -1282,7 +1316,7 @@ describe('Nacharbeit Review #128: Datei-Stream', () => {
   });
 
   it('B1: Header, dann Stillstand → 502 moodle_unreachable (timeout) als JSON', async () => {
-    const s = await withContents({ tuning: { fileTimeoutMs: 200 } });
+    const s = await withContents({ tuning: { idleTimeoutMs: 200 } });
     s.moodle.files.set(REF.slow, (res) => {
       res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': 1000 });
       res.flushHeaders();

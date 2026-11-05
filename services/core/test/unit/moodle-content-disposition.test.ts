@@ -8,7 +8,7 @@ import {
   filenameFrom,
   parseContentDisposition,
 } from '../../src/moodle/content-disposition.ts';
-import { scrubToken } from '../../src/moodle/client.ts';
+import { isValidFileRef, MAX_REF_LENGTH, scrubToken } from '../../src/moodle/client.ts';
 import { calendarDate, mapFile, nameFromRef, safeUrl, timestamp } from '../../src/moodle/mappers.ts';
 import { MoodleFileRegistry } from '../../src/moodle/reader.ts';
 
@@ -244,5 +244,18 @@ describe('Hilfen der Lese-Endpunkte', () => {
       true,
     ]);
     expect(registry.size).toBe(2);
+  });
+
+  it('MoodleFileRegistry merkt sich keine Verweise über der Längengrenze (Issue #129, H10)', () => {
+    const registry = new MoodleFileRegistry();
+    const prefix = '/1/mod_resource/content/1/';
+    const atLimit = prefix + 'a'.repeat(MAX_REF_LENGTH - prefix.length);
+    const tooLong = atLimit + 'a';
+    expect([atLimit.length, tooLong.length]).toEqual([MAX_REF_LENGTH, MAX_REF_LENGTH + 1]);
+    registry.add(atLimit);
+    registry.add(tooLong);
+    expect([registry.has(atLimit), registry.has(tooLong), registry.size]).toEqual([true, false, 1]);
+    // Die Grenze gilt auch für den Abruf selbst
+    expect([isValidFileRef(atLimit), isValidFileRef(tooLong)]).toEqual([true, false]);
   });
 });

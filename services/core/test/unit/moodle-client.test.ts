@@ -163,16 +163,24 @@ describe('MoodleClient.call', () => {
     expect(error.details).toEqual({ reason: 'no_json' });
   });
 
-  it('höchstens 2 Anfragen gleichzeitig, Starts mit Mindestabstand', async () => {
-    // Echte Zeit: Starts im Abstand von mindestens minIntervalMs (kleine Toleranz für Timer)
+  it('höchstens 2 Anfragen gleichzeitig (Zähler und Gates), Starts mit Mindestabstand (virtuelle Zeit)', async () => {
+    // Keine Zeitmessung: Die Gleichzeitigkeit belegt ein Zähler, den Gates auf die Spitze treiben. Der Abstand
+    // läuft über eine selbst gestellte Uhr, die `sleep` weiterstellt (CI-Timer dürfen früh oder spät feuern).
+    let clock = 0;
+    const sleep = async (ms: number) => {
+      const until = clock + ms;
+      await Promise.resolve();
+      clock = Math.max(clock, until);
+    };
     let active = 0;
     let maxActive = 0;
     const starts: number[] = [];
+    const gates: (() => void)[] = [];
     const fake = fakeFetch(async () => {
       active += 1;
       maxActive = Math.max(maxActive, active);
-      starts.push(performance.now());
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      starts.push(clock);
+      await new Promise<void>((resolve) => gates.push(resolve));
       active -= 1;
       return json({});
     });
@@ -180,15 +188,31 @@ describe('MoodleClient.call', () => {
       baseUrl: FAKE_BASE,
       tokens: new StaticTokenStore(FAKE_TOKEN),
       fetch: fake.fetch,
+      now: () => clock,
+      sleep,
       minIntervalMs: 40,
     });
-    await Promise.all(Array.from({ length: 6 }, () => c.read('core_webservice_get_site_info')));
-    expect(fake.requests).toHaveLength(6);
-    expect(maxActive).toBeLessThanOrEqual(2);
-    // Der i-te Start liegt frühestens i × 40 ms nach dem ersten (Timer dürfen sich nur verspäten)
-    for (let i = 1; i < starts.length; i += 1) {
-      expect((starts[i] ?? 0) - (starts[0] ?? 0)).toBeGreaterThanOrEqual(i * 40 - 5);
+    const calls = Array.from({ length: 6 }, () => c.read('core_webservice_get_site_info'));
+    const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+    await settle();
+    // Genau zwei laufen, die übrigen vier warten auf einen Platz
+    expect([active, fake.requests.length, gates.length]).toEqual([2, 2, 2]);
+    for (let done = 1; done <= 4; done += 1) {
+      gates.shift()?.();
+      await settle();
+      // Platz frei → genau eine weitere Anfrage startet, nie mehr als zwei zugleich
+      expect([active, fake.requests.length]).toEqual([2, 2 + done]);
     }
+    while (gates.length > 0) {
+      gates.shift()?.();
+      await settle();
+    }
+    await Promise.all(calls);
+    expect(fake.requests).toHaveLength(6);
+    expect(maxActive).toBe(2);
+    // Der i-te Start liegt genau i x 40 ms nach dem ersten
+    expect(starts).toEqual([0, 40, 80, 120, 160, 200]);
   });
 });
 
@@ -397,7 +421,7 @@ describe('Nacharbeit Review: Weiterleitungen, read/write, Zeitlimits, Downloads'
     const { client: c, requests } = client(
       () => new Response('%PDF-Inhalt', { status: 200, headers: { 'content-type': 'application/pdf' } }),
       FAKE_TOKEN,
-      { maxConcurrent: 1 },
+      { maxConcurrentDownloads: 1 },
     );
     const first = await c.downloadFile(ref);
     const second = c.downloadFile(ref);
@@ -416,7 +440,7 @@ describe('Nacharbeit Review: Weiterleitungen, read/write, Zeitlimits, Downloads'
     const { client: c, requests } = client(
       () => new Response('%PDF', { status: 200, headers: { 'content-type': 'application/pdf' } }),
       FAKE_TOKEN,
-      { maxConcurrent: 1, fileTimeoutMs: 50 },
+      { maxConcurrentDownloads: 1, idleTimeoutMs: 50 },
     );
     const abandoned = await c.downloadFile(ref);
     const errors: unknown[] = [];
@@ -433,7 +457,7 @@ describe('Nacharbeit Review: Weiterleitungen, read/write, Zeitlimits, Downloads'
     const { client: c } = client(
       () => new Response('%PDF', { status: 200, headers: { 'content-type': 'application/pdf' } }),
       FAKE_TOKEN,
-      { maxConcurrent: 1, fileTimeoutMs: 20 },
+      { maxConcurrentDownloads: 1, idleTimeoutMs: 20 },
     );
     const uncaught: unknown[] = [];
     const onUncaught = (error: unknown) => uncaught.push(error);
@@ -461,7 +485,7 @@ describe('Nacharbeit Review: Weiterleitungen, read/write, Zeitlimits, Downloads'
           { status: 200, headers: { 'content-type': 'application/pdf' } },
         ),
       FAKE_TOKEN,
-      { maxConcurrent: 1 },
+      { maxConcurrentDownloads: 1 },
     );
     const first = await c.downloadFile(ref);
     first.stream.resume();

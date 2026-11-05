@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { pino } from 'pino';
@@ -916,6 +917,89 @@ describe('Moodle-Abgleich (T1-23)', () => {
         { moodle, now: () => NOW },
       );
     }
+  });
+
+  it('stop() bricht einen laufenden Download sofort ab: kein Material, keine Restdatei (Issue #129)', async () => {
+    await start();
+    // Die erste Datei liefert ein paar Byte und bleibt dann stehen (Leerlauf-Zeitlimit 30 s, nicht abgewartet)
+    let upstreamClosed = false;
+    let firstBytesSent = false;
+    fake.files.set(REF.vl01, (res) => {
+      res.on('close', () => (upstreamClosed = true));
+      res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': 1_000_000 });
+      res.write(Buffer.from('%PDF-1.4\n'));
+      firstBytesSent = true;
+    });
+    const before = await tableCounts();
+    expect((await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id })).status).toBe(200);
+    while (!firstBytesSent) await new Promise((r) => setTimeout(r, 10));
+    // Der Download läuft, der Abgleich hängt in dieser Datei
+    expect((await sync.status()).state).toBe('laeuft');
+
+    const started = Date.now();
+    await sync.stop(10_000);
+    // Weit unter der Wartezeit von 10 s und dem Leerlauf-Zeitlimit von 30 s
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect((await sync.status()).state).not.toBe('laeuft');
+    expect((await sync.status()).last_run).toMatchObject({ ok: false, error_code: 'abgebrochen' });
+
+    const after = await tableCounts();
+    expect([after.decks, after.sheets, after.jobs]).toEqual([before.decks, before.sheets, before.jobs]);
+    // Auch nicht als fehlgeschlagen vermerkt: ein neuer Abgleich versucht die Datei wieder
+    expect((await itemByRef(REF.vl01)).last_error).toBeNull();
+    // Moodle-Verbindung ist zu, und im temporären Ordner liegt nichts
+    for (let i = 0; i < 100 && !upstreamClosed; i += 1) await new Promise((r) => setTimeout(r, 10));
+    expect(upstreamClosed).toBe(true);
+    expect(await listFiles(uploadTmpDir(t.config.dataDir)).catch(() => [])).toEqual([]);
+  });
+
+  it('stop() genau nach dem Ende des Downloads: kein Material, keine Restdatei (Issue #129, Wettlauf)', async () => {
+    await start();
+    // Der Download ist vollständig und der Abbruch-Listener des Clients schon weg, wenn stop() kommt:
+    // Das Signal kann den Stream nicht mehr treffen, nur die Prüfung nach storeDownload fängt es ab.
+    const original = moodle.client.downloadFile.bind(moodle.client);
+    let stops = 0;
+    moodle.client.downloadFile = async (ref, options) => {
+      const real = await original(ref, options);
+      const chunks: Buffer[] = [];
+      for await (const chunk of real.stream) chunks.push(Buffer.from(chunk as Uint8Array));
+      const stream = Readable.from([Buffer.concat(chunks)]);
+      // 'end' kommt vor dem Abschluss der Pipeline in storeDownload
+      stream.once('end', () => {
+        stops += 1;
+        void sync.stop();
+      });
+      return { ...real, stream };
+    };
+    const before = await tableCounts();
+    expect((await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id })).status).toBe(200);
+    await sync.idle();
+    expect(stops).toBe(1);
+    expect((await sync.status()).last_run).toMatchObject({ ok: false, error_code: 'abgebrochen' });
+    const after = await tableCounts();
+    expect([after.decks, after.sheets, after.jobs]).toEqual([before.decks, before.sheets, before.jobs]);
+    expect((await itemByRef(REF.vl01)).last_error).toBeNull();
+    expect(await listFiles(uploadTmpDir(t.config.dataDir)).catch(() => [])).toEqual([]);
+  });
+
+  it('„Jetzt abgleichen“ für einen ausgeschalteten Kurs → 409 moodle_link_disabled (Issue #129)', async () => {
+    await start();
+    await linkDbs();
+    await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id, sync_enabled: false });
+    const requestsBefore = fake.requests.length;
+    const disabled = await req<{ error: { code: string } }>('POST', '/moodle/sync', {
+      course_id: COURSE.dbs,
+    });
+    expect(disabled.status).toBe(409);
+    expect(disabled.body.error.code).toBe('moodle_link_disabled');
+    // Es wurde nichts angestoßen
+    await sync.idle();
+    expect(fake.requests.length).toBe(requestsBefore);
+    // Ein Gesamtabgleich ohne Kurs bleibt erlaubt, wieder eingeschaltet geht auch der Kurs
+    expect((await req('POST', '/moodle/sync', {})).status).toBe(202);
+    await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id, sync_enabled: true });
+    await sync.idle();
+    expect((await req('POST', '/moodle/sync', { course_id: COURSE.dbs })).status).toBe(202);
   });
 
   it('„Ignorieren“ lässt sich rückgängig machen: zurück auf offen, ohne Abgleich (Review #134, M2)', async () => {
