@@ -113,10 +113,27 @@ describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
       '/x?pairing%5Fid=[Redacted]&device_token=[Redacted]',
     );
     expect(redactUrl('/x?pairing_id=a&pairing_id=b#f')).toBe(
-      '/x?pairing_id=[Redacted]&pairing_id=[Redacted]#f',
+      '/x?pairing_id=[Redacted]&pairing_id=[Redacted]',
     );
     expect(redactUrl('/devices')).toBe('/devices');
     expect(redactUrl('/x?')).toBe('/x?');
+  });
+
+  it('zerlegt die Query wie Fastify: Wert bis zum nächsten &, auch über # und ? hinweg (Issue #100)', () => {
+    // Fastify liest hier pairing_id = „GEHEIM#frag“ bzw. „GEHEIM?x=1“: nichts davon darf stehen bleiben
+    expect(redactUrl('/p?pairing_id=GEHEIM#frag')).toBe('/p?pairing_id=[Redacted]');
+    expect(redactUrl('/p?pairing_id=GEHEIM?x=1&y=2')).toBe('/p?pairing_id=[Redacted]&y=2');
+    expect(redactUrl('/p?x=1#&pairing_id=GEHEIM')).toBe('/p?x=1#&pairing_id=[Redacted]');
+    // & im Pfad: die Query beginnt erst beim ersten ?
+    expect(redactUrl('/p&a=b?pairing_id=GEHEIM')).toBe('/p&a=b?pairing_id=[Redacted]');
+    // Ein zweites ? trennt nichts: Für Fastify ist das der Wert von a, kein pairing_id
+    expect(redactUrl('/p?a=b?pairing_id=x')).toBe('/p?a=b?pairing_id=x');
+    // Meldungstext: endet am Leerraum, mehrere URLs in einer Zeile
+    expect(redactUrl('Route DELETE:/p?pairing_id=GEHEIM not found, vorher /q?token=GEHEIM2 x')).toBe(
+      'Route DELETE:/p?pairing_id=[Redacted] not found, vorher /q?token=[Redacted] x',
+    );
+    // Ohne = und mit leerem Namen bleibt alles, wie es ist
+    expect(redactUrl('/p?pairing_id&=x')).toBe('/p?pairing_id&=x');
   });
 
   it('Namensgrenzen: harmlose Parameter bleiben lesbar, geheime werden geschwärzt', () => {

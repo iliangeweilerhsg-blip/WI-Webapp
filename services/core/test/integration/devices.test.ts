@@ -22,13 +22,16 @@ import { LastSeenTracker, onDeviceRevoked, verifyDeviceToken } from '../../src/s
 import { PairingManager } from '../../src/services/pairing.ts';
 import { buildApp } from '../../src/app.ts';
 import { createDb } from '../../src/db/client.ts';
+import { loggerOptions } from '../../src/logger.ts';
 import { startTestApp, TEST_PORT, testConfig, type TestApp } from './helpers.ts';
 
 const MAC_IP = '192.168.1.5';
 const clock = { now: Date.now() };
 
-/** Gesammelte Log-Zeilen aller Tests dieser Datei (Prüfung: Code und Token tauchen nie auf) */
+/** Gesammelte Log-Zeilen aller Tests dieser Datei (Prüfung: Code, Token und geheime `pairing_id` tauchen nie auf) */
 const logLines: string[] = [];
+/** Geheime `pairing_id` aller in dieser Datei geöffneten Fenster (#100, H-1) */
+const secretPairingIds = new Set<string>();
 const logStream = new Writable({
   write(chunk: Buffer, _enc, done) {
     logLines.push(chunk.toString('utf8'));
@@ -42,11 +45,16 @@ beforeAll(async () => {
   pairing = new PairingManager({ now: () => clock.now });
   t = await startTestApp(
     {},
-    { pairing, pairingHost: () => MAC_IP, logger: pino({ level: 'trace' }, logStream) },
+    // Dieselben Logger-Optionen wie im Betrieb (Serializer mit Schwärzung), sonst prüft der Log-Test nichts Echtes
+    { pairing, pairingHost: () => MAC_IP, logger: pino(loggerOptions({ logLevel: 'trace' }), logStream) },
   );
 });
 afterAll(async () => {
   await t.close();
+  // Über alle Tests dieser Datei: keine geheime pairing_id im Log (auch nicht aus DELETE ?pairing_id=)
+  const all = logLines.join('\n');
+  expect(secretPairingIds.size).toBeGreaterThan(0);
+  for (const id of secretPairingIds) expect(all).not.toContain(id);
 });
 afterEach(() => {
   clock.now = Date.now();
@@ -79,7 +87,9 @@ const nonce = () => randomBytes(18).toString('base64url');
 async function openWindow(): Promise<PairingCode> {
   const res = await t.request({ method: 'POST', url: '/api/v1/devices/pairings' });
   expect(res.statusCode).toBe(201);
-  return PairingCodeSchema.parse(res.json());
+  const code = PairingCodeSchema.parse(res.json());
+  secretPairingIds.add(code.pairing_id);
+  return code;
 }
 
 async function confirm(
@@ -385,6 +395,55 @@ describe('Fenster am Mac schließen (DELETE /devices/pairings)', () => {
     expect(del.statusCode).toBe(204);
     const c = await confirm({ pairing_id: current.pairing_id, code: current.code });
     expect(c.statusCode).toBe(201);
+  });
+
+  it('die geheime pairing_id aus ?pairing_id steht nicht im Log (#100, H-1)', async () => {
+    const w = await openWindow();
+    const before = logLines.length;
+    const del = await t.request({
+      method: 'DELETE',
+      url: `/api/v1/devices/pairings?pairing_id=${w.pairing_id}`,
+    });
+    expect(del.statusCode).toBe(204);
+    // Ungültige Kennung (400) und unbekannter Pfad (404) laufen über andere Logzeilen
+    const bad = await t.request({
+      method: 'DELETE',
+      url: `/api/v1/devices/pairings?pairing_id=${w.pairing_id}x`,
+    });
+    expect(bad.statusCode).toBe(400);
+    const missing = await t.request({
+      method: 'DELETE',
+      url: `/api/v1/gibt-es-nicht?pairing_id=${w.pairing_id}`,
+    });
+    expect(missing.statusCode).toBe(404);
+    const list = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(list.headers['sg-pairing-state']).toBe('closed');
+
+    const lines = logLines.slice(before).join('\n');
+    expect(lines).toContain('incoming request');
+    expect(lines).toContain('/api/v1/devices/pairings?pairing_id=[Redacted]');
+    expect(lines).not.toContain(w.pairing_id);
+  });
+});
+
+describe('Zustand während des Einlösens (#100, H-4)', () => {
+  it('SG-Pairing-State ist confirming, solange ein richtiger Code eingelöst wird', async () => {
+    const w = await openWindow();
+    const grant = pairing.beginConfirm(
+      { pairing_id: w.pairing_id, code: w.code, public_nonce: nonce() },
+      freshIp(),
+    );
+    try {
+      const during = await t.request({ url: '/api/v1/devices/pairings/requests' });
+      expect(during.headers['sg-pairing-state']).toBe('confirming');
+      expect(during.headers['sg-pairing-id']).toBe(w.pairing_id);
+      const c = await confirm({ pairing_id: w.pairing_id, code: w.code });
+      expect(errorCode(c)).toBe('pairing_window_closed');
+    } finally {
+      grant.abort();
+    }
+    const after = await t.request({ url: '/api/v1/devices/pairings/requests' });
+    expect(after.headers['sg-pairing-state']).toBe('open');
   });
 });
 

@@ -137,6 +137,56 @@ describe('Fenster', () => {
     second.commit();
     expect(pm.status().state).toBe('paired');
   });
+
+  it('während ein richtiger Code eingelöst wird: Zustand confirming, nicht open (#100, H-4)', () => {
+    for (const via of ['qr', 'public'] as const) {
+      const { clock, pm } = setup();
+      const w = pm.open();
+      const id = via === 'qr' ? w.pairingId : startPublic(pm);
+      const grant = pm.beginConfirm({ pairing_id: id, code: w.code, public_nonce: NONCE(1) }, freshIp());
+      expect(pm.status()).toEqual({ state: 'confirming', pairingId: w.pairingId });
+      expect(pm.listRequests()).toEqual([]);
+      // Auch wenn das Fenster während des Anlegens abläuft: Der Code war rechtzeitig richtig
+      clock.now += PAIRING_WINDOW_MS;
+      expect(pm.status().state).toBe('confirming');
+      clock.now -= PAIRING_WINDOW_MS;
+      grant.abort();
+      expect(pm.status().state).toBe('open');
+      pm.beginConfirm({ pairing_id: id, code: w.code, public_nonce: NONCE(2) }, freshIp()).commit();
+      expect(pm.status().state).toBe('paired');
+    }
+  });
+
+  it('confirming im Zustand qr_only und mit gemerktem Schließen', () => {
+    const { pm } = setup();
+    const w = pm.open();
+    const publicId = startPublic(pm);
+    for (let i = 0; i < 20; i++) {
+      fails(() =>
+        pm.beginConfirm(
+          { pairing_id: publicId, code: wrong(w.code), public_nonce: NONCE(10 + i) },
+          freshIp(),
+        ),
+      );
+    }
+    expect(pm.status().state).toBe('qr_only');
+    const grant = pm.beginConfirm(
+      { pairing_id: w.pairingId, code: w.code, public_nonce: NONCE(1) },
+      freshIp(),
+    );
+    expect(pm.status().state).toBe('confirming');
+    grant.abort();
+    expect(pm.status().state).toBe('qr_only');
+
+    const again = pm.beginConfirm(
+      { pairing_id: w.pairingId, code: w.code, public_nonce: NONCE(2) },
+      freshIp(),
+    );
+    pm.close(w.pairingId);
+    expect(pm.status().state).toBe('confirming');
+    again.abort();
+    expect(pm.status().state).toBe('closed');
+  });
 });
 
 describe('Fehlversuche (§12 Schritt 4)', () => {

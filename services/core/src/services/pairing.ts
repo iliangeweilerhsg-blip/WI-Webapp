@@ -36,6 +36,8 @@ const HOUR_MS = 60 * MINUTE_MS;
  * - `none`: nie geöffnet (seit dem Start des Core)
  * - `open`: offen, beide Wege
  * - `qr_only`: zu viele Fehlversuche über `pair/start`, nur noch der QR-Weg ist offen
+ * - `confirming`: ein richtiger Code wird gerade eingelöst, das Fenster ist für alle anderen zu. Danach `paired`,
+ *   scheitert das Anlegen, wieder `open` bzw. `qr_only` (oder `closed`, falls währenddessen geschlossen wurde)
  * - `expired`: 5 min abgelaufen
  * - `paired`: ein Gerät wurde gekoppelt, Fenster geschlossen
  * - `closed_failures`: zu viele Fehlversuche über den QR-Weg, Fenster geschlossen
@@ -43,7 +45,7 @@ const HOUR_MS = 60 * MINUTE_MS;
  * - `locked`: globale Sperre (423), bis ein neues Fenster geöffnet wird
  */
 export type PairingState =
-  'none' | 'open' | 'qr_only' | 'expired' | 'paired' | 'closed_failures' | 'closed' | 'locked';
+  'none' | 'open' | 'qr_only' | 'confirming' | 'expired' | 'paired' | 'closed_failures' | 'closed' | 'locked';
 
 /** Weg einer Bestätigung: über die geheime Kennung (QR) oder die öffentliche (`pair/start`) */
 export type PairingPath = 'qr' | 'public';
@@ -255,6 +257,8 @@ export class PairingManager {
     if (w.closed === 'paired') return { state: 'paired', pairingId };
     if (w.closed === 'failures') return { state: 'closed_failures', pairingId };
     if (w.closed === 'cancelled') return { state: 'closed', pairingId };
+    // Vor dem Ablauf prüfen: Ein Code, der vor Ablauf richtig war, wird noch eingelöst (#100, H-4)
+    if (w.closed === 'confirming') return { state: 'confirming', pairingId };
     if (this.now() >= w.expiresAt) {
       w.code = '';
       return { state: 'expired', pairingId };
