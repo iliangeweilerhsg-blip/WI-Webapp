@@ -504,8 +504,11 @@ describe('Härtung #93: Dateiname aus Content-Disposition', () => {
   it.each([
     // [Header, erwarteter Name]
     ['attachment; filename="../../etc/passwd"', 'passwd'],
-    ['attachment; filename="..\\..\\windows\\win.ini"', 'win.ini'],
-    ['attachment; filename="a\\b"', 'b'],
+    // Im Quoted-String ist `\x` ein Escape für `x` (RFC 6266/9110 quoted-pair), kein Pfadtrenner (T1-22)
+    ['attachment; filename="..\\..\\windows\\win.ini"', 'windowswin.ini'],
+    ['attachment; filename="a\\b"', 'ab'],
+    // Ohne Quotes ist `\` kein tchar → Header ungültig, kein Name
+    ['attachment; filename=..\\..\\win.ini', null],
     ['attachment; filename="/etc/passwd"', 'passwd'],
     ["attachment; filename*=UTF-8''..%2F..%2Ftest.pdf", 'test.pdf'],
     ["attachment; filename*=UTF-8''%2e%2e%2F%2e%2e%2Fsecret.txt", 'secret.txt'],
