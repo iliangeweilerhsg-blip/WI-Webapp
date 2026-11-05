@@ -233,6 +233,15 @@ export function installFakeCore(
       if (materialResponse) return materialResponse;
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
+      // Daten/Papierkorb (T1-18): leere Antworten, damit das gerenderte Panel nicht ins Leere fragt
+      if (path === '/backups' && method === 'GET') {
+        return json({
+          status: { target: null, last_success_at: null, next_run_at: null, stale: false, running: false },
+          items: [],
+          next_cursor: null,
+        });
+      }
+      if (path === '/trash' && method === 'GET') return json({ items: [], next_cursor: null });
 
       if (path === '/settings' && method === 'GET') return json(core.settings);
       if (path === '/settings' && method === 'PATCH') {
