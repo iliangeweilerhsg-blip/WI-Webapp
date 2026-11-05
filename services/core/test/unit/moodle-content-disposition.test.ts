@@ -219,6 +219,12 @@ describe('Hilfen der Lese-Endpunkte', () => {
     expect(nameFromRef('/1/a/b/%C3%9Cbung%201.pdf')).toBe('\u00dcbung 1.pdf');
   });
 
+  it('scrubToken ignoriert Groß-/Kleinschreibung und Regex-Zeichen im Token', () => {
+    const token = 'ab'.repeat(16);
+    expect(scrubToken(`x${token.toUpperCase()}y${token}`, token)).toBe('x[Redacted]y[Redacted]');
+    expect(scrubToken('a.b+c a.b+c axb+c', 'a.b+c')).toBe('[Redacted] [Redacted] axb+c');
+  });
+
   it('scrubToken ersetzt den Token überall, auch in Schlüsseln', () => {
     const token = 'ab'.repeat(16);
     expect(scrubToken({ [`k${token}`]: [`x${token}y`, 1, null, { z: token }] }, token)).toEqual({

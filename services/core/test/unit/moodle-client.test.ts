@@ -654,3 +654,60 @@ describe('Härtung #93: reservierte Formularfelder', () => {
     expect(keys.slice(0, -3)).toEqual(['courseid', 'options[0][name]', 'options[0][value]']);
   });
 });
+
+describe('Nacharbeit Review #128: unvollständiger Download', () => {
+  const ref = '/12/mod_resource/content/1/a.pdf';
+
+  it('Moodle kündigt mehr Byte an, als kommen: Stream endet mit 502 incomplete', async () => {
+    const { client: c } = client(
+      () =>
+        new Response('abc', {
+          status: 200,
+          headers: { 'content-type': 'application/pdf', 'content-length': '1000' },
+        }),
+    );
+    const file = await c.downloadFile(ref);
+    const chunks: Buffer[] = [];
+    const error = await httpError(
+      (async () => {
+        for await (const chunk of file.stream) chunks.push(Buffer.from(chunk as Uint8Array));
+      })(),
+    );
+    expect([error.statusCode, error.code, error.details?.reason]).toEqual([
+      502,
+      'moodle_unreachable',
+      'incomplete',
+    ]);
+    expect(Buffer.concat(chunks).toString()).toBe('abc');
+  });
+
+  it('leerer Body trotz Content-Length → 502 incomplete, bevor ein Stream entsteht', async () => {
+    const { client: c } = client(
+      () =>
+        new Response('', {
+          status: 200,
+          headers: { 'content-type': 'application/pdf', 'content-length': '5' },
+        }),
+    );
+    const error = await httpError(c.downloadFile(ref));
+    expect([error.statusCode, error.code, error.details?.reason]).toEqual([
+      502,
+      'moodle_unreachable',
+      'incomplete',
+    ]);
+  });
+
+  it('genau angekündigte Länge endet normal', async () => {
+    const { client: c } = client(
+      () =>
+        new Response('abc', {
+          status: 200,
+          headers: { 'content-type': 'application/pdf', 'content-length': '3' },
+        }),
+    );
+    const file = await c.downloadFile(ref);
+    const chunks: Buffer[] = [];
+    for await (const chunk of file.stream) chunks.push(Buffer.from(chunk as Uint8Array));
+    expect(Buffer.concat(chunks).toString()).toBe('abc');
+  });
+});

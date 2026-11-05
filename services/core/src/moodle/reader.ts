@@ -72,6 +72,16 @@ function defaultTimeZone(): string {
   return process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
 
+/** Gültige IANA-Zeitzone oder UTC. Eine falsche `TZ` darf keinen 500 auslösen */
+export function validTimeZone(timeZone: string): string {
+  try {
+    new Intl.DateTimeFormat('en-CA', { timeZone });
+    return timeZone;
+  } catch {
+    return 'UTC';
+  }
+}
+
 export interface MoodleReaderOptions {
   client: MoodleClient;
   status: MoodleStatusService;
@@ -89,7 +99,7 @@ export class MoodleReader {
     this.client = options.client;
     this.status = options.status;
     this.files = options.files;
-    this.timeZone = options.timeZone ?? defaultTimeZone();
+    this.timeZone = validTimeZone(options.timeZone ?? defaultTimeZone());
   }
 
   private context(): MapContext {
@@ -155,29 +165,24 @@ export class MoodleReader {
 
   /**
    * Noten. `gradereport_user_get_grade_items` braucht eine Kurs-ID: Ohne `courseId` wird jeder Kurs
-   * des Nutzers einzeln abgefragt, außer Kurse, die Noten ausblenden (`showgrades = 0`).
+   * des Nutzers einzeln abgefragt, außer Kurse, die Noten ausblenden (`showgrades = 0`). Kurse mit
+   * Fehler fallen dann weg; scheitern alle, gilt der erste Fehler.
    */
   async grades(courseId?: number): Promise<MoodleGradeList> {
     const userid = await this.status.userId();
-    let courseIds: number[];
-    if (courseId) {
-      courseIds = [courseId];
-    } else {
-      courseIds = list(await this.rawCourses())
-        .map(rec)
-        .filter((course) => course !== null && course.showgrades !== false && course.showgrades !== 0)
-        .map((course) => moodleId(course?.id))
-        .filter((id): id is number => id !== null);
-    }
-    const results = await Promise.all(
-      courseIds.map(async (id) =>
-        mapGradeItems(
-          await this.client.read('gradereport_user_get_grade_items', { courseid: id, userid }),
-          id,
-        ),
-      ),
-    );
-    return { items: results.flat() };
+    const gradesOf = async (id: number) =>
+      mapGradeItems(await this.client.read('gradereport_user_get_grade_items', { courseid: id, userid }), id);
+    if (courseId) return { items: await gradesOf(courseId) };
+    const courseIds = list(await this.rawCourses())
+      .map(rec)
+      .filter((course) => course !== null && course.showgrades !== false && course.showgrades !== 0)
+      .map((course) => moodleId(course?.id))
+      .filter((id): id is number => id !== null);
+    const results = await Promise.allSettled(courseIds.map(gradesOf));
+    const ok = results.filter((result) => result.status === 'fulfilled');
+    const failed = results.find((result) => result.status === 'rejected');
+    if (ok.length === 0 && failed) throw failed.reason;
+    return { items: ok.flatMap((result) => result.value) };
   }
 
   async quizzes(courseId?: number): Promise<MoodleQuizList> {

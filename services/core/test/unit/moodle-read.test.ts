@@ -2,6 +2,8 @@
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import type { AddressInfo } from 'node:net';
+import { Readable } from 'node:stream';
+import { gzipSync } from 'node:zlib';
 import { pino } from 'pino';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -19,9 +21,14 @@ import {
   MoodleStatusSchema,
   MoodleSubmissionStatusSchema,
 } from '@sg/shared';
+import { HttpError } from '../../src/errors.ts';
 import { loggerOptions } from '../../src/logger.ts';
 import { decodeExtValue, parseContentDisposition } from '../../src/moodle/content-disposition.ts';
-import { createMoodleServices, type MoodleClientTuning } from '../../src/moodle/index.ts';
+import {
+  createMoodleServices,
+  type MoodleClientTuning,
+  type MoodleServices,
+} from '../../src/moodle/index.ts';
 import { StaticTokenStore } from '../../src/moodle/token-store.ts';
 import { registerErrorHandler } from '../../src/plugins/errors.ts';
 import { moodleRoutes } from '../../src/routes/moodle.ts';
@@ -376,6 +383,8 @@ afterEach(async () => {
 
 interface Setup {
   moodle: FakeMoodleServer;
+  services: MoodleServices;
+  tokens: StaticTokenStore;
   url: string;
   logs: string[];
   bodies: string[];
@@ -384,7 +393,12 @@ interface Setup {
 }
 
 async function setup(
-  options: { token?: string | null; tuning?: MoodleClientTuning; validUntil?: string } = {},
+  options: {
+    token?: string | null;
+    tuning?: MoodleClientTuning;
+    validUntil?: string;
+    timeZone?: string;
+  } = {},
 ): Promise<Setup> {
   moodle = await new FakeMoodleServer(TOKEN).start();
   moodle.rest = fixtures(moodle.baseUrl);
@@ -393,13 +407,14 @@ async function setup(
   const logger = pino(loggerOptions({ logLevel: 'trace' }), {
     write: (line: string) => void logs.push(line),
   });
+  const tokens = new StaticTokenStore(options.token === undefined ? TOKEN : options.token);
   const services = createMoodleServices({
     config: { moodleUrl: moodle.baseUrl, dataDir: '/gibt/es/nicht' },
-    tokens: new StaticTokenStore(options.token === undefined ? TOKEN : options.token),
+    tokens,
     logger: logger.child({ module: 'moodle' }),
     readMeta: async () => ({ token_valid_until: options.validUntil ?? '2027-03-31' }),
     now: () => NOW,
-    timeZone: 'Europe/Berlin',
+    timeZone: options.timeZone ?? 'Europe/Berlin',
     client: { minIntervalMs: 0, retryDelaysMs: [0, 0], timeoutMs: 2000, ...options.tuning },
   });
   // forceCloseConnections: fetch öffnet nach einem Abbruch vorsorglich eine Verbindung ohne Anfrage.
@@ -423,7 +438,7 @@ async function setup(
     bodies.push(text, JSON.stringify([...response.headers]));
     return { status: response.status, body: JSON.parse(text) as unknown };
   };
-  return { moodle, url, logs, bodies, get, json };
+  return { moodle, services, tokens, url, logs, bodies, get, json };
 }
 
 const fileUrl = (ref: string) => `/moodle/file?ref=${encodeURIComponent(ref)}`;
@@ -914,7 +929,8 @@ describe('GET /moodle/file: Stream, Header, nur bekannte Dateien', () => {
     }
     const text = await s.get(fileUrl(REF.text));
     await readAll(text);
-    expect(text.headers.get('content-type')).toBe('text/plain; charset=ISO-8859-1');
+    // Erlaubter Zeichensatz bleibt (klein geschrieben)
+    expect(text.headers.get('content-type')).toBe('text/plain; charset=iso-8859-1');
     expect(text.headers.get('content-disposition')).toBe(
       `inline; filename="notizen.txt"; filename*=UTF-8''notizen.txt`,
     );
@@ -1220,5 +1236,229 @@ describe('Token nie in Logs oder Antworten', () => {
     expect(s.moodle.requests.some((request) => request.params.get('wstoken') === TOKEN)).toBe(true);
     expect(log).not.toContain(TOKEN);
     expect(s.bodies.join('\n')).not.toContain(TOKEN);
+  });
+});
+
+// ---------- Nacharbeit Review PR #128 ----------
+
+/** Fehlerantwort statt Datei: JSON, ohne die Datei-Header */
+async function jsonFailure(s: Setup, ref: string) {
+  const response = await s.get(fileUrl(ref));
+  const text = await response.text();
+  s.bodies.push(text, JSON.stringify([...response.headers]));
+  return {
+    status: response.status,
+    contentType: response.headers.get('content-type'),
+    disposition: response.headers.get('content-disposition'),
+    error: ApiErrorSchema.parse(JSON.parse(text)).error,
+  };
+}
+
+describe('Nacharbeit Review #128: Datei-Stream', () => {
+  it('B1: Header, dann Reset → 502 moodle_unreachable als JSON, mit Wiederholung', async () => {
+    const s = await withContents();
+    s.moodle.files.set(REF.slow, (res) => {
+      res.writeHead(200, {
+        'content-type': 'application/pdf',
+        'content-length': 1000,
+        'content-disposition': 'attachment; filename="a.pdf"',
+      });
+      res.flushHeaders();
+      setTimeout(() => res.socket?.destroy(), 20);
+    });
+    const failure = await jsonFailure(s, REF.slow);
+    expect([failure.status, failure.error.code, failure.error.details?.reason]).toEqual([
+      502,
+      'moodle_unreachable',
+      'network',
+    ]);
+    expect(failure.contentType).toMatch(/^application\/json/);
+    expect(failure.disposition).toBeNull();
+    expect(s.moodle.calls('pluginfile')).toHaveLength(3);
+  });
+
+  it('B1: Header, dann Stillstand → 502 moodle_unreachable (timeout) als JSON', async () => {
+    const s = await withContents({ tuning: { fileTimeoutMs: 200 } });
+    s.moodle.files.set(REF.slow, (res) => {
+      res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': 1000 });
+      res.flushHeaders();
+      // Rest kommt nie
+    });
+    const failure = await jsonFailure(s, REF.slow);
+    expect([failure.status, failure.error.code, failure.error.details?.reason]).toEqual([
+      502,
+      'moodle_unreachable',
+      'timeout',
+    ]);
+    expect(failure.contentType).toMatch(/^application\/json/);
+    expect(failure.disposition).toBeNull();
+  });
+
+  it('B1: Stream scheitert vor dem ersten Byte → JSON-Fehler ohne Datei-Header (nicht 500)', async () => {
+    const s = await withContents();
+    s.services.client.downloadFile = async () => ({
+      stream: new Readable({
+        read() {
+          this.destroy(
+            new HttpError(502, 'moodle_unreachable', 'Moodle ist nicht erreichbar.', { reason: 'network' }),
+          );
+        },
+      }),
+      contentType: 'application/pdf',
+      contentLength: 10,
+      filename: 'a.pdf',
+    });
+    const failure = await jsonFailure(s, REF.slides);
+    expect([failure.status, failure.error.code]).toEqual([502, 'moodle_unreachable']);
+    expect(failure.contentType).toMatch(/^application\/json/);
+    expect(failure.disposition).toBeNull();
+  });
+
+  it('S1: gzip trotz identity → ganze Datei, ohne die komprimierte Länge weiterzugeben', async () => {
+    const s = await withContents();
+    const original = Buffer.alloc(50_000, 0x61);
+    const compressed = gzipSync(original);
+    s.moodle.files.set(REF.slides, (res) => {
+      res.writeHead(200, {
+        'content-type': 'application/pdf',
+        'content-encoding': 'gzip',
+        'content-length': compressed.length,
+      });
+      res.end(compressed);
+    });
+    const response = await s.get(fileUrl(REF.slides));
+    expect(response.status).toBe(200);
+    expect((await readAll(response)).equals(original)).toBe(true);
+    expect(response.headers.get('content-length')).not.toBe(String(compressed.length));
+    expect(s.moodle.calls('pluginfile')[0]?.headers['accept-encoding']).toBe('identity');
+  });
+
+  it('S1: gzip, entpackt über dem Limit → nie mehr als das Limit, kein 500', async () => {
+    const s = await withContents({ tuning: { maxFileBytes: 20_000 } });
+    const compressed = gzipSync(Buffer.alloc(200_000, 0x61));
+    s.moodle.files.set(REF.slides, (res) => {
+      res.writeHead(200, {
+        'content-type': 'application/pdf',
+        'content-encoding': 'gzip',
+        'content-length': compressed.length,
+      });
+      res.end(compressed);
+    });
+    const response = await s.get(fileUrl(REF.slides));
+    expect(response.status).not.toBe(500);
+    let received = 0;
+    try {
+      for await (const chunk of response.body ?? []) received += (chunk as Uint8Array).byteLength;
+    } catch {
+      // Abbruch beim Limit
+    }
+    if (response.status === 200) expect(received).toBeLessThanOrEqual(20_000);
+    else expect(response.status).toBe(502);
+  });
+
+  it('S2: JSON-Anhang mit Content-Disposition ist Inhalt, kein Fehler; Token bleibt gültig', async () => {
+    const s = await withContents();
+    const body = JSON.stringify({ error: 'Ungültiges Token', errorcode: 'invalidtoken' });
+    s.moodle.files.set(
+      REF.slides,
+      fileReply({ body, contentType: 'application/json', disposition: 'attachment; filename="daten.json"' }),
+    );
+    const response = await s.get(fileUrl(REF.slides));
+    expect(response.status).toBe(200);
+    expect((await readAll(response)).toString()).toBe(body);
+    expect(response.headers.get('content-type')).toBe('application/octet-stream');
+    expect(s.tokens.invalidations).toBe(0);
+  });
+
+  it('S2: Moodle-Fehler von pluginfile.php ohne fremden Text (kein moodle_message)', async () => {
+    const s = await withContents();
+    s.moodle.files.set(
+      REF.slides,
+      fileReply({
+        body: JSON.stringify({ exception: 'x', errorcode: 'sonstwas', message: '<b>fremder Text</b>' }),
+        contentType: 'application/json',
+      }),
+    );
+    const failure = await jsonFailure(s, REF.slides);
+    expect([failure.status, failure.error.code]).toEqual([502, 'moodle_error']);
+    expect(failure.error.message).toBe('Moodle meldet einen Fehler.');
+    expect(failure.error.details).not.toHaveProperty('moodle_message');
+    expect(s.bodies.join('\n')).not.toContain('fremder Text');
+  });
+
+  it('H2: Token im Fehler-JSON von pluginfile.php erreicht weder Antwort noch Log', async () => {
+    const s = await withContents();
+    s.moodle.files.set(
+      REF.slides,
+      fileReply({
+        body: JSON.stringify({ exception: 'x', errorcode: `fehler_${TOKEN}`, message: `wstoken=${TOKEN}` }),
+        contentType: 'application/json',
+      }),
+    );
+    const failure = await jsonFailure(s, REF.slides);
+    expect([failure.status, failure.error.code]).toEqual([502, 'moodle_error']);
+    expect(failure.error.details?.moodle_errorcode).toBe('fehler_[Redacted]');
+    expect(s.logs.join('\n')).toContain('fehler_[Redacted]');
+    expect(s.logs.join('\n')).not.toContain(TOKEN);
+    expect(s.bodies.join('\n')).not.toContain(TOKEN);
+  });
+
+  it('H6: HEAD lädt die Datei nicht', async () => {
+    const s = await withContents();
+    s.moodle.files.set(REF.slides, fileReply({ body: 'x' }));
+    const response = await s.get(fileUrl(REF.slides), { method: 'HEAD' });
+    expect(response.status).toBe(404);
+    expect(s.moodle.calls('pluginfile')).toHaveLength(0);
+  });
+
+  it('H7: unsicherer Zeichensatz wird utf-8; CORP und Cache-Control an der Datei', async () => {
+    const s = await withContents();
+    s.moodle.files.set(
+      REF.text,
+      fileReply({ body: '+ADw-script+AD4-', contentType: 'text/plain; charset=UTF-7' }),
+    );
+    const response = await s.get(fileUrl(REF.text));
+    await readAll(response);
+    expect(response.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+    expect(response.headers.get('cross-origin-resource-policy')).toBe('same-origin');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+});
+
+describe('Nacharbeit Review #128: Lese-Endpunkte', () => {
+  it('H3: ungültige Zeitzone → UTC statt 500', async () => {
+    const s = await setup({ timeZone: 'Mars/Olympus_Mons' });
+    const { status, body } = await s.json('/moodle/courses');
+    expect(status).toBe(200);
+    expect(MoodleCourseListSchema.parse(body).items[0]?.start_date).toBe('2026-10-11');
+  });
+
+  it('H9: Noten ohne course_id: Kurse mit Fehler fallen weg; scheitern alle, gilt der erste Fehler', async () => {
+    const s = await setup();
+    s.moodle.rest.core_enrol_get_users_courses = [
+      { id: 101, shortname: 'A', fullname: 'A', showgrades: true },
+      { id: 103, shortname: 'B', fullname: 'B', showgrades: true },
+    ];
+    const grades = fixtures(s.moodle.baseUrl).gradereport_user_get_grade_items as (
+      params: URLSearchParams,
+    ) => unknown;
+    s.moodle.rest.gradereport_user_get_grade_items = (params: URLSearchParams) =>
+      params.get('courseid') === '103'
+        ? { exception: 'moodle_exception', errorcode: 'nopermissions', message: 'Keine Rechte' }
+        : grades(params);
+    const partial = MoodleGradeListSchema.parse((await s.json('/moodle/grades')).body);
+    expect(partial.items.map((item) => item.course_id)).toEqual([101, 101]);
+
+    s.moodle.rest.gradereport_user_get_grade_items = {
+      exception: 'moodle_exception',
+      errorcode: 'nopermissions',
+      message: 'Keine Rechte',
+    };
+    const error = await errorOf(s, '/moodle/grades');
+    expect([error.status, error.code, error.details?.moodle_errorcode]).toEqual([
+      502,
+      'moodle_error',
+      'nopermissions',
+    ]);
   });
 });

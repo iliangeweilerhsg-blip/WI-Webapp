@@ -12,6 +12,7 @@ export type FileHandler = (res: ServerResponse, req: IncomingMessage) => void | 
 export interface RecordedMoodleRequest {
   path: string;
   params: URLSearchParams;
+  headers: IncomingMessage['headers'];
 }
 
 export class FakeMoodleServer {
@@ -65,7 +66,7 @@ export class FakeMoodleServer {
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const params = new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
     const path = new URL(req.url ?? '/', 'http://x').pathname;
-    this.requests.push({ path, params });
+    this.requests.push({ path, params, headers: req.headers });
 
     if (req.method === 'POST' && path === '/webservice/rest/server.php') {
       if (params.get('wstoken') !== this.token || !this.tokenValid) {

@@ -81,8 +81,10 @@ const REDACTED = '[Redacted]';
  */
 export function scrubToken<T>(value: T, token: string): T {
   if (token === '') return value;
+  // Groß-/Kleinschreibung egal: Moodle-Tokens sind Hex, ein Proxy könnte sie in Großbuchstaben spiegeln
+  const pattern = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
   const walk = (item: unknown): unknown => {
-    if (typeof item === 'string') return item.includes(token) ? item.split(token).join(REDACTED) : item;
+    if (typeof item === 'string') return item.replace(pattern, REDACTED);
     if (Array.isArray(item)) return item.map(walk);
     if (typeof item === 'object' && item !== null) {
       const out: Record<string, unknown> = {};
@@ -498,7 +500,8 @@ export class MoodleClient {
       try {
         response = await this.fetchFn(target.toString(), {
           method: 'POST',
-          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          // Ohne Kompression: Content-Length gilt dann für die gelieferten Byte (Limit, Weitergabe)
+          headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept-encoding': 'identity' },
           body: new URLSearchParams([['token', token]]).toString(),
           redirect: 'manual',
           signal: AbortSignal.timeout(this.fileTimeoutMs),
@@ -525,8 +528,13 @@ export class MoodleClient {
 
       const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
       const lengthHeader = response.headers.get('content-length');
-      const contentLength = lengthHeader && /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : null;
-      const rawName = filenameFrom(response.headers.get('content-disposition'));
+      // Komprimiert Moodle trotzdem, entpackt fetch: Content-Length nennt dann die komprimierte Größe
+      // und gilt weder fürs Limit noch für die Antwort an die Web-App
+      const encoding = (response.headers.get('content-encoding') ?? 'identity').trim().toLowerCase();
+      const contentLength =
+        encoding === 'identity' && lengthHeader && /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : null;
+      const disposition = response.headers.get('content-disposition');
+      const rawName = filenameFrom(disposition);
       // Auch ein Dateiname von Moodle darf den Token nicht weitertragen (Header an die Web-App)
       const filename = rawName === null ? null : scrubToken(rawName, token);
       if (contentLength !== null && contentLength > this.maxFileBytes) {
@@ -539,10 +547,12 @@ export class MoodleClient {
       if (!reader) return { stream: Readable.from([]), contentType, contentLength, filename };
       const body = reader;
 
-      // Fehler meldet pluginfile.php als kleines JSON mit HTTP 200. Höchstens 64 KB davon lesen
+      // Fehler meldet pluginfile.php als kleines JSON mit HTTP 200. Höchstens 64 KB davon lesen.
+      // Eine echte Datei kommt mit Content-Disposition: Dann ist JSON Inhalt (z. B. ein Forenanhang
+      // eines Dritten mit `errorcode: invalidtoken`) und wird nie als Fehlermeldung gedeutet
       const head: Uint8Array[] = [];
       let done = false;
-      if (contentType.toLowerCase().startsWith('application/json')) {
+      if (disposition === null && contentType.toLowerCase().startsWith('application/json')) {
         let size = 0;
         try {
           while (size <= MAX_JSON_ERROR_BYTES) {
@@ -574,12 +584,30 @@ export class MoodleClient {
         }
       }
 
-      // Schon der gelesene Anfang ist zu groß: abbrechen, solange withRetries den Platz noch freigibt
+      // Das erste Stück noch hier lesen: Bricht Moodle direkt nach den Headern ab oder bleibt stehen,
+      // läuft das über Wiederholung bzw. 502, bevor die Web-App Header bekommt
+      if (!done && head.length === 0) {
+        try {
+          const chunk = await reader.read();
+          if (chunk.done) done = true;
+          else head.push(chunk.value);
+        } catch (error) {
+          throw transientFrom(error);
+        }
+      }
+
+      // Schon der gelesene Anfang ist zu groß bzw. unvollständig: abbrechen, solange withRetries den
+      // Platz noch freigibt
       let received = head.reduce((sum, chunk) => sum + chunk.byteLength, 0);
       if (received > limit) {
         await body.cancel().catch(() => {});
         throw this.unreachable(label, 'too_large', false);
       }
+      if (done && contentLength !== null && received < contentLength) {
+        throw this.unreachable(label, 'incomplete', false);
+      }
+      // Fehler im laufenden Stream: wie alle Moodle-Fehler als 502 mit Grund
+      const fail = (reason: string) => this.unreachable(label, reason, false);
 
       // Ab hier gibt der Stream den Platz frei: am Ende, bei destroy() oder spätestens nach dem
       // Zeitlimit, auch wenn niemand den Stream liest
@@ -609,7 +637,7 @@ export class MoodleClient {
             (chunk) => {
               if (chunk.done) {
                 if (contentLength !== null && received < contentLength) {
-                  this.destroy(new Error('Datei-Download unvollständig'));
+                  this.destroy(fail('incomplete'));
                 } else {
                   this.push(null);
                 }
@@ -617,12 +645,12 @@ export class MoodleClient {
               }
               received += chunk.value.byteLength;
               if (received > limit) {
-                this.destroy(new Error('Datei größer als erlaubt, Download abgebrochen'));
+                this.destroy(fail('too_large'));
                 return;
               }
               this.push(chunk.value);
             },
-            (error: unknown) => this.destroy(error instanceof Error ? error : new Error(String(error))),
+            (error: unknown) => this.destroy(fail(transientFrom(error).reason)),
           );
         },
         destroy(error, callback) {
@@ -634,10 +662,7 @@ export class MoodleClient {
       // (Zeitlimit oder Netzfehler). Aufrufer mit pipeline/for await bekommen den Fehler trotzdem.
       stream.on('error', () => {});
       // finish() läuft frühestens im nächsten Tick, timer ist dann gesetzt
-      const timer = setTimeout(
-        () => stream.destroy(new Error('Zeitlimit beim Datei-Download überschritten')),
-        this.fileTimeoutMs,
-      );
+      const timer = setTimeout(() => stream.destroy(fail('timeout')), this.fileTimeoutMs);
       timer.unref();
       return { stream, contentType, contentLength, filename };
     });
@@ -703,6 +728,13 @@ export class MoodleClient {
         'Die nötige Moodle-Funktion ist für diesen Zugang nicht freigegeben.',
         { wsfunctions: [wsfunction], moodle_errorcode: errorcode },
       );
+    }
+    // pluginfile.php: Der Text kann aus einer fremden Datei stammen, darum nicht an die Web-App
+    if (wsfunction === 'pluginfile') {
+      return new HttpError(502, 'moodle_error', 'Moodle meldet einen Fehler.', {
+        wsfunction,
+        moodle_errorcode: errorcode,
+      });
     }
     return new HttpError(502, 'moodle_error', message || 'Moodle meldet einen Fehler.', {
       wsfunction,

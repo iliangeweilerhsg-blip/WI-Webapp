@@ -16,14 +16,20 @@ export const INLINE_CONTENT_TYPES: ReadonlySet<string> = new Set([
 ]);
 
 const CHARSET = /;\s*charset\s*=\s*"?([A-Za-z0-9._-]{1,40})"?/i;
+/** Zeichensätze, die text/plain behalten darf. Alles andere (z. B. UTF-7) wird zu utf-8 */
+const TEXT_CHARSETS: ReadonlySet<string> = new Set(['utf-8', 'us-ascii', 'iso-8859-1', 'windows-1252']);
+
+/** Header, die nur zur Datei gehören. Bei einer Fehlerantwort statt der Datei werden sie entfernt */
+export const FILE_ONLY_HEADERS = ['content-type', 'content-disposition', 'content-length'] as const;
 
 export function fileResponseHeaders(download: MoodleDownload, ref: string): Record<string, string> {
   const essence = (download.contentType.split(';')[0] ?? '').trim().toLowerCase();
   const inline = INLINE_CONTENT_TYPES.has(essence);
   let contentType = 'application/octet-stream';
   if (inline) {
-    const charset = CHARSET.exec(download.contentType)?.[1];
-    contentType = essence === 'text/plain' ? `text/plain; charset=${charset ?? 'utf-8'}` : essence;
+    const charset = CHARSET.exec(download.contentType)?.[1]?.toLowerCase();
+    const safeCharset = charset && TEXT_CHARSETS.has(charset) ? charset : 'utf-8';
+    contentType = essence === 'text/plain' ? `text/plain; charset=${safeCharset}` : essence;
   }
   const headers: Record<string, string> = {
     'content-type': contentType,
@@ -33,6 +39,9 @@ export function fileResponseHeaders(download: MoodleDownload, ref: string): Reco
     ),
     'x-content-type-options': 'nosniff',
     'content-security-policy': 'sandbox',
+    // Nur die Web-App im selben Origin darf die Datei einbetten; nichts landet in geteilten Caches
+    'cross-origin-resource-policy': 'same-origin',
+    'cache-control': 'private, no-store',
   };
   if (download.contentLength !== null) headers['content-length'] = String(download.contentLength);
   return headers;

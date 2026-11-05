@@ -27,7 +27,7 @@ import {
 import { HttpError } from '../errors.ts';
 import { isMoodleActionId, needsConfirmation, type MoodleActionContext } from '../moodle/actions.ts';
 import { isValidFileRef, moodleNotConfigured } from '../moodle/client.ts';
-import { fileResponseHeaders } from '../moodle/file-headers.ts';
+import { FILE_ONLY_HEADERS, fileResponseHeaders } from '../moodle/file-headers.ts';
 import type { MoodleServices } from '../moodle/index.ts';
 
 export interface MoodleRouteDeps {
@@ -251,6 +251,17 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
   typed.get(
     '/moodle/file',
     {
+      // HEAD würde den Handler ausführen und die Datei von Moodle laden
+      exposeHeadRoute: false,
+      // Scheitert der Stream, bevor Header gesendet sind, geht die Fehlerantwort als JSON hinaus:
+      // ohne Content-Type, Content-Disposition und Content-Length der Datei. Der geworfene Fehler geht
+      // danach an den zentralen Error-Handler
+      errorHandler: (error, _request, reply) => {
+        if (!reply.raw.headersSent) {
+          for (const name of FILE_ONLY_HEADERS) reply.removeHeader(name);
+        }
+        throw error;
+      },
       schema: {
         tags: ['Moodle'],
         summary:
