@@ -102,6 +102,111 @@ Eigener Kalender „Lernplan". Nur die App schreibt dort. Änderungen dort werde
 
 ---
 
+## MDL · Moodle-Anbindung
+
+Das Studien-Gehirn liest Moodle über dieselbe Web-Service-API wie die offizielle Moodle-App (Dienst `moodle_mobile_app`) und führt dort ausgewählte Aktionen aus. Es ist **kein zweites Moodle**: Moodle bleibt der Ort für Abgaben, Noten und Foren. Die App holt Inhalte ab und bietet einzelne Aktionen als Buttons an. Technik und Endpunkte: [08 §9](08-SCHNITTSTELLEN.md#9-moodle-anbindung).
+
+**Gemeinsame Regeln für alle MDL-Funktionen**
+- **Nur der Core spricht mit Moodle.** Der Token liegt im macOS-Schlüsselbund und gelangt nie in die Web-App, die iPad-App, Logs, Fehlermeldungen oder die Datenbank.
+- **Schonend lesen:** höchstens 4 Anfragen pro Sekunde, höchstens 2 gleichzeitig. Dateien werden nur neu geladen, wenn sich `timemodified` oder die Größe geändert hat.
+- **Schreiben nur auf ausdrücklichen Klick.** Kein Hintergrundprozess schreibt in Moodle. Aktionen, die endgültig oder öffentlich sind, brauchen eine Bestätigung mit Vorschau (F-MDL-06).
+- **Quiz-Versuche werden nie über die App gestartet oder abgesendet.** Sie zählen als Prüfungs- bzw. Studienleistung. Die App zeigt Quizze nur an und verlinkt auf Moodle.
+- Ohne Moodle-Zugang bleibt die App voll nutzbar. Upload per Drag & Drop (F-ORG-02, -03) bleibt der Normalweg für Material aus anderen Quellen.
+
+### F-MDL-01 · Moodle-Zugang einrichten und überwachen
+`P1` · Phase 1 · M2
+
+**Einrichtung (einmalig, alle 12 Wochen wiederholen):**
+1. `pnpm sg moodle login` öffnet Moodle im Browser mit der Adresse `…/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=<zufall>&urlscheme=moodlemobile&confirmed=1`. Der Nutzer meldet sich dort selbst an (bei Moodle.UP über Shibboleth/UP-SSO).
+2. Die Seite zeigt den Link „Tippen Sie hier, falls sich die mobile App nicht automatisch öffnet“. Er enthält `moodlemobile://token=<base64(signatur:::token:::privatetoken)>`. Die CLI erklärt, wie man ihn kopiert (Safari: Konsole mit `copy(…)`, siehe `docs/anleitungen/MOODLE-TOKEN.md`).
+3. Die CLI liest den Link bzw. Token aus der Zwischenablage, prüft ihn mit `core_webservice_get_site_info`, legt ihn im Schlüsselbund ab (Dienst `studiengehirn-moodle`), leert die Zwischenablage und schreibt `config/moodle.json` mit `site_url`, `user_id` und `token_valid_until`.
+4. `token_valid_until` = heute + 12 Wochen (Moodle-Standard `tokenduration`). Der Nutzer kann das Datum mit `--gueltig-bis JJJJ-MM-TT` überschreiben, wenn Moodle unter *Einstellungen → Sicherheitsschlüssel* etwas anderes anzeigt.
+
+**Überwachung:** `GET /moodle/status` liefert den Zustand `nicht_eingerichtet`, `ok`, `laeuft_bald_ab` (≤ 7 Tage), `abgelaufen`, `ungueltig` (Moodle meldet `invalidtoken`) oder `nicht_erreichbar`. Ab `laeuft_bald_ab` zeigt die Web-App einen dezenten Hinweis mit der Anleitung zur Erneuerung. Bei `ungueltig` oder `abgelaufen` stoppt der Abgleich (F-MDL-04), statt Fehler zu sammeln.
+
+**Akzeptanzkriterien**
+- [ ] Nach der Einrichtung steht der Token nur im Schlüsselbund, nicht in Dateien, Logs oder der Zwischenablage.
+- [ ] 7 Tage vor `token_valid_until` erscheint der Hinweis. Ein von Moodle abgelehnter Token führt zu `ungueltig`, nicht zu einer Fehlerflut.
+
+### F-MDL-02 · Moodle-Inhalte lesen
+`P1` · Phase 1 · M2, M8
+
+Der Core bietet typisierte Lese-Endpunkte für: Kursliste, Kursinhalt (Abschnitte, Aktivitäten, Dateien, Ordner, Seiten, Links), Aufgaben und Abgabestatus, Foren, Diskussionen und Beiträge, kommende Fristen, Noten, Quizze (nur Anzeige) und Benachrichtigungen. Dateien werden über den Core gestreamt (`GET /moodle/file?ref=…`), nie direkt aus dem Browser von Moodle geladen.
+
+Die Endpunkte liefern **eigene, normalisierte Formate** (`Moodle*` in `packages/schemas`), nicht die Rohantworten von Moodle. So bleibt die Web-App stabil, wenn Moodle seine Antworten ändert.
+
+**Akzeptanzkriterien**
+- [ ] Alle Lese-Endpunkte aus 08 §9 liefern für die Kurse des Nutzers gültige Antworten nach Schema.
+- [ ] `GET /moodle/file` akzeptiert nur Verweise auf `webservice/pluginfile.php` der eingerichteten Moodle-Instanz (kein Abruf beliebiger URLs).
+
+### F-MDL-03 · Kurse den Modulen zuordnen
+`P1` · Phase 1 · M2
+
+Jeder Moodle-Kurs kann genau einem Modul zugeordnet werden. Vorschlag über Titelähnlichkeit (wie F-KAL-02). Kurse ohne Zuordnung werden nicht abgeglichen. Organisatorische Kurse wie „Klausurtermine …“ oder alte Kurse (Start vor dem aktuellen Semester) werden standardmäßig nicht vorgeschlagen.
+
+### F-MDL-04 · Abgleich: Material und Fristen automatisch übernehmen
+`P1` · Phase 1 · M2, M8, M10
+
+Ein Abgleich läuft beim Start des Core, danach alle 2 h und auf Knopfdruck („Jetzt abgleichen“). Er arbeitet nur auf zugeordneten Kursen (F-MDL-03) und nur lesend.
+
+**Ablauf je Kurs**
+1. Kursinhalt holen. Jede Datei wird über ihre Moodle-Kennung (Aktivität + Dateipfad) wiedererkannt.
+2. **Neu oder geändert** (`timemodified` oder Größe anders): Datei laden, `sha256` bilden und einordnen:
+   - **Foliensatz**, wenn Name oder Aktivität auf Folien hindeutet („Folien“, „Vorlesung“, „VL“, „Slides“, „Lecture“) → wie F-ORG-02.
+   - **Übungsblatt**, wenn sie auf eine Übung hindeutet („Übung“, „Blatt“, „Aufgabe“, „Exercise“, „Sheet“, Muster wie `u05.pdf`) → wie F-ORG-03.
+   - **Sonst** landet sie in der Inbox mit „Als Folien / Übung / ignorieren“. Die Entscheidung gilt künftig für die ganze Aktivität.
+   - Nur PDFs. Andere Dateien werden aufgelistet, aber nicht übernommen.
+3. **Fristen:** Aufgaben mit `duedate` und kommende Kalenderereignisse werden als Fristen übernommen. Ist zu einem Übungsblatt eine Moodle-Aufgabe erkennbar (gleiche Woche/gleicher Name), bekommt das Blatt deren Abgabedatum.
+4. Gelöschte oder versteckte Moodle-Inhalte werden lokal **nie gelöscht**. Sie werden nur als „in Moodle entfernt“ markiert.
+
+**Sonderfälle**
+- Gleiche Datei (`sha256`) schon per Hand hochgeladen → keine Kopie, nur Verknüpfung.
+- Neue Version einer übernommenen Datei → Versionsregel aus F-ORG-02.
+- Token `ungueltig` oder `abgelaufen` → Abgleich pausiert, Hinweis aus F-MDL-01.
+
+**Akzeptanzkriterien**
+- [ ] Ein zweiter Abgleich ohne Änderungen in Moodle lädt keine Datei erneut.
+- [ ] Eine in Moodle neu hochgeladene Folien-PDF ist nach dem nächsten Abgleich im richtigen Modul sichtbar.
+- [ ] Eine Abgabefrist aus Moodle erscheint im Planer bzw. am Übungsblatt.
+
+### F-MDL-05 · Aktionen in Moodle ausführen
+`P1` · Phase 1 / 2 · M8
+
+Der Core führt einen festen **Aktionskatalog** (08 §9.3). Jede Aktion hat eine Kennung, typisierte Parameter und eine Risikostufe. Die Web-App ruft Aktionen nur über diesen Katalog auf, z. B. über den Baustein `<MoodleActionButton action="assign.submit" …>`. Neue Buttons brauchen deshalb keinen neuen Core-Code.
+
+| Aktion | Was passiert | Risiko |
+|---|---|---|
+| `assign.save_draft` | Dateien oder Text als Entwurf in einer Aufgabe speichern (bei Aufgaben ohne Einreichen-Schritt ist das schon die Abgabe: dann mit Bestätigung) | `aenderbar` |
+| `assign.submit` | Entwurf endgültig zur Bewertung einreichen | `endgueltig` |
+| `forum.create_discussion` | Neue Diskussion in einem Forum | `oeffentlich` |
+| `forum.reply` | Antwort auf einen Beitrag | `oeffentlich` |
+| `completion.set` | Aktivität als erledigt / nicht erledigt markieren | `aenderbar` |
+| `calendar.create_event` | Eigenen Termin im Moodle-Kalender anlegen | `aenderbar` |
+| `message.send` | Persönliche Nachricht an eine Person | `oeffentlich` |
+| `notifications.mark_read` | Alle Benachrichtigungen als gelesen markieren | `harmlos` |
+| `files.upload_private` | Datei in „Meine Dateien“ hochladen | `aenderbar` |
+
+Bewusst **nicht** im Katalog: Quiz-Versuche (siehe oben), Gruppenwahl (für den Token nicht freigegeben), alles, was andere Personen verwaltet.
+
+**Akzeptanzkriterien**
+- [ ] Jede Aktion prüft ihre Parameter, bevor sie Moodle anspricht.
+- [ ] Eine Aktion, die Moodle ablehnt, liefert eine verständliche Meldung mit dem Moodle-Fehlercode in `details`.
+
+### F-MDL-06 · Bestätigung vor endgültigen und öffentlichen Aktionen
+`P1` · Phase 1 · M8
+
+Aktionen mit Risiko `endgueltig` oder `oeffentlich` laufen in zwei Schritten:
+1. **Vorschau** (`POST /moodle/actions/{id}/preview`): Der Core prüft die Parameter, liest bei Bedarf den aktuellen Stand aus Moodle und beschreibt in Klartext, was passieren wird, z. B. „Abgabe ‚Blatt 3‘ in ‚Mathematik für Wirtschaftsinformatik‘ endgültig einreichen. Danach sind keine Änderungen mehr möglich.“ Dazu gibt er einen **Bestätigungscode** aus.
+2. **Ausführen** (`POST /moodle/actions/{id}/execute`) nur mit diesem Code.
+
+Der Code gilt **5 Minuten**, **einmal** und nur für **genau diese Aktion mit genau diesen Parametern** (Hash). Fehlt der Code, antwortet der Core mit `409 moodle_confirmation_required`, ist er abgelaufen, schon benutzt oder für andere Angaben ausgestellt, mit `409 moodle_confirmation_invalid`. Die Web-App zeigt die Vorschau als Dialog mit „Abbrechen“ als Standard. Aktionen mit Risiko `harmlos` oder `aenderbar` laufen ohne Dialog, zeigen aber eine Erfolgsmeldung. Antwortet der Core trotzdem mit `409 moodle_confirmation_required` (Verschärfung im Einzelfall, z. B. Speichern ist bei dieser Aufgabe schon die Abgabe), zeigt die Web-App den Vorschau-Dialog wie bei endgültigen Aktionen.
+
+**Akzeptanzkriterien**
+- [ ] Ohne vorherige Vorschau lässt sich keine `endgueltig`- oder `oeffentlich`-Aktion ausführen, auch nicht per `curl`.
+- [ ] Ein Bestätigungscode funktioniert kein zweites Mal und nicht für geänderte Parameter.
+
+---
+
 ## SES · Vorlesungs-Session
 
 ### F-SES-01 · Zustandsautomat einer Session
@@ -881,7 +986,7 @@ Jede Einstellung hat einen sinnvollen Standard. **Die App ist ohne Besuch der Ei
 | Phase | Funktionen |
 |---|---|
 | **0** | F-ORG-01, F-ORG-02, F-ORG-03 (Upload), F-ORG-04 |
-| **1** | F-KAL-01, F-KAL-02, F-SES-01 bis F-SES-05, F-DSH-01, -02, -04, -05, -06, F-INK-01 bis -07, -13, -14, F-SYN-01 bis -03, F-AUD-01, -02, F-DAT-01, -02, -04, F-EIN-01 (Teil) |
+| **1** | F-KAL-01, F-KAL-02, F-MDL-01 bis F-MDL-06, F-SES-01 bis F-SES-05, F-DSH-01, -02, -04, -05, -06, F-INK-01 bis -07, -13, -14, F-SYN-01 bis -03, F-AUD-01, -02, F-DAT-01, -02, -04, F-EIN-01 (Teil) |
 | **2** | F-ORG-03 (Zerlegung), F-SES-06, F-DSH-03, -07, F-INK-08, -12, F-NAC-01 bis -08, F-BIB-01 bis -05, -07, F-SUC-01, F-DAT-03 (Vault), F-DAT-05 |
 | **3** | F-ORG-05, -06, F-INK-09, -10, -11, F-BIB-06, -08, -09, F-SUC-02, F-LRN-01 bis -17, F-DAT-03 (voll) |
 | **4** | F-KAL-03, -04, -05, F-PLN-01 bis -09 |

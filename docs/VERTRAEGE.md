@@ -17,9 +17,11 @@ Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammen
 | `SG_DEV_WEB_ORIGIN` | leer. In der Entwicklung `http://localhost:3000` | Core (CORS nur für diesen Origin) |
 | `NEXT_PUBLIC_SG_API_BASE` | `/api/v1`. In der Entwicklung `http://localhost:4710/api/v1` | Web-App |
 | `SG_LOG_LEVEL` | `info` | Core, Worker |
+| `SG_MOODLE_URL` | leer (Moodle-Anbindung aus). Beim Owner `https://moodle2.uni-potsdam.de` | Core, CLI |
 | `TZ` | Zeitzone des Systems | Core (Ortszeit für ICS-Termine ohne Zeitzone, Backup-Uhrzeit). Tests laufen mit `TZ=Europe/Zurich` |
 
 Geheimnisse wie API-Schlüssel stehen in `$SG_DATA_DIR/config/.env` mit Rechten 600 (02 §3). Die Prozesse lesen diese Datei beim Start.
+**Ausnahme Moodle:** Der Moodle-Token liegt nur im macOS-Schlüsselbund (Dienst `studiengehirn-moodle`), nie in `.env`. Nur der Core liest ihn (08 §9.1).
 
 ## 2. Befehle, die jeder Baustein anbietet
 

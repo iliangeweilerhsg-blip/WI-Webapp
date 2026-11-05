@@ -1,0 +1,10 @@
+{
+  "action_id": "quiz.attempt",
+  "risk": "endgueltig",
+  "needs_confirmation": true,
+  "summary": "x",
+  "warnings": [],
+  "details": {},
+  "confirmation_token": null,
+  "expires_at": null
+}

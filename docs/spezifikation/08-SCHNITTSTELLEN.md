@@ -32,6 +32,7 @@ Ein Formatwechsel ist erst fertig, wenn alle drei Generate-Schritte und Contract
 | Planer | `GET /plan?from&to` · `GET /plan/now` · `PATCH /study-blocks/{id}` (verschieben, pin, skip) · `POST /study-blocks` · `GET/PATCH /preferences` |
 | Suche & Fragen | `GET /search?q&filters` · `POST /ask` (Frag deine Vorlesung, Antwort per Server-Sent Events) |
 | Videos | `GET /videos?concept_id` · `POST /videos` (anfordern) · `GET /videos/{id}/file` |
+| Moodle (§9) | `GET /moodle/status` · `GET /moodle/courses` · `GET /moodle/courses/{id}/contents` · `GET /moodle/assignments` · `GET /moodle/deadlines` · `GET /moodle/file?ref` · `GET /moodle/actions` · `POST /moodle/uploads` · `POST /moodle/actions/{id}/preview` · `POST /moodle/actions/{id}/execute` |
 | System | `GET /jobs?session_id` · `POST /jobs/{id}/retry` · `GET /costs?month` · `POST /backup` · `GET /backups` · `POST /export` · `GET/PATCH /settings` · `GET/DELETE /devices` · `POST /devices/pairings` · `GET /devices/pairings/requests` · `POST /devices/pair/start` · `POST /devices/pair/confirm` · `GET /trash` · `POST /trash/{id}/restore` |
 
 ## 2. Sync-Protokoll (WebSocket)
@@ -242,7 +243,7 @@ Texte in Markdown mit LaTeX (`$…$`, `$$…$$`).
 
 ```
 ~/StudienGehirn/
-├── config/            .env (Schlüssel, Rechte 600), settings-Export
+├── config/            .env (Schlüssel, Rechte 600), moodle.json (ohne Token, §9.1), settings-Export
 ├── media/
 │   ├── decks/<deck_id>/original.pdf, slides/<index>.png, thumbs/<index>.webp
 │   ├── sheets/<sheet_id>/original.pdf, solution.pdf
@@ -252,6 +253,7 @@ Texte in Markdown mit LaTeX (`$…$`, `$$…$$`).
 │   ├── imports/<session_id>/…
 │   └── videos/<video_id>.mp4, <video_id>.vtt
 ├── vault/             (§8)
+├── tmp/moodle-uploads/<upload_id>  (Uploads für Moodle-Aktionen, verfallen nach 24 h, §9.3)
 └── logs/              core.log, worker.log (rotierend, 14 Tage)
 ```
 
@@ -325,3 +327,102 @@ beherrschung: 0.62                # von der App gepflegt, nur lesend gedacht
 - Links `sg://…` öffnen die Web-App (registriertes URL-Schema über eine kleine Hilfs-App, P1). In Obsidian sind sie anklickbare Links. Fallback: `http://localhost:4710/open/…`.
 - Frontmatter-Schlüssel für Beziehungen werden in beide Richtungen synchronisiert (F-BIB-05).
 - Schreibzugriffe der App erfolgen atomar (temporäre Datei + Umbenennen), damit Obsidian nie halbe Dateien liest.
+
+## 9. Moodle-Anbindung
+
+Funktionen: F-MDL-01 bis F-MDL-06 (Kap. 04). Datenformate: `packages/schemas/src/moodle.schema.json`.
+
+### 9.1 Zugang
+
+| Thema | Festlegung |
+|---|---|
+| Instanz | `SG_MOODLE_URL`, z. B. `https://moodle2.uni-potsdam.de`. Leer = Moodle-Anbindung aus (`GET /moodle/status` → `nicht_eingerichtet`, `GET /moodle/actions` → alle Aktionen `available: false`, alle anderen Moodle-Endpunkte → `503 moodle_not_configured`). |
+| Token | macOS-Schlüsselbund, Dienst `studiengehirn-moodle`. Der Core liest ihn mit `security find-generic-password -s studiengehirn-moodle -w` und hält ihn nur im Speicher. |
+| Metadaten | `config/moodle.json`: `{ "site_url", "user_id", "token_valid_until" (Datum), "created_at" }`. Enthält keinen Token. |
+| Moodle-API | `POST <SG_MOODLE_URL>/webservice/rest/server.php` mit `wstoken`, `wsfunction`, `moodlewsrestformat=json`, Parameter im Body (`application/x-www-form-urlencoded`, verschachtelt als `a[0][b]=…`). Der Token steht **nie** in einer URL. |
+| Dateien | Download über `webservice/pluginfile.php/…`. Der Token geht als Formularfeld `token` per `POST` mit, nicht in der URL. Upload über `webservice/upload.php` (Entwurfsbereich), danach Verwendung in der jeweiligen Aktion. |
+| Drosselung | Höchstens 4 Anfragen pro Sekunde, höchstens 2 gleichzeitig, Zeitlimit 30 s (Dateien 120 s). Lesende Aufrufe werden bei Netzwerkfehlern und `5xx` bis zu 2-mal wiederholt (1 s, 4 s). Schreibende Aufrufe werden **nie** automatisch wiederholt (der Client trennt `read()` und `write()`; `read()` verweigert bekannte schreibende Funktionen). Scheitert ein schreibender Aufruf an Netzwerk, Zeitlimit oder `5xx`, ist offen, ob Moodle ihn übernommen hat: `502 moodle_unreachable` mit `details.outcome_unknown = true`. Die Web-App wiederholt dann nicht selbst, sondern lässt den Stand neu laden. Ein Datei-Download belegt seinen Platz, bis die Übertragung endet. |
+| Weiterleitungen | Der Core folgt **keiner** HTTP-Weiterleitung von Moodle (`redirect: manual`), sonst ginge der Token im Body an das neue Ziel. Eine `3xx`-Antwort → `502 moodle_unreachable` mit `details.reason = "redirect"`. `SG_MOODLE_URL` muss daher die endgültige Adresse sein. |
+| Logs | Token, `wstoken` und `token` werden redigiert. Geloggt werden Funktionsname, Dauer und Moodle-Fehlercode. |
+
+**Fehler von Moodle** (geprüft am 04.11.2026 gegen Moodle 4.5): Die REST-Schnittstelle antwortet auch bei Fehlern mit HTTP 200 und `{ "exception", "errorcode", "message" }`. `webservice/pluginfile.php` antwortet bei Fehlern mit JSON `{ "error", "errorcode" }`, HTTP 200 (z. B. `invalidtoken`) bzw. 404 (`filenotfound`).
+
+**Fehlercodes des Core**
+
+| HTTP | `code` | Wann |
+|---|---|---|
+| 503 | `moodle_not_configured` | `SG_MOODLE_URL` leer oder kein Token im Schlüsselbund |
+| 409 | `moodle_token_invalid` | Moodle meldet `invalidtoken` oder `invalidtimedtoken` (Token unbekannt oder abgelaufen) |
+| 502 | `moodle_unreachable` | Netzwerkfehler, Zeitlimit, Antwort ist kein JSON |
+| 502 | `moodle_error` | Moodle meldet eine Ausnahme. `details.moodle_errorcode` und `details.moodle_message` |
+| 501 | `moodle_function_unavailable` | Die nötige `wsfunction` ist für den Token nicht freigegeben (Moodle: `accessexception`, unbekannte Funktion: `invalidrecord` auf `external_functions`) |
+| 501 | `moodle_action_not_implemented` | Aktion steht im Katalog, ist im Core aber noch nicht umgesetzt |
+| 404 | `moodle_file_not_found` | Moodle findet die Datei zu `ref` nicht (`filenotfound`) |
+| 400 | `moodle_file_ref_invalid` | `ref` zeigt nicht auf `webservice/pluginfile.php` der Instanz |
+| 404 | `moodle_action_not_found` | Unbekannte Aktionskennung |
+| 409 | `moodle_confirmation_required` | Aktion braucht Bestätigung, Code fehlt |
+| 409 | `moodle_confirmation_invalid` | Code abgelaufen, schon benutzt oder für andere Aktion/Parameter |
+
+### 9.2 Lese-Endpunkte
+
+Alle unter `/api/v1/moodle`. Antworten in eigenen Formaten (Schema-Namen in Klammern). Zeitangaben ISO 8601 UTC, Moodle-IDs als Integer.
+
+| Endpunkt | Antwort | Moodle-Funktionen |
+|---|---|---|
+| `GET /moodle/status` | `MoodleStatus` | `core_webservice_get_site_info` (höchstens alle 5 min, sonst Zwischenspeicher) |
+| `GET /moodle/courses` | `MoodleCourseList` | `core_enrol_get_users_courses` |
+| `GET /moodle/courses/{course_id}/contents` | `MoodleCourseContents` | `core_course_get_contents` |
+| `GET /moodle/assignments?course_id` | `MoodleAssignmentList` | `mod_assign_get_assignments` |
+| `GET /moodle/assignments/{assignment_id}/submission` | `MoodleSubmissionStatus` | `mod_assign_get_submission_status` |
+| `GET /moodle/forums?course_id` | `MoodleForumList` | `mod_forum_get_forums_by_courses` |
+| `GET /moodle/forums/{forum_id}/discussions` | `MoodleDiscussionList` | `mod_forum_get_forum_discussions` |
+| `GET /moodle/discussions/{discussion_id}/posts` | `MoodlePostList` | `mod_forum_get_discussion_posts` |
+| `GET /moodle/deadlines?from&limit` | `MoodleDeadlineList` | `core_calendar_get_action_events_by_timesort` |
+| `GET /moodle/grades?course_id` | `MoodleGradeList` | `gradereport_user_get_grade_items` |
+| `GET /moodle/quizzes?course_id` | `MoodleQuizList` | `mod_quiz_get_quizzes_by_courses` |
+| `GET /moodle/notifications?limit` | `MoodleNotificationList` | `message_popup_get_popup_notifications` |
+| `GET /moodle/file?ref` | Datei (Stream, `Content-Length` von Moodle, Sicherheits-Header siehe unten) | `webservice/pluginfile.php` |
+
+`ref` ist der Pfad hinter `pluginfile.php`, wie er in `MoodleFile.ref` steht, z. B. `/123/mod_resource/content/4/01-Einfuehrung.pdf`. Ohne `course_id` gelten Listen für alle Kurse des Nutzers.
+
+**Sicherheits-Header für `GET /moodle/file`:** Dateien aus Moodle stammen auch von anderen Personen (z. B. Forenanhänge). Sie dürfen nie als aktive Inhalte im Origin des Core laufen, sonst könnte ein Skript Vorschau und Ausführen ohne Klick auslösen. Darum immer `X-Content-Type-Options: nosniff` und `Content-Security-Policy: sandbox`. `Content-Type` wird nur für eine Allowlist übernommen (`application/pdf`, `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `text/plain`). Alles andere, ausdrücklich auch HTML und SVG, geht als `application/octet-stream` mit `Content-Disposition: attachment`.
+
+### 9.3 Aktionen
+
+| Endpunkt | Body | Antwort |
+|---|---|---|
+| `GET /moodle/actions` | – | `MoodleActionCatalog` |
+| `POST /moodle/uploads` | multipart, eine Datei (≤ 100 MB) | `MoodleUpload` |
+| `POST /moodle/actions/{action_id}/preview` | `MoodleActionRequest` | `MoodleActionPreview` |
+| `POST /moodle/actions/{action_id}/execute` | `MoodleActionExecute` | `MoodleActionResult` |
+
+- **Uploads:** Dateien für Aktionen (z. B. die Lösung als PDF) werden zuerst zum Core hochgeladen und liegen unter `tmp/moodle-uploads/<upload_id>`. Aktionen verweisen über `upload_ids`. Uploads verfallen nach 24 h. Kein Pfad aus dem Dateisystem wird als Parameter angenommen.
+- **Vorschau** ist für jede Aktion erlaubt, auch ohne Bestätigungspflicht (z. B. um den Text vorher zu zeigen). Sie verändert nichts in Moodle.
+- **Bestätigungscode:** zufällig (128 bit, base64url), gebunden an `action_id` + SHA-256 der kanonischen Parameter (Schlüssel sortiert), gültig 5 min, einmal verwendbar, nur im Speicher des Core. Ein Neustart des Core macht alle Codes ungültig.
+- **Ausführen** mit Risiko `endgueltig`/`oeffentlich` ohne Code → `409 moodle_confirmation_required`, mit abgelaufenem, benutztem oder fremdem Code → `409 moodle_confirmation_invalid`. Mit Risiko `harmlos`/`aenderbar` wird ein mitgeschickter Code ignoriert, außer bei Verschärfung im Einzelfall (nächster Punkt).
+- **Verschärfung im Einzelfall:** Ein Handler darf für bestimmte Parameter zusätzlich eine Bestätigung verlangen (nie weniger). Pflichtfall: `assign.save_draft` bei Aufgaben ohne Einreichen-Schritt (`requires_submit = false`), denn dort gilt Speichern in Moodle sofort als Abgabe. Die Vorschau warnt dann und liefert einen Code. Der Katalog zeigt `needs_confirmation` nur nach Risiko: Die Web-App muss daher bei jeder Aktion mit `409 moodle_confirmation_required` rechnen und dann den Vorschau-Dialog zeigen.
+- **Idempotenz:** `execute` beachtet `Idempotency-Key` (08 §1). So schickt ein doppelter Klick nichts zweimal ab.
+
+**Parameter je Aktion** (Schema `MoodleActionParams<Name>`)
+
+| Aktion | Parameter | Moodle-Funktionen |
+|---|---|---|
+| `assign.save_draft` | `assignment_id`, `upload_ids?`, `online_text_html?` (mindestens eins) | `webservice/upload.php`, `mod_assign_save_submission` |
+| `assign.submit` | `assignment_id`, `accept_statement` (Pflicht, `true`, wenn die Aufgabe eine Erklärung verlangt) | `mod_assign_get_submission_status`, `mod_assign_submit_for_grading` |
+| `forum.create_discussion` | `forum_id`, `subject`, `message_html`, `upload_ids?` | `mod_forum_add_discussion` |
+| `forum.reply` | `post_id`, `subject?`, `message_html`, `upload_ids?` | `mod_forum_add_discussion_post` |
+| `completion.set` | `cmid`, `completed` | `core_completion_update_activity_completion_status_manually` |
+| `calendar.create_event` | `name`, `start_at`, `duration_minutes?`, `description_html?` | `core_calendar_submit_create_update_form` |
+| `message.send` | `to_user_id`, `text` | `core_message_send_instant_messages` |
+| `notifications.mark_read` | – | `core_message_mark_all_notifications_as_read` |
+| `files.upload_private` | `upload_ids` | `webservice/upload.php`, `core_user_add_user_private_files` |
+
+### 9.4 Abgleich (F-MDL-04)
+
+Der Abgleich läuft **im Core** (er braucht den Token), nicht im Worker. Für jede übernommene PDF legt er wie beim Upload einen Foliensatz bzw. ein Übungsblatt an und erzeugt den Job `pdf.ingest`. Tabellen (Core, Migration mit T1-23):
+
+| Tabelle | Inhalt |
+|---|---|
+| `moodle_course_link` | `module_id`, `moodle_course_id` (eindeutig), `sync_enabled`, `last_synced_at` |
+| `moodle_item` | `moodle_course_id`, `cmid`, `file_ref` (eindeutig), `timemodified`, `size_bytes`, `sha256`, `kind` (`folien`/`uebung`/`ignoriert`/`offen`), `slide_deck_id?`, `exercise_sheet_id?`, `removed_in_moodle_at?` |
+| `moodle_deadline` | `moodle_event_id` bzw. `assignment_id`, `module_id`, `name`, `due_at`, `exercise_sheet_id?` |
