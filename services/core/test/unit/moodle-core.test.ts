@@ -146,6 +146,55 @@ describe('MoodleStatusService', () => {
     await Promise.all([service.getStatus(), service.getStatus(), service.availableFunctions()]);
     expect(requests).toHaveLength(1);
   });
+
+  it('Härtung #93: functions mit null, Zahl und Text darin → kein Absturz, nur gültige Namen', async () => {
+    const { service } = setup(FAKE_TOKEN, {
+      core_webservice_get_site_info: {
+        ...siteInfo([]),
+        functions: [null, 5, 'core_x', [], { name: 7 }, { name: 'core_webservice_get_site_info' }],
+      },
+    });
+    expect((await service.getStatus()).state).toBe('ok');
+    expect(await service.availableFunctions()).toEqual(new Set(['core_webservice_get_site_info']));
+  });
+
+  it('Härtung #93: functions: [null] allein → leere Freigaben, Status ok', async () => {
+    const { service } = setup(FAKE_TOKEN, {
+      core_webservice_get_site_info: { ...siteInfo([]), functions: [null] },
+    });
+    expect((await service.getStatus()).state).toBe('ok');
+    expect(await service.availableFunctions()).toEqual(new Set());
+  });
+
+  it.each([0, -1, 1.5, 0.5, '4711', null])(
+    'Härtung #93 (H4): userid %j ist keine Nutzer-ID → userId() wirft, Status bleibt ok',
+    async (userid) => {
+      const { service } = setup(FAKE_TOKEN, {
+        core_webservice_get_site_info: { ...siteInfo([]), userid },
+      });
+      expect((await service.getStatus()).state).toBe('ok');
+      await expect(service.userId()).rejects.toMatchObject({
+        code: 'moodle_unreachable',
+        details: { reason: 'no_site_info' },
+      });
+    },
+  );
+
+  it('Härtung #93 (H4): userid 1 ist gültig', async () => {
+    const { service } = setup(FAKE_TOKEN, { core_webservice_get_site_info: { ...siteInfo([]), userid: 1 } });
+    expect(await service.userId()).toBe(1);
+  });
+
+  it.each([null, 'ok', 42, ['x']])(
+    'Härtung #93: Seiteninfo %j statt Objekt → nicht_erreichbar, kein Absturz',
+    async (body) => {
+      const { service } = setup(FAKE_TOKEN, { core_webservice_get_site_info: body });
+      const status = MoodleStatusSchema.parse(await service.getStatus());
+      expect(status.state).toBe('nicht_erreichbar');
+      expect(await service.availableFunctions()).toBeNull();
+      await expect(service.userId()).rejects.toMatchObject({ code: 'moodle_unreachable' });
+    },
+  );
 });
 
 describe('KeychainTokenStore', () => {
