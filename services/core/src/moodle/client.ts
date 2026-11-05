@@ -32,14 +32,19 @@ export interface MoodleClientOptions {
   tokens: MoodleTokenStore;
   fetch?: FetchFn;
   logger?: MoodleLogger;
-  /** Höchstens so viele Anfragen gleichzeitig (Standard 2) */
+  /** Höchstens so viele REST-Aufrufe gleichzeitig (Standard 2) */
   maxConcurrent?: number;
-  /** Mindestabstand zwischen zwei Anfrage-Starts in ms (Standard 250 = 4/s) */
+  /** Höchstens so viele Datei-Downloads gleichzeitig, eigener Pool neben den REST-Aufrufen (Standard 2) */
+  maxConcurrentDownloads?: number;
+  /** Mindestabstand zwischen zwei Anfrage-Starts in ms, REST und Downloads zusammen (Standard 250 = 4/s) */
   minIntervalMs?: number;
   /** Zeitlimit für REST-Aufrufe (Standard 30 s) */
   timeoutMs?: number;
-  /** Zeitlimit für Datei-Downloads, ganze Übertragung (Standard 120 s) */
-  fileTimeoutMs?: number;
+  /**
+   * Leerlauf-Zeitlimit für Datei-Downloads (Standard 30 s): So lange darf Moodle ohne neue Daten bleiben,
+   * bis zu den Headern wie danach. Es gibt kein Limit für die ganze Übertragung.
+   */
+  idleTimeoutMs?: number;
   /** Wartezeiten vor Wiederholungen lesender Aufrufe (Standard 1 s, 4 s) */
   retryDelaysMs?: readonly number[];
   /** Größte JSON-Antwort der REST-Schnittstelle in Byte (Standard `MAX_RESPONSE_BYTES`) */
@@ -71,6 +76,8 @@ const MAX_JSON_ERROR_BYTES = 64 * 1024;
 export const MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 /** Obergrenze für einen Datei-Download. Größere Dateien bricht der Core ab */
 export const MAX_FILE_BYTES = 512 * 1024 * 1024;
+/** Längster Dateiverweis (Zeichen). Längere sind ungültig und kommen nicht in die Registry */
+export const MAX_REF_LENGTH = 2048;
 /** Ersatz für den Token, falls Moodle ihn in einer Antwort zurückschickt */
 const REDACTED = '[Redacted]';
 
@@ -212,7 +219,7 @@ export function flattenParams(params: MoodleParams): [string, string][] {
  * (auch nicht kodiert), keine Schrägstriche oder Steuerzeichen in kodierten Segmenten, kein `?`/`#`.
  */
 export function isValidFileRef(ref: string): boolean {
-  if (ref.length > 2048 || !ref.startsWith('/') || /[?#\\\s]/.test(ref)) return false;
+  if (ref.length > MAX_REF_LENGTH || !ref.startsWith('/') || /[?#\\\s]/.test(ref)) return false;
   const segments = ref.slice(1).split('/');
   if (segments.length < 4) return false;
   if (!/^\d+$/.test(segments[0] ?? '')) return false;
@@ -257,27 +264,70 @@ export function fileRefFromUrl(baseUrl: string, fileUrl: string): string | null 
   return null;
 }
 
-/** Höchstens `max` gleichzeitig, Starts mindestens `interval` ms auseinander */
-class Throttle {
-  private active = 0;
+/** Abbruch durch den Aufrufer (Web-App weg, Core fährt herunter). Kein Fehler von Moodle, wird nie wiederholt */
+export class RequestAbortedError extends Error {
+  constructor() {
+    super('Die Anfrage wurde abgebrochen.');
+    this.name = 'AbortError';
+  }
+}
+
+/** Mindestabstand zwischen Anfrage-Starts, gemeinsam für alle Pools (Moodle drosselt pro Zugang) */
+class Pacer {
   private nextStart = 0;
-  private readonly waiters: (() => void)[] = [];
-  private readonly max: number;
   private readonly interval: number;
   private readonly now: () => number;
-  private readonly sleep: (ms: number) => Promise<void>;
 
-  constructor(max: number, interval: number, now: () => number, sleep: (ms: number) => Promise<void>) {
-    this.max = max;
+  constructor(interval: number, now: () => number) {
     this.interval = interval;
     this.now = now;
+  }
+
+  /** Reserviert den nächsten Start. Rückgabe: so lange (ms) muss der Aufrufer noch warten */
+  reserve(): number {
+    const now = this.now();
+    const start = Math.max(now, this.nextStart);
+    this.nextStart = start + this.interval;
+    return start - now;
+  }
+}
+
+/** Höchstens `max` gleichzeitig. Wartende können per `AbortSignal` ausscheiden, ohne je zu starten */
+class Throttle {
+  private active = 0;
+  private readonly waiters: (() => void)[] = [];
+  private readonly max: number;
+  private readonly pacer: Pacer;
+  private readonly sleep: (ms: number) => Promise<void>;
+
+  constructor(max: number, pacer: Pacer, sleep: (ms: number) => Promise<void>) {
+    this.max = max;
+    this.pacer = pacer;
     this.sleep = sleep;
   }
 
   /** Belegt einen Platz. Die zurückgegebene Funktion gibt ihn frei (mehrfacher Aufruf schadet nicht) */
-  async acquire(): Promise<() => void> {
+  async acquire(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted) throw new RequestAbortedError();
     while (this.active >= this.max) {
-      await new Promise<void>((resolve) => this.waiters.push(resolve));
+      await new Promise<void>((resolve, reject) => {
+        const wake = () => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        };
+        const onAbort = () => {
+          const index = this.waiters.indexOf(wake);
+          if (index >= 0) this.waiters.splice(index, 1);
+          reject(new RequestAbortedError());
+        };
+        this.waiters.push(wake);
+        signal?.addEventListener('abort', onAbort, { once: true });
+      });
+      if (signal?.aborted) {
+        // Geweckt und gleichzeitig abgebrochen: den Platz an den Nächsten weiterreichen
+        this.waiters.shift()?.();
+        throw new RequestAbortedError();
+      }
     }
     this.active += 1;
     let released = false;
@@ -288,10 +338,10 @@ class Throttle {
       this.waiters.shift()?.();
     };
     try {
-      const now = this.now();
-      const start = Math.max(now, this.nextStart);
-      this.nextStart = start + this.interval;
-      if (start > now) await this.sleep(start - now);
+      const wait = this.pacer.reserve();
+      if (wait > 0) await this.sleep(wait);
+      // Abgebrochen, während der Platz gewartet hat: Moodle wird nicht mehr angefragt
+      if (signal?.aborted) throw new RequestAbortedError();
     } catch (error) {
       release();
       throw error;
@@ -351,8 +401,9 @@ export class MoodleClient {
   private readonly fetchFn: FetchFn;
   private readonly logger: MoodleLogger | undefined;
   private readonly throttle: Throttle;
+  private readonly downloadThrottle: Throttle;
   private readonly timeoutMs: number;
-  private readonly fileTimeoutMs: number;
+  private readonly idleTimeoutMs: number;
   private readonly retryDelaysMs: readonly number[];
   private readonly maxResponseBytes: number;
   private readonly maxFileBytes: number;
@@ -367,14 +418,12 @@ export class MoodleClient {
     this.logger = options.logger;
     this.now = options.now ?? Date.now;
     this.sleep = options.sleep ?? defaultSleep;
-    this.throttle = new Throttle(
-      options.maxConcurrent ?? 2,
-      options.minIntervalMs ?? 250,
-      this.now,
-      this.sleep,
-    );
+    const pacer = new Pacer(options.minIntervalMs ?? 250, this.now);
+    this.throttle = new Throttle(options.maxConcurrent ?? 2, pacer, this.sleep);
+    // Eigener Pool: Hängende Downloads dürfen Status, Fristen und andere REST-Aufrufe nicht aufhalten
+    this.downloadThrottle = new Throttle(options.maxConcurrentDownloads ?? 2, pacer, this.sleep);
     this.timeoutMs = options.timeoutMs ?? 30_000;
-    this.fileTimeoutMs = options.fileTimeoutMs ?? 120_000;
+    this.idleTimeoutMs = options.idleTimeoutMs ?? 30_000;
     this.retryDelaysMs = options.retryDelaysMs ?? [1000, 4000];
     this.maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
     this.maxFileBytes = options.maxFileBytes ?? MAX_FILE_BYTES;
@@ -475,14 +524,25 @@ export class MoodleClient {
 
   /**
    * Lädt eine Datei über `webservice/pluginfile.php`. Der Token geht als Formularfeld `token` per POST
-   * mit. Der Platz in der Drosselung bleibt belegt, bis der Stream endet, zerstört wird oder das
-   * Zeitlimit (120 s) abläuft. Danach wird der Stream mit Fehler beendet.
+   * mit. Downloads haben einen eigenen Pool (`maxConcurrentDownloads`, Standard 2), getrennt von den
+   * REST-Aufrufen. Der Platz bleibt belegt, bis der Stream endet, zerstört wird oder Moodle länger als
+   * `idleTimeoutMs` (30 s) keine Daten liefert. Es gibt kein Limit für die ganze Übertragung, nur für
+   * Stillstand (das schließt einen Leser ein, der den Stream nicht abnimmt). Danach wird der Stream mit
+   * Fehler beendet (`502 moodle_unreachable`, `reason = "timeout"`).
+   *
+   * Ein Zeitlimit wird bei Downloads **nicht** wiederholt (sonst bis zu 3 × Leerlauf-Zeitlimit vor dem
+   * ersten Byte). Netzwerkfehler und 5xx werden wie bei REST bis zu 2-mal wiederholt.
+   *
+   * `options.signal` bricht ab, ohne dass Moodle weiter belastet wird: Wartet der Aufruf noch auf einen
+   * Platz, wird Moodle nie angefragt. Läuft der Download, wird die Verbindung geschlossen und der Stream
+   * mit `RequestAbortedError` zerstört. Ein Abbruch wird nie wiederholt.
    *
    * Größenlimit (`maxFileBytes`): Ein größerer `Content-Length` → `502 moodle_unreachable` mit
    * `details.reason = "too_large"`, ohne die Datei zu lesen. Ohne oder mit falschem `Content-Length`
    * bricht der Stream mit Fehler ab, sobald mehr Byte ankommen als erlaubt bzw. angekündigt.
    */
-  async downloadFile(ref: string): Promise<MoodleDownload> {
+  async downloadFile(ref: string, options: { signal?: AbortSignal } = {}): Promise<MoodleDownload> {
+    const external = options.signal;
     if (!isValidFileRef(ref)) {
       throw new HttpError(400, 'moodle_file_ref_invalid', 'Der Dateiverweis ist ungültig.');
     }
@@ -495,176 +555,223 @@ export class MoodleClient {
     }
     const label = 'pluginfile';
 
-    return this.withRetries(label, false, async (slot) => {
-      let response: Response;
-      try {
-        response = await this.fetchFn(target.toString(), {
-          method: 'POST',
-          // Ohne Kompression: Content-Length gilt dann für die gelieferten Byte (Limit, Weitergabe)
-          headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept-encoding': 'identity' },
-          body: new URLSearchParams([['token', token]]).toString(),
-          redirect: 'manual',
-          signal: AbortSignal.timeout(this.fileTimeoutMs),
-        });
-      } catch (error) {
-        throw transientFrom(error);
-      }
-      if (isRedirect(response)) {
-        await discard(response);
-        throw this.unreachable(label, 'redirect', false);
-      }
-      if (response.status >= 500) {
-        await discard(response);
-        throw new TransientError(`http_${response.status}`);
-      }
-      if (response.status === 404) {
-        await discard(response);
-        throw new HttpError(404, 'moodle_file_not_found', 'Moodle findet die Datei nicht.');
-      }
-      if (response.status !== 200) {
-        await discard(response);
-        throw this.unreachable(label, `http_${response.status}`, false);
-      }
-
-      const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
-      const lengthHeader = response.headers.get('content-length');
-      // Komprimiert Moodle trotzdem, entpackt fetch: Content-Length nennt dann die komprimierte Größe
-      // und gilt weder fürs Limit noch für die Antwort an die Web-App
-      const encoding = (response.headers.get('content-encoding') ?? 'identity').trim().toLowerCase();
-      const contentLength =
-        encoding === 'identity' && lengthHeader && /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : null;
-      const disposition = response.headers.get('content-disposition');
-      const rawName = filenameFrom(disposition);
-      // Auch ein Dateiname von Moodle darf den Token nicht weitertragen (Header an die Web-App)
-      const filename = rawName === null ? null : scrubToken(rawName, token);
-      if (contentLength !== null && contentLength > this.maxFileBytes) {
-        await discard(response);
-        throw this.unreachable(label, 'too_large', false);
-      }
-      // Höchstens so viele Byte gehen durch: Limit bzw. angekündigte Länge, falls kleiner
-      const limit = Math.min(this.maxFileBytes, contentLength ?? Number.POSITIVE_INFINITY);
-      const reader = response.body?.getReader();
-      if (!reader) return { stream: Readable.from([]), contentType, contentLength, filename };
-      const body = reader;
-
-      // Fehler meldet pluginfile.php als kleines JSON mit HTTP 200. Höchstens 64 KB davon lesen.
-      // Eine echte Datei kommt mit Content-Disposition: Dann ist JSON Inhalt (z. B. ein Forenanhang
-      // eines Dritten mit `errorcode: invalidtoken`) und wird nie als Fehlermeldung gedeutet
-      const head: Uint8Array[] = [];
-      let done = false;
-      if (disposition === null && contentType.toLowerCase().startsWith('application/json')) {
-        let size = 0;
-        try {
-          while (size <= MAX_JSON_ERROR_BYTES) {
-            const chunk = await reader.read();
-            if (chunk.done) {
-              done = true;
-              break;
-            }
-            head.push(chunk.value);
-            size += chunk.value.byteLength;
-          }
-        } catch (error) {
-          throw transientFrom(error);
-        }
-        if (done) {
-          let parsed: unknown = null;
-          try {
-            parsed = JSON.parse(Buffer.concat(head).toString('utf8'));
-          } catch {
-            // keine Fehlermeldung, sondern eine JSON-Datei
-          }
-          parsed = scrubToken(parsed, token);
-          if (isMoodleException(parsed)) {
-            if (parsed.errorcode === 'filenotfound') {
-              throw new HttpError(404, 'moodle_file_not_found', 'Moodle findet die Datei nicht.');
-            }
-            throw this.mapException(label, parsed);
-          }
-        }
-      }
-
-      // Das erste Stück noch hier lesen: Bricht Moodle direkt nach den Headern ab oder bleibt stehen,
-      // läuft das über Wiederholung bzw. 502, bevor die Web-App Header bekommt
-      if (!done && head.length === 0) {
-        try {
-          const chunk = await reader.read();
-          if (chunk.done) done = true;
-          else head.push(chunk.value);
-        } catch (error) {
-          throw transientFrom(error);
-        }
-      }
-
-      // Schon der gelesene Anfang ist zu groß bzw. unvollständig: abbrechen, solange withRetries den
-      // Platz noch freigibt
-      let received = head.reduce((sum, chunk) => sum + chunk.byteLength, 0);
-      if (received > limit) {
-        await body.cancel().catch(() => {});
-        throw this.unreachable(label, 'too_large', false);
-      }
-      if (done && contentLength !== null && received < contentLength) {
-        throw this.unreachable(label, 'incomplete', false);
-      }
-      // Fehler im laufenden Stream: wie alle Moodle-Fehler als 502 mit Grund
-      const fail = (reason: string) => this.unreachable(label, reason, false);
-
-      // Ab hier gibt der Stream den Platz frei: am Ende, bei destroy() oder spätestens nach dem
-      // Zeitlimit, auch wenn niemand den Stream liest
-      slot.keep();
-      const release = slot.release;
-      const pending = [...head];
-      let finished = false;
-      const finish = () => {
-        if (finished) return;
-        finished = true;
+    const attempt = async (slot: Slot): Promise<MoodleDownload> => {
+      // Leerlauf-Zeitlimit: `arm()` startet es bei jedem Datenstück neu, bei Stillstand bricht es ab
+      const idle = new AbortController();
+      let timer: NodeJS.Timeout | undefined;
+      let onIdle = () => idle.abort(new DOMException('Moodle liefert keine Daten mehr', 'TimeoutError'));
+      const arm = () => {
         clearTimeout(timer);
-        release();
-        void body.cancel().catch(() => {});
+        timer = setTimeout(() => onIdle(), this.idleTimeoutMs);
+        timer.unref();
       };
-      const stream = new Readable({
-        read() {
-          const next = pending.shift();
-          if (next) {
-            this.push(next);
-            return;
+      const signal = external ? AbortSignal.any([idle.signal, external]) : idle.signal;
+      // Abbruch durch den Aufrufer ist kein Netzwerkfehler und wird nicht wiederholt
+      const failure = (error: unknown): Error =>
+        external?.aborted ? new RequestAbortedError() : transientFrom(error);
+      arm();
+      let streaming = false;
+      try {
+        let response: Response;
+        try {
+          response = await this.fetchFn(target.toString(), {
+            method: 'POST',
+            // Ohne Kompression: Content-Length gilt dann für die gelieferten Byte (Limit, Weitergabe)
+            headers: { 'content-type': 'application/x-www-form-urlencoded', 'accept-encoding': 'identity' },
+            body: new URLSearchParams([['token', token]]).toString(),
+            redirect: 'manual',
+            signal,
+          });
+        } catch (error) {
+          throw failure(error);
+        }
+        if (isRedirect(response)) {
+          await discard(response);
+          throw this.unreachable(label, 'redirect', false);
+        }
+        if (response.status >= 500) {
+          await discard(response);
+          throw new TransientError(`http_${response.status}`);
+        }
+        if (response.status === 404) {
+          await discard(response);
+          throw new HttpError(404, 'moodle_file_not_found', 'Moodle findet die Datei nicht.');
+        }
+        if (response.status !== 200) {
+          await discard(response);
+          throw this.unreachable(label, `http_${response.status}`, false);
+        }
+
+        const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
+        const lengthHeader = response.headers.get('content-length');
+        // Komprimiert Moodle trotzdem, entpackt fetch: Content-Length nennt dann die komprimierte Größe
+        // und gilt weder fürs Limit noch für die Antwort an die Web-App
+        const encoding = (response.headers.get('content-encoding') ?? 'identity').trim().toLowerCase();
+        const contentLength =
+          encoding === 'identity' && lengthHeader && /^\d+$/.test(lengthHeader) ? Number(lengthHeader) : null;
+        const disposition = response.headers.get('content-disposition');
+        const rawName = filenameFrom(disposition);
+        // Auch ein Dateiname von Moodle darf den Token nicht weitertragen (Header an die Web-App)
+        const filename = rawName === null ? null : scrubToken(rawName, token);
+        if (contentLength !== null && contentLength > this.maxFileBytes) {
+          await discard(response);
+          throw this.unreachable(label, 'too_large', false);
+        }
+        // Höchstens so viele Byte gehen durch: Limit bzw. angekündigte Länge, falls kleiner
+        const limit = Math.min(this.maxFileBytes, contentLength ?? Number.POSITIVE_INFINITY);
+        const reader = response.body?.getReader();
+        if (!reader) {
+          clearTimeout(timer);
+          return { stream: Readable.from([]), contentType, contentLength, filename };
+        }
+        const body = reader;
+
+        // Fehler meldet pluginfile.php als kleines JSON mit HTTP 200. Höchstens 64 KB davon lesen.
+        // Eine echte Datei kommt mit Content-Disposition: Dann ist JSON Inhalt (z. B. ein Forenanhang
+        // eines Dritten mit `errorcode: invalidtoken`) und wird nie als Fehlermeldung gedeutet
+        const head: Uint8Array[] = [];
+        let done = false;
+        if (disposition === null && contentType.toLowerCase().startsWith('application/json')) {
+          let size = 0;
+          try {
+            while (size <= MAX_JSON_ERROR_BYTES) {
+              const chunk = await reader.read();
+              arm();
+              if (chunk.done) {
+                done = true;
+                break;
+              }
+              head.push(chunk.value);
+              size += chunk.value.byteLength;
+            }
+          } catch (error) {
+            throw failure(error);
           }
           if (done) {
-            this.push(null);
-            return;
+            let parsed: unknown = null;
+            try {
+              parsed = JSON.parse(Buffer.concat(head).toString('utf8'));
+            } catch {
+              // keine Fehlermeldung, sondern eine JSON-Datei
+            }
+            parsed = scrubToken(parsed, token);
+            if (isMoodleException(parsed)) {
+              if (parsed.errorcode === 'filenotfound') {
+                throw new HttpError(404, 'moodle_file_not_found', 'Moodle findet die Datei nicht.');
+              }
+              throw this.mapException(label, parsed);
+            }
           }
-          body.read().then(
-            (chunk) => {
-              if (chunk.done) {
-                if (contentLength !== null && received < contentLength) {
-                  this.destroy(fail('incomplete'));
-                } else {
-                  this.push(null);
+        }
+
+        // Das erste Stück noch hier lesen: Bricht Moodle direkt nach den Headern ab oder bleibt stehen,
+        // läuft das über 502 bzw. Wiederholung (nicht bei Zeitlimit), bevor die Web-App Header bekommt
+        if (!done && head.length === 0) {
+          try {
+            const chunk = await reader.read();
+            arm();
+            if (chunk.done) done = true;
+            else head.push(chunk.value);
+          } catch (error) {
+            throw failure(error);
+          }
+        }
+
+        // Schon der gelesene Anfang ist zu groß bzw. unvollständig: abbrechen, solange withRetries den
+        // Platz noch freigibt
+        let received = head.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+        if (received > limit) {
+          await body.cancel().catch(() => {});
+          throw this.unreachable(label, 'too_large', false);
+        }
+        if (done && contentLength !== null && received < contentLength) {
+          throw this.unreachable(label, 'incomplete', false);
+        }
+        if (external?.aborted) {
+          await body.cancel().catch(() => {});
+          throw new RequestAbortedError();
+        }
+        // Fehler im laufenden Stream: wie alle Moodle-Fehler als 502 mit Grund
+        const fail = (reason: string) => this.unreachable(label, reason, false);
+
+        // Ab hier gibt der Stream den Platz frei: am Ende, bei destroy() oder spätestens nach dem
+        // Leerlauf-Zeitlimit, auch wenn niemand den Stream liest
+        slot.keep();
+        streaming = true;
+        const release = slot.release;
+        const pending = [...head];
+        let finished = false;
+        const onAbort = () => stream.destroy(new RequestAbortedError());
+        const finish = () => {
+          if (finished) return;
+          finished = true;
+          clearTimeout(timer);
+          external?.removeEventListener('abort', onAbort);
+          release();
+          void body.cancel().catch(() => {});
+        };
+        const stream = new Readable({
+          read() {
+            const next = pending.shift();
+            if (next) {
+              this.push(next);
+              return;
+            }
+            if (done) {
+              this.push(null);
+              return;
+            }
+            body.read().then(
+              (chunk) => {
+                if (finished) return;
+                arm();
+                if (chunk.done) {
+                  if (contentLength !== null && received < contentLength) {
+                    this.destroy(fail('incomplete'));
+                  } else {
+                    this.push(null);
+                  }
+                  return;
                 }
-                return;
-              }
-              received += chunk.value.byteLength;
-              if (received > limit) {
-                this.destroy(fail('too_large'));
-                return;
-              }
-              this.push(chunk.value);
-            },
-            (error: unknown) => this.destroy(fail(transientFrom(error).reason)),
-          );
-        },
-        destroy(error, callback) {
-          finish();
-          callback(error);
-        },
-      });
-      // Ein liegen gelassener Stream ohne eigenen Fehler-Listener darf den Core nicht abstürzen lassen
-      // (Zeitlimit oder Netzfehler). Aufrufer mit pipeline/for await bekommen den Fehler trotzdem.
-      stream.on('error', () => {});
-      // finish() läuft frühestens im nächsten Tick, timer ist dann gesetzt
-      const timer = setTimeout(() => stream.destroy(fail('timeout')), this.fileTimeoutMs);
-      timer.unref();
-      return { stream, contentType, contentLength, filename };
+                received += chunk.value.byteLength;
+                if (received > limit) {
+                  this.destroy(fail('too_large'));
+                  return;
+                }
+                this.push(chunk.value);
+              },
+              (error: unknown) =>
+                this.destroy(
+                  external?.aborted ? new RequestAbortedError() : fail(transientFrom(error).reason),
+                ),
+            );
+          },
+          destroy(error, callback) {
+            finish();
+            callback(error);
+          },
+        });
+        // Ein liegen gelassener Stream ohne eigenen Fehler-Listener darf den Core nicht abstürzen lassen
+        // (Zeitlimit oder Netzfehler). Aufrufer mit pipeline/for await bekommen den Fehler trotzdem.
+        stream.on('error', () => {});
+        // Bei Stillstand: Verbindung abbrechen und den Stream mit Fehler beenden
+        onIdle = () => {
+          idle.abort(new DOMException('Moodle liefert keine Daten mehr', 'TimeoutError'));
+          stream.destroy(fail('timeout'));
+        };
+        external?.addEventListener('abort', onAbort, { once: true });
+        arm();
+        return { stream, contentType, contentLength, filename };
+      } catch (error) {
+        // Nach dem Start des Streams gehört der Timer dem Stream
+        if (!streaming) clearTimeout(timer);
+        throw error;
+      }
+    };
+    return this.withRetries(label, false, attempt, {
+      pool: this.downloadThrottle,
+      signal: external,
+      retryTimeouts: false,
     });
   }
 
@@ -672,17 +779,22 @@ export class MoodleClient {
     label: string,
     write: boolean,
     attempt: (slot: Slot) => Promise<T>,
+    options: { pool?: Throttle; signal?: AbortSignal | undefined; retryTimeouts?: boolean } = {},
   ): Promise<T> {
     const delays = write ? [] : this.retryDelaysMs;
+    const pool = options.pool ?? this.throttle;
     for (let index = 0; ; index += 1) {
-      const release = await this.throttle.acquire();
+      const release = await pool.acquire(options.signal);
       let kept = false;
       try {
         return await attempt({ release, keep: () => (kept = true) });
       } catch (error) {
         if (!(error instanceof TransientError)) throw error;
         const delay = delays[index];
-        if (delay === undefined) throw this.unreachable(label, error.reason, write);
+        // Zeitlimit ohne Wiederholung (Downloads): sonst bis zu 3 x Zeitlimit bis zur Fehlermeldung
+        if (delay === undefined || (error.reason === 'timeout' && options.retryTimeouts === false)) {
+          throw this.unreachable(label, error.reason, write);
+        }
         this.logger?.warn(
           { wsfunction: label, reason: error.reason, retry_in_ms: delay },
           'Moodle-Aufruf wird wiederholt',

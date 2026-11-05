@@ -143,6 +143,8 @@ export class MoodleSync {
   private queued: Queued | null = null;
   private lastRun: MoodleSyncRun | null = null;
   private stopped = false;
+  /** Wird bei `stop()` ausgelöst und bricht einen laufenden Datei-Download ab */
+  private readonly stopController = new AbortController();
   private nextRunAt: Date | null = null;
 
   constructor(options: MoodleSyncOptions) {
@@ -209,12 +211,18 @@ export class MoodleSync {
   }
 
   /**
-   * Herunterfahren (Review #133, S3): keine neuen Läufe, der angehängte wird verworfen, der laufende bricht an der
-   * nächsten Stelle zwischen zwei Dateien bzw. Kursen ab (`error_code = abgebrochen`). Wartet höchstens `waitMs`,
-   * damit der Core vor seiner harten Frist (`SHUTDOWN_DEADLINE_MS` in main.ts) sauber endet.
+   * Herunterfahren (Review #133, S3): keine neuen Läufe, der angehängte wird verworfen, der laufende bricht ab
+   * (`error_code = abgebrochen`). Ein gerade laufender Datei-Download wird sofort abgebrochen (`AbortSignal`), die
+   * temporäre Datei entfernt und kein Material angelegt. Sonst bricht er an der nächsten Stelle zwischen zwei
+   * Dateien bzw. Kursen ab. Wartet höchstens `waitMs`, damit der Core vor seiner harten Frist
+   * (`SHUTDOWN_DEADLINE_MS` in main.ts) sauber endet.
+   *
+   * **`stop()` ist endgültig:** Danach startet diese Instanz nie wieder einen Lauf (`run()` liefert nur noch
+   * `abgebrochen`), auch nicht nach Ablauf von `waitMs`. Wer wieder abgleichen will, legt eine neue Instanz an.
    */
   async stop(waitMs: number = SHUTDOWN_WAIT_MS): Promise<void> {
     this.stopped = true;
+    this.stopController.abort();
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<void>((resolve) => {
       timer = setTimeout(resolve, waitMs);
@@ -473,14 +481,23 @@ export class MoodleSync {
 
     let stored: Awaited<ReturnType<typeof storeDownload>>;
     try {
-      const download = await this.moodle.client.downloadFile(file.ref);
+      const download = await this.moodle.client.downloadFile(file.ref, {
+        signal: this.stopController.signal,
+      });
       stored = await storeDownload(download.stream, this.dataDir, this.maxImportBytes);
     } catch (error) {
+      // Abbruch durch stop() ist kein Fehler der Datei: nichts vermerken, Lauf endet mit `abgebrochen`
+      if (this.stopped) throw new SyncStopped();
       if (codeOfToken(error)) throw error;
       if (error instanceof HttpError && error.code === 'moodle_file_not_found') return fail('nicht_gefunden');
       if (error instanceof HttpError && error.details?.reason === 'too_large') return fail('zu_gross');
       this.logger?.warn({ err: error, cmid: row.cmid }, 'Moodle-Datei nicht geladen');
       return fail('download_fehlgeschlagen');
+    }
+    if (this.stopped) {
+      // Der Download war schon fertig, als gestoppt wurde: kein Material mehr anlegen
+      await rm(stored.tmpPath, { force: true });
+      throw new SyncStopped();
     }
     if (!stored.isPdf) {
       await rm(stored.tmpPath, { force: true });

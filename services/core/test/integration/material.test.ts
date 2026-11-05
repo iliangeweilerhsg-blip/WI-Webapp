@@ -826,6 +826,23 @@ describe('Foliensätze lesen, ändern, löschen', () => {
     expect(SlideDeckSchema.parse(res.json()).title).toBe('Skript');
   });
 
+  it("Content-Disposition kodiert filename* nach RFC 8187 (Titel mit '()*)", async () => {
+    const id = await createDeck();
+    const patch = await t.request({
+      method: 'PATCH',
+      url: `${API}/slide-decks/${id}`,
+      payload: { title: "Vorl'(1)* Übung" },
+    });
+    expect(patch.statusCode).toBe(200);
+    const res = await t.request({ url: `${API}/slide-decks/${id}/file` });
+    const header = String(res.headers['content-disposition']);
+    const ext = /filename\*=UTF-8''(.*)$/.exec(header)?.[1] ?? '';
+    // attr-char (RFC 8187 3.2.1): kein ', (, ) und * im kodierten Wert
+    expect(ext).toBe('Vorl%27%281%29%2A%20%C3%9Cbung.pdf');
+    expect(ext).not.toMatch(/['()*]/);
+    expect(header).toContain('filename="Vorl\'(1)* _bung.pdf"');
+  });
+
   it('PATCH ändert den Titel, leerer Titel → 400, unbekannt → 404', async () => {
     const id = await createDeck();
     const res = await t.request({

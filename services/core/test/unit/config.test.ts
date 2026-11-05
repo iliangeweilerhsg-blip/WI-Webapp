@@ -30,7 +30,35 @@ describe('loadConfig', () => {
       /geheim/,
     );
     expect(() => loadConfig({ SG_MOODLE_URL: 'https://moodle.example.org/?x=1' })).toThrow(/https/);
-    expect(() => loadConfig({ SG_MOODLE_URL: 'kein url' })).toThrow(/gültige/);
+    expect(() => loadConfig({ SG_MOODLE_URL: 'nicht-url' })).toThrow(/g\u00fcltige/);
+  });
+
+  it('lehnt Backslash, Leer- und Steuerzeichen in SG_MOODLE_URL ab (wie die CLI)', () => {
+    // Der URL-Parser deutet diese Zeichen still um: der Host wäre evil.test
+    for (const raw of [
+      'https://evil.test\\@moodle.example.org',
+      'https://moodle.example.org/a b',
+      'https://moodle.example.org/\tx',
+      'https://moodle.exam\nple.org',
+      'https://moodle.example.org/\u0000',
+      'https://moodle.example.org/\u0085',
+      'kein url',
+    ]) {
+      expect(() => loadConfig({ SG_MOODLE_URL: raw }), JSON.stringify(raw)).toThrow(/Backslash/);
+    }
+    // Umgebender Leerraum ist erlaubt (wird abgeschnitten)
+    expect(loadConfig({ SG_MOODLE_URL: '  https://moodle.example.org/  ' }).moodleUrl).toBe(
+      'https://moodle.example.org',
+    );
+  });
+
+  it('speichert SG_MOODLE_URL in normalisierter Form (origin + pathname)', () => {
+    expect(loadConfig({ SG_MOODLE_URL: 'HTTPS://Moodle.Example.org:443/lms//' }).moodleUrl).toBe(
+      'https://moodle.example.org/lms',
+    );
+    expect(loadConfig({ SG_MOODLE_URL: 'https://moodle.example.org:8443' }).moodleUrl).toBe(
+      'https://moodle.example.org:8443',
+    );
   });
 
   it('liest Umgebungsvariablen und entfernt den Schrägstrich am Ende des Dev-Origins', () => {

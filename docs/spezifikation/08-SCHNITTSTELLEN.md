@@ -347,6 +347,13 @@ Funktionen: F-MDL-01 bis F-MDL-06 (Kap. 04). Datenformate: `packages/schemas/src
 
 **Fehler von Moodle** (geprüft am 04.11.2026 gegen Moodle 4.5): Die REST-Schnittstelle antwortet auch bei Fehlern mit HTTP 200 und `{ "exception", "errorcode", "message" }`. `webservice/pluginfile.php` antwortet bei Fehlern mit JSON `{ "error", "errorcode" }`, HTTP 200 (z. B. `invalidtoken`) bzw. 404 (`filenotfound`).
 
+**Ergänzungen zur Drosselung (Issue #129):**
+- **Eigener Download-Pool:** Datei-Downloads haben 2 eigene Plätze, getrennt von den 2 Plätzen der REST-Aufrufe. Zwei hängende Downloads halten Status, Fristen und Kursinhalte nicht auf. Die Grenze von 4 Anfragen pro Sekunde gilt für beide Pools zusammen.
+- **Leerlauf-Zeitlimit statt Gesamtlimit:** Für Dateien gilt statt „120 s“ ein Leerlauf-Zeitlimit von 30 s. Gemeint sind 30 s ohne neue Daten, schon vor den Headern und vor dem ersten Byte. Die Dauer der ganzen Übertragung ist nicht begrenzt (nur die Dateigröße, §9.2). Für REST-Aufrufe bleibt es bei 30 s für die ganze Antwort.
+- **Kein Wiederholen bei Stillstand:** Ein Datei-Download, der am Zeitlimit scheitert, wird nicht wiederholt (`502 moodle_unreachable`, `details.reason = "timeout"`). Netzwerkfehler und `5xx` werden wie bei REST bis zu 2-mal wiederholt.
+- **Abbruch:** Bricht die Web-App ab oder fährt der Core herunter, wird die Moodle-Verbindung geschlossen und der Platz frei. Wartet die Anfrage noch auf einen Platz, wird Moodle nie angefragt.
+- **`SG_MOODLE_URL` prüft der Core beim Start wie die CLI:** nur `https`, keine Zugangsdaten, kein Query und Fragment, kein Backslash, Leer- oder Steuerzeichen. Intern zählt nur die normalisierte Form (`origin + pathname`, ohne Schrägstrich am Ende). Ein ungültiger Wert verhindert den Start des Core.
+
 **Fehlercodes des Core**
 
 | HTTP | `code` | Wann |
@@ -363,6 +370,7 @@ Funktionen: F-MDL-01 bis F-MDL-06 (Kap. 04). Datenformate: `packages/schemas/src
 | 409 | `moodle_confirmation_required` | Aktion braucht Bestätigung, Code fehlt |
 | 409 | `moodle_confirmation_invalid` | Code abgelaufen, schon benutzt oder für andere Aktion/Parameter |
 | 404 | `moodle_link_not_found` | Kurs ist keinem Modul zugeordnet (`DELETE /moodle/links/{course_id}`, `POST /moodle/sync` mit `course_id`) |
+| 409 | `moodle_link_disabled` | Kurs ist zugeordnet, aber der Abgleich ist ausgeschaltet (`sync_enabled = false`): `POST /moodle/sync` mit `course_id`. Es wird nichts angestoßen |
 | 404 | `moodle_item_not_found` | Unbekannte Moodle-Datei (`PATCH /moodle/items/{id}`) |
 
 ### 9.2 Lese-Endpunkte
@@ -390,9 +398,13 @@ Alle unter `/api/v1/moodle`. Antworten in eigenen Formaten (Schema-Namen in Klam
 **Ergänzungen (T1-22/T1-23, VERTRAEGE §17.1):**
 - `GET /moodle/file` liefert nur bekannte Dateien: aus Kursinhalt, Aufgaben-Intro, eigener Abgabe und Forenanhängen (im Speicher) sowie dauerhaft alle `moodle_item.file_ref`. Ein unbekannter `ref` → `404 moodle_file_not_found` mit `details.reason = "unknown_ref"`.
 - Zu große Antworten → `502 moodle_unreachable` mit `details.reason = "too_large"`. Grenzen: JSON 16 MiB, Datei 512 MiB, `limit` 1–50 (Standard 20), `from` Standard „jetzt“.
+- Ein `ref` ist höchstens 2.048 Zeichen lang. Längere sind ungültig (`400 moodle_file_ref_invalid`) und kommen nie in die Liste der bekannten Dateien.
+- Beim Abbruch durch die Web-App (Anfrage geschlossen, bevor die Antwort fertig ist) bricht auch der Abruf bei Moodle ab (§9.1).
 - `MoodleCourse.module_id` ist die bestätigte Zuordnung. Dazu kommen `suggested_module_id` und `category` (`aktuell`/`organisatorisch`/`alt`, §9.4).
 
 **Sicherheits-Header für `GET /moodle/file`:** Dateien aus Moodle stammen auch von anderen Personen (z. B. Forenanhänge). Sie dürfen nie als aktive Inhalte im Origin des Core laufen, sonst könnte ein Skript Vorschau und Ausführen ohne Klick auslösen. Darum immer `X-Content-Type-Options: nosniff` und `Content-Security-Policy: sandbox`. `Content-Type` wird nur für eine Allowlist übernommen (`application/pdf`, `image/png`, `image/jpeg`, `image/gif`, `image/webp`, `text/plain`). Alles andere, ausdrücklich auch HTML und SVG, geht als `application/octet-stream` mit `Content-Disposition: attachment`.
+
+**Prüfung `Content-Security-Policy: sandbox` und PDF-Viewer (Issue #129, H8):** Der eingebaute Viewer von Google Chrome 153 zeigt ein PDF mit genau diesen Headern an, sowohl beim direkten Öffnen als auch eingebettet per `<iframe>` und `<object>` (Prüfung am 05.11.2026, Chrome for Testing 153, mit Anzeige unter Xvfb). Die Anpassung von §9.2 ist für Chrome nicht nötig. **Safari wurde nicht geprüft** (nicht verfügbar in dieser Umgebung), das bleibt vor T1-25 offen.
 
 ### 9.3 Aktionen
 

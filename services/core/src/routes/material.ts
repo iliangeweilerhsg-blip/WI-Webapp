@@ -26,6 +26,7 @@ import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
 import { exerciseSheet, slideDeck } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
+import { asciiFallback, encodeExtValue } from '../moodle/content-disposition.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import {
@@ -401,10 +402,14 @@ async function serveFile(request: FastifyRequest, reply: FastifyReply, options: 
   return reply.header('content-length', info.size).send(createReadStream(options.path));
 }
 
-/** `inline; filename="…"; filename*=UTF-8''…` für den Titel */
-function pdfDisposition(title: string): string {
-  const ascii = title.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
-  return `inline; filename="${ascii}.pdf"; filename*=UTF-8''${encodeURIComponent(title)}.pdf`;
+/**
+ * `inline; filename="<ASCII-Ersatz>"; filename*=UTF-8''<RFC-8187-kodiert>` für den Titel. Kodiert mit dem
+ * Encoder aus `moodle/content-disposition.ts`: `encodeURIComponent` lässt `'()*` stehen, das verstößt
+ * gegen RFC 8187 (`attr-char`).
+ */
+export function pdfDisposition(title: string): string {
+  const name = `${title}.pdf`;
+  return `inline; filename="${asciiFallback(name)}"; filename*=UTF-8''${encodeExtValue(name)}`;
 }
 
 // ---------- Routen ----------

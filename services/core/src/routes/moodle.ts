@@ -38,7 +38,7 @@ import {
 import type { Db } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
 import { isMoodleActionId, needsConfirmation, type MoodleActionContext } from '../moodle/actions.ts';
-import { isValidFileRef, moodleNotConfigured } from '../moodle/client.ts';
+import { isValidFileRef, moodleNotConfigured, RequestAbortedError } from '../moodle/client.ts';
 import { FILE_ONLY_HEADERS, fileResponseHeaders } from '../moodle/file-headers.ts';
 import type { MoodleServices } from '../moodle/index.ts';
 import {
@@ -46,7 +46,6 @@ import {
   decideItem,
   deleteLink,
   isKnownFileRef,
-  isLinked,
   listItems,
   listLinks,
   listSyncedDeadlines,
@@ -323,7 +322,22 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
           { reason: 'unknown_ref' },
         );
       }
-      const download = await client.downloadFile(ref);
+      // Bricht die Web-App ab, bevor die Antwort fertig ist (auch während die Anfrage noch auf einen
+      // Download-Platz wartet), wird Moodle nicht mehr angefragt bzw. die Verbindung geschlossen
+      const aborted = new AbortController();
+      const onClose = () => {
+        if (!reply.raw.writableFinished) aborted.abort();
+      };
+      reply.raw.once('close', onClose);
+      let download: Awaited<ReturnType<typeof client.downloadFile>>;
+      try {
+        download = await client.downloadFile(ref, { signal: aborted.signal });
+      } catch (error) {
+        reply.raw.off('close', onClose);
+        // Niemand wartet mehr auf die Antwort
+        if (error instanceof RequestAbortedError) return reply.code(499).send();
+        throw error;
+      }
       // Stream direkt durchreichen, nie die ganze Datei puffern. Bricht die Web-App ab, zerstört
       // Fastify den Stream, und der Client gibt Moodle-Verbindung und Platz in der Drosselung frei
       return reply.headers(fileResponseHeaders(download, ref)).send(download.stream);
@@ -547,14 +561,30 @@ function registerSyncRoutes(
         tags: ['Moodle'],
         summary: '„Jetzt abgleichen“: startet einen Abgleich im Hintergrund (läuft schon einer, danach)',
         body: MoodleSyncRequestSchema.optional(),
-        response: { 202: MoodleSyncStatusSchema, 404: ApiErrorSchema, 503: ApiErrorSchema },
+        response: {
+          202: MoodleSyncStatusSchema,
+          404: ApiErrorSchema,
+          409: ApiErrorSchema,
+          503: ApiErrorSchema,
+        },
       },
     },
     async (request, reply) => {
       if (!(await client.isConfigured())) throw moodleNotConfigured();
       const courseId = request.body?.course_id;
-      if (courseId && !(await isLinked(db, courseId))) {
-        throw new HttpError(404, 'moodle_link_not_found', 'Dieser Kurs ist keinem Modul zugeordnet.');
+      if (courseId) {
+        const link = (await listLinks(db)).find((entry) => entry.moodle_course_id === courseId);
+        if (!link) {
+          throw new HttpError(404, 'moodle_link_not_found', 'Dieser Kurs ist keinem Modul zugeordnet.');
+        }
+        // Der Abgleich überspringt Kurse mit ausgeschaltetem Abgleich: nicht 202 versprechen und nichts tun
+        if (!link.sync_enabled) {
+          throw new HttpError(
+            409,
+            'moodle_link_disabled',
+            'Der Abgleich für diesen Kurs ist ausgeschaltet. Bitte zuerst einschalten.',
+          );
+        }
       }
       void sync.run('manuell', courseId ? [courseId] : undefined).catch(() => {});
       return reply.code(202).send(await sync.status());

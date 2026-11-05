@@ -12,7 +12,7 @@ import type {
   MoodleQuizList,
   MoodleSubmissionStatus,
 } from '@sg/shared';
-import type { MoodleClient } from './client.ts';
+import { MAX_REF_LENGTH, type MoodleClient } from './client.ts';
 import {
   list,
   mapAssignments,
@@ -49,6 +49,8 @@ export class MoodleFileRegistry {
   }
 
   add(ref: string): void {
+    // Längere Verweise gelten nirgends als gültig (isValidFileRef): nicht merken, damit die Registry klein bleibt
+    if (ref.length > MAX_REF_LENGTH) return;
     // Neu einsortieren, damit häufig gesehene Verweise nicht als älteste herausfallen
     this.refs.delete(ref);
     this.refs.add(ref);

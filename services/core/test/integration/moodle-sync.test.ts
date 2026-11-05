@@ -918,6 +918,60 @@ describe('Moodle-Abgleich (T1-23)', () => {
     }
   });
 
+  it('stop() bricht einen laufenden Download sofort ab: kein Material, keine Restdatei (Issue #129)', async () => {
+    await start();
+    // Die erste Datei liefert ein paar Byte und bleibt dann stehen (Leerlauf-Zeitlimit 30 s, nicht abgewartet)
+    let upstreamClosed = false;
+    let firstBytesSent = false;
+    fake.files.set(REF.vl01, (res) => {
+      res.on('close', () => (upstreamClosed = true));
+      res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': 1_000_000 });
+      res.write(Buffer.from('%PDF-1.4\n'));
+      firstBytesSent = true;
+    });
+    const before = await tableCounts();
+    expect((await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id })).status).toBe(200);
+    while (!firstBytesSent) await new Promise((r) => setTimeout(r, 10));
+    // Der Download läuft, der Abgleich hängt in dieser Datei
+    expect((await sync.status()).state).toBe('laeuft');
+
+    const started = Date.now();
+    await sync.stop(10_000);
+    // Weit unter der Wartezeit von 10 s und dem Leerlauf-Zeitlimit von 30 s
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect((await sync.status()).state).not.toBe('laeuft');
+    expect((await sync.status()).last_run).toMatchObject({ ok: false, error_code: 'abgebrochen' });
+
+    const after = await tableCounts();
+    expect([after.decks, after.sheets, after.jobs]).toEqual([before.decks, before.sheets, before.jobs]);
+    // Auch nicht als fehlgeschlagen vermerkt: ein neuer Abgleich versucht die Datei wieder
+    expect((await itemByRef(REF.vl01)).last_error).toBeNull();
+    // Moodle-Verbindung ist zu, und im temporären Ordner liegt nichts
+    for (let i = 0; i < 100 && !upstreamClosed; i += 1) await new Promise((r) => setTimeout(r, 10));
+    expect(upstreamClosed).toBe(true);
+    expect(await listFiles(uploadTmpDir(t.config.dataDir)).catch(() => [])).toEqual([]);
+  });
+
+  it('„Jetzt abgleichen“ für einen ausgeschalteten Kurs → 409 moodle_link_disabled (Issue #129)', async () => {
+    await start();
+    await linkDbs();
+    await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id, sync_enabled: false });
+    const requestsBefore = fake.requests.length;
+    const disabled = await req<{ error: { code: string } }>('POST', '/moodle/sync', {
+      course_id: COURSE.dbs,
+    });
+    expect(disabled.status).toBe(409);
+    expect(disabled.body.error.code).toBe('moodle_link_disabled');
+    // Es wurde nichts angestoßen
+    await sync.idle();
+    expect(fake.requests.length).toBe(requestsBefore);
+    // Ein Gesamtabgleich ohne Kurs bleibt erlaubt, wieder eingeschaltet geht auch der Kurs
+    expect((await req('POST', '/moodle/sync', {})).status).toBe(202);
+    await req('PUT', `/moodle/links/${COURSE.dbs}`, { module_id: dbsModule.id, sync_enabled: true });
+    await sync.idle();
+    expect((await req('POST', '/moodle/sync', { course_id: COURSE.dbs })).status).toBe(202);
+  });
+
   it('„Ignorieren“ lässt sich rückgängig machen: zurück auf offen, ohne Abgleich (Review #134, M2)', async () => {
     await start();
     state.folder.push({
