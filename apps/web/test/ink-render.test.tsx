@@ -3,10 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import type { PageElement, Stroke } from '@sg/shared';
 import { InkPage } from '../src/components/ink/InkPage.tsx';
-import { paintScene, strokeOutline, TOOL_STYLES } from '../src/components/ink/render.ts';
+import {
+  paintScene,
+  redrawRegion,
+  resetScratchCanvas,
+  SCRATCH_KEEP_PX,
+  strokeOutline,
+  TOOL_STYLES,
+} from '../src/components/ink/render.ts';
 import { decodeStroke } from '../src/components/ink/stroke.ts';
 import { installCanvasMock, type CanvasLog } from './canvas-mock.ts';
 import { loadFixtures } from './ink-fixtures.ts';
+
+type PageProps = NonNullable<React.ComponentProps<typeof InkPage>['page']>;
 
 const files = loadFixtures();
 const all = files.flatMap((f) => f.strokes);
@@ -270,5 +279,59 @@ describe('<InkPage>', () => {
     const { container: c3 } = render(<InkPage strokes={[]} width={200} dim="off" />);
     expect(c3.querySelector<HTMLElement>('canvas')!.parentElement!.style.filter).toBe('');
     document.documentElement.removeAttribute('data-theme');
+  });
+});
+
+describe('<InkPage> Querformat', () => {
+  it('begrenzt bei großem Zoom die LÄNGERE Seite auf 4096 Pixel (Querformat)', () => {
+    vi.stubGlobal('devicePixelRatio', 2);
+    const landscape = { width_pt: 842, height_pt: 595, template: 'liniert' } as unknown as PageProps;
+    const { container } = render(<InkPage strokes={[]} page={landscape} width={9000} />);
+    const canvas = container.querySelector('canvas')!;
+    expect(Math.max(canvas.width, canvas.height)).toBeLessThanOrEqual(4096);
+    expect(canvas.width).toBe(4096);
+    expect(canvas.height).toBe(Math.round((4096 * 595) / 842));
+    // Seitenverhältnis bleibt erhalten
+    expect(canvas.width / canvas.height).toBeCloseTo(842 / 595, 2);
+  });
+
+  it('Hochformat bleibt auf der Höhe begrenzt', () => {
+    vi.stubGlobal('devicePixelRatio', 2);
+    const { container } = render(<InkPage strokes={[]} width={9000} />);
+    const canvas = container.querySelector('canvas')!;
+    expect(canvas.height).toBe(4096);
+    expect(canvas.width).toBeLessThan(4096);
+  });
+});
+
+describe('redrawRegion Zwischen-Canvas', () => {
+  const fakeCtx = () => {
+    const drawn: HTMLCanvasElement[] = [];
+    const ctx = {
+      save: vi.fn(),
+      restore: vi.fn(),
+      setTransform: vi.fn(),
+      clearRect: vi.fn(),
+      drawImage: (c: HTMLCanvasElement) => drawn.push(c),
+    } as unknown as CanvasRenderingContext2D;
+    return { ctx, drawn };
+  };
+  const size = { width: 4000, height: 4000 };
+  beforeEach(() => resetScratchCanvas());
+
+  it('gibt einen großen Zwischen-Canvas nach Gebrauch frei (0×0)', () => {
+    const { ctx, drawn } = fakeCtx();
+    redrawRegion(ctx, [], { x0: 0, y0: 0, x1: 2000, y1: 2000 }, 1, size);
+    expect(drawn).toHaveLength(1);
+    expect(2000 * 2000).toBeGreaterThan(SCRATCH_KEEP_PX);
+    expect(drawn[0]!.width).toBe(0);
+    expect(drawn[0]!.height).toBe(0);
+  });
+
+  it('behält einen kleinen Zwischen-Canvas für die nächste Teilzeichnung', () => {
+    const { ctx, drawn } = fakeCtx();
+    redrawRegion(ctx, [], { x0: 10, y0: 10, x1: 110, y1: 60 }, 1, size);
+    expect(drawn[0]!.width).toBeGreaterThanOrEqual(100);
+    expect(drawn[0]!.height).toBeGreaterThanOrEqual(50);
   });
 });
