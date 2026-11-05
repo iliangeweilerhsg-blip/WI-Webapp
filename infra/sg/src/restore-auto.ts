@@ -10,7 +10,8 @@ import { SINGLE_USER_ID } from '@sg/shared';
 import { checkBackupTarget } from '@sg/shared/backup-target';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { readBackupSettings, errorText } from './backup.ts';
+import { readBackupSettings, errorText, RESTORE_TEST_PID_NAME } from './backup.ts';
+import { writeRunPid } from './liveness.ts';
 import {
   dropDatabase,
   loadStand,
@@ -89,9 +90,25 @@ async function dropLeftovers(deps: RestoreDeps): Promise<void> {
 
 /** Fertig: Exit-Code 0 = Test bestanden, 1 = nicht bestanden. Das Ergebnis steht in jedem Fall in `setting`. */
 export async function runAutoRestoreTest(deps: RestoreDeps, options: AutoRestoreOptions): Promise<number> {
-  const { cfg, pg, log, err } = deps;
   const now = deps.now ?? (() => new Date());
   const started = await startedAt(deps, now()).catch(() => now().toISOString());
+  // PID-Datei mit dem Beginn aus `setting.restore_test`: stürzt dieser Prozess ab, sieht `sg backup` (auch vor einer
+  // Migration in `sg start`) das sofort und blockiert nicht bis zur 2-Stunden-Frist (#113)
+  const removePid = writeRunPid(deps.cfg.dataDir, RESTORE_TEST_PID_NAME, started);
+  try {
+    return await autoRestoreTest(deps, options, started);
+  } finally {
+    removePid();
+  }
+}
+
+async function autoRestoreTest(
+  deps: RestoreDeps,
+  options: AutoRestoreOptions,
+  started: string,
+): Promise<number> {
+  const { cfg, pg, log, err } = deps;
+  const now = deps.now ?? (() => new Date());
   const base = { trigger: options.trigger, started_at: started } as const;
   const finish = async (
     result:

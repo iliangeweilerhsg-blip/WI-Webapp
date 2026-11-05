@@ -51,6 +51,8 @@ const CODE_MESSAGES: Record<string, string> = {
   session_exists: 'Zu diesem Termin gibt es schon eine Session.',
   session_one_active: 'Es läuft schon eine Session.',
   idempotency_key_in_progress: 'Die Datei wird gerade schon hochgeladen.',
+  // Nur am Mac selbst erlaubt (z. B. „Jetzt sichern“, „Jetzt testen“ von einem gekoppelten Gerät, #113)
+  local_only: 'Das geht nur direkt am Mac.',
 };
 
 function messageForStatus(status: number): string {
