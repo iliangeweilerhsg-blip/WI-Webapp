@@ -34,7 +34,7 @@ Python-Contract-Tests: `cd packages/schemas && uv run --project python pytest py
 
 - Migrationen erzeugt `drizzle-kit` aus `services/core/src/db/schema/`, abgelegt unter `services/core/drizzle/`. Danach muss `drizzle-kit generate` „No schema changes“ melden.
 - **Nur vorwärts:** Drizzle kennt keine Down-Migrationen. Änderungen werden rückwärtskompatibel gebaut: erst Spalte hinzufügen, später alte entfernen.
-- Vor jeder Migration auf dem Mac des Owners wird ein Backup gemacht. `sg backup` folgt mit T1-18, bis dahin von Hand mit `pg_dump`.
+- Vor jeder Migration auf dem Mac des Owners wird ein Backup gemacht. `sg migrate` legt es selbst an (`pnpm sg backup`, VERTRAEGE §13), sofern ein Backup-Ziel eingestellt ist.
 - **Ausgerollte Migrationen nie ändern.** Solange eine Migration nur auf Branches existiert, darf sie neu erzeugt werden.
 - **Fremdschlüssel:**
   - CASCADE für Teile eines Ganzen, z. B. `slide` → `slide_deck`.
