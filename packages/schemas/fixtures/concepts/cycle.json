@@ -1,5 +1,5 @@
 {
-  "README": "VERTRAEGE §20.6 A3, Invariante 4: Kreis, wenn new.to über bestätigte baut_auf-Kanten aktiver Konzepte new.from erreicht. path = kürzester Kreis ab new.from (Breitensuche ab new.to, Nachbarn in aufsteigender Reihenfolge der Kurznamen), sonst null. Unbestätigte Kanten zählen nicht.",
+  "README": "VERTRAEGE §20.6 A3, Invariante 4: Kreis, wenn new.to über bestätigte baut_auf-Kanten aktiver Konzepte new.from erreicht. path = kürzester Kreis ab new.from (Breitensuche ab new.to, Nachbarn nach Konzept-ID aufsteigend), sonst null. Unbestätigte Kanten zählen nicht. Die IDs werden so vergeben, dass ihre Reihenfolge der Reihenfolge der Kurznamen entspricht.",
   "cases": [
     {
       "name": "direkt",

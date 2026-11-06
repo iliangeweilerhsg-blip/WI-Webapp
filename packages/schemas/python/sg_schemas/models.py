@@ -2717,11 +2717,11 @@ class InboxDecision(BaseModel):
     )
     duplicate_of: Uuid | None = Field(
         ...,
-        description='A3: Beziehung, die es mit der gewählten Art schon gab. Die vorgeschlagene Zeile bleibt unbestätigt liegen (§20.6)',
+        description='A2/A3: vorhandene Beziehung, mit der die umgehängte (A2) bzw. umgewidmete (A3) Beziehung zusammenfiel. Die Zeile des Eintrags bleibt unbestätigt liegen (§20.6)',
     )
     triggered_by: Uuid | None = Field(
         ...,
-        description='A3 als Folge einer Konzept-Annahme: der Eintrag, dessen Annahme die Bestätigung ausgelöst hat (§20.6 A1)',
+        description='Eintrag, dessen Entscheidung diesen mitentschieden hat (A1: bestätigte Beziehung, A2: umgehängte Dublette, A3: bestätigte vorhandene Beziehung). Wieder öffnen nur über diesen Eintrag (§20.6)',
     )
 
 
