@@ -1,4 +1,5 @@
 import { mkdtempSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from 'fastify';
@@ -65,4 +66,19 @@ export async function startTestApp(
       await handle.close();
     },
   };
+}
+
+/**
+ * Belegt einen freien Port auf 127.0.0.1 (für Tests „zweiter Core scheitert mit EADDRINUSE“, #170). Ein schlichter
+ * Socket statt eines ersten Core, damit dessen eigene Start-Hooks das Ergebnis nicht verfälschen.
+ */
+export async function occupyPort(): Promise<{ port: number; close: () => Promise<void> }> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  return { port, close: () => new Promise<void>((resolve) => server.close(() => resolve())) };
 }

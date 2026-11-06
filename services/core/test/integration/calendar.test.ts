@@ -20,7 +20,7 @@ import { session } from '../../src/db/schema/index.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { calendarHooks, setCalendarHooks, syncAllUrlSources } from '../../src/services/calendar.ts';
 import { IcsFetchError } from '../../src/services/calendar-fetch.ts';
-import { startTestApp, type TestApp } from './helpers.ts';
+import { occupyPort, startTestApp, type TestApp } from './helpers.ts';
 
 const FIXTURES = fileURLToPath(new URL('../../../../tests/fixtures/ics/', import.meta.url));
 const API = '/api/v1';
@@ -1094,6 +1094,9 @@ describe('Zeitplan: beim Start und alle 6 h', () => {
     fetchMock.mockResolvedValue(weekly('start@test', 'Start', 2));
     const started = await startTestApp();
     try {
+      // onReady (ready/inject) läuft vor dem Binden: noch kein Abgleich, erst nach erfolgreichem listen (#170)
+      expect(fetchMock).not.toHaveBeenCalled();
+      await started.app.listen({ port: 0, host: '127.0.0.1' });
       await vi.waitFor(async () => {
         expect(fetchMock).toHaveBeenCalledWith('https://start.example.edu/plan.ics');
         const rows = await t.handle
@@ -1103,6 +1106,26 @@ describe('Zeitplan: beim Start und alle 6 h', () => {
     } finally {
       await started.close();
     }
+  });
+
+  it('Port belegt (EADDRINUSE): kein Abgleich beim Start', async () => {
+    const id = uuidv7();
+    await t.handle.sql`INSERT INTO calendar_source (id, user_id, kind, name, url, readonly)
+      VALUES (${id}, ${SINGLE_USER_ID}, 'ics_url', 'Start', 'https://start.example.edu/plan.ics', true)`;
+    fetchMock.mockResolvedValue(weekly('start@test', 'Start', 2));
+    const blocker = await occupyPort();
+    const second = await startTestApp();
+    try {
+      await expect(second.app.listen({ port: blocker.port, host: '127.0.0.1' })).rejects.toThrow(
+        /EADDRINUSE/,
+      );
+    } finally {
+      await second.close(); // wartet auf einen laufenden Abgleich
+      await blocker.close();
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+    const rows = await t.handle.sql`SELECT count(*)::int AS n FROM calendar_event WHERE source_id = ${id}`;
+    expect(rows[0]?.n).toBe(0);
   });
 });
 
