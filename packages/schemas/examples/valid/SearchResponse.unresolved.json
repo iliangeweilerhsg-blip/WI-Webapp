@@ -1,0 +1,12 @@
+{
+  "query": "normalform",
+  "mode": "text",
+  "degraded": null,
+  "filters": {
+    "module_ids": [],
+    "kinds": [],
+    "unresolved": ["fach:XYZ"]
+  },
+  "hits": [],
+  "took_ms": 2
+}

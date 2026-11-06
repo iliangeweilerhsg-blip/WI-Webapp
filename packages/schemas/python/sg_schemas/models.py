@@ -221,6 +221,48 @@ class DeviceKind(StrEnum):
     iphone = 'iphone'
 
 
+class Text(RootModel[StrictStr]):
+    root: StrictStr = Field(..., max_length=2000, min_length=1)
+
+
+class EmbedRequest(BaseModel):
+    """
+    POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 256 KB
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    texts: list[Text] = Field(..., max_length=16, min_length=1)
+
+
+class Vector(RootModel[list[StrictFloat]]):
+    root: list[StrictFloat] = Field(..., max_length=1024, min_length=1024)
+
+
+class EmbedResponse(BaseModel):
+    """
+    Antwort von POST /embed: ein L2-normierter Vektor je Text, in derselben Reihenfolge
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    model: StrictStr = Field(..., min_length=1)
+    dim: Literal[1024]
+    vectors: list[Vector] = Field(..., max_length=16, min_length=1)
+
+
+class EmbedderState(StrEnum):
+    """
+    Zustand des Embedders im Worker (VERTRAEGE §19.2)
+    """
+
+    bereit = 'bereit'
+    laedt = 'laedt'
+    nicht_verfuegbar = 'nicht_verfuegbar'
+
+
 class Status(StrEnum):
     ok = 'ok'
 
@@ -950,6 +992,54 @@ class ReviewState(StrEnum):
     erledigt = 'erledigt'
 
 
+class SearchDegraded1(StrEnum):
+    """
+    Warum nur Wortsuche lief. null bei mode = hybrid oder ohne Wörter
+    """
+
+    embedder_not_ready = 'embedder_not_ready'
+    embedder_unavailable = 'embedder_unavailable'
+
+
+class SearchIndexScope(StrEnum):
+    """
+    Ziel eines search.index-Jobs: ein Foliensatz (Folien) oder eine Session (Transkript-Fenster)
+    """
+
+    deck = 'deck'
+    session = 'session'
+
+
+class SearchKind(StrEnum):
+    """
+    Art eines Sucheintrags (search_chunk.source_kind). Konzepte, Notizen, Aufgaben, Karten und Fotos kommen mit ihren Tickets als neue Werte dazu
+    """
+
+    slide = 'slide'
+    transcript = 'transcript'
+
+
+class Mode(StrEnum):
+    hybrid = 'hybrid'
+    text = 'text'
+
+
+class UnresolvedItem(RootModel[StrictStr]):
+    root: StrictStr = Field(..., min_length=1)
+
+
+class SearchSnippetPart(BaseModel):
+    """
+    Teil eines Ausschnitts. hit = Treffer-Wort (als <mark> darstellen). Immer als Text rendern, nie als HTML
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    text: StrictStr = Field(..., min_length=1)
+    hit: StrictBool
+
+
 class SemesterUpdate(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -1286,6 +1376,32 @@ class Uuid(RootModel[StrictStr]):
         pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
         title='Uuid',
     )
+
+
+class Embedder(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    provider: StrictStr = Field(..., examples=['bge-m3', 'fake'], min_length=1)
+    model: StrictStr = Field(
+        ..., examples=['BAAI/bge-m3', 'fake-embed-1'], min_length=1
+    )
+    dim: Literal[1024]
+    state: EmbedderState
+    error: StrictStr | None = Field(
+        ..., description='Grund bei nicht_verfuegbar, sonst null', max_length=500
+    )
+
+
+class WorkerHealth(BaseModel):
+    """
+    GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    embedder: Embedder
 
 
 class AlignLogPayload(BaseModel):
@@ -3668,6 +3784,102 @@ class RestoreTest(BaseModel):
     )
 
 
+class SearchIndexPayload(BaseModel):
+    """
+    search.index (VERTRAEGE §19.3). job.session_id bleibt NULL, auch bei scope = session
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    scope: SearchIndexScope
+    id: StrictStr = Field(
+        ...,
+        description='slide_deck.id bzw. session.id',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+
+
+class SearchIndexResult(BaseModel):
+    """
+    Ergebnis von search.index (VERTRAEGE §19.3)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    scope: SearchIndexScope
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    chunk_count: StrictInt = Field(
+        ..., description='Einträge des Ziels nach dem Lauf', ge=0
+    )
+    embedded_count: StrictInt = Field(
+        ..., description='neu eingebettete Einträge', ge=0
+    )
+    reused_count: StrictInt = Field(
+        ...,
+        description='Einträge, deren Vektor wiederverwendet wurde (gleicher Text, gleiches Modell, gleiche Version)',
+        ge=0,
+    )
+    removed_count: StrictInt = Field(
+        ..., description='hart gelöschte Einträge, die es im Ziel nicht mehr gibt', ge=0
+    )
+    embedding_model: StrictStr | None = Field(
+        ...,
+        description='Modell der Vektoren. null: Embedder nicht verfügbar, Einträge ohne Vektor geschrieben (§19.3 Schritt 4)',
+        examples=['BAAI/bge-m3'],
+        min_length=1,
+    )
+    embedding_error: StrictStr | None = Field(
+        ...,
+        description='Grund, warum ohne Vektoren geschrieben wurde. Ohne Pfade und ohne Geheimnisse',
+        max_length=500,
+    )
+    index_version: StrictInt = Field(
+        ..., description='SEARCH_INDEX_VERSION des Workers beim Lauf', ge=1
+    )
+    deleted: StrictBool = Field(
+        ..., description='true: Ziel ist weich gelöscht, nichts geschrieben'
+    )
+    missing: StrictBool = Field(
+        ..., description='true: Ziel existiert nicht (mehr), nichts geschrieben'
+    )
+
+
+class SearchModuleRef(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    name: StrictStr = Field(..., min_length=1)
+    short_name: StrictStr | None
+
+
+class Filters(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    module_ids: list[Uuid] = Field(
+        ..., description='aufgelöste Module aus fach: und module_id. Leer = alle'
+    )
+    kinds: list[SearchKind] = Field(..., description='aus typ:. Leer = alle')
+    unresolved: list[UnresolvedItem] = Field(
+        ...,
+        description='Präfixe, die nichts trafen (wörtlich, z. B. fach:XYZ). Nicht leer → hits leer',
+    )
+
+
 class Semester(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -5326,6 +5538,78 @@ class PhotoAddOp(BaseModel):
     origin: SyncOrigin | None = None
 
 
+class SearchHitSlide(BaseModel):
+    """
+    Treffer auf einer Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['slide']
+    chunk_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    score: StrictFloat = Field(..., gt=0.0)
+    module: SearchModuleRef
+    snippet: list[SearchSnippetPart]
+    deck_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    deck_title: StrictStr
+    slide_index: StrictInt = Field(..., ge=1)
+    slide_title: StrictStr | None
+
+
+class SearchHitTranscript(BaseModel):
+    """
+    Treffer im Gesagten (Transkript-Fenster). Ziel: /rueckblick?id=<session_id>&t=<t_ms>
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['transcript']
+    chunk_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    score: StrictFloat = Field(..., gt=0.0)
+    module: SearchModuleRef
+    snippet: list[SearchSnippetPart]
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_number: StrictInt | None = Field(
+        ..., description='VL-Nummer (Session.number)', ge=1
+    )
+    session_title: StrictStr | None
+    session_started_at: AwareDatetime | None
+    t_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    t_end_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+
+
 class Session(BaseModel):
     """
     Durchführung eines Termins. planned_starts_at/planned_ends_at sind abgeleitet aus dem Kalendertermin (null bei spontanen Sessions).
@@ -5696,6 +5980,26 @@ class MoodleCourseContents(BaseModel):
     sections: list[MoodleSection]
 
 
+class SearchResponse(BaseModel):
+    """
+    GET /search (VERTRAEGE §19.6)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    query: StrictStr = Field(..., description='Suchtext ohne Filter-Präfixe')
+    mode: Mode
+    degraded: SearchDegraded1 | None = Field(
+        ...,
+        description='Warum nur Wortsuche lief. null bei mode = hybrid oder ohne Wörter',
+        title='SearchDegraded',
+    )
+    filters: Filters
+    hits: list[SearchHitSlide | SearchHitTranscript] = Field(..., max_length=50)
+    took_ms: StrictInt = Field(..., ge=0)
+
+
 class ElementUpsertData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -5850,6 +6154,9 @@ class SchemaBundle(BaseModel):
         None, alias='ElementUpsertData'
     )
     ElementUpsertOp_1: ElementUpsertOp | None = Field(None, alias='ElementUpsertOp')
+    EmbedRequest_1: EmbedRequest | None = Field(None, alias='EmbedRequest')
+    EmbedResponse_1: EmbedResponse | None = Field(None, alias='EmbedResponse')
+    EmbedderState_1: EmbedderState | None = Field(None, alias='EmbedderState')
     EpochMs: StrictInt | None = Field(
         None,
         description='Epochen-Millisekunden (UTC) nach der synchronisierten Uhr (02 §5). Nur im Sync-Protokoll und im Strich-Format (08 §1).',
@@ -6153,6 +6460,33 @@ class SchemaBundle(BaseModel):
         None, alias='RestoreTestTrigger'
     )
     ReviewState_1: ReviewState | None = Field(None, alias='ReviewState')
+    SearchDegraded: SearchDegraded1 | None = Field(
+        None,
+        description='Warum nur Wortsuche lief. null bei mode = hybrid oder ohne Wörter',
+        title='SearchDegraded',
+    )
+    SearchHit: SearchHitSlide | SearchHitTranscript | None = Field(
+        None,
+        description='Treffer, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt; kind schließt sich gegenseitig aus)',
+        title='SearchHit',
+    )
+    SearchHitSlide_1: SearchHitSlide | None = Field(None, alias='SearchHitSlide')
+    SearchHitTranscript_1: SearchHitTranscript | None = Field(
+        None, alias='SearchHitTranscript'
+    )
+    SearchIndexPayload_1: SearchIndexPayload | None = Field(
+        None, alias='SearchIndexPayload'
+    )
+    SearchIndexResult_1: SearchIndexResult | None = Field(
+        None, alias='SearchIndexResult'
+    )
+    SearchIndexScope_1: SearchIndexScope | None = Field(None, alias='SearchIndexScope')
+    SearchKind_1: SearchKind | None = Field(None, alias='SearchKind')
+    SearchModuleRef_1: SearchModuleRef | None = Field(None, alias='SearchModuleRef')
+    SearchResponse_1: SearchResponse | None = Field(None, alias='SearchResponse')
+    SearchSnippetPart_1: SearchSnippetPart | None = Field(
+        None, alias='SearchSnippetPart'
+    )
     Semester_1: Semester | None = Field(None, alias='Semester')
     SemesterCreate_1: SemesterCreate | None = Field(None, alias='SemesterCreate')
     SemesterList_1: SemesterList | None = Field(None, alias='SemesterList')
@@ -6432,11 +6766,13 @@ class SchemaBundle(BaseModel):
         pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
         title='Uuid',
     )
+    WorkerHealth_1: WorkerHealth | None = Field(None, alias='WorkerHealth')
 
 
 # Union-Typen (für Validierung: pydantic.TypeAdapter(<Typ>))
 type PageElement = TextElement | ImageElement | ShapeElement | TapeElement | StampElement
 type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload
+type SearchHit = SearchHitSlide | SearchHitTranscript
 type SyncClientMessage = SyncHello | SyncSubscribe | SyncUnsubscribe | SyncTimePing | SyncTimeOffset | SyncPing | SyncPresence | SyncOp
 type SyncEvent = SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent
 type SyncOp = NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | NotebookUpdateOp | NotebookDeleteOp | NotebookRestoreOp | PageRestoreOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp

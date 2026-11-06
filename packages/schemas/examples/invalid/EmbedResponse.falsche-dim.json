@@ -1,0 +1,5 @@
+{
+  "model": "fake-embed-1",
+  "dim": 1024,
+  "vectors": [[0.1, 0.2]]
+}

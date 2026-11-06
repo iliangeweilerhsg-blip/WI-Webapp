@@ -3,7 +3,7 @@
 Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammenspielen. So können die Teile parallel gebaut werden (`AGENTS.md`, Regel 4).
 Änderungen nur durch den Lead. Datenformate selbst stehen in `packages/schemas`.
 
-§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1, §17 ist der Moodle-Abgleich. Ab §18 folgt Phase 2.
+§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1, §17 ist der Moodle-Abgleich. Ab §18 folgt Phase 2: §18 Transkription und Rückblick, §19 Suche.
 
 ## 1. Umgebungsvariablen
 
@@ -21,6 +21,9 @@ Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammen
 | `TZ` | Zeitzone des Systems | Core (Ortszeit für ICS-Termine ohne Zeitzone, Backup-Uhrzeit). Tests laufen mit `TZ=Europe/Zurich` |
 | `SG_TRANSCRIBER` | `mlx-whisper`. In CI und auf Linux `fake` | Worker (§18.6) |
 | `SG_WHISPER_MODEL` | `mlx-community/whisper-large-v3-turbo` | Worker (§18.6) |
+| `SG_EMBEDDER` | `bge-m3`. In CI und auf Linux `fake` | Worker (§19.2) |
+| `SG_EMBED_MODEL` | `BAAI/bge-m3` | Worker (§19.2) |
+| `SG_WORKER_PORT` | `4711` | Worker (bindet `127.0.0.1`) und Core (ruft fest `http://127.0.0.1:<port>` auf, nie `localhost`, §19.4) |
 
 Geheimnisse wie API-Schlüssel stehen in `$SG_DATA_DIR/config/.env` mit Rechten 600 (02 §3). Die Prozesse lesen diese Datei beim Start.
 **Ausnahme Moodle:** Der Moodle-Token liegt nur im macOS-Schlüsselbund (Dienst `studiengehirn-moodle`), nie in `.env`. Nur der Core liest ihn (08 §9.1). Einzige Ausnahme: `pnpm sg moodle login` liest den Eintrag direkt nach dem Speichern einmal zurück, um zu prüfen, dass der Core genau diesen Token findet. `pnpm sg moodle status` und `logout` lesen den Token nie.
@@ -1336,3 +1339,161 @@ Die Web-App lädt `GET /sessions/{id}/transcript` neu, wenn in `session.updated`
   - **Ohne Folienzuordnung:** `slide_source = null` → Transkript als eine Liste.
 
 **Nur der Owner kann testen:** `mlx-whisper` auf dem Mac (Laufzeit ≤ 15 min für 90 min, Speicher, Qualität des Vokabular-Hinweises, S5) und den Rückblick mit einer echten Vorlesung.
+
+## 19. Suche: Index, Embeddings, ⌘K (F-SUC-01, 05 §P1/§P18, W-04)
+
+Zweiter Schnitt von Phase 2. Er macht Folien und Gesagtes durchsuchbar, im Wortlaut und nach Bedeutung. Grundlage für Konzepte (§20, folgt), „Frag deine Vorlesung“ (F-SUC-02) und `align.content`.
+Datenformate in `packages/schemas/src/search.schema.json`, Tabelle in der Migration `0009_search`.
+**Nicht Teil dieses Schnitts:** Konzepte, Karten, Notiz-OCR, Fotos, Aufgaben (es gibt noch kein `sheet.split`), `rag.answer`, Filter `semester:`. Die Gruppen dafür kommen mit den jeweiligen Tickets dazu (neue Werte in `SearchKind`).
+
+### 19.1 Tabelle `search_chunk` (ersetzt 03 §7 `search_chunk`)
+
+Ein Eintrag je durchsuchbarem Stück. Schreiber ist nur der Worker (`search.index`), der Core liest.
+
+| Spalte              | Inhalt                                                                                                                                                                                                                                                                                                                                         |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pflichtfelder 03 §1 | dazu der `updated_at`-Trigger                                                                                                                                                                                                                                                                                                                  |
+| `source_kind`       | `slide` \| `transcript` (`SearchKind`)                                                                                                                                                                                                                                                                                                         |
+| `source_id`         | `slide`: `slide.id`. `transcript`: `session.id` (Segment-IDs sind nicht stabil, §18.1)                                                                                                                                                                                                                                                         |
+| `part`              | `slide`: immer 0. `transcript`: Nummer des Fensters ab 0 (§19.3)                                                                                                                                                                                                                                                                               |
+| `deck_id`           | FK `slide_deck`, `ON DELETE CASCADE`. Gesetzt genau bei `slide`                                                                                                                                                                                                                                                                                |
+| `session_id`        | FK `session`, `ON DELETE CASCADE`. Gesetzt genau bei `transcript`                                                                                                                                                                                                                                                                              |
+| `slide_index`       | bei `slide` der Index der Folie, sonst `NULL`                                                                                                                                                                                                                                                                                                  |
+| `t_ms`, `t_end_ms`  | bei `transcript` Beginn und Ende des Fensters (Sitzungszeit, `t_end_ms ≥ t_ms`), sonst `NULL`                                                                                                                                                                                                                                                  |
+| `title`             | bei `slide` `slide.title`, sonst `NULL`                                                                                                                                                                                                                                                                                                        |
+| `text`              | durchsuchbarer Text, 1–8 000 Zeichen, NFC, ohne Steuerzeichen (§19.3, CHECK)                                                                                                                                                                                                                                                                   |
+| `ts_config`         | `german` \| `english` \| `simple`                                                                                                                                                                                                                                                                                                              |
+| `tsv`               | `to_tsvector(ts_config::regconfig, text) \|\| to_tsvector('simple', text)`, vom Worker beim Schreiben berechnet (keine generierte Spalte). Der `simple`-Teil sorgt dafür, dass ein halb getipptes Wort mit `:*` trifft (`vorlesu` findet „Vorlesungen“, der Wortstamm allein tut das nicht) und Fachwörter der anderen Sprache gefunden werden |
+| `embedding`         | `vector(1024)` oder `NULL` (Embedder nicht verfügbar)                                                                                                                                                                                                                                                                                          |
+| `embedding_model`   | Modell des Vektors (`BAAI/bge-m3` \| `fake-embed-1`), `NULL` genau dann, wenn `embedding` `NULL` ist                                                                                                                                                                                                                                           |
+| `content_hash`      | SHA-256 (hex) über UTF-8 von `text`                                                                                                                                                                                                                                                                                                            |
+| `index_version`     | `SEARCH_INDEX_VERSION` beim Schreiben (§19.3)                                                                                                                                                                                                                                                                                                  |
+| `job_id`            | schreibender Job, ohne FK                                                                                                                                                                                                                                                                                                                      |
+
+- `UNIQUE (source_kind, source_id, part)`. CHECKs: Werte von `source_kind` und `ts_config`, genau eine der Spalten `deck_id`/`session_id` passend zu `source_kind`, `slide_index ≥ 1` bei `slide`, Zeiten nur und vollständig bei `transcript`, Länge von `text`, keine Steuerzeichen in `text` (`text !~ '[[:cntrl:]]'`), Form von `content_hash`, `(embedding IS NULL) = (embedding_model IS NULL)`.
+- Indizes: GIN auf `tsv`, HNSW auf `embedding` (`vector_cosine_ops`), btree auf `deck_id` und auf `session_id`.
+- **Papierkorb (§13):** `slide_deck → search_chunk (deck_id)` und `session → search_chunk (session_id)` kommen in `CHILDREN` (`trash.ts`, dazu `search_chunk` im Typ `Node` und `search_chunk: []`). Weiches Löschen setzt denselben `deleted_at`, die Wiederherstellung holt die Einträge zurück. Endgültiges Löschen nimmt sie über die FKs mit.
+- **Ersetzen ist hart** (wie §18.1): `search.index` löscht und überschreibt nur seine eigenen Einträge, ohne Papierkorb.
+- `slide.embedding` (03 §4) schreibt `search.index` mit, derselbe Vektor wie der Eintrag der Folie (05 §P1: `embed.slides` geht in `search.index` auf). `transcript_segment.embedding` bleibt `NULL` (kommt mit `align.content`).
+- **Bekannte Grenze:** Ändert sich später `module.lang` oder kommt nachträglich ein `vision_summary`, entsteht kein neuer `search.index`. Das holt erst ein neuer `pdf.ingest`, ein neues Transkript oder eine höhere `SEARCH_INDEX_VERSION` nach.
+
+### 19.2 Embeddings im Worker (02 §7)
+
+| Variable         | Standard                             | Bedeutung                                                |
+| ---------------- | ------------------------------------ | -------------------------------------------------------- |
+| `SG_EMBEDDER`    | `bge-m3`. In CI und auf Linux `fake` | Anbieter                                                 |
+| `SG_EMBED_MODEL` | `BAAI/bge-m3`                        | Hugging-Face-Modell für `bge-m3`                         |
+| `SG_WORKER_PORT` | `4711`                               | Port des Loopback-Endpunkts (§19.4), liest auch der Core |
+
+- **`bge-m3`:** `sentence-transformers` mit `SG_EMBED_MODEL`, nur dichte Vektoren (1024), `normalize_embeddings=True`, `max_seq_length = 512`, Gerät `mps`, wenn verfügbar, sonst `cpu`. Keine Präfixe vor Anfragen (bge-m3 braucht keine). Abhängigkeit nur für `sys_platform == 'darwin' and platform_machine == 'arm64'`, wie `mlx-whisper` (Begründung im PR). Beim ersten Start lädt das Modell (≈ 2,3 GB) von Hugging Face. Texte verlassen den Mac nie.
+- **Laden im Hintergrund:** Der Worker startet sofort. Ein Thread lädt das Modell. Bis dahin ist der Embedder „nicht bereit“. Scheitert das Laden (Import, Download), bleibt er dauerhaft „nicht verfügbar“ mit Grund. Der Worker protokolliert das einmal und läuft weiter.
+- **Fake** (`SG_EMBEDDER=fake`): deterministisch, sofort bereit, `model = "fake-embed-1"`, `dim = 1024`. Wörter = Treffer von `[^\W_]+` (Python-`re`, Unicode, gleichbedeutend mit `[\p{L}\p{N}]+`) in `unicodedata.normalize('NFC', text).casefold()`, nur mit ≥ 2 Zeichen. Je Wort `h = sha256(utf8(wort))`, Position `int.from_bytes(h[0:4], 'big') % 1024`, Vorzeichen `+1`, wenn `h[4]` gerade ist, sonst `−1`. Vektor = Summe, danach L2-normiert. Ohne Wörter: Nullvektor, der nie gespeichert und nie gesucht wird. Gleiche Wörter ergeben so ähnliche Vektoren, die Tests können sich darauf verlassen.
+- **Schnittstelle** (`ai/interfaces.py`, erweitert): `Embedder` bekommt `provider: str`, `model: str`, `dim: int`, `ready() -> bool`, `error() -> str | None`, `wait_ready(timeout_s: float) -> bool` und `embed(texts: list[str]) -> list[list[float]]`. `embed` ist thread-sicher (Lock), denn Job-Schleife und Loopback-Endpunkt teilen sich ein Modell. **Anfragen des Endpunkts haben Vorrang:** Ein Zähler wartender Endpunkt-Anfragen (mit `threading.Condition`) lässt die Job-Schleife vor jedem Stapel warten, bis keine Anfrage ansteht. Eine Suchanfrage wartet so höchstens auf den gerade laufenden Stapel.
+- Unbekannter Wert in `SG_EMBEDDER`: wie ein gescheitertes Laden („nicht verfügbar“).
+
+### 19.3 Job `search.index` (05 §P18)
+
+| Payload                                                   | `priority` | `job.session_id`                                                                                                                              | Ergebnis            |
+| --------------------------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- |
+| `SearchIndexPayload` `{ scope: "deck" \| "session", id }` | 5          | **immer `NULL`**, auch bei `scope = session`. So erscheint der Job nicht in `session.processing` und hält `verarbeitet` nicht auf (§3, §18.2) | `SearchIndexResult` |
+
+**Konstanten im Worker:** `SEARCH_INDEX_VERSION = 1` (steigt, wenn sich Stückelung, Textbildung oder `ts_config` ändern. Der Core kennt denselben Wert, §19.5). `MAX_TEXT = 8000`, `WINDOW_MS = 60000`, `EMBED_BATCH = 16`.
+
+**Stücke bilden:**
+
+- **Text säubern**, in dieser Reihenfolge: nach NFC normalisieren, Steuerzeichen (Unicode-Kategorie `Cc`) außer Leerraum entfernen (insbesondere `\x01`/`\x02`, die §19.6 für Hervorhebungen nutzt), dann Leerraum (`\s+`, auch Zeilenumbrüche) zu einem Leerzeichen zusammenfassen, trimmen, auf `MAX_TEXT` Zeichen kürzen. Leere Stücke entfallen. Ergebnis erfüllt den CHECK aus §19.1.
+- **`scope = deck`:** je nicht gelöschte Folie des Foliensatzes ein Stück `slide`: `text` = nicht leere Teile aus `slide.title`, `slide.text`, `slide.vision_summary`, mit `\n` verbunden, dann gesäubert. `ts_config` nach `module.lang` des Moduls des Foliensatzes: `de` → `german`, `en` → `english`, sonst `simple`.
+- **`scope = session`:** nicht gelöschte `transcript_segment` der Session, sortiert nach `(start_ms, recording_id, seq)`, zu Fenstern gruppiert: Ein Abschnitt kommt in das laufende Fenster, solange danach `end_ms − Fensterbeginn ≤ WINDOW_MS` gilt, sonst beginnt ein neues. Ein einzelner längerer Abschnitt bildet ein eigenes Fenster. `text` = Abschnittstexte mit Leerzeichen, `t_ms`/`t_end_ms` = erster Beginn/letztes Ende, `ts_config` nach `lang` des ersten Abschnitts (`de`/`en`, sonst `simple`), `part` = Nummer des Fensters.
+
+**Ablauf** (`services/worker/src/sg_worker/handlers/search_index.py`):
+
+1. Payload prüfen. Ziel ohne Sperre lesen. Fehlt die Zeile ganz → `fertig` mit `missing = true` (nichts zu tun, die FKs haben alles entfernt). Ist es weich gelöscht → `fertig` mit `deleted = true`, nichts schreiben (die Einträge liegen mit im Papierkorb). In beiden Fällen sind alle Zähler 0 und `embedding_model`/`embedding_error` `null`.
+2. Stücke bilden (oben). Vorhandene Einträge des Ziels lesen (nicht gelöscht).
+3. **Wiederverwenden:** Ein Stück mit gleichem `(source_kind, source_id, part)`, gleichem `content_hash`, gleicher `index_version` und einem `embedding_model` gleich dem aktuellen Modell behält seinen Vektor. Die übrigen werden in Stapeln zu `EMBED_BATCH` eingebettet, **außerhalb** einer Transaktion (der Heartbeat läuft weiter). Vorher `wait_ready(600)`.
+4. **Ohne Embedder** (nicht verfügbar oder nach 600 s nicht bereit): Die Stücke werden trotzdem geschrieben, mit `embedding = NULL`. Ergebnis `embedding_model = null`, `embedding_error` = Grund. Die Wortsuche funktioniert so immer. §19.5 holt die Vektoren nach, sobald der Embedder bereit ist.
+5. **Eine Transaktion:** prüfen, dass der Job noch diesem Worker gehört (wie §18.2, sonst `LockLostError`). **Ziel sperren**, damit Löschen und Wiederherstellen sauber davor oder danach liegen: Session über `progress.lock_session`, Foliensatz mit `SELECT … FROM slide_deck WHERE id = … FOR SHARE`. Fehlt es oder ist es inzwischen gelöscht → wie Schritt 1 (nichts schreiben). Einträge des Ziels, die es nicht mehr gibt, hart löschen. Die übrigen per `INSERT … ON CONFLICT (source_kind, source_id, part) DO UPDATE` schreiben, `tsv = to_tsvector(ts_config::regconfig, text) || to_tsvector('simple', text)` (§19.1), `index_version`, `job_id`, `deleted_at = NULL` bleibt unberührt (gelöschte Ziele erreichen diesen Schritt nicht). Bei `deck`: `slide.embedding` jeder Folie auf den Vektor ihres Stücks setzen, Folien ohne Stück oder ohne Vektor auf `NULL`, jeweils nur `WHERE embedding IS DISTINCT FROM …` (sonst bewegt jede Indizierung `updated_at` aller Folien). `ctx.finish(SearchIndexResult)`.
+
+`SearchIndexResult`: `scope`, `id`, `chunk_count`, `embedded_count` (neu eingebettet), `reused_count`, `removed_count`, `embedding_model` (oder `null`), `embedding_error` (oder `null`), `index_version`, `deleted`, `missing`.
+
+**Fehler:** Payload ungültig → `fehler` sofort. Lock verloren → `LockLostError`. Alles andere → Retry nach §3. Ein fehlender Embedder ist kein Fehler (Schritt 4).
+
+### 19.4 Loopback-Endpunkt des Workers (W-04 Option A)
+
+Der Core braucht für eine Suchanfrage deren Vektor, berechnet mit **demselben** Modell (Entscheidungsvorlage W-04). Der Worker bietet dafür einen kleinen HTTP-Server in einem eigenen Thread an. Die Job-Schleife bleibt bis auf den Vorrang aus §19.2 unverändert.
+
+- **Bindung:** nur `127.0.0.1:SG_WORKER_PORT`, nie eine andere Adresse. Ist der Port belegt, protokolliert der Worker das und läuft ohne Endpunkt weiter (die Suche fällt auf Wortsuche zurück).
+- **Reihenfolge beim Start:** erst den Port binden, **danach** das Token erzeugen und schreiben. Scheitert das Binden, wird die Token-Datei nicht angefasst (sonst überschreibt ein zweiter Worker das Token des laufenden, und der Core bekommt dauerhaft `401`).
+- **Token:** 32 Zufallsbytes (`secrets.token_hex(32)`) nach `$SG_DATA_DIR/run/worker.token`. Ordner `run/` anlegen bzw. auf 700 setzen, auch wenn er schon existiert. Ist `run/` oder die Datei ein Symlink, abbrechen (Endpunkt aus, protokollieren). Schreiben über `worker.token.part`: alte `.part` entfernen, neu mit `os.open(…, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, 0o600)`, schreiben, `fsync`, dann `os.replace` auf `worker.token`. Jede Anfrage braucht `Authorization: Bearer <token>`, Vergleich mit `hmac.compare_digest`. Sonst `401`. Der Core liest die Datei bei Bedarf und nach einer `401` erneut (der Worker könnte neu gestartet sein). Das Token steht nie in Logs, `.env`, der DB oder Antworten.
+- **`GET /health`** → `WorkerHealth` `{ embedder: { provider, model, dim, state: "bereit" | "laedt" | "nicht_verfuegbar", error } }`.
+- **`POST /embed`** mit `EmbedRequest` `{ texts: string[] }` (1–16 Texte, je 1–2 000 Zeichen, sonst `400`) → `EmbedResponse` `{ model, dim, vectors }`. Nicht bereit → `503` mit `{ "code": "embedder_not_ready" }`, nicht verfügbar → `503` mit `{ "code": "embedder_unavailable" }`.
+- **Grenzen:** `Content-Length` ist Pflicht (fehlt sie oder kommt `Transfer-Encoding: chunked` → `411`), Body höchstens 256 KB, geprüft **vor** dem Lesen (`413` hat Vorrang vor der Schema-Prüfung). Zeitlimit je Verbindung 5 s, höchstens 4 gleichzeitige Anfragen (weitere → `503` mit `{ "code": "busy" }`). `Host` muss `127.0.0.1:<port>` sein, sonst `400` (Schutz gegen DNS-Rebinding).
+- Andere Pfade und Methoden → `404`/`405`. Nur `Content-Type: application/json`, sonst `415`. Keine CORS-Header (Browser haben dort nichts zu suchen).
+- **Logs:** `log_message` überschreiben. Protokolliert werden höchstens Methode, Pfad, Status und Dauer, nie Header, Token oder Anfragetexte.
+- Stufe A im Review (Token, Bindung, Dateirechte).
+
+### 19.5 Core: Jobs anlegen und nachholen
+
+- **Foliensatz:** Wo der Core `pdf.ingest` für einen Foliensatz anlegt (`services/material.ts`), legt er in derselben Transaktion `search.index { scope: "deck", id }` mit `depends_on = [pdf.ingest]` an. Wartet schon ein `search.index` für diesen Foliensatz, wird er mit `FOR UPDATE` gelesen und wiederverwendet: Zuerst fallen alte Abhängigkeiten weg, die in `fehler` oder `abgebrochen` stehen, gelöscht sind oder nicht mehr existieren (wie §18.2), dann kommt der neue `pdf.ingest` dazu. Übungsblätter bekommen keinen (noch kein Text). `priority = 5`.
+- **Session:** `ensurePipelineJobs` (§18.2) legt nach dem Schritt `transcribe` zusätzlich `search.index { scope: "session", id }` an (bzw. verwendet einen wartenden wieder), mit `depends_on` = der `transcribe`-Job, den der Aufruf angelegt oder wiederverwendet hat. Kein Eintrag in `processing` (§19.3). Gleiche Bereinigung alter Abhängigkeiten wie bei `transcribe`. `priority = 5`. Bei `fromStep = align.log` entsteht kein `search.index` (das Transkript ändert sich nicht).
+- **Nachholen** (`services/core/src/services/search-backfill.ts`): beim Start des Core und danach alle 10 min. Ziele sind nicht gelöschte Foliensätze mit `ingest_state = 'verarbeitet'` und nicht gelöschte Sessions mit mindestens einem nicht gelöschten `transcript` (Modul jeweils nicht gelöscht). **Maßgeblich ist der neueste** nicht gelöschte `search.index` des Ziels (`payload->>'scope'`, `payload->>'id'`, sortiert nach `created_at`, `id` absteigend). Ein Ziel bekommt einen neuen Job, wenn
+  - es keinen gibt, oder
+  - der neueste `fertig` ist und `result->>'deleted'` oder `result->>'missing'` `true` ist, `result->>'index_version'` ≠ `SEARCH_INDEX_VERSION` ist, oder der Embedder laut `GET /health` `bereit` ist und `result->>'embedding_model'` (auch `null`) ≠ dessen `model` ist, oder
+  - der neueste in `fehler`/`abgebrochen` steht und sein `updated_at` (Zeitpunkt des Scheiterns) älter als 24 h ist (jüngere Fehlschläge werden übersprungen, sonst entstünde alle 10 min ein neuer Job für ein dauerhaft scheiterndes Ziel).
+
+  Steht der neueste in `wartet` oder `laeuft`, passiert nichts. Ist der Worker nicht erreichbar oder sein Embedder nicht `bereit`, entfällt die Modell-Bedingung. Höchstens 50 neue Jobs je Lauf, ältestes Ziel zuerst. **Nachgeholte Jobs haben `priority = -5`**, damit ein großer erster Lauf die Kette nach einer Vorlesung (`audio.finalize` mit 0) nicht aufhält. `SEARCH_INDEX_VERSION = 1` steht als Konstante im Core und im Worker, kein Test prüft die Gleichheit über die Sprachgrenze. Wer den Wert ändert, ändert ihn an beiden Stellen und hier.
+
+- `JOB_PAYLOAD_SCHEMAS` bekommt `search.index`.
+
+### 19.6 `GET /search`
+
+| Query       | Bedeutung                                                             |
+| ----------- | --------------------------------------------------------------------- |
+| `q`         | Pflicht, 1–200 Zeichen nach `trim`. Enthält Wörter und Filter-Präfixe |
+| `module_id` | optional, nur dieses Modul (zusätzlich zu `fach:`)                    |
+| `limit`     | optional, 1–50, Standard 20                                           |
+
+Antwort 200 `SearchResponse`, Fehler `400 validation_failed`. Erlaubt für lokal und Netz (wie die übrigen Lese-Routen).
+
+0. **Normalisieren:** `q` nach NFC (sonst zerfallen zerlegte Umlaute in Teilwörter).
+1. **Präfixe** (F-SUC-01), getrennt durch Leerraum, Groß-/Kleinschreibung egal (auch in `x`): `fach:<x>` → Modul mit `short_name` gleich `x`, sonst Module, deren `name` mit `x` beginnt (nicht gelöscht). Leeres `fach:` gilt als nicht aufgelöst. `typ:folie` → nur `slide`, `typ:gesagtes` → nur `transcript`. Mehrere `typ:` vereinigen sich. Ein Präfix, das nichts trifft (unbekanntes Fach, unbekannter Typ, `semester:` in diesem Schnitt), steht in `filters.unresolved` und macht die Trefferliste leer. Ist `module_id` unbekannt oder gelöscht, steht `module_id:<id>` in `filters.unresolved`. Ist die Schnittmenge aus `module_id` und `fach:` leer, steht der `fach:`-Filter in `unresolved` (nie `module_ids: []`, das hieße „alle“). Der Rest von `q` ist der Suchtext.
+2. **Wörter:** Treffer von `[\p{L}\p{N}]+` im Suchtext, höchstens 8. Keine Wörter → leere Treffer, `mode = "text"`.
+3. **Wortsuche:** Je Konfiguration `c` aus `german`, `english`, `simple` die Anfrage `to_tsquery(c, 'w1 & w2 & … & wn:*')`. Den Ausdruck `tq` direkt in die Abfrage schreiben, nicht in eine CTE (sonst schätzt der Planer falsch und liest die ganze Tabelle). `:*` (Präfix) nur am letzten Wort und nur, wenn `q` nicht auf Leerraum endet. Weil die Wörter nur aus Buchstaben und Ziffern bestehen, kann die Syntax von `to_tsquery` nicht verletzt werden. Der String geht trotzdem nur als Parameter in die Abfrage. Die drei werden mit `||` verbunden (`tq`). Kandidaten: die 50 besten nach `ts_rank_cd(tsv, tq)`.
+4. **Bedeutungssuche:** nur, wenn mindestens ein Wort ≥ 2 Zeichen hat (sonst wäre der Vektor des Fakes der Nullvektor, und `<=>` liefert `NaN`). Entfällt sie deshalb, gilt `mode = "text"`, `degraded = null`. Vektor des Suchtexts (die Wörter, mit Leerzeichen verbunden) über `POST /embed` (§19.4), Zeitlimit 800 ms. Kandidaten: die 50 nächsten mit `embedding_model` = Modell der Antwort und Cosinus-Ähnlichkeit ≥ `MIN_VECTOR_SIM = 0.45`.
+   - **Ohne Filter** (kein `module_id`, kein `fach:`, kein `typ:`): HNSW mit `SET LOCAL hnsw.ef_search = 100`.
+   - **Mit Filter:** exakte Suche ohne HNSW (Einträge der Foliensätze/Sessions der Module über die btree-Indizes, dann sortieren). HNSW filtert erst nach dem Suchen und liefert dann zu wenige Treffer (gemessen: 8 statt 50). `hnsw.iterative_scan` gibt es erst ab pgvector 0.8, lokal läuft teils 0.6.
+   - **Scheitert der Aufruf**, entfällt dieser Teil (`mode = "text"`): `503` mit `embedder_not_ready` → `degraded = "embedder_not_ready"`. Alles andere (nicht erreichbar, Zeitlimit, `401`, Token-Datei fehlt, `503` mit anderem Code) → `"embedder_unavailable"`.
+5. **Mischen:** Reciprocal Rank Fusion, `score = Σ 1 / (60 + rang)` über beide Listen (Rang ab 1), bei Gleichstand nach `chunk_id` aufsteigend. Die besten `limit` Treffer.
+6. **Filter in beiden Teilen:** nur nicht gelöschte Einträge, deren Foliensatz bzw. Session und deren Modul nicht gelöscht sind. Das Modul kommt immer über den Join `slide_deck.module_id` bzw. `session.module_id`, nie aus einer Kopie.
+7. **Ausschnitt:** `ts_headline(ts_config::regconfig, text, tq, <optionen>)` mit `<optionen>` = `StartSel=<U+0001>, StopSel=<U+0002>, MaxWords=30, MinWords=12, ShortWord=2, MaxFragments=1`. Die Steuerzeichen müssen echte Zeichen sein: Optionen als Parameter übergeben (oder `E'…\x01…'`), ein Literal `'StartSel=\x01'` ohne `E` liefert die vier Zeichen `\x01`. Der Core zerlegt das Ergebnis in `SearchSnippetPart[]` `{ text, hit }` (leere Teile entfallen). Liegt der Ausschnitt nicht am Anfang von `text`, beginnt er mit `… `, liegt er nicht am Ende, endet er mit ` …` (als Teil ohne `hit`). Reine Vektortreffer haben keine Worttreffer: Dann liefert `ts_headline` den Textanfang, alle Teile ohne `hit`. Halb getippte Wörter (Präfix) hebt `ts_headline` nicht hervor, das ist hingenommen. Die Web-App rendert die Teile als Text, nie als HTML.
+
+`SearchHit`: `kind`, `chunk_id`, `score`, `module` `{ id, name, short_name }`, `snippet`, und je nach Art:
+
+- `slide`: `deck_id`, `deck_title`, `slide_index`, `slide_title`.
+- `transcript`: `session_id`, `session_number` (VL-Nummer), `session_title`, `session_started_at`, `t_ms`, `t_end_ms`. Die Web-App zeigt „VL 7 · Titel“ bzw. das Datum, wenn beides fehlt.
+
+`SearchResponse`: `query` (Suchtext ohne Präfixe), `mode` (`hybrid` \| `text`), `degraded` (`null` \| `embedder_not_ready` \| `embedder_unavailable`), `filters` `{ module_ids, kinds, unresolved }`, `hits`, `took_ms`.
+
+**Ziel (F-SUC-01):** erste Ergebnisse in < 300 ms bei 5 000 Folien und 200 h Transkript (≈ 12 000 Fenster). Ein Test mit synthetischen Daten in dieser Größe misst die Abfrage ohne Embedding-Aufruf.
+
+### 19.7 Web: ⌘K (07 §3.12)
+
+- **Öffnen:** `⌘K` bzw. `Strg+K` überall (vorhandenes `matchShortcut` → `'search'` in `apps/web/src/lib/shortcuts.ts`), dazu der Knopf „⌘K Suche“ in der Navigation (07 §2). `Esc` schließt. Overlay mittig, 640 px breit, auf schmalen Bildschirmen volle Breite mit 16 px Rand. Im Live-Dashboard liegt es über der Notizen-Spalte, die Folie bleibt sichtbar (F-DSH-07).
+- **Eingabe:** Anfrage 120 ms nach dem letzten Tastendruck, die vorige wird abgebrochen (`AbortController`). Ab 1 Zeichen. Die Web-App fragt mit `limit=50`, damit viele Folientreffer das Gesagte nicht verdrängen. Die letzte Antwort bleibt sichtbar, bis die neue da ist (kein Flackern).
+- **Gruppen** in fester Reihenfolge, je höchstens 8 Treffer in Reihenfolge des `score`: „Folien“ (Foliensatz · Folie n · Titel, Ausschnitt), „Gesagtes“ (Session · `mm:ss`, Ausschnitt, ▶). Leere Gruppen entfallen. Treffer-Wörter als `<mark>`.
+- **Tastatur:** `↑`/`↓` wählen über alle Gruppen, `Enter` öffnet, `⌘Enter` bzw. `Strg+Enter` öffnet in einem neuen Tab. **Läuft gerade eine Session** (Route des Live-Dashboards `/session`), öffnet auch `Enter` in einem neuen Tab, damit die Aufnahme ungestört bleibt.
+- **Ziele:** Folie → `documentHref('folien', deck_id, slide_index)`. Gesagtes → `/rueckblick?id=<session_id>&t=<t_ms>`. Der Rückblick springt bei `t` an diese Stelle und zeigt die Folie dazu, ohne automatisch abzuspielen (Browser verbieten Autoplay). ▶ ist derselbe Sprung.
+- **Zustände:** leer (Hinweis auf die Präfixe `fach:` und `typ:folie`/`typ:gesagtes`), keine Treffer („Nichts gefunden“), `filters.unresolved` („Unbekannter Filter: …“), `mode = text` mit `degraded` (ruhige Zeile „Nur Wortsuche · Bedeutungssuche startet noch“ bzw. „… nicht verfügbar“), Fehler der Anfrage (Zeile „Suche gerade nicht erreichbar“). Keine Spinner-Hektik: Ein dezenter Hinweis erscheint erst nach 300 ms ohne Antwort.
+- Hell- und Dunkelmodus, Fokus bleibt im Overlay (Fokusfalle), beim Schließen zurück auf das vorher fokussierte Element.
+
+### 19.8 Tickets und Besitz
+
+| Ticket             | Inhalt                                                                                         | Besitzt (Dateien)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | Abhängig von                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **T2-10** (Lead)   | Diese Verträge, `search.schema.json`, Beispiele, Migration `0009_search`, Drizzle-Schema       | `packages/schemas/src/search.schema.json`, `packages/schemas/examples/**/Search*`, `packages/schemas/examples/**/Embed*`, `packages/schemas/examples/**/WorkerHealth*`, generierte Dateien, `services/core/src/db/schema/search.ts`, eine Zeile in `services/core/src/db/schema/index.ts`, `services/core/drizzle/0009_*`, dieser Abschnitt                                                                                                                                                                             | –                                                                                                                                   |
+| **T2-11** (Worker) | Embedder (`bge-m3`, Fake), Loopback-Endpunkt mit Token, `search.index`                         | `services/worker/src/sg_worker/ai/{interfaces,embedder}.py`, `services/worker/src/sg_worker/server.py`, `services/worker/src/sg_worker/handlers/search_index.py`, je eine Zeile in `handlers/__init__.py`, Start des Embedders und des Servers in `__main__.py` bzw. `loop.py` (nur das), `services/worker/pyproject.toml`, `services/worker/uv.lock`, Tests unter `services/worker/tests/` (Migration `0009` so laden wie `0006` in `conftest.py`)                                                                     | T2-10                                                                                                                               |
+| **T2-12** (Core)   | `GET /search`, Worker-Client, Jobs anlegen (Foliensatz, Session), Nachholen, Papierkorb-Kanten | `services/core/src/{routes,services}/search.ts`, `services/core/src/services/search-backfill.ts`, `services/core/src/lib/worker-client.ts`, in `services/material.ts` nur das Anlegen von `search.index`, in `services/pipeline.ts` nur der Schritt `search.index`, in `services/trash.ts` nur die zwei Kanten samt `search_chunk` im Typ `Node` und `search_chunk: []`, in `services/jobs.ts` nur `JOB_PAYLOAD_SCHEMAS`, Start des Nachholens in `main.ts`/`app.ts` (je eine Zeile), Tests unter `services/core/test/` | T2-10. Parallel zu T2-11: Die Tests schreiben `search_chunk`-Zeilen selbst und ersetzen den Worker-Endpunkt durch einen Test-Server |
+| **T2-13** (Web)    | ⌘K nach §19.7, Sprung im Rückblick (`t`)                                                       | `apps/web/src/components/search/**`, `apps/web/src/lib/search.ts`, im Layout bzw. in der Navigation nur das Einbinden (wenige Zeilen), in `apps/web/src/components/rueckblick/**` nur der Parameter `t`, `apps/web/test/fake-core.ts` nur `GET /search`                                                                                                                                                                                                                                                                 | T2-10. Gegen die Beispiele in `packages/schemas/examples/valid` und die Fake-Core-Route bauen                                       |
+
+**Später:** `pnpm sg doctor` prüft `GET /health` des Workers (eigenes Ticket).
+
+**Nur der Owner kann testen:** `bge-m3` auf dem Mac (Ladezeit, Speicher, Antwortzeit von `/embed`, Qualität der Bedeutungssuche mit echten Folien und einer echten Vorlesung).

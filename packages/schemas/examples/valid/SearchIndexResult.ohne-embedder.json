@@ -1,0 +1,13 @@
+{
+  "scope": "session",
+  "id": "019a5c00-0000-7000-8000-000000000002",
+  "chunk_count": 88,
+  "embedded_count": 0,
+  "reused_count": 0,
+  "removed_count": 0,
+  "embedding_model": null,
+  "embedding_error": "Modell konnte nicht geladen werden (kein Netz)",
+  "index_version": 1,
+  "deleted": false,
+  "missing": false
+}

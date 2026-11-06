@@ -1,0 +1,27 @@
+{
+  "query": "x",
+  "mode": "text",
+  "degraded": null,
+  "filters": {
+    "module_ids": [],
+    "kinds": [],
+    "unresolved": []
+  },
+  "hits": [
+    {
+      "kind": "slide",
+      "chunk_id": "019a5c00-0000-7000-8000-000000000020",
+      "score": 0.01,
+      "module": {
+        "id": "019a5c00-0000-7000-8000-000000000010",
+        "name": "Datenbanksysteme",
+        "short_name": "DBS"
+      },
+      "snippet": [],
+      "deck_id": "019a5c00-0000-7000-8000-000000000001",
+      "deck_title": "VL",
+      "slide_title": null
+    }
+  ],
+  "took_ms": 1
+}

@@ -1,0 +1,71 @@
+{
+  "query": "normalform",
+  "mode": "hybrid",
+  "degraded": null,
+  "filters": {
+    "module_ids": [],
+    "kinds": [],
+    "unresolved": []
+  },
+  "hits": [
+    {
+      "kind": "slide",
+      "chunk_id": "019a5c00-0000-7000-8000-000000000020",
+      "score": 0.0325,
+      "module": {
+        "id": "019a5c00-0000-7000-8000-000000000010",
+        "name": "Datenbanksysteme",
+        "short_name": "DBS"
+      },
+      "snippet": [
+        {
+          "text": "Die dritte ",
+          "hit": false
+        },
+        {
+          "text": "Normalform",
+          "hit": true
+        },
+        {
+          "text": " verbietet transitive Abhängigkeiten",
+          "hit": false
+        }
+      ],
+      "deck_id": "019a5c00-0000-7000-8000-000000000001",
+      "deck_title": "VL 7 Normalisierung",
+      "slide_index": 14,
+      "slide_title": "3NF"
+    },
+    {
+      "kind": "transcript",
+      "chunk_id": "019a5c00-0000-7000-8000-000000000021",
+      "score": 0.0161,
+      "module": {
+        "id": "019a5c00-0000-7000-8000-000000000010",
+        "name": "Datenbanksysteme",
+        "short_name": "DBS"
+      },
+      "snippet": [
+        {
+          "text": "… und das ist eben die dritte ",
+          "hit": false
+        },
+        {
+          "text": "Normalform",
+          "hit": true
+        },
+        {
+          "text": ", das kommt auch in der Klausur …",
+          "hit": false
+        }
+      ],
+      "session_id": "019a5c00-0000-7000-8000-000000000002",
+      "session_number": 7,
+      "session_title": null,
+      "session_started_at": "2026-11-03T07:15:00Z",
+      "t_ms": 2512000,
+      "t_end_ms": 2571000
+    }
+  ],
+  "took_ms": 41
+}
