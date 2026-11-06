@@ -56,13 +56,15 @@ _SPACE = re.compile(r"\s+")
 
 
 def clean_text(text: str) -> str:
-    """Säubern nach §19.3, in dieser Reihenfolge: NFC, Steuerzeichen (Cc, etwa `\\x01`/`\\x02`
-    aus §19.6) außer Leerraum und Formatzeichen (Cf, etwa U+00AD, U+200B, U+FEFF) entfernen,
-    Leerraum (`\\s+`, auch Zeilenumbrüche) zu einem Leerzeichen, trimmen, auf `MAX_TEXT` Zeichen
-    kürzen. Erfüllt `text !~ '[[:cntrl:]]'`, auch wenn Postgres mit ICU Cf dazuzählt."""
-    text = _CONTROL.sub("", unicodedata.normalize("NFC", text))
+    """Säubern nach §19.3, in dieser Reihenfolge: Steuerzeichen (Cc, etwa `\\x01`/`\\x02` aus
+    §19.6) außer Leerraum und Formatzeichen (Cf, etwa U+00AD, U+200B, U+FEFF) entfernen, danach NFC
+    (so ist das Ergebnis immer NFC, auch wenn ein entferntes Zeichen Bestandteile trennte), Leerraum
+    (`\\s+`, auch Zeilenumbrüche) zu einem Leerzeichen, trimmen, auf `MAX_TEXT` Zeichen kürzen.
+    Erfüllt `text !~ '[[:cntrl:]]'`, auch wenn Postgres mit ICU Cf dazuzählt."""
+    text = _CONTROL.sub("", text)
     if not text.isascii():  # Cf gibt es nur außerhalb von ASCII
         text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+        text = unicodedata.normalize("NFC", text)
     return _SPACE.sub(" ", text).strip()[:MAX_TEXT]
 
 

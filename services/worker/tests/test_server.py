@@ -679,3 +679,49 @@ def test_wait_idle_returns_on_shutdown() -> None:
         threading.Timer(0.1, em.request_shutdown).start()
         assert em.ENDPOINT_PRIORITY.wait_idle(10) is False
         assert time.monotonic() - t0 < 2
+
+
+def test_timer_start_failure_closes_connection_and_frees_counter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = start(tmp_path, em.FakeEmbedder())
+    try:
+        httpd = s._httpd
+        assert httpd is not None
+        client, server_side = socket.socketpair()
+        with httpd._open_lock:
+            httpd._open += 1  # wie `process_request`, bevor der Thread startet
+
+        def boom(self: threading.Timer) -> None:
+            raise RuntimeError("can't start new thread")
+
+        monkeypatch.setattr(srv.threading.Timer, "start", boom)
+        with pytest.raises(RuntimeError):
+            httpd.process_request_thread(server_side, ("127.0.0.1", 0))
+        assert httpd.open_connections == 0
+        assert server_side.fileno() == -1  # Verbindung geschlossen
+        client.settimeout(2)
+        assert client.recv(10) == b""
+        client.close()
+    finally:
+        s.stop()
+
+
+def test_token_dir_fsync_failure_only_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    real_fsync = os.fsync
+
+    def failing(fd: int) -> None:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(5, "Input/output error")
+        real_fsync(fd)
+
+    monkeypatch.setattr(srv.os, "fsync", failing)
+    token = "b" * 64
+    with caplog.at_level(logging.WARNING, logger=srv.log.name):
+        final = srv.write_token(tmp_path, token)
+    assert final.read_text() == token  # Token liegt an seinem Platz
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert token not in caplog.text and str(tmp_path) not in caplog.text

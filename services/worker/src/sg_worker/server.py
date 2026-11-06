@@ -115,11 +115,19 @@ def write_token(data_dir: Path, token: str) -> Path:
     finally:
         os.close(fd)
     os.replace(part, final)
-    dir_fd = os.open(run, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    # Das Token liegt schon an seinem Platz: scheitert nur das Sichern des Ordners, wird gewarnt
+    # (ohne Pfad und ohne Token), der Start aber nicht abgebrochen.
     try:
-        os.fsync(dir_fd)  # das Umbenennen überlebt einen Absturz
-    finally:
-        os.close(dir_fd)
+        dir_fd = os.open(run, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(dir_fd)  # das Umbenennen überlebt einen Absturz
+        finally:
+            os.close(dir_fd)
+    except OSError as exc:
+        log.warning(
+            "Token-Ordner nicht mit fsync gesichert",
+            extra={"error": exc.strerror or type(exc).__name__},
+        )
     return final
 
 
@@ -170,11 +178,15 @@ class _Server(ThreadingHTTPServer):
     def process_request_thread(self, request: Any, client_address: Any) -> None:
         timer = threading.Timer(CONNECTION_TIMEOUT_S, _abort_connection, args=(request,))
         timer.daemon = True
-        timer.start()
+        handled = False
         try:
-            super().process_request_thread(request, client_address)
+            timer.start()  # scheitert schon der Start, räumt `finally` auf
+            handled = True
+            super().process_request_thread(request, client_address)  # schließt selbst
         finally:
             timer.cancel()
+            if not handled:
+                self.shutdown_request(request)
             self._release_connection()
 
     def handle_error(self, request: Any, client_address: Any) -> None:
