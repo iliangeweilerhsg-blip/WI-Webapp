@@ -1,0 +1,21 @@
+{
+  "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+  "extract_job_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e21",
+  "extract_input_hash": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+  "resolve_version": 1,
+  "session_deleted": false,
+  "unchanged": false,
+  "auto_merged": 2,
+  "proposed_new": 5,
+  "proposed_merge": 1,
+  "proposed_relations": 4,
+  "auto_accepted": 0,
+  "skipped_rejected": 0,
+  "dropped_cycles": 0,
+  "embedded_concepts": 0,
+  "embedding_model": "BAAI/bge-m3",
+  "embedding_error": null,
+  "prompt_version": "concepts.resolve/v1",
+  "model": "claude-sonnet-5-5",
+  "cost_eur": 0.0061
+}

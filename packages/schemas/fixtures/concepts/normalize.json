@@ -1,0 +1,59 @@
+{
+  "README": "VERTRAEGE §20.3: norm = NFC, Steuer- (Cc, außer Leerraum) und Formatzeichen (Cf) entfernen, Leerraum zusammenfassen, trimmen. key = norm in Kleinbuchstaben (str.lower() bzw. toLowerCase(), kein casefold). base = key ohne einen Klammerzusatz am Ende (Muster \\s*\\([^()]*\\)$, einmal), leer -> key.",
+  "cases": [
+    {
+      "input": "  Dritte   Normalform (3NF) ",
+      "norm": "Dritte Normalform (3NF)",
+      "key": "dritte normalform (3nf)",
+      "base": "dritte normalform"
+    },
+    {
+      "input": "Normalisierung (Datenbanken)",
+      "norm": "Normalisierung (Datenbanken)",
+      "key": "normalisierung (datenbanken)",
+      "base": "normalisierung"
+    },
+    {
+      "input": "Abhängigkeit",
+      "norm": "Abhängigkeit",
+      "key": "abhängigkeit",
+      "base": "abhängigkeit"
+    },
+    {
+      "input": "Funktionale​ Abhängigkeit",
+      "norm": "Funktionale Abhängigkeit",
+      "key": "funktionale abhängigkeit",
+      "base": "funktionale abhängigkeit"
+    },
+    {
+      "input": "Straße",
+      "norm": "Straße",
+      "key": "straße",
+      "base": "straße"
+    },
+    {
+      "input": "Third Normal Form (3NF) (Datenbanken)",
+      "norm": "Third Normal Form (3NF) (Datenbanken)",
+      "key": "third normal form (3nf) (datenbanken)",
+      "base": "third normal form (3nf)"
+    },
+    {
+      "input": "(Datenbanken)",
+      "norm": "(Datenbanken)",
+      "key": "(datenbanken)",
+      "base": "(datenbanken)"
+    },
+    {
+      "input": "Zeile\neins\ttab",
+      "norm": "Zeile eins tab",
+      "key": "zeile eins tab",
+      "base": "zeile eins tab"
+    },
+    {
+      "input": "Schlüssel­­kandidat",
+      "norm": "Schlüsselkandidat",
+      "key": "schlüsselkandidat",
+      "base": "schlüsselkandidat"
+    }
+  ]
+}

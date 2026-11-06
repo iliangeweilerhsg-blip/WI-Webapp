@@ -67,6 +67,13 @@ const TABLES = [
   'moodle_course_decided',
   // Suchindex (T2-10, VERTRAEGE §19.1)
   'search_chunk',
+  // Konzepte, Inbox, Zusammenfassung (T2-20, VERTRAEGE §20.1)
+  'concept',
+  'concept_module',
+  'concept_relation',
+  'evidence',
+  'inbox_item',
+  'session_summary',
 ];
 
 /** Phase-1-Tabellen ohne die Pflichtfelder aus 03 §1 (Struktur genau nach VERTRAEGE §6.1) */
@@ -159,6 +166,7 @@ describe('Migrationen', () => {
   it('legt HNSW-Indizes (Cosinus) für Embeddings an', async () => {
     const idx = await sql`SELECT indexname, indexdef FROM pg_indexes WHERE indexdef LIKE '%hnsw%'`;
     expect(idx.map((r) => r.indexname).sort()).toEqual([
+      'concept_embedding_hnsw', // T2-20 (VERTRAEGE §20.1)
       'search_chunk_embedding_hnsw', // T2-10 (VERTRAEGE §19.1)
       'slide_embedding_hnsw',
       'task_embedding_hnsw',
@@ -170,6 +178,7 @@ describe('Migrationen', () => {
     const cols = await sql`SELECT table_name, udt_name FROM information_schema.columns
       WHERE column_name = 'embedding' AND table_schema = 'public' ORDER BY table_name`;
     expect(cols.map((c) => `${c.table_name}:${c.udt_name}`)).toEqual([
+      'concept:vector', // T2-20 (VERTRAEGE §20.1)
       'search_chunk:vector', // T2-10 (VERTRAEGE §19.1)
       'slide:vector',
       'task:vector',
@@ -576,5 +585,327 @@ describe('search_chunk (T2-10, VERTRAEGE §19.1)', () => {
     await sql`DELETE FROM session WHERE id = ${otherSession}`;
     const [cnt] = await sql`SELECT count(*)::int AS n FROM search_chunk WHERE session_id = ${otherSession}`;
     expect(cnt!.n).toBe(0);
+  });
+});
+
+describe('Konzepte, Inbox, Zusammenfassung (T2-20, VERTRAEGE §20.1)', () => {
+  const H = 'b'.repeat(64);
+  let moduleId: string;
+  let sessionId: string;
+
+  beforeAll(async () => {
+    const semesterId = uuidv7();
+    moduleId = uuidv7();
+    sessionId = uuidv7();
+    await sql`INSERT INTO semester (id, user_id, name) VALUES (${semesterId}, ${SINGLE_USER_ID}, 'Konzepte-Test')`;
+    await sql`INSERT INTO module (id, user_id, semester_id, name, color)
+      VALUES (${moduleId}, ${SINGLE_USER_ID}, ${semesterId}, 'Datenbanksysteme', 'mod-02')`;
+    await sql`INSERT INTO session (id, user_id, module_id) VALUES (${sessionId}, ${SINGLE_USER_ID}, ${moduleId})`;
+  });
+
+  async function newSession(): Promise<string> {
+    const id = uuidv7();
+    await sql`INSERT INTO session (id, user_id, module_id) VALUES (${id}, ${SINGLE_USER_ID}, ${moduleId})`;
+    return id;
+  }
+
+  interface ConceptRow {
+    id: string;
+    name: string;
+    status: string;
+    proposal: string | null;
+    merged: string | null;
+    kind: string | null;
+  }
+
+  async function insertConcept(over: Partial<ConceptRow> = {}): Promise<string> {
+    const r: ConceptRow = {
+      id: uuidv7(),
+      name: 'Dritte Normalform (3NF)',
+      status: 'aktiv',
+      proposal: null,
+      merged: null,
+      kind: 'definition',
+      ...over,
+    };
+    await sql`INSERT INTO concept (id, user_id, name, status, proposal_session_id, merged_into, kind)
+      VALUES (${r.id}, ${SINGLE_USER_ID}, ${r.name}, ${r.status}, ${r.proposal}, ${r.merged}, ${r.kind})`;
+    return r.id;
+  }
+
+  interface RelationRow {
+    id: string;
+    kind: string;
+    confirmed: boolean;
+    proposal: string | null;
+  }
+
+  async function insertRelation(from: string, to: string, over: Partial<RelationRow> = {}): Promise<string> {
+    const r: RelationRow = { id: uuidv7(), kind: 'baut_auf', confirmed: true, proposal: null, ...over };
+    await sql`INSERT INTO concept_relation (id, user_id, from_id, to_id, kind, source, confirmed, proposal_session_id)
+      VALUES (${r.id}, ${SINGLE_USER_ID}, ${from}, ${to}, ${r.kind}, 'ki', ${r.confirmed}, ${r.proposal})`;
+    return r.id;
+  }
+
+  interface EvidenceRow {
+    id: string;
+    kind: string;
+    session: string | null;
+    ref: string;
+    t: number | null;
+    tEnd: number | null;
+    deleted: string | null;
+  }
+
+  async function insertEvidence(conceptId: string, over: Partial<EvidenceRow> = {}): Promise<string> {
+    const r: EvidenceRow = {
+      id: uuidv7(),
+      kind: 'transcript',
+      session: sessionId,
+      ref: sessionId,
+      t: 1000,
+      tEnd: 2000,
+      deleted: null,
+      ...over,
+    };
+    await sql`INSERT INTO evidence (id, user_id, concept_id, session_id, kind, ref_id, t_start_ms, t_end_ms, deleted_at)
+      VALUES (${r.id}, ${SINGLE_USER_ID}, ${conceptId}, ${r.session}, ${r.kind}, ${r.ref}, ${r.t}, ${r.tEnd},
+        ${r.deleted})`;
+    return r.id;
+  }
+
+  interface ItemRow {
+    id: string;
+    kind: string;
+    payloadKind: string;
+    status: string;
+    decided: string | null;
+    concept: string | null;
+    target: string | null;
+    relation: string | null;
+    session: string | null;
+  }
+
+  async function insertItem(over: Partial<ItemRow> = {}): Promise<string> {
+    const r: ItemRow = {
+      id: uuidv7(),
+      kind: 'concept_new',
+      payloadKind: over.kind ?? 'concept_new',
+      status: 'offen',
+      decided: null,
+      concept: null,
+      target: null,
+      relation: null,
+      session: sessionId,
+      ...over,
+    };
+    await sql`INSERT INTO inbox_item (id, user_id, kind, session_id, payload, status, decided_at, concept_id,
+        target_concept_id, relation_id)
+      VALUES (${r.id}, ${SINGLE_USER_ID}, ${r.kind}, ${r.session}, ${JSON.stringify({ kind: r.payloadKind })}::jsonb,
+        ${r.status}, ${r.decided}, ${r.concept}, ${r.target}, ${r.relation})`;
+    return r.id;
+  }
+
+  async function count(table: string, column: string, value: string): Promise<number> {
+    const [row] = await sql`SELECT count(*)::int AS n FROM ${sql(table)} WHERE ${sql(column)} = ${value}`;
+    return row!.n as number;
+  }
+
+  it('prüft Status, Vorschlags-Session, Zusammenführung, Art, Name und Vektor am Konzept', async () => {
+    await expect(insertConcept({ status: 'vorschlag' })).rejects.toThrow(/concept_proposal_chk/);
+    await expect(insertConcept({ status: 'aktiv', proposal: sessionId })).rejects.toThrow(
+      /concept_proposal_chk/,
+    );
+    await expect(insertConcept({ status: 'zusammengefuehrt' })).rejects.toThrow(/concept_merged_chk/);
+    const target = await insertConcept();
+    await expect(insertConcept({ status: 'aktiv', merged: target })).rejects.toThrow(/concept_merged_chk/);
+    const self = uuidv7();
+    await expect(insertConcept({ id: self, status: 'zusammengefuehrt', merged: self })).rejects.toThrow(
+      /concept_merged_chk/,
+    );
+    await expect(insertConcept({ status: 'geprueft' })).rejects.toThrow(/concept_status_chk/);
+    await expect(insertConcept({ kind: 'formel' })).rejects.toThrow(/concept_kind_chk/);
+    await expect(insertConcept({ name: '' })).rejects.toThrow(/concept_name_chk/);
+    await expect(insertConcept({ name: 'mit\nUmbruch' })).rejects.toThrow(/concept_name_chk/);
+    await insertConcept({ status: 'vorschlag', proposal: sessionId, kind: null });
+    await insertConcept({ status: 'zusammengefuehrt', merged: target, proposal: sessionId });
+    const vec = `[${Array.from({ length: 1024 }, () => 0.01).join(',')}]`;
+    await expect(
+      sql`INSERT INTO concept (id, user_id, name, status, embedding)
+        VALUES (${uuidv7()}, ${SINGLE_USER_ID}, 'x', 'aktiv', ${vec}::vector)`,
+    ).rejects.toThrow(/concept_embedding_model_chk/);
+  });
+
+  it('prüft Beziehungen: keine Schleife, symmetrische Arten sortiert, bestätigt ohne Session, eindeutig', async () => {
+    const [a, b] = [await insertConcept({ name: 'A' }), await insertConcept({ name: 'B' })].sort() as [
+      string,
+      string,
+    ];
+    await expect(insertRelation(a, a)).rejects.toThrow(/concept_relation_self_chk/);
+    await expect(insertRelation(b, a, { kind: 'verwandt' })).rejects.toThrow(
+      /concept_relation_symmetric_chk/,
+    );
+    await expect(insertRelation(a, b, { kind: 'teil_von' })).rejects.toThrow(/concept_relation_kind_chk/);
+    await expect(insertRelation(a, b, { confirmed: false })).rejects.toThrow(
+      /concept_relation_confirmed_chk/,
+    );
+    await expect(insertRelation(a, b, { proposal: sessionId })).rejects.toThrow(
+      /concept_relation_confirmed_chk/,
+    );
+    await insertRelation(a, b, { kind: 'verwandt' });
+    const rel = await insertRelation(b, a);
+    await expect(insertRelation(b, a)).rejects.toThrow(/concept_relation_uq/);
+    await sql`UPDATE concept_relation SET deleted_at = now() WHERE id = ${rel}`;
+    await insertRelation(b, a, { confirmed: false, proposal: sessionId });
+  });
+
+  it('prüft Belege: Zeitraum nur und vollständig bei transcript, Verweis auf die Session, keine Dubletten', async () => {
+    const c = await insertConcept();
+    await expect(insertEvidence(c, { t: null })).rejects.toThrow(/evidence_times_chk/);
+    await expect(insertEvidence(c, { t: 5, tEnd: 4 })).rejects.toThrow(/evidence_times_chk/);
+    await expect(insertEvidence(c, { ref: uuidv7() })).rejects.toThrow(/evidence_times_chk/);
+    await expect(insertEvidence(c, { kind: 'slide', ref: uuidv7() })).rejects.toThrow(/evidence_times_chk/);
+    await expect(insertEvidence(c, { kind: 'video', t: null, tEnd: null })).rejects.toThrow(
+      /evidence_kind_chk/,
+    );
+    const slideId = uuidv7();
+    const slideEvidence = { kind: 'slide', ref: slideId, t: null, tEnd: null };
+    await insertEvidence(c, slideEvidence);
+    await expect(insertEvidence(c, slideEvidence)).rejects.toThrow(/evidence_dedupe_uq/);
+    // Gleiche Folie aus einer anderen Session und ein gelöschter Doppelgänger sind erlaubt
+    await insertEvidence(c, { ...slideEvidence, session: await newSession() });
+    await insertEvidence(c, { ...slideEvidence, deleted: new Date().toISOString() });
+    await insertEvidence(c);
+    await expect(insertEvidence(c)).rejects.toThrow(/evidence_dedupe_uq/);
+  });
+
+  it('prüft Inbox-Einträge: Verweise je Art, Entscheidung, Art der Nutzlast, ein Eintrag je Vorschlag', async () => {
+    const p = await insertConcept({ status: 'vorschlag', proposal: sessionId });
+    const t = await insertConcept();
+    await expect(insertItem({ concept: null })).rejects.toThrow(/inbox_item_refs_chk/);
+    await expect(insertItem({ concept: p, target: t })).rejects.toThrow(/inbox_item_refs_chk/);
+    await expect(insertItem({ kind: 'concept_merge', concept: p })).rejects.toThrow(/inbox_item_refs_chk/);
+    await expect(insertItem({ concept: p, status: 'angenommen' })).rejects.toThrow(/inbox_item_decided_chk/);
+    await expect(insertItem({ concept: p, decided: new Date().toISOString() })).rejects.toThrow(
+      /inbox_item_decided_chk/,
+    );
+    await expect(insertItem({ concept: p, payloadKind: 'relation' })).rejects.toThrow(
+      /inbox_item_payload_kind_chk/,
+    );
+    await expect(insertItem({ kind: 'summary', concept: p })).rejects.toThrow(/inbox_item_kind_chk/);
+    await insertItem({ concept: p });
+    await expect(insertItem({ concept: p })).rejects.toThrow(/inbox_item_concept_uq/);
+    const rel = await insertRelation(p, t, { confirmed: false, proposal: sessionId });
+    await insertItem({ kind: 'relation', relation: rel });
+    await expect(
+      sql`UPDATE inbox_item SET decision = '{}'::jsonb WHERE relation_id = ${rel}`,
+    ).rejects.toThrow(/inbox_item_decided_chk/);
+    await sql`UPDATE inbox_item SET status = 'abgelehnt', decided_at = now(), decision = '{}'::jsonb
+      WHERE relation_id = ${rel}`;
+  });
+
+  it('hält eine Zusammenfassung je Session mit 1 bis 5 Sätzen', async () => {
+    const s = await newSession();
+    const sentence = { text: 'Ein Satz.', sources: [] };
+    const insert = (sentences: unknown[]) =>
+      sql`INSERT INTO session_summary (id, user_id, session_id, sentences, provider, model, prompt_version, input_hash)
+        VALUES (${uuidv7()}, ${SINGLE_USER_ID}, ${s}, ${JSON.stringify(sentences)}::jsonb, 'fake', 'fake-llm-1',
+          'summary.write/v1', ${H})`;
+    await expect(insert([])).rejects.toThrow(/session_summary_sentences_chk/);
+    await expect(insert(Array.from({ length: 6 }, () => sentence))).rejects.toThrow(
+      /session_summary_sentences_chk/,
+    );
+    await insert([sentence]);
+    await expect(insert([sentence])).rejects.toThrow(/session_summary_session_uq/);
+  });
+
+  it('nimmt beim endgültigen Löschen der Session Vorschläge, Belege, Einträge und Zusammenfassung mit, nie aktive Konzepte', async () => {
+    const s = await newSession();
+    const active = await insertConcept({ name: 'Funktionale Abhängigkeit' });
+    const proposal = await insertConcept({ name: 'Zweite Normalform', status: 'vorschlag', proposal: s });
+    const husk = await insertConcept({ status: 'zusammengefuehrt', merged: active, proposal: s });
+    const rel = await insertRelation(proposal, active, { confirmed: false, proposal: s });
+    const kept = await insertRelation(active, await insertConcept({ name: 'Relation' }));
+    const ev = await insertEvidence(active, { session: s, ref: s });
+    await insertItem({ concept: proposal, session: s });
+    await insertItem({ kind: 'relation', relation: rel, session: s });
+    await sql`INSERT INTO session_summary (id, user_id, session_id, sentences, provider, model, prompt_version, input_hash)
+      VALUES (${uuidv7()}, ${SINGLE_USER_ID}, ${s}, '[{"text":"x","sources":[]}]'::jsonb, 'fake', 'fake-llm-1',
+        'summary.write/v1', ${H})`;
+    await sql`INSERT INTO concept_module (id, user_id, concept_id, module_id)
+      VALUES (${uuidv7()}, ${SINGLE_USER_ID}, ${active}, ${moduleId})`;
+
+    await sql`DELETE FROM session WHERE id = ${s}`;
+
+    expect(await count('concept', 'id', proposal)).toBe(0);
+    expect(await count('concept', 'id', husk)).toBe(0);
+    expect(await count('concept', 'id', active)).toBe(1);
+    expect(await count('concept_relation', 'id', rel)).toBe(0);
+    expect(await count('concept_relation', 'id', kept)).toBe(1);
+    expect(await count('evidence', 'id', ev)).toBe(0);
+    expect(await count('inbox_item', 'session_id', s)).toBe(0);
+    expect(await count('session_summary', 'session_id', s)).toBe(0);
+    expect(await count('concept_module', 'concept_id', active)).toBe(1);
+  });
+
+  it('löscht mit einem Modul nur die Zuordnung, mit einem Konzept Hüllen, Belege und Beziehungen', async () => {
+    const semesterId = uuidv7();
+    const otherModule = uuidv7();
+    await sql`INSERT INTO semester (id, user_id, name) VALUES (${semesterId}, ${SINGLE_USER_ID}, 'Weg')`;
+    await sql`INSERT INTO module (id, user_id, semester_id, name, color)
+      VALUES (${otherModule}, ${SINGLE_USER_ID}, ${semesterId}, 'Statistik', 'mod-03')`;
+    const c = await insertConcept({ name: 'Varianz' });
+    await sql`INSERT INTO concept_module (id, user_id, concept_id, module_id)
+      VALUES (${uuidv7()}, ${SINGLE_USER_ID}, ${c}, ${otherModule})`;
+    await sql`DELETE FROM module WHERE id = ${otherModule}`;
+    expect(await count('concept_module', 'concept_id', c)).toBe(0);
+    expect(await count('concept', 'id', c)).toBe(1);
+
+    const husk = await insertConcept({ status: 'zusammengefuehrt', merged: c, proposal: sessionId });
+    const ev = await insertEvidence(c, { t: 7, tEnd: 9 });
+    const rel = await insertRelation(c, await insertConcept({ name: 'Erwartungswert' }));
+    await sql`DELETE FROM concept WHERE id = ${c}`;
+    expect(await count('concept', 'id', husk)).toBe(0);
+    expect(await count('evidence', 'id', ev)).toBe(0);
+    expect(await count('concept_relation', 'id', rel)).toBe(0);
+  });
+
+  it('pflegt updated_at an den neuen Tabellen', async () => {
+    const c = await insertConcept({ name: 'Schlüssel' });
+    const [before] =
+      await sql`SELECT extract(epoch FROM updated_at)::float8 AS t FROM concept WHERE id = ${c}`;
+    await sql`SELECT pg_sleep(0.01)`;
+    await sql`UPDATE concept SET one_liner = 'Identifiziert ein Tupel eindeutig.' WHERE id = ${c}`;
+    const [after] =
+      await sql`SELECT extract(epoch FROM updated_at)::float8 AS t FROM concept WHERE id = ${c}`;
+    expect(after!.t).toBeGreaterThan(before!.t);
+    const triggers = await sql`SELECT tgrelid::regclass::text AS t FROM pg_trigger
+      WHERE tgname LIKE '%touch_updated_at' AND tgrelid::regclass::text IN
+        ('concept','concept_module','concept_relation','evidence','inbox_item','session_summary')`;
+    expect(triggers.map((r) => r.t).sort()).toEqual([
+      'concept',
+      'concept_module',
+      'concept_relation',
+      'evidence',
+      'inbox_item',
+      'session_summary',
+    ]);
+  });
+
+  it('ergänzt cost_entry um Session, Cache-Tokens, USD und request_id (VERTRAEGE §20.5)', async () => {
+    const insert = (over: { cacheRead?: number; usd?: number; request?: string | null } = {}) => {
+      const r = { cacheRead: 0, usd: 0.01, request: 'req_test' as string | null, ...over };
+      return sql`INSERT INTO cost_entry (id, user_id, session_id, provider, model, task, input_tokens, output_tokens,
+          cache_creation_input_tokens, cache_read_input_tokens, cost_estimate_usd, cost_estimate_eur, request_id)
+        VALUES (${uuidv7()}, ${SINGLE_USER_ID}, ${sessionId}, 'anthropic', 'claude-sonnet-5-5', 'concepts.extract',
+          1200, 300, 0, ${r.cacheRead}, ${r.usd}, 0.0092, ${r.request})`;
+    };
+    await insert();
+    await expect(insert({ cacheRead: -1 })).rejects.toThrow(/cost_entry_tokens_chk/);
+    await expect(insert({ usd: -0.5 })).rejects.toThrow(/cost_entry_cost_chk/);
+    await expect(insert({ request: 'r'.repeat(201) })).rejects.toThrow(/cost_entry_request_id_chk/);
+    const [row] = await sql`SELECT cost_estimate_usd::float8 AS usd, session_id FROM cost_entry
+      WHERE request_id = 'req_test' ORDER BY created_at DESC LIMIT 1`;
+    expect(row).toMatchObject({ usd: 0.01, session_id: sessionId });
   });
 });

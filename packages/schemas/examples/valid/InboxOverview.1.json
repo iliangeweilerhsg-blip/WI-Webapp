@@ -1,0 +1,21 @@
+{
+  "open_count": 12,
+  "older_count": 3,
+  "sessions": [
+    {
+      "session": {
+        "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+        "number": 7,
+        "title": "Normalformen",
+        "started_at": "2026-11-05T12:15:00Z",
+        "module": {
+          "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e02",
+          "name": "Datenbanksysteme",
+          "short_name": "DBS"
+        }
+      },
+      "open_count": 9,
+      "oldest_at": "2026-11-05T14:12:30Z"
+    }
+  ]
+}

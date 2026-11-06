@@ -1,0 +1,62 @@
+{
+  "created_at": "2026-11-05T14:12:30Z",
+  "updated_at": "2026-11-05T14:12:30Z",
+  "status": "angenommen",
+  "session": {
+    "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+    "number": 7,
+    "title": "Normalformen",
+    "started_at": "2026-11-05T12:15:00Z",
+    "module": {
+      "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e02",
+      "name": "Datenbanksysteme",
+      "short_name": "DBS"
+    }
+  },
+  "job_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e22",
+  "decided_at": "2026-11-05T14:20:00Z",
+  "target_concept_id": null,
+  "relation_id": null,
+  "blocked": null,
+  "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e51",
+  "kind": "concept_new",
+  "priority": 0,
+  "payload": {
+    "kind": "concept_new",
+    "proposal": {
+      "name": "Dritte Normalform (3NF)",
+      "aliases": ["Third normal form"],
+      "one_liner": "Eine Relation ist in 3NF, wenn kein Nichtschlüsselattribut transitiv vom Schlüssel abhängt.",
+      "kind": "definition",
+      "importance": 3,
+      "exam_hint": true,
+      "prof_explanation": "Transitive Abhängigkeiten werden in eine eigene Tabelle ausgelagert.",
+      "confidence": 0.86
+    },
+    "evidence": [
+      {
+        "kind": "slide",
+        "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+        "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+        "slide_index": 14
+      },
+      {
+        "kind": "transcript",
+        "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+        "t_start_ms": 2512000,
+        "t_end_ms": 2730000
+      }
+    ],
+    "similar": [
+      {
+        "concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e32",
+        "name": "Funktionale Abhängigkeit",
+        "similarity": 0.71,
+        "verdict": null
+      }
+    ],
+    "prompt_version": "concepts.extract/v1",
+    "model": "claude-sonnet-5-5"
+  },
+  "concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e31"
+}

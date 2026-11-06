@@ -1,0 +1,15 @@
+{
+  "worker_reachable": true,
+  "llm": {
+    "provider": "anthropic",
+    "configured": false,
+    "issue": "kein_schluessel"
+  },
+  "budget": {
+    "month": "2026-11",
+    "spent_eur": 0,
+    "budget_eur": 10,
+    "reached": false,
+    "warn": false
+  }
+}

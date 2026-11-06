@@ -1,0 +1,115 @@
+{
+  "README": "VERTRAEGE §20.6 A3, Invariante 4: Kreis, wenn new.to über bestätigte baut_auf-Kanten aktiver Konzepte new.from erreicht. path = kürzester Kreis ab new.from (Breitensuche ab new.to, Nachbarn nach Konzept-ID aufsteigend), sonst null. Unbestätigte Kanten zählen nicht. Die IDs werden so vergeben, dass ihre Reihenfolge der Reihenfolge der Kurznamen entspricht.",
+  "cases": [
+    {
+      "name": "direkt",
+      "edges": [
+        {
+          "from": "b",
+          "to": "a",
+          "confirmed": true
+        }
+      ],
+      "new": {
+        "from": "a",
+        "to": "b"
+      },
+      "path": ["a", "b", "a"]
+    },
+    {
+      "name": "ueber-zwei",
+      "edges": [
+        {
+          "from": "b",
+          "to": "c",
+          "confirmed": true
+        },
+        {
+          "from": "c",
+          "to": "a",
+          "confirmed": true
+        }
+      ],
+      "new": {
+        "from": "a",
+        "to": "b"
+      },
+      "path": ["a", "b", "c", "a"]
+    },
+    {
+      "name": "kein-kreis",
+      "edges": [
+        {
+          "from": "b",
+          "to": "c",
+          "confirmed": true
+        }
+      ],
+      "new": {
+        "from": "a",
+        "to": "b"
+      },
+      "path": null
+    },
+    {
+      "name": "kuerzester-zuerst-nach-name",
+      "edges": [
+        {
+          "from": "b",
+          "to": "d",
+          "confirmed": true
+        },
+        {
+          "from": "d",
+          "to": "a",
+          "confirmed": true
+        },
+        {
+          "from": "b",
+          "to": "c",
+          "confirmed": true
+        },
+        {
+          "from": "c",
+          "to": "a",
+          "confirmed": true
+        }
+      ],
+      "new": {
+        "from": "a",
+        "to": "b"
+      },
+      "path": ["a", "b", "c", "a"]
+    },
+    {
+      "name": "unbestaetigt-zaehlt-nicht",
+      "edges": [
+        {
+          "from": "b",
+          "to": "a",
+          "confirmed": false
+        }
+      ],
+      "new": {
+        "from": "a",
+        "to": "b"
+      },
+      "path": null
+    },
+    {
+      "name": "gleiche-richtung",
+      "edges": [
+        {
+          "from": "a",
+          "to": "b",
+          "confirmed": true
+        }
+      ],
+      "new": {
+        "from": "a",
+        "to": "b"
+      },
+      "path": null
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+  "session_deleted": false,
+  "empty": false,
+  "unchanged": false,
+  "input_hash": "3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f3f",
+  "prompt_version": "concepts.extract/v1",
+  "model": "claude-sonnet-5-5",
+  "chapters": 1,
+  "concepts": [
+    {
+      "key": "c1",
+      "proposal": {
+        "name": "Dritte Normalform (3NF)",
+        "aliases": ["Third normal form"],
+        "one_liner": "Eine Relation ist in 3NF, wenn kein Nichtschlüsselattribut transitiv vom Schlüssel abhängt.",
+        "kind": "definition",
+        "importance": 3,
+        "exam_hint": true,
+        "prof_explanation": "Transitive Abhängigkeiten werden in eine eigene Tabelle ausgelagert.",
+        "confidence": 0.86
+      },
+      "evidence": []
+    }
+  ],
+  "relations": [
+    {
+      "from": "c1",
+      "to": "c2",
+      "kind": "baut_auf",
+      "why": "3NF setzt FA voraus.",
+      "confidence": 0.9
+    }
+  ],
+  "dropped_concepts": 1,
+  "dropped_evidence": 2,
+  "dropped_relations": 0,
+  "cost_eur": 0.0412
+}

@@ -20,6 +20,27 @@ from pydantic import (
 )
 
 
+class AiBudgetStatus(BaseModel):
+    """
+    Monatsbudget (F-DAT-05). Monat = Kalendermonat in Ortszeit
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    month: StrictStr = Field(..., pattern='^[0-9]{4}-(0[1-9]|1[0-2])$')
+    spent_eur: StrictFloat = Field(
+        ..., description='Euro (Schätzung, VERTRAEGE §20.5)', ge=0.0
+    )
+    budget_eur: StrictFloat = Field(
+        ..., description='Euro (Schätzung, VERTRAEGE §20.5)', ge=0.0
+    )
+    reached: StrictBool = Field(
+        ..., description='spent_eur ≥ budget_eur: KI-Jobs enden mit fehler'
+    )
+    warn: StrictBool = Field(..., description='spent_eur ≥ 80 % von budget_eur')
+
+
 class AlignLogMode(StrEnum):
     """
     log: aus Folienwechseln. ohne_wechsel: Foliensatz, aber kein verwertbarer Wechsel (ganze Session auf Folie 1). folienlos: kein Foliensatz, keine Segmente
@@ -63,6 +84,16 @@ class AudioGapReason(StrEnum):
 
     fehlender_chunk = 'fehlender_chunk'
     zeitluecke = 'zeitluecke'
+
+
+class AutoAcceptMode(StrEnum):
+    """
+    F-EIN-01 KI „automatisch annehmen“: aus, nur Beziehungen, alles mit Konfidenz ≥ 0,9
+    """
+
+    aus = 'aus'
+    nur_beziehungen = 'nur_beziehungen'
+    alles_ab_0_9 = 'alles_ab_0_9'
 
 
 class BBox(RootModel[list[StrictFloat]]):
@@ -169,6 +200,128 @@ class ColumnWidths(RootModel[list[ColumnWidth]]):
     )
 
 
+class Alias(RootModel[StrictStr]):
+    root: StrictStr = Field(..., max_length=200, min_length=1)
+
+
+class ConceptKind(StrEnum):
+    """
+    Art eines Konzepts (05 §P7a, W-02 Option A: concept.kind)
+    """
+
+    definition = 'definition'
+    verfahren = 'verfahren'
+    modell = 'modell'
+    satz = 'satz'
+    beispiel = 'beispiel'
+
+
+class ConceptProposal(BaseModel):
+    """
+    Ein von der KI gefundenes Konzept (05 §P7a), nach Prüfung der Belege
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    name: StrictStr = Field(
+        ...,
+        description='NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen',
+        max_length=200,
+        min_length=1,
+    )
+    aliases: list[Alias] = Field(
+        ...,
+        description='weitere Namen, z. B. der englische Begriff (05 §1 Sprache)',
+        max_length=20,
+    )
+    one_liner: StrictStr | None = Field(
+        ..., description='„In einem Satz“', max_length=500, min_length=1
+    )
+    kind: ConceptKind | None
+    importance: StrictInt = Field(..., description='1–3 (05 §P7a)', ge=1, le=3)
+    exam_hint: StrictBool = Field(
+        ..., description='Die KI hat einen Klausurhinweis erkannt'
+    )
+    prof_explanation: StrictStr | None = Field(
+        ...,
+        description='Kernaussage des Profs in 1–2 Sätzen',
+        max_length=600,
+        min_length=1,
+    )
+    confidence: StrictFloat = Field(
+        ..., description='Selbsteinschätzung der KI, 0..1', ge=0.0, le=1.0
+    )
+
+
+class ConceptRelationKind(StrEnum):
+    """
+    Beziehungstyp (03 §7). „A baut_auf B“: B ist Voraussetzung von A. gegensatz und verwandt sind symmetrisch
+    """
+
+    baut_auf = 'baut_auf'
+    beispiel_fuer = 'beispiel_fuer'
+    gegensatz = 'gegensatz'
+    angewendet_in = 'angewendet_in'
+    verwandt = 'verwandt'
+
+
+class ConceptRelationSource(StrEnum):
+    """
+    Herkunft einer Beziehung (03 §7)
+    """
+
+    ki = 'ki'
+    manuell = 'manuell'
+    wikilink = 'wikilink'
+
+
+class Direction(StrEnum):
+    """
+    ausgehend: dieses Konzept ist from_id
+    """
+
+    ausgehend = 'ausgehend'
+    eingehend = 'eingehend'
+
+
+class ConceptStatus(StrEnum):
+    """
+    concept.status (03 §7). vorschlag: nur als Inbox-Vorschlag, zusammengefuehrt: merged_into gesetzt (Invariante 5)
+    """
+
+    vorschlag = 'vorschlag'
+    aktiv = 'aktiv'
+    zusammengefuehrt = 'zusammengefuehrt'
+
+
+class CostByModel(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    provider: StrictStr = Field(..., min_length=1)
+    model: StrictStr = Field(..., min_length=1)
+    calls: StrictInt = Field(..., ge=0)
+    input_tokens: StrictInt = Field(..., ge=0)
+    output_tokens: StrictInt = Field(..., ge=0)
+    cache_creation_input_tokens: StrictInt = Field(..., ge=0)
+    cache_read_input_tokens: StrictInt = Field(..., ge=0)
+    eur: StrictFloat = Field(
+        ..., description='Euro (Schätzung, VERTRAEGE §20.5)', ge=0.0
+    )
+
+
+class CostByTask(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    task: StrictStr = Field(..., min_length=1)
+    calls: StrictInt = Field(..., ge=0)
+    eur: StrictFloat = Field(
+        ..., description='Euro (Schätzung, VERTRAEGE §20.5)', ge=0.0
+    )
+
+
 class DashboardLayout(StrEnum):
     """
     Layout-Vorlagen F-DSH-01
@@ -263,6 +416,23 @@ class EmbedderState(StrEnum):
     nicht_verfuegbar = 'nicht_verfuegbar'
 
 
+class ExtractedRelation(BaseModel):
+    """
+    Beziehung zwischen zwei Konzepten derselben Vorlesung
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    from_: StrictStr = Field(..., alias='from', pattern='^c[0-9]+$')
+    to: StrictStr = Field(..., pattern='^c[0-9]+$')
+    kind: ConceptRelationKind
+    why: StrictStr = Field(..., max_length=500, min_length=1)
+    confidence: StrictFloat = Field(
+        ..., description='Selbsteinschätzung der KI, 0..1', ge=0.0, le=1.0
+    )
+
+
 class Status(StrEnum):
     ok = 'ok'
 
@@ -324,6 +494,61 @@ class IcsWarning(BaseModel):
     )
     message: StrictStr
     external_uid: StrictStr | None
+
+
+class InboxBlockedReason(StrEnum):
+    """
+    Warum eine Beziehung noch nicht annehmbar ist: ein Endpunkt ist noch Vorschlag bzw. wurde abgelehnt
+    """
+
+    endpunkt_offen = 'endpunkt_offen'
+    endpunkt_abgelehnt = 'endpunkt_abgelehnt'
+
+
+class Action(StrEnum):
+    """
+    Massenaktion
+    """
+
+    accept = 'accept'
+    reject = 'reject'
+    reopen = 'reopen'
+
+
+class Action1(StrEnum):
+    """
+    Wirkung
+    """
+
+    angenommen_neu = 'angenommen_neu'
+    zusammengefuehrt = 'zusammengefuehrt'
+    beziehung_bestaetigt = 'beziehung_bestaetigt'
+    abgelehnt = 'abgelehnt'
+
+
+class AddedAliase(RootModel[StrictStr]):
+    root: StrictStr = Field(..., max_length=200, min_length=1)
+
+
+class InboxKind(StrEnum):
+    """
+    Art eines Inbox-Eintrags (03 §8). Weitere Arten (card_batch, slide_correction, …) kommen mit ihren Tickets
+    """
+
+    concept_new = 'concept_new'
+    concept_merge = 'concept_merge'
+    relation = 'relation'
+
+
+class InboxStatus(StrEnum):
+    """
+    Status eines Inbox-Eintrags (03 §8). automatisch: nach der Einstellung ai.auto_accept angenommen
+    """
+
+    offen = 'offen'
+    angenommen = 'angenommen'
+    abgelehnt = 'abgelehnt'
+    automatisch = 'automatisch'
 
 
 class IngestState(StrEnum):
@@ -400,6 +625,16 @@ class LanguageCode(RootModel[StrictStr]):
     )
 
 
+class LlmIssue(StrEnum):
+    """
+    Warum die KI nicht eingerichtet ist (VERTRAEGE §20.5)
+    """
+
+    kein_schluessel = 'kein_schluessel'
+    env_offen = 'env_offen'
+    unbekannter_anbieter = 'unbekannter_anbieter'
+
+
 class MaintenanceNightlyPayload(BaseModel):
     """
     maintenance.nightly (08 §5, T1-18). Phase 1: Papierkorb leeren, verwaiste Dateien, sync_op gelöschter Ströme
@@ -453,6 +688,15 @@ class MarkerSource(StrEnum):
     ipad = 'ipad'
     mac = 'mac'
     detektor = 'detektor'
+
+
+class MergeBasis(StrEnum):
+    """
+    Grund eines concept_merge-Vorschlags: ki = KI-Entscheidung „gleich“, name = gleicher Name/Alias ohne Embedder (degradiert)
+    """
+
+    ki = 'ki'
+    name = 'name'
 
 
 class ModuleColor(StrEnum):
@@ -916,12 +1160,15 @@ class PhotoMime(StrEnum):
 
 class PipelineStep(StrEnum):
     """
-    Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge = Anzeige-Reihenfolge
+    Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge = Anzeige-Reihenfolge
     """
 
     audio_finalize = 'audio.finalize'
     transcribe = 'transcribe'
     align_log = 'align.log'
+    concepts_extract = 'concepts.extract'
+    concepts_resolve = 'concepts.resolve'
+    summary_write = 'summary.write'
 
 
 class Point2(RootModel[list[StrictFloat]]):
@@ -952,6 +1199,17 @@ class RecordingState(StrEnum):
     laeuft = 'laeuft'
     vollstaendig = 'vollstaendig'
     mit_luecken = 'mit_luecken'
+
+
+class ResolveVerdict(StrEnum):
+    """
+    Entscheidung im Abgleich (05 §P8, Band 0,75–0,88). Abbildung auf Inbox-Arten: VERTRAEGE §20.3
+    """
+
+    gleich = 'gleich'
+    teil_von = 'teil_von'
+    verwandt = 'verwandt'
+    verschieden = 'verschieden'
 
 
 class RestoreTestReason(StrEnum):
@@ -1393,15 +1651,63 @@ class Embedder(BaseModel):
     )
 
 
-class WorkerHealth(BaseModel):
+class WorkerLlmStatus(BaseModel):
     """
-    GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token
+    KI-Anbieter des Workers (GET /health des Workers, Feld llm). Nie der Schlüssel selbst
     """
 
     model_config = ConfigDict(
         extra='forbid',
     )
-    embedder: Embedder
+    provider: StrictStr = Field(
+        ..., description='anthropic | fake (SG_LLM)', min_length=1
+    )
+    configured: StrictBool = Field(
+        ..., description='true: Aufrufe möglich (Schlüssel vorhanden bzw. Fake)'
+    )
+    issue: LlmIssue | None
+
+
+class AiSettings(BaseModel):
+    """
+    Einstellungen KI (F-EIN-01, VERTRAEGE §20.7). Bereich ai in setting
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    monthly_budget_eur: StrictFloat = Field(
+        ...,
+        description='Monatsbudget in Euro, Standard 10. 0 schaltet Cloud-KI ab',
+        ge=0.0,
+        le=1000.0,
+    )
+    auto_accept: AutoAcceptMode
+
+
+class AiSettingsUpdate(BaseModel):
+    """
+    Teil von SettingsUpdate.ai
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    monthly_budget_eur: StrictFloat | None = Field(None, ge=0.0, le=1000.0)
+    auto_accept: AutoAcceptMode | None = None
+
+
+class AiStatus(BaseModel):
+    """
+    GET /ai/status
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    worker_reachable: StrictBool
+    llm: WorkerLlmStatus | None
+    budget: AiBudgetStatus
 
 
 class AlignLogPayload(BaseModel):
@@ -1759,6 +2065,229 @@ class CalendarSourceList(BaseModel):
     next_cursor: StrictStr | None
 
 
+class Concept(BaseModel):
+    """
+    Konzept (03 §7). Gehört keinem Fach allein (concept_module). Ohne embedding, vault_path und block_hashes (kommen mit dem Vault)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    name: StrictStr = Field(
+        ...,
+        description='NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen',
+        max_length=200,
+        min_length=1,
+    )
+    aliases: list[Alias] = Field(
+        ...,
+        description='weitere Namen, z. B. der englische Begriff (05 §1 Sprache)',
+        max_length=20,
+    )
+    kind: ConceptKind | None
+    one_liner: StrictStr | None = Field(
+        ..., description='„In einem Satz“', max_length=500, min_length=1
+    )
+    status: ConceptStatus
+    merged_into: Uuid | None
+    exam_relevant: StrictBool
+    importance_base: StrictFloat = Field(
+        ...,
+        description='Startwert der Wichtigkeit (W-05: importance 1|2|3 → 0,8|1,0|1,3)',
+        ge=0.0,
+        le=2.0,
+    )
+
+
+class ConceptEdit(BaseModel):
+    """
+    Änderungen beim Annehmen eines Konzept-Vorschlags
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    name: StrictStr | None = Field(
+        None,
+        description='NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen',
+        max_length=200,
+        min_length=1,
+    )
+    aliases: list[Alias] | None = Field(
+        None,
+        description='weitere Namen, z. B. der englische Begriff (05 §1 Sprache)',
+        max_length=20,
+    )
+    one_liner: StrictStr | None = Field(
+        None, description='„In einem Satz“', max_length=500, min_length=1
+    )
+    kind: ConceptKind | None = None
+
+
+class Other(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    name: StrictStr = Field(
+        ...,
+        description='NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen',
+        max_length=200,
+        min_length=1,
+    )
+    status: ConceptStatus
+
+
+class ConceptRelationView(BaseModel):
+    """
+    Bestätigte Beziehung aus Sicht eines Konzepts
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    kind: ConceptRelationKind
+    direction: Direction = Field(
+        ..., description='ausgehend: dieses Konzept ist from_id'
+    )
+    other: Other
+    source: ConceptRelationSource
+    confidence: StrictFloat | None = Field(..., ge=0.0, le=1.0)
+    cross_module: StrictBool = Field(
+        ...,
+        description='Fächerbrücke (05 §P8.4): die beiden Konzepte haben kein gemeinsames Modul',
+    )
+
+
+class ConceptsExtractPayload(BaseModel):
+    """
+    concepts.extract (VERTRAEGE §20.2). job.session_id ist gesetzt
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    force: StrictBool | None = Field(
+        None, description='true: auch bei gleichem input_hash neu aufrufen'
+    )
+
+
+class ConceptsResolvePayload(BaseModel):
+    """
+    concepts.resolve (VERTRAEGE §20.3). job.session_id ist gesetzt
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    extract_job_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    force: StrictBool | None = Field(
+        None, description='true: auch bei unverändertem Extrakt neu abgleichen'
+    )
+
+
+class ConceptsResolveResult(BaseModel):
+    """
+    Ergebnis von concepts.resolve
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    extract_job_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    extract_input_hash: StrictStr | None = Field(..., pattern='^[0-9a-f]{64}$')
+    resolve_version: StrictInt = Field(
+        ..., description='RESOLVE_VERSION des Workers', ge=1
+    )
+    session_deleted: StrictBool
+    unchanged: StrictBool = Field(
+        ...,
+        description='true: gleicher Extrakt wie beim letzten fertigen Abgleich, nichts geschrieben',
+    )
+    auto_merged: StrictInt = Field(
+        ...,
+        description='Konzepte, deren Belege automatisch an ein vorhandenes Konzept gingen',
+        ge=0,
+    )
+    proposed_new: StrictInt = Field(..., ge=0)
+    proposed_merge: StrictInt = Field(..., ge=0)
+    proposed_relations: StrictInt = Field(..., ge=0)
+    auto_accepted: StrictInt = Field(
+        ..., description='Einträge mit Status automatisch', ge=0
+    )
+    skipped_rejected: StrictInt = Field(
+        ...,
+        description='nicht erneut vorgeschlagen, weil für diese Session abgelehnt',
+        ge=0,
+    )
+    dropped_cycles: StrictInt = Field(
+        ..., description='baut_auf-Vorschläge, die einen Kreis bilden würden', ge=0
+    )
+    embedded_concepts: StrictInt = Field(
+        ..., description='nachgeholte Vektoren aktiver Konzepte', ge=0
+    )
+    embedding_model: StrictStr | None = Field(..., min_length=1)
+    embedding_error: StrictStr | None = Field(..., max_length=500)
+    prompt_version: StrictStr | None = Field(
+        ..., description='null ohne KI-Aufruf', min_length=1
+    )
+    model: StrictStr | None = Field(..., min_length=1)
+    cost_eur: StrictFloat = Field(
+        ..., description='Euro (Schätzung, VERTRAEGE §20.5)', ge=0.0
+    )
+
+
 class Device(BaseModel):
     """
     Gekoppeltes Gerät. Das Token selbst gibt die API nie aus (gespeichert nur token_hash).
@@ -1849,6 +2378,61 @@ class ElementRemoveOp(BaseModel):
     data: ElementRemoveData
     seq: StrictInt | None = Field(None, description='Nur Server → Client', ge=1)
     origin: SyncOrigin | None = None
+
+
+class EvidenceRefSlide(BaseModel):
+    """
+    Beleg auf eine Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['slide']
+    slide_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    deck_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    slide_index: StrictInt = Field(
+        ..., description='Index der Folie im Foliensatz, ab 1', ge=1
+    )
+
+
+class EvidenceRefTranscript(BaseModel):
+    """
+    Beleg auf einen Zeitraum des Gesagten (Sitzungszeit, §18.1). t_end_ms ≥ t_start_ms prüft der Schreiber. Ziel: /rueckblick?id=<session_id>&t=<t_start_ms>
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['transcript']
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    t_start_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
+    t_end_ms: StrictInt = Field(
+        ...,
+        description='Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.',
+        ge=0,
+        title='SessionMs',
+    )
 
 
 class ExerciseSheet(BaseModel):
@@ -2043,6 +2627,176 @@ class ImageElementPayload(BaseModel):
         title='Uuid',
     )
     crop: BBox | None
+
+
+class InboxAcceptRequest(BaseModel):
+    """
+    POST /inbox/{id}/accept (§20.6). Welche Felder zu welcher Art passen, regelt der Vertrag (sonst 400 inbox_action_invalid)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    edit: ConceptEdit | None = None
+    merge_into: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    as_new: StrictBool | None = Field(
+        None,
+        description='concept_merge: als neues Konzept annehmen statt zusammenführen',
+    )
+    relation_kind: ConceptRelationKind | None = None
+
+
+class InboxBulkRequest(BaseModel):
+    """
+    POST /inbox/bulk. Genau eins von ids und session_id (sonst 400 validation_failed)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    action: Action = Field(..., description='Massenaktion')
+    ids: list[Uuid] | None = Field(None, max_length=500, min_length=1)
+    session_id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+
+
+class SkippedItem(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    code: StrictStr = Field(..., min_length=1)
+
+
+class InboxBulkResult(BaseModel):
+    """
+    Antwort auf POST /inbox/bulk
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    decided: list[Uuid] = Field(
+        ..., description='geänderte Einträge in Bearbeitungsreihenfolge'
+    )
+    skipped: list[SkippedItem]
+
+
+class InboxDecision(BaseModel):
+    """
+    Was eine Annahme geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST /inbox/{id}/reopen, §20.6)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    action: Action1 = Field(..., description='Wirkung')
+    concept_id: Uuid | None
+    merged_into: Uuid | None
+    moved_evidence_ids: list[Uuid]
+    added_aliases: list[AddedAliase]
+    added_module_ids: list[Uuid]
+    previous: ConceptEdit | None
+    relation_kind_before: ConceptRelationKind | None
+    cascade_item_ids: list[Uuid] = Field(
+        ..., description='mit derselben Entscheidung geänderte Beziehungs-Einträge'
+    )
+    duplicate_of: Uuid | None = Field(
+        ...,
+        description='A2/A3: vorhandene Beziehung, mit der die umgehängte (A2) bzw. umgewidmete (A3) Beziehung zusammenfiel. Die Zeile des Eintrags bleibt unbestätigt liegen (§20.6)',
+    )
+    triggered_by: Uuid | None = Field(
+        ...,
+        description='Eintrag, dessen Entscheidung diesen mitentschieden hat (A1: bestätigte Beziehung, A2: umgehängte Dublette, A3: bestätigte vorhandene Beziehung). Wieder öffnen nur über diesen Eintrag (§20.6)',
+    )
+
+
+class Target(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    concept_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    name: StrictStr = Field(
+        ...,
+        description='NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen',
+        max_length=200,
+        min_length=1,
+    )
+
+
+class InboxPayloadRelation(BaseModel):
+    """
+    Nutzlast relation (Beziehung zwischen zwei Konzepten)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['relation']
+    from_concept_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    to_concept_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    relation_kind: ConceptRelationKind
+    why: StrictStr = Field(..., max_length=500, min_length=1)
+    confidence: StrictFloat = Field(
+        ..., description='Selbsteinschätzung der KI, 0..1', ge=0.0, le=1.0
+    )
+    prompt_version: StrictStr = Field(..., min_length=1)
+    model: StrictStr = Field(..., min_length=1)
+
+
+class InboxSimilarConcept(BaseModel):
+    """
+    Ähnliches vorhandenes Konzept („gleich wie X?“, 07 §3.5)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    concept_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    name: StrictStr = Field(
+        ...,
+        description='NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen',
+        max_length=200,
+        min_length=1,
+    )
+    similarity: StrictFloat | None = Field(
+        ..., description='Cosinus-Ähnlichkeit, null ohne Embedder', ge=0.0, le=1.0
+    )
+    verdict: ResolveVerdict | None
 
 
 class Job(BaseModel):
@@ -3967,6 +4721,28 @@ class SessionCreate(BaseModel):
     title: StrictStr | None = None
 
 
+class SessionRef(BaseModel):
+    """
+    Kurzangabe einer Session für Listen (Anzeige „VL 7 · Titel“ bzw. Datum)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    number: StrictInt | None = Field(
+        ..., description='VL-Nummer (Session.number)', ge=1
+    )
+    title: StrictStr | None
+    started_at: AwareDatetime | None
+    module: SearchModuleRef
+
+
 class SessionRefData(BaseModel):
     """
     session.pause / session.resume
@@ -4610,6 +5386,54 @@ class StrokeRemoveOp(BaseModel):
     origin: SyncOrigin | None = None
 
 
+class SummaryWritePayload(BaseModel):
+    """
+    summary.write (VERTRAEGE §20.4, nur die Zusammenfassung, ohne vault.write). job.session_id ist gesetzt
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    force: StrictBool | None = None
+
+
+class SummaryWriteResult(BaseModel):
+    """
+    Ergebnis von summary.write
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_deleted: StrictBool
+    skipped: StrictBool = Field(
+        ...,
+        description='true: weder Folien noch Transkript, eine alte Zusammenfassung wurde entfernt',
+    )
+    unchanged: StrictBool
+    input_hash: StrictStr | None = Field(..., pattern='^[0-9a-f]{64}$')
+    sentence_count: StrictInt = Field(..., ge=0, le=5)
+    outline_count: StrictInt = Field(..., ge=0, le=30)
+    dropped_sentences: StrictInt = Field(..., ge=0)
+    prompt_version: StrictStr | None = Field(..., min_length=1)
+    model: StrictStr | None = Field(..., min_length=1)
+    cost_eur: StrictFloat = Field(
+        ..., description='Euro (Schätzung, VERTRAEGE §20.5)', ge=0.0
+    )
+
+
 class SyncAck(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -5097,6 +5921,18 @@ class UploadResult(BaseModel):
     duplicate: StrictBool
 
 
+class WorkerHealth(BaseModel):
+    """
+    GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token. llm ab §20.5, optional, damit ein älterer Worker gültig bleibt
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    embedder: Embedder
+    llm: WorkerLlmStatus | None = None
+
+
 class AudioFinalizeResult(BaseModel):
     """
     job.result von audio.finalize. state ist nie laeuft
@@ -5137,6 +5973,54 @@ class BackupStatus(BaseModel):
         ...,
         description='Letzter automatischer oder manueller Restore-Test (F-DAT-02), null = noch keiner gelaufen',
     )
+
+
+class ConceptListItem(BaseModel):
+    """
+    Eintrag in GET /concepts
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    concept: Concept
+    modules: list[SearchModuleRef]
+    evidence_count: StrictInt = Field(..., ge=0)
+    session_count: StrictInt = Field(
+        ..., description='Sessions mit mindestens einem Beleg', ge=0
+    )
+
+
+class CostBySession(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session: SessionRef | None
+    calls: StrictInt = Field(..., ge=0)
+    eur: StrictFloat = Field(
+        ..., description='Euro (Schätzung, VERTRAEGE §20.5)', ge=0.0
+    )
+
+
+class CostSummary(BaseModel):
+    """
+    GET /costs/summary (F-DAT-05): ein Monat, je Aufgabe, je Session (höchstens 20), je Modell
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    budget: AiBudgetStatus
+    calls: StrictInt = Field(..., ge=0)
+    by_task: list[CostByTask]
+    by_session: list[CostBySession] = Field(..., max_length=20)
+    by_model: list[CostByModel]
 
 
 class DrawingSnapshotData(BaseModel):
@@ -5185,6 +6069,61 @@ class DrawingSnapshotOp(BaseModel):
     origin: SyncOrigin | None = None
 
 
+class EvidenceView(BaseModel):
+    """
+    Gespeicherter Beleg (Tabelle evidence) mit Anzeigeangaben
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    ref: EvidenceRefSlide | EvidenceRefTranscript = Field(
+        ...,
+        description='Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt)',
+        title='EvidenceRef',
+    )
+    session: SessionRef | None
+    slide_title: StrictStr | None = Field(
+        ..., description='nur bei slide: Titel der Folie, sonst null'
+    )
+    missing: StrictBool = Field(
+        ...,
+        description='true: Ziel gelöscht (Folie bzw. Foliensatz), der Beleg ist nicht mehr anspringbar',
+    )
+    quote: StrictStr | None = Field(
+        ..., description='kurzes Zitat für die Anzeige', max_length=300, min_length=1
+    )
+    auto: StrictBool = Field(
+        ...,
+        description='true: beim Abgleich automatisch an ein vorhandenes Konzept gehängt (§20.3)',
+    )
+
+
+class ExtractedConcept(BaseModel):
+    """
+    Konzept im Ergebnis von concepts.extract mit mindestens einem gültigen Beleg (LP8)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    key: StrictStr = Field(
+        ...,
+        description='Schlüssel innerhalb des Ergebnisses (c1, c2, …)',
+        pattern='^c[0-9]+$',
+    )
+    proposal: ConceptProposal
+    evidence: list[EvidenceRefSlide | EvidenceRefTranscript] = Field(
+        ..., max_length=12, min_length=1
+    )
+
+
 class IcsImportResult(BaseModel):
     """
     Antwort auf POST /calendar/sources (201) und POST /calendar/sources/{id}/sync (200). Der Abgleich läuft synchron im Core, nicht als Job.
@@ -5220,6 +6159,63 @@ class ImageElement(BaseModel):
     z: StrictInt
     t_ms: SessionMs | None
     payload: ImageElementPayload
+
+
+class InboxOverviewSession(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session: SessionRef | None
+    open_count: StrictInt = Field(..., ge=1)
+    oldest_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+
+
+class InboxPayloadConceptMerge(BaseModel):
+    """
+    Nutzlast concept_merge (Vorschlag: dasselbe wie ein vorhandenes Konzept)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['concept_merge']
+    proposal: ConceptProposal
+    evidence: list[EvidenceRefSlide | EvidenceRefTranscript] = Field(
+        ..., max_length=12, min_length=1
+    )
+    target: Target
+    basis: MergeBasis
+    similarity: StrictFloat | None = Field(..., ge=0.0, le=1.0)
+    reason: StrictStr | None = Field(
+        ...,
+        description='Begründung der KI, null bei basis = name',
+        max_length=500,
+        min_length=1,
+    )
+    prompt_version: StrictStr | None = Field(
+        ..., description='null bei basis = name (kein KI-Aufruf)', min_length=1
+    )
+    model: StrictStr | None = Field(..., min_length=1)
+
+
+class InboxPayloadConceptNew(BaseModel):
+    """
+    Nutzlast concept_new (neues Konzept)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['concept_new']
+    proposal: ConceptProposal
+    evidence: list[EvidenceRefSlide | EvidenceRefTranscript] = Field(
+        ..., max_length=12, min_length=1
+    )
+    similar: list[InboxSimilarConcept] = Field(..., max_length=3)
+    prompt_version: StrictStr = Field(..., min_length=1)
+    model: StrictStr = Field(..., min_length=1)
 
 
 class MoodleActionCatalog(BaseModel):
@@ -5669,6 +6665,37 @@ class Session(BaseModel):
     )
 
 
+class SessionConceptItem(BaseModel):
+    """
+    Konzept mit Belegen aus genau dieser Session
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    concept: Concept
+    evidence: list[EvidenceView]
+    inbox_item_id: Uuid | None
+    inbox_status: InboxStatus | None
+
+
+class SessionConcepts(BaseModel):
+    """
+    GET /sessions/{id}/concepts: aktive und vorgeschlagene Konzepte mit Belegen aus der Session
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    items: list[SessionConceptItem]
+
+
 class SessionList(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -5823,6 +6850,34 @@ class StampElement(BaseModel):
     payload: StampElementPayload
 
 
+class SummaryOutlineItem(BaseModel):
+    """
+    Ein Gliederungspunkt (Kapitel aus den Folien)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    title: StrictStr = Field(..., max_length=200, min_length=1)
+    sources: list[EvidenceRefSlide | EvidenceRefTranscript] = Field(
+        ..., max_length=6, min_length=0
+    )
+
+
+class SummarySentence(BaseModel):
+    """
+    Ein Satz der Kurzfassung mit Belegen (LP8)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    text: StrictStr = Field(..., max_length=600, min_length=1)
+    sources: list[EvidenceRefSlide | EvidenceRefTranscript] = Field(
+        ..., max_length=6, min_length=1
+    )
+
+
 class SyncConnectionEvent(BaseModel):
     """
     Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
@@ -5972,6 +7027,104 @@ class BackupOverview(BaseModel):
     next_cursor: StrictStr | None
 
 
+class ConceptDetail(BaseModel):
+    """
+    GET /concepts/{id}
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    concept: Concept
+    modules: list[SearchModuleRef]
+    evidence: list[EvidenceView] = Field(
+        ..., description='nicht gelöschte Belege, neueste Session zuerst, höchstens 200'
+    )
+    relations: list[ConceptRelationView] = Field(
+        ..., description='nur bestätigte Beziehungen zu nicht gelöschten Konzepten'
+    )
+    inbox_item_id: Uuid | None
+
+
+class ConceptList(BaseModel):
+    """
+    GET /concepts
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[ConceptListItem]
+    next_cursor: StrictStr | None
+
+
+class ConceptsExtractResult(BaseModel):
+    """
+    Ergebnis von concepts.extract (job.result). concepts.resolve liest es über extract_job_id
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_deleted: StrictBool = Field(
+        ..., description='true: Session weich gelöscht, nichts aufgerufen'
+    )
+    empty: StrictBool = Field(
+        ..., description='true: weder Folien noch Transkript, kein Aufruf'
+    )
+    unchanged: StrictBool = Field(
+        ...,
+        description='true: gleicher input_hash wie das letzte fertige Ergebnis, übernommen statt aufgerufen',
+    )
+    input_hash: StrictStr | None = Field(..., pattern='^[0-9a-f]{64}$')
+    prompt_version: StrictStr | None = Field(
+        ..., description='z. B. concepts.extract/v1', min_length=1
+    )
+    model: StrictStr | None = Field(
+        ...,
+        description='Modell der Antwort (nach einem Refusal-Fallback das tatsächlich genutzte)',
+        min_length=1,
+    )
+    chapters: StrictInt = Field(
+        ..., description='Anzahl der Aufrufe (Kapitel), 0 ohne Aufruf', ge=0
+    )
+    concepts: list[ExtractedConcept] = Field(..., max_length=30)
+    relations: list[ExtractedRelation] = Field(..., max_length=60)
+    dropped_concepts: StrictInt = Field(
+        ..., description='verworfen, weil kein Beleg gültig war', ge=0
+    )
+    dropped_evidence: StrictInt = Field(..., ge=0)
+    dropped_relations: StrictInt = Field(..., ge=0)
+    cost_eur: StrictFloat = Field(
+        ..., description='Euro (Schätzung, VERTRAEGE §20.5)', ge=0.0
+    )
+
+
+class InboxOverview(BaseModel):
+    """
+    GET /inbox/overview: Zähler für Navigation und Gruppen (F-NAC-06)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    open_count: StrictInt = Field(..., ge=0)
+    older_count: StrictInt = Field(
+        ...,
+        description='offene Einträge älter als 14 Tage („12 ältere Vorschläge“)',
+        ge=0,
+    )
+    sessions: list[InboxOverviewSession] = Field(
+        ..., description='Gruppen mit offenen Einträgen, neueste Session zuerst'
+    )
+
+
 class MoodleCourseContents(BaseModel):
     """
     Antwort von GET /moodle/courses/{course_id}/contents
@@ -6002,6 +7155,57 @@ class SearchResponse(BaseModel):
     filters: Filters
     hits: list[SearchHitSlide | SearchHitTranscript] = Field(..., max_length=50)
     took_ms: StrictInt = Field(..., ge=0)
+
+
+class SessionSummary(BaseModel):
+    """
+    Zusammenfassung einer Session (Tabelle session_summary, F-NAC-08 ohne Vault). Direkt sichtbar, kein Inbox-Vorschlag (§20.4)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    lang: Lang | None
+    sentences: list[SummarySentence] = Field(..., max_length=5, min_length=1)
+    outline: list[SummaryOutlineItem] = Field(..., max_length=30, min_length=0)
+    model: StrictStr = Field(..., min_length=1)
+    prompt_version: StrictStr = Field(..., min_length=1)
+    job_id: Uuid | None
+
+
+class SessionSummaryView(BaseModel):
+    """
+    GET /sessions/{id}/summary. summary = null: (noch) keine Zusammenfassung
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    summary: SessionSummary | None
 
 
 class ElementUpsertData(BaseModel):
@@ -6052,6 +7256,55 @@ class ElementUpsertOp(BaseModel):
     origin: SyncOrigin | None = None
 
 
+class InboxItem(BaseModel):
+    """
+    Inbox-Eintrag (03 §8, F-NAC-06)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    kind: InboxKind
+    status: InboxStatus
+    session: SessionRef | None
+    job_id: Uuid | None
+    priority: StrictInt = Field(
+        ..., description='kleiner = früher (Reihenfolge der geführten Nacharbeitung)'
+    )
+    decided_at: AwareDatetime | None
+    payload: (
+        InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation
+    ) = Field(..., description='Schemageprüfte Nutzlast eines Inbox-Eintrags (03 §8), unterschieden über kind', title='InboxPayload')
+    concept_id: Uuid | None
+    target_concept_id: Uuid | None
+    relation_id: Uuid | None
+    blocked: InboxBlockedReason | None
+
+
+class InboxItemList(BaseModel):
+    """
+    GET /inbox
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[InboxItem]
+    next_cursor: StrictStr | None
+
+
 class PageDetail(BaseModel):
     """
     GET /pages/{id}: Seite mit Elementen (ohne gelöschte, nach z sortiert)
@@ -6069,11 +7322,27 @@ class PageDetail(BaseModel):
     )
 
 
+class InboxDecisionResult(BaseModel):
+    """
+    Antwort auf accept, reject und reopen
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    item: InboxItem
+    concept: Concept | None
+
+
 class SchemaBundle(BaseModel):
     """
     GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
     """
 
+    AiBudgetStatus_1: AiBudgetStatus | None = Field(None, alias='AiBudgetStatus')
+    AiSettings_1: AiSettings | None = Field(None, alias='AiSettings')
+    AiSettingsUpdate_1: AiSettingsUpdate | None = Field(None, alias='AiSettingsUpdate')
+    AiStatus_1: AiStatus | None = Field(None, alias='AiStatus')
     AlignLogMode_1: AlignLogMode | None = Field(None, alias='AlignLogMode')
     AlignLogPayload_1: AlignLogPayload | None = Field(None, alias='AlignLogPayload')
     AlignLogResult_1: AlignLogResult | None = Field(None, alias='AlignLogResult')
@@ -6091,6 +7360,7 @@ class SchemaBundle(BaseModel):
     )
     AudioGap_1: AudioGap | None = Field(None, alias='AudioGap')
     AudioGapReason_1: AudioGapReason | None = Field(None, alias='AudioGapReason')
+    AutoAcceptMode_1: AutoAcceptMode | None = Field(None, alias='AutoAcceptMode')
     BBox: list[StrictFloat] | None = Field(
         None, description='[x, y, w, h] in pt', max_length=4, min_length=4, title='BBox'
     )
@@ -6136,6 +7406,39 @@ class SchemaBundle(BaseModel):
         min_length=3,
         title='ColumnWidths',
     )
+    Concept_1: Concept | None = Field(None, alias='Concept')
+    ConceptDetail_1: ConceptDetail | None = Field(None, alias='ConceptDetail')
+    ConceptEdit_1: ConceptEdit | None = Field(None, alias='ConceptEdit')
+    ConceptKind_1: ConceptKind | None = Field(None, alias='ConceptKind')
+    ConceptList_1: ConceptList | None = Field(None, alias='ConceptList')
+    ConceptListItem_1: ConceptListItem | None = Field(None, alias='ConceptListItem')
+    ConceptProposal_1: ConceptProposal | None = Field(None, alias='ConceptProposal')
+    ConceptRelationKind_1: ConceptRelationKind | None = Field(
+        None, alias='ConceptRelationKind'
+    )
+    ConceptRelationSource_1: ConceptRelationSource | None = Field(
+        None, alias='ConceptRelationSource'
+    )
+    ConceptRelationView_1: ConceptRelationView | None = Field(
+        None, alias='ConceptRelationView'
+    )
+    ConceptStatus_1: ConceptStatus | None = Field(None, alias='ConceptStatus')
+    ConceptsExtractPayload_1: ConceptsExtractPayload | None = Field(
+        None, alias='ConceptsExtractPayload'
+    )
+    ConceptsExtractResult_1: ConceptsExtractResult | None = Field(
+        None, alias='ConceptsExtractResult'
+    )
+    ConceptsResolvePayload_1: ConceptsResolvePayload | None = Field(
+        None, alias='ConceptsResolvePayload'
+    )
+    ConceptsResolveResult_1: ConceptsResolveResult | None = Field(
+        None, alias='ConceptsResolveResult'
+    )
+    CostByModel_1: CostByModel | None = Field(None, alias='CostByModel')
+    CostBySession_1: CostBySession | None = Field(None, alias='CostBySession')
+    CostByTask_1: CostByTask | None = Field(None, alias='CostByTask')
+    CostSummary_1: CostSummary | None = Field(None, alias='CostSummary')
     DashboardLayout_1: DashboardLayout | None = Field(None, alias='DashboardLayout')
     DataSettings_1: DataSettings | None = Field(None, alias='DataSettings')
     DataSettingsUpdate_1: DataSettingsUpdate | None = Field(
@@ -6167,12 +7470,26 @@ class SchemaBundle(BaseModel):
         ge=0,
         title='EpochMs',
     )
+    EvidenceRef: EvidenceRefSlide | EvidenceRefTranscript | None = Field(
+        None,
+        description='Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt)',
+        title='EvidenceRef',
+    )
+    EvidenceRefSlide_1: EvidenceRefSlide | None = Field(None, alias='EvidenceRefSlide')
+    EvidenceRefTranscript_1: EvidenceRefTranscript | None = Field(
+        None, alias='EvidenceRefTranscript'
+    )
+    EvidenceView_1: EvidenceView | None = Field(None, alias='EvidenceView')
     ExerciseSheet_1: ExerciseSheet | None = Field(None, alias='ExerciseSheet')
     ExerciseSheetList_1: ExerciseSheetList | None = Field(
         None, alias='ExerciseSheetList'
     )
     ExerciseSheetUpdate_1: ExerciseSheetUpdate | None = Field(
         None, alias='ExerciseSheetUpdate'
+    )
+    ExtractedConcept_1: ExtractedConcept | None = Field(None, alias='ExtractedConcept')
+    ExtractedRelation_1: ExtractedRelation | None = Field(
+        None, alias='ExtractedRelation'
     )
     FileReceipt_1: FileReceipt | None = Field(None, alias='FileReceipt')
     FileRef_1: FileRef | None = Field(None, alias='FileRef')
@@ -6199,6 +7516,41 @@ class SchemaBundle(BaseModel):
     ImageElementPayload_1: ImageElementPayload | None = Field(
         None, alias='ImageElementPayload'
     )
+    InboxAcceptRequest_1: InboxAcceptRequest | None = Field(
+        None, alias='InboxAcceptRequest'
+    )
+    InboxBlockedReason_1: InboxBlockedReason | None = Field(
+        None, alias='InboxBlockedReason'
+    )
+    InboxBulkRequest_1: InboxBulkRequest | None = Field(None, alias='InboxBulkRequest')
+    InboxBulkResult_1: InboxBulkResult | None = Field(None, alias='InboxBulkResult')
+    InboxDecision_1: InboxDecision | None = Field(None, alias='InboxDecision')
+    InboxDecisionResult_1: InboxDecisionResult | None = Field(
+        None, alias='InboxDecisionResult'
+    )
+    InboxItem_1: InboxItem | None = Field(None, alias='InboxItem')
+    InboxItemList_1: InboxItemList | None = Field(None, alias='InboxItemList')
+    InboxKind_1: InboxKind | None = Field(None, alias='InboxKind')
+    InboxOverview_1: InboxOverview | None = Field(None, alias='InboxOverview')
+    InboxOverviewSession_1: InboxOverviewSession | None = Field(
+        None, alias='InboxOverviewSession'
+    )
+    InboxPayload: (
+        InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation | None
+    ) = Field(None, description='Schemageprüfte Nutzlast eines Inbox-Eintrags (03 §8), unterschieden über kind', title='InboxPayload')
+    InboxPayloadConceptMerge_1: InboxPayloadConceptMerge | None = Field(
+        None, alias='InboxPayloadConceptMerge'
+    )
+    InboxPayloadConceptNew_1: InboxPayloadConceptNew | None = Field(
+        None, alias='InboxPayloadConceptNew'
+    )
+    InboxPayloadRelation_1: InboxPayloadRelation | None = Field(
+        None, alias='InboxPayloadRelation'
+    )
+    InboxSimilarConcept_1: InboxSimilarConcept | None = Field(
+        None, alias='InboxSimilarConcept'
+    )
+    InboxStatus_1: InboxStatus | None = Field(None, alias='InboxStatus')
     IngestState_1: IngestState | None = Field(None, alias='IngestState')
     InkMode_1: InkMode | None = Field(None, alias='InkMode')
     IsoDate: date | None = Field(None, title='IsoDate')
@@ -6218,6 +7570,7 @@ class SchemaBundle(BaseModel):
     LectureSettingsUpdate_1: LectureSettingsUpdate | None = Field(
         None, alias='LectureSettingsUpdate'
     )
+    LlmIssue_1: LlmIssue | None = Field(None, alias='LlmIssue')
     MaintenanceNightlyPayload_1: MaintenanceNightlyPayload | None = Field(
         None, alias='MaintenanceNightlyPayload'
     )
@@ -6232,6 +7585,7 @@ class SchemaBundle(BaseModel):
     MarkerRemoveData_1: MarkerRemoveData | None = Field(None, alias='MarkerRemoveData')
     MarkerRemoveOp_1: MarkerRemoveOp | None = Field(None, alias='MarkerRemoveOp')
     MarkerSource_1: MarkerSource | None = Field(None, alias='MarkerSource')
+    MergeBasis_1: MergeBasis | None = Field(None, alias='MergeBasis')
     Module_1: Module | None = Field(None, alias='Module')
     ModuleColor_1: ModuleColor | None = Field(None, alias='ModuleColor')
     ModuleCreate_1: ModuleCreate | None = Field(None, alias='ModuleCreate')
@@ -6455,6 +7809,7 @@ class SchemaBundle(BaseModel):
     )
     RecordingCreate_1: RecordingCreate | None = Field(None, alias='RecordingCreate')
     RecordingState_1: RecordingState | None = Field(None, alias='RecordingState')
+    ResolveVerdict_1: ResolveVerdict | None = Field(None, alias='ResolveVerdict')
     RestoreTest_1: RestoreTest | None = Field(None, alias='RestoreTest')
     RestoreTestReason_1: RestoreTestReason | None = Field(
         None, alias='RestoreTestReason'
@@ -6496,6 +7851,10 @@ class SchemaBundle(BaseModel):
     SemesterList_1: SemesterList | None = Field(None, alias='SemesterList')
     SemesterUpdate_1: SemesterUpdate | None = Field(None, alias='SemesterUpdate')
     Session_1: Session | None = Field(None, alias='Session')
+    SessionConceptItem_1: SessionConceptItem | None = Field(
+        None, alias='SessionConceptItem'
+    )
+    SessionConcepts_1: SessionConcepts | None = Field(None, alias='SessionConcepts')
     SessionCreate_1: SessionCreate | None = Field(None, alias='SessionCreate')
     SessionExtendRequest_1: SessionExtendRequest | None = Field(
         None, alias='SessionExtendRequest'
@@ -6509,6 +7868,7 @@ class SchemaBundle(BaseModel):
     )
     SessionPauseOp_1: SessionPauseOp | None = Field(None, alias='SessionPauseOp')
     SessionProcessing: dict[str, JobState] | None = None
+    SessionRef_1: SessionRef | None = Field(None, alias='SessionRef')
     SessionRefData_1: SessionRefData | None = Field(None, alias='SessionRefData')
     SessionReprocessRequest_1: SessionReprocessRequest | None = Field(
         None, alias='SessionReprocessRequest'
@@ -6539,6 +7899,10 @@ class SchemaBundle(BaseModel):
         None,
         pattern='^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
         title='SessionStreamId',
+    )
+    SessionSummary_1: SessionSummary | None = Field(None, alias='SessionSummary')
+    SessionSummaryView_1: SessionSummaryView | None = Field(
+        None, alias='SessionSummaryView'
     )
     SessionTranscript_1: SessionTranscript | None = Field(
         None, alias='SessionTranscript'
@@ -6582,6 +7946,16 @@ class SchemaBundle(BaseModel):
     StrokeRemoveData_1: StrokeRemoveData | None = Field(None, alias='StrokeRemoveData')
     StrokeRemoveOp_1: StrokeRemoveOp | None = Field(None, alias='StrokeRemoveOp')
     StrokeTool_1: StrokeTool | None = Field(None, alias='StrokeTool')
+    SummaryOutlineItem_1: SummaryOutlineItem | None = Field(
+        None, alias='SummaryOutlineItem'
+    )
+    SummarySentence_1: SummarySentence | None = Field(None, alias='SummarySentence')
+    SummaryWritePayload_1: SummaryWritePayload | None = Field(
+        None, alias='SummaryWritePayload'
+    )
+    SummaryWriteResult_1: SummaryWriteResult | None = Field(
+        None, alias='SummaryWriteResult'
+    )
     SyncAck_1: SyncAck | None = Field(None, alias='SyncAck')
     SyncClientKind_1: SyncClientKind | None = Field(None, alias='SyncClientKind')
     SyncClientMessage: (
@@ -6771,9 +8145,12 @@ class SchemaBundle(BaseModel):
         title='Uuid',
     )
     WorkerHealth_1: WorkerHealth | None = Field(None, alias='WorkerHealth')
+    WorkerLlmStatus_1: WorkerLlmStatus | None = Field(None, alias='WorkerLlmStatus')
 
 
 # Union-Typen (für Validierung: pydantic.TypeAdapter(<Typ>))
+type EvidenceRef = EvidenceRefSlide | EvidenceRefTranscript
+type InboxPayload = InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation
 type PageElement = TextElement | ImageElement | ShapeElement | TapeElement | StampElement
 type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload
 type SearchHit = SearchHitSlide | SearchHitTranscript

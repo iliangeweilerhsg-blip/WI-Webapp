@@ -1,0 +1,13 @@
+{
+  "action": "beziehung_bestaetigt",
+  "concept_id": null,
+  "merged_into": null,
+  "moved_evidence_ids": [],
+  "added_aliases": [],
+  "added_module_ids": [],
+  "previous": null,
+  "relation_kind_before": "verwandt",
+  "cascade_item_ids": [],
+  "duplicate_of": "keine-uuid",
+  "triggered_by": null
+}

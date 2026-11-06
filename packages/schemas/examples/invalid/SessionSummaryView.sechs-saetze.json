@@ -1,0 +1,105 @@
+{
+  "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+  "summary": {
+    "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e71",
+    "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+    "created_at": "2026-11-05T14:12:30Z",
+    "updated_at": "2026-11-05T14:12:30Z",
+    "lang": "de",
+    "sentences": [
+      {
+        "text": "Satz 0.",
+        "sources": [
+          {
+            "kind": "slide",
+            "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+            "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+            "slide_index": 14
+          }
+        ]
+      },
+      {
+        "text": "Satz 1.",
+        "sources": [
+          {
+            "kind": "slide",
+            "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+            "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+            "slide_index": 14
+          }
+        ]
+      },
+      {
+        "text": "Satz 2.",
+        "sources": [
+          {
+            "kind": "slide",
+            "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+            "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+            "slide_index": 14
+          }
+        ]
+      },
+      {
+        "text": "Satz 3.",
+        "sources": [
+          {
+            "kind": "slide",
+            "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+            "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+            "slide_index": 14
+          }
+        ]
+      },
+      {
+        "text": "Satz 4.",
+        "sources": [
+          {
+            "kind": "slide",
+            "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+            "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+            "slide_index": 14
+          }
+        ]
+      },
+      {
+        "text": "Satz 5.",
+        "sources": [
+          {
+            "kind": "slide",
+            "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+            "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+            "slide_index": 14
+          }
+        ]
+      }
+    ],
+    "outline": [
+      {
+        "title": "Wiederholung: funktionale Abhängigkeiten",
+        "sources": [
+          {
+            "kind": "slide",
+            "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e15",
+            "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+            "slide_index": 15
+          }
+        ]
+      },
+      {
+        "title": "Dritte Normalform",
+        "sources": [
+          {
+            "kind": "slide",
+            "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+            "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+            "slide_index": 14
+          }
+        ]
+      }
+    ],
+    "model": "claude-sonnet-5-5",
+    "prompt_version": "summary.write/v1",
+    "job_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e23"
+  }
+}

@@ -9,6 +9,10 @@ import Foundation
 /// GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
 // MARK: - SchemaBundle
 struct SchemaBundle: Codable {
+    let aiBudgetStatus: AIBudgetStatus?
+    let aiSettings: AISettings?
+    let aiSettingsUpdate: AISettingsUpdate?
+    let aiStatus: AIStatus?
     let alignLogMode: AlignLogMode?
     let alignLogPayload: AlignLogPayload?
     let alignLogResult: AlignLogResult?
@@ -22,6 +26,7 @@ struct SchemaBundle: Codable {
     let audioFinalizeResult: AudioFinalizeResult?
     let audioGap: AudioGap?
     let audioGapReason: AudioGapReason?
+    let autoAcceptMode: AutoAcceptMode?
     let backupOverview: BackupOverview?
     let backupRun: BackupRun?
     let backupState: BackupState?
@@ -41,6 +46,25 @@ struct SchemaBundle: Codable {
     let calendarUpdateScope: CalendarUpdateScope?
     let clientDevice: ClientDevice?
     let columnWidths: [Double]?
+    let concept: Concept?
+    let conceptDetail: ConceptDetail?
+    let conceptEdit: ConceptEdit?
+    let conceptKind: ConceptKind?
+    let conceptList: ConceptList?
+    let conceptListItem: ConceptListItem?
+    let conceptProposal: ConceptProposal?
+    let conceptRelationKind: ConceptRelationKind?
+    let conceptRelationSource: ConceptRelationSource?
+    let conceptRelationView: ConceptRelationView?
+    let conceptsExtractPayload: ConceptsExtractPayload?
+    let conceptsExtractResult: ConceptsExtractResult?
+    let conceptsResolvePayload: ConceptsResolvePayload?
+    let conceptsResolveResult: ConceptsResolveResult?
+    let conceptStatus: ConceptStatus?
+    let costByModel: CostByModel?
+    let costBySession: CostBySession?
+    let costByTask: CostByTask?
+    let costSummary: CostSummary?
     let dashboardLayout: DashboardLayout?
     let dataSettings: DataSettings?
     let dataSettingsUpdate: DataSettingsUpdate?
@@ -57,9 +81,15 @@ struct SchemaBundle: Codable {
     let embedRequest: EmbedRequest?
     let embedResponse: EmbedResponse?
     let epochMS: Int?
+    let evidenceRef: EvidenceRef?
+    let evidenceRefSlide: EvidenceRefSlide?
+    let evidenceRefTranscript: EvidenceRefTranscript?
+    let evidenceView: EvidenceView?
     let exerciseSheet: ExerciseSheet?
     let exerciseSheetList: ExerciseSheetList?
     let exerciseSheetUpdate: ExerciseSheetUpdate?
+    let extractedConcept: ExtractedConcept?
+    let extractedRelation: ExtractedRelation?
     let fileReceipt: FileReceipt?
     let fileRef: FileRef?
     let generalSettings: GeneralSettings?
@@ -73,6 +103,23 @@ struct SchemaBundle: Codable {
     let icsWarning: ICSWarning?
     let imageElement: ImageElement?
     let imageElementPayload: ImageElementPayload?
+    let inboxAcceptRequest: InboxAcceptRequest?
+    let inboxBlockedReason: InboxBlockedReason?
+    let inboxBulkRequest: InboxBulkRequest?
+    let inboxBulkResult: InboxBulkResult?
+    let inboxDecision: InboxDecision?
+    let inboxDecisionResult: InboxDecisionResult?
+    let inboxItem: InboxItem?
+    let inboxItemList: InboxItemList?
+    let inboxKind: InboxKind?
+    let inboxOverview: InboxOverview?
+    let inboxOverviewSession: InboxOverviewSession?
+    let inboxPayload: InboxPayload?
+    let inboxPayloadConceptMerge: InboxPayloadConceptMerge?
+    let inboxPayloadConceptNew: InboxPayloadConceptNew?
+    let inboxPayloadRelation: InboxPayloadRelation?
+    let inboxSimilarConcept: InboxSimilarConcept?
+    let inboxStatus: InboxStatus?
     let ingestState: IngestState?
     let inkMode: InkMode?
     let isoDate: String?
@@ -84,6 +131,7 @@ struct SchemaBundle: Codable {
     let languageCode: String?
     let lectureSettings: LectureSettings?
     let lectureSettingsUpdate: LectureSettingsUpdate?
+    let llmIssue: LlmIssue?
     let maintenanceNightlyPayload: MaintenanceNightlyPayload?
     let maintenanceNightlyResult: MaintenanceNightlyResult?
     let marker: Marker?
@@ -94,6 +142,7 @@ struct SchemaBundle: Codable {
     let markerRemoveData: MarkerRemoveData?
     let markerRemoveOp: MarkerRemoveOp?
     let markerSource: MarkerSource?
+    let mergeBasis: MergeBasis?
     let module: Module?
     let moduleColor: ModuleColor?
     let moduleCreate: ModuleCreate?
@@ -217,6 +266,7 @@ struct SchemaBundle: Codable {
     let recordingComplete: RecordingComplete?
     let recordingCreate: RecordingCreate?
     let recordingState: RecordingState?
+    let resolveVerdict: ResolveVerdict?
     let restoreTest: RestoreTest?
     let restoreTestReason: RestoreTestReason?
     let restoreTestState: RestoreTestState?
@@ -238,12 +288,15 @@ struct SchemaBundle: Codable {
     let semesterList: SemesterList?
     let semesterUpdate: SemesterUpdate?
     let session: Session?
+    let sessionConceptItem: SessionConceptItem?
+    let sessionConcepts: SessionConcepts?
     let sessionCreate: SessionCreate?
     let sessionExtendRequest: SessionExtendRequest?
     let sessionList: SessionList?
     let sessionMS: Int?
     let sessionPauseOp: SessionPauseOp?
     let sessionProcessing: [String: JobState]?
+    let sessionRef: SessionRef?
     let sessionRefData: SessionRefData?
     let sessionReprocessRequest: SessionReprocessRequest?
     let sessionReprocessResult: SessionReprocessResult?
@@ -259,6 +312,8 @@ struct SchemaBundle: Codable {
     let sessionStopOp: SessionStopOp?
     let sessionStopRequest: SessionStopRequest?
     let sessionStreamID: String?
+    let sessionSummary: SessionSummary?
+    let sessionSummaryView: SessionSummaryView?
     let sessionTranscript: SessionTranscript?
     let sessionUpdate: SessionUpdate?
     let settings: Settings?
@@ -288,6 +343,10 @@ struct SchemaBundle: Codable {
     let strokeRemoveData: StrokeRemoveData?
     let strokeRemoveOp: StrokeRemoveOp?
     let strokeTool: StrokeTool?
+    let summaryOutlineItem: SummaryOutlineItem?
+    let summarySentence: SummarySentence?
+    let summaryWritePayload: SummaryWritePayload?
+    let summaryWriteResult: SummaryWriteResult?
     let syncACK: SyncACK?
     let syncClientKind: SyncClientKind?
     let syncClientMessage: SyncClientMessage?
@@ -343,8 +402,13 @@ struct SchemaBundle: Codable {
     let uploadResult: UploadResult?
     let uuid: String?
     let workerHealth: WorkerHealth?
+    let workerLlmStatus: WorkerLlmStatus?
 
     enum CodingKeys: String, CodingKey {
+        case aiBudgetStatus = "AiBudgetStatus"
+        case aiSettings = "AiSettings"
+        case aiSettingsUpdate = "AiSettingsUpdate"
+        case aiStatus = "AiStatus"
         case alignLogMode = "AlignLogMode"
         case alignLogPayload = "AlignLogPayload"
         case alignLogResult = "AlignLogResult"
@@ -358,6 +422,7 @@ struct SchemaBundle: Codable {
         case audioFinalizeResult = "AudioFinalizeResult"
         case audioGap = "AudioGap"
         case audioGapReason = "AudioGapReason"
+        case autoAcceptMode = "AutoAcceptMode"
         case backupOverview = "BackupOverview"
         case backupRun = "BackupRun"
         case backupState = "BackupState"
@@ -377,6 +442,25 @@ struct SchemaBundle: Codable {
         case calendarUpdateScope = "CalendarUpdateScope"
         case clientDevice = "ClientDevice"
         case columnWidths = "ColumnWidths"
+        case concept = "Concept"
+        case conceptDetail = "ConceptDetail"
+        case conceptEdit = "ConceptEdit"
+        case conceptKind = "ConceptKind"
+        case conceptList = "ConceptList"
+        case conceptListItem = "ConceptListItem"
+        case conceptProposal = "ConceptProposal"
+        case conceptRelationKind = "ConceptRelationKind"
+        case conceptRelationSource = "ConceptRelationSource"
+        case conceptRelationView = "ConceptRelationView"
+        case conceptsExtractPayload = "ConceptsExtractPayload"
+        case conceptsExtractResult = "ConceptsExtractResult"
+        case conceptsResolvePayload = "ConceptsResolvePayload"
+        case conceptsResolveResult = "ConceptsResolveResult"
+        case conceptStatus = "ConceptStatus"
+        case costByModel = "CostByModel"
+        case costBySession = "CostBySession"
+        case costByTask = "CostByTask"
+        case costSummary = "CostSummary"
         case dashboardLayout = "DashboardLayout"
         case dataSettings = "DataSettings"
         case dataSettingsUpdate = "DataSettingsUpdate"
@@ -393,9 +477,15 @@ struct SchemaBundle: Codable {
         case embedRequest = "EmbedRequest"
         case embedResponse = "EmbedResponse"
         case epochMS = "EpochMs"
+        case evidenceRef = "EvidenceRef"
+        case evidenceRefSlide = "EvidenceRefSlide"
+        case evidenceRefTranscript = "EvidenceRefTranscript"
+        case evidenceView = "EvidenceView"
         case exerciseSheet = "ExerciseSheet"
         case exerciseSheetList = "ExerciseSheetList"
         case exerciseSheetUpdate = "ExerciseSheetUpdate"
+        case extractedConcept = "ExtractedConcept"
+        case extractedRelation = "ExtractedRelation"
         case fileReceipt = "FileReceipt"
         case fileRef = "FileRef"
         case generalSettings = "GeneralSettings"
@@ -409,6 +499,23 @@ struct SchemaBundle: Codable {
         case icsWarning = "IcsWarning"
         case imageElement = "ImageElement"
         case imageElementPayload = "ImageElementPayload"
+        case inboxAcceptRequest = "InboxAcceptRequest"
+        case inboxBlockedReason = "InboxBlockedReason"
+        case inboxBulkRequest = "InboxBulkRequest"
+        case inboxBulkResult = "InboxBulkResult"
+        case inboxDecision = "InboxDecision"
+        case inboxDecisionResult = "InboxDecisionResult"
+        case inboxItem = "InboxItem"
+        case inboxItemList = "InboxItemList"
+        case inboxKind = "InboxKind"
+        case inboxOverview = "InboxOverview"
+        case inboxOverviewSession = "InboxOverviewSession"
+        case inboxPayload = "InboxPayload"
+        case inboxPayloadConceptMerge = "InboxPayloadConceptMerge"
+        case inboxPayloadConceptNew = "InboxPayloadConceptNew"
+        case inboxPayloadRelation = "InboxPayloadRelation"
+        case inboxSimilarConcept = "InboxSimilarConcept"
+        case inboxStatus = "InboxStatus"
         case ingestState = "IngestState"
         case inkMode = "InkMode"
         case isoDate = "IsoDate"
@@ -420,6 +527,7 @@ struct SchemaBundle: Codable {
         case languageCode = "LanguageCode"
         case lectureSettings = "LectureSettings"
         case lectureSettingsUpdate = "LectureSettingsUpdate"
+        case llmIssue = "LlmIssue"
         case maintenanceNightlyPayload = "MaintenanceNightlyPayload"
         case maintenanceNightlyResult = "MaintenanceNightlyResult"
         case marker = "Marker"
@@ -430,6 +538,7 @@ struct SchemaBundle: Codable {
         case markerRemoveData = "MarkerRemoveData"
         case markerRemoveOp = "MarkerRemoveOp"
         case markerSource = "MarkerSource"
+        case mergeBasis = "MergeBasis"
         case module = "Module"
         case moduleColor = "ModuleColor"
         case moduleCreate = "ModuleCreate"
@@ -553,6 +662,7 @@ struct SchemaBundle: Codable {
         case recordingComplete = "RecordingComplete"
         case recordingCreate = "RecordingCreate"
         case recordingState = "RecordingState"
+        case resolveVerdict = "ResolveVerdict"
         case restoreTest = "RestoreTest"
         case restoreTestReason = "RestoreTestReason"
         case restoreTestState = "RestoreTestState"
@@ -574,12 +684,15 @@ struct SchemaBundle: Codable {
         case semesterList = "SemesterList"
         case semesterUpdate = "SemesterUpdate"
         case session = "Session"
+        case sessionConceptItem = "SessionConceptItem"
+        case sessionConcepts = "SessionConcepts"
         case sessionCreate = "SessionCreate"
         case sessionExtendRequest = "SessionExtendRequest"
         case sessionList = "SessionList"
         case sessionMS = "SessionMs"
         case sessionPauseOp = "SessionPauseOp"
         case sessionProcessing = "SessionProcessing"
+        case sessionRef = "SessionRef"
         case sessionRefData = "SessionRefData"
         case sessionReprocessRequest = "SessionReprocessRequest"
         case sessionReprocessResult = "SessionReprocessResult"
@@ -595,6 +708,8 @@ struct SchemaBundle: Codable {
         case sessionStopOp = "SessionStopOp"
         case sessionStopRequest = "SessionStopRequest"
         case sessionStreamID = "SessionStreamId"
+        case sessionSummary = "SessionSummary"
+        case sessionSummaryView = "SessionSummaryView"
         case sessionTranscript = "SessionTranscript"
         case sessionUpdate = "SessionUpdate"
         case settings = "Settings"
@@ -624,6 +739,10 @@ struct SchemaBundle: Codable {
         case strokeRemoveData = "StrokeRemoveData"
         case strokeRemoveOp = "StrokeRemoveOp"
         case strokeTool = "StrokeTool"
+        case summaryOutlineItem = "SummaryOutlineItem"
+        case summarySentence = "SummarySentence"
+        case summaryWritePayload = "SummaryWritePayload"
+        case summaryWriteResult = "SummaryWriteResult"
         case syncACK = "SyncAck"
         case syncClientKind = "SyncClientKind"
         case syncClientMessage = "SyncClientMessage"
@@ -679,6 +798,7 @@ struct SchemaBundle: Codable {
         case uploadResult = "UploadResult"
         case uuid = "Uuid"
         case workerHealth = "WorkerHealth"
+        case workerLlmStatus = "WorkerLlmStatus"
     }
 }
 
@@ -701,6 +821,10 @@ extension SchemaBundle {
     }
 
     func with(
+        aiBudgetStatus: AIBudgetStatus?? = nil,
+        aiSettings: AISettings?? = nil,
+        aiSettingsUpdate: AISettingsUpdate?? = nil,
+        aiStatus: AIStatus?? = nil,
         alignLogMode: AlignLogMode?? = nil,
         alignLogPayload: AlignLogPayload?? = nil,
         alignLogResult: AlignLogResult?? = nil,
@@ -714,6 +838,7 @@ extension SchemaBundle {
         audioFinalizeResult: AudioFinalizeResult?? = nil,
         audioGap: AudioGap?? = nil,
         audioGapReason: AudioGapReason?? = nil,
+        autoAcceptMode: AutoAcceptMode?? = nil,
         backupOverview: BackupOverview?? = nil,
         backupRun: BackupRun?? = nil,
         backupState: BackupState?? = nil,
@@ -733,6 +858,25 @@ extension SchemaBundle {
         calendarUpdateScope: CalendarUpdateScope?? = nil,
         clientDevice: ClientDevice?? = nil,
         columnWidths: [Double]?? = nil,
+        concept: Concept?? = nil,
+        conceptDetail: ConceptDetail?? = nil,
+        conceptEdit: ConceptEdit?? = nil,
+        conceptKind: ConceptKind?? = nil,
+        conceptList: ConceptList?? = nil,
+        conceptListItem: ConceptListItem?? = nil,
+        conceptProposal: ConceptProposal?? = nil,
+        conceptRelationKind: ConceptRelationKind?? = nil,
+        conceptRelationSource: ConceptRelationSource?? = nil,
+        conceptRelationView: ConceptRelationView?? = nil,
+        conceptsExtractPayload: ConceptsExtractPayload?? = nil,
+        conceptsExtractResult: ConceptsExtractResult?? = nil,
+        conceptsResolvePayload: ConceptsResolvePayload?? = nil,
+        conceptsResolveResult: ConceptsResolveResult?? = nil,
+        conceptStatus: ConceptStatus?? = nil,
+        costByModel: CostByModel?? = nil,
+        costBySession: CostBySession?? = nil,
+        costByTask: CostByTask?? = nil,
+        costSummary: CostSummary?? = nil,
         dashboardLayout: DashboardLayout?? = nil,
         dataSettings: DataSettings?? = nil,
         dataSettingsUpdate: DataSettingsUpdate?? = nil,
@@ -749,9 +893,15 @@ extension SchemaBundle {
         embedRequest: EmbedRequest?? = nil,
         embedResponse: EmbedResponse?? = nil,
         epochMS: Int?? = nil,
+        evidenceRef: EvidenceRef?? = nil,
+        evidenceRefSlide: EvidenceRefSlide?? = nil,
+        evidenceRefTranscript: EvidenceRefTranscript?? = nil,
+        evidenceView: EvidenceView?? = nil,
         exerciseSheet: ExerciseSheet?? = nil,
         exerciseSheetList: ExerciseSheetList?? = nil,
         exerciseSheetUpdate: ExerciseSheetUpdate?? = nil,
+        extractedConcept: ExtractedConcept?? = nil,
+        extractedRelation: ExtractedRelation?? = nil,
         fileReceipt: FileReceipt?? = nil,
         fileRef: FileRef?? = nil,
         generalSettings: GeneralSettings?? = nil,
@@ -765,6 +915,23 @@ extension SchemaBundle {
         icsWarning: ICSWarning?? = nil,
         imageElement: ImageElement?? = nil,
         imageElementPayload: ImageElementPayload?? = nil,
+        inboxAcceptRequest: InboxAcceptRequest?? = nil,
+        inboxBlockedReason: InboxBlockedReason?? = nil,
+        inboxBulkRequest: InboxBulkRequest?? = nil,
+        inboxBulkResult: InboxBulkResult?? = nil,
+        inboxDecision: InboxDecision?? = nil,
+        inboxDecisionResult: InboxDecisionResult?? = nil,
+        inboxItem: InboxItem?? = nil,
+        inboxItemList: InboxItemList?? = nil,
+        inboxKind: InboxKind?? = nil,
+        inboxOverview: InboxOverview?? = nil,
+        inboxOverviewSession: InboxOverviewSession?? = nil,
+        inboxPayload: InboxPayload?? = nil,
+        inboxPayloadConceptMerge: InboxPayloadConceptMerge?? = nil,
+        inboxPayloadConceptNew: InboxPayloadConceptNew?? = nil,
+        inboxPayloadRelation: InboxPayloadRelation?? = nil,
+        inboxSimilarConcept: InboxSimilarConcept?? = nil,
+        inboxStatus: InboxStatus?? = nil,
         ingestState: IngestState?? = nil,
         inkMode: InkMode?? = nil,
         isoDate: String?? = nil,
@@ -776,6 +943,7 @@ extension SchemaBundle {
         languageCode: String?? = nil,
         lectureSettings: LectureSettings?? = nil,
         lectureSettingsUpdate: LectureSettingsUpdate?? = nil,
+        llmIssue: LlmIssue?? = nil,
         maintenanceNightlyPayload: MaintenanceNightlyPayload?? = nil,
         maintenanceNightlyResult: MaintenanceNightlyResult?? = nil,
         marker: Marker?? = nil,
@@ -786,6 +954,7 @@ extension SchemaBundle {
         markerRemoveData: MarkerRemoveData?? = nil,
         markerRemoveOp: MarkerRemoveOp?? = nil,
         markerSource: MarkerSource?? = nil,
+        mergeBasis: MergeBasis?? = nil,
         module: Module?? = nil,
         moduleColor: ModuleColor?? = nil,
         moduleCreate: ModuleCreate?? = nil,
@@ -909,6 +1078,7 @@ extension SchemaBundle {
         recordingComplete: RecordingComplete?? = nil,
         recordingCreate: RecordingCreate?? = nil,
         recordingState: RecordingState?? = nil,
+        resolveVerdict: ResolveVerdict?? = nil,
         restoreTest: RestoreTest?? = nil,
         restoreTestReason: RestoreTestReason?? = nil,
         restoreTestState: RestoreTestState?? = nil,
@@ -930,12 +1100,15 @@ extension SchemaBundle {
         semesterList: SemesterList?? = nil,
         semesterUpdate: SemesterUpdate?? = nil,
         session: Session?? = nil,
+        sessionConceptItem: SessionConceptItem?? = nil,
+        sessionConcepts: SessionConcepts?? = nil,
         sessionCreate: SessionCreate?? = nil,
         sessionExtendRequest: SessionExtendRequest?? = nil,
         sessionList: SessionList?? = nil,
         sessionMS: Int?? = nil,
         sessionPauseOp: SessionPauseOp?? = nil,
         sessionProcessing: [String: JobState]?? = nil,
+        sessionRef: SessionRef?? = nil,
         sessionRefData: SessionRefData?? = nil,
         sessionReprocessRequest: SessionReprocessRequest?? = nil,
         sessionReprocessResult: SessionReprocessResult?? = nil,
@@ -951,6 +1124,8 @@ extension SchemaBundle {
         sessionStopOp: SessionStopOp?? = nil,
         sessionStopRequest: SessionStopRequest?? = nil,
         sessionStreamID: String?? = nil,
+        sessionSummary: SessionSummary?? = nil,
+        sessionSummaryView: SessionSummaryView?? = nil,
         sessionTranscript: SessionTranscript?? = nil,
         sessionUpdate: SessionUpdate?? = nil,
         settings: Settings?? = nil,
@@ -980,6 +1155,10 @@ extension SchemaBundle {
         strokeRemoveData: StrokeRemoveData?? = nil,
         strokeRemoveOp: StrokeRemoveOp?? = nil,
         strokeTool: StrokeTool?? = nil,
+        summaryOutlineItem: SummaryOutlineItem?? = nil,
+        summarySentence: SummarySentence?? = nil,
+        summaryWritePayload: SummaryWritePayload?? = nil,
+        summaryWriteResult: SummaryWriteResult?? = nil,
         syncACK: SyncACK?? = nil,
         syncClientKind: SyncClientKind?? = nil,
         syncClientMessage: SyncClientMessage?? = nil,
@@ -1034,9 +1213,14 @@ extension SchemaBundle {
         trashRestoreResult: TrashRestoreResult?? = nil,
         uploadResult: UploadResult?? = nil,
         uuid: String?? = nil,
-        workerHealth: WorkerHealth?? = nil
+        workerHealth: WorkerHealth?? = nil,
+        workerLlmStatus: WorkerLlmStatus?? = nil
     ) -> SchemaBundle {
         return SchemaBundle(
+            aiBudgetStatus: aiBudgetStatus ?? self.aiBudgetStatus,
+            aiSettings: aiSettings ?? self.aiSettings,
+            aiSettingsUpdate: aiSettingsUpdate ?? self.aiSettingsUpdate,
+            aiStatus: aiStatus ?? self.aiStatus,
             alignLogMode: alignLogMode ?? self.alignLogMode,
             alignLogPayload: alignLogPayload ?? self.alignLogPayload,
             alignLogResult: alignLogResult ?? self.alignLogResult,
@@ -1050,6 +1234,7 @@ extension SchemaBundle {
             audioFinalizeResult: audioFinalizeResult ?? self.audioFinalizeResult,
             audioGap: audioGap ?? self.audioGap,
             audioGapReason: audioGapReason ?? self.audioGapReason,
+            autoAcceptMode: autoAcceptMode ?? self.autoAcceptMode,
             backupOverview: backupOverview ?? self.backupOverview,
             backupRun: backupRun ?? self.backupRun,
             backupState: backupState ?? self.backupState,
@@ -1069,6 +1254,25 @@ extension SchemaBundle {
             calendarUpdateScope: calendarUpdateScope ?? self.calendarUpdateScope,
             clientDevice: clientDevice ?? self.clientDevice,
             columnWidths: columnWidths ?? self.columnWidths,
+            concept: concept ?? self.concept,
+            conceptDetail: conceptDetail ?? self.conceptDetail,
+            conceptEdit: conceptEdit ?? self.conceptEdit,
+            conceptKind: conceptKind ?? self.conceptKind,
+            conceptList: conceptList ?? self.conceptList,
+            conceptListItem: conceptListItem ?? self.conceptListItem,
+            conceptProposal: conceptProposal ?? self.conceptProposal,
+            conceptRelationKind: conceptRelationKind ?? self.conceptRelationKind,
+            conceptRelationSource: conceptRelationSource ?? self.conceptRelationSource,
+            conceptRelationView: conceptRelationView ?? self.conceptRelationView,
+            conceptsExtractPayload: conceptsExtractPayload ?? self.conceptsExtractPayload,
+            conceptsExtractResult: conceptsExtractResult ?? self.conceptsExtractResult,
+            conceptsResolvePayload: conceptsResolvePayload ?? self.conceptsResolvePayload,
+            conceptsResolveResult: conceptsResolveResult ?? self.conceptsResolveResult,
+            conceptStatus: conceptStatus ?? self.conceptStatus,
+            costByModel: costByModel ?? self.costByModel,
+            costBySession: costBySession ?? self.costBySession,
+            costByTask: costByTask ?? self.costByTask,
+            costSummary: costSummary ?? self.costSummary,
             dashboardLayout: dashboardLayout ?? self.dashboardLayout,
             dataSettings: dataSettings ?? self.dataSettings,
             dataSettingsUpdate: dataSettingsUpdate ?? self.dataSettingsUpdate,
@@ -1085,9 +1289,15 @@ extension SchemaBundle {
             embedRequest: embedRequest ?? self.embedRequest,
             embedResponse: embedResponse ?? self.embedResponse,
             epochMS: epochMS ?? self.epochMS,
+            evidenceRef: evidenceRef ?? self.evidenceRef,
+            evidenceRefSlide: evidenceRefSlide ?? self.evidenceRefSlide,
+            evidenceRefTranscript: evidenceRefTranscript ?? self.evidenceRefTranscript,
+            evidenceView: evidenceView ?? self.evidenceView,
             exerciseSheet: exerciseSheet ?? self.exerciseSheet,
             exerciseSheetList: exerciseSheetList ?? self.exerciseSheetList,
             exerciseSheetUpdate: exerciseSheetUpdate ?? self.exerciseSheetUpdate,
+            extractedConcept: extractedConcept ?? self.extractedConcept,
+            extractedRelation: extractedRelation ?? self.extractedRelation,
             fileReceipt: fileReceipt ?? self.fileReceipt,
             fileRef: fileRef ?? self.fileRef,
             generalSettings: generalSettings ?? self.generalSettings,
@@ -1101,6 +1311,23 @@ extension SchemaBundle {
             icsWarning: icsWarning ?? self.icsWarning,
             imageElement: imageElement ?? self.imageElement,
             imageElementPayload: imageElementPayload ?? self.imageElementPayload,
+            inboxAcceptRequest: inboxAcceptRequest ?? self.inboxAcceptRequest,
+            inboxBlockedReason: inboxBlockedReason ?? self.inboxBlockedReason,
+            inboxBulkRequest: inboxBulkRequest ?? self.inboxBulkRequest,
+            inboxBulkResult: inboxBulkResult ?? self.inboxBulkResult,
+            inboxDecision: inboxDecision ?? self.inboxDecision,
+            inboxDecisionResult: inboxDecisionResult ?? self.inboxDecisionResult,
+            inboxItem: inboxItem ?? self.inboxItem,
+            inboxItemList: inboxItemList ?? self.inboxItemList,
+            inboxKind: inboxKind ?? self.inboxKind,
+            inboxOverview: inboxOverview ?? self.inboxOverview,
+            inboxOverviewSession: inboxOverviewSession ?? self.inboxOverviewSession,
+            inboxPayload: inboxPayload ?? self.inboxPayload,
+            inboxPayloadConceptMerge: inboxPayloadConceptMerge ?? self.inboxPayloadConceptMerge,
+            inboxPayloadConceptNew: inboxPayloadConceptNew ?? self.inboxPayloadConceptNew,
+            inboxPayloadRelation: inboxPayloadRelation ?? self.inboxPayloadRelation,
+            inboxSimilarConcept: inboxSimilarConcept ?? self.inboxSimilarConcept,
+            inboxStatus: inboxStatus ?? self.inboxStatus,
             ingestState: ingestState ?? self.ingestState,
             inkMode: inkMode ?? self.inkMode,
             isoDate: isoDate ?? self.isoDate,
@@ -1112,6 +1339,7 @@ extension SchemaBundle {
             languageCode: languageCode ?? self.languageCode,
             lectureSettings: lectureSettings ?? self.lectureSettings,
             lectureSettingsUpdate: lectureSettingsUpdate ?? self.lectureSettingsUpdate,
+            llmIssue: llmIssue ?? self.llmIssue,
             maintenanceNightlyPayload: maintenanceNightlyPayload ?? self.maintenanceNightlyPayload,
             maintenanceNightlyResult: maintenanceNightlyResult ?? self.maintenanceNightlyResult,
             marker: marker ?? self.marker,
@@ -1122,6 +1350,7 @@ extension SchemaBundle {
             markerRemoveData: markerRemoveData ?? self.markerRemoveData,
             markerRemoveOp: markerRemoveOp ?? self.markerRemoveOp,
             markerSource: markerSource ?? self.markerSource,
+            mergeBasis: mergeBasis ?? self.mergeBasis,
             module: module ?? self.module,
             moduleColor: moduleColor ?? self.moduleColor,
             moduleCreate: moduleCreate ?? self.moduleCreate,
@@ -1245,6 +1474,7 @@ extension SchemaBundle {
             recordingComplete: recordingComplete ?? self.recordingComplete,
             recordingCreate: recordingCreate ?? self.recordingCreate,
             recordingState: recordingState ?? self.recordingState,
+            resolveVerdict: resolveVerdict ?? self.resolveVerdict,
             restoreTest: restoreTest ?? self.restoreTest,
             restoreTestReason: restoreTestReason ?? self.restoreTestReason,
             restoreTestState: restoreTestState ?? self.restoreTestState,
@@ -1266,12 +1496,15 @@ extension SchemaBundle {
             semesterList: semesterList ?? self.semesterList,
             semesterUpdate: semesterUpdate ?? self.semesterUpdate,
             session: session ?? self.session,
+            sessionConceptItem: sessionConceptItem ?? self.sessionConceptItem,
+            sessionConcepts: sessionConcepts ?? self.sessionConcepts,
             sessionCreate: sessionCreate ?? self.sessionCreate,
             sessionExtendRequest: sessionExtendRequest ?? self.sessionExtendRequest,
             sessionList: sessionList ?? self.sessionList,
             sessionMS: sessionMS ?? self.sessionMS,
             sessionPauseOp: sessionPauseOp ?? self.sessionPauseOp,
             sessionProcessing: sessionProcessing ?? self.sessionProcessing,
+            sessionRef: sessionRef ?? self.sessionRef,
             sessionRefData: sessionRefData ?? self.sessionRefData,
             sessionReprocessRequest: sessionReprocessRequest ?? self.sessionReprocessRequest,
             sessionReprocessResult: sessionReprocessResult ?? self.sessionReprocessResult,
@@ -1287,6 +1520,8 @@ extension SchemaBundle {
             sessionStopOp: sessionStopOp ?? self.sessionStopOp,
             sessionStopRequest: sessionStopRequest ?? self.sessionStopRequest,
             sessionStreamID: sessionStreamID ?? self.sessionStreamID,
+            sessionSummary: sessionSummary ?? self.sessionSummary,
+            sessionSummaryView: sessionSummaryView ?? self.sessionSummaryView,
             sessionTranscript: sessionTranscript ?? self.sessionTranscript,
             sessionUpdate: sessionUpdate ?? self.sessionUpdate,
             settings: settings ?? self.settings,
@@ -1316,6 +1551,10 @@ extension SchemaBundle {
             strokeRemoveData: strokeRemoveData ?? self.strokeRemoveData,
             strokeRemoveOp: strokeRemoveOp ?? self.strokeRemoveOp,
             strokeTool: strokeTool ?? self.strokeTool,
+            summaryOutlineItem: summaryOutlineItem ?? self.summaryOutlineItem,
+            summarySentence: summarySentence ?? self.summarySentence,
+            summaryWritePayload: summaryWritePayload ?? self.summaryWritePayload,
+            summaryWriteResult: summaryWriteResult ?? self.summaryWriteResult,
             syncACK: syncACK ?? self.syncACK,
             syncClientKind: syncClientKind ?? self.syncClientKind,
             syncClientMessage: syncClientMessage ?? self.syncClientMessage,
@@ -1370,7 +1609,8 @@ extension SchemaBundle {
             trashRestoreResult: trashRestoreResult ?? self.trashRestoreResult,
             uploadResult: uploadResult ?? self.uploadResult,
             uuid: uuid ?? self.uuid,
-            workerHealth: workerHealth ?? self.workerHealth
+            workerHealth: workerHealth ?? self.workerHealth,
+            workerLlmStatus: workerLlmStatus ?? self.workerLlmStatus
         )
     }
 
@@ -1381,6 +1621,292 @@ extension SchemaBundle {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// Monatsbudget (F-DAT-05). Monat = Kalendermonat in Ortszeit
+// MARK: - AIBudgetStatus
+struct AIBudgetStatus: Codable {
+    /// Euro (Schätzung, VERTRAEGE §20.5)
+    let budgetEur: Double
+    let month: String
+    /// spent_eur ≥ budget_eur: KI-Jobs enden mit fehler
+    let reached: Bool
+    /// Euro (Schätzung, VERTRAEGE §20.5)
+    let spentEur: Double
+    /// spent_eur ≥ 80 % von budget_eur
+    let warn: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case budgetEur = "budget_eur"
+        case month = "month"
+        case reached = "reached"
+        case spentEur = "spent_eur"
+        case warn = "warn"
+    }
+}
+
+// MARK: AIBudgetStatus convenience initializers and mutators
+
+extension AIBudgetStatus {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AIBudgetStatus.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        budgetEur: Double? = nil,
+        month: String? = nil,
+        reached: Bool? = nil,
+        spentEur: Double? = nil,
+        warn: Bool? = nil
+    ) -> AIBudgetStatus {
+        return AIBudgetStatus(
+            budgetEur: budgetEur ?? self.budgetEur,
+            month: month ?? self.month,
+            reached: reached ?? self.reached,
+            spentEur: spentEur ?? self.spentEur,
+            warn: warn ?? self.warn
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Einstellungen KI (F-EIN-01, VERTRAEGE §20.7). Bereich ai in setting
+// MARK: - AISettings
+struct AISettings: Codable {
+    let autoAccept: AutoAcceptMode
+    /// Monatsbudget in Euro, Standard 10. 0 schaltet Cloud-KI ab
+    let monthlyBudgetEur: Double
+
+    enum CodingKeys: String, CodingKey {
+        case autoAccept = "auto_accept"
+        case monthlyBudgetEur = "monthly_budget_eur"
+    }
+}
+
+// MARK: AISettings convenience initializers and mutators
+
+extension AISettings {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AISettings.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        autoAccept: AutoAcceptMode? = nil,
+        monthlyBudgetEur: Double? = nil
+    ) -> AISettings {
+        return AISettings(
+            autoAccept: autoAccept ?? self.autoAccept,
+            monthlyBudgetEur: monthlyBudgetEur ?? self.monthlyBudgetEur
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// F-EIN-01 KI „automatisch annehmen“: aus, nur Beziehungen, alles mit Konfidenz ≥ 0,9
+enum AutoAcceptMode: String, Codable {
+    case allesAb0_9 = "alles_ab_0_9"
+    case aus = "aus"
+    case nurBeziehungen = "nur_beziehungen"
+}
+
+/// Teil von SettingsUpdate.ai
+// MARK: - AISettingsUpdate
+struct AISettingsUpdate: Codable {
+    let autoAccept: AutoAcceptMode?
+    let monthlyBudgetEur: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case autoAccept = "auto_accept"
+        case monthlyBudgetEur = "monthly_budget_eur"
+    }
+}
+
+// MARK: AISettingsUpdate convenience initializers and mutators
+
+extension AISettingsUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AISettingsUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        autoAccept: AutoAcceptMode?? = nil,
+        monthlyBudgetEur: Double?? = nil
+    ) -> AISettingsUpdate {
+        return AISettingsUpdate(
+            autoAccept: autoAccept ?? self.autoAccept,
+            monthlyBudgetEur: monthlyBudgetEur ?? self.monthlyBudgetEur
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /ai/status
+// MARK: - AIStatus
+struct AIStatus: Codable {
+    let budget: AIBudgetStatus
+    let llm: WorkerLlmStatus?
+    let workerReachable: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case budget = "budget"
+        case llm = "llm"
+        case workerReachable = "worker_reachable"
+    }
+}
+
+// MARK: AIStatus convenience initializers and mutators
+
+extension AIStatus {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(AIStatus.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        budget: AIBudgetStatus? = nil,
+        llm: WorkerLlmStatus?? = nil,
+        workerReachable: Bool? = nil
+    ) -> AIStatus {
+        return AIStatus(
+            budget: budget ?? self.budget,
+            llm: llm ?? self.llm,
+            workerReachable: workerReachable ?? self.workerReachable
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// KI-Anbieter des Workers (GET /health des Workers, Feld llm). Nie der Schlüssel selbst
+// MARK: - WorkerLlmStatus
+struct WorkerLlmStatus: Codable {
+    /// true: Aufrufe möglich (Schlüssel vorhanden bzw. Fake)
+    let configured: Bool
+    let issue: LlmIssue?
+    /// anthropic | fake (SG_LLM)
+    let provider: String
+
+    enum CodingKeys: String, CodingKey {
+        case configured = "configured"
+        case issue = "issue"
+        case provider = "provider"
+    }
+}
+
+// MARK: WorkerLlmStatus convenience initializers and mutators
+
+extension WorkerLlmStatus {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(WorkerLlmStatus.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        configured: Bool? = nil,
+        issue: LlmIssue?? = nil,
+        provider: String? = nil
+    ) -> WorkerLlmStatus {
+        return WorkerLlmStatus(
+            configured: configured ?? self.configured,
+            issue: issue ?? self.issue,
+            provider: provider ?? self.provider
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Warum die KI nicht eingerichtet ist (VERTRAEGE §20.5)
+enum LlmIssue: String, Codable {
+    case envOffen = "env_offen"
+    case keinSchluessel = "kein_schluessel"
+    case unbekannterAnbieter = "unbekannter_anbieter"
 }
 
 /// log: aus Folienwechseln. ohne_wechsel: Foliensatz, aber kein verwertbarer Wechsel (ganze
@@ -2798,6 +3324,1535 @@ enum ClientDevice: String, Codable {
     case mac = "mac"
 }
 
+/// Konzept (03 §7). Gehört keinem Fach allein (concept_module). Ohne embedding, vault_path
+/// und block_hashes (kommen mit dem Vault)
+// MARK: - Concept
+struct Concept: Codable {
+    /// weitere Namen, z. B. der englische Begriff (05 §1 Sprache)
+    let aliases: [String]
+    let createdAt: Date
+    let examRelevant: Bool
+    let id: String
+    /// Startwert der Wichtigkeit (W-05: importance 1|2|3 → 0,8|1,0|1,3)
+    let importanceBase: Double
+    let kind: ConceptKind?
+    let mergedInto: String?
+    /// NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+    let name: String
+    /// „In einem Satz“
+    let oneLiner: String?
+    let status: ConceptStatus
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case aliases = "aliases"
+        case createdAt = "created_at"
+        case examRelevant = "exam_relevant"
+        case id = "id"
+        case importanceBase = "importance_base"
+        case kind = "kind"
+        case mergedInto = "merged_into"
+        case name = "name"
+        case oneLiner = "one_liner"
+        case status = "status"
+        case updatedAt = "updated_at"
+    }
+}
+
+// MARK: Concept convenience initializers and mutators
+
+extension Concept {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Concept.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        aliases: [String]? = nil,
+        createdAt: Date? = nil,
+        examRelevant: Bool? = nil,
+        id: String? = nil,
+        importanceBase: Double? = nil,
+        kind: ConceptKind?? = nil,
+        mergedInto: String?? = nil,
+        name: String? = nil,
+        oneLiner: String?? = nil,
+        status: ConceptStatus? = nil,
+        updatedAt: Date? = nil
+    ) -> Concept {
+        return Concept(
+            aliases: aliases ?? self.aliases,
+            createdAt: createdAt ?? self.createdAt,
+            examRelevant: examRelevant ?? self.examRelevant,
+            id: id ?? self.id,
+            importanceBase: importanceBase ?? self.importanceBase,
+            kind: kind ?? self.kind,
+            mergedInto: mergedInto ?? self.mergedInto,
+            name: name ?? self.name,
+            oneLiner: oneLiner ?? self.oneLiner,
+            status: status ?? self.status,
+            updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Art eines Konzepts (05 §P7a, W-02 Option A: concept.kind)
+enum ConceptKind: String, Codable {
+    case beispiel = "beispiel"
+    case definition = "definition"
+    case modell = "modell"
+    case satz = "satz"
+    case verfahren = "verfahren"
+}
+
+/// concept.status (03 §7). vorschlag: nur als Inbox-Vorschlag, zusammengefuehrt: merged_into
+/// gesetzt (Invariante 5)
+enum ConceptStatus: String, Codable {
+    case aktiv = "aktiv"
+    case vorschlag = "vorschlag"
+    case zusammengefuehrt = "zusammengefuehrt"
+}
+
+/// GET /concepts/{id}
+// MARK: - ConceptDetail
+struct ConceptDetail: Codable {
+    let concept: Concept
+    /// nicht gelöschte Belege, neueste Session zuerst, höchstens 200
+    let evidence: [EvidenceView]
+    let inboxItemID: String?
+    let modules: [SearchModuleRef]
+    /// nur bestätigte Beziehungen zu nicht gelöschten Konzepten
+    let relations: [ConceptRelationView]
+
+    enum CodingKeys: String, CodingKey {
+        case concept = "concept"
+        case evidence = "evidence"
+        case inboxItemID = "inbox_item_id"
+        case modules = "modules"
+        case relations = "relations"
+    }
+}
+
+// MARK: ConceptDetail convenience initializers and mutators
+
+extension ConceptDetail {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptDetail.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        concept: Concept? = nil,
+        evidence: [EvidenceView]? = nil,
+        inboxItemID: String?? = nil,
+        modules: [SearchModuleRef]? = nil,
+        relations: [ConceptRelationView]? = nil
+    ) -> ConceptDetail {
+        return ConceptDetail(
+            concept: concept ?? self.concept,
+            evidence: evidence ?? self.evidence,
+            inboxItemID: inboxItemID ?? self.inboxItemID,
+            modules: modules ?? self.modules,
+            relations: relations ?? self.relations
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Gespeicherter Beleg (Tabelle evidence) mit Anzeigeangaben
+// MARK: - EvidenceView
+struct EvidenceView: Codable {
+    /// true: beim Abgleich automatisch an ein vorhandenes Konzept gehängt (§20.3)
+    let auto: Bool
+    let id: String
+    /// true: Ziel gelöscht (Folie bzw. Foliensatz), der Beleg ist nicht mehr anspringbar
+    let missing: Bool
+    /// kurzes Zitat für die Anzeige
+    let quote: String?
+    let ref: EvidenceRef
+    let session: SessionRef?
+    /// nur bei slide: Titel der Folie, sonst null
+    let slideTitle: String?
+
+    enum CodingKeys: String, CodingKey {
+        case auto = "auto"
+        case id = "id"
+        case missing = "missing"
+        case quote = "quote"
+        case ref = "ref"
+        case session = "session"
+        case slideTitle = "slide_title"
+    }
+}
+
+// MARK: EvidenceView convenience initializers and mutators
+
+extension EvidenceView {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(EvidenceView.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        auto: Bool? = nil,
+        id: String? = nil,
+        missing: Bool? = nil,
+        quote: String?? = nil,
+        ref: EvidenceRef? = nil,
+        session: SessionRef?? = nil,
+        slideTitle: String?? = nil
+    ) -> EvidenceView {
+        return EvidenceView(
+            auto: auto ?? self.auto,
+            id: id ?? self.id,
+            missing: missing ?? self.missing,
+            quote: quote ?? self.quote,
+            ref: ref ?? self.ref,
+            session: session ?? self.session,
+            slideTitle: slideTitle ?? self.slideTitle
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen
+/// typisierten Union erzeugt)
+///
+/// Beleg auf eine Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+///
+/// Beleg auf einen Zeitraum des Gesagten (Sitzungszeit, §18.1). t_end_ms ≥ t_start_ms prüft
+/// der Schreiber. Ziel: /rueckblick?id=<session_id>&t=<t_start_ms>
+// MARK: - EvidenceRef
+struct EvidenceRef: Codable {
+    let deckID: String?
+    let kind: SearchKind
+    let slideID: String?
+    /// Index der Folie im Foliensatz, ab 1
+    let slideIndex: Int?
+    let sessionID: String?
+    let tEndMS: Int?
+    let tStartMS: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case deckID = "deck_id"
+        case kind = "kind"
+        case slideID = "slide_id"
+        case slideIndex = "slide_index"
+        case sessionID = "session_id"
+        case tEndMS = "t_end_ms"
+        case tStartMS = "t_start_ms"
+    }
+}
+
+// MARK: EvidenceRef convenience initializers and mutators
+
+extension EvidenceRef {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(EvidenceRef.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        deckID: String?? = nil,
+        kind: SearchKind? = nil,
+        slideID: String?? = nil,
+        slideIndex: Int?? = nil,
+        sessionID: String?? = nil,
+        tEndMS: Int?? = nil,
+        tStartMS: Int?? = nil
+    ) -> EvidenceRef {
+        return EvidenceRef(
+            deckID: deckID ?? self.deckID,
+            kind: kind ?? self.kind,
+            slideID: slideID ?? self.slideID,
+            slideIndex: slideIndex ?? self.slideIndex,
+            sessionID: sessionID ?? self.sessionID,
+            tEndMS: tEndMS ?? self.tEndMS,
+            tStartMS: tStartMS ?? self.tStartMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Art eines Sucheintrags (search_chunk.source_kind). Konzepte, Notizen, Aufgaben, Karten
+/// und Fotos kommen mit ihren Tickets als neue Werte dazu
+enum SearchKind: String, Codable {
+    case slide = "slide"
+    case transcript = "transcript"
+}
+
+/// Kurzangabe einer Session für Listen (Anzeige „VL 7 · Titel“ bzw. Datum)
+// MARK: - SessionRef
+struct SessionRef: Codable {
+    let id: String
+    let module: SearchModuleRef
+    /// VL-Nummer (Session.number)
+    let number: Int?
+    let startedAt: Date?
+    let title: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case module = "module"
+        case number = "number"
+        case startedAt = "started_at"
+        case title = "title"
+    }
+}
+
+// MARK: SessionRef convenience initializers and mutators
+
+extension SessionRef {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionRef.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String? = nil,
+        module: SearchModuleRef? = nil,
+        number: Int?? = nil,
+        startedAt: Date?? = nil,
+        title: String?? = nil
+    ) -> SessionRef {
+        return SessionRef(
+            id: id ?? self.id,
+            module: module ?? self.module,
+            number: number ?? self.number,
+            startedAt: startedAt ?? self.startedAt,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SearchModuleRef
+struct SearchModuleRef: Codable {
+    let id: String
+    let name: String
+    let shortName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case name = "name"
+        case shortName = "short_name"
+    }
+}
+
+// MARK: SearchModuleRef convenience initializers and mutators
+
+extension SearchModuleRef {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SearchModuleRef.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String? = nil,
+        name: String? = nil,
+        shortName: String?? = nil
+    ) -> SearchModuleRef {
+        return SearchModuleRef(
+            id: id ?? self.id,
+            name: name ?? self.name,
+            shortName: shortName ?? self.shortName
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Bestätigte Beziehung aus Sicht eines Konzepts
+// MARK: - ConceptRelationView
+struct ConceptRelationView: Codable {
+    let confidence: Double?
+    /// Fächerbrücke (05 §P8.4): die beiden Konzepte haben kein gemeinsames Modul
+    let crossModule: Bool
+    /// ausgehend: dieses Konzept ist from_id
+    let direction: Direction
+    let id: String
+    let kind: ConceptRelationKind
+    let other: Other
+    let source: ConceptRelationSource
+
+    enum CodingKeys: String, CodingKey {
+        case confidence = "confidence"
+        case crossModule = "cross_module"
+        case direction = "direction"
+        case id = "id"
+        case kind = "kind"
+        case other = "other"
+        case source = "source"
+    }
+}
+
+// MARK: ConceptRelationView convenience initializers and mutators
+
+extension ConceptRelationView {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptRelationView.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        confidence: Double?? = nil,
+        crossModule: Bool? = nil,
+        direction: Direction? = nil,
+        id: String? = nil,
+        kind: ConceptRelationKind? = nil,
+        other: Other? = nil,
+        source: ConceptRelationSource? = nil
+    ) -> ConceptRelationView {
+        return ConceptRelationView(
+            confidence: confidence ?? self.confidence,
+            crossModule: crossModule ?? self.crossModule,
+            direction: direction ?? self.direction,
+            id: id ?? self.id,
+            kind: kind ?? self.kind,
+            other: other ?? self.other,
+            source: source ?? self.source
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// ausgehend: dieses Konzept ist from_id
+enum Direction: String, Codable {
+    case ausgehend = "ausgehend"
+    case eingehend = "eingehend"
+}
+
+/// Beziehungstyp (03 §7). „A baut_auf B“: B ist Voraussetzung von A. gegensatz und verwandt
+/// sind symmetrisch
+enum ConceptRelationKind: String, Codable {
+    case angewendetIn = "angewendet_in"
+    case bautAuf = "baut_auf"
+    case beispielFuer = "beispiel_fuer"
+    case gegensatz = "gegensatz"
+    case verwandt = "verwandt"
+}
+
+// MARK: - Other
+struct Other: Codable {
+    let id: String
+    /// NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+    let name: String
+    let status: ConceptStatus
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case name = "name"
+        case status = "status"
+    }
+}
+
+// MARK: Other convenience initializers and mutators
+
+extension Other {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Other.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String? = nil,
+        name: String? = nil,
+        status: ConceptStatus? = nil
+    ) -> Other {
+        return Other(
+            id: id ?? self.id,
+            name: name ?? self.name,
+            status: status ?? self.status
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Herkunft einer Beziehung (03 §7)
+enum ConceptRelationSource: String, Codable {
+    case ki = "ki"
+    case manuell = "manuell"
+    case wikilink = "wikilink"
+}
+
+/// Änderungen beim Annehmen eines Konzept-Vorschlags
+// MARK: - ConceptEdit
+struct ConceptEdit: Codable {
+    /// weitere Namen, z. B. der englische Begriff (05 §1 Sprache)
+    let aliases: [String]?
+    let kind: ConceptKind?
+    /// NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+    let name: String?
+    /// „In einem Satz“
+    let oneLiner: String?
+
+    enum CodingKeys: String, CodingKey {
+        case aliases = "aliases"
+        case kind = "kind"
+        case name = "name"
+        case oneLiner = "one_liner"
+    }
+}
+
+// MARK: ConceptEdit convenience initializers and mutators
+
+extension ConceptEdit {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptEdit.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        aliases: [String]?? = nil,
+        kind: ConceptKind?? = nil,
+        name: String?? = nil,
+        oneLiner: String?? = nil
+    ) -> ConceptEdit {
+        return ConceptEdit(
+            aliases: aliases ?? self.aliases,
+            kind: kind ?? self.kind,
+            name: name ?? self.name,
+            oneLiner: oneLiner ?? self.oneLiner
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /concepts
+// MARK: - ConceptList
+struct ConceptList: Codable {
+    let items: [ConceptListItem]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+    }
+}
+
+// MARK: ConceptList convenience initializers and mutators
+
+extension ConceptList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [ConceptListItem]? = nil,
+        nextCursor: String?? = nil
+    ) -> ConceptList {
+        return ConceptList(
+            items: items ?? self.items,
+            nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Eintrag in GET /concepts
+// MARK: - ConceptListItem
+struct ConceptListItem: Codable {
+    let concept: Concept
+    let evidenceCount: Int
+    let modules: [SearchModuleRef]
+    /// Sessions mit mindestens einem Beleg
+    let sessionCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case concept = "concept"
+        case evidenceCount = "evidence_count"
+        case modules = "modules"
+        case sessionCount = "session_count"
+    }
+}
+
+// MARK: ConceptListItem convenience initializers and mutators
+
+extension ConceptListItem {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptListItem.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        concept: Concept? = nil,
+        evidenceCount: Int? = nil,
+        modules: [SearchModuleRef]? = nil,
+        sessionCount: Int? = nil
+    ) -> ConceptListItem {
+        return ConceptListItem(
+            concept: concept ?? self.concept,
+            evidenceCount: evidenceCount ?? self.evidenceCount,
+            modules: modules ?? self.modules,
+            sessionCount: sessionCount ?? self.sessionCount
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ein von der KI gefundenes Konzept (05 §P7a), nach Prüfung der Belege
+// MARK: - ConceptProposal
+struct ConceptProposal: Codable {
+    /// weitere Namen, z. B. der englische Begriff (05 §1 Sprache)
+    let aliases: [String]
+    /// Selbsteinschätzung der KI, 0..1
+    let confidence: Double
+    /// Die KI hat einen Klausurhinweis erkannt
+    let examHint: Bool
+    /// 1–3 (05 §P7a)
+    let importance: Int
+    let kind: ConceptKind?
+    /// NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+    let name: String
+    /// „In einem Satz“
+    let oneLiner: String?
+    /// Kernaussage des Profs in 1–2 Sätzen
+    let profExplanation: String?
+
+    enum CodingKeys: String, CodingKey {
+        case aliases = "aliases"
+        case confidence = "confidence"
+        case examHint = "exam_hint"
+        case importance = "importance"
+        case kind = "kind"
+        case name = "name"
+        case oneLiner = "one_liner"
+        case profExplanation = "prof_explanation"
+    }
+}
+
+// MARK: ConceptProposal convenience initializers and mutators
+
+extension ConceptProposal {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptProposal.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        aliases: [String]? = nil,
+        confidence: Double? = nil,
+        examHint: Bool? = nil,
+        importance: Int? = nil,
+        kind: ConceptKind?? = nil,
+        name: String? = nil,
+        oneLiner: String?? = nil,
+        profExplanation: String?? = nil
+    ) -> ConceptProposal {
+        return ConceptProposal(
+            aliases: aliases ?? self.aliases,
+            confidence: confidence ?? self.confidence,
+            examHint: examHint ?? self.examHint,
+            importance: importance ?? self.importance,
+            kind: kind ?? self.kind,
+            name: name ?? self.name,
+            oneLiner: oneLiner ?? self.oneLiner,
+            profExplanation: profExplanation ?? self.profExplanation
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// concepts.extract (VERTRAEGE §20.2). job.session_id ist gesetzt
+// MARK: - ConceptsExtractPayload
+struct ConceptsExtractPayload: Codable {
+    /// true: auch bei gleichem input_hash neu aufrufen
+    let force: Bool?
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case force = "force"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: ConceptsExtractPayload convenience initializers and mutators
+
+extension ConceptsExtractPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptsExtractPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        force: Bool?? = nil,
+        sessionID: String? = nil
+    ) -> ConceptsExtractPayload {
+        return ConceptsExtractPayload(
+            force: force ?? self.force,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ergebnis von concepts.extract (job.result). concepts.resolve liest es über extract_job_id
+// MARK: - ConceptsExtractResult
+struct ConceptsExtractResult: Codable {
+    /// Anzahl der Aufrufe (Kapitel), 0 ohne Aufruf
+    let chapters: Int
+    let concepts: [ExtractedConcept]
+    /// Euro (Schätzung, VERTRAEGE §20.5)
+    let costEur: Double
+    /// verworfen, weil kein Beleg gültig war
+    let droppedConcepts: Int
+    let droppedEvidence: Int
+    let droppedRelations: Int
+    /// true: weder Folien noch Transkript, kein Aufruf
+    let empty: Bool
+    let inputHash: String?
+    /// Modell der Antwort (nach einem Refusal-Fallback das tatsächlich genutzte)
+    let model: String?
+    /// z. B. concepts.extract/v1
+    let promptVersion: String?
+    let relations: [ExtractedRelation]
+    /// true: Session weich gelöscht, nichts aufgerufen
+    let sessionDeleted: Bool
+    let sessionID: String
+    /// true: gleicher input_hash wie das letzte fertige Ergebnis, übernommen statt aufgerufen
+    let unchanged: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case chapters = "chapters"
+        case concepts = "concepts"
+        case costEur = "cost_eur"
+        case droppedConcepts = "dropped_concepts"
+        case droppedEvidence = "dropped_evidence"
+        case droppedRelations = "dropped_relations"
+        case empty = "empty"
+        case inputHash = "input_hash"
+        case model = "model"
+        case promptVersion = "prompt_version"
+        case relations = "relations"
+        case sessionDeleted = "session_deleted"
+        case sessionID = "session_id"
+        case unchanged = "unchanged"
+    }
+}
+
+// MARK: ConceptsExtractResult convenience initializers and mutators
+
+extension ConceptsExtractResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptsExtractResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        chapters: Int? = nil,
+        concepts: [ExtractedConcept]? = nil,
+        costEur: Double? = nil,
+        droppedConcepts: Int? = nil,
+        droppedEvidence: Int? = nil,
+        droppedRelations: Int? = nil,
+        empty: Bool? = nil,
+        inputHash: String?? = nil,
+        model: String?? = nil,
+        promptVersion: String?? = nil,
+        relations: [ExtractedRelation]? = nil,
+        sessionDeleted: Bool? = nil,
+        sessionID: String? = nil,
+        unchanged: Bool? = nil
+    ) -> ConceptsExtractResult {
+        return ConceptsExtractResult(
+            chapters: chapters ?? self.chapters,
+            concepts: concepts ?? self.concepts,
+            costEur: costEur ?? self.costEur,
+            droppedConcepts: droppedConcepts ?? self.droppedConcepts,
+            droppedEvidence: droppedEvidence ?? self.droppedEvidence,
+            droppedRelations: droppedRelations ?? self.droppedRelations,
+            empty: empty ?? self.empty,
+            inputHash: inputHash ?? self.inputHash,
+            model: model ?? self.model,
+            promptVersion: promptVersion ?? self.promptVersion,
+            relations: relations ?? self.relations,
+            sessionDeleted: sessionDeleted ?? self.sessionDeleted,
+            sessionID: sessionID ?? self.sessionID,
+            unchanged: unchanged ?? self.unchanged
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Konzept im Ergebnis von concepts.extract mit mindestens einem gültigen Beleg (LP8)
+// MARK: - ExtractedConcept
+struct ExtractedConcept: Codable {
+    let evidence: [EvidenceRef]
+    /// Schlüssel innerhalb des Ergebnisses (c1, c2, …)
+    let key: String
+    let proposal: ConceptProposal
+
+    enum CodingKeys: String, CodingKey {
+        case evidence = "evidence"
+        case key = "key"
+        case proposal = "proposal"
+    }
+}
+
+// MARK: ExtractedConcept convenience initializers and mutators
+
+extension ExtractedConcept {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ExtractedConcept.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        evidence: [EvidenceRef]? = nil,
+        key: String? = nil,
+        proposal: ConceptProposal? = nil
+    ) -> ExtractedConcept {
+        return ExtractedConcept(
+            evidence: evidence ?? self.evidence,
+            key: key ?? self.key,
+            proposal: proposal ?? self.proposal
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Beziehung zwischen zwei Konzepten derselben Vorlesung
+// MARK: - ExtractedRelation
+struct ExtractedRelation: Codable {
+    /// Selbsteinschätzung der KI, 0..1
+    let confidence: Double
+    let from: String
+    let kind: ConceptRelationKind
+    let to: String
+    let why: String
+
+    enum CodingKeys: String, CodingKey {
+        case confidence = "confidence"
+        case from = "from"
+        case kind = "kind"
+        case to = "to"
+        case why = "why"
+    }
+}
+
+// MARK: ExtractedRelation convenience initializers and mutators
+
+extension ExtractedRelation {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ExtractedRelation.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        confidence: Double? = nil,
+        from: String? = nil,
+        kind: ConceptRelationKind? = nil,
+        to: String? = nil,
+        why: String? = nil
+    ) -> ExtractedRelation {
+        return ExtractedRelation(
+            confidence: confidence ?? self.confidence,
+            from: from ?? self.from,
+            kind: kind ?? self.kind,
+            to: to ?? self.to,
+            why: why ?? self.why
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// concepts.resolve (VERTRAEGE §20.3). job.session_id ist gesetzt
+// MARK: - ConceptsResolvePayload
+struct ConceptsResolvePayload: Codable {
+    let extractJobID: String
+    /// true: auch bei unverändertem Extrakt neu abgleichen
+    let force: Bool?
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case extractJobID = "extract_job_id"
+        case force = "force"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: ConceptsResolvePayload convenience initializers and mutators
+
+extension ConceptsResolvePayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptsResolvePayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        extractJobID: String? = nil,
+        force: Bool?? = nil,
+        sessionID: String? = nil
+    ) -> ConceptsResolvePayload {
+        return ConceptsResolvePayload(
+            extractJobID: extractJobID ?? self.extractJobID,
+            force: force ?? self.force,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ergebnis von concepts.resolve
+// MARK: - ConceptsResolveResult
+struct ConceptsResolveResult: Codable {
+    /// Einträge mit Status automatisch
+    let autoAccepted: Int
+    /// Konzepte, deren Belege automatisch an ein vorhandenes Konzept gingen
+    let autoMerged: Int
+    /// Euro (Schätzung, VERTRAEGE §20.5)
+    let costEur: Double
+    /// baut_auf-Vorschläge, die einen Kreis bilden würden
+    let droppedCycles: Int
+    /// nachgeholte Vektoren aktiver Konzepte
+    let embeddedConcepts: Int
+    let embeddingError: String?
+    let embeddingModel: String?
+    let extractInputHash: String?
+    let extractJobID: String
+    let model: String?
+    /// null ohne KI-Aufruf
+    let promptVersion: String?
+    let proposedMerge: Int
+    let proposedNew: Int
+    let proposedRelations: Int
+    /// RESOLVE_VERSION des Workers
+    let resolveVersion: Int
+    let sessionDeleted: Bool
+    let sessionID: String
+    /// nicht erneut vorgeschlagen, weil für diese Session abgelehnt
+    let skippedRejected: Int
+    /// true: gleicher Extrakt wie beim letzten fertigen Abgleich, nichts geschrieben
+    let unchanged: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case autoAccepted = "auto_accepted"
+        case autoMerged = "auto_merged"
+        case costEur = "cost_eur"
+        case droppedCycles = "dropped_cycles"
+        case embeddedConcepts = "embedded_concepts"
+        case embeddingError = "embedding_error"
+        case embeddingModel = "embedding_model"
+        case extractInputHash = "extract_input_hash"
+        case extractJobID = "extract_job_id"
+        case model = "model"
+        case promptVersion = "prompt_version"
+        case proposedMerge = "proposed_merge"
+        case proposedNew = "proposed_new"
+        case proposedRelations = "proposed_relations"
+        case resolveVersion = "resolve_version"
+        case sessionDeleted = "session_deleted"
+        case sessionID = "session_id"
+        case skippedRejected = "skipped_rejected"
+        case unchanged = "unchanged"
+    }
+}
+
+// MARK: ConceptsResolveResult convenience initializers and mutators
+
+extension ConceptsResolveResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ConceptsResolveResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        autoAccepted: Int? = nil,
+        autoMerged: Int? = nil,
+        costEur: Double? = nil,
+        droppedCycles: Int? = nil,
+        embeddedConcepts: Int? = nil,
+        embeddingError: String?? = nil,
+        embeddingModel: String?? = nil,
+        extractInputHash: String?? = nil,
+        extractJobID: String? = nil,
+        model: String?? = nil,
+        promptVersion: String?? = nil,
+        proposedMerge: Int? = nil,
+        proposedNew: Int? = nil,
+        proposedRelations: Int? = nil,
+        resolveVersion: Int? = nil,
+        sessionDeleted: Bool? = nil,
+        sessionID: String? = nil,
+        skippedRejected: Int? = nil,
+        unchanged: Bool? = nil
+    ) -> ConceptsResolveResult {
+        return ConceptsResolveResult(
+            autoAccepted: autoAccepted ?? self.autoAccepted,
+            autoMerged: autoMerged ?? self.autoMerged,
+            costEur: costEur ?? self.costEur,
+            droppedCycles: droppedCycles ?? self.droppedCycles,
+            embeddedConcepts: embeddedConcepts ?? self.embeddedConcepts,
+            embeddingError: embeddingError ?? self.embeddingError,
+            embeddingModel: embeddingModel ?? self.embeddingModel,
+            extractInputHash: extractInputHash ?? self.extractInputHash,
+            extractJobID: extractJobID ?? self.extractJobID,
+            model: model ?? self.model,
+            promptVersion: promptVersion ?? self.promptVersion,
+            proposedMerge: proposedMerge ?? self.proposedMerge,
+            proposedNew: proposedNew ?? self.proposedNew,
+            proposedRelations: proposedRelations ?? self.proposedRelations,
+            resolveVersion: resolveVersion ?? self.resolveVersion,
+            sessionDeleted: sessionDeleted ?? self.sessionDeleted,
+            sessionID: sessionID ?? self.sessionID,
+            skippedRejected: skippedRejected ?? self.skippedRejected,
+            unchanged: unchanged ?? self.unchanged
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - CostByModel
+struct CostByModel: Codable {
+    let cacheCreationInputTokens: Int
+    let cacheReadInputTokens: Int
+    let calls: Int
+    /// Euro (Schätzung, VERTRAEGE §20.5)
+    let eur: Double
+    let inputTokens: Int
+    let model: String
+    let outputTokens: Int
+    let provider: String
+
+    enum CodingKeys: String, CodingKey {
+        case cacheCreationInputTokens = "cache_creation_input_tokens"
+        case cacheReadInputTokens = "cache_read_input_tokens"
+        case calls = "calls"
+        case eur = "eur"
+        case inputTokens = "input_tokens"
+        case model = "model"
+        case outputTokens = "output_tokens"
+        case provider = "provider"
+    }
+}
+
+// MARK: CostByModel convenience initializers and mutators
+
+extension CostByModel {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CostByModel.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cacheCreationInputTokens: Int? = nil,
+        cacheReadInputTokens: Int? = nil,
+        calls: Int? = nil,
+        eur: Double? = nil,
+        inputTokens: Int? = nil,
+        model: String? = nil,
+        outputTokens: Int? = nil,
+        provider: String? = nil
+    ) -> CostByModel {
+        return CostByModel(
+            cacheCreationInputTokens: cacheCreationInputTokens ?? self.cacheCreationInputTokens,
+            cacheReadInputTokens: cacheReadInputTokens ?? self.cacheReadInputTokens,
+            calls: calls ?? self.calls,
+            eur: eur ?? self.eur,
+            inputTokens: inputTokens ?? self.inputTokens,
+            model: model ?? self.model,
+            outputTokens: outputTokens ?? self.outputTokens,
+            provider: provider ?? self.provider
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - CostBySession
+struct CostBySession: Codable {
+    let calls: Int
+    /// Euro (Schätzung, VERTRAEGE §20.5)
+    let eur: Double
+    let session: SessionRef?
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case calls = "calls"
+        case eur = "eur"
+        case session = "session"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: CostBySession convenience initializers and mutators
+
+extension CostBySession {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CostBySession.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        calls: Int? = nil,
+        eur: Double? = nil,
+        session: SessionRef?? = nil,
+        sessionID: String? = nil
+    ) -> CostBySession {
+        return CostBySession(
+            calls: calls ?? self.calls,
+            eur: eur ?? self.eur,
+            session: session ?? self.session,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - CostByTask
+struct CostByTask: Codable {
+    let calls: Int
+    /// Euro (Schätzung, VERTRAEGE §20.5)
+    let eur: Double
+    let task: String
+
+    enum CodingKeys: String, CodingKey {
+        case calls = "calls"
+        case eur = "eur"
+        case task = "task"
+    }
+}
+
+// MARK: CostByTask convenience initializers and mutators
+
+extension CostByTask {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CostByTask.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        calls: Int? = nil,
+        eur: Double? = nil,
+        task: String? = nil
+    ) -> CostByTask {
+        return CostByTask(
+            calls: calls ?? self.calls,
+            eur: eur ?? self.eur,
+            task: task ?? self.task
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /costs/summary (F-DAT-05): ein Monat, je Aufgabe, je Session (höchstens 20), je Modell
+// MARK: - CostSummary
+struct CostSummary: Codable {
+    let budget: AIBudgetStatus
+    let byModel: [CostByModel]
+    let bySession: [CostBySession]
+    let byTask: [CostByTask]
+    let calls: Int
+
+    enum CodingKeys: String, CodingKey {
+        case budget = "budget"
+        case byModel = "by_model"
+        case bySession = "by_session"
+        case byTask = "by_task"
+        case calls = "calls"
+    }
+}
+
+// MARK: CostSummary convenience initializers and mutators
+
+extension CostSummary {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CostSummary.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        budget: AIBudgetStatus? = nil,
+        byModel: [CostByModel]? = nil,
+        bySession: [CostBySession]? = nil,
+        byTask: [CostByTask]? = nil,
+        calls: Int? = nil
+    ) -> CostSummary {
+        return CostSummary(
+            budget: budget ?? self.budget,
+            byModel: byModel ?? self.byModel,
+            bySession: bySession ?? self.bySession,
+            byTask: byTask ?? self.byTask,
+            calls: calls ?? self.calls
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// Layout-Vorlagen F-DSH-01
 enum DashboardLayout: String, Codable {
     case fokus = "fokus"
@@ -3797,6 +5852,130 @@ enum EmbedderState: String, Codable {
     case nichtVerfuegbar = "nicht_verfuegbar"
 }
 
+/// Beleg auf eine Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+// MARK: - EvidenceRefSlide
+struct EvidenceRefSlide: Codable {
+    let deckID: String
+    let kind: EvidenceRefSlideKind
+    let slideID: String
+    /// Index der Folie im Foliensatz, ab 1
+    let slideIndex: Int
+
+    enum CodingKeys: String, CodingKey {
+        case deckID = "deck_id"
+        case kind = "kind"
+        case slideID = "slide_id"
+        case slideIndex = "slide_index"
+    }
+}
+
+// MARK: EvidenceRefSlide convenience initializers and mutators
+
+extension EvidenceRefSlide {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(EvidenceRefSlide.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        deckID: String? = nil,
+        kind: EvidenceRefSlideKind? = nil,
+        slideID: String? = nil,
+        slideIndex: Int? = nil
+    ) -> EvidenceRefSlide {
+        return EvidenceRefSlide(
+            deckID: deckID ?? self.deckID,
+            kind: kind ?? self.kind,
+            slideID: slideID ?? self.slideID,
+            slideIndex: slideIndex ?? self.slideIndex
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum EvidenceRefSlideKind: String, Codable {
+    case slide = "slide"
+}
+
+/// Beleg auf einen Zeitraum des Gesagten (Sitzungszeit, §18.1). t_end_ms ≥ t_start_ms prüft
+/// der Schreiber. Ziel: /rueckblick?id=<session_id>&t=<t_start_ms>
+// MARK: - EvidenceRefTranscript
+struct EvidenceRefTranscript: Codable {
+    let kind: EvidenceRefTranscriptKind
+    let sessionID: String
+    let tEndMS: Int
+    let tStartMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case sessionID = "session_id"
+        case tEndMS = "t_end_ms"
+        case tStartMS = "t_start_ms"
+    }
+}
+
+// MARK: EvidenceRefTranscript convenience initializers and mutators
+
+extension EvidenceRefTranscript {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(EvidenceRefTranscript.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: EvidenceRefTranscriptKind? = nil,
+        sessionID: String? = nil,
+        tEndMS: Int? = nil,
+        tStartMS: Int? = nil
+    ) -> EvidenceRefTranscript {
+        return EvidenceRefTranscript(
+            kind: kind ?? self.kind,
+            sessionID: sessionID ?? self.sessionID,
+            tEndMS: tEndMS ?? self.tEndMS,
+            tStartMS: tStartMS ?? self.tStartMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum EvidenceRefTranscriptKind: String, Codable {
+    case transcript = "transcript"
+}
+
 /// Übungsblatt. Ergänzung zu 03 §4: ingest_state zeigt den Fortschritt von pdf.ingest für
 /// das Blatt.
 // MARK: - ExerciseSheet
@@ -4673,6 +6852,1116 @@ extension ImageElementPayload {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// POST /inbox/{id}/accept (§20.6). Welche Felder zu welcher Art passen, regelt der Vertrag
+/// (sonst 400 inbox_action_invalid)
+// MARK: - InboxAcceptRequest
+struct InboxAcceptRequest: Codable {
+    /// concept_merge: als neues Konzept annehmen statt zusammenführen
+    let asNew: Bool?
+    let edit: ConceptEdit?
+    let mergeInto: String?
+    let relationKind: ConceptRelationKind?
+
+    enum CodingKeys: String, CodingKey {
+        case asNew = "as_new"
+        case edit = "edit"
+        case mergeInto = "merge_into"
+        case relationKind = "relation_kind"
+    }
+}
+
+// MARK: InboxAcceptRequest convenience initializers and mutators
+
+extension InboxAcceptRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxAcceptRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        asNew: Bool?? = nil,
+        edit: ConceptEdit?? = nil,
+        mergeInto: String?? = nil,
+        relationKind: ConceptRelationKind?? = nil
+    ) -> InboxAcceptRequest {
+        return InboxAcceptRequest(
+            asNew: asNew ?? self.asNew,
+            edit: edit ?? self.edit,
+            mergeInto: mergeInto ?? self.mergeInto,
+            relationKind: relationKind ?? self.relationKind
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Warum eine Beziehung noch nicht annehmbar ist: ein Endpunkt ist noch Vorschlag bzw. wurde
+/// abgelehnt
+enum InboxBlockedReason: String, Codable {
+    case endpunktAbgelehnt = "endpunkt_abgelehnt"
+    case endpunktOffen = "endpunkt_offen"
+}
+
+/// POST /inbox/bulk. Genau eins von ids und session_id (sonst 400 validation_failed)
+// MARK: - InboxBulkRequest
+struct InboxBulkRequest: Codable {
+    /// Massenaktion
+    let action: InboxBulkRequestAction
+    let ids: [String]?
+    let sessionID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case action = "action"
+        case ids = "ids"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: InboxBulkRequest convenience initializers and mutators
+
+extension InboxBulkRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxBulkRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        action: InboxBulkRequestAction? = nil,
+        ids: [String]?? = nil,
+        sessionID: String?? = nil
+    ) -> InboxBulkRequest {
+        return InboxBulkRequest(
+            action: action ?? self.action,
+            ids: ids ?? self.ids,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Massenaktion
+enum InboxBulkRequestAction: String, Codable {
+    case accept = "accept"
+    case reject = "reject"
+    case reopen = "reopen"
+}
+
+/// Antwort auf POST /inbox/bulk
+// MARK: - InboxBulkResult
+struct InboxBulkResult: Codable {
+    /// geänderte Einträge in Bearbeitungsreihenfolge
+    let decided: [String]
+    let skipped: [Skipped]
+
+    enum CodingKeys: String, CodingKey {
+        case decided = "decided"
+        case skipped = "skipped"
+    }
+}
+
+// MARK: InboxBulkResult convenience initializers and mutators
+
+extension InboxBulkResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxBulkResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        decided: [String]? = nil,
+        skipped: [Skipped]? = nil
+    ) -> InboxBulkResult {
+        return InboxBulkResult(
+            decided: decided ?? self.decided,
+            skipped: skipped ?? self.skipped
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Skipped
+struct Skipped: Codable {
+    let code: String
+    let id: String
+
+    enum CodingKeys: String, CodingKey {
+        case code = "code"
+        case id = "id"
+    }
+}
+
+// MARK: Skipped convenience initializers and mutators
+
+extension Skipped {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Skipped.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        code: String? = nil,
+        id: String? = nil
+    ) -> Skipped {
+        return Skipped(
+            code: code ?? self.code,
+            id: id ?? self.id
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Was eine Annahme geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST
+/// /inbox/{id}/reopen, §20.6)
+// MARK: - InboxDecision
+struct InboxDecision: Codable {
+    /// Wirkung
+    let action: InboxDecisionAction
+    let addedAliases: [String]
+    let addedModuleIDS: [String]
+    /// mit derselben Entscheidung geänderte Beziehungs-Einträge
+    let cascadeItemIDS: [String]
+    let conceptID: String?
+    /// A2/A3: vorhandene Beziehung, mit der die umgehängte (A2) bzw. umgewidmete (A3) Beziehung
+    /// zusammenfiel. Die Zeile des Eintrags bleibt unbestätigt liegen (§20.6)
+    let duplicateOf: String?
+    let mergedInto: String?
+    let movedEvidenceIDS: [String]
+    let previous: ConceptEdit?
+    let relationKindBefore: ConceptRelationKind?
+    /// Eintrag, dessen Entscheidung diesen mitentschieden hat (A1: bestätigte Beziehung, A2:
+    /// umgehängte Dublette, A3: bestätigte vorhandene Beziehung). Wieder öffnen nur über diesen
+    /// Eintrag (§20.6)
+    let triggeredBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case action = "action"
+        case addedAliases = "added_aliases"
+        case addedModuleIDS = "added_module_ids"
+        case cascadeItemIDS = "cascade_item_ids"
+        case conceptID = "concept_id"
+        case duplicateOf = "duplicate_of"
+        case mergedInto = "merged_into"
+        case movedEvidenceIDS = "moved_evidence_ids"
+        case previous = "previous"
+        case relationKindBefore = "relation_kind_before"
+        case triggeredBy = "triggered_by"
+    }
+}
+
+// MARK: InboxDecision convenience initializers and mutators
+
+extension InboxDecision {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxDecision.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        action: InboxDecisionAction? = nil,
+        addedAliases: [String]? = nil,
+        addedModuleIDS: [String]? = nil,
+        cascadeItemIDS: [String]? = nil,
+        conceptID: String?? = nil,
+        duplicateOf: String?? = nil,
+        mergedInto: String?? = nil,
+        movedEvidenceIDS: [String]? = nil,
+        previous: ConceptEdit?? = nil,
+        relationKindBefore: ConceptRelationKind?? = nil,
+        triggeredBy: String?? = nil
+    ) -> InboxDecision {
+        return InboxDecision(
+            action: action ?? self.action,
+            addedAliases: addedAliases ?? self.addedAliases,
+            addedModuleIDS: addedModuleIDS ?? self.addedModuleIDS,
+            cascadeItemIDS: cascadeItemIDS ?? self.cascadeItemIDS,
+            conceptID: conceptID ?? self.conceptID,
+            duplicateOf: duplicateOf ?? self.duplicateOf,
+            mergedInto: mergedInto ?? self.mergedInto,
+            movedEvidenceIDS: movedEvidenceIDS ?? self.movedEvidenceIDS,
+            previous: previous ?? self.previous,
+            relationKindBefore: relationKindBefore ?? self.relationKindBefore,
+            triggeredBy: triggeredBy ?? self.triggeredBy
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Wirkung
+enum InboxDecisionAction: String, Codable {
+    case abgelehnt = "abgelehnt"
+    case angenommenNeu = "angenommen_neu"
+    case beziehungBestaetigt = "beziehung_bestaetigt"
+    case zusammengefuehrt = "zusammengefuehrt"
+}
+
+/// Antwort auf accept, reject und reopen
+// MARK: - InboxDecisionResult
+struct InboxDecisionResult: Codable {
+    let concept: Concept?
+    let item: InboxItem
+
+    enum CodingKeys: String, CodingKey {
+        case concept = "concept"
+        case item = "item"
+    }
+}
+
+// MARK: InboxDecisionResult convenience initializers and mutators
+
+extension InboxDecisionResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxDecisionResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        concept: Concept?? = nil,
+        item: InboxItem? = nil
+    ) -> InboxDecisionResult {
+        return InboxDecisionResult(
+            concept: concept ?? self.concept,
+            item: item ?? self.item
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Inbox-Eintrag (03 §8, F-NAC-06)
+// MARK: - InboxItem
+struct InboxItem: Codable {
+    let blocked: InboxBlockedReason?
+    let conceptID: String?
+    let createdAt: Date
+    let decidedAt: Date?
+    let id: String
+    let jobID: String?
+    let kind: InboxKind
+    let payload: InboxPayload
+    /// kleiner = früher (Reihenfolge der geführten Nacharbeitung)
+    let priority: Int
+    let relationID: String?
+    let session: SessionRef?
+    let status: InboxStatus
+    let targetConceptID: String?
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case blocked = "blocked"
+        case conceptID = "concept_id"
+        case createdAt = "created_at"
+        case decidedAt = "decided_at"
+        case id = "id"
+        case jobID = "job_id"
+        case kind = "kind"
+        case payload = "payload"
+        case priority = "priority"
+        case relationID = "relation_id"
+        case session = "session"
+        case status = "status"
+        case targetConceptID = "target_concept_id"
+        case updatedAt = "updated_at"
+    }
+}
+
+// MARK: InboxItem convenience initializers and mutators
+
+extension InboxItem {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxItem.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        blocked: InboxBlockedReason?? = nil,
+        conceptID: String?? = nil,
+        createdAt: Date? = nil,
+        decidedAt: Date?? = nil,
+        id: String? = nil,
+        jobID: String?? = nil,
+        kind: InboxKind? = nil,
+        payload: InboxPayload? = nil,
+        priority: Int? = nil,
+        relationID: String?? = nil,
+        session: SessionRef?? = nil,
+        status: InboxStatus? = nil,
+        targetConceptID: String?? = nil,
+        updatedAt: Date? = nil
+    ) -> InboxItem {
+        return InboxItem(
+            blocked: blocked ?? self.blocked,
+            conceptID: conceptID ?? self.conceptID,
+            createdAt: createdAt ?? self.createdAt,
+            decidedAt: decidedAt ?? self.decidedAt,
+            id: id ?? self.id,
+            jobID: jobID ?? self.jobID,
+            kind: kind ?? self.kind,
+            payload: payload ?? self.payload,
+            priority: priority ?? self.priority,
+            relationID: relationID ?? self.relationID,
+            session: session ?? self.session,
+            status: status ?? self.status,
+            targetConceptID: targetConceptID ?? self.targetConceptID,
+            updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Art eines Inbox-Eintrags (03 §8). Weitere Arten (card_batch, slide_correction, …) kommen
+/// mit ihren Tickets
+enum InboxKind: String, Codable {
+    case conceptMerge = "concept_merge"
+    case conceptNew = "concept_new"
+    case relation = "relation"
+}
+
+/// Schemageprüfte Nutzlast eines Inbox-Eintrags (03 §8), unterschieden über kind
+///
+/// Nutzlast concept_new (neues Konzept)
+///
+/// Nutzlast concept_merge (Vorschlag: dasselbe wie ein vorhandenes Konzept)
+///
+/// Nutzlast relation (Beziehung zwischen zwei Konzepten)
+// MARK: - InboxPayload
+struct InboxPayload: Codable {
+    let evidence: [EvidenceRef]?
+    let kind: InboxKind
+    let model: String?
+    /// null bei basis = name (kein KI-Aufruf)
+    let promptVersion: String?
+    let proposal: ConceptProposal?
+    let similar: [InboxSimilarConcept]?
+    let basis: MergeBasis?
+    /// Begründung der KI, null bei basis = name
+    let reason: String?
+    let similarity: Double?
+    let target: Target?
+    /// Selbsteinschätzung der KI, 0..1
+    let confidence: Double?
+    let fromConceptID: String?
+    let relationKind: ConceptRelationKind?
+    let toConceptID: String?
+    let why: String?
+
+    enum CodingKeys: String, CodingKey {
+        case evidence = "evidence"
+        case kind = "kind"
+        case model = "model"
+        case promptVersion = "prompt_version"
+        case proposal = "proposal"
+        case similar = "similar"
+        case basis = "basis"
+        case reason = "reason"
+        case similarity = "similarity"
+        case target = "target"
+        case confidence = "confidence"
+        case fromConceptID = "from_concept_id"
+        case relationKind = "relation_kind"
+        case toConceptID = "to_concept_id"
+        case why = "why"
+    }
+}
+
+// MARK: InboxPayload convenience initializers and mutators
+
+extension InboxPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        evidence: [EvidenceRef]?? = nil,
+        kind: InboxKind? = nil,
+        model: String?? = nil,
+        promptVersion: String?? = nil,
+        proposal: ConceptProposal?? = nil,
+        similar: [InboxSimilarConcept]?? = nil,
+        basis: MergeBasis?? = nil,
+        reason: String?? = nil,
+        similarity: Double?? = nil,
+        target: Target?? = nil,
+        confidence: Double?? = nil,
+        fromConceptID: String?? = nil,
+        relationKind: ConceptRelationKind?? = nil,
+        toConceptID: String?? = nil,
+        why: String?? = nil
+    ) -> InboxPayload {
+        return InboxPayload(
+            evidence: evidence ?? self.evidence,
+            kind: kind ?? self.kind,
+            model: model ?? self.model,
+            promptVersion: promptVersion ?? self.promptVersion,
+            proposal: proposal ?? self.proposal,
+            similar: similar ?? self.similar,
+            basis: basis ?? self.basis,
+            reason: reason ?? self.reason,
+            similarity: similarity ?? self.similarity,
+            target: target ?? self.target,
+            confidence: confidence ?? self.confidence,
+            fromConceptID: fromConceptID ?? self.fromConceptID,
+            relationKind: relationKind ?? self.relationKind,
+            toConceptID: toConceptID ?? self.toConceptID,
+            why: why ?? self.why
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Grund eines concept_merge-Vorschlags: ki = KI-Entscheidung „gleich“, name = gleicher
+/// Name/Alias ohne Embedder (degradiert)
+enum MergeBasis: String, Codable {
+    case ki = "ki"
+    case name = "name"
+}
+
+/// Ähnliches vorhandenes Konzept („gleich wie X?“, 07 §3.5)
+// MARK: - InboxSimilarConcept
+struct InboxSimilarConcept: Codable {
+    let conceptID: String
+    /// NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+    let name: String
+    /// Cosinus-Ähnlichkeit, null ohne Embedder
+    let similarity: Double?
+    let verdict: ResolveVerdict?
+
+    enum CodingKeys: String, CodingKey {
+        case conceptID = "concept_id"
+        case name = "name"
+        case similarity = "similarity"
+        case verdict = "verdict"
+    }
+}
+
+// MARK: InboxSimilarConcept convenience initializers and mutators
+
+extension InboxSimilarConcept {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxSimilarConcept.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        conceptID: String? = nil,
+        name: String? = nil,
+        similarity: Double?? = nil,
+        verdict: ResolveVerdict?? = nil
+    ) -> InboxSimilarConcept {
+        return InboxSimilarConcept(
+            conceptID: conceptID ?? self.conceptID,
+            name: name ?? self.name,
+            similarity: similarity ?? self.similarity,
+            verdict: verdict ?? self.verdict
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Entscheidung im Abgleich (05 §P8, Band 0,75–0,88). Abbildung auf Inbox-Arten: VERTRAEGE
+/// §20.3
+enum ResolveVerdict: String, Codable {
+    case gleich = "gleich"
+    case teilVon = "teil_von"
+    case verschieden = "verschieden"
+    case verwandt = "verwandt"
+}
+
+// MARK: - Target
+struct Target: Codable {
+    let conceptID: String
+    /// NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+    let name: String
+
+    enum CodingKeys: String, CodingKey {
+        case conceptID = "concept_id"
+        case name = "name"
+    }
+}
+
+// MARK: Target convenience initializers and mutators
+
+extension Target {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Target.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        conceptID: String? = nil,
+        name: String? = nil
+    ) -> Target {
+        return Target(
+            conceptID: conceptID ?? self.conceptID,
+            name: name ?? self.name
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Status eines Inbox-Eintrags (03 §8). automatisch: nach der Einstellung ai.auto_accept
+/// angenommen
+enum InboxStatus: String, Codable {
+    case abgelehnt = "abgelehnt"
+    case angenommen = "angenommen"
+    case automatisch = "automatisch"
+    case offen = "offen"
+}
+
+/// GET /inbox
+// MARK: - InboxItemList
+struct InboxItemList: Codable {
+    let items: [InboxItem]
+    let nextCursor: String?
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case nextCursor = "next_cursor"
+    }
+}
+
+// MARK: InboxItemList convenience initializers and mutators
+
+extension InboxItemList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxItemList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [InboxItem]? = nil,
+        nextCursor: String?? = nil
+    ) -> InboxItemList {
+        return InboxItemList(
+            items: items ?? self.items,
+            nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /inbox/overview: Zähler für Navigation und Gruppen (F-NAC-06)
+// MARK: - InboxOverview
+struct InboxOverview: Codable {
+    /// offene Einträge älter als 14 Tage („12 ältere Vorschläge“)
+    let olderCount: Int
+    let openCount: Int
+    /// Gruppen mit offenen Einträgen, neueste Session zuerst
+    let sessions: [InboxOverviewSession]
+
+    enum CodingKeys: String, CodingKey {
+        case olderCount = "older_count"
+        case openCount = "open_count"
+        case sessions = "sessions"
+    }
+}
+
+// MARK: InboxOverview convenience initializers and mutators
+
+extension InboxOverview {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxOverview.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        olderCount: Int? = nil,
+        openCount: Int? = nil,
+        sessions: [InboxOverviewSession]? = nil
+    ) -> InboxOverview {
+        return InboxOverview(
+            olderCount: olderCount ?? self.olderCount,
+            openCount: openCount ?? self.openCount,
+            sessions: sessions ?? self.sessions
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - InboxOverviewSession
+struct InboxOverviewSession: Codable {
+    let oldestAt: Date
+    let openCount: Int
+    let session: SessionRef?
+
+    enum CodingKeys: String, CodingKey {
+        case oldestAt = "oldest_at"
+        case openCount = "open_count"
+        case session = "session"
+    }
+}
+
+// MARK: InboxOverviewSession convenience initializers and mutators
+
+extension InboxOverviewSession {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxOverviewSession.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        oldestAt: Date? = nil,
+        openCount: Int? = nil,
+        session: SessionRef?? = nil
+    ) -> InboxOverviewSession {
+        return InboxOverviewSession(
+            oldestAt: oldestAt ?? self.oldestAt,
+            openCount: openCount ?? self.openCount,
+            session: session ?? self.session
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Nutzlast concept_merge (Vorschlag: dasselbe wie ein vorhandenes Konzept)
+// MARK: - InboxPayloadConceptMerge
+struct InboxPayloadConceptMerge: Codable {
+    let basis: MergeBasis
+    let evidence: [EvidenceRef]
+    let kind: InboxPayloadConceptMergeKind
+    let model: String?
+    /// null bei basis = name (kein KI-Aufruf)
+    let promptVersion: String?
+    let proposal: ConceptProposal
+    /// Begründung der KI, null bei basis = name
+    let reason: String?
+    let similarity: Double?
+    let target: Target
+
+    enum CodingKeys: String, CodingKey {
+        case basis = "basis"
+        case evidence = "evidence"
+        case kind = "kind"
+        case model = "model"
+        case promptVersion = "prompt_version"
+        case proposal = "proposal"
+        case reason = "reason"
+        case similarity = "similarity"
+        case target = "target"
+    }
+}
+
+// MARK: InboxPayloadConceptMerge convenience initializers and mutators
+
+extension InboxPayloadConceptMerge {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxPayloadConceptMerge.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        basis: MergeBasis? = nil,
+        evidence: [EvidenceRef]? = nil,
+        kind: InboxPayloadConceptMergeKind? = nil,
+        model: String?? = nil,
+        promptVersion: String?? = nil,
+        proposal: ConceptProposal? = nil,
+        reason: String?? = nil,
+        similarity: Double?? = nil,
+        target: Target? = nil
+    ) -> InboxPayloadConceptMerge {
+        return InboxPayloadConceptMerge(
+            basis: basis ?? self.basis,
+            evidence: evidence ?? self.evidence,
+            kind: kind ?? self.kind,
+            model: model ?? self.model,
+            promptVersion: promptVersion ?? self.promptVersion,
+            proposal: proposal ?? self.proposal,
+            reason: reason ?? self.reason,
+            similarity: similarity ?? self.similarity,
+            target: target ?? self.target
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum InboxPayloadConceptMergeKind: String, Codable {
+    case conceptMerge = "concept_merge"
+}
+
+/// Nutzlast concept_new (neues Konzept)
+// MARK: - InboxPayloadConceptNew
+struct InboxPayloadConceptNew: Codable {
+    let evidence: [EvidenceRef]
+    let kind: InboxPayloadConceptNewKind
+    let model: String
+    let promptVersion: String
+    let proposal: ConceptProposal
+    let similar: [InboxSimilarConcept]
+
+    enum CodingKeys: String, CodingKey {
+        case evidence = "evidence"
+        case kind = "kind"
+        case model = "model"
+        case promptVersion = "prompt_version"
+        case proposal = "proposal"
+        case similar = "similar"
+    }
+}
+
+// MARK: InboxPayloadConceptNew convenience initializers and mutators
+
+extension InboxPayloadConceptNew {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxPayloadConceptNew.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        evidence: [EvidenceRef]? = nil,
+        kind: InboxPayloadConceptNewKind? = nil,
+        model: String? = nil,
+        promptVersion: String? = nil,
+        proposal: ConceptProposal? = nil,
+        similar: [InboxSimilarConcept]? = nil
+    ) -> InboxPayloadConceptNew {
+        return InboxPayloadConceptNew(
+            evidence: evidence ?? self.evidence,
+            kind: kind ?? self.kind,
+            model: model ?? self.model,
+            promptVersion: promptVersion ?? self.promptVersion,
+            proposal: proposal ?? self.proposal,
+            similar: similar ?? self.similar
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum InboxPayloadConceptNewKind: String, Codable {
+    case conceptNew = "concept_new"
+}
+
+/// Nutzlast relation (Beziehung zwischen zwei Konzepten)
+// MARK: - InboxPayloadRelation
+struct InboxPayloadRelation: Codable {
+    /// Selbsteinschätzung der KI, 0..1
+    let confidence: Double
+    let fromConceptID: String
+    let kind: InboxPayloadRelationKind
+    let model: String
+    let promptVersion: String
+    let relationKind: ConceptRelationKind
+    let toConceptID: String
+    let why: String
+
+    enum CodingKeys: String, CodingKey {
+        case confidence = "confidence"
+        case fromConceptID = "from_concept_id"
+        case kind = "kind"
+        case model = "model"
+        case promptVersion = "prompt_version"
+        case relationKind = "relation_kind"
+        case toConceptID = "to_concept_id"
+        case why = "why"
+    }
+}
+
+// MARK: InboxPayloadRelation convenience initializers and mutators
+
+extension InboxPayloadRelation {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxPayloadRelation.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        confidence: Double? = nil,
+        fromConceptID: String? = nil,
+        kind: InboxPayloadRelationKind? = nil,
+        model: String? = nil,
+        promptVersion: String? = nil,
+        relationKind: ConceptRelationKind? = nil,
+        toConceptID: String? = nil,
+        why: String? = nil
+    ) -> InboxPayloadRelation {
+        return InboxPayloadRelation(
+            confidence: confidence ?? self.confidence,
+            fromConceptID: fromConceptID ?? self.fromConceptID,
+            kind: kind ?? self.kind,
+            model: model ?? self.model,
+            promptVersion: promptVersion ?? self.promptVersion,
+            relationKind: relationKind ?? self.relationKind,
+            toConceptID: toConceptID ?? self.toConceptID,
+            why: why ?? self.why
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum InboxPayloadRelationKind: String, Codable {
+    case relation = "relation"
 }
 
 /// Schreibmodus F-INK-03
@@ -12055,13 +15344,16 @@ enum PhotoAddOpKind: String, Codable {
     case photoAdd = "photo.add"
 }
 
-/// Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge =
-/// Anzeige-Reihenfolge
+/// Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge
+/// = Anzeige-Reihenfolge
 ///
 /// Standard transcribe. Alle späteren Schritte laufen mit (VERTRAEGE §18.2)
 enum PipelineStep: String, Codable {
     case alignLog = "align.log"
     case audioFinalize = "audio.finalize"
+    case conceptsExtract = "concepts.extract"
+    case conceptsResolve = "concepts.resolve"
+    case summaryWrite = "summary.write"
     case transcribe = "transcribe"
 }
 
@@ -12403,65 +15695,6 @@ extension SearchHit {
     }
 }
 
-/// Art eines Sucheintrags (search_chunk.source_kind). Konzepte, Notizen, Aufgaben, Karten
-/// und Fotos kommen mit ihren Tickets als neue Werte dazu
-enum SearchKind: String, Codable {
-    case slide = "slide"
-    case transcript = "transcript"
-}
-
-// MARK: - SearchModuleRef
-struct SearchModuleRef: Codable {
-    let id: String
-    let name: String
-    let shortName: String?
-
-    enum CodingKeys: String, CodingKey {
-        case id = "id"
-        case name = "name"
-        case shortName = "short_name"
-    }
-}
-
-// MARK: SearchModuleRef convenience initializers and mutators
-
-extension SearchModuleRef {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(SearchModuleRef.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        id: String? = nil,
-        name: String? = nil,
-        shortName: String?? = nil
-    ) -> SearchModuleRef {
-        return SearchModuleRef(
-            id: id ?? self.id,
-            name: name ?? self.name,
-            shortName: shortName ?? self.shortName
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
 /// Teil eines Ausschnitts. hit = Treffer-Wort (als <mark> darstellen). Immer als Text
 /// rendern, nie als HTML
 // MARK: - SearchSnippetPart
@@ -12518,7 +15751,7 @@ struct SearchHitSlide: Codable {
     let chunkID: String
     let deckID: String
     let deckTitle: String
-    let kind: SearchHitSlideKind
+    let kind: EvidenceRefSlideKind
     let module: SearchModuleRef
     let score: Double
     let slideIndex: Int
@@ -12560,7 +15793,7 @@ extension SearchHitSlide {
         chunkID: String? = nil,
         deckID: String? = nil,
         deckTitle: String? = nil,
-        kind: SearchHitSlideKind? = nil,
+        kind: EvidenceRefSlideKind? = nil,
         module: SearchModuleRef? = nil,
         score: Double? = nil,
         slideIndex: Int? = nil,
@@ -12589,15 +15822,11 @@ extension SearchHitSlide {
     }
 }
 
-enum SearchHitSlideKind: String, Codable {
-    case slide = "slide"
-}
-
 /// Treffer im Gesagten (Transkript-Fenster). Ziel: /rueckblick?id=<session_id>&t=<t_ms>
 // MARK: - SearchHitTranscript
 struct SearchHitTranscript: Codable {
     let chunkID: String
-    let kind: SearchHitTranscriptKind
+    let kind: EvidenceRefTranscriptKind
     let module: SearchModuleRef
     let score: Double
     let sessionID: String
@@ -12644,7 +15873,7 @@ extension SearchHitTranscript {
 
     func with(
         chunkID: String? = nil,
-        kind: SearchHitTranscriptKind? = nil,
+        kind: EvidenceRefTranscriptKind? = nil,
         module: SearchModuleRef? = nil,
         score: Double? = nil,
         sessionID: String? = nil,
@@ -12677,10 +15906,6 @@ extension SearchHitTranscript {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
-}
-
-enum SearchHitTranscriptKind: String, Codable {
-    case transcript = "transcript"
 }
 
 /// search.index (VERTRAEGE §19.3). job.session_id bleibt NULL, auch bei scope = session
@@ -13412,6 +16637,113 @@ enum StopReason: String, Codable {
     case manuell = "manuell"
     case maximaldauer = "maximaldauer"
     case stille = "stille"
+}
+
+/// Konzept mit Belegen aus genau dieser Session
+// MARK: - SessionConceptItem
+struct SessionConceptItem: Codable {
+    let concept: Concept
+    let evidence: [EvidenceView]
+    let inboxItemID: String?
+    let inboxStatus: InboxStatus?
+
+    enum CodingKeys: String, CodingKey {
+        case concept = "concept"
+        case evidence = "evidence"
+        case inboxItemID = "inbox_item_id"
+        case inboxStatus = "inbox_status"
+    }
+}
+
+// MARK: SessionConceptItem convenience initializers and mutators
+
+extension SessionConceptItem {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionConceptItem.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        concept: Concept? = nil,
+        evidence: [EvidenceView]? = nil,
+        inboxItemID: String?? = nil,
+        inboxStatus: InboxStatus?? = nil
+    ) -> SessionConceptItem {
+        return SessionConceptItem(
+            concept: concept ?? self.concept,
+            evidence: evidence ?? self.evidence,
+            inboxItemID: inboxItemID ?? self.inboxItemID,
+            inboxStatus: inboxStatus ?? self.inboxStatus
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /sessions/{id}/concepts: aktive und vorgeschlagene Konzepte mit Belegen aus der
+/// Session
+// MARK: - SessionConcepts
+struct SessionConcepts: Codable {
+    let items: [SessionConceptItem]
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: SessionConcepts convenience initializers and mutators
+
+extension SessionConcepts {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionConcepts.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [SessionConceptItem]? = nil,
+        sessionID: String? = nil
+    ) -> SessionConcepts {
+        return SessionConcepts(
+            items: items ?? self.items,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
 }
 
 /// POST /sessions: spontane Session ohne Termin (F-SES-04). Ergebnis im Zustand bereit,
@@ -14446,6 +17778,235 @@ extension SessionStopRequest {
     ) -> SessionStopRequest {
         return SessionStopRequest(
             reason: reason ?? self.reason
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Zusammenfassung einer Session (Tabelle session_summary, F-NAC-08 ohne Vault). Direkt
+/// sichtbar, kein Inbox-Vorschlag (§20.4)
+// MARK: - SessionSummary
+struct SessionSummary: Codable {
+    let createdAt: Date
+    let id: String
+    let jobID: String?
+    let lang: Lang?
+    let model: String
+    let outline: [SummaryOutlineItem]
+    let promptVersion: String
+    let sentences: [SummarySentence]
+    let sessionID: String
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case createdAt = "created_at"
+        case id = "id"
+        case jobID = "job_id"
+        case lang = "lang"
+        case model = "model"
+        case outline = "outline"
+        case promptVersion = "prompt_version"
+        case sentences = "sentences"
+        case sessionID = "session_id"
+        case updatedAt = "updated_at"
+    }
+}
+
+// MARK: SessionSummary convenience initializers and mutators
+
+extension SessionSummary {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionSummary.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        createdAt: Date? = nil,
+        id: String? = nil,
+        jobID: String?? = nil,
+        lang: Lang?? = nil,
+        model: String? = nil,
+        outline: [SummaryOutlineItem]? = nil,
+        promptVersion: String? = nil,
+        sentences: [SummarySentence]? = nil,
+        sessionID: String? = nil,
+        updatedAt: Date? = nil
+    ) -> SessionSummary {
+        return SessionSummary(
+            createdAt: createdAt ?? self.createdAt,
+            id: id ?? self.id,
+            jobID: jobID ?? self.jobID,
+            lang: lang ?? self.lang,
+            model: model ?? self.model,
+            outline: outline ?? self.outline,
+            promptVersion: promptVersion ?? self.promptVersion,
+            sentences: sentences ?? self.sentences,
+            sessionID: sessionID ?? self.sessionID,
+            updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ein Gliederungspunkt (Kapitel aus den Folien)
+// MARK: - SummaryOutlineItem
+struct SummaryOutlineItem: Codable {
+    let sources: [EvidenceRef]
+    let title: String
+
+    enum CodingKeys: String, CodingKey {
+        case sources = "sources"
+        case title = "title"
+    }
+}
+
+// MARK: SummaryOutlineItem convenience initializers and mutators
+
+extension SummaryOutlineItem {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SummaryOutlineItem.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        sources: [EvidenceRef]? = nil,
+        title: String? = nil
+    ) -> SummaryOutlineItem {
+        return SummaryOutlineItem(
+            sources: sources ?? self.sources,
+            title: title ?? self.title
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ein Satz der Kurzfassung mit Belegen (LP8)
+// MARK: - SummarySentence
+struct SummarySentence: Codable {
+    let sources: [EvidenceRef]
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case sources = "sources"
+        case text = "text"
+    }
+}
+
+// MARK: SummarySentence convenience initializers and mutators
+
+extension SummarySentence {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SummarySentence.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        sources: [EvidenceRef]? = nil,
+        text: String? = nil
+    ) -> SummarySentence {
+        return SummarySentence(
+            sources: sources ?? self.sources,
+            text: text ?? self.text
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /sessions/{id}/summary. summary = null: (noch) keine Zusammenfassung
+// MARK: - SessionSummaryView
+struct SessionSummaryView: Codable {
+    let sessionID: String
+    let summary: SessionSummary?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case summary = "summary"
+    }
+}
+
+// MARK: SessionSummaryView convenience initializers and mutators
+
+extension SessionSummaryView {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SessionSummaryView.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        sessionID: String? = nil,
+        summary: SessionSummary?? = nil
+    ) -> SessionSummaryView {
+        return SessionSummaryView(
+            sessionID: sessionID ?? self.sessionID,
+            summary: summary ?? self.summary
         )
     }
 
@@ -16079,6 +19640,143 @@ extension StrokeRemoveOp {
 
 enum StrokeRemoveOpKind: String, Codable {
     case strokeRemove = "stroke.remove"
+}
+
+/// summary.write (VERTRAEGE §20.4, nur die Zusammenfassung, ohne vault.write).
+/// job.session_id ist gesetzt
+// MARK: - SummaryWritePayload
+struct SummaryWritePayload: Codable {
+    let force: Bool?
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case force = "force"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: SummaryWritePayload convenience initializers and mutators
+
+extension SummaryWritePayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SummaryWritePayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        force: Bool?? = nil,
+        sessionID: String? = nil
+    ) -> SummaryWritePayload {
+        return SummaryWritePayload(
+            force: force ?? self.force,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ergebnis von summary.write
+// MARK: - SummaryWriteResult
+struct SummaryWriteResult: Codable {
+    /// Euro (Schätzung, VERTRAEGE §20.5)
+    let costEur: Double
+    let droppedSentences: Int
+    let inputHash: String?
+    let model: String?
+    let outlineCount: Int
+    let promptVersion: String?
+    let sentenceCount: Int
+    let sessionDeleted: Bool
+    let sessionID: String
+    /// true: weder Folien noch Transkript, eine alte Zusammenfassung wurde entfernt
+    let skipped: Bool
+    let unchanged: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case costEur = "cost_eur"
+        case droppedSentences = "dropped_sentences"
+        case inputHash = "input_hash"
+        case model = "model"
+        case outlineCount = "outline_count"
+        case promptVersion = "prompt_version"
+        case sentenceCount = "sentence_count"
+        case sessionDeleted = "session_deleted"
+        case sessionID = "session_id"
+        case skipped = "skipped"
+        case unchanged = "unchanged"
+    }
+}
+
+// MARK: SummaryWriteResult convenience initializers and mutators
+
+extension SummaryWriteResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SummaryWriteResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        costEur: Double? = nil,
+        droppedSentences: Int? = nil,
+        inputHash: String?? = nil,
+        model: String?? = nil,
+        outlineCount: Int? = nil,
+        promptVersion: String?? = nil,
+        sentenceCount: Int? = nil,
+        sessionDeleted: Bool? = nil,
+        sessionID: String? = nil,
+        skipped: Bool? = nil,
+        unchanged: Bool? = nil
+    ) -> SummaryWriteResult {
+        return SummaryWriteResult(
+            costEur: costEur ?? self.costEur,
+            droppedSentences: droppedSentences ?? self.droppedSentences,
+            inputHash: inputHash ?? self.inputHash,
+            model: model ?? self.model,
+            outlineCount: outlineCount ?? self.outlineCount,
+            promptVersion: promptVersion ?? self.promptVersion,
+            sentenceCount: sentenceCount ?? self.sentenceCount,
+            sessionDeleted: sessionDeleted ?? self.sessionDeleted,
+            sessionID: sessionID ?? self.sessionID,
+            skipped: skipped ?? self.skipped,
+            unchanged: unchanged ?? self.unchanged
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
 }
 
 // MARK: - SyncACK
@@ -19513,13 +23211,16 @@ extension UploadResult {
     }
 }
 
-/// GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token
+/// GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token.
+/// llm ab §20.5, optional, damit ein älterer Worker gültig bleibt
 // MARK: - WorkerHealth
 struct WorkerHealth: Codable {
     let embedder: Embedder
+    let llm: WorkerLlmStatus?
 
     enum CodingKeys: String, CodingKey {
         case embedder = "embedder"
+        case llm = "llm"
     }
 }
 
@@ -19542,10 +23243,12 @@ extension WorkerHealth {
     }
 
     func with(
-        embedder: Embedder? = nil
+        embedder: Embedder? = nil,
+        llm: WorkerLlmStatus?? = nil
     ) -> WorkerHealth {
         return WorkerHealth(
-            embedder: embedder ?? self.embedder
+            embedder: embedder ?? self.embedder,
+            llm: llm ?? self.llm
         )
     }
 
@@ -19912,6 +23615,51 @@ class JSONAny: Codable {
 
 // MARK: - Pflichtfelder explizit kodieren (auch null), siehe docs/VERTRAEGE.md §11.7
 
+extension AIBudgetStatus {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(budgetEur, forKey: .budgetEur)
+        try container.encode(month, forKey: .month)
+        try container.encode(reached, forKey: .reached)
+        try container.encode(spentEur, forKey: .spentEur)
+        try container.encode(warn, forKey: .warn)
+    }
+}
+
+extension AISettings {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(autoAccept, forKey: .autoAccept)
+        try container.encode(monthlyBudgetEur, forKey: .monthlyBudgetEur)
+    }
+}
+
+extension AISettingsUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(autoAccept, forKey: .autoAccept)
+        try container.encodeIfPresent(monthlyBudgetEur, forKey: .monthlyBudgetEur)
+    }
+}
+
+extension AIStatus {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(budget, forKey: .budget)
+        try container.encode(llm, forKey: .llm)
+        try container.encode(workerReachable, forKey: .workerReachable)
+    }
+}
+
+extension WorkerLlmStatus {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(configured, forKey: .configured)
+        try container.encode(issue, forKey: .issue)
+        try container.encode(provider, forKey: .provider)
+    }
+}
+
 extension AlignLogPayload {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -20145,6 +23893,248 @@ extension CalendarSourceList {
     }
 }
 
+extension Concept {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(aliases, forKey: .aliases)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(examRelevant, forKey: .examRelevant)
+        try container.encode(id, forKey: .id)
+        try container.encode(importanceBase, forKey: .importanceBase)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(mergedInto, forKey: .mergedInto)
+        try container.encode(name, forKey: .name)
+        try container.encode(oneLiner, forKey: .oneLiner)
+        try container.encode(status, forKey: .status)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+extension ConceptDetail {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(concept, forKey: .concept)
+        try container.encode(evidence, forKey: .evidence)
+        try container.encode(inboxItemID, forKey: .inboxItemID)
+        try container.encode(modules, forKey: .modules)
+        try container.encode(relations, forKey: .relations)
+    }
+}
+
+extension EvidenceView {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(auto, forKey: .auto)
+        try container.encode(id, forKey: .id)
+        try container.encode(missing, forKey: .missing)
+        try container.encode(quote, forKey: .quote)
+        try container.encode(ref, forKey: .ref)
+        try container.encode(session, forKey: .session)
+        try container.encode(slideTitle, forKey: .slideTitle)
+    }
+}
+
+extension SessionRef {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(module, forKey: .module)
+        try container.encode(number, forKey: .number)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encode(title, forKey: .title)
+    }
+}
+
+extension SearchModuleRef {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(shortName, forKey: .shortName)
+    }
+}
+
+extension ConceptRelationView {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(crossModule, forKey: .crossModule)
+        try container.encode(direction, forKey: .direction)
+        try container.encode(id, forKey: .id)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(other, forKey: .other)
+        try container.encode(source, forKey: .source)
+    }
+}
+
+extension ConceptEdit {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(aliases, forKey: .aliases)
+        try container.encodeIfPresent(kind, forKey: .kind)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(oneLiner, forKey: .oneLiner)
+    }
+}
+
+extension ConceptList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension ConceptListItem {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(concept, forKey: .concept)
+        try container.encode(evidenceCount, forKey: .evidenceCount)
+        try container.encode(modules, forKey: .modules)
+        try container.encode(sessionCount, forKey: .sessionCount)
+    }
+}
+
+extension ConceptProposal {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(aliases, forKey: .aliases)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(examHint, forKey: .examHint)
+        try container.encode(importance, forKey: .importance)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(name, forKey: .name)
+        try container.encode(oneLiner, forKey: .oneLiner)
+        try container.encode(profExplanation, forKey: .profExplanation)
+    }
+}
+
+extension ConceptsExtractPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(force, forKey: .force)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension ConceptsExtractResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chapters, forKey: .chapters)
+        try container.encode(concepts, forKey: .concepts)
+        try container.encode(costEur, forKey: .costEur)
+        try container.encode(droppedConcepts, forKey: .droppedConcepts)
+        try container.encode(droppedEvidence, forKey: .droppedEvidence)
+        try container.encode(droppedRelations, forKey: .droppedRelations)
+        try container.encode(empty, forKey: .empty)
+        try container.encode(inputHash, forKey: .inputHash)
+        try container.encode(model, forKey: .model)
+        try container.encode(promptVersion, forKey: .promptVersion)
+        try container.encode(relations, forKey: .relations)
+        try container.encode(sessionDeleted, forKey: .sessionDeleted)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(unchanged, forKey: .unchanged)
+    }
+}
+
+extension ExtractedConcept {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(evidence, forKey: .evidence)
+        try container.encode(key, forKey: .key)
+        try container.encode(proposal, forKey: .proposal)
+    }
+}
+
+extension ExtractedRelation {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(from, forKey: .from)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(to, forKey: .to)
+        try container.encode(why, forKey: .why)
+    }
+}
+
+extension ConceptsResolvePayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(extractJobID, forKey: .extractJobID)
+        try container.encodeIfPresent(force, forKey: .force)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension ConceptsResolveResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(autoAccepted, forKey: .autoAccepted)
+        try container.encode(autoMerged, forKey: .autoMerged)
+        try container.encode(costEur, forKey: .costEur)
+        try container.encode(droppedCycles, forKey: .droppedCycles)
+        try container.encode(embeddedConcepts, forKey: .embeddedConcepts)
+        try container.encode(embeddingError, forKey: .embeddingError)
+        try container.encode(embeddingModel, forKey: .embeddingModel)
+        try container.encode(extractInputHash, forKey: .extractInputHash)
+        try container.encode(extractJobID, forKey: .extractJobID)
+        try container.encode(model, forKey: .model)
+        try container.encode(promptVersion, forKey: .promptVersion)
+        try container.encode(proposedMerge, forKey: .proposedMerge)
+        try container.encode(proposedNew, forKey: .proposedNew)
+        try container.encode(proposedRelations, forKey: .proposedRelations)
+        try container.encode(resolveVersion, forKey: .resolveVersion)
+        try container.encode(sessionDeleted, forKey: .sessionDeleted)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(skippedRejected, forKey: .skippedRejected)
+        try container.encode(unchanged, forKey: .unchanged)
+    }
+}
+
+extension CostByModel {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cacheCreationInputTokens, forKey: .cacheCreationInputTokens)
+        try container.encode(cacheReadInputTokens, forKey: .cacheReadInputTokens)
+        try container.encode(calls, forKey: .calls)
+        try container.encode(eur, forKey: .eur)
+        try container.encode(inputTokens, forKey: .inputTokens)
+        try container.encode(model, forKey: .model)
+        try container.encode(outputTokens, forKey: .outputTokens)
+        try container.encode(provider, forKey: .provider)
+    }
+}
+
+extension CostBySession {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(calls, forKey: .calls)
+        try container.encode(eur, forKey: .eur)
+        try container.encode(session, forKey: .session)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension CostByTask {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(calls, forKey: .calls)
+        try container.encode(eur, forKey: .eur)
+        try container.encode(task, forKey: .task)
+    }
+}
+
+extension CostSummary {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(budget, forKey: .budget)
+        try container.encode(byModel, forKey: .byModel)
+        try container.encode(bySession, forKey: .bySession)
+        try container.encode(byTask, forKey: .byTask)
+        try container.encode(calls, forKey: .calls)
+    }
+}
+
 extension DataSettings {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -20291,6 +24281,26 @@ extension EmbedResponse {
         try container.encode(dim, forKey: .dim)
         try container.encode(model, forKey: .model)
         try container.encode(vectors, forKey: .vectors)
+    }
+}
+
+extension EvidenceRefSlide {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deckID, forKey: .deckID)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(slideID, forKey: .slideID)
+        try container.encode(slideIndex, forKey: .slideIndex)
+    }
+}
+
+extension EvidenceRefTranscript {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(tEndMS, forKey: .tEndMS)
+        try container.encode(tStartMS, forKey: .tStartMS)
     }
 }
 
@@ -20443,6 +24453,155 @@ extension ImageElementPayload {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(crop, forKey: .crop)
         try container.encode(photoID, forKey: .photoID)
+    }
+}
+
+extension InboxAcceptRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(asNew, forKey: .asNew)
+        try container.encodeIfPresent(edit, forKey: .edit)
+        try container.encodeIfPresent(mergeInto, forKey: .mergeInto)
+        try container.encodeIfPresent(relationKind, forKey: .relationKind)
+    }
+}
+
+extension InboxBulkRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(action, forKey: .action)
+        try container.encodeIfPresent(ids, forKey: .ids)
+        try container.encodeIfPresent(sessionID, forKey: .sessionID)
+    }
+}
+
+extension InboxBulkResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(decided, forKey: .decided)
+        try container.encode(skipped, forKey: .skipped)
+    }
+}
+
+extension InboxDecision {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(action, forKey: .action)
+        try container.encode(addedAliases, forKey: .addedAliases)
+        try container.encode(addedModuleIDS, forKey: .addedModuleIDS)
+        try container.encode(cascadeItemIDS, forKey: .cascadeItemIDS)
+        try container.encode(conceptID, forKey: .conceptID)
+        try container.encode(duplicateOf, forKey: .duplicateOf)
+        try container.encode(mergedInto, forKey: .mergedInto)
+        try container.encode(movedEvidenceIDS, forKey: .movedEvidenceIDS)
+        try container.encode(previous, forKey: .previous)
+        try container.encode(relationKindBefore, forKey: .relationKindBefore)
+        try container.encode(triggeredBy, forKey: .triggeredBy)
+    }
+}
+
+extension InboxDecisionResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(concept, forKey: .concept)
+        try container.encode(item, forKey: .item)
+    }
+}
+
+extension InboxItem {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(blocked, forKey: .blocked)
+        try container.encode(conceptID, forKey: .conceptID)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(decidedAt, forKey: .decidedAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(jobID, forKey: .jobID)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(payload, forKey: .payload)
+        try container.encode(priority, forKey: .priority)
+        try container.encode(relationID, forKey: .relationID)
+        try container.encode(session, forKey: .session)
+        try container.encode(status, forKey: .status)
+        try container.encode(targetConceptID, forKey: .targetConceptID)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+extension InboxSimilarConcept {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(conceptID, forKey: .conceptID)
+        try container.encode(name, forKey: .name)
+        try container.encode(similarity, forKey: .similarity)
+        try container.encode(verdict, forKey: .verdict)
+    }
+}
+
+extension InboxItemList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension InboxOverview {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(olderCount, forKey: .olderCount)
+        try container.encode(openCount, forKey: .openCount)
+        try container.encode(sessions, forKey: .sessions)
+    }
+}
+
+extension InboxOverviewSession {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(oldestAt, forKey: .oldestAt)
+        try container.encode(openCount, forKey: .openCount)
+        try container.encode(session, forKey: .session)
+    }
+}
+
+extension InboxPayloadConceptMerge {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(basis, forKey: .basis)
+        try container.encode(evidence, forKey: .evidence)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(model, forKey: .model)
+        try container.encode(promptVersion, forKey: .promptVersion)
+        try container.encode(proposal, forKey: .proposal)
+        try container.encode(reason, forKey: .reason)
+        try container.encode(similarity, forKey: .similarity)
+        try container.encode(target, forKey: .target)
+    }
+}
+
+extension InboxPayloadConceptNew {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(evidence, forKey: .evidence)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(model, forKey: .model)
+        try container.encode(promptVersion, forKey: .promptVersion)
+        try container.encode(proposal, forKey: .proposal)
+        try container.encode(similar, forKey: .similar)
+    }
+}
+
+extension InboxPayloadRelation {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(confidence, forKey: .confidence)
+        try container.encode(fromConceptID, forKey: .fromConceptID)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(model, forKey: .model)
+        try container.encode(promptVersion, forKey: .promptVersion)
+        try container.encode(relationKind, forKey: .relationKind)
+        try container.encode(toConceptID, forKey: .toConceptID)
+        try container.encode(why, forKey: .why)
     }
 }
 
@@ -21747,15 +25906,6 @@ extension RecordingCreate {
     }
 }
 
-extension SearchModuleRef {
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(id, forKey: .id)
-        try container.encode(name, forKey: .name)
-        try container.encode(shortName, forKey: .shortName)
-    }
-}
-
 extension SearchSnippetPart {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -21911,6 +26061,24 @@ extension SessionStartOffset {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(deviceID, forKey: .deviceID)
         try container.encode(offsetMS, forKey: .offsetMS)
+    }
+}
+
+extension SessionConceptItem {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(concept, forKey: .concept)
+        try container.encode(evidence, forKey: .evidence)
+        try container.encode(inboxItemID, forKey: .inboxItemID)
+        try container.encode(inboxStatus, forKey: .inboxStatus)
+    }
+}
+
+extension SessionConcepts {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+        try container.encode(sessionID, forKey: .sessionID)
     }
 }
 
@@ -22092,6 +26260,46 @@ extension SessionStopRequest {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(reason, forKey: .reason)
+    }
+}
+
+extension SessionSummary {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(jobID, forKey: .jobID)
+        try container.encode(lang, forKey: .lang)
+        try container.encode(model, forKey: .model)
+        try container.encode(outline, forKey: .outline)
+        try container.encode(promptVersion, forKey: .promptVersion)
+        try container.encode(sentences, forKey: .sentences)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+extension SummaryOutlineItem {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sources, forKey: .sources)
+        try container.encode(title, forKey: .title)
+    }
+}
+
+extension SummarySentence {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sources, forKey: .sources)
+        try container.encode(text, forKey: .text)
+    }
+}
+
+extension SessionSummaryView {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(summary, forKey: .summary)
     }
 }
 
@@ -22385,6 +26593,31 @@ extension StrokeRemoveOp {
         try container.encodeIfPresent(seq, forKey: .seq)
         try container.encode(stream, forKey: .stream)
         try container.encode(type, forKey: .type)
+    }
+}
+
+extension SummaryWritePayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(force, forKey: .force)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension SummaryWriteResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(costEur, forKey: .costEur)
+        try container.encode(droppedSentences, forKey: .droppedSentences)
+        try container.encode(inputHash, forKey: .inputHash)
+        try container.encode(model, forKey: .model)
+        try container.encode(outlineCount, forKey: .outlineCount)
+        try container.encode(promptVersion, forKey: .promptVersion)
+        try container.encode(sentenceCount, forKey: .sentenceCount)
+        try container.encode(sessionDeleted, forKey: .sessionDeleted)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(skipped, forKey: .skipped)
+        try container.encode(unchanged, forKey: .unchanged)
     }
 }
 
@@ -22757,5 +26990,6 @@ extension WorkerHealth {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(embedder, forKey: .embedder)
+        try container.encodeIfPresent(llm, forKey: .llm)
     }
 }

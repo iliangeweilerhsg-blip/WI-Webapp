@@ -71,6 +71,10 @@ export const STEP_LABELS: Record<PipelineStep, string> = {
   'audio.finalize': 'Audio',
   transcribe: 'Transkript',
   'align.log': 'Folien zuordnen',
+  // VERTRAEGE §20.2 (Texte der Schrittliste)
+  'concepts.extract': 'Konzepte',
+  'concepts.resolve': 'Abgleich',
+  'summary.write': 'Zusammenfassung',
 };
 
 export interface StepRow {
