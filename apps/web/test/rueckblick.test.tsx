@@ -822,3 +822,45 @@ describe('Rückblick: Teile derselben Abschnitte', () => {
     expect(stub.started.at(-1)).toMatchObject({ at: 200 });
   });
 });
+
+describe('Rückblick: Sprung aus der Suche (&t=<ms>, VERTRAEGE §19.7)', () => {
+  it('springt an die Stelle, zeigt die Folie dazu und spielt nicht automatisch ab', async () => {
+    boot({ search: `id=${SESSION_ID}&t=210000` });
+    await screen.findAllByTestId('transcript-line');
+    // t liegt in der ersten Aufnahme (started_ms 0): Position in der Datei = t − started_ms
+    await waitFor(() => expect(audio(R1).currentTime).toBe(210));
+    // Folie 2 ist gewählt, die Zeile an der Stelle ist markiert
+    await waitFor(() => expect(counter()).toHaveTextContent('Folie 2 von 3'));
+    expect(activeLines()).toHaveLength(1);
+    expect(activeLines()[0]).toHaveTextContent('Die dritte Normalform ist klausurrelevant.');
+    expect(stub.play).not.toHaveBeenCalled();
+    expect(stub.started).toHaveLength(0);
+  });
+
+  it('rechnet mit dem Beginn der passenden Aufnahme (zweite Aufnahme nach einer Lücke)', async () => {
+    boot({ search: `id=${SESSION_ID}&t=720000` });
+    await screen.findAllByTestId('transcript-line');
+    await waitFor(() => expect(audio(R2).currentTime).toBe(20));
+    expect(audio(R1).currentTime).toBe(0);
+    expect(stub.play).not.toHaveBeenCalled();
+  });
+
+  it('dasselbe Ziel erneut aus der Suche springt wieder (Ereignis)', async () => {
+    boot({ search: `id=${SESSION_ID}&t=210000` });
+    await screen.findAllByTestId('transcript-line');
+    await waitFor(() => expect(audio(R1).currentTime).toBe(210));
+    tick(R1, 400);
+    expect(audio(R1).currentTime).toBe(400);
+    act(() => void window.dispatchEvent(new CustomEvent('sg:review-jump', { detail: { t: 210000 } })));
+    await waitFor(() => expect(audio(R1).currentTime).toBe(210));
+    expect(stub.play).not.toHaveBeenCalled();
+  });
+
+  it('ohne oder mit ungültigem t bleibt alles am Anfang', async () => {
+    boot({ search: `id=${SESSION_ID}&t=abc` });
+    await screen.findAllByTestId('transcript-line');
+    expect(audio(R1).currentTime).toBe(0);
+    expect(activeLines()).toHaveLength(0);
+    expect(counter()).toHaveTextContent('Folie 1 von 3');
+  });
+});
