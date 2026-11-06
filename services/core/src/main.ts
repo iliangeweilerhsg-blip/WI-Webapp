@@ -25,7 +25,7 @@ if (dotEnvFile) {
 
 const handle = createDb(config.databaseUrl);
 // Moodle-Abgleich beim Start und alle 2 h (F-MDL-04); ohne SG_MOODLE_URL bleibt er aus
-const app = await buildApp({ config, db: handle.db, logger, moodleSchedule: true });
+const app = await buildApp({ config, db: handle.db, logger, moodleSchedule: true, searchBackfill: true });
 
 let bonjour: BonjourHandle | null = null;
 let stopping = false;

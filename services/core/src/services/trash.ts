@@ -28,6 +28,7 @@ export type Node =
   | 'transcript'
   | 'transcript_segment'
   | 'slide_segment'
+  | 'search_chunk'
   | 'notebook'
   | 'page'
   | 'stroke'
@@ -53,7 +54,11 @@ export const CHILDREN: Record<Node, Edge[]> = {
     { child: 'session', fk: 'module_id' },
     { child: 'notebook', fk: 'module_id' },
   ],
-  slide_deck: [{ child: 'slide', fk: 'deck_id' }],
+  slide_deck: [
+    { child: 'slide', fk: 'deck_id' },
+    // Suchindex der Folien (§19.1), gleicher Zeitstempel. Endgültiges Löschen nimmt ihn über den FK mit
+    { child: 'search_chunk', fk: 'deck_id' },
+  ],
   slide: [],
   exercise_sheet: [{ child: 'task', fk: 'sheet_id' }],
   task: [],
@@ -69,6 +74,8 @@ export const CHILDREN: Record<Node, Edge[]> = {
     { child: 'transcript', fk: 'session_id' },
     { child: 'transcript_segment', fk: 'session_id' },
     { child: 'slide_segment', fk: 'session_id' },
+    // Suchindex des Gesagten (§19.1)
+    { child: 'search_chunk', fk: 'session_id' },
   ],
   slide_event: [],
   marker: [],
@@ -78,6 +85,7 @@ export const CHILDREN: Record<Node, Edge[]> = {
   transcript: [],
   transcript_segment: [],
   slide_segment: [],
+  search_chunk: [],
   notebook: [{ child: 'page', fk: 'notebook_id' }],
   page: [
     { child: 'stroke', fk: 'page_id' },

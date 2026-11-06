@@ -4,6 +4,7 @@ import {
   AlignLogPayloadSchema,
   AudioFinalizePayloadSchema,
   PdfIngestPayloadSchema,
+  SearchIndexPayloadSchema,
   SINGLE_USER_ID,
   TranscribePayloadSchema,
   type Job,
@@ -29,6 +30,7 @@ export const JOB_PAYLOAD_SCHEMAS: Partial<Record<JobType, ZodType>> = {
   'audio.finalize': AudioFinalizePayloadSchema,
   transcribe: TranscribePayloadSchema,
   'align.log': AlignLogPayloadSchema,
+  'search.index': SearchIndexPayloadSchema,
 };
 
 export interface EnqueueJobInput {
