@@ -53,6 +53,9 @@ struct SchemaBundle: Codable {
     let elementRemoveOp: ElementRemoveOp?
     let elementUpsertData: ElementUpsertData?
     let elementUpsertOp: ElementUpsertOp?
+    let embedderState: EmbedderState?
+    let embedRequest: EmbedRequest?
+    let embedResponse: EmbedResponse?
     let epochMS: Int?
     let exerciseSheet: ExerciseSheet?
     let exerciseSheetList: ExerciseSheetList?
@@ -219,6 +222,17 @@ struct SchemaBundle: Codable {
     let restoreTestState: RestoreTestState?
     let restoreTestTrigger: RestoreTestTrigger?
     let reviewState: ReviewState?
+    let searchDegraded: SearchDegraded?
+    let searchHit: SearchHit?
+    let searchHitSlide: SearchHitSlide?
+    let searchHitTranscript: SearchHitTranscript?
+    let searchIndexPayload: SearchIndexPayload?
+    let searchIndexResult: SearchIndexResult?
+    let searchIndexScope: SearchIndexScope?
+    let searchKind: SearchKind?
+    let searchModuleRef: SearchModuleRef?
+    let searchResponse: SearchResponse?
+    let searchSnippetPart: SearchSnippetPart?
     let semester: Semester?
     let semesterCreate: SemesterCreate?
     let semesterList: SemesterList?
@@ -328,6 +342,7 @@ struct SchemaBundle: Codable {
     let trashRestoreResult: TrashRestoreResult?
     let uploadResult: UploadResult?
     let uuid: String?
+    let workerHealth: WorkerHealth?
 
     enum CodingKeys: String, CodingKey {
         case alignLogMode = "AlignLogMode"
@@ -374,6 +389,9 @@ struct SchemaBundle: Codable {
         case elementRemoveOp = "ElementRemoveOp"
         case elementUpsertData = "ElementUpsertData"
         case elementUpsertOp = "ElementUpsertOp"
+        case embedderState = "EmbedderState"
+        case embedRequest = "EmbedRequest"
+        case embedResponse = "EmbedResponse"
         case epochMS = "EpochMs"
         case exerciseSheet = "ExerciseSheet"
         case exerciseSheetList = "ExerciseSheetList"
@@ -540,6 +558,17 @@ struct SchemaBundle: Codable {
         case restoreTestState = "RestoreTestState"
         case restoreTestTrigger = "RestoreTestTrigger"
         case reviewState = "ReviewState"
+        case searchDegraded = "SearchDegraded"
+        case searchHit = "SearchHit"
+        case searchHitSlide = "SearchHitSlide"
+        case searchHitTranscript = "SearchHitTranscript"
+        case searchIndexPayload = "SearchIndexPayload"
+        case searchIndexResult = "SearchIndexResult"
+        case searchIndexScope = "SearchIndexScope"
+        case searchKind = "SearchKind"
+        case searchModuleRef = "SearchModuleRef"
+        case searchResponse = "SearchResponse"
+        case searchSnippetPart = "SearchSnippetPart"
         case semester = "Semester"
         case semesterCreate = "SemesterCreate"
         case semesterList = "SemesterList"
@@ -649,6 +678,7 @@ struct SchemaBundle: Codable {
         case trashRestoreResult = "TrashRestoreResult"
         case uploadResult = "UploadResult"
         case uuid = "Uuid"
+        case workerHealth = "WorkerHealth"
     }
 }
 
@@ -715,6 +745,9 @@ extension SchemaBundle {
         elementRemoveOp: ElementRemoveOp?? = nil,
         elementUpsertData: ElementUpsertData?? = nil,
         elementUpsertOp: ElementUpsertOp?? = nil,
+        embedderState: EmbedderState?? = nil,
+        embedRequest: EmbedRequest?? = nil,
+        embedResponse: EmbedResponse?? = nil,
         epochMS: Int?? = nil,
         exerciseSheet: ExerciseSheet?? = nil,
         exerciseSheetList: ExerciseSheetList?? = nil,
@@ -881,6 +914,17 @@ extension SchemaBundle {
         restoreTestState: RestoreTestState?? = nil,
         restoreTestTrigger: RestoreTestTrigger?? = nil,
         reviewState: ReviewState?? = nil,
+        searchDegraded: SearchDegraded?? = nil,
+        searchHit: SearchHit?? = nil,
+        searchHitSlide: SearchHitSlide?? = nil,
+        searchHitTranscript: SearchHitTranscript?? = nil,
+        searchIndexPayload: SearchIndexPayload?? = nil,
+        searchIndexResult: SearchIndexResult?? = nil,
+        searchIndexScope: SearchIndexScope?? = nil,
+        searchKind: SearchKind?? = nil,
+        searchModuleRef: SearchModuleRef?? = nil,
+        searchResponse: SearchResponse?? = nil,
+        searchSnippetPart: SearchSnippetPart?? = nil,
         semester: Semester?? = nil,
         semesterCreate: SemesterCreate?? = nil,
         semesterList: SemesterList?? = nil,
@@ -989,7 +1033,8 @@ extension SchemaBundle {
         trashParent: TrashParent?? = nil,
         trashRestoreResult: TrashRestoreResult?? = nil,
         uploadResult: UploadResult?? = nil,
-        uuid: String?? = nil
+        uuid: String?? = nil,
+        workerHealth: WorkerHealth?? = nil
     ) -> SchemaBundle {
         return SchemaBundle(
             alignLogMode: alignLogMode ?? self.alignLogMode,
@@ -1036,6 +1081,9 @@ extension SchemaBundle {
             elementRemoveOp: elementRemoveOp ?? self.elementRemoveOp,
             elementUpsertData: elementUpsertData ?? self.elementUpsertData,
             elementUpsertOp: elementUpsertOp ?? self.elementUpsertOp,
+            embedderState: embedderState ?? self.embedderState,
+            embedRequest: embedRequest ?? self.embedRequest,
+            embedResponse: embedResponse ?? self.embedResponse,
             epochMS: epochMS ?? self.epochMS,
             exerciseSheet: exerciseSheet ?? self.exerciseSheet,
             exerciseSheetList: exerciseSheetList ?? self.exerciseSheetList,
@@ -1202,6 +1250,17 @@ extension SchemaBundle {
             restoreTestState: restoreTestState ?? self.restoreTestState,
             restoreTestTrigger: restoreTestTrigger ?? self.restoreTestTrigger,
             reviewState: reviewState ?? self.reviewState,
+            searchDegraded: searchDegraded ?? self.searchDegraded,
+            searchHit: searchHit ?? self.searchHit,
+            searchHitSlide: searchHitSlide ?? self.searchHitSlide,
+            searchHitTranscript: searchHitTranscript ?? self.searchHitTranscript,
+            searchIndexPayload: searchIndexPayload ?? self.searchIndexPayload,
+            searchIndexResult: searchIndexResult ?? self.searchIndexResult,
+            searchIndexScope: searchIndexScope ?? self.searchIndexScope,
+            searchKind: searchKind ?? self.searchKind,
+            searchModuleRef: searchModuleRef ?? self.searchModuleRef,
+            searchResponse: searchResponse ?? self.searchResponse,
+            searchSnippetPart: searchSnippetPart ?? self.searchSnippetPart,
             semester: semester ?? self.semester,
             semesterCreate: semesterCreate ?? self.semesterCreate,
             semesterList: semesterList ?? self.semesterList,
@@ -1310,7 +1369,8 @@ extension SchemaBundle {
             trashParent: trashParent ?? self.trashParent,
             trashRestoreResult: trashRestoreResult ?? self.trashRestoreResult,
             uploadResult: uploadResult ?? self.uploadResult,
-            uuid: uuid ?? self.uuid
+            uuid: uuid ?? self.uuid,
+            workerHealth: workerHealth ?? self.workerHealth
         )
     }
 
@@ -3630,6 +3690,111 @@ extension ElementUpsertOp {
 
 enum ElementUpsertOpKind: String, Codable {
     case elementUpsert = "element.upsert"
+}
+
+/// POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 64 KB
+// MARK: - EmbedRequest
+struct EmbedRequest: Codable {
+    let texts: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case texts = "texts"
+    }
+}
+
+// MARK: EmbedRequest convenience initializers and mutators
+
+extension EmbedRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(EmbedRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        texts: [String]? = nil
+    ) -> EmbedRequest {
+        return EmbedRequest(
+            texts: texts ?? self.texts
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort von POST /embed: ein L2-normierter Vektor je Text, in derselben Reihenfolge
+// MARK: - EmbedResponse
+struct EmbedResponse: Codable {
+    let dim: Int
+    let model: String
+    let vectors: [[Double]]
+
+    enum CodingKeys: String, CodingKey {
+        case dim = "dim"
+        case model = "model"
+        case vectors = "vectors"
+    }
+}
+
+// MARK: EmbedResponse convenience initializers and mutators
+
+extension EmbedResponse {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(EmbedResponse.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        dim: Int? = nil,
+        model: String? = nil,
+        vectors: [[Double]]? = nil
+    ) -> EmbedResponse {
+        return EmbedResponse(
+            dim: dim ?? self.dim,
+            model: model ?? self.model,
+            vectors: vectors ?? self.vectors
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Zustand des Embedders im Worker (VERTRAEGE §19.2)
+enum EmbedderState: String, Codable {
+    case bereit = "bereit"
+    case laedt = "laedt"
+    case nichtVerfuegbar = "nicht_verfuegbar"
 }
 
 /// Übungsblatt. Ergänzung zu 03 §4: ingest_state zeigt den Fortschritt von pdf.ingest für
@@ -12126,6 +12291,674 @@ enum ReviewState: String, Codable {
     case offen = "offen"
 }
 
+enum SearchDegraded: String, Codable {
+    case embedderNotReady = "embedder_not_ready"
+    case embedderUnavailable = "embedder_unavailable"
+}
+
+/// Treffer auf einer Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+///
+/// Treffer im Gesagten (Transkript-Fenster). Ziel: /rueckblick?id=<session_id>&t=<t_ms>
+// MARK: - SearchHit
+struct SearchHit: Codable {
+    let chunkID: String
+    let deckID: String?
+    let deckTitle: String?
+    let kind: SearchKind
+    let module: SearchModuleRef
+    let score: Double
+    let slideIndex: Int?
+    let slideTitle: String?
+    let snippet: [SearchSnippetPart]
+    let sessionID: String?
+    /// VL-Nummer (Session.number)
+    let sessionNumber: Int?
+    let sessionStartedAt: Date?
+    let sessionTitle: String?
+    let tEndMS: Int?
+    let tMS: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case chunkID = "chunk_id"
+        case deckID = "deck_id"
+        case deckTitle = "deck_title"
+        case kind = "kind"
+        case module = "module"
+        case score = "score"
+        case slideIndex = "slide_index"
+        case slideTitle = "slide_title"
+        case snippet = "snippet"
+        case sessionID = "session_id"
+        case sessionNumber = "session_number"
+        case sessionStartedAt = "session_started_at"
+        case sessionTitle = "session_title"
+        case tEndMS = "t_end_ms"
+        case tMS = "t_ms"
+    }
+}
+
+// MARK: SearchHit convenience initializers and mutators
+
+extension SearchHit {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SearchHit.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        chunkID: String? = nil,
+        deckID: String?? = nil,
+        deckTitle: String?? = nil,
+        kind: SearchKind? = nil,
+        module: SearchModuleRef? = nil,
+        score: Double? = nil,
+        slideIndex: Int?? = nil,
+        slideTitle: String?? = nil,
+        snippet: [SearchSnippetPart]? = nil,
+        sessionID: String?? = nil,
+        sessionNumber: Int?? = nil,
+        sessionStartedAt: Date?? = nil,
+        sessionTitle: String?? = nil,
+        tEndMS: Int?? = nil,
+        tMS: Int?? = nil
+    ) -> SearchHit {
+        return SearchHit(
+            chunkID: chunkID ?? self.chunkID,
+            deckID: deckID ?? self.deckID,
+            deckTitle: deckTitle ?? self.deckTitle,
+            kind: kind ?? self.kind,
+            module: module ?? self.module,
+            score: score ?? self.score,
+            slideIndex: slideIndex ?? self.slideIndex,
+            slideTitle: slideTitle ?? self.slideTitle,
+            snippet: snippet ?? self.snippet,
+            sessionID: sessionID ?? self.sessionID,
+            sessionNumber: sessionNumber ?? self.sessionNumber,
+            sessionStartedAt: sessionStartedAt ?? self.sessionStartedAt,
+            sessionTitle: sessionTitle ?? self.sessionTitle,
+            tEndMS: tEndMS ?? self.tEndMS,
+            tMS: tMS ?? self.tMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Art eines Sucheintrags (search_chunk.source_kind). Konzepte, Notizen, Aufgaben, Karten
+/// und Fotos kommen mit ihren Tickets als neue Werte dazu
+enum SearchKind: String, Codable {
+    case slide = "slide"
+    case transcript = "transcript"
+}
+
+// MARK: - SearchModuleRef
+struct SearchModuleRef: Codable {
+    let id: String
+    let name: String
+    let shortName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case name = "name"
+        case shortName = "short_name"
+    }
+}
+
+// MARK: SearchModuleRef convenience initializers and mutators
+
+extension SearchModuleRef {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SearchModuleRef.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String? = nil,
+        name: String? = nil,
+        shortName: String?? = nil
+    ) -> SearchModuleRef {
+        return SearchModuleRef(
+            id: id ?? self.id,
+            name: name ?? self.name,
+            shortName: shortName ?? self.shortName
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Teil eines Ausschnitts. hit = Treffer-Wort (als <mark> darstellen). Immer als Text
+/// rendern, nie als HTML
+// MARK: - SearchSnippetPart
+struct SearchSnippetPart: Codable {
+    let hit: Bool
+    let text: String
+
+    enum CodingKeys: String, CodingKey {
+        case hit = "hit"
+        case text = "text"
+    }
+}
+
+// MARK: SearchSnippetPart convenience initializers and mutators
+
+extension SearchSnippetPart {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SearchSnippetPart.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        hit: Bool? = nil,
+        text: String? = nil
+    ) -> SearchSnippetPart {
+        return SearchSnippetPart(
+            hit: hit ?? self.hit,
+            text: text ?? self.text
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Treffer auf einer Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+// MARK: - SearchHitSlide
+struct SearchHitSlide: Codable {
+    let chunkID: String
+    let deckID: String
+    let deckTitle: String
+    let kind: SearchHitSlideKind
+    let module: SearchModuleRef
+    let score: Double
+    let slideIndex: Int
+    let slideTitle: String?
+    let snippet: [SearchSnippetPart]
+
+    enum CodingKeys: String, CodingKey {
+        case chunkID = "chunk_id"
+        case deckID = "deck_id"
+        case deckTitle = "deck_title"
+        case kind = "kind"
+        case module = "module"
+        case score = "score"
+        case slideIndex = "slide_index"
+        case slideTitle = "slide_title"
+        case snippet = "snippet"
+    }
+}
+
+// MARK: SearchHitSlide convenience initializers and mutators
+
+extension SearchHitSlide {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SearchHitSlide.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        chunkID: String? = nil,
+        deckID: String? = nil,
+        deckTitle: String? = nil,
+        kind: SearchHitSlideKind? = nil,
+        module: SearchModuleRef? = nil,
+        score: Double? = nil,
+        slideIndex: Int? = nil,
+        slideTitle: String?? = nil,
+        snippet: [SearchSnippetPart]? = nil
+    ) -> SearchHitSlide {
+        return SearchHitSlide(
+            chunkID: chunkID ?? self.chunkID,
+            deckID: deckID ?? self.deckID,
+            deckTitle: deckTitle ?? self.deckTitle,
+            kind: kind ?? self.kind,
+            module: module ?? self.module,
+            score: score ?? self.score,
+            slideIndex: slideIndex ?? self.slideIndex,
+            slideTitle: slideTitle ?? self.slideTitle,
+            snippet: snippet ?? self.snippet
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SearchHitSlideKind: String, Codable {
+    case slide = "slide"
+}
+
+/// Treffer im Gesagten (Transkript-Fenster). Ziel: /rueckblick?id=<session_id>&t=<t_ms>
+// MARK: - SearchHitTranscript
+struct SearchHitTranscript: Codable {
+    let chunkID: String
+    let kind: SearchHitTranscriptKind
+    let module: SearchModuleRef
+    let score: Double
+    let sessionID: String
+    /// VL-Nummer (Session.number)
+    let sessionNumber: Int?
+    let sessionStartedAt: Date?
+    let sessionTitle: String?
+    let snippet: [SearchSnippetPart]
+    let tEndMS: Int
+    let tMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case chunkID = "chunk_id"
+        case kind = "kind"
+        case module = "module"
+        case score = "score"
+        case sessionID = "session_id"
+        case sessionNumber = "session_number"
+        case sessionStartedAt = "session_started_at"
+        case sessionTitle = "session_title"
+        case snippet = "snippet"
+        case tEndMS = "t_end_ms"
+        case tMS = "t_ms"
+    }
+}
+
+// MARK: SearchHitTranscript convenience initializers and mutators
+
+extension SearchHitTranscript {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SearchHitTranscript.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        chunkID: String? = nil,
+        kind: SearchHitTranscriptKind? = nil,
+        module: SearchModuleRef? = nil,
+        score: Double? = nil,
+        sessionID: String? = nil,
+        sessionNumber: Int?? = nil,
+        sessionStartedAt: Date?? = nil,
+        sessionTitle: String?? = nil,
+        snippet: [SearchSnippetPart]? = nil,
+        tEndMS: Int? = nil,
+        tMS: Int? = nil
+    ) -> SearchHitTranscript {
+        return SearchHitTranscript(
+            chunkID: chunkID ?? self.chunkID,
+            kind: kind ?? self.kind,
+            module: module ?? self.module,
+            score: score ?? self.score,
+            sessionID: sessionID ?? self.sessionID,
+            sessionNumber: sessionNumber ?? self.sessionNumber,
+            sessionStartedAt: sessionStartedAt ?? self.sessionStartedAt,
+            sessionTitle: sessionTitle ?? self.sessionTitle,
+            snippet: snippet ?? self.snippet,
+            tEndMS: tEndMS ?? self.tEndMS,
+            tMS: tMS ?? self.tMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SearchHitTranscriptKind: String, Codable {
+    case transcript = "transcript"
+}
+
+/// search.index (VERTRAEGE §19.3). job.session_id bleibt NULL, auch bei scope = session
+// MARK: - SearchIndexPayload
+struct SearchIndexPayload: Codable {
+    /// slide_deck.id bzw. session.id
+    let id: String
+    let scope: SearchIndexScope
+
+    enum CodingKeys: String, CodingKey {
+        case id = "id"
+        case scope = "scope"
+    }
+}
+
+// MARK: SearchIndexPayload convenience initializers and mutators
+
+extension SearchIndexPayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SearchIndexPayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        id: String? = nil,
+        scope: SearchIndexScope? = nil
+    ) -> SearchIndexPayload {
+        return SearchIndexPayload(
+            id: id ?? self.id,
+            scope: scope ?? self.scope
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ziel eines search.index-Jobs: ein Foliensatz (Folien) oder eine Session
+/// (Transkript-Fenster)
+enum SearchIndexScope: String, Codable {
+    case deck = "deck"
+    case session = "session"
+}
+
+/// Ergebnis von search.index (VERTRAEGE §19.3)
+// MARK: - SearchIndexResult
+struct SearchIndexResult: Codable {
+    /// Einträge des Ziels nach dem Lauf
+    let chunkCount: Int
+    /// true: Ziel ist weich gelöscht, nichts geschrieben
+    let deleted: Bool
+    /// neu eingebettete Einträge
+    let embeddedCount: Int
+    /// Grund, warum ohne Vektoren geschrieben wurde. Ohne Pfade und ohne Geheimnisse
+    let embeddingError: String?
+    /// Modell der Vektoren. null: Embedder nicht verfügbar, Einträge ohne Vektor geschrieben
+    /// (§19.3 Schritt 4)
+    let embeddingModel: String?
+    let id: String
+    /// SEARCH_INDEX_VERSION des Workers beim Lauf
+    let indexVersion: Int
+    /// true: Ziel existiert nicht (mehr), nichts geschrieben
+    let missing: Bool
+    /// hart gelöschte Einträge, die es im Ziel nicht mehr gibt
+    let removedCount: Int
+    /// Einträge, deren Vektor wiederverwendet wurde (gleicher Text, gleiches Modell, gleiche
+    /// Version)
+    let reusedCount: Int
+    let scope: SearchIndexScope
+
+    enum CodingKeys: String, CodingKey {
+        case chunkCount = "chunk_count"
+        case deleted = "deleted"
+        case embeddedCount = "embedded_count"
+        case embeddingError = "embedding_error"
+        case embeddingModel = "embedding_model"
+        case id = "id"
+        case indexVersion = "index_version"
+        case missing = "missing"
+        case removedCount = "removed_count"
+        case reusedCount = "reused_count"
+        case scope = "scope"
+    }
+}
+
+// MARK: SearchIndexResult convenience initializers and mutators
+
+extension SearchIndexResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SearchIndexResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        chunkCount: Int? = nil,
+        deleted: Bool? = nil,
+        embeddedCount: Int? = nil,
+        embeddingError: String?? = nil,
+        embeddingModel: String?? = nil,
+        id: String? = nil,
+        indexVersion: Int? = nil,
+        missing: Bool? = nil,
+        removedCount: Int? = nil,
+        reusedCount: Int? = nil,
+        scope: SearchIndexScope? = nil
+    ) -> SearchIndexResult {
+        return SearchIndexResult(
+            chunkCount: chunkCount ?? self.chunkCount,
+            deleted: deleted ?? self.deleted,
+            embeddedCount: embeddedCount ?? self.embeddedCount,
+            embeddingError: embeddingError ?? self.embeddingError,
+            embeddingModel: embeddingModel ?? self.embeddingModel,
+            id: id ?? self.id,
+            indexVersion: indexVersion ?? self.indexVersion,
+            missing: missing ?? self.missing,
+            removedCount: removedCount ?? self.removedCount,
+            reusedCount: reusedCount ?? self.reusedCount,
+            scope: scope ?? self.scope
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /search (VERTRAEGE §19.6)
+// MARK: - SearchResponse
+struct SearchResponse: Codable {
+    let degraded: SearchDegraded?
+    let filters: Filters
+    let hits: [SearchHit]
+    let mode: Mode
+    /// Suchtext ohne Filter-Präfixe
+    let query: String
+    let tookMS: Int
+
+    enum CodingKeys: String, CodingKey {
+        case degraded = "degraded"
+        case filters = "filters"
+        case hits = "hits"
+        case mode = "mode"
+        case query = "query"
+        case tookMS = "took_ms"
+    }
+}
+
+// MARK: SearchResponse convenience initializers and mutators
+
+extension SearchResponse {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SearchResponse.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        degraded: SearchDegraded?? = nil,
+        filters: Filters? = nil,
+        hits: [SearchHit]? = nil,
+        mode: Mode? = nil,
+        query: String? = nil,
+        tookMS: Int? = nil
+    ) -> SearchResponse {
+        return SearchResponse(
+            degraded: degraded ?? self.degraded,
+            filters: filters ?? self.filters,
+            hits: hits ?? self.hits,
+            mode: mode ?? self.mode,
+            query: query ?? self.query,
+            tookMS: tookMS ?? self.tookMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Filters
+struct Filters: Codable {
+    /// aus typ:. Leer = alle
+    let kinds: [SearchKind]
+    /// aufgelöste Module aus fach: und module_id. Leer = alle
+    let moduleIDS: [String]
+    /// Präfixe, die nichts trafen (wörtlich, z. B. fach:XYZ). Nicht leer → hits leer
+    let unresolved: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case kinds = "kinds"
+        case moduleIDS = "module_ids"
+        case unresolved = "unresolved"
+    }
+}
+
+// MARK: Filters convenience initializers and mutators
+
+extension Filters {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Filters.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kinds: [SearchKind]? = nil,
+        moduleIDS: [String]? = nil,
+        unresolved: [String]? = nil
+    ) -> Filters {
+        return Filters(
+            kinds: kinds ?? self.kinds,
+            moduleIDS: moduleIDS ?? self.moduleIDS,
+            unresolved: unresolved ?? self.unresolved
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum Mode: String, Codable {
+    case hybrid = "hybrid"
+    case text = "text"
+}
+
 // MARK: - Semester
 struct Semester: Codable {
     /// Archiviert = nur in der Navigation ausgeblendet, bleibt durchsuchbar und lernbar
@@ -18673,6 +19506,112 @@ extension UploadResult {
     }
 }
 
+/// GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token
+// MARK: - WorkerHealth
+struct WorkerHealth: Codable {
+    let embedder: Embedder
+
+    enum CodingKeys: String, CodingKey {
+        case embedder = "embedder"
+    }
+}
+
+// MARK: WorkerHealth convenience initializers and mutators
+
+extension WorkerHealth {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(WorkerHealth.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        embedder: Embedder? = nil
+    ) -> WorkerHealth {
+        return WorkerHealth(
+            embedder: embedder ?? self.embedder
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - Embedder
+struct Embedder: Codable {
+    let dim: Int
+    /// Grund bei nicht_verfuegbar, sonst null
+    let error: String?
+    let model: String
+    let provider: String
+    let state: EmbedderState
+
+    enum CodingKeys: String, CodingKey {
+        case dim = "dim"
+        case error = "error"
+        case model = "model"
+        case provider = "provider"
+        case state = "state"
+    }
+}
+
+// MARK: Embedder convenience initializers and mutators
+
+extension Embedder {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Embedder.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        dim: Int? = nil,
+        error: String?? = nil,
+        model: String? = nil,
+        provider: String? = nil,
+        state: EmbedderState? = nil
+    ) -> Embedder {
+        return Embedder(
+            dim: dim ?? self.dim,
+            error: error ?? self.error,
+            model: model ?? self.model,
+            provider: provider ?? self.provider,
+            state: state ?? self.state
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - Helper functions for creating encoders and decoders
 
 func newJSONDecoder() -> JSONDecoder {
@@ -19329,6 +20268,22 @@ extension ElementUpsertOp {
         try container.encodeIfPresent(seq, forKey: .seq)
         try container.encode(stream, forKey: .stream)
         try container.encode(type, forKey: .type)
+    }
+}
+
+extension EmbedRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(texts, forKey: .texts)
+    }
+}
+
+extension EmbedResponse {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(dim, forKey: .dim)
+        try container.encode(model, forKey: .model)
+        try container.encode(vectors, forKey: .vectors)
     }
 }
 
@@ -20785,6 +21740,92 @@ extension RecordingCreate {
     }
 }
 
+extension SearchModuleRef {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(shortName, forKey: .shortName)
+    }
+}
+
+extension SearchSnippetPart {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(hit, forKey: .hit)
+        try container.encode(text, forKey: .text)
+    }
+}
+
+extension SearchHitSlide {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chunkID, forKey: .chunkID)
+        try container.encode(deckID, forKey: .deckID)
+        try container.encode(deckTitle, forKey: .deckTitle)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(module, forKey: .module)
+        try container.encode(score, forKey: .score)
+        try container.encode(slideIndex, forKey: .slideIndex)
+        try container.encode(slideTitle, forKey: .slideTitle)
+        try container.encode(snippet, forKey: .snippet)
+    }
+}
+
+extension SearchHitTranscript {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chunkID, forKey: .chunkID)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(module, forKey: .module)
+        try container.encode(score, forKey: .score)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(sessionNumber, forKey: .sessionNumber)
+        try container.encode(sessionStartedAt, forKey: .sessionStartedAt)
+        try container.encode(sessionTitle, forKey: .sessionTitle)
+        try container.encode(snippet, forKey: .snippet)
+        try container.encode(tEndMS, forKey: .tEndMS)
+        try container.encode(tMS, forKey: .tMS)
+    }
+}
+
+extension SearchIndexPayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(scope, forKey: .scope)
+    }
+}
+
+extension SearchIndexResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(chunkCount, forKey: .chunkCount)
+        try container.encode(deleted, forKey: .deleted)
+        try container.encode(embeddedCount, forKey: .embeddedCount)
+        try container.encode(embeddingError, forKey: .embeddingError)
+        try container.encode(embeddingModel, forKey: .embeddingModel)
+        try container.encode(id, forKey: .id)
+        try container.encode(indexVersion, forKey: .indexVersion)
+        try container.encode(missing, forKey: .missing)
+        try container.encode(removedCount, forKey: .removedCount)
+        try container.encode(reusedCount, forKey: .reusedCount)
+        try container.encode(scope, forKey: .scope)
+    }
+}
+
+extension SearchResponse {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(degraded, forKey: .degraded)
+        try container.encode(filters, forKey: .filters)
+        try container.encode(hits, forKey: .hits)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(query, forKey: .query)
+        try container.encode(tookMS, forKey: .tookMS)
+    }
+}
+
 extension Semester {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -21702,5 +22743,12 @@ extension UploadResult {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(duplicate, forKey: .duplicate)
         try container.encode(id, forKey: .id)
+    }
+}
+
+extension WorkerHealth {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(embedder, forKey: .embedder)
     }
 }

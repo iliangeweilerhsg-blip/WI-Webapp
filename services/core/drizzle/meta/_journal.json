@@ -64,6 +64,13 @@
       "when": 1793925339768,
       "tag": "0008_backup_warning",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793952306715,
+      "tag": "0009_search",
+      "breakpoints": true
     }
   ]
 }

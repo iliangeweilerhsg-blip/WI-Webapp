@@ -137,6 +137,15 @@
     "ElementUpsertOp": {
       "$ref": "#/$defs/ElementUpsertOp"
     },
+    "EmbedRequest": {
+      "$ref": "#/$defs/EmbedRequest"
+    },
+    "EmbedResponse": {
+      "$ref": "#/$defs/EmbedResponse"
+    },
+    "EmbedderState": {
+      "$ref": "#/$defs/EmbedderState"
+    },
     "EpochMs": {
       "$ref": "#/$defs/EpochMs"
     },
@@ -635,6 +644,39 @@
     "ReviewState": {
       "$ref": "#/$defs/ReviewState"
     },
+    "SearchDegraded": {
+      "$ref": "#/$defs/SearchDegraded"
+    },
+    "SearchHit": {
+      "$ref": "#/$defs/SearchHit"
+    },
+    "SearchHitSlide": {
+      "$ref": "#/$defs/SearchHitSlide"
+    },
+    "SearchHitTranscript": {
+      "$ref": "#/$defs/SearchHitTranscript"
+    },
+    "SearchIndexPayload": {
+      "$ref": "#/$defs/SearchIndexPayload"
+    },
+    "SearchIndexResult": {
+      "$ref": "#/$defs/SearchIndexResult"
+    },
+    "SearchIndexScope": {
+      "$ref": "#/$defs/SearchIndexScope"
+    },
+    "SearchKind": {
+      "$ref": "#/$defs/SearchKind"
+    },
+    "SearchModuleRef": {
+      "$ref": "#/$defs/SearchModuleRef"
+    },
+    "SearchResponse": {
+      "$ref": "#/$defs/SearchResponse"
+    },
+    "SearchSnippetPart": {
+      "$ref": "#/$defs/SearchSnippetPart"
+    },
     "Semester": {
       "$ref": "#/$defs/Semester"
     },
@@ -961,6 +1003,9 @@
     },
     "Uuid": {
       "$ref": "#/$defs/Uuid"
+    },
+    "WorkerHealth": {
+      "$ref": "#/$defs/WorkerHealth"
     }
   },
   "$defs": {
@@ -2243,6 +2288,71 @@
           "$ref": "#/$defs/SyncOrigin"
         }
       }
+    },
+    "EmbedRequest": {
+      "title": "EmbedRequest",
+      "type": "object",
+      "description": "POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 64 KB",
+      "required": [
+        "texts"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "texts": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      }
+    },
+    "EmbedResponse": {
+      "title": "EmbedResponse",
+      "type": "object",
+      "description": "Antwort von POST /embed: ein L2-normierter Vektor je Text, in derselben Reihenfolge",
+      "required": [
+        "model",
+        "dim",
+        "vectors"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dim": {
+          "type": "integer",
+          "const": 1024
+        },
+        "vectors": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "array",
+            "minItems": 1024,
+            "maxItems": 1024,
+            "items": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "EmbedderState": {
+      "title": "EmbedderState",
+      "type": "string",
+      "enum": [
+        "bereit",
+        "laedt",
+        "nicht_verfuegbar"
+      ],
+      "description": "Zustand des Embedders im Worker (VERTRAEGE §19.2)"
     },
     "EpochMs": {
       "title": "EpochMs",
@@ -7944,6 +8054,394 @@
       ],
       "description": "Nacharbeitung (F-NAC-05, Phase 2)"
     },
+    "SearchDegraded": {
+      "title": "SearchDegraded",
+      "description": "Warum nur Wortsuche lief. null bei mode = hybrid oder ohne Wörter",
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "embedder_not_ready",
+            "embedder_unavailable"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "SearchHit": {
+      "title": "SearchHit",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SearchHitSlide"
+        },
+        {
+          "$ref": "#/$defs/SearchHitTranscript"
+        }
+      ]
+    },
+    "SearchHitSlide": {
+      "title": "SearchHitSlide",
+      "type": "object",
+      "description": "Treffer auf einer Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>",
+      "required": [
+        "kind",
+        "chunk_id",
+        "score",
+        "module",
+        "snippet",
+        "deck_id",
+        "deck_title",
+        "slide_index",
+        "slide_title"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "slide"
+        },
+        "chunk_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "score": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "module": {
+          "$ref": "#/$defs/SearchModuleRef"
+        },
+        "snippet": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SearchSnippetPart"
+          }
+        },
+        "deck_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "deck_title": {
+          "type": "string"
+        },
+        "slide_index": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "slide_title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SearchHitTranscript": {
+      "title": "SearchHitTranscript",
+      "type": "object",
+      "description": "Treffer im Gesagten (Transkript-Fenster). Ziel: /rueckblick?id=<session_id>&t=<t_ms>",
+      "required": [
+        "kind",
+        "chunk_id",
+        "score",
+        "module",
+        "snippet",
+        "session_id",
+        "session_number",
+        "session_title",
+        "session_started_at",
+        "t_ms",
+        "t_end_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "transcript"
+        },
+        "chunk_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "score": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "module": {
+          "$ref": "#/$defs/SearchModuleRef"
+        },
+        "snippet": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SearchSnippetPart"
+          }
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "VL-Nummer (Session.number)"
+        },
+        "session_title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "t_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "t_end_ms": {
+          "$ref": "#/$defs/SessionMs"
+        }
+      }
+    },
+    "SearchIndexPayload": {
+      "title": "SearchIndexPayload",
+      "type": "object",
+      "description": "search.index (VERTRAEGE §19.3). job.session_id bleibt NULL, auch bei scope = session",
+      "required": [
+        "scope",
+        "id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/SearchIndexScope"
+        },
+        "id": {
+          "$ref": "#/$defs/Uuid",
+          "description": "slide_deck.id bzw. session.id"
+        }
+      }
+    },
+    "SearchIndexResult": {
+      "title": "SearchIndexResult",
+      "type": "object",
+      "description": "Ergebnis von search.index (VERTRAEGE §19.3)",
+      "required": [
+        "scope",
+        "id",
+        "chunk_count",
+        "embedded_count",
+        "reused_count",
+        "removed_count",
+        "embedding_model",
+        "embedding_error",
+        "index_version",
+        "deleted",
+        "missing"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "$ref": "#/$defs/SearchIndexScope"
+        },
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "chunk_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Einträge des Ziels nach dem Lauf"
+        },
+        "embedded_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "neu eingebettete Einträge"
+        },
+        "reused_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Einträge, deren Vektor wiederverwendet wurde (gleicher Text, gleiches Modell, gleiche Version)"
+        },
+        "removed_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "hart gelöschte Einträge, die es im Ziel nicht mehr gibt"
+        },
+        "embedding_model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "Modell der Vektoren. null: Embedder nicht verfügbar, Einträge ohne Vektor geschrieben (§19.3 Schritt 4)",
+          "examples": [
+            "BAAI/bge-m3"
+          ]
+        },
+        "embedding_error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500,
+          "description": "Grund, warum ohne Vektoren geschrieben wurde. Ohne Pfade und ohne Geheimnisse"
+        },
+        "index_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "SEARCH_INDEX_VERSION des Workers beim Lauf"
+        },
+        "deleted": {
+          "type": "boolean",
+          "description": "true: Ziel ist weich gelöscht, nichts geschrieben"
+        },
+        "missing": {
+          "type": "boolean",
+          "description": "true: Ziel existiert nicht (mehr), nichts geschrieben"
+        }
+      }
+    },
+    "SearchIndexScope": {
+      "title": "SearchIndexScope",
+      "type": "string",
+      "enum": [
+        "deck",
+        "session"
+      ],
+      "description": "Ziel eines search.index-Jobs: ein Foliensatz (Folien) oder eine Session (Transkript-Fenster)"
+    },
+    "SearchKind": {
+      "title": "SearchKind",
+      "type": "string",
+      "enum": [
+        "slide",
+        "transcript"
+      ],
+      "description": "Art eines Sucheintrags (search_chunk.source_kind). Konzepte, Notizen, Aufgaben, Karten und Fotos kommen mit ihren Tickets als neue Werte dazu"
+    },
+    "SearchModuleRef": {
+      "title": "SearchModuleRef",
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "short_name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "short_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "SearchResponse": {
+      "title": "SearchResponse",
+      "type": "object",
+      "description": "GET /search (VERTRAEGE §19.6)",
+      "required": [
+        "query",
+        "mode",
+        "degraded",
+        "filters",
+        "hits",
+        "took_ms"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": "string",
+          "description": "Suchtext ohne Filter-Präfixe"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "hybrid",
+            "text"
+          ]
+        },
+        "degraded": {
+          "$ref": "#/$defs/SearchDegraded"
+        },
+        "filters": {
+          "type": "object",
+          "required": [
+            "module_ids",
+            "kinds",
+            "unresolved"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "module_ids": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Uuid"
+              },
+              "description": "aufgelöste Module aus fach: und module_id. Leer = alle"
+            },
+            "kinds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SearchKind"
+              },
+              "description": "aus typ:. Leer = alle"
+            },
+            "unresolved": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              },
+              "description": "Präfixe, die nichts trafen (wörtlich, z. B. fach:XYZ). Nicht leer → hits leer"
+            }
+          }
+        },
+        "hits": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/SearchHit"
+          }
+        },
+        "took_ms": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "SearchSnippetPart": {
+      "title": "SearchSnippetPart",
+      "type": "object",
+      "description": "Teil eines Ausschnitts. hit = Treffer-Wort (als <mark> darstellen). Immer als Text rendern, nie als HTML",
+      "required": [
+        "text",
+        "hit"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hit": {
+          "type": "boolean"
+        }
+      }
+    },
     "Semester": {
       "title": "Semester",
       "type": "object",
@@ -11379,6 +11877,61 @@
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
       "description": "UUIDv7 (03 §1), Kleinbuchstaben"
+    },
+    "WorkerHealth": {
+      "title": "WorkerHealth",
+      "type": "object",
+      "description": "GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token",
+      "required": [
+        "embedder"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "embedder": {
+          "type": "object",
+          "required": [
+            "provider",
+            "model",
+            "dim",
+            "state",
+            "error"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "provider": {
+              "type": "string",
+              "minLength": 1,
+              "examples": [
+                "bge-m3",
+                "fake"
+              ]
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1,
+              "examples": [
+                "BAAI/bge-m3",
+                "fake-embed-1"
+              ]
+            },
+            "dim": {
+              "type": "integer",
+              "const": 1024
+            },
+            "state": {
+              "$ref": "#/$defs/EmbedderState"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 500,
+              "description": "Grund bei nicht_verfuegbar, sonst null"
+            }
+          }
+        }
+      }
     }
   }
 }

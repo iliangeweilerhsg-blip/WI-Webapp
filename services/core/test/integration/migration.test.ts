@@ -65,6 +65,8 @@ const TABLES = [
   'slide_segment',
   // Automatische Kurszuordnung (#141)
   'moodle_course_decided',
+  // Suchindex (T2-10, VERTRAEGE §19.1)
+  'search_chunk',
 ];
 
 /** Phase-1-Tabellen ohne die Pflichtfelder aus 03 §1 (Struktur genau nach VERTRAEGE §6.1) */
@@ -156,7 +158,11 @@ describe('Migrationen', () => {
 
   it('legt HNSW-Indizes (Cosinus) für Embeddings an', async () => {
     const idx = await sql`SELECT indexname, indexdef FROM pg_indexes WHERE indexdef LIKE '%hnsw%'`;
-    expect(idx.map((r) => r.indexname).sort()).toEqual(['slide_embedding_hnsw', 'task_embedding_hnsw']);
+    expect(idx.map((r) => r.indexname).sort()).toEqual([
+      'search_chunk_embedding_hnsw', // T2-10 (VERTRAEGE §19.1)
+      'slide_embedding_hnsw',
+      'task_embedding_hnsw',
+    ]);
     for (const row of idx) expect(row.indexdef).toContain('vector_cosine_ops');
   });
 
@@ -164,6 +170,7 @@ describe('Migrationen', () => {
     const cols = await sql`SELECT table_name, udt_name FROM information_schema.columns
       WHERE column_name = 'embedding' AND table_schema = 'public' ORDER BY table_name`;
     expect(cols.map((c) => `${c.table_name}:${c.udt_name}`)).toEqual([
+      'search_chunk:vector', // T2-10 (VERTRAEGE §19.1)
       'slide:vector',
       'task:vector',
       'transcript_segment:vector', // T2-01, noch ohne Index (VERTRAEGE §18.1)
@@ -425,5 +432,103 @@ describe('Migrationen', () => {
         'status',
       ]);
     });
+  });
+});
+
+describe('search_chunk (T2-10, VERTRAEGE §19.1)', () => {
+  const H = 'a'.repeat(64);
+  let deckId: string;
+  let sessionId: string;
+
+  beforeAll(async () => {
+    const semesterId = uuidv7();
+    const moduleId = uuidv7();
+    deckId = uuidv7();
+    sessionId = uuidv7();
+    await sql`INSERT INTO semester (id, user_id, name) VALUES (${semesterId}, ${SINGLE_USER_ID}, 'Suche-Test')`;
+    await sql`INSERT INTO module (id, user_id, semester_id, name, color)
+      VALUES (${moduleId}, ${SINGLE_USER_ID}, ${semesterId}, 'Datenbanksysteme', 'mod-01')`;
+    await sql`INSERT INTO slide_deck (id, user_id, module_id, title, file_path, sha256)
+      VALUES (${deckId}, ${SINGLE_USER_ID}, ${moduleId}, 'VL 7', ${'media/decks/' + deckId + '/original.pdf'}, ${H})`;
+    await sql`INSERT INTO session (id, user_id, module_id) VALUES (${sessionId}, ${SINGLE_USER_ID}, ${moduleId})`;
+  });
+
+  const slideRow = (over: Record<string, unknown> = {}) => ({
+    id: uuidv7(),
+    kind: 'slide',
+    source: uuidv7(),
+    part: 0,
+    deck: deckId as string | null,
+    sess: null as string | null,
+    idx: 1 as number | null,
+    t: null as number | null,
+    tEnd: null as number | null,
+    cfg: 'german',
+    text: 'Die dritte Normalform verbietet transitive Abhängigkeiten',
+    ...over,
+  });
+
+  async function insert(r: ReturnType<typeof slideRow>) {
+    await sql`INSERT INTO search_chunk (id, user_id, source_kind, source_id, part, deck_id, session_id, slide_index,
+        t_ms, t_end_ms, text, ts_config, tsv, content_hash, index_version)
+      VALUES (${r.id}, ${SINGLE_USER_ID}, ${r.kind}, ${r.source}, ${r.part}, ${r.deck}, ${r.sess}, ${r.idx},
+        ${r.t}, ${r.tEnd}, ${r.text}, ${r.cfg}, to_tsvector(${r.cfg}::regconfig, ${r.text}), ${H}, 1)`;
+  }
+
+  it('nimmt Folien- und Transkript-Einträge an und findet sie über to_tsquery mit mehreren Konfigurationen', async () => {
+    await insert(slideRow());
+    await insert(
+      slideRow({
+        kind: 'transcript',
+        source: sessionId,
+        deck: null,
+        sess: sessionId,
+        idx: null,
+        t: 2_512_000,
+        tEnd: 2_571_000,
+        text: 'und das ist eben die dritte Normalform, das kommt auch in der Klausur',
+      }),
+    );
+    const rows = await sql`SELECT source_kind FROM search_chunk
+      WHERE tsv @@ (to_tsquery('german', 'normalform:*') || to_tsquery('english', 'normalform:*')
+                    || to_tsquery('simple', 'normalform:*'))
+      ORDER BY source_kind`;
+    expect(rows.map((r) => r.source_kind)).toEqual(['slide', 'transcript']);
+  });
+
+  it('weist falsche Eltern, Zeiten, Konfigurationen und Vektor ohne Modell ab', async () => {
+    await expect(insert(slideRow({ sess: sessionId }))).rejects.toThrow(/search_chunk_parent_chk/);
+    await expect(insert(slideRow({ deck: null }))).rejects.toThrow(/search_chunk_parent_chk/);
+    await expect(insert(slideRow({ idx: null }))).rejects.toThrow(/search_chunk_parent_chk/);
+    await expect(insert(slideRow({ part: 1 }))).rejects.toThrow(/search_chunk_parent_chk/);
+    await expect(insert(slideRow({ t: 0, tEnd: 1 }))).rejects.toThrow(/search_chunk_parent_chk/);
+    const tr = { kind: 'transcript', source: sessionId, deck: null, sess: sessionId, idx: null, part: 7 };
+    await expect(insert(slideRow({ ...tr, t: 5, tEnd: 4 }))).rejects.toThrow(/search_chunk_parent_chk/);
+    await expect(insert(slideRow({ ...tr, source: uuidv7(), t: 0, tEnd: 1 }))).rejects.toThrow(
+      /search_chunk_parent_chk/,
+    );
+    await expect(insert(slideRow({ cfg: 'french' }))).rejects.toThrow(/search_chunk_ts_config_chk/);
+    await expect(insert(slideRow({ text: '' }))).rejects.toThrow(/search_chunk_text_chk/);
+    const vec = `[${Array.from({ length: 1024 }, () => 0.01).join(',')}]`;
+    await expect(
+      sql`INSERT INTO search_chunk (id, user_id, source_kind, source_id, part, deck_id, slide_index, text, ts_config,
+          tsv, embedding, content_hash, index_version)
+        VALUES (${uuidv7()}, ${SINGLE_USER_ID}, 'slide', ${uuidv7()}, 0, ${deckId}, 1, 'x', 'simple',
+          to_tsvector('simple', 'x'), ${vec}::vector, ${H}, 1)`,
+    ).rejects.toThrow(/search_chunk_embedding_model_chk/);
+  });
+
+  it('ist je (source_kind, source_id, part) eindeutig und verschwindet mit dem Foliensatz', async () => {
+    const r = slideRow();
+    await insert(r);
+    await expect(insert({ ...r, id: uuidv7() })).rejects.toThrow(/search_chunk_source_uq/);
+    const otherDeck = uuidv7();
+    const [mod] = await sql`SELECT module_id FROM slide_deck WHERE id = ${deckId}`;
+    await sql`INSERT INTO slide_deck (id, user_id, module_id, title, file_path, sha256)
+      VALUES (${otherDeck}, ${SINGLE_USER_ID}, ${mod.module_id}, 'weg', ${'media/decks/' + otherDeck + '/original.pdf'}, ${H})`;
+    await insert(slideRow({ deck: otherDeck }));
+    await sql`DELETE FROM slide_deck WHERE id = ${otherDeck}`;
+    const [{ n }] = await sql`SELECT count(*)::int AS n FROM search_chunk WHERE deck_id = ${otherDeck}`;
+    expect(n).toBe(0);
   });
 });

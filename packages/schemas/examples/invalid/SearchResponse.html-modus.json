@@ -1,0 +1,12 @@
+{
+  "query": "x",
+  "mode": "semantisch",
+  "degraded": null,
+  "filters": {
+    "module_ids": [],
+    "kinds": [],
+    "unresolved": []
+  },
+  "hits": [],
+  "took_ms": 1
+}

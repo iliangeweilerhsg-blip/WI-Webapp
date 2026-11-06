@@ -1,0 +1,13 @@
+{
+  "scope": "deck",
+  "id": "019a5c00-0000-7000-8000-000000000001",
+  "chunk_count": 42,
+  "embedded_count": 3,
+  "reused_count": 39,
+  "removed_count": 1,
+  "embedding_model": "BAAI/bge-m3",
+  "embedding_error": null,
+  "index_version": 1,
+  "deleted": false,
+  "missing": false
+}

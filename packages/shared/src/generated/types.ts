@@ -208,6 +208,13 @@ export type HexColor = string
  */
 export type MarkerKind = ("frage" | "klausur" | "verknuepfung")
 /**
+ * Zustand des Embedders im Worker (VERTRAEGE §19.2)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EmbedderState".
+ */
+export type EmbedderState = ("bereit" | "laedt" | "nicht_verfuegbar")
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "IngestState".
  */
@@ -407,6 +414,36 @@ export type PipelineStep = ("audio.finalize" | "transcribe" | "align.log")
  */
 export type ReviewState = ("offen" | "in_arbeit" | "erledigt")
 /**
+ * Warum nur Wortsuche lief. null bei mode = hybrid oder ohne Wörter
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchDegraded".
+ */
+export type SearchDegraded = (("embedder_not_ready" | "embedder_unavailable") | null)
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchHit".
+ */
+export type SearchHit = (SearchHitSlide | SearchHitTranscript)
+/**
+ * Ziel eines search.index-Jobs: ein Foliensatz (Folien) oder eine Session (Transkript-Fenster)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchIndexScope".
+ */
+export type SearchIndexScope = ("deck" | "session")
+/**
+ * UUIDv7 (03 §1), Kleinbuchstaben
+ */
+export type Uuid1 = string
+/**
+ * Art eines Sucheintrags (search_chunk.source_kind). Konzepte, Notizen, Aufgaben, Karten und Fotos kommen mit ihren Tickets als neue Werte dazu
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchKind".
+ */
+export type SearchKind = ("slide" | "transcript")
+/**
  * Zustandsautomat F-SES-01, Übergänge in docs/VERTRAEGE.md
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -437,11 +474,11 @@ export type SlideSegmentSource = ("log" | "ausrichtung" | "manuell")
 /**
  * UUIDv7 (03 §1), Kleinbuchstaben
  */
-export type Uuid1 = string
+export type Uuid2 = string
 /**
  * UUIDv7 (03 §1), Kleinbuchstaben
  */
-export type Uuid2 = string
+export type Uuid3 = string
 /**
  * Transcriber im Worker (02 §7). fake nur für CI und Linux (VERTRAEGE §18.6). Cloud-Anbieter kommen als neue Werte
  * 
@@ -452,7 +489,7 @@ export type TranscriptProvider = ("mlx-whisper" | "fake")
 /**
  * UUIDv7 (03 §1), Kleinbuchstaben
  */
-export type Uuid3 = string
+export type Uuid4 = string
 /**
  * Strom (08 §2.2): notebook:<id>, session:<id> oder user
  * 
@@ -1128,6 +1165,34 @@ data: ElementUpsertData
  */
 seq?: number
 origin?: SyncOrigin
+}
+/**
+ * POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 64 KB
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EmbedRequest".
+ */
+export interface EmbedRequest {
+/**
+ * @minItems 1
+ * @maxItems 16
+ */
+texts: string[]
+}
+/**
+ * Antwort von POST /embed: ein L2-normierter Vektor je Text, in derselben Reihenfolge
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EmbedResponse".
+ */
+export interface EmbedResponse {
+model: string
+dim: 1024
+/**
+ * @minItems 1
+ * @maxItems 16
+ */
+vectors: number[][]
 }
 /**
  * Übungsblatt. Ergänzung zu 03 §4: ingest_state zeigt den Fortschritt von pdf.ingest für das Blatt.
@@ -3176,6 +3241,153 @@ started_ms: SessionMs
 chunks_independent?: boolean
 }
 /**
+ * Treffer auf einer Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchHitSlide".
+ */
+export interface SearchHitSlide {
+kind: "slide"
+chunk_id: Uuid
+score: number
+module: SearchModuleRef
+snippet: SearchSnippetPart[]
+deck_id: Uuid
+deck_title: string
+slide_index: number
+slide_title: (string | null)
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchModuleRef".
+ */
+export interface SearchModuleRef {
+id: Uuid
+name: string
+short_name: (string | null)
+}
+/**
+ * Teil eines Ausschnitts. hit = Treffer-Wort (als <mark> darstellen). Immer als Text rendern, nie als HTML
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchSnippetPart".
+ */
+export interface SearchSnippetPart {
+text: string
+hit: boolean
+}
+/**
+ * Treffer im Gesagten (Transkript-Fenster). Ziel: /rueckblick?id=<session_id>&t=<t_ms>
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchHitTranscript".
+ */
+export interface SearchHitTranscript {
+kind: "transcript"
+chunk_id: Uuid
+score: number
+module: SearchModuleRef
+snippet: SearchSnippetPart[]
+session_id: Uuid
+/**
+ * VL-Nummer (Session.number)
+ */
+session_number: (number | null)
+session_title: (string | null)
+session_started_at: (Timestamp | null)
+t_ms: SessionMs
+t_end_ms: SessionMs
+}
+/**
+ * search.index (VERTRAEGE §19.3). job.session_id bleibt NULL, auch bei scope = session
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchIndexPayload".
+ */
+export interface SearchIndexPayload {
+scope: SearchIndexScope
+id: Uuid1
+}
+/**
+ * Ergebnis von search.index (VERTRAEGE §19.3)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchIndexResult".
+ */
+export interface SearchIndexResult {
+scope: SearchIndexScope
+id: Uuid
+/**
+ * Einträge des Ziels nach dem Lauf
+ */
+chunk_count: number
+/**
+ * neu eingebettete Einträge
+ */
+embedded_count: number
+/**
+ * Einträge, deren Vektor wiederverwendet wurde (gleicher Text, gleiches Modell, gleiche Version)
+ */
+reused_count: number
+/**
+ * hart gelöschte Einträge, die es im Ziel nicht mehr gibt
+ */
+removed_count: number
+/**
+ * Modell der Vektoren. null: Embedder nicht verfügbar, Einträge ohne Vektor geschrieben (§19.3 Schritt 4)
+ */
+embedding_model: (string | null)
+/**
+ * Grund, warum ohne Vektoren geschrieben wurde. Ohne Pfade und ohne Geheimnisse
+ */
+embedding_error: (string | null)
+/**
+ * SEARCH_INDEX_VERSION des Workers beim Lauf
+ */
+index_version: number
+/**
+ * true: Ziel ist weich gelöscht, nichts geschrieben
+ */
+deleted: boolean
+/**
+ * true: Ziel existiert nicht (mehr), nichts geschrieben
+ */
+missing: boolean
+}
+/**
+ * GET /search (VERTRAEGE §19.6)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchResponse".
+ */
+export interface SearchResponse {
+/**
+ * Suchtext ohne Filter-Präfixe
+ */
+query: string
+mode: ("hybrid" | "text")
+degraded: SearchDegraded
+filters: {
+/**
+ * aufgelöste Module aus fach: und module_id. Leer = alle
+ */
+module_ids: Uuid[]
+/**
+ * aus typ:. Leer = alle
+ */
+kinds: SearchKind[]
+/**
+ * Präfixe, die nichts trafen (wörtlich, z. B. fach:XYZ). Nicht leer → hits leer
+ */
+unresolved: string[]
+}
+/**
+ * @maxItems 50
+ */
+hits: SearchHit[]
+took_ms: number
+}
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "Semester".
  */
@@ -3568,8 +3780,8 @@ updated_at: Timestamp
 deleted_at: (Timestamp | null)
 session_id: Uuid
 recording_id: Uuid
-job_id: Uuid1
-finalize_job_id: Uuid2
+job_id: Uuid2
+finalize_job_id: Uuid3
 provider: TranscriptProvider
 model: string
 language: (LanguageCode | null)
@@ -3593,7 +3805,7 @@ segment_id: Uuid
  * 0, 1, … innerhalb des Abschnitts
  */
 part: number
-recording_id: Uuid3
+recording_id: Uuid4
 slide_id: (Uuid | null)
 slide_index: (number | null)
 start_ms: SessionMs
@@ -4212,4 +4424,22 @@ restored_count: number
 export interface UploadResult {
 id: Uuid
 duplicate: boolean
+}
+/**
+ * GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "WorkerHealth".
+ */
+export interface WorkerHealth {
+embedder: {
+provider: string
+model: string
+dim: 1024
+state: EmbedderState
+/**
+ * Grund bei nicht_verfuegbar, sonst null
+ */
+error: (string | null)
+}
 }

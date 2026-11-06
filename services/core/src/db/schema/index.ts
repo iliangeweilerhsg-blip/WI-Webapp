@@ -8,3 +8,4 @@ export * from './sync.ts';
 export * from './system.ts';
 export * from './moodle.ts';
 export * from './transcript.ts';
+export * from './search.ts';
