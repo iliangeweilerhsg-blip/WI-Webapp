@@ -1,0 +1,748 @@
+{
+  "README": "VERTRAEGE §20.6: Annahmen A1–A3, Ablehnen, Rückgängig. Abstrakter Ausgangszustand mit Kurznamen statt IDs; die IDs werden so vergeben, dass ihre Reihenfolge der Reihenfolge der Kurznamen entspricht (wichtig für symmetrische Arten). concepts[].session = proposal_session_id, items[].proposal = proposal der Nutzlast. expect.error: erwarteter Fehlercode (dann ändert sich nichts) oder null; expect.concepts/relations/items/evidence: nur die genannten Felder werden geprüft.",
+  "cases": [
+    {
+      "name": "a1-annehmen",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Dritte Normalform",
+          "aliases": ["3NF"],
+          "status": "vorschlag",
+          "session": "s1"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i1",
+          "kind": "concept_new",
+          "concept": "p",
+          "session": "s1",
+          "proposal": {
+            "name": "Dritte Normalform",
+            "aliases": ["3NF"],
+            "one_liner": null,
+            "kind": "definition",
+            "importance": 3,
+            "exam_hint": true,
+            "prof_explanation": null,
+            "confidence": 0.8
+          }
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i1",
+        "body": {}
+      },
+      "expect": {
+        "error": null,
+        "concepts": {
+          "p": {
+            "status": "aktiv",
+            "session": null,
+            "importance_base": 1.3,
+            "exam_relevant": true
+          }
+        },
+        "items": {
+          "i1": {
+            "status": "angenommen",
+            "decision": {
+              "action": "angenommen_neu",
+              "concept_id": "p"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a1-name-existiert",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Dritte  Normalform",
+          "status": "vorschlag",
+          "session": "s1"
+        },
+        {
+          "ref": "t",
+          "name": "Normalformen",
+          "aliases": ["dritte normalform"],
+          "status": "aktiv"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i1",
+          "kind": "concept_new",
+          "concept": "p",
+          "session": "s1",
+          "proposal": {
+            "name": "Dritte  Normalform",
+            "aliases": [],
+            "one_liner": null,
+            "kind": "definition",
+            "importance": 2,
+            "exam_hint": false,
+            "prof_explanation": null,
+            "confidence": 0.8
+          }
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i1",
+        "body": {}
+      },
+      "expect": {
+        "error": "concept_exists",
+        "details": {
+          "concept_id": "t"
+        }
+      }
+    },
+    {
+      "name": "a1-homonym-anderer-zusatz",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Normalisierung (Datenbanken)",
+          "status": "vorschlag",
+          "session": "s1"
+        },
+        {
+          "ref": "t",
+          "name": "Normalisierung (Statistik)",
+          "status": "aktiv"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i1",
+          "kind": "concept_new",
+          "concept": "p",
+          "session": "s1",
+          "proposal": {
+            "name": "Normalisierung (Datenbanken)",
+            "aliases": [],
+            "one_liner": null,
+            "kind": "definition",
+            "importance": 2,
+            "exam_hint": false,
+            "prof_explanation": null,
+            "confidence": 0.8
+          }
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i1",
+        "body": {}
+      },
+      "expect": {
+        "error": null,
+        "concepts": {
+          "p": {
+            "status": "aktiv"
+          }
+        }
+      }
+    },
+    {
+      "name": "a1-bearbeiteter-name-kollidiert",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Streuung",
+          "status": "vorschlag",
+          "session": "s1"
+        },
+        {
+          "ref": "t",
+          "name": "Varianz (Statistik)",
+          "aliases": ["Varianz"],
+          "status": "aktiv"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i1",
+          "kind": "concept_new",
+          "concept": "p",
+          "session": "s1",
+          "proposal": {
+            "name": "Streuung",
+            "aliases": [],
+            "one_liner": null,
+            "kind": "definition",
+            "importance": 2,
+            "exam_hint": false,
+            "prof_explanation": null,
+            "confidence": 0.8
+          }
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i1",
+        "body": {
+          "edit": {
+            "name": "Varianz"
+          }
+        }
+      },
+      "expect": {
+        "error": "concept_exists",
+        "details": {
+          "concept_id": "t"
+        }
+      }
+    },
+    {
+      "name": "a2-zusammenfuehren",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Funktionale Abhängigkeit",
+          "aliases": ["FD"],
+          "status": "vorschlag",
+          "session": "s1"
+        },
+        {
+          "ref": "t",
+          "name": "Funktionale Abhängigkeit (Datenbanken)",
+          "aliases": ["Functional dependency"],
+          "status": "aktiv"
+        }
+      ],
+      "evidence": [
+        {
+          "ref": "e1",
+          "concept": "p",
+          "session": "s1",
+          "kind": "slide",
+          "slide": "f14"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i1",
+          "kind": "concept_merge",
+          "concept": "p",
+          "target": "t",
+          "session": "s1",
+          "proposal": {
+            "name": "Funktionale Abhängigkeit",
+            "aliases": ["FD"],
+            "one_liner": null,
+            "kind": "definition",
+            "importance": 2,
+            "exam_hint": false,
+            "prof_explanation": null,
+            "confidence": 0.8
+          }
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i1",
+        "body": {}
+      },
+      "expect": {
+        "error": null,
+        "concepts": {
+          "p": {
+            "status": "zusammengefuehrt",
+            "merged_into": "t",
+            "session": "s1"
+          },
+          "t": {
+            "aliases": ["Functional dependency", "Funktionale Abhängigkeit", "FD"]
+          }
+        },
+        "evidence": {
+          "e1": {
+            "concept": "t"
+          }
+        },
+        "items": {
+          "i1": {
+            "status": "angenommen",
+            "decision": {
+              "action": "zusammengefuehrt",
+              "merged_into": "t",
+              "moved_evidence_ids": ["e1"],
+              "added_aliases": ["Funktionale Abhängigkeit", "FD"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a2-ziel-ist-vorschlag",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Schlüssel",
+          "status": "vorschlag",
+          "session": "s1"
+        },
+        {
+          "ref": "q",
+          "name": "Primärschlüssel",
+          "status": "vorschlag",
+          "session": "s2"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i1",
+          "kind": "concept_new",
+          "concept": "p",
+          "session": "s1",
+          "proposal": {
+            "name": "Schlüssel",
+            "aliases": [],
+            "one_liner": null,
+            "kind": "definition",
+            "importance": 2,
+            "exam_hint": false,
+            "prof_explanation": null,
+            "confidence": 0.8
+          }
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i1",
+        "body": {
+          "merge_into": "q"
+        }
+      },
+      "expect": {
+        "error": "merge_target_invalid"
+      }
+    },
+    {
+      "name": "a3-endpunkt-offen",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Zweite Normalform",
+          "status": "vorschlag",
+          "session": "s1"
+        },
+        {
+          "ref": "t",
+          "name": "Erste Normalform",
+          "status": "aktiv"
+        }
+      ],
+      "relations": [
+        {
+          "ref": "r1",
+          "from": "p",
+          "to": "t",
+          "kind": "baut_auf",
+          "confirmed": false,
+          "session": "s1"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i2",
+          "kind": "relation",
+          "relation": "r1",
+          "session": "s1"
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i2",
+        "body": {}
+      },
+      "expect": {
+        "error": "relation_endpoint_pending",
+        "details": {
+          "concept_id": "p"
+        }
+      }
+    },
+    {
+      "name": "a3-kreis",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "a",
+          "name": "Relation",
+          "status": "aktiv"
+        },
+        {
+          "ref": "b",
+          "name": "Tupel",
+          "status": "aktiv"
+        }
+      ],
+      "relations": [
+        {
+          "ref": "r0",
+          "from": "b",
+          "to": "a",
+          "kind": "baut_auf",
+          "confirmed": true
+        },
+        {
+          "ref": "r1",
+          "from": "a",
+          "to": "b",
+          "kind": "baut_auf",
+          "confirmed": false,
+          "session": "s1"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i2",
+          "kind": "relation",
+          "relation": "r1",
+          "session": "s1"
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i2",
+        "body": {}
+      },
+      "expect": {
+        "error": "relation_cycle",
+        "details": {
+          "path": ["a", "b", "a"]
+        }
+      }
+    },
+    {
+      "name": "a3-dublette-nach-artwechsel",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "a",
+          "name": "Relation",
+          "status": "aktiv"
+        },
+        {
+          "ref": "b",
+          "name": "Tabelle",
+          "status": "aktiv"
+        }
+      ],
+      "relations": [
+        {
+          "ref": "r0",
+          "from": "a",
+          "to": "b",
+          "kind": "verwandt",
+          "confirmed": true
+        },
+        {
+          "ref": "r1",
+          "from": "b",
+          "to": "a",
+          "kind": "baut_auf",
+          "confirmed": false,
+          "session": "s1"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i2",
+          "kind": "relation",
+          "relation": "r1",
+          "session": "s1"
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i2",
+        "body": {
+          "relation_kind": "verwandt"
+        }
+      },
+      "expect": {
+        "error": null,
+        "relations": {
+          "r1": {
+            "from": "b",
+            "to": "a",
+            "kind": "baut_auf",
+            "confirmed": false,
+            "session": "s1"
+          },
+          "r0": {
+            "confirmed": true
+          }
+        },
+        "items": {
+          "i2": {
+            "status": "angenommen",
+            "decision": {
+              "action": "beziehung_bestaetigt",
+              "relation_kind_before": "baut_auf",
+              "duplicate_of": "r0"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "ablehnen-mit-beziehungen",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Boyce-Codd-Normalform",
+          "status": "vorschlag",
+          "session": "s1"
+        },
+        {
+          "ref": "t",
+          "name": "Dritte Normalform",
+          "status": "aktiv"
+        }
+      ],
+      "relations": [
+        {
+          "ref": "r1",
+          "from": "p",
+          "to": "t",
+          "kind": "baut_auf",
+          "confirmed": false,
+          "session": "s1"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i1",
+          "kind": "concept_new",
+          "concept": "p",
+          "session": "s1",
+          "proposal": {
+            "name": "Boyce-Codd-Normalform",
+            "aliases": [],
+            "one_liner": null,
+            "kind": "definition",
+            "importance": 2,
+            "exam_hint": false,
+            "prof_explanation": null,
+            "confidence": 0.8
+          }
+        },
+        {
+          "ref": "i2",
+          "kind": "relation",
+          "relation": "r1",
+          "session": "s1"
+        }
+      ],
+      "action": {
+        "op": "reject",
+        "item": "i1"
+      },
+      "expect": {
+        "error": null,
+        "concepts": {
+          "p": {
+            "status": "vorschlag",
+            "session": "s1"
+          }
+        },
+        "relations": {
+          "r1": {
+            "confirmed": false
+          }
+        },
+        "items": {
+          "i1": {
+            "status": "abgelehnt",
+            "decision": {
+              "action": "abgelehnt",
+              "cascade_item_ids": ["i2"]
+            }
+          },
+          "i2": {
+            "status": "abgelehnt"
+          }
+        }
+      }
+    },
+    {
+      "name": "a1-bestaetigt-beziehungen-nach-einstellung",
+      "settings": {
+        "auto_accept": "nur_beziehungen"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Zweite Normalform",
+          "status": "vorschlag",
+          "session": "s1"
+        },
+        {
+          "ref": "t",
+          "name": "Erste Normalform",
+          "status": "aktiv"
+        }
+      ],
+      "relations": [
+        {
+          "ref": "r1",
+          "from": "p",
+          "to": "t",
+          "kind": "baut_auf",
+          "confirmed": false,
+          "session": "s1"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i1",
+          "kind": "concept_new",
+          "concept": "p",
+          "session": "s1",
+          "proposal": {
+            "name": "Zweite Normalform",
+            "aliases": [],
+            "one_liner": null,
+            "kind": "definition",
+            "importance": 2,
+            "exam_hint": false,
+            "prof_explanation": null,
+            "confidence": 0.8
+          }
+        },
+        {
+          "ref": "i2",
+          "kind": "relation",
+          "relation": "r1",
+          "session": "s1"
+        }
+      ],
+      "action": {
+        "op": "accept",
+        "item": "i1",
+        "body": {}
+      },
+      "expect": {
+        "error": null,
+        "concepts": {
+          "p": {
+            "status": "aktiv"
+          }
+        },
+        "relations": {
+          "r1": {
+            "confirmed": true,
+            "session": null
+          }
+        },
+        "items": {
+          "i1": {
+            "status": "angenommen",
+            "decision": {
+              "cascade_item_ids": ["i2"]
+            }
+          },
+          "i2": {
+            "status": "angenommen",
+            "decision": {
+              "action": "beziehung_bestaetigt",
+              "triggered_by": "i1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "rueckgaengig-abgelehnt",
+      "settings": {
+        "auto_accept": "aus"
+      },
+      "concepts": [
+        {
+          "ref": "p",
+          "name": "Schlüsselkandidat",
+          "status": "vorschlag",
+          "session": "s1"
+        }
+      ],
+      "items": [
+        {
+          "ref": "i1",
+          "kind": "concept_new",
+          "concept": "p",
+          "session": "s1",
+          "status": "abgelehnt",
+          "proposal": {
+            "name": "Schlüsselkandidat",
+            "aliases": [],
+            "one_liner": null,
+            "kind": "definition",
+            "importance": 2,
+            "exam_hint": false,
+            "prof_explanation": null,
+            "confidence": 0.8
+          },
+          "decision": {
+            "action": "abgelehnt",
+            "cascade_item_ids": []
+          }
+        }
+      ],
+      "action": {
+        "op": "reopen",
+        "item": "i1"
+      },
+      "expect": {
+        "error": null,
+        "items": {
+          "i1": {
+            "status": "offen",
+            "decision": null
+          }
+        },
+        "concepts": {
+          "p": {
+            "status": "vorschlag"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "README": "VERTRAEGE §20.3: namensgleich = ein key eines Namens oder Alias von a gleich einem key von b. namensähnlich = dasselbe mit key oder base.",
+  "cases": [
+    {
+      "a": {
+        "name": "Normalisierung"
+      },
+      "b": {
+        "name": "Normalisierung (Datenbanken)"
+      },
+      "namensgleich": false,
+      "namensaehnlich": true
+    },
+    {
+      "a": {
+        "name": "Normalisierung (Datenbanken)"
+      },
+      "b": {
+        "name": "Normalisierung (Statistik)"
+      },
+      "namensgleich": false,
+      "namensaehnlich": true
+    },
+    {
+      "a": {
+        "name": "Dritte Normalform",
+        "aliases": ["3NF"]
+      },
+      "b": {
+        "name": "3nf"
+      },
+      "namensgleich": true,
+      "namensaehnlich": true
+    },
+    {
+      "a": {
+        "name": "Varianz"
+      },
+      "b": {
+        "name": "Kovarianz"
+      },
+      "namensgleich": false,
+      "namensaehnlich": false
+    },
+    {
+      "a": {
+        "name": "Third normal form"
+      },
+      "b": {
+        "name": "Dritte Normalform",
+        "aliases": ["Third Normal Form"]
+      },
+      "namensgleich": true,
+      "namensaehnlich": true
+    },
+    {
+      "a": {
+        "name": "Funktionale  Abhängigkeit"
+      },
+      "b": {
+        "name": "funktionale abhängigkeit"
+      },
+      "namensgleich": true,
+      "namensaehnlich": true
+    },
+    {
+      "a": {
+        "name": "Straße"
+      },
+      "b": {
+        "name": "Strasse"
+      },
+      "namensgleich": false,
+      "namensaehnlich": false
+    }
+  ]
+}

@@ -2078,6 +2078,14 @@ relation_kind_before: (ConceptRelationKind | null)
  * mit derselben Entscheidung geänderte Beziehungs-Einträge
  */
 cascade_item_ids: Uuid[]
+/**
+ * A3: Beziehung, die es mit der gewählten Art schon gab. Die vorgeschlagene Zeile bleibt unbestätigt liegen (§20.6)
+ */
+duplicate_of: (Uuid | null)
+/**
+ * A3 als Folge einer Konzept-Annahme: der Eintrag, dessen Annahme die Bestätigung ausgelöst hat (§20.6 A1)
+ */
+triggered_by: (Uuid | null)
 }
 /**
  * Antwort auf accept, reject und reopen

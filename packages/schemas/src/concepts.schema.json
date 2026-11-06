@@ -1277,7 +1277,9 @@
         "added_module_ids",
         "previous",
         "relation_kind_before",
-        "cascade_item_ids"
+        "cascade_item_ids",
+        "duplicate_of",
+        "triggered_by"
       ],
       "additionalProperties": false,
       "properties": {
@@ -1352,6 +1354,28 @@
             "$ref": "#/$defs/Uuid"
           },
           "description": "mit derselben Entscheidung geänderte Beziehungs-Einträge"
+        },
+        "duplicate_of": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A3: Beziehung, die es mit der gewählten Art schon gab. Die vorgeschlagene Zeile bleibt unbestätigt liegen (§20.6)"
+        },
+        "triggered_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A3 als Folge einer Konzept-Annahme: der Eintrag, dessen Annahme die Bestätigung ausgelöst hat (§20.6 A1)"
         }
       }
     },

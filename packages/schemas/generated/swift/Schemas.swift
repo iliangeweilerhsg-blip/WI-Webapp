@@ -7090,10 +7090,16 @@ struct InboxDecision: Codable {
     /// mit derselben Entscheidung geänderte Beziehungs-Einträge
     let cascadeItemIDS: [String]
     let conceptID: String?
+    /// A3: Beziehung, die es mit der gewählten Art schon gab. Die vorgeschlagene Zeile bleibt
+    /// unbestätigt liegen (§20.6)
+    let duplicateOf: String?
     let mergedInto: String?
     let movedEvidenceIDS: [String]
     let previous: ConceptEdit?
     let relationKindBefore: ConceptRelationKind?
+    /// A3 als Folge einer Konzept-Annahme: der Eintrag, dessen Annahme die Bestätigung ausgelöst
+    /// hat (§20.6 A1)
+    let triggeredBy: String?
 
     enum CodingKeys: String, CodingKey {
         case action = "action"
@@ -7101,10 +7107,12 @@ struct InboxDecision: Codable {
         case addedModuleIDS = "added_module_ids"
         case cascadeItemIDS = "cascade_item_ids"
         case conceptID = "concept_id"
+        case duplicateOf = "duplicate_of"
         case mergedInto = "merged_into"
         case movedEvidenceIDS = "moved_evidence_ids"
         case previous = "previous"
         case relationKindBefore = "relation_kind_before"
+        case triggeredBy = "triggered_by"
     }
 }
 
@@ -7132,10 +7140,12 @@ extension InboxDecision {
         addedModuleIDS: [String]? = nil,
         cascadeItemIDS: [String]? = nil,
         conceptID: String?? = nil,
+        duplicateOf: String?? = nil,
         mergedInto: String?? = nil,
         movedEvidenceIDS: [String]? = nil,
         previous: ConceptEdit?? = nil,
-        relationKindBefore: ConceptRelationKind?? = nil
+        relationKindBefore: ConceptRelationKind?? = nil,
+        triggeredBy: String?? = nil
     ) -> InboxDecision {
         return InboxDecision(
             action: action ?? self.action,
@@ -7143,10 +7153,12 @@ extension InboxDecision {
             addedModuleIDS: addedModuleIDS ?? self.addedModuleIDS,
             cascadeItemIDS: cascadeItemIDS ?? self.cascadeItemIDS,
             conceptID: conceptID ?? self.conceptID,
+            duplicateOf: duplicateOf ?? self.duplicateOf,
             mergedInto: mergedInto ?? self.mergedInto,
             movedEvidenceIDS: movedEvidenceIDS ?? self.movedEvidenceIDS,
             previous: previous ?? self.previous,
-            relationKindBefore: relationKindBefore ?? self.relationKindBefore
+            relationKindBefore: relationKindBefore ?? self.relationKindBefore,
+            triggeredBy: triggeredBy ?? self.triggeredBy
         )
     }
 
@@ -24478,10 +24490,12 @@ extension InboxDecision {
         try container.encode(addedModuleIDS, forKey: .addedModuleIDS)
         try container.encode(cascadeItemIDS, forKey: .cascadeItemIDS)
         try container.encode(conceptID, forKey: .conceptID)
+        try container.encode(duplicateOf, forKey: .duplicateOf)
         try container.encode(mergedInto, forKey: .mergedInto)
         try container.encode(movedEvidenceIDS, forKey: .movedEvidenceIDS)
         try container.encode(previous, forKey: .previous)
         try container.encode(relationKindBefore, forKey: .relationKindBefore)
+        try container.encode(triggeredBy, forKey: .triggeredBy)
     }
 }
 

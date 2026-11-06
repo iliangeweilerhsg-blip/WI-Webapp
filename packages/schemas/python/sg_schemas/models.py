@@ -2715,6 +2715,14 @@ class InboxDecision(BaseModel):
     cascade_item_ids: list[Uuid] = Field(
         ..., description='mit derselben Entscheidung geänderte Beziehungs-Einträge'
     )
+    duplicate_of: Uuid | None = Field(
+        ...,
+        description='A3: Beziehung, die es mit der gewählten Art schon gab. Die vorgeschlagene Zeile bleibt unbestätigt liegen (§20.6)',
+    )
+    triggered_by: Uuid | None = Field(
+        ...,
+        description='A3 als Folge einer Konzept-Annahme: der Eintrag, dessen Annahme die Bestätigung ausgelöst hat (§20.6 A1)',
+    )
 
 
 class Target(BaseModel):

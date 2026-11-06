@@ -7,5 +7,7 @@
   "added_module_ids": [],
   "previous": null,
   "relation_kind_before": null,
-  "cascade_item_ids": []
+  "cascade_item_ids": [],
+  "duplicate_of": null,
+  "triggered_by": null
 }
