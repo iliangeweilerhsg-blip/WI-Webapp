@@ -208,12 +208,8 @@
           "name": "calendar_event_source_id_calendar_source_id_fk",
           "tableFrom": "calendar_event",
           "tableTo": "calendar_source",
-          "columnsFrom": [
-            "source_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -221,12 +217,8 @@
           "name": "calendar_event_module_id_module_id_fk",
           "tableFrom": "calendar_event",
           "tableTo": "module",
-          "columnsFrom": [
-            "module_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["module_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -453,12 +445,8 @@
           "name": "module_semester_id_semester_id_fk",
           "tableFrom": "module",
           "tableTo": "semester",
-          "columnsFrom": [
-            "semester_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["semester_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -749,12 +737,8 @@
           "name": "session_calendar_event_id_calendar_event_id_fk",
           "tableFrom": "session",
           "tableTo": "calendar_event",
-          "columnsFrom": [
-            "calendar_event_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["calendar_event_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -762,12 +746,8 @@
           "name": "session_module_id_module_id_fk",
           "tableFrom": "session",
           "tableTo": "module",
-          "columnsFrom": [
-            "module_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["module_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -775,12 +755,8 @@
           "name": "session_slide_deck_id_slide_deck_id_fk",
           "tableFrom": "session",
           "tableTo": "slide_deck",
-          "columnsFrom": [
-            "slide_deck_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["slide_deck_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -943,12 +919,8 @@
           "name": "exercise_sheet_module_id_module_id_fk",
           "tableFrom": "exercise_sheet",
           "tableTo": "module",
-          "columnsFrom": [
-            "module_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["module_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1120,12 +1092,8 @@
           "name": "slide_deck_id_slide_deck_id_fk",
           "tableFrom": "slide",
           "tableTo": "slide_deck",
-          "columnsFrom": [
-            "deck_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["deck_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1271,12 +1239,8 @@
           "name": "slide_deck_module_id_module_id_fk",
           "tableFrom": "slide_deck",
           "tableTo": "module",
-          "columnsFrom": [
-            "module_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["module_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         },
@@ -1284,12 +1248,8 @@
           "name": "slide_deck_session_id_session_id_fk",
           "tableFrom": "slide_deck",
           "tableTo": "session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1423,12 +1383,8 @@
           "name": "task_sheet_id_exercise_sheet_id_fk",
           "tableFrom": "task",
           "tableTo": "exercise_sheet",
-          "columnsFrom": [
-            "sheet_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["sheet_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1557,12 +1513,8 @@
           "name": "task_slide_link_task_id_task_id_fk",
           "tableFrom": "task_slide_link",
           "tableTo": "task",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["task_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1570,12 +1522,8 @@
           "name": "task_slide_link_slide_id_slide_id_fk",
           "tableFrom": "task_slide_link",
           "tableTo": "slide",
-          "columnsFrom": [
-            "slide_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["slide_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1687,12 +1635,8 @@
           "name": "audio_chunk_recording_id_recording_id_fk",
           "tableFrom": "audio_chunk",
           "tableTo": "recording",
-          "columnsFrom": [
-            "recording_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["recording_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1702,10 +1646,7 @@
         "audio_chunk_recording_seq_uq": {
           "name": "audio_chunk_recording_seq_uq",
           "nullsNotDistinct": false,
-          "columns": [
-            "recording_id",
-            "seq"
-          ]
+          "columns": ["recording_id", "seq"]
         }
       },
       "policies": {},
@@ -1836,12 +1777,8 @@
           "name": "marker_session_id_session_id_fk",
           "tableFrom": "marker",
           "tableTo": "session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1972,12 +1909,8 @@
           "name": "photo_session_id_session_id_fk",
           "tableFrom": "photo",
           "tableTo": "session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2122,12 +2055,8 @@
           "name": "recording_session_id_session_id_fk",
           "tableFrom": "recording",
           "tableTo": "session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2256,12 +2185,8 @@
           "name": "slide_event_session_id_session_id_fk",
           "tableFrom": "slide_event",
           "tableTo": "session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2389,12 +2314,8 @@
           "name": "notebook_module_id_module_id_fk",
           "tableFrom": "notebook",
           "tableTo": "module",
-          "columnsFrom": [
-            "module_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["module_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -2551,12 +2472,8 @@
           "name": "page_notebook_id_notebook_id_fk",
           "tableFrom": "page",
           "tableTo": "notebook",
-          "columnsFrom": [
-            "notebook_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["notebook_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2676,12 +2593,8 @@
           "name": "page_element_page_id_page_id_fk",
           "tableFrom": "page_element",
           "tableTo": "page",
-          "columnsFrom": [
-            "page_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["page_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2814,12 +2727,8 @@
           "name": "stroke_page_id_page_id_fk",
           "tableFrom": "stroke",
           "tableTo": "page",
-          "columnsFrom": [
-            "page_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["page_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2829,10 +2738,7 @@
         "stroke_page_client_uq": {
           "name": "stroke_page_client_uq",
           "nullsNotDistinct": false,
-          "columns": [
-            "page_id",
-            "client_id"
-          ]
+          "columns": ["page_id", "client_id"]
         }
       },
       "policies": {},
@@ -2955,12 +2861,8 @@
           "name": "sync_op_stream_sync_stream_stream_fk",
           "tableFrom": "sync_op",
           "tableTo": "sync_stream",
-          "columnsFrom": [
-            "stream"
-          ],
-          "columnsTo": [
-            "stream"
-          ],
+          "columnsFrom": ["stream"],
+          "columnsTo": ["stream"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2968,19 +2870,14 @@
       "compositePrimaryKeys": {
         "sync_op_pkey": {
           "name": "sync_op_pkey",
-          "columns": [
-            "stream",
-            "seq"
-          ]
+          "columns": ["stream", "seq"]
         }
       },
       "uniqueConstraints": {
         "sync_op_op_id_uq": {
           "name": "sync_op_op_id_uq",
           "nullsNotDistinct": false,
-          "columns": [
-            "op_id"
-          ]
+          "columns": ["op_id"]
         }
       },
       "policies": {},
@@ -3276,12 +3173,8 @@
           "name": "cost_entry_job_id_job_id_fk",
           "tableFrom": "cost_entry",
           "tableTo": "job",
-          "columnsFrom": [
-            "job_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["job_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3372,9 +3265,7 @@
         "device_token_hash_unique": {
           "name": "device_token_hash_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "token_hash"
-          ]
+          "columns": ["token_hash"]
         }
       },
       "policies": {},
@@ -3455,11 +3346,7 @@
       "compositePrimaryKeys": {
         "idempotency_key_key_method_path_pk": {
           "name": "idempotency_key_key_method_path_pk",
-          "columns": [
-            "key",
-            "method",
-            "path"
-          ]
+          "columns": ["key", "method", "path"]
         }
       },
       "uniqueConstraints": {},
@@ -3894,12 +3781,8 @@
           "name": "moodle_course_link_module_id_module_id_fk",
           "tableFrom": "moodle_course_link",
           "tableTo": "module",
-          "columnsFrom": [
-            "module_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["module_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4078,12 +3961,8 @@
           "name": "moodle_deadline_module_id_module_id_fk",
           "tableFrom": "moodle_deadline",
           "tableTo": "module",
-          "columnsFrom": [
-            "module_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["module_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4091,12 +3970,8 @@
           "name": "moodle_deadline_exercise_sheet_id_exercise_sheet_id_fk",
           "tableFrom": "moodle_deadline",
           "tableTo": "exercise_sheet",
-          "columnsFrom": [
-            "exercise_sheet_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["exercise_sheet_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -4289,12 +4164,8 @@
           "name": "moodle_item_slide_deck_id_slide_deck_id_fk",
           "tableFrom": "moodle_item",
           "tableTo": "slide_deck",
-          "columnsFrom": [
-            "slide_deck_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["slide_deck_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -4302,12 +4173,8 @@
           "name": "moodle_item_exercise_sheet_id_exercise_sheet_id_fk",
           "tableFrom": "moodle_item",
           "tableTo": "exercise_sheet",
-          "columnsFrom": [
-            "exercise_sheet_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["exercise_sheet_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -4450,12 +4317,8 @@
           "name": "slide_segment_session_id_session_id_fk",
           "tableFrom": "slide_segment",
           "tableTo": "session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4620,12 +4483,8 @@
           "name": "transcript_session_id_session_id_fk",
           "tableFrom": "transcript",
           "tableTo": "session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4633,12 +4492,8 @@
           "name": "transcript_recording_id_recording_id_fk",
           "tableFrom": "transcript",
           "tableTo": "recording",
-          "columnsFrom": [
-            "recording_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["recording_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4648,18 +4503,12 @@
         "transcript_recording_uq": {
           "name": "transcript_recording_uq",
           "nullsNotDistinct": false,
-          "columns": [
-            "recording_id"
-          ]
+          "columns": ["recording_id"]
         },
         "transcript_id_recording_session_uq": {
           "name": "transcript_id_recording_session_uq",
           "nullsNotDistinct": false,
-          "columns": [
-            "id",
-            "recording_id",
-            "session_id"
-          ]
+          "columns": ["id", "recording_id", "session_id"]
         }
       },
       "policies": {},
@@ -4838,12 +4687,8 @@
           "name": "transcript_segment_session_id_session_id_fk",
           "tableFrom": "transcript_segment",
           "tableTo": "session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4851,16 +4696,8 @@
           "name": "transcript_segment_transcript_fk",
           "tableFrom": "transcript_segment",
           "tableTo": "transcript",
-          "columnsFrom": [
-            "transcript_id",
-            "recording_id",
-            "session_id"
-          ],
-          "columnsTo": [
-            "id",
-            "recording_id",
-            "session_id"
-          ],
+          "columnsFrom": ["transcript_id", "recording_id", "session_id"],
+          "columnsTo": ["id", "recording_id", "session_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4870,10 +4707,7 @@
         "transcript_segment_seq_uq": {
           "name": "transcript_segment_seq_uq",
           "nullsNotDistinct": false,
-          "columns": [
-            "transcript_id",
-            "seq"
-          ]
+          "columns": ["transcript_id", "seq"]
         }
       },
       "policies": {},
@@ -5100,12 +4934,8 @@
           "name": "search_chunk_deck_id_slide_deck_id_fk",
           "tableFrom": "search_chunk",
           "tableTo": "slide_deck",
-          "columnsFrom": [
-            "deck_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["deck_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -5113,12 +4943,8 @@
           "name": "search_chunk_session_id_session_id_fk",
           "tableFrom": "search_chunk",
           "tableTo": "session",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -5128,11 +4954,7 @@
         "search_chunk_source_uq": {
           "name": "search_chunk_source_uq",
           "nullsNotDistinct": false,
-          "columns": [
-            "source_kind",
-            "source_id",
-            "part"
-          ]
+          "columns": ["source_kind", "source_id", "part"]
         }
       },
       "policies": {},
