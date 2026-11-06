@@ -12296,6 +12296,9 @@ enum SearchDegraded: String, Codable {
     case embedderUnavailable = "embedder_unavailable"
 }
 
+/// Treffer, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union
+/// erzeugt; kind schließt sich gegenseitig aus)
+///
 /// Treffer auf einer Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
 ///
 /// Treffer im Gesagten (Transkript-Fenster). Ziel: /rueckblick?id=<session_id>&t=<t_ms>

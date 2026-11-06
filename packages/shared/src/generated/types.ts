@@ -421,6 +421,8 @@ export type ReviewState = ("offen" | "in_arbeit" | "erledigt")
  */
 export type SearchDegraded = (("embedder_not_ready" | "embedder_unavailable") | null)
 /**
+ * Treffer, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt; kind schließt sich gegenseitig aus)
+ * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SearchHit".
  */

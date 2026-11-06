@@ -8072,7 +8072,8 @@
     },
     "SearchHit": {
       "title": "SearchHit",
-      "oneOf": [
+      "description": "Treffer, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt; kind schließt sich gegenseitig aus)",
+      "anyOf": [
         {
           "$ref": "#/$defs/SearchHitSlide"
         },

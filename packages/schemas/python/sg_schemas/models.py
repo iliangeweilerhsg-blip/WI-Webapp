@@ -6466,7 +6466,9 @@ class SchemaBundle(BaseModel):
         title='SearchDegraded',
     )
     SearchHit: SearchHitSlide | SearchHitTranscript | None = Field(
-        None, title='SearchHit'
+        None,
+        description='Treffer, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt; kind schließt sich gegenseitig aus)',
+        title='SearchHit',
     )
     SearchHitSlide_1: SearchHitSlide | None = Field(None, alias='SearchHitSlide')
     SearchHitTranscript_1: SearchHitTranscript | None = Field(
@@ -6770,6 +6772,7 @@ class SchemaBundle(BaseModel):
 # Union-Typen (für Validierung: pydantic.TypeAdapter(<Typ>))
 type PageElement = TextElement | ImageElement | ShapeElement | TapeElement | StampElement
 type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload
+type SearchHit = SearchHitSlide | SearchHitTranscript
 type SyncClientMessage = SyncHello | SyncSubscribe | SyncUnsubscribe | SyncTimePing | SyncTimeOffset | SyncPing | SyncPresence | SyncOp
 type SyncEvent = SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent
 type SyncOp = NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | NotebookUpdateOp | NotebookDeleteOp | NotebookRestoreOp | PageRestoreOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp
