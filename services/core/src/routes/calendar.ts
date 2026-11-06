@@ -147,21 +147,30 @@ export async function calendarRoutes(app: FastifyInstance, deps: CalendarRouteDe
   await app.register(multipart, multipartOptions);
 
   // --- Zeitplan: beim Start und alle 6 h -------------------------------------------------------
+  // Erst nach erfolgreichem `listen` (`onListen`, nicht `onReady`): Ein Core mit `EADDRINUSE` gleicht nichts ab (#170)
   if (deps.scheduler !== false) {
-    let running = false;
+    let running: Promise<void> | null = null;
+    let timer: NodeJS.Timeout | undefined;
+    let stopped = false;
     const run = () => {
-      if (running) return;
-      running = true;
-      syncAllUrlSources(db, app.log)
+      if (running || stopped) return;
+      running = syncAllUrlSources(db, app.log)
         .catch((error: unknown) => app.log.warn({ err: error }, 'Kalender-Abgleich konnte nicht starten'))
         .finally(() => {
-          running = false;
+          running = null;
         });
     };
-    app.addHook('onReady', async () => run());
-    const timer = setInterval(run, SYNC_INTERVAL_MS);
-    timer.unref();
-    app.addHook('onClose', async () => clearInterval(timer));
+    app.addHook('onListen', async () => {
+      if (timer || stopped) return;
+      timer = setInterval(run, SYNC_INTERVAL_MS);
+      timer.unref();
+      run();
+    });
+    app.addHook('onClose', async () => {
+      stopped = true;
+      clearInterval(timer);
+      await running;
+    });
   }
 
   // --- Quellen ----------------------------------------------------------------------------------
