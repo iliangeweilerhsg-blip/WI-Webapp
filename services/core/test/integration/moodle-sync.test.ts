@@ -537,7 +537,10 @@ describe('Moodle-Abgleich (T1-23)', () => {
     expect(sheet?.dueAt?.toISOString()).toBe('2026-11-12T22:59:00.000Z');
 
     // pdf.ingest für beide, wie beim Upload
-    const jobs = await db.select({ type: job.type, payload: job.payload }).from(job);
+    const jobs = await db
+      .select({ type: job.type, payload: job.payload })
+      .from(job)
+      .where(sql`${job.type} <> 'search.index'`);
     expect(jobs.map((j) => j.payload).sort()).toEqual(
       [{ slide_deck_id: deck?.id }, { exercise_sheet_id: sheet?.id }].sort(),
     );

@@ -11768,7 +11768,7 @@
         "dependent_count": {
           "type": "integer",
           "minimum": 0,
-          "description": "Mitgelöschte abhängige Objekte, die mit wiederhergestellt werden"
+          "description": "Mitgelöschte abhängige Objekte, die der Nutzer kennt und die mit wiederhergestellt werden. Maschinenausgaben (transcript, transcript_segment, slide_segment, search_chunk) werden mitgelöscht und mitwiederhergestellt, aber nicht mitgezählt (VERTRAEGE §13)"
         }
       }
     },
@@ -11851,7 +11851,8 @@
         },
         "restored_count": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "description": "Alle wiederhergestellten Zeilen samt Objekt selbst, auch Maschinenausgaben (anders als dependent_count, VERTRAEGE §13)"
         }
       }
     },

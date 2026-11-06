@@ -53,6 +53,8 @@ jobs:
           --health-cmd "pg_isready -U sg" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgres://sg:sg@localhost:5432/sg_test
+      # Leistungstest (VERTRAEGE §19.6) läuft lokal, Zeitmessungen auf geteilten Runnern schwanken
+      SG_SKIP_SEARCH_PERF: '1'
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

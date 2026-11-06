@@ -11,6 +11,7 @@ import type { Tx } from '../db/client.ts';
 import { audioChunk, job, recording, session } from '../db/schema/index.ts';
 import { enqueueJob, JOB_NOTIFY_CHANNEL } from './jobs.ts';
 import { lockRecording } from './recordings.ts';
+import { ensureSearchIndexJob } from './search-backfill.ts';
 import { emitSessionUpdated } from './sessions.ts';
 
 type JobRow = typeof job.$inferSelect;
@@ -227,8 +228,12 @@ export async function ensurePipelineJobs(
     .reverse();
 
   if (fromStep === 'audio.finalize' || fromStep === 'transcribe') {
-    jobs.push(await ensureSessionJob(tx, sessionId, 'transcribe', openFinalizeIds, force));
+    const transcribeJob = await ensureSessionJob(tx, sessionId, 'transcribe', openFinalizeIds, force);
+    jobs.push(transcribeJob);
     touched.push('transcribe');
+    // Suchindex des Gesagten nach dem Transkript (§19.5). `job.session_id` bleibt NULL, kein Eintrag in
+    // `processing` und nicht in der Rückgabe (die Kette der Session, §18.2/§18.5, bleibt unverändert)
+    await ensureSearchIndexJob(tx, { scope: 'session', id: sessionId }, [transcribeJob.id]);
   }
   jobs.push(await ensureSessionJob(tx, sessionId, 'align.log', openFinalizeIds, false));
   touched.push('align.log');

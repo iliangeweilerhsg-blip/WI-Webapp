@@ -142,7 +142,10 @@ async function counts() {
   return {
     decks: await count('slide_deck'),
     sheets: await count('exercise_sheet'),
-    jobs: await count('job'),
+    // `search.index` zum Foliensatz (§19.5) zählt hier nicht mit, eigene Prüfungen in search-jobs.test.ts
+    jobs:
+      (await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM job WHERE type <> 'search.index'`)[0]?.n ??
+      0,
   };
 }
 
@@ -183,9 +186,19 @@ describe('POST /slide-decks', () => {
     });
     expect(readFileSync(join(t.config.dataDir, deck!.file_path as string)).equals(data)).toBe(true);
 
-    const jobs = await t.handle.sql`SELECT * FROM job`;
+    const jobs = await t.handle.sql`SELECT * FROM job WHERE type = 'pdf.ingest'`;
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({ type: 'pdf.ingest', state: 'wartet', session_id: null });
+    // Dazu der Suchindex des Foliensatzes, abhängig von pdf.ingest (§19.5)
+    const search = await t.handle.sql`SELECT * FROM job WHERE type = 'search.index'`;
+    expect(search).toHaveLength(1);
+    expect(search[0]).toMatchObject({
+      state: 'wartet',
+      session_id: null,
+      priority: 5,
+      depends_on: [jobs[0]!.id],
+    });
+    expect(search[0]!.payload).toEqual({ scope: 'deck', id: result.id });
     expect(jobs[0]!.payload).toEqual({ slide_deck_id: result.id });
     expect(PdfIngestPayloadSchema.safeParse(jobs[0]!.payload).success).toBe(true);
     expect(
@@ -206,7 +219,7 @@ describe('POST /slide-decks', () => {
     const detail = await t.request({ url: `${API}/slide-decks/${id}` });
     const body = SlideDeckDetailSchema.parse(detail.json());
     expect(body.deck).toMatchObject({ title: 'Eigener Titel', session_id: sessionId, ingest_state: 'neu' });
-    const [job] = await t.handle.sql`SELECT session_id FROM job`;
+    const [job] = await t.handle.sql`SELECT session_id FROM job WHERE type = 'pdf.ingest'`;
     expect(job!.session_id).toBe(sessionId);
     await t.handle.sql`DELETE FROM slide_deck`;
     await t.handle.sql`DELETE FROM session WHERE id = ${sessionId}`;
@@ -397,13 +410,13 @@ describe('Magic-Bytes, Wiederholung nach Fehler, Aufräumen', () => {
       expect(UploadResultSchema.parse(again.json())).toEqual({ id: first.id, duplicate: true });
       const [row] = await sql`SELECT ingest_state FROM ${sql(table)} WHERE id = ${first.id}`;
       expect(row!.ingest_state).toBe('neu');
-      const jobs = await sql`SELECT payload, state FROM job ORDER BY created_at`;
+      const jobs = await sql`SELECT payload, state FROM job WHERE type = 'pdf.ingest' ORDER BY created_at`;
       expect(jobs).toHaveLength(2);
       expect(jobs[1]).toMatchObject({ state: 'wartet', payload: { [key]: first.id } });
 
       // Nicht gescheitert: keine zweite Einlesung
       await up({ module_id: moduleId }, { data });
-      expect(await sql`SELECT 1 FROM job`).toHaveLength(2);
+      expect(await sql`SELECT 1 FROM job WHERE type = 'pdf.ingest'`).toHaveLength(2);
     },
   );
 

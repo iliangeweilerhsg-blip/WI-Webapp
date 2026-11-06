@@ -305,7 +305,18 @@ function isDirect(kind: TrashKind): SQL {
   return parts.length > 0 ? sql.join(parts, sql` AND `) : sql`TRUE`;
 }
 
-/** Anzahl der mit `ts` mitgelöschten abhängigen Objekte (Kaskade aus trash.ts, ohne die Wurzel) */
+/**
+ * Maschinenausgaben (Transkript, Folienzuordnung, Suchindex): Sie kaskadieren mit, zählen aber nicht als „abhängige
+ * Objekte“ in `GET /trash` (sonst zeigt ein Foliensatz mit 30 Folien „mit 60 abhängigen Objekten“).
+ */
+export const MACHINE_OUTPUT_NODES: ReadonlySet<Node> = new Set<Node>([
+  'search_chunk',
+  'transcript',
+  'transcript_segment',
+  'slide_segment',
+]);
+
+/** Anzahl der mit `ts` mitgelöschten abhängigen Objekte (Kaskade aus trash.ts, ohne die Wurzel und ohne Maschinenausgaben) */
 async function countDependents(tx: DbOrTx, kind: TrashKind, id: string, ts: string): Promise<number> {
   let total = 0;
   let level: { node: Node; ids: string[] }[] = [{ node: kind, ids: [id] }];
@@ -321,7 +332,7 @@ async function countDependents(tx: DbOrTx, kind: TrashKind, id: string, ts: stri
                 sql`, `,
               )}) AND deleted_at = ${ts}::timestamptz`,
         );
-        total += rows.length;
+        if (!MACHINE_OUTPUT_NODES.has(edge.child)) total += rows.length;
         if (rows.length > 0) next.push({ node: edge.child, ids: rows.map((r) => r.id) });
       }
     }

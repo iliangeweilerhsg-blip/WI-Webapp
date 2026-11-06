@@ -20,6 +20,7 @@ import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { enqueueJob } from './jobs.ts';
+import { ensureSearchIndexJob } from './search-backfill.ts';
 import { attachDeckToSession } from './sessions.ts';
 import { softDeleteWithOps } from './trash-ops.ts';
 
@@ -165,6 +166,14 @@ async function placeOriginal({ dataDir, kind, id, upload }: PlaceOptions): Promi
 }
 
 /**
+ * Suchindex des Foliensatzes nach `pdf.ingest` (VERTRAEGE §19.5), in derselben Transaktion. Ein wartender
+ * `search.index` wird wiederverwendet. Übungsblätter bekommen keinen (noch kein Text).
+ */
+async function ensureDeckSearchJob(tx: Tx, deckId: string, ingestJobId: string): Promise<void> {
+  await ensureSearchIndexJob(tx, { scope: 'deck', id: deckId }, [ingestJobId]);
+}
+
+/**
  * Legt Foliensatz (oder Blatt) samt Job an. Ablauf in EINER Transaktion:
  * Advisory-Lock auf (Modul, sha256) → Dublettenprüfung → Zeile anlegen → Datei an Ort und Stelle
  * rücken → Job anlegen. Schlägt etwas fehl, rollt die Transaktion zurück und der Ordner wird entfernt.
@@ -195,11 +204,12 @@ async function createMaterial(
         // Früherer Versuch endgültig gescheitert: neu einlesen lassen statt eine tote Dublette zu behalten
         if (duplicate.failed) {
           await reset(tx, duplicate.id);
-          await enqueueJob(tx, {
+          const ingestId = await enqueueJob(tx, {
             type: 'pdf.ingest',
             payload: jobPayload(duplicate.id),
             ...(sessionId ? { sessionId } : {}),
           });
+          if (kind === 'deck') await ensureDeckSearchJob(tx, duplicate.id, ingestId);
         }
         return { id: duplicate.id, duplicate: true };
       }
@@ -208,11 +218,12 @@ async function createMaterial(
       await insert(tx, id, filePath);
       await placeOriginal({ dataDir, kind: folder, id, upload });
       placed = true;
-      await enqueueJob(tx, {
+      const ingestId = await enqueueJob(tx, {
         type: 'pdf.ingest',
         payload: jobPayload(id),
         ...(sessionId ? { sessionId } : {}),
       });
+      if (kind === 'deck') await ensureDeckSearchJob(tx, id, ingestId);
       return { id, duplicate: false };
     });
   } catch (error) {

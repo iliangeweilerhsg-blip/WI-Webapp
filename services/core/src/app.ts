@@ -32,11 +32,13 @@ import { recordingRoutes } from './routes/recordings.ts';
 import { sessionRoutes } from './routes/sessions.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { systemRoutes } from './routes/system.ts';
+import { searchRoutes } from './routes/search.ts';
 import { trashRoutes } from './routes/trash.ts';
 import { transcriptRoutes } from './routes/transcript.ts';
 import { LastSeenTracker, verifyDeviceToken } from './services/devices.ts';
 import { pickPairingHost } from './services/discovery.ts';
 import { PairingManager } from './services/pairing.ts';
+import { registerSearchBackfill } from './services/search-backfill.ts';
 import { startSessionTicker, type SessionTicker } from './services/sessions.ts';
 import { syncPlugin } from './sync/server.ts';
 
@@ -62,6 +64,8 @@ export interface BuildAppOptions {
   pairing?: PairingManager;
   /** IPv4 für `PairingCode.host`. Standard: aktive Schnittstelle, bevorzugt `en0` */
   pairingHost?: () => string;
+  /** Nachholen des Suchindex beim Start und alle 10 min (VERTRAEGE §19.5). Standard: aus; `main.ts` schaltet es ein */
+  searchBackfill?: boolean;
 }
 
 function readVersion(): string {
@@ -184,6 +188,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(inkRoutes, { db, config });
       await api.register(recordingRoutes, { db, config });
       await api.register(transcriptRoutes, { db });
+      await api.register(searchRoutes, { db, config });
       await api.register(backupRoutes, { db, config });
       await api.register(trashRoutes, { db, config });
       await api.register(settingsRoutes, { db, config });
@@ -220,6 +225,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     // Laufenden Abgleich an der nächsten Stelle abbrechen und höchstens kurz warten (Review #133, S3)
     await moodleSync.stop(options.moodleShutdownWaitMs);
   });
+
+  if (options.searchBackfill) registerSearchBackfill(app, { db, config, logger });
 
   // Static Export der Web-App und Not-Found-Handler (muss nach den API-Routen kommen)
   await registerWeb(app, config);

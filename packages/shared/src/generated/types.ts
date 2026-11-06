@@ -4385,7 +4385,7 @@ deleted_at: Timestamp
 purge_at: Timestamp
 parent: (TrashParent | null)
 /**
- * Mitgelöschte abhängige Objekte, die mit wiederhergestellt werden
+ * Mitgelöschte abhängige Objekte, die der Nutzer kennt und die mit wiederhergestellt werden. Maschinenausgaben (transcript, transcript_segment, slide_segment, search_chunk) werden mitgelöscht und mitwiederhergestellt, aber nicht mitgezählt (VERTRAEGE §13)
  */
 dependent_count: number
 }
@@ -4415,6 +4415,9 @@ next_cursor: (string | null)
 export interface TrashRestoreResult {
 id: Uuid
 kind: TrashKind
+/**
+ * Alle wiederhergestellten Zeilen samt Objekt selbst, auch Maschinenausgaben (anders als dependent_count, VERTRAEGE §13)
+ */
 restored_count: number
 }
 /**
