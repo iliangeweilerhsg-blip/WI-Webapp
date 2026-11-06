@@ -9,7 +9,17 @@ import { pino } from 'pino';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SINGLE_USER_ID, type JobState } from '@sg/shared';
 import type { DbHandle } from '../../src/db/client.ts';
-import { courseModule, job, semester, session, slideDeck, transcript } from '../../src/db/schema/index.ts';
+import {
+  courseModule,
+  job,
+  semester,
+  session,
+  slide,
+  slideDeck,
+  slideSegment,
+  transcript,
+  transcriptSegment,
+} from '../../src/db/schema/index.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { createExerciseSheet, createSlideDeck } from '../../src/services/material.ts';
 import { ensurePipelineJobs } from '../../src/services/pipeline.ts';
@@ -20,7 +30,7 @@ import {
   startSearchBackfill,
 } from '../../src/services/search-backfill.ts';
 import { setSessionEventPublisher } from '../../src/services/sessions.ts';
-import { restoreWithOps, softDeleteWithOps } from '../../src/services/trash-ops.ts';
+import { listTrash, restoreWithOps, softDeleteWithOps } from '../../src/services/trash-ops.ts';
 import { FAKE_MODEL, FakeWorker } from '../unit/worker-fake.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 import { insertSlideChunk, insertTranscriptChunk } from './search-helpers.ts';
@@ -594,6 +604,92 @@ describe('Papierkorb: search_chunk mit Foliensatz und Session (§19.1)', () => {
       [w0, null],
       [w1, null],
     ]);
+  });
+
+  it('GET /trash: Maschinenausgaben zählen nicht als abhängige Objekte (Folien und Aufnahmen schon)', async () => {
+    const deck = uuidv7();
+    await handle.db.insert(slideDeck).values({
+      id: deck,
+      ...base,
+      moduleId,
+      title: 'F',
+      filePath: 'x.pdf',
+      sha256: 'a'.repeat(64),
+    });
+    const slideIds = [uuidv7(), uuidv7()];
+    for (const [i, sid] of slideIds.entries()) {
+      await handle.db
+        .insert(slide)
+        .values({ id: sid, ...base, deckId: deck, index: i + 1, widthPt: 1, heightPt: 1 });
+      await insertSlideChunk(handle, {
+        deckId: deck,
+        slideIndex: i + 1,
+        slideId: sid,
+        text: `Folie ${i + 1}`,
+      });
+    }
+
+    const sessionId = uuidv7();
+    await handle.db.insert(session).values({ id: sessionId, ...base, moduleId, state: 'verarbeitet' });
+    const recordingId = uuidv7();
+    await handle.sql`INSERT INTO recording (id, user_id, session_id, mime, codec, started_ms)
+      VALUES (${recordingId}, ${SINGLE_USER_ID}, ${sessionId}, 'audio/webm', 'opus', 0)`;
+    const transcriptId = uuidv7();
+    await handle.db.insert(transcript).values({
+      id: transcriptId,
+      ...base,
+      sessionId,
+      recordingId,
+      jobId: uuidv7(),
+      finalizeJobId: uuidv7(),
+      provider: 'fake',
+      model: 'fake',
+      inputHash: 'e'.repeat(64),
+      audioSha256: 'f'.repeat(64),
+      audioDurationMs: 1000,
+      segmentCount: 2,
+      wordCount: 2,
+    });
+    for (const seq of [0, 1]) {
+      await handle.db.insert(transcriptSegment).values({
+        id: uuidv7(),
+        ...base,
+        transcriptId,
+        sessionId,
+        recordingId,
+        seq,
+        startMs: seq * 1000,
+        endMs: seq * 1000 + 500,
+        text: `Satz ${seq}`,
+        lang: 'de',
+      });
+    }
+    await handle.db.insert(slideSegment).values({
+      id: uuidv7(),
+      ...base,
+      sessionId,
+      slideId: slideIds[0]!,
+      slideIndex: 1,
+      startMs: 0,
+      endMs: 2000,
+      source: 'log',
+      confidence: 1,
+    });
+    await insertTranscriptChunk(handle, { sessionId, part: 0, tMs: 0, tEndMs: 1500, text: 'Satz 0 Satz 1' });
+
+    await softDeleteWithOps(handle.db, 'slide_deck', deck);
+    await softDeleteWithOps(handle.db, 'session', sessionId);
+    const { items } = await listTrash(handle.db, { limit: 50 });
+    const count = (id: string) => items.find((i) => i.id === id)?.dependent_count;
+    expect(count(deck)).toBe(2); // nur die Folien, nicht die Sucheinträge
+    expect(count(sessionId)).toBe(1); // nur die Aufnahme, nicht Transkript, Abschnitte, Zuordnung, Suchindex
+    // Die Kaskade nimmt die Maschinenausgaben trotzdem mit
+    const [alive] = await handle.sql<{ n: number }[]>`
+      SELECT (SELECT count(*) FROM search_chunk WHERE deleted_at IS NULL)
+           + (SELECT count(*) FROM transcript WHERE deleted_at IS NULL)
+           + (SELECT count(*) FROM transcript_segment WHERE deleted_at IS NULL)
+           + (SELECT count(*) FROM slide_segment WHERE deleted_at IS NULL) AS n`;
+    expect(Number(alive!.n)).toBe(0);
   });
 
   it('endgültiges Löschen nimmt die Einträge über den Fremdschlüssel mit', async () => {

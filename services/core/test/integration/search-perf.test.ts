@@ -3,6 +3,11 @@
 // antwortet ohne HTTP). Gemessen werden die Wortsuche (mode text) und, mit einem festen Anfragevektor, die
 // Bedeutungssuche mit HNSW (ohne Filter) und exakt (mit Filter).
 //
+// Lokal starten (etwa 80 s, eigene Test-Datenbank wie alle Integrationstests):
+//   cd services/core && DATABASE_URL=postgres://sg:sg@127.0.0.1:5432/postgres \
+//     pnpm test:integration test/integration/search-perf.test.ts --silent=false
+// `--silent=false` zeigt die gemessenen Zeiten. In CI ist `SG_SKIP_SEARCH_PERF=1` gesetzt.
+//
 // `SG_SKIP_SEARCH_PERF=1` überspringt den Test (z. B. auf langsamen CI-Runnern: Aufbau der Daten samt HNSW-Index dauert
 // dort deutlich länger als die übrigen Tests, und Zeitmessungen auf geteilten Runnern schwanken).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
