@@ -43,6 +43,7 @@ function backupOverview(target: string | null, extra: Record<string, unknown> = 
             error: null,
             trigger: 'zeitplan',
             stand: '20261104T030012Z',
+            warning: null,
           },
         ]
       : [],
@@ -305,6 +306,33 @@ describe('DataSettings', () => {
     mount(<DataSettings />);
     await user.click(await screen.findByRole('button', { name: 'Jetzt sichern' }));
     await waitFor(() => expect(screen.getByTestId('toast-live')).not.toBeEmptyDOMElement());
+  });
+
+  it('Warnung des jüngsten erfolgreichen Laufs (#124): sichtbar oben und am Lauf; ältere zählen nicht', async () => {
+    const text =
+      'Im Backup-Ziel lässt sich ein alter Stand seit mehreren Läufen nicht entfernen: 20261001T030000Z (Keine Berechtigung (EPERM)).';
+    const withWarning = backupOverview('/x');
+    const run: Record<string, unknown> = { ...withWarning.items[0], warning: text };
+    // Ein laufender neuerer Lauf verdeckt die Warnung nicht
+    const items: Record<string, unknown>[] = [
+      { ...run, id: UUID(2), state: 'laeuft', warning: null, stand: null },
+      run,
+    ];
+    Object.assign(withWarning, { items });
+    stubCore((c) => (c.path.startsWith('/backups') ? withWarning : settings('/x')));
+    const first = mount(<DataSettings />);
+    const banner = await screen.findByRole('status', { name: 'Warnung zum Backup' });
+    expect(banner).toHaveTextContent(text);
+    expect(screen.getByText('mit Warnung')).toHaveAttribute('title', text);
+    first.unmount();
+
+    // Der jüngste erfolgreiche Lauf hat keine Warnung mehr (Rest entfernt): kein Hinweis, auch wenn ein älterer einen hat
+    const resolved = backupOverview('/x');
+    Object.assign(resolved, { items: [...resolved.items, { ...run, id: UUID(3) }] });
+    stubCore((c) => (c.path.startsWith('/backups') ? resolved : settings('/x')));
+    mount(<DataSettings />);
+    await screen.findByText(/Letztes Backup:/);
+    expect(screen.queryByRole('status', { name: 'Warnung zum Backup' })).not.toBeInTheDocument();
   });
 
   it('von einem gekoppelten Gerät: 403 local_only ergibt einen verständlichen Hinweis (#113)', async () => {

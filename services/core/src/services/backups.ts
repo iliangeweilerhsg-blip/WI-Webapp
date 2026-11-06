@@ -43,6 +43,7 @@ export function toApiBackupRun(row: BackupRunRow): BackupRun {
     error: row.error,
     trigger: row.trigger as BackupTrigger,
     stand: row.stand,
+    warning: row.warning,
   };
 }
 

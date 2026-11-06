@@ -56,6 +56,9 @@ interface Run {
   sha: string | null;
   trigger: string;
   target: string;
+  /** `backup_run.thin_left` (H3, #124): Reste des Ausdünnens nach diesem Lauf */
+  thinLeft?: string[] | null;
+  warning?: string | null;
 }
 
 /** Datenbank-Attrappe: erkennt die SQL-Texte der CLI und führt Buch über `backup_run` */
@@ -86,6 +89,8 @@ class FakePg implements PgAccess {
   testStartedAt = '2026-11-04T02:59:00.000Z';
   /** Vom Backup als abgebrochen markierter Restore-Test (#113) */
   testAborted: Record<string, unknown> | null = null;
+  /** Hat `backup_run` schon die Spalten aus `0008` (`thin_left`, `warning`)? */
+  hasThinLeft = true;
 
   async query(sql: string, vars: Record<string, string> = {}, db?: string): Promise<string[][]> {
     this.queries.push({ sql, vars, db });
@@ -179,6 +184,23 @@ class FakePg implements PgAccess {
       }
     }
     if (sql.includes("to_regclass('sync_meta')")) return [['t']];
+    if (sql.includes("column_name = 'thin_left'")) return [[this.hasThinLeft ? '1' : '0']];
+    if (sql.includes("array_to_string(thin_left, '/')")) {
+      const previous = [...this.runs.values()]
+        .filter(
+          (r) => r.state === 'fertig' && r.target === vars.target && r.id !== vars.id && r.thinLeft != null,
+        )
+        .reverse()[0];
+      return previous ? [[(previous.thinLeft as string[]).join('/')]] : [];
+    }
+    if (sql.includes('SET thin_left = ')) {
+      const run = this.runs.get(vars.id as string);
+      if (run) {
+        run.thinLeft = (vars.left as string).split('/').filter((n) => n !== '');
+        run.warning = vars.warning === '' ? null : (vars.warning as string);
+      }
+      return [];
+    }
     return [];
   }
   async dump(file: string): Promise<void> {
@@ -885,7 +907,7 @@ describe('Ziel prüfen: gemeinsame Regeln mit dem Core', () => {
   it('legt fehlenden Zielordner an, wenn der Elternordner existiert; sonst Fehler', () => {
     const dataDir = tmp();
     const parent = tmp();
-    expect(validateTarget(join(parent, 'neu'), dataDir)).toBe(join(realpathSync(parent), 'neu'));
+    expect(validateTarget(join(parent, 'neu'), dataDir).path).toBe(join(realpathSync(parent), 'neu'));
     expect(() => validateTarget(join(parent, 'a', 'b'), dataDir)).toThrow(/nicht vorhanden/);
   });
 
@@ -894,7 +916,7 @@ describe('Ziel prüfen: gemeinsame Regeln mit dem Core', () => {
     const real = tmp();
     const link = join(tmp(), 'link');
     symlinkSync(real, link);
-    expect(validateTarget(link, dataDir)).toBe(realpathSync(real));
+    expect(validateTarget(link, dataDir).path).toBe(realpathSync(real));
   });
 
   it('lehnt eine Datei als Ziel ab', () => {
@@ -1441,5 +1463,78 @@ describe('Restore liest den Stand ohne Symlink-Folgen (#119)', () => {
     symlinkSync(echt, join(s.target, STAND));
     expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
     expect(s.pg.testResult).toMatchObject({ reason: 'beschaedigt' });
+  });
+});
+
+describe('H3 (#124): Warnung, wenn ein alter Stand über mehrere Läufe stehen bleibt', () => {
+  /** Alter Stand mit Manifest im Ziel */
+  function oldStand(target: string, name: string): string {
+    const dir = join(target, name);
+    mkdirSync(join(dir, 'media'), { recursive: true });
+    writeFileSync(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ version: 1, stand: name, dump: { sha256: 'a' } }),
+    );
+    writeFileSync(join(dir, 'db.dump'), 'DUMP');
+    return dir;
+  }
+
+  it('erster Lauf: nur Log mit Ursache; zweiter Lauf: Warnung am Lauf; danach entfernt: keine Warnung', async () => {
+    const { target, pg, deps, logs, errs } = setup();
+    // Zwei Stände am selben Tag: das Ausdünnen entfernt den älteren. Er lässt sich nicht löschen (z. B. immutable).
+    const stuck = oldStand(target, '20261001T030000Z');
+    oldStand(target, '20261001T040000Z');
+    let locked = true;
+    deps.targetHooks = {
+      step: (op, phase, d) => {
+        if (locked && op === 'unlink' && phase === 'before' && d === stuck) {
+          throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' });
+        }
+      },
+    };
+    const ids = [
+      '019a4e14-0000-7000-8000-0000000000c1',
+      '019a4e14-0000-7000-8000-0000000000c2',
+      '019a4e14-0000-7000-8000-0000000000c3',
+    ];
+    let n = 0;
+    deps.newId = () => ids[n] as string;
+
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(0);
+    expect(pg.runs.get(ids[0] as string)).toMatchObject({
+      state: 'fertig',
+      thinLeft: ['20261001T030000Z'],
+      warning: null,
+    });
+    expect(logs.join('\n')).toMatch(
+      /20261001T030000Z nicht vollständig entfernt: Keine Berechtigung \(EPERM\)/,
+    );
+    expect(logs.join('\n')).not.toMatch(/ausgetauscht/);
+
+    n = 1;
+    deps.now = () => new Date('2026-11-05T03:00:12Z');
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+    const second = pg.runs.get(ids[1] as string);
+    expect(second?.thinLeft).toEqual(['20261001T030000Z']);
+    expect(second?.warning).toMatch(
+      /seit mehreren Läufen nicht entfernen: 20261001T030000Z \(Keine Berechtigung \(EPERM\)/,
+    );
+    expect(second?.warning?.length).toBeLessThanOrEqual(500);
+    expect(errs.join('\n')).toMatch(/Warnung: Im Backup-Ziel lässt sich ein alter Stand/);
+
+    // Sperre aufgehoben: der nächste Lauf entfernt den Rest, keine Warnung mehr
+    locked = false;
+    n = 2;
+    deps.now = () => new Date('2026-11-06T03:00:12Z');
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+    expect(pg.runs.get(ids[2] as string)).toMatchObject({ thinLeft: [], warning: null });
+    expect(existsSync(stuck)).toBe(false);
+  });
+
+  it('Datenbank ohne die neuen Spalten (Backup vor der Migration): Lauf fertig, nichts eingetragen', async () => {
+    const { pg, deps, errs } = setup({ hasThinLeft: false });
+    expect(await runBackup(deps, { trigger: 'vor_migration' })).toBe(0);
+    expect(pg.queries.some((q) => q.sql.includes('SET thin_left'))).toBe(false);
+    expect(errs).toEqual([]);
   });
 });

@@ -53,10 +53,10 @@ function writer(hooks?: NoFollowHooks): NoFollowWriter {
   const w = new NoFollowWriter(hooks);
   const mkdir = w.mkdir.bind(w);
   let first = true;
-  w.mkdir = (path: string) => {
+  w.mkdir = (path: string, mode?: number) => {
     if (first) w.adopt(dirname(path));
     first = false;
-    mkdir(path);
+    return mkdir(path, mode);
   };
   return w;
 }

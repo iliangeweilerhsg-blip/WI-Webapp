@@ -1,0 +1,16 @@
+{
+  "id": "019a4e14-0000-7000-8000-000000000086",
+  "user_id": "019a4e14-0000-7000-8000-000000000001",
+  "created_at": "2026-11-04T07:15:00Z",
+  "updated_at": "2026-11-04T07:15:00Z",
+  "deleted_at": null,
+  "started_at": "2026-11-04T02:00:00Z",
+  "finished_at": "2026-11-04T02:02:12Z",
+  "target": "/Volumes/Backup/StudienGehirn",
+  "size_bytes": 734003200,
+  "state": "fertig",
+  "error": null,
+  "trigger": "zeitplan",
+  "stand": "20261104T020000Z",
+  "warning": "Im Backup-Ziel lässt sich ein alter Stand seit mehreren Läufen nicht entfernen: 20261001T030000Z (Keine Berechtigung (EPERM), etwa durch Zugriffsrechte, ACLs oder eine Sperre (immutable): db.dump). Bitte im Ziel Rechte und Sperren prüfen und den Ordner von Hand löschen."
+}

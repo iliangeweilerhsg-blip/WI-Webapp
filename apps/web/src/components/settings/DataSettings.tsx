@@ -82,6 +82,9 @@ export function DataSettings() {
   if (settings.isError) return <CoreHint error={settings.error} />;
 
   const { status, items } = backups.data;
+  // Warnung des jüngsten erfolgreichen Laufs (z. B. ein alter Stand, der sich seit mehreren Läufen nicht entfernen
+  // lässt, #124). Ältere Warnungen zählen nicht mehr: Der jüngste Lauf hat es erneut versucht.
+  const warning = items.find((run) => run.state === 'fertig')?.warning ?? null;
   const data = settings.data.data;
   const targetValue = target ?? data.backup_target ?? '';
   const timeValue = time ?? data.backup_time;
@@ -125,6 +128,17 @@ export function DataSettings() {
         ) : null}
         {status.next_run_at ? ` · nächstes: ${new Date(status.next_run_at).toLocaleString('de-DE')}` : ''}
       </p>
+
+      {warning !== null ? (
+        <div
+          role="status"
+          aria-label="Warnung zum Backup"
+          className="space-y-1 rounded-md border border-border bg-accent-soft p-3 text-sm"
+        >
+          <p className="font-medium">Warnung zum letzten Backup</p>
+          <p>{warning}</p>
+        </div>
+      ) : null}
 
       <RestoreTestStatus
         test={status.restore_test}
@@ -214,6 +228,11 @@ export function DataSettings() {
                 <td>
                   {STATE_LABEL[run.state]}
                   {run.error ? `: ${run.error}` : ''}
+                  {run.warning ? (
+                    <span className="block text-xs text-text-muted" title={run.warning}>
+                      mit Warnung
+                    </span>
+                  ) : null}
                 </td>
                 <td>{formatSize(run.size_bytes)}</td>
               </tr>

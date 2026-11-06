@@ -15,20 +15,22 @@ import { SINGLE_USER_ID } from '@sg/shared';
 import { checkBackupTarget } from '@sg/shared/backup-target';
 import {
   copyTree,
+  describeLeft,
   DUMP_FILE,
   listStands,
   MANIFEST_FILE,
   readManifest,
-  removeStalePartials,
-  removeStand,
+  removeStalePartialsReport,
+  removeStandReport,
   selectRetention,
   standName,
   type CopyStats,
   type Manifest,
+  type TargetDir,
 } from './backup-files.ts';
 import type { SgConfig } from './config.ts';
 import { removeRunPids, runLiveness, sweepDeadRunPids, writeRunPid } from './liveness.ts';
-import { NoFollowReader, NoFollowWriter, type NoFollowHooks } from './nofollow.ts';
+import { NoFollowReader, NoFollowWriter, UnsafeTargetError, type NoFollowHooks } from './nofollow.ts';
 import { scrubSecrets, type PgAccess } from './pg.ts';
 import { copyAndHash, makePrivateDir } from './staging.ts';
 
@@ -149,9 +151,18 @@ export async function readBackupSettings(pg: PgAccess): Promise<BackupSettings> 
  * Symlinks aufgelöst, nicht im Datenordner (auch nicht in `media/` oder `vault/`: sonst kopiert sich das Backup in
  * sich selbst), kein Systemordner. Ein fehlender Ordner wird angelegt, wenn der Elternordner existiert (ein nicht eingehängter
  * Datenträger legt keinen Ordner an).
+ *
+ * Rückgabe: aufgelöster Pfad und Identität (`dev`/`ino` per `lstat`, H2 aus #124). Der ganze Lauf verankert das Ziel
+ * mit genau dieser Identität (Schreiben, Lesen, Ausdünnen): Wird es danach ausgetauscht, scheitert jeder Zugriff,
+ * statt in einem anderen Ordner zu schreiben oder zu löschen.
  */
-export function validateTarget(target: string, dataDir: string): string {
-  return checkBackupTarget(target, dataDir, { createMissing: true });
+export function validateTarget(target: string, dataDir: string): TargetDir {
+  const path = checkBackupTarget(target, dataDir, { createMissing: true });
+  const info = lstatSync(path);
+  if (info.isSymbolicLink() || !info.isDirectory()) {
+    throw new UnsafeTargetError(`${path} wurde nach der Prüfung ersetzt. Der Lauf bricht ab.`);
+  }
+  return { path, dev: info.dev, ino: info.ino };
 }
 
 export async function countObjects(pg: PgAccess, db?: string): Promise<Record<string, number>> {
@@ -363,7 +374,8 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       );
     }
 
-    const target = validateTarget(targetSetting, cfg.dataDir);
+    const targetDir = validateTarget(targetSetting, cfg.dataDir);
+    const target = targetDir.path;
     const stand = standName(started);
     const finalDir = join(target, stand);
     const partial = join(target, `.${stand}.partial`);
@@ -371,7 +383,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     // Ein schon vorhandener Stand oder `.partial` gleichen Namens lässt den Lauf scheitern, gelöscht wird dabei nichts.
     if (lstatSync(finalDir, { throwIfNoEntry: false })) throw new Error(`Den Stand ${stand} gibt es schon.`);
     const out = new NoFollowWriter(deps.targetHooks);
-    out.adopt(target);
+    out.adopt(target, targetDir);
     out.mkdir(partial);
 
     try {
@@ -396,7 +408,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       // Gelesen wird verankert (#119): der Datenordner als vertrauenswürdige Quelle (Verschwundenes zählt nur), der
       // vorige Stand im Ziel ohne Symlink-Folgen. Nur Dateien, die dort genau so liegen, werden verlinkt.
       const reader = new NoFollowReader(deps.targetHooks, true);
-      reader.adopt(target);
+      reader.adopt(target, targetDir);
       const previousDir = previous ? reader.child(target, previous, 'skip') : null;
       for (const sub of ['media', 'vault'] as const) {
         const source = join(cfg.dataDir, sub);
@@ -452,11 +464,13 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     }
 
     // Ausdünnen erst nach einem erfolgreichen Lauf, Fehler dabei machen das Backup nicht ungültig
+    let thinned: ThinResult | null = null;
     try {
-      thin(target, now().getTime(), log);
+      thinned = thin(targetDir, now().getTime(), log, deps.targetHooks);
     } catch (error) {
       err(`Ausdünnen alter Stände fehlgeschlagen: ${errorText(error, cfg)}`);
     }
+    if (runId && thinned) await recordLeftovers(deps, runId, targetSetting, thinned.left);
     return 0;
   } catch (error) {
     return await fail(errorText(error, cfg), 1);
@@ -493,31 +507,108 @@ async function dumpPrivately(
 /** So viele Stände vor Migrationen bleiben unabhängig von der Ausdünnung erhalten */
 export const KEEP_PRE_MIGRATION = 3;
 
+/** Ein Stand oder `.partial`, der beim Ausdünnen stehen blieb, mit Ursache als Text (H3, #124) */
+export interface Leftover {
+  name: string;
+  reason: string;
+}
+
+export interface ThinResult {
+  removed: string[];
+  left: Leftover[];
+}
+
 /**
  * Alte Stände nach 14/8/6 entfernen und alte `.partial`-Ordner (älter als 1 Tag) aufräumen.
  * Die letzten 3 Stände mit `trigger = vor_migration` bleiben zusätzlich immer erhalten.
+ * Das Ziel wird mit der Identität aus `validateTarget` verankert (H2). Rückgabe: entfernte Stände und Reste, die
+ * stehen blieben, mit ihrer tatsächlichen Ursache (H3).
  */
-export function thin(target: string, nowMs: number, log: (message: string) => void = () => {}): string[] {
-  removeStalePartials(target, nowMs, 86_400_000);
-  const stands = listStands(target); // neueste zuerst
+export function thin(
+  target: TargetDir,
+  nowMs: number,
+  log: (message: string) => void = () => {},
+  hooks?: NoFollowHooks,
+): ThinResult {
+  const base = target.path;
+  const result: ThinResult = { removed: [], left: [] };
+  const partials = removeStalePartialsReport(target, nowMs, 86_400_000, hooks);
+  for (const { name, left } of partials.left) {
+    const reason = describeLeft(left, join(base, name));
+    result.left.push({ name, reason });
+    log(`Alten halbfertigen Lauf ${name} nicht vollständig entfernt: ${reason}. Der Rest bleibt stehen.`);
+  }
+  const stands = listStands(base); // neueste zuerst
   const protectedStands = new Set(
     stands
-      .filter((s) => readManifest(join(target, s))?.trigger === 'vor_migration')
+      .filter((s) => readManifest(join(base, s))?.trigger === 'vor_migration')
       .slice(0, KEEP_PRE_MIGRATION),
   );
   const { remove } = selectRetention(stands);
-  const removed: string[] = [];
   for (const stand of remove) {
     if (protectedStands.has(stand)) continue;
-    const result = removeStand(target, stand);
-    if (result === true) {
-      removed.push(stand);
+    const report = removeStandReport(target, stand, hooks);
+    if (report.status === true) {
+      result.removed.push(stand);
       log(`Alten Stand ${stand} entfernt.`);
-    } else if (result === 'teilweise') {
+    } else if (report.status === 'teilweise') {
+      const reason = describeLeft(report.left, join(base, stand));
+      result.left.push({ name: stand, reason });
       log(
-        `Alten Stand ${stand} nicht vollständig entfernt: Im Ziel wurde während des Löschens etwas ausgetauscht. Der Rest bleibt stehen.`,
+        `Alten Stand ${stand} nicht vollständig entfernt: ${reason}. Der Rest bleibt stehen, der nächste Lauf versucht es erneut.`,
       );
     }
   }
-  return removed;
+  return result;
+}
+
+/** Höchstlänge von `backup_run.warning` (wie `error`) */
+const WARNING_MAX = 500;
+
+/** Warnung für Reste, die schon nach dem vorigen Lauf stehen blieben (`null`: keine) */
+export function leftoverWarning(stuck: Leftover[]): string | null {
+  if (stuck.length === 0) return null;
+  const what = stuck.length === 1 ? 'lässt sich ein alter Stand' : `lassen sich ${stuck.length} alte Stände`;
+  const list = stuck.map((s) => `${s.name} (${s.reason})`).join('; ');
+  const text = `Im Backup-Ziel ${what} seit mehreren Läufen nicht entfernen: ${list}. Bitte im Ziel Rechte und Sperren prüfen und den Ordner von Hand löschen.`;
+  return text.length > WARNING_MAX ? `${text.slice(0, WARNING_MAX - 1)}…` : text;
+}
+
+/**
+ * Reste des Ausdünnens am Lauf festhalten (`backup_run.thin_left`) und warnen, wenn ein Rest schon nach dem vorigen
+ * Lauf mit demselben Ziel stehen blieb (`backup_run.warning`, H3). Fehlt die Spalte (Backup vor der Migration, die
+ * sie anlegt), passiert nichts. Fehler hier machen das Backup nicht ungültig.
+ */
+async function recordLeftovers(
+  deps: Pick<BackupDeps, 'pg' | 'err' | 'cfg'>,
+  runId: string,
+  targetSetting: string,
+  left: Leftover[],
+): Promise<void> {
+  const { pg } = deps;
+  try {
+    const [has] = await pg.query(
+      `SELECT count(*) FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'backup_run' AND column_name = 'thin_left'`,
+    );
+    if (Number(has?.[0] ?? 0) === 0) return;
+    const [previous] = await pg.query(
+      `SELECT array_to_string(thin_left, '/') FROM backup_run
+        WHERE state = 'fertig' AND target = :'target' AND id <> :'id'::uuid AND thin_left IS NOT NULL
+          AND deleted_at IS NULL
+        ORDER BY finished_at DESC NULLS LAST, id DESC LIMIT 1`,
+      { id: runId, target: targetSetting },
+    );
+    const before = new Set((previous?.[0] ?? '').split('/').filter((name) => name !== ''));
+    const warning = leftoverWarning(left.filter((l) => before.has(l.name)));
+    if (warning) deps.err(`Warnung: ${warning}`);
+    await pg.query(
+      `UPDATE backup_run SET thin_left = string_to_array(:'left', '/'), warning = NULLIF(:'warning', ''),
+              updated_at = now()
+        WHERE id = :'id'::uuid`,
+      { id: runId, left: left.map((l) => l.name).join('/'), warning: warning ?? '' },
+    );
+  } catch (error) {
+    deps.err(`Reste des Ausdünnens ließen sich nicht eintragen: ${errorText(error, deps.cfg)}`);
+  }
 }

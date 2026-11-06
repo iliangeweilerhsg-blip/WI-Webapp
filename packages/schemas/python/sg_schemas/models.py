@@ -1483,6 +1483,11 @@ class BackupRun(BaseModel):
         description='Name des Stands für sg restore <stand>, z. B. 20261104T030012Z. null solange er läuft oder bei Fehler',
         pattern='^[0-9]{8}T[0-9]{6}Z$',
     )
+    warning: StrictStr | None = Field(
+        ...,
+        description='Warnung zum Lauf, z. B. ein alter Stand, der sich seit mehreren Läufen nicht aus dem Ziel entfernen lässt (VERTRAEGE §13). null = keine',
+        max_length=500,
+    )
 
 
 class CalendarEvent(BaseModel):

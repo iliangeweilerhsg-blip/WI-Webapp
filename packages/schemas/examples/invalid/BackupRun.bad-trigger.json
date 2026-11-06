@@ -11,5 +11,6 @@
   "state": "fertig",
   "error": null,
   "trigger": "nachts",
-  "stand": "20261104T020000Z"
+  "stand": "20261104T020000Z",
+  "warning": null
 }

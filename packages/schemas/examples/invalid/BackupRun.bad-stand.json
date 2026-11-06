@@ -11,5 +11,6 @@
   "state": "fertig",
   "error": null,
   "trigger": "zeitplan",
-  "stand": "2026-11-04"
+  "stand": "2026-11-04",
+  "warning": null
 }

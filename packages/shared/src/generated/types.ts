@@ -733,6 +733,10 @@ trigger: BackupTrigger
  * Name des Stands für sg restore <stand>, z. B. 20261104T030012Z. null solange er läuft oder bei Fehler
  */
 stand: (string | null)
+/**
+ * Warnung zum Lauf, z. B. ein alter Stand, der sich seit mehreren Läufen nicht aus dem Ziel entfernen lässt (VERTRAEGE §13). null = keine
+ */
+warning: (string | null)
 }
 /**
  * Termin. session_id ist abgeleitet: die nicht gelöschte Session zu diesem Termin.
