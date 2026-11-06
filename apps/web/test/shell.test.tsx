@@ -7,6 +7,7 @@ const nav = vi.hoisted(() => ({ pathname: '/' }));
 
 vi.mock('next/navigation', () => ({
   usePathname: () => nav.pathname,
+  useRouter: () => ({ push: vi.fn() }),
   useSearchParams: () => new URLSearchParams('id=0190f6a2-0000-7000-8000-0000000000a1'),
 }));
 
@@ -111,7 +112,7 @@ describe('Tastenkürzel (jsdom ist kein Mac: Strg)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await user.keyboard('{Control>}k{/Control}');
     expect(screen.getByRole('dialog', { name: 'Suche' })).toBeInTheDocument();
-    expect(screen.getByRole('searchbox')).toHaveFocus();
+    expect(screen.getByRole('combobox')).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
