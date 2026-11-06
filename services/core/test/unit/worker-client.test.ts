@@ -1,6 +1,7 @@
 // T2-12: Client für den Loopback-Endpunkt des Workers (VERTRAEGE §19.4, §19.6 Schritt 4) gegen einen echten
 // Test-Server auf 127.0.0.1 mit Token-Datei.
-import { mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -140,6 +141,29 @@ describe('WorkerClient', () => {
     symlinkSync(elsewhere, file);
     expect(await code(client.embed(['x y']))).toBe('embedder_unavailable');
     expect(worker.requests).toHaveLength(0);
+  });
+
+  it('FIFO statt Token-Datei: blockiert nicht, embedder_unavailable', async () => {
+    const file = join(dataDir, 'run', 'worker.token');
+    unlinkSync(file);
+    execFileSync('mkfifo', [file]);
+    const started = Date.now();
+    expect(await code(client.embed(['x y']))).toBe('embedder_unavailable');
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(worker.requests).toHaveLength(0);
+  });
+
+  it('Token-Datei größer als 1 KB → embedder_unavailable, auch wenn sie mit dem Token beginnt', async () => {
+    worker.writeTokenFile(`${worker.token}\n${' '.repeat(1100)}`);
+    expect(await code(client.embed(['x y']))).toBe('embedder_unavailable');
+    expect(worker.requests).toHaveLength(0);
+  });
+
+  it('Token-Datei ist ein Ordner → embedder_unavailable', async () => {
+    const file = join(dataDir, 'run', 'worker.token');
+    unlinkSync(file);
+    mkdirSync(file);
+    expect(await code(client.embed(['x y']))).toBe('embedder_unavailable');
   });
 
   it('Token mit Zeilenumbruch am Ende wird angenommen', async () => {

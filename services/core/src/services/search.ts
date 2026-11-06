@@ -163,6 +163,10 @@ export function splitHeadline(headline: string, text: string): SearchSnippetPart
   flush();
 
   const plain = parts.map((p) => p.text).join('');
+  // Bekannter Randfall: Kommt derselbe Ausschnitt mehrfach im Text vor, nimmt `indexOf` das erste Vorkommen. Stammt
+  // der Ausschnitt aus einem späteren, fehlt dann ggf. das `… ` vorn bzw. steht ein `… ` hinten zu viel. Nur die
+  // Anzeige ist betroffen; bei echten Texten mit 12–30 Wörtern je Ausschnitt praktisch ausgeschlossen. Kommt der
+  // Ausschnitt gar nicht wörtlich vor, gibt es kein `…`.
   const at = plain ? text.indexOf(plain) : -1;
   let before = '';
   let after = '';
@@ -199,7 +203,7 @@ export interface SearchDeps {
   worker: Pick<WorkerClient, 'embed'>;
 }
 
-interface ResolvedFilters {
+export interface ResolvedFilters {
   /** `null`: alle Module */
   moduleIds: string[] | null;
   kinds: SearchKind[];
@@ -312,38 +316,40 @@ async function textCandidates(db: Db, tsText: string, filters: ResolvedFilters):
 }
 
 /**
- * Bedeutungssuche: die `CANDIDATES` nächsten mit gleichem Modell und Ähnlichkeit ≥ `MIN_VECTOR_SIM`.
- * Ohne Filter über HNSW (`SET LOCAL hnsw.ef_search`), mit Filter exakt (MATERIALIZED: der Planer kann die
- * Sortierung nicht an den HNSW-Index geben, der erst nach dem Suchen filtert).
+ * Abfrage der Bedeutungssuche (§19.6 Schritt 4), exportiert für den Plan-Test. Ohne Filter über HNSW (der Aufrufer
+ * setzt `SET LOCAL hnsw.ef_search` in derselben Transaktion), mit Filter exakt (MATERIALIZED: der Planer kann die
+ * Sortierung nicht an den HNSW-Index geben, der erst nach dem Suchen filtert und dann zu wenige Treffer liefert).
  */
+export function vectorQuery(vector: number[], model: string, filters: ResolvedFilters): SQL {
+  const literal = `[${vector.join(',')}]`;
+  if (hasFilter(filters)) {
+    return sql`WITH cand AS MATERIALIZED (
+        SELECT c.id, c.embedding <=> ${literal}::vector AS dist FROM ${FROM_CHUNKS}
+        WHERE ${filterSql(filters)} AND c.embedding IS NOT NULL AND c.embedding_model = ${model}
+      )
+      SELECT id, dist FROM cand WHERE dist <= ${1 - MIN_VECTOR_SIM} ORDER BY dist, id LIMIT ${CANDIDATES}`;
+  }
+  return sql`SELECT c.id, c.embedding <=> ${literal}::vector AS dist FROM ${FROM_CHUNKS}
+      WHERE ${ALIVE} AND c.embedding_model = ${model}
+      ORDER BY c.embedding <=> ${literal}::vector
+      LIMIT ${CANDIDATES}`;
+}
+
+/** Bedeutungssuche: die `CANDIDATES` nächsten mit gleichem Modell und Ähnlichkeit ≥ `MIN_VECTOR_SIM` */
 async function vectorCandidates(
   db: Db,
   vector: number[],
   model: string,
   filters: ResolvedFilters,
 ): Promise<string[]> {
-  const literal = `[${vector.join(',')}]`;
   const maxDistance = 1 - MIN_VECTOR_SIM;
-  let rows: { id: string; dist: number | string | null }[];
-  if (hasFilter(filters)) {
-    rows = await db.execute<{ id: string; dist: number }>(
-      sql`WITH cand AS MATERIALIZED (
-            SELECT c.id, c.embedding <=> ${literal}::vector AS dist FROM ${FROM_CHUNKS}
-            WHERE ${filterSql(filters)} AND c.embedding IS NOT NULL AND c.embedding_model = ${model}
-          )
-          SELECT id, dist FROM cand WHERE dist <= ${maxDistance} ORDER BY dist, id LIMIT ${CANDIDATES}`,
-    );
-  } else {
-    rows = await db.transaction(async (tx) => {
-      await tx.execute(sql.raw(`SET LOCAL hnsw.ef_search = ${HNSW_EF_SEARCH}`));
-      return tx.execute<{ id: string; dist: number }>(
-        sql`SELECT c.id, c.embedding <=> ${literal}::vector AS dist FROM ${FROM_CHUNKS}
-            WHERE ${ALIVE} AND c.embedding_model = ${model}
-            ORDER BY c.embedding <=> ${literal}::vector
-            LIMIT ${CANDIDATES}`,
-      );
-    });
-  }
+  const query = vectorQuery(vector, model, filters);
+  const rows = hasFilter(filters)
+    ? await db.execute<{ id: string; dist: number }>(query)
+    : await db.transaction(async (tx) => {
+        await tx.execute(sql.raw(`SET LOCAL hnsw.ef_search = ${HNSW_EF_SEARCH}`));
+        return tx.execute<{ id: string; dist: number }>(query);
+      });
   return rows
     .map((r) => ({ id: r.id, dist: Number(r.dist) }))
     .filter((r) => Number.isFinite(r.dist) && r.dist <= maxDistance)

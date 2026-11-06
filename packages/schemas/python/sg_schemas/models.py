@@ -5073,7 +5073,11 @@ class TrashRestoreResult(BaseModel):
         title='Uuid',
     )
     kind: TrashKind
-    restored_count: StrictInt = Field(..., ge=1)
+    restored_count: StrictInt = Field(
+        ...,
+        description='Alle wiederhergestellten Zeilen samt Objekt selbst, auch Maschinenausgaben (anders als dependent_count, VERTRAEGE §13)',
+        ge=1,
+    )
 
 
 class UploadResult(BaseModel):
@@ -5942,7 +5946,7 @@ class TrashItem(BaseModel):
     parent: TrashParent | None
     dependent_count: StrictInt = Field(
         ...,
-        description='Mitgelöschte abhängige Objekte, die mit wiederhergestellt werden',
+        description='Mitgelöschte abhängige Objekte, die der Nutzer kennt und die mit wiederhergestellt werden. Maschinenausgaben (transcript, transcript_segment, slide_segment, search_chunk) werden mitgelöscht und mitwiederhergestellt, aber nicht mitgezählt (VERTRAEGE §13)',
         ge=0,
     )
 

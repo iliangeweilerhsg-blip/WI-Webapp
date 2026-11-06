@@ -19225,7 +19225,9 @@ extension TranscribeResult {
 // MARK: - TrashItem
 struct TrashItem: Codable {
     let deletedAt: Date
-    /// Mitgelöschte abhängige Objekte, die mit wiederhergestellt werden
+    /// Mitgelöschte abhängige Objekte, die der Nutzer kennt und die mit wiederhergestellt
+    /// werden. Maschinenausgaben (transcript, transcript_segment, slide_segment, search_chunk)
+    /// werden mitgelöscht und mitwiederhergestellt, aber nicht mitgezählt (VERTRAEGE §13)
     let dependentCount: Int
     let id: String
     let kind: TrashKind
@@ -19410,6 +19412,8 @@ extension TrashList {
 struct TrashRestoreResult: Codable {
     let id: String
     let kind: TrashKind
+    /// Alle wiederhergestellten Zeilen samt Objekt selbst, auch Maschinenausgaben (anders als
+    /// dependent_count, VERTRAEGE §13)
     let restoredCount: Int
 
     enum CodingKeys: String, CodingKey {

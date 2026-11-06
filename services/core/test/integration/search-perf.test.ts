@@ -137,6 +137,7 @@ describe.skipIf(SKIP)('Leistung GET /search (5 000 Folien, 12 000 Fenster)', () 
     for (const [q, ms] of Object.entries(results)) expect(ms, q).toBeLessThan(TARGET_MS);
   });
 
+  // Ob ohne Filter wirklich HNSW genutzt wird, prüft search.test.ts („Abfrageplan der Bedeutungssuche“, auch in CI)
   it(`Bedeutungssuche (fester Vektor, ohne HTTP): HNSW ohne Filter und exakt mit Filter < ${TARGET_MS} ms`, async () => {
     const [row] = await app.handle.sql<{ v: string }[]>`
       SELECT embedding::text AS v FROM search_chunk WHERE source_kind = 'transcript' LIMIT 1`;
@@ -152,18 +153,5 @@ describe.skipIf(SKIP)('Leistung GET /search (5 000 Folien, 12 000 Fenster)', () 
     }
     console.info('Suchzeit hybrid (Median, ms):', results);
     for (const [q, ms] of Object.entries(results)) expect(ms, q).toBeLessThan(TARGET_MS);
-
-    // Plan ohne Filter: HNSW-Index
-    const plan = await app.handle.sql.begin(async (tx) => {
-      await tx`SET LOCAL hnsw.ef_search = 100`;
-      return tx.unsafe(
-        `EXPLAIN SELECT c.id FROM search_chunk c LEFT JOIN slide_deck d ON d.id = c.deck_id
-           LEFT JOIN session s ON s.id = c.session_id JOIN module m ON m.id = coalesce(d.module_id, s.module_id)
-         WHERE c.deleted_at IS NULL AND d.deleted_at IS NULL AND s.deleted_at IS NULL AND m.deleted_at IS NULL
-           AND c.embedding_model = 'fake-embed-1'
-         ORDER BY c.embedding <=> '${row!.v}'::vector LIMIT 50`,
-      );
-    });
-    expect(plan.map((p) => Object.values(p)[0]).join('\n')).toContain('search_chunk_embedding_hnsw');
   });
 });

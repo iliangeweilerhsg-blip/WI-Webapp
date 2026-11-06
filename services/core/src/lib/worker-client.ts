@@ -26,6 +26,8 @@ export const EMBED_TIMEOUT_MS = 800;
 export const HEALTH_TIMEOUT_MS = 2000;
 /** Antworten des Workers sind klein (16 Vektoren à 1024 Zahlen ≈ 400 KB). Mehr wird nicht gelesen */
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+/** Die Token-Datei hat 64 Zeichen (plus Zeilenumbruch). Größere Dateien werden nicht gelesen */
+const MAX_TOKEN_FILE_BYTES = 1024;
 /** `secrets.token_hex(32)` im Worker */
 const TOKEN_RE = /^[0-9a-f]{64}$/;
 
@@ -138,12 +140,21 @@ export class WorkerClient {
     throw new WorkerError('embedder_unavailable', 'Der Worker lehnt das Token ab.');
   }
 
-  /** Liest das Token ohne Symlinks zu folgen. Fehlt die Datei oder hat sie ein falsches Format: `embedder_unavailable` */
+  /**
+   * Liest das Token ohne Symlinks zu folgen und ohne zu blockieren (`O_NONBLOCK`: eine FIFO an ihrer Stelle hält den
+   * Core nicht an). Nur eine gewöhnliche Datei bis `MAX_TOKEN_FILE_BYTES` wird gelesen. Fehlt sie, ist sie keine
+   * gewöhnliche Datei, zu groß oder hat ein falsches Format: `embedder_unavailable`.
+   */
   private async readToken(): Promise<string> {
     let text: string;
     try {
-      const handle = await open(this.tokenPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const handle = await open(
+        this.tokenPath,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
       try {
+        const info = await handle.stat();
+        if (!info.isFile() || info.size > MAX_TOKEN_FILE_BYTES) throw new Error('keine passende Datei');
         text = await handle.readFile({ encoding: 'utf8' });
       } finally {
         await handle.close();

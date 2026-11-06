@@ -3,10 +3,12 @@
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SINGLE_USER_ID, SearchResponseSchema, type SearchHit, type SearchResponse } from '@sg/shared';
 import type { DbHandle } from '../../src/db/client.ts';
 import { courseModule, semester, session, slideDeck } from '../../src/db/schema/index.ts';
+import { vectorQuery } from '../../src/services/search.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { FakeWorker, fakeEmbed } from '../unit/worker-fake.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
@@ -554,5 +556,40 @@ describe('Validierung', () => {
 
   it('200 Zeichen nach trim sind erlaubt (Leerraum außen zählt nicht)', async () => {
     expect((await get({ q: `  ${'x'.repeat(200)}  ` })).status).toBe(200);
+  });
+});
+
+describe('Abfrageplan der Bedeutungssuche (ohne Zeitmessung, läuft auch in CI)', () => {
+  /** Plan der Abfrage, die `search()` tatsächlich stellt. Seq-Scan aus, damit auch wenige Zeilen den Index zeigen */
+  async function plan(filters: Parameters<typeof vectorQuery>[2]): Promise<string> {
+    const rows = await handle.db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL enable_seqscan = off`);
+      await tx.execute(sql`SET LOCAL hnsw.ef_search = 100`);
+      return tx.execute<Record<string, string>>(
+        sql`EXPLAIN ${vectorQuery(fakeEmbed('normalform'), 'fake-embed-1', filters)}`,
+      );
+    });
+    return rows.map((r) => Object.values(r)[0]).join('\n');
+  }
+
+  beforeEach(async () => {
+    for (let i = 1; i <= 5; i += 1) {
+      await insertSlideChunk(handle, { deckId: deckDbs, slideIndex: i, text: `Folie ${i}`, embedding: true });
+    }
+  });
+
+  it('ohne Filter: HNSW-Index', async () => {
+    expect(await plan({ moduleIds: null, kinds: [], unresolved: [] })).toContain(
+      'search_chunk_embedding_hnsw',
+    );
+  });
+
+  it('mit Filter (Modul oder Art): exakt, ohne HNSW', async () => {
+    expect(await plan({ moduleIds: [dbs], kinds: [], unresolved: [] })).not.toContain(
+      'search_chunk_embedding_hnsw',
+    );
+    expect(await plan({ moduleIds: null, kinds: ['slide'], unresolved: [] })).not.toContain(
+      'search_chunk_embedding_hnsw',
+    );
   });
 });
