@@ -227,7 +227,7 @@ class Text(RootModel[StrictStr]):
 
 class EmbedRequest(BaseModel):
     """
-    POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 64 KB
+    POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 256 KB
     """
 
     model_config = ConfigDict(

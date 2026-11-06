@@ -1,5 +1,5 @@
 {
-  "id": "0d957a2f-84c4-43f6-8dbc-4a1ae7f958d8",
+  "id": "40f07df0-e048-44d1-a65e-09614692c4aa",
   "prevId": "07b26ff7-4057-4dea-9b00-784ec542b2a6",
   "version": "7",
   "dialect": "postgresql",
@@ -5156,6 +5156,10 @@
         "search_chunk_text_chk": {
           "name": "search_chunk_text_chk",
           "value": "char_length(\"search_chunk\".\"text\") BETWEEN 1 AND 8000"
+        },
+        "search_chunk_text_cntrl_chk": {
+          "name": "search_chunk_text_cntrl_chk",
+          "value": "\"search_chunk\".\"text\" !~ '[[:cntrl:]]'"
         },
         "search_chunk_content_hash_chk": {
           "name": "search_chunk_content_hash_chk",

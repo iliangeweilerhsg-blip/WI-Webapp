@@ -31,6 +31,7 @@ CREATE TABLE "search_chunk" (
             AND "search_chunk"."source_id" = "search_chunk"."session_id" AND "search_chunk"."slide_index" IS NULL AND "search_chunk"."title" IS NULL
             AND "search_chunk"."t_ms" IS NOT NULL AND "search_chunk"."t_ms" >= 0 AND "search_chunk"."t_end_ms" IS NOT NULL AND "search_chunk"."t_end_ms" >= "search_chunk"."t_ms")),
 	CONSTRAINT "search_chunk_text_chk" CHECK (char_length("search_chunk"."text") BETWEEN 1 AND 8000),
+	CONSTRAINT "search_chunk_text_cntrl_chk" CHECK ("search_chunk"."text" !~ '[[:cntrl:]]'),
 	CONSTRAINT "search_chunk_content_hash_chk" CHECK ("search_chunk"."content_hash" ~ '^[0-9a-f]{64}$'),
 	CONSTRAINT "search_chunk_embedding_model_chk" CHECK (("search_chunk"."embedding" IS NULL) = ("search_chunk"."embedding_model" IS NULL)),
 	CONSTRAINT "search_chunk_index_version_chk" CHECK ("search_chunk"."index_version" >= 1)

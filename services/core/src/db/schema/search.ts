@@ -11,7 +11,7 @@ import { session } from './organisation.ts';
 /** int8 als JS-Zahl (Sitzungszeiten bleiben weit unter 2^53) */
 const int8 = (name: string) => bigint(name, { mode: 'number' });
 
-/** `tsvector`. Der Worker schreibt `to_tsvector(ts_config::regconfig, text)`, keine generierte Spalte (§19.1). */
+/** `tsvector`. Der Worker schreibt `to_tsvector(ts_config::regconfig, text) || to_tsvector('simple', text)`, keine generierte Spalte (§19.1). */
 const tsvector = customType<{ data: string; driverData: string }>({
   dataType: () => 'tsvector',
 });
@@ -56,6 +56,8 @@ export const searchChunk = pgTable(
             AND ${t.tMs} IS NOT NULL AND ${t.tMs} >= 0 AND ${t.tEndMs} IS NOT NULL AND ${t.tEndMs} >= ${t.tMs})`,
     ),
     check('search_chunk_text_chk', sql`char_length(${t.text}) BETWEEN 1 AND 8000`),
+    // Steuerzeichen nie im Text: GET /search zerlegt die Ausschnitte an U+0001/U+0002 (§19.6)
+    check('search_chunk_text_cntrl_chk', sql`${t.text} !~ '[[:cntrl:]]'`),
     check('search_chunk_content_hash_chk', sql`${t.contentHash} ~ '^[0-9a-f]{64}$'`),
     check('search_chunk_embedding_model_chk', sql`(${t.embedding} IS NULL) = (${t.embeddingModel} IS NULL)`),
     check('search_chunk_index_version_chk', sql`${t.indexVersion} >= 1`),

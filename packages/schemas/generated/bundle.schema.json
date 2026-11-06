@@ -2292,7 +2292,7 @@
     "EmbedRequest": {
       "title": "EmbedRequest",
       "type": "object",
-      "description": "POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 64 KB",
+      "description": "POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 256 KB",
       "required": [
         "texts"
       ],

@@ -1167,7 +1167,7 @@ seq?: number
 origin?: SyncOrigin
 }
 /**
- * POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 64 KB
+ * POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 256 KB
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "EmbedRequest".

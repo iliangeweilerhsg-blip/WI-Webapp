@@ -465,6 +465,7 @@ describe('search_chunk (T2-10, VERTRAEGE §19.1)', () => {
     tEnd: null as number | null,
     cfg: 'german',
     text: 'Die dritte Normalform verbietet transitive Abhängigkeiten',
+    hash: H,
     ...over,
   });
 
@@ -472,7 +473,8 @@ describe('search_chunk (T2-10, VERTRAEGE §19.1)', () => {
     await sql`INSERT INTO search_chunk (id, user_id, source_kind, source_id, part, deck_id, session_id, slide_index,
         t_ms, t_end_ms, text, ts_config, tsv, content_hash, index_version)
       VALUES (${r.id}, ${SINGLE_USER_ID}, ${r.kind}, ${r.source}, ${r.part}, ${r.deck}, ${r.sess}, ${r.idx},
-        ${r.t}, ${r.tEnd}, ${r.text}, ${r.cfg}, to_tsvector(${r.cfg}::regconfig, ${r.text}), ${H}, 1)`;
+        ${r.t}, ${r.tEnd}, ${r.text}, ${r.cfg},
+        to_tsvector(${r.cfg}::regconfig, ${r.text}) || to_tsvector('simple', ${r.text}), ${r.hash}, 1)`;
   }
 
   it('nimmt Folien- und Transkript-Einträge an und findet sie über to_tsquery mit mehreren Konfigurationen', async () => {
@@ -496,6 +498,16 @@ describe('search_chunk (T2-10, VERTRAEGE §19.1)', () => {
     expect(rows.map((r) => r.source_kind)).toEqual(['slide', 'transcript']);
   });
 
+  it('findet halb getippte Wörter über den simple-Teil von tsv (§19.1)', async () => {
+    await insert(slideRow({ text: 'Vorlesungen zur Normalisierung von Datenbanken' }));
+    for (const prefix of ['vorles', 'vorlesu', 'vorlesun', 'normalisieru', 'datenba']) {
+      const rows = await sql`SELECT 1 FROM search_chunk
+        WHERE tsv @@ (to_tsquery('german', ${prefix + ':*'}) || to_tsquery('english', ${prefix + ':*'})
+                      || to_tsquery('simple', ${prefix + ':*'}))`;
+      expect(rows.length, prefix).toBeGreaterThan(0);
+    }
+  });
+
   it('weist falsche Eltern, Zeiten, Konfigurationen und Vektor ohne Modell ab', async () => {
     await expect(insert(slideRow({ sess: sessionId }))).rejects.toThrow(/search_chunk_parent_chk/);
     await expect(insert(slideRow({ deck: null }))).rejects.toThrow(/search_chunk_parent_chk/);
@@ -509,6 +521,14 @@ describe('search_chunk (T2-10, VERTRAEGE §19.1)', () => {
     );
     await expect(insert(slideRow({ cfg: 'french' }))).rejects.toThrow(/search_chunk_ts_config_chk/);
     await expect(insert(slideRow({ text: '' }))).rejects.toThrow(/search_chunk_text_chk/);
+    await expect(insert(slideRow({ text: 'x'.repeat(8001) }))).rejects.toThrow(/search_chunk_text_chk/);
+    await expect(insert(slideRow({ text: 'mit \u0001 Steuerzeichen' }))).rejects.toThrow(
+      /search_chunk_text_cntrl_chk/,
+    );
+    await expect(insert(slideRow({ text: 'zwei\nZeilen' }))).rejects.toThrow(/search_chunk_text_cntrl_chk/);
+    await expect(insert(slideRow({ hash: 'A'.repeat(64) }))).rejects.toThrow(/search_chunk_content_hash_chk/);
+    await expect(insert(slideRow({ idx: 0 }))).rejects.toThrow(/search_chunk_parent_chk/);
+    await insert(slideRow({ text: 'x'.repeat(8000) }));
     const vec = `[${Array.from({ length: 1024 }, () => 0.01).join(',')}]`;
     await expect(
       sql`INSERT INTO search_chunk (id, user_id, source_kind, source_id, part, deck_id, slide_index, text, ts_config,
@@ -525,10 +545,36 @@ describe('search_chunk (T2-10, VERTRAEGE §19.1)', () => {
     const otherDeck = uuidv7();
     const [mod] = await sql`SELECT module_id FROM slide_deck WHERE id = ${deckId}`;
     await sql`INSERT INTO slide_deck (id, user_id, module_id, title, file_path, sha256)
-      VALUES (${otherDeck}, ${SINGLE_USER_ID}, ${mod.module_id}, 'weg', ${'media/decks/' + otherDeck + '/original.pdf'}, ${H})`;
+      VALUES (${otherDeck}, ${SINGLE_USER_ID}, ${mod!.module_id}, 'weg', ${'media/decks/' + otherDeck + '/original.pdf'}, ${H})`;
     await insert(slideRow({ deck: otherDeck }));
     await sql`DELETE FROM slide_deck WHERE id = ${otherDeck}`;
-    const [{ n }] = await sql`SELECT count(*)::int AS n FROM search_chunk WHERE deck_id = ${otherDeck}`;
-    expect(n).toBe(0);
+    const [cnt] = await sql`SELECT count(*)::int AS n FROM search_chunk WHERE deck_id = ${otherDeck}`;
+    expect(cnt!.n).toBe(0);
+  });
+
+  it('verschwindet mit der Session und pflegt updated_at', async () => {
+    const otherSession = uuidv7();
+    const [mod] = await sql`SELECT module_id FROM slide_deck WHERE id = ${deckId}`;
+    await sql`INSERT INTO session (id, user_id, module_id) VALUES (${otherSession}, ${SINGLE_USER_ID}, ${mod!.module_id})`;
+    const r = slideRow({
+      kind: 'transcript',
+      source: otherSession,
+      deck: null,
+      sess: otherSession,
+      idx: null,
+      t: 0,
+      tEnd: 10,
+    });
+    await insert(r);
+    const [before] =
+      await sql`SELECT extract(epoch FROM updated_at)::float8 AS t FROM search_chunk WHERE id = ${r.id}`;
+    await sql`SELECT pg_sleep(0.01)`;
+    await sql`UPDATE search_chunk SET part = 1 WHERE id = ${r.id}`;
+    const [after] =
+      await sql`SELECT extract(epoch FROM updated_at)::float8 AS t FROM search_chunk WHERE id = ${r.id}`;
+    expect(after!.t).toBeGreaterThan(before!.t);
+    await sql`DELETE FROM session WHERE id = ${otherSession}`;
+    const [cnt] = await sql`SELECT count(*)::int AS n FROM search_chunk WHERE session_id = ${otherSession}`;
+    expect(cnt!.n).toBe(0);
   });
 });

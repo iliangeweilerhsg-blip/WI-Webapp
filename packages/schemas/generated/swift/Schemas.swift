@@ -3692,7 +3692,7 @@ enum ElementUpsertOpKind: String, Codable {
     case elementUpsert = "element.upsert"
 }
 
-/// POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 64 KB
+/// POST /embed des Loopback-Endpunkts (VERTRAEGE §19.4). Body höchstens 256 KB
 // MARK: - EmbedRequest
 struct EmbedRequest: Codable {
     let texts: [String]
