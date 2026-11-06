@@ -1,7 +1,7 @@
 """KI-Anbieter-Schnittstellen (docs/spezifikation/02-ARCHITEKTUR.md §7).
 
-Nur Protokolle und Typen. Transcriber-Implementierungen stehen in `transcriber.py`, die übrigen
-(bge-m3, Claude API, macOS-Stimmen) folgen mit den Pipeline-Tickets.
+Nur Protokolle und Typen. Transcriber-Implementierungen stehen in `transcriber.py`, Embedder in
+`embedder.py`, die übrigen (Claude API, macOS-Stimmen) folgen mit den Pipeline-Tickets.
 """
 
 from __future__ import annotations
@@ -72,7 +72,24 @@ class Transcriber(Protocol):
 
 
 class Embedder(Protocol):
+    """Text-Embeddings (VERTRAEGE §19.2, erweitert 02 §7). Implementierungen in `ai/embedder.py`:
+    `bge-m3` (nur macOS arm64, lädt im Hintergrund) und `fake` (CI, Linux).
+
+    `ready()`: Modell geladen, `embed` liefert Vektoren. `error()`: Grund, warum der Embedder
+    dauerhaft nicht verfügbar ist (sonst None). `wait_ready` wartet höchstens `timeout_s` Sekunden
+    auf das Ende des Ladens und gibt `ready()` zurück. `embed` ist thread-sicher (Job-Schleife und
+    Loopback-Endpunkt teilen sich ein Modell) und liefert je Text einen L2-normierten Vektor der
+    Länge `dim` in derselben Reihenfolge."""
+
+    provider: str  # "bge-m3" | "fake"
+    model: str  # "BAAI/bge-m3" | "fake-embed-1" (search_chunk.embedding_model)
     dim: int
+
+    def ready(self) -> bool: ...
+
+    def error(self) -> str | None: ...
+
+    def wait_ready(self, timeout_s: float) -> bool: ...
 
     def embed(self, texts: list[str]) -> list[list[float]]: ...
 
