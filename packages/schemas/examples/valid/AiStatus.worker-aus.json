@@ -1,0 +1,11 @@
+{
+  "worker_reachable": false,
+  "llm": null,
+  "budget": {
+    "month": "2026-11",
+    "spent_eur": 1.84,
+    "budget_eur": 10,
+    "reached": false,
+    "warn": false
+  }
+}

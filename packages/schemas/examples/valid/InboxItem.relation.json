@@ -1,0 +1,35 @@
+{
+  "created_at": "2026-11-05T14:12:30Z",
+  "updated_at": "2026-11-05T14:12:30Z",
+  "status": "offen",
+  "session": {
+    "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+    "number": 7,
+    "title": "Normalformen",
+    "started_at": "2026-11-05T12:15:00Z",
+    "module": {
+      "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e02",
+      "name": "Datenbanksysteme",
+      "short_name": "DBS"
+    }
+  },
+  "job_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e22",
+  "decided_at": null,
+  "target_concept_id": null,
+  "relation_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e41",
+  "blocked": "endpunkt_offen",
+  "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e53",
+  "kind": "relation",
+  "priority": 100,
+  "payload": {
+    "kind": "relation",
+    "from_concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e31",
+    "to_concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e32",
+    "relation_kind": "baut_auf",
+    "why": "Die 3NF wird über funktionale Abhängigkeiten definiert.",
+    "confidence": 0.9,
+    "prompt_version": "concepts.extract/v1",
+    "model": "claude-sonnet-5-5"
+  },
+  "concept_id": null
+}

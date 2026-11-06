@@ -1,6 +1,20 @@
 /* GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen */
 
 /**
+ * F-EIN-01 KI „automatisch annehmen“: aus, nur Beziehungen, alles mit Konfidenz ≥ 0,9
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "AutoAcceptMode".
+ */
+export type AutoAcceptMode = ("aus" | "nur_beziehungen" | "alles_ab_0_9")
+/**
+ * Warum die KI nicht eingerichtet ist (VERTRAEGE §20.5)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "LlmIssue".
+ */
+export type LlmIssue = ("kein_schluessel" | "env_offen" | "unbekannter_anbieter")
+/**
  * log: aus Folienwechseln. ohne_wechsel: Foliensatz, aber kein verwertbarer Wechsel (ganze Session auf Folie 1). folienlos: kein Foliensatz, keine Segmente
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -138,6 +152,41 @@ export type ClientDevice = ("mac" | "ipad")
  */
 export type ColumnWidths = number[]
 /**
+ * Art eines Konzepts (05 §P7a, W-02 Option A: concept.kind)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptKind".
+ */
+export type ConceptKind = ("definition" | "verfahren" | "modell" | "satz" | "beispiel")
+/**
+ * concept.status (03 §7). vorschlag: nur als Inbox-Vorschlag, zusammengefuehrt: merged_into gesetzt (Invariante 5)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptStatus".
+ */
+export type ConceptStatus = ("vorschlag" | "aktiv" | "zusammengefuehrt")
+/**
+ * Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EvidenceRef".
+ */
+export type EvidenceRef = (EvidenceRefSlide | EvidenceRefTranscript)
+/**
+ * Beziehungstyp (03 §7). „A baut_auf B“: B ist Voraussetzung von A. gegensatz und verwandt sind symmetrisch
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptRelationKind".
+ */
+export type ConceptRelationKind = ("baut_auf" | "beispiel_fuer" | "gegensatz" | "angewendet_in" | "verwandt")
+/**
+ * Herkunft einer Beziehung (03 §7)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptRelationSource".
+ */
+export type ConceptRelationSource = ("ki" | "manuell" | "wikilink")
+/**
  * Layout-Vorlagen F-DSH-01
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -224,6 +273,48 @@ export type IngestState = ("neu" | "verarbeitet" | "fehler")
  * via the `definition` "Lang".
  */
 export type Lang = ("de" | "en" | "mixed")
+/**
+ * Warum eine Beziehung noch nicht annehmbar ist: ein Endpunkt ist noch Vorschlag bzw. wurde abgelehnt
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxBlockedReason".
+ */
+export type InboxBlockedReason = ("endpunkt_offen" | "endpunkt_abgelehnt")
+/**
+ * Art eines Inbox-Eintrags (03 §8). Weitere Arten (card_batch, slide_correction, …) kommen mit ihren Tickets
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxKind".
+ */
+export type InboxKind = ("concept_new" | "concept_merge" | "relation")
+/**
+ * Status eines Inbox-Eintrags (03 §8). automatisch: nach der Einstellung ai.auto_accept angenommen
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxStatus".
+ */
+export type InboxStatus = ("offen" | "angenommen" | "abgelehnt" | "automatisch")
+/**
+ * Schemageprüfte Nutzlast eines Inbox-Eintrags (03 §8), unterschieden über kind
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxPayload".
+ */
+export type InboxPayload = (InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation)
+/**
+ * Entscheidung im Abgleich (05 §P8, Band 0,75–0,88). Abbildung auf Inbox-Arten: VERTRAEGE §20.3
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ResolveVerdict".
+ */
+export type ResolveVerdict = ("gleich" | "teil_von" | "verwandt" | "verschieden")
+/**
+ * Grund eines concept_merge-Vorschlags: ki = KI-Entscheidung „gleich“, name = gleicher Name/Alias ohne Embedder (degradiert)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "MergeBasis".
+ */
+export type MergeBasis = ("ki" | "name")
 /**
  * Schreibmodus F-INK-03
  * 
@@ -400,12 +491,12 @@ export type PencilSqueezeAction = ("werkzeugpalette" | "radierer" | "system" | "
  */
 export type PhotoMime = ("image/heic" | "image/jpeg")
 /**
- * Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge = Anzeige-Reihenfolge
+ * Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge = Anzeige-Reihenfolge
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PipelineStep".
  */
-export type PipelineStep = ("audio.finalize" | "transcribe" | "align.log")
+export type PipelineStep = ("audio.finalize" | "transcribe" | "align.log" | "concepts.extract" | "concepts.resolve" | "summary.write")
 /**
  * Nacharbeitung (F-NAC-05, Phase 2)
  * 
@@ -458,9 +549,9 @@ export type SessionState = ("geplant" | "bereit" | "laeuft" | "pausiert" | "been
  */
 export type StopReason = ("manuell" | "kalenderende" | "stille" | "maximaldauer" | "absturz_wiederhergestellt")
 /**
- * Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge = Anzeige-Reihenfolge
+ * Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge = Anzeige-Reihenfolge
  */
-export type PipelineStep1 = ("audio.finalize" | "transcribe" | "align.log")
+export type PipelineStep1 = ("audio.finalize" | "transcribe" | "align.log" | "concepts.extract" | "concepts.resolve" | "summary.write")
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SlideEventSource".
@@ -553,6 +644,82 @@ export type TrashKind = ("semester" | "module" | "slide_deck" | "exercise_sheet"
 /**
  * GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
  */
+/**
+ * Monatsbudget (F-DAT-05). Monat = Kalendermonat in Ortszeit
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "AiBudgetStatus".
+ */
+export interface AiBudgetStatus {
+month: string
+/**
+ * Euro (Schätzung, VERTRAEGE §20.5)
+ */
+spent_eur: number
+/**
+ * Euro (Schätzung, VERTRAEGE §20.5)
+ */
+budget_eur: number
+/**
+ * spent_eur ≥ budget_eur: KI-Jobs enden mit fehler
+ */
+reached: boolean
+/**
+ * spent_eur ≥ 80 % von budget_eur
+ */
+warn: boolean
+}
+/**
+ * Einstellungen KI (F-EIN-01, VERTRAEGE §20.7). Bereich ai in setting
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "AiSettings".
+ */
+export interface AiSettings {
+/**
+ * Monatsbudget in Euro, Standard 10. 0 schaltet Cloud-KI ab
+ */
+monthly_budget_eur: number
+auto_accept: AutoAcceptMode
+}
+/**
+ * Teil von SettingsUpdate.ai
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "AiSettingsUpdate".
+ */
+export interface AiSettingsUpdate {
+monthly_budget_eur?: number
+auto_accept?: AutoAcceptMode
+}
+/**
+ * GET /ai/status
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "AiStatus".
+ */
+export interface AiStatus {
+worker_reachable: boolean
+llm: (WorkerLlmStatus | null)
+budget: AiBudgetStatus
+}
+/**
+ * KI-Anbieter des Workers (GET /health des Workers, Feld llm). Nie der Schlüssel selbst
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "WorkerLlmStatus".
+ */
+export interface WorkerLlmStatus {
+/**
+ * anthropic | fake (SG_LLM)
+ */
+provider: string
+/**
+ * true: Aufrufe möglich (Schlüssel vorhanden bzw. Fake)
+ */
+configured: boolean
+issue: (LlmIssue | null)
+}
 /**
  * align.log (08 §5, VERTRAEGE §18.3)
  * 
@@ -904,6 +1071,477 @@ name?: string
 export interface CalendarSourceList {
 items: CalendarSource[]
 next_cursor: (string | null)
+}
+/**
+ * Konzept (03 §7). Gehört keinem Fach allein (concept_module). Ohne embedding, vault_path und block_hashes (kommen mit dem Vault)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "Concept".
+ */
+export interface Concept {
+id: Uuid
+created_at: Timestamp
+updated_at: Timestamp
+/**
+ * NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+ */
+name: string
+/**
+ * weitere Namen, z. B. der englische Begriff (05 §1 Sprache)
+ * 
+ * @maxItems 20
+ */
+aliases: string[]
+kind: (ConceptKind | null)
+/**
+ * „In einem Satz“
+ */
+one_liner: (string | null)
+status: ConceptStatus
+merged_into: (Uuid | null)
+exam_relevant: boolean
+/**
+ * Startwert der Wichtigkeit (W-05: importance 1|2|3 → 0,8|1,0|1,3)
+ */
+importance_base: number
+}
+/**
+ * GET /concepts/{id}
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptDetail".
+ */
+export interface ConceptDetail {
+concept: Concept
+modules: SearchModuleRef[]
+/**
+ * nicht gelöschte Belege, neueste Session zuerst, höchstens 200
+ */
+evidence: EvidenceView[]
+/**
+ * nur bestätigte Beziehungen zu nicht gelöschten Konzepten
+ */
+relations: ConceptRelationView[]
+inbox_item_id: (Uuid | null)
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchModuleRef".
+ */
+export interface SearchModuleRef {
+id: Uuid
+name: string
+short_name: (string | null)
+}
+/**
+ * Gespeicherter Beleg (Tabelle evidence) mit Anzeigeangaben
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EvidenceView".
+ */
+export interface EvidenceView {
+id: Uuid
+ref: EvidenceRef
+session: (SessionRef | null)
+/**
+ * nur bei slide: Titel der Folie, sonst null
+ */
+slide_title: (string | null)
+/**
+ * true: Ziel gelöscht (Folie bzw. Foliensatz), der Beleg ist nicht mehr anspringbar
+ */
+missing: boolean
+/**
+ * kurzes Zitat für die Anzeige
+ */
+quote: (string | null)
+/**
+ * true: beim Abgleich automatisch an ein vorhandenes Konzept gehängt (§20.3)
+ */
+auto: boolean
+}
+/**
+ * Beleg auf eine Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EvidenceRefSlide".
+ */
+export interface EvidenceRefSlide {
+kind: "slide"
+slide_id: Uuid
+deck_id: Uuid
+/**
+ * Index der Folie im Foliensatz, ab 1
+ */
+slide_index: number
+}
+/**
+ * Beleg auf einen Zeitraum des Gesagten (Sitzungszeit, §18.1). t_end_ms ≥ t_start_ms prüft der Schreiber. Ziel: /rueckblick?id=<session_id>&t=<t_start_ms>
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EvidenceRefTranscript".
+ */
+export interface EvidenceRefTranscript {
+kind: "transcript"
+session_id: Uuid
+t_start_ms: SessionMs
+t_end_ms: SessionMs
+}
+/**
+ * Kurzangabe einer Session für Listen (Anzeige „VL 7 · Titel“ bzw. Datum)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionRef".
+ */
+export interface SessionRef {
+id: Uuid
+/**
+ * VL-Nummer (Session.number)
+ */
+number: (number | null)
+title: (string | null)
+started_at: (Timestamp | null)
+module: SearchModuleRef
+}
+/**
+ * Bestätigte Beziehung aus Sicht eines Konzepts
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptRelationView".
+ */
+export interface ConceptRelationView {
+id: Uuid
+kind: ConceptRelationKind
+/**
+ * ausgehend: dieses Konzept ist from_id
+ */
+direction: ("ausgehend" | "eingehend")
+other: {
+id: Uuid
+/**
+ * NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+ */
+name: string
+status: ConceptStatus
+}
+source: ConceptRelationSource
+confidence: (number | null)
+/**
+ * Fächerbrücke (05 §P8.4): die beiden Konzepte haben kein gemeinsames Modul
+ */
+cross_module: boolean
+}
+/**
+ * Änderungen beim Annehmen eines Konzept-Vorschlags
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptEdit".
+ */
+export interface ConceptEdit {
+/**
+ * NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+ */
+name?: string
+/**
+ * weitere Namen, z. B. der englische Begriff (05 §1 Sprache)
+ * 
+ * @maxItems 20
+ */
+aliases?: string[]
+/**
+ * „In einem Satz“
+ */
+one_liner?: (string | null)
+kind?: (ConceptKind | null)
+}
+/**
+ * GET /concepts
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptList".
+ */
+export interface ConceptList {
+items: ConceptListItem[]
+next_cursor: (string | null)
+}
+/**
+ * Eintrag in GET /concepts
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptListItem".
+ */
+export interface ConceptListItem {
+concept: Concept
+modules: SearchModuleRef[]
+evidence_count: number
+/**
+ * Sessions mit mindestens einem Beleg
+ */
+session_count: number
+}
+/**
+ * Ein von der KI gefundenes Konzept (05 §P7a), nach Prüfung der Belege
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptProposal".
+ */
+export interface ConceptProposal {
+/**
+ * NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+ */
+name: string
+/**
+ * weitere Namen, z. B. der englische Begriff (05 §1 Sprache)
+ * 
+ * @maxItems 20
+ */
+aliases: string[]
+/**
+ * „In einem Satz“
+ */
+one_liner: (string | null)
+kind: (ConceptKind | null)
+/**
+ * 1–3 (05 §P7a)
+ */
+importance: number
+/**
+ * Die KI hat einen Klausurhinweis erkannt
+ */
+exam_hint: boolean
+/**
+ * Kernaussage des Profs in 1–2 Sätzen
+ */
+prof_explanation: (string | null)
+/**
+ * Selbsteinschätzung der KI, 0..1
+ */
+confidence: number
+}
+/**
+ * concepts.extract (VERTRAEGE §20.2). job.session_id ist gesetzt
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptsExtractPayload".
+ */
+export interface ConceptsExtractPayload {
+session_id: Uuid
+/**
+ * true: auch bei gleichem input_hash neu aufrufen
+ */
+force?: boolean
+}
+/**
+ * Ergebnis von concepts.extract (job.result). concepts.resolve liest es über extract_job_id
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptsExtractResult".
+ */
+export interface ConceptsExtractResult {
+session_id: Uuid
+/**
+ * true: Session weich gelöscht, nichts aufgerufen
+ */
+session_deleted: boolean
+/**
+ * true: weder Folien noch Transkript, kein Aufruf
+ */
+empty: boolean
+/**
+ * true: gleicher input_hash wie das letzte fertige Ergebnis, übernommen statt aufgerufen
+ */
+unchanged: boolean
+input_hash: (string | null)
+/**
+ * z. B. concepts.extract/v1
+ */
+prompt_version: (string | null)
+/**
+ * Modell der Antwort (nach einem Refusal-Fallback das tatsächlich genutzte)
+ */
+model: (string | null)
+/**
+ * Anzahl der Aufrufe (Kapitel), 0 ohne Aufruf
+ */
+chapters: number
+/**
+ * @maxItems 30
+ */
+concepts: ExtractedConcept[]
+/**
+ * @maxItems 60
+ */
+relations: ExtractedRelation[]
+/**
+ * verworfen, weil kein Beleg gültig war
+ */
+dropped_concepts: number
+dropped_evidence: number
+dropped_relations: number
+/**
+ * Euro (Schätzung, VERTRAEGE §20.5)
+ */
+cost_eur: number
+}
+/**
+ * Konzept im Ergebnis von concepts.extract mit mindestens einem gültigen Beleg (LP8)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ExtractedConcept".
+ */
+export interface ExtractedConcept {
+/**
+ * Schlüssel innerhalb des Ergebnisses (c1, c2, …)
+ */
+key: string
+proposal: ConceptProposal
+/**
+ * @minItems 1
+ * @maxItems 12
+ */
+evidence: EvidenceRef[]
+}
+/**
+ * Beziehung zwischen zwei Konzepten derselben Vorlesung
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ExtractedRelation".
+ */
+export interface ExtractedRelation {
+from: string
+to: string
+kind: ConceptRelationKind
+why: string
+/**
+ * Selbsteinschätzung der KI, 0..1
+ */
+confidence: number
+}
+/**
+ * concepts.resolve (VERTRAEGE §20.3). job.session_id ist gesetzt
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptsResolvePayload".
+ */
+export interface ConceptsResolvePayload {
+session_id: Uuid
+extract_job_id: Uuid
+/**
+ * true: auch bei unverändertem Extrakt neu abgleichen
+ */
+force?: boolean
+}
+/**
+ * Ergebnis von concepts.resolve
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ConceptsResolveResult".
+ */
+export interface ConceptsResolveResult {
+session_id: Uuid
+extract_job_id: Uuid
+extract_input_hash: (string | null)
+/**
+ * RESOLVE_VERSION des Workers
+ */
+resolve_version: number
+session_deleted: boolean
+/**
+ * true: gleicher Extrakt wie beim letzten fertigen Abgleich, nichts geschrieben
+ */
+unchanged: boolean
+/**
+ * Konzepte, deren Belege automatisch an ein vorhandenes Konzept gingen
+ */
+auto_merged: number
+proposed_new: number
+proposed_merge: number
+proposed_relations: number
+/**
+ * Einträge mit Status automatisch
+ */
+auto_accepted: number
+/**
+ * nicht erneut vorgeschlagen, weil für diese Session abgelehnt
+ */
+skipped_rejected: number
+/**
+ * baut_auf-Vorschläge, die einen Kreis bilden würden
+ */
+dropped_cycles: number
+/**
+ * nachgeholte Vektoren aktiver Konzepte
+ */
+embedded_concepts: number
+embedding_model: (string | null)
+embedding_error: (string | null)
+/**
+ * null ohne KI-Aufruf
+ */
+prompt_version: (string | null)
+model: (string | null)
+/**
+ * Euro (Schätzung, VERTRAEGE §20.5)
+ */
+cost_eur: number
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CostByModel".
+ */
+export interface CostByModel {
+provider: string
+model: string
+calls: number
+input_tokens: number
+output_tokens: number
+cache_creation_input_tokens: number
+cache_read_input_tokens: number
+/**
+ * Euro (Schätzung, VERTRAEGE §20.5)
+ */
+eur: number
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CostBySession".
+ */
+export interface CostBySession {
+session_id: Uuid
+session: (SessionRef | null)
+calls: number
+/**
+ * Euro (Schätzung, VERTRAEGE §20.5)
+ */
+eur: number
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CostByTask".
+ */
+export interface CostByTask {
+task: string
+calls: number
+/**
+ * Euro (Schätzung, VERTRAEGE §20.5)
+ */
+eur: number
+}
+/**
+ * GET /costs/summary (F-DAT-05): ein Monat, je Aufgabe, je Session (höchstens 20), je Modell
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CostSummary".
+ */
+export interface CostSummary {
+budget: AiBudgetStatus
+calls: number
+by_task: CostByTask[]
+/**
+ * @maxItems 20
+ */
+by_session: CostBySession[]
+by_model: CostByModel[]
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1368,6 +2006,240 @@ export interface IcsWarning {
 code: string
 message: string
 external_uid: (string | null)
+}
+/**
+ * POST /inbox/{id}/accept (§20.6). Welche Felder zu welcher Art passen, regelt der Vertrag (sonst 400 inbox_action_invalid)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxAcceptRequest".
+ */
+export interface InboxAcceptRequest {
+edit?: ConceptEdit
+merge_into?: Uuid
+/**
+ * concept_merge: als neues Konzept annehmen statt zusammenführen
+ */
+as_new?: boolean
+relation_kind?: ConceptRelationKind
+}
+/**
+ * POST /inbox/bulk. Genau eins von ids und session_id (sonst 400 validation_failed)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxBulkRequest".
+ */
+export interface InboxBulkRequest {
+/**
+ * Massenaktion
+ */
+action: ("accept" | "reject" | "reopen")
+/**
+ * @minItems 1
+ * @maxItems 500
+ */
+ids?: Uuid[]
+session_id?: Uuid
+}
+/**
+ * Antwort auf POST /inbox/bulk
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxBulkResult".
+ */
+export interface InboxBulkResult {
+/**
+ * geänderte Einträge in Bearbeitungsreihenfolge
+ */
+decided: Uuid[]
+skipped: {
+id: Uuid
+code: string
+}[]
+}
+/**
+ * Was eine Annahme geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST /inbox/{id}/reopen, §20.6)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxDecision".
+ */
+export interface InboxDecision {
+/**
+ * Wirkung
+ */
+action: ("angenommen_neu" | "zusammengefuehrt" | "beziehung_bestaetigt" | "abgelehnt")
+concept_id: (Uuid | null)
+merged_into: (Uuid | null)
+moved_evidence_ids: Uuid[]
+added_aliases: string[]
+added_module_ids: Uuid[]
+previous: (ConceptEdit | null)
+relation_kind_before: (ConceptRelationKind | null)
+/**
+ * mit derselben Entscheidung geänderte Beziehungs-Einträge
+ */
+cascade_item_ids: Uuid[]
+}
+/**
+ * Antwort auf accept, reject und reopen
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxDecisionResult".
+ */
+export interface InboxDecisionResult {
+item: InboxItem
+concept: (Concept | null)
+}
+/**
+ * Inbox-Eintrag (03 §8, F-NAC-06)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxItem".
+ */
+export interface InboxItem {
+id: Uuid
+created_at: Timestamp
+updated_at: Timestamp
+kind: InboxKind
+status: InboxStatus
+session: (SessionRef | null)
+job_id: (Uuid | null)
+/**
+ * kleiner = früher (Reihenfolge der geführten Nacharbeitung)
+ */
+priority: number
+decided_at: (Timestamp | null)
+payload: InboxPayload
+concept_id: (Uuid | null)
+target_concept_id: (Uuid | null)
+relation_id: (Uuid | null)
+blocked: (InboxBlockedReason | null)
+}
+/**
+ * Nutzlast concept_new (neues Konzept)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxPayloadConceptNew".
+ */
+export interface InboxPayloadConceptNew {
+kind: "concept_new"
+proposal: ConceptProposal
+/**
+ * @minItems 1
+ * @maxItems 12
+ */
+evidence: EvidenceRef[]
+/**
+ * @maxItems 3
+ */
+similar: InboxSimilarConcept[]
+prompt_version: string
+model: string
+}
+/**
+ * Ähnliches vorhandenes Konzept („gleich wie X?“, 07 §3.5)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxSimilarConcept".
+ */
+export interface InboxSimilarConcept {
+concept_id: Uuid
+/**
+ * NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+ */
+name: string
+/**
+ * Cosinus-Ähnlichkeit, null ohne Embedder
+ */
+similarity: (number | null)
+verdict: (ResolveVerdict | null)
+}
+/**
+ * Nutzlast concept_merge (Vorschlag: dasselbe wie ein vorhandenes Konzept)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxPayloadConceptMerge".
+ */
+export interface InboxPayloadConceptMerge {
+kind: "concept_merge"
+proposal: ConceptProposal
+/**
+ * @minItems 1
+ * @maxItems 12
+ */
+evidence: EvidenceRef[]
+target: {
+concept_id: Uuid
+/**
+ * NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen
+ */
+name: string
+}
+basis: MergeBasis
+similarity: (number | null)
+/**
+ * Begründung der KI, null bei basis = name
+ */
+reason: (string | null)
+/**
+ * null bei basis = name (kein KI-Aufruf)
+ */
+prompt_version: (string | null)
+model: (string | null)
+}
+/**
+ * Nutzlast relation (Beziehung zwischen zwei Konzepten)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxPayloadRelation".
+ */
+export interface InboxPayloadRelation {
+kind: "relation"
+from_concept_id: Uuid
+to_concept_id: Uuid
+relation_kind: ConceptRelationKind
+why: string
+/**
+ * Selbsteinschätzung der KI, 0..1
+ */
+confidence: number
+prompt_version: string
+model: string
+}
+/**
+ * GET /inbox
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxItemList".
+ */
+export interface InboxItemList {
+items: InboxItem[]
+next_cursor: (string | null)
+}
+/**
+ * GET /inbox/overview: Zähler für Navigation und Gruppen (F-NAC-06)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxOverview".
+ */
+export interface InboxOverview {
+open_count: number
+/**
+ * offene Einträge älter als 14 Tage („12 ältere Vorschläge“)
+ */
+older_count: number
+/**
+ * Gruppen mit offenen Einträgen, neueste Session zuerst
+ */
+sessions: InboxOverviewSession[]
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxOverviewSession".
+ */
+export interface InboxOverviewSession {
+session: (SessionRef | null)
+open_count: number
+oldest_at: Timestamp
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -3260,15 +4132,6 @@ slide_index: number
 slide_title: (string | null)
 }
 /**
- * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "SearchModuleRef".
- */
-export interface SearchModuleRef {
-id: Uuid
-name: string
-short_name: (string | null)
-}
-/**
  * Teil eines Ausschnitts. hit = Treffer-Wort (als <mark> darstellen). Immer als Text rendern, nie als HTML
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -3501,6 +4364,28 @@ device_id: Uuid
 offset_ms: number
 }
 /**
+ * Konzept mit Belegen aus genau dieser Session
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionConceptItem".
+ */
+export interface SessionConceptItem {
+concept: Concept
+evidence: EvidenceView[]
+inbox_item_id: (Uuid | null)
+inbox_status: (InboxStatus | null)
+}
+/**
+ * GET /sessions/{id}/concepts: aktive und vorgeschlagene Konzepte mit Belegen aus der Session
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionConcepts".
+ */
+export interface SessionConcepts {
+session_id: Uuid
+items: SessionConceptItem[]
+}
+/**
  * POST /sessions: spontane Session ohne Termin (F-SES-04). Ergebnis im Zustand bereit, danach /start.
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -3724,6 +4609,70 @@ origin?: SyncOrigin
  */
 export interface SessionStopRequest {
 reason?: StopReason
+}
+/**
+ * Zusammenfassung einer Session (Tabelle session_summary, F-NAC-08 ohne Vault). Direkt sichtbar, kein Inbox-Vorschlag (§20.4)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionSummary".
+ */
+export interface SessionSummary {
+id: Uuid
+session_id: Uuid
+created_at: Timestamp
+updated_at: Timestamp
+lang: (Lang | null)
+/**
+ * @minItems 1
+ * @maxItems 5
+ */
+sentences: SummarySentence[]
+/**
+ * @minItems 0
+ * @maxItems 30
+ */
+outline: SummaryOutlineItem[]
+model: string
+prompt_version: string
+job_id: (Uuid | null)
+}
+/**
+ * Ein Satz der Kurzfassung mit Belegen (LP8)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SummarySentence".
+ */
+export interface SummarySentence {
+text: string
+/**
+ * @minItems 1
+ * @maxItems 6
+ */
+sources: EvidenceRef[]
+}
+/**
+ * Ein Gliederungspunkt (Kapitel aus den Folien)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SummaryOutlineItem".
+ */
+export interface SummaryOutlineItem {
+title: string
+/**
+ * @minItems 0
+ * @maxItems 6
+ */
+sources: EvidenceRef[]
+}
+/**
+ * GET /sessions/{id}/summary. summary = null: (noch) keine Zusammenfassung
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SessionSummaryView".
+ */
+export interface SessionSummaryView {
+session_id: Uuid
+summary: (SessionSummary | null)
 }
 /**
  * GET /sessions/{id}/transcript: alles für den Rückblick einer Session (F-NAC-02). Listen nach start_ms sortiert
@@ -4034,6 +4983,41 @@ data: StrokeRemoveData
  */
 seq?: number
 origin?: SyncOrigin
+}
+/**
+ * summary.write (VERTRAEGE §20.4, nur die Zusammenfassung, ohne vault.write). job.session_id ist gesetzt
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SummaryWritePayload".
+ */
+export interface SummaryWritePayload {
+session_id: Uuid
+force?: boolean
+}
+/**
+ * Ergebnis von summary.write
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SummaryWriteResult".
+ */
+export interface SummaryWriteResult {
+session_id: Uuid
+session_deleted: boolean
+/**
+ * true: weder Folien noch Transkript, eine alte Zusammenfassung wurde entfernt
+ */
+skipped: boolean
+unchanged: boolean
+input_hash: (string | null)
+sentence_count: number
+outline_count: number
+dropped_sentences: number
+prompt_version: (string | null)
+model: (string | null)
+/**
+ * Euro (Schätzung, VERTRAEGE §20.5)
+ */
+cost_eur: number
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -4431,7 +5415,7 @@ id: Uuid
 duplicate: boolean
 }
 /**
- * GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token
+ * GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token. llm ab §20.5, optional, damit ein älterer Worker gültig bleibt
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "WorkerHealth".
@@ -4447,4 +5431,5 @@ state: EmbedderState
  */
 error: (string | null)
 }
+llm?: WorkerLlmStatus
 }

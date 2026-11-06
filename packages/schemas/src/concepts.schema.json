@@ -1,0 +1,1888 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Konzepte, Inbox, Zusammenfassung und KI-Kosten (03 §7/§8, 05 §P7a/§P8/§P9, F-NAC-06/-08, F-DAT-05, VERTRAEGE §20)",
+  "$defs": {
+    "ConceptKind": {
+      "type": "string",
+      "enum": ["definition", "verfahren", "modell", "satz", "beispiel"],
+      "description": "Art eines Konzepts (05 §P7a, W-02 Option A: concept.kind)"
+    },
+    "ConceptStatus": {
+      "type": "string",
+      "enum": ["vorschlag", "aktiv", "zusammengefuehrt"],
+      "description": "concept.status (03 §7). vorschlag: nur als Inbox-Vorschlag, zusammengefuehrt: merged_into gesetzt (Invariante 5)"
+    },
+    "ConceptRelationKind": {
+      "type": "string",
+      "enum": ["baut_auf", "beispiel_fuer", "gegensatz", "angewendet_in", "verwandt"],
+      "description": "Beziehungstyp (03 §7). „A baut_auf B“: B ist Voraussetzung von A. gegensatz und verwandt sind symmetrisch"
+    },
+    "ConceptRelationSource": {
+      "type": "string",
+      "enum": ["ki", "manuell", "wikilink"],
+      "description": "Herkunft einer Beziehung (03 §7)"
+    },
+    "InboxKind": {
+      "type": "string",
+      "enum": ["concept_new", "concept_merge", "relation"],
+      "description": "Art eines Inbox-Eintrags (03 §8). Weitere Arten (card_batch, slide_correction, …) kommen mit ihren Tickets"
+    },
+    "InboxStatus": {
+      "type": "string",
+      "enum": ["offen", "angenommen", "abgelehnt", "automatisch"],
+      "description": "Status eines Inbox-Eintrags (03 §8). automatisch: nach der Einstellung ai.auto_accept angenommen"
+    },
+    "AutoAcceptMode": {
+      "type": "string",
+      "enum": ["aus", "nur_beziehungen", "alles_ab_0_9"],
+      "description": "F-EIN-01 KI „automatisch annehmen“: aus, nur Beziehungen, alles mit Konfidenz ≥ 0,9"
+    },
+    "ResolveVerdict": {
+      "type": "string",
+      "enum": ["gleich", "teil_von", "verwandt", "verschieden"],
+      "description": "Entscheidung im Abgleich (05 §P8, Band 0,75–0,88). Abbildung auf Inbox-Arten: VERTRAEGE §20.3"
+    },
+    "MergeBasis": {
+      "type": "string",
+      "enum": ["ki", "name"],
+      "description": "Grund eines concept_merge-Vorschlags: ki = KI-Entscheidung „gleich“, name = gleicher Name/Alias ohne Embedder (degradiert)"
+    },
+    "LlmIssue": {
+      "type": "string",
+      "enum": ["kein_schluessel", "env_offen", "unbekannter_anbieter"],
+      "description": "Warum die KI nicht eingerichtet ist (VERTRAEGE §20.5)"
+    },
+    "EvidenceRefSlide": {
+      "type": "object",
+      "description": "Beleg auf eine Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>",
+      "required": ["kind", "slide_id", "deck_id", "slide_index"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "slide"
+        },
+        "slide_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "deck_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "slide_index": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Index der Folie im Foliensatz, ab 1"
+        }
+      }
+    },
+    "EvidenceRefTranscript": {
+      "type": "object",
+      "description": "Beleg auf einen Zeitraum des Gesagten (Sitzungszeit, §18.1). t_end_ms ≥ t_start_ms prüft der Schreiber. Ziel: /rueckblick?id=<session_id>&t=<t_start_ms>",
+      "required": ["kind", "session_id", "t_start_ms", "t_end_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "transcript"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "t_start_ms": {
+          "$ref": "#/$defs/SessionMs"
+        },
+        "t_end_ms": {
+          "$ref": "#/$defs/SessionMs"
+        }
+      }
+    },
+    "EvidenceRef": {
+      "description": "Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvidenceRefSlide"
+        },
+        {
+          "$ref": "#/$defs/EvidenceRefTranscript"
+        }
+      ]
+    },
+    "SessionRef": {
+      "type": "object",
+      "description": "Kurzangabe einer Session für Listen (Anzeige „VL 7 · Titel“ bzw. Datum)",
+      "required": ["id", "number", "title", "started_at", "module"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "number": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "VL-Nummer (Session.number)"
+        },
+        "title": {
+          "type": ["string", "null"]
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "module": {
+          "$ref": "#/$defs/SearchModuleRef"
+        }
+      }
+    },
+    "EvidenceView": {
+      "type": "object",
+      "description": "Gespeicherter Beleg (Tabelle evidence) mit Anzeigeangaben",
+      "required": ["id", "ref", "session", "slide_title", "missing", "quote", "auto"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "ref": {
+          "$ref": "#/$defs/EvidenceRef"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "slide_title": {
+          "type": ["string", "null"],
+          "description": "nur bei slide: Titel der Folie, sonst null"
+        },
+        "missing": {
+          "type": "boolean",
+          "description": "true: Ziel gelöscht (Folie bzw. Foliensatz), der Beleg ist nicht mehr anspringbar"
+        },
+        "quote": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 300,
+          "description": "kurzes Zitat für die Anzeige"
+        },
+        "auto": {
+          "type": "boolean",
+          "description": "true: beim Abgleich automatisch an ein vorhandenes Konzept gehängt (§20.3)"
+        }
+      }
+    },
+    "Concept": {
+      "type": "object",
+      "description": "Konzept (03 §7). Gehört keinem Fach allein (concept_module). Ohne embedding, vault_path und block_hashes (kommen mit dem Vault)",
+      "required": [
+        "id",
+        "created_at",
+        "updated_at",
+        "name",
+        "aliases",
+        "kind",
+        "one_liner",
+        "status",
+        "merged_into",
+        "exam_relevant",
+        "importance_base"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "maxItems": 20,
+          "description": "weitere Namen, z. B. der englische Begriff (05 §1 Sprache)"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConceptKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "one_liner": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "„In einem Satz“"
+        },
+        "status": {
+          "$ref": "#/$defs/ConceptStatus"
+        },
+        "merged_into": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exam_relevant": {
+          "type": "boolean"
+        },
+        "importance_base": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Startwert der Wichtigkeit (W-05: importance 1|2|3 → 0,8|1,0|1,3)"
+        }
+      }
+    },
+    "ConceptListItem": {
+      "type": "object",
+      "description": "Eintrag in GET /concepts",
+      "required": ["concept", "modules", "evidence_count", "session_count"],
+      "additionalProperties": false,
+      "properties": {
+        "concept": {
+          "$ref": "#/$defs/Concept"
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SearchModuleRef"
+          }
+        },
+        "evidence_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "session_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sessions mit mindestens einem Beleg"
+        }
+      }
+    },
+    "ConceptList": {
+      "type": "object",
+      "description": "GET /concepts",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConceptListItem"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "ConceptRelationView": {
+      "type": "object",
+      "description": "Bestätigte Beziehung aus Sicht eines Konzepts",
+      "required": ["id", "kind", "direction", "other", "source", "confidence", "cross_module"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/ConceptRelationKind"
+        },
+        "direction": {
+          "type": "string",
+          "enum": ["ausgehend", "eingehend"],
+          "description": "ausgehend: dieses Konzept ist from_id"
+        },
+        "other": {
+          "type": "object",
+          "required": ["id", "name", "status"],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen"
+            },
+            "status": {
+              "$ref": "#/$defs/ConceptStatus"
+            }
+          }
+        },
+        "source": {
+          "$ref": "#/$defs/ConceptRelationSource"
+        },
+        "confidence": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "cross_module": {
+          "type": "boolean",
+          "description": "Fächerbrücke (05 §P8.4): die beiden Konzepte haben kein gemeinsames Modul"
+        }
+      }
+    },
+    "ConceptDetail": {
+      "type": "object",
+      "description": "GET /concepts/{id}",
+      "required": ["concept", "modules", "evidence", "relations", "inbox_item_id"],
+      "additionalProperties": false,
+      "properties": {
+        "concept": {
+          "$ref": "#/$defs/Concept"
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SearchModuleRef"
+          }
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceView"
+          },
+          "description": "nicht gelöschte Belege, neueste Session zuerst, höchstens 200"
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ConceptRelationView"
+          },
+          "description": "nur bestätigte Beziehungen zu nicht gelöschten Konzepten"
+        },
+        "inbox_item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionConceptItem": {
+      "type": "object",
+      "description": "Konzept mit Belegen aus genau dieser Session",
+      "required": ["concept", "evidence", "inbox_item_id", "inbox_status"],
+      "additionalProperties": false,
+      "properties": {
+        "concept": {
+          "$ref": "#/$defs/Concept"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceView"
+          }
+        },
+        "inbox_item_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inbox_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionConcepts": {
+      "type": "object",
+      "description": "GET /sessions/{id}/concepts: aktive und vorgeschlagene Konzepte mit Belegen aus der Session",
+      "required": ["session_id", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionConceptItem"
+          }
+        }
+      }
+    },
+    "ConceptEdit": {
+      "type": "object",
+      "description": "Änderungen beim Annehmen eines Konzept-Vorschlags",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "maxItems": 20,
+          "description": "weitere Namen, z. B. der englische Begriff (05 §1 Sprache)"
+        },
+        "one_liner": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "„In einem Satz“"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConceptKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ConceptProposal": {
+      "type": "object",
+      "description": "Ein von der KI gefundenes Konzept (05 §P7a), nach Prüfung der Belege",
+      "required": [
+        "name",
+        "aliases",
+        "one_liner",
+        "kind",
+        "importance",
+        "exam_hint",
+        "prof_explanation",
+        "confidence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "maxItems": 20,
+          "description": "weitere Namen, z. B. der englische Begriff (05 §1 Sprache)"
+        },
+        "one_liner": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "„In einem Satz“"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConceptKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "importance": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 3,
+          "description": "1–3 (05 §P7a)"
+        },
+        "exam_hint": {
+          "type": "boolean",
+          "description": "Die KI hat einen Klausurhinweis erkannt"
+        },
+        "prof_explanation": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 600,
+          "description": "Kernaussage des Profs in 1–2 Sätzen"
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Selbsteinschätzung der KI, 0..1"
+        }
+      }
+    },
+    "ExtractedConcept": {
+      "type": "object",
+      "description": "Konzept im Ergebnis von concepts.extract mit mindestens einem gültigen Beleg (LP8)",
+      "required": ["key", "proposal", "evidence"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^c[0-9]+$",
+          "description": "Schlüssel innerhalb des Ergebnisses (c1, c2, …)"
+        },
+        "proposal": {
+          "$ref": "#/$defs/ConceptProposal"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 1,
+          "maxItems": 12
+        }
+      }
+    },
+    "ExtractedRelation": {
+      "type": "object",
+      "description": "Beziehung zwischen zwei Konzepten derselben Vorlesung",
+      "required": ["from", "to", "kind", "why", "confidence"],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string",
+          "pattern": "^c[0-9]+$"
+        },
+        "to": {
+          "type": "string",
+          "pattern": "^c[0-9]+$"
+        },
+        "kind": {
+          "$ref": "#/$defs/ConceptRelationKind"
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Selbsteinschätzung der KI, 0..1"
+        }
+      }
+    },
+    "ConceptsExtractPayload": {
+      "type": "object",
+      "description": "concepts.extract (VERTRAEGE §20.2). job.session_id ist gesetzt",
+      "required": ["session_id"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "true: auch bei gleichem input_hash neu aufrufen"
+        }
+      }
+    },
+    "ConceptsExtractResult": {
+      "type": "object",
+      "description": "Ergebnis von concepts.extract (job.result). concepts.resolve liest es über extract_job_id",
+      "required": [
+        "session_id",
+        "session_deleted",
+        "empty",
+        "unchanged",
+        "input_hash",
+        "prompt_version",
+        "model",
+        "chapters",
+        "concepts",
+        "relations",
+        "dropped_concepts",
+        "dropped_evidence",
+        "dropped_relations",
+        "cost_eur"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_deleted": {
+          "type": "boolean",
+          "description": "true: Session weich gelöscht, nichts aufgerufen"
+        },
+        "empty": {
+          "type": "boolean",
+          "description": "true: weder Folien noch Transkript, kein Aufruf"
+        },
+        "unchanged": {
+          "type": "boolean",
+          "description": "true: gleicher input_hash wie das letzte fertige Ergebnis, übernommen statt aufgerufen"
+        },
+        "input_hash": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "prompt_version": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "z. B. concepts.extract/v1"
+        },
+        "model": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "Modell der Antwort (nach einem Refusal-Fallback das tatsächlich genutzte)"
+        },
+        "chapters": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Anzahl der Aufrufe (Kapitel), 0 ohne Aufruf"
+        },
+        "concepts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExtractedConcept"
+          },
+          "maxItems": 30
+        },
+        "relations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExtractedRelation"
+          },
+          "maxItems": 60
+        },
+        "dropped_concepts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "verworfen, weil kein Beleg gültig war"
+        },
+        "dropped_evidence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_relations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cost_eur": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Euro (Schätzung, VERTRAEGE §20.5)"
+        }
+      }
+    },
+    "ConceptsResolvePayload": {
+      "type": "object",
+      "description": "concepts.resolve (VERTRAEGE §20.3). job.session_id ist gesetzt",
+      "required": ["session_id", "extract_job_id"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "extract_job_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "true: auch bei unverändertem Extrakt neu abgleichen"
+        }
+      }
+    },
+    "ConceptsResolveResult": {
+      "type": "object",
+      "description": "Ergebnis von concepts.resolve",
+      "required": [
+        "session_id",
+        "extract_job_id",
+        "extract_input_hash",
+        "resolve_version",
+        "session_deleted",
+        "unchanged",
+        "auto_merged",
+        "proposed_new",
+        "proposed_merge",
+        "proposed_relations",
+        "auto_accepted",
+        "skipped_rejected",
+        "dropped_cycles",
+        "embedded_concepts",
+        "embedding_model",
+        "embedding_error",
+        "prompt_version",
+        "model",
+        "cost_eur"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "extract_job_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "extract_input_hash": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "resolve_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "RESOLVE_VERSION des Workers"
+        },
+        "session_deleted": {
+          "type": "boolean"
+        },
+        "unchanged": {
+          "type": "boolean",
+          "description": "true: gleicher Extrakt wie beim letzten fertigen Abgleich, nichts geschrieben"
+        },
+        "auto_merged": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Konzepte, deren Belege automatisch an ein vorhandenes Konzept gingen"
+        },
+        "proposed_new": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "proposed_merge": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "proposed_relations": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "auto_accepted": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Einträge mit Status automatisch"
+        },
+        "skipped_rejected": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "nicht erneut vorgeschlagen, weil für diese Session abgelehnt"
+        },
+        "dropped_cycles": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "baut_auf-Vorschläge, die einen Kreis bilden würden"
+        },
+        "embedded_concepts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "nachgeholte Vektoren aktiver Konzepte"
+        },
+        "embedding_model": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "embedding_error": {
+          "type": ["string", "null"],
+          "maxLength": 500
+        },
+        "prompt_version": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "null ohne KI-Aufruf"
+        },
+        "model": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "cost_eur": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Euro (Schätzung, VERTRAEGE §20.5)"
+        }
+      }
+    },
+    "SummaryWritePayload": {
+      "type": "object",
+      "description": "summary.write (VERTRAEGE §20.4, nur die Zusammenfassung, ohne vault.write). job.session_id ist gesetzt",
+      "required": ["session_id"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "force": {
+          "type": "boolean"
+        }
+      }
+    },
+    "SummaryWriteResult": {
+      "type": "object",
+      "description": "Ergebnis von summary.write",
+      "required": [
+        "session_id",
+        "session_deleted",
+        "skipped",
+        "unchanged",
+        "input_hash",
+        "sentence_count",
+        "outline_count",
+        "dropped_sentences",
+        "prompt_version",
+        "model",
+        "cost_eur"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_deleted": {
+          "type": "boolean"
+        },
+        "skipped": {
+          "type": "boolean",
+          "description": "true: weder Folien noch Transkript, eine alte Zusammenfassung wurde entfernt"
+        },
+        "unchanged": {
+          "type": "boolean"
+        },
+        "input_hash": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "sentence_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        },
+        "outline_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "dropped_sentences": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prompt_version": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "model": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "cost_eur": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Euro (Schätzung, VERTRAEGE §20.5)"
+        }
+      }
+    },
+    "SummarySentence": {
+      "type": "object",
+      "description": "Ein Satz der Kurzfassung mit Belegen (LP8)",
+      "required": ["text", "sources"],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 1,
+          "maxItems": 6
+        }
+      }
+    },
+    "SummaryOutlineItem": {
+      "type": "object",
+      "description": "Ein Gliederungspunkt (Kapitel aus den Folien)",
+      "required": ["title", "sources"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 0,
+          "maxItems": 6
+        }
+      }
+    },
+    "SessionSummary": {
+      "type": "object",
+      "description": "Zusammenfassung einer Session (Tabelle session_summary, F-NAC-08 ohne Vault). Direkt sichtbar, kein Inbox-Vorschlag (§20.4)",
+      "required": [
+        "id",
+        "session_id",
+        "created_at",
+        "updated_at",
+        "lang",
+        "sentences",
+        "outline",
+        "model",
+        "prompt_version",
+        "job_id"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "lang": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Lang"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sentences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SummarySentence"
+          },
+          "minItems": 1,
+          "maxItems": 5
+        },
+        "outline": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SummaryOutlineItem"
+          },
+          "minItems": 0,
+          "maxItems": 30
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SessionSummaryView": {
+      "type": "object",
+      "description": "GET /sessions/{id}/summary. summary = null: (noch) keine Zusammenfassung",
+      "required": ["session_id", "summary"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "InboxSimilarConcept": {
+      "type": "object",
+      "description": "Ähnliches vorhandenes Konzept („gleich wie X?“, 07 §3.5)",
+      "required": ["concept_id", "name", "similarity", "verdict"],
+      "additionalProperties": false,
+      "properties": {
+        "concept_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen"
+        },
+        "similarity": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Cosinus-Ähnlichkeit, null ohne Embedder"
+        },
+        "verdict": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ResolveVerdict"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "InboxPayloadConceptNew": {
+      "type": "object",
+      "description": "Nutzlast concept_new (neues Konzept)",
+      "required": ["kind", "proposal", "evidence", "similar", "prompt_version", "model"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "concept_new"
+        },
+        "proposal": {
+          "$ref": "#/$defs/ConceptProposal"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 1,
+          "maxItems": 12
+        },
+        "similar": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxSimilarConcept"
+          },
+          "maxItems": 3
+        },
+        "prompt_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "InboxPayloadConceptMerge": {
+      "type": "object",
+      "description": "Nutzlast concept_merge (Vorschlag: dasselbe wie ein vorhandenes Konzept)",
+      "required": [
+        "kind",
+        "proposal",
+        "evidence",
+        "target",
+        "basis",
+        "similarity",
+        "reason",
+        "prompt_version",
+        "model"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "concept_merge"
+        },
+        "proposal": {
+          "$ref": "#/$defs/ConceptProposal"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 1,
+          "maxItems": 12
+        },
+        "target": {
+          "type": "object",
+          "required": ["concept_id", "name"],
+          "additionalProperties": false,
+          "properties": {
+            "concept_id": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "NFC, getrimmt, Leerraum zusammengefasst, ohne Steuerzeichen"
+            }
+          }
+        },
+        "basis": {
+          "$ref": "#/$defs/MergeBasis"
+        },
+        "similarity": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "reason": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Begründung der KI, null bei basis = name"
+        },
+        "prompt_version": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "null bei basis = name (kein KI-Aufruf)"
+        },
+        "model": {
+          "type": ["string", "null"],
+          "minLength": 1
+        }
+      }
+    },
+    "InboxPayloadRelation": {
+      "type": "object",
+      "description": "Nutzlast relation (Beziehung zwischen zwei Konzepten)",
+      "required": [
+        "kind",
+        "from_concept_id",
+        "to_concept_id",
+        "relation_kind",
+        "why",
+        "confidence",
+        "prompt_version",
+        "model"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "relation"
+        },
+        "from_concept_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "to_concept_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "relation_kind": {
+          "$ref": "#/$defs/ConceptRelationKind"
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Selbsteinschätzung der KI, 0..1"
+        },
+        "prompt_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "InboxPayload": {
+      "description": "Schemageprüfte Nutzlast eines Inbox-Eintrags (03 §8), unterschieden über kind",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/InboxPayloadConceptNew"
+        },
+        {
+          "$ref": "#/$defs/InboxPayloadConceptMerge"
+        },
+        {
+          "$ref": "#/$defs/InboxPayloadRelation"
+        }
+      ]
+    },
+    "InboxDecision": {
+      "type": "object",
+      "description": "Was eine Annahme geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST /inbox/{id}/reopen, §20.6)",
+      "required": [
+        "action",
+        "concept_id",
+        "merged_into",
+        "moved_evidence_ids",
+        "added_aliases",
+        "added_module_ids",
+        "previous",
+        "relation_kind_before",
+        "cascade_item_ids"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["angenommen_neu", "zusammengefuehrt", "beziehung_bestaetigt", "abgelehnt"],
+          "description": "Wirkung"
+        },
+        "concept_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "merged_into": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "moved_evidence_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          }
+        },
+        "added_aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "added_module_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          }
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConceptEdit"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relation_kind_before": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ConceptRelationKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cascade_item_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "description": "mit derselben Entscheidung geänderte Beziehungs-Einträge"
+        }
+      }
+    },
+    "InboxItem": {
+      "type": "object",
+      "description": "Inbox-Eintrag (03 §8, F-NAC-06)",
+      "required": [
+        "id",
+        "created_at",
+        "updated_at",
+        "kind",
+        "status",
+        "session",
+        "job_id",
+        "priority",
+        "decided_at",
+        "payload",
+        "concept_id",
+        "target_concept_id",
+        "relation_id",
+        "blocked"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "kind": {
+          "$ref": "#/$defs/InboxKind"
+        },
+        "status": {
+          "$ref": "#/$defs/InboxStatus"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "priority": {
+          "type": "integer",
+          "description": "kleiner = früher (Reihenfolge der geführten Nacharbeitung)"
+        },
+        "decided_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "$ref": "#/$defs/InboxPayload"
+        },
+        "concept_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_concept_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relation_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "blocked": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InboxBlockedReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "InboxBlockedReason": {
+      "type": "string",
+      "enum": ["endpunkt_offen", "endpunkt_abgelehnt"],
+      "description": "Warum eine Beziehung noch nicht annehmbar ist: ein Endpunkt ist noch Vorschlag bzw. wurde abgelehnt"
+    },
+    "InboxItemList": {
+      "type": "object",
+      "description": "GET /inbox",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxItem"
+          }
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "InboxOverviewSession": {
+      "type": "object",
+      "required": ["session", "open_count", "oldest_at"],
+      "additionalProperties": false,
+      "properties": {
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "open_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "oldest_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "InboxOverview": {
+      "type": "object",
+      "description": "GET /inbox/overview: Zähler für Navigation und Gruppen (F-NAC-06)",
+      "required": ["open_count", "older_count", "sessions"],
+      "additionalProperties": false,
+      "properties": {
+        "open_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "older_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "offene Einträge älter als 14 Tage („12 ältere Vorschläge“)"
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxOverviewSession"
+          },
+          "description": "Gruppen mit offenen Einträgen, neueste Session zuerst"
+        }
+      }
+    },
+    "InboxAcceptRequest": {
+      "type": "object",
+      "description": "POST /inbox/{id}/accept (§20.6). Welche Felder zu welcher Art passen, regelt der Vertrag (sonst 400 inbox_action_invalid)",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "edit": {
+          "$ref": "#/$defs/ConceptEdit"
+        },
+        "merge_into": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "as_new": {
+          "type": "boolean",
+          "description": "concept_merge: als neues Konzept annehmen statt zusammenführen"
+        },
+        "relation_kind": {
+          "$ref": "#/$defs/ConceptRelationKind"
+        }
+      }
+    },
+    "InboxDecisionResult": {
+      "type": "object",
+      "description": "Antwort auf accept, reject und reopen",
+      "required": ["item", "concept"],
+      "additionalProperties": false,
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/InboxItem"
+        },
+        "concept": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Concept"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "InboxBulkRequest": {
+      "type": "object",
+      "description": "POST /inbox/bulk. Genau eins von ids und session_id (sonst 400 validation_failed)",
+      "required": ["action"],
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": ["accept", "reject", "reopen"],
+          "description": "Massenaktion"
+        },
+        "ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1,
+          "maxItems": 500
+        },
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        }
+      }
+    },
+    "InboxBulkResult": {
+      "type": "object",
+      "description": "Antwort auf POST /inbox/bulk",
+      "required": ["decided", "skipped"],
+      "additionalProperties": false,
+      "properties": {
+        "decided": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "description": "geänderte Einträge in Bearbeitungsreihenfolge"
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "code"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/Uuid"
+              },
+              "code": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "WorkerLlmStatus": {
+      "type": "object",
+      "description": "KI-Anbieter des Workers (GET /health des Workers, Feld llm). Nie der Schlüssel selbst",
+      "required": ["provider", "configured", "issue"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1,
+          "description": "anthropic | fake (SG_LLM)"
+        },
+        "configured": {
+          "type": "boolean",
+          "description": "true: Aufrufe möglich (Schlüssel vorhanden bzw. Fake)"
+        },
+        "issue": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LlmIssue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "AiBudgetStatus": {
+      "type": "object",
+      "description": "Monatsbudget (F-DAT-05). Monat = Kalendermonat in Ortszeit",
+      "required": ["month", "spent_eur", "budget_eur", "reached", "warn"],
+      "additionalProperties": false,
+      "properties": {
+        "month": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+        },
+        "spent_eur": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Euro (Schätzung, VERTRAEGE §20.5)"
+        },
+        "budget_eur": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Euro (Schätzung, VERTRAEGE §20.5)"
+        },
+        "reached": {
+          "type": "boolean",
+          "description": "spent_eur ≥ budget_eur: KI-Jobs enden mit fehler"
+        },
+        "warn": {
+          "type": "boolean",
+          "description": "spent_eur ≥ 80 % von budget_eur"
+        }
+      }
+    },
+    "AiStatus": {
+      "type": "object",
+      "description": "GET /ai/status",
+      "required": ["worker_reachable", "llm", "budget"],
+      "additionalProperties": false,
+      "properties": {
+        "worker_reachable": {
+          "type": "boolean"
+        },
+        "llm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkerLlmStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "budget": {
+          "$ref": "#/$defs/AiBudgetStatus"
+        }
+      }
+    },
+    "CostByTask": {
+      "type": "object",
+      "required": ["task", "calls", "eur"],
+      "additionalProperties": false,
+      "properties": {
+        "task": {
+          "type": "string",
+          "minLength": 1
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eur": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Euro (Schätzung, VERTRAEGE §20.5)"
+        }
+      }
+    },
+    "CostBySession": {
+      "type": "object",
+      "required": ["session_id", "session", "calls", "eur"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eur": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Euro (Schätzung, VERTRAEGE §20.5)"
+        }
+      }
+    },
+    "CostByModel": {
+      "type": "object",
+      "required": [
+        "provider",
+        "model",
+        "calls",
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "eur"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_creation_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_read_input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "eur": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Euro (Schätzung, VERTRAEGE §20.5)"
+        }
+      }
+    },
+    "CostSummary": {
+      "type": "object",
+      "description": "GET /costs/summary (F-DAT-05): ein Monat, je Aufgabe, je Session (höchstens 20), je Modell",
+      "required": ["budget", "calls", "by_task", "by_session", "by_model"],
+      "additionalProperties": false,
+      "properties": {
+        "budget": {
+          "$ref": "#/$defs/AiBudgetStatus"
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "by_task": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CostByTask"
+          }
+        },
+        "by_session": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CostBySession"
+          },
+          "maxItems": 20
+        },
+        "by_model": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CostByModel"
+          }
+        }
+      }
+    },
+    "AiSettings": {
+      "type": "object",
+      "description": "Einstellungen KI (F-EIN-01, VERTRAEGE §20.7). Bereich ai in setting",
+      "required": ["monthly_budget_eur", "auto_accept"],
+      "additionalProperties": false,
+      "properties": {
+        "monthly_budget_eur": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000,
+          "description": "Monatsbudget in Euro, Standard 10. 0 schaltet Cloud-KI ab"
+        },
+        "auto_accept": {
+          "$ref": "#/$defs/AutoAcceptMode"
+        }
+      }
+    },
+    "AiSettingsUpdate": {
+      "type": "object",
+      "description": "Teil von SettingsUpdate.ai",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "monthly_budget_eur": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1000
+        },
+        "auto_accept": {
+          "$ref": "#/$defs/AutoAcceptMode"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "budget": {
+    "month": "2026-11",
+    "spent_eur": 1.84,
+    "budget_eur": 10,
+    "reached": false,
+    "warn": false
+  },
+  "calls": 14,
+  "by_task": [
+    {
+      "task": "concepts.extract",
+      "calls": 5,
+      "eur": 1.21
+    },
+    {
+      "task": "summary.write",
+      "calls": 5,
+      "eur": 0.48
+    },
+    {
+      "task": "concepts.resolve",
+      "calls": 4,
+      "eur": 0.15
+    }
+  ],
+  "by_session": [
+    {
+      "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+      "session": {
+        "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+        "number": 7,
+        "title": "Normalformen",
+        "started_at": "2026-11-05T12:15:00Z",
+        "module": {
+          "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e02",
+          "name": "Datenbanksysteme",
+          "short_name": "DBS"
+        }
+      },
+      "calls": 3,
+      "eur": 0.37
+    }
+  ],
+  "by_model": [
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "calls": 14,
+      "input_tokens": 512000,
+      "output_tokens": 61000,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "eur": 1.84
+    }
+  ]
+}

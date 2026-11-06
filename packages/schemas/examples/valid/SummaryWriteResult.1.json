@@ -1,0 +1,13 @@
+{
+  "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+  "session_deleted": false,
+  "skipped": false,
+  "unchanged": false,
+  "input_hash": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+  "sentence_count": 5,
+  "outline_count": 4,
+  "dropped_sentences": 0,
+  "prompt_version": "summary.write/v1",
+  "model": "claude-sonnet-5-5",
+  "cost_eur": 0.0187
+}

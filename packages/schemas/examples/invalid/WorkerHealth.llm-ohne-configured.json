@@ -1,0 +1,13 @@
+{
+  "embedder": {
+    "provider": "fake",
+    "model": "fake-embed-1",
+    "dim": 1024,
+    "state": "bereit",
+    "error": null
+  },
+  "llm": {
+    "provider": "fake",
+    "issue": null
+  }
+}

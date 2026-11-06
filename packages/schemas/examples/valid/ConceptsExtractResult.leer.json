@@ -1,0 +1,16 @@
+{
+  "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+  "session_deleted": false,
+  "empty": true,
+  "unchanged": false,
+  "input_hash": null,
+  "prompt_version": null,
+  "model": null,
+  "chapters": 0,
+  "concepts": [],
+  "relations": [],
+  "dropped_concepts": 0,
+  "dropped_evidence": 0,
+  "dropped_relations": 0,
+  "cost_eur": 0
+}

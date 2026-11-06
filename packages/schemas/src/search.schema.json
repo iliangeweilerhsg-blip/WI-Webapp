@@ -104,7 +104,7 @@
     },
     "WorkerHealth": {
       "type": "object",
-      "description": "GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token",
+      "description": "GET /health des Loopback-Endpunkts im Worker (VERTRAEGE §19.4). Nur 127.0.0.1, mit Token. llm ab §20.5, optional, damit ein älterer Worker gültig bleibt",
       "required": ["embedder"],
       "additionalProperties": false,
       "properties": {
@@ -136,6 +136,9 @@
               "description": "Grund bei nicht_verfuegbar, sonst null"
             }
           }
+        },
+        "llm": {
+          "$ref": "#/$defs/WorkerLlmStatus"
         }
       }
     },

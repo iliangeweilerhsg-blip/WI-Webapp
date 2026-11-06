@@ -356,8 +356,15 @@
     },
     "PipelineStep": {
       "type": "string",
-      "enum": ["audio.finalize", "transcribe", "align.log"],
-      "description": "Schritte der Kette nach dem Session-Ende (05 §2), Phase 2 erster Schnitt. Reihenfolge = Anzeige-Reihenfolge"
+      "enum": [
+        "audio.finalize",
+        "transcribe",
+        "align.log",
+        "concepts.extract",
+        "concepts.resolve",
+        "summary.write"
+      ],
+      "description": "Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge = Anzeige-Reihenfolge"
     },
     "SessionReprocessRequest": {
       "type": "object",
