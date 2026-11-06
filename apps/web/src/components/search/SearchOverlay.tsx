@@ -141,7 +141,7 @@ function Overlay({ onClose }: { onClose: () => void }) {
 
   function onKeyDown(e: React.KeyboardEvent) {
     // Tasten gehören dem Overlay: Dashboard und Seite dahinter bekommen sie nicht (außer ⌘/Strg+K zum Umschalten)
-    if (!matchShortcut(e.nativeEvent, mac)) e.stopPropagation();
+    if (matchShortcut(e.nativeEvent, mac) !== 'search') e.stopPropagation();
     if (e.nativeEvent.isComposing) return;
     if (e.key === 'Escape') {
       e.preventDefault();
