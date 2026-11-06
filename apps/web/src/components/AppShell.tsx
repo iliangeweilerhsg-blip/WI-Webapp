@@ -13,7 +13,7 @@ import type { SyncClient } from '../lib/sync/client.ts';
 import { ToastProvider } from '../lib/toast.tsx';
 import { UploadProvider } from '../lib/uploads.tsx';
 import { Icon } from './Icon.tsx';
-import { SearchDialog } from './SearchDialog.tsx';
+import { SearchOverlay } from './search/SearchOverlay.tsx';
 import { SetupHost } from './SetupHost.tsx';
 import { Sidebar } from './Sidebar.tsx';
 
@@ -252,7 +252,7 @@ function Shell({ children }: { children: ReactNode }) {
               </main>
             </div>
           </div>
-          <SearchDialog open={searchOpen} onClose={() => setSearchOpen(false)} />
+          <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
           <SetupHost requested={setupRequested} />
         </div>
       </UploadProvider>

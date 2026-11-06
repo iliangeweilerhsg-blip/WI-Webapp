@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/',
+  useRouter: () => ({ push: vi.fn() }),
 }));
 
 vi.mock('../src/components/ink', () => ({

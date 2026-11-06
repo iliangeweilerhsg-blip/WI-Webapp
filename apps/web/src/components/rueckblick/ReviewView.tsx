@@ -13,6 +13,7 @@ import { useDeckDetail } from '../../lib/material.ts';
 import { moduleColorVar, useModules } from '../../lib/modules.ts';
 import { moduleHref } from '../../lib/nav.ts';
 import { isEditableTarget } from '../../lib/shortcuts.ts';
+import { parseJumpMs } from '../../lib/search.ts';
 import { sessionHref } from '../../lib/sessions.ts';
 import {
   NO_SLIDE,
@@ -214,6 +215,19 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
   const initialT = useRef(firstStart);
   const everPlayed = useRef(false);
   if (player.playing) everPlayed.current = true;
+  // Sprung aus der Suche (`&t=<ms>`, VERTRAEGE §19.7): einmal an diese Stelle, ohne Abspielen (kein Autoplay). Die
+  // Position in der Aufnahme ist `t − started_ms` (macht `seek`), die Folie folgt wie bei jedem Sprung.
+  const jumpMs = parseJumpMs(useSearchParams().get('t'));
+  const jumpedTo = useRef<string | null>(null);
+  const { seek: seekPlayer } = player;
+  const hasRecordings = player.recordings.length > 0;
+  useEffect(() => {
+    if (jumpMs === null || !hasRecordings) return;
+    const key = `${session.id}:${jumpMs}`;
+    if (jumpedTo.current === key) return;
+    jumpedTo.current = key;
+    seekPlayer(jumpMs, false);
+  }, [session.id, jumpMs, hasRecordings, seekPlayer]);
   // Markiert wird erst, wenn abgespielt oder gesprungen wurde (vorher steht der Player am Anfang)
   const engaged = player.playing || everPlayed.current || player.t !== initialT.current;
 

@@ -10,6 +10,11 @@ import type {
   Notebook,
   PairingCode,
   PairingRequest,
+  SearchDegraded,
+  SearchHitSlide,
+  SearchHitTranscript,
+  SearchResponse,
+  SearchSnippetPart,
   Semester,
   Session,
   SessionTranscript,
@@ -297,6 +302,151 @@ export interface RecordedRequest {
   headers: Record<string, string>;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Suche (GET /search, VERTRAEGE §19.6): einfache, deterministische Antworten aus festen Beispieldaten
+// ---------------------------------------------------------------------------------------------
+
+type FixtureText = { text: string };
+/** Ein Treffer der Beispieldaten; `text` ist der volle Text, den die Route zu `snippet` zerlegt */
+export type SearchFixtureHit =
+  (Omit<SearchHitSlide, 'snippet'> & FixtureText) | (Omit<SearchHitTranscript, 'snippet'> & FixtureText);
+
+const SEARCH_MODULE = {
+  id: '0190f6a2-0000-7000-8000-0000000000a3',
+  name: 'Datenbanksysteme',
+  short_name: 'DBS',
+};
+const searchId = (n: number) => `0190f6a2-0000-7000-8000-${String(5000 + n).padStart(12, '0')}`;
+
+/** Erfundene Beispieldaten: zwei Folien und zwei Stellen im Gesagten zu „Normalform“, dazu eine Folie zu Indizes */
+export const SEARCH_FIXTURE: SearchFixtureHit[] = [
+  {
+    kind: 'slide',
+    chunk_id: searchId(1),
+    score: 0.0325,
+    module: SEARCH_MODULE,
+    text: 'Die dritte Normalform verbietet transitive Abhängigkeiten',
+    deck_id: searchId(100),
+    deck_title: 'VL 7 Normalisierung',
+    slide_index: 14,
+    slide_title: '3NF',
+  },
+  {
+    kind: 'slide',
+    chunk_id: searchId(2),
+    score: 0.0301,
+    module: SEARCH_MODULE,
+    text: 'Zweite Normalform: jedes Nichtschlüsselattribut hängt vom ganzen Schlüssel ab',
+    deck_id: searchId(100),
+    deck_title: 'VL 7 Normalisierung',
+    slide_index: 12,
+    slide_title: '2NF',
+  },
+  {
+    kind: 'slide',
+    chunk_id: searchId(3),
+    score: 0.0164,
+    module: SEARCH_MODULE,
+    text: 'Ein Index beschleunigt die Suche nach Schlüsselwerten',
+    deck_id: searchId(101),
+    deck_title: 'VL 9 Indizes',
+    slide_index: 3,
+    slide_title: null,
+  },
+  {
+    kind: 'transcript',
+    chunk_id: searchId(4),
+    score: 0.0161,
+    module: SEARCH_MODULE,
+    text: '… und das ist eben die dritte Normalform, das kommt auch in der Klausur …',
+    session_id: searchId(200),
+    session_number: 7,
+    session_title: null,
+    session_started_at: '2026-11-03T07:15:00Z',
+    t_ms: 2_512_000,
+    t_end_ms: 2_571_000,
+  },
+  {
+    kind: 'transcript',
+    chunk_id: searchId(5),
+    score: 0.0159,
+    module: SEARCH_MODULE,
+    text: 'Bei der Normalform merkt ihr euch: erst die Schlüssel, dann die Abhängigkeiten',
+    session_id: searchId(201),
+    session_number: null,
+    session_title: null,
+    session_started_at: '2026-11-04T08:00:00Z',
+    t_ms: 95_000,
+    t_end_ms: 140_000,
+  },
+];
+
+/** Zerlegt `text` so, dass jedes Wort, das mit einem Suchwort beginnt, ein Treffer ist (`hit`) */
+export function fixtureSnippet(text: string, words: string[]): SearchSnippetPart[] {
+  const parts: SearchSnippetPart[] = [];
+  for (const piece of text.split(/([\p{L}\p{N}]+)/u)) {
+    if (piece === '') continue;
+    const hit = words.some((w) => /^[\p{L}\p{N}]+$/u.test(piece) && piece.toLowerCase().startsWith(w));
+    const last = parts[parts.length - 1];
+    if (last && last.hit === hit) last.text += piece;
+    else parts.push({ text: piece, hit });
+  }
+  return parts;
+}
+
+/** Antwort der Route: `fach:<kurzname>`, `typ:folie|gesagtes` und Wörter (Präfix nur am letzten Wort, wie §19.6) */
+export function fixtureSearch(
+  q: string,
+  limit: number,
+  fixtures: readonly SearchFixtureHit[],
+  options: { degraded?: SearchDegraded } = {},
+): SearchResponse {
+  const tokens = q.normalize('NFC').split(/\s+/).filter(Boolean);
+  const unresolved: string[] = [];
+  const kinds: ('slide' | 'transcript')[] = [];
+  const fach: string[] = [];
+  const rest: string[] = [];
+  for (const token of tokens) {
+    const m = /^(fach|typ):(.*)$/i.exec(token);
+    if (!m) rest.push(token);
+    else if (m[1]!.toLowerCase() === 'typ') {
+      const v = m[2]!.toLowerCase();
+      if (v === 'folie') kinds.push('slide');
+      else if (v === 'gesagtes') kinds.push('transcript');
+      else unresolved.push(token);
+    } else if (fixtures.some((f) => f.module.short_name?.toLowerCase() === m[2]!.toLowerCase())) {
+      fach.push(m[2]!.toLowerCase());
+    } else unresolved.push(token);
+  }
+  const words = (rest.join(' ').match(/[\p{L}\p{N}]+/gu) ?? []).slice(0, 8).map((w) => w.toLowerCase());
+  const prefixLast = !/\s$/.test(q);
+  const matches = (text: string) => {
+    const tokensOfText = (text.match(/[\p{L}\p{N}]+/gu) ?? []).map((w) => w.toLowerCase());
+    return words.every((w, i) =>
+      tokensOfText.some((t) => (i === words.length - 1 && prefixLast ? t.startsWith(w) : t === w)),
+    );
+  };
+  const hits =
+    unresolved.length > 0 || words.length === 0
+      ? []
+      : fixtures
+          .filter((f) => kinds.length === 0 || kinds.includes(f.kind))
+          .filter((f) => fach.length === 0 || fach.includes((f.module.short_name ?? '').toLowerCase()))
+          .filter((f) => matches(f.text))
+          .sort((a, b) => b.score - a.score)
+          .slice(0, limit)
+          .map(({ text, ...hit }) => ({ ...hit, snippet: fixtureSnippet(text, words) }));
+  const degraded = options.degraded ?? null;
+  return {
+    query: rest.join(' '),
+    mode: degraded ? 'text' : 'hybrid',
+    degraded,
+    filters: { module_ids: [], kinds, unresolved },
+    hits: hits as SearchResponse['hits'],
+    took_ms: 3,
+  };
+}
+
 export interface FakeCore {
   semesters: Semester[];
   modules: Module[];
@@ -315,6 +465,12 @@ export interface FakeCore {
   transcripts: Record<string, SessionTranscript>;
   /** GET /sessions/{id}/transcript scheitert mit 500, solange true */
   failTranscript: boolean;
+  /** Treffer für GET /search (Standard: `SEARCH_FIXTURE`) */
+  searchFixtures: SearchFixtureHit[];
+  /** GET /search liefert nur die Wortsuche mit diesem Grund (`mode = text`) */
+  searchDegraded: SearchDegraded;
+  /** GET /search scheitert mit 500, solange true */
+  failSearch: boolean;
   /** Für GET /sessions/{id}/snapshot (VERTRAEGE §7.2): Folienwechsel und Marker, `stream_seq`/`stream_op_id` */
   slideEvents: SlideEvent[];
   markers: Marker[];
@@ -418,6 +574,9 @@ export function installFakeCore(
     failNotebooks: false,
     transcripts: {},
     failTranscript: false,
+    searchFixtures: structuredClone(SEARCH_FIXTURE),
+    searchDegraded: null,
+    failSearch: false,
     slideEvents: [],
     markers: [],
     streamSeq: 0,
@@ -494,6 +653,16 @@ export function installFakeCore(
       if (materialResponse) return materialResponse;
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
+      // GET /search (§19.6): 400 ohne Suchtext, sonst Treffer aus `core.searchFixtures`
+      if (path === '/search' && method === 'GET') {
+        if (core.failSearch) return json({ error: { code: 'internal', message: 'x' } }, 500);
+        const q = url.searchParams.get('q') ?? '';
+        const limit = Number(url.searchParams.get('limit') ?? 20);
+        if (q.trim() === '' || q.trim().length > 200 || !(limit >= 1 && limit <= 50)) {
+          return json({ error: { code: 'validation_failed', message: 'x' } }, 400);
+        }
+        return json(fixtureSearch(q, limit, core.searchFixtures, { degraded: core.searchDegraded }));
+      }
       // Daten/Papierkorb (T1-18): leere Antworten, damit das gerenderte Panel nicht ins Leere fragt
       if (path === '/backups' && method === 'GET') {
         return json({
