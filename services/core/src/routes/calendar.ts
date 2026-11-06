@@ -147,6 +147,8 @@ export async function calendarRoutes(app: FastifyInstance, deps: CalendarRouteDe
   await app.register(multipart, multipartOptions);
 
   // --- Zeitplan: beim Start und alle 6 h -------------------------------------------------------
+  /** So lange wartet `onClose` höchstens auf einen laufenden Abgleich */
+  const CLOSE_WAIT_MS = 2_000;
   // Erst nach erfolgreichem `listen` (`onListen`, nicht `onReady`): Ein Core mit `EADDRINUSE` gleicht nichts ab (#170)
   if (deps.scheduler !== false) {
     let running: Promise<void> | null = null;
@@ -169,7 +171,19 @@ export async function calendarRoutes(app: FastifyInstance, deps: CalendarRouteDe
     app.addHook('onClose', async () => {
       stopped = true;
       clearInterval(timer);
-      await running;
+      // Höchstens CLOSE_WAIT_MS auf einen laufenden Abgleich warten: Ein Abruf darf 15 s dauern, `main.ts` beendet
+      // den Core nach 10 s hart. Ein abgebrochener Abgleich wird beim nächsten Start wiederholt (Review #172).
+      if (running) {
+        let wait: NodeJS.Timeout | undefined;
+        await Promise.race([
+          running,
+          new Promise<void>((resolve) => {
+            wait = setTimeout(resolve, CLOSE_WAIT_MS);
+            wait.unref();
+          }),
+        ]);
+        clearTimeout(wait);
+      }
     });
   }
 
