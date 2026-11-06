@@ -6,5 +6,6 @@ from . import (  # noqa: F401
     internal,
     maintenance,
     pdf_ingest,
+    search_index,
     transcribe,
 )
