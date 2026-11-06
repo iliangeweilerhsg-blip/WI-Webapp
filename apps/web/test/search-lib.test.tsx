@@ -125,6 +125,7 @@ describe('Anzeige', () => {
   it('Folie: Foliensatz · Folie n · Titel', () => {
     expect(slideLabel(slide(14, 1, { slide_title: '3NF' }))).toBe('VL 7 Normalisierung · Folie 14 · 3NF');
     expect(slideLabel(slide(3, 1, { slide_title: null }))).toBe('VL 7 Normalisierung · Folie 3');
+    expect(slideLabel(slide(3, 1, { deck_title: '', slide_title: ' ' }))).toBe('Folie 3');
   });
 
   it('Zeile bei reiner Wortsuche', () => {

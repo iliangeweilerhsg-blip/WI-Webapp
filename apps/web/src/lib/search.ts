@@ -79,10 +79,11 @@ export function sessionLabel(hit: SpokenHit): string {
   return date || 'Vorlesung';
 }
 
-/** „Foliensatz · Folie n · Titel“ */
+/** „Foliensatz · Folie n · Titel“; leere Teile entfallen */
 export function slideLabel(hit: SlideHit): string {
-  const title = hit.slide_title?.trim();
-  return [hit.deck_title, `Folie ${hit.slide_index}`, ...(title ? [title] : [])].join(' · ');
+  return [hit.deck_title.trim(), `Folie ${hit.slide_index}`, hit.slide_title?.trim() ?? '']
+    .filter((p) => p !== '')
+    .join(' · ');
 }
 
 /** Ruhige Zeile bei reiner Wortsuche (§19.7); sonst `null` */
@@ -98,3 +99,6 @@ export function parseJumpMs(raw: string | null): number | null {
   if (raw === null || !/^\d{1,12}$/.test(raw)) return null;
   return Number(raw);
 }
+
+/** Ereignis auf `window`: Die Suche öffnet das Ziel, auf dem der Rückblick schon steht (`detail.t` in ms) */
+export const JUMP_EVENT = 'sg:review-jump';

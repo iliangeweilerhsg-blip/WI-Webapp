@@ -31,7 +31,7 @@ function Host({ start = true }: { start?: boolean }) {
 }
 
 const searchRequests = () => core.requests.filter((r) => r.path.startsWith('/search'));
-const input = () => screen.getByRole('searchbox', { name: 'Suchbegriff' });
+const input = () => screen.getByRole('combobox', { name: 'Suchbegriff' });
 const options = () => screen.queryAllByRole('option');
 const selected = () => options().filter((o) => o.getAttribute('aria-selected') === 'true');
 
@@ -280,8 +280,13 @@ describe('Suche: Treffer', () => {
     render(<Host />);
     await typeQuery(user, 'index');
     await waitFor(() => expect(options()).toHaveLength(16));
-    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(['Folien', 'Gesagtes']);
+    const groupsNames = screen.getAllByRole('group').map((g) => g.getAttribute('aria-labelledby'));
+    expect(groupsNames).toHaveLength(2);
+    expect(screen.getAllByRole('group').map((g) => g.firstElementChild?.textContent)).toEqual([
+      'Folien',
+      'Gesagtes',
+    ]);
+    expect(screen.queryAllByRole('heading')).toHaveLength(0);
     const slides = within(screen.getByRole('group', { name: 'Folien' })).getAllByRole('option');
     expect(slides).toHaveLength(8);
     expect(slides[0]).toHaveTextContent('Folie 12');
@@ -473,5 +478,43 @@ describe('Suche: Fokus und Schließen', () => {
     expect(dialog.className).toContain('max-w-[640px]');
     expect(dialog.className).toContain('w-full');
     expect(dialog.parentElement?.className).toContain('px-4');
+  });
+});
+
+describe('Suche: Tasten bleiben im Overlay (auf /session)', () => {
+  it('Tab + P, Klick in die Fußzeile + P und Pfeiltasten erreichen window nicht', async () => {
+    nav.pathname = '/session';
+    const user = userEvent.setup();
+    render(<Host />);
+    const spy = vi.fn();
+    window.addEventListener('keydown', spy);
+    try {
+      await user.tab();
+      expect(screen.getByRole('button', { name: 'Schließen' })).toHaveFocus();
+      await user.keyboard('p2');
+      expect(spy).not.toHaveBeenCalled();
+      // Klick ins Leere der Fußzeile: Fokus bleibt im Dialog
+      await user.click(screen.getByText(/Enter öffnet in neuem Tab/));
+      expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+      await user.keyboard('p');
+      expect(spy).not.toHaveBeenCalled();
+      // Fokus von außen hineinholen
+      const outside = document.createElement('button');
+      document.body.appendChild(outside);
+      outside.focus();
+      expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+      outside.remove();
+      // ⌘/Strg+K darf durch (schaltet die Suche um)
+      await user.keyboard('{Control>}k{/Control}');
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('keydown', spy);
+    }
+  });
+
+  it('Esc während einer IME-Eingabe schließt nicht', async () => {
+    render(<Host />);
+    fireEvent.keyDown(input(), { key: 'Escape', isComposing: true });
+    expect(screen.getByRole('dialog')).toBeVisible();
   });
 });

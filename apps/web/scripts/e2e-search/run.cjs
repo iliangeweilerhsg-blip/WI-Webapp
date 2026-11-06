@@ -156,6 +156,7 @@ function startServer(data) {
   const wav = silentWav(REC_DURATION_MS / 1000);
   const searchLog = [];
   const state = { failSearch: false };
+  const posts = [];
   const sendJson = (res, body, status = 200) => {
     res.writeHead(status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(body));
@@ -163,6 +164,7 @@ function startServer(data) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname;
+    if (req.method !== 'GET') posts.push(`${req.method} ${p}`);
     if (p.startsWith('/api/v1/')) {
       const api = p.slice('/api/v1'.length);
       if (api === '/health') return sendJson(res, { status: 'ok', db: 'ok', version: '0.0.0' });
@@ -225,7 +227,9 @@ function startServer(data) {
     fs.createReadStream(file).pipe(res);
   });
   return new Promise((resolve) =>
-    server.listen(0, '127.0.0.1', () => resolve({ server, port: server.address().port, searchLog, state })),
+    server.listen(0, '127.0.0.1', () =>
+      resolve({ server, port: server.address().port, searchLog, state, posts }),
+    ),
   );
 }
 
@@ -252,7 +256,7 @@ async function main() {
   if (shotsDir) fs.mkdirSync(shotsDir, { recursive: true });
   const fake = await loadFake();
   const data = buildData(fake);
-  const { server, port, searchLog, state } = await startServer(data);
+  const { server, port, searchLog, state, posts } = await startServer(data);
   const base = `http://127.0.0.1:${port}`;
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch();
@@ -276,7 +280,7 @@ async function main() {
   }
   const options = (page) => page.locator('[role="option"]');
   async function search(page, text) {
-    await page.getByRole('searchbox', { name: 'Suchbegriff' }).fill(text);
+    await page.getByRole('combobox', { name: 'Suchbegriff' }).fill(text);
     await options(page).first().waitFor({ timeout: 8000 });
   }
 
@@ -314,7 +318,7 @@ async function main() {
         JSON.stringify(searchLog),
       );
       check('Treffer-Wörter als <mark>', (await page.locator('[role="option"] mark').count()) >= 4);
-      const headings = await page.locator('[role="dialog"] h2').allTextContents();
+      const headings = await page.locator('[role="dialog"] [role="group"] > :first-child').allTextContents();
       check('Gruppen Folien, Gesagtes', headings.join(',') === 'Folien,Gesagtes', headings.join(','));
       check(
         'mm:ss und ▶ bei Gesagtem',
@@ -417,15 +421,15 @@ async function main() {
       await page.keyboard.type('zzzz');
       await page.getByText('Nichts gefunden').waitFor();
       check('Nichts gefunden', true);
-      await page.getByRole('searchbox').fill('normalform fach:XYZ');
+      await page.getByRole('combobox', { name: 'Suchbegriff' }).fill('normalform fach:XYZ');
       await page.getByText('Unbekannter Filter: fach:XYZ').waitFor();
       check('Unbekannter Filter', true);
       state.failSearch = true;
-      await page.getByRole('searchbox').fill('normalform');
+      await page.getByRole('combobox', { name: 'Suchbegriff' }).fill('normalform');
       await page.getByText('Suche gerade nicht erreichbar').waitFor();
       check('Fehlerzeile', true);
       state.failSearch = false;
-      await page.getByRole('searchbox').fill('normalform typ:folie');
+      await page.getByRole('combobox', { name: 'Suchbegriff' }).fill('normalform typ:folie');
       await page.waitForFunction(
         () =>
           document.querySelectorAll('[data-kind="transcript"]').length === 0 &&
@@ -462,7 +466,7 @@ async function main() {
         await page.waitForTimeout(150);
         await page.screenshot({ path: path.join(shotsDir, file) });
         if (name === 'dunkel-desktop') {
-          await page.getByRole('searchbox').fill('zzzz');
+          await page.getByRole('combobox', { name: 'Suchbegriff' }).fill('zzzz');
           await page.getByText('Nichts gefunden').waitFor();
           await page.screenshot({ path: path.join(shotsDir, '20-nichts-gefunden-dunkel-desktop.png') });
         }
@@ -492,6 +496,22 @@ async function main() {
           );
           await page.waitForTimeout(150);
           await page.screenshot({ path: path.join(shotsDir, '30-live-dashboard-dunkel-desktop.png') });
+          // Tasten bleiben im Overlay: P (Pause) und 2 (Layout) erreichen das Dashboard nicht
+          posts.length = 0;
+          await page.keyboard.press('Tab');
+          await page.keyboard.press('p');
+          await page.getByText(/Enter öffnet in neuem Tab/).click();
+          await page.keyboard.press('p');
+          await page.keyboard.press('2');
+          await page.waitForTimeout(300);
+          check(
+            'auf /session: kein POST /pause durch Tasten im Overlay',
+            !posts.some((x) => /pause/.test(x)),
+            posts.join(','),
+          );
+          const inDialog = await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'));
+          check('Fokus bleibt im Dialog nach Klick in die Fußzeile', inDialog);
+          await page.getByRole('combobox', { name: 'Suchbegriff' }).focus();
           const popup = context.waitForEvent('page');
           await page.keyboard.press('Enter');
           const tab = await popup;

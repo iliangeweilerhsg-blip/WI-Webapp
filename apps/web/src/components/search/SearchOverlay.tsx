@@ -7,6 +7,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { SearchHit } from '@sg/shared';
 import {
+  JUMP_EVENT,
   MAX_QUERY_LENGTH,
   degradedLine,
   flatHits,
@@ -16,7 +17,7 @@ import {
   sessionLabel,
   slideLabel,
 } from '../../lib/search.ts';
-import { isMacPlatform } from '../../lib/shortcuts.ts';
+import { isMacPlatform, matchShortcut } from '../../lib/shortcuts.ts';
 import { Icon } from '../Icon.tsx';
 import { Snippet } from './Snippet.tsx';
 import { useSearch } from './use-search.ts';
@@ -69,11 +70,46 @@ function Overlay({ onClose }: { onClose: () => void }) {
       setRect(null);
       return;
     }
-    const measure = () => setRect(notesRect());
+    const measure = () =>
+      setRect((old) => {
+        const next = notesRect();
+        const same =
+          old === next ||
+          (old &&
+            next &&
+            old.left === next.left &&
+            old.top === next.top &&
+            old.width === next.width &&
+            old.height === next.height);
+        return same ? old : next;
+      });
     measure();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    // Layoutwechsel, Trennlinie ziehen, Seitenleiste, später erscheinende Zeilen: Spalte und Container beobachten
+    let observer: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(measure);
+      const el = document.querySelector('[data-column="notizen"]');
+      if (el) observer.observe(el);
+      if (el?.parentElement) observer.observe(el.parentElement);
+      observer.observe(document.body);
+    }
+    return () => {
+      window.removeEventListener('resize', measure);
+      observer?.disconnect();
+    };
   }, [onSession]);
+
+  // Fokus verlässt den Dialog nie (sonst erreichen Tasten das Dashboard dahinter)
+  useEffect(() => {
+    function onFocusIn(e: FocusEvent) {
+      if (dialogRef.current && e.target instanceof Node && !dialogRef.current.contains(e.target)) {
+        inputRef.current?.focus();
+      }
+    }
+    document.addEventListener('focusin', onFocusIn);
+    return () => document.removeEventListener('focusin', onFocusIn);
+  }, []);
 
   const groups = useMemo(() => (response ? groupHits(response.hits) : null), [response]);
   const hits = useMemo(() => (groups ? flatHits(groups) : []), [groups]);
@@ -93,12 +129,20 @@ function Overlay({ onClose }: { onClose: () => void }) {
         return;
       }
       onClose();
+      // Steht der Rückblick schon auf genau diesem Ziel, ändert ein Push nichts: der Sprung geht per Ereignis
+      if (hit.kind === 'transcript' && href === window.location.pathname + window.location.search) {
+        window.dispatchEvent(new CustomEvent(JUMP_EVENT, { detail: { t: hit.t_ms } }));
+        return;
+      }
       router.push(href);
     },
     [onSession, onClose, router],
   );
 
   function onKeyDown(e: React.KeyboardEvent) {
+    // Tasten gehören dem Overlay: Dashboard und Seite dahinter bekommen sie nicht (außer ⌘/Strg+K zum Umschalten)
+    if (!matchShortcut(e.nativeEvent, mac)) e.stopPropagation();
+    if (e.nativeEvent.isComposing) return;
     if (e.key === 'Escape') {
       e.preventDefault();
       onClose();
@@ -119,7 +163,7 @@ function Overlay({ onClose }: { onClose: () => void }) {
       }
       return;
     }
-    if (e.target !== inputRef.current || e.nativeEvent.isComposing) return;
+    if (e.target !== inputRef.current) return;
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault();
       if (hits.length === 0) return;
@@ -205,6 +249,10 @@ function Overlay({ onClose }: { onClose: () => void }) {
           aria-modal="true"
           aria-label="Suche"
           onKeyDown={onKeyDown}
+          onMouseDown={(e) => {
+            // Klicks ins Leere des Dialogs nehmen dem Feld den Fokus nicht (sonst läge er auf <body>)
+            if (!(e.target as HTMLElement).closest('input, button')) e.preventDefault();
+          }}
           className="flex max-h-[min(34rem,calc(100dvh-8rem))] w-full max-w-[640px] flex-col rounded-lg border border-border bg-surface-raised shadow-lg"
         >
           <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
@@ -214,7 +262,10 @@ function Overlay({ onClose }: { onClose: () => void }) {
             <input
               ref={inputRef}
               type="search"
+              role="combobox"
               aria-label="Suchbegriff"
+              aria-expanded={hits.length > 0}
+              aria-autocomplete="list"
               aria-controls={listId}
               aria-activedescendant={hits.length > 0 ? optionId(active) : undefined}
               autoComplete="off"
@@ -269,17 +320,20 @@ function Overlay({ onClose }: { onClose: () => void }) {
               <div id={listId} role="listbox" aria-label="Treffer">
                 {groups.slides.length > 0 ? (
                   <div role="group" aria-labelledby={`${uid}-folien`}>
-                    <h2 id={`${uid}-folien`} className="px-3 pb-1 pt-2 text-xs font-medium text-text-muted">
+                    <div id={`${uid}-folien`} className="px-3 pb-1 pt-2 text-xs font-medium text-text-muted">
                       Folien
-                    </h2>
+                    </div>
                     {groups.slides.map(renderRow)}
                   </div>
                 ) : null}
                 {groups.spoken.length > 0 ? (
                   <div role="group" aria-labelledby={`${uid}-gesagtes`}>
-                    <h2 id={`${uid}-gesagtes`} className="px-3 pb-1 pt-2 text-xs font-medium text-text-muted">
+                    <div
+                      id={`${uid}-gesagtes`}
+                      className="px-3 pb-1 pt-2 text-xs font-medium text-text-muted"
+                    >
                       Gesagtes
-                    </h2>
+                    </div>
                     {groups.spoken.map(renderRow)}
                   </div>
                 ) : null}

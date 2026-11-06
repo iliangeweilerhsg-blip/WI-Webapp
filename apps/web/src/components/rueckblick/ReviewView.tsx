@@ -13,7 +13,7 @@ import { useDeckDetail } from '../../lib/material.ts';
 import { moduleColorVar, useModules } from '../../lib/modules.ts';
 import { moduleHref } from '../../lib/nav.ts';
 import { isEditableTarget } from '../../lib/shortcuts.ts';
-import { parseJumpMs } from '../../lib/search.ts';
+import { JUMP_EVENT, parseJumpMs } from '../../lib/search.ts';
 import { sessionHref } from '../../lib/sessions.ts';
 import {
   NO_SLIDE,
@@ -228,6 +228,15 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
     jumpedTo.current = key;
     seekPlayer(jumpMs, false);
   }, [session.id, jumpMs, hasRecordings, seekPlayer]);
+  // Dasselbe Ziel erneut aus der Suche: die Adresse bleibt gleich, die Suche meldet den Sprung per Ereignis
+  useEffect(() => {
+    function onJump(e: Event) {
+      const t = (e as CustomEvent<{ t: number }>).detail?.t;
+      if (typeof t === 'number') seekPlayer(t, false);
+    }
+    window.addEventListener(JUMP_EVENT, onJump);
+    return () => window.removeEventListener(JUMP_EVENT, onJump);
+  }, [seekPlayer]);
   // Markiert wird erst, wenn abgespielt oder gesprungen wurde (vorher steht der Player am Anfang)
   const engaged = player.playing || everPlayed.current || player.t !== initialT.current;
 

@@ -112,7 +112,7 @@ describe('Tastenkürzel (jsdom ist kein Mac: Strg)', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await user.keyboard('{Control>}k{/Control}');
     expect(screen.getByRole('dialog', { name: 'Suche' })).toBeInTheDocument();
-    expect(screen.getByRole('searchbox')).toHaveFocus();
+    expect(screen.getByRole('combobox')).toHaveFocus();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
