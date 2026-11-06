@@ -3,7 +3,7 @@
 Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammenspielen. So können die Teile parallel gebaut werden (`AGENTS.md`, Regel 4).
 Änderungen nur durch den Lead. Datenformate selbst stehen in `packages/schemas`.
 
-§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1, §17 ist der Moodle-Abgleich. Ab §18 folgt Phase 2: §18 Transkription und Rückblick, §19 Suche.
+§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1, §17 ist der Moodle-Abgleich. Ab §18 folgt Phase 2: §18 Transkription und Rückblick, §19 Suche, §20 Konzepte, Inbox und Zusammenfassung.
 
 ## 1. Umgebungsvariablen
 
@@ -24,6 +24,10 @@ Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammen
 | `SG_EMBEDDER` | `bge-m3`. In CI und auf Linux `fake` | Worker (§19.2) |
 | `SG_EMBED_MODEL` | `BAAI/bge-m3` | Worker (§19.2) |
 | `SG_WORKER_PORT` | `4711` | Worker (bindet `127.0.0.1`) und Core (ruft fest `http://127.0.0.1:<port>` auf, nie `localhost`, §19.4) |
+| `SG_LLM` | `anthropic`. In CI und Tests `fake` | Worker (§20.5) |
+| `ANTHROPIC_API_KEY` | leer. Nur in `config/.env` | nur Worker (§20.5). Der Core überspringt alle `ANTHROPIC_*` aus `.env` und entfernt den Schlüssel aus seiner Umgebung |
+| `SG_MODEL_FAST` / `SG_MODEL_STANDARD` / `SG_MODEL_DEEP` | `claude-haiku-5-5` / `claude-sonnet-5-5` / `claude-opus-5-5` | Worker (§20.5, K-01) |
+| `SG_USD_EUR` | `0.92` | Worker (Kosten in Euro, §20.5) |
 
 Geheimnisse wie API-Schlüssel stehen in `$SG_DATA_DIR/config/.env` mit Rechten 600 (02 §3). Die Prozesse lesen diese Datei beim Start.
 **Ausnahme Moodle:** Der Moodle-Token liegt nur im macOS-Schlüsselbund (Dienst `studiengehirn-moodle`), nie in `.env`. Nur der Core liest ihn (08 §9.1). Einzige Ausnahme: `pnpm sg moodle login` liest den Eintrag direkt nach dem Speichern einmal zurück, um zu prüfen, dass der Core genau diesen Token findet. `pnpm sg moodle status` und `logout` lesen den Token nie.
@@ -1498,3 +1502,325 @@ Antwort 200 `SearchResponse`, Fehler `400 validation_failed`. Erlaubt für lokal
 **Später:** `pnpm sg doctor` prüft `GET /health` des Workers (eigenes Ticket).
 
 **Nur der Owner kann testen:** `bge-m3` auf dem Mac (Ladezeit, Speicher, Antwortzeit von `/embed`, Qualität der Bedeutungssuche mit echten Folien und einer echten Vorlesung).
+
+## 20. Konzepte, Inbox und Zusammenfassung (F-NAC-05/-06/-08, F-BIB-02, F-DAT-05, 05 §P7a/§P8/§P9)
+
+Dritter Schnitt von Phase 2: **Transkript und Folien → Konzepte → Abgleich mit dem Wissensnetz → Inbox**, dazu die Kurzfassung je Vorlesung und der Kostenzähler mit Monatsbudget. Erster Schnitt mit Cloud-KI (Claude API).
+Datenformate in `packages/schemas/src/concepts.schema.json`, dazu `PipelineStep` (`transcript.schema.json`) und `WorkerHealth.llm` (`search.schema.json`). Tabellen in der Migration `0010_concepts`.
+**Nicht Teil dieses Schnitts:** `vault.write` und alles am Vault (Konzeptnotizen, Vorlesungsnotiz, `vault_path`, `content_hash`, `block_hashes` aus W-02), Karten, Klausurhinweis-Detektor (P7b), OCR, `align.content`, Cornell- und ❓-Fragen, `prereq.check`, Konzepte in der Suche (später als `SearchKind = concept`), Konzepte außerhalb der Inbox bearbeiten, zusammenführen oder teilen (F-BIB-03/-04), Graph, der Ablauf der geführten Nacharbeitung (F-NAC-05 nutzt später diese Endpunkte), Hinweis im Tagesbriefing bei 80 %, Modus „nur lokal“ und Modellstufen je Aufgabe in den Einstellungen, Umzug der Moodle-Inbox auf `inbox_item` (08 §9.4).
+
+### 20.1 Tabellen
+
+| Tabelle | Inhalt | Schreiber |
+|---|---|---|
+| `concept` | 03 §7 mit W-02 Option A: `name` (1–200 Zeichen, ohne Steuerzeichen), `aliases text[]` (≤ 20), `kind` (`ConceptKind` oder `NULL`), `one_liner` (≤ 500), `status` (`vorschlag` \| `aktiv` \| `zusammengefuehrt`), `merged_into` (FK `concept`, `ON DELETE CASCADE`), `proposal_session_id` (FK `session`, `ON DELETE CASCADE`), `exam_relevant`, `importance_base` (Standard 1,0), `embedding vector(1024)` und `embedding_model` | Worker (`concepts.resolve`), Core (Inbox) |
+| `concept_module` | `concept_id`, `module_id` (beide FK, `ON DELETE CASCADE`), `UNIQUE (concept_id, module_id)` | Worker, Core |
+| `concept_relation` | `from_id`, `to_id` (FK `concept`, Kaskade), `kind` (`ConceptRelationKind`), `source` (`ki` \| `manuell` \| `wikilink`), `confidence` (0..1), `confirmed`, `why` (≤ 500), `proposal_session_id` (FK `session`, Kaskade), `job_id` (ohne FK) | Worker, Core |
+| `evidence` | `concept_id` (FK, Kaskade), `session_id` (FK, Kaskade, Herkunft des Belegs), `kind`, `ref_id`, `t_start_ms`, `t_end_ms`, `region jsonb`, `quote` (≤ 300), `weight` (Standard 1), `auto`, `job_id` (ohne FK) | Worker, Core (beim Zusammenführen) |
+| `inbox_item` | 03 §8: `kind` (`concept_new` \| `concept_merge` \| `relation`), `session_id` (FK, Kaskade), `job_id` (ohne FK), `payload jsonb` (`InboxPayload`), `status` (`offen` \| `angenommen` \| `abgelehnt` \| `automatisch`), `decided_at`, `decision jsonb` (`InboxDecision`), `priority` (kleiner = früher), `concept_id`, `target_concept_id` (FK `concept`, Kaskade), `relation_id` (FK `concept_relation`, Kaskade) | Worker (anlegen, automatisch annehmen), Core (entscheiden) |
+| `session_summary` | Eine je Session (`UNIQUE (session_id)`, FK Kaskade): `lang`, `sentences jsonb` (`SummarySentence[]`, 1–5), `outline jsonb` (`SummaryOutlineItem[]`, ≤ 30), `provider`, `model`, `prompt_version`, `input_hash`, `job_id` (ohne FK) | Worker (`summary.write`) |
+| `cost_entry` (Ergänzung) | dazu `session_id` (ohne FK: Kosten bleiben nach dem Löschen gezählt), `cache_creation_input_tokens`, `cache_read_input_tokens`, `cost_estimate_usd`, `request_id` (≤ 200). CHECKs gegen negative Werte | Worker (§20.5) |
+
+- Alle neuen Tabellen haben die Pflichtfelder aus 03 §1 und den `updated_at`-Trigger. Die Migration legt den HNSW-Index `concept_embedding_hnsw` (`vector_cosine_ops`) an.
+- **Konzept-CHECKs:** `zusammengefuehrt` genau dann, wenn `merged_into` gesetzt ist (Invariante 5), nie auf sich selbst. `vorschlag` braucht `proposal_session_id`, `aktiv` hat nie eine. `importance_base` in (0, 2]. `(embedding IS NULL) = (embedding_model IS NULL)`.
+- **Vorschläge hängen an ihrer Session.** Ein `vorschlag` (und eine Hülle `zusammengefuehrt`, die aus einem Vorschlag entstand) trägt `proposal_session_id`, ebenso eine unbestätigte Beziehung (`confirmed = (proposal_session_id IS NULL)`, CHECK). Wird das Konzept angenommen bzw. die Beziehung bestätigt, wird `proposal_session_id` geleert. So nimmt das Löschen einer Session ihre Vorschläge mit, nie angenommenes Wissen (§20.8).
+- **Beziehungen:** keine Schleife (`from_id <> to_id`), die symmetrischen Arten `gegensatz` und `verwandt` stehen immer mit `from_id < to_id`, `UNIQUE (from_id, to_id, kind) WHERE deleted_at IS NULL`. Kreisfreiheit von `baut_auf` (Invariante 4) prüft der Schreiber (§20.6).
+- **Belege:** `kind` nach 03 §7 (`slide` \| `transcript` \| `ink` \| `task` \| `photo` \| `past_exam_question`), dieser Schnitt schreibt nur `slide` und `transcript`. `slide`: `ref_id = slide.id`, ohne Zeiten, ohne FK (wie §6, die Folie kann später gelöscht sein). `transcript`: `ref_id = session_id = session.id`, `0 ≤ t_start_ms ≤ t_end_ms` (§18.1, nie eine Segment-ID). Kein Beleg doppelt: `UNIQUE (concept_id, kind, ref_id, coalesce(t_start_ms, -1), coalesce(t_end_ms, -1), coalesce(session_id, 0…0)) WHERE deleted_at IS NULL` (`evidence_dedupe_uq`). `auto = true` heißt: beim Abgleich automatisch an ein vorhandenes Konzept gehängt (§20.3), ein neuer Lauf ersetzt ihn.
+- **Inbox-Einträge:** `concept_new` hat `concept_id` (den Vorschlag), `concept_merge` zusätzlich `target_concept_id`, `relation` nur `relation_id` (CHECK). Je Vorschlag und je Beziehung höchstens ein Eintrag (partielle Unique-Indizes). `status = offen` genau dann, wenn `decided_at` leer ist; `decision` nur bei entschiedenen. `payload->>'kind' = kind` (CHECK).
+- **Ersetzen ist hart, Löschen weich** (wie §18.1): Jobs ersetzen ihre eigenen früheren Ergebnisse mit `DELETE` (05 §1), nie Entschiedenes. Das weiche Löschen einer Session setzt auf allen ihren Zeilen denselben `deleted_at` (§20.8).
+- **Konzepte gehören keinem Fach allein** (03 §7, LP10): `concept_module` ordnet zu, der Abgleich sucht über alle Fächer und Semester.
+
+### 20.2 Kette, Fortschritt und Anlegen (Core)
+
+**Kette** (05 §2, Lead-Entscheidung): `transcribe` + `align.log` → `concepts.extract` → `concepts.resolve` → `summary.write`.
+
+| Job | Payload | `priority` | `depends_on` | Ergebnis |
+|---|---|---|---|---|
+| `concepts.extract` | `ConceptsExtractPayload` `{ session_id, force? }` | 8 | der `transcribe`- und der `align.log`-Job desselben Aufrufs (angelegt oder wiederverwendet), dazu ein laufender `concepts.extract` der Session | `ConceptsExtractResult` |
+| `concepts.resolve` | `ConceptsResolvePayload` `{ session_id, extract_job_id, force? }` | 7 | der `concepts.extract`-Job aus `extract_job_id`, dazu ein laufender `concepts.resolve` der Session | `ConceptsResolveResult` |
+| `summary.write` | `SummaryWritePayload` `{ session_id, force? }` | 6 | der `concepts.resolve`-Job desselben Aufrufs, dazu ein laufender `summary.write` der Session | `SummaryWriteResult` |
+
+- `job.session_id` ist gesetzt, `max_attempts` bleibt 3. Die Prioritäten liegen unter Transkription (20) und Ausrichtung (10) und über `search.index` (5), wie 05 §1 („Transkription > Ausrichtung > alles für die Nacharbeitung“).
+- **Die drei Jobs halten `verarbeitet` auf** (§3: die Session wird erst `verarbeitet`, wenn kein Job mit ihrer `session_id` mehr wartet oder läuft). Begründung: `verarbeitet` heißt im Heute-Bildschirm „Nacharbeitung bereit“ (F-NAC-01), und die Nacharbeitung braucht Konzepte und Kurzfassung (F-NAC-05 Schritte 2 und 4). Das Ziel „Pipeline ≤ 45 min“ (10 §3) gilt für die ganze Kette. Fehlt der Schlüssel oder ist das Budget erreicht, enden die Jobs sofort mit `fehler` (§20.5) und halten nichts auf.
+- **Abhängigkeit gescheitert:** Scheitert `transcribe` oder `align.log`, wird `concepts.extract` nach §3 `abgebrochen`, ebenso alle folgenden. „Erneut versuchen“ ab dem ersten gescheiterten Schritt baut die Kette neu. Ohne Audio bzw. mit `ohne_audio` endet `transcribe` aber `fertig`, und die Konzepte entstehen nur aus den Folien.
+- **`ensurePipelineJobs`** (§18.2) bekommt die Schritte 5 bis 7, nach `align.log` und in dieser Reihenfolge. Wiederverwenden wie bei `transcribe`: Wartet schon ein Job des Typs, wird er genommen, `payload.force` wird `alt ODER neu`, `depends_on` werden bereinigt (§18.2: `fehler`, `abgebrochen`, gelöscht oder unbekannt fallen weg) und um die neuen Vorgänger ergänzt. Bei `concepts.resolve` wird zusätzlich `payload.extract_job_id` auf den neuen `concepts.extract`-Job gesetzt. Fortschritt wie Schritt 4 aus §18.2 für jeden berührten Typ.
+
+| `from_step` | angelegt bzw. wiederverwendet |
+|---|---|
+| `audio.finalize`, `transcribe` | wie §18.2, danach `concepts.extract`, `concepts.resolve`, `summary.write` |
+| `align.log` | `align.log`, danach die drei (die Zuordnung ändert die Eingabe der Konzepte) |
+| `concepts.extract` | `concepts.extract`, `concepts.resolve`, `summary.write`. `depends_on` von `concepts.extract` sind dann nur ein laufender Job desselben Typs |
+| `concepts.resolve` | `concepts.resolve` mit `extract_job_id` = neuester `fertig`e `concepts.extract` der Session, danach `summary.write`. Gibt es keinen, gilt `from_step = concepts.extract` |
+| `summary.write` | nur `summary.write` (ohne `depends_on` außer einem laufenden Job desselben Typs) |
+
+- `force` wirkt wie bisher auf `audio.finalize` und `transcribe` (§18.2), bei den neuen Schritten nur auf den Schritt `from_step` selbst. Folgeschritte erkennen geänderte Eingaben über ihren `input_hash` und rufen sonst die KI nicht erneut auf (Kosten).
+- **Beim Stopp** bleibt alles wie in §18.2: Die Kette entsteht nur, wenn die Session Audio hat, und dann mit den drei neuen Schritten. **Ohne Audio** gibt es keine automatische Kette (die Session wird sofort `verarbeitet`); Konzepte und Kurzfassung entstehen dann nur über `POST /sessions/{id}/reprocess` mit `from_step: "concepts.extract"` (Rückblick: „Konzepte erzeugen“, §20.10).
+- **`POST /sessions/{id}/reprocess`** (§18.5): `409 session_no_audio` nur noch bei `from_step` `audio.finalize` oder `transcribe`. Die neuen Schritte brauchen kein Audio.
+- **Fortschritt und Anzeige:** Die Zusammenfassung aus §18.2 gilt unverändert, Einheit ist die Session. Texte der Schrittliste: `concepts.extract` „Konzepte“, `concepts.resolve` „Abgleich“, `summary.write` „Zusammenfassung“. Der Rückblick-Zustand „Verarbeitung offen“ zeigt bei offenen Konzept-Schritten „Konzepte kommen noch“ statt „Transkript kommt noch“, sobald `transcribe` fertig ist (§20.10).
+- `JOB_PAYLOAD_SCHEMAS` bekommt die drei Typen. `search.index` bleibt unverändert (Konzepte kommen später in die Suche).
+- **Merge-Reihenfolge:** Die Kette im Core (T2-22a) erst nach den Worker-Handlern (T2-21a, T2-21b). Sonst enden alle Konzept-Jobs mit `unbekannter Job-Typ` (§3).
+
+### 20.3 `concepts.extract` und `concepts.resolve` (Worker)
+
+**Gemeinsame Regeln**
+- **Normieren** eines Namens oder Alias: NFC, Steuer- und Formatzeichen entfernen (wie §19.3), Leerraum zusammenfassen, trimmen. **Vergleichsform** `key(s)` = Normform in `casefold()`. **Basisform** `base(s)` = `key(s)` ohne einen Klammerzusatz am Ende (`normalisierung (datenbanken)` → `normalisierung`). **Namensgleich** sind zwei Konzepte, wenn die `key` irgendeines Namens oder Alias des einen gleich der `key` irgendeines Namens oder Alias des anderen ist. **Namensähnlich** sind sie, wenn das für `key` oder `base` gilt (so treffen sich „Normalisierung“ und „Normalisierung (Datenbanken)“, aber zwei Homonyme mit verschiedenem Klammerzusatz sind nicht namensgleich).
+- **Session lesen:** Fehlt die Session-Zeile → `fehler` sofort (`NonRetryableError("Session unbekannt")`). Ist sie weich gelöscht → `fertig` mit `session_deleted = true`, nichts aufrufen, nichts schreiben. Schreiben wie §18.2: eine Transaktion, Session zuerst sperren (`progress.lock_session`, inzwischen gelöscht → wie eben), Job-Besitz prüfen (`LockLostError`).
+- **KI-Aufrufe** laufen außerhalb einer Transaktion, der Heartbeat läuft weiter. Regeln für Aufrufe, Fehler und Kosten in §20.5.
+
+**`concepts.extract`** (`handlers/concepts_extract.py`, 05 §P7a, Stufe `standard`)
+
+1. Payload prüfen. Session lesen (oben). Modul (`name`, `short_name`, `lang`), Foliensatz der Session, Folien (nicht gelöscht, nach `index`: `title`, `text`, `vision_summary`), `slide_segment` mit der Quellenwahl aus §18.4 (`manuell` vor `ausrichtung` vor `log`), `transcript_segment` (nicht gelöscht, nach `(start_ms, recording_id, seq)`) und die Marker `frage`/`klausur` mit `t_ms`.
+2. **Eingabe bauen** (deterministisch, Sitzungszeiten als `[h:mm:ss]`): Kopf mit Modul, Sprache, VL-Nummer, Titel und Datum. Je Folie Titel, Text (≤ 1 500 Zeichen), Vision-Zusammenfassung und die Transkript-Abschnitte, die laut `slide_segment` in ihre Zeit fallen (Mitte des Abschnitts), **gekürzt auf die ersten 600 Wörter je Folie** (05 §P7a, Rest als „…“). Abschnitte ohne Folie (folienlos oder außerhalb aller Segmente) in Blöcken zu 5 min. Marker als Liste mit Zeit. Die Sprache der Ausgabe ist `module.lang` (`mixed`: die Sprache der Vorlesung, 05 §1).
+3. **Weder Folien noch Transkript-Abschnitte:** `fertig` mit `empty = true`, kein Aufruf, `concepts = []`.
+4. `input_hash` = SHA-256 über UTF-8 von `prompt_version \n Modell \n EXTRACT_VERSION \n Eingabe` (`EXTRACT_VERSION = 1`, Konstante im Worker, steigt mit Änderungen an Eingabe oder Prüfung). Hat der neueste `fertig`e `concepts.extract` der Session denselben `input_hash` und ist `force` nicht gesetzt: dessen Ergebnis übernehmen, `unchanged = true`, kein Aufruf.
+5. **Kapitel:** Liegt die Eingabe über 150 000 geschätzten Tokens (`ceil(UTF-8-Bytes / 3)`), wird sie an Foliengrenzen in Kapitel zu höchstens 100 000 geschätzten Tokens geteilt. Jeder Aufruf bekommt dieselbe Anweisung und denselben Kopf (Prompt-Caching auf diesem Block, nur bei mehr als einem Kapitel). Die Kapitel werden ohne weiteren KI-Aufruf zusammengeführt: gleiche `key` → ein Konzept (Belege vereinigt, größte `importance`, `exam_hint` ODER, erster `one_liner`).
+6. **Aufruf** mit dem Prompt `prompts/concepts.extract/v1.md` und der strukturierten Ausgabe nach 05 §P7a: je Konzept `name`, `aliases`, `one_liner`, `kind`, Folien-Indizes, Zeiträume (Sekunden Sitzungszeit), `importance` 1–3, `exam_hint`, `prof_explanation`, `confidence`; dazu Beziehungen zwischen Konzepten dieser Vorlesung (`from`, `to`, `kind`, `why`, `confidence`). Das Ausgabemodell gehört zum Prompt und liegt im Worker (§20.5).
+7. **Prüfen (LP8, 05 §4):**
+   - Folien-Belege: Index muss eine nicht gelöschte Folie des Foliensatzes der Session sein → `EvidenceRefSlide` mit `slide_id`, `deck_id`, `slide_index`. Sonst verwerfen.
+   - Zeit-Belege: auf `[0, timeline_end_ms]` (§18.3) klemmen, `start < end`, höchstens 20 min lang, und mindestens ein `transcript_segment` der Session muss überlappen. Sonst verwerfen. Überlappende Zeiträume eines Konzepts zusammenfassen. → `EvidenceRefTranscript`.
+   - Höchstens 12 Belege je Konzept (Folien zuerst, dann Zeiträume nach Beginn). **Ein Konzept ohne gültigen Beleg wird verworfen** (`dropped_concepts`).
+   - Namen und Aliase normieren, leere verwerfen, Aliase ohne Dubletten und ohne den Namen. Konzepte mit gleicher `key` zusammenführen. Höchstens 30 Konzepte (nach `importance`, dann Reihenfolge der Ausgabe).
+   - Beziehungen nur zwischen behaltenen Konzepten, symmetrische Arten werden nicht doppelt geführt, Selbstbezug fällt weg (`dropped_relations`). Höchstens 60.
+   - Hat die KI Konzepte geliefert und ist **keins** gültig, gilt die Ausgabe als ungültig (einmal nachfordern, §20.5).
+8. `ctx.finish(ConceptsExtractResult)`: die geprüften Konzepte mit Schlüsseln `c1`, `c2`, … in Ausgabereihenfolge, Beziehungen über diese Schlüssel. Der Job schreibt keine Tabellen außer `cost_entry` (08 §5: „Zwischenergebnis in `job.result`“).
+
+**`concepts.resolve`** (`handlers/concepts_resolve.py`, 05 §P8, Stufe `standard`)
+
+1. Payload prüfen, Session lesen (oben). `extract_job_id` muss ein `fertig`er `concepts.extract` derselben Session sein, sonst `fehler` sofort (`Konzepte fehlen`). Sein `job.result` mit `ConceptsExtractResult` prüfen.
+2. **Unverändert:** Hat der neueste `fertig`e `concepts.resolve` der Session dieselbe `extract_input_hash` und dieselbe `resolve_version` (`RESOLVE_VERSION = 1`) und ist `force` nicht gesetzt: `fertig` mit `unchanged = true`, nichts schreiben. So bleibt die Inbox stabil, wenn nur der Rest der Kette neu läuft.
+3. **Vektoren nachholen:** Aktive Konzepte ohne Vektor des aktuellen Embedder-Modells (höchstens 500 je Lauf) einbetten. Text = Name, Aliase (mit `, `) und One-Liner, je eine Zeile, gesäubert wie §19.3, ≤ 2 000 Zeichen. Dasselbe für die extrahierten Konzepte. Vorher `wait_ready(600)` (§19.3).
+4. **Ohne Embedder** (nicht verfügbar oder nicht bereit): degradiert, nur Namensgleichheit (unten). Ergebnis `embedding_model = null`, `embedding_error` = Grund.
+5. **Zuordnen** je extrahiertem Konzept `x`, Regeln in dieser Reihenfolge:
+   - **Schon entschieden in dieser Session:** `x` ist namensgleich mit einem Vorschlag dieser Session, dessen Eintrag `abgelehnt` ist → entfällt (`skipped_rejected`, Abgelehntes kommt für dieselbe Session nicht wieder). `x` ist namensgleich mit einem aktiven Konzept, das aus einem angenommenen bzw. automatisch angenommenen Eintrag dieser Session stammt (Konzept des Eintrags oder Ziel der Zusammenführung) → Belege dorthin (`auto = true`).
+   - **Kandidaten:** aktive, nicht gelöschte Konzepte mit Vektor des aktuellen Modells, Ähnlichkeit = `1 − (embedding <=> v)`, die 5 ähnlichsten mit Ähnlichkeit ≥ 0,75.
+   - **Gleiches Konzept, automatisch:** Ein Kandidat mit Ähnlichkeit ≥ 0,88 **und** namensähnlich → die Belege von `x` gehen an ihn (`auto = true`), dazu `concept_module` (Kandidat, Modul der Session), falls sie fehlt. Kein Inbox-Eintrag. Bei mehreren gewinnt der ähnlichste.
+   - **KI-Entscheidung** für die übrigen Kandidaten im Band (0,75 bis unter 0,88, dazu ≥ 0,88 ohne Namensähnlichkeit), gebündelt in **einem** Aufruf (unten): `gleich` → `concept_merge` auf diesen Kandidaten (bei mehreren `gleich` der ähnlichste). `teil_von` und `verwandt` → `concept_new` und ein Beziehungsvorschlag `verwandt` zwischen `x` und dem Kandidaten (`why` = Begründung). `verschieden` → nichts.
+   - Sonst `concept_new`.
+   - **Degradiert:** Ein namensähnliches aktives Konzept → `concept_merge` mit `basis = name` (nie automatisch, Homonyme in verschiedenen Fächern), sonst `concept_new`.
+6. **Beziehungen** (05 §P8.3): Je Konzept, das nach Schritt 5 neu oder Ziel eines Vorschlags ist, die 20 ähnlichsten aktiven Konzepte (zusammen höchstens 200) gehen in denselben Aufruf, die KI schlägt typisierte Beziehungen mit Begründung vor. Dazu kommen die Beziehungen aus dem Extrakt (Schlüssel auf die Konzepte nach Schritt 5 abgebildet: automatisch zusammengeführte zeigen auf ihr Ziel). Selbstbezüge und Dubletten (auch gegen vorhandene, nicht gelöschte Beziehungen) fallen weg, symmetrische Arten werden sortiert. `baut_auf`, das mit bestätigten `baut_auf`-Beziehungen einen Kreis bildet, fällt weg (`dropped_cycles`, Invariante 4).
+   **Ein KI-Aufruf** (`prompts/concepts.resolve/v1.md`) nur, wenn es Band-Kandidaten oder Nachbarn gibt. Ist das Wissensnetz leer, läuft der Job ohne Aufruf (`prompt_version = null`). Die Fächerbrücke (05 §P8.4) wird beim Lesen berechnet (`ConceptRelationView.cross_module`), nicht gespeichert.
+7. **Schreiben** (eine Transaktion, §20.6 Sperren):
+   - **Eigene frühere Ergebnisse dieser Session entfernen (hart):** offene Inbox-Einträge der Session samt ihrer Vorschläge (`concept` mit `status = vorschlag` und `proposal_session_id` = Session, deren Eintrag `offen` ist) und unbestätigten Beziehungen (deren Eintrag `offen` ist), dazu alle Belege mit `auto = true` und `session_id` = Session. Entschiedenes (`angenommen`, `abgelehnt`, `automatisch`) bleibt.
+   - Je Vorschlag: `concept` (`status = vorschlag`, `proposal_session_id`, Vektor), `concept_module` (Vorschlag, Modul der Session), Belege (`auto = false`, `session_id`, `job_id`) und der Inbox-Eintrag mit `InboxPayloadConceptNew` (`similar`: bis zu 3 Kandidaten mit Ähnlichkeit und ggf. Entscheidung) bzw. `InboxPayloadConceptMerge`.
+   - Je Beziehung: `concept_relation` (`confirmed = false`, `source = ki`, `proposal_session_id`, `job_id`) und ein Eintrag `relation`.
+   - **Priorität:** Konzept-Einträge `10 · (3 − importance) + Position im Extrakt`, Beziehungen `1000 + Position`.
+   - Belege an vorhandene Konzepte mit `ON CONFLICT DO NOTHING` (`evidence_dedupe_uq`).
+   - **Automatisch annehmen** nach `ai.auto_accept` (§20.7), mit denselben Wirkungen wie im Core (§20.6), Status `automatisch`: `nur_beziehungen` → Beziehungen, deren Endpunkte beide `aktiv` sind. `alles_ab_0_9` → zusätzlich `concept_new` mit `confidence ≥ 0,9` (Annahme A1), `concept_merge` mit `basis = ki` und Entscheidungs-Konfidenz ≥ 0,9 (A2) und danach Beziehungen mit `confidence ≥ 0,9`, deren Endpunkte jetzt aktiv sind (A3). Scheitert eine Annahme (Namenskonflikt, Kreis), bleibt der Eintrag `offen`.
+   - `ctx.finish(ConceptsResolveResult)`.
+
+**Fehler** (beide Jobs): Payload ungültig, Session fehlt, Extrakt fehlt → `fehler` sofort. Lock verloren → `LockLostError`. KI-Fehler nach §20.5. Ein fehlender Embedder ist kein Fehler (Schritt 4).
+
+**Fake** (`SG_LLM=fake`, §20.5), deterministisch, ohne Netz:
+- `concepts.extract`: je Folie mit nicht leerem Titel (nach `index`, gleiche `key` nur einmal) ein Konzept: Name = Titel, `aliases = []`, `one_liner` = `Erfundene Erklärung zu <Titel>.`, `kind = definition`, `importance = 2`, `exam_hint = false`, `prof_explanation = null`, `confidence = 0.95`. Belege: die Folie und, falls es Transkript-Abschnitte in ihrer Zeit gibt, ein Zeitraum vom ersten Beginn bis zum letzten Ende dieser Abschnitte. Ohne Folien, aber mit Transkript: je angefangene 10 min ein Konzept `Thema <k>` mit dem Zeitraum der Abschnitte darin. Beziehungen: `c(k+1) baut_auf c(k)`, `why` = `Folgt in der Vorlesung.`, `confidence = 0.9`.
+- `concepts.resolve`: Entscheidung `gleich`, wenn `base` gleich ist, `teil_von`, wenn eine `base` die andere als ganzes Wort enthält, sonst `verschieden`, Konfidenz 0,9, Begründung `Regel des Fakes.`. Keine weiteren Beziehungen.
+
+### 20.4 `summary.write` (Worker, 05 §P9 ohne Vault, F-NAC-08)
+
+`handlers/summary_write.py`, Stufe `standard`, Prompt `prompts/summary.write/v1.md`.
+
+1. Payload prüfen, Session lesen (§20.3).
+2. **Eingabe:** wie §20.3 Schritt 2, aber höchstens 300 Wörter Transkript je Folie, dazu die Konzepte der Session (aktive und Vorschläge mit Belegen aus dieser Session, ohne abgelehnte: Name und One-Liner).
+3. **Weder Folien noch Transkript:** eine vorhandene Zusammenfassung hart löschen, `fertig` mit `skipped = true`.
+4. `input_hash` wie §20.3 (mit `SUMMARY_VERSION = 1`). Gleicher `input_hash` wie die gespeicherte Zusammenfassung und kein `force` → `unchanged = true`.
+5. **Aufruf:** bis zu 5 Sätze (05 §P9), jeder mit Belegen (Folien-Indizes, Zeiträume), und eine Gliederung (Kapitel aus den Folien, je Punkt Titel und Folien-Indizes). Belege prüfen wie §20.3 Schritt 7. Ein Satz ohne gültigen Beleg fällt weg (`dropped_sentences`), höchstens 6 Belege je Satz. Bleibt **kein** Satz, gilt die Ausgabe als ungültig (einmal nachfordern, §20.5).
+6. Schreiben (Session sperren, Job-Besitz prüfen): `session_summary` per `INSERT … ON CONFLICT (session_id) DO UPDATE` ersetzen, `lang` = `module.lang`. `ctx.finish(SummaryWriteResult)`.
+
+**Direkt sichtbar, kein Inbox-Vorschlag** (Abweichung von 03 §8 und 08 §5, `inbox_item(summary)`): Die Kurzfassung verändert das Wissensnetz nicht (05 §1 „Vorschlag statt Tatsache“ gilt für Konzepte, Beziehungen, Karten). Sie ist mit ✦ als KI-Text erkennbar (R8), jeder Satz trägt Quellen (R6), und ein zusätzlicher Klick zum Annehmen brächte nichts. Bearbeiten kommt mit dem Vault; dann gilt: Eine bearbeitete Zusammenfassung überschreibt `summary.write` nicht.
+
+**Fake:** Sätze `Die Vorlesung behandelt <Name>.` für die ersten 5 Konzepte der Eingabe mit bis zu 2 ihrer Belege; ohne Konzepte `Folie <i> behandelt <Titel>.` für die ersten 5 Folien mit Titel; ohne Folien `Ab <mm:ss> geht es um gesprochene Inhalte.` je 10 min. Gliederung: je Folie mit Titel (höchstens 30) der Titel mit dieser Folie als Beleg.
+
+### 20.5 KI im Worker: Anbieter, Schlüssel, Aufrufe, Kosten, Budget
+
+| Variable | Standard | Bedeutung |
+|---|---|---|
+| `SG_LLM` | `anthropic`. In CI und Tests `fake` | Anbieter. Unbekannter Wert: nicht eingerichtet (`issue = unbekannter_anbieter`) |
+| `ANTHROPIC_API_KEY` | leer | Schlüssel der Claude API. Nur in `$SG_DATA_DIR/config/.env` (Rechte 600), nur der Worker liest ihn |
+| `SG_MODEL_FAST`, `SG_MODEL_STANDARD`, `SG_MODEL_DEEP` | `claude-haiku-5-5`, `claude-sonnet-5-5`, `claude-opus-5-5` | Modell je Stufe (`ai/tiers.py`, K-01) |
+| `SG_USD_EUR` | `0.92` | Umrechnung der Preise (USD) in Euro. Bewusst eher hoch: Das Budget greift lieber zu früh |
+| `SG_FAKE_LLM_EUR_PER_CALL` | `0` | nur Tests: Kosten, die der Fake je Aufruf bucht |
+
+**Schlüssel**
+- Der Worker liest `.env` beim Start (wie bisher), übernimmt `ANTHROPIC_API_KEY` in seine Konfiguration und **entfernt die Variable danach aus `os.environ`**, damit Kindprozesse (`ffmpeg`) sie nicht erben. Kommt der Schlüssel aus `.env` und ist die Datei für Gruppe oder andere lesbar, nutzt der Worker ihn nicht (`issue = env_offen`, Log-Hinweis auf `chmod 600`). Eine in der Umgebung gesetzte Variable hat wie bei allen Variablen Vorrang (nur für die Entwicklung).
+- Der Client bekommt den Schlüssel ausdrücklich (`Anthropic(api_key=…)`). Andere Anmeldewege des SDK (Profile, `ANTHROPIC_AUTH_TOKEN`) werden nicht genutzt. `ANTHROPIC_LOG` wird nicht gesetzt.
+- Der Schlüssel steht nie in Logs, `job.error`, `job.result`, der Datenbank, Antworten oder im Repo. Eingerichtet wird er nur in der Datei, nie über die Web-App. Eine Änderung wirkt nach einem Neustart des Workers (`pnpm sg stop`, `pnpm sg start`).
+- **Der Core liest den Schlüssel nie:** `loadDotEnv` überspringt Schlüssel, die mit `ANTHROPIC_` beginnen, und der Core entfernt `ANTHROPIC_API_KEY` beim Start aus seiner Umgebung (die CLI-Prozesse, die er startet, erben ihn so nicht).
+- **`GET /health` des Workers** (§19.4) bekommt `llm: WorkerLlmStatus` `{ provider, configured, issue }` (optional im Schema, damit ein älterer Worker gültig bleibt). `configured` ist beim Fake immer `true`.
+
+**Aufrufe** (offizielles SDK `anthropic`, neue Abhängigkeit für alle Plattformen, Version legt T2-21a fest, mindestens zwei Wochen alt)
+
+| Aufgabe | Stufe | `output_config.effort` | `max_tokens` | Streaming | Prompt |
+|---|---|---|---|---|---|
+| `concepts.extract` | `standard` | `medium` | 64 000 | ja | `concepts.extract/v1` |
+| `concepts.resolve` | `standard` | `low` | 16 000 | nein | `concepts.resolve/v1` |
+| `summary.write` | `standard` | `medium` | 32 000 | ja | `summary.write/v1` |
+
+- **Begründung `resolve` auf `standard`/`low`:** 05 §P8 verlangt `standard`. Die Entscheidung „gleich/Teil von/verwandt/verschieden“ braucht Fachverständnis über Sprachen und Fächer hinweg, ein falsches Zusammenführen kostet den Nutzer mehr als die paar Cent. Der Aufruf ist gebündelt und klein, darum reicht `low`. `fast` (Haiku) hat außerdem keinen serverseitigen Refusal-Fallback.
+- **Strukturierte Ausgabe** über `messages.parse(…, output_format=<Pydantic-Modell>)` bzw. bei Streaming `messages.stream(…, output_format=…)` und `get_final_message().parsed_output`. Die Ausgabemodelle gehören zum Prompt und liegen im Worker (`ai/outputs.py`, versioniert mit dem Prompt), nicht in `packages/schemas`: Sie nutzen Folien-Indizes und Sekunden statt IDs, und Constraints aus dem Codegen (Muster, Grenzen) kann die strukturierte Ausgabe nicht alle erzwingen. Gespeichert werden die geprüften Typen aus `packages/schemas` (`ConceptsExtractResult`, `InboxPayload`, `SessionSummary`).
+- **Thinking** bleibt Standard (adaptiv, Parameter weglassen). Kein `temperature`, `top_p`, `top_k`.
+- **Refusal-Fallback** standardmäßig an (Vorlesungsinhalte wie IT-Sicherheit können Klassifikatoren auslösen): `fallbacks: "default"` mit Beta-Header `server-side-fallback-2026-07-01`, nur für Sonnet und Opus (Haiku hat keinen). Wie das SDK das bindet (Beta-Namensraum, ggf. `extra_body`), legt T2-21a fest. Das tatsächlich genutzte Modell steht in `response.model` und kommt in `cost_entry.model` und die Ergebnisse.
+- **`stop_reason` vor dem Lesen prüfen:** `refusal` (auch nach dem Fallback) → `fehler` sofort, `KI hat die Anfrage abgelehnt (<Kategorie>)`. `max_tokens` → `fehler` sofort, `KI-Ausgabe zu lang`.
+- **Ungültige Ausgabe** (Schema verletzt oder nach §20.3/§20.4 ganz unbrauchbar): **einmal** nachfordern. Die Nachricht enthält die bisherige Antwort und die Fehlermeldung (ohne Prefill). Scheitert auch das: `fehler` sofort, `KI-Ausgabe ungültig`.
+- **Prompts** liegen versioniert unter `services/worker/prompts/<aufgabe>/v<n>.md` (05 §1). Die Version (`<aufgabe>/v<n>`) steht in Ergebnis, Inbox-Nutzlast und `session_summary`. Eine Änderung am Prompt ist eine neue Version (alte bleiben liegen) und ändert `input_hash`.
+- **Prompt-Caching** nur bei mehreren Kapiteln derselben Vorlesung (§20.3 Schritt 5).
+- Client: Zeitlimit 600 s je Aufruf, `max_retries = 2` im SDK.
+
+| Fehler | Ergebnis (`job.error`) |
+|---|---|
+| nicht eingerichtet (beim Start jedes der drei Jobs geprüft) | `fehler` sofort, `KI nicht eingerichtet` |
+| Monatsbudget erreicht (vor jedem Aufruf geprüft) | `fehler` sofort, `Monatsbudget erreicht` |
+| `401` | `fehler` sofort, `KI-Schlüssel ungültig` |
+| `403`, `404` | `fehler` sofort, `Kein Zugriff auf das Modell <Modell>` |
+| `400`, `413` | `fehler` sofort, `KI-Anfrage ungültig` |
+| `429`, `5xx`, `529`, Verbindung, Zeitlimit | Retry nach §3 (30 s, 60 s), danach `fehler`, `KI nicht erreichbar (<Status>)` |
+| Refusal, `max_tokens`, ungültige Ausgabe | siehe oben |
+
+Fehlertexte enthalten nie Schlüssel, Header oder Eingabetexte.
+
+**Kosten** (F-DAT-05)
+- **Je Aufruf eine `cost_entry`-Zeile**, direkt danach in einer **eigenen** Transaktion, auch wenn der Job danach scheitert: `job_id`, `session_id`, `provider`, `model`, `task` (Job-Typ), die vier Token-Zahlen aus `usage`, `cost_estimate_usd`, `cost_estimate_eur`, `request_id`.
+- **Preise** (USD je Million Tokens, Tabelle im Worker, `ai/pricing.py`):
+
+| Modell | Eingabe | Ausgabe | Cache schreiben (5 min) | Cache lesen |
+|---|---|---|---|---|
+| `claude-haiku-5-5` (Prompt ≤ 100 000 Tokens) | 0,10 | 0,50 | 0,125 | 0,01 |
+| `claude-haiku-5-5` (Prompt > 100 000 Tokens, gilt dann für den ganzen Aufruf) | 0,50 | 2,50 | 0,625 | 0,05 |
+| `claude-sonnet-5-5` | 2 | 10 | 2,50 | 0,20 |
+| `claude-opus-5-5` | 4 | 20 | 5 | 0,20 |
+
+  Unbekanntes Modell (etwa über `SG_MODEL_*`): Preis von `claude-opus-5-5` und eine Warnung im Log (lieber zu hoch). Liefert die Antwort Einträge je Modell (`usage.iterations`, Refusal-Fallback), wird je Eintrag mit dessen Preis gerechnet. `cost_estimate_eur = round(usd · SG_USD_EUR, 6)`.
+- **Fake:** `provider = fake`, `model = fake-llm-1`, Tokens geschätzt (`ceil(UTF-8-Bytes / 3)`), Kosten `SG_FAKE_LLM_EUR_PER_CALL` (Standard 0). So lassen sich Kostenübersicht und Budget in der CI prüfen.
+
+**Monatsbudget**
+- **Monat** = Kalendermonat in Ortszeit (`TZ`, wie §8). Summe = `sum(cost_estimate_eur)` der nicht gelöschten `cost_entry` seit Monatsbeginn.
+- **Vor jedem Aufruf** (auch vor dem Nachfordern): Summe ≥ `ai.monthly_budget_eur` (gelesen aus `setting` Schlüssel `ai`, fehlend oder ungültig: 10) → `fehler` sofort, `Monatsbudget erreicht`. Ein laufender Aufruf wird nicht abgebrochen, das Budget kann also um einen Aufruf überschritten werden. Der Nutzer erhöht das Budget und stößt die Kette neu an (`reprocess`). `monthly_budget_eur = 0` schaltet die Cloud-KI damit ganz ab.
+- Abweichung von F-DAT-05: Bei 100 % enden **alle** KI-Jobs dieses Schnitts mit `fehler` (es gibt noch keine „nicht dringenden“). Der Hinweis bei 80 % steht nur in den Einstellungen (`warn`), das Tagesbriefing kommt mit Phase 4.
+
+### 20.6 Core: Endpunkte und Entscheidungen
+
+| Route | Antwort | Fehler |
+|---|---|---|
+| `GET /inbox?status&session_id&kind&cursor&limit` | 200 `InboxItemList` | `400 validation_failed` |
+| `GET /inbox/overview` | 200 `InboxOverview` | – |
+| `POST /inbox/{id}/accept` mit `InboxAcceptRequest` | 200 `InboxDecisionResult` | `404 inbox_item_not_found`, `409 inbox_item_decided`, `400 inbox_action_invalid`, `409 concept_exists`, `409 merge_target_invalid`, `409 relation_endpoint_pending`, `409 relation_cycle` |
+| `POST /inbox/{id}/reject` | 200 `InboxDecisionResult` | `404 inbox_item_not_found`, `409 inbox_item_decided` |
+| `POST /inbox/{id}/reopen` | 200 `InboxDecisionResult` | `404 inbox_item_not_found`, `409 inbox_item_not_decided`, `409 inbox_reopen_conflict` |
+| `POST /inbox/bulk` mit `InboxBulkRequest` | 200 `InboxBulkResult` | `400 validation_failed` (nicht genau eins von `ids` und `session_id`), `404 session_not_found` |
+| `GET /concepts?module_id&status&q&cursor&limit` | 200 `ConceptList` | `400 validation_failed` |
+| `GET /concepts/{id}` | 200 `ConceptDetail` | `404 concept_not_found` |
+| `GET /sessions/{id}/concepts` | 200 `SessionConcepts` | `404 session_not_found` |
+| `GET /sessions/{id}/summary` | 200 `SessionSummaryView` (`summary: null`, wenn es keine gibt) | `404 session_not_found` |
+| `GET /costs/summary?month` | 200 `CostSummary` | `400 validation_failed` |
+| `GET /ai/status` | 200 `AiStatus` | – |
+
+Alle Routen gelten lokal und aus dem Netz (mit Token) wie die übrigen. Gelöschte Sessions, Konzepte und Einträge gibt es nicht (`404`). Listen wie §7 (Standard 50, höchstens 200).
+
+**Lesen**
+- **`GET /inbox`:** `status` = `offen` (Standard) \| `entschieden` \| `alle`, `kind` mehrfach. Sortierung `(created_at DESC, priority, id)`: Einträge eines Laufs haben denselben `created_at` und stehen nach `priority`. `session` als `SessionRef`. `blocked` bei `relation`: `endpunkt_offen`, wenn ein Endpunkt noch `vorschlag` mit offenem Eintrag ist, `endpunkt_abgelehnt`, wenn sein Eintrag abgelehnt ist, sonst `null`.
+- **`GET /inbox/overview`:** `open_count`, `older_count` (offen und älter als 14 Tage, F-NAC-06) und je Session mit offenen Einträgen `open_count` und `oldest_at`, neueste Session zuerst. Einträge ohne Session bilden eine Gruppe mit `session = null`.
+- **`GET /concepts`:** `status` = `aktiv` (Standard) \| `vorschlag` \| `alle` (ohne `zusammengefuehrt`), `module_id` über `concept_module`, `q` (1–100 Zeichen) trifft Name oder Alias als Teilwort (`ILIKE`, ohne Groß-/Kleinschreibung). Sortierung `lower(name), id`. `evidence_count` und `session_count` über nicht gelöschte Belege.
+- **`GET /concepts/{id}`:** auch für Vorschläge und Hüllen (`zusammengefuehrt` mit `merged_into`, die Web-App leitet weiter). Belege mit `EvidenceView` (`missing`, wenn Folie oder Foliensatz gelöscht ist, `slide_title` aus der Folie), neueste Session zuerst, höchstens 200. Beziehungen nur bestätigte zu nicht gelöschten Konzepten, `cross_module` = die beiden Konzepte haben kein gemeinsames Modul. `inbox_item_id` = offener Eintrag des Konzepts, sonst `null`.
+- **`GET /sessions/{id}/concepts`:** Konzepte mit mindestens einem nicht gelöschten Beleg aus der Session (`evidence.session_id`), nur `aktiv` und `vorschlag`, ohne Vorschläge mit abgelehntem Eintrag. Je Konzept nur die Belege dieser Session. Sortierung: kleinster Folien-Index der Belege, dann frühester Zeitpunkt, dann Name.
+- **`GET /costs/summary`:** `month` als `YYYY-MM` (Standard: aktueller Monat in Ortszeit). Summen über `cost_entry` im Monat, `by_session` die 20 teuersten mit `SessionRef` (gelöschte Sessions mit `session = null`).
+- **`GET /ai/status`:** `GET /health` des Workers (§19.4, Zeitlimit 800 ms). Nicht erreichbar → `worker_reachable = false`, `llm = null`. Fehlt `llm` in der Antwort (älterer Worker), ebenfalls `llm = null`. `budget` aus `cost_entry` und `ai.monthly_budget_eur`, `warn` ab 80 %.
+
+**Annehmen** (Wirkungen gelten genauso für die Automatik im Worker, §20.3)
+- **A1 `concept_new` annehmen** (ohne `merge_into`): Ist ein anderes aktives Konzept namensgleich (§20.3) mit dem Vorschlag in der Fassung nach `edit`, folgt `409 concept_exists` mit `details.concept_id` (die Web-App bietet „Mit <Name> zusammenführen“ an, die Automatik nimmt A2 mit diesem Ziel). Sonst: `edit` übernehmen (alte Werte in `decision.previous`), `status = aktiv`, `proposal_session_id = NULL`, `importance_base` nach W-05 aus `importance` (1 → 0,8, 2 → 1,0, 3 → 1,3), `exam_relevant` ODER `exam_hint`. Ändern sich Name, Aliase oder One-Liner, werden `embedding` und `embedding_model` geleert (der nächste Abgleich holt den Vektor nach, §20.3 Schritt 3). Danach offene `relation`-Einträge mit diesem Konzept als Endpunkt nach `ai.auto_accept` automatisch bestätigen (A3), sobald beide Endpunkte aktiv sind; ihre IDs stehen in `decision.cascade_item_ids`.
+- **A2 Zusammenführen** (`concept_merge` annehmen oder `concept_new` mit `merge_into`): Ziel `T` = `merge_into` oder `target_concept_id`. `T` muss ein anderes, aktives, nicht gelöschtes Konzept sein, sonst `409 merge_target_invalid`. Belege des Vorschlags `P` an `T` hängen (bei Dublette nach `evidence_dedupe_uq` wird der von `P` hart gelöscht), `P.name` und `P.aliases` als Aliase an `T` (ohne namensgleiche, höchstens 20 insgesamt), fehlende `concept_module` an `T`, unbestätigte Beziehungen von `P` auf `T` umhängen, samt `from_concept_id`/`to_concept_id` in der Nutzlast ihrer Einträge (Selbstbezug oder Dublette: Beziehung samt Eintrag hart löschen), `T.exam_relevant` ODER `exam_hint`, `T.embedding` leeren, wenn Aliase dazukamen. `P`: `status = zusammengefuehrt`, `merged_into = T` (Invariante 5, `proposal_session_id` bleibt). `decision`: `moved_evidence_ids`, `added_aliases`, `added_module_ids`, umgehängte Beziehungs-Einträge in `cascade_item_ids`.
+- **A3 Beziehung bestätigen:** Beide Endpunkte müssen `aktiv` sein, sonst `409 relation_endpoint_pending` (`details.concept_id`). `relation_kind` ändert die Art (alte in `decision.relation_kind_before`, symmetrische sortieren). Gibt es die Beziehung danach schon, wird diese samt Eintrag als `angenommen` geschlossen und die Zeile hart gelöscht. `baut_auf` darf keinen Kreis über bestätigte `baut_auf` bilden, sonst `409 relation_cycle` mit `details.path` (Konzept-IDs). Dann `confirmed = true`, `proposal_session_id = NULL`.
+- Passt ein Feld nicht zur Art (`relation_kind` bei Konzepten, `edit` bei Beziehungen, `as_new` bei `concept_new`, `as_new` zusammen mit `merge_into`), folgt `400 inbox_action_invalid`. `concept_merge` mit `as_new: true` wird wie A1 angenommen (`edit` erlaubt).
+- Eintrag: `status = angenommen`, `decided_at = now()`, `decision`.
+
+**Ablehnen:** Eintrag `abgelehnt` (`decision.action = abgelehnt`). Der Vorschlag bleibt als `vorschlag` liegen (Begründung: Rückgängig ist trivial, ein neuer Lauf schlägt ihn für diese Session nicht wieder vor, §20.3 Schritt 7, und es gibt keinen Sonderfall im Papierkorb; Listen zeigen nur `aktiv`). Offene `relation`-Einträge mit diesem Vorschlag als Endpunkt werden mit abgelehnt (`cascade_item_ids`). Eine abgelehnte Beziehung bleibt unbestätigt liegen.
+
+**Rückgängig (`reopen`, R15):** setzt den Eintrag auf `offen` und macht `decision` rückgängig:
+- `abgelehnt` → `offen`, die `cascade_item_ids` ebenso.
+- A1: nur, wenn das Konzept keine Belege aus anderen Sessions, keine bestätigten Beziehungen außer denen aus `cascade_item_ids` und keine Konzepte hat, die in es zusammengeführt wurden. Sonst `409 inbox_reopen_conflict`. Dann `status = vorschlag`, `proposal_session_id` = Session des Eintrags, Felder aus `previous`, `cascade_item_ids` zurück auf `offen` (Beziehungen unbestätigt mit `proposal_session_id`).
+- A2: die `moved_evidence_ids`, die noch an `T` hängen, zurück an `P`, `added_aliases` (falls noch vorhanden) und `added_module_ids` von `T` entfernen, umgehängte Beziehungen zurück an `P`, `P` wieder `vorschlag` ohne `merged_into`.
+- A3: `confirmed = false`, `proposal_session_id` = Session des Eintrags, Art aus `relation_kind_before`.
+- Ein Eintrag ohne Session (gelöscht) lässt sich nicht wieder öffnen (`404`).
+
+**Massenaktionen (`POST /inbox/bulk`):** `accept` mit `session_id` nimmt alle offenen Einträge der Session an: erst `concept_new` und `concept_merge` nach `priority`, dann `relation`. Jeder Eintrag in einem eigenen Savepoint, Fehler (etwa `concept_exists`, `relation_cycle`, `relation_endpoint_pending`) landen in `skipped` mit Code, der Rest läuft weiter. `reject` und `reopen` entsprechend. Mit `ids` gilt dieselbe Reihenfolge. „Rückgängig“ im Toast schickt `reopen` mit den `decided`-IDs (in umgekehrter Reihenfolge).
+
+**Sperren:** Session-Zeile des Eintrags `FOR SHARE` (vor dem Eintrag, damit `concepts.resolve`, das die Session `FOR NO KEY UPDATE` sperrt, davor oder danach liegt) → Eintrag `FOR UPDATE` (Status unter der Sperre prüfen) → betroffene Konzepte nach ID sortiert `FOR UPDATE` → Beziehungen. Jede Bestätigung einer `baut_auf`-Beziehung (Core und Worker) nimmt vorher `pg_advisory_xact_lock(CONCEPT_GRAPH_LOCK_KEY = 70070006)`, damit zwei gleichzeitige Bestätigungen keinen Kreis bilden. `Idempotency-Key` gilt für alle `POST` (08 §1).
+
+### 20.7 Einstellungen KI (F-EIN-01, §14)
+
+- Neuer Bereich `ai` in `setting` (`AiSettings`): `monthly_budget_eur` (0–1 000, Standard 10) und `auto_accept` (`aus` \| `nur_beziehungen` \| `alles_ab_0_9`, Standard `aus`). `GET /settings` liefert ihn aufgefüllt, `PATCH /settings` mit `ai` (`AiSettingsUpdate`) führt Feld für Feld zusammen (§14.1).
+- **Schemaänderung mit T2-22a:** `Settings` bekommt `ai: AiSettings` als Pflichtfeld, `SettingsUpdate` bekommt `ai?: AiSettingsUpdate`. Beides kommt im selben PR wie `services/settings.ts`, damit `main` grün bleibt (wie §14.2). Diese Änderung an `packages/schemas` ist für T2-22a vorab freigegeben.
+- Der Worker liest den Bereich direkt aus `setting` (Schlüssel `ai`), fehlende oder ungültige Felder mit den Standards.
+
+### 20.8 Papierkorb (§13)
+
+| Gelöscht | Mitgelöscht (gleiches `deleted_at`) | Bleibt |
+|---|---|---|
+| `session` | zusätzlich zu §13: `inbox_item` (`session_id`), `evidence` (`session_id`), `concept` (`proposal_session_id`: Vorschläge und Hüllen) mit deren `concept_module`, `concept_relation` (`proposal_session_id`), `session_summary` | aktive Konzepte, auch wenn sie danach keinen Beleg mehr haben, und bestätigte Beziehungen |
+| `module` (und damit `semester`) | zusätzlich `concept_module` (`module_id`), über die Sessions alles aus der Zeile oben | die Konzepte selbst |
+| `slide_deck` | – | Folien-Belege und Quellen der Zusammenfassung (Anzeige „Folie gelöscht“, `missing`) |
+
+- `CHILDREN` in `trash.ts`: `session → inbox_item, evidence, concept (proposal_session_id), concept_relation (proposal_session_id), session_summary`, `module → concept_module`, `concept → concept_module`. Die neuen Tabellen kommen in den Typ `Node`, `dependent_count` zählt sie nicht (Maschinenausgaben und Vorschläge, wie §13).
+- **Begründung „aktive Konzepte bleiben“:** Angenommenes ist bestätigtes Wissen des Nutzers (05 §1: nie bestätigte Nutzerdaten ersetzen), Konzepte gehören keinem Fach allein (LP10) und tragen später Karten und Beziehungen. Ein Konzept ohne Beleg zeigt „Keine Belege mehr“ (§20.10). Konzepte selbst löschen kommt mit dem Vault (F-BIB-05, eigene `TrashKind`).
+- Wiederherstellen holt alles mit gleichem `deleted_at` zurück. Verletzt das einen partiellen Unique-Index (`evidence_dedupe_uq`, `concept_relation_uq`, Inbox-Indizes), gilt `409 restore_conflict` (§13).
+- Endgültiges Löschen erledigen die FKs (`ON DELETE CASCADE` auf `session`, `concept`, `concept_relation`, `module`). `cost_entry` bleibt (keine FK auf `session`).
+
+### 20.9 Sync
+
+Kein neues Ereignis. `inbox.count` aus 08 §2.4 entfällt (wie `session.processing` in §18.7). Die Web-App lädt nach:
+- bei `session.updated`, wenn `processing['concepts.resolve']` oder `processing['summary.write']` auf `fertig` wechselt: `GET /inbox/overview`, `GET /sessions/{id}/concepts` bzw. `GET /sessions/{id}/summary`,
+- nach eigenen Entscheidungen (Antwort der Route),
+- nach dem Neuverbinden (§11.6).
+Zwei offene Tabs können kurz verschiedene Zähler zeigen. Das iPad ist nicht betroffen.
+
+### 20.10 Web (verbindliche Eckpunkte)
+
+- **Inbox** `/inbox` (07 §3.11, F-NAC-06): oben „Vorschläge“, darunter wie bisher die Moodle-Dateien (`MoodleInbox`). Gruppen je Session aus `GET /inbox/overview` (Kopf „VL 7 · Titel · Modul“), Einträge mit Typ-Symbol, Kurzbeschreibung (`concept_new`: Name und One-Liner; `concept_merge`: „gleich wie *Ziel*?“; `relation`: „A baut auf B auf“), ✦ und Quellen-Chips („F 14“, „42:12“). Aktionen „Annehmen“ / „Verwerfen“, Tasten `→` `←` `E` (bearbeiten: Name, Aliase, One-Liner, Art, inline, kein Dialog), Ziel wählen über eine Konzeptsuche (`GET /concepts?q`). „Alle annehmen“ je Gruppe mit 10-s-Toast „Rückgängig“ (R15). Filter nach Art. Einträge älter als 14 Tage gesammelt („12 ältere Vorschläge“, aufklappbar). `blocked`-Beziehungen ausgegraut mit Hinweis „wartet auf *Konzept*“. `409 concept_exists` → Toast mit „Zusammenführen“, kein Dialog.
+- **Navigation:** Zahl offener Einträge (`open_count`) neutral grau, nie rot (07 §2, LP9).
+- **Rückblick** (`/rueckblick`, §18.9): Kurzfassung ✦ über dem Transkript (aufklappbar, 5 Sätze mit Quellen-Chips, Gliederung). Folien-Chip wählt die Folie, Zeit-Chip springt wie `t` (§19.7). In der rechten Spalte „Konzepte“ als Chips (Vorschläge mit dezenter Kennzeichnung) mit Sprung zur Konzeptansicht; Konzepte der aktuellen Folie zuerst. Neue Zustände: Konzept-Schritt offen → „Konzepte kommen noch“, KI nicht eingerichtet (`GET /ai/status`, `configured = false`) → statt „nicht fertig“ ruhig „KI nicht eingerichtet · Einstellungen“, Session ohne Konzept-Schritte in `processing` → „Konzepte erzeugen“ (`reprocess` mit `from_step: "concepts.extract"`).
+- **Konzeptansicht** `/bibliothek?konzept=<id>` (F-BIB-02, 07 §3.6, ohne Notiz-Editor und ohne Beherrschung): Kopf mit Name, Aliasen, Fächern, Klausur-Kennzeichen; Belege als Kacheln (Folie → `documentHref('folien', deck_id, slide_index)`, Zeit → `/rueckblick?id=<session_id>&t=<t_start_ms>` mit ▶); Beziehungen nach Art und Richtung mit Fächerbrücken-Kennzeichen; ohne Belege „Keine Belege mehr“. Hüllen leiten auf `merged_into` weiter, Vorschläge zeigen „Vorschlag · in der Inbox“.
+- **Bibliothek** `/bibliothek` ohne Parameter: Konzeptliste je Modul (`GET /concepts?module_id`), Suche im Namen.
+- **Einstellungen → KI:** Status „Eingerichtet“ bzw. „Nicht eingerichtet“ mit einem Satz, wie es geht (Schlüssel in `~/StudienGehirn/config/.env` eintragen, `chmod 600`, Worker neu starten). Nie ein Eingabefeld für den Schlüssel. Monatsbudget (Zahl in €), „automatisch annehmen“ (drei Optionen), Kosten des Monats aus `GET /costs/summary` (Summe, Balken gegen Budget ohne Rot, je Aufgabe, teuerste Sessions).
+- Texte ruhig und sachlich (07 §7), keine modalen Dialoge, während eine Session läuft keine KI-Ausgabe (R1). Hell- und Dunkelmodus.
+
+### 20.11 Neue Fehlercodes
+
+| Code | HTTP | Bedeutung |
+|---|---|---|
+| `inbox_item_not_found`, `concept_not_found` | 404 | Objekt fehlt oder ist gelöscht |
+| `inbox_item_decided` | 409 | Eintrag ist schon entschieden (`details.status`) |
+| `inbox_item_not_decided` | 409 | `reopen` auf einen offenen Eintrag |
+| `inbox_reopen_conflict` | 409 | Rückgängig nicht mehr möglich (§20.6) |
+| `concept_exists` | 409 | namensgleiches aktives Konzept (`details.concept_id`) |
+| `merge_target_invalid` | 409 | Ziel fehlt, ist nicht aktiv oder der Vorschlag selbst |
+| `relation_endpoint_pending` | 409 | Endpunkt der Beziehung ist noch kein aktives Konzept (`details.concept_id`) |
+| `relation_cycle` | 409 | `baut_auf` würde einen Kreis bilden (`details.path`, F-BIB-03: „Das würde einen Kreis bilden: A → B → A“) |
+| `inbox_action_invalid` | 400 | Feld passt nicht zur Art des Eintrags |
+
+### 20.12 Tickets und Besitz
+
+| Ticket | Inhalt | Besitzt (Dateien) | Abhängig von |
+|---|---|---|---|
+| **T2-20** (Lead) | Diese Verträge, `concepts.schema.json`, `PipelineStep`, `WorkerHealth.llm`, Beispiele, Migration `0010_concepts`, Drizzle-Schema, Texte der Schrittliste | `packages/schemas/src/concepts.schema.json`, die Ergänzungen in `transcript.schema.json` und `search.schema.json`, Beispiele, generierte Dateien, `services/core/src/db/schema/{concepts,system}.ts`, eine Zeile in `index.ts`, `services/core/drizzle/0010_*`, in `apps/web/src/lib/transcript.ts` nur `STEP_LABELS`, dieser Abschnitt | – |
+| **T2-21a** (Worker) | LLM-Client (`anthropic`, Fake) mit Refusal-Fallback, Prüfung von `stop_reason` und einmaligem Nachfordern, Schlüssel-Handhabung, Preise, `cost_entry`, Budget, `llm` in `GET /health`, `concepts.extract` mit Prompt | `services/worker/src/sg_worker/ai/{interfaces,llm,llm_fake,outputs,pricing,budget}.py`, `services/worker/src/sg_worker/handlers/concepts_extract.py`, `services/worker/prompts/concepts.extract/**`, in `server.py` nur das Feld `llm`, in `config.py`/`__main__.py` nur Schlüssel und `SG_LLM`, `pyproject.toml`, `uv.lock` (Abhängigkeit `anthropic`, Begründung im PR), eine Zeile in `handlers/__init__.py`, Tests (Migration `0010` in `conftest.py` laden) | T2-20 |
+| **T2-21b** (Worker) | `concepts.resolve` (Abgleich, Beziehungen, Inbox, Automatik), `summary.write`, Prompts, Fake-Regeln dazu | `services/worker/src/sg_worker/handlers/{concepts_resolve,summary_write}.py`, `services/worker/src/sg_worker/concepts/**` (Normieren, Annahme A1–A3, Kreisprüfung), `services/worker/prompts/{concepts.resolve,summary.write}/**`, je eine Zeile in `handlers/__init__.py`, in `ai/outputs.py` und `ai/llm_fake.py` nur die eigenen Teile, Tests | T2-21a (LLM-Client) |
+| **T2-22a** (Core) | Kette und `reprocess` (§20.2), `GET /sessions/{id}/summary`, `GET /costs/summary`, `GET /ai/status`, Einstellungen `ai` samt Schema, Schlüssel-Schutz im Core, Papierkorb-Kanten, `JOB_PAYLOAD_SCHEMAS` | `services/core/src/services/pipeline.ts`, in `services/transcript.ts` nur `reprocessSession`, `services/core/src/{routes,services}/{summary,costs,ai-status}.ts`, `services/core/src/services/settings.ts` und `Settings`/`SettingsUpdate` (§20.7), in `config.ts`/`main.ts` nur `ANTHROPIC_*`, in `services/trash.ts` nur die Kanten aus §20.8 samt Typ `Node`, in `services/jobs.ts` nur `JOB_PAYLOAD_SCHEMAS`, in `lib/worker-client.ts` nur `llm`, Zeilen in `app.ts`, Tests unter `services/core/test/` | T2-20. **Merge erst nach T2-21b** (§20.2) |
+| **T2-22b** (Core) | Inbox (Lesen, A1–A3, Ablehnen, Rückgängig, Massenaktionen, Sperren), `GET /concepts`, `GET /concepts/{id}`, `GET /sessions/{id}/concepts` | `services/core/src/{routes,services}/{inbox,concepts}.ts`, `services/core/src/services/concept-graph.ts` (Normieren, Kreisprüfung, A1–A3; gleiche Regeln wie T2-21b), in `lib/locks.ts` nur `CONCEPT_GRAPH_LOCK_KEY`, Zeilen in `app.ts`, Tests (schreiben Vorschläge selbst in die Tabellen) | T2-20. Parallel zu T2-21b und T2-22a |
+| **T2-23** (Web) | Inbox, Zähler in der Navigation, Rückblick (Kurzfassung, Konzepte, neue Zustände), Konzeptansicht und -liste, Einstellungen → KI | `apps/web/src/app/inbox/**`, `apps/web/src/app/bibliothek/**`, `apps/web/src/components/{inbox,concepts}/**`, `apps/web/src/components/settings/Ai*.tsx` mit einem Reiter in `SettingsView.tsx`, `apps/web/src/lib/{inbox,concepts,costs}.ts`, in `components/rueckblick/**` und `components/processing/**` nur Kurzfassung, Konzepte und Zustände aus §20.10, in `lib/nav.ts`/`Sidebar.tsx` nur der Zähler, in `apps/web/test/fake-core.ts` nur die Routen aus §20.6 | T2-20. Gegen die Beispiele in `packages/schemas/examples/valid` und die Fake-Core-Routen bauen, danach gegen T2-21/T2-22 mit `SG_LLM=fake` |
+
+**Gemeinsame Regeln von Worker und Core:** Namensgleichheit (§20.3), Annahme A1–A3 und Kreisprüfung stehen in beiden Sprachen (Worker für die Automatik, Core für die Inbox). Beide Tickets testen dieselben Fälle aus §20.6; ändert sich eine Regel, ändern beide und dieser Abschnitt.
+
+**Nur der Owner kann testen:** echte API-Aufrufe (Kosten, Schlüssel in `.env`, Refusal-Fallback mit einer IT-Sicherheits-Vorlesung), die Qualität der Konzepte und der Kurzfassung (goldener Datensatz 05 §4: Konzept-Trefferquote ≥ 80 %, später), die Laufzeit der ganzen Kette (≤ 45 min) und die Annahmequote in der Inbox (05 §4).
+
+### 20.13 Abweichungen von der Spezifikation (Überblick)
+
+- **08 §5 `summary.write`:** schreibt `session_summary` statt `inbox_item(summary)` und Vault-Notiz (§20.4).
+- **03 §8:** in diesem Schnitt nur die Inbox-Arten `concept_new`, `concept_merge`, `relation` (CHECK und Schema). Neue Spalten `decision`, `concept_id`, `target_concept_id`, `relation_id`.
+- **03 §7:** zusätzlich `concept.proposal_session_id`, `embedding_model`, `concept_relation.why`, `proposal_session_id`, `job_id`, `evidence.session_id`, `auto`, `job_id`. Ohne `vault_path`, `content_hash`, `block_hashes` (kommen mit dem Vault).
+- **03 §13 `cost_entry`:** zusätzlich `session_id`, Cache-Tokens, `cost_estimate_usd`, `request_id`.
+- **Invariante 4:** Kreise aus KI-Vorschlägen werden verworfen (`dropped_cycles`), beim Annehmen folgt `409 relation_cycle`. Ein Inbox-Konflikt entsteht erst mit Wikilinks (F-BIB-05).
+- **05 §P8:** `teil_von` und `verwandt` → neues Konzept plus Beziehung `verwandt` (es gibt keinen Beziehungstyp „Teil von“). Ohne Embedder führt Namensähnlichkeit zu einem Vorschlag statt zu einer automatischen Zusammenführung.
+- **05 §P7a:** Kapitel erst ab 150 000 geschätzten Tokens, Zusammenführung der Kapitel ohne KI-Aufruf.
+- **05 §2:** `concepts.extract` hängt von `transcribe` **und** `align.log` ab. Scheitert eins davon, wird die Konzept-Kette abgebrochen (§3).
+- **F-DAT-05:** Bei 100 % enden alle KI-Jobs mit `fehler`, kein Hinweis im Tagesbriefing (§20.5).
+- **08 §1, §2.4:** Endpunkte wie §20.6 (dazu `reopen`, `GET /inbox/overview`, `GET /sessions/{id}/concepts|summary`, `GET /costs/summary`, `GET /ai/status`), ohne `POST /concepts`, `PATCH /concepts/{id}`, `merge`, `split`, `/concept-relations`, `/graph`. Kein Ereignis `inbox.count`.
+- **08 §5:** `concepts.resolve` und `summary.write` mit optionalem `force`.
+- **02 §7 / K-01:** Modelle nur über `SG_MODEL_*`, die Einstellung „Modellstufen je Aufgabe“ kommt später. Die genaue Form der `LLM`-Schnittstelle legt T2-21a fest (strukturierte Ausgabe über das SDK).
+- **Abgelehnte Vorschläge** bleiben als `vorschlag` liegen statt weich gelöscht zu werden (§20.6).
