@@ -112,20 +112,40 @@ export const backupRun = pgTable(
   ],
 );
 
+/**
+ * Ein Cloud-Aufruf (03 §13, F-DAT-05, VERTRAEGE §20.5). Schreibt der Worker direkt nach jedem Aufruf in einer
+ * eigenen Transaktion. `session_id` ohne FK: Kosten bleiben auch nach dem endgültigen Löschen der Session gezählt.
+ */
 export const costEntry = pgTable(
   'cost_entry',
   {
     ...baseColumns(),
     jobId: uuid('job_id').references(() => job.id, { onDelete: 'set null' }),
-    provider: text('provider').notNull(),
-    model: text('model').notNull(),
-    task: text('task').notNull(),
+    sessionId: uuid('session_id'),
+    provider: text('provider').notNull(), // anthropic | fake
+    model: text('model').notNull(), // Modell der Antwort (nach einem Refusal-Fallback das tatsächlich genutzte)
+    task: text('task').notNull(), // Job-Typ, z. B. concepts.extract
     inputTokens: integer('input_tokens').notNull().default(0),
     outputTokens: integer('output_tokens').notNull().default(0),
+    cacheCreationInputTokens: integer('cache_creation_input_tokens').notNull().default(0),
+    cacheReadInputTokens: integer('cache_read_input_tokens').notNull().default(0),
     audioSeconds: real('audio_seconds').notNull().default(0),
+    costEstimateUsd: numeric('cost_estimate_usd', { mode: 'number' }).notNull().default(0),
     costEstimateEur: numeric('cost_estimate_eur', { mode: 'number' }).notNull().default(0),
+    /** `request-id` der Antwort (Support-Anfragen), höchstens 200 Zeichen */
+    requestId: text('request_id'),
   },
-  (t) => [index('cost_entry_job_idx').on(t.jobId), index('cost_entry_created_idx').on(t.createdAt)],
+  (t) => [
+    index('cost_entry_job_idx').on(t.jobId),
+    index('cost_entry_created_idx').on(t.createdAt),
+    index('cost_entry_session_idx').on(t.sessionId),
+    check(
+      'cost_entry_tokens_chk',
+      sql`${t.inputTokens} >= 0 AND ${t.outputTokens} >= 0 AND ${t.cacheCreationInputTokens} >= 0 AND ${t.cacheReadInputTokens} >= 0`,
+    ),
+    check('cost_entry_cost_chk', sql`${t.costEstimateUsd} >= 0 AND ${t.costEstimateEur} >= 0`),
+    check('cost_entry_request_id_chk', sql`${t.requestId} IS NULL OR char_length(${t.requestId}) <= 200`),
+  ],
 );
 
 /** Gespeicherte erste Antworten für `Idempotency-Key` (08 §1). Einträge älter als 24 h werden beim Start gelöscht. */
