@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DataSettings, formatSize } from '../src/components/settings/DataSettings.tsx';
+import { DataSettings, formatSize, oneLine } from '../src/components/settings/DataSettings.tsx';
 import { TrashSettings, daysLeft } from '../src/components/settings/TrashSettings.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ToastProvider } from '../src/lib/toast.tsx';
@@ -134,6 +134,10 @@ afterEach(() => {
 });
 
 describe('Hilfsfunktionen', () => {
+  it('oneLine: Zeilenumbrüche und Steuerzeichen werden zu Leerzeichen', () => {
+    expect(oneLine('Stand „a\nb“\u0007 weg\r\n')).toBe('Stand „a b“ weg');
+  });
+
   it('formatSize und daysLeft', () => {
     expect(formatSize(null)).toBe('–');
     expect(formatSize(512)).toBe('512 B');
@@ -308,11 +312,14 @@ describe('DataSettings', () => {
     await waitFor(() => expect(screen.getByTestId('toast-live')).not.toBeEmptyDOMElement());
   });
 
-  it('Warnung des jüngsten erfolgreichen Laufs (#124): sichtbar oben und am Lauf; ältere zählen nicht', async () => {
+  it('Warnung des jüngsten erfolgreichen Laufs (#124): sichtbar oben, auf einer Zeile; ältere zählen nicht', async () => {
     const text =
-      'Im Backup-Ziel lässt sich ein alter Stand seit mehreren Läufen nicht entfernen: 20261001T030000Z (Keine Berechtigung (EPERM)).';
+      'Ein alter Backup-Stand lässt sich seit mehreren Läufen nicht löschen (keine Berechtigung). Prüfe das Backup-Ziel und lösche den Ordner „20261001T030000Z“ von Hand.';
     const withWarning = backupOverview('/x');
-    const run: Record<string, unknown> = { ...withWarning.items[0], warning: text };
+    const run: Record<string, unknown> = {
+      ...withWarning.items[0],
+      warning: text.replace('Prüfe', '\nPrüfe'),
+    };
     // Ein laufender neuerer Lauf verdeckt die Warnung nicht
     const items: Record<string, unknown>[] = [
       { ...run, id: UUID(2), state: 'laeuft', warning: null, stand: null },
@@ -322,8 +329,10 @@ describe('DataSettings', () => {
     stubCore((c) => (c.path.startsWith('/backups') ? withWarning : settings('/x')));
     const first = mount(<DataSettings />);
     const banner = await screen.findByRole('status', { name: 'Warnung zum Backup' });
-    expect(banner).toHaveTextContent(text);
-    expect(screen.getByText('mit Warnung')).toHaveAttribute('title', text);
+    expect(banner.textContent).toContain(text);
+    expect(banner.textContent).not.toContain('\n');
+    // Nur oben, nicht noch einmal (unerreichbar per Tap) in der Tabelle
+    expect(screen.queryByText('mit Warnung')).not.toBeInTheDocument();
     first.unmount();
 
     // Der jüngste erfolgreiche Lauf hat keine Warnung mehr (Rest entfernt): kein Hinweis, auch wenn ein älterer einen hat

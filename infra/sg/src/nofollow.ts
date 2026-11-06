@@ -297,7 +297,8 @@ export class NoFollowWriter extends AnchoredDirs {
       }
       this.step('place', 'before', staging, name);
       try {
-        // `..` ist der Elternordner dieser Inode (der Zielordner), nicht ein Pfad, der umgehängt werden kann
+        // `..` ist der aktuelle Elternordner dieser Inode. Wird der private Ordner inzwischen umgehängt, landet der
+        // (geprüfte, eigene) Link woanders: Das fängt die Prüfung im verankerten Zielordner danach ab (Abbruch).
         linkSync(LINK_STAGING_FILE, join('..', name));
       } catch (error) {
         unlinkSync(LINK_STAGING_FILE);

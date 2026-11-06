@@ -17,6 +17,8 @@ import {
   copyTree,
   describeLeft,
   DUMP_FILE,
+  plainCause,
+  rootCause,
   listStands,
   MANIFEST_FILE,
   readManifest,
@@ -92,7 +94,11 @@ export interface BackupDeps extends BackupIo {
   /** Lebt dieser Prozess noch? (Tests; Standard: `process.kill(pid, 0)`) */
   alive?: (pid: number) => boolean;
   /** Nur für Tests: läuft direkt nachdem der Dump ins Ziel kopiert wurde (Austausch durch einen Angreifer) */
-  hooks?: { afterDumpCopy?: (destination: string) => void | Promise<void> };
+  hooks?: {
+    afterDumpCopy?: (destination: string) => void | Promise<void>;
+    /** Nur für Tests: läuft direkt nach `validateTarget` (Tausch des Ziels nach der Prüfung, H2) */
+    afterValidate?: (target: string) => void;
+  };
   /** Nur für Tests: Tausch zwischen Prüfung und Systemaufruf im Ziel (`NoFollowWriter`) */
   targetHooks?: NoFollowHooks;
 }
@@ -375,6 +381,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     }
 
     const targetDir = validateTarget(targetSetting, cfg.dataDir);
+    deps.hooks?.afterValidate?.(targetDir.path);
     const target = targetDir.path;
     const stand = standName(started);
     const finalDir = join(target, stand);
@@ -507,10 +514,13 @@ async function dumpPrivately(
 /** So viele Stände vor Migrationen bleiben unabhängig von der Ausdünnung erhalten */
 export const KEEP_PRE_MIGRATION = 3;
 
-/** Ein Stand oder `.partial`, der beim Ausdünnen stehen blieb, mit Ursache als Text (H3, #124) */
+/** Ein Stand oder `.partial`, der beim Ausdünnen stehen blieb (H3, #124) */
 export interface Leftover {
   name: string;
+  /** Ursache mit Eintrag, für das Log (mit Fehlercode) */
   reason: string;
+  /** Ursache als Code (`EACCES`, `getauscht`, …), daraus der Text der Oberfläche */
+  cause: string;
 }
 
 export interface ThinResult {
@@ -535,7 +545,7 @@ export function thin(
   const partials = removeStalePartialsReport(target, nowMs, 86_400_000, hooks);
   for (const { name, left } of partials.left) {
     const reason = describeLeft(left, join(base, name));
-    result.left.push({ name, reason });
+    result.left.push({ name, reason, cause: rootCause(left)?.cause ?? 'unbekannt' });
     log(`Alten halbfertigen Lauf ${name} nicht vollständig entfernt: ${reason}. Der Rest bleibt stehen.`);
   }
   const stands = listStands(base); // neueste zuerst
@@ -553,7 +563,7 @@ export function thin(
       log(`Alten Stand ${stand} entfernt.`);
     } else if (report.status === 'teilweise') {
       const reason = describeLeft(report.left, join(base, stand));
-      result.left.push({ name: stand, reason });
+      result.left.push({ name: stand, reason, cause: rootCause(report.left)?.cause ?? 'unbekannt' });
       log(
         `Alten Stand ${stand} nicht vollständig entfernt: ${reason}. Der Rest bleibt stehen, der nächste Lauf versucht es erneut.`,
       );
@@ -565,13 +575,33 @@ export function thin(
 /** Höchstlänge von `backup_run.warning` (wie `error`) */
 const WARNING_MAX = 500;
 
-/** Warnung für Reste, die schon nach dem vorigen Lauf stehen blieben (`null`: keine) */
+/**
+ * Warnung für die Oberfläche, wenn Reste schon nach dem vorigen Lauf stehen blieben (`null`: keine). Ein ruhiger Satz
+ * ohne Fehlercodes (die stehen im Log), mit den Ordnernamen (geprüfte Muster, keine Namen aus dem Stand). Passen
+ * nicht alle Namen in 500 Zeichen, folgt „und N weitere“.
+ */
 export function leftoverWarning(stuck: Leftover[]): string | null {
-  if (stuck.length === 0) return null;
-  const what = stuck.length === 1 ? 'lässt sich ein alter Stand' : `lassen sich ${stuck.length} alte Stände`;
-  const list = stuck.map((s) => `${s.name} (${s.reason})`).join('; ');
-  const text = `Im Backup-Ziel ${what} seit mehreren Läufen nicht entfernen: ${list}. Bitte im Ziel Rechte und Sperren prüfen und den Ordner von Hand löschen.`;
-  return text.length > WARNING_MAX ? `${text.slice(0, WARNING_MAX - 1)}…` : text;
+  const [first] = stuck;
+  if (!first) return null;
+  const partial = (l: Leftover) => l.name.startsWith('.');
+  const cause = plainCause(first.cause);
+  if (stuck.length === 1) {
+    const what = partial(first) ? 'Ein unvollständiger Stand' : 'Ein alter Backup-Stand';
+    return `${what} lässt sich seit mehreren Läufen nicht löschen (${cause}). Prüfe das Backup-Ziel und lösche den Ordner „${first.name}“ von Hand.`;
+  }
+  const what = stuck.every(partial)
+    ? `${stuck.length} unvollständige Stände`
+    : stuck.some(partial)
+      ? `${stuck.length} alte Ordner im Backup-Ziel`
+      : `${stuck.length} alte Backup-Stände`;
+  const head = `${what} lassen sich seit mehreren Läufen nicht löschen (${cause}). Prüfe das Backup-Ziel und lösche die Ordner von Hand: `;
+  const names = stuck.map((l) => `„${l.name}“`);
+  for (let shown = names.length; shown >= 1; shown--) {
+    const rest = names.length - shown;
+    const text = `${head}${names.slice(0, shown).join(', ')}${rest > 0 ? ` und ${rest} weitere` : ''}.`;
+    if (text.length <= WARNING_MAX) return text;
+  }
+  return `${head.slice(0, WARNING_MAX - 1)}…`;
 }
 
 /**
@@ -579,7 +609,7 @@ export function leftoverWarning(stuck: Leftover[]): string | null {
  * Lauf mit demselben Ziel stehen blieb (`backup_run.warning`, H3). Fehlt die Spalte (Backup vor der Migration, die
  * sie anlegt), passiert nichts. Fehler hier machen das Backup nicht ungültig.
  */
-async function recordLeftovers(
+export async function recordLeftovers(
   deps: Pick<BackupDeps, 'pg' | 'err' | 'cfg'>,
   runId: string,
   targetSetting: string,

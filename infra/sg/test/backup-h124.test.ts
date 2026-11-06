@@ -16,15 +16,16 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   copyTree,
   describeLeft,
+  oneLine,
   readManifest,
   removeStalePartialsReport,
   removeStandReport,
 } from '../src/backup-files.ts';
-import { thin, validateTarget } from '../src/backup.ts';
+import { leftoverWarning, thin, validateTarget, type Leftover } from '../src/backup.ts';
 import {
   LINK_STAGING_DIR,
   NoFollowReader,
@@ -40,6 +41,7 @@ function tmp(): string {
   return d;
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const d of dirs.splice(0)) {
     chmodRecursive(d);
     rmSync(d, { recursive: true, force: true });
@@ -395,7 +397,9 @@ describe('H3: Ursache, wenn ein Stand nicht entfernt werden kann', () => {
         if (op === 'unlink' && phase === 'before' && d === dir) throw sysError('EACCES');
       },
     });
-    expect(result.left).toEqual([{ name: '20261001T030000Z', reason: expect.stringContaining('EACCES') }]);
+    expect(result.left).toEqual([
+      { name: '20261001T030000Z', reason: expect.stringContaining('EACCES'), cause: 'EACCES' },
+    ]);
     expect(logs.join('\n')).toMatch(
       /20261001T030000Z nicht vollständig entfernt: Keine Berechtigung \(EACCES\)/,
     );
@@ -427,5 +431,124 @@ describe('Testlücke: strenger dev/ino-Vergleich beim Lesen der Restore-Quelle',
     ).toThrow(/ausgetauscht/);
     expect(swapped).toBe(true);
     expect(existsSync(join(base, 'kopie', 'media', 'a.jpg'))).toBe(false);
+  });
+});
+
+describe('H1: privater Ordner nur, wenn er wirklich privat ist (Nacharbeit Review #160)', () => {
+  it('gehört er nicht dem Lauf (anderer Besitzer): kopieren statt verlinken, kein Rest', () => {
+    const { base, prevPhotos, partial } = linkScene();
+    const expected = lstatSync(join(prevPhotos, 'f1.jpg'));
+    const out = writerFor(base);
+    out.mkdir(partial);
+    out.mkdir(join(partial, 'photos'));
+    const uid = process.getuid?.() ?? 0;
+    vi.spyOn(process, 'getuid').mockReturnValue(uid + 1);
+    expect(out.link(join(prevPhotos, 'f1.jpg'), join(partial, 'photos', 'f1.jpg'), expected)).toBe(false);
+    expect(readdirSync(join(partial, 'photos'))).toEqual([]);
+  });
+
+  it('Gruppe hat Rechte (0750): kopieren statt verlinken, kein Rest', () => {
+    const { base, prevPhotos, partial } = linkScene();
+    const expected = lstatSync(join(prevPhotos, 'f1.jpg'));
+    const out = writerFor(base, {
+      step: (op, phase, d, name) => {
+        if (op === 'mkdir' && phase === 'after' && name === LINK_STAGING_DIR) chmodSync(join(d, name), 0o750);
+      },
+    });
+    out.mkdir(partial);
+    out.mkdir(join(partial, 'photos'));
+    expect(out.link(join(prevPhotos, 'f1.jpg'), join(partial, 'photos', 'f1.jpg'), expected)).toBe(false);
+    expect(readdirSync(join(partial, 'photos'))).toEqual([]);
+  });
+
+  it('privater Ordner vor endLinks ausgetauscht: Abbruch, der fremde Ordner bleibt', () => {
+    const { base, prevPhotos, partial } = linkScene();
+    const expected = lstatSync(join(prevPhotos, 'f1.jpg'));
+    const photos = join(partial, 'photos');
+    const out = writerFor(base);
+    out.mkdir(partial);
+    out.mkdir(photos);
+    expect(out.link(join(prevPhotos, 'f1.jpg'), join(photos, 'f1.jpg'), expected)).toBe(true);
+    // Angreifer: eigenen (leeren) Ordner an die Stelle des privaten legen
+    renameSync(join(photos, LINK_STAGING_DIR), join(base, 'weg'));
+    mkdirSync(join(photos, LINK_STAGING_DIR));
+    expect(() => out.endLinks(photos)).toThrow(UnsafeTargetError);
+    expect(existsSync(join(photos, LINK_STAGING_DIR))).toBe(true);
+  });
+});
+
+describe('chdir ohne Zugriff: „nicht zugänglich“ statt „ausgetauscht“ (Nacharbeit Review #160)', () => {
+  /** Kernel-Fehler wie von `chdir` */
+  function chdirFails(dir: string, code: string): void {
+    const real = process.chdir.bind(process);
+    vi.spyOn(process, 'chdir').mockImplementation((to: string) => {
+      if (to === dir) throw Object.assign(new Error(`${code}: chdir`), { code });
+      real(to);
+    });
+  }
+
+  it('simuliert (läuft auch als root): Ausdünnen nennt EACCES, Schreiber meldet „nicht zugänglich“', () => {
+    const target = tmp();
+    const dir = stand(target, '20261001T030000Z');
+    const photos = join(dir, 'media', 'photos');
+    chdirFails(photos, 'EACCES');
+    const report = removeStandReport(target, '20261001T030000Z');
+    expect(report.left[0]).toEqual({ path: photos, cause: 'EACCES' });
+    expect(describeLeft(report.left, dir)).toMatch(/^Keine Berechtigung \(EACCES\)/);
+    vi.restoreAllMocks();
+
+    const out = new NoFollowWriter();
+    out.adopt(target);
+    chdirFails(target, 'EPERM');
+    expect(() => out.mkdir(join(target, 'neu'))).toThrow(/nicht zugänglich \(EPERM\)/);
+  });
+
+  it('echt (nur ohne root): Ordner 0000 bzw. 0600 ergibt EACCES', () => {
+    if (process.getuid?.() === 0) return; // root darf jeden Ordner betreten
+    for (const mode of [0o000, 0o600]) {
+      const target = tmp();
+      const dir = stand(target, '20261001T030000Z');
+      chmodSync(join(dir, 'media'), mode);
+      const report = removeStandReport(target, '20261001T030000Z');
+      expect(describeLeft(report.left, dir)).toContain('EACCES');
+      chmodSync(join(dir, 'media'), 0o755);
+    }
+  });
+});
+
+describe('Texte (Nacharbeit Review #160)', () => {
+  const left = (name: string, cause = 'EPERM'): Leftover => ({ name, reason: 'x', cause });
+
+  it('Warnung ohne Fachbegriffe; ein .partial heißt „unvollständiger Stand“', () => {
+    const one = leftoverWarning([left('20261001T030000Z')]);
+    expect(one).toBe(
+      'Ein alter Backup-Stand lässt sich seit mehreren Läufen nicht löschen (keine Berechtigung). Prüfe das Backup-Ziel und lösche den Ordner „20261001T030000Z“ von Hand.',
+    );
+    expect(one).not.toMatch(/EPERM|EACCES|ACL|partial/);
+    expect(leftoverWarning([left('.20261001T030000Z.partial', 'getauscht')])).toMatch(
+      /^Ein unvollständiger Stand lässt sich .* \(das Ziel wurde dabei verändert\)/,
+    );
+    expect(leftoverWarning([])).toBeNull();
+  });
+
+  it('viele Reste: höchstens 500 Zeichen, mit „und N weitere“', () => {
+    const many = Array.from({ length: 60 }, (_, i) =>
+      left(`202610${String((i % 28) + 1).padStart(2, '0')}T0${i % 10}0000Z`),
+    );
+    const text = leftoverWarning(many) as string;
+    expect(text.length).toBeLessThanOrEqual(500);
+    expect(text).toMatch(/^60 alte Backup-Stände lassen sich/);
+    expect(text).toMatch(/und \d+ weitere\.$/);
+  });
+
+  it('Log: kein „: .“, wenn der Stand-Ordner selbst bleibt; Namen aus dem Stand auf einer Zeile', () => {
+    const base = '/ziel/20261001T030000Z';
+    expect(describeLeft([{ path: base, cause: 'getauscht' }], base)).toBe(
+      'Im Ziel wurde während des Löschens etwas ausgetauscht',
+    );
+    const text = describeLeft([{ path: `${base}/media/böse\nZeile\u0007.jpg`, cause: 'EPERM' }], base);
+    expect(text).toContain('(bei media/böse?Zeile?.jpg)');
+    expect(text.includes('\n') || text.includes('\u0007')).toBe(false);
+    expect(oneLine('a\r\nb\u2028c')).toBe('a??b?c');
   });
 });

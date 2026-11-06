@@ -12,5 +12,5 @@
   "error": null,
   "trigger": "zeitplan",
   "stand": "20261104T020000Z",
-  "warning": "Im Backup-Ziel lässt sich ein alter Stand seit mehreren Läufen nicht entfernen: 20261001T030000Z (Keine Berechtigung (EPERM), etwa durch Zugriffsrechte, ACLs oder eine Sperre (immutable): db.dump). Bitte im Ziel Rechte und Sperren prüfen und den Ordner von Hand löschen."
+  "warning": "Ein alter Backup-Stand lässt sich seit mehreren Läufen nicht löschen (keine Berechtigung). Prüfe das Backup-Ziel und lösche den Ordner „20261001T030000Z“ von Hand."
 }

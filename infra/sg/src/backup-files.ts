@@ -500,12 +500,45 @@ export function causeText(cause: string): string {
   }
 }
 
+/** Steuerzeichen und Zeilenumbrüche (Namen aus dem Ziel sind nicht vertrauenswürdig) als `?`, für Log und Anzeige */
+export function oneLine(text: string): string {
+  // eslint-disable-next-line no-control-regex -- Steuerzeichen sind genau das, was hier ersetzt wird
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '?');
+}
+
+/** Die tiefste Ursache, die nicht nur Folge ist (`unvollstaendig`); `undefined`, wenn nichts stehen blieb */
+export function rootCause(left: LeftBehind[]): LeftBehind | undefined {
+  return left.find((l) => l.cause !== 'unvollstaendig') ?? left[0];
+}
+
 /**
- * Ursache in einem Satz, mit dem betroffenen Eintrag relativ zu `base`: die tiefste, die nicht nur Folge ist
- * (`unvollstaendig`). Leer, wenn nichts stehen blieb.
+ * Ursache in einem Satz für das Log, mit dem betroffenen Eintrag relativ zu `base` (auf eine Zeile gebracht). Ist es
+ * der Ordner selbst, ohne Eintrag. Leer, wenn nichts stehen blieb.
  */
 export function describeLeft(left: LeftBehind[], base: string): string {
-  const first = left.find((l) => l.cause !== 'unvollstaendig') ?? left[0];
+  const first = rootCause(left);
   if (!first) return '';
-  return `${causeText(first.cause)}: ${relative(base, first.path) || '.'}`;
+  const rel = oneLine(relative(base, first.path));
+  return rel === '' ? causeText(first.cause) : `${causeText(first.cause)} (bei ${rel})`;
+}
+
+/** Ursache ohne Fachbegriffe, für die Oberfläche (`backup_run.warning`) */
+export function plainCause(cause: string): string {
+  switch (cause) {
+    case 'EACCES':
+    case 'EPERM':
+      return 'keine Berechtigung';
+    case 'EROFS':
+      return 'das Ziel ist schreibgeschützt';
+    case 'getauscht':
+      return 'das Ziel wurde dabei verändert';
+    case 'hinzugekommen':
+    case 'ENOTEMPTY':
+    case 'EEXIST':
+      return 'im Ordner kam etwas hinzu';
+    case 'EBUSY':
+      return 'ein Eintrag ist in Benutzung';
+    default:
+      return 'Fehler beim Löschen';
+  }
 }

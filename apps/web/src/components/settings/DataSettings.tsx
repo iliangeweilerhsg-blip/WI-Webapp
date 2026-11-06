@@ -45,6 +45,17 @@ const RESTORE_ADVICE: Record<NonNullable<RestoreTest['reason']>, string> = {
   intern: 'Der Test konnte nicht ausgeführt werden. Starte ihn mit „Jetzt testen“ erneut.',
 };
 
+/** Text aus der Datenbank auf eine Zeile: Zeilenumbrüche und Steuerzeichen werden zu Leerzeichen */
+export function oneLine(text: string): string {
+  return (
+    text
+      // eslint-disable-next-line no-control-regex -- Steuerzeichen sind genau das, was hier entfernt wird
+      .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+      .replace(/ {2,}/g, ' ')
+      .trim()
+  );
+}
+
 /** `20261104T030012Z` → Datum (UTC) für die Anzeige, sonst der Name selbst */
 export function standLabel(stand: string): string {
   const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(stand);
@@ -83,8 +94,10 @@ export function DataSettings() {
 
   const { status, items } = backups.data;
   // Warnung des jüngsten erfolgreichen Laufs (z. B. ein alter Stand, der sich seit mehreren Läufen nicht entfernen
-  // lässt, #124). Ältere Warnungen zählen nicht mehr: Der jüngste Lauf hat es erneut versucht.
-  const warning = items.find((run) => run.state === 'fertig')?.warning ?? null;
+  // lässt, #124). Ältere Warnungen zählen nicht mehr: Der jüngste Lauf hat es erneut versucht. Sie stehen darum auch
+  // nicht in der Tabelle.
+  const lastWarning = items.find((run) => run.state === 'fertig')?.warning ?? null;
+  const warning = lastWarning === null ? null : oneLine(lastWarning);
   const data = settings.data.data;
   const targetValue = target ?? data.backup_target ?? '';
   const timeValue = time ?? data.backup_time;
@@ -228,11 +241,6 @@ export function DataSettings() {
                 <td>
                   {STATE_LABEL[run.state]}
                   {run.error ? `: ${run.error}` : ''}
-                  {run.warning ? (
-                    <span className="block text-xs text-text-muted" title={run.warning}>
-                      mit Warnung
-                    </span>
-                  ) : null}
                 </td>
                 <td>{formatSize(run.size_bytes)}</td>
               </tr>

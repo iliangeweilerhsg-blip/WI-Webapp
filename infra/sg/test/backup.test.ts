@@ -1466,6 +1466,45 @@ describe('Restore liest den Stand ohne Symlink-Folgen (#119)', () => {
   });
 });
 
+describe('H2 (#124): Schreiber und Leser verankern das Ziel mit der Identität aus validateTarget', () => {
+  /** Angreifer: Ziel beiseiteschieben, an seiner Stelle ein Symlink auf einen fremden Ordner */
+  function swapTarget(target: string): string {
+    const fremd = join(tmp(), 'fremd');
+    mkdirSync(fremd);
+    renameSync(target, `${target}-weg`);
+    symlinkSync(fremd, target);
+    return fremd;
+  }
+
+  it('Schreiber: Ziel direkt nach der Prüfung getauscht → nichts landet im fremden Ordner', async () => {
+    const { target, pg, deps } = setup();
+    let fremd = '';
+    deps.hooks = { afterValidate: () => (fremd = swapTarget(target)) };
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(1);
+    expect(readdirSync(fremd)).toEqual([]);
+    expect(pg.runs.get('019a4e14-0000-7000-8000-0000000000aa')?.state).toBe('fehler');
+  });
+
+  it('Leser: Ziel vor dem Lesen des vorigen Standes getauscht → Abbruch schon beim Ziel', async () => {
+    const { target, pg, deps } = setup();
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(0);
+    const previous = readdirSync(target)[0] as string;
+    deps.now = () => new Date('2026-11-05T03:00:12Z');
+    deps.newId = () => '019a4e14-0000-7000-8000-0000000000ab';
+    deps.hooks = {
+      afterDumpCopy: () => {
+        const fremd = swapTarget(target);
+        // Der fremde Ordner sieht aus wie das Ziel mit demselben vorigen Stand
+        mkdirSync(join(fremd, previous, 'media', 'photos'), { recursive: true });
+      },
+    };
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(1);
+    expect(pg.runs.get('019a4e14-0000-7000-8000-0000000000ab')?.error).toContain(
+      `${target} wurde während des Laufs ersetzt (Symlink`,
+    );
+  });
+});
+
 describe('H3 (#124): Warnung, wenn ein alter Stand über mehrere Läufe stehen bleibt', () => {
   /** Alter Stand mit Manifest im Ziel */
   function oldStand(target: string, name: string): string {
@@ -1516,11 +1555,10 @@ describe('H3 (#124): Warnung, wenn ein alter Stand über mehrere Läufe stehen b
     expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
     const second = pg.runs.get(ids[1] as string);
     expect(second?.thinLeft).toEqual(['20261001T030000Z']);
-    expect(second?.warning).toMatch(
-      /seit mehreren Läufen nicht entfernen: 20261001T030000Z \(Keine Berechtigung \(EPERM\)/,
+    expect(second?.warning).toBe(
+      'Ein alter Backup-Stand lässt sich seit mehreren Läufen nicht löschen (keine Berechtigung). Prüfe das Backup-Ziel und lösche den Ordner „20261001T030000Z“ von Hand.',
     );
-    expect(second?.warning?.length).toBeLessThanOrEqual(500);
-    expect(errs.join('\n')).toMatch(/Warnung: Im Backup-Ziel lässt sich ein alter Stand/);
+    expect(errs.join('\n')).toMatch(/Warnung: Ein alter Backup-Stand lässt sich/);
 
     // Sperre aufgehoben: der nächste Lauf entfernt den Rest, keine Warnung mehr
     locked = false;
