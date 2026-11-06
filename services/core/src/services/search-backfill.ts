@@ -198,14 +198,18 @@ export function startSearchBackfill(
   };
 }
 
-/** In `buildApp`: startet das Nachholen mit dem Start der App und beendet es mit `close()` */
+/**
+ * In `buildApp`: startet das Nachholen erst nach erfolgreichem `listen` (Hook `onListen`, nicht
+ * `onReady`, das vor dem Binden läuft: ein Core mit `EADDRINUSE` legt so keine Jobs an) und beendet
+ * es mit `close()`. Mit `inject` allein (Tests) startet es nicht.
+ */
 export function registerSearchBackfill(
   app: FastifyInstance,
   deps: { db: Db; config: Pick<Config, 'dataDir'>; logger: Logger },
 ): void {
   let handle: SearchBackfillHandle | undefined;
-  app.addHook('onReady', async () => {
-    handle = startSearchBackfill({
+  app.addHook('onListen', async () => {
+    handle ??= startSearchBackfill({
       db: deps.db,
       worker: new WorkerClient({ dataDir: deps.config.dataDir }),
       logger: deps.logger.child({ module: 'search-backfill' }),

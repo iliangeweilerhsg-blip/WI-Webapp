@@ -11,9 +11,11 @@
 // `SG_SKIP_SEARCH_PERF=1` überspringt den Test (z. B. auf langsamen CI-Runnern: Aufbau der Daten samt HNSW-Index dauert
 // dort deutlich länger als die übrigen Tests, und Zeitmessungen auf geteilten Runnern schwanken).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { SINGLE_USER_ID } from '@sg/shared';
 import { WorkerError } from '../../src/lib/worker-client.ts';
-import { search } from '../../src/services/search.ts';
+import { search, vectorQuery } from '../../src/services/search.ts';
+import { fakeEmbed } from '../unit/worker-fake.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
 const SKIP = process.env.SG_SKIP_SEARCH_PERF === '1';
@@ -137,7 +139,28 @@ describe.skipIf(SKIP)('Leistung GET /search (5 000 Folien, 12 000 Fenster)', () 
     for (const [q, ms] of Object.entries(results)) expect(ms, q).toBeLessThan(TARGET_MS);
   });
 
-  // Ob ohne Filter wirklich HNSW genutzt wird, prüft search.test.ts („Abfrageplan der Bedeutungssuche“, auch in CI)
+  // search.test.ts („Abfrageplan der Bedeutungssuche“, auch in CI) prüft den Plan mit `enable_seqscan = off`, weil es dort
+  // nur wenige Zeilen gibt. Hier, bei ≈ 17 000 Zeilen, wählt der Planer ohne Eingriff selbst den HNSW-Index.
+  it('Abfrageplan ohne enable_seqscan = off: HNSW ohne Filter, kein HNSW mit Filter', async () => {
+    const plan = async (filters: Parameters<typeof vectorQuery>[2]) =>
+      (
+        await app.handle.db.transaction(async (tx) => {
+          await tx.execute(sql`SET LOCAL hnsw.ef_search = 100`);
+          return tx.execute<Record<string, string>>(
+            sql`EXPLAIN ${vectorQuery(fakeEmbed('normalform'), 'fake-embed-1', filters)}`,
+          );
+        })
+      )
+        .map((r) => Object.values(r)[0])
+        .join('\n');
+    expect(await plan({ moduleIds: null, kinds: [], unresolved: [] })).toContain(
+      'search_chunk_embedding_hnsw',
+    );
+    expect(await plan({ moduleIds: null, kinds: ['slide'], unresolved: [] })).not.toContain(
+      'search_chunk_embedding_hnsw',
+    );
+  });
+
   it(`Bedeutungssuche (fester Vektor, ohne HTTP): HNSW ohne Filter und exakt mit Filter < ${TARGET_MS} ms`, async () => {
     const [row] = await app.handle.sql<{ v: string }[]>`
       SELECT embedding::text AS v FROM search_chunk WHERE source_kind = 'transcript' LIMIT 1`;

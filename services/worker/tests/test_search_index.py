@@ -242,6 +242,16 @@ def test_clean_text_removes_format_chars() -> None:
     assert si.clean_text("\u00ad\u200b") == ""
 
 
+def test_clean_text_result_is_always_nfc() -> None:
+    import unicodedata
+
+    # e + ZWJ + Akut: nach dem Entfernen des Cf stehen e und U+0301 zusammen und müssen zu é werden
+    out = si.clean_text("e\u200d\u0301")
+    assert unicodedata.is_normalized("NFC", out)
+    assert out == "\u00e9"
+    assert unicodedata.is_normalized("NFC", si.clean_text("a\x01\u0308 o\u00ad\u0308"))
+
+
 def test_ts_config_mapping() -> None:
     assert [si.ts_config_for(x) for x in ("de", "en", "mixed", None, "fr")] == [
         "german", "english", "simple", "simple", "simple",

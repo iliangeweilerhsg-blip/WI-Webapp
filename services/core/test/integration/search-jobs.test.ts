@@ -509,14 +509,30 @@ describe('Nachholen (§19.5)', () => {
     expect((await searchJobs()).map((j) => (j.payload as { id: string }).id)).toEqual([deck]);
   });
 
-  it('buildApp mit searchBackfill: startet beim Start, ohne Option nicht', async () => {
+  it('buildApp mit searchBackfill: startet erst nach erfolgreichem listen, ohne Option nie', async () => {
     const deck = await mkDeck();
     const withBackfill = await startTestApp({}, { searchBackfill: true });
+    await withBackfill.app.ready(); // onReady läuft vor dem Binden: noch keine Jobs
+    expect(await searchJobs()).toEqual([]);
+    await withBackfill.app.listen({ port: 0, host: '127.0.0.1' });
     await withBackfill.close(); // wartet auf den laufenden Lauf
     expect((await searchJobs()).map((j) => (j.payload as { id: string }).id)).toEqual([deck]);
     await handle.sql`DELETE FROM job`;
     const without = await startTestApp();
+    await without.app.listen({ port: 0, host: '127.0.0.1' });
     await without.close();
+    expect(await searchJobs()).toEqual([]);
+  });
+
+  it('buildApp mit searchBackfill: Port belegt (EADDRINUSE) legt keine Jobs an', async () => {
+    await mkDeck();
+    const first = await startTestApp();
+    await first.app.listen({ port: 0, host: '127.0.0.1' });
+    const port = (first.app.server.address() as { port: number }).port;
+    const second = await startTestApp({}, { searchBackfill: true });
+    await expect(second.app.listen({ port, host: '127.0.0.1' })).rejects.toThrow(/EADDRINUSE/);
+    await second.close();
+    await first.close();
     expect(await searchJobs()).toEqual([]);
   });
 });
