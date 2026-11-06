@@ -17,8 +17,10 @@
 //     über den Deskriptor, Zeiten per `futimes`.
 //   - Aufräumen löscht nur, was dieser Schreiber selbst angelegt hat und was `lstat` im verankerten Ordner noch
 //     unverändert zeigt (`unlink`, Ordner per `rmdir`, nur leere). Fremde Einträge bleiben liegen.
-// Grenze: `link` und das Lesen des vorigen Standes nutzen absolute Pfade im Ziel (nur lesend bzw. als Quelle eines
-// Hardlinks, der danach geprüft und sonst wieder entfernt wird).
+//   - Ein Hardlink auf den vorigen Stand entsteht zuerst in einem privaten Unterordner (0700) des Zielordners, wird
+//     dort geprüft und erst danach relativ an seinen Platz gelegt (H1, #124). Ein falscher Link ist so für keinen
+//     anderen Benutzer erreichbar.
+// Grenze: Die Quelle eines Hardlinks nennt `link` über ihren absoluten Pfad (ohne `linkat` geht das nicht verankert).
 import {
   closeSync,
   constants,
@@ -47,13 +49,17 @@ export const READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.
 
 /** Im Ziel wurde etwas ausgetauscht oder lag schon etwas im Weg: der Lauf bricht ab (fail-closed) */
 export class UnsafeTargetError extends Error {
-  constructor(message: string) {
+  /** Systemfehler, wenn der Ordner nicht ausgetauscht, sondern nicht zugänglich war (`EACCES`, `EPERM`) */
+  readonly sysCode: string | undefined;
+
+  constructor(message: string, sysCode?: string) {
     super(message);
     this.name = 'UnsafeTargetError';
+    this.sysCode = sysCode;
   }
 }
 
-interface Identity {
+export interface Identity {
   dev: number;
   ino: number;
 }
@@ -67,7 +73,7 @@ function sameNode(a: Identity, b: Identity): boolean {
 }
 
 export type NoFollowOp =
-  'mkdir' | 'create' | 'link' | 'rename' | 'unlink' | 'rmdir' | 'readdir' | 'open' | 'lstat';
+  'mkdir' | 'create' | 'link' | 'place' | 'rename' | 'unlink' | 'rmdir' | 'readdir' | 'open' | 'lstat';
 
 export interface NoFollowHooks {
   /**
@@ -99,8 +105,15 @@ export class AnchoredDirs {
   /**
    * Übernimmt einen vorhandenen, vertrauenswürdigen Ordner als Ausgangspunkt (das per `realpath` geprüfte Ziel, der
    * Datenordner). Er wird nie gelöscht. Seine Identität gilt ab jetzt: Wird er ersetzt, scheitert jeder Zugriff.
+   * `known`: die Identität, mit der er geprüft wurde (Ziel aus `validateTarget`, H2 aus #124). Ohne sie gilt, was
+   * `stat` jetzt sieht.
    */
-  adopt(dir: string): void {
+  adopt(dir: string, known?: Identity): void {
+    if (known) {
+      this.dirs.set(dir, identity(known));
+      this.adopted.add(dir);
+      return;
+    }
     const info = statSync(dir);
     if (!info.isDirectory()) throw new UnsafeTargetError(`${dir} ist kein Ordner.`);
     this.dirs.set(dir, identity(info));
@@ -124,7 +137,11 @@ export class AnchoredDirs {
     try {
       process.chdir(dir);
     } catch (error) {
-      if (missing === 'enoent' && (error as NodeJS.ErrnoException).code === 'ENOENT') throw error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (missing === 'enoent' && code === 'ENOENT') throw error;
+      if (code === 'EACCES' || code === 'EPERM') {
+        throw new UnsafeTargetError(`${dir} ist nicht zugänglich (${code}). Der Lauf bricht ab.`, code);
+      }
       throw new UnsafeTargetError(
         `${dir} wurde während des Laufs ersetzt oder entfernt. Der Lauf bricht ab.`,
       );
@@ -146,18 +163,31 @@ export class AnchoredDirs {
   }
 }
 
+/**
+ * Privater Unterordner (0700), in dem ein Hardlink entsteht und geprüft wird, bevor er an seinen Platz kommt (H1,
+ * #124). Endet auf `.partial`: `copyTree` und `treeSize` überspringen ihn, aus dem Datenordner wird er nie kopiert.
+ */
+export const LINK_STAGING_DIR = '.sg-link.partial';
+/** Name des Hardlinks im privaten Unterordner */
+const LINK_STAGING_FILE = 'neu';
+
 /** Schreiber für einen Baum, den ein Lauf neu anlegt (`.<stand>.partial` im Ziel, Restore-Ordner im Datenordner) */
 export class NoFollowWriter extends AnchoredDirs {
   private readonly files = new Map<string, Identity>();
+  /** Zielordner → sein privater Unterordner für Hardlinks (`null`: Dateisystem ohne private Rechte, nur kopieren) */
+  private readonly linkDirs = new Map<string, string | null>();
 
-  /** Legt den Ordner `path` neu an. Sein Elternordner muss von diesem Schreiber sein (angelegt oder übernommen). */
-  mkdir(path: string): void {
+  /**
+   * Legt den Ordner `path` neu an. Sein Elternordner muss von diesem Schreiber sein (angelegt oder übernommen).
+   * Rückgabe: `lstat` des neuen Ordners.
+   */
+  mkdir(path: string, mode = 0o777): Stats {
     const parent = dirname(path);
     const name = basename(path);
     const info = this.inDir(parent, () => {
       this.step('mkdir', 'before', parent, name);
       try {
-        mkdirSync(name);
+        mkdirSync(name, mode);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
           throw new UnsafeTargetError(
@@ -174,6 +204,7 @@ export class NoFollowWriter extends AnchoredDirs {
       return created;
     });
     this.dirs.set(path, identity(info));
+    return info;
   }
 
   /** Legt `path` exklusiv an (Ordner muss von diesem Schreiber sein). Rückgabe: Dateideskriptor zum Schreiben */
@@ -230,18 +261,47 @@ export class NoFollowWriter extends AnchoredDirs {
 
   /**
    * Hardlink `to` auf die vorhandene Datei `existing` (voriger Stand), die beim Prüfen die Identität `expected` hatte.
-   * Zeigt der neue Eintrag danach nicht genau auf diese Datei, wird er wieder entfernt und `false` zurückgegeben (der
-   * Aufrufer kopiert dann). `false` auch, wenn kein Hardlink möglich ist. Ein Eintrag an der Stelle von `to` ist ein
-   * Fehler.
+   *
+   * H1 (#124): `link` nennt die Quelle über ihren absoluten Pfad. Wird dort ein Ordner gegen einen Symlink getauscht,
+   * entsteht kurz ein Link auf eine fremde Datei. Darum entsteht der Link zuerst im privaten Unterordner (0700) von
+   * `dirname(to)`, verankert und relativ. Dort kann ihn kein anderer Benutzer öffnen, solange er geprüft wird. Zeigt
+   * er nicht genau auf die geprüfte Datei, wird er dort entfernt und `false` zurückgegeben (der Aufrufer kopiert).
+   * Erst danach bekommt er seinen Platz: `link('neu', '../<name>')` aus dem privaten Ordner (nie überschreibend, anders
+   * als `rename`), dann `unlink('neu')`. Zum Schluss muss im verankerten Zielordner unter `<name>` genau die geprüfte
+   * Datei liegen, sonst bricht der Lauf ab.
+   *
+   * `false` auch, wenn kein Hardlink möglich ist oder sich kein privater Ordner anlegen lässt (Dateisystem ohne
+   * Unix-Rechte). Ein Eintrag an der Stelle von `to` ist ein Fehler. Den privaten Ordner entfernt `endLinks`.
    */
   link(existing: string, to: string, expected: Identity): boolean {
     const parent = dirname(to);
     const name = basename(to);
-    return this.inDir(parent, () => {
-      this.step('link', 'before', parent, name);
+    const staging = this.linkDir(parent);
+    if (staging === null) return false;
+    const placed = this.inDir(staging, () => {
+      this.step('link', 'before', staging, LINK_STAGING_FILE);
       try {
-        linkSync(existing, name);
+        linkSync(existing, LINK_STAGING_FILE);
       } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new UnsafeTargetError(`${staging} enthält schon einen Eintrag. Der Lauf bricht ab.`);
+        }
+        return false;
+      }
+      this.step('link', 'after', staging, LINK_STAGING_FILE);
+      const info = exists(LINK_STAGING_FILE);
+      if (!info || info.isSymbolicLink() || !info.isFile() || !sameNode(info, expected)) {
+        // Nicht die geprüfte Datei: im privaten Ordner wieder entfernen, sie war nie woanders erreichbar
+        if (info && !info.isDirectory()) unlinkSync(LINK_STAGING_FILE);
+        return false;
+      }
+      this.step('place', 'before', staging, name);
+      try {
+        // `..` ist der aktuelle Elternordner dieser Inode. Wird der private Ordner inzwischen umgehängt, landet der
+        // (geprüfte, eigene) Link woanders: Das fängt die Prüfung im verankerten Zielordner danach ab (Abbruch).
+        linkSync(LINK_STAGING_FILE, join('..', name));
+      } catch (error) {
+        unlinkSync(LINK_STAGING_FILE);
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
           throw new UnsafeTargetError(
             `${to} gibt es schon. Der Lauf bricht ab, ohne etwas zu überschreiben.`,
@@ -249,16 +309,59 @@ export class NoFollowWriter extends AnchoredDirs {
         }
         return false;
       }
-      this.step('link', 'after', parent, name);
-      const info = exists(name);
-      if (!info || info.isSymbolicLink() || !info.isFile() || !sameNode(info, expected)) {
-        // Nicht die geprüfte Datei: den gerade angelegten Eintrag im eigenen Ordner wieder entfernen
-        if (info && !info.isDirectory()) unlinkSync(name);
-        return false;
-      }
-      this.files.set(to, identity(info));
+      unlinkSync(LINK_STAGING_FILE);
       return true;
     });
+    if (!placed) return false;
+    this.inDir(parent, () => {
+      this.step('place', 'after', parent, name);
+      const info = exists(name);
+      if (!info || info.isSymbolicLink() || !info.isFile() || !sameNode(info, expected)) {
+        throw new UnsafeTargetError(
+          `${to} ist nach dem Verlinken nicht die geprüfte Datei (im Ziel ausgetauscht). Der Lauf bricht ab.`,
+        );
+      }
+    });
+    this.files.set(to, identity(expected));
+    return true;
+  }
+
+  /**
+   * Privater Unterordner für Hardlinks in `dir` (einmal je Ordner angelegt, 0700). `null`, wenn das Dateisystem den
+   * Ordner nicht als privat meldet: dann wird nicht verlinkt, sondern kopiert.
+   */
+  private linkDir(dir: string): string | null {
+    const known = this.linkDirs.get(dir);
+    if (known !== undefined) return known;
+    const path = join(dir, LINK_STAGING_DIR);
+    const info = this.mkdir(path, 0o700);
+    const uid = process.getuid?.();
+    const isPrivate = (info.mode & 0o077) === 0 && (uid === undefined || info.uid === uid);
+    this.linkDirs.set(dir, isPrivate ? path : null);
+    if (!isPrivate) this.removeLinkDir(dir, path);
+    return isPrivate ? path : null;
+  }
+
+  /** Den privaten Unterordner für Hardlinks in `dir` wieder entfernen (nach dem letzten Link in diesem Ordner) */
+  endLinks(dir: string): void {
+    const path = this.linkDirs.get(dir);
+    if (path === undefined) return;
+    this.linkDirs.delete(dir);
+    if (path !== null) this.removeLinkDir(dir, path);
+  }
+
+  private removeLinkDir(dir: string, path: string): void {
+    const expected = this.dirs.get(path);
+    if (!expected) return;
+    this.inDir(dir, () => {
+      const info = exists(LINK_STAGING_DIR);
+      if (!info || info.isSymbolicLink() || !info.isDirectory() || !sameNode(info, expected)) {
+        throw new UnsafeTargetError(`${path} wurde während des Laufs ersetzt. Der Lauf bricht ab.`);
+      }
+      this.step('rmdir', 'before', dir, LINK_STAGING_DIR);
+      rmdirSync(LINK_STAGING_DIR);
+    });
+    this.dirs.delete(path);
   }
 
   /**
@@ -270,6 +373,9 @@ export class NoFollowWriter extends AnchoredDirs {
     if (dirname(to) !== parent) throw new Error('renameDir: nur innerhalb desselben Ordners');
     const fromName = basename(from);
     const toName = basename(to);
+    if ([...this.linkDirs.values()].some((path) => path !== null)) {
+      throw new Error('renameDir: erst endLinks für alle Ordner mit Hardlinks aufrufen');
+    }
     const expected = this.dirs.get(from);
     if (!expected || this.adopted.has(from)) {
       throw new UnsafeTargetError(`${from} wurde nicht von diesem Lauf angelegt.`);
@@ -451,11 +557,28 @@ export class NoFollowReader extends AnchoredDirs {
 }
 
 /**
+ * Warum ein Eintrag beim Löschen stehen blieb (H3, #124): `getauscht` (Identität weicht ab, Ordner ersetzt oder
+ * entfernt), `hinzugekommen` (während des Löschens kam etwas in den Stand), `unvollstaendig` (Folge: darunter blieb
+ * etwas stehen) oder der Systemfehler (`EACCES`, `EPERM`, `ENOTEMPTY`, `EROFS`, …).
+ */
+export interface LeftBehind {
+  path: string;
+  cause: string;
+}
+
+/** Ursache aus einem Fehler beim Löschen */
+function causeOf(error: unknown): string {
+  if (error instanceof UnsafeTargetError) return error.sysCode ?? 'getauscht';
+  const code = (error as NodeJS.ErrnoException).code;
+  return typeof code === 'string' ? code : 'unbekannt';
+}
+
+/**
  * Löscht `<parent>/<name>` samt Inhalt, ohne je einem Symlink zu folgen (Ausdünnen im Ziel, #119). `parent` muss
  * bekannt sein (übernommen). Jede Ebene wird verankert betreten (`chdir` plus Vergleich mit dem `lstat`, mit dem sie
  * gesehen wurde), gelöscht wird nur relativ (`unlink`, `rmdir`). Symlinks werden als Eintrag entfernt, nie verfolgt.
  * Weicht ein Ordner beim Betreten ab (Tausch), wird dort nicht weiter abgestiegen: Der Rest bleibt stehen
- * (fail-closed). Rückgabe: Pfade, die stehen bleiben.
+ * (fail-closed). Rückgabe: was stehen bleibt, mit Ursache. Die tiefste Ursache steht vorn (Kinder vor Eltern).
  */
 export class NoFollowRemover extends AnchoredDirs {
   /**
@@ -463,19 +586,22 @@ export class NoFollowRemover extends AnchoredDirs {
    * (`manifest.json` eines Standes): Bricht das Löschen ab, bleibt der Rest ein gültiger Stand und wird beim nächsten
    * Ausdünnen erneut verankert gelöscht, statt als Waise ohne Manifest liegen zu bleiben.
    */
-  removeTree(parent: string, name: string, last?: string): string[] {
-    const left: string[] = [];
+  removeTree(parent: string, name: string, last?: string): LeftBehind[] {
+    const left: LeftBehind[] = [];
     this.removeEntry(parent, name, left, last);
     return left;
   }
 
-  private removeEntry(parent: string, name: string, left: string[], last?: string): void {
+  private removeEntry(parent: string, name: string, left: LeftBehind[], last?: string): void {
     const path = join(parent, name);
+    const keep = (cause: string): void => {
+      left.push({ path, cause });
+    };
     let info: Stats | undefined;
     try {
       info = this.inDir(parent, () => exists(name));
-    } catch {
-      left.push(path);
+    } catch (error) {
+      keep(causeOf(error));
       return;
     }
     if (!info) return;
@@ -487,8 +613,8 @@ export class NoFollowRemover extends AnchoredDirs {
           this.step('unlink', 'before', parent, name);
           unlinkSync(name);
         });
-      } catch {
-        left.push(path);
+      } catch (error) {
+        keep(causeOf(error));
       }
       return;
     }
@@ -499,15 +625,15 @@ export class NoFollowRemover extends AnchoredDirs {
         this.step('readdir', 'before', path, '.');
         return readdirSync('.');
       });
-    } catch {
-      left.push(path); // ausgetauscht: nicht weiter absteigen
+    } catch (error) {
+      keep(causeOf(error)); // ausgetauscht oder nicht lesbar: nicht weiter absteigen
       return;
     }
     const before = left.length;
     for (const entry of entries) if (entry !== last) this.removeEntry(path, entry, left);
     if (last !== undefined && entries.includes(last)) {
       if (left.length > before) {
-        left.push(path); // abgebrochen: `last` bleibt, der Rest gilt weiter als das, was er war
+        keep('unvollstaendig'); // abgebrochen: `last` bleibt, der Rest gilt weiter als das, was er war
         return;
       }
       // Unmittelbar davor im verankerten Ordner erneut nachsehen: Hat jemand inzwischen etwas angelegt, bliebe nach
@@ -515,12 +641,12 @@ export class NoFollowRemover extends AnchoredDirs {
       let remaining: string[];
       try {
         remaining = this.inDir(path, () => readdirSync('.'));
-      } catch {
-        left.push(path);
+      } catch (error) {
+        keep(causeOf(error));
         return;
       }
       if (remaining.length !== 1 || remaining[0] !== last) {
-        left.push(path);
+        keep('hinzugekommen');
         return;
       }
       this.removeEntry(path, last, left);
@@ -529,14 +655,15 @@ export class NoFollowRemover extends AnchoredDirs {
       this.inDir(parent, () => {
         const now = exists(name);
         if (!now || now.isSymbolicLink() || !now.isDirectory() || !sameNode(now, info)) {
-          left.push(path);
+          keep('getauscht');
           return;
         }
         this.step('rmdir', 'before', parent, name);
         rmdirSync(name);
       });
-    } catch {
-      left.push(path);
+    } catch (error) {
+      // Blieb darunter etwas stehen, ist das die Ursache (`ENOTEMPTY` ist dann nur die Folge)
+      keep(left.length > before ? 'unvollstaendig' : causeOf(error));
     }
   }
 }

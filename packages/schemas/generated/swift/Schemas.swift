@@ -1957,6 +1957,9 @@ struct BackupRun: Codable {
     let trigger: BackupTrigger
     let updatedAt: Date
     let userID: String
+    /// Warnung zum Lauf, z. B. ein alter Stand, der sich seit mehreren Läufen nicht aus dem Ziel
+    /// entfernen lässt (VERTRAEGE §13). null = keine
+    let warning: String?
 
     enum CodingKeys: String, CodingKey {
         case createdAt = "created_at"
@@ -1972,6 +1975,7 @@ struct BackupRun: Codable {
         case trigger = "trigger"
         case updatedAt = "updated_at"
         case userID = "user_id"
+        case warning = "warning"
     }
 }
 
@@ -2006,7 +2010,8 @@ extension BackupRun {
         target: String? = nil,
         trigger: BackupTrigger? = nil,
         updatedAt: Date? = nil,
-        userID: String? = nil
+        userID: String? = nil,
+        warning: String?? = nil
     ) -> BackupRun {
         return BackupRun(
             createdAt: createdAt ?? self.createdAt,
@@ -2021,7 +2026,8 @@ extension BackupRun {
             target: target ?? self.target,
             trigger: trigger ?? self.trigger,
             updatedAt: updatedAt ?? self.updatedAt,
-            userID: userID ?? self.userID
+            userID: userID ?? self.userID,
+            warning: warning ?? self.warning
         )
     }
 
@@ -19078,6 +19084,7 @@ extension BackupRun {
         try container.encode(trigger, forKey: .trigger)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(userID, forKey: .userID)
+        try container.encode(warning, forKey: .warning)
     }
 }
 

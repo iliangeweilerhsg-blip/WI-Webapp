@@ -21,7 +21,8 @@
       "state": "fertig",
       "error": null,
       "trigger": "zeitplan",
-      "stand": "20261104T020000Z"
+      "stand": "20261104T020000Z",
+      "warning": null
     }
   ],
   "next_cursor": null

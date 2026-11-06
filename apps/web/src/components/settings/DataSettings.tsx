@@ -45,6 +45,17 @@ const RESTORE_ADVICE: Record<NonNullable<RestoreTest['reason']>, string> = {
   intern: 'Der Test konnte nicht ausgeführt werden. Starte ihn mit „Jetzt testen“ erneut.',
 };
 
+/** Text aus der Datenbank auf eine Zeile: Zeilenumbrüche und Steuerzeichen werden zu Leerzeichen */
+export function oneLine(text: string): string {
+  return (
+    text
+      // eslint-disable-next-line no-control-regex -- Steuerzeichen sind genau das, was hier entfernt wird
+      .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ')
+      .replace(/ {2,}/g, ' ')
+      .trim()
+  );
+}
+
 /** `20261104T030012Z` → Datum (UTC) für die Anzeige, sonst der Name selbst */
 export function standLabel(stand: string): string {
   const m = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(stand);
@@ -82,6 +93,11 @@ export function DataSettings() {
   if (settings.isError) return <CoreHint error={settings.error} />;
 
   const { status, items } = backups.data;
+  // Warnung des jüngsten erfolgreichen Laufs (z. B. ein alter Stand, der sich seit mehreren Läufen nicht entfernen
+  // lässt, #124). Ältere Warnungen zählen nicht mehr: Der jüngste Lauf hat es erneut versucht. Sie stehen darum auch
+  // nicht in der Tabelle.
+  const lastWarning = items.find((run) => run.state === 'fertig')?.warning ?? null;
+  const warning = lastWarning === null ? null : oneLine(lastWarning);
   const data = settings.data.data;
   const targetValue = target ?? data.backup_target ?? '';
   const timeValue = time ?? data.backup_time;
@@ -125,6 +141,17 @@ export function DataSettings() {
         ) : null}
         {status.next_run_at ? ` · nächstes: ${new Date(status.next_run_at).toLocaleString('de-DE')}` : ''}
       </p>
+
+      {warning !== null ? (
+        <div
+          role="status"
+          aria-label="Warnung zum Backup"
+          className="space-y-1 rounded-md border border-border bg-accent-soft p-3 text-sm"
+        >
+          <p className="font-medium">Warnung zum letzten Backup</p>
+          <p>{warning}</p>
+        </div>
+      ) : null}
 
       <RestoreTestStatus
         test={status.restore_test}

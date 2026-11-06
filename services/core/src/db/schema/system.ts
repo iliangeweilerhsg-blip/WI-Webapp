@@ -95,9 +95,18 @@ export const backupRun = pgTable(
      * Ständen, deren Manifest diese Prüfsumme trägt: Die Datenbank ist die Vertrauensquelle, nicht das Ziel.
      */
     dumpSha256: text('dump_sha256'),
+    /**
+     * Reste des Ausdünnens nach diesem Lauf (Stände bzw. `.partial`-Ordner, die stehen blieben), von `sg backup`
+     * eingetragen (#124). `null` = nicht ausgedünnt oder Lauf vor dieser Spalte. Nur für den Vergleich mit dem
+     * nächsten Lauf, nicht in der API.
+     */
+    thinLeft: text('thin_left').array(),
+    /** Warnung zum Lauf (höchstens 500 Zeichen), z. B. ein Stand, der sich seit mehreren Läufen nicht entfernen lässt */
+    warning: text('warning'),
   },
   (t) => [
     check('backup_run_dump_sha256_chk', sql`${t.dumpSha256} IS NULL OR ${t.dumpSha256} ~ '^[0-9a-f]{64}$'`),
+    check('backup_run_warning_chk', sql`${t.warning} IS NULL OR char_length(${t.warning}) <= 500`),
     check('backup_run_state_chk', sql`${t.state} IN ('laeuft','fertig','fehler')`),
     check('backup_run_trigger_chk', sql`${t.trigger} IN ('zeitplan','manuell','vor_migration')`),
   ],

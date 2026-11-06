@@ -1,12 +1,14 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
 import { closeSync, existsSync, readdirSync, type Stats } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import {
   NoFollowReader,
   NoFollowRemover,
   NoFollowWriter,
   readSmallRegularFile,
   UnsafeTargetError,
+  type Identity,
+  type LeftBehind,
   type NoFollowHooks,
 } from './nofollow.ts';
 
@@ -273,6 +275,8 @@ function copyLevel(src: string, dst: string, prev: string | null, result: CopySt
       closeSync(opened.fd);
     }
   }
+  // Der private Ordner für Hardlinks (H1) gehört nie zum Stand
+  out.endLinks(dst);
 }
 
 /**
@@ -376,38 +380,165 @@ export function listStands(target: string): string[] {
     .reverse();
 }
 
+/** Geprüftes Ziel mit der Identität, mit der es geprüft wurde (`validateTarget`, H2 aus #124) */
+export interface TargetDir extends Identity {
+  path: string;
+}
+
+/**
+ * Ziel für den Remover übernehmen: mit Identität aus `validateTarget` (so im Lauf), sonst (nur Tests) wie gesehen.
+ * Rückgabe: Pfad des Ziels.
+ */
+function adoptTarget(remover: NoFollowRemover, target: string | TargetDir): string {
+  if (typeof target === 'string') {
+    remover.adopt(target);
+    return target;
+  }
+  remover.adopt(target.path, target);
+  return target.path;
+}
+
+/** Ergebnis von `removeStandReport`: was stehen blieb, mit Ursache (H3) */
+export interface RemoveReport {
+  /** `true` = entfernt, `false` = kein Stand, `'teilweise'` = es bleibt etwas stehen */
+  status: boolean | 'teilweise';
+  left: LeftBehind[];
+}
+
 /**
  * Löscht nur Ordner, die wirklich ein Stand sind (Name passt, Manifest vorhanden). Gelöscht wird verankert, ohne je
  * einem Symlink zu folgen, auch wenn während des Löschens Ordner ausgetauscht werden (`NoFollowRemover`, #119).
- * Rückgabe: `true` = entfernt, `false` = kein Stand, `'teilweise'` = es bleibt etwas stehen (Tausch erkannt,
- * fail-closed).
+ * Das Ziel wird mit seiner geprüften Identität verankert (`TargetDir`, H2): Ist es inzwischen ein anderer Ordner,
+ * wird darin nichts gelöscht.
  */
-export function removeStand(target: string, stand: string, hooks?: NoFollowHooks): boolean | 'teilweise' {
-  if (!STAND_RE.test(stand)) return false;
-  const dir = join(target, stand);
-  if (readManifest(dir) === null) return false;
+export function removeStandReport(
+  target: string | TargetDir,
+  stand: string,
+  hooks?: NoFollowHooks,
+): RemoveReport {
+  if (!STAND_RE.test(stand)) return { status: false, left: [] };
+  if (readManifest(join(typeof target === 'string' ? target : target.path, stand)) === null) {
+    return { status: false, left: [] };
+  }
   const remover = new NoFollowRemover(hooks);
-  remover.adopt(target);
+  const base = adoptTarget(remover, target);
   // Das Manifest geht zuletzt: Ein abgebrochener Rest bleibt ein Stand und wird beim nächsten Lauf weiter gelöscht
-  return remover.removeTree(target, stand, MANIFEST_FILE).length === 0 ? true : 'teilweise';
+  const left = remover.removeTree(base, stand, MANIFEST_FILE);
+  return { status: left.length === 0 ? true : 'teilweise', left };
+}
+
+/** Wie `removeStandReport`, nur das Ergebnis: `true` = entfernt, `false` = kein Stand, `'teilweise'` = Rest bleibt */
+export function removeStand(
+  target: string | TargetDir,
+  stand: string,
+  hooks?: NoFollowHooks,
+): boolean | 'teilweise' {
+  return removeStandReport(target, stand, hooks).status;
+}
+
+/** Ergebnis von `removeStalePartialsReport` */
+export interface PartialsReport {
+  removed: string[];
+  /** Nicht vollständig entfernte `.partial`-Ordner mit dem, was darin stehen blieb */
+  left: { name: string; left: LeftBehind[] }[];
 }
 
 /** Halbfertige Läufe (`.<stand>.partial`) löschen, die älter als `olderThanMs` sind (verankert wie `removeStand`) */
+export function removeStalePartialsReport(
+  target: string | TargetDir,
+  now: number,
+  olderThanMs: number,
+  hooks?: NoFollowHooks,
+): PartialsReport {
+  const report: PartialsReport = { removed: [], left: [] };
+  const remover = new NoFollowRemover(hooks);
+  const base = typeof target === 'string' ? target : target.path;
+  if (!existsSync(base)) return report;
+  adoptTarget(remover, target);
+  for (const entry of readdirSync(base, { withFileTypes: true })) {
+    const match = /^\.([0-9]{8}T[0-9]{6}Z)\.partial$/.exec(entry.name);
+    if (!entry.isDirectory() || !match) continue;
+    if (now - standDate(match[1] as string).getTime() < olderThanMs) continue;
+    const left = remover.removeTree(base, entry.name);
+    if (left.length === 0) report.removed.push(entry.name);
+    else report.left.push({ name: entry.name, left });
+  }
+  return report;
+}
+
+/** Wie `removeStalePartialsReport`, nur die entfernten Namen */
 export function removeStalePartials(
-  target: string,
+  target: string | TargetDir,
   now: number,
   olderThanMs: number,
   hooks?: NoFollowHooks,
 ): string[] {
-  const removed: string[] = [];
-  if (!existsSync(target)) return removed;
-  const remover = new NoFollowRemover(hooks);
-  remover.adopt(target);
-  for (const entry of readdirSync(target, { withFileTypes: true })) {
-    const match = /^\.([0-9]{8}T[0-9]{6}Z)\.partial$/.exec(entry.name);
-    if (!entry.isDirectory() || !match) continue;
-    if (now - standDate(match[1] as string).getTime() < olderThanMs) continue;
-    if (remover.removeTree(target, entry.name).length === 0) removed.push(entry.name);
+  return removeStalePartialsReport(target, now, olderThanMs, hooks).removed;
+}
+
+/** Deutscher Text zu einer Ursache aus `LeftBehind` (H3: die tatsächliche Ursache, nicht pauschal „ausgetauscht“) */
+export function causeText(cause: string): string {
+  switch (cause) {
+    case 'getauscht':
+      return 'Im Ziel wurde während des Löschens etwas ausgetauscht';
+    case 'hinzugekommen':
+      return 'Während des Löschens kam im Stand etwas hinzu';
+    case 'EACCES':
+    case 'EPERM':
+      return `Keine Berechtigung (${cause}), etwa durch Zugriffsrechte, ACLs oder eine Sperre (immutable)`;
+    case 'ENOTEMPTY':
+    case 'EEXIST':
+      return `Ein Ordner ist nicht leer (${cause}), im Ziel kam etwas hinzu`;
+    case 'EROFS':
+      return 'Das Ziel ist schreibgeschützt (EROFS)';
+    case 'EBUSY':
+      return 'Ein Eintrag ist in Benutzung (EBUSY)';
+    case 'unvollstaendig':
+      return 'Darunter blieb etwas stehen';
+    default:
+      return `Systemfehler ${cause}`;
   }
-  return removed;
+}
+
+/** Steuerzeichen und Zeilenumbrüche (Namen aus dem Ziel sind nicht vertrauenswürdig) als `?`, für Log und Anzeige */
+export function oneLine(text: string): string {
+  // eslint-disable-next-line no-control-regex -- Steuerzeichen sind genau das, was hier ersetzt wird
+  return text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '?');
+}
+
+/** Die tiefste Ursache, die nicht nur Folge ist (`unvollstaendig`); `undefined`, wenn nichts stehen blieb */
+export function rootCause(left: LeftBehind[]): LeftBehind | undefined {
+  return left.find((l) => l.cause !== 'unvollstaendig') ?? left[0];
+}
+
+/**
+ * Ursache in einem Satz für das Log, mit dem betroffenen Eintrag relativ zu `base` (auf eine Zeile gebracht). Ist es
+ * der Ordner selbst, ohne Eintrag. Leer, wenn nichts stehen blieb.
+ */
+export function describeLeft(left: LeftBehind[], base: string): string {
+  const first = rootCause(left);
+  if (!first) return '';
+  const rel = oneLine(relative(base, first.path));
+  return rel === '' ? causeText(first.cause) : `${causeText(first.cause)} (bei ${rel})`;
+}
+
+/** Ursache ohne Fachbegriffe, für die Oberfläche (`backup_run.warning`) */
+export function plainCause(cause: string): string {
+  switch (cause) {
+    case 'EACCES':
+    case 'EPERM':
+      return 'keine Berechtigung';
+    case 'EROFS':
+      return 'das Ziel ist schreibgeschützt';
+    case 'getauscht':
+      return 'das Ziel wurde dabei verändert';
+    case 'hinzugekommen':
+    case 'ENOTEMPTY':
+    case 'EEXIST':
+      return 'im Ordner kam etwas hinzu';
+    case 'EBUSY':
+      return 'ein Eintrag ist in Benutzung';
+    default:
+      return 'Fehler beim Löschen';
+  }
 }

@@ -1339,7 +1339,8 @@
         "state",
         "error",
         "trigger",
-        "stand"
+        "stand",
+        "warning"
       ],
       "additionalProperties": false,
       "properties": {
@@ -1408,6 +1409,14 @@
           ],
           "pattern": "^[0-9]{8}T[0-9]{6}Z$",
           "description": "Name des Stands für sg restore <stand>, z. B. 20261104T030012Z. null solange er läuft oder bei Fehler"
+        },
+        "warning": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 500,
+          "description": "Warnung zum Lauf, z. B. ein alter Stand, der sich seit mehreren Läufen nicht aus dem Ziel entfernen lässt (VERTRAEGE §13). null = keine"
         }
       }
     },

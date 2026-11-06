@@ -11,5 +11,6 @@
   "state": "laeuft",
   "error": null,
   "trigger": "manuell",
-  "stand": null
+  "stand": null,
+  "warning": null
 }

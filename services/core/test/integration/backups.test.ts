@@ -109,6 +109,26 @@ describe('GET /backups', () => {
     expect(stale.status.stale).toBe(true);
   });
 
+  it('#124: warning des Laufs kommt in der Liste an, thin_left bleibt intern; höchstens 500 Zeichen', async () => {
+    await setData({ backup_target: '/ziel' });
+    const recent = new Date(Date.now() - 3600_000).toISOString();
+    const id = await insertRun({ started: recent, state: 'fertig', finished: recent });
+    const text =
+      'Im Backup-Ziel lässt sich ein alter Stand seit mehreren Läufen nicht entfernen: 20261001T030000Z.';
+    await t.handle
+      .sql`UPDATE backup_run SET warning = ${text}, thin_left = ${['20261001T030000Z']} WHERE id = ${id}`;
+    const body = (await t.request({ method: 'GET', url: `${API}/backups` })).json<BackupOverview>();
+    expect(body.items[0]?.warning).toBe(text);
+    expect(Object.keys(body.items[0] ?? {})).not.toContain('thin_left');
+    // Ohne Warnung: null
+    await t.handle.sql`UPDATE backup_run SET warning = NULL WHERE id = ${id}`;
+    const none = (await t.request({ method: 'GET', url: `${API}/backups` })).json<BackupOverview>();
+    expect(none.items[0]?.warning).toBeNull();
+    await expect(
+      t.handle.sql`UPDATE backup_run SET warning = ${'x'.repeat(501)} WHERE id = ${id}`,
+    ).rejects.toThrow(/backup_run_warning_chk/);
+  });
+
   it('ein "laeuft" von vor Tagen gilt als abgestürzt und blockiert nicht', async () => {
     await setData({ backup_target: '/ziel' });
     await insertRun({ started: new Date(Date.now() - 2 * 86_400_000).toISOString(), state: 'laeuft' });

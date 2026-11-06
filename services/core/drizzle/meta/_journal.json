@@ -57,6 +57,13 @@
       "when": 1793907676364,
       "tag": "0007_moodle_auto",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793925339768,
+      "tag": "0008_backup_warning",
+      "breakpoints": true
     }
   ]
 }
