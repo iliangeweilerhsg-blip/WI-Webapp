@@ -13,11 +13,12 @@ Core holt hier den Vektor einer Suchanfrage, berechnet mit **demselben** Modell 
 - `GET /health` → `WorkerHealth`. `POST /embed` mit `EmbedRequest` → `EmbedResponse`.
 - **Grenzen:** `Host` muss `127.0.0.1:<port>` sein (`400`, DNS-Rebinding), `Content-Length`
   Pflicht (`411`, auch bei `Transfer-Encoding`), Body ≤ 256 KB vor dem Lesen geprüft (`413`), nur
-  `application/json` (`415`), 5 s je Verbindung, höchstens 4 Anfragen gleichzeitig (`503 busy`).
+  `application/json` (`415`), 5 s je Verbindung, höchstens 4 Anfragen gleichzeitig (`503 busy`),
+  höchstens 32 offene Verbindungen (überzählige werden sofort geschlossen).
   Andere Pfade `404`, andere Methoden `405`. Keine CORS-Header.
 - **Logs:** nur Methode, Pfad, Status und Dauer.
-- **Vorrang (§19.2):** Jede `/embed`-Anfrage meldet sich bei `ENDPOINT_PRIORITY` an. Die
-  Job-Schleife wartet vor jedem Stapel, bis keine Anfrage ansteht.
+- **Vorrang (§19.2):** Eine gültige `/embed`-Anfrage meldet sich für die Dauer des Einbettens
+  bei `ENDPOINT_PRIORITY` an. Die Job-Schleife wartet vor jedem Stapel, bis keine ansteht.
 """
 
 from __future__ import annotations
@@ -52,6 +53,8 @@ HOST = "127.0.0.1"  # nie eine andere Adresse
 DEFAULT_PORT = 4711
 MAX_BODY = 256 * 1024
 MAX_CONCURRENT = 4
+#: Offene Verbindungen (inklusive solcher, deren Kopfzeilen noch nicht gelesen sind)
+MAX_CONNECTIONS = 32
 TOKEN_NAME = "worker.token"
 #: Zeitlimit je Verbindung (gesamt) und je Lese-/Schreibvorgang
 CONNECTION_TIMEOUT_S = 5.0
@@ -77,7 +80,7 @@ def worker_port(environ: Mapping[str, str] | None = None) -> int:
     raw = (env.get("SG_WORKER_PORT") or "").strip()
     if not raw:
         return DEFAULT_PORT
-    if not raw.isdigit() or not 1 <= int(raw) <= 65535:
+    if not (raw.isascii() and raw.isdigit()) or not 1 <= int(raw) <= 65535:
         raise ConfigError(f"SG_WORKER_PORT ungültig: {raw[:20]!r}")
     return int(raw)
 
@@ -112,6 +115,11 @@ def write_token(data_dir: Path, token: str) -> Path:
     finally:
         os.close(fd)
     os.replace(part, final)
+    dir_fd = os.open(run, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(dir_fd)  # das Umbenennen überlebt einen Absturz
+    finally:
+        os.close(dir_fd)
     return final
 
 
@@ -132,6 +140,32 @@ class _Server(ThreadingHTTPServer):
         self.token_bytes = b""  # erst nach dem Binden gesetzt (§19.4)
         self.expected_host = f"{HOST}:{self.server_port}"
         self.slots = threading.BoundedSemaphore(MAX_CONCURRENT)
+        self._open = 0
+        self._open_lock = threading.Lock()
+
+    @property
+    def open_connections(self) -> int:
+        with self._open_lock:
+            return self._open
+
+    def _release_connection(self) -> None:
+        with self._open_lock:
+            self._open -= 1
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        """Höchstens `MAX_CONNECTIONS` offene Verbindungen, überzählige sofort schließen."""
+        with self._open_lock:
+            full = self._open >= MAX_CONNECTIONS
+            if not full:
+                self._open += 1
+        if full:
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._release_connection()
+            raise
 
     def process_request_thread(self, request: Any, client_address: Any) -> None:
         timer = threading.Timer(CONNECTION_TIMEOUT_S, _abort_connection, args=(request,))
@@ -141,6 +175,7 @@ class _Server(ThreadingHTTPServer):
             super().process_request_thread(request, client_address)
         finally:
             timer.cancel()
+            self._release_connection()
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         # Abgebrochene Verbindungen (Zeitlimit, Client weg): kein Traceback auf stderr
@@ -225,27 +260,31 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/health":
             self._health()
         else:
-            with ENDPOINT_PRIORITY.request():
-                self._embed()
+            self._embed()
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_HEAD = do_OPTIONS = _dispatch
 
     def _health(self) -> None:
         emb = self.server.embedder
-        state = embedder_state(emb)
-        error = emb.error() if state == "nicht_verfuegbar" else None
-        health = WorkerHealth.model_validate(
-            {
-                "embedder": {
-                    "provider": emb.provider,
-                    "model": emb.model,
-                    "dim": emb.dim,
-                    "state": state,
-                    "error": None if error is None else error[:500],
+        try:
+            state = embedder_state(emb)
+            error = emb.error() if state == "nicht_verfuegbar" else None
+            health = WorkerHealth.model_validate(
+                {
+                    "embedder": {
+                        "provider": emb.provider,
+                        "model": emb.model,
+                        "dim": emb.dim,
+                        "state": state,
+                        "error": None if error is None else error[:500],
+                    }
                 }
-            }
-        )
-        self._send_json(200, health.model_dump_json())
+            ).model_dump_json()
+        except Exception:
+            log.exception("Loopback: Zustand nicht lesbar")
+            self._error(500, "internal_error")
+            return
+        self._send_json(200, health)
 
     def _read_body(self) -> bytes | None:
         """Body mit `Content-Length` (≤ 256 KB, vor dem Lesen geprüft). None: Antwort gesendet."""
@@ -258,7 +297,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._error(411, "length_required")
             return None
         raw = raw.strip()
-        if not raw.isdigit():
+        if not (raw.isascii() and raw.isdigit()):  # "²".isdigit() ist wahr, int("²") nicht
             self._error(400, "validation_failed")
             return None
         length = int(raw)
@@ -285,7 +324,11 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             if not emb.ready():
                 raise EmbedderNotReady if emb.error() is None else EmbedderUnavailable
-            vectors = emb.embed(texts)
+            with ENDPOINT_PRIORITY.request():  # nur um das Einbetten (§19.2)
+                vectors = emb.embed(texts)
+            response = EmbedResponse.model_validate(
+                {"model": emb.model, "dim": emb.dim, "vectors": vectors}
+            ).model_dump_json()
         except EmbedderNotReady:
             self._error(503, "embedder_not_ready")
             return
@@ -296,10 +339,7 @@ class _Handler(BaseHTTPRequestHandler):
             log.exception("Loopback: Einbetten fehlgeschlagen")  # ohne Texte, ohne Token
             self._error(500, "internal_error")
             return
-        response = EmbedResponse.model_validate(
-            {"model": emb.model, "dim": emb.dim, "vectors": vectors}
-        )
-        self._send_json(200, response.model_dump_json())
+        self._send_json(200, response)
 
 
 class LoopbackServer:

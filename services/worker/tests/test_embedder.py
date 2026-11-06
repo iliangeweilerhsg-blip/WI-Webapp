@@ -259,3 +259,36 @@ def test_safe_error_strips_home_and_paths() -> None:
     out = em.safe_error(text)
     assert "/home/erfunden" not in out and "/tmp/a" not in out
     assert len(out) <= em.MAX_ERROR
+
+
+# ---------- Stopp-Signal ----------
+
+
+@pytest.fixture
+def reset_shutdown() -> Any:
+    em.SHUTDOWN.clear()
+    yield
+    em.SHUTDOWN.clear()
+
+
+@pytest.mark.usefixtures("reset_shutdown")
+def test_wait_ready_returns_on_shutdown() -> None:
+    gate = threading.Event()
+    importer, _ = stub_importer(gate=gate)
+    e = em.BgeM3Embedder(importer=importer)
+    e.start()
+    t0 = time.monotonic()
+    threading.Timer(0.1, em.request_shutdown).start()
+    assert e.wait_ready(600) is False
+    assert time.monotonic() - t0 < 3
+    gate.set()
+
+
+@pytest.mark.usefixtures("reset_shutdown")
+def test_shutdown_when_triggers() -> None:
+    flag = threading.Event()
+    thread = em.shutdown_when(flag.is_set, interval_s=0.01)
+    assert not em.SHUTDOWN.is_set()
+    flag.set()
+    thread.join(2)
+    assert em.SHUTDOWN.is_set()

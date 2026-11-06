@@ -8,7 +8,7 @@ from collections.abc import Callable
 from types import FrameType
 
 from . import handlers  # noqa: F401  (registriert die Handler)
-from .ai.embedder import start_embedder
+from .ai.embedder import shutdown_when, start_embedder
 from .ai.transcriber import config_error
 from .config import Settings, load_env_file
 from .logging_setup import setup_logging
@@ -58,6 +58,7 @@ def main() -> int:
         log.error("Transkription nicht verfügbar", extra={"error": problem})
     # §19.2/§19.4: Embedder lädt im Hintergrund, der Loopback-Endpunkt läuft in eigenen Threads
     server = start_server(settings.data_dir, start_embedder(log))
+    shutdown_when(lambda: worker.stopping)  # SIGTERM gibt Wartende im Embedder frei
     try:
         worker.run()
     except KeyboardInterrupt:

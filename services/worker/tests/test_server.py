@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import json
 import logging
@@ -214,13 +215,21 @@ def test_token_never_logged_or_returned(
 def test_worker_port_config() -> None:
     assert srv.worker_port({}) == 4711
     assert srv.worker_port({"SG_WORKER_PORT": "5123"}) == 5123
-    for bad in ("0", "70000", "abc", "-1"):
+    for bad in (
+        "0",
+        "70000",
+        "abc",
+        "-1",
+        "²",
+        "\u0664\u0667\u0661\u0661",
+    ):  # Hochzahl, arabisch-indische Ziffern
         with pytest.raises(srv.ConfigError):
             srv.worker_port({"SG_WORKER_PORT": bad})
 
 
-def test_start_server_with_bad_port_returns_none(tmp_path: Path) -> None:
-    assert srv.start_server(tmp_path, em.FakeEmbedder(), {"SG_WORKER_PORT": "x"}) is None
+@pytest.mark.parametrize("port", ["x", "²"])
+def test_start_server_with_bad_port_returns_none(tmp_path: Path, port: str) -> None:
+    assert srv.start_server(tmp_path, em.FakeEmbedder(), {"SG_WORKER_PORT": port}) is None
     assert not (tmp_path / "run").exists()
 
 
@@ -393,7 +402,7 @@ def raw_request(server: srv.LoopbackServer, head: str, body: bytes = b"") -> byt
     assert server.address is not None and server.token is not None
     text = head.replace("{host}", f"127.0.0.1:{server.address[1]}").replace("{token}", server.token)
     with socket.create_connection(server.address, timeout=5) as sock:
-        sock.sendall(text.replace("\n", "\r\n").encode() + b"\r\n" + body)
+        sock.sendall(text.replace("\n", "\r\n").encode("latin-1") + b"\r\n" + body)
         chunks = []
         while data := sock.recv(65536):
             chunks.append(data)
@@ -532,3 +541,141 @@ def test_embed_requests_get_priority_over_jobs(tmp_path: Path) -> None:
     finally:
         gate.set()
         s.stop()
+
+
+# ---------- Nacharbeit Review #163 ----------
+
+
+@pytest.fixture
+def reset_shutdown() -> Iterator[None]:
+    em.SHUTDOWN.clear()
+    yield
+    em.SHUTDOWN.clear()
+
+
+def test_stop_removes_only_own_token(tmp_path: Path) -> None:
+    s = start(tmp_path, em.FakeEmbedder())
+    token_file = tmp_path / "run" / "worker.token"
+    token_file.write_text("f" * 64)  # inzwischen von einem anderen Worker geschrieben
+    s.stop()
+    assert token_file.read_text() == "f" * 64
+
+
+@pytest.mark.parametrize("length", ["²", "1 0", "-5", "0x10"])
+def test_non_ascii_content_length_is_400(server: srv.LoopbackServer, length: str) -> None:
+    head = "POST /embed HTTP/1.1\nHost: {host}\nAuthorization: Bearer {token}\n"
+    head += f"Content-Type: application/json\nContent-Length: {length}\n"
+    answer = raw_request(server, head)
+    assert answer.startswith(b"HTTP/1.0 400") and b'"validation_failed"' in answer
+
+
+def test_invalid_vectors_give_500(tmp_path: Path) -> None:
+    class Broken(em.FakeEmbedder):
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[0.5] * 3 for _ in texts]  # falsche Länge
+
+    s = start(tmp_path, Broken())
+    try:
+        status, _, data = request(s, "POST", "/embed", {"texts": ["x"]})
+        assert (status, data) == (500, {"code": "internal_error"})
+        assert request(s, "GET", "/health")[0] == 200  # Server lebt weiter
+    finally:
+        s.stop()
+
+
+def test_invalid_health_gives_500(tmp_path: Path) -> None:
+    broken = em.FakeEmbedder(provider="")  # verletzt WorkerHealth (minLength 1)
+    s = start(tmp_path, broken)
+    try:
+        status, _, data = request(s, "GET", "/health")
+        assert (status, data) == (500, {"code": "internal_error"})
+    finally:
+        s.stop()
+
+
+def test_priority_only_while_embedding(tmp_path: Path) -> None:
+    seen: list[int] = []
+
+    class Watching(em.FakeEmbedder):
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            seen.append(em.ENDPOINT_PRIORITY.pending)
+            return super().embed(texts)
+
+    s = start(tmp_path, Watching())
+    try:
+        assert s.address is not None and s.token is not None
+        body = json.dumps({"texts": ["Laufzeit"]}).encode()
+        head = (
+            f"POST /embed HTTP/1.1\r\nHost: 127.0.0.1:{s.address[1]}\r\n"
+            f"Authorization: Bearer {s.token}\r\nContent-Type: application/json\r\n"
+            f"Content-Length: {len(body)}\r\n\r\n"
+        ).encode()
+        with socket.create_connection(s.address, timeout=5) as sock:
+            sock.sendall(head + body[:5])  # Body kommt langsam
+            time.sleep(0.2)
+            assert em.ENDPOINT_PRIORITY.pending == 0  # beim Lesen noch nicht angemeldet
+            sock.sendall(body[5:])
+            answer = sock.recv(65536)
+        assert answer.startswith(b"HTTP/1.0 200")
+        assert seen == [1]
+        assert em.ENDPOINT_PRIORITY.pending == 0
+        # Ungültige oder nicht bereite Anfragen melden sich gar nicht an
+        assert request(s, "POST", "/embed", {"texts": []})[0] == 400
+        assert seen == [1]
+    finally:
+        s.stop()
+
+
+def test_open_connections_are_capped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(srv, "MAX_CONNECTIONS", 3)
+    s = start(tmp_path, em.FakeEmbedder())
+    idle: list[socket.socket] = []
+    try:
+        assert s.address is not None and s._httpd is not None
+        for _ in range(3):  # offen, aber ohne Kopfzeilen
+            idle.append(socket.create_connection(s.address, timeout=5))
+        deadline = time.monotonic() + 5
+        while s._httpd.open_connections < 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert s._httpd.open_connections == 3
+        with socket.create_connection(s.address, timeout=5) as extra:
+            t0 = time.monotonic()
+            with contextlib.suppress(ConnectionResetError):
+                assert extra.recv(100) == b""  # sofort geschlossen
+            assert time.monotonic() - t0 < 2
+        for sock in idle:
+            sock.close()
+        deadline = time.monotonic() + 5
+        while s._httpd.open_connections > 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert request(s, "GET", "/health")[0] == 200
+        deadline = time.monotonic() + 5
+        while s._httpd.open_connections > 0 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert s._httpd.open_connections == 0
+    finally:
+        for sock in idle:
+            sock.close()
+        s.stop()
+
+
+def test_token_dir_is_fsynced(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    synced: list[bool] = []
+    real_fsync = os.fsync
+
+    def spy(fd: int) -> None:
+        synced.append(stat.S_ISDIR(os.fstat(fd).st_mode))
+        real_fsync(fd)
+
+    monkeypatch.setattr(srv.os, "fsync", spy)
+    srv.write_token(tmp_path, "a" * 64)
+    assert synced == [False, True]  # erst die Datei, nach dem Umbenennen der Ordner
+
+
+@pytest.mark.usefixtures("reset_shutdown")
+def test_wait_idle_returns_on_shutdown() -> None:
+    with em.ENDPOINT_PRIORITY.request():
+        t0 = time.monotonic()
+        threading.Timer(0.1, em.request_shutdown).start()
+        assert em.ENDPOINT_PRIORITY.wait_idle(10) is False
+        assert time.monotonic() - t0 < 2

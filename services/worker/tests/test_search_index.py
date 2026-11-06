@@ -233,7 +233,13 @@ def test_clean_text_has_no_control_chars() -> None:
 
     every = "".join(chr(c) for c in range(0x0, 0x250)) + "\u2028\u2029\ufeff"
     out = si.clean_text(every)
-    assert not any(unicodedata.category(ch) == "Cc" for ch in out)
+    assert not any(unicodedata.category(ch) in ("Cc", "Cf") for ch in out)
+
+
+def test_clean_text_removes_format_chars() -> None:
+    # weiches Trennzeichen, Nullbreite-Leerzeichen, BOM, Richtungszeichen
+    assert si.clean_text("Vor\u00adle\u200bsung\ufeff \u200eTeil\u2060") == "Vorlesung Teil"
+    assert si.clean_text("\u00ad\u200b") == ""
 
 
 def test_ts_config_mapping() -> None:
@@ -720,3 +726,23 @@ def test_job_waits_for_endpoint_requests() -> None:
     assert done.wait(5)
     thread.join()
     assert len(fake.calls) == 1 and out[0].model == "fake-embed-1"
+
+
+def test_format_chars_never_reach_the_table(worker: Worker, db: Conn, emb: Counting) -> None:
+    did, _ = deck(db, module(db), [{"title": "Al\u00adgo\u200brith\ufeffmus", "text": "x"}])
+    result(run_job(worker, db, "deck", did))
+    [row] = chunks(db)
+    assert row["text"] == "Algorithmus x"
+    assert db.execute("SELECT %s !~ '[[:cntrl:]]'", (row["text"],)).fetchone() == (True,)
+
+
+def test_shutdown_stops_embedding(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = Counting()
+    chunk_list = [si.Chunk("slide", uuid.uuid4(), 0, f"Text {i}", "german") for i in range(20)]
+    em.SHUTDOWN.set()
+    try:
+        out = si.embed_chunks(fake, chunk_list)
+    finally:
+        em.SHUTDOWN.clear()
+    assert fake.calls == []
+    assert (out.model, out.error, out.vectors) == (None, "Worker wird beendet", {})

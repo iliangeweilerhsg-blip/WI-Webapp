@@ -57,9 +57,12 @@ _SPACE = re.compile(r"\s+")
 
 def clean_text(text: str) -> str:
     """Säubern nach §19.3, in dieser Reihenfolge: NFC, Steuerzeichen (Cc, etwa `\\x01`/`\\x02`
-    aus §19.6) außer Leerraum entfernen, Leerraum (`\\s+`, auch Zeilenumbrüche) zu einem
-    Leerzeichen, trimmen, auf `MAX_TEXT` Zeichen kürzen. Erfüllt `text !~ '[[:cntrl:]]'`."""
+    aus §19.6) außer Leerraum und Formatzeichen (Cf, etwa U+00AD, U+200B, U+FEFF) entfernen,
+    Leerraum (`\\s+`, auch Zeilenumbrüche) zu einem Leerzeichen, trimmen, auf `MAX_TEXT` Zeichen
+    kürzen. Erfüllt `text !~ '[[:cntrl:]]'`, auch wenn Postgres mit ICU Cf dazuzählt."""
     text = _CONTROL.sub("", unicodedata.normalize("NFC", text))
+    if not text.isascii():  # Cf gibt es nur außerhalb von ASCII
+        text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
     return _SPACE.sub(" ", text).strip()[:MAX_TEXT]
 
 
@@ -268,6 +271,9 @@ class Embedded:
     error: str | None
 
 
+_STOPPING = "Worker wird beendet"
+
+
 def embed_chunks(embedder: Embedder, todo: Sequence[Chunk]) -> Embedded:
     """Bettet `todo` in Stapeln ein (außerhalb einer Transaktion). Ist der Embedder nicht
     verfügbar oder nach `WAIT_READY_S` nicht bereit, bleiben die übrigen Stücke ohne Vektor."""
@@ -277,11 +283,15 @@ def embed_chunks(embedder: Embedder, todo: Sequence[Chunk]) -> Embedded:
     try:
         if not embedder.wait_ready(WAIT_READY_S):
             raise EmbedderUnavailable(
-                embedder.error() or f"Embedder nach {int(WAIT_READY_S)} s nicht bereit"
+                embedder.error()
+                or (_STOPPING if embedders.SHUTDOWN.is_set() else None)
+                or f"Embedder nach {int(WAIT_READY_S)} s nicht bereit"
             )
         for i in range(0, len(todo), EMBED_BATCH):
             batch = todo[i : i + EMBED_BATCH]
             embedders.ENDPOINT_PRIORITY.wait_idle()  # Suchanfragen gehen vor (§19.2)
+            if embedders.SHUTDOWN.is_set():  # SIGTERM: Rest ohne Vektor, §19.5 holt nach
+                raise EmbedderUnavailable(_STOPPING)
             vectors = embedder.embed([c.text for c in batch])
             if len(vectors) != len(batch):
                 raise RuntimeError("Embedder lieferte eine falsche Anzahl Vektoren")

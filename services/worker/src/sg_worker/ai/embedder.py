@@ -65,6 +65,13 @@ def embedder_state(embedder: Embedder) -> EmbedderState:
     return "laedt"
 
 
+#: Wird beim Beenden des Workers gesetzt (`request_shutdown`): Wartende (`wait_ready`,
+#: `wait_idle`) geben dann sofort auf, statt den SIGTERM bis zu 10 min aufzuhalten.
+SHUTDOWN = threading.Event()
+#: So oft prüfen Wartende das Stopp-Signal (Sekunden)
+_WAIT_SLICE_S = 0.5
+
+
 class EndpointPriority:
     """Vorrang des Loopback-Endpunkts (§19.2): Zähler anstehender Endpunkt-Anfragen mit
     `threading.Condition`. Die Job-Schleife wartet vor jedem Stapel (`wait_idle`), bis keine
@@ -93,13 +100,43 @@ class EndpointPriority:
                     self._cond.notify_all()
 
     def wait_idle(self, timeout_s: float | None = None) -> bool:
-        """Wartet, bis keine Endpunkt-Anfrage ansteht. False: Zeitlimit erreicht."""
+        """Wartet, bis keine Endpunkt-Anfrage ansteht. False: Zeitlimit erreicht oder der Worker
+        wird beendet (`SHUTDOWN`)."""
         with self._cond:
-            return self._cond.wait_for(lambda: self._pending == 0, timeout_s)
+            return self._cond.wait_for(
+                lambda: self._pending == 0 or SHUTDOWN.is_set(), timeout_s
+            ) and (self._pending == 0)
+
+    def wake(self) -> None:
+        """Weckt Wartende (nach `SHUTDOWN.set()`)."""
+        with self._cond:
+            self._cond.notify_all()
 
 
 #: Gemeinsam für Job-Schleife und Endpunkt (ein Modell je Prozess)
 ENDPOINT_PRIORITY = EndpointPriority()
+
+
+def request_shutdown() -> None:
+    """Der Worker wird beendet: Wartende sofort freigeben."""
+    SHUTDOWN.set()
+    ENDPOINT_PRIORITY.wake()
+
+
+def shutdown_when(
+    stopping: Callable[[], bool], interval_s: float = _WAIT_SLICE_S
+) -> threading.Thread:
+    """Daemon-Thread, der `request_shutdown()` auslöst, sobald `stopping()` wahr ist (beim Start
+    des Workers mit `lambda: worker.stopping`)."""
+
+    def watch() -> None:
+        while not stopping():
+            time.sleep(interval_s)
+        request_shutdown()
+
+    thread = threading.Thread(target=watch, name="sg-embedder-stop", daemon=True)
+    thread.start()
+    return thread
 
 
 _ABS_PATH = re.compile(r"(?<![\w.:/])/(?:[\w.\-]+/)+[\w.\-]*")
@@ -287,7 +324,12 @@ class BgeM3Embedder:
     def wait_ready(self, timeout_s: float) -> bool:
         if self._thread is None:
             self.start()
-        self._done.wait(max(0.0, timeout_s))
+        deadline = time.monotonic() + max(0.0, timeout_s)
+        while not self._done.is_set() and not SHUTDOWN.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._done.wait(min(remaining, _WAIT_SLICE_S))
         return self.ready()
 
     def embed(self, texts: list[str]) -> list[list[float]]:
