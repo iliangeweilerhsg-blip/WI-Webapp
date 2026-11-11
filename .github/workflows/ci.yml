@@ -37,6 +37,24 @@ jobs:
         run: |
           pnpm --filter @sg/web build
           node apps/web/scripts/check-theme-init.mjs --strict
+      - name: Backup-Tests mit root (Besitzerprüfung #182/#183)
+        working-directory: infra/sg
+        run: |
+          ROOT_TMP="$(sudo mktemp -d)"; echo "ROOT_TMP=$ROOT_TMP" >> "$GITHUB_ENV"
+          sudo env "PATH=$PATH" SG_ROOT_TESTS=1 TMPDIR="$ROOT_TMP" CI=true \
+            node_modules/.bin/vitest run test/backup.test.ts -t '\[root\]' \
+            --reporter=default --reporter=json --outputFile="$ROOT_TMP/root.json"
+          sudo cat "$ROOT_TMP/root.json" | node -e '
+            const r=JSON.parse(require("fs").readFileSync(0,"utf8"));
+            const t=r.testResults.flatMap(f=>f.assertionResults).filter(a=>a.fullName.includes("[root]"));
+            const bad=t.filter(a=>a.status!=="passed");
+            console.log(`Root-Tests: ${t.length} gefunden, ${t.length-bad.length} bestanden`);
+            if(t.length<9||bad.length) { console.error(bad.map(a=>a.fullName+": "+a.status).join("\n")); process.exit(1); }'
+      - name: Aufräumen nach root-Lauf
+        if: always()
+        run: |
+          [ -n "${ROOT_TMP:-}" ] && sudo rm -rf "$ROOT_TMP"
+          sudo chown -R "$(id -u):$(id -g)" infra/sg
 
   integration:
     name: Integration (Core + Postgres)
@@ -63,7 +81,7 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -r --if-present run test:integration
+      - run: pnpm -r --workspace-concurrency=1 --if-present run test:integration
 
   python:
     name: Python (Schemas, Worker)

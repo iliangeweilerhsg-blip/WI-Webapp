@@ -12,23 +12,39 @@ import { runAnchor } from '../src/restore.ts';
 const BASE = process.env.DATABASE_URL;
 const MIGRATE = fileURLToPath(new URL('../../../services/core/src/migrate.ts', import.meta.url));
 
+/**
+ * Legt eine frische Testdatenbank an und migriert sie. Läuft parallel eine andere Suite, kann CREATE DATABASE mit
+ * 55006 („being accessed by other users“) scheitern; das wird bis zu 5× im Abstand von 500 ms wiederholt.
+ */
+async function createTestDb(name: string): Promise<{ admin: PgAccess; pg: PgAccess }> {
+  const base = new URL(BASE as string);
+  const admin = createPg({ databaseUrl: base.toString(), composeFile: '' }, realExec, 'local');
+  const url = new URL(base.toString());
+  url.pathname = `/${name}`;
+  const pg = createPg({ databaseUrl: url.toString(), composeFile: '' }, realExec, 'local');
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await admin.query(`CREATE DATABASE ${name}`);
+      break;
+    } catch (e) {
+      if (attempt >= 5 || !/being accessed by other users/.test(String(e))) throw e;
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  execFileSync('node', [MIGRATE], {
+    env: { ...process.env, DATABASE_URL: url.toString() },
+    stdio: 'pipe',
+  });
+  return { admin, pg };
+}
+
 describe.skipIf(!BASE)('recordLeftovers gegen PostgreSQL (Nacharbeit Review #160)', () => {
   const name = `sg_cli_it_${randomBytes(4).toString('hex')}`;
   let admin: PgAccess;
   let pg: PgAccess;
 
-  beforeAll(() => {
-    const base = new URL(BASE as string);
-    admin = createPg({ databaseUrl: base.toString(), composeFile: '' }, realExec, 'local');
-    const url = new URL(base.toString());
-    url.pathname = `/${name}`;
-    pg = createPg({ databaseUrl: url.toString(), composeFile: '' }, realExec, 'local');
-    return admin.query(`CREATE DATABASE ${name}`).then(() => {
-      execFileSync('node', [MIGRATE], {
-        env: { ...process.env, DATABASE_URL: url.toString() },
-        stdio: 'pipe',
-      });
-    });
+  beforeAll(async () => {
+    ({ admin, pg } = await createTestDb(name));
   }, 120_000);
 
   afterAll(async () => {
@@ -92,18 +108,8 @@ describe.skipIf(!BASE)(
     let admin: PgAccess;
     let pg: PgAccess;
 
-    beforeAll(() => {
-      const base = new URL(BASE as string);
-      admin = createPg({ databaseUrl: base.toString(), composeFile: '' }, realExec, 'local');
-      const url = new URL(base.toString());
-      url.pathname = `/${name}`;
-      pg = createPg({ databaseUrl: url.toString(), composeFile: '' }, realExec, 'local');
-      return admin.query(`CREATE DATABASE ${name}`).then(() => {
-        execFileSync('node', [MIGRATE], {
-          env: { ...process.env, DATABASE_URL: url.toString() },
-          stdio: 'pipe',
-        });
-      });
+    beforeAll(async () => {
+      ({ admin, pg } = await createTestDb(name));
     }, 120_000);
 
     afterAll(async () => {
