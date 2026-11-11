@@ -300,7 +300,7 @@ final class SyncEngineTests: XCTestCase {
 
     func testNewDBEpochMarksAllPagesForReconcile() async throws {
         let h = SyncHarness()
-        h.library.dbEpoch = "epoch-alt"
+        h.library.setDBEpoch("epoch-alt")
         h.factory.configure = { socket, _ in socket.epoch = "epoch-neu" }
         h.start()
 
