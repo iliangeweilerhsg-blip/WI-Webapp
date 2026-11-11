@@ -1,7 +1,7 @@
 import Foundation
 
 /// Wartezeit vor dem Neuverbinden (VERTRAEGE §11.2, §11.4): 1, 2, 4, 8, 16, 30, 30 … Sekunden,
-/// dazu 0 bis 25 % Zufall. Nach einem `ack` oder dem ersten `pong` beginnt die Folge von vorn.
+/// davon 0 bis 25 % Zufall abgezogen (wie der Web-Client), also nie über 30 s. Nach einem `ack` oder dem ersten `pong` beginnt die Folge von vorn.
 struct SyncBackoff: Equatable, Sendable {
     static let firstDelay = 1.0
     static let maxDelay = 30.0
@@ -22,7 +22,7 @@ struct SyncBackoff: Equatable, Sendable {
     /// - Parameter jitter: Zufallszahl in 0 ..< 1
     mutating func next(jitter: Double) -> Duration {
         let clamped = min(max(jitter, 0), 1)
-        let seconds = baseDelay * (1 + SyncBackoff.maxJitter * clamped)
+        let seconds = baseDelay * (1 - SyncBackoff.maxJitter * clamped)
         attempt += 1
         return .milliseconds(Int((seconds * 1000).rounded()))
     }

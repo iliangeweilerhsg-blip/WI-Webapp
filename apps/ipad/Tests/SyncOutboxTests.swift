@@ -191,12 +191,16 @@ final class SyncClockBackoffTests: XCTestCase {
         XCTAssertEqual(backoff.next(jitter: 0), .milliseconds(1000))
     }
 
-    func testBackoffAddsUpToTwentyFivePercentJitter() {
+    func testBackoffSubtractsUpToTwentyFivePercentJitter() {
         var backoff = SyncBackoff()
-        XCTAssertEqual(backoff.next(jitter: 1), .milliseconds(1250))
-        XCTAssertEqual(backoff.next(jitter: 0.5), .milliseconds(2250))
+        XCTAssertEqual(backoff.next(jitter: 1), .milliseconds(750))
+        XCTAssertEqual(backoff.next(jitter: 0.5), .milliseconds(1750))
         // Außerhalb von 0 ... 1 wird begrenzt
-        XCTAssertEqual(backoff.next(jitter: 7), .milliseconds(5000))
+        XCTAssertEqual(backoff.next(jitter: 7), .milliseconds(3000))
+        // Die Grenze von 30 s gilt auch mit Zufall
+        for _ in 0..<5 { _ = backoff.next(jitter: 0) }
+        XCTAssertEqual(backoff.next(jitter: 0), .milliseconds(30000))
+        XCTAssertEqual(backoff.next(jitter: 1), .milliseconds(22500))
     }
 }
 
