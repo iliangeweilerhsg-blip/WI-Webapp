@@ -35,8 +35,28 @@ function expandHome(path: string): string {
 const repoRoot = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 
 /**
+ * Variablen der Claude API (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` …). Der Core liest
+ * den Schlüssel nie (VERTRAEGE §20.5): Nur der Worker nutzt ihn.
+ */
+export function isAnthropicEnvKey(key: string): boolean {
+  return key.startsWith('ANTHROPIC_');
+}
+
+/**
+ * Entfernt alle `ANTHROPIC_*`-Variablen aus der Umgebung des Core (VERTRAEGE §20.5), auch wenn sie schon beim
+ * Start gesetzt waren: Kindprozesse, die der Core startet (CLI für Backups), erben sie so nicht. Rückgabe: die Namen
+ * der entfernten Variablen (nie die Werte), für einen Log-Hinweis.
+ */
+export function scrubAnthropicEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+  const removed = Object.keys(env).filter(isAnthropicEnvKey);
+  for (const key of removed) delete env[key];
+  return removed.sort();
+}
+
+/**
  * Liest `$SG_DATA_DIR/config/.env` und trägt fehlende Variablen ein.
  * Bereits gesetzte Umgebungsvariablen haben Vorrang. Rückgabe: Pfad der gelesenen Datei oder null.
+ * Schlüssel, die mit `ANTHROPIC_` beginnen, werden übersprungen (§20.5: der Core liest den KI-Schlüssel nie).
  */
 export function loadDotEnv(env: NodeJS.ProcessEnv = process.env): string | null {
   const dataDir = resolve(expandHome(env.SG_DATA_DIR || join(homedir(), 'StudienGehirn')));
@@ -44,6 +64,7 @@ export function loadDotEnv(env: NodeJS.ProcessEnv = process.env): string | null 
   if (!existsSync(file)) return null;
   const parsed = parseEnv(readFileSync(file, 'utf8'));
   for (const [key, value] of Object.entries(parsed)) {
+    if (isAnthropicEnvKey(key)) continue;
     if (env[key] === undefined && value !== undefined) env[key] = value;
   }
   return file;

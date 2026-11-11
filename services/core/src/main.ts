@@ -1,6 +1,6 @@
 // `pnpm --filter @sg/core start`: startet die API auf SG_CORE_PORT (docs/VERTRAEGE.md §2)
 import { buildApp } from './app.ts';
-import { hasOpenPermissions, loadConfig, loadDotEnv } from './config.ts';
+import { hasOpenPermissions, loadConfig, loadDotEnv, scrubAnthropicEnv } from './config.ts';
 import { createDb } from './db/client.ts';
 import { createLogger } from './logger.ts';
 import { purgeIdempotencyKeys } from './plugins/idempotency.ts';
@@ -11,8 +11,18 @@ import { startScheduler } from './services/scheduler.ts';
 const SHUTDOWN_DEADLINE_MS = 10_000;
 
 const dotEnvFile = loadDotEnv();
+// Der Core liest den KI-Schlüssel nie und gibt ihn nicht an Kindprozesse weiter (VERTRAEGE §20.5). Vor allem anderen,
+// auch vor dem Logger: Danach steht in `process.env` keine `ANTHROPIC_*`-Variable mehr
+const scrubbedEnv = scrubAnthropicEnv();
 const config = loadConfig();
 const logger = createLogger(config);
+if (scrubbedEnv.length > 0) {
+  // Nur die Namen, nie die Werte
+  logger.info(
+    { variables: scrubbedEnv },
+    'KI-Variablen aus der Umgebung des Core entfernt (nur der Worker nutzt sie)',
+  );
+}
 if (dotEnvFile) {
   logger.info({ file: dotEnvFile }, 'Konfiguration aus .env geladen');
   if (hasOpenPermissions(dotEnvFile)) {

@@ -36,5 +36,9 @@
     "backup_target": null,
     "backup_encryption": false,
     "backup_time": "03:00"
+  },
+  "ai": {
+    "monthly_budget_eur": 10,
+    "auto_accept": "aus"
   }
 }

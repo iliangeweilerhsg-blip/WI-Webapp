@@ -141,12 +141,24 @@ def test_bge_import_error_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> Non
 class StubModel:
     """Attrappe für `SentenceTransformer`: zählt gleichzeitige Aufrufe von `encode`."""
 
-    def __init__(self, name: str, *, device: str, dim: int = 1024, gate: Any = None) -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        device: str,
+        dim: int = 1024,
+        gate: Any = None,
+        model_kwargs: dict[str, Any] | None = None,
+        nan_in: tuple[str, ...] = (),
+    ) -> None:
         if gate is not None:
             gate.wait(10)
         self.name = name
         self.device = device
         self.dim = dim
+        self.model_kwargs = model_kwargs
+        self.dtype = (model_kwargs or {}).get("dtype", "float32")
+        self.nan_in = nan_in
         self.max_seq_length = 8192
         self.calls: list[dict[str, Any]] = []
         self.active = 0
@@ -163,22 +175,42 @@ class StubModel:
         self.calls.append({"texts": list(texts), **kwargs})
         self.active -= 1
         rows = [em.fake_vector(t) for t in texts]
+        if self.dtype in self.nan_in:
+            rows = [[math.nan] * self.dim for _ in texts]
         return SimpleNamespace(tolist=lambda: rows)
+
+    def float(self) -> StubModel:
+        self.dtype = "float32"
+        return self
 
 
 def stub_importer(
-    *, mps: bool = True, dim: int = 1024, gate: Any = None, fail: Exception | None = None
+    *,
+    mps: bool = True,
+    dim: int = 1024,
+    gate: Any = None,
+    fail: Exception | None = None,
+    nan_in: tuple[str, ...] = (),
 ) -> tuple[Any, dict[str, Any]]:
-    seen: dict[str, Any] = {}
+    seen: dict[str, Any] = {"threads": [], "empty_cache": 0}
 
-    def make(name: str, *, device: str) -> StubModel:
+    def make(name: str, **kwargs: Any) -> StubModel:
         if fail is not None:
             raise fail
-        seen["model"] = StubModel(name, device=device, dim=dim, gate=gate)
+        seen["kwargs"] = kwargs
+        seen["model"] = StubModel(name, dim=dim, gate=gate, nan_in=nan_in, **kwargs)
         return seen["model"]
 
+    def empty_cache() -> None:
+        seen["empty_cache"] += 1
+
     st = SimpleNamespace(SentenceTransformer=make)
-    torch = SimpleNamespace(backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: mps)))
+    torch = SimpleNamespace(
+        backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: mps)),
+        float16="float16",
+        set_num_threads=seen["threads"].append,
+        mps=SimpleNamespace(empty_cache=empty_cache),
+    )
     return (lambda: (st, torch)), seen
 
 
@@ -193,11 +225,166 @@ def test_bge_loads_with_contract_settings(mps: bool, device: str) -> None:
     assert model.max_seq_length == 512
     [vec] = e.embed(["Pivotelement"])
     assert vec == em.fake_vector("Pivotelement")
-    call = model.calls[0]
+    call = model.calls[-1]
     assert call["normalize_embeddings"] is True
     assert call["convert_to_numpy"] is True
     assert call["texts"] == ["Pivotelement"]  # keine Präfixe
     assert em.embedder_state(e) == "bereit"
+
+
+# ---------- Entlastung: fp16, Threads, Zwischenspeicher ----------
+
+
+@pytest.fixture
+def tuning() -> Any:
+    yield
+    em.configure_tuning()
+
+
+@pytest.mark.parametrize(
+    ("device", "dtype"),
+    [("mps", "float16"), ("cuda", "float16"), ("cuda:0", "float16"), ("cpu", "float32")],
+)
+def test_pick_dtype_per_device(device: str, dtype: str) -> None:
+    assert em.pick_dtype(device) == dtype
+
+
+def test_bge_loads_fp16_on_mps() -> None:
+    importer, seen = stub_importer(mps=True)
+    e = em.BgeM3Embedder(importer=importer)
+    assert e.wait_ready(10)
+    assert seen["kwargs"] == {"device": "mps", "model_kwargs": {"dtype": "float16"}}
+    assert (e.device, e.dtype) == ("mps", "float16")
+    # Probelauf beim Laden, danach den Zwischenspeicher des Geräts freigeben
+    assert [c["texts"] for c in seen["model"].calls] == [[em.WARMUP_TEXT]]
+    assert seen["empty_cache"] == 1
+    [vec] = e.embed(["Pivotelement"])
+    assert len(vec) == 1024 and abs(norm(vec) - 1.0) < 1e-12
+
+
+def test_bge_stays_fp32_on_cpu() -> None:
+    importer, seen = stub_importer(mps=False)
+    e = em.BgeM3Embedder(importer=importer)
+    assert e.wait_ready(10)
+    assert seen["kwargs"] == {"device": "cpu"}  # kein dtype: fp32 wie bisher
+    assert (e.device, e.dtype) == ("cpu", "float32")
+    assert seen["model"].calls == [] and seen["empty_cache"] == 0
+    e.release_cache()
+    assert seen["empty_cache"] == 0  # nur auf mps
+
+
+def test_bge_falls_back_to_fp32_when_fp16_gives_nan() -> None:
+    importer, seen = stub_importer(mps=True, nan_in=("float16",))
+    e = em.BgeM3Embedder(importer=importer)
+    assert e.wait_ready(10)
+    assert (e.dtype, seen["model"].dtype) == ("float32", "float32")
+    assert e.embed(["Laufzeit"]) == [em.fake_vector("Laufzeit")]
+
+
+def test_bge_falls_back_to_fp32_when_fp16_probe_raises() -> None:
+    """Scheitert fp16 auf dem Gerät ganz (fehlende Half-Operation), bleibt der Embedder nutzbar."""
+    importer, seen = stub_importer(mps=True)
+    st, torch = importer()
+    make = st.SentenceTransformer
+
+    def make_failing_fp16(name: str, **kwargs: Any) -> Any:
+        model = make(name, **kwargs)
+        encode = model.encode
+
+        def encode_or_fail(texts: list[str], **kw: Any) -> Any:
+            if model.dtype == "float16":
+                raise RuntimeError("MPS: Half nicht unterstützt")
+            return encode(texts, **kw)
+
+        model.encode = encode_or_fail
+        return model
+
+    st.SentenceTransformer = make_failing_fp16
+    e = em.BgeM3Embedder(importer=lambda: (st, torch))
+    assert e.wait_ready(10) is True and e.error() is None
+    assert (e.dtype, seen["model"].dtype) == ("float32", "float32")
+    assert e.embed(["Laufzeit"]) == [em.fake_vector("Laufzeit")]
+
+
+def test_bge_renormalizes_fp16_vectors() -> None:
+    importer, seen = stub_importer()
+    e = em.BgeM3Embedder(importer=importer)
+    assert e.wait_ready(10)
+    # fp16 normiert nur grob: Länge 0,999 statt 1
+    rows = [[0.999 * x for x in em.fake_vector("Laufzeit Rekursion")]]
+    seen["model"].encode = lambda texts, **kw: SimpleNamespace(tolist=lambda: rows)
+    [vec] = e.embed(["x"])
+    assert abs(norm(vec) - 1.0) < 1e-12
+    assert cos(vec, em.fake_vector("Laufzeit Rekursion")) > 1 - 1e-12
+
+
+def test_unit_keeps_zero_and_invalid_rows() -> None:
+    assert em._unit([0.0, 0.0]) == [0.0, 0.0]
+    assert math.isnan(em._unit([math.nan, 1.0])[0])
+    assert em._unit([3, 4]) == [0.6, 0.8]
+
+
+@pytest.mark.usefixtures("tuning")
+def test_bge_sets_torch_threads() -> None:
+    em.configure_tuning(threads=3)
+    importer, seen = stub_importer()
+    assert em.BgeM3Embedder(importer=importer).wait_ready(10)
+    assert seen["threads"] == [3]
+
+
+@pytest.mark.usefixtures("tuning")
+def test_default_threads_are_half_the_cores(monkeypatch: pytest.MonkeyPatch) -> None:
+    em.configure_tuning()
+    monkeypatch.setattr("os.cpu_count", lambda: 8)
+    assert em.embed_threads() == 4
+    monkeypatch.setattr("os.cpu_count", lambda: 1)
+    assert em.embed_threads() == 1
+    monkeypatch.setattr("os.cpu_count", lambda: None)
+    assert em.embed_threads() == 1
+
+
+def test_bge_survives_failing_set_num_threads_and_empty_cache() -> None:
+    importer, _ = stub_importer()
+    st, torch = importer()
+
+    def boom(*_: Any) -> None:
+        raise RuntimeError("nein")
+
+    torch.set_num_threads = boom
+    torch.mps.empty_cache = boom
+    e = em.BgeM3Embedder(importer=lambda: (st, torch))
+    assert e.wait_ready(10) is True and e.error() is None
+
+
+@pytest.mark.usefixtures("tuning", "reset_shutdown")
+def test_pause_between_batches_waits_and_stops_on_shutdown() -> None:
+    em.configure_tuning(pause_ms=60)
+    assert em.index_pause_s() == 0.06
+    t0 = time.monotonic()
+    em.pause_between_batches()
+    assert time.monotonic() - t0 >= 0.05
+    em.configure_tuning(pause_ms=0)
+    t0 = time.monotonic()
+    em.pause_between_batches()
+    assert time.monotonic() - t0 < 0.05
+    em.configure_tuning(pause_ms=5000)
+    em.request_shutdown()
+    t0 = time.monotonic()
+    em.pause_between_batches()
+    assert time.monotonic() - t0 < 1
+
+
+def test_embed_itself_never_pauses(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Die Drosselung liegt im Handler von `search.index`, nicht im Embedder."""
+    waits: list[float] = []
+    monkeypatch.setattr(em.SHUTDOWN, "wait", lambda t=None: waits.append(t) or False)
+    importer, _ = stub_importer()
+    e = em.BgeM3Embedder(importer=importer)
+    assert e.wait_ready(10)
+    for _ in range(5):
+        e.embed(["Laufzeit"])
+    em.FakeEmbedder().embed(["Laufzeit"])
+    assert waits == []
 
 
 def test_bge_is_loading_until_model_is_there() -> None:
@@ -250,7 +437,7 @@ def test_bge_embed_is_thread_safe() -> None:
     for t in threads:
         t.join()
     assert errors == []
-    assert len(seen["model"].calls) == 40
+    assert len(seen["model"].calls) == 41  # 40 und der Probelauf nach dem Laden (mps)
     assert seen["model"].overlap is False
 
 

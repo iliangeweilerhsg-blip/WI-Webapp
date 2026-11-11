@@ -547,6 +547,8 @@ export function makeSettings(): Settings {
       ],
     },
     data: { backup_target: null, backup_encryption: false, backup_time: '03:00' },
+    // Pflichtfeld seit T2-22a (VERTRAEGE §20.7). Die Oberfläche dazu baut T2-23
+    ai: { monthly_budget_eur: 10, auto_accept: 'aus' },
   };
 }
 

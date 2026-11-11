@@ -19,7 +19,8 @@ Ablauf:
 8. Eine Transaktion: Session sperren (gelöscht → `session_deleted`), `fertig` mit
    `ConceptsExtractResult`. Der Job schreibt keine Tabellen außer `cost_entry`.
 
-Normieren und Vergleichsform (`normalize_name`, `name_key`) folgen §20.3 „Gemeinsame Regeln“.
+Normieren und Vergleichsform (`normalize_name`, `name_key`) folgen §20.3 „Gemeinsame Regeln“ und
+liegen in `concepts/names.py`.
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ from ..ai.outputs import (
     ConceptsExtractOutput,
     ExtractConceptOut,
 )
+from ..concepts.names import name_key, normalize_name
 from ..registry import JobContext, LockLostError, NonRetryableError, handler
 from .align_log import _timeline_end
 from .search_index import clean_text
@@ -80,19 +82,6 @@ SOURCES = ("manuell", "ausrichtung", "log")
 LANG_NAMES = {"de": "Deutsch", "en": "Englisch"}
 
 Conn = psycopg.Connection[Any]
-
-
-# ---------- Normieren (§20.3 „Gemeinsame Regeln“) ----------
-
-
-def normalize_name(text: str) -> str:
-    """NFC, Steuer- und Formatzeichen entfernen (wie §19.3), Leerraum zusammenfassen, trimmen."""
-    return clean_text(text)
-
-
-def name_key(text: str) -> str:
-    """Vergleichsform: Normform in Kleinbuchstaben (`str.lower()`, nicht `casefold()`)."""
-    return normalize_name(text).lower()
 
 
 def _shorten(text: str | None, limit: int) -> str | None:

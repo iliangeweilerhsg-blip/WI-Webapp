@@ -314,6 +314,13 @@ export const MACHINE_OUTPUT_NODES: ReadonlySet<Node> = new Set<Node>([
   'transcript',
   'transcript_segment',
   'slide_segment',
+  // Konzepte und Inbox (§20.8): Maschinenausgaben und Vorschläge der Session
+  'inbox_item',
+  'evidence',
+  'concept',
+  'concept_module',
+  'concept_relation',
+  'session_summary',
 ]);
 
 /** Anzahl der mit `ts` mitgelöschten abhängigen Objekte (Kaskade aus trash.ts, ohne die Wurzel und ohne Maschinenausgaben) */

@@ -29,6 +29,12 @@ export type Node =
   | 'transcript_segment'
   | 'slide_segment'
   | 'search_chunk'
+  | 'inbox_item'
+  | 'evidence'
+  | 'concept'
+  | 'concept_module'
+  | 'concept_relation'
+  | 'session_summary'
   | 'notebook'
   | 'page'
   | 'stroke'
@@ -53,6 +59,8 @@ export const CHILDREN: Record<Node, Edge[]> = {
     { child: 'exercise_sheet', fk: 'module_id' },
     { child: 'session', fk: 'module_id' },
     { child: 'notebook', fk: 'module_id' },
+    // §20.8: nur die Zuordnung, die Konzepte selbst bleiben (sie gehören keinem Fach allein)
+    { child: 'concept_module', fk: 'module_id' },
   ],
   slide_deck: [
     { child: 'slide', fk: 'deck_id' },
@@ -76,6 +84,14 @@ export const CHILDREN: Record<Node, Edge[]> = {
     { child: 'slide_segment', fk: 'session_id' },
     // Suchindex des Gesagten (§19.1)
     { child: 'search_chunk', fk: 'session_id' },
+    // Konzepte und Inbox (§20.8): Vorschläge und Hüllen der Session (`proposal_session_id`) samt ihren Zuordnungen,
+    // unbestätigte Beziehungen, Belege, Inbox-Einträge und die Zusammenfassung. Aktive Konzepte und bestätigte
+    // Beziehungen haben keine `proposal_session_id` und bleiben, auch ohne Beleg.
+    { child: 'inbox_item', fk: 'session_id' },
+    { child: 'evidence', fk: 'session_id' },
+    { child: 'concept', fk: 'proposal_session_id' },
+    { child: 'concept_relation', fk: 'proposal_session_id' },
+    { child: 'session_summary', fk: 'session_id' },
   ],
   slide_event: [],
   marker: [],
@@ -86,6 +102,12 @@ export const CHILDREN: Record<Node, Edge[]> = {
   transcript_segment: [],
   slide_segment: [],
   search_chunk: [],
+  inbox_item: [],
+  evidence: [],
+  concept: [{ child: 'concept_module', fk: 'concept_id' }],
+  concept_module: [],
+  concept_relation: [],
+  session_summary: [],
   notebook: [{ child: 'page', fk: 'notebook_id' }],
   page: [
     { child: 'stroke', fk: 'page_id' },
@@ -197,6 +219,41 @@ const UNIQUE_CHECKS: Partial<
   slide: [{ constraint: 'slide_deck_index_uq', cols: ['deck_id', 'index'] }],
 };
 
+/**
+ * Maschinenausgaben weichen beim Wiederherstellen, statt zu blockieren (VERTRAEGE §20.8): Kollidiert eine
+ * wiederhergestellte Zeile `r` mit einer inzwischen vorhandenen aktiven Zeile `a` im genannten partiellen
+ * Unique-Index, wird `r` in derselben Transaktion **hart gelöscht** statt `409 restore_conflict`. Läuft für alle
+ * Kinder eines Knotens vor `checkRestoreConflicts` und vor dem Zurücksetzen von `deleted_at`.
+ *
+ * - `concept_relation` (`concept_relation_uq`): die unbestätigten Beziehungen der Session. Ihr Inbox-Eintrag geht
+ *   über den FK `inbox_item.relation_id` (`ON DELETE CASCADE`) mit.
+ * - `evidence` (`evidence_dedupe_uq`): die Belege der Session, verglichen mit denselben Ausdrücken wie der Index.
+ *
+ * Andere Konflikte (Inbox-Indizes, `session_summary_session_uq`) bleiben `409 restore_conflict`.
+ */
+const RESTORE_YIELD: Partial<Record<Node, (r: string, a: string) => SQL>> = {
+  concept_relation: (r, a) =>
+    sql`${col(a, 'from_id')} = ${col(r, 'from_id')} AND ${col(a, 'to_id')} = ${col(r, 'to_id')}
+        AND ${col(a, 'kind')} = ${col(r, 'kind')} AND NOT ${col(r, 'confirmed')}`,
+  evidence: (r, a) =>
+    sql`${col(a, 'concept_id')} = ${col(r, 'concept_id')} AND ${col(a, 'kind')} = ${col(r, 'kind')}
+        AND ${col(a, 'ref_id')} = ${col(r, 'ref_id')}
+        AND coalesce(${col(a, 't_start_ms')}, -1) = coalesce(${col(r, 't_start_ms')}, -1)
+        AND coalesce(${col(a, 't_end_ms')}, -1) = coalesce(${col(r, 't_end_ms')}, -1)
+        AND ${col(a, 'session_id')} IS NOT DISTINCT FROM ${col(r, 'session_id')}`,
+};
+
+/** Wiederhergestellte Zeilen `restored(r)` aus `table`, die nach `RESTORE_YIELD` kollidieren, hart löschen */
+async function yieldOnRestore(tx: Tx, table: Node, restored: (alias: string) => SQL): Promise<void> {
+  const collides = RESTORE_YIELD[table];
+  if (!collides) return;
+  await tx.execute(
+    sql`DELETE FROM ${sql.identifier(table)} r USING ${sql.identifier(table)} a
+        WHERE ${restored('r')} AND ${col('a', 'deleted_at')} IS NULL AND ${col('a', 'id')} <> ${col('r', 'id')}
+          AND ${collides('r', 'a')}`,
+  );
+}
+
 const restoreConflict = (constraint: string, conflictingId: string | null) =>
   new HttpError(
     409,
@@ -230,12 +287,20 @@ async function checkRestoreConflicts(tx: Tx, table: Node, restored: (alias: stri
 async function cascade(tx: Tx, node: Node, ids: string[], mode: Mode): Promise<number> {
   if (ids.length === 0) return 0;
   let count = 0;
-  for (const edge of CHILDREN[node]) {
-    const where = (alias: string | null): SQL => {
+  const whereOf =
+    (edge: Edge) =>
+    (alias: string | null): SQL => {
       const parts: SQL[] = [inArray(col(alias, edge.fk), ids), matchCondition(mode, alias)];
       if (mode.op === 'delete' && edge.deleteFilter) parts.push(edge.deleteFilter);
       return sql.join(parts, sql` AND `);
     };
+  // Weichen vor allem anderen (§20.8): Das harte Löschen einer Beziehung nimmt über den FK ihren Inbox-Eintrag mit.
+  // So zählt `restored_count` nur, was wirklich zurückkommt, unabhängig von der Reihenfolge der Kanten
+  if (mode.op === 'restore') {
+    for (const edge of CHILDREN[node]) await yieldOnRestore(tx, edge.child, whereOf(edge));
+  }
+  for (const edge of CHILDREN[node]) {
+    const where = whereOf(edge);
 
     if (mode.op === 'delete' && edge.child === 'session') {
       // Aktive Sessions werden nie mitgelöscht. FOR UPDATE sperrt die Sessions gegen einen gleichzeitigen Start:

@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SettingsSchema, SINGLE_USER_ID } from '@sg/shared';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import { setting } from '../../src/db/schema/index.ts';
-import { DEFAULT_SETTINGS, getSettings } from '../../src/services/settings.ts';
+import { DEFAULT_SETTINGS, getAiSettings, getSettings } from '../../src/services/settings.ts';
 import { testDatabaseUrl } from './helpers.ts';
 
 let handle: DbHandle;
@@ -59,7 +59,33 @@ describe('getSettings', () => {
         ],
       },
       data: { backup_target: null, backup_encryption: false, backup_time: '03:00' },
+      // Bereich `ai` (VERTRAEGE §20.7)
+      ai: { monthly_budget_eur: 10, auto_accept: 'aus' },
     });
+  });
+
+  it('Bereich ai: gespeicherte Felder über den Standards, ungültige und unbekannte zählen nicht (§20.7)', async () => {
+    await store('ai', { monthly_budget_eur: 25, auto_accept: 'bunt', modell: 'x' });
+    expect((await getSettings(handle.db, CONFIG)).ai).toEqual({ monthly_budget_eur: 25, auto_accept: 'aus' });
+    expect(await getAiSettings(handle.db)).toEqual({ monthly_budget_eur: 25, auto_accept: 'aus' });
+    await handle.sql`TRUNCATE setting`;
+    // außerhalb 0..1000, falscher Typ: Standard 10 (wie der Worker, §20.5)
+    for (const bad of [-1, 1000.5, '20', null, true]) {
+      await handle.sql`TRUNCATE setting`;
+      await store('ai', { monthly_budget_eur: bad, auto_accept: 'nur_beziehungen' });
+      expect(await getAiSettings(handle.db), String(bad)).toEqual({
+        monthly_budget_eur: 10,
+        auto_accept: 'nur_beziehungen',
+      });
+    }
+    // 0 ist gültig (schaltet die Cloud-KI ab), ein gelöschter Bereich zählt nicht
+    await handle.sql`TRUNCATE setting`;
+    await store('ai', { monthly_budget_eur: 0 });
+    expect((await getAiSettings(handle.db)).monthly_budget_eur).toBe(0);
+    await handle.sql`TRUNCATE setting`;
+    await store('ai', { monthly_budget_eur: 99 }, true);
+    expect(await getAiSettings(handle.db)).toEqual(DEFAULT_SETTINGS.ai);
+    expect(SettingsSchema.parse(await getSettings(handle.db, CONFIG)).ai).toEqual(DEFAULT_SETTINGS.ai);
   });
 
   it('legt gespeicherte Felder über die Standards; ungültige, unbekannte und gelöschte Werte zählen nicht', async () => {

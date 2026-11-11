@@ -3,9 +3,12 @@ import type { ZodType } from 'zod';
 import {
   AlignLogPayloadSchema,
   AudioFinalizePayloadSchema,
+  ConceptsExtractPayloadSchema,
+  ConceptsResolvePayloadSchema,
   PdfIngestPayloadSchema,
   SearchIndexPayloadSchema,
   SINGLE_USER_ID,
+  SummaryWritePayloadSchema,
   TranscribePayloadSchema,
   type Job,
   type JobState,
@@ -31,6 +34,10 @@ export const JOB_PAYLOAD_SCHEMAS: Partial<Record<JobType, ZodType>> = {
   transcribe: TranscribePayloadSchema,
   'align.log': AlignLogPayloadSchema,
   'search.index': SearchIndexPayloadSchema,
+  // Konzept-Kette (VERTRAEGE §20.2)
+  'concepts.extract': ConceptsExtractPayloadSchema,
+  'concepts.resolve': ConceptsResolvePayloadSchema,
+  'summary.write': SummaryWritePayloadSchema,
 };
 
 export interface EnqueueJobInput {

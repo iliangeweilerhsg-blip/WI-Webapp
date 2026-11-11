@@ -1,5 +1,6 @@
-// Verarbeitungskette nach dem Session-Ende (VERTRAEGE §18.2, 05 §2):
-// audio.finalize → transcribe und audio.finalize → align.log.
+// Verarbeitungskette nach dem Session-Ende (VERTRAEGE §18.2 und §20.2, 05 §2):
+// audio.finalize → transcribe und audio.finalize → align.log, danach
+// transcribe + align.log → concepts.extract → concepts.resolve → summary.write.
 //
 // `ensurePipelineJobs` legt die Jobs an oder verwendet wartende wieder und rechnet `session.processing` mit
 // derselben Regel wie der Worker („neuester Job je Einheit“, `summarizeProcessing`). Der Aufrufer hält die
@@ -16,13 +17,29 @@ import { emitSessionUpdated } from './sessions.ts';
 
 type JobRow = typeof job.$inferSelect;
 
-/** Priorität der Jobs (VERTRAEGE §18.2): `transcribe` wird bei freiem Worker vor `align.log` geholt */
-const PRIORITY = { transcribe: 20, 'align.log': 10 } as const;
+/** Schritte mit der Session als Einheit (alle außer `audio.finalize`) */
+type SessionStep = Exclude<PipelineStep, 'audio.finalize'>;
+
+/**
+ * Priorität der Jobs (VERTRAEGE §18.2, §20.2): Transkription > Ausrichtung > alles für die Nacharbeitung, und das
+ * über `search.index` (5).
+ */
+const PRIORITY: Record<SessionStep, number> = {
+  transcribe: 20,
+  'align.log': 10,
+  'concepts.extract': 8,
+  'concepts.resolve': 7,
+  'summary.write': 6,
+};
 
 export interface EnsurePipelineOptions {
   /** Erster Schritt, der neu angelegt wird. Alle späteren laufen mit */
   fromStep: PipelineStep;
-  /** Nur für `audio.finalize` (fertige Jobs neu anlegen) und `transcribe` (`payload.force`) */
+  /**
+   * `audio.finalize` (fertige Jobs neu anlegen) und `transcribe` (`payload.force`) wie §18.2. Bei den Schritten aus
+   * §20.2 nur für den Schritt `fromStep` selbst: Folgeschritte erkennen geänderte Eingaben über ihren `input_hash`
+   * und rufen sonst die KI nicht erneut auf (Kosten).
+   */
   force?: boolean;
   /** `false`: kein `session.updated` senden (der Aufrufer sendet es selbst, z. B. `finishSession`) */
   emit?: boolean;
@@ -128,40 +145,48 @@ async function usableDependencies(tx: Tx, ids: string[]): Promise<string[]> {
   return ids.filter((id) => alive.has(id));
 }
 
+interface SessionJobSpec {
+  type: SessionStep;
+  /** Vorgänger dieses Aufrufs (angelegt oder wiederverwendet), kommen in `depends_on` */
+  predecessors: string[];
+  /** `payload.force` setzen (bei einem wartenden Job: `alt ODER neu`) */
+  force: boolean;
+  /** Weitere Payload-Felder, die auch ein wiederverwendeter Job neu bekommt (`extract_job_id`) */
+  extra?: Record<string, unknown>;
+}
+
 /**
- * Schritte 2 und 3: `transcribe` bzw. `align.log` der Session. Ein wartender Job wird wiederverwendet (`depends_on`
- * um die offenen `audio.finalize`-Jobs ergänzt, bei `transcribe` wird `force` zu `alt ODER neu`). Sonst entsteht ein
- * neuer Job, der von den offenen `audio.finalize`-Jobs und einem laufenden Job desselben Typs abhängt.
+ * Ein Schritt mit der Session als Einheit (§18.2 Schritte 2 und 3, §20.2 Schritte 5 bis 7). Ein wartender Job wird
+ * wiederverwendet: `depends_on` bereinigt und um die Vorgänger ergänzt, `force` wird zu `alt ODER neu`, `extra`
+ * überschreibt. Sonst entsteht ein neuer Job, der von den Vorgängern und einem laufenden Job desselben Typs abhängt.
  */
-async function ensureSessionJob(
-  tx: Tx,
-  sessionId: string,
-  type: 'transcribe' | 'align.log',
-  openFinalizeIds: string[],
-  force: boolean,
-): Promise<JobRow> {
+async function ensureSessionJob(tx: Tx, sessionId: string, spec: SessionJobSpec): Promise<JobRow> {
+  const { type, predecessors, force } = spec;
   const [waiting] = await sessionJobs(tx, sessionId, type, ['wartet']);
   if (waiting) {
-    const payload = type === 'transcribe' && force ? { ...waiting.payload, force: true } : waiting.payload;
+    const payload = { ...waiting.payload, ...spec.extra, ...(force ? { force: true } : {}) };
     // Abhängigkeiten in `fehler`/`abgebrochen` oder gelöscht (bzw. nicht mehr vorhanden) fallen weg, sonst bricht
     // der Worker den Job ab und „Mit vorhandenem Audio fortfahren“ scheitert still (VERTRAEGE §18.2).
     const kept = await usableDependencies(tx, waiting.dependsOn);
     const [updated] = await tx
       .update(job)
-      .set({ payload, dependsOn: union(kept, openFinalizeIds), updatedAt: sql`now()` })
+      .set({ payload, dependsOn: union(kept, predecessors), updatedAt: sql`now()` })
       .where(eq(job.id, waiting.id))
       .returning();
     return updated ?? waiting;
   }
   const running = await sessionJobs(tx, sessionId, type, ['laeuft']);
-  const payload: Record<string, unknown> =
-    type === 'transcribe' && force ? { session_id: sessionId, force: true } : { session_id: sessionId };
+  const payload: Record<string, unknown> = {
+    session_id: sessionId,
+    ...spec.extra,
+    ...(force ? { force: true } : {}),
+  };
   return insertJob(tx, {
     type,
     payload,
     priority: PRIORITY[type],
     dependsOn: union(
-      openFinalizeIds,
+      predecessors,
       running.map((r) => r.id),
     ),
     sessionId,
@@ -169,9 +194,21 @@ async function ensureSessionJob(
 }
 
 /**
+ * Der `concepts.extract`-Job, auf dem `concepts.resolve` bei `fromStep = concepts.resolve` aufsetzt (§20.2): der
+ * neueste nicht gelöschte der Session, der noch trägt. Das ist der neueste `fertig`e, außer es wartet oder läuft
+ * schon ein neuerer: Dann gehört der wartende `concepts.resolve` zu diesem Lauf und bleibt an ihm hängen (sonst
+ * hinge er von dem laufenden Job ab und läse das Ergebnis des älteren). `null`: keiner, die Kette beginnt dann bei
+ * `concepts.extract`.
+ */
+async function latestExtractJob(tx: Tx, sessionId: string): Promise<JobRow | null> {
+  const [row] = await sessionJobs(tx, sessionId, 'concepts.extract', ['wartet', 'laeuft', 'fertig']);
+  return row ?? null;
+}
+
+/**
  * Zusammenfassung des Fortschritts je Job-Typ (VERTRAEGE §18.2, Referenz-SQL): Je Einheit zählt nur der neueste
  * nicht gelöschte Job, ein laufender Job der Einheit macht sie `laeuft`. Einheit ist bei `audio.finalize` die
- * Aufnahme, sonst die Session. `null`, wenn es keinen Job des Typs gibt (der Schlüssel bleibt dann unverändert).
+ * Aufnahme, sonst die Session (auch bei den Schritten aus §20.2). `null`, wenn es keinen Job des Typs gibt (der Schlüssel bleibt dann unverändert).
  * Muss mit `SUMMARY_SQL` im Worker (`progress.py`) übereinstimmen.
  */
 export async function summarizeProcessing(
@@ -200,10 +237,19 @@ export async function summarizeProcessing(
 }
 
 /**
- * Kette anlegen (VERTRAEGE §18.2). Rückgabe: die angelegten oder wiederverwendeten Jobs in Ketten-Reihenfolge
- * (`audio.finalize` je Aufnahme nach ID, `transcribe`, `align.log`).
+ * Kette anlegen (VERTRAEGE §18.2, §20.2). Rückgabe: die angelegten oder wiederverwendeten Jobs in Ketten-Reihenfolge
+ * (`audio.finalize` je Aufnahme nach ID, `transcribe`, `align.log`, `concepts.extract`, `concepts.resolve`,
+ * `summary.write`).
  *
- * `fromStep = audio.finalize`: auch `audio.finalize`. `transcribe`: ab `transcribe`. `align.log`: nur `align.log`.
+ * | `fromStep`         | angelegt bzw. wiederverwendet                                                        |
+ * |--------------------|--------------------------------------------------------------------------------------|
+ * | `audio.finalize`   | alles                                                                                |
+ * | `transcribe`       | ab `transcribe`                                                                      |
+ * | `align.log`        | `align.log`, danach die drei Konzept-Schritte                                        |
+ * | `concepts.extract` | die drei Konzept-Schritte (`concepts.extract` nur hinter einem laufenden desselben Typs) |
+ * | `concepts.resolve` | `concepts.resolve` auf dem neuesten `concepts.extract`, danach `summary.write`. Gibt es keinen, wie `concepts.extract` |
+ * | `summary.write`    | nur `summary.write`                                                                  |
+ *
  * Danach wird `session.processing` für jeden berührten Typ neu gerechnet (nie pauschal `wartet`), `updated_at`
  * angehoben und `session.updated` gesendet.
  */
@@ -212,31 +258,84 @@ export async function ensurePipelineJobs(
   sessionId: string,
   options: EnsurePipelineOptions,
 ): Promise<JobRow[]> {
-  const { fromStep } = options;
+  let fromStep = options.fromStep;
   const force = options.force ?? false;
   const jobs: JobRow[] = [];
   const touched: PipelineStep[] = [];
+  const add = (type: PipelineStep, row: JobRow): JobRow => {
+    jobs.push(row);
+    touched.push(type);
+    return row;
+  };
 
   if (fromStep === 'audio.finalize') {
     const finalize = await ensureFinalizeJobs(tx, sessionId, force);
     jobs.push(...finalize);
     if (finalize.length > 0) touched.push('audio.finalize');
   }
-  // Nach Schritt 1 lesen: auch ein eben angelegter Job ist offen
-  const openFinalizeIds = (await sessionJobs(tx, sessionId, 'audio.finalize', ['wartet', 'laeuft']))
-    .map((j) => j.id)
-    .reverse();
 
-  if (fromStep === 'audio.finalize' || fromStep === 'transcribe') {
-    const transcribeJob = await ensureSessionJob(tx, sessionId, 'transcribe', openFinalizeIds, force);
-    jobs.push(transcribeJob);
-    touched.push('transcribe');
-    // Suchindex des Gesagten nach dem Transkript (§19.5). `job.session_id` bleibt NULL, kein Eintrag in
-    // `processing` und nicht in der Rückgabe (die Kette der Session, §18.2/§18.5, bleibt unverändert)
-    await ensureSearchIndexJob(tx, { scope: 'session', id: sessionId }, [transcribeJob.id]);
+  // Schritte 2 und 3 (§18.2). Ihre Jobs sind die Vorgänger von `concepts.extract`
+  const inputJobs: string[] = [];
+  const fromAudio = fromStep === 'audio.finalize' || fromStep === 'transcribe';
+  if (fromAudio || fromStep === 'align.log') {
+    // Nach Schritt 1 lesen: auch ein eben angelegter Job ist offen
+    const openFinalizeIds = (await sessionJobs(tx, sessionId, 'audio.finalize', ['wartet', 'laeuft']))
+      .map((j) => j.id)
+      .reverse();
+    if (fromAudio) {
+      const transcribeJob = add(
+        'transcribe',
+        await ensureSessionJob(tx, sessionId, { type: 'transcribe', predecessors: openFinalizeIds, force }),
+      );
+      inputJobs.push(transcribeJob.id);
+      // Suchindex des Gesagten nach dem Transkript (§19.5). `job.session_id` bleibt NULL, kein Eintrag in
+      // `processing` und nicht in der Rückgabe (die Kette der Session, §18.2/§18.5, bleibt unverändert)
+      await ensureSearchIndexJob(tx, { scope: 'session', id: sessionId }, [transcribeJob.id]);
+    }
+    const alignJob = add(
+      'align.log',
+      await ensureSessionJob(tx, sessionId, {
+        type: 'align.log',
+        predecessors: openFinalizeIds,
+        force: false,
+      }),
+    );
+    inputJobs.push(alignJob.id);
   }
-  jobs.push(await ensureSessionJob(tx, sessionId, 'align.log', openFinalizeIds, false));
-  touched.push('align.log');
+
+  // Schritte 5 bis 7 (§20.2)
+  let summaryAfter: string[] = [];
+  if (fromStep !== 'summary.write') {
+    let extractJob = fromStep === 'concepts.resolve' ? await latestExtractJob(tx, sessionId) : null;
+    // Ohne brauchbaren `concepts.extract` gilt `from_step = concepts.extract` (§20.2), auch für `force`
+    if (fromStep === 'concepts.resolve' && !extractJob) fromStep = 'concepts.extract';
+    extractJob ??= add(
+      'concepts.extract',
+      await ensureSessionJob(tx, sessionId, {
+        type: 'concepts.extract',
+        predecessors: inputJobs,
+        force: force && fromStep === 'concepts.extract',
+      }),
+    );
+    const resolveJob = add(
+      'concepts.resolve',
+      await ensureSessionJob(tx, sessionId, {
+        type: 'concepts.resolve',
+        predecessors: [extractJob.id],
+        force: force && fromStep === 'concepts.resolve',
+        extra: { extract_job_id: extractJob.id },
+      }),
+    );
+    summaryAfter = [resolveJob.id];
+  }
+  add(
+    'summary.write',
+    await ensureSessionJob(tx, sessionId, {
+      type: 'summary.write',
+      predecessors: summaryAfter,
+      force: force && fromStep === 'summary.write',
+    }),
+  );
 
   const patch: Record<string, JobState> = {};
   for (const type of touched) {

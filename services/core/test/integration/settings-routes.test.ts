@@ -44,6 +44,8 @@ describe('GET /settings', () => {
     expect(settings.lecture).toEqual(DEFAULT_SETTINGS.lecture);
     expect(settings.pen).toEqual(DEFAULT_SETTINGS.pen);
     expect(settings.data).toEqual(DEFAULT_SETTINGS.data);
+    // Bereich `ai` ist Pflichtfeld und kommt aufgefüllt (VERTRAEGE §20.7)
+    expect(settings.ai).toEqual({ monthly_budget_eur: 10, auto_accept: 'aus' });
   });
 });
 
@@ -121,6 +123,25 @@ describe('PATCH /settings', () => {
     expect((await patchOk({ data: { backup_encryption: false } })).data.backup_encryption).toBe(false);
   });
 
+  it('ändert den Bereich „ai“ Feld für Feld und speichert nur die geänderten Felder (§20.7)', async () => {
+    const first = await patchOk({ ai: { monthly_budget_eur: 25 } });
+    expect(first.ai).toEqual({ monthly_budget_eur: 25, auto_accept: 'aus' });
+    const second = await patchOk({ ai: { auto_accept: 'alles_ab_0_9' } });
+    expect(second.ai).toEqual({ monthly_budget_eur: 25, auto_accept: 'alles_ab_0_9' });
+    expect(await get()).toEqual(second);
+    // 0 schaltet die Cloud-KI ab, 1000 ist die Obergrenze, Nachkommastellen sind erlaubt
+    expect((await patchOk({ ai: { monthly_budget_eur: 0 } })).ai.monthly_budget_eur).toBe(0);
+    expect((await patchOk({ ai: { monthly_budget_eur: 1000 } })).ai.monthly_budget_eur).toBe(1000);
+    expect((await patchOk({ ai: { monthly_budget_eur: 7.5 } })).ai.monthly_budget_eur).toBe(7.5);
+    // Der Worker liest genau diese Zeile (Schlüssel `ai`)
+    const rows = await t.handle.sql`SELECT key, value FROM setting`;
+    expect(rows.map((r) => ({ key: r.key, value: r.value }))).toEqual([
+      { key: 'ai', value: { monthly_budget_eur: 7.5, auto_accept: 'alles_ab_0_9' } },
+    ]);
+    // andere Bereiche bleiben unberührt, und aus dem Netz ist der Bereich wie die übrigen änderbar
+    expect(second.lecture).toEqual(DEFAULT_SETTINGS.lecture);
+  });
+
   it('Teil-Update lässt alle anderen Felder und Bereiche unverändert', async () => {
     const before = await patchOk({ lecture: { auto_stop_warning_s: 30 }, pen: { shape_recognition: true } });
     const after = await patchOk({ lecture: { auto_stop_extend_min: 20 } });
@@ -128,6 +149,7 @@ describe('PATCH /settings', () => {
     expect(after.pen).toEqual(before.pen);
     expect(after.general).toEqual(before.general);
     expect(after.data).toEqual(before.data);
+    expect(after.ai).toEqual(before.ai);
   });
 
   it('leerer Body und leere Bereiche ändern nichts', async () => {
@@ -177,6 +199,11 @@ describe('PATCH /settings', () => {
       ['mehr als 8 Farben', { pen: { favorite_colors: Array<string>(9).fill('#112233FF') } }],
       ['Uhrzeit', { data: { backup_time: '24:00' } }],
       ['Uhrzeit ohne Doppelpunkt', { data: { backup_time: '0300' } }],
+      ['KI: Budget negativ', { ai: { monthly_budget_eur: -1 } }],
+      ['KI: Budget über 1000', { ai: { monthly_budget_eur: 1000.01 } }],
+      ['KI: Budget keine Zahl', { ai: { monthly_budget_eur: '10' } }],
+      ['KI: unbekannte Automatik', { ai: { auto_accept: 'immer' } }],
+      ['KI: unbekanntes Feld (kein Schlüssel über die Web-App)', { ai: { api_key: 'x' } }],
     ];
     for (const [name, payload] of cases) {
       it(name, async () => {
