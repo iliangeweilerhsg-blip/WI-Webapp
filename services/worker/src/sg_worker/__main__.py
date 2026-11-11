@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import os
 import signal
 import sys
 from collections.abc import Callable
 from types import FrameType
 
 from . import handlers  # noqa: F401  (registriert die Handler)
+from .ai import llm
 from .ai.embedder import shutdown_when, start_embedder
 from .ai.transcriber import config_error
-from .config import Settings, load_env_file
+from .config import KEY_VAR, Settings, load_env_file, take_llm_settings
 from .logging_setup import setup_logging
 from .loop import Worker
 from .server import start_server
@@ -43,9 +45,21 @@ def install_signal_handlers(worker: Worker) -> None:
 
 def main() -> int:
     settings = Settings.from_env()
-    load_env_file(settings.data_dir / "config" / ".env")
+    env_file = settings.data_dir / "config" / ".env"
+    key_from_environment = bool((os.environ.get(KEY_VAR) or "").strip())
+    load_env_file(env_file)
     settings = Settings.from_env()  # nach dem Laden der .env erneut lesen
+    # §20.5: Schlüssel übernehmen, danach alle ANTHROPIC_* aus der Umgebung entfernen
+    llm_settings = take_llm_settings(env_file, key_from_environment=key_from_environment)
     log = setup_logging(settings.data_dir, settings.log_level)
+    llm.configure(llm_settings)
+    if llm_settings.issue == "env_offen":
+        log.error(
+            "KI-Schlüssel nicht genutzt: config/.env ist für andere lesbar, bitte chmod 600 "
+            "und den Worker neu starten"
+        )
+    elif llm_settings.issue is not None:
+        log.warning("KI nicht eingerichtet", extra={"issue": llm_settings.issue})
     worker = Worker(
         settings.database_url,
         settings.data_dir,

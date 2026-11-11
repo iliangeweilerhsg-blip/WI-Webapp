@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SINGLE_USER_ID, SearchResponseSchema, type SearchHit, type SearchResponse } from '@sg/shared';
 import type { DbHandle } from '../../src/db/client.ts';
 import { courseModule, semester, session, slideDeck } from '../../src/db/schema/index.ts';
-import { HNSW_EF_SEARCH, vectorQuery } from '../../src/services/search.ts';
+import { vectorQuery } from '../../src/services/search.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { FakeWorker, fakeEmbed } from '../unit/worker-fake.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
@@ -564,7 +564,7 @@ describe('Abfrageplan der Bedeutungssuche (ohne Zeitmessung, läuft auch in CI)'
   async function plan(filters: Parameters<typeof vectorQuery>[2]): Promise<string> {
     const rows = await handle.db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL enable_seqscan = off`);
-      await tx.execute(sql.raw(`SET LOCAL hnsw.ef_search = ${HNSW_EF_SEARCH}`));
+      await tx.execute(sql`SET LOCAL hnsw.ef_search = 100`);
       return tx.execute<Record<string, string>>(
         sql`EXPLAIN ${vectorQuery(fakeEmbed('normalform'), 'fake-embed-1', filters)}`,
       );

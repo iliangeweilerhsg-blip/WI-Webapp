@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'drizzle-orm';
 import { SINGLE_USER_ID } from '@sg/shared';
 import { WorkerError } from '../../src/lib/worker-client.ts';
-import { HNSW_EF_SEARCH, search, vectorQuery } from '../../src/services/search.ts';
+import { search, vectorQuery } from '../../src/services/search.ts';
 import { fakeEmbed } from '../unit/worker-fake.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
@@ -145,7 +145,7 @@ describe.skipIf(SKIP)('Leistung GET /search (5 000 Folien, 12 000 Fenster)', () 
     const plan = async (filters: Parameters<typeof vectorQuery>[2]) =>
       (
         await app.handle.db.transaction(async (tx) => {
-          await tx.execute(sql.raw(`SET LOCAL hnsw.ef_search = ${HNSW_EF_SEARCH}`));
+          await tx.execute(sql`SET LOCAL hnsw.ef_search = 100`);
           return tx.execute<Record<string, string>>(
             sql`EXPLAIN ${vectorQuery(fakeEmbed('normalform'), 'fake-embed-1', filters)}`,
           );

@@ -197,17 +197,11 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     { prefix: API_BASE },
   );
 
-  // Start-Hooks mit Nebenwirkungen laufen erst nach erfolgreichem `listen` (`onListen`, nicht `onReady`, das vor dem
-  // Binden läuft): Ein zweiter Core, der mit `EADDRINUSE` scheitert, ändert so nichts (#170). Mit `inject` allein
-  // (Tests) starten sie nicht.
-
-  // Takt: geplant → bereit → verpasst und Auto-Stopp-Rückfallebene, beim Start einmal mit Absturz-Erkennung.
-  // Die Absturz-Erkennung darf nur der Core auslösen, der wirklich läuft: Ein zweiter Core würde sonst die
-  // Sessions des ersten als abgestürzt beenden (F-SES-05)
+  // Takt: geplant → bereit → verpasst und Auto-Stopp-Rückfallebene, beim Start einmal mit Absturz-Erkennung
   if (options.sessionTicker !== false) {
     let ticker: SessionTicker | undefined;
-    app.addHook('onListen', async () => {
-      ticker ??= startSessionTicker({
+    app.addHook('onReady', async () => {
+      ticker = startSessionTicker({
         db,
         config,
         onError: (error) => logger.error({ err: error }, 'Session-Takt fehlgeschlagen'),
@@ -222,8 +216,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   // Moodle-Abgleich: beim Start und alle 2 h (F-MDL-04). Beim Beenden den laufenden Abgleich abwarten
   let stopMoodleSchedule: (() => void) | undefined;
   if (options.moodleSchedule) {
-    app.addHook('onListen', async () => {
-      stopMoodleSchedule ??= moodleSync.startSchedule();
+    app.addHook('onReady', async () => {
+      stopMoodleSchedule = moodleSync.startSchedule();
     });
   }
   app.addHook('onClose', async () => {

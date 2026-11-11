@@ -10,7 +10,8 @@ Core holt hier den Vektor einer Suchanfrage, berechnet mit **demselben** Modell 
   (Ordner 700, Datei 600, atomar über `worker.token.part`, Symlinks → Endpunkt aus). Jede Anfrage
   braucht `Authorization: Bearer <token>` (`hmac.compare_digest`), sonst `401`. Das Token steht
   nie in Logs oder Antworten.
-- `GET /health` → `WorkerHealth`. `POST /embed` mit `EmbedRequest` → `EmbedResponse`.
+- `GET /health` → `WorkerHealth` (mit `llm`, §20.5). `POST /embed` mit `EmbedRequest` →
+  `EmbedResponse`.
 - **Grenzen:** `Host` muss `127.0.0.1:<port>` sein (`400`, DNS-Rebinding), `Content-Length`
   Pflicht (`411`, auch bei `Transfer-Encoding`), Body ≤ 256 KB vor dem Lesen geprüft (`413`), nur
   `application/json` (`415`), 5 s je Verbindung, höchstens 4 Anfragen gleichzeitig (`503 busy`),
@@ -48,6 +49,7 @@ from .ai.embedder import (
     embedder_state,
 )
 from .ai.interfaces import Embedder
+from .ai.llm import llm_status
 
 HOST = "127.0.0.1"  # nie eine andere Adresse
 DEFAULT_PORT = 4711
@@ -289,7 +291,8 @@ class _Handler(BaseHTTPRequestHandler):
                         "dim": emb.dim,
                         "state": state,
                         "error": None if error is None else error[:500],
-                    }
+                    },
+                    "llm": llm_status(),  # §20.5, nie der Schlüssel
                 }
             ).model_dump_json()
         except Exception:

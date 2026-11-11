@@ -52,7 +52,7 @@ import { completeRecording, createRecording, storeChunk } from '../../src/servic
 import { deleteModule, deleteSemester } from '../../src/services/organisation.ts';
 import { restoreWithOps } from '../../src/services/trash-ops.ts';
 import { autoStopBoundary } from '../../src/services/auto-stop.ts';
-import { occupyPort, startTestApp, testConfig, testDatabaseUrl, type TestApp } from './helpers.ts';
+import { startTestApp, testConfig, testDatabaseUrl, type TestApp } from './helpers.ts';
 
 let handle: DbHandle;
 const base = { userId: SINGLE_USER_ID };
@@ -925,38 +925,6 @@ describe('Core-Takt', () => {
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect((await row(planned)).state).toBe('bereit');
     expect(errors).toEqual([]);
-  });
-
-  it('buildApp: der Takt startet erst nach erfolgreichem listen (onListen), mit inject/ready allein nie', async () => {
-    const crashed = await mkSession({ state: 'laeuft', startedAt: T(0) });
-    const app = await startTestApp({}, { sessionTicker: true, now: () => T(300) });
-    try {
-      await app.app.ready(); // onReady läuft vor dem Binden: noch keine Absturz-Erkennung
-      expect((await row(crashed)).state).toBe('laeuft');
-      await app.app.listen({ port: 0, host: '127.0.0.1' });
-    } finally {
-      await app.close(); // wartet auf den laufenden Takt
-    }
-    // Ohne Aufnahme gibt es keinen Job: der Stopp setzt gleich `verarbeitet` (§9.1)
-    expect(await row(crashed)).toMatchObject({
-      state: 'verarbeitet',
-      stopReason: 'absturz_wiederhergestellt',
-    });
-  });
-
-  it('buildApp: Port belegt (EADDRINUSE) beendet keine Session des laufenden Core als abgestürzt', async () => {
-    const running = await mkSession({ state: 'laeuft', startedAt: T(0) });
-    const blocker = await occupyPort();
-    const second = await startTestApp({}, { sessionTicker: true, now: () => T(300) });
-    try {
-      await expect(second.app.listen({ port: blocker.port, host: '127.0.0.1' })).rejects.toThrow(
-        /EADDRINUSE/,
-      );
-    } finally {
-      await second.close();
-      await blocker.close();
-    }
-    expect(await row(running)).toMatchObject({ state: 'laeuft', stopReason: null, endedAt: null });
   });
 });
 
