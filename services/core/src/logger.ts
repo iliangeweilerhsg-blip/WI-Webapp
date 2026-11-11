@@ -103,7 +103,17 @@ export function initialLogDay(logDir: string, now: Date = new Date()): string {
 const SECRET_PARAM =
   /(^|[_-])(pairing_id|token|wstoken|access_token|secret|password|passwd|nonce|code|api_key|apikey|access_key|private_key|auth)($|[_-])/i;
 
-/** Ein Paar `name=wert` der Query: geheimer Name → Wert `[Redacted]`. Der Name wird vor dem Vergleich dekodiert */
+/**
+ * Query-Parameter mit Nutzerinhalt (#167): Suchtexte (`GET /search?q=…`, VERTRAEGE §19.6) sollen nicht 14 Tage im
+ * `core.log` stehen. Gilt für alle Routen. Nur der genaue Name (Groß-/Kleinschreibung egal), auch mit
+ * Klammer-Anhang (`q[]`, `q[0]`), damit Namen wie `sequence` oder `quality` lesbar bleiben. Pfad und Status bleiben.
+ */
+const CONTENT_PARAM = /^(q|query|search|search_query)(\[[^\]]*\])*$/i;
+
+/**
+ * Ein Paar `name=wert` der Query: geheimer Name oder Nutzerinhalt → Wert `[Redacted]`. Der Name wird vor dem
+ * Vergleich dekodiert
+ */
 function redactQueryPair(pair: string): string {
   const eq = pair.indexOf('=');
   if (eq <= 0) return pair;
@@ -116,7 +126,8 @@ function redactQueryPair(pair: string): string {
   }
   // `/p#?pairing_id=…`: Fastify liest den Schlüssel `?pairing_id`. Kein Geheimnis für den Core, aber
   // vermutlich eines für den Absender, darum führende `?`/`#` beim Vergleich ignorieren (lieber zu viel schwärzen)
-  return SECRET_PARAM.test(name.replace(/^[?#]+/, '')) ? `${rawName}=[Redacted]` : pair;
+  const bare = name.replace(/^[?#]+/, '');
+  return SECRET_PARAM.test(bare) || CONTENT_PARAM.test(bare) ? `${rawName}=[Redacted]` : pair;
 }
 
 /**
@@ -135,14 +146,44 @@ export function redactUrl(text: string): string {
   );
 }
 
-/** `err`-Serializer: wie pino, aber `message` und `stack` laufen durch `redactUrl` */
+/**
+ * Texte `\nparams: …`, die Drizzle bei einem DB-Fehler an die Meldung hängt (`DrizzleQueryError`:
+ * `Failed query: <sql>\nparams: <werte>`), für den Fehler und alle seine `cause`. Die Werte sind Nutzerinhalte,
+ * z. B. der Suchtext aus `GET /search` (#167), und sollen nicht ins Log.
+ */
+function queryParamTexts(err: unknown): string[] {
+  const texts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = err;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    const { message, params } = current as { message?: unknown; params?: unknown };
+    if (typeof message === 'string' && message.startsWith('Failed query: ') && Array.isArray(params)) {
+      const text = `\nparams: ${String(params)}`;
+      if (message.includes(text)) texts.push(text);
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return texts;
+}
+
+/**
+ * `err`-Serializer: wie pino, aber `message` und `stack` laufen durch `redactUrl`, und die Parameter einer
+ * fehlgeschlagenen DB-Abfrage (Drizzle) werden geschwärzt (#167)
+ */
 export function serializeError(err: unknown): unknown {
   const serialized = pino.stdSerializers.err(err as Error);
   if (serialized && typeof serialized === 'object') {
     const out = serialized as unknown as Record<string, unknown>;
+    const paramTexts = queryParamTexts(err);
     for (const field of ['message', 'stack']) {
-      if (typeof out[field] === 'string') out[field] = redactUrl(out[field]);
+      const raw = out[field];
+      if (typeof raw !== 'string') continue;
+      let value = raw;
+      for (const text of paramTexts) value = value.split(text).join('\nparams: [Redacted]');
+      out[field] = redactUrl(value);
     }
+    if (paramTexts.length > 0 && 'params' in out) out.params = '[Redacted]';
   }
   return serialized;
 }

@@ -12,7 +12,8 @@ import {
 import { connect, type AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import Fastify from 'fastify';
+import { DrizzleQueryError } from 'drizzle-orm/errors';
+import Fastify, { type FastifyBaseLogger } from 'fastify';
 import { pino } from 'pino';
 import { describe, expect, it } from 'vitest';
 import { hasOpenPermissions } from '../../src/config.ts';
@@ -24,6 +25,7 @@ import {
   redactUrl,
   rotateLogs,
 } from '../../src/logger.ts';
+import { registerErrorHandler } from '../../src/plugins/errors.ts';
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -248,6 +250,82 @@ describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
     expect(log).toContain('request completed');
     expect(log).not.toContain(SECRET);
     expect(log).toContain('pairing_id=[Redacted]&x=1');
+  });
+});
+
+describe('Suchtexte im Request-Log werden geschwärzt (#167)', () => {
+  const SEARCH = 'vertrauliche Prüfungsfrage';
+
+  it('redactUrl: q, query und search (mit Klammer-Anhang), ähnliche Namen bleiben lesbar', () => {
+    expect(redactUrl('/api/v1/search?q=abc&module_id=m1&limit=5')).toBe(
+      '/api/v1/search?q=[Redacted]&module_id=m1&limit=5',
+    );
+    for (const name of ['q', 'Q', 'query', 'search', 'search_query', 'q[]', 'q%5B0%5D', 'q%5b%5d']) {
+      expect(redactUrl(`/x?a=1&${name}=v`)).toBe(`/x?a=1&${name}=[Redacted]`);
+    }
+    for (const name of ['sequence', 'quality', 'qq', 'research', 'search_after', 'seq']) {
+      expect(redactUrl(`/x?${name}=v`)).toBe(`/x?${name}=v`);
+    }
+  });
+
+  it('im echten Log-Strom: kein Suchtext, Pfad und Statuscode bleiben', async () => {
+    const lines: string[] = [];
+    const app = Fastify({
+      loggerInstance: pino(loggerOptions({ logLevel: 'info' }), { write: (c: string) => void lines.push(c) }),
+    });
+    app.get('/api/v1/search', async () => ({ items: [] }));
+    const encoded = encodeURIComponent(SEARCH);
+    const ok = await app.inject({ method: 'GET', url: `/api/v1/search?q=${encoded}&limit=5` });
+    expect(ok.statusCode).toBe(200);
+    // Auch der Not-Found-Weg („Route GET:/…?q=… not found“) und Klammer- bzw. Großschreibung
+    await app.inject({ method: 'GET', url: `/api/v1/suche?q=${encoded}` });
+    await app.inject({ method: 'GET', url: `/api/v1/search?q[]=${encoded}&Q=${encoded}` });
+    await app.close();
+    const log = lines.join('');
+    expect(log).toContain('incoming request');
+    expect(log).not.toContain(encoded);
+    expect(log).not.toContain(SEARCH);
+    expect(log).not.toContain('Pr%C3%BCfungsfrage');
+    expect(log).toContain('"url":"/api/v1/search?q=[Redacted]&limit=5"');
+    expect(log).toContain('"statusCode":200');
+    expect(log).toContain('"statusCode":404');
+  });
+
+  it('500 nach DB-Fehler: die Parameter der Abfrage (Suchtext) stehen nicht im Log, auch nicht in cause', async () => {
+    const lines: string[] = [];
+    const app = Fastify({
+      loggerInstance: pino(loggerOptions({ logLevel: 'info' }), {
+        write: (c: string) => void lines.push(c),
+      }) as FastifyBaseLogger,
+    });
+    registerErrorHandler(app);
+    const timeout = new Error('canceling statement due to statement timeout');
+    app.get('/api/v1/search', async (request) => {
+      const q = (request.query as { q: string }).q;
+      // Wie search.ts: `to_tsquery(…, $1)` mit dem Suchtext; Drizzle hängt ihn an Meldung und Feld `params`
+      throw new DrizzleQueryError(`select … to_tsquery('german'::regconfig, $1)`, [`${q}:*`, q], timeout);
+    });
+    app.get('/api/v1/wrapped', async () => {
+      throw new Error('Transaktion fehlgeschlagen', {
+        cause: new DrizzleQueryError('insert … values ($1)', [SEARCH], timeout),
+      });
+    });
+    expect(
+      (await app.inject({ method: 'GET', url: `/api/v1/search?q=${encodeURIComponent(SEARCH)}` })).statusCode,
+    ).toBe(500);
+    expect((await app.inject({ method: 'GET', url: '/api/v1/wrapped' })).statusCode).toBe(500);
+    await app.close();
+    const log = lines.join('');
+    expect(log).not.toContain('Prüfungsfrage');
+    const errors = lines.map((l) => JSON.parse(l) as { err?: Record<string, unknown> }).filter((l) => l.err);
+    expect(errors).toHaveLength(2);
+    // Die Abfrage selbst und der Grund bleiben lesbar
+    expect(errors[0]!.err!.message).toBe(
+      `Failed query: select … to_tsquery('german'::regconfig, $1)\nparams: [Redacted]: canceling statement due to statement timeout`,
+    );
+    expect(errors[0]!.err!.params).toBe('[Redacted]');
+    expect(errors[0]!.err!.query).toContain('to_tsquery');
+    expect(String(errors[1]!.err!.stack)).toContain('params: [Redacted]');
   });
 });
 
