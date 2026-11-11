@@ -923,7 +923,8 @@ export async function undoRelation(tx: Tx, item: ItemRow, decision: InboxDecisio
 
 /**
  * Eintrag ablehnen. Bei einem Konzept-Vorschlag werden die offenen Beziehungs-Einträge mit ihm als Endpunkt mit
- * abgelehnt. Vorschlag und Beziehungen bleiben liegen (§20.6).
+ * abgelehnt. Vorschlag und Beziehungen bleiben liegen (§20.6). Ist einer davon gerade gesperrt, rollt das Ablehnen
+ * zurück und läuft neu (`require`): sonst bliebe er offen, obwohl sein Endpunkt abgelehnt ist.
  */
 export async function rejectItem(tx: Tx, item: ItemRow): Promise<InboxDecision> {
   const cascade: string[] = [];
@@ -932,7 +933,7 @@ export async function rejectItem(tx: Tx, item: ItemRow): Promise<InboxDecision> 
     const locked = await lockItems(
       tx,
       candidates.map((row) => row.itemId),
-      'skip',
+      'require',
     );
     for (const { itemId } of candidates) {
       const row = locked.get(itemId);

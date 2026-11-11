@@ -375,6 +375,29 @@ describe('zwei Entscheidungen gleichzeitig', () => {
     }
   });
 
+  it('Ablehnen lässt keinen gerade gesperrten Folge-Eintrag offen, sondern wartet und lehnt ihn mit ab', async () => {
+    await world.concept('p', { name: 'Zweite Normalform' });
+    await world.concept('t', { name: 'Erste Normalform', status: 'aktiv' });
+    await world.relation('r1', { from: 'p', to: 't' });
+    await world.item('i1', { kind: 'concept_new', concept: 'p' });
+    await world.item('ir1', { kind: 'relation', relation: 'r1' });
+
+    // Eine andere Entscheidung hält den Beziehungs-Eintrag gerade
+    const holder = await openTx();
+    await holder.sql`SELECT id FROM inbox_item WHERE id = ${refId('ir1')} FOR UPDATE`;
+    const request = reject('i1');
+    try {
+      expect(await pending(request)).toBe(true);
+      await holder.commit();
+    } finally {
+      await holder.rollback();
+    }
+    const res = await request;
+    expect(res.statusCode).toBe(200);
+    expect((await world.itemRow('i1')).decision?.cascade_item_ids).toEqual([refId('ir1')]);
+    expect((await world.itemRow('ir1')).status).toBe('abgelehnt');
+  });
+
   it('zweimal Rückgängig gleichzeitig: einmal 200, einmal 409, der Zustand ist der vom Anfang', async () => {
     await world.setAutoAccept('nur_beziehungen');
     for (let round = 0; round < ROUNDS; round += 1) {
