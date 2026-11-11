@@ -89,16 +89,23 @@ function readVersion(): string {
  * - `keepAliveTimeoutMs`: Leerlauf zwischen zwei Anfragen auf derselben Verbindung (Fastify-Standard: 72 s).
  * - `requestTimeoutMs`: Längste Zeit, um eine ganze Anfrage samt Body zu empfangen (gegen Tröpfeln). Ein Upload bis
  *   200 MB (`MAX_UPLOAD_BYTES`) braucht so nur etwa 1 Mbit/s.
+ * - `maxRequestsPerSocket`: Nach so vielen Anfragen schließt der Core die Keep-Alive-Verbindung (`Connection: close`),
+ *   der Client verbindet neu. Begrenzt, wie lange eine einzelne Verbindung mit tröpfelnden Anfragen lebt. Hoch genug,
+ *   dass Bursts (Seitenlisten, Vorschaubilder, Audio-Chunks einer Live-Aufnahme) kaum neu verbinden müssen.
  * - `maxPerSource` und `maxNetwork`: offene Verbindungen je Quelle (IPv6 je /64) bzw. aus dem Netz insgesamt.
  *   Überzählige werden sofort geschlossen. Loopback ist ausgenommen, damit die Web-App auf dem Mac immer geht.
+ * - `maxConnections`: harte Obergrenze aller offenen Verbindungen samt Loopback und WebSockets
+ *   (`server.maxConnections`), weit unter dem FD-Limit des Prozesses, damit DB und Dateien immer noch öffnen.
  * Tests dürfen das Objekt vor `buildApp` ändern (kürzere Zeiten).
  */
 export const connectionLimits = {
   connectionTimeoutMs: 120_000,
   keepAliveTimeoutMs: 10_000,
   requestTimeoutMs: 30 * 60_000,
+  maxRequestsPerSocket: 1000,
   maxPerSource: 32,
   maxNetwork: 256,
+  maxConnections: 1024,
 };
 
 /** Zählt offene Verbindungen aus dem Netz und schließt die über `maxPerSource`/`maxNetwork`. Loopback zählt nie */
@@ -107,6 +114,7 @@ function limitNetworkConnections(
   logger: Logger,
   limits: typeof connectionLimits,
 ): void {
+  app.server.maxConnections = limits.maxConnections;
   const perSource = new Map<string, number>();
   let network = 0;
   let dropped = 0;
@@ -183,6 +191,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     connectionTimeout: connectionLimits.connectionTimeoutMs,
     keepAliveTimeout: connectionLimits.keepAliveTimeoutMs,
     requestTimeout: connectionLimits.requestTimeoutMs,
+    maxRequestsPerSocket: connectionLimits.maxRequestsPerSocket,
     // Abgelehnte Netzanfragen werden zusammengefasst statt einzeln geloggt (#87)
     logController: new RequestLogController(),
     // Fehler, die Fastify vor den Hooks abfängt (kaputte URL, ungültiger Content-Type …):

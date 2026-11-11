@@ -124,6 +124,63 @@ describe('Zeitgrenzen für Verbindungen', () => {
   });
 });
 
+describe('maxRequestsPerSocket und maxConnections', () => {
+  let t: TestApp;
+  let port: number;
+  const sockets: Socket[] = [];
+
+  beforeAll(async () => {
+    Object.assign(connectionLimits, { maxRequestsPerSocket: 2, maxConnections: 3, keepAliveTimeoutMs: 200 });
+    t = await startTestApp();
+    await t.app.listen({ port: 0, host: '127.0.0.1' });
+    port = (t.app.server.address() as AddressInfo).port;
+  });
+  afterEach(async () => {
+    for (const socket of sockets.splice(0)) socket.destroy();
+    await sleep(100);
+  });
+  afterAll(async () => {
+    restoreLimits();
+    await t.close();
+  });
+
+  // Node schließt den Socket dabei nicht sofort (es setzt nur `Connection: close` und beantwortet weitere Anfragen
+  // mit 503). Ein Client, der ihn trotzdem offen hält, fällt unter keepAliveTimeout (plus 1 s Puffer von Node)
+  it('nach maxRequestsPerSocket Anfragen: Connection: close, danach 503, dann schließt keepAliveTimeout', async () => {
+    const conn = await openSocket('127.0.0.1', port);
+    sockets.push(conn.socket);
+    let response = '';
+    conn.socket.on('data', (chunk: Buffer) => (response += chunk.toString('utf8')));
+    const get = `GET ${API}/health HTTP/1.1\r\nHost: localhost:${t.config.port}\r\n\r\n`;
+    conn.socket.write(get);
+    await waitFor(() => response.split('HTTP/1.1 200').length === 2, 3000, 'erste Antwort');
+    expect(response.toLowerCase()).toContain('connection: keep-alive');
+    response = '';
+    conn.socket.write(get);
+    await waitFor(() => response.includes('HTTP/1.1 200'), 3000, 'zweite Antwort');
+    expect(response.toLowerCase()).toContain('connection: close');
+    response = '';
+    conn.socket.write(get);
+    await waitFor(() => response.includes('\r\n\r\n'), 3000, 'dritte Antwort');
+    expect(response.startsWith('HTTP/1.1 503')).toBe(true);
+    await waitFor(conn.closed, 3000, 'Schließen nach keepAliveTimeout');
+  });
+
+  it('über maxConnections hinaus werden Verbindungen sofort geschlossen, auch über Loopback', async () => {
+    const allowed = [];
+    for (let i = 0; i < 3; i++) {
+      const conn = await openSocket('127.0.0.1', port);
+      sockets.push(conn.socket);
+      allowed.push(conn);
+    }
+    await sleep(100);
+    const extra = await openSocket('127.0.0.1', port);
+    sockets.push(extra.socket);
+    await waitFor(extra.closed, 2000, 'Schließen über maxConnections');
+    expect(allowed.map((c) => c.closed())).toEqual([false, false, false]);
+  });
+});
+
 describe('WebSocket /sync bleibt über die HTTP-Zeitgrenzen hinaus offen', () => {
   let app: SyncTestApp;
   beforeAll(async () => {
