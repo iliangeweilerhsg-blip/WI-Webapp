@@ -63,6 +63,17 @@ import {
   withVerifiedDump,
 } from '../src/staging.ts';
 
+// Tests der Besitzerprüfung brauchen root (lchown auf fremde uid). Neue Root-Tests NUR über `rootIt` anlegen:
+// Es setzt das Präfix „[root] “, nach dem der CI-Schritt „Backup-Tests mit root“ filtert und zählt.
+const asRoot = process.getuid?.() === 0;
+function rootIt(name: string, fn: () => Promise<void> | void, timeout?: number): void {
+  it.skipIf(!asRoot)(`[root] ${name}`, fn, timeout);
+}
+// Wächter: In CI (SG_ROOT_TESTS=1) muss der Lauf wirklich root sein, sonst wären alle [root]-Tests still übersprungen.
+it.runIf(process.env.SG_ROOT_TESTS === '1')('[root] Wächter: läuft wirklich als root', () => {
+  expect(process.getuid?.()).toBe(0);
+});
+
 const dirs: string[] = [];
 function tmp(): string {
   const d = mkdtempSync(join(tmpdir(), 'sg-backup-'));
@@ -1767,9 +1778,7 @@ describe('H-1 (#161): erfundene Stände im Ziel zählen nicht und werden nie gel
     if (!lstatSync(path).isDirectory()) return;
     for (const name of readdirSync(path)) chownTree(join(path, name));
   }
-  const asRoot = process.getuid?.() === 0;
-
-  it.skipIf(!asRoot)(
+  rootIt(
     'Ordner eines anderen Benutzers mit kopiertem Manifest unter eigenem Standnamen: weder Hardlink-Quelle noch gelöscht',
     async () => {
       const { dataDir, target, deps, logs } = setup();
@@ -1799,7 +1808,7 @@ describe('H-1 (#161): erfundene Stände im Ziel zählen nicht und werden nie gel
     },
   );
 
-  it.skipIf(!asRoot)(
+  rootIt(
     'alter .partial eines anderen Benutzers mit einem hineingeschobenen echten Stand wird nicht gelöscht',
     async () => {
       const { target, deps, logs } = setup();
@@ -1817,7 +1826,7 @@ describe('H-1 (#161): erfundene Stände im Ziel zählen nicht und werden nie gel
     },
   );
 
-  it.skipIf(!asRoot)(
+  rootIt(
     'voriger Stand wird erst während pg_dump gegen einen fremden Ordner getauscht (TOCTOU): keine Hardlinks auf fremde Dateien',
     async () => {
       const { dataDir, target, pg, deps } = setup();
@@ -1956,7 +1965,6 @@ describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)',
     if (!lstatSync(path).isDirectory()) return;
     for (const name of readdirSync(path)) chownTree(join(path, name), uid);
   }
-  const asRoot = process.getuid?.() === 0;
   /** Wie ein Ziel, das für alles den Besitzer `uid` meldet: jeder neue Ordner bekommt ihn */
   const reportsOwner = (uid: number): BackupDeps['targetHooks'] => ({
     step: (op, phase, dir, name) => {
@@ -2023,7 +2031,7 @@ describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)',
     expect(copyTree(src, join(root, 's3'), join(root, 's1'), undefined, { owner: uid }).linked).toBe(1);
   });
 
-  it.skipIf(!asRoot)(
+  rootIt(
     'Ziel meldet für alles eine fremde uid: ausgedünnt und verlinkt, das Log nennt den Grund',
     async () => {
       const { target, pg, deps, logs, errs } = setup();
@@ -2050,7 +2058,7 @@ describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)',
     },
   );
 
-  it.skipIf(!asRoot)(
+  rootIt(
     'Gegenprobe auf demselben Ziel: Ordner eines dritten Besitzers mit kopiertem Manifest ist weder Hardlink-Quelle noch gelöscht',
     async () => {
       const { dataDir, target, deps, logs } = setup();
@@ -2079,7 +2087,7 @@ describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)',
     },
   );
 
-  it.skipIf(!asRoot)(
+  rootIt(
     'Stände eines früheren Laufs als anderer Benutzer: nicht ausgedünnt, nicht verlinkt, Warnung am Lauf und im Log',
     async () => {
       const { target, pg, deps, logs, errs } = setup();
@@ -2102,7 +2110,7 @@ describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)',
     },
   );
 
-  it.skipIf(!asRoot)(
+  rootIt(
     'Wettlauf beim Anlegen des .partial: ein untergeschobener fremder Ordner wird nicht zum Maßstab für „eigen“',
     async () => {
       const { target, deps, logs, errs } = setup();
@@ -2132,7 +2140,7 @@ describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)',
     },
   );
 
-  it.skipIf(!asRoot)(
+  rootIt(
     'Wettlauf beim Anlegen des .partial: ein Symlink an Stelle der Probedatei wird nie verfolgt',
     async () => {
       const { target, deps, errs } = setup();
