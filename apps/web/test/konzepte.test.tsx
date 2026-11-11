@@ -31,6 +31,7 @@ import { aiStateSentence, budgetPercent, monthLabel, parseBudget } from '../src/
 import {
   InboxRequestError,
   acceptItem,
+  bulkInChunks,
   bulkTarget,
   inboxErrorMessage,
   parseAliases,
@@ -239,6 +240,45 @@ describe('Hilfen', () => {
     expect(bulkTarget(items, SESSION.id, 2)).toEqual({ session_id: SESSION.id });
     expect(bulkTarget(items, SESSION.id, 3)).toEqual({ ids: [I_NEW, I_MERGE] });
     expect(bulkTarget(items, null, 2)).toEqual({ ids: [I_NEW, I_MERGE] });
+  });
+
+  it('Massenaktionen mit mehr als 500 `ids` gehen in Blöcken zu 500, Ergebnisse zusammengeführt', async () => {
+    const many = Array.from({ length: 1001 }, (_, i) =>
+      newItem({ id: id(30_000 + i), concept_id: id(40_000 + i), priority: 1 }),
+    );
+    boot(many);
+    // Ein schon entschiedener Eintrag im zweiten Block landet in `skipped`
+    const decided = core.inboxItems[700];
+    if (decided) decided.status = 'abgelehnt';
+    const ids = many.map((item) => item.id);
+    const result = await bulkInChunks({ action: 'reject', ids });
+    const bulks = core.requests.filter((r) => r.path === '/inbox/bulk');
+    expect(bulks.map((r) => (r.body as { ids: string[] }).ids.length)).toEqual([500, 500, 1]);
+    expect(bulks.flatMap((r) => (r.body as { ids: string[] }).ids)).toEqual(ids);
+    expect(result.decided).toHaveLength(1000);
+    expect(result.skipped).toEqual([{ id: id(30_700), code: 'inbox_item_decided' }]);
+
+    // Scheitert ein späterer Block, bleibt das Entschiedene, der Rest steht mit Code in `skipped`
+    boot(many.map((item) => ({ ...item, status: 'offen' as const })));
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (...args: Parameters<typeof fetch>) => {
+      calls += 1;
+      if (calls === 2) throw new TypeError('offline');
+      return realFetch(...args);
+    }) as typeof fetch;
+    try {
+      const partial = await bulkInChunks({ action: 'reject', ids });
+      expect(partial.decided).toHaveLength(500);
+      expect(partial.skipped).toHaveLength(501);
+      expect(partial.skipped[0]).toEqual({ id: id(30_500), code: 'unreachable' });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    // Wenige `ids` bleiben eine Anfrage; „Alle annehmen“ sortiert erst Konzepte nach `priority`, dann Beziehungen
+    expect(bulkTarget([relationItem(), mergeItem(), newItem()], null, 0)).toEqual({
+      ids: [I_NEW, I_MERGE, I_REL],
+    });
   });
 
   it('Fehlercodes haben verständliche Texte, auch die drei, die im Vertrag noch fehlen', () => {
@@ -586,6 +626,24 @@ describe('Inbox: Vorschläge', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Alle annehmen/ }));
     await waitFor(() => expect(posts()[0]?.body).toEqual({ action: 'accept', ids: [I_NEW] }));
   });
+
+  it('lädt alle Seiten offener Einträge; ab 2000 sagt ein Satz, dass weitere später kommen', async () => {
+    boot(Array.from({ length: 450 }, (_, i) => newItem({ id: id(50_000 + i), concept_id: id(60_000 + i) })));
+    const first = wrap(<SuggestionInbox />);
+    await waitFor(() => expect(document.querySelectorAll('[data-inbox-item]')).toHaveLength(450));
+    const pages = core.requests.filter((r) => r.path.startsWith('/inbox?'));
+    expect(pages).toHaveLength(3);
+    expect(pages[2]?.path).toContain('cursor=400');
+    expect(screen.queryByTestId('inbox-capped')).toBeNull();
+    first.unmount();
+
+    boot(Array.from({ length: 2001 }, (_, i) => newItem({ id: id(70_000 + i), concept_id: id(80_000 + i) })));
+    wrap(<SuggestionInbox />);
+    expect(await screen.findByTestId('inbox-capped', {}, { timeout: 10_000 })).toHaveTextContent(
+      'nur die ersten 2000 offenen Vorschläge',
+    );
+    expect(document.querySelectorAll('[data-inbox-item]')).toHaveLength(2000);
+  }, 30_000);
 
   it('ohne Vorschläge ein ruhiger Satz; nicht erreichbarer Core ohne Absturz', async () => {
     boot([]);

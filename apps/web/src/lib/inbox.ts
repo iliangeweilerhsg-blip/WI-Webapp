@@ -18,7 +18,7 @@ import {
   type InboxOverview,
 } from '@sg/shared';
 import { watchReconnect } from '../components/dashboard/reconnect.ts';
-import { ApiRequestError, apiBase, apiGet, friendlyMessage, type Parser } from './api.ts';
+import { ApiRequestError, apiBase, apiGet, friendlyMessage, isUnreachable, type Parser } from './api.ts';
 import { CONCEPTS_KEY, relationSentence } from './concepts.ts';
 import { useHydrationSafe } from './hydrated.ts';
 import { useActiveSession } from './sessions.ts';
@@ -194,6 +194,8 @@ export function inboxErrorMessage(error: unknown, names: ReadonlyMap<string, str
 // ---------------------------------------------------------------------------------------------
 
 const MAX_PAGES = 10;
+/** So viele offene Einträge lädt die Inbox höchstens; darüber steht ein Hinweis */
+export const INBOX_OPEN_CAP = MAX_PAGES * 200;
 
 /** Alle offenen Einträge (`GET /inbox?status=offen`, Seiten zu 200) */
 export async function fetchOpenItems(signal?: AbortSignal): Promise<InboxItem[]> {
@@ -300,6 +302,33 @@ export function bulkInbox(request: InboxBulkRequest): Promise<InboxBulkResult> {
   return inboxPost('/inbox/bulk', InboxBulkResultSchema, request);
 }
 
+/** Höchstzahl der `ids` je `POST /inbox/bulk` (Schema `InboxBulkRequest`) */
+export const BULK_MAX_IDS = 500;
+
+/**
+ * `POST /inbox/bulk` mit beliebig vielen `ids`: in Blöcken zu höchstens 500, nacheinander, Ergebnisse zusammengeführt.
+ * Scheitert ein späterer Block, landen seine und alle folgenden IDs mit dem Fehlercode in `skipped`, damit das schon
+ * Entschiedene rückgängig gemacht werden kann. Scheitert der erste Block, kommt der Fehler durch.
+ */
+export async function bulkInChunks(request: InboxBulkRequest): Promise<InboxBulkResult> {
+  const ids = request.ids;
+  if (ids === undefined || ids.length <= BULK_MAX_IDS) return bulkInbox(request);
+  const merged: InboxBulkResult = { decided: [], skipped: [] };
+  for (let at = 0; at < ids.length; at += BULK_MAX_IDS) {
+    try {
+      const part = await bulkInbox({ action: request.action, ids: ids.slice(at, at + BULK_MAX_IDS) });
+      merged.decided.push(...part.decided);
+      merged.skipped.push(...part.skipped);
+    } catch (error) {
+      if (at === 0) throw error;
+      const code = errorCode(error) ?? (isUnreachable(error) ? 'unreachable' : 'failed');
+      merged.skipped.push(...ids.slice(at).map((id) => ({ id, code })));
+      break;
+    }
+  }
+  return merged;
+}
+
 /**
  * Nimmt entschiedene Einträge sofort aus der Liste und lädt Inbox und Konzepte neu. Mitentschiedene Folge-Einträge
  * (`InboxItem` zeigt `decision` nicht) verschwinden mit dem Neuladen.
@@ -325,12 +354,16 @@ export function bulkTarget(
   sessionOpenCount: number,
 ): Pick<InboxBulkRequest, 'ids' | 'session_id'> {
   if (sessionId !== null && visible.length === sessionOpenCount) return { session_id: sessionId };
-  return { ids: visible.map((item) => item.id) };
+  // Reihenfolge wie im Core (§20.6): erst Konzepte nach `priority`, dann Beziehungen. So bleibt sie auch über die
+  // Blöcke zu 500 hinweg erhalten.
+  const rank = (item: InboxItem) => (item.kind === 'relation' ? 1 : 0);
+  const ordered = [...visible].sort((a, b) => rank(a) - rank(b) || a.priority - b.priority);
+  return { ids: ordered.map((item) => item.id) };
 }
 
 /** „Rückgängig“ nach einer Massenaktion: `reopen` in umgekehrter Reihenfolge (§20.6) */
 export function undoBulk(decided: readonly string[]): Promise<InboxBulkResult> {
-  return bulkInbox({ action: 'reopen', ids: [...decided].reverse() });
+  return bulkInChunks({ action: 'reopen', ids: [...decided].reverse() });
 }
 
 // ---------------------------------------------------------------------------------------------

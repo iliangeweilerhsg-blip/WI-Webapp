@@ -2,6 +2,7 @@
 
 // Einstellungen → KI (VERTRAEGE §20.7, §20.10, F-EIN-01, F-DAT-05): Status, Monatsbudget, automatisches Annehmen und
 // die Kosten des Monats. Den Schlüssel trägt man in der `.env` ein; hier gibt es nie ein Eingabefeld dafür.
+import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { useContext, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { AiSettingsUpdate, AutoAcceptMode, CostSummary } from '@sg/shared';
@@ -238,9 +239,12 @@ function CostTable({ costs }: { costs: CostSummary }) {
               <tr key={row.session_id} className="border-t border-border">
                 <th scope="row" className="py-1.5 text-left font-normal">
                   {row.session ? (
-                    <a href={rueckblickHref(row.session.id)} className="underline-offset-2 hover:underline">
+                    <Link
+                      href={rueckblickHref(row.session.id)}
+                      className="underline-offset-2 hover:underline"
+                    >
                       {sessionRefLabel(row.session)}
-                    </a>
+                    </Link>
                   ) : (
                     <span className="text-text-muted">Gelöschte Vorlesung</span>
                   )}

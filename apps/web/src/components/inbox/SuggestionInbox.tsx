@@ -9,10 +9,11 @@ import type { InboxAcceptRequest, InboxItem, InboxKind, SessionRef } from '@sg/s
 import { conceptKey, fetchConcept, sessionRefLabel } from '../../lib/concepts.ts';
 import {
   INBOX_KIND_FILTERS,
+  INBOX_OPEN_CAP,
   UNDO_MS,
   acceptItem,
   applyDecided,
-  bulkInbox,
+  bulkInChunks,
   bulkTarget,
   conceptNames,
   errorCode,
@@ -212,7 +213,7 @@ export function SuggestionInbox() {
     setBulkBusy(true);
     try {
       const target = bulkTarget(group.items, group.session?.id ?? null, group.openCount);
-      const result = await bulkInbox({ action: 'accept', ...target });
+      const result = await bulkInChunks({ action: 'accept', ...target });
       applyDecided(client, result.decided);
       document.getElementById('inbox-suggestions-title')?.focus();
       const left = result.skipped.length;
@@ -292,6 +293,12 @@ export function SuggestionInbox() {
         {open.running === true ? (
           <p role="status" className="mb-3 text-sm text-text-muted">
             Während der Vorlesung kommen keine neuen Vorschläge dazu.
+          </p>
+        ) : null}
+        {items.length >= INBOX_OPEN_CAP ? (
+          <p data-testid="inbox-capped" className="mb-3 text-sm text-text-muted">
+            Es stehen nur die ersten {INBOX_OPEN_CAP} offenen Vorschläge da. Entscheide sie, dann kommen
+            weitere.
           </p>
         ) : null}
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Nach Art filtern">

@@ -1427,7 +1427,10 @@ function handleConcepts(
       .filter((x) => status === 'alle' || (status === 'offen') === (x.status === 'offen'))
       .filter((x) => kinds.length === 0 || kinds.includes(x.kind))
       .filter((x) => !sessionId || x.session?.id === sessionId);
-    return json({ items: items.slice(0, limit), next_cursor: null });
+    // Cursor des Fakes: Versatz als Text
+    const offset = Number(url.searchParams.get('cursor') ?? 0) || 0;
+    const next = offset + limit < items.length ? String(offset + limit) : null;
+    return json({ items: items.slice(offset, offset + limit), next_cursor: next });
   }
   if (path === '/inbox/overview' && method === 'GET') {
     const open = sorted().filter((x) => x.status === 'offen');
@@ -1457,7 +1460,12 @@ function handleConcepts(
     const ids = body?.ids as string[] | undefined;
     const sessionId = body?.session_id as string | undefined;
     const action = body?.action as 'accept' | 'reject' | 'reopen' | undefined;
-    if (!action || (ids === undefined) === (sessionId === undefined)) {
+    // Schema: `ids` mit 1 bis 500 Einträgen
+    if (
+      !action ||
+      (ids === undefined) === (sessionId === undefined) ||
+      (ids !== undefined && (ids.length < 1 || ids.length > 500))
+    ) {
       return fail({ status: 400, code: 'validation_failed' });
     }
     if (sessionId !== undefined && !core.sessions.some((x) => x.id === sessionId && !x.deleted_at)) {
