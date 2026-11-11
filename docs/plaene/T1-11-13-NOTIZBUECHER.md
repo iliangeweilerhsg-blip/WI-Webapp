@@ -75,7 +75,7 @@ Alle Texte kommen mit **PR 1** nach `main`. Danach ändern die anderen PRs die V
 **V1 · §7.2, neue Zeile in der Tabelle nach `GET /sessions/{id}/snapshot`:**
 
 ```markdown
-| `GET /sessions/{id}/notebook` | – | 200 `Notebook` | 404 `session_not_found`, 404 `notebook_not_found` (Modul gelöscht) |
+| `GET /sessions/{id}/notebook` | – | 200 `Notebook` | 404 `session_not_found`, 404 `notebook_not_found` (Rückfall: Modul gelöscht, Session nicht. Über `DELETE /modules` kommt das nicht vor, die Kaskade §13 löscht die Sessions mit) |
 ```
 
 **V2 · §7.2, neuer Punkt unter der Tabelle:**
@@ -111,7 +111,7 @@ Alle Texte kommen mit **PR 1** nach `main`. Danach ändern die anderen PRs die V
 
 ```markdown
 - **`presence.session_id` des iPads** ist die laufende oder pausierte Session, wenn ihr Modul das Modul des offenen Notizbuchs ist, sonst `null`.
-- **Notizbuch der Notizen-Spalte.** Standard ist `GET /sessions/{id}/notebook` (§7.2). Meldet ein iPad per `presence` ein `notebook_id`, das zum Modul der Session gehört (enthalten in `GET /notebooks?module_id`), zeigt die Spalte dieses Notizbuch. Meldet das iPad `notebook_id = null` oder ein Notizbuch eines anderen Moduls, gilt wieder der Standard. So erscheinen auch Striche aus einem frei gewählten Notizbuch (UX-30).
+- **Notizbuch der Notizen-Spalte.** Standard ist `GET /sessions/{id}/notebook` (§7.2). Meldet ein iPad per `presence` ein `notebook_id`, das zum Modul der Session gehört (`Notebook.module_id` = `Session.module_id`), zeigt die Spalte dieses Notizbuch. Meldet das iPad `notebook_id = null` oder ein Notizbuch eines anderen Moduls, gilt wieder der Standard. Trennt sich das iPad, bleibt die Spalte beim zuletzt gezeigten Notizbuch. So erscheinen auch Striche aus einem frei gewählten Notizbuch (UX-30).
 ```
 
 **V5 · §11.7, neuer Punkt 7 nach „UUIDs klein“:**
@@ -163,7 +163,7 @@ PR 1 (Vertrag, Core, Web, iPad klein)  ──┬──▶ PR 2 (iPad Bibliothek)
 - PR 1 zuerst, nach dem Merge von #214.
 - PR 2, 3, 4 **nacheinander**. Alle drei fassen `SyncEngine.swift` und `InkPageView.swift` an.
 - PR 5 läuft parallel zu PR 2 bis 4. Der Scope ist disjunkt (`apps/web/**`).
-- #211 (`fix/web-sync-spaetes-abo`) ändert `InkColumn.tsx` und `lib/sync/client.ts`. PR 1 und PR 5 starten erst nach dessen Merge oder rebasen darauf.
+- #211 (`fix/web-sync-spaetes-abo`) ändert `InkColumn.tsx` und `lib/sync/client.ts`. PR 1 und PR 5 starten erst nach dessen Merge. PR 1 braucht dessen `SyncClient.devicePresence` (letzte `presence` des iPads), ein Rebase auf den offenen Branch reicht nicht.
 
 Für alle PRs gilt: Branch `feat/<kurz>`, PR-Beschreibung nach `AGENTS.md`, Checkliste aus `10-UMSETZUNG.md` §6, keine neuen Abhängigkeiten.
 
@@ -177,7 +177,7 @@ Für alle PRs gilt: Branch `feat/<kurz>`, PR-Beschreibung nach `AGENTS.md`, Chec
 - `docs/VERTRAEGE.md` (V1 bis V7, wörtlich)
 - `services/core/src/services/notebooks.ts`, `services/core/src/routes/sessions.ts`
 - `services/core/test/integration/ink-rest.test.ts` (oder `sessions.test.ts`)
-- `apps/web/src/lib/ink.ts`, `apps/web/src/components/dashboard/NotesColumn.tsx`, `apps/web/src/components/ink/InkColumn.tsx` (nur die neue Prop), `apps/web/src/lib/session-notebook.ts` (löschen), zugehörige Tests in `apps/web/test/`
+- `apps/web/src/lib/ink.ts`, `apps/web/src/components/dashboard/NotesColumn.tsx`, `apps/web/src/lib/session-notebook.ts` (löschen), zugehörige Tests in `apps/web/test/`. `InkColumn.tsx` bleibt unverändert (siehe unten).
 - `apps/ipad/Sources/Core/CoreClient.swift`, `apps/ipad/Sources/Sync/SyncEngine.swift` (nur `lookupLecture`), `apps/ipad/Tests/CoreClientSyncTests.swift`, `apps/ipad/Tests/SyncEngineTests.swift`
 
 **Schnittstellen**
@@ -200,12 +200,11 @@ Web:
 export function fetchSessionNotebook(sessionId: string, signal?: AbortSignal): Promise<Notebook>;
 // NotesColumn: Props
 { session: Pick<Session, 'id' | 'module_id'>; client: SyncClient | null }
-// InkColumn: neue optionale Prop
-initialPresencePageId?: string | null;
 ```
 - `NotesColumn` lädt `fetchSessionNotebook` (Query-Schlüssel `['sessions', id, 'notebook']`) und weiter `fetchNotebooks(moduleId)`. Der Abruf des Termins entfällt.
-- `NotesColumn` hört selbst auf `presence` (`client.onEvent`). Zustand `ipad: { notebookId, pageId } | null`. Regel V4: `notebookId` aus `presence`, wenn es in der Notizbuch-Liste des Moduls steht, sonst das Standard-Notizbuch.
-- Wechselt das Notizbuch wegen `presence`, bekommt `InkColumn` die Seite aus demselben Ereignis als `initialPresencePageId`. Sonst zeigte sie bis zum nächsten Seitenwechsel die letzte statt der aktuellen Seite.
+- `NotesColumn` hört selbst auf `presence` (`client.onEvent`). Startwert beim Einhängen: `client.devicePresence('ipad')` (kommt mit #211). Zustand `ipad: { notebookId } | null`. Regel V4: `notebookId` aus `presence`, wenn das Notizbuch zum Modul der Session gehört, sonst das Standard-Notizbuch.
+- Modul prüfen: Steht `notebookId` in der geladenen Liste, entscheidet deren `module_id`. Fehlt es dort (frisch auf dem iPad angelegt oder jenseits der ersten 50), fragt `NotesColumn` einmal `GET /notebooks/{id}` (neuer Helfer `fetchNotebook` in `lib/ink.ts`, Query-Schlüssel `['notebooks', 'one', id]`). 404 oder anderes Modul → Standard.
+- `InkColumn` bekommt `key={notebook.id}`. So startet sie beim Wechsel frisch (`following = true`, keine alte Seitenliste) und liest die aktuelle iPad-Seite selbst über `devicePresence` (#211). Eine neue Prop ist dafür nicht nötig.
 - Alle Aufrufer von `NotesColumn` übergeben `session.id`.
 
 iPad:
@@ -217,8 +216,8 @@ func sessionNotebook(endpoint: CoreEndpoint, token: String, sessionID: String) a
 - `SyncEngine.lookupLecture` fragt zuerst `sessionNotebook`. Bei `nil` gilt die alte Regel (erstes „Vorlesung“ aus `GET /notebooks?module_id`). So läuft ein neues iPad auch gegen einen alten Core.
 
 **Testfälle**
-- Core (Integration): Session ohne Termin → `vorlesung`. Termin `uebung` → `uebung`. Termin `tutorium` → `uebung`. Termin `pruefung` → `vorlesung`. Termin weich gelöscht, Art `uebung` → `uebung`. Modul ohne Standard-Notizbücher (direkt in der DB angelegt) → werden angelegt, 200. Session gelöscht → 404 `session_not_found`. Modul gelöscht → 404 `notebook_not_found`. Ungültige ID → 400. Aus dem Netz ohne Token → 401.
-- Web: Übung zeigt „Übung“. `presence` mit freiem Notizbuch desselben Moduls → Spalte wechselt und zeigt die gemeldete Seite. `presence` mit Notizbuch eines anderen Moduls → kein Wechsel. `presence` mit `notebook_id = null` → zurück zum Standard. Fehler des Endpunkts → Hinweis mit „Erneut versuchen“.
+- Core (Integration): Session ohne Termin → `vorlesung`. Termin `uebung` → `uebung`. Termin `tutorium` → `uebung`. Termin `pruefung` → `vorlesung`. Termin weich gelöscht, Art `uebung` → `uebung`. Modul ohne Standard-Notizbücher (direkt in der DB angelegt) → werden angelegt, 200. Session gelöscht → 404 `session_not_found`. Modul per `DELETE /modules/{id}` gelöscht → 404 `session_not_found` (Kaskade). Nur `module.deleted_at` direkt in der DB gesetzt → 404 `notebook_not_found`. Ungültige ID → 400. Aus dem Netz ohne Token → 401, mit Geräte-Token → 200.
+- Web: Übung zeigt „Übung“. `presence` mit freiem Notizbuch desselben Moduls → Spalte wechselt und zeigt die gemeldete Seite. `presence` vor dem Einhängen (nur über `devicePresence`) → Spalte zeigt gleich das gemeldete Notizbuch. Notizbuch nicht in der Liste, `GET /notebooks/{id}` liefert dasselbe Modul → Wechsel. `presence` mit Notizbuch eines anderen Moduls → kein Wechsel. `presence` mit `notebook_id = null` → zurück zum Standard. Fehler des Endpunkts → Hinweis mit „Erneut versuchen“.
 - iPad: `lookupLecture` nimmt das Notizbuch des Endpunkts (Fake liefert „Übung“). 404 → alte Regel. Pfad und Methode in `CoreClientSyncTests`.
 
 **Akzeptanzkriterien**
@@ -317,7 +316,7 @@ protocol InkLibraryStore: AnyObject {
     func pages(inNotebook notebookID: String) -> [LibraryPage]          // ohne gelöschte, nach index, dann id
     func page(_ id: String) -> LibraryPage?
 
-    func mergeModules(_ server: [Module], at: Date)
+    func mergeModules(_ server: [ModuleBrief], at: Date)
     func mergeNotebooks(_ server: [Notebook], moduleID: String)
     func mergePages(_ server: [Page], notebookID: String, pendingUpdatePageIDs: Set<String>, pendingDeletePageIDs: Set<String>)
 
@@ -338,11 +337,12 @@ Regeln für das Zusammenführen (genau so umsetzen und testen):
 - **Module:** Die Liste des Core ersetzt die lokale. Ausnahme: `inkMode` bleibt lokal, solange `inkModeDirty`. Ein Modul, das am Core fehlt, bleibt nur stehen, solange es ein Notizbuch mit `knownOnServer == false` hat.
 - **Notizbücher eines Moduls:** Jedes Notizbuch des Core wird übernommen (`title`, `kind`, `moduleID`, `knownOnServer = true`, `hidden = false`). Ein lokales Notizbuch, das am Core fehlt: mit `knownOnServer == false` bleibt es (wartet noch), sonst `hidden = true`.
 - **Seiten eines Notizbuchs:**
-  - Seite lokal und am Core: `index`, `template`, `version`, Folien-IDs vom Core übernehmen, **außer** die Seite steht in `pendingUpdatePageIDs`. War sie lokal gelöscht und steht nicht in `pendingDeletePageIDs`: `deletedAtMS = nil` (am Mac wiederhergestellt).
+  - Seite lokal und am Core: `index`, `template`, `version`, `sessionID`, Folien-IDs vom Core übernehmen, **außer** die Seite steht in `pendingUpdatePageIDs`. War sie lokal gelöscht und steht nicht in `pendingDeletePageIDs`: `deletedAtMS = nil` (am Mac wiederhergestellt).
   - Seite nur am Core: **nicht** als `LibraryPage` anlegen. Nur `remoteMaxIndex` und `remoteOnlyPageCount` des Notizbuchs setzen.
   - Seite nur lokal: unverändert lassen.
+  - **Die beiden Mengen ermittelt der Dienst vor dem Abruf und vereinigt sie mit dem Stand danach.** Sonst setzt ein `ack`, das während des Abrufs eintrifft, eine veraltete Antwort durch: Eine gerade gelöschte Seite käme zurück, ein gerade bestätigtes Umsortieren würde zurückgedreht. Seiten in der Löschfrist (`deletedAtMS != nil`, `deleteQueued == false`, PR 3) zählen zu `pendingDeletePageIDs`.
 
-Migration (`Library/InkLibraryMigration.swift`): Gibt es `bindings.json` und keine `library.json`, wird je `InkBinding` ein `LibraryNotebook` (`title = "Vorlesung"`, `kind = .vorlesung`, `knownOnServer = true`) und eine `LibraryPage` (A4, `blanko`, `index = 1`, `version = 1`, `createQueued = pageCreated`, `needsReconcile`) angelegt. `moduleName` wird zu einem `LibraryModule`. `lastNotebookID` und `dbEpoch` wandern mit. Danach wird `bindings.json` in `bindings.migriert.json` umbenannt. Der nächste Abgleich mit dem Core korrigiert Titel, Art, `index` und `version`.
+Migration (`Library/InkLibraryMigration.swift`): Gibt es `bindings.json` und keine `library.json`, wird je `InkBinding` ein `LibraryNotebook` (`title = "Vorlesung"`, `kind = .vorlesung`, `knownOnServer = true`) und eine `LibraryPage` (A4, `blanko`, `index = 1`, `version = 1`, `createQueued = pageCreated`, `needsReconcile`) angelegt. `moduleName` wird zu einem `LibraryModule` (fehlt er, wie bei Bindungen vor #214: Name „Modul“ bis zum ersten Abruf). `lastNotebookID` und `dbEpoch` wandern mit. Danach wird `bindings.json` in `bindings.migriert.json` umbenannt. Der nächste Abgleich mit dem Core korrigiert Titel, Art, `index` und `version`.
 
 Dienst (`Library/InkLibraryService.swift`), `@MainActor @Observable`:
 ```swift
@@ -378,10 +378,13 @@ final class InkLibraryService {
   func reportRESTError(_ error: Error)      // 401 → tokenInvalid, wie heute
   var clockOffsetForDrafts: Int? { get }
   ```
-- `InkOpBuilder` neu: `notebookCreate(notebook:nowMS:offsetMS:makeID:)`, `pageCreate(page:nowMS:offsetMS:makeID:)` (ersetzt die A4-Variante). `correct(_:offsetMS:)` behandelt **alle** Arten, die das iPad sendet: `notebook.create` (`at` und `data.created_at` + Versatz), `page.create`, `page.update`, `page.delete` (`at` + Versatz). Heute liefert `default` dort `nil`, und die Operation landet als `local_op_invalid` in der Fehlerablage.
-- `SyncOutbox`: `mark(forPage:)` zählt nur `stroke.add` und `stroke.remove`. Sonst löst jede Seiten-Operation einen unnötigen Abgleich aus.
-- `SyncEngine.deadLetter`: bei `notebook.create` alle wartenden Operationen mit demselben `stream` mitnehmen und `library.removeNotebook` aufrufen. Bei `page.create` wie heute, mit `library.removePage`.
-- `CoreClient` neu: `modules(endpoint:token:)` (`GET /modules?limit=200`, `next_cursor` folgen), sonst vorhandene Methoden.
+- `InkOpBuilder` neu: `notebookCreate(notebook:nowMS:offsetMS:makeID:)`, `pageCreate(page:nowMS:offsetMS:makeID:)` (ersetzt die A4-Variante, alle Felder aus der `LibraryPage`). `correct(_:offsetMS:)` behandelt **alle** Arten, die das iPad sendet: `notebook.create` (`at` und `data.created_at` + Versatz), `page.create`, `page.update`, `page.delete` (`at` + Versatz). Heute liefert `default` dort `nil`, und die Operation landet als `local_op_invalid` in der Fehlerablage. **Ebenso `opID(of:)`:** Es kennt heute nur dieselben drei Arten, `makeDraft` liefert für jede andere `nil`, und die neue Operation entstünde gar nicht. `notebook.create` hat `pageID = nil` im `OutboxDraft`.
+- `SyncEngine.reconcile`: Fehlt die Seite am Core (404), sendet es `page.create` mit den Feldern der `LibraryPage` (`index`, `template`, Format, Folien-IDs), nicht mehr A4/`blanko` mit `pages.count + 1`. Sonst käme eine Folienseite nach einer Wiederherstellung als leere A4-Seite zurück.
+- `SyncOutbox`: `mark(forPage:)` zählt nur `stroke.add` und `stroke.remove` (heute ist nur `page.create` ausgenommen). Sonst löst jede Seiten-Operation einen unnötigen Abgleich aus.
+- `SyncEngine.deadLetter`: bei `notebook.create` alle wartenden Operationen mit demselben `stream` mitnehmen und `library.removeNotebook` aufrufen. Bei `page.create` wie heute, mit `library.removePage`. Beide entfernen nur den Eintrag der Bibliothek. Die Dateien unter `Ink/<page_id>/` bleiben (wie heute bei `removeBinding`).
+- `CoreClient` neu: `modules(endpoint:token:)` (`GET /modules?limit=200`, `next_cursor` folgen). Dekodiert wird in einen schlanken eigenen Typ `ModuleBrief` (`id`, `name`, `short_name`, `settings.ink_mode` als `String?`, über `InkMode(rawValue:)`), nicht in das generierte `Module`/`ModuleList`. Grund: Der Swift-Contract prüft `ModuleList` nicht, und ein neuer Enum-Wert in `color` oder `settings.layout` ließe sonst den ganzen Abruf scheitern (Muster wie `ModuleNameResponse`). `mergeModules` nimmt `[ModuleBrief]`.
+- `CoreClient.notebooks(…)` fragt mit `limit=200` und folgt `next_cursor`. Die Regel „fehlt am Core → `hidden`“ braucht die vollständige Liste.
+- „+ Notizbuch“: Titel getrimmt, leer → Knopf aus. Ein leerer Titel ergäbe `message_invalid` und die Fehlerablage.
 - `presence`: nach V4.
 
 Oberfläche:
@@ -394,13 +397,14 @@ Oberfläche:
 - `refresh()` läuft bei jedem neuen `welcomeCount` und beim Erscheinen des Startbildschirms, höchstens alle 30 s.
 
 **Testfälle** (alle als Unit-Tests mit Fakes, kein Netz)
-- Zusammenführen: jede Regel oben einzeln. Dazu: lokal angelegtes Notizbuch übersteht einen Abruf, in dem es noch fehlt. `inkModeDirty` schützt die lokale Wahl.
+- Zusammenführen: jede Regel oben einzeln. Dazu: lokal angelegtes Notizbuch übersteht einen Abruf, in dem es noch fehlt. `inkModeDirty` schützt die lokale Wahl. `page.update` bzw. `page.delete` wird während des Abrufs bestätigt (Fake-Engine), die Antwort zeigt noch den alten Stand → lokaler `index` bleibt, gelöschte Seite bleibt gelöscht. Modul mit unbekanntem `color`-Wert im JSON → Abruf gelingt.
 - Migration: zwei Bindungen → zwei Notizbücher mit je einer Seite, `lastNotebookID` und `dbEpoch` erhalten, zweiter Start migriert nicht erneut, kaputte `bindings.json` → leere Bibliothek ohne Absturz.
 - `openTarget`: ohne Seite wird eine angelegt und `page.create` eingereiht, `index = max(lokal, remoteMaxIndex) + 1`. Mit `lastPageID` wird diese genommen. Kein zweites `page.create` beim zweiten Öffnen.
 - Offline: Bibliothek aus der Datei, Notizbuch wählen, schreiben → Operationen liegen in der Warteschlange, `session_id = null`, `t_start_ms = null`.
 - Session-Zuordnung: Session im selben Modul → `sessionID` gesetzt. Session in anderem Modul → `nil`, `presence.session_id = null`.
 - `notebook.create`: Operation dekodiert als `SGSyncOp.notebookCreate`, Strom `notebook:<id>`, steht vor `page.create`. Uhrkorrektur ändert `at` und `created_at`. Ablehnung (`module_not_found`) nimmt alle Operationen des Stroms mit.
-- `correct` für `page.update` und `page.delete` liefert nie `nil`.
+- `correct` für `page.update` und `page.delete` liefert nie `nil`. Jeder neue Builder liefert einen `OutboxDraft` (nicht `nil`).
+- Abgleich einer Folienseite, die der Core nicht kennt → `page.create` mit `template = folie`, Format und `index` der `LibraryPage`.
 - `mark(forPage:)` ändert sich durch `page.create` nicht.
 - Alle vorhandenen Tests aus T1-14 und #214 laufen weiter (auf die neue Ablage umgestellt).
 
@@ -460,7 +464,7 @@ Verhalten:
   3. `version` = Version des Core, alle wartenden `page.update` dieser Seite mit `discard` entfernen;
   4. weichen die lokalen Felder vom Core ab, **ein** neues `page.update` mit den lokalen Feldern und der Version des Core einreihen.
   Scheitert der Abruf, bleibt ein Merker stehen. Der nächste `welcome` versucht es erneut. Fehler für Operationen, die nicht mehr in der Warteschlange stehen, ignoriert die Engine schon heute.
-- **Löschen ohne Dialog (R1):** Die Seite verschwindet sofort. Unten erscheint 5 s lang eine Leiste „Seite gelöscht · Rückgängig“. Erst danach wird `page.delete` eingereiht. Merker `deletedAtMS` plus `deleteQueued` in der Bibliothek: Stürzt die App in der Frist ab, reiht der nächste Start nach. Die letzte Seite eines Notizbuchs lässt sich löschen, danach legt `openTarget` eine neue an. Zeichnung und Vorschaubild bleiben 30 Tage auf dem iPad.
+- **Löschen ohne Dialog (R1):** Die Seite verschwindet sofort. Unten erscheint 5 s lang eine Leiste „Seite gelöscht · Rückgängig“. Erst danach wird `page.delete` eingereiht. Merker `deletedAtMS` plus `deleteQueued` in der Bibliothek: Stürzt die App in der Frist ab, reiht der nächste Start nach. Die letzte Seite eines Notizbuchs lässt sich löschen, danach legt `openTarget` eine neue an. `openTarget` überspringt ein `lastPageID`, das auf eine gelöschte Seite zeigt. Zeichnung und Vorschaubild bleiben 30 Tage auf dem iPad.
 - **Blättern:** Eine Seite ist sichtbar. Oben „‹ Seite 3 / 12 ›“ mit zwei Knöpfen (≥ 44 pt). Dazu ein Ein-Finger-Wisch nach links oder rechts, nur wenn nicht gezoomt ist. Auf der letzten Seite legt „›“ bzw. der Wisch eine neue Seite an, aber nur, wenn die aktuelle Seite mindestens einen Strich hat. Die neue Seite erbt die Vorlage der aktuellen (bei `folie`: `blanko`).
 - **Seitenwechsel:** alte Seite `saveNow()`, neues `InkPageModel` und neuer `InkCanvasContainerView(pageSize:)`. Es lebt immer nur **eine** Seite mit ihren zwei `PKCanvasView`. Nach dem Wechsel `setPresence`, `setLast` und, wenn nötig, Abgleich.
 - **Seitenleiste** („Seiten ▤“ unten rechts, 07 §4.3): Raster mit Vorschaubildern und Seitenzahl. Tipp springt. Ziehen sortiert um. Kontextmenü: „Vorlage ▸“, „Löschen“. Knopf „+“ mit Vorlagenwahl. Fußzeile, wenn `remoteOnlyPageCount > 0`: „N weitere Seiten liegen nur am Mac.“
@@ -615,7 +619,7 @@ Verhalten:
 
 - `Schemas.swift` liegt im App-Modul und definiert unter anderem `Task`, `Page`, `Stroke`, `Session`, `Notebook`, `Module`, `Slide`, `SlideDeck`, `SlideEvent`, `Settings`, `Photo`, `Marker`.
 - Darum **immer `_Concurrency.Task`** schreiben, auch bei `Task.sleep`, `Task.detached` und `Task.isCancelled`.
-- Eigene Typen heißen `Library…`, `Slide…Info`, `SlideRef`, `SessionBrief`. Keinen der Namen oben neu vergeben, auch nicht verschachtelt.
+- Eigene Typen heißen `Library…`, `Slide…Info`, `SlideRef`, `SessionBrief`, `ModuleBrief`. Keinen der Namen oben neu vergeben, auch nicht verschachtelt.
 - Kodieren von Operationen nur über `SGSyncOp` und `SGSync.encoder()` (§11.7). Pflichtfelder mit `null` müssen im JSON stehen (`session_id`, `background_slide_id`, `attached_slide_id`). Die Tests prüfen das am JSON-Text.
 - UUIDs immer über `InkID.uuidV7()` (klein).
 
@@ -634,7 +638,9 @@ Verhalten:
 - **`correct` kennt heute nur drei Arten.** Jede neue Art ohne Zweig landet als `local_op_invalid` in der Fehlerablage (PR 2 schließt das für alle vier neuen Arten auf einmal).
 - **Abgleich nur für Seiten, die dieses iPad angelegt hat.** `InkReconciler.plan` entfernt am Core alle Striche, die lokal fehlen. Auf einer Seite, die nur am Mac existiert, löschte das alles. Darum legt `mergePages` für solche Seiten keine `LibraryPage` an.
 - **`db_epoch` neu:** `markAllNeedReconcile` setzt jede lokale Seite. Der Abgleich läuft je Seite beim Öffnen, nicht für alle auf einmal. Für nie wieder geöffnete Seiten: Beim Öffnen eines Notizbuchs zusätzlich für jede Seite mit `needsReconcile` und ohne Treffer in `GET /notebooks/{id}/pages` ein `page.create` einreihen (idempotent). Die Striche folgen beim Öffnen der Seite.
+- **`db_epoch` neu, Notizbücher (PR 2):** Ein freies Notizbuch, das nach dem Backup angelegt wurde, fehlt dem Core danach. Ohne Gegenmittel setzte der nächste Abruf es auf `hidden` (es war ja `knownOnServer`), und jedes erneute `page.create` scheiterte mit `notebook_not_found`. Darum in `onWelcome` bei neuer `db_epoch`: alle Notizbücher `knownOnServer = false`, und für jedes Notizbuch mit `kind == .frei` und mindestens einer lokalen Seite `notebook.create` erneut einreihen (neue `op_id`, `created_at` aus der Bibliothek). Das ist idempotent: Kennt der Core die ID, auch im Papierkorb, kommt `ack` ohne Änderung. Es steht in der Warteschlange vor allen `page.create` aus dem Abgleich. Test: neue `db_epoch` → ein `notebook.create` je freiem Notizbuch mit Seiten, keins für `vorlesung`/`uebung`, nichts wird ausgeblendet.
 - **Nach `db_epoch` stimmt `version` nicht mehr.** `mergePages` übernimmt die Version des Core, wenn kein `page.update` wartet. Wartet eines, löst der Konfliktweg aus PR 3 es auf.
+- **Reihenfolge nach einer Wiederherstellung:** `mergePages` übernimmt `index` und `template` des Core, also den Stand des Backups. Umsortierungen und Vorlagenwechsel nach dem Backup gehen dabei verloren, Striche nicht. Bewusste Lücke, im PR von PR 3 nennen.
 - **Seite am Mac gelöscht:** Das iPad merkt es in Phase 1 nicht. Striche auf diese Seite nimmt der Core an und legt sie in den Papierkorb (§11.2). Bewusste Lücke, im PR nennen.
 - **Fenster von 200 Operationen:** Umsortieren großer Notizbücher erzeugt viele kleine Operationen. Das Fenster und die Paketbildung der Engine regeln das. Nichts bündeln.
 - **`mark(forPage:)`** nur für Striche zählen (PR 2), sonst gleicht jede Seite nach jeder Seiten-Operation unnötig ab.
