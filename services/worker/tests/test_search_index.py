@@ -407,11 +407,64 @@ def test_no_reuse_with_other_version_or_model(
     assert {r["index_version"] for r in chunks(db)} == {1}
 
 
-def test_embeds_in_batches_of_16(worker: Worker, db: Conn, emb: Counting) -> None:
-    did, _ = deck(db, module(db), [{"title": f"Folie {i}", "text": "Inhalt"} for i in range(20)])
+def test_embeds_in_small_batches(worker: Worker, db: Conn, emb: Counting) -> None:
+    assert si.EMBED_BATCH == 4
+    did, _ = deck(db, module(db), [{"title": f"Folie {i}", "text": "Inhalt"} for i in range(18)])
     res = result(run_job(worker, db, "deck", did))
-    assert res["embedded_count"] == 20
-    assert [len(c) for c in emb.calls] == [16, 4]
+    assert res["embedded_count"] == 18
+    assert [len(c) for c in emb.calls] == [4, 4, 4, 4, 2]
+
+
+def test_pauses_between_batches_but_not_before_the_first(
+    worker: Worker, db: Conn, emb: Counting, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(em, "pause_between_batches", lambda: events.append("pause"))
+    emb.hook = lambda: events.append("embed")
+    did, _ = deck(db, module(db), [{"title": f"Folie {i}", "text": "Inhalt"} for i in range(9)])
+    result(run_job(worker, db, "deck", did))
+    assert events == ["embed", "pause", "embed", "pause", "embed"]
+
+
+def test_single_batch_never_pauses(
+    worker: Worker, db: Conn, emb: Counting, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pauses: list[int] = []
+    monkeypatch.setattr(em, "pause_between_batches", lambda: pauses.append(1))
+    did, _ = deck(db, module(db), SLIDES[:2])
+    result(run_job(worker, db, "deck", did))
+    assert len(emb.calls) == 1 and pauses == []
+
+
+def test_pause_comes_before_waiting_for_search_requests(
+    emb: Counting, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Erst pausieren, dann auf Suchanfragen warten: Eine Anfrage, die während der Pause
+    eintrifft, kommt so vor dem nächsten Stapel dran."""
+    events: list[str] = []
+    monkeypatch.setattr(em, "pause_between_batches", lambda: events.append("pause"))
+    monkeypatch.setattr(em.ENDPOINT_PRIORITY, "wait_idle", lambda *a: events.append("idle") or True)
+    emb.hook = lambda: events.append("embed")
+    todo = [si.Chunk("slide", uuid.uuid4(), 0, f"Text {i}", "simple") for i in range(5)]
+    si.embed_chunks(emb, todo)
+    assert events == ["idle", "embed", "pause", "idle", "embed"]
+
+
+def test_releases_device_cache_only_after_large_runs(emb: Counting) -> None:
+    released: list[int] = []
+    emb.release_cache = lambda: released.append(1)  # type: ignore[attr-defined]
+
+    def todo(n: int) -> list[si.Chunk]:
+        return [si.Chunk("slide", uuid.uuid4(), 0, f"T {i}", "simple") for i in range(n)]
+
+    em.configure_tuning(pause_ms=0)
+    try:
+        si.embed_chunks(emb, todo(si.EMBED_BATCH))
+        assert released == []
+        si.embed_chunks(emb, todo(si.EMBED_BATCH + 1))
+        assert released == [1]
+    finally:
+        em.configure_tuning()
 
 
 def test_text_without_words_gets_no_vector(worker: Worker, db: Conn, emb: Counting) -> None:
@@ -637,10 +690,10 @@ def test_embedder_lost_between_batches(
     use(monkeypatch, Counting(hook=second_fails))
     did, _ = deck(db, module(db), [{"title": f"Folie {i}", "text": "Inhalt"} for i in range(20)])
     res = result(run_job(worker, db, "deck", did))
-    assert (res["chunk_count"], res["embedded_count"]) == (20, 16)
+    assert (res["chunk_count"], res["embedded_count"]) == (20, 4)
     assert (res["embedding_model"], res["embedding_error"]) == (None, "Modell entladen")
     models = [r["embedding_model"] for r in chunks(db)]
-    assert models == ["fake-embed-1"] * 16 + [None] * 4
+    assert models == ["fake-embed-1"] * 4 + [None] * 16
 
 
 # ---------- Lock ----------

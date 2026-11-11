@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import sys
@@ -10,7 +11,7 @@ from types import FrameType
 
 from . import handlers  # noqa: F401  (registriert die Handler)
 from .ai import llm
-from .ai.embedder import shutdown_when, start_embedder
+from .ai.embedder import configure_tuning, shutdown_when, start_embedder
 from .ai.transcriber import config_error
 from .config import KEY_VAR, Settings, load_env_file, take_llm_settings
 from .logging_setup import setup_logging
@@ -43,6 +44,17 @@ def install_signal_handlers(worker: Worker) -> None:
     signal.signal(signal.SIGINT, handler)
 
 
+def lower_priority(nice: int, log: logging.Logger) -> None:
+    """Senkt die Priorität des Worker-Prozesses (`SG_WORKER_NICE`), damit Indizieren und
+    Transkribieren den Mac nicht ausbremsen. Scheitert das, wird es nur protokolliert."""
+    if nice <= 0:
+        return
+    try:
+        os.nice(nice)
+    except (OSError, AttributeError) as exc:  # AttributeError: Plattform ohne `os.nice`
+        log.warning("Priorität nicht gesenkt", extra={"nice": nice, "error": type(exc).__name__})
+
+
 def main() -> int:
     settings = Settings.from_env()
     env_file = settings.data_dir / "config" / ".env"
@@ -53,6 +65,8 @@ def main() -> int:
     llm_settings = take_llm_settings(env_file, key_from_environment=key_from_environment)
     log = setup_logging(settings.data_dir, settings.log_level)
     llm.configure(llm_settings)
+    lower_priority(settings.worker_nice, log)
+    configure_tuning(threads=settings.embed_threads, pause_ms=settings.embed_pause_ms)
     if llm_settings.issue == "env_offen":
         log.error(
             "KI-Schlüssel nicht genutzt: config/.env ist für andere lesbar, bitte chmod 600 "
