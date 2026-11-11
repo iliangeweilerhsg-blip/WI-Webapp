@@ -4944,7 +4944,7 @@ class SessionUpdate(BaseModel):
 
 class Settings(BaseModel):
     """
-    GET /settings: alle Phase-1-Bereiche, fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
+    GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
     """
 
     model_config = ConfigDict(
@@ -4954,6 +4954,7 @@ class Settings(BaseModel):
     lecture: LectureSettings
     pen: PenSettings
     data: DataSettings
+    ai: AiSettings
 
 
 class SettingsUpdate(BaseModel):
@@ -4968,6 +4969,7 @@ class SettingsUpdate(BaseModel):
     lecture: LectureSettingsUpdate | None = None
     pen: PenSettingsUpdate | None = None
     data: DataSettingsUpdate | None = None
+    ai: AiSettingsUpdate | None = None
 
 
 class ShapeElementPayload(BaseModel):

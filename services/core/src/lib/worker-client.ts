@@ -13,9 +13,11 @@ import { join } from 'node:path';
 import {
   EmbedResponseSchema,
   WorkerHealthSchema,
+  WorkerLlmStatusSchema,
   type EmbedRequest,
   type EmbedResponse,
   type WorkerHealth,
+  type WorkerLlmStatus,
 } from '@sg/shared';
 
 /** Standard-Port des Workers (VERTRAEGE §1) */
@@ -24,6 +26,8 @@ export const DEFAULT_WORKER_PORT = 4711;
 export const EMBED_TIMEOUT_MS = 800;
 /** Zeitlimit für `GET /health` (Nachholen, §19.5) */
 export const HEALTH_TIMEOUT_MS = 2000;
+/** Zeitlimit für `GET /health` aus `GET /ai/status` (§20.6) */
+export const LLM_STATUS_TIMEOUT_MS = 800;
 /** Antworten des Workers sind klein (16 Vektoren à 1024 Zahlen ≈ 400 KB). Mehr wird nicht gelesen */
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 /** Die Token-Datei hat 64 Zeichen (plus Zeilenumbruch). Größere Dateien werden nicht gelesen */
@@ -116,6 +120,23 @@ export class WorkerClient {
       throw new WorkerError('embedder_unavailable', 'Antwort des Workers passt nicht zum Schema.');
     }
     return parsed.data;
+  }
+
+  /**
+   * Feld `llm` aus `GET /health` (§20.5, §20.6 `GET /ai/status`), Zeitlimit 800 ms. Wirft nie: Antwortet der Worker
+   * nicht (aus, Zeitlimit, Token fehlt), ist er `reachable = false`. Fehlt `llm` (älterer Worker) oder passt es nicht
+   * zum Schema, ist `llm = null`. Der Rest der Antwort (`embedder`) wird hier bewusst nicht geprüft.
+   */
+  async llmStatus(): Promise<{ reachable: boolean; llm: WorkerLlmStatus | null }> {
+    let response: RawResponse;
+    try {
+      response = await this.call('GET', '/health', undefined, LLM_STATUS_TIMEOUT_MS);
+    } catch {
+      return { reachable: false, llm: null };
+    }
+    if (response.status !== 200) return { reachable: false, llm: null };
+    const parsed = WorkerLlmStatusSchema.safeParse((response.body as { llm?: unknown } | null)?.llm);
+    return { reachable: true, llm: parsed.success ? parsed.data : null };
   }
 
   /**

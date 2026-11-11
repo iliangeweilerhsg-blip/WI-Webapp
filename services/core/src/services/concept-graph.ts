@@ -24,11 +24,11 @@ import {
   evidence,
   inboxItem,
   notDeleted,
-  setting,
 } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { CONCEPT_GRAPH_LOCK_KEY } from '../lib/locks.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
+import { getAiSettings } from './settings.ts';
 
 // --- Normieren und Namensgleichheit (§20.3) -------------------------------------------------------------
 
@@ -211,16 +211,9 @@ export async function lockItems(
   return new Map(locked.map((row) => [row.id, row]));
 }
 
-const AUTO_ACCEPT_MODES: readonly AutoAcceptMode[] = ['aus', 'nur_beziehungen', 'alles_ab_0_9'];
-
-/** `ai.auto_accept` direkt aus `setting` (§20.7). Fehlt oder ungültig: `aus` */
+/** `ai.auto_accept` aus dem Bereich `ai` (§20.7, `getAiSettings`). Fehlt oder ungültig: `aus` */
 export async function readAutoAccept(tx: Tx): Promise<AutoAcceptMode> {
-  const [row] = await tx
-    .select({ value: setting.value })
-    .from(setting)
-    .where(and(eq(setting.key, 'ai'), notDeleted(setting)));
-  const value = (row?.value as { auto_accept?: unknown } | null | undefined)?.auto_accept;
-  return AUTO_ACCEPT_MODES.includes(value as AutoAcceptMode) ? (value as AutoAcceptMode) : 'aus';
+  return (await getAiSettings(tx)).auto_accept;
 }
 
 export function emptyDecision(action: InboxDecision['action']): InboxDecision {

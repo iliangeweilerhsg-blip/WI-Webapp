@@ -1,14 +1,16 @@
 // Globale Einstellungen (F-EIN-01, VERTRAEGE §14.1). getSettings aus T1-DB; PATCH baut T1-19.
 //
-// Gespeichert ist je Bereich (`general`, `lecture`, `pen`, `data`) eine Zeile in `setting` mit dem Bereichsobjekt
+// Gespeichert ist je Bereich (`general`, `lecture`, `pen`, `data`, `ai`) eine Zeile in `setting` mit dem Bereichsobjekt
 // OHNE Standardwerte. getSettings füllt fehlende oder ungültige Felder mit den Standards auf.
-import { and, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
   SINGLE_USER_ID,
+  AiSettingsUpdateSchema,
   DataSettingsUpdateSchema,
   GeneralSettingsUpdateSchema,
   LectureSettingsUpdateSchema,
   PenSettingsUpdateSchema,
+  type AiSettings,
   type DataSettings,
   type GeneralSettings,
   type LectureSettings,
@@ -23,15 +25,16 @@ import type { Db, DbOrTx } from '../db/client.ts';
 import { notDeleted, setting } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 
-export const SETTING_KEYS = ['general', 'lecture', 'pen', 'data'] as const;
+export const SETTING_KEYS = ['general', 'lecture', 'pen', 'data', 'ai'] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
-/** Standards aus VERTRAEGE §14.1 (ohne `general.data_dir`, das kommt aus SG_DATA_DIR) */
+/** Standards aus VERTRAEGE §14.1 und §20.7 (ohne `general.data_dir`, das kommt aus SG_DATA_DIR) */
 export const DEFAULT_SETTINGS: {
   general: Omit<GeneralSettings, 'data_dir'>;
   lecture: LectureSettings;
   pen: PenSettings;
   data: DataSettings;
+  ai: AiSettings;
 } = {
   general: { content_lang: 'de', appearance: 'system' },
   lecture: {
@@ -63,6 +66,8 @@ export const DEFAULT_SETTINGS: {
     ],
   },
   data: { backup_target: null, backup_encryption: false, backup_time: '03:00' },
+  // KI (§20.7): Der Worker liest denselben Bereich direkt aus `setting` und nutzt dieselben Standards
+  ai: { monthly_budget_eur: 10, auto_accept: 'aus' },
 };
 
 /**
@@ -81,7 +86,7 @@ function mergeArea<T extends object>(defaults: T, stored: unknown, schema: z.Zod
 }
 
 /**
- * Alle Phase-1-Bereiche mit Standards aufgefüllt (`GET /settings`).
+ * Alle Bereiche (Phase 1 und `ai`, §20.7) mit Standards aufgefüllt (`GET /settings`).
  * `general.data_dir` kommt aus der App-Konfiguration (`SG_DATA_DIR`), nie aus der Datenbank.
  */
 export async function getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): Promise<Settings> {
@@ -98,7 +103,20 @@ export async function getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): 
     lecture: mergeArea(DEFAULT_SETTINGS.lecture, stored.get('lecture'), LectureSettingsUpdateSchema),
     pen: mergeArea(DEFAULT_SETTINGS.pen, stored.get('pen'), PenSettingsUpdateSchema),
     data: mergeArea(DEFAULT_SETTINGS.data, stored.get('data'), DataSettingsUpdateSchema),
+    ai: mergeArea(DEFAULT_SETTINGS.ai, stored.get('ai'), AiSettingsUpdateSchema),
   };
+}
+
+/**
+ * Nur der Bereich `ai` (§20.7), mit Standards aufgefüllt: Monatsbudget und „automatisch annehmen“. Für Kosten und
+ * KI-Status, die den Datenordner nicht brauchen. Fehlende oder ungültige Felder zählen wie im Worker als Standard.
+ */
+export async function getAiSettings(db: DbOrTx): Promise<AiSettings> {
+  const [row] = await db
+    .select({ value: setting.value })
+    .from(setting)
+    .where(and(eq(setting.key, 'ai'), notDeleted(setting)));
+  return mergeArea(DEFAULT_SETTINGS.ai, row?.value, AiSettingsUpdateSchema);
 }
 
 /**

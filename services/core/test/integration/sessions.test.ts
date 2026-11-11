@@ -851,10 +851,17 @@ describe('Core-Takt', () => {
         endedAt: T(50),
         state: 'beendet', // Aufnahme vorhanden → audio.finalize-Job
       });
-      // audio.finalize plus die Kette nach dem Stopp (transcribe, align.log; VERTRAEGE §18.2)
+      // audio.finalize plus die Kette nach dem Stopp (transcribe, align.log, Konzept-Schritte; VERTRAEGE §18.2, §20.2)
       expect(
         (await handle.db.select().from(job).where(eq(job.sessionId, id))).map((j) => j.type).sort(),
-      ).toEqual(['align.log', 'audio.finalize', 'transcribe']);
+      ).toEqual([
+        'align.log',
+        'audio.finalize',
+        'concepts.extract',
+        'concepts.resolve',
+        'summary.write',
+        'transcribe',
+      ]);
     });
 
     it('Core-Start ohne Aktivität: ended_at = started_at; Grenze nicht überschritten: läuft weiter (F-SES-05)', async () => {
@@ -1842,7 +1849,14 @@ describe('Stopp und Aufnahmen', () => {
     expect(await finalizeJobs(rec)).toHaveLength(1);
     expect(
       (await handle.db.select().from(job).where(eq(job.sessionId, id))).map((j) => j.type).sort(),
-    ).toEqual(['align.log', 'audio.finalize', 'transcribe']);
+    ).toEqual([
+      'align.log',
+      'audio.finalize',
+      'concepts.extract',
+      'concepts.resolve',
+      'summary.write',
+      'transcribe',
+    ]);
   });
 
   it('wartender oder laufender Job: Session bleibt beendet', async () => {

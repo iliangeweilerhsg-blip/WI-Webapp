@@ -171,3 +171,62 @@ describe('WorkerClient', () => {
     expect((await client.embed(['x y'])).vectors).toHaveLength(1);
   });
 });
+
+// T2-22a: Feld `llm` aus `GET /health` für `GET /ai/status` (VERTRAEGE §20.5, §20.6)
+describe('WorkerClient.llmStatus', () => {
+  it('liefert llm aus GET /health mit Token, auch neben einem ladenden Embedder', async () => {
+    worker.llm = { provider: 'anthropic', configured: false, issue: 'kein_schluessel' };
+    worker.healthState = 'laedt';
+    expect(await client.llmStatus()).toEqual({
+      reachable: true,
+      llm: { provider: 'anthropic', configured: false, issue: 'kein_schluessel' },
+    });
+    expect(worker.requests[0]).toMatchObject({
+      method: 'GET',
+      path: '/health',
+      host: `127.0.0.1:${worker.port}`,
+      authorization: `Bearer ${worker.token}`,
+    });
+    worker.llm = { provider: 'fake', configured: true, issue: null };
+    expect((await client.llmStatus()).llm).toEqual({ provider: 'fake', configured: true, issue: null });
+  });
+
+  it('älterer Worker ohne llm oder llm außerhalb des Schemas → erreichbar, llm null', async () => {
+    expect(await client.llmStatus()).toEqual({ reachable: true, llm: null });
+    for (const bad of [
+      { provider: 'anthropic', configured: true, issue: 'unbekannt' },
+      { provider: 'anthropic', configured: true, issue: null, api_key: 'platzhalter' },
+      { configured: true },
+      'ja',
+      null,
+    ]) {
+      worker.llm = bad;
+      expect(await client.llmStatus(), JSON.stringify(bad)).toEqual({ reachable: true, llm: null });
+    }
+  });
+
+  it('wirft nie: Worker aus, Token fehlt, 401 oder Zeitlimit (800 ms) → nicht erreichbar', async () => {
+    worker.llm = { provider: 'fake', configured: true, issue: null };
+    worker.healthDelayMs = 3000;
+    const started = Date.now();
+    expect(await client.llmStatus()).toEqual({ reachable: false, llm: null });
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeGreaterThanOrEqual(700);
+    expect(elapsed).toBeLessThan(1500);
+    worker.healthDelayMs = 0;
+
+    worker.mode = 'unauthorized';
+    expect(await client.llmStatus()).toEqual({ reachable: false, llm: null });
+    worker.mode = 'ok';
+    expect((await client.llmStatus()).reachable).toBe(true);
+
+    unlinkSync(join(dataDir, 'run', 'worker.token'));
+    expect(await new WorkerClient({ dataDir, port: worker.port }).llmStatus()).toEqual({
+      reachable: false,
+      llm: null,
+    });
+    worker.writeTokenFile();
+    await worker.stop();
+    expect(await client.llmStatus()).toEqual({ reachable: false, llm: null });
+  });
+});

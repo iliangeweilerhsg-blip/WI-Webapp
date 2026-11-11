@@ -172,8 +172,8 @@
     },
     "Settings": {
       "type": "object",
-      "description": "GET /settings: alle Phase-1-Bereiche, fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.",
-      "required": ["general", "lecture", "pen", "data"],
+      "description": "GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.",
+      "required": ["general", "lecture", "pen", "data", "ai"],
       "additionalProperties": false,
       "properties": {
         "general": {
@@ -187,6 +187,9 @@
         },
         "data": {
           "$ref": "#/$defs/DataSettings"
+        },
+        "ai": {
+          "$ref": "#/$defs/AiSettings"
         }
       }
     },
@@ -315,6 +318,9 @@
         },
         "data": {
           "$ref": "#/$defs/DataSettingsUpdate"
+        },
+        "ai": {
+          "$ref": "#/$defs/AiSettingsUpdate"
         }
       }
     },

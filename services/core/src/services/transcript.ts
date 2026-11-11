@@ -317,7 +317,8 @@ export async function getSessionTranscript(
  * Der Zustand der Session ändert sich nicht, nur `processing`.
  *
  * Fehler (HttpError): 404 `session_not_found`, 409 `session_not_ended` (`details.state`), 409 `session_no_audio`
- * (ab `audio.finalize`/`transcribe` ohne nicht gelöschte Aufnahme mit mindestens einem Chunk).
+ * (nur ab `audio.finalize`/`transcribe` ohne nicht gelöschte Aufnahme mit mindestens einem Chunk; `align.log` und
+ * die Konzept-Schritte aus §20.2 brauchen kein Audio).
  */
 export async function reprocessSession(
   db: Db,
@@ -339,7 +340,8 @@ export async function reprocessSession(
       });
     }
     const fromStep = input.from_step ?? 'transcribe';
-    if (fromStep !== 'align.log' && (await recordingsWithChunks(tx, sessionId)).length === 0) {
+    const needsAudio = fromStep === 'audio.finalize' || fromStep === 'transcribe';
+    if (needsAudio && (await recordingsWithChunks(tx, sessionId)).length === 0) {
       throw new HttpError(409, 'session_no_audio', 'Die Session hat keine Aufnahme mit Audio.');
     }
     const jobs = await ensurePipelineJobs(tx, sessionId, { fromStep, force: input.force ?? false });
