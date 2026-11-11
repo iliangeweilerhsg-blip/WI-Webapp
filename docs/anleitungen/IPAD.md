@@ -78,7 +78,8 @@ Ohne diese Erlaubnis erreicht die App den Mac nicht. Nachträglich ändern: **Ei
 ## 8. Koppeln
 
 1. **Am Mac:** Studien-Gehirn starten. In der Web-App **Einstellungen → Geräte** öffnen und die Kopplung starten. Der Mac zeigt einen QR-Code, einen Code mit sechs Ziffern und seine Adresse. Das Fenster gilt 5 Minuten.
-2. **Am iPad**, empfohlener Weg: **QR-Code scannen** antippen, die Kamera erlauben und den QR-Code am Mac scannen. Fertig.
+2. **Am iPad**, empfohlener Weg: **QR-Code scannen** antippen, die Kamera erlauben und den QR-Code am Mac scannen. Das iPad zeigt danach die Adresse aus dem QR-Code. Vergleiche sie mit der Adresse, die der Mac anzeigt. Stimmen beide überein, tippe **Koppeln** an.
+   - Steht dort die Warnung **„Diese Adresse liegt nicht in deinem Heimnetz“**, führt die Adresse nicht in ein privates WLAN. Das ist in manchen Uni-WLANs normal, kann aber auch ein fremder QR-Code sein. Kopple nur, wenn der Mac genau diese Adresse anzeigt. Im Zweifel tippe **Abbrechen** an.
 3. **Ohne Kamera:** Tippe unter „Im WLAN gefunden“ deinen Mac an. Oder gib unter „Adresse von Hand“ die Adresse ein, die der Mac anzeigt. Tippe dann die sechs Ziffern ein und wähle **Koppeln**.
 4. Die Web-App meldet das neue Gerät. Oben rechts in der iPad-App steht **Mac ●** mit grünem Punkt.
 
