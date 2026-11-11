@@ -25,6 +25,7 @@ import {
   removeStalePartialsReport,
   removeStandReport,
   selectRetention,
+  STAND_RE,
   standName,
   type CopyStats,
   type Manifest,
@@ -394,7 +395,16 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     out.mkdir(partial);
 
     try {
-      const previous = listStands(target)[0] ?? null;
+      // Voriger Stand für Hardlinks: nur ein eigener (H-1, #161). Ein erfundener Stand im Ziel darf nie die Quelle
+      // sein, sonst verlinkt der neue Stand Dateien, die einem Dritten gehören.
+      let previous: string | null = null;
+      try {
+        previous = ownStandsIn(target, await readOwnedStands(pg, targetSetting))[0] ?? null;
+      } catch (error) {
+        err(
+          `Die eigenen Stände ließen sich nicht aus backup_run lesen (${errorText(error, cfg)}). Es wird ohne Hardlinks vollständig kopiert.`,
+        );
+      }
       log(`Backup ${stand} nach ${target} (${options.trigger}) …`);
 
       log('Sichere die Datenbank (pg_dump) …');
@@ -471,9 +481,11 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     }
 
     // Ausdünnen erst nach einem erfolgreichen Lauf, Fehler dabei machen das Backup nicht ungültig
+    // Gezählt und gelöscht werden nur eigene Stände laut `backup_run` (H-1, #161), der neue Stand nie
     let thinned: ThinResult | null = null;
     try {
-      thinned = thin(targetDir, now().getTime(), log, deps.targetHooks);
+      const owned = await readOwnedStands(pg, targetSetting);
+      thinned = thin(targetDir, { owned, current: stand }, now().getTime(), log, deps.targetHooks);
     } catch (error) {
       err(`Ausdünnen alter Stände fehlgeschlagen: ${errorText(error, cfg)}`);
     }
@@ -511,6 +523,59 @@ async function dumpPrivately(
   }
 }
 
+/** Ein eigener Stand laut `backup_run` (H-1, #161) */
+export interface OwnedStand {
+  trigger: string;
+  /** `backup_run.dump_sha256`, `null` bei Läufen vor Migration 0004 */
+  sha256: string | null;
+}
+
+/** Eigene Stände eines Ziels: Standname → Lauf */
+export type OwnedStands = ReadonlyMap<string, OwnedStand>;
+
+/**
+ * Stände, die nachweislich von uns stammen (H-1, #161): Läufe in `backup_run` mit `state = fertig`, genau diesem Ziel
+ * (`target` wie in der Einstellung) und `stand`. Die Datenbank ist die Vertrauensquelle (VERTRAEGE §13), das Ziel
+ * nicht: Wer dort nur Ordner anlegen kann, soll mit erfundenen Ständen weder die Aufbewahrung belegen noch den
+ * „vorigen Stand“ für Hardlinks stellen können.
+ */
+export async function readOwnedStands(pg: PgAccess, targetSetting: string): Promise<OwnedStands> {
+  const rows = await pg.query(
+    `SELECT stand, trigger, coalesce(dump_sha256, '') FROM backup_run
+      WHERE state = 'fertig' AND deleted_at IS NULL AND stand IS NOT NULL AND target = :'target'`,
+    { target: targetSetting },
+  );
+  const owned = new Map<string, OwnedStand>();
+  for (const [stand, trigger, sha] of rows) {
+    if (!stand || !STAND_RE.test(stand)) continue;
+    owned.set(stand, { trigger: trigger ?? '', sha256: sha ? sha : null });
+  }
+  return owned;
+}
+
+/**
+ * Eigene Stände im Ziel, neueste zuerst: Ordner mit gültigem Manifest (`listStands`), zu dem es einen eigenen Lauf
+ * gibt. Das Manifest muss diesen Stand nennen und, wenn der Lauf eine Prüfsumme hat, genau diese tragen. Ein
+ * ausgetauschter oder umbenannter Ordner unter einem eigenen Namen zählt so nicht als eigener Stand.
+ */
+export function ownStandsIn(base: string, owned: OwnedStands, stands = listStands(base)): string[] {
+  return stands.filter((stand) => {
+    const run = owned.get(stand);
+    if (!run) return false;
+    const manifest = readManifest(join(base, stand));
+    if (!manifest || manifest.stand !== stand) return false;
+    return run.sha256 === null || manifest.dump.sha256 === run.sha256;
+  });
+}
+
+/** Was beim Ausdünnen als eigen gilt (H-1, #161) */
+export interface ThinOwnership {
+  /** Eigene Stände laut `backup_run` (`readOwnedStands`) */
+  owned: OwnedStands;
+  /** Der Stand des laufenden Backups: wird nie gelöscht */
+  current?: string;
+}
+
 /** So viele Stände vor Migrationen bleiben unabhängig von der Ausdünnung erhalten */
 export const KEEP_PRE_MIGRATION = 3;
 
@@ -531,11 +596,14 @@ export interface ThinResult {
 /**
  * Alte Stände nach 14/8/6 entfernen und alte `.partial`-Ordner (älter als 1 Tag) aufräumen.
  * Die letzten 3 Stände mit `trigger = vor_migration` bleiben zusätzlich immer erhalten.
+ * Gezählt und gelöscht werden nur eigene Stände (`own`, H-1 aus #161): Ordner ohne eigenen Lauf in `backup_run`
+ * bleiben unangetastet und belegen keinen Platz in der Aufbewahrung. `own.current` wird nie gelöscht.
  * Das Ziel wird mit der Identität aus `validateTarget` verankert (H2). Rückgabe: entfernte Stände und Reste, die
  * stehen blieben, mit ihrer tatsächlichen Ursache (H3).
  */
 export function thin(
   target: TargetDir,
+  own: ThinOwnership,
   nowMs: number,
   log: (message: string) => void = () => {},
   hooks?: NoFollowHooks,
@@ -548,12 +616,22 @@ export function thin(
     result.left.push({ name, reason, cause: rootCause(left)?.cause ?? 'unbekannt' });
     log(`Alten halbfertigen Lauf ${name} nicht vollständig entfernt: ${reason}. Der Rest bleibt stehen.`);
   }
-  const stands = listStands(base); // neueste zuerst
+  for (const name of partials.kept) {
+    log(
+      `Halbfertiger Lauf ${name} enthält ein Manifest (etwa ein umbenannter Stand) und wird nicht gelöscht. Prüfe das Backup-Ziel.`,
+    );
+  }
+  const all = listStands(base); // neueste zuerst
+  const stands = ownStandsIn(base, own.owned, all);
+  if (all.length > stands.length) {
+    log(
+      `${all.length - stands.length} Ordner im Ziel sehen wie Stände aus, gehören aber zu keinem eigenen Backup-Lauf. Sie zählen nicht zur Aufbewahrung und werden nicht gelöscht.`,
+    );
+  }
   const protectedStands = new Set(
-    stands
-      .filter((s) => readManifest(join(base, s))?.trigger === 'vor_migration')
-      .slice(0, KEEP_PRE_MIGRATION),
+    stands.filter((s) => own.owned.get(s)?.trigger === 'vor_migration').slice(0, KEEP_PRE_MIGRATION),
   );
+  if (own.current) protectedStands.add(own.current);
   const { remove } = selectRetention(stands);
   for (const stand of remove) {
     if (protectedStands.has(stand)) continue;

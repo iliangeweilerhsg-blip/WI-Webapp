@@ -1,5 +1,5 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
-import { closeSync, existsSync, readdirSync, type Stats } from 'node:fs';
+import { closeSync, existsSync, lstatSync, readdirSync, type Stats } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import {
   NoFollowReader,
@@ -439,8 +439,23 @@ export function removeStand(
 /** Ergebnis von `removeStalePartialsReport` */
 export interface PartialsReport {
   removed: string[];
+  /**
+   * Nicht angefasst, weil darin ein `manifest.json` liegt (H-1, #161): Ein abgebrochener Lauf hat fast nie eines,
+   * ein in `.<stand>.partial` umbenannter fertiger Stand dagegen schon. So bringt ein Umbenennen im Ziel `sg backup`
+   * nicht dazu, einen echten Stand zu löschen.
+   */
+  kept: string[];
   /** Nicht vollständig entfernte `.partial`-Ordner mit dem, was darin stehen blieb */
   left: { name: string; left: LeftBehind[] }[];
+}
+
+/** Liegt in `dir` ein Eintrag `manifest.json`? (ohne Symlink-Folgen; im Zweifel ja, dann wird nichts gelöscht) */
+function holdsManifest(dir: string): boolean {
+  try {
+    return lstatSync(join(dir, MANIFEST_FILE), { throwIfNoEntry: false }) !== undefined;
+  } catch {
+    return true;
+  }
 }
 
 /** Halbfertige Läufe (`.<stand>.partial`) löschen, die älter als `olderThanMs` sind (verankert wie `removeStand`) */
@@ -450,7 +465,7 @@ export function removeStalePartialsReport(
   olderThanMs: number,
   hooks?: NoFollowHooks,
 ): PartialsReport {
-  const report: PartialsReport = { removed: [], left: [] };
+  const report: PartialsReport = { removed: [], kept: [], left: [] };
   const remover = new NoFollowRemover(hooks);
   const base = typeof target === 'string' ? target : target.path;
   if (!existsSync(base)) return report;
@@ -459,6 +474,10 @@ export function removeStalePartialsReport(
     const match = /^\.([0-9]{8}T[0-9]{6}Z)\.partial$/.exec(entry.name);
     if (!entry.isDirectory() || !match) continue;
     if (now - standDate(match[1] as string).getTime() < olderThanMs) continue;
+    if (holdsManifest(join(base, entry.name))) {
+      report.kept.push(entry.name);
+      continue;
+    }
     const left = remover.removeTree(base, entry.name);
     if (left.length === 0) report.removed.push(entry.name);
     else report.left.push({ name: entry.name, left });

@@ -78,11 +78,14 @@ export function listStandsText(target: string): string[] {
  * der Vertrauensquelle) muss auch das Manifest genau diese Prüfsumme tragen: Ein Stand mit erfundenem Manifest samt
  * passendem Dump wird so abgelehnt. Die Prüfsumme des Dumps selbst wird erst beim Einspielen gebildet
  * (`withVerifiedDump`): Prüfen und Einspielen betreffen so dieselben Bytes (kein Austausch dazwischen, TOCTOU).
+ * Mit `maxDumpBytes` (aus `backup_run.size_bytes`, M-1 aus #114) darf das Manifest keinen größeren Dump nennen: Die
+ * Größe im Manifest begrenzt die Prüfkopie, darf aber selbst nicht beliebig groß gefälscht sein.
  */
 export async function loadStand(
   target: string,
   stand: string,
   expectedSha?: string,
+  maxDumpBytes?: number,
 ): Promise<{ dir: string; manifest: Manifest }> {
   if (!STAND_RE.test(stand)) throw new Error(`„${stand}“ ist kein Stand (erwartet z. B. 20261104T030012Z).`);
   const dir = join(target, stand);
@@ -96,9 +99,41 @@ export async function loadStand(
       `Das Manifest des Standes ${stand} passt nicht zum protokollierten Backup-Lauf. Der Stand wird nicht eingespielt.`,
     );
   }
+  if (maxDumpBytes !== undefined && !(manifest.dump.bytes <= maxDumpBytes)) {
+    throw new StandError(
+      'nicht_authentisch',
+      `Das Manifest des Standes ${stand} nennt einen größeren Dump, als der protokollierte Backup-Lauf war. Der Stand wird nicht eingespielt.`,
+    );
+  }
   if (!existsSync(join(dir, DUMP_FILE)))
     throw new StandError('beschaedigt', `Im Stand ${stand} fehlt ${DUMP_FILE}.`);
   return { dir, manifest };
+}
+
+/** Prüfsumme und Größe eines eigenen Laufs (`backup_run`) zu einem Stand */
+export interface RunAnchor {
+  sha256: string;
+  /** `backup_run.size_bytes` (Dump plus Dateien), `undefined` = unbekannt */
+  sizeBytes: number | undefined;
+}
+
+/**
+ * Eigener, fertiger Lauf zu `stand` mit Prüfsumme (Härtung aus #114): Gibt es ihn, verlangt auch der Restore von Hand
+ * (`--test <stand>`, `<stand>`) genau diese Prüfsumme. Ein im Ziel ausgetauschter eigener Stand führt so kein fremdes
+ * SQL aus. Gesucht wird nur nach dem Standnamen (er ist der Startzeitpunkt des Laufs), unabhängig vom Ziel, damit
+ * das auch mit `--ziel` gilt. `null`: kein solcher Lauf oder die Datenbank ist nicht erreichbar.
+ */
+export async function runAnchor(pg: PgAccess, stand: string): Promise<RunAnchor | null> {
+  if (!STAND_RE.test(stand)) return null;
+  const [row] = await pg.query(
+    `SELECT dump_sha256, coalesce(size_bytes::text, '') FROM backup_run
+      WHERE state = 'fertig' AND deleted_at IS NULL AND dump_sha256 <> '' AND stand = :'stand'
+      ORDER BY started_at DESC, id DESC LIMIT 1`,
+    { stand },
+  );
+  if (!row?.[0]) return null;
+  const size = row[1] ? Number(row[1]) : NaN;
+  return { sha256: row[0], sizeBytes: Number.isSafeInteger(size) ? size : undefined };
 }
 
 /** Dump des Standes in den privaten Ordner kopieren, dabei prüfen, dann mit genau dieser Kopie weitermachen */
@@ -108,7 +143,13 @@ export function withStandDump<T>(
   manifest: Manifest,
   fn: (verifiedCopy: string) => Promise<T>,
 ): Promise<T> {
-  return withVerifiedDump(deps.cfg.dataDir, join(dir, DUMP_FILE), manifest.dump.sha256, manifest.stand, fn);
+  return withVerifiedDump(
+    deps.cfg.dataDir,
+    join(dir, DUMP_FILE),
+    { sha256: manifest.dump.sha256, bytes: manifest.dump.bytes },
+    manifest.stand,
+    fn,
+  );
 }
 
 /** Ein Verstoß beim Lesen des Standes (Symlink, Sonderdatei, Tausch) ist ein beschädigter Stand */
@@ -195,7 +236,19 @@ export async function runRestore(deps: RestoreDeps, options: RestoreOptions): Pr
       return 0;
     }
 
-    const { dir, manifest } = await loadStand(target, options.stand);
+    // Gehört der Stand zu einem eigenen Lauf, gilt dessen Prüfsumme (und Größe) auch hier. Ohne Datenbank (etwa
+    // beim Restore nach einem Datenbankschaden) bleibt es bei der Prüfung gegen das Manifest.
+    let anchor: RunAnchor | null = null;
+    try {
+      anchor = await runAnchor(pg, options.stand);
+    } catch (error) {
+      log(
+        `Hinweis: backup_run ist nicht lesbar (${errorText(error, cfg)}). Der Stand wird nur gegen sein Manifest geprüft.`,
+      );
+    }
+    const { dir, manifest } = await loadStand(target, options.stand, anchor?.sha256, anchor?.sizeBytes);
+    if (anchor)
+      log(`Stand ${options.stand} gehört zu einem eigenen Backup-Lauf, seine Prüfsumme wird verlangt.`);
     return options.test
       ? await testRestore(deps, dir, manifest)
       : await fullRestore(deps, options, dir, manifest);

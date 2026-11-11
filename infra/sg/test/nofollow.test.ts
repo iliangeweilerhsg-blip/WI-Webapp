@@ -264,7 +264,7 @@ describe('Lesen aus dem Ziel: FIFO, Gerät, Symlink', () => {
     const err = await withVerifiedDump(
       dataDir,
       join(stand, 'db.dump'),
-      'a'.repeat(64),
+      { sha256: 'a'.repeat(64), bytes: 10 },
       'S',
       async () => 1,
     ).catch((e: unknown) => e);

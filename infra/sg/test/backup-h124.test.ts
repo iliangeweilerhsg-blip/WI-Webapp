@@ -25,7 +25,7 @@ import {
   removeStalePartialsReport,
   removeStandReport,
 } from '../src/backup-files.ts';
-import { leftoverWarning, thin, validateTarget, type Leftover } from '../src/backup.ts';
+import { leftoverWarning, thin, validateTarget, type Leftover, type OwnedStands } from '../src/backup.ts';
 import {
   LINK_STAGING_DIR,
   NoFollowReader,
@@ -270,7 +270,12 @@ describe('H2: Ausdünnen verankert das Ziel mit der Identität aus validateTarge
     swapForLink(checked.path, fremd);
 
     const logs: string[] = [];
-    const result = thin(checked, Date.parse('2026-11-05T00:00:00Z'), (m) => logs.push(m));
+    const result = thin(
+      checked,
+      owned('20261001T030000Z', '20261001T040000Z'),
+      Date.parse('2026-11-05T00:00:00Z'),
+      (m) => logs.push(m),
+    );
     expect(result.removed).toEqual([]);
     expect(readdirSync(fremd).sort()).toEqual([
       '.20261001T030000Z.partial',
@@ -309,11 +314,20 @@ describe('H2: Ausdünnen verankert das Ziel mit der Identität aus validateTarge
     const checked = validateTarget(target, tmp());
     stand(target, '20261001T030000Z');
     stand(target, '20261001T040000Z');
-    const result = thin(checked, Date.parse('2026-11-05T00:00:00Z'));
+    const result = thin(
+      checked,
+      owned('20261001T030000Z', '20261001T040000Z'),
+      Date.parse('2026-11-05T00:00:00Z'),
+    );
     expect(result).toEqual({ removed: ['20261001T030000Z'], left: [] });
     expect(readdirSync(target)).toEqual(['20261001T040000Z']);
   });
 });
+
+/** Diese Stände gelten als eigene Läufe (`backup_run`, H-1 aus #161); die Testmanifeste tragen die Prüfsumme `a` */
+function owned(...stands: string[]): { owned: OwnedStands } {
+  return { owned: new Map(stands.map((s) => [s, { trigger: 'zeitplan', sha256: 'a' }])) };
+}
 
 /** Fehler wie vom Kernel (`code`) */
 function sysError(code: string): NodeJS.ErrnoException {
@@ -392,7 +406,8 @@ describe('H3: Ursache, wenn ein Stand nicht entfernt werden kann', () => {
     const dir = stand(target, '20261001T030000Z');
     stand(target, '20261001T040000Z');
     const logs: string[] = [];
-    const result = thin(checked, Date.parse('2026-11-05T00:00:00Z'), (m) => logs.push(m), {
+    const own = owned('20261001T030000Z', '20261001T040000Z');
+    const result = thin(checked, own, Date.parse('2026-11-05T00:00:00Z'), (m) => logs.push(m), {
       step: (op, phase, d) => {
         if (op === 'unlink' && phase === 'before' && d === dir) throw sysError('EACCES');
       },

@@ -10,6 +10,8 @@ import {
   rmSync,
   symlinkSync,
   realpathSync,
+  truncateSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -24,7 +26,14 @@ import {
   parseRestoreArgs,
   preMigrationBackup,
 } from '../src/backup-commands.ts';
-import { errorText, runBackup, validateTarget, type BackupDeps } from '../src/backup.ts';
+import {
+  errorText,
+  runBackup,
+  thin,
+  validateTarget,
+  type BackupDeps,
+  type OwnedStands,
+} from '../src/backup.ts';
 import {
   createPg,
   openPg,
@@ -36,6 +45,13 @@ import {
 } from '../src/pg.ts';
 import { recoverRestore, runRestore, type RestoreDeps } from '../src/restore.ts';
 import { runAutoRestoreTest } from '../src/restore-auto.ts';
+import {
+  copyAndHash,
+  FREE_RESERVE_BYTES,
+  freeBytes,
+  SIZE_MISMATCH,
+  withVerifiedDump,
+} from '../src/staging.ts';
 
 const dirs: string[] = [];
 function tmp(): string {
@@ -95,6 +111,19 @@ class FakePg implements PgAccess {
   async query(sql: string, vars: Record<string, string> = {}, db?: string): Promise<string[][]> {
     this.queries.push({ sql, vars, db });
     if (sql.includes('Abgebrochen: kein Abschluss')) return [];
+    if (sql.includes("AND stand = :'stand'")) {
+      // Eigener Lauf zum Stand (restore von Hand, Härtung aus #114)
+      const run = [...this.runs.values()]
+        .filter((r) => r.state === 'fertig' && r.stand === vars.stand && r.sha)
+        .reverse()[0];
+      return run ? [[run.sha as string, run.size ?? '']] : [];
+    }
+    if (sql.includes("SELECT stand, trigger, coalesce(dump_sha256, '')")) {
+      // Eigene Stände (H-1, #161)
+      return [...this.runs.values()]
+        .filter((r) => r.state === 'fertig' && r.stand && r.target === vars.target)
+        .map((r) => [r.stand as string, r.trigger, r.sha ?? '']);
+    }
     if (sql.includes("NULLIF(:'id'")) {
       return Array.from({ length: this.otherActive }, (_, i) => [
         `019a4e14-0000-7000-8000-0000000000${String(i).padStart(2, '0')}`,
@@ -146,7 +175,7 @@ class FakePg implements PgAccess {
       return [...this.runs.values()]
         .filter((r) => r.state === 'fertig' && r.stand && r.sha && r.target === vars.target)
         .reverse()
-        .map((r) => [r.stand as string, r.sha as string]);
+        .map((r) => [r.stand as string, r.sha as string, r.size ?? '']);
     }
     if (sql.includes("INSERT INTO setting (key, value, user_id) VALUES ('restore_test'")) {
       this.testResult = JSON.parse(vars.value as string) as Record<string, unknown>;
@@ -223,13 +252,18 @@ function setup(over: Partial<FakePg> = {}) {
   const pg = Object.assign(new FakePg(), { target }, over);
   const logs: string[] = [];
   const errs: string[] = [];
+  let ids = 0;
   const deps: BackupDeps = {
     cfg: { dataDir, databaseUrl: 'postgres://sg:geheim-pw@127.0.0.1:5432/sg' },
     pg,
     log: (m) => logs.push(m),
     err: (m) => errs.push(m),
     now: () => new Date('2026-11-04T03:00:12Z'),
-    newId: () => '019a4e14-0000-7000-8000-0000000000aa',
+    // Erster Lauf `…aa`, jeder weitere eine eigene ID (eigene Stände zählen nach `backup_run`, H-1 aus #161)
+    newId: () =>
+      ids++ === 0
+        ? '019a4e14-0000-7000-8000-0000000000aa'
+        : `019a4e14-0000-7000-8000-1${String(ids).padStart(11, '0')}`,
   };
   return { dataDir, target, pg, deps, logs, errs };
 }
@@ -1506,8 +1540,19 @@ describe('H2 (#124): Schreiber und Leser verankern das Ziel mit der Identität a
 });
 
 describe('H3 (#124): Warnung, wenn ein alter Stand über mehrere Läufe stehen bleibt', () => {
-  /** Alter Stand mit Manifest im Ziel */
-  function oldStand(target: string, name: string): string {
+  /** Alter, eigener Stand mit Manifest im Ziel (samt Lauf in `backup_run`, H-1 aus #161) */
+  function oldStand(pg: FakePg, target: string, name: string): string {
+    const id = `019a4e14-0000-7000-8000-2${name.slice(4, 8)}${name.slice(9, 15)}0`;
+    pg.runs.set(id, {
+      id,
+      state: 'fertig',
+      error: null,
+      stand: name,
+      size: '4',
+      sha: 'a',
+      trigger: 'zeitplan',
+      target,
+    });
     const dir = join(target, name);
     mkdirSync(join(dir, 'media'), { recursive: true });
     writeFileSync(
@@ -1521,8 +1566,8 @@ describe('H3 (#124): Warnung, wenn ein alter Stand über mehrere Läufe stehen b
   it('erster Lauf: nur Log mit Ursache; zweiter Lauf: Warnung am Lauf; danach entfernt: keine Warnung', async () => {
     const { target, pg, deps, logs, errs } = setup();
     // Zwei Stände am selben Tag: das Ausdünnen entfernt den älteren. Er lässt sich nicht löschen (z. B. immutable).
-    const stuck = oldStand(target, '20261001T030000Z');
-    oldStand(target, '20261001T040000Z');
+    const stuck = oldStand(pg, target, '20261001T030000Z');
+    oldStand(pg, target, '20261001T040000Z');
     let locked = true;
     deps.targetHooks = {
       step: (op, phase, d) => {
@@ -1574,5 +1619,283 @@ describe('H3 (#124): Warnung, wenn ein alter Stand über mehrere Läufe stehen b
     expect(await runBackup(deps, { trigger: 'vor_migration' })).toBe(0);
     expect(pg.queries.some((q) => q.sql.includes('SET thin_left'))).toBe(false);
     expect(errs).toEqual([]);
+  });
+});
+
+describe('H-1 (#161): erfundene Stände im Ziel zählen nicht und werden nie gelöscht', () => {
+  /** Ein Ordner, der wie ein Stand aussieht (nur ein Manifest), von jemandem, der im Ziel nur Ordner anlegen kann */
+  function fakeStand(target: string, name: string): string {
+    const dir = join(target, name);
+    mkdirSync(dir);
+    writeFileSync(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ version: 1, stand: name, dump: { sha256: 'x' } }),
+    );
+    return dir;
+  }
+  /** 28 Standnamen in 28 verschiedenen Monaten ab 2030: belegen alle Stufen der Aufbewahrung (14 + 8 + 6) */
+  const futureNames = (): string[] =>
+    Array.from({ length: 28 }, (_, i) => standName(new Date(Date.UTC(2030, i, 1, 0, 0, 0))));
+  /** Stand mit Manifest (Prüfsumme `sha`) und Dump, wie ihn ein eigener Lauf hinterlässt */
+  function realStand(target: string, name: string, sha = 'a'): string {
+    const dir = join(target, name);
+    mkdirSync(join(dir, 'media'), { recursive: true });
+    writeFileSync(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ version: 1, stand: name, dump: { sha256: sha } }),
+    );
+    writeFileSync(join(dir, 'db.dump'), 'DUMP');
+    return dir;
+  }
+  const own = (entries: [string, string][]): OwnedStands =>
+    new Map(entries.map(([stand, sha]) => [stand, { trigger: 'zeitplan', sha256: sha }]));
+  function checkedTarget() {
+    const target = join(tmp(), 'ziel');
+    mkdirSync(target);
+    return { target, checked: validateTarget(target, tmp()) };
+  }
+
+  it('28 erfundene Stände in der Zukunft: alle echten Stände bleiben, auch der neue; die erfundenen bleiben liegen', async () => {
+    const { target, deps, logs } = setup();
+    const real: string[] = [];
+    for (let day = 0; day < 5; day += 1) {
+      const date = new Date(Date.UTC(2026, 10, 1 + day, 3));
+      expect(await runBackup({ ...deps, now: () => date }, { trigger: 'zeitplan' })).toBe(0);
+      real.push(standName(date));
+    }
+    const fakes = futureNames();
+    for (const name of fakes) fakeStand(target, name);
+    const date = new Date(Date.UTC(2026, 10, 6, 3));
+    expect(await runBackup({ ...deps, now: () => date }, { trigger: 'zeitplan' })).toBe(0);
+    real.push(standName(date));
+    for (const stand of real) expect(readManifest(join(target, stand)), stand).not.toBeNull();
+    for (const stand of fakes) expect(existsSync(join(target, stand, 'manifest.json')), stand).toBe(true);
+    expect(logs.join('\n')).toMatch(/28 Ordner im Ziel sehen wie Stände aus, gehören aber zu keinem eigenen/);
+  });
+
+  it('erfundener Stand am selben Tag (T235959Z) verdrängt den echten Stand dieses Tages nicht', () => {
+    const { target, checked } = checkedTarget();
+    realStand(target, '20261001T030000Z');
+    fakeStand(target, '20261001T235959Z');
+    const result = thin(
+      checked,
+      { owned: own([['20261001T030000Z', 'a']]) },
+      Date.parse('2026-11-05T00:00:00Z'),
+    );
+    expect(result.removed).toEqual([]);
+    expect(readdirSync(target).sort()).toEqual(['20261001T030000Z', '20261001T235959Z']);
+  });
+
+  it('der Stand des laufenden Backups wird nie gelöscht, auch wenn eigene Stände in der Zukunft liegen', () => {
+    const { target, checked } = checkedTarget();
+    const future = futureNames();
+    for (const stand of future) realStand(target, stand);
+    const current = '20261104T030012Z';
+    realStand(target, current);
+    const owned = own([...future, current].map((s): [string, string] => [s, 'a']));
+    thin(checked, { owned, current }, Date.parse('2026-11-04T03:01:00Z'));
+    expect(readManifest(join(target, current))).not.toBeNull();
+  });
+
+  it('eigener Name, aber Manifest mit fremder Prüfsumme: zählt nicht und wird nicht gelöscht', () => {
+    const { target, checked } = checkedTarget();
+    realStand(target, '20261001T030000Z', 'fremd');
+    realStand(target, '20261001T040000Z', 'b');
+    const owned = own([
+      ['20261001T030000Z', 'a'],
+      ['20261001T040000Z', 'b'],
+    ]);
+    const result = thin(checked, { owned }, Date.parse('2026-11-05T00:00:00Z'));
+    expect(result.removed).toEqual([]);
+    expect(readdirSync(target).sort()).toEqual(['20261001T030000Z', '20261001T040000Z']);
+  });
+
+  it('erfundener neuerer Stand wird nicht zum vorigen Stand: keine Hardlinks auf fremde Dateien', async () => {
+    const { dataDir, target, deps } = setup();
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z
+    const ownFile = join(target, '20261104T030012Z', 'media', 'photos', 'a.jpg');
+    // Neuer als der echte Stand, mit einer Datei gleicher Größe und Zeit wie im Datenordner
+    const fake = fakeStand(target, '20261104T120000Z');
+    mkdirSync(join(fake, 'media', 'photos'), { recursive: true });
+    const evil = join(fake, 'media', 'photos', 'a.jpg');
+    writeFileSync(evil, 'BOES');
+    const source = statSync(join(dataDir, 'media', 'photos', 'a.jpg'));
+    utimesSync(evil, source.atime, source.mtime);
+
+    const next = { ...deps, now: () => new Date('2026-11-05T03:00:00Z') };
+    expect(await runBackup(next, { trigger: 'zeitplan' })).toBe(0);
+    const copied = join(target, '20261105T030000Z', 'media', 'photos', 'a.jpg');
+    expect(lstatSync(copied).ino).not.toBe(lstatSync(evil).ino);
+    expect(lstatSync(copied).ino).toBe(lstatSync(ownFile).ino); // verlinkt auf den eigenen Stand
+    expect(readFileSync(copied, 'utf8')).toBe('JPEG');
+  });
+
+  it('ein in .<stand>.partial umbenannter echter Stand wird beim Aufräumen nicht gelöscht', async () => {
+    const { target, deps, logs } = setup();
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+    const renamed = join(target, '.20261001T030000Z.partial');
+    renameSync(join(target, '20261104T030012Z'), renamed);
+    const next = { ...deps, now: () => new Date('2026-11-05T03:00:00Z') };
+    expect(await runBackup(next, { trigger: 'zeitplan' })).toBe(0);
+    expect(readManifest(renamed)).not.toBeNull();
+    expect(readFileSync(join(renamed, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+    expect(logs.join('\n')).toMatch(/\.20261001T030000Z\.partial enthält ein Manifest/);
+  });
+
+  it('backup_run nicht lesbar: nicht ausgedünnt und ohne Hardlinks kopiert (fail-closed), Lauf trotzdem fertig', async () => {
+    const { target, pg, deps, errs } = setup();
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z
+    const query = pg.query.bind(pg);
+    pg.query = async (sql, vars, db) => {
+      if (sql.includes('SELECT stand, trigger')) throw new Error('Datenbank weg');
+      return query(sql, vars, db);
+    };
+    // Gleicher Tag: ohne den Fehler würde der ältere Stand ausgedünnt und die Datei verlinkt
+    const next = { ...deps, now: () => new Date('2026-11-04T05:00:00Z') };
+    expect(await runBackup(next, { trigger: 'zeitplan' })).toBe(0);
+    expect(readdirSync(target).sort()).toEqual(['20261104T030012Z', '20261104T050000Z']);
+    expect(lstatSync(join(target, '20261104T050000Z', 'media', 'photos', 'a.jpg')).ino).not.toBe(
+      lstatSync(join(target, '20261104T030012Z', 'media', 'photos', 'a.jpg')).ino,
+    );
+    expect(errs.join('\n')).toMatch(/ohne Hardlinks/);
+    expect(errs.join('\n')).toMatch(/Ausdünnen alter Stände fehlgeschlagen/);
+  });
+});
+
+describe('M-1 (#114): Größengrenze für die Prüfkopie des Dumps', () => {
+  const STAND = '20261104T030012Z';
+  /** Ersetzt `db.dump` durch eine sparse Datei mit `bytes` Bytes (belegt auf der Platte fast nichts) */
+  function sparseDump(dir: string, bytes: number): void {
+    const dump = join(dir, 'db.dump');
+    rmSync(dump);
+    writeFileSync(dump, '');
+    truncateSync(dump, bytes);
+  }
+  function setManifestBytes(dir: string, bytes: number): void {
+    const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as {
+      dump: { bytes: number };
+    };
+    manifest.dump.bytes = bytes;
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
+  }
+  const restoreLeftovers = (dataDir: string): string[] =>
+    existsSync(join(dataDir, 'tmp'))
+      ? readdirSync(join(dataDir, 'tmp')).filter((n) => n.startsWith('restore-'))
+      : [];
+
+  it('copyAndHash: falsche Größe → Abbruch vor dem Anlegen der Kopie', async () => {
+    const base = tmp();
+    const src = join(base, 'riesig');
+    writeFileSync(src, '');
+    truncateSync(src, 2 * 1024 ** 3);
+    await expect(copyAndHash(src, join(base, 'kopie'), undefined, 4)).rejects.toMatchObject({
+      code: SIZE_MISMATCH,
+    });
+    expect(existsSync(join(base, 'kopie'))).toBe(false);
+  });
+
+  it('restore --test: übergroßer sparse Dump (Manifest unverändert) wird nicht kopiert', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    sparseDump(join(s.target, STAND), 64 * 1024 * 1024);
+    expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.errs.join('\n')).toMatch(/nicht die Größe aus dem Manifest/);
+    expect(restoreLeftovers(s.dataDir)).toEqual([]);
+  });
+
+  it('automatischer Test: übergroßer Dump samt gefälschter Größe im Manifest → nicht_authentisch (Grenze aus backup_run)', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    const dir = join(s.target, STAND);
+    sparseDump(dir, 2 * 1024 ** 4);
+    setManifestBytes(dir, 2 * 1024 ** 4);
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.pg.testResult).toMatchObject({ state: 'fehler', reason: 'nicht_authentisch', stand: STAND });
+    expect(restoreLeftovers(s.dataDir)).toEqual([]);
+  });
+
+  it('Prüfkopie passt nicht mit Reserve auf die Platte → klare Meldung, nichts kopiert, fn nie aufgerufen', async () => {
+    // Freier Platz wird vorgegeben: ein echter übergroßer Dump würde ohne die Prüfung die Platte des Testrechners füllen
+    const dataDir = tmp();
+    const src = join(tmp(), 'db.dump');
+    writeFileSync(src, 'PGDMP-test');
+    const sha256 = createHash('sha256').update('PGDMP-test').digest('hex');
+    const called: string[] = [];
+    const run = withVerifiedDump(
+      dataDir,
+      src,
+      { sha256, bytes: 10 },
+      STAND,
+      async (copy) => void called.push(copy),
+      () => FREE_RESERVE_BYTES + 5,
+    );
+    await expect(run).rejects.toThrow(/zu wenig Platz frei/);
+    expect(called).toEqual([]);
+    expect(restoreLeftovers(dataDir)).toEqual([]);
+    // Mit genug Platz geht es
+    await withVerifiedDump(
+      dataDir,
+      src,
+      { sha256, bytes: 10 },
+      STAND,
+      async (copy) => void called.push(copy),
+      () => FREE_RESERVE_BYTES + 10,
+    );
+    expect(called).toHaveLength(1);
+  });
+
+  it('freeBytes liefert den freien Platz des Datenordners', () => {
+    expect(freeBytes(tmp())).toBeGreaterThan(0);
+  });
+
+  it('Manifest ohne gültige Größe: fail-closed', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    setManifestBytes(join(s.target, STAND), -1);
+    s.pg.runs.clear();
+    expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.errs.join('\n')).toMatch(/keine gültige Größe/);
+  });
+});
+
+describe('Härtung aus #114: restore von Hand verlangt die Prüfsumme eines eigenen Laufs', () => {
+  const STAND = '20261104T030012Z';
+  /** Angreifer tauscht Dump und Prüfsumme im Manifest passend aus (gleiche Größe) */
+  function forge(dir: string): void {
+    writeFileSync(join(dir, 'db.dump'), 'PGDMP-boes');
+    const manifest = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as {
+      dump: { sha256: string };
+    };
+    manifest.dump.sha256 = createHash('sha256').update('PGDMP-boes').digest('hex');
+    writeFileSync(join(dir, 'manifest.json'), JSON.stringify(manifest));
+  }
+
+  it('--test: ausgetauschter eigener Stand wird nicht eingespielt', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    forge(join(s.target, STAND));
+    expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.errs.join('\n')).toMatch(/passt nicht zum protokollierten Backup-Lauf/);
+  });
+
+  it('vollständig: ebenso, vor jeder Änderung', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    forge(join(s.target, STAND));
+    expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(1);
+    expect(s.pg.restored).toEqual([]);
+    expect(s.pg.databases).toEqual(new Set(['sg']));
+  });
+
+  it('ohne eigenen Lauf (fremder Stand) bleibt es beim Manifest, wie dokumentiert', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    forge(join(s.target, STAND));
+    s.pg.runs.clear();
+    expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(0);
   });
 });
