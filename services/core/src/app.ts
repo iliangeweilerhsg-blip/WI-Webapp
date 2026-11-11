@@ -23,7 +23,9 @@ import { createMoodleServices, type MoodleServices } from './moodle/index.ts';
 import { MoodleSync } from './moodle/sync.ts';
 import { backupRoutes } from './routes/backups.ts';
 import { calendarRoutes } from './routes/calendar.ts';
+import { conceptRoutes } from './routes/concepts.ts';
 import { devicesRoutes } from './routes/devices.ts';
+import { inboxRoutes } from './routes/inbox.ts';
 import { materialRoutes } from './routes/material.ts';
 import { moodleRoutes } from './routes/moodle.ts';
 import { inkRoutes } from './routes/notebooks.ts';
@@ -189,6 +191,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(recordingRoutes, { db, config });
       await api.register(transcriptRoutes, { db });
       await api.register(searchRoutes, { db, config });
+      await api.register(inboxRoutes, { db });
+      await api.register(conceptRoutes, { db });
       await api.register(backupRoutes, { db, config });
       await api.register(trashRoutes, { db, config });
       await api.register(settingsRoutes, { db, config });
