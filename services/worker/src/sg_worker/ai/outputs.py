@@ -66,3 +66,62 @@ class ConceptsExtractOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     concepts: list[ExtractConceptOut]
     relations: list[ExtractRelationOut]
+
+
+# ---------- concepts.resolve/v1 (05 §P8) ----------
+
+CONCEPTS_RESOLVE_PROMPT = "concepts.resolve/v1"
+
+ResolveVerdictOut = Literal["gleich", "teil_von", "verwandt", "verschieden"]
+
+
+class ResolveDecisionOut(BaseModel):
+    """Entscheidung zu einem Paar aus `<paar neu=… vorhanden=…/>`."""
+
+    model_config = ConfigDict(extra="forbid")
+    concept: str = Field(description="ref des neuen Konzepts, z. B. c3")
+    candidate: str = Field(description="ref des vorhandenen Konzepts, z. B. k7")
+    verdict: ResolveVerdictOut = Field(description="Verhältnis des neuen zum vorhandenen Konzept")
+    reason: str = Field(description="Begründung in einem Satz")
+    confidence: float = Field(description="Selbsteinschätzung 0 bis 1")
+
+
+class ResolveRelationOut(BaseModel):
+    """Beziehung zwischen einem neuen Konzept und einem seiner Nachbarn, über ihre refs."""
+
+    model_config = ConfigDict(extra="forbid")
+    from_ref: str = Field(description="ref des Konzepts A (c… oder k…)")
+    to_ref: str = Field(description="ref des Konzepts B (c… oder k…)")
+    kind: RelationKindOut = Field(description="„A baut_auf B“: B ist Voraussetzung von A")
+    why: str = Field(description="Begründung in einem Satz")
+    confidence: float = Field(description="Selbsteinschätzung 0 bis 1")
+
+
+class ConceptsResolveOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decisions: list[ResolveDecisionOut]
+    relations: list[ResolveRelationOut]
+
+
+# ---------- summary.write/v1 (05 §P9) ----------
+
+SUMMARY_WRITE_PROMPT = "summary.write/v1"
+
+
+class SummarySentenceOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(description="ein Satz der Kurzfassung")
+    slides: list[int] = Field(description="Indizes der Folien (i aus <folie i=…>), die ihn belegen")
+    times: list[ExtractTimeRange] = Field(description="Zeiträume des Transkripts, die ihn belegen")
+
+
+class SummaryOutlineOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    title: str = Field(description="Titel des Kapitels")
+    slides: list[int] = Field(description="Indizes der Folien des Kapitels")
+
+
+class SummaryWriteOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sentences: list[SummarySentenceOut]
+    outline: list[SummaryOutlineOut]
