@@ -1,12 +1,9 @@
 import type { Metadata } from 'next';
-import { PlaceholderScreen } from '../../components/Placeholder.tsx';
+import { LibraryView } from '../../components/concepts/LibraryView.tsx';
 
 export const metadata: Metadata = { title: 'Bibliothek' };
 
+/** Bibliothek (VERTRAEGE §20.10): Konzeptliste je Modul, mit `?konzept=<id>` die Konzeptansicht (F-BIB-02) */
 export default function BibliothekPage() {
-  return (
-    <PlaceholderScreen title="Bibliothek" phase={2}>
-      Hier findest du Folien, Konzepte und Notizen aller Module.
-    </PlaceholderScreen>
-  );
+  return <LibraryView />;
 }

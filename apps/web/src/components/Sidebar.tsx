@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useInboxCount } from '../lib/inbox.ts';
 import { NAV_MAIN, NAV_SETTINGS, NAV_TOP, type NavItem } from '../lib/nav.ts';
 import { CoreStatus } from './CoreStatus.tsx';
 import { Icon } from './Icon.tsx';
@@ -14,7 +15,10 @@ interface SidebarProps {
   onOpenSearch: () => void;
   /** Öffnet den Einrichtungsdialog (Hinweis in der Modulliste, solange es kein Semester gibt) */
   onOpenSetup?: () => void;
-  /** Neutrale Inbox-Zahl (07 §2: grau, nie rot). Solange der Core keine Zahl liefert, leer. */
+  /**
+   * Neutrale Inbox-Zahl (07 §2: grau, nie rot). Ohne Angabe die Zahl offener Vorschläge aus `GET /inbox/overview`
+   * (VERTRAEGE §20.10); während eine Session läuft, wird sie nicht neu geladen (R1).
+   */
   inboxCount?: number | null;
   /** Drawer-Zustand für schmale Bildschirme (< 768 px). Breit ignoriert das CSS ihn. */
   drawerOpen?: boolean;
@@ -30,7 +34,7 @@ function NavLink({ item, count }: { item: NavItem; count?: number | null }) {
       <Link
         href={item.href}
         aria-current={active ? 'page' : undefined}
-        aria-label={item.label}
+        aria-label={count ? `${item.label}, ${count} offen` : item.label}
         title={item.label}
         className={`sg-nav-link ${active ? 'sg-nav-link-active' : ''}`}
       >
@@ -51,6 +55,8 @@ export function Sidebar({
   drawerOpen = false,
   modal = false,
 }: SidebarProps) {
+  const openCount = useInboxCount();
+  const count = inboxCount ?? openCount;
   return (
     <aside
       id="sidebar"
@@ -83,7 +89,7 @@ export function Sidebar({
         <ModuleNav {...(onOpenSetup ? { onOpenSetup } : {})} />
         <ul className="mt-4 flex flex-col gap-1">
           {NAV_MAIN.map((item) => (
-            <NavLink key={item.href} item={item} count={item.href === '/inbox' ? inboxCount : null} />
+            <NavLink key={item.href} item={item} count={item.href === '/inbox' ? count : null} />
           ))}
         </ul>
       </nav>
