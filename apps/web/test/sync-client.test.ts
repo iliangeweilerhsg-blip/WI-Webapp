@@ -686,3 +686,123 @@ describe('Eingehende Operationen', () => {
     expect(seen).toEqual([{ client: 'ipad', device_id: null, connected: true }]);
   });
 });
+
+describe('Abos zwischen hello und welcome', () => {
+  const welcome = (resume: unknown[] = []) =>
+    server.last.push({
+      type: 'welcome',
+      protocol: 1,
+      server_time: Date.now(),
+      server_version: 'fake',
+      db_epoch: server.dbEpoch,
+      device_id: null,
+      resume,
+    });
+
+  it('ein spätes Abo wird nach welcome nachgemeldet, danach kommen Operationen an', async () => {
+    const c = make();
+    server.mute = true;
+    void c.connect();
+    await settle();
+    expect(server.last.of('hello')).toHaveLength(1);
+    const got: SyncOp[] = [];
+    c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, (op) => got.push(op));
+    server.mute = false;
+    welcome();
+    await settle();
+    expect(server.last.of('subscribe')).toEqual([
+      { type: 'subscribe', streams: [{ stream: nbStream(1), last_seq: 0, last_op_id: null }] },
+    ]);
+    server.last.push(server.addForeign(nbStream(1), 'page.delete', { data: { page_id: uid(77) } }));
+    await settle();
+    expect(got.map((o) => o.seq)).toEqual([1]);
+  });
+
+  it('ein Abo vor hello erzeugt kein zusätzliches subscribe', async () => {
+    const c = make();
+    c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined);
+    await c.connect();
+    await settle();
+    expect(server.last.of('subscribe')).toHaveLength(0);
+  });
+
+  it('hello-Abo zwischen hello und welcome ab- und wieder angemeldet: genau ein subscribe nach welcome', async () => {
+    const c = make();
+    const off = c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined);
+    server.mute = true;
+    void c.connect();
+    await settle();
+    expect(server.last.of('hello')).toHaveLength(1);
+    off();
+    c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined);
+    // Der Server arbeitet das `unsubscribe` erst nach `welcome` ab; ohne Nachmelden bliebe der Strom ohne Abo
+    expect(server.last.of('unsubscribe')).toHaveLength(1);
+    server.mute = false;
+    welcome();
+    await settle();
+    expect(server.last.of('subscribe')).toEqual([
+      { type: 'subscribe', streams: [{ stream: nbStream(1), last_seq: 0, last_op_id: null }] },
+    ]);
+  });
+
+  it('Abo während welcome noch die db_epoch liest: genau ein subscribe', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const getMeta = store.getMeta.bind(store);
+    store.getMeta = async (key) => {
+      await gate;
+      return getMeta(key);
+    };
+    const c = make();
+    server.mute = true;
+    void c.connect();
+    await settle();
+    server.mute = false;
+    welcome();
+    await settle();
+    c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined);
+    release();
+    await settle();
+    expect(server.last.of('subscribe')).toHaveLength(1);
+  });
+
+  it('geänderte db_epoch mit spätem Abo: genau ein subscribe, nach dem Reset', async () => {
+    await store.setMeta('db_epoch', 'alte-epoche');
+    const c = make();
+    server.mute = true;
+    void c.connect();
+    await settle();
+    const onReset = vi.fn(async () => ({ lastSeq: 0, lastOpId: null }));
+    c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined, { onReset });
+    server.mute = false;
+    welcome();
+    await settle();
+    expect(onReset).toHaveBeenCalledTimes(1);
+    expect(server.last.of('subscribe')).toHaveLength(1);
+  });
+
+  it('devicePresence merkt die letzte presence und vergisst sie beim Trennen des Geräts', async () => {
+    const c = make();
+    await c.connect();
+    await settle();
+    expect(c.devicePresence('ipad')).toBeNull();
+    const data = {
+      client: 'ipad',
+      device_id: uid(50),
+      device_name: 'iPad',
+      session_id: null,
+      notebook_id: uid(1),
+      page_id: uid(5),
+    };
+    server.last.push({ type: 'event', name: 'presence', data });
+    await settle();
+    expect(c.devicePresence('ipad')).toEqual(data);
+    server.last.push({
+      type: 'event',
+      name: 'device.connection',
+      data: { client: 'ipad', device_id: uid(50), connected: false },
+    });
+    await settle();
+    expect(c.devicePresence('ipad')).toBeNull();
+  });
+});
