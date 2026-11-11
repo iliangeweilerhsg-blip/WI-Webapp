@@ -157,6 +157,14 @@ final class InkStrokeCodecTests: XCTestCase {
         XCTAssertEqual(stroke.tEndMS, 300_250)
     }
 
+    func testStrokeFromBeforeTheSessionStartsAtZero() throws {
+        let started = createdAt.addingTimeInterval(60)
+        let stroke = try XCTUnwrap(
+            InkStrokeCodec.encode(sample(), clientID: "id", sessionStartedAt: started))
+        XCTAssertEqual(stroke.tStartMS, 0)
+        XCTAssertEqual(stroke.tEndMS, 250)
+    }
+
     func testMarkerBecomesTranslucentOnTheHighlightLayer() throws {
         let yellow = InkRGBA(red: 0xFF, green: 0xE0, blue: 0x66)
         let marker = try XCTUnwrap(

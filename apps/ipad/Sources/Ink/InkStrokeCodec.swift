@@ -173,7 +173,8 @@ enum InkStrokeCodec {
         var start: Int?
         var end: Int?
         if let sessionStartedAt {
-            let offset = createdAt - milliseconds(sessionStartedAt)
+            // SessionMs ist ≥ 0: Striche von vor dem Start (z. B. per Lasso verschoben) beginnen bei 0
+            let offset = max(0, createdAt - milliseconds(sessionStartedAt))
             start = offset
             end = offset + Int(last.dt.rounded())
         }
