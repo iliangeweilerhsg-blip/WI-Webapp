@@ -1,9 +1,9 @@
-import type { IncomingHttpHeaders } from 'node:http';
-import { isIP } from 'node:net';
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
+import { isIP, type Socket } from 'node:net';
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.ts';
 import { HttpError } from '../errors.ts';
-import type { RejectionLog } from './rejection-log.ts';
+import { sourceKey, type RejectionLog } from './rejection-log.ts';
 
 /**
  * Sicherheitsregeln des Core (docs/VERTRAEGE.md §5, §7, §11.1, §16.2, 09 §4):
@@ -170,6 +170,298 @@ export function closeRejectedUpgrade(
   });
 }
 
+/** Was der Verbindungswächter von einem Socket braucht. Passt auf `net.Socket`, Unit-Tests geben Attrappen */
+export interface GateSocket {
+  readonly remoteAddress?: string | undefined;
+  readonly destroyed?: boolean;
+  destroy(): void;
+  once(event: 'close', listener: () => void): unknown;
+}
+
+/** Grenzen des Verbindungswächters. Werden bei jeder Verbindung neu gelesen (Tests ändern das Objekt) */
+export interface ConnectionGateLimits {
+  /** Offene Verbindungen ohne Vorrang je Quelle (IPv6 je /64) bzw. mit Vorrang je genauer Adresse */
+  maxPerSource: number;
+  /** Offene Netzverbindungen ohne Vorrang insgesamt */
+  maxNetwork: number;
+  /** So lange darf eine Verbindung ohne Token-Vorrang bis zu den Headern ihrer ersten Anfrage brauchen */
+  firstRequestTimeoutMs: number;
+  /** Längste Dauer einer Netzanfrage ohne Token samt Body (nur Kopplungsrouten kommen am Wächter vorbei) */
+  tokenlessRequestTimeoutMs: number;
+  /** So lange nach der letzten Anfrage mit gültigem Token hat eine Quelladresse Vorrang */
+  trustedAddressTtlMs: number;
+  /** Höchstens so viele Adressen mit Vorrang; die am längsten nicht bestätigte fällt heraus */
+  maxTrustedAddresses: number;
+}
+
+interface GateEntry {
+  socket: GateSocket;
+  /** `sourceKey`: IPv4, IPv6 je /64 */
+  key: string;
+  /** Genaue Adresse (IPv4-mapped als IPv4) */
+  address: string;
+  /** Reihenfolge der Annahme, für „älteste zuerst“ */
+  seq: number;
+  /** `open`: zählt gegen `maxNetwork` und kann verdrängt werden. `protected`: Vorrang (Token oder Adresse) */
+  bucket: 'open' | 'protected' | 'gone';
+  /** Auf dieser Verbindung kam schon eine Anfrage mit gültigem Token an */
+  authenticated: boolean;
+  firstRequestTimer?: ReturnType<typeof setTimeout> | undefined;
+}
+
+/** Genaue Quelladresse, IPv4-mapped IPv6 als IPv4 (anders als `sourceKey` ohne /64-Zusammenfassung) */
+function exactAddress(address: string | undefined): string {
+  if (!address) return 'unbekannt';
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(address);
+  return mapped?.[1] ?? address.toLowerCase();
+}
+
+/**
+ * Verbindungswächter für Netzverbindungen (#84 M-1, #185). Loopback zählt nie.
+ *
+ * Ziel: Ein gekoppeltes Gerät kommt immer durch, auch wenn ein Gerät ohne Token im WLAN die Grenzen ausreizt.
+ *
+ * - **Vorrang an der Verbindung:** Trägt eine Anfrage ein gültiges Token, gilt ihre Verbindung als authentifiziert.
+ *   Sie zählt ab dann nicht mehr gegen `maxNetwork` und wird nie verdrängt. Das ist an das Token gebunden und lässt
+ *   sich mit einer gefälschten Adresse nicht erschleichen.
+ * - **Vorrang an der Adresse (15 min):** Die genaue Quelladresse (IPv6 nicht je /64) einer Anfrage mit gültigem
+ *   Token ist danach `trustedAddressTtlMs` lang freigegeben. Neue Verbindungen von dort zählen nicht gegen
+ *   `maxNetwork`, je Adresse gelten höchstens `maxPerSource`. So muss eine neue Verbindung des iPads nicht erst um
+ *   einen Platz kämpfen, bevor sie ihr Token zeigen kann. Wer die Adresse fälscht (ARP-/NDP-Spoofing), bekommt nur
+ *   bis zu `maxPerSource` Plätze außerhalb von `maxNetwork`, aber keinen Zugriff: Jede Anfrage braucht ein Token.
+ * - **Verdrängen statt abweisen:** Ist `maxNetwork` voll, wird die älteste Verbindung ohne Vorrang aus der Quelle mit
+ *   den meisten solchen Verbindungen geschlossen und die neue angenommen. Ein Angreifer mit vielen Verbindungen
+ *   verdrängt so sich selbst, nicht die eine neue Verbindung des iPads. Über `maxPerSource` je Quelle wird weiter
+ *   abgewiesen: Das ist das eigene Budget der Quelle.
+ * - **Kurze Fristen ohne Token:** Eine Verbindung muss die Header ihrer ersten Anfrage binnen
+ *   `firstRequestTimeoutMs` senden, sofern sie nicht schon ein gültiges Token gezeigt hat. Eine Netzanfrage ohne
+ *   Token, die der Wächter durchlässt (Kopplung), muss binnen `tokenlessRequestTimeoutMs` samt Body beantwortet
+ *   sein. Langsame Uploads gibt es nur mit Token.
+ * - Vom Wächter abgelehnte Netzanfragen bekommen `Connection: close` (`registerSecurity`). So hält niemand einen
+ *   Platz mit Keep-Alive-401 oder einem tröpfelnden Body nach der 401.
+ */
+export class NetworkConnectionGate {
+  private readonly entries = new WeakMap<GateSocket, GateEntry>();
+  /** Verbindungen ohne Vorrang je Quelle, in Annahme-Reihenfolge */
+  private readonly open = new Map<string, Set<GateEntry>>();
+  private openCount = 0;
+  private readonly protectedPerAddress = new Map<string, number>();
+  /** Adresse → Ablaufzeitpunkt, die am längsten nicht bestätigte zuerst */
+  private readonly trusted = new Map<string, number>();
+  private seq = 0;
+  private dropped = 0;
+  private evicted = 0;
+  private lastWarn = Number.NEGATIVE_INFINITY;
+  private readonly now: () => number;
+  private readonly limits: ConnectionGateLimits;
+  private readonly logger: { warn: (fields: object, message: string) => void } | undefined;
+
+  constructor(
+    limits: ConnectionGateLimits,
+    logger?: { warn: (fields: object, message: string) => void },
+    options: { now?: () => number } = {},
+  ) {
+    this.limits = limits;
+    this.logger = logger;
+    this.now = options.now ?? Date.now;
+  }
+
+  /** Hängt den Wächter an einen HTTP-Server */
+  attach(server: {
+    on(event: 'connection', listener: (socket: Socket) => void): unknown;
+    on(event: 'request', listener: (request: IncomingMessage) => void): unknown;
+  }): void {
+    server.on('connection', (socket: Socket) => this.admit(socket));
+    server.on('request', (request: IncomingMessage) => this.requestStarted(request.socket));
+  }
+
+  /** Offene Netzverbindungen ohne Vorrang (zählen gegen `maxNetwork`) */
+  get openConnections(): number {
+    return this.openCount;
+  }
+
+  /** Neue Verbindung: mit Vorrang annehmen, annehmen, dafür eine andere verdrängen oder sofort schließen */
+  admit(socket: GateSocket): void {
+    if (isLoopbackAddress(socket.remoteAddress)) return;
+    const entry: GateEntry = {
+      socket,
+      key: sourceKey(socket.remoteAddress),
+      address: exactAddress(socket.remoteAddress),
+      seq: ++this.seq,
+      bucket: 'gone',
+      authenticated: false,
+    };
+    if (
+      this.isTrusted(entry.address) &&
+      (this.protectedPerAddress.get(entry.address) ?? 0) < this.limits.maxPerSource
+    ) {
+      this.addProtected(entry);
+    } else {
+      if ((this.open.get(entry.key)?.size ?? 0) >= this.limits.maxPerSource) {
+        this.reject(socket, entry.key);
+        return;
+      }
+      if (this.openCount >= this.limits.maxNetwork) {
+        const victim = this.pickVictim();
+        if (!victim) {
+          this.reject(socket, entry.key);
+          return;
+        }
+        this.release(victim);
+        victim.socket.destroy();
+        this.evicted++;
+        this.warn(victim.key);
+      }
+      this.addOpen(entry);
+    }
+    this.entries.set(socket, entry);
+    const timer = setTimeout(() => {
+      entry.firstRequestTimer = undefined;
+      if (!entry.authenticated && entry.bucket !== 'gone' && !socket.destroyed) socket.destroy();
+    }, this.limits.firstRequestTimeoutMs);
+    timer.unref?.();
+    entry.firstRequestTimer = timer;
+    socket.once('close', () => this.release(entry));
+  }
+
+  /** Die Header einer Anfrage sind da: Die Frist bis zur ersten Anfrage ist erfüllt */
+  requestStarted(socket: GateSocket): void {
+    const entry = this.entries.get(socket);
+    if (entry) this.clearFirstRequestTimer(entry);
+  }
+
+  /** Eine Anfrage auf diesem Socket trug ein gültiges Token: Verbindung und Adresse bekommen Vorrang */
+  authenticate(socket: GateSocket): void {
+    if (isLoopbackAddress(socket.remoteAddress)) return;
+    const address = exactAddress(socket.remoteAddress);
+    this.trust(address);
+    const entry = this.entries.get(socket);
+    if (!entry || entry.bucket === 'gone') return;
+    entry.authenticated = true;
+    this.clearFirstRequestTimer(entry);
+    if (entry.bucket === 'open' && (this.protectedPerAddress.get(address) ?? 0) < this.limits.maxPerSource) {
+      this.removeOpen(entry);
+      this.addProtected(entry);
+    }
+  }
+
+  /** Netzanfrage ohne Token (Kopplung): Socket schließen, wenn die Antwort nicht binnen der Frist fertig ist */
+  limitTokenlessRequest(
+    socket: GateSocket,
+    response: { once(event: 'close', cb: () => void): unknown },
+  ): void {
+    const entry = this.entries.get(socket);
+    if (!entry || entry.bucket === 'gone') return;
+    const timer = setTimeout(() => {
+      if (!socket.destroyed) socket.destroy();
+    }, this.limits.tokenlessRequestTimeoutMs);
+    timer.unref?.();
+    response.once('close', () => clearTimeout(timer));
+  }
+
+  private isTrusted(address: string): boolean {
+    const expires = this.trusted.get(address);
+    if (expires === undefined) return false;
+    if (expires > this.now()) return true;
+    this.trusted.delete(address);
+    return false;
+  }
+
+  private trust(address: string): void {
+    // Neu einsortieren, damit die Map nach letzter Bestätigung geordnet bleibt
+    this.trusted.delete(address);
+    this.trusted.set(address, this.now() + this.limits.trustedAddressTtlMs);
+    while (this.trusted.size > this.limits.maxTrustedAddresses) {
+      const oldest = this.trusted.keys().next().value;
+      if (oldest === undefined) break;
+      this.trusted.delete(oldest);
+    }
+  }
+
+  /** Älteste nicht authentifizierte Verbindung aus der Quelle mit den meisten solchen Verbindungen */
+  private pickVictim(): GateEntry | undefined {
+    let victim: GateEntry | undefined;
+    let victimCount = 0;
+    for (const set of this.open.values()) {
+      let count = 0;
+      let oldest: GateEntry | undefined;
+      for (const entry of set) {
+        if (entry.authenticated) continue;
+        count++;
+        oldest ??= entry;
+      }
+      if (!oldest) continue;
+      if (count > victimCount || (count === victimCount && victim && oldest.seq < victim.seq)) {
+        victim = oldest;
+        victimCount = count;
+      }
+    }
+    return victim;
+  }
+
+  private addOpen(entry: GateEntry): void {
+    let set = this.open.get(entry.key);
+    if (!set) {
+      set = new Set();
+      this.open.set(entry.key, set);
+    }
+    set.add(entry);
+    this.openCount++;
+    entry.bucket = 'open';
+  }
+
+  private removeOpen(entry: GateEntry): void {
+    const set = this.open.get(entry.key);
+    if (set?.delete(entry)) {
+      this.openCount--;
+      if (set.size === 0) this.open.delete(entry.key);
+    }
+    entry.bucket = 'gone';
+  }
+
+  private addProtected(entry: GateEntry): void {
+    this.protectedPerAddress.set(entry.address, (this.protectedPerAddress.get(entry.address) ?? 0) + 1);
+    entry.bucket = 'protected';
+  }
+
+  /** Zählt die Verbindung sofort heraus (nicht erst bei `close`, das nach `destroy()` asynchron kommt) */
+  private release(entry: GateEntry): void {
+    this.clearFirstRequestTimer(entry);
+    if (entry.bucket === 'open') {
+      this.removeOpen(entry);
+    } else if (entry.bucket === 'protected') {
+      const left = (this.protectedPerAddress.get(entry.address) ?? 1) - 1;
+      if (left > 0) this.protectedPerAddress.set(entry.address, left);
+      else this.protectedPerAddress.delete(entry.address);
+    }
+    entry.bucket = 'gone';
+  }
+
+  private clearFirstRequestTimer(entry: GateEntry): void {
+    if (entry.firstRequestTimer) clearTimeout(entry.firstRequestTimer);
+    entry.firstRequestTimer = undefined;
+  }
+
+  private reject(socket: GateSocket, key: string): void {
+    socket.destroy();
+    this.dropped++;
+    this.warn(key);
+  }
+
+  /** Keine Zeile je Verbindung (#87): höchstens eine je Minute */
+  private warn(source: string): void {
+    const now = this.now();
+    if (now - this.lastWarn < 60_000) return;
+    this.logger?.warn(
+      { source, dropped: this.dropped, evicted: this.evicted },
+      'Verbindungen aus dem Netz über der Grenze geschlossen',
+    );
+    this.lastWarn = now;
+    this.dropped = 0;
+    this.evicted = 0;
+  }
+}
+
 export interface SecurityOptions {
   config: Pick<Config, 'port' | 'devWebOrigin'>;
   verifyDeviceToken?: DeviceTokenVerifier;
@@ -257,12 +549,16 @@ export function registerSecurity(
   app: FastifyInstance,
   guard: SecurityGuard,
   rejections?: RejectionLog,
+  connections?: NetworkConnectionGate,
 ): void {
   app.decorateRequest('sgDevice', undefined);
   app.decorate('authenticateUpgrade', async (request: GuardRequest) => {
     // Ohne Routing gibt es keine Ausnahme: Kopplungs-Routen sind keine Upgrades
     // (Felder einzeln: bei `IncomingMessage` sind `headers` usw. Getter, ein Spread würde sie verlieren)
     const result = await guard({ method: request.method, headers: request.headers, socket: request.socket });
+    if (result && connections && !isLocalRequest(request)) {
+      connections.authenticate(request.socket as GateSocket);
+    }
     return result ?? null;
   });
   app.addHook('onRequest', async (request, reply) => {
@@ -270,9 +566,14 @@ export function registerSecurity(
     try {
       device = await guard(request);
     } catch (error) {
-      if (rejections && !isLocalRequest(request) && error instanceof HttpError) {
-        rejections.record(request.socket.remoteAddress, error.statusCode);
-        request.sgRejectionCounted = true;
+      if (!isLocalRequest(request) && error instanceof HttpError) {
+        if (rejections) {
+          rejections.record(request.socket.remoteAddress, error.statusCode);
+          request.sgRejectionCounted = true;
+        }
+        // Abgelehnte Netzanfrage (401/403/421): Verbindung nach der Antwort schließen (#185). Sonst hält ein Gerät
+        // ohne Token seinen Platz mit Keep-Alive-401 oder einem tröpfelnden Body nach der 401
+        reply.header('connection', 'close');
       }
       // Abgelehnter WebSocket-Upgrade: Die Antwort geht direkt auf den Socket, den der HTTP-Server nach dem
       // `upgrade`-Ereignis nicht mehr verwaltet. Ohne eigenes Schließen bliebe er serverseitig halb offen hängen
@@ -281,6 +582,12 @@ export function registerSecurity(
       throw error;
     }
     if (device !== undefined) request.sgDevice = device;
+    if (connections && !isLocalRequest(request)) {
+      // Gültiges Token: Verbindung und Adresse bekommen Vorrang vor Geräten ohne Token (#185)
+      if (device) connections.authenticate(request.raw.socket);
+      // Kopplungsroute ohne Token: kurze Frist samt Body, langsame Anfragen gibt es nur mit Token
+      else if (device === undefined) connections.limitTokenlessRequest(request.raw.socket, reply.raw);
+    }
     // Kopplungsrouten aus dem Netz (`device` undefiniert) sind ohne Token offen: nicht vorab freigeben, sonst
     // flutet jede Anfrage (auch 400/409/429) das Log. Siehe `onResponse` unten.
     if (rejections && device !== undefined) {

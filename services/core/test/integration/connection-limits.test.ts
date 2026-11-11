@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { connect, type AddressInfo, type Socket } from 'node:net';
 import { SINGLE_USER_ID, UploadResultSchema } from '@sg/shared';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { connectionLimits } from '../../src/app.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
@@ -275,12 +275,183 @@ describe.skipIf(!lan)('Obergrenze offener Verbindungen aus dem Netz', () => {
     expect(status).toBe(401);
   });
 
-  it('maxNetwork begrenzt alle Netzverbindungen zusammen', async () => {
+  // Seit #185 wird bei voller Grenze nicht mehr die neue Verbindung abgewiesen, sondern die älteste ohne Vorrang
+  // verdrängt. Die Zahl offener Netzverbindungen bleibt trotzdem bei maxNetwork
+  it('maxNetwork begrenzt alle Netzverbindungen zusammen, die älteste ohne Token wird verdrängt', async () => {
     connectionLimits.maxPerSource = 100;
     connectionLimits.maxNetwork = 2;
     const allowed = [await open(lan!), await open(lan!)];
     const extra = await open(lan!);
-    await waitFor(extra.closed, 2000, 'Schließen über maxNetwork');
-    expect(allowed.map((c) => c.closed())).toEqual([false, false]);
+    await waitFor(allowed[0]!.closed, 2000, 'Verdrängen der ältesten Verbindung über maxNetwork');
+    await sleep(100);
+    expect([allowed[1]!.closed(), extra.closed()]).toEqual([false, false]);
+  });
+});
+
+// #185: Ein Gerät ohne Token im WLAN darf das gekoppelte iPad nicht aussperren. Fremde Quellen entstehen über
+// `localAddress` 127.0.0.x: Diese Adressen sind nicht in der Loopback-Liste und zählen darum als Netz
+const DEVICE_TOKEN = 'geraete-token-185';
+const DEVICE_ID = '0190f6a2-0000-7000-8000-0000000000f1';
+const IPAD = '127.0.0.9';
+const ATTACKERS = ['127.0.0.2', '127.0.0.3'];
+
+describe('Vorrang für gekoppelte Geräte bei vollen Verbindungsgrenzen (#185)', () => {
+  let app: SyncTestApp;
+  const sockets: Socket[] = [];
+
+  beforeEach(async () => {
+    // 2 Angreifer-Quellen × maxPerSource = maxNetwork
+    Object.assign(connectionLimits, { maxPerSource: 4, maxNetwork: 8 });
+    app = await startSyncApp({
+      extra: {
+        verifyDeviceToken: async (token) => (token === DEVICE_TOKEN ? { deviceId: DEVICE_ID } : null),
+      },
+    });
+  });
+  afterEach(async () => {
+    for (const socket of sockets.splice(0)) socket.destroy();
+    restoreLimits();
+    await app.close();
+  });
+
+  /** Roher Socket von einer fremden Quelladresse */
+  async function openFrom(localAddress: string) {
+    const socket = connect({ host: '127.0.0.1', port: app.port, localAddress });
+    sockets.push(socket);
+    let closed = false;
+    let data = '';
+    socket.on('close', () => (closed = true));
+    socket.on('error', () => {});
+    socket.on('data', (chunk: Buffer) => (data += chunk.toString('utf8')));
+    await new Promise<void>((resolve, reject) => {
+      socket.once('connect', () => resolve());
+      socket.once('error', reject);
+    });
+    return { socket, closed: () => closed, data: () => data };
+  }
+
+  /** `GET /health` von einer Quelladresse, eigene Verbindung je Anfrage (wie ein neuer Verbindungsaufbau des iPads) */
+  function get(localAddress: string, token?: string): Promise<number> {
+    return new Promise((resolve, reject) => {
+      const req = httpRequest({
+        host: '127.0.0.1',
+        port: app.port,
+        localAddress,
+        path: `${API}/health`,
+        agent: false,
+        headers: {
+          host: `127.0.0.1:${app.port}`,
+          connection: 'close',
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+        },
+      });
+      req.on('response', (res) => {
+        res.resume();
+        resolve(res.statusCode ?? 0);
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  async function fillNetwork() {
+    const attacker = [];
+    for (const source of ATTACKERS) {
+      for (let i = 0; i < connectionLimits.maxPerSource; i++) attacker.push(await openFrom(source));
+    }
+    await sleep(100);
+    expect(attacker.some((c) => c.closed())).toBe(false);
+    return attacker;
+  }
+
+  it('ein Angreifer ohne Token belegt maxNetwork, das gekoppelte Gerät kommt trotzdem durch', async () => {
+    const attacker = await fillNetwork();
+    // Erste Verbindung des iPads (Adresse noch ohne Vorrang): verdrängt die älteste Angreifer-Verbindung
+    expect(await get(IPAD, DEVICE_TOKEN)).toBe(200);
+    await waitFor(() => attacker.some((c) => c.closed()), 2000, 'Verdrängen einer Angreifer-Verbindung');
+    await sleep(50);
+    expect(attacker.filter((c) => c.closed())).toHaveLength(1);
+
+    // Der Angreifer füllt nach (die volle Quelle wird abgewiesen, die andere bekommt den Platz zurück)
+    const refill = [await openFrom(ATTACKERS[0]!), await openFrom(ATTACKERS[1]!)];
+    await sleep(100);
+    const holding = [...attacker, ...refill].filter((c) => !c.closed());
+    expect(holding).toHaveLength(connectionLimits.maxNetwork);
+
+    // Jetzt hat die Adresse des iPads Vorrang: 20 von 20 neuen Verbindungen kommen durch, ohne zu verdrängen
+    for (let i = 0; i < 20; i++) expect(await get(IPAD, DEVICE_TOKEN)).toBe(200);
+    await sleep(100);
+    expect(holding.filter((c) => c.closed())).toHaveLength(0);
+
+    // Ohne Token bekommt dieselbe Lage keinen Vorrang: eine neue Quelle verdrängt nur einen Angreifer
+    expect(await get('127.0.0.10')).toBe(401);
+  });
+
+  it('eine Keep-Alive-Verbindung mit gültigem Token wird bei einer Flut nie verdrängt', async () => {
+    const ipad = await openFrom(IPAD);
+    const request = `GET ${API}/health HTTP/1.1\r\nHost: 127.0.0.1:${app.port}\r\nAuthorization: Bearer ${DEVICE_TOKEN}\r\n\r\n`;
+    ipad.socket.write(request);
+    await waitFor(() => ipad.data().includes('HTTP/1.1 200'), 3000, 'erste Antwort');
+    expect(ipad.data().toLowerCase()).toContain('connection: keep-alive');
+
+    // Weit über maxNetwork aus drei Quellen
+    for (const source of [...ATTACKERS, '127.0.0.4']) {
+      for (let i = 0; i < connectionLimits.maxPerSource; i++) await openFrom(source);
+    }
+    await sleep(200);
+    expect(ipad.closed()).toBe(false);
+    ipad.socket.write(request);
+    await waitFor(() => ipad.data().split('HTTP/1.1 200').length === 3, 3000, 'zweite Antwort');
+  });
+
+  it('abgelehnte Netzanfrage: Connection: close, der Server schließt die Verbindung (auch bei tröpfelndem Body)', async () => {
+    const keepAlive = await openFrom(ATTACKERS[0]!);
+    keepAlive.socket.write(`GET ${API}/health HTTP/1.1\r\nHost: 127.0.0.1:${app.port}\r\n\r\n`);
+    await waitFor(keepAlive.closed, 3000, 'Schließen nach 401');
+    expect(keepAlive.data().startsWith('HTTP/1.1 401')).toBe(true);
+    expect(keepAlive.data().toLowerCase()).toContain('connection: close');
+
+    const trickle = await openFrom(ATTACKERS[1]!);
+    trickle.socket.write(
+      `POST ${API}/health HTTP/1.1\r\nHost: 127.0.0.1:${app.port}\r\nContent-Type: application/json\r\n` +
+        `Content-Length: 100000\r\n\r\n{`,
+    );
+    for (let i = 0; i < 20 && !trickle.closed(); i++) {
+      await sleep(50);
+      if (!trickle.closed()) trickle.socket.write(' ');
+    }
+    await waitFor(trickle.closed, 3000, 'Schließen trotz tröpfelndem Body');
+    expect(trickle.data().startsWith('HTTP/1.1 401')).toBe(true);
+  });
+
+  it('ohne Header binnen firstRequestTimeoutMs wird eine Netzverbindung geschlossen, Loopback nicht', async () => {
+    connectionLimits.firstRequestTimeoutMs = 300;
+    const started = Date.now();
+    const idle = await openFrom(ATTACKERS[0]!);
+    const local = await openSocket('127.0.0.1', app.port);
+    sockets.push(local.socket);
+    await waitFor(idle.closed, 3000, 'Schließen ohne erste Anfrage');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(250);
+    await sleep(200);
+    // Für Loopback gilt weiter connectionTimeout (120 s)
+    expect(local.closed()).toBe(false);
+  });
+
+  it('eine Kopplungsanfrage ohne Token muss samt Body binnen tokenlessRequestTimeoutMs fertig sein', async () => {
+    connectionLimits.tokenlessRequestTimeoutMs = 400;
+    const slow = await openFrom(ATTACKERS[0]!);
+    const started = Date.now();
+    slow.socket.write(
+      `POST ${API}/devices/pair/start HTTP/1.1\r\nHost: 127.0.0.1:${app.port}\r\n` +
+        `Content-Type: application/json\r\nContent-Length: 1000\r\n\r\n{`,
+    );
+    // Jede 100 ms ein Byte: connectionTimeout schlägt so nie zu, nur die Frist ohne Token
+    for (let i = 0; i < 30 && !slow.closed(); i++) {
+      await sleep(100);
+      if (!slow.closed()) slow.socket.write(' ');
+    }
+    expect(slow.closed()).toBe(true);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(350);
+    expect(Date.now() - started).toBeLessThan(2500);
   });
 });

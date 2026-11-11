@@ -10,12 +10,12 @@ import type { Db } from './db/client.ts';
 import { apiErrorBody, HttpError } from './errors.ts';
 import { registerErrorHandler } from './plugins/errors.ts';
 import { registerIdempotency } from './plugins/idempotency.ts';
-import { createRejectionLog, RequestLogController, sourceKey } from './plugins/rejection-log.ts';
+import { createRejectionLog, RequestLogController } from './plugins/rejection-log.ts';
 import {
   closeRejectedUpgrade,
   createSecurityGuard,
   isLocalRequest,
-  isLoopbackAddress,
+  NetworkConnectionGate,
   registerSecurity,
   type DeviceTokenVerifier,
 } from './plugins/security.ts';
@@ -92,8 +92,14 @@ function readVersion(): string {
  * - `maxRequestsPerSocket`: Nach so vielen Anfragen schließt der Core die Keep-Alive-Verbindung (`Connection: close`),
  *   der Client verbindet neu. Begrenzt, wie lange eine einzelne Verbindung mit tröpfelnden Anfragen lebt. Hoch genug,
  *   dass Bursts (Seitenlisten, Vorschaubilder, Audio-Chunks einer Live-Aufnahme) kaum neu verbinden müssen.
- * - `maxPerSource` und `maxNetwork`: offene Verbindungen je Quelle (IPv6 je /64) bzw. aus dem Netz insgesamt.
- *   Überzählige werden sofort geschlossen. Loopback ist ausgenommen, damit die Web-App auf dem Mac immer geht.
+ * - `maxPerSource` und `maxNetwork`: offene Netzverbindungen ohne Vorrang je Quelle (IPv6 je /64) bzw. insgesamt.
+ *   Über `maxPerSource` wird sofort geschlossen. Ist `maxNetwork` voll, verdrängt die neue Verbindung die älteste
+ *   ohne Vorrang aus der größten Quelle (#185). Loopback ist ausgenommen, damit die Web-App auf dem Mac immer geht.
+ * - Vorrang (#185): Verbindungen, die schon ein gültiges Token gezeigt haben, und neue Verbindungen von einer Adresse
+ *   mit gültigem Token in den letzten `trustedAddressTtlMs` zählen nicht gegen `maxNetwork` und werden nie
+ *   verdrängt. Je Adresse gelten für sie höchstens `maxPerSource`. Gemerkt werden höchstens `maxTrustedAddresses`.
+ * - `firstRequestTimeoutMs`: Eine Netzverbindung ohne Token-Vorrang muss ihre ersten Header so schnell senden.
+ * - `tokenlessRequestTimeoutMs`: Längste Dauer einer Netzanfrage ohne Token (Kopplung) samt Body.
  * - `maxConnections`: harte Obergrenze aller offenen Verbindungen samt Loopback und WebSockets
  *   (`server.maxConnections`), weit unter dem FD-Limit des Prozesses, damit DB und Dateien immer noch öffnen.
  * Tests dürfen das Objekt vor `buildApp` ändern (kürzere Zeiten).
@@ -106,45 +112,11 @@ export const connectionLimits = {
   maxPerSource: 32,
   maxNetwork: 256,
   maxConnections: 1024,
+  firstRequestTimeoutMs: 15_000,
+  tokenlessRequestTimeoutMs: 10_000,
+  trustedAddressTtlMs: 15 * 60_000,
+  maxTrustedAddresses: 64,
 };
-
-/** Zählt offene Verbindungen aus dem Netz und schließt die über `maxPerSource`/`maxNetwork`. Loopback zählt nie */
-function limitNetworkConnections(
-  app: FastifyInstance,
-  logger: Logger,
-  limits: typeof connectionLimits,
-): void {
-  app.server.maxConnections = limits.maxConnections;
-  const perSource = new Map<string, number>();
-  let network = 0;
-  let dropped = 0;
-  let lastWarn = 0;
-  app.server.on('connection', (socket) => {
-    if (isLoopbackAddress(socket.remoteAddress)) return;
-    const key = sourceKey(socket.remoteAddress);
-    const count = perSource.get(key) ?? 0;
-    if (count >= limits.maxPerSource || network >= limits.maxNetwork) {
-      socket.destroy();
-      dropped++;
-      // Keine Zeile je Verbindung (#87): höchstens eine je Minute
-      const now = Date.now();
-      if (now - lastWarn >= 60_000) {
-        logger.warn({ source: key, dropped }, 'Verbindungen aus dem Netz über der Grenze geschlossen');
-        lastWarn = now;
-        dropped = 0;
-      }
-      return;
-    }
-    perSource.set(key, count + 1);
-    network++;
-    socket.once('close', () => {
-      network--;
-      const left = (perSource.get(key) ?? 1) - 1;
-      if (left > 0) perSource.set(key, left);
-      else perSource.delete(key);
-    });
-  });
-}
 
 /**
  * Baut die Fastify-Anwendung. Neue Fachbereiche (T0-07 …): Routen in `src/routes/<bereich>.ts`,
@@ -180,6 +152,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       return verified;
     });
   const guard = createSecurityGuard({ config, verifyDeviceToken: verifyToken });
+  // Verbindungsgrenzen und Vorrang gekoppelter Geräte (#84 M-1, #185)
+  const connections = new NetworkConnectionGate(connectionLimits, logger);
   const pairing = options.pairing ?? new PairingManager();
   const pairingHost = options.pairingHost ?? (() => pickPairingHost());
 
@@ -206,9 +180,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           await guard(request);
         } catch (denied) {
           if (denied instanceof HttpError) {
-            if (!isLocalRequest(request) && !request.sgRejectionCounted) {
-              rejections.record(request.socket.remoteAddress, denied.statusCode);
-              request.sgRejectionCounted = true;
+            if (!isLocalRequest(request)) {
+              if (!request.sgRejectionCounted) {
+                rejections.record(request.socket.remoteAddress, denied.statusCode);
+                request.sgRejectionCounted = true;
+              }
+              // Wie im onRequest-Hook: abgelehnte Netzanfrage schließt die Verbindung (#185)
+              reply.header('connection', 'close');
             }
             return reply.code(denied.statusCode).send(apiErrorBody(denied.code, denied.message));
           }
@@ -223,13 +201,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   const rejections = createRejectionLog(app);
-  limitNetworkConnections(app, logger, connectionLimits);
+  app.server.maxConnections = connectionLimits.maxConnections;
+  connections.attach(app.server);
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
   // Reihenfolge: Sicherheitsprüfung vor allem anderen (auch vor CORS-Preflight)
-  registerSecurity(app, guard, rejections);
+  registerSecurity(app, guard, rejections, connections);
   registerErrorHandler(app);
   registerIdempotency(app, db);
   // WebSocket /sync (T1-08). Vor allen Routen, damit Upgrades auf andere Pfade geschlossen werden
