@@ -30,6 +30,7 @@ import {
   selectRetention,
   STAND_RE,
   standName,
+  targetOwner,
   type CopyStats,
   type Manifest,
   type TargetDir,
@@ -395,20 +396,27 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     if (lstatSync(finalDir, { throwIfNoEntry: false })) throw new Error(`Den Stand ${stand} gibt es schon.`);
     const out = new NoFollowWriter(deps.targetHooks);
     out.adopt(target, targetDir);
-    out.mkdir(partial);
+    const created = out.mkdir(partial);
+    let owner: number | undefined;
 
     try {
+      // Eigen ist im Ziel, was den Besitzer des eigenen `.partial` hat (#183), nicht zwingend den Benutzer des Laufs.
+      // `targetOwner` prüft per Probedatei, dass das `.partial` nicht beim Anlegen getauscht wurde.
+      owner = targetOwner(out, partial, created);
+      out.owner = owner;
       // Voriger Stand für Hardlinks: nur ein eigener (H-1, #161). Ein erfundener Stand im Ziel darf nie die Quelle
       // sein, sonst verlinkt der neue Stand Dateien, die einem Dritten gehören.
       let previous: string | null = null;
       try {
-        previous = ownStandsIn(target, await readOwnedStands(pg, targetSetting))[0] ?? null;
+        previous = ownStandsIn(target, await readOwnedStands(pg, targetSetting), undefined, owner)[0] ?? null;
       } catch (error) {
         err(
           `Die eigenen Stände ließen sich nicht aus backup_run lesen (${errorText(error, cfg)}). Es wird ohne Hardlinks vollständig kopiert.`,
         );
       }
       log(`Backup ${stand} nach ${target} (${options.trigger}) …`);
+      const runUid = process.getuid?.();
+      if (owner !== undefined && owner !== runUid) log(foreignOwnerNote(owner, runUid));
 
       log('Sichere die Datenbank (pg_dump) …');
       // Der Dump entsteht in einem privaten Ordner, nicht im Ziel: Dort kann ihn niemand austauschen, während
@@ -441,7 +449,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         } catch {
           prevSub = null; // voriger Stand nicht lesbar: alles kopieren
         }
-        copyTree(source, join(partial, sub), prevSub, stats[sub], { out, reader });
+        copyTree(source, join(partial, sub), prevSub, stats[sub], { out, reader, owner });
         log(
           `  ${stats[sub].files} Dateien, ${stats[sub].copied} neu kopiert, ${stats[sub].linked} unverändert`,
         );
@@ -488,11 +496,13 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     let thinned: ThinResult | null = null;
     try {
       const owned = await readOwnedStands(pg, targetSetting);
-      thinned = thin(targetDir, { owned, current: stand }, now().getTime(), log, deps.targetHooks);
+      thinned = thin(targetDir, { owned, current: stand, owner }, now().getTime(), log, deps.targetHooks);
     } catch (error) {
       err(`Ausdünnen alter Stände fehlgeschlagen: ${errorText(error, cfg)}`);
     }
-    if (runId && thinned) await recordLeftovers(deps, runId, targetSetting, thinned.left);
+    const ownerWarn = thinned ? foreignOwnerWarning(thinned.foreign ?? []) : null;
+    if (ownerWarn) err(`Warnung: ${ownerWarn}`);
+    if (runId && thinned) await recordLeftovers(deps, runId, targetSetting, thinned.left, ownerWarn);
     return 0;
   } catch (error) {
     return await fail(errorText(error, cfg), 1);
@@ -560,14 +570,67 @@ export async function readOwnedStands(pg: PgAccess, targetSetting: string): Prom
  * Eigene Stände im Ziel, neueste zuerst: Ordner mit gültigem Manifest (`listStands`), zu dem es einen eigenen Lauf
  * gibt. Das Manifest muss diesen Stand nennen und, wenn der Lauf eine Prüfsumme hat, genau diese tragen. Ein
  * ausgetauschter oder umbenannter Ordner unter einem eigenen Namen zählt so nicht als eigener Stand.
+ * `owner`: Besitzer eigener Ordner im Ziel (`targetOwner`, #183), ohne Angabe der Benutzer dieses Prozesses.
  */
-export function ownStandsIn(base: string, owned: OwnedStands, stands = listStands(base)): string[] {
-  return stands.filter((stand) => {
+export function ownStandsIn(
+  base: string,
+  owned: OwnedStands,
+  stands = listStands(base),
+  owner?: number,
+): string[] {
+  return classifyStands(base, owned, stands, owner).own;
+}
+
+/**
+ * Wie `ownStandsIn`, dazu `foreign` (#183): Stände, zu denen Lauf und Manifest passen, deren Ordner aber einen anderen
+ * Besitzer als `owner` hat. Sie zählen nicht als eigen (ein fremder Ordner mit kopiertem Manifest sieht genauso aus),
+ * werden aber gemeldet: Stammen sie doch aus eigenen Läufen (früher als anderer Benutzer, per `sudo`, mit anderen
+ * Einhängeoptionen), werden sie nie ausgedünnt und das Ziel läuft voll.
+ */
+export function classifyStands(
+  base: string,
+  owned: OwnedStands,
+  stands: string[],
+  owner?: number,
+): { own: string[]; foreign: string[] } {
+  const own: string[] = [];
+  const foreign: string[] = [];
+  for (const stand of stands) {
+    const dir = join(base, stand);
+    if (!matchesOwnRun(owned, stand, readManifest(dir))) continue;
     // Ein Ordner eines anderen Benutzers mit kopiertem Manifest unter dem Namen eines eigenen Standes (der echte wurde
     // weggeschoben) ist kein eigener Stand: Er würde sonst zur Hardlink-Quelle oder beim Ausdünnen samt Inhalt gelöscht.
-    if (!ownedByThisUser(join(base, stand))) return false;
-    return matchesOwnRun(owned, stand, readManifest(join(base, stand)));
-  });
+    if (ownedByThisUser(dir, owner)) own.push(stand);
+    else foreign.push(stand);
+  }
+  return { own, foreign };
+}
+
+/** Log: Das Ziel meldet für eigene Ordner einen anderen Besitzer als den Benutzer des Laufs (#183) */
+export function foreignOwnerNote(owner: number, runUid: number | undefined): string {
+  return (
+    `Das Backup-Ziel meldet für Ordner, die dieser Lauf anlegt, den Besitzer uid ${owner}, der Lauf selbst läuft als ` +
+    `uid ${runUid ?? '?'} (etwa eine SMB-/CIFS-Freigabe ohne uid= oder ein Lauf per sudo auf NFS mit root_squash). ` +
+    `Als eigene Stände gelten darum Ordner mit uid ${owner}. Meldet das Ziel für alle Ordner diesen Besitzer, ` +
+    `unterscheidet sg backup dort eigene nicht von fremden Ordnern; dann schützen nur backup_run und die Prüfsumme im Manifest.`
+  );
+}
+
+/**
+ * Warnung für die Oberfläche (`backup_run.warning`), wenn Stände eigener Läufe einen anderen Besitzer haben als die
+ * Ordner dieses Laufs (#183, `classifyStands`). `null`: keine.
+ */
+export function foreignOwnerWarning(foreign: string[]): string | null {
+  if (foreign.length === 0) return null;
+  const what =
+    foreign.length === 1
+      ? 'Ein Backup-Stand im Ziel gehört'
+      : `${foreign.length} Backup-Stände im Ziel gehören`;
+  return (
+    `${what} einem anderen Benutzer als die neuen Stände, etwa nach einem Lauf per sudo oder einer geänderten ` +
+    `Freigabe. Solche Stände werden weder ausgedünnt noch für unveränderte Dateien genutzt, jeder Lauf kopiert ` +
+    `dann alles und das Ziel kann volllaufen. Prüfe die Besitzer der Ordner im Backup-Ziel.`
+  );
 }
 
 /** Nennt `manifest` den Stand `stand`, gibt es dazu einen eigenen Lauf, und trägt es (falls bekannt) dessen Prüfsumme? */
@@ -583,6 +646,8 @@ export interface ThinOwnership {
   owned: OwnedStands;
   /** Der Stand des laufenden Backups: wird nie gelöscht */
   current?: string;
+  /** Besitzer eigener Ordner im Ziel (`targetOwner`, #183); ohne Angabe der Benutzer dieses Prozesses */
+  owner?: number | undefined;
 }
 
 /** So viele Stände vor Migrationen bleiben unabhängig von der Ausdünnung erhalten */
@@ -600,6 +665,8 @@ export interface Leftover {
 export interface ThinResult {
   removed: string[];
   left: Leftover[];
+  /** Stände eigener Läufe mit anderem Besitzer als `own.owner` (#183): nicht ausgedünnt (fehlt, wenn keine) */
+  foreign?: string[];
 }
 
 /**
@@ -619,7 +686,7 @@ export function thin(
 ): ThinResult {
   const base = target.path;
   const result: ThinResult = { removed: [], left: [] };
-  const partials = removeStalePartialsReport(target, nowMs, 86_400_000, hooks);
+  const partials = removeStalePartialsReport(target, nowMs, 86_400_000, hooks, own.owner);
   for (const { name, left } of partials.left) {
     const reason = describeLeft(left, join(base, name));
     result.left.push({ name, reason, cause: rootCause(left)?.cause ?? 'unbekannt' });
@@ -633,10 +700,21 @@ export function thin(
     );
   }
   const all = listStands(base); // neueste zuerst
-  const stands = ownStandsIn(base, own.owned, all);
+  const { own: stands, foreign } = classifyStands(base, own.owned, all, own.owner);
   if (all.length > stands.length) {
     log(
       `${all.length - stands.length} Ordner im Ziel sehen wie Stände aus, gehören aber zu keinem eigenen Backup-Lauf. Sie zählen nicht zur Aufbewahrung und werden nicht gelöscht.`,
+    );
+  }
+  if (foreign.length > 0) {
+    result.foreign = foreign;
+    const owner = own.owner ?? process.getuid?.();
+    const shown =
+      foreign.slice(0, 5).join(', ') + (foreign.length > 5 ? ` und ${foreign.length - 5} weitere` : '');
+    log(
+      `${foreign.length} davon passen zu eigenen Läufen in backup_run, ihr Ordner gehört aber einem anderen Benutzer als die Ordner dieses Laufs (uid ${owner ?? '?'}): ${shown}. ` +
+        `Ursache ist meist ein früherer Lauf als anderer Benutzer (etwa per sudo) oder eine geänderte Freigabe, es kann aber auch ein fremder Ordner unter dem Namen eines Standes sein. ` +
+        `Diese Stände werden weder ausgedünnt noch für Hardlinks genutzt, jeder Lauf kopiert darum alles vollständig. Prüfe die Besitzer im Backup-Ziel.`,
     );
   }
   const protectedStands = new Set(
@@ -649,7 +727,7 @@ export function thin(
     // Unmittelbar vor dem Löschen erneut prüfen und das Löschen an genau diesen Ordner binden (TOCTOU, H-1 aus #161):
     // Schiebt jemand während des Ausdünnens einen Stand, der bleiben soll, unter diesen Namen, bleibt er stehen.
     // Das Manifest wird in genau dem geprüften Ordner gelesen (`readManifestAt`), nicht erneut über den Namen.
-    const seen = ownedDir(join(base, stand));
+    const seen = ownedDir(join(base, stand), own.owner);
     if (!seen || !matchesOwnRun(own.owned, stand, readManifestAt(target, stand, seen, hooks))) {
       log(
         `Der Stand ${stand} hat sich während des Ausdünnens verändert und wird nicht gelöscht. Prüfe das Backup-Ziel.`,
@@ -705,14 +783,16 @@ export function leftoverWarning(stuck: Leftover[]): string | null {
 
 /**
  * Reste des Ausdünnens am Lauf festhalten (`backup_run.thin_left`) und warnen, wenn ein Rest schon nach dem vorigen
- * Lauf mit demselben Ziel stehen blieb (`backup_run.warning`, H3). Fehlt die Spalte (Backup vor der Migration, die
- * sie anlegt), passiert nichts. Fehler hier machen das Backup nicht ungültig.
+ * Lauf mit demselben Ziel stehen blieb (`backup_run.warning`, H3). `extra`: eine weitere Warnung (Besitzer, #183), die
+ * vor der zu den Resten steht. Fehlt die Spalte (Backup vor der Migration, die sie anlegt), passiert nichts. Fehler
+ * hier machen das Backup nicht ungültig.
  */
 export async function recordLeftovers(
   deps: Pick<BackupDeps, 'pg' | 'err' | 'cfg'>,
   runId: string,
   targetSetting: string,
   left: Leftover[],
+  extra: string | null = null,
 ): Promise<void> {
   const { pg } = deps;
   try {
@@ -729,8 +809,9 @@ export async function recordLeftovers(
       { id: runId, target: targetSetting },
     );
     const before = new Set((previous?.[0] ?? '').split('/').filter((name) => name !== ''));
-    const warning = leftoverWarning(left.filter((l) => before.has(l.name)));
-    if (warning) deps.err(`Warnung: ${warning}`);
+    const stuck = leftoverWarning(left.filter((l) => before.has(l.name)));
+    if (stuck) deps.err(`Warnung: ${stuck}`);
+    const warning = joinWarnings(extra, stuck);
     await pg.query(
       `UPDATE backup_run SET thin_left = string_to_array(:'left', '/'), warning = NULLIF(:'warning', ''),
               updated_at = now()
@@ -740,4 +821,11 @@ export async function recordLeftovers(
   } catch (error) {
     deps.err(`Reste des Ausdünnens ließen sich nicht eintragen: ${errorText(error, deps.cfg)}`);
   }
+}
+
+/** Zwei Warnungen in einem Text für `backup_run.warning`, höchstens 500 Zeichen (`null`: keine) */
+function joinWarnings(first: string | null, second: string | null): string | null {
+  const text = [first, second].filter((w): w is string => w !== null && w !== '').join(' ');
+  if (text === '') return null;
+  return text.length <= WARNING_MAX ? text : `${text.slice(0, WARNING_MAX - 1)}…`;
 }

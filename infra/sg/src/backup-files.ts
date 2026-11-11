@@ -146,6 +146,12 @@ export interface CopyTreeOptions {
    * ausgetauschter Eintrag ist ein Fehler (`UnsafeTargetError`), statt übersprungen zu werden.
    */
   strictSource?: boolean;
+  /**
+   * Besitzer (uid), den eigene Dateien im Ziel haben (#183): der des eigenen, gerade angelegten `.partial`
+   * (`targetOwner`). Nur Dateien des vorigen Standes mit genau diesem Besitzer werden verlinkt. Ohne Angabe: der
+   * Benutzer dieses Prozesses.
+   */
+  owner?: number | undefined;
 }
 
 /**
@@ -182,7 +188,14 @@ export function copyTree(
     }
     if (prev && existsSync(prev)) reader.adopt(prev);
   }
-  copyLevel(src, dst, prev && reader.knows(prev) ? prev : null, result, { ...options, out, reader, strict });
+  const owner = options.owner ?? process.getuid?.();
+  copyLevel(src, dst, prev && reader.knows(prev) ? prev : null, result, {
+    beforeCopy: options.beforeCopy,
+    out,
+    reader,
+    strict,
+    owner,
+  });
   return result;
 }
 
@@ -191,6 +204,8 @@ interface Level {
   out: NoFollowWriter;
   reader: NoFollowReader;
   strict: boolean;
+  /** Besitzer eigener Dateien im Ziel (`undefined`: ohne Unix-Besitzer, nicht geprüft) */
+  owner: number | undefined;
 }
 
 function unsafe(message: string): UnsafeTargetError {
@@ -266,9 +281,10 @@ function copyLevel(src: string, dst: string, prev: string | null, result: CopySt
       // Nur eigene Dateien verlinken (H-1, #161): Die Besitzerprüfung des vorigen Standes (`ownStandsIn`) läuft vor
       // `pg_dump`, gelesen wird er erst danach. Tauscht ihn jemand dazwischen gegen einen eigenen Ordner, gehören
       // dessen Dateien nicht diesem Benutzer und werden kopiert statt verlinkt (sonst änderte er später den neuen Stand).
+      // „Eigen“ heißt: derselbe Besitzer wie das eigene `.partial` (#183), nicht zwingend der Benutzer des Prozesses.
       if (
         old &&
-        (process.getuid === undefined || old.uid === process.getuid()) &&
+        (level.owner === undefined || old.uid === level.owner) &&
         old.size === real.size &&
         Math.abs(old.mtimeMs - real.mtimeMs) < 2
       ) {
@@ -505,14 +521,39 @@ export interface PartialsReport {
 }
 
 /**
- * Ist `path` ein echter Ordner (kein Symlink), der dem Benutzer dieses Prozesses gehört? (H-1, #161)
- * Was `sg backup` im Ziel anlegt, gehört immer dem Benutzer des Laufs. Wer im Ziel nur Ordner anlegen kann, erzeugt
- * Ordner mit seinem eigenen Besitzer und kann so keinen eigenen Stand vortäuschen, auch nicht mit einem kopierten
- * Manifest. Auf Dateisystemen ohne Unix-Besitzer (exFAT, manche SMB-Freigaben) meldet der Kernel für alles den
- * einhängenden Benutzer; dort hilft die Prüfung nicht, schadet aber auch nicht (dort kann ohnehin jeder alles löschen).
+ * Besitzer (uid), den Ordner haben, die dieser Lauf im Ziel anlegt (#183). Meist ist das der Benutzer des Prozesses.
+ * Manche Ziele melden aber einen anderen: SMB/CIFS ohne `uid=` (alles gehört dem einhängenden Benutzer oder root), NFS
+ * mit `root_squash` bei einem Lauf per `sudo` (alles gehört `nobody`). Mit `getuid()` gälte dort kein Stand als eigen:
+ * nie ausgedünnt, nie verlinkt, das Ziel liefe voll. `undefined`: Plattform ohne Unix-Besitzer (Windows), nicht geprüft.
+ *
+ * Maßstab ist nicht das `lstat` des eigenen `.partial` (`created`, Rückgabe von `NoFollowWriter.mkdir`) allein: Tauscht
+ * jemand den frisch angelegten Ordner zwischen `mkdir` und `lstat` gegen einen eigenen, gälte sonst seine uid als
+ * „eigen“ (H-1 aus #161 wieder offen). Darum legt der Lauf im `.partial` exklusiv eine Probedatei an und nimmt deren
+ * uid per `fstat` am eigenen Deskriptor (`ownerOfNew`). Ein Ziel mit Unix-Besitzern gibt Datei und Ordner desselben
+ * Prozesses dieselbe uid, ein Ziel ohne meldet für beide dieselbe. Weicht `created` davon ab, wurde getauscht: Abbruch.
  */
-export function ownedByThisUser(path: string): boolean {
-  return ownedDir(path) !== null;
+export function targetOwner(out: NoFollowWriter, partial: string, created: Stats): number | undefined {
+  if (process.getuid === undefined) return undefined;
+  const owner = out.ownerOfNew(partial);
+  if (created.uid !== owner) {
+    throw new UnsafeTargetError(
+      `${partial} wurde beim Anlegen ersetzt: Der Ordner gehört uid ${created.uid}, neue Dateien dieses Laufs gehören uid ${owner}. Der Lauf bricht ab.`,
+    );
+  }
+  return owner;
+}
+
+/**
+ * Ist `path` ein echter Ordner (kein Symlink) mit dem Besitzer `owner`? (H-1, #161; #183) `owner` ist der Besitzer
+ * eigener Ordner im Ziel (`targetOwner`), ohne Angabe der Benutzer dieses Prozesses.
+ * Was `sg backup` im Ziel anlegt, gehört immer diesem Besitzer. Wer im Ziel nur Ordner anlegen kann, erzeugt auf einem
+ * Dateisystem mit Unix-Besitzern Ordner mit seinem eigenen Besitzer und kann so keinen eigenen Stand vortäuschen, auch
+ * nicht mit einem kopierten Manifest. Auf Dateisystemen ohne Unix-Besitzer (exFAT, SMB/CIFS ohne Unix-Erweiterungen)
+ * meldet der Kernel für alles denselben Besitzer; dort hilft die Prüfung nicht, schadet aber auch nicht (dort kann
+ * ohnehin jeder mit Zugang alles ändern und löschen). Es bleiben `backup_run` und die Prüfsumme im Manifest.
+ */
+export function ownedByThisUser(path: string, owner?: number): boolean {
+  return ownedDir(path, owner) !== null;
 }
 
 /**
@@ -520,11 +561,11 @@ export function ownedByThisUser(path: string): boolean {
  * Löschen an genau diese Identität (`removeTree(…, expected)`): Ein inzwischen unter den Namen geschobener anderer
  * Ordner wird so nicht gelöscht (TOCTOU, H-1 aus #161).
  */
-export function ownedDir(path: string): Identity | null {
+export function ownedDir(path: string, owner = process.getuid?.()): Identity | null {
   try {
     const info = lstatSync(path, { throwIfNoEntry: false });
     if (!info?.isDirectory()) return null;
-    if (process.getuid !== undefined && info.uid !== process.getuid()) return null;
+    if (owner !== undefined && info.uid !== owner) return null;
     return { dev: info.dev, ino: info.ino };
   } catch {
     return null;
@@ -550,12 +591,16 @@ function holdsManifestAt(
   }
 }
 
-/** Halbfertige Läufe (`.<stand>.partial`) löschen, die älter als `olderThanMs` sind (verankert wie `removeStand`) */
+/**
+ * Halbfertige Läufe (`.<stand>.partial`) löschen, die älter als `olderThanMs` sind (verankert wie `removeStand`).
+ * Nur Ordner mit dem Besitzer `owner` (`targetOwner`, ohne Angabe der Benutzer dieses Prozesses).
+ */
 export function removeStalePartialsReport(
   target: string | TargetDir,
   now: number,
   olderThanMs: number,
   hooks?: NoFollowHooks,
+  owner?: number,
 ): PartialsReport {
   const report: PartialsReport = { removed: [], kept: [], left: [] };
   const remover = new NoFollowRemover(hooks);
@@ -566,7 +611,7 @@ export function removeStalePartialsReport(
     const match = /^\.([0-9]{8}T[0-9]{6}Z)\.partial$/.exec(entry.name);
     if (!entry.isDirectory() || !match) continue;
     if (now - standDate(match[1] as string).getTime() < olderThanMs) continue;
-    const seen = ownedDir(join(base, entry.name));
+    const seen = ownedDir(join(base, entry.name), owner);
     if (!seen) {
       report.kept.push({ name: entry.name, why: 'fremd' });
       continue;

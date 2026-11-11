@@ -1947,6 +1947,219 @@ describe('H-1 (#161): erfundene Stände im Ziel zählen nicht und werden nie gel
   });
 });
 
+describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)', () => {
+  const FREMD = 4242;
+  const ANDERER = 4343;
+  /** Besitzer des ganzen Baums ändern (nur als root möglich) */
+  function chownTree(path: string, uid: number): void {
+    lchownSync(path, uid, uid);
+    if (!lstatSync(path).isDirectory()) return;
+    for (const name of readdirSync(path)) chownTree(join(path, name), uid);
+  }
+  const asRoot = process.getuid?.() === 0;
+  /** Wie ein Ziel, das für alles den Besitzer `uid` meldet: jeder neue Ordner bekommt ihn */
+  const reportsOwner = (uid: number): BackupDeps['targetHooks'] => ({
+    step: (op, phase, dir, name) => {
+      // Ordner und Dateien: Ein solches Ziel meldet für alles, was der Lauf anlegt, denselben Besitzer
+      if ((op === 'mkdir' || op === 'create') && phase === 'after') lchownSync(join(dir, name), uid, uid);
+    },
+  });
+  const runWith = (
+    pg: { runs: Map<string, { stand: string | null; warning?: string | null }> },
+    stand: string,
+  ) => [...pg.runs.values()].find((r) => r.stand === stand);
+  function realStand(target: string, name: string): string {
+    const dir = join(target, name);
+    mkdirSync(join(dir, 'media'), { recursive: true });
+    writeFileSync(
+      join(dir, 'manifest.json'),
+      JSON.stringify({ version: 1, stand: name, dump: { sha256: 'a' } }),
+    );
+    writeFileSync(join(dir, 'db.dump'), 'DUMP');
+    return dir;
+  }
+  const own = (names: string[]): OwnedStands =>
+    new Map(names.map((stand) => [stand, { trigger: 'zeitplan', sha256: 'a' }]));
+
+  it('thin: eigen ist, was den Besitzer des eigenen .partial hat; Stände eines anderen Besitzers bleiben und werden gemeldet', () => {
+    const target = join(tmp(), 'ziel');
+    mkdirSync(target);
+    const checked = validateTarget(target, tmp());
+    const names = ['20261001T010000Z', '20261001T030000Z'];
+    for (const n of names) realStand(target, n);
+    mkdirSync(join(target, '.20261001T020000Z.partial'));
+    const uid = process.getuid?.() ?? 0;
+    const logs: string[] = [];
+    // Neue Ordner hätten im Ziel einen anderen Besitzer: die vorhandenen zählen nicht als eigen, nichts wird gelöscht
+    const other = thin(
+      checked,
+      { owned: own(names), owner: uid + 1 },
+      Date.parse('2026-11-05T00:00:00Z'),
+      (m) => logs.push(m),
+    );
+    expect(other.removed).toEqual([]);
+    expect(other.foreign).toEqual(['20261001T030000Z', '20261001T010000Z']);
+    expect(readdirSync(target).sort()).toEqual(['.20261001T020000Z.partial', ...names]);
+    expect(logs.join('\n')).toMatch(
+      /2 davon passen zu eigenen Läufen in backup_run, ihr Ordner gehört aber einem anderen Benutzer/,
+    );
+    expect(logs.join('\n')).toMatch(/\.20261001T020000Z\.partial gehört einem anderen Benutzer/);
+    // Gegenprobe: mit dem Besitzer der Ordner wird ausgedünnt und der alte .partial aufgeräumt
+    const same = thin(checked, { owned: own(names), owner: uid }, Date.parse('2026-11-05T00:00:00Z'));
+    expect(same.removed).toEqual(['20261001T010000Z']);
+    expect(same.foreign).toBeUndefined();
+    expect(readdirSync(target)).toEqual(['20261001T030000Z']);
+  });
+
+  it('copyTree: verlinkt nur Dateien mit dem Besitzer eigener Ordner (owner)', () => {
+    const root = tmp();
+    const src = join(root, 'src');
+    mkdirSync(src);
+    writeFileSync(join(src, 'a.txt'), 'AAAA');
+    const first = copyTree(src, join(root, 's1'), null);
+    expect(first.copied).toBe(1);
+    const uid = process.getuid?.() ?? 0;
+    expect(copyTree(src, join(root, 's2'), join(root, 's1'), undefined, { owner: uid + 1 }).linked).toBe(0);
+    expect(copyTree(src, join(root, 's3'), join(root, 's1'), undefined, { owner: uid }).linked).toBe(1);
+  });
+
+  it.skipIf(!asRoot)(
+    'Ziel meldet für alles eine fremde uid: ausgedünnt und verlinkt, das Log nennt den Grund',
+    async () => {
+      const { target, pg, deps, logs, errs } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z
+      chownTree(target, FREMD);
+      const old = join(target, '20261104T030012Z');
+      const oldIno = lstatSync(join(old, 'media', 'photos', 'a.jpg')).ino;
+      // Gleicher Tag: der ältere Stand wird ausgedünnt, unveränderte Dateien kommen als Hardlink
+      const next = { ...deps, now: () => new Date('2026-11-04T05:00:00Z'), targetHooks: reportsOwner(FREMD) };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).toBe(0);
+      expect(readdirSync(target)).toEqual(['20261104T050000Z']);
+      const stand = join(target, '20261104T050000Z');
+      expect(lstatSync(stand).uid).toBe(FREMD);
+      expect(lstatSync(join(stand, 'media', 'photos', 'a.jpg')).ino).toBe(oldIno);
+      expect(readFileSync(join(stand, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+      const log = logs.join('\n');
+      expect(log).toMatch(
+        /meldet für Ordner, die dieser Lauf anlegt, den Besitzer uid 4242, der Lauf selbst läuft als uid 0/,
+      );
+      expect(log).toMatch(/1 Dateien, 0 neu kopiert, 1 unverändert/);
+      expect(log).toMatch(/Alten Stand 20261104T030012Z entfernt/);
+      expect(errs.join('\n')).not.toMatch(/Warnung/);
+      expect(runWith(pg, '20261104T050000Z')?.warning ?? null).toBeNull();
+    },
+  );
+
+  it.skipIf(!asRoot)(
+    'Gegenprobe auf demselben Ziel: Ordner eines dritten Besitzers mit kopiertem Manifest ist weder Hardlink-Quelle noch gelöscht',
+    async () => {
+      const { dataDir, target, deps, logs } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z
+      chownTree(target, FREMD);
+      const real = join(target, '20261104T030012Z');
+      const manifest = readFileSync(join(real, 'manifest.json'));
+      renameSync(real, join(target, 'weggeschoben'));
+      mkdirSync(join(real, 'media', 'photos'), { recursive: true });
+      writeFileSync(join(real, 'manifest.json'), manifest);
+      writeFileSync(join(real, 'db.dump'), 'DUMP');
+      const evil = join(real, 'media', 'photos', 'a.jpg');
+      writeFileSync(evil, 'BOES');
+      const source = statSync(join(dataDir, 'media', 'photos', 'a.jpg'));
+      utimesSync(evil, source.atime, source.mtime);
+      chownTree(real, ANDERER);
+
+      const next = { ...deps, now: () => new Date('2026-11-04T05:00:00Z'), targetHooks: reportsOwner(FREMD) };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).toBe(0);
+      const copied = join(target, '20261104T050000Z', 'media', 'photos', 'a.jpg');
+      expect(lstatSync(copied).ino).not.toBe(lstatSync(evil).ino);
+      expect(readFileSync(copied, 'utf8')).toBe('JPEG');
+      expect(readFileSync(evil, 'utf8')).toBe('BOES');
+      expect(readManifest(join(target, 'weggeschoben'))).not.toBeNull();
+      expect(logs.join('\n')).toMatch(/1 Ordner im Ziel sehen wie Stände aus/);
+    },
+  );
+
+  it.skipIf(!asRoot)(
+    'Stände eines früheren Laufs als anderer Benutzer: nicht ausgedünnt, nicht verlinkt, Warnung am Lauf und im Log',
+    async () => {
+      const { target, pg, deps, logs, errs } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z
+      const old = join(target, '20261104T030012Z');
+      chownTree(old, FREMD); // etwa früher ohne sudo gelaufen, jetzt als root
+      const next = { ...deps, now: () => new Date('2026-11-04T05:00:00Z') };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).toBe(0);
+      expect(readdirSync(target).sort()).toEqual(['20261104T030012Z', '20261104T050000Z']);
+      expect(lstatSync(join(target, '20261104T050000Z', 'media', 'photos', 'a.jpg')).ino).not.toBe(
+        lstatSync(join(old, 'media', 'photos', 'a.jpg')).ino,
+      );
+      expect(logs.join('\n')).toMatch(
+        /1 davon passen zu eigenen Läufen in backup_run, ihr Ordner gehört aber einem anderen Benutzer als die Ordner dieses Laufs \(uid 0\): 20261104T030012Z/,
+      );
+      const warning =
+        'Ein Backup-Stand im Ziel gehört einem anderen Benutzer als die neuen Stände, etwa nach einem Lauf per sudo oder einer geänderten Freigabe. Solche Stände werden weder ausgedünnt noch für unveränderte Dateien genutzt, jeder Lauf kopiert dann alles und das Ziel kann volllaufen. Prüfe die Besitzer der Ordner im Backup-Ziel.';
+      expect(runWith(pg, '20261104T050000Z')?.warning).toBe(warning);
+      expect(errs.join('\n')).toContain(`Warnung: ${warning}`);
+    },
+  );
+
+  it.skipIf(!asRoot)(
+    'Wettlauf beim Anlegen des .partial: ein untergeschobener fremder Ordner wird nicht zum Maßstab für „eigen“',
+    async () => {
+      const { target, deps, logs, errs } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z, Besitzer root
+      const name = '.20261104T050000Z.partial';
+      const evil = join(target, name);
+      // Der Angreifer tauscht das frisch angelegte .partial (zwischen mkdir und lstat) gegen einen eigenen Ordner
+      const swap: BackupDeps['targetHooks'] = {
+        step: (op, phase, dir, entry) => {
+          if (op !== 'mkdir' || phase !== 'after' || entry !== name) return;
+          renameSync(join(dir, entry), join(dir, 'geklaut'));
+          mkdirSync(evil);
+          lchownSync(evil, ANDERER, ANDERER);
+        },
+      };
+      const next = { ...deps, now: () => new Date('2026-11-04T05:00:00Z'), targetHooks: swap };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).not.toBe(0);
+      // Nichts landet im Ordner des Angreifers (leer wieder entfernt), seine uid gilt nirgends als eigen
+      expect(existsSync(evil) ? readdirSync(evil) : []).toEqual([]);
+      expect(existsSync(join(target, '20261104T050000Z'))).toBe(false);
+      expect(logs.join('\n')).not.toMatch(/uid 4343/);
+      // Abbruch genau durch die Probe (`targetOwner`), nicht durch eine andere Meldung mit „ersetzt“
+      expect(errs.join('\n')).toMatch(
+        /beim Anlegen ersetzt: Der Ordner gehört uid 4343, neue Dateien dieses Laufs gehören uid 0/,
+      );
+      expect(readManifest(join(target, '20261104T030012Z'))).not.toBeNull();
+    },
+  );
+
+  it.skipIf(!asRoot)(
+    'Wettlauf beim Anlegen des .partial: ein Symlink an Stelle der Probedatei wird nie verfolgt',
+    async () => {
+      const { target, deps, errs } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+      const name = '.20261104T050000Z.partial';
+      const evil = join(target, name);
+      const victim = join(dirname(target), 'opfer.txt');
+      writeFileSync(victim, 'ORIGINAL');
+      const swap: BackupDeps['targetHooks'] = {
+        step: (op, phase, dir, entry) => {
+          if (op !== 'mkdir' || phase !== 'after' || entry !== name) return;
+          renameSync(join(dir, entry), join(dir, 'geklaut'));
+          mkdirSync(evil);
+          symlinkSync(victim, join(evil, '.sg-besitzer.partial'));
+          lchownSync(evil, ANDERER, ANDERER);
+        },
+      };
+      const next = { ...deps, now: () => new Date('2026-11-04T05:00:00Z'), targetHooks: swap };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).not.toBe(0);
+      expect(readFileSync(victim, 'utf8')).toBe('ORIGINAL');
+      expect(lstatSync(join(evil, '.sg-besitzer.partial')).isSymbolicLink()).toBe(true);
+      expect(existsSync(join(target, '20261104T050000Z'))).toBe(false);
+      expect(errs.join('\n')).toMatch(/sg-besitzer\.partial gibt es schon/);
+    },
+  );
+});
+
 describe('M-1 (#114): Größengrenze für die Prüfkopie des Dumps', () => {
   const STAND = '20261104T030012Z';
   /** Ersetzt `db.dump` durch eine sparse Datei mit `bytes` Bytes (belegt auf der Platte fast nichts) */
