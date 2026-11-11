@@ -470,6 +470,8 @@ export interface FakeCore {
   events: CalendarEvent[];
   /** GET /notebooks scheitert mit 500, solange true */
   failNotebooks: boolean;
+  /** GET /sessions/{id}/notebook scheitert mit 500, solange true */
+  failSessionNotebook: boolean;
   /** Antwort von GET /sessions/{id}/transcript je Session (VERTRAEGE §18.4); ohne Eintrag ein leeres Transkript */
   transcripts: Record<string, SessionTranscript>;
   /** GET /sessions/{id}/transcript scheitert mit 500, solange true */
@@ -682,6 +684,7 @@ export function installFakeCore(
     notebooks: [],
     events: [],
     failNotebooks: false,
+    failSessionNotebook: false,
     transcripts: {},
     failTranscript: false,
     searchFixtures: structuredClone(SEARCH_FIXTURE),
@@ -1040,6 +1043,25 @@ export function installFakeCore(
           items: core.notebooks.filter((n) => !moduleId || n.module_id === moduleId),
           next_cursor: null,
         });
+      }
+
+      // GET /notebooks/{id} (§7.4)
+      const notebookOne = /^\/notebooks\/([^/]+)$/.exec(path);
+      if (notebookOne && method === 'GET') {
+        const found = core.notebooks.find((n) => n.id === notebookOne[1] && !n.deleted_at);
+        return found ? json(found) : json({ error: { code: 'notebook_not_found', message: 'x' } }, 404);
+      }
+
+      // GET /sessions/{id}/notebook (§7.2, #199): Übung und Tutorium → „uebung“, sonst „vorlesung“
+      const sessionNotebook = /^\/sessions\/([^/]+)\/notebook$/.exec(path);
+      if (sessionNotebook && method === 'GET') {
+        if (core.failSessionNotebook) return json({ error: { code: 'internal', message: 'x' } }, 500);
+        const found = core.sessions.find((x) => x.id === sessionNotebook[1] && !x.deleted_at);
+        if (!found) return json({ error: { code: 'session_not_found', message: 'x' } }, 404);
+        const event = core.events.find((e) => e.id === found.calendar_event_id);
+        const kind = event?.kind === 'uebung' || event?.kind === 'tutorium' ? 'uebung' : 'vorlesung';
+        const nb = core.notebooks.find((n) => n.module_id === found.module_id && n.kind === kind);
+        return nb ? json(nb) : json({ error: { code: 'notebook_not_found', message: 'x' } }, 404);
       }
 
       const sessionMatch = /^\/sessions\/([^/]+)\/(start|pause|resume|stop|extend)$/.exec(path);

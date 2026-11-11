@@ -55,6 +55,56 @@ final class CoreClientSyncTests: XCTestCase {
     }
 
     @MainActor
+    func testSessionNotebookAsksTheSessionEndpointAndRetriesOnConnectionLoss() async throws {
+        let transport = FakeTransport([
+            .failure(.networkConnectionLost),
+            .http(
+                status: 200,
+                body: """
+                    {"id":"019a4e14-0000-7000-8000-0000000000e2","user_id":"019a4e14-0000-7000-8000-000000000001",
+                    "module_id":"019a4e14-0000-7000-8000-0000000000c1","kind":"uebung","title":"Übung","page_count":0,
+                    "created_at":"2026-11-04T07:15:00Z","updated_at":"2026-11-04T07:15:00Z","deleted_at":null}
+                    """),
+        ])
+        let client = Fixtures.client(transport)
+
+        let notebook = try await client.sessionNotebook(
+            endpoint: Fixtures.endpoint, token: Fixtures.token, sessionID: "s1")
+
+        XCTAssertEqual(notebook?.id, "019a4e14-0000-7000-8000-0000000000e2")
+        XCTAssertEqual(notebook?.kind, .uebung)
+        XCTAssertEqual(transport.requests.count, 2)
+        let request = try XCTUnwrap(transport.requests.last)
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/v1/sessions/s1/notebook")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(Fixtures.token)")
+    }
+
+    @MainActor
+    func testSessionNotebookGivesNilFor404() async throws {
+        let transport = FakeTransport([.http(status: 404, body: Fixtures.apiError("notebook_not_found"))])
+        let client = Fixtures.client(transport)
+
+        let notebook = try await client.sessionNotebook(
+            endpoint: Fixtures.endpoint, token: Fixtures.token, sessionID: "s1")
+
+        XCTAssertNil(notebook)
+    }
+
+    @MainActor
+    func testSessionNotebookStillThrowsOtherErrors() async {
+        let transport = FakeTransport([.http(status: 401, body: Fixtures.apiError("device_token_invalid"))])
+        let client = Fixtures.client(transport)
+
+        do {
+            _ = try await client.sessionNotebook(endpoint: Fixtures.endpoint, token: Fixtures.token, sessionID: "s1")
+            XCTFail("401 muss ein Fehler bleiben")
+        } catch {
+            XCTAssertEqual(ConnectionError.wrap(error), .tokenInvalid)
+        }
+    }
+
+    @MainActor
     func testNotebookPagesRetryOnConnectionLoss() async throws {
         let transport = FakeTransport([
             .failure(.networkConnectionLost),

@@ -9,7 +9,7 @@ import {
   type NotebookUpdate,
 } from '@sg/shared';
 import type { Db, DbOrTx, Tx } from '../db/client.ts';
-import { courseModule, notebook, syncStream } from '../db/schema/index.ts';
+import { calendarEvent, courseModule, notebook, session, syncStream } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
@@ -97,6 +97,40 @@ async function getNotebookRow(tx: DbOrTx, id: string): Promise<Notebook> {
 }
 
 export const getNotebook = getNotebookRow;
+
+const sessionNotFound = () => new HttpError(404, 'session_not_found', 'Die Session wurde nicht gefunden.');
+
+/**
+ * `GET /sessions/{id}/notebook` (#199, VERTRAEGE §7.2): das Notizbuch der Session. Übung und Tutorium: „Übung“,
+ * alles andere, auch ohne Termin: „Vorlesung“. Ein weich gelöschter Termin zählt mit seiner Art, damit das
+ * Notizbuch nicht nachträglich wechselt. Fehlende Standard-Notizbücher werden vorher angelegt.
+ */
+export async function sessionNotebook(db: Db, sessionId: string): Promise<Notebook> {
+  return db.transaction(async (tx) => {
+    const [found] = await tx
+      .select({ moduleId: session.moduleId, eventKind: calendarEvent.kind })
+      .from(session)
+      .leftJoin(calendarEvent, eq(calendarEvent.id, session.calendarEventId))
+      .where(and(eq(session.id, sessionId), isNull(session.deletedAt)));
+    if (!found) throw sessionNotFound();
+    await ensureDefaultNotebooks(tx, found.moduleId);
+    const kind: NotebookKind =
+      found.eventKind === 'uebung' || found.eventKind === 'tutorium' ? 'uebung' : 'vorlesung';
+    const [row] = await tx
+      .select({ row: notebook, pageCount: pageCountOf })
+      .from(notebook)
+      .where(
+        and(
+          eq(notebook.moduleId, found.moduleId),
+          eq(notebook.kind, kind),
+          isNull(notebook.deletedAt),
+          moduleIsActive,
+        ),
+      );
+    if (!row) throw notebookNotFound();
+    return toApiNotebook(row.row, row.pageCount);
+  });
+}
 
 /**
  * Notizbücher auflisten, nach Anlage sortiert („Vorlesung“, „Übung“, dann eigene). Mit `moduleId` werden

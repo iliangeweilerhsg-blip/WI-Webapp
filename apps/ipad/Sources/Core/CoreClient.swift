@@ -134,6 +134,18 @@ final class CoreClient {
         return try decode(NotebookList.self, from: data).items
     }
 
+    /// `GET /sessions/{id}/notebook` (#199): das Notizbuch der Session, wie der Core es bestimmt.
+    /// `nil` bei 404 (älterer Core ohne diesen Endpunkt, oder das Modul ist gelöscht).
+    func sessionNotebook(endpoint: CoreEndpoint, token: String, sessionID: String) async throws -> Notebook? {
+        do {
+            let data = try await send(
+                "GET", "/sessions/\(sessionID)/notebook", endpoint: endpoint, token: token, body: nil)
+            return try decode(Notebook.self, from: data)
+        } catch ConnectionError.server(let status, _) where status == 404 {
+            return nil
+        }
+    }
+
     /// `GET /notebooks/{id}/pages`
     func notebookPages(endpoint: CoreEndpoint, token: String, notebookID: String) async throws -> [Page] {
         let data = try await send(

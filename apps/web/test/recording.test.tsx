@@ -66,6 +66,7 @@ function fakeSync(state = 'online') {
     takeOver: vi.fn(),
     listShelf: vi.fn(async () => []),
     subscribe: vi.fn(),
+    devicePresence: vi.fn(() => null),
   };
   return {
     client: client as unknown as SyncClient,

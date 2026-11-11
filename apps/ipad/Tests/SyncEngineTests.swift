@@ -423,11 +423,8 @@ final class SyncEngineTests: XCTestCase {
         let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
         let h = SyncHarness(health: [
             .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
-            .http(
-                status: 200,
-                body:
-                    "{\"items\":[\(notebookJSON(id: "019a4e14-0000-7000-8000-0000000000e2", kind: "uebung")),\(notebookJSON(id: notebookID, kind: "vorlesung"))],\"next_cursor\":null}"
-            ),
+            // `GET /sessions/{id}/notebook` (#199): der Core nennt das Notizbuch
+            .http(status: 200, body: notebookJSON(id: notebookID, kind: "vorlesung")),
             .http(status: 200, body: "{\"id\":\"019a4e14-0000-7000-8000-0000000000c1\",\"name\":\"Analysis I\"}"),
             .http(
                 status: 200,
@@ -463,9 +460,7 @@ final class SyncEngineTests: XCTestCase {
         let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
         let h = SyncHarness(health: [
             .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
-            .http(
-                status: 200,
-                body: "{\"items\":[\(notebookJSON(id: notebookID, kind: "vorlesung"))],\"next_cursor\":null}"),
+            .http(status: 200, body: notebookJSON(id: notebookID, kind: "vorlesung")),
         ])
         h.start()
         _ = await eventually { h.engine.state == .online }
@@ -479,13 +474,51 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(h.bindings.lastNotebookID, h.binding.notebookID)
     }
 
+    func testRunningLectureTakesTheNotebookFromTheEndpoint() async throws {
+        let exerciseID = "019a4e14-0000-7000-8000-0000000000e2"
+        let h = SyncHarness(health: [
+            .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
+            .http(status: 200, body: notebookJSON(id: exerciseID, kind: "uebung")),
+        ])
+        h.start()
+        _ = await eventually { h.engine.state == .online }
+
+        let running = await h.engine.runningLectureNotebookID()
+        XCTAssertEqual(running, exerciseID)
+        // Sessions, dann das Notizbuch der Session. Die Liste der Notizbücher wird nicht gebraucht.
+        XCTAssertEqual(h.transport.requests.count, 2)
+        let request = h.transport.requests[1]
+        XCTAssertEqual(request.httpMethod, "GET")
+        XCTAssertEqual(request.url?.path, "/api/v1/sessions/019a4e14-0000-7000-8000-0000000000d1/notebook")
+    }
+
+    func testRunningLectureFallsBackToTheOldRuleOn404() async throws {
+        let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
+        let h = SyncHarness(health: [
+            .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
+            // Älterer Core: kein Endpunkt
+            .http(status: 404, body: Fixtures.apiError("not_found")),
+            .http(
+                status: 200,
+                body:
+                    "{\"items\":[\(notebookJSON(id: "019a4e14-0000-7000-8000-0000000000e2", kind: "uebung")),\(notebookJSON(id: notebookID, kind: "vorlesung"))],\"next_cursor\":null}"
+            ),
+        ])
+        h.start()
+        _ = await eventually { h.engine.state == .online }
+
+        let running = await h.engine.runningLectureNotebookID()
+        XCTAssertEqual(running, notebookID)
+        XCTAssertEqual(h.transport.requests.count, 3)
+        XCTAssertEqual(h.transport.requests[2].url?.path, "/api/v1/notebooks")
+        XCTAssertEqual(h.transport.requests[2].url?.query, "module_id=019a4e14-0000-7000-8000-0000000000c1")
+    }
+
     func testResolveBindingStillBindsWhenTheModuleNameFails() async throws {
         let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
         let h = SyncHarness(health: [
             .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
-            .http(
-                status: 200,
-                body: "{\"items\":[\(notebookJSON(id: notebookID, kind: "vorlesung"))],\"next_cursor\":null}"),
+            .http(status: 200, body: notebookJSON(id: notebookID, kind: "vorlesung")),
             // Modulname scheitert: Das Notizbuch wird trotzdem gebunden, nur ohne Namen
             .http(status: 500, body: "{}"),
             .http(
