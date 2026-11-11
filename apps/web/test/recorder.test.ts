@@ -390,6 +390,48 @@ describe('AudioRecorder', () => {
     await h.recorder.stop();
   });
 
+  describe('Fehlerablage: nur die eigene Session zählt', () => {
+    const OLD = {
+      recordingId: 'alt',
+      seq: 0,
+      startMs: 0,
+      durationMs: 10_000,
+      sha256: 'x',
+      data: new Uint8Array([9]).buffer,
+      status: 409,
+      code: 'chunk_conflict',
+      message: 'm',
+      shelvedAt: 1,
+    };
+
+    it('Teil einer früheren Session (und Altbestand ohne sessionId) löst bei neuer Session nichts aus', async () => {
+      const h = setup();
+      await h.store.shelveChunk({ ...OLD, sessionId: '01b2b985-1860-7058-a15c-e5d0adae8e75' });
+      await h.store.shelveChunk({ ...OLD, recordingId: 'alt2' });
+      await h.recorder.start();
+      h.clock.t = 30_000;
+      h.mr().emit([1]);
+      await settle(h);
+      expect(await h.store.listShelf()).toHaveLength(2);
+      expect(h.recorder.getStatus().upload.shelvedChunks).toBe(0);
+      await h.recorder.stop();
+    });
+
+    it('abgelehnter Teil der aktuellen Session zählt trotz Altbestand', async () => {
+      const h = setup({
+        respond: (c) => (c.path.endsWith('/chunks/0') ? apiError(409, 'chunk_conflict') : undefined),
+      });
+      await h.store.shelveChunk({ ...OLD, sessionId: '01b2b985-1860-7058-a15c-e5d0adae8e75' });
+      await h.recorder.start();
+      h.clock.t = 30_000;
+      h.mr().emit([1]);
+      await settle(h);
+      expect(await h.store.listShelf()).toHaveLength(2);
+      expect(h.recorder.getStatus().upload.shelvedChunks).toBe(1);
+      await h.recorder.stop();
+    });
+  });
+
   it('Core beim Start nicht erreichbar: Aufnahme läuft, Anlegen und Chunks folgen später', async () => {
     let down = true;
     const h = setup({ respond: () => (down ? 'throw' : undefined) });

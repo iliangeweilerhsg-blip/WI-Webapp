@@ -206,6 +206,34 @@ describe('Heute: Start-Karte nach Zustand', () => {
     expect(within(c).getByRole('button', { name: 'Beenden' })).toBeInTheDocument();
   });
 
+  it('laufend im Leader-Tab: ehrlich „ohne Aufnahme“, hohler Punkt, Hinweis auf die Vorlesungs-Ansicht (UX-01)', async () => {
+    boot({
+      now: '2026-11-04T07:20:00Z',
+      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
+    });
+    const c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
+    expect(within(c).getByText('Läuft · ohne Aufnahme')).toBeInTheDocument();
+    expect(within(c).getByText(/Die Aufnahme läuft nur in der Vorlesungs-Ansicht\./)).toBeInTheDocument();
+    expect(within(c).getByRole('status')).toHaveTextContent(/hier wird nicht aufgenommen/);
+    expect(c.innerHTML).not.toMatch(/bg-record/);
+    expect(c.querySelector('.border-text-muted.rounded-full')).not.toBeNull();
+    expect(within(c).getByRole('link', { name: 'Zur Vorlesung' })).toBeInTheDocument();
+  });
+
+  it('laufend im Folge-Tab: „Läuft · anderer Tab“, ohne Aufnahme-Zusage (UX-01)', async () => {
+    boot({
+      now: '2026-11-04T07:20:00Z',
+      syncState: 'other_tab',
+      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
+    });
+    const c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
+    expect(await within(c).findByText('Läuft · anderer Tab')).toBeInTheDocument();
+    expect(within(c).queryByText('Läuft · ohne Aufnahme')).toBeNull();
+    expect(within(c).queryByText(/Die Aufnahme läuft nur in der Vorlesungs-Ansicht/)).toBeNull();
+    expect(within(c).getByRole('status')).toHaveTextContent(/anderer Tab/);
+    expect(within(c).getByRole('link', { name: 'Zur Vorlesung' })).toBeInTheDocument();
+  });
+
   it('pausiert: „Fortsetzen“, keine laufende Dauer', async () => {
     boot({
       now: '2026-11-04T07:20:00Z',
@@ -225,6 +253,17 @@ describe('Heute: Start-Karte nach Zustand', () => {
     expect(within(c).getByText(/ohne dass aufgenommen wurde/)).toBeInTheDocument();
     expect(within(c).queryByRole('button')).toBeNull();
     expect(c.innerHTML).not.toMatch(/text-danger|bg-record/);
+    // UX-18: Weg für den Fall, dass die Veranstaltung noch läuft
+    expect(
+      within(c).getByText(
+        'Der Termin ist vorbei, ohne dass aufgenommen wurde. Läuft die Veranstaltung noch? Dann starte unten eine Session ohne Termin.',
+      ),
+    ).toBeInTheDocument();
+    expect(within(c).getByRole('link', { name: 'Session ohne Termin' })).toHaveAttribute(
+      'href',
+      '#spontan-title',
+    );
+    expect(document.getElementById('spontan-title')).not.toBeNull();
   });
 
   it('beendet und verarbeitet: Zustand und Link zum Modul', async () => {
@@ -398,11 +437,36 @@ describe('Heute: Aktionen', () => {
     await user.click(screen.getByRole('button', { name: 'Fortsetzen' }));
     expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Beenden' }));
+    await user.click(await screen.findByRole('button', { name: 'Session beenden' }));
     await waitFor(() => expect(card()).toHaveAttribute('data-state', 'beendet'));
     expect(calls(/pause$/)).toHaveLength(1);
     expect(calls(/resume$/)).toHaveLength(1);
     expect(calls(/stop$/)).toHaveLength(1);
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('Beenden fragt nach (UX-06): „Weiterlaufen lassen“ beendet nichts, „Session beenden“ beendet', async () => {
+    const user = userEvent.setup();
+    boot({
+      now: '2026-11-04T07:20:00Z',
+      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
+    });
+    await user.click(await screen.findByRole('button', { name: 'Beenden' }));
+    expect(within(card()).getByRole('alertdialog')).toHaveTextContent('Session beenden?');
+    expect(calls(/stop$/)).toHaveLength(0);
+    // Heute nimmt nicht auf: Die Antwort verspricht keine Aufnahme
+    expect(within(card()).queryByRole('button', { name: 'Weiter aufnehmen' })).toBeNull();
+    expect(within(card()).getByRole('button', { name: 'Weiterlaufen lassen' })).toHaveFocus();
+    await user.click(within(card()).getByRole('button', { name: 'Weiterlaufen lassen' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(calls(/stop$/)).toHaveLength(0);
+    expect(card()).toHaveAttribute('data-state', 'laeuft');
+    // Der Fokus kehrt auf „Beenden“ zurück
+    expect(screen.getByRole('button', { name: 'Beenden' })).toHaveFocus();
+    await user.click(screen.getByRole('button', { name: 'Beenden' }));
+    await user.click(within(card()).getByRole('button', { name: 'Session beenden' }));
+    await waitFor(() => expect(card()).toHaveAttribute('data-state', 'beendet'));
+    expect(calls(/stop$/)).toHaveLength(1);
   });
 
   it('session_transition_invalid: deutscher Text, Ansicht wird aufgefrischt', async () => {
