@@ -34,7 +34,8 @@ enum InkOpBuilder {
                     stream: binding.stream,
                     type: .op
                 )
-                if let draft = makeDraft(.strokeAdd(op), kind: "stroke.add", binding: binding,
+                if let draft = makeDraft(
+                    .strokeAdd(op), kind: "stroke.add", stream: binding.stream, pageID: binding.pageID,
                     sessionStartMS: stroke.tStartMS == nil ? nil : binding.sessionStartMS)
                 {
                     drafts.append(draft)
@@ -54,7 +55,10 @@ enum InkOpBuilder {
                         stream: binding.stream,
                         type: .op
                     )
-                    if let draft = makeDraft(.strokeRemove(op), kind: "stroke.remove", binding: binding, sessionStartMS: nil) {
+                    if let draft = makeDraft(
+                        .strokeRemove(op), kind: "stroke.remove", stream: binding.stream, pageID: binding.pageID,
+                        sessionStartMS: nil)
+                    {
                         drafts.append(draft)
                     }
                     start = end
@@ -64,10 +68,42 @@ enum InkOpBuilder {
         return corrected(drafts, offsetMS: offsetMS)
     }
 
-    /// `page.create` für eine neue Seite: A4, leer (`blanko`), alles andere `null`
+    /// `notebook.create` für ein freies Notizbuch, das offline angelegt wurde (VERTRAEGE §11.3).
+    /// Läuft im Strom des neuen Notizbuchs und gehört zu keiner Seite (`pageID = nil`).
+    static func notebookCreate(
+        notebook: LibraryNotebook,
+        nowMS: Int,
+        offsetMS: Int?,
+        makeID: () -> String
+    ) -> OutboxDraft? {
+        let op = NotebookCreateOp(
+            at: nowMS,
+            clockUncertain: true,
+            data: NotebookCreateData(
+                createdAt: notebook.createdAtMS,
+                kind: .frei,
+                moduleID: notebook.moduleID,
+                notebookID: notebook.id,
+                title: notebook.title
+            ),
+            kind: .notebookCreate,
+            opID: makeID(),
+            origin: nil,
+            seq: nil,
+            stream: notebook.stream,
+            type: .op
+        )
+        guard
+            let built = makeDraft(
+                .notebookCreate(op), kind: "notebook.create", stream: notebook.stream, pageID: nil,
+                sessionStartMS: nil)
+        else { return nil }
+        return corrected([built], offsetMS: offsetMS).first
+    }
+
+    /// `page.create` mit allen Feldern der Seite aus der Bibliothek (Vorlage, Format, Folien, Session)
     static func pageCreate(
-        binding: InkBinding,
-        index: Int,
+        page: LibraryPage,
         nowMS: Int,
         offsetMS: Int?,
         makeID: () -> String
@@ -76,26 +112,27 @@ enum InkOpBuilder {
             at: nowMS,
             clockUncertain: true,
             data: PageCreateData(
-                attachedSlideID: nil,
-                backgroundSlideID: nil,
-                heightPt: 842,
-                index: index,
-                notebookID: binding.notebookID,
-                pageID: binding.pageID,
-                sessionID: binding.sessionID,
-                template: .blanko,
-                widthPt: 595
+                attachedSlideID: page.attachedSlideID,
+                backgroundSlideID: page.backgroundSlideID,
+                heightPt: page.heightPt,
+                index: page.index,
+                notebookID: page.notebookID,
+                pageID: page.id,
+                sessionID: page.sessionID,
+                template: page.template,
+                widthPt: page.widthPt
             ),
             kind: .pageCreate,
             opID: makeID(),
             origin: nil,
             seq: nil,
-            stream: binding.stream,
+            stream: page.stream,
             type: .op
         )
-        guard let built = makeDraft(.pageCreate(op), kind: "page.create", binding: binding, sessionStartMS: nil) else {
-            return nil
-        }
+        guard
+            let built = makeDraft(
+                .pageCreate(op), kind: "page.create", stream: page.stream, pageID: page.id, sessionStartMS: nil)
+        else { return nil }
         return corrected([built], offsetMS: offsetMS).first
     }
 
@@ -132,6 +169,17 @@ enum InkOpBuilder {
             corrected = .strokeRemove(value.with(at: value.at + offsetMS, clockUncertain: false))
         case .pageCreate(let value):
             corrected = .pageCreate(value.with(at: value.at + offsetMS, clockUncertain: false))
+        case .notebookCreate(let value):
+            corrected = .notebookCreate(
+                value.with(
+                    at: value.at + offsetMS,
+                    clockUncertain: false,
+                    data: value.data.with(createdAt: value.data.createdAt + offsetMS)
+                ))
+        case .pageUpdate(let value):
+            corrected = .pageUpdate(value.with(at: value.at + offsetMS, clockUncertain: false))
+        case .pageDelete(let value):
+            corrected = .pageDelete(value.with(at: value.at + offsetMS, clockUncertain: false))
         default:
             return nil
         }
@@ -147,26 +195,31 @@ enum InkOpBuilder {
     private static func makeDraft(
         _ op: SGSyncOp,
         kind: String,
-        binding: InkBinding,
+        stream: String,
+        pageID: String?,
         sessionStartMS: Int?
     ) -> OutboxDraft? {
         guard let json = try? text(op), let opID = opID(of: op) else { return nil }
         return OutboxDraft(
             opID: opID,
-            stream: binding.stream,
+            stream: stream,
             kind: kind,
-            pageID: binding.pageID,
+            pageID: pageID,
             json: json,
             clockUncertain: true,
             sessionStartMS: sessionStartMS
         )
     }
 
-    private static func opID(of op: SGSyncOp) -> String? {
+    /// `op_id` jeder Operation, die das iPad sendet. Fehlt eine Art, entsteht ihre Operation gar nicht.
+    static func opID(of op: SGSyncOp) -> String? {
         switch op {
         case .strokeAdd(let value): return value.opID
         case .strokeRemove(let value): return value.opID
         case .pageCreate(let value): return value.opID
+        case .pageUpdate(let value): return value.opID
+        case .pageDelete(let value): return value.opID
+        case .notebookCreate(let value): return value.opID
         default: return nil
         }
     }

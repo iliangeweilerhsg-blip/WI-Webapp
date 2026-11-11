@@ -51,7 +51,7 @@ final class CoreClientSyncTests: XCTestCase {
 
         XCTAssertTrue(notebooks.isEmpty)
         XCTAssertEqual(transport.requests.count, 3)
-        XCTAssertEqual(transport.requests.last?.url?.query, "module_id=m1")
+        XCTAssertEqual(transport.requests.last?.url?.query, "module_id=m1&limit=200")
     }
 
     @MainActor

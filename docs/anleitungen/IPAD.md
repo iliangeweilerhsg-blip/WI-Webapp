@@ -2,7 +2,7 @@
 
 So kommt die App „Studien-Gehirn“ auf dein iPad. Du brauchst kein bezahltes Entwicklerkonto. Dauer beim ersten Mal: etwa 20 Minuten.
 
-**Stand:** Die App kann koppeln und zeigt den Verbindungsstatus. Notizbücher und Stift folgen.
+**Stand:** Die App kann koppeln, zeigt den Verbindungsstatus und listet deine Notizbücher je Modul. Seiten blättern, Vorlagen und Folien folgen.
 
 ## Was du brauchst
 
@@ -84,6 +84,18 @@ Ohne diese Erlaubnis erreicht die App den Mac nicht. Nachträglich ändern: **Ei
 4. Die Web-App meldet das neue Gerät. Oben rechts in der iPad-App steht **Mac ●** mit grünem Punkt.
 
 Der QR-Code ist der sicherste Weg. Namen in der Liste „Im WLAN gefunden“ sind nicht geprüft.
+
+## Notizbücher wählen
+
+Auf dem Startbildschirm steht je Modul eine Karte mit den Notizbüchern des Moduls („Vorlesung“, „Übung“ und eigene). Tippe ein Notizbuch an, um darin zu schreiben. Die Wahl ist frei und geht auch ohne Verbindung zum Mac.
+
+- **Läuft gerade eine Vorlesung,** steht oben die Karte „Läuft gerade“. Sie öffnet das passende Notizbuch.
+- **Eigenes Notizbuch anlegen:** In der Karte des Moduls auf **Notizbuch** tippen, einen Titel eingeben, **Anlegen** wählen. Das geht auch offline. Beim nächsten Verbinden erscheint es am Mac.
+- **Ohne Verbindung** steht eine ruhige Zeile „Offline · Stand von …“ da. Du siehst den Stand vom letzten Verbinden. Ist die Liste leer, verbinde das iPad einmal mit dem Mac.
+- **Titel der Schreibfläche:** „Modul · Notizbuch“. So siehst du immer, wohin geschrieben wird.
+- **Update von einer älteren Version:** Deine bisherigen Seiten und noch nicht gesendete Striche bleiben erhalten. Die App übernimmt sie beim ersten Start in die neue Liste.
+
+Umbenennen und Löschen von Notizbüchern geht am Mac. Mehrere Seiten je Notizbuch, Vorlagen und Folien folgen in einem späteren Schritt.
 
 ## Die App läuft nur 7 Tage
 
