@@ -33,20 +33,17 @@ import { uuidv7 } from '../lib/uuid7.ts';
 // --- Normieren und Namensgleichheit (§20.3) -------------------------------------------------------------
 
 /** Steuerzeichen (Cc) außer Leerraum, wie `_CONTROL` im Worker (§19.3) */
+// eslint-disable-next-line no-control-regex -- genau diese Zeichen werden entfernt
 const CONTROL_RE = /[\u0000-\u0008\u000e-\u001b\u007f-\u0084\u0086-\u009f]/g;
 const FORMAT_RE = /\p{Cf}/gu;
 /** Leerraum wie `\s` in Python: JS-`\s` kennt U+001C–U+001F und U+0085 nicht */
+// eslint-disable-next-line no-control-regex -- Leerraum wie in Python
 const SPACE_RE = /[\s\u001c-\u001f\u0085]+/g;
 const SUFFIX_RE = /\s*\([^()]*\)$/;
 
 /** Normform: Steuer- und Formatzeichen entfernen, NFC, Leerraum zusammenfassen, trimmen */
 export function normName(input: string): string {
-  return input
-    .replace(CONTROL_RE, '')
-    .replace(FORMAT_RE, '')
-    .normalize('NFC')
-    .replace(SPACE_RE, ' ')
-    .trim();
+  return input.replace(CONTROL_RE, '').replace(FORMAT_RE, '').normalize('NFC').replace(SPACE_RE, ' ').trim();
 }
 
 /** Vergleichsform: Normform in Kleinbuchstaben nach Unicode, ohne Gebietsschema (wie `str.lower()`) */
@@ -470,7 +467,7 @@ export async function undoAcceptNew(tx: Tx, item: ItemRow, decision: InboxDecisi
       ),
     )
     .limit(1);
-  if (false as boolean) throw reopenConflict('Das Konzept hat inzwischen Belege aus anderen Vorlesungen.');
+  if (foreignEvidence) throw reopenConflict('Das Konzept hat inzwischen Belege aus anderen Vorlesungen.');
 
   const confirmed = await tx
     .select({ id: conceptRelation.id })
@@ -664,7 +661,8 @@ export async function acceptMerge(tx: Tx, item: ItemRow, targetId: string): Prom
     const from = replaceId(relation.fromId, pId, targetId);
     const to = replaceId(relation.toId, pId, targetId);
     const [fromId, toId] = orderEndpoints(relation.kind, from, to);
-    const duplicate = from === to ? undefined : await findRelation(tx, fromId, toId, relation.kind, relation.id);
+    const duplicate =
+      from === to ? undefined : await findRelation(tx, fromId, toId, relation.kind, relation.id);
     if (from === to || duplicate) {
       if (relationItem.status !== 'offen') continue;
       await markItem(tx, relationItem.id, 'abgelehnt', {
@@ -689,7 +687,10 @@ export async function acceptMerge(tx: Tx, item: ItemRow, targetId: string): Prom
     })
     .where(eq(concept.id, targetId));
   // Invariante 5. `proposal_session_id` bleibt: das Löschen der Session nimmt die Hülle mit
-  await tx.update(concept).set({ status: 'zusammengefuehrt', mergedInto: targetId }).where(eq(concept.id, pId));
+  await tx
+    .update(concept)
+    .set({ status: 'zusammengefuehrt', mergedInto: targetId })
+    .where(eq(concept.id, pId));
 
   return {
     ...emptyDecision('zusammengefuehrt'),
@@ -843,9 +844,7 @@ export async function confirmRelation(
     const [existingItem] = await tx
       .select()
       .from(inboxItem)
-      .where(
-        and(eq(inboxItem.relationId, existing.id), eq(inboxItem.status, 'offen'), notDeleted(inboxItem)),
-      )
+      .where(and(eq(inboxItem.relationId, existing.id), eq(inboxItem.status, 'offen'), notDeleted(inboxItem)))
       .for('update', { skipLocked: true });
     if (!existingItem) return decision;
     if (kind === 'baut_auf') await assertNoCycle(tx, fromId, toId);

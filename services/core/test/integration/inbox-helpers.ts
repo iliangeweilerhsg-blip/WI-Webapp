@@ -170,14 +170,12 @@ export class World {
         WHERE id = ${refId(ref)}`;
     }
     for (const moduleRef of seed.modules ?? []) {
-      await this.db
-        .insert(conceptModule)
-        .values({
-          id: refId(`cm-${ref}-${moduleRef}`),
-          ...base,
-          conceptId: refId(ref),
-          moduleId: refId(moduleRef),
-        });
+      await this.db.insert(conceptModule).values({
+        id: refId(`cm-${ref}-${moduleRef}`),
+        ...base,
+        conceptId: refId(ref),
+        moduleId: refId(moduleRef),
+      });
     }
     return refId(ref);
   }

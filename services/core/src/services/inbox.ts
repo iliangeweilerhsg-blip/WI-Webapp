@@ -54,7 +54,9 @@ const notFound = () => new HttpError(404, 'inbox_item_not_found', 'Der Eintrag w
 /** `blocked` je offenem Beziehungs-Eintrag: ein Endpunkt ist noch Vorschlag (offen bzw. abgelehnt) */
 async function loadBlocked(db: DbOrTx, rows: readonly ItemRow[]): Promise<Map<string, InboxBlockedReason>> {
   const result = new Map<string, InboxBlockedReason>();
-  const relationIds = rows.flatMap((row) => (row.status === 'offen' && row.relationId ? [row.relationId] : []));
+  const relationIds = rows.flatMap((row) =>
+    row.status === 'offen' && row.relationId ? [row.relationId] : [],
+  );
   if (relationIds.length === 0) return result;
   const endpoints = await db
     .select({
@@ -265,7 +267,10 @@ type AcceptPlan =
   | { type: 'relation'; relationKind: ConceptRelationKind | undefined };
 
 /** Welche Felder zu welcher Art passen (§20.6), sonst `400 inbox_action_invalid` */
-export function planAccept(item: Pick<ItemRow, 'kind' | 'targetConceptId'>, body: InboxAcceptRequest): AcceptPlan {
+export function planAccept(
+  item: Pick<ItemRow, 'kind' | 'targetConceptId'>,
+  body: InboxAcceptRequest,
+): AcceptPlan {
   const invalid = (field: string) =>
     new HttpError(400, 'inbox_action_invalid', `Das Feld ${field} passt nicht zu diesem Vorschlag.`, {
       field,

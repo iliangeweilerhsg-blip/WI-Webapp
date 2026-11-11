@@ -30,7 +30,11 @@ beforeEach(async () => {
 });
 
 const post = (path: string, payload?: unknown) =>
-  app.request({ method: 'POST', url: `${API}${path}`, ...(payload === undefined ? {} : { payload }) });
+  app.request({
+    method: 'POST',
+    url: `${API}${path}`,
+    ...(payload === undefined ? {} : { payload: payload as object }),
+  });
 const accept = (ref: string, body: unknown = {}) => post(`/inbox/${refId(ref)}/accept`, body);
 const reject = (ref: string) => post(`/inbox/${refId(ref)}/reject`);
 const reopen = (ref: string) => post(`/inbox/${refId(ref)}/reopen`);
