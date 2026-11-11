@@ -160,7 +160,13 @@ export function StatusBar({
       recordingState === 'stopping' ||
       recordingState === 'recording' ||
       recordingState === 'starting';
-    uploadText = saving ? 'Wird gesichert …' : 'Gesichert';
+    // Zurückgestellte Teile (der Core hat sie abgelehnt) bleiben liegen: dann nicht still „Gesichert“ melden
+    const shelved = upload.shelvedChunks;
+    uploadText = saving
+      ? 'Wird gesichert …'
+      : shelved > 0
+        ? `Gesichert, ${shelved === 1 ? '1 Teil' : `${shelved} Teile`} zurückgestellt`
+        : 'Gesichert';
   }
 
   let record: { label: string; time: string | null; dot: 'rec' | 'hollow' | 'filled' };

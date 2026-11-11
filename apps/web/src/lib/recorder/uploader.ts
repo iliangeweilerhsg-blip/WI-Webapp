@@ -31,6 +31,8 @@ export interface UploaderOptions {
   /** Läuft die Aufnahme noch in diesem Tab? Dann wird sie nie als verwaist abgeschlossen. */
   isActive?: (recordingId: string) => boolean;
   abandonAfterMs?: number;
+  /** Zählt in `shelvedChunks` nur Ablage-Einträge dieser Session (ohne Angabe: alle) */
+  sessionId?: string;
   onChange?: (status: UploaderStatus) => void;
 }
 
@@ -73,6 +75,7 @@ export class ChunkUploader {
   private readonly now: () => number;
   private readonly isActive: (recordingId: string) => boolean;
   private readonly abandonAfterMs: number;
+  private readonly sessionId: string | undefined;
   private readonly onChange: ((status: UploaderStatus) => void) | undefined;
 
   private running: Promise<void> | null = null;
@@ -96,6 +99,7 @@ export class ChunkUploader {
     this.now = options.now ?? Date.now;
     this.isActive = options.isActive ?? (() => false);
     this.abandonAfterMs = options.abandonAfterMs ?? ABANDON_AFTER_MS;
+    this.sessionId = options.sessionId;
     this.onChange = options.onChange;
   }
 
@@ -166,7 +170,12 @@ export class ChunkUploader {
       // Abgelehnte Aufnahmen bleiben als Metadaten liegen, ihr `complete` geht nie an den Core
       if (meta.complete && !meta.rejected) completes += 1;
     }
-    const shelved = (await this.store.listShelf()).length;
+    // Die Ablage wird nie geleert: nur Teile der eigenen Session zählen, sonst meldet jede spätere Session sie mit
+    const shelf = await this.store.listShelf();
+    const shelved =
+      this.sessionId === undefined
+        ? shelf.length
+        : shelf.filter((e) => e.sessionId === this.sessionId).length;
     if (seq !== this.countsSeq) return;
     if (
       pending !== this.status.pendingChunks ||
@@ -342,6 +351,7 @@ export class ChunkUploader {
     }
     await this.store.shelveChunk({
       recordingId: chunk.recordingId,
+      sessionId: meta.sessionId,
       seq: chunk.seq,
       startMs: chunk.startMs,
       durationMs: chunk.durationMs,
@@ -359,6 +369,7 @@ export class ChunkUploader {
     for (const chunk of await this.store.listChunks(meta.id)) {
       await this.store.shelveChunk({
         recordingId: chunk.recordingId,
+        sessionId: meta.sessionId,
         seq: chunk.seq,
         startMs: chunk.startMs,
         durationMs: chunk.durationMs,

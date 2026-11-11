@@ -43,6 +43,8 @@ export interface ChunkRecord {
 export interface ShelfRecord {
   id?: number;
   recordingId: string;
+  /** Session der Aufnahme. Fehlt bei älteren Einträgen: die zählen für keine Session (`UploaderOptions.sessionId`) */
+  sessionId?: string;
   seq: number;
   startMs: number;
   durationMs: number;
@@ -85,7 +87,7 @@ export interface UploaderStatus {
   pendingChunks: number;
   /** Intern: abgeschlossene Aufnahmen, deren `POST …/complete` noch aussteht (zählt nicht in `pendingChunks`) */
   pendingCompletes?: number;
-  /** Chunks in der Fehlerablage */
+  /** Chunks dieser Session in der Fehlerablage (nur mit gesetzter `sessionId`, sonst alle) */
   shelvedChunks: number;
   /** Letzter Versuch scheiterte an Netz oder Core (5xx) */
   offline: boolean;

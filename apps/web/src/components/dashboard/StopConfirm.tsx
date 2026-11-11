@@ -8,7 +8,16 @@ import { useEffect, useRef } from 'react';
 const button =
   'inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong px-4 py-2 text-md hover:bg-surface-raised';
 
-export function StopConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+export function StopConfirm({
+  onConfirm,
+  onCancel,
+  cancelLabel = 'Weiter aufnehmen',
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+  /** Text der ungefährlichen Antwort. Wo nicht aufgenommen wird (Heute), darf er keine Aufnahme versprechen. */
+  cancelLabel?: string;
+}) {
   const box = useRef<HTMLDivElement>(null);
   const cancel = useRef<HTMLButtonElement>(null);
   const onCancelRef = useRef(onCancel);
@@ -58,7 +67,7 @@ export function StopConfirm({ onConfirm, onCancel }: { onConfirm: () => void; on
       </p>
       <div className="flex flex-wrap gap-2">
         <button ref={cancel} type="button" className={button} onClick={onCancel}>
-          Weiter aufnehmen
+          {cancelLabel}
         </button>
         <button type="button" className={button} onClick={onConfirm}>
           Session beenden

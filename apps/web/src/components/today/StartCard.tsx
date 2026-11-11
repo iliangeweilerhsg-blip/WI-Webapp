@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@sg/shared';
+import { StopConfirm } from '../dashboard/StopConfirm.tsx';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import { moduleHref } from '../../lib/nav.ts';
 import { noteMicIntent } from '../../lib/recorder/mic-intent.ts';
@@ -66,13 +67,25 @@ export interface StartCardProps {
   now: number;
   /** Eine vergessene aktive Session läuft noch; der Core beendet sie beim Start (§9.1) */
   previousRunning?: boolean;
+  /** Dieser Tab ist Folge-Tab (ein anderer Tab hält die Sync-Leader-Rolle) */
+  otherTab?: boolean;
+  /** Zusätzliche Klassen für den Kartenrand (z. B. Hervorhebung bei der Beenden-Frage) */
+  className?: string;
   /** Neue Fassung der Session aus einer Antwort des Core übernehmen */
   onSession: (session: Session) => void;
   /** Liste neu laden (z. B. nach `session_transition_invalid`) */
   onRefetch: () => void;
 }
 
-export function StartCard({ entry, now, previousRunning = false, onSession, onRefetch }: StartCardProps) {
+export function StartCard({
+  entry,
+  now,
+  previousRunning = false,
+  otherTab = false,
+  className = '',
+  onSession,
+  onRefetch,
+}: StartCardProps) {
   const session = entry.session;
   const router = useRouter();
   const [busy, setBusy] = useState<Action | null>(null);
@@ -80,6 +93,7 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
   const busyRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [ended, setEnded] = useState(false);
+  const [confirmStop, setConfirmStop] = useState(false);
   const cardRef = useRef<HTMLElement>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const hadFocus = useRef(false);
@@ -89,6 +103,8 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
   // Eine neue Lage macht die alte Fehlermeldung hinfällig
   useEffect(() => setError(null), [session?.id, session?.state]);
   useEffect(() => setEnded(false), [session?.id]);
+  // Die Frage gilt nur für die Lage, in der sie gestellt wurde
+  useEffect(() => setConfirmStop(false), [session?.id, session?.state]);
   // Verschwindet der Knopf, der den Fokus hatte (z. B. „Start“), geht der Fokus auf die Überschrift der Karte
   useEffect(() => {
     if (busy !== null || !hadFocus.current) return;
@@ -162,10 +178,9 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
     }
   }
 
+  // Auf „Heute“ läuft nie eine Aufnahme (sie gehört der Vorlesungs-Ansicht): kein REC-Rot, sondern ein hohler Punkt (UX-01)
   const dot =
-    state === 'laeuft' ? (
-      <span aria-hidden="true" className="inline-block size-2.5 rounded-full bg-record" />
-    ) : state === 'pausiert' ? (
+    state === 'laeuft' || state === 'pausiert' ? (
       <span aria-hidden="true" className="inline-block size-2.5 rounded-full border-2 border-text-muted" />
     ) : null;
 
@@ -175,14 +190,14 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
       ref={cardRef}
       aria-labelledby={titleId}
       data-state={state}
-      className={`rounded-lg border bg-surface ${big ? 'border-border-strong px-4 py-5 sm:px-6' : 'border-border px-4 py-4'}`}
+      className={`rounded-lg border bg-surface ${className} ${big ? 'border-border-strong px-4 py-5 sm:px-6' : 'border-border px-4 py-4'}`}
     >
       <p className="flex items-center gap-2 text-sm font-medium text-text-muted">
         {dot}
-        <span>{HEADINGS[state]}</span>
+        <span>{heading(state, otherTab)}</span>
         {/* Zustand für Screenreader als ruhige Statusmeldung */}
         <span role="status" className="sr-only">
-          {statusText(state)}
+          {statusText(state, otherTab)}
         </span>
       </p>
 
@@ -207,8 +222,15 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
             {[timeRange, entry.room].filter(Boolean).join(' · ') || 'Spontane Session'}
           </p>
           <p className="mt-2 text-md">
-            {detail(state, { now, startsInMs, plannedStart, startedAt, session })}
+            {detail(state, { now, startsInMs, plannedStart, startedAt, session, otherTab })}
           </p>
+          {state === 'verpasst' ? (
+            <p className="mt-1 text-md">
+              <a href="#spontan-title" className="underline underline-offset-4">
+                Session ohne Termin
+              </a>
+            </p>
+          ) : null}
           {previousRunning && canStart ? (
             <p className="mt-1 text-sm text-text-muted">
               Vorherige Vorlesung läuft noch und wird beim Start beendet.
@@ -270,7 +292,11 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
                 type="button"
                 className={`${ghost} ml-4 sm:ml-8`}
                 aria-disabled={busy !== null}
-                onClick={() => void run('stop')}
+                aria-expanded={confirmStop}
+                onClick={() => {
+                  // Während einer Aktion keine Frage öffnen (vorher hielt `run()` den Klick ab)
+                  if (!busyRef.current) setConfirmStop(true);
+                }}
               >
                 {busy === 'stop' ? 'Wird beendet …' : 'Beenden'}
               </button>
@@ -289,6 +315,19 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
         </div>
       </div>
 
+      {confirmStop && (state === 'laeuft' || state === 'pausiert') ? (
+        <div className="mt-4 overflow-hidden rounded-md border border-border">
+          <StopConfirm
+            cancelLabel="Weiterlaufen lassen"
+            onCancel={() => setConfirmStop(false)}
+            onConfirm={() => {
+              setConfirmStop(false);
+              void run('stop');
+            }}
+          />
+        </div>
+      ) : null}
+
       {error ? (
         <p role="alert" className="mt-3 text-sm text-danger">
           {error}
@@ -298,14 +337,21 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
   );
 }
 
-function statusText(state: CardState): string {
+function heading(state: CardState, otherTab: boolean): string {
+  if (state === 'laeuft') return otherTab ? 'Läuft · anderer Tab' : 'Läuft · ohne Aufnahme';
+  return HEADINGS[state];
+}
+
+function statusText(state: CardState, otherTab: boolean): string {
   switch (state) {
     case 'bevorstehend':
       return 'Die Session beginnt später.';
     case 'bereit':
       return 'Die Session ist bereit zum Start.';
     case 'laeuft':
-      return 'Die Session läuft.';
+      return otherTab
+        ? 'Die Session läuft. Ein anderer Tab hält die Verbindung.'
+        : 'Die Session läuft, aber hier wird nicht aufgenommen.';
     case 'pausiert':
       return 'Die Session ist pausiert.';
     case 'verpasst':
@@ -325,6 +371,7 @@ function detail(
     plannedStart: number | null;
     startedAt: number | null;
     session: Session;
+    otherTab: boolean;
   },
 ): string {
   switch (state) {
@@ -335,11 +382,18 @@ function detail(
         ? `Beginnt um ${formatClock(c.plannedStart)}, ${formatUntil(c.startsInMs)}.`
         : 'Der Termin hat begonnen.';
     case 'laeuft':
-      return c.startedAt !== null ? `Seit ${formatClock(c.startedAt)} Uhr.` : 'Läuft.';
+      return [
+        c.startedAt !== null ? `Seit ${formatClock(c.startedAt)} Uhr.` : null,
+        c.otherTab
+          ? 'Ein anderer Tab hält die Verbindung.'
+          : 'Die Aufnahme läuft nur in der Vorlesungs-Ansicht.',
+      ]
+        .filter(Boolean)
+        .join(' ');
     case 'pausiert':
       return 'Fortsetzen nimmt genau dort wieder auf.';
     case 'verpasst':
-      return 'Der Termin ist vorbei, ohne dass aufgenommen wurde.';
+      return 'Der Termin ist vorbei, ohne dass aufgenommen wurde. Läuft die Veranstaltung noch? Dann starte unten eine Session ohne Termin.';
     case 'beendet':
       return 'Die Aufnahme wird gerade verarbeitet.';
     case 'verarbeitet':

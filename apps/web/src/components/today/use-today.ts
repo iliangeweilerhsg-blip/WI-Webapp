@@ -102,6 +102,8 @@ export interface TodayData {
   live: boolean;
   /** Hinweis „keine Live-Verbindung“ zeigen */
   hint: boolean;
+  /** Dieser Tab ist Folge-Tab: Ein anderer Tab hält die Sync-Leader-Rolle */
+  otherTab: boolean;
   /** Neue Fassung einer Session übernehmen (Antwort einer Aktion); ältere Fassungen werden ignoriert */
   apply: (session: Session) => void;
   refetch: () => void;
@@ -127,7 +129,7 @@ function useEvents(range: DayRange | null) {
 export function useTodayData(now: number | null): TodayData {
   const client = useQueryClient();
   const sync = useSyncClient();
-  const { live, hint, online } = useLiveState(sync);
+  const { live, hint, online, otherTab } = useLiveState(sync);
   const dayStart = now === null ? null : startOfDay(new Date(now)).getTime();
   const range = useMemo(() => (dayStart === null ? null : dayRange(dayStart)), [dayStart]);
   const modules = useModules();
@@ -215,6 +217,7 @@ export function useTodayData(now: number | null): TodayData {
     updatedAt: lastOk.current,
     live,
     hint,
+    otherTab,
     apply,
     refetch,
   };
