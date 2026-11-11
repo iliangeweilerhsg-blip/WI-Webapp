@@ -24,6 +24,8 @@ final class AppModel {
     private(set) var connection: ConnectionStatus = .unknown
 
     let pairing: PairingController
+    /// Live-Sync mit dem Mac (T1-14). `nil` in Tests ohne Netz.
+    let sync: SyncEngine?
 
     private let client: CoreClient
     private let tokenStore: any TokenStore
@@ -34,9 +36,11 @@ final class AppModel {
         tokenStore: any TokenStore,
         macStore: any PairedMacStore,
         deviceName: String,
-        appVersion: String?
+        appVersion: String?,
+        sync: SyncEngine? = nil
     ) {
         self.client = client
+        self.sync = sync
         self.tokenStore = tokenStore
         self.macStore = macStore
         self.pairing = PairingController(
@@ -46,6 +50,9 @@ final class AppModel {
             deviceName: deviceName,
             appVersion: appVersion
         )
+        sync?.onStateChange = { [weak self] state in
+            self?.syncStateChanged(state)
+        }
         reload()
         pairing.onPaired = { [weak self] in
             self?.reload()
@@ -61,11 +68,34 @@ final class AppModel {
             phase = .unpaired
         }
         connection = .unknown
+        // Der Sync läuft, solange das iPad gekoppelt ist
+        if case .paired(let mac) = phase {
+            sync?.start(mac: mac)
+        } else {
+            sync?.stop()
+        }
+    }
+
+    /// Der Verbindungsstatus folgt der Engine: online heißt verbunden, ein widerrufenes Token heißt neu koppeln.
+    /// Alles andere klärt die Abfrage von `/health`.
+    private func syncStateChanged(_ state: SyncEngine.State) {
+        guard case .paired = phase else { return }
+        switch state {
+        case .online:
+            connection = .connected
+        case .tokenInvalid:
+            connection = .disconnected(.tokenInvalid)
+        default:
+            break
+        }
     }
 
     /// Nach einem 401 ist das Token endgültig ungültig. Weitere Abfragen bringen nichts,
     /// bis neu gekoppelt ist (`reload()` setzt den Status zurück).
-    var isPollingPaused: Bool { connection == .disconnected(.tokenInvalid) }
+    /// Solange der Sync online ist, weiß die App ohnehin, dass der Mac antwortet.
+    var isPollingPaused: Bool {
+        connection == .disconnected(.tokenInvalid) || sync?.state == .online
+    }
 
     /// Regelmäßige Abfrage vom Startbildschirm. Ruht, solange das Token ungültig ist.
     func pollConnection() async {
@@ -98,6 +128,8 @@ final class AppModel {
     /// Kopplung aufheben: am Mac abmelden (so gut es geht), Token und Adresse löschen
     func unpair() async {
         guard case .paired(let mac) = phase else { return }
+        // Die Warteschlange bleibt auf dem iPad, nur die Verbindung endet
+        sync?.stop()
         if let token = try? tokenStore.loadToken() {
             // Ist der Mac nicht erreichbar oder das Token schon widerrufen, bleibt nur das lokale Löschen
             try? await client.removeDevice(endpoint: mac.endpoint, deviceID: mac.deviceID, token: token)

@@ -4,6 +4,7 @@ import UIKit
 @main
 struct StudienGehirnApp: App {
     @State private var model = AppModel.live()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -12,6 +13,12 @@ struct StudienGehirnApp: App {
                 Color.clear
             } else {
                 RootView(model: model)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Zurück im Vordergrund: Wartezeit überspringen, tote Verbindung früh erkennen
+            if phase == .active {
+                model.sync?.kick()
             }
         }
     }
@@ -27,12 +34,21 @@ enum AppEnvironment {
 extension AppModel {
     /// Die echte App: URLSession, Schlüsselbund, UserDefaults
     static func live() -> AppModel {
-        AppModel(
-            client: CoreClient(transport: URLSessionTransport()),
-            tokenStore: KeychainTokenStore(),
+        let client = CoreClient(transport: URLSessionTransport())
+        let tokenStore = KeychainTokenStore()
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        // Unit-Tests laufen in der App: keine Dateien und keine Verbindung
+        let sync: SyncEngine? =
+            AppEnvironment.isRunningTests
+            ? nil
+            : SyncEngine.live(client: client, tokenStore: tokenStore, appVersion: appVersion)
+        return AppModel(
+            client: client,
+            tokenStore: tokenStore,
             macStore: DefaultsPairedMacStore(),
             deviceName: UIDevice.current.name,
-            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            appVersion: appVersion,
+            sync: sync
         )
     }
 }

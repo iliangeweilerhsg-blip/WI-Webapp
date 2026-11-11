@@ -2,9 +2,15 @@ import SwiftUI
 import UIKit
 
 /// Schreibfläche einer Seite mit Werkzeugleiste (F-INK-01).
-/// Vorläufig öffnet sie die eine Seite des Test-Notizbuchs. Notizbücher, Seiten und Vorlagen folgen mit T1-13.
+/// Mit laufender Vorlesung öffnet sie die Seite des Vorlesungs-Notizbuchs und sendet die Striche live an den Mac
+/// (T1-14). Ohne Bindung bleibt es bei der lokalen Testseite ohne Sync. Notizbücher, Seiten und Vorlagen folgen
+/// mit T1-13.
 struct InkPageView: View {
+    let sync: SyncEngine?
+
     @State private var model: InkPageModel?
+    @State private var binding: InkBinding?
+    @State private var isReconciling = false
     /// Händigkeit: Seite der Werkzeugleiste. Später aus `Settings.lecture.toolbar_side` (F-EIN-01).
     @AppStorage("ink.toolbarSide") private var toolbarSideRaw = ToolbarSide.rechts.rawValue
     @Environment(\.scenePhase) private var scenePhase
@@ -28,11 +34,22 @@ struct InkPageView: View {
                         InkToolbar(model: model)
                     }
                 }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    if sync != nil, binding == nil {
+                        Text("Kein Notizbuch am Mac gefunden. Diese Seite bleibt vorerst nur auf dem iPad. Starte am Mac eine Vorlesung und öffne die Schreibfläche danach neu.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal)
+                            .padding(.vertical, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(.secondarySystemBackground))
+                    }
+                }
             } else {
                 Color(.secondarySystemBackground)
             }
         }
-        .navigationTitle("Test-Notizbuch")
+        .navigationTitle(binding == nil ? "Test-Notizbuch" : "Vorlesung")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -45,19 +62,75 @@ struct InkPageView: View {
                     toolbarSide == .links ? "Werkzeugleiste nach rechts" : "Werkzeugleiste nach links")
             }
         }
+        .task {
+            await open()
+        }
         .onAppear {
-            if model == nil {
-                model = InkPageModel(store: FileInkPageStore.standard())
-            }
+            sync?.setPresence(presence(onPage: true))
         }
         .onDisappear {
             model?.saveNow()
+            sync?.setPresence(presence(onPage: false))
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 model?.saveNow()
             }
         }
+        .onChange(of: sync?.welcomeCount ?? 0) { _, _ in
+            // Neu verbunden (auch nach neuer db_epoch): Seite abgleichen, wenn nötig
+            _Concurrency.Task { await reconcileIfNeeded() }
+        }
+    }
+
+    /// Öffnet die Seite: Bindung auflösen, Modell anlegen, Sync anschließen
+    private func open() async {
+        guard model == nil else { return }
+        let resolved = await sync?.resolveBinding()
+        guard !_Concurrency.Task.isCancelled else { return }
+
+        let store = FileInkPageStore.standard()
+        let page: InkPageModel
+        if let sync, let resolved {
+            page = InkPageModel(
+                pageID: resolved.pageID,
+                store: store,
+                outboxMark: sync.outboxMark(forPage: resolved.pageID)
+            )
+            page.outboxNumberProvider = { [weak sync] in sync?.outboxLastNumber ?? 0 }
+            page.sessionStartedAt = resolved.sessionStartMS.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+            page.onStrokeChanges = { [weak sync, weak page] changes in
+                guard let sync, let page else { return }
+                // Scheitert das Einreihen, holt der nächste Abgleich es nach
+                if !sync.enqueue(changes, binding: resolved) {
+                    page.markNeedsReconcile()
+                }
+            }
+        } else {
+            page = InkPageModel(store: store)
+        }
+        binding = resolved
+        model = page
+        sync?.setPresence(presence(onPage: true))
+        await reconcileIfNeeded()
+    }
+
+    private func reconcileIfNeeded() async {
+        guard let sync, let model, let binding, sync.canReachCore, !isReconciling else { return }
+        guard model.needsReconcile || sync.bindingNeedsReconcile(pageID: binding.pageID) else { return }
+        isReconciling = true
+        await sync.reconcile(page: model, binding: binding)
+        isReconciling = false
+    }
+
+    /// `page_id` ist nur gesetzt, solange die Schreibfläche offen ist
+    private func presence(onPage: Bool) -> SyncPresenceTarget? {
+        guard let binding else { return nil }
+        return SyncPresenceTarget(
+            sessionID: binding.sessionID,
+            notebookID: binding.notebookID,
+            pageID: onPage ? binding.pageID : nil
+        )
     }
 }
 

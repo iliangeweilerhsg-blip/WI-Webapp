@@ -41,12 +41,25 @@ struct CoreEndpoint: Equatable, Hashable, Sendable {
     var displayText: String { "\(host):\(port)" }
 
     /// URL unter `/api/v1`. `path` beginnt mit `/`.
-    func url(path: String) -> URL? {
+    func url(path: String, queryItems: [URLQueryItem] = []) -> URL? {
         var components = URLComponents()
         components.scheme = "http"
         components.host = host
         components.port = port
         components.path = "/api/v1" + path
+        if !queryItems.isEmpty {
+            components.queryItems = queryItems
+        }
+        return components.url
+    }
+
+    /// WebSocket des Sync: `ws://host:port/sync`, außerhalb von `/api/v1` (VERTRAEGE §11.1)
+    func syncURL() -> URL? {
+        var components = URLComponents()
+        components.scheme = "ws"
+        components.host = host
+        components.port = port
+        components.path = "/sync"
         return components.url
     }
 
