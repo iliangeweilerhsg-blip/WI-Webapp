@@ -13,13 +13,25 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
 from .interfaces import CallCost, StructuredRequest, Tier
 from .llm import Backend, LlmFatalError, Reply
-from .outputs import ConceptsExtractOutput, ExtractConceptOut, ExtractRelationOut, ExtractTimeRange
+from .outputs import (
+    ConceptsExtractOutput,
+    ConceptsResolveOutput,
+    ExtractConceptOut,
+    ExtractRelationOut,
+    ExtractTimeRange,
+    ResolveDecisionOut,
+    ResolveVerdictOut,
+    SummaryOutlineOut,
+    SummarySentenceOut,
+    SummaryWriteOutput,
+)
 from .pricing import Tokens, usd_eur
 
 log = logging.getLogger(__name__)
@@ -161,3 +173,106 @@ def concepts_extract(
         for i in range(len(concepts) - 1)
     ]
     return ConceptsExtractOutput(concepts=concepts, relations=relations)
+
+
+# ---------- concepts.resolve (§20.3 „Fake“) ----------
+
+
+@dataclass(frozen=True)
+class FakePair:
+    """Ein Paar, das die KI entscheiden soll. `*_base` ist die Basisform des Namens (§20.3)."""
+
+    concept: str
+    candidate: str
+    concept_base: str
+    candidate_base: str
+
+
+def _whole_word(inner: str, outer: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(inner)}(?!\w)", outer) is not None
+
+
+def concepts_resolve(pairs: Sequence[FakePair]) -> ConceptsResolveOutput:
+    """`gleich`, wenn die Basisform gleich ist, `teil_von`, wenn eine die andere als ganzes Wort
+    enthält, sonst `verschieden`. Konfidenz 0,9. Keine weiteren Beziehungen."""
+    decisions: list[ResolveDecisionOut] = []
+    for pair in pairs:
+        a, b = pair.concept_base, pair.candidate_base
+        verdict: ResolveVerdictOut = "verschieden"
+        if a == b:
+            verdict = "gleich"
+        elif a and b and (_whole_word(a, b) or _whole_word(b, a)):
+            verdict = "teil_von"
+        decisions.append(
+            ResolveDecisionOut(
+                concept=pair.concept,
+                candidate=pair.candidate,
+                verdict=verdict,
+                reason="Regel des Fakes.",
+                confidence=0.9,
+            )
+        )
+    return ConceptsResolveOutput(decisions=decisions, relations=[])
+
+
+# ---------- summary.write (§20.4 „Fake“) ----------
+
+MAX_FAKE_SENTENCES = 5
+MAX_FAKE_OUTLINE = 30
+
+
+@dataclass(frozen=True)
+class FakeConcept:
+    """Ein Konzept der Eingabe mit seinen Belegen aus dieser Session (Folien-Indizes, ms)."""
+
+    name: str
+    slides: list[int] = field(default_factory=list)
+    spans: list[tuple[int, int]] = field(default_factory=list)
+
+
+def summary_write(
+    concepts: Sequence[FakeConcept],
+    slides: Sequence[FakeSlide],
+    segments: Sequence[tuple[int, int]],
+) -> SummaryWriteOutput:
+    """`Die Vorlesung behandelt <Name>.` für die ersten 5 Konzepte mit bis zu 2 ihrer Belege;
+    ohne Konzepte `Folie <i> behandelt <Titel>.` für die ersten 5 Folien mit Titel; ohne Folien
+    `Ab <mm:ss> geht es um gesprochene Inhalte.` je angefangene 10 min. Gliederung: je Folie mit
+    Titel (höchstens 30) der Titel mit dieser Folie."""
+    titled = [s for s in sorted(slides, key=lambda s: s.index) if s.title]
+    sentences: list[SummarySentenceOut] = []
+    if concepts:
+        for concept in concepts[:MAX_FAKE_SENTENCES]:
+            picked_slides = concept.slides[:2]
+            picked_spans = concept.spans[: 2 - len(picked_slides)]
+            sentences.append(
+                SummarySentenceOut(
+                    text=f"Die Vorlesung behandelt {concept.name}.",
+                    slides=picked_slides,
+                    times=[t for span in picked_spans for t in _range([span])],
+                )
+            )
+    elif titled:
+        sentences = [
+            SummarySentenceOut(
+                text=f"Folie {s.index} behandelt {s.title}.", slides=[s.index], times=[]
+            )
+            for s in titled[:MAX_FAKE_SENTENCES]
+        ]
+    else:
+        windows: dict[int, list[tuple[int, int]]] = {}
+        for start, end in segments:
+            windows.setdefault(start // TEN_MIN_MS, []).append((start, end))
+        for k in sorted(windows)[:MAX_FAKE_SENTENCES]:
+            first = min(s for s, _ in windows[k]) // 1000
+            sentences.append(
+                SummarySentenceOut(
+                    text=f"Ab {first // 60:02d}:{first % 60:02d} geht es um gesprochene Inhalte.",
+                    slides=[],
+                    times=_range(windows[k]),
+                )
+            )
+    outline = [
+        SummaryOutlineOut(title=s.title or "", slides=[s.index]) for s in titled[:MAX_FAKE_OUTLINE]
+    ]
+    return SummaryWriteOutput(sentences=sentences, outline=outline)
