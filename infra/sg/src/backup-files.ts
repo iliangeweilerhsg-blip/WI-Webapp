@@ -1,7 +1,8 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
-import { closeSync, existsSync, readdirSync, type Stats } from 'node:fs';
+import { closeSync, existsSync, lstatSync, readdirSync, readSync, type Stats } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import {
+  type AnchoredDirs,
   NoFollowReader,
   NoFollowRemover,
   NoFollowWriter,
@@ -262,7 +263,15 @@ function copyLevel(src: string, dst: string, prev: string | null, result: CopySt
       }
       let how: 'linked' | 'copied' = 'copied';
       const old = prevFile(reader, prev, name);
-      if (old && old.size === real.size && Math.abs(old.mtimeMs - real.mtimeMs) < 2) {
+      // Nur eigene Dateien verlinken (H-1, #161): Die Besitzerprüfung des vorigen Standes (`ownStandsIn`) läuft vor
+      // `pg_dump`, gelesen wird er erst danach. Tauscht ihn jemand dazwischen gegen einen eigenen Ordner, gehören
+      // dessen Dateien nicht diesem Benutzer und werden kopiert statt verlinkt (sonst änderte er später den neuen Stand).
+      if (
+        old &&
+        (process.getuid === undefined || old.uid === process.getuid()) &&
+        old.size === real.size &&
+        Math.abs(old.mtimeMs - real.mtimeMs) < 2
+      ) {
         // `old` stammt aus dem verankerten Ordner des vorigen Standes: der Link wird nur behalten, wenn er genau auf
         // diese Datei zeigt (N2). Kein Hardlink möglich: kopieren.
         if (out.link(join(prev as string, name), to, old)) how = 'linked';
@@ -354,20 +363,62 @@ export function readManifest(standDir: string): Manifest | null {
     // Das Ziel ist nicht vertrauenswürdig: kein Symlink, keine FIFO (würde hängen), höchstens 1 MB
     const raw = readSmallRegularFile(join(standDir, MANIFEST_FILE), MANIFEST_MAX_BYTES);
     if (raw === null) return null;
-    const parsed: unknown = JSON.parse(raw.toString('utf8'));
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      (parsed as Manifest).version === 1 &&
-      typeof (parsed as Manifest).stand === 'string' &&
-      typeof (parsed as Manifest).dump?.sha256 === 'string'
-    ) {
-      return parsed as Manifest;
-    }
+    return parseManifest(raw);
   } catch {
     // fehlt oder kaputt
   }
   return null;
+}
+
+function parseManifest(raw: Buffer): Manifest | null {
+  const parsed: unknown = JSON.parse(raw.toString('utf8'));
+  if (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    (parsed as Manifest).version === 1 &&
+    typeof (parsed as Manifest).stand === 'string' &&
+    typeof (parsed as Manifest).dump?.sha256 === 'string'
+  ) {
+    return parsed as Manifest;
+  }
+  return null;
+}
+
+/**
+ * Manifest des Ordners `<target>/<name>`, gelesen in genau dem Ordner mit der Identität `seen` (verankert, relativ,
+ * ohne Symlink-Folgen). `null`, wenn unter dem Namen inzwischen ein anderer Ordner liegt, das Manifest fehlt oder
+ * ungültig ist. So prüft, wer danach mit `removeTree(…, seen)` löscht, das Manifest desselben Ordners, den er löscht:
+ * Ein kurzer Tausch nur während des Lesens (A→B→A) täuscht die Prüfung nicht mehr (TOCTOU, H-1 aus #161).
+ */
+export function readManifestAt(
+  target: string | TargetDir,
+  name: string,
+  seen: Identity,
+  hooks?: NoFollowHooks,
+): Manifest | null {
+  const reader = new NoFollowReader(hooks);
+  let opened: { fd: number; info: Stats };
+  try {
+    const base = adoptTarget(reader, target);
+    opened = reader.open(reader.enter(base, name, seen), MANIFEST_FILE);
+  } catch {
+    return null;
+  }
+  try {
+    if (opened.info.size > MANIFEST_MAX_BYTES) return null;
+    const buffer = Buffer.alloc(opened.info.size);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const n = readSync(opened.fd, buffer, offset, buffer.length - offset, null);
+      if (n === 0) break;
+      offset += n;
+    }
+    return parseManifest(buffer.subarray(0, offset));
+  } catch {
+    return null;
+  } finally {
+    closeSync(opened.fd);
+  }
 }
 
 /** Vollständige Stände im Ziel (Ordner mit gültigem Manifest), neueste zuerst */
@@ -389,7 +440,7 @@ export interface TargetDir extends Identity {
  * Ziel für den Remover übernehmen: mit Identität aus `validateTarget` (so im Lauf), sonst (nur Tests) wie gesehen.
  * Rückgabe: Pfad des Ziels.
  */
-function adoptTarget(remover: NoFollowRemover, target: string | TargetDir): string {
+function adoptTarget(remover: AnchoredDirs, target: string | TargetDir): string {
   if (typeof target === 'string') {
     remover.adopt(target);
     return target;
@@ -415,6 +466,7 @@ export function removeStandReport(
   target: string | TargetDir,
   stand: string,
   hooks?: NoFollowHooks,
+  expected?: Identity,
 ): RemoveReport {
   if (!STAND_RE.test(stand)) return { status: false, left: [] };
   if (readManifest(join(typeof target === 'string' ? target : target.path, stand)) === null) {
@@ -423,7 +475,7 @@ export function removeStandReport(
   const remover = new NoFollowRemover(hooks);
   const base = adoptTarget(remover, target);
   // Das Manifest geht zuletzt: Ein abgebrochener Rest bleibt ein Stand und wird beim nächsten Lauf weiter gelöscht
-  const left = remover.removeTree(base, stand, MANIFEST_FILE);
+  const left = remover.removeTree(base, stand, MANIFEST_FILE, expected);
   return { status: left.length === 0 ? true : 'teilweise', left };
 }
 
@@ -439,8 +491,63 @@ export function removeStand(
 /** Ergebnis von `removeStalePartialsReport` */
 export interface PartialsReport {
   removed: string[];
+  /**
+   * Nicht angefasst (H-1, #161), weil der Ordner nicht nachweislich aus einem eigenen Lauf stammt:
+   * - `manifest`: Darin liegt ein `manifest.json`. Ein abgebrochener Lauf hat fast nie eines, ein in
+   *   `.<stand>.partial` umbenannter fertiger Stand dagegen schon. So bringt ein Umbenennen im Ziel `sg backup` nicht
+   *   dazu, einen echten Stand zu löschen.
+   * - `fremd`: Der Ordner gehört einem anderen Benutzer (`ownedByThisUser`). Er stammt nicht aus `sg backup` und kann
+   *   darum alles Mögliche enthalten, etwa einen dorthin verschobenen echten Stand.
+   */
+  kept: { name: string; why: 'manifest' | 'fremd' }[];
   /** Nicht vollständig entfernte `.partial`-Ordner mit dem, was darin stehen blieb */
   left: { name: string; left: LeftBehind[] }[];
+}
+
+/**
+ * Ist `path` ein echter Ordner (kein Symlink), der dem Benutzer dieses Prozesses gehört? (H-1, #161)
+ * Was `sg backup` im Ziel anlegt, gehört immer dem Benutzer des Laufs. Wer im Ziel nur Ordner anlegen kann, erzeugt
+ * Ordner mit seinem eigenen Besitzer und kann so keinen eigenen Stand vortäuschen, auch nicht mit einem kopierten
+ * Manifest. Auf Dateisystemen ohne Unix-Besitzer (exFAT, manche SMB-Freigaben) meldet der Kernel für alles den
+ * einhängenden Benutzer; dort hilft die Prüfung nicht, schadet aber auch nicht (dort kann ohnehin jeder alles löschen).
+ */
+export function ownedByThisUser(path: string): boolean {
+  return ownedDir(path) !== null;
+}
+
+/**
+ * Wie `ownedByThisUser`, mit der Identität des geprüften Ordners (`null`: nicht eigen). Wer danach löscht, bindet das
+ * Löschen an genau diese Identität (`removeTree(…, expected)`): Ein inzwischen unter den Namen geschobener anderer
+ * Ordner wird so nicht gelöscht (TOCTOU, H-1 aus #161).
+ */
+export function ownedDir(path: string): Identity | null {
+  try {
+    const info = lstatSync(path, { throwIfNoEntry: false });
+    if (!info?.isDirectory()) return null;
+    if (process.getuid !== undefined && info.uid !== process.getuid()) return null;
+    return { dev: info.dev, ino: info.ino };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Liegt in `<base>/<name>` ein Eintrag `manifest.json`? Nachgesehen wird verankert in genau dem Ordner mit der
+ * Identität `seen` (wie `readManifestAt`), ohne Symlink-Folgen. Im Zweifel ja, dann wird nichts gelöscht.
+ */
+function holdsManifestAt(
+  target: string | TargetDir,
+  name: string,
+  seen: Identity,
+  hooks?: NoFollowHooks,
+): boolean {
+  const reader = new NoFollowReader(hooks);
+  try {
+    const base = adoptTarget(reader, target);
+    return reader.list(reader.enter(base, name, seen)).some((entry) => entry.name === MANIFEST_FILE);
+  } catch {
+    return true;
+  }
 }
 
 /** Halbfertige Läufe (`.<stand>.partial`) löschen, die älter als `olderThanMs` sind (verankert wie `removeStand`) */
@@ -450,7 +557,7 @@ export function removeStalePartialsReport(
   olderThanMs: number,
   hooks?: NoFollowHooks,
 ): PartialsReport {
-  const report: PartialsReport = { removed: [], left: [] };
+  const report: PartialsReport = { removed: [], kept: [], left: [] };
   const remover = new NoFollowRemover(hooks);
   const base = typeof target === 'string' ? target : target.path;
   if (!existsSync(base)) return report;
@@ -459,7 +566,17 @@ export function removeStalePartialsReport(
     const match = /^\.([0-9]{8}T[0-9]{6}Z)\.partial$/.exec(entry.name);
     if (!entry.isDirectory() || !match) continue;
     if (now - standDate(match[1] as string).getTime() < olderThanMs) continue;
-    const left = remover.removeTree(base, entry.name);
+    const seen = ownedDir(join(base, entry.name));
+    if (!seen) {
+      report.kept.push({ name: entry.name, why: 'fremd' });
+      continue;
+    }
+    if (holdsManifestAt(target, entry.name, seen, hooks)) {
+      report.kept.push({ name: entry.name, why: 'manifest' });
+      continue;
+    }
+    // Gelöscht wird nur genau der geprüfte Ordner (ein inzwischen hierher geschobener Stand bleibt stehen)
+    const left = remover.removeTree(base, entry.name, undefined, seen);
     if (left.length === 0) report.removed.push(entry.name);
     else report.left.push({ name: entry.name, left });
   }

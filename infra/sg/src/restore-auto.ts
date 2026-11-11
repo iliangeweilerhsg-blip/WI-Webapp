@@ -159,7 +159,7 @@ async function autoRestoreTest(
 
     // Nur eigene, protokollierte Läufe für genau dieses Ziel (Einstellung `data.backup_target`)
     const runs = await pg.query(
-      `SELECT stand, dump_sha256 FROM backup_run
+      `SELECT stand, dump_sha256, coalesce(size_bytes::text, '') FROM backup_run
         WHERE state = 'fertig' AND deleted_at IS NULL AND stand IS NOT NULL AND dump_sha256 IS NOT NULL
           AND target = :'target'
         ORDER BY started_at DESC, id DESC LIMIT ${CANDIDATES}`,
@@ -173,7 +173,10 @@ async function autoRestoreTest(
         'Im Backup-Ziel gibt es keinen Stand, der zu einem eigenen, abgeschlossenen Backup-Lauf gehört.',
       );
     }
-    const [stand, sha] = candidate as [string, string];
+    const [stand, sha, sizeText] = candidate as [string, string, string | undefined];
+    // Obergrenze für den Dump aus der Datenbank (M-1, #114): Das Manifest allein ist hier nicht vertrauenswürdig
+    const size = sizeText ? Number(sizeText) : NaN;
+    const maxDumpBytes = Number.isSafeInteger(size) ? size : undefined;
     currentStand = stand;
     // War es der jüngste erfolgreiche Lauf? (Sonst lag der jüngste nicht mehr im Ziel oder hatte keine Prüfsumme.)
     const newest = await pg.query(
@@ -186,7 +189,7 @@ async function autoRestoreTest(
 
     let loaded;
     try {
-      loaded = await loadStand(resolved, stand, sha);
+      loaded = await loadStand(resolved, stand, sha, maxDumpBytes);
     } catch (e) {
       if (e instanceof StandError) return await fail(stand, e.reason, e.message);
       throw e;
