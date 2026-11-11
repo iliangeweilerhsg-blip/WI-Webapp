@@ -7,6 +7,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from sg_schemas.models import JobType
 
 from conftest import USER_ID, MakeJob, get_job
 from sg_worker import jobs
@@ -343,6 +344,13 @@ def test_light_types_run_during_session(
 def test_light_list_contains_rag_answer_and_no_held_type() -> None:
     assert "rag.answer" in jobs.LIGHT_JOB_TYPES
     assert not set(jobs.LIGHT_JOB_TYPES) & set(HELD_TYPES)
+
+
+def test_light_and_held_cover_job_type_exactly() -> None:
+    # Ein Tippfehler in der Erlaubnisliste würde den Typ still zurückhalten
+    known = {t.value for t in JobType} | {"internal.echo"}
+    assert set(jobs.LIGHT_JOB_TYPES) <= known
+    assert set(jobs.LIGHT_JOB_TYPES) | set(HELD_TYPES) == known
 
 
 def test_unknown_new_type_waits_during_session(

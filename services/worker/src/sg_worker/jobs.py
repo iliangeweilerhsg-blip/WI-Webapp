@@ -28,9 +28,9 @@ BACKOFF_BASE_SECONDS = 30
 # Leicht: kurze Datenbank-, Datei- oder Dateikonvertierungsarbeit ohne Modell und ohne Netz, oder ein Job, auf den
 # die Nutzerin wartet (`rag.answer`).
 LIGHT_JOB_TYPES = (
-    "audio.finalize",  # Chunks zusammenfügen (ffmpeg ohne Neukodierung), nötig, damit die Aufnahme gesichert ist
+    "audio.finalize",  # Chunks zu full.m4a (ffmpeg, ein Thread, AAC 64 kbit/s), sichert die Aufnahme
     "align.log",  # Zeitachse aus Folienwechseln: reine Datenbankarbeit
-    "pdf.ingest",  # PDF der Folien einlesen: kurz, begrenzt
+    "pdf.ingest",  # Folien-PDF einlesen: Seiten rendern und Text lesen (PyMuPDF), ohne Modell
     "rag.answer",  # Antwort auf eine Frage: die Nutzerin wartet darauf
     "vault.write",  # kleine Markdown-Datei schreiben
     "internal.echo",  # Test-Handler des Worker-Gerüsts ohne Last
