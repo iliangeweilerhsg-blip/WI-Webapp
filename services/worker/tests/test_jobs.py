@@ -7,6 +7,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from sg_schemas.models import JobType
 
 from conftest import USER_ID, MakeJob, get_job
 from sg_worker import jobs
@@ -290,7 +291,39 @@ def test_heavy_job_is_claimed_after_session_ends(
     assert job["id"] == heavy
 
 
-@pytest.mark.parametrize("job_type", list(jobs.HEAVY_JOB_TYPES))
+# Bisher gesperrte Typen plus die übrigen JobType-Werte aus packages/schemas, die nicht leicht sind
+HELD_TYPES = [
+    "transcribe",
+    "search.index",
+    "concepts.extract",
+    "concepts.resolve",
+    "summary.write",
+    "maintenance.nightly",
+    "embed.slides",
+    "embed.tasks",
+    "sheet.split",
+    "match.tasks_slides",
+    "align.content",
+    "detect.exam_hints",
+    "ocr.photos",
+    "ocr.ink",
+    "cards.generate",
+    "cornell.questions",
+    "explain.questions",
+    "prereq.check",
+    "past_exam.analyze",
+    "grade.open",
+    "grade.analyze_error",
+    "feynman.evaluate",
+    "solution.compare",
+    "video.v0",
+    "video.v1",
+    "video.v2",
+    "fsrs.optimize",
+]
+
+
+@pytest.mark.parametrize("job_type", HELD_TYPES)
 def test_all_heavy_types_are_held(
     conn: psycopg.Connection[Any], make_job: MakeJob, job_type: str
 ) -> None:
@@ -299,13 +332,39 @@ def test_all_heavy_types_are_held(
     assert jobs.claim_next(conn, "w") is None
 
 
-@pytest.mark.parametrize("job_type", ["pdf.ingest", "align.log", "audio.finalize"])
+@pytest.mark.parametrize("job_type", list(jobs.LIGHT_JOB_TYPES))
 def test_light_types_run_during_session(
     conn: psycopg.Connection[Any], make_job: MakeJob, job_type: str
 ) -> None:
     _make_session(conn, "laeuft")
     make_job(job_type)
     assert jobs.claim_next(conn, "w") is not None
+
+
+def test_light_list_contains_rag_answer_and_no_held_type() -> None:
+    assert "rag.answer" in jobs.LIGHT_JOB_TYPES
+    assert not set(jobs.LIGHT_JOB_TYPES) & set(HELD_TYPES)
+
+
+def test_light_and_held_cover_job_type_exactly() -> None:
+    # Ein Tippfehler in der Erlaubnisliste würde den Typ still zurückhalten
+    known = {t.value for t in JobType} | {"internal.echo"}
+    assert set(jobs.LIGHT_JOB_TYPES) <= known
+    assert set(jobs.LIGHT_JOB_TYPES) | set(HELD_TYPES) == known
+
+
+def test_unknown_new_type_waits_during_session(
+    conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    sid = _make_session(conn, "laeuft")
+    unknown = make_job("zukunft.neuer_typ")
+    assert jobs.claim_next(conn, "w") is None
+    assert get_job(conn, unknown)["state"] == "wartet"
+    assert get_job(conn, unknown)["attempts"] == 0
+    conn.execute("UPDATE session SET state = 'beendet' WHERE id = %s", (sid,))
+    job = jobs.claim_next(conn, "w")
+    assert job is not None
+    assert job["id"] == unknown
 
 
 def test_paused_session_holds(conn: psycopg.Connection[Any], make_job: MakeJob) -> None:
