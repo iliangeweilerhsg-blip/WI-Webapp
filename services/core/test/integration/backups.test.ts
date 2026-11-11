@@ -9,6 +9,7 @@ import {
   type LaunchInput,
 } from '../../src/services/backups.ts';
 import { tickBackup, tickNightly } from '../../src/services/scheduler.ts';
+import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
 const API = '/api/v1';
@@ -289,5 +290,61 @@ describe('Zeitplan: maintenance.nightly', () => {
     expect(await tickNightly(t.handle.db, new Date(2026, 10, 5, 3, 30))).not.toBeNull();
     const [count] = await t.handle.sql`SELECT count(*)::int AS n FROM job`;
     expect(count?.n).toBe(2);
+  });
+});
+
+describe('Zeitplan: Ruhe in der Vorlesung (UX-05)', () => {
+  const config = () => ({
+    dataDir: t.config.dataDir,
+    databaseUrl: t.config.databaseUrl,
+    port: t.config.port,
+  });
+  const sessionId = uuidv7();
+  const semesterId = uuidv7();
+  const moduleId = uuidv7();
+  beforeAll(async () => {
+    await t.handle
+      .sql`INSERT INTO semester (id, user_id, name) VALUES (${semesterId}, ${SINGLE_USER_ID}, 'Ruhe-Test')`;
+    await t.handle
+      .sql`INSERT INTO module (id, user_id, semester_id, name, color) VALUES (${moduleId}, ${SINGLE_USER_ID}, ${semesterId}, 'Ruhe', 'mod-01')`;
+  });
+  afterAll(async () => {
+    await t.handle.sql`DELETE FROM session WHERE id = ${sessionId}`;
+    await t.handle.sql`DELETE FROM module WHERE id = ${moduleId}`;
+    await t.handle.sql`DELETE FROM semester WHERE id = ${semesterId}`;
+  });
+  const setSession = async (state: string, deleted = false) => {
+    await t.handle.sql`DELETE FROM session WHERE id = ${sessionId}`;
+    await t.handle.sql`INSERT INTO session (id, user_id, module_id, state, started_at, deleted_at)
+      VALUES (${sessionId}, ${SINGLE_USER_ID}, ${moduleId}, ${state}, now(), ${deleted ? new Date().toISOString() : null})`;
+  };
+  afterEach(async () => {
+    await t.handle.sql`DELETE FROM session WHERE id = ${sessionId}`;
+  });
+
+  it('läuft eine Session, startet kein Backup und es entsteht kein backup_run; nach dem Ende startet derselbe Tick', async () => {
+    await setData({ backup_target: '/ziel', backup_time: '03:00' });
+    await setSession('laeuft');
+    const wake = new Date();
+    expect(await tickBackup(t.handle.db, config(), wake)).toBeNull();
+    expect(launched).toHaveLength(0);
+    const [none] = await t.handle.sql`SELECT count(*)::int AS n FROM backup_run`;
+    expect(none?.n).toBe(0);
+    await setSession('beendet');
+    expect(await tickBackup(t.handle.db, config(), wake)).not.toBeNull();
+    expect(launched).toHaveLength(1);
+  });
+
+  it('eine pausierte Session hält ebenfalls, eine gelöschte nicht', async () => {
+    await setData({ backup_target: '/ziel', backup_time: '03:00' });
+    await setSession('pausiert');
+    expect(await tickBackup(t.handle.db, config(), new Date())).toBeNull();
+    await setSession('laeuft', true);
+    expect(await tickBackup(t.handle.db, config(), new Date())).not.toBeNull();
+  });
+
+  it('tickNightly legt den Job trotz Session an', async () => {
+    await setSession('laeuft');
+    expect(await tickNightly(t.handle.db, new Date(2026, 10, 4, 12, 0))).not.toBeNull();
   });
 });

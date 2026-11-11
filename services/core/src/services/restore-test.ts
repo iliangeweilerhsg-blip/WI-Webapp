@@ -9,6 +9,7 @@ import { backupRun, setting } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { BACKUP_LOCK_KEY, RESTORE_TEST_LOCK_KEY } from '../lib/locks.ts';
 import { isBackupRunning, spawnSg, type BackupConfig } from './backups.ts';
+import { hasActiveSession } from './sessions.ts';
 import { getSettings } from './settings.ts';
 
 export type RestoreTestTrigger = RestoreTest['trigger'];
@@ -179,6 +180,7 @@ export function restoreTestDue(last: RestoreTest | null, now: Date): boolean {
 
 /** Zeitplan: startet den Test (`trigger = zeitplan`), wenn er fällig ist. Rückgabe: `true` = gestartet. */
 export async function tickRestoreTest(db: Db, config: BackupConfig, now = new Date()): Promise<boolean> {
+  if (await hasActiveSession(db)) return false; // Ruhe in der Vorlesung (UX-05)
   const { data } = await getSettings(db, config);
   if (!data.backup_target) return false;
   if (await isBackupRunning(db, now)) return false;

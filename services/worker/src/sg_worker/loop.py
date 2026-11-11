@@ -7,7 +7,7 @@ import os
 import socket
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -65,6 +65,7 @@ class Worker:
         worker_id: str | None = None,
         connect_kwargs: Mapping[str, Any] | None = None,
         logger: logging.Logger | None = None,
+        heavy_hold: Callable[[], bool] | None = None,
     ) -> None:
         self.database_url = database_url
         self.data_dir = data_dir
@@ -78,6 +79,8 @@ class Worker:
         self.worker_id = worker_id or f"{socket.gethostname()}:{os.getpid()}"
         self.connect_kwargs = dict(connect_kwargs or {})
         self.log = logger or logging.getLogger(LOGGER_NAME)
+        # Haken für weitere Gründe, schwere Jobs zu halten (#204). Standard: keiner
+        self.heavy_hold = heavy_hold
         self._stop = threading.Event()
         self._reconnect_delay = 1.0
 
@@ -181,7 +184,7 @@ class Worker:
         count = 0
         while not self.stopping:
             self._cancel_dependents(conn)
-            job = jobs.claim_next(conn, self.worker_id)
+            job = jobs.claim_next(conn, self.worker_id, hold_heavy=self._hold_heavy())
             if job is None:
                 break
             if job["session_id"]:
@@ -191,6 +194,17 @@ class Worker:
             self._execute(conn, job)
             count += 1
         return count
+
+    def _hold_heavy(self) -> bool:
+        """Fragt den Haken `heavy_hold` (#204). Ein Fehler darin beendet den Worker nicht:
+        Er wird geloggt, und es gilt nur die Session-Regel der Abhol-Abfrage (UX-05)."""
+        if self.heavy_hold is None:
+            return False
+        try:
+            return bool(self.heavy_hold())
+        except Exception:
+            self.log.exception("heavy_hold fehlgeschlagen, es gilt nur die Session-Regel")
+            return False
 
     def _cancel_dependents(self, conn: psycopg.Connection[Any]) -> None:
         """Bricht Jobs mit gescheiterter Abhängigkeit ab, kaskadierend in Runden. Je Session eine

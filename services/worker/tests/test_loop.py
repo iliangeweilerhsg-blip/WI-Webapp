@@ -402,3 +402,39 @@ def test_wait_wakes_for_due_run_after(
     conn.execute("UPDATE job SET run_after = now() + interval '1500 milliseconds'")
     with running(worker):
         assert wait_for(lambda: get_job(conn, job_id)["state"] == "fertig", timeout=6)
+
+
+def test_drain_passes_heavy_hold_to_claim(
+    worker: Worker, conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    heavy = make_job("transcribe")
+    light = make_job("internal.echo")
+    worker.heavy_hold = lambda: True
+    assert worker.drain(conn) == 1
+    assert get_job(conn, light)["state"] == "fertig"
+    row = get_job(conn, heavy)
+    assert row["state"] == "wartet"
+    assert row["attempts"] == 0
+
+
+def test_drain_without_heavy_hold_claims_heavy(
+    worker: Worker, conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    assert worker.heavy_hold is None
+    heavy = make_job("transcribe")  # kein Handler registriert: wird geholt und scheitert
+    assert worker.drain(conn) == 1
+    assert get_job(conn, heavy)["attempts"] >= 1
+
+
+def test_drain_survives_failing_heavy_hold(
+    worker: Worker, conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    """Ein kaputter Haken beendet den Worker nicht. Es gilt dann nur die Session-Regel."""
+
+    def broken() -> bool:
+        raise RuntimeError("Haken kaputt")
+
+    light = make_job("internal.echo")
+    worker.heavy_hold = broken
+    assert worker.drain(conn) == 1
+    assert get_job(conn, light)["state"] == "fertig"
