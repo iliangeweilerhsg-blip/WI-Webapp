@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useEffect, useId, useState } from 'react';
 import type { ConceptListItem } from '@sg/shared';
 import {
+  CONCEPT_LIST_CAP,
   KIND_LABELS,
   MAX_CONCEPT_QUERY,
   conceptHref,
@@ -108,6 +109,11 @@ function ConceptLibrary() {
           )
         ) : (
           <div className="space-y-8">
+            {(concepts.data?.length ?? 0) >= CONCEPT_LIST_CAP ? (
+              <p data-testid="concepts-capped" className="text-sm text-text-muted">
+                Es stehen nur die ersten {CONCEPT_LIST_CAP} Konzepte da. Weitere findest du über die Suche.
+              </p>
+            ) : null}
             {groups.map((group) => (
               <section key={group.id || 'ohne'} aria-labelledby={`concepts-${group.id || 'ohne'}`}>
                 <h2

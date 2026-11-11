@@ -1517,14 +1517,17 @@ function handleConcepts(
           a.concept.name.toLowerCase().localeCompare(b.concept.name.toLowerCase()) ||
           a.concept.id.localeCompare(b.concept.id),
       )
-      .slice(0, limit)
       .map((c) => ({
         concept: c.concept,
         modules: c.modules,
         evidence_count: c.evidence.length,
         session_count: new Set(c.evidence.flatMap((e) => (e.session ? [e.session.id] : []))).size,
       }));
-    return json({ items, next_cursor: null });
+    // Cursor des Fakes: Versatz als Text
+    const offset = Number(url.searchParams.get('cursor') ?? 0) || 0;
+    const page = items.slice(offset, offset + limit);
+    const next = offset + limit < items.length ? String(offset + limit) : null;
+    return json({ items: page, next_cursor: next });
   }
   const conceptOne = /^\/concepts\/([^/]+)$/.exec(path);
   if (conceptOne && method === 'GET') {

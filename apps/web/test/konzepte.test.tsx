@@ -274,6 +274,15 @@ describe('Hilfen', () => {
     ]) {
       expect(inboxErrorMessage(error(409, code))).not.toMatch(/nicht geklappt|schiefgegangen/);
     }
+    // Allgemeine Codes und unbekannte Codes fallen wie in `lib/api.ts` auf verständliche Texte zurück
+    expect(inboxErrorMessage(error(400, 'validation_failed'))).toBe(
+      'Das passt so nicht. Prüfe deine Eingabe.',
+    );
+    expect(inboxErrorMessage(error(401, 'device_token_required'))).toBe(
+      'Dieses Gerät ist noch nicht mit dem Core gekoppelt.',
+    );
+    expect(inboxErrorMessage(error(404, 'irgendwas_neues'))).toBe('Das gibt es nicht (mehr).');
+    expect(inboxErrorMessage(error(500, 'internal'))).toMatch(/schiefgegangen/);
   });
 
   it('Aktionen reichen `details` des Core durch und senden einen Idempotency-Key', async () => {
@@ -377,6 +386,18 @@ describe('Inbox: Vorschläge', () => {
     fireEvent.click(within(toast()).getByRole('button', { name: 'Rückgängig' }));
     await waitFor(() => expect(rowOf(I_NEW)).not.toBeNull());
     expect(posts().at(-1)?.path).toBe(`/inbox/${I_NEW}/reopen`);
+  });
+
+  it('Doppelklick auf „Annehmen“ schickt die Entscheidung nur einmal', async () => {
+    boot();
+    wrap(<SuggestionInbox />);
+    await screen.findByText('Dritte Normalform');
+    const accept = within(rowOf(I_NEW)).getByRole('button', { name: 'Annehmen' });
+    fireEvent.click(accept);
+    fireEvent.click(accept);
+    fireEvent.keyDown(rowOf(I_NEW), { key: 'ArrowRight' });
+    await waitFor(() => expect(rowOf(I_NEW)).toBeNull());
+    expect(posts().map((r) => r.path)).toEqual([`/inbox/${I_NEW}/accept`]);
   });
 
   it('← verwirft, ↓ ↑ wechseln die Zeile, in Eingabefeldern gelten die Tasten nicht', async () => {
@@ -636,6 +657,48 @@ describe('Navigation: Zähler', () => {
   });
 });
 
+describe('Inbox: Neuverbinden', () => {
+  it('lädt Zähler und Vorschläge nach dem Neuverbinden nach (§20.9)', async () => {
+    boot();
+    const listeners = new Map<string, Set<(data: unknown) => void>>();
+    const sync = {
+      connectionState: 'online',
+      connect: vi.fn(async () => undefined),
+      disconnect: vi.fn(),
+      onEvent: vi.fn((name: string, fn: (data: unknown) => void) => {
+        const set = listeners.get(name) ?? new Set();
+        set.add(fn);
+        listeners.set(name, set);
+        return () => void set.delete(fn);
+      }),
+    };
+    const setState = (state: string) => {
+      sync.connectionState = state;
+      for (const fn of listeners.get('connection') ?? []) fn({ state, retryInMs: null, closeCode: null });
+    };
+    const { SyncProvider } = await import('../src/lib/sync/SyncProvider.tsx');
+    const { unmount } = render(
+      <ThemeProvider>
+        <QueryProvider>
+          <SyncProvider client={sync as never}>
+            <ToastProvider>
+              <SuggestionInbox />
+            </ToastProvider>
+          </SyncProvider>
+        </QueryProvider>
+      </ThemeProvider>,
+    );
+    await screen.findByText('Dritte Normalform');
+    const overviews = () => core.requests.filter((r) => r.path === '/inbox/overview').length;
+    const before = overviews();
+    act(() => setState('backoff'));
+    act(() => setState('online'));
+    await waitFor(() => expect(overviews()).toBeGreaterThan(before));
+    unmount();
+    expect([...(listeners.get('connection') ?? [])]).toHaveLength(0);
+  });
+});
+
 describe('Bibliothek', () => {
   function bootLibrary() {
     boot([]);
@@ -721,6 +784,27 @@ describe('Bibliothek', () => {
     await user.clear(screen.getByLabelText('Konzepte suchen'));
     await user.type(screen.getByLabelText('Konzepte suchen'), 'xyz');
     expect(await screen.findByText('Kein Konzept gefunden.')).toBeInTheDocument();
+  });
+
+  it('lädt alle Seiten; ab 2000 Konzepten sagt ein Satz, dass weitere nur über die Suche kommen', async () => {
+    boot([]);
+    core.concepts = Array.from({ length: 450 }, (_, i) =>
+      makeConceptDetail({ id: id(10_000 + i), name: `Konzept ${String(i).padStart(4, '0')}` }),
+    );
+    const { unmount } = wrap(<LibraryView />);
+    await screen.findByRole('link', { name: 'Konzept 0449' });
+    const pages = core.requests.filter((r) => r.path.startsWith('/concepts?'));
+    expect(pages).toHaveLength(3);
+    expect(pages[2]?.path).toContain('cursor=400');
+    expect(screen.queryByTestId('concepts-capped')).toBeNull();
+    unmount();
+
+    core.concepts = Array.from({ length: 2001 }, (_, i) =>
+      makeConceptDetail({ id: id(20_000 + i), name: `Konzept ${String(i).padStart(4, '0')}` }),
+    );
+    wrap(<LibraryView />);
+    expect(await screen.findByTestId('concepts-capped')).toHaveTextContent('nur die ersten 2000 Konzepte');
+    expect(screen.queryByRole('link', { name: 'Konzept 2000' })).toBeNull();
   });
 
   it('ohne Konzepte ein Satz und der Weg zur Inbox', async () => {

@@ -151,6 +151,8 @@ export function sessionRefLabel(session: SessionRef | null, withModule = true): 
 
 /** Höchstens so viele Seiten je Liste (200 je Seite) */
 const MAX_PAGES = 10;
+/** So viele Konzepte lädt eine Liste höchstens; mehr zeigt die Bibliothek nur über die Suche */
+export const CONCEPT_LIST_CAP = MAX_PAGES * 200;
 
 export interface ConceptQuery {
   moduleId?: string;

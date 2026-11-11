@@ -17,6 +17,7 @@ import {
   type InboxKind,
   type InboxOverview,
 } from '@sg/shared';
+import { watchReconnect } from '../components/dashboard/reconnect.ts';
 import { ApiRequestError, apiBase, apiGet, friendlyMessage, type Parser } from './api.ts';
 import { CONCEPTS_KEY, relationSentence } from './concepts.ts';
 import { useHydrationSafe } from './hydrated.ts';
@@ -68,7 +69,17 @@ const INBOX_MESSAGES: Record<string, string> = {
   inbox_action_invalid: 'Das passt nicht zu dieser Art von Vorschlag.',
   inbox_busy: 'Gerade beschäftigt, bitte gleich nochmal.',
   session_not_found: 'Diese Vorlesung gibt es nicht mehr.',
+  // Allgemeine Codes, die `lib/api.ts` auch kennt (dort nicht exportiert)
+  validation_failed: 'Das passt so nicht. Prüfe deine Eingabe.',
+  device_token_required: 'Dieses Gerät ist noch nicht mit dem Core gekoppelt.',
 };
+
+/** Unbekannter Code: Text nach dem Status (wie `lib/api.ts`) */
+function fallbackMessage(status: number): string {
+  if (status === 404) return 'Das gibt es nicht (mehr).';
+  if (status >= 500) return 'Im Core ist etwas schiefgegangen. Versuch es gleich noch einmal.';
+  return 'Das hat nicht geklappt.';
+}
 
 /** Fehler einer Inbox-Aktion samt `details` des Core (`concept_id`, `path`, `triggered_by`, …) */
 export class InboxRequestError extends ApiRequestError {
@@ -80,9 +91,7 @@ export class InboxRequestError extends ApiRequestError {
       status,
       code,
       message: `${code}: ${message}`,
-      userMessage:
-        INBOX_MESSAGES[code] ??
-        (status >= 500 ? 'Im Core ist etwas schiefgegangen.' : 'Das hat nicht geklappt.'),
+      userMessage: INBOX_MESSAGES[code] ?? fallbackMessage(status),
     });
     this.name = 'InboxRequestError';
     this.details = details;
@@ -229,11 +238,17 @@ export function useInboxOverview() {
   });
   useEffect(() => {
     if (!sync) return;
-    return sync.onEvent('session.updated', (session) => {
+    const offUpdated = sync.onEvent('session.updated', (session) => {
       if (session.processing['concepts.resolve'] === 'fertig') {
         void client.invalidateQueries({ queryKey: INBOX_KEY });
       }
     });
+    // Nach dem Neuverbinden nachladen: Ereignisse aus der Lücke kommen nicht nach (§20.9, §11.6)
+    const offReconnect = watchReconnect(sync, () => void client.invalidateQueries({ queryKey: INBOX_KEY }));
+    return () => {
+      offUpdated();
+      offReconnect();
+    };
   }, [sync, client]);
   // Nach dem Ende der Session nachholen (nur beim Wechsel von „läuft“ auf „läuft nicht“)
   const wasRunning = useRef(false);
