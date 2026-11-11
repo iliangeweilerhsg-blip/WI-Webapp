@@ -148,13 +148,43 @@ final class PairingControllerTests: XCTestCase {
     func testNetworkErrorDuringConfirmKeepsCodeEntry() async {
         let setup = Setup([
             .http(status: 201, body: Fixtures.pairStartResponse),
-            .failure(.timedOut),
+            .failure(.cannotConnectToHost),
         ])
         await setup.controller.start(endpoint: Fixtures.endpoint)
 
         await setup.controller.submit(code: "123456")
 
         XCTAssertEqual(setup.controller.state, .awaitingCode(Fixtures.endpoint, pairingID: Fixtures.publicPairingID))
+        XCTAssertEqual(setup.controller.lastError, .coreNotFound)
+    }
+
+    @MainActor
+    func testTimeoutDuringConfirmIsNotRetriedAndPointsToTheMac() async {
+        // N-3 aus dem Review von #192: Beim Timeout kann der Mac den Code schon eingelöst haben
+        let setup = Setup([
+            .http(status: 201, body: Fixtures.pairStartResponse),
+            .failure(.timedOut),
+            .http(status: 201, body: Fixtures.pairResponse),
+        ])
+        await setup.controller.start(endpoint: Fixtures.endpoint)
+
+        await setup.controller.submit(code: "123456")
+
+        // pair/start und genau ein pair/confirm
+        XCTAssertEqual(setup.transport.requests.count, 2)
+        XCTAssertEqual(setup.controller.lastError, .pairingOutcomeUnknown)
+        XCTAssertNil(setup.tokens.token)
+        XCTAssertEqual(setup.controller.state, .awaitingCode(Fixtures.endpoint, pairingID: Fixtures.publicPairingID))
+    }
+
+    @MainActor
+    func testTimeoutDuringPairStartStaysATimeout() async {
+        // pair/start ist idempotent: Hier bleibt es bei der genauen Ursache
+        let setup = Setup([.failure(.timedOut)])
+
+        await setup.controller.start(endpoint: Fixtures.endpoint)
+
+        XCTAssertEqual(setup.controller.state, .idle)
         XCTAssertEqual(setup.controller.lastError, .timeout)
     }
 
@@ -276,6 +306,44 @@ final class PairingControllerTests: XCTestCase {
         setup.controller.review(other)
 
         XCTAssertEqual(setup.controller.state, .reviewing(shown))
+    }
+
+    @MainActor
+    func testStartDoesNotLeaveReview() async throws {
+        // N-2 aus dem Review von #192: Eine Bonjour-Auflösung, die nach dem Scan fertig wird,
+        // ruft start() auf. Die Rückfrage muss stehen bleiben.
+        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)])
+        let link = try XCTUnwrap(PairingLink(qrPayload: Self.qrPayload))
+        setup.controller.review(link)
+
+        await setup.controller.start(endpoint: Fixtures.endpoint)
+
+        XCTAssertEqual(setup.controller.state, .reviewing(link))
+        XCTAssertNil(setup.controller.lastError)
+        XCTAssertTrue(setup.transport.requests.isEmpty)
+
+        // Die Rückfrage gilt weiter für den gescannten Link
+        await setup.controller.confirmReviewedLink()
+
+        XCTAssertEqual(setup.controller.state, .paired)
+        XCTAssertEqual(setup.transport.requests.count, 1)
+        XCTAssertEqual(setup.transport.requests[0].url?.path, "/api/v1/devices/pair/confirm")
+        XCTAssertEqual(try setup.transport.jsonBody(at: 0)["pairing_id"] as? String, Fixtures.qrPairingID)
+        XCTAssertEqual(setup.macs.mac?.endpoint, link.endpoint)
+    }
+
+    @MainActor
+    func testQrTimeoutDuringConfirmPointsToTheMac() async throws {
+        let setup = Setup([.failure(.timedOut)])
+        let link = try XCTUnwrap(PairingLink(qrPayload: Self.qrPayload))
+
+        setup.controller.review(link)
+        await setup.controller.confirmReviewedLink()
+
+        XCTAssertEqual(setup.transport.requests.count, 1)
+        XCTAssertEqual(setup.controller.lastError, .pairingOutcomeUnknown)
+        XCTAssertEqual(setup.controller.state, .idle)
+        XCTAssertNil(setup.tokens.token)
     }
 
     @MainActor

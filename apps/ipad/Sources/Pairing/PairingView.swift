@@ -241,6 +241,8 @@ struct PairingView: View {
         _Concurrency.Task {
             let endpoint = await MacResolver.resolve(mac)
             resolvingMacID = nil
+            // Inzwischen ein QR-Code gescannt: Die Rückfrage bleibt stehen, auch ohne Fehlermeldung
+            if case .reviewing = controller.state { return }
             guard let endpoint else {
                 controller.report(.macNotResolved)
                 return

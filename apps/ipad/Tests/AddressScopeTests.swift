@@ -78,6 +78,19 @@ final class AddressScopeTests: XCTestCase {
         assertPublic("::ffff:999.1.1.1")
     }
 
+    func testLeadingZerosAreNotReadAsPrivate() {
+        // N-1 aus dem Review von #192: `010` könnte oktal gelesen werden (8.0.0.1)
+        for host in [
+            "010.0.0.1", "10.00.0.1", "10.0.0.01", "0127.0.0.1", "192.168.01.20", "192.0168.1.20",
+            "172.016.0.1", "00.0.0.0", "::ffff:010.0.0.1", "::ffff:192.168.1.020",
+        ] {
+            assertPublic(host)
+        }
+        // Die Null selbst bleibt ein gültiges Oktett
+        assertPrivate("10.0.0.1")
+        assertPrivate("192.168.0.0")
+    }
+
     func testGarbageIsPublic() {
         // Im Zweifel warnen
         for host in [

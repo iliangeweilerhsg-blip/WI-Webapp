@@ -40,7 +40,9 @@ enum AddressScope: Equatable, Sendable {
         return isLocalName(host) ? .privateNetwork : .publicNetwork
     }
 
-    /// Vier Zahlen von 0 bis 255, sonst `nil`
+    /// Vier Zahlen von 0 bis 255, sonst `nil`.
+    /// Führende Nullen gelten als ungültig: `010.0.0.1` sähe dezimal nach 10/8 aus, das System
+    /// könnte das Oktett aber oktal lesen (8.0.0.1).
     private static func ipv4Octets(_ host: String) -> [Int]? {
         let parts = host.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 4 else { return nil }
@@ -49,6 +51,7 @@ enum AddressScope: Equatable, Sendable {
             guard !part.isEmpty, part.count <= 3, part.allSatisfy({ $0.isASCII && $0.isNumber }) else {
                 return nil
             }
+            guard part.count == 1 || part.first != "0" else { return nil }
             guard let value = Int(part), value <= 255 else { return nil }
             octets.append(value)
         }

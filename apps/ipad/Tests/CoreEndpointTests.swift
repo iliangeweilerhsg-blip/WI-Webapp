@@ -23,6 +23,25 @@ final class CoreEndpointTests: XCTestCase {
         XCTAssertNil(CoreEndpoint(userInput: ""))
     }
 
+    func testRejectsIPv4WithLeadingZeros() {
+        // N-1 aus dem Review von #192: `010.0.0.1` sähe privat aus, könnte aber oktal gelesen werden
+        XCTAssertNil(CoreEndpoint(userInput: "010.0.0.1"))
+        XCTAssertNil(CoreEndpoint(userInput: "10.00.0.1"))
+        XCTAssertNil(CoreEndpoint(userInput: "192.168.1.020:4710"))
+        XCTAssertNil(CoreEndpoint(userInput: "http://0127.0.0.1:4710/api/v1/health"))
+        XCTAssertNil(CoreEndpoint(host: "192.168.01.20"))
+        XCTAssertNil(CoreEndpoint(host: "00.0.0.0"))
+        // Die Null selbst bleibt ein gültiges Oktett
+        XCTAssertEqual(CoreEndpoint(userInput: "10.0.0.1")?.host, "10.0.0.1")
+        XCTAssertEqual(CoreEndpoint(userInput: "192.168.0.100")?.host, "192.168.0.100")
+    }
+
+    func testQrLinkWithLeadingZeroHostIsRejected() {
+        XCTAssertNil(
+            PairingLink(
+                qrPayload: "sg://pair?v=1&host=010.0.0.1&port=4710&pairing_id=\(Fixtures.qrPairingID)&code=654321"))
+    }
+
     func testBuildsApiUrl() {
         let url = Fixtures.endpoint.url(path: "/devices/pair/start")
         XCTAssertEqual(url?.absoluteString, "http://192.0.2.10:4710/api/v1/devices/pair/start")
