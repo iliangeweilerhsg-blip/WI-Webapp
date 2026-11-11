@@ -22,6 +22,20 @@ Job = dict[str, Any]
 STUCK_AFTER_SECONDS = 180.0
 BACKOFF_BASE_SECONDS = 30
 
+# Ruhe in der Vorlesung (UX-05, VERTRAEGE §3): Solange eine Session `laeuft` oder `pausiert`, holt der Worker diese
+# Jobs nicht. Sie bleiben `wartet`, `attempts` steigt nicht. Leichte Jobs (`audio.finalize`, `align.log`,
+# `pdf.ingest`) laufen weiter.
+HEAVY_JOB_TYPES = (
+    "transcribe",
+    "search.index",
+    "concepts.extract",
+    "concepts.resolve",
+    "summary.write",
+    "maintenance.nightly",
+)
+# Eine Session, die länger als so viele Stunden "läuft", gilt als vergessen und hält nichts mehr zurück
+SESSION_HOLD_MAX_HOURS = 12
+
 # Abhängigkeit gescheitert (`fehler`/`abgebrochen`) -> abhängigen Job abbrechen (§3).
 _CANCEL_FAILED_SQL = """
 UPDATE job SET state = 'abgebrochen',
@@ -89,6 +103,9 @@ WITH next AS (
       SELECT 1 FROM unnest(j.depends_on) AS d(id)
       WHERE NOT EXISTS (SELECT 1 FROM job dj
                         WHERE dj.id = d.id AND dj.state = 'fertig' AND dj.deleted_at IS NULL))
+    AND (NOT (j.type = ANY(%(heavy)s)) OR (NOT %(hold)s AND NOT EXISTS (
+          SELECT 1 FROM session s WHERE s.state IN ('laeuft','pausiert') AND s.deleted_at IS NULL
+            AND s.started_at > now() - make_interval(hours => %(cap_h)s))))
   ORDER BY j.priority DESC, j.created_at
   FOR UPDATE OF j SKIP LOCKED
   LIMIT 1
@@ -196,10 +213,22 @@ def cancel_failed_dependents(conn: Conn) -> int:
     return total
 
 
-def claim_next(conn: Conn, worker_id: str) -> Job | None:
-    """Holt den nächsten fälligen Job (`FOR UPDATE SKIP LOCKED`) und markiert ihn als `laeuft`."""
+def claim_next(conn: Conn, worker_id: str, *, hold_heavy: bool = False) -> Job | None:
+    """Holt den nächsten fälligen Job (`FOR UPDATE SKIP LOCKED`) und markiert ihn als `laeuft`.
+
+    Schwere Jobs (`HEAVY_JOB_TYPES`) werden übersprungen, solange eine Session läuft oder pausiert
+    ist (UX-05) oder `hold_heavy` gesetzt ist (Haken für weitere Gründe, #204).
+    """
     with conn.cursor(row_factory=dict_row) as cur:
-        cur.execute(_CLAIM_SQL, {"worker": worker_id})
+        cur.execute(
+            _CLAIM_SQL,
+            {
+                "worker": worker_id,
+                "heavy": list(HEAVY_JOB_TYPES),
+                "hold": hold_heavy,
+                "cap_h": SESSION_HOLD_MAX_HOURS,
+            },
+        )
         return cur.fetchone()
 
 

@@ -44,6 +44,7 @@ import { transcriptRoutes } from './routes/transcript.ts';
 import { LastSeenTracker, verifyDeviceToken } from './services/devices.ts';
 import { pickPairingHost } from './services/discovery.ts';
 import { PairingManager } from './services/pairing.ts';
+import { registerKeepAwake } from './services/keep-awake.ts';
 import { registerSearchBackfill } from './services/search-backfill.ts';
 import { startSessionTicker, type SessionTicker } from './services/sessions.ts';
 import { syncPlugin } from './sync/server.ts';
@@ -72,6 +73,8 @@ export interface BuildAppOptions {
   pairingHost?: () => string;
   /** Nachholen des Suchindex beim Start und alle 10 min (VERTRAEGE §19.5). Standard: aus; `main.ts` schaltet es ein */
   searchBackfill?: boolean;
+  /** Mac während einer Session wach halten (`caffeinate`, UX-04). Standard: aus; `main.ts` schaltet es ein */
+  keepAwake?: boolean;
 }
 
 function readVersion(): string {
@@ -298,6 +301,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   if (options.searchBackfill) registerSearchBackfill(app, { db, config, logger });
+  if (options.keepAwake) registerKeepAwake(app, { db, logger });
 
   // Static Export der Web-App und Not-Found-Handler (muss nach den API-Routen kommen)
   await registerWeb(app, config);

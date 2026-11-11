@@ -6,8 +6,9 @@ import uuid
 from typing import Any
 
 import psycopg
+import pytest
 
-from conftest import MakeJob, get_job
+from conftest import USER_ID, MakeJob, get_job
 from sg_worker import jobs
 
 
@@ -238,3 +239,110 @@ def test_seconds_until_next_run(conn: psycopg.Connection[Any], make_job: MakeJob
     secs = jobs.seconds_until_next_run(conn)
     assert secs is not None
     assert 10 < secs <= 20
+
+
+# --- Ruhe in der Vorlesung (UX-05): schwere Jobs halten, solange eine Session läuft ---
+
+
+def _make_session(
+    conn: psycopg.Connection[Any],
+    state: str = "laeuft",
+    *,
+    started_hours_ago: float = 1,
+    deleted: bool = False,
+) -> uuid.UUID:
+    sid = uuid.uuid4()
+    conn.execute(
+        """
+        INSERT INTO session (id, user_id, state, started_at, deleted_at)
+        VALUES (%s, %s, %s, now() - make_interval(hours => %s),
+                CASE WHEN %s THEN now() ELSE NULL END)
+        """,
+        (sid, USER_ID, state, started_hours_ago, deleted),
+    )
+    return sid
+
+
+def test_running_session_holds_heavy_but_not_light(
+    conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    _make_session(conn, "laeuft")
+    heavy = make_job("transcribe", priority=20)
+    light = make_job("audio.finalize", priority=0)
+    job = jobs.claim_next(conn, "w")
+    assert job is not None
+    assert job["id"] == light
+    assert jobs.claim_next(conn, "w") is None
+    row = get_job(conn, heavy)
+    assert row["state"] == "wartet"
+    assert row["attempts"] == 0
+
+
+def test_heavy_job_is_claimed_after_session_ends(
+    conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    sid = _make_session(conn, "laeuft")
+    heavy = make_job("transcribe")
+    assert jobs.claim_next(conn, "w") is None
+    conn.execute("UPDATE session SET state = 'beendet' WHERE id = %s", (sid,))
+    job = jobs.claim_next(conn, "w")
+    assert job is not None
+    assert job["id"] == heavy
+
+
+@pytest.mark.parametrize("job_type", list(jobs.HEAVY_JOB_TYPES))
+def test_all_heavy_types_are_held(
+    conn: psycopg.Connection[Any], make_job: MakeJob, job_type: str
+) -> None:
+    _make_session(conn, "laeuft")
+    make_job(job_type)
+    assert jobs.claim_next(conn, "w") is None
+
+
+@pytest.mark.parametrize("job_type", ["pdf.ingest", "align.log", "audio.finalize"])
+def test_light_types_run_during_session(
+    conn: psycopg.Connection[Any], make_job: MakeJob, job_type: str
+) -> None:
+    _make_session(conn, "laeuft")
+    make_job(job_type)
+    assert jobs.claim_next(conn, "w") is not None
+
+
+def test_paused_session_holds(conn: psycopg.Connection[Any], make_job: MakeJob) -> None:
+    _make_session(conn, "pausiert")
+    make_job("transcribe")
+    assert jobs.claim_next(conn, "w") is None
+
+
+def test_soft_deleted_session_does_not_hold(
+    conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    _make_session(conn, "laeuft", deleted=True)
+    make_job("transcribe")
+    assert jobs.claim_next(conn, "w") is not None
+
+
+def test_stale_session_older_than_cap_does_not_hold(
+    conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    _make_session(conn, "laeuft", started_hours_ago=13)
+    make_job("transcribe")
+    assert jobs.claim_next(conn, "w") is not None
+
+
+def test_recent_session_inside_cap_holds(conn: psycopg.Connection[Any], make_job: MakeJob) -> None:
+    _make_session(conn, "laeuft", started_hours_ago=1)
+    make_job("transcribe")
+    assert jobs.claim_next(conn, "w") is None
+
+
+def test_hold_heavy_flag_without_session(conn: psycopg.Connection[Any], make_job: MakeJob) -> None:
+    heavy = make_job("transcribe", priority=10)
+    light = make_job("pdf.ingest")
+    job = jobs.claim_next(conn, "w", hold_heavy=True)
+    assert job is not None
+    assert job["id"] == light
+    assert jobs.claim_next(conn, "w", hold_heavy=True) is None
+    job = jobs.claim_next(conn, "w")
+    assert job is not None
+    assert job["id"] == heavy

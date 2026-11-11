@@ -12,6 +12,7 @@ import { NIGHTLY_LOCK_KEY } from '../lib/locks.ts';
 import { latestOccurrence, startBackup, isBackupRunning } from './backups.ts';
 import { enqueueJob } from './jobs.ts';
 import { getRestoreTest, tickRestoreTest } from './restore-test.ts';
+import { hasActiveSession } from './sessions.ts';
 import { getSettings } from './settings.ts';
 
 /** Ortszeit, zu der der Core `maintenance.nightly` anlegt (VERTRAEGE §13) */
@@ -48,6 +49,8 @@ export async function tickBackup(
   config: Pick<Config, 'dataDir' | 'databaseUrl' | 'port'>,
   now = new Date(),
 ): Promise<string | null> {
+  // Ruhe in der Vorlesung (UX-05): kein Backup, solange eine Session läuft oder pausiert. Der nächste Takt danach holt es nach
+  if (await hasActiveSession(db)) return null;
   const { data } = await getSettings(db, config);
   if (!data.backup_target) return null;
   if (await isBackupRunning(db, now)) return null;

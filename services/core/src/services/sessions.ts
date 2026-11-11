@@ -78,6 +78,16 @@ const READY_BEFORE_START_MS = 15 * MINUTE_MS;
 
 const NEVER_STARTED_STATES = ['geplant', 'bereit', 'verpasst'] as const;
 const ACTIVE_STATES = ['laeuft', 'pausiert'] as const;
+
+/** Steht eine nicht gelöschte Session in `laeuft` oder `pausiert`? (UX-04/05: Mac wach halten, schwere Arbeit halten) */
+export async function hasActiveSession(db: DbOrTx): Promise<boolean> {
+  const [row] = await db
+    .select({ id: session.id })
+    .from(session)
+    .where(and(inArray(session.state, [...ACTIVE_STATES]), notDeleted(session)))
+    .limit(1);
+  return row !== undefined;
+}
 /** Gründe, die der Core selbst (Takt, Start einer späteren Session) oder ein Browser-Auto-Stopp setzt und die ein Gerät korrigieren darf */
 const CORRECTABLE_REASONS: readonly StopReason[] = [
   'kalenderende',

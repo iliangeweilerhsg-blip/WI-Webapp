@@ -10,6 +10,7 @@ import {
   RESTORE_TEST_INTERVAL_MS,
 } from '../../src/services/restore-test.ts';
 import { tickBackup } from '../../src/services/scheduler.ts';
+import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
 const API = '/api/v1';
@@ -299,6 +300,42 @@ describe('Zeitplan (monatlich, Nachholen)', () => {
     await setData({ backup_target: null });
     expect(await tickRestoreTest(t.handle.db, t.config, now)).toBe(false); // kein Ziel
     await setData({ backup_target: '/ziel' });
+    expect(await tickRestoreTest(t.handle.db, t.config, now)).toBe(true);
+    expect(launched).toHaveLength(1);
+  });
+});
+
+describe('Restore-Test: Ruhe in der Vorlesung (UX-05)', () => {
+  const now = new Date('2026-11-10T10:00:00Z');
+  const sessionId = uuidv7();
+  const semesterId = uuidv7();
+  const moduleId = uuidv7();
+  beforeAll(async () => {
+    await t.handle
+      .sql`INSERT INTO semester (id, user_id, name) VALUES (${semesterId}, ${SINGLE_USER_ID}, 'Ruhe-Test')`;
+    await t.handle
+      .sql`INSERT INTO module (id, user_id, semester_id, name, color) VALUES (${moduleId}, ${SINGLE_USER_ID}, ${semesterId}, 'Ruhe', 'mod-01')`;
+  });
+  afterAll(async () => {
+    await t.handle.sql`DELETE FROM session WHERE id = ${sessionId}`;
+    await t.handle.sql`DELETE FROM module WHERE id = ${moduleId}`;
+    await t.handle.sql`DELETE FROM semester WHERE id = ${semesterId}`;
+  });
+  afterEach(async () => {
+    await t.handle.sql`DELETE FROM session WHERE id = ${sessionId}`;
+  });
+
+  it('hält, solange eine Session läuft oder pausiert; danach startet er', async () => {
+    await setData({ backup_target: '/ziel' });
+    await insertRun({ started: new Date(now.getTime() - 3600_000).toISOString() });
+    for (const state of ['laeuft', 'pausiert']) {
+      await t.handle.sql`DELETE FROM session WHERE id = ${sessionId}`;
+      await t.handle.sql`INSERT INTO session (id, user_id, module_id, state, started_at)
+        VALUES (${sessionId}, ${SINGLE_USER_ID}, ${moduleId}, ${state}, now())`;
+      expect(await tickRestoreTest(t.handle.db, t.config, now)).toBe(false);
+    }
+    expect(launched).toHaveLength(0);
+    await t.handle.sql`UPDATE session SET state = 'beendet' WHERE id = ${sessionId}`;
     expect(await tickRestoreTest(t.handle.db, t.config, now)).toBe(true);
     expect(launched).toHaveLength(1);
   });
