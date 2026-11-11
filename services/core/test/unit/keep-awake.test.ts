@@ -1,7 +1,17 @@
 // UX-04: Mac während der Vorlesung wach halten. Fake-`spawn`, nie ein echtes `caffeinate`.
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { FastifyInstance } from 'fastify';
 import type { Logger } from 'pino';
-import { createKeepAwake, type KeepAwakeChild, type KeepAwakeSpawn } from '../../src/services/keep-awake.ts';
+import type { Db } from '../../src/db/client.ts';
+import {
+  createKeepAwake,
+  registerKeepAwake,
+  type KeepAwakeChild,
+  type KeepAwakeSpawn,
+} from '../../src/services/keep-awake.ts';
+
+const active = vi.hoisted(() => ({ fn: vi.fn<() => Promise<boolean>>() }));
+vi.mock('../../src/services/sessions.ts', () => ({ hasActiveSession: () => active.fn() }));
 
 class FakeChild implements KeepAwakeChild {
   readonly kill = vi.fn((_signal?: NodeJS.Signals) => true);
@@ -87,5 +97,75 @@ describe('createKeepAwake', () => {
     awake.stop();
     expect(children[0]?.kill).toHaveBeenCalledExactlyOnceWith('SIGTERM');
     expect(awake.isActive()).toBe(false);
+  });
+});
+
+describe('registerKeepAwake', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    active.fn.mockReset();
+  });
+
+  function setupApp() {
+    const hooks = new Map<string, () => Promise<void>>();
+    const app = {
+      addHook: (name: string, fn: () => Promise<void>) => hooks.set(name, fn),
+    } as unknown as FastifyInstance;
+    const children: FakeChild[] = [];
+    const spawn = vi.fn(() => {
+      const child = new FakeChild();
+      children.push(child);
+      return child;
+    });
+    const error = vi.fn();
+    const logger = { warn: vi.fn(), info: vi.fn(), error } as unknown as Logger;
+    (logger as unknown as { child: () => Logger }).child = () => logger;
+    registerKeepAwake(app, {
+      db: {} as Db,
+      logger,
+      intervalMs: 1000,
+      platform: 'darwin',
+      spawn: spawn as KeepAwakeSpawn,
+    });
+    const hook = (name: string) => hooks.get(name)?.() ?? Promise.resolve();
+    return { hook, spawn, children, error };
+  }
+
+  it('gleicht nach listen und im Takt ab; onClose beendet caffeinate', async () => {
+    vi.useFakeTimers();
+    const { hook, spawn, children } = setupApp();
+    active.fn.mockResolvedValue(true);
+    await hook('onListen');
+    expect(spawn).toHaveBeenCalledTimes(1);
+    active.fn.mockResolvedValue(false);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(children[0]?.kill).toHaveBeenCalledExactlyOnceWith('SIGTERM');
+    active.fn.mockResolvedValue(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(spawn).toHaveBeenCalledTimes(2);
+    await hook('onClose');
+    expect(children[1]?.kill).toHaveBeenCalledExactlyOnceWith('SIGTERM');
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('ein Abgleich, der erst nach onClose fertig wird, startet nichts mehr', async () => {
+    const { hook, spawn } = setupApp();
+    let resolve: (value: boolean) => void = () => {};
+    active.fn.mockReturnValue(new Promise<boolean>((r) => (resolve = r)));
+    const listening = hook('onListen');
+    await hook('onClose');
+    resolve(true);
+    await listening;
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('ein Fehler der DB-Abfrage wird geloggt und startet nichts', async () => {
+    const { hook, spawn, error } = setupApp();
+    active.fn.mockRejectedValue(new Error('db weg'));
+    await hook('onListen');
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(spawn).not.toHaveBeenCalled();
+    await hook('onClose');
   });
 });

@@ -424,3 +424,17 @@ def test_drain_without_heavy_hold_claims_heavy(
     heavy = make_job("transcribe")  # kein Handler registriert: wird geholt und scheitert
     assert worker.drain(conn) == 1
     assert get_job(conn, heavy)["attempts"] >= 1
+
+
+def test_drain_survives_failing_heavy_hold(
+    worker: Worker, conn: psycopg.Connection[Any], make_job: MakeJob
+) -> None:
+    """Ein kaputter Haken beendet den Worker nicht. Es gilt dann nur die Session-Regel."""
+
+    def broken() -> bool:
+        raise RuntimeError("Haken kaputt")
+
+    light = make_job("internal.echo")
+    worker.heavy_hold = broken
+    assert worker.drain(conn) == 1
+    assert get_job(conn, light)["state"] == "fertig"

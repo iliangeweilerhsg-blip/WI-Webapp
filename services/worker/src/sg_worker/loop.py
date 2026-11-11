@@ -184,8 +184,7 @@ class Worker:
         count = 0
         while not self.stopping:
             self._cancel_dependents(conn)
-            hold = bool(self.heavy_hold and self.heavy_hold())
-            job = jobs.claim_next(conn, self.worker_id, hold_heavy=hold)
+            job = jobs.claim_next(conn, self.worker_id, hold_heavy=self._hold_heavy())
             if job is None:
                 break
             if job["session_id"]:
@@ -195,6 +194,17 @@ class Worker:
             self._execute(conn, job)
             count += 1
         return count
+
+    def _hold_heavy(self) -> bool:
+        """Fragt den Haken `heavy_hold` (#204). Ein Fehler darin beendet den Worker nicht:
+        Er wird geloggt, und es gilt nur die Session-Regel der Abhol-Abfrage (UX-05)."""
+        if self.heavy_hold is None:
+            return False
+        try:
+            return bool(self.heavy_hold())
+        except Exception:
+            self.log.exception("heavy_hold fehlgeschlagen, es gilt nur die Session-Regel")
+            return False
 
     def _cancel_dependents(self, conn: psycopg.Connection[Any]) -> None:
         """Bricht Jobs mit gescheiterter Abhängigkeit ab, kaskadierend in Runden. Je Session eine
