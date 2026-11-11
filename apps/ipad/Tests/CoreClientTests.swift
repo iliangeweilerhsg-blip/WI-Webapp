@@ -58,24 +58,57 @@ final class CoreClientTests: XCTestCase {
     }
 
     @MainActor
-    func testRetriesPairConfirmToo() async throws {
+    func testRetriesPairStartBecauseSameNonceIsSameRequest() async throws {
+        let transport = FakeTransport([
+            .failure(.networkConnectionLost),
+            .http(status: 201, body: Fixtures.pairStartResponse),
+        ])
+        let client = Fixtures.client(transport)
+
+        let pairingID = try await client.pairStart(
+            endpoint: Fixtures.endpoint, deviceName: "iPad Test", nonce: PairingInput.makeNonce())
+
+        XCTAssertEqual(pairingID, Fixtures.publicPairingID)
+        XCTAssertEqual(transport.requests.count, 2)
+    }
+
+    @MainActor
+    func testRetriesDeleteBecauseItIsIdempotent() async throws {
+        let transport = FakeTransport([
+            .failure(.networkConnectionLost),
+            .http(status: 204, body: ""),
+        ])
+        let client = Fixtures.client(transport)
+
+        try await client.removeDevice(
+            endpoint: Fixtures.endpoint, deviceID: Fixtures.deviceID, token: Fixtures.token)
+
+        XCTAssertEqual(transport.requests.count, 2)
+    }
+
+    @MainActor
+    func testNeverRetriesPairConfirm() async {
+        // Nicht idempotent (VERTRAEGE §5, Review L-1): Die Verbindung kann auch abreißen,
+        // nachdem der Core den Code schon eingelöst oder den Fehlversuch gezählt hat.
         let transport = FakeTransport([
             .failure(.networkConnectionLost),
             .http(status: 201, body: Fixtures.pairResponse),
         ])
         let client = Fixtures.client(transport)
 
-        let result = try await client.pairConfirm(
-            endpoint: Fixtures.endpoint,
-            pairingID: Fixtures.publicPairingID,
-            code: "123456",
-            deviceName: "iPad Test",
-            nonce: PairingInput.makeNonce(),
-            appVersion: "0.1.0"
-        )
+        let error = await failure {
+            _ = try await client.pairConfirm(
+                endpoint: Fixtures.endpoint,
+                pairingID: Fixtures.publicPairingID,
+                code: "123456",
+                deviceName: "iPad Test",
+                nonce: PairingInput.makeNonce(),
+                appVersion: "0.1.0"
+            )
+        }
 
-        XCTAssertEqual(result.deviceToken, Fixtures.token)
-        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(error, .connectionLost)
+        XCTAssertEqual(transport.requests.count, 1)
     }
 
     // MARK: - Anfragen

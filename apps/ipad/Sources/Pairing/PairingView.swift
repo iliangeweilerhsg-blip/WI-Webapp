@@ -23,6 +23,8 @@ struct PairingView: View {
                     qrSection
                     foundMacsSection
                     manualSection
+                case .reviewing(let link):
+                    reviewSection(link)
                 case .requesting:
                     progressSection("Frage beim Mac an …")
                 case .awaitingCode(let endpoint, _):
@@ -124,8 +126,52 @@ struct PairingView: View {
         }
     }
 
+    /// Rückfrage nach dem Scan: Erst hier entscheidet der Nutzer, ob das iPad koppelt (Review M-1).
+    /// Der QR-Code enthält keinen Namen des Macs (VERTRAEGE §12), darum steht hier die Adresse.
+    private func reviewSection(_ link: PairingLink) -> some View {
+        let isPrivate = link.endpoint.scope == .privateNetwork
+        return Section {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Adresse des Macs").font(.subheadline).foregroundStyle(.secondary)
+                Text(link.endpoint.displayText)
+                    .font(.title2.monospacedDigit())
+            }
+            .accessibilityElement(children: .combine)
+            if !isPrivate {
+                publicAddressWarning
+            }
+            Button(isPrivate ? "Koppeln" : "Trotzdem koppeln") {
+                _Concurrency.Task { await controller.confirmReviewedLink() }
+            }
+            Button("Abbrechen", role: .cancel) {
+                controller.cancel()
+            }
+        } header: {
+            Text("Mit diesem Mac koppeln?")
+        } footer: {
+            Text("Vergleiche die Adresse mit der Anzeige am Mac unter Einstellungen → Geräte. Kopple nur, wenn sie übereinstimmt.")
+        }
+    }
+
+    private var publicAddressWarning: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Diese Adresse liegt nicht in deinem Heimnetz").font(.headline)
+                Text("Deine Notizen gehen später an diese Adresse. Kopple nur, wenn der Mac genau diese Adresse anzeigt, zum Beispiel im WLAN der Uni.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
     private func codeSection(endpoint: CoreEndpoint) -> some View {
         Section {
+            if endpoint.scope != .privateNetwork {
+                publicAddressWarning
+            }
             TextField("Code vom Mac", text: $code)
                 .keyboardType(.numberPad)
                 .font(.title2.monospacedDigit())
@@ -176,7 +222,8 @@ struct PairingView: View {
             controller.report(.invalidPairingLink)
             return
         }
-        _Concurrency.Task { await controller.pair(with: link) }
+        // Nur vorlegen: Gesendet wird erst nach „Koppeln“
+        controller.review(link)
     }
 
     private func connectManually() {

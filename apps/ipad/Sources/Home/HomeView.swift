@@ -46,8 +46,9 @@ struct HomeView: View {
         .task {
             // Solange der Startbildschirm sichtbar ist, regelmäßig nachsehen.
             // Der Live-Sync (WebSocket) ersetzt das später.
+            // Nach einem 401 ruht die Abfrage, bis neu gekoppelt ist. „Erneut prüfen“ fragt trotzdem.
             while !_Concurrency.Task.isCancelled {
-                await model.checkConnection()
+                await model.pollConnection()
                 try? await _Concurrency.Task.sleep(for: .seconds(15))
             }
         }

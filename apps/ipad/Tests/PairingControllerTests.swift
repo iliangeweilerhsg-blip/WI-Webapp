@@ -183,19 +183,58 @@ final class PairingControllerTests: XCTestCase {
         XCTAssertNotEqual(first, second)
     }
 
+    @MainActor
+    func testConnectionLostDuringConfirmIsNotRetriedAndPointsToTheMac() async {
+        let setup = Setup([
+            .http(status: 201, body: Fixtures.pairStartResponse),
+            .failure(.networkConnectionLost),
+            .http(status: 201, body: Fixtures.pairResponse),
+        ])
+        await setup.controller.start(endpoint: Fixtures.endpoint)
+
+        await setup.controller.submit(code: "123456")
+
+        // pair/start und genau ein pair/confirm
+        XCTAssertEqual(setup.transport.requests.count, 2)
+        XCTAssertEqual(setup.controller.lastError, .pairingOutcomeUnknown)
+        XCTAssertNil(setup.tokens.token)
+        XCTAssertEqual(setup.controller.state, .awaitingCode(Fixtures.endpoint, pairingID: Fixtures.publicPairingID))
+    }
+
     // MARK: - QR-Weg
 
-    @MainActor
-    func testQrLinkPairsWithoutPairStart() async throws {
-        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)])
-        let payload = "sg://pair?v=1&host=192.0.2.10&port=4710&pairing_id=\(Fixtures.qrPairingID)&code=654321"
-        let link = try XCTUnwrap(PairingLink(qrPayload: payload))
+    private static let qrPayload =
+        "sg://pair?v=1&host=192.168.1.20&port=4710&pairing_id=\(Fixtures.qrPairingID)&code=654321"
+    private static let publicQrPayload =
+        "sg://pair?v=1&host=192.0.2.10&port=4710&pairing_id=\(Fixtures.qrPairingID)&code=111111"
 
-        await setup.controller.pair(with: link)
+    @MainActor
+    func testScannedQrLinkSendsNothingUntilConfirmed() async throws {
+        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)])
+        let link = try XCTUnwrap(PairingLink(qrPayload: Self.qrPayload))
+
+        setup.controller.review(link)
+
+        XCTAssertEqual(setup.controller.state, .reviewing(link))
+        XCTAssertFalse(setup.controller.isBusy)
+        XCTAssertTrue(setup.transport.requests.isEmpty)
+        XCTAssertNil(setup.tokens.token)
+        XCTAssertNil(setup.macs.mac)
+    }
+
+    @MainActor
+    func testConfirmedQrLinkPairsWithoutPairStart() async throws {
+        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)])
+        let link = try XCTUnwrap(PairingLink(qrPayload: Self.qrPayload))
+
+        setup.controller.review(link)
+        await setup.controller.confirmReviewedLink()
 
         XCTAssertEqual(setup.controller.state, .paired)
         XCTAssertEqual(setup.tokens.token, Fixtures.token)
+        XCTAssertEqual(setup.macs.mac?.endpoint, link.endpoint)
         XCTAssertEqual(setup.transport.requests.count, 1)
+        XCTAssertEqual(setup.transport.requests.first?.url?.host, "192.168.1.20")
         XCTAssertEqual(setup.transport.requests.first?.url?.path, "/api/v1/devices/pair/confirm")
         let body = try setup.transport.jsonBody(at: 0)
         XCTAssertEqual(body["pairing_id"] as? String, Fixtures.qrPairingID)
@@ -203,12 +242,61 @@ final class PairingControllerTests: XCTestCase {
     }
 
     @MainActor
+    func testCancelledQrLinkSendsNothing() async throws {
+        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)])
+        let link = try XCTUnwrap(PairingLink(qrPayload: Self.qrPayload))
+
+        setup.controller.review(link)
+        setup.controller.cancel()
+        await setup.controller.confirmReviewedLink()
+
+        XCTAssertEqual(setup.controller.state, .idle)
+        XCTAssertTrue(setup.transport.requests.isEmpty)
+        XCTAssertNil(setup.tokens.token)
+    }
+
+    @MainActor
+    func testConfirmWithoutReviewSendsNothing() async {
+        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)])
+
+        await setup.controller.confirmReviewedLink()
+
+        XCTAssertEqual(setup.controller.state, .idle)
+        XCTAssertTrue(setup.transport.requests.isEmpty)
+    }
+
+    @MainActor
+    func testSecondScanDoesNotReplaceLinkUnderReview() async throws {
+        // Bestätigt wird die angezeigte Adresse: kein Austausch unter der Hand
+        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)])
+        let shown = try XCTUnwrap(PairingLink(qrPayload: Self.qrPayload))
+        let other = try XCTUnwrap(PairingLink(qrPayload: Self.publicQrPayload))
+
+        setup.controller.review(shown)
+        setup.controller.review(other)
+
+        XCTAssertEqual(setup.controller.state, .reviewing(shown))
+    }
+
+    @MainActor
+    func testQrLinkWithPublicAddressIsFlaggedAndStillNeedsConfirmation() async throws {
+        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)])
+        let link = try XCTUnwrap(PairingLink(qrPayload: Self.publicQrPayload))
+
+        setup.controller.review(link)
+
+        XCTAssertEqual(link.endpoint.scope, .publicNetwork)
+        XCTAssertEqual(setup.controller.state, .reviewing(link))
+        XCTAssertTrue(setup.transport.requests.isEmpty)
+    }
+
+    @MainActor
     func testQrFailureReturnsToStart() async throws {
         let setup = Setup([.http(status: 403, body: Fixtures.apiError("pairing_code_invalid"))])
-        let payload = "sg://pair?v=1&host=192.0.2.10&port=4710&pairing_id=\(Fixtures.qrPairingID)&code=654321"
-        let link = try XCTUnwrap(PairingLink(qrPayload: payload))
+        let link = try XCTUnwrap(PairingLink(qrPayload: Self.qrPayload))
 
-        await setup.controller.pair(with: link)
+        setup.controller.review(link)
+        await setup.controller.confirmReviewedLink()
 
         XCTAssertEqual(setup.controller.state, .idle)
         XCTAssertEqual(setup.controller.lastError, .pairing(.codeInvalid))

@@ -40,7 +40,12 @@ struct PairingResult: Equatable, Sendable {
 /// Wiederholung (VERTRAEGE §5, Hinweis H-1): Der Core schließt Keep-Alive-Verbindungen nach
 /// 10 s Leerlauf. Trifft eine Anfrage genau auf dieses Schließen, meldet URLSession
 /// `networkConnectionLost`. URLSession wiederholt das nicht für jede Methode selbst, darum
-/// wiederholt der Client hier. Der Server hat die Anfrage in diesem Fall nicht gelesen.
+/// wiederholt der Client hier.
+///
+/// Wiederholt werden nur idempotente Anfragen: `GET`, `DELETE` und `pair/start` (dieselbe Nonce
+/// ergibt dieselbe Anfrage). `pair/confirm` nie: `networkConnectionLost` kann auch auftreten,
+/// nachdem der Core die Anfrage schon verarbeitet hat. Eine Wiederholung würde dann einen
+/// Fehlversuch doppelt zählen oder ein schon gekoppeltes Gerät als Fehler melden (Review L-1).
 @MainActor
 final class CoreClient {
     private let transport: any HTTPTransport
@@ -63,7 +68,8 @@ final class CoreClient {
         return response.pairingID
     }
 
-    /// `POST /devices/pair/confirm`: löst den Code ein und liefert das Geräte-Token
+    /// `POST /devices/pair/confirm`: löst den Code ein und liefert das Geräte-Token.
+    /// Nicht idempotent, darum ohne automatische Wiederholung.
     func pairConfirm(
         endpoint: CoreEndpoint,
         pairingID: String,
@@ -81,7 +87,9 @@ final class CoreClient {
             publicNonce: nonce
         )
         let body = try encode(request)
-        let data = try await send("POST", "/devices/pair/confirm", endpoint: endpoint, token: nil, body: body)
+        let data = try await send(
+            "POST", "/devices/pair/confirm", endpoint: endpoint, token: nil, body: body,
+            retriesOnConnectionLoss: false)
         guard let response = try? newJSONDecoder().decode(PairResponse.self, from: data) else {
             throw ConnectionError.invalidResponse
         }
@@ -114,7 +122,8 @@ final class CoreClient {
         _ path: String,
         endpoint: CoreEndpoint,
         token: String?,
-        body: Data?
+        body: Data?,
+        retriesOnConnectionLoss: Bool = true
     ) async throws -> Data {
         guard let url = endpoint.url(path: path) else { throw ConnectionError.invalidAddress }
         var request = URLRequest(url: url)
@@ -137,7 +146,7 @@ final class CoreClient {
             do {
                 result = try await transport.send(request)
             } catch let error as URLError {
-                if error.code == .networkConnectionLost, attempt < maxRetries {
+                if retriesOnConnectionLoss, error.code == .networkConnectionLost, attempt < maxRetries {
                     attempt += 1
                     try? await _Concurrency.Task.sleep(for: retryDelay)
                     continue

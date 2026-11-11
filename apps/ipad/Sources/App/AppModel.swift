@@ -63,6 +63,16 @@ final class AppModel {
         connection = .unknown
     }
 
+    /// Nach einem 401 ist das Token endgültig ungültig. Weitere Abfragen bringen nichts,
+    /// bis neu gekoppelt ist (`reload()` setzt den Status zurück).
+    var isPollingPaused: Bool { connection == .disconnected(.tokenInvalid) }
+
+    /// Regelmäßige Abfrage vom Startbildschirm. Ruht, solange das Token ungültig ist.
+    func pollConnection() async {
+        guard !isPollingPaused else { return }
+        await checkConnection()
+    }
+
     /// Fragt den Core einmal an. Ein 401 heißt: Kopplung widerrufen, neu koppeln anbieten.
     func checkConnection() async {
         guard case .paired(let mac) = phase else { return }

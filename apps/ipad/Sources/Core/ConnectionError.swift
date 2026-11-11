@@ -24,6 +24,8 @@ enum ConnectionError: Error, Equatable, Sendable {
     case coreNotFound
     /// Verbindung brach mitten in der Anfrage ab (auch nach den Wiederholungen)
     case connectionLost
+    /// Verbindung brach beim Einlösen des Codes ab: offen, ob der Mac schon gekoppelt hat
+    case pairingOutcomeUnknown
     /// 401: Token fehlt, ist unbekannt oder wurde am Mac widerrufen
     case tokenInvalid
     /// 421: Der Core nimmt nur IP-Adressen und `.local`-Namen an
@@ -106,6 +108,7 @@ enum ConnectionError: Error, Equatable, Sendable {
         case .timeout: return "Mac antwortet nicht"
         case .coreNotFound: return "Mac nicht gefunden"
         case .connectionLost: return "Verbindung unterbrochen"
+        case .pairingOutcomeUnknown: return "Verbindung beim Koppeln unterbrochen"
         case .tokenInvalid: return "Kopplung nicht mehr gültig"
         case .hostNotAllowed: return "Adresse nicht zugelassen"
         case .pairing(let failure):
@@ -144,6 +147,8 @@ enum ConnectionError: Error, Equatable, Sendable {
             return "Unter dieser Adresse läuft kein Studien-Gehirn. Prüfe Adresse und Port und ob die App am Mac gestartet ist."
         case .connectionLost:
             return "Die Verbindung brach ab. Versuch es noch einmal."
+        case .pairingOutcomeUnknown:
+            return "Prüfe am Mac unter Einstellungen → Geräte, ob das iPad schon in der Liste steht. Wenn ja, entferne es dort. Starte die Kopplung dann neu."
         case .tokenInvalid:
             return "Das iPad wurde am Mac entfernt oder die Kopplung ist abgelaufen. Kopple es neu."
         case .hostNotAllowed:

@@ -86,6 +86,48 @@ final class AppModelTests: XCTestCase {
     }
 
     @MainActor
+    func testPollingStopsAfterRevokedTokenUntilPairedAgain() async {
+        let (model, transport) = makeModel(
+            [
+                .http(status: 401, body: Fixtures.apiError("device_token_invalid")),
+                .http(status: 200, body: "{}"),
+            ],
+            tokens: FakeTokenStore(token: Fixtures.token),
+            macs: FakePairedMacStore(mac: Fixtures.pairedMac)
+        )
+
+        await model.pollConnection()
+        XCTAssertEqual(model.connection, .disconnected(.tokenInvalid))
+        XCTAssertTrue(model.isPollingPaused)
+
+        await model.pollConnection()
+        await model.pollConnection()
+        XCTAssertEqual(transport.requests.count, 1)
+
+        // Neu gekoppelt: reload() setzt den Status zurück, die Abfrage läuft wieder
+        model.reload()
+        XCTAssertFalse(model.isPollingPaused)
+        await model.pollConnection()
+        XCTAssertEqual(transport.requests.count, 2)
+        XCTAssertEqual(model.connection, .connected)
+    }
+
+    @MainActor
+    func testPollingContinuesAfterOtherErrors() async {
+        let (model, transport) = makeModel(
+            [.failure(.timedOut)],
+            tokens: FakeTokenStore(token: Fixtures.token),
+            macs: FakePairedMacStore(mac: Fixtures.pairedMac)
+        )
+
+        await model.pollConnection()
+        await model.pollConnection()
+
+        XCTAssertFalse(model.isPollingPaused)
+        XCTAssertEqual(transport.requests.count, 2)
+    }
+
+    @MainActor
     func testUnpairSignsOffAtCoreAndDeletesLocalData() async {
         let tokens = FakeTokenStore(token: Fixtures.token)
         let macs = FakePairedMacStore(mac: Fixtures.pairedMac)

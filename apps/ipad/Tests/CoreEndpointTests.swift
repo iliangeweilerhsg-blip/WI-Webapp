@@ -113,6 +113,7 @@ final class ConnectionErrorTests: XCTestCase {
     func testEveryCauseHasTexts() {
         let causes: [ConnectionError] = [
             .insecureConnectionBlocked, .localNetworkDenied, .offline, .timeout, .coreNotFound, .connectionLost,
+            .pairingOutcomeUnknown,
             .tokenInvalid, .hostNotAllowed, .pairing(.windowClosed), .pairing(.locked), .pairing(.rateLimited),
             .pairing(.requestsFull), .pairing(.codeInvalid), .pairing(.requestRejected),
             .server(status: 500, code: "x"), .server(status: 500, code: nil), .invalidResponse, .invalidAddress,

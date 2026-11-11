@@ -5,6 +5,8 @@ import Observation
 enum PairingState: Equatable, Sendable {
     /// Mac wählen: QR-Code, Bonjour-Liste oder Adresse von Hand
     case idle
+    /// QR-Code gelesen: Der Nutzer sieht die Adresse und entscheidet. Noch nichts gesendet.
+    case reviewing(PairingLink)
     /// `pair/start` läuft
     case requesting(CoreEndpoint)
     /// Anfrage steht am Mac, der Nutzer tippt den Code ein
@@ -18,7 +20,9 @@ enum PairingState: Equatable, Sendable {
 /// Zustandsautomat der Kopplung.
 ///
 /// Zwei Wege führen zum Token:
-/// - QR-Code (empfohlen, §12 H-5): `pair(with:)` löst den Code direkt ein.
+/// - QR-Code (empfohlen, §12 H-5): `review(_:)` zeigt die Adresse, erst `confirmReviewedLink()`
+///   löst den Code ein. Ohne diese Rückfrage würde ein untergeschobener QR-Code das iPad
+///   unbemerkt an einen fremden Host koppeln (Review M-1).
 /// - Bonjour oder Adresse von Hand: `start(endpoint:)`, dann `submit(code:)`.
 @MainActor
 @Observable
@@ -58,7 +62,7 @@ final class PairingController {
     var isBusy: Bool {
         switch state {
         case .requesting, .confirming: return true
-        case .idle, .awaitingCode, .paired: return false
+        case .idle, .reviewing, .awaitingCode, .paired: return false
         }
     }
 
@@ -95,9 +99,16 @@ final class PairingController {
         )
     }
 
-    /// QR-Weg: Adresse, Kennung und Code kommen aus dem QR-Code
-    func pair(with link: PairingLink) async {
-        guard !isBusy else { return }
+    /// QR-Weg, Schritt 1: Adresse aus dem QR-Code zur Bestätigung vorlegen. Sendet nichts.
+    func review(_ link: PairingLink) {
+        guard state == .idle else { return }
+        lastError = nil
+        state = .reviewing(link)
+    }
+
+    /// QR-Weg, Schritt 2: Der Nutzer hat die Adresse bestätigt, jetzt den Code einlösen
+    func confirmReviewedLink() async {
+        guard case .reviewing(let link) = state else { return }
         beginAttempt()
         await confirm(endpoint: link.endpoint, pairingID: link.pairingID, code: link.code, fallback: .idle)
     }
@@ -132,7 +143,11 @@ final class PairingController {
                 appVersion: appVersion
             )
         } catch {
-            let cause = ConnectionError.wrap(error)
+            var cause = ConnectionError.wrap(error)
+            if cause == .connectionLost {
+                // Ohne Wiederholung (nicht idempotent): Der Mac kann schon gekoppelt haben
+                cause = .pairingOutcomeUnknown
+            }
             if cause == .pairing(.codeInvalid) {
                 wrongCodes += 1
             }
