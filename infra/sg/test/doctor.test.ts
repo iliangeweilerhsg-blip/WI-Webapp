@@ -10,7 +10,10 @@ import {
   runChecks,
   type CheckResult,
 } from '../src/doctor.ts';
-import type { RunResult, System } from '../src/system.ts';
+import { freeBytesNearest, type RunResult, type System } from '../src/system.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const cfg = resolveConfig({}, '/home/u', '/repo');
 const OK: RunResult = { ok: true, stdout: 'x 1.0\n', stderr: '' };
@@ -152,6 +155,12 @@ describe('checkFreeSpace', () => {
     expect(formatChecks(results)).toContain('Wenig Speicher frei');
   });
 
+  it('Gegenprobe: 1 Byte unter 10 GB ist ein Hinweis und zeigt nicht "10,0"', () => {
+    const r = checkFreeSpace(fakeSystem({ freeBytes: () => MIN_FREE_BYTES - 1 }), cfg);
+    expect(r.status).toBe('info');
+    expect(r.detail).toContain('9,9 GB');
+  });
+
   it('meldet "nicht feststellbar", wenn die Messung fehlschlägt', () => {
     const r = checkFreeSpace(fakeSystem({ freeBytes: () => undefined }), cfg);
     expect(r.status).toBe('info');
@@ -162,6 +171,22 @@ describe('checkFreeSpace', () => {
     const asked: string[] = [];
     checkFreeSpace(fakeSystem({ freeBytes: (p) => (asked.push(p), 1) }), cfg);
     expect(asked).toEqual([cfg.dataDir]);
+  });
+});
+
+describe('freeBytesNearest (echtes Dateisystem)', () => {
+  it('misst bei fehlendem Datenordner im nächsten vorhandenen Elternordner', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-free-'));
+    try {
+      const own = freeBytesNearest(dir);
+      expect(own).toBeGreaterThan(0);
+      // gleiches Dateisystem, nur ungefähr gleich, weil parallel andere Tests schreiben
+      expect(Math.abs((freeBytesNearest(join(dir, 'fehlt', 'tiefer')) ?? 0) - (own ?? 0))).toBeLessThan(
+        1024 ** 3,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -115,8 +115,10 @@ export function checkDataDir(sys: System, cfg: SgConfig): CheckResult {
   };
 }
 
+/** GiB mit einer Nachkommastelle, abgeschnitten (nicht gerundet): knapp unter 10 GB zeigt "9,9", nie "10,0". */
 function formatGb(bytes: number): string {
-  return (bytes / 1024 ** 3).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const tenths = Math.floor((bytes / 1024 ** 3) * 10) / 10;
+  return tenths.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
 export function checkFreeSpace(sys: System, cfg: SgConfig): CheckResult {
