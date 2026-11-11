@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterator, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -854,6 +855,43 @@ def test_degraded_run_is_redone_once_the_embedder_is_ready(core_db: Conn, go: An
         # Danach gilt wieder „unverändert“
         again = result_of(go(resolve_job(core_db, lec, ex)))
         assert again.unchanged and [i["id"] for i in items(core_db)] == after
+    finally:
+        embedders.set_shared_embedder(None)
+
+
+@dataclass
+class LoadingEmbedder(AngleEmbedder):
+    """Lädt noch und wird nicht fertig. Merkt sich jedes `wait_ready`."""
+
+    waits: list[float] = field(default_factory=list)
+
+    def ready(self) -> bool:
+        return False
+
+    def wait_ready(self, timeout_s: float) -> bool:
+        self.waits.append(timeout_s)
+        return False
+
+
+def test_unchanged_waits_for_the_embedder_only_after_a_degraded_run(core_db: Conn, go: Any) -> None:
+    """Die Job-Schleife wartet im `unchanged`-Pfad nur, wenn der Vorlauf degradiert war."""
+    loading = LoadingEmbedder()
+    embedders.set_shared_embedder(AngleEmbedder())
+    try:
+        lec = lecture(core_db)
+        ex = extract_job(core_db, lec, [proposal("Rekursion")])
+        assert result_of(go(resolve_job(core_db, lec, ex))).embedding_model == EMBED_MODEL
+        embedders.set_shared_embedder(loading)
+        assert result_of(go(resolve_job(core_db, lec, ex))).unchanged
+        assert loading.waits == []  # voller Vorlauf: kein Warten
+
+        embedders.set_shared_embedder(UnavailableEmbedder(provider="x", model="m", reason="Aus"))
+        other = extract_job(core_db, lec, [proposal("Rekursion")], input_hash="b" * 64)
+        assert result_of(go(resolve_job(core_db, lec, other))).embedding_model is None
+        # Degradierter Vorlauf, Embedder lädt und wird nicht fertig: einmal warten, unverändert
+        embedders.set_shared_embedder(loading)
+        assert result_of(go(resolve_job(core_db, lec, other))).unchanged
+        assert loading.waits == [cr.search_index.WAIT_READY_S]
     finally:
         embedders.set_shared_embedder(None)
 
