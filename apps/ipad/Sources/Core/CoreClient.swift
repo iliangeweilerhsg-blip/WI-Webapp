@@ -139,7 +139,7 @@ final class CoreClient {
             } catch let error as URLError {
                 if error.code == .networkConnectionLost, attempt < maxRetries {
                     attempt += 1
-                    try? await Task.sleep(for: retryDelay)
+                    try? await _Concurrency.Task.sleep(for: retryDelay)
                     continue
                 }
                 throw ConnectionError.from(error)

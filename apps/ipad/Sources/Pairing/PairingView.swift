@@ -132,7 +132,7 @@ struct PairingView: View {
                 .accessibilityLabel("Code mit sechs Ziffern")
             Button("Koppeln") {
                 let entered = code
-                Task { await controller.submit(code: entered) }
+                _Concurrency.Task { await controller.submit(code: entered) }
             }
             .disabled(PairingInput.normalizedCode(code) == nil)
             Button("Abbrechen", role: .cancel) {
@@ -176,7 +176,7 @@ struct PairingView: View {
             controller.report(.invalidPairingLink)
             return
         }
-        Task { await controller.pair(with: link) }
+        _Concurrency.Task { await controller.pair(with: link) }
     }
 
     private func connectManually() {
@@ -185,13 +185,13 @@ struct PairingView: View {
             return
         }
         code = ""
-        Task { await controller.start(endpoint: endpoint) }
+        _Concurrency.Task { await controller.start(endpoint: endpoint) }
     }
 
     private func choose(_ mac: DiscoveredMac) {
         resolvingMacID = mac.id
         code = ""
-        Task {
+        _Concurrency.Task {
             let endpoint = await MacResolver.resolve(mac)
             resolvingMacID = nil
             guard let endpoint else {

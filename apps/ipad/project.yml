@@ -29,6 +29,8 @@ targets:
     sources:
       - path: Sources
       # Generierte Typen und Hilfsschicht werden direkt eingebunden, nicht kopiert (VERTRAEGE §11.7, §16.3)
+      # Achtung: Schemas.swift liegt damit im App-Modul und verdeckt Task (auch Page, Stroke).
+      # In der App darum immer _Concurrency.Task schreiben. Ein eigenes Modul geht nicht, die Typen sind internal.
       - path: ../../packages/schemas/generated/swift/Schemas.swift
       - path: ../../packages/schemas/swift-support/Sources
     settings:

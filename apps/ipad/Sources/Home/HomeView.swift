@@ -46,9 +46,9 @@ struct HomeView: View {
         .task {
             // Solange der Startbildschirm sichtbar ist, regelmäßig nachsehen.
             // Der Live-Sync (WebSocket) ersetzt das später.
-            while !Task.isCancelled {
+            while !_Concurrency.Task.isCancelled {
                 await model.checkConnection()
-                try? await Task.sleep(for: .seconds(15))
+                try? await _Concurrency.Task.sleep(for: .seconds(15))
             }
         }
     }
@@ -106,11 +106,11 @@ struct ConnectionDetailView: View {
             Divider()
 
             Button("Erneut prüfen") {
-                Task { await model.checkConnection() }
+                _Concurrency.Task { await model.checkConnection() }
             }
             if needsNewPairing {
                 Button("Neu koppeln") {
-                    Task { await model.unpair() }
+                    _Concurrency.Task { await model.unpair() }
                 }
             } else {
                 Button("Kopplung aufheben", role: .destructive) {
@@ -126,7 +126,7 @@ struct ConnectionDetailView: View {
             titleVisibility: .visible
         ) {
             Button("Aufheben", role: .destructive) {
-                Task { await model.unpair() }
+                _Concurrency.Task { await model.unpair() }
             }
             Button("Abbrechen", role: .cancel) {}
         } message: {
