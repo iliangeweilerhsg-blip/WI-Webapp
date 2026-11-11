@@ -24,6 +24,16 @@ struct HomeView: View {
                         title: "Notizbücher",
                         text: "Deine Notizbücher je Modul erscheinen hier mit dem nächsten Schritt."
                     )
+                    // Vorläufiger Zugang zur Schreibfläche (T1-12). Die Notizbuchverwaltung folgt mit T1-13.
+                    NavigationLink {
+                        InkPageView()
+                    } label: {
+                        PlaceholderCard(
+                            title: "Test-Notizbuch",
+                            text: "Schreibfläche ausprobieren. Die Seite bleibt vorerst nur auf dem iPad."
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
                 .padding()
                 .frame(maxWidth: 720, alignment: .leading)
