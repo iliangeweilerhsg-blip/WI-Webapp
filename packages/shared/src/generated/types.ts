@@ -4802,7 +4802,7 @@ title?: (string | null)
 slide_deck_id?: (Uuid | null)
 }
 /**
- * GET /settings: alle Phase-1-Bereiche, fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
+ * GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "Settings".
@@ -4812,6 +4812,7 @@ general: GeneralSettings
 lecture: LectureSettings
 pen: PenSettings
 data: DataSettings
+ai: AiSettings
 }
 /**
  * PATCH /settings: nur die angegebenen Felder ändern sich. Antwort: Settings
@@ -4824,6 +4825,7 @@ general?: GeneralSettingsUpdate
 lecture?: LectureSettingsUpdate
 pen?: PenSettingsUpdate
 data?: DataSettingsUpdate
+ai?: AiSettingsUpdate
 }
 /**
  * Eine Seite eines Foliensatzes. Bilder über GET /slides/{id}/image bzw. /thumb.

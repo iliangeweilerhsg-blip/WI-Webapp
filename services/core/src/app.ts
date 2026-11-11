@@ -21,8 +21,10 @@ import {
 import { registerWeb } from './plugins/web.ts';
 import { createMoodleServices, type MoodleServices } from './moodle/index.ts';
 import { MoodleSync } from './moodle/sync.ts';
+import { aiStatusRoutes } from './routes/ai-status.ts';
 import { backupRoutes } from './routes/backups.ts';
 import { calendarRoutes } from './routes/calendar.ts';
+import { costsRoutes } from './routes/costs.ts';
 import { devicesRoutes } from './routes/devices.ts';
 import { materialRoutes } from './routes/material.ts';
 import { moodleRoutes } from './routes/moodle.ts';
@@ -31,6 +33,7 @@ import { organisationRoutes } from './routes/organisation.ts';
 import { recordingRoutes } from './routes/recordings.ts';
 import { sessionRoutes } from './routes/sessions.ts';
 import { settingsRoutes } from './routes/settings.ts';
+import { summaryRoutes } from './routes/summary.ts';
 import { systemRoutes } from './routes/system.ts';
 import { searchRoutes } from './routes/search.ts';
 import { trashRoutes } from './routes/trash.ts';
@@ -189,6 +192,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(recordingRoutes, { db, config });
       await api.register(transcriptRoutes, { db });
       await api.register(searchRoutes, { db, config });
+      // Kurzfassung, KI-Kosten und KI-Status (VERTRAEGE §20.6, T2-22a)
+      await api.register(summaryRoutes, { db });
+      await api.register(costsRoutes, { db });
+      await api.register(aiStatusRoutes, { db, config });
       await api.register(backupRoutes, { db, config });
       await api.register(trashRoutes, { db, config });
       await api.register(settingsRoutes, { db, config });

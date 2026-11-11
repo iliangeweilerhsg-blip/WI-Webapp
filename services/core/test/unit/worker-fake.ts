@@ -53,6 +53,10 @@ export class FakeWorker {
   /** Zustand für `GET /health` */
   healthState: 'bereit' | 'laedt' | 'nicht_verfuegbar' = 'bereit';
   model = FAKE_MODEL;
+  /** Feld `llm` in `GET /health` (§20.5). `undefined`: Feld fehlt (älterer Worker) */
+  llm: unknown = undefined;
+  /** Verzögerung von `GET /health` in ms (Zeitlimit von `GET /ai/status`) */
+  healthDelayMs = 0;
   /** Verzögerung bei `mode = slow` */
   delayMs = 1500;
   /** Eigene Vektoren statt des Fakes (z. B. für exakte Ähnlichkeiten) */
@@ -129,7 +133,9 @@ export class FakeWorker {
       return send(401, { code: 'unauthorized' });
     }
     if (req.method === 'GET' && req.url === '/health') {
+      if (this.healthDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.healthDelayMs));
       return send(200, {
+        ...(this.llm === undefined ? {} : { llm: this.llm }),
         embedder: {
           provider: 'fake',
           model: this.model,

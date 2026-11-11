@@ -18507,16 +18507,18 @@ extension SessionUpdate {
     }
 }
 
-/// GET /settings: alle Phase-1-Bereiche, fehlende Werte mit Standard aufgefüllt. Geräte
-/// stehen unter /devices.
+/// GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit
+/// Standard aufgefüllt. Geräte stehen unter /devices.
 // MARK: - Settings
 struct Settings: Codable {
+    let ai: AISettings
     let data: DataSettings
     let general: GeneralSettings
     let lecture: LectureSettings
     let pen: PenSettings
 
     enum CodingKeys: String, CodingKey {
+        case ai = "ai"
         case data = "data"
         case general = "general"
         case lecture = "lecture"
@@ -18543,12 +18545,14 @@ extension Settings {
     }
 
     func with(
+        ai: AISettings? = nil,
         data: DataSettings? = nil,
         general: GeneralSettings? = nil,
         lecture: LectureSettings? = nil,
         pen: PenSettings? = nil
     ) -> Settings {
         return Settings(
+            ai: ai ?? self.ai,
             data: data ?? self.data,
             general: general ?? self.general,
             lecture: lecture ?? self.lecture,
@@ -18568,12 +18572,14 @@ extension Settings {
 /// PATCH /settings: nur die angegebenen Felder ändern sich. Antwort: Settings
 // MARK: - SettingsUpdate
 struct SettingsUpdate: Codable {
+    let ai: AISettingsUpdate?
     let data: DataSettingsUpdate?
     let general: GeneralSettingsUpdate?
     let lecture: LectureSettingsUpdate?
     let pen: PenSettingsUpdate?
 
     enum CodingKeys: String, CodingKey {
+        case ai = "ai"
         case data = "data"
         case general = "general"
         case lecture = "lecture"
@@ -18600,12 +18606,14 @@ extension SettingsUpdate {
     }
 
     func with(
+        ai: AISettingsUpdate?? = nil,
         data: DataSettingsUpdate?? = nil,
         general: GeneralSettingsUpdate?? = nil,
         lecture: LectureSettingsUpdate?? = nil,
         pen: PenSettingsUpdate?? = nil
     ) -> SettingsUpdate {
         return SettingsUpdate(
+            ai: ai ?? self.ai,
             data: data ?? self.data,
             general: general ?? self.general,
             lecture: lecture ?? self.lecture,
@@ -26395,6 +26403,7 @@ extension SessionUpdate {
 extension Settings {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ai, forKey: .ai)
         try container.encode(data, forKey: .data)
         try container.encode(general, forKey: .general)
         try container.encode(lecture, forKey: .lecture)
@@ -26405,6 +26414,7 @@ extension Settings {
 extension SettingsUpdate {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(ai, forKey: .ai)
         try container.encodeIfPresent(data, forKey: .data)
         try container.encodeIfPresent(general, forKey: .general)
         try container.encodeIfPresent(lecture, forKey: .lecture)

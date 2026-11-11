@@ -44,6 +44,13 @@ let moduleId = '';
 /** Minuten nach 2026-11-04 09:00 UTC */
 const T = (min: number): Date => new Date(Date.UTC(2026, 10, 4, 9, 0) + min * 60_000);
 const HEX = 'a'.repeat(64);
+/** Schritte aus §20.2 (T2-22a): Sie hängen an jeder Kette ab `transcribe` bzw. `align.log`. Details in pipeline-concepts.test.ts */
+const CONCEPT_STEPS = ['concepts.extract', 'concepts.resolve', 'summary.write'] as const;
+const CONCEPTS_WAITING = {
+  'concepts.extract': 'wartet',
+  'concepts.resolve': 'wartet',
+  'summary.write': 'wartet',
+} as const;
 
 beforeAll(async () => {
   app = await startTestApp();
@@ -207,6 +214,7 @@ describe('Kette beim Stopp', () => {
       'audio.finalize': 'wartet',
       transcribe: 'wartet',
       'align.log': 'wartet',
+      ...CONCEPTS_WAITING,
     });
     // align.log hängt nicht von transcribe ab
     expect(align!.dependsOn).not.toContain(transcribe!.id);
@@ -220,15 +228,14 @@ describe('Kette beim Stopp', () => {
     const { id } = await runningSession('pausiert');
     const stopped = (await stop(id)).session;
     expect(stopped.state).toBe('beendet');
-    expect((await jobsOf(id)).map((j) => j.type).sort()).toEqual([
-      'align.log',
-      'audio.finalize',
-      'transcribe',
-    ]);
+    expect((await jobsOf(id)).map((j) => j.type).sort()).toEqual(
+      ['align.log', 'audio.finalize', 'transcribe', ...CONCEPT_STEPS].sort(),
+    );
     expect(stopped.processing).toEqual({
       'audio.finalize': 'wartet',
       transcribe: 'wartet',
       'align.log': 'wartet',
+      ...CONCEPTS_WAITING,
     });
   });
 
@@ -255,6 +262,7 @@ describe('Kette beim Stopp', () => {
       'audio.finalize': 'fertig',
       transcribe: 'wartet',
       'align.log': 'wartet',
+      ...CONCEPTS_WAITING,
     });
   });
 
@@ -333,7 +341,8 @@ describe('ensurePipelineJobs', () => {
     const [t] = await jobsOf(id, 'transcribe');
     expect(t!.payload).toEqual({ session_id: id, force: true }); // alt ODER neu: bleibt true
     expect(t!.dependsOn).toEqual([fin]);
-    expect(third).toHaveLength(2);
+    expect(third.map((j) => j.type)).toEqual(['transcribe', 'align.log', ...CONCEPT_STEPS]);
+    expect(third.map((j) => j.id)).toEqual(first.map((j) => j.id));
   });
 
   it('[P2] ein laufender Job desselben Typs wird Abhängigkeit des neuen (Fehlschlag wird geerbt)', async () => {
@@ -381,14 +390,15 @@ describe('ensurePipelineJobs', () => {
     const waitingT = await mkJob(id, 'transcribe', 'wartet', { dependsOn: [runningT] });
     const waitingA = await mkJob(id, 'align.log', 'wartet', { dependsOn: [runningA] });
 
-    const [t, a] = await ensure(id, 'transcribe');
+    const [t, a, ...concepts] = await ensure(id, 'transcribe');
     expect(t).toMatchObject({ id: waitingT, dependsOn: [runningT] });
     expect(a).toMatchObject({ id: waitingA, dependsOn: [runningA] });
+    expect(concepts.map((j) => j.type)).toEqual([...CONCEPT_STEPS]);
 
     const res = await post(id, { from_step: 'transcribe' });
     expect(res.statusCode).toBe(202);
     const byId = new Map((await jobsOf(id)).map((j) => [j.id, j]));
-    expect(byId.size).toBe(5); // nichts neu angelegt
+    expect(byId.size).toBe(5 + CONCEPT_STEPS.length); // nichts neu angelegt (die drei Konzept-Jobs stammen von oben)
     expect(byId.get(waitingT)).toMatchObject({ state: 'wartet', dependsOn: [runningT] });
     expect(byId.get(waitingA)).toMatchObject({ state: 'wartet', dependsOn: [runningA] });
   });
@@ -412,14 +422,20 @@ describe('ensurePipelineJobs', () => {
     const b = await mkRecording(id);
     const jobs = await ensure(id, 'audio.finalize');
     const order = [a, b].sort();
-    expect(jobs.map((j) => j.type)).toEqual(['audio.finalize', 'audio.finalize', 'transcribe', 'align.log']);
+    expect(jobs.map((j) => j.type)).toEqual([
+      'audio.finalize',
+      'audio.finalize',
+      'transcribe',
+      'align.log',
+      ...CONCEPT_STEPS,
+    ]);
     expect(jobs.slice(0, 2).map((j) => (j.payload as { recording_id: string }).recording_id)).toEqual(order);
     expect(jobs[2]!.dependsOn).toHaveLength(2);
 
     const id2 = await mkSession({ state: 'beendet' });
     await mkRecording(id2);
     const onlyAlign = await ensure(id2, 'align.log');
-    expect(onlyAlign.map((j) => j.type)).toEqual(['align.log']);
+    expect(onlyAlign.map((j) => j.type)).toEqual(['align.log', ...CONCEPT_STEPS]);
     expect(await jobsOf(id2, 'transcribe')).toEqual([]);
   });
 
@@ -534,7 +550,10 @@ describe('POST /sessions/{id}/reprocess', () => {
     expect(await jobsOf(id)).toEqual([]);
     const align = await post(id, { from_step: 'align.log' });
     expect(align.statusCode).toBe(202);
-    expect(SessionReprocessResultSchema.parse(align.json()).jobs.map((j) => j.type)).toEqual(['align.log']);
+    expect(SessionReprocessResultSchema.parse(align.json()).jobs.map((j) => j.type)).toEqual([
+      'align.log',
+      ...CONCEPT_STEPS,
+    ]);
     expect(await jobsOf(id, 'transcribe')).toEqual([]);
     // eine gelöschte Aufnahme zählt nicht
     const deletedOnly = await mkSession();
@@ -558,13 +577,14 @@ describe('POST /sessions/{id}/reprocess', () => {
     const res = await post(id, { from_step: 'transcribe' });
     expect(res.statusCode).toBe(202);
     const body = SessionReprocessResultSchema.parse(res.json());
-    expect(body.jobs.map((j) => j.type)).toEqual(['transcribe', 'align.log']);
+    expect(body.jobs.map((j) => j.type)).toEqual(['transcribe', 'align.log', ...CONCEPT_STEPS]);
     expect(body.jobs.every((j) => j.state === 'wartet' && j.session_id === id)).toBe(true);
     expect(body.session.state).toBe('verarbeitet');
     expect(body.session.processing).toEqual({
       'audio.finalize': 'fertig',
       transcribe: 'wartet',
       'align.log': 'wartet',
+      ...CONCEPTS_WAITING,
     });
     expect((await sessionRow(id)).processing).toEqual(body.session.processing);
     // session.updated mit dem neuen Stand
@@ -606,6 +626,7 @@ describe('POST /sessions/{id}/reprocess', () => {
       'audio.finalize': 'fehler', // unverändert: from_step transcribe fasst audio.finalize nicht an
       transcribe: 'wartet',
       'align.log': 'wartet',
+      ...CONCEPTS_WAITING,
     });
     expect(await jobsOf(id, 'audio.finalize')).toHaveLength(1);
     // „Erneut versuchen“ ab audio.finalize legt dagegen einen neuen Job an und der Fortschritt dreht auf wartet
@@ -630,13 +651,18 @@ describe('POST /sessions/{id}/reprocess', () => {
     const rec = await mkRecording(id);
     await mkJob(id, 'audio.finalize', 'fertig', { recordingId: rec });
     const plain = await post(id, { from_step: 'audio.finalize' });
-    expect(plain.json().jobs.map((j: { type: string }) => j.type)).toEqual(['transcribe', 'align.log']);
+    expect(plain.json().jobs.map((j: { type: string }) => j.type)).toEqual([
+      'transcribe',
+      'align.log',
+      ...CONCEPT_STEPS,
+    ]);
     expect(await jobsOf(id, 'audio.finalize')).toHaveLength(1);
     const forced = await post(id, { from_step: 'audio.finalize', force: true });
     expect(forced.json().jobs.map((j: { type: string }) => j.type)).toEqual([
       'audio.finalize',
       'transcribe',
       'align.log',
+      ...CONCEPT_STEPS,
     ]);
     expect(await jobsOf(id, 'audio.finalize')).toHaveLength(2);
     const [t] = await jobsOf(id, 'transcribe');
