@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { Notebook, Session } from '@sg/shared';
-import { friendlyMessage } from '../../lib/api.ts';
+import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import { useHydrationSafe } from '../../lib/hydrated.ts';
 import { fetchNotebook, fetchNotebooks, fetchSessionNotebook } from '../../lib/ink.ts';
 import type { SyncClient } from '../../lib/sync/client.ts';
@@ -38,10 +38,33 @@ interface IpadNotebook {
   notebookId: string | null;
 }
 
-const readIpad = (client: SyncClient | null): IpadNotebook => ({
-  client,
-  notebookId: client?.devicePresence('ipad')?.notebook_id ?? null,
-});
+/**
+ * Zuletzt gemeldetes Notizbuch je Sync-Client und Session. Nach dem Trennen des iPads liefert `devicePresence`
+ * nichts mehr. Eine neu eingehängte Spalte (Tab- oder Layoutwechsel) bleibt so trotzdem beim zuletzt gezeigten
+ * Notizbuch (V4).
+ */
+const remembered = new WeakMap<SyncClient, Map<string, string | null>>();
+
+function remember(client: SyncClient, sessionId: string, notebookId: string | null): void {
+  let bySession = remembered.get(client);
+  if (!bySession) remembered.set(client, (bySession = new Map()));
+  bySession.set(sessionId, notebookId);
+}
+
+function readIpad(client: SyncClient | null, sessionId: string): IpadNotebook {
+  if (!client) return { client, notebookId: null };
+  const presence = client.devicePresence('ipad');
+  if (!presence) return { client, notebookId: remembered.get(client)?.get(sessionId) ?? null };
+  remember(client, sessionId, presence.notebook_id);
+  return { client, notebookId: presence.notebook_id };
+}
+
+/**
+ * 404 auf `GET /notebooks/{id}` kurz wiederholen: Nach dem Neuverbinden meldet das iPad `presence` vor seinen
+ * Operationen. Ein offline angelegtes Notizbuch kennt der Core dann für einen Moment noch nicht.
+ */
+const retryNotFound = (count: number, error: unknown) =>
+  count < 3 && error instanceof ApiRequestError && error.status === 404;
 
 export function NotesColumn({
   session,
@@ -51,18 +74,20 @@ export function NotesColumn({
   client: SyncClient | null;
 }) {
   const moduleId = session.module_id;
-  const [ipad, setIpad] = useState<IpadNotebook>(() => readIpad(client));
+  const [ipad, setIpad] = useState<IpadNotebook>(() => readIpad(client, session.id));
   /** Das zuletzt gezeigte Notizbuch: bleibt stehen, solange ein neues gemeldetes noch geprüft wird */
   const shown = useRef<Notebook | null>(null);
 
   // Startwert aus der letzten `presence` des iPads (auch wenn sie vor dem Einhängen kam), danach folgen
   useEffect(() => {
     if (!client) return;
-    setIpad(readIpad(client));
+    setIpad(readIpad(client, session.id));
     return client.onEvent('presence', (p) => {
-      if (p.client === 'ipad') setIpad({ client, notebookId: p.notebook_id });
+      if (p.client !== 'ipad') return;
+      remember(client, session.id, p.notebook_id);
+      setIpad({ client, notebookId: p.notebook_id });
     });
-  }, [client]);
+  }, [client, session.id]);
 
   const standard = useHydrationSafe(
     useQuery({
@@ -85,7 +110,8 @@ export function NotesColumn({
     useQuery({
       queryKey: ['notebooks', 'one', reported],
       enabled: lookup,
-      retry: false,
+      retry: retryNotFound,
+      retryDelay: (attempt) => 500 * (attempt + 1),
       queryFn: ({ signal }) => fetchNotebook(reported ?? '', signal),
     }),
   );

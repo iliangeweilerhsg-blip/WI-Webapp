@@ -112,6 +112,10 @@ function fakeSync(state = 'online') {
     setIpadBefore(notebookId: string | null) {
       ipad = presenceOf(notebookId);
     },
+    /** iPad getrennt: `devicePresence('ipad')` liefert wieder `null`, ohne Ereignis */
+    setIpadGone() {
+      ipad = null;
+    },
     setState(next: string) {
       client.connectionState = next;
       for (const fn of listeners.get('connection') ?? [])
@@ -732,6 +736,34 @@ describe('Dashboard: Notizbuch der Session vom Core (#199)', () => {
     act(() => sync.ipadPresence('0190f6a2-0000-7000-8000-0000000000cf'));
     await waitFor(() => expect(gets('/notebooks/0190f6a2-0000-7000-8000-0000000000cf')).toBe(1));
     expect(screen.getByTestId('ink-column')).toHaveTextContent(NB_VL.id);
+  });
+
+  it('offline angelegtes Notizbuch: 404 wird kurz wiederholt, dann Wechsel', async () => {
+    boot({ notebooks: [NB_UEBUNG, NB_VL] });
+    expect(await inkColumn()).toHaveTextContent(NB_VL.id);
+    // presence kommt vor `notebook.create`: der Core kennt das Notizbuch noch nicht
+    act(() => sync.ipadPresence(NB_FREI.id));
+    await waitFor(() => expect(gets(`/notebooks/${NB_FREI.id}`)).toBe(1));
+    expect(screen.getByTestId('ink-column')).toHaveTextContent(NB_VL.id);
+    core.notebooks = [NB_UEBUNG, NB_VL, NB_FREI];
+    await waitFor(() => expect(screen.getByTestId('ink-column')).toHaveTextContent(NB_FREI.id), {
+      timeout: 3000,
+    });
+    expect(gets(`/notebooks/${NB_FREI.id}`)).toBe(2);
+  });
+
+  it('iPad getrennt: eine neu eingehängte Spalte bleibt beim zuletzt gezeigten Notizbuch', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot({ wide: false, notebooks: [NB_UEBUNG, NB_VL, NB_FREI] });
+    await user.click(await screen.findByRole('tab', { name: 'Notizen' }));
+    expect(await screen.findByTestId('ink-column')).toHaveTextContent(NB_VL.id);
+    act(() => sync.ipadPresence(NB_FREI.id));
+    await waitFor(() => expect(screen.getByTestId('ink-column')).toHaveTextContent(NB_FREI.id));
+    // Das iPad trennt sich: `devicePresence` liefert nichts mehr
+    sync.setIpadGone();
+    await user.click(screen.getByRole('tab', { name: 'Übung' }));
+    await user.click(screen.getByRole('tab', { name: 'Notizen' }));
+    expect(await screen.findByTestId('ink-column')).toHaveTextContent(NB_FREI.id);
   });
 
   it('presence mit notebook_id null: zurück zum Standard', async () => {
