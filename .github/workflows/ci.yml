@@ -1,5 +1,5 @@
 # CI (10 §1): Lint, Typen, Tests, Codegen-Prüfung, Contract-Tests, Secret-Scanning.
-# Swift: Contract-Check im Swift-6-Sprachmodus unter Linux; die iOS-SDK-Typprüfung läuft lokal auf dem Mac (kein macOS-Runner).
+# Swift: Contract-Check im Swift-6-Sprachmodus unter Linux; die iPad-App baut und testet der Job `ipad` auf einem macOS-Runner im Simulator.
 name: CI
 
 on:

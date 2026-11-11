@@ -9,14 +9,14 @@ So kommt die App „Studien-Gehirn“ auf dein iPad. Du brauchst kein bezahltes 
 - Mac mit **Xcode 16 oder neuer** (kostenlos im App Store)
 - iPad mit **iPadOS 17 oder neuer** und ein USB-C-Kabel
 - Deine Apple-ID
-- [Homebrew](https://brew.sh) auf dem Mac
+- [Homebrew](https://brew.sh) auf dem Mac. Noch nicht installiert? Öffne brew.sh, kopiere den Befehl unter „Install Homebrew“ ins Terminal und folge den Hinweisen. Am Ende nennt das Terminal unter „Next steps“ noch zwei oder drei Befehle, die du ebenfalls ausführst.
 - Mac und iPad im **selben WLAN**
 
 ## 1. Xcode-Projekt erzeugen
 
 Das Xcode-Projekt liegt nicht im Repo. Ein Skript erzeugt es aus `apps/ipad/project.yml`.
 
-Öffne das **Terminal** und wechsle in den Ordner des Repos. Dann:
+Öffne das **Terminal** und wechsle in den Ordner des Repos: Tippe `cd ` (mit Leerzeichen), zieh den Repo-Ordner aus dem Finder ins Terminal-Fenster und drück Enter. Dann:
 
 ```bash
 bash apps/ipad/scripts/projekt-erzeugen.sh
@@ -66,7 +66,7 @@ Der Punkt „Entwicklermodus“ erscheint erst, wenn das iPad einmal mit Xcode v
 ## 6. App aufspielen
 
 1. In Xcode auf **▶** klicken (oder `cmd` + `R`).
-2. Beim ersten Mal dauert das einige Minuten.
+2. Beim ersten Mal dauert das einige Minuten. Fragt der Mac, ob `codesign` auf deinen Schlüsselbund zugreifen darf, gib dein Mac-Passwort ein und wähle **Immer erlauben**.
 3. Startet die App nicht und Xcode meldet einen nicht vertrauenswürdigen Entwickler? Dann auf dem iPad: **Einstellungen → Allgemein → VPN & Geräteverwaltung**. Unter **Entwickler-App** deine Apple-ID antippen und **Vertrauen** wählen. Danach in Xcode noch einmal **▶**.
 
 ## 7. „Lokales Netzwerk“ erlauben
