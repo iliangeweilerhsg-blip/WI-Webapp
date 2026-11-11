@@ -59,7 +59,7 @@ export interface RecorderOptions {
   /** Quelle für `session.updated` (`SyncClient`). `beendet` schließt ab, `pausiert`/`laeuft` trennen/öffnen Aufnahmen. */
   events?: SessionEventSource;
   store?: RecorderStore;
-  uploader?: Omit<UploaderOptions, 'store' | 'isActive' | 'onChange'>;
+  uploader?: Omit<UploaderOptions, 'store' | 'isActive' | 'onChange' | 'sessionId'>;
   /** Standard: `navigator.mediaDevices.getUserMedia` */
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   MediaRecorder?: MediaRecorderCtorLike;
@@ -145,6 +145,7 @@ export class AudioRecorder {
     this.uploader = new ChunkUploader({
       ...options.uploader,
       store: this.store,
+      sessionId: options.sessionId,
       isActive: (id) => this.activeIds.has(id),
       onChange: (upload) => this.patch({ upload }),
     });
