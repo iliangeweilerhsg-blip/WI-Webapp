@@ -492,3 +492,74 @@ def test_budget_checked_before_rerequest(
     job = go(add_job(core_db, sid))
     assert (job["state"], job["error"]) == ("fehler", "Monatsbudget erreicht")
     assert len(backend.messages) == 1 and len(costs(core_db)) == 1
+
+
+# ---------- Nacharbeit Review #175 ----------
+
+
+def test_non_finite_confidence_becomes_zero() -> None:
+    out = ConceptsExtractOutput(
+        concepts=[
+            concept("A", slides=[1], confidence=float("nan")),
+            concept("B", slides=[2], confidence=float("inf")),
+            concept("b", slides=[3], confidence=float("-inf")),
+        ],
+        relations=[
+            rel("A", "B", "baut_auf", "x", confidence=float("nan")),
+            rel("B", "A", "verwandt", "y", confidence=float("inf")),
+        ],
+    )
+    checked = ce.check_outputs([out], material(), "s")
+    assert [c["proposal"]["confidence"] for c in checked.concepts] == [0.0, 0.0]
+    assert [r["confidence"] for r in checked.relations] == [0.0, 0.0]
+
+
+def test_nan_from_api_finishes(core_db: Conn, go: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    sid = lecture(core_db)
+    text = (
+        '{"concepts": [{"name": "Rekursion", "aliases": [], "one_liner": "Kurz.", '
+        '"kind": "definition", "slides": [1], "times": [], "importance": 2, "exam_hint": false, '
+        '"prof_explanation": null, "confidence": NaN}], "relations": []}'
+    )
+    use(monkeypatch, Scripted([text]))
+    res = result_of(go(add_job(core_db, sid)))
+    assert res.concepts[0].proposal.confidence == 0.0
+
+
+def test_invalid_result_is_not_retried(
+    core_db: Conn, go: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verletzt das geprüfte Ergebnis trotzdem das Schema: `fehler` ohne Retry und ohne
+    Pydantic-Text (Eingabewerte) in `job.error`."""
+    sid = lecture(core_db)
+    broken = ce.Checked(
+        concepts=[{"key": "c1", "proposal": {"name": "geheim-erfunden"}, "evidence": []}],
+        relations=[],
+    )
+    monkeypatch.setattr(ce, "check_outputs", lambda *a, **k: broken)
+    job = go(add_job(core_db, sid))
+    assert (job["state"], job["error"], job["attempts"]) == ("fehler", "KI-Ausgabe ungültig", 1)
+    assert len(costs(core_db)) == 1
+
+
+def test_bad_names_count_as_dropped() -> None:
+    out = ConceptsExtractOutput(
+        concepts=[
+            concept(" ​ ", slides=[1]),
+            concept("x" * 201, slides=[1]),
+            concept("Gut", slides=[1]),
+        ],
+        relations=[],
+    )
+    checked = ce.check_outputs([out], material(), "s")
+    assert [c["proposal"]["name"] for c in checked.concepts] == ["Gut"]
+    assert checked.dropped_concepts == 2
+
+
+def test_merged_range_capped_at_20_min() -> None:
+    out = ConceptsExtractOutput(
+        concepts=[concept("A", times=[t(0, 700), t(600, 1300)])], relations=[]
+    )
+    checked = ce.check_outputs([out], material(), "s")
+    (ev,) = checked.concepts[0]["evidence"]
+    assert (ev["t_start_ms"], ev["t_end_ms"]) == (0, 20 * 60_000)

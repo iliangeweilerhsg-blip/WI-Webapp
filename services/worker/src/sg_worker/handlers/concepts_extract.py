@@ -36,6 +36,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import psycopg
+from pydantic import ValidationError
 from sg_schemas.models import ConceptsExtractPayload, ConceptsExtractResult
 
 from .. import progress
@@ -395,13 +396,22 @@ def _overlaps(segments: Sequence[Seg], start: int, end: int) -> bool:
 
 
 def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Überlappende Zeiträume zusammenfassen, danach jeden auf höchstens 20 min kappen."""
     merged: list[tuple[int, int]] = []
     for start, end in sorted(ranges):
         if merged and start <= merged[-1][1]:
             merged[-1] = (merged[-1][0], max(merged[-1][1], end))
         else:
             merged.append((start, end))
-    return merged
+    return [(start, min(end, start + MAX_RANGE_MS)) for start, end in merged]
+
+
+def _unit(value: float) -> float:
+    """Konfidenz auf 0..1 klemmen. Nicht endliche Werte (NaN, ±inf) gelten als 0."""
+    number = float(value)
+    if not math.isfinite(number):
+        return 0.0
+    return min(max(number, 0.0), 1.0)
 
 
 def check_outputs(
@@ -412,9 +422,11 @@ def check_outputs(
     end_ms = material.timeline_end_ms
     groups: dict[str, _Group] = {}
     order: list[str] = []
+    dropped_names = 0
     for concept in (c for out in outputs for c in out.concepts):
         name = normalize_name(concept.name)
         if not name or len(name) > MAX_NAME:
+            dropped_names += 1
             continue
         key = name.lower()
         if key in groups:
@@ -423,7 +435,7 @@ def check_outputs(
             groups[key] = _Group(len(order), name, concept, [concept])
             order.append(key)
 
-    checked = Checked(concepts=[], relations=[])
+    checked = Checked(concepts=[], relations=[], dropped_concepts=dropped_names)
     kept: list[tuple[_Group, dict[str, Any]]] = []
     for key in order:
         group = groups[key]
@@ -501,7 +513,7 @@ def check_outputs(
                 "to": b,
                 "kind": rel.kind,
                 "why": why,
-                "confidence": min(max(float(rel.confidence), 0.0), 1.0),
+                "confidence": _unit(rel.confidence),
             }
         )
     return checked
@@ -529,7 +541,7 @@ def _proposal(group: _Group, evidence: list[dict[str, Any]]) -> dict[str, Any]:
             "importance": max(int(m.importance) for m in members),
             "exam_hint": any(m.exam_hint for m in members),
             "prof_explanation": prof,
-            "confidence": min(max(max(float(m.confidence) for m in members), 0.0), 1.0),
+            "confidence": max(_unit(m.confidence) for m in members),
         },
         "evidence": evidence,
     }
@@ -670,17 +682,22 @@ def concepts_extract(payload: ConceptsExtractPayload, ctx: JobContext) -> dict[s
             "dropped_concepts": checked.dropped_concepts,
         },
     )
-    result = _result(
-        sid,
-        input_hash=digest,
-        prompt_version=CONCEPTS_EXTRACT_PROMPT,
-        model=used_model,
-        chapters=len(parts),
-        concepts=checked.concepts,
-        relations=checked.relations,
-        dropped_concepts=checked.dropped_concepts,
-        dropped_evidence=checked.dropped_evidence,
-        dropped_relations=checked.dropped_relations,
-        cost_eur=round(meter.total_eur, 6),
-    )
+    try:
+        result = _result(
+            sid,
+            input_hash=digest,
+            prompt_version=CONCEPTS_EXTRACT_PROMPT,
+            model=used_model,
+            chapters=len(parts),
+            concepts=checked.concepts,
+            relations=checked.relations,
+            dropped_concepts=checked.dropped_concepts,
+            dropped_evidence=checked.dropped_evidence,
+            dropped_relations=checked.dropped_relations,
+            cost_eur=round(meter.total_eur, 6),
+        )
+    except ValidationError:
+        # Nie den Pydantic-Text (mit Eingabewerten) in job.error, kein Retry (Kosten)
+        ctx.logger.error("Geprüftes Ergebnis verletzt ConceptsExtractResult")
+        raise NonRetryableError(llm_mod.INVALID_OUTPUT) from None
     return _finish(ctx, sid, result, meter.total_eur)

@@ -92,8 +92,13 @@ def no_access(model: str) -> str:
     return f"Kein Zugriff auf das Modell {model[:100]}"
 
 
+#: Länge der Refusal-Kategorie aus der API in `job.error`
+MAX_CATEGORY = 50
+
+
 def refused(category: str | None) -> str:
-    return f"KI hat die Anfrage abgelehnt ({category or 'ohne Kategorie'})"
+    label = " ".join(str(category or "").split())[:MAX_CATEGORY] or "ohne Kategorie"
+    return f"KI hat die Anfrage abgelehnt ({label})"
 
 
 # ---------- Antwort eines Anbieters ----------

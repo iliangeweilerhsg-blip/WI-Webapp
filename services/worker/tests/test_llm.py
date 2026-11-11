@@ -241,6 +241,29 @@ def test_refusal_without_category(core_db: Conn, go: Any) -> None:
     assert job["error"] == "KI hat die Anfrage abgelehnt (ohne Kategorie)"
 
 
+def test_refusal_category_is_shortened() -> None:
+    message = llm.refused("neue_kategorie_" + "x" * 80 + "\nzweite Zeile")
+    assert message == f"KI hat die Anfrage abgelehnt ({('neue_kategorie_' + 'x' * 80)[:50]})"
+    assert llm.refused("  ") == "KI hat die Anfrage abgelehnt (ohne Kategorie)"
+
+
+def test_echo_content_after_mid_output_fallback() -> None:
+    """Nach einem Fallback mitten in der Ausgabe entfallen Thinking- und Tool-Blöcke vor dem
+    letzten `fallback`-Block; alles andere bleibt unverändert und in Reihenfolge."""
+    thinking = {"type": "thinking", "thinking": "", "signature": "a"}
+    redacted = {"type": "redacted_thinking", "data": "b"}
+    tool = {"type": "tool_use", "id": "t1", "name": "x", "input": {}}
+    partial = {"type": "text", "text": '{"concepts": ['}
+    switch = {"type": "fallback", "from": {"model": "m1"}, "to": {"model": "m2"}}
+    late_thinking = {"type": "thinking", "thinking": "", "signature": "c"}
+    rest = {"type": "text", "text": "]}"}
+    content = [thinking, redacted, tool, partial, switch, late_thinking, rest]
+    assert llm.echo_content(content) == [partial, switch, late_thinking, rest]
+    # Ohne Fallback: unverändert (auch Objekte statt dicts)
+    plain = [thinking, partial]
+    assert llm.echo_content(plain) == plain and llm.echo_content(plain) is not plain
+
+
 def test_max_tokens_fails(core_db: Conn, go: Any) -> None:
     api = Api(sse('{"concepts": [', stop_reason="max_tokens"))
     use_api(api)
