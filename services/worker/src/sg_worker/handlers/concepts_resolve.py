@@ -592,7 +592,9 @@ def read_output(
     dict[tuple[str, uuid.UUID], Verdict], list[tuple[str, uuid.UUID, bool, str, str, float]]
 ]:
     """Geprüfte Entscheidungen je Paar und Beziehungen `(Schlüssel, Nachbar, vom Schlüssel aus?,
-    Art, Begründung, Konfidenz)`. Unbekannte refs und nicht verlangte Paare fallen weg."""
+    Art, Begründung, Konfidenz)`. Unbekannte refs und nicht verlangte Paare fallen weg, ebenso
+    Beziehungen zu einem Kandidaten, den die KI als `verschieden` (§20.3 Schritt 5: keine
+    Beziehung) oder `gleich` (Ziel der Zusammenführung bzw. weiteres `gleich`) entschieden hat."""
     by_ref = {ref: cid for cid, ref in question.refs.items()}
     asked = {(x.key, cid) for x, cid in question.pairs}
     verdicts: dict[tuple[str, uuid.UUID], Verdict] = {}
@@ -612,6 +614,9 @@ def read_output(
         key, cid = (a, by_ref.get(b)) if forward else (b, by_ref.get(a))
         why = _shorten(r.why, MAX_WHY)
         if cid is None or (key, cid) not in allowed or why is None:
+            continue
+        verdict = verdicts.get((key, cid))
+        if verdict is not None and verdict.verdict in ("gleich", "verschieden"):
             continue
         if len(relations) >= MAX_KI_RELATIONS:
             break

@@ -396,7 +396,9 @@ def test_decisions_and_neighbor_relations_from_the_model(
                 ],
                 [
                     ("c1", "k5", "angewendet_in"),
-                    ("k4", "c1", "baut_auf"),
+                    ("k5", "c1", "baut_auf"),
+                    ("k4", "c1", "baut_auf"),  # Paar `verschieden`: keine Beziehung
+                    ("c1", "k2", "verwandt"),  # weiteres `gleich`: keine Beziehung
                     ("k4", "k5", "verwandt"),  # zwei vorhandene: fällt weg
                     ("c1", "k1", "verwandt"),  # zum Ziel der Zusammenführung: fällt weg
                     ("c1", "k77", "verwandt"),  # unbekannte ref
@@ -423,8 +425,9 @@ def test_decisions_and_neighbor_relations_from_the_model(
     assert got == {
         (*sorted([new, part]), "verwandt"),  # teil_von → verwandt, trotz Zusammenführung
         (new, far, "angewendet_in"),
-        (different, new, "baut_auf"),
+        (far, new, "baut_auf"),
     }
+    assert different not in {x for triple in got for x in triple[:2]}
     assert weak not in {x for triple in got for x in triple[:2]}
     assert [i["priority"] for i in inbox[1:]] == [1000, 1001, 1002]
 
