@@ -25,6 +25,7 @@ import {
   removeStalePartialsReport,
   removeStandReport,
   ownedByThisUser,
+  ownedDir,
   selectRetention,
   STAND_RE,
   standName,
@@ -641,7 +642,16 @@ export function thin(
   const { remove } = selectRetention(stands);
   for (const stand of remove) {
     if (protectedStands.has(stand)) continue;
-    const report = removeStandReport(target, stand, hooks);
+    // Unmittelbar vor dem Löschen erneut prüfen und das Löschen an genau diesen Ordner binden (TOCTOU, H-1 aus #161):
+    // Schiebt jemand während des Ausdünnens einen Stand, der bleiben soll, unter diesen Namen, bleibt er stehen.
+    const seen = ownedDir(join(base, stand));
+    if (!seen || ownStandsIn(base, own.owned, [stand]).length === 0) {
+      log(
+        `Der Stand ${stand} hat sich während des Ausdünnens verändert und wird nicht gelöscht. Prüfe das Backup-Ziel.`,
+      );
+      continue;
+    }
+    const report = removeStandReport(target, stand, hooks, seen);
     if (report.status === true) {
       result.removed.push(stand);
       log(`Alten Stand ${stand} entfernt.`);

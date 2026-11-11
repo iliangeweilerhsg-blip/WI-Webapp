@@ -20,7 +20,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveConfig } from '../src/config.ts';
-import { copyTree, listStands, readManifest, standName, treeSize } from '../src/backup-files.ts';
+import {
+  copyTree,
+  listStands,
+  readManifest,
+  removeStandReport,
+  standName,
+  treeSize,
+} from '../src/backup-files.ts';
 import {
   backupBeforeMigrate,
   parseBackupArgs,
@@ -686,6 +693,14 @@ function restoreSetup(over: Partial<FakePg> = {}) {
 }
 
 describe('runRestore', () => {
+  it('--test: Stand ohne eigenen Lauf in backup_run → Hinweis, geprüft wird nur gegen das Manifest', async () => {
+    const s = restoreSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    s.pg.runs.clear();
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: true, yes: false })).toBe(0);
+    expect(s.logs.join('\n')).toMatch(/keinen eigenen Backup-Lauf mit Prüfsumme/);
+  });
+
   it('ohne Stand: listet die Stände', async () => {
     const s = restoreSetup();
     await runBackup(s.backupDeps, { trigger: 'manuell' });
@@ -1799,6 +1814,79 @@ describe('H-1 (#161): erfundene Stände im Ziel zählen nicht und werden nie gel
       expect(logs.join('\n')).toMatch(/\.20261001T030000Z\.partial gehört einem anderen Benutzer/);
     },
   );
+
+  it.skipIf(!asRoot)(
+    'voriger Stand wird erst während pg_dump gegen einen fremden Ordner getauscht (TOCTOU): keine Hardlinks auf fremde Dateien',
+    async () => {
+      const { dataDir, target, pg, deps } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z
+      const real = join(target, '20261104T030012Z');
+      const evil = join(real, 'media', 'photos', 'a.jpg');
+      // Die Besitzerprüfung (`ownStandsIn`) läuft vor pg_dump, der vorige Stand wird erst danach gelesen. Genau
+      // dazwischen schiebt der Angreifer den echten Stand weg und legt unter seinem Namen einen eigenen Ordner an.
+      const dump = pg.dumpImpl;
+      pg.dumpImpl = async (file) => {
+        const manifest = readFileSync(join(real, 'manifest.json'));
+        renameSync(real, join(target, 'weggeschoben'));
+        mkdirSync(join(real, 'media', 'photos'), { recursive: true });
+        writeFileSync(join(real, 'manifest.json'), manifest);
+        writeFileSync(evil, 'BOES');
+        const source = statSync(join(dataDir, 'media', 'photos', 'a.jpg'));
+        utimesSync(evil, source.atime, source.mtime);
+        chownTree(real);
+        await dump(file);
+      };
+      const next = { ...deps, now: () => new Date('2026-11-05T03:00:00Z') };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).toBe(0);
+      const copied = join(target, '20261105T030000Z', 'media', 'photos', 'a.jpg');
+      expect(lstatSync(copied).ino).not.toBe(lstatSync(evil).ino);
+      expect(lstatSync(copied).uid).toBe(process.getuid?.());
+      expect(readFileSync(copied, 'utf8')).toBe('JPEG');
+    },
+  );
+
+  it('TOCTOU: ein behaltener Stand, der während des Ausdünnens unter den Namen eines alten geschoben wird, bleibt', () => {
+    const { target, checked } = checkedTarget();
+    const names = ['20261001T010000Z', '20261001T020000Z', '20261001T030000Z'];
+    for (const n of names) realStand(target, n);
+    const keep = names[2] as string;
+    let swapped = false;
+    const logs: string[] = [];
+    thin(
+      checked,
+      { owned: own(names.map((n): [string, string] => [n, 'a'])) },
+      Date.parse('2026-11-05T00:00:00Z'),
+      (m) => logs.push(m),
+      {
+        step: (op, phase, _dir, name) => {
+          if (swapped || op !== 'rmdir' || phase !== 'before') return;
+          // Gerade wird der erste alte Stand gelöscht: den zweiten wegschieben, den behaltenen an seine Stelle
+          const other = names.find((n) => n !== name && n !== keep) as string;
+          if (!existsSync(join(target, other))) return;
+          swapped = true;
+          renameSync(join(target, other), join(target, 'weggeschoben'));
+          renameSync(join(target, keep), join(target, other));
+        },
+      },
+    );
+    expect(swapped).toBe(true);
+    const survivors = readdirSync(target).filter((n) => readManifest(join(target, n))?.stand === keep);
+    expect(survivors).toHaveLength(1);
+    expect(logs.join('\n')).toMatch(/hat sich während des Ausdünnens verändert/);
+  });
+
+  it('removeStandReport mit geprüfter Identität: ein inzwischen anderer Ordner unter dem Namen wird nicht gelöscht', () => {
+    const { target, checked } = checkedTarget();
+    realStand(target, '20261001T010000Z');
+    realStand(target, '20261001T020000Z');
+    const seen = lstatSync(join(target, '20261001T010000Z'));
+    renameSync(join(target, '20261001T010000Z'), join(target, 'weggeschoben'));
+    renameSync(join(target, '20261001T020000Z'), join(target, '20261001T010000Z'));
+    const report = removeStandReport(checked, '20261001T010000Z', undefined, seen);
+    expect(report.status).toBe('teilweise');
+    expect(report.left[0]?.cause).toBe('getauscht');
+    expect(readManifest(join(target, '20261001T010000Z'))?.stand).toBe('20261001T020000Z');
+  });
 
   it('backup_run nicht lesbar: nicht ausgedünnt und ohne Hardlinks kopiert (fail-closed), Lauf trotzdem fertig', async () => {
     const { target, pg, deps, errs } = setup();

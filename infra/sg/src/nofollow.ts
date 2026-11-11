@@ -585,14 +585,22 @@ export class NoFollowRemover extends AnchoredDirs {
    * `last`: Eintrag der obersten Ebene, der als letzter gelöscht wird, und nur, wenn bis dahin nichts stehen blieb
    * (`manifest.json` eines Standes): Bricht das Löschen ab, bleibt der Rest ein gültiger Stand und wird beim nächsten
    * Ausdünnen erneut verankert gelöscht, statt als Waise ohne Manifest liegen zu bleiben.
+   * `expected`: Identität, mit der `name` vorher geprüft wurde (eigener Stand, H-1 aus #161). Liegt unter dem Namen
+   * inzwischen etwas anderes (etwa ein dorthin geschobener Stand, der bleiben soll), wird nichts gelöscht (`getauscht`).
    */
-  removeTree(parent: string, name: string, last?: string): LeftBehind[] {
+  removeTree(parent: string, name: string, last?: string, expected?: Identity): LeftBehind[] {
     const left: LeftBehind[] = [];
-    this.removeEntry(parent, name, left, last);
+    this.removeEntry(parent, name, left, last, expected);
     return left;
   }
 
-  private removeEntry(parent: string, name: string, left: LeftBehind[], last?: string): void {
+  private removeEntry(
+    parent: string,
+    name: string,
+    left: LeftBehind[],
+    last?: string,
+    expected?: Identity,
+  ): void {
     const path = join(parent, name);
     const keep = (cause: string): void => {
       left.push({ path, cause });
@@ -605,6 +613,10 @@ export class NoFollowRemover extends AnchoredDirs {
       return;
     }
     if (!info) return;
+    if (expected && !sameNode(info, expected)) {
+      keep('getauscht');
+      return;
+    }
     if (info.isSymbolicLink() || !info.isDirectory()) {
       try {
         this.inDir(parent, () => {

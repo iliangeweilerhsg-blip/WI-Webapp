@@ -262,7 +262,15 @@ function copyLevel(src: string, dst: string, prev: string | null, result: CopySt
       }
       let how: 'linked' | 'copied' = 'copied';
       const old = prevFile(reader, prev, name);
-      if (old && old.size === real.size && Math.abs(old.mtimeMs - real.mtimeMs) < 2) {
+      // Nur eigene Dateien verlinken (H-1, #161): Die Besitzerprüfung des vorigen Standes (`ownStandsIn`) läuft vor
+      // `pg_dump`, gelesen wird er erst danach. Tauscht ihn jemand dazwischen gegen einen eigenen Ordner, gehören
+      // dessen Dateien nicht diesem Benutzer und werden kopiert statt verlinkt (sonst änderte er später den neuen Stand).
+      if (
+        old &&
+        (process.getuid === undefined || old.uid === process.getuid()) &&
+        old.size === real.size &&
+        Math.abs(old.mtimeMs - real.mtimeMs) < 2
+      ) {
         // `old` stammt aus dem verankerten Ordner des vorigen Standes: der Link wird nur behalten, wenn er genau auf
         // diese Datei zeigt (N2). Kein Hardlink möglich: kopieren.
         if (out.link(join(prev as string, name), to, old)) how = 'linked';
@@ -415,6 +423,7 @@ export function removeStandReport(
   target: string | TargetDir,
   stand: string,
   hooks?: NoFollowHooks,
+  expected?: Identity,
 ): RemoveReport {
   if (!STAND_RE.test(stand)) return { status: false, left: [] };
   if (readManifest(join(typeof target === 'string' ? target : target.path, stand)) === null) {
@@ -423,7 +432,7 @@ export function removeStandReport(
   const remover = new NoFollowRemover(hooks);
   const base = adoptTarget(remover, target);
   // Das Manifest geht zuletzt: Ein abgebrochener Rest bleibt ein Stand und wird beim nächsten Lauf weiter gelöscht
-  const left = remover.removeTree(base, stand, MANIFEST_FILE);
+  const left = remover.removeTree(base, stand, MANIFEST_FILE, expected);
   return { status: left.length === 0 ? true : 'teilweise', left };
 }
 
@@ -460,12 +469,22 @@ export interface PartialsReport {
  * einhängenden Benutzer; dort hilft die Prüfung nicht, schadet aber auch nicht (dort kann ohnehin jeder alles löschen).
  */
 export function ownedByThisUser(path: string): boolean {
+  return ownedDir(path) !== null;
+}
+
+/**
+ * Wie `ownedByThisUser`, mit der Identität des geprüften Ordners (`null`: nicht eigen). Wer danach löscht, bindet das
+ * Löschen an genau diese Identität (`removeTree(…, expected)`): Ein inzwischen unter den Namen geschobener anderer
+ * Ordner wird so nicht gelöscht (TOCTOU, H-1 aus #161).
+ */
+export function ownedDir(path: string): Identity | null {
   try {
     const info = lstatSync(path, { throwIfNoEntry: false });
-    if (!info?.isDirectory()) return false;
-    return process.getuid === undefined || info.uid === process.getuid();
+    if (!info?.isDirectory()) return null;
+    if (process.getuid !== undefined && info.uid !== process.getuid()) return null;
+    return { dev: info.dev, ino: info.ino };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -494,7 +513,8 @@ export function removeStalePartialsReport(
     const match = /^\.([0-9]{8}T[0-9]{6}Z)\.partial$/.exec(entry.name);
     if (!entry.isDirectory() || !match) continue;
     if (now - standDate(match[1] as string).getTime() < olderThanMs) continue;
-    if (!ownedByThisUser(join(base, entry.name))) {
+    const seen = ownedDir(join(base, entry.name));
+    if (!seen) {
       report.kept.push({ name: entry.name, why: 'fremd' });
       continue;
     }
@@ -502,7 +522,8 @@ export function removeStalePartialsReport(
       report.kept.push({ name: entry.name, why: 'manifest' });
       continue;
     }
-    const left = remover.removeTree(base, entry.name);
+    // Gelöscht wird nur genau der geprüfte Ordner (ein inzwischen hierher geschobener Stand bleibt stehen)
+    const left = remover.removeTree(base, entry.name, undefined, seen);
     if (left.length === 0) report.removed.push(entry.name);
     else report.left.push({ name: entry.name, left });
   }

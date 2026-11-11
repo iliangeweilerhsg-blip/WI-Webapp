@@ -239,8 +239,10 @@ export async function runRestore(deps: RestoreDeps, options: RestoreOptions): Pr
     // Gehört der Stand zu einem eigenen Lauf, gilt dessen Prüfsumme (und Größe) auch hier. Ohne Datenbank (etwa
     // beim Restore nach einem Datenbankschaden) bleibt es bei der Prüfung gegen das Manifest.
     let anchor: RunAnchor | null = null;
+    let anchorRead = false;
     try {
       anchor = await runAnchor(pg, options.stand);
+      anchorRead = true;
     } catch (error) {
       log(
         `Hinweis: backup_run ist nicht lesbar (${errorText(error, cfg)}). Der Stand wird nur gegen sein Manifest geprüft.`,
@@ -249,6 +251,10 @@ export async function runRestore(deps: RestoreDeps, options: RestoreOptions): Pr
     const { dir, manifest } = await loadStand(target, options.stand, anchor?.sha256, anchor?.sizeBytes);
     if (anchor)
       log(`Stand ${options.stand} gehört zu einem eigenen Backup-Lauf, seine Prüfsumme wird verlangt.`);
+    else if (anchorRead)
+      log(
+        `Hinweis: Zum Stand ${options.stand} gibt es keinen eigenen Backup-Lauf mit Prüfsumme. Er wird nur gegen sein Manifest geprüft.`,
+      );
     return options.test
       ? await testRestore(deps, dir, manifest)
       : await fullRestore(deps, options, dir, manifest);
