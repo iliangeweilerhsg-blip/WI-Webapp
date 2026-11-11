@@ -87,7 +87,7 @@ Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so gü
 | Modell | Wann |
 |---|---|
 | **Fable 5.2** | Komplexeste Features: Nebenläufigkeit und Locks, Ketten über mehrere Dienste, Sync, schwierige Algorithmen |
-| **Opus 5.5** | Reviews von Code, Security-Reviews und Gegen-Reviews (ersetzt Argons Gegen-Review), Verträge und Architektur |
+| **Opus 5.5** | Reviews von Code, Security-Reviews und Gegen-Reviews (ersetzt Argons Gegen-Review), Security-kritischer Code, Debugging, Merge-Konflikte, Verträge und Architektur |
 | **Sonnet 5.5** | Standard für Features, UI und Doku sowie Reviews von Doku |
 | **Haiku** | Mechanisches: Umbenennen, Labels, einfache Formatierung |
 
@@ -104,7 +104,7 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 | **A – kritisch** | Anmeldung und Geräte-Kopplung (Tokens, Auth-Wächter), Moodle-Zugangsdaten und andere Geheimnisse, Dateipfade und Uploads, Löschen/Papierkorb/Wiederherstellen, Backup/Restore, Sync-Protokoll, Sperren und Nebenläufigkeit, Migrationen, alles mit Datenverlust- oder Sicherheitsrisiko | voll: Gegenproben auf alle Kernpfade (gezielt eingebaute Fehler, die die Tests finden müssen), echte Nachstellung gegen Postgres oder den echten Core, Angriffsszenarien |
 | **B – normal** | UI-Features, Darstellung, Einstellungen (ohne Zugangsdaten und Berechtigungen), Hilfsfunktionen | gezielt: Diff und direkt betroffene Dateien, 2–3 Gegenproben auf die Kernlogik, Browser-Check nur wenn die Tests das Verhalten nicht abdecken (z. B. Layout, echte Timer) |
 
-**Im Zweifel gilt Stufe A.** Stufe B nur, wenn der PR keinen Bereich aus A berührt, auch nicht indirekt. Doku-PRs prüft ein frischer Sonnet-Subagent im Umfang von Stufe B.
+**Im Zweifel gilt Stufe A.** Stufe B nur, wenn der PR keinen Bereich aus A berührt, auch nicht indirekt. Security-Kritisches bekommt zusätzlich ein Gegen-Review durch einen weiteren frischen Opus-Subagent. Doku-PRs prüft ein frischer Sonnet-Subagent im Umfang von Stufe B.
 
 **Nachrunden.** Das Erst-Review macht immer ein frischer Subagent. Die folgenden Nachrunden erfüllen die Regel „unabhängiges Review“ weiterhin.
 - Eine kleine Nacharbeit (Stufe B, bis 150 geänderte Zeilen und ohne Berührung von Bereichen aus Stufe A) prüft Claude selbst anhand des Diffs.
@@ -115,13 +115,18 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 - Konkrete Dateien und Abschnitte nennen, keine pauschalen Leselisten („lies die Spezifikation“).
 - Autoren führen die Tests der betroffenen Pakete aus. Die volle Suite läuft in der CI.
 - Screenshots nur bei UI-Änderungen.
-- Höchstens **2 Subagents gleichzeitig** (Autoren und Reviewer zusammengezählt), außer der Owner gibt mehr frei.
+- Höchstens **2 Agents parallel** (Autoren und Reviewer zusammengezählt), solange das 5-Stunden-Fenster der Engpass ist. Mehr nur, wenn der Owner es freigibt.
 
 **Neue Regeln ab 11.11.2026 (Arbeit ohne Argon).**
 - **Knappe Briefs:** Der Auftrag nennt Abschnittsverweise (z. B. „Vertrag §3.2“) und eine Dateiliste. Ganze Verträge werden nicht eingefügt.
 - **Vollständig implementieren:** Agents liefern das Feature komplett mit Tests, keine Platzhalter und kein „Rest folgt“.
 - **Höchstens 1 Nacharbeitsrunde:** Danach entscheidet Claude, ob er selbst korrigiert oder neu zuschneidet. Das gilt zusätzlich zu den Nachrunden-Regeln oben.
-- **Review-Tiefe nach Risiko:** Stufe A (kritisch) bekommt das volle Review durch Opus, Security-Kritisches zusätzlich ein Gegen-Review durch einen weiteren frischen Opus-Subagent. Stufe B (normal) bekommt das gezielte Review.
+
+**Cache-Regel (Owner, 11.11.2026).** Der Cache von Subagents hält nur etwa 5 Minuten. Darum gilt:
+- Kein Agent wartet länger als 5 Minuten im Leerlauf: kein `sleep` und kein Polling langer Hintergrund-Tests.
+- Tests laufen gezielt und im Vordergrund. Die volle Suite läuft einmal am Ende, bei Bedarf in Teilen von jeweils unter 5 Minuten.
+- Einen Agent wiederverwenden geht nur innerhalb von 5 Minuten nach seiner letzten Antwort. Sonst übernimmt ein frischer Agent mit kurzem Brief.
+- Kleine Review-Befunde behebt der Reviewer selbst im selben Lauf.
 
 **Lead-Session.** Ist der Verlauf sehr lang, übergibt Claude an eine neue Session. Den Stand findet die neue Session in offenen Issues und PRs sowie in einer kurzen Übergabe-Notiz, die Claude vorher als Issue mit dem Titel „Lead-Übergabe“ anlegt. PR-Abos werden nach dem Merge sofort beendet.
 
