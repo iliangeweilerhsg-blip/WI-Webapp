@@ -217,6 +217,14 @@ export function StatusBar({
             </span>
           ) : null}
           {pauseHint ? <span className="font-medium">Noch Pause?</span> : null}
+          {/* UX-04: Die Wake Lock des Browsers wirkt nur im sichtbaren Tab. Ruhig und ohne Zusage: ob der Mac wach
+              bleibt, hängt am Core (`caffeinate` gibt es nur unter macOS). */}
+          {running && rec.status.tabHidden ? (
+            <span className="text-text-muted" data-testid="tab-hidden">
+              Tab verdeckt
+              <span className="sr-only">. Die Bildschirmsperre des Browsers greift gerade nicht.</span>
+            </span>
+          ) : null}
           {/* Zustand für Screenreader als ruhige Statusmeldung */}
           <span role="status" className="sr-only">
             {running

@@ -377,6 +377,35 @@ describe('Rückblick: Tastatur', () => {
 });
 
 describe('Rückblick: Zustände', () => {
+  it('wartet ein Schritt und läuft eine andere Session, steht der Hinweis auf die Vorlesung (UX-05)', async () => {
+    boot({
+      session: { processing: { 'audio.finalize': 'fertig', transcribe: 'wartet', 'align.log': 'wartet' } },
+      transcript: makeTranscript({ session_id: SESSION_ID, recordings: [makeRecording({ id: R1 })] }),
+    });
+    core.sessions.push(
+      makeSession({
+        id: '0190f6a2-0000-7000-8000-0000000000e9',
+        module_id: DBS.id,
+        state: 'laeuft',
+        started_at: '2026-11-04T10:00:00Z',
+        updated_at: '2026-11-04T10:00:00Z',
+      }),
+    );
+    expect(await screen.findByTestId('step-hold')).toHaveTextContent(
+      'Manche Schritte warten, bis die Vorlesung vorbei ist.',
+    );
+  });
+
+  it('ohne laufende Session steht kein Hinweis, auch wenn ein Schritt wartet (UX-05)', async () => {
+    boot({
+      session: { processing: { 'audio.finalize': 'fertig', transcribe: 'wartet', 'align.log': 'wartet' } },
+      transcript: makeTranscript({ session_id: SESSION_ID, recordings: [makeRecording({ id: R1 })] }),
+    });
+    await screen.findByTestId('step-list');
+    await waitFor(() => expect(core.requests.some((r) => /state=laeuft/.test(r.path))).toBe(true));
+    expect(screen.queryByTestId('step-hold')).toBeNull();
+  });
+
   it('Verarbeitung offen: Schrittliste und „Transkript kommt noch“, ohne Balken und Prozent', async () => {
     boot({
       session: { processing: { 'audio.finalize': 'fertig', transcribe: 'laeuft', 'align.log': 'wartet' } },

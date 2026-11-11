@@ -437,6 +437,44 @@ describe('Aufnahme im Dashboard: Mikrofon-Berechtigung', () => {
   });
 });
 
+describe('Aufnahme im Dashboard: verdeckter Tab (UX-04)', () => {
+  function fakeDoc(initial: string) {
+    const handlers = new Set<() => void>();
+    const doc = {
+      visibilityState: initial,
+      addEventListener: (_t: 'visibilitychange', fn: () => void) => void handlers.add(fn),
+      removeEventListener: (_t: 'visibilitychange', fn: () => void) => void handlers.delete(fn),
+    };
+    return {
+      doc,
+      set(next: string) {
+        doc.visibilityState = next;
+        act(() => handlers.forEach((fn) => fn()));
+      },
+    };
+  }
+  const lock = {
+    request: async () => ({ release: async () => undefined, addEventListener: () => undefined }),
+  };
+
+  it('zeigt bei verdecktem Tab ruhig „Tab verdeckt“ und nimmt es beim Zurückkehren weg', async () => {
+    const d = fakeDoc('visible');
+    const base = fakeRecording();
+    boot({
+      rec: base,
+      env: { recorder: { ...base.env.recorder, document: d.doc, navigator: { wakeLock: lock } } },
+    });
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    expect(within(b).queryByText('Tab verdeckt')).toBeNull();
+    d.set('hidden');
+    const hint = await within(b).findByText('Tab verdeckt');
+    expect(hint.className).not.toMatch(/danger|warn/);
+    d.set('visible');
+    await waitFor(() => expect(within(b).queryByText('Tab verdeckt')).toBeNull());
+  });
+});
+
 describe('Aufnahme im Dashboard: Pegel für den Auto-Stopp', () => {
   it('Stille aus dem Recorder-Pegel führt zu „Stoppt gleich · weiter aufnehmen“', async () => {
     // Pegel 0,0005: hörbar vom Mikrofon (nicht digital null), aber unter der Sprachschwelle
