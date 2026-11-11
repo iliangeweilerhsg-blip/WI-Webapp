@@ -1960,7 +1960,8 @@ describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)',
   /** Wie ein Ziel, das für alles den Besitzer `uid` meldet: jeder neue Ordner bekommt ihn */
   const reportsOwner = (uid: number): BackupDeps['targetHooks'] => ({
     step: (op, phase, dir, name) => {
-      if (op === 'mkdir' && phase === 'after') lchownSync(join(dir, name), uid, uid);
+      // Ordner und Dateien: Ein solches Ziel meldet für alles, was der Lauf anlegt, denselben Besitzer
+      if ((op === 'mkdir' || op === 'create') && phase === 'after') lchownSync(join(dir, name), uid, uid);
     },
   });
   const runWith = (
@@ -2098,6 +2099,33 @@ describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)',
         'Ein Backup-Stand im Ziel gehört einem anderen Benutzer als die neuen Stände, etwa nach einem Lauf per sudo oder einer geänderten Freigabe. Solche Stände werden weder ausgedünnt noch für unveränderte Dateien genutzt, jeder Lauf kopiert dann alles und das Ziel kann volllaufen. Prüfe die Besitzer der Ordner im Backup-Ziel.';
       expect(runWith(pg, '20261104T050000Z')?.warning).toBe(warning);
       expect(errs.join('\n')).toContain(`Warnung: ${warning}`);
+    },
+  );
+
+  it.skipIf(!asRoot)(
+    'Wettlauf beim Anlegen des .partial: ein untergeschobener fremder Ordner wird nicht zum Maßstab für „eigen“',
+    async () => {
+      const { target, deps, logs, errs } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z, Besitzer root
+      const name = '.20261104T050000Z.partial';
+      const evil = join(target, name);
+      // Der Angreifer tauscht das frisch angelegte .partial (zwischen mkdir und lstat) gegen einen eigenen Ordner
+      const swap: BackupDeps['targetHooks'] = {
+        step: (op, phase, dir, entry) => {
+          if (op !== 'mkdir' || phase !== 'after' || entry !== name) return;
+          renameSync(join(dir, entry), join(dir, 'geklaut'));
+          mkdirSync(evil);
+          lchownSync(evil, ANDERER, ANDERER);
+        },
+      };
+      const next = { ...deps, now: () => new Date('2026-11-04T05:00:00Z'), targetHooks: swap };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).not.toBe(0);
+      // Nichts landet im Ordner des Angreifers (leer wieder entfernt), seine uid gilt nirgends als eigen
+      expect(existsSync(evil) ? readdirSync(evil) : []).toEqual([]);
+      expect(existsSync(join(target, '20261104T050000Z'))).toBe(false);
+      expect(logs.join('\n')).not.toMatch(/uid 4343/);
+      expect(errs.join('\n')).toMatch(/ersetzt/);
+      expect(readManifest(join(target, '20261104T030012Z'))).not.toBeNull();
     },
   );
 });

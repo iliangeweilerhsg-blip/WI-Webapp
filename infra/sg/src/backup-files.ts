@@ -521,14 +521,26 @@ export interface PartialsReport {
 }
 
 /**
- * Besitzer (uid), den Ordner haben, die dieser Lauf im Ziel anlegt (#183): der des eigenen, gerade angelegten
- * `.partial` (`created`, Rückgabe von `NoFollowWriter.mkdir`). Meist ist das der Benutzer des Prozesses. Manche Ziele
- * melden aber einen anderen: SMB/CIFS ohne `uid=` (alles gehört dem einhängenden Benutzer oder root), NFS mit
- * `root_squash` bei einem Lauf per `sudo` (alles gehört `nobody`). Mit `getuid()` gälte dort kein Stand als eigen: nie
- * ausgedünnt, nie verlinkt, das Ziel liefe voll. `undefined`: Plattform ohne Unix-Besitzer (Windows), nicht geprüft.
+ * Besitzer (uid), den Ordner haben, die dieser Lauf im Ziel anlegt (#183). Meist ist das der Benutzer des Prozesses.
+ * Manche Ziele melden aber einen anderen: SMB/CIFS ohne `uid=` (alles gehört dem einhängenden Benutzer oder root), NFS
+ * mit `root_squash` bei einem Lauf per `sudo` (alles gehört `nobody`). Mit `getuid()` gälte dort kein Stand als eigen:
+ * nie ausgedünnt, nie verlinkt, das Ziel liefe voll. `undefined`: Plattform ohne Unix-Besitzer (Windows), nicht geprüft.
+ *
+ * Maßstab ist nicht das `lstat` des eigenen `.partial` (`created`, Rückgabe von `NoFollowWriter.mkdir`) allein: Tauscht
+ * jemand den frisch angelegten Ordner zwischen `mkdir` und `lstat` gegen einen eigenen, gälte sonst seine uid als
+ * „eigen“ (H-1 aus #161 wieder offen). Darum legt der Lauf im `.partial` exklusiv eine Probedatei an und nimmt deren
+ * uid per `fstat` am eigenen Deskriptor (`ownerOfNew`). Ein Ziel mit Unix-Besitzern gibt Datei und Ordner desselben
+ * Prozesses dieselbe uid, ein Ziel ohne meldet für beide dieselbe. Weicht `created` davon ab, wurde getauscht: Abbruch.
  */
-export function targetOwner(created: Stats): number | undefined {
-  return process.getuid === undefined ? undefined : created.uid;
+export function targetOwner(out: NoFollowWriter, partial: string, created: Stats): number | undefined {
+  if (process.getuid === undefined) return undefined;
+  const owner = out.ownerOfNew(partial);
+  if (created.uid !== owner) {
+    throw new UnsafeTargetError(
+      `${partial} wurde beim Anlegen ersetzt: Der Ordner gehört uid ${created.uid}, neue Dateien dieses Laufs gehören uid ${owner}. Der Lauf bricht ab.`,
+    );
+  }
+  return owner;
 }
 
 /**

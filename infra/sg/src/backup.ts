@@ -396,11 +396,14 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     if (lstatSync(finalDir, { throwIfNoEntry: false })) throw new Error(`Den Stand ${stand} gibt es schon.`);
     const out = new NoFollowWriter(deps.targetHooks);
     out.adopt(target, targetDir);
-    // Eigen ist im Ziel, was den Besitzer des eigenen `.partial` hat (#183), nicht zwingend den Benutzer des Laufs
-    const owner = targetOwner(out.mkdir(partial));
-    out.owner = owner;
+    const created = out.mkdir(partial);
+    let owner: number | undefined;
 
     try {
+      // Eigen ist im Ziel, was den Besitzer des eigenen `.partial` hat (#183), nicht zwingend den Benutzer des Laufs.
+      // `targetOwner` prüft per Probedatei, dass das `.partial` nicht beim Anlegen getauscht wurde.
+      owner = targetOwner(out, partial, created);
+      out.owner = owner;
       // Voriger Stand für Hardlinks: nur ein eigener (H-1, #161). Ein erfundener Stand im Ziel darf nie die Quelle
       // sein, sonst verlinkt der neue Stand Dateien, die einem Dritten gehören.
       let previous: string | null = null;

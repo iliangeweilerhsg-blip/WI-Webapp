@@ -170,6 +170,8 @@ export class AnchoredDirs {
 export const LINK_STAGING_DIR = '.sg-link.partial';
 /** Name des Hardlinks im privaten Unterordner */
 const LINK_STAGING_FILE = 'neu';
+/** Probedatei für `ownerOfNew` (wird gleich wieder entfernt; endet auf `.partial`, falls sie doch liegen bleibt) */
+const OWNER_PROBE = '.sg-besitzer.partial';
 
 /** Schreiber für einen Baum, den ein Lauf neu anlegt (`.<stand>.partial` im Ziel, Restore-Ordner im Datenordner) */
 export class NoFollowWriter extends AnchoredDirs {
@@ -232,8 +234,25 @@ export class NoFollowWriter extends AnchoredDirs {
         throw error;
       }
       this.files.set(path, identity(fstatSync(fd)));
+      this.step('create', 'after', parent, name);
       return fd;
     });
+  }
+
+  /**
+   * Besitzer (uid), den das Ziel einer Datei gibt, die dieser Prozess im (eigenen oder übernommenen) Ordner `dir`
+   * exklusiv anlegt (#183). Gelesen per `fstat` am eigenen Deskriptor, nicht über einen Namen: Diesen Wert kann
+   * niemand unterschieben, der Ordner unter einem Namen tauscht. Die Probedatei wird gleich wieder entfernt.
+   */
+  ownerOfNew(dir: string): number {
+    const path = join(dir, OWNER_PROBE);
+    const fd = this.openNew(path, 0o600);
+    try {
+      return fstatSync(fd).uid;
+    } finally {
+      closeSync(fd);
+      this.removeOwnFile(path);
+    }
   }
 
   /** Neue Datei mit festem Inhalt */
