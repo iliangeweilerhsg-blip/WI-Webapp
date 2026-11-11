@@ -193,6 +193,54 @@ describe('<InkColumn> laden und blättern', () => {
   });
 });
 
+describe('<InkColumn> spätes Abo und frühe presence', () => {
+  it('Spalte hängt sich zwischen hello und welcome ein: stroke.add erscheint trotzdem live', async () => {
+    server.mute = true;
+    void client.connect();
+    await waitFor(() => expect(server.sockets.length).toBe(1));
+    await waitFor(() => expect(server.last.of('hello')).toHaveLength(1));
+    render(<InkColumn notebookId={uid(NB)} client={client} />);
+    await waitFor(() => expect(strokeCount()).toBe(strokesB.length));
+    await waitFor(() => expect(internals().subs.has(nbStream(NB))).toBe(true));
+    server.mute = false;
+    server.last.push({
+      type: 'welcome',
+      protocol: 1,
+      server_time: Date.now(),
+      server_version: 'fake',
+      db_epoch: server.dbEpoch,
+      device_id: null,
+      resume: [],
+    });
+    await waitFor(() => expect(server.last.of('subscribe')).toHaveLength(1));
+    const fresh = { ...strokesA[0]!, client_id: uid(7002), created_at: 9_000_000_000_000 } as Stroke;
+    await act(async () => void addOp('stroke.add', { page_id: PAGE_B, stroke: fresh }));
+    await waitFor(() => expect(strokeCount()).toBe(strokesB.length + 1));
+  });
+
+  it('presence vor dem Einhängen: die Spalte zeigt die Seite des iPads', async () => {
+    await client.connect();
+    await act(async () =>
+      server.last.push({
+        type: 'event',
+        name: 'presence',
+        data: {
+          client: 'ipad',
+          device_id: uid(50),
+          device_name: 'iPad',
+          session_id: null,
+          notebook_id: uid(NB),
+          page_id: PAGE_A,
+        },
+      }),
+    );
+    await sleep(20);
+    render(<InkColumn notebookId={uid(NB)} client={client} />);
+    await waitFor(() => expect(screen.getByText('Seite 1 von 2')).toBeInTheDocument());
+    await waitFor(() => expect(strokeCount()).toBe(strokesA.length));
+  });
+});
+
 describe('<InkColumn> Live-Updates', () => {
   it('stroke.add erscheint live, stroke.remove entfernt, element.upsert/remove wirken', async () => {
     await mount();
@@ -352,6 +400,7 @@ describe('<InkColumn> Filter und Puffer', () => {
       subscribe,
       onEvent: () => () => undefined,
       connectionState: 'online',
+      devicePresence: () => null,
     } as unknown as InkSyncSource;
     return { source, subscribe, push: (op: object) => onOp(op as SyncOp) };
   }

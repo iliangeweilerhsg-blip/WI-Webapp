@@ -10,7 +10,7 @@ import type { SyncClient } from '../../lib/sync/client.ts';
 import { InkPage } from './InkPage.tsx';
 
 /** Was die Spalte vom Sync-Client braucht (der echte `SyncClient` passt). */
-export type InkSyncSource = Pick<SyncClient, 'subscribe' | 'onEvent' | 'connectionState'>;
+export type InkSyncSource = Pick<SyncClient, 'subscribe' | 'onEvent' | 'connectionState' | 'devicePresence'>;
 
 export interface InkColumnProps {
   notebookId: string;
@@ -369,6 +369,12 @@ export function InkColumn({ notebookId, client, className }: InkColumnProps) {
       }),
     ];
     setSyncState(client.connectionState);
+    // `presence` kam vielleicht schon vor dem Einhängen: die letzte Meldung des iPads nachlesen
+    const known = client.devicePresence('ipad');
+    if (known && known.notebook_id === notebookId && known.page_id) {
+      setPresencePage(known.page_id);
+      lastPresenceRef.current = known.page_id;
+    }
 
     return () => {
       cancelled = true;

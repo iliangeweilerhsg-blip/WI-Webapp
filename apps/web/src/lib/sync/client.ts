@@ -267,6 +267,10 @@ export class SyncClient {
   private welcomeTimer: ReturnType<typeof setTimeout> | null = null;
   private lastReceivedAt = 0;
   private welcomed = false;
+  /** Ströme, die im `hello` dieser Verbindung standen; spätere Abos meldet `onWelcome` nach. */
+  private helloStreams = new Set<string>();
+  /** Letzte `presence` je Gerät, damit später eingehängte Ansichten sie nachlesen können. */
+  private presenceByDevice = new Map<string, ClientEventMap['presence']>();
   private sending = false;
 
   private clockTimer: ReturnType<typeof setTimeout> | null = null;
@@ -515,6 +519,26 @@ export class SyncClient {
     };
   }
 
+  /** Letzte `presence` des Geräts (z. B. `'ipad'`), solange es verbunden ist. */
+  devicePresence(client: 'ipad' | 'web'): ClientEventMap['presence'] | null {
+    for (const p of this.presenceByDevice.values()) if (p.client === client) return p;
+    return null;
+  }
+
+  private trackPresence(msg: { name: string; data: unknown }): void {
+    if (msg.name === 'presence') {
+      const d = msg.data as ClientEventMap['presence'];
+      this.presenceByDevice.set(d.device_id ?? d.client, d);
+    } else if (msg.name === 'device.connection') {
+      const d = msg.data as ClientEventMap['device.connection'];
+      if (d.connected) return;
+      for (const [key, p] of this.presenceByDevice) {
+        if (d.device_id === null ? p.client === d.client : key === d.device_id)
+          this.presenceByDevice.delete(key);
+      }
+    }
+  }
+
   /** Meldet, was dieser Client gerade zeigt. Wird nach dem Neuverbinden erneut gesendet. */
   setPresence(p: { session_id: string | null; notebook_id: string | null; page_id: string | null }): void {
     this.lastPresence = p;
@@ -621,6 +645,7 @@ export class SyncClient {
     this.clearReconnect();
     this.connId++;
     this.welcomed = false;
+    this.helloStreams = new Set();
     this.sessionSuperseded = false;
     this.setState('connecting');
     let ws: WebSocketLike;
@@ -640,13 +665,15 @@ export class SyncClient {
       this.welcomeTimer = setTimeout(() => {
         if (this.ws === ws && !this.welcomed) this.forceClose(ws, 4000);
       }, this.welcomeTimeoutMs);
+      const helloSubs = [...this.subs.values()];
+      this.helloStreams = new Set(helloSubs.map((s) => s.stream));
       this.sendJson({
         type: 'hello',
         protocol: 1,
         client: 'web',
         ...(this.opts.deviceId ? { device_id: this.opts.deviceId } : {}),
         app_version: this.opts.appVersion ?? '0.0.0',
-        streams: [...this.subs.values()].map((s) => ({
+        streams: helloSubs.map((s) => ({
           stream: s.stream,
           last_seq: s.lastSeq,
           last_op_id: s.lastOpId,
@@ -715,6 +742,8 @@ export class SyncClient {
   private afterClose(): void {
     this.ws = null;
     this.welcomed = false;
+    this.helloStreams = new Set();
+    this.presenceByDevice.clear();
     this.stopKeepalive();
     this.stopClockSync();
     this.inFlight.clear();
@@ -822,6 +851,7 @@ export class SyncClient {
         return;
       }
       case 'event':
+        this.trackPresence(msg);
         this.emit(msg.name, msg.data as never);
         return;
     }
@@ -981,6 +1011,13 @@ export class SyncClient {
     if (stored === null) await this.store.setMeta('db_epoch', w.db_epoch).catch(() => undefined);
     if (this.lastPresence) this.sendJson({ type: 'presence', ...this.lastPresence });
     this.startResets(resets, epochChanged ? w.db_epoch : null);
+    // Abos zwischen `hello` und `welcome` standen nicht im `hello`: jetzt nachmelden (Reset-Ströme abonniert resetLoop selbst)
+    const resetting = new Set(resets.map((r) => r.sub.stream));
+    this.sendSubscribe(
+      [...this.subs.values()].filter(
+        (s) => !this.helloStreams.has(s.stream) && !resetting.has(s.stream) && !s.resetting,
+      ),
+    );
     this.startClockSync(connId);
   }
 
