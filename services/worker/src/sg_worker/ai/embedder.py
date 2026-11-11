@@ -12,6 +12,11 @@ verlassen den Mac nie.
 
 Job-Schleife und Loopback-Endpunkt (`server.py`) teilen sich **ein** Modell
 (`shared_embedder`). `embed` ist darum thread-sicher.
+
+**Entlastung für Macs mit 8 GB:** Auf `mps` und `cuda` lädt das Modell in fp16 (halber Speicher),
+auf der CPU in fp32. `torch` rechnet mit `SG_EMBED_THREADS` Threads. Die Pause zwischen den
+Stapeln von `search.index` (`SG_EMBED_PAUSE_MS`) liegt im Handler, **nicht** in `embed`: Der
+Loopback-Endpunkt wird nie gedrosselt. `__main__` übergibt die Werte mit `configure_tuning`.
 """
 
 from __future__ import annotations
@@ -30,6 +35,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from ..config import DEFAULT_EMBED_PAUSE_MS, default_embed_threads
 from .interfaces import Embedder
 
 PROVIDER_BGE = "bge-m3"
@@ -42,6 +48,11 @@ DIM = 1024
 MAX_SEQ_LENGTH = 512
 #: Länge eines Fehlertexts (WorkerHealth.error, SearchIndexResult.embedding_error: ≤ 500)
 MAX_ERROR = 300
+
+#: Auf diesen Geräten lädt das Modell in fp16, sonst in fp32
+HALF_DEVICES = ("mps", "cuda")
+#: Kurzer Text für den Probelauf nach dem Laden (prüft fp16, wärmt das Gerät vor)
+WARMUP_TEXT = "Probe"
 
 EmbedderState = Literal["bereit", "laedt", "nicht_verfuegbar"]
 
@@ -222,6 +233,44 @@ class UnavailableEmbedder:
         raise EmbedderUnavailable(self.reason)
 
 
+# ---------- Entlastung (SG_EMBED_THREADS, SG_EMBED_PAUSE_MS) ----------
+
+
+@dataclass(frozen=True)
+class Tuning:
+    #: Threads für `torch.set_num_threads`. None: etwa die Hälfte der Kerne
+    threads: int | None = None
+    #: Pause zwischen zwei Stapeln von `search.index` (Millisekunden)
+    pause_ms: int = DEFAULT_EMBED_PAUSE_MS
+
+
+_tuning = Tuning()
+
+
+def configure_tuning(*, threads: int | None = None, pause_ms: int = DEFAULT_EMBED_PAUSE_MS) -> None:
+    """Beim Start des Workers (und in Tests): Werte aus `Settings` übernehmen."""
+    global _tuning
+    _tuning = Tuning(threads=threads, pause_ms=max(0, pause_ms))
+
+
+def embed_threads() -> int:
+    threads = _tuning.threads
+    return default_embed_threads() if threads is None else max(1, threads)
+
+
+def index_pause_s() -> float:
+    """Pause zwischen zwei Stapeln von `search.index` in Sekunden (0 = keine)."""
+    return _tuning.pause_ms / 1000.0
+
+
+def pause_between_batches() -> None:
+    """Nur für `search.index`: gibt CPU und GPU kurz frei. Endet sofort, wenn der Worker beendet
+    wird. Der Loopback-Endpunkt ruft das nie auf."""
+    pause = index_pause_s()
+    if pause > 0:
+        SHUTDOWN.wait(pause)
+
+
 # ---------- bge-m3 ----------
 
 
@@ -245,6 +294,34 @@ def _pick_device(torch: Any) -> str:
         return "cpu"
 
 
+def pick_dtype(device: str) -> Literal["float16", "float32"]:
+    """fp16 auf `mps` und `cuda` (halber Speicher, ≈ 1,1 statt 2,3 GB), fp32 auf der CPU (dort ist
+    fp16 langsam und teils nicht umgesetzt)."""
+    return "float16" if device.split(":", 1)[0] in HALF_DEVICES else "float32"
+
+
+def _set_threads(torch: Any, threads: int) -> None:
+    try:
+        torch.set_num_threads(threads)
+    except Exception as exc:  # nur eine Optimierung: nie das Laden verhindern
+        log.warning("Thread-Zahl nicht gesetzt", extra={"error": type(exc).__name__})
+
+
+def _unit(row: list[Any]) -> list[float]:
+    """L2-normiert in doppelter Genauigkeit nach. fp16 normiert nur auf etwa 1e-3 genau; die
+    gespeicherten Vektoren sollen unabhängig vom dtype die Länge 1 haben. Nullvektoren und
+    ungültige Werte bleiben unverändert (der Aufrufer prüft sie)."""
+    values = [float(x) for x in row]
+    norm = math.sqrt(math.fsum(x * x for x in values))
+    if norm == 0 or not math.isfinite(norm):
+        return values
+    return [x / norm for x in values]
+
+
+def _all_finite(rows: list[list[float]]) -> bool:
+    return all(math.isfinite(x) for row in rows for x in row)
+
+
 def _dimension(model: Any) -> int | None:
     # sentence-transformers ≥ 6: `get_embedding_dimension`, davor `get_sentence_embedding_dimension`
     for name in ("get_embedding_dimension", "get_sentence_embedding_dimension"):
@@ -259,6 +336,7 @@ def _dimension(model: Any) -> int | None:
 class BgeM3Embedder:
     """`bge-m3` über `sentence-transformers`: nur dichte Vektoren (1024), L2-normiert,
     `max_seq_length = 512`, Gerät `mps`, wenn verfügbar, sonst `cpu`. Keine Präfixe.
+    Auf `mps`/`cuda` fp16, auf der CPU fp32 (`pick_dtype`).
 
     `start()` lädt das Modell in einem Daemon-Thread. `importer` ist für Tests austauschbar."""
 
@@ -267,6 +345,8 @@ class BgeM3Embedder:
     dim: int = DIM
     importer: Callable[[], tuple[Any, Any]] = _import_sentence_transformers
     device: str | None = field(default=None, init=False)
+    dtype: str | None = field(default=None, init=False)
+    _torch: Any = field(default=None, init=False, repr=False)
     _st: Any = field(default=None, init=False, repr=False)
     _error: str | None = field(default=None, init=False)
     _done: threading.Event = field(default_factory=threading.Event, init=False, repr=False)
@@ -285,14 +365,32 @@ class BgeM3Embedder:
         t0 = time.monotonic()
         try:
             st, torch = self.importer()
+            _set_threads(torch, embed_threads())
             device = _pick_device(torch)
-            loaded = st.SentenceTransformer(self.model, device=device)
+            dtype = pick_dtype(device)
+            if dtype == "float16":
+                loaded = st.SentenceTransformer(
+                    self.model, device=device, model_kwargs={"dtype": torch.float16}
+                )
+            else:
+                loaded = st.SentenceTransformer(self.model, device=device)
             loaded.max_seq_length = MAX_SEQ_LENGTH
             dim = _dimension(loaded)
             if dim is not None and dim != self.dim:
                 raise EmbedderUnavailable(f"Modell liefert {dim} statt {self.dim} Dimensionen")
+            # Probelauf: wärmt das Gerät vor (die erste Suchanfrage ist sonst langsam) und prüft,
+            # ob fp16 gültige Zahlen liefert. Wenn nicht: zurück auf fp32 statt NaN-Vektoren.
+            if dtype == "float16" and not _all_finite(self._encode(loaded, [WARMUP_TEXT])):
+                log.warning(
+                    "fp16 liefert ungültige Werte, weiter mit fp32", extra={"device": device}
+                )
+                loaded = loaded.float()
+                dtype = "float32"
             self.device = device
+            self.dtype = dtype
+            self._torch = torch
             self._st = loaded
+            self.release_cache()
         except EmbedderUnavailable as exc:
             self._error = safe_error(str(exc))
         except Exception as exc:  # Download ohne Netz, kaputter Cache, Speicher …
@@ -311,6 +409,8 @@ class BgeM3Embedder:
                     "provider": self.provider,
                     "model": self.model,
                     "device": self.device,
+                    "dtype": self.dtype,
+                    "threads": embed_threads(),
                     "load_ms": int((time.monotonic() - t0) * 1000),
                 },
             )
@@ -341,15 +441,29 @@ class BgeM3Embedder:
         if not texts:
             return []
         with self._lock:
-            out = st.encode(
-                list(texts),
-                batch_size=len(texts),
-                show_progress_bar=False,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
-            )
-        vectors: list[list[float]] = [[float(x) for x in row] for row in out.tolist()]
-        return vectors
+            return self._encode(st, texts)
+
+    @staticmethod
+    def _encode(st: Any, texts: list[str]) -> list[list[float]]:
+        out = st.encode(
+            list(texts),
+            batch_size=len(texts),
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        return [_unit(row) for row in out.tolist()]
+
+    def release_cache(self) -> None:
+        """Gibt auf `mps` den Zwischenspeicher des Geräts frei (nach dem Laden und nach großen
+        Index-Läufen). Nur eine Optimierung: Fehler werden verschluckt."""
+        if self.device != "mps" or self._torch is None:
+            return
+        try:
+            with self._lock:
+                self._torch.mps.empty_cache()
+        except Exception as exc:
+            log.debug("empty_cache fehlgeschlagen", extra={"error": type(exc).__name__})
 
 
 # ---------- Auswahl ----------

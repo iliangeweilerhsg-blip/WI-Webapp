@@ -518,6 +518,23 @@ def test_request_log_has_only_method_path_status_duration(
     assert "vertraulich" not in dump and "geheim" not in dump and str(server.token) not in dump
 
 
+def test_embed_is_never_throttled(server: srv.LoopbackServer, monkeypatch: Any) -> None:
+    """`SG_EMBED_PAUSE_MS` gilt nur für `search.index`: Der Endpunkt pausiert nie."""
+    pauses: list[int] = []
+    waits: list[Any] = []
+    em.configure_tuning(pause_ms=5000)
+    monkeypatch.setattr(em, "pause_between_batches", lambda: pauses.append(1))
+    monkeypatch.setattr(em.SHUTDOWN, "wait", lambda t=None: waits.append(t) or False)
+    try:
+        t0 = time.monotonic()
+        status, _, _ = request(server, "POST", "/embed", {"texts": ["Laufzeit"] * 16})
+        assert status == 200
+        assert time.monotonic() - t0 < 2
+        assert pauses == [] and waits == []
+    finally:
+        em.configure_tuning()
+
+
 def test_embed_requests_get_priority_over_jobs(tmp_path: Path) -> None:
     gate = threading.Event()
 

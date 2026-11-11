@@ -42,7 +42,9 @@ from ..uuid7 import uuid7
 SEARCH_INDEX_VERSION = 1
 MAX_TEXT = 8000
 WINDOW_MS = 60_000
-EMBED_BATCH = 16
+#: Klein gehalten: Eine Suchanfrage wartet höchstens auf den laufenden Stapel (§19.2), und der
+#: Speicherbedarf je Stapel bleibt auf Macs mit 8 GB gering.
+EMBED_BATCH = 4
 #: So lange wartet ein Job auf das Laden des Modells (Sekunden)
 WAIT_READY_S = 600.0
 
@@ -291,6 +293,9 @@ def embed_chunks(embedder: Embedder, todo: Sequence[Chunk]) -> Embedded:
             )
         for i in range(0, len(todo), EMBED_BATCH):
             batch = todo[i : i + EMBED_BATCH]
+            if i > 0:
+                # Drosselung nur hier, nie in `POST /embed`: CPU und GPU kurz freigeben
+                embedders.pause_between_batches()
             embedders.ENDPOINT_PRIORITY.wait_idle()  # Suchanfragen gehen vor (§19.2)
             if embedders.SHUTDOWN.is_set():  # SIGTERM: Rest ohne Vektor, §19.5 holt nach
                 raise EmbedderUnavailable(_STOPPING)
@@ -299,6 +304,10 @@ def embed_chunks(embedder: Embedder, todo: Sequence[Chunk]) -> Embedded:
                 raise RuntimeError("Embedder lieferte eine falsche Anzahl Vektoren")
             for chunk, vec in zip(batch, vectors, strict=True):
                 out.vectors[chunk.key] = _valid_vector(vec, embedder.dim)
+        if len(todo) > EMBED_BATCH:
+            release = getattr(embedder, "release_cache", None)
+            if callable(release):
+                release()
     except (EmbedderNotReady, EmbedderUnavailable) as exc:
         out.model = None
         out.error = safe_error(str(exc) or embedder.error() or "Embedder nicht verfügbar")
