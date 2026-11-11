@@ -24,7 +24,7 @@ Du brauchst einen Mac, am besten mit Apple Silicon. Installiere der Reihe nach:
 pnpm sg doctor
 ```
 
-Der Befehl prüft Node, pnpm, uv, Docker, die Ports 4710 und 5432 und den Datenordner (Standard `~/StudienGehirn`). Jede Zeile beginnt mit ✓ (in Ordnung), ✗ (fehlt) oder ℹ (Hinweis). Bei ✗ steht darunter, was zu tun ist. Behebe das und starte `pnpm sg doctor` erneut. Am Ende muss „Alles bereit.“ stehen.
+Der Befehl prüft Node, pnpm, uv, ffmpeg, Docker, die Ports 4710 und 5432 und den Datenordner (Standard `~/StudienGehirn`). Freien Speicher und Apple Silicon meldet er nur als Hinweis. Jede Zeile beginnt mit ✓ (in Ordnung), ✗ (fehlt) oder ℹ (Hinweis). Bei ✗ steht darunter, was zu tun ist. Behebe das und starte `pnpm sg doctor` erneut. Am Ende muss „Alles bereit.“ stehen.
 
 ## 3. Erster Start
 
