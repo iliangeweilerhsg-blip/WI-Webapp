@@ -126,7 +126,7 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
     setError(null);
     try {
       if (action === 'start') {
-        noteMicIntent();
+        noteMicIntent(session.id);
         const result = await startSession(session.id);
         onSession(result.session);
         if (result.ended_session) {

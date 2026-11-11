@@ -711,9 +711,77 @@ describe('AudioRecorder: Mikrofon, Pause, Verlust', () => {
     expect((await store.listShelf()).map((e) => e.seq)).toEqual([0]);
     expect(await store.listChunks('rec-late')).toEqual([]);
     expect(calls).toHaveLength(1);
+    // Ihr `complete` geht nie an den Core: zählt nicht als „wird gesichert“ (UX-08)
+    expect(uploader.getStatus()).toMatchObject({ pendingChunks: 0, pendingCompletes: 0 });
     uploader.kick();
     await uploader.drain();
     expect(calls).toHaveLength(1);
+  });
+
+  it('UX-08: ein älterer Zählvorgang aus `kick()` überschreibt den neueren Stand nicht', async () => {
+    class GatedStore extends MemoryRecorderStore {
+      gate: Promise<void> | null = null;
+      override async listShelf() {
+        const gate = this.gate;
+        this.gate = null;
+        if (gate) await gate;
+        return super.listShelf();
+      }
+    }
+    const store = new GatedStore();
+    await store.putRecording({
+      id: 'rec-race',
+      sessionId: 's',
+      mime: 'audio/webm;codecs=opus',
+      codec: 'opus',
+      startedMs: 0,
+      chunksIndependent: false,
+      created: true,
+      nextSeq: 1,
+      recordedMs: 10,
+      lastActivityAt: Date.now(),
+      complete: null,
+    });
+    await store.addChunk(
+      {
+        recordingId: 'rec-race',
+        seq: 0,
+        startMs: 0,
+        durationMs: 10,
+        sha256: 'a'.repeat(64),
+        data: new Uint8Array([1]).buffer,
+        attempts: 0,
+      },
+      {},
+    );
+    let releasePut: () => void = () => undefined;
+    const putGate = new Promise<void>((r) => (releasePut = r));
+    let putStarted: () => void = () => undefined;
+    const putSeen = new Promise<void>((r) => (putStarted = r));
+    const { fetchFn } = fakeCore();
+    const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'PUT') {
+        putStarted();
+        await putGate;
+      }
+      return fetchFn(input, init);
+    }) as typeof globalThis.fetch;
+    const uploader = resumePendingUploads({ store, baseUrl: 'http://core/api/v1', fetch });
+    await putSeen;
+    // Zählvorgang A: sieht den Chunk noch und hängt danach
+    let releaseShelf: () => void = () => undefined;
+    store.gate = new Promise<void>((r) => (releaseShelf = r));
+    uploader.kick();
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+    // Der Durchgang lädt den Chunk hoch und zählt neu (B): nichts wartet mehr
+    releasePut();
+    await uploader.drain();
+    expect(uploader.getStatus().pendingChunks).toBe(0);
+    // A wird erst jetzt fertig und darf den Stand nicht auf 1 zurücksetzen
+    releaseShelf();
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(uploader.getStatus().pendingChunks).toBe(0);
+    uploader.dispose();
   });
 
   it('Pegel: ein angehaltener AudioContext meldet nichts (statt 0)', () => {

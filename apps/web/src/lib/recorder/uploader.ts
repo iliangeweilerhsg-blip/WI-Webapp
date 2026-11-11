@@ -84,6 +84,8 @@ export class ChunkUploader {
   private status: UploaderStatus = { pendingChunks: 0, shelvedChunks: 0, offline: false, retryInMs: null };
   /** Chunks bzw. Aufnahmen, die der Core schon einmal als unbekannt (404) gemeldet hat */
   private readonly notFound = new Set<string>();
+  /** Zähler der Aufrufe von `refreshCounts()`: nur der jüngste setzt den Stand */
+  private countsSeq = 0;
 
   constructor(options: UploaderOptions) {
     this.store = options.store;
@@ -154,13 +156,18 @@ export class ChunkUploader {
   }
 
   private async refreshCounts(): Promise<void> {
+    // `kick()` zählt auch neben einem laufenden Durchgang: Ein älterer Zählvorgang, der später fertig wird, darf den
+    // neueren Stand nicht überschreiben (sonst bliebe z. B. „Wird gesichert …“ stehen)
+    const seq = ++this.countsSeq;
     let pending = 0;
     let completes = 0;
     for (const meta of await this.store.listRecordings()) {
       pending += (await this.store.listChunks(meta.id)).length;
-      if (meta.complete) completes += 1;
+      // Abgelehnte Aufnahmen bleiben als Metadaten liegen, ihr `complete` geht nie an den Core
+      if (meta.complete && !meta.rejected) completes += 1;
     }
     const shelved = (await this.store.listShelf()).length;
+    if (seq !== this.countsSeq) return;
     if (
       pending !== this.status.pendingChunks ||
       shelved !== this.status.shelvedChunks ||

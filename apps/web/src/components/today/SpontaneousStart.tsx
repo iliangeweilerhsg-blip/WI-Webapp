@@ -63,7 +63,7 @@ function useSpontaneousStart(onSession?: (session: Session) => void) {
     const id = pending.current?.moduleId === moduleId ? pending.current.id : uuidv7();
     pending.current = { moduleId, id };
     try {
-      noteMicIntent();
+      noteMicIntent(id);
       const result = await createAndStartSession(moduleId, id);
       pending.current = null;
       rememberLastModuleId(moduleId);

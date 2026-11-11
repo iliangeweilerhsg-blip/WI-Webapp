@@ -137,7 +137,7 @@ export function useSessionRecording(session: Session, client: SyncClient | null)
   const connection = useConnectionState(client);
   const leader = isLeaderState(connection);
   const permission = usePermission(env.permission);
-  const [userStarted, setUserStarted] = useState(() => hasMicIntent());
+  const [userStarted, setUserStarted] = useState(() => hasMicIntent(session.id));
   const [parts, setParts] = useState<{ recorder: AudioRecorder; control: LeaderRecording } | null>(null);
 
   const sessionId = session.id;

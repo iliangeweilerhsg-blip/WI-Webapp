@@ -142,7 +142,7 @@ afterEach(() => {
 describe('Aufnahme im Dashboard: Start ohne zweiten Klick (UX-03)', () => {
   it('mit Startgeste kurz zuvor beginnt die Aufnahme ohne Klick, auch bei „prompt“', async () => {
     vi.setSystemTime(Date.parse(NOW) - 5000);
-    noteMicIntent();
+    noteMicIntent(SESSION_ID);
     boot({ rec: fakeRecording({ permission: 'prompt' }) });
     const b = await screenBar();
     expect(await within(b).findByText('REC')).toBeVisible();
@@ -160,9 +160,19 @@ describe('Aufnahme im Dashboard: Start ohne zweiten Klick (UX-03)', () => {
     expect(rec.getUserMedia).not.toHaveBeenCalled();
   });
 
+  it('eine Startgeste für eine andere Session zählt nicht (z. B. nach gescheitertem Start)', async () => {
+    vi.setSystemTime(Date.parse(NOW) - 5000);
+    noteMicIntent('0190f6a2-0000-7000-8000-0000000000ff');
+    boot({ rec: fakeRecording({ permission: 'prompt' }) });
+    const b = await screenBar();
+    expect(await within(b).findByText('Keine Aufnahme')).toBeVisible();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(rec.getUserMedia).not.toHaveBeenCalled();
+  });
+
   it('eine Startgeste, die über 60 s zurückliegt, zählt nicht', async () => {
     vi.setSystemTime(Date.parse(NOW) - 61_000);
-    noteMicIntent();
+    noteMicIntent(SESSION_ID);
     boot({ rec: fakeRecording({ permission: 'prompt' }) });
     const b = await screenBar();
     expect(await within(b).findByText('Keine Aufnahme')).toBeVisible();
