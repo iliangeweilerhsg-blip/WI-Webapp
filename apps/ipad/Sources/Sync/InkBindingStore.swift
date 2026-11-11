@@ -13,9 +13,23 @@ struct InkBinding: Codable, Equatable, Sendable {
     var sessionID: String?
     /// Start dieser Session auf der Uhr des Mac, in ms
     var sessionStartMS: Int?
+    /// Name des Moduls, zuletzt vom Core gelesen. Fehlt bei alten `bindings.json` und ohne Antwort des Core.
+    var moduleName: String?
 
     /// Strom aller Operationen dieses Notizbuchs (VERTRAEGE §11.2)
     var stream: String { "notebook:\(notebookID)" }
+}
+
+/// Entscheidet, ob die laufende Vorlesung in einem anderen Notizbuch liegt als die offene Seite (UX-19)
+enum InkBindingCheck {
+    /// - Parameters:
+    ///   - shownNotebookID: Notizbuch der offenen Seite, `nil` bei der lokalen Testseite
+    ///   - runningNotebookID: Notizbuch der laufenden Vorlesung laut Core, `nil` ohne laufende Vorlesung
+    /// - Returns: `true`, wenn der Knopf „Zur laufenden Vorlesung“ erscheinen soll. Nichts wird verschoben.
+    static func differs(shownNotebookID: String?, runningNotebookID: String?) -> Bool {
+        guard let runningNotebookID else { return false }
+        return runningNotebookID != shownNotebookID
+    }
 }
 
 /// Ablage der Bindungen. Schreibfehler werden nicht gemeldet: Der Stand liegt im Speicher und wird bei der

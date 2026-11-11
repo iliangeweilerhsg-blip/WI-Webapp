@@ -11,6 +11,8 @@ struct InkPageView: View {
     @State private var model: InkPageModel?
     @State private var binding: InkBinding?
     @State private var isReconciling = false
+    /// Notizbuch der laufenden Vorlesung, wenn es vom angezeigten abweicht (UX-19). Die Seite bleibt stehen.
+    @State private var otherNotebookID: String?
     /// Händigkeit: Seite der Werkzeugleiste. Später aus `Settings.lecture.toolbar_side` (F-EIN-01).
     @AppStorage("ink.toolbarSide") private var toolbarSideRaw = ToolbarSide.rechts.rawValue
     @Environment(\.scenePhase) private var scenePhase
@@ -35,21 +37,36 @@ struct InkPageView: View {
                     }
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
-                    if sync != nil, binding == nil {
-                        Text("Kein Notizbuch am Mac gefunden. Diese Seite bleibt vorerst nur auf dem iPad. Starte am Mac eine Vorlesung und öffne die Schreibfläche danach neu.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    VStack(spacing: 0) {
+                        if sync != nil, binding == nil {
+                            infoRow("Kein Notizbuch am Mac gefunden. Diese Seite bleibt vorerst nur auf dem iPad. Starte am Mac eine Vorlesung und öffne die Schreibfläche danach neu.")
+                        }
+                        if let offlineText {
+                            infoRow(offlineText)
+                        }
+                        if otherNotebookID != nil {
+                            HStack {
+                                Text("Am Mac läuft eine Vorlesung. Diese Seite gehört nicht dazu.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                Button("Zur laufenden Vorlesung") {
+                                    _Concurrency.Task { await switchToRunningLecture() }
+                                }
+                                .buttonStyle(.bordered)
+                            }
                             .padding(.horizontal)
                             .padding(.vertical, 8)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(Color(.secondarySystemBackground))
+                        }
                     }
                 }
             } else {
                 Color(.secondarySystemBackground)
             }
         }
-        .navigationTitle(binding == nil ? "Test-Notizbuch" : "Vorlesung")
+        .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -79,8 +96,53 @@ struct InkPageView: View {
         }
         .onChange(of: sync?.welcomeCount ?? 0) { _, _ in
             // Neu verbunden (auch nach neuer db_epoch): Seite abgleichen, wenn nötig
-            _Concurrency.Task { await reconcileIfNeeded() }
+            _Concurrency.Task {
+                await reconcileIfNeeded()
+                await checkRunningLecture()
+            }
         }
+    }
+
+    private var title: String {
+        guard let binding else { return "Test-Notizbuch" }
+        return InkPageTitle.text(moduleName: binding.moduleName)
+    }
+
+    /// Zeile ohne Verbindung. Der Modulname steht dabei, damit klar ist, wohin geschrieben wird.
+    private var offlineText: String? {
+        guard let sync, let binding, sync.state != .online else { return nil }
+        return InkPageTitle.offlineLine(moduleName: binding.moduleName)
+    }
+
+    private func infoRow(_ text: String) -> some View {
+        Text(text)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemBackground))
+    }
+
+    /// Löst die Bindung nach einer neuen Verbindung erneut auf. Weicht die laufende Vorlesung ab, erscheint nur
+    /// der Knopf: Die Seite wird nicht ungefragt gewechselt.
+    private func checkRunningLecture() async {
+        guard let sync, model != nil else { return }
+        let running = await sync.runningLectureNotebookID()
+        guard !_Concurrency.Task.isCancelled else { return }
+        let differs = InkBindingCheck.differs(
+            shownNotebookID: binding?.notebookID, runningNotebookID: running)
+        otherNotebookID = differs ? running : nil
+    }
+
+    /// Erst der Knopf wechselt: Aktuelle Seite sichern, Abmelden von der alten Seite, neu öffnen
+    private func switchToRunningLecture() async {
+        model?.saveNow()
+        sync?.setPresence(presence(onPage: false))
+        otherNotebookID = nil
+        model = nil
+        binding = nil
+        await open()
     }
 
     /// Öffnet die Seite: Bindung auflösen, Modell anlegen, Sync anschließen

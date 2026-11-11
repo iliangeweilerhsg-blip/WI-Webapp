@@ -428,6 +428,7 @@ final class SyncEngineTests: XCTestCase {
                 body:
                     "{\"items\":[\(notebookJSON(id: "019a4e14-0000-7000-8000-0000000000e2", kind: "uebung")),\(notebookJSON(id: notebookID, kind: "vorlesung"))],\"next_cursor\":null}"
             ),
+            .http(status: 200, body: "{\"id\":\"019a4e14-0000-7000-8000-0000000000c1\",\"name\":\"Analysis I\"}"),
             .http(
                 status: 200,
                 body: "{\"items\":[],\"notebook_id\":\"\(notebookID)\",\"stream_op_id\":null,\"stream_seq\":0}"),
@@ -441,8 +442,10 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertTrue(resolved.pageCreated)
         XCTAssertEqual(resolved.sessionStartMS, 1_794_384_000_000)
         XCTAssertEqual(h.bindings.lastNotebookID, notebookID)
-        XCTAssertEqual(h.transport.requests.count, 3)
+        XCTAssertEqual(resolved.moduleName, "Analysis I")
+        XCTAssertEqual(h.transport.requests.count, 4)
         XCTAssertTrue(h.transport.requests[0].url?.absoluteString.contains("state=laeuft") ?? false)
+        XCTAssertTrue(h.transport.requests[2].url?.path.hasSuffix("/modules/019a4e14-0000-7000-8000-0000000000c1") ?? false)
 
         // `page.create` ging als Erstes raus, mit Index 1 und dem Strom des Notizbuchs
         let sent = await eventually { h.factory.sockets[0].ops.count == 1 }
@@ -454,6 +457,33 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(data["page_id"] as? String, resolved.pageID)
         XCTAssertEqual(data["index"] as? Int, 1)
         XCTAssertEqual(data["template"] as? String, "blanko")
+    }
+
+    func testRunningLectureOnlyReadsAndStoresNothing() async throws {
+        let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
+        let h = SyncHarness(health: [
+            .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
+            .http(
+                status: 200,
+                body: "{\"items\":[\(notebookJSON(id: notebookID, kind: "vorlesung"))],\"next_cursor\":null}"),
+            // Modulname scheitert: Das Notizbuch wird trotzdem gefunden
+            .http(status: 500, body: "{}"),
+        ])
+        h.start()
+        _ = await eventually { h.engine.state == .online }
+
+        let running = await h.engine.runningLectureNotebookID()
+        XCTAssertEqual(running, notebookID)
+        // Keine neue Bindung, kein neues „zuletzt verwendet“
+        XCTAssertNil(h.bindings.binding(forNotebook: notebookID))
+        XCTAssertEqual(h.bindings.lastNotebookID, h.binding.notebookID)
+    }
+
+    func testRunningLectureWithoutConnectionGivesNil() async throws {
+        let h = SyncHarness()
+        let running = await h.engine.runningLectureNotebookID()
+        XCTAssertNil(running)
+        XCTAssertEqual(h.transport.requests.count, 0)
     }
 
     func testResolveBindingOfflineFallsBackToTheLastNotebook() async throws {

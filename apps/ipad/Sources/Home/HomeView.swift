@@ -7,11 +7,22 @@ struct HomeView: View {
     let mac: PairedMac
 
     @State private var showsStatus = false
+    /// Hinweis, wenn die Signatur der App bald abläuft (UX-13). `nil` ohne Profil oder bei genug Restzeit.
+    @State private var expiryNotice: String?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if let expiryNotice {
+                        Text(expiryNotice)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+                            .accessibilityElement(children: .combine)
+                    }
                     PlaceholderCard(
                         title: "Gleich",
                         text: "Deine nächste Vorlesung erscheint hier, sobald der Kalender angebunden ist."
@@ -53,6 +64,9 @@ struct HomeView: View {
                     }
                 }
             }
+        }
+        .onAppear {
+            expiryNotice = ProfileExpiry.currentNotice()
         }
         .task {
             // Solange der Startbildschirm sichtbar ist, regelmäßig nachsehen.

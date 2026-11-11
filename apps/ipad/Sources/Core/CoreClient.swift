@@ -120,6 +120,12 @@ final class CoreClient {
         return try decode(SessionList.self, from: data).items
     }
 
+    /// `GET /modules/{id}`: nur der Name wird gebraucht (Titel der Schreibfläche, UX-19)
+    func moduleName(endpoint: CoreEndpoint, token: String, moduleID: String) async throws -> String {
+        let data = try await send("GET", "/modules/\(moduleID)", endpoint: endpoint, token: token, body: nil)
+        return try decode(ModuleNameResponse.self, from: data).name
+    }
+
     /// `GET /notebooks?module_id=…`
     func notebooks(endpoint: CoreEndpoint, token: String, moduleID: String) async throws -> [Notebook] {
         let data = try await send(
@@ -209,4 +215,9 @@ final class CoreClient {
     private static func errorCode(in data: Data) -> String? {
         (try? newJSONDecoder().decode(APIError.self, from: data))?.error.code
     }
+}
+
+/// Ausschnitt aus `Module`: Unbekannte Felder werden ignoriert
+private struct ModuleNameResponse: Decodable {
+    let name: String
 }

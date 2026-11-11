@@ -91,6 +91,10 @@ Mit dem kostenlosen Personal Team gilt die Signatur **7 Tage**. Danach startet d
 
 Abhilfe: iPad anschließen und in Xcode wieder auf **▶** klicken (Schritt 6). Die Kopplung bleibt dabei erhalten. Lösche die App dafür nicht.
 
+**Feste Routine:** Such dir einen Wochentag, an dem keine Vorlesung ist, zum Beispiel den Sonntagabend, und spiel die App immer dann neu auf. So läuft sie nie mitten in der Woche ab.
+
+**Vorwarnung in der App:** Auf dem Startbildschirm steht ein Hinweis, sobald nur noch 2 Tage bleiben („App läuft noch 2 Tage“, am letzten Tag „App läuft heute ab“). Dann am Mac über Xcode neu aufspielen. Siehst du keinen Hinweis, ist noch genug Zeit oder die App kann ihr Ablaufdatum nicht lesen. Verlass dich deshalb nicht allein darauf, sondern halte die Wochenroutine ein.
+
 ## Wenn etwas nicht klappt
 
 Tippe in der App oben rechts auf **Mac ●**. Dort steht die Ursache.
