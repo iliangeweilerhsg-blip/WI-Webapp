@@ -7,8 +7,10 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import type { Session, SessionTranscript, TranscriptLine } from '@sg/shared';
+import type { EvidenceRef, Session, SessionTranscript, TranscriptLine } from '@sg/shared';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
+import { CONCEPT_STEPS, useSessionConcepts, useSessionSummary } from '../../lib/concepts.ts';
+import { useAiStatus } from '../../lib/costs.ts';
 import { useDeckDetail } from '../../lib/material.ts';
 import { moduleColorVar, useModules } from '../../lib/modules.ts';
 import { moduleHref } from '../../lib/nav.ts';
@@ -36,7 +38,9 @@ import { useSessionData } from '../dashboard/use-session.ts';
 import { EmptyState } from '../Placeholder.tsx';
 import { StepList } from '../processing/StepList.tsx';
 import { PlayerBar } from './PlayerBar.tsx';
+import { SessionConceptChips } from './SessionConceptChips.tsx';
 import { SlideColumn, type SlideItem } from './SlideColumn.tsx';
+import { SummaryPanel } from './SummaryPanel.tsx';
 import { TranscriptList, lineKey } from './TranscriptList.tsx';
 import { SKIP_MS, usePlayer } from './use-player.ts';
 
@@ -209,6 +213,10 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
   const deckId = session.slide_deck_id;
   const rows = stepRows(session.processing);
   const showSteps = rows.some((row) => row.state !== 'fertig');
+  // Kurzfassung, Konzepte und Stand der KI (VERTRAEGE §20.10). `ReviewBody` gibt es nur für beendete Sessions.
+  const summary = useSessionSummary(session.id, session.processing, true);
+  const concepts = useSessionConcepts(session.id, session.processing, true);
+  const ai = useAiStatus();
 
   const firstStart = lines[0]?.start_ms ?? timelineBounds(transcript.recordings)?.start ?? 0;
   const player = usePlayer(transcript.recordings, firstStart);
@@ -309,11 +317,39 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [toggle, skip]);
 
+  // Quellen-Chips der Kurzfassung: Folie wählen bzw. wie `t` in der Aufnahme springen (§19.7), ohne die Seite zu wechseln
+  const pickSource = (ref: EvidenceRef): boolean => {
+    if (ref.kind === 'slide') {
+      if (!mapped || !validKeys.has(ref.slide_id)) return false;
+      setChosen(ref.slide_id);
+      return true;
+    }
+    if (ref.session_id !== session.id || !hasRecordings) return false;
+    seekPlayer(ref.t_start_ms, false);
+    return true;
+  };
+
   const transcriptFailed = isFailed(session.processing.transcribe ?? 'fertig');
   const transcriptPending = isPending(session.processing.transcribe ?? 'fertig');
   const hasContent = lines.length > 0 || mapped;
   const slide = slides.find((s) => s.id === selected);
   const columnTitle = slide ? `Transkript zu Folie ${slide.index}` : 'Transkript vor der ersten Folie';
+  // „Konzepte kommen noch“ statt „Transkript kommt noch“, sobald `transcribe` fertig ist (§20.2)
+  const conceptsPending =
+    (session.processing.transcribe ?? 'fertig') === 'fertig' &&
+    CONCEPT_STEPS.some((step) => isPending(session.processing[step] ?? 'fertig'));
+
+  const conceptChips = (
+    <SessionConceptChips
+      items={concepts.data?.items}
+      processing={session.processing}
+      slideId={slide?.id ?? null}
+      ai={ai.data}
+      busy={reprocess.busy}
+      error={showSteps ? null : reprocess.error}
+      onCreate={() => void reprocess.run('concepts.extract')}
+    />
+  );
 
   const notices = (
     <>
@@ -323,9 +359,14 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
           busy={reprocess.busy}
           error={reprocess.error}
           onRetry={(step) => void reprocess.run(step)}
+          ai={ai.data}
         />
       ) : null}
-      {state === 'offen' && (transcriptPending || transcript.transcripts.length === 0) ? (
+      {state === 'offen' && conceptsPending ? (
+        <p role="status" className="text-md text-text-muted">
+          Konzepte kommen noch.
+        </p>
+      ) : state === 'offen' && (transcriptPending || transcript.transcripts.length === 0) ? (
         <p role="status" className="text-md text-text-muted">
           Transkript kommt noch.
         </p>
@@ -350,8 +391,12 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
           ) : null}
         </div>
       ) : null}
+      {summary.data?.summary ? <SummaryPanel summary={summary.data.summary} onPick={pickSource} /> : null}
     </>
   );
+
+  // Steht das Transkript neben der Folie, stehen die Konzepte in der rechten Spalte, sonst über dem Inhalt
+  const conceptsInColumn = state !== 'nicht_beendet' && state !== 'keine_aufnahme' && hasContent && mapped;
 
   let content;
   if (state === 'nicht_beendet') content = null;
@@ -404,28 +449,31 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
             spoken={spoken}
           />
         </div>
-        <div className="min-w-0">
-          <h2 className="text-md font-medium">{columnTitle}</h2>
-          {shownLines.length > 0 ? (
-            <div className="mt-1">
-              <TranscriptList
-                label={columnTitle}
-                lines={shownLines}
-                startedAt={startedAt}
-                activeKey={activeLine ? lineKey(activeLine) : null}
-                lang={lang}
-                onPlay={playLine}
-              />
-            </div>
-          ) : (
-            <p className="mt-2 text-md text-text-muted">
-              {transcriptFailed
-                ? 'Transkript nicht fertig.'
-                : lines.length === 0
-                  ? 'Hier erscheint das Transkript, sobald es fertig ist.'
-                  : 'Zu dieser Folie wurde nichts gesagt.'}
-            </p>
-          )}
+        <div className="flex min-w-0 flex-col gap-4">
+          {conceptChips}
+          <div className="min-w-0">
+            <h2 className="text-md font-medium">{columnTitle}</h2>
+            {shownLines.length > 0 ? (
+              <div className="mt-1">
+                <TranscriptList
+                  label={columnTitle}
+                  lines={shownLines}
+                  startedAt={startedAt}
+                  activeKey={activeLine ? lineKey(activeLine) : null}
+                  lang={lang}
+                  onPlay={playLine}
+                />
+              </div>
+            ) : (
+              <p className="mt-2 text-md text-text-muted">
+                {transcriptFailed
+                  ? 'Transkript nicht fertig.'
+                  : lines.length === 0
+                    ? 'Hier erscheint das Transkript, sobald es fertig ist.'
+                    : 'Zu dieser Folie wurde nichts gesagt.'}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -436,6 +484,7 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 md:px-8">
         <div className="mx-auto flex max-w-6xl flex-col gap-4">
           {notices}
+          {conceptsInColumn ? null : conceptChips}
           {content}
         </div>
       </div>

@@ -1,9 +1,15 @@
 import { vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import type {
+  AiStatus,
   CalendarEvent,
+  Concept,
+  ConceptDetail,
+  CostSummary,
   Device,
   ExerciseSheet,
+  InboxItem,
+  InboxOverview,
   Marker,
   Module,
   Recording,
@@ -17,6 +23,9 @@ import type {
   SearchSnippetPart,
   Semester,
   Session,
+  SessionConceptItem,
+  SessionRef,
+  SessionSummary,
   SessionTranscript,
   Settings,
   Slide,
@@ -513,6 +522,105 @@ export interface FakeCore {
   addPairingRequest: (name: string) => PairingRequest;
   /** Das iPad bestätigt mit dem richtigen Code: Gerät anlegen, Fenster `paired` */
   completePairing: (name?: string) => Device;
+  /** Einträge der Inbox in allen Zuständen (VERTRAEGE §20.6). `GET /inbox` sortiert nach `created_at DESC, priority, id` */
+  inboxItems: InboxItem[];
+  /** Konzepte für `GET /concepts` und `GET /concepts/{id}` */
+  concepts: ConceptDetail[];
+  /** Antwort von `GET /sessions/{id}/concepts` je Session; ohne Eintrag leer */
+  sessionConcepts: Record<string, SessionConceptItem[]>;
+  /** Antwort von `GET /sessions/{id}/summary` je Session; ohne Eintrag `summary: null` */
+  summaries: Record<string, SessionSummary>;
+  /** Antwort von `GET /ai/status` */
+  aiStatus: AiStatus;
+  /** Antwort von `GET /costs/summary` */
+  costSummary: CostSummary;
+  /** Der nächste `POST /inbox/…` wird mit diesem Fehler abgelehnt */
+  rejectNextInbox: null | { status: number; code: string; details?: Record<string, unknown> };
+}
+
+const CONCEPT_NOW = '2026-11-05T14:12:30Z';
+
+export function makeSessionRef(overrides: Partial<SessionRef> = {}): SessionRef {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000e1',
+    number: 7,
+    title: 'Normalformen',
+    started_at: '2026-11-05T12:15:00Z',
+    module: { id: '0190f6a2-0000-7000-8000-0000000000a1', name: 'Datenbanksysteme', short_name: 'DBS' },
+    ...overrides,
+  };
+}
+
+export function makeConcept(overrides: Partial<Concept> = {}): Concept {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000c0001',
+    created_at: CONCEPT_NOW,
+    updated_at: CONCEPT_NOW,
+    name: 'Funktionale Abhängigkeit',
+    aliases: [],
+    kind: 'definition',
+    one_liner: null,
+    status: 'aktiv',
+    merged_into: null,
+    exam_relevant: false,
+    importance_base: 1,
+    ...overrides,
+  };
+}
+
+export function makeConceptDetail(
+  concept: Partial<Concept> = {},
+  overrides: Partial<Omit<ConceptDetail, 'concept'>> = {},
+): ConceptDetail {
+  return {
+    concept: makeConcept(concept),
+    modules: [makeSessionRef().module],
+    evidence: [],
+    relations: [],
+    inbox_item_id: null,
+    ...overrides,
+  };
+}
+
+/** Offener Eintrag der Inbox; `payload` bestimmt die Art */
+export function makeInboxItem(payload: InboxItem['payload'], overrides: Partial<InboxItem> = {}): InboxItem {
+  return {
+    id: '0190f6a2-0000-7000-8000-00000001b001',
+    created_at: CONCEPT_NOW,
+    updated_at: CONCEPT_NOW,
+    kind: payload.kind,
+    status: 'offen',
+    session: makeSessionRef(),
+    job_id: null,
+    priority: payload.kind === 'relation' ? 100 : 1,
+    decided_at: null,
+    payload,
+    concept_id: null,
+    target_concept_id: payload.kind === 'concept_merge' ? payload.target.concept_id : null,
+    relation_id: null,
+    blocked: null,
+    ...overrides,
+  };
+}
+
+export function makeAiStatus(overrides: Partial<AiStatus> = {}): AiStatus {
+  return {
+    worker_reachable: true,
+    llm: { provider: 'fake', configured: true, issue: null },
+    budget: { month: '2026-11', spent_eur: 0, budget_eur: 10, reached: false, warn: false },
+    ...overrides,
+  };
+}
+
+export function makeCostSummary(overrides: Partial<CostSummary> = {}): CostSummary {
+  return {
+    budget: { month: '2026-11', spent_eur: 0, budget_eur: 10, reached: false, warn: false },
+    calls: 0,
+    by_task: [],
+    by_session: [],
+    by_model: [],
+    ...overrides,
+  };
 }
 
 export function makeSettings(): Settings {
@@ -634,6 +742,13 @@ export function installFakeCore(
       core.pairing.requests = [];
       return created;
     },
+    inboxItems: [],
+    concepts: [],
+    sessionConcepts: {},
+    summaries: {},
+    aiStatus: makeAiStatus(),
+    costSummary: makeCostSummary(),
+    rejectNextInbox: null,
   };
 
   vi.stubGlobal(
@@ -653,6 +768,9 @@ export function installFakeCore(
 
       const materialResponse = await handleMaterial(core, { path, method, url, body, form, headers, newId });
       if (materialResponse) return materialResponse;
+
+      const conceptsResponse = handleConcepts(core, path, method, url, body);
+      if (conceptsResponse) return conceptsResponse;
 
       if (path === '/health') return json({ status: 'ok', db: 'ok', version: '0.0.0' });
       // GET /search (§19.6): 400 ohne Suchtext, sonst Treffer aus `core.searchFixtures`
@@ -1159,5 +1277,290 @@ function handleDevices(core: FakeCore, path: string, method: string, url: URL): 
     }
     return new Response(null, { status: 204 });
   }
+  return null;
+}
+
+const INBOX_OLDER_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** Namensgleich im Sinne des Fake-Core: ohne Groß-/Kleinschreibung, Leerraum zusammengefasst */
+const sameName = (a: string, b: string) =>
+  a.trim().replace(/\s+/g, ' ').toLowerCase() === b.trim().replace(/\s+/g, ' ').toLowerCase();
+
+type InboxFailure = { status: number; code: string; details?: Record<string, unknown> };
+
+/**
+ * Entscheidung über einen Eintrag mit den Prüfungen, die die Oberfläche braucht (§20.6): `concept_exists`,
+ * `merge_target_invalid`, `relation_endpoint_pending`, `inbox_action_invalid`. Liefert den Fehler oder `null`.
+ */
+function decideInboxItem(
+  core: FakeCore,
+  item: InboxItem,
+  action: 'accept' | 'reject' | 'reopen',
+  body: Record<string, unknown> | null,
+): InboxFailure | null {
+  const now = new Date().toISOString();
+  if (action === 'reopen') {
+    if (item.status === 'offen') return { status: 409, code: 'inbox_item_not_decided' };
+    if (item.session === null) return { status: 404, code: 'inbox_item_not_found' };
+    item.status = 'offen';
+    item.decided_at = null;
+    const own = core.concepts.find((c) => c.concept.id === item.concept_id);
+    if (own && item.kind !== 'relation') own.concept.status = 'vorschlag';
+    return null;
+  }
+  if (item.status !== 'offen') {
+    return { status: 409, code: 'inbox_item_decided', details: { status: item.status } };
+  }
+  if (action === 'reject') {
+    item.status = 'abgelehnt';
+    item.decided_at = now;
+    return null;
+  }
+  const request = body ?? {};
+  const payload = item.payload;
+  if (payload.kind === 'relation') {
+    if (request.edit !== undefined || request.merge_into !== undefined || request.as_new !== undefined) {
+      return { status: 400, code: 'inbox_action_invalid' };
+    }
+    const waiting = [payload.from_concept_id, payload.to_concept_id].find((id) =>
+      core.inboxItems.some((x) => x.kind !== 'relation' && x.concept_id === id && x.status !== 'angenommen'),
+    );
+    if (waiting) return { status: 409, code: 'relation_endpoint_pending', details: { concept_id: waiting } };
+    if (typeof request.relation_kind === 'string') {
+      payload.relation_kind = request.relation_kind as typeof payload.relation_kind;
+    }
+  } else {
+    if (request.relation_kind !== undefined) return { status: 400, code: 'inbox_action_invalid' };
+    if (
+      request.as_new !== undefined &&
+      (payload.kind === 'concept_new' || request.merge_into !== undefined)
+    ) {
+      return { status: 400, code: 'inbox_action_invalid' };
+    }
+    const mergeInto =
+      (request.merge_into as string | undefined) ??
+      (payload.kind === 'concept_merge' && !request.as_new ? payload.target.concept_id : undefined);
+    if (mergeInto !== undefined) {
+      const target = core.concepts.find((c) => c.concept.id === mergeInto);
+      if (!target || target.concept.status !== 'aktiv' || mergeInto === item.concept_id) {
+        return { status: 409, code: 'merge_target_invalid' };
+      }
+    } else {
+      const edit = (request.edit ?? {}) as Partial<Concept>;
+      const name = edit.name ?? payload.proposal.name;
+      const existing = core.concepts.find(
+        (c) =>
+          c.concept.status === 'aktiv' && c.concept.id !== item.concept_id && sameName(c.concept.name, name),
+      );
+      if (existing) {
+        return { status: 409, code: 'concept_exists', details: { concept_id: existing.concept.id } };
+      }
+      const own = core.concepts.find((c) => c.concept.id === item.concept_id);
+      if (own) Object.assign(own.concept, edit, { status: 'aktiv', updated_at: now });
+      else {
+        core.concepts.push(
+          makeConceptDetail(
+            {
+              id: item.concept_id ?? item.id,
+              name,
+              aliases: edit.aliases ?? payload.proposal.aliases,
+              one_liner: edit.one_liner !== undefined ? edit.one_liner : payload.proposal.one_liner,
+              kind: edit.kind !== undefined ? edit.kind : payload.proposal.kind,
+            },
+            { modules: item.session ? [item.session.module] : [] },
+          ),
+        );
+      }
+    }
+  }
+  item.status = 'angenommen';
+  item.decided_at = now;
+  // Beziehungen, deren Endpunkte jetzt beide entschieden sind, sind nicht mehr blockiert
+  for (const other of core.inboxItems) {
+    if (other.payload.kind !== 'relation' || other.status !== 'offen') continue;
+    const ends = [other.payload.from_concept_id, other.payload.to_concept_id];
+    const open = core.inboxItems.some(
+      (x) =>
+        x.kind !== 'relation' && x.status === 'offen' && x.concept_id !== null && ends.includes(x.concept_id),
+    );
+    if (!open && other.blocked === 'endpunkt_offen') other.blocked = null;
+  }
+  return null;
+}
+
+/** Die Routen aus VERTRAEGE §20.6: Inbox, Konzepte, Kurzfassung, Kosten, KI-Status */
+function handleConcepts(
+  core: FakeCore,
+  path: string,
+  method: string,
+  url: URL,
+  body: Record<string, unknown> | null,
+): Response | null {
+  const fail = (failure: InboxFailure) =>
+    json(
+      {
+        error: {
+          code: failure.code,
+          message: 'x',
+          ...(failure.details ? { details: failure.details } : {}),
+        },
+      },
+      failure.status,
+    );
+  const sorted = () =>
+    [...core.inboxItems].sort(
+      (a, b) =>
+        Date.parse(b.created_at) - Date.parse(a.created_at) ||
+        a.priority - b.priority ||
+        a.id.localeCompare(b.id),
+    );
+
+  if (path === '/inbox' && method === 'GET') {
+    const status = url.searchParams.get('status') ?? 'offen';
+    const kinds = url.searchParams.getAll('kind');
+    const sessionId = url.searchParams.get('session_id');
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    if (!['offen', 'entschieden', 'alle'].includes(status) || !(limit >= 1 && limit <= 200)) {
+      return fail({ status: 400, code: 'validation_failed' });
+    }
+    const items = sorted()
+      .filter((x) => status === 'alle' || (status === 'offen') === (x.status === 'offen'))
+      .filter((x) => kinds.length === 0 || kinds.includes(x.kind))
+      .filter((x) => !sessionId || x.session?.id === sessionId);
+    // Cursor des Fakes: Versatz als Text
+    const offset = Number(url.searchParams.get('cursor') ?? 0) || 0;
+    const next = offset + limit < items.length ? String(offset + limit) : null;
+    return json({ items: items.slice(offset, offset + limit), next_cursor: next });
+  }
+  if (path === '/inbox/overview' && method === 'GET') {
+    const open = sorted().filter((x) => x.status === 'offen');
+    const groups = new Map<string, InboxOverview['sessions'][number]>();
+    for (const item of open) {
+      const key = item.session?.id ?? '';
+      const group = groups.get(key) ?? { session: item.session, open_count: 0, oldest_at: item.created_at };
+      group.open_count += 1;
+      if (Date.parse(item.created_at) < Date.parse(group.oldest_at)) group.oldest_at = item.created_at;
+      groups.set(key, group);
+    }
+    const overview: InboxOverview = {
+      open_count: open.length,
+      older_count: open.filter((x) => Date.now() - Date.parse(x.created_at) > INBOX_OLDER_MS).length,
+      sessions: [...groups.values()].sort(
+        (a, b) => Date.parse(b.session?.started_at ?? '') - Date.parse(a.session?.started_at ?? '') || 0,
+      ),
+    };
+    return json(overview);
+  }
+  if (path.startsWith('/inbox/') && method === 'POST' && core.rejectNextInbox) {
+    const failure = core.rejectNextInbox;
+    core.rejectNextInbox = null;
+    return fail(failure);
+  }
+  if (path === '/inbox/bulk' && method === 'POST') {
+    const ids = body?.ids as string[] | undefined;
+    const sessionId = body?.session_id as string | undefined;
+    const action = body?.action as 'accept' | 'reject' | 'reopen' | undefined;
+    // Schema: `ids` mit 1 bis 500 Einträgen
+    if (
+      !action ||
+      (ids === undefined) === (sessionId === undefined) ||
+      (ids !== undefined && (ids.length < 1 || ids.length > 500))
+    ) {
+      return fail({ status: 400, code: 'validation_failed' });
+    }
+    if (sessionId !== undefined && !core.sessions.some((x) => x.id === sessionId && !x.deleted_at)) {
+      return fail({ status: 404, code: 'session_not_found' });
+    }
+    const wanted = sorted().filter((x) =>
+      ids
+        ? ids.includes(x.id)
+        : x.session?.id === sessionId && (action === 'reopen') !== (x.status === 'offen'),
+    );
+    // Erst Konzepte nach `priority`, dann Beziehungen (§20.6)
+    const ordered = [
+      ...wanted.filter((x) => x.kind !== 'relation'),
+      ...wanted.filter((x) => x.kind === 'relation'),
+    ];
+    const decided: string[] = [];
+    const skipped: { id: string; code: string }[] = [];
+    for (const item of ordered) {
+      const failure = decideInboxItem(core, item, action, null);
+      if (failure) skipped.push({ id: item.id, code: failure.code });
+      else decided.push(item.id);
+    }
+    return json({ decided, skipped });
+  }
+  const decision = /^\/inbox\/([^/]+)\/(accept|reject|reopen)$/.exec(path);
+  if (decision && method === 'POST') {
+    const item = core.inboxItems.find((x) => x.id === decision[1]);
+    if (!item) return fail({ status: 404, code: 'inbox_item_not_found' });
+    const failure = decideInboxItem(core, item, decision[2] as 'accept' | 'reject' | 'reopen', body);
+    if (failure) return fail(failure);
+    const concept = core.concepts.find((c) => c.concept.id === item.concept_id)?.concept ?? null;
+    return json({ item, concept });
+  }
+
+  if (path === '/concepts' && method === 'GET') {
+    const status = url.searchParams.get('status') ?? 'aktiv';
+    const q = url.searchParams.get('q');
+    const moduleId = url.searchParams.get('module_id');
+    const limit = Number(url.searchParams.get('limit') ?? 50);
+    if (
+      !['aktiv', 'vorschlag', 'alle'].includes(status) ||
+      !(limit >= 1 && limit <= 200) ||
+      (q !== null && (q.length < 1 || q.length > 100))
+    ) {
+      return fail({ status: 400, code: 'validation_failed' });
+    }
+    const needle = q?.toLowerCase() ?? '';
+    const items = core.concepts
+      .filter((c) => c.concept.status !== 'zusammengefuehrt')
+      .filter((c) => status === 'alle' || c.concept.status === status)
+      .filter((c) => !moduleId || c.modules.some((m) => m.id === moduleId))
+      .filter((c) =>
+        [c.concept.name, ...c.concept.aliases].some((name) => name.toLowerCase().includes(needle)),
+      )
+      .sort(
+        (a, b) =>
+          a.concept.name.toLowerCase().localeCompare(b.concept.name.toLowerCase()) ||
+          a.concept.id.localeCompare(b.concept.id),
+      )
+      .map((c) => ({
+        concept: c.concept,
+        modules: c.modules,
+        evidence_count: c.evidence.length,
+        session_count: new Set(c.evidence.flatMap((e) => (e.session ? [e.session.id] : []))).size,
+      }));
+    // Cursor des Fakes: Versatz als Text
+    const offset = Number(url.searchParams.get('cursor') ?? 0) || 0;
+    const page = items.slice(offset, offset + limit);
+    const next = offset + limit < items.length ? String(offset + limit) : null;
+    return json({ items: page, next_cursor: next });
+  }
+  const conceptOne = /^\/concepts\/([^/]+)$/.exec(path);
+  if (conceptOne && method === 'GET') {
+    const found = core.concepts.find((c) => c.concept.id === conceptOne[1]);
+    return found ? json(found) : fail({ status: 404, code: 'concept_not_found' });
+  }
+
+  const sessionPart = /^\/sessions\/([^/]+)\/(concepts|summary)$/.exec(path);
+  if (sessionPart && method === 'GET') {
+    const id = sessionPart[1] ?? '';
+    if (!core.sessions.some((x) => x.id === id && !x.deleted_at)) {
+      return fail({ status: 404, code: 'session_not_found' });
+    }
+    return sessionPart[2] === 'concepts'
+      ? json({ session_id: id, items: core.sessionConcepts[id] ?? [] })
+      : json({ session_id: id, summary: core.summaries[id] ?? null });
+  }
+
+  if (path === '/costs/summary' && method === 'GET') {
+    const month = url.searchParams.get('month');
+    if (month !== null && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+      return fail({ status: 400, code: 'validation_failed' });
+    }
+    return json(core.costSummary);
+  }
+  if (path === '/ai/status' && method === 'GET') return json(core.aiStatus);
   return null;
 }

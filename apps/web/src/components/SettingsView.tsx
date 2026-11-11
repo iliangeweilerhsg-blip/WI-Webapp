@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { AiSettings } from './settings/AiSettings.tsx';
 import { DevicesSettings } from './settings/DevicesSettings.tsx';
 import { SettingsTabContext, type TabMark } from './settings/form.tsx';
 import { DataSettings } from './settings/DataSettings.tsx';
@@ -51,6 +52,8 @@ const TABS: readonly SettingsTab[] = [
   { id: 'stift', label: 'Stift', panel: () => <PenSettingsForm /> },
   { id: 'geraete', label: 'Geräte', lazy: true, panel: () => <DevicesSettings /> },
   { id: 'moodle', label: 'Moodle', lazy: true, panel: () => <MoodleSettings /> },
+  // KI (T2-23, VERTRAEGE §20.7): Status, Monatsbudget, automatisches Annehmen, Kosten
+  { id: 'ki', label: 'KI', lazy: true, panel: () => <AiSettings /> },
   {
     id: 'daten',
     lazy: true,

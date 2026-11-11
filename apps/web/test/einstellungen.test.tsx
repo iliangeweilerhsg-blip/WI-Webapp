@@ -49,7 +49,7 @@ describe('Reiter', () => {
       within(tabs)
         .getAllByRole('tab')
         .map((t) => t.textContent),
-    ).toEqual(['Allgemein', 'Vorlesung', 'Stift', 'Geräte', 'Moodle', 'Daten und Papierkorb']);
+    ).toEqual(['Allgemein', 'Vorlesung', 'Stift', 'Geräte', 'Moodle', 'KI', 'Daten und Papierkorb']);
     expect(screen.getByRole('tab', { name: 'Allgemein' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('group', { name: 'Darstellung' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Semester' })).toBeInTheDocument();
