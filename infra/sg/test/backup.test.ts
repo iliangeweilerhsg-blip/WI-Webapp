@@ -2124,8 +2124,38 @@ describe('#183: Ziel mit fremder uid (SMB/CIFS ohne uid=, NFS mit root_squash)',
       expect(existsSync(evil) ? readdirSync(evil) : []).toEqual([]);
       expect(existsSync(join(target, '20261104T050000Z'))).toBe(false);
       expect(logs.join('\n')).not.toMatch(/uid 4343/);
-      expect(errs.join('\n')).toMatch(/ersetzt/);
+      // Abbruch genau durch die Probe (`targetOwner`), nicht durch eine andere Meldung mit „ersetzt“
+      expect(errs.join('\n')).toMatch(
+        /beim Anlegen ersetzt: Der Ordner gehört uid 4343, neue Dateien dieses Laufs gehören uid 0/,
+      );
       expect(readManifest(join(target, '20261104T030012Z'))).not.toBeNull();
+    },
+  );
+
+  it.skipIf(!asRoot)(
+    'Wettlauf beim Anlegen des .partial: ein Symlink an Stelle der Probedatei wird nie verfolgt',
+    async () => {
+      const { target, deps, errs } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+      const name = '.20261104T050000Z.partial';
+      const evil = join(target, name);
+      const victim = join(dirname(target), 'opfer.txt');
+      writeFileSync(victim, 'ORIGINAL');
+      const swap: BackupDeps['targetHooks'] = {
+        step: (op, phase, dir, entry) => {
+          if (op !== 'mkdir' || phase !== 'after' || entry !== name) return;
+          renameSync(join(dir, entry), join(dir, 'geklaut'));
+          mkdirSync(evil);
+          symlinkSync(victim, join(evil, '.sg-besitzer.partial'));
+          lchownSync(evil, ANDERER, ANDERER);
+        },
+      };
+      const next = { ...deps, now: () => new Date('2026-11-04T05:00:00Z'), targetHooks: swap };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).not.toBe(0);
+      expect(readFileSync(victim, 'utf8')).toBe('ORIGINAL');
+      expect(lstatSync(join(evil, '.sg-besitzer.partial')).isSymbolicLink()).toBe(true);
+      expect(existsSync(join(target, '20261104T050000Z'))).toBe(false);
+      expect(errs.join('\n')).toMatch(/sg-besitzer\.partial gibt es schon/);
     },
   );
 });
