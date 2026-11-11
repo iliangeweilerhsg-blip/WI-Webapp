@@ -39,10 +39,10 @@ from ..ai import llm_fake
 from ..ai.budget import CostMeter
 from ..ai.interfaces import Effort, StructuredRequest, Tier
 from ..ai.outputs import SUMMARY_WRITE_PROMPT, ExtractTimeRange, SummaryWriteOutput
+from ..concepts import material as mat
 from ..concepts.names import normalize_name
 from ..registry import JobContext, LockLostError, NonRetryableError, handler
 from ..uuid7 import uuid7
-from . import concepts_extract as ce
 from .search_index import clean_text
 
 TASK = "summary.write"
@@ -77,10 +77,10 @@ class SessionConcept:
     spans: tuple[tuple[int, int], ...] = ()
 
 
-def limit_words(material: ce.Material, limit: int) -> ce.Material:
+def limit_words(material: mat.Material, limit: int) -> mat.Material:
     """Kürzt das Gesagte je Folie auf die ersten `limit` Wörter (Rest als „…“). Die Zeiten der
     Abschnitte bleiben, damit `von`/`bis` und die Zuordnung zur Folie gleich bleiben."""
-    per_slide, _ = ce.assign(material)
+    per_slide, _ = mat.assign(material)
     texts: dict[int, str] = {}
     for segs in per_slide.values():
         left = limit
@@ -151,23 +151,25 @@ def load_concepts(conn: Conn, sid: uuid.UUID, deck_id: uuid.UUID | None) -> list
 def concepts_block(concepts: Sequence[SessionConcept]) -> str:
     lines = ["<konzepte>"]
     for concept in concepts:
-        text = ce.esc(normalize_name(concept.name))
+        text = mat.esc(normalize_name(concept.name))
         one_liner = normalize_name(concept.one_liner or "")
         if one_liner:
-            text += f": {ce.esc(one_liner)}"
+            text += f": {mat.esc(one_liner)}"
         lines.append(f"<konzept>{text}</konzept>")
     lines.append("</konzepte>")
     return "\n".join(lines)
 
 
-def build_input(material: ce.Material, concepts: Sequence[SessionConcept]) -> tuple[ce.Built, str]:
+def build_input(
+    material: mat.Material, concepts: Sequence[SessionConcept]
+) -> tuple[mat.Built, str]:
     """Die Eingabe (deterministisch): wie `concepts.extract` mit höchstens 300 Wörtern je Folie,
     danach die Konzepte der Session."""
-    built = ce.build_input(limit_words(material, MAX_WORDS_PER_SLIDE))
+    built = mat.build_input(limit_words(material, MAX_WORDS_PER_SLIDE))
     if not concepts:
         return built, built.full
     footer = concepts_block(concepts) + "\n\n" + built.footer
-    return built, ce.compose(built.head, built.items, footer)
+    return built, mat.compose(built.head, built.items, footer)
 
 
 def input_hash(model: str, text: str, prompt_version: str = SUMMARY_WRITE_PROMPT) -> str:
@@ -192,7 +194,7 @@ class Checked:
 
 
 def _sources(
-    material: ce.Material,
+    material: mat.Material,
     session_id: str,
     indices: Sequence[int],
     times: Sequence[ExtractTimeRange],
@@ -218,28 +220,28 @@ def _sources(
         end = min(max(r.end_s * 1000, 0), end_ms)
         if (
             start < end
-            and end - start <= ce.MAX_RANGE_MS
-            and ce._overlaps(material.segments, start, end)
+            and end - start <= mat.MAX_RANGE_MS
+            and mat.overlaps(material.segments, start, end)
         ):
             ranges.append((start, end))
     refs += [
         {"kind": "transcript", "session_id": session_id, "t_start_ms": s, "t_end_ms": e}
-        for s, e in ce._merge_ranges(ranges)
+        for s, e in mat.merge_ranges(ranges)
     ]
     return refs[:MAX_SOURCES]
 
 
-def check_output(out: SummaryWriteOutput, material: ce.Material, session_id: str) -> Checked:
+def check_output(out: SummaryWriteOutput, material: mat.Material, session_id: str) -> Checked:
     checked = Checked()
     for sentence in out.sentences:
-        text = ce._shorten(sentence.text, MAX_SENTENCE)
+        text = mat.shorten(sentence.text, MAX_SENTENCE)
         sources = _sources(material, session_id, sentence.slides, sentence.times)
         if text is None or not sources or len(checked.sentences) >= MAX_SENTENCES:
             checked.dropped_sentences += 1
             continue
         checked.sentences.append({"text": text, "sources": sources})
     for item in out.outline:
-        title = ce._shorten(item.title, MAX_TITLE)
+        title = mat.shorten(item.title, MAX_TITLE)
         if title is None or len(checked.outline) >= MAX_OUTLINE:
             continue
         checked.outline.append(
@@ -284,7 +286,7 @@ def _finish(ctx: JobContext, result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fake(
-    built: ce.Built, material: ce.Material, concepts: Sequence[SessionConcept]
+    built: mat.Built, material: mat.Material, concepts: Sequence[SessionConcept]
 ) -> SummaryWriteOutput:
     slides = [
         llm_fake.FakeSlide(
@@ -321,14 +323,14 @@ def summary_write(payload: SummaryWritePayload, ctx: JobContext) -> dict[str, An
     sid = uuid.UUID(payload.session_id)
     conn = ctx.conn
     llm_mod.require_configured()
-    row = ce._session_row(conn, sid)
+    row = mat.session_row(conn, sid)
     if row is None:
         raise NonRetryableError("Session unbekannt")
     if row[1] is not None:
         with conn.transaction():
             progress.lock_session(conn, sid)
             return _finish(ctx, _result(sid, session_deleted=True))
-    material = ce._load(conn, sid, row)
+    material = mat.load(conn, sid, row)
     if not material.slides and not material.segments:
         with conn.transaction():
             if not progress.lock_session(conn, sid):

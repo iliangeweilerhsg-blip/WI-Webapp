@@ -827,6 +827,37 @@ def test_without_embedder_only_names_count(core_db: Conn, go: Any) -> None:
     assert concept_named(core_db, "Rekursion")["embedding"] is None
 
 
+def test_degraded_run_is_redone_once_the_embedder_is_ready(core_db: Conn, go: Any) -> None:
+    """§20.3 Schritt 2: Ein Vorlauf mit `embedding_model = null` gilt nicht als unverändert."""
+    embedders.set_shared_embedder(UnavailableEmbedder(provider="x", model="m", reason="Aus"))
+    try:
+        lec = lecture(core_db)
+        ex = extract_job(core_db, lec, [proposal("Rekursion"), proposal("Induktion")])
+        first = result_of(go(resolve_job(core_db, lec, ex)))
+        assert first.embedding_model is None and first.proposed_new == 2
+        assert concept_named(core_db, "Rekursion")["embedding"] is None
+        before = [i["id"] for i in items(core_db)]
+        # Solange der Embedder fehlt, bleibt der degradierte Abgleich stehen (Inbox stabil)
+        still = result_of(go(resolve_job(core_db, lec, ex)))
+        assert still.unchanged and [i["id"] for i in items(core_db)] == before
+
+        # Embedder bereit: neu abgleichen, auch wenn der neueste Lauf nur `unchanged` war
+        embedders.set_shared_embedder(AngleEmbedder())
+        redone = result_of(go(resolve_job(core_db, lec, ex)))
+        assert not redone.unchanged and redone.proposed_new == 2
+        assert redone.embedding_model == EMBED_MODEL and redone.embedding_error is None
+        assert concept_named(core_db, "Rekursion")["embedding"] is not None
+        after = [i["id"] for i in items(core_db)]
+        assert len(after) == 2 and not set(after) & set(before)
+        check_inbox(core_db)
+
+        # Danach gilt wieder „unverändert“
+        again = result_of(go(resolve_job(core_db, lec, ex)))
+        assert again.unchanged and [i["id"] for i in items(core_db)] == after
+    finally:
+        embedders.set_shared_embedder(None)
+
+
 # ---------- Automatik ----------
 
 

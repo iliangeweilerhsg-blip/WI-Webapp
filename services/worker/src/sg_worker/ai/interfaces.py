@@ -16,7 +16,6 @@ from pydantic import BaseModel
 from .pricing import Tokens
 
 Tier = Literal["fast", "standard", "deep"]
-Role = Literal["system", "user", "assistant"]
 
 
 @dataclass(frozen=True)
@@ -41,23 +40,6 @@ class Segment:
     avg_logprob: float | None = None
     no_speech_prob: float | None = None
     words: tuple[Word, ...] = ()
-
-
-@dataclass(frozen=True)
-class Msg:
-    role: Role
-    content: str
-
-
-@dataclass(frozen=True)
-class Result:
-    """Antwort eines LLM-Aufrufs. `parsed` ist gesetzt, wenn ein Schema verlangt war."""
-
-    text: str
-    model: str
-    parsed: BaseModel | None = None
-    input_tokens: int = 0
-    output_tokens: int = 0
 
 
 class Transcriber(Protocol):
