@@ -147,21 +147,44 @@ export async function calendarRoutes(app: FastifyInstance, deps: CalendarRouteDe
   await app.register(multipart, multipartOptions);
 
   // --- Zeitplan: beim Start und alle 6 h -------------------------------------------------------
+  /** So lange wartet `onClose` höchstens auf einen laufenden Abgleich */
+  const CLOSE_WAIT_MS = 2_000;
+  // Erst nach erfolgreichem `listen` (`onListen`, nicht `onReady`): Ein Core mit `EADDRINUSE` gleicht nichts ab (#170)
   if (deps.scheduler !== false) {
-    let running = false;
+    let running: Promise<void> | null = null;
+    let timer: NodeJS.Timeout | undefined;
+    let stopped = false;
     const run = () => {
-      if (running) return;
-      running = true;
-      syncAllUrlSources(db, app.log)
+      if (running || stopped) return;
+      running = syncAllUrlSources(db, app.log)
         .catch((error: unknown) => app.log.warn({ err: error }, 'Kalender-Abgleich konnte nicht starten'))
         .finally(() => {
-          running = false;
+          running = null;
         });
     };
-    app.addHook('onReady', async () => run());
-    const timer = setInterval(run, SYNC_INTERVAL_MS);
-    timer.unref();
-    app.addHook('onClose', async () => clearInterval(timer));
+    app.addHook('onListen', async () => {
+      if (timer || stopped) return;
+      timer = setInterval(run, SYNC_INTERVAL_MS);
+      timer.unref();
+      run();
+    });
+    app.addHook('onClose', async () => {
+      stopped = true;
+      clearInterval(timer);
+      // Höchstens CLOSE_WAIT_MS auf einen laufenden Abgleich warten: Ein Abruf darf 15 s dauern, `main.ts` beendet
+      // den Core nach 10 s hart. Ein abgebrochener Abgleich wird beim nächsten Start wiederholt (Review #172).
+      if (running) {
+        let wait: NodeJS.Timeout | undefined;
+        await Promise.race([
+          running,
+          new Promise<void>((resolve) => {
+            wait = setTimeout(resolve, CLOSE_WAIT_MS);
+            wait.unref();
+          }),
+        ]);
+        clearTimeout(wait);
+      }
+    });
   }
 
   // --- Quellen ----------------------------------------------------------------------------------

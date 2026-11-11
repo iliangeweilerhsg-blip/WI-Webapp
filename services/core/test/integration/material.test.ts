@@ -24,7 +24,7 @@ import { createDb } from '../../src/db/client.ts';
 import { registerErrorHandler } from '../../src/plugins/errors.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { materialRoutes, parseRange, sweepOrphanFolders } from '../../src/routes/material.ts';
-import { startTestApp, testDatabaseUrl, type TestApp } from './helpers.ts';
+import { occupyPort, startTestApp, testDatabaseUrl, type TestApp } from './helpers.ts';
 
 let t: TestApp;
 let moduleId: string;
@@ -465,6 +465,9 @@ describe('Magic-Bytes, Wiederholung nach Fehler, Aufräumen', () => {
     utimesSync(staleTmp, old, old);
     const second = await startTestApp({ dataDir });
     try {
+      // Erst nach erfolgreichem listen (onListen, #170): ready/inject allein räumt nicht auf
+      expect((await readdir(join(dataDir, 'media', '.tmp'))).sort()).toEqual(['alt.upload', 'neu.upload']);
+      await second.app.listen({ port: 0, host: '127.0.0.1' });
       const left = await eventually(
         () => readdir(join(dataDir, 'media', '.tmp')),
         (names) => !names.includes('alt.upload'),
@@ -473,6 +476,26 @@ describe('Magic-Bytes, Wiederholung nach Fehler, Aufräumen', () => {
     } finally {
       await second.close();
     }
+  });
+
+  it('Port belegt (EADDRINUSE): beim Start wird nichts gelöscht oder verschoben (#170)', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'sg-core-sweep-'));
+    const old = new Date(Date.now() - 3 * 3600 * 1000);
+    mkdirSync(join(dataDir, 'media', '.tmp'), { recursive: true });
+    const staleTmp = join(dataDir, 'media', '.tmp', 'alt.upload');
+    writeFileSync(staleTmp, 'x');
+    utimesSync(staleTmp, old, old);
+    const blocker = await occupyPort();
+    const second = await startTestApp({ dataDir });
+    try {
+      await expect(second.app.listen({ port: blocker.port, host: '127.0.0.1' })).rejects.toThrow(
+        /EADDRINUSE/,
+      );
+    } finally {
+      await second.close(); // wartet auf ein laufendes Aufräumen
+      await blocker.close();
+    }
+    expect(await readdir(join(dataDir, 'media', '.tmp'))).toEqual(['alt.upload']);
   });
 });
 

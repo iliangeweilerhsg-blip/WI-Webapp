@@ -8,7 +8,7 @@ import { Readable } from 'node:stream';
 import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
 import { pino } from 'pino';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   MoodleCourseListSchema,
   MoodleItemListSchema,
@@ -27,7 +27,7 @@ import { StaticTokenStore } from '../../src/moodle/token-store.ts';
 import { createSlideDeck, uploadTmpDir } from '../../src/services/material.ts';
 import { FakeMoodleServer, fileReply, unix } from '../unit/moodle-server.ts';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
-import { startTestApp, testDatabaseUrl, type TestApp } from './helpers.ts';
+import { occupyPort, startTestApp, testDatabaseUrl, type TestApp } from './helpers.ts';
 
 /** Erkennbar unechter Test-Token „0123…ef0123…ef“, ohne Literal gebaut (sonst schlägt gitleaks an, siehe .gitleaksignore) */
 const TOKEN = Array.from({ length: 32 }, (_, i) => (i % 16).toString(16)).join('');
@@ -1052,5 +1052,44 @@ describe('Moodle-Abgleich (T1-23)', () => {
     });
     installFixtures();
     expect(await sync.run('manuell')).toMatchObject({ files_new: 1, inbox_new: 1 });
+  });
+});
+
+describe('Abgleich beim Start des Core (F-MDL-04, #170)', () => {
+  /** Ersatz für den Abgleich: zählt nur Start und Stopp des Zeitplans */
+  function fakeSync() {
+    const stopSchedule = vi.fn();
+    const startSchedule = vi.fn(() => stopSchedule);
+    const sync = { startSchedule, stop: vi.fn(async () => {}) } as unknown as MoodleSync;
+    return { sync, startSchedule, stopSchedule };
+  }
+
+  it('startet erst nach erfolgreichem listen (onListen), einmal; close stoppt den Zeitplan', async () => {
+    const fake = fakeSync();
+    const app = await startTestApp({}, { moodleSync: fake.sync, moodleSchedule: true });
+    try {
+      await app.app.ready(); // onReady läuft vor dem Binden
+      expect(fake.startSchedule).not.toHaveBeenCalled();
+      await app.app.listen({ port: 0, host: '127.0.0.1' });
+      await vi.waitFor(() => expect(fake.startSchedule).toHaveBeenCalledTimes(1));
+    } finally {
+      await app.close();
+    }
+    expect(fake.stopSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('Port belegt (EADDRINUSE): kein Abgleich', async () => {
+    const fake = fakeSync();
+    const blocker = await occupyPort();
+    const second = await startTestApp({}, { moodleSync: fake.sync, moodleSchedule: true });
+    try {
+      await expect(second.app.listen({ port: blocker.port, host: '127.0.0.1' })).rejects.toThrow(
+        /EADDRINUSE/,
+      );
+    } finally {
+      await second.close();
+      await blocker.close();
+    }
+    expect(fake.startSchedule).not.toHaveBeenCalled();
   });
 });

@@ -432,15 +432,32 @@ export async function materialRoutes(app: FastifyInstance, deps: MaterialRouteDe
     limits: { fileSize: maxBytes, files: 5, fields: 20, fieldSize: 4096, parts: 30 },
   };
   await app.register(multipart, multipartOptions);
+  // Aufräumen beim Start und danach regelmäßig. Erst nach erfolgreichem `listen` (`onListen`): Ein zweiter Core,
+  // der mit `EADDRINUSE` scheitert, verschiebt keine Ordner und löscht keine Uploads (#170)
+  let sweeping: Promise<void> | null = null;
+  let timer: NodeJS.Timeout | undefined;
+  let stopped = false;
   const sweep = () => {
-    removeStaleTmp(dataDir)
+    if (sweeping || stopped) return;
+    sweeping = removeStaleTmp(dataDir)
       .then(() => sweepOrphanFolders(db, dataDir, app.log))
-      .catch((error: unknown) => app.log.warn({ err: error }, 'Aufräumen der Uploads fehlgeschlagen'));
+      .then(() => {})
+      .catch((error: unknown) => app.log.warn({ err: error }, 'Aufräumen der Uploads fehlgeschlagen'))
+      .finally(() => {
+        sweeping = null;
+      });
   };
-  sweep();
-  const timer = setInterval(sweep, CLEANUP_INTERVAL_MS);
-  timer.unref();
-  app.addHook('onClose', async () => clearInterval(timer));
+  app.addHook('onListen', async () => {
+    if (timer || stopped) return;
+    timer = setInterval(sweep, CLEANUP_INTERVAL_MS);
+    timer.unref();
+    sweep();
+  });
+  app.addHook('onClose', async () => {
+    stopped = true;
+    clearInterval(timer);
+    await sweeping;
+  });
 
   const parseUpload = createUploadParser(dataDir, maxBytes);
   const uploadHooks = {
