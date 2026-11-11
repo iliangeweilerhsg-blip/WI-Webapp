@@ -16,7 +16,7 @@ import { moduleColorVar, useModules } from '../../lib/modules.ts';
 import { moduleHref } from '../../lib/nav.ts';
 import { isEditableTarget } from '../../lib/shortcuts.ts';
 import { JUMP_EVENT, parseJumpMs } from '../../lib/search.ts';
-import { sessionHref } from '../../lib/sessions.ts';
+import { sessionHref, useActiveSession } from '../../lib/sessions.ts';
 import {
   NO_SLIDE,
   activeLineIndex,
@@ -217,6 +217,7 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
   const summary = useSessionSummary(session.id, session.processing, true);
   const concepts = useSessionConcepts(session.id, session.processing, true);
   const ai = useAiStatus();
+  const active = useActiveSession();
 
   const firstStart = lines[0]?.start_ms ?? timelineBounds(transcript.recordings)?.start ?? 0;
   const player = usePlayer(transcript.recordings, firstStart);
@@ -360,6 +361,7 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
           error={reprocess.error}
           onRetry={(step) => void reprocess.run(step)}
           ai={ai.data}
+          lectureRunning={active.data != null && active.data.id !== session.id}
         />
       ) : null}
       {state === 'offen' && conceptsPending ? (

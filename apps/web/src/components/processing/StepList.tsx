@@ -36,6 +36,11 @@ export interface StepListProps {
   onRetry?: (fromStep: PipelineStep) => void;
   /** Stand der KI (`GET /ai/status`); ohne Angabe gelten die bisherigen Texte */
   ai?: AiStatus | null | undefined;
+  /**
+   * Eine andere Session läuft oder ist pausiert (UX-05). Der Core hält dann schwere Jobs zurück (VERTRAEGE §3), nennt
+   * aber nicht, welche. Darum steht nur ein allgemeiner Hinweis, wenn ein Schritt wartet, ohne die Liste zu kopieren.
+   */
+  lectureRunning?: boolean;
 }
 
 /** Ruhiger Grund, warum ein Konzept-Schritt nicht fertig ist; `null` = „nicht fertig“ */
@@ -46,10 +51,23 @@ export function aiReason(step: PipelineStep, ai: AiStatus | null | undefined): s
   return null;
 }
 
+/**
+ * Schritte, die der Worker auch während einer laufenden Session abholt (Erlaubnisliste `LIGHT_JOB_TYPES` in
+ * `services/worker/src/sg_worker/jobs.py`, VERTRAEGE §3). Alle anderen gelten als gehalten, auch ein neuer Schritt.
+ */
+const LIGHT_STEPS: ReadonlySet<PipelineStep> = new Set<PipelineStep>(['audio.finalize', 'align.log']);
+
 const button =
   'inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 py-2 text-md hover:bg-surface-raised aria-disabled:opacity-60';
 
-export function StepList({ processing, busy = false, error = null, onRetry, ai }: StepListProps) {
+export function StepList({
+  processing,
+  busy = false,
+  error = null,
+  onRetry,
+  ai,
+  lectureRunning = false,
+}: StepListProps) {
   const rows = stepRows(processing);
   if (rows.length === 0) return null;
   const retry = retryStep(processing);
@@ -95,6 +113,11 @@ export function StepList({ processing, busy = false, error = null, onRetry, ai }
           </li>
         ))}
       </ul>
+      {lectureRunning && rows.some((row) => row.state === 'wartet' && !LIGHT_STEPS.has(row.step)) ? (
+        <p className="mt-2 text-sm text-text-muted" data-testid="step-hold">
+          Manche Schritte warten, bis die Vorlesung vorbei ist.
+        </p>
+      ) : null}
       {retry && onRetry ? (
         <div className="mt-3 flex flex-wrap gap-2">
           <button
