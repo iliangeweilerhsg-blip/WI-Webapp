@@ -167,6 +167,7 @@ const grid = () => screen.getByTestId('dashboard-grid');
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
+  window.sessionStorage.clear();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -245,6 +246,9 @@ describe('Dashboard: Steuerung über die Statusleiste', () => {
     expect(posts(/\/resume$/)).toHaveLength(1);
 
     await user.click(within(bar()).getByRole('button', { name: 'Beenden' }));
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Session beenden' }),
+    );
     await within(bar()).findByText('Beendet');
     expect(posts(/\/stop$/)).toHaveLength(1);
     expect(within(bar()).getByTestId('elapsed')).toHaveTextContent('00:42:13');
@@ -1051,5 +1055,113 @@ describe('Dashboard: Nachschärfungen aus dem Review (PR #126)', () => {
     outside.remove();
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(posts(/\/stop$/)).toHaveLength(0);
+  });
+});
+
+describe('Dashboard: Rückfrage beim Beenden (UX-06)', () => {
+  it('„Beenden“ fragt nach, beendet erst nach „Session beenden“', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    await user.click(within(b).getByRole('button', { name: 'Beenden' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText('Session beenden?')).toBeVisible();
+    expect(posts(/\/stop$/)).toHaveLength(0);
+
+    await user.click(within(dialog).getByRole('button', { name: 'Session beenden' }));
+    await within(b).findByText('Beendet');
+    expect(posts(/\/stop$/)).toHaveLength(1);
+  });
+
+  it('„Weiter aufnehmen“ schließt die Frage, der Fokus kehrt auf „Beenden“ zurück', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    const stop = within(b).getByRole('button', { name: 'Beenden' });
+    await user.click(stop);
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Weiter aufnehmen' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(stop).toHaveFocus();
+    expect(posts(/\/stop$/)).toHaveLength(0);
+    expect(within(b).getByText('REC')).toBeVisible();
+  });
+});
+
+describe('Dashboard: Dauer der Pause (UX-07)', () => {
+  /** Intervalle laufen auf der Fake-Uhr, sonst sähe der Test die Sekundentakte nie */
+  function bootFakeClock(opts: Parameters<typeof boot>[0] = {}) {
+    vi.useRealTimers();
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    return boot(opts);
+  }
+  const advance = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+
+  it('zeigt die Dauer ab dem Wechsel; ab 20 Minuten kommt „Noch Pause?“; Fortsetzen räumt auf', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    bootFakeClock();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    await user.click(within(b).getByRole('button', { name: 'Pause' }));
+    await within(b).findByText('Pausiert');
+    expect(within(b).queryByTestId('elapsed')).toBeNull();
+
+    await advance(12 * 60_000 + 40_000);
+    expect(within(b).getByTestId('pause-elapsed')).toHaveTextContent('00:12:40');
+    expect(within(b).getByTestId('pause-elapsed')).toHaveTextContent('Pausendauer');
+    expect(within(b).queryByText('Noch Pause?')).toBeNull();
+
+    await advance(7 * 60_000 + 19_000);
+    expect(within(b).getByTestId('pause-elapsed')).toHaveTextContent('00:19:59');
+    expect(within(b).queryByText('Noch Pause?')).toBeNull();
+    expect(within(b).queryByText(/seit über 20 Minuten/)).toBeNull();
+
+    await advance(1000);
+    expect(within(b).getByText('Noch Pause?')).toBeVisible();
+    expect(within(b).getByText('Die Session ist seit über 20 Minuten pausiert.')).toBeInTheDocument();
+
+    await user.click(within(b).getByRole('button', { name: 'Fortsetzen' }));
+    await within(b).findByText('REC');
+    expect(within(b).queryByTestId('pause-elapsed')).toBeNull();
+    expect(within(b).queryByText('Noch Pause?')).toBeNull();
+    expect(window.sessionStorage.getItem(`sg.session.pausedSince.${SESSION_ID}`)).toBeNull();
+  });
+
+  it('war die Session beim Laden schon pausiert, zählt die Dauer ab `updated_at`', async () => {
+    bootFakeClock({ session: running({ state: 'pausiert', updated_at: '2026-11-04T08:37:13Z' }) });
+    const b = await screenBar();
+    expect(await within(b).findByTestId('pause-elapsed')).toHaveTextContent('00:05:00');
+  });
+
+  it('ein gemerkter Beginn aus `sessionStorage` hat Vorrang (Neuladen der Seite)', async () => {
+    window.sessionStorage.setItem(`sg.session.pausedSince.${SESSION_ID}`, String(Date.parse(NOW) - 90_000));
+    bootFakeClock({ session: running({ state: 'pausiert', updated_at: '2026-11-04T08:37:13Z' }) });
+    const b = await screenBar();
+    expect(await within(b).findByTestId('pause-elapsed')).toHaveTextContent('00:01:30');
+  });
+});
+
+describe('Dashboard: Link zum Rückblick (UX-09)', () => {
+  it.each(['beendet', 'verarbeitet'] as const)(
+    'bei „%s“ führt der erste Link zum Rückblick',
+    async (state) => {
+      boot({ session: running({ state, ended_at: '2026-11-04T08:30:00Z' }) });
+      const b = await screenBar();
+      const link = await within(b).findByRole('link', { name: 'Rückblick' });
+      expect(link).toHaveAttribute('href', `/rueckblick?id=${SESSION_ID}`);
+      expect(within(b).getAllByRole('link')[0]).toBe(link);
+    },
+  );
+
+  it.each(['laeuft', 'geplant'] as const)('bei „%s“ gibt es keinen Rückblick-Link', async (state) => {
+    boot({ session: running({ state, started_at: state === 'geplant' ? null : STARTED }) });
+    const b = await screenBar();
+    await within(b).findByText(state === 'laeuft' ? 'REC' : 'Nicht gestartet');
+    expect(within(b).queryByRole('link', { name: 'Rückblick' })).toBeNull();
   });
 });

@@ -18,6 +18,7 @@ import {
   AudioRecorder,
   LeaderRecording,
   createWebLocksRecordingLock,
+  hasMicIntent,
   isLeaderState,
   notifyUploadsPending,
   useConnectionState,
@@ -136,7 +137,7 @@ export function useSessionRecording(session: Session, client: SyncClient | null)
   const connection = useConnectionState(client);
   const leader = isLeaderState(connection);
   const permission = usePermission(env.permission);
-  const [userStarted, setUserStarted] = useState(false);
+  const [userStarted, setUserStarted] = useState(() => hasMicIntent(session.id));
   const [parts, setParts] = useState<{ recorder: AudioRecorder; control: LeaderRecording } | null>(null);
 
   const sessionId = session.id;
@@ -183,6 +184,19 @@ export function useSessionRecording(session: Session, client: SyncClient | null)
   useEffect(() => {
     control?.set({ leader, phase, allowed });
   }, [control, leader, phase, allowed]);
+
+  // Seite schließen oder neu laden, solange aufgenommen wird: der Browser fragt nach (UX-02). Wie weit er das zeigt,
+  // entscheidet er selbst; der Handler ist nur die Bitte darum.
+  const live = status.state === 'recording' || status.state === 'starting' || status.state === 'paused';
+  useEffect(() => {
+    if (!live) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [live]);
 
   // Nur der Leader lädt hoch. Wer die Rolle verliert, meldet nach dem Stopp, dass Chunks bereitliegen.
   const wasLeader = useRef(false);

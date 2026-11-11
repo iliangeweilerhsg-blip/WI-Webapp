@@ -236,6 +236,7 @@ function SessionScreen() {
         offline={data.hint}
         otherTab={data.otherTab}
         actions={actions}
+        onStopRequest={() => setConfirmStop(true)}
       />
     </section>
   );

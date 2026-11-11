@@ -1,17 +1,18 @@
 'use client';
 
 // Statusleiste des Live-Dashboards (F-DSH-06, 07 §3.3), von links nach rechts:
-// Aufnahme (● REC und Laufzeit, oder der Mikrofonzustand: Pausiert, Mikrofon fehlt, Aufnahme in anderem Tab), Marker (T1-17), iPad-Status, Live-Verbindung, Stopp-Hinweis, Pause und Beenden.
+// Aufnahme (● REC und Laufzeit, oder der Zustand: Keine Aufnahme, Pausiert mit Dauer, Mikrofon fehlt, Aufnahme in anderem Tab), Upload-Status, Marker (T1-17), iPad-Status, Live-Verbindung, Stopp-Hinweis, Pause und Beenden.
 // Keine Farbe außer dem roten Aufnahmepunkt, kein Text länger als drei Wörter, keine Animationen.
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@sg/shared';
 import { useAutoStop } from '../../lib/autostop';
 import { DEVICES_KEY, useDevices } from '../../lib/devices.ts';
 import { moduleHref } from '../../lib/nav.ts';
 import { isActive } from '../../lib/sessions.ts';
 import { useSettings } from '../../lib/settings.ts';
+import { rueckblickHref } from '../../lib/transcript.ts';
 import type { SyncClient } from '../../lib/sync/client.ts';
 import { AutoStopHint } from '../autostop';
 import { formatElapsed } from '../today/model.ts';
@@ -19,7 +20,7 @@ import { POLL_MS, useLiveState, useNow } from '../today/use-today.ts';
 import { MarkerControls } from './markers/MarkerControls.tsx';
 import { watchReconnect } from './reconnect.ts';
 import { useSessionRecording, type RecordingKind } from './use-recording.ts';
-import type { SessionActions } from './use-session.ts';
+import { usePausedSince, type SessionActions } from './use-session.ts';
 
 const secondary =
   'inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong px-4 py-2 text-md hover:bg-surface-raised aria-disabled:opacity-50';
@@ -59,7 +60,7 @@ const RUNNING_LABEL: Record<RecordingKind, string> = {
   starting: 'Startet',
   waiting: 'Wartet auf anderen Tab',
   paused: 'Pausiert',
-  'needs-start': 'Mikrofon aus',
+  'needs-start': 'Keine Aufnahme',
   'mic-denied': 'Zugriff verweigert',
   'mic-missing': 'Mikrofon fehlt',
   error: 'Aufnahme gestört',
@@ -78,6 +79,13 @@ function Dot({ filled, record = false }: { filled: boolean; record?: boolean }) 
   );
 }
 
+/** Ab dieser Pausendauer fragt die Leiste „Noch Pause?“ (UX-07) */
+export const PAUSE_HINT_MS = 20 * 60_000;
+/** So lange steht „Aufnahme neu begonnen“ nach einem Neustart des Recorders (UX-08) */
+const RESTART_NOTICE_MS = 30_000;
+/** Ab so vielen wartenden Teilen meldet die Leiste den Rückstau (UX-08) */
+const BACKLOG_MIN = 3;
+
 export interface StatusBarProps {
   session: Session;
   client: SyncClient | null;
@@ -87,9 +95,19 @@ export interface StatusBarProps {
   /** Dieser Tab folgt einem anderen (Leader): kein eigener Live-Strom */
   otherTab?: boolean;
   actions: SessionActions;
+  /** „Beenden“ wurde gedrückt: die Ansicht fragt nach (UX-06), die Leiste beendet nicht selbst */
+  onStopRequest: () => void;
 }
 
-export function StatusBar({ session, client, moduleId, offline, otherTab = false, actions }: StatusBarProps) {
+export function StatusBar({
+  session,
+  client,
+  moduleId,
+  offline,
+  otherTab = false,
+  actions,
+  onStopRequest,
+}: StatusBarProps) {
   const now = useNow(1000);
   const ipad = useIpadConnected(client);
   const settings = useSettings();
@@ -110,6 +128,41 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
   const rec = useSessionRecording(session, client);
   const needsMic = running && rec.kind !== 'rec';
 
+  // Pausendauer (UX-07): der Core kennt keinen Beginn der Pause, die Ansicht merkt ihn sich
+  const pausedSince = usePausedSince(session);
+  const pauseMs = paused && pausedSince !== null && now !== null ? Math.max(0, now - pausedSince) : null;
+  const pauseHint = pauseMs !== null && pauseMs >= PAUSE_HINT_MS;
+
+  // Upload-Status (UX-08): nur der Leader lädt hoch. Neustart und „in dieser Ansicht aufgenommen“ merkt sich die Leiste.
+  const { restarts, upload } = rec.status;
+  const recordingState = rec.status.state;
+  const recordedHere = useRef(false);
+  if (recordingState === 'recording' || recordingState === 'starting') recordedHere.current = true;
+  const seenRestarts = useRef(restarts);
+  const [restartedAt, setRestartedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (restarts > seenRestarts.current) setRestartedAt(Date.now());
+    seenRestarts.current = restarts;
+  }, [restarts]);
+  const leader = !otherTab;
+  let uploadText: string | null = null;
+  if (leader && running) {
+    const parts: string[] = [];
+    if (upload.pendingChunks >= BACKLOG_MIN) parts.push(`${upload.pendingChunks} Teile warten`);
+    if (restartedAt !== null && now !== null && now - restartedAt < RESTART_NOTICE_MS)
+      parts.push('Aufnahme neu begonnen');
+    uploadText = parts.length > 0 ? parts.join(' · ') : null;
+  } else if (leader && !active && recordedHere.current) {
+    // Der Recorder stoppt erst nach dem Ende der Session: bis dahin und währenddessen ist noch nichts gesichert
+    const saving =
+      upload.pendingChunks > 0 ||
+      (upload.pendingCompletes ?? 0) > 0 ||
+      recordingState === 'stopping' ||
+      recordingState === 'recording' ||
+      recordingState === 'starting';
+    uploadText = saving ? 'Wird gesichert …' : 'Gesichert';
+  }
+
   let record: { label: string; time: string | null; dot: 'rec' | 'hollow' | 'filled' };
   if (running && rec.kind === 'rec') {
     record = {
@@ -120,7 +173,7 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
   } else if (running) {
     record = { label: RUNNING_LABEL[rec.kind], time: null, dot: 'hollow' };
   } else if (paused) {
-    // Die Pause kennt der Core nicht als Zeitraum, darum zeigt sie keine Dauer (wie die Start-Karte)
+    // Die Dauer der Pause steht separat (`pause-elapsed`), `elapsed` bleibt der Laufzeit vorbehalten
     record = { label: 'Pausiert', time: null, dot: 'hollow' };
   } else if (session.state === 'beendet' || session.state === 'verarbeitet') {
     record = {
@@ -144,13 +197,20 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-3 py-2 text-sm">
         <p className="flex items-center gap-2">
           <Dot filled={record.dot === 'filled'} record={record.dot === 'rec'} />
-          <span className="font-medium">{record.label}</span>
+          <span className={needsMic ? 'font-semibold' : 'font-medium'}>{record.label}</span>
           {record.time ? (
             <span className="tabular-nums" data-testid="elapsed">
               <span className="sr-only">Laufzeit </span>
               {record.time}
             </span>
           ) : null}
+          {pauseMs !== null ? (
+            <span className="tabular-nums" data-testid="pause-elapsed">
+              <span className="sr-only">Pausendauer </span>
+              {formatElapsed(pauseMs)}
+            </span>
+          ) : null}
+          {pauseHint ? <span className="font-medium">Noch Pause?</span> : null}
           {/* Zustand für Screenreader als ruhige Statusmeldung */}
           <span role="status" className="sr-only">
             {running
@@ -158,7 +218,9 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
                 ? 'Die Session läuft und wird aufgenommen.'
                 : `Die Session läuft. ${rec.message ?? ''}`.trim()
               : paused
-                ? 'Die Session ist pausiert.'
+                ? pauseHint
+                  ? 'Die Session ist seit über 20 Minuten pausiert.'
+                  : 'Die Session ist pausiert.'
                 : record.label === 'Beendet'
                   ? 'Die Session ist beendet.'
                   : 'Die Session läuft nicht.'}
@@ -170,12 +232,22 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
           rec.kind === 'mic-denied' ||
           rec.kind === 'mic-missing' ||
           rec.kind === 'error') ? (
-          <button type="button" className={secondary} onClick={rec.start}>
+          <button
+            type="button"
+            className={rec.kind === 'needs-start' ? primary : secondary}
+            onClick={rec.start}
+          >
             {rec.kind === 'needs-start' ? 'Aufnahme starten' : 'Erneut versuchen'}
           </button>
         ) : null}
 
         <MarkerControls sessionId={session.id} active={active} startedAt={startedAt} client={client} />
+
+        {uploadText ? (
+          <p className="text-text-muted" data-testid="upload-status" aria-live="polite">
+            {uploadText}
+          </p>
+        ) : null}
 
         <p className="flex items-center gap-2 text-text-muted" data-testid="ipad-status">
           <Dot filled={ipad} />
@@ -226,13 +298,18 @@ export function StatusBar({ session, client, moduleId, offline, otherTab = false
                 type="button"
                 className={`${ghost} ml-2 sm:ml-6`}
                 aria-disabled={busy}
-                onClick={() => !busy && void actions.run('stop')}
+                onClick={() => !busy && onStopRequest()}
               >
                 {actions.busy === 'stop' ? 'Wird beendet …' : 'Beenden'}
               </button>
             </>
           ) : (
             <>
+              {session.state === 'beendet' || session.state === 'verarbeitet' ? (
+                <Link href={rueckblickHref(session.id)} className={primary}>
+                  Rückblick
+                </Link>
+              ) : null}
               <Link href="/" className={secondary}>
                 Zu Heute
               </Link>

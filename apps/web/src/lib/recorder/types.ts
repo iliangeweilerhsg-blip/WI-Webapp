@@ -83,6 +83,8 @@ export type WakeLockState = 'unsupported' | 'inactive' | 'active' | 'released';
 export interface UploaderStatus {
   /** Chunks, die noch auf den Core warten (alle Aufnahmen) */
   pendingChunks: number;
+  /** Intern: abgeschlossene Aufnahmen, deren `POST …/complete` noch aussteht (zählt nicht in `pendingChunks`) */
+  pendingCompletes?: number;
   /** Chunks in der Fehlerablage */
   shelvedChunks: number;
   /** Letzter Versuch scheiterte an Netz oder Core (5xx) */

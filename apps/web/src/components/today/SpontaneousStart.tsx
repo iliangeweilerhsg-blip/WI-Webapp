@@ -20,6 +20,7 @@ import {
   sessionHref,
   useActiveSession,
 } from '../../lib/sessions.ts';
+import { noteMicIntent } from '../../lib/recorder/mic-intent.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { uuidv7 } from '../../lib/uuid.ts';
 
@@ -62,6 +63,7 @@ function useSpontaneousStart(onSession?: (session: Session) => void) {
     const id = pending.current?.moduleId === moduleId ? pending.current.id : uuidv7();
     pending.current = { moduleId, id };
     try {
+      noteMicIntent(id);
       const result = await createAndStartSession(moduleId, id);
       pending.current = null;
       rememberLastModuleId(moduleId);

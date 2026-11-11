@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@sg/shared';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import { moduleHref } from '../../lib/nav.ts';
+import { noteMicIntent } from '../../lib/recorder/mic-intent.ts';
 import {
   isDashboardAvailable,
   pauseSession,
@@ -125,6 +126,7 @@ export function StartCard({ entry, now, previousRunning = false, onSession, onRe
     setError(null);
     try {
       if (action === 'start') {
+        noteMicIntent(session.id);
         const result = await startSession(session.id);
         onSession(result.session);
         if (result.ended_session) {

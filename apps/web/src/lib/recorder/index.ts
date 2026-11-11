@@ -3,6 +3,7 @@ export * from './leader-recording.ts';
 export * from './leader-state.ts';
 export * from './useResumePendingUploads.ts';
 export * from './level.ts';
+export * from './mic-intent.ts';
 export * from './recorder.ts';
 export * from './store.ts';
 export * from './types.ts';
