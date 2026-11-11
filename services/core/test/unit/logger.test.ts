@@ -251,6 +251,45 @@ describe('Request-Log schwärzt geheime Query-Parameter (Issue #91)', () => {
   });
 });
 
+describe('Suchtexte im Request-Log werden geschwärzt (#167)', () => {
+  const SEARCH = 'vertrauliche Prüfungsfrage';
+
+  it('redactUrl: q, query und search (mit Klammer-Anhang), ähnliche Namen bleiben lesbar', () => {
+    expect(redactUrl('/api/v1/search?q=abc&module_id=m1&limit=5')).toBe(
+      '/api/v1/search?q=[Redacted]&module_id=m1&limit=5',
+    );
+    for (const name of ['q', 'Q', 'query', 'search', 'search_query', 'q[]', 'q%5B0%5D', 'q%5b%5d']) {
+      expect(redactUrl(`/x?a=1&${name}=v`)).toBe(`/x?a=1&${name}=[Redacted]`);
+    }
+    for (const name of ['sequence', 'quality', 'qq', 'research', 'search_after', 'seq']) {
+      expect(redactUrl(`/x?${name}=v`)).toBe(`/x?${name}=v`);
+    }
+  });
+
+  it('im echten Log-Strom: kein Suchtext, Pfad und Statuscode bleiben', async () => {
+    const lines: string[] = [];
+    const app = Fastify({
+      loggerInstance: pino(loggerOptions({ logLevel: 'info' }), { write: (c: string) => void lines.push(c) }),
+    });
+    app.get('/api/v1/search', async () => ({ items: [] }));
+    const encoded = encodeURIComponent(SEARCH);
+    const ok = await app.inject({ method: 'GET', url: `/api/v1/search?q=${encoded}&limit=5` });
+    expect(ok.statusCode).toBe(200);
+    // Auch der Not-Found-Weg („Route GET:/…?q=… not found“) und Klammer- bzw. Großschreibung
+    await app.inject({ method: 'GET', url: `/api/v1/suche?q=${encoded}` });
+    await app.inject({ method: 'GET', url: `/api/v1/search?q[]=${encoded}&Q=${encoded}` });
+    await app.close();
+    const log = lines.join('');
+    expect(log).toContain('incoming request');
+    expect(log).not.toContain(encoded);
+    expect(log).not.toContain(SEARCH);
+    expect(log).not.toContain('Pr%C3%BCfungsfrage');
+    expect(log).toContain('"url":"/api/v1/search?q=[Redacted]&limit=5"');
+    expect(log).toContain('"statusCode":200');
+    expect(log).toContain('"statusCode":404');
+  });
+});
+
 describe('Log-Schwärzung Moodle-Token (08 §9.1)', () => {
   it('schwärzt wstoken und token, auch eine Ebene tiefer', () => {
     const dir = mkdtempSync(join(tmpdir(), 'sg-log-'));

@@ -103,7 +103,17 @@ export function initialLogDay(logDir: string, now: Date = new Date()): string {
 const SECRET_PARAM =
   /(^|[_-])(pairing_id|token|wstoken|access_token|secret|password|passwd|nonce|code|api_key|apikey|access_key|private_key|auth)($|[_-])/i;
 
-/** Ein Paar `name=wert` der Query: geheimer Name → Wert `[Redacted]`. Der Name wird vor dem Vergleich dekodiert */
+/**
+ * Query-Parameter mit Nutzerinhalt (#167): Suchtexte (`GET /search?q=…`, VERTRAEGE §19.6) sollen nicht 14 Tage im
+ * `core.log` stehen. Gilt für alle Routen. Nur der genaue Name (Groß-/Kleinschreibung egal), auch mit
+ * Klammer-Anhang (`q[]`, `q[0]`), damit Namen wie `sequence` oder `quality` lesbar bleiben. Pfad und Status bleiben.
+ */
+const CONTENT_PARAM = /^(q|query|search|search_query)(\[[^\]]*\])*$/i;
+
+/**
+ * Ein Paar `name=wert` der Query: geheimer Name oder Nutzerinhalt → Wert `[Redacted]`. Der Name wird vor dem
+ * Vergleich dekodiert
+ */
 function redactQueryPair(pair: string): string {
   const eq = pair.indexOf('=');
   if (eq <= 0) return pair;
@@ -116,7 +126,8 @@ function redactQueryPair(pair: string): string {
   }
   // `/p#?pairing_id=…`: Fastify liest den Schlüssel `?pairing_id`. Kein Geheimnis für den Core, aber
   // vermutlich eines für den Absender, darum führende `?`/`#` beim Vergleich ignorieren (lieber zu viel schwärzen)
-  return SECRET_PARAM.test(name.replace(/^[?#]+/, '')) ? `${rawName}=[Redacted]` : pair;
+  const bare = name.replace(/^[?#]+/, '');
+  return SECRET_PARAM.test(bare) || CONTENT_PARAM.test(bare) ? `${rawName}=[Redacted]` : pair;
 }
 
 /**

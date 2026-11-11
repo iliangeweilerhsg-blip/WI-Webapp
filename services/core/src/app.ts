@@ -10,11 +10,12 @@ import type { Db } from './db/client.ts';
 import { apiErrorBody, HttpError } from './errors.ts';
 import { registerErrorHandler } from './plugins/errors.ts';
 import { registerIdempotency } from './plugins/idempotency.ts';
-import { createRejectionLog, RequestLogController } from './plugins/rejection-log.ts';
+import { createRejectionLog, RequestLogController, sourceKey } from './plugins/rejection-log.ts';
 import {
   closeRejectedUpgrade,
   createSecurityGuard,
   isLocalRequest,
+  isLoopbackAddress,
   registerSecurity,
   type DeviceTokenVerifier,
 } from './plugins/security.ts';
@@ -74,6 +75,65 @@ function readVersion(): string {
 }
 
 /**
+ * Grenzen für HTTP-Verbindungen (#84 M-1). Ohne sie kann ein Gerät im WLAN ohne Token beliebig viele leere oder
+ * Keep-Alive-Verbindungen offen halten, bis der Core keine Dateien mehr öffnen kann (`EMFILE`).
+ * - `connectionTimeoutMs`: Ein Socket ohne jeden Verkehr in beide Richtungen wird geschlossen (`server.setTimeout`).
+ *   Aktive Uploads und Downloads setzen die Uhr mit jedem Paket zurück. Großzügig, weil Handler wie der
+ *   Moodle-Datei-Proxy bis zu 30 s auf Moodle warten dürfen, ohne dass Bytes fließen. Für den WebSocket `/sync`
+ *   gilt die Grenze nicht: Node nimmt sie beim Upgrade vom Socket, der Sync-Server hat eigene (VERTRAEGE §11.4).
+ * - `keepAliveTimeoutMs`: Leerlauf zwischen zwei Anfragen auf derselben Verbindung (Fastify-Standard: 72 s).
+ * - `requestTimeoutMs`: Längste Zeit, um eine ganze Anfrage samt Body zu empfangen (gegen Tröpfeln). Ein Upload bis
+ *   200 MB (`MAX_UPLOAD_BYTES`) braucht so nur etwa 1 Mbit/s.
+ * - `maxPerSource` und `maxNetwork`: offene Verbindungen je Quelle (IPv6 je /64) bzw. aus dem Netz insgesamt.
+ *   Überzählige werden sofort geschlossen. Loopback ist ausgenommen, damit die Web-App auf dem Mac immer geht.
+ * Tests dürfen das Objekt vor `buildApp` ändern (kürzere Zeiten).
+ */
+export const connectionLimits = {
+  connectionTimeoutMs: 120_000,
+  keepAliveTimeoutMs: 10_000,
+  requestTimeoutMs: 30 * 60_000,
+  maxPerSource: 32,
+  maxNetwork: 256,
+};
+
+/** Zählt offene Verbindungen aus dem Netz und schließt die über `maxPerSource`/`maxNetwork`. Loopback zählt nie */
+function limitNetworkConnections(
+  app: FastifyInstance,
+  logger: Logger,
+  limits: typeof connectionLimits,
+): void {
+  const perSource = new Map<string, number>();
+  let network = 0;
+  let dropped = 0;
+  let lastWarn = 0;
+  app.server.on('connection', (socket) => {
+    if (isLoopbackAddress(socket.remoteAddress)) return;
+    const key = sourceKey(socket.remoteAddress);
+    const count = perSource.get(key) ?? 0;
+    if (count >= limits.maxPerSource || network >= limits.maxNetwork) {
+      socket.destroy();
+      dropped++;
+      // Keine Zeile je Verbindung (#87): höchstens eine je Minute
+      const now = Date.now();
+      if (now - lastWarn >= 60_000) {
+        logger.warn({ source: key, dropped }, 'Verbindungen aus dem Netz über der Grenze geschlossen');
+        lastWarn = now;
+        dropped = 0;
+      }
+      return;
+    }
+    perSource.set(key, count + 1);
+    network++;
+    socket.once('close', () => {
+      network--;
+      const left = (perSource.get(key) ?? 1) - 1;
+      if (left > 0) perSource.set(key, left);
+      else perSource.delete(key);
+    });
+  });
+}
+
+/**
  * Baut die Fastify-Anwendung. Neue Fachbereiche (T0-07 …): Routen in `src/routes/<bereich>.ts`,
  * Schema in `src/db/schema/<bereich>.ts`, Logik in `src/services/<bereich>.ts`, hier registrieren.
  */
@@ -114,6 +174,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     loggerInstance: logger as FastifyBaseLogger,
     // Lokal oder Netz entscheidet allein die Socket-Adresse (VERTRAEGE §5): kein trustProxy
     trustProxy: false,
+    // Verbindungs-Timeouts gegen offen gehaltene Sockets (#84 M-1), Begründung bei `connectionLimits`
+    connectionTimeout: connectionLimits.connectionTimeoutMs,
+    keepAliveTimeout: connectionLimits.keepAliveTimeoutMs,
+    requestTimeout: connectionLimits.requestTimeoutMs,
     // Abgelehnte Netzanfragen werden zusammengefasst statt einzeln geloggt (#87)
     logController: new RequestLogController(),
     // Fehler, die Fastify vor den Hooks abfängt (kaputte URL, ungültiger Content-Type …):
@@ -145,6 +209,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
 
   const rejections = createRejectionLog(app);
+  limitNetworkConnections(app, logger, connectionLimits);
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
