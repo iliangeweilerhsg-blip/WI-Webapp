@@ -600,6 +600,31 @@ def test_invalid_vectors_give_500(tmp_path: Path) -> None:
         s.stop()
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), 1e200])
+def test_non_finite_vectors_give_503_and_never_null(tmp_path: Path, bad: float) -> None:
+    """NaN und inf würden im JSON zu `null`. 1e200 ist endlich, die Norm aber nicht."""
+
+    class Broken(em.FakeEmbedder):
+        def embed(self, texts: list[str]) -> list[list[float]]:
+            vectors = super().embed(texts)
+            vectors[-1][7] = bad
+            return vectors
+
+    s = start(tmp_path, Broken())
+    try:
+        status, _, data = request(s, "POST", "/embed", {"texts": ["Laufzeit", "Rekursion"]})
+        assert (status, data) == (503, {"code": "embedder_invalid_output"})
+        assert request(s, "GET", "/health")[0] == 200  # Server lebt weiter
+    finally:
+        s.stop()
+
+
+def test_zero_vector_is_still_answered(server: srv.LoopbackServer) -> None:
+    # Fake ohne Wörter ≥ 2 Zeichen: Nullvektor (§19.2), gültig und endlich
+    status, _, data = request(server, "POST", "/embed", {"texts": ["x"]})
+    assert status == 200 and not any(data["vectors"][0])
+
+
 def test_invalid_health_gives_500(tmp_path: Path) -> None:
     broken = em.FakeEmbedder(provider="")  # verletzt WorkerHealth (minLength 1)
     s = start(tmp_path, broken)

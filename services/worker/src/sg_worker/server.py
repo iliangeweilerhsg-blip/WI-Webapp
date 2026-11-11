@@ -11,7 +11,8 @@ Core holt hier den Vektor einer Suchanfrage, berechnet mit **demselben** Modell 
   braucht `Authorization: Bearer <token>` (`hmac.compare_digest`), sonst `401`. Das Token steht
   nie in Logs oder Antworten.
 - `GET /health` → `WorkerHealth` (mit `llm`, §20.5). `POST /embed` mit `EmbedRequest` →
-  `EmbedResponse`.
+  `EmbedResponse`. Enthält ein Vektor NaN oder ±inf (oder ist seine Norm nicht endlich), kommt
+  `503` mit `embedder_invalid_output`, nie `null` in der Antwort.
 - **Grenzen:** `Host` muss `127.0.0.1:<port>` sein (`400`, DNS-Rebinding), `Content-Length`
   Pflicht (`411`, auch bei `Transfer-Encoding`), Body ≤ 256 KB vor dem Lesen geprüft (`413`), nur
   `application/json` (`415`), 5 s je Verbindung, höchstens 4 Anfragen gleichzeitig (`503 busy`),
@@ -28,12 +29,13 @@ import contextlib
 import hmac
 import json
 import logging
+import math
 import os
 import secrets
 import socket
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -341,6 +343,11 @@ class _Handler(BaseHTTPRequestHandler):
                 raise EmbedderNotReady if emb.error() is None else EmbedderUnavailable
             with ENDPOINT_PRIORITY.request():  # nur um das Einbetten (§19.2)
                 vectors = emb.embed(texts)
+            if not _vectors_ok(vectors):
+                # Sonst gingen NaN und inf als `null` an den Core (JSON kennt sie nicht)
+                log.error("Loopback: Embedder lieferte ungültige Vektoren")
+                self._error(503, "embedder_invalid_output")
+                return
             response = EmbedResponse.model_validate(
                 {"model": emb.model, "dim": emb.dim, "vectors": vectors}
             ).model_dump_json()
@@ -355,6 +362,15 @@ class _Handler(BaseHTTPRequestHandler):
             self._error(500, "internal_error")
             return
         self._send_json(200, response)
+
+
+def _vectors_ok(vectors: Sequence[Sequence[float]]) -> bool:
+    """Nur endliche Zahlen und eine endliche Norm. Der Nullvektor bleibt erlaubt (Fake ohne Wörter,
+    §19.2). Anzahl und Dimension prüft danach `EmbedResponse`."""
+    try:
+        return all(math.isfinite(math.fsum(float(x) * float(x) for x in vec)) for vec in vectors)
+    except (TypeError, ValueError, OverflowError):
+        return False
 
 
 class LoopbackServer:

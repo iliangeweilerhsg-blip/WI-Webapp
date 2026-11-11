@@ -7,7 +7,9 @@ Ablauf:
    `session_deleted`). `extract_job_id` muss ein `fertig`er `concepts.extract` derselben Session
    sein, sonst `fehler` (`Konzepte fehlen`).
 2. Gleicher `extract_input_hash` und gleiche `RESOLVE_VERSION` wie beim neuesten fertigen Lauf und
-   kein `force`: `unchanged`, nichts schreiben (die Inbox bleibt stabil).
+   kein `force`: `unchanged`, nichts schreiben (die Inbox bleibt stabil). Ausnahme: Der letzte
+   echte Abgleich lief ohne Embedder (`embedding_model = null`) und der Embedder ist jetzt bereit.
+   Dann wird neu abgeglichen.
 3. Vektoren: aktive Konzepte ohne Vektor des aktuellen Modells (≤ 500) und die extrahierten
    Konzepte einbetten. Ohne Embedder degradiert: nur Namensgleichheit.
 4. Zuordnen (`plan`): schon entschieden in dieser Session → Kandidaten (exakte Suche, die 5
@@ -55,11 +57,11 @@ from ..ai.interfaces import Effort, StructuredRequest, Tier
 from ..ai.outputs import CONCEPTS_RESOLVE_PROMPT, ConceptsResolveOutput
 from ..concepts import accept
 from ..concepts.cycle import confirmed_edges, find_cycle
+from ..concepts.material import LANG_NAMES, esc, shorten, unit
 from ..concepts.names import Labels, labels, name_base, normalize_name, same_name, similar_name
 from ..registry import JobContext, LockLostError, NonRetryableError, handler
 from ..uuid7 import uuid7
 from . import search_index
-from .concepts_extract import LANG_NAMES, _shorten, _unit, esc
 
 TASK = "concepts.resolve"
 EXTRACT_TASK = "concepts.extract"
@@ -313,6 +315,28 @@ def load_known(conn: Conn, ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Known]:
 
 
 # ---------- Vektoren (§20.3 Schritt 3 und 4) ----------
+
+
+def _degraded_before(conn: Conn, sid: uuid.UUID, digest: str, job_id: str) -> bool:
+    """§20.3 Schritt 2: Lief der letzte echte Abgleich dieses Extrakts ohne Embedder?
+
+    Ein `unchanged`-Lauf trägt selbst kein `embedding_model`. Darum zählt der neueste Lauf mit
+    demselben `extract_input_hash` und derselben `resolve_version`, der wirklich abgeglichen hat."""
+    row = conn.execute(
+        "SELECT result->>'embedding_model' FROM job WHERE type = %s AND session_id = %s "
+        "AND state = 'fertig' AND deleted_at IS NULL AND id <> %s "
+        "AND result->>'extract_input_hash' = %s AND result->>'resolve_version' = %s "
+        "AND COALESCE(result->>'unchanged', 'false') <> 'true' "
+        "AND COALESCE(result->>'session_deleted', 'false') <> 'true' "
+        "ORDER BY created_at DESC, id DESC LIMIT 1",
+        (TASK, sid, uuid.UUID(job_id), digest, str(RESOLVE_VERSION)),
+    ).fetchone()
+    return row is not None and row[0] is None
+
+
+def _embedder_ready() -> bool:
+    """Wartet wie Schritt 3 (`wait_ready`, §19.3). Ohne Embedder kommt sofort False."""
+    return search_index.get_embedder().wait_ready(search_index.WAIT_READY_S)
 
 
 def embed_text(name: str, aliases: Sequence[str], one_liner: str | None) -> str:
@@ -604,7 +628,7 @@ def read_output(
         if cid is None or pair not in asked or pair in verdicts:
             continue
         verdicts[(pair[0], cid)] = Verdict(
-            d.verdict, _shorten(d.reason, MAX_REASON), _unit(d.confidence)
+            d.verdict, shorten(d.reason, MAX_REASON), unit(d.confidence)
         )
     allowed = {(x.key, cid) for x, ids in question.neighbors for cid in ids}
     relations: list[tuple[str, uuid.UUID, bool, str, str, float]] = []
@@ -612,7 +636,7 @@ def read_output(
         a, b = r.from_ref.strip(), r.to_ref.strip()
         forward = b in by_ref
         key, cid = (a, by_ref.get(b)) if forward else (b, by_ref.get(a))
-        why = _shorten(r.why, MAX_WHY)
+        why = shorten(r.why, MAX_WHY)
         if cid is None or (key, cid) not in allowed or why is None:
             continue
         verdict = verdicts.get((key, cid))
@@ -620,7 +644,7 @@ def read_output(
             continue
         if len(relations) >= MAX_KI_RELATIONS:
             break
-        relations.append((key, cid, forward, r.kind, why, _unit(r.confidence)))
+        relations.append((key, cid, forward, r.kind, why, unit(r.confidence)))
     return verdicts, relations
 
 
@@ -1071,6 +1095,8 @@ def concepts_resolve(payload: ConceptsResolvePayload, ctx: JobContext) -> dict[s
             previous is not None
             and previous.get("extract_input_hash") == digest
             and previous.get("resolve_version") == RESOLVE_VERSION
+            # Ein degradierter Vorlauf bleibt nur stehen, solange der Embedder fehlt
+            and not (_degraded_before(conn, sid, digest, ctx.job_id) and _embedder_ready())
         ):
             with conn.transaction():
                 if not progress.lock_session(conn, sid):

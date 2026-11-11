@@ -20,21 +20,20 @@ Ablauf:
    `ConceptsExtractResult`. Der Job schreibt keine Tabellen außer `cost_entry`.
 
 Normieren und Vergleichsform (`normalize_name`, `name_key`) folgen §20.3 „Gemeinsame Regeln“ und
-liegen in `concepts/names.py`.
+liegen in `concepts/names.py`. Material lesen, Eingabe bauen und die Hilfen für Belege teilt sich
+der Job mit `concepts.resolve` und `summary.write`: `concepts/material.py`.
 """
 
 from __future__ import annotations
 
-import bisect
 import hashlib
 import math
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cache, partial
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import psycopg
 from pydantic import ValidationError
@@ -43,17 +42,29 @@ from sg_schemas.models import ConceptsExtractPayload, ConceptsExtractResult
 from .. import progress
 from ..ai import llm as llm_mod
 from ..ai import llm_fake
-from ..ai.budget import CostMeter, local_tz_name
+from ..ai.budget import CostMeter
 from ..ai.interfaces import Effort, StructuredRequest, Tier
 from ..ai.outputs import (
     CONCEPTS_EXTRACT_PROMPT,
     ConceptsExtractOutput,
     ExtractConceptOut,
 )
+from ..concepts.material import (
+    MAX_RANGE_MS,
+    Built,
+    Item,
+    Material,
+    build_input,
+    compose,
+    load,
+    merge_ranges,
+    overlaps,
+    session_row,
+    shorten,
+    unit,
+)
 from ..concepts.names import name_key, normalize_name
 from ..registry import JobContext, LockLostError, NonRetryableError, handler
-from .align_log import _timeline_end
-from .search_index import clean_text
 
 TASK = "concepts.extract"
 TIER: Tier = "standard"
@@ -63,12 +74,8 @@ PROMPT_FILE = Path(__file__).resolve().parents[3] / "prompts" / "concepts.extrac
 EFFORT: Effort = "medium"
 MAX_TOKENS = 64_000
 
-MAX_SLIDE_TEXT = 1500
-MAX_WORDS_PER_SLIDE = 600
-BLOCK_MS = 5 * 60_000
 CHAPTER_THRESHOLD = 150_000
 CHAPTER_MAX = 100_000
-MAX_RANGE_MS = 20 * 60_000
 MAX_EVIDENCE = 12
 MAX_CONCEPTS = 30
 MAX_RELATIONS = 60
@@ -78,246 +85,8 @@ MAX_ONE_LINER = 500
 MAX_PROF = 600
 MAX_WHY = 500
 SYMMETRIC = {"gegensatz", "verwandt"}
-SOURCES = ("manuell", "ausrichtung", "log")
-LANG_NAMES = {"de": "Deutsch", "en": "Englisch"}
 
 Conn = psycopg.Connection[Any]
-
-
-def _shorten(text: str | None, limit: int) -> str | None:
-    if text is None:
-        return None
-    value = normalize_name(text)
-    if not value:
-        return None
-    return value if len(value) <= limit else value[: limit - 1].rstrip() + "…"
-
-
-# ---------- Material ----------
-
-
-@dataclass(frozen=True)
-class Slide:
-    id: uuid.UUID
-    index: int
-    title: str | None
-    text: str
-    vision_summary: str | None
-
-
-@dataclass(frozen=True)
-class Seg:
-    start_ms: int
-    end_ms: int
-    text: str
-
-
-@dataclass
-class Material:
-    user_id: uuid.UUID
-    deck_id: uuid.UUID | None
-    module_name: str | None
-    module_short: str | None
-    lang: str | None
-    number: int | None
-    title: str | None
-    date: str | None
-    timeline_end_ms: int
-    slides: list[Slide] = field(default_factory=list)
-    segments: list[Seg] = field(default_factory=list)
-    spans: list[tuple[int, int, uuid.UUID]] = field(default_factory=list)  # slide_segment
-    markers: list[tuple[str, int]] = field(default_factory=list)
-
-
-def _session_row(conn: Conn, sid: uuid.UUID) -> tuple[Any, ...] | None:
-    return conn.execute(
-        "SELECT user_id, deleted_at, module_id, slide_deck_id, number, title, started_at, "
-        "ended_at FROM session WHERE id = %s",
-        (sid,),
-    ).fetchone()
-
-
-def _load(conn: Conn, sid: uuid.UUID, row: tuple[Any, ...]) -> Material:
-    user_id, _deleted, module_id, deck_id, number, title, started_at, ended_at = row
-    mod = conn.execute(
-        "SELECT name, short_name, lang FROM module WHERE id = %s", (module_id,)
-    ).fetchone()
-    slides = [
-        Slide(r[0], int(r[1]), r[2], r[3] or "", r[4])
-        for r in conn.execute(
-            "SELECT s.id, s.index, s.title, s.text, s.vision_summary FROM slide s "
-            "JOIN slide_deck d ON d.id = s.deck_id "
-            "WHERE d.id = %s AND d.deleted_at IS NULL AND s.deleted_at IS NULL ORDER BY s.index",
-            (deck_id,),
-        ).fetchall()
-    ]
-    segments = [
-        Seg(int(r[0]), int(r[1]), r[2] or "")
-        for r in conn.execute(
-            "SELECT start_ms, end_ms, text FROM transcript_segment "
-            "WHERE session_id = %s AND deleted_at IS NULL ORDER BY start_ms, recording_id, seq",
-            (sid,),
-        ).fetchall()
-    ]
-    # §18.4: gelöschte Segmente und Segmente gelöschter Folien entfallen, dann die erste Quelle
-    by_source: dict[str, list[tuple[int, int, uuid.UUID]]] = {}
-    for source, slide_id, start, end in conn.execute(
-        "SELECT g.source, g.slide_id, g.start_ms, g.end_ms FROM slide_segment g "
-        "JOIN slide s ON s.id = g.slide_id AND s.deleted_at IS NULL "
-        "WHERE g.session_id = %s AND g.deleted_at IS NULL ORDER BY g.start_ms, g.id",
-        (sid,),
-    ).fetchall():
-        by_source.setdefault(source, []).append((int(start), int(end), slide_id))
-    spans = next((by_source[s] for s in SOURCES if by_source.get(s)), [])
-    markers = [
-        (str(r[0]), int(r[1]))
-        for r in conn.execute(
-            "SELECT kind, t_ms FROM marker WHERE session_id = %s AND deleted_at IS NULL "
-            "AND kind IN ('frage', 'klausur') ORDER BY t_ms, id",
-            (sid,),
-        ).fetchall()
-    ]
-    date = None
-    if started_at is not None:
-        date = started_at.astimezone(ZoneInfo(local_tz_name())).date().isoformat()
-    return Material(
-        user_id=user_id,
-        deck_id=deck_id if slides else None,
-        module_name=None if mod is None else mod[0],
-        module_short=None if mod is None else mod[1],
-        lang=None if mod is None else mod[2],
-        number=number,
-        title=title,
-        date=date,
-        timeline_end_ms=_timeline_end(conn, sid, started_at, ended_at),
-        slides=slides,
-        segments=segments,
-        spans=spans,
-        markers=markers,
-    )
-
-
-# ---------- Eingabe ----------
-
-
-def hms(ms: int) -> str:
-    """Sitzungszeit als `[h:mm:ss]`."""
-    total = max(0, ms) // 1000
-    return f"[{total // 3600}:{total // 60 % 60:02d}:{total % 60:02d}]"
-
-
-def esc(text: str) -> str:
-    """Material maskieren: `&`, `<`, `>` (§20.3)."""
-    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-def _words(texts: Sequence[str], limit: int) -> str:
-    words = " ".join(t for t in (clean_text(x) for x in texts) if t).split(" ")
-    words = [w for w in words if w]
-    if len(words) <= limit:
-        return " ".join(words)
-    return " ".join(words[:limit]) + " …"
-
-
-@dataclass(frozen=True)
-class Item:
-    """Ein Stück der Eingabe (eine Folie oder ein Block ohne Folie). Kapitel enden an Items."""
-
-    text: str
-    slide: Slide | None = None
-    spans: tuple[tuple[int, int], ...] = ()  # Zeiten der Abschnitte darin (ms)
-
-
-@dataclass(frozen=True)
-class Built:
-    head: str
-    items: list[Item]
-    footer: str
-
-    @property
-    def full(self) -> str:
-        return compose(self.head, self.items, self.footer)
-
-
-def compose(head: str, items: Sequence[Item], footer: str) -> str:
-    return "\n\n".join([head, *(i.text for i in items), footer])
-
-
-def assign(material: Material) -> tuple[dict[uuid.UUID, list[Seg]], list[Seg]]:
-    """Abschnitte auf Folien verteilen: die Folie, in deren Segment die Mitte liegt."""
-    spans = sorted(material.spans)
-    starts = [s[0] for s in spans]
-    known = {s.id for s in material.slides}
-    per_slide: dict[uuid.UUID, list[Seg]] = {}
-    loose: list[Seg] = []
-    for seg in material.segments:
-        mid = (seg.start_ms + seg.end_ms) // 2
-        i = bisect.bisect_right(starts, mid) - 1
-        if i >= 0 and mid < spans[i][1] and spans[i][2] in known:
-            per_slide.setdefault(spans[i][2], []).append(seg)
-        else:
-            loose.append(seg)
-    return per_slide, loose
-
-
-def build_input(material: Material) -> Built:
-    lines = ["<kopf>"]
-    module = esc(normalize_name(material.module_name or "")) or "unbekannt"
-    if material.module_short:
-        module += f" ({esc(normalize_name(material.module_short))})"
-    lines.append(f"Modul: {module}")
-    lines.append(f"Sprache: {material.lang or 'unbekannt'}")
-    if material.number is not None:
-        lines.append(f"Vorlesung Nr.: {material.number}")
-    if material.title:
-        lines.append(f"Titel: {esc(normalize_name(material.title))}")
-    if material.date:
-        lines.append(f"Datum: {material.date}")
-    lines.append("</kopf>")
-    if material.markers:
-        lines.append("Marker:")
-        lines += [f'<marker art="{kind}" zeit="{hms(t)}"/>' for kind, t in material.markers]
-    head = "\n".join(lines)
-
-    per_slide, loose = assign(material)
-    items: list[Item] = []
-    for slide in material.slides:
-        parts = [f'<folie i="{slide.index}">']
-        if slide.title and normalize_name(slide.title):
-            parts.append(f"Titel: {esc(normalize_name(slide.title))}")
-        text = normalize_name(slide.text)
-        if text:
-            if len(text) > MAX_SLIDE_TEXT:
-                text = text[:MAX_SLIDE_TEXT] + "…"
-            parts.append(f"Text: {esc(text)}")
-        if slide.vision_summary and normalize_name(slide.vision_summary):
-            parts.append(f"Bildbeschreibung: {esc(normalize_name(slide.vision_summary))}")
-        segs = per_slide.get(slide.id, [])
-        if segs:
-            said = _words([s.text for s in segs], MAX_WORDS_PER_SLIDE)
-            von = hms(min(s.start_ms for s in segs))
-            bis = hms(max(s.end_ms for s in segs))
-            parts.append(f'<transkript von="{von}" bis="{bis}">{esc(said)}</transkript>')
-        parts.append("</folie>")
-        items.append(Item("\n".join(parts), slide, tuple((s.start_ms, s.end_ms) for s in segs)))
-    blocks: dict[int, list[Seg]] = {}
-    for seg in loose:
-        blocks.setdefault(seg.start_ms // BLOCK_MS, []).append(seg)
-    for k in sorted(blocks):
-        segs = blocks[k]
-        said = esc(" ".join(t for t in (clean_text(s.text) for s in segs) if t))
-        von = hms(min(s.start_ms for s in segs))
-        bis = hms(max(s.end_ms for s in segs))
-        items.append(
-            Item(
-                f'<transkript von="{von}" bis="{bis}">{said}</transkript>',
-                None,
-                tuple((s.start_ms, s.end_ms) for s in segs),
-            )
-        )
-    lang = LANG_NAMES.get(material.lang or "", "die Sprache der Vorlesung")
-    footer = f"Ausgabesprache: {lang}"
-    return Built(head, items, footer)
 
 
 def estimate_tokens(text: str) -> int:
@@ -374,35 +143,6 @@ class _Group:
     members: list[ExtractConceptOut]
 
 
-def _overlaps(segments: Sequence[Seg], start: int, end: int) -> bool:
-    for seg in segments:
-        if seg.start_ms == seg.end_ms:
-            if start <= seg.start_ms < end:
-                return True
-        elif seg.start_ms < end and start < seg.end_ms:
-            return True
-    return False
-
-
-def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Überlappende Zeiträume zusammenfassen, danach jeden auf höchstens 20 min kappen."""
-    merged: list[tuple[int, int]] = []
-    for start, end in sorted(ranges):
-        if merged and start <= merged[-1][1]:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-        else:
-            merged.append((start, end))
-    return [(start, min(end, start + MAX_RANGE_MS)) for start, end in merged]
-
-
-def _unit(value: float) -> float:
-    """Konfidenz auf 0..1 klemmen. Nicht endliche Werte (NaN, ±inf) gelten als 0."""
-    number = float(value)
-    if not math.isfinite(number):
-        return 0.0
-    return min(max(number, 0.0), 1.0)
-
-
 def check_outputs(
     outputs: Sequence[ConceptsExtractOutput], material: Material, session_id: str
 ) -> Checked:
@@ -454,7 +194,7 @@ def check_outputs(
                 if (
                     not start < end
                     or end - start > MAX_RANGE_MS
-                    or not _overlaps(material.segments, start, end)
+                    or not overlaps(material.segments, start, end)
                 ):
                     checked.dropped_evidence += 1
                 else:
@@ -462,7 +202,7 @@ def check_outputs(
         slide_refs.sort(key=lambda e: int(e["slide_index"]))
         time_refs = [
             {"kind": "transcript", "session_id": session_id, "t_start_ms": s, "t_end_ms": e}
-            for s, e in _merge_ranges(ranges)
+            for s, e in merge_ranges(ranges)
         ]
         evidence = [*slide_refs, *time_refs]
         if len(evidence) > MAX_EVIDENCE:
@@ -487,7 +227,7 @@ def check_outputs(
     for rel in (r for out in outputs for r in out.relations):
         a = keys.get(name_key(rel.from_concept))
         b = keys.get(name_key(rel.to_concept))
-        why = _shorten(rel.why, MAX_WHY)
+        why = shorten(rel.why, MAX_WHY)
         if a is None or b is None or a == b or why is None:
             checked.dropped_relations += 1
             continue
@@ -502,7 +242,7 @@ def check_outputs(
                 "to": b,
                 "kind": rel.kind,
                 "why": why,
-                "confidence": _unit(rel.confidence),
+                "confidence": unit(rel.confidence),
             }
         )
     return checked
@@ -519,8 +259,8 @@ def _proposal(group: _Group, evidence: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         alias_keys.add(value.lower())
         aliases.append(value)
-    one_liner = next((v for m in members if (v := _shorten(m.one_liner, MAX_ONE_LINER))), None)
-    prof = next((v for m in members if (v := _shorten(m.prof_explanation, MAX_PROF))), None)
+    one_liner = next((v for m in members if (v := shorten(m.one_liner, MAX_ONE_LINER))), None)
+    prof = next((v for m in members if (v := shorten(m.prof_explanation, MAX_PROF))), None)
     return {
         "proposal": {
             "name": group.name,
@@ -530,7 +270,7 @@ def _proposal(group: _Group, evidence: list[dict[str, Any]]) -> dict[str, Any]:
             "importance": max(int(m.importance) for m in members),
             "exam_hint": any(m.exam_hint for m in members),
             "prof_explanation": prof,
-            "confidence": max(_unit(m.confidence) for m in members),
+            "confidence": max(unit(m.confidence) for m in members),
         },
         "evidence": evidence,
     }
@@ -608,12 +348,12 @@ def _fake(items: Sequence[Item]) -> ConceptsExtractOutput:
 def concepts_extract(payload: ConceptsExtractPayload, ctx: JobContext) -> dict[str, Any]:
     sid = uuid.UUID(payload.session_id)
     llm_mod.require_configured()
-    row = _session_row(ctx.conn, sid)
+    row = session_row(ctx.conn, sid)
     if row is None:
         raise NonRetryableError("Session unbekannt")
     if row[1] is not None:
         return _finish(ctx, sid, _result(sid, session_deleted=True), 0.0)
-    material = _load(ctx.conn, sid, row)
+    material = load(ctx.conn, sid, row)
     if not material.slides and not material.segments:
         return _finish(ctx, sid, _result(sid, empty=True), 0.0)
 

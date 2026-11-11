@@ -40,8 +40,8 @@ from sg_worker.ai.outputs import (
     SummaryWriteOutput,
 )
 from sg_worker.ai.pricing import Tokens
+from sg_worker.concepts import material as mat
 from sg_worker.config import LlmSettings
-from sg_worker.handlers import concepts_extract as ce
 from sg_worker.handlers import summary_write as sw
 
 Conn = psycopg.Connection[Any]
@@ -309,9 +309,9 @@ def test_input_has_concepts_and_300_words(core_db: Conn) -> None:
     core_db.execute("UPDATE concept SET deleted_at = now() WHERE name = 'Verschmolzen'")
     other = session(core_db, core_db.execute("SELECT id FROM module").fetchone()[0])  # type: ignore[index]
     concept(core_db, other, "Andere Session", slides=[ids[0]])
-    row = ce._session_row(core_db, sid)
+    row = mat.session_row(core_db, sid)
     assert row is not None
-    material = ce._load(core_db, sid, row)
+    material = mat.load(core_db, sid, row)
     concepts = sw.load_concepts(core_db, sid, material.deck_id)
     assert [c.name for c in concepts] == ["Rekur<sion>"]
     built, text = sw.build_input(material, concepts)
@@ -325,7 +325,7 @@ def test_input_has_concepts_and_300_words(core_db: Conn) -> None:
     ) in text
     assert text.startswith(built.head)
     # Der Extrakt kürzt erst bei 600 Wörtern: andere Eingabe, anderer Hash
-    assert "v99" in ce.build_input(material).full
+    assert "v99" in mat.build_input(material).full
     assert sw.input_hash("m", text) != sw.input_hash("m2", text)
     # Ohne Konzepte entfällt der Block
     assert "<konzepte>" not in sw.build_input(material, [])[1]
@@ -345,12 +345,12 @@ def test_request_parameters(core_db: Conn, go: Any, monkeypatch: pytest.MonkeyPa
 # ---------- Prüfen ----------
 
 
-def material() -> ce.Material:
-    slides = [ce.Slide(uuid.uuid4(), i, f"Titel {i}", "", None) for i in range(1, 10)]
-    return ce.Material(
+def material() -> mat.Material:
+    slides = [mat.Slide(uuid.uuid4(), i, f"Titel {i}", "", None) for i in range(1, 10)]
+    return mat.Material(
         user_id=uuid.uuid4(), deck_id=uuid.uuid4(), module_name="M", module_short=None, lang="de",
         number=1, title=None, date=None, timeline_end_ms=3_600_000, slides=slides,
-        segments=[ce.Seg(0, 60_000, "a"), ce.Seg(600_000, 660_000, "b")],
+        segments=[mat.Seg(0, 60_000, "a"), mat.Seg(600_000, 660_000, "b")],
     )  # fmt: skip
 
 
