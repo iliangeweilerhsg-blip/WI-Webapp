@@ -4,6 +4,7 @@ import { accessSync, constants, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net';
 import { arch, platform } from 'node:os';
 import { dirname, join } from 'node:path';
+import { freeBytes } from './staging.ts';
 
 export interface RunResult {
   ok: boolean;
@@ -20,6 +21,8 @@ export interface System {
   portFree(port: number, host: string): Promise<boolean>;
   /** true, wenn der Ordner (bzw. der nächste vorhandene Elternordner) beschreibbar ist. */
   dirWritable(path: string): boolean;
+  /** Freier Platz in Bytes im Dateisystem des Ordners (bzw. des nächsten vorhandenen Elternordners); `undefined`: nicht feststellbar. */
+  freeBytes(path: string): number | undefined;
 }
 
 export function run(cmd: string, args: string[], timeoutMs = 15000): Promise<RunResult> {
@@ -57,6 +60,17 @@ export function dirWritable(path: string): boolean {
   }
 }
 
+/** Misst wie beim Restore (`freeBytes` in staging.ts), geht aber bis zum nächsten vorhandenen Ordner hoch. */
+export function freeBytesNearest(path: string): number | undefined {
+  let current = path;
+  while (!existsSync(current)) {
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+  return freeBytes(current);
+}
+
 export function realSystem(): System {
   return {
     nodeVersion: process.versions.node,
@@ -65,5 +79,6 @@ export function realSystem(): System {
     run: (cmd, args) => run(cmd, args),
     portFree,
     dirWritable,
+    freeBytes: freeBytesNearest,
   };
 }
