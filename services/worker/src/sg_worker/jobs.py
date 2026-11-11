@@ -22,16 +22,18 @@ Job = dict[str, Any]
 STUCK_AFTER_SECONDS = 180.0
 BACKOFF_BASE_SECONDS = 30
 
-# Ruhe in der Vorlesung (UX-05, VERTRAEGE §3): Solange eine Session `laeuft` oder `pausiert`, holt der Worker diese
-# Jobs nicht. Sie bleiben `wartet`, `attempts` steigt nicht. Leichte Jobs (`audio.finalize`, `align.log`,
-# `pdf.ingest`) laufen weiter.
-HEAVY_JOB_TYPES = (
-    "transcribe",
-    "search.index",
-    "concepts.extract",
-    "concepts.resolve",
-    "summary.write",
-    "maintenance.nightly",
+# Ruhe in der Vorlesung (UX-05, VERTRAEGE §3): Solange eine Session `laeuft` oder `pausiert`, holt der Worker nur
+# Jobs dieser Erlaubnisliste. Alles andere gilt als schwer (CPU, RAM oder Netz) und bleibt `wartet`, `attempts`
+# steigt nicht. Ein neuer Typ wartet also von selbst, bis er hier ausdrücklich als leicht eingetragen wird.
+# Leicht: kurze Datenbank-, Datei- oder Dateikonvertierungsarbeit ohne Modell und ohne Netz, oder ein Job, auf den
+# die Nutzerin wartet (`rag.answer`).
+LIGHT_JOB_TYPES = (
+    "audio.finalize",  # Chunks zusammenfügen (ffmpeg ohne Neukodierung), nötig, damit die Aufnahme gesichert ist
+    "align.log",  # Zeitachse aus Folienwechseln: reine Datenbankarbeit
+    "pdf.ingest",  # PDF der Folien einlesen: kurz, begrenzt
+    "rag.answer",  # Antwort auf eine Frage: die Nutzerin wartet darauf
+    "vault.write",  # kleine Markdown-Datei schreiben
+    "internal.echo",  # Test-Handler des Worker-Gerüsts ohne Last
 )
 # Eine Session, die länger als so viele Stunden "läuft", gilt als vergessen und hält nichts mehr zurück
 SESSION_HOLD_MAX_HOURS = 12
@@ -103,7 +105,7 @@ WITH next AS (
       SELECT 1 FROM unnest(j.depends_on) AS d(id)
       WHERE NOT EXISTS (SELECT 1 FROM job dj
                         WHERE dj.id = d.id AND dj.state = 'fertig' AND dj.deleted_at IS NULL))
-    AND (NOT (j.type = ANY(%(heavy)s)) OR (NOT %(hold)s AND NOT EXISTS (
+    AND (j.type = ANY(%(light)s) OR (NOT %(hold)s AND NOT EXISTS (
           SELECT 1 FROM session s WHERE s.state IN ('laeuft','pausiert') AND s.deleted_at IS NULL
             AND s.started_at > now() - make_interval(hours => %(cap_h)s))))
   ORDER BY j.priority DESC, j.created_at
@@ -216,15 +218,16 @@ def cancel_failed_dependents(conn: Conn) -> int:
 def claim_next(conn: Conn, worker_id: str, *, hold_heavy: bool = False) -> Job | None:
     """Holt den nächsten fälligen Job (`FOR UPDATE SKIP LOCKED`) und markiert ihn als `laeuft`.
 
-    Schwere Jobs (`HEAVY_JOB_TYPES`) werden übersprungen, solange eine Session läuft oder pausiert
-    ist (UX-05) oder `hold_heavy` gesetzt ist (Haken für weitere Gründe, #204).
+    Jobs, die nicht in `LIGHT_JOB_TYPES` stehen (schwer, auch unbekannte Typen), werden übersprungen,
+    solange eine Session läuft oder pausiert ist (UX-05) oder `hold_heavy` gesetzt ist (Haken für
+    weitere Gründe, #204).
     """
     with conn.cursor(row_factory=dict_row) as cur:
         cur.execute(
             _CLAIM_SQL,
             {
                 "worker": worker_id,
-                "heavy": list(HEAVY_JOB_TYPES),
+                "light": list(LIGHT_JOB_TYPES),
                 "hold": hold_heavy,
                 "cap_h": SESSION_HOLD_MAX_HOURS,
             },
