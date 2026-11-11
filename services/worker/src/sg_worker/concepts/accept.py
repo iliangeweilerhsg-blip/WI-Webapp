@@ -364,7 +364,7 @@ def _merge(conn: Conn, item: _Item, target_id: uuid.UUID | None) -> dict[str, An
     concepts = _lock_concepts(conn, [item.concept_id, target_id])
     source = concepts.get(item.concept_id)
     target = concepts.get(target_id)
-    if target is None or not target.alive:
+    if target is None or target.status != "aktiv" or not target.alive:
         raise AcceptError("merge_target_invalid")
     if source is None or source.status != "vorschlag" or not source.alive:
         raise AcceptError("inbox_action_invalid")
