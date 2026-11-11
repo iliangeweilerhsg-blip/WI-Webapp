@@ -726,6 +726,46 @@ describe('Abos zwischen hello und welcome', () => {
     expect(server.last.of('subscribe')).toHaveLength(0);
   });
 
+  it('hello-Abo zwischen hello und welcome ab- und wieder angemeldet: genau ein subscribe nach welcome', async () => {
+    const c = make();
+    const off = c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined);
+    server.mute = true;
+    void c.connect();
+    await settle();
+    expect(server.last.of('hello')).toHaveLength(1);
+    off();
+    c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined);
+    // Der Server arbeitet das `unsubscribe` erst nach `welcome` ab; ohne Nachmelden bliebe der Strom ohne Abo
+    expect(server.last.of('unsubscribe')).toHaveLength(1);
+    server.mute = false;
+    welcome();
+    await settle();
+    expect(server.last.of('subscribe')).toEqual([
+      { type: 'subscribe', streams: [{ stream: nbStream(1), last_seq: 0, last_op_id: null }] },
+    ]);
+  });
+
+  it('Abo während welcome noch die db_epoch liest: genau ein subscribe', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const getMeta = store.getMeta.bind(store);
+    store.getMeta = async (key) => {
+      await gate;
+      return getMeta(key);
+    };
+    const c = make();
+    server.mute = true;
+    void c.connect();
+    await settle();
+    server.mute = false;
+    welcome();
+    await settle();
+    c.subscribe(nbStream(1), { lastSeq: 0, lastOpId: null }, () => undefined);
+    release();
+    await settle();
+    expect(server.last.of('subscribe')).toHaveLength(1);
+  });
+
   it('geänderte db_epoch mit spätem Abo: genau ein subscribe, nach dem Reset', async () => {
     await store.setMeta('db_epoch', 'alte-epoche');
     const c = make();

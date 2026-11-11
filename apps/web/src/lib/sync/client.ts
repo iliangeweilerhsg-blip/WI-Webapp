@@ -267,7 +267,11 @@ export class SyncClient {
   private welcomeTimer: ReturnType<typeof setTimeout> | null = null;
   private lastReceivedAt = 0;
   private welcomed = false;
-  /** Ströme, die im `hello` dieser Verbindung standen; spätere Abos meldet `onWelcome` nach. */
+  /**
+   * Ströme, die in dieser Verbindung schon gemeldet sind (`hello` oder `subscribe`). Was fehlt, meldet `onWelcome` nach:
+   * Abos, deren `subscribe` vor `welcome` verworfen wurde, und abgemeldete Ströme (ihr `unsubscribe` arbeitet der
+   * Server erst nach `welcome` ab).
+   */
   private helloStreams = new Set<string>();
   /** Letzte `presence` je Gerät, damit später eingehängte Ansichten sie nachlesen können. */
   private presenceByDevice = new Map<string, ClientEventMap['presence']>();
@@ -943,6 +947,7 @@ export class SyncClient {
     if (sub.receivers.size > 0) return;
     if (sub.gapTimer) clearTimeout(sub.gapTimer);
     this.subs.delete(stream);
+    this.helloStreams.delete(stream);
     this.sendJson({ type: 'unsubscribe', streams: [stream] });
   }
 
@@ -987,11 +992,16 @@ export class SyncClient {
 
   private sendSubscribe(subs: Subscription[]): void {
     if (subs.length === 0) return;
-    if (!this.welcomed) return;
-    this.sendJson({
+    if (!this.welcomed) {
+      // Vor `welcome` verworfen: `onWelcome` meldet den Strom nach
+      for (const s of subs) this.helloStreams.delete(s.stream);
+      return;
+    }
+    const sent = this.sendJson({
       type: 'subscribe',
       streams: subs.map((s) => ({ stream: s.stream, last_seq: s.lastSeq, last_op_id: s.lastOpId })),
     });
+    if (sent) for (const s of subs) this.helloStreams.add(s.stream);
   }
 
   private async onWelcome(w: Extract<SyncServerMessage, { type: 'welcome' }>, connId: number): Promise<void> {
@@ -1011,7 +1021,7 @@ export class SyncClient {
     if (stored === null) await this.store.setMeta('db_epoch', w.db_epoch).catch(() => undefined);
     if (this.lastPresence) this.sendJson({ type: 'presence', ...this.lastPresence });
     this.startResets(resets, epochChanged ? w.db_epoch : null);
-    // Abos zwischen `hello` und `welcome` standen nicht im `hello`: jetzt nachmelden (Reset-Ströme abonniert resetLoop selbst)
+    // Noch nicht gemeldete Abos (spät oder im Fenster neu angemeldet) jetzt nachmelden (Reset-Ströme abonniert resetLoop selbst)
     const resetting = new Set(resets.map((r) => r.sub.stream));
     this.sendSubscribe(
       [...this.subs.values()].filter(
