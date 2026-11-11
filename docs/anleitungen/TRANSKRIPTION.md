@@ -9,7 +9,7 @@ Hintergrund: 05 §P4, VERTRAEGE §18.6, Spike S5, T2-02a (#145).
 ## Voraussetzungen
 
 - Mac mit Apple Silicon (M1 oder neuer), macOS 14 oder neuer. Auf Intel-Macs und unter Linux wird `mlx-whisper` nicht installiert.
-- `ffmpeg` (brauchst du schon für das Audio, `pnpm sg doctor` prüft es).
+- `ffmpeg` (brauchst du schon für das Audio; `pnpm sg doctor` meldet es als Fehler, wenn es fehlt, Abhilfe: `brew install ffmpeg`).
 - Etwa 3 GB freier Platz: das Modell (≈ 1,6 GB) und die Python-Pakete (installiert etwa 1 GB, PyTorch allein ≈ 140 MB als Download).
 
 ## 1. Einmalig: Pakete installieren

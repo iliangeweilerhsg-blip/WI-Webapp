@@ -12,6 +12,9 @@ export interface CheckResult {
   hint?: string;
 }
 
+/** Darunter weist `sg doctor` auf knappen Speicher im Datenordner hin (Hinweis, kein Fehler). */
+export const MIN_FREE_BYTES = 10 * 1024 ** 3;
+
 export const MIN_NODE = { major: 22, minor: 18 } as const;
 
 export function parseVersion(version: string): { major: number; minor: number; patch: number } | null {
@@ -112,6 +115,23 @@ export function checkDataDir(sys: System, cfg: SgConfig): CheckResult {
   };
 }
 
+function formatGb(bytes: number): string {
+  return (bytes / 1024 ** 3).toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+export function checkFreeSpace(sys: System, cfg: SgConfig): CheckResult {
+  const name = 'Freier Speicher (Hinweis)';
+  const free = sys.freeBytes(cfg.dataDir);
+  if (free === undefined) return { name, status: 'info', detail: 'nicht feststellbar' };
+  if (free >= MIN_FREE_BYTES)
+    return { name, status: 'ok', detail: `${formatGb(free)} GB frei im Datenordner` };
+  return {
+    name,
+    status: 'info',
+    detail: `Wenig Speicher frei: ${formatGb(free)} GB im Datenordner. Aufnahmen und Backups brauchen Platz.`,
+  };
+}
+
 export function checkAppleSilicon(sys: System): CheckResult {
   const name = 'Apple Silicon (Hinweis)';
   if (sys.platform === 'darwin' && sys.arch === 'arm64') {
@@ -144,6 +164,13 @@ export async function runChecks(sys: System, cfg: SgConfig): Promise<CheckResult
       ['--version'],
       'uv installieren: "brew install uv" oder https://docs.astral.sh/uv/ (für den Python-Worker).',
     ),
+    await checkTool(
+      sys,
+      'ffmpeg',
+      'ffmpeg',
+      ['-version'],
+      'ffmpeg installieren: "brew install ffmpeg" (der Worker braucht es für das Audio, Job audio_finalize).',
+    ),
     await checkDocker(sys),
     await checkPort(
       sys,
@@ -160,6 +187,7 @@ export async function runChecks(sys: System, cfg: SgConfig): Promise<CheckResult
       'Läuft schon eine andere Datenbank oder Studien-Gehirn? Dann "pnpm sg stop".',
     ),
     checkDataDir(sys, cfg),
+    checkFreeSpace(sys, cfg),
     checkAppleSilicon(sys),
   ];
 }
