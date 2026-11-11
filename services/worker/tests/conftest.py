@@ -241,3 +241,50 @@ def get_job(conn: psycopg.Connection[Any], job_id: uuid.UUID) -> dict[str, Any]:
         row = cur.fetchone()
     assert row is not None
     return row
+
+
+# ---------- Ganzes Core-Schema (alle Migrationen, ab T2-21a mit 0010_concepts) ----------
+
+#: Alle Migrationen des Core in Reihenfolge, wie `test_search_index.py`/`test_maintenance.py`.
+#: Für Jobs, die `cost_entry`, `setting`, `marker` und die Tabellen aus 0010 brauchen.
+DRIZZLE = Path(__file__).resolve().parents[2] / "core" / "drizzle"
+MIGRATION_0010 = DRIZZLE / "0010_concepts.sql"
+
+
+def core_migrations() -> list[str]:
+    statements: list[str] = []
+    for f in sorted(DRIZZLE.glob("*.sql")):
+        text = f.read_text(encoding="utf-8")
+        statements.extend(p for p in text.split("--> statement-breakpoint") if p.strip())
+    return statements
+
+
+@pytest.fixture
+def core_schema(database_url: str) -> Iterator[str]:
+    """Eigenes Schema je Test mit **allen** Core-Migrationen (0000 bis 0010), pgvector aus
+    `public`."""
+    assert MIGRATION_0010.is_file(), "Migration 0010_concepts fehlt"
+    name = f"c_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(database_url, autocommit=True) as c:
+        c.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        c.execute(f'CREATE SCHEMA "{name}"')
+        c.execute(f'SET search_path TO "{name}", public')
+        for statement in core_migrations():
+            if "CREATE EXTENSION" in statement:
+                continue
+            c.execute(statement.replace('"public".', f'"{name}".'))  # type: ignore[call-overload]
+        try:
+            yield name
+        finally:
+            c.execute(f'DROP SCHEMA "{name}" CASCADE')
+
+
+@pytest.fixture
+def core_kwargs(core_schema: str) -> dict[str, Any]:
+    return {"options": f"-c search_path={core_schema},public"}
+
+
+@pytest.fixture
+def core_db(database_url: str, core_kwargs: dict[str, Any]) -> Iterator[psycopg.Connection[Any]]:
+    with psycopg.connect(database_url, autocommit=True, **core_kwargs) as c:
+        yield c
