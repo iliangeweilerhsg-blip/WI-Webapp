@@ -24,6 +24,7 @@ import {
   readManifest,
   removeStalePartialsReport,
   removeStandReport,
+  ownedByThisUser,
   selectRetention,
   STAND_RE,
   standName,
@@ -562,6 +563,9 @@ export function ownStandsIn(base: string, owned: OwnedStands, stands = listStand
   return stands.filter((stand) => {
     const run = owned.get(stand);
     if (!run) return false;
+    // Ein Ordner eines anderen Benutzers mit kopiertem Manifest unter dem Namen eines eigenen Standes (der echte wurde
+    // weggeschoben) ist kein eigener Stand: Er würde sonst zur Hardlink-Quelle oder beim Ausdünnen samt Inhalt gelöscht.
+    if (!ownedByThisUser(join(base, stand))) return false;
     const manifest = readManifest(join(base, stand));
     if (!manifest || manifest.stand !== stand) return false;
     return run.sha256 === null || manifest.dump.sha256 === run.sha256;
@@ -616,9 +620,11 @@ export function thin(
     result.left.push({ name, reason, cause: rootCause(left)?.cause ?? 'unbekannt' });
     log(`Alten halbfertigen Lauf ${name} nicht vollständig entfernt: ${reason}. Der Rest bleibt stehen.`);
   }
-  for (const name of partials.kept) {
+  for (const { name, why } of partials.kept) {
     log(
-      `Halbfertiger Lauf ${name} enthält ein Manifest (etwa ein umbenannter Stand) und wird nicht gelöscht. Prüfe das Backup-Ziel.`,
+      why === 'manifest'
+        ? `Halbfertiger Lauf ${name} enthält ein Manifest (etwa ein umbenannter Stand) und wird nicht gelöscht. Prüfe das Backup-Ziel.`
+        : `Der Ordner ${name} gehört einem anderen Benutzer, stammt also nicht aus sg backup, und wird nicht gelöscht. Prüfe das Backup-Ziel.`,
     );
   }
   const all = listStands(base); // neueste zuerst

@@ -440,13 +440,33 @@ export function removeStand(
 export interface PartialsReport {
   removed: string[];
   /**
-   * Nicht angefasst, weil darin ein `manifest.json` liegt (H-1, #161): Ein abgebrochener Lauf hat fast nie eines,
-   * ein in `.<stand>.partial` umbenannter fertiger Stand dagegen schon. So bringt ein Umbenennen im Ziel `sg backup`
-   * nicht dazu, einen echten Stand zu löschen.
+   * Nicht angefasst (H-1, #161), weil der Ordner nicht nachweislich aus einem eigenen Lauf stammt:
+   * - `manifest`: Darin liegt ein `manifest.json`. Ein abgebrochener Lauf hat fast nie eines, ein in
+   *   `.<stand>.partial` umbenannter fertiger Stand dagegen schon. So bringt ein Umbenennen im Ziel `sg backup` nicht
+   *   dazu, einen echten Stand zu löschen.
+   * - `fremd`: Der Ordner gehört einem anderen Benutzer (`ownedByThisUser`). Er stammt nicht aus `sg backup` und kann
+   *   darum alles Mögliche enthalten, etwa einen dorthin verschobenen echten Stand.
    */
-  kept: string[];
+  kept: { name: string; why: 'manifest' | 'fremd' }[];
   /** Nicht vollständig entfernte `.partial`-Ordner mit dem, was darin stehen blieb */
   left: { name: string; left: LeftBehind[] }[];
+}
+
+/**
+ * Ist `path` ein echter Ordner (kein Symlink), der dem Benutzer dieses Prozesses gehört? (H-1, #161)
+ * Was `sg backup` im Ziel anlegt, gehört immer dem Benutzer des Laufs. Wer im Ziel nur Ordner anlegen kann, erzeugt
+ * Ordner mit seinem eigenen Besitzer und kann so keinen eigenen Stand vortäuschen, auch nicht mit einem kopierten
+ * Manifest. Auf Dateisystemen ohne Unix-Besitzer (exFAT, manche SMB-Freigaben) meldet der Kernel für alles den
+ * einhängenden Benutzer; dort hilft die Prüfung nicht, schadet aber auch nicht (dort kann ohnehin jeder alles löschen).
+ */
+export function ownedByThisUser(path: string): boolean {
+  try {
+    const info = lstatSync(path, { throwIfNoEntry: false });
+    if (!info?.isDirectory()) return false;
+    return process.getuid === undefined || info.uid === process.getuid();
+  } catch {
+    return false;
+  }
 }
 
 /** Liegt in `dir` ein Eintrag `manifest.json`? (ohne Symlink-Folgen; im Zweifel ja, dann wird nichts gelöscht) */
@@ -474,8 +494,12 @@ export function removeStalePartialsReport(
     const match = /^\.([0-9]{8}T[0-9]{6}Z)\.partial$/.exec(entry.name);
     if (!entry.isDirectory() || !match) continue;
     if (now - standDate(match[1] as string).getTime() < olderThanMs) continue;
+    if (!ownedByThisUser(join(base, entry.name))) {
+      report.kept.push({ name: entry.name, why: 'fremd' });
+      continue;
+    }
     if (holdsManifest(join(base, entry.name))) {
-      report.kept.push(entry.name);
+      report.kept.push({ name: entry.name, why: 'manifest' });
       continue;
     }
     const left = remover.removeTree(base, entry.name);

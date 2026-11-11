@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lchownSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -1741,6 +1742,63 @@ describe('H-1 (#161): erfundene Stände im Ziel zählen nicht und werden nie gel
     expect(readFileSync(join(renamed, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
     expect(logs.join('\n')).toMatch(/\.20261001T030000Z\.partial enthält ein Manifest/);
   });
+
+  /** Wie von einem anderen Benutzer angelegt: Besitzer des ganzen Baums wird `FREMD` (nur als root möglich) */
+  const FREMD = 4242;
+  function chownTree(path: string): void {
+    lchownSync(path, FREMD, FREMD);
+    if (!lstatSync(path).isDirectory()) return;
+    for (const name of readdirSync(path)) chownTree(join(path, name));
+  }
+  const asRoot = process.getuid?.() === 0;
+
+  it.skipIf(!asRoot)(
+    'Ordner eines anderen Benutzers mit kopiertem Manifest unter eigenem Standnamen: weder Hardlink-Quelle noch gelöscht',
+    async () => {
+      const { dataDir, target, deps, logs } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z
+      const real = join(target, '20261104T030012Z');
+      // Der Angreifer schiebt den echten Stand weg (dafür reicht Schreibrecht im Ziel) und legt unter seinem Namen
+      // einen eigenen Ordner mit dem kopierten Manifest (Prüfsumme stimmt) und einer Datei gleicher Größe und Zeit an.
+      const manifest = readFileSync(join(real, 'manifest.json'));
+      renameSync(real, join(target, 'weggeschoben'));
+      mkdirSync(join(real, 'media', 'photos'), { recursive: true });
+      writeFileSync(join(real, 'manifest.json'), manifest);
+      writeFileSync(join(real, 'db.dump'), 'DUMP');
+      const evil = join(real, 'media', 'photos', 'a.jpg');
+      writeFileSync(evil, 'BOES');
+      const source = statSync(join(dataDir, 'media', 'photos', 'a.jpg'));
+      utimesSync(evil, source.atime, source.mtime);
+      chownTree(real);
+
+      // Gleicher Tag: als eigener Stand wäre der Ordner Hardlink-Quelle und würde danach ausgedünnt
+      const next = { ...deps, now: () => new Date('2026-11-04T05:00:00Z') };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).toBe(0);
+      const copied = join(target, '20261104T050000Z', 'media', 'photos', 'a.jpg');
+      expect(lstatSync(copied).ino).not.toBe(lstatSync(evil).ino);
+      expect(readFileSync(copied, 'utf8')).toBe('JPEG');
+      expect(readFileSync(evil, 'utf8')).toBe('BOES');
+      expect(logs.join('\n')).toMatch(/1 Ordner im Ziel sehen wie Stände aus/);
+    },
+  );
+
+  it.skipIf(!asRoot)(
+    'alter .partial eines anderen Benutzers mit einem hineingeschobenen echten Stand wird nicht gelöscht',
+    async () => {
+      const { target, deps, logs } = setup();
+      expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0); // 20261104T030012Z
+      const fake = join(target, '.20261001T030000Z.partial');
+      mkdirSync(fake);
+      chownTree(fake);
+      // Das Manifest liegt eine Ebene tiefer: Die Prüfung auf ein Manifest im .partial greift hier nicht
+      renameSync(join(target, '20261104T030012Z'), join(fake, 'drin'));
+      const next = { ...deps, now: () => new Date('2026-11-05T03:00:00Z') };
+      expect(await runBackup(next, { trigger: 'zeitplan' })).toBe(0);
+      expect(readManifest(join(fake, 'drin'))).not.toBeNull();
+      expect(readFileSync(join(fake, 'drin', 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+      expect(logs.join('\n')).toMatch(/\.20261001T030000Z\.partial gehört einem anderen Benutzer/);
+    },
+  );
 
   it('backup_run nicht lesbar: nicht ausgedünnt und ohne Hardlinks kopiert (fail-closed), Lauf trotzdem fertig', async () => {
     const { target, pg, deps, errs } = setup();
