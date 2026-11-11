@@ -111,6 +111,8 @@ export class ChunkUploader {
     if (this.running) {
       // Neue Arbeit, während die Schleife ausläuft: noch ein Durchgang
       this.dirty = true;
+      // Der Rückstau soll sichtbar wachsen, auch wenn der laufende Durchgang an einem Chunk hängt (UX-08)
+      void this.refreshCounts().catch(() => undefined);
       return;
     }
     this.running = this.loop().finally(() => {
@@ -153,11 +155,18 @@ export class ChunkUploader {
 
   private async refreshCounts(): Promise<void> {
     let pending = 0;
-    for (const meta of await this.store.listRecordings())
+    let completes = 0;
+    for (const meta of await this.store.listRecordings()) {
       pending += (await this.store.listChunks(meta.id)).length;
+      if (meta.complete) completes += 1;
+    }
     const shelved = (await this.store.listShelf()).length;
-    if (pending !== this.status.pendingChunks || shelved !== this.status.shelvedChunks) {
-      this.setStatus({ pendingChunks: pending, shelvedChunks: shelved });
+    if (
+      pending !== this.status.pendingChunks ||
+      shelved !== this.status.shelvedChunks ||
+      completes !== (this.status.pendingCompletes ?? 0)
+    ) {
+      this.setStatus({ pendingChunks: pending, shelvedChunks: shelved, pendingCompletes: completes });
     }
   }
 

@@ -1,7 +1,7 @@
 // Aufnahme im Live-Dashboard (Issue #106): Statusleiste, Leader-Regel, Mikrofon-Berechtigung, Pegel für den Auto-Stopp.
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Session } from '@sg/shared';
 import { SessionView } from '../src/components/dashboard/SessionView.tsx';
@@ -11,7 +11,12 @@ import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { FakeWebLocks, fakeRecording, fakeStream, type FakeRecording } from './recording-fakes.ts';
-import { MemoryRecorderStore, useResumePendingUploads } from '../src/lib/recorder/index.ts';
+import {
+  MemoryRecorderStore,
+  noteMicIntent,
+  resetMicIntent,
+  useResumePendingUploads,
+} from '../src/lib/recorder/index.ts';
 import { installFakeCore, makeModule, makeSemester, makeSession, type FakeCore } from './fake-core.ts';
 
 const nav = vi.hoisted(() => ({ search: '' }));
@@ -127,10 +132,150 @@ const uploads = (re: RegExp) =>
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
+  resetMicIntent();
 });
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+describe('Aufnahme im Dashboard: Start ohne zweiten Klick (UX-03)', () => {
+  it('mit Startgeste kurz zuvor beginnt die Aufnahme ohne Klick, auch bei „prompt“', async () => {
+    vi.setSystemTime(Date.parse(NOW) - 5000);
+    noteMicIntent();
+    boot({ rec: fakeRecording({ permission: 'prompt' }) });
+    const b = await screenBar();
+    expect(await within(b).findByText('REC')).toBeVisible();
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('ohne Startgeste steht „Keine Aufnahme“ mit dem Knopf, das Mikrofon bleibt zu', async () => {
+    boot({ rec: fakeRecording({ permission: 'prompt' }) });
+    const b = await screenBar();
+    const label = await within(b).findByText('Keine Aufnahme');
+    expect(label).toHaveClass('font-semibold');
+    const button = within(b).getByRole('button', { name: 'Aufnahme starten' });
+    expect(button).toHaveClass('bg-accent');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(rec.getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it('eine Startgeste, die über 60 s zurückliegt, zählt nicht', async () => {
+    vi.setSystemTime(Date.parse(NOW) - 61_000);
+    noteMicIntent();
+    boot({ rec: fakeRecording({ permission: 'prompt' }) });
+    const b = await screenBar();
+    expect(await within(b).findByText('Keine Aufnahme')).toBeVisible();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(rec.getUserMedia).not.toHaveBeenCalled();
+  });
+});
+
+describe('Aufnahme im Dashboard: Seite verlassen fragt nach (UX-02)', () => {
+  /** `true`, wenn ein Handler `beforeunload` abgefangen hat */
+  function leaveIsBlocked(): boolean {
+    const event = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  }
+
+  it('bei REC wird das Verlassen abgefangen; nach Beenden und Unmount nicht mehr', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    const view = boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    expect(leaveIsBlocked()).toBe(true);
+
+    await user.click(within(b).getByRole('button', { name: 'Beenden' }));
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Session beenden' }),
+    );
+    await within(b).findByText('Beendet');
+    await waitFor(() => expect(leaveIsBlocked()).toBe(false));
+    view.unmount();
+    expect(leaveIsBlocked()).toBe(false);
+  });
+
+  it('nach dem Unmount mitten in der Aufnahme ist der Handler entfernt', async () => {
+    const view = boot();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    view.unmount();
+    expect(leaveIsBlocked()).toBe(false);
+  });
+
+  it('ohne Aufnahme (Keine Aufnahme) und im Folge-Tab wird nichts abgefangen', async () => {
+    boot({ rec: fakeRecording({ permission: 'prompt' }) });
+    const b = await screenBar();
+    await within(b).findByText('Keine Aufnahme');
+    expect(leaveIsBlocked()).toBe(false);
+    cleanup();
+
+    boot({ syncState: 'other_tab' });
+    const b2 = await screenBar();
+    await within(b2).findByText('Aufnahme in anderem Tab');
+    expect(leaveIsBlocked()).toBe(false);
+  });
+});
+
+describe('Aufnahme im Dashboard: Upload-Status (UX-08)', () => {
+  /** PUTs der Chunks bleiben hängen, bis `release()` kommt; alles andere geht durch */
+  function holdChunks() {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    rec.fetch.mockImplementation(async (url: unknown, init?: RequestInit) => {
+      if (init?.method === 'PUT' && /\/chunks\/\d+$/.test(String(url))) await gate;
+      return Response.json({}, { status: 201 });
+    });
+    return () => release();
+  }
+
+  it('ab 3 wartenden Teilen steht der Rückstau; nach Beenden „Wird gesichert …“, dann „Gesichert“', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot();
+    const release = holdChunks();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    expect(within(b).queryByTestId('upload-status')).toBeNull();
+    act(() => {
+      for (let i = 0; i < 3; i++) rec.mr.instances[0]?.emit(16);
+    });
+    expect(await within(b).findByTestId('upload-status')).toHaveTextContent('3 Teile warten');
+
+    await user.click(within(b).getByRole('button', { name: 'Beenden' }));
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Session beenden' }),
+    );
+    await within(b).findByText('Beendet');
+    expect(await within(b).findByText('Wird gesichert …')).toBeVisible();
+
+    release();
+    await waitFor(() => expect(within(b).getByTestId('upload-status')).toHaveTextContent('Gesichert'));
+    expect(uploads(/^POST .*\/complete$/)).toHaveLength(1);
+  });
+
+  it('bei 1 wartenden Teil steht nichts', async () => {
+    boot();
+    holdChunks();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    act(() => rec.mr.instances[0]?.emit(16));
+    await waitFor(() => expect(uploads(/^PUT .*\/chunks\/0$/)).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(within(b).queryByTestId('upload-status')).toBeNull();
+  });
+
+  it('ein Folge-Tab zeigt keinen Upload-Status', async () => {
+    const base = fakeRecording({ permission: 'prompt' });
+    await seedLeftover(base.store);
+    boot({ rec: base, syncState: 'other_tab' });
+    const b = await screenBar();
+    await within(b).findByText('Aufnahme in anderem Tab');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(within(b).queryByTestId('upload-status')).toBeNull();
+  });
 });
 
 describe('Aufnahme im Dashboard: Leader-Tab', () => {
@@ -198,6 +343,9 @@ describe('Aufnahme im Dashboard: Leader-Tab', () => {
     expect(rec.mr.instances).toHaveLength(2);
 
     await user.click(within(b).getByRole('button', { name: 'Beenden' }));
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Session beenden' }),
+    );
     await within(b).findByText('Beendet');
     await waitFor(() => expect(uploads(/^POST .*\/complete$/)).toHaveLength(2));
     expect(rec.mr.instances[1]?.state).toBe('inactive');
@@ -209,7 +357,7 @@ describe('Aufnahme im Dashboard: Mikrofon-Berechtigung', () => {
     const user = userEvent.setup({ advanceTimers: () => undefined });
     boot({ rec: fakeRecording({ permission: 'prompt' }) });
     const b = await screenBar();
-    expect(await within(b).findByText('Mikrofon aus')).toBeVisible();
+    expect(await within(b).findByText('Keine Aufnahme')).toBeVisible();
     expect(within(b).queryByText('REC')).toBeNull();
     await new Promise((r) => setTimeout(r, 50));
     expect(rec.getUserMedia).not.toHaveBeenCalled();

@@ -1,6 +1,7 @@
 'use client';
 
-// Bestätigung für „Stopp“ per Tastenkürzel (07 §10: ⌘⇧S). Kein Modal: Folie und Notizen bleiben sichtbar, die
+// Bestätigung für „Stopp“: per Tastenkürzel (07 §10: ⌘⇧S) und per Knopf „Beenden“ der Statusleiste (UX-06).
+// Kein Modal: Folie und Notizen bleiben sichtbar, die
 // Aufnahme läuft bis zur Bestätigung weiter. Der Fokus liegt auf der ungefährlichen Antwort („Weiter aufnehmen“).
 import { useEffect, useRef } from 'react';
 
