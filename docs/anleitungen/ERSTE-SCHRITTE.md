@@ -11,7 +11,7 @@ Du brauchst einen Mac, am besten mit Apple Silicon. Installiere der Reihe nach:
 2. **Node 22.18 oder neuer** (22.x), zum Beispiel mit `nvm install 22`. Die Version steht in `.nvmrc`.
 3. **pnpm**: `corepack enable`
 4. **uv** (für den Python-Worker): `brew install uv`
-5. **ffmpeg** (der Worker wandelt damit die Aufnahme um): `brew install ffmpeg`. `pnpm sg doctor` prüft das nicht, ohne ffmpeg bleibt die Verarbeitung der Aufnahme aber stehen.
+5. **ffmpeg** (der Worker wandelt damit die Aufnahme um): `brew install ffmpeg`. `pnpm sg doctor` meldet es als Fehler, wenn es fehlt. Ohne ffmpeg bleibt die Verarbeitung der Aufnahme stehen.
 6. Abhängigkeiten laden:
 
    ```bash
@@ -24,7 +24,7 @@ Du brauchst einen Mac, am besten mit Apple Silicon. Installiere der Reihe nach:
 pnpm sg doctor
 ```
 
-Der Befehl prüft Node, pnpm, uv, Docker, die Ports 4710 und 5432 und den Datenordner (Standard `~/StudienGehirn`). Jede Zeile beginnt mit ✓ (in Ordnung), ✗ (fehlt) oder ℹ (Hinweis). Bei ✗ steht darunter, was zu tun ist. Behebe das und starte `pnpm sg doctor` erneut. Am Ende muss „Alles bereit.“ stehen.
+Der Befehl prüft Node, pnpm, uv, ffmpeg, Docker, die Ports 4710 und 5432 und den Datenordner (Standard `~/StudienGehirn`). Freien Speicher und Apple Silicon meldet er nur als Hinweis. Jede Zeile beginnt mit ✓ (in Ordnung), ✗ (fehlt) oder ℹ (Hinweis). Bei ✗ steht darunter, was zu tun ist. Behebe das und starte `pnpm sg doctor` erneut. Am Ende muss „Alles bereit.“ stehen.
 
 ## 3. Erster Start
 
