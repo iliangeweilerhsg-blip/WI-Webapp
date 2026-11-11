@@ -51,6 +51,12 @@ export function aiReason(step: PipelineStep, ai: AiStatus | null | undefined): s
   return null;
 }
 
+/**
+ * Schritte, die der Worker auch während einer laufenden Session abholt (Erlaubnisliste `LIGHT_JOB_TYPES` in
+ * `services/worker/src/sg_worker/jobs.py`, VERTRAEGE §3). Alle anderen gelten als gehalten, auch ein neuer Schritt.
+ */
+const LIGHT_STEPS: ReadonlySet<PipelineStep> = new Set<PipelineStep>(['audio.finalize', 'align.log']);
+
 const button =
   'inline-flex min-h-11 items-center rounded-md border border-border-strong px-4 py-2 text-md hover:bg-surface-raised aria-disabled:opacity-60';
 
@@ -107,7 +113,7 @@ export function StepList({
           </li>
         ))}
       </ul>
-      {lectureRunning && rows.some((row) => row.state === 'wartet') ? (
+      {lectureRunning && rows.some((row) => row.state === 'wartet' && !LIGHT_STEPS.has(row.step)) ? (
         <p className="mt-2 text-sm text-text-muted" data-testid="step-hold">
           Manche Schritte warten, bis die Vorlesung vorbei ist.
         </p>

@@ -222,7 +222,7 @@ export function StatusBar({
           {running && rec.status.tabHidden ? (
             <span className="text-text-muted" data-testid="tab-hidden">
               Tab verdeckt
-              <span className="sr-only">. Die Bildschirmsperre des Browsers greift gerade nicht.</span>
+              <span className="sr-only">. Der Browser hält den Bildschirm gerade nicht wach.</span>
             </span>
           ) : null}
           {/* Zustand für Screenreader als ruhige Statusmeldung */}
