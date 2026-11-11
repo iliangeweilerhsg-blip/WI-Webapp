@@ -466,17 +466,41 @@ final class SyncEngineTests: XCTestCase {
             .http(
                 status: 200,
                 body: "{\"items\":[\(notebookJSON(id: notebookID, kind: "vorlesung"))],\"next_cursor\":null}"),
-            // Modulname scheitert: Das Notizbuch wird trotzdem gefunden
-            .http(status: 500, body: "{}"),
         ])
         h.start()
         _ = await eventually { h.engine.state == .online }
 
         let running = await h.engine.runningLectureNotebookID()
         XCTAssertEqual(running, notebookID)
+        // Nur Sessions und Notizbücher: kein Modulname, keine Seitenliste
+        XCTAssertEqual(h.transport.requests.count, 2)
         // Keine neue Bindung, kein neues „zuletzt verwendet“
         XCTAssertNil(h.bindings.binding(forNotebook: notebookID))
         XCTAssertEqual(h.bindings.lastNotebookID, h.binding.notebookID)
+    }
+
+    func testResolveBindingStillBindsWhenTheModuleNameFails() async throws {
+        let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
+        let h = SyncHarness(health: [
+            .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
+            .http(
+                status: 200,
+                body: "{\"items\":[\(notebookJSON(id: notebookID, kind: "vorlesung"))],\"next_cursor\":null}"),
+            // Modulname scheitert: Das Notizbuch wird trotzdem gebunden, nur ohne Namen
+            .http(status: 500, body: "{}"),
+            .http(
+                status: 200,
+                body: "{\"items\":[],\"notebook_id\":\"\(notebookID)\",\"stream_op_id\":null,\"stream_seq\":0}"),
+        ])
+        h.start()
+        _ = await eventually { h.engine.state == .online }
+
+        let resolvedOrNil = await h.engine.resolveBinding()
+        let resolved = try XCTUnwrap(resolvedOrNil)
+        XCTAssertEqual(resolved.notebookID, notebookID)
+        XCTAssertNil(resolved.moduleName)
+        XCTAssertEqual(h.bindings.lastNotebookID, notebookID)
+        XCTAssertEqual(h.transport.requests.count, 4)
     }
 
     func testRunningLectureWithoutConnectionGivesNil() async throws {

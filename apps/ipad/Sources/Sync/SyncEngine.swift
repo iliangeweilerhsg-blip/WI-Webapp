@@ -288,7 +288,8 @@ final class SyncEngine {
     /// `nil` ohne Verbindung, ohne laufende Vorlesung oder bei einem Fehler (UX-19).
     func runningLectureNotebookID() async -> String? {
         guard canReachCore, let credentials = credentials() else { return nil }
-        guard let found = try? await lookupLecture(credentials) else { return nil }
+        // Ohne Modulnamen: Diese Abfrage läuft bei jeder neuen Verbindung, der Name wird hier nicht gebraucht
+        guard let found = try? await lookupLecture(credentials, withModuleName: false) else { return nil }
         return found.notebook.id
     }
 
@@ -298,8 +299,9 @@ final class SyncEngine {
         var moduleName: String?
     }
 
-    /// Fragt Session, Notizbuch und Modulname ab. Der Name ist nicht lebenswichtig: Scheitert er, bleibt er `nil`.
-    private func lookupLecture(_ credentials: Credentials) async throws -> LectureLookup? {
+    /// Fragt Session, Notizbuch und auf Wunsch den Modulnamen ab. Der Name ist nicht lebenswichtig: Scheitert er,
+    /// bleibt er `nil`.
+    private func lookupLecture(_ credentials: Credentials, withModuleName: Bool) async throws -> LectureLookup? {
         let sessions = try await client.activeSessions(endpoint: credentials.endpoint, token: credentials.token)
         // Die zuletzt begonnene Session
         guard
@@ -310,13 +312,16 @@ final class SyncEngine {
         guard let notebook = notebooks.first(where: { $0.kind == .vorlesung && $0.deletedAt == nil }) else {
             return nil
         }
-        let name = try? await client.moduleName(
-            endpoint: credentials.endpoint, token: credentials.token, moduleID: session.moduleID)
+        var name: String?
+        if withModuleName {
+            name = try? await client.moduleName(
+                endpoint: credentials.endpoint, token: credentials.token, moduleID: session.moduleID)
+        }
         return LectureLookup(session: session, notebook: notebook, moduleName: name)
     }
 
     private func resolveOnline(_ credentials: Credentials) async throws -> InkBinding? {
-        guard let found = try await lookupLecture(credentials) else { return nil }
+        guard let found = try await lookupLecture(credentials, withModuleName: true) else { return nil }
         let session = found.session
         let notebook = found.notebook
         let moduleName = found.moduleName

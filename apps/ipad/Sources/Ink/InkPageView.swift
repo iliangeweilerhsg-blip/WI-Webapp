@@ -129,7 +129,9 @@ struct InkPageView: View {
     private func checkRunningLecture() async {
         guard let sync, model != nil else { return }
         let running = await sync.runningLectureNotebookID()
-        guard !_Concurrency.Task.isCancelled else { return }
+        // Während der Anfrage kann der Knopf schon gewechselt haben. Ohne Modell läuft der Wechsel noch:
+        // Dann gilt das Ergebnis nicht, sonst stünde der Knopf nach dem Wechsel wieder da.
+        guard !_Concurrency.Task.isCancelled, model != nil else { return }
         let differs = InkBindingCheck.differs(
             shownNotebookID: binding?.notebookID, runningNotebookID: running)
         otherNotebookID = differs ? running : nil
