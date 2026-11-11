@@ -66,9 +66,12 @@ final class PairingController {
         }
     }
 
-    /// Bonjour-Weg und Eingabe von Hand: Anfrage am Mac anlegen
+    /// Bonjour-Weg und Eingabe von Hand: Anfrage am Mac anlegen.
+    /// Liegt gerade ein QR-Code zur Bestätigung vor, passiert nichts: Eine Bonjour-Auflösung,
+    /// die erst nach dem Scan fertig wird, soll die Rückfrage nicht wegschieben.
     func start(endpoint: CoreEndpoint) async {
         guard !isBusy else { return }
+        if case .reviewing = state { return }
         lastError = nil
         beginAttempt()
         state = .requesting(endpoint)
@@ -144,8 +147,9 @@ final class PairingController {
             )
         } catch {
             var cause = ConnectionError.wrap(error)
-            if cause == .connectionLost {
-                // Ohne Wiederholung (nicht idempotent): Der Mac kann schon gekoppelt haben
+            if cause == .connectionLost || cause == .timeout {
+                // Ohne Wiederholung (nicht idempotent): Der Mac kann schon gekoppelt haben.
+                // Das gilt auch beim Timeout: Die Anfrage kann angekommen sein, nur die Antwort fehlt.
                 cause = .pairingOutcomeUnknown
             }
             if cause == .pairing(.codeInvalid) {

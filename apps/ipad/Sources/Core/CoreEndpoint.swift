@@ -1,7 +1,7 @@
 import Foundation
 
 /// Adresse des Core auf dem Mac.
-/// Erlaubt sind nur IPv4-Adressen und `<name>.local`: Andere Hostnamen weist der Core mit
+/// Erlaubt sind nur IPv4-Adressen (ohne führende Nullen) und `<name>.local`: Andere Hostnamen weist der Core mit
 /// `421 host_not_allowed` ab (VERTRAEGE §5), und die ATS-Ausnahme `NSAllowsLocalNetworking`
 /// gilt nur für lokale Ziele.
 struct CoreEndpoint: Equatable, Hashable, Sendable {
@@ -61,6 +61,8 @@ struct CoreEndpoint: Equatable, Hashable, Sendable {
             guard !part.isEmpty, part.count <= 3, part.allSatisfy({ $0.isASCII && $0.isNumber }) else {
                 return false
             }
+            // Führende Nullen ablehnen: Das System könnte `010` oktal lesen (8 statt 10)
+            guard part.count == 1 || part.first != "0" else { return false }
             guard let value = Int(part), value <= 255 else { return false }
         }
         return true
