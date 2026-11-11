@@ -293,7 +293,10 @@ export function StartCard({
                 className={`${ghost} ml-4 sm:ml-8`}
                 aria-disabled={busy !== null}
                 aria-expanded={confirmStop}
-                onClick={() => setConfirmStop(true)}
+                onClick={() => {
+                  // Während einer Aktion keine Frage öffnen (vorher hielt `run()` den Klick ab)
+                  if (!busyRef.current) setConfirmStop(true);
+                }}
               >
                 {busy === 'stop' ? 'Wird beendet …' : 'Beenden'}
               </button>
@@ -315,6 +318,7 @@ export function StartCard({
       {confirmStop && (state === 'laeuft' || state === 'pausiert') ? (
         <div className="mt-4 overflow-hidden rounded-md border border-border">
           <StopConfirm
+            cancelLabel="Weiterlaufen lassen"
             onCancel={() => setConfirmStop(false)}
             onConfirm={() => {
               setConfirmStop(false);

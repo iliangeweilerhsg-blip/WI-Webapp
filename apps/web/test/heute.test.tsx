@@ -445,7 +445,7 @@ describe('Heute: Aktionen', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('Beenden fragt nach (UX-06): „Weiter aufnehmen“ beendet nichts, „Session beenden“ beendet', async () => {
+  it('Beenden fragt nach (UX-06): „Weiterlaufen lassen“ beendet nichts, „Session beenden“ beendet', async () => {
     const user = userEvent.setup();
     boot({
       now: '2026-11-04T07:20:00Z',
@@ -454,10 +454,15 @@ describe('Heute: Aktionen', () => {
     await user.click(await screen.findByRole('button', { name: 'Beenden' }));
     expect(within(card()).getByRole('alertdialog')).toHaveTextContent('Session beenden?');
     expect(calls(/stop$/)).toHaveLength(0);
-    await user.click(within(card()).getByRole('button', { name: 'Weiter aufnehmen' }));
+    // Heute nimmt nicht auf: Die Antwort verspricht keine Aufnahme
+    expect(within(card()).queryByRole('button', { name: 'Weiter aufnehmen' })).toBeNull();
+    expect(within(card()).getByRole('button', { name: 'Weiterlaufen lassen' })).toHaveFocus();
+    await user.click(within(card()).getByRole('button', { name: 'Weiterlaufen lassen' }));
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(calls(/stop$/)).toHaveLength(0);
     expect(card()).toHaveAttribute('data-state', 'laeuft');
+    // Der Fokus kehrt auf „Beenden“ zurück
+    expect(screen.getByRole('button', { name: 'Beenden' })).toHaveFocus();
     await user.click(screen.getByRole('button', { name: 'Beenden' }));
     await user.click(within(card()).getByRole('button', { name: 'Session beenden' }));
     await waitFor(() => expect(card()).toHaveAttribute('data-state', 'beendet'));
