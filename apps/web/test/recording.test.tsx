@@ -266,6 +266,28 @@ describe('Aufnahme im Dashboard: Upload-Status (UX-08)', () => {
     expect(uploads(/^POST .*\/complete$/)).toHaveLength(1);
   });
 
+  it('abgelehnte Teile liegen zurückgestellt: nach Beenden nicht still „Gesichert“', async () => {
+    const user = userEvent.setup({ advanceTimers: () => undefined });
+    boot();
+    rec.fetch.mockImplementation(async (url: unknown, init?: RequestInit) => {
+      if (init?.method === 'PUT' && /\/chunks\/\d+$/.test(String(url)))
+        return Response.json({ error: { code: 'chunk_conflict', message: 'm' } }, { status: 409 });
+      return Response.json({}, { status: 201 });
+    });
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    act(() => rec.mr.instances[0]?.emit(16));
+    await user.click(within(b).getByRole('button', { name: 'Beenden' }));
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Session beenden' }),
+    );
+    await waitFor(() =>
+      expect(within(b).getByTestId('upload-status')).toHaveTextContent(
+        /Gesichert, \d+ Teile? zurückgestellt/,
+      ),
+    );
+  });
+
   it('bei 1 wartenden Teil steht nichts', async () => {
     boot();
     holdChunks();
