@@ -22,6 +22,7 @@ import {
   listStands,
   MANIFEST_FILE,
   readManifest,
+  readManifestAt,
   removeStalePartialsReport,
   removeStandReport,
   ownedByThisUser,
@@ -562,15 +563,18 @@ export async function readOwnedStands(pg: PgAccess, targetSetting: string): Prom
  */
 export function ownStandsIn(base: string, owned: OwnedStands, stands = listStands(base)): string[] {
   return stands.filter((stand) => {
-    const run = owned.get(stand);
-    if (!run) return false;
     // Ein Ordner eines anderen Benutzers mit kopiertem Manifest unter dem Namen eines eigenen Standes (der echte wurde
     // weggeschoben) ist kein eigener Stand: Er würde sonst zur Hardlink-Quelle oder beim Ausdünnen samt Inhalt gelöscht.
     if (!ownedByThisUser(join(base, stand))) return false;
-    const manifest = readManifest(join(base, stand));
-    if (!manifest || manifest.stand !== stand) return false;
-    return run.sha256 === null || manifest.dump.sha256 === run.sha256;
+    return matchesOwnRun(owned, stand, readManifest(join(base, stand)));
   });
+}
+
+/** Nennt `manifest` den Stand `stand`, gibt es dazu einen eigenen Lauf, und trägt es (falls bekannt) dessen Prüfsumme? */
+function matchesOwnRun(owned: OwnedStands, stand: string, manifest: Manifest | null): boolean {
+  const run = owned.get(stand);
+  if (!run || !manifest || manifest.stand !== stand) return false;
+  return run.sha256 === null || manifest.dump.sha256 === run.sha256;
 }
 
 /** Was beim Ausdünnen als eigen gilt (H-1, #161) */
@@ -644,8 +648,9 @@ export function thin(
     if (protectedStands.has(stand)) continue;
     // Unmittelbar vor dem Löschen erneut prüfen und das Löschen an genau diesen Ordner binden (TOCTOU, H-1 aus #161):
     // Schiebt jemand während des Ausdünnens einen Stand, der bleiben soll, unter diesen Namen, bleibt er stehen.
+    // Das Manifest wird in genau dem geprüften Ordner gelesen (`readManifestAt`), nicht erneut über den Namen.
     const seen = ownedDir(join(base, stand));
-    if (!seen || ownStandsIn(base, own.owned, [stand]).length === 0) {
+    if (!seen || !matchesOwnRun(own.owned, stand, readManifestAt(target, stand, seen, hooks))) {
       log(
         `Der Stand ${stand} hat sich während des Ausdünnens verändert und wird nicht gelöscht. Prüfe das Backup-Ziel.`,
       );

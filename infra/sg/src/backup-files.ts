@@ -1,7 +1,8 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
-import { closeSync, existsSync, lstatSync, readdirSync, type Stats } from 'node:fs';
+import { closeSync, existsSync, lstatSync, readdirSync, readSync, type Stats } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import {
+  type AnchoredDirs,
   NoFollowReader,
   NoFollowRemover,
   NoFollowWriter,
@@ -362,20 +363,62 @@ export function readManifest(standDir: string): Manifest | null {
     // Das Ziel ist nicht vertrauenswürdig: kein Symlink, keine FIFO (würde hängen), höchstens 1 MB
     const raw = readSmallRegularFile(join(standDir, MANIFEST_FILE), MANIFEST_MAX_BYTES);
     if (raw === null) return null;
-    const parsed: unknown = JSON.parse(raw.toString('utf8'));
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      (parsed as Manifest).version === 1 &&
-      typeof (parsed as Manifest).stand === 'string' &&
-      typeof (parsed as Manifest).dump?.sha256 === 'string'
-    ) {
-      return parsed as Manifest;
-    }
+    return parseManifest(raw);
   } catch {
     // fehlt oder kaputt
   }
   return null;
+}
+
+function parseManifest(raw: Buffer): Manifest | null {
+  const parsed: unknown = JSON.parse(raw.toString('utf8'));
+  if (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    (parsed as Manifest).version === 1 &&
+    typeof (parsed as Manifest).stand === 'string' &&
+    typeof (parsed as Manifest).dump?.sha256 === 'string'
+  ) {
+    return parsed as Manifest;
+  }
+  return null;
+}
+
+/**
+ * Manifest des Ordners `<target>/<name>`, gelesen in genau dem Ordner mit der Identität `seen` (verankert, relativ,
+ * ohne Symlink-Folgen). `null`, wenn unter dem Namen inzwischen ein anderer Ordner liegt, das Manifest fehlt oder
+ * ungültig ist. So prüft, wer danach mit `removeTree(…, seen)` löscht, das Manifest desselben Ordners, den er löscht:
+ * Ein kurzer Tausch nur während des Lesens (A→B→A) täuscht die Prüfung nicht mehr (TOCTOU, H-1 aus #161).
+ */
+export function readManifestAt(
+  target: string | TargetDir,
+  name: string,
+  seen: Identity,
+  hooks?: NoFollowHooks,
+): Manifest | null {
+  const reader = new NoFollowReader(hooks);
+  let opened: { fd: number; info: Stats };
+  try {
+    const base = adoptTarget(reader, target);
+    opened = reader.open(reader.enter(base, name, seen), MANIFEST_FILE);
+  } catch {
+    return null;
+  }
+  try {
+    if (opened.info.size > MANIFEST_MAX_BYTES) return null;
+    const buffer = Buffer.alloc(opened.info.size);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const n = readSync(opened.fd, buffer, offset, buffer.length - offset, null);
+      if (n === 0) break;
+      offset += n;
+    }
+    return parseManifest(buffer.subarray(0, offset));
+  } catch {
+    return null;
+  } finally {
+    closeSync(opened.fd);
+  }
 }
 
 /** Vollständige Stände im Ziel (Ordner mit gültigem Manifest), neueste zuerst */
@@ -397,7 +440,7 @@ export interface TargetDir extends Identity {
  * Ziel für den Remover übernehmen: mit Identität aus `validateTarget` (so im Lauf), sonst (nur Tests) wie gesehen.
  * Rückgabe: Pfad des Ziels.
  */
-function adoptTarget(remover: NoFollowRemover, target: string | TargetDir): string {
+function adoptTarget(remover: AnchoredDirs, target: string | TargetDir): string {
   if (typeof target === 'string') {
     remover.adopt(target);
     return target;
@@ -488,10 +531,20 @@ export function ownedDir(path: string): Identity | null {
   }
 }
 
-/** Liegt in `dir` ein Eintrag `manifest.json`? (ohne Symlink-Folgen; im Zweifel ja, dann wird nichts gelöscht) */
-function holdsManifest(dir: string): boolean {
+/**
+ * Liegt in `<base>/<name>` ein Eintrag `manifest.json`? Nachgesehen wird verankert in genau dem Ordner mit der
+ * Identität `seen` (wie `readManifestAt`), ohne Symlink-Folgen. Im Zweifel ja, dann wird nichts gelöscht.
+ */
+function holdsManifestAt(
+  target: string | TargetDir,
+  name: string,
+  seen: Identity,
+  hooks?: NoFollowHooks,
+): boolean {
+  const reader = new NoFollowReader(hooks);
   try {
-    return lstatSync(join(dir, MANIFEST_FILE), { throwIfNoEntry: false }) !== undefined;
+    const base = adoptTarget(reader, target);
+    return reader.list(reader.enter(base, name, seen)).some((entry) => entry.name === MANIFEST_FILE);
   } catch {
     return true;
   }
@@ -518,7 +571,7 @@ export function removeStalePartialsReport(
       report.kept.push({ name: entry.name, why: 'fremd' });
       continue;
     }
-    if (holdsManifest(join(base, entry.name))) {
+    if (holdsManifestAt(target, entry.name, seen, hooks)) {
       report.kept.push({ name: entry.name, why: 'manifest' });
       continue;
     }

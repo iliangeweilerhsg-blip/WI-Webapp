@@ -24,6 +24,8 @@ import {
   copyTree,
   listStands,
   readManifest,
+  readManifestAt,
+  removeStalePartialsReport,
   removeStandReport,
   standName,
   treeSize,
@@ -1886,6 +1888,43 @@ describe('H-1 (#161): erfundene Stände im Ziel zählen nicht und werden nie gel
     expect(report.status).toBe('teilweise');
     expect(report.left[0]?.cause).toBe('getauscht');
     expect(readManifest(join(target, '20261001T010000Z'))?.stand).toBe('20261001T020000Z');
+  });
+
+  it('Manifest-Prüfung vor dem Ausdünnen liest im geprüften Ordner, nicht über den Namen (Tausch A→B→A)', () => {
+    const { target, checked } = checkedTarget();
+    realStand(target, '20261001T010000Z');
+    realStand(target, '20261001T030000Z');
+    const seenOld = lstatSync(join(target, '20261001T010000Z'));
+    const seenKeep = lstatSync(join(target, '20261001T030000Z'));
+    // Geprüft wurde der behaltene Stand (er lag kurz unter dem alten Namen), inzwischen liegt dort wieder der alte:
+    // Über den Namen gelesen sähe das Manifest gültig aus, im geprüften Ordner gelesen nicht.
+    expect(readManifestAt(checked, '20261001T010000Z', seenKeep)).toBeNull();
+    expect(readManifestAt(checked, '20261001T010000Z', seenOld)?.stand).toBe('20261001T010000Z');
+    // Symlink unter dem Namen auf einen anderen als den geprüften Ordner: wird nicht gelesen
+    symlinkSync(join(target, '20261001T030000Z'), join(target, '20261001T020000Z'));
+    expect(readManifestAt(checked, '20261001T020000Z', seenOld)).toBeNull();
+  });
+
+  it('TOCTOU .partial: ein nach der Prüfung unter den Namen geschobener echter Stand wird nicht gelöscht', () => {
+    const { target, checked } = checkedTarget();
+    const partial = '.20261001T010000Z.partial';
+    mkdirSync(join(target, partial, 'media'), { recursive: true });
+    realStand(target, '20261001T030000Z');
+    let swapped = false;
+    const report = removeStalePartialsReport(checked, Date.parse('2026-11-05T00:00:00Z'), 86_400_000, {
+      step: (op, phase, dir) => {
+        if (swapped || op !== 'readdir' || phase !== 'before' || dir !== join(target, partial)) return;
+        // Besitzer geprüft, Manifest gerade nachgesehen: jetzt den echten Stand unter den Namen des .partial schieben
+        swapped = true;
+        renameSync(join(target, partial), join(target, 'weggeschoben'));
+        renameSync(join(target, '20261001T030000Z'), join(target, partial));
+      },
+    });
+    expect(swapped).toBe(true);
+    expect(report.removed).toEqual([]);
+    expect(report.left[0]?.left[0]?.cause).toBe('getauscht');
+    expect(readManifest(join(target, partial))?.stand).toBe('20261001T030000Z');
+    expect(readFileSync(join(target, partial, 'db.dump'), 'utf8')).toBe('DUMP');
   });
 
   it('backup_run nicht lesbar: nicht ausgedünnt und ohne Hardlinks kopiert (fail-closed), Lauf trotzdem fertig', async () => {
