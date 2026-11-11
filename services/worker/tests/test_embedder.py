@@ -281,6 +281,31 @@ def test_bge_falls_back_to_fp32_when_fp16_gives_nan() -> None:
     assert e.embed(["Laufzeit"]) == [em.fake_vector("Laufzeit")]
 
 
+def test_bge_falls_back_to_fp32_when_fp16_probe_raises() -> None:
+    """Scheitert fp16 auf dem Gerät ganz (fehlende Half-Operation), bleibt der Embedder nutzbar."""
+    importer, seen = stub_importer(mps=True)
+    st, torch = importer()
+    make = st.SentenceTransformer
+
+    def make_failing_fp16(name: str, **kwargs: Any) -> Any:
+        model = make(name, **kwargs)
+        encode = model.encode
+
+        def encode_or_fail(texts: list[str], **kw: Any) -> Any:
+            if model.dtype == "float16":
+                raise RuntimeError("MPS: Half nicht unterstützt")
+            return encode(texts, **kw)
+
+        model.encode = encode_or_fail
+        return model
+
+    st.SentenceTransformer = make_failing_fp16
+    e = em.BgeM3Embedder(importer=lambda: (st, torch))
+    assert e.wait_ready(10) is True and e.error() is None
+    assert (e.dtype, seen["model"].dtype) == ("float32", "float32")
+    assert e.embed(["Laufzeit"]) == [em.fake_vector("Laufzeit")]
+
+
 def test_bge_renormalizes_fp16_vectors() -> None:
     importer, seen = stub_importer()
     e = em.BgeM3Embedder(importer=importer)

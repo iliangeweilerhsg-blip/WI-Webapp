@@ -379,11 +379,10 @@ class BgeM3Embedder:
             if dim is not None and dim != self.dim:
                 raise EmbedderUnavailable(f"Modell liefert {dim} statt {self.dim} Dimensionen")
             # Probelauf: wärmt das Gerät vor (die erste Suchanfrage ist sonst langsam) und prüft,
-            # ob fp16 gültige Zahlen liefert. Wenn nicht: zurück auf fp32 statt NaN-Vektoren.
-            if dtype == "float16" and not _all_finite(self._encode(loaded, [WARMUP_TEXT])):
-                log.warning(
-                    "fp16 liefert ungültige Werte, weiter mit fp32", extra={"device": device}
-                )
+            # ob fp16 gültige Zahlen liefert. Wenn nicht (oder fp16 scheitert ganz, etwa eine auf
+            # `mps` fehlende Half-Operation): zurück auf fp32 statt NaN-Vektoren oder gar keinem
+            # Embedder.
+            if dtype == "float16" and not self._fp16_ok(loaded, device):
                 loaded = loaded.float()
                 dtype = "float32"
             self.device = device
@@ -442,6 +441,19 @@ class BgeM3Embedder:
             return []
         with self._lock:
             return self._encode(st, texts)
+
+    def _fp16_ok(self, st: Any, device: str) -> bool:
+        """Probelauf in fp16. False: ungültige Werte oder ein Fehler (dann weiter mit fp32)."""
+        try:
+            if _all_finite(self._encode(st, [WARMUP_TEXT])):
+                return True
+            problem = "ungültige Werte"
+        except Exception as exc:
+            problem = type(exc).__name__
+        log.warning(
+            "fp16 nicht nutzbar, weiter mit fp32", extra={"device": device, "error": problem}
+        )
+        return False
 
     @staticmethod
     def _encode(st: Any, texts: list[str]) -> list[list[float]]:

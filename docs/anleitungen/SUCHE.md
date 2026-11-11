@@ -107,9 +107,10 @@ SG_EMBED_PAUSE_MS=75
 
 - `SG_EMBEDDER=fake` liefert erfundene Vektoren ohne Modell (für Tests, nicht für den Alltag).
 - `SG_WORKER_PORT` ändern, falls Port 4711 schon belegt ist. Core und Worker lesen denselben Wert.
-- `SG_WORKER_NICE` (0 bis 19, Standard 10): So weit senkt der Worker beim Start seine Priorität, damit andere Programme Vorrang haben. `0` schaltet das ab.
-- `SG_EMBED_THREADS` (Standard: die Hälfte der Kerne, mindestens 1): So viele Prozessor-Threads nutzt das Modell.
-- `SG_EMBED_PAUSE_MS` (0 bis 5000, Standard 75): Pause in Millisekunden zwischen zwei Stapeln beim Aufbau des Suchindex. Die Suche selbst (⌘K) wird nie gebremst.
+- `SG_WORKER_NICE` (0 bis 19, Standard 10): So weit senkt der Worker beim Start seine Priorität, damit andere Programme Vorrang haben. `0` schaltet das ab. Die Aufnahme in der Vorlesung ist davon nicht betroffen (sie läuft im Browser und im Core, nicht im Worker). Ist der Mac stark beschäftigt, braucht nur die Transkription nach der Vorlesung etwas länger.
+- `SG_EMBED_THREADS` (Standard: die Hälfte der Kerne, mindestens 1, auf einem Mac mit 8 Kernen also 4): So viele Prozessor-Threads nutzt das Modell.
+- `SG_EMBED_PAUSE_MS` (0 bis 5000, Standard 75): Pause in Millisekunden zwischen zwei Stapeln beim Aufbau des Suchindex. Für die Suche selbst (⌘K) gilt die Pause nie.
+- Ungültige Werte (etwa Buchstaben) zählen als Standardwert, zu große oder zu kleine Zahlen als die nächste Grenze.
 
 **Macs mit 8 GB:** Die Standardwerte sind dafür gewählt. Das Modell lädt auf Apple-Chips mit halber Genauigkeit (fp16, etwa 1,1 statt 2,3 GB), die Treffer bleiben praktisch gleich. Ruckelt der Mac trotzdem, während der Index entsteht, `SG_EMBED_PAUSE_MS=250` und `SG_EMBED_THREADS=2` setzen. Der Index braucht dann länger, die Suche bleibt gleich schnell.
 
