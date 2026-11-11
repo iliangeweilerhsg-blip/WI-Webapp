@@ -1,39 +1,42 @@
-# Zusammenarbeit: Claude (Lead) × Claude-Subagents × Argon (Gemini 4 Argon)
+# Zusammenarbeit: Claude (Lead) × Claude-Subagents (Argon pausiert)
 
-Stand: 4. November 2026 · Betrieb **nur über Abos** (Claude-Abo und Google-AI-Abo), keine API-Keys.
+Stand: 11. November 2026 · Betrieb **nur über Abos**, keine API-Keys.
+
+> **Argon ist pausiert (Owner-Entscheidung vom 11.11.2026).** Das Projekt arbeitet ohne Argon.
+> Claude ist Lead und vergibt Arbeit nur noch an Claude-Subagents.
+> Alle Argon-Abschnitte unten sind als „ruht“ markiert. Sie bleiben stehen, falls der Owner Argon wieder freigibt.
 
 ## 1. Grundidee
 
 Claude führt und merged, der Owner (Mensch) setzt Ziele und hat ein Veto (`status:halt`).
 
-**Gewichtung (Vorgabe des Owners):** Die Hauptarbeit machen **Claude und Claude-Subagents**.
-**Argon ist zusätzliche Unterstützung**: für Aufgaben, bei denen seine Stärken klar helfen (Abschnitt 3), und als Extra-Kapazität.
-Kein Arbeitspaket darf davon abhängen, dass Argon gerade läuft. Was eilig ist oder etwas blockiert, macht Claude.
+**Aufgabenverteilung:** Die gesamte Arbeit machen **Claude und Claude-Subagents**.
+Argon ist pausiert und bekommt keine Aufgaben. Reviews und Gegen-Reviews übernehmen frische Claude-Subagents (Abschnitt 4).
 
-| Wer | Anteil (Richtwert) | Typische Arbeit |
+| Wer | Anteil | Typische Arbeit |
 |---|---|---|
-| **Claude (Lead)** | Steuerung | Architektur, Schnittstellen, Aufgaben zerlegen, Reviews, Integration, Merges |
-| **Claude-Subagents** | Großteil der Umsetzung | Features parallel in eigenen Branches, Tests, Refactorings, unabhängige Reviews (Modell nach Abschnitt 4) |
-| **Argon** | Ergänzung | UI aus Mockups/Screenshots, Security-Audits, Analyse langer Dokumente, Gegen-Reviews, große Textmengen |
+| **Claude (Lead)** | Steuerung | Architektur, Schnittstellen, Aufgaben zerlegen, Integration, Merges |
+| **Claude-Subagents** | Umsetzung und Reviews | Features parallel in eigenen Branches, Tests, Refactorings, unabhängige Reviews und Gegen-Reviews (Modell nach Abschnitt 4) |
+| **Argon** | pausiert | (ruht) UI aus Mockups, Security-Audits, lange Dokumente, Gegen-Reviews |
 
-Claude und Argon laufen in getrennten Produkten und können sich nicht direkt aufrufen.
 **GitHub ist die gemeinsame Schnittstelle:** Aufgaben sind Issues, Ergebnisse sind Pull Requests, Feedback sind Reviews und Kommentare.
 
 ```
 Owner ──Ziel──▶ Claude (Lead, Claude Code in der Cloud)
                  │  zerlegt in Tasks, legt Schnittstellen fest, wählt das Modell pro Task
                  ├──▶ selbst erledigen                         Branch claude/…
-                 ├──▶ Claude-Subagents/Workflows, parallel      Branches feat/…
-                 └──▶ Issue mit Label agent:argon  ──┐         (Queue)
-                                                     │
-Owner öffnet Antigravity + Start-Prompt ──▶ Argon arbeitet die Queue ab
-                                                     │
-                       PR "[Argon] …" (status:review) ◀┘
-                 Claude reviewt ──▶ Feedback + Issue: agent:argon, status:nacharbeit ──▶ nächster Argon-Schub
-                 Claude gibt frei (status:freigegeben) ──▶ Claude merged
+                 └──▶ Claude-Subagents/Workflows, parallel      Branches feat/…
+                          │
+                          ▼
+                 frischer Subagent reviewt (Opus bei Code, Sonnet bei Doku)
+                 Claude merged nach Freigabe
+
+(ruht: Argon-Queue mit Label agent:argon, PRs "[Argon] …", Review und Nacharbeit über GitHub)
 ```
 
 ## 2. Welche Kanäle es per Abo gibt (Recherche, Nov. 2026)
+
+_Nur Claude Code ist aktiv. Die Zeilen zu Antigravity und Gemini CLI ruhen, solange Argon pausiert ist._
 
 | Kanal | Status | Verwendung bei uns |
 |---|---|---|
@@ -47,57 +50,48 @@ Owner öffnet Antigravity + Start-Prompt ──▶ Argon arbeitet die Queue ab
 dass Argon sie ohne Rückfragen abarbeiten kann. Sobald Antigravity Cloud-Ausführung bekommt, kann Argon ebenfalls ohne den Owner laufen.
 Dann wird nur der Startweg ausgetauscht, der Prozess bleibt gleich.
 
-## 3. Was Argon besonders gut kann – und wofür wir es einsetzen
+## 3. Stärken-Matrix und Aufgabenverteilung
 
-Gemini 4 Argon wurde am 30.09.2026 angekündigt und ist seit Mitte Oktober 2026 breit verfügbar.
-**Achtung:** Die meisten Zahlen stammen von Google oder aus Sekundärquellen und sind nicht unabhängig geprüft.
-Das Erfahrungslog (Abschnitt 8) korrigiert die Matrix anhand echter Ergebnisse.
+Ohne Argon verteilt Claude die Arbeit nach Modell. Die Details stehen im Modell-Routing (Abschnitt 4).
 
-| Stärke von Argon (laut Quellen) | Beleg | Einsatz bei uns |
-|---|---|---|
-| **Sehr langer Kontext** (~1 Mio. Tokens) | Größter Vorsprung u. a. bei GraphWalks 256k–1M (84,2 %) | Ganzes Repo auf einmal analysieren: Konsistenz, große Migrationen, Architektur-Doku, lange Vorgaben/PDFs auswerten |
-| **Multimodal** (Bild, Video, Dateien) | SWE-bench Multimodal 56 % (Vals AI, Platz 4 von 18) | Mockup/Screenshot → UI-Komponente; visuelle Prüfung von Screenshots |
-| **Security / Cyber-Defense** | Laut Google speziell trainiert, Schwachstellen zu finden, zu validieren und zu patchen | Security-Audits vor Releases |
-| **Wissensarbeit** (Finanzen, Recht) | Führt in Reviews bei Legal-/Finance-Benchmarks | Fachlogik der Wirtschaftsinformatik-App, Entwürfe für Rechtstexte – **immer menschlich prüfen** |
-| **Große Output-Mengen** | Long decode | Testdaten, Seed-Daten, Übersetzungen, umfangreiche Doku |
-| **Second Opinion** | anderes Modell = andere blinde Flecken | Gegen-Review von Claudes PRs an kritischen Stellen |
-
-| Schwäche von Argon (laut Quellen) | Folge |
+| Aufgabe | Wer |
 |---|---|
-| Terminal-lastige Agentenarbeit (Terminal-Bench ~57 % vs. ~66 % bei Claude Opus 5.5) | Build-Setup, CI und Debugging macht Claude |
-| Wettbewerbsprogrammierung schwach (ProgramBench 2,5 %) | Knifflige Algorithmen macht Claude |
-| Berichte über Zweifel an der Coding-Leistung im Alltag | Jeder Argon-PR wird von Claude reviewt |
-| Läuft nur, wenn der Owner Antigravity startet | Nichts Eiliges oder Blockierendes an Argon geben |
-
-**Claude (Lead) übernimmt:** Architektur und Tech-Stack, Aufgabenzerlegung, Schnittstellen, Build/CI/Tooling,
-Debugging, Integration mehrerer Branches, Code-Reviews und alles, was über Nacht fertig werden muss.
+| Architektur, Schnittstellen, Aufgabenzerlegung, Integration, Merges | Claude (Lead) |
+| Komplexeste Features (Nebenläufigkeit, Locks, Sync, schwierige Algorithmen) | Subagent mit Fable 5.2 |
+| Standard-Features, UI, Doku, Tests | Subagent mit Sonnet 5.5 |
+| Code- und Security-Reviews, Gegen-Reviews | frischer Subagent mit Opus 5.5 |
+| Mechanisches (Umbenennen, Labels, Formatierung) | Subagent mit Haiku |
+| Build-Setup, CI, Debugging | Claude (Lead) |
 
 ### Zuordnungsregel
 
-> Braucht der Task **viel Kontext auf einmal, Bilder, einen Security-Blick oder Fachwissen** und darf er bis zum nächsten Antigravity-Start warten? → **Argon**.
-> Braucht er **Terminal-Arbeit, Architekturentscheidungen, Integration** oder ist er **eilig**? → **Claude**.
-> Mehrere **unabhängige Features**? → **Claude-Subagents parallel** (Abschnitt 5).
+> **Komplex** (Nebenläufigkeit, mehrere Dienste, Sync, Algorithmen)? → **Fable 5.2**.
+> **Normales Feature, UI oder Doku?** → **Sonnet 5.5**.
+> **Review, Security, Vertrag?** → **Opus 5.5**.
+> **Rein mechanisch?** → **Haiku**.
+> Mehrere **unabhängige Features**? → **Subagents parallel** (Abschnitt 5).
+
+### Argon (ruht)
+
+Gemini 4 Argon wurde am 30.09.2026 angekündigt. Der Owner hat Argon am 11.11.2026 pausiert.
+Frühere Einschätzung, falls Argon zurückkehrt: Stärken bei sehr langem Kontext (~1 Mio. Tokens), Multimodalität (Mockup → UI), Security-Audits und Wissensarbeit.
+Schwächen bei Terminal-Arbeit, knifflichen Algorithmen und Verfügbarkeit (läuft nur, wenn der Owner Antigravity startet).
+Die Zahlen stammten von Google oder aus Sekundärquellen und wurden nicht unabhängig geprüft.
+Die früheren Aufgaben von Argon liegen jetzt bei Opus (Security-Audits, Gegen-Reviews) und Sonnet (UI, Doku).
+Fehlt ein Blick auf ein Bild oder ein sehr großes Dokument, liest Claude es selbst in Teilen.
 
 ## 4. Modell-Routing (Pflicht)
 
 Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so günstig wie möglich.
 
-### Claude-Seite (Subagents, Workflows, Cloud-Sessions)
-
 | Modell | Wann |
 |---|---|
-| **Opus** | Architektur, Schnittstellen, Reviews (v. a. von Argon-PRs), Debugging, Security-kritischer Code, Merge-Konflikte |
-| **Sonnet** | Features nach klarer Spezifikation, Tests schreiben, normale Refactorings |
-| **Haiku** | Mechanisches: Suchen, Umbenennen, Formatieren, kleine Doku-Änderungen, Zusammenfassungen |
+| **Fable 5.2** | Komplexeste Features: Nebenläufigkeit und Locks, Ketten über mehrere Dienste, Sync, schwierige Algorithmen |
+| **Opus 5.5** | Reviews von Code, Security-Reviews und Gegen-Reviews (ersetzt Argons Gegen-Review), Verträge und Architektur |
+| **Sonnet 5.5** | Standard für Features, UI und Doku sowie Reviews von Doku |
+| **Haiku** | Mechanisches: Umbenennen, Labels, einfache Formatierung |
 
-### Gemini-Seite (Modellwahl in Antigravity)
-
-| Modell | Wann |
-|---|---|
-| **Gemini 4 Argon (Medium)** | Standard für alle `agent:argon`-Issues |
-| **Gemini 3.8 Flash (Medium)** | Nur wenn **alle** offenen Argon-Issues das Label `modell:flash` tragen (einfache Massenarbeit). Spart Abo-Kontingent |
-
-Claude markiert im Issue, welches Modell sinnvoll ist (Label `modell:flash` nur bei einfachen Tasks).
+(Ruht: Die frühere Gemini-Tabelle mit Argon und Flash gilt nicht, solange Argon pausiert ist.)
 
 ## 4a. Token-Budget (Owner-Auftrag vom 05.11.2026)
 
@@ -123,6 +117,12 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 - Screenshots nur bei UI-Änderungen.
 - Höchstens **2 Subagents gleichzeitig** (Autoren und Reviewer zusammengezählt), außer der Owner gibt mehr frei.
 
+**Neue Regeln ab 11.11.2026 (Arbeit ohne Argon).**
+- **Knappe Briefs:** Der Auftrag nennt Abschnittsverweise (z. B. „Vertrag §3.2“) und eine Dateiliste. Ganze Verträge werden nicht eingefügt.
+- **Vollständig implementieren:** Agents liefern das Feature komplett mit Tests, keine Platzhalter und kein „Rest folgt“.
+- **Höchstens 1 Nacharbeitsrunde:** Danach entscheidet Claude, ob er selbst korrigiert oder neu zuschneidet. Das gilt zusätzlich zu den Nachrunden-Regeln oben.
+- **Review-Tiefe nach Risiko:** Stufe A (kritisch) bekommt das volle Review durch Opus, Security-Kritisches zusätzlich ein Gegen-Review durch einen weiteren frischen Opus-Subagent. Stufe B (normal) bekommt das gezielte Review.
+
 **Lead-Session.** Ist der Verlauf sehr lang, übergibt Claude an eine neue Session. Den Stand findet die neue Session in offenen Issues und PRs sowie in einer kurzen Übergabe-Notiz, die Claude vorher als Issue mit dem Titel „Lead-Übergabe“ anlegt. PR-Abos werden nach dem Merge sofort beendet.
 
 ## 5. Parallele Features mit Claude-Subagents
@@ -140,9 +140,11 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 3. **Gemeinsame Dateien** (Routing, Navigation, `package.json`, Lockfile) ändert nur Claude beim Integrieren.
 4. **Ein Branch pro Task**, abgezweigt vom aktuellen `main`; kleine PRs, schnell mergen, danach rebasen.
 5. **Merge-Reihenfolge** bestimmt Claude, Konflikte löst Claude.
-6. **Argon** zählt als weiterer paralleler Worker mit denselben Regeln. Über `status:in-arbeit` sieht jeder, was belegt ist.
+6. **Argon** (pausiert) zählte als weiterer paralleler Worker mit denselben Regeln. Über `status:in-arbeit` sieht jeder, was belegt ist.
 
-## 5a. Fallback: Argons Limit ist aufgebraucht
+## 5a. Fallback: Argons Limit ist aufgebraucht (ruht)
+
+_Gilt nur, wenn Argon wieder aktiv ist. Solange er pausiert ist, laufen weder der Poller `scripts/claude-argon-poll.sh` noch die stündliche geplante Aufgabe dafür. Kurz: Claude übernimmt Argons Branch `argon/issue-<nr>`, tauscht die Labels gegen `agent:claude` und arbeitet dort weiter._
 
 Das Gemini-Abo hat Nutzungslimits. Ist es aufgebraucht, macht Claude weiter, und die Arbeit geht nicht verloren:
 
@@ -163,16 +165,16 @@ Das Gemini-Abo hat Nutzungslimits. Ist es aufgebraucht, macht Claude weiter, und
 
 **Nachts / ohne Owner (Claude):**
 - `agent:claude`-Issues und vom Owner vorgegebene Ziele umsetzen, bei Bedarf mit Subagents/Workflows
-- Argon-PRs reviewen, die Argon-Queue für den nächsten Schub vorbereiten
+- Offene PRs von Subagents reviewen lassen und mergen (Argon-Queue ruht)
 - Fragen an den Owner als Issue mit `status:blockiert` sammeln statt zu raten
 
 **Morgens (Owner, ca. 5 Minuten):**
 1. Fragen beantworten: `gh issue list --label status:blockiert`. Nach der Antwort das Label `status:blockiert` entfernen
 2. Optional ansehen, was Claude gemergt hat: `gh pr list --state merged --limit 10`. Soll ein offener PR **nicht** gemergt werden: Label `status:halt` setzen
-3. Optional, als Zusatzkapazität: Antigravity öffnen, Modell wählen, Prompt aus [`docs/argon/DAUERBETRIEB.md`](argon/DAUERBETRIEB.md) einfügen. Argon arbeitet seine Queue ab und wartet danach selbstständig auf neue Aufgaben, solange der Mac an ist. Ohne Argon läuft das Projekt trotzdem weiter
+3. (Ruht, Argon pausiert) Optional, als Zusatzkapazität: Antigravity öffnen, Modell wählen, Prompt aus [`docs/argon/DAUERBETRIEB.md`](argon/DAUERBETRIEB.md) einfügen. Argon arbeitet seine Queue ab und wartet danach selbstständig auf neue Aufgaben, solange der Mac an ist. Ohne Argon läuft das Projekt trotzdem weiter
 4. Hängt ein Issue auf `status:in-arbeit`, ohne dass jemand daran arbeitet: `gh issue edit <nr> --remove-label status:in-arbeit`
 
-## 7. Pilotphase: Argons Stärken im echten Projekt prüfen
+## 7. Pilotphase: Argons Stärken im echten Projekt prüfen (ruht)
 
 1. **Onboarding (Issue #1):** Argon prüft den Prozess selbst und verbessert `GEMINI.md`/Start-Prompt – testet den kompletten Ablauf Issue → PR → Review.
 2. **Multimodal:** Screenshot/Skizze → UI-Komponente (sobald der Tech-Stack steht).
@@ -183,7 +185,7 @@ Das Gemini-Abo hat Nutzungslimits. Ist es aufgebraucht, macht Claude weiter, und
 
 Siehe [`ERFAHRUNGSLOG.md`](ERFAHRUNGSLOG.md) (eigene Datei, damit es keine Merge-Konflikte mit dieser Doku gibt).
 
-## Einrichtung (einmalig, durch den Owner)
+## Einrichtung (einmalig, durch den Owner; ruht, solange Argon pausiert ist)
 
 1. (Erledigt am 04.11.2026) Setup nach `main` gemergt – ohne `GEMINI.md`/`AGENTS.md` auf `main` startet Argon nicht (der Start-Prompt prüft das).
 2. Antigravity installieren, mit dem Google-Konto des Abos anmelden, Repo klonen und öffnen.

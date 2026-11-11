@@ -9,7 +9,7 @@ Diese Datei gilt für **alle** Agenten. `CLAUDE.md` und `GEMINI.md` ergänzen nu
 |---|---|---|---|
 | **Owner** | Mensch | GitHub | Ziele setzen, Entscheidungen, **Merges nach `main`** |
 | **Lead** | Claude | Claude Code (Claude-Abo, Cloud-Sessions) | Architektur, Aufgaben zerlegen und verteilen, Reviews, Integration, CI |
-| **Spezialist** | Argon (Gemini 4 Argon) | Google Antigravity (Gemini-Abo, auf dem Rechner des Owners) | Bearbeitet die Issue-Queue mit Label `agent:argon` |
+| **Spezialist** (pausiert) | Argon (Gemini 4 Argon) | Google Antigravity (Gemini-Abo, auf dem Rechner des Owners) | Bearbeitet die Issue-Queue mit Label `agent:argon`. **Seit 11.11.2026 pausiert**, es arbeitet nur Claude mit Subagents |
 | **Worker** | Claude-Subagents | vom Lead gestartet, eigene Worktrees/Branches | Parallele Feature-Arbeit |
 
 Claude und Argon können sich nicht direkt aufrufen. **GitHub ist die einzige Schnittstelle:**
@@ -19,6 +19,8 @@ Details: [`docs/KOLLABORATION.md`](docs/KOLLABORATION.md).
 ## Labels
 
 Anlegen mit `bash scripts/setup-labels.sh`.
+
+> Seit 11.11.2026 arbeitet das Projekt ohne Argon. `agent:argon`, `argon:limit` und `modell:flash` werden derzeit nicht genutzt.
 
 | Label | Wo | Bedeutung | Setzt |
 |---|---|---|---|
@@ -52,7 +54,7 @@ nicht über GitHub-Approvals (eigene PRs kann man auf GitHub nicht approven).
 10. **Ehrlich berichten.** Was nicht getestet wurde oder nicht funktioniert, steht im PR – nichts schönreden.
 11. **Bei Unklarheit nicht raten:** Frage ins Issue schreiben, `status:blockiert` setzen, mit dem nächsten Task weitermachen.
 12. **Abhängigkeiten:** Ein Issue mit „Abhängig von #X“ erst bearbeiten, wenn der PR zu #X gemergt ist.
-13. **Übernahme bei Argon-Limit:** Siehe `docs/KOLLABORATION.md`, Abschnitt „Fallback“. Claude arbeitet dann auf Argons Branch weiter. Die Arbeit geht nie verloren, weil Argon Zwischenstände pusht.
+13. **Übernahme bei Argon-Limit (ruht, Argon ist pausiert):** Siehe `docs/KOLLABORATION.md`, Abschnitt „Fallback“. Claude arbeitet dann auf Argons Branch weiter. Die Arbeit geht nie verloren, weil Argon Zwischenstände pusht.
 
 ## PR-Beschreibung (Pflichtinhalt)
 
