@@ -1,5 +1,5 @@
 # CI (10 §1): Lint, Typen, Tests, Codegen-Prüfung, Contract-Tests, Secret-Scanning.
-# Swift: Contract-Check im Swift-6-Sprachmodus unter Linux; die iOS-SDK-Typprüfung läuft lokal auf dem Mac (kein macOS-Runner).
+# Swift: Contract-Check im Swift-6-Sprachmodus unter Linux; die iPad-App baut und testet der Job `ipad` auf einem macOS-Runner im Simulator.
 name: CI
 
 on:
@@ -104,6 +104,58 @@ jobs:
       - run: swift --version
       - name: Schemas.swift + swift-support kompilieren, Sync-Beispiele und Striche round-trippen
         run: bash packages/schemas/swift-support/check.sh
+
+  ipad:
+    name: iPad-App (Build und Tests im Simulator)
+    # macOS-Runner sind für öffentliche Repos kostenlos
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Betrifft die Änderung die iPad-App?
+        id: changes
+        run: |
+          # Im PR ist HEAD der Merge-Commit, HEAD^1 der Stand von main: Der Unterschied ist genau der PR.
+          # Auf main ist HEAD^1 der Stand vor dem Merge. Lässt sich das nicht bestimmen, wird gebaut.
+          run=true
+          if files="$(git diff --name-only HEAD^1 HEAD 2>/dev/null)"; then
+            pattern='^(apps/ipad/|packages/schemas/swift-support/|packages/schemas/generated/swift/|\.github/workflows/ci\.yml$)'
+            if ! grep -qE "$pattern" <<<"$files"; then
+              run=false
+              echo "Keine Änderung an der iPad-App, Build wird übersprungen."
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+      - name: Xcode-Version
+        if: steps.changes.outputs.run == 'true'
+        run: xcodebuild -version
+      - name: Xcode-Projekt erzeugen (XcodeGen)
+        if: steps.changes.outputs.run == 'true'
+        run: bash apps/ipad/scripts/projekt-erzeugen.sh
+      - name: iPad-Simulator wählen
+        id: simulator
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          udid="$(bash apps/ipad/scripts/ci-simulator.sh)"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: App bauen und Tests ausführen
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project apps/ipad/StudienGehirn.xcodeproj \
+            -scheme StudienGehirn \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }}" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+      - name: Fehler aus dem Build-Log (Kurzfassung)
+        if: failure() && steps.changes.outputs.run == 'true'
+        run: |
+          if [ -f "$RUNNER_TEMP/xcodebuild.log" ]; then
+            grep -nE "error:|\*\* (BUILD|TEST) FAILED|XCTAssert|: failed" "$RUNNER_TEMP/xcodebuild.log" | head -200 || true
+          fi
 
   secrets:
     name: Secret-Scanning

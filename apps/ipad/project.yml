@@ -1,0 +1,57 @@
+# XcodeGen-Beschreibung der iPad-App. Das Xcode-Projekt wird daraus erzeugt und nicht eingecheckt:
+#   bash apps/ipad/scripts/projekt-erzeugen.sh
+# Team-ID nie hier eintragen (öffentliches Repo), sondern in Config/Local.xcconfig oder in Xcode wählen.
+name: StudienGehirn
+
+options:
+  bundleIdPrefix: de.studiengehirn
+  deploymentTarget:
+    # iPad Air M2 wurde mit iPadOS 17.4 ausgeliefert. 17.0 reicht für Observation und deckt jedes Update ab.
+    iOS: '17.0'
+  developmentLanguage: de
+  createIntermediateGroups: true
+
+configFiles:
+  Debug: Config/Base.xcconfig
+  Release: Config/Base.xcconfig
+
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    TARGETED_DEVICE_FAMILY: '2'
+    MARKETING_VERSION: '0.1.0'
+    CURRENT_PROJECT_VERSION: '1'
+
+targets:
+  StudienGehirn:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+      # Generierte Typen und Hilfsschicht werden direkt eingebunden, nicht kopiert (VERTRAEGE §11.7, §16.3)
+      # Achtung: Schemas.swift liegt damit im App-Modul und verdeckt Task (auch Page, Stroke).
+      # In der App darum immer _Concurrency.Task schreiben. Ein eigenes Modul geht nicht, die Typen sind internal.
+      - path: ../../packages/schemas/generated/swift/Schemas.swift
+      - path: ../../packages/schemas/swift-support/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.studiengehirn.ipad
+        INFOPLIST_FILE: Config/Info.plist
+        GENERATE_INFOPLIST_FILE: 'NO'
+        ASSETCATALOG_COMPILER_APPICON_NAME: ''
+        CODE_SIGN_STYLE: Automatic
+    scheme:
+      testTargets:
+        - StudienGehirnTests
+
+  StudienGehirnTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: StudienGehirn
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: de.studiengehirn.ipad.tests
+        GENERATE_INFOPLIST_FILE: 'YES'

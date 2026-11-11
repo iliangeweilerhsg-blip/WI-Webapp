@@ -1,0 +1,6 @@
+# Aus project.yml erzeugt (bash scripts/projekt-erzeugen.sh)
+*.xcodeproj/
+# Lokale Signatur-Einstellungen (Team-ID), nie einchecken
+Config/Local.xcconfig
+DerivedData/
+build/

@@ -1,0 +1,5 @@
+// Gemeinsame Einstellungen. Die Team-ID gehört NICHT ins Repo (öffentlich).
+// Wer nicht nach jedem Erzeugen des Projekts das Team in Xcode wählen will, legt daneben
+// Config/Local.xcconfig an (steht in .gitignore) mit der Zeile:
+//   DEVELOPMENT_TEAM = <deine Team-ID>
+#include? "Local.xcconfig"
