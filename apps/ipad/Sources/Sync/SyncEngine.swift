@@ -284,7 +284,24 @@ final class SyncEngine {
         return ensurePageCreated(last, index: 1)
     }
 
-    private func resolveOnline(_ credentials: Credentials) async throws -> InkBinding? {
+    /// Notizbuch der laufenden Vorlesung laut Core, nur lesend: Es wird nichts angelegt oder gespeichert.
+    /// `nil` ohne Verbindung, ohne laufende Vorlesung oder bei einem Fehler (UX-19).
+    func runningLectureNotebookID() async -> String? {
+        guard canReachCore, let credentials = credentials() else { return nil }
+        // Ohne Modulnamen: Diese Abfrage läuft bei jeder neuen Verbindung, der Name wird hier nicht gebraucht
+        guard let found = try? await lookupLecture(credentials, withModuleName: false) else { return nil }
+        return found.notebook.id
+    }
+
+    private struct LectureLookup {
+        var session: Session
+        var notebook: Notebook
+        var moduleName: String?
+    }
+
+    /// Fragt Session, Notizbuch und auf Wunsch den Modulnamen ab. Der Name ist nicht lebenswichtig: Scheitert er,
+    /// bleibt er `nil`.
+    private func lookupLecture(_ credentials: Credentials, withModuleName: Bool) async throws -> LectureLookup? {
         let sessions = try await client.activeSessions(endpoint: credentials.endpoint, token: credentials.token)
         // Die zuletzt begonnene Session
         guard
@@ -295,11 +312,25 @@ final class SyncEngine {
         guard let notebook = notebooks.first(where: { $0.kind == .vorlesung && $0.deletedAt == nil }) else {
             return nil
         }
+        var name: String?
+        if withModuleName {
+            name = try? await client.moduleName(
+                endpoint: credentials.endpoint, token: credentials.token, moduleID: session.moduleID)
+        }
+        return LectureLookup(session: session, notebook: notebook, moduleName: name)
+    }
+
+    private func resolveOnline(_ credentials: Credentials) async throws -> InkBinding? {
+        guard let found = try await lookupLecture(credentials, withModuleName: true) else { return nil }
+        let session = found.session
+        let notebook = found.notebook
+        let moduleName = found.moduleName
         let startMS = session.startedAt.map { InkStrokeCodec.milliseconds($0) }
 
         if var existing = bindings.binding(forNotebook: notebook.id) {
             existing.sessionID = session.id
             existing.sessionStartMS = startMS
+            existing.moduleName = moduleName ?? existing.moduleName
             bindings.save(existing, makeLast: true)
             return ensurePageCreated(existing, index: 1)
         }
@@ -310,6 +341,7 @@ final class SyncEngine {
         if var existing = bindings.binding(forNotebook: notebook.id) {
             existing.sessionID = session.id
             existing.sessionStartMS = startMS
+            existing.moduleName = moduleName ?? existing.moduleName
             bindings.save(existing, makeLast: true)
             return ensurePageCreated(existing, index: pages.count + 1)
         }
@@ -320,7 +352,8 @@ final class SyncEngine {
             pageCreated: false,
             needsReconcile: false,
             sessionID: session.id,
-            sessionStartMS: startMS
+            sessionStartMS: startMS,
+            moduleName: moduleName
         )
         // Erst die Bindung, dann `page.create`: Bricht die App dazwischen ab, holt der nächste Start es nach
         bindings.save(binding, makeLast: true)
