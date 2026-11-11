@@ -124,11 +124,25 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 
 **Cache-Regel (Owner, 11.11.2026).** Der Cache von Subagents hält nur etwa 5 Minuten. Darum gilt:
 - Kein Agent wartet länger als 5 Minuten im Leerlauf: kein `sleep` und kein Polling langer Hintergrund-Tests.
-- Tests laufen gezielt und im Vordergrund. Die volle Suite läuft einmal am Ende, bei Bedarf in Teilen von jeweils unter 5 Minuten.
+- Tests laufen gezielt und im Vordergrund, nie mit `run_in_background`. Die volle Suite läuft einmal am Ende, bei Bedarf in Teilen von jeweils unter 5 Minuten.
 - Einen Agent wiederverwenden geht nur innerhalb von 5 Minuten nach seiner letzten Antwort. Sonst übernimmt ein frischer Agent mit kurzem Brief.
 - Kleine Review-Befunde behebt der Reviewer selbst im selben Lauf.
 
 **Lead-Session.** Ist der Verlauf sehr lang, übergibt Claude an eine neue Session. Den Stand findet die neue Session in offenen Issues und PRs sowie in einer kurzen Übergabe-Notiz, die Claude vorher als Issue mit dem Titel „Lead-Übergabe“ anlegt. PR-Abos werden nach dem Merge sofort beendet.
+
+**Fragen an den Owner (Entscheidungsdokument, Owner-Regel vom 11.11.2026).** Das Repo ist öffentlich. Darum stellt Claude Fragen nicht im Chat, sondern als Issue.
+- Jede Frage ist ein eigenes Issue mit dem Label `entscheidung`. Dringende bekommen zusätzlich `dringend`.
+- Jede Frage wird in der Übersicht #188 verlinkt.
+- Nachfragen laufen im jeweiligen Issue.
+- Schreibt der Owner im Chat „Fragen beantwortet“, liest Claude alle Antworten und arbeitet weiter. Erledigte Issues schließt Claude.
+- Ausnahme: Geheimes und Persönliches bleibt im Chat, nie im Issue.
+
+**Ruhemodus im Chat (Owner-Regel vom 11.11.2026).**
+- Agent-Meldungen arbeitet der Lead still ab: Review, CI, Merge, nächster Agent. Im Chat erscheint dazu höchstens eine ⚙-Zeile.
+- Der laufende Stand steht in #188 unter „Aktueller Stand“. Auf „Stand?“ antwortet Claude mit einer Zusammenfassung.
+- Ausführlich wird nur bei Antworten an den Owner, bei Dringendem und bei Aufgaben für den Owner.
+- Nachrichten des Owners haben Vorrang vor Agent-Meldungen.
+- Schreibt der Owner „Gespräch“, entfallen auch die ⚙-Zeilen, bis er „weiter“ schreibt.
 
 ## 5. Parallele Features mit Claude-Subagents
 
