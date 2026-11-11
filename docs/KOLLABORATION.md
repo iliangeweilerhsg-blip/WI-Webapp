@@ -133,7 +133,7 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 **Fragen an den Owner (Entscheidungsdokument, Owner-Regel vom 11.11.2026).** Das Repo ist öffentlich. Darum stellt Claude Fragen nicht im Chat, sondern als Issue.
 - Jede Frage ist ein eigenes Issue mit dem Label `entscheidung`. Dringende bekommen zusätzlich `dringend`.
 - Jede Frage wird in der Übersicht #188 verlinkt.
-- Nachfragen laufen im Issue oder im Chat. Das Ergebnis steht immer im Issue.
+- Nachfragen laufen im jeweiligen Issue.
 - Schreibt der Owner im Chat „Fragen beantwortet“, liest Claude alle Antworten und arbeitet weiter. Erledigte Issues schließt Claude.
 - Ausnahme: Geheimes und Persönliches bleibt im Chat, nie im Issue.
 
