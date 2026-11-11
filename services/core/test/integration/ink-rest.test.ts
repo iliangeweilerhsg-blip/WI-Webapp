@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  SINGLE_USER_ID,
   ApiErrorSchema,
   FileReceiptSchema,
   NotebookListSchema,
@@ -18,10 +19,11 @@ import {
   type Semester,
   type Stroke,
 } from '@sg/shared';
-import { notebook, page } from '../../src/db/schema/index.ts';
+import { calendarEvent, courseModule, notebook, page, session } from '../../src/db/schema/index.ts';
+import { createDevice } from '../../src/services/devices.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { appendOp } from '../../src/sync/append.ts';
-import { startTestApp, type TestApp } from './helpers.ts';
+import { startTestApp, TEST_PORT, type TestApp } from './helpers.ts';
 import {
   loadStrokeFixtures,
   makeOp,
@@ -705,5 +707,116 @@ describe('Fotos: PUT/GET /photos/{id}/file und photo.add', () => {
     expect(results.filter((r) => r.statusCode === 201)).toHaveLength(1);
     const files = readdirSync(join(t.config.dataDir, 'media', 'photos'));
     expect(files).toEqual([`${id}.jpg`]);
+  });
+});
+
+describe('GET /sessions/{id}/notebook (#199)', () => {
+  /** Session des Moduls, mit Termin der Art `kind` (oder ohne Termin) */
+  async function sessionWith(kind: string | null, eventDeleted = false, state = 'laeuft'): Promise<string> {
+    let eventId: string | null = null;
+    if (kind !== null) {
+      eventId = uuidv7();
+      await t.handle.db.insert(calendarEvent).values({
+        id: eventId,
+        userId: SINGLE_USER_ID,
+        deletedAt: eventDeleted ? new Date() : null,
+        moduleId: seed.moduleId,
+        kind,
+        title: 'Termin',
+        startsAt: new Date(),
+        endsAt: new Date(),
+      });
+    }
+    const id = uuidv7();
+    await t.handle.db.insert(session).values({
+      id,
+      userId: SINGLE_USER_ID,
+      moduleId: seed.moduleId,
+      calendarEventId: eventId,
+      state,
+      startedFrom: 'ipad',
+    } as typeof session.$inferInsert);
+    return id;
+  }
+
+  async function notebookOf(sessionId: string): Promise<Notebook> {
+    const res = await json('GET', `/sessions/${sessionId}/notebook`);
+    expect(res.statusCode, res.body).toBe(200);
+    return NotebookSchema.parse(res.json());
+  }
+
+  it.each([
+    [null, 'vorlesung'],
+    ['vorlesung', 'vorlesung'],
+    ['uebung', 'uebung'],
+    ['tutorium', 'uebung'],
+    ['pruefung', 'vorlesung'],
+  ] as const)('Termin %s → Notizbuch %s', async (eventKind, wanted) => {
+    const nb = await notebookOf(await sessionWith(eventKind));
+    expect(nb.kind).toBe(wanted);
+    expect(nb.module_id).toBe(seed.moduleId);
+    expect(nb.title).toBe(wanted === 'uebung' ? 'Übung' : 'Vorlesung');
+  });
+
+  it('weich gelöschter Termin zählt mit seiner Art', async () => {
+    expect((await notebookOf(await sessionWith('uebung', true))).kind).toBe('uebung');
+  });
+
+  it('legt fehlende Standard-Notizbücher an (Modul direkt in der DB), zweiter Aufruf liefert dasselbe', async () => {
+    const id = await sessionWith('uebung');
+    const first = await notebookOf(id);
+    const second = await notebookOf(id);
+    expect(second.id).toBe(first.id);
+    const rows = await t.handle.db.select().from(notebook).where(eq(notebook.moduleId, seed.moduleId));
+    expect(rows.map((r) => r.kind).sort()).toEqual(['uebung', 'vorlesung']);
+  });
+
+  it('gelöschte oder unbekannte Session → 404 session_not_found', async () => {
+    const id = await seedSession(t.handle.db, seed.moduleId, new Date());
+    expect((await errorOf(await json('GET', `/sessions/${id}/notebook`), 404)).code).toBe(
+      'session_not_found',
+    );
+    expect((await errorOf(await json('GET', `/sessions/${uuidv7()}/notebook`), 404)).code).toBe(
+      'session_not_found',
+    );
+  });
+
+  it('Modul per DELETE /modules gelöscht → 404 session_not_found (Kaskade)', async () => {
+    const id = await sessionWith('uebung', false, 'beendet');
+    expect((await json('DELETE', `/modules/${seed.moduleId}`)).statusCode).toBe(204);
+    expect((await errorOf(await json('GET', `/sessions/${id}/notebook`), 404)).code).toBe(
+      'session_not_found',
+    );
+  });
+
+  it('nur module.deleted_at direkt gesetzt → 404 notebook_not_found', async () => {
+    const id = await sessionWith('uebung');
+    await t.handle.db
+      .update(courseModule)
+      .set({ deletedAt: new Date() })
+      .where(eq(courseModule.id, seed.moduleId));
+    expect((await errorOf(await json('GET', `/sessions/${id}/notebook`), 404)).code).toBe(
+      'notebook_not_found',
+    );
+  });
+
+  it('ungültige ID → 400', async () => {
+    expect((await json('GET', '/sessions/nope/notebook')).statusCode).toBe(400);
+  });
+
+  it('aus dem Netz: ohne Token 401, mit Geräte-Token 200', async () => {
+    const id = await sessionWith('tutorium');
+    const net = (token?: string) =>
+      t.app.inject({
+        method: 'GET',
+        url: `${API}/sessions/${id}/notebook`,
+        remoteAddress: '192.168.1.20',
+        headers: { host: `192.168.1.5:${TEST_PORT}`, ...(token ? { authorization: `Bearer ${token}` } : {}) },
+      });
+    expect((await net()).statusCode).toBe(401);
+    const { token } = await createDevice(t.handle.db, { name: 'iPad', kind: 'ipad', appVersion: null });
+    const res = await net(token);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(NotebookSchema.parse(res.json()).kind).toBe('uebung');
   });
 });

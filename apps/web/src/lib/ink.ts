@@ -3,9 +3,11 @@
 import {
   NotebookListSchema,
   NotebookPagesSchema,
+  NotebookSchema,
   PageDetailSchema,
   PageStrokesSchema,
   StrokeSchema,
+  type Notebook,
   type NotebookList,
   type NotebookPages,
   type PageDetail,
@@ -17,6 +19,19 @@ import { apiGet, type Parser } from './api.ts';
 export function fetchNotebooks(moduleId?: string, signal?: AbortSignal): Promise<NotebookList> {
   const query = moduleId ? `?module_id=${encodeURIComponent(moduleId)}` : '';
   return apiGet(`/notebooks${query}`, NotebookListSchema, { signal });
+}
+
+/** `GET /notebooks/{id}` – ein Notizbuch (404, wenn es gelöscht ist oder sein Modul). */
+export function fetchNotebook(notebookId: string, signal?: AbortSignal): Promise<Notebook> {
+  return apiGet(`/notebooks/${encodeURIComponent(notebookId)}`, NotebookSchema, { signal });
+}
+
+/**
+ * `GET /sessions/{id}/notebook` – das Notizbuch der Session (#199, VERTRAEGE §7.2). Der Core entscheidet:
+ * Übung und Tutorium zeigen „Übung“, alles andere „Vorlesung“.
+ */
+export function fetchSessionNotebook(sessionId: string, signal?: AbortSignal): Promise<Notebook> {
+  return apiGet(`/sessions/${encodeURIComponent(sessionId)}/notebook`, NotebookSchema, { signal });
 }
 
 /** `GET /notebooks/{id}/pages` – Seiten nach `index`, mit `stream_seq`/`stream_op_id` für das Abonnement. */

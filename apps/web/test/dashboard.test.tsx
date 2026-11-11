@@ -69,9 +69,20 @@ const notebook = (id: string, kind: Notebook['kind'], created: string): Notebook
 const NB_UEBUNG = notebook('0190f6a2-0000-7000-8000-0000000000c2', 'uebung', '2026-11-01T08:00:00Z');
 const NB_VL = notebook('0190f6a2-0000-7000-8000-0000000000c3', 'vorlesung', '2026-11-01T08:00:01Z');
 
+const presenceOf = (notebookId: string | null) => ({
+  client: 'ipad',
+  device_id: '0190f6a2-0000-7000-8000-0000000000d1',
+  device_name: 'iPad',
+  session_id: SESSION_ID,
+  notebook_id: notebookId,
+  page_id: null,
+});
+
 /** Sync-Client mit steuerbaren Ereignissen */
 function fakeSync(state = 'online') {
   const listeners = new Map<string, Set<(data: unknown) => void>>();
+  /** Letzte `presence` des iPads, wie `SyncClient.devicePresence('ipad')` sie liefert */
+  let ipad: unknown = null;
   const client = {
     connectionState: state,
     connect: vi.fn(async () => undefined),
@@ -85,11 +96,21 @@ function fakeSync(state = 'online') {
     takeOver: vi.fn(),
     listShelf: vi.fn(async () => []),
     subscribe: vi.fn(),
+    devicePresence: vi.fn(() => ipad),
   };
   return {
     client: client as unknown as SyncClient,
     emit: (name: string, data: unknown) => {
       for (const fn of listeners.get(name) ?? []) fn(data);
+    },
+    /** `presence` des iPads: wird nachlesbar und als Ereignis gemeldet */
+    ipadPresence(notebookId: string | null) {
+      ipad = presenceOf(notebookId);
+      for (const fn of listeners.get('presence') ?? []) fn(ipad);
+    },
+    /** Nur nachlesbar (kam vor dem Einhängen der Spalte) */
+    setIpadBefore(notebookId: string | null) {
+      ipad = presenceOf(notebookId);
     },
     setState(next: string) {
       client.connectionState = next;
@@ -127,6 +148,8 @@ function boot(
     devices?: ReturnType<typeof makeDevice>[];
     now?: string;
     search?: string;
+    /** `presence` des iPads, die schon vor dem Einhängen der Spalte da war */
+    ipadNotebook?: string | null;
   } = {},
 ) {
   vi.setSystemTime(new Date(opts.now ?? NOW));
@@ -144,6 +167,7 @@ function boot(
   core.settingsGate = opts.hold?.settings ?? null;
   core.eventGate = opts.hold?.event ?? null;
   sync = fakeSync(opts.syncState);
+  if (opts.ipadNotebook !== undefined) sync.setIpadBefore(opts.ipadNotebook);
   return render(
     <ThemeProvider>
       <QueryProvider>
@@ -203,9 +227,9 @@ describe('Dashboard: Aufbau', () => {
     expect(core.requests.some((r) => r.path === `/notebooks?module_id=${DBS.id}`)).toBe(true);
   });
 
-  it('Notizen: ohne Notizbuch steht ein ruhiger Hinweis', async () => {
+  it('Notizen: gibt der Core kein Notizbuch her, steht ein ruhiger Hinweis', async () => {
     boot({ notebooks: [] });
-    expect(await screen.findByText('Zu diesem Modul gibt es noch kein Notizbuch.')).toBeVisible();
+    expect(await screen.findByText(/Notizen nicht erreichbar/)).toBeVisible();
   });
 
   it('ohne ?id steht ein Hinweis mit Weg zurück', async () => {
@@ -635,56 +659,97 @@ describe('Dashboard: Auto-Stopp-Hinweis', () => {
 
 const root = document.documentElement;
 
-describe('Dashboard: Notizbuch nach Termintyp (Punkt 1)', () => {
+describe('Dashboard: Notizbuch der Session vom Core (#199)', () => {
   const EVENT_ID = '0190f6a2-0000-7000-8000-0000000000f1';
-  const pick = async (kind: CalendarEvent['kind'] | 'fehlt' | 'ohne') => {
-    const events = kind === 'fehlt' || kind === 'ohne' ? [] : [makeEvent({ id: EVENT_ID, kind })];
+  const OTHER_MODULE = '0190f6a2-0000-7000-8000-0000000000a9';
+  const NB_FREI = { ...notebook('0190f6a2-0000-7000-8000-0000000000c4', 'frei', '2026-11-02T08:00:00Z') };
+  const NB_FREMD = {
+    ...notebook('0190f6a2-0000-7000-8000-0000000000c5', 'frei', '2026-11-02T09:00:00Z'),
+    module_id: OTHER_MODULE,
+  };
+  const inkColumn = async () =>
+    within(await screen.findByRole('group', { name: 'Notizen' })).findByTestId('ink-column');
+
+  const pick = async (kind: CalendarEvent['kind'] | 'ohne') => {
     boot({
       session: running({ calendar_event_id: kind === 'ohne' ? null : EVENT_ID }),
-      events,
+      events: kind === 'ohne' ? [] : [makeEvent({ id: EVENT_ID, kind })],
     });
-    const col = await screen.findByRole('group', { name: 'Notizen' });
-    return (await within(col).findByTestId('ink-column')).textContent;
+    return (await inkColumn()).textContent;
   };
 
-  it('Übung und Tutorium zeigen das Notizbuch „Übung“', async () => {
+  it('Übung und Tutorium zeigen das Notizbuch „Übung“, ohne den Termin abzufragen', async () => {
     expect(await pick('uebung')).toBe(NB_UEBUNG.id);
-    expect(core.requests.some((r) => r.path === `/calendar/events/${EVENT_ID}`)).toBe(true);
+    expect(core.requests.some((r) => r.path === `/sessions/${SESSION_ID}/notebook`)).toBe(true);
+    expect(core.requests.some((r) => r.path.startsWith('/calendar/events/'))).toBe(false);
     cleanup();
     expect(await pick('tutorium')).toBe(NB_UEBUNG.id);
   });
 
-  it('Vorlesung, anderer Typ, Session ohne Termin und nicht erreichbarer Termin zeigen „Vorlesung“', async () => {
+  it('Vorlesung, anderer Typ und Session ohne Termin zeigen „Vorlesung“', async () => {
     expect(await pick('vorlesung')).toBe(NB_VL.id);
     cleanup();
     expect(await pick('pruefung')).toBe(NB_VL.id);
     cleanup();
     expect(await pick('ohne')).toBe(NB_VL.id);
-    expect(core.requests.some((r) => r.path.startsWith('/calendar/events/'))).toBe(false);
-    cleanup();
-    // Der Termin gibt es nicht (404): die Notizen hängen nicht daran
-    expect(await pick('fehlt')).toBe(NB_VL.id);
   });
 
-  it('fehlt das Notizbuch „Übung“, gilt „Vorlesung“', async () => {
-    boot({
-      session: running({ calendar_event_id: EVENT_ID }),
-      events: [makeEvent({ id: EVENT_ID, kind: 'uebung' })],
-      notebooks: [NB_VL],
-    });
-    const col = await screen.findByRole('group', { name: 'Notizen' });
-    expect(await within(col).findByTestId('ink-column')).toHaveTextContent(NB_VL.id);
+  it('presence mit freiem Notizbuch desselben Moduls: die Spalte wechselt', async () => {
+    boot({ notebooks: [NB_UEBUNG, NB_VL, NB_FREI] });
+    expect(await inkColumn()).toHaveTextContent(NB_VL.id);
+    act(() => sync.ipadPresence(NB_FREI.id));
+    await waitFor(() => expect(screen.getByTestId('ink-column')).toHaveTextContent(NB_FREI.id));
+  });
+
+  it('presence vor dem Einhängen (nur über devicePresence): die Spalte zeigt gleich das gemeldete Notizbuch', async () => {
+    boot({ notebooks: [NB_UEBUNG, NB_VL, NB_FREI], ipadNotebook: NB_FREI.id });
+    expect(await inkColumn()).toHaveTextContent(NB_FREI.id);
+    // Nie das Standard-Notizbuch dazwischen
+    expect(screen.queryByText(NB_VL.id)).toBeNull();
+  });
+
+  it('Notizbuch nicht in der Liste: GET /notebooks/{id} entscheidet, gleiches Modul → Wechsel', async () => {
+    boot({ notebooks: [NB_UEBUNG, NB_VL], ipadNotebook: null });
+    expect(await inkColumn()).toHaveTextContent(NB_VL.id);
+    // Frisch auf dem iPad angelegt: der Core kennt es, die geladene Liste noch nicht
+    core.notebooks = [NB_UEBUNG, NB_VL, NB_FREI];
+    act(() => sync.ipadPresence(NB_FREI.id));
+    await waitFor(() => expect(screen.getByTestId('ink-column')).toHaveTextContent(NB_FREI.id));
+    expect(gets(`/notebooks/${NB_FREI.id}`)).toBe(1);
+  });
+
+  it('presence mit Notizbuch eines anderen Moduls: kein Wechsel', async () => {
+    boot({ notebooks: [NB_UEBUNG, NB_VL, NB_FREMD] });
+    expect(await inkColumn()).toHaveTextContent(NB_VL.id);
+    act(() => sync.ipadPresence(NB_FREMD.id));
+    await waitFor(() => expect(gets(`/notebooks/${NB_FREMD.id}`)).toBe(1));
+    expect(screen.getByTestId('ink-column')).toHaveTextContent(NB_VL.id);
+  });
+
+  it('presence mit unbekanntem Notizbuch (404): kein Wechsel', async () => {
+    boot();
+    expect(await inkColumn()).toHaveTextContent(NB_VL.id);
+    act(() => sync.ipadPresence('0190f6a2-0000-7000-8000-0000000000cf'));
+    await waitFor(() => expect(gets('/notebooks/0190f6a2-0000-7000-8000-0000000000cf')).toBe(1));
+    expect(screen.getByTestId('ink-column')).toHaveTextContent(NB_VL.id);
+  });
+
+  it('presence mit notebook_id null: zurück zum Standard', async () => {
+    boot({ notebooks: [NB_UEBUNG, NB_VL, NB_FREI], ipadNotebook: NB_FREI.id });
+    expect(await inkColumn()).toHaveTextContent(NB_FREI.id);
+    act(() => sync.ipadPresence(null));
+    await waitFor(() => expect(screen.getByTestId('ink-column')).toHaveTextContent(NB_VL.id));
   });
 });
 
 describe('Dashboard: Notizen-Spalte im Fehlerfall (Punkt 4)', () => {
-  it('„Erneut versuchen“ lädt die Notizbücher neu', async () => {
+  it('„Erneut versuchen“ lädt das Notizbuch der Session neu', async () => {
     const user = userEvent.setup({ advanceTimers: () => undefined });
     boot();
-    core.failNotebooks = true;
+    core.failSessionNotebook = true;
     const col = await screen.findByRole('group', { name: 'Notizen' });
     expect(await within(col).findByText(/Notizen nicht erreichbar/)).toBeVisible();
-    core.failNotebooks = false;
+    core.failSessionNotebook = false;
     await user.click(within(col).getByRole('button', { name: 'Erneut versuchen' }));
     expect(await within(col).findByTestId('ink-column')).toHaveTextContent(NB_VL.id);
     expect(within(col).queryByRole('button', { name: 'Erneut versuchen' })).toBeNull();
@@ -997,28 +1062,6 @@ describe('Dashboard: Nachschärfungen aus dem Review (PR #126)', () => {
     expect(root).toHaveAttribute('data-theme', 'dark');
     root.removeAttribute('data-theme');
     window.localStorage.clear();
-  });
-
-  it('H2: solange der Termin lädt, rendert die Ink-Spalte nicht', async () => {
-    const EVENT_ID = '0190f6a2-0000-7000-8000-0000000000f2';
-    let release!: () => void;
-    const gate = new Promise<void>((r) => (release = r));
-    boot({
-      session: running({ calendar_event_id: EVENT_ID }),
-      events: [makeEvent({ id: EVENT_ID, kind: 'uebung' })],
-      hold: { event: gate },
-    });
-    const col = await screen.findByRole('group', { name: 'Notizen' });
-    await waitFor(() => expect(gets(`/calendar/events/${EVENT_ID}`)).toBe(1));
-    await waitFor(() => expect(gets(`/notebooks?module_id=${DBS.id}`)).toBe(1));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 80));
-    });
-    expect(within(col).queryByTestId('ink-column')).toBeNull();
-    expect(within(col).getByText('Notizen werden geladen …')).toBeVisible();
-    await act(async () => release());
-    // Erst jetzt, mit dem Termin, steht das richtige Notizbuch da (kein Umschalten von „Vorlesung“)
-    expect(await within(col).findByTestId('ink-column')).toHaveTextContent(NB_UEBUNG.id);
   });
 
   it('H3: öffnet die Ansicht bei getrennter Verbindung, lädt das erste „online“ neu', async () => {

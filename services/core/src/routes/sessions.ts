@@ -6,6 +6,7 @@ import {
   ApiErrorSchema,
   SessionCreateSchema,
   SessionExtendRequestSchema,
+  NotebookSchema,
   SessionListSchema,
   SessionSchema,
   SessionSnapshotSchema,
@@ -21,6 +22,7 @@ import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
+import { sessionNotebook } from '../services/notebooks.ts';
 import {
   createSession,
   deleteSession,
@@ -170,6 +172,19 @@ export async function sessionRoutes(app: FastifyInstance, deps: SessionRouteDeps
       },
     },
     async (request) => getSessionSnapshot(db, request.params.id),
+  );
+
+  typed.get(
+    '/sessions/:id/notebook',
+    {
+      schema: {
+        tags: ['Sessions'],
+        summary: 'Notizbuch der Session: „Übung“ bei Übung und Tutorium, sonst „Vorlesung“ (#199)',
+        params: IdParams,
+        response: { 200: NotebookSchema, 400: ApiErrorSchema, 404: ApiErrorSchema },
+      },
+    },
+    async (request) => sessionNotebook(db, request.params.id),
   );
 
   typed.post(

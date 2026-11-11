@@ -278,12 +278,14 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 | `PATCH /sessions/{id}` | `SessionUpdate` | 200 `Session` | 404 |
 | `DELETE /sessions/{id}` | – | 204 (Papierkorb über `softDeleteWithOps`, Kaskade §13, dann `session.updated` mit `deleted_at`) | 404, 409 `session_active` (läuft oder pausiert) |
 | `GET /sessions/{id}/snapshot` | – | 200 `SessionSnapshot` | 404 |
+| `GET /sessions/{id}/notebook` | – | 200 `Notebook` | 404 `session_not_found`, 404 `notebook_not_found` (Rückfall: Modul gelöscht, Session nicht. Über `DELETE /modules` kommt das nicht vor, die Kaskade §13 löscht die Sessions mit) |
 | `POST /sessions/{id}/start` | `SessionStartRequest` | 200 `SessionStartResult` | 404, 409 `session_transition_invalid` |
 | `POST /sessions/{id}/pause` | – | 200 `Session` | 404, 409 `session_transition_invalid` |
 | `POST /sessions/{id}/resume` | – | 200 `Session` | 404, 409 `session_transition_invalid` |
 | `POST /sessions/{id}/stop` | `SessionStopRequest` | 200 `Session` | 404, 409 `session_transition_invalid` |
 | `POST /sessions/{id}/extend` | `SessionExtendRequest` | 200 `Session` mit neuem `auto_stop_extended_until` | 404, 409 `session_not_active` |
 
+- **Notizbuch der Session (#199).** Der Core ist die einzige Quelle für diese Regel, iPad und Web leiten sie nicht selbst ab. Hat die Session einen Termin mit `kind` `uebung` oder `tutorium`, ist es das Notizbuch `uebung` des Moduls. In allen anderen Fällen ist es `vorlesung`, auch ohne Termin. Ein weich gelöschter Termin zählt mit seiner Art, damit das Notizbuch nicht nachträglich wechselt. Fehlen die Standard-Notizbücher, legt der Core sie vorher an (wie `GET /notebooks?module_id`, §7.4). Die Antwort hängt nicht vom Zustand der Session ab. Gelöschte Sessions ergeben 404 `session_not_found`.
 - `state` ist eine Komma-Liste, z. B. `state=laeuft,pausiert` für die aktive Session nach einem Neuladen (F-SES-05).
 - Sortierung: aufsteigend nach `coalesce(started_at, planned_starts_at, created_at)`, bei Gleichstand nach `id`.
 - `from`/`to` filtern auf denselben Zeitpunkt. Der Heute-Bildschirm (T1-03) fragt `from=<heute 00:00>&to=<morgen 00:00>` ab. Zusätzlich holt er `GET /sessions?state=laeuft,pausiert` (eine laufende Session vom Vortag) und `GET /calendar/events?from&to` für den Raum (`location`), verknüpft über `calendar_event_id`; danach hält `session.updated` die Liste aktuell. Das ist kein neuer Endpunkt.
@@ -321,6 +323,24 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 - Der Upload von `pkdrawing` und Fotos ist auch für weich gelöschte Seiten bzw. Fotos erlaubt (sie kommen mit der Datei aus dem Papierkorb zurück). `GET` liefert für gelöschte Objekte 404. Ein Foto, dessen Typ von `photo.add` abweicht (HEIC hochgeladen, JPEG gemeldet), wird beim Anlegen der Zeile als verwaiste Datei entfernt.
 - **`page.index` ist nicht eindeutig.** Das iPad ist der einzige Schreiber und hält die Reihenfolge. Bei Gleichstand gilt die Sortierung oben.
 - Der Core legt für jedes Modul die Notizbücher „Vorlesung“ (`vorlesung`) und „Übung“ (`uebung`) an: beim Anlegen des Moduls und, für ältere Module, beim ersten `GET /notebooks?module_id`. Das ist idempotent (F-INK-02).
+- **Seiten vom iPad (T1-13).**
+  - Neue Seiten hängt das iPad hinten an: `index` = höchster bekannter `index` des Notizbuchs + 1 (lokal und laut `GET /notebooks/{id}/pages`).
+  - Umsortieren: Das iPad nummeriert die Seiten dicht neu (1 … n) und sendet je Seite, deren `index` sich ändert, ein `page.update`. Nach `page.delete` bleiben Lücken stehen.
+  - Vorlage wechseln: `page.update` mit neuem `template`. Zwischen `folie` und den anderen Vorlagen wird nicht gewechselt.
+  - `page.session_id` setzt das iPad nur beim Anlegen: die laufende oder pausierte Session, wenn ihr Modul das Modul des Notizbuchs ist, sonst `null`.
+- **Seitenformate (F-INK-02, F-INK-03).**
+  - Freie Seite: 595 × 842 pt, `template` ≠ `folie`, `background_slide_id = null`. `attached_slide_id` ist die Folie, die beim Anlegen lief, sonst `null`.
+  - Folienseite: `width_pt`/`height_pt` der Folie (`Slide.width_pt`, `Slide.height_pt`), `template = folie`, `background_slide_id` = Folie, `attached_slide_id = null`.
+  - Je Notizbuch und Folie gibt es höchstens eine Folienseite. Das iPad sucht vor dem Anlegen eine nicht gelöschte Seite mit diesem `background_slide_id` und öffnet sie. Der Core erzwingt das nicht. Gibt es doch mehrere, gilt die mit dem kleinsten `index`.
+- **Vorlagen-Geometrie.** iPad und Web zeichnen gleich. Ursprung oben links, Einheit pt, `w`/`h` = Seitengröße, Linienstärke 0,7 pt, Papier `#FAF9F5`, Linien `#E3E5E8`, Rand der Cornell-Vorlage `#E8B4B4`. Raster `r` = 5 mm = 14,173 pt.
+
+  | `template` | Zeichnung |
+  |---|---|
+  | `blanko`, `folie` | nur Papier. Bei `folie` liegt die Folie darüber (`GET /slides/{id}/image` bzw. das PDF) |
+  | `liniert` | waagerechte Linien bei y = 60, 90, 120 … solange y < h − 20, von x = 40 bis w − 40 |
+  | `kariert` | waagerechte Linien bei y = r, 2r … < h und senkrechte bei x = r, 2r … < w, über die ganze Seite |
+  | `punktraster` | Punkte (1,2 pt) auf allen Kreuzungen des Rasters `r` |
+  | `cornell` | wie bisher in der Web-App (`render.ts`). Das iPad bietet sie in Phase 1 nicht an |
 
 ### 7.5 Geräte, Daten, Einstellungen (T1-10, T1-18, T1-19)
 
@@ -623,6 +643,8 @@ Der Client sendet alle 15 s `ping`, der Server antwortet mit `pong`. Bleibt die 
 ### 11.6 Anwesenheit und Server-Ereignisse
 
 - Das iPad sendet `presence` bei jedem Wechsel von Session, Notizbuch oder Seite. Der Server gibt das als Ereignis `presence` an alle anderen weiter. Die Notizen-Spalte folgt `page_id` des iPads (F-DSH-04).
+- **`presence.session_id` des iPads** ist die laufende oder pausierte Session, wenn ihr Modul das Modul des offenen Notizbuchs ist, sonst `null`.
+- **Notizbuch der Notizen-Spalte.** Standard ist `GET /sessions/{id}/notebook` (§7.2). Meldet ein iPad per `presence` ein `notebook_id`, das zum Modul der Session gehört (`Notebook.module_id` = `Session.module_id`), zeigt die Spalte dieses Notizbuch. Meldet das iPad `notebook_id = null` oder ein Notizbuch eines anderen Moduls, gilt wieder der Standard. Trennt sich das iPad, bleibt die Spalte beim zuletzt gezeigten Notizbuch. So erscheinen auch Striche aus einem frei gewählten Notizbuch (UX-30).
 - `device.connection` geht bei jeder An- und Abmeldung eines Clients raus (iPad-Punkt in der Statusleiste, F-DSH-06).
 - `session.updated` geht bei jeder Änderung einer Session raus, auch bei zeitgesteuerten und vom Worker gemeldeten (§3, `pg_notify('sg_session', …)`). Den Kanal `sg_session` hört das Sync-Plugin über `listenCommittedOps(…, { channels })` und sendet den aktuellen Stand der Session (`notifySessionUpdated`). `Session.updated_at` steigt bei jeder Änderung **durch jeden Schreiber** streng monoton (`greatest(clock_timestamp(), updated_at + interval '1 millisecond')`), auch durch den Worker (`progress.py`) und beim Löschen und Wiederherstellen (`trash.ts`): Clients verwerfen ältere Fassungen darüber, und `now()` (Beginn der Transaktion) liegt bei wartenden Transaktionen vor dem Stand, auf den sie gewartet haben. Löschen und Wiederherstellen (`softDeleteWithOps`, `restoreWithOps`) senden `session.updated` für jede betroffene Session.
 - `pairing.requested` geht **nur an lokale Web-Clients** (§12).
@@ -640,6 +662,7 @@ quicktype fasst Unions zu einem Struct mit optionalen Feldern zusammen. Außerde
 4. **Unbekanntes ignorieren:** Unbekannte `type`, `kind` oder `name` ergeben `.unknown` und einen Eintrag über `SGSync.log`, keinen Fehler. Eine bekannte Operation, die sich nicht decodieren lässt (z. B. neuer Enum-Wert), ergibt ebenfalls `SGSyncOp.unknown(kind, stream, seq)`. Der Client zählt deren `seq` trotzdem mit (§11.2).
 5. **Fehlercodes als String:** Unbekannte `SyncErrorCode` ergeben `.unknownError(SGUnknownSyncError)` mit `code` als String, `retryable` und `fatal`.
 6. **UUIDs klein:** `UUID().uuidString` liefert Großbuchstaben, darum immer `.lowercased()`.
+7. **Folien verfolgen:** Das iPad abonniert `session:<id>` der laufenden Session nur lesend. In `hello.streams` meldet es nichts. Nach jedem `welcome` lädt es `GET /sessions/{id}/snapshot` und abonniert mit `stream_seq` und `stream_op_id` daraus. Die aktuelle Folie ist das letzte `slide_event` des Snapshots, danach jedes `slide.change` mit der nächsten `seq`. Bei `reset` oder einer Lücke lädt es den Snapshot neu und abonniert erneut. Einen `seq`-Stand über Verbindungen hinweg speichert es nicht.
 
 Nachweis: CI-Job **Swift-Contract** (`bash packages/schemas/swift-support/check.sh`). Er kompiliert `Schemas.swift` mit der Hilfsschicht und decodiert alle gültigen Beispiele der Sync-Typen, `Stroke` und `PageElement`, der REST-Typen des iPads (`Device`, `DeviceList`, `PairStartResponse`, `PairResponse`, `Notebook`, `NotebookList`, `NotebookPages`, `Page`, `PageStrokes`, `PageDetail` über `SGPageDetail`, `Session`, `SessionList`, `SessionSnapshot`, `Settings`, `FileReceipt`) sowie `tests/fixtures/strokes/*.json`. Dann kodiert er sie wieder und vergleicht sie mit dem Original, `null`-Felder und Millisekunden eingeschlossen. Dazu prüft er das Ignorieren unbekannter Nachrichten und Fehlercodes. Kompiliert wird im **Swift-6-Sprachmodus**, damit die iPad-App mit dem Xcode-Standard bauen kann. Einschränkung: `SGServerMessage` ist noch nicht `Sendable` (wegen `JSONAny` in `SyncError.details`) und darf deshalb nicht über Isolationsgrenzen gereicht werden. Das wird in #97 nachgezogen. Auf dem Mac prüft das Skript die Dateien zusätzlich gegen das iOS-SDK.
 
@@ -873,7 +896,7 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 
 - `module.settings jsonb NOT NULL DEFAULT '{}'` mit dem Inhalt `ModuleSettings`: `layout`, `column_widths`, `ink_mode`. Ein fehlender Schlüssel bedeutet: globaler Standard aus `lecture.default_layout` bzw. `default_ink_mode`.
 - **Schema-Änderung mit T1-DB** (§16): `Module` bekommt `settings: ModuleSettings` als Pflichtfeld, `ModuleUpdate` bekommt `settings?: ModuleSettingsUpdate`. Beides kommt im selben PR wie Migration und die kleine Core-Änderung in `services/organisation.ts`, damit `main` grün bleibt. Diese Änderung an `packages/schemas` ist für T1-DB vorab freigegeben.
-- `PATCH /modules/{id}` mit `settings` führt Schlüssel für Schlüssel zusammen, `null` entfernt einen Schlüssel. Die Web-App schreibt `layout`/`column_widths` (F-DSH-01), das iPad `ink_mode` (F-INK-03). Die beiden überschreiben sich nicht gegenseitig.
+- `PATCH /modules/{id}` mit `settings` führt Schlüssel für Schlüssel zusammen, `null` entfernt einen Schlüssel. Die Web-App schreibt `layout`/`column_widths` (F-DSH-01), das iPad `ink_mode` (F-INK-03). Die beiden überschreiben sich nicht gegenseitig. Ohne Verbindung merkt sich das iPad die Wahl lokal und sendet sie bei der nächsten Verbindung. Der letzte Stand gewinnt.
 
 ## 15. Fehlercodes Phase 1 (Übersicht)
 
@@ -982,6 +1005,7 @@ T1-DB legt alle an: `appendOp`, `softDelete`/`restoreFromTrash` und `getSettings
 | T1-05 / T1-17 | Folien blättern, Marker vom Mac | `apps/web/src/components/dashboard/slides/**` bzw. `dashboard/markers/**` (ersetzen die Platzhalter aus T1-04) | T1-04, T1-WS |
 | T1-16 | Notizen-Spalte, Strich-Renderer | `apps/web/src/components/ink/**` | Renderer sofort (Testdaten), Live mit T1-WS |
 | T1-11 bis T1-15 | iPad-App | `apps/ipad/**`, übernimmt `Schemas.swift` und `swift-support/Sources` | Spike S1, T1-08 |
+| T1-11 Rest, T1-13, #199 | Notizbücher, Seiten, Schreibmodi | Zuschnitt und Schnittstellen in `docs/plaene/T1-11-13-NOTIZBUECHER.md` | #214 |
 
 **Dashboard-Platzhalter (T1-04 → T1-05, T1-17):** Das Live-Dashboard (`/session?id=<session_id>`) bindet je eine Komponente aus den beiden Ordnern ein. T1-05 und T1-17 ersetzen **nur den Inhalt der Datei** und behalten Dateiname, Exportname und Props bei. Weitere Dateien in ihrem Ordner dürfen sie frei anlegen.
 

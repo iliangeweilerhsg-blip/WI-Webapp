@@ -307,10 +307,20 @@ final class SyncEngine {
         guard
             let session = sessions.max(by: { ($0.startedAt ?? $0.createdAt) < ($1.startedAt ?? $1.createdAt) })
         else { return nil }
-        let notebooks = try await client.notebooks(
-            endpoint: credentials.endpoint, token: credentials.token, moduleID: session.moduleID)
-        guard let notebook = notebooks.first(where: { $0.kind == .vorlesung && $0.deletedAt == nil }) else {
-            return nil
+        let notebook: Notebook
+        if let fromCore = try await client.sessionNotebook(
+            endpoint: credentials.endpoint, token: credentials.token, sessionID: session.id)
+        {
+            // Der Core entscheidet (#199): „Übung“ bei Übung und Tutorium, sonst „Vorlesung“
+            notebook = fromCore
+        } else {
+            // Älterer Core ohne den Endpunkt (404): die alte Regel, das erste „Vorlesung“ des Moduls
+            let notebooks = try await client.notebooks(
+                endpoint: credentials.endpoint, token: credentials.token, moduleID: session.moduleID)
+            guard let legacy = notebooks.first(where: { $0.kind == .vorlesung && $0.deletedAt == nil }) else {
+                return nil
+            }
+            notebook = legacy
         }
         var name: String?
         if withModuleName {
