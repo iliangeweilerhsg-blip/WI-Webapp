@@ -359,7 +359,8 @@ describe('GET /costs/summary', () => {
   });
 
   it('[K5] 400 validation_failed für einen month, der kein YYYY-MM ist', async () => {
-    for (const month of ['2026-13', '2026-00', '2026-1', '26-11', 'november', '2026-11-01', '']) {
+    // 0000-01: Postgres kennt das Jahr 0 nicht, ohne Prüfung käme ein 500
+    for (const month of ['2026-13', '2026-00', '2026-1', '26-11', 'november', '2026-11-01', '', '0000-01']) {
       const res = await get(`/costs/summary?month=${encodeURIComponent(month)}`);
       expect(res.statusCode, month).toBe(400);
       expect(res.json().error.code).toBe('validation_failed');

@@ -15,7 +15,8 @@ export const BUDGET_WARN_RATIO = 0.8;
 /** `by_session`: die teuersten Sessions (§20.6) */
 export const COST_SESSION_LIMIT = 20;
 
-const MONTH_RE = /^[0-9]{4}-(0[1-9]|1[0-2])$/;
+/** `YYYY-MM`. Das Jahr 0000 kennt Postgres nicht (`date` außerhalb des Bereichs, sonst 500) */
+export const MONTH_RE = /^(?!0000)[0-9]{4}-(0[1-9]|1[0-2])$/;
 
 /**
  * IANA-Name der Ortszeit des Prozesses (§20.5): `TZ` (ohne führenden `:`), sonst die Zone des Systems, sonst `UTC`.

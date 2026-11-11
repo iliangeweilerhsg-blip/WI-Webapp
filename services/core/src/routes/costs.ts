@@ -4,7 +4,7 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { ApiErrorSchema, CostSummarySchema } from '@sg/shared';
 import type { Db } from '../db/client.ts';
-import { getCostSummary } from '../services/costs.ts';
+import { getCostSummary, MONTH_RE } from '../services/costs.ts';
 
 export interface CostsRouteDeps {
   db: Db;
@@ -13,10 +13,7 @@ export interface CostsRouteDeps {
 }
 
 const CostsQuerySchema = z.object({
-  month: z
-    .string()
-    .regex(/^[0-9]{4}-(0[1-9]|1[0-2])$/, { message: 'month muss die Form YYYY-MM haben' })
-    .optional(),
+  month: z.string().regex(MONTH_RE, { message: 'month muss die Form YYYY-MM haben' }).optional(),
 });
 
 export async function costsRoutes(app: FastifyInstance, deps: CostsRouteDeps): Promise<void> {
