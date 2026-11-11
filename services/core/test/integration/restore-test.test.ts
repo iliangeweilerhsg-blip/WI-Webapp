@@ -111,6 +111,7 @@ describe('Ergebnis in GET /backups', () => {
     await setResult(test());
     const res = await t.request({ method: 'GET', url: `${API}/settings` });
     expect(Object.keys(res.json<Record<string, unknown>>()).sort()).toEqual([
+      'ai',
       'data',
       'general',
       'lecture',

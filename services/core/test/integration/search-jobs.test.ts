@@ -209,7 +209,14 @@ describe('search.index in ensurePipelineJobs (§19.5)', () => {
     const sessionId = uuidv7();
     await handle.db.insert(session).values({ id: sessionId, ...base, moduleId, state: 'verarbeitet' });
     const jobs = await ensure(sessionId, 'transcribe');
-    expect(jobs.map((j) => j.type)).toEqual(['transcribe', 'align.log']);
+    // samt der Konzept-Kette (§20.2)
+    expect(jobs.map((j) => j.type)).toEqual([
+      'transcribe',
+      'align.log',
+      'concepts.extract',
+      'concepts.resolve',
+      'summary.write',
+    ]);
     const [search] = await searchJobs();
     expect(search).toMatchObject({
       state: 'wartet',
@@ -219,7 +226,13 @@ describe('search.index in ensurePipelineJobs (§19.5)', () => {
       dependsOn: [jobs[0]!.id],
     });
     const [row] = await handle.db.select().from(session).where(eq(session.id, sessionId));
-    expect(Object.keys(row!.processing ?? {}).sort()).toEqual(['align.log', 'transcribe']);
+    expect(Object.keys(row!.processing ?? {}).sort()).toEqual([
+      'align.log',
+      'concepts.extract',
+      'concepts.resolve',
+      'summary.write',
+      'transcribe',
+    ]);
   });
 
   it('wiederholt: wartender Job wird wiederverwendet, tote Abhängigkeiten fallen weg', async () => {
@@ -256,7 +269,12 @@ describe('search.index in ensurePipelineJobs (§19.5)', () => {
   it('fromStep = align.log: kein search.index', async () => {
     const sessionId = uuidv7();
     await handle.db.insert(session).values({ id: sessionId, ...base, moduleId, state: 'verarbeitet' });
-    expect((await ensure(sessionId, 'align.log')).map((j) => j.type)).toEqual(['align.log']);
+    expect((await ensure(sessionId, 'align.log')).map((j) => j.type)).toEqual([
+      'align.log',
+      'concepts.extract',
+      'concepts.resolve',
+      'summary.write',
+    ]);
     expect(await searchJobs()).toEqual([]);
   });
 
