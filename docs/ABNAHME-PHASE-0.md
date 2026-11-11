@@ -18,9 +18,9 @@ OrbStack ist die Docker-Umgebung für die Datenbank. So geht es weiter:
 3. Kurz prüfen: `docker --version` sollte eine Versionszeile zeigen.
 
 ```bash
-brew install node@22 uv
+brew install node@22 uv ffmpeg
 ```
-Bitte genau `node@22` nehmen, nicht `brew install node`. Das wäre eine zu neue Version.
+Bitte genau `node@22` nehmen, nicht `brew install node`. Das wäre eine zu neue Version. `ffmpeg` braucht der Worker für das Audio (`pnpm sg doctor` meldet es sonst mit ✗).
 
 ```bash
 echo 'export PATH="/opt/homebrew/opt/node@22/bin:$PATH"' >> ~/.zprofile && source ~/.zprofile
@@ -60,7 +60,7 @@ Ab jetzt reicht nach jedem `git pull` einfach `pnpm sg start`. Neue Pakete werde
 ```bash
 pnpm sg doctor
 ```
-- Es darf keine Zeile mit ✗ geben. Die Zeile mit ℹ (Apple Silicon) ist nur ein Hinweis.
+- Es darf keine Zeile mit ✗ geben. Zeilen mit ℹ (Apple Silicon, freier Speicher) sind nur Hinweise.
 - Am Ende muss „Alles bereit.“ stehen.
 - Typisch bei ✗ ist „Docker: läuft nicht“. Dann OrbStack öffnen, warten, bis es bereit ist, und `pnpm sg doctor` wiederholen.
 - Wenn du `doctor` erneut ausführst, während die App noch läuft, meldet es „Port … belegt“. Das ist dann kein Fehler. Vorher `pnpm sg stop` ausführen.

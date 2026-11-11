@@ -1,14 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { resolveConfig } from '../src/config.ts';
 import {
+  checkFreeSpace,
   checkNode,
   doctorExitCode,
+  MIN_FREE_BYTES,
   formatChecks,
   parseVersion,
   runChecks,
   type CheckResult,
 } from '../src/doctor.ts';
-import type { RunResult, System } from '../src/system.ts';
+import { freeBytesNearest, type RunResult, type System } from '../src/system.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const cfg = resolveConfig({}, '/home/u', '/repo');
 const OK: RunResult = { ok: true, stdout: 'x 1.0\n', stderr: '' };
@@ -23,6 +28,7 @@ function fakeSystem(over: Partial<System> & { failing?: string[] } = {}): System
     run: async (cmd, args) => (failing.includes([cmd, ...args].join(' ')) ? FAIL : OK),
     portFree: async () => true,
     dirWritable: () => true,
+    freeBytes: () => 50 * 1024 ** 3,
     ...over,
   };
 }
@@ -107,6 +113,80 @@ describe('runChecks', () => {
     expect(byName(linux, 'Apple Silicon').status).toBe('info');
     const mac = await runChecks(fakeSystem(), cfg);
     expect(byName(mac, 'Apple Silicon').detail).toMatch(/Apple Silicon erkannt/);
+  });
+});
+
+describe('ffmpeg', () => {
+  it('ist ok, wenn ffmpeg antwortet', async () => {
+    const r = byName(await runChecks(fakeSystem(), cfg), 'ffmpeg');
+    expect(r.status).toBe('ok');
+  });
+
+  it('meldet fehlendes ffmpeg mit Abhilfe und Exit-Code 1', async () => {
+    const results = await runChecks(fakeSystem({ failing: ['ffmpeg -version'] }), cfg);
+    const r = byName(results, 'ffmpeg');
+    expect(r.status).toBe('fail');
+    expect(r.hint).toMatch(/brew install ffmpeg/);
+    expect(doctorExitCode(results)).toBe(1);
+  });
+
+  it('startet ffmpeg mit Argument-Array', async () => {
+    const calls: Array<[string, string[]]> = [];
+    await runChecks(fakeSystem({ run: async (c, a) => (calls.push([c, a]), OK) }), cfg);
+    expect(calls).toContainEqual(['ffmpeg', ['-version']]);
+  });
+});
+
+describe('checkFreeSpace', () => {
+  it('ist ok ab 10 GB', () => {
+    const r = checkFreeSpace(fakeSystem({ freeBytes: () => MIN_FREE_BYTES }), cfg);
+    expect(r.status).toBe('ok');
+  });
+
+  it('warnt unter 10 GB, ohne Abbruch', async () => {
+    const sys = fakeSystem({ freeBytes: () => 7.3 * 1024 ** 3 });
+    const r = checkFreeSpace(sys, cfg);
+    expect(r.status).toBe('info');
+    expect(r.detail).toBe(
+      'Wenig Speicher frei: 7,3 GB im Datenordner. Aufnahmen und Backups brauchen Platz.',
+    );
+    const results = await runChecks(sys, cfg);
+    expect(doctorExitCode(results)).toBe(0);
+    expect(formatChecks(results)).toContain('Wenig Speicher frei');
+  });
+
+  it('Gegenprobe: 1 Byte unter 10 GB ist ein Hinweis und zeigt nicht "10,0"', () => {
+    const r = checkFreeSpace(fakeSystem({ freeBytes: () => MIN_FREE_BYTES - 1 }), cfg);
+    expect(r.status).toBe('info');
+    expect(r.detail).toContain('9,9 GB');
+  });
+
+  it('meldet "nicht feststellbar", wenn die Messung fehlschlägt', () => {
+    const r = checkFreeSpace(fakeSystem({ freeBytes: () => undefined }), cfg);
+    expect(r.status).toBe('info');
+    expect(r.detail).toBe('nicht feststellbar');
+  });
+
+  it('misst im Datenordner', () => {
+    const asked: string[] = [];
+    checkFreeSpace(fakeSystem({ freeBytes: (p) => (asked.push(p), 1) }), cfg);
+    expect(asked).toEqual([cfg.dataDir]);
+  });
+});
+
+describe('freeBytesNearest (echtes Dateisystem)', () => {
+  it('misst bei fehlendem Datenordner im nächsten vorhandenen Elternordner', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-free-'));
+    try {
+      const own = freeBytesNearest(dir);
+      expect(own).toBeGreaterThan(0);
+      // gleiches Dateisystem, nur ungefähr gleich, weil parallel andere Tests schreiben
+      expect(Math.abs((freeBytesNearest(join(dir, 'fehlt', 'tiefer')) ?? 0) - (own ?? 0))).toBeLessThan(
+        1024 ** 3,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
