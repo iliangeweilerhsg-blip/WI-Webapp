@@ -110,6 +110,49 @@ final class CoreClient {
         _ = try await send("DELETE", "/devices/\(deviceID)", endpoint: endpoint, token: token, body: nil)
     }
 
+    // MARK: Lesen für den Sync (T1-14). Nur `GET`, darum mit Wiederholung bei `networkConnectionLost`.
+
+    /// `GET /sessions?state=laeuft,pausiert`: die laufende oder pausierte Session (auch vom Vortag)
+    func activeSessions(endpoint: CoreEndpoint, token: String) async throws -> [Session] {
+        let data = try await send(
+            "GET", "/sessions", endpoint: endpoint, token: token, body: nil,
+            queryItems: [URLQueryItem(name: "state", value: "laeuft,pausiert")])
+        return try decode(SessionList.self, from: data).items
+    }
+
+    /// `GET /notebooks?module_id=…`
+    func notebooks(endpoint: CoreEndpoint, token: String, moduleID: String) async throws -> [Notebook] {
+        let data = try await send(
+            "GET", "/notebooks", endpoint: endpoint, token: token, body: nil,
+            queryItems: [URLQueryItem(name: "module_id", value: moduleID)])
+        return try decode(NotebookList.self, from: data).items
+    }
+
+    /// `GET /notebooks/{id}/pages`
+    func notebookPages(endpoint: CoreEndpoint, token: String, notebookID: String) async throws -> [Page] {
+        let data = try await send(
+            "GET", "/notebooks/\(notebookID)/pages", endpoint: endpoint, token: token, body: nil)
+        return try decode(NotebookPages.self, from: data).items
+    }
+
+    /// `GET /pages/{id}/strokes`. `nil`, wenn der Core die Seite nicht kennt (404).
+    func pageStrokes(endpoint: CoreEndpoint, token: String, pageID: String) async throws -> PageStrokes? {
+        do {
+            let data = try await send(
+                "GET", "/pages/\(pageID)/strokes", endpoint: endpoint, token: token, body: nil)
+            return try decode(PageStrokes.self, from: data)
+        } catch ConnectionError.server(let status, _) where status == 404 {
+            return nil
+        }
+    }
+
+    private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        guard let value = try? newJSONDecoder().decode(type, from: data) else {
+            throw ConnectionError.invalidResponse
+        }
+        return value
+    }
+
     private func encode<T: Encodable>(_ value: T) throws -> Data {
         guard let data = try? newJSONEncoder().encode(value) else {
             throw ConnectionError.invalidResponse
@@ -123,9 +166,10 @@ final class CoreClient {
         endpoint: CoreEndpoint,
         token: String?,
         body: Data?,
+        queryItems: [URLQueryItem] = [],
         retriesOnConnectionLoss: Bool = true
     ) async throws -> Data {
-        guard let url = endpoint.url(path: path) else { throw ConnectionError.invalidAddress }
+        guard let url = endpoint.url(path: path, queryItems: queryItems) else { throw ConnectionError.invalidAddress }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.timeoutInterval = 10

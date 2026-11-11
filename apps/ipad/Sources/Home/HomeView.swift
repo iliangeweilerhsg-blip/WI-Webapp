@@ -25,12 +25,13 @@ struct HomeView: View {
                         text: "Deine Notizbücher je Modul erscheinen hier mit dem nächsten Schritt."
                     )
                     // Vorläufiger Zugang zur Schreibfläche (T1-12). Die Notizbuchverwaltung folgt mit T1-13.
+                    // Mit laufender Vorlesung erscheinen die Striche live am Mac (T1-14).
                     NavigationLink {
-                        InkPageView()
+                        InkPageView(sync: model.sync)
                     } label: {
                         PlaceholderCard(
-                            title: "Test-Notizbuch",
-                            text: "Schreibfläche ausprobieren. Die Seite bleibt vorerst nur auf dem iPad."
+                            title: "Schreibfläche",
+                            text: "Schreibe in das Notizbuch der laufenden Vorlesung. Ohne Verbindung wird lokal gepuffert."
                         )
                     }
                     .buttonStyle(.plain)
@@ -55,8 +56,8 @@ struct HomeView: View {
         }
         .task {
             // Solange der Startbildschirm sichtbar ist, regelmäßig nachsehen.
-            // Der Live-Sync (WebSocket) ersetzt das später.
-            // Nach einem 401 ruht die Abfrage, bis neu gekoppelt ist. „Erneut prüfen“ fragt trotzdem.
+            // Solange der Live-Sync (WebSocket) online ist, ruht die Abfrage: Der Sync weiß es besser.
+            // Nach einem 401 ruht sie ebenfalls, bis neu gekoppelt ist. „Erneut prüfen“ fragt trotzdem.
             while !_Concurrency.Task.isCancelled {
                 await model.pollConnection()
                 try? await _Concurrency.Task.sleep(for: .seconds(15))
@@ -114,6 +115,10 @@ struct ConnectionDetailView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
+            if let sync = model.sync {
+                SyncStatusRows(sync: sync)
+            }
+
             Divider()
 
             Button("Erneut prüfen") {
@@ -165,5 +170,35 @@ struct ConnectionDetailView: View {
             return error.needsNewPairing
         }
         return false
+    }
+}
+
+/// Stand des Sync: wartende Operationen, Fehlerablage, ggf. Hinweis zur App-Version
+struct SyncStatusRows: View {
+    let sync: SyncEngine
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Divider()
+            Text("Sync").font(.subheadline.weight(.semibold))
+            Text("Wartend: \(sync.pendingCount)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Text("Fehlerablage: \(sync.deadLetterCount)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            if sync.state == .unsupported {
+                Text("Der Mac spricht ein anderes Protokoll. App aktualisieren.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if sync.deadLetterCount > 0 {
+                // Export an den Mac über das Teilen-Menü (VERTRAEGE §11.2). Ein Wiedereinspielen gibt es noch nicht.
+                ShareLink(item: sync.deadLetterURL) {
+                    Label("Fehlerablage teilen", systemImage: "square.and.arrow.up")
+                        .font(.footnote)
+                }
+            }
+        }
     }
 }

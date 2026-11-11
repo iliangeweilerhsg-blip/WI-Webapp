@@ -42,6 +42,11 @@ final class InkPageModel {
     @ObservationIgnored var sessionStartedAt: Date?
     /// Anschluss für den Sync (T1-14): bekommt jede Änderung im neutralen Format
     @ObservationIgnored var onStrokeChanges: (([InkStrokeChange]) -> Void)?
+    /// Liefert die höchste Nummer der Warteschlange (`SyncOutbox.lastNumber`). Wird beim Speichern festgehalten.
+    @ObservationIgnored var outboxNumberProvider: (() -> Int)?
+    /// Lokaler Stand und Core müssen abgeglichen werden: nach einem Absturz, bei neu vergebenen IDs, bei einem
+    /// gescheiterten Einreihen oder nach neuer `db_epoch`. Der Abgleich löscht das Flag (`reconcileFinished()`).
+    private(set) var needsReconcile = false
 
     @ObservationIgnored private var history = InkHistory<PKDrawing>()
     @ObservationIgnored private var trackers = InkPageTrackers()
@@ -49,6 +54,7 @@ final class InkPageModel {
     @ObservationIgnored private var toolUseRecorded = false
     @ObservationIgnored private var isDirty = false
     @ObservationIgnored private var saveTask: _Concurrency.Task<Void, Never>?
+    @ObservationIgnored private var loadedOutboxNumber = 0
     private let store: any InkPageStore
     private let saveDelay: Duration
 
@@ -56,7 +62,8 @@ final class InkPageModel {
         pageID: String = InkPageModel.testPageID,
         pageSize: CGSize = InkPageModel.a4,
         store: any InkPageStore,
-        saveDelay: Duration = .seconds(1)
+        saveDelay: Duration = .seconds(1),
+        outboxMark: Int = 0
     ) {
         self.pageID = pageID
         self.pageSize = pageSize
@@ -67,9 +74,32 @@ final class InkPageModel {
         inkDrawing = InkPageModel.drawing(from: snapshot.ink)
         highlightDrawing = InkPageModel.drawing(from: snapshot.highlight)
         trackers = snapshot.trackers
-        // Zuordnung an den geladenen Bestand angleichen (z. B. wenn die IDs fehlten)
-        _ = syncStrokes(.ink)
-        _ = syncStrokes(.highlight)
+        loadedOutboxNumber = snapshot.outboxNumber
+        // Absturz zwischen Einreihen und Speichern: Die Warteschlange kennt mehr als die Zeichnung
+        needsReconcile = snapshot.needsReconcile || outboxMark > snapshot.outboxNumber
+        // Zuordnung an den geladenen Bestand angleichen (z. B. wenn die IDs fehlten).
+        // Neu vergebene IDs kennt der Core nicht: Abgleich nötig.
+        let inkChanges = syncStrokes(.ink)
+        let highlightChanges = syncStrokes(.highlight)
+        if !inkChanges.isEmpty || !highlightChanges.isEmpty {
+            needsReconcile = true
+        }
+    }
+
+    /// Das Einreihen in die Warteschlange ist gescheitert: Der nächste Abgleich holt das nach
+    func markNeedsReconcile() {
+        guard !needsReconcile else { return }
+        needsReconcile = true
+        isDirty = true
+        scheduleSave()
+    }
+
+    /// Der Abgleich mit dem Core ist durch
+    func reconcileFinished() {
+        guard needsReconcile else { return }
+        needsReconcile = false
+        isDirty = true
+        scheduleSave()
     }
 
     func drawing(for layer: StrokeLayer) -> PKDrawing {
@@ -173,10 +203,13 @@ final class InkPageModel {
         let snapshot = InkPageSnapshot(
             ink: inkDrawing.strokes.isEmpty ? nil : inkDrawing.dataRepresentation(),
             highlight: highlightDrawing.strokes.isEmpty ? nil : highlightDrawing.dataRepresentation(),
-            trackers: trackers
+            trackers: trackers,
+            outboxNumber: max(loadedOutboxNumber, outboxNumberProvider?() ?? 0),
+            needsReconcile: needsReconcile
         )
         do {
             try store.save(snapshot, pageID: pageID)
+            loadedOutboxNumber = snapshot.outboxNumber
             isDirty = false
             if saveFailed { saveFailed = false }
         } catch {

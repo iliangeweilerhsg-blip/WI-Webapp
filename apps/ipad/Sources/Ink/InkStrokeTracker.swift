@@ -118,6 +118,10 @@ struct InkTrackerDiff: Equatable, Sendable {
 
 /// Zuordnung `Fingerabdruck → client_id` einer Ebene (08 §4.3). Sie liegt neben der Zeichnung auf der
 /// Platte, damit ein Strich nach dem Neustart dieselbe ID behält.
+///
+/// Verschwundene Striche bleiben in `retired` erhalten (höchstens `retiredLimit`). Kommt ein Strich mit
+/// demselben Schlüssel zurück (Rückgängig nach Radieren, Wiederholen), behält er seine `client_id`. So bleibt
+/// `stroke.add` auf dem Core ein Upsert desselben Strichs, auch wenn `stroke.remove` schon gesendet wurde.
 struct InkStrokeTracker: Codable, Equatable, Sendable {
     struct Entry: Codable, Equatable, Sendable {
         var clientID: String
@@ -125,10 +129,40 @@ struct InkStrokeTracker: Codable, Equatable, Sendable {
         var signature: String
     }
 
+    /// Höchstzahl der gemerkten, verschwundenen Striche. Die ältesten fallen heraus.
+    static let retiredLimit = 500
+
     /// Schlüssel `Fingerabdruck#n`. `n` zählt gleiche Fingerabdrücke durch (kopierte Striche).
     private(set) var entries: [String: Entry] = [:]
+    /// Verschwundene Striche, nach Schlüssel
+    private(set) var retired: [String: Entry] = [:]
+    /// Reihenfolge, in der sie verschwanden (ältester zuerst)
+    private(set) var retiredOrder: [String] = []
 
     init() {}
+
+    private enum CodingKeys: String, CodingKey {
+        case entries, retired, retiredOrder
+    }
+
+    /// Ältere Dateien (`ids.json`) kennen nur `entries`
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        entries = try container.decodeIfPresent([String: Entry].self, forKey: .entries) ?? [:]
+        retired = try container.decodeIfPresent([String: Entry].self, forKey: .retired) ?? [:]
+        let order = try container.decodeIfPresent([String].self, forKey: .retiredOrder) ?? []
+        // Reihenfolge und Inhalt in Einklang bringen, falls die Datei unstimmig ist
+        var seen = Set<String>()
+        var cleaned: [String] = []
+        for key in order where retired[key] != nil && seen.insert(key).inserted {
+            cleaned.append(key)
+        }
+        for key in retired.keys.sorted() where !seen.contains(key) {
+            cleaned.append(key)
+        }
+        retiredOrder = cleaned
+        trimRetired()
+    }
 
     /// Vergleicht den Strichbestand mit dem letzten Stand und merkt sich den neuen.
     /// - Parameter makeID: liefert eine neue `client_id` (UUIDv7, klein)
@@ -151,7 +185,15 @@ struct InkStrokeTracker: Codable, Equatable, Sendable {
                 next[key] = Entry(clientID: known.clientID, signature: signature)
                 diff.clientIDs.append(known.clientID)
             } else {
-                let clientID = makeID()
+                let clientID: String
+                if let revived = retired[key] {
+                    // Derselbe Strich ist zurück: gleiche ID, als neuer Upsert melden
+                    clientID = revived.clientID
+                    retired[key] = nil
+                    retiredOrder.removeAll { $0 == key }
+                } else {
+                    clientID = makeID()
+                }
                 diff.upserts.append(.init(index: index, clientID: clientID, isNew: true))
                 next[key] = Entry(clientID: clientID, signature: signature)
                 diff.clientIDs.append(clientID)
@@ -159,11 +201,29 @@ struct InkStrokeTracker: Codable, Equatable, Sendable {
         }
 
         var removed: [String] = []
-        for (key, entry) in entries where next[key] == nil {
+        for key in entries.keys.sorted() where next[key] == nil {
+            guard let entry = entries[key] else { continue }
             removed.append(entry.clientID)
+            retire(key, entry)
         }
         diff.removed = removed.sorted()
         entries = next
         return diff
+    }
+
+    private mutating func retire(_ key: String, _ entry: Entry) {
+        if retired[key] != nil {
+            retiredOrder.removeAll { $0 == key }
+        }
+        retired[key] = entry
+        retiredOrder.append(key)
+        trimRetired()
+    }
+
+    private mutating func trimRetired() {
+        while retiredOrder.count > InkStrokeTracker.retiredLimit {
+            let oldest = retiredOrder.removeFirst()
+            retired[oldest] = nil
+        }
     }
 }
