@@ -176,6 +176,12 @@ export class NoFollowWriter extends AnchoredDirs {
   private readonly files = new Map<string, Identity>();
   /** Zielordner → sein privater Unterordner für Hardlinks (`null`: Dateisystem ohne private Rechte, nur kopieren) */
   private readonly linkDirs = new Map<string, string | null>();
+  /**
+   * Besitzer (uid), den eigene Ordner haben (#183): Der private Ordner für Hardlinks gilt nur mit diesem Besitzer als
+   * privat. Ohne Angabe der Benutzer dieses Prozesses; `sg backup` setzt den Besitzer des eigenen `.partial`
+   * (`targetOwner`), weil manche Ziele (SMB/CIFS ohne `uid=`, NFS mit `root_squash`) einen anderen melden.
+   */
+  owner: number | undefined = undefined;
 
   /**
    * Legt den Ordner `path` neu an. Sein Elternordner muss von diesem Schreiber sein (angelegt oder übernommen).
@@ -335,8 +341,8 @@ export class NoFollowWriter extends AnchoredDirs {
     if (known !== undefined) return known;
     const path = join(dir, LINK_STAGING_DIR);
     const info = this.mkdir(path, 0o700);
-    const uid = process.getuid?.();
-    const isPrivate = (info.mode & 0o077) === 0 && (uid === undefined || info.uid === uid);
+    const owner = this.owner ?? process.getuid?.();
+    const isPrivate = (info.mode & 0o077) === 0 && (owner === undefined || info.uid === owner);
     this.linkDirs.set(dir, isPrivate ? path : null);
     if (!isPrivate) this.removeLinkDir(dir, path);
     return isPrivate ? path : null;
