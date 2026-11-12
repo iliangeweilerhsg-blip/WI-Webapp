@@ -447,3 +447,22 @@ export async function listSyncedDeadlines(
     .limit(filter.limit);
   return rows.map((row) => toApiDeadline(row.deadline));
 }
+
+/**
+ * Kurs-ID einer Moodle-Aufgabe aus den lokal geführten Fristen (ohne Moodle). `null`, wenn die Aufgabe nicht
+ * bekannt ist oder in Moodle entfernt wurde. Nur eine Abkürzung für Aktionen, nie eine Berechtigung.
+ */
+export async function courseIdOfAssignment(db: DbOrTx, assignmentId: number): Promise<number | null> {
+  const [row] = await db
+    .select({ course: moodleDeadline.moodleCourseId })
+    .from(moodleDeadline)
+    .where(
+      and(
+        eq(moodleDeadline.moodleAssignmentId, assignmentId),
+        isNull(moodleDeadline.removedInMoodleAt),
+        notDeleted(moodleDeadline),
+      ),
+    )
+    .limit(1);
+  return row?.course ?? null;
+}

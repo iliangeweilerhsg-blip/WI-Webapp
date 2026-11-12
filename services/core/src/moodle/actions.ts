@@ -18,6 +18,7 @@ import {
 import { MOODLE_GATED_ACTIONS } from '../config.ts';
 import { HttpError } from '../errors.ts';
 import type { MoodleClient } from './client.ts';
+import { createAssignHandlers } from './actions/assign.ts';
 import type { MoodleUploadStore } from './uploads.ts';
 
 export interface MoodleActionSpec<P> {
@@ -35,6 +36,11 @@ export interface MoodleActionContext {
   userId(): Promise<number>;
   /** Löst `upload_ids` auf (`acquire`/`release`). Unbekannt oder verfallen → 404 `moodle_upload_not_found` */
   uploads: MoodleUploadStore;
+  /**
+   * Kurs-ID einer Aufgabe aus `moodle_deadline` (lokal, ohne Moodle). `null`, wenn unbekannt oder ohne Datenbank.
+   * Spart den großen Aufruf von `mod_assign_get_assignments` über alle Kurse.
+   */
+  courseIdOfAssignment(assignmentId: number): Promise<number | null>;
 }
 
 export interface MoodleActionPreviewResult {
@@ -87,7 +93,12 @@ export const MOODLE_ACTION_SPECS = {
     description:
       'Dateien oder Text als Entwurf in einer Moodle-Aufgabe speichern. Ersetzt den bisherigen Entwurf.',
     risk: 'aenderbar',
-    wsfunctions: ['mod_assign_save_submission'],
+    // Lesende Funktionen des Handlers gehören dazu (Plan §4.1), sonst wäre die Aktion „verfügbar“ und scheitert dann
+    wsfunctions: [
+      'mod_assign_get_assignments',
+      'mod_assign_get_submission_status',
+      'mod_assign_save_submission',
+    ],
     params: MoodleActionParamsAssignSaveDraftSchema.refine(
       (p) => p.upload_ids !== undefined || p.online_text_html !== undefined,
       { message: 'upload_ids oder online_text_html angeben' },
@@ -97,7 +108,11 @@ export const MOODLE_ACTION_SPECS = {
     label: 'Endgültig einreichen',
     description: 'Den Entwurf zur Bewertung einreichen. Danach sind keine Änderungen mehr möglich.',
     risk: 'endgueltig',
-    wsfunctions: ['mod_assign_get_submission_status', 'mod_assign_submit_for_grading'],
+    wsfunctions: [
+      'mod_assign_get_assignments',
+      'mod_assign_get_submission_status',
+      'mod_assign_submit_for_grading',
+    ],
     params: MoodleActionParamsAssignSubmitSchema,
   }),
   'forum.create_discussion': spec({
@@ -273,8 +288,8 @@ export class MoodleActionRegistry {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Umgesetzte Aktionen. Weitere (assign.*, forum.*, message.send, calendar.*, files.*) folgen mit T1-24
-// und bleiben hinter `SG_MOODLE_ACTIONS`.
+// Umgesetzte Aktionen. `assign.*` steht in `actions/assign.ts`. Weitere (forum.*, message.send, calendar.*, files.*)
+// folgen mit T1-24 und bleiben hinter `SG_MOODLE_ACTIONS`.
 
 const completionSet: MoodleActionHandler<MoodleActionParamsMap['completion.set']> = {
   async preview(_ctx, params) {
@@ -323,6 +338,7 @@ const notificationsMarkRead: MoodleActionHandler<MoodleActionParamsMap['notifica
 
 /** Handler, die der Core heute mitbringt */
 export const DEFAULT_ACTION_HANDLERS: MoodleActionHandlers = {
+  ...createAssignHandlers(),
   'completion.set': completionSet,
   'notifications.mark_read': notificationsMarkRead,
 };
