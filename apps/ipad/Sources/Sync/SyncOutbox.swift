@@ -95,6 +95,19 @@ final class SyncOutbox {
         marks[pageID] ?? 0
     }
 
+    /// Die nächste Operation, die gesendet werden soll: die erste, die noch nicht unterwegs ist. Ausnahme: Wartet in
+    /// deren Strom noch ein `notebook.create`, das nicht unterwegs ist, geht es vor. Das kommt vor, wenn es nach einer
+    /// neuen `db_epoch` hinten angehängt wurde (hinter `page.create` und Striche desselben Notizbuchs). Die Datei
+    /// bleibt unverändert und append-only: Nur die Sendereihenfolge ändert sich, es kann also nichts verloren gehen.
+    func nextToSend(inFlight: Set<String>) -> OutboxEntry? {
+        guard let first = pending.first(where: { !inFlight.contains($0.opID) }) else { return nil }
+        if first.kind == "notebook.create" { return first }
+        let create = pending.first {
+            $0.kind == "notebook.create" && $0.stream == first.stream && !inFlight.contains($0.opID)
+        }
+        return create ?? first
+    }
+
     // MARK: Schreiben
 
     /// Reiht Operationen ein. Erst wenn sie auf der Platte stehen, kehrt die Methode zurück.

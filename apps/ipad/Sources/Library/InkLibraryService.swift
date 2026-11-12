@@ -23,6 +23,7 @@ final class InkLibraryService {
 
     @ObservationIgnored private let store: any InkLibraryStore
     @ObservationIgnored private let client: CoreClient
+    @ObservationIgnored private let pageStore: (any InkPageStore)?
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private var lastRefreshAt: Date?
     @ObservationIgnored private var isRefreshing = false
@@ -31,12 +32,15 @@ final class InkLibraryService {
         store: any InkLibraryStore,
         sync: SyncEngine,
         client: CoreClient,
+        pageStore: (any InkPageStore)? = nil,
         now: @escaping @MainActor () -> Date = { Date() }
     ) {
         self.store = store
         self.sync = sync
         self.client = client
+        self.pageStore = pageStore
         self.now = now
+        adoptLegacyTestPage()
     }
 
     // MARK: Lesen
@@ -98,6 +102,8 @@ final class InkLibraryService {
             let briefs = try await client.modules(endpoint: access.endpoint, token: access.token)
             guard !_Concurrency.Task.isCancelled else { return }
             store.mergeModules(briefs, at: now())
+            // Waren beim Start noch keine Module bekannt, wird die Übernahme der alten Testseite jetzt nachgeholt
+            adoptLegacyTestPage()
             bump()
             for brief in briefs {
                 do {
@@ -195,6 +201,95 @@ final class InkLibraryService {
         }
         bump()
         return notebook
+    }
+
+    // MARK: Alte Testseite
+
+    /// Name des Notizbuchs, in das die alte lokale Testseite übernommen wird
+    static let legacyNotebookTitle = "Alte Schreibfläche"
+
+    /// Einmalige Übernahme der alten lokalen Testseite (`InkPageModel.testPageID`, bis #224 ohne laufende Vorlesung
+    /// beschrieben) in ein freies Notizbuch „Alte Schreibfläche“. Zielmodul ist das des zuletzt benutzten Notizbuchs,
+    /// sonst das erste Modul der Bibliothek. Gibt es noch kein Modul, passiert nichts: Der nächste Start oder der
+    /// erste Abruf der Module versucht es erneut. Hat die Seite keine Striche, wird nichts angelegt.
+    ///
+    /// Idempotent über die Marke `legacyTestPageHandled` und darüber, dass die Seite danach in der Bibliothek steht.
+    /// Es wird nichts gelöscht: Die Dateien unter `Ink/<page_id>/` bleiben und sind jetzt die Seite des Notizbuchs.
+    /// Notizbuch, `page.create` und alle Striche kommen in einem Schritt in die Warteschlange.
+    func adoptLegacyTestPage() {
+        guard !store.legacyTestPageHandled, let pageStore else { return }
+        let pageID = InkPageModel.testPageID
+        if store.page(pageID) != nil {
+            store.markLegacyTestPageHandled()
+            return
+        }
+        let moduleID = store.lastNotebookID.flatMap { store.notebook($0)?.moduleID } ?? modules.first?.id
+        guard let moduleID, store.modules.contains(where: { $0.id == moduleID }) else { return }
+
+        let model = InkPageModel(pageID: pageID, store: pageStore, saveDelay: .seconds(1))
+        let strokes = model.neutralStrokes()
+        guard !strokes.isEmpty else {
+            store.markLegacyTestPageHandled()
+            return
+        }
+
+        let notebook = LibraryNotebook(
+            id: InkID.uuidV7(),
+            moduleID: moduleID,
+            title: InkLibraryService.legacyNotebookTitle,
+            kind: .frei,
+            createdAtMS: nowMS(),
+            knownOnServer: false,
+            hidden: false,
+            lastPageID: pageID,
+            remoteMaxIndex: 0,
+            remoteOnlyPageCount: 0
+        )
+        var page = LibraryPage(
+            id: pageID,
+            notebookID: notebook.id,
+            index: 1,
+            template: .blanko,
+            widthPt: Double(model.pageSize.width),
+            heightPt: Double(model.pageSize.height),
+            sessionID: nil,
+            backgroundSlideID: nil,
+            attachedSlideID: nil,
+            version: 1,
+            createQueued: false,
+            needsReconcile: false,
+            deletedAtMS: nil,
+            deleteQueued: false
+        )
+        // Erst die Bibliothek, dann die Operationen. Bricht die App dazwischen ab, steht die Seite ohne
+        // `createQueued` da: `openTarget` reiht dann `page.create` nach und der Abgleich beim Öffnen die Striche.
+        page.needsReconcile = true
+        store.upsert(notebook)
+        store.upsert(page)
+
+        let binding = makeBinding(notebook: notebook, page: page)
+        guard
+            let first = InkOpBuilder.notebookCreate(
+                notebook: notebook, nowMS: nowMS(), offsetMS: sync.clockOffsetForDrafts,
+                makeID: { InkID.uuidV7() }),
+            let create = InkOpBuilder.pageCreate(
+                page: page, nowMS: nowMS(), offsetMS: sync.clockOffsetForDrafts, makeID: { InkID.uuidV7() })
+        else { return }
+        let strokeOps = InkOpBuilder.ops(
+            for: strokes.map { .upsert($0) }, binding: binding, nowMS: nowMS(),
+            offsetMS: sync.clockOffsetForDrafts, makeID: { InkID.uuidV7() })
+        guard sync.enqueue(drafts: [first, create] + strokeOps) else { return }
+
+        page.createQueued = true
+        page.needsReconcile = false
+        store.upsert(page)
+        store.markLegacyTestPageHandled()
+        // Die Zuordnung der Striche zu ihren `client_id` festhalten, damit das Öffnen keine neuen IDs vergibt
+        model.outboxNumberProvider = { [sync] in sync.outboxLastNumber }
+        model.markNeedsReconcile()
+        model.reconcileFinished()
+        model.saveNow()
+        bump()
     }
 
     // MARK: Schreibziel

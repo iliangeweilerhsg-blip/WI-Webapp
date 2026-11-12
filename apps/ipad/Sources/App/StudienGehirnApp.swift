@@ -45,7 +45,8 @@ extension AppModel {
             let engine = SyncEngine.live(
                 client: client, tokenStore: tokenStore, appVersion: appVersion, library: store)
             sync = engine
-            library = InkLibraryService(store: store, sync: engine, client: client)
+            library = InkLibraryService(
+                store: store, sync: engine, client: client, pageStore: FileInkPageStore.standard())
         }
         return AppModel(
             client: client,

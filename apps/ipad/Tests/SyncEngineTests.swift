@@ -503,6 +503,43 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertTrue(h.library.page(h.binding.pageID)?.needsReconcile ?? false)
     }
 
+    /// M1 (#225): Offline entstand eine Seite in einem freien Notizbuch, ihr `page.create` und ein Strich warten.
+    /// Der Mac wird danach auf ein älteres Backup zurückgesetzt (neue `db_epoch`). `requeueFreeNotebooks` hängt
+    /// `notebook.create` hinten an. Gegenprobe: Ohne `SyncOutbox.nextToSend` ginge `page.create` zuerst hinaus, der Core
+    /// antwortete `notebook_not_found` und Seite samt Strich landeten in der Fehlerablage.
+    func testNewDBEpochSendsNotebookCreateBeforeWaitingPageOperations() async throws {
+        let h = SyncHarness()
+        let notebook = freeNotebook("019a4e14-0000-7000-8000-0000000000f1", module: h.binding.moduleID, known: true)
+        let page = blankPage("019a4e14-0000-7000-8000-0000000000f2", in: notebook.id)
+        h.library.upsert(notebook)
+        h.library.upsert(page)
+        var binding = h.binding
+        binding.notebookID = notebook.id
+        binding.pageID = page.id
+        let pageCreate = try XCTUnwrap(
+            InkOpBuilder.pageCreate(page: page, nowMS: 1, offsetMS: nil, makeID: { InkID.uuidV7() }))
+        XCTAssertTrue(h.engine.enqueue(drafts: [pageCreate]))
+        XCTAssertTrue(h.engine.enqueue([.upsert(h.stroke("s0"))], binding: binding))
+        h.library.setDBEpoch("epoch-alt")
+        h.factory.configure = { socket, _ in
+            socket.epoch = "epoch-neu"
+            // Wie der Core: Als allererste Operation scheitert `page.create` (Notizbuch unbekannt)
+            socket.opPolicy = { _, kind, index in
+                kind == "page.create" && index == 0
+                    ? .error(code: "notebook_not_found", retryable: false, fatal: false) : .ack
+            }
+        }
+        h.start()
+
+        let done = await eventually { h.engine.pendingCount == 0 }
+        XCTAssertTrue(done)
+        let kinds = h.factory.sockets[0].ops.map { $0.object["kind"] as? String }
+        XCTAssertEqual(kinds, ["notebook.create", "page.create", "stroke.add"])
+        XCTAssertEqual(h.engine.deadLetterCount, 0)
+        XCTAssertNotNil(h.library.page(page.id))
+        XCTAssertNotNil(h.library.notebook(notebook.id))
+    }
+
     func testFirstEpochDoesNotRequeueNotebooks() async throws {
         let h = SyncHarness()
         h.library.upsert(freeNotebook("019a4e14-0000-7000-8000-0000000000f1", module: h.binding.moduleID, known: true))

@@ -11,6 +11,8 @@ protocol InkLibraryStore: AnyObject {
     var dbEpoch: String? { get }
     /// Letzter erfolgreicher Abruf der Module
     var refreshedAt: Date? { get }
+    /// Die alte lokale Testseite wurde geprüft (und bei Strichen übernommen), siehe `InkLibraryService.adoptLegacyTestPage`
+    var legacyTestPageHandled: Bool { get }
 
     /// Ohne `hidden`, nach `createdAtMS`, dann `id`
     func notebooks(inModule moduleID: String) -> [LibraryNotebook]
@@ -36,6 +38,7 @@ protocol InkLibraryStore: AnyObject {
     func removePage(_ id: String)
 
     func setDBEpoch(_ epoch: String)
+    func markLegacyTestPageHandled()
     /// Neue `db_epoch`: Jede Seite muss abgeglichen werden, und kein Notizbuch gilt mehr als dem Core bekannt
     func markAllNeedReconcile()
     func clearNeedsReconcile(pageID: String)
@@ -90,6 +93,7 @@ final class FileInkLibraryStore: InkLibraryStore {
     var modules: [LibraryModule] { file.modules }
     var lastNotebookID: String? { file.lastNotebookID }
     var dbEpoch: String? { file.dbEpoch }
+    var legacyTestPageHandled: Bool { file.legacyTestPageHandled ?? false }
 
     var refreshedAt: Date? {
         file.refreshedAtMS.map { Date(timeIntervalSince1970: Double($0) / 1000) }
@@ -269,6 +273,12 @@ final class FileInkLibraryStore: InkLibraryStore {
     func setDBEpoch(_ epoch: String) {
         guard file.dbEpoch != epoch else { return }
         file.dbEpoch = epoch
+        persist()
+    }
+
+    func markLegacyTestPageHandled() {
+        guard file.legacyTestPageHandled != true else { return }
+        file.legacyTestPageHandled = true
         persist()
     }
 

@@ -21,6 +21,34 @@ final class SyncOutboxTests: XCTestCase {
         )
     }
 
+    private func draft(_ index: Int, kind: String, stream: String, page: String? = nil) -> OutboxDraft {
+        OutboxDraft(
+            opID: "op-\(index)", stream: stream, kind: kind, pageID: page, json: "{}", clockUncertain: false,
+            sessionStartMS: nil)
+    }
+
+    func testNotebookCreateIsSentBeforeWaitingOperationsOfItsStream() throws {
+        let directory = makeDirectory()
+        let outbox = SyncOutbox(directory: directory)
+        try outbox.append([
+            draft(1, kind: "page.create", stream: "notebook:a", page: "p1"),
+            draft(2, kind: "stroke.add", stream: "notebook:b", page: "p2"),
+            draft(3, kind: "stroke.add", stream: "notebook:a", page: "p1"),
+            draft(4, kind: "notebook.create", stream: "notebook:a"),
+        ])
+        // Der Strom „a“ beginnt mit seinem `notebook.create`, die Reihenfolge der Datei bleibt
+        XCTAssertEqual(outbox.nextToSend(inFlight: [])?.opID, "op-4")
+        XCTAssertEqual(outbox.pending.map(\.opID), ["op-1", "op-2", "op-3", "op-4"])
+        XCTAssertEqual(SyncOutbox(directory: directory).pending.map(\.opID), ["op-1", "op-2", "op-3", "op-4"])
+        // Ist es unterwegs, folgt der Rest in Reihenfolge
+        XCTAssertEqual(outbox.nextToSend(inFlight: ["op-4"])?.opID, "op-1")
+        XCTAssertEqual(outbox.nextToSend(inFlight: ["op-4", "op-1"])?.opID, "op-2")
+        // Ein anderer Strom bleibt, wo er ist
+        outbox.acknowledge(opID: "op-4")
+        XCTAssertEqual(outbox.nextToSend(inFlight: [])?.opID, "op-1")
+        XCTAssertNil(outbox.nextToSend(inFlight: ["op-1", "op-2", "op-3"]))
+    }
+
     func testAppendSurvivesANewInstance() throws {
         let directory = makeDirectory()
         let outbox = SyncOutbox(directory: directory)
