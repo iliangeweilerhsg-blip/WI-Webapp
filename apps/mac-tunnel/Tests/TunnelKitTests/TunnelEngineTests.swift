@@ -136,21 +136,47 @@ final class TunnelEngineTests: XCTestCase {
         var wrongKey = device.presharedKey
         wrongKey[0] ^= 0xFF
         let otherDevice = TestDevice()
-        let intruders: [(String, TestClient)] = [
+        // Falscher Schlüssel: Der Handshake selbst scheitert.
+        let wrongKeys: [(String, TestClient)] = [
             ("falscher Schlüssel", TestClient.tls(port: listenerPort, presharedKey: wrongKey)),
             ("Schlüssel eines anderen Geräts", TestClient.tls(port: listenerPort, presharedKey: otherDevice.presharedKey)),
+        ]
+        // Richtiger Schlüssel, aber anderes Verfahren oder andere Kennung. In der CI (macOS-Runner) gilt:
+        // - Network.framework beschränkt die Verfahren am Server nicht auf die angehängten: Ein Client, der nur
+        //   TLS_PSK_WITH_AES_128_GCM_SHA256 (0x00A8) anbietet, bekommt einen fertigen Handshake mit 0x00A8. Auch ein
+        //   Client mit nur ECDHE_RSA (0xC02F) bietet wegen des PSK zusätzlich 0x00A8 an und landet dort.
+        // - Die PSK-Kennung prüft der Server womöglich nicht (ein PSK je Listener).
+        // Darum entscheidet der Schlüssel, und nach dem Handshake die Prüfung des Verfahrens im Helfer (Plan E12):
+        // Solche Verbindungen schließt der Helfer sofort, bevor eine Verbindung zum Core entsteht. Der Test prüft genau
+        // das: Entweder scheitert der Handshake, oder er endet mit einem nicht erlaubten Verfahren und wird geschlossen.
+        // Ein Handshake mit erlaubtem Verfahren ist nur bei der falschen Kennung denkbar (gleicher Schlüssel).
+        let rightKeyOtherwiseWrong: [(String, TestClient)] = [
             ("falsche Kennung", TestClient.tls(port: listenerPort, presharedKey: device.presharedKey, identity: "sgX")),
-            // Verfahren ohne PSK (ECDHE_RSA_WITH_AES_128_GCM_SHA256): Es gibt nichts, worauf man sich einigen könnte
+            // Verfahren ohne PSK (ECDHE_RSA_WITH_AES_128_GCM_SHA256)
             ("Verfahren ohne PSK", TestClient.tls(port: listenerPort, presharedKey: device.presharedKey, suiteIDs: [0xC02F])),
             // PSK-Verfahren ohne ECDHE (TLS_PSK_WITH_AES_128_GCM_SHA256): nicht erlaubt
             ("nicht erlaubtes PSK-Verfahren", TestClient.tls(port: listenerPort, presharedKey: device.presharedKey, suiteIDs: [0x00A8])),
         ]
-        defer { for (_, client) in intruders { client.close() } }
-        for (title, client) in intruders {
+        defer { for (_, client) in wrongKeys + rightKeyOtherwiseWrong { client.close() } }
+        for (title, client) in wrongKeys {
             let connected = await client.connect(timeout: 4)
-            XCTAssertFalse(
-                connected,
-                "Handshake gelungen trotz: \(title). Ausgehandelt: \(client.negotiated?.text ?? "-"). Client: \(client.stateHistory). Helfer: \(rig.logLines)")
+            XCTAssertFalse(connected, "Handshake gelungen trotz: \(title). Client: \(client.stateHistory)")
+        }
+        var acceptedWithRightKey = 0
+        for (title, client) in rightKeyOtherwiseWrong {
+            guard await client.connect(timeout: 4) else { continue }
+            let negotiated = client.negotiated
+            if title == "falsche Kennung", negotiated?.isAllowed == true {
+                // Gleicher Schlüssel, erlaubtes Verfahren: Der Server ignoriert die Kennung. Das ist zulässig, denn wer
+                // den Schlüssel kennt, ist berechtigt, und die Kennung ist kein Geheimnis (E13 schützt nur vor
+                // Verfolgung). Diese Verbindung darf den Core erreichen; sie wird gezählt und geschlossen.
+                acceptedWithRightKey += 1
+                client.close()
+                continue
+            }
+            XCTAssertFalse(negotiated?.isAllowed ?? false, "\(title): erlaubtes Verfahren ausgehandelt")
+            let closedByHelper = await waitUntil(timeout: 3) { client.isClosed }
+            XCTAssertTrue(closedByHelper, "\(title): Der Helfer schließt die Verbindung nicht (\(negotiated?.text ?? "-"))")
         }
 
         // Kein TLS: reines TCP mit Daten, die wie eine HTTP-Anfrage aussehen
@@ -165,10 +191,12 @@ final class TunnelEngineTests: XCTestCase {
         // Alle Fehlversuche sind gezählt oder abgelaufen, aber nie beim Core angekommen
         let settled = await waitUntil(timeout: 8) {
             let listener = rig.engine.snapshot().listeners.first
-            return listener?.handshakes_pending == 0 && (listener?.handshakes_failed ?? 0) >= 5
+            return listener?.handshakes_pending == 0
+                && (listener?.handshakes_failed ?? 0) >= 5 - acceptedWithRightKey
+                && listener?.connections == 0
         }
         XCTAssertTrue(settled, "\(rig.engine.snapshot())")
-        XCTAssertEqual(rig.core?.acceptedCount, 0, "Ein Fehlversuch hat den Core erreicht")
+        XCTAssertEqual(rig.core?.acceptedCount ?? 0, acceptedWithRightKey, "Ein Fehlversuch hat den Core erreicht")
         XCTAssertEqual(rig.core?.receivedBytes.count, 0)
         XCTAssertEqual(rig.engine.snapshot().listeners.first?.connections, 0)
     }
