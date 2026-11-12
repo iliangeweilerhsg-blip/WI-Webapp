@@ -615,7 +615,8 @@ final class SyncEngine {
 
     /// Nach neuer `db_epoch`: Ein freies Notizbuch, das nach dem Backup angelegt wurde, fehlt dem Core. Ohne
     /// `notebook.create` scheiterte jedes erneute `page.create` mit `notebook_not_found`. Die Operation ist
-    /// idempotent (der Core bestätigt eine bekannte ID ohne Änderung) und steht vor den `page.create` des Abgleichs.
+    /// idempotent (der Core bestätigt eine bekannte ID ohne Änderung). Sie steht evtl. hinter wartenden Operationen ihres
+    /// Stroms; `SyncOutbox.nextToSend` sendet sie trotzdem zuerst.
     private func requeueFreeNotebooks() {
         var drafts: [OutboxDraft] = []
         for notebook in library.allNotebooks()
@@ -690,7 +691,7 @@ final class SyncEngine {
         repeat {
             link.pumpAgain = false
             while link === self.link, !link.blocked, link.inFlight.count < SyncEngine.window {
-                guard let entry = outbox.pending.first(where: { !link.inFlight.contains($0.opID) }) else {
+                guard let entry = outbox.nextToSend(inFlight: link.inFlight) else {
                     break
                 }
                 var outgoing = entry

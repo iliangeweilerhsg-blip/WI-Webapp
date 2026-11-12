@@ -84,4 +84,7 @@ struct InkLibraryFile: Codable, Equatable, Sendable {
     var dbEpoch: String?
     /// Zeitpunkt des letzten erfolgreichen Abrufs der Module, in ms
     var refreshedAtMS: Int?
+    /// Die alte lokale Testseite (`InkPageModel.testPageID`) wurde geprüft und bei Strichen übernommen. Optional,
+    /// damit eine ältere `library.json` ohne das Feld lesbar bleibt (L3 aus #225): Neue Felder sind immer optional.
+    var legacyTestPageHandled: Bool?
 }

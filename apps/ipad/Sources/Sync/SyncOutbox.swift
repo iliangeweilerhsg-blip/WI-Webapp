@@ -66,6 +66,8 @@ final class SyncOutbox {
 
     private let fileURL: URL
     private var pendingIDs = Set<String>()
+    /// Wartende `notebook.create`. Bei 0 spart `nextToSend` die Suche über die ganze Warteschlange.
+    private var pendingNotebookCreates = 0
     private var nextNumber = 1
     /// Höchste vergebene Nummer je Seite (bleibt nach `ack` erhalten)
     private var marks: [String: Int] = [:]
@@ -93,6 +95,19 @@ final class SyncOutbox {
     /// Höchste Nummer einer Strich-Operation, die je für diese Seite vergeben wurde, 0 = keine
     func mark(forPage pageID: String) -> Int {
         marks[pageID] ?? 0
+    }
+
+    /// Die nächste Operation, die gesendet werden soll: die erste, die noch nicht unterwegs ist. Ausnahme: Wartet in
+    /// deren Strom noch ein `notebook.create`, das nicht unterwegs ist, geht es vor. Das kommt vor, wenn es nach einer
+    /// neuen `db_epoch` hinten angehängt wurde (hinter `page.create` und Striche desselben Notizbuchs). Die Datei
+    /// bleibt unverändert und append-only: Nur die Sendereihenfolge ändert sich, es kann also nichts verloren gehen.
+    func nextToSend(inFlight: Set<String>) -> OutboxEntry? {
+        guard let first = pending.first(where: { !inFlight.contains($0.opID) }) else { return nil }
+        if first.kind == "notebook.create" || pendingNotebookCreates == 0 { return first }
+        let create = pending.first {
+            $0.kind == "notebook.create" && $0.stream == first.stream && !inFlight.contains($0.opID)
+        }
+        return create ?? first
     }
 
     // MARK: Schreiben
@@ -175,6 +190,7 @@ final class SyncOutbox {
     private func add(_ entry: OutboxEntry) {
         pending.append(entry)
         pendingIDs.insert(entry.opID)
+        if entry.kind == "notebook.create" { pendingNotebookCreates += 1 }
         note(entry)
     }
 
@@ -190,6 +206,7 @@ final class SyncOutbox {
         guard pendingIDs.contains(opID), let index = pending.firstIndex(where: { $0.opID == opID }) else {
             return false
         }
+        if pending[index].kind == "notebook.create" { pendingNotebookCreates -= 1 }
         pending.remove(at: index)
         pendingIDs.remove(opID)
         return true
