@@ -115,7 +115,7 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 - Konkrete Dateien und Abschnitte nennen, keine pauschalen Leselisten („lies die Spezifikation“).
 - Autoren führen die Tests der betroffenen Pakete aus. Die volle Suite läuft in der CI.
 - Screenshots nur bei UI-Änderungen.
-- Höchstens **2 Agents parallel** (Autoren und Reviewer zusammengezählt), solange das 5-Stunden-Fenster der Engpass ist. Mehr nur, wenn der Owner es freigibt.
+- Höchstens **3 Agents parallel** (Autoren und Reviewer zusammengezählt), Owner-Freigabe vom 12.11. Mehr nur, wenn der Owner es freigibt. Wird das 5-Stunden-Fenster knapp, wieder weniger.
 
 **Neue Regeln ab 11.11.2026 (Arbeit ohne Argon).**
 - **Knappe Briefs:** Der Auftrag nennt Abschnittsverweise (z. B. „Vertrag §3.2“) und eine Dateiliste. Ganze Verträge werden nicht eingefügt.
@@ -152,7 +152,7 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 
 | Variante | Wie | Wann |
 |---|---|---|
-| **Subagent mit eigenem Worktree** | Eigene Git-Arbeitskopie und eigener Branch (`feat/…`) pro Subagent | 2 kleinere Features gleichzeitig (mehr nur mit Owner-Freigabe, siehe §4a) |
+| **Subagent mit eigenem Worktree** | Eigene Git-Arbeitskopie und eigener Branch (`feat/…`) pro Subagent | bis zu 3 Agents gleichzeitig inkl. Reviewern (mehr nur mit Owner-Freigabe, siehe §4a) |
 | **Eigene Cloud-Session pro Feature** | Claude startet eine separate Claude-Code-Session mit eigenem Container und Ziel-Branch und überwacht sie | Größere, länger laufende Features |
 | **Workflow (Multi-Agent)** | Orchestrierung mehrerer Agenten per Skript, Modell pro Agent nach Abschnitt 4 | Vom Owner freigegeben; für größere Pakete, z. B. nachts |
 
