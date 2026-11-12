@@ -105,6 +105,47 @@ final class DownloadHardeningTests: XCTestCase {
         XCTAssertNil(store.pdfURL(deckID: "deck-1"))
     }
 
+    /// Der echte Delegate ohne Netz: Die Task wird nie gestartet, die Callbacks ruft der Test selbst auf.
+    private func delegateResult(
+        _ delegate: LimitedDownloadDelegate, startAfter callbacks: (URLSession, URLSessionDownloadTask) -> Void
+    ) async -> Error? {
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let task = session.downloadTask(with: URL(string: "http://127.0.0.1:9/file")!)
+        callbacks(session, task)
+        do {
+            let _: HTTPURLResponse = try await withCheckedThrowingContinuation { continuation in
+                delegate.start(continuation)
+            }
+            return nil
+        } catch {
+            return error
+        }
+    }
+
+    func testDelegateResumesWhenTheTaskEndedBeforeStart() async {
+        // Abbruch vor dem Start (Swift-Task schon abgebrochen): Das Ende kommt vor `start`, darf aber nicht hängen
+        let delegate = LimitedDownloadDelegate(
+            limit: DownloadLimit(maxBytes: 10, maxDuration: 5), destination: tempFile())
+        let error = await delegateResult(delegate) { session, task in
+            delegate.urlSession(session, task: task, didCompleteWithError: URLError(.cancelled))
+        }
+        XCTAssertEqual((error as? URLError)?.code, .cancelled)
+    }
+
+    func testDelegateReportsExceededLimitAndRemovesTheFile() async throws {
+        let file = tempFile()
+        try Data(count: 20).write(to: file)
+        let delegate = LimitedDownloadDelegate(limit: DownloadLimit(maxBytes: 10, maxDuration: 5), destination: file)
+        let error = await delegateResult(delegate) { session, task in
+            delegate.urlSession(
+                session, downloadTask: task, didWriteData: 20, totalBytesWritten: 20, totalBytesExpectedToWrite: -1)
+            delegate.urlSession(session, task: task, didCompleteWithError: nil)
+        }
+        XCTAssertEqual((error as? URLError)?.code, .dataLengthExceedsMaximum)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+    }
+
     // MARK: L14
 
     func testSafeIDRule() {
@@ -142,6 +183,7 @@ final class DownloadHardeningTests: XCTestCase {
                 "notebookPages",
                 { _ = try await client.notebookPages(endpoint: endpoint, token: token, notebookID: bad) }
             ),
+            ("notebooks", { _ = try await client.notebooks(endpoint: endpoint, token: token, moduleID: bad) }),
             ("pageStrokes", { _ = try await client.pageStrokes(endpoint: endpoint, token: token, pageID: bad) }),
             ("pageState", { _ = try await client.pageState(endpoint: endpoint, token: token, pageID: bad) }),
             (

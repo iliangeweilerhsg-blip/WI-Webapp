@@ -66,12 +66,17 @@ final class URLSessionTransport: HTTPTransport {
 }
 
 /// Download-Delegate mit Größengrenze. `@unchecked Sendable`: URLSession ruft ihn auf einer eigenen seriellen Queue
-/// auf, der veränderliche Zustand (`continuation`, `exceeded`, `moveError`) liegt hinter `lock`.
+/// auf, der veränderliche Zustand (`continuation`, `pending`, `exceeded`, `moveError`) liegt hinter `lock`.
+///
+/// `didCompleteWithError` kann vor `start` kommen: Ist die Swift-Task schon abgebrochen, ruft
+/// `withTaskCancellationHandler` `task.cancel()` vor dem Start auf, und URLSession meldet das Ende auf seiner Queue.
+/// Das Ergebnis wartet dann in `pending`, bis `start` es abholt (sonst würde der Aufrufer nie fortgesetzt).
 final class LimitedDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let limit: DownloadLimit
     private let destination: URL
     private let lock = NSLock()
     private var continuation: CheckedContinuation<HTTPURLResponse, Error>?
+    private var pending: Result<HTTPURLResponse, Error>?
     private var exceeded = false
     private var moveError: Error?
 
@@ -82,6 +87,12 @@ final class LimitedDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unch
 
     func start(_ continuation: CheckedContinuation<HTTPURLResponse, Error>) {
         lock.lock()
+        if let pending {
+            self.pending = nil
+            lock.unlock()
+            continuation.resume(with: pending)
+            return
+        }
         self.continuation = continuation
         lock.unlock()
     }
@@ -90,6 +101,12 @@ final class LimitedDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unch
         lock.lock()
         exceeded = true
         lock.unlock()
+    }
+
+    private var isExceeded: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return exceeded
     }
 
     func urlSession(
@@ -103,8 +120,9 @@ final class LimitedDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unch
     }
 
     func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
-        // Die Datei von URLSession ist nur in diesem Aufruf gültig: hier verschieben (nur bei 2xx)
-        guard let http = downloadTask.response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
+        // Die Datei von URLSession ist nur in diesem Aufruf gültig: hier verschieben (nur bei 2xx und unter der Grenze)
+        guard !isExceeded, let http = downloadTask.response as? HTTPURLResponse, (200..<300).contains(http.statusCode)
+        else { return }
         do {
             try? FileManager.default.removeItem(at: destination)
             try FileManager.default.moveItem(at: location, to: destination)
@@ -117,26 +135,33 @@ final class LimitedDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unch
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         lock.lock()
-        let continuation = self.continuation
-        self.continuation = nil
         let wasExceeded = exceeded
         let moveFailure = moveError
         lock.unlock()
-        guard let continuation else { return }
+        let result: Result<HTTPURLResponse, Error>
         if wasExceeded {
-            try? FileManager.default.removeItem(at: destination)
-            continuation.resume(throwing: URLError(.dataLengthExceedsMaximum))
+            result = .failure(URLError(.dataLengthExceedsMaximum))
         } else if let error {
-            try? FileManager.default.removeItem(at: destination)
-            continuation.resume(throwing: error)
+            result = .failure(error)
         } else if let moveFailure {
-            try? FileManager.default.removeItem(at: destination)
-            continuation.resume(throwing: moveFailure)
+            result = .failure(moveFailure)
         } else if let http = task.response as? HTTPURLResponse {
-            continuation.resume(returning: http)
+            result = .success(http)
         } else {
-            continuation.resume(throwing: URLError(.badServerResponse))
+            result = .failure(URLError(.badServerResponse))
         }
+        if case .failure = result {
+            try? FileManager.default.removeItem(at: destination)
+        }
+        lock.lock()
+        guard let continuation else {
+            pending = result
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        lock.unlock()
+        continuation.resume(with: result)
     }
 }
 
@@ -263,11 +288,12 @@ final class CoreClient {
     /// `GET /notebooks?module_id=…&limit=200`, bis `next_cursor` leer ist. Die Regel „fehlt am Core, dann
     /// ausblenden“ braucht die vollständige Liste.
     func notebooks(endpoint: CoreEndpoint, token: String, moduleID: String) async throws -> [Notebook] {
+        let safeModule = try Self.safeID(moduleID)
         var result: [Notebook] = []
         var cursor: String?
         for _ in 0..<CoreClient.maxListPages {
             var query = [
-                URLQueryItem(name: "module_id", value: moduleID),
+                URLQueryItem(name: "module_id", value: safeModule),
                 URLQueryItem(name: "limit", value: "200"),
             ]
             if let cursor {
