@@ -10,7 +10,7 @@ import { apiGet } from '../../lib/api.ts';
 import { CALENDAR_KEY, addDays, dayKey, startOfDay } from '../../lib/calendar.ts';
 import { useHydrationSafe } from '../../lib/hydrated.ts';
 import { useModules } from '../../lib/modules.ts';
-import { listSessions, mergeSession } from '../../lib/sessions.ts';
+import { applyActiveSession, listSessions, mergeSession } from '../../lib/sessions.ts';
 import type { SyncClient } from '../../lib/sync/client.ts';
 import type { ConnectionState } from '../../lib/sync/types.ts';
 import { useSyncClient } from '../../lib/sync/SyncProvider.tsx';
@@ -172,6 +172,7 @@ export function useTodayData(now: number | null): TodayData {
 
   const apply = useCallback(
     (session: Session) => {
+      applyActiveSession(client, session);
       if (!range) return;
       for (const during of inflight.current) {
         const known = during.get(session.id);

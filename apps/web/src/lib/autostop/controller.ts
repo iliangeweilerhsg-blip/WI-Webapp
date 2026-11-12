@@ -5,7 +5,7 @@ import type { Session } from '@sg/shared';
 import { ApiRequestError } from '../api.ts';
 import { subscribeAudioLevel, type AudioLevelListener } from '../recorder/level.ts';
 import type { SessionEventSource } from '../recorder/recorder.ts';
-import { extendSession, stopSession } from '../sessions.ts';
+import { extendSession, getSession, isActive, stopSession } from '../sessions.ts';
 import { SilenceTracker, type SilenceTrackerOptions } from './voice.ts';
 import {
   evaluateAutoStop,
@@ -18,6 +18,8 @@ import {
 export interface AutoStopApi {
   stop: typeof stopSession;
   extend: typeof extendSession;
+  /** Frischer Stand vor dem Stopp. Fehlt die Funktion, stoppt der Controller ohne Abgleich (alte Tests). */
+  get?: typeof getSession;
 }
 
 export interface AutoStopControllerOptions {
@@ -53,6 +55,8 @@ export interface AutoStopSnapshot {
   /** Endgültig abgelehnter Stopp (andere 4xx als 404/409): Meldung, kein weiterer Versuch */
   stopError: string | null;
 }
+
+type StopReasonOf = Extract<AutoStopStatus, { state: 'stoppen' }>['stopReason'];
 
 const INACTIVE: AutoStopSnapshot = {
   status: { state: 'inaktiv' },
@@ -106,7 +110,7 @@ export class AutoStopController {
 
   constructor(options: AutoStopControllerOptions = {}) {
     this.now = options.now ?? Date.now;
-    this.api = options.api ?? { stop: stopSession, extend: extendSession };
+    this.api = options.api ?? { stop: stopSession, extend: extendSession, get: getSession };
     this.tickMs = options.tickMs ?? 1000;
     this.retryMs = options.retryMs ?? 10_000;
     this.extendGraceMs = options.extendGraceMs ?? 2 * 60_000;
@@ -272,7 +276,7 @@ export class AutoStopController {
     if (status.state === 'stoppen' && !held && now >= this.retryAt) {
       this.stopSentFor = session.id;
       this.stopTimer();
-      void this.sendStop(session.id, status.stopReason);
+      void this.confirmAndStop(session.id, status.stopReason);
     }
     // Fällig, aber zurückgehalten (extend läuft oder Schonfrist): Der Hinweis bleibt sichtbar
     if (status.state === 'stoppen' && held) {
@@ -285,6 +289,56 @@ export class AutoStopController {
       return;
     }
     this.update(status);
+  }
+
+  /**
+   * Vor dem Stopp den frischen Stand lesen (§11.8): Ein Tab mit altem Stand darf keine Session stoppen, die ein anderer
+   * Tab gerade verlängert hat (Folge-Tabs bekommen kein `session.updated`). Ohne `api.get` wird sofort gestoppt.
+   */
+  private async confirmAndStop(id: string, reason: StopReasonOf) {
+    const get = this.api.get;
+    if (!get) {
+      await this.sendStop(id, reason);
+      return;
+    }
+    let fresh: Session;
+    try {
+      fresh = await get(id);
+    } catch (error) {
+      if (this.disposed || this.session?.id !== id) return;
+      // 404: Es gibt nichts mehr zu stoppen (wie beim Stopp selbst)
+      if (error instanceof ApiRequestError && error.status === 404) return;
+      // Netz, Server und alles andere: wie ein gescheiterter Stopp, später neu versuchen
+      this.stopSentFor = null;
+      this.retryAt = this.now() + this.retryMs;
+      this.sync();
+      return;
+    }
+    const current = this.session;
+    if (this.disposed || current?.id !== id) return;
+    if (!isActive(fresh) || fresh.deleted_at !== null) {
+      // Schon beendet (oder gelöscht): kein Stopp. Der Stand räumt auf; stopSentFor bleibt gesetzt.
+      this.setSession(fresh);
+      return;
+    }
+    // Ein Ereignis, das während des Abrufs eintraf, kann neuer sein als die Antwort
+    const basis = Date.parse(current.updated_at) > Date.parse(fresh.updated_at) ? current : fresh;
+    const rules = toAutoStopSession(basis);
+    const settings = this.settings;
+    const now = this.now();
+    const status =
+      rules && settings
+        ? evaluateAutoStop({ session: rules, settings, now, silentSince: this.tracker.silentSince(now) })
+        : null;
+    const held = this.extending || now < this.graceUntil;
+    if (status?.state !== 'stoppen' || held) {
+      // Verlängert, zurückgehalten oder sonst nicht mehr fällig: der nächste Takt entscheidet
+      this.stopSentFor = null;
+      this.setSession(fresh);
+      this.sync();
+      return;
+    }
+    await this.sendStop(id, status.stopReason);
   }
 
   /** Stopp senden, genau einmal je Session. Netz- und Serverfehler geben den Weg für einen späteren Versuch frei. */

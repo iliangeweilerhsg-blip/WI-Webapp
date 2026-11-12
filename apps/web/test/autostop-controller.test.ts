@@ -464,5 +464,111 @@ describe('Auto-Stopp gegen den Fake-Core (REST nach VERTRAEGE §7.2)', () => {
     expect(stops[0]!.headers['Idempotency-Key']).toBeTruthy();
     expect(core.sessions[0]).toMatchObject({ state: 'beendet', stop_reason: 'maximaldauer' });
     expect(controller.getSnapshot().status.state).toBe('inaktiv');
+    // Der Standard enthält den Vorab-Abgleich: ein zusätzlicher GET vor dem Stopp
+    const gets = core.requests.filter(
+      (r) => r.method === 'GET' && r.path === `/sessions/${core.sessions[0]!.id}`,
+    );
+    expect(gets).toHaveLength(1);
+  });
+});
+
+describe('Vorab-Abgleich vor dem Stopp (VERTRAEGE §11.8)', () => {
+  /** Session, die in 1 s die harte Grenze (Regel 4) erreicht, mit `api.get` */
+  function withGet(get?: NonNullable<AutoStopApi['get']>) {
+    const ctx = setup({ started_at: iso(T0 - 240 * MIN + 1000) });
+    const getMock = vi.fn<NonNullable<AutoStopApi['get']>>(get ?? (async () => ctx.session()));
+    (ctx.api as AutoStopApi).get = getMock;
+    return { ...ctx, get: getMock };
+  }
+
+  it('get liefert eine verlängerte Session: kein Stopp, der Hinweis ist weg', async () => {
+    const ctx = withGet();
+    ctx.get.mockImplementation(async () => ({
+      ...ctx.session(),
+      auto_stop_extended_until: iso(Date.now() + 15 * MIN),
+      updated_at: iso(Date.now()),
+    }));
+    await advance(3000, ctx.level, 0.1);
+    expect(ctx.get).toHaveBeenCalledTimes(1);
+    expect(ctx.api.stop).not.toHaveBeenCalled();
+    expect(ctx.controller.getSnapshot().status.state).toBe('ok');
+    await advance(60_000, ctx.level, 0.1);
+    expect(ctx.api.stop).not.toHaveBeenCalled();
+    expect(ctx.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('get liefert beendet: kein POST, Zustand inaktiv', async () => {
+    const ctx = withGet();
+    ctx.get.mockImplementation(async () => ({
+      ...ctx.session(),
+      state: 'beendet',
+      ended_at: iso(Date.now()),
+      stop_reason: 'manuell',
+      updated_at: iso(Date.now()),
+    }));
+    await advance(5000, ctx.level, 0.1);
+    expect(ctx.get).toHaveBeenCalledTimes(1);
+    expect(ctx.api.stop).not.toHaveBeenCalled();
+    expect(ctx.controller.getSnapshot().status.state).toBe('inaktiv');
+  });
+
+  it('get scheitert am Netz: neuer Versuch nach retryMs, höchstens einer zugleich, dann der Stopp', async () => {
+    const { level, api, get } = withGet();
+    get.mockRejectedValueOnce(
+      new ApiRequestError({ kind: 'unreachable', message: 'x', userMessage: 'Core nicht erreichbar' }),
+    );
+    await advance(3000, level, 0.1);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(api.stop).not.toHaveBeenCalled();
+    await advance(5000, level, 0.1); // retryMs (10 s) noch nicht um
+    expect(get).toHaveBeenCalledTimes(1);
+    await advance(10_000, level, 0.1);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(api.stop).toHaveBeenCalledTimes(1);
+    await advance(30_000, level, 0.1);
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(api.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('get liefert 404: kein Stopp und kein neuer Versuch', async () => {
+    const { level, api, get } = withGet();
+    get.mockRejectedValue(
+      new ApiRequestError({ kind: 'api', status: 404, message: 'x', userMessage: 'Session nicht gefunden' }),
+    );
+    await advance(40_000, level, 0.1);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(api.stop).not.toHaveBeenCalled();
+  });
+
+  it('get liefert den unveränderten Stand: genau ein POST mit dem richtigen Grund', async () => {
+    const { level, api, get } = withGet();
+    await advance(30_000, level, 0.1);
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(api.stop).toHaveBeenCalledTimes(1);
+    expect(api.stop).toHaveBeenCalledWith(expect.any(String), 'maximaldauer');
+  });
+
+  it('Klick auf „Verlängern“, während get noch läuft: kein POST …/stop', async () => {
+    const { controller, level, api, get, session } = withGet();
+    let releaseGet!: (s: Session) => void;
+    get.mockImplementationOnce(() => new Promise<Session>((resolve) => (releaseGet = resolve)));
+    let releaseExtend!: (s: Session) => void;
+    api.extend.mockImplementationOnce(() => new Promise<Session>((resolve) => (releaseExtend = resolve)));
+    await advance(3000, level, 0.1);
+    expect(get).toHaveBeenCalledTimes(1);
+    const pending = controller.extend();
+    expect(controller.getSnapshot().extending).toBe(true);
+    releaseGet(session()); // unveränderter Stand: allein würde er zum Stopp führen
+    await advance(1000, level, 0.1);
+    expect(api.stop).not.toHaveBeenCalled();
+    releaseExtend({
+      ...session(),
+      auto_stop_extended_until: iso(Date.now() + 15 * MIN),
+      updated_at: iso(Date.now()),
+    });
+    await pending;
+    await advance(10_000, level, 0.1);
+    expect(api.stop).not.toHaveBeenCalled();
+    expect(controller.getSnapshot().status.state).toBe('ok');
   });
 });

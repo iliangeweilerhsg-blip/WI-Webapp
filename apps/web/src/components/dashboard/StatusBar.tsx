@@ -20,7 +20,8 @@ import { POLL_MS, useLiveState, useNow } from '../today/use-today.ts';
 import { MarkerControls } from './markers/MarkerControls.tsx';
 import { watchReconnect } from './reconnect.ts';
 import { useSessionRecording, type RecordingKind } from './use-recording.ts';
-import { usePausedSince, type SessionActions } from './use-session.ts';
+import { usePausedSince } from '../../lib/recording/paused-since.ts';
+import type { SessionActions } from './use-session.ts';
 
 const secondary =
   'inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong px-4 py-2 text-md hover:bg-surface-raised aria-disabled:opacity-50';
