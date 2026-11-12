@@ -17,7 +17,9 @@ vi.mock('next/navigation', () => ({
 
 import { MicTest, MIC_TEST_MAX_MS } from '../src/components/settings/MicTest.tsx';
 import { BackupHint } from '../src/components/today/BackupHint.tsx';
+import { QueryClient } from '@tanstack/react-query';
 import { QueryProvider } from '../src/lib/query.tsx';
+import { readMicrophoneId, SETTINGS_KEY } from '../src/lib/settings.ts';
 import { fakeStream, type FakeStream } from './recording-fakes.ts';
 import { makeSession } from './fake-core.ts';
 
@@ -140,14 +142,61 @@ describe('Mikrofon testen', () => {
     const user = userEvent.setup();
     render(<MicTest microphoneId="weg" />);
     await user.click(screen.getByRole('button', { name: 'Mikrofon testen' }));
-    expect(await screen.findByText(/Dieses Mikrofon wurde nicht gefunden/)).toBeInTheDocument();
+    expect(await screen.findByText(/gewählte Mikrofon wurde nicht gefunden/)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/nimmt die Aufnahme das Standardmikrofon/);
+  });
+
+  it('Tab geht in den Hintergrund: Test endet, Mikrofon und AudioContext sind frei', async () => {
+    const user = userEvent.setup();
+    render(<MicTest microphoneId={null} />);
+    await user.click(screen.getByRole('button', { name: 'Mikrofon testen' }));
+    await screen.findByRole('meter');
+    const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      expect(screen.queryByRole('meter')).toBeNull();
+      expect(allTracksStopped()).toBe(true);
+      expect(contexts.every((c) => c.closed)).toBe(true);
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
+  it('Abbrechen, solange der Browser-Dialog offen ist: kein „Kein Signal“, späte Spur wird freigegeben', async () => {
+    let answer: (s: MediaStream) => void = () => undefined;
+    getUserMedia.mockImplementationOnce(
+      () =>
+        new Promise<MediaStream>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<MicTest microphoneId={null} />);
+    await user.click(screen.getByRole('button', { name: 'Mikrofon testen' }));
+    await user.click(screen.getByRole('button', { name: 'Test beenden' }));
+    expect(screen.getByRole('status')).not.toHaveTextContent(/Kein Signal/);
+    const late = fakeStream();
+    await act(async () => answer(late));
+    expect(late.tracks[0]!.stop).toHaveBeenCalled();
+    expect(screen.queryByRole('meter')).toBeNull();
+  });
+
+  it('ohne Web Audio: Meldung, das Mikrofon wird gar nicht erst geöffnet', async () => {
+    vi.stubGlobal('AudioContext', undefined);
+    const user = userEvent.setup();
+    render(<MicTest microphoneId={null} />);
+    await user.click(screen.getByRole('button', { name: 'Mikrofon testen' }));
+    expect(screen.getByRole('status')).toHaveTextContent(/Pegel lässt sich in diesem Browser nicht messen/);
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 
   it('läuft eine Session im Tab: Knopf gesperrt mit Grund, getUserMedia wird nie gerufen', async () => {
     rec.phase = 'laeuft';
     render(<MicTest microphoneId={null} />);
     expect(screen.getByRole('button', { name: 'Mikrofon testen' })).toBeDisabled();
-    expect(screen.getByRole('status')).toHaveTextContent(/Gesperrt: In diesem Tab läuft gerade eine Session/);
+    expect(screen.getByRole('status')).toHaveTextContent(/Gesperrt: Gerade läuft eine Session/);
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
@@ -258,6 +307,14 @@ describe('Backup-Hinweis (UX-10)', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('Backup läuft gerade (Datenträger ist da): kein Hinweis', async () => {
+    const fetchSpy = stubBackups({ running: true });
+    hint();
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    await act(async () => undefined);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
   it('Core antwortet mit Fehler: kein Hinweis', async () => {
     const fetchSpy = stubBackups('fehler');
     hint();
@@ -278,5 +335,38 @@ describe('Backup-Hinweis (UX-10)', () => {
     hint();
     await act(async () => undefined);
     expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Aufnahme nutzt dasselbe Mikrofon wie der Test (`microphone_id` aus den Einstellungen)
+// ---------------------------------------------------------------------------------------------
+
+describe('readMicrophoneId (Recorder liest das gewählte Mikrofon)', () => {
+  it('aus dem Cache der Einstellungen, ohne Abfrage (solange frisch)', async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000 } } }); // wie in der App
+    client.setQueryData(SETTINGS_KEY, { lecture: { microphone_id: 'mic-7' } });
+    await expect(readMicrophoneId(client)).resolves.toBe('mic-7');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('Core nicht erreichbar: null (Standardmikrofon)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ error: { code: 'x', message: 'x' } }, { status: 404 })),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    await expect(readMicrophoneId(client)).resolves.toBeNull();
+  });
+
+  it('Core antwortet nicht: nach kurzer Wartezeit null, die Aufnahme wartet nicht', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => new Promise<Response>(() => undefined)),
+    );
+    const client = new QueryClient();
+    await expect(readMicrophoneId(client, 20)).resolves.toBeNull();
   });
 });

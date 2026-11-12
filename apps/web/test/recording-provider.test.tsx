@@ -661,3 +661,14 @@ describe('RecordingProvider: Pausendauer', () => {
     expect(kind()).toBe('paused');
   });
 });
+
+describe('RecordingProvider: gewähltes Mikrofon (UX-03)', () => {
+  it('nimmt mit dem Mikrofon aus Einstellungen → Vorlesung auf, wie „Mikrofon testen“', async () => {
+    boot();
+    core.settings.lecture.microphone_id = 'mic-7';
+    await waitFor(() => expect(kind()).toBe('rec'));
+    expect(rec.getUserMedia).toHaveBeenCalledWith({
+      audio: { channelCount: 1, deviceId: { exact: 'mic-7' } },
+    });
+  });
+});

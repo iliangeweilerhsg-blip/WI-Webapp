@@ -16,7 +16,8 @@ export function BackupHint({ sessions }: { sessions: readonly Session[] }) {
   const backups = useBackups();
   const view = useRecordingView();
   const status = backups.data?.status;
-  if (!status || status.target === null || !status.stale) return null;
+  // Läuft gerade ein Backup, ist der Datenträger da: dann keine Frage danach
+  if (!status || status.target === null || !status.stale || status.running) return null;
   if (view.phase !== 'andere' || sessions.some((s) => s.state === 'laeuft' || s.state === 'pausiert'))
     return null;
   return (
