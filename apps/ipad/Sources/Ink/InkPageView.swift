@@ -735,7 +735,9 @@ struct InkPageView: View {
                 return
             }
             model?.saveNow()
-            guard library.needsLecturePage(notebookID: currentNotebookID),
+            // Ist inzwischen die erste Folie bekannt, übernimmt `followSlideIfNeeded()` (#268): keine leere
+            // Vorlesungsseite, die gleich danach von der Folienseite abgelöst würde
+            guard !writesOnSlide, library.needsLecturePage(notebookID: currentNotebookID),
                 let target = library.openLectureTarget(notebookID: currentNotebookID)
             else { return }
             await show(pageID: target.pageID)

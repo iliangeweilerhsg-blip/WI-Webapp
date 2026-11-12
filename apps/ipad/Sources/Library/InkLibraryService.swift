@@ -1346,7 +1346,9 @@ final class InkLibraryService {
     /// aus einer früheren Vorlesung mit gleicher `slide_id` trüge die Zeitbasis der alten Session. Eine Seite ohne
     /// Session zählt nur, wenn sie erst nach Beginn der Session angelegt wurde (offline, wie `needsLecturePage`). Läuft
     /// keine Session, gibt es keine Zeitbasis zu schützen und die Seite wird wie bisher wiederverwendet. Die neue Seite
-    /// trägt über `addPage` Session und `sessionStartMS`.
+    /// trägt über `addPage` Session und `sessionStartMS`. Maßgeblich ist die Session des Moduls wie bei `addPage` und
+    /// der Zeitbasis der Striche, nicht `lectureSession(for:)`: Auch im Übungsnotizbuch oder solange das Notizbuch der
+    /// Session unbekannt ist (offline), bekäme eine alte Folienseite sonst die Zeit der früheren Session.
     func slidePage(notebookID: String, slide: SlideRef) -> LibraryPage? {
         let session = store.notebook(notebookID).flatMap { matchingSession(moduleID: $0.moduleID) }
         let existing = store.pages(inNotebook: notebookID)

@@ -331,7 +331,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 - **Seitenformate (F-INK-02, F-INK-03).**
   - Freie Seite: 595 × 842 pt, `template` ≠ `folie`, `background_slide_id = null`. `attached_slide_id` ist die Folie, die beim Anlegen lief, sonst `null`.
   - Folienseite: `width_pt`/`height_pt` der Folie (`Slide.width_pt`, `Slide.height_pt`), `template = folie`, `background_slide_id` = Folie, `attached_slide_id = null`.
-  - Je Notizbuch und Folie gibt es höchstens eine Folienseite. Das iPad sucht vor dem Anlegen eine nicht gelöschte Seite mit diesem `background_slide_id` und öffnet sie. Der Core erzwingt das nicht. Gibt es doch mehrere, gilt die mit dem kleinsten `index`.
+  - Je Notizbuch, Folie und Session gibt es höchstens eine Folienseite (#268). Das iPad sucht vor dem Anlegen eine nicht gelöschte Seite mit diesem `background_slide_id` und öffnet sie. Läuft eine Session des Moduls, zählt nur eine Seite mit dieser `session_id` (oder ohne Session, offline nach ihrem Beginn angelegt). Eine Folienseite einer früheren Session bleibt, wie sie ist, sonst bekämen neue Striche deren Zeitbasis. Der Core erzwingt das nicht. Gibt es doch mehrere passende, gilt die mit dem kleinsten `index`.
 - **Vorlagen-Geometrie.** iPad und Web zeichnen gleich. Ursprung oben links, Einheit pt, `w`/`h` = Seitengröße, Linienstärke 0,7 pt, Papier `#FAF9F5`, Linien `#E3E5E8`, Rand der Cornell-Vorlage `#E8B4B4`. Raster `r` = 5 mm = 14,173 pt.
 
   | `template` | Zeichnung |
