@@ -27,6 +27,9 @@ final class URLSessionTransport: HTTPTransport {
         // 20 s: Durch den Tunnel braucht schon der Verbindungsaufbau bis zu 12 s (WLAN 2 s, dann peer-to-peer bis 10 s)
         configuration.timeoutIntervalForRequest = 20
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        // Nie über einen Proxy (Gegen-Review PR #276): Anfragen mit Token gehen im Klartext an den Weiterleiter auf
+        // Loopback. Ein Proxy aus den WLAN-Einstellungen oder einer PAC-Datei bekäme sie sonst samt Token.
+        configuration.connectionProxyDictionary = [:]
         session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
 
@@ -46,6 +49,8 @@ final class URLSessionTransport: HTTPTransport {
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = limit.maxDuration
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        // Nie über einen Proxy, wie oben: Das Token steht im Header
+        configuration.connectionProxyDictionary = [:]
         let delegate = LimitedDownloadDelegate(limit: limit, destination: file)
         let limitedSession = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
         defer { limitedSession.finishTasksAndInvalidate() }

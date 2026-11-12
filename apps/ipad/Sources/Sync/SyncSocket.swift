@@ -95,6 +95,8 @@ final class URLSessionSyncSocketFactory: SyncSocketFactory {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = 60
+        // Nie über einen Proxy (Gegen-Review PR #276): Das Upgrade trägt das Token im Klartext an den Weiterleiter
+        configuration.connectionProxyDictionary = [:]
         // Keine Weiterleitung beim Upgrade (Review L16), auch wenn URLSession dort selten eine verfolgt
         session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
