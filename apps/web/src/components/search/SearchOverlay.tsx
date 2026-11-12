@@ -1,13 +1,15 @@
 'use client';
 
-// Suche (⌘K, 07 §3.12, VERTRAEGE §19.7): Overlay mit Eingabe, Treffern in den Gruppen „Folien“ und „Gesagtes“ und
+// Suche (⌘K, 07 §3.12, VERTRAEGE §19.7): Overlay mit Eingabe, Treffern in den Gruppen „Folien“, „Gesagtes“ und „Konzepte“ und
 // Tastatursteuerung. Mittig, 640 px breit, schmal volle Breite mit 16 px Rand. Im Live-Dashboard (`/session`) liegt es
 // über der Notizen-Spalte, die Folie bleibt sichtbar (F-DSH-07).
 import { useRouter, usePathname } from 'next/navigation';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { SearchHit } from '@sg/shared';
+import type { ConceptListItem, SearchHit } from '@sg/shared';
 import {
   JUMP_EVENT,
+  conceptHitHref,
+  conceptModulesLabel,
   MAX_QUERY_LENGTH,
   degradedLine,
   flatHits,
@@ -21,6 +23,9 @@ import { isMacPlatform, matchShortcut } from '../../lib/shortcuts.ts';
 import { Icon } from '../Icon.tsx';
 import { Snippet } from './Snippet.tsx';
 import { useSearch } from './use-search.ts';
+
+/** Eine auswählbare Zeile: Folie oder Gesagtes (aus `/search`) oder Konzept (aus `/concepts`, UX-309) */
+type Row = { type: 'hit'; hit: SearchHit } | { type: 'concept'; item: ConceptListItem };
 
 interface Rect {
   left: number;
@@ -51,7 +56,7 @@ function Overlay({ onClose }: { onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
-  const { response, failed, slow } = useSearch(query);
+  const { response, concepts, failed, slow } = useSearch(query);
   const [rect, setRect] = useState<Rect | null>(null);
   const mac = useMemo(() => isMacPlatform(), []);
 
@@ -112,8 +117,14 @@ function Overlay({ onClose }: { onClose: () => void }) {
   }, []);
 
   const groups = useMemo(() => (response ? groupHits(response.hits) : null), [response]);
-  const hits = useMemo(() => (groups ? flatHits(groups) : []), [groups]);
-  useEffect(() => setActive(0), [response]);
+  const hits = useMemo<Row[]>(
+    () => [
+      ...(groups ? flatHits(groups) : []).map((hit): Row => ({ type: 'hit', hit })),
+      ...concepts.map((item): Row => ({ type: 'concept', item })),
+    ],
+    [groups, concepts],
+  );
+  useEffect(() => setActive(0), [response, concepts]);
 
   const optionId = (i: number) => `${uid}-opt-${i}`;
   useEffect(() => {
@@ -121,8 +132,9 @@ function Overlay({ onClose }: { onClose: () => void }) {
   }, [active, hits]);
 
   const openHit = useCallback(
-    (hit: SearchHit, newTab: boolean) => {
-      const href = hitHref(hit);
+    (row: Row, newTab: boolean) => {
+      const href = row.type === 'concept' ? conceptHitHref(row.item) : hitHref(row.hit);
+      const hit = row.type === 'hit' ? row.hit : null;
       // Läuft eine Session, bleibt die Aufnahme ungestört: immer in einem neuen Tab (§19.7)
       if (newTab || onSession) {
         window.open(href, '_blank', 'noopener');
@@ -130,7 +142,7 @@ function Overlay({ onClose }: { onClose: () => void }) {
       }
       onClose();
       // Steht der Rückblick schon auf genau diesem Ziel, ändert ein Push nichts: der Sprung geht per Ereignis
-      if (hit.kind === 'transcript' && href === window.location.pathname + window.location.search) {
+      if (hit?.kind === 'transcript' && href === window.location.pathname + window.location.search) {
         window.dispatchEvent(new CustomEvent(JUMP_EVENT, { detail: { t: hit.t_ms } }));
         return;
       }
@@ -170,10 +182,10 @@ function Overlay({ onClose }: { onClose: () => void }) {
       const step = e.key === 'ArrowDown' ? 1 : -1;
       setActive((a) => (a + step + hits.length) % hits.length);
     } else if (e.key === 'Enter') {
-      const hit = hits[active];
-      if (!hit) return;
+      const row = hits[active];
+      if (!row) return;
       e.preventDefault();
-      openHit(hit, e.metaKey || e.ctrlKey);
+      openHit(row, e.metaKey || e.ctrlKey);
     }
   }
 
@@ -182,8 +194,41 @@ function Overlay({ onClose }: { onClose: () => void }) {
   const degraded = response ? degradedLine(response) : null;
   const empty = trimmed === '';
   const noHits = !empty && !failed && response !== null && hits.length === 0;
+  const slideRows = groups?.slides ?? [];
+  const spokenRows = groups?.spoken ?? [];
 
   let index = 0;
+  const renderConcept = (item: ConceptListItem) => {
+    const i = index++;
+    const selected = i === active;
+    const modules = conceptModulesLabel(item);
+    const detail = item.concept.one_liner?.trim();
+    return (
+      <div
+        key={item.concept.id}
+        id={optionId(i)}
+        role="option"
+        aria-selected={selected}
+        data-kind="concept"
+        onMouseMove={() => setActive(i)}
+        onClick={(e) => openHit({ type: 'concept', item }, e.metaKey || e.ctrlKey)}
+        className={`flex cursor-pointer items-start gap-3 rounded-md border-l-2 px-3 py-2 ${
+          selected ? 'border-accent bg-accent-soft' : 'border-transparent'
+        }`}
+      >
+        <div className="min-w-0 flex-1">
+          <p className="flex min-w-0 items-baseline gap-2 text-sm">
+            <span className="min-w-0 truncate font-medium">{item.concept.name}</span>
+            {modules ? <span className="ml-auto shrink-0 text-xs text-text-muted">{modules}</span> : null}
+          </p>
+          {detail ? (
+            <p className="mt-0.5 line-clamp-2 break-words text-sm text-text-muted">{detail}</p>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
   const renderRow = (hit: SearchHit) => {
     const i = index++;
     const selected = i === active;
@@ -196,7 +241,7 @@ function Overlay({ onClose }: { onClose: () => void }) {
         aria-selected={selected}
         data-kind={hit.kind}
         onMouseMove={() => setActive(i)}
-        onClick={(e) => openHit(hit, e.metaKey || e.ctrlKey)}
+        onClick={(e) => openHit({ type: 'hit', hit }, e.metaKey || e.ctrlKey)}
         className={`flex cursor-pointer items-start gap-3 rounded-md border-l-2 px-3 py-2 ${
           selected ? 'border-accent bg-accent-soft' : 'border-transparent'
         }`}
@@ -271,7 +316,7 @@ function Overlay({ onClose }: { onClose: () => void }) {
               autoComplete="off"
               spellCheck={false}
               maxLength={MAX_QUERY_LENGTH}
-              placeholder="Folien und Gesagtes durchsuchen …"
+              placeholder="Folien, Gesagtes und Konzepte durchsuchen …"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="min-h-9 min-w-0 flex-1 bg-transparent text-md outline-none placeholder:text-text-muted [&::-webkit-search-cancel-button]:hidden"
@@ -284,7 +329,7 @@ function Overlay({ onClose }: { onClose: () => void }) {
           <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2" onMouseDown={(e) => e.preventDefault()}>
             {empty ? (
               <div className="px-3 py-2 text-sm text-text-muted">
-                <p>Durchsucht Folien und Gesagtes aus deinen Vorlesungen.</p>
+                <p>Durchsucht Folien, Gesagtes und Konzepte aus deinen Vorlesungen.</p>
                 <p className="mt-2">
                   Eingrenzen mit <code className="font-mono text-text">fach:DBS</code>,{' '}
                   <code className="font-mono text-text">typ:folie</code> oder{' '}
@@ -316,17 +361,17 @@ function Overlay({ onClose }: { onClose: () => void }) {
                 ) : null}
               </>
             ) : null}
-            {!empty && !failed && groups && hits.length > 0 ? (
+            {!empty && !failed && response && hits.length > 0 ? (
               <div id={listId} role="listbox" aria-label="Treffer">
-                {groups.slides.length > 0 ? (
+                {slideRows.length > 0 ? (
                   <div role="group" aria-labelledby={`${uid}-folien`}>
                     <div id={`${uid}-folien`} className="px-3 pb-1 pt-2 text-xs font-medium text-text-muted">
                       Folien
                     </div>
-                    {groups.slides.map(renderRow)}
+                    {slideRows.map(renderRow)}
                   </div>
                 ) : null}
-                {groups.spoken.length > 0 ? (
+                {spokenRows.length > 0 ? (
                   <div role="group" aria-labelledby={`${uid}-gesagtes`}>
                     <div
                       id={`${uid}-gesagtes`}
@@ -334,7 +379,18 @@ function Overlay({ onClose }: { onClose: () => void }) {
                     >
                       Gesagtes
                     </div>
-                    {groups.spoken.map(renderRow)}
+                    {spokenRows.map(renderRow)}
+                  </div>
+                ) : null}
+                {concepts.length > 0 ? (
+                  <div role="group" aria-labelledby={`${uid}-konzepte`}>
+                    <div
+                      id={`${uid}-konzepte`}
+                      className="px-3 pb-1 pt-2 text-xs font-medium text-text-muted"
+                    >
+                      Konzepte
+                    </div>
+                    {concepts.map(renderConcept)}
                   </div>
                 ) : null}
               </div>

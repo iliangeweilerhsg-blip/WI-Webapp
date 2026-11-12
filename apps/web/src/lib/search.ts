@@ -7,7 +7,9 @@ import {
   type SearchHitTranscript,
   type SearchResponse,
 } from '@sg/shared';
+import type { ConceptListItem } from '@sg/shared';
 import { apiGet } from './api.ts';
+import { conceptHref, fetchConcepts, MAX_CONCEPT_QUERY } from './concepts.ts';
 import { documentHref, formatDate } from './material.ts';
 
 /** Die Web-App fragt immer mit 50, damit viele Folientreffer das Gesagte nicht verdrängen (§19.7) */
@@ -25,6 +27,32 @@ export const MAX_QUERY_LENGTH = 200;
 export function fetchSearch(q: string, signal?: AbortSignal): Promise<SearchResponse> {
   const params = new URLSearchParams({ q, limit: String(SEARCH_LIMIT) });
   return apiGet(`/search?${params.toString()}`, SearchResponseSchema, { signal });
+}
+
+/** Höchstens so viele Konzepte in ⌘K (UX-309) */
+export const CONCEPT_LIMIT = 5;
+
+/** Ein Präfix wie `fach:DBS` oder `typ:folie` richtet sich an die Folien- und Transkriptsuche, nicht an Konzepte */
+const FILTER_PREFIX_RE = /(^|\s)[\p{L}]+:\S/u;
+
+/**
+ * Konzepte nach Name und Alias (UX-309): kleiner zweiter Aufruf an `GET /concepts?q=`, der Such-Vertrag (§19.6) bleibt
+ * unverändert, das iPad sieht nichts davon. Mit Filterpräfix oder leerer Anfrage gibt es keinen Aufruf.
+ */
+export async function fetchConceptHits(q: string, signal?: AbortSignal): Promise<ConceptListItem[]> {
+  const text = q.trim().slice(0, MAX_CONCEPT_QUERY).trim();
+  if (text === '' || FILTER_PREFIX_RE.test(text)) return [];
+  return fetchConcepts({ q: text, limit: CONCEPT_LIMIT }, signal);
+}
+
+/** Ziel eines Konzepttreffers: die Konzeptseite in der Bibliothek */
+export function conceptHitHref(item: ConceptListItem): string {
+  return conceptHref(item.concept.id);
+}
+
+/** „DBS, MA“; ohne Modul leer */
+export function conceptModulesLabel(item: ConceptListItem): string {
+  return item.modules.map((m) => m.short_name ?? m.name).join(', ');
 }
 
 export type SlideHit = SearchHitSlide;
