@@ -1,4 +1,5 @@
 import {
+  cpSync,
   existsSync,
   lchownSync,
   lstatSync,
@@ -19,6 +20,20 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// Schreibgeschütztes Ziel simulieren (auch als root, der Dateirechte übergeht): `accessSync(W_OK)` auf einem Pfad
+// in `readOnlyDirs` scheitert mit EACCES, wie bei einem read-only NAS, Snapshot oder schreibgeschütztem Stick.
+const readOnlyDirs = vi.hoisted(() => new Set<string>());
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const accessSync = ((path: Parameters<typeof actual.accessSync>[0], mode?: number) => {
+    if (typeof path === 'string' && mode === actual.constants.W_OK && readOnlyDirs.has(path)) {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    }
+    return actual.accessSync(path, mode);
+  }) as typeof actual.accessSync;
+  return { ...actual, accessSync };
+});
 import { resolveConfig } from '../src/config.ts';
 import {
   copyTree,
@@ -75,6 +90,7 @@ it.runIf(process.env.SG_ROOT_TESTS === '1')('[root] Wächter: läuft wirklich al
 });
 
 const dirs: string[] = [];
+afterEach(() => readOnlyDirs.clear());
 function tmp(): string {
   const d = mkdtempSync(join(tmpdir(), 'sg-backup-'));
   dirs.push(d);
@@ -1051,6 +1067,44 @@ describe('Backup vor der Migration ist fail-closed', () => {
   });
 });
 
+describe('Schreibgeschütztes Backup-Ziel (read-only NAS, Snapshot, Stick)', () => {
+  async function readOnlyAfterBackup() {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    readOnlyDirs.add(realpathSync(s.target));
+    return s;
+  }
+
+  it('sg backup scheitert weiter an einem nicht beschreibbaren Ziel', async () => {
+    const s = restoreSetup();
+    readOnlyDirs.add(realpathSync(s.target));
+    expect(() => validateTarget(s.target, s.dataDir)).toThrow(/nicht beschreibbar/);
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(1);
+  });
+
+  it('validateTarget ohne Schreibprüfung akzeptiert das Ziel, die übrigen Prüfungen bleiben', () => {
+    const s = restoreSetup();
+    readOnlyDirs.add(realpathSync(s.target));
+    expect(validateTarget(s.target, s.dataDir, false, false).path).toBe(realpathSync(s.target));
+    expect(() => validateTarget('relativ/pfad', s.dataDir, false, false)).toThrow(/absolut/);
+    expect(() => validateTarget(join(s.dataDir, 'media'), s.dataDir, false, false)).toThrow(/media/);
+    expect(() => validateTarget(join(s.target, 'fehlt'), s.dataDir, false, false)).toThrow(/nicht vorhanden/);
+  });
+
+  it('sg restore --test und vollständig laufen von einem schreibgeschützten Ziel', async () => {
+    const s = await readOnlyAfterBackup();
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: true, yes: false })).toBe(0);
+    expect(await runRestore(s.deps, { test: false, yes: false })).toBe(0);
+    expect(s.errs).toEqual([]);
+  });
+
+  it('der Monatstest läuft von einem schreibgeschützten Ziel', async () => {
+    const s = await readOnlyAfterBackup();
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
+    expect(s.pg.testResult).toMatchObject({ state: 'ok' });
+  });
+});
+
 describe('Automatischer Restore-Test (F-DAT-02)', () => {
   const STAND = '20261104T030012Z';
 
@@ -1526,6 +1580,47 @@ describe('Restore liest den Stand ohne Symlink-Folgen (#119)', () => {
     symlinkSync(echt, join(s.target, STAND));
     expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
     expect(s.pg.testResult).toMatchObject({ reason: 'beschaedigt' });
+  });
+});
+
+describe('Restore übernimmt das Ziel mit der Identität aus validateTarget (#161)', () => {
+  const STAND = '20261104T030012Z';
+  /** Angreifer: Ziel nach der Prüfung beiseiteschieben, an seiner Stelle eine Kopie (gleicher Pfad, anderer Ordner) */
+  function swapTarget(target: string): void {
+    renameSync(target, `${target}.alt`);
+    cpSync(`${target}.alt`, target, { recursive: true });
+  }
+
+  it('automatischer Test: Ziel während des Einspielens ersetzt → "beschaedigt"', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    s.pg.restoreImpl = async () => swapTarget(s.target);
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ state: 'fehler', reason: 'beschaedigt' });
+  });
+
+  it('Gegenprobe: automatischer Test ohne Tausch besteht', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
+  });
+
+  it('restore --test: Ziel während des Einspielens ersetzt → "beschädigt"', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    s.pg.restoreImpl = async () => swapTarget(s.target);
+    expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(1);
+    expect(s.errs.join('\n')).toContain('beschädigt');
+  });
+
+  it('vollständiger Restore: Ziel während der Rückfrage ersetzt → Abbruch vor jeder Änderung', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    s.deps.confirm = async () => (swapTarget(s.target), true);
+    expect(await runRestore(s.deps, { stand: STAND, test: false, yes: false })).toBe(1);
+    expect(s.errs.join('\n')).toContain('beschädigt');
+    expect(s.pg.restored).toEqual([]);
+    expect(existsSync(join(s.dataDir, 'restore.journal.json'))).toBe(false);
   });
 });
 

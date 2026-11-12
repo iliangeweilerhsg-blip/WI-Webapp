@@ -1,5 +1,6 @@
 // #124 (H3) gegen echtes PostgreSQL: Welcher Lauf zählt als „voriger“ für die Warnung? Läuft nur mit DATABASE_URL
-// (CI: Job „Integration“ über `test:integration`), sonst übersprungen.
+// (CI: Job „Integration“ über `test:integration`). Lokal ohne DATABASE_URL wird übersprungen; mit CI=true und ohne
+// DATABASE_URL scheitert die Datei, damit kein Lauf still grün bleibt (#161).
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +11,7 @@ import { createPg, realExec, type PgAccess } from '../src/pg.ts';
 import { runAnchor } from '../src/restore.ts';
 
 const BASE = process.env.DATABASE_URL;
+const IN_CI = !!process.env.CI && process.env.CI !== 'false' && process.env.CI !== '0';
 const MIGRATE = fileURLToPath(new URL('../../../services/core/src/migrate.ts', import.meta.url));
 
 /**
@@ -37,6 +39,14 @@ async function createTestDb(name: string): Promise<{ admin: PgAccess; pg: PgAcce
   });
   return { admin, pg };
 }
+
+describe.runIf(IN_CI && !BASE)('Integrationstest braucht in CI eine Datenbank', () => {
+  it('DATABASE_URL ist gesetzt', () => {
+    throw new Error(
+      'CI=true, aber DATABASE_URL fehlt: Die PostgreSQL-Integrationstests würden sonst still übersprungen.',
+    );
+  });
+});
 
 describe.skipIf(!BASE)('recordLeftovers gegen PostgreSQL (Nacharbeit Review #160)', () => {
   const name = `sg_cli_it_${randomBytes(4).toString('hex')}`;
