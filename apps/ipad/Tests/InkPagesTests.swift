@@ -67,6 +67,11 @@ final class InkPagesTests: XCTestCase {
 
     // MARK: Anlegen und Index
 
+    /// L11 aus #225: Die Leiste „Rückgängig“ endet vor der Löschfrist
+    func testTheUndoBarEndsBeforeTheDeleteGrace() {
+        XCTAssertLessThan(InkLibraryService.undoBarDuration, InkLibraryService.deleteGrace)
+    }
+
     func testAddPageContinuesTheIndexAndQueuesAPageCreateWithAllFields() throws {
         let h = SyncHarness()
         let page = try XCTUnwrap(

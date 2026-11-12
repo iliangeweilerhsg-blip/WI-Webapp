@@ -161,6 +161,20 @@ final class SlideSwitchGateQuietTests: XCTestCase {
         XCTAssertEqual(gate.slideChanged(three), three)
     }
 
+    /// L15 aus #225: Eine Änderung der laufenden Session darf nicht zur Folienseite zurückspringen
+    func testAFollowedSlideIsNotFollowedAgainUntilForgotten() {
+        let gate = makeGate(GateTestClock())
+        XCTAssertFalse(gate.alreadyFollowed(one))
+        gate.noteFollowed(one)
+        XCTAssertTrue(gate.alreadyFollowed(one))
+        XCTAssertFalse(gate.alreadyFollowed(two))
+        // Das Öffnen jeder Seite setzt das Gate zurück, die gemerkte Folie bleibt
+        gate.reset()
+        XCTAssertTrue(gate.alreadyFollowed(one))
+        gate.forgetFollowed()
+        XCTAssertFalse(gate.alreadyFollowed(one))
+    }
+
     func testTheViewIsToldToRestartTheWaitWhenAChangeWaitsOrAStrokeEnds() {
         let clock = GateTestClock()
         let gate = makeGate(clock)

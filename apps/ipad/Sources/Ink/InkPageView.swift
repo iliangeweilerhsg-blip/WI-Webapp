@@ -264,7 +264,9 @@ struct InkPageView: View {
         .onChange(of: sync.pendingCount) { _, _ in
             allSynced.update(isOnline: sync.state == .online, pending: sync.pendingCount)
         }
-        .onChange(of: library.running) { _, _ in
+        .onChange(of: library.running) { old, new in
+            // Eine andere Vorlesung: die aktuelle Folie wird wieder angesteuert (L15 aus #225)
+            if old?.id != new?.id { gate.forgetFollowed() }
             // Die Vorlesung hat begonnen oder geendet: Session der offenen Seite nachziehen
             applyFreshTarget()
             followSlideIfNeeded()
@@ -525,6 +527,8 @@ struct InkPageView: View {
         guard force || library.inkMode(forModule: moduleID) == .aufFolie else { return }
         _Concurrency.Task {
             guard let slide = await slides.currentSlide() else { return }
+            // Dieselbe Folie wie beim letzten Wechsel: nicht zurückspringen, wenn von Hand weitergeblättert wurde
+            guard force || !gate.alreadyFollowed(slide) else { return }
             if let now = gate.slideChanged(slide) {
                 openSlidePage(now)
             }
@@ -536,6 +540,7 @@ struct InkPageView: View {
             // Setzt der Stift zwischen Freigabe und Wechsel an, wartet der Wechsel erneut bis zum Absetzen. Sonst
             // verschwände die Ansicht mitten im Strich.
             guard gate.slideChanged(slide) != nil else { return }
+            gate.noteFollowed(slide)
             guard let page = library.slidePage(notebookID: currentNotebookID, slide: slide) else { return }
             await show(pageID: page.id)
         }
@@ -755,6 +760,8 @@ struct InkPageView: View {
         failedToOpen = false
         showsSidebar = false
         currentNotebookID = target
+        // Im neuen Notizbuch gibt es noch keine Folienseite: die aktuelle Folie wird wieder angesteuert
+        gate.forgetFollowed()
         await open()
     }
 
@@ -908,7 +915,7 @@ private struct InkUndoDeleteBar: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
         .task(id: pageID) {
-            try? await _Concurrency.Task.sleep(for: .seconds(5))
+            try? await _Concurrency.Task.sleep(for: InkLibraryService.undoBarDuration)
             guard !_Concurrency.Task.isCancelled else { return }
             onExpire()
         }

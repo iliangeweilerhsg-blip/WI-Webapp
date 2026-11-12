@@ -64,6 +64,25 @@ final class SlideSwitchGate {
         self.quiet = quietPeriod
     }
 
+    /// Folie, auf deren Seite die Ansicht zuletzt gewechselt hat. Bis zum nächsten Folienwechsel bleibt man auf der
+    /// Seite, die man von Hand gewählt hat (L15 aus #225).
+    @ObservationIgnored private var followedSlideID: String?
+
+    /// Hat die Ansicht zu dieser Folie schon gewechselt? Dann springt nicht jede Änderung der laufenden Session
+    /// (neues Notizbuch, andere Startzeit) zurück zur Folienseite.
+    func alreadyFollowed(_ slide: SlideRef) -> Bool {
+        followedSlideID == slide.id
+    }
+
+    func noteFollowed(_ slide: SlideRef) {
+        followedSlideID = slide.id
+    }
+
+    /// Eine andere Vorlesung beginnt oder endet: Die erste Folie wird wieder angesteuert
+    func forgetFollowed() {
+        followedSlideID = nil
+    }
+
     /// Wartet überhaupt ein Wechsel?
     var hasPending: Bool { pending != nil || lecturePending }
 

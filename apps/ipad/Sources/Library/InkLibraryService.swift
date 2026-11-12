@@ -20,6 +20,9 @@ final class InkLibraryService {
     static let deletedOnMacLine = "Am Mac gelöscht, liegt im Papierkorb"
     /// Löschfrist: So lange lässt sich eine gelöschte Seite zurückholen. `page.delete` wird erst danach eingereiht.
     static let deleteGrace: Duration = .seconds(5)
+    /// So lange zeigt die Leiste „Rückgängig“. Etwas kürzer als die Löschfrist: Die Leiste startet erst mit dem
+    /// Zeichnen der Ansicht, ein Tipp in den letzten Millisekunden scheiterte sonst still (L11 aus #225).
+    static let undoBarDuration: Duration = .milliseconds(4500)
 
     /// Die Engine, über die Operationen laufen
     let sync: SyncEngine
