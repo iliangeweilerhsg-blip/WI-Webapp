@@ -1082,7 +1082,8 @@ describe('Dashboard: Nachschärfungen aus dem Review (PR #126)', () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
     boot({ hold: { settings: gate } });
-    await within(await screenBar()).findByText('REC');
+    // Die Aufnahme wartet bis zu 1 s auf das gewählte Mikrofon aus den Einstellungen, dann Standardmikrofon (UX-03)
+    await within(await screenBar()).findByText('REC', undefined, { timeout: 4000 });
     // Einstellungen hängen noch: das Attribut ist trotzdem schon gesetzt (ThemeProvider hat „System“ angewendet)
     await waitFor(() => expect(root).toHaveAttribute('data-theme', 'dark'));
     expect(gets('/settings')).toBe(1);

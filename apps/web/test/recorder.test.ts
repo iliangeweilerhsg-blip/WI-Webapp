@@ -117,6 +117,7 @@ function setup(
     respond?: (c: Call) => Response | 'throw' | undefined;
     events?: SessionEventSource;
     pageEvents?: RecorderOptions['pageEvents'];
+    microphoneId?: RecorderOptions['microphoneId'];
   } = {},
 ): Harness {
   FakeMediaRecorder.instances = [];
@@ -133,6 +134,7 @@ function setup(
     sessionId: '01a1a874-0759-7058-a15c-e5d0adae8e74',
     sessionMs: () => 5_000,
     ...(opts.events ? { events: opts.events } : {}),
+    ...(opts.microphoneId ? { microphoneId: opts.microphoneId } : {}),
     // Ohne eigenen Fake kein echtes window: die Tests sollen nicht an den Eigenschaften von jsdom hängen
     pageEvents: opts.pageEvents ?? {
       addEventListener: () => undefined,
@@ -151,6 +153,9 @@ function setup(
     getUserMedia: async (c) => {
       media.constraints.push(c);
       if (media.fail) throw new Error('kein Mikrofon');
+      const wanted = (c.audio as { deviceId?: { exact?: string } } | undefined)?.deviceId?.exact;
+      if (wanted === 'abgesteckt')
+        throw Object.assign(new Error('nicht da'), { name: 'OverconstrainedError' });
       const stream = fakeStream();
       streams.push(stream);
       return stream;
@@ -635,6 +640,43 @@ describe('AudioRecorder: Mikrofon, Pause, Verlust', () => {
     expect(h.recorder.getStatus().recordingId).not.toBe(first);
     expect(h.streams).toHaveLength(2);
     await h.recorder.stop();
+  });
+
+  it('UX-03: nimmt mit dem gewählten Mikrofon auf, gelesen bei jedem Öffnen', async () => {
+    let chosen: string | null = 'mic-7';
+    const h = setup({ microphoneId: async () => chosen });
+    await h.recorder.start();
+    expect(h.media.constraints).toEqual([{ audio: { channelCount: 1, deviceId: { exact: 'mic-7' } } }]);
+    chosen = null; // in den Einstellungen auf „Standardmikrofon“ zurückgestellt
+    h.streams[0]!.track.readyState = 'ended';
+    h.streams[0]!.track.onended?.();
+    await vi.waitFor(() => expect(h.recorder.getStatus().restarts).toBe(1));
+    expect(h.media.constraints[1]).toEqual({ audio: { channelCount: 1 } });
+    await h.recorder.stop();
+  });
+
+  it('UX-03: gewähltes Mikrofon fehlt oder Einstellungen unlesbar: Standardmikrofon statt keiner Aufnahme', async () => {
+    const h = setup({ microphoneId: () => 'abgesteckt' });
+    await h.recorder.start();
+    expect(h.recorder.getStatus().state).toBe('recording');
+    expect(h.media.constraints).toEqual([
+      { audio: { channelCount: 1, deviceId: { exact: 'abgesteckt' } } },
+      { audio: { channelCount: 1 } },
+    ]);
+    await h.recorder.stop();
+
+    const broken = setup({ microphoneId: () => Promise.reject(new Error('Core weg')) });
+    await broken.recorder.start();
+    expect(broken.recorder.getStatus().state).toBe('recording');
+    expect(broken.media.constraints).toEqual([{ audio: { channelCount: 1 } }]);
+    await broken.recorder.stop();
+  });
+
+  it('UX-03: andere Fehler beim gewählten Mikrofon (verweigert) fallen nicht auf das Standardmikrofon zurück', async () => {
+    const h = setup({ microphoneId: () => 'mic-7' });
+    h.media.fail = true;
+    await expect(h.recorder.start()).rejects.toThrow(/Mikrofon/);
+    expect(h.media.constraints).toHaveLength(1);
   });
 
   it('B1: Spur endet und kein Mikrofon mehr: sichtbarer Fehlerzustand', async () => {

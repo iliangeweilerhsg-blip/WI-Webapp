@@ -66,6 +66,12 @@ export interface RecorderOptions {
   events?: SessionEventSource;
   store?: RecorderStore;
   uploader?: Omit<UploaderOptions, 'store' | 'isActive' | 'onChange' | 'sessionId'>;
+  /**
+   * Gewähltes Mikrofon aus Einstellungen → Vorlesung (`microphone_id`, `deviceId` aus MediaDevices). `null` oder ohne
+   * Angabe: Standardmikrofon. Wird vor jedem Öffnen des Mikrofons neu gelesen. Fehlt das Gerät, nimmt der Recorder das
+   * Standardmikrofon (lieber Ton vom falschen Mikrofon als gar keiner).
+   */
+  microphoneId?: () => string | null | Promise<string | null>;
   /** Standard: `navigator.mediaDevices.getUserMedia` */
   getUserMedia?: (constraints: MediaStreamConstraints) => Promise<MediaStream>;
   MediaRecorder?: MediaRecorderCtorLike;
@@ -201,7 +207,7 @@ export class AudioRecorder {
         settled = true;
         reject(Object.assign(new Error('Das Mikrofon antwortet nicht.'), { name: 'TimeoutError' }));
       }, limit);
-      get(AUDIO_CONSTRAINTS).then(
+      this.openMicrophone(get).then(
         (stream) => {
           clearTimeout(timer);
           if (settled) {
@@ -221,6 +227,28 @@ export class AudioRecorder {
         },
       );
     });
+  }
+
+  /** Das gewählte Mikrofon öffnen; fehlt es (`OverconstrainedError`/`NotFoundError`), das Standardmikrofon */
+  private async openMicrophone(
+    get: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
+  ): Promise<MediaStream> {
+    const pick = this.o.microphoneId;
+    if (!pick) return get(AUDIO_CONSTRAINTS); // ohne Auswahl ohne Umweg (synchron)
+    let id: string | null;
+    try {
+      id = (await pick()) ?? null;
+    } catch {
+      id = null; // Einstellungen nicht lesbar: Standardmikrofon
+    }
+    if (id === null) return get(AUDIO_CONSTRAINTS);
+    try {
+      return await get({ audio: { channelCount: 1, deviceId: { exact: id } } });
+    } catch (error) {
+      const name = (error as { name?: string } | null)?.name;
+      if (name !== 'OverconstrainedError' && name !== 'NotFoundError') throw error;
+      return get(AUDIO_CONSTRAINTS);
+    }
   }
 
   /** Mikrofon öffnen und aufnehmen. Die Aufnahme wird beim Core angelegt, auch erst später (offline erlaubt). */
