@@ -44,7 +44,7 @@ beforeAll(async () => {
   };
   const dataDir = mkdtempSync(join(tmpdir(), 'sg-core-moodle-access-'));
   const moodle = createMoodleServices({
-    config: { moodleUrl: FAKE_BASE, dataDir },
+    config: { moodleUrl: FAKE_BASE, dataDir, moodleActions: ['assign.submit'] },
     tokens: new StaticTokenStore(FAKE_TOKEN),
     fetch: fake.fetch,
     handlers: { ...DEFAULT_ACTION_HANDLERS, 'assign.submit': submitHandler },

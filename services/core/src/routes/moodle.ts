@@ -87,7 +87,7 @@ const errorResponses = {
 
 export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps): Promise<void> {
   const typed = app.withTypeProvider<ZodTypeProvider>();
-  const { client, status, actions, confirmations, reader, files } = deps.moodle;
+  const { client, status, actions, confirmations, locks, reader, files } = deps.moodle;
   const context: MoodleActionContext = { client, userId: () => status.userId() };
 
   function actionId(raw: string): MoodleActionId {
@@ -377,9 +377,14 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     async (request) => {
       const id = actionId(request.params.action_id);
       const { handler, params, confirm } = await prepare(id, request.body.params);
-      const preview = await handler.preview(context, params);
+      // Zähler zuerst, dann Stand: Läuft dazwischen ein `revokeScope`, wird der Code nicht gültig (08 §9.3).
+      // Die Vorschau nimmt keine Sperre, ein langer Upload soll sie nicht blockieren
+      const scope = handler.scope?.(params) ?? null;
+      const epoch = scope !== null ? confirmations.epoch(scope) : 0;
+      const state = (await handler.state?.(context, params)) ?? null;
+      const preview = await handler.preview(context, params, state);
       const risk = actions.spec(id).risk;
-      const code = confirm ? confirmations.issue(id, params) : null;
+      const code = confirm ? confirmations.issue(id, params, { state, scope, epoch }) : null;
       return {
         action_id: id,
         risk,
@@ -408,26 +413,58 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     async (request) => {
       const id = actionId(request.params.action_id);
       const { handler, params, confirm } = await prepare(id, request.body.params);
-      if (confirm) {
-        const token = request.body.confirmation_token;
-        if (!token) {
-          throw new HttpError(
-            409,
-            'moodle_confirmation_required',
-            'Diese Aktion braucht eine Bestätigung. Bitte zuerst die Vorschau abrufen.',
-          );
-        }
-        if (!confirmations.consume(token, id, params)) {
-          throw new HttpError(
-            409,
-            'moodle_confirmation_invalid',
-            'Der Bestätigungscode ist abgelaufen, schon benutzt oder gilt für andere Angaben.',
-          );
-        }
+      const token = request.body.confirmation_token;
+      if (confirm && !token) {
+        throw new HttpError(
+          409,
+          'moodle_confirmation_required',
+          'Diese Aktion braucht eine Bestätigung. Bitte zuerst die Vorschau abrufen.',
+        );
       }
-      request.log.info({ action_id: id }, 'Moodle-Aktion wird ausgeführt');
-      const outcome = await handler.execute(context, params);
-      return { action_id: id, summary: outcome.summary, result: outcome.result };
+      // Aktionen mit gleichem Schlüssel laufen nacheinander. Ein Upload kann Minuten dauern, die Anfrage wartet
+      // darum höchstens 10 s (Zeitlimit der Sperre)
+      const lockKey = handler.lockKey?.(params) ?? null;
+      const release = lockKey === null ? null : await locks.acquire(lockKey);
+      if (lockKey !== null && release === null) {
+        throw new HttpError(409, 'moodle_action_busy', 'Für diese Aufgabe läuft gerade eine andere Aktion.', {
+          action_id: id,
+        });
+      }
+      try {
+        // Erst den Stand lesen, dann den Code einlösen: `consume` verbraucht ihn auch bei einem Fehlschlag.
+        // Scheitert das Lesen, bleibt der Code offen (es wurde nichts geschrieben)
+        const state = (await handler.state?.(context, params)) ?? null;
+        if (confirm && token) {
+          const result = confirmations.consume(token, id, params, state);
+          if (result !== 'ok') {
+            throw new HttpError(
+              409,
+              'moodle_confirmation_invalid',
+              result === 'state_changed'
+                ? 'Der Stand in Moodle hat sich seit der Vorschau geändert. Bitte die Vorschau erneut abrufen.'
+                : 'Der Bestätigungscode ist abgelaufen, schon benutzt oder gilt für andere Angaben.',
+              result === 'state_changed' ? { reason: 'stand_geaendert' } : undefined,
+            );
+          }
+        }
+        request.log.info({ action_id: id }, 'Moodle-Aktion wird ausgeführt');
+        let rejected = false;
+        try {
+          const outcome = await handler.execute(context, params, state);
+          return { action_id: id, summary: outcome.summary, result: outcome.result };
+        } catch (error) {
+          // Eine Ablehnung vor dem Schreiben (nichts geändert) widerruft nichts
+          rejected = error instanceof HttpError && error.code === 'moodle_action_rejected';
+          throw error;
+        } finally {
+          // Nach jedem Schreibversuch, auch bei Fehler und `outcome_unknown`: Der Entwurf kann sich geändert haben.
+          // Noch unter der Sperre, damit kein anderes `execute` dazwischen einen alten Code einlöst
+          const revoked = rejected ? null : (handler.revokesScope?.(params) ?? null);
+          if (revoked !== null) confirmations.revokeScope(revoked);
+        }
+      } finally {
+        release?.();
+      }
     },
   );
 

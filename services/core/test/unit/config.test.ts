@@ -117,3 +117,38 @@ describe('loadDotEnv', () => {
     expect(loadDotEnv(env)).toBeNull();
   });
 });
+
+describe('SG_MOODLE_ACTIONS (T1-24, E12)', () => {
+  it('Standard: leer, keine Aktion aus T1-24', () => {
+    expect(loadConfig({}).moodleActions).toEqual([]);
+    expect(loadConfig({ SG_MOODLE_ACTIONS: '' }).moodleActions).toEqual([]);
+    expect(loadConfig({ SG_MOODLE_ACTIONS: ' , ,' }).moodleActions).toEqual([]);
+  });
+
+  it('eine Aktion, mehrere mit Leerzeichen, Doppelte fallen weg', () => {
+    expect(loadConfig({ SG_MOODLE_ACTIONS: 'assign.submit' }).moodleActions).toEqual(['assign.submit']);
+    expect(
+      loadConfig({ SG_MOODLE_ACTIONS: ' assign.save_draft , assign.submit,assign.submit ' }).moodleActions,
+    ).toEqual(['assign.save_draft', 'assign.submit']);
+  });
+
+  it('unbekannte Kennung bricht den Start ab und nennt sie samt den erlaubten', () => {
+    expect(() => loadConfig({ SG_MOODLE_ACTIONS: 'assign.submit,assign.sumbit' })).toThrow(/assign\.sumbit/);
+    expect(() => loadConfig({ SG_MOODLE_ACTIONS: 'nix' })).toThrow(/Erlaubt: assign\.save_draft/);
+  });
+
+  it('completion.set und notifications.mark_read hängen nicht am Schalter und sind hier unbekannt', () => {
+    expect(() => loadConfig({ SG_MOODLE_ACTIONS: 'completion.set' })).toThrow(/unbekannte Aktionen/);
+    expect(() => loadConfig({ SG_MOODLE_ACTIONS: 'notifications.mark_read' })).toThrow(/unbekannte Aktionen/);
+  });
+
+  it('die Meldung enthält nur gekürzte Kennungen', () => {
+    const long = 'x'.repeat(500);
+    try {
+      loadConfig({ SG_MOODLE_ACTIONS: long });
+      expect.unreachable();
+    } catch (error) {
+      expect((error as Error).message).not.toContain('x'.repeat(41));
+    }
+  });
+});

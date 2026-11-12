@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MoodleStatusSchema } from '@sg/shared';
 import { MoodleClient } from '../../src/moodle/client.ts';
 import { canonicalJson, ConfirmationStore } from '../../src/moodle/confirmations.ts';
+import { KeyedMutex } from '../../src/moodle/locks.ts';
 import { computeState, daysUntil, MoodleStatusService } from '../../src/moodle/status.ts';
 import { KeychainTokenStore, StaticTokenStore } from '../../src/moodle/token-store.ts';
 import { FAKE_BASE, FAKE_TOKEN, fakeFetch, restHandler, siteInfo } from './moodle-fake.ts';
@@ -20,18 +21,22 @@ describe('Bestätigungscodes (F-MDL-06)', () => {
     const { token } = store.issue('assign.submit', params);
     expect(token).toMatch(/^[A-Za-z0-9_-]{22}$/);
     // Schlüsselreihenfolge egal
-    expect(store.consume(token, 'assign.submit', { accept_statement: true, assignment_id: 3 })).toBe(true);
-    expect(store.consume(token, 'assign.submit', params)).toBe(false);
+    expect(store.consume(token, 'assign.submit', { accept_statement: true, assignment_id: 3 })).toBe('ok');
+    expect(store.consume(token, 'assign.submit', params)).toBe('invalid');
   });
 
   it('andere Parameter oder Aktion verbrauchen den Code', () => {
     const store = new ConfirmationStore();
     const a = store.issue('assign.submit', { assignment_id: 3, accept_statement: true });
-    expect(store.consume(a.token, 'assign.submit', { assignment_id: 4, accept_statement: true })).toBe(false);
-    expect(store.consume(a.token, 'assign.submit', { assignment_id: 3, accept_statement: true })).toBe(false);
+    expect(store.consume(a.token, 'assign.submit', { assignment_id: 4, accept_statement: true })).toBe(
+      'invalid',
+    );
+    expect(store.consume(a.token, 'assign.submit', { assignment_id: 3, accept_statement: true })).toBe(
+      'invalid',
+    );
     const b = store.issue('forum.reply', { post_id: 1, message_html: 'x' });
-    expect(store.consume(b.token, 'message.send', { post_id: 1, message_html: 'x' })).toBe(false);
-    expect(store.consume('gibt-es-nicht-1234', 'forum.reply', {})).toBe(false);
+    expect(store.consume(b.token, 'message.send', { post_id: 1, message_html: 'x' })).toBe('invalid');
+    expect(store.consume('gibt-es-nicht-1234', 'forum.reply', {})).toBe('invalid');
   });
 
   it('Code verfällt nach 5 Minuten', () => {
@@ -40,7 +45,7 @@ describe('Bestätigungscodes (F-MDL-06)', () => {
     const { token, expiresAt } = store.issue('message.send', { to_user_id: 1, text: 'Hallo' });
     expect(expiresAt.getTime()).toBe(now + 5 * 60 * 1000);
     now += 5 * 60 * 1000;
-    expect(store.consume(token, 'message.send', { to_user_id: 1, text: 'Hallo' })).toBe(false);
+    expect(store.consume(token, 'message.send', { to_user_id: 1, text: 'Hallo' })).toBe('invalid');
   });
 
   it('abgelaufene Codes werden aufgeräumt, höchstens 100 offen', () => {
@@ -269,5 +274,187 @@ describe('Nacharbeit Review: Token-Speicher und Status', () => {
     valid = false;
     await client.read('core_enrol_get_users_courses').catch(() => {});
     expect((await service.getStatus()).state).toBe('ungueltig');
+  });
+});
+
+describe('Bestätigungscodes: Bindung an den Stand (T1-24, 08 §9.3)', () => {
+  const params = { assignment_id: 3, accept_statement: true };
+
+  it('gleicher Stand → ok, anderer Stand → state_changed, Schlüsselreihenfolge egal', () => {
+    const store = new ConfirmationStore();
+    const a = store.issue('assign.submit', params, { state: { b: 1, a: [2, 1] } });
+    expect(store.consume(a.token, 'assign.submit', params, { a: [2, 1], b: 1 })).toBe('ok');
+    const b = store.issue('assign.submit', params, { state: { v: 1 } });
+    expect(store.consume(b.token, 'assign.submit', params, { v: 2 })).toBe('state_changed');
+    // Der Code ist danach verbraucht
+    expect(store.consume(b.token, 'assign.submit', params, { v: 1 })).toBe('invalid');
+  });
+
+  it('andere Parameter haben Vorrang vor dem Stand: invalid, nicht state_changed', () => {
+    const store = new ConfirmationStore();
+    const a = store.issue('assign.submit', params, { state: { v: 1 } });
+    expect(store.consume(a.token, 'assign.submit', { ...params, assignment_id: 4 }, { v: 2 })).toBe(
+      'invalid',
+    );
+  });
+
+  it('abgelaufen → invalid, auch wenn der Stand abweicht', () => {
+    let now = 0;
+    const store = new ConfirmationStore({ now: () => now });
+    const a = store.issue('assign.submit', params, { state: { v: 1 } });
+    now += 5 * 60 * 1000;
+    expect(store.consume(a.token, 'assign.submit', params, { v: 2 })).toBe('invalid');
+  });
+
+  it('ohne Bindung wie bisher: kein Stand = null, ein Stand beim Einlösen ist dann eine Abweichung', () => {
+    const store = new ConfirmationStore();
+    const a = store.issue('assign.submit', params);
+    expect(store.consume(a.token, 'assign.submit', params)).toBe('ok');
+    const b = store.issue('assign.submit', params, { state: null });
+    expect(store.consume(b.token, 'assign.submit', params, undefined)).toBe('ok');
+    const c = store.issue('assign.submit', params);
+    expect(store.consume(c.token, 'assign.submit', params, { v: 1 })).toBe('state_changed');
+  });
+
+  it('„kein Entwurf“ ({ submission_id: null }) ist ein anderer Stand als null', () => {
+    const store = new ConfirmationStore();
+    const a = store.issue('assign.submit', params, { state: { submission_id: null } });
+    expect(store.consume(a.token, 'assign.submit', params, null)).toBe('state_changed');
+  });
+
+  it('revokeScope verwirft alle offenen Codes des Bereichs und zählt sie, andere Bereiche bleiben', () => {
+    const store = new ConfirmationStore();
+    const a1 = store.issue('assign.submit', params, { scope: 'assign:3' });
+    const a2 = store.issue('assign.submit', params, { scope: 'assign:3' });
+    const other = store.issue('assign.submit', params, { scope: 'assign:4' });
+    const none = store.issue('assign.submit', params);
+    expect(store.revokeScope('assign:3')).toBe(2);
+    expect(store.consume(a1.token, 'assign.submit', params)).toBe('invalid');
+    expect(store.consume(a2.token, 'assign.submit', params)).toBe('invalid');
+    expect(store.consume(other.token, 'assign.submit', params)).toBe('ok');
+    expect(store.consume(none.token, 'assign.submit', params)).toBe('ok');
+    expect(store.revokeScope('assign:3')).toBe(0);
+  });
+
+  it('revokeScope zählt abgelaufene Codes nicht mit', () => {
+    let now = 0;
+    const store = new ConfirmationStore({ now: () => now });
+    store.issue('assign.submit', params, { scope: 'assign:3' });
+    now += 5 * 60 * 1000;
+    expect(store.revokeScope('assign:3')).toBe(0);
+  });
+
+  it('epoch steigt mit jedem revokeScope, je Bereich', () => {
+    const store = new ConfirmationStore();
+    expect(store.epoch('assign:3')).toBe(0);
+    store.revokeScope('assign:3');
+    store.revokeScope('assign:3');
+    expect(store.epoch('assign:3')).toBe(2);
+    expect(store.epoch('assign:4')).toBe(0);
+  });
+
+  it('Zähler: Code, dessen Zähler vor einem revokeScope gelesen wurde, wird ausgegeben, gilt aber nie', () => {
+    const store = new ConfirmationStore();
+    const epoch = store.epoch('assign:3');
+    store.revokeScope('assign:3');
+    const late = store.issue('assign.submit', params, { scope: 'assign:3', epoch, state: { v: 1 } });
+    expect(late.token).toEqual(expect.any(String));
+    expect(late.expiresAt.getTime()).toBeGreaterThan(Date.now() - 1000);
+    expect(store.size).toBe(0);
+    expect(store.consume(late.token, 'assign.submit', params, { v: 1 })).toBe('invalid');
+    // Mit frischem Zähler gilt der Code
+    const fresh = store.issue('assign.submit', params, {
+      scope: 'assign:3',
+      epoch: store.epoch('assign:3'),
+      state: { v: 1 },
+    });
+    expect(store.consume(fresh.token, 'assign.submit', params, { v: 1 })).toBe('ok');
+  });
+});
+
+describe('Bestätigungscodes: Stand muss reines JSON sein (fail closed)', () => {
+  const params = { assignment_id: 3, accept_statement: true };
+
+  it('Date, Map, Set, NaN und Klassen im Stand: kein Code, sonst sähe die Bindung keine Änderung', () => {
+    const store = new ConfirmationStore();
+    for (const bad of [
+      { t: new Date(0) },
+      { files: new Map([['a', 1]]) },
+      [new Set([1])],
+      { size: Number.NaN },
+      { size: Infinity },
+      { n: 1n },
+      new (class Stand {})(),
+    ]) {
+      expect(() => store.issue('assign.submit', params, { state: bad })).toThrow(/kein reines JSON/);
+    }
+    expect(store.size).toBe(0);
+  });
+
+  it('beim Einlösen wirft ein solcher Stand, ohne den Code zu verbrauchen', () => {
+    const store = new ConfirmationStore();
+    const a = store.issue('assign.submit', params, { state: { t: 0 } });
+    expect(() => store.consume(a.token, 'assign.submit', params, { t: new Date(0) })).toThrow();
+    expect(store.consume(a.token, 'assign.submit', params, { t: 0 })).toBe('ok');
+  });
+
+  it('reines JSON samt Objekten ohne Prototyp geht durch', () => {
+    const store = new ConfirmationStore();
+    const bare = Object.assign(Object.create(null) as Record<string, unknown>, { a: [1, 'x', null, true] });
+    const a = store.issue('assign.submit', params, { state: bare });
+    expect(store.consume(a.token, 'assign.submit', params, { a: [1, 'x', null, true] })).toBe('ok');
+  });
+});
+
+describe('KeyedMutex (T1-24, Sperre je Aufgabe)', () => {
+  it('gleicher Schlüssel: nacheinander in Reihenfolge, andere Schlüssel parallel', async () => {
+    const mutex = new KeyedMutex({ timeoutMs: 60_000 });
+    const order: string[] = [];
+    const first = await mutex.acquire('assign:1');
+    expect(first).not.toBeNull();
+    const second = mutex.acquire('assign:1').then((release) => {
+      order.push('zweite');
+      return release;
+    });
+    const third = mutex.acquire('assign:1').then((release) => {
+      order.push('dritte');
+      return release;
+    });
+    // Anderer Schlüssel ist sofort frei
+    const other = await mutex.acquire('assign:2');
+    expect(other).not.toBeNull();
+    other?.();
+    expect(order).toEqual([]);
+    first?.();
+    (await second)?.();
+    (await third)?.();
+    expect(order).toEqual(['zweite', 'dritte']);
+    expect(mutex.isLocked('assign:1')).toBe(false);
+    expect(mutex.isLocked('assign:2')).toBe(false);
+  });
+
+  it('Zeitlimit: acquire liefert null, der Wartende ist aus der Schlange, die Sperre bleibt beim Halter', async () => {
+    const mutex = new KeyedMutex({ timeoutMs: 20 });
+    const holder = await mutex.acquire('assign:1');
+    expect(await mutex.acquire('assign:1')).toBeNull();
+    expect(mutex.isLocked('assign:1')).toBe(true);
+    holder?.();
+    expect(mutex.isLocked('assign:1')).toBe(false);
+    // Ein abgebrochener Wartender blockiert die nächsten nicht
+    const next = await mutex.acquire('assign:1');
+    expect(next).not.toBeNull();
+    next?.();
+  });
+
+  it('release ist einmalig: ein zweiter Aufruf gibt die Sperre des Nachfolgers nicht frei', async () => {
+    const mutex = new KeyedMutex({ timeoutMs: 60_000 });
+    const first = await mutex.acquire('k');
+    const second = mutex.acquire('k');
+    first?.();
+    const held = await second;
+    first?.();
+    expect(mutex.isLocked('k')).toBe(true);
+    held?.();
+    expect(mutex.isLocked('k')).toBe(false);
   });
 });

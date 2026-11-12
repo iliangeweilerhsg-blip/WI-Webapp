@@ -20,6 +20,7 @@ Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammen
 | `NEXT_PUBLIC_SG_API_BASE` | `/api/v1`. In der Entwicklung `http://localhost:4710/api/v1` | Web-App |
 | `SG_LOG_LEVEL` | `info` | Core, Worker |
 | `SG_MOODLE_URL` | leer (Moodle-Anbindung aus). Beim Owner `https://moodle2.uni-potsdam.de` | Core, CLI |
+| `SG_MOODLE_ACTIONS` | leer (keine Aktion aus T1-24). Kommagetrennte Liste, erlaubt: `assign.save_draft`, `assign.submit`, `forum.create_discussion`, `forum.reply`, `message.send`, `calendar.create_event`, `files.upload_private`. Eine unbekannte Kennung verhindert den Start. `completion.set` und `notifications.mark_read` hängen nicht daran. Ohne Eintrag ist eine Aktion `available: false` und antwortet mit `501 moodle_action_not_implemented`; die Upload-Route ebenso, solange keine freigeschaltete Aktion Uploads annimmt | Core |
 | `TZ` | Zeitzone des Systems | Core (Ortszeit für ICS-Termine ohne Zeitzone, Backup-Uhrzeit). Tests laufen mit `TZ=Europe/Zurich` |
 | `SG_TRANSCRIBER` | `mlx-whisper`. In CI und auf Linux `fake` | Worker (§18.6) |
 | `SG_WHISPER_MODEL` | `mlx-community/whisper-large-v3-turbo` | Worker (§18.6) |
