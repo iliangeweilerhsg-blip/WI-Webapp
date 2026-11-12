@@ -54,7 +54,9 @@ const MESSAGES: Record<string, string> = {
   moodle_upload_not_found: 'Diese Datei ist nicht mehr vorgemerkt. Wähle sie noch einmal.',
   moodle_upload_limit: 'Es sind schon zu viele Dateien vorgemerkt. Entferne zuerst eine.',
   moodle_upload_in_use: 'Die Datei wird gerade verwendet und lässt sich jetzt nicht entfernen.',
-  moodle_upload_type_invalid: 'Dieser Dateityp ist nicht erlaubt. Erlaubt sind PDF, PNG, JPEG, ZIP und Text.',
+  moodle_upload_type_invalid:
+    'Dieser Dateityp ist nicht erlaubt. Erlaubt sind PDF, PNG, JPEG, ZIP und Text (.txt, .md, .csv).',
+  moodle_function_unavailable: 'Dein Moodle-Zugang erlaubt diese Aktion nicht.',
   multipart_required: 'Die Datei konnte nicht gesendet werden.',
   local_only: 'Das geht nur direkt am Mac.',
 };
@@ -98,6 +100,8 @@ function hasCode(error: unknown, code: string): boolean {
 export const isActionNotImplemented = (error: unknown) => hasCode(error, 'moodle_action_not_implemented');
 export const isConfirmationInvalid = (error: unknown) => hasCode(error, 'moodle_confirmation_invalid');
 export const isActionBusy = (error: unknown) => hasCode(error, 'moodle_action_busy');
+/** `409`: `execute` ohne Code, der Core verlangt jetzt eine Bestätigung (z. B. Aufgabe ohne Einreichen-Schritt) */
+export const isConfirmationRequired = (error: unknown) => hasCode(error, 'moodle_confirmation_required');
 /** Moodle hat vielleicht geschrieben, vielleicht nicht (`details.outcome_unknown`): nie wiederholen */
 export function isOutcomeUnknown(error: unknown): boolean {
   return error instanceof ApiRequestError && error.details.outcome_unknown === true;
@@ -467,6 +471,12 @@ const clockFormat = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: 
 export function formatClock(iso: string): string {
   return clockFormat.format(new Date(iso));
 }
+
+/**
+ * Endungen, die der Core für Moodle-Uploads annimmt (Plan T1-24 F2, `services/core/src/moodle/uploads.ts`). Nur ein
+ * Hinweis für die Dateiauswahl, entscheiden tut der Core
+ */
+export const MOODLE_UPLOAD_ACCEPT = '.pdf,.png,.jpg,.jpeg,.zip,.txt,.md,.csv';
 
 /** Link zur Seite „Abgabe“ */
 export function abgabeHref(assignmentId: number, moduleId: string): string {

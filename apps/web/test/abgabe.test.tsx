@@ -9,7 +9,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 
 const search = vi.hoisted(() => ({ value: 'aufgabe=42&modul=0190f6a2-0000-7000-8000-0000000000a1' }));
-const session = vi.hoisted(() => ({ active: false }));
+const session = vi.hoisted(() => ({ active: false as boolean | undefined }));
 vi.mock('next/navigation', () => ({
   usePathname: () => '/abgabe',
   useSearchParams: () => new URLSearchParams(search.value),
@@ -17,7 +17,10 @@ vi.mock('next/navigation', () => ({
 }));
 vi.mock('../src/lib/sessions.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/sessions.ts')>()),
-  useActiveSession: () => ({ data: session.active ? { id: 's1' } : null }),
+  // `undefined` = noch unbekannt (Abruf läuft oder scheiterte)
+  useActiveSession: () => ({
+    data: session.active === undefined ? undefined : session.active ? { id: 's1' } : null,
+  }),
 }));
 
 import { AbgabeView } from '../src/components/moodle/AbgabeView.tsx';
@@ -58,13 +61,22 @@ function previewBody(over: Record<string, unknown> = {}) {
     needs_confirmation: true,
     summary: 'Abgabe „Blatt 3“ in „Beispielkurs“ endgültig einreichen: loesung.pdf (1,2 MB).',
     warnings: ['Gruppenabgabe: Das gilt für die ganze Gruppe.'],
-    details: { files: [{ name: 'loesung.pdf', bytes: 1_200_000 }], text_preview: '<b>kein HTML</b>' },
+    // Form wie im Core (`assign.*`, #303)
+    details: {
+      files: [{ name: 'loesung.pdf', size_bytes: 1_200_000 }],
+      text_preview: '<b>kein HTML</b>',
+      requires_statement: false,
+    },
     confirmation_token: TOKEN,
     expires_at: new Date(Date.now() + 5 * 60_000).toISOString(),
     ...over,
   };
 }
-const resultBody = { action_id: 'assign.submit', summary: 'Eingereicht.', result: { state: 'eingereicht' } };
+const resultBody = {
+  action_id: 'assign.submit',
+  summary: 'Eingereicht.',
+  result: { state: 'eingereicht', last_modified_at: NOW, verified: true, warnings: [] },
+};
 
 function makeScript(): Script {
   return {
@@ -296,7 +308,7 @@ describe('MoodleActionButton', () => {
     expect(keys[0]).not.toBe(keys[1]);
   });
 
-  it('moodle_action_busy: ruhige Meldung, ein neuer Versuch bekommt einen neuen Idempotency-Key', async () => {
+  it('moodle_action_busy: Rückfrage bleibt mit ruhigem Hinweis, ein neuer Versuch bekommt einen neuen Idempotency-Key', async () => {
     script.execute.push(() => apiError(409, 'moodle_action_busy'));
     const user = userEvent.setup();
     render(<Button />);
@@ -304,15 +316,130 @@ describe('MoodleActionButton', () => {
     await user.click(
       await within(await screen.findByRole('dialog')).findByRole('button', { name: 'Einreichen' }),
     );
-    expect(await screen.findByRole('alert')).toHaveTextContent('läuft gerade eine andere Aktion');
+    const dialog = screen.getByRole('dialog');
+    expect(await within(dialog).findByText(/läuft gerade eine andere Aktion/)).toBeInTheDocument();
+    expect(callsTo('/execute')).toHaveLength(1);
+    // Nichts von selbst: erst der zweite Klick schickt wieder
+    await user.click(within(dialog).getByRole('button', { name: 'Einreichen' }));
+    await screen.findByRole('status');
+    expect(callsTo('/preview')).toHaveLength(1);
+    const executes = callsTo('/execute');
+    expect(executes.map((c) => c.body?.confirmation_token)).toEqual([TOKEN, TOKEN]);
+    const keys = executes.map((c) => c.headers['Idempotency-Key']);
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBeTruthy();
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it('moodle_confirmation_required ohne Code: neue Vorschau, Rückfrage, nie selbst ausführen', async () => {
+    script.preview.push(() =>
+      json(previewBody({ needs_confirmation: false, confirmation_token: null, expires_at: null })),
+    );
+    script.execute.push(() => apiError(409, 'moodle_confirmation_required'));
+    const user = userEvent.setup();
+    render(<Button />);
+    await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/verlangt dafür jetzt eine Bestätigung/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Abbrechen' })).toHaveFocus();
+    expect(callsTo('/preview')).toHaveLength(2);
+    expect(callsTo('/execute')).toHaveLength(1);
+    await user.click(within(dialog).getByRole('button', { name: 'Einreichen' }));
+    await screen.findByRole('status');
+    expect(callsTo('/execute')[1]?.body?.confirmation_token).toBe(TOKEN);
+  });
+
+  it('Vorschau verlangt Bestätigung, liefert aber keinen Code: nichts ausführen', async () => {
+    script.preview.push(() => json(previewBody({ confirmation_token: null })));
+    const user = userEvent.setup();
+    render(<Button />);
+    await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Die Bestätigung fehlt');
+    expect(callsTo('/execute')).toHaveLength(0);
+  });
+
+  it('zeigt Abweichungen aus result.warnings und ein nicht nachgeprüftes Ergebnis ehrlich an', async () => {
+    script.execute.push(() =>
+      json({
+        action_id: 'assign.save_draft',
+        summary: 'Entwurf gespeichert, aber mit Abweichungen.',
+        result: {
+          state: 'entwurf',
+          files: [{ name: 'a.pdf', size_bytes: 1 }],
+          last_modified_at: NOW,
+          verified: true,
+          warnings: ['Nicht im Entwurf gefunden: b.pdf.'],
+        },
+      }),
+    );
+    script.execute.push(() =>
+      json({
+        action_id: 'assign.save_draft',
+        summary:
+          'Entwurf gespeichert. Der neue Stand konnte nicht gelesen werden, bitte prüfe ihn in Moodle.',
+        result: { state: null, files: null, last_modified_at: null, verified: false, warnings: [] },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<Button />);
     await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
     await user.click(
       await within(await screen.findByRole('dialog')).findByRole('button', { name: 'Einreichen' }),
     );
-    await screen.findByRole('status');
-    const keys = callsTo('/execute').map((c) => c.headers['Idempotency-Key']);
-    expect(keys).toHaveLength(2);
-    expect(keys[0]).not.toBe(keys[1]);
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('Entwurf gespeichert, aber mit Abweichungen.');
+    expect(within(status).getByText('Nicht im Entwurf gefunden: b.pdf.')).toBeInTheDocument();
+    expect(status).not.toHaveTextContent('nicht nachprüfen');
+    expect(status).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
+    await user.click(
+      await within(await screen.findByRole('dialog')).findByRole('button', { name: 'Einreichen' }),
+    );
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('nicht nachprüfen'));
+    expect(screen.getByRole('status')).not.toHaveTextContent('Abweichungen');
+  });
+
+  it('Erklärung: Text und leeres Häkchen in der Rückfrage, Bestätigen erst mit Häkchen', async () => {
+    script.preview.push(() =>
+      json(
+        previewBody({
+          details: {
+            files: [{ name: 'loesung.pdf', size_bytes: 1_200_000 }],
+            requires_statement: true,
+            statement_text: 'Ich habe diese Arbeit selbst verfasst.',
+          },
+        }),
+      ),
+    );
+    script.preview.push(() =>
+      json(
+        previewBody({
+          confirmation_token: 'token-bbbbbbbbbbbbbbbb',
+          details: { requires_statement: true, statement_text: 'Ich habe diese Arbeit selbst verfasst.' },
+        }),
+      ),
+    );
+    script.execute.push(() => apiError(409, 'moodle_confirmation_invalid', { reason: 'stand_geaendert' }));
+    const user = userEvent.setup();
+    render(<Button />);
+    await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Ich habe diese Arbeit selbst verfasst.')).toBeInTheDocument();
+    const box = within(dialog).getByRole('checkbox', { name: /Erklärung gelesen/ });
+    expect(box).not.toBeChecked();
+    const go = within(dialog).getByRole('button', { name: 'Einreichen' });
+    expect(go).toBeDisabled();
+    fireEvent.click(go);
+    expect(callsTo('/execute')).toHaveLength(0);
+    await user.click(box);
+    expect(go).toBeEnabled();
+    await user.click(go);
+    // Neue Vorschau nach `stand_geaendert`: das Häkchen steht wieder leer da
+    expect(await within(dialog).findByText(/Der Entwurf hat sich geändert/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('checkbox')).not.toBeChecked();
+    expect(within(dialog).getByRole('button', { name: 'Einreichen' })).toBeDisabled();
+    expect(callsTo('/execute')).toHaveLength(1);
   });
 
   it('501: ehrlicher Hinweis „noch nicht freigeschaltet“, Knopf aus', async () => {
@@ -350,6 +477,15 @@ describe('MoodleActionButton', () => {
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('region')).not.toBeInTheDocument();
     expect(callsTo('/execute')).toHaveLength(0);
+  });
+
+  it('solange unklar ist, ob eine Session läuft, gibt es keinen Dialog', async () => {
+    session.active = undefined;
+    const user = userEvent.setup();
+    render(<Button />);
+    await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
+    expect(await screen.findByRole('region')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('Session startet bei offenem Dialog: Dialog verschwindet, Rückfrage steht in der Seite, Code bleibt', async () => {
@@ -455,7 +591,7 @@ describe('Seite „Abgabe“', () => {
     expect(await screen.findByText(/file_too_large|Test/)).toBeInTheDocument();
   });
 
-  it('Einreichen nur mit Entwurf; verlangt die Aufgabe eine Erklärung, braucht es das Häkchen', async () => {
+  it('verlangt die Aufgabe eine Erklärung, steht das Häkchen leer in der Rückfrage, nicht vorab in der Seite', async () => {
     script.assignment = { ...script.assignment, requires_statement: true };
     const user = userEvent.setup();
     render(
@@ -464,10 +600,50 @@ describe('Seite „Abgabe“', () => {
       </QueryProvider>,
     );
     const submit = await screen.findByRole('button', { name: 'Endgültig einreichen' });
-    expect(submit).toBeDisabled();
-    expect(await screen.findByText('Bestätige zuerst die Erklärung.')).toBeInTheDocument();
-    await user.click(screen.getByRole('checkbox'));
-    expect(submit).toBeEnabled();
+    await waitFor(() => expect(submit).toBeEnabled());
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    await user.click(submit);
+    const dialog = await screen.findByRole('dialog');
+    const box = within(dialog).getByRole('checkbox');
+    expect(box).not.toBeChecked();
+    const go = within(dialog).getByRole('button', { name: 'Endgültig einreichen' });
+    expect(go).toBeDisabled();
+    await user.click(box);
+    await user.click(go);
+    await screen.findByText('Eingereicht.');
+    expect(callsTo('/preview')[0]?.body).toEqual({ params: { assignment_id: 42, accept_statement: true } });
+    expect(callsTo('/execute')[0]?.body).toEqual({
+      params: { assignment_id: 42, accept_statement: true },
+      confirmation_token: TOKEN,
+    });
+  });
+
+  it('ohne Erklärung kein Häkchen, accept_statement bleibt false', async () => {
+    const user = userEvent.setup();
+    render(
+      <QueryProvider>
+        <AbgabeView />
+      </QueryProvider>,
+    );
+    const submit = await screen.findByRole('button', { name: 'Endgültig einreichen' });
+    await waitFor(() => expect(screen.getByRole('link', { name: 'In Moodle öffnen' })).toBeInTheDocument());
+    await user.click(submit);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(callsTo('/preview')[0]?.body).toEqual({ params: { assignment_id: 42, accept_statement: false } });
+  });
+
+  it('Dateiauswahl nennt nur die Typen, die der Core annimmt', async () => {
+    const { container } = render(
+      <QueryProvider>
+        <AbgabeView />
+      </QueryProvider>,
+    );
+    await screen.findByRole('button', { name: 'Als Entwurf speichern' });
+    expect(container.querySelector('input[type="file"]')).toHaveAttribute(
+      'accept',
+      '.pdf,.png,.jpg,.jpeg,.zip,.txt,.md,.csv',
+    );
   });
 
   it('ohne Entwurf ist Einreichen aus; schon eingereicht sperrt auch das Wählen', async () => {

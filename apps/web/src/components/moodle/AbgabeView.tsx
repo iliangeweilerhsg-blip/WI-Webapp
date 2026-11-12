@@ -12,6 +12,7 @@ import {
   formatDue,
   isMoodleNotConfigured,
   isWebUrl,
+  MOODLE_UPLOAD_ACCEPT,
   moodleErrorMessage,
   removeMoodleUpload,
   uploadMoodleFile,
@@ -52,7 +53,6 @@ export function AbgabeView() {
   const submission = useMoodleSubmission(assignmentId);
   const refresh = useRefreshSubmission();
   const [files, setFiles] = useState<PendingFile[]>([]);
-  const [accept, setAccept] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const counter = useRef(0);
   const input = useRef<HTMLInputElement>(null);
@@ -86,7 +86,8 @@ export function AbgabeView() {
   const submitted = sub?.state === 'eingereicht';
   const mayEdit = sub?.can_edit === true && !submitted;
   const requiresSubmit = assignment?.requires_submit ?? true;
-  const needsStatement = assignment?.requires_statement === true;
+  // Unbekannt (Aufgabe nicht geladen) gilt als „verlangt“: Das Häkchen steht dann in der Rückfrage, nie vorausgefüllt
+  const needsStatement = assignment?.requires_statement ?? true;
 
   function add(list: FileList | File[]) {
     for (const file of Array.from(list)) {
@@ -189,7 +190,16 @@ export function AbgabeView() {
           className="rounded-lg border border-dashed border-border-strong px-4 py-5 text-sm"
         >
           <p className="text-text-muted">Ziehe Dateien hierher oder wähle sie aus.</p>
-          <input ref={input} type="file" multiple hidden onChange={onPick} aria-label="Dateien wählen" />
+          <p className="text-text-muted">PDF, PNG, JPEG, ZIP oder Text (.txt, .md, .csv).</p>
+          <input
+            ref={input}
+            type="file"
+            multiple
+            hidden
+            accept={MOODLE_UPLOAD_ACCEPT}
+            onChange={onPick}
+            aria-label="Dateien wählen"
+          />
           <button
             type="button"
             disabled={!mayEdit}
@@ -243,7 +253,8 @@ export function AbgabeView() {
           action="assign.save_draft"
           params={{ assignment_id: assignmentId, upload_ids: uploadIds }}
           label="Als Entwurf speichern"
-          confirmLabel="Als Entwurf speichern"
+          // Ohne Einreichen-Schritt ist Speichern schon die Abgabe, der Core fragt dann nach (Plan §6.2)
+          confirmLabel={requiresSubmit ? 'Als Entwurf speichern' : 'Speichern und abgeben'}
           disabled={!mayEdit || uploading || uploadIds.length === 0}
           disabledReason={
             !mayEdit
@@ -261,29 +272,21 @@ export function AbgabeView() {
 
         {requiresSubmit ? (
           <div className="space-y-2">
-            {needsStatement ? (
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={accept}
-                  onChange={(e) => setAccept(e.target.checked)}
-                  className="mt-0.5 size-4"
-                />
-                <span>Ich bestätige die Erklärung zur Eigenständigkeit dieser Aufgabe.</span>
-              </label>
-            ) : null}
+            {/* Die Erklärung steht mit ihrem Text und einem leeren Häkchen in der Rückfrage (Plan §6.2). Die
+                Vorschau braucht `accept_statement`, sie ändert aber nichts; ausgeführt wird erst mit Häkchen */}
             <MoodleActionButton
               action="assign.submit"
-              params={{ assignment_id: assignmentId, accept_statement: accept }}
+              params={{ assignment_id: assignmentId, accept_statement: needsStatement }}
               label="Endgültig einreichen"
               confirmLabel="Endgültig einreichen"
-              disabled={sub?.state !== 'entwurf' || sub.can_submit !== true || (needsStatement && !accept)}
+              acknowledge={needsStatement ? 'Ich habe die Erklärung gelesen und bestätige sie.' : undefined}
+              disabled={sub?.state !== 'entwurf' || sub.can_submit !== true}
               disabledReason={
-                sub?.state === 'entwurf' && sub.can_submit && needsStatement && !accept
-                  ? 'Bestätige zuerst die Erklärung.'
-                  : sub?.state === 'eingereicht'
+                !sub
+                  ? undefined
+                  : sub.state === 'eingereicht'
                     ? 'Schon eingereicht.'
-                    : sub?.state === 'entwurf'
+                    : sub.state === 'entwurf'
                       ? 'Moodle erlaubt das Einreichen gerade nicht.'
                       : 'Speichere zuerst einen Entwurf.'
               }

@@ -9,8 +9,10 @@ import {
   executeMoodleAction,
   formatBytes,
   formatClock,
+  isActionBusy,
   isActionNotImplemented,
   isConfirmationInvalid,
+  isConfirmationRequired,
   isOutcomeUnknown,
   isStateChanged,
   moodleErrorMessage,
@@ -32,6 +34,12 @@ export interface MoodleActionButtonProps {
   disabled?: boolean;
   /** Grund, warum der Knopf aus ist; steht als Text daneben */
   disabledReason?: string;
+  /**
+   * Häkchen in der Rückfrage, z. B. für die Erklärung zur Eigenständigkeit. Es steht bei jeder neuen Vorschau leer da,
+   * „Bestätigen“ geht erst mit Häkchen. Verlangt die Vorschau eine Erklärung (`details.requires_statement`), erscheint
+   * es auch ohne diese Angabe
+   */
+  acknowledge?: string;
   onDone?(result: MoodleActionResult): void;
   /** `outcome_unknown`: Moodle hat es vielleicht übernommen. Die Seite lädt den Stand neu */
   onUncertain?(): void;
@@ -41,7 +49,7 @@ type Phase =
   | { kind: 'idle' }
   | { kind: 'busy' }
   | { kind: 'confirm'; preview: MoodleActionPreview; notice: string | null }
-  | { kind: 'done'; summary: string }
+  | { kind: 'done'; result: MoodleActionResult }
   | { kind: 'error'; message: string }
   | { kind: 'unavailable' };
 
@@ -50,22 +58,32 @@ interface FileLine {
   bytes: number | null;
 }
 
-/** Dateien aus `details.files`, tolerant gegenüber der genauen Form (Plan §4.4 legt sie nicht fest) */
+/** Dateien aus `details.files`: `{ name, size_bytes }` (Core, `assign.*`). Unbekannte Einträge fallen weg */
 function filesOf(details: Record<string, unknown>): FileLine[] {
   const raw = details.files;
   if (!Array.isArray(raw)) return [];
   const lines: FileLine[] = [];
   for (const entry of raw as unknown[]) {
-    if (typeof entry === 'string') lines.push({ name: entry, bytes: null });
-    else if (typeof entry === 'object' && entry !== null) {
-      const o = entry as Record<string, unknown>;
-      const name = typeof o.name === 'string' ? o.name : typeof o.filename === 'string' ? o.filename : null;
-      const bytes =
-        typeof o.bytes === 'number' ? o.bytes : typeof o.size_bytes === 'number' ? o.size_bytes : null;
-      if (name) lines.push({ name, bytes });
-    }
+    if (typeof entry !== 'object' || entry === null) continue;
+    const o = entry as Record<string, unknown>;
+    if (typeof o.name !== 'string' || !o.name) continue;
+    lines.push({ name: o.name, bytes: typeof o.size_bytes === 'number' ? o.size_bytes : null });
   }
   return lines;
+}
+
+/** `result.warnings` und `result.verified` aus `execute` (Core, `assign.*`); fehlt etwas, gilt es als unbekannt */
+function outcomeOf(result: MoodleActionResult): { warnings: string[]; unverified: boolean } {
+  const raw: unknown = result.result.warnings;
+  const warnings = Array.isArray(raw)
+    ? raw.filter((w): w is string => typeof w === 'string' && w.trim() !== '')
+    : [];
+  return { warnings, unverified: result.result.verified === false };
+}
+
+/** Die Vorschau sagt, dass Einreichen die Erklärung zur Eigenständigkeit verlangt */
+function statementRequired(preview: MoodleActionPreview): boolean {
+  return preview.details.requires_statement === true;
 }
 
 function textOf(details: Record<string, unknown>, key: string): string | null {
@@ -81,6 +99,9 @@ function ConfirmBody({
   busy,
   titleId,
   cancelRef,
+  acknowledge,
+  acknowledged,
+  onAcknowledge,
   onConfirm,
   onCancel,
 }: {
@@ -90,12 +111,16 @@ function ConfirmBody({
   busy: boolean;
   titleId: string;
   cancelRef: RefObject<HTMLButtonElement | null>;
+  acknowledge: string | null;
+  acknowledged: boolean;
+  onAcknowledge: (value: boolean) => void;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   const files = filesOf(preview.details);
   const excerpt = textOf(preview.details, 'text_preview');
   const statement = textOf(preview.details, 'statement_text');
+  const statementId = useId();
   return (
     <div className="space-y-3">
       <h3 id={titleId} className="text-md font-medium">
@@ -127,7 +152,28 @@ function ConfirmBody({
         </p>
       ) : null}
       {statement ? (
-        <p className="whitespace-pre-wrap break-words text-sm text-text-muted">{statement}</p>
+        <div className="space-y-1">
+          <p id={statementId} className="text-sm font-medium">
+            Erklärung zur Eigenständigkeit
+          </p>
+          <p
+            aria-labelledby={statementId}
+            className="whitespace-pre-wrap break-words rounded-md border border-border px-3 py-2 text-sm"
+          >
+            {statement}
+          </p>
+        </div>
+      ) : null}
+      {acknowledge ? (
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(e) => onAcknowledge(e.target.checked)}
+            className="mt-0.5 size-4"
+          />
+          <span>{acknowledge}</span>
+        </label>
       ) : null}
       {preview.expires_at ? (
         <p className="text-sm text-text-muted">
@@ -146,7 +192,7 @@ function ConfirmBody({
         <button
           type="button"
           onClick={onConfirm}
-          disabled={busy}
+          disabled={busy || (acknowledge !== null && !acknowledged)}
           className="min-h-9 rounded-md border border-border px-3 text-sm text-text-muted hover:bg-surface hover:text-text disabled:opacity-50"
         >
           {busy ? 'Einen Moment …' : confirmLabel}
@@ -163,19 +209,29 @@ export function MoodleActionButton({
   confirmLabel = 'Bestätigen',
   disabled = false,
   disabledReason,
+  acknowledge,
   onDone,
   onUncertain,
 }: MoodleActionButtonProps) {
   const catalog = useMoodleActionCatalog();
   const active = useActiveSession();
-  const inSession = Boolean(active.data);
+  // R1: Solange unklar ist, ob eine Session läuft (`undefined`), lieber keinen Dialog
+  const inSession = active.data !== null;
   const info = catalog.data?.find((item) => item.id === action);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [executing, setExecuting] = useState(false);
+  const [acknowledged, setAcknowledged] = useState(false);
   const singleFlight = useSingleFlight();
   const titleId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const resultRef = useRef<HTMLDivElement>(null);
+
+  /** Neue Vorschau zeigen: das Häkchen steht wieder leer da (nie vorausgefüllt) */
+  const showConfirm = useCallback((preview: MoodleActionPreview, notice: string | null) => {
+    setAcknowledged(false);
+    setPhase({ kind: 'confirm', preview, notice });
+  }, []);
 
   const confirming = phase.kind === 'confirm';
   const expiresAt = phase.kind === 'confirm' ? phase.preview.expires_at : null;
@@ -184,22 +240,29 @@ export function MoodleActionButton({
     if (!expiresAt) return;
     const wait = Math.max(0, new Date(expiresAt).getTime() - Date.now());
     const timer = setTimeout(() => {
+      focusResult.current = true;
       setPhase({ kind: 'error', message: 'Die Bestätigung ist abgelaufen. Starte noch einmal.' });
     }, wait);
     return () => clearTimeout(timer);
   }, [expiresAt]);
 
-  // Der Fokus liegt zuerst auf „Abbrechen“ (Standard); nach dem Abbrechen zurück auf dem Knopf
+  // Der Fokus liegt zuerst auf „Abbrechen“ (Standard); nach dem Abbrechen zurück auf dem Knopf, nach einem Ergebnis
+  // aus der Rückfrage auf der Ergebniszeile (sonst landet er nach dem Schließen auf <body>)
   const returnFocus = useRef(false);
+  const focusResult = useRef(false);
   useEffect(() => {
     if (confirming) cancelRef.current?.focus();
     else if (returnFocus.current) {
       returnFocus.current = false;
       triggerRef.current?.focus();
+    } else if (focusResult.current && phase.kind !== 'busy') {
+      focusResult.current = false;
+      resultRef.current?.focus();
     }
-  }, [confirming, inSession]);
+  }, [confirming, inSession, phase.kind]);
 
   const cancel = useCallback(() => {
+    focusResult.current = false;
     returnFocus.current = true;
     setPhase({ kind: 'idle' });
   }, []);
@@ -220,19 +283,35 @@ export function MoodleActionButton({
 
   function start() {
     singleFlight((done) => {
+      // Der Knopf ist danach oft aus (z. B. ohne Dateien): Fokus auf die Ergebniszeile
+      focusResult.current = true;
       setPhase({ kind: 'busy' });
       void (async () => {
         try {
           const preview = await previewMoodleAction(action, params);
-          if (preview.needs_confirmation && preview.confirmation_token) {
-            setPhase({ kind: 'confirm', preview, notice: null });
+          if (preview.needs_confirmation) {
+            if (preview.confirmation_token) showConfirm(preview, null);
+            else setPhase({ kind: 'error', message: 'Die Bestätigung fehlt. Starte noch einmal.' });
             return;
           }
           const result = await executeMoodleAction(action, params, null);
-          setPhase({ kind: 'done', summary: result.summary });
+          setPhase({ kind: 'done', result });
           onDone?.(result);
         } catch (error) {
-          fail(error);
+          if (isConfirmationRequired(error)) {
+            // Zwischen Vorschau und Ausführen verlangt der Core jetzt eine Bestätigung (Plan §6.2): Rückfrage zeigen,
+            // nie selbst ausführen
+            try {
+              const fresh = await previewMoodleAction(action, params);
+              if (fresh.needs_confirmation && fresh.confirmation_token) {
+                showConfirm(fresh, 'Moodle verlangt dafür jetzt eine Bestätigung. Bitte prüfe die Angaben.');
+              } else {
+                setPhase({ kind: 'error', message: 'Der Stand hat sich geändert. Starte noch einmal.' });
+              }
+            } catch (previewError) {
+              fail(previewError);
+            }
+          } else fail(error);
         } finally {
           done();
         }
@@ -243,26 +322,33 @@ export function MoodleActionButton({
   function confirm() {
     if (phase.kind !== 'confirm') return;
     const { preview } = phase;
+    if ((acknowledge ?? statementRequired(preview)) && !acknowledged) return;
     singleFlight((done) => {
       setExecuting(true);
+      focusResult.current = true;
       void (async () => {
         try {
           const result = await executeMoodleAction(action, params, preview.confirmation_token);
-          setPhase({ kind: 'done', summary: result.summary });
+          setPhase({ kind: 'done', result });
           onDone?.(result);
         } catch (error) {
-          if (isConfirmationInvalid(error)) {
+          if (isActionBusy(error)) {
+            // Nichts geschrieben, der Code gilt noch: Rückfrage bleibt, ein neuer Versuch bekommt einen neuen
+            // `Idempotency-Key` (apiSend)
+            focusResult.current = false;
+            setPhase({ kind: 'confirm', preview, notice: moodleErrorMessage(error) });
+          } else if (isConfirmationInvalid(error)) {
             // Neue Vorschau holen und die Rückfrage neu zeigen. Nie automatisch ausführen
             try {
               const fresh = await previewMoodleAction(action, params);
               if (fresh.needs_confirmation && fresh.confirmation_token) {
-                setPhase({
-                  kind: 'confirm',
-                  preview: fresh,
-                  notice: isStateChanged(error)
+                focusResult.current = false;
+                showConfirm(
+                  fresh,
+                  isStateChanged(error)
                     ? 'Der Entwurf hat sich geändert. Bitte prüfe ihn noch einmal.'
                     : 'Die Bestätigung galt nicht mehr. Hier ist der aktuelle Stand.',
-                });
+                );
               } else {
                 setPhase({ kind: 'error', message: 'Der Stand hat sich geändert. Starte noch einmal.' });
               }
@@ -297,6 +383,7 @@ export function MoodleActionButton({
         ? (disabledReason ?? null)
         : null;
 
+  const outcome = phase.kind === 'done' ? outcomeOf(phase.result) : null;
   const body =
     phase.kind === 'confirm' ? (
       <ConfirmBody
@@ -306,6 +393,12 @@ export function MoodleActionButton({
         busy={executing}
         titleId={titleId}
         cancelRef={cancelRef}
+        acknowledge={
+          acknowledge ??
+          (statementRequired(phase.preview) ? 'Ich habe die Erklärung gelesen und bestätige sie.' : null)
+        }
+        acknowledged={acknowledged}
+        onAcknowledge={setAcknowledged}
         onConfirm={confirm}
         onCancel={cancel}
       />
@@ -325,14 +418,29 @@ export function MoodleActionButton({
       </button>
       {reason ? <p className="text-sm text-text-muted">{reason}</p> : null}
       {phase.kind === 'done' ? (
-        <p role="status" className="text-sm">
-          {phase.summary}
-        </p>
+        <div ref={resultRef} tabIndex={-1} role="status" className="space-y-1 text-sm outline-none">
+          <p>{phase.result.summary}</p>
+          {outcome && outcome.warnings.length > 0 ? (
+            <>
+              <p className="text-text-muted">Moodle zeigt danach nicht ganz das Erwartete:</p>
+              <ul className="list-disc space-y-0.5 pl-5 text-text-muted">
+                {outcome.warnings.map((warning, index) => (
+                  <li key={index}>{warning}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {outcome?.unverified ? (
+            <p className="text-text-muted">
+              Den neuen Stand konnte die App nicht nachprüfen. Sieh bitte in Moodle nach.
+            </p>
+          ) : null}
+        </div>
       ) : null}
       {phase.kind === 'error' ? (
-        <p role="alert" className="text-sm">
-          {phase.message}
-        </p>
+        <div ref={resultRef} tabIndex={-1} role="alert" className="text-sm outline-none">
+          <p>{phase.message}</p>
+        </div>
       ) : null}
       {body && inSession ? (
         // R1: In der Vorlesung kein Dialog, die Rückfrage steht in der Seite
