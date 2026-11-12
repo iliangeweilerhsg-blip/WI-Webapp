@@ -786,11 +786,12 @@ struct InkPageView: View {
         // Netzabfragen mit der alten Zeitbasis geschrieben würde. Ist die Folie nicht bekannt, bleibt alles wie bisher.
         // Ohne das Gate: Es gibt noch keine offene Seite, auf der geschrieben wird, und `present` setzt es ohnehin
         // zurück. Ein zurückgestellter Wechsel (Stift eben noch auf der vorigen Seite) zeigte sonst doch die alte Seite.
-        // Der Folgeaufruf am Ende wechselt nicht noch einmal, weil `show` bei derselben Seite nichts tut.
-        let slideTarget: InkBinding? =
-            writesOnSlide
-            ? library.slides?.knownCurrentSlide().flatMap { library.openSlideTarget(notebookID: notebookID, slide: $0) }
-            : nil
+        // Der Folgeaufruf am Ende wechselt nicht noch einmal: Die Folie ist gemerkt (L15), und `show` täte bei
+        // derselben Seite ohnehin nichts.
+        let knownSlide = writesOnSlide ? library.slides?.knownCurrentSlide() : nil
+        let slideTarget: InkBinding? = knownSlide.flatMap {
+            library.openSlideTarget(notebookID: notebookID, slide: $0)
+        }
         guard
             let target = slideTarget
                 ?? (appendsForLecture
@@ -800,6 +801,9 @@ struct InkPageView: View {
             return
         }
         let page = present(target)
+        // Die Folienseite ist schon offen: Der Folgeaufruf am Ende stellt für dieselbe Folie keinen Wechsel mehr
+        // zurück (sonst stünde beim Schreiben „Folie N · Tippen zum Wechseln“ auf genau dieser Seite, L15)
+        if slideTarget != nil, let knownSlide { gate.noteFollowed(knownSlide) }
 
         await library.refresh()
         guard !_Concurrency.Task.isCancelled, model === page else { return }
