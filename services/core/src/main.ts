@@ -2,6 +2,7 @@
 import { buildApp } from './app.ts';
 import { hasOpenPermissions, loadConfig, loadDotEnv, scrubAnthropicEnv } from './config.ts';
 import { createDb } from './db/client.ts';
+import { acquireCoreLock, CoreLockHeldError, lockHeldMessage, type CoreLock } from './lib/instance-lock.ts';
 import { createLogger } from './logger.ts';
 import { purgeIdempotencyKeys } from './plugins/idempotency.ts';
 import { startBonjour, type BonjourHandle } from './services/discovery.ts';
@@ -15,6 +16,22 @@ const dotEnvFile = loadDotEnv();
 // auch vor dem Logger: Danach steht in `process.env` keine `ANTHROPIC_*`-Variable mehr
 const scrubbedEnv = scrubAnthropicEnv();
 const config = loadConfig();
+// Ein Core pro Datenordner (#174): vor Logger (er rotiert `logs/core.log`), Migrationen und Hooks. Der Logger
+// existiert hier noch nicht, darum geht die Meldung nach stderr
+let lock: CoreLock;
+try {
+  lock = acquireCoreLock(config.dataDir);
+} catch (error) {
+  console.error(
+    error instanceof CoreLockHeldError
+      ? lockHeldMessage(error)
+      : `Die Sperrdatei im Datenordner konnte nicht angelegt werden: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  process.exit(1);
+}
+// Freigabe erst beim tatsächlichen Prozessende (auch nach `process.exit`, unbehandeltem Fehler oder Frist), nicht schon
+// nach `app.close()`: Sonst könnte ein Neustart den Logger rotieren, während der alte Core noch Zeilen schreibt
+process.on('exit', () => lock.release());
 const logger = createLogger(config);
 if (scrubbedEnv.length > 0) {
   // Nur die Namen, nie die Werte
