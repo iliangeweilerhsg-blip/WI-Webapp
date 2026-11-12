@@ -772,9 +772,20 @@ struct InkPageView: View {
         // Läuft eine Vorlesung des Moduls und endet die letzte Seite in einer anderen, beginnt eine neue Seite (UX-44)
         // (nicht bei „Auf Folie“ mit verfügbarer Folie, #268: ohne Folie gilt die Logik des freien Modus)
         let appendsForLecture = !writesOnSlide
+        // Ist die Folie lokal schon bekannt (Foliensatz auf dem iPad), öffnet „Auf Folie“ gleich die Folienseite
+        // (#272). So zeigt `openTarget` nicht kurz die alte letzte Seite, auf der bis zum Wechsel nach den
+        // Netzabfragen mit der alten Zeitbasis geschrieben würde. Ist die Folie nicht bekannt, bleibt alles wie bisher.
+        // Ohne das Gate: Es gibt noch keine offene Seite, auf der geschrieben wird, und `present` setzt es ohnehin
+        // zurück. Ein zurückgestellter Wechsel (Stift eben noch auf der vorigen Seite) zeigte sonst doch die alte Seite.
+        // Der Folgeaufruf am Ende wechselt nicht noch einmal, weil `show` bei derselben Seite nichts tut.
+        let slideTarget: InkBinding? =
+            writesOnSlide
+            ? library.slides?.knownCurrentSlide().flatMap { library.openSlideTarget(notebookID: notebookID, slide: $0) }
+            : nil
         guard
-            let target = appendsForLecture
-                ? library.openLectureTarget(notebookID: notebookID) : library.openTarget(notebookID: notebookID)
+            let target = slideTarget
+                ?? (appendsForLecture
+                    ? library.openLectureTarget(notebookID: notebookID) : library.openTarget(notebookID: notebookID))
         else {
             failedToOpen = true
             return
