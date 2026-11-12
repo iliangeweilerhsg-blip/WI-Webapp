@@ -27,6 +27,11 @@ protocol InterfaceListing: Sendable {
 /// - `.local` schützt nur gegen das Gateway, nicht gegen andere Teilnehmer: Im fremden Netzsegment kann jeder auf die
 ///   mDNS-Frage nach dem Namen antworten. Eine Prüfung der aufgelösten Adresse hilft nicht: Wer antwortet, steht
 ///   ja im Subnetz.
+///
+/// Tunnel (VPN) und Mobilfunk zählen nicht als eigenes Netz (`SystemInterfaceListing.counts`): Hinter einer
+/// Punkt-zu-Punkt-Verbindung liegt kein Netzsegment. Wohin die Anfrage geht, entscheidet die Gegenstelle
+/// (Betreiber des VPN, Mobilfunknetz), ihre Netzmaske sagt darüber nichts. So hält es auch der Mac beim Host der
+/// Kopplung (VERTRAEGE: VPN-Tunnel zählen nicht).
 enum TokenDestination {
     /// Reine Funktion ohne Netzzugriff.
     ///
@@ -73,22 +78,34 @@ enum TokenDestination {
     }
 }
 
-/// Die echten Schnittstellen des iPads per `getifaddrs`: nur `IFF_UP` und `IFF_RUNNING`, nicht Loopback, nur IPv4
+/// Die echten Schnittstellen des iPads per `getifaddrs`: nur IPv4 und nur Schnittstellen, die `counts` besteht
 struct SystemInterfaceListing: InterfaceListing {
+    /// Tunnel und Mobilfunk, auch falls eine solche Schnittstelle ausnahmsweise nicht als Punkt-zu-Punkt markiert ist
+    static let excludedNamePrefixes = ["utun", "ipsec", "ppp", "pdp_ip"]
+
     init() {}
+
+    /// Zählt diese Schnittstelle als Netz des iPads? Nur `IFF_UP` und `IFF_RUNNING`, nicht Loopback, nicht
+    /// Punkt-zu-Punkt (`IFF_POINTOPOINT`: VPN-Tunnel, Mobilfunk) und kein Name aus `excludedNamePrefixes`.
+    static func counts(name: String, flags: UInt32) -> Bool {
+        let required = UInt32(IFF_UP) | UInt32(IFF_RUNNING)
+        guard flags & required == required else { return false }
+        guard flags & (UInt32(IFF_LOOPBACK) | UInt32(IFF_POINTOPOINT)) == 0 else { return false }
+        return !excludedNamePrefixes.contains { name.hasPrefix($0) }
+    }
 
     func activeIPv4() -> [InterfaceAddress] {
         var head: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&head) == 0, let first = head else { return [] }
         defer { freeifaddrs(head) }
 
-        let required = UInt32(IFF_UP) | UInt32(IFF_RUNNING)
         var result: [InterfaceAddress] = []
         var cursor: UnsafeMutablePointer<ifaddrs>? = first
         while let entry = cursor {
             defer { cursor = entry.pointee.ifa_next }
-            let flags = UInt32(entry.pointee.ifa_flags)
-            guard flags & required == required, flags & UInt32(IFF_LOOPBACK) == 0 else { continue }
+            guard let rawName = entry.pointee.ifa_name,
+                Self.counts(name: String(cString: rawName), flags: UInt32(entry.pointee.ifa_flags))
+            else { continue }
             guard let address = entry.pointee.ifa_addr, let netmask = entry.pointee.ifa_netmask,
                 address.pointee.sa_family == sa_family_t(AF_INET)
             else { continue }

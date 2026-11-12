@@ -1,3 +1,4 @@
+import Darwin
 import XCTest
 
 @testable import StudienGehirn
@@ -148,6 +149,25 @@ final class TokenDestinationTests: XCTestCase {
         XCTAssertEqual(FakeInterfaces.address("10.0.0.1", prefix: 24).netmask, 0xFFFF_FF00)
         XCTAssertEqual(FakeInterfaces.address("10.0.0.1", prefix: 32).netmask, UInt32.max)
         XCTAssertEqual(FakeInterfaces.address("10.0.0.1", prefix: 8).netmask, 0xFF00_0000)
+    }
+
+    func testTunnelsAndCellularDoNotCount() {
+        let up = UInt32(IFF_UP) | UInt32(IFF_RUNNING)
+        let pointToPoint = UInt32(IFF_POINTOPOINT)
+        XCTAssertTrue(SystemInterfaceListing.counts(name: "en0", flags: up))
+        XCTAssertTrue(SystemInterfaceListing.counts(name: "en2", flags: up))
+        XCTAssertTrue(SystemInterfaceListing.counts(name: "bridge100", flags: up))
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "en0", flags: UInt32(IFF_UP)))
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "en0", flags: UInt32(IFF_RUNNING)))
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "lo0", flags: up | UInt32(IFF_LOOPBACK)))
+        // VPN und Mobilfunk: per Flag und, falls es fehlt, per Name
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "utun4", flags: up | pointToPoint))
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "pdp_ip0", flags: up | pointToPoint))
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "en5", flags: up | pointToPoint))
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "utun4", flags: up))
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "ipsec0", flags: up))
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "ppp0", flags: up))
+        XCTAssertFalse(SystemInterfaceListing.counts(name: "pdp_ip1", flags: up))
     }
 
     func testSystemListingDoesNotCrashAndSkipsLoopback() {
