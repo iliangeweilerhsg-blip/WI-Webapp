@@ -38,6 +38,8 @@ struct InkPageView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// Hält das iPad in einer laufenden Vorlesung wach (UX-305)
     @State private var screenWake = ScreenWakeController()
+    /// Die Schreibfläche ist zu sehen (zwischen `onAppear` und `onDisappear`)
+    @State private var isOnScreen = false
     /// „Alles am Mac“ nach dem Aufholen (UX-49)
     @State private var allSynced = AllSyncedNotice()
     /// Hinweis zu „Auf Folie“, 5 s nach einem Tipp auf den ausgegrauten Umschalter (UX-51)
@@ -234,7 +236,20 @@ struct InkPageView: View {
         .task {
             await open()
         }
+        .task(id: ScreenWakeTaskKey(isOnline: sync.state == .online, reportedAt: library.runningReportedAt)) {
+            // Ohne Verbindung gilt die Vorlesung nur noch eine Frist lang als laufend (UX-305): danach freigeben
+            updateScreenWake()
+            while let left = ScreenWakePolicy.offlineGraceLeft(
+                running: library.running != nil, isOnline: sync.state == .online,
+                reportedAt: library.runningReportedAt, now: Date())
+            {
+                try? await _Concurrency.Task.sleep(for: .seconds(left + 1))
+                if _Concurrency.Task.isCancelled { return }
+            }
+            updateScreenWake()
+        }
         .onAppear {
+            isOnScreen = true
             updateScreenWake(visible: true)
             refreshExpiry()
             allSynced.update(isOnline: sync.state == .online, pending: sync.pendingCount)
@@ -246,7 +261,8 @@ struct InkPageView: View {
             }
         }
         .onDisappear {
-            updateScreenWake(visible: false)
+            isOnScreen = false
+            screenWake.release()
             // Keine Freigabe, solange die Ansicht nicht zu sehen ist
             quietTask?.cancel()
             quietTask = nil
@@ -258,10 +274,10 @@ struct InkPageView: View {
             sync.setPresence(presence(onPage: false))
         }
         .onChange(of: library.running?.id) { _, _ in
-            updateScreenWake(visible: true)
+            updateScreenWake()
         }
         .onChange(of: scenePhase) { _, phase in
-            updateScreenWake(visible: true)
+            updateScreenWake(phase: phase)
             if phase == .active {
                 // Der Tag kann gewechselt haben (UX-50)
                 refreshExpiry()
@@ -363,10 +379,14 @@ struct InkPageView: View {
     }
 
     /// Bildschirm wach halten, solange eine Vorlesung läuft und die Schreibfläche zu sehen ist (UX-305). Beim Verlassen
-    /// und im Hintergrund wird die Sperre immer zurückgesetzt.
-    private func updateScreenWake(visible: Bool) {
+    /// und im Hintergrund wird die Sperre immer zurückgesetzt. Ohne Angabe gelten `isOnScreen` und `scenePhase`.
+    private func updateScreenWake(visible: Bool? = nil, phase: ScenePhase? = nil) {
         screenWake.update(
-            lectureRunning: library.running != nil, writingSurfaceVisible: visible, appActive: scenePhase == .active)
+            lectureRunning: ScreenWakePolicy.lectureCounts(
+                running: library.running != nil, isOnline: sync.state == .online,
+                reportedAt: library.runningReportedAt, now: Date()),
+            writingSurfaceVisible: visible ?? isOnScreen,
+            appActive: (phase ?? scenePhase) == .active)
     }
 
     private func refreshExpiry() {

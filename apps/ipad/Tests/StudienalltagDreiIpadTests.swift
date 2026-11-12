@@ -59,6 +59,32 @@ final class ScreenWakeLectureTests: XCTestCase {
         XCTAssertFalse(timer.isIdleTimerDisabled)
     }
 
+    func testOfflineLectureCountsOnlyWithinTheGrace() {
+        let reported = Date(timeIntervalSince1970: 1_000_000)
+        let grace = ScreenWakePolicy.offlineGrace
+        // Online zählt die Vorlesung ohne Frist, ohne Vorlesung nie
+        XCTAssertTrue(
+            ScreenWakePolicy.lectureCounts(
+                running: true, isOnline: true, reportedAt: nil, now: reported.addingTimeInterval(grace * 10)))
+        XCTAssertFalse(ScreenWakePolicy.lectureCounts(running: false, isOnline: true, reportedAt: reported, now: reported))
+        XCTAssertNil(ScreenWakePolicy.offlineGraceLeft(running: true, isOnline: true, reportedAt: reported, now: reported))
+        // Offline: nur innerhalb der Frist ab der letzten Meldung
+        XCTAssertTrue(
+            ScreenWakePolicy.lectureCounts(
+                running: true, isOnline: false, reportedAt: reported, now: reported.addingTimeInterval(grace - 1)))
+        XCTAssertEqual(
+            ScreenWakePolicy.offlineGraceLeft(
+                running: true, isOnline: false, reportedAt: reported, now: reported.addingTimeInterval(grace - 60)),
+            60)
+        XCTAssertFalse(
+            ScreenWakePolicy.lectureCounts(
+                running: true, isOnline: false, reportedAt: reported, now: reported.addingTimeInterval(grace)))
+        XCTAssertNil(
+            ScreenWakePolicy.offlineGraceLeft(
+                running: true, isOnline: false, reportedAt: reported, now: reported.addingTimeInterval(grace)))
+        XCTAssertFalse(ScreenWakePolicy.lectureCounts(running: true, isOnline: false, reportedAt: nil, now: reported))
+    }
+
     func testExplicitReleaseAlwaysResets() {
         let timer = CountingIdleTimer()
         let wake = ScreenWakeController(timer: timer)
