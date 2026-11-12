@@ -10,7 +10,7 @@
   "scripts": {
     "sg": "node sg.mjs",
     "typecheck": "tsc --noEmit -p .",
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/*.integration.test.ts'",
     "test:integration": "vitest run test/backup-pg.integration.test.ts"
   },
   "dependencies": {

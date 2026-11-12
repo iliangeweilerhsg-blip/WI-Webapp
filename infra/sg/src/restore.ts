@@ -19,9 +19,16 @@ import {
   treeSize,
   type Manifest,
 } from './backup-files.ts';
-import { COUNT_TABLES, countObjects, errorText, readBackupSettings, type BackupIo } from './backup.ts';
+import {
+  COUNT_TABLES,
+  countObjects,
+  errorText,
+  readBackupSettings,
+  validateTarget,
+  type BackupIo,
+} from './backup.ts';
 import type { SgConfig } from './config.ts';
-import { NoFollowReader, UnsafeTargetError } from './nofollow.ts';
+import { NoFollowReader, UnsafeTargetError, type Identity } from './nofollow.ts';
 import { safeIdent, type PgAccess } from './pg.ts';
 import { StandError, withVerifiedDump } from './staging.ts';
 
@@ -177,11 +184,13 @@ export interface StandTree {
  * Stand im Ziel verankert öffnen (#119): Der Stand-Ordner, `media/` und `vault/` werden ohne Symlink-Folgen betreten
  * (`NoFollowReader`). Ein Symlink an ihrer Stelle oder darunter ergibt `StandError('beschaedigt')`.
  */
-export function openStandTree(dir: string): StandTree {
+export function openStandTree(dir: string, targetId?: Identity): StandTree {
   return asStandError(dir, () => {
     const reader = new NoFollowReader();
     const parent = dirname(dir);
-    reader.adopt(parent);
+    // Mit der Identität aus `validateTarget` (dev/ino) statt per `statSync` neu zu sehen (#161): Wurde das Ziel
+    // nach der Prüfung ersetzt, scheitert der erste Zugriff.
+    reader.adopt(parent, targetId);
     const standDir = reader.child(parent, basename(dir));
     if (!standDir) throw new UnsafeTargetError(`${dir} fehlt.`);
     return { reader, media: reader.child(standDir, 'media'), vault: reader.child(standDir, 'vault') };
@@ -192,8 +201,8 @@ export function openStandTree(dir: string): StandTree {
  * Dateianzahl und Größen des Standes gegen das Manifest (.DS_Store u. Ä. zählen auf beiden Seiten nie). Gelesen wird
  * verankert ohne Symlink-Folgen; ein Symlink im Stand ergibt `StandError('beschaedigt')`.
  */
-export function standFilesMatch(dir: string, manifest: Manifest): boolean {
-  const tree = openStandTree(dir);
+export function standFilesMatch(dir: string, manifest: Manifest, targetId?: Identity): boolean {
+  const tree = openStandTree(dir, targetId);
   const size = (path: string | null) =>
     path
       ? asStandError(dir, () => treeSize(path, { reader: tree.reader, strict: true }))
@@ -216,13 +225,16 @@ export async function runRestore(deps: RestoreDeps, options: RestoreOptions): Pr
   const { cfg, pg, log, err } = deps;
   try {
     if ((await recoverRestore(deps)) !== null) return 0;
-    const target = options.target ?? (await readBackupSettings(pg).catch(() => ({ target: null }))).target;
-    if (!target) {
+    const setting = options.target ?? (await readBackupSettings(pg).catch(() => ({ target: null }))).target;
+    if (!setting) {
       err(
         'Kein Backup-Ziel bekannt. Gib es mit --ziel <pfad> an oder stelle es unter Einstellungen → Daten ein.',
       );
       return 2;
     }
+    // Ziel einmal prüfen und mit dieser Identität (dev/ino) übernehmen, nicht später per `statSync` (#161)
+    const { path: target, dev, ino } = validateTarget(setting, cfg.dataDir, false);
+    const targetId: Identity = { dev, ino };
 
     if (!options.stand) {
       const lines = listStandsText(target);
@@ -256,8 +268,8 @@ export async function runRestore(deps: RestoreDeps, options: RestoreOptions): Pr
         `Hinweis: Zum Stand ${options.stand} gibt es keinen eigenen Backup-Lauf mit Prüfsumme. Er wird nur gegen sein Manifest geprüft.`,
       );
     return options.test
-      ? await testRestore(deps, dir, manifest)
-      : await fullRestore(deps, options, dir, manifest);
+      ? await testRestore(deps, dir, manifest, targetId)
+      : await fullRestore(deps, options, dir, manifest, targetId);
   } catch (error) {
     err(`Wiederherstellung fehlgeschlagen: ${errorText(error, cfg)}`);
     return 1;
@@ -287,6 +299,7 @@ export async function restoreIntoScratch(
   dir: string,
   manifest: Manifest,
   prefix = 'restoretest',
+  targetId?: Identity,
 ): Promise<RestoreTestReport> {
   const { pg, log, err } = deps;
   const suffix = (deps.random ?? (() => Math.random().toString(36).slice(2, 8)))();
@@ -304,7 +317,7 @@ export async function restoreIntoScratch(
       const differences = Object.entries(manifest.counts)
         .filter(([table, expected]) => table in counts && counts[table] !== expected)
         .map(([table, expected]) => ({ table, expected, actual: counts[table] as number }));
-      const mediaOk = standFilesMatch(dir, manifest);
+      const mediaOk = standFilesMatch(dir, manifest, targetId);
       return { counts, differences, missingTables, mediaOk };
     } finally {
       await dropDatabase(pg, name).catch((e: unknown) =>
@@ -314,9 +327,14 @@ export async function restoreIntoScratch(
   });
 }
 
-async function testRestore(deps: RestoreDeps, dir: string, manifest: Manifest): Promise<number> {
+async function testRestore(
+  deps: RestoreDeps,
+  dir: string,
+  manifest: Manifest,
+  targetId?: Identity,
+): Promise<number> {
   const { log, err } = deps;
-  const report = await restoreIntoScratch(deps, dir, manifest);
+  const report = await restoreIntoScratch(deps, dir, manifest, 'restoretest', targetId);
 
   log('Objekte in der wiederhergestellten Datenbank:');
   for (const table of COUNT_TABLES) {
@@ -427,6 +445,7 @@ async function fullRestore(
   options: RestoreOptions,
   dir: string,
   manifest: Manifest,
+  targetId?: Identity,
 ): Promise<number> {
   const { cfg, pg, log, err } = deps;
   const running = await deps.servicesRunning();
@@ -438,7 +457,7 @@ async function fullRestore(
   }
 
   // Prüfungen vor jeder Änderung
-  if (!standFilesMatch(dir, manifest)) {
+  if (!standFilesMatch(dir, manifest, targetId)) {
     err(
       `Die Dateien im Stand ${manifest.stand} stimmen nicht mit dem Manifest überein (Anzahl oder Größe). ` +
         'Der Stand ist unvollständig oder beschädigt, es wurde nichts verändert.',
@@ -482,7 +501,7 @@ async function fullRestore(
   const fresh = safeIdent(`${live}_restore_${stamp}`);
   const old = safeIdent(`${live}_vor_restore_${stamp}`);
   // media/ und vault/ des Standes verankert, ohne Symlink-Folgen (#119)
-  const tree = openStandTree(dir);
+  const tree = openStandTree(dir, targetId);
   const journal: RestoreJournal = {
     version: 1,
     stand: manifest.stand,

@@ -167,8 +167,8 @@ export async function readBackupSettings(pg: PgAccess): Promise<BackupSettings> 
  * mit genau dieser Identität (Schreiben, Lesen, Ausdünnen): Wird es danach ausgetauscht, scheitert jeder Zugriff,
  * statt in einem anderen Ordner zu schreiben oder zu löschen.
  */
-export function validateTarget(target: string, dataDir: string): TargetDir {
-  const path = checkBackupTarget(target, dataDir, { createMissing: true });
+export function validateTarget(target: string, dataDir: string, createMissing = true): TargetDir {
+  const path = checkBackupTarget(target, dataDir, { createMissing });
   const info = lstatSync(path);
   if (info.isSymbolicLink() || !info.isDirectory()) {
     throw new UnsafeTargetError(`${path} wurde nach der Prüfung ersetzt. Der Lauf bricht ab.`);
