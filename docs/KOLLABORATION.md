@@ -28,7 +28,7 @@ Owner ──Ziel──▶ Claude (Lead, Claude Code in der Cloud)
                  └──▶ Claude-Subagents/Workflows, parallel      Branches feat/…
                           │
                           ▼
-                 frischer Subagent reviewt (Opus bei Code, Sonnet bei Doku und kleinen, risikoarmen Änderungen)
+                 frischer Subagent reviewt (Opus bei Code, Sonnet bei Doku)
                  Claude merged nach Freigabe
 
 (ruht: Argon-Queue mit Label agent:argon, PRs "[Argon] …", Review und Nacharbeit über GitHub)
@@ -88,7 +88,7 @@ Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so gü
 |---|---|
 | **Fable 5.2** | Planung von Features (Owner-Regel vom 11.11.2026): Umsetzungsplan mit Vertragstext, Dateien/Scope, Schnittstellen, Testfällen und Fallstricken. Der Plan liegt unter `docs/plaene/` und wird vor der Umsetzung von Opus geprüft |
 | **Opus 5.5** | Reviews von Code, Security-Reviews und Gegen-Reviews (ersetzt Argons Gegen-Review), Security-kritischer Code, Debugging, Merge-Konflikte, Verträge und Architektur |
-| **Sonnet 5.5** | Schreibt den Code nach Plan, außerdem UI und Doku. Reviewt Doku und kleine, risikoarme Änderungen (reine Texte, Darstellung, kleine Nacharbeiten). Logik, Sync, iPad und Sicherheit prüft immer Opus |
+| **Sonnet 5.5** | Schreibt den Code nach Plan, außerdem UI und Doku. Reviewt Doku. Code prüft immer Opus (Merge-Regeln in CLAUDE.md) |
 | **Haiku** | Mechanisches: Umbenennen, Labels, einfache Formatierung |
 
 (Ruht: Die frühere Gemini-Tabelle mit Argon und Flash gilt nicht, solange Argon pausiert ist.)
@@ -97,7 +97,7 @@ Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so gü
 
 Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Qualität zu verschlechtern**. Claude verantwortet das als Orchestrator. Die Regeln:
 
-**Review-Tiefe nach Risiko.** Das erste Review jedes eigenen Code-PRs macht ein frischer Opus-Subagent. Ausnahme: Doku und kleine, risikoarme Änderungen prüft ein frischer Sonnet-Subagent (Modell-Routing). Logik, Sync, iPad und Sicherheit bleiben bei Opus. Die Tiefe richtet sich nach dem Risiko:
+**Review-Tiefe nach Risiko.** Das erste Review jedes eigenen Code-PRs macht ein frischer Opus-Subagent, Doku-PRs ein frischer Sonnet-Subagent. Die Tiefe richtet sich nach dem Risiko:
 
 | Stufe | Wann | Review-Umfang |
 |---|---|---|
