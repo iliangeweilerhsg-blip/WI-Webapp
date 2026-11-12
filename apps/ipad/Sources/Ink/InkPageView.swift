@@ -264,7 +264,9 @@ struct InkPageView: View {
         .onChange(of: sync.pendingCount) { _, _ in
             allSynced.update(isOnline: sync.state == .online, pending: sync.pendingCount)
         }
-        .onChange(of: library.running) { _, _ in
+        .onChange(of: library.running) { old, new in
+            // Eine andere Vorlesung: die aktuelle Folie wird wieder angesteuert (L15 aus #225)
+            if old?.id != new?.id { gate.forgetFollowed() }
             // Die Vorlesung hat begonnen oder geendet: Session der offenen Seite nachziehen
             applyFreshTarget()
             followSlideIfNeeded()
@@ -525,6 +527,9 @@ struct InkPageView: View {
         guard force || library.inkMode(forModule: moduleID) == .aufFolie else { return }
         _Concurrency.Task {
             guard let slide = await slides.currentSlide() else { return }
+            // Dieselbe Folie wie beim letzten Wechsel: nicht zurückspringen, wenn von Hand weitergeblättert wurde.
+            // Wartet aber ein Wechsel zu einer anderen Folie, ersetzt diese ihn (A, B, zurück zu A beim Schreiben).
+            guard gate.shouldFollow(slide, force: force) else { return }
             if let now = gate.slideChanged(slide) {
                 openSlidePage(now)
             }
@@ -536,7 +541,9 @@ struct InkPageView: View {
             // Setzt der Stift zwischen Freigabe und Wechsel an, wartet der Wechsel erneut bis zum Absetzen. Sonst
             // verschwände die Ansicht mitten im Strich.
             guard gate.slideChanged(slide) != nil else { return }
+            // Erst merken, wenn es die Seite gibt: Scheitert das Anlegen, versucht es der nächste Anstoß erneut
             guard let page = library.slidePage(notebookID: currentNotebookID, slide: slide) else { return }
+            gate.noteFollowed(slide)
             await show(pageID: page.id)
         }
     }
@@ -643,7 +650,7 @@ struct InkPageView: View {
 
     // MARK: Löschen mit Frist
 
-    /// Löscht ohne Dialog (R1). Unten erscheint 5 s lang „Rückgängig“. Ist es die offene Seite, rückt die nächste nach.
+    /// Löscht ohne Dialog (R1). Unten erscheint 4,5 s lang „Rückgängig“. Ist es die offene Seite, rückt die nächste nach.
     private func delete(pageID: String) {
         let visible = pages
         guard let index = visible.firstIndex(where: { $0.id == pageID }) else { return }
@@ -755,6 +762,8 @@ struct InkPageView: View {
         failedToOpen = false
         showsSidebar = false
         currentNotebookID = target
+        // Im neuen Notizbuch gibt es noch keine Folienseite: die aktuelle Folie wird wieder angesteuert
+        gate.forgetFollowed()
         await open()
     }
 
@@ -777,11 +786,12 @@ struct InkPageView: View {
         // Netzabfragen mit der alten Zeitbasis geschrieben würde. Ist die Folie nicht bekannt, bleibt alles wie bisher.
         // Ohne das Gate: Es gibt noch keine offene Seite, auf der geschrieben wird, und `present` setzt es ohnehin
         // zurück. Ein zurückgestellter Wechsel (Stift eben noch auf der vorigen Seite) zeigte sonst doch die alte Seite.
-        // Der Folgeaufruf am Ende wechselt nicht noch einmal, weil `show` bei derselben Seite nichts tut.
-        let slideTarget: InkBinding? =
-            writesOnSlide
-            ? library.slides?.knownCurrentSlide().flatMap { library.openSlideTarget(notebookID: notebookID, slide: $0) }
-            : nil
+        // Der Folgeaufruf am Ende wechselt nicht noch einmal: Die Folie ist gemerkt (L15), und `show` täte bei
+        // derselben Seite ohnehin nichts.
+        let knownSlide = writesOnSlide ? library.slides?.knownCurrentSlide() : nil
+        let slideTarget: InkBinding? = knownSlide.flatMap {
+            library.openSlideTarget(notebookID: notebookID, slide: $0)
+        }
         guard
             let target = slideTarget
                 ?? (appendsForLecture
@@ -791,6 +801,9 @@ struct InkPageView: View {
             return
         }
         let page = present(target)
+        // Die Folienseite ist schon offen: Der Folgeaufruf am Ende stellt für dieselbe Folie keinen Wechsel mehr
+        // zurück (sonst stünde beim Schreiben „Folie N · Tippen zum Wechseln“ auf genau dieser Seite, L15)
+        if slideTarget != nil, let knownSlide { gate.noteFollowed(knownSlide) }
 
         await library.refresh()
         guard !_Concurrency.Task.isCancelled, model === page else { return }
@@ -891,7 +904,8 @@ struct InkPageView: View {
     }
 }
 
-/// Leiste „Seite gelöscht · Rückgängig“. Verschwindet nach 5 s von selbst, kein Dialog (R1).
+/// Leiste „Seite gelöscht · Rückgängig“. Verschwindet nach `undoBarDuration` (4,5 s, kürzer als die Löschfrist) von
+/// selbst, kein Dialog (R1).
 private struct InkUndoDeleteBar: View {
     let pageID: String
     let onUndo: () -> Void
@@ -908,7 +922,7 @@ private struct InkUndoDeleteBar: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
         .task(id: pageID) {
-            try? await _Concurrency.Task.sleep(for: .seconds(5))
+            try? await _Concurrency.Task.sleep(for: InkLibraryService.undoBarDuration)
             guard !_Concurrency.Task.isCancelled else { return }
             onExpire()
         }

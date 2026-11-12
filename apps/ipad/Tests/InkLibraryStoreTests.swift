@@ -314,6 +314,20 @@ final class InkLibraryStoreTests: XCTestCase {
         XCTAssertEqual(store.page("p1")?.needsReconcile, false)
     }
 
+    /// L2 aus #225: Nur freie Notizbücher legt das iPad neu an. Ein Vorlesungs- oder Übungs-Notizbuch, das nach der
+    /// Wiederherstellung am Core fehlt, muss ausgeblendet werden können.
+    func testNewEpochKeepsWhatTheMacOwnsKnownAndHidesItWhenMissing() {
+        let store = FileInkLibraryStore(url: makeURL())
+        store.upsert(notebook("lecture", kind: .vorlesung, known: true))
+        store.upsert(notebook("free", kind: .frei, known: true))
+        store.markAllNeedReconcile()
+        XCTAssertEqual(store.notebook("lecture")?.knownOnServer, true)
+        XCTAssertEqual(store.notebook("free")?.knownOnServer, false)
+        store.mergeNotebooks([], moduleID: LibraryFixtures.moduleID)
+        XCTAssertEqual(store.notebook("lecture")?.hidden, true)
+        XCTAssertEqual(store.notebook("free")?.hidden, false)
+    }
+
     // MARK: Auf der Platte
 
     func testTheLibrarySurvivesARestart() throws {

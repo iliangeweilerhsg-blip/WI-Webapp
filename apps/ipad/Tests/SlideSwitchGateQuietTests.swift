@@ -161,6 +161,47 @@ final class SlideSwitchGateQuietTests: XCTestCase {
         XCTAssertEqual(gate.slideChanged(three), three)
     }
 
+    /// L15 aus #225: Eine Änderung der laufenden Session darf nicht zur Folienseite zurückspringen
+    func testAFollowedSlideIsNotFollowedAgainUntilForgotten() {
+        let gate = makeGate(GateTestClock())
+        XCTAssertFalse(gate.alreadyFollowed(one))
+        gate.noteFollowed(one)
+        XCTAssertTrue(gate.alreadyFollowed(one))
+        XCTAssertFalse(gate.alreadyFollowed(two))
+        // Das Öffnen jeder Seite setzt das Gate zurück, die gemerkte Folie bleibt
+        gate.reset()
+        XCTAssertTrue(gate.alreadyFollowed(one))
+        gate.forgetFollowed()
+        XCTAssertFalse(gate.alreadyFollowed(one))
+    }
+
+    /// L15: Die gemerkte Folie wird nur ohne wartenden Wechsel übersprungen, mit `force` nie
+    func testShouldFollowSkipsOnlyTheFollowedSlideWithoutAWaitingChange() {
+        let gate = makeGate(GateTestClock())
+        XCTAssertTrue(gate.shouldFollow(one))
+        gate.noteFollowed(one)
+        XCTAssertFalse(gate.shouldFollow(one))
+        XCTAssertTrue(gate.shouldFollow(one, force: true))
+        XCTAssertTrue(gate.shouldFollow(two))
+    }
+
+    /// L15: Folie A, B, zurück zu A bei aufliegendem Stift. Die Rückkehr zu A ersetzt den wartenden Wechsel zu B.
+    func testReturningToTheFollowedSlideWhileWritingReplacesTheWaitingChange() async {
+        let clock = GateTestClock()
+        let gate = makeGate(clock)
+        gate.noteFollowed(one)
+        gate.toolBegan()
+        XCTAssertTrue(gate.shouldFollow(two))
+        XCTAssertNil(gate.slideChanged(two))
+        // Ein wartender Wechsel darf die Rückkehr zur gemerkten Folie nicht verschlucken
+        XCTAssertTrue(gate.shouldFollow(one))
+        XCTAssertNil(gate.slideChanged(one))
+        clock.advance(0.5)
+        gate.finishTool()
+        await gate.awaitQuiet(sleep: { try await clock.sleep($0) })
+        XCTAssertEqual(gate.takeReleased(), one)
+    }
+
     func testTheViewIsToldToRestartTheWaitWhenAChangeWaitsOrAStrokeEnds() {
         let clock = GateTestClock()
         let gate = makeGate(clock)

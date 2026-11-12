@@ -316,7 +316,9 @@ final class FileInkLibraryStore: InkLibraryStore {
         for index in file.pages.indices {
             file.pages[index].needsReconcile = true
         }
-        for index in file.notebooks.indices {
+        // Nur freie Notizbücher werden neu angelegt (`requeueFreeNotebooks`). Vorlesungs- und Übungs-Notizbücher
+        // legt der Mac an: Fehlen sie nach der Wiederherstellung, sollen sie ausgeblendet werden können (L2 aus #225)
+        for index in file.notebooks.indices where file.notebooks[index].kind == .frei {
             file.notebooks[index].knownOnServer = false
         }
         persist()
