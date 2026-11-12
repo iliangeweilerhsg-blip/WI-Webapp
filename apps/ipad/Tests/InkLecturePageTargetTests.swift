@@ -130,17 +130,45 @@ final class InkLecturePageTargetTests: XCTestCase {
         XCTAssertEqual(service.pages(inNotebook: notebookID).count, 1)
     }
 
-    func testAnEmptyPageWithoutASessionIsReused() async throws {
+    /// #250: Die Seite ohne Session von vor der Vorlesung gäbe ihren Strichen keine Sitzungszeit, und ihre Session
+    /// lässt sich nach dem Anlegen nicht mehr setzen (§7.4). Darum bekommt auch die leere Seite eine neue.
+    func testAnEmptyPageWithoutASessionFromBeforeTheLectureGetsANewPage() async throws {
         let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: nil, hasStrokes: false)
         let service = makeService(h, pageStore: store)
         await runLecture(h, service)
 
+        XCTAssertTrue(service.needsLecturePage(notebookID: notebookID))
+        let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
+        XCTAssertNotEqual(target.pageID, firstPageID)
+        XCTAssertEqual(target.sessionID, runningID)
+        XCTAssertEqual(target.sessionStartMS, startMS)
+        XCTAssertEqual(service.page(target.pageID)?.sessionID, runningID)
+        XCTAssertEqual(service.pages(inNotebook: notebookID).count, 2)
+        // Die alte Seite bekäme keine Sitzungszeit
+        XCTAssertNil(service.target(forPage: firstPageID)?.sessionStartMS)
+    }
+
+    func testAnEmptyOfflinePageCreatedDuringTheSessionIsReused() async throws {
+        let h = makeHarness()
+        let store = FakeInkPageStore()
+        try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true)
+        let offlineID = InkID.uuidV7(now: Date(timeIntervalSince1970: Double(startMS + 300_000) / 1000))
+        h.library.upsert(
+            LibraryPage(
+                id: offlineID, notebookID: notebookID, index: 2, template: .blanko, widthPt: 595, heightPt: 842,
+                sessionID: nil, backgroundSlideID: nil, attachedSlideID: nil, version: 1, createQueued: true,
+                needsReconcile: false, deletedAtMS: nil, deleteQueued: false))
+        h.library.setLast(notebookID: notebookID, pageID: offlineID)
+        let service = makeService(h, pageStore: store)
+        await runLecture(h, service)
+
         XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
-        XCTAssertEqual(target.pageID, firstPageID)
-        XCTAssertEqual(service.pages(inNotebook: notebookID).count, 1)
+        XCTAssertEqual(target.pageID, offlineID)
+        XCTAssertEqual(target.sessionStartMS, startMS)
+        XCTAssertEqual(service.pages(inNotebook: notebookID).count, 2)
     }
 
     func testAnEmptyPageWithAnotherSessionStillGetsANewPage() async throws {
@@ -178,7 +206,9 @@ final class InkLecturePageTargetTests: XCTestCase {
         XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
         XCTAssertEqual(target.pageID, firstPageID)
+        // Ohne laufende Session: keine Session für `presence`, und der Start der Vorwoche ist hier unbekannt (#250)
         XCTAssertNil(target.sessionID)
+        XCTAssertNil(target.sessionStartMS)
         XCTAssertEqual(service.pages(inNotebook: notebookID).count, 1)
     }
 

@@ -494,7 +494,8 @@ final class InkLibraryService {
                 createQueued: false,
                 needsReconcile: false,
                 deletedAtMS: nil,
-                deleteQueued: false
+                deleteQueued: false,
+                sessionStartMS: session?.startMS
             )
             // Erst die Bibliothek, dann die Operation
             store.upsert(page)
@@ -549,16 +550,17 @@ final class InkLibraryService {
     }
 
     /// Braucht die laufende Vorlesung dieses Notizbuchs eine neue Seite? Ja, wenn die letzte Seite eine andere
-    /// `sessionID` trägt als die laufende Session. Ausnahmen für eine Seite ohne Session: Sie ist leer, oder sie wurde
-    /// erst nach Beginn der Session angelegt (offline in dieser Vorlesung). Dann wird sie weiterverwendet. Eine leere
-    /// Seite mit fremder Session bekommt eine neue Seite, sonst ordnet der Rückblick sie der falschen Vorlesung zu.
-    /// `page.session_id` setzt das iPad nur beim Anlegen (§7.4).
+    /// `sessionID` trägt als die laufende Session. Ausnahme: Eine Seite ohne Session, die erst nach Beginn der Session
+    /// angelegt wurde (offline in dieser Vorlesung), wird weiterverwendet. Jede andere Seite bekommt eine neue Seite,
+    /// auch eine leere: Eine leere Seite mit fremder Session ordnete der Rückblick der falschen Vorlesung zu, und eine
+    /// leere Seite ohne Session von vor der Vorlesung gäbe ihren Strichen keine Sitzungszeit (#250). `page.session_id`
+    /// setzt das iPad nur beim Anlegen (§7.4).
     func needsLecturePage(notebookID: String) -> Bool {
         guard let notebook = store.notebook(notebookID), let session = lectureSession(for: notebook),
             let last = lastPage(of: notebook)
         else { return false }
         if last.sessionID == session.id { return false }
-        if last.sessionID == nil, !pageHasStrokes(last.id) || createdDuring(session, pageID: last.id) { return false }
+        if last.sessionID == nil, createdDuring(session, pageID: last.id) { return false }
         return true
     }
 
@@ -608,7 +610,8 @@ final class InkLibraryService {
             createQueued: false,
             needsReconcile: false,
             deletedAtMS: nil,
-            deleteQueued: false
+            deleteQueued: false,
+            sessionStartMS: matchingSession(moduleID: notebook.moduleID)?.startMS
         )
         store.upsert(page)
         guard let queued = ensureCreateQueued(page, notebook: notebook) else {
@@ -820,7 +823,10 @@ final class InkLibraryService {
         var merged = page
         if !dirty.contains(LibraryPage.Field.index.rawValue) { merged.index = remote.index }
         if !dirty.contains(LibraryPage.Field.template.rawValue) { merged.template = remote.template }
-        if !dirty.contains(LibraryPage.Field.sessionID.rawValue) { merged.sessionID = remote.sessionID }
+        if !dirty.contains(LibraryPage.Field.sessionID.rawValue) {
+            if merged.sessionID != remote.sessionID { merged.sessionStartMS = nil }
+            merged.sessionID = remote.sessionID
+        }
         if !dirty.contains(LibraryPage.Field.backgroundSlideID.rawValue) {
             merged.backgroundSlideID = remote.backgroundSlideID
         }
@@ -1018,6 +1024,8 @@ final class InkLibraryService {
         if pageID == openPageID, let live = openModel, live.pageID == pageID {
             noteReadability(of: live)
             guard !live.isUnreadable else { return .skipped }
+            // Die Zeit der Striche folgt der Session der Seite, nicht dem Stand, den die Ansicht zuletzt übernommen hat
+            live.sessionStartedAt = binding.sessionStartMS.map { Date(timeIntervalSince1970: Double($0) / 1000) }
             return await sync.reconcile(page: live, binding: binding) { [weak self] in
                 // Die Ansicht hat inzwischen ein anderes Modell (Seite verlassen und neu geöffnet): `live` kennt dessen
                 // neue Striche nicht
@@ -1071,16 +1079,47 @@ final class InkLibraryService {
         return running
     }
 
+    /// Startzeit, die zu den Strichen dieser Seite gehört (#250). Maßgeblich ist die Session der Seite
+    /// (`page.sessionID`), nie einfach die gerade laufende des Moduls:
+    /// - Trägt die Seite eine Session, gilt deren Start: bei der laufenden Session der frische Wert, sonst der
+    ///   gemerkte (`sessionStartMS`). Ist er unbekannt, fehlt `t_start_ms`.
+    /// - Trägt die Seite keine Session, gehört sie zur laufenden Session des Moduls nur dann, wenn sie erst nach deren
+    ///   Beginn angelegt wurde (offline in dieser Vorlesung, wie `needsLecturePage`). Sonst ohne Sitzungszeit.
+    private func strokeSessionStart(page: LibraryPage, running: RunningSession?) -> Int? {
+        if let pageSession = page.sessionID {
+            if let running, running.id == pageSession { return running.startMS ?? page.sessionStartMS }
+            return page.sessionStartMS
+        }
+        if let running, createdDuring(running, pageID: page.id) { return running.startMS }
+        return nil
+    }
+
+    /// Merkt den Start der laufenden Session an den Seiten, die zu ihr gehören und ihn noch nicht kennen. So behalten
+    /// ihre Striche die Sitzungszeit auch nach dem Ende der Vorlesung (#250).
+    private func rememberStart(of session: RunningSession) {
+        guard let startMS = session.startMS else { return }
+        for notebook in store.notebooks(inModule: session.moduleID) {
+            for page in store.pages(inNotebook: notebook.id)
+            where page.sessionID == session.id && page.sessionStartMS != startMS {
+                var known = page
+                known.sessionStartMS = startMS
+                store.upsert(known)
+            }
+        }
+    }
+
     private func makeBinding(notebook: LibraryNotebook, page: LibraryPage) -> InkBinding {
-        let session = matchingSession(moduleID: notebook.moduleID)
+        // `sessionID` bleibt die laufende Session des Moduls (`presence.session_id`, §11.6), die Zeit der Striche folgt
+        // der Session der Seite (#250)
+        let running = matchingSession(moduleID: notebook.moduleID)
         return InkBinding(
             notebookID: notebook.id,
             pageID: page.id,
             moduleID: notebook.moduleID,
             pageCreated: page.createQueued,
             needsReconcile: page.needsReconcile,
-            sessionID: session?.id,
-            sessionStartMS: session?.startMS,
+            sessionID: running?.id,
+            sessionStartMS: strokeSessionStart(page: page, running: running),
             moduleName: store.modules.first { $0.id == notebook.moduleID }?.name
         )
     }
@@ -1137,6 +1176,7 @@ final class InkLibraryService {
             slideDeckID: session.slideDeckID,
             notebookID: notebook?.id
         )
+        if let running { rememberStart(of: running) }
     }
 
     /// Das Notizbuch der Session. Der Core entscheidet (#199): „Übung“ bei Übung und Tutorium, sonst „Vorlesung“.
@@ -1214,6 +1254,7 @@ final class InkLibraryService {
             notebookID: known)
         if running != provisional {
             running = provisional
+            rememberStart(of: provisional)
             bump()
         }
         guard known == nil, sync.canReachCore, let access = sync.restAccess() else { return }
@@ -1223,6 +1264,7 @@ final class InkLibraryService {
         running = RunningSession(
             id: brief.id, moduleID: brief.moduleID, startMS: brief.startedAtMS, slideDeckID: brief.slideDeckID,
             notebookID: notebook.id)
+        if let running { rememberStart(of: running) }
         bump()
     }
 

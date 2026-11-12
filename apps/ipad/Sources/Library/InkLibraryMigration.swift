@@ -65,7 +65,8 @@ enum InkLibraryMigration {
                     createQueued: binding.pageCreated,
                     needsReconcile: binding.needsReconcile,
                     deletedAtMS: nil,
-                    deleteQueued: false
+                    deleteQueued: false,
+                    sessionStartMS: binding.pageCreated ? nil : binding.sessionStartMS
                 ))
         }
         return result

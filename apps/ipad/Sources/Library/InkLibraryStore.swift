@@ -235,6 +235,7 @@ final class FileInkLibraryStore: InkLibraryStore {
                 file.pages[index].index = remote.index
                 file.pages[index].template = remote.template
                 file.pages[index].version = remote.version
+                if file.pages[index].sessionID != remote.sessionID { file.pages[index].sessionStartMS = nil }
                 file.pages[index].sessionID = remote.sessionID
                 file.pages[index].backgroundSlideID = remote.backgroundSlideID
                 file.pages[index].attachedSlideID = remote.attachedSlideID

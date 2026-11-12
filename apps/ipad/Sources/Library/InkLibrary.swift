@@ -59,6 +59,10 @@ struct LibraryPage: Codable, Equatable, Sendable, Identifiable {
     /// `nil` = unbekannt (Altbestand): Bei einem Konflikt gelten dann alle lokalen Felder (L9 aus #225).
     /// Optional, damit eine ältere `library.json` lesbar bleibt (L3).
     var dirtyFields: [String]? = nil
+    /// Start der Session `sessionID` auf der Uhr des Mac (ms), soweit lokal bekannt (#250). Daraus entsteht `t_start_ms`
+    /// der Striche dieser Seite, auch wenn die Session nicht mehr läuft. Nicht Teil des Vertrags, nur lokal. `nil` =
+    /// unbekannt, dann bekommen Striche der Seite keine Sitzungszeit. Optional, damit eine ältere `library.json` lesbar bleibt.
+    var sessionStartMS: Int? = nil
 
     /// Strom aller Operationen des Notizbuchs dieser Seite
     var stream: String { "notebook:\(notebookID)" }
