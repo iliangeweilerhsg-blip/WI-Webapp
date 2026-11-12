@@ -248,7 +248,7 @@ describe('<InkPage>', () => {
     expect(log.fills).toHaveLength(2);
   });
 
-  it('begrenzt den Zoom: nie mehr als 4096 Pixel Höhe, nie unter 1 Pixel je CSS-Pixel', () => {
+  it('begrenzt den Zoom: die längere Seite nie über 4096 Pixel, nie unter 1 Pixel je CSS-Pixel', () => {
     vi.stubGlobal('devicePixelRatio', 3);
     const { container } = render(<InkPage strokes={[]} width={9000} />);
     const c = container.querySelector<HTMLCanvasElement>('canvas[data-layer="under"]')!;
