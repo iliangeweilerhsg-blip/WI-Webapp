@@ -188,7 +188,7 @@ struct PairingView: View {
         } header: {
             Text("Verbunden mit \(endpoint.displayText)")
         } footer: {
-            Text("Gib die sechs Ziffern ein, die dein Mac anzeigt.")
+            Text("Gib die sechs Ziffern ein, die dein Mac anzeigt. Die Adresse oben muss mit der Adresse am Mac übereinstimmen, sonst brich ab.")
         }
     }
 

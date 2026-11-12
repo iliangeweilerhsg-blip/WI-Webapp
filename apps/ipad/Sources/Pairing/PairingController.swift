@@ -155,17 +155,17 @@ final class PairingController {
         wrongCodes = 0
     }
 
-    private func confirm(
-        endpoint requested: CoreEndpoint, pairingID: String, code: String, fallback: PairingState
-    ) async {
+    private func confirm(endpoint: CoreEndpoint, pairingID: String, code: String, fallback: PairingState) async {
         lastError = nil
-        state = .confirming(requested)
-        // QR-Code mit `.local`-Host (nicht von uns erzeugt): ebenfalls erst auflösen, es wird nur die IP gespeichert
-        guard let endpoint = await addressForPairing(requested) else {
-            lastError = .localNameNotResolved
+        // `pair/confirm` trägt den Code (beim QR-Weg auch die geheime `pairing_id`) und geht nur an eine IPv4-Adresse,
+        // nie per mDNS an einen Namen (#261, VERTRAEGE §12 H-5). `PairingLink` nimmt nur IPv4 an, und `start` hat einen
+        // `.local`-Namen schon aufgelöst; diese Prüfung ist die zweite Sicherung.
+        guard TokenDestination.parseIPv4(endpoint.host) != nil else {
+            lastError = .invalidAddress
             state = fallback
             return
         }
+        state = .confirming(endpoint)
         let result: PairingResult
         do {
             result = try await client.pairConfirm(

@@ -110,28 +110,12 @@ final class LocalNameResolvedAtPairingTests: XCTestCase {
         XCTAssertEqual(setup.controller.state, .awaitingCode(Fixtures.endpoint, pairingID: Fixtures.publicPairingID))
     }
 
-    func testQRCodeWithLocalHostStoresTheIPToo() async throws {
-        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)], resolvesTo: Fixtures.endpoint)
-        let link = try XCTUnwrap(PairingLink(qrPayload: localQR))
-
-        setup.controller.review(link)
-        await setup.controller.confirmReviewedLink()
-
-        XCTAssertEqual(setup.controller.state, .paired)
-        XCTAssertEqual(setup.macs.mac?.endpoint, Fixtures.endpoint)
-        XCTAssertEqual(setup.transport.requests.first?.url?.host, "192.0.2.10")
-    }
-
-    func testQRCodeWithUnresolvableLocalHostSendsNothing() async throws {
-        let setup = Setup([.http(status: 201, body: Fixtures.pairResponse)], resolvesTo: nil)
-        let link = try XCTUnwrap(PairingLink(qrPayload: localQR))
-
-        setup.controller.review(link)
-        await setup.controller.confirmReviewedLink()
-
-        XCTAssertEqual(setup.controller.state, .idle)
-        XCTAssertEqual(setup.controller.lastError, .localNameNotResolved)
-        XCTAssertEqual(setup.transport.requests.count, 0)
-        XCTAssertNil(setup.macs.mac)
+    func testQRCodeWithLocalHostIsRejected() {
+        // Der Mac schreibt immer eine IPv4 in den QR-Code. Ein `.local`-Name liefe über mDNS, und wer dort antwortet,
+        // bekäme die geheime `pairing_id` und den Code (VERTRAEGE §12 H-5). Der QR-Weg kommt ohne Bonjour aus.
+        XCTAssertNil(PairingLink(qrPayload: localQR))
+        XCTAssertNil(PairingLink(qrPayload: localQR.replacingOccurrences(of: "mein-mac.local", with: "Mein-Mac.LOCAL")))
+        XCTAssertNotNil(
+            PairingLink(qrPayload: localQR.replacingOccurrences(of: "mein-mac.local", with: "192.0.2.10")))
     }
 }

@@ -531,6 +531,31 @@ final class TokenOnlyInOwnNetworkAppModelTests: XCTestCase {
         XCTAssertEqual(model.phase, .unpaired)
     }
 
+    func testRePairingFromAStoredLocalNameSendsNothingAndDeletesLocally() async {
+        // „Neu koppeln“ bei einer `.local`-Kopplung (#261): Das Abmelden am Mac bräuchte ein Token an den Namen, darum
+        // geht nichts raus. Den alten Eintrag entfernt der Nutzer am Mac, der Rat sagt wo.
+        let local = PairedMac(
+            endpoint: CoreEndpoint(host: "mein-mac.local")!, deviceID: Fixtures.deviceID, deviceName: "iPad Test")
+        let transport = FakeTransport([.http(status: 204, body: "")])
+        let tokens = FakeTokenStore(token: Fixtures.token)
+        let macs = FakePairedMacStore(mac: local)
+        let model = AppModel(
+            client: Fixtures.client(transport, interfaces: Fixtures.sameNetwork),
+            tokenStore: tokens,
+            macStore: macs,
+            deviceName: "iPad Test",
+            appVersion: "0.1.0"
+        )
+
+        await model.unpair()
+
+        XCTAssertEqual(transport.requests.count, 0)
+        XCTAssertNil(tokens.token)
+        XCTAssertNil(macs.mac)
+        XCTAssertEqual(model.phase, .unpaired)
+        XCTAssertTrue(ConnectionError.rePairingNeeded.advice.contains("Einstellungen → Geräte"))
+    }
+
     func testRevokedTokenStillWinsOverOtherNetwork() {
         XCTAssertEqual(
             BadgeState.resolve(connection: .disconnected(.otherNetwork), syncState: .tokenInvalid),

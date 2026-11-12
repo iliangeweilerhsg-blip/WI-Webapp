@@ -207,7 +207,7 @@ enum ConnectionError: Error, Equatable, Sendable {
         case .otherNetwork:
             return "Deine Notizen bleiben auf dem iPad und gleichen sich später ab."
         case .rePairingNeeded:
-            return "Verbindungsdetails → Neu koppeln, dann den QR-Code am Mac scannen. Deine Notizen bleiben auf dem iPad und gleichen sich danach ab."
+            return "Verbindungsdetails → Neu koppeln, dann den QR-Code am Mac scannen. Den alten Eintrag des iPads entfernst du am Mac unter Einstellungen → Geräte. Deine Notizen bleiben auf dem iPad und gleichen sich danach ab."
         case .localNameNotResolved:
             return "Gib die IP-Adresse des Macs ein, zum Beispiel 192.168.1.20, oder scanne den QR-Code am Mac."
         }
