@@ -216,6 +216,29 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertEqual(h.engine.pendingCount, 1)
     }
 
+    /// Review L16: Eine abgelehnte Weiterleitung (Proxy, Captive Portal) ist ein vorübergehender Fehler. Die Kopplung
+    /// bleibt, die Engine verbindet mit Wartezeit neu und fragt nicht erst `GET /health`.
+    func testHTTP302OnUpgradeRetriesWithBackoffAndKeepsThePairing() async throws {
+        let h = SyncHarness()
+        h.factory.configure = { socket, index in
+            if index == 0 { socket.initialFailure = .rejected(status: 302) }
+        }
+        h.enqueueStrokes(1)
+        h.start()
+
+        let waiting = await eventually { h.engine.state == .waiting }
+        XCTAssertTrue(waiting)
+        XCTAssertTrue(h.transport.requests.isEmpty)
+        XCTAssertEqual(h.tokens.token, Fixtures.token)
+        XCTAssertEqual(h.engine.pendingCount, 1)
+        await h.clock.advance(0.5)
+        XCTAssertEqual(h.factory.sockets.count, 1)
+        await h.clock.advance(1)
+        _ = try await waitForSocket(h, index: 1)
+        let online = await eventually { h.engine.state == .online }
+        XCTAssertTrue(online)
+    }
+
     func testUnclearUpgradeFailureAsksHealthAndStopsOn401() async throws {
         let h = SyncHarness(health: [.http(status: 401, body: Fixtures.apiError("device_token_invalid"))])
         h.factory.configure = { socket, _ in

@@ -71,7 +71,7 @@ final class URLSessionSyncSocket: SyncSocket {
 
     /// Schließcode und HTTP-Antwort stehen erst nach dem Fehler am Task
     private func mapped(_ error: Error) -> SyncSocketError {
-        if let http = task.response as? HTTPURLResponse, http.statusCode >= 400 {
+        if let http = task.response as? HTTPURLResponse, http.statusCode >= 300 {
             return .rejected(status: http.statusCode)
         }
         let code = task.closeCode
@@ -95,7 +95,8 @@ final class URLSessionSyncSocketFactory: SyncSocketFactory {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = 60
-        session = URLSession(configuration: configuration)
+        // Keine Weiterleitung beim Upgrade (Review L16), auch wenn URLSession dort selten eine verfolgt
+        session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
 
     func open(_ request: URLRequest) -> any SyncSocket {

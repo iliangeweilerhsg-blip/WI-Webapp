@@ -26,7 +26,7 @@ final class URLSessionTransport: HTTPTransport {
         configuration.waitsForConnectivity = false
         configuration.timeoutIntervalForRequest = 10
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        session = URLSession(configuration: configuration)
+        session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -62,6 +62,26 @@ final class URLSessionTransport: HTTPTransport {
             try? FileManager.default.removeItem(at: file)
             throw error
         }
+    }
+}
+
+/// Keine HTTP-Weiterleitungen (Review L16): Ein manipulierter Core oder ein Angreifer im LAN (der Mac spricht per http)
+/// könnte sonst auf einen fremden Host umleiten, und URLSession würde die Anfrage dorthin wiederholen. Mit `nil` endet
+/// die Anfrage mit der 3xx-Antwort selbst; der Client wertet sie wie jede Antwort außerhalb von 2xx als Fehler.
+enum NoRedirect {
+    static func refuse(_ completionHandler: @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
+/// Session-Delegate, der Weiterleitungen ablehnt. `@unchecked Sendable`: `NSObject` ist nicht `Sendable`, die Klasse
+/// hat aber keinen Zustand.
+final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        NoRedirect.refuse(completionHandler)
     }
 }
 
@@ -107,6 +127,14 @@ final class LimitedDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unch
         lock.lock()
         defer { lock.unlock() }
         return exceeded
+    }
+
+    /// Keine Weiterleitung (Review L16): Die 3xx-Antwort bleibt die Antwort, `didFinishDownloadingTo` verschiebt nichts.
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        NoRedirect.refuse(completionHandler)
     }
 
     func urlSession(
