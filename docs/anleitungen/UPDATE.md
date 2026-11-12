@@ -40,9 +40,15 @@ Die iPad-App musst du nur neu aufspielen, wenn sich ihre Quellen geändert haben
    pnpm sg ipad aufgespielt
    ```
 
-`pnpm sg ipad` zeigt jederzeit, ob die App aktuell ist. Ob die App auf dem iPad wirklich neu ist, kann `sg` nicht sehen. Es vergleicht nur den Stand im Repo mit dem, den du zuletzt bestätigt hast. Beim allerersten Start merkt sich `sg` nur den Stand. Ohne Git, etwa in einem entpackten Ordner, gibt es keinen Hinweis.
+`pnpm sg ipad` zeigt jederzeit, ob die App aktuell ist. Ob die App auf dem iPad wirklich neu ist, kann `sg` nicht sehen. Es vergleicht nur den Stand im Repo mit dem, den du zuletzt bestätigt hast. Beim allerersten Start merkt sich `sg` nur den Stand. Ohne Git, etwa in einem entpackten Ordner, gibt es keinen Hinweis. Von Hand prüfst du es direkt nach dem `git pull`:
+
+```bash
+git diff --stat HEAD@{1} -- apps/ipad apps/mac-tunnel/Sources/TunnelShared packages/schemas/swift-support packages/schemas/generated/swift
+```
 
 Meldet die iPad-App „Der Mac spricht ein anderes Protokoll. App aktualisieren.“, ist sie älter als der Mac. Spiele sie dann ebenfalls neu auf.
+
+**Einmalig beim Update auf die Direktverbindung (UX-12):** Danach zeigt das iPad „Bitte einmal neu koppeln“. Das ist erwartet. Was du tust: [IPAD.md](IPAD.md), Abschnitt „Nach dem Update: einmal neu koppeln“.
 
 ## Wenn etwas schiefgeht
 

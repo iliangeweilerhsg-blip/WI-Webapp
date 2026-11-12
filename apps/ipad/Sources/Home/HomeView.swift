@@ -8,8 +8,6 @@ struct HomeView: View {
     let mac: PairedMac
 
     @State private var showsStatus = false
-    /// Testansicht für die Direktverbindung (Spike S6, UX-12). Nur über Verbindungsdetails → Entwickler.
-    @State private var showsSpike = false
     /// Ablaufdatum der Signatur (UX-13), `nil` ohne Profil. Wird beim Erscheinen und beim Aktivieren der App neu gelesen.
     @State private var expiry: Date?
     /// „Jetzt“ für den Ablaufhinweis, wird beim Erscheinen und beim Aktivieren der App neu gesetzt (UX-50)
@@ -38,6 +36,10 @@ struct HomeView: View {
                     // Gespeicherter `.local`-Name aus älterer Version: einmal neu koppeln, ebenfalls ruhig (#261)
                     if model.connection == .disconnected(.rePairingNeeded) {
                         NoticeCard(text: HomeTexts.rePairingCard)
+                    }
+                    // Gekoppelt vor dem Tunnel, ohne Tunnel-Schlüssel: einmal neu koppeln, ruhig und ohne Dialog (UX-12)
+                    if model.routeState == .down(.repairNeeded) {
+                        NoticeCard(text: HomeTexts.tunnelRepairCard)
                     }
                     if let sync = model.sync {
                         if sync.state == .unsupported {
@@ -72,20 +74,10 @@ struct HomeView: View {
                         ConnectionBadge(state: model.badgeState)
                     }
                     .popover(isPresented: $showsStatus) {
-                        ConnectionDetailView(model: model, mac: mac) {
-                            // Erst das Popover schließen, dann die Ansicht zeigen (sonst geht die Anzeige verloren)
-                            showsStatus = false
-                            _Concurrency.Task {
-                                try? await _Concurrency.Task.sleep(for: .milliseconds(400))
-                                showsSpike = true
-                            }
-                        }
+                        ConnectionDetailView(model: model, mac: mac)
                     }
                 }
             }
-        }
-        .sheet(isPresented: $showsSpike) {
-            SpikeView(model: SpikeP2PModel.shared)
         }
         .onAppear {
             refreshExpiry()
@@ -124,6 +116,9 @@ enum HomeTexts {
 
     /// Die Kopplung speichert einen `.local`-Namen, dorthin geht kein Token mehr (#261)
     static let rePairingCard = "\(ConnectionError.rePairingNeeded.title) · \(ConnectionError.rePairingNeeded.advice)"
+
+    /// Gekoppelt, aber ohne Tunnel-Schlüssel (vor UX-12): Es geht nichts raus, einmal neu koppeln
+    static let tunnelRepairCard = "\(ConnectionError.tunnelKeyMissing.title) · \(ConnectionError.tunnelKeyMissing.advice)"
 
     /// Gespeichert ist nur die IP des Macs (#261). Bekommt er per DHCP eine neue, antwortet unter der alten niemand.
     /// Der Weg zurück: Kopplung aufheben und neu koppeln.
@@ -218,8 +213,6 @@ struct ConnectionBadge: View {
 struct ConnectionDetailView: View {
     let model: AppModel
     let mac: PairedMac
-    /// Öffnet die Testansicht „Direktverbindung testen“ (Spike S6)
-    let openSpike: () -> Void
 
     @State private var confirmsUnpair = false
 
@@ -229,10 +222,19 @@ struct ConnectionDetailView: View {
             if let detail = detail {
                 Text(detail).font(.subheadline).foregroundStyle(.secondary)
             }
-            Text("Mac: \(mac.endpoint.displayText)")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            if HomeTexts.mayHaveNewAddress(model.connection) {
+            if let routeState = model.routeState {
+                // Eine Zeile zum Weg (UX-12, F4): über das WLAN oder direkt. Nur bei stehender Verbindung, sonst nichts.
+                if model.badgeState.isGreen, let line = RouteTexts.pathLine(routeState) {
+                    Text(line)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Mac: \(mac.endpoint.displayText)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            if model.routeState == nil, HomeTexts.mayHaveNewAddress(model.connection) {
                 Text(HomeTexts.newAddressHint)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -257,15 +259,6 @@ struct ConnectionDetailView: View {
                 }
             }
 
-            // Gut versteckt: nur für den Gerätetest im Hörsaal (Spike S6), fällt mit UX-12 PR 4 wieder weg
-            DisclosureGroup("Entwickler") {
-                Button("Direktverbindung testen") {
-                    openSpike()
-                }
-                .font(.footnote)
-            }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
         }
         .padding()
         .frame(minWidth: 320, alignment: .leading)
@@ -288,6 +281,7 @@ struct ConnectionDetailView: View {
     private var detail: String? { model.badgeState.detail }
 
     private var needsNewPairing: Bool {
+        if model.routeState == .down(.repairNeeded) { return true }
         if case .disconnected(let error) = model.connection {
             return error.needsNewPairing
         }

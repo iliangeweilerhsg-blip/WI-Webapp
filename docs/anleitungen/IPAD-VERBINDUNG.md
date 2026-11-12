@@ -90,7 +90,7 @@ Hinweis: Die Liste unter Systemeinstellungen → Datenschutz & Sicherheit → Lo
 
 Für die Direktverbindung im Hörsaal (Wi-Fi peer-to-peer, ohne gemeinsames Netz) läuft am Mac ein kleines Programm, der Helfer `sg-tunnel`. Plan: `docs/plaene/UX-12-MAC-WIEDERFINDEN.md`.
 
-**Stand heute:** Die Mac-Seite ist fertig. Das iPad benutzt den Helfer erst nach der nächsten Umstellung (UX-12, PR 4). Bis dahin ändert sich beim Koppeln und beim Sync nichts. Du musst nichts tun, außer ab und zu `pnpm sg doctor` anzusehen.
+**Stand heute:** Mac-Seite und iPad sind fertig. Das iPad spricht nach der Kopplung **nur noch über den Helfer** mit dem Mac, zu Hause und im Hörsaal (Abschnitt 6). Läuft der Helfer nicht, gibt es keinen Abgleich: Das iPad fällt bewusst nicht auf die alte Adresse zurück. Dein Schreiben bleibt auf dem iPad und geht danach zum Mac. Ein iPad, das vor dem Tunnel gekoppelt wurde, muss einmal neu gekoppelt werden ([IPAD.md](IPAD.md)).
 
 ### Was `pnpm sg start` und `pnpm sg stop` damit tun
 
@@ -128,3 +128,24 @@ Ist die macOS-Firewall an, fragt macOS beim Start des Helfers: „Möchtest du, 
 - Hast du versehentlich „Ablehnen“ geklickt, ist der Helfer still gesperrt. `pnpm sg doctor` meldet das (✗ Firewall). Behebung: Systemeinstellungen → Netzwerk → Firewall → Optionen, „sg-tunnel“ auf „Eingehende Verbindungen zulassen“ stellen, dann `pnpm sg stop` und `pnpm sg start`.
 - Bei dir ist die Firewall laut Abschnitt 4 aus, dann erscheint die Frage nicht.
 - **Nicht geprüft:** Wie sich die Firewall und der Cisco-Socket-Filter (Abschnitt „Bekannte Ursache“) gegenüber dem Helfer verhalten, ob macOS 15 beim „Lokalen Netzwerk“ für `sg-tunnel` fragt (aus dem Terminal gestartete Programme sind laut Apple ausgenommen), und wie der Wortlaut von `socketfilterfw` genau ausfällt. Der Gerätetest im Hörsaal (Plan §9.1) klärt das.
+
+## 6. Im Hörsaal: das iPad findet den Mac nicht
+
+Das iPad sucht seinen Mac über einen Bonjour-Dienst (`_sg-tunnel._tcp`), erst im gemeinsamen WLAN (2 Sekunden), dann per Wi-Fi peer-to-peer (bis 10 Sekunden). Den zuletzt erfolgreichen Weg versucht es zuerst. Ein Netz, ein Hotspot oder eine IP-Adresse braucht es nicht. Tippe auf **Mac ●**, dort steht die Ursache:
+
+| Anzeige | Was sie heißt | Was hilft |
+|---|---|---|
+| Suche deinen Mac … | Normal in den ersten Sekunden | Warten |
+| Mac nicht gefunden | Kein Dienst mit dem Namen deines Macs zu sehen | Mac aufgeklappt und am Netzteil? `pnpm sg start` läuft? Am Mac WLAN an? `pnpm sg doctor` ansehen (Zeilen „Tunnel-Helfer“) |
+| WLAN ist aus | Am iPad ist WLAN ausgeschaltet. Auch die Direktverbindung braucht es | WLAN am iPad einschalten. Ein Netz brauchst du nicht |
+| Lokales Netzwerk nicht erlaubt | iPadOS lässt die Suche nicht zu | Einstellungen → Datenschutz & Sicherheit → Lokales Netzwerk → Studien-Gehirn. Nach dem Aufspielen kann die Erlaubnis zurückgesetzt sein |
+| Mac nicht gefunden, mit dem Satz „… nicht mit dem richtigen Schlüssel“ | Etwas unter dem Namen deines Macs hat den Handshake begonnen, kennt aber den Schlüssel nicht. Jeder in Funkreichweite kann den Namen nachsprechen. Der Satz erscheint erst nach drei vergeblichen Suchläufen | Nichts entkoppeln. Zu Hause prüfen, ob das iPad am Mac unter Einstellungen → Geräte noch steht. Kommt der Hinweis zu Hause, am Mac `pnpm sg doctor` ansehen |
+| Bitte einmal neu koppeln | Dieses iPad hat keinen Tunnel-Schlüssel (vor dem Tunnel gekoppelt) | [IPAD.md](IPAD.md), Abschnitt „Nach dem Update: einmal neu koppeln“ |
+
+**Was in den Verbindungsdetails steht, wenn alles läuft:** „Verbunden über das WLAN“ (gemeinsames Netz) oder „Direkt verbunden, ohne WLAN-Netz“ (peer-to-peer). Die Zeile nennt den Weg der zuletzt aufgebauten Verbindung. Sie wechselt nur, wenn eine neue Verbindung entsteht, nie mitten in einer bestehenden.
+
+**Tempo:** Den Weg zu deinem Mac merkt sich das iPad zwei Minuten lang. Folgende Verbindungen (Seiten, Folien) sparen sich so die Suche. Nach einem Netzwechsel oder wenn die App wieder in den Vordergrund kommt, sucht es neu.
+
+**Die macOS-Firewall und der Cisco-Socket-Filter** (Abschnitte 1 und 5) können den Helfer sperren. `pnpm sg doctor` meldet das.
+
+**Nicht geprüft:** Peer-to-peer im vollen Hörsaal, die Dauer des Aufbaus, der Akku über 90 Minuten und das Verhalten der Erlaubnis „Lokales Netzwerk“ nach dem wöchentlichen Aufspielen. Das klärt der Gerätetest (Plan Abschnitt 9.1). Der frühere Test aus [SPIKE-P2P.md](SPIKE-P2P.md) ist erledigt.
