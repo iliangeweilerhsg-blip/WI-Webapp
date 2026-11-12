@@ -1,7 +1,9 @@
 // `sg doctor`: prüft die Voraussetzungen und liefert eine Checkliste mit Lösungshinweisen.
-import { readFileSync } from 'node:fs';
+import { closeSync, fstatSync, lstatSync, openSync, readSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
 import { DB_PORT, healthUrl, type SgConfig } from './config.ts';
+import { processAlive } from './liveness.ts';
+import { READ_FLAGS } from './nofollow.ts';
 import type { System } from './system.ts';
 
 export type CheckStatus = 'ok' | 'fail' | 'info';
@@ -218,40 +220,77 @@ export function doctorExitCode(results: CheckResult[]): number {
   return results.some((r) => r.status === 'fail') ? 1 : 0;
 }
 
+/**
+ * Inhalt von `<Datenordner>/run/core.lock`, nur gelesen:
+ * - `missing`: Datei fehlt
+ * - `pid`: gültige PID
+ * - `invalid`: leer, kaputt oder zu groß für eine PID-Datei
+ * - `special`: keine normale Datei (symbolischer Link, Ordner, FIFO, Gerät). Der Core legt so etwas nie an
+ * - `unreadable`: lässt sich nicht lesen (z. B. `EACCES`)
+ */
+export type LockRead =
+  | { kind: 'missing' }
+  | { kind: 'pid'; pid: number }
+  | { kind: 'invalid' }
+  | { kind: 'special' }
+  | { kind: 'unreadable'; code: string };
+
 /** Zugriffe der Sperrdatei-Prüfung (im Test ersetzbar). `sg doctor` löscht nie etwas, darum gibt es nur Lesezugriffe. */
 export interface LockDoctorIo {
-  /** Inhalt von `core.lock`: `null` = Datei fehlt, `pid: null` = leer oder kaputt */
-  readLock(path: string): { pid: number | null } | null;
+  readLock(path: string): LockRead;
   alive(pid: number): boolean;
   /** Antwortet der Core unter `/api/v1/health`? */
   coreReachable(): Promise<boolean>;
 }
 
+/** Eine PID-Datei des Core ist `<pid>\n`; mehr wird nie gelesen */
+const LOCK_MAX_BYTES = 64;
+
+function errnoCode(error: unknown): string {
+  return (error as NodeJS.ErrnoException).code ?? 'unbekannt';
+}
+
 /**
- * Lebt der Prozess? Kopie von `processAlive` aus `services/core/src/lib/instance-lock.ts` (#174): `sg` hängt nicht
- * vom Core-Paket ab. `EPERM` heißt: lebt, gehört nur einem anderen Benutzer. Bei Änderungen beide Stellen anpassen.
+ * Liest die Sperrdatei, ohne hängen zu bleiben: kein Folgen eines symbolischen Links, kein Warten an einem FIFO
+ * (`O_NONBLOCK`), höchstens `LOCK_MAX_BYTES` Bytes. Gleiche PID-Regel wie `parsePid` im Core (`instance-lock.ts`).
  */
-export function processAlive(pid: number): boolean {
+export function readLockFileSafe(path: string): LockRead {
+  let info: Stats;
   try {
-    process.kill(pid, 0);
-    return true;
+    info = lstatSync(path);
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+    const code = errnoCode(error);
+    return code === 'ENOENT' ? { kind: 'missing' } : { kind: 'unreadable', code };
+  }
+  if (!info.isFile()) return { kind: 'special' };
+  if (info.size > LOCK_MAX_BYTES) return { kind: 'invalid' };
+  let fd: number;
+  try {
+    // Zwischen lstat und open kann die Datei getauscht werden: darum `O_NOFOLLOW | O_NONBLOCK`, Typ danach per fstat
+    fd = openSync(path, READ_FLAGS);
+  } catch (error) {
+    const code = errnoCode(error);
+    if (code === 'ENOENT') return { kind: 'missing' };
+    if (code === 'ELOOP') return { kind: 'special' };
+    return { kind: 'unreadable', code };
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return { kind: 'special' };
+    const buf = Buffer.alloc(LOCK_MAX_BYTES + 1);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    if (n > LOCK_MAX_BYTES) return { kind: 'invalid' };
+    const pid = Number(buf.toString('utf8', 0, n).trim());
+    return Number.isInteger(pid) && pid > 0 ? { kind: 'pid', pid } : { kind: 'invalid' };
+  } catch (error) {
+    return { kind: 'unreadable', code: errnoCode(error) };
+  } finally {
+    closeSync(fd);
   }
 }
 
 export function realLockDoctorIo(cfg: SgConfig): LockDoctorIo {
   return {
-    readLock(path) {
-      let text: string;
-      try {
-        text = readFileSync(path, 'utf8');
-      } catch {
-        return null;
-      }
-      const pid = Number(text.trim());
-      return { pid: Number.isInteger(pid) && pid > 0 ? pid : null };
-    },
+    readLock: readLockFileSafe,
     alive: processAlive,
     async coreReachable() {
       try {
@@ -264,41 +303,47 @@ export function realLockDoctorIo(cfg: SgConfig): LockDoctorIo {
   };
 }
 
-/** Prüft `<Datenordner>/run/core.lock` (#174, #292). Nie `fail`: Eine veraltete Datei übernimmt der nächste Start. */
+/**
+ * Prüft `<Datenordner>/run/core.lock` (#174, #292). Nie `fail` und nie schreibend: Eine veraltete Datei übernimmt der
+ * nächste Start selbst. Zuerst die Datei, dann der Health-Abruf: Startet der Core währenddessen, ist die Datei schon
+ * lange vor dem Port da (Meldung „startet vielleicht gerade“); stoppt er, ist zuerst der Port zu.
+ */
 export async function checkCoreLock(cfg: SgConfig, io: LockDoctorIo): Promise<CheckResult> {
   const name = 'Core-Sperrdatei (Hinweis)';
   const path = join(cfg.dataDir, 'run', 'core.lock');
   const lock = io.readLock(path);
   const reachable = await io.coreReachable();
-  if (lock === null) {
-    if (!reachable) return { name, status: 'ok', detail: 'keine Datei, der Core läuft nicht' };
-    return {
-      name,
-      status: 'info',
-      detail: `Der Core antwortet, aber ${path} fehlt (ältere Version oder Datei von Hand gelöscht). Ein zweiter Core würde nicht erkannt.`,
-    };
-  }
-  if (lock.pid === null) {
-    return {
-      name,
-      status: 'info',
-      detail: `${path} ist leer oder kaputt. Das ist harmlos, die Datei wird beim nächsten Start übernommen.`,
-    };
+  const info = (detail: string): CheckResult => ({ name, status: 'info', detail });
+  // Antwortet ein Core, ohne dass eine lebende PID in der Datei steht, würde ein zweiter Start ihn nicht erkennen
+  const unguarded = reachable
+    ? ` Der Core antwortet aber unter ${healthUrl(cfg)}: Ein zweiter Start würde ihn nicht erkennen (ältere Version oder Datei von Hand geändert). Den Core mit "sg stop" beenden und neu starten.`
+    : '';
+
+  switch (lock.kind) {
+    case 'missing':
+      if (!reachable) return { name, status: 'ok', detail: 'keine Datei, der Core läuft nicht' };
+      return info(`${path} fehlt.${unguarded}`);
+    case 'unreadable':
+      return info(`${path} lässt sich nicht lesen (${lock.code}). Gehört die Datei einem anderen Benutzer?`);
+    case 'special':
+      return info(
+        `${path} ist keine normale Datei (z. B. ein symbolischer Link oder Ordner). Der Core legt so etwas nie an ` +
+          `und startet damit womöglich nicht. Den Eintrag von Hand löschen ("sg doctor" löscht nichts).`,
+      );
+    case 'invalid':
+      return info(`${path} ist leer oder kaputt. Die Datei wird beim nächsten Start übernommen.${unguarded}`);
+    case 'pid':
+      break;
   }
   if (!io.alive(lock.pid)) {
-    return {
-      name,
-      status: 'info',
-      detail: `veraltet (PID ${lock.pid} läuft nicht mehr, z. B. nach einem Absturz). Die Datei wird beim nächsten Start übernommen.`,
-    };
+    return info(
+      `${path} ist veraltet (PID ${lock.pid} läuft nicht mehr, z. B. nach einem Absturz). Die Datei wird beim nächsten Start übernommen.${unguarded}`,
+    );
   }
   if (reachable) return { name, status: 'ok', detail: `Core läuft (PID ${lock.pid})` };
-  return {
-    name,
-    status: 'info',
-    detail:
-      `PID ${lock.pid} lebt, aber der Core antwortet nicht unter ${healthUrl(cfg)}. Vielleicht startet er gerade noch. ` +
+  return info(
+    `PID ${lock.pid} lebt, aber der Core antwortet nicht unter ${healthUrl(cfg)}. Vielleicht startet er gerade noch. ` +
       `Sonst trägt möglicherweise ein fremder Prozess diese PID (PID-Wiederverwendung nach einem Absturz). ` +
       `Dann die Datei ${path} von Hand löschen ("sg doctor" löscht nichts).`,
-  };
+  );
 }

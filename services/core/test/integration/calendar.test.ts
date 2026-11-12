@@ -1134,20 +1134,23 @@ describe('Zeitplan: beim Start und alle 6 h', () => {
       VALUES (${id}, ${SINGLE_USER_ID}, 'ics_url', 'Hängt', 'https://haengt.example.edu/plan.ics', true)`;
     // Antwortet nie: weder Ergebnis noch Fehler
     fetchMock.mockReturnValue(new Promise<string>(() => {}));
+    // Echte Zeit statt Fake-Timer: `listen`, Fastify-Hooks und der Postgres-Treiber nutzen selbst Timer. Gemessen wird
+    // nur `app.close()` (die onClose-Hooks), der Datenbank-Pool schließt danach getrennt.
     const started = await startTestApp();
     let closed = false;
     try {
       await started.app.listen({ port: 0, host: '127.0.0.1' });
       await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
       const begin = performance.now();
-      await started.close();
+      await started.app.close();
       closed = true;
       const elapsed = performance.now() - begin;
       expect(elapsed).toBeLessThan(3_000);
       // Es wurde tatsächlich gewartet (sonst prüfte der Test den Abbruchpfad nicht)
       expect(elapsed).toBeGreaterThanOrEqual(1_500);
     } finally {
-      if (!closed) await started.close();
+      if (closed) await started.handle.close();
+      else await started.close();
     }
   });
 });

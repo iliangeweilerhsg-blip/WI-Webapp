@@ -1,10 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveConfig } from '../src/config.ts';
+import { processAlive } from '../src/liveness.ts';
 import {
   checkCoreLock,
   checkFreeSpace,
-  processAlive,
   type LockDoctorIo,
+  type LockRead,
+  readLockFileSafe,
   checkNode,
   doctorExitCode,
   MIN_FREE_BYTES,
@@ -14,9 +20,6 @@ import {
   type CheckResult,
 } from '../src/doctor.ts';
 import { freeBytesNearest, type RunResult, type System } from '../src/system.ts';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 const cfg = resolveConfig({}, '/home/u', '/repo');
 const OK: RunResult = { ok: true, stdout: 'x 1.0\n', stderr: '' };
@@ -206,50 +209,125 @@ describe('formatChecks', () => {
 
 describe('checkCoreLock', () => {
   const lockCfg = resolveConfig({ SG_DATA_DIR: '/data' }, '/home/u', '/repo');
-  const io = (lock: { pid: number | null } | null, alive: boolean, reachable: boolean): LockDoctorIo => ({
+  const io = (lock: LockRead, alive: boolean, reachable: boolean): LockDoctorIo => ({
     readLock: () => lock,
     alive: () => alive,
     coreReachable: async () => reachable,
   });
+  const pid = (n: number): LockRead => ({ kind: 'pid', pid: n });
 
   it('keine Datei und kein Core: ok', async () => {
-    expect((await checkCoreLock(lockCfg, io(null, false, false))).status).toBe('ok');
+    expect((await checkCoreLock(lockCfg, io({ kind: 'missing' }, false, false))).status).toBe('ok');
   });
 
   it('keine Datei, aber der Core antwortet: Hinweis, kein Fehler', async () => {
-    const r = await checkCoreLock(lockCfg, io(null, false, true));
+    const r = await checkCoreLock(lockCfg, io({ kind: 'missing' }, false, true));
     expect(r.status).toBe('info');
-    expect(r.detail).toMatch(/fehlt/);
+    expect(r.detail).toMatch(/fehlt.*zweiter Start würde ihn nicht erkennen/);
   });
 
   it('lebende PID und Core erreichbar: ok', async () => {
-    const r = await checkCoreLock(lockCfg, io({ pid: 4242 }, true, true));
+    const r = await checkCoreLock(lockCfg, io(pid(4242), true, true));
     expect(r.status).toBe('ok');
     expect(r.detail).toMatch(/4242/);
   });
 
   it('tote PID: veraltet, wird beim nächsten Start übernommen (kein Fehler)', async () => {
-    const r = await checkCoreLock(lockCfg, io({ pid: 4242 }, false, false));
+    const r = await checkCoreLock(lockCfg, io(pid(4242), false, false));
     expect(r.status).toBe('info');
     expect(r.detail).toMatch(/veraltet.*nächsten Start übernommen/);
+    expect(r.detail).not.toMatch(/zweiter Start/);
+  });
+
+  it('tote PID, aber ein Core antwortet: Hinweis, dass ein zweiter Start ihn nicht erkennt', async () => {
+    const r = await checkCoreLock(lockCfg, io(pid(4242), false, true));
+    expect(r.status).toBe('info');
+    expect(r.detail).toMatch(/veraltet.*zweiter Start würde ihn nicht erkennen/);
   });
 
   it('leere oder kaputte Datei: Hinweis, kein Fehler', async () => {
-    const r = await checkCoreLock(lockCfg, io({ pid: null }, false, false));
+    const r = await checkCoreLock(lockCfg, io({ kind: 'invalid' }, false, false));
     expect(r.status).toBe('info');
-    expect(r.detail).toMatch(/übernommen/);
+    expect(r.detail).toMatch(/leer oder kaputt.*übernommen/);
+    expect(r.detail).not.toMatch(/zweiter Start/);
+    const live = await checkCoreLock(lockCfg, io({ kind: 'invalid' }, false, true));
+    expect(live.detail).toMatch(/zweiter Start würde ihn nicht erkennen/);
+  });
+
+  it('nicht lesbar oder keine normale Datei: Hinweis mit Pfad, kein Fehler', async () => {
+    const denied = await checkCoreLock(lockCfg, io({ kind: 'unreadable', code: 'EACCES' }, false, true));
+    expect(denied.status).toBe('info');
+    expect(denied.detail).toMatch(/nicht lesen \(EACCES\)/);
+    expect(denied.detail).not.toMatch(/fehlt/);
+    const special = await checkCoreLock(lockCfg, io({ kind: 'special' }, false, false));
+    expect(special.status).toBe('info');
+    expect(special.detail).toContain('/data/run/core.lock ist keine normale Datei');
+    expect(doctorExitCode([denied, special])).toBe(0);
   });
 
   it('lebende PID, Core nicht erreichbar: PID-Wiederverwendung und Pfad zum Löschen', async () => {
-    const r = await checkCoreLock(lockCfg, io({ pid: 4242 }, true, false));
+    const r = await checkCoreLock(lockCfg, io(pid(4242), true, false));
     expect(r.status).toBe('info');
     expect(r.detail).toMatch(/fremder Prozess/);
     expect(r.detail).toContain('/data/run/core.lock');
     expect(doctorExitCode([r])).toBe(0);
   });
 
-  it('processAlive: eigener Prozess lebt, unbelegte PID nicht', () => {
+  it('processAlive (aus liveness.ts, gleiche Regel wie im Core): eigener Prozess lebt, unbelegte PID nicht', () => {
     expect(processAlive(process.pid)).toBe(true);
     expect(processAlive(2 ** 22 + 12345)).toBe(false);
   });
+});
+
+describe('readLockFileSafe', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'sg-lock-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const lock = () => join(dir, 'core.lock');
+
+  it('fehlt, gültige PID, leer, kaputt', () => {
+    expect(readLockFileSafe(lock())).toEqual({ kind: 'missing' });
+    writeFileSync(lock(), '4242\n');
+    expect(readLockFileSafe(lock())).toEqual({ kind: 'pid', pid: 4242 });
+    writeFileSync(lock(), '');
+    expect(readLockFileSafe(lock())).toEqual({ kind: 'invalid' });
+    writeFileSync(lock(), 'abc');
+    expect(readLockFileSafe(lock())).toEqual({ kind: 'invalid' });
+    writeFileSync(lock(), '-3\n');
+    expect(readLockFileSafe(lock())).toEqual({ kind: 'invalid' });
+  });
+
+  it('große Datei wird nicht gelesen, sondern gilt als kaputt', () => {
+    writeFileSync(lock(), `4242${' '.repeat(10_000)}`);
+    expect(readLockFileSafe(lock())).toEqual({ kind: 'invalid' });
+  });
+
+  it('symbolischer Link, Ordner und FIFO: keine normale Datei, ohne zu folgen oder zu hängen', () => {
+    writeFileSync(join(dir, 'ziel'), '4242\n');
+    symlinkSync(join(dir, 'ziel'), lock());
+    expect(readLockFileSafe(lock())).toEqual({ kind: 'special' });
+    rmSync(lock());
+    symlinkSync(join(dir, 'fehlt'), lock());
+    expect(readLockFileSafe(lock())).toEqual({ kind: 'special' });
+    rmSync(lock());
+    mkdirSync(lock());
+    expect(readLockFileSafe(lock())).toEqual({ kind: 'special' });
+    rmSync(lock(), { recursive: true });
+    if (process.platform !== 'win32') {
+      execFileSync('mkfifo', [lock()]);
+      expect(readLockFileSafe(lock())).toEqual({ kind: 'special' });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'ohne Leserechte: nicht lesbar (EACCES)',
+    () => {
+      writeFileSync(lock(), '4242\n', { mode: 0o000 });
+      expect(readLockFileSafe(lock())).toEqual({ kind: 'unreadable', code: 'EACCES' });
+    },
+  );
 });
