@@ -813,8 +813,14 @@ struct InkPageView: View {
         guard let model, let binding, sync.canReachCore, !isReconciling else { return }
         guard model.needsReconcile || sync.pageNeedsReconcile(pageID: binding.pageID) else { return }
         isReconciling = true
-        await sync.reconcile(page: model, binding: binding)
+        // Wechselt die Seite während der Anfrage (weiter und zurück), ist `model` veraltet: Es kennt die neuen Striche
+        // des neu geöffneten Modells nicht und würde sie am Core entfernen. Dann nichts planen.
+        let result = await sync.reconcile(page: model, binding: binding) { self.model === model }
         isReconciling = false
+        // Der Abgleich der jetzt offenen Seite wurde in der Zwischenzeit übersprungen (`isReconciling`): nachholen
+        if result == .skipped, self.model !== model, !_Concurrency.Task.isCancelled {
+            await reconcileIfNeeded()
+        }
     }
 
     /// `page_id` ist nur gesetzt, solange die Schreibfläche offen ist
