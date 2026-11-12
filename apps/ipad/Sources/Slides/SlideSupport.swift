@@ -17,6 +17,13 @@ enum InkModeResolver {
         guard let running, running.moduleID == moduleID, running.slideDeckID != nil else { return false }
         return slideKnown
     }
+
+    /// Schreibt die Ansicht auf Folienseiten? Nur im Modus „Auf Folie“ **und** mit verfügbarer Folie (#268). Ohne
+    /// verfügbare Folie (keine Folien, erste Folie noch unbekannt) gilt für Vorlesungsseiten dieselbe Logik wie im
+    /// freien Modus, damit nie auf einer alten Seite ohne richtige Zeitbasis weitergeschrieben wird.
+    static func writesOnSlide(mode: InkMode?, slideAvailable: Bool) -> Bool {
+        mode == .aufFolie && slideAvailable
+    }
 }
 
 /// Hält einen Folienwechsel zurück, solange geschrieben wird (UX-43). Der Wechsel gilt erst nach einer Ruhezeit
