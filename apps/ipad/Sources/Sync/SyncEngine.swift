@@ -372,8 +372,8 @@ final class SyncEngine {
     enum ReconcileResult: Equatable, Sendable {
         /// Der Stand ist abgeglichen, das Flag ist gelöscht
         case done
-        /// Nichts getan: Die Seite wird gerade abgeglichen, der Aufrufer wollte nicht mehr (`isStillValid`) oder es
-        /// gibt keine Kopplung. Das Flag bleibt stehen.
+        /// Nichts getan: Die Seite wird gerade abgeglichen, der Aufrufer wollte nicht mehr (`isStillValid`), es
+        /// gibt keine Kopplung oder die Seite ist unlesbar (`InkPageModel.isUnreadable`). Das Flag bleibt stehen.
         case skipped
         /// Der Core war nicht erreichbar. Das Flag bleibt stehen.
         case unreachable
@@ -397,6 +397,9 @@ final class SyncEngine {
     func reconcile(
         page: InkPageModel, binding: InkBinding, isStillValid: @MainActor () -> Bool = { true }
     ) async -> ReconcileResult {
+        // Unlesbare Seite (#252): ihr Stand ist leer und sagt nichts über die Seite. Planen hieße, am Core alle Striche zu
+        // entfernen. Kein Plan, keine Anfrage, das Flag bleibt.
+        guard !page.isUnreadable else { return .skipped }
         guard let credentials = credentials() else { return .skipped }
         guard reconcilingPages.insert(binding.pageID).inserted else { return .skipped }
         defer { reconcilingPages.remove(binding.pageID) }

@@ -310,6 +310,8 @@ final class InkLibraryService {
         guard let moduleID, store.modules.contains(where: { $0.id == moduleID }) else { return }
 
         let model = InkPageModel(pageID: pageID, store: pageStore, saveDelay: .seconds(1))
+        // Unlesbar (#252): nicht als „leer“ abhaken. Der nächste Start versucht es noch einmal.
+        guard !model.isUnreadable else { return }
         let strokes = model.neutralStrokes()
         guard !strokes.isEmpty else {
             store.markLegacyTestPageHandled()
@@ -456,7 +458,8 @@ final class InkLibraryService {
     private func pageHasStrokes(_ pageID: String) -> Bool {
         guard let pageStore else { return true }
         let snapshot = pageStore.load(pageID: pageID)
-        return snapshot.ink != nil || snapshot.highlight != nil
+        // Unlesbar (#252): unbekannt, also „ja“. Sonst würde die Seite als leer wiederverwendet.
+        return snapshot.unreadable || snapshot.ink != nil || snapshot.highlight != nil
     }
 
     /// Braucht die laufende Vorlesung dieses Notizbuchs eine neue Seite? Ja, wenn die letzte Seite eine andere
@@ -919,8 +922,9 @@ final class InkLibraryService {
             return self.passGeneration == generation && self.openChanges == changesBefore
                 && self.openPageID != pageID
         }
-        // Zuordnungen, die beim Laden neu entstanden (IDs), bleiben nur erhalten, wenn die Seite unberührt blieb
-        if result == .done, openChanges == changesBefore, openPageID != pageID {
+        // Zuordnungen, die beim Laden neu entstanden (IDs), bleiben nur erhalten, wenn die Seite unberührt blieb.
+        // Eine unlesbare Seite (#252) wird nie geschrieben (das Modell sperrt `saveNow` ohnehin).
+        if result == .done, !model.isUnreadable, openChanges == changesBefore, openPageID != pageID {
             model.saveNow()
         }
         return result

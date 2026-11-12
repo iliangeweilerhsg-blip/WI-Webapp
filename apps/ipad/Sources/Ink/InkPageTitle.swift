@@ -56,6 +56,8 @@ enum InkPageTitle {
 
     /// Text der Infozeile, wenn nach dem Warten alles am Mac angekommen ist (UX-49)
     static let allSyncedLine = "Alles am Mac"
+    /// Die Seite liegt auf dem iPad, ließ sich aber nicht lesen (#252). Sie ist gesperrt, die Datei bleibt unberührt.
+    static let unreadableLine = "Diese Seite konnte nicht gelesen werden. Am Mac liegt der letzte Stand."
 
     private static func clean(_ name: String?) -> String? {
         guard let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {

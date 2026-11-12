@@ -42,6 +42,14 @@ final class InkCanvasContainerView: UIView {
         set { paper.backgroundImage = newValue }
     }
 
+    /// Unlesbare Seite (#252): beide Ebenen nehmen keine Eingabe an, Blättern per Wisch bleibt möglich
+    var isLocked = false {
+        didSet {
+            guard isLocked != oldValue else { return }
+            applyActiveLayer()
+        }
+    }
+
     private let paper: InkPaperView
     private var activeLayer: StrokeLayer = .ink
     private var appliedTools: InkToolState?
@@ -165,9 +173,9 @@ final class InkCanvasContainerView: UIView {
     }
 
     private func applyActiveLayer() {
-        inkCanvas.isUserInteractionEnabled = activeLayer == .ink
-        highlightCanvas.isUserInteractionEnabled = activeLayer == .highlight
-        if window != nil {
+        inkCanvas.isUserInteractionEnabled = !isLocked && activeLayer == .ink
+        highlightCanvas.isUserInteractionEnabled = !isLocked && activeLayer == .highlight
+        if window != nil, !isLocked {
             activeCanvas.becomeFirstResponder()
         }
     }
@@ -380,6 +388,7 @@ struct InkCanvasView: UIViewRepresentable {
             model.pencilDoubleTapped(system: preference)
         }
         view.onSwipePage = onSwipePage
+        view.isLocked = model.isUnreadable
         return view
     }
 
