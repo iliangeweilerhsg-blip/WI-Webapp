@@ -342,7 +342,12 @@ describe('Tunnel-Eingang: Wächter und Routentabelle', () => {
     ]) {
       expect(table, known).toContain(known);
     }
-    expect(routes.filter((r) => r.config?.sgAccess === 'local').length).toBeGreaterThanOrEqual(6);
+    // Moodle schreiben nur vom Mac selbst (08 §9.3): über den Tunnel 403 `local_only`, auch mit Token
+    for (const step of ['preview', 'execute']) {
+      const route = routes.find((r) => r.url === `${API}/moodle/actions/:action_id/${step}`);
+      expect(route?.config?.sgAccess, step).toBe('local');
+    }
+    expect(routes.filter((r) => r.config?.sgAccess === 'local').length).toBeGreaterThanOrEqual(8);
     expect(routes.filter((r) => r.config?.sgAccess === 'pairing')).toHaveLength(2);
   });
 

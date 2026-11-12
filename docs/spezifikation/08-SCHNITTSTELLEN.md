@@ -421,7 +421,8 @@ Alle unter `/api/v1/moodle`. Antworten in eigenen Formaten (Schema-Namen in Klam
 - **Bestätigungscode:** zufällig (128 bit, base64url), gebunden an `action_id` + SHA-256 der kanonischen Parameter (Schlüssel sortiert), gültig 5 min, einmal verwendbar, nur im Speicher des Core. Ein Neustart des Core macht alle Codes ungültig.
 - **Ausführen** mit Risiko `endgueltig`/`oeffentlich` ohne Code → `409 moodle_confirmation_required`, mit abgelaufenem, benutztem oder fremdem Code → `409 moodle_confirmation_invalid`. Mit Risiko `harmlos`/`aenderbar` wird ein mitgeschickter Code ignoriert, außer bei Verschärfung im Einzelfall (nächster Punkt).
 - **Verschärfung im Einzelfall:** Ein Handler darf für bestimmte Parameter zusätzlich eine Bestätigung verlangen (nie weniger). Pflichtfall: `assign.save_draft` bei Aufgaben ohne Einreichen-Schritt (`requires_submit = false`), denn dort gilt Speichern in Moodle sofort als Abgabe. Die Vorschau warnt dann und liefert einen Code. Der Katalog zeigt `needs_confirmation` nur nach Risiko: Die Web-App muss daher bei jeder Aktion mit `409 moodle_confirmation_required` rechnen und dann den Vorschau-Dialog zeigen.
-- **Idempotenz:** `execute` beachtet `Idempotency-Key` (08 §1). So schickt ein doppelter Klick nichts zweimal ab.
+- **Idempotenz:** `execute` beachtet `Idempotency-Key` (08 §1). So schickt ein doppelter Klick nichts zweimal ab. Die Vorschau speichert nichts unter einem `Idempotency-Key` (der Header wird ignoriert), denn ihre Antwort enthält den Bestätigungscode.
+- **Nur lokal:** `preview` und `execute` sind nur vom Mac selbst erreichbar. Aus dem Netz und über den Tunnel-Eingang antworten sie auch mit gültigem Geräte-Token mit `403 local_only` (VERTRAEGE §5). Ein gekoppeltes Gerät löst keine Aktion in Moodle aus. `GET /moodle/actions` bleibt mit Geräte-Token lesbar. Für `POST /moodle/uploads` gilt dasselbe, sobald es die Route gibt (T1-24).
 
 **Parameter je Aktion** (Schema `MoodleActionParams<Name>`)
 
