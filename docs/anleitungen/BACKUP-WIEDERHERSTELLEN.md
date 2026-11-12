@@ -68,7 +68,7 @@ Ein Stand von einer **neueren** App-Version wird abgelehnt. Mach dann zuerst `gi
 
 Wurde die Wiederherstellung unterbrochen, schließt `pnpm sg start` sie beim nächsten Mal selbst ab oder baut sie zurück.
 
-Das iPad erkennt eine Wiederherstellung und gleicht sich danach neu mit dem Mac ab.
+**iPad nach einer Wiederherstellung:** Das iPad erkennt die Wiederherstellung. Es gleicht aber nur die Seiten neu mit dem Mac ab, die du auf dem iPad öffnest. Ein automatischer Abgleich aller Seiten kommt noch. Bis dahin öffnest du nach jedem Restore **jedes Notizbuch einmal** und blätterst durch die Seiten, damit die Striche wieder am Mac landen. Seiten, die du nicht öffnest, fehlen am Mac ohne Hinweis.
 
 ## 4. Papierkorb
 
