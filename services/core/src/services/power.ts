@@ -42,7 +42,8 @@ const NO_BATTERY: PowerReading = { has_battery: false, percent: null, on_ac: nul
  *     Now drawing from 'Battery Power'
  *      -InternalBattery-0 (id=4653155)	87%; discharging; 4:12 remaining present: true
  *
- * Quelle ist die erste Zeile (`'AC Power'` oder `'Battery Power'`), der Prozentwert steht in der Akkuzeile.
+ * Quelle ist die erste Zeile (`'AC Power'` oder `'Battery Power'`; ältere macOS schreiben „Currently drawing from“),
+ * der Prozentwert steht in der Akkuzeile.
  * Ohne Akkuzeile (Mac mini, Mac Studio) oder bei unlesbarem Text: kein Akku.
  */
 export function parsePmset(output: string): PowerReading {
@@ -51,7 +52,7 @@ export function parsePmset(output: string): PowerReading {
   if (!battery) return NO_BATTERY;
   const percent = Number(battery[1]);
   if (!Number.isInteger(percent) || percent < 0 || percent > 100) return NO_BATTERY;
-  const source = /Now drawing from '([^']*)'/.exec(text)?.[1];
+  const source = /drawing from '([^']*)'/.exec(text)?.[1];
   const onAc = source === 'AC Power' ? true : source === 'Battery Power' ? false : null;
   return { has_battery: true, percent, on_ac: onAc };
 }

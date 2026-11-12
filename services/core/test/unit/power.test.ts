@@ -30,6 +30,23 @@ describe('parsePmset', () => {
     expect(parsePmset('Fehler: nicht verfügbar')).toEqual(none);
     expect(parsePmset(' -InternalBattery-0 (id=1)\t140%; x')).toEqual(none);
   });
+  it('weitere echte Formen: nicht ladend am Netz, Ladeende, ältere macOS, ohne Schätzung', () => {
+    expect(
+      parsePmset(`Now drawing from 'AC Power'
+ -InternalBattery-0 (id=4653155)\t80%; AC attached; not charging present: true
+`),
+    ).toEqual({ has_battery: true, percent: 80, on_ac: true });
+    expect(
+      parsePmset(`Now drawing from 'AC Power'
+ -InternalBattery-0 (id=4653155)\t99%; finishing charge; 0:05 remaining present: true
+`),
+    ).toEqual({ has_battery: true, percent: 99, on_ac: true });
+    expect(
+      parsePmset(`Currently drawing from 'Battery Power'
+ -InternalBattery-0\t9%; discharging; (no estimate) present: true
+`),
+    ).toEqual({ has_battery: true, percent: 9, on_ac: false });
+  });
   it('unbekannte Quelle: on_ac null', () => {
     expect(parsePmset(' -InternalBattery-0 (id=1)\t50%; discharging;')).toEqual({
       has_battery: true,

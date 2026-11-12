@@ -427,7 +427,7 @@ Modul-Einstellungen laufen über `PATCH /modules/{id}` (§14.2).
 - **Kein Akku ist kein Fehler:** Auf Linux, auf einem Mac ohne Akku (Mini, Studio) und wenn `pmset` scheitert oder nicht rechtzeitig antwortet, lautet die Antwort 200 mit `has_battery: false`, `percent: null`, `on_ac: null`. Ein Scheitern von `pmset` steht nur im Log (Stufe `debug`). Die Web-App zeigt dann nichts.
 - **Messung** (`services/power.ts`):
   - Nur unter macOS: `/usr/bin/pmset -g batt` über `execFile` mit festem Argument-Array, ohne Shell, ohne Eingabe von außen.
-  - Höchstens 2 s Laufzeit (`PMSET_TIMEOUT_MS`) und 8 KiB Ausgabe (`PMSET_MAX_OUTPUT_BYTES`); mehr bricht den Lauf ab (= kein Akku). Gelesen werden die Zeile `Now drawing from 'AC Power'` bzw. `'Battery Power'` und der Prozentwert der Zeile `InternalBattery`.
+  - Höchstens 2 s Laufzeit (`PMSET_TIMEOUT_MS`) und 8 KiB Ausgabe (`PMSET_MAX_OUTPUT_BYTES`); mehr bricht den Lauf ab (= kein Akku). Gelesen werden die Zeile `Now drawing from 'AC Power'` bzw. `'Battery Power'` (ältere macOS: `Currently drawing from`) und der Prozentwert der Zeile `InternalBattery`.
   - Das Ergebnis gilt 30 Sekunden (`POWER_TTL_MS`), auch ein Fehlschlag; gleichzeitige Aufrufe teilen sich einen Lauf. Es läuft kein eigener Zeitgeber im Core: gemessen wird nur auf Anfrage.
 - **Web (Verbindliches):**
   - Statusleiste und Aufnahme-Leiste, nur während einer Session: Ist `on_ac === false` und `percent < 20` (`BATTERY_WARN_PERCENT`), steht eine ruhige Zeile „Akku 14 % · Netzteil anschließen“. Die Web-App fragt dann jede Minute nach. Kein Dialog, kein Ton, keine Farbe (R1). Der Vorschlag in `STUDIENALLTAG-3.md` nannte 15 %, festgelegt sind 20 %.
