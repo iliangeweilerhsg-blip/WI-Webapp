@@ -264,7 +264,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   await app.register(
     async (api) => {
       api.get('/openapi.json', { schema: { hide: true } }, async () => api.swagger());
-      await api.register(systemRoutes, { db, version });
+      await api.register(systemRoutes, { db, version, dataDir: config.dataDir });
       await api.register(materialRoutes, { db, config });
       await api.register(organisationRoutes, { db });
       await api.register(sessionRoutes, { db, config, ...(options.now ? { now: options.now } : {}) });

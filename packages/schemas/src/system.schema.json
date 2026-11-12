@@ -258,6 +258,43 @@
         }
       }
     },
+    "SystemStorage": {
+      "type": "object",
+      "description": "GET /system/storage (UX-11, VERTRAEGE §7.6): freier Platz auf dem Datenträger des Datenordners und Größe der Daten. Größen sind Dateigrößen in Byte (keine Plattenblöcke)",
+      "required": ["data_dir_free_bytes", "data_dir_size_bytes", "measured_at"],
+      "additionalProperties": false,
+      "properties": {
+        "data_dir_free_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Frei für den Benutzer auf dem Datenträger, auf dem `SG_DATA_DIR` liegt (statfs, bei jedem Aufruf frisch)"
+        },
+        "data_dir_size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Summe aller Dateien in `SG_DATA_DIR` (ohne die Datenbank, sie liegt je nach Einrichtung außerhalb). Gemessen zum Zeitpunkt `measured_at`, nicht bei jedem Aufruf neu"
+        },
+        "media_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Teil von `data_dir_size_bytes` unter `media/` (Aufnahmen, Folien, Fotos, Notizen)"
+        },
+        "vault_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Teil von `data_dir_size_bytes` unter `vault/`"
+        },
+        "db_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Größe der Datenbank (`pg_database_size`), zählt nicht zu `data_dir_size_bytes`. Fehlt, wenn die Abfrage scheitert"
+        },
+        "measured_at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Zeitpunkt der Messung von `data_dir_size_bytes`, `media_bytes` und `vault_bytes`"
+        }
+      }
+    },
     "BackupState": {
       "type": "string",
       "enum": ["laeuft", "fertig", "fehler"]

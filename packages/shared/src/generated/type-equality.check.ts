@@ -376,6 +376,7 @@ const _SyncTimePing: Equal<z.infer<typeof Z.SyncTimePingSchema>, T.SyncTimePing>
 const _SyncTimePong: Equal<z.infer<typeof Z.SyncTimePongSchema>, T.SyncTimePong> = true;
 const _SyncUnsubscribe: Equal<z.infer<typeof Z.SyncUnsubscribeSchema>, T.SyncUnsubscribe> = true;
 const _SyncWelcome: Equal<z.infer<typeof Z.SyncWelcomeSchema>, T.SyncWelcome> = true;
+const _SystemStorage: Equal<z.infer<typeof Z.SystemStorageSchema>, T.SystemStorage> = true;
 const _TapeElement: Equal<z.infer<typeof Z.TapeElementSchema>, T.TapeElement> = true;
 const _TapeElementPayload: Equal<z.infer<typeof Z.TapeElementPayloadSchema>, T.TapeElementPayload> = true;
 const _Task: Equal<z.infer<typeof Z.TaskSchema>, T.Task> = true;

@@ -10,8 +10,10 @@ import {
   useStartRestoreTest,
   useUpdateSettings,
 } from '../../lib/data.ts';
+import { formatSize } from '../../lib/storage.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { CoreHint } from '../CoreHint.tsx';
+import { StorageInfo } from './StorageInfo.tsx';
 
 const smallButton = 'rounded-md border border-border px-3 py-1 text-sm hover:bg-surface disabled:opacity-50';
 const input = 'rounded-md border border-border bg-surface px-3 py-1 text-sm';
@@ -64,18 +66,7 @@ export function standLabel(stand: string): string {
   return date.toLocaleString('de-DE');
 }
 
-export function formatSize(bytes: number | null): string {
-  if (bytes === null) return '–';
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes;
-  let unit = -1;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(1)} ${units[unit]}`;
-}
+export { formatSize };
 
 /** Einstellungen → Daten (F-DAT-01): Backup-Ziel, Uhrzeit, Status, Läufe, „Jetzt sichern“. */
 export function DataSettings() {
@@ -128,6 +119,7 @@ export function DataSettings() {
       <h2 id="data-title" className="text-lg font-semibold">
         Daten und Backups
       </h2>
+      <StorageInfo />
       <p className="text-sm" role="status">
         {status.target === null
           ? 'Kein Backup-Ziel eingerichtet: Es werden keine Backups angelegt.'

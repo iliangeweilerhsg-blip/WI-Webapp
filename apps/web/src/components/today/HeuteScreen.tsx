@@ -7,6 +7,7 @@ import { MoodleAccessHint } from '../MoodleAccessHint.tsx';
 import { MoodleDeadlines } from '../MoodleDeadlines.tsx';
 import { EmptyState } from '../Placeholder.tsx';
 import { BackupHint } from './BackupHint.tsx';
+import { StorageHint } from './StorageHint.tsx';
 import { SpontaneousStartCard } from './SpontaneousStart.tsx';
 import { StartCard } from './StartCard.tsx';
 import { TodayList } from './TodayList.tsx';
@@ -98,6 +99,9 @@ export function HeuteScreen() {
 
         {/* Ruhiger Hinweis auf ein veraltetes Backup (UX-10), nie während einer Session */}
         {now !== null ? <BackupHint sessions={sessions} /> : null}
+
+        {/* Ruhiger Hinweis, wenn der Platz für etwa 2 Vorlesungen Audio nicht reicht (UX-11), nie während einer Session */}
+        {now !== null ? <StorageHint sessions={sessions} /> : null}
       </div>
     </section>
   );
