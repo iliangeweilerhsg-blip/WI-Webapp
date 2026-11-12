@@ -12,7 +12,7 @@ vi.mock('next/navigation', () => ({
 
 import { SearchOverlay } from '../src/components/search/SearchOverlay.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
-import { installFakeCore, type FakeCore, type SearchFixtureHit } from './fake-core.ts';
+import { installFakeCore, makeConceptDetail, type FakeCore, type SearchFixtureHit } from './fake-core.ts';
 
 let core: FakeCore;
 let openSpy: ReturnType<typeof vi.fn>;
@@ -183,6 +183,8 @@ describe('Suche: Anfrage', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: string, init?: RequestInit) => {
+        // nur `/search`; der Konzeptaufruf (UX-309) läuft nebenher
+        if (!String(input).includes('/search')) return real(input, init);
         if (init?.signal) signals.push(init.signal);
         if (first) {
           first = false;
@@ -516,5 +518,99 @@ describe('Suche: Tasten bleiben im Overlay (auf /session)', () => {
     render(<Host />);
     fireEvent.keyDown(input(), { key: 'Escape', isComposing: true });
     expect(screen.getByRole('dialog')).toBeVisible();
+  });
+});
+
+describe('Suche: Konzepte (UX-309)', () => {
+  const conceptRequests = () => core.requests.filter((r) => r.path.startsWith('/concepts'));
+
+  beforeEach(() => {
+    core.concepts = [
+      makeConceptDetail({
+        id: '0190f6a2-0000-7000-8000-0000000c0042',
+        name: 'Normalform',
+        aliases: ['NF'],
+        one_liner: 'Regeln gegen Redundanz',
+      }),
+    ];
+  });
+
+  it('zeigt Konzepte als Gruppe mit Name, Modul und Link zur Konzeptseite', async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    await typeQuery(user, 'normalform');
+    const group = await screen.findByRole('group', { name: 'Konzepte' });
+    const row = within(group).getByRole('option');
+    expect(row).toHaveTextContent('Normalform');
+    expect(row).toHaveTextContent('DBS');
+    expect(row).toHaveAttribute('data-kind', 'concept');
+    const params = new URLSearchParams(conceptRequests()[0]!.path.split('?')[1]);
+    expect(params.get('q')).toBe('normalform');
+    expect(params.get('limit')).toBe('5');
+    await user.click(row);
+    expect(nav.push).toHaveBeenCalledWith('/bibliothek?konzept=0190f6a2-0000-7000-8000-0000000c0042');
+  });
+
+  it('findet ein Konzept auch über seinen Alias, Enter öffnet es', async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    await typeQuery(user, 'nf');
+    await screen.findByRole('group', { name: 'Konzepte' });
+    await user.keyboard('{ArrowUp}{Enter}');
+    expect(nav.push).toHaveBeenCalledWith('/bibliothek?konzept=0190f6a2-0000-7000-8000-0000000c0042');
+  });
+
+  it('mit Filterpräfix kein Konzeptaufruf', async () => {
+    const user = userEvent.setup();
+    render(<Host />);
+    await typeQuery(user, 'normalform typ:folie');
+    await waitFor(() => expect(searchRequests().length).toBeGreaterThan(0));
+    expect(conceptRequests()).toHaveLength(0);
+    expect(screen.queryByRole('group', { name: 'Konzepte' })).toBeNull();
+  });
+
+  it('Konzepte allein genügen: kein „Nichts gefunden“', async () => {
+    core.concepts = [makeConceptDetail({ name: 'Zzyzx' })];
+    const user = userEvent.setup();
+    render(<Host />);
+    await typeQuery(user, 'zzyzx');
+    await screen.findByRole('group', { name: 'Konzepte' });
+    expect(screen.queryByText('Nichts gefunden')).toBeNull();
+  });
+
+  it('scheitert nur der Konzeptaufruf, bleiben Folien und Gesagtes ohne Fehlerzeile', async () => {
+    const real = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (...args: Parameters<typeof fetch>) => {
+        if (String(args[0]).includes('/concepts')) throw new TypeError('offline');
+        return real(...args);
+      }),
+    );
+    const user = userEvent.setup();
+    render(<Host />);
+    await typeQuery(user, 'normalform');
+    await waitFor(() => expect(options().length).toBeGreaterThan(0));
+    expect(screen.queryByText('Suche gerade nicht erreichbar')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Konzepte' })).toBeNull();
+  });
+
+  it('fällt nur `/search` aus, bleiben die Konzepte neben der Fehlerzeile erreichbar', async () => {
+    const real = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (...args: Parameters<typeof fetch>) => {
+        if (String(args[0]).includes('/search')) throw new TypeError('offline');
+        return real(...args);
+      }),
+    );
+    const user = userEvent.setup();
+    render(<Host />);
+    await typeQuery(user, 'normalform');
+    const group = await screen.findByRole('group', { name: 'Konzepte' });
+    expect(within(group).getByRole('option')).toHaveTextContent('Normalform');
+    expect(await screen.findByText('Suche gerade nicht erreichbar')).toBeVisible();
+    await user.keyboard('{Enter}');
+    expect(nav.push).toHaveBeenCalledWith('/bibliothek?konzept=0190f6a2-0000-7000-8000-0000000c0042');
   });
 });
