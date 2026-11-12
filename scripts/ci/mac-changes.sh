@@ -4,7 +4,7 @@
 # Im PR ist HEAD der Merge-Commit, HEAD^1 der Stand von main: Der Unterschied ist genau der PR.
 # Auf main (push), bei anderen Ereignissen oder wenn sich der Diff nicht bestimmen lässt, laufen immer alle Jobs.
 # Änderungen am Workflow oder an scripts/ci/ lassen ebenfalls alle Jobs laufen.
-set -u
+set -u -o pipefail
 
 out="${GITHUB_OUTPUT:-/dev/stdout}"
 common='\.github/workflows/ci\.yml$|scripts/ci/'
@@ -23,7 +23,10 @@ if [ "${GITHUB_EVENT_NAME:-pull_request}" != "pull_request" ]; then
   emit true true true
   exit 0
 fi
-if ! files="$(git diff --name-only HEAD^1 HEAD 2>/dev/null)"; then
+# HEAD muss der Merge-Commit des PR sein (zwei Eltern), sonst zeigte HEAD^1..HEAD nur den letzten Commit.
+# -z: Pfade mit Umlauten o. Ä. kommen sonst in Anführungszeichen ("apps/ipad/…") und träfen kein Muster.
+if ! git rev-parse -q --verify 'HEAD^2' >/dev/null \
+  || ! files="$(git diff -z --name-only HEAD^1 HEAD 2>/dev/null | tr '\0' '\n')"; then
   echo "Diff nicht bestimmbar: alle macOS-Jobs laufen."
   emit true true true
   exit 0
