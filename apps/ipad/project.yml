@@ -36,7 +36,9 @@ targets:
       # Tunnel zum Mac (UX-12, PR 4): Ableitung von Dienstname und PSK aus `tunnel_key`, TLS-PSK-Optionen. Dieselben
       # Quelldateien baut der Mac-Helfer `sg-tunnel` (apps/mac-tunnel), es gibt keine zweite Implementierung.
       # Hier gilt der Swift-6-Sprachmodus und kein bloßes `Task` (Schemas.swift verdeckt den Namen).
-      - path: ../../apps/mac-tunnel/Sources/TunnelShared
+      # Pfad bewusst `../mac-tunnel`: Mit `../../apps/…` legte XcodeGen (createIntermediateGroups) die Dateien unter
+      # `apps/WI-Webapp/apps/…` ab, der Bau fand sie nicht.
+      - path: ../mac-tunnel/Sources/TunnelShared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.studiengehirn.ipad
