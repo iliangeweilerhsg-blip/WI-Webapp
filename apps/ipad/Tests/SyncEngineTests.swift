@@ -605,8 +605,14 @@ final class SyncEngineTests: XCTestCase {
         let creates = ops.filter { $0.object["kind"] as? String == "notebook.create" }
         XCTAssertEqual(creates.count, 1)
         XCTAssertEqual(creates.first?.object["stream"] as? String, "notebook:\(withPages.id)")
-        // Nichts wird ausgeblendet, aber keins gilt mehr als dem Core bekannt
-        XCTAssertTrue(h.library.allNotebooks().allSatisfy { !$0.hidden && !$0.knownOnServer })
+        // Nichts wird ausgeblendet. Die freien Notizbücher (mit und ohne Seite) gelten nicht mehr als dem Core bekannt,
+        // das Vorlesungs-Notizbuch legt der Mac an und bleibt bekannt (L2 aus #225): Fehlt es nach der
+        // Wiederherstellung, blendet `mergeNotebooks` es aus
+        XCTAssertTrue(h.library.allNotebooks().allSatisfy { !$0.hidden })
+        XCTAssertEqual(h.library.notebook(withPages.id)?.knownOnServer, false)
+        XCTAssertEqual(h.library.notebook(withoutPages.id)?.knownOnServer, false)
+        XCTAssertEqual(h.library.notebook(h.binding.notebookID)?.kind, .vorlesung)
+        XCTAssertEqual(h.library.notebook(h.binding.notebookID)?.knownOnServer, true)
         XCTAssertEqual(h.library.notebooks(inModule: module).count, 3)
         XCTAssertTrue(h.library.page(h.binding.pageID)?.needsReconcile ?? false)
     }
