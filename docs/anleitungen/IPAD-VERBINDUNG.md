@@ -116,7 +116,7 @@ Die Zeilen beginnen mit „Tunnel-Helfer ·“. Ein ✗ bedeutet: etwas ist kapu
 | Peer-to-peer | ℹ an oder aus (`SG_TUNNEL_P2P`) |
 | Dienstname | ✗ macOS hat den Bonjour-Namen umbenannt („… (2)“), weil ihn jemand schon belegt hat. `pnpm sg stop`, `pnpm sg start`. Bleibt es, ist in Funkreichweite ein zweites Studien-Gehirn oder ein Fremder, der den Namen belegt |
 | Handshakes | ℹ Viele gescheiterte Verbindungsversuche seit dem Start. Meist ein iPad mit altem Schlüssel (neu koppeln) oder jemand im Funk. Das ist nur Verzögerung, kein Leck |
-| Geräte ohne Schlüssel | ✗ Gekoppelte Geräte ohne Tunnel-Schlüssel (vor UX-12 gekoppelt oder aus einem Backup wiederhergestellt). Sie müssen **einmal neu gekoppelt** werden: In der Web-App unter Einstellungen → Geräte entfernen, dann das iPad zu Hause neu koppeln (QR-Code). Der Schlüssel entsteht nur bei der Kopplung, nie nachträglich |
+| Geräte ohne Schlüssel | ✗ Gekoppelte Geräte ohne Tunnel-Schlüssel (vor UX-12 gekoppelt). Sie müssen **einmal neu gekoppelt** werden: In der Web-App unter Einstellungen → Geräte entfernen, dann das iPad zu Hause neu koppeln (QR-Code). Der Schlüssel entsteht nur bei der Kopplung, nie nachträglich |
 | Firewall | siehe unten |
 
 ### Die Firewall-Frage

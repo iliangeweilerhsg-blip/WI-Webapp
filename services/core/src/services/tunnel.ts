@@ -332,8 +332,8 @@ export class TunnelKeyStore {
   }
 
   /**
-   * Abgleich beim Start: Einträge ohne aktives Gerät fliegen raus. Aktive Geräte ohne Eintrag (vor UX-12 gekoppelt,
-   * oder nach einer Wiederherstellung) bekommen **keinen** neuen Schlüssel, sie müssen neu koppeln.
+   * Abgleich beim Start: Einträge ohne aktives Gerät fliegen raus. Aktive Geräte ohne Eintrag (vor UX-12 gekoppelt;
+   * `sg restore` widerruft nach einer Wiederherstellung alle Geräte, #304 M2) bekommen **keinen** neuen Schlüssel, sie müssen neu koppeln.
    * Rückgabe: wie viele Einträge entfernt wurden und wie viele aktive Geräte ohne Schlüssel sind.
    */
   reconcile(activeDeviceIds: Iterable<string>): Promise<{ removed: number; withoutKey: number }> {
