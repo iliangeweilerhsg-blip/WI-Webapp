@@ -95,7 +95,7 @@ Auf dem Startbildschirm steht je Modul eine Karte mit den Notizbüchern des Modu
 - **Titel der Schreibfläche:** „Modul · Notizbuch“. So siehst du immer, wohin geschrieben wird.
 - **Update von einer älteren Version:** Deine bisherigen Seiten und noch nicht gesendete Striche bleiben erhalten. Die App übernimmt sie beim ersten Start in die neue Liste.
 
-Umbenennen und Löschen kommt noch. Bis dahin vertippte Notizbücher einfach liegen lassen.
+**Umbenennen und Löschen** geht am Mac: in der Web-App im Modul unter **Notizbücher**. „Vorlesung“ und „Übung“ lassen sich nur umbenennen. Das iPad zeigt die Änderung, sobald es den Startbildschirm zeigt oder neu verbindet. Schreibst du vorher noch in ein Notizbuch, das am Mac gelöscht wurde, landen diese Striche mit im Papierkorb und kommen beim Wiederherstellen zurück.
 
 ## Seiten und Vorlagen
 

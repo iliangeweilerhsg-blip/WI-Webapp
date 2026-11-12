@@ -1131,6 +1131,9 @@ export function installFakeCore(
       if (trashRestore && method === 'POST') {
         const found = core.notebooks.find((n) => n.id === trashRestore[1] && n.deleted_at);
         if (!found) return json({ error: { code: 'trash_item_not_found', message: 'x' } }, 404);
+        if (core.modules.some((m) => m.id === found.module_id && m.deleted_at)) {
+          return json({ error: { code: 'restore_parent_deleted', message: 'x' } }, 409);
+        }
         found.deleted_at = null;
         return json({ id: found.id, kind: 'notebook', restored_count: 1 });
       }
@@ -1140,7 +1143,13 @@ export function installFakeCore(
         if (core.failNotebooks) return json({ error: { code: 'internal', message: 'x' } }, 500);
         const moduleId = url.searchParams.get('module_id');
         return json({
-          items: core.notebooks.filter((n) => !n.deleted_at && (!moduleId || n.module_id === moduleId)),
+          // Wie der Core: ohne gelöschte Notizbücher und ohne die gelöschter Module
+          items: core.notebooks.filter(
+            (n) =>
+              !n.deleted_at &&
+              (!moduleId || n.module_id === moduleId) &&
+              !core.modules.some((m) => m.id === n.module_id && m.deleted_at),
+          ),
           next_cursor: null,
         });
       }

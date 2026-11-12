@@ -76,6 +76,10 @@ describe('Notizbücher im Modul (UX-52)', () => {
       expect(within(row).queryByRole('button', { name: /löschen/ })).not.toBeInTheDocument();
     }
     expect(within(rows[2]!).getByRole('button', { name: 'Skizzen löschen' })).toBeInTheDocument();
+    // Das iPad erfährt Änderungen erst beim nächsten Abruf, darum steht der Hinweis dabei
+    expect(
+      screen.getByText(/Das iPad übernimmt Änderungen, sobald es den Startbildschirm zeigt/),
+    ).toBeInTheDocument();
   });
 
   it('Umbenennen: Enter speichert, die Zeile zeigt den neuen Titel', async () => {
@@ -148,6 +152,23 @@ describe('Notizbücher im Modul (UX-52)', () => {
       ['POST', `/trash/${FREI.id}/restore`],
     ]);
     expect(core.notebooks.find((n) => n.id === FREI.id)?.deleted_at).toBeNull();
+  });
+
+  it('Rückgängig scheitert (Modul inzwischen gelöscht): Meldung statt stiller Rücknahme', async () => {
+    const core = setup();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Skizzen löschen' }));
+    const toast = (await screen.findByText('„Skizzen“ gelöscht')).closest(
+      '[data-testid="toast-live"]',
+    ) as HTMLElement;
+    core.modules[0]!.deleted_at = '2026-11-04T09:00:00Z';
+    await user.click(within(toast).getByRole('button', { name: 'Rückgängig' }));
+    expect(
+      await screen.findByText(
+        '„Skizzen“ ließ sich nicht zurückholen. Das Modul ist gelöscht. Stelle zuerst das Modul wieder her.',
+      ),
+    ).toBeInTheDocument();
+    expect(core.notebooks.find((n) => n.id === FREI.id)?.deleted_at).not.toBeNull();
   });
 
   it('Anlegen: Titel eingeben, Enter, neues freies Notizbuch mit Client-ID (UUIDv7)', async () => {

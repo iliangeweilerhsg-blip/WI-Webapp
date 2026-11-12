@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import type { Notebook } from '@sg/shared';
+import type { Notebook, NotebookList } from '@sg/shared';
 import { ApiRequestError, friendlyMessage } from '../lib/api.ts';
 import { useHydrationSafe } from '../lib/hydrated.ts';
 import {
@@ -32,7 +32,7 @@ function NotebookRow({
   onDeleted,
 }: {
   notebook: Notebook;
-  onChanged: () => void;
+  onChanged: (updated: Notebook) => void;
   onDeleted: (notebook: Notebook) => void;
 }) {
   const [editing, setEditing] = useState(false);
@@ -69,8 +69,7 @@ function NotebookRow({
     setBusy(true);
     setError(null);
     try {
-      await renameNotebook(notebook.id, title);
-      onChanged();
+      onChanged(await renameNotebook(notebook.id, title));
       setEditing(false);
       setTimeout(() => renameButton.current?.focus(), 0);
     } catch (failure) {
@@ -275,9 +274,21 @@ export function ModuleNotebooks({ moduleId }: { moduleId: string }) {
   );
   const refresh = () => {
     void client.invalidateQueries({ queryKey: ['notebooks'] });
+    void client.invalidateQueries({ queryKey: ['trash'] });
   };
+  // Die Antwort des Core sofort übernehmen, damit die Zeile nicht bis zum Neuladen den alten Stand zeigt
+  const patchList = (change: (items: Notebook[]) => Notebook[]) =>
+    client.setQueryData<NotebookList>(notebooksKey(moduleId), (old) =>
+      old ? { ...old, items: change(old.items) } : old,
+    );
+
+  function onChanged(updated: Notebook) {
+    patchList((items) => items.map((n) => (n.id === updated.id ? updated : n)));
+    refresh();
+  }
 
   function onDeleted(notebook: Notebook) {
+    patchList((items) => items.filter((n) => n.id !== notebook.id));
     refresh();
     toast.show({
       message: `„${notebook.title}“ gelöscht`,
@@ -305,6 +316,12 @@ export function ModuleNotebooks({ moduleId }: { moduleId: string }) {
       <h2 id={`notizbuecher-${moduleId}`} className="text-lg font-semibold">
         Notizbücher
       </h2>
+      {/* Das iPad liest Notizbücher nur per REST (Startbildschirm, neue Verbindung, Öffnen), nicht über den Sync */}
+      <p className="mt-1 text-sm text-text-muted">
+        Das iPad übernimmt Änderungen, sobald es den Startbildschirm zeigt oder neu verbindet. Was es vorher
+        noch in ein gelöschtes Notizbuch schreibt, liegt mit im Papierkorb und kommt beim Wiederherstellen
+        zurück.
+      </p>
       {notebooks.isPending ? (
         <p className="mt-2 text-sm text-text-muted">Notizbücher werden geladen …</p>
       ) : notebooks.isError ? (
@@ -314,7 +331,7 @@ export function ModuleNotebooks({ moduleId }: { moduleId: string }) {
       ) : (
         <ul aria-label="Notizbücher" className="mt-2 divide-y divide-border">
           {items.map((notebook) => (
-            <NotebookRow key={notebook.id} notebook={notebook} onChanged={refresh} onDeleted={onDeleted} />
+            <NotebookRow key={notebook.id} notebook={notebook} onChanged={onChanged} onDeleted={onDeleted} />
           ))}
         </ul>
       )}
