@@ -55,6 +55,21 @@ export function makeSemester(overrides: Partial<Semester> = {}): Semester {
   };
 }
 
+export function makeNotebook(overrides: Partial<Notebook> = {}): Notebook {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000b1',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    module_id: '0190f6a2-0000-7000-8000-0000000000a1',
+    title: 'Notizbuch',
+    kind: 'frei',
+    page_count: 0,
+    ...overrides,
+  };
+}
+
 export function makeSession(overrides: Partial<Session> = {}): Session {
   return {
     id: '0190f6a2-0000-7000-8000-0000000000e1',
@@ -1072,12 +1087,60 @@ export function installFakeCore(
         return new Response(null, { status: 204 });
       }
 
+      // POST /notebooks (§7.4): freies Notizbuch; 404 module_not_found, 409 notebook_exists / notebook_kind_exists
+      if (path === '/notebooks' && method === 'POST') {
+        const title = typeof body?.title === 'string' ? body.title.trim() : '';
+        if (title === '') return json({ error: { code: 'validation_failed', message: 'x' } }, 400);
+        if (!core.modules.some((m) => m.id === body?.module_id && !m.deleted_at)) {
+          return json({ error: { code: 'module_not_found', message: 'x' } }, 404);
+        }
+        const id = typeof body?.id === 'string' ? body.id : newId();
+        if (core.notebooks.some((n) => n.id === id)) {
+          return json({ error: { code: 'notebook_exists', message: 'x' } }, 409);
+        }
+        const kind = (body?.kind as Notebook['kind'] | undefined) ?? 'frei';
+        if (
+          kind !== 'frei' &&
+          core.notebooks.some((n) => n.module_id === body?.module_id && n.kind === kind && !n.deleted_at)
+        ) {
+          return json({ error: { code: 'notebook_kind_exists', message: 'x' } }, 409);
+        }
+        const created = makeNotebook({ id, module_id: String(body?.module_id), title, kind });
+        core.notebooks.push(created);
+        return json(created, 201);
+      }
+
+      // PATCH und DELETE /notebooks/{id} (§7.4): Standard-Notizbücher lassen sich umbenennen, aber nicht löschen
+      const notebookWrite = /^\/notebooks\/([^/]+)$/.exec(path);
+      if (notebookWrite && (method === 'PATCH' || method === 'DELETE')) {
+        const found = core.notebooks.find((n) => n.id === notebookWrite[1] && !n.deleted_at);
+        if (!found) return json({ error: { code: 'notebook_not_found', message: 'x' } }, 404);
+        if (method === 'DELETE') {
+          if (found.kind !== 'frei') return json({ error: { code: 'notebook_default', message: 'x' } }, 409);
+          found.deleted_at = NOW;
+          return new Response(null, { status: 204 });
+        }
+        const title = typeof body?.title === 'string' ? body.title.trim() : found.title;
+        if (title === '') return json({ error: { code: 'validation_failed', message: 'x' } }, 400);
+        found.title = title;
+        return json(found);
+      }
+
+      // POST /trash/{id}/restore (§13) – hier nur für Notizbücher
+      const trashRestore = /^\/trash\/([^/]+)\/restore$/.exec(path);
+      if (trashRestore && method === 'POST') {
+        const found = core.notebooks.find((n) => n.id === trashRestore[1] && n.deleted_at);
+        if (!found) return json({ error: { code: 'trash_item_not_found', message: 'x' } }, 404);
+        found.deleted_at = null;
+        return json({ id: found.id, kind: 'notebook', restored_count: 1 });
+      }
+
       // GET /notebooks?module_id (§7.4)
       if (path === '/notebooks' && method === 'GET') {
         if (core.failNotebooks) return json({ error: { code: 'internal', message: 'x' } }, 500);
         const moduleId = url.searchParams.get('module_id');
         return json({
-          items: core.notebooks.filter((n) => !moduleId || n.module_id === moduleId),
+          items: core.notebooks.filter((n) => !n.deleted_at && (!moduleId || n.module_id === moduleId)),
           next_cursor: null,
         });
       }
