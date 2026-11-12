@@ -19,6 +19,11 @@ final class InkLibraryService {
 
     /// Laufende oder pausierte Session laut letztem Abruf, `nil` ohne Verbindung oder ohne Session
     private(set) var running: RunningSession?
+    /// Zeitpunkt der letzten Meldung über die laufende Session oder des Verbindungsabrisses, was später kam (UX-57).
+    /// Ohne Verbindung bleibt `running` stehen, dann sagt dieser Zeitpunkt, wie alt der Stand ist. `nil` ohne Session.
+    private(set) var runningReportedAt: Date?
+    /// Letzter gemeldeter Stand des Sync, für `syncOnlineChanged`
+    @ObservationIgnored private var syncWasOnline = false
     /// Zählt bei jeder Änderung der Ablage hoch. Die Ablage selbst ist nicht beobachtbar, die Lesefunktionen unten
     /// lesen diesen Zähler mit, damit SwiftUI nach einer Änderung neu zeichnet.
     private(set) var revision = 0
@@ -123,7 +128,10 @@ final class InkLibraryService {
     func refresh(force: Bool = false) async {
         guard sync.canReachCore, let access = sync.restAccess() else {
             // Mit dem Follower bleibt die Session stehen: Er lädt bei der nächsten Verbindung neu
-            if !followsSessions, running != nil { running = nil }
+            if !followsSessions, running != nil {
+                running = nil
+                runningReportedAt = nil
+            }
             return
         }
         guard !isRefreshing else { return }
@@ -807,8 +815,10 @@ final class InkLibraryService {
         guard let session = sessions.max(by: { ($0.startedAt ?? $0.createdAt) < ($1.startedAt ?? $1.createdAt) })
         else {
             running = nil
+            runningReportedAt = nil
             return
         }
+        runningReportedAt = now()
         let notebook = await resolveNotebook(sessionID: session.id, moduleID: session.moduleID, access: access)
         guard !_Concurrency.Task.isCancelled else { return }
         register(notebook)
@@ -861,6 +871,14 @@ final class InkLibraryService {
 
     // MARK: Session aus dem Strom (T1-13 Teil 2)
 
+    /// Der Sync wird online oder verlässt `online`. Bis zum Abriss war die laufende Session bestätigt: Der Stand der
+    /// Karte „Lief zuletzt“ ist dann dieser Moment, nicht die letzte Änderung der Session (UX-57).
+    func syncOnlineChanged(_ isOnline: Bool) {
+        defer { syncWasOnline = isOnline }
+        guard syncWasOnline, !isOnline, running != nil else { return }
+        runningReportedAt = now()
+    }
+
     /// Ab jetzt kommt die laufende Session vom `SessionFollower`, `refresh` fragt sie nicht mehr ab
     func attachFollower() {
         followsSessions = true
@@ -872,12 +890,14 @@ final class InkLibraryService {
         followToken += 1
         let token = followToken
         guard let brief else {
-            if running != nil {
+            if running != nil || runningReportedAt != nil {
                 running = nil
+                runningReportedAt = nil
                 bump()
             }
             return
         }
+        runningReportedAt = now()
         let known = running?.id == brief.id ? running?.notebookID : nil
         let provisional = RunningSession(
             id: brief.id, moduleID: brief.moduleID, startMS: brief.startedAtMS, slideDeckID: brief.slideDeckID,

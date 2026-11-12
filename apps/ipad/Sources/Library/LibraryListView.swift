@@ -20,7 +20,9 @@ struct LibraryListView: View {
                     InkPageView(library: library, notebookID: notebookID)
                 } label: {
                     RunningCard(
-                        moduleName: library.moduleName(running.moduleID) ?? "Vorlesung",
+                        title: LibraryTexts.runningTitle(
+                            moduleName: library.moduleName(running.moduleID) ?? "Vorlesung",
+                            isOnline: isOnline, reportedAt: library.runningReportedAt),
                         notebookTitle: notebook.title)
                 }
                 .buttonStyle(.plain)
@@ -81,6 +83,21 @@ enum LibraryTexts {
         return "Offline · Stand von \(refreshedAt.formatted(date: .abbreviated, time: .shortened))"
     }
 
+    /// Titel der Karte zur Vorlesung. Ohne Verbindung ist es der letzte Stand, kein „Läuft gerade“ (UX-57).
+    static func runningTitle(
+        moduleName: String, isOnline: Bool, reportedAt: Date?, calendar: Calendar = .current
+    ) -> String {
+        if isOnline { return "Läuft gerade: \(moduleName)" }
+        guard let reportedAt else { return "Lief zuletzt: \(moduleName)" }
+        return "Lief zuletzt: \(moduleName) · Stand \(clockText(reportedAt, calendar: calendar))"
+    }
+
+    /// „10:42“
+    static func clockText(_ date: Date, calendar: Calendar = .current) -> String {
+        let parts = calendar.dateComponents([.hour, .minute], from: date)
+        return String(format: "%02ld:%02ld", parts.hour ?? 0, parts.minute ?? 0)
+    }
+
     static func emptyText(isOnline: Bool) -> String {
         isOnline
             ? "Noch keine Module. Lege am Mac ein Modul an."
@@ -129,12 +146,12 @@ private struct ModuleCard: View {
 }
 
 private struct RunningCard: View {
-    let moduleName: String
+    let title: String
     let notebookTitle: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Läuft gerade: \(moduleName)").font(.headline)
+            Text(title).font(.headline)
             Text(notebookTitle).font(.subheadline).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)

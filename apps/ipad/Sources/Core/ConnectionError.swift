@@ -50,6 +50,8 @@ enum ConnectionError: Error, Equatable, Sendable {
     case tokenStorageFailed
     /// Anderer Netzwerkfehler, mit Fehlernummer des Systems
     case network(code: Int)
+    /// Der Mac antwortet, spricht aber ein anderes Protokoll (Sync-Code 4426): die App ist veraltet (UX-48)
+    case appOutdated
 
     /// Zuordnung der Systemfehler von URLSession
     static func from(_ error: URLError) -> ConnectionError {
@@ -130,6 +132,7 @@ enum ConnectionError: Error, Equatable, Sendable {
         case .macNotResolved: return "Mac nicht erreichbar"
         case .tokenStorageFailed: return "Schlüsselbund nicht verfügbar"
         case .network(let code): return "Netzwerkfehler (\(code))"
+        case .appOutdated: return "App passt nicht mehr zum Mac"
         }
     }
 
@@ -188,6 +191,8 @@ enum ConnectionError: Error, Equatable, Sendable {
             return "Die Kopplung ließ sich nicht sicher speichern. Entferne das iPad am Mac und kopple es neu."
         case .network:
             return "Prüfe das WLAN und versuch es noch einmal."
+        case .appOutdated:
+            return "Am Mac über Xcode neu aufspielen."
         }
     }
 }
