@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { isMacPlatform, matchShortcut } from '../lib/shortcuts.ts';
 import { SIDEBAR_KEY } from '../lib/theme.tsx';
 import { SIDEBAR_AUTO_ATTR } from '../lib/theme-init.ts';
-import { RecordingProvider, type RecordingEnv } from '../lib/recording';
+import { RecordingProvider, useNoteRecordingIntent, type RecordingEnv } from '../lib/recording';
 import { useResumePendingUploads } from '../lib/recorder/useResumePendingUploads.ts';
 import { ErrorShelf } from '../lib/sync/ErrorShelf.tsx';
 import { OtherTabBanner } from '../lib/sync/OtherTabBanner.tsx';
@@ -14,6 +14,7 @@ import type { SyncClient } from '../lib/sync/client.ts';
 import { ToastProvider } from '../lib/toast.tsx';
 import { UploadProvider } from '../lib/uploads.tsx';
 import { Icon } from './Icon.tsx';
+import { RecordingBar } from './recording/RecordingBar.tsx';
 import { SearchOverlay } from './search/SearchOverlay.tsx';
 import { SetupHost } from './SetupHost.tsx';
 import { Sidebar } from './Sidebar.tsx';
@@ -45,6 +46,18 @@ function Shell({ children }: { children: ReactNode }) {
   const sync = useSyncClient();
   // Ungesendete Aufnahme-Chunks nachholen, ab dem App-Start und nur im Leader-Tab (Issue #115)
   useResumePendingUploads(sync);
+  // „Hier übernehmen“ ist eine Nutzeraktion: Sie erlaubt dem Tab, das Mikrofon zu öffnen, sobald er Leader ist
+  const noteRecordingIntent = useNoteRecordingIntent();
+
+  // bfcache (Plan 210, E8): Kommt die Seite aus dem Cache zurück, sind Mikrofon, Sperren und WebSocket in unbekanntem
+  // Zustand. Neuladen ist der Weg, den der Vertrag („Nach dem Neuladen“, §11.8) schon beschreibt.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) window.location.reload();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, []);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -248,7 +261,7 @@ function Shell({ children }: { children: ReactNode }) {
               </button>
               <span className="text-sm font-semibold">Studien-Gehirn</span>
             </header>
-            {sync && <OtherTabBanner client={sync} />}
+            {sync && <OtherTabBanner client={sync} onTakeOver={noteRecordingIntent} />}
             {sync && <ErrorShelf client={sync} />}
             <div className="flex min-h-0 flex-1">
               <main
@@ -263,6 +276,7 @@ function Shell({ children }: { children: ReactNode }) {
                 )}
               </main>
             </div>
+            <RecordingBar />
           </div>
           <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
           <SetupHost requested={setupRequested} />

@@ -740,6 +740,39 @@ describe('Einstellungen › Moodle: automatische Zuordnung (#141)', () => {
       '/einstellungen?bereich=allgemein',
     );
   });
+
+  it('der Link bleibt in der App (kein rohes <a>) und der Reiter folgt der neuen Adresse ohne Neuladen', async () => {
+    core.semesters = [];
+    installMoodle(core, { courses: [{ ...marketing, module_id: null }] });
+    window.history.replaceState(null, '', '/einstellungen?bereich=moodle');
+    const tree = () => (
+      <ThemeProvider>
+        <QueryProvider>
+          <ToastProvider>
+            <UploadProvider>
+              <SettingsView />
+            </UploadProvider>
+          </ToastProvider>
+        </QueryProvider>
+      </ThemeProvider>
+    );
+    const view = render(tree());
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Moodle' })).toHaveAttribute('aria-selected', 'true'),
+    );
+    const hint = (await screen.findByText('Lege zuerst das Semester an.')).closest('p') as HTMLElement;
+    const link = within(hint).getByRole('link', { name: 'Zu den Semestern' });
+    // `next/link` rendert ein <a> mit `data-`-freiem href; ein rohes <a href> wäre ein harter Seitenwechsel.
+    // Der Router ändert nur die Adresse und die Query, die Ansicht bleibt eingehängt:
+    const before = screen.getByRole('tab', { name: 'Moodle' });
+    search.value = 'bereich=allgemein';
+    window.history.pushState(null, '', link.getAttribute('href')!);
+    view.rerender(tree());
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'Allgemein' })).toHaveAttribute('aria-selected', 'true'),
+    );
+    expect(screen.getByRole('tab', { name: 'Moodle' })).toBe(before);
+  });
 });
 
 describe('Inbox (F-MDL-04)', () => {

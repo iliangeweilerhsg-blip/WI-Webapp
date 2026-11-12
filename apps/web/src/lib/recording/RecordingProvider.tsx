@@ -44,12 +44,6 @@ import { useSyncClient } from '../sync/SyncProvider.tsx';
 import { usePausedSince } from './paused-since.ts';
 import { useTrackedSessionState, type TrackedPhase } from './tracked-session.ts';
 
-/**
- * Schalter für Teil 2 (Plan E11): Solange er gilt, wird nur aufgenommen und automatisch gestoppt, wenn das Dashboard
- * der verfolgten Session offen ist (altes Verhalten). Teil 3 löscht ihn.
- */
-const ROUTE_GATE = true;
-
 /** Anzeige-Zustand der Aufnahme */
 export type RecordingKind =
   | 'rec' // nimmt auf
@@ -401,10 +395,8 @@ export function RecordingProvider({ children, env = {} }: { children: ReactNode;
     () => IDLE_STATUS,
   );
 
-  // Soll-Zustand. Solange der Schalter gilt, zählt nur ein offenes Dashboard der Session: sonst stoppt der Recorder
-  // (er wird nicht entsorgt, das Hochladen läuft im Leader weiter).
-  const gated = ROUTE_GATE && !shownByDashboard;
-  const phase: TrackedPhase = gated || !tracked ? 'andere' : tracked.phase;
+  // Soll-Zustand: Die Aufnahme folgt der aktiven Session, nicht der Route (VERTRAEGE §11.8)
+  const phase: TrackedPhase = tracked?.phase ?? 'andere';
   const allowed = tabAllowed || permission === 'granted';
   useEffect(() => {
     control?.set({ leader, phase, allowed });
@@ -492,7 +484,7 @@ export function RecordingProvider({ children, env = {} }: { children: ReactNode;
   );
   const pausedSince = usePausedSince(pausedInput);
 
-  // Auto-Stopp: der Host läuft nur bei laufender oder pausierter Session (und, solange der Schalter gilt, offenem Dashboard)
+  // Auto-Stopp: der Host läuft nur bei laufender oder pausierter Session, auf jeder Route
   const hostSession = tracked && phase !== 'andere' ? tracked.session : null;
   const [autoReport, setAutoReport] = useState<AutoStopReport>(IDLE_REPORT);
   const report = setAutoReport;
@@ -531,12 +523,11 @@ export function RecordingProvider({ children, env = {} }: { children: ReactNode;
     message = MESSAGES.needsStart;
   } else kind = 'starting';
 
-  const trackedPhase = tracked?.phase ?? 'andere';
   const view = useMemo<RecordingView>(
     () => ({
       sessionId,
       session,
-      phase: trackedPhase,
+      phase,
       kind,
       message,
       status,
@@ -549,7 +540,7 @@ export function RecordingProvider({ children, env = {} }: { children: ReactNode;
     [
       sessionId,
       session,
-      trackedPhase,
+      phase,
       kind,
       message,
       status,

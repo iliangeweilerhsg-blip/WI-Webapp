@@ -96,6 +96,8 @@ export class LeaderRecording {
 
   /** Neuer Soll-Zustand */
   set(patch: Partial<LeaderRecordingInput>): void {
+    // Nach `dispose()` startet nichts mehr (sonst nähme ein entsorgter Recorder wieder auf)
+    if (this.disposed) return;
     const next = { ...this.input, ...patch };
     if (
       next.leader === this.input.leader &&
@@ -109,6 +111,7 @@ export class LeaderRecording {
 
   /** Nutzeraktion „Aufnahme starten“: erlaubt das Öffnen des Mikrofons und versucht es erneut */
   retry(): void {
+    if (this.disposed) return;
     this.input = { ...this.input, allowed: true };
     this.failed = false;
     this.schedule();

@@ -17,6 +17,8 @@ import { SyncClient } from '../src/lib/sync/client.ts';
 import { useSyncClient } from '../src/lib/sync/SyncProvider.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
+import { fakeRecording } from './recording-fakes.ts';
+import { installFakeCore, makeModule, makeSemester, makeSession } from './fake-core.ts';
 
 type Listener = (e: { matches: boolean }) => void;
 
@@ -259,5 +261,121 @@ describe('AppShell: SyncClient', () => {
     expect(await screen.findByText('Inhalt')).toBeVisible();
     expect(screen.queryByTestId('ink-column')).toBeNull();
     expect(screen.queryByRole('complementary', { name: 'Notizen' })).toBeNull();
+  });
+});
+
+describe('AppShell: Aufnahme (Issue #210)', () => {
+  /** Eine laufende Session im Fake-Core; ohne Mikrofon-Erlaubnis, damit nichts aufgenommen wird */
+  function mountWithSession() {
+    const module = makeModule({ id: '0190f6a2-0000-7000-8000-0000000000a3' });
+    installFakeCore({
+      semesters: [makeSemester()],
+      modules: [module],
+      sessions: [
+        makeSession({
+          id: '0190f6a2-0000-7000-8000-0000000000e1',
+          module_id: module.id,
+          state: 'laeuft',
+          started_at: new Date().toISOString(),
+        }),
+      ],
+    });
+    const { client } = fakeClient();
+    return render(
+      <ThemeProvider>
+        <QueryProvider>
+          <AppShell syncClient={client} recordingEnv={fakeRecording({ permission: 'prompt' }).env}>
+            <p>Inhalt</p>
+          </AppShell>
+        </QueryProvider>
+      </ThemeProvider>,
+    );
+  }
+
+  it('die Aufnahme-Leiste liegt in der Inhaltsspalte nach `main`', async () => {
+    stubNarrow(false);
+    mountWithSession();
+    const bar = await screen.findByRole('complementary', { name: 'Aufnahme' });
+    const main = document.getElementById('main')!;
+    const column = main.closest('.flex-col')!;
+    expect(column.contains(bar)).toBe(true);
+    expect(main.compareDocumentPosition(bar) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Sie scrollt nicht mit dem Inhalt und schrumpft nicht
+    expect(main.contains(bar)).toBe(false);
+    expect(bar).toHaveClass('shrink-0');
+  });
+
+  it('bei offenem Drawer ist die Leiste `inert` (die ganze Spalte)', async () => {
+    stubNarrow(true);
+    const user = userEvent.setup();
+    mountWithSession();
+    const bar = await screen.findByRole('complementary', { name: 'Aufnahme' });
+    expect(bar.closest('[inert]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Menü öffnen' }));
+    expect(bar.closest('[inert]')).not.toBeNull();
+  });
+
+  it('ohne aktive Session gibt es keine Leiste', async () => {
+    stubNarrow(false);
+    mount(fakeClient().client);
+    expect(await screen.findByText('Inhalt')).toBeVisible();
+    expect(screen.queryByRole('complementary', { name: 'Aufnahme' })).toBeNull();
+  });
+
+  describe('bfcache (`pageshow`)', () => {
+    function stubReload() {
+      const reload = vi.fn();
+      const original = window.location;
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: { ...original, reload },
+      });
+      return {
+        reload,
+        restore: () => Object.defineProperty(window, 'location', { configurable: true, value: original }),
+      };
+    }
+    const pageshow = (persisted: boolean) => {
+      const event = new Event('pageshow') as PageTransitionEvent;
+      Object.defineProperty(event, 'persisted', { value: persisted });
+      act(() => void window.dispatchEvent(event));
+    };
+
+    it('aus dem bfcache zurück (`persisted`): lädt neu', () => {
+      stubNarrow(false);
+      const { reload, restore } = stubReload();
+      try {
+        mount(fakeClient().client);
+        pageshow(true);
+        expect(reload).toHaveBeenCalledTimes(1);
+      } finally {
+        restore();
+      }
+    });
+
+    it('normales Laden (`persisted` falsch): kein Neuladen', () => {
+      stubNarrow(false);
+      const { reload, restore } = stubReload();
+      try {
+        mount(fakeClient().client);
+        pageshow(false);
+        expect(reload).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
+
+    it('nach dem Unmount hört die Shell nicht mehr auf `pageshow`', () => {
+      stubNarrow(false);
+      const { reload, restore } = stubReload();
+      try {
+        const view = mount(fakeClient().client);
+        view.unmount();
+        pageshow(true);
+        expect(reload).not.toHaveBeenCalled();
+      } finally {
+        restore();
+      }
+    });
   });
 });

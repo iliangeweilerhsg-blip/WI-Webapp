@@ -61,7 +61,6 @@ export function HeuteScreen() {
             entry={cardEntry}
             now={now}
             previousRunning={pick.previousRunning !== null}
-            otherTab={data.otherTab}
             onSession={data.apply}
             onRefetch={data.refetch}
           />
