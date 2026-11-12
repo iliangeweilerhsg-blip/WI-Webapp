@@ -372,6 +372,40 @@ describe('Bestätigungscodes: Bindung an den Stand (T1-24, 08 §9.3)', () => {
   });
 });
 
+describe('Bestätigungscodes: Stand muss reines JSON sein (fail closed)', () => {
+  const params = { assignment_id: 3, accept_statement: true };
+
+  it('Date, Map, Set, NaN und Klassen im Stand: kein Code, sonst sähe die Bindung keine Änderung', () => {
+    const store = new ConfirmationStore();
+    for (const bad of [
+      { t: new Date(0) },
+      { files: new Map([['a', 1]]) },
+      [new Set([1])],
+      { size: Number.NaN },
+      { size: Infinity },
+      { n: 1n },
+      new (class Stand {})(),
+    ]) {
+      expect(() => store.issue('assign.submit', params, { state: bad })).toThrow(/kein reines JSON/);
+    }
+    expect(store.size).toBe(0);
+  });
+
+  it('beim Einlösen wirft ein solcher Stand, ohne den Code zu verbrauchen', () => {
+    const store = new ConfirmationStore();
+    const a = store.issue('assign.submit', params, { state: { t: 0 } });
+    expect(() => store.consume(a.token, 'assign.submit', params, { t: new Date(0) })).toThrow();
+    expect(store.consume(a.token, 'assign.submit', params, { t: 0 })).toBe('ok');
+  });
+
+  it('reines JSON samt Objekten ohne Prototyp geht durch', () => {
+    const store = new ConfirmationStore();
+    const bare = Object.assign(Object.create(null) as Record<string, unknown>, { a: [1, 'x', null, true] });
+    const a = store.issue('assign.submit', params, { state: bare });
+    expect(store.consume(a.token, 'assign.submit', params, { a: [1, 'x', null, true] })).toBe('ok');
+  });
+});
+
 describe('KeyedMutex (T1-24, Sperre je Aufgabe)', () => {
   it('gleicher Schlüssel: nacheinander in Reihenfolge, andere Schlüssel parallel', async () => {
     const mutex = new KeyedMutex({ timeoutMs: 60_000 });

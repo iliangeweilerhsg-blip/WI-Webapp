@@ -177,6 +177,16 @@ export class MoodleActionRegistry {
    * umgesetzt, auch wenn ihr Handler im Code steht. `completion.set` und `notifications.mark_read` hängen nicht daran.
    */
   constructor(handlers: MoodleActionHandlers, enabled: Iterable<string> = []) {
+    // Der Widerruf muss unter der Sperre laufen (08 §9.3): Sonst löst ein paralleles `execute` dazwischen noch einen
+    // alten Code ein. Ein Handler mit `revokesScope` braucht darum `lockKey`
+    for (const [id, handler] of Object.entries(handlers) as [
+      string,
+      MoodleActionHandler<unknown> | undefined,
+    ][]) {
+      if (handler?.revokesScope && !handler.lockKey) {
+        throw new Error(`Moodle-Aktion ${id}: revokesScope ohne lockKey`);
+      }
+    }
     this.handlers = handlers;
     this.enabled = new Set(enabled);
   }

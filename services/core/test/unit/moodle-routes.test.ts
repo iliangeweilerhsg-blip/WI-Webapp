@@ -827,6 +827,27 @@ describe('T1-24 Rahmen: Widerruf nach eigenem Schreiben (revokeScope, Zähler)',
   });
 });
 
+describe('T1-24 Rahmen: Widerruf nur mit Sperre', () => {
+  it('ein Handler mit revokesScope ohne lockKey lässt sich nicht eintragen', () => {
+    const handler = {
+      revokesScope: () => 'assign:1',
+      async preview() {
+        return { summary: 'x' };
+      },
+      async execute() {
+        return { summary: 'x', result: {} };
+      },
+    };
+    expect(() =>
+      createMoodleServices({
+        config: { moodleUrl: FAKE_BASE, dataDir: '/gibt/es/nicht' },
+        tokens: new StaticTokenStore(FAKE_TOKEN),
+        handlers: { 'assign.save_draft': handler },
+      }),
+    ).toThrow(/revokesScope ohne lockKey/);
+  });
+});
+
 describe('T1-24 Rahmen: Sperre je Aufgabe (moodle_action_busy)', () => {
   it('belegt länger als das Zeitlimit: 409 moodle_action_busy, der Handler läuft nicht', async () => {
     const { control, handlers } = frameHandlers();

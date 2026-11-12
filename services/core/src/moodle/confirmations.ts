@@ -28,8 +28,42 @@ export function paramsHash(actionId: string, params: unknown): Buffer {
 /** Ergebnis von {@link ConfirmationStore.consume} */
 export type ConsumeResult = 'ok' | 'invalid' | 'state_changed';
 
-/** SHA-256 über den kanonischen Stand. Kein Stand zählt als `null` */
+/**
+ * Prüft, dass der Stand reines JSON ist (null, Wahrheitswert, Text, endliche Zahl, Liste, schlichtes Objekt).
+ * `canonicalJson` machte aus `Date`, `Map` oder `Set` sonst still `{}` und aus `NaN` `null`: Dann sähe die Bindung
+ * eine Änderung nicht. Ein Handler mit solchem Stand ist ein Programmierfehler, darum Fehler statt Code.
+ */
+function assertJsonState(value: unknown, depth = 0): void {
+  if (depth > 64) throw new Error('Stand einer Moodle-Aktion ist zu tief verschachtelt');
+  if (value === null || value === undefined) return;
+  switch (typeof value) {
+    case 'boolean':
+    case 'string':
+      return;
+    case 'number':
+      if (Number.isFinite(value)) return;
+      break;
+    case 'object': {
+      if (Array.isArray(value)) {
+        for (const item of value) assertJsonState(item, depth + 1);
+        return;
+      }
+      const proto = Object.getPrototypeOf(value) as unknown;
+      if (proto === Object.prototype || proto === null) {
+        for (const item of Object.values(value as Record<string, unknown>)) assertJsonState(item, depth + 1);
+        return;
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  throw new Error('Stand einer Moodle-Aktion ist kein reines JSON');
+}
+
+/** SHA-256 über den kanonischen Stand. Kein Stand zählt als `null`. Wirft bei einem Stand, der kein reines JSON ist */
 export function stateHash(state: unknown): Buffer {
+  assertJsonState(state);
   return createHash('sha256')
     .update(canonicalJson(state ?? null))
     .digest();
@@ -87,6 +121,8 @@ export class ConfirmationStore {
     params: unknown,
     binding: ConfirmationBinding = {},
   ): { token: string; expiresAt: Date } {
+    // Zuerst: Ein Stand, der kein reines JSON ist, wirft, bevor ein Code entsteht
+    const boundState = stateHash(binding.state);
     this.prune();
     // 128 bit, base64url
     const token = randomBytes(16).toString('base64url');
@@ -97,7 +133,7 @@ export class ConfirmationStore {
     if (!stale) {
       this.open.set(token, {
         hash: paramsHash(actionId, params),
-        stateHash: stateHash(binding.state),
+        stateHash: boundState,
         scope,
         expiresAt,
       });
@@ -116,12 +152,14 @@ export class ConfirmationStore {
    * `state_changed`: Parameter stimmen, aber der Stand in Moodle ist ein anderer als bei der Vorschau.
    */
   consume(token: string, actionId: string, params: unknown, state?: unknown): ConsumeResult {
+    // Vor dem Nachschlagen: Ein Stand, der kein reines JSON ist, wirft hier und verbraucht keinen Code
+    const currentState = stateHash(state);
     const entry = this.open.get(token);
     if (!entry) return 'invalid';
     this.open.delete(token);
     // Beide Vergleiche immer ausführen, damit die Dauer nichts über den Grund verrät
     const sameParams = timingSafeEqual(entry.hash, paramsHash(actionId, params));
-    const sameState = timingSafeEqual(entry.stateHash, stateHash(state));
+    const sameState = timingSafeEqual(entry.stateHash, currentState);
     if (entry.expiresAt <= this.now() || !sameParams) return 'invalid';
     return sameState ? 'ok' : 'state_changed';
   }

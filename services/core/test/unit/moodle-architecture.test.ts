@@ -2,7 +2,7 @@
 // Vorschau und Ausführen erreicht nur der Klick-Handler der Web-App über `routes/moodle.ts`. Die Tests sichern, dass
 // UNSER Code das nie anders tut. Ein fremdes Programm am Mac kann das nicht verhindern (VERTRAEGE §5).
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
@@ -64,13 +64,56 @@ describe('Architektur Core: nur routes/moodle.ts erreicht Moodle-Aktionen', () =
     ]);
   });
 
+  /**
+   * Alle Modulpfade einer Datei, aufgelöst relativ zu `services/core/src`, ohne Endung: statisch (`from`, auch
+   * `export … from`), nur für Nebenwirkungen (`import '…'`), dynamisch (`import(…)`) und `require(…)`, mit beiden
+   * Anführungszeichen und Backticks. So umgeht eine andere Schreibweise den Test nicht.
+   */
+  function importsOf(source: Source): string[] {
+    const specifier = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['"`])([^'"`]+)\1/g;
+    const dir = posix.dirname(source.path);
+    const out: string[] = [];
+    for (const match of source.code.matchAll(specifier)) {
+      const spec = match[2] ?? '';
+      if (!spec.startsWith('.')) continue;
+      out.push(
+        posix
+          .normalize(posix.join(dir, spec))
+          .replace(/\.(?:[cm]?[jt]s)$/, '')
+          .replace(/\/index$/, ''),
+      );
+    }
+    return out;
+  }
+  const importersOf = (target: string) =>
+    coreFiles
+      .filter((f) => importsOf(f).includes(target))
+      .map((f) => f.path)
+      .sort();
+
+  it('importsOf erkennt alle Schreibweisen (Gegenprobe)', () => {
+    const probe = (code: string, path = 'moodle/sync.ts') => importsOf({ path, code, raw: code });
+    expect(probe("import { x } from './actions.ts';")).toEqual(['moodle/actions']);
+    expect(probe('import { x } from "./actions.js";')).toEqual(['moodle/actions']);
+    expect(probe("const m = await import('./actions');")).toEqual(['moodle/actions']);
+    expect(probe('const m = await import(`./actions.ts`);')).toEqual(['moodle/actions']);
+    expect(probe("export * from './actions.ts';")).toEqual(['moodle/actions']);
+    expect(probe("import './actions.ts';")).toEqual(['moodle/actions']);
+    expect(probe("const m = require('../moodle/actions.ts');", 'routes/x.ts')).toEqual(['moodle/actions']);
+  });
+
   it('actions.ts (Handler) importieren nur routes/moodle.ts und moodle/index.ts', () => {
-    const importsActions = /from\s+'(?:\.\.?\/)+(?:moodle\/)?actions\.ts'/;
-    expect(only(coreFiles, importsActions)).toEqual(['moodle/index.ts', 'routes/moodle.ts']);
+    expect(importersOf('moodle/actions')).toEqual(['moodle/index.ts', 'routes/moodle.ts']);
+  });
+
+  it('Bestätigungscodes und Sperren importiert nur moodle/index.ts', () => {
+    expect(importersOf('moodle/confirmations')).toEqual(['moodle/index.ts']);
+    expect(importersOf('moodle/locks')).toEqual(['moodle/index.ts']);
   });
 
   it('Registry, Bestätigungscodes, Sperren und Katalog tauchen nur dort auf, wo sie hingehören', () => {
-    // Job-Handler, sync.ts und alle anderen Routen kennen weder Handler noch Codes
+    // Job-Handler, sync.ts und alle anderen Routen kennen weder Handler noch Codes. Auch kein
+    // `Pick<MoodleServices, 'actions'>` und kein Zugriff `moodle['actions']`
     const allowed = new Set([
       'routes/moodle.ts',
       'moodle/index.ts',
@@ -79,7 +122,7 @@ describe('Architektur Core: nur routes/moodle.ts erreicht Moodle-Aktionen', () =
       'moodle/locks.ts',
     ]);
     const pattern =
-      /\b(MoodleActionRegistry|MoodleActionHandler|ConfirmationStore|KeyedMutex|DEFAULT_ACTION_HANDLERS|MOODLE_ACTION_SPECS)\b|\bconfirmations\b|\bmoodle\.actions\b|\bmoodle\.locks\b/;
+      /\b(MoodleActionRegistry|MoodleActionHandler|ConfirmationStore|KeyedMutex|DEFAULT_ACTION_HANDLERS|MOODLE_ACTION_SPECS)\b|\bconfirmations\b|\bmoodle\.actions\b|\bmoodle\.locks\b|['"`](?:actions|locks)['"`]/;
     const offenders = only(coreFiles, pattern).filter((path) => !allowed.has(path));
     expect(offenders).toEqual([]);
   });
