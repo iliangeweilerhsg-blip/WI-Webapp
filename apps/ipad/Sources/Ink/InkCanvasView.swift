@@ -328,8 +328,11 @@ extension InkCanvasContainerView: @preconcurrency PKCanvasViewDelegate {
 }
 
 extension InkCanvasContainerView: UIGestureRecognizerDelegate {
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        guard gestureRecognizer is UISwipeGestureRecognizer else { return true }
+    // UIView hat dieselbe Methode; sie gilt für alle Gesten dieser Ansicht
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer is UISwipeGestureRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
         return onSwipePage != nil && isNotZoomedIn
     }
 
