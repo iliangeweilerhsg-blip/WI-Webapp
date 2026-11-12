@@ -614,6 +614,12 @@
     "Notebook": {
       "$ref": "#/$defs/Notebook"
     },
+    "NotebookChange": {
+      "$ref": "#/$defs/NotebookChange"
+    },
+    "NotebookChangeKind": {
+      "$ref": "#/$defs/NotebookChangeKind"
+    },
     "NotebookCreate": {
       "$ref": "#/$defs/NotebookCreate"
     },
@@ -8328,6 +8334,34 @@
         }
       }
     },
+    "NotebookChange": {
+      "title": "NotebookChange",
+      "type": "object",
+      "description": "Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client per REST",
+      "required": [
+        "notebook_id",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookChangeKind"
+        }
+      }
+    },
+    "NotebookChangeKind": {
+      "title": "NotebookChangeKind",
+      "type": "string",
+      "description": "Art der Server-Operation: notebook.update, .delete oder .restore",
+      "enum": [
+        "update",
+        "delete",
+        "restore"
+      ]
+    },
     "NotebookCreate": {
       "title": "NotebookCreate",
       "type": "object",
@@ -13003,24 +13037,7 @@
           "const": "notebook.changed"
         },
         "data": {
-          "type": "object",
-          "required": [
-            "notebook_id",
-            "kind"
-          ],
-          "additionalProperties": false,
-          "properties": {
-            "notebook_id": {
-              "$ref": "#/$defs/Uuid"
-            },
-            "kind": {
-              "enum": [
-                "update",
-                "delete",
-                "restore"
-              ]
-            }
-          }
+          "$ref": "#/$defs/NotebookChange"
         }
       }
     },

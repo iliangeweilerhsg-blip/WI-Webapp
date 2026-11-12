@@ -306,7 +306,9 @@ final class InkLibraryService {
             } catch {
                 return
             }
-            guard let self else { return }
+            // Ein neueres Ereignis kann diesen Task abgebrochen haben, nachdem der Schlaf schon zu Ende war. Dann gehört
+            // der Abruf dem neuen Task: nicht doppelt laden und dessen Verweis nicht überschreiben.
+            guard !_Concurrency.Task.isCancelled, let self else { return }
             // Ab hier gehört der Abruf nicht mehr zum wartenden Task: Eine neue Änderung bricht ihn nicht ab
             self.liveRefreshTask = nil
             self.liveRefreshSince = nil

@@ -1771,19 +1771,28 @@
           "const": "notebook.changed"
         },
         "data": {
-          "type": "object",
-          "required": ["notebook_id", "kind"],
-          "additionalProperties": false,
-          "properties": {
-            "notebook_id": {
-              "$ref": "#/$defs/Uuid"
-            },
-            "kind": {
-              "enum": ["update", "delete", "restore"]
-            }
-          }
+          "$ref": "#/$defs/NotebookChange"
         }
       }
+    },
+    "NotebookChange": {
+      "type": "object",
+      "description": "Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client per REST",
+      "required": ["notebook_id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookChangeKind"
+        }
+      }
+    },
+    "NotebookChangeKind": {
+      "type": "string",
+      "description": "Art der Server-Operation: notebook.update, .delete oder .restore",
+      "enum": ["update", "delete", "restore"]
     },
     "SyncEvent": {
       "description": "Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert",

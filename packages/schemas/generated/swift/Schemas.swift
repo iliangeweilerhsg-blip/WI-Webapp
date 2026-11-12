@@ -69,7 +69,7 @@ struct SchemaBundle: Codable {
     let dataSettings: DataSettings?
     let dataSettingsUpdate: DataSettingsUpdate?
     let device: Device?
-    let deviceKind: DeviceKindEnum?
+    let deviceKind: DeviceKind?
     let deviceList: DeviceList?
     let drawingSnapshotData: DrawingSnapshotData?
     let drawingSnapshotOp: DrawingSnapshotOp?
@@ -212,6 +212,8 @@ struct SchemaBundle: Codable {
     let moodleSyncTrigger: MoodleSyncTrigger?
     let moodleUpload: MoodleUpload?
     let notebook: Notebook?
+    let notebookChange: NotebookChange?
+    let notebookChangeKind: NotebookChangeKind?
     let notebookCreate: NotebookCreate?
     let notebookCreateData: NotebookCreateData?
     let notebookCreateOp: NotebookCreateOp?
@@ -609,6 +611,8 @@ struct SchemaBundle: Codable {
         case moodleSyncTrigger = "MoodleSyncTrigger"
         case moodleUpload = "MoodleUpload"
         case notebook = "Notebook"
+        case notebookChange = "NotebookChange"
+        case notebookChangeKind = "NotebookChangeKind"
         case notebookCreate = "NotebookCreate"
         case notebookCreateData = "NotebookCreateData"
         case notebookCreateOp = "NotebookCreateOp"
@@ -883,7 +887,7 @@ extension SchemaBundle {
         dataSettings: DataSettings?? = nil,
         dataSettingsUpdate: DataSettingsUpdate?? = nil,
         device: Device?? = nil,
-        deviceKind: DeviceKindEnum?? = nil,
+        deviceKind: DeviceKind?? = nil,
         deviceList: DeviceList?? = nil,
         drawingSnapshotData: DrawingSnapshotData?? = nil,
         drawingSnapshotOp: DrawingSnapshotOp?? = nil,
@@ -1026,6 +1030,8 @@ extension SchemaBundle {
         moodleSyncTrigger: MoodleSyncTrigger?? = nil,
         moodleUpload: MoodleUpload?? = nil,
         notebook: Notebook?? = nil,
+        notebookChange: NotebookChange?? = nil,
+        notebookChangeKind: NotebookChangeKind?? = nil,
         notebookCreate: NotebookCreate?? = nil,
         notebookCreateData: NotebookCreateData?? = nil,
         notebookCreateOp: NotebookCreateOp?? = nil,
@@ -1423,6 +1429,8 @@ extension SchemaBundle {
             moodleSyncTrigger: moodleSyncTrigger ?? self.moodleSyncTrigger,
             moodleUpload: moodleUpload ?? self.moodleUpload,
             notebook: notebook ?? self.notebook,
+            notebookChange: notebookChange ?? self.notebookChange,
+            notebookChangeKind: notebookChangeKind ?? self.notebookChangeKind,
             notebookCreate: notebookCreate ?? self.notebookCreate,
             notebookCreateData: notebookCreateData ?? self.notebookCreateData,
             notebookCreateOp: notebookCreateOp ?? self.notebookCreateOp,
@@ -4985,7 +4993,7 @@ struct Device: Codable {
     let createdAt: Date
     let deletedAt: Date?
     let id: String
-    let kind: DeviceKindEnum
+    let kind: DeviceKind
     let lastSeenAt: Date?
     let name: String
     let updatedAt: Date
@@ -5031,7 +5039,7 @@ extension Device {
         createdAt: Date? = nil,
         deletedAt: Date?? = nil,
         id: String? = nil,
-        kind: DeviceKindEnum? = nil,
+        kind: DeviceKind? = nil,
         lastSeenAt: Date?? = nil,
         name: String? = nil,
         updatedAt: Date? = nil,
@@ -5061,7 +5069,7 @@ extension Device {
     }
 }
 
-enum DeviceKindEnum: String, Codable {
+enum DeviceKind: String, Codable {
     case ipad = "ipad"
     case iphone = "iphone"
 }
@@ -12636,6 +12644,63 @@ enum NotebookKind: String, Codable {
     case vorlesung = "vorlesung"
 }
 
+/// Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client
+/// per REST
+// MARK: - NotebookChange
+struct NotebookChange: Codable {
+    let kind: NotebookChangeKind
+    let notebookID: String
+
+    enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case notebookID = "notebook_id"
+    }
+}
+
+// MARK: NotebookChange convenience initializers and mutators
+
+extension NotebookChange {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookChange.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: NotebookChangeKind? = nil,
+        notebookID: String? = nil
+    ) -> NotebookChange {
+        return NotebookChange(
+            kind: kind ?? self.kind,
+            notebookID: notebookID ?? self.notebookID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Art der Server-Operation: notebook.update, .delete oder .restore
+enum NotebookChangeKind: String, Codable {
+    case delete = "delete"
+    case restore = "restore"
+    case update = "update"
+}
+
 /// POST /notebooks. kind fehlt = frei
 // MARK: - NotebookCreate
 struct NotebookCreate: Codable {
@@ -14335,7 +14400,7 @@ struct PairConfirmRequest: Codable {
     let appVersion: String?
     let code: String
     let deviceName: String
-    let kind: DeviceKindEnum
+    let kind: DeviceKind
     let pairingID: String
     let publicNonce: String
 
@@ -14371,7 +14436,7 @@ extension PairConfirmRequest {
         appVersion: String?? = nil,
         code: String? = nil,
         deviceName: String? = nil,
-        kind: DeviceKindEnum? = nil,
+        kind: DeviceKind? = nil,
         pairingID: String? = nil,
         publicNonce: String? = nil
     ) -> PairConfirmRequest {
@@ -14449,7 +14514,7 @@ extension PairResponse {
 // MARK: - PairStartRequest
 struct PairStartRequest: Codable {
     let deviceName: String
-    let kind: DeviceKindEnum
+    let kind: DeviceKind
     /// Zufallswert des iPads (base64url, ≥ 128 Bit)
     let publicNonce: String
 
@@ -14480,7 +14545,7 @@ extension PairStartRequest {
 
     func with(
         deviceName: String? = nil,
-        kind: DeviceKindEnum? = nil,
+        kind: DeviceKind? = nil,
         publicNonce: String? = nil
     ) -> PairStartRequest {
         return PairStartRequest(
@@ -14630,7 +14695,7 @@ extension PairingCode {
 // MARK: - PairingRequest
 struct PairingRequest: Codable {
     let deviceName: String
-    let kind: DeviceKindEnum
+    let kind: DeviceKind
     let pairingID: String
     let requestID: String
     let requestedAt: Date
@@ -14664,7 +14729,7 @@ extension PairingRequest {
 
     func with(
         deviceName: String? = nil,
-        kind: DeviceKindEnum? = nil,
+        kind: DeviceKind? = nil,
         pairingID: String? = nil,
         requestID: String? = nil,
         requestedAt: Date? = nil
@@ -19893,7 +19958,7 @@ struct SyncClientMessage: Codable {
     let sessionID: String?
     let at: Int?
     let clockUncertain: Bool?
-    let data: SyncClientMessageData?
+    let data: DataClass?
     let kind: SyncClientMessageKind?
     let opID: String?
     let origin: SyncOrigin?
@@ -19958,7 +20023,7 @@ extension SyncClientMessage {
         sessionID: String?? = nil,
         at: Int?? = nil,
         clockUncertain: Bool?? = nil,
-        data: SyncClientMessageData?? = nil,
+        data: DataClass?? = nil,
         kind: SyncClientMessageKind?? = nil,
         opID: String?? = nil,
         origin: SyncOrigin?? = nil,
@@ -20013,8 +20078,8 @@ extension SyncClientMessage {
 /// Rückgängig (⌘Z, F-DSH-05) bzw. Löschen
 ///
 /// Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
-// MARK: - SyncClientMessageData
-struct SyncClientMessageData: Codable {
+// MARK: - DataClass
+struct DataClass: Codable {
     let createdAt: Int?
     /// Nur frei. Die Notizbücher vorlesung/uebung legt der Core an
     let kind: PurpleMarkerKind?
@@ -20094,11 +20159,11 @@ struct SyncClientMessageData: Codable {
     }
 }
 
-// MARK: SyncClientMessageData convenience initializers and mutators
+// MARK: DataClass convenience initializers and mutators
 
-extension SyncClientMessageData {
+extension DataClass {
     init(data: Data) throws {
-        self = try newJSONDecoder().decode(SyncClientMessageData.self, from: data)
+        self = try newJSONDecoder().decode(DataClass.self, from: data)
     }
 
     init(_ json: String, using encoding: String.Encoding = .utf8) throws {
@@ -20149,8 +20214,8 @@ extension SyncClientMessageData {
         source: ClientDevice?? = nil,
         fileRef: PhotoFileRef?? = nil,
         photoID: String?? = nil
-    ) -> SyncClientMessageData {
-        return SyncClientMessageData(
+    ) -> DataClass {
+        return DataClass(
             createdAt: createdAt ?? self.createdAt,
             kind: kind ?? self.kind,
             moduleID: moduleID ?? self.moduleID,
@@ -20628,7 +20693,7 @@ enum SyncErrorType: String, Codable {
 /// Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
 // MARK: - SyncEvent
 struct SyncEvent: Codable {
-    let data: DataClass
+    let data: SyncEventData
     let name: SyncEventName
     let type: SyncConnectionEventType
 
@@ -20658,7 +20723,7 @@ extension SyncEvent {
     }
 
     func with(
-        data: DataClass? = nil,
+        data: SyncEventData? = nil,
         name: SyncEventName? = nil,
         type: SyncConnectionEventType? = nil
     ) -> SyncEvent {
@@ -20685,8 +20750,11 @@ extension SyncEvent {
 /// Web-App listet sie und kann sie ablehnen (DELETE
 /// /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App
 /// empfiehlt darum den QR-Weg
-// MARK: - DataClass
-struct DataClass: Codable {
+///
+/// Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client
+/// per REST
+// MARK: - SyncEventData
+struct SyncEventData: Codable {
     let autoStopExtendedUntil: Date?
     let calendarEventID: String?
     let createdAt: Date?
@@ -20717,7 +20785,7 @@ struct DataClass: Codable {
     let pageID: String?
     let sessionID: String?
     let connected: Bool?
-    let kind: PurpleDeviceKind?
+    let kind: EKind?
     let pairingID: String?
     let requestID: String?
     let requestedAt: Date?
@@ -20758,11 +20826,11 @@ struct DataClass: Codable {
     }
 }
 
-// MARK: DataClass convenience initializers and mutators
+// MARK: SyncEventData convenience initializers and mutators
 
-extension DataClass {
+extension SyncEventData {
     init(data: Data) throws {
-        self = try newJSONDecoder().decode(DataClass.self, from: data)
+        self = try newJSONDecoder().decode(SyncEventData.self, from: data)
     }
 
     init(_ json: String, using encoding: String.Encoding = .utf8) throws {
@@ -20805,12 +20873,12 @@ extension DataClass {
         pageID: String?? = nil,
         sessionID: String?? = nil,
         connected: Bool?? = nil,
-        kind: PurpleDeviceKind?? = nil,
+        kind: EKind?? = nil,
         pairingID: String?? = nil,
         requestID: String?? = nil,
         requestedAt: Date?? = nil
-    ) -> DataClass {
-        return DataClass(
+    ) -> SyncEventData {
+        return SyncEventData(
             autoStopExtendedUntil: autoStopExtendedUntil ?? self.autoStopExtendedUntil,
             calendarEventID: calendarEventID ?? self.calendarEventID,
             createdAt: createdAt ?? self.createdAt,
@@ -20855,7 +20923,8 @@ extension DataClass {
     }
 }
 
-enum PurpleDeviceKind: String, Codable {
+/// Art der Server-Operation: notebook.update, .delete oder .restore
+enum EKind: String, Codable {
     case delete = "delete"
     case ipad = "ipad"
     case iphone = "iphone"
@@ -20946,7 +21015,7 @@ enum SyncHelloType: String, Codable {
 /// Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
 // MARK: - SyncNotebookChangedEvent
 struct SyncNotebookChangedEvent: Codable {
-    let data: SyncNotebookChangedEventData
+    let data: NotebookChange
     let name: SyncNotebookChangedEventName
     let type: SyncConnectionEventType
 
@@ -20976,7 +21045,7 @@ extension SyncNotebookChangedEvent {
     }
 
     func with(
-        data: SyncNotebookChangedEventData? = nil,
+        data: NotebookChange? = nil,
         name: SyncNotebookChangedEventName? = nil,
         type: SyncConnectionEventType? = nil
     ) -> SyncNotebookChangedEvent {
@@ -20996,60 +21065,6 @@ extension SyncNotebookChangedEvent {
     }
 }
 
-// MARK: - SyncNotebookChangedEventData
-struct SyncNotebookChangedEventData: Codable {
-    let kind: PurpleKind
-    let notebookID: String
-
-    enum CodingKeys: String, CodingKey {
-        case kind = "kind"
-        case notebookID = "notebook_id"
-    }
-}
-
-// MARK: SyncNotebookChangedEventData convenience initializers and mutators
-
-extension SyncNotebookChangedEventData {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(SyncNotebookChangedEventData.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        kind: PurpleKind? = nil,
-        notebookID: String? = nil
-    ) -> SyncNotebookChangedEventData {
-        return SyncNotebookChangedEventData(
-            kind: kind ?? self.kind,
-            notebookID: notebookID ?? self.notebookID
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-enum PurpleKind: String, Codable {
-    case delete = "delete"
-    case restore = "restore"
-    case update = "update"
-}
-
 enum SyncNotebookChangedEventName: String, Codable {
     case notebookChanged = "notebook.changed"
 }
@@ -21063,7 +21078,7 @@ enum SyncNotebookChangedEventName: String, Codable {
 struct SyncOp: Codable {
     let at: Int
     let clockUncertain: Bool
-    let data: SyncClientMessageData
+    let data: DataClass
     let kind: SyncClientMessageKind
     let opID: String
     let origin: SyncOrigin?
@@ -21106,7 +21121,7 @@ extension SyncOp {
     func with(
         at: Int? = nil,
         clockUncertain: Bool? = nil,
-        data: SyncClientMessageData? = nil,
+        data: DataClass? = nil,
         kind: SyncClientMessageKind? = nil,
         opID: String? = nil,
         origin: SyncOrigin?? = nil,
@@ -21715,6 +21730,9 @@ extension SyncServerMessage {
 /// Web-App listet sie und kann sie ablehnen (DELETE
 /// /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App
 /// empfiehlt darum den QR-Weg
+///
+/// Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client
+/// per REST
 // MARK: - SyncServerMessageData
 struct SyncServerMessageData: Codable {
     let createdAt: CreatedAt?
@@ -22015,6 +22033,7 @@ enum CreatedAt: Codable {
     }
 }
 
+/// Art der Server-Operation: notebook.update, .delete oder .restore
 enum Kind: String, Codable {
     case delete = "delete"
     case frage = "frage"
@@ -25546,6 +25565,14 @@ extension Notebook {
         try container.encode(title, forKey: .title)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(userID, forKey: .userID)
+    }
+}
+
+extension NotebookChange {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(notebookID, forKey: .notebookID)
     }
 }
 

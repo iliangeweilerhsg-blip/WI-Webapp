@@ -442,6 +442,13 @@ export type MoodleSyncState = ("aus" | "bereit" | "laeuft" | "pausiert")
  */
 export type NotebookKind = ("vorlesung" | "uebung" | "frei")
 /**
+ * Art der Server-Operation: notebook.update, .delete oder .restore
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookChangeKind".
+ */
+export type NotebookChangeKind = ("update" | "delete" | "restore")
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PageTemplate".
  */
@@ -3464,6 +3471,16 @@ kind: NotebookKind
 page_count: number
 }
 /**
+ * Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client per REST
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookChange".
+ */
+export interface NotebookChange {
+notebook_id: Uuid
+kind: NotebookChangeKind
+}
+/**
  * POST /notebooks. kind fehlt = frei
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -5236,10 +5253,7 @@ data: PairingRequest
 export interface SyncNotebookChangedEvent {
 type: "event"
 name: "notebook.changed"
-data: {
-notebook_id: Uuid
-kind: ("update" | "delete" | "restore")
-}
+data: NotebookChange
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from enum import Enum, StrEnum
+from enum import StrEnum
 from typing import Any, Literal
 
 from pydantic import (
@@ -1093,6 +1093,16 @@ class EventId(RootModel[StrictInt]):
     root: StrictInt = Field(..., description='Moodle-ID', ge=1)
 
 
+class NotebookChangeKind(StrEnum):
+    """
+    Art der Server-Operation: notebook.update, .delete oder .restore
+    """
+
+    update = 'update'
+    delete = 'delete'
+    restore = 'restore'
+
+
 class NotebookKind(StrEnum):
     vorlesung = 'vorlesung'
     uebung = 'uebung'
@@ -1444,12 +1454,6 @@ class SyncErrorCode(StrEnum):
     op_not_allowed = 'op_not_allowed'
     session_superseded = 'session_superseded'
     internal_error = 'internal_error'
-
-
-class Kind1(Enum):
-    update = 'update'
-    delete = 'delete'
-    restore = 'restore'
 
 
 class SyncOrigin(StrEnum):
@@ -3799,6 +3803,23 @@ class Notebook(BaseModel):
     page_count: StrictInt = Field(..., description='Abgeleitet', ge=0)
 
 
+class NotebookChange(BaseModel):
+    """
+    Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client per REST
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    notebook_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    kind: NotebookChangeKind
+
+
 class NotebookCreate(BaseModel):
     """
     POST /notebooks. kind fehlt = frei
@@ -5501,19 +5522,6 @@ class SyncError(BaseModel):
     details: dict[str, Any] | None = None
 
 
-class Data(BaseModel):
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    notebook_id: StrictStr = Field(
-        ...,
-        description='UUIDv7 (03 §1), Kleinbuchstaben',
-        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
-        title='Uuid',
-    )
-    kind: Kind1
-
-
 class SyncNotebookChangedEvent(BaseModel):
     """
     Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms. Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
@@ -5524,7 +5532,7 @@ class SyncNotebookChangedEvent(BaseModel):
     )
     type: Literal['event']
     name: Literal['notebook.changed']
-    data: Data
+    data: NotebookChange
 
 
 class SyncPairingEvent(BaseModel):
@@ -7751,6 +7759,10 @@ class SchemaBundle(BaseModel):
     )
     MoodleUpload_1: MoodleUpload | None = Field(None, alias='MoodleUpload')
     Notebook_1: Notebook | None = Field(None, alias='Notebook')
+    NotebookChange_1: NotebookChange | None = Field(None, alias='NotebookChange')
+    NotebookChangeKind_1: NotebookChangeKind | None = Field(
+        None, alias='NotebookChangeKind'
+    )
     NotebookCreate_1: NotebookCreate | None = Field(None, alias='NotebookCreate')
     NotebookCreateData_1: NotebookCreateData | None = Field(
         None, alias='NotebookCreateData'

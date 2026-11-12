@@ -165,6 +165,12 @@ final class FileInkLibraryStore: InkLibraryStore {
                 merged.append(local)
             }
         }
+        // Notizbücher eines Moduls, das am Core fehlt (am Mac mit Modul oder Semester gelöscht), gelten wie in
+        // `mergeNotebooks` als gelöscht. Kommt das Modul zurück, macht `mergeNotebooks` sie wieder sichtbar (#245).
+        for index in file.notebooks.indices
+        where file.notebooks[index].knownOnServer && !seen.contains(file.notebooks[index].moduleID) {
+            file.notebooks[index].hidden = true
+        }
         file.modules = merged
         file.refreshedAtMS = InkStrokeCodec.milliseconds(date)
         persist()

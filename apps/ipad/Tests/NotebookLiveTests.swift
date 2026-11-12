@@ -62,6 +62,7 @@ final class NotebookChangedInboundTests: XCTestCase {
 
 @MainActor
 private final class LiveRefreshState {
+    var modules: [String] = [LibraryFixtures.moduleJSON()]
     var notebooks: [String] = []
     var moduleRequests = 0
     var events = 0
@@ -82,7 +83,7 @@ final class NotebookLiveRefreshTests: XCTestCase {
             let path = request.url?.path ?? ""
             if path.hasSuffix("/modules") {
                 state.moduleRequests += 1
-                return .http(status: 200, body: LibraryFixtures.list([LibraryFixtures.moduleJSON()]))
+                return .http(status: 200, body: LibraryFixtures.list(state.modules))
             }
             if path.hasSuffix("/notebooks") {
                 return .http(status: 200, body: LibraryFixtures.list(state.notebooks))
@@ -131,7 +132,7 @@ final class NotebookLiveRefreshTests: XCTestCase {
         XCTAssertEqual(rig.state.moduleRequests, before + 1)
     }
 
-    func testAConstantStreamReloadsExactlyAtTheMaximumWait() async {
+    func testAConstantStreamReloadsAtTheMaximumWait() async {
         let rig = await makeRig()
         let before = rig.state.moduleRequests
 
@@ -140,12 +141,13 @@ final class NotebookLiveRefreshTests: XCTestCase {
             await change(rig, "update")
             if rig.state.events < 10 { await rig.h.clock.advance(0.5) }
         }
-        // 4,5 s nach dem ersten Ereignis, das letzte ist gerade eingetroffen
+        // 4,5 s nach dem ersten Ereignis, das letzte ist gerade eingetroffen. Ohne Höchstwartezeit käme der Abruf erst
+        // bei 5,5 s. Geprüft wird mit Abstand zur Grenze (Gleitkomma, Aufrunden auf ganze Millisekunden).
         await rig.h.clock.advance(0.4)
         // 4,9 s nach dem ersten: noch kein Abruf
         XCTAssertEqual(rig.state.moduleRequests, before)
-        await rig.h.clock.advance(0.1)
-        // Genau 5,0 s: genau ein Abruf
+        await rig.h.clock.advance(0.2)
+        // 5,1 s: genau ein Abruf
         XCTAssertEqual(rig.state.moduleRequests, before + 1)
 
         // Danach nichts mehr, solange nichts kommt
@@ -185,6 +187,28 @@ final class NotebookLiveRefreshTests: XCTestCase {
         XCTAssertNotNil(service.page(rig.h.binding.pageID))
 
         // Wiederhergestellt: Es steht wieder in der Liste, die Zeile verschwindet
+        rig.state.notebooks = [LibraryFixtures.notebookJSON(id: notebookA)]
+        await change(rig, "restore")
+        await rig.h.clock.advance(1.1)
+        XCTAssertFalse(service.isDeletedOnMac(notebookID: notebookA))
+    }
+
+    func testAModuleDeletedOnTheMacShowsTheLineForItsOpenNotebook() async {
+        let rig = await makeRig()
+        let service = rig.h.service
+        await service.refresh(force: true)
+        XCTAssertFalse(service.isDeletedOnMac(notebookID: notebookA))
+
+        // Modul am Mac gelöscht: Der Core liefert weder das Modul noch seine Notizbücher
+        rig.state.modules = []
+        rig.state.notebooks = []
+        await change(rig, "delete")
+        await rig.h.clock.advance(1.1)
+        XCTAssertTrue(service.isDeletedOnMac(notebookID: notebookA))
+        XCTAssertNotNil(service.openTarget(notebookID: notebookA))
+
+        // Modul wiederhergestellt: Die Zeile verschwindet
+        rig.state.modules = [LibraryFixtures.moduleJSON()]
         rig.state.notebooks = [LibraryFixtures.notebookJSON(id: notebookA)]
         await change(rig, "restore")
         await rig.h.clock.advance(1.1)
