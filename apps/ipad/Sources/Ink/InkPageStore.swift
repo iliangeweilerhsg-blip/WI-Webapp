@@ -18,10 +18,16 @@ struct InkPageSnapshot: Equatable, Sendable {
     var outboxNumber = 0
     /// Lokaler Stand und Core müssen abgeglichen werden (`InkReconciler`)
     var needsReconcile = false
+    /// Die Dateien der Seite gibt es, ließen sich aber nicht lesen oder decodieren (#252). Der Rest des Stands ist dann
+    /// leer und sagt nichts über die Seite. Wer so einen Stand bekommt, gleicht nie ab und speichert nie: Ein Abgleich
+    /// entfernte am Core alle Striche, Speichern überschriebe die Datei. Eine fehlende Datei (neue Seite) ist
+    /// dagegen ein gültiger, leerer Stand.
+    var unreadable = false
 }
 
 /// Lokale Ablage der Seiten
 protocol InkPageStore {
+    /// Fehlt die Seite, ist der Stand leer. Ist sie vorhanden, aber nicht lesbar, trägt er `unreadable`.
     func load(pageID: String) -> InkPageSnapshot
     func save(_ snapshot: InkPageSnapshot, pageID: String) throws
 }
@@ -55,11 +61,43 @@ struct FileInkPageStore: InkPageStore {
 
     private static let legacyFiles = ["ink.pkdrawing", "highlight.pkdrawing", "ids.json"]
 
+    /// Ergebnis beim Lesen einer Datei der Seite
+    private enum FileRead {
+        case missing
+        case data(Data)
+        case failed
+    }
+
+    /// Unterscheidet „gibt es nicht“ von „Lesefehler“. Alles außer „Datei fehlt“ zählt als Fehler.
+    private static func read(_ url: URL) -> FileRead {
+        do {
+            return .data(try Data(contentsOf: url))
+        } catch {
+            let cocoa = error as? CocoaError
+            if cocoa?.code == .fileReadNoSuchFile || cocoa?.code == .fileNoSuchFile {
+                return .missing
+            }
+            let nsError = error as NSError
+            if nsError.domain == NSPOSIXErrorDomain, nsError.code == Int(ENOENT) {
+                return .missing
+            }
+            return .failed
+        }
+    }
+
+    private static var unreadableSnapshot: InkPageSnapshot {
+        var snapshot = InkPageSnapshot()
+        snapshot.unreadable = true
+        return snapshot
+    }
+
     func load(pageID: String) -> InkPageSnapshot {
         let folder = self.folder(for: pageID)
-        if let data = try? Data(contentsOf: folder.appendingPathComponent("page.plist")),
-            let plist = try? PropertyListDecoder().decode(InkPagePlist.self, from: data)
-        {
+        switch FileInkPageStore.read(folder.appendingPathComponent("page.plist")) {
+        case .data(let data):
+            guard let plist = try? PropertyListDecoder().decode(InkPagePlist.self, from: data) else {
+                return FileInkPageStore.unreadableSnapshot
+            }
             return InkPageSnapshot(
                 ink: plist.ink,
                 highlight: plist.highlight,
@@ -67,15 +105,31 @@ struct FileInkPageStore: InkPageStore {
                 outboxNumber: plist.outboxNumber,
                 needsReconcile: plist.needsReconcile
             )
+        case .failed:
+            return FileInkPageStore.unreadableSnapshot
+        case .missing:
+            break
         }
-        // Alter Stand: drei einzelne Dateien
+        // Alter Stand: drei einzelne Dateien. Fehlt eine, ist sie leer; ist eine da und nicht lesbar, ist die Seite es auch.
         var snapshot = InkPageSnapshot()
-        snapshot.ink = try? Data(contentsOf: folder.appendingPathComponent("ink.pkdrawing"))
-        snapshot.highlight = try? Data(contentsOf: folder.appendingPathComponent("highlight.pkdrawing"))
-        if let data = try? Data(contentsOf: folder.appendingPathComponent("ids.json")),
-            let trackers = try? JSONDecoder().decode(InkPageTrackers.self, from: data)
-        {
+        switch FileInkPageStore.read(folder.appendingPathComponent("ink.pkdrawing")) {
+        case .data(let data): snapshot.ink = data
+        case .missing: break
+        case .failed: return FileInkPageStore.unreadableSnapshot
+        }
+        switch FileInkPageStore.read(folder.appendingPathComponent("highlight.pkdrawing")) {
+        case .data(let data): snapshot.highlight = data
+        case .missing: break
+        case .failed: return FileInkPageStore.unreadableSnapshot
+        }
+        switch FileInkPageStore.read(folder.appendingPathComponent("ids.json")) {
+        case .data(let data):
+            guard let trackers = try? JSONDecoder().decode(InkPageTrackers.self, from: data) else {
+                return FileInkPageStore.unreadableSnapshot
+            }
             snapshot.trackers = trackers
+        case .missing: break
+        case .failed: return FileInkPageStore.unreadableSnapshot
         }
         return snapshot
     }

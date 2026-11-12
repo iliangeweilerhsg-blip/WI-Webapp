@@ -37,6 +37,10 @@ final class InkPageModel {
     private(set) var canRedo = false
     /// Das letzte Speichern ist gescheitert (Anzeige in der Werkzeugleiste)
     private(set) var saveFailed = false
+    /// Die Seite liegt auf der Platte, ließ sich aber nicht lesen (#252). Das Modell ist dann gesperrt: Es nimmt keine
+    /// Änderung an, speichert nicht und markiert nichts. Sonst überschriebe ein neuer Stand die Datei, und ein Abgleich
+    /// entfernte am Core alle Striche der Seite.
+    let isUnreadable: Bool
 
     /// Start der laufenden Session für `t_start_ms`/`t_end_ms`. Ohne Session `nil`.
     @ObservationIgnored var sessionStartedAt: Date?
@@ -76,6 +80,18 @@ final class InkPageModel {
         self.saveDelay = saveDelay
 
         let snapshot = store.load(pageID: pageID)
+        // Daten, die PencilKit nicht versteht, gelten wie ein Lesefehler und nicht als leere Zeichnung
+        let corrupt =
+            [snapshot.ink, snapshot.highlight].contains { data in
+                guard let data else { return false }
+                return (try? PKDrawing(data: data)) == nil
+            }
+        isUnreadable = snapshot.unreadable || corrupt
+        if isUnreadable {
+            // Alles bleibt leer und unberührt; `needsReconcile` bleibt, wie es auf der Platte steht
+            needsReconcile = snapshot.needsReconcile
+            return
+        }
         inkDrawing = InkPageModel.drawing(from: snapshot.ink)
         highlightDrawing = InkPageModel.drawing(from: snapshot.highlight)
         trackers = snapshot.trackers
@@ -93,7 +109,7 @@ final class InkPageModel {
 
     /// Das Einreihen in die Warteschlange ist gescheitert: Der nächste Abgleich holt das nach
     func markNeedsReconcile() {
-        guard !needsReconcile else { return }
+        guard !isUnreadable, !needsReconcile else { return }
         needsReconcile = true
         isDirty = true
         scheduleSave()
@@ -101,7 +117,7 @@ final class InkPageModel {
 
     /// Der Abgleich mit dem Core ist durch
     func reconcileFinished() {
-        guard needsReconcile else { return }
+        guard !isUnreadable, needsReconcile else { return }
         needsReconcile = false
         isDirty = true
         scheduleSave()
@@ -132,6 +148,7 @@ final class InkPageModel {
 
     /// Die Nutzerin hat eine Ebene geändert (Strich, Radieren, Lasso)
     func canvasDidChange(layer: StrokeLayer, drawing: PKDrawing) {
+        guard !isUnreadable else { return }
         let before = self.drawing(for: layer)
         // PencilKit meldet auch Zeichnungen, die die App selbst gesetzt hat
         guard drawing != before else { return }
@@ -151,14 +168,14 @@ final class InkPageModel {
     // MARK: Rückgängig und Wiederholen
 
     func undo() {
-        guard let step = history.undo() else { return }
+        guard !isUnreadable, let step = history.undo() else { return }
         endToolUse()
         setDrawing(step.before, layer: step.layer, byApp: true)
         didChange(step.layer)
     }
 
     func redo() {
-        guard let step = history.redo() else { return }
+        guard !isUnreadable, let step = history.redo() else { return }
         endToolUse()
         setDrawing(step.after, layer: step.layer, byApp: true)
         didChange(step.layer)
@@ -206,7 +223,7 @@ final class InkPageModel {
     func saveNow() {
         saveTask?.cancel()
         saveTask = nil
-        guard isDirty else { return }
+        guard !isUnreadable, isDirty else { return }
         let snapshot = InkPageSnapshot(
             ink: inkDrawing.strokes.isEmpty ? nil : inkDrawing.dataRepresentation(),
             highlight: highlightDrawing.strokes.isEmpty ? nil : highlightDrawing.dataRepresentation(),
@@ -288,6 +305,7 @@ final class InkPageModel {
 
     /// Speichert, sobald der Stift kurz ruht. So stört das Schreiben auf die Platte den Strich nicht.
     private func scheduleSave() {
+        guard !isUnreadable else { return }
         saveTask?.cancel()
         let delay = saveDelay
         saveTask = _Concurrency.Task { [weak self] in

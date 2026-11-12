@@ -58,6 +58,8 @@ actor InkThumbnailService {
         }
         renderedTemplates[pageID] = template
         let snapshot = store.load(pageID: pageID)
+        // Unlesbare Seite (#252): kein Bild aus dem leeren Stand, sonst zeigte die Seitenleiste eine leere Seite
+        guard !snapshot.unreadable else { return nil }
         let rendered = _Concurrency.Task.detached(priority: .utility) {
             InkThumbnailService.render(
                 ink: snapshot.ink, highlight: snapshot.highlight, template: template, widthPt: widthPt,

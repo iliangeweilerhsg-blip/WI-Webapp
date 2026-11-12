@@ -111,6 +111,10 @@ struct InkPageView: View {
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(spacing: 0) {
                         pageStrip
+                        if model.isUnreadable {
+                            // Ruhige Zeile statt Dialog (R1). Die Seite ist gesperrt, die Datei bleibt, wie sie ist.
+                            infoRow(InkPageTitle.unreadableLine)
+                        }
                         if let offlineText {
                             infoRow(offlineText)
                         }
