@@ -650,11 +650,7 @@ struct InkPageView: View {
             _Concurrency.Task { await show(pageID: next) }
         } else {
             // Die letzte Seite ist weg: `openTarget` legt eine neue an
-            _Concurrency.Task {
-                await openFreshPage()
-                // Nur merken, wenn die Ersatzseite wirklich neu ist und die Löschfrist noch läuft
-                if undoPageID == pageID { replacementPageID = binding?.pageID }
-            }
+            _Concurrency.Task { await openFreshPage(afterDeleting: pageID) }
         }
     }
 
@@ -666,9 +662,14 @@ struct InkPageView: View {
         if library.undoDelete(pageID: pageID) {
             // Die leere Ersatzseite der gelöschten letzten Seite wieder entfernen, sonst bleibt eine Restseite (UX-55).
             // Erst sichern: Ob sie leer ist, liest der Dienst von der Platte. Mit Strich bleibt sie.
+            // Ist die Ersatzseite offen, zählen auch die Striche im Speicher: Scheitert das Sichern, wüsste die Platte
+            // nichts von ihnen.
             if let replacementID, replacementID != pageID {
                 model?.saveNow()
-                library.discardEmptyPage(pageID: replacementID)
+                let openWithStrokes = binding?.pageID == replacementID && currentHasStrokes
+                if !openWithStrokes {
+                    library.discardEmptyPage(pageID: replacementID)
+                }
             }
             _Concurrency.Task { await show(pageID: pageID) }
         }
@@ -688,13 +689,19 @@ struct InkPageView: View {
         await reconcileIfNeeded()
     }
 
-    /// Nach dem Löschen der letzten Seite: eine neue anlegen und öffnen
-    private func openFreshPage() async {
+    /// Nach dem Löschen der letzten Seite: eine neue anlegen und öffnen. Läuft die Löschfrist der Seite noch, merkt
+    /// sich die Ansicht die Ersatzseite für „Rückgängig“ (UX-55), und zwar vor dem Abgleich, der warten kann.
+    /// Nur eine Seite, die `openTarget` neu angelegt hat, gilt als Ersatzseite, nie eine schon vorhandene.
+    private func openFreshPage(afterDeleting deletedID: String) async {
+        let known = Set(library.pages(inNotebook: currentNotebookID).map(\.id))
         guard let target = library.openTarget(notebookID: currentNotebookID) else {
             failedToOpen = true
             return
         }
         let page = present(target)
+        if undoPageID == deletedID, target.pageID != deletedID, !known.contains(target.pageID) {
+            replacementPageID = target.pageID
+        }
         guard !_Concurrency.Task.isCancelled, model === page else { return }
         await reconcileIfNeeded()
     }
