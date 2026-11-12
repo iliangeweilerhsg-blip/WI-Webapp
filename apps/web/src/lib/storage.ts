@@ -43,13 +43,15 @@ export function isStorageLow(freeBytes: number): boolean {
   return freeBytes < STORAGE_WARN_BELOW_BYTES;
 }
 
-export function useSystemStorage() {
+export function useSystemStorage(options: { refetchIntervalMs?: number | false } = {}) {
   const query = useQuery({
     queryKey: ['system', 'storage'],
     queryFn: ({ signal }) => apiGet('/system/storage', SystemStorageSchema, { signal }),
     staleTime: 60_000,
     // Der freie Platz ändert sich während einer Vorlesung; ein Fehler (etwa älterer Core) wird nicht wiederholt
     retry: false,
+    // Während einer Session fragt die Statusleiste regelmäßig nach (UX-316)
+    refetchInterval: options.refetchIntervalMs ?? false,
   });
   return useHydrationSafe(query);
 }

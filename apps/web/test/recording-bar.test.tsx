@@ -23,7 +23,14 @@ import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { FakeWebLocks, fakeRecording, type FakeRecording } from './recording-fakes.ts';
-import { installFakeCore, makeModule, makeSemester, makeSession, type FakeCore } from './fake-core.ts';
+import {
+  installFakeCore,
+  makeDevice,
+  makeModule,
+  makeSemester,
+  makeSession,
+  type FakeCore,
+} from './fake-core.ts';
 
 const nav = vi.hoisted(() => {
   const listeners = new Set<() => void>();
@@ -130,6 +137,10 @@ interface BootOptions {
   ui?: ReactNode;
   /** Mit der echten `AppShell` (Banner „anderer Tab“, Leiste in der Inhaltsspalte) statt nur Provider und Leiste */
   shell?: boolean;
+  /** Gekoppelte Geräte laut `GET /devices` */
+  devices?: ReturnType<typeof makeDevice>[];
+  /** Freier Platz am Mac laut `GET /system/storage`; ohne Angabe antwortet die Route nicht (404) */
+  freeBytes?: number;
 }
 
 function boot(opts: BootOptions = {}) {
@@ -142,7 +153,25 @@ function boot(opts: BootOptions = {}) {
     sessions: opts.sessions ?? [session(A_ID)],
   });
   core.notebooks = [];
-  core.devices = [];
+  core.devices = opts.devices ?? [];
+  if (opts.freeBytes !== undefined) {
+    const coreFetch = globalThis.fetch;
+    const free = opts.freeBytes;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/system/storage')
+        ? Promise.resolve(
+            Response.json({
+              data_dir_free_bytes: free,
+              data_dir_size_bytes: 1_000_000_000,
+              media_bytes: 500_000_000,
+              vault_bytes: 1_000_000,
+              db_bytes: 1_000_000,
+              measured_at: '2026-11-04T08:00:00Z',
+            }),
+          )
+        : coreFetch(input, init),
+    );
+  }
   sync = fakeSync(opts.syncState);
   rec = opts.rec ?? fakeRecording();
   env = { ...rec.env, ...opts.env };
@@ -610,5 +639,53 @@ describe('Folgepunkte #266', () => {
     await user.click(link);
     act(() => nav.setPath('/session'));
     await waitFor(() => expect(document.getElementById('main')).toHaveFocus());
+  });
+});
+
+describe('Aufnahme-Leiste: iPad und Speicher (UX-306, UX-316)', () => {
+  const ipad = (connected: boolean) => makeDevice({ kind: 'ipad', connected });
+
+  it('zeigt den Punkt "iPad" mit dem Stand der Verbindung, wenn ein iPad gekoppelt ist', async () => {
+    boot({ devices: [ipad(true)] });
+    const dot = await screen.findByTestId('bar-ipad-status');
+    expect(dot).toHaveTextContent('iPad');
+    expect(dot).toHaveTextContent('verbunden');
+    expect(dot).not.toHaveTextContent('nicht verbunden');
+  });
+
+  it('sagt "nicht verbunden", wenn das gekoppelte iPad gerade fehlt', async () => {
+    boot({ devices: [ipad(false)] });
+    expect(await screen.findByTestId('bar-ipad-status')).toHaveTextContent('nicht verbunden');
+  });
+
+  it('lässt den Punkt weg, solange kein iPad gekoppelt ist', async () => {
+    boot({ devices: [] });
+    await waitFor(() => expect(requests(/^GET \/devices/).length).toBeGreaterThan(0));
+    await settle();
+    expect(bar()).not.toBeNull();
+    expect(screen.queryByTestId('bar-ipad-status')).toBeNull();
+  });
+
+  it('fragt ohne aktive Session weder Geräte noch Speicher ab', async () => {
+    boot({ sessions: [], devices: [ipad(true)], freeBytes: 800_000_000 });
+    await waitFor(() => expect(requests(/^GET \/sessions\?state=/).length).toBeGreaterThan(0));
+    await settle();
+    expect(bar()).toBeNull();
+    expect(requests(/^GET \/devices/)).toHaveLength(0);
+    expect(screen.queryByTestId('storage-status')).toBeNull();
+  });
+
+  it('meldet knappen Speicher unter 1 GB ruhig in der Leiste', async () => {
+    boot({ freeBytes: 800_000_000 });
+    const note = await screen.findByTestId('storage-status');
+    expect(note).toHaveTextContent('nur noch 800 MB frei');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('schweigt bei 1 GB und mehr', async () => {
+    boot({ freeBytes: 1_000_000_000 });
+    await waitFor(() => expect(requests(/^GET \/devices/).length).toBeGreaterThan(0));
+    await settle();
+    expect(screen.queryByTestId('storage-status')).toBeNull();
   });
 });

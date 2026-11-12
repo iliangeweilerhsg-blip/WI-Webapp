@@ -8,11 +8,13 @@
 import Link from 'next/link';
 import { useRef } from 'react';
 import { useRecordingView } from '../../lib/recording';
+import { useSyncClient } from '../../lib/sync/SyncProvider.tsx';
 import { isDashboardAvailable, sessionHref } from '../../lib/sessions.ts';
 import { AutoStopHint } from '../autostop';
-import { PAUSE_HINT_MS } from '../dashboard/StatusBar.tsx';
+import { PAUSE_HINT_MS, useIpadState } from '../dashboard/StatusBar.tsx';
 import { formatElapsed } from '../today/model.ts';
 import { useNow } from '../today/use-today.ts';
+import { LowStorageNote } from './LowStorageNote.tsx';
 import { RECORDING_LABEL, RecordDot, recordingStatusText } from './labels.ts';
 
 const primary =
@@ -83,6 +85,9 @@ export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
           </button>
         ) : null}
 
+        <LowStorageNote active />
+        <BarIpadStatus />
+
         <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-2">
           <AutoStopHint
             status={view.autoStop.status}
@@ -112,5 +117,21 @@ export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
         </p>
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * Der Punkt "iPad" wie in der Statusleiste (UX-306); ohne gekoppeltes iPad bleibt er weg. Eigene Komponente, damit
+ * `GET /devices` (und im Folge-Tab dessen Abfrage alle 30 s) nur läuft, solange die Leiste zu sehen ist.
+ */
+function BarIpadStatus() {
+  const ipad = useIpadState(useSyncClient());
+  if (!ipad.paired) return null;
+  return (
+    <p className="flex items-center gap-2 text-text-muted" data-testid="bar-ipad-status">
+      <RecordDot filled={ipad.connected} record={false} />
+      <span>iPad</span>
+      <span className="sr-only">{ipad.connected ? 'verbunden' : 'nicht verbunden'}</span>
+    </p>
   );
 }
