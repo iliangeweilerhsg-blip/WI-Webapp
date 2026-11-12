@@ -594,4 +594,23 @@ describe('Suche: Konzepte (UX-309)', () => {
     expect(screen.queryByText('Suche gerade nicht erreichbar')).toBeNull();
     expect(screen.queryByRole('group', { name: 'Konzepte' })).toBeNull();
   });
+
+  it('fällt nur `/search` aus, bleiben die Konzepte neben der Fehlerzeile erreichbar', async () => {
+    const real = globalThis.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (...args: Parameters<typeof fetch>) => {
+        if (String(args[0]).includes('/search')) throw new TypeError('offline');
+        return real(...args);
+      }),
+    );
+    const user = userEvent.setup();
+    render(<Host />);
+    await typeQuery(user, 'normalform');
+    const group = await screen.findByRole('group', { name: 'Konzepte' });
+    expect(within(group).getByRole('option')).toHaveTextContent('Normalform');
+    expect(await screen.findByText('Suche gerade nicht erreichbar')).toBeVisible();
+    await user.keyboard('{Enter}');
+    expect(nav.push).toHaveBeenCalledWith('/bibliothek?konzept=0190f6a2-0000-7000-8000-0000000c0042');
+  });
 });

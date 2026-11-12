@@ -116,7 +116,8 @@ function Overlay({ onClose }: { onClose: () => void }) {
     return () => document.removeEventListener('focusin', onFocusIn);
   }, []);
 
-  const groups = useMemo(() => (response ? groupHits(response.hits) : null), [response]);
+  // Fällt `/search` aus, bleiben nur die Konzepte (eigener Aufruf); die alte Antwort wird dann nicht mehr gezeigt
+  const groups = useMemo(() => (response && !failed ? groupHits(response.hits) : null), [response, failed]);
   const hits = useMemo<Row[]>(
     () => [
       ...(groups ? flatHits(groups) : []).map((hit): Row => ({ type: 'hit', hit })),
@@ -361,7 +362,7 @@ function Overlay({ onClose }: { onClose: () => void }) {
                 ) : null}
               </>
             ) : null}
-            {!empty && !failed && response && hits.length > 0 ? (
+            {!empty && (failed ? concepts.length > 0 : response && hits.length > 0) ? (
               <div id={listId} role="listbox" aria-label="Treffer">
                 {slideRows.length > 0 ? (
                   <div role="group" aria-labelledby={`${uid}-folien`}>
