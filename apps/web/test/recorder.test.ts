@@ -728,6 +728,29 @@ describe('AudioRecorder: Mikrofon, Pause, Verlust', () => {
     expect(handlers.size).toBe(0);
   });
 
+  it('pagehide und verborgen bei beendetem MediaRecorder: kein requestData, kein Fehler im Hörer', async () => {
+    const handlers = new Set<() => void>();
+    const pageEvents = {
+      addEventListener: (_type: 'pagehide', fn: () => void) => void handlers.add(fn),
+      removeEventListener: (_type: 'pagehide', fn: () => void) => void handlers.delete(fn),
+    };
+    const h = setup({ pageEvents });
+    await h.recorder.start();
+    const mr = FakeMediaRecorder.instances[0]!;
+    // Wie im Browser: requestData() wirft im Zustand `inactive`
+    const requestData = vi.fn(() => {
+      throw new DOMException('inactive', 'InvalidStateError');
+    });
+    mr.requestData = requestData;
+    mr.state = 'inactive';
+    expect(() => [...handlers].forEach((fn) => fn())).not.toThrow();
+    h.visibility.state = 'hidden';
+    expect(() => h.visibility.fire()).not.toThrow();
+    expect(requestData).not.toHaveBeenCalled();
+    mr.state = 'recording';
+    await h.recorder.stop();
+  });
+
   it('Aufnahme aus IndexedDB gelöscht: neue Chunks kommen in die Fehlerablage statt verloren zu gehen', async () => {
     const h = setup();
     await h.recorder.start();

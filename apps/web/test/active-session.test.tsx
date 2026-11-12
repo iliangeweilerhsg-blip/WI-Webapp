@@ -200,6 +200,49 @@ describe('useActiveSession: Ereignisse', () => {
   });
 });
 
+describe('useActiveSession: Ereignis während eines Abrufs', () => {
+  it('die ältere Antwort überschreibt das Ereignis nicht: es wird neu abgerufen', async () => {
+    boot('online', [session(A_ID, { updated_at: T(1) })]);
+    await waitFor(() => expect(shown()).toBe(A_ID));
+    // Die nächste Antwort auf die Liste wird zurückgehalten, nachdem der Core sie gebaut hat (Stand: A läuft)
+    const underlying = globalThis.fetch;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let hold = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string, init?: RequestInit) => {
+        const response = await underlying(input, init);
+        if (hold && String(input).includes('/sessions?state=')) {
+          hold = false;
+          await held;
+        }
+        return response;
+      }),
+    );
+    await sync.emit('leader.changed', {});
+    await waitFor(() => expect(activeGets()).toHaveLength(2));
+    // Danach beendet der Core A; das Ereignis kommt vor der zurückgehaltenen Antwort an
+    const ended = session(A_ID, { state: 'beendet', ended_at: T(10), updated_at: T(10) });
+    core.sessions[0] = ended;
+    await sync.emit('session.updated', ended);
+    await waitFor(() => expect(shown()).toBe('keine'));
+    release();
+    // Die zurückgehaltene Antwort ist angekommen (setTimeout läuft echt)
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 20)));
+    expect(shown()).toBe('keine');
+    expect(activeGets()).toHaveLength(3);
+  });
+
+  it('ohne laufenden Abruf löst ein Ereignis keine Abfrage aus', async () => {
+    boot('online', [session(A_ID, { updated_at: T(1) })]);
+    await waitFor(() => expect(shown()).toBe(A_ID));
+    await sync.emit('session.updated', session(A_ID, { state: 'pausiert', updated_at: T(2) }));
+    await advance(100);
+    expect(activeGets()).toHaveLength(1);
+  });
+});
+
 describe('applyActiveSession', () => {
   function primed(active: Session | null) {
     const client = new QueryClient();

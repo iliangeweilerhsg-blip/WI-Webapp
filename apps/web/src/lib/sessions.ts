@@ -197,7 +197,12 @@ export function useActiveSession() {
   useEffect(() => {
     if (!sync) return;
     const refetch = () => void client.invalidateQueries({ queryKey: ACTIVE_SESSION_KEY });
-    const offUpdated = sync.onEvent('session.updated', (incoming) => applyActiveSession(client, incoming));
+    const offUpdated = sync.onEvent('session.updated', (incoming) => {
+      applyActiveSession(client, incoming);
+      // Kam das Ereignis während eines Abrufs, kann dessen Antwort älter sein und das Ereignis überschreiben. Online
+      // fragt niemand nach, der falsche Stand bliebe stehen: darum neu abrufen (bricht den laufenden Abruf ab).
+      if (client.isFetching({ queryKey: ACTIVE_SESSION_KEY, exact: true }) > 0) refetch();
+    });
     let wasDown = sync.connectionState !== 'online';
     const offConnection = sync.onEvent('connection', (c) => {
       if (c.state === 'online') {
