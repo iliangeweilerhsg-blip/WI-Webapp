@@ -21,8 +21,12 @@ protocol InterfaceListing: Sendable {
 /// eine Anfrage mit Token nur an eine IPv4-Adresse im Subnetz einer aktiven Schnittstelle des iPads, oder an einen
 /// `.local`-Namen (mDNS antwortet nur im eigenen Netzsegment). Sonst geht nichts raus.
 ///
-/// Grenze: Ein fremdes Netz mit demselben Adressbereich (zum Beispiel `192.168.1.0/24`) besteht die Prüfung. Das
-/// schließt erst der Tunnel (PR 4).
+/// Grenzen (schließt erst der Tunnel, PR 4):
+/// - Ein fremdes Netz mit demselben Adressbereich (zum Beispiel `192.168.1.0/24`) besteht die Prüfung. Wer das fremde
+///   Netz stellt, kann per DHCP auch eine sehr weite Netzmaske vergeben.
+/// - `.local` schützt nur gegen das Gateway, nicht gegen andere Teilnehmer: Im fremden Netzsegment kann jeder auf die
+///   mDNS-Frage nach dem Namen antworten. Eine Prüfung der aufgelösten Adresse hilft nicht: Wer antwortet, steht
+///   ja im Subnetz.
 enum TokenDestination {
     /// Reine Funktion ohne Netzzugriff.
     ///

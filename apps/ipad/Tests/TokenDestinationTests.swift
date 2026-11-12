@@ -247,6 +247,21 @@ final class TokenOnlyInOwnNetworkClientTests: XCTestCase {
         XCTAssertEqual(transport.requests.count, 1)
     }
 
+    func testRetryAfterConnectionLossIsCheckedAgain() async {
+        // `networkConnectionLost` kommt typisch beim Wechsel des WLANs: Die Wiederholung darf nicht ungeprüft raus
+        let interfaces = SwitchableInterfaces([FakeInterfaces.address("192.0.2.77", prefix: 24)])
+        let transport = FakeTransport([.failure(.networkConnectionLost), .http(status: 200, body: "{}")])
+        transport.duringRequest = { _ in
+            interfaces.set([FakeInterfaces.address("198.51.100.5", prefix: 24)])
+        }
+        let client = Fixtures.client(transport, interfaces: interfaces)
+
+        let error = await failure { try await client.checkHealth(endpoint: Fixtures.endpoint, token: Fixtures.token) }
+
+        XCTAssertEqual(error, .otherNetwork)
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+
     func testLocalNamesAreNotBlocked() async throws {
         let transport = FakeTransport([.http(status: 200, body: "{}")])
         let client = Fixtures.client(transport, interfaces: FakeInterfaces([]))

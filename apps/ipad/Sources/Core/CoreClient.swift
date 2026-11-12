@@ -506,10 +506,6 @@ final class CoreClient {
         queryItems: [URLQueryItem] = [],
         retriesOnConnectionLoss: Bool = true
     ) async throws -> Data {
-        // Mit Token nur ins eigene Netz (UX-12, PR 0). Die Kopplung (`pair/*`, ohne Token) bleibt unberührt.
-        if token != nil {
-            try requireTokenDestination(endpoint)
-        }
         guard let url = endpoint.url(path: path, queryItems: queryItems) else { throw ConnectionError.invalidAddress }
         var request = URLRequest(url: url)
         request.httpMethod = method
@@ -527,6 +523,12 @@ final class CoreClient {
 
         var attempt = 0
         while true {
+            // Mit Token nur ins eigene Netz (UX-12, PR 0), vor jedem Versuch: `networkConnectionLost` kommt typisch beim
+            // Wechsel des WLANs, die Wiederholung ginge sonst ungeprüft ins neue Netz. Die Kopplung (`pair/*`, ohne
+            // Token) bleibt unberührt.
+            if token != nil {
+                try requireTokenDestination(endpoint)
+            }
             let result: (Data, HTTPURLResponse)
             do {
                 result = try await transport.send(request)
