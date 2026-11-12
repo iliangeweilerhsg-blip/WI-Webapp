@@ -30,6 +30,10 @@ sg-schemas = { path = "../../packages/schemas/python", editable = true }
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Bewusst nur das Paket: `prompts/` liegt neben `src/` und gehört nicht ins Wheel. Der Worker läuft
+# aus dem Quellbaum (`uv run --project services/worker sg-worker`, editierbare Installation, siehe
+# infra/sg/src/commands.ts); die Handler lesen `<Projekt>/prompts/…`. `tests/test_units.py` prüft,
+# dass jede Prompt-Datei existiert. Ein Wheel-Betrieb bräuchte `force-include` und neue Pfade.
 [tool.hatch.build.targets.wheel]
 packages = ["src/sg_worker"]
 

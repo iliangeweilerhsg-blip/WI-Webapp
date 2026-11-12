@@ -113,3 +113,30 @@ def test_signal_handler_semantics(tmp_path: Path) -> None:
     on_signal(signal.SIGINT, None)  # erstes SIGINT: nur Flag
     with pytest.raises(KeyboardInterrupt):
         on_signal(signal.SIGINT, None)  # zweites SIGINT: sofort
+
+
+def test_ai_package_has_no_old_exports() -> None:
+    """`Msg` und `Result` (Altlast aus T2-21a) sind weg und werden nicht mehr gebraucht."""
+    import sg_worker.ai as ai
+
+    assert not hasattr(ai, "Msg") and not hasattr(ai, "Result")
+    assert "Msg" not in ai.__all__ and "Result" not in ai.__all__
+
+
+def test_prompt_files_exist() -> None:
+    """Die Prompts liegen unter `services/worker/prompts/` (Quellbaum, editierbare Installation
+    über `uv run --project`), nicht im Wheel. Fehlt eine Datei, scheitern die Jobs erst zur
+    Laufzeit: darum hier prüfen."""
+    from sg_worker.ai import outputs
+    from sg_worker.handlers import concepts_extract, concepts_resolve, summary_write
+
+    root = Path(concepts_extract.PROMPT_FILE).parents[1]
+    for version in (
+        outputs.CONCEPTS_EXTRACT_PROMPT,
+        outputs.CONCEPTS_RESOLVE_PROMPT,
+        outputs.SUMMARY_WRITE_PROMPT,
+    ):
+        task, _, v = version.partition("/")
+        assert (root / task / f"{v}.md").read_text(encoding="utf-8").strip(), version
+    for module in (concepts_extract, concepts_resolve, summary_write):
+        assert module.PROMPT_FILE.is_file(), module.__name__

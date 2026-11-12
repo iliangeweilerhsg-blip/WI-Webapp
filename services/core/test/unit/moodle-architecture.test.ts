@@ -120,6 +120,18 @@ describe('Architektur Core: nur routes/moodle.ts erreicht Moodle-Aktionen', () =
     expect(importersOf('moodle/locks')).toEqual(['moodle/index.ts']);
   });
 
+  it('der Upload-Speicher wird nur von moodle/index.ts, den Handlern und routes/moodle.ts importiert', () => {
+    // Kein Job, kein Abgleich und keine andere Route kommt an die Dateien unter tmp/moodle-uploads/
+    expect(importersOf('moodle/uploads')).toEqual([
+      'moodle/actions.ts',
+      'moodle/index.ts',
+      'routes/moodle.ts',
+    ]);
+    // und er spricht kein Netz an (sonst gehörte die Datei in die Liste mit ausgehendem HTTP)
+    const file = coreFiles.find((f) => f.path === 'moodle/uploads.ts');
+    expect(file?.code).not.toMatch(/\bfetch\(|node:https?|undici|\bnew WebSocket\b/);
+  });
+
   it('Registry, Bestätigungscodes, Sperren und Katalog tauchen nur dort auf, wo sie hingehören', () => {
     // Job-Handler, sync.ts und alle anderen Routen kennen weder Handler noch Codes. Auch kein
     // `Pick<MoodleServices, 'actions'>` und kein Zugriff `moodle['actions']`

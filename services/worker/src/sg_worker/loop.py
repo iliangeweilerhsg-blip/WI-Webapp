@@ -18,7 +18,14 @@ from psycopg.pq import TransactionStatus
 
 from . import jobs, progress
 from .logging_setup import LOGGER_NAME, job_log_context
-from .registry import JobContext, LockLostError, NonRetryableError, Registry, default_registry
+from .registry import (
+    JobContext,
+    LockLostError,
+    NonRetryableError,
+    Registry,
+    RetryableError,
+    default_registry,
+)
 
 DEFAULT_CHANNEL = "sg_jobs"
 POLL_INTERVAL_SECONDS = 30.0
@@ -270,6 +277,11 @@ class Worker:
                 self._reset_connection(conn)
                 self._finish_failed(conn, job, str(exc), retry=False)
                 self.log.error("Job nicht wiederholbar fehlgeschlagen", extra={"error": str(exc)})
+            except RetryableError as exc:
+                # Nur der Text laut Vertrag, kein Klassenname (§20.5)
+                self._reset_connection(conn)
+                self._finish_failed(conn, job, str(exc))
+                self.log.warning("Job vorübergehend fehlgeschlagen", extra={"error": str(exc)})
             except Exception as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 self._reset_connection(conn)
