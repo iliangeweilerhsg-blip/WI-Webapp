@@ -64,6 +64,38 @@ final class RequestsCancelledBeforeStopTests: XCTestCase {
         XCTAssertEqual(forwarder.stopCount, 2)
     }
 
+    func testListenerFailureAfterReadyCancelsBeforeTheForwarderCleansUp() {
+        let forwarder = FakeForwarder()
+        let route = makeRoute(forwarder)
+        var stopsSeenByHook: [Int] = []
+        route.willStopForwarder = { stopsSeenByHook.append(forwarder.stopCount) }
+        route.setPaired(true)
+        XCTAssertNotNil(route.endpoint())
+
+        // Der Port geht verloren, ohne dass `stopAll` läuft
+        forwarder.failListener()
+
+        XCTAssertEqual(stopsSeenByHook, [0], "Auch beim Ausfall des Listeners erst abbrechen")
+        XCTAssertNil(route.endpoint())
+        XCTAssertEqual(route.state, .down(.macNotFound))
+
+        // Der folgende Hintergrund meldet nichts doppelt: Es läuft kein Weiterleiter mehr
+        route.appWentToBackground()
+        XCTAssertEqual(stopsSeenByHook.count, 1)
+    }
+
+    func testListenerThatNeverStartedDoesNotRunTheHook() {
+        let forwarder = FakeForwarder()
+        forwarder.portToReport = nil
+        let route = makeRoute(forwarder)
+        var calls = 0
+        route.willStopForwarder = { calls += 1 }
+
+        route.setPaired(true)
+
+        XCTAssertEqual(calls, 0, "Ohne gemeldeten Port ging nie eine Anfrage an den Weiterleiter")
+    }
+
     // MARK: AppModel: Hintergrund bricht ab, Vordergrund nimmt wieder auf
 
     private struct Parts {
@@ -179,6 +211,36 @@ final class RequestsCancelledBeforeStopTests: XCTestCase {
         let done = await eventually { h.engine.pendingCount == 0 }
         XCTAssertTrue(done)
         XCTAssertEqual(second.opIDs, ids, "Gleiche op_id, gleiche Reihenfolge: Der Core bestätigt sie idempotent")
+    }
+
+    func testForegroundDoesNotRestartASyncWhoseTokenWasRevoked() async {
+        let p = makeParts()
+        let h = p.harness
+        // Gesetzt, bevor die Schleife zum ersten Mal läuft: Sie startet in `AppModel.init`, läuft aber erst beim
+        // ersten `await`
+        h.factory.configure = { socket, _ in socket.initialFailure = .closed(code: 4401) }
+        let invalid = await eventually { h.engine.state == .tokenInvalid }
+        XCTAssertTrue(invalid)
+        let opened = h.factory.sockets.count
+
+        p.model.appWentToBackground()
+        XCTAssertEqual(h.engine.state, .tokenInvalid, "Der Hintergrund verdeckt „Token ungültig“ nicht")
+        XCTAssertEqual(h.factory.invalidateCount, 1)
+
+        p.routing.fixedEndpoint = CoreEndpoint(host: "127.0.0.1", port: 41009)
+        p.model.appBecameActive()
+        await h.clock.advance(100)
+
+        XCTAssertEqual(h.engine.state, .tokenInvalid)
+        XCTAssertEqual(h.factory.sockets.count, opened, "Token ungültig: keine neuen Versuche")
+        XCTAssertEqual(p.model.badgeState, .disconnected(.tokenInvalid))
+    }
+
+    func testResumeWithoutSuspendDoesNothing() async {
+        let h = SyncHarness()
+        h.engine.resumeConnections()
+        XCTAssertEqual(h.engine.state, .stopped)
+        XCTAssertTrue(h.factory.sockets.isEmpty)
     }
 
     func testSuspendWithoutARunningSyncOnlyInvalidatesTheSession() {

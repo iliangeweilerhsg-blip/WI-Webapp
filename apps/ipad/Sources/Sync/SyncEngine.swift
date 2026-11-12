@@ -133,6 +133,8 @@ final class SyncEngine {
     private let random: @MainActor () -> Double
 
     @ObservationIgnored private var runningMac: PairedMac?
+    /// `suspendConnections()` hat eine laufende Schleife angehalten; `resumeConnections()` nimmt sie wieder auf
+    @ObservationIgnored private var suspended = false
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var loopTask: _Concurrency.Task<Void, Never>?
     @ObservationIgnored private var waitTask: _Concurrency.Task<Void, Never>?
@@ -201,6 +203,7 @@ final class SyncEngine {
     func start(mac: PairedMac) {
         if runningMac == mac, loopTask != nil { return }
         halt(to: .stopped)
+        suspended = false
         runningMac = mac
         let gen = generation
         setState(.connecting)
@@ -214,17 +217,29 @@ final class SyncEngine {
     func stop() {
         halt(to: .stopped)
         runningMac = nil
+        suspended = false
     }
 
     /// Die App geht in den Hintergrund oder der Weiterleiter stoppt (Issue #282): Schließt die Verbindung, hält die Schleife
     /// an und macht die URLSession ungültig. Die Warteschlange bleibt auf der Platte; was noch unbestätigt unterwegs war,
     /// geht bei der nächsten Verbindung erneut raus (gleiche `op_id`, der Core bestätigt sie idempotent). `runningMac`
-    /// bleibt, damit `start(mac:)` im Vordergrund die Schleife wieder aufnimmt.
+    /// bleibt, damit `resumeConnections()` im Vordergrund die Schleife wieder aufnimmt.
+    ///
+    /// Eine schon beendete Schleife (`tokenInvalid`, `unsupported`) bleibt, wie sie ist: Ihr Zustand bleibt sichtbar,
+    /// und der Vordergrund startet sie nicht neu (Token ungültig: keine Versuche, Plan UX-12 §5).
     func suspendConnections() {
-        if runningMac != nil {
+        if runningMac != nil, loopTask != nil {
             halt(to: .stopped)
+            suspended = true
         }
         sockets.invalidateSessions()
+    }
+
+    /// Die App ist wieder im Vordergrund: Nimmt die Schleife wieder auf, wenn `suspendConnections()` sie angehalten
+    /// hat. Sonst passiert nichts (sie läuft schon, wurde nie gestartet oder endete mit `tokenInvalid`/`unsupported`).
+    func resumeConnections() {
+        guard suspended, let mac = runningMac else { return }
+        start(mac: mac)
     }
 
     /// Die Wegewahl hat sich geändert (neuer Port des Weiterleiters, Mac gefunden): Wartet die Engine, verbindet sie

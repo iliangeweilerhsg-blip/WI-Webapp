@@ -275,10 +275,10 @@ final class AppModel {
     /// Die App kommt in den Vordergrund: Die Wegewahl startet den Weiterleiter (neuer Port), WLAN gilt wieder zuerst
     func appBecameActive() {
         routing?.appBecameActive()
-        // Der Sync wurde im Hintergrund angehalten (`cancelConnections`): neue Schleife, neue URLSession. Läuft er schon,
-        // passiert nichts.
-        if case .paired(let mac) = phase {
-            sync?.start(mac: mac)
+        // Der Sync wurde im Hintergrund angehalten (`cancelConnections`): neue Schleife, neue URLSession. Läuft er
+        // schon oder endete er mit „Token ungültig“ bzw. „App veraltet“, passiert nichts.
+        if case .paired = phase {
+            sync?.resumeConnections()
         }
         sync?.kick()
     }

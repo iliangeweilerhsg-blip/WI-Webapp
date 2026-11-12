@@ -166,8 +166,10 @@ final class LocalForwarder: LocalForwarding {
                     self.port = value
                     ready(value)
                 case .failed:
-                    self.stop()
+                    // Erst melden, dann aufräumen: Die Wegewahl bricht beim Verlust des Ports alle Anfragen ab
+                    // (Issue #282)
                     ready(nil)
+                    self.stop()
                 default:
                     break
                 }
