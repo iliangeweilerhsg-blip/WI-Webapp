@@ -1,7 +1,7 @@
 // Aufnahme-Leiste der App-Shell (Plan #210, PR 3; VERTRAEGE §11.8): Zustand der Aufnahme außerhalb des Dashboards,
 // „Aufnahme starten“, Rückfrage des Auto-Stopps, „Zur Vorlesung“ und die Übernahme im Folge-Tab (UX-01, UX-59).
 import 'fake-indexeddb/auto';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -9,6 +9,7 @@ import type { Session } from '@sg/shared';
 import { AppShell } from '../src/components/AppShell.tsx';
 import { SessionView } from '../src/components/dashboard/SessionView.tsx';
 import { RecordingBar } from '../src/components/recording/RecordingBar.tsx';
+import { useQueryClient } from '@tanstack/react-query';
 import { QueryProvider } from '../src/lib/query.tsx';
 import {
   RecordingProvider,
@@ -17,19 +18,41 @@ import {
   type RecordingEnv,
 } from '../src/lib/recording/index.ts';
 import { resetMicIntent } from '../src/lib/recorder/index.ts';
-import { sessionHref } from '../src/lib/sessions.ts';
+import { applyActiveSession, sessionHref } from '../src/lib/sessions.ts';
 import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { FakeWebLocks, fakeRecording, type FakeRecording } from './recording-fakes.ts';
 import { installFakeCore, makeModule, makeSemester, makeSession, type FakeCore } from './fake-core.ts';
 
-const nav = vi.hoisted(() => ({ search: '' }));
-vi.mock('next/navigation', () => ({
-  usePathname: () => '/',
-  useSearchParams: () => new URLSearchParams(nav.search),
-  useRouter: () => ({ push: vi.fn() }),
-}));
+const nav = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  return {
+    search: '',
+    path: '/',
+    listeners,
+    setPath(next: string) {
+      this.path = next;
+      for (const l of listeners) l();
+    },
+  };
+});
+vi.mock('next/navigation', async () => {
+  const { useSyncExternalStore } = await import('react');
+  return {
+    usePathname: () =>
+      useSyncExternalStore(
+        (l) => {
+          nav.listeners.add(l);
+          return () => void nav.listeners.delete(l);
+        },
+        () => nav.path,
+        () => nav.path,
+      ),
+    useSearchParams: () => new URLSearchParams(nav.search),
+    useRouter: () => ({ push: vi.fn() }),
+  };
+});
 vi.mock('../src/components/ink', () => ({
   InkColumn: ({ notebookId }: { notebookId: string }) => <div data-testid="ink-column">{notebookId}</div>,
 }));
@@ -112,6 +135,7 @@ interface BootOptions {
 function boot(opts: BootOptions = {}) {
   vi.setSystemTime(new Date(NOW));
   nav.search = `id=${A_ID}`;
+  nav.path = '/';
   core = installFakeCore({
     semesters: [makeSemester()],
     modules: [DBS],
@@ -467,5 +491,124 @@ describe('Hier übernehmen (Folge-Tab wird Leader)', () => {
     await user.click(within(bar()!).getByRole('button', { name: 'Erneut versuchen' }));
     await waitFor(() => expect(kindOfBar()).toBe('rec'));
     expect(rec.getUserMedia).toHaveBeenCalledTimes(2);
+  });
+});
+
+function Thrower({ fail }: { fail: { on: boolean; rerender?: () => void } }) {
+  const [, force] = useState(0);
+  fail.rerender = () => force((n) => n + 1);
+  if (fail.on) throw new Error('kaputt');
+  return <p data-testid="page-ok">Seite ok</p>;
+}
+
+/** Schreibt direkt in die Abfrage der aktiven Session, ohne die Seitenabfrage der Session anzufassen */
+function PushActive({ next }: { next: Session }) {
+  const client = useQueryClient();
+  return (
+    <button type="button" onClick={() => applyActiveSession(client, next)}>
+      push-active
+    </button>
+  );
+}
+
+describe('Folgepunkte #266', () => {
+  it('Renderfehler in der Seite: Shell und Leiste bleiben, die Aufnahme läuft weiter, „Neu laden“ rendert nur die Ansicht', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const fail: { on: boolean; rerender?: () => void } = { on: false };
+    boot({ shell: true, ui: <Thrower fail={fail} /> });
+    await waitFor(() => expect(kindOfBar()).toBe('rec'));
+    expect(screen.getByTestId('page-ok')).toBeInTheDocument();
+    const mr = rec.mr.instances[0]!;
+    const stopsBefore = rec.tracks.map((t) => t.stop.mock.calls.length);
+
+    // Die Seite wirft beim nächsten Rendern
+    fail.on = true;
+    act(() => fail.rerender?.());
+    expect(await screen.findByTestId('view-error')).toHaveTextContent(
+      'Diese Ansicht hat einen Fehler. Die Aufnahme läuft weiter.',
+    );
+    // Shell und Leiste stehen, die Aufnahme ist unberührt (kein dispose)
+    expect(kindOfBar()).toBe('rec');
+    expect(screen.getByRole('navigation', { name: /./ })).toBeInTheDocument();
+    expect(mr.state).not.toBe('inactive');
+    expect(rec.tracks.map((t) => t.stop.mock.calls.length)).toEqual(stopsBefore);
+
+    fail.on = false;
+    await user.click(screen.getByRole('button', { name: 'Neu laden' }));
+    expect(await screen.findByTestId('page-ok')).toBeInTheDocument();
+    expect(screen.queryByTestId('view-error')).toBeNull();
+    expect(document.getElementById('main')).toHaveFocus();
+    expect(kindOfBar()).toBe('rec');
+    expect(mr.state).not.toBe('inactive');
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('Statusleiste folgt der Phase aus der aktiven Session, auch wenn der Seitenstand älter ist', async () => {
+    boot({
+      shell: true,
+      ui: (
+        <>
+          <SessionView />
+          <PushActive next={session(A_ID, { state: 'pausiert', updated_at: '2026-11-04T08:30:00Z' })} />
+        </>
+      ),
+    });
+    const statusBar = await screen.findByLabelText('Statusleiste');
+    await within(statusBar).findByText('REC');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'push-active' }));
+    await within(statusBar).findByText('Pausiert');
+    expect(within(statusBar).getByRole('button', { name: 'Fortsetzen' })).toBeInTheDocument();
+    expect(within(statusBar).queryByText('REC')).toBeNull();
+  });
+
+  it('Statusleiste: Ist der Seitenstand neuer als die aktive Session, gilt der Seitenstand', async () => {
+    function PushPage({ next }: { next: Session }) {
+      const client = useQueryClient();
+      return (
+        <button type="button" onClick={() => client.setQueryData(['sessions', 'dashboard', next.id], next)}>
+          push-page
+        </button>
+      );
+    }
+    boot({
+      shell: true,
+      ui: (
+        <>
+          <SessionView />
+          <PushPage next={session(A_ID, { state: 'pausiert', updated_at: '2026-11-04T08:30:00Z' })} />
+        </>
+      ),
+    });
+    const statusBar = await screen.findByLabelText('Statusleiste');
+    await within(statusBar).findByText('REC');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'push-page' }));
+    // Die aktive Session (älter, „läuft“) überstimmt den neueren Seitenstand nicht
+    await within(statusBar).findByText('Pausiert');
+    expect(within(statusBar).queryByText('REC')).toBeNull();
+  });
+
+  it('„Aufnahme starten“ setzt den Fokus auf den Statussatz der Leiste', async () => {
+    const user = userEvent.setup();
+    boot({ rec: fakeRecording({ permission: 'prompt' }) });
+    await waitFor(() => expect(kindOfBar()).toBe('needs-start'));
+    const line = within(bar()!).getByText('Keine Aufnahme').closest('p')!;
+    expect(line).toHaveAttribute('tabindex', '-1');
+    await user.click(within(bar()!).getByRole('button', { name: 'Aufnahme starten' }));
+    expect(line).toHaveFocus();
+    await waitFor(() => expect(kindOfBar()).toBe('rec'));
+    expect(line).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+  });
+
+  it('„Zur Vorlesung“ setzt den Fokus nach dem Seitenwechsel auf den Inhalt (main)', async () => {
+    const user = userEvent.setup();
+    boot({ shell: true });
+    await waitFor(() => expect(kindOfBar()).toBe('rec'));
+    const link = within(bar()!).getByRole('link', { name: 'Zur Vorlesung' });
+    link.addEventListener('click', (e) => e.preventDefault());
+    await user.click(link);
+    act(() => nav.setPath('/session'));
+    await waitFor(() => expect(document.getElementById('main')).toHaveFocus());
   });
 });

@@ -18,6 +18,7 @@ import { RecordingBar } from './recording/RecordingBar.tsx';
 import { SearchOverlay } from './search/SearchOverlay.tsx';
 import { SetupHost } from './SetupHost.tsx';
 import { Sidebar } from './Sidebar.tsx';
+import { ViewErrorBoundary } from './ViewErrorBoundary.tsx';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const NARROW_QUERY = '(max-width: 767.98px)';
@@ -112,15 +113,31 @@ function Shell({ children }: { children: ReactNode }) {
     target?.focus();
   }, [drawerOpen]);
 
+  const focusMain = useCallback(() => document.getElementById('main')?.focus(), []);
+
   // Navigation schließt den Drawer, der Fokus geht in den Inhalt
   const firstPath = useRef(pathname);
   const drawerOpenRef = useRef(drawerOpen);
   drawerOpenRef.current = drawerOpen;
+  // „Zur Vorlesung“ in der Aufnahme-Leiste: Die Leiste verschwindet mit dem Seitenwechsel, der Fokus geht in den Inhalt
+  const focusAfterNavigation = useRef(false);
+  const focusMainAfterNavigation = useCallback(() => {
+    focusAfterNavigation.current = true;
+    // Bleibt der Pfad gleich (`/session` mit anderer ID), gibt es keinen Pfadwechsel, auf den man warten könnte
+    if (firstPath.current === '/session') {
+      setTimeout(() => {
+        if (focusAfterNavigation.current) focusMain();
+        focusAfterNavigation.current = false;
+      }, 0);
+    }
+  }, [focusMain]);
   useEffect(() => {
     if (firstPath.current === pathname) return;
     firstPath.current = pathname;
     if (drawerOpenRef.current) closeDrawer('main');
-  }, [pathname, closeDrawer]);
+    else if (focusAfterNavigation.current) focusMain();
+    focusAfterNavigation.current = false;
+  }, [pathname, closeDrawer, focusMain]);
 
   // Wechsel auf einen breiten Bildschirm schließt ihn
   useEffect(() => {
@@ -269,14 +286,16 @@ function Shell({ children }: { children: ReactNode }) {
                 tabIndex={-1}
                 className={`min-w-0 flex-1 ${fullBleed ? 'overflow-hidden' : 'overflow-y-auto px-4 py-6 md:px-8 md:py-8'}`}
               >
-                {fullBleed ? (
-                  <div className="h-full">{children}</div>
-                ) : (
-                  <div className="mx-auto max-w-3xl">{children}</div>
-                )}
+                <ViewErrorBoundary resetKey={pathname} onReset={focusMain}>
+                  {fullBleed ? (
+                    <div className="h-full">{children}</div>
+                  ) : (
+                    <div className="mx-auto max-w-3xl">{children}</div>
+                  )}
+                </ViewErrorBoundary>
               </main>
             </div>
-            <RecordingBar />
+            <RecordingBar onNavigate={focusMainAfterNavigation} />
           </div>
           <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
           <SetupHost requested={setupRequested} />

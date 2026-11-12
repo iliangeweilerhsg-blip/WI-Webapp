@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@sg/shared';
 import { DEVICES_KEY, useDevices } from '../../lib/devices.ts';
 import { moduleHref } from '../../lib/nav.ts';
-import { isActive } from '../../lib/sessions.ts';
+import { isActive, newerSession } from '../../lib/sessions.ts';
 import { rueckblickHref } from '../../lib/transcript.ts';
 import type { SyncClient } from '../../lib/sync/client.ts';
 import { AutoStopHint } from '../autostop';
@@ -75,7 +75,7 @@ export interface StatusBarProps {
 }
 
 export function StatusBar({
-  session,
+  session: pageSession,
   client,
   moduleId,
   offline,
@@ -84,6 +84,16 @@ export function StatusBar({
   onStopRequest,
 }: StatusBarProps) {
   const now = useNow(1000);
+  // Aufnahme (Issue #106) und Auto-Stopp (F-SES-03) gehören der App-Shell (RecordingProvider, Issue #210): Die
+  // Statusleiste zeigt nur ihren Stand. Nur der Sync-Leader-Tab nimmt auf. REC steht nur, wenn wirklich aufgenommen wird.
+  useClaimRecordingDisplay(pageSession.id);
+  const rec = useRecordingFor(pageSession.id);
+  // Phase aus derselben Quelle wie der Recorder (`useActiveSession`, 10 s bzw. Ereignis), nicht nur aus dem
+  // Seitenstand (30 s): Bei derselben Session gilt die neuere Fassung (Issue #266). Nach dem Ende gilt der Seitenstand.
+  const session =
+    rec.session !== null && rec.session.id === pageSession.id && rec.phase !== 'andere'
+      ? newerSession(pageSession, rec.session)
+      : pageSession;
   const ipad = useIpadConnected(client);
   const active = isActive(session);
   const running = session.state === 'laeuft';
@@ -91,10 +101,6 @@ export function StatusBar({
   const startedAt = session.started_at ? Date.parse(session.started_at) : null;
   const endedAt = session.ended_at ? Date.parse(session.ended_at) : null;
 
-  // Aufnahme (Issue #106) und Auto-Stopp (F-SES-03) gehören der App-Shell (RecordingProvider, Issue #210): Die
-  // Statusleiste zeigt nur ihren Stand. Nur der Sync-Leader-Tab nimmt auf. REC steht nur, wenn wirklich aufgenommen wird.
-  useClaimRecordingDisplay(session.id);
-  const rec = useRecordingFor(session.id);
   const auto = rec.autoStop;
   const needsMic = running && rec.kind !== 'rec';
 
