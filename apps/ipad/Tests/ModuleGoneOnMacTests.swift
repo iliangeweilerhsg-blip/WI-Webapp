@@ -137,6 +137,29 @@ final class ModuleGoneOnMacTests: XCTestCase {
         XCTAssertEqual(h.service.pagesNeedingReconcile, 0)
     }
 
+    /// Wird das Modul ausgeblendet, während der Abgleich auf den Core wartet, plant er danach nichts: kein
+    /// `page.create` an der Sperre vorbei, das Flag bleibt
+    func testAModuleThatGoesDuringReconcilePlansNothing() async throws {
+        let h = SyncHarness()
+        let missingPage = FakeTransport.Reply.http(status: 404, body: Fixtures.apiError("page_not_found"))
+        h.transport.router = { request in (request.url?.path ?? "").contains("/pages/") ? missingPage : nil }
+        h.start()
+        let online = await eventually { h.engine.state == .online }
+        XCTAssertTrue(online)
+        let moduleID = h.binding.moduleID
+        let library = h.library
+        h.transport.duringRequest = { request in
+            if (request.url?.path ?? "").contains("/pages/") { library.markModuleGone(moduleID: moduleID) }
+        }
+        let page = InkPageModel(pageID: h.binding.pageID, store: FakeInkPageStore(), saveDelay: .seconds(1))
+
+        let result = await h.engine.reconcile(page: page, binding: h.binding)
+        XCTAssertEqual(result, .skipped)
+        XCTAssertEqual(h.engine.pendingCount, 0)
+        XCTAssertFalse(h.engine.hasPending(kind: "page.create", stream: h.binding.stream))
+        XCTAssertEqual(h.library.page(h.binding.pageID)?.needsReconcile, true)
+    }
+
     func testOtherModulesStayUntouched() async throws {
         let h = SyncHarness()
         rejectNotebookCreates(h)

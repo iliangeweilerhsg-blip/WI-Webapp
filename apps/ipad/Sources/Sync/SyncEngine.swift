@@ -481,8 +481,11 @@ final class SyncEngine {
                 return .unreachable
             }
         }
-        // Ab hier gibt es kein `await` mehr: Der lokale Stand ist genau der, den der Plan sieht
-        guard runningMac != nil, isStillValid() else { return .skipped }
+        // Ab hier gibt es kein `await` mehr: Der lokale Stand ist genau der, den der Plan sieht. Während der Anfrage kann
+        // ein `module_not_found` das Modul ausgeblendet haben (L8 aus #286): dann wie oben nichts planen.
+        guard runningMac != nil, isStillValid(), !(library.notebook(binding.notebookID)?.isModuleGone ?? false) else {
+            return .skipped
+        }
         var succeeded = true
         // Wartende Operationen der Seite zuerst auf den Stand des Core rechnen (Absturz mitten im Senden)
         let pendingForPage = outbox.pending.filter { $0.pageID == binding.pageID }
