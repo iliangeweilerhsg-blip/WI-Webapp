@@ -666,6 +666,15 @@ describe('Aufnahme-Leiste: iPad und Speicher (UX-306, UX-316)', () => {
     expect(screen.queryByTestId('bar-ipad-status')).toBeNull();
   });
 
+  it('fragt ohne aktive Session weder Geräte noch Speicher ab', async () => {
+    boot({ sessions: [], devices: [ipad(true)], freeBytes: 800_000_000 });
+    await waitFor(() => expect(requests(/^GET \/sessions\?state=/).length).toBeGreaterThan(0));
+    await settle();
+    expect(bar()).toBeNull();
+    expect(requests(/^GET \/devices/)).toHaveLength(0);
+    expect(screen.queryByTestId('storage-status')).toBeNull();
+  });
+
   it('meldet knappen Speicher unter 1 GB ruhig in der Leiste', async () => {
     boot({ freeBytes: 800_000_000 });
     const note = await screen.findByTestId('storage-status');

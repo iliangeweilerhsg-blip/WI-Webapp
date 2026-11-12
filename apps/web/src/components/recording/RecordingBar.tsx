@@ -26,7 +26,6 @@ export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const view = useRecordingView();
   const statusLine = useRef<HTMLParagraphElement>(null);
   const now = useNow(1000);
-  const ipad = useIpadState(useSyncClient());
   // Ohne aktive Session, oder wenn das Dashboard dieser Session offen ist (dort zeigt die Statusleiste alles)
   if (view.session === null || view.phase === 'andere' || view.shownByDashboard) return null;
 
@@ -87,14 +86,7 @@ export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
         ) : null}
 
         <LowStorageNote active />
-        {/* Der Punkt "iPad" wie in der Statusleiste (UX-306); ohne gekoppeltes iPad bleibt er weg */}
-        {ipad.paired ? (
-          <p className="flex items-center gap-2 text-text-muted" data-testid="bar-ipad-status">
-            <RecordDot filled={ipad.connected} record={false} />
-            <span>iPad</span>
-            <span className="sr-only">{ipad.connected ? 'verbunden' : 'nicht verbunden'}</span>
-          </p>
-        ) : null}
+        <BarIpadStatus />
 
         <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-2">
           <AutoStopHint
@@ -125,5 +117,21 @@ export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
         </p>
       ) : null}
     </aside>
+  );
+}
+
+/**
+ * Der Punkt "iPad" wie in der Statusleiste (UX-306); ohne gekoppeltes iPad bleibt er weg. Eigene Komponente, damit
+ * `GET /devices` (und im Folge-Tab dessen Abfrage alle 30 s) nur läuft, solange die Leiste zu sehen ist.
+ */
+function BarIpadStatus() {
+  const ipad = useIpadState(useSyncClient());
+  if (!ipad.paired) return null;
+  return (
+    <p className="flex items-center gap-2 text-text-muted" data-testid="bar-ipad-status">
+      <RecordDot filled={ipad.connected} record={false} />
+      <span>iPad</span>
+      <span className="sr-only">{ipad.connected ? 'verbunden' : 'nicht verbunden'}</span>
+    </p>
   );
 }

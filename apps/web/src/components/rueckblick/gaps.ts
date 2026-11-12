@@ -1,5 +1,6 @@
 // Lücken in der Aufnahme (UX-310): Zeiträume zwischen zwei Aufnahmen einer Session, in denen nichts aufgenommen
-// wurde (Deckel zu, Mac-Neustart, "Aufnahme neu begonnen"). Abgeleitet aus `started_ms` und `duration_ms` der
+// wurde (Deckel zu, Mac-Neustart, "Aufnahme neu begonnen", aber auch eine gewollte Pause: VERTRAEGE §9.1).
+// Darum neutral "Keine Aufnahme" statt "fehlt". Abgeleitet aus `started_ms` und `duration_ms` der
 // Aufnahmen; der Core meldet Lücken nicht selbst. Vor der ersten und hinter der letzten Aufnahme lässt sich aus diesen
 // Daten keine Lücke bestimmen (Beginn und Ende der Session sind keine Aufnahmezeiten).
 import type { Recording } from '@sg/shared';
@@ -39,9 +40,9 @@ export function formatGapDuration(ms: number): string {
   return m === 0 ? `${h} h` : `${h} h ${m} min`;
 }
 
-/** "Aufnahme fehlt 10:12 bis 10:25 (13 min)" */
+/** "Keine Aufnahme 10:12 bis 10:25 (13 min)", Uhrzeit in Ortszeit wie die Zeiten des Transkripts */
 export function gapText(gap: RecordingGap, startedAt: string | null): string {
-  return `Aufnahme fehlt ${clockAt(startedAt, gap.start_ms)} bis ${clockAt(startedAt, gap.end_ms)} (${formatGapDuration(gap.end_ms - gap.start_ms)})`;
+  return `Keine Aufnahme ${clockAt(startedAt, gap.start_ms)} bis ${clockAt(startedAt, gap.end_ms)} (${formatGapDuration(gap.end_ms - gap.start_ms)})`;
 }
 
 /** Summe für den Kopf des Rückblicks, `null` ohne Lücken */
@@ -49,6 +50,6 @@ export function gapsSummary(gaps: readonly RecordingGap[]): string | null {
   if (gaps.length === 0) return null;
   const total = gaps.reduce((sum, g) => sum + (g.end_ms - g.start_ms), 0);
   return gaps.length === 1
-    ? `In der Aufnahme fehlen ${formatGapDuration(total)}.`
-    : `In der Aufnahme fehlen ${formatGapDuration(total)} in ${gaps.length} Lücken.`;
+    ? `${formatGapDuration(total)} ohne Aufnahme.`
+    : `${formatGapDuration(total)} ohne Aufnahme, in ${gaps.length} Lücken.`;
 }

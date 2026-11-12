@@ -976,12 +976,12 @@ describe('Lücken in der Aufnahme (UX-310)', () => {
     await screen.findAllByTestId('transcript-line');
     const gap = screen.getByTestId('recording-gap');
     expect(gap).toHaveTextContent(
-      `Aufnahme fehlt ${clockAt(STARTED, 600_000)} bis ${clockAt(STARTED, 700_000)} (2 min)`,
+      `Keine Aufnahme ${clockAt(STARTED, 600_000)} bis ${clockAt(STARTED, 700_000)} (2 min)`,
     );
     // Die Lücke steht zwischen der letzten Zeile der ersten Aufnahme und der ersten der zweiten
     const items = Array.from(document.querySelectorAll('ol[aria-label="Transkript"] > li'));
     expect(items.at(-2)).toBe(gap);
-    expect(screen.getByTestId('gaps-summary')).toHaveTextContent('In der Aufnahme fehlen 2 min.');
+    expect(screen.getByTestId('gaps-summary')).toHaveTextContent('2 min ohne Aufnahme.');
     // Die Lücke ist keine Abspielstelle
     expect(lineEls()).toHaveLength(6);
   });
@@ -1019,8 +1019,6 @@ describe('Lücken in der Aufnahme (UX-310)', () => {
       deck: false,
     });
     await screen.findAllByTestId('transcript-line');
-    expect(screen.getByTestId('gaps-summary')).toHaveTextContent(
-      'In der Aufnahme fehlen 13 min in 2 Lücken.',
-    );
+    expect(screen.getByTestId('gaps-summary')).toHaveTextContent('13 min ohne Aufnahme, in 2 Lücken.');
   });
 });

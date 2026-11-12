@@ -80,7 +80,7 @@ export interface TranscriptListProps {
   lang: string | null;
   onPlay: (line: TranscriptLine) => void;
   label: string;
-  /** Lücken zwischen Aufnahmen (UX-310): Eine Zeile "Aufnahme fehlt ..." steht zwischen den Zeilen davor und danach */
+  /** Lücken zwischen Aufnahmen (UX-310): Eine Zeile "Keine Aufnahme ..." steht zwischen den Zeilen davor und danach */
   gaps?: readonly RecordingGap[];
 }
 

@@ -433,6 +433,14 @@ describe('Heute: Speicher am Startknopf (UX-316)', () => {
     );
   });
 
+  it('steht auf „Heute“ nur einmal: die allgemeine Speicherzeile wiederholt ihn nicht', async () => {
+    boot({ freeBytes: 50_000_000 });
+    await screen.findByTestId('start-storage-hint');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getAllByText(/nur noch 50 MB frei/)).toHaveLength(1);
+    expect(screen.queryByText(/Räume Platz frei/)).toBeNull();
+  });
+
   it('schweigt, wenn eine Vorlesung noch passt', async () => {
     boot({ freeBytes: 3_000_000_000 });
     await screen.findByRole('button', { name: 'Start' });
