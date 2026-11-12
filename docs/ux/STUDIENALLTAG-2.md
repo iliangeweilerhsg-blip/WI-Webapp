@@ -41,7 +41,7 @@ Die IDs verweisen auf Abschnitt 3 (alt) und Abschnitt 4 (neu).
 |---|---|
 | **Muss** | Laden, prüfen, dass Mac und iPad-App starten. Nichts updaten. |
 | **Heute** | `VORLESUNGSTAG.md` nennt die Schritte. Die iPad-App warnt ab 2 Tagen Rest auf dem Startbildschirm (#214). |
-| **Kann schiefgehen** | Die Warnung steht nur auf dem Startbildschirm. Wer die App in der Schreibfläche lässt, sieht sie nicht (UX-50). Ein fehlendes Backup fällt weiter nur in den Einstellungen auf (UX-10 offen). Die Anleitungen sind an vier Stellen überholt (UX-58). |
+| **Kann schiefgehen** | Die Warnung steht nur auf dem Startbildschirm. Wer die App in der Schreibfläche lässt, sieht sie nicht (UX-50). Ein fehlendes Backup fällt weiter nur in den Einstellungen auf (UX-10 offen). Die Anleitungen sind an mehreren Stellen überholt (UX-58). |
 
 ### 1.3 Weg zur Uni, Ankunft
 
@@ -232,7 +232,7 @@ Kategorien: **A** sofort umsetzbar · **B** Frage an den Owner · **C** gehört 
 | UX-55 | Seite gelöscht, später vermisst | Papierkorb-Titel ohne Modul. Rückkehr aufs iPad erst nach neuem Öffnen. Leere Restseite nach „Rückgängig“. | niedrig | Titel mit Modul und Notizbuch. Nach „Rückgängig“ die leere Ersatzseite wieder entfernen. | A |
 | UX-56 | Eigenes Notizbuch anlegen | Kein Feedback bei Fehlschlag, kein direktes Öffnen, gleiche Titel möglich. | niedrig | Nach dem Anlegen öffnen. Fehlschlag ruhig melden. Gleichen Titel im Modul ablehnen. | A |
 | UX-57 | iPad verliert die Verbindung, die Vorlesung endet | „Läuft gerade“ bleibt stehen, bis die App neu startet oder sich verbindet. Neue Seiten erhalten die alte Session. | niedrig | Ohne Verbindung „Lief zuletzt · Stand 10:42“ statt „Läuft gerade“. | A |
-| UX-58 | Anleitungen lesen | `VORLESUNGSTAG.md`, `IPAD.md` und `BACKUP-WIEDERHERSTELLEN.md` passen an vier Stellen nicht mehr zum Code. Der Mac-Neustart fehlt. | mittel | Anleitungen nachziehen. | A |
+| UX-58 | Anleitungen lesen | `VORLESUNGSTAG.md`, `IPAD.md` und `BACKUP-WIEDERHERSTELLEN.md` passen an mehreren Stellen nicht mehr zum Code. Der Mac-Neustart fehlt. | mittel | Anleitungen nachziehen. | A |
 | UX-59 | Im Hörsaal neu koppeln | Der Weg führt über Einstellungen → Geräte. Wer dafür das Dashboard verlässt, beendet die Aufnahme. | hoch | Gehört zu #210 (Recorder in der App-Hülle) und UX-12. Bis dahin: neuer Tab, in der Anleitung genannt. | C |
 | UX-60 | Isoliertes Uni-WLAN | „Auf Folie“ braucht die Verbindung. Folien vorab laden und am iPad blättern fehlt. | hoch | T1-15, Frage 4 in #219. | C |
 | UX-61 | Startbildschirm des iPads | Zwei Platzhalter-Karten stehen über den Notizbüchern. | niedrig | Ausblenden, bis sie echt sind. | A |
@@ -287,7 +287,7 @@ Regel R1 bleibt: kein Dialog während einer Vorlesung.
 - **Größe:** klein.
 
 ### UX-48 · „Mac ●“ grün, obwohl nichts synchronisiert
-- **Beleg:** `AppModel.syncStateChanged()` behandelt nur `.online` und `.tokenInvalid`. Bei `.unsupported` und `.waiting` entscheidet `checkHealth`, das Ergebnis ist `.connected`. `ConnectionBadge` färbt danach. `LibraryListView` nimmt dagegen `sync.state == .online`. Der Text „Der Mac spricht ein anderes Protokoll. App aktualisieren.“ steht nur in `SyncStatusRows`.
+- **Beleg:** `AppModel.syncStateChanged()` behandelt nur `.online` und `.tokenInvalid`. Bei `.unsupported` und `.waiting` entscheidet `checkHealth`, das Ergebnis ist `.connected`. `ConnectionBadge` färbt danach. `HomeView` übergibt der `LibraryListView` dagegen `sync.state == .online` (`isOnline`). Der Text „Der Mac spricht ein anderes Protokoll. App aktualisieren.“ steht nur in `SyncStatusRows`.
 - **Bereich:** `apps/ipad/Sources/App/AppModel.swift`, `Core/ConnectionError.swift`, `Home/HomeView.swift`, `Tests/AppModelTests.swift`.
 - **Plan:**
   1. `.unsupported` wird ein eigener getrennter Zustand mit Titel und Rat: „App passt nicht mehr zum Mac. Am Mac über Xcode neu aufspielen.“
@@ -330,7 +330,7 @@ Regel R1 bleibt: kein Dialog während einer Vorlesung.
 
 ### UX-55 · Gelöschte Seite wiederfinden
 - **Beleg:** `services/core/src/services/trash.ts`: `page: 'Seite ' || index`. `TrashSettings.tsx` zeigt „in <Notizbuch>“. `InkLibraryStore.mergePages()` holt eine am Mac wiederhergestellte Seite erst beim nächsten Abruf zurück. `InkPageView.delete()` ruft bei der letzten Seite `openFreshPage()`, `undoDelete()` lässt die neue Seite stehen.
-- **Bereich:** `services/core/src/services/trash-ops.ts` (Titel des Elternobjekts), `apps/ipad/Sources/Ink/InkPageView.swift`, Tests.
+- **Bereich:** `services/core/src/services/trash.ts` (`TITLE` und Elternobjekt), `apps/ipad/Sources/Ink/InkPageView.swift`, Tests.
 - **Plan:**
   1. Der Papierkorb zeigt für Seiten „Seite 3 in Modul A · Vorlesung“.
   2. Nach „Rückgängig“ wird die leere Ersatzseite wieder gelöscht, wenn sie keinen Strich hat.
@@ -395,7 +395,7 @@ Die vier Fragen aus #219 (Blättern, Löschen, Verwalten, Folien vorab) bleiben 
 
 | ID | Ticket | Anmerkung aus dem Durchlauf |
 |---|---|---|
-| UX-53 | Epic E-NAC (wie UX-35) | Beleg: `InkColumn` wird nur in `dashboard/SessionView.tsx` benutzt. Zusammen mit UX-54 heißt das: Geht das iPad verloren, sieht man alte Notizen nirgends. Eine lesende Ansicht im Modul könnte mit UX-52 vorgezogen werden. Das entscheidet der Lead. |
+| UX-53 | Epic E-NAC (wie UX-35) | Beleg: `InkColumn` hängt nur an `dashboard/NotesColumn.tsx`, und die bindet nur `dashboard/SessionView.tsx` ein. Zusammen mit UX-54 heißt das: Geht das iPad verloren, sieht man alte Notizen nirgends. Eine lesende Ansicht im Modul könnte mit UX-52 vorgezogen werden. Das entscheidet der Lead. |
 | UX-59 | #210 und UX-12 | Beleg: Kopplung nur unter Einstellungen → Geräte (`IPAD.md`, Schritt 8). Der Recorder hängt an `StatusBar.tsx`. Die Seitenleiste ist auch in der Vorlesungs-Ansicht da (`AppShell.tsx`). Das hebt #210 in der Reihenfolge nach oben. |
 | UX-60 | T1-15, Frage 4 in #219 | Beleg: `InkModeResolver.isAvailable()` verlangt eine laufende Session mit bekannter Folie. Plan §4.5: „Isoliertes Uni-WLAN“. |
 
@@ -429,7 +429,7 @@ Danach: UX-49, UX-51, UX-57, UX-55, UX-56, UX-61, UX-11 Rest, UX-14, UX-17, UX-1
 | 2 | iPad „Folie und Seite zur Vorlesung“: UX-43, UX-44 | `Slides/SlideSupport.swift`, `Ink/InkPageView.swift`, `Library/InkLibraryService.swift` | Opus |
 | 3 | iPad „Ehrliche Hinweise“: UX-47, UX-48, UX-49, UX-50, UX-51, UX-57, UX-61 | `App/`, `Home/`, `Library/LibraryListView.swift`, Infozeilen in `Ink/InkPageView.swift` | Opus |
 | 4 | iPad „Abgleich nach Wiederherstellung“: UX-46 | `Library/InkLibraryService.swift`, `Sync/SyncEngine.swift` | Opus, zusätzlich Gegen-Review |
-| 5 | iPad und Core „Kleinigkeiten“: UX-55, UX-56 | `Library/`, `Ink/InkPageView.swift`, `services/core/src/services/trash-ops.ts` | Opus |
+| 5 | iPad und Core „Kleinigkeiten“: UX-55, UX-56 | `Library/`, `Ink/InkPageView.swift`, `services/core/src/services/trash.ts` | Opus |
 | 6 | Web „Notizbücher im Modul“: UX-52 | `apps/web/src/lib/ink.ts`, neue Komponente, `ModulView.tsx` | Opus |
 | 7 | Web „Recorder in der App-Hülle“: #210 | wie in Durchlauf 1 beschrieben | Opus |
 
