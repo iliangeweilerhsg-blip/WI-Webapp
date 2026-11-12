@@ -147,6 +147,8 @@ function boot(
     syncState?: string;
     rec?: FakeRecording;
     env?: Partial<RecordingEnv>;
+    /** Freier Platz am Mac laut `GET /system/storage`; ohne Angabe antwortet die Route nicht (404) */
+    freeBytes?: number;
   } = {},
 ) {
   setNow(opts.now ?? '2026-11-04T07:10:00Z'); // 08:10 Uhr
@@ -156,6 +158,24 @@ function boot(
     sessions: opts.sessions ?? [planned(), SECOND],
     events: opts.events ?? [EVENT_DBS, EVENT_STAT],
   });
+  if (opts.freeBytes !== undefined) {
+    const coreFetch = globalThis.fetch;
+    const free = opts.freeBytes;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/system/storage')
+        ? Promise.resolve(
+            Response.json({
+              data_dir_free_bytes: free,
+              data_dir_size_bytes: 1_000_000_000,
+              media_bytes: 500_000_000,
+              vault_bytes: 1_000_000,
+              db_bytes: 1_000_000,
+              measured_at: '2026-11-04T07:00:00Z',
+            }),
+          )
+        : coreFetch(input, init),
+    );
+  }
   sync = fakeSync(opts.syncState);
   rec = opts.rec ?? fakeRecording();
   return render(
@@ -398,6 +418,26 @@ describe('Heute: Start-Karte nach Zustand', () => {
     });
     const c = await screen.findByRole('region', { name: /Statistik/ });
     expect(c).toHaveAttribute('data-state', 'laeuft');
+  });
+});
+
+describe('Heute: Speicher am Startknopf (UX-316)', () => {
+  it('sagt direkt an der Karte, wenn der Platz nicht für eine Vorlesung reicht, und lässt den Start zu', async () => {
+    boot({ freeBytes: 50_000_000 });
+    const hint = await screen.findByTestId('start-storage-hint');
+    expect(hint).toHaveTextContent('nur noch 50 MB frei');
+    expect(hint).toHaveTextContent('reicht nicht für eine ganze Vorlesung');
+    expect(within(card()).getByRole('button', { name: 'Start' })).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+  });
+
+  it('schweigt, wenn eine Vorlesung noch passt', async () => {
+    boot({ freeBytes: 3_000_000_000 });
+    await screen.findByRole('button', { name: 'Start' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('start-storage-hint')).toBeNull();
   });
 });
 

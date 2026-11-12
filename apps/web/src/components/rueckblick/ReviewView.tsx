@@ -41,6 +41,7 @@ import { PlayerBar } from './PlayerBar.tsx';
 import { SessionConceptChips } from './SessionConceptChips.tsx';
 import { SlideColumn, type SlideItem } from './SlideColumn.tsx';
 import { SummaryPanel } from './SummaryPanel.tsx';
+import { gapsSummary, recordingGaps } from './gaps.ts';
 import { TranscriptList, lineKey } from './TranscriptList.tsx';
 import { SKIP_MS, usePlayer } from './use-player.ts';
 
@@ -356,8 +357,16 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
     />
   );
 
+  const gaps = useMemo(() => recordingGaps(transcript.recordings), [transcript.recordings]);
+  const gapNote = gapsSummary(gaps);
+
   const notices = (
     <>
+      {gapNote ? (
+        <p className="text-sm text-text-muted" data-testid="gaps-summary">
+          {gapNote}
+        </p>
+      ) : null}
       {showSteps ? (
         <StepList
           processing={session.processing}
@@ -446,6 +455,7 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
             activeKey={activeLine ? lineKey(activeLine) : null}
             lang={lang}
             onPlay={playLine}
+            gaps={gaps}
           />
         </div>
       </div>
@@ -476,6 +486,7 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
                   activeKey={activeLine ? lineKey(activeLine) : null}
                   lang={lang}
                   onPlay={playLine}
+                  gaps={gaps}
                 />
               </div>
             ) : (

@@ -18,6 +18,7 @@ import { POLL_MS, useLiveState, useNow } from '../today/use-today.ts';
 import { MarkerControls } from './markers/MarkerControls.tsx';
 import { watchReconnect } from './reconnect.ts';
 import { useClaimRecordingDisplay, useRecordingFor } from '../../lib/recording';
+import { LowStorageNote } from '../recording/LowStorageNote.tsx';
 import { RECORDING_LABEL, RecordDot as Dot, recordingStatusText } from '../recording/labels.ts';
 import type { SessionActions } from './use-session.ts';
 
@@ -33,7 +34,7 @@ const ghost =
  * `leader.changed`) lösen nur ein neues Laden aus: Sie sagen nicht, welches von mehreren iPads gemeint ist, und
  * kommen nach einem Verbindungsabbruch nicht nach (§11.6).
  */
-export function useIpadConnected(client: SyncClient | null): boolean {
+export function useIpadState(client: SyncClient | null): { paired: boolean; connected: boolean } {
   // Ohne Live-Verbindung (auch im Folge-Tab) kommen keine Ereignisse: dann alle 30 s nachfragen
   const { online } = useLiveState(client);
   const devices = useDevices({ refetchIntervalMs: online ? false : POLL_MS });
@@ -51,7 +52,12 @@ export function useIpadConnected(client: SyncClient | null): boolean {
     ];
     return () => offs.forEach((off) => off());
   }, [client, queryClient]);
-  return devices.data?.some((d) => d.kind === 'ipad' && d.connected) ?? false;
+  const ipads = devices.data?.filter((d) => d.kind === 'ipad') ?? [];
+  return { paired: ipads.length > 0, connected: ipads.some((d) => d.connected) };
+}
+
+export function useIpadConnected(client: SyncClient | null): boolean {
+  return useIpadState(client).connected;
 }
 
 /** Ab dieser Pausendauer fragt die Leiste „Noch Pause?“ (UX-07) */
@@ -228,6 +234,8 @@ export function StatusBar({
             {uploadText}
           </p>
         ) : null}
+
+        <LowStorageNote active={active} />
 
         <p className="flex items-center gap-2 text-text-muted" data-testid="ipad-status">
           <Dot filled={ipad} />

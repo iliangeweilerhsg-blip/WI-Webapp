@@ -963,3 +963,64 @@ describe('Rückblick: Kosten (UX-16)', () => {
     expect(screen.getByText(/KI-Kosten dieser Vorlesung/)).not.toHaveTextContent('bisher');
   });
 });
+
+describe('Lücken in der Aufnahme (UX-310)', () => {
+  const noSlides: Partial<SessionTranscript> = {
+    slide_segments: [],
+    slide_source: null,
+    slide_deck_id: null,
+  };
+
+  it('zeigt zwischen zwei Aufnahmen mit mehr als einer Minute Abstand eine Zeile und im Kopf die Summe', async () => {
+    boot({ transcript: fullTranscript(noSlides), deck: false });
+    await screen.findAllByTestId('transcript-line');
+    const gap = screen.getByTestId('recording-gap');
+    expect(gap).toHaveTextContent(
+      `Aufnahme fehlt ${clockAt(STARTED, 600_000)} bis ${clockAt(STARTED, 700_000)} (2 min)`,
+    );
+    // Die Lücke steht zwischen der letzten Zeile der ersten Aufnahme und der ersten der zweiten
+    const items = Array.from(document.querySelectorAll('ol[aria-label="Transkript"] > li'));
+    expect(items.at(-2)).toBe(gap);
+    expect(screen.getByTestId('gaps-summary')).toHaveTextContent('In der Aufnahme fehlen 2 min.');
+    // Die Lücke ist keine Abspielstelle
+    expect(lineEls()).toHaveLength(6);
+  });
+
+  it('zeigt nichts bei Abstand unter einer Minute', async () => {
+    boot({
+      transcript: fullTranscript({
+        ...noSlides,
+        recordings: [
+          makeRecording({ id: R1, started_ms: 0, duration_ms: 600_000 }),
+          makeRecording({ id: R2, started_ms: 650_000, duration_ms: 100_000 }),
+        ],
+      }),
+      deck: false,
+    });
+    await screen.findAllByTestId('transcript-line');
+    expect(screen.queryByTestId('recording-gap')).toBeNull();
+    expect(screen.queryByTestId('gaps-summary')).toBeNull();
+  });
+
+  it('fasst mehrere Lücken zusammen', async () => {
+    boot({
+      transcript: fullTranscript({
+        ...noSlides,
+        recordings: [
+          makeRecording({ id: R1, started_ms: 0, duration_ms: 300_000 }),
+          makeRecording({ id: R2, started_ms: 900_000, duration_ms: 100_000 }),
+          makeRecording({
+            id: '0190f6a2-0000-7000-8000-0000000000f6',
+            started_ms: 1_200_000,
+            duration_ms: 1000,
+          }),
+        ],
+      }),
+      deck: false,
+    });
+    await screen.findAllByTestId('transcript-line');
+    expect(screen.getByTestId('gaps-summary')).toHaveTextContent(
+      'In der Aufnahme fehlen 13 min in 2 Lücken.',
+    );
+  });
+});

@@ -154,6 +154,8 @@ function boot(
     search?: string;
     /** `presence` des iPads, die schon vor dem Einhängen der Spalte da war */
     ipadNotebook?: string | null;
+    /** Freier Platz am Mac laut `GET /system/storage`; ohne Angabe antwortet die Route nicht (404) */
+    freeBytes?: number;
   } = {},
 ) {
   vi.setSystemTime(new Date(opts.now ?? NOW));
@@ -168,6 +170,24 @@ function boot(
   core.events = opts.events ?? [];
   core.settings.general.appearance = opts.appearance ?? 'system';
   core.devices = opts.devices ?? [];
+  if (opts.freeBytes !== undefined) {
+    const coreFetch = globalThis.fetch;
+    const free = opts.freeBytes;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).includes('/system/storage')
+        ? Promise.resolve(
+            Response.json({
+              data_dir_free_bytes: free,
+              data_dir_size_bytes: 1_000_000_000,
+              media_bytes: 500_000_000,
+              vault_bytes: 1_000_000,
+              db_bytes: 1_000_000,
+              measured_at: '2026-11-04T08:00:00Z',
+            }),
+          )
+        : coreFetch(input, init),
+    );
+  }
   core.settingsGate = opts.hold?.settings ?? null;
   core.eventGate = opts.hold?.event ?? null;
   sync = fakeSync(opts.syncState);
@@ -437,6 +457,21 @@ describe('Dashboard: Live-Aktualisierung (session.updated)', () => {
     expect(within(b).getByTestId('live-status')).toHaveTextContent('Anderer Tab');
     expect(within(b).getByTestId('live-status')).not.toHaveTextContent('Live');
     expect(screen.queryByText(/Keine Live-Verbindung –/)).toBeNull();
+  });
+});
+
+describe('Dashboard: Speicher in der Statusleiste (UX-316)', () => {
+  it('meldet unter 1 GB eine ruhige Zeile', async () => {
+    boot({ freeBytes: 700_000_000 });
+    const note = await within(await screenBar()).findByTestId('storage-status');
+    expect(note).toHaveTextContent('nur noch 700 MB frei');
+  });
+
+  it('schweigt bei genug Platz', async () => {
+    boot({ freeBytes: 20_000_000_000 });
+    const b = await screenBar();
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
+    expect(within(b).queryByTestId('storage-status')).toBeNull();
   });
 });
 

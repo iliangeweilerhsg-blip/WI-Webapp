@@ -8,11 +8,13 @@
 import Link from 'next/link';
 import { useRef } from 'react';
 import { useRecordingView } from '../../lib/recording';
+import { useSyncClient } from '../../lib/sync/SyncProvider.tsx';
 import { isDashboardAvailable, sessionHref } from '../../lib/sessions.ts';
 import { AutoStopHint } from '../autostop';
-import { PAUSE_HINT_MS } from '../dashboard/StatusBar.tsx';
+import { PAUSE_HINT_MS, useIpadState } from '../dashboard/StatusBar.tsx';
 import { formatElapsed } from '../today/model.ts';
 import { useNow } from '../today/use-today.ts';
+import { LowStorageNote } from './LowStorageNote.tsx';
 import { RECORDING_LABEL, RecordDot, recordingStatusText } from './labels.ts';
 
 const primary =
@@ -24,6 +26,7 @@ export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const view = useRecordingView();
   const statusLine = useRef<HTMLParagraphElement>(null);
   const now = useNow(1000);
+  const ipad = useIpadState(useSyncClient());
   // Ohne aktive Session, oder wenn das Dashboard dieser Session offen ist (dort zeigt die Statusleiste alles)
   if (view.session === null || view.phase === 'andere' || view.shownByDashboard) return null;
 
@@ -81,6 +84,16 @@ export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
           >
             {actionLabel}
           </button>
+        ) : null}
+
+        <LowStorageNote active />
+        {/* Der Punkt "iPad" wie in der Statusleiste (UX-306); ohne gekoppeltes iPad bleibt er weg */}
+        {ipad.paired ? (
+          <p className="flex items-center gap-2 text-text-muted" data-testid="bar-ipad-status">
+            <RecordDot filled={ipad.connected} record={false} />
+            <span>iPad</span>
+            <span className="sr-only">{ipad.connected ? 'verbunden' : 'nicht verbunden'}</span>
+          </p>
         ) : null}
 
         <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-2">

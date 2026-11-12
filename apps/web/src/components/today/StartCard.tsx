@@ -20,6 +20,7 @@ import {
 } from '../../lib/sessions.ts';
 import { moduleColorVar } from '../../lib/modules.ts';
 import { useRecordingFor, type RecordingKind } from '../../lib/recording';
+import { formatSize, lecturesThatFit, useSystemStorage } from '../../lib/storage.ts';
 import { rueckblickHref } from '../../lib/transcript.ts';
 import { useNow } from './use-today.ts';
 import {
@@ -89,6 +90,7 @@ export function StartCard({
   // Die Aufnahme gehört der App-Shell (Issue #210): Die Karte zeigt ihren Stand und kann sie starten (E10)
   const rec = useRecordingFor(session?.id ?? '');
   const recKind = rec.kind;
+  const storage = useSystemStorage();
   const [busy, setBusy] = useState<Action | null>(null);
   // Doppel-Tipp im selben Render-Takt abfangen (der Zustand `busy` kommt erst im nächsten)
   const busyRef = useRef(false);
@@ -236,6 +238,18 @@ export function StartCard({
               <a href="#spontan-title" className="underline underline-offset-4">
                 Session ohne Termin
               </a>
+            </p>
+          ) : null}
+          {canStart && storage.data && lecturesThatFit(storage.data.data_dir_free_bytes) < 1 ? (
+            <p className="mt-1 text-sm text-text-muted" data-testid="start-storage-hint">
+              Auf dem Mac sind nur noch {formatSize(storage.data.data_dir_free_bytes)} frei. Das reicht nicht
+              für eine ganze Vorlesung. Du kannst trotzdem starten.{' '}
+              <Link
+                href="/einstellungen?bereich=daten"
+                className="underline underline-offset-2 hover:text-text"
+              >
+                Speicherplatz
+              </Link>
             </p>
           ) : null}
           {previousRunning && canStart ? (
