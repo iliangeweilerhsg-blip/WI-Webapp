@@ -26,8 +26,15 @@ import { registerErrorHandler } from '../../src/plugins/errors.ts';
 import { moodleRoutes } from '../../src/routes/moodle.ts';
 import { FAKE_BASE, FAKE_TOKEN, fakeFetch, restHandler, siteInfo } from './moodle-fake.ts';
 
+/** Nur die Aktionen ohne Schalter: Die Handler aus T1-24 ersetzen die Tests selbst (siehe moodle-assign.test.ts) */
+const BASE_HANDLERS: MoodleActionHandlers = {
+  'completion.set': DEFAULT_ACTION_HANDLERS['completion.set']!,
+  'notifications.mark_read': DEFAULT_ACTION_HANDLERS['notifications.mark_read']!,
+};
+
 const ALL_FUNCTIONS = [
   'core_webservice_get_site_info',
+  'mod_assign_get_assignments',
   'mod_assign_get_submission_status',
   'mod_assign_submit_for_grading',
   'core_completion_update_activity_completion_status_manually',
@@ -80,7 +87,7 @@ async function setup(
     },
     tokens: new StaticTokenStore(options.token === undefined ? FAKE_TOKEN : options.token),
     fetch: fake.fetch,
-    handlers: options.handlers ?? { ...DEFAULT_ACTION_HANDLERS, 'assign.submit': submitHandler },
+    handlers: options.handlers ?? { ...BASE_HANDLERS, 'assign.submit': submitHandler },
     readMeta: async () => ({ token_valid_until: '2027-01-27' }),
     ...(options.now ? { now: options.now } : {}),
     ...(options.lockTimeoutMs === undefined ? {} : { lockTimeoutMs: options.lockTimeoutMs }),
@@ -322,7 +329,7 @@ describe('Nacharbeit Review: Bestätigung über die Route', () => {
   const replyParams = { post_id: 7, message_html: '<p>Danke!</p>' };
   function extraHandlers(executed: string[]): MoodleActionHandlers {
     return {
-      ...DEFAULT_ACTION_HANDLERS,
+      ...BASE_HANDLERS,
       'forum.reply': {
         async preview() {
           return { summary: 'Antwort im Forum veröffentlichen.' };
@@ -517,7 +524,7 @@ describe('Härtung #93: defensive Zugriffe auf Moodle-Antworten', () => {
       config: { moodleUrl: FAKE_BASE, dataDir: '/gibt/es/nicht' },
       tokens: new StaticTokenStore(FAKE_TOKEN),
       fetch: fake.fetch,
-      handlers: DEFAULT_ACTION_HANDLERS,
+      handlers: BASE_HANDLERS,
       readMeta: async () => ({ token_valid_until: '2027-01-27' }),
     });
     app = Fastify({ logger: false });
@@ -630,6 +637,7 @@ function frameHandlers() {
 }
 
 const FRAME_FUNCTIONS = [
+  'mod_assign_get_assignments',
   'core_webservice_get_site_info',
   'mod_assign_get_submission_status',
   'mod_assign_submit_for_grading',
@@ -943,7 +951,7 @@ describe('T1-24 Rahmen: Schalter SG_MOODLE_ACTIONS (E12)', () => {
   it('leer: Aktionen aus T1-24 sind aus, auch mit Handler; alte Aktionen laufen weiter', async () => {
     const { handlers } = frameHandlers();
     const { app: a, requests } = await setup({
-      handlers: { ...DEFAULT_ACTION_HANDLERS, ...handlers },
+      handlers: { ...BASE_HANDLERS, ...handlers },
       functions: [...FRAME_FUNCTIONS, 'core_completion_update_activity_completion_status_manually'],
       moodleActions: [],
       responses: { core_completion_update_activity_completion_status_manually: { status: true } },

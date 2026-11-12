@@ -22,6 +22,7 @@ import {
 } from '@sg/shared';
 import { exerciseSheet, job, moodleDeadline, moodleItem, slideDeck } from '../../src/db/schema/index.ts';
 import { createMoodleServices, type MoodleServices } from '../../src/moodle/index.ts';
+import { courseIdOfAssignment } from '../../src/moodle/store.ts';
 import { MoodleSync } from '../../src/moodle/sync.ts';
 import { StaticTokenStore } from '../../src/moodle/token-store.ts';
 import { createSlideDeck, uploadTmpDir } from '../../src/services/material.ts';
@@ -558,6 +559,15 @@ describe('Moodle-Abgleich (T1-23)', () => {
       ['termin', 'Projektpräsentation', '2026-11-20T09:00:00Z'],
     ]);
     expect(deadlines[0]?.exercise_sheet_id).toBe(sheet?.id);
+
+    // Kurs-ID einer Aufgabe für die Aktionen (T1-24): lokal aus den Fristen, unbekannt → null
+    const [task] = await db
+      .select({ id: moodleDeadline.moodleAssignmentId })
+      .from(moodleDeadline)
+      .where(eq(moodleDeadline.source, 'aufgabe'));
+    expect(task?.id).toEqual(expect.any(Number));
+    expect(await courseIdOfAssignment(db, task!.id!)).toBe(COURSE.dbs);
+    expect(await courseIdOfAssignment(db, 987654)).toBeNull();
 
     const status = MoodleSyncStatusSchema.parse((await req('GET', '/moodle/sync')).body);
     expect(status).toMatchObject({ state: 'bereit', connection: 'ok' });

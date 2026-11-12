@@ -4,6 +4,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef } from 'react';
 import {
+  MoodleActionCatalogSchema,
+  MoodleActionPreviewSchema,
+  MoodleActionResultSchema,
+  MoodleAssignmentListSchema,
   MoodleAutoAssignResultSchema,
   MoodleCourseLinkListSchema,
   MoodleCourseLinkSchema,
@@ -12,12 +16,15 @@ import {
   MoodleItemSchema,
   MoodleStatusSchema,
   MoodleSyncedDeadlineListSchema,
+  MoodleSubmissionStatusSchema,
   MoodleSyncStatusSchema,
+  MoodleUploadSchema,
+  type MoodleActionId,
   type MoodleItem,
   type MoodleSyncStatus,
   type Semester,
 } from '@sg/shared';
-import { ApiRequestError, apiGet, apiSend, friendlyMessage } from './api.ts';
+import { ApiRequestError, apiGet, apiSend, apiUpload, friendlyMessage } from './api.ts';
 
 export const MOODLE_KEY = ['moodle'] as const;
 const SYNC_KEY = ['moodle', 'sync'] as const;
@@ -33,18 +40,77 @@ const MESSAGES: Record<string, string> = {
   moodle_not_configured: 'Moodle ist noch nicht eingerichtet.',
   moodle_token_invalid: 'Moodle lehnt den Zugang ab. Erneuere ihn mit pnpm sg moodle login.',
   moodle_unreachable: 'Moodle ist gerade nicht erreichbar.',
+  // Moodle selbst meldet einen Fehler oder lehnt ab (z. B. eine Warnung beim Einreichen), kein Fehler im Core
+  moodle_error: 'Moodle hat einen Fehler gemeldet.',
   moodle_item_not_found: 'Diese Datei gibt es nicht mehr.',
   moodle_link_not_found: 'Dieser Kurs ist keinem Modul mehr zugeordnet.',
   moodle_link_disabled: 'Der Abgleich für diesen Kurs ist ausgeschaltet. Schalte ihn zuerst ein.',
   module_not_found: 'Dieses Modul gibt es nicht mehr.',
   moodle_module_not_removable: 'Das Modul enthält schon Inhalte und bleibt. Löse stattdessen die Zuordnung.',
   session_active: 'In diesem Modul läuft gerade eine Session. Beende sie zuerst.',
+  // Aktionen und Uploads (T1-24, 08 §9.1)
+  moodle_action_not_implemented: 'Diese Aktion ist noch nicht freigeschaltet.',
+  moodle_action_busy: 'Für diese Aufgabe läuft gerade eine andere Aktion. Versuche es gleich noch einmal.',
+  moodle_confirmation_required: 'Diese Aktion braucht eine Bestätigung.',
+  moodle_confirmation_invalid: 'Die Bestätigung gilt nicht mehr. Bitte prüfe die Angaben noch einmal.',
+  moodle_upload_not_found: 'Diese Datei ist nicht mehr vorgemerkt. Wähle sie noch einmal.',
+  moodle_upload_limit: 'Es sind schon zu viele Dateien vorgemerkt. Entferne zuerst eine.',
+  moodle_upload_in_use: 'Die Datei wird gerade verwendet und lässt sich jetzt nicht entfernen.',
+  moodle_upload_type_invalid:
+    'Dieser Dateityp ist nicht erlaubt. Erlaubt sind PDF, PNG, JPEG, ZIP und Text (.txt, .md, .csv).',
+  moodle_function_unavailable: 'Dein Moodle-Zugang erlaubt diese Aktion nicht.',
+  multipart_required: 'Die Datei konnte nicht gesendet werden.',
+  local_only: 'Das geht nur direkt am Mac.',
+};
+
+/** Gründe für `409 moodle_action_rejected` (Plan T1-24 §4.2) */
+const REJECTION_REASONS: Record<string, string> = {
+  nicht_bearbeitbar: 'Diese Abgabe lässt sich gerade nicht bearbeiten.',
+  frist_vorbei: 'Die Frist ist vorbei, Moodle nimmt keine Abgabe mehr an.',
+  noch_nicht_offen: 'Die Abgabe ist noch nicht geöffnet.',
+  schon_eingereicht: 'Diese Aufgabe ist schon eingereicht.',
+  nichts_einzureichen: 'Es gibt nichts einzureichen. Speichere zuerst einen Entwurf.',
+  erklaerung_fehlt: 'Die Erklärung zur Eigenständigkeit muss bestätigt sein.',
+  abgabeart_nicht_erlaubt: 'Diese Aufgabe nimmt diese Art der Abgabe nicht an.',
+  zu_viele_dateien: 'Das sind mehr Dateien, als die Aufgabe erlaubt.',
+  datei_zu_gross: 'Eine Datei ist größer, als die Aufgabe erlaubt.',
+  dateityp_nicht_erlaubt: 'Diese Aufgabe nimmt diesen Dateityp nicht an.',
+  uploads_nicht_freigegeben: 'Dein Moodle-Zugang erlaubt keine Uploads.',
+  nicht_gefunden: 'Diese Aufgabe gibt es in Moodle nicht (mehr).',
 };
 
 export function moodleErrorMessage(error: unknown): string {
-  if (error instanceof ApiRequestError && error.code && MESSAGES[error.code])
-    return MESSAGES[error.code] ?? '';
+  if (error instanceof ApiRequestError && error.code) {
+    if (error.code === 'moodle_action_rejected') {
+      const reason = error.details.reason;
+      return (typeof reason === 'string' ? REJECTION_REASONS[reason] : undefined) ?? 'Moodle lehnt das ab.';
+    }
+    // Die Obergrenze nennt der Core selbst (Uploads für Moodle: 100 MB), nicht die allgemeine Meldung
+    if (error.code === 'file_too_large') {
+      const text = error.message.replace(/^file_too_large:\s*/, '').trim();
+      return text || 'Die Datei ist zu groß.';
+    }
+    if (MESSAGES[error.code]) return MESSAGES[error.code] ?? '';
+  }
   return friendlyMessage(error);
+}
+
+function hasCode(error: unknown, code: string): boolean {
+  return error instanceof ApiRequestError && error.code === code;
+}
+/** `501`: der Schalter `SG_MOODLE_ACTIONS` ist für diese Aktion aus */
+export const isActionNotImplemented = (error: unknown) => hasCode(error, 'moodle_action_not_implemented');
+export const isConfirmationInvalid = (error: unknown) => hasCode(error, 'moodle_confirmation_invalid');
+export const isActionBusy = (error: unknown) => hasCode(error, 'moodle_action_busy');
+/** `409`: `execute` ohne Code, der Core verlangt jetzt eine Bestätigung (z. B. Aufgabe ohne Einreichen-Schritt) */
+export const isConfirmationRequired = (error: unknown) => hasCode(error, 'moodle_confirmation_required');
+/** Moodle hat vielleicht geschrieben, vielleicht nicht (`details.outcome_unknown`): nie wiederholen */
+export function isOutcomeUnknown(error: unknown): boolean {
+  return error instanceof ApiRequestError && error.details.outcome_unknown === true;
+}
+/** `details.reason = "stand_geaendert"`: der Stand in Moodle ist nicht mehr der der Vorschau */
+export function isStateChanged(error: unknown): boolean {
+  return isConfirmationInvalid(error) && (error as ApiRequestError).details.reason === 'stand_geaendert';
 }
 
 export function isMoodleTokenInvalid(error: unknown): boolean {
@@ -312,4 +378,109 @@ export function formatDue(iso: string, now: number = Date.now()): string {
 /** „zuletzt 12.11., 10:42“ für den letzten Abgleich */
 export function formatSyncedAt(iso: string): string {
   return dateTimeFormat.format(new Date(iso));
+}
+
+// --- Aktionen (T1-24, 08 §9.3) ---
+
+const ACTIONS_KEY = ['moodle', 'actions'] as const;
+const ASSIGNMENTS_KEY = ['moodle', 'assignments'] as const;
+const SUBMISSION_KEY = ['moodle', 'submission'] as const;
+
+export type MoodleActionParams = Record<string, unknown>;
+
+/** Aktionskatalog mit Verfügbarkeit für den aktuellen Zugang */
+export function useMoodleActionCatalog(enabled = true) {
+  return useQuery({
+    queryKey: ACTIONS_KEY,
+    queryFn: async ({ signal }) =>
+      (await apiGet('/moodle/actions', MoodleActionCatalogSchema, { signal })).items,
+    enabled,
+    staleTime: 60_000,
+    retry: (count, error) => !isMoodleNotConfigured(error) && count < 1,
+  });
+}
+
+/** Vorschau: ändert nichts in Moodle. Liefert bei Bedarf den Bestätigungscode */
+export function previewMoodleAction(action: MoodleActionId, params: MoodleActionParams) {
+  return apiSend('POST', `/moodle/actions/${action}/preview`, MoodleActionPreviewSchema, {
+    body: { params },
+  });
+}
+
+/** Ausführen. Jeder Aufruf bekommt einen frischen `Idempotency-Key` (`apiSend`), auch nach `moodle_action_busy` */
+export function executeMoodleAction(
+  action: MoodleActionId,
+  params: MoodleActionParams,
+  token: string | null,
+) {
+  return apiSend('POST', `/moodle/actions/${action}/execute`, MoodleActionResultSchema, {
+    body: { params, ...(token ? { confirmation_token: token } : {}) },
+  });
+}
+
+/** Alle Aufgaben (ohne Kurs) bzw. die eines Kurses */
+export function useMoodleAssignments(enabled = true) {
+  return useQuery({
+    queryKey: ASSIGNMENTS_KEY,
+    queryFn: async ({ signal }) =>
+      (await apiGet('/moodle/assignments', MoodleAssignmentListSchema, { signal })).items,
+    enabled,
+    staleTime: 60_000,
+    retry: (count, error) => !isMoodleNotConfigured(error) && !isMoodleTokenInvalid(error) && count < 1,
+  });
+}
+
+/** Abgabestand einer Aufgabe */
+export function useMoodleSubmission(assignmentId: number | null) {
+  return useQuery({
+    queryKey: [...SUBMISSION_KEY, assignmentId],
+    queryFn: ({ signal }) =>
+      apiGet(`/moodle/assignments/${assignmentId}/submission`, MoodleSubmissionStatusSchema, { signal }),
+    enabled: assignmentId !== null,
+    retry: (count, error) => !isMoodleNotConfigured(error) && !isMoodleTokenInvalid(error) && count < 1,
+  });
+}
+
+/** Stand der Abgabe neu laden, z. B. nach einer Aktion oder bei unklarem Ausgang */
+export function useRefreshSubmission() {
+  const client = useQueryClient();
+  return useCallback(() => client.invalidateQueries({ queryKey: SUBMISSION_KEY }), [client]);
+}
+
+/** Datei für eine Aktion vormerken (`POST /moodle/uploads`), ein Schlüssel je Datei */
+export function uploadMoodleFile(file: File, signal?: AbortSignal) {
+  return apiUpload('/moodle/uploads', MoodleUploadSchema, {
+    file,
+    fields: {},
+    idempotencyKey: globalThis.crypto.randomUUID(),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+export function removeMoodleUpload(uploadId: string) {
+  return apiSend('DELETE', `/moodle/uploads/${encodeURIComponent(uploadId)}`, null);
+}
+
+const KB = 1024;
+/** „1,2 MB“, „300 KB“ */
+export function formatBytes(bytes: number): string {
+  if (bytes < KB) return `${bytes} B`;
+  if (bytes < KB * KB) return `${Math.max(1, Math.round(bytes / KB))} KB`;
+  return `${new Intl.NumberFormat('de-DE', { maximumFractionDigits: 1 }).format(bytes / KB / KB)} MB`;
+}
+
+const clockFormat = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
+export function formatClock(iso: string): string {
+  return clockFormat.format(new Date(iso));
+}
+
+/**
+ * Endungen, die der Core für Moodle-Uploads annimmt (Plan T1-24 F2, `services/core/src/moodle/uploads.ts`). Nur ein
+ * Hinweis für die Dateiauswahl, entscheiden tut der Core
+ */
+export const MOODLE_UPLOAD_ACCEPT = '.pdf,.png,.jpg,.jpeg,.zip,.txt,.md,.csv';
+
+/** Link zur Seite „Abgabe“ */
+export function abgabeHref(assignmentId: number, moduleId: string): string {
+  return `/abgabe?aufgabe=${assignmentId}&modul=${encodeURIComponent(moduleId)}`;
 }

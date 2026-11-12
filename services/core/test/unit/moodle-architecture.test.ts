@@ -111,8 +111,16 @@ describe('Architektur Core: nur routes/moodle.ts erreicht Moodle-Aktionen', () =
     expect(probe("const m = require('../moodle/actions.ts');", 'routes/x.ts')).toEqual(['moodle/actions']);
   });
 
-  it('actions.ts (Handler) importieren nur routes/moodle.ts und moodle/index.ts', () => {
-    expect(importersOf('moodle/actions')).toEqual(['moodle/index.ts', 'routes/moodle.ts']);
+  it('actions.ts (Handler) importieren nur routes/moodle.ts und moodle/index.ts (und Typen: actions/assign.ts)', () => {
+    // actions/assign.ts holt sich nur Typen (`import type`) aus actions.ts und wird selbst von actions.ts eingebunden
+    expect(importersOf('moodle/actions')).toEqual([
+      'moodle/actions/assign.ts',
+      'moodle/index.ts',
+      'routes/moodle.ts',
+    ]);
+    const assign = coreFiles.find((f) => f.path === 'moodle/actions/assign.ts')?.code ?? '';
+    expect(assign).toMatch(/^import type \{[^}]*\} from '\.\.\/actions\.ts';/m);
+    expect(assign).not.toMatch(/^import (?!type\b)[^;]*from '\.\.\/actions\.ts'/m);
   });
 
   it('Bestätigungscodes und Sperren importiert nur moodle/index.ts', () => {
@@ -124,6 +132,7 @@ describe('Architektur Core: nur routes/moodle.ts erreicht Moodle-Aktionen', () =
     // Kein Job, kein Abgleich und keine andere Route kommt an die Dateien unter tmp/moodle-uploads/
     expect(importersOf('moodle/uploads')).toEqual([
       'moodle/actions.ts',
+      'moodle/actions/assign.ts',
       'moodle/index.ts',
       'routes/moodle.ts',
     ]);
@@ -139,6 +148,7 @@ describe('Architektur Core: nur routes/moodle.ts erreicht Moodle-Aktionen', () =
       'routes/moodle.ts',
       'moodle/index.ts',
       'moodle/actions.ts',
+      'moodle/actions/assign.ts',
       'moodle/confirmations.ts',
       'moodle/locks.ts',
     ]);
@@ -147,8 +157,8 @@ describe('Architektur Core: nur routes/moodle.ts erreicht Moodle-Aktionen', () =
     expect(offenders).toEqual([]);
   });
 
-  it('client.write (schreibender Moodle-Aufruf) steht nur in moodle/actions.ts und moodle/client.ts', () => {
-    expect(only(coreFiles, WRITE_PATTERN)).toEqual(['moodle/actions.ts']);
+  it('client.write (schreibender Moodle-Aufruf) steht nur in den Handlern (moodle/actions.ts, actions/assign.ts) und moodle/client.ts', () => {
+    expect(only(coreFiles, WRITE_PATTERN)).toEqual(['moodle/actions.ts', 'moodle/actions/assign.ts']);
     expect(only(coreFiles, /\basync write\b|\bwrite<T/)).toEqual(['moodle/client.ts']);
   });
 
