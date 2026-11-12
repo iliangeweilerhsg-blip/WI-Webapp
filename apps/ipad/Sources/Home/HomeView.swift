@@ -37,6 +37,12 @@ struct HomeView: View {
                             DeadLetterCard(sync: sync)
                         }
                     }
+                    // Nach einer Wiederherstellung am Mac gleicht das iPad alle Seiten ab (UX-46)
+                    if let progress = model.library?.backgroundReconcile {
+                        NoticeCard(
+                            text: HomeTexts.reconcileLine(
+                                remaining: progress.remaining, afterRestore: progress.afterRestore))
+                    }
                     // Notizbücher je Modul (UX-30). Mit laufender Vorlesung erscheinen die Striche live am Mac (T1-14).
                     if let library = model.library {
                         LibraryListView(library: library, isOnline: model.sync?.state == .online)
@@ -90,6 +96,13 @@ struct HomeView: View {
 /// Texte des Startbildschirms. Reine Funktionen, damit sie testbar sind.
 enum HomeTexts {
     static let appOutdatedCard = "App passt nicht mehr zum Mac. Am Mac über Xcode neu aufspielen."
+
+    /// Zeile während des Abgleichs aller Seiten (UX-46). Zählt herunter, am Ende verschwindet sie.
+    static func reconcileLine(remaining: Int, afterRestore: Bool) -> String {
+        let pages = remaining == 1 ? "1 Seite wird" : "\(remaining) Seiten werden"
+        let work = "\(pages) abgeglichen"
+        return afterRestore ? "Mac wiederhergestellt · \(work)" : work
+    }
 
     /// Karte zur Fehlerablage (UX-47)
     static func deadLetterCard(count: Int) -> String {

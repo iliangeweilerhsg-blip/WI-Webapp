@@ -214,6 +214,7 @@ struct InkPageView: View {
             refreshExpiry()
             allSynced.update(isOnline: sync.state == .online, pending: sync.pendingCount)
             sync.setPresence(presence(onPage: true))
+            if let model { library.setOpenPage(model) }
             // Zurück in der Ansicht: Ein Wechsel wartete noch, das Warten läuft weiter
             if gate.hasPending {
                 startQuietWait()
@@ -224,6 +225,8 @@ struct InkPageView: View {
             quietTask?.cancel()
             quietTask = nil
             model?.saveNow()
+            // Die Seite ist nicht mehr offen: Ein Hintergrund-Abgleich lädt sie von der Platte (UX-46)
+            library.setOpenPage(nil)
             // Beim Verlassen läuft die Frist ab: `page.delete` jetzt einreihen
             library.flushPendingDeletes()
             sync.setPresence(presence(onPage: false))
@@ -702,6 +705,7 @@ struct InkPageView: View {
         model?.saveNow()
         sync.setPresence(presence(onPage: false))
         model = nil
+        library.setOpenPage(nil)
         binding = nil
         failedToOpen = false
         showsSidebar = false
@@ -788,6 +792,8 @@ struct InkPageView: View {
         page.onToolUseFinished = { [weak gate] in gate?.finishTool() }
         binding = target
         model = page
+        // Der Hintergrund-Abgleich nach einer Wiederherstellung nimmt für diese Seite genau dieses Modell (UX-46)
+        library.setOpenPage(page)
         sync.setPresence(presence(onPage: true))
         updateSlideBackground()
         return page
