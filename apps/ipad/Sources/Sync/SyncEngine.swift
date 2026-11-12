@@ -40,6 +40,8 @@ private final class SyncLink {
     /// Wiederholbarer Fehler: nichts mehr senden, die Verbindung wird neu aufgebaut
     var blocked = false
     var welcomed = false
+    /// Zeitpunkt des `welcome` (für den Backoff-Reset nach einer stabilen Verbindung)
+    var welcomedAt: Date?
     var lastPongAt: Date
     /// Wir haben geschlossen (Zeitüberschreitung, Fehler beim Senden, fatale Meldung)
     var closedByUs = false
@@ -85,6 +87,8 @@ final class SyncEngine {
     static let maxInternalErrors = 5
     static let pingInterval: Duration = .seconds(15)
     static let pongTimeout: TimeInterval = 45
+    /// Hält eine Verbindung so lange nach `welcome` (belegt durch ein `pong`), beginnt die Wartezeit von vorn
+    static let stableConnectionInterval: TimeInterval = 60
     /// So lange sammelt die Engine `ack`-Zeilen, bevor sie sie mit einem fsync schreibt
     static let ackFlushDelay: Duration = .milliseconds(250)
     static let clockResyncInterval: TimeInterval = 300
@@ -651,8 +655,17 @@ final class SyncEngine {
         case .inbound(let value):
             onInbound?(value)
         case .pong:
-            // Kein Backoff-Reset: Laut VERTRAEGE §11.2 beginnt die Folge nur nach einem `ack` von vorn
-            link.lastPongAt = now()
+            // Ein `pong` allein setzt den Backoff nicht zurück (VERTRAEGE §11.2: nach `ack`). Ausnahme: Die Verbindung
+            // hält seit `stableConnectionInterval`. Sonst wartete ein iPad, das nur liest (keine `ack`), nach ein paar
+            // Abbrüchen über die ganze Laufzeit hinweg 30 s. Ein `welcome`-Reset ginge nicht: 4503 kommt immer nach
+            // `welcome`, die Folge 1 s, 2 s, 4 s … gäbe es dann nie.
+            let at = now()
+            link.lastPongAt = at
+            if let welcomedAt = link.welcomedAt,
+                at.timeIntervalSince(welcomedAt) >= SyncEngine.stableConnectionInterval
+            {
+                backoff.reset()
+            }
         case .ack(let opID):
             await onAck(opID: opID, link: link)
         case .error(let failure):
@@ -732,6 +745,7 @@ final class SyncEngine {
 
     private func onWelcome(dbEpoch: String, link: SyncLink) async {
         link.welcomed = true
+        link.welcomedAt = now()
         link.lastPongAt = now()
         // Nach einer Wiederherstellung am Mac kennt der Core den Stand nicht mehr: alles abgleichen
         if let stored = library.dbEpoch, stored != dbEpoch {
@@ -896,6 +910,9 @@ final class SyncEngine {
                 // Abgebrochen: `flushAcksNow` hat schon geschrieben
                 return
             }
+            // Der Schlaf kann schon vorbei sein, wenn `flushAcksNow` abbricht. Dann gehört `ackFlushTask` evtl.
+            // schon einer neuen Aufgabe und darf nicht überschrieben werden.
+            guard !_Concurrency.Task.isCancelled else { return }
             self.ackFlushTask = nil
             self.outbox.flushAcks()
         }

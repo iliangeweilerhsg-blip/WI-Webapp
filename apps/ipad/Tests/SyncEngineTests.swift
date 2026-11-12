@@ -190,11 +190,37 @@ final class SyncEngineTests: XCTestCase {
         _ = try await waitForSocket(h, index: 2)
     }
 
+    func testStableConnectionResetsBackoff() async throws {
+        let h = SyncHarness()
+        h.start()
+        let first = try await waitForSocket(h, index: 0)
+        _ = await eventually { h.engine.state == .online }
+
+        first.fail(.closed(code: 4503))
+        _ = await eventually { h.engine.state == .waiting }
+        await h.clock.advance(1.5)
+        let second = try await waitForSocket(h, index: 1)
+        _ = await eventually { h.engine.state == .online }
+
+        // Eine Minute stabil (belegt durch `pong`): Die nächste Wartezeit ist wieder 1 s statt 2 s
+        await h.clock.advance(65)
+        XCTAssertTrue(second.types.contains("ping"))
+        second.fail(.closed(code: 4503))
+        _ = await eventually { h.engine.state == .waiting }
+        await h.clock.advance(0.5)
+        XCTAssertEqual(h.factory.sockets.count, 2)
+        await h.clock.advance(0.75)
+        _ = try await waitForSocket(h, index: 2)
+    }
+
     func testAcksAreFlushedWithOneFsyncAfterTheDelay() async throws {
         let h = SyncHarness()
+        // Erst online, dann einreihen: Mit bekanntem Versatz entfällt die Uhrkorrektur (`rewrite`, je ein fsync).
+        // Gezählt werden so nur die fsyncs der `ack`-Zeilen.
+        h.start()
+        _ = await eventually { h.engine.state == .online }
         h.enqueueStrokes(20)
         let before = h.outbox.syncCount
-        h.start()
         let finished = await eventually { h.engine.pendingCount == 0 }
         XCTAssertTrue(finished)
 
@@ -418,6 +444,8 @@ final class SyncEngineTests: XCTestCase {
         let done = await eventually { h.engine.pendingCount == 0 }
         XCTAssertTrue(done)
         XCTAssertEqual(h.factory.sockets[0].ops.count, 3)
+        // Die `ack`-Zeilen schreibt die Engine gebündelt nach `ackFlushDelay` (im Speicher sind sie sofort erledigt)
+        await h.clock.advance(0.3)
         XCTAssertEqual(SyncOutbox(directory: h.directory).pending.count, 0)
     }
 
