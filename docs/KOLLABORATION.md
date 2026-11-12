@@ -57,16 +57,16 @@ Ohne Argon verteilt Claude die Arbeit nach Modell. Die Details stehen im Modell-
 | Aufgabe | Wer |
 |---|---|
 | Architektur, Schnittstellen, Aufgabenzerlegung, Integration, Merges | Claude (Lead) |
-| Komplexeste Features (Nebenläufigkeit, Locks, Sync, schwierige Algorithmen) | Subagent mit Fable 5.2 |
-| Standard-Features, UI, Doku, Tests | Subagent mit Sonnet 5.5 |
+| Planung von Features (Umsetzungsplan mit Vertragstext, PR-Zuschnitt, Tests, Fallstricken) | Subagent mit Fable 5.2 |
+| Code nach Plan, Standard-Features, UI, Doku, Tests | Subagent mit Sonnet 5.5 |
 | Code- und Security-Reviews, Gegen-Reviews | frischer Subagent mit Opus 5.5 |
 | Mechanisches (Umbenennen, Labels, Formatierung) | Subagent mit Haiku |
 | Build-Setup, CI, Debugging | Claude (Lead) |
 
 ### Zuordnungsregel
 
-> **Komplex** (Nebenläufigkeit, mehrere Dienste, Sync, Algorithmen)? → **Fable 5.2**.
-> **Normales Feature, UI oder Doku?** → **Sonnet 5.5**.
+> **Neues Feature?** → **Fable 5.2** plant, **Sonnet 5.5** schreibt den Code nach Plan, **Opus 5.5** reviewt.
+> **Kleine Änderung, UI oder Doku?** → **Sonnet 5.5**.
 > **Review, Security, Vertrag?** → **Opus 5.5**.
 > **Rein mechanisch?** → **Haiku**.
 > Mehrere **unabhängige Features**? → **Subagents parallel** (Abschnitt 5).
@@ -86,9 +86,9 @@ Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so gü
 
 | Modell | Wann |
 |---|---|
-| **Fable 5.2** | Komplexeste Features: Nebenläufigkeit und Locks, Ketten über mehrere Dienste, Sync, schwierige Algorithmen |
+| **Fable 5.2** | Planung von Features (Owner-Regel vom 11.11.2026): Umsetzungsplan mit Vertragstext, Dateien/Scope, Schnittstellen, Testfällen und Fallstricken. Der Plan liegt unter `docs/plaene/` und wird vor der Umsetzung von Opus geprüft |
 | **Opus 5.5** | Reviews von Code, Security-Reviews und Gegen-Reviews (ersetzt Argons Gegen-Review), Security-kritischer Code, Debugging, Merge-Konflikte, Verträge und Architektur |
-| **Sonnet 5.5** | Standard für Features, UI und Doku sowie Reviews von Doku |
+| **Sonnet 5.5** | Schreibt den Code nach Plan, außerdem UI und Doku. Reviewt Doku und kleine, risikoarme Änderungen (reine Texte, Darstellung, kleine Nacharbeiten) |
 | **Haiku** | Mechanisches: Umbenennen, Labels, einfache Formatierung |
 
 (Ruht: Die frühere Gemini-Tabelle mit Argon und Flash gilt nicht, solange Argon pausiert ist.)
@@ -143,6 +143,10 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 - Ausführlich wird nur bei Antworten an den Owner, bei Dringendem und bei Aufgaben für den Owner.
 - Nachrichten des Owners haben Vorrang vor Agent-Meldungen.
 - Schreibt der Owner „Gespräch“, entfallen auch die ⚙-Zeilen, bis er „weiter“ schreibt.
+
+**Autonom weiterarbeiten (Owner-Regel vom 11.11.2026).**
+- Kommen keine Eingaben vom Owner, arbeitet Claude trotzdem weiter und legt sinnvolle Tasks selbst an (Backlog in #188).
+- Ist nichts mehr offen, spielt Claude den Studienalltag und die Nutzung der App erneut durch (User-Experience: Was muss passieren, was kann passieren, welche Fehler treten auf). Die Befunde kommen nach `docs/ux/`. Lösungen ohne Rückfrage setzt Claude sofort um, der Rest geht als `entscheidung`-Issue an den Owner.
 
 ## 5. Parallele Features mit Claude-Subagents
 
