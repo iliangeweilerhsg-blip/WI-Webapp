@@ -235,6 +235,46 @@ final class InkUnreadablePageTests: XCTestCase {
         XCTAssertEqual(h.library.page(good)?.needsReconcile, false)
         let kinds = h.factory.sockets.flatMap { $0.ops.compactMap { $0.object["kind"] as? String } }
         XCTAssertFalse(kinds.contains("stroke.remove"))
+        // Die kaputte Seite zählt nicht als offen: Die Zeile zeigt nur noch den ehrlichen Hinweis
+        XCTAssertEqual(service.pagesNeedingReconcile, 0)
+        XCTAssertEqual(service.unreadablePagesNeedingReconcile, 1)
+        XCTAssertEqual(
+            service.backgroundReconcile,
+            InkLibraryService.BackgroundReconcile(remaining: 0, afterRestore: false, unreadable: 1))
+    }
+
+    func testOpeningAnUnreadablePageTakesItOutOfTheCountUntilItReadsAgain() throws {
+        let h = SyncHarness()
+        let root = h.directory.appendingPathComponent("Ink")
+        let pages = FileInkPageStore(root: root)
+        let url = try writePlist(garbage, root: root, pageID: h.binding.pageID)
+        let clock = h.clock
+        let service = InkLibraryService(
+            store: h.library, sync: h.engine, client: h.client, pageStore: pages,
+            now: { clock.date }, graceSleep: { try await clock.sleep($0) })
+        h.library.markAllNeedReconcile()
+        XCTAssertEqual(service.pagesNeedingReconcile, 1)
+
+        service.setOpenPage(InkPageModel(pageID: h.binding.pageID, store: pages, saveDelay: .seconds(3600)))
+        XCTAssertEqual(service.pagesNeedingReconcile, 0)
+        XCTAssertEqual(service.unreadablePagesNeedingReconcile, 1)
+
+        // Lässt sich die Seite wieder lesen, zählt sie wieder als offen
+        try FileManager.default.removeItem(at: url)
+        service.setOpenPage(InkPageModel(pageID: h.binding.pageID, store: pages, saveDelay: .seconds(3600)))
+        XCTAssertEqual(service.pagesNeedingReconcile, 1)
+        XCTAssertEqual(service.unreadablePagesNeedingReconcile, 0)
+    }
+
+    func testHomeLineNamesUnreadablePagesSeparately() {
+        XCTAssertEqual(
+            HomeTexts.reconcileLine(remaining: 0, afterRestore: false, unreadable: 1),
+            "1 Seite konnte nicht gelesen werden")
+        XCTAssertEqual(
+            HomeTexts.reconcileLine(remaining: 2, afterRestore: true, unreadable: 3),
+            "Mac wiederhergestellt · 2 Seiten werden abgeglichen · 3 Seiten konnten nicht gelesen werden")
+        XCTAssertEqual(
+            HomeTexts.reconcileLine(remaining: 1, afterRestore: true), "Mac wiederhergestellt · 1 Seite wird abgeglichen")
     }
 
     func testMissingFileOfANewPageIsStillReconciledAsEmpty() async throws {

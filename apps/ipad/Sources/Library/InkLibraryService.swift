@@ -46,6 +46,9 @@ final class InkLibraryService {
         var remaining: Int
         /// Der Durchgang folgt auf eine neue `db_epoch`
         var afterRestore: Bool
+        /// Markierte Seiten, die sich nicht lesen ließen (#252). Sie zählen nicht zu `remaining`: Der Durchgang lässt
+        /// sie aus, das Flag bleibt stehen.
+        var unreadable = 0
     }
 
     /// Seit dem Start der App lief ein Durchgang an (erstes `welcome`). Erst dann zeigt der Startbildschirm die Zeile.
@@ -58,6 +61,10 @@ final class InkLibraryService {
     /// Zählt bei jedem neuen Durchgang und bei jedem Abbruch hoch. Ein Durchgang mit alter Nummer endet am nächsten
     /// Prüfpunkt, ohne etwas zu ändern.
     @ObservationIgnored private var passGeneration = 0
+    /// Seiten, deren Modell sich zuletzt nicht lesen ließ (#252, nur im Arbeitsspeicher). Der Durchgang lässt sie aus
+    /// und zählt sie nicht als offen, sonst verschwände die Zeile auf dem Startbildschirm nie. Lädt die Seite wieder
+    /// lesbar (Öffnen, nächster Start), fällt sie heraus. Änderungen melden sich über `bump()`.
+    @ObservationIgnored private var unreadablePageIDs = Set<String>()
     /// Die offene Seite der Schreibfläche. Ihr Modell gehört der Ansicht; der Durchgang gleicht sie mit genau diesem
     /// Modell ab und lädt sie nie ein zweites Mal.
     @ObservationIgnored private weak var openModel: InkPageModel?
@@ -786,6 +793,16 @@ final class InkLibraryService {
         openModel = model
         openPageID = model?.pageID
         openChanges += 1
+        if let model { noteReadability(of: model) }
+    }
+
+    /// Hält fest, ob sich die Seite des Modells lesen ließ (#252)
+    private func noteReadability(of model: InkPageModel) {
+        let changed =
+            model.isUnreadable
+            ? unreadablePageIDs.insert(model.pageID).inserted
+            : unreadablePageIDs.remove(model.pageID) != nil
+        if changed { bump() }
     }
 
     /// Zeile auf dem Startbildschirm: steht, solange nach einem `welcome` markierte Seiten übrig sind, auch wenn der
@@ -796,16 +813,27 @@ final class InkLibraryService {
         _ = sync.reconciledPages
         guard passStarted else { return nil }
         let remaining = pagesNeedingReconcile
-        guard remaining > 0 else { return nil }
-        return BackgroundReconcile(remaining: remaining, afterRestore: restorePending)
+        let unreadable = unreadablePagesNeedingReconcile
+        guard remaining > 0 || unreadable > 0 else { return nil }
+        return BackgroundReconcile(remaining: remaining, afterRestore: restorePending, unreadable: unreadable)
     }
 
     /// Markierte Seiten (`needsReconcile`), die der Durchgang abgleichen muss: sichtbar und beim Core angelegt bzw.
-    /// eingereiht. Eine Seite, deren `page.create` nie eingereiht wurde, hat noch nie Striche gehabt.
+    /// eingereiht. Eine Seite, deren `page.create` nie eingereiht wurde, hat noch nie Striche gehabt. Unlesbare Seiten
+    /// (#252) zählen nicht: Sie werden nie abgeglichen (`unreadablePagesNeedingReconcile`).
     var pagesNeedingReconcile: Int {
+        flaggedPages().filter { !unreadablePageIDs.contains($0.id) }.count
+    }
+
+    /// Markierte Seiten, die sich nicht lesen ließen (#252). Das Flag bleibt, die Datei bleibt unberührt.
+    var unreadablePagesNeedingReconcile: Int {
+        flaggedPages().filter { unreadablePageIDs.contains($0.id) }.count
+    }
+
+    private func flaggedPages() -> [LibraryPage] {
         track()
-        return store.allNotebooks().reduce(0) { sum, notebook in
-            sum + store.pages(inNotebook: notebook.id).filter { $0.needsReconcile && $0.createQueued }.count
+        return store.allNotebooks().flatMap { notebook in
+            store.pages(inNotebook: notebook.id).filter { $0.needsReconcile && $0.createQueued }
         }
     }
 
@@ -867,13 +895,15 @@ final class InkLibraryService {
             for page in pages {
                 guard isCurrentPass(generation) else { break outer }
                 guard let current = store.page(page.id), current.needsReconcile, current.createQueued,
-                    current.deletedAtMS == nil
+                    current.deletedAtMS == nil, !unreadablePageIDs.contains(current.id)
                 else { continue }
                 var result = await reconcileForPass(pageID: current.id, generation: generation)
                 // Verworfen, weil die Seite währenddessen geöffnet, gewechselt oder geschlossen wurde: einmal mit dem
                 // dann gültigen Modell nachholen. Sonst bliebe sie markiert, wenn der Abgleich der Ansicht genau in
                 // diesem Moment übersprungen wurde.
-                if result == .skipped, isCurrentPass(generation), store.page(current.id)?.needsReconcile == true {
+                if result == .skipped, isCurrentPass(generation), store.page(current.id)?.needsReconcile == true,
+                    !unreadablePageIDs.contains(current.id)
+                {
                     result = await reconcileForPass(pageID: current.id, generation: generation)
                 }
                 if result == .unreachable {
@@ -897,6 +927,8 @@ final class InkLibraryService {
             return .skipped
         }
         if pageID == openPageID, let live = openModel, live.pageID == pageID {
+            noteReadability(of: live)
+            guard !live.isUnreadable else { return .skipped }
             return await sync.reconcile(page: live, binding: binding) { [weak self] in
                 // Die Ansicht hat inzwischen ein anderes Modell (Seite verlassen und neu geöffnet): `live` kennt dessen
                 // neue Striche nicht
@@ -913,6 +945,9 @@ final class InkLibraryService {
             saveDelay: .seconds(3600),
             outboxMark: sync.outboxMark(forPage: pageID)
         )
+        // Unlesbar (#252): aus dem Durchgang nehmen, damit die Zeile nicht ewig eine offene Seite zählt
+        noteReadability(of: model)
+        guard !model.isUnreadable else { return .skipped }
         model.outboxNumberProvider = { [weak engine = sync] in engine?.outboxLastNumber ?? 0 }
         model.sessionStartedAt = binding.sessionStartMS.map { Date(timeIntervalSince1970: Double($0) / 1000) }
         let changesBefore = openChanges

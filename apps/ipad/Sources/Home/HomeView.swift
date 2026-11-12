@@ -41,7 +41,8 @@ struct HomeView: View {
                     if let progress = model.library?.backgroundReconcile {
                         NoticeCard(
                             text: HomeTexts.reconcileLine(
-                                remaining: progress.remaining, afterRestore: progress.afterRestore))
+                                remaining: progress.remaining, afterRestore: progress.afterRestore,
+                                unreadable: progress.unreadable))
                     }
                     // Notizbücher je Modul (UX-30). Mit laufender Vorlesung erscheinen die Striche live am Mac (T1-14).
                     if let library = model.library {
@@ -97,11 +98,22 @@ struct HomeView: View {
 enum HomeTexts {
     static let appOutdatedCard = "App passt nicht mehr zum Mac. Am Mac über Xcode neu aufspielen."
 
-    /// Zeile während des Abgleichs aller Seiten (UX-46). Zählt herunter, am Ende verschwindet sie.
-    static func reconcileLine(remaining: Int, afterRestore: Bool) -> String {
-        let pages = remaining == 1 ? "1 Seite wird" : "\(remaining) Seiten werden"
-        let work = "\(pages) abgeglichen"
-        return afterRestore ? "Mac wiederhergestellt · \(work)" : work
+    /// Zeile während des Abgleichs aller Seiten (UX-46). Zählt herunter, am Ende verschwindet sie. Markierte Seiten,
+    /// die sich nicht lesen ließen (#252), zählt sie nicht mit: Sie werden nie abgeglichen und stehen als eigener
+    /// Hinweis da, solange es sie gibt.
+    static func reconcileLine(remaining: Int, afterRestore: Bool, unreadable: Int = 0) -> String {
+        var parts: [String] = []
+        if remaining > 0 {
+            let pages = remaining == 1 ? "1 Seite wird" : "\(remaining) Seiten werden"
+            let work = "\(pages) abgeglichen"
+            parts.append(afterRestore ? "Mac wiederhergestellt · \(work)" : work)
+        }
+        if unreadable > 0 {
+            parts.append(
+                unreadable == 1
+                    ? "1 Seite konnte nicht gelesen werden" : "\(unreadable) Seiten konnten nicht gelesen werden")
+        }
+        return parts.joined(separator: " · ")
     }
 
     /// Karte zur Fehlerablage (UX-47)
