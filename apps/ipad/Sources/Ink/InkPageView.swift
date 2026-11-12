@@ -102,6 +102,7 @@ struct InkPageView: View {
                         onSwipePage: { step($0) })
                         .id(model.pageID)
                         .ignoresSafeArea(edges: .bottom)
+                        .overlay(alignment: .top) { transientNotices }
                     if toolbarSide == .rechts {
                         Divider()
                         InkToolbar(model: model)
@@ -112,17 +113,12 @@ struct InkPageView: View {
                         pageStrip
                         if let offlineText {
                             infoRow(offlineText)
-                        } else if allSynced.isVisible {
-                            infoRow(InkPageTitle.allSyncedLine)
                         }
                         if let expiryLine {
                             infoRow(expiryLine)
                         }
                         if let statusText = slideBackground?.statusText {
                             infoRow(statusText)
-                        }
-                        if let hint = slideModeHint {
-                            infoRow(hint)
                         }
                         if let waiting = pendingSwitchText {
                             Button {
@@ -326,12 +322,34 @@ struct InkPageView: View {
     /// Ablauf der Signatur als Infozeile, nur am letzten Tag und am Tag davor (UX-50)
     private var expiryLine: String? {
         guard let expiryDate else { return nil }
-        return ProfileExpiry.pageLine(expiry: expiryDate, now: expiryNow, pendingChanges: sync.pendingCount)
+        return ProfileExpiry.pageLine(
+            expiry: expiryDate, now: expiryNow, pendingChanges: ProfileExpiry.waitingChanges(
+                isOnline: sync.state == .online, pending: sync.pendingCount))
     }
 
     private func refreshExpiry() {
         expiryDate = ProfileExpiry.currentExpiry()
         expiryNow = Date()
+    }
+
+    /// Kurze Hinweise („Alles am Mac“ 3 s, Folien-Hinweis 5 s) liegen über der Fläche, statt sie zu verkleinern: Jede
+    /// neue Höhe passt die Seite neu ein und setzt den Zoom zurück. Der Stift schreibt durch sie hindurch.
+    private var transientNotices: some View {
+        VStack(spacing: 0) {
+            if offlineText == nil, allSynced.isVisible {
+                infoRow(InkPageTitle.allSyncedLine)
+            }
+            if let hint = slideModeHint {
+                infoRow(hint)
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    /// Kleiner Wechsel ins Notizbuch der laufenden Vorlesung, wenn kein Banner dasteht: gleiches Modul (UX-51) oder
+    /// Banner weggeklickt. Kein eigenes Banner, kein Dialog (R1).
+    private var showsLectureShortcut: Bool {
+        otherNotebookID != nil && !showsOtherLectureBanner
     }
 
     private func infoRow(_ text: String) -> some View {
@@ -373,6 +391,18 @@ struct InkPageView: View {
             .accessibilityLabel(index.map { $0 + 1 < count } == true ? "Nächste Seite" : "Neue Seite")
 
             Spacer()
+
+            if showsLectureShortcut {
+                Button {
+                    _Concurrency.Task { await switchToRunningLecture() }
+                } label: {
+                    Label("Zur Vorlesung", systemImage: "arrow.uturn.left")
+                        .font(.subheadline)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityHint("Öffnet das Notizbuch der laufenden Vorlesung")
+            }
 
             modeButton
 
@@ -457,6 +487,8 @@ struct InkPageView: View {
             }
             .opacity(dimmed ? 0.4 : 1)
             .accessibilityLabel(mode == .aufFolie ? "Schreibmodus: Auf Folie" : "Schreibmodus: Freie Seite")
+            // Ohne `.disabled` fehlt das Merkmal „abgeblendet“: Der Wert sagt es VoiceOver
+            .accessibilityValue(dimmed ? "Wechsel gerade nicht möglich" : "")
             .accessibilityHint(
                 slideModeAvailable ? "Ein Tipp wechselt den Modus für dieses Modul" : InkModeResolver.unavailableHint)
         }

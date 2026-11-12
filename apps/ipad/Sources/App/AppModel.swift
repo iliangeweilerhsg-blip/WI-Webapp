@@ -26,7 +26,9 @@ enum BadgeState: Equatable, Sendable {
     ///   - connection: Ergebnis der Abfrage von `/health`
     ///   - syncState: Zustand des Sync, `nil` ohne Engine (dann gilt allein die Abfrage)
     static func resolve(connection: ConnectionStatus, syncState: SyncEngine.State?) -> BadgeState {
-        if connection == .disconnected(.tokenInvalid) { return .disconnected(.tokenInvalid) }
+        if connection == .disconnected(.tokenInvalid) || syncState == .tokenInvalid {
+            return .disconnected(.tokenInvalid)
+        }
         if syncState == .unsupported { return .appOutdated }
         if syncState == .online { return .online }
         switch connection {
@@ -148,6 +150,8 @@ final class AppModel {
     /// Der Verbindungsstatus folgt der Engine: online heißt verbunden, ein widerrufenes Token heißt neu koppeln.
     /// Alles andere klärt die Abfrage von `/health`.
     private func syncStateChanged(_ state: SyncEngine.State) {
+        // „Lief zuletzt · Stand …“ nennt den Moment, in dem die Verbindung abriss (UX-57)
+        library?.syncOnlineChanged(state == .online)
         guard case .paired = phase else { return }
         switch state {
         case .online:

@@ -66,6 +66,12 @@ enum ProfileExpiry {
         return expirationDate(fromProfile: data)
     }
 
+    /// Zahl der Änderungen, die der Hinweis nennt: nur ohne laufenden Sync. Online gehen sie ohnehin raus, sonst
+    /// wechselte der Text mit jedem Strich.
+    static func waitingChanges(isOnline: Bool, pending: Int) -> Int {
+        isOnline ? 0 : pending
+    }
+
     /// Hinweis für den Startbildschirm, `nil` wenn nichts anzuzeigen ist
     static func currentNotice(now: Date = Date(), pendingChanges: Int = 0) -> String? {
         guard let expiry = currentExpiry() else { return nil }

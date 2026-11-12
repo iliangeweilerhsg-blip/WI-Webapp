@@ -18,7 +18,8 @@ struct HomeView: View {
     private var expiryNotice: String? {
         guard let expiry else { return nil }
         return ProfileExpiry.notice(
-            expiry: expiry, now: expiryNow, pendingChanges: model.sync?.pendingCount ?? 0)
+            expiry: expiry, now: expiryNow, pendingChanges: ProfileExpiry.waitingChanges(
+                isOnline: model.sync?.state == .online, pending: model.sync?.pendingCount ?? 0))
     }
 
     var body: some View {
@@ -92,8 +93,9 @@ enum HomeTexts {
 
     /// Karte zur Fehlerablage (UX-47)
     static func deadLetterCard(count: Int) -> String {
-        let changes = count == 1 ? "1 Änderung konnte" : "\(count) Änderungen konnten"
-        return "\(changes) der Mac nicht annehmen. Die Zeichnungen liegen noch auf dem iPad."
+        // Subjekt ist „der Mac“: „konnte“ auch in der Mehrzahl
+        let changes = count == 1 ? "1 Änderung" : "\(count) Änderungen"
+        return "\(changes) konnte der Mac nicht annehmen. Die Zeichnungen liegen noch auf dem iPad."
     }
 }
 

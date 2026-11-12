@@ -43,6 +43,28 @@ final class BadgeStateTests: XCTestCase {
         XCTAssertEqual(
             BadgeState.resolve(connection: .disconnected(.tokenInvalid), syncState: .waiting),
             .disconnected(.tokenInvalid))
+        // Meldet nur der Sync den Widerruf, gilt er auch, wenn `/health` vorher antwortete
+        let badge = BadgeState.resolve(connection: .connected, syncState: .tokenInvalid)
+        XCTAssertEqual(badge, .disconnected(.tokenInvalid))
+        XCTAssertFalse(badge.isGreen)
+    }
+
+    func testNoCombinationIsFalselyGreen() {
+        let connections: [ConnectionStatus] = [
+            .unknown, .checking, .connected, .disconnected(.offline), .disconnected(.timeout),
+            .disconnected(.tokenInvalid), .disconnected(.appOutdated),
+        ]
+        let states: [SyncEngine.State] = [
+            .stopped, .connecting, .clockSync, .online, .waiting, .tokenInvalid, .unsupported,
+        ]
+        for connection in connections {
+            for state in states {
+                let badge = BadgeState.resolve(connection: connection, syncState: state)
+                XCTAssertEqual(
+                    badge.isGreen, state == .online && connection != .disconnected(.tokenInvalid),
+                    "\(connection) / \(state)")
+            }
+        }
     }
 
     func testDisconnectedNamesTheCause() {
@@ -88,7 +110,7 @@ final class PendingChangesTextTests: XCTestCase {
     func testDeadLetterCardText() {
         XCTAssertEqual(
             HomeTexts.deadLetterCard(count: 3),
-            "3 Änderungen konnten der Mac nicht annehmen. Die Zeichnungen liegen noch auf dem iPad.")
+            "3 Änderungen konnte der Mac nicht annehmen. Die Zeichnungen liegen noch auf dem iPad.")
         XCTAssertEqual(
             HomeTexts.deadLetterCard(count: 1),
             "1 Änderung konnte der Mac nicht annehmen. Die Zeichnungen liegen noch auf dem iPad.")
@@ -141,22 +163,53 @@ final class TimedNoticeTests: XCTestCase {
         XCTAssertFalse(notice.isVisible)
     }
 
-    func testAllSyncedNewChangesHideTheNoticeAndItShowsOnlyOncePerDrain() async {
+    func testAllSyncedIgnoresStrokesWrittenOnline() async {
         let clock = VirtualClock()
         let notice = AllSyncedNotice(sleep: { try await clock.sleep($0) })
 
+        // Mit Verbindung steigt und fällt die Zahl mit jedem Strich: kein Hinweis
+        for _ in 0..<3 {
+            notice.update(isOnline: true, pending: 1)
+            notice.update(isOnline: true, pending: 0)
+            XCTAssertFalse(notice.isVisible)
+        }
+    }
+
+    func testAllSyncedShowsOncePerCatchUp() async {
+        let clock = VirtualClock()
+        let notice = AllSyncedNotice(sleep: { try await clock.sleep($0) })
+
+        notice.update(isOnline: false, pending: 3)
+        notice.update(isOnline: true, pending: 3)
+        notice.update(isOnline: true, pending: 0)
+        XCTAssertTrue(notice.isVisible)
+        // Ein frischer Strich während des Hinweises lässt ihn stehen, die Frist bleibt
         notice.update(isOnline: true, pending: 1)
         notice.update(isOnline: true, pending: 0)
         XCTAssertTrue(notice.isVisible)
-        notice.update(isOnline: true, pending: 4)
+        await clock.advance(3.1)
         XCTAssertFalse(notice.isVisible)
-        // Die alte Frist darf den neuen Stand nicht berühren
-        await clock.advance(5)
+        notice.update(isOnline: true, pending: 1)
+        notice.update(isOnline: true, pending: 0)
         XCTAssertFalse(notice.isVisible)
+    }
+
+    func testAllSyncedHidesWhenTheConnectionDropsAgain() async {
+        let clock = VirtualClock()
+        let notice = AllSyncedNotice(sleep: { try await clock.sleep($0) })
+
+        notice.update(isOnline: false, pending: 2)
         notice.update(isOnline: true, pending: 0)
         XCTAssertTrue(notice.isVisible)
+        notice.update(isOnline: false, pending: 0)
+        XCTAssertFalse(notice.isVisible)
+        // Die alte Frist darf einen neuen Hinweis nicht vorzeitig beenden
+        notice.update(isOnline: false, pending: 1)
         notice.update(isOnline: true, pending: 0)
-        await clock.advance(3.1)
+        XCTAssertTrue(notice.isVisible)
+        await clock.advance(2.9)
+        XCTAssertTrue(notice.isVisible)
+        await clock.advance(0.2)
         XCTAssertFalse(notice.isVisible)
     }
 
@@ -215,6 +268,12 @@ final class ExpiryLineTests: XCTestCase {
         XCTAssertNil(ProfileExpiry.pageLine(expiry: date("2026-11-18T08:00:00Z"), now: now, calendar: calendar))
         // Der Startbildschirm warnt dagegen schon 2 Tage vorher
         XCTAssertNotNil(ProfileExpiry.notice(expiry: date("2026-11-13T08:00:00Z"), now: now, calendar: calendar))
+    }
+
+    func testOnlyChangesWaitingWithoutSyncAreNamed() {
+        XCTAssertEqual(ProfileExpiry.waitingChanges(isOnline: false, pending: 37), 37)
+        // Online gehen sie gerade raus, der Text soll nicht mit jedem Strich wechseln
+        XCTAssertEqual(ProfileExpiry.waitingChanges(isOnline: true, pending: 2), 0)
     }
 
     func testPendingChangesAreNamed() {
@@ -323,5 +382,29 @@ final class RunningCardTextTests: XCTestCase {
         await h.service.follow(session: nil)
         XCTAssertNil(h.service.runningReportedAt)
         XCTAssertNil(h.service.running)
+    }
+
+    func testStateIsTheMomentTheConnectionDropped() async {
+        let h = SyncHarness(health: [])
+        let brief = SessionBrief(
+            id: "019a4e14-0000-7000-8000-0000000000d1", moduleID: LibraryFixtures.moduleID, state: "laeuft",
+            startedAtMS: 1_794_384_000_000, slideDeckID: nil, deleted: false, updatedAtMS: 1)
+        await h.service.follow(session: brief)
+        let reported = h.clock.date
+
+        // Nicht online gewesen: Ein weiterer Wechsel ändert den Stand nicht
+        h.service.syncOnlineChanged(false)
+        XCTAssertEqual(h.service.runningReportedAt, reported)
+
+        h.service.syncOnlineChanged(true)
+        await h.clock.advance(600)
+        // Bis zum Abriss war die Session bestätigt, auch ohne neue Meldung
+        h.service.syncOnlineChanged(false)
+        XCTAssertEqual(h.service.runningReportedAt, h.clock.date)
+        XCTAssertEqual(h.service.runningReportedAt, reported.addingTimeInterval(600))
+
+        await h.clock.advance(60)
+        h.service.syncOnlineChanged(false)
+        XCTAssertEqual(h.service.runningReportedAt, reported.addingTimeInterval(600))
     }
 }

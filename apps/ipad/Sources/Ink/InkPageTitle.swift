@@ -117,14 +117,16 @@ final class TimedNotice {
     }
 }
 
-/// „Alles am Mac“ (UX-49): Warteten Änderungen und der Sync ist wieder online mit 0 Wartenden, steht der Hinweis 3 s da.
+/// „Alles am Mac“ (UX-49): Warteten ohne Verbindung Änderungen und der Sync ist wieder online mit 0 Wartenden, steht der
+/// Hinweis 3 s da. Beim Schreiben mit Verbindung steigt und fällt die Zahl mit jedem Strich, das zählt nicht.
 @MainActor
 @Observable
 final class AllSyncedNotice {
     static let duration: Duration = .seconds(3)
 
     let timer: TimedNotice
-    @ObservationIgnored private var hadPending = false
+    /// Ohne Verbindung warteten Änderungen, der Sync holt sie nach dem Verbinden auf
+    @ObservationIgnored private var catchingUp = false
 
     var isVisible: Bool { timer.isVisible }
 
@@ -136,17 +138,15 @@ final class AllSyncedNotice {
 
     /// Bei jeder Änderung von Sync-Zustand oder Zahl der Wartenden aufrufen
     func update(isOnline: Bool, pending: Int) {
-        if pending > 0 {
-            hadPending = true
-            timer.hide()
-        } else if isOnline {
-            if hadPending {
-                hadPending = false
-                timer.show()
-            }
-        } else {
+        guard isOnline else {
+            if pending > 0 { catchingUp = true }
             // Offline zeigt die Offline-Zeile
             timer.hide()
+            return
         }
+        // Online: Wartet noch etwas, läuft das Aufholen noch (oder es ist ein frischer Strich)
+        guard pending == 0, catchingUp else { return }
+        catchingUp = false
+        timer.show()
     }
 }
