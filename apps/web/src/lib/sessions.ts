@@ -94,9 +94,11 @@ export async function listSessionsAll(filter: SessionFilter, signal?: AbortSigna
   return items;
 }
 
-/** Vorbei und aufgenommen: Der Rückblick gibt es für `beendet` und `verarbeitet` */
+/** Vorbei und aufgenommen: Den Rückblick gibt es für `beendet` und `verarbeitet` */
+export const FINISHED_STATES = ['beendet', 'verarbeitet'] as const;
+
 export function isFinished(session: Pick<Session, 'state'>): boolean {
-  return session.state === 'beendet' || session.state === 'verarbeitet';
+  return (FINISHED_STATES as readonly string[]).includes(session.state);
 }
 
 /** Neueste zuerst (nach Startzeit; gleiche Zeit nach ID) */
@@ -133,7 +135,8 @@ export function sessionLabel(session: Pick<Session, 'number' | 'title'>, deckTit
 export function useModuleSessions(moduleId: string) {
   return useQuery({
     queryKey: ['sessions', 'modul', moduleId],
-    queryFn: ({ signal }) => listSessionsAll({ moduleId }, signal),
+    // Der Core filtert die Zustände schon, damit geplante Termine des Semesters keine Seiten belegen
+    queryFn: ({ signal }) => listSessionsAll({ moduleId, states: FINISHED_STATES }, signal),
     select: (items) => newestFirst(items.filter(isFinished)),
   });
 }

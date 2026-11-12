@@ -10,6 +10,7 @@ import { addDays, dayKey, startOfDay } from '../../lib/calendar.ts';
 import { useHydrationSafe } from '../../lib/hydrated.ts';
 import { formatDate } from '../../lib/material.ts';
 import {
+  FINISHED_STATES,
   formatDuration,
   isFinished,
   listSessionsAll,
@@ -30,7 +31,8 @@ export function RecentSessions({ modules, now }: { modules: readonly Module[]; n
     useQuery({
       // Unter ['sessions','heute'], damit Ereignisse und Neuladen der Ansicht auch diese Liste auffrischen
       queryKey: ['sessions', 'heute', 'zuletzt', key],
-      queryFn: ({ signal }) => listSessionsAll({ from }, signal),
+      // Nur vergangene Vorlesungen: Ohne Zustandsfilter kämen alle geplanten Termine bis Semesterende mit
+      queryFn: ({ signal }) => listSessionsAll({ from, states: FINISHED_STATES }, signal),
       select: (items) => newestFirst(items.filter(isFinished)).slice(0, RECENT_COUNT),
     }),
   );

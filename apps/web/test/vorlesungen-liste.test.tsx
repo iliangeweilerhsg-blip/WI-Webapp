@@ -22,6 +22,7 @@ import { QueryProvider } from '../src/lib/query.tsx';
 import {
   formatDuration,
   isFinished,
+  listSessionsAll,
   newestFirst,
   sessionDurationMs,
   sessionLabel,
@@ -94,6 +95,42 @@ describe('Hilfsfunktionen für Vorlesungen', () => {
     const a = finished(1, '2026-11-02T08:00:00Z', 90);
     const b = finished(2, '2026-11-05T08:00:00Z', 90);
     expect(newestFirst([a, b]).map((s) => s.id)).toEqual([b.id, a.id]);
+  });
+});
+
+describe('listSessionsAll', () => {
+  const page = (n: number, next: string | null) =>
+    new Response(JSON.stringify({ items: [finished(n, '2026-11-02T08:00:00Z', 90)], next_cursor: next }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  it('folgt dem Cursor bis zum Ende und schickt Zustände und Modul mit', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        urls.push(String(input));
+        return page(urls.length, urls.length < 2 ? 'c1' : null);
+      }),
+    );
+    const items = await listSessionsAll({ moduleId: DBS.id, states: ['beendet', 'verarbeitet'] });
+    expect(items).toHaveLength(2);
+    expect(urls).toHaveLength(2);
+    const first = new URL(urls[0]!, 'http://x');
+    expect(first.searchParams.get('state')).toBe('beendet,verarbeitet');
+    expect(first.searchParams.get('module_id')).toBe(DBS.id);
+    expect(first.searchParams.get('limit')).toBe('200');
+    expect(first.searchParams.has('cursor')).toBe(false);
+    expect(new URL(urls[1]!, 'http://x').searchParams.get('cursor')).toBe('c1');
+  });
+
+  it('hört nach höchstens 5 Seiten auf, auch wenn der Core weiter einen Cursor liefert', async () => {
+    const fetchMock = vi.fn(async () => page(1, 'immer'));
+    vi.stubGlobal('fetch', fetchMock);
+    const items = await listSessionsAll({});
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(items).toHaveLength(5);
   });
 });
 
