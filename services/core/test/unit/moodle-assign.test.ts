@@ -31,6 +31,8 @@ interface FakeFile {
   bytes: number;
   modified: number;
   hash?: string;
+  /** Ordner in Moodle (`filepath`), Standard `/` */
+  path?: string;
 }
 interface FakeSubmission {
   id: number;
@@ -38,6 +40,7 @@ interface FakeSubmission {
   modified: number;
   files: FakeFile[];
   text: string | null;
+  attempt?: number;
 }
 interface FakeAssignment {
   id: number;
@@ -48,8 +51,8 @@ interface FakeAssignment {
   allowfrom: number;
   statement: boolean;
   statementText: string | null;
-  /** `submissiondrafts`: Gibt es einen Einreichen-Schritt? */
-  drafts: boolean;
+  /** `submissiondrafts`: Gibt es einen Einreichen-Schritt? `null`: Moodle liefert das Feld nicht */
+  drafts: boolean | null;
   team: boolean;
   fileEnabled: boolean;
   textEnabled: boolean;
@@ -84,6 +87,8 @@ class FakeMoodle {
   /** N3: Speichert Moodle nur einen Teil, geht der andere verloren (Gegenprobe zur Annahme „bleibt erhalten“) */
   wipeMissingPart = false;
   uploadfiles: number | undefined = 1;
+  /** Läuft zu Beginn jedes REST-Aufrufs, `n` zählt die Aufrufe dieser Funktion ab 1 (für Wettläufe zwischen Lesevorgängen) */
+  beforeCall: ((fn: string, n: number) => void) | null = null;
   private nextItem = 4242;
   private modifiedAt = unix('2026-11-11T13:03:00Z');
 
@@ -157,6 +162,7 @@ class FakeMoodle {
             area: 'submission_files',
             files: s.files.map((f) => ({
               filename: f.name,
+              filepath: f.path ?? '/',
               filesize: f.bytes,
               timemodified: f.modified,
               ...(f.hash ? { contenthash: f.hash } : {}),
@@ -174,7 +180,13 @@ class FakeMoodle {
   private status(a: FakeAssignment) {
     const s = a.submission;
     const raw = s
-      ? { id: s.id, status: s.status, timemodified: s.modified, attemptnumber: 0, plugins: this.plugins(s) }
+      ? {
+          id: s.id,
+          status: s.status,
+          timemodified: s.modified,
+          attemptnumber: s.attempt ?? 0,
+          plugins: this.plugins(s),
+        }
       : undefined;
     return {
       lastattempt: {
@@ -204,7 +216,7 @@ class FakeMoodle {
       cutoffdate: a.cutoffdate,
       allowsubmissionsfromdate: a.allowfrom,
       requiresubmissionstatement: a.statement ? 1 : 0,
-      submissiondrafts: a.drafts ? 1 : 0,
+      ...(a.drafts === null ? {} : { submissiondrafts: a.drafts ? 1 : 0 }),
       teamsubmission: a.team ? 1 : 0,
       configs: [
         cfg('file', 'enabled', a.fileEnabled ? 1 : 0),
@@ -225,6 +237,7 @@ class FakeMoodle {
     if (new URL(request.url).pathname.endsWith('/upload.php')) return this.upload(request);
     const fn = request.body.get('wsfunction') ?? '';
     this.calls.push(fn);
+    this.beforeCall?.(fn, this.count(fn));
     if (request.body.get('wstoken') !== FAKE_TOKEN) {
       return json({ exception: 'moodle_exception', errorcode: 'invalidtoken', message: 'Ungültig' });
     }
@@ -987,14 +1000,21 @@ describe('assign.submit: gleichzeitige Aufrufe (Sperre je Aufgabe)', () => {
     const gate = fake.gate('mod_assign_submit_for_grading');
     const submitting = execute('assign.submit', submitParams(), token);
     await gate.started.promise;
+    const statusReads = fake.count('mod_assign_get_submission_status');
     const saving = execute('assign.save_draft', draftOf());
-    // Solange eingereicht wird, schreibt save_draft nichts
-    await Promise.resolve();
+    // Solange eingereicht wird, liest save_draft nicht einmal den Stand (es wartet auf die Sperre). Ohne Sperre
+    // hätte es in dieser Zeit längst gelesen und geschrieben
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(fake.count('mod_assign_get_submission_status')).toBe(statusReads);
     expect(fake.count('mod_assign_save_submission')).toBe(0);
     gate.release.resolve();
     expect((await submitting).statusCode).toBe(200);
-    // Danach ist die Aufgabe eingereicht: Speichern wird abgelehnt (canedit bleibt im Fake true, der Status zählt nicht)
-    await saving;
+    // Danach läuft das Speichern (im Fake bleibt canedit true, Moodle selbst würde es ablehnen)
+    expect((await saving).statusCode).toBe(200);
+    const order = fake.calls.filter((c) => c.startsWith('mod_assign_s'));
+    expect(order.indexOf('mod_assign_submit_for_grading')).toBeLessThan(
+      order.indexOf('mod_assign_save_submission'),
+    );
     expect(fake.count('mod_assign_submit_for_grading')).toBe(1);
   });
 });
@@ -1128,6 +1148,105 @@ describe('assign.submit: Fehler von Moodle', () => {
 });
 
 // ---------- Rahmen ----------
+
+describe('Gegenprobe: jedes Feld des Stands zählt (Review #303)', () => {
+  type Change = (a: FakeAssignment, s: FakeSubmission) => void;
+  const cases: [string, Change][] = [
+    ['Abgabe-ID', (_a, s) => (s.id += 1)],
+    ['Status', (_a, s) => (s.status = 'new')],
+    ['Versuch', (_a, s) => (s.attempt = 1)],
+    ['Größe einer Datei', (_a, s) => (s.files[0]!.bytes += 1)],
+    ['timemodified einer Datei', (_a, s) => (s.files[0]!.modified += 1)],
+    ['Ordner einer Datei', (_a, s) => (s.files[0]!.path = '/neu/')],
+    ['Einreichen-Schritt (submissiondrafts)', (a) => (a.drafts = false)],
+    ['Erklärung verlangt', (a) => (a.statement = true)],
+  ];
+  for (const [label, change] of cases) {
+    it(`${label} ändert sich, sonst alles gleich → 409 stand_geaendert, nichts eingereicht`, async () => {
+      await withDraft();
+      const token = await codeFor('assign.submit', submitParams(true));
+      const a = fake.assignments.get(A)!;
+      change(a, a.submission!);
+      const res = await execute('assign.submit', submitParams(true), token);
+      expect(res.statusCode).toBe(409);
+      expect(errorOf(res)).toMatchObject({
+        code: 'moodle_confirmation_invalid',
+        details: { reason: 'stand_geaendert' },
+      });
+      expect(fake.count('mod_assign_submit_for_grading')).toBe(0);
+    });
+  }
+
+  it('Langer Dateiname: eine Umbenennung hinter Zeichen 120 zählt', async () => {
+    await setup();
+    fake.add({ id: A });
+    fake.draft(A, [{ ...FILE, name: `${'a'.repeat(130)}-1.pdf` }]);
+    const token = await codeFor('assign.submit', submitParams());
+    fake.assignments.get(A)!.submission!.files[0]!.name = `${'a'.repeat(130)}-2.pdf`;
+    const res = await execute('assign.submit', submitParams(), token);
+    expect(errorOf(res).details).toMatchObject({ reason: 'stand_geaendert' });
+    expect(fake.count('mod_assign_submit_for_grading')).toBe(0);
+  });
+
+  it('Gruppenabgabe: ein Teammitglied ändert nur die Dateiliste → 409 stand_geaendert', async () => {
+    await withDraft({ team: true });
+    const token = await codeFor('assign.submit', submitParams());
+    fake.assignments.get(A)!.submission!.files.push({ ...FILE, name: 'vom-team.pdf' });
+    const res = await execute('assign.submit', submitParams(), token);
+    expect(errorOf(res).details).toMatchObject({ reason: 'stand_geaendert' });
+    expect(fake.count('mod_assign_submit_for_grading')).toBe(0);
+  });
+
+  it('save_draft: der Stand enthält sha256, Größe und Namen der Uploads (E5) und ist deterministisch', async () => {
+    await withDraft({ drafts: false });
+    const one = await put('b.pdf');
+    const two = await put('a.pdf', Buffer.from('%PDF-1.7\n%anders\n'));
+    const handler = createAssignHandlers({ now: () => NOW_MS })['assign.save_draft'];
+    const ctx: MoodleActionContext = {
+      client: moodle.client,
+      userId: async () => 1,
+      uploads: moodle.uploads,
+      courseIdOfAssignment: async () => null,
+    };
+    const params = { assignment_id: A, upload_ids: [one.id, two.id] };
+    const first = (await handler.state!(ctx, params)) as { uploads: unknown };
+    const reversed = await handler.state!(ctx, { assignment_id: A, upload_ids: [two.id, one.id] });
+    expect(JSON.stringify(reversed)).toBe(JSON.stringify(first));
+    expect(first.uploads).toEqual(
+      [one, two]
+        .map((u) => ({ sha256: u.sha256, bytes: u.sizeBytes, name: u.filename }))
+        .sort((x, y) => (x.sha256 < y.sha256 ? -1 : 1)),
+    );
+  });
+
+  it('save_draft: submissiondrafts fehlt in der Antwort → nur mit Code (streng)', async () => {
+    await setup();
+    fake.add({ id: A, drafts: null });
+    const prev = MoodleActionPreviewSchema.parse((await preview('assign.save_draft', draftOf())).json());
+    expect(prev.needs_confirmation).toBe(true);
+    expect(prev.confirmation_token).toEqual(expect.any(String));
+    const res = await execute('assign.save_draft', draftOf());
+    expect(res.statusCode).toBe(409);
+    expect(errorOf(res).code).toBe('moodle_confirmation_required');
+    expect(fake.count('mod_assign_save_submission')).toBe(0);
+  });
+
+  it('save_draft: Aufgabe stellt zwischen Code-Prüfung und Stand auf „ohne Einreichen-Schritt“ um → kein Schreiben', async () => {
+    await setup();
+    fake.add({ id: A });
+    const file = await put();
+    // 1. Lesen der Aufgabe: Code-Pflicht wird entschieden (nein). 2. Lesen: Stand unter der Sperre
+    fake.beforeCall = (fn, n) => {
+      if (fn === 'mod_assign_get_assignments' && n === 2) fake.assignments.get(A)!.drafts = false;
+    };
+    const res = await execute('assign.save_draft', { assignment_id: A, upload_ids: [file.id] });
+    expect(res.statusCode).toBe(409);
+    expect(errorOf(res).code).toBe('moodle_confirmation_required');
+    expect(fake.touched().filter((c) => c === 'upload.php' || c === 'mod_assign_save_submission')).toEqual(
+      [],
+    );
+  });
+});
 
 describe('Schalter SG_MOODLE_ACTIONS und Katalog', () => {
   it('ohne Freischaltung: beide 501, Moodle sieht nichts', async () => {

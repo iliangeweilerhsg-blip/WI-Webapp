@@ -215,7 +215,10 @@ async function findAssignment(ctx: MoodleActionContext, assignmentId: number): P
 }
 
 interface DraftFile {
+  /** Für die Anzeige bereinigt und gekürzt */
   name: string;
+  /** Roh aus Moodle, nur für den Stand: Ordner plus Name (ungekürzt, damit jede Umbenennung zählt) */
+  key: string;
   bytes: number;
   modified: number | null;
   /** Nur, wenn Moodle einen liefert (N4) */
@@ -254,6 +257,7 @@ async function readSubmission(ctx: MoodleActionContext, assignmentId: number): P
     return [
       {
         name: cleanName(name),
+        key: `${str(f.filepath) ?? '/'}${name}`,
         bytes: Math.max(0, int(f.filesize) ?? 0),
         modified: seconds(f.timemodified),
         contenthash: str(f.contenthash) || null,
@@ -287,7 +291,7 @@ async function uploadsAllowed(ctx: MoodleActionContext): Promise<boolean> {
 
 function draftFilesState(files: readonly DraftFile[]) {
   return files
-    .map((f) => ({ name: f.name, bytes: f.bytes, timemodified: f.modified, contenthash: f.contenthash }))
+    .map((f) => ({ name: f.key, bytes: f.bytes, timemodified: f.modified, contenthash: f.contenthash }))
     .sort(
       (a, b) =>
         byText(a.name, b.name) ||
@@ -327,6 +331,13 @@ interface Snapshot {
  * und Vorprüfung und Code-Bindung sehen denselben Stand. Fehlt der Eintrag (direkter Aufruf), wird neu gelesen.
  */
 const snapshots = new WeakMap<object, Snapshot>();
+
+/**
+ * `assign.save_draft`: Was `requiresConfirmation` für genau dieses Parameter-Objekt ergeben hat. Die Route reicht
+ * dasselbe Objekt an `requiresConfirmation`, `state` und `execute`. Hat sich die Aufgabe zwischen beiden Lesevorgängen
+ * auf „ohne Einreichen-Schritt“ umgestellt, wäre das Speichern sonst eine Abgabe ohne Code.
+ */
+const confirmationDecided = new WeakMap<object, boolean>();
 
 function uploadsOf(ctx: MoodleActionContext, ids: readonly string[] | undefined): StoredUpload[] {
   // Unbekannt oder verfallen → 404, bevor Moodle angesprochen wird
@@ -484,7 +495,9 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
     // Ohne Einreichen-Schritt ist Speichern schon die Abgabe: dann nur mit Code. Unbekannt zählt als „ja“
     async requiresConfirmation(ctx, params) {
       uploadsOf(ctx, params.upload_ids);
-      return (await findAssignment(ctx, params.assignment_id)).requiresSubmit !== true;
+      const needed = (await findAssignment(ctx, params.assignment_id)).requiresSubmit !== true;
+      confirmationDecided.set(params, needed);
+      return needed;
     },
     async state(ctx, params) {
       const snap = await snapshotOf(ctx, params.assignment_id, uploadsOf(ctx, params.upload_ids));
@@ -543,6 +556,14 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
     async execute(ctx, params, state): Promise<MoodleActionOutcome> {
       const snap = await snapshotFor(ctx, state, params.assignment_id, params.upload_ids);
       assertCanSave(params, snap, nowSec());
+      // Ohne Code freigegeben, aber jetzt ist Speichern die Abgabe: nichts schreiben, die Web-App holt die Vorschau
+      if (confirmationDecided.get(params) === false && snap.assignment.requiresSubmit !== true) {
+        throw new HttpError(
+          409,
+          'moodle_confirmation_required',
+          'Bei dieser Aufgabe ist Speichern schon die Abgabe. Bitte zuerst die Vorschau abrufen.',
+        );
+      }
       const ids = params.upload_ids ?? [];
       // Als „in Benutzung“ markieren, solange die Dateien gelesen werden (kein Löschen mittendrin)
       const used = ids.length > 0 ? ctx.uploads.acquire(ids) : [];
