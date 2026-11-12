@@ -449,6 +449,35 @@ final class InkPagesTests: XCTestCase {
         XCTAssertEqual(versionFour.count, 1)
     }
 
+    func testAfterAConflictOnlyTheReplacementWaitsOnDiskAndTheOldUpdatesStayDroppedAfterARestart() async throws {
+        let h = conflictHarness(
+            detail: .http(status: 200, body: detailBody(id: firstPageID, index: 1, template: "blanko", version: 4)))
+        queueTwoUpdates(h)
+        let stale = Set(pendingEntries(h).filter { $0.kind == "page.update" }.map(\.opID))
+        XCTAssertEqual(stale.count, 2)
+        h.factory.configure = { socket, _ in
+            socket.opPolicy = { _, kind, index in
+                // Die alten werden abgelehnt, der Ersatz bleibt unbeantwortet (wartet weiter)
+                kind == "page.update" && index < 2
+                    ? .error(code: "page_version_conflict", retryable: false, fatal: false)
+                    : (kind == "page.update" ? .silent : .ack)
+            }
+        }
+        await startOnline(h)
+
+        let sent = await eventually { h.factory.sockets[0].ops.count >= 3 }
+        XCTAssertTrue(sent)
+        // Neu von der Platte gelesen: genau der Ersatz wartet, mit der Version des Core und den lokalen Feldern
+        let updates = pendingEntries(h).filter { $0.kind == "page.update" }
+        XCTAssertEqual(updates.count, 1)
+        let replacement = try XCTUnwrap(updates.first)
+        XCTAssertFalse(stale.contains(replacement.opID))
+        let data = try dataOf(replacement)
+        XCTAssertEqual(data["version"] as? Int, 4)
+        XCTAssertEqual((data["fields"] as? [String: Any])?["template"] as? String, "kariert")
+        XCTAssertEqual(h.engine.deadLetterCount, 0)
+    }
+
     func testAConflictWithoutLocalDifferenceOnlyTakesTheCoreVersion() async throws {
         let h = conflictHarness(
             detail: .http(status: 200, body: detailBody(id: firstPageID, index: 1, template: "kariert", version: 7)))

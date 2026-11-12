@@ -550,9 +550,10 @@ final class InkLibraryService {
     /// Der Core hat ein `page.update` abgelehnt, weil die Version nicht stimmt. Ablauf:
     /// 1. Läuft für die Seite schon eine Auflösung, passiert nichts.
     /// 2. `GET /pages/{id}`. Bei 404 werden die wartenden `page.update` der Seite verworfen.
-    /// 3. Alle wartenden `page.update` der Seite entfernen (`discard`, keine Fehlerablage), `version` = Version des Core.
-    /// 4. Weichen die lokalen Felder vom Core ab, geht **ein** neues `page.update` mit den lokalen Feldern und der
+    /// 3. Weichen die lokalen Felder vom Core ab, geht **ein** neues `page.update` mit den lokalen Feldern und der
     ///    Version des Core in die Warteschlange.
+    /// 4. Danach alle älteren wartenden `page.update` der Seite entfernen (`discard`, keine Fehlerablage),
+    ///    `version` = Version des Core (+ 1 mit Ersatz).
     /// Scheitert ein Schritt, ruht die Seite in der Engine weiter. Der nächste `welcome` versucht es erneut.
     func resolveVersionConflict(pageID: String) async {
         guard !resolvingConflicts.contains(pageID) else { return }
@@ -570,10 +571,10 @@ final class InkLibraryService {
         guard !_Concurrency.Task.isCancelled else { return }
         // Erst nach dem Abruf lesen: Änderungen, die währenddessen eingereiht wurden, gehören zum Ersatz
         let stale = sync.pendingOpIDs(kind: "page.update", pageID: pageID)
-        guard sync.discardPending(opIDs: stale) else { return }
 
         guard let remote, var page = store.page(pageID) else {
             // Der Core kennt die Seite nicht mehr (oder die Bibliothek nicht): nichts zu ersetzen
+            guard sync.discardPending(opIDs: stale) else { return }
             sync.resumePage(pageID)
             return
         }
@@ -583,6 +584,10 @@ final class InkLibraryService {
         if differs {
             var replacement = page
             replacement.version = remote.version
+            // Erst den Ersatz einreihen, dann die alten verwerfen: Bricht die App dazwischen ab, wartet weiter ein
+            // `page.update` mit den lokalen Feldern, und der nächste Konflikt löst es auf. Andersherum stünde keins
+            // mehr in der Warteschlange, und der nächste Abruf der Seiten setzte Reihenfolge und Vorlage auf den
+            // Stand des Core zurück. Der Ersatz ruht, bis `resumePage` die Seite freigibt.
             guard
                 let draft = InkOpBuilder.pageUpdate(
                     page: replacement, nowMS: nowMS(), offsetMS: sync.clockOffsetForDrafts,
@@ -593,6 +598,9 @@ final class InkLibraryService {
         } else {
             page.version = remote.version
         }
+        // Scheitert das Verwerfen, bleibt die Seite geparkt. Der nächste Versuch verwirft auch den Ersatz und reiht
+        // einen neuen ein.
+        guard sync.discardPending(opIDs: stale) else { return }
         store.upsert(page)
         bump()
         sync.resumePage(pageID)
