@@ -246,14 +246,17 @@ export interface StartCheckDeps {
 /** Die drei Schritte zum Neukoppeln (UX-302, UX-304), so wie `IPAD.md` sie beschreibt */
 export const RECOUPLE_STEPS = [
   '  1. Web-App am Mac: Einstellungen → Geräte → das iPad entfernen.',
-  '  2. iPad: Mac ● antippen → Neu koppeln.',
-  '  3. Zu Hause im Heimnetz den QR-Code vom Mac scannen (Details: docs/anleitungen/IPAD.md).',
+  '  2. iPad: Mac ● antippen → Neu koppeln (steht dort nur „Kopplung aufheben“, das antippen).',
+  '  3. Zu Hause im Heimnetz: am Mac unter Einstellungen → Geräte die Kopplung starten, QR-Code mit dem iPad scannen (docs/anleitungen/IPAD.md, „Koppeln“).',
 ];
 
-/** Hat der Helfer schon eine aktuelle Zustandsdatei geschrieben und sind die Dienste nicht mehr beim Starten? */
-function helperSettled(io: TunnelDoctorIo): boolean {
+/**
+ * Hat der Helfer seit `sinceMs` eine Zustandsdatei geschrieben und sind die Dienste nicht mehr beim Starten?
+ * Eine ältere Datei stammt vom Helfer vor `sg stop` (rasches `sg stop`/`sg start`) und sagt über den neuen nichts.
+ */
+function helperSettled(io: TunnelDoctorIo, sinceMs: number): boolean {
   const read = io.readState();
-  if (read.kind !== 'ok' || read.ageMs > TUNNEL_STATE_MAX_AGE_MS) return false;
+  if (read.kind !== 'ok' || read.ageMs > Math.min(TUNNEL_STATE_MAX_AGE_MS, sinceMs)) return false;
   const state = parseTunnelState(read.state);
   return state !== null && !state.listeners.some((l) => l.state === 'starting');
 }
@@ -270,13 +273,16 @@ export async function checkTunnelAfterStart(
 ): Promise<void> {
   try {
     if (!cfg.tunnel || io.platform !== 'darwin') return;
-    const deadline = deps.now() + (deps.waitMs ?? 12_000);
-    while (!helperSettled(io) && deps.now() < deadline) {
+    const started = deps.now();
+    const deadline = started + (deps.waitMs ?? 12_000);
+    while (!helperSettled(io, deps.now() - started) && deps.now() < deadline) {
       if (deps.isStopping() || !io.helperRunning()) break;
       await deps.sleep(500);
     }
     if (deps.isStopping()) return;
     const results = await runTunnelChecks(cfg, io);
+    // Während der Prüfung beendet: nichts mehr über einen Helfer melden, der gerade gestoppt wird
+    if (deps.isStopping()) return;
     for (const line of formatStartCheck(results)) deps.log(line);
   } catch (e) {
     deps.log(
@@ -456,7 +462,7 @@ async function checkPairedWithoutKey(io: TunnelDoctorIo, file: KeyFileInfo): Pro
   }
   return fail(
     part,
-    `${missing.length} gekoppelte(s) Gerät(e) ohne Tunnel-Schlüssel (vor UX-12 gekoppelt)`,
+    `${missing.length} gekoppelte(s) Gerät(e) ohne Tunnel-Schlüssel (vor UX-12 gekoppelt oder Start mit SG_TUNNEL=0)`,
     'Neu koppeln: In der Web-App unter Einstellungen → Geräte das Gerät entfernen und das iPad im Heimnetz neu koppeln (QR-Code). Der Schlüssel entsteht nur bei der Kopplung und wird nie nachträglich erzeugt.',
   );
 }

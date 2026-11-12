@@ -602,6 +602,37 @@ describe('Prüfung nach sg start (UX-302)', () => {
     expect((await run(io({ platform: 'linux' }))).lines).toEqual([]);
   });
 
+  it('nimmt keine Zustandsdatei vom Helfer vor sg stop (rasches stop/start)', async () => {
+    const c = clock();
+    const lines: string[] = [];
+    // Alte Datei: 3 s alt beim Start der Prüfung, danach schreibt niemand mehr
+    await checkTunnelAfterStart(
+      cfg,
+      io({ readState: () => ({ kind: 'ok', state: goodState(), ageMs: 3000 + c.now() }) }),
+      {
+        ...c,
+        isStopping: () => false,
+        log: (l) => lines.push(l),
+      },
+    );
+    expect(c.now()).toBeGreaterThanOrEqual(12_000);
+    expect(lines).toHaveLength(1);
+  });
+
+  it('schweigt, wenn sg während der Prüfung beendet wird', async () => {
+    let stopping = false;
+    const { lines } = await run(
+      io({
+        firewall: async () => {
+          stopping = true;
+          return { enabled: true, blocked: true };
+        },
+      }),
+      { isStopping: () => stopping },
+    );
+    expect(lines).toEqual([]);
+  });
+
   it('wirft nie, auch wenn eine Prüfung abstürzt', async () => {
     const { lines } = await run(
       io({
