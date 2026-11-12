@@ -12,6 +12,10 @@ import {
   formatDue,
   isMoodleNotConfigured,
   isWebUrl,
+  isMoodleTokenInvalid,
+  lateNote,
+  needsRenewal,
+  useMoodleActionCatalog,
   MOODLE_UPLOAD_ACCEPT,
   moodleErrorMessage,
   removeMoodleUpload,
@@ -52,6 +56,7 @@ export function AbgabeView() {
   const assignments = useMoodleAssignments(assignmentId !== null);
   const submission = useMoodleSubmission(assignmentId);
   const refresh = useRefreshSubmission();
+  const catalog = useMoodleActionCatalog();
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const counter = useRef(0);
@@ -127,11 +132,50 @@ export function AbgabeView() {
     status.data?.site_url && assignment && isWebUrl(status.data.site_url)
       ? `${status.data.site_url.replace(/\/+$/, '')}/mod/assign/view.php?id=${assignment.cmid}`
       : null;
+  // Ohne Aufgabe (z. B. weil Moodle den Zugang ablehnt) führt der Link wenigstens auf die Seite von Moodle
+  const openLink =
+    moodleLink ?? (isWebUrl(status.data?.site_url ?? null) ? (status.data?.site_url ?? null) : null);
+  // UX-313: Nimmt Moodle den Zugang nicht mehr an, steht „In Moodle öffnen“ vor dem Weg zum Erneuern
+  const accessBroken =
+    isMoodleTokenInvalid(submission.error) ||
+    status.data?.state === 'abgelaufen' ||
+    status.data?.state === 'ungueltig';
+  // UX-312: Sind beide Aktionen aus (`SG_MOODLE_ACTIONS` leer oder Zugang ohne Recht), sagt die Seite es gleich oben
+  const actionsOff =
+    catalog.data !== undefined &&
+    ['assign.save_draft', 'assign.submit'].every(
+      (id) => catalog.data.find((item) => item.id === id)?.available !== true,
+    );
+  const timing = sub
+    ? lateNote({
+        state: sub.state,
+        lastModifiedAt: sub.last_modified_at,
+        dueAt: assignment?.due_at ?? null,
+        cutoffAt: assignment?.cutoff_at ?? null,
+      })
+    : null;
+  const openInMoodle = openLink ? (
+    <a
+      href={openLink}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={
+        actionsOff || accessBroken
+          ? 'inline-flex min-h-9 items-center rounded-md border border-border-strong px-3 text-sm hover:bg-surface'
+          : 'text-sm text-text-muted underline-offset-2 hover:text-text hover:underline'
+      }
+    >
+      In Moodle öffnen
+    </a>
+  ) : null;
 
   return (
     <Shell back={back} title={assignment?.name ?? 'Abgabe'}>
+      {accessBroken ? openInMoodle : null}
       <MoodleAccessHint withLink />
-      {submission.error && !isMoodleNotConfigured(submission.error) ? (
+      {submission.error &&
+      !isMoodleNotConfigured(submission.error) &&
+      !(accessBroken && needsRenewal(status.data?.state)) ? (
         isUnreachable(submission.error) ? (
           <CoreHint error={submission.error} />
         ) : (
@@ -141,24 +185,14 @@ export function AbgabeView() {
         )
       ) : null}
 
-      <section aria-label="Aufgabe" className="space-y-1 text-sm text-text-muted">
-        {assignment?.due_at ? <p>Frist: {formatDue(assignment.due_at)}</p> : null}
-        {moodleLink ? (
-          <a
-            href={moodleLink}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="underline-offset-2 hover:text-text hover:underline"
-          >
-            In Moodle öffnen
-          </a>
-        ) : null}
-      </section>
-
       <section aria-labelledby="abgabe-stand" className="space-y-2">
         <h2 id="abgabe-stand" className="text-sm font-medium text-text-muted">
           Stand in Moodle
         </h2>
+        {assignment?.due_at ? (
+          <p className="text-sm text-text-muted">Frist: {formatDue(assignment.due_at)}</p>
+        ) : null}
+        {timing ? <p className="text-sm text-text-muted">{timing}</p> : null}
         {sub ? (
           <>
             <p className="text-md">
@@ -178,6 +212,12 @@ export function AbgabeView() {
         ) : submission.isPending ? (
           <p className="text-sm text-text-muted">Wird geladen …</p>
         ) : null}
+        {actionsOff ? (
+          <p className="text-sm text-text-muted">
+            Abgeben aus der App ist noch nicht freigeschaltet. Gib die Aufgabe so lange direkt in Moodle ab.
+          </p>
+        ) : null}
+        {accessBroken ? null : openInMoodle}
       </section>
 
       <section aria-labelledby="abgabe-dateien" className="space-y-3">

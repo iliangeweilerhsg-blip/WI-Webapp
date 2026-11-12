@@ -46,6 +46,8 @@ interface Script {
   assignment: Record<string, unknown>;
   catalog: Array<{ id: string; label: string; available: boolean }>;
   deadlines: unknown[];
+  status: Record<string, unknown>;
+  submissionError: Response | null;
   calls: Call[];
 }
 
@@ -121,6 +123,15 @@ function makeScript(): Script {
       { id: 'assign.submit', label: 'Abgabe einreichen', available: true },
     ],
     deadlines: [],
+    status: {
+      state: 'ok',
+      site_url: 'https://moodle.example.org',
+      site_name: 'Beispiel-Moodle',
+      user_fullname: 'Erika Beispiel',
+      token_valid_until: '2027-01-31',
+      checked_at: NOW,
+    },
+    submissionError: null,
     calls: [],
   };
 }
@@ -136,18 +147,11 @@ function install() {
       const method = init?.method ?? 'GET';
       const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : null;
       script.calls.push({ method, path, body, headers: (init?.headers ?? {}) as Record<string, string> });
-      if (path === '/moodle/status')
-        return json({
-          state: 'ok',
-          site_url: 'https://moodle.example.org',
-          site_name: 'Beispiel-Moodle',
-          user_fullname: 'Erika Beispiel',
-          token_valid_until: '2027-01-31',
-          checked_at: NOW,
-        });
+      if (path === '/moodle/status') return json(script.status);
       if (path === '/moodle/actions') return json({ items: script.catalog.map(infoOf) });
       if (path === '/moodle/assignments') return json({ items: [script.assignment] });
-      if (path === '/moodle/assignments/42/submission') return json(script.submission);
+      if (path === '/moodle/assignments/42/submission')
+        return script.submissionError ?? json(script.submission);
       if (path === '/moodle/synced-deadlines') return json({ items: script.deadlines });
       if (path === '/moodle/uploads' && method === 'POST') {
         const file = (init?.body as FormData).get('file') as File;
@@ -768,6 +772,51 @@ describe('Seite „Abgabe“', () => {
       </QueryProvider>,
     );
     await waitFor(() => expect(screen.getAllByText('Dein Moodle-Zugang erlaubt das nicht.')).toHaveLength(2));
+  });
+});
+
+describe('Seite „Abgabe“: Stand oben (UX-312) und Zugang (UX-313)', () => {
+  it('der Stand steht vor den Dateien, mit Frist; „In Moodle öffnen“ ist Hauptknopf, wenn die Aktionen aus sind', async () => {
+    script.catalog = [
+      { id: 'assign.save_draft', label: 'Als Entwurf speichern', available: false },
+      { id: 'assign.submit', label: 'Abgabe einreichen', available: false },
+    ];
+    render(
+      <QueryProvider>
+        <AbgabeView />
+      </QueryProvider>,
+    );
+    expect(await screen.findByText(/Abgeben aus der App ist noch nicht freigeschaltet/)).toBeInTheDocument();
+    const stand = screen.getByRole('heading', { name: 'Stand in Moodle' });
+    const dateien = screen.getByRole('heading', { name: 'Dateien für den Entwurf' });
+    expect(stand.compareDocumentPosition(dateien) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const section = stand.closest('section') as HTMLElement;
+    expect(within(section).getByText(/Frist:/)).toBeInTheDocument();
+    expect(within(section).getByRole('link', { name: 'In Moodle öffnen' })).toBeInTheDocument();
+  });
+
+  it('Aktionen an: keine Zeile „noch nicht freigeschaltet“', async () => {
+    render(
+      <QueryProvider>
+        <AbgabeView />
+      </QueryProvider>,
+    );
+    await screen.findByText(/Entwurf gespeichert/);
+    expect(screen.queryByText(/noch nicht freigeschaltet/)).not.toBeInTheDocument();
+  });
+
+  it('Zugang abgelehnt: „In Moodle öffnen“ steht vor dem Weg zum Erneuern', async () => {
+    script.status = { ...script.status, state: 'ungueltig' };
+    script.submissionError = apiError(401, 'moodle_token_invalid');
+    render(
+      <QueryProvider>
+        <AbgabeView />
+      </QueryProvider>,
+    );
+    const hint = await screen.findByText(/Moodle nimmt den Zugang nicht mehr an/);
+    const link = screen.getByRole('link', { name: 'In Moodle öffnen' });
+    expect(link.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByText(/pnpm sg moodle login/)).toHaveLength(1);
   });
 });
 
