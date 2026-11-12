@@ -562,6 +562,9 @@ describe('Validierung', () => {
 describe('Abfrageplan der Bedeutungssuche (ohne Zeitmessung, läuft auch in CI)', () => {
   /** Plan der Abfrage, die `search()` tatsächlich stellt. Seq-Scan aus, damit auch wenige Zeilen den Index zeigen */
   async function plan(filters: Parameters<typeof vectorQuery>[2]): Promise<string> {
+    // Statistik auffrischen. Veraltete Zahlen aus früheren Tests (Autovacuum) lassen den Planer sonst über
+    // search_chunk_deck_idx + Sort statt über HNSW gehen, auch mit enable_seqscan = off (Flake #297)
+    await handle.sql`ANALYZE search_chunk, slide_deck, session, module`;
     const rows = await handle.db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL enable_seqscan = off`);
       await tx.execute(sql.raw(`SET LOCAL hnsw.ef_search = ${HNSW_EF_SEARCH}`));
