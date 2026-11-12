@@ -221,6 +221,25 @@ export async function dropDatabase(pg: PgAccess, name: string): Promise<void> {
   await pg.query(`DROP DATABASE IF EXISTS ${safeIdent(name)} WITH (FORCE)`, {}, 'postgres');
 }
 
+/**
+ * Widerruft in der frisch eingespielten Datenbank **alle** aktiven Geräte (#304 M2, VERTRAEGE §13). Der Widerruf ist
+ * ein `deleted_at`, und der Dump kennt nur den Stand vom Backup-Zeitpunkt: Ein danach entferntes Gerät (verlorenes
+ * iPad, Verdacht auf mitgelesenes Token) wäre sonst nach dem Restore wieder aktiv. Alle Geräte zu widerrufen ist
+ * unabhängig davon, ob die bisherige Datenbank noch lesbar ist, und damit der sichere Weg. Der Core entfernt beim
+ * nächsten Start die Tunnel-Schlüssel aller nicht aktiven Geräte (`TunnelKeyStore.reconcile`), `secrets/` bleibt so
+ * allein dem Core überlassen. Rückgabe: Anzahl der widerrufenen Geräte (0 auch bei Ständen ohne Tabelle `device`).
+ */
+export async function revokeRestoredDevices(pg: PgAccess, database: string): Promise<number> {
+  const [has] = await pg.query(`SELECT to_regclass('device') IS NOT NULL`, {}, database);
+  if (has?.[0] !== 't') return 0;
+  const rows = await pg.query(
+    `WITH r AS (UPDATE device SET deleted_at = now() WHERE deleted_at IS NULL RETURNING 1) SELECT count(*) FROM r`,
+    {},
+    database,
+  );
+  return Number(rows[0]?.[0] ?? 0);
+}
+
 export async function runRestore(deps: RestoreDeps, options: RestoreOptions): Promise<number> {
   const { cfg, pg, log, err } = deps;
   try {
@@ -483,7 +502,8 @@ async function fullRestore(
   if (!options.yes) {
     const ok = await deps.confirm(
       `Stand ${manifest.stand} (${standDate(manifest.stand).toLocaleString('de-DE')}) wiederherstellen? ` +
-        'Die aktuellen Daten werden zur Seite gelegt, aber nicht gelöscht. (ja/nein)',
+        'Die aktuellen Daten werden zur Seite gelegt, aber nicht gelöscht. ' +
+        'Alle gekoppelten Geräte (iPad) müssen danach neu gekoppelt werden. (ja/nein)',
     );
     if (!ok) {
       log('Abgebrochen.');
@@ -559,6 +579,14 @@ async function swapIn(
     } else {
       log(
         'Der Stand hat noch kein sync_meta (älteres Schema). Die Epoche entsteht bei der nächsten Migration.',
+      );
+    }
+    // Geräte: Der Stand kennt nur den Widerrufsstand vom Backup-Zeitpunkt (#304 M2)
+    const revokedDevices = await revokeRestoredDevices(pg, fresh);
+    if (revokedDevices > 0) {
+      log(
+        `${revokedDevices} gekoppelte${revokedDevices === 1 ? 's Gerät wurde' : ' Geräte wurden'} widerrufen: ` +
+          'Nach einer Wiederherstellung muss jedes Gerät neu gekoppelt werden.',
       );
     }
     // Den Lauf, aus dem der Stand stammt, kann der Dump nur als "läuft" enthalten: abschließen. Andere offene Läufe sind tot.

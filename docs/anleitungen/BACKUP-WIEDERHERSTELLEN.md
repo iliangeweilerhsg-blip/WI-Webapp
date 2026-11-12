@@ -54,6 +54,7 @@ Das geht nur im Terminal und nur, wenn Core und Worker **nicht** laufen. Es erse
    ```
 
    Auf die Frage antwortest du mit `ja`. Die aktuellen Daten werden zur Seite gelegt, nicht gelöscht.
+   `sg restore` meldet, wie viele Geräte es widerrufen hat. Das ist Absicht: Der Stand weiß nicht, welche Geräte du seit dem Backup entfernt hast (zum Beispiel ein verlorenes iPad). Ohne den Widerruf wäre dessen Kopplung wieder gültig.
 5. Starten:
 
    ```bash
@@ -67,6 +68,8 @@ Die bisherigen Daten bleiben als Sicherheitsnetz liegen: als Datenbank mit dem Z
 Ein Stand von einer **neueren** App-Version wird abgelehnt. Mach dann zuerst `git pull` ([UPDATE.md](UPDATE.md)).
 
 Wurde die Wiederherstellung unterbrochen, schließt `pnpm sg start` sie beim nächsten Mal selbst ab oder baut sie zurück.
+
+**Geräte nach einer Wiederherstellung:** Nach einer Wiederherstellung ist **kein** Gerät mehr gekoppelt, auch das iPad nicht. Das iPad zeigt meist „Mac nicht gefunden“ und findet den Mac nicht mehr, weil sein Schlüssel am Mac gelöscht ist. Koppeln geht so: Auf dem iPad im Verbindungsmenü des Startbildschirms **Neu koppeln** bzw. **Kopplung aufheben** tippen (je nachdem, was die App anbietet), dann zu Hause in der Web-App unter **Einstellungen → Geräte** die Kopplung starten und mit dem iPad den QR-Code am Mac scannen (siehe [IPAD.md](IPAD.md), Abschnitt „Koppeln“). Die Notizbücher auf dem iPad bleiben erhalten. Am Mac musst du nichts entfernen, die Geräteliste ist nach dem Start leer.
 
 **iPad nach einer Wiederherstellung:** Das iPad erkennt die Wiederherstellung, sobald es sich wieder mit dem Mac verbindet, und gleicht danach alle Seiten selbst neu ab. Du musst dafür keine Notizbücher öffnen. Auf dem Startbildschirm steht solange die Zeile „Mac wiederhergestellt · N Seiten werden abgeglichen“. Die Zahl zählt herunter, am Ende verschwindet die Zeile.
 

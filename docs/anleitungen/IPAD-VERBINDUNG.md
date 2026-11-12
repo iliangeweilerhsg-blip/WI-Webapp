@@ -116,7 +116,7 @@ Die Zeilen beginnen mit „Tunnel-Helfer ·“. Ein ✗ bedeutet: etwas ist kapu
 | Peer-to-peer | ℹ an oder aus (`SG_TUNNEL_P2P`) |
 | Dienstname | ✗ macOS hat den Bonjour-Namen umbenannt („… (2)“), weil ihn jemand schon belegt hat. `pnpm sg stop`, `pnpm sg start`. Bleibt es, ist in Funkreichweite ein zweites Studien-Gehirn oder ein Fremder, der den Namen belegt |
 | Handshakes | ℹ Viele gescheiterte Verbindungsversuche seit dem Start. Meist ein iPad mit altem Schlüssel (neu koppeln) oder jemand im Funk. Das ist nur Verzögerung, kein Leck |
-| Geräte ohne Schlüssel | ✗ Gekoppelte Geräte ohne Tunnel-Schlüssel (vor UX-12 gekoppelt oder aus einem Backup wiederhergestellt). Sie müssen **einmal neu gekoppelt** werden: In der Web-App unter Einstellungen → Geräte entfernen, dann das iPad zu Hause neu koppeln (QR-Code). Der Schlüssel entsteht nur bei der Kopplung, nie nachträglich |
+| Geräte ohne Schlüssel | ✗ Gekoppelte Geräte ohne Tunnel-Schlüssel (vor UX-12 gekoppelt). Sie müssen **einmal neu gekoppelt** werden: In der Web-App unter Einstellungen → Geräte entfernen, dann das iPad zu Hause neu koppeln (QR-Code). Der Schlüssel entsteht nur bei der Kopplung, nie nachträglich |
 | Firewall | siehe unten |
 
 ### Die Firewall-Frage
@@ -136,7 +136,7 @@ Das iPad sucht seinen Mac über einen Bonjour-Dienst (`_sg-tunnel._tcp`), erst i
 | Anzeige | Was sie heißt | Was hilft |
 |---|---|---|
 | Suche deinen Mac … | Normal in den ersten Sekunden | Warten |
-| Mac nicht gefunden | Kein Dienst mit dem Namen deines Macs zu sehen | Mac aufgeklappt und am Netzteil? `pnpm sg start` läuft? Am Mac WLAN an? `pnpm sg doctor` ansehen (Zeilen „Tunnel-Helfer“) |
+| Mac nicht gefunden | Kein Dienst mit dem Namen deines Macs zu sehen | Mac aufgeklappt und am Netzteil? `pnpm sg start` läuft? Am Mac WLAN an? `pnpm sg doctor` ansehen (Zeilen „Tunnel-Helfer“). Nach einer Wiederherstellung aus dem Backup (`pnpm sg restore`) sind alle Geräte entkoppelt: neu koppeln, siehe [BACKUP-WIEDERHERSTELLEN.md](BACKUP-WIEDERHERSTELLEN.md) |
 | WLAN ist aus | Am iPad ist WLAN ausgeschaltet. Auch die Direktverbindung braucht es | WLAN am iPad einschalten. Ein Netz brauchst du nicht |
 | Lokales Netzwerk nicht erlaubt | iPadOS lässt die Suche nicht zu | Einstellungen → Datenschutz & Sicherheit → Lokales Netzwerk → Studien-Gehirn. Nach dem Aufspielen kann die Erlaubnis zurückgesetzt sein |
 | Mac nicht gefunden, mit dem Satz „… nicht mit dem richtigen Schlüssel“ | Etwas unter dem Namen deines Macs hat den Handshake begonnen, kennt aber den Schlüssel nicht. Jeder in Funkreichweite kann den Namen nachsprechen. Der Satz erscheint erst nach drei vergeblichen Suchläufen | Nichts entkoppeln. Zu Hause prüfen, ob das iPad am Mac unter Einstellungen → Geräte noch steht. Kommt der Hinweis zu Hause, am Mac `pnpm sg doctor` ansehen |

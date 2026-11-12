@@ -82,6 +82,15 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Der Restore-Test ruft pg_dump/pg_restore lokal auf. Der Runner liefert einen neueren
+      # Client als den Server (pg16); dessen Dump enthält SET transaction_timeout (erst ab pg17).
+      # Darum den zum Server passenden Client aus dem PGDG-Repo installieren (infra/sg/src/pg.ts
+      # findet ihn unter /usr/lib/postgresql/16/bin).
+      - name: PostgreSQL-16-Client installieren
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-16
+          /usr/lib/postgresql/16/bin/pg_dump --version
       - run: pnpm -r --workspace-concurrency=1 --if-present run test:integration
 
   python:
