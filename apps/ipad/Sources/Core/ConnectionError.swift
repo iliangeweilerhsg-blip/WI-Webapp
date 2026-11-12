@@ -135,6 +135,17 @@ enum ConnectionError: Error, Equatable, Sendable {
         }
     }
 
+    /// Hinweis nach einer Wiederherstellung (UX-304): Der Restore am Mac widerruft alle Geräte und bringt die
+    /// Tunnel-Schlüssel nicht zurück, danach hilft nur Neukoppeln (zu Hause, QR-Code in Einstellungen → Geräte am Mac).
+    /// Bewusst ohne „aufheben“ und „entkoppeln“: Beim falschen Schlüssel soll der Text nicht zum Entkoppeln drängen.
+    static let restoreHint =
+        "Wurde der Mac neu aufgesetzt oder aus einem Backup wiederhergestellt, muss das iPad zu Hause neu gekoppelt werden (QR-Code am Mac)."
+
+    /// Wie `restoreHint`, mit dem Weg im Menü. Nur beim Text „Mac nicht gefunden“: Dort ist „Kopplung aufheben“ (mit
+    /// Rückfrage) der Weg zum Neukoppeln.
+    static let restoreHintWithPath =
+        "\(restoreHint) Der Weg: Verbindungsdetails → Kopplung aufheben, dann den QR-Code am Mac scannen."
+
     /// Kurztext für die Statusanzeige
     var title: String {
         switch self {
@@ -243,11 +254,11 @@ enum ConnectionError: Error, Equatable, Sendable {
         case .tunnelKeyMissing:
             return "Für die Direktverbindung braucht das iPad einen neuen Schlüssel. Kopple es einmal zu Hause neu (QR-Code am Mac). Deine Notizen bleiben auf dem iPad und gleichen sich danach ab."
         case .tunnelMacNotFound:
-            return "Läuft Studien-Gehirn am Mac, und ist er aufgeklappt? Am Mac muss WLAN eingeschaltet sein. Deine Notizen bleiben auf dem iPad und gleichen sich später ab."
+            return "Läuft Studien-Gehirn am Mac, und ist er aufgeklappt? Am Mac muss WLAN eingeschaltet sein. \(Self.restoreHintWithPath) Deine Notizen bleiben auf dem iPad und gleichen sich später ab."
         case .wifiSwitchedOff:
             return "Schalte WLAN am iPad ein. Ein Netz brauchst du nicht, das iPad verbindet sich direkt mit dem Mac."
         case .tunnelHandshakeFailed:
-            return "Ein Gerät hat unter dem Namen deines Macs geantwortet, aber nicht mit dem richtigen Schlüssel. Zu Hause prüfen, ob das iPad am Mac noch gekoppelt ist."
+            return "Ein Gerät hat unter dem Namen deines Macs geantwortet, aber nicht mit dem richtigen Schlüssel. Zu Hause prüfen, ob das iPad am Mac noch gekoppelt ist. \(Self.restoreHint)"
         case .macWithoutTunnel:
             return "Der Mac hat beim Koppeln keinen Schlüssel für die Verbindung geschickt. Am Mac Studien-Gehirn aktualisieren und mit pnpm sg start starten (ohne SG_TUNNEL=0), pnpm sg doctor zeigt den Tunnel-Helfer. Den eben angelegten Eintrag des iPads unter Einstellungen → Geräte entfernen, dann neu koppeln."
         }

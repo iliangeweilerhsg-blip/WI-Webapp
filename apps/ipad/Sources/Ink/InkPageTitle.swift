@@ -56,6 +56,10 @@ enum InkPageTitle {
 
     /// Text der Infozeile, wenn nach dem Warten alles am Mac angekommen ist (UX-49)
     static let allSyncedLine = "Alles am Mac"
+    /// Speichern der Seite scheitert (UX-317, Empfehlung a aus #287): ruhig, ohne Dialog, bleibt bis zum nächsten
+    /// erfolgreichen Speichern. Die Striche liegen noch im Arbeitsspeicher und gehen live an den Mac.
+    static let saveFailedLine =
+        "Diese Seite konnte nicht gespeichert werden. Deine Striche sind noch da, bitte nicht schließen. Speicher auf dem iPad prüfen."
     /// Die Seite liegt auf dem iPad, ließ sich aber nicht lesen (#252). Sie ist gesperrt, die Datei bleibt unberührt.
     static let unreadableLine = "Diese Seite konnte nicht gelesen werden. Am Mac liegt der letzte Stand."
 

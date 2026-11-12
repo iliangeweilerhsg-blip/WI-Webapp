@@ -120,16 +120,6 @@ enum HomeTexts {
     /// Gekoppelt, aber ohne Tunnel-Schlüssel (vor UX-12): Es geht nichts raus, einmal neu koppeln
     static let tunnelRepairCard = "\(ConnectionError.tunnelKeyMissing.title) · \(ConnectionError.tunnelKeyMissing.advice)"
 
-    /// Gespeichert ist nur die IP des Macs (#261). Bekommt er per DHCP eine neue, antwortet unter der alten niemand.
-    /// Der Weg zurück: Kopplung aufheben und neu koppeln.
-    static let newAddressHint =
-        "Hat der Mac inzwischen eine andere IP-Adresse? Am Mac zeigt Einstellungen → Geräte sie an. Weicht sie ab: Kopplung aufheben und neu koppeln."
-
-    /// Nur, wenn unter der gespeicherten Adresse niemand antwortet
-    static func mayHaveNewAddress(_ connection: ConnectionStatus) -> Bool {
-        connection == .disconnected(.timeout) || connection == .disconnected(.coreNotFound)
-    }
-
     /// Zeile während des Abgleichs aller Seiten (UX-46). Zählt herunter, am Ende verschwindet sie. Markierte Seiten,
     /// die sich nicht lesen ließen (#252), zählt sie nicht mit: Sie werden nie abgeglichen und stehen als eigener
     /// Hinweis da, solange es sie gibt.
@@ -231,11 +221,6 @@ struct ConnectionDetailView: View {
                 }
             } else {
                 Text("Mac: \(mac.endpoint.displayText)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            if model.routeState == nil, HomeTexts.mayHaveNewAddress(model.connection) {
-                Text(HomeTexts.newAddressHint)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

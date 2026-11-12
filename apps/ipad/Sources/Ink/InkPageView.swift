@@ -36,6 +36,8 @@ struct InkPageView: View {
     /// Händigkeit: Seite der Werkzeugleiste. Später aus `Settings.lecture.toolbar_side` (F-EIN-01).
     @AppStorage("ink.toolbarSide") private var toolbarSideRaw = ToolbarSide.rechts.rawValue
     @Environment(\.scenePhase) private var scenePhase
+    /// Hält das iPad in einer laufenden Vorlesung wach (UX-305)
+    @State private var screenWake = ScreenWakeController()
     /// „Alles am Mac“ nach dem Aufholen (UX-49)
     @State private var allSynced = AllSyncedNotice()
     /// Hinweis zu „Auf Folie“, 5 s nach einem Tipp auf den ausgegrauten Umschalter (UX-51)
@@ -113,6 +115,10 @@ struct InkPageView: View {
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(spacing: 0) {
                         pageStrip
+                        if model.saveFailed {
+                            // Ruhige Zeile statt Dialog (R1, #287 Empfehlung a). Bleibt, bis das Speichern wieder klappt.
+                            infoRow(InkPageTitle.saveFailedLine)
+                        }
                         if model.isUnreadable {
                             // Ruhige Zeile statt Dialog (R1). Die Seite ist gesperrt, die Datei bleibt, wie sie ist.
                             infoRow(InkPageTitle.unreadableLine)
@@ -229,6 +235,7 @@ struct InkPageView: View {
             await open()
         }
         .onAppear {
+            updateScreenWake(visible: true)
             refreshExpiry()
             allSynced.update(isOnline: sync.state == .online, pending: sync.pendingCount)
             sync.setPresence(presence(onPage: true))
@@ -239,6 +246,7 @@ struct InkPageView: View {
             }
         }
         .onDisappear {
+            updateScreenWake(visible: false)
             // Keine Freigabe, solange die Ansicht nicht zu sehen ist
             quietTask?.cancel()
             quietTask = nil
@@ -249,7 +257,11 @@ struct InkPageView: View {
             library.flushPendingDeletes()
             sync.setPresence(presence(onPage: false))
         }
+        .onChange(of: library.running?.id) { _, _ in
+            updateScreenWake(visible: true)
+        }
         .onChange(of: scenePhase) { _, phase in
+            updateScreenWake(visible: true)
             if phase == .active {
                 // Der Tag kann gewechselt haben (UX-50)
                 refreshExpiry()
@@ -348,6 +360,13 @@ struct InkPageView: View {
         return ProfileExpiry.pageLine(
             expiry: expiryDate, now: expiryNow, pendingChanges: ProfileExpiry.waitingChanges(
                 isOnline: sync.state == .online, pending: sync.pendingCount))
+    }
+
+    /// Bildschirm wach halten, solange eine Vorlesung läuft und die Schreibfläche zu sehen ist (UX-305). Beim Verlassen
+    /// und im Hintergrund wird die Sperre immer zurückgesetzt.
+    private func updateScreenWake(visible: Bool) {
+        screenWake.update(
+            lectureRunning: library.running != nil, writingSurfaceVisible: visible, appActive: scenePhase == .active)
     }
 
     private func refreshExpiry() {
