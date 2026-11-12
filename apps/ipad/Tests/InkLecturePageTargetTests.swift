@@ -178,7 +178,9 @@ final class InkLecturePageTargetTests: XCTestCase {
         XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
         XCTAssertEqual(target.pageID, firstPageID)
-        XCTAssertNil(target.sessionID)
+        // Die Seite behält ihre Session (#250), ohne laufende Session fehlt nur der bekannte Start
+        XCTAssertEqual(target.sessionID, lastWeekID)
+        XCTAssertNil(target.sessionStartMS)
         XCTAssertEqual(service.pages(inNotebook: notebookID).count, 1)
     }
 

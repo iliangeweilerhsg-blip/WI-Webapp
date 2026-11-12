@@ -231,10 +231,17 @@ final class InkLibraryServiceTests: XCTestCase {
         await h.service.refresh(force: true)
         XCTAssertNotNil(h.service.running)
 
-        // Gleiches Modul: Session und Start gesetzt, auch für eine Seite, die vor der Vorlesung geöffnet war
+        // Gleiches Modul: Eine Seite ohne Session, die vor der Vorlesung angelegt wurde, gehört nicht dazu (#250)
         let same = try XCTUnwrap(h.service.target(forPage: h.binding.pageID))
-        XCTAssertEqual(same.sessionID, "019a4e14-0000-7000-8000-0000000000d1")
-        XCTAssertEqual(same.sessionStartMS, 1_794_384_000_000)
+        XCTAssertNil(same.sessionID)
+        XCTAssertNil(same.sessionStartMS)
+        // Eine Seite dieser Session bekommt Session und Start
+        var own = try XCTUnwrap(h.library.page(h.binding.pageID))
+        own.sessionID = "019a4e14-0000-7000-8000-0000000000d1"
+        h.library.upsert(own)
+        let ownTarget = try XCTUnwrap(h.service.target(forPage: h.binding.pageID))
+        XCTAssertEqual(ownTarget.sessionID, "019a4e14-0000-7000-8000-0000000000d1")
+        XCTAssertEqual(ownTarget.sessionStartMS, 1_794_384_000_000)
 
         // Anderes Modul: keine Session, `presence.session_id = null`
         h.library.mergeModules(
