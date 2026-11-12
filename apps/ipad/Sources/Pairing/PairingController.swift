@@ -142,10 +142,14 @@ final class PairingController {
 
     /// Die Adresse, an die die Kopplung geht: IPv4 bleibt, ein `.local`-Name wird aufgelöst. `nil`, wenn das nicht
     /// klappt. Ein Ergebnis, das selbst wieder ein Name ist, zählt als gescheitert: Gespeichert wird nie ein Name.
+    /// Ebenso eine IP außerhalb des Netzes des iPads: Die Antwort auf die Namensfrage ist nicht geprüft, Code und
+    /// `pairing_id` sollen nicht in ein fremdes Netz gehen, und das Token ginge dorthin ohnehin nie
+    /// (`TokenDestination`); die Kopplung wäre also nutzlos.
     private func addressForPairing(_ endpoint: CoreEndpoint) async -> CoreEndpoint? {
         guard TokenDestination.isLocalName(endpoint.host) else { return endpoint }
         guard let resolved = await localResolver.resolve(endpoint),
-            TokenDestination.parseIPv4(resolved.host) != nil
+            TokenDestination.parseIPv4(resolved.host) != nil,
+            client.allowsToken(for: resolved)
         else { return nil }
         return resolved
     }

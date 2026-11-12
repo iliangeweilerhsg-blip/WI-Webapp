@@ -106,6 +106,30 @@ final class LocalNameResolvedAtPairingTests: XCTestCase {
         XCTAssertEqual(setup.transport.requests.count, 0)
     }
 
+    func testResolvedAddressOutsideTheIPadsNetworkIsRefused() async throws {
+        // Die Antwort auf die Namensfrage ist nicht geprüft: Eine IP außerhalb des Netzes bekommt weder Code noch
+        // `pairing_id`, und dorthin ginge das Token ohnehin nie (die Kopplung wäre nutzlos)
+        let setup = Setup(
+            [.http(status: 201, body: Fixtures.pairStartResponse)],
+            resolvesTo: try XCTUnwrap(CoreEndpoint(host: "203.0.113.9", port: 4710)))
+
+        await setup.controller.start(endpoint: localEndpoint)
+
+        XCTAssertEqual(setup.controller.state, .idle)
+        XCTAssertEqual(setup.controller.lastError, .localNameNotResolved)
+        XCTAssertEqual(setup.transport.requests.count, 0)
+        XCTAssertNil(setup.macs.mac)
+    }
+
+    func testHintForChangedMacAddressOnlyWhenNobodyAnswers() {
+        XCTAssertTrue(HomeTexts.mayHaveNewAddress(.disconnected(.timeout)))
+        XCTAssertTrue(HomeTexts.mayHaveNewAddress(.disconnected(.coreNotFound)))
+        XCTAssertFalse(HomeTexts.mayHaveNewAddress(.disconnected(.otherNetwork)))
+        XCTAssertFalse(HomeTexts.mayHaveNewAddress(.disconnected(.tokenInvalid)))
+        XCTAssertFalse(HomeTexts.mayHaveNewAddress(.connected))
+        XCTAssertTrue(HomeTexts.newAddressHint.contains("Kopplung aufheben"))
+    }
+
     func testIPAddressIsNotResolved() async {
         let setup = Setup([.http(status: 201, body: Fixtures.pairStartResponse)], resolvesTo: nil)
 
