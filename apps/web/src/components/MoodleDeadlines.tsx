@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Module } from '@sg/shared';
 import { documentHref } from '../lib/material.ts';
 import { moduleColorVar } from '../lib/modules.ts';
-import { formatDue, isWebUrl, useSyncedDeadlines } from '../lib/moodle.ts';
+import { abgabeHref, formatDue, isWebUrl, useSyncedDeadlines } from '../lib/moodle.ts';
 
 /**
  * Fristen aus Moodle (F-MDL-04 Schritt 3): ruhige Liste nach Datum, ohne Countdown und ohne rote Farbe (R11).
@@ -100,6 +100,14 @@ export function MoodleDeadlines({
                     className="text-text-muted underline-offset-2 hover:text-text hover:underline"
                   >
                     Blatt
+                  </Link>
+                ) : null}
+                {deadline.source === 'aufgabe' && deadline.assignment_id !== null ? (
+                  <Link
+                    href={abgabeHref(deadline.assignment_id, deadline.module_id)}
+                    className="text-text-muted underline-offset-2 hover:text-text hover:underline"
+                  >
+                    Abgeben
                   </Link>
                 ) : null}
                 {isWebUrl(deadline.url) ? (
