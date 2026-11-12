@@ -8,6 +8,8 @@ struct HomeView: View {
     let mac: PairedMac
 
     @State private var showsStatus = false
+    /// Testansicht für die Direktverbindung (Spike S6, UX-12). Nur über Verbindungsdetails → Entwickler.
+    @State private var showsSpike = false
     /// Ablaufdatum der Signatur (UX-13), `nil` ohne Profil. Wird beim Erscheinen und beim Aktivieren der App neu gelesen.
     @State private var expiry: Date?
     /// „Jetzt“ für den Ablaufhinweis, wird beim Erscheinen und beim Aktivieren der App neu gesetzt (UX-50)
@@ -66,10 +68,20 @@ struct HomeView: View {
                         ConnectionBadge(state: model.badgeState)
                     }
                     .popover(isPresented: $showsStatus) {
-                        ConnectionDetailView(model: model, mac: mac)
+                        ConnectionDetailView(model: model, mac: mac) {
+                            // Erst das Popover schließen, dann die Ansicht zeigen (sonst geht die Anzeige verloren)
+                            showsStatus = false
+                            _Concurrency.Task {
+                                try? await _Concurrency.Task.sleep(for: .milliseconds(400))
+                                showsSpike = true
+                            }
+                        }
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showsSpike) {
+            SpikeView(model: SpikeP2PModel.shared)
         }
         .onAppear {
             refreshExpiry()
@@ -189,6 +201,8 @@ struct ConnectionBadge: View {
 struct ConnectionDetailView: View {
     let model: AppModel
     let mac: PairedMac
+    /// Öffnet die Testansicht „Direktverbindung testen“ (Spike S6)
+    let openSpike: () -> Void
 
     @State private var confirmsUnpair = false
 
@@ -220,6 +234,16 @@ struct ConnectionDetailView: View {
                     confirmsUnpair = true
                 }
             }
+
+            // Gut versteckt: nur für den Gerätetest im Hörsaal (Spike S6), fällt mit UX-12 PR 4 wieder weg
+            DisclosureGroup("Entwickler") {
+                Button("Direktverbindung testen") {
+                    openSpike()
+                }
+                .font(.footnote)
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
         }
         .padding()
         .frame(minWidth: 320, alignment: .leading)

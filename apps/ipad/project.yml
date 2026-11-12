@@ -33,6 +33,9 @@ targets:
       # In der App darum immer _Concurrency.Task schreiben. Ein eigenes Modul geht nicht, die Typen sind internal.
       - path: ../../packages/schemas/generated/swift/Schemas.swift
       - path: ../../packages/schemas/swift-support/Sources
+      # Spike S6 (UX-12, PR 1): Protokoll, Code, TLS-PSK und Client teilen sich Mac-Paket und iPad-App (Swift 6).
+      # Fällt mit PR 4 weg, wenn die Testansicht entfernt wird.
+      - path: ../../spikes/s6-p2p/Sources/SpikeShared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.studiengehirn.ipad
