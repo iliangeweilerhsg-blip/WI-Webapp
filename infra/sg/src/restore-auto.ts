@@ -7,11 +7,11 @@
 // Stand und der von `sg backup` eingetragenen Prüfsumme des Dumps) und dessen Manifest genau diese Prüfsumme trägt.
 // Die Datenbank ist die Vertrauensquelle, das Ziel nicht. Stände ohne Lauf-Eintrag werden nie angefasst.
 import { SINGLE_USER_ID } from '@sg/shared';
-import { checkBackupTarget } from '@sg/shared/backup-target';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { readBackupSettings, errorText, RESTORE_TEST_PID_NAME } from './backup.ts';
+import { readBackupSettings, errorText, RESTORE_TEST_PID_NAME, validateTarget } from './backup.ts';
 import { writeRunPid } from './liveness.ts';
+import type { Identity } from './nofollow.ts';
 import {
   dropDatabase,
   loadStand,
@@ -147,8 +147,13 @@ async function autoRestoreTest(
     const { target } = await readBackupSettings(pg);
     if (!target) return await fail(null, 'kein_ziel', 'Es ist kein Backup-Ziel eingestellt.');
     let resolved: string;
+    let targetId: Identity;
     try {
-      resolved = checkBackupTarget(target, cfg.dataDir, { createMissing: false });
+      // Ziel einmal prüfen und mit dieser Identität (dev/ino) verankert lesen (#161): Wird es danach ersetzt,
+      // scheitert das Lesen des Standes (`beschaedigt`), statt einem fremden Ordner zu folgen
+      const checked = validateTarget(target, cfg.dataDir, false);
+      resolved = checked.path;
+      targetId = { dev: checked.dev, ino: checked.ino };
     } catch (e) {
       return await fail(
         null,
@@ -200,6 +205,7 @@ async function autoRestoreTest(
       loaded.dir,
       loaded.manifest,
       'autotest',
+      targetId,
     ).catch((e: unknown) => {
       if (e instanceof StandError) throw e; // Prüfsumme der Kopie stimmt nicht: wird unten wie oben gemeldet
       throw new RestoreRunError(errorText(e, cfg));

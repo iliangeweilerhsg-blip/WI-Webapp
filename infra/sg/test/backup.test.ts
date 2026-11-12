@@ -1,4 +1,5 @@
 import {
+  cpSync,
   existsSync,
   lchownSync,
   lstatSync,
@@ -1526,6 +1527,47 @@ describe('Restore liest den Stand ohne Symlink-Folgen (#119)', () => {
     symlinkSync(echt, join(s.target, STAND));
     expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
     expect(s.pg.testResult).toMatchObject({ reason: 'beschaedigt' });
+  });
+});
+
+describe('Restore übernimmt das Ziel mit der Identität aus validateTarget (#161)', () => {
+  const STAND = '20261104T030012Z';
+  /** Angreifer: Ziel nach der Prüfung beiseiteschieben, an seiner Stelle eine Kopie (gleicher Pfad, anderer Ordner) */
+  function swapTarget(target: string): void {
+    renameSync(target, `${target}.alt`);
+    cpSync(`${target}.alt`, target, { recursive: true });
+  }
+
+  it('automatischer Test: Ziel während des Einspielens ersetzt → "beschaedigt"', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    s.pg.restoreImpl = async () => swapTarget(s.target);
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ state: 'fehler', reason: 'beschaedigt' });
+  });
+
+  it('Gegenprobe: automatischer Test ohne Tausch besteht', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
+  });
+
+  it('restore --test: Ziel während des Einspielens ersetzt → "beschädigt"', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    s.pg.restoreImpl = async () => swapTarget(s.target);
+    expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(1);
+    expect(s.errs.join('\n')).toContain('beschädigt');
+  });
+
+  it('vollständiger Restore: Ziel während der Rückfrage ersetzt → Abbruch vor jeder Änderung', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    s.deps.confirm = async () => (swapTarget(s.target), true);
+    expect(await runRestore(s.deps, { stand: STAND, test: false, yes: false })).toBe(1);
+    expect(s.errs.join('\n')).toContain('beschädigt');
+    expect(s.pg.restored).toEqual([]);
+    expect(existsSync(join(s.dataDir, 'restore.journal.json'))).toBe(false);
   });
 });
 
