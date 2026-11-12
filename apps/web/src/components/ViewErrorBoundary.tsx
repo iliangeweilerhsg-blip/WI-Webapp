@@ -33,8 +33,11 @@ export class ViewErrorBoundary extends Component<Props, State> {
     console.error('Ansicht hat einen Fehler', error, info.componentStack);
   }
 
-  override componentDidUpdate(prev: Props) {
-    if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null });
+  override componentDidUpdate(prev: Props, prevState: State) {
+    // Nur einen Fehler zurücksetzen, der schon VOR diesem Wechsel stand. Wirft die neue Seite gleich beim Wechsel,
+    // kommen Fehler und neuer Schlüssel in derselben Übergabe: Ein Zurücksetzen rendert sie sonst sofort noch einmal.
+    if (this.state.error && prevState.error && prev.resetKey !== this.props.resetKey)
+      this.setState({ error: null });
   }
 
   private readonly reset = () => {

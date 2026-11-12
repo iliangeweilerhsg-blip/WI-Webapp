@@ -562,6 +562,32 @@ describe('Folgepunkte #266', () => {
     expect(within(statusBar).queryByText('REC')).toBeNull();
   });
 
+  it('Statusleiste: Ist der Seitenstand neuer als die aktive Session, gilt der Seitenstand', async () => {
+    function PushPage({ next }: { next: Session }) {
+      const client = useQueryClient();
+      return (
+        <button type="button" onClick={() => client.setQueryData(['sessions', 'dashboard', next.id], next)}>
+          push-page
+        </button>
+      );
+    }
+    boot({
+      shell: true,
+      ui: (
+        <>
+          <SessionView />
+          <PushPage next={session(A_ID, { state: 'pausiert', updated_at: '2026-11-04T08:30:00Z' })} />
+        </>
+      ),
+    });
+    const statusBar = await screen.findByLabelText('Statusleiste');
+    await within(statusBar).findByText('REC');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'push-page' }));
+    // Die aktive Session (älter, „läuft“) überstimmt den neueren Seitenstand nicht
+    await within(statusBar).findByText('Pausiert');
+    expect(within(statusBar).queryByText('REC')).toBeNull();
+  });
+
   it('„Aufnahme starten“ setzt den Fokus auf den Statussatz der Leiste', async () => {
     const user = userEvent.setup();
     boot({ rec: fakeRecording({ permission: 'prompt' }) });

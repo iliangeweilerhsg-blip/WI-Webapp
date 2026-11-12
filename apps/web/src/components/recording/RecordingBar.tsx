@@ -93,7 +93,14 @@ export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
           />
           {/* Der Link erst, wenn die Route existiert (T1-04, siehe `SESSION_DASHBOARD_AVAILABLE`) */}
           {isDashboardAvailable() ? (
-            <Link href={sessionHref(session.id)} className={secondary} onClick={onNavigate}>
+            <Link
+              href={sessionHref(session.id)}
+              className={secondary}
+              onClick={(e) => {
+                // Mit Zusatztaste (neuer Tab/Fenster) bleibt die Seite: dann später keinen Fokus umsetzen
+                if (e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) onNavigate?.();
+              }}
+            >
               Zur Vorlesung
             </Link>
           ) : null}
