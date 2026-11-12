@@ -38,7 +38,7 @@ git diff --stat HEAD@{1} -- apps/ipad
 - **Keine Ausgabe:** Es hat sich nichts geändert. Die App bleibt, wie sie ist.
 - **Dateien aufgelistet:** Spiele die App neu auf, wie in [IPAD.md](IPAD.md) beschrieben (Schritt 1 und Schritt 6). Die Kopplung bleibt erhalten. Lösche die App nicht.
 
-Meldet die iPad-App „Der Mac spricht ein anderes Protokoll. App aktualisieren.“, ist sie älter als der Mac. Spiele sie dann ebenfalls neu auf. Einen Hinweis darauf am Mac gibt es noch nicht.
+Meldet die iPad-App „Der Mac spricht ein anderes Protokoll. App aktualisieren.“, ist sie älter als der Mac. Spiele sie dann ebenfalls neu auf. Am Mac sagt dir `pnpm sg start` Bescheid: Hat sich `apps/ipad` seit dem letzten Start geändert, steht nach dem Start im Terminal „iPad-App neu aufspielen“. Die Meldung kommt nur einmal. Beim allerersten Start merkt sich `sg` nur den Stand.
 
 ## Wenn etwas schiefgeht
 

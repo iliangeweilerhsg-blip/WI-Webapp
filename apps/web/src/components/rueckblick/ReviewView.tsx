@@ -10,7 +10,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import type { EvidenceRef, Session, SessionTranscript, TranscriptLine } from '@sg/shared';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import { CONCEPT_STEPS, useSessionConcepts, useSessionSummary } from '../../lib/concepts.ts';
-import { useAiStatus } from '../../lib/costs.ts';
+import { AI_SETTINGS_HREF, formatEur, sessionCost, useAiStatus, useCostSummary } from '../../lib/costs.ts';
 import { useDeckDetail } from '../../lib/material.ts';
 import { moduleColorVar, useModules } from '../../lib/modules.ts';
 import { moduleHref } from '../../lib/nav.ts';
@@ -217,6 +217,8 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
   const summary = useSessionSummary(session.id, session.processing, true);
   const concepts = useSessionConcepts(session.id, session.processing, true);
   const ai = useAiStatus();
+  const costs = useCostSummary();
+  const cost = sessionCost(costs.data, session.id);
   const active = useActiveSession();
 
   const firstStart = lines[0]?.start_ms ?? timelineBounds(transcript.recordings)?.start ?? 0;
@@ -363,6 +365,14 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
           ai={ai.data}
           lectureRunning={active.data != null && active.data.id !== session.id}
         />
+      ) : null}
+      {cost ? (
+        <p className="text-sm text-text-muted">
+          {`KI-Kosten dieser Vorlesung: ca. ${formatEur(cost.eur)}. `}
+          <Link href={AI_SETTINGS_HREF} className="underline underline-offset-2 hover:text-text">
+            Einstellungen → KI
+          </Link>
+        </p>
       ) : null}
       {state === 'offen' && conceptsPending ? (
         <p role="status" className="text-md text-text-muted">

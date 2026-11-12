@@ -11,6 +11,7 @@ import { clockAt, isoAt, useReprocess } from '../src/lib/transcript.ts';
 import { installAudioStub, type AudioStub } from './audio-stub.ts';
 import {
   installFakeCore,
+  makeCostSummary,
   makeDeck,
   makeLine,
   makeModule,
@@ -911,5 +912,26 @@ describe('Rückblick: Sprung aus der Suche (&t=<ms>, VERTRAEGE §19.7)', () => {
     expect(audio(R1).currentTime).toBe(0);
     expect(activeLines()).toHaveLength(0);
     expect(counter()).toHaveTextContent('Folie 1 von 3');
+  });
+});
+
+describe('Rückblick: Kosten (UX-16)', () => {
+  it('zeigt die geschätzten KI-Kosten dieser Vorlesung mit Link zu Einstellungen → KI', async () => {
+    boot();
+    core.costSummary = makeCostSummary({
+      by_session: [{ session_id: SESSION_ID, session: null, calls: 3, eur: 0.42 }],
+    });
+    const line = await screen.findByText(/KI-Kosten dieser Vorlesung: ca\./);
+    expect(line).toHaveTextContent('0.42');
+    expect(within(line).getByRole('link', { name: 'Einstellungen → KI' })).toHaveAttribute(
+      'href',
+      '/einstellungen?bereich=ki',
+    );
+  });
+
+  it('ohne Eintrag für diese Session steht keine Kostenzeile da', async () => {
+    boot();
+    await screen.findByText(/Folie 1 von 3/);
+    expect(screen.queryByText(/KI-Kosten dieser Vorlesung/)).toBeNull();
   });
 });

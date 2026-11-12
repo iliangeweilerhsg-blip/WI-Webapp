@@ -6,6 +6,7 @@ import { CoreHint } from '../CoreHint.tsx';
 import { MoodleAccessHint } from '../MoodleAccessHint.tsx';
 import { MoodleDeadlines } from '../MoodleDeadlines.tsx';
 import { EmptyState } from '../Placeholder.tsx';
+import { FirstStepsCard } from './FirstSteps.tsx';
 import { SpontaneousStartCard } from './SpontaneousStart.tsx';
 import { StartCard } from './StartCard.tsx';
 import { TodayList } from './TodayList.tsx';
@@ -94,6 +95,9 @@ export function HeuteScreen() {
 
         {/* Dezenter Hinweis zum Moodle-Zugang ab 7 Tagen vor Ablauf (F-MDL-01). Sonst nichts */}
         {now !== null ? <MoodleAccessHint withLink /> : null}
+
+        {/* Erste Schritte (UX-14): hakt sich selbst ab, nie während einer Session, weg wenn alles erledigt ist */}
+        {hasData ? <FirstStepsCard /> : null}
       </div>
     </section>
   );

@@ -115,3 +115,15 @@ export function parseBudget(text: string): number | null {
   const value = Number(normalized);
   return value >= 0 && value <= 1000 ? value : null;
 }
+
+/**
+ * Geschätzte KI-Kosten einer Session aus `by_session` (UX-16). `by_session` nennt nur die 20 teuersten Sessions des
+ * laufenden Monats: fehlt die Session dort, ist sie älter oder billiger, und es gibt keine Zahl (`null`).
+ */
+export function sessionCost(
+  summary: Pick<CostSummary, 'by_session'> | undefined | null,
+  sessionId: string,
+): { eur: number; calls: number } | null {
+  const row = summary?.by_session.find((s) => s.session_id === sessionId);
+  return row ? { eur: row.eur, calls: row.calls } : null;
+}
