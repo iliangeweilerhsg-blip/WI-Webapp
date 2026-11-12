@@ -8,7 +8,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@sg/shared';
 import { friendlyMessage } from '../../lib/api.ts';
 import { useHydrationSafe } from '../../lib/hydrated.ts';
-import { getSession, newerSession, pauseSession, resumeSession, stopSession } from '../../lib/sessions.ts';
+import {
+  applyActiveSession,
+  getSession,
+  newerSession,
+  pauseSession,
+  resumeSession,
+  stopSession,
+} from '../../lib/sessions.ts';
 import { useSyncClient } from '../../lib/sync/SyncProvider.tsx';
 import { POLL_MS, useLiveState } from '../today/use-today.ts';
 import { watchReconnect } from './reconnect.ts';
@@ -51,6 +58,7 @@ export function useSessionData(id: string | null): SessionData {
     (session: Session) => {
       if (session.id !== id) return;
       client.setQueryData<Session>(key(session.id), (old) => newerSession(old, session));
+      applyActiveSession(client, session);
     },
     [client, id],
   );
@@ -134,57 +142,4 @@ export function useSessionActions(
     [session, onSession, onRefetch],
   );
   return { busy, error, run };
-}
-
-const pausedKey = (id: string) => `sg.session.pausedSince.${id}`;
-
-function readPaused(id: string): number | null {
-  try {
-    const raw = window.sessionStorage.getItem(pausedKey(id));
-    const value = raw === null ? NaN : Number(raw);
-    return Number.isFinite(value) ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function writePaused(id: string, value: number | null): void {
-  try {
-    if (value === null) window.sessionStorage.removeItem(pausedKey(id));
-    else window.sessionStorage.setItem(pausedKey(id), String(value));
-  } catch {
-    // Speicher gesperrt: die Anzeige gilt dann nur bis zum Neuladen
-  }
-}
-
-/**
- * Seit wann ist die Session pausiert (ms seit Epoche)? Der Core kennt die Pause nicht als Zeitraum (kein `paused_at`).
- * Darum merkt sich die Ansicht den Wechsel in `sessionStorage`. War die Session beim Laden schon pausiert und fehlt der
- * Eintrag, gilt `updated_at` (nächste Näherung für den Beginn der Pause). In anderen Zuständen entfällt der Eintrag.
- */
-export function usePausedSince(session: Session | undefined): number | null {
-  const id = session?.id ?? null;
-  const paused = session?.state === 'pausiert';
-  const updatedAtRef = useRef(session?.updated_at ?? null);
-  updatedAtRef.current = session?.updated_at ?? null;
-  // Wurde in dieser Ansicht schon ein anderer Zustand gesehen? Dann ist der Wechsel jetzt, sonst steht nur `updated_at` fest
-  const seenOther = useRef(false);
-  const [since, setSince] = useState<number | null>(null);
-  useEffect(() => {
-    if (id === null) return;
-    if (!paused) {
-      seenOther.current = true;
-      writePaused(id, null);
-      setSince(null);
-      return;
-    }
-    let value = readPaused(id);
-    if (value === null) {
-      const parsed = updatedAtRef.current ? Date.parse(updatedAtRef.current) : NaN;
-      value = seenOther.current || !Number.isFinite(parsed) ? Date.now() : parsed;
-      writePaused(id, value);
-    }
-    setSince(value);
-  }, [id, paused]);
-  return paused ? since : null;
 }

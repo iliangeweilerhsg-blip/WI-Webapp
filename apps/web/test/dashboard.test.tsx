@@ -1213,6 +1213,21 @@ describe('Dashboard: Dauer der Pause (UX-07)', () => {
     expect(await within(b).findByTestId('pause-elapsed')).toHaveTextContent('00:05:00');
   });
 
+  it('Pause vom anderen Gerät, vom Tab erst 20 s später gesehen: die Dauer zählt ab `updated_at`', async () => {
+    bootFakeClock();
+    const b = await screenBar();
+    await within(b).findByText('REC');
+    // Die Pause begann um 08:42:13; der Tab sieht sie erst 20 s später
+    await advance(20_000);
+    act(() =>
+      sync.emit('session.updated', running({ state: 'pausiert', updated_at: '2026-11-04T08:42:13Z' })),
+    );
+    expect(await within(b).findByTestId('pause-elapsed')).toHaveTextContent('00:00:20');
+    expect(window.sessionStorage.getItem(`sg.session.pausedSince.${SESSION_ID}`)).toBe(
+      String(Date.parse('2026-11-04T08:42:13Z')),
+    );
+  });
+
   it('ein gemerkter Beginn aus `sessionStorage` hat Vorrang (Neuladen der Seite)', async () => {
     window.sessionStorage.setItem(`sg.session.pausedSince.${SESSION_ID}`, String(Date.parse(NOW) - 90_000));
     bootFakeClock({ session: running({ state: 'pausiert', updated_at: '2026-11-04T08:37:13Z' }) });

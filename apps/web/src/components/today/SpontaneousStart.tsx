@@ -10,6 +10,7 @@ import type { Module, Session } from '@sg/shared';
 import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import {
   ACTIVE_SESSION_KEY,
+  applyActiveSession,
   createAndStartSession,
   deleteSession,
   findActiveSession,
@@ -67,6 +68,9 @@ function useSpontaneousStart(onSession?: (session: Session) => void) {
       const result = await createAndStartSession(moduleId, id);
       pending.current = null;
       rememberLastModuleId(moduleId);
+      // Auch auf der Modulseite (ohne `onSession`) soll der Tab die neue Session sofort kennen
+      if (result.ended_session) applyActiveSession(client, result.ended_session);
+      applyActiveSession(client, result.session);
       onSession?.(result.session);
       if (result.ended_session) {
         onSession?.(result.ended_session);

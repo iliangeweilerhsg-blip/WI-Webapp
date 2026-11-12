@@ -52,6 +52,12 @@ export interface RecorderDocumentLike extends VisibilityDocumentLike {
   removeEventListener(type: 'visibilitychange', fn: () => void): void;
 }
 
+/** Quelle für `pagehide` (Standard `window`) */
+export interface RecorderPageEventsLike {
+  addEventListener(type: 'pagehide', fn: () => void): void;
+  removeEventListener(type: 'pagehide', fn: () => void): void;
+}
+
 export interface RecorderOptions {
   sessionId: string;
   /** Aktuelle Sitzungszeit in ms (`SessionMs`). Bestimmt `started_ms` jeder Aufnahme. */
@@ -66,6 +72,8 @@ export interface RecorderOptions {
   level?: LevelMeterOptions;
   navigator?: WakeLockNavigatorLike;
   document?: RecorderDocumentLike;
+  /** Standard: `window`. Für `pagehide` (Tests liefern einen Fake). */
+  pageEvents?: RecorderPageEventsLike;
   /** Monotone Uhr in ms (`performance.now`) */
   clock?: () => number;
   /** Wanduhr in Epochen-ms (`Date.now`) */
@@ -134,6 +142,7 @@ export class AudioRecorder {
   private lastWall = 0;
   private lastClock = 0;
   private visibilityHandler: (() => void) | null = null;
+  private pageHideHandler: (() => void) | null = null;
   /** Aufnahmen, die laufen oder gerade abgeschlossen werden: nie als verwaist behandeln */
   private readonly activeIds = new Set<string>();
 
@@ -262,11 +271,31 @@ export class AudioRecorder {
     if (doc) {
       // Ein Tab im Hintergrund kann gedrosselt oder beendet werden: gepufferte Daten jetzt herausgeben
       this.visibilityHandler = () => {
-        if (doc.visibilityState === 'hidden') this.run?.recorder.requestData?.();
+        if (doc.visibilityState === 'hidden') this.flushBuffered();
       };
       doc.addEventListener('visibilitychange', this.visibilityHandler);
     }
+    const page = this.o.pageEvents ?? (typeof window !== 'undefined' ? window : undefined);
+    if (page) {
+      // Tab wird geschlossen oder verlassen: den Rest herausgeben, soweit der Browser es noch zulässt
+      this.pageHideHandler = () => this.flushBuffered();
+      page.addEventListener('pagehide', this.pageHideHandler);
+    }
     this.patch({ state: 'recording' });
+  }
+
+  /**
+   * Gepufferte Daten herausgeben (verborgen, `pagehide`). Nur bei laufendem `MediaRecorder`: Im Zustand `inactive`
+   * (etwa nachdem der Browser ihn beendet hat) wirft `requestData()` einen `InvalidStateError`.
+   */
+  private flushBuffered(): void {
+    const recorder = this.run?.recorder;
+    if (!recorder || recorder.state !== 'recording') return;
+    try {
+      recorder.requestData?.();
+    } catch {
+      // Nur nach Möglichkeit (§11.8)
+    }
   }
 
   private onSessionUpdated(s: Session): void {
@@ -358,6 +387,9 @@ export class AudioRecorder {
     const doc = this.o.document ?? (typeof document !== 'undefined' ? document : undefined);
     if (doc && this.visibilityHandler) doc.removeEventListener('visibilitychange', this.visibilityHandler);
     this.visibilityHandler = null;
+    const page = this.o.pageEvents ?? (typeof window !== 'undefined' ? window : undefined);
+    if (page && this.pageHideHandler) page.removeEventListener('pagehide', this.pageHideHandler);
+    this.pageHideHandler = null;
     this.stopLevel?.();
     this.stopLevel = null;
     void this.wake.release();

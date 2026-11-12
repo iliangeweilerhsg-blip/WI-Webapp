@@ -8,7 +8,7 @@ import type { AutoStopSettings } from './rules.ts';
 
 export interface UseAutoStopOptions extends Pick<
   AutoStopControllerOptions,
-  'events' | 'voice' | 'api' | 'now'
+  'events' | 'voice' | 'api' | 'now' | 'subscribeLevel'
 > {
   /** Die laufende Session (`laeuft`/`pausiert`); `null` oder eine andere Phase: nichts zu tun */
   session: Session | null | undefined;
@@ -40,8 +40,8 @@ export function useAutoStop(options: UseAutoStopOptions): UseAutoStopResult {
   const [controller, setController] = useState<AutoStopController | null>(null);
 
   useEffect(() => {
-    const { events, voice, api, now } = latest.current;
-    const instance = new AutoStopController({ events, voice, api, now });
+    const { events, voice, api, now, subscribeLevel } = latest.current;
+    const instance = new AutoStopController({ events, voice, api, now, subscribeLevel });
     instance.setSettings(latest.current.lecture ?? null);
     instance.setSession(latest.current.session ?? null);
     setController(instance);

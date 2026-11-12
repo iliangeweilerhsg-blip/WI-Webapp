@@ -13,6 +13,7 @@ import {
   startLevelMeter,
   subscribeAudioLevel,
   type MediaRecorderLike,
+  type RecorderOptions,
   type RecorderStore,
   type SessionEventSource,
 } from '../src/lib/recorder/index.ts';
@@ -112,7 +113,11 @@ interface Harness {
 }
 
 function setup(
-  opts: { respond?: (c: Call) => Response | 'throw' | undefined; events?: SessionEventSource } = {},
+  opts: {
+    respond?: (c: Call) => Response | 'throw' | undefined;
+    events?: SessionEventSource;
+    pageEvents?: RecorderOptions['pageEvents'];
+  } = {},
 ): Harness {
   FakeMediaRecorder.instances = [];
   const { calls, fetchFn } = fakeCore(opts.respond);
@@ -128,6 +133,11 @@ function setup(
     sessionId: '01a1a874-0759-7058-a15c-e5d0adae8e74',
     sessionMs: () => 5_000,
     ...(opts.events ? { events: opts.events } : {}),
+    // Ohne eigenen Fake kein echtes window: die Tests sollen nicht an den Eigenschaften von jsdom hängen
+    pageEvents: opts.pageEvents ?? {
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+    },
     store,
     uploader: {
       baseUrl: 'http://core/api/v1',
@@ -694,6 +704,50 @@ describe('AudioRecorder: Mikrofon, Pause, Verlust', () => {
     h.visibility.fire();
     await settle(h);
     expect(h.calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+    await h.recorder.stop();
+  });
+
+  it('pagehide: requestData genau einmal je Ereignis, nach stop() abgemeldet, ohne Aufnahme nichts', async () => {
+    const handlers = new Set<() => void>();
+    const pageEvents = {
+      addEventListener: (_type: 'pagehide', fn: () => void) => void handlers.add(fn),
+      removeEventListener: (_type: 'pagehide', fn: () => void) => void handlers.delete(fn),
+    };
+    const fire = () => [...handlers].forEach((fn) => fn());
+    const h = setup({ pageEvents });
+    expect(handlers.size).toBe(0);
+    fire(); // noch keine Aufnahme
+    await settle(h);
+    expect(h.calls.filter((c) => c.method === 'PUT')).toHaveLength(0);
+    await h.recorder.start();
+    expect(handlers.size).toBe(1);
+    fire();
+    await settle(h);
+    expect(h.calls.filter((c) => c.method === 'PUT')).toHaveLength(1);
+    await h.recorder.stop();
+    expect(handlers.size).toBe(0);
+  });
+
+  it('pagehide und verborgen bei beendetem MediaRecorder: kein requestData, kein Fehler im Hörer', async () => {
+    const handlers = new Set<() => void>();
+    const pageEvents = {
+      addEventListener: (_type: 'pagehide', fn: () => void) => void handlers.add(fn),
+      removeEventListener: (_type: 'pagehide', fn: () => void) => void handlers.delete(fn),
+    };
+    const h = setup({ pageEvents });
+    await h.recorder.start();
+    const mr = FakeMediaRecorder.instances[0]!;
+    // Wie im Browser: requestData() wirft im Zustand `inactive`
+    const requestData = vi.fn(() => {
+      throw new DOMException('inactive', 'InvalidStateError');
+    });
+    mr.requestData = requestData;
+    mr.state = 'inactive';
+    expect(() => [...handlers].forEach((fn) => fn())).not.toThrow();
+    h.visibility.state = 'hidden';
+    expect(() => h.visibility.fire()).not.toThrow();
+    expect(requestData).not.toHaveBeenCalled();
+    mr.state = 'recording';
     await h.recorder.stop();
   });
 

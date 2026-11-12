@@ -1,5 +1,5 @@
 // REST-Funktionen für Sessions (VERTRAEGE §7.2): Stopp und Verlängerung (T1-07), Liste und Zustandswechsel (T1-03).
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import {
   SessionListSchema,
@@ -10,6 +10,7 @@ import {
   type StopReason,
 } from '@sg/shared';
 import { ApiRequestError, apiGet, apiSend } from './api.ts';
+import { useConnectionState } from './recorder/leader-state.ts';
 import { useSyncClient } from './sync/SyncProvider.tsx';
 import { uuidv7 } from './uuid.ts';
 
@@ -155,44 +156,75 @@ export function deleteSession(id: string): Promise<void> {
   return apiSend('DELETE', `/sessions/${encodeURIComponent(id)}`, null);
 }
 
+/** Abstand der Abfrage ohne Live-Verbindung, solange eine Session aktiv ist */
+export const ACTIVE_POLL_MS = 10_000;
+/** … und ohne aktive Session */
+export const ACTIVE_IDLE_POLL_MS = 30_000;
+
 /**
- * Abfrage der aktiven Session für die Modulseite, live gehalten durch `session.updated` (z. B. ein Start vom iPad).
- * Ältere Fassungen (`updated_at`) ändern nichts. Nach einer Unterbrechung der Verbindung wird neu geladen.
+ * Übernimmt eine neue Fassung in den Cache `ACTIVE_SESSION_KEY` (Ereignis `session.updated` oder Antwort einer
+ * Aktion bzw. des Auto-Stopps). Dieselbe Session: Ältere Fassungen (`updated_at`) ändern nichts, eine nicht mehr
+ * aktive oder gelöschte Fassung leert den Cache. Andere Session: Eine aktive Fassung ersetzt die bekannte nur, wenn ihr
+ * `updated_at` nicht älter ist (sonst ist sie veraltet, z. B. eine späte Antwort für A, nachdem B gestartet wurde).
+ * Ist der Cache noch nicht geladen, liefert der Abruf den Stand.
+ */
+export function applyActiveSession(client: QueryClient, incoming: Session): void {
+  client.setQueryData<Session | null>(ACTIVE_SESSION_KEY, (old) => {
+    if (old === undefined) return old;
+    const active = isActive(incoming) && incoming.deleted_at === null;
+    if (old && old.id === incoming.id) {
+      const next = newerSession(old, incoming);
+      if (next !== incoming) return old;
+      return active ? incoming : null;
+    }
+    if (!active) return old;
+    if (old && time(incoming.updated_at) < time(old.updated_at)) return old;
+    return incoming;
+  });
+}
+
+/**
+ * Abfrage der aktiven Session, live gehalten durch `session.updated` (z. B. ein Start vom iPad). Nach einer
+ * Unterbrechung der Verbindung oder einem Wechsel des Leaders wird neu geladen. Nachgefragt wird nur ohne
+ * Live-Verbindung (Folge-Tab, `backoff`, `failed`): alle 10 s mit aktiver Session, sonst alle 30 s (§11.8). Das gilt
+ * auch im Hintergrund und ohne Netz (der Core ist lokal). Das Intervall hängt an `online`, nicht an `live`: `live`
+ * springt bei blockiertem WebSocket zwischen `connecting` und `backoff` und startete den Timer immer wieder neu.
  */
 export function useActiveSession() {
   const client = useQueryClient();
   const sync = useSyncClient();
+  const online = useConnectionState(sync) === 'online';
   useEffect(() => {
     if (!sync) return;
+    const refetch = () => void client.invalidateQueries({ queryKey: ACTIVE_SESSION_KEY });
     const offUpdated = sync.onEvent('session.updated', (incoming) => {
-      client.setQueryData<Session | null>(ACTIVE_SESSION_KEY, (old) => {
-        if (old === undefined) return old; // noch nicht geladen: der Abruf liefert den Stand
-        if (old && old.id === incoming.id) {
-          const next = newerSession(old, incoming);
-          if (next !== incoming) return old;
-          return isActive(incoming) && incoming.deleted_at === null ? incoming : null;
-        }
-        return isActive(incoming) && incoming.deleted_at === null ? incoming : old;
-      });
+      applyActiveSession(client, incoming);
+      // Kam das Ereignis während eines Abrufs, kann dessen Antwort älter sein und das Ereignis überschreiben. Online
+      // fragt niemand nach, der falsche Stand bliebe stehen: darum neu abrufen (bricht den laufenden Abruf ab).
+      if (client.isFetching({ queryKey: ACTIVE_SESSION_KEY, exact: true }) > 0) refetch();
     });
     let wasDown = sync.connectionState !== 'online';
     const offConnection = sync.onEvent('connection', (c) => {
       if (c.state === 'online') {
-        if (wasDown) void client.invalidateQueries({ queryKey: ACTIVE_SESSION_KEY });
+        if (wasDown) refetch();
         wasDown = false;
       } else if (c.state !== 'syncing') {
         wasDown = true;
       }
     });
+    const offLeader = sync.onEvent('leader.changed', refetch);
     return () => {
       offUpdated();
       offConnection();
+      offLeader();
     };
   }, [sync, client]);
   return useQuery({
     queryKey: ACTIVE_SESSION_KEY,
     queryFn: ({ signal }) => findActiveSession(signal),
-    refetchInterval: 30_000,
+    refetchInterval: (query) => (online ? false : query.state.data ? ACTIVE_POLL_MS : ACTIVE_IDLE_POLL_MS),
+    refetchIntervalInBackground: true,
+    networkMode: 'always',
   });
 }
 
