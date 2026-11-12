@@ -21,6 +21,11 @@ class NonRetryableError(Exception):
     """
 
 
+class RetryableError(Exception):
+    """Vorübergehender Fehler (Netz, Rate-Limit): Retry nach §3. Die Meldung steht **unverändert**
+    in `job.error` (ohne Klassennamen-Präfix), wie der Vertrag sie vorgibt (§20.5)."""
+
+
 class PayloadError(NonRetryableError):
     """Das Payload passt nicht zum Schema des Job-Typs. Retry wäre sinnlos."""
 

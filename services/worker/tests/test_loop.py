@@ -71,6 +71,34 @@ def test_handler_exception_retries_then_fails(
     assert row["attempts"] == 2
 
 
+def test_retryable_error_has_no_class_prefix(
+    database_url: str,
+    connect_kwargs: dict[str, Any],
+    tmp_path: Path,
+    conn: psycopg.Connection[Any],
+    make_job: MakeJob,
+) -> None:
+    from sg_worker.registry import RetryableError
+
+    reg = Registry()
+
+    def flaky(payload: dict[str, Any], ctx: JobContext) -> dict[str, Any]:
+        raise RetryableError("KI nicht erreichbar (429)")
+
+    reg.register("internal.echo", flaky)
+    w = Worker(
+        database_url,
+        tmp_path,
+        registry=reg,
+        channel=f"sg_jobs_{uuid.uuid4().hex[:8]}",
+        connect_kwargs=connect_kwargs,
+    )
+    job_id = make_job(max_attempts=2)
+    w.drain(conn)
+    row = get_job(conn, job_id)
+    assert (row["state"], row["error"]) == ("wartet", "KI nicht erreichbar (429)")
+
+
 def test_unknown_type_is_fehler_and_loop_continues(
     worker: Worker, conn: psycopg.Connection[Any], make_job: MakeJob
 ) -> None:

@@ -452,6 +452,59 @@ def test_env_file_644_is_not_used(tmp_path: Path) -> None:
     assert settings.configured
 
 
+def test_env_symlink_is_not_read(tmp_path: Path) -> None:
+    from sg_worker.config import load_env_file
+
+    real = env_file(tmp_path, 0o600)
+    link = tmp_path / "link.env"
+    link.symlink_to(real)
+    environ: dict[str, str] = {}
+    assert load_env_file(link, environ) == "symlink"
+    assert environ == {}  # nichts gelesen
+    settings = take_llm_settings(
+        link, key_from_environment=False, environ={"ANTHROPIC_API_KEY": KEY}
+    )
+    assert (settings.configured, settings.issue) == (False, "env_offen")
+
+
+def test_env_foreign_owner_is_not_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    from sg_worker.config import load_env_file
+
+    path = env_file(tmp_path, 0o600, "ANDERE=1\n")
+    monkeypatch.setattr(os, "geteuid", lambda: os.stat(path).st_uid + 1)
+    environ: dict[str, str] = {}
+    assert load_env_file(path, environ) == "fremder_besitzer"
+    assert environ == {}
+    settings = take_llm_settings(
+        path, key_from_environment=False, environ={"ANTHROPIC_API_KEY": KEY}
+    )
+    assert (settings.configured, settings.issue) == (False, "env_offen")
+
+
+def test_env_not_regular_file_is_not_read(tmp_path: Path) -> None:
+    import os
+
+    from sg_worker.config import load_env_file
+
+    fifo = tmp_path / "fifo.env"
+    os.mkfifo(fifo)
+    assert load_env_file(fifo, {}) == "keine_datei"  # blockiert nicht
+    assert load_env_file(tmp_path, {}) == "keine_datei"  # Ordner
+
+
+def test_env_mode_is_checked_on_open_descriptor(tmp_path: Path) -> None:
+    from sg_worker.config import read_env_file
+
+    assert read_env_file(tmp_path / "fehlt")[1] == "fehlt"
+    text, problem = read_env_file(env_file(tmp_path, 0o600))
+    assert problem is None and text is not None and KEY in text
+    (tmp_path / "o").mkdir()
+    text, problem = read_env_file(env_file(tmp_path / "o", 0o604))
+    assert problem == "offen" and text is not None  # gelesen, Schlüssel aber nicht genutzt
+
+
 def test_load_env_then_take(tmp_path: Path) -> None:
     from sg_worker.config import load_env_file
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 from collections.abc import Mapping, MutableMapping
@@ -14,18 +15,70 @@ DEFAULT_WORKER_NICE = 10
 #: `SG_EMBED_PAUSE_MS`: Pause zwischen zwei Stapeln von `search.index` (0 = aus, höchstens 5000)
 DEFAULT_EMBED_PAUSE_MS = 75
 MAX_EMBED_PAUSE_MS = 5000
+#: Eine `.env` ist klein; eine größere Datei wird nicht gelesen
+MAX_ENV_BYTES = 1_000_000
 
 
-def load_env_file(path: Path, environ: MutableMapping[str, str] | None = None) -> None:
+#: Befunde von `inspect_env_file`, bei denen die Datei gar nicht gelesen wird (fail-closed)
+ENV_UNSAFE = ("symlink", "keine_datei", "fremder_besitzer", "unlesbar")
+
+
+def read_env_file(path: Path) -> tuple[str | None, str | None]:
+    """Öffnet `path` ohne einem Symlink zu folgen (`O_NOFOLLOW`, `O_NONBLOCK`: eine FIFO hält den
+    Worker nicht an) und prüft Art, Besitzer und Rechte per `fstat` auf dem **offenen**
+    Deskriptor (kein TOCTOU zwischen Prüfung und Lesen). Gleiche Regeln wie der Core bei seinen
+    Schlüsseldateien (`worker-client.ts`, `tunnel.ts`).
+
+    Rückgabe `(text, befund)`. Befund: `None` (in Ordnung), `fehlt`, `offen` (für Gruppe oder
+    andere lesbar: der Text wird gelesen, ein Schlüssel daraus aber nicht genutzt) oder einer aus
+    `ENV_UNSAFE` (`symlink`, `keine_datei`, `fremder_besitzer`, `unlesbar`): dann ist `text` None.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return None, "fehlt"
+    except OSError as exc:
+        # ELOOP: der letzte Teil des Pfads ist ein Symlink (O_NOFOLLOW)
+        return None, "symlink" if exc.errno == errno.ELOOP else "unlesbar"
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return None, "keine_datei"
+        geteuid = getattr(os, "geteuid", None)
+        if geteuid is not None and info.st_uid != geteuid():
+            return None, "fremder_besitzer"
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            raw = handle.read(MAX_ENV_BYTES + 1)
+    except OSError:
+        return None, "unlesbar"
+    finally:
+        os.close(fd)
+    if len(raw) > MAX_ENV_BYTES:
+        return None, "unlesbar"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None, "unlesbar"
+    return text, "offen" if info.st_mode & (stat.S_IRWXG | stat.S_IRWXO) else None
+
+
+def inspect_env_file(path: Path) -> str | None:
+    """Befund zu `path` wie bei `read_env_file`, ohne den Inhalt zu behalten."""
+    return read_env_file(path)[1]
+
+
+def load_env_file(path: Path, environ: MutableMapping[str, str] | None = None) -> str | None:
     """Liest `KEY=VALUE`-Zeilen aus `path` in `environ` (Standard: os.environ).
 
-    Bereits gesetzte Variablen gewinnen. Fehlt die Datei, passiert nichts.
+    Bereits gesetzte Variablen gewinnen. Fehlt die Datei, passiert nichts. Ist sie ein Symlink,
+    keine reguläre Datei oder gehört sie einem anderen Benutzer, wird sie **nicht** gelesen.
+    Rückgabe: der Befund von `read_env_file` (None = in Ordnung).
     """
     target = os.environ if environ is None else environ
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        return
+    text, problem = read_env_file(path)
+    if text is None:
+        return problem
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -36,6 +89,7 @@ def load_env_file(path: Path, environ: MutableMapping[str, str] | None = None) -
         if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
             value = value[1:-1]
         target.setdefault(key, value)
+    return problem
 
 
 def default_embed_threads(cpu_count: int | None = None) -> int:
@@ -106,12 +160,11 @@ class LlmSettings:
 
 
 def env_file_open(path: Path) -> bool:
-    """True, wenn die Datei für Gruppe oder andere lesbar ist (nicht `chmod 600`)."""
-    try:
-        mode = path.stat().st_mode
-    except OSError:
-        return False
-    return bool(mode & (stat.S_IRWXG | stat.S_IRWXO))
+    """True, wenn der Schlüssel aus `path` nicht genutzt werden darf: für Gruppe oder andere
+    lesbar (nicht `chmod 600`), Symlink, keine reguläre Datei oder fremder Besitzer. Eine fehlende
+    Datei gilt nicht als offen."""
+    problem = inspect_env_file(path)
+    return problem is not None and problem != "fehlt"
 
 
 def take_llm_settings(
