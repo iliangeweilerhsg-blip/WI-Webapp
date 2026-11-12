@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { DashboardLayout, InkMode, ToolbarSide } from '@sg/shared';
+import { MicTest } from './MicTest.tsx';
 import { AreaForm, NumberField, SelectField, useAreaForm } from './form.tsx';
 
 const LAYOUTS: readonly { value: DashboardLayout; label: string }[] = [
@@ -77,6 +78,7 @@ export function LectureSettingsForm() {
             options={micOptions}
             onChange={(x) => form.set('microphone_id', x === DEFAULT_MIC ? null : x)}
           />
+          <MicTest microphoneId={savedMic} />
           <div className="sm:col-span-2">
             <h3 className="text-sm font-semibold">Automatisch beenden</h3>
             <p className="mt-1 text-xs text-text-muted">

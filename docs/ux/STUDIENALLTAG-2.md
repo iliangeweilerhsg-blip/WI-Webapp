@@ -173,14 +173,14 @@ Die IDs verweisen auf Abschnitt 3 (alt) und Abschnitt 4 (neu).
 |---|---|---|
 | UX-01 | erledigt | Der Recorder hängt an der App-Shell (`RecordingProvider`) und läuft über jede Navigation weiter. Unten steht die Aufnahme-Leiste, „Heute“ zeigt „Läuft · Aufnahme“ (#210, Teile 1 bis 3, Plan `docs/plaene/210-AUFNAHME-APPSHELL.md`). |
 | UX-02 | erledigt | `beforeunload` in `use-recording.ts` (#212). |
-| UX-03 | teilweise | Start gilt als Mikrofon-Wunsch, Hauptknopf „Aufnahme starten“ (#212). „Mikrofon testen“ in `LectureSettings.tsx` fehlt. |
+| UX-03 | erledigt | Start gilt als Mikrofon-Wunsch, Hauptknopf „Aufnahme starten“ (#212). „Mikrofon testen“ mit Pegelanzeige in `LectureSettings.tsx` (`MicTest.tsx`), gesperrt während einer Session im Tab. |
 | UX-04 | erledigt | `caffeinate` über `keep-awake.ts` (#213). Der Hinweis „Tab verdeckt“ wurde bewusst wieder entfernt (#222). |
 | UX-05 | erledigt | Schwere Jobs und Backup warten (#213, #221), Hinweis im Rückblick (#222). |
 | UX-06 | erledigt | Rückfrage beim Klick im Dashboard (#212) und auf „Heute“ (#220). |
 | UX-07 | erledigt | Pausendauer und „Noch Pause?“ (#212). |
 | UX-08 | erledigt | „Teile warten“, „Aufnahme neu begonnen“, „Wird gesichert …“ (#212, #220). |
 | UX-09 | erledigt | Knopf „Rückblick“ nach dem Ende (#212). |
-| UX-10 | offen | Kein Backup-Hinweis unter `components/today/`. |
+| UX-10 | erledigt | Ruhiger Backup-Hinweis auf „Heute“ (`today/BackupHint.tsx`), nie während einer Session. |
 | UX-11 | teilweise | `sg doctor` prüft den Speicher (#216). Core und Web-App zeigen ihn nicht. |
 | UX-12 | offen | `PairedMacStore.swift` speichert weiter Host und Port fest. |
 | UX-13 | erledigt | `ProfileExpiry.swift`, Hinweis auf dem Startbildschirm (#214). Lesen des Profils am Gerät nicht geprüft. Nachbesserung: UX-50. |

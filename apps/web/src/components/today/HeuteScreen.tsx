@@ -6,6 +6,7 @@ import { CoreHint } from '../CoreHint.tsx';
 import { MoodleAccessHint } from '../MoodleAccessHint.tsx';
 import { MoodleDeadlines } from '../MoodleDeadlines.tsx';
 import { EmptyState } from '../Placeholder.tsx';
+import { BackupHint } from './BackupHint.tsx';
 import { SpontaneousStartCard } from './SpontaneousStart.tsx';
 import { StartCard } from './StartCard.tsx';
 import { TodayList } from './TodayList.tsx';
@@ -94,6 +95,9 @@ export function HeuteScreen() {
 
         {/* Dezenter Hinweis zum Moodle-Zugang ab 7 Tagen vor Ablauf (F-MDL-01). Sonst nichts */}
         {now !== null ? <MoodleAccessHint withLink /> : null}
+
+        {/* Ruhiger Hinweis auf ein veraltetes Backup (UX-10), nie während einer Session */}
+        {now !== null ? <BackupHint sessions={sessions} /> : null}
       </div>
     </section>
   );
