@@ -95,7 +95,7 @@ Auf dem Startbildschirm steht je Modul eine Karte mit den Notizbüchern des Modu
 - **Titel der Schreibfläche:** „Modul · Notizbuch“. So siehst du immer, wohin geschrieben wird.
 - **Update von einer älteren Version:** Deine bisherigen Seiten und noch nicht gesendete Striche bleiben erhalten. Die App übernimmt sie beim ersten Start in die neue Liste.
 
-Umbenennen und Löschen von Notizbüchern geht am Mac.
+Umbenennen und Löschen kommt noch. Bis dahin vertippte Notizbücher einfach liegen lassen.
 
 ## Seiten und Vorlagen
 
@@ -103,7 +103,7 @@ Ein Notizbuch hat viele Seiten. Eine Seite ist sichtbar.
 
 - **Blättern:** Oben steht „‹ Seite 3 / 12 ›“. Tippe auf die Pfeile oder wische mit einem Finger nach links oder rechts. Das Wischen geht nur, solange du nicht hineingezoomt hast. Stört es dich beim Zoomen oder Scrollen, nimm die Pfeile.
 - **Neue Seite:** Auf der letzten Seite legt der Pfeil „›“ (oder der Wisch) eine neue Seite an. Das geht nur, wenn die aktuelle Seite mindestens einen Strich hat. Die neue Seite übernimmt die Vorlage der aktuellen. Über **Seiten ▤** und **+** wählst du die Vorlage selbst.
-- **Seitenleiste:** **Seiten ▤** öffnet ein Panel mit Vorschaubildern. Tippe ein Bild an, um zur Seite zu springen. Halte ein Bild gedrückt und ziehe es an eine andere Stelle, um die Seite zu verschieben. Gedrückt halten öffnet außerdem das Menü mit **Vorlage** und **Löschen**. Das Panel schließt du mit dem **✕**. Der Stift schreibt auch bei offenem Panel weiter. Steht unten „N weitere Seiten liegen nur am Mac“, hat der Mac Seiten, die dieses iPad nicht hat.
+- **Seitenleiste:** **Seiten ▤** öffnet ein Panel mit Vorschaubildern. Tippe ein Bild an, um zur Seite zu springen. Halte ein Bild gedrückt und ziehe es an eine andere Stelle, um die Seite zu verschieben. Gedrückt halten öffnet außerdem das Menü mit **Vorlage** und **Löschen**. Das Panel schließt du mit dem **✕**. Der Stift schreibt auch bei offenem Panel weiter. Steht unten „N weitere Seiten liegen nur am Mac“, hat der Mac Seiten, die dieses iPad nicht hat. Mehr dazu im Abschnitt „Seiten, die nur am Mac liegen“.
 - **Vorlage:** Im Menü **⋯** oben (oder in der Seitenleiste) wählst du Blanko, Liniert, Kariert oder Punktraster. Kariert und Punktraster haben ein 5-mm-Raster.
 - **Löschen ohne Rückfrage:** **⋯ → Seite löschen** (oder in der Seitenleiste). Die Seite verschwindet sofort. Unten erscheint 5 Sekunden lang **Seite gelöscht · Rückgängig**. Tippst du darauf, ist die Seite wieder da. Sonst landet sie im Papierkorb am Mac. Verlässt du die Schreibfläche, gilt die Frist als abgelaufen. Auf dem iPad bleiben Zeichnung und Vorschaubild noch erhalten.
 - **Alles geht offline.** Anlegen, Umsortieren, Vorlage und Löschen werden gemerkt und beim nächsten Verbinden zum Mac geschickt. Haben beide Seiten dieselbe Seite verändert, gewinnt je Feld die Änderung, die zuletzt gemacht wurde und noch nicht beim Mac war: Hast du nur die Vorlage geändert und der Mac nur die Reihenfolge, bleibt beides.
@@ -118,6 +118,18 @@ Oben in der Seitenzeile steht ein Umschalter. Ein Tipp wechselt zwischen **Freie
 - **Nur mit laufender Vorlesung:** „Auf Folie“ geht nur, wenn am Mac eine Vorlesung dieses Moduls mit Foliensatz läuft. Sonst ist der Umschalter ausgegraut, und es steht „Folien brauchen eine laufende Vorlesung mit Foliensatz“. Zurück zur freien Seite geht immer.
 - **Folien auf dem iPad:** Das iPad lädt nur den Foliensatz der laufenden Vorlesung, und nur vom gekoppelten Mac. Die Datei wird vor der Anzeige geprüft (Größe, Prüfsumme) und liegt dann im App-Speicher, nicht im Backup. Insgesamt höchstens 1 GB, der älteste Satz geht zuerst. Schon geladene Folien erscheinen auch ohne Verbindung unter deinen Notizen. Fehlt eine Folie, steht „Folie wird geladen …“ oder „Folie nicht auf dem iPad“. Schreiben geht trotzdem.
 - **Vorab laden und Folien ohne Verbindung wählen** folgt später (T1-15).
+
+## Seiten, die nur am Mac liegen
+
+Das iPad zeigt nur Seiten, die es selbst angelegt hat. Seiten, die nur der Mac kennt, bleiben unsichtbar. Stattdessen steht in der Seitenleiste „N weitere Seiten liegen nur am Mac.“ Das passiert zum Beispiel nach einem neuen oder zweiten iPad oder nachdem du die App gelöscht hast. Am Mac sind diese Seiten außerhalb einer laufenden Vorlesung auch nicht zu sehen.
+
+**Lösche die App nicht und schreibe nicht auf einem anderen iPad weiter.** Sonst sind die alten Seiten nur noch am Mac zu sehen und nicht mehr auf dem iPad.
+
+## Fehlerablage
+
+Auf dem Startbildschirm steht im Abschnitt „Sync“ die Zeile „Wartend: N“ (Änderungen, die noch zum Mac müssen) und „Fehlerablage: N“. Steht dort eine Zahl über 0, konnte der Mac N Änderungen nicht annehmen. Die Zeichnungen sind nicht automatisch weg, sie liegen in einer Datei auf dem iPad. Die betroffene Seite oder das Notizbuch kann aus der Liste verschwinden. Ein Zurückspielen gibt es noch nicht.
+
+Mit **Fehlerablage teilen** schickst du die Datei über das Teilen-Menü zum Mac, damit sie nicht verloren geht. Tritt das öfter auf, melde es.
 
 ## Die App läuft nur 7 Tage
 
