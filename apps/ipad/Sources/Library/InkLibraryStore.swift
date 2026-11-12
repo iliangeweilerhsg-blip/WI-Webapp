@@ -13,6 +13,8 @@ protocol InkLibraryStore: AnyObject {
     var refreshedAt: Date? { get }
     /// Die alte lokale Testseite wurde geprüft (und bei Strichen übernommen), siehe `InkLibraryService.adoptLegacyTestPage`
     var legacyTestPageHandled: Bool { get }
+    /// IDs der begonnenen Übernahme der alten Testseite (L7 aus #286), `nil` = noch nicht begonnen
+    var legacyAdoption: LegacyAdoptionMarker? { get }
 
     /// Ohne `hidden`, nach `createdAtMS`, dann `id`
     func notebooks(inModule moduleID: String) -> [LibraryNotebook]
@@ -41,9 +43,14 @@ protocol InkLibraryStore: AnyObject {
     func removeNotebook(_ id: String)
     /// `page.create` wurde endgültig abgelehnt
     func removePage(_ id: String)
+    /// Der Core kennt das Modul nicht mehr (`module_not_found`, L8 aus #286): Alle seine Notizbücher ausblenden und
+    /// als „Modul gelöscht“ markieren, ihre Seiten zum Abgleich vormerken. Nichts wird gelöscht.
+    func markModuleGone(moduleID: String)
 
     func setDBEpoch(_ epoch: String)
     func markLegacyTestPageHandled()
+    /// Hält die IDs der Übernahme fest, bevor etwas angelegt wird. Eine vorhandene Markierung bleibt.
+    func beginLegacyAdoption(_ marker: LegacyAdoptionMarker)
     /// Neue `db_epoch`: Jede Seite muss abgeglichen werden, und kein Notizbuch gilt mehr als dem Core bekannt
     func markAllNeedReconcile()
     func clearNeedsReconcile(pageID: String)
@@ -105,6 +112,7 @@ final class FileInkLibraryStore: InkLibraryStore {
     var lastNotebookID: String? { file.lastNotebookID }
     var dbEpoch: String? { file.dbEpoch }
     var legacyTestPageHandled: Bool { file.legacyTestPageHandled ?? false }
+    var legacyAdoption: LegacyAdoptionMarker? { file.legacyAdoption }
 
     var refreshedAt: Date? {
         file.refreshedAtMS.map { Date(timeIntervalSince1970: Double($0) / 1000) }
@@ -161,7 +169,7 @@ final class FileInkLibraryStore: InkLibraryStore {
         }
         // Ein Modul, das am Core fehlt, bleibt nur stehen, solange es ein Notizbuch gibt, das der Core noch nicht kennt
         for local in file.modules where !seen.contains(local.id) {
-            if file.notebooks.contains(where: { $0.moduleID == local.id && !$0.knownOnServer }) {
+            if file.notebooks.contains(where: { $0.moduleID == local.id && !$0.knownOnServer && !$0.isModuleGone }) {
                 merged.append(local)
             }
         }
@@ -170,6 +178,20 @@ final class FileInkLibraryStore: InkLibraryStore {
         for index in file.notebooks.indices
         where file.notebooks[index].knownOnServer && !seen.contains(file.notebooks[index].moduleID) {
             file.notebooks[index].hidden = true
+        }
+        // Das Modul ist wieder da (am Mac wiederhergestellt): freie Notizbücher werden wieder sichtbar und beim Öffnen
+        // neu angelegt, ihre Seiten gleichen dann ab. Die vom Mac angelegten holt `mergeNotebooks`.
+        for index in file.notebooks.indices
+        where file.notebooks[index].isModuleGone && seen.contains(file.notebooks[index].moduleID) {
+            file.notebooks[index].moduleGone = nil
+            guard file.notebooks[index].kind == .frei else { continue }
+            file.notebooks[index].hidden = false
+            file.notebooks[index].knownOnServer = false
+            let notebookID = file.notebooks[index].id
+            for pageIndex in file.pages.indices where file.pages[pageIndex].notebookID == notebookID {
+                file.pages[pageIndex].createQueued = false
+                file.pages[pageIndex].needsReconcile = true
+            }
         }
         file.modules = merged
         file.refreshedAtMS = InkStrokeCodec.milliseconds(date)
@@ -188,6 +210,7 @@ final class FileInkLibraryStore: InkLibraryStore {
                 file.notebooks[index].createdAtMS = created
                 file.notebooks[index].knownOnServer = true
                 file.notebooks[index].hidden = false
+                file.notebooks[index].moduleGone = nil
             } else {
                 file.notebooks.append(
                     LibraryNotebook(
@@ -300,6 +323,26 @@ final class FileInkLibraryStore: InkLibraryStore {
         persist()
     }
 
+    func markModuleGone(moduleID: String) {
+        var changed = false
+        for index in file.notebooks.indices where file.notebooks[index].moduleID == moduleID {
+            if !file.notebooks[index].isModuleGone || !file.notebooks[index].hidden {
+                file.notebooks[index].moduleGone = true
+                file.notebooks[index].hidden = true
+                changed = true
+            }
+            let notebookID = file.notebooks[index].id
+            for pageIndex in file.pages.indices where file.pages[pageIndex].notebookID == notebookID {
+                // Kommt das Modul zurück (oder gleicht ein Abgleich später ab), muss alles neu verglichen werden
+                if !file.pages[pageIndex].needsReconcile {
+                    file.pages[pageIndex].needsReconcile = true
+                    changed = true
+                }
+            }
+        }
+        if changed { persist() }
+    }
+
     func setDBEpoch(_ epoch: String) {
         guard file.dbEpoch != epoch else { return }
         file.dbEpoch = epoch
@@ -309,6 +352,12 @@ final class FileInkLibraryStore: InkLibraryStore {
     func markLegacyTestPageHandled() {
         guard file.legacyTestPageHandled != true else { return }
         file.legacyTestPageHandled = true
+        persist()
+    }
+
+    func beginLegacyAdoption(_ marker: LegacyAdoptionMarker) {
+        guard file.legacyAdoption == nil else { return }
+        file.legacyAdoption = marker
         persist()
     }
 

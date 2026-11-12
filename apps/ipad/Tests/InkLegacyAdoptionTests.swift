@@ -56,9 +56,11 @@ final class InkLegacyAdoptionTests: XCTestCase {
         let notebook = try XCTUnwrap(notebooks.first)
         XCTAssertEqual(notebook.kind, .frei)
         XCTAssertFalse(notebook.knownOnServer)
-        XCTAssertEqual(notebook.lastPageID, InkPageModel.testPageID)
-
-        let page = try XCTUnwrap(service.page(InkPageModel.testPageID))
+        // L7: eigene ID statt der festen der Testseite
+        let page = try XCTUnwrap(service.pages(inNotebook: notebook.id).first)
+        XCTAssertNotEqual(page.id, InkPageModel.testPageID)
+        XCTAssertNil(service.page(InkPageModel.testPageID))
+        XCTAssertEqual(notebook.lastPageID, page.id)
         XCTAssertEqual(page.notebookID, notebook.id)
         XCTAssertEqual(page.index, 1)
         XCTAssertTrue(page.createQueued)
@@ -66,8 +68,10 @@ final class InkLegacyAdoptionTests: XCTestCase {
 
         // `notebook.create` zuerst, dann `page.create`, dann je Strich ein `stroke.add`
         XCTAssertEqual(pendingKinds(h), ["notebook.create", "page.create", "stroke.add", "stroke.add"])
-        // Die Datei bleibt, die Zuordnung der Striche ist gespeichert
-        XCTAssertEqual(pages.load(pageID: InkPageModel.testPageID).trackers.ink.entries.count, 2)
+        // Die alte Datei bleibt, die Kopie unter der neuen ID trägt die Zuordnung der Striche
+        XCTAssertNotNil(pages.load(pageID: InkPageModel.testPageID).ink)
+        XCTAssertEqual(pages.load(pageID: page.id).trackers.ink.entries.count, 2)
+        XCTAssertEqual(h.library.legacyAdoption, LegacyAdoptionMarker(notebookID: notebook.id, pageID: page.id))
     }
 
     func testPageWithoutStrokesIsNotAdopted() throws {
@@ -106,11 +110,42 @@ final class InkLegacyAdoptionTests: XCTestCase {
         XCTAssertEqual(pendingKinds(h).count, 3)
     }
 
-    /// Absturz zwischen dem Speichern von Notizbuch und Seite: Der nächste Versuch nimmt dasselbe Notizbuch
-    func testInterruptedAdoptionReusesItsNotebook() throws {
+    /// Absturz zwischen dem Speichern von Notizbuch und Seite: Der nächste Versuch nimmt dieselben IDs (L7 aus #286)
+    func testInterruptedAdoptionReusesItsMarkedIDs() throws {
+        let h = SyncHarness()
+        let marker = LegacyAdoptionMarker(
+            notebookID: "019a4e14-0000-7000-8000-0000000000e1", pageID: "019a4e14-0000-7000-8000-0000000000e2")
+        h.library.beginLegacyAdoption(marker)
+        let orphan = LibraryNotebook(
+            id: marker.notebookID,
+            moduleID: h.binding.moduleID,
+            title: InkLibraryService.legacyNotebookTitle,
+            kind: .frei,
+            createdAtMS: 1,
+            knownOnServer: false,
+            hidden: false,
+            lastPageID: marker.pageID,
+            remoteMaxIndex: 0,
+            remoteOnlyPageCount: 0
+        )
+        h.library.upsert(orphan)
+        let pages = pageStore(h)
+        try writeLegacyPage(pages, strokes: 1)
+
+        let service = makeService(h, pageStore: pages)
+        let adopted = service.notebooks(inModule: h.binding.moduleID).filter { $0.title == "Alte Schreibfläche" }
+        XCTAssertEqual(adopted.map(\.id), [orphan.id])
+        XCTAssertEqual(service.page(marker.pageID)?.notebookID, orphan.id)
+        XCTAssertNil(service.page(InkPageModel.testPageID))
+        XCTAssertEqual(pendingKinds(h), ["notebook.create", "page.create", "stroke.add"])
+    }
+
+    /// Ein Notizbuch aus der Zeit vor der Markierung (verwaist, `lastPageID` = feste ID) wird weiterverwendet,
+    /// die Seite bekommt trotzdem eine neue ID
+    func testOrphanFromBeforeTheMarkerIsReused() throws {
         let h = SyncHarness()
         let orphan = LibraryNotebook(
-            id: "019a4e14-0000-7000-8000-0000000000e1",
+            id: "019a4e14-0000-7000-8000-0000000000e3",
             moduleID: h.binding.moduleID,
             title: InkLibraryService.legacyNotebookTitle,
             kind: .frei,
@@ -128,8 +163,25 @@ final class InkLegacyAdoptionTests: XCTestCase {
         let service = makeService(h, pageStore: pages)
         let adopted = service.notebooks(inModule: h.binding.moduleID).filter { $0.title == "Alte Schreibfläche" }
         XCTAssertEqual(adopted.map(\.id), [orphan.id])
-        XCTAssertEqual(service.page(InkPageModel.testPageID)?.notebookID, orphan.id)
-        XCTAssertEqual(pendingKinds(h), ["notebook.create", "page.create", "stroke.add"])
+        let page = try XCTUnwrap(service.pages(inNotebook: orphan.id).first)
+        XCTAssertNotEqual(page.id, InkPageModel.testPageID)
+        XCTAssertEqual(service.notebook(orphan.id)?.lastPageID, page.id)
+    }
+
+    /// Zwei iPads mit derselben Testseite bekommen verschiedene Seiten-IDs
+    func testTwoDevicesGetDifferentPageIDs() throws {
+        let first = SyncHarness()
+        let second = SyncHarness()
+        let firstPages = pageStore(first)
+        let secondPages = pageStore(second)
+        try writeLegacyPage(firstPages, strokes: 1)
+        try writeLegacyPage(secondPages, strokes: 1)
+        let a = makeService(first, pageStore: firstPages)
+        let b = makeService(second, pageStore: secondPages)
+        let pageA = try XCTUnwrap(a.notebooks(inModule: first.binding.moduleID).first { $0.title == "Alte Schreibfläche" })
+        let pageB = try XCTUnwrap(b.notebooks(inModule: second.binding.moduleID).first { $0.title == "Alte Schreibfläche" })
+        XCTAssertNotEqual(pageA.lastPageID, pageB.lastPageID)
+        XCTAssertNotEqual(pageA.id, pageB.id)
     }
 
     func testAdoptionWaitsUntilAModuleIsKnown() throws {
@@ -147,8 +199,8 @@ final class InkLegacyAdoptionTests: XCTestCase {
         empty.mergeModules(
             [ModuleBrief(id: "m1", name: "Analysis I", shortName: nil, inkMode: nil)], at: h.clock.date)
         service.adoptLegacyTestPage()
-        let notebookID = try XCTUnwrap(empty.page(InkPageModel.testPageID)?.notebookID)
-        XCTAssertEqual(empty.notebook(notebookID)?.moduleID, "m1")
+        let adoptedPage = try XCTUnwrap(empty.legacyAdoption.flatMap { empty.page($0.pageID) })
+        XCTAssertEqual(empty.notebook(adoptedPage.notebookID)?.moduleID, "m1")
         XCTAssertTrue(empty.legacyTestPageHandled)
         XCTAssertEqual(pendingKinds(h), ["notebook.create", "page.create", "stroke.add"])
     }
@@ -163,7 +215,7 @@ final class InkLegacyAdoptionTests: XCTestCase {
         let pages = pageStore(h)
         try writeLegacyPage(pages, strokes: 1)
         let service = makeService(h, pageStore: pages)
-        let notebookID = try XCTUnwrap(service.page(InkPageModel.testPageID)?.notebookID)
+        let notebookID = try XCTUnwrap(h.library.legacyAdoption.flatMap { service.page($0.pageID) }?.notebookID)
         // Zuletzt benutzt ist die Vorlesung des Harness, nicht das alphabetisch erste Modul
         XCTAssertEqual(service.notebook(notebookID)?.moduleID, h.binding.moduleID)
     }

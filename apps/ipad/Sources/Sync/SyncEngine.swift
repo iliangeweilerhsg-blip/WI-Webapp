@@ -51,6 +51,11 @@ private final class SyncLink {
     var probing = false
     var probeT0: Int?
     var ticker: _Concurrency.Task<Void, Never>?
+    /// Module, deren Fehlen (`module_not_found`) sich per REST nicht bestätigen ließ (L8 aus #286). Abgelehnte
+    /// Operationen ihrer Notizbücher ruhen bis zur nächsten Verbindung (`parkedOps`), statt in die Fehlerablage zu gehen.
+    var unconfirmedModules = Set<String>()
+    /// Operationen, die auf dieser Verbindung nicht mehr gesendet werden; sie bleiben in der Warteschlange
+    var parkedOps = Set<String>()
 
     init(socket: any SyncSocket, now: Date) {
         self.socket = socket
@@ -98,6 +103,9 @@ final class SyncEngine {
     private(set) var pendingCount = 0
     /// Operationen in der Fehlerablage
     private(set) var deadLetterCount = 0
+    /// Zählt hoch, wenn der Core ein Modul nicht mehr kennt (`module_not_found`, L8 aus #286). Die Bibliothek ändert
+    /// sich dann (Notizbücher ausgeblendet), ohne dass die Fehlerablage wächst.
+    private(set) var missingModuleCount = 0
     /// Zählt bei jedem `welcome` hoch. Die Schreibfläche gleicht danach ab, wenn nötig.
     private(set) var welcomeCount = 0
     /// Zählt bei jedem erfolgreichen Abgleich einer Seite hoch (Ansicht oder Hintergrund-Durchgang). Die Zeile
@@ -121,6 +129,10 @@ final class SyncEngine {
     /// Empfänger (`InkLibraryService`) gleicht dann alle markierten Seiten im Hintergrund ab (UX-46). Bei jedem
     /// weiteren `welcome` kommt der Aufruf wieder, damit ein unterbrochener Durchgang weiterläuft.
     @ObservationIgnored var onWelcomed: (@MainActor (_ epochChanged: Bool) -> Void)?
+    /// Läuft, bevor die wartenden Operationen eines am Mac gelöschten Moduls entfallen (L8 aus #286). Der
+    /// `InkLibraryService` schreibt dann die offene Seite auf die Platte: Ihre letzten Striche stehen sonst nur im
+    /// Speicher und in der Warteschlange.
+    @ObservationIgnored var onModuleMissing: (@MainActor (_ moduleID: String) -> Void)?
 
     private let client: CoreClient
     private let sockets: any SyncSocketFactory
@@ -299,6 +311,8 @@ final class SyncEngine {
     /// - Returns: `false`, wenn das Schreiben scheiterte. Die Seite muss dann später abgeglichen werden.
     @discardableResult
     func enqueue(_ changes: [InkStrokeChange], binding: InkBinding) -> Bool {
+        // Modul am Mac gelöscht (L8 aus #286): Die Striche bleiben lokal, gesendet wird nichts
+        if library.notebook(binding.notebookID)?.isModuleGone ?? false { return true }
         let drafts = InkOpBuilder.ops(
             for: changes,
             binding: binding,
@@ -320,7 +334,12 @@ final class SyncEngine {
     /// Reiht fertige Operationen ein (Notizbuch, Seite). Sie stehen auf der Platte, bevor etwas gesendet wird.
     /// - Returns: `false`, wenn das Schreiben scheiterte. Dann ist nichts eingereiht.
     @discardableResult
-    func enqueue(drafts: [OutboxDraft]) -> Bool {
+    func enqueue(drafts all: [OutboxDraft]) -> Bool {
+        // Notizbücher eines am Mac gelöschten Moduls senden nichts mehr; ihre Seiten sind zum Abgleich vorgemerkt
+        let drafts = all.filter { draft in
+            guard let id = SyncEngine.notebookID(ofStream: draft.stream) else { return true }
+            return !(library.notebook(id)?.isModuleGone ?? false)
+        }
         guard !drafts.isEmpty else { return true }
         do {
             try outbox.append(drafts)
@@ -437,6 +456,10 @@ final class SyncEngine {
         // Unlesbare Seite (#252): ihr Stand ist leer und sagt nichts über die Seite. Planen hieße, am Core alle Striche zu
         // entfernen. Kein Plan, keine Anfrage, das Flag bleibt.
         guard !page.isUnreadable else { return .skipped }
+        // Modul am Mac gelöscht (L8 aus #286): nichts planen. Ein `page.create` ginge sonst an der Sperre in
+        // `enqueue(drafts:)` vorbei in die Warteschlange (Fehlerablage, Seite aus der Bibliothek), und das Flag fiele,
+        // obwohl nichts gesendet wurde. Es bleibt, bis das Modul zurückkommt.
+        guard !(library.notebook(binding.notebookID)?.isModuleGone ?? false) else { return .skipped }
         guard let credentials = credentials() else { return .skipped }
         guard reconcilingPages.insert(binding.pageID).inserted else { return .skipped }
         defer { reconcilingPages.remove(binding.pageID) }
@@ -458,8 +481,11 @@ final class SyncEngine {
                 return .unreachable
             }
         }
-        // Ab hier gibt es kein `await` mehr: Der lokale Stand ist genau der, den der Plan sieht
-        guard runningMac != nil, isStillValid() else { return .skipped }
+        // Ab hier gibt es kein `await` mehr: Der lokale Stand ist genau der, den der Plan sieht. Während der Anfrage kann
+        // ein `module_not_found` das Modul ausgeblendet haben (L8 aus #286): dann wie oben nichts planen.
+        guard runningMac != nil, isStillValid(), !(library.notebook(binding.notebookID)?.isModuleGone ?? false) else {
+            return .skipped
+        }
         var succeeded = true
         // Wartende Operationen der Seite zuerst auf den Stand des Core rechnen (Absturz mitten im Senden)
         let pendingForPage = outbox.pending.filter { $0.pageID == binding.pageID }
@@ -883,7 +909,7 @@ final class SyncEngine {
     private func requeueFreeNotebooks() {
         var drafts: [OutboxDraft] = []
         for notebook in library.allNotebooks()
-        where notebook.kind == .frei && !library.pages(inNotebook: notebook.id).isEmpty {
+        where notebook.kind == .frei && !notebook.isModuleGone && !library.pages(inNotebook: notebook.id).isEmpty {
             if let draft = InkOpBuilder.notebookCreate(
                 notebook: notebook,
                 nowMS: nowMS(),
@@ -954,7 +980,8 @@ final class SyncEngine {
         repeat {
             link.pumpAgain = false
             while link === self.link, !link.blocked, link.inFlight.count < SyncEngine.window {
-                let skipped = parkedPages.isEmpty ? link.inFlight : link.inFlight.union(parkedOpIDs())
+                var skipped = parkedPages.isEmpty ? link.inFlight : link.inFlight.union(parkedOpIDs())
+                if !link.parkedOps.isEmpty { skipped.formUnion(link.parkedOps) }
                 guard let entry = outbox.nextToSend(inFlight: skipped) else {
                     break
                 }
@@ -1070,6 +1097,37 @@ final class SyncEngine {
             return
         }
 
+        // `module_not_found` (L8 aus #286): erst per REST bestätigen, dass das Modul fehlt. Ein einzelner Fehler des Core
+        // soll nicht alle Notizbücher eines Moduls ausblenden.
+        if let entry, let moduleID = owningModuleID(of: entry) {
+            if link.unconfirmedModules.contains(moduleID) {
+                // Nicht zu klären: ruht bis zur nächsten Verbindung (auch abhängige Fehler wie `notebook_not_found`)
+                link.inFlight.remove(opID)
+                link.parkedOps.insert(opID)
+                await pump(link)
+                return
+            }
+            if failure.code == "module_not_found" {
+                // Bis zur Antwort bleibt die Operation im Flug: Der Taktgeber sendet sie so nicht erneut
+                switch await moduleStatus(moduleID) {
+                case .missing:
+                    link.inFlight.remove(opID)
+                    handleModuleMissing(moduleID: moduleID, link: link)
+                    await pump(link)
+                    return
+                case .unknown:
+                    link.unconfirmedModules.insert(moduleID)
+                    link.inFlight.remove(opID)
+                    link.parkedOps.insert(opID)
+                    await pump(link)
+                    return
+                case .present:
+                    // Das Modul gibt es: Es gilt die Regel für nicht wiederholbare Fehler
+                    break
+                }
+            }
+        }
+
         // Endgültig abgelehnt: samt Abhängigen in die Fehlerablage, der Rest läuft weiter
         link.inFlight.remove(opID)
         // Ausnahme `page_version_conflict`: nicht in die Fehlerablage. Die Seite wird neu geladen und das
@@ -1084,10 +1142,63 @@ final class SyncEngine {
             await pump(link)
             return
         }
-        if let entry {
-            deadLetter(entry, code: failure.code, message: failure.message, link: link)
+        // Während der Rückfrage zum Modul kann sich die Warteschlange geändert haben: neu lesen
+        if let current = outbox.pending.first(where: { $0.opID == opID }) {
+            deadLetter(current, code: failure.code, message: failure.message, link: link)
         }
         await pump(link)
+    }
+
+    private enum ModuleStatus {
+        case missing
+        case present
+        case unknown
+    }
+
+    /// Modul des Notizbuchs, zu dessen Strom die Operation gehört. `nil` bei anderen Strömen oder unbekanntem Notizbuch.
+    private func owningModuleID(of entry: OutboxEntry) -> String? {
+        guard let notebookID = SyncEngine.notebookID(ofStream: entry.stream) else { return nil }
+        return library.notebook(notebookID)?.moduleID
+    }
+
+    /// `GET /modules/{id}`: 404 `module_not_found` bestätigt das Fehlen, 200 widerlegt es. Alles andere (keine
+    /// Verbindung, anderer Fehler) lässt die Frage offen.
+    private func moduleStatus(_ moduleID: String) async -> ModuleStatus {
+        guard let credentials = credentials() else { return .unknown }
+        do {
+            _ = try await client.moduleName(
+                endpoint: credentials.endpoint, token: credentials.token, moduleID: moduleID)
+            return .present
+        } catch ConnectionError.server(let status, let code) where status == 404 && code == "module_not_found" {
+            return .missing
+        } catch {
+            handleRESTError(error)
+            return .unknown
+        }
+    }
+
+    /// Das Modul gibt es am Core nicht mehr (nicht nur im Papierkorb: weich gelöschte Module nimmt der Core an,
+    /// VERTRAEGE §11.2; per REST bestätigt). Zuerst sichert der Dienst die offene Seite und die Bibliothek merkt die
+    /// Seiten zum Abgleich vor, dann entfallen alle wartenden Operationen der Notizbücher des Moduls ohne Fehlerablage.
+    /// Die Zeichnungen liegen in den Dateien der Seiten: Kommt das Modul zurück, holt der Abgleich alles nach.
+    private func handleModuleMissing(moduleID: String, link: SyncLink) {
+        onModuleMissing?(moduleID)
+        library.markModuleGone(moduleID: moduleID)
+        let streams = Set(library.allNotebooks().filter { $0.moduleID == moduleID }.map(\.stream))
+        let ids = outbox.pending.filter { streams.contains($0.stream) }.map(\.opID)
+        do {
+            try outbox.discard(opIDs: ids)
+        } catch {
+            // Nicht geschrieben: Die Operationen bleiben und ruhen auf dieser Verbindung. Die nächste bekommt
+            // `module_not_found` erneut.
+            link.parkedOps.formUnion(ids)
+        }
+        for id in ids {
+            link.inFlight.remove(id)
+            internalErrors[id] = nil
+        }
+        missingModuleCount += 1
+        refreshCounts()
     }
 
     /// Verschiebt die Operation und alles, was von ihr abhängt, in die Fehlerablage. Bei `page.create` sind das
