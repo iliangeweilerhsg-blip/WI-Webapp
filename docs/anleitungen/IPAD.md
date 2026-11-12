@@ -68,6 +68,7 @@ Der Punkt „Entwicklermodus“ erscheint erst, wenn das iPad einmal mit Xcode v
 1. In Xcode auf **▶** klicken (oder `cmd` + `R`).
 2. Beim ersten Mal dauert das einige Minuten. Fragt der Mac, ob `codesign` auf deinen Schlüsselbund zugreifen darf, gib dein Mac-Passwort ein und wähle **Immer erlauben**.
 3. Startet die App nicht und Xcode meldet einen nicht vertrauenswürdigen Entwickler? Dann auf dem iPad: **Einstellungen → Allgemein → VPN & Geräteverwaltung**. Unter **Entwickler-App** deine Apple-ID antippen und **Vertrauen** wählen. Danach in Xcode noch einmal **▶**.
+4. Läuft die App, bestätige im Terminal `pnpm sg ipad aufgespielt`. Dann meldet `pnpm sg start` erst nach dem nächsten Update wieder, dass die App neu aufgespielt werden muss ([UPDATE.md](UPDATE.md)).
 
 ## 7. „Lokales Netzwerk“ erlauben
 

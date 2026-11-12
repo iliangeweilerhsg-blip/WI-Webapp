@@ -11,7 +11,7 @@ import {
 import type { CommandName } from './cli.ts';
 import { appUrl, childEnv, CORE_STOP_TIMEOUT_S, healthUrl, type SgConfig } from './config.ts';
 import { doctorExitCode, formatChecks, runChecks } from './doctor.ts';
-import { checkIpadApp } from './ipad-hint.ts';
+import { checkIpadApp, ipadCommand } from './ipad-hint.ts';
 import { moodleCommand, realMoodleDeps } from './moodle.ts';
 import {
   clearStopMarker,
@@ -280,7 +280,7 @@ export async function start(cfg: SgConfig): Promise<number> {
   }
   clearStopMarker(cfg);
 
-  // UX-17: Hat sich die iPad-App seit dem letzten Start geändert? Der Hinweis erscheint, sobald alles läuft.
+  // UX-17: Haben sich die iPad-Quellen seit dem bestätigten Aufspielen geändert? Der Hinweis erscheint, sobald alles läuft.
   const ipadNote = checkIpadApp(cfg);
 
   log('Starte PostgreSQL (docker compose) …');
@@ -390,7 +390,7 @@ export async function start(cfg: SgConfig): Promise<number> {
     if (!shuttingDown) {
       if (ready) {
         log(`Studien-Gehirn läuft: ${appUrl(cfg)}`);
-        if (ipadNote !== null) log(ipadNote);
+        if (ipadNote !== null) for (const line of ipadNote.split('\n')) log(line);
         log('Mit Strg+C beenden.');
         // Der Helfer startet erst jetzt, nach dem Core, und wird überwacht (Neustart nach Absturz mit Grenze)
         if (tunnelBuild.status === 'ready') {
@@ -531,5 +531,7 @@ export async function dispatch(command: CommandName, cfg: SgConfig, rest: string
       return restoreCommand(cfg, rest);
     case 'moodle':
       return moodleCommand(cfg, rest, realMoodleDeps());
+    case 'ipad':
+      return ipadCommand(cfg, rest);
   }
 }

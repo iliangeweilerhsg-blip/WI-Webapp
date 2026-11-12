@@ -29,16 +29,20 @@ So holst du neue Versionen auf den Mac und aufs iPad. Mach das **nicht am Vorles
 
 ## iPad-App
 
-Die iPad-App musst du nur neu aufspielen, wenn sich im Ordner `apps/ipad` etwas geändert hat. Prüfe das direkt nach dem `git pull`:
+Die iPad-App musst du nur neu aufspielen, wenn sich ihre Quellen geändert haben. Das sind `apps/ipad` und die Teile, die Xcode mit einbaut: `packages/schemas/generated/swift`, `packages/schemas/swift-support` und der gemeinsame Tunnel-Code unter `apps/mac-tunnel/Sources/TunnelShared`.
 
-```bash
-git diff --stat HEAD@{1} -- apps/ipad
-```
+`pnpm sg start` sagt dir Bescheid: Haben sich diese Quellen seit dem letzten Aufspielen geändert, steht nach dem Start im Terminal „iPad-App neu aufspielen“. Der Hinweis kommt bei jedem Start wieder, bis du das Aufspielen bestätigst:
 
-- **Keine Ausgabe:** Es hat sich nichts geändert. Die App bleibt, wie sie ist.
-- **Dateien aufgelistet:** Spiele die App neu auf, wie in [IPAD.md](IPAD.md) beschrieben (Schritt 1 und Schritt 6). Die Kopplung bleibt erhalten. Lösche die App nicht.
+1. Spiele die App neu auf, wie in [IPAD.md](IPAD.md) beschrieben (Schritt 1 und Schritt 6). Die Kopplung bleibt erhalten. Lösche die App nicht.
+2. Bestätige danach im Terminal:
 
-Meldet die iPad-App „Der Mac spricht ein anderes Protokoll. App aktualisieren.“, ist sie älter als der Mac. Spiele sie dann ebenfalls neu auf. Am Mac sagt dir `pnpm sg start` Bescheid: Hat sich `apps/ipad` seit dem letzten Start geändert, steht nach dem Start im Terminal „iPad-App neu aufspielen“. Die Meldung kommt nur einmal. Beim allerersten Start merkt sich `sg` nur den Stand.
+   ```bash
+   pnpm sg ipad aufgespielt
+   ```
+
+`pnpm sg ipad` zeigt jederzeit, ob die App aktuell ist. Ob die App auf dem iPad wirklich neu ist, kann `sg` nicht sehen. Es vergleicht nur den Stand im Repo mit dem, den du zuletzt bestätigt hast. Beim allerersten Start merkt sich `sg` nur den Stand. Ohne Git, etwa in einem entpackten Ordner, gibt es keinen Hinweis.
+
+Meldet die iPad-App „Der Mac spricht ein anderes Protokoll. App aktualisieren.“, ist sie älter als der Mac. Spiele sie dann ebenfalls neu auf.
 
 ## Wenn etwas schiefgeht
 

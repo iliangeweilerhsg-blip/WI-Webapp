@@ -1,7 +1,8 @@
 'use client';
 
 // KI-Status und Kosten (VERTRAEGE §20.5–§20.7): `GET /ai/status`, `GET /costs/summary`, Texte dazu.
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 import {
   AiStatusSchema,
   CostSummarySchema,
@@ -117,13 +118,34 @@ export function parseBudget(text: string): number | null {
 }
 
 /**
- * Geschätzte KI-Kosten einer Session aus `by_session` (UX-16). `by_session` nennt nur die 20 teuersten Sessions des
- * laufenden Monats: fehlt die Session dort, ist sie älter oder billiger, und es gibt keine Zahl (`null`).
+ * Geschätzte KI-Kosten einer Session aus `by_session` (UX-16). Die Zahl gilt nur für den Monat der Übersicht
+ * (`budget.month`): Was in einem anderen Monat angefallen ist, fehlt darin. `by_session` nennt zudem nur die 20
+ * teuersten Sessions dieses Monats: Fehlt die Session dort, gibt es keine Zahl (`null`), statt einer falschen.
  */
 export function sessionCost(
-  summary: Pick<CostSummary, 'by_session'> | undefined | null,
+  summary: Pick<CostSummary, 'by_session' | 'budget'> | undefined | null,
   sessionId: string,
-): { eur: number; calls: number } | null {
+): { eur: number; calls: number; month: string } | null {
   const row = summary?.by_session.find((s) => s.session_id === sessionId);
-  return row ? { eur: row.eur, calls: row.calls } : null;
+  return row && summary ? { eur: row.eur, calls: row.calls, month: summary.budget.month } : null;
+}
+
+/**
+ * Kosten einer Session für den Rückblick. Läuft die Verarbeitung noch, kommen weitere Kosten dazu: Sobald sie endet
+ * (`pending` wird `false`), holt der Hook die Übersicht neu, damit keine Zwischensumme stehen bleibt.
+ */
+export function useSessionCost(sessionId: string, pending: boolean) {
+  const client = useQueryClient();
+  const costs = useCostSummary();
+  const wasPending = useRef(pending);
+  useEffect(() => {
+    if (wasPending.current && !pending) void client.invalidateQueries({ queryKey: COSTS_KEY });
+    wasPending.current = pending;
+  }, [client, pending]);
+  return sessionCost(costs.data, sessionId);
+}
+
+/** Zeile im Rückblick: „KI-Kosten dieser Vorlesung im November 2026: ca. 0,42 €“, während der Verarbeitung „bisher“ */
+export function sessionCostText(cost: { eur: number; month: string }, pending: boolean): string {
+  return `KI-Kosten dieser Vorlesung im ${monthLabel(cost.month)}: ${pending ? 'bisher ' : ''}ca. ${formatEur(cost.eur)}.`;
 }

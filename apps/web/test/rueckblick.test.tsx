@@ -916,13 +916,14 @@ describe('Rückblick: Sprung aus der Suche (&t=<ms>, VERTRAEGE §19.7)', () => {
 });
 
 describe('Rückblick: Kosten (UX-16)', () => {
-  it('zeigt die geschätzten KI-Kosten dieser Vorlesung mit Link zu Einstellungen → KI', async () => {
+  it('zeigt die geschätzten KI-Kosten dieser Vorlesung im Monat der Übersicht, mit Link zu Einstellungen → KI', async () => {
     boot();
     core.costSummary = makeCostSummary({
       by_session: [{ session_id: SESSION_ID, session: null, calls: 3, eur: 0.42 }],
     });
-    const line = await screen.findByText(/KI-Kosten dieser Vorlesung: ca\./);
+    const line = await screen.findByText(/KI-Kosten dieser Vorlesung im November 2026: ca\./);
     expect(line).toHaveTextContent('0.42');
+    expect(line).not.toHaveTextContent('bisher');
     expect(within(line).getByRole('link', { name: 'Einstellungen → KI' })).toHaveAttribute(
       'href',
       '/einstellungen?bereich=ki',
@@ -933,5 +934,32 @@ describe('Rückblick: Kosten (UX-16)', () => {
     boot();
     await screen.findByText(/Folie 1 von 3/);
     expect(screen.queryByText(/KI-Kosten dieser Vorlesung/)).toBeNull();
+  });
+
+  it('während der Verarbeitung „bisher“, danach wird die Summe neu geholt', async () => {
+    const running: Session['processing'] = {
+      'audio.finalize': 'fertig',
+      transcribe: 'laeuft',
+      'align.log': 'fertig',
+    };
+    boot({
+      session: { processing: running },
+      transcript: makeTranscript({ session_id: SESSION_ID, recordings: [makeRecording({ id: R1 })] }),
+    });
+    core.costSummary = makeCostSummary({
+      by_session: [{ session_id: SESSION_ID, session: null, calls: 1, eur: 0.1 }],
+    });
+    const first = await screen.findByText(/KI-Kosten dieser Vorlesung/);
+    expect(first).toHaveTextContent('bisher ca.');
+    expect(first).toHaveTextContent('0.10');
+
+    core.transcripts[SESSION_ID] = fullTranscript();
+    core.costSummary = makeCostSummary({
+      by_session: [{ session_id: SESSION_ID, session: null, calls: 4, eur: 0.55 }],
+    });
+    const current = core.sessions[0] as Session;
+    sync.emit('session.updated', { ...current, processing: ALL_DONE, updated_at: '2026-11-04T09:12:00Z' });
+    await waitFor(() => expect(screen.getByText(/KI-Kosten dieser Vorlesung/)).toHaveTextContent('0.55'));
+    expect(screen.getByText(/KI-Kosten dieser Vorlesung/)).not.toHaveTextContent('bisher');
   });
 });
