@@ -233,3 +233,39 @@ describe('Aufnahme nur im Leader-Tab', () => {
     expect(seen).toEqual([true, false]);
   });
 });
+
+describe('nach dispose()', () => {
+  it('set() und retry() starten keine Aufnahme mehr', async () => {
+    const shared = { running: new Set<object>(), maxRunning: 0 };
+    const a = makeTab(shared, new FakeWebLocks());
+    lead(a, true);
+    await a.control.idle();
+    expect(a.recorder.getStatus().state).toBe('recording');
+
+    a.control.dispose();
+    await a.control.idle();
+    expect(a.recorder.getStatus().state).not.toBe('recording');
+    expect(shared.running.size).toBe(0);
+    const instances = a.mr.instances.length;
+    const microphoneCalls = a.tracks.length;
+
+    // Ein später gerufenes `set` (z. B. ein Effekt mit veraltetem Verweis) darf den entsorgten Recorder nicht wecken
+    a.control.set({ leader: true, phase: 'laeuft', allowed: true });
+    a.control.retry();
+    await a.control.idle();
+    expect(a.mr.instances).toHaveLength(instances);
+    expect(a.tracks).toHaveLength(microphoneCalls);
+    expect(shared.running.size).toBe(0);
+    expect(shared.maxRunning).toBe(1);
+  });
+
+  it('retry() nach dispose() öffnet das Mikrofon nicht, auch ohne vorherige Aufnahme', async () => {
+    const shared = { running: new Set<object>(), maxRunning: 0 };
+    const a = makeTab(shared, new FakeWebLocks());
+    a.control.dispose();
+    a.control.retry();
+    await a.control.idle();
+    expect(a.tracks).toHaveLength(0);
+    expect(a.mr.instances).toHaveLength(0);
+  });
+});

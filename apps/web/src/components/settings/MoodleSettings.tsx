@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { Module, MoodleCourse, MoodleCourseLink, MoodleSyncStatus } from '@sg/shared';
 import { useRestoreTrashItem } from '../../lib/data.ts';
@@ -40,15 +41,16 @@ const AUTO_NOTE = { zugeordnet: 'automatisch zugeordnet', angelegt: 'Modul autom
 
 /**
  * Ohne aktuelles Semester legt die automatische Zuordnung keine Module an (#141). Ein ruhiger Hinweis mit Link zu den
- * Semestern (Einstellungen › Allgemein). Bewusst ein normaler Link: Die Einstellungen lesen `bereich` beim Laden
+ * Semestern (Einstellungen › Allgemein). Ein `next/link`, kein rohes `<a>`: Ein harter Seitenwechsel würde die Aufnahme
+ * beenden (Issue #210). `SettingsView` folgt `?bereich=` bei jeder Änderung der Query.
  */
 function SemesterHint({ empty }: { empty: boolean }) {
   return (
     <p role="status" className="mt-3 rounded-lg border border-border bg-surface px-4 py-3 text-sm">
       {empty ? 'Lege zuerst das Semester an.' : 'Wähle zuerst das aktuelle Semester.'}{' '}
-      <a href="/einstellungen?bereich=allgemein" className={textLink}>
+      <Link href="/einstellungen?bereich=allgemein" className={textLink}>
         Zu den Semestern
-      </a>
+      </Link>
       <span className="mt-1 block text-text-muted">
         Danach ordnet die App deine Kurse automatisch Modulen zu und legt fehlende Module an.
       </span>

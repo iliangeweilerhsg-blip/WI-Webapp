@@ -24,7 +24,8 @@ import { mergeSession, sessionHref, stopSession } from '../src/lib/sessions.ts';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { installCalendarCore, makeEvent, type CalendarCore } from './calendar-core.ts';
-import { fakeRecording } from './recording-fakes.ts';
+import type { RecordingEnv } from '../src/lib/recording/index.ts';
+import { FakeWebLocks, fakeRecording, type FakeRecording } from './recording-fakes.ts';
 import { makeModule, makeSemester, makeSession } from './fake-core.ts';
 
 const push = vi.fn();
@@ -133,8 +134,20 @@ function setNow(iso: string) {
 let core: CalendarCore;
 let sync: ReturnType<typeof fakeSync>;
 
+/** Ein Zeitpunkt vor jeder Grenze des Auto-Stopps: sonst stoppt die Shell die „vergessene“ Session vor dem Test */
+const BEFORE_AUTOSTOP = () => Date.parse('2026-11-04T05:30:00Z');
+
+let rec: FakeRecording;
+
 function boot(
-  opts: { sessions?: Session[]; events?: (typeof EVENT_DBS)[]; now?: string; syncState?: string } = {},
+  opts: {
+    sessions?: Session[];
+    events?: (typeof EVENT_DBS)[];
+    now?: string;
+    syncState?: string;
+    rec?: FakeRecording;
+    env?: Partial<RecordingEnv>;
+  } = {},
 ) {
   setNow(opts.now ?? '2026-11-04T07:10:00Z'); // 08:10 Uhr
   core = installCalendarCore({
@@ -144,10 +157,11 @@ function boot(
     events: opts.events ?? [EVENT_DBS, EVENT_STAT],
   });
   sync = fakeSync(opts.syncState);
+  rec = opts.rec ?? fakeRecording();
   return render(
     <ThemeProvider>
       <QueryProvider>
-        <AppShell syncClient={sync.client} recordingEnv={fakeRecording().env}>
+        <AppShell syncClient={sync.client} recordingEnv={{ ...rec.env, ...opts.env }}>
           <HeuteView />
         </AppShell>
       </QueryProvider>
@@ -155,6 +169,15 @@ function boot(
   );
 }
 
+function denied() {
+  return Object.assign(new Error('denied'), { name: 'NotAllowedError' });
+}
+function missing() {
+  return Object.assign(new Error('missing'), { name: 'NotFoundError' });
+}
+
+const RUNNING = [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })];
+const bar = () => screen.queryByRole('complementary', { name: 'Aufnahme' });
 const card = () => screen.getByRole('region', { name: /Datenbanksysteme/ });
 const calls = (path: RegExp) => core.requests.filter((r) => r.method === 'POST' && path.test(r.path));
 
@@ -207,32 +230,100 @@ describe('Heute: Start-Karte nach Zustand', () => {
     expect(within(c).getByRole('button', { name: 'Beenden' })).toBeInTheDocument();
   });
 
-  it('laufend im Leader-Tab: ehrlich „ohne Aufnahme“, hohler Punkt, Hinweis auf die Vorlesungs-Ansicht (UX-01)', async () => {
-    boot({
-      now: '2026-11-04T07:20:00Z',
-      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
-    });
+  it('laufend, es wird aufgenommen: „Läuft · Aufnahme“, roter Punkt, ehrlicher Satz (UX-01)', async () => {
+    boot({ now: '2026-11-04T07:20:00Z', sessions: RUNNING });
     const c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
-    expect(within(c).getByText('Läuft · ohne Aufnahme')).toBeInTheDocument();
-    expect(within(c).getByText(/Die Aufnahme läuft nur in der Vorlesungs-Ansicht\./)).toBeInTheDocument();
-    expect(within(c).getByRole('status')).toHaveTextContent(/hier wird nicht aufgenommen/);
-    expect(c.innerHTML).not.toMatch(/bg-record/);
-    expect(c.querySelector('.border-text-muted.rounded-full')).not.toBeNull();
+    expect(await within(c).findByText('Läuft · Aufnahme')).toBeInTheDocument();
+    expect(within(c).getByText(/Die Aufnahme läuft, auch wenn du die Seite wechselst\./)).toBeInTheDocument();
+    // Die Karte sagt nur die Session an, die Leiste die Aufnahme
+    expect(within(c).getByRole('status')).toHaveTextContent('Die Session läuft.');
+    expect(c.querySelector('.bg-record.rounded-full')).not.toBeNull();
+    expect(within(c).queryByRole('button', { name: /Aufnahme starten|Erneut versuchen/ })).toBeNull();
     expect(within(c).getByRole('link', { name: 'Zur Vorlesung' })).toBeInTheDocument();
+    // Die Leiste unten zeigt REC; auf „Heute“ läuft die Aufnahme also weiter
+    await waitFor(() => expect(bar()).toHaveAttribute('data-kind', 'rec'));
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(c.innerHTML).not.toMatch(/Vorlesungs-Ansicht/);
+  });
+
+  it.each([
+    [
+      'needs-start',
+      fakeRecording({ permission: 'prompt' }),
+      'Es wird nicht aufgenommen.',
+      'Aufnahme starten',
+    ],
+    [
+      'mic-denied',
+      fakeRecording({ permission: 'granted', getUserMedia: () => Promise.reject(denied()) }),
+      'Der Zugriff auf das Mikrofon ist verweigert.',
+      'Erneut versuchen',
+    ],
+    [
+      'mic-missing',
+      fakeRecording({ permission: 'granted', getUserMedia: () => Promise.reject(missing()) }),
+      'Es wurde kein Mikrofon gefunden.',
+      'Erneut versuchen',
+    ],
+    [
+      'error',
+      fakeRecording({ permission: 'granted', getUserMedia: () => Promise.reject(new Error('kaputt')) }),
+      'Die Aufnahme ist gestört.',
+      'Erneut versuchen',
+    ],
+  ])(
+    'laufend, Zustand %s: „Läuft · ohne Aufnahme“, hohler Punkt, Knopf in der Karte',
+    async (kind, recording, text, button) => {
+      boot({ now: '2026-11-04T07:20:00Z', sessions: RUNNING, rec: recording });
+      const c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
+      await waitFor(() => expect(bar()).toHaveAttribute('data-kind', kind));
+      expect(within(c).getByText('Läuft · ohne Aufnahme')).toBeInTheDocument();
+      expect(within(c).getByText(new RegExp(text.replace('.', '\\.')))).toBeInTheDocument();
+      expect(c.innerHTML).not.toMatch(/bg-record/);
+      expect(c.querySelector('.border-text-muted.rounded-full')).not.toBeNull();
+      expect(within(c).getByRole('button', { name: button })).toBeInTheDocument();
+      // Die Leiste hat denselben Knopf: Tests greifen mit `within` zu
+      expect(within(bar()!).getByRole('button', { name: button })).toBeInTheDocument();
+    },
+  );
+
+  it('laufend, „Aufnahme starten“ in der Karte öffnet das Mikrofon, danach „Läuft · Aufnahme“', async () => {
+    const user = userEvent.setup();
+    boot({ now: '2026-11-04T07:20:00Z', sessions: RUNNING, rec: fakeRecording({ permission: 'prompt' }) });
+    const c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
+    await user.click(await within(c).findByRole('button', { name: 'Aufnahme starten' }));
+    expect(await within(c).findByText('Läuft · Aufnahme')).toBeInTheDocument();
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(within(c).queryByRole('button', { name: 'Aufnahme starten' })).toBeNull();
+    expect(c.querySelector('.bg-record.rounded-full')).not.toBeNull();
   });
 
   it('laufend im Folge-Tab: „Läuft · anderer Tab“, ohne Aufnahme-Zusage (UX-01)', async () => {
-    boot({
-      now: '2026-11-04T07:20:00Z',
-      syncState: 'other_tab',
-      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
-    });
+    boot({ now: '2026-11-04T07:20:00Z', syncState: 'other_tab', sessions: RUNNING });
     const c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
     expect(await within(c).findByText('Läuft · anderer Tab')).toBeInTheDocument();
     expect(within(c).queryByText('Läuft · ohne Aufnahme')).toBeNull();
-    expect(within(c).queryByText(/Die Aufnahme läuft nur in der Vorlesungs-Ansicht/)).toBeNull();
-    expect(within(c).getByRole('status')).toHaveTextContent(/anderer Tab/);
+    expect(within(c).getByText(/Für die Aufnahme ist ein anderer Tab zuständig\./)).toBeInTheDocument();
+    expect(within(c).getByRole('status')).toHaveTextContent('Die Session läuft.');
+    expect(c.innerHTML).not.toMatch(/bg-record/);
     expect(within(c).getByRole('link', { name: 'Zur Vorlesung' })).toBeInTheDocument();
+    expect(rec.getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it('laufend, die Aufnahme wartet auf den Mikrofon-Abfrage eines anderen Tabs: „Läuft · wartet“', async () => {
+    const held = new FakeWebLocks();
+    const release = await held.acquire(new AbortController().signal);
+    boot({
+      now: '2026-11-04T07:20:00Z',
+      sessions: RUNNING,
+      rec: fakeRecording({ locks: held }),
+      env: { waitHintMs: 10 },
+    });
+    const c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
+    expect(await within(c).findByText('Läuft · wartet')).toBeInTheDocument();
+    expect(within(c).getByText(/Die Aufnahme wartet auf einen anderen Tab\./)).toBeInTheDocument();
+    release!();
+    expect(await within(c).findByText('Läuft · Aufnahme')).toBeInTheDocument();
   });
 
   it('pausiert: „Fortsetzen“, keine laufende Dauer', async () => {
@@ -379,7 +470,7 @@ describe('Heute: Aktionen', () => {
     expect(calls(/\/sessions\/[^/]+\/start$/)).toHaveLength(1);
     expect(calls(/\/start$/)[0]!.body).toEqual({ started_from: 'mac' });
     expect(core.sessions.find((s) => s.id === SESSION_ID)?.state).toBe('laeuft');
-    expect(await screen.findByRole('link', { name: 'Zur Vorlesung' })).toBeInTheDocument();
+    expect(await within(card()).findByRole('link', { name: 'Zur Vorlesung' })).toBeInTheDocument();
   });
 
   it('Start ohne Dashboard-Route: keine Weiterleitung, Karte zeigt läuft mit Link', async () => {
@@ -446,16 +537,30 @@ describe('Heute: Aktionen', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('Beenden bei laufender Aufnahme: die Antwort heißt „Weiter aufnehmen“', async () => {
+    const user = userEvent.setup();
+    boot({ now: '2026-11-04T07:20:00Z', sessions: RUNNING });
+    await waitFor(() => expect(bar()).toHaveAttribute('data-kind', 'rec'));
+    await user.click(await screen.findByRole('button', { name: 'Beenden' }));
+    expect(within(card()).getByRole('button', { name: 'Weiter aufnehmen' })).toHaveFocus();
+    expect(within(card()).queryByRole('button', { name: 'Weiterlaufen lassen' })).toBeNull();
+    await user.click(within(card()).getByRole('button', { name: 'Weiter aufnehmen' }));
+    expect(calls(/stop$/)).toHaveLength(0);
+    expect(card()).toHaveAttribute('data-state', 'laeuft');
+    expect(bar()).toHaveAttribute('data-kind', 'rec');
+  });
+
   it('Beenden fragt nach (UX-06): „Weiterlaufen lassen“ beendet nichts, „Session beenden“ beendet', async () => {
     const user = userEvent.setup();
     boot({
       now: '2026-11-04T07:20:00Z',
-      sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
+      sessions: RUNNING,
+      rec: fakeRecording({ permission: 'prompt' }),
     });
     await user.click(await screen.findByRole('button', { name: 'Beenden' }));
     expect(within(card()).getByRole('alertdialog')).toHaveTextContent('Session beenden?');
     expect(calls(/stop$/)).toHaveLength(0);
-    // Heute nimmt nicht auf: Die Antwort verspricht keine Aufnahme
+    // Ohne laufende Aufnahme verspricht die Antwort keine Aufnahme
     expect(within(card()).queryByRole('button', { name: 'Weiter aufnehmen' })).toBeNull();
     expect(within(card()).getByRole('button', { name: 'Weiterlaufen lassen' })).toHaveFocus();
     await user.click(within(card()).getByRole('button', { name: 'Weiterlaufen lassen' }));
@@ -978,6 +1083,7 @@ describe('Heute: Karte, Fokus, Hinweise', () => {
       sessions: [planned({ state: 'laeuft', started_at: '2026-11-04T07:15:00Z' })],
     });
     await screen.findByRole('button', { name: 'Pause' });
+    // Weder in der Karte noch in der Leiste ein Link ins 404
     expect(screen.queryByRole('link', { name: 'Zur Vorlesung' })).toBeNull();
     expect(screen.getByText(/Seit 08:15 Uhr/)).toBeInTheDocument();
   });
@@ -994,7 +1100,13 @@ describe('Heute: Karte, Fokus, Hinweise', () => {
       planned_ends_at: '2026-11-04T06:30:00Z',
       updated_at: '2026-11-04T05:00:00Z',
     });
-    boot({ now: '2026-11-04T07:10:00Z', sessions: [forgotten, planned()], events: [EVENT_DBS] });
+    // Die Shell würde die vergessene Session selbst stoppen (Auto-Stopp auf jeder Route): Hier soll der Core sie beenden
+    boot({
+      now: '2026-11-04T07:10:00Z',
+      sessions: [forgotten, planned()],
+      events: [EVENT_DBS],
+      env: { autoStop: { now: BEFORE_AUTOSTOP } },
+    });
     const c = await screen.findByRole('region', { name: /Datenbanksysteme/ });
     expect(
       within(c).getByText('Vorherige Vorlesung läuft noch und wird beim Start beendet.'),

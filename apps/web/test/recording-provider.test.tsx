@@ -1,5 +1,5 @@
-// Recorder und Auto-Stopp an der App-Shell (Plan #210, PR 2; VERTRAEGE §11.8): Ein Recorder je Tab, der der aktiven
-// Session folgt. Solange `ROUTE_GATE` gilt, nur bei offenem Dashboard der Session (altes Verhalten).
+// Recorder und Auto-Stopp an der App-Shell (Plan #210; VERTRAEGE §11.8): Ein Recorder je Tab, der der aktiven
+// Session folgt, auf jeder Route. Das Dashboard meldet sich nur an (`shownByDashboard`), es steuert nichts.
 import 'fake-indexeddb/auto';
 import { StrictMode, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -203,8 +203,8 @@ describe('RecordingProvider: ohne aktive Session', () => {
   });
 });
 
-describe('RecordingProvider: Dashboard und Schalter (altes Verhalten)', () => {
-  it('Dashboard offen: REC. Dashboard weg: die Aufnahme stoppt sauber, der Provider bleibt. Zurück: neue Aufnahme', async () => {
+describe('RecordingProvider: Navigation (Aufnahme folgt der Session, nicht der Route)', () => {
+  it('Dashboard hängt aus: dieselbe Aufnahme läuft weiter, auch beim Zurückkehren', async () => {
     const view = boot();
     await waitFor(() => expect(kind()).toBe('rec'));
     expect(screen.getByTestId('shown')).toHaveTextContent('true');
@@ -214,34 +214,47 @@ describe('RecordingProvider: Dashboard und Schalter (altes Verhalten)', () => {
     await waitFor(() => expect(uploads(/^PUT .*\/chunks\/0$/)).toHaveLength(1));
 
     view.show(null);
-    await waitFor(() => expect(kind()).toBe('inactive'));
-    // Die Session läuft weiter; es wird nur nicht aufgenommen
+    await waitFor(() => expect(screen.getByTestId('shown')).toHaveTextContent('false'));
+    await settle(150);
+    // Weiter dieselbe Aufnahme: kein Stopp, kein `complete`, keine zweite Mikrofon-Abfrage, Spur offen
+    expect(kind()).toBe('rec');
     expect(phase()).toBe('laeuft');
     expect(shownSession()).toBe(A_ID);
-    await waitFor(() => expect(uploads(/^POST .*\/complete$/)).toHaveLength(1));
-    expect(rec.mr.instances[0]?.state).toBe('inactive');
-    expect(uploads(/^PUT .*\/chunks\/1$/)).toHaveLength(1);
-    for (const t of rec.tracks) expect(t.stop).toHaveBeenCalled();
-    // Der Recorder wurde nicht entsorgt: derselbe Provider, kein neuer Tab-Zustand
+    expect(screen.getByTestId('recording-id').textContent).toBe(first);
+    expect(uploads(/^POST .*\/complete$/)).toHaveLength(0);
     expect(rec.mr.instances).toHaveLength(1);
+    expect(rec.mr.instances[0]?.state).toBe('recording');
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+    for (const t of rec.tracks) expect(t.stop).not.toHaveBeenCalled();
 
+    // Zurück ins Dashboard: weiter dieselbe Aufnahme
     view.show(<Dashboard />);
-    await waitFor(() => expect(kind()).toBe('rec'));
-    expect(rec.mr.instances).toHaveLength(2);
-    expect(rec.getUserMedia).toHaveBeenCalledTimes(2);
-    expect(screen.getByTestId('recording-id').textContent).not.toBe(first);
+    await waitFor(() => expect(screen.getByTestId('shown')).toHaveTextContent('true'));
+    await settle(150);
+    expect(kind()).toBe('rec');
+    expect(screen.getByTestId('recording-id').textContent).toBe(first);
+    expect(rec.mr.instances).toHaveLength(1);
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(uploads(/^POST .*\/complete$/)).toHaveLength(0);
   });
 
-  it('Dashboard einer anderen Session: keine Aufnahme', async () => {
+  it('ohne jedes Dashboard (Heute, Einstellungen): aufgenommen wird trotzdem', async () => {
+    boot({ ui: <p>Heute</p> });
+    await waitFor(() => expect(kind()).toBe('rec'));
+    expect(screen.getByTestId('shown')).toHaveTextContent('false');
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+  });
+
+  it('Dashboard einer anderen Session: die Aufnahme der aktiven Session bleibt unverändert', async () => {
     boot({
       sessions: [session(A_ID), session(OLD_ID, { state: 'beendet', ended_at: '2026-11-03T10:00:00Z' })],
       ui: <Dashboard id={OLD_ID} />,
     });
-    await waitFor(() => expect(shownSession()).toBe(A_ID));
-    await settle();
+    await waitFor(() => expect(kind()).toBe('rec'));
+    expect(shownSession()).toBe(A_ID);
     expect(screen.getByTestId('shown')).toHaveTextContent('false');
-    expect(kind()).toBe('inactive');
-    expect(rec.getUserMedia).not.toHaveBeenCalled();
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(uploads(new RegExp(`^POST .*/sessions/${OLD_ID}/recordings$`))).toHaveLength(0);
   });
 
   it('useRecordingFor mit fremder ID liefert „inactive“; solange die aktive Session lädt, „starting“', async () => {
@@ -284,9 +297,10 @@ describe('RecordingProvider: Dashboard und Schalter (altes Verhalten)', () => {
     });
     const bar = await screen.findByLabelText('Statusleiste');
     expect(await within(bar).findByText('Beendet')).toBeVisible();
+    // Das Dashboard der beendeten Session sagt „Beendet“, die Aufnahme der aktiven Session läuft weiter
     await waitFor(() => expect(shownSession()).toBe(A_ID));
-    expect(kind()).toBe('inactive');
-    expect(rec.getUserMedia).not.toHaveBeenCalled();
+    await waitFor(() => expect(kind()).toBe('rec'));
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -437,7 +451,7 @@ describe('RecordingProvider: Wechsel der Session', () => {
     },
   );
 
-  it('Start von B aus dem Dashboard von B: der alte Recorder von A startet nicht wieder', async () => {
+  it('Dashboard von B offen, A läuft: A wird aufgenommen; B startet, B löst A ab; danach nimmt kein alter Recorder auf', async () => {
     const locks = new FakeWebLocks();
     const shared = { running: new Set<object>(), maxRunning: 0 };
     boot({
@@ -446,31 +460,35 @@ describe('RecordingProvider: Wechsel der Session', () => {
       ui: <Dashboard id={B_ID} />,
     });
     await waitFor(() => expect(shownSession()).toBe(A_ID));
-    await settle();
-    // A läuft, aber kein Dashboard zeigt A: keine Aufnahme (Schalter)
-    expect(kind()).toBe('inactive');
-    expect(rec.getUserMedia).not.toHaveBeenCalled();
+    // A läuft, das Dashboard zeigt B: aufgenommen wird A
+    await waitFor(() => expect(kind()).toBe('rec'));
+    expect(screen.getByTestId('shown')).toHaveTextContent('false');
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+    const first = screen.getByTestId('recording-id').textContent;
 
     await switchToB('b-first');
     await waitFor(() => expect(shownSession()).toBe(B_ID));
     await waitFor(() => expect(kind()).toBe('rec'));
+    await waitFor(() => expect(screen.getByTestId('recording-id').textContent).not.toBe(first));
     await settle(150);
-    // Genau eine Aufnahme, und zwar für B
-    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
-    expect(rec.mr.instances).toHaveLength(1);
+    // Genau zwei Aufnahmen: A, dann B; nie zwei zugleich
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(2);
+    expect(rec.mr.instances).toHaveLength(2);
     expect(shared.maxRunning).toBe(1);
-    expect(uploads(new RegExp(`^POST .*/sessions/${B_ID}/recordings$`))).toHaveLength(1);
+    expect(locks.maxHeld).toBe(1);
+    expect(uploads(new RegExp(`^POST .*/sessions/${A_ID}/recordings$`)).length).toBeGreaterThanOrEqual(1);
+    expect(uploads(new RegExp(`^POST .*/sessions/${B_ID}/recordings$`)).length).toBeGreaterThanOrEqual(1);
 
     // B endet und gibt die Sperre frei: Auch jetzt nimmt kein übrig gebliebener Recorder für A auf
     await sync.emit(
       'session.updated',
       session(B_ID, { number: 8, state: 'beendet', updated_at: '2026-11-04T08:50:00Z' }),
     );
-    await waitFor(() => expect(uploads(/^POST .*\/complete$/)).toHaveLength(1));
+    await waitFor(() => expect(shared.running.size).toBe(0));
     await settle(150);
-    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(2);
     expect(shared.running.size).toBe(0);
-    expect(uploads(new RegExp(`^POST .*/sessions/${A_ID}/recordings$`))).toHaveLength(0);
+    expect(shared.maxRunning).toBe(1);
   });
 
   it('A → B → C kurz hintereinander ohne Sperre: C wartet auf A, nicht nur auf B', async () => {

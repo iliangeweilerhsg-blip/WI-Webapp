@@ -19,12 +19,12 @@ Diese Liste hilft, dass die Aufnahme in der Vorlesung durchläuft. Sie gilt für
 ## Aufnahme
 
 1. **Starten:** Auf **Heute** gibt es für den Termin einen Knopf **Jetzt starten** (je nach Zeit auch **Start** oder **Früher starten**). Ohne Termin: **Session starten** und ein Modul wählen.
-2. Erlaube dem Browser das Mikrofon. Fragt er nicht, erscheint in der Statusleiste **Aufnahme starten**. Klicke darauf.
+2. Erlaube dem Browser das Mikrofon. Fragt er nicht, erscheint unten **Aufnahme starten** (Statusleiste oder Aufnahme-Leiste). Klicke darauf.
 3. Prüfe in der Statusleiste die Anzeige **REC** mit Laufzeit. Steht dort etwas anderes, zum Beispiel **Zugriff verweigert**, **Mikrofon fehlt**, **Aufnahme gestört**, **Pausiert** oder ein Hinweis, dass nicht aufgenommen wird, dann wird nichts aufgenommen.
 4. **Pausieren:** **Pause**. Danach unbedingt **Fortsetzen**, sonst bleibt der Rest ohne Ton.
-5. **Beenden:** **Beenden** oder das Tastenkürzel ⌘⇧S. Beides fragt vorher nach („Session beenden?“) und antwortet mit **Weiter aufnehmen** oder **Session beenden**. Das Kürzel gilt nur in der Vorlesungs-Ansicht. Auf **Heute** gibt es den Knopf **Beenden**, die Frage heißt dort **Weiterlaufen lassen** oder **Session beenden**.
-6. Schließe den Tab der Vorlesung nicht. Ohne den Tab wird nichts aufgenommen, die Session läuft ohne Ton weiter.
-7. **Bleib in der Vorlesungs-Ansicht.** Die Aufnahme hängt an dieser Ansicht. Wechselst du in der Seitenleiste zu **Heute**, zu den Einstellungen oder in ein Modul, verlässt du die Ansicht und ihre Aufnahme endet. Auf **Heute** steht dann „Läuft · ohne Aufnahme“. Kehrst du über **Zur Vorlesung** zurück, beginnt die Aufnahme neu. Zeigt die Statusleiste **Aufnahme starten**, klicke darauf. Dazwischen fehlt der Ton. Brauchst du die Einstellungen, öffne die App dafür in einem zweiten Tab und lass den ersten Tab in der Vorlesungs-Ansicht.
+5. **Beenden:** **Beenden** oder das Tastenkürzel ⌘⇧S. Beides fragt vorher nach („Session beenden?“) und antwortet mit **Weiter aufnehmen** oder **Session beenden**. Das Kürzel gilt nur in der Vorlesungs-Ansicht. Auf **Heute** gibt es den Knopf **Beenden**, die Frage heißt dort **Weiter aufnehmen** (solange aufgenommen wird, sonst **Weiterlaufen lassen**) oder **Session beenden**.
+6. Schließe den Tab nicht und lade ihn nicht neu. Ohne den Tab wird nichts aufgenommen, die Session läuft ohne Ton weiter. Der Browser fragt vorher nach. Arbeite in **einem** Tab.
+7. **Du kannst die Vorlesungs-Ansicht verlassen.** Die Aufnahme läuft weiter, auch auf **Heute**, in den Einstellungen oder in einem Modul. Unten steht dann eine schmale Leiste mit **REC** und der Laufzeit. **Zur Vorlesung** bringt dich zurück. Steht dort etwas anderes als **REC**, wird nicht aufgenommen. Zeigt die Leiste **Aufnahme starten**, klicke darauf.
 
 Die App beendet die Session auch selbst: spätestens 30 Minuten nach dem Kalenderende (**Einstellungen → Vorlesung → Spätestens nach Kalenderende**) und nach höchstens 4 Stunden (**Höchstdauer**). Vorher erscheint ein Hinweis „weiter aufnehmen?“, mit dem du verlängerst.
 
@@ -40,8 +40,8 @@ Die Session bleibt „läuft“, bis die Grenze aus dem Absatz oben erreicht ist
 
 1. Öffne die **Docker**-App, falls sie nicht läuft. Die Datenbank läuft in Docker.
 2. Starte im Repo-Ordner `pnpm sg start`. Das startet die Datenbank, falls nötig, und den Core. Das dauert etwas. Läuft es nicht, prüft `pnpm sg doctor` die Voraussetzungen.
-3. Öffne im Browser **Heute**. Dort steht „Läuft · ohne Aufnahme“. Klicke **Zur Vorlesung**.
-4. Prüfe in der Statusleiste die Anzeige **REC** mit Laufzeit. Fehlt sie, klicke **Aufnahme starten** (Aufnahme, Schritt 2 und 3).
+3. Öffne im Browser **Heute**. Steht dort „Läuft · ohne Aufnahme“, klicke in der Karte **Aufnahme starten**. Danach steht „Läuft · Aufnahme“ und unten **REC**.
+4. Prüfe, dass unten **REC** mit Laufzeit steht (Aufnahme, Schritt 3). Auf **Heute** ist das die Aufnahme-Leiste, in der Vorlesungs-Ansicht die Statusleiste.
 5. Das iPad verbindet sich von selbst wieder. Was du dazwischen geschrieben hast, wartet in der Warteschlange und geht danach zum Mac. Zeigt das iPad den Mac nicht, hilft [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md).
 
 Im Modus **Auf Folie** bleibt das iPad so lange auf der letzten Folie stehen, bis der Mac wieder da ist.

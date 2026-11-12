@@ -49,7 +49,7 @@ Die IDs verweisen auf Abschnitt 3 (alt) und Abschnitt 4 (neu).
 |---|---|
 | **Muss** | Mac aufklappen, App läuft. iPad findet den Mac. |
 | **Heute** | Nach einem Neustart braucht es Docker und `pnpm sg start` (UX-21, Frage offen). Der Core hält den Mac während einer Session wach (#213). Das iPad verbindet sich von selbst neu, spätestens alle 30 s (`SyncBackoff`). Ohne Verbindung wählt man das Notizbuch frei und schreibt lokal (#224). |
-| **Kann schiefgehen** | Im Hotspot hat der Mac eine andere Adresse. Das iPad kennt nur die alte, es bleibt bei „neu koppeln“ (UX-12 offen). Neu koppeln geht am Mac nur unter Einstellungen → Geräte. Wer dafür die Vorlesungs-Ansicht verlässt, beendet die Aufnahme (UX-59). Ist die iPad-App älter als der Mac, zeigt sie trotzdem „Mac ●“ in Grün (UX-48). |
+| **Kann schiefgehen** | Im Hotspot hat der Mac eine andere Adresse. Das iPad kennt nur die alte, es bleibt bei „neu koppeln“ (UX-12 offen). Neu koppeln geht am Mac nur unter Einstellungen → Geräte. Die Aufnahme läuft dabei weiter (UX-59, erledigt mit #210). Ist die iPad-App älter als der Mac, zeigt sie trotzdem „Mac ●“ in Grün (UX-48). |
 
 ### 1.4 Vorlesung starten
 
@@ -65,7 +65,7 @@ Die IDs verweisen auf Abschnitt 3 (alt) und Abschnitt 4 (neu).
 |---|---|
 | **Muss** | Schreiben wie auf Papier. Folien folgen. Nichts stört. |
 | **Heute** | Seiten blättern, anlegen, sortieren, Vorlagen (#227). Modus „Auf Folie“: Das iPad folgt dem Folienwechsel am Mac, die Folie liegt unter der Schrift (#228). Der Mac zeigt die Striche live (#211) und die Folie darunter (#229). |
-| **Kann schiefgehen** | Der Folienwechsel wartet nur auf das Absetzen des Stifts. Mitten im Wort springt die Seite (UX-43). Blättern kann nur der Mac, das iPad nicht (UX-32, T1-15). Im isolierten Uni-WLAN geht „Auf Folie“ gar nicht (UX-60). Wer am Mac in die Seitenleiste klickt, beendet weiter die Aufnahme, „Heute“ sagt es jetzt aber ehrlich (UX-01 teilweise). In einem eigenen Notizbuch steht dauerhaft ein Banner, das nicht stimmt (UX-51). |
+| **Kann schiefgehen** | Der Folienwechsel wartet nur auf das Absetzen des Stifts. Mitten im Wort springt die Seite (UX-43). Blättern kann nur der Mac, das iPad nicht (UX-32, T1-15). Im isolierten Uni-WLAN geht „Auf Folie“ gar nicht (UX-60). Wer am Mac in die Seitenleiste klickt, beendet die Aufnahme nicht mehr: Sie läuft app-weit weiter, unten steht die Aufnahme-Leiste (UX-01, erledigt mit #210). In einem eigenen Notizbuch steht dauerhaft ein Banner, das nicht stimmt (UX-51). |
 
 ### 1.6 Pause
 
@@ -165,13 +165,13 @@ Die IDs verweisen auf Abschnitt 3 (alt) und Abschnitt 4 (neu).
 
 ## 3. Stand der Befunde aus Durchlauf 1
 
-**Summe:** 13 erledigt, 5 teilweise, 24 offen. Von den 24 offenen warten 9 auf eine Antwort des Owners (#201 bis #209).
+**Summe:** 14 erledigt, 4 teilweise, 24 offen. Von den 24 offenen warten 9 auf eine Antwort des Owners (#201 bis #209).
 
 ### Kategorie A (UX-01 bis UX-19)
 
 | ID | Stand | Beleg |
 |---|---|---|
-| UX-01 | teilweise | „Heute“ zeigt „Läuft · ohne Aufnahme“ (#220). Der Recorder hängt weiter an `StatusBar.tsx`. Rest in #210. |
+| UX-01 | erledigt | Der Recorder hängt an der App-Shell (`RecordingProvider`) und läuft über jede Navigation weiter. Unten steht die Aufnahme-Leiste, „Heute“ zeigt „Läuft · Aufnahme“ (#210, Teile 1 bis 3, Plan `docs/plaene/210-AUFNAHME-APPSHELL.md`). |
 | UX-02 | erledigt | `beforeunload` in `use-recording.ts` (#212). |
 | UX-03 | teilweise | Start gilt als Mikrofon-Wunsch, Hauptknopf „Aufnahme starten“ (#212). „Mikrofon testen“ in `LectureSettings.tsx` fehlt. |
 | UX-04 | erledigt | `caffeinate` über `keep-awake.ts` (#213). Der Hinweis „Tab verdeckt“ wurde bewusst wieder entfernt (#222). |
@@ -233,7 +233,7 @@ Kategorien: **A** sofort umsetzbar · **B** Frage an den Owner · **C** gehört 
 | UX-56 | Eigenes Notizbuch anlegen | Kein Feedback bei Fehlschlag, kein direktes Öffnen, gleiche Titel möglich. | niedrig | Nach dem Anlegen öffnen. Fehlschlag ruhig melden. Gleichen Titel im Modul ablehnen. | A |
 | UX-57 | iPad verliert die Verbindung, die Vorlesung endet | „Läuft gerade“ bleibt stehen, bis die App neu startet oder sich verbindet. Neue Seiten erhalten die alte Session. | niedrig | Ohne Verbindung „Lief zuletzt · Stand 10:42“ statt „Läuft gerade“. | A |
 | UX-58 | Anleitungen lesen | `VORLESUNGSTAG.md`, `IPAD.md` und `BACKUP-WIEDERHERSTELLEN.md` passen an mehreren Stellen nicht mehr zum Code. Der Mac-Neustart fehlt. | mittel | Anleitungen nachziehen. | A |
-| UX-59 | Im Hörsaal neu koppeln | Der Weg führt über Einstellungen → Geräte. Wer dafür das Dashboard verlässt, beendet die Aufnahme. | hoch | Gehört zu #210 (Recorder in der App-Hülle) und UX-12. Bis dahin: neuer Tab, in der Anleitung genannt. | C |
+| UX-59 | Im Hörsaal neu koppeln | Der Weg führt über Einstellungen → Geräte. Die Aufnahme läuft dabei weiter (erledigt mit #210, Teil 3). Offen bleibt UX-12 (neue Adresse im Hotspot). | hoch | Gehört zu #210 (Recorder in der App-Hülle, **erledigt**) und UX-12. | C |
 | UX-60 | Isoliertes Uni-WLAN | „Auf Folie“ braucht die Verbindung. Folien vorab laden und am iPad blättern fehlt. | hoch | T1-15, Frage 4 in #219. | C |
 | UX-61 | Startbildschirm des iPads | Zwei Platzhalter-Karten stehen über den Notizbüchern. | niedrig | Ausblenden, bis sie echt sind. | A |
 
@@ -353,7 +353,7 @@ Regel R1 bleibt: kein Dialog während einer Vorlesung.
 - **Beleg und Plan, nur Doku:**
   1. `VORLESUNGSTAG.md`, „Energiesparen“: Der Core hält den Mac während einer Session wach (`keep-awake.ts`, #213). Der Satz „Verlass dich nicht darauf“ ist überholt. Deckel offen bleibt richtig.
   2. `VORLESUNGSTAG.md`, „Beenden“: Auch der Klick fragt jetzt nach (#212, #220).
-  3. `VORLESUNGSTAG.md`, neu: Die Vorlesungs-Ansicht nicht verlassen. Für Einstellungen einen neuen Tab öffnen (UX-01, UX-59).
+  3. `VORLESUNGSTAG.md`, neu: Die Aufnahme läuft beim Navigieren weiter, unten steht die Aufnahme-Leiste (UX-01, UX-59, erledigt mit #210 Teil 3).
   4. `VORLESUNGSTAG.md`, neuer Abschnitt „Wenn der Mac neu startet“: Docker, `pnpm sg start`, „Zur Vorlesung“, REC prüfen, das iPad verbindet sich selbst.
   5. `IPAD.md`: „Umbenennen und Löschen geht am Mac“ streichen, bis UX-52 da ist.
   6. `BACKUP-WIEDERHERSTELLEN.md`: Nach dem Restore auf dem iPad die Notizbücher öffnen, bis UX-46 da ist.
@@ -408,7 +408,7 @@ Die Liste enthält auch die offenen A-Punkte aus Durchlauf 1.
 
 | Rang | ID | Warum an dieser Stelle | Größe |
 |---|---|---|---|
-| 1 | UX-01 Rest (#210) | Ein Klick aus der Vorlesungs-Ansicht beendet weiter die Aufnahme. UX-59 kommt dazu. | mittel |
+| 1 | UX-01 Rest (#210) | **Erledigt mit #210 Teil 3:** Die Aufnahme läuft beim Navigieren weiter. UX-59 ist damit ebenfalls erledigt. | mittel |
 | 2 | UX-43 | Stört in jeder Vorlesung mit Folien, mehrmals. | klein bis mittel |
 | 3 | UX-46 | Nach einem Restore fehlen Notizen am Mac, ohne dass es jemand merkt. | mittel |
 | 4 | UX-50, UX-48 | Die App fällt aus oder synchronisiert nicht, und der Hinweis steht am falschen Ort. | klein |

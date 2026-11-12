@@ -38,4 +38,15 @@ describe('OtherTabBanner', () => {
     act(() => emit('online'));
     expect(screen.queryByRole('button', { name: 'Hier übernehmen' })).toBeNull();
   });
+
+  it('meldet die Nutzeraktion vor dem Übernehmen (onTakeOver, dann takeOver)', async () => {
+    const { src, takeOver } = source('other_tab');
+    const order: string[] = [];
+    const onTakeOver = vi.fn(() => void order.push('intent'));
+    takeOver.mockImplementation(() => void order.push('takeOver'));
+    render(<OtherTabBanner client={src} onTakeOver={onTakeOver} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Hier übernehmen' }));
+    expect(onTakeOver).toHaveBeenCalledOnce();
+    expect(order).toEqual(['intent', 'takeOver']);
+  });
 });

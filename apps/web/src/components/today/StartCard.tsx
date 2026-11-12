@@ -19,6 +19,7 @@ import {
   stopSession,
 } from '../../lib/sessions.ts';
 import { moduleColorVar } from '../../lib/modules.ts';
+import { useRecordingFor, type RecordingKind } from '../../lib/recording';
 import { rueckblickHref } from '../../lib/transcript.ts';
 import { useNow } from './use-today.ts';
 import {
@@ -67,8 +68,6 @@ export interface StartCardProps {
   now: number;
   /** Eine vergessene aktive Session läuft noch; der Core beendet sie beim Start (§9.1) */
   previousRunning?: boolean;
-  /** Dieser Tab ist Folge-Tab (ein anderer Tab hält die Sync-Leader-Rolle) */
-  otherTab?: boolean;
   /** Zusätzliche Klassen für den Kartenrand (z. B. Hervorhebung bei der Beenden-Frage) */
   className?: string;
   /** Neue Fassung der Session aus einer Antwort des Core übernehmen */
@@ -81,13 +80,15 @@ export function StartCard({
   entry,
   now,
   previousRunning = false,
-  otherTab = false,
   className = '',
   onSession,
   onRefetch,
 }: StartCardProps) {
   const session = entry.session;
   const router = useRouter();
+  // Die Aufnahme gehört der App-Shell (Issue #210): Die Karte zeigt ihren Stand und kann sie starten (E10)
+  const rec = useRecordingFor(session?.id ?? '');
+  const recKind = rec.kind;
   const [busy, setBusy] = useState<Action | null>(null);
   // Doppel-Tipp im selben Render-Takt abfangen (der Zustand `busy` kommt erst im nächsten)
   const busyRef = useRef(false);
@@ -178,11 +179,17 @@ export function StartCard({
     }
   }
 
-  // Auf „Heute“ läuft nie eine Aufnahme (sie gehört der Vorlesungs-Ansicht): kein REC-Rot, sondern ein hohler Punkt (UX-01)
+  // Roter Punkt nur, wenn wirklich aufgenommen wird; sonst hohl (UX-01)
   const dot =
     state === 'laeuft' || state === 'pausiert' ? (
-      <span aria-hidden="true" className="inline-block size-2.5 rounded-full border-2 border-text-muted" />
+      <span
+        aria-hidden="true"
+        className={`inline-block size-2.5 rounded-full ${
+          state === 'laeuft' && recKind === 'rec' ? 'bg-record' : 'border-2 border-text-muted'
+        }`}
+      />
     ) : null;
+  const recAction = state === 'laeuft' ? recordingAction(recKind) : null;
 
   const titleId = `start-card-${session.id}`;
   return (
@@ -194,10 +201,10 @@ export function StartCard({
     >
       <p className="flex items-center gap-2 text-sm font-medium text-text-muted">
         {dot}
-        <span>{heading(state, otherTab)}</span>
+        <span>{heading(state, recKind)}</span>
         {/* Zustand für Screenreader als ruhige Statusmeldung */}
         <span role="status" className="sr-only">
-          {statusText(state, otherTab)}
+          {statusText(state)}
         </span>
       </p>
 
@@ -222,7 +229,7 @@ export function StartCard({
             {[timeRange, entry.room].filter(Boolean).join(' · ') || 'Spontane Session'}
           </p>
           <p className="mt-2 text-md">
-            {detail(state, { now, startsInMs, plannedStart, startedAt, session, otherTab })}
+            {detail(state, { now, startsInMs, plannedStart, startedAt, session, recKind })}
           </p>
           {state === 'verpasst' ? (
             <p className="mt-1 text-md">
@@ -263,6 +270,11 @@ export function StartCard({
                   : earlyReady
                     ? 'Start'
                     : 'Jetzt starten'}
+            </button>
+          ) : null}
+          {recAction ? (
+            <button type="button" className={primary} onClick={rec.start}>
+              {recAction}
             </button>
           ) : null}
           {state === 'laeuft' || state === 'pausiert' ? (
@@ -318,7 +330,7 @@ export function StartCard({
       {confirmStop && (state === 'laeuft' || state === 'pausiert') ? (
         <div className="mt-4 overflow-hidden rounded-md border border-border">
           <StopConfirm
-            cancelLabel="Weiterlaufen lassen"
+            cancelLabel={state === 'laeuft' && recKind === 'rec' ? 'Weiter aufnehmen' : 'Weiterlaufen lassen'}
             onCancel={() => setConfirmStop(false)}
             onConfirm={() => {
               setConfirmStop(false);
@@ -337,21 +349,44 @@ export function StartCard({
   );
 }
 
-function heading(state: CardState, otherTab: boolean): string {
-  if (state === 'laeuft') return otherTab ? 'Läuft · anderer Tab' : 'Läuft · ohne Aufnahme';
-  return HEADINGS[state];
+/** Knopf in der Karte, wenn nicht aufgenommen wird, aber ein Klick helfen kann (E10) */
+function recordingAction(kind: RecordingKind): string | null {
+  if (kind === 'needs-start') return 'Aufnahme starten';
+  if (kind === 'mic-denied' || kind === 'mic-missing' || kind === 'error') return 'Erneut versuchen';
+  return null;
 }
 
-function statusText(state: CardState, otherTab: boolean): string {
+function heading(state: CardState, kind: RecordingKind): string {
+  if (state !== 'laeuft') return HEADINGS[state];
+  switch (kind) {
+    case 'rec':
+      return 'Läuft · Aufnahme';
+    case 'starting':
+      return 'Läuft · Aufnahme startet';
+    case 'waiting':
+      return 'Läuft · wartet';
+    case 'other-tab':
+      return 'Läuft · anderer Tab';
+    case 'needs-start':
+    case 'mic-denied':
+    case 'mic-missing':
+    case 'error':
+      return 'Läuft · ohne Aufnahme';
+    default:
+      // Ohne Shell (Tests ohne Provider) ist der Stand der Aufnahme unbekannt
+      return HEADINGS.laeuft;
+  }
+}
+
+/** Die Karte sagt nur den Zustand der Session an, die Aufnahme-Leiste den der Aufnahme (nichts doppelt vorlesen) */
+function statusText(state: CardState): string {
   switch (state) {
     case 'bevorstehend':
       return 'Die Session beginnt später.';
     case 'bereit':
       return 'Die Session ist bereit zum Start.';
     case 'laeuft':
-      return otherTab
-        ? 'Die Session läuft. Ein anderer Tab hält die Verbindung.'
-        : 'Die Session läuft, aber hier wird nicht aufgenommen.';
+      return 'Die Session läuft.';
     case 'pausiert':
       return 'Die Session ist pausiert.';
     case 'verpasst':
@@ -363,6 +398,29 @@ function statusText(state: CardState, otherTab: boolean): string {
   }
 }
 
+function recordingDetail(kind: RecordingKind): string | null {
+  switch (kind) {
+    case 'rec':
+      return 'Die Aufnahme läuft, auch wenn du die Seite wechselst.';
+    case 'starting':
+      return 'Das Mikrofon wird geöffnet.';
+    case 'waiting':
+      return 'Die Aufnahme wartet auf einen anderen Tab.';
+    case 'needs-start':
+      return 'Es wird nicht aufgenommen.';
+    case 'mic-denied':
+      return 'Der Zugriff auf das Mikrofon ist verweigert.';
+    case 'mic-missing':
+      return 'Es wurde kein Mikrofon gefunden.';
+    case 'error':
+      return 'Die Aufnahme ist gestört.';
+    case 'other-tab':
+      return 'Für die Aufnahme ist ein anderer Tab zuständig.';
+    default:
+      return null;
+  }
+}
+
 function detail(
   state: CardState,
   c: {
@@ -371,7 +429,7 @@ function detail(
     plannedStart: number | null;
     startedAt: number | null;
     session: Session;
-    otherTab: boolean;
+    recKind: RecordingKind;
   },
 ): string {
   switch (state) {
@@ -384,9 +442,7 @@ function detail(
     case 'laeuft':
       return [
         c.startedAt !== null ? `Seit ${formatClock(c.startedAt)} Uhr.` : null,
-        c.otherTab
-          ? 'Ein anderer Tab hält die Verbindung.'
-          : 'Die Aufnahme läuft nur in der Vorlesungs-Ansicht.',
+        recordingDetail(c.recKind),
       ]
         .filter(Boolean)
         .join(' ');
