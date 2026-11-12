@@ -136,6 +136,68 @@ enum InkOpBuilder {
         return corrected([built], offsetMS: offsetMS).first
     }
 
+    /// `page.update` mit dem vollständigen Stand der Seite (`fields`, VERTRAEGE §11.3). `version` ist die Version,
+    /// auf der die Änderung beruht, also `page.version` **vor** dem Hochzählen. Die Bibliothek zählt erst nach dem
+    /// Einreihen hoch (§11.2: jede weitere Offline-Änderung beruht auf der vorigen).
+    static func pageUpdate(
+        page: LibraryPage,
+        nowMS: Int,
+        offsetMS: Int?,
+        makeID: () -> String
+    ) -> OutboxDraft? {
+        let op = PageUpdateOp(
+            at: nowMS,
+            clockUncertain: true,
+            data: PageUpdateData(
+                fields: PageUpdateFields(
+                    attachedSlideID: page.attachedSlideID,
+                    backgroundSlideID: page.backgroundSlideID,
+                    index: page.index,
+                    sessionID: page.sessionID,
+                    template: page.template
+                ),
+                pageID: page.id,
+                version: page.version
+            ),
+            kind: .pageUpdate,
+            opID: makeID(),
+            origin: nil,
+            seq: nil,
+            stream: page.stream,
+            type: .op
+        )
+        guard
+            let built = makeDraft(
+                .pageUpdate(op), kind: "page.update", stream: page.stream, pageID: page.id, sessionStartMS: nil)
+        else { return nil }
+        return corrected([built], offsetMS: offsetMS).first
+    }
+
+    /// `page.delete`. Der Core legt die Seite samt Strichen in den Papierkorb (§11.2).
+    static func pageDelete(
+        page: LibraryPage,
+        nowMS: Int,
+        offsetMS: Int?,
+        makeID: () -> String
+    ) -> OutboxDraft? {
+        let op = PageDeleteOp(
+            at: nowMS,
+            clockUncertain: true,
+            data: PageDeleteData(pageID: page.id),
+            kind: .pageDelete,
+            opID: makeID(),
+            origin: nil,
+            seq: nil,
+            stream: page.stream,
+            type: .op
+        )
+        guard
+            let built = makeDraft(
+                .pageDelete(op), kind: "page.delete", stream: page.stream, pageID: page.id, sessionStartMS: nil)
+        else { return nil }
+        return corrected([built], offsetMS: offsetMS).first
+    }
+
     /// Rechnet eine Operation mit unsicherer Uhr auf die synchronisierte Zeit um (VERTRAEGE §11.5):
     /// `at += o`, `stroke.created_at += o`, `t_start = max(0, created_at − Sessionstart)`,
     /// `t_end = t_start + Dauer`, danach `clock_uncertain = false`. Eine schon korrigierte Operation

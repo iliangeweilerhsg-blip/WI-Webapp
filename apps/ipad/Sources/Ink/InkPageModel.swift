@@ -42,6 +42,8 @@ final class InkPageModel {
     @ObservationIgnored var sessionStartedAt: Date?
     /// Anschluss für den Sync (T1-14): bekommt jede Änderung im neutralen Format
     @ObservationIgnored var onStrokeChanges: (([InkStrokeChange]) -> Void)?
+    /// Wird nach jedem erfolgreichen Speichern aufgerufen, mit dem geschriebenen Stand (Vorschaubild der Seitenleiste)
+    @ObservationIgnored var onSaved: ((InkPageSnapshot) -> Void)?
     /// Liefert die höchste Nummer der Warteschlange (`SyncOutbox.lastNumber`). Wird beim Speichern festgehalten.
     @ObservationIgnored var outboxNumberProvider: (() -> Int)?
     /// Lokaler Stand und Core müssen abgeglichen werden: nach einem Absturz, bei neu vergebenen IDs, bei einem
@@ -212,6 +214,7 @@ final class InkPageModel {
             loadedOutboxNumber = snapshot.outboxNumber
             isDirty = false
             if saveFailed { saveFailed = false }
+            onSaved?(snapshot)
         } catch {
             if !saveFailed { saveFailed = true }
         }

@@ -2,7 +2,7 @@
 
 So kommt die App „Studien-Gehirn“ auf dein iPad. Du brauchst kein bezahltes Entwicklerkonto. Dauer beim ersten Mal: etwa 20 Minuten.
 
-**Stand:** Die App kann koppeln, zeigt den Verbindungsstatus und listet deine Notizbücher je Modul. Seiten blättern, Vorlagen und Folien folgen.
+**Stand:** Die App kann koppeln, zeigt den Verbindungsstatus und listet deine Notizbücher je Modul. Seiten blättern, anlegen, umsortieren und löschen, dazu Vorlagen (liniert, kariert, Punktraster). Schreibmodi und Folien folgen.
 
 ## Was du brauchst
 
@@ -95,7 +95,18 @@ Auf dem Startbildschirm steht je Modul eine Karte mit den Notizbüchern des Modu
 - **Titel der Schreibfläche:** „Modul · Notizbuch“. So siehst du immer, wohin geschrieben wird.
 - **Update von einer älteren Version:** Deine bisherigen Seiten und noch nicht gesendete Striche bleiben erhalten. Die App übernimmt sie beim ersten Start in die neue Liste.
 
-Umbenennen und Löschen von Notizbüchern geht am Mac. Mehrere Seiten je Notizbuch, Vorlagen und Folien folgen in einem späteren Schritt.
+Umbenennen und Löschen von Notizbüchern geht am Mac.
+
+## Seiten und Vorlagen
+
+Ein Notizbuch hat viele Seiten. Eine Seite ist sichtbar.
+
+- **Blättern:** Oben steht „‹ Seite 3 / 12 ›“. Tippe auf die Pfeile oder wische mit einem Finger nach links oder rechts. Das Wischen geht nur, solange du nicht hineingezoomt hast. Stört es dich beim Zoomen oder Scrollen, nimm die Pfeile.
+- **Neue Seite:** Auf der letzten Seite legt der Pfeil „›“ (oder der Wisch) eine neue Seite an. Das geht nur, wenn die aktuelle Seite mindestens einen Strich hat. Die neue Seite übernimmt die Vorlage der aktuellen. Über **Seiten ▤** und **+** wählst du die Vorlage selbst.
+- **Seitenleiste:** **Seiten ▤** öffnet ein Panel mit Vorschaubildern. Tippe ein Bild an, um zur Seite zu springen. Halte ein Bild gedrückt und ziehe es an eine andere Stelle, um die Seite zu verschieben. Gedrückt halten öffnet außerdem das Menü mit **Vorlage** und **Löschen**. Das Panel schließt du mit dem **✕**. Der Stift schreibt auch bei offenem Panel weiter. Steht unten „N weitere Seiten liegen nur am Mac“, hat der Mac Seiten, die dieses iPad nicht hat.
+- **Vorlage:** Im Menü **⋯** oben (oder in der Seitenleiste) wählst du Blanko, Liniert, Kariert oder Punktraster. Kariert und Punktraster haben ein 5-mm-Raster.
+- **Löschen ohne Rückfrage:** **⋯ → Seite löschen** (oder in der Seitenleiste). Die Seite verschwindet sofort. Unten erscheint 5 Sekunden lang **Seite gelöscht · Rückgängig**. Tippst du darauf, ist die Seite wieder da. Sonst landet sie im Papierkorb am Mac. Verlässt du die Schreibfläche, gilt die Frist als abgelaufen. Auf dem iPad bleiben Zeichnung und Vorschaubild noch erhalten.
+- **Alles geht offline.** Anlegen, Umsortieren, Vorlage und Löschen werden gemerkt und beim nächsten Verbinden zum Mac geschickt. Haben beide Seiten dieselbe Seite verändert, gewinnt der Stand vom iPad.
 
 ## Die App läuft nur 7 Tage
 

@@ -102,6 +102,11 @@ struct FileInkPageStore: InkPageStore {
         }
     }
 
+    /// `Ink/<page_id>/thumb.jpg`: Vorschaubild der Seitenleiste (T1-13)
+    func thumbnailURL(pageID: String) -> URL {
+        folder(for: pageID).appendingPathComponent("thumb.jpg")
+    }
+
     private func folder(for pageID: String) -> URL {
         // Seiten-IDs sind UUIDs. Alles andere wird entschärft, damit kein Pfad aus dem Ordner herausführt.
         let safe = pageID.filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }

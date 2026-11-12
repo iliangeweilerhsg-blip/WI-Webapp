@@ -11,6 +11,8 @@ import Observation
 final class InkLibraryService {
     /// Abrufe der Bibliothek höchstens in diesem Abstand (Startbildschirm und jedes `welcome`)
     static let refreshInterval: TimeInterval = 30
+    /// Löschfrist: So lange lässt sich eine gelöschte Seite zurückholen. `page.delete` wird erst danach eingereiht.
+    static let deleteGrace: Duration = .seconds(5)
 
     /// Die Engine, über die Operationen laufen
     let sync: SyncEngine
@@ -27,20 +29,33 @@ final class InkLibraryService {
     @ObservationIgnored private let now: @MainActor () -> Date
     @ObservationIgnored private var lastRefreshAt: Date?
     @ObservationIgnored private var isRefreshing = false
+    @ObservationIgnored private let graceSleep: @MainActor (Duration) async throws -> Void
+    /// Laufende Löschfristen je Seite
+    @ObservationIgnored private var graceTasks: [String: _Concurrency.Task<Void, Never>] = [:]
+    /// Seiten, deren `page_version_conflict` gerade aufgelöst wird
+    @ObservationIgnored private var resolvingConflicts = Set<String>()
 
     init(
         store: any InkLibraryStore,
         sync: SyncEngine,
         client: CoreClient,
         pageStore: (any InkPageStore)? = nil,
-        now: @escaping @MainActor () -> Date = { Date() }
+        now: @escaping @MainActor () -> Date = { Date() },
+        graceSleep: @escaping @MainActor (Duration) async throws -> Void = { try await _Concurrency.Task.sleep(for: $0) }
     ) {
         self.store = store
         self.sync = sync
         self.client = client
         self.pageStore = pageStore
         self.now = now
+        self.graceSleep = graceSleep
         adoptLegacyTestPage()
+        sync.onPageVersionConflict = { [weak self] pageID in
+            _Concurrency.Task { await self?.resolveVersionConflict(pageID: pageID) }
+        }
+        // Stürzte die App in der Löschfrist ab, steht die Seite als gelöscht in der Bibliothek, ihr `page.delete`
+        // fehlt aber noch: jetzt nachreihen
+        flushPendingDeletes()
     }
 
     // MARK: Lesen
@@ -74,6 +89,12 @@ final class InkLibraryService {
     func page(_ id: String) -> LibraryPage? {
         track()
         return store.page(id)
+    }
+
+    /// Sichtbare Seiten eines Notizbuchs nach `index`, dann `id`. Gelöschte (auch in der Löschfrist) fehlen.
+    func pages(inNotebook notebookID: String) -> [LibraryPage] {
+        track()
+        return store.pages(inNotebook: notebookID)
     }
 
     func moduleName(_ moduleID: String) -> String? {
@@ -141,10 +162,12 @@ final class InkLibraryService {
             return
         }
         guard !_Concurrency.Task.isCancelled, store.notebook(notebookID) != nil else { return }
-        // Seiten in der Löschfrist (5 s) zählen später ebenfalls zu den ausstehenden Löschungen. Gelöscht wird erst
-        // mit dem Seitenwechsel (T1-13 Teil 1), in diesem Schritt gibt es sie noch nicht.
+        // Seiten in der Löschfrist (5 s) zählen zu den ausstehenden Löschungen: Ihr `page.delete` steht noch nicht in
+        // der Warteschlange, der Core kennt sie aber noch. Sonst käme eine eben gelöschte Seite zurück. Die Menge wird
+        // erst nach dem Abruf gelesen: Eine Seite, die währenddessen gelöscht wurde, gehört dazu.
+        let grace = Set(store.pagesInDeleteGrace().map(\.id))
         let updates = updatesBefore.union(sync.pendingPageIDs(kind: "page.update"))
-        let deletes = deletesBefore.union(sync.pendingPageIDs(kind: "page.delete"))
+        let deletes = deletesBefore.union(sync.pendingPageIDs(kind: "page.delete")).union(grace)
         store.mergePages(remote, notebookID: notebookID, pendingUpdatePageIDs: updates, pendingDeletePageIDs: deletes)
 
         // Neue `db_epoch`: Eine Seite, die der Core nicht mehr kennt und die nie wieder geöffnet wird, käme sonst
@@ -312,7 +335,7 @@ final class InkLibraryService {
             page = LibraryPage(
                 id: InkID.uuidV7(),
                 notebookID: notebook.id,
-                index: max(0, notebook.remoteMaxIndex) + 1,
+                index: nextIndex(in: notebook),
                 template: .blanko,
                 widthPt: LibraryPage.a4Width,
                 heightPt: LibraryPage.a4Height,
@@ -341,7 +364,257 @@ final class InkLibraryService {
         return makeBinding(notebook: notebook, page: page)
     }
 
+    // MARK: Seiten (T1-13 Teil 1)
+
+    /// Hängt eine Seite an: `index` = höchster bekannter Index + 1 (lokal, in der Löschfrist und laut
+    /// `GET /notebooks/{id}/pages`, VERTRAEGE §7.4). Erst die Bibliothek, dann `page.create`. Die Session setzt der
+    /// Dienst nur, wenn die laufende Session zum Modul des Notizbuchs gehört.
+    /// - Returns: `nil`, wenn das Notizbuch unbekannt ist oder das Schreiben scheitert
+    func addPage(
+        notebookID: String, template: PageTemplate, size: CGSize, backgroundSlideID: String?,
+        attachedSlideID: String?
+    ) -> LibraryPage? {
+        guard let notebook = store.notebook(notebookID), size.width > 0, size.height > 0 else { return nil }
+        let page = LibraryPage(
+            id: InkID.uuidV7(),
+            notebookID: notebook.id,
+            index: nextIndex(in: notebook),
+            template: template,
+            widthPt: Double(size.width),
+            heightPt: Double(size.height),
+            sessionID: matchingSession(moduleID: notebook.moduleID)?.id,
+            backgroundSlideID: backgroundSlideID,
+            attachedSlideID: attachedSlideID,
+            version: 1,
+            createQueued: false,
+            needsReconcile: false,
+            deletedAtMS: nil,
+            deleteQueued: false
+        )
+        store.upsert(page)
+        guard let queued = ensureCreateQueued(page, notebook: notebook) else {
+            store.removePage(page.id)
+            bump()
+            return nil
+        }
+        bump()
+        return queued
+    }
+
+    /// Öffnet eine bestimmte Seite als Schreibziel (Blättern, Seitenleiste). Merkt sie als letzte Seite des Notizbuchs.
+    /// - Returns: `nil` für unbekannte oder gelöschte Seiten
+    func openPage(pageID: String) -> InkBinding? {
+        guard let page = store.page(pageID), page.deletedAtMS == nil, let notebook = store.notebook(page.notebookID),
+            let queued = ensureCreateQueued(page, notebook: notebook)
+        else { return nil }
+        store.setLast(notebookID: notebook.id, pageID: queued.id)
+        bump()
+        return makeBinding(notebook: notebook, page: queued)
+    }
+
+    /// Setzt die Vorlage. Von oder nach „Folie“ wechselt die Seite nicht (VERTRAEGE §7.4). Reiht ein `page.update` mit
+    /// dem vollständigen Stand ein.
+    /// - Returns: `false` bei unbekannter oder gelöschter Seite, bei „Folie“ und wenn das Schreiben scheitert
+    @discardableResult
+    func setTemplate(pageID: String, _ template: PageTemplate) -> Bool {
+        guard let page = store.page(pageID), page.deletedAtMS == nil, page.template != .folie, template != .folie
+        else { return false }
+        if page.template == template { return true }
+        var updated = page
+        updated.template = template
+        return commitUpdates([(original: page, updated: updated)])
+    }
+
+    /// Verschiebt eine Seite von Platz `from` nach `to` (0-basiert, in der Reihenfolge der sichtbaren Seiten).
+    /// Nummeriert dicht neu (1 … n) und reiht ein `page.update` je Seite ein, deren `index` sich ändert. Jede
+    /// Operation beruht auf der Version der Seite, danach steigt sie um 1.
+    /// - Returns: `false` bei ungültigen Plätzen oder wenn das Schreiben scheitert. Gleicher Platz: `true`, nichts
+    ///   wird eingereiht.
+    @discardableResult
+    func movePage(notebookID: String, from: Int, to: Int) -> Bool {
+        var pages = store.pages(inNotebook: notebookID)
+        guard pages.indices.contains(from), pages.indices.contains(to) else { return false }
+        if from == to { return true }
+        let moved = pages.remove(at: from)
+        pages.insert(moved, at: to)
+        var changes: [(original: LibraryPage, updated: LibraryPage)] = []
+        for (offset, page) in pages.enumerated() where page.index != offset + 1 {
+            var updated = page
+            updated.index = offset + 1
+            changes.append((original: page, updated: updated))
+        }
+        return commitUpdates(changes)
+    }
+
+    /// Löscht mit Frist (kein Dialog): Die Seite ist sofort unsichtbar, `page.delete` wird erst nach
+    /// `deleteGrace` (5 s) eingereiht, oder früher mit `flushPendingDeletes`. Bis dahin bringt `undoDelete` sie
+    /// vollständig zurück. Zeichnung und Vorschaubild bleiben auf dem iPad.
+    func deletePage(pageID: String) {
+        guard var page = store.page(pageID), page.deletedAtMS == nil else { return }
+        page.deletedAtMS = nowMS()
+        page.deleteQueued = false
+        store.upsert(page)
+        scheduleCommit(pageID: pageID)
+        bump()
+    }
+
+    /// Holt eine Seite aus der Löschfrist zurück. Nach Ablauf der Frist (`page.delete` eingereiht) geht das nicht mehr.
+    @discardableResult
+    func undoDelete(pageID: String) -> Bool {
+        guard var page = store.page(pageID), page.deletedAtMS != nil, !page.deleteQueued else { return false }
+        graceTasks[pageID]?.cancel()
+        graceTasks[pageID] = nil
+        page.deletedAtMS = nil
+        store.upsert(page)
+        bump()
+        return true
+    }
+
+    /// Reiht `page.delete` für alle Seiten in der Löschfrist sofort ein (Verlassen, Hintergrund, Start)
+    func flushPendingDeletes() {
+        for page in store.pagesInDeleteGrace() {
+            graceTasks[page.id]?.cancel()
+            commitDelete(pageID: page.id)
+        }
+    }
+
+    private func scheduleCommit(pageID: String) {
+        graceTasks[pageID]?.cancel()
+        let sleeper = graceSleep
+        graceTasks[pageID] = _Concurrency.Task { [weak self] in
+            do {
+                try await sleeper(InkLibraryService.deleteGrace)
+            } catch {
+                return
+            }
+            self?.commitDelete(pageID: pageID)
+        }
+    }
+
+    /// Die Frist ist um: `page.delete` einreihen und die Bibliothek vermerken. Scheitert das Einreihen, bleibt die
+    /// Seite in der Löschfrist und der nächste `flushPendingDeletes` versucht es erneut.
+    @discardableResult
+    private func commitDelete(pageID: String) -> Bool {
+        graceTasks[pageID] = nil
+        guard var page = store.page(pageID), page.deletedAtMS != nil, !page.deleteQueued else { return true }
+        // Kennt der Core die Seite nicht (`page.create` nie eingereiht), gibt es nichts zu löschen
+        if page.createQueued {
+            guard
+                let draft = InkOpBuilder.pageDelete(
+                    page: page, nowMS: nowMS(), offsetMS: sync.clockOffsetForDrafts, makeID: { InkID.uuidV7() }),
+                sync.enqueue(drafts: [draft])
+            else { return false }
+        }
+        page.deleteQueued = true
+        store.upsert(page)
+        bump()
+        return true
+    }
+
+    /// Schreibt geänderte Seiten in die Bibliothek (Version + 1) und reiht je Seite ein `page.update` ein. Scheitert
+    /// das Einreihen, wird die Bibliothek zurückgesetzt. Seiten ohne `createQueued` bekommen kein `page.update`:
+    /// Ihr `page.create` trägt später schon den neuen Stand.
+    private func commitUpdates(_ changes: [(original: LibraryPage, updated: LibraryPage)]) -> Bool {
+        var drafts: [OutboxDraft] = []
+        var stored: [LibraryPage] = []
+        for change in changes {
+            var page = change.updated
+            if change.original.createQueued {
+                guard
+                    let draft = InkOpBuilder.pageUpdate(
+                        page: change.updated, nowMS: nowMS(), offsetMS: sync.clockOffsetForDrafts,
+                        makeID: { InkID.uuidV7() })
+                else { return false }
+                drafts.append(draft)
+                page.version = change.original.version + 1
+            }
+            stored.append(page)
+        }
+        // Erst die Bibliothek, dann die Operationen
+        for page in stored {
+            store.upsert(page)
+        }
+        if !drafts.isEmpty, !sync.enqueue(drafts: drafts) {
+            for change in changes {
+                store.upsert(change.original)
+            }
+            bump()
+            return false
+        }
+        bump()
+        return true
+    }
+
+    // MARK: page_version_conflict (VERTRAEGE §11.2)
+
+    /// Der Core hat ein `page.update` abgelehnt, weil die Version nicht stimmt. Ablauf:
+    /// 1. Läuft für die Seite schon eine Auflösung, passiert nichts.
+    /// 2. `GET /pages/{id}`. Bei 404 werden die wartenden `page.update` der Seite verworfen.
+    /// 3. Weichen die lokalen Felder vom Core ab, geht **ein** neues `page.update` mit den lokalen Feldern und der
+    ///    Version des Core in die Warteschlange.
+    /// 4. Danach alle älteren wartenden `page.update` der Seite entfernen (`discard`, keine Fehlerablage),
+    ///    `version` = Version des Core (+ 1 mit Ersatz).
+    /// Scheitert ein Schritt, ruht die Seite in der Engine weiter. Der nächste `welcome` versucht es erneut.
+    func resolveVersionConflict(pageID: String) async {
+        guard !resolvingConflicts.contains(pageID) else { return }
+        resolvingConflicts.insert(pageID)
+        defer { resolvingConflicts.remove(pageID) }
+        guard sync.canReachCore, let access = sync.restAccess() else { return }
+
+        let remote: RemotePageState?
+        do {
+            remote = try await client.pageState(endpoint: access.endpoint, token: access.token, pageID: pageID)
+        } catch {
+            sync.reportRESTError(error)
+            return
+        }
+        guard !_Concurrency.Task.isCancelled else { return }
+        // Erst nach dem Abruf lesen: Änderungen, die währenddessen eingereiht wurden, gehören zum Ersatz
+        let stale = sync.pendingOpIDs(kind: "page.update", pageID: pageID)
+
+        guard let remote, var page = store.page(pageID) else {
+            // Der Core kennt die Seite nicht mehr (oder die Bibliothek nicht): nichts zu ersetzen
+            guard sync.discardPending(opIDs: stale) else { return }
+            sync.resumePage(pageID)
+            return
+        }
+        let differs =
+            page.index != remote.index || page.template != remote.template || page.sessionID != remote.sessionID
+            || page.backgroundSlideID != remote.backgroundSlideID || page.attachedSlideID != remote.attachedSlideID
+        if differs {
+            var replacement = page
+            replacement.version = remote.version
+            // Erst den Ersatz einreihen, dann die alten verwerfen: Bricht die App dazwischen ab, wartet weiter ein
+            // `page.update` mit den lokalen Feldern, und der nächste Konflikt löst es auf. Andersherum stünde keins
+            // mehr in der Warteschlange, und der nächste Abruf der Seiten setzte Reihenfolge und Vorlage auf den
+            // Stand des Core zurück. Der Ersatz ruht, bis `resumePage` die Seite freigibt.
+            guard
+                let draft = InkOpBuilder.pageUpdate(
+                    page: replacement, nowMS: nowMS(), offsetMS: sync.clockOffsetForDrafts,
+                    makeID: { InkID.uuidV7() }),
+                sync.enqueue(drafts: [draft])
+            else { return }
+            page.version = remote.version + 1
+        } else {
+            page.version = remote.version
+        }
+        // Scheitert das Verwerfen, bleibt die Seite geparkt. Der nächste Versuch verwirft auch den Ersatz und reiht
+        // einen neuen ein.
+        guard sync.discardPending(opIDs: stale) else { return }
+        store.upsert(page)
+        bump()
+        sync.resumePage(pageID)
+    }
+
     // MARK: Intern
+
+    /// `index` der nächsten Seite: höchster bekannter Index + 1, auch von Seiten in der Löschfrist und von Seiten,
+    /// die nur am Mac liegen
+    private func nextIndex(in notebook: LibraryNotebook) -> Int {
+        let visible = store.pages(inNotebook: notebook.id).map(\.index).max() ?? 0
+        let inGrace = store.pagesInDeleteGrace().filter { $0.notebookID == notebook.id }.map(\.index).max() ?? 0
+        return max(0, notebook.remoteMaxIndex, visible, inGrace) + 1
+    }
 
     private func nowMS() -> Int {
         InkStrokeCodec.milliseconds(now())

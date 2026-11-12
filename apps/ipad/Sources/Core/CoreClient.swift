@@ -201,6 +201,18 @@ final class CoreClient {
         }
     }
 
+    /// `GET /pages/{id}`: nur der Stand der Seite (`RemotePageState`), ohne ihre Elemente. `nil` bei 404.
+    /// Nötig für `page_version_conflict` (VERTRAEGE §11.2): Der Client lädt die Seite neu und sendet mit der Version
+    /// des Core erneut.
+    func pageState(endpoint: CoreEndpoint, token: String, pageID: String) async throws -> RemotePageState? {
+        do {
+            let data = try await send("GET", "/pages/\(pageID)", endpoint: endpoint, token: token, body: nil)
+            return try decode(RemotePageState.self, from: data)
+        } catch ConnectionError.server(let status, _) where status == 404 {
+            return nil
+        }
+    }
+
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         guard let value = try? newJSONDecoder().decode(type, from: data) else {
             throw ConnectionError.invalidResponse
@@ -325,5 +337,53 @@ private struct ModuleBriefList: Decodable {
     private enum CodingKeys: String, CodingKey {
         case items
         case nextCursor = "next_cursor"
+    }
+}
+
+/// Stand einer Seite laut `GET /pages/{id}` (Feld `page`). Gelesen wird nur, was die Konfliktauflösung braucht:
+/// Unbekannte Felder und Elemente der Seite werden ignoriert, eine unbekannte Vorlage zählt als `blanko`.
+struct RemotePageState: Decodable, Equatable, Sendable {
+    let version: Int
+    let index: Int
+    let template: PageTemplate
+    let sessionID: String?
+    let backgroundSlideID: String?
+    let attachedSlideID: String?
+
+    init(
+        version: Int, index: Int, template: PageTemplate, sessionID: String?, backgroundSlideID: String?,
+        attachedSlideID: String?
+    ) {
+        self.version = version
+        self.index = index
+        self.template = template
+        self.sessionID = sessionID
+        self.backgroundSlideID = backgroundSlideID
+        self.attachedSlideID = attachedSlideID
+    }
+
+    private enum RootKeys: String, CodingKey {
+        case page
+    }
+
+    private enum PageKeys: String, CodingKey {
+        case version
+        case index
+        case template
+        case sessionID = "session_id"
+        case backgroundSlideID = "background_slide_id"
+        case attachedSlideID = "attached_slide_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let root = try decoder.container(keyedBy: RootKeys.self)
+        let page = try root.nestedContainer(keyedBy: PageKeys.self, forKey: .page)
+        version = try page.decode(Int.self, forKey: .version)
+        index = try page.decode(Int.self, forKey: .index)
+        let raw = try page.decodeIfPresent(String.self, forKey: .template)
+        template = raw.flatMap { PageTemplate(rawValue: $0) } ?? .blanko
+        sessionID = try page.decodeIfPresent(String.self, forKey: .sessionID)
+        backgroundSlideID = try page.decodeIfPresent(String.self, forKey: .backgroundSlideID)
+        attachedSlideID = try page.decodeIfPresent(String.self, forKey: .attachedSlideID)
     }
 }

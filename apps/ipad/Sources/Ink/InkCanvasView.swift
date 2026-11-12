@@ -27,25 +27,34 @@ final class InkCanvasContainerView: UIView {
     var onUndo: (@MainActor () -> Void)?
     var onRedo: (@MainActor () -> Void)?
     var onPencilDoubleTap: (@MainActor (InkSystemTapPreference) -> Void)?
+    /// Ein-Finger-Wisch nach links (+1) oder rechts (-1), nur wenn die Seite nicht gezoomt ist (T1-13: Blättern)
+    var onSwipePage: (@MainActor (Int) -> Void)?
 
-    private let paper = UIView()
+    /// Vorlage der Seite. Eine neue Vorlage zeichnet das Papier neu.
+    var template: PageTemplate {
+        get { paper.template }
+        set { paper.template = newValue }
+    }
+
+    private let paper: InkPaperView
     private var activeLayer: StrokeLayer = .ink
     private var appliedTools: InkToolState?
     private var appliedInkRevision: Int?
     private var appliedHighlightRevision: Int?
     private var laidOutSize: CGSize = .zero
     private var isSyncing = false
+    /// Zoomstufe, bei der die Seite die Breite füllt (`fitPageToWidth`)
+    private var fitZoom: CGFloat = 1
 
-    init(pageSize: CGSize) {
+    init(pageSize: CGSize, template: PageTemplate = .blanko) {
         self.pageSize = pageSize
+        // Papier und Vorlage in Seitenkoordinaten, Farben wie in der Web-App (#FAF9F5), in Hell und Dunkel gleich
+        paper = InkPaperView(pageSize: pageSize, template: template)
         super.init(frame: .zero)
 
         backgroundColor = .secondarySystemBackground
         clipsToBounds = true
 
-        // Papierfarbe wie in der Web-App (#FAF9F5), in Hell und Dunkel gleich
-        paper.backgroundColor = UIColor(red: 250.0 / 255.0, green: 249.0 / 255.0, blue: 245.0 / 255.0, alpha: 1)
-        paper.isUserInteractionEnabled = false
         addSubview(paper)
 
         for canvas in [highlightCanvas, inkCanvas] {
@@ -63,6 +72,17 @@ final class InkCanvasContainerView: UIView {
         undoTap.require(toFail: redoTap)
         addGestureRecognizer(redoTap)
         addGestureRecognizer(undoTap)
+
+        // Ein Finger wischt waagerecht = blättern. Die Schreibflächen scrollen mit dem Finger, darum darf der Wisch
+        // gleichzeitig erkannt werden. Er beginnt nur, wenn nicht gezoomt ist.
+        for direction in [UISwipeGestureRecognizer.Direction.left, .right] {
+            let swipe = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipe(_:)))
+            swipe.direction = direction
+            swipe.numberOfTouchesRequired = 1
+            swipe.allowedTouchTypes = [NSNumber(value: UITouch.TouchType.direct.rawValue)]
+            swipe.delegate = self
+            addGestureRecognizer(swipe)
+        }
 
         // Doppeltipp am Apple Pencil 2
         let pencil = UIPencilInteraction()
@@ -170,6 +190,7 @@ final class InkCanvasContainerView: UIView {
     private func fitPageToWidth() {
         guard pageSize.width > 0, pageSize.height > 0 else { return }
         let fit = bounds.width / pageSize.width
+        fitZoom = fit
         let wholePage = min(fit, bounds.height / pageSize.height)
         let master = activeCanvas
         let oldHeight = master.contentSize.height
@@ -242,6 +263,16 @@ final class InkCanvasContainerView: UIView {
         onRedo?()
     }
 
+    @objc private func handleSwipe(_ recognizer: UISwipeGestureRecognizer) {
+        guard recognizer.state == .ended else { return }
+        onSwipePage?(recognizer.direction == .left ? 1 : -1)
+    }
+
+    /// Die Seite füllt die Breite oder ist kleiner (nicht hineingezoomt)
+    var isNotZoomedIn: Bool {
+        activeCanvas.zoomScale <= fitZoom * 1.02
+    }
+
     /// Was iPadOS für den Doppeltipp eingestellt hat
     static func systemTapPreference() -> InkSystemTapPreference {
         switch UIPencilInteraction.preferredTapAction {
@@ -296,6 +327,23 @@ extension InkCanvasContainerView: @preconcurrency PKCanvasViewDelegate {
     }
 }
 
+extension InkCanvasContainerView: UIGestureRecognizerDelegate {
+    // UIView hat dieselbe Methode; sie gilt für alle Gesten dieser Ansicht
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer is UISwipeGestureRecognizer else {
+            return super.gestureRecognizerShouldBegin(gestureRecognizer)
+        }
+        return onSwipePage != nil && isNotZoomedIn
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer is UISwipeGestureRecognizer
+    }
+}
+
 extension InkCanvasContainerView: UIPencilInteractionDelegate {
     func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
         onPencilDoubleTap?(InkCanvasContainerView.systemTapPreference())
@@ -305,10 +353,13 @@ extension InkCanvasContainerView: UIPencilInteractionDelegate {
 /// Die Schreibfläche in SwiftUI
 struct InkCanvasView: UIViewRepresentable {
     let model: InkPageModel
+    var template: PageTemplate = .blanko
+    /// Wisch zum Blättern: +1 weiter, -1 zurück
+    var onSwipePage: (@MainActor (Int) -> Void)?
 
     func makeUIView(context: Context) -> InkCanvasContainerView {
         let model = self.model
-        let view = InkCanvasContainerView(pageSize: model.pageSize)
+        let view = InkCanvasContainerView(pageSize: model.pageSize, template: template)
         view.onDrawingChanged = { layer, drawing in
             model.canvasDidChange(layer: layer, drawing: drawing)
         }
@@ -319,10 +370,13 @@ struct InkCanvasView: UIViewRepresentable {
         view.onPencilDoubleTap = { preference in
             model.pencilDoubleTapped(system: preference)
         }
+        view.onSwipePage = onSwipePage
         return view
     }
 
     func updateUIView(_ view: InkCanvasContainerView, context: Context) {
+        view.template = template
+        view.onSwipePage = onSwipePage
         view.apply(model.tools)
         view.setDrawing(model.inkDrawing, revision: model.inkRevision, layer: .ink)
         view.setDrawing(model.highlightDrawing, revision: model.highlightRevision, layer: .highlight)

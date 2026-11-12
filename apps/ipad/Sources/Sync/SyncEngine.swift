@@ -96,6 +96,11 @@ final class SyncEngine {
 
     /// Für `AppModel`: Der Verbindungsstatus der App folgt der Engine
     @ObservationIgnored var onStateChange: ((State) -> Void)?
+    /// Der Core hat ein `page.update` mit `page_version_conflict` abgelehnt (VERTRAEGE §11.2). Die Operation ist
+    /// **nicht** in der Fehlerablage: Der Empfänger (`InkLibraryService`) lädt die Seite neu, ersetzt die wartenden
+    /// `page.update` und ruft danach `resumePage` auf. Nach jedem `welcome` kommt der Aufruf für noch offene Seiten
+    /// erneut.
+    @ObservationIgnored var onPageVersionConflict: (@MainActor (String) -> Void)?
 
     private let client: CoreClient
     private let sockets: any SyncSocketFactory
@@ -118,6 +123,9 @@ final class SyncEngine {
     @ObservationIgnored private var lastClockSync: Date?
     @ObservationIgnored private var internalErrors: [String: Int] = [:]
     @ObservationIgnored private var presence: SyncPresenceTarget?
+    /// Seiten mit einem offenen `page_version_conflict`: Ihre wartenden `page.update` werden nicht gesendet, bis
+    /// `resumePage` sie freigibt. Sonst gäbe die abgelehnte Operation eine Endlosschleife.
+    @ObservationIgnored private var parkedPages = Set<String>()
 
     init(
         client: CoreClient,
@@ -287,6 +295,37 @@ final class SyncEngine {
     /// Seiten, für die gerade eine Operation dieser Art in der Warteschlange wartet
     func pendingPageIDs(kind: String) -> Set<String> {
         Set(outbox.pending.compactMap { $0.kind == kind ? $0.pageID : nil })
+    }
+
+    /// `op_id` der wartenden Operationen dieser Art für diese Seite, in Reihenfolge der Warteschlange
+    func pendingOpIDs(kind: String, pageID: String) -> [String] {
+        outbox.pending.filter { $0.kind == kind && $0.pageID == pageID }.map(\.opID)
+    }
+
+    /// Entfernt wartende Operationen ohne Fehlerablage, weil eine neuere sie ersetzt (Konfliktauflösung)
+    /// - Returns: `false`, wenn das Schreiben scheitert. Dann ist nichts entfernt.
+    @discardableResult
+    func discardPending(opIDs: [String]) -> Bool {
+        guard !opIDs.isEmpty else { return true }
+        do {
+            try outbox.discard(opIDs: opIDs)
+        } catch {
+            return false
+        }
+        if let link {
+            for id in opIDs {
+                link.inFlight.remove(id)
+                internalErrors[id] = nil
+            }
+        }
+        refreshCounts()
+        return true
+    }
+
+    /// Der Konflikt der Seite ist aufgelöst: Ihre wartenden `page.update` dürfen wieder gesendet werden
+    func resumePage(_ pageID: String) {
+        guard parkedPages.remove(pageID) != nil else { return }
+        schedulePump()
     }
 
     /// Wartet in der Warteschlange eine Operation dieser Art in diesem Strom?
@@ -609,6 +648,10 @@ final class SyncEngine {
         }
         library.setDBEpoch(dbEpoch)
         welcomeCount += 1
+        // Ein Konflikt, dessen Auflösung (REST) nicht gelang, wird mit der neuen Verbindung erneut versucht
+        for pageID in parkedPages.sorted() {
+            onPageVersionConflict?(pageID)
+        }
         setState(.clockSync)
         await startClockProbe(link)
     }
@@ -691,7 +734,8 @@ final class SyncEngine {
         repeat {
             link.pumpAgain = false
             while link === self.link, !link.blocked, link.inFlight.count < SyncEngine.window {
-                guard let entry = outbox.nextToSend(inFlight: link.inFlight) else {
+                let skipped = parkedPages.isEmpty ? link.inFlight : link.inFlight.union(parkedOpIDs())
+                guard let entry = outbox.nextToSend(inFlight: skipped) else {
                     break
                 }
                 var outgoing = entry
@@ -726,6 +770,13 @@ final class SyncEngine {
                 }
             }
         } while link.pumpAgain && link === self.link
+    }
+
+    /// Wartende `page.update` von Seiten mit offenem Konflikt. Ohne Konflikt leer und ohne Suche in der Warteschlange.
+    private func parkedOpIDs() -> Set<String> {
+        guard !parkedPages.isEmpty else { return [] }
+        return Set(
+            outbox.pending.compactMap { $0.kind == "page.update" && parkedPages.contains($0.pageID ?? "") ? $0.opID : nil })
     }
 
     private func onAck(opID: String, link: SyncLink) async {
@@ -772,6 +823,18 @@ final class SyncEngine {
 
         // Endgültig abgelehnt: samt Abhängigen in die Fehlerablage, der Rest läuft weiter
         link.inFlight.remove(opID)
+        // Ausnahme `page_version_conflict`: nicht in die Fehlerablage. Die Seite wird neu geladen und das
+        // `page.update` ersetzt. Bis dahin ruht ihre Operation.
+        if failure.code == "page_version_conflict", onPageVersionConflict != nil, let entry, entry.kind == "page.update",
+            let pageID = entry.pageID
+        {
+            // Nur der erste Fehler einer Seite stößt die Auflösung an. Weitere Operationen derselben Seite ersetzt sie mit.
+            if parkedPages.insert(pageID).inserted {
+                onPageVersionConflict?(pageID)
+            }
+            await pump(link)
+            return
+        }
         if let entry {
             deadLetter(entry, code: failure.code, message: failure.message, link: link)
         }

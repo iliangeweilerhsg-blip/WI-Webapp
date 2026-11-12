@@ -22,6 +22,9 @@ protocol InkLibraryStore: AnyObject {
     /// Ohne gelöschte, nach `index`, dann `id`
     func pages(inNotebook notebookID: String) -> [LibraryPage]
     func page(_ id: String) -> LibraryPage?
+    /// Seiten in der Löschfrist: lokal gelöscht, `page.delete` noch nicht eingereiht (`deletedAtMS` gesetzt,
+    /// `deleteQueued` false). Sie sind vollständig wiederherstellbar und zählen beim Zusammenführen als gelöscht.
+    func pagesInDeleteGrace() -> [LibraryPage]
 
     func mergeModules(_ server: [ModuleBrief], at: Date)
     func mergeNotebooks(_ server: [Notebook], moduleID: String)
@@ -123,6 +126,12 @@ final class FileInkLibraryStore: InkLibraryStore {
         file.pages.first { $0.id == id }
     }
 
+    func pagesInDeleteGrace() -> [LibraryPage] {
+        file.pages
+            .filter { $0.deletedAtMS != nil && !$0.deleteQueued }
+            .sorted { ($0.deletedAtMS ?? 0, $0.id) < ($1.deletedAtMS ?? 0, $1.id) }
+    }
+
     // MARK: Zusammenführen
 
     func mergeModules(_ server: [ModuleBrief], at date: Date) {
@@ -204,6 +213,10 @@ final class FileInkLibraryStore: InkLibraryStore {
                 remoteOnly += 1
                 continue
             }
+            // In der Löschfrist (5 s) ist die Seite für den Core noch nicht gelöscht, lokal aber schon: Sie bleibt
+            // gelöscht und ihr Stand wird nicht überschrieben, damit „Rückgängig“ den lokalen Stand zurückbringt
+            let inGrace = file.pages[index].deletedAtMS != nil && !file.pages[index].deleteQueued
+            if inGrace { continue }
             if !pendingUpdatePageIDs.contains(remote.id) {
                 file.pages[index].index = remote.index
                 file.pages[index].template = remote.template
