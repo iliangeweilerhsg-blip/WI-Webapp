@@ -5,7 +5,7 @@ import { act, cleanup, render, renderHook, screen, waitFor, within } from '@test
 import userEvent from '@testing-library/user-event';
 import type { Session } from '@sg/shared';
 import { SessionView } from '../src/components/dashboard/SessionView.tsx';
-import { RecordingEnvContext, type RecordingEnv } from '../src/components/dashboard/use-recording.ts';
+import { RecordingProvider, type RecordingEnv } from '../src/lib/recording/index.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
@@ -111,11 +111,11 @@ function boot(
   return render(
     <ThemeProvider>
       <QueryProvider>
-        <RecordingEnvContext.Provider value={env}>
-          <SyncProvider client={sync.client}>
+        <SyncProvider client={sync.client}>
+          <RecordingProvider env={env}>
             <SessionView />
-          </SyncProvider>
-        </RecordingEnvContext.Provider>
+          </RecordingProvider>
+        </SyncProvider>
       </QueryProvider>
     </ThemeProvider>,
   );
@@ -538,7 +538,7 @@ describe('Aufnahme im Dashboard: nur der Leader lädt hoch', () => {
   });
 });
 
-describe('Aufnahme im Dashboard: Seite verlassen', () => {
+describe('Aufnahme im Dashboard: Tab weg (Unmount des Baums)', () => {
   it('Unmount stoppt sauber: letzter Chunk (PUT), complete, Mikrofon frei', async () => {
     const view = boot();
     const b = await screenBar();
@@ -558,7 +558,7 @@ describe('Aufnahme im Dashboard: Seite verlassen', () => {
 const chunkSeqs = () =>
   new Set(uploads(/^PUT .*\/chunks\/\d+$/).map(([url]) => Number(String(url).split('/').pop())));
 
-describe('Aufnahme im Dashboard: Rückstau beim Verlassen', () => {
+describe('Aufnahme im Dashboard: Rückstau, wenn der Tab weg ist', () => {
   const slowCore = (ms: number) =>
     rec.fetch.mockImplementation(async () => {
       await new Promise((r) => setTimeout(r, ms));

@@ -24,6 +24,7 @@ import { mergeSession, sessionHref, stopSession } from '../src/lib/sessions.ts';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { installCalendarCore, makeEvent, type CalendarCore } from './calendar-core.ts';
+import { fakeRecording } from './recording-fakes.ts';
 import { makeModule, makeSemester, makeSession } from './fake-core.ts';
 
 const push = vi.fn();
@@ -146,7 +147,7 @@ function boot(
   return render(
     <ThemeProvider>
       <QueryProvider>
-        <AppShell syncClient={sync.client}>
+        <AppShell syncClient={sync.client} recordingEnv={fakeRecording().env}>
           <HeuteView />
         </AppShell>
       </QueryProvider>
@@ -474,11 +475,13 @@ describe('Heute: Aktionen', () => {
     boot();
     const start = await screen.findByRole('button', { name: 'Start' });
     core.rejectNextSession = { status: 409, code: 'session_transition_invalid' };
-    const before = core.requests.filter((r) => r.path.startsWith('/sessions?')).length;
+    const before = core.requests.filter((r) => r.path.startsWith('/sessions?from=')).length;
     await user.click(start);
     expect(await screen.findByRole('alert')).toHaveTextContent('Das geht bei dieser Session gerade nicht.');
     await waitFor(() =>
-      expect(core.requests.filter((r) => r.path.startsWith('/sessions?')).length).toBeGreaterThan(before),
+      expect(core.requests.filter((r) => r.path.startsWith('/sessions?from=')).length).toBeGreaterThan(
+        before,
+      ),
     );
     expect(push).not.toHaveBeenCalled();
     // Der Knopf ist wieder bedienbar
@@ -652,7 +655,7 @@ describe('Heute: ohne Verbindung', () => {
     await screen.findByRole('button', { name: 'Start' });
     act(() => sync.setState('backoff'));
     await screen.findByText(/Keine Live-Verbindung/);
-    const before = core.requests.filter((r) => r.path.startsWith('/sessions?')).length;
+    const before = core.requests.filter((r) => r.path.startsWith('/sessions?from=')).length;
     // Während der Unterbrechung hat sich etwas geändert (Ereignisse werden nicht nachgeliefert)
     const stored = core.sessions.find((s) => s.id === SESSION_ID)!;
     stored.state = 'laeuft';
@@ -660,17 +663,19 @@ describe('Heute: ohne Verbindung', () => {
     stored.updated_at = '2026-11-04T07:10:00Z';
     act(() => sync.setState('online'));
     await waitFor(() => expect(card()).toHaveAttribute('data-state', 'laeuft'));
-    expect(core.requests.filter((r) => r.path.startsWith('/sessions?')).length).toBeGreaterThan(before);
+    expect(core.requests.filter((r) => r.path.startsWith('/sessions?from=')).length).toBeGreaterThan(before);
     expect(screen.queryByText(/Keine Live-Verbindung/)).toBeNull();
   });
 
   it('Start mit anfangs fehlender Verbindung lädt nach dem Verbinden neu', async () => {
     boot({ syncState: 'connecting' });
     await screen.findByRole('button', { name: 'Start' });
-    const before = core.requests.filter((r) => r.path.startsWith('/sessions?')).length;
+    const before = core.requests.filter((r) => r.path.startsWith('/sessions?from=')).length;
     act(() => sync.setState('online'));
     await waitFor(() =>
-      expect(core.requests.filter((r) => r.path.startsWith('/sessions?')).length).toBeGreaterThan(before),
+      expect(core.requests.filter((r) => r.path.startsWith('/sessions?from=')).length).toBeGreaterThan(
+        before,
+      ),
     );
   });
 
@@ -680,7 +685,7 @@ describe('Heute: ohne Verbindung', () => {
     vi.useRealTimers();
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
     setNow('2026-11-04T07:10:00Z');
-    const count = () => core.requests.filter((r) => r.path.startsWith('/sessions?')).length;
+    const count = () => core.requests.filter((r) => r.path.startsWith('/sessions?from=')).length;
     const before = count();
     // Blockierter WebSocket: `connecting` und `backoff` wechseln sich ab, nie `online`
     act(() => sync.setState('backoff'));
@@ -703,7 +708,7 @@ describe('Heute: ohne Verbindung', () => {
     render(
       <ThemeProvider>
         <QueryProvider>
-          <AppShell syncClient={sync.client}>
+          <AppShell syncClient={sync.client} recordingEnv={fakeRecording().env}>
             <HeuteView />
           </AppShell>
         </QueryProvider>

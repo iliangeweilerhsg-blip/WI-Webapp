@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation';
 import { isMacPlatform, matchShortcut } from '../lib/shortcuts.ts';
 import { SIDEBAR_KEY } from '../lib/theme.tsx';
 import { SIDEBAR_AUTO_ATTR } from '../lib/theme-init.ts';
+import { RecordingProvider, type RecordingEnv } from '../lib/recording';
 import { useResumePendingUploads } from '../lib/recorder/useResumePendingUploads.ts';
 import { ErrorShelf } from '../lib/sync/ErrorShelf.tsx';
 import { OtherTabBanner } from '../lib/sync/OtherTabBanner.tsx';
@@ -21,10 +22,21 @@ const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), [tabi
 const NARROW_QUERY = '(max-width: 767.98px)';
 
 /** App-Rahmen (07 §2): Seitenleiste (breit einklappbar, schmal als Drawer), Inhalt, Sync-Hinweise, globale Kürzel. */
-export function AppShell({ children, syncClient }: { children: ReactNode; syncClient?: SyncClient }) {
+export function AppShell({
+  children,
+  syncClient,
+  recordingEnv,
+}: {
+  children: ReactNode;
+  syncClient?: SyncClient;
+  /** Nur für Tests: gefälschte Browser-Schnittstellen der Aufnahme */
+  recordingEnv?: RecordingEnv;
+}) {
   return (
     <SyncProvider {...(syncClient ? { client: syncClient } : {})}>
-      <Shell>{children}</Shell>
+      <RecordingProvider {...(recordingEnv ? { env: recordingEnv } : {})}>
+        <Shell>{children}</Shell>
+      </RecordingProvider>
     </SyncProvider>
   );
 }
