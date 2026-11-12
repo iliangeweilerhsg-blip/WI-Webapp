@@ -2,6 +2,7 @@
 import { buildApp } from './app.ts';
 import { hasOpenPermissions, loadConfig, loadDotEnv, scrubAnthropicEnv } from './config.ts';
 import { createDb } from './db/client.ts';
+import { acquireCoreLock, CoreLockHeldError, lockHeldMessage, type CoreLock } from './lib/instance-lock.ts';
 import { createLogger } from './logger.ts';
 import { purgeIdempotencyKeys } from './plugins/idempotency.ts';
 import { startBonjour, type BonjourHandle } from './services/discovery.ts';
@@ -15,6 +16,20 @@ const dotEnvFile = loadDotEnv();
 // auch vor dem Logger: Danach steht in `process.env` keine `ANTHROPIC_*`-Variable mehr
 const scrubbedEnv = scrubAnthropicEnv();
 const config = loadConfig();
+// Ein Core pro Datenordner (#174): vor Logger (er rotiert `logs/core.log`), Migrationen und Hooks. Der Logger
+// existiert hier noch nicht, darum geht die Meldung nach stderr
+let lock: CoreLock;
+try {
+  lock = acquireCoreLock(config.dataDir);
+} catch (error) {
+  console.error(
+    error instanceof CoreLockHeldError
+      ? lockHeldMessage(error)
+      : `Die Sperrdatei im Datenordner konnte nicht angelegt werden: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  process.exit(1);
+}
+process.on('exit', () => lock.release());
 const logger = createLogger(config);
 if (scrubbedEnv.length > 0) {
   // Nur die Namen, nie die Werte
@@ -64,6 +79,8 @@ async function shutdown(signal: string): Promise<void> {
   } catch (error) {
     logger.error({ err: error }, 'Fehler beim Beenden');
     process.exitCode = 1;
+  } finally {
+    lock.release();
   }
 }
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
@@ -99,4 +116,5 @@ try {
   stopping = true;
   await app.close().catch(() => {});
   await handle.close().catch(() => {});
+  lock.release();
 }
