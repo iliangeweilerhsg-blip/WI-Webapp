@@ -22,6 +22,7 @@ import {
   makeSession,
   type FakeCore,
 } from './fake-core.ts';
+import { stubPower, type PowerStub } from './power-stub.ts';
 
 const nav = vi.hoisted(() => ({ search: '' }));
 vi.mock('next/navigation', () => ({
@@ -156,6 +157,8 @@ function boot(
     ipadNotebook?: string | null;
     /** Freier Platz am Mac laut `GET /system/storage`; ohne Angabe antwortet die Route nicht (404) */
     freeBytes?: number;
+    /** Akku des Macs laut `GET /system/power`; ohne Angabe antwortet die Route nicht (404) */
+    power?: PowerStub;
   } = {},
 ) {
   vi.setSystemTime(new Date(opts.now ?? NOW));
@@ -188,6 +191,7 @@ function boot(
         : coreFetch(input, init),
     );
   }
+  if (opts.power) stubPower(opts.power);
   core.settingsGate = opts.hold?.settings ?? null;
   core.eventGate = opts.hold?.event ?? null;
   sync = fakeSync(opts.syncState);
@@ -457,6 +461,22 @@ describe('Dashboard: Live-Aktualisierung (session.updated)', () => {
     expect(within(b).getByTestId('live-status')).toHaveTextContent('Anderer Tab');
     expect(within(b).getByTestId('live-status')).not.toHaveTextContent('Live');
     expect(screen.queryByText(/Keine Live-Verbindung –/)).toBeNull();
+  });
+});
+
+describe('Dashboard: Akku in der Statusleiste (UX-315)', () => {
+  it('meldet unter 20 % ohne Netzteil eine ruhige Zeile', async () => {
+    boot({ power: { percent: 14, on_ac: false } });
+    const note = await within(await screenBar()).findByTestId('battery-status');
+    expect(note).toHaveTextContent('Akku 14 % · Netzteil anschließen');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('schweigt am Netzteil', async () => {
+    boot({ power: { percent: 14, on_ac: true } });
+    const b = await screenBar();
+    await waitFor(() => expect(gets('/devices?limit=200')).toBe(1));
+    expect(within(b).queryByTestId('battery-status')).toBeNull();
   });
 });
 

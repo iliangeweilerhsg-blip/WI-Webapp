@@ -5,7 +5,7 @@ vi.hoisted(() => {
   process.env.TZ = 'Europe/Zurich';
 });
 
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { Session } from '@sg/shared';
 import { AppShell } from '../src/components/AppShell.tsx';
@@ -27,6 +27,7 @@ import { installCalendarCore, makeEvent, type CalendarCore } from './calendar-co
 import type { RecordingEnv } from '../src/lib/recording/index.ts';
 import { FakeWebLocks, fakeRecording, type FakeRecording } from './recording-fakes.ts';
 import { makeModule, makeSemester, makeSession } from './fake-core.ts';
+import { stubPower, type PowerStub } from './power-stub.ts';
 
 const push = vi.fn();
 const dashboard = vi.hoisted(() => ({ available: true }));
@@ -149,6 +150,8 @@ function boot(
     env?: Partial<RecordingEnv>;
     /** Freier Platz am Mac laut `GET /system/storage`; ohne Angabe antwortet die Route nicht (404) */
     freeBytes?: number;
+    /** Akku des Macs laut `GET /system/power`; ohne Angabe antwortet die Route nicht (404) */
+    power?: PowerStub;
   } = {},
 ) {
   setNow(opts.now ?? '2026-11-04T07:10:00Z'); // 08:10 Uhr
@@ -176,6 +179,7 @@ function boot(
         : coreFetch(input, init),
     );
   }
+  if (opts.power) stubPower(opts.power);
   sync = fakeSync(opts.syncState);
   rec = opts.rec ?? fakeRecording();
   return render(
@@ -446,6 +450,37 @@ describe('Heute: Speicher am Startknopf (UX-316)', () => {
     await screen.findByRole('button', { name: 'Start' });
     await new Promise((r) => setTimeout(r, 50));
     expect(screen.queryByTestId('start-storage-hint')).toBeNull();
+  });
+});
+
+describe('Heute: Akku am Startknopf (UX-315)', () => {
+  it('fragt ruhig „Mac am Netz?“, wenn der Akku unter 40 % liegt, und lässt den Start zu', async () => {
+    boot({ power: { percent: 35, on_ac: false } });
+    const hint = await screen.findByTestId('start-battery-hint');
+    expect(hint).toHaveTextContent('Akku bei 35 %');
+    expect(hint).toHaveTextContent('Mac am Netz?');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(within(card()).getByRole('button', { name: 'Start' })).not.toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
+  });
+
+  it('schweigt am Netzteil, bei vollem Akku und wenn die Route fehlt', async () => {
+    boot({ power: { percent: 10, on_ac: true } });
+    await screen.findByRole('button', { name: 'Start' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('start-battery-hint')).toBeNull();
+    cleanup();
+    boot({ power: { percent: 80, on_ac: false } });
+    await screen.findByRole('button', { name: 'Start' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('start-battery-hint')).toBeNull();
+    cleanup();
+    boot();
+    await screen.findByRole('button', { name: 'Start' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByTestId('start-battery-hint')).toBeNull();
   });
 });
 

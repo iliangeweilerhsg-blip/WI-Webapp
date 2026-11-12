@@ -411,6 +411,31 @@ Modul-Einstellungen laufen über `PATCH /modules/{id}` (§14.2).
   - Nie, solange eine Session läuft oder pausiert (R1, wie der Backup-Hinweis).
 - **Nicht Teil dieses Vertrags:** `sg doctor` (UX-11, Schritt 1).
 
+### 7.7 Akku des Macs (UX-315)
+
+| Methode und Pfad | Body | Antwort | Fehler |
+|---|---|---|---|
+| `GET /system/power` | – | 200 `SystemPower` | – (es gibt keinen Fehlerfall, siehe unten) |
+
+- **Warum eine eigene Route:** Eine Erweiterung von `/system/storage` hätte zwei Dinge vermischt, die nichts miteinander zu tun haben. Der Speicher hängt am Datenordner (503, wenn er fehlt), der Akku nicht. Dazu kommen ein anderer Zwischenspeicher (30 Sekunden statt 5 Minuten für die Größe), ein anderer Zugang (nur lokal) und ein anderer Abfragetakt in der Web-App. Eine neue Route ändert nichts an `SystemStorage`: abwärtskompatibel, ein älterer Core antwortet 404, die Web-App zeigt dann nichts.
+- **Zugang:** `config.sgAccess = 'local'`. Anders als der Speicher (§7.6) geht der Akku des Macs kein anderes Gerät etwas an, das iPad braucht ihn nicht. Aus dem Netz (IP oder Tunnel) antwortet der Core mit 403 `local_only`, auch mit Token; ohne Token zuerst 401 (§5).
+- **Antwort:** `SystemPower` in `packages/schemas`. Pflichtfelder:
+  - `has_battery` (boolean),
+  - `percent` (Ganzzahl 0 bis 100 oder `null`),
+  - `on_ac` (`true` = am Netzteil, auch wenn es nicht lädt; `false` = Akkubetrieb; `null` = unbekannt oder kein Akku),
+  - `measured_at` (Zeitpunkt der Messung).
+- **Kein Akku ist kein Fehler:** Auf Linux, auf einem Mac ohne Akku (Mini, Studio) und wenn `pmset` scheitert oder nicht rechtzeitig antwortet, lautet die Antwort 200 mit `has_battery: false`, `percent: null`, `on_ac: null`. Ein Scheitern von `pmset` steht nur im Log (Stufe `debug`). Die Web-App zeigt dann nichts.
+- **Messung** (`services/power.ts`):
+  - Nur unter macOS: `/usr/bin/pmset -g batt` über `execFile` mit festem Argument-Array, ohne Shell, ohne Eingabe von außen.
+  - Höchstens 2 s Laufzeit (`PMSET_TIMEOUT_MS`) und 8 KiB Ausgabe (`PMSET_MAX_OUTPUT_BYTES`); mehr bricht den Lauf ab (= kein Akku). Gelesen werden die Zeile `Now drawing from 'AC Power'` bzw. `'Battery Power'` (ältere macOS: `Currently drawing from`) und der Prozentwert der Zeile `InternalBattery`.
+  - Das Ergebnis gilt 30 Sekunden (`POWER_TTL_MS`), auch ein Fehlschlag; gleichzeitige Aufrufe teilen sich einen Lauf. Es läuft kein eigener Zeitgeber im Core: gemessen wird nur auf Anfrage.
+- **Web (Verbindliches):**
+  - Statusleiste und Aufnahme-Leiste, nur während einer Session: Ist `on_ac === false` und `percent < 20` (`BATTERY_WARN_PERCENT`), steht eine ruhige Zeile „Akku 14 % · Netzteil anschließen“. Die Web-App fragt dann jede Minute nach. Kein Dialog, kein Ton, keine Farbe (R1). Der Vorschlag in `STUDIENALLTAG-3.md` nannte 15 %, festgelegt sind 20 %.
+  - Start-Karte (`today/StartCard.tsx`): Ist `on_ac === false` und `percent < 40` (`BATTERY_START_WARN_PERCENT`), steht unter den Angaben „Akku bei 35 %. Mac am Netz? …“. Der Start bleibt möglich. 40 %, weil eine Vorlesung rund anderthalb Stunden dauert.
+  - Bei unbekannter Quelle (`on_ac: null`), ohne Akku oder ohne Antwort schweigt die Web-App.
+  - Die Konstanten stehen in `apps/web/src/lib/system.ts`.
+- **UX-316 (Core-Teil):** Der Core braucht dafür nichts Neues. `GET /system/storage` liefert den freien Platz bei jedem Aufruf frisch (§7.6); die Prüfung am Start und die Zeile in der Session baut die Web-App (#312).
+
 ## 8. Kalender: Import und Abgleich (T1-01)
 
 **Der Abgleich ist kein Job.** Der Core erledigt ihn synchron. Begründung:

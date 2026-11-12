@@ -33,7 +33,7 @@ Ein Formatwechsel ist erst fertig, wenn alle drei Generate-Schritte und Contract
 | Suche & Fragen | `GET /search?q&filters` · `POST /ask` (Frag deine Vorlesung, Antwort per Server-Sent Events) |
 | Videos | `GET /videos?concept_id` · `POST /videos` (anfordern) · `GET /videos/{id}/file` |
 | Moodle (§9) | `GET /moodle/status` · `GET /moodle/courses` · `GET /moodle/courses/{id}/contents` · `GET /moodle/assignments` · `GET /moodle/deadlines` · `GET /moodle/file?ref` · `GET /moodle/actions` · `POST /moodle/uploads` · `DELETE /moodle/uploads/{upload_id}` · `POST /moodle/actions/{id}/preview` · `POST /moodle/actions/{id}/execute` · Abgleich (§9.4): `GET /moodle/links` · `PUT/DELETE /moodle/links/{course_id}` · `GET /moodle/items` · `PATCH /moodle/items/{id}` · `GET/POST /moodle/sync` · `GET /moodle/synced-deadlines` |
-| System | `GET /jobs?session_id` · `POST /jobs/{id}/retry` · `GET /costs?month` · `POST /backup` · `GET /backups` · `POST /export` · `GET/PATCH /settings` · `GET/DELETE /devices` · `POST /devices/pairings` · `GET /devices/pairings/requests` · `POST /devices/pair/start` · `POST /devices/pair/confirm` · `GET /trash` · `POST /trash/{id}/restore` |
+| System | `GET /system/storage` (VERTRAEGE §7.6) · `GET /system/power` (nur lokal, VERTRAEGE §7.7) · `GET /jobs?session_id` · `POST /jobs/{id}/retry` · `GET /costs?month` · `POST /backup` · `GET /backups` · `POST /export` · `GET/PATCH /settings` · `GET/DELETE /devices` · `POST /devices/pairings` · `GET /devices/pairings/requests` · `POST /devices/pair/start` · `POST /devices/pair/confirm` · `GET /trash` · `POST /trash/{id}/restore` |
 
 ## 2. Sync-Protokoll (WebSocket)
 

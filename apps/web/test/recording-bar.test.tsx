@@ -31,6 +31,7 @@ import {
   makeSession,
   type FakeCore,
 } from './fake-core.ts';
+import { stubPower, type PowerStub } from './power-stub.ts';
 
 const nav = vi.hoisted(() => {
   const listeners = new Set<() => void>();
@@ -141,6 +142,8 @@ interface BootOptions {
   devices?: ReturnType<typeof makeDevice>[];
   /** Freier Platz am Mac laut `GET /system/storage`; ohne Angabe antwortet die Route nicht (404) */
   freeBytes?: number;
+  /** Akku des Macs laut `GET /system/power`; ohne Angabe antwortet die Route nicht (404) */
+  power?: PowerStub;
 }
 
 function boot(opts: BootOptions = {}) {
@@ -172,6 +175,7 @@ function boot(opts: BootOptions = {}) {
         : coreFetch(input, init),
     );
   }
+  if (opts.power) stubPower(opts.power);
   sync = fakeSync(opts.syncState);
   rec = opts.rec ?? fakeRecording();
   env = { ...rec.env, ...opts.env };
@@ -680,6 +684,30 @@ describe('Aufnahme-Leiste: iPad und Speicher (UX-306, UX-316)', () => {
     const note = await screen.findByTestId('storage-status');
     expect(note).toHaveTextContent('nur noch 800 MB frei');
     expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('meldet einen Akku unter 20 % ohne Netzteil ruhig in der Leiste', async () => {
+    boot({ power: { percent: 14, on_ac: false } });
+    const note = await screen.findByTestId('battery-status');
+    expect(note).toHaveTextContent('Akku 14 % · Netzteil anschließen');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('schweigt bei 20 % und mehr, am Netzteil und ohne aktive Session', async () => {
+    boot({ power: { percent: 20, on_ac: false } });
+    await waitFor(() => expect(requests(/^GET \/devices/).length).toBeGreaterThan(0));
+    await settle();
+    expect(screen.queryByTestId('battery-status')).toBeNull();
+    cleanup();
+    boot({ power: { percent: 5, on_ac: true } });
+    await waitFor(() => expect(requests(/^GET \/devices/).length).toBeGreaterThan(0));
+    await settle();
+    expect(screen.queryByTestId('battery-status')).toBeNull();
+    cleanup();
+    boot({ sessions: [], power: { percent: 5, on_ac: false } });
+    await waitFor(() => expect(requests(/^GET \/sessions\?state=/).length).toBeGreaterThan(0));
+    await settle();
+    expect(screen.queryByTestId('battery-status')).toBeNull();
   });
 
   it('schweigt bei 1 GB und mehr', async () => {

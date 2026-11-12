@@ -14,6 +14,7 @@ import { AutoStopHint } from '../autostop';
 import { PAUSE_HINT_MS, useIpadState } from '../dashboard/StatusBar.tsx';
 import { formatElapsed } from '../today/model.ts';
 import { useNow } from '../today/use-today.ts';
+import { LowBatteryNote } from './LowBatteryNote.tsx';
 import { LowStorageNote } from './LowStorageNote.tsx';
 import { RECORDING_LABEL, RecordDot, recordingStatusText } from './labels.ts';
 
@@ -86,6 +87,7 @@ export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
         ) : null}
 
         <LowStorageNote active />
+        <LowBatteryNote active />
         <BarIpadStatus />
 
         <div className="ml-auto flex flex-wrap items-center gap-x-5 gap-y-2">

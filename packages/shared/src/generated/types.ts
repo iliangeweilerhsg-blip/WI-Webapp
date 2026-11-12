@@ -640,6 +640,10 @@ export type SyncServerMessage = (SyncWelcome | SyncSubscribed | SyncAck | SyncOp
  */
 export type Timestamp1 = string
 /**
+ * ISO 8601, UTC
+ */
+export type Timestamp2 = string
+/**
  * transkribiert: neu geschrieben. unveraendert: gleicher input_hash, übersprungen. ohne_audio: keine full.m4a (altes Transkript entfernt)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -5324,6 +5328,24 @@ t0: EpochMs
 ts: EpochMs
 }
 /**
+ * GET /system/power (UX-315, VERTRAEGE §7.7): Akku des Macs, nur lokal. Ohne Akku (Mac mini), ohne macOS oder wenn der Stand nicht lesbar ist: `has_battery` false und die übrigen Werte null, kein Fehler. Der Stand gilt bis zu 30 Sekunden
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SystemPower".
+ */
+export interface SystemPower {
+has_battery: boolean
+/**
+ * Ladestand in Prozent, null ohne Akku
+ */
+percent: (number | null)
+/**
+ * true = der Mac hängt am Netzteil (auch wenn er gerade nicht lädt), false = Akkubetrieb, null = unbekannt oder kein Akku
+ */
+on_ac: (boolean | null)
+measured_at: Timestamp1
+}
+/**
  * GET /system/storage (UX-11, VERTRAEGE §7.6): freier Platz auf dem Datenträger des Datenordners und Größe der Daten. Größen sind Dateigrößen in Byte (keine Plattenblöcke)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -5350,7 +5372,7 @@ vault_bytes?: number
  * Größe der Datenbank (`pg_database_size`), zählt nicht zu `data_dir_size_bytes`. Fehlt, wenn die Abfrage scheitert
  */
 db_bytes?: number
-measured_at: Timestamp1
+measured_at: Timestamp2
 }
 /**
  * Teilaufgabe eines Übungsblatts. Zerlegung erst ab Phase 2 (F-ORG-03).

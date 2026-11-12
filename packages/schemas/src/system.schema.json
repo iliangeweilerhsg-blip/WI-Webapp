@@ -295,6 +295,31 @@
         }
       }
     },
+    "SystemPower": {
+      "type": "object",
+      "description": "GET /system/power (UX-315, VERTRAEGE §7.7): Akku des Macs, nur lokal. Ohne Akku (Mac mini), ohne macOS oder wenn der Stand nicht lesbar ist: `has_battery` false und die übrigen Werte null, kein Fehler. Der Stand gilt bis zu 30 Sekunden",
+      "required": ["has_battery", "percent", "on_ac", "measured_at"],
+      "additionalProperties": false,
+      "properties": {
+        "has_battery": {
+          "type": "boolean"
+        },
+        "percent": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Ladestand in Prozent, null ohne Akku"
+        },
+        "on_ac": {
+          "type": ["boolean", "null"],
+          "description": "true = der Mac hängt am Netzteil (auch wenn er gerade nicht lädt), false = Akkubetrieb, null = unbekannt oder kein Akku"
+        },
+        "measured_at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Zeitpunkt der Messung (höchstens 30 Sekunden alt)"
+        }
+      }
+    },
     "BackupState": {
       "type": "string",
       "enum": ["laeuft", "fertig", "fehler"]

@@ -7,6 +7,7 @@ import {
   HealthSchema,
   JobListSchema,
   JobStateSchema,
+  SystemPowerSchema,
   SystemStorageSchema,
   UuidSchema,
 } from '@sg/shared';
@@ -14,6 +15,7 @@ import type { Db } from '../db/client.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
 import { HttpError } from '../errors.ts';
 import { listJobs } from '../services/jobs.ts';
+import { PowerMeter } from '../services/power.ts';
 import { StorageMeter } from '../services/storage.ts';
 
 const HEALTH_DB_TIMEOUT_MS = 3000;
@@ -25,6 +27,8 @@ export interface SystemRouteDeps {
   dataDir?: string;
   /** Nur für Tests: eigener Messer (Zeitgrenze, Uhr) */
   storage?: StorageMeter;
+  /** Nur für Tests: eigener Akku-Leser (Plattform, `pmset`, Uhr) */
+  power?: PowerMeter;
 }
 
 const JobsQuerySchema = PageQuerySchema.extend({
@@ -79,6 +83,25 @@ export async function systemRoutes(app: FastifyInstance, deps: SystemRouteDeps):
         cursor: request.query.cursor,
         limit: request.query.limit,
       }),
+  );
+
+  const power =
+    deps.power ??
+    new PowerMeter({
+      onError: (error) => app.log.debug({ err: error }, 'Akkustand nicht lesbar, Antwort: kein Akku'),
+    });
+  // Nur lokal: Der Akku des Macs geht kein anderes Gerät etwas an (UX-315)
+  typed.get(
+    '/system/power',
+    {
+      config: { sgAccess: 'local' },
+      schema: {
+        tags: ['System'],
+        summary: 'Akku des Macs: Prozent und Netzteil (UX-315)',
+        response: { 200: SystemPowerSchema },
+      },
+    },
+    async () => power.read(),
   );
 
   const storage =
