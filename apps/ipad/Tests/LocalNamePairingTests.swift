@@ -21,10 +21,15 @@ final class FakeLocalResolver: LocalNameResolving, @unchecked Sendable {
     }
 
     func resolve(_ endpoint: CoreEndpoint) async -> CoreEndpoint? {
-        lock.lock()
-        asked.append(endpoint)
-        lock.unlock()
+        record(endpoint)
         return answer
+    }
+
+    /// Synchron, weil `NSLock.lock()` in `async`-Funktionen nicht erlaubt ist
+    private func record(_ endpoint: CoreEndpoint) {
+        lock.lock()
+        defer { lock.unlock() }
+        asked.append(endpoint)
     }
 }
 
