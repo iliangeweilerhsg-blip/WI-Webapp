@@ -18,6 +18,7 @@ import {
 import { MOODLE_GATED_ACTIONS } from '../config.ts';
 import { HttpError } from '../errors.ts';
 import type { MoodleClient } from './client.ts';
+import type { MoodleUploadStore } from './uploads.ts';
 
 export interface MoodleActionSpec<P> {
   label: string;
@@ -32,6 +33,8 @@ export interface MoodleActionContext {
   client: MoodleClient;
   /** Moodle-Nutzer-ID des Token-Inhabers */
   userId(): Promise<number>;
+  /** Löst `upload_ids` auf (`acquire`/`release`). Unbekannt oder verfallen → 404 `moodle_upload_not_found` */
+  uploads: MoodleUploadStore;
 }
 
 export interface MoodleActionPreviewResult {

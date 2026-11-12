@@ -1,4 +1,5 @@
 // Moodle-Anbindung zusammensetzen (08 §9)
+import type { MoodleActionId } from '@sg/shared';
 import type { Config } from '../config.ts';
 import { DEFAULT_ACTION_HANDLERS, MoodleActionRegistry, type MoodleActionHandlers } from './actions.ts';
 import { MoodleClient, type FetchFn, type MoodleClientOptions, type MoodleLogger } from './client.ts';
@@ -7,6 +8,7 @@ import { KeyedMutex } from './locks.ts';
 import { readMoodleMeta, type MoodleMeta } from './meta.ts';
 import { MoodleFileRegistry, MoodleReader } from './reader.ts';
 import { MoodleStatusService } from './status.ts';
+import { MoodleUploadStore } from './uploads.ts';
 import { KeychainTokenStore, type MoodleTokenStore } from './token-store.ts';
 
 export interface MoodleServices {
@@ -16,6 +18,13 @@ export interface MoodleServices {
   confirmations: ConfirmationStore;
   /** Sperre je Aufgabe o. Ä. für `execute` (08 §9.3) */
   locks: KeyedMutex;
+  /** Uploads für Aktionen (08 §9.3), nur im Speicher des Core, Dateien unter `tmp/moodle-uploads/` */
+  uploads: MoodleUploadStore;
+  /**
+   * `POST /moodle/uploads` ist nur offen, wenn eine freigeschaltete Aktion `upload_ids` annimmt (E12). Sonst
+   * `501 moodle_action_not_implemented`.
+   */
+  uploadsEnabled: boolean;
   /** Lese-Endpunkte (F-MDL-02) */
   reader: MoodleReader;
   /** Über die Lese-Endpunkte ausgegebene Dateiverweise, nur diese liefert GET /moodle/file */
@@ -29,6 +38,7 @@ export type MoodleClientTuning = Partial<
     | 'maxConcurrent'
     | 'minIntervalMs'
     | 'timeoutMs'
+    | 'uploadTimeoutMs'
     | 'maxConcurrentDownloads'
     | 'idleTimeoutMs'
     | 'retryDelaysMs'
@@ -53,6 +63,14 @@ export interface CreateMoodleServicesOptions {
   timeZone?: string;
 }
 
+/** Freischaltbare Aktionen, deren Parameter `upload_ids` enthalten */
+const UPLOAD_ACTIONS: readonly MoodleActionId[] = [
+  'assign.save_draft',
+  'forum.create_discussion',
+  'forum.reply',
+  'files.upload_private',
+];
+
 export function createMoodleServices(options: CreateMoodleServicesOptions): MoodleServices {
   const client = new MoodleClient({
     baseUrl: options.config.moodleUrl,
@@ -68,6 +86,7 @@ export function createMoodleServices(options: CreateMoodleServicesOptions): Mood
   });
   const now = options.now;
   const files = new MoodleFileRegistry();
+  const enabled = options.config.moodleActions ?? [];
   return {
     client,
     status,
@@ -77,6 +96,12 @@ export function createMoodleServices(options: CreateMoodleServicesOptions): Mood
     ),
     confirmations: new ConfirmationStore(now ? { now: () => now().getTime() } : {}),
     locks: new KeyedMutex(options.lockTimeoutMs === undefined ? {} : { timeoutMs: options.lockTimeoutMs }),
+    uploads: new MoodleUploadStore({
+      dataDir: options.config.dataDir,
+      ...(now ? { now: () => now().getTime() } : {}),
+    }),
+    // Aktionen, die `upload_ids` annehmen (Schemas `MoodleActionParams*`)
+    uploadsEnabled: UPLOAD_ACTIONS.some((id) => enabled.includes(id)),
     reader: new MoodleReader({
       client,
       status,

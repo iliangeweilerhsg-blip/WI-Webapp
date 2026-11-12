@@ -1,5 +1,6 @@
 // Moodle-Web-Service-Client (08 §9.1). Einziger Ort im Core, der mit Moodle spricht.
 // Der Token steht nur im Body der Anfragen, nie in URL, Log oder Fehlermeldung.
+import { openAsBlob } from 'node:fs';
 import { Readable } from 'node:stream';
 import { HttpError } from '../errors.ts';
 import { filenameFrom } from './content-disposition.ts';
@@ -41,6 +42,11 @@ export interface MoodleClientOptions {
   /** Zeitlimit für REST-Aufrufe (Standard 30 s) */
   timeoutMs?: number;
   /**
+   * Mindest-Zeitlimit für den Upload einer Datei zu Moodle (Standard 120 s). Bei großen Dateien länger: mindestens
+   * so viel, wie `MIN_UPLOAD_RATE_BYTES` je Sekunde brauchen.
+   */
+  uploadTimeoutMs?: number;
+  /**
    * Leerlauf-Zeitlimit für Datei-Downloads (Standard 30 s): So lange darf Moodle ohne neue Daten bleiben,
    * bis zu den Headern wie danach. Es gibt kein Limit für die ganze Übertragung.
    */
@@ -62,6 +68,14 @@ export interface MoodleClientOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/** Eine Datei für {@link MoodleClient.uploadDraft}. `path` stammt aus dem Upload-Speicher, nie aus einer Eingabe */
+export interface MoodleUploadFile {
+  path: string;
+  /** Name bei Moodle. `FormData` maskiert Anführungszeichen und Zeilenumbrüche */
+  filename: string;
+  sizeBytes: number;
+}
+
 export interface MoodleDownload {
   stream: Readable;
   contentType: string;
@@ -77,6 +91,9 @@ export interface MoodleDownload {
 const TOKEN_ERRORCODES = new Set(['invalidtoken', 'invalidtimedtoken']);
 const REST_PATH = '/webservice/rest/server.php';
 const PLUGINFILE_PATH = '/webservice/pluginfile.php';
+const UPLOAD_PATH = '/webservice/upload.php';
+/** Beim Zeitlimit für Uploads gerechnete Mindestrate (64 KiB/s) */
+export const MIN_UPLOAD_RATE_BYTES = 64 * 1024;
 /** Größte JSON-Antwort, die beim Datei-Download als mögliche Fehlermeldung gelesen wird */
 const MAX_JSON_ERROR_BYTES = 64 * 1024;
 /** Obergrenze für JSON-Antworten der REST-Schnittstelle (Review #125: `response.text()` begrenzen) */
@@ -410,6 +427,7 @@ export class MoodleClient {
   private readonly throttle: Throttle;
   private readonly downloadThrottle: Throttle;
   private readonly timeoutMs: number;
+  private readonly uploadTimeoutMs: number;
   private readonly idleTimeoutMs: number;
   private readonly minRateBytes: number;
   private readonly rateWindowMs: number;
@@ -432,6 +450,7 @@ export class MoodleClient {
     // Eigener Pool: Hängende Downloads dürfen Status, Fristen und andere REST-Aufrufe nicht aufhalten
     this.downloadThrottle = new Throttle(options.maxConcurrentDownloads ?? 2, pacer, this.sleep);
     this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.uploadTimeoutMs = options.uploadTimeoutMs ?? 120_000;
     this.idleTimeoutMs = options.idleTimeoutMs ?? 30_000;
     this.minRateBytes = options.minRateBytes ?? 64 * 1024;
     this.rateWindowMs = options.rateWindowMs ?? 60_000;
@@ -531,6 +550,125 @@ export class MoodleClient {
 
     if (isMoodleException(data)) throw this.mapException(wsfunction, data);
     return data as T;
+  }
+
+  /**
+   * Lädt Dateien nacheinander in einen Entwurfsbereich (`webservice/upload.php`, `multipart/form-data`) und liefert
+   * dessen `itemid`. Die erste Datei bekommt `itemid = 0`, die weiteren die gelieferte. Der Token steht im
+   * Formularfeld `token`, nie in der URL. Eine Datei je Anfrage, gestreamt von der Platte (nie ganz im Speicher).
+   * Zählt in der Drosselung und im REST-Pool.
+   *
+   * Wird **nie** wiederholt: Netzwerkfehler, Zeitlimit und 5xx → `502 moodle_unreachable` mit
+   * `details.outcome_unknown = true`. Ein Fehlerobjekt von Moodle → `409 moodle_token_invalid` (Token) bzw.
+   * `502 moodle_error`. Logs nennen nur Aufruf, Dauer, Anzahl und Byte, keine Dateinamen.
+   */
+  async uploadDraft(files: readonly MoodleUploadFile[]): Promise<{ itemid: number }> {
+    if (files.length === 0) throw new Error('uploadDraft braucht mindestens eine Datei');
+    const token = await this.requireToken();
+    const started = this.now();
+    let itemid = 0;
+    let bytes = 0;
+    for (const file of files) {
+      const received = await this.uploadOne(token, file, itemid);
+      if (itemid !== 0 && received !== itemid) {
+        throw new HttpError(502, 'moodle_error', 'Moodle hat den Upload nicht bestätigt.', {
+          wsfunction: 'upload.php',
+          moodle_errorcode: 'upload_itemid_mismatch',
+        });
+      }
+      itemid = received;
+      bytes += file.sizeBytes;
+    }
+    this.logger?.debug(
+      { wsfunction: 'upload.php', duration_ms: this.now() - started, files: files.length, bytes },
+      'Moodle-Upload',
+    );
+    return { itemid };
+  }
+
+  private async uploadOne(token: string, file: MoodleUploadFile, itemid: number): Promise<number> {
+    let blob: Blob;
+    try {
+      blob = await openAsBlob(file.path);
+    } catch {
+      throw new HttpError(404, 'moodle_upload_not_found', 'Die hochgeladene Datei ist nicht mehr vorhanden.');
+    }
+    if (blob.size !== file.sizeBytes) {
+      throw new HttpError(404, 'moodle_upload_not_found', 'Die hochgeladene Datei ist nicht mehr vorhanden.');
+    }
+    const form = new FormData();
+    // Nur der Client setzt diese Felder. Kein Parameter einer Aktion fließt in einen Feldnamen
+    form.append('token', token);
+    form.append('filearea', 'draft');
+    form.append('itemid', String(itemid));
+    form.append('file_1', blob, file.filename);
+    const timeoutMs = Math.max(
+      this.uploadTimeoutMs,
+      Math.floor((file.sizeBytes / MIN_UPLOAD_RATE_BYTES) * 1000),
+    );
+    const label = 'upload.php';
+
+    const data = await this.withRetries(label, true, async () => {
+      let response: Response;
+      try {
+        response = await this.fetchFn(`${this.baseUrl}${UPLOAD_PATH}`, {
+          method: 'POST',
+          // Kein `content-type`: `fetch` setzt ihn samt Grenze selbst
+          headers: { accept: 'application/json' },
+          body: form,
+          // Nie einer Weiterleitung folgen: Sie würde den Token im Body an ein anderes Ziel schicken
+          redirect: 'manual',
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (error) {
+        throw transientFrom(error);
+      }
+      if (isRedirect(response)) {
+        await discard(response);
+        throw this.unreachable(label, 'redirect', false);
+      }
+      if (response.status >= 500) {
+        await discard(response);
+        throw new TransientError(`http_${response.status}`);
+      }
+      if (response.status !== 200) {
+        await discard(response);
+        throw this.unreachable(label, `http_${response.status}`, false);
+      }
+      let text: string;
+      try {
+        text = await readTextLimited(response, this.maxResponseBytes);
+      } catch (error) {
+        if (error instanceof TooLargeError) throw this.unreachable(label, 'too_large', true);
+        throw transientFrom(error);
+      }
+      try {
+        return scrubToken(JSON.parse(text) as unknown, token);
+      } catch {
+        throw this.unreachable(label, 'no_json', true);
+      }
+    });
+    return this.uploadItemId(data);
+  }
+
+  /** `itemid` aus der Antwort von `upload.php`: ein Array mit einem Objekt je Datei, oder ein Fehlerobjekt */
+  private uploadItemId(data: unknown): number {
+    const entry: unknown = Array.isArray(data) && data.length === 1 ? data[0] : data;
+    if (typeof entry === 'object' && entry !== null && !Array.isArray(entry)) {
+      const fields = entry as MoodleException;
+      if (typeof fields.error === 'string' || typeof fields.errorcode === 'string' || 'exception' in fields) {
+        throw this.mapException('upload.php', {
+          ...fields,
+          errorcode: typeof fields.errorcode === 'string' ? fields.errorcode : 'uploaderror',
+        });
+      }
+      const id = Number((fields as { itemid?: unknown }).itemid);
+      if (Number.isSafeInteger(id) && id > 0) return id;
+    }
+    throw new HttpError(502, 'moodle_error', 'Moodle hat den Upload nicht bestätigt.', {
+      wsfunction: 'upload.php',
+      moodle_errorcode: 'upload_response_invalid',
+    });
   }
 
   /**
