@@ -26,6 +26,8 @@ final class AppModel {
     let pairing: PairingController
     /// Live-Sync mit dem Mac (T1-14). `nil` in Tests ohne Netz.
     let sync: SyncEngine?
+    /// Bibliothek der Notizbücher (T1-11 Rest). `nil` in Tests ohne Netz.
+    let library: InkLibraryService?
 
     private let client: CoreClient
     private let tokenStore: any TokenStore
@@ -37,10 +39,12 @@ final class AppModel {
         macStore: any PairedMacStore,
         deviceName: String,
         appVersion: String?,
-        sync: SyncEngine? = nil
+        sync: SyncEngine? = nil,
+        library: InkLibraryService? = nil
     ) {
         self.client = client
         self.sync = sync
+        self.library = library
         self.tokenStore = tokenStore
         self.macStore = macStore
         self.pairing = PairingController(

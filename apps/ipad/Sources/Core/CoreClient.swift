@@ -48,6 +48,9 @@ struct PairingResult: Equatable, Sendable {
 /// Fehlversuch doppelt zählen oder ein schon gekoppeltes Gerät als Fehler melden (Review L-1).
 @MainActor
 final class CoreClient {
+    /// Schutz vor einer Endlosschleife, falls ein Core den Cursor nie leert
+    private static let maxListPages = 50
+
     private let transport: any HTTPTransport
     private let maxRetries: Int
     private let retryDelay: Duration
@@ -126,12 +129,46 @@ final class CoreClient {
         return try decode(ModuleNameResponse.self, from: data).name
     }
 
-    /// `GET /notebooks?module_id=…`
+    /// `GET /modules?limit=200`, bis `next_cursor` leer ist. Gelesen wird nur das, was die Bibliothek braucht
+    /// (`ModuleBrief`): Ein neuer Wert in `color` oder `settings.layout` lässt den Abruf nicht scheitern.
+    func modules(endpoint: CoreEndpoint, token: String) async throws -> [ModuleBrief] {
+        var result: [ModuleBrief] = []
+        var cursor: String?
+        for _ in 0..<CoreClient.maxListPages {
+            var query = [URLQueryItem(name: "limit", value: "200")]
+            if let cursor {
+                query.append(URLQueryItem(name: "cursor", value: cursor))
+            }
+            let data = try await send("GET", "/modules", endpoint: endpoint, token: token, body: nil, queryItems: query)
+            let page = try decode(ModuleBriefList.self, from: data)
+            result += page.items
+            guard let next = page.nextCursor, !next.isEmpty, next != cursor else { break }
+            cursor = next
+        }
+        return result
+    }
+
+    /// `GET /notebooks?module_id=…&limit=200`, bis `next_cursor` leer ist. Die Regel „fehlt am Core, dann
+    /// ausblenden“ braucht die vollständige Liste.
     func notebooks(endpoint: CoreEndpoint, token: String, moduleID: String) async throws -> [Notebook] {
-        let data = try await send(
-            "GET", "/notebooks", endpoint: endpoint, token: token, body: nil,
-            queryItems: [URLQueryItem(name: "module_id", value: moduleID)])
-        return try decode(NotebookList.self, from: data).items
+        var result: [Notebook] = []
+        var cursor: String?
+        for _ in 0..<CoreClient.maxListPages {
+            var query = [
+                URLQueryItem(name: "module_id", value: moduleID),
+                URLQueryItem(name: "limit", value: "200"),
+            ]
+            if let cursor {
+                query.append(URLQueryItem(name: "cursor", value: cursor))
+            }
+            let data = try await send(
+                "GET", "/notebooks", endpoint: endpoint, token: token, body: nil, queryItems: query)
+            let page = try decode(NotebookList.self, from: data)
+            result += page.items
+            guard let next = page.nextCursor, !next.isEmpty, next != cursor else { break }
+            cursor = next
+        }
+        return result
     }
 
     /// `GET /sessions/{id}/notebook` (#199): das Notizbuch der Session, wie der Core es bestimmt.
@@ -232,4 +269,61 @@ final class CoreClient {
 /// Ausschnitt aus `Module`: Unbekannte Felder werden ignoriert
 private struct ModuleNameResponse: Decodable {
     let name: String
+}
+
+/// Ausschnitt aus `Module` für die Bibliothek: Unbekannte Felder und Werte werden ignoriert
+/// (Muster wie `ModuleNameResponse`, aber ohne das generierte `Module`/`ModuleList`).
+struct ModuleBrief: Decodable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let shortName: String?
+    /// `settings.ink_mode`; ein unbekannter Wert zählt als „nicht gesetzt“
+    let inkMode: InkMode?
+
+    init(id: String, name: String, shortName: String?, inkMode: InkMode?) {
+        self.id = id
+        self.name = name
+        self.shortName = shortName
+        self.inkMode = inkMode
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case shortName = "short_name"
+        case settings
+    }
+
+    private struct SettingsExcerpt: Decodable {
+        let inkMode: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case inkMode = "ink_mode"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            inkMode = try? container.decodeIfPresent(String.self, forKey: .inkMode)
+        }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        shortName = try? container.decodeIfPresent(String.self, forKey: .shortName)
+        let settings = try? container.decodeIfPresent(SettingsExcerpt.self, forKey: .settings)
+        let raw = settings?.inkMode
+        inkMode = raw.flatMap { InkMode(rawValue: $0) }
+    }
+}
+
+private struct ModuleBriefList: Decodable {
+    let items: [ModuleBrief]
+    let nextCursor: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case items
+        case nextCursor = "next_cursor"
+    }
 }

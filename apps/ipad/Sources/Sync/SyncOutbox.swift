@@ -8,9 +8,9 @@ struct OutboxEntry: Codable, Equatable, Sendable {
     var opID: String
     /// `notebook:<notebook_id>`
     var stream: String
-    /// `page.create`, `stroke.add`, `stroke.remove`
+    /// `notebook.create`, `page.create`, `page.update`, `page.delete`, `stroke.add`, `stroke.remove`
     var kind: String
-    /// Seite, auf die sich die Operation bezieht (für Abhängigkeiten und `mark(forPage:)`)
+    /// Seite, auf die sich die Operation bezieht (für Abhängigkeiten und `mark(forPage:)`), `nil` bei `notebook.create`
     var pageID: String?
     var json: String
     /// `at` und `created_at` stammen von einer ungeprüften Uhr und werden vor dem ersten Senden korrigiert
@@ -179,8 +179,9 @@ final class SyncOutbox {
     }
 
     private func note(_ entry: OutboxEntry) {
-        // `page.create` ändert die Zeichnung nicht: Es zählt nicht für den Absturzvergleich (`InkPageSnapshot.outboxNumber`)
-        if let pageID = entry.pageID, entry.kind != "page.create" {
+        // Nur Striche ändern die Zeichnung: Seiten-Operationen (`page.create`, `page.update`, `page.delete`) zählen
+        // nicht für den Absturzvergleich (`InkPageSnapshot.outboxNumber`)
+        if let pageID = entry.pageID, entry.kind == "stroke.add" || entry.kind == "stroke.remove" {
             marks[pageID] = max(marks[pageID] ?? 0, entry.number)
         }
     }

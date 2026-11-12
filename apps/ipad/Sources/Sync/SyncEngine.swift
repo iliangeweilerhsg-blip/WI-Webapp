@@ -100,7 +100,7 @@ final class SyncEngine {
     private let client: CoreClient
     private let sockets: any SyncSocketFactory
     private let outbox: SyncOutbox
-    private let bindings: any InkBindingStore
+    private let library: any InkLibraryStore
     private let tokenStore: any TokenStore
     private let appVersion: String?
     private let now: @MainActor () -> Date
@@ -123,7 +123,7 @@ final class SyncEngine {
         client: CoreClient,
         sockets: any SyncSocketFactory,
         outbox: SyncOutbox,
-        bindings: any InkBindingStore,
+        library: any InkLibraryStore,
         tokenStore: any TokenStore,
         appVersion: String? = nil,
         now: @escaping @MainActor () -> Date = { Date() },
@@ -133,7 +133,7 @@ final class SyncEngine {
         self.client = client
         self.sockets = sockets
         self.outbox = outbox
-        self.bindings = bindings
+        self.library = library
         self.tokenStore = tokenStore
         self.appVersion = appVersion
         self.now = now
@@ -143,7 +143,9 @@ final class SyncEngine {
     }
 
     /// Die echte Engine: Dateien in „Application Support/Sync“, URLSession-WebSocket
-    static func live(client: CoreClient, tokenStore: any TokenStore, appVersion: String?) -> SyncEngine {
+    static func live(
+        client: CoreClient, tokenStore: any TokenStore, appVersion: String?, library: any InkLibraryStore
+    ) -> SyncEngine {
         let base =
             FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
@@ -152,7 +154,7 @@ final class SyncEngine {
             client: client,
             sockets: URLSessionSyncSocketFactory(),
             outbox: SyncOutbox(directory: directory),
-            bindings: FileInkBindingStore(url: directory.appendingPathComponent("bindings.json")),
+            library: library,
             tokenStore: tokenStore,
             appVersion: appVersion
         )
@@ -248,14 +250,53 @@ final class SyncEngine {
         return true
     }
 
+    /// Reiht fertige Operationen ein (Notizbuch, Seite). Sie stehen auf der Platte, bevor etwas gesendet wird.
+    /// - Returns: `false`, wenn das Schreiben scheiterte. Dann ist nichts eingereiht.
+    @discardableResult
+    func enqueue(drafts: [OutboxDraft]) -> Bool {
+        guard !drafts.isEmpty else { return true }
+        do {
+            try outbox.append(drafts)
+        } catch {
+            return false
+        }
+        refreshCounts()
+        schedulePump()
+        return true
+    }
+
     /// Der Core ist erreichbar oder wird gerade erreicht (REST-Anfragen lohnen sich)
     var canReachCore: Bool {
         state == .connecting || state == .clockSync || state == .online
     }
 
+    /// Zugang für REST-Abrufe der Bibliothek. `nil` ohne Kopplung.
+    func restAccess() -> (endpoint: CoreEndpoint, token: String)? {
+        guard let found = credentials() else { return nil }
+        return (found.endpoint, found.token)
+    }
+
+    /// Ein 401 bei einem REST-Abruf der Bibliothek heißt: Kopplung widerrufen (wie bei den eigenen Abrufen)
+    func reportRESTError(_ error: Error) {
+        handleRESTError(error)
+    }
+
+    /// Letzter gemessener Versatz Mac − iPad, `nil` = noch nie gemessen
+    var clockOffsetForDrafts: Int? { clockOffsetMS }
+
+    /// Seiten, für die gerade eine Operation dieser Art in der Warteschlange wartet
+    func pendingPageIDs(kind: String) -> Set<String> {
+        Set(outbox.pending.compactMap { $0.kind == kind ? $0.pageID : nil })
+    }
+
+    /// Wartet in der Warteschlange eine Operation dieser Art in diesem Strom?
+    func hasPending(kind: String, stream: String) -> Bool {
+        outbox.pending.contains { $0.kind == kind && $0.stream == stream }
+    }
+
     /// Neue `db_epoch`: Die Seite muss mit dem Core abgeglichen werden
-    func bindingNeedsReconcile(pageID: String) -> Bool {
-        bindings.binding(forPage: pageID)?.needsReconcile ?? false
+    func pageNeedsReconcile(pageID: String) -> Bool {
+        library.page(pageID)?.needsReconcile ?? false
     }
 
     /// Höchste Nummer der Warteschlange (für `page.plist`)
@@ -263,137 +304,6 @@ final class SyncEngine {
 
     /// Höchste Nummer, die für diese Seite vergeben wurde
     func outboxMark(forPage pageID: String) -> Int { outbox.mark(forPage: pageID) }
-
-    // MARK: Bindung
-
-    /// Findet das Notizbuch, in das geschrieben wird, und legt beim ersten Mal die Seite an (E1).
-    /// Ohne Verbindung gilt das zuletzt verwendete Notizbuch. `nil`: keine Bindung, die Seite bleibt lokal.
-    func resolveBinding() async -> InkBinding? {
-        if canReachCore, let credentials = credentials() {
-            do {
-                if let resolved = try await resolveOnline(credentials) {
-                    return resolved
-                }
-            } catch {
-                handleRESTError(error)
-            }
-        }
-        guard let lastID = bindings.lastNotebookID, let last = bindings.binding(forNotebook: lastID) else {
-            return nil
-        }
-        return ensurePageCreated(last, index: 1)
-    }
-
-    /// Notizbuch der laufenden Vorlesung laut Core, nur lesend: Es wird nichts angelegt oder gespeichert.
-    /// `nil` ohne Verbindung, ohne laufende Vorlesung oder bei einem Fehler (UX-19).
-    func runningLectureNotebookID() async -> String? {
-        guard canReachCore, let credentials = credentials() else { return nil }
-        // Ohne Modulnamen: Diese Abfrage läuft bei jeder neuen Verbindung, der Name wird hier nicht gebraucht
-        guard let found = try? await lookupLecture(credentials, withModuleName: false) else { return nil }
-        return found.notebook.id
-    }
-
-    private struct LectureLookup {
-        var session: Session
-        var notebook: Notebook
-        var moduleName: String?
-    }
-
-    /// Fragt Session, Notizbuch und auf Wunsch den Modulnamen ab. Der Name ist nicht lebenswichtig: Scheitert er,
-    /// bleibt er `nil`.
-    private func lookupLecture(_ credentials: Credentials, withModuleName: Bool) async throws -> LectureLookup? {
-        let sessions = try await client.activeSessions(endpoint: credentials.endpoint, token: credentials.token)
-        // Die zuletzt begonnene Session
-        guard
-            let session = sessions.max(by: { ($0.startedAt ?? $0.createdAt) < ($1.startedAt ?? $1.createdAt) })
-        else { return nil }
-        let notebook: Notebook
-        if let fromCore = try await client.sessionNotebook(
-            endpoint: credentials.endpoint, token: credentials.token, sessionID: session.id)
-        {
-            // Der Core entscheidet (#199): „Übung“ bei Übung und Tutorium, sonst „Vorlesung“
-            notebook = fromCore
-        } else {
-            // Älterer Core ohne den Endpunkt (404): die alte Regel, das erste „Vorlesung“ des Moduls
-            let notebooks = try await client.notebooks(
-                endpoint: credentials.endpoint, token: credentials.token, moduleID: session.moduleID)
-            guard let legacy = notebooks.first(where: { $0.kind == .vorlesung && $0.deletedAt == nil }) else {
-                return nil
-            }
-            notebook = legacy
-        }
-        var name: String?
-        if withModuleName {
-            name = try? await client.moduleName(
-                endpoint: credentials.endpoint, token: credentials.token, moduleID: session.moduleID)
-        }
-        return LectureLookup(session: session, notebook: notebook, moduleName: name)
-    }
-
-    private func resolveOnline(_ credentials: Credentials) async throws -> InkBinding? {
-        guard let found = try await lookupLecture(credentials, withModuleName: true) else { return nil }
-        let session = found.session
-        let notebook = found.notebook
-        let moduleName = found.moduleName
-        let startMS = session.startedAt.map { InkStrokeCodec.milliseconds($0) }
-
-        if var existing = bindings.binding(forNotebook: notebook.id) {
-            existing.sessionID = session.id
-            existing.sessionStartMS = startMS
-            existing.moduleName = moduleName ?? existing.moduleName
-            bindings.save(existing, makeLast: true)
-            return ensurePageCreated(existing, index: 1)
-        }
-
-        let pages = try await client.notebookPages(
-            endpoint: credentials.endpoint, token: credentials.token, notebookID: notebook.id)
-        // Während der Anfrage kann ein zweiter Aufruf die Bindung schon angelegt haben
-        if var existing = bindings.binding(forNotebook: notebook.id) {
-            existing.sessionID = session.id
-            existing.sessionStartMS = startMS
-            existing.moduleName = moduleName ?? existing.moduleName
-            bindings.save(existing, makeLast: true)
-            return ensurePageCreated(existing, index: pages.count + 1)
-        }
-        let binding = InkBinding(
-            notebookID: notebook.id,
-            pageID: InkID.uuidV7(),
-            moduleID: session.moduleID,
-            pageCreated: false,
-            needsReconcile: false,
-            sessionID: session.id,
-            sessionStartMS: startMS,
-            moduleName: moduleName
-        )
-        // Erst die Bindung, dann `page.create`: Bricht die App dazwischen ab, holt der nächste Start es nach
-        bindings.save(binding, makeLast: true)
-        return ensurePageCreated(binding, index: pages.count + 1)
-    }
-
-    /// Reiht `page.create` ein, falls noch nicht geschehen. `nil`, wenn das Schreiben scheitert.
-    private func ensurePageCreated(_ binding: InkBinding, index: Int) -> InkBinding? {
-        guard !binding.pageCreated else { return binding }
-        guard
-            let draft = InkOpBuilder.pageCreate(
-                binding: binding,
-                index: index,
-                nowMS: nowMS(),
-                offsetMS: clockOffsetMS,
-                makeID: { InkID.uuidV7() }
-            )
-        else { return nil }
-        do {
-            try outbox.append([draft])
-        } catch {
-            return nil
-        }
-        var created = binding
-        created.pageCreated = true
-        bindings.save(created, makeLast: true)
-        refreshCounts()
-        schedulePump()
-        return created
-    }
 
     // MARK: Abgleich
 
@@ -409,20 +319,15 @@ final class SyncEngine {
             handleRESTError(error)
             return
         }
-        var pageIndex = 1
-        if remote == nil,
-            let pages = try? await client.notebookPages(
-                endpoint: credentials.endpoint, token: credentials.token, notebookID: binding.notebookID)
-        {
-            pageIndex = pages.count + 1
-        }
         // Ab hier gibt es kein `await` mehr: Der lokale Stand ist genau der, den der Plan sieht
         guard runningMac != nil else { return }
         var succeeded = true
         if remote == nil {
+            // Der Core kennt die Seite nicht (Wiederherstellung): mit allen Feldern der Bibliothek neu anlegen,
+            // damit z. B. eine Folienseite nicht als leere A4-Seite zurückkommt
+            let known = library.page(binding.pageID) ?? SyncEngine.fallbackPage(for: binding)
             if let draft = InkOpBuilder.pageCreate(
-                binding: binding,
-                index: pageIndex,
+                page: known,
                 nowMS: nowMS(),
                 offsetMS: clockOffsetMS,
                 makeID: { InkID.uuidV7() }
@@ -444,8 +349,28 @@ final class SyncEngine {
         schedulePump()
         if succeeded {
             page.reconcileFinished()
-            bindings.clearNeedsReconcile(forPage: binding.pageID)
+            library.clearNeedsReconcile(pageID: binding.pageID)
         }
+    }
+
+    /// Seite, wenn die Bibliothek sie nicht (mehr) kennt: A4, leer, wie die alte Bindung sie angelegt hat
+    private static func fallbackPage(for binding: InkBinding) -> LibraryPage {
+        LibraryPage(
+            id: binding.pageID,
+            notebookID: binding.notebookID,
+            index: 1,
+            template: .blanko,
+            widthPt: LibraryPage.a4Width,
+            heightPt: LibraryPage.a4Height,
+            sessionID: binding.sessionID,
+            backgroundSlideID: nil,
+            attachedSlideID: nil,
+            version: 1,
+            createQueued: true,
+            needsReconcile: false,
+            deletedAtMS: nil,
+            deleteQueued: false
+        )
     }
 
     // MARK: Anwesenheit
@@ -678,13 +603,35 @@ final class SyncEngine {
         link.welcomed = true
         link.lastPongAt = now()
         // Nach einer Wiederherstellung am Mac kennt der Core den Stand nicht mehr: alles abgleichen
-        if let stored = bindings.dbEpoch, stored != dbEpoch {
-            bindings.markAllNeedReconcile()
+        if let stored = library.dbEpoch, stored != dbEpoch {
+            library.markAllNeedReconcile()
+            requeueFreeNotebooks()
         }
-        bindings.setDBEpoch(dbEpoch)
+        library.setDBEpoch(dbEpoch)
         welcomeCount += 1
         setState(.clockSync)
         await startClockProbe(link)
+    }
+
+    /// Nach neuer `db_epoch`: Ein freies Notizbuch, das nach dem Backup angelegt wurde, fehlt dem Core. Ohne
+    /// `notebook.create` scheiterte jedes erneute `page.create` mit `notebook_not_found`. Die Operation ist
+    /// idempotent (der Core bestätigt eine bekannte ID ohne Änderung) und steht vor den `page.create` des Abgleichs.
+    private func requeueFreeNotebooks() {
+        var drafts: [OutboxDraft] = []
+        for notebook in library.allNotebooks()
+        where notebook.kind == .frei && !library.pages(inNotebook: notebook.id).isEmpty {
+            if let draft = InkOpBuilder.notebookCreate(
+                notebook: notebook,
+                nowMS: nowMS(),
+                offsetMS: clockOffsetMS,
+                makeID: { InkID.uuidV7() }
+            ) {
+                drafts.append(draft)
+            }
+        }
+        // Scheitert das Schreiben, bleibt das Notizbuch `knownOnServer = false`. Der nächste Aufruf von
+        // `InkLibraryService.openTarget` reiht `notebook.create` dann nach.
+        enqueue(drafts: drafts)
     }
 
     // MARK: Uhrabgleich (VERTRAEGE §11.5)
@@ -831,13 +778,18 @@ final class SyncEngine {
     }
 
     /// Verschiebt die Operation und alles, was von ihr abhängt, in die Fehlerablage. Bei `page.create` sind das
-    /// alle Operationen derselben Seite, und die Bindung wird verworfen.
+    /// alle Operationen derselben Seite, bei `notebook.create` alle Operationen desselben Stroms (also des Notizbuchs).
+    /// Der Eintrag der Bibliothek wird entfernt, die Dateien unter `Ink/<page_id>/` bleiben.
     @discardableResult
     private func deadLetter(_ entry: OutboxEntry, code: String, message: String, link: SyncLink?) -> Bool {
         var ids = [entry.opID]
         let isPageCreate = entry.kind == "page.create"
+        let isNotebookCreate = entry.kind == "notebook.create"
         if isPageCreate, let pageID = entry.pageID {
             ids += outbox.pending.filter { $0.pageID == pageID && $0.opID != entry.opID }.map(\.opID)
+        }
+        if isNotebookCreate {
+            ids += outbox.pending.filter { $0.stream == entry.stream && $0.opID != entry.opID }.map(\.opID)
         }
         do {
             try outbox.moveToDeadLetter(opIDs: ids, code: code, message: message)
@@ -851,10 +803,21 @@ final class SyncEngine {
             }
         }
         if isPageCreate, let pageID = entry.pageID {
-            bindings.removeBinding(forPage: pageID)
+            library.removePage(pageID)
+        }
+        if isNotebookCreate, let notebookID = SyncEngine.notebookID(ofStream: entry.stream) {
+            library.removeNotebook(notebookID)
         }
         refreshCounts()
         return true
+    }
+
+    /// `notebook:<id>` → `<id>`
+    nonisolated static func notebookID(ofStream stream: String) -> String? {
+        let prefix = "notebook:"
+        guard stream.hasPrefix(prefix) else { return nil }
+        let id = String(stream.dropFirst(prefix.count))
+        return id.isEmpty ? nil : id
     }
 
     /// Wachhund und Taktgeber der Verbindung: `ping` alle 15 s, trennen nach 45 s ohne `pong`,

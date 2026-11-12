@@ -38,17 +38,23 @@ extension AppModel {
         let tokenStore = KeychainTokenStore()
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
         // Unit-Tests laufen in der App: keine Dateien und keine Verbindung
-        let sync: SyncEngine? =
-            AppEnvironment.isRunningTests
-            ? nil
-            : SyncEngine.live(client: client, tokenStore: tokenStore, appVersion: appVersion)
+        var sync: SyncEngine?
+        var library: InkLibraryService?
+        if !AppEnvironment.isRunningTests {
+            let store = FileInkLibraryStore.standard()
+            let engine = SyncEngine.live(
+                client: client, tokenStore: tokenStore, appVersion: appVersion, library: store)
+            sync = engine
+            library = InkLibraryService(store: store, sync: engine, client: client)
+        }
         return AppModel(
             client: client,
             tokenStore: tokenStore,
             macStore: DefaultsPairedMacStore(),
             deviceName: UIDevice.current.name,
             appVersion: appVersion,
-            sync: sync
+            sync: sync,
+            library: library
         )
     }
 }

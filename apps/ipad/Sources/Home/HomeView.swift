@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Startbildschirm (07-UX §4.2). Die Karten sind Platzhalter, bis Kalender, Wiederholung und
-/// Notizbücher angebunden sind (T1-12 ff.). Echt ist hier nur der Verbindungsstatus.
+/// Startbildschirm (07-UX §4.2). „Gleich“ und „Jetzt sinnvoll“ sind Platzhalter, bis Kalender und Wiederholung
+/// angebunden sind. Echt sind der Verbindungsstatus und die Notizbücher je Modul.
 struct HomeView: View {
     let model: AppModel
     let mac: PairedMac
@@ -31,21 +31,10 @@ struct HomeView: View {
                         title: "Jetzt sinnvoll",
                         text: "Vorschläge zum Wiederholen folgen später."
                     )
-                    PlaceholderCard(
-                        title: "Notizbücher",
-                        text: "Deine Notizbücher je Modul erscheinen hier mit dem nächsten Schritt."
-                    )
-                    // Vorläufiger Zugang zur Schreibfläche (T1-12). Die Notizbuchverwaltung folgt mit T1-13.
-                    // Mit laufender Vorlesung erscheinen die Striche live am Mac (T1-14).
-                    NavigationLink {
-                        InkPageView(sync: model.sync)
-                    } label: {
-                        PlaceholderCard(
-                            title: "Schreibfläche",
-                            text: "Schreibe in das Notizbuch der laufenden Vorlesung. Ohne Verbindung wird lokal gepuffert."
-                        )
+                    // Notizbücher je Modul (UX-30). Mit laufender Vorlesung erscheinen die Striche live am Mac (T1-14).
+                    if let library = model.library {
+                        LibraryListView(library: library, isOnline: model.sync?.state == .online)
                     }
-                    .buttonStyle(.plain)
                 }
                 .padding()
                 .frame(maxWidth: 720, alignment: .leading)
@@ -67,6 +56,9 @@ struct HomeView: View {
         }
         .onAppear {
             expiryNotice = ProfileExpiry.currentNotice()
+        }
+        .onChange(of: model.sync?.welcomeCount ?? 0) { _, _ in
+            _Concurrency.Task { await model.library?.refresh() }
         }
         .task {
             // Solange der Startbildschirm sichtbar ist, regelmäßig nachsehen.

@@ -2,23 +2,38 @@ import SwiftUI
 import UIKit
 
 /// Schreibfläche einer Seite mit Werkzeugleiste (F-INK-01).
-/// Mit laufender Vorlesung öffnet sie die Seite des Vorlesungs-Notizbuchs und sendet die Striche live an den Mac
-/// (T1-14). Ohne Bindung bleibt es bei der lokalen Testseite ohne Sync. Notizbücher, Seiten und Vorlagen folgen
-/// mit T1-13.
+/// Sie öffnet die letzte Seite des gewählten Notizbuchs (UX-30) und sendet die Striche live an den Mac (T1-14).
+/// Ohne Verbindung wird lokal gepuffert: Die Wahl des Notizbuchs geht auch offline. Seiten, Vorlagen und
+/// Schreibmodi folgen mit T1-13.
 struct InkPageView: View {
-    let sync: SyncEngine?
+    let library: InkLibraryService
 
+    @State private var currentNotebookID: String
     @State private var model: InkPageModel?
     @State private var binding: InkBinding?
     @State private var isReconciling = false
-    /// Notizbuch der laufenden Vorlesung, wenn es vom angezeigten abweicht (UX-19). Die Seite bleibt stehen.
-    @State private var otherNotebookID: String?
+    /// Das Notizbuch ist der Bibliothek nicht bekannt oder die Seite ließ sich nicht anlegen
+    @State private var failedToOpen = false
     /// Händigkeit: Seite der Werkzeugleiste. Später aus `Settings.lecture.toolbar_side` (F-EIN-01).
     @AppStorage("ink.toolbarSide") private var toolbarSideRaw = ToolbarSide.rechts.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
+    init(library: InkLibraryService, notebookID: String) {
+        self.library = library
+        _currentNotebookID = State(initialValue: notebookID)
+    }
+
+    private var sync: SyncEngine { library.sync }
+
     private var toolbarSide: ToolbarSide {
         ToolbarSide(rawValue: toolbarSideRaw) ?? .rechts
+    }
+
+    /// Notizbuch der laufenden Vorlesung, wenn es vom angezeigten abweicht (UX-19). Die Seite bleibt stehen.
+    private var otherNotebookID: String? {
+        let running = library.running?.notebookID
+        return InkBindingCheck.differs(shownNotebookID: currentNotebookID, runningNotebookID: running)
+            ? running : nil
     }
 
     var body: some View {
@@ -38,9 +53,6 @@ struct InkPageView: View {
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(spacing: 0) {
-                        if sync != nil, binding == nil {
-                            infoRow("Kein Notizbuch am Mac gefunden. Diese Seite bleibt vorerst nur auf dem iPad. Starte am Mac eine Vorlesung und öffne die Schreibfläche danach neu.")
-                        }
                         if let offlineText {
                             infoRow(offlineText)
                         }
@@ -62,6 +74,12 @@ struct InkPageView: View {
                         }
                     }
                 }
+            } else if failedToOpen {
+                Text("Dieses Notizbuch ist nicht mehr verfügbar.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(.secondarySystemBackground))
             } else {
                 Color(.secondarySystemBackground)
             }
@@ -83,35 +101,43 @@ struct InkPageView: View {
             await open()
         }
         .onAppear {
-            sync?.setPresence(presence(onPage: true))
+            sync.setPresence(presence(onPage: true))
         }
         .onDisappear {
             model?.saveNow()
-            sync?.setPresence(presence(onPage: false))
+            sync.setPresence(presence(onPage: false))
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 model?.saveNow()
             }
         }
-        .onChange(of: sync?.welcomeCount ?? 0) { _, _ in
-            // Neu verbunden (auch nach neuer db_epoch): Seite abgleichen, wenn nötig
+        .onChange(of: library.running) { _, _ in
+            // Die Vorlesung hat begonnen oder geendet: Session der offenen Seite nachziehen
+            applyFreshTarget()
+        }
+        .onChange(of: sync.welcomeCount) { _, _ in
+            // Neu verbunden (auch nach neuer db_epoch): Bibliothek auffrischen, Seite abgleichen, wenn nötig
             _Concurrency.Task {
+                await library.refresh()
+                await library.refreshPages(notebookID: currentNotebookID)
+                applyFreshTarget()
                 await reconcileIfNeeded()
-                await checkRunningLecture()
             }
         }
     }
 
     private var title: String {
-        guard let binding else { return "Test-Notizbuch" }
-        return InkPageTitle.text(moduleName: binding.moduleName)
+        guard let binding else { return library.notebook(currentNotebookID)?.title ?? "Notizbuch" }
+        return InkPageTitle.text(
+            moduleName: binding.moduleName, notebookTitle: library.notebook(binding.notebookID)?.title)
     }
 
-    /// Zeile ohne Verbindung. Der Modulname steht dabei, damit klar ist, wohin geschrieben wird.
+    /// Zeile ohne Verbindung. Modul und Notizbuch stehen dabei, damit klar ist, wohin geschrieben wird.
     private var offlineText: String? {
-        guard let sync, let binding, sync.state != .online else { return nil }
-        return InkPageTitle.offlineLine(moduleName: binding.moduleName)
+        guard let binding, sync.state != .online else { return nil }
+        return InkPageTitle.offlineLine(
+            moduleName: binding.moduleName, notebookTitle: library.notebook(binding.notebookID)?.title)
     }
 
     private func infoRow(_ text: String) -> some View {
@@ -124,64 +150,76 @@ struct InkPageView: View {
             .background(Color(.secondarySystemBackground))
     }
 
-    /// Löst die Bindung nach einer neuen Verbindung erneut auf. Weicht die laufende Vorlesung ab, erscheint nur
-    /// der Knopf: Die Seite wird nicht ungefragt gewechselt.
-    private func checkRunningLecture() async {
-        guard let sync, model != nil else { return }
-        let running = await sync.runningLectureNotebookID()
-        // Während der Anfrage kann der Knopf schon gewechselt haben. Ohne Modell läuft der Wechsel noch:
-        // Dann gilt das Ergebnis nicht, sonst stünde der Knopf nach dem Wechsel wieder da.
-        guard !_Concurrency.Task.isCancelled, model != nil else { return }
-        let differs = InkBindingCheck.differs(
-            shownNotebookID: binding?.notebookID, runningNotebookID: running)
-        otherNotebookID = differs ? running : nil
-    }
-
     /// Erst der Knopf wechselt: Aktuelle Seite sichern, Abmelden von der alten Seite, neu öffnen
     private func switchToRunningLecture() async {
+        guard let target = otherNotebookID else { return }
         model?.saveNow()
-        sync?.setPresence(presence(onPage: false))
-        otherNotebookID = nil
+        sync.setPresence(presence(onPage: false))
         model = nil
         binding = nil
+        failedToOpen = false
+        currentNotebookID = target
         await open()
     }
 
-    /// Öffnet die Seite: Bindung auflösen, Modell anlegen, Sync anschließen
+    /// Öffnet die Seite: Schreibziel aus der Bibliothek, Modell anlegen, Sync anschließen. Der Abruf beim Core
+    /// kommt danach und hält das Schreiben nicht auf.
     private func open() async {
         guard model == nil else { return }
-        let resolved = await sync?.resolveBinding()
-        guard !_Concurrency.Task.isCancelled else { return }
+        let notebookID = currentNotebookID
+        guard let target = library.openTarget(notebookID: notebookID), let libraryPage = library.page(target.pageID)
+        else {
+            failedToOpen = true
+            return
+        }
 
         let store = FileInkPageStore.standard()
-        let page: InkPageModel
-        if let sync, let resolved {
-            page = InkPageModel(
-                pageID: resolved.pageID,
-                store: store,
-                outboxMark: sync.outboxMark(forPage: resolved.pageID)
-            )
-            page.outboxNumberProvider = { [weak sync] in sync?.outboxLastNumber ?? 0 }
-            page.sessionStartedAt = resolved.sessionStartMS.map { Date(timeIntervalSince1970: Double($0) / 1000) }
-            page.onStrokeChanges = { [weak sync, weak page] changes in
-                guard let sync, let page else { return }
-                // Scheitert das Einreihen, holt der nächste Abgleich es nach
-                if !sync.enqueue(changes, binding: resolved) {
-                    page.markNeedsReconcile()
-                }
+        let page = InkPageModel(
+            pageID: target.pageID,
+            pageSize: CGSize(width: libraryPage.widthPt, height: libraryPage.heightPt),
+            store: store,
+            outboxMark: sync.outboxMark(forPage: target.pageID)
+        )
+        page.outboxNumberProvider = { [weak library] in library?.sync.outboxLastNumber ?? 0 }
+        page.sessionStartedAt = target.sessionStartMS.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+        let pageID = target.pageID
+        page.onStrokeChanges = { [weak library, weak page] changes in
+            guard let library, let page else { return }
+            // Das Ziel wird bei jedem Aufruf neu gelesen: Beginnt die Vorlesung erst nach dem Öffnen, fehlt sonst
+            // die Session an den Strichen. Scheitert das Einreihen, holt der nächste Abgleich es nach.
+            guard let current = library.target(forPage: pageID) else {
+                page.markNeedsReconcile()
+                return
             }
-        } else {
-            page = InkPageModel(store: store)
+            if !library.sync.enqueue(changes, binding: current) {
+                page.markNeedsReconcile()
+            }
         }
-        binding = resolved
+        binding = target
         model = page
-        sync?.setPresence(presence(onPage: true))
+        sync.setPresence(presence(onPage: true))
+
+        await library.refresh()
+        guard !_Concurrency.Task.isCancelled, model === page else { return }
+        await library.refreshPages(notebookID: notebookID)
+        guard !_Concurrency.Task.isCancelled, model === page else { return }
+        applyFreshTarget()
         await reconcileIfNeeded()
     }
 
+    /// Zieht Session und Modulname der offenen Seite aus der Bibliothek nach
+    private func applyFreshTarget() {
+        guard let model, let current = binding, let fresh = library.target(forPage: current.pageID) else { return }
+        model.sessionStartedAt = fresh.sessionStartMS.map { Date(timeIntervalSince1970: Double($0) / 1000) }
+        if fresh != current {
+            binding = fresh
+        }
+        sync.setPresence(presence(onPage: true))
+    }
+
     private func reconcileIfNeeded() async {
-        guard let sync, let model, let binding, sync.canReachCore, !isReconciling else { return }
-        guard model.needsReconcile || sync.bindingNeedsReconcile(pageID: binding.pageID) else { return }
+        guard let model, let binding, sync.canReachCore, !isReconciling else { return }
+        guard model.needsReconcile || sync.pageNeedsReconcile(pageID: binding.pageID) else { return }
         isReconciling = true
         await sync.reconcile(page: model, binding: binding)
         isReconciling = false

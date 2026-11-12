@@ -35,6 +35,24 @@ final class SyncOutboxTests: XCTestCase {
         XCTAssertEqual(reopened.mark(forPage: "other"), 0)
     }
 
+    func testOnlyStrokeOperationsMoveTheMarkOfAPage() throws {
+        let outbox = SyncOutbox(directory: makeDirectory())
+        func draft(_ index: Int, kind: String, page: String?) -> OutboxDraft {
+            OutboxDraft(
+                opID: "op-\(index)", stream: "notebook:n1", kind: kind, pageID: page, json: "{}",
+                clockUncertain: false, sessionStartMS: nil)
+        }
+        try outbox.append([
+            draft(1, kind: "notebook.create", page: nil),
+            draft(2, kind: "page.create", page: "page-1"),
+            draft(3, kind: "page.update", page: "page-1"),
+            draft(4, kind: "page.delete", page: "page-1"),
+        ])
+        XCTAssertEqual(outbox.mark(forPage: "page-1"), 0)
+        try outbox.append([draft(5, kind: "stroke.remove", page: "page-1")])
+        XCTAssertEqual(outbox.mark(forPage: "page-1"), 5)
+    }
+
     func testAcknowledgeRemovesTheEntryAlsoAfterARestart() throws {
         let directory = makeDirectory()
         let outbox = SyncOutbox(directory: directory)
@@ -292,10 +310,10 @@ final class InkOpBuilderTests: XCTestCase {
         XCTAssertEqual(Set(drafts.map(\.opID)).count, 3)
     }
 
-    func testPageCreateIsBlankA4WithNulls() throws {
+    func testPageCreateOfAFreshPageIsBlankA4WithNulls() throws {
         let ids = IDs()
         let draft = try XCTUnwrap(
-            InkOpBuilder.pageCreate(binding: binding, index: 4, nowMS: 5000, offsetMS: nil, makeID: ids.make))
+            InkOpBuilder.pageCreate(page: libraryPage(index: 4, sessionID: binding.sessionID), nowMS: 5000, offsetMS: nil, makeID: ids.make))
         let json = try object(draft)
         XCTAssertEqual(json["kind"] as? String, "page.create")
         XCTAssertEqual(json["stream"] as? String, "notebook:\(binding.notebookID)")
@@ -383,7 +401,7 @@ final class InkOpBuilderTests: XCTestCase {
             InkOpBuilder.ops(for: [.remove(["a"])], binding: binding, nowMS: 100, offsetMS: nil, makeID: ids.make)
                 .first)
         let create = try XCTUnwrap(
-            InkOpBuilder.pageCreate(binding: binding, index: 1, nowMS: 100, offsetMS: nil, makeID: ids.make))
+            InkOpBuilder.pageCreate(page: libraryPage(), nowMS: 100, offsetMS: nil, makeID: ids.make))
         for draft in [remove, create] {
             let entry = OutboxEntry(
                 number: 1, opID: draft.opID, stream: draft.stream, kind: draft.kind, pageID: draft.pageID,
@@ -393,6 +411,199 @@ final class InkOpBuilderTests: XCTestCase {
             XCTAssertEqual(json["at"] as? Int, 150)
             XCTAssertEqual(json["clock_uncertain"] as? Bool, false)
         }
+    }
+
+    // MARK: Notizbuch und Seiten (T1-11 Rest)
+
+    private func libraryPage(
+        index: Int = 1, template: PageTemplate = .blanko, width: Double = 595, height: Double = 842,
+        background: String? = nil, attached: String? = nil, sessionID: String? = nil
+    ) -> LibraryPage {
+        LibraryPage(
+            id: binding.pageID, notebookID: binding.notebookID, index: index, template: template,
+            widthPt: width, heightPt: height, sessionID: sessionID, backgroundSlideID: background,
+            attachedSlideID: attached, version: 1, createQueued: false, needsReconcile: false,
+            deletedAtMS: nil, deleteQueued: false)
+    }
+
+    private let freeNotebook = LibraryNotebook(
+        id: "019a4e14-0000-7000-8000-0000000000e9", moduleID: "019a4e14-0000-7000-8000-0000000000c1",
+        title: "Eigene Notizen", kind: .frei, createdAtMS: 7000, knownOnServer: false, hidden: false,
+        lastPageID: nil, remoteMaxIndex: 0, remoteOnlyPageCount: 0)
+
+    private func entry(_ draft: OutboxDraft) -> OutboxEntry {
+        OutboxEntry(
+            number: 1, opID: draft.opID, stream: draft.stream, kind: draft.kind, pageID: draft.pageID,
+            json: draft.json, clockUncertain: draft.clockUncertain, sessionStartMS: draft.sessionStartMS)
+    }
+
+    private func jsonObject(_ text: String) throws -> [String: Any] {
+        try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+    }
+
+    private func pageUpdateDraft() throws -> OutboxDraft {
+        let op = PageUpdateOp(
+            at: 100,
+            clockUncertain: true,
+            data: PageUpdateData(
+                fields: PageUpdateFields(
+                    attachedSlideID: nil, backgroundSlideID: nil, index: 2, sessionID: nil, template: .liniert),
+                pageID: binding.pageID,
+                version: 3
+            ),
+            kind: .pageUpdate,
+            opID: "019a4e14-0000-7000-8000-0000000000aa",
+            origin: nil,
+            seq: nil,
+            stream: binding.stream,
+            type: .op
+        )
+        let json = String(decoding: try SGSyncOp.pageUpdate(op).encode(), as: UTF8.self)
+        return OutboxDraft(
+            opID: op.opID, stream: binding.stream, kind: "page.update", pageID: binding.pageID, json: json,
+            clockUncertain: true, sessionStartMS: nil)
+    }
+
+    private func pageDeleteDraft() throws -> OutboxDraft {
+        let op = PageDeleteOp(
+            at: 100,
+            clockUncertain: true,
+            data: PageDeleteData(pageID: binding.pageID),
+            kind: .pageDelete,
+            opID: "019a4e14-0000-7000-8000-0000000000ab",
+            origin: nil,
+            seq: nil,
+            stream: binding.stream,
+            type: .op
+        )
+        let json = String(decoding: try SGSyncOp.pageDelete(op).encode(), as: UTF8.self)
+        return OutboxDraft(
+            opID: op.opID, stream: binding.stream, kind: "page.delete", pageID: binding.pageID, json: json,
+            clockUncertain: true, sessionStartMS: nil)
+    }
+
+    func testNotebookCreateIsFreeInItsOwnStreamWithoutAPage() throws {
+        let ids = IDs()
+        let draft = try XCTUnwrap(
+            InkOpBuilder.notebookCreate(notebook: freeNotebook, nowMS: 5000, offsetMS: nil, makeID: ids.make))
+        XCTAssertEqual(draft.kind, "notebook.create")
+        XCTAssertEqual(draft.stream, "notebook:\(freeNotebook.id)")
+        XCTAssertNil(draft.pageID)
+        XCTAssertTrue(draft.clockUncertain)
+
+        let json = try jsonObject(draft.json)
+        XCTAssertEqual(json["type"] as? String, "op")
+        XCTAssertEqual(json["kind"] as? String, "notebook.create")
+        XCTAssertEqual(json["stream"] as? String, "notebook:\(freeNotebook.id)")
+        XCTAssertNil(json["seq"])
+        XCTAssertNil(json["origin"])
+        let data = try XCTUnwrap(json["data"] as? [String: Any])
+        XCTAssertEqual(data["notebook_id"] as? String, freeNotebook.id)
+        XCTAssertEqual(data["module_id"] as? String, freeNotebook.moduleID)
+        XCTAssertEqual(data["title"] as? String, "Eigene Notizen")
+        XCTAssertEqual(data["kind"] as? String, "frei")
+        XCTAssertEqual(data["created_at"] as? Int, 7000)
+
+        // Das Ergebnis lässt sich als `notebook.create` zurücklesen
+        let decoded = try SGSyncOp.decode(Data(draft.json.utf8))
+        guard case .notebookCreate(let op) = decoded else { return XCTFail("keine notebook.create") }
+        XCTAssertEqual(op.opID, draft.opID)
+    }
+
+    func testCorrectShiftsAtAndCreatedAtOfANotebookCreate() throws {
+        let ids = IDs()
+        let draft = try XCTUnwrap(
+            InkOpBuilder.notebookCreate(notebook: freeNotebook, nowMS: 5000, offsetMS: nil, makeID: ids.make))
+        let fixed = try XCTUnwrap(InkOpBuilder.correct(entry(draft), offsetMS: 1500))
+        XCTAssertFalse(fixed.clockUncertain)
+        let json = try jsonObject(fixed.json)
+        XCTAssertEqual(json["at"] as? Int, 6500)
+        XCTAssertEqual(json["clock_uncertain"] as? Bool, false)
+        XCTAssertEqual((json["data"] as? [String: Any])?["created_at"] as? Int, 8500)
+        // Zweiter Aufruf ändert nichts
+        XCTAssertEqual(InkOpBuilder.correct(fixed, offsetMS: 99_000), fixed)
+    }
+
+    func testKnownOffsetCorrectsANotebookCreateImmediately() throws {
+        let ids = IDs()
+        let draft = try XCTUnwrap(
+            InkOpBuilder.notebookCreate(notebook: freeNotebook, nowMS: 5000, offsetMS: 1000, makeID: ids.make))
+        XCTAssertFalse(draft.clockUncertain)
+        let json = try jsonObject(draft.json)
+        XCTAssertEqual(json["at"] as? Int, 6000)
+        XCTAssertEqual((json["data"] as? [String: Any])?["created_at"] as? Int, 8000)
+    }
+
+    func testCorrectNeverGivesNilForPageUpdateAndPageDelete() throws {
+        for draft in [try pageUpdateDraft(), try pageDeleteDraft()] {
+            let fixed = try XCTUnwrap(InkOpBuilder.correct(entry(draft), offsetMS: 50), draft.kind)
+            XCTAssertFalse(fixed.clockUncertain)
+            let json = try jsonObject(fixed.json)
+            XCTAssertEqual(json["at"] as? Int, 150)
+            XCTAssertEqual(json["clock_uncertain"] as? Bool, false)
+            XCTAssertEqual(json["kind"] as? String, draft.kind)
+        }
+    }
+
+    func testPageUpdateKeepsItsFieldsAndVersionWhenCorrected() throws {
+        let fixed = try XCTUnwrap(InkOpBuilder.correct(entry(try pageUpdateDraft()), offsetMS: 50))
+        let data = try XCTUnwrap(try jsonObject(fixed.json)["data"] as? [String: Any])
+        XCTAssertEqual(data["version"] as? Int, 3)
+        let fields = try XCTUnwrap(data["fields"] as? [String: Any])
+        XCTAssertEqual(fields["index"] as? Int, 2)
+        XCTAssertEqual(fields["template"] as? String, "liniert")
+        // Pflichtfelder mit `null` bleiben stehen
+        XCTAssertTrue(fields["session_id"] is NSNull)
+        XCTAssertTrue(fields["background_slide_id"] is NSNull)
+        XCTAssertTrue(fields["attached_slide_id"] is NSNull)
+    }
+
+    func testOpIDKnowsEveryKindTheIPadSends() throws {
+        let ids = IDs()
+        let create = try XCTUnwrap(
+            InkOpBuilder.notebookCreate(notebook: freeNotebook, nowMS: 1, offsetMS: nil, makeID: ids.make))
+        let page = try XCTUnwrap(
+            InkOpBuilder.pageCreate(page: libraryPage(), nowMS: 1, offsetMS: nil, makeID: ids.make))
+        let stroke = try XCTUnwrap(
+            InkOpBuilder.ops(for: [.upsert(stroke())], binding: binding, nowMS: 1, offsetMS: nil, makeID: ids.make)
+                .first)
+        let remove = try XCTUnwrap(
+            InkOpBuilder.ops(for: [.remove(["a"])], binding: binding, nowMS: 1, offsetMS: nil, makeID: ids.make)
+                .first)
+        for draft in [create, page, stroke, remove, try pageUpdateDraft(), try pageDeleteDraft()] {
+            let op = try SGSyncOp.decode(Data(draft.json.utf8))
+            XCTAssertEqual(InkOpBuilder.opID(of: op), draft.opID, draft.kind)
+        }
+    }
+
+    func testPageCreateCarriesAllFieldsOfASlidePage() throws {
+        let ids = IDs()
+        let slide = "019a4e14-0000-7000-8000-0000000000f9"
+        let page = libraryPage(index: 4, template: .folie, width: 960, height: 540, background: slide)
+        let draft = try XCTUnwrap(InkOpBuilder.pageCreate(page: page, nowMS: 5000, offsetMS: nil, makeID: ids.make))
+        XCTAssertEqual(draft.pageID, page.id)
+        XCTAssertEqual(draft.stream, "notebook:\(binding.notebookID)")
+        let data = try XCTUnwrap(try jsonObject(draft.json)["data"] as? [String: Any])
+        XCTAssertEqual(data["template"] as? String, "folie")
+        XCTAssertEqual(data["index"] as? Int, 4)
+        XCTAssertEqual(data["width_pt"] as? Double, 960)
+        XCTAssertEqual(data["height_pt"] as? Double, 540)
+        XCTAssertEqual(data["background_slide_id"] as? String, slide)
+        XCTAssertTrue(data["attached_slide_id"] is NSNull)
+        XCTAssertTrue(data["session_id"] is NSNull)
+    }
+
+    func testPageCreateOfAFreePageCanCarrySessionAndAttachedSlide() throws {
+        let ids = IDs()
+        let page = libraryPage(
+            index: 2, attached: "019a4e14-0000-7000-8000-0000000000f8",
+            sessionID: "019a4e14-0000-7000-8000-0000000000d1")
+        let draft = try XCTUnwrap(InkOpBuilder.pageCreate(page: page, nowMS: 5000, offsetMS: nil, makeID: ids.make))
+        let data = try XCTUnwrap(try jsonObject(draft.json)["data"] as? [String: Any])
+        XCTAssertEqual(data["template"] as? String, "blanko")
+        XCTAssertEqual(data["session_id"] as? String, "019a4e14-0000-7000-8000-0000000000d1")
+        XCTAssertEqual(data["attached_slide_id"] as? String, "019a4e14-0000-7000-8000-0000000000f8")
+        XCTAssertTrue(data["background_slide_id"] is NSNull)
     }
 }
 

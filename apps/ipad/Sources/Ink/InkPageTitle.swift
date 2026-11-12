@@ -15,6 +15,26 @@ enum InkPageTitle {
         return "Offline · schreibt ins zuletzt benutzte Notizbuch"
     }
 
+    /// Titel der Schreibfläche mit Notizbuch: „<Modul> · <Notizbuch>“ (UX-30)
+    static func text(moduleName: String?, notebookTitle: String?) -> String {
+        let module = clean(moduleName)
+        let notebook = clean(notebookTitle)
+        if let module, let notebook {
+            return "\(module) · \(notebook)"
+        }
+        return module ?? notebook ?? "Vorlesung"
+    }
+
+    /// Zeile ohne Verbindung: nennt Modul und Notizbuch
+    static func offlineLine(moduleName: String?, notebookTitle: String?) -> String {
+        let module = clean(moduleName)
+        let notebook = clean(notebookTitle)
+        if let module, let notebook {
+            return "Offline · schreibt in \(module) · \(notebook)"
+        }
+        return offlineLine(moduleName: module ?? notebook)
+    }
+
     private static func clean(_ name: String?) -> String? {
         guard let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
             return nil

@@ -4,21 +4,6 @@ import XCTest
 
 @MainActor
 final class SyncEngineTests: XCTestCase {
-    private let sessionJSON = """
-        {"id":"019a4e14-0000-7000-8000-0000000000d1","user_id":"019a4e14-0000-7000-8000-000000000001",
-        "module_id":"019a4e14-0000-7000-8000-0000000000c1","created_at":"2026-11-04T07:15:00Z",
-        "updated_at":"2026-11-04T07:15:00Z","deleted_at":null,"state":"laeuft",
-        "started_at":"2026-11-11T08:00:00Z","processing":{},"review_state":"offen"}
-        """
-
-    private func notebookJSON(id: String, kind: String) -> String {
-        """
-        {"id":"\(id)","user_id":"019a4e14-0000-7000-8000-000000000001","module_id":"019a4e14-0000-7000-8000-0000000000c1",
-        "kind":"\(kind)","title":"Vorlesung","page_count":0,"created_at":"2026-11-04T07:15:00Z",
-        "updated_at":"2026-11-04T07:15:00Z","deleted_at":null}
-        """
-    }
-
     // MARK: (a) Reihenfolge nach dem Verbinden
 
     func testSendsHelloThenClockThenPresenceThenOperations() async throws {
@@ -143,18 +128,18 @@ final class SyncEngineTests: XCTestCase {
                     : .error(code: "page_not_found", retryable: false, fatal: false)
             }
         }
+        let page = try XCTUnwrap(h.library.page(h.binding.pageID))
         let draft = try XCTUnwrap(
             InkOpBuilder.pageCreate(
-                binding: h.binding, index: 1, nowMS: 1_762_246_500_000, offsetMS: nil,
-                makeID: { InkID.uuidV7() }))
+                page: page, nowMS: 1_762_246_500_000, offsetMS: nil, makeID: { InkID.uuidV7() }))
         try h.outbox.append([draft])
         h.enqueueStrokes(2)
         h.start()
 
         let done = await eventually { h.engine.pendingCount == 0 && h.engine.deadLetterCount == 3 }
         XCTAssertTrue(done)
-        // Die Bindung gilt nicht mehr
-        XCTAssertNil(h.bindings.binding(forPage: h.binding.pageID))
+        // Die Seite gilt nicht mehr
+        XCTAssertNil(h.library.page(h.binding.pageID))
     }
 
     // MARK: (e) Wiederholbare Fehler
@@ -313,17 +298,17 @@ final class SyncEngineTests: XCTestCase {
 
     // MARK: (i) db_epoch
 
-    func testNewDBEpochMarksAllBindingsForReconcile() async throws {
+    func testNewDBEpochMarksAllPagesForReconcile() async throws {
         let h = SyncHarness()
-        h.bindings.dbEpoch = "epoch-alt"
+        h.library.setDBEpoch("epoch-alt")
         h.factory.configure = { socket, _ in socket.epoch = "epoch-neu" }
         h.start()
 
         let online = await eventually { h.engine.state == .online }
         XCTAssertTrue(online)
-        XCTAssertEqual(h.bindings.dbEpoch, "epoch-neu")
-        XCTAssertTrue(h.bindings.binding(forPage: h.binding.pageID)?.needsReconcile ?? false)
-        XCTAssertTrue(h.engine.bindingNeedsReconcile(pageID: h.binding.pageID))
+        XCTAssertEqual(h.library.dbEpoch, "epoch-neu")
+        XCTAssertTrue(h.library.page(h.binding.pageID)?.needsReconcile ?? false)
+        XCTAssertTrue(h.engine.pageNeedsReconcile(pageID: h.binding.pageID))
     }
 
     func testFirstEpochIsStoredWithoutReconcile() async throws {
@@ -332,8 +317,8 @@ final class SyncEngineTests: XCTestCase {
 
         let online = await eventually { h.engine.state == .online }
         XCTAssertTrue(online)
-        XCTAssertEqual(h.bindings.dbEpoch, "epoch-1")
-        XCTAssertFalse(h.engine.bindingNeedsReconcile(pageID: h.binding.pageID))
+        XCTAssertEqual(h.library.dbEpoch, "epoch-1")
+        XCTAssertFalse(h.engine.pageNeedsReconcile(pageID: h.binding.pageID))
     }
 
     // MARK: (j) Offline eingereiht
@@ -417,146 +402,162 @@ final class SyncEngineTests: XCTestCase {
         _ = try await waitForSocket(h, index: 1)
     }
 
-    // MARK: Bindung und Abgleich über REST
+    // MARK: Notizbuch, Seite und Abgleich
 
-    func testResolveBindingCreatesPageAndQueuesPageCreateFirst() async throws {
-        let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
+    private func freeNotebook(_ id: String, module: String, title: String = "Eigene Notizen", known: Bool = false)
+        -> LibraryNotebook
+    {
+        LibraryNotebook(
+            id: id, moduleID: module, title: title, kind: .frei, createdAtMS: 1_762_246_500_000,
+            knownOnServer: known, hidden: false, lastPageID: nil, remoteMaxIndex: 0, remoteOnlyPageCount: 0)
+    }
+
+    private func blankPage(_ id: String, in notebookID: String) -> LibraryPage {
+        LibraryPage(
+            id: id, notebookID: notebookID, index: 1, template: .blanko, widthPt: 595, heightPt: 842,
+            sessionID: nil, backgroundSlideID: nil, attachedSlideID: nil, version: 1, createQueued: true,
+            needsReconcile: false, deletedAtMS: nil, deleteQueued: false)
+    }
+
+    func testNotebookCreateIsSentBeforePageCreateInItsOwnStream() async throws {
+        let h = SyncHarness()
+        let notebook = freeNotebook("019a4e14-0000-7000-8000-0000000000f1", module: h.binding.moduleID)
+        h.library.upsert(notebook)
+        let created = try XCTUnwrap(
+            InkOpBuilder.notebookCreate(
+                notebook: notebook, nowMS: 1_762_246_500_000, offsetMS: nil, makeID: { InkID.uuidV7() }))
+        let page = blankPage("019a4e14-0000-7000-8000-0000000000f2", in: notebook.id)
+        let pageCreate = try XCTUnwrap(
+            InkOpBuilder.pageCreate(
+                page: page, nowMS: 1_762_246_500_000, offsetMS: nil, makeID: { InkID.uuidV7() }))
+        XCTAssertTrue(h.engine.enqueue(drafts: [created, pageCreate]))
+        h.start()
+
+        let done = await eventually { h.engine.pendingCount == 0 }
+        XCTAssertTrue(done)
+        let ops = h.factory.sockets[0].ops
+        XCTAssertEqual(ops.map { $0.object["kind"] as? String }, ["notebook.create", "page.create"])
+        XCTAssertEqual(ops[0].object["stream"] as? String, "notebook:\(notebook.id)")
+        XCTAssertEqual(ops[1].object["stream"] as? String, "notebook:\(notebook.id)")
+        // Uhrkorrektur trifft `at` und `created_at`
+        XCTAssertEqual(ops[0].object["at"] as? Int, 1_762_246_500_000 + 2000)
+        let data = try XCTUnwrap(ops[0].object["data"] as? [String: Any])
+        XCTAssertEqual(data["created_at"] as? Int, 1_762_246_500_000 + 2000)
+        XCTAssertEqual(data["kind"] as? String, "frei")
+    }
+
+    func testRejectedNotebookCreateTakesTheWholeStreamAlong() async throws {
+        let h = SyncHarness()
+        h.factory.configure = { socket, _ in
+            socket.opPolicy = { _, kind, _ in
+                kind == "notebook.create"
+                    ? .error(code: "module_not_found", retryable: false, fatal: false) : .ack
+            }
+        }
+        let notebook = freeNotebook("019a4e14-0000-7000-8000-0000000000f1", module: h.binding.moduleID)
+        h.library.upsert(notebook)
+        let page = blankPage("019a4e14-0000-7000-8000-0000000000f2", in: notebook.id)
+        h.library.upsert(page)
+        let drafts = [
+            try XCTUnwrap(
+                InkOpBuilder.notebookCreate(notebook: notebook, nowMS: 1, offsetMS: nil, makeID: { InkID.uuidV7() })),
+            try XCTUnwrap(InkOpBuilder.pageCreate(page: page, nowMS: 1, offsetMS: nil, makeID: { InkID.uuidV7() })),
+        ]
+        XCTAssertTrue(h.engine.enqueue(drafts: drafts))
+        // Ein Strich in einem anderen Notizbuch bleibt unberührt
+        XCTAssertTrue(h.enqueueStrokes(1))
+        h.start()
+
+        let done = await eventually { h.engine.pendingCount == 0 && h.engine.deadLetterCount == 2 }
+        XCTAssertTrue(done)
+        XCTAssertNil(h.library.notebook(notebook.id))
+        XCTAssertNil(h.library.page(page.id))
+        XCTAssertNotNil(h.library.notebook(h.binding.notebookID))
+    }
+
+    func testNewDBEpochRequeuesFreeNotebooksWithPagesOnly() async throws {
+        let h = SyncHarness()
+        let module = h.binding.moduleID
+        let withPages = freeNotebook("019a4e14-0000-7000-8000-0000000000f1", module: module, known: true)
+        let withoutPages = freeNotebook("019a4e14-0000-7000-8000-0000000000f3", module: module, known: true)
+        h.library.upsert(withPages)
+        h.library.upsert(withoutPages)
+        h.library.upsert(blankPage("019a4e14-0000-7000-8000-0000000000f2", in: withPages.id))
+        h.library.setDBEpoch("epoch-alt")
+        h.factory.configure = { socket, _ in socket.epoch = "epoch-neu" }
+        h.start()
+
+        let online = await eventually { h.engine.state == .online }
+        XCTAssertTrue(online)
+        let done = await eventually { h.engine.pendingCount == 0 }
+        XCTAssertTrue(done)
+
+        // Genau ein `notebook.create`: für das freie Notizbuch mit Seite, nicht für „Vorlesung“ und nicht für das leere
+        let ops = h.factory.sockets[0].ops
+        let creates = ops.filter { $0.object["kind"] as? String == "notebook.create" }
+        XCTAssertEqual(creates.count, 1)
+        XCTAssertEqual(creates.first?.object["stream"] as? String, "notebook:\(withPages.id)")
+        // Nichts wird ausgeblendet, aber keins gilt mehr als dem Core bekannt
+        XCTAssertTrue(h.library.allNotebooks().allSatisfy { !$0.hidden && !$0.knownOnServer })
+        XCTAssertEqual(h.library.notebooks(inModule: module).count, 3)
+        XCTAssertTrue(h.library.page(h.binding.pageID)?.needsReconcile ?? false)
+    }
+
+    func testFirstEpochDoesNotRequeueNotebooks() async throws {
+        let h = SyncHarness()
+        h.library.upsert(freeNotebook("019a4e14-0000-7000-8000-0000000000f1", module: h.binding.moduleID, known: true))
+        h.library.upsert(blankPage("019a4e14-0000-7000-8000-0000000000f2", in: "019a4e14-0000-7000-8000-0000000000f1"))
+        h.start()
+        let online = await eventually { h.engine.state == .online }
+        XCTAssertTrue(online)
+        await h.clock.settle()
+        XCTAssertEqual(h.factory.sockets[0].ops.count, 0)
+    }
+
+    func testReconcileRecreatesAnUnknownSlidePageWithItsOwnFields() async throws {
         let h = SyncHarness(health: [
-            .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
-            // `GET /sessions/{id}/notebook` (#199): der Core nennt das Notizbuch
-            .http(status: 200, body: notebookJSON(id: notebookID, kind: "vorlesung")),
-            .http(status: 200, body: "{\"id\":\"019a4e14-0000-7000-8000-0000000000c1\",\"name\":\"Analysis I\"}"),
-            .http(
-                status: 200,
-                body: "{\"items\":[],\"notebook_id\":\"\(notebookID)\",\"stream_op_id\":null,\"stream_seq\":0}"),
+            // `GET /pages/{id}/strokes`: der Core kennt die Seite nicht
+            .http(status: 404, body: Fixtures.apiError("page_not_found"))
         ])
+        let slidePage = LibraryPage(
+            id: "019a4e14-0000-7000-8000-0000000000f2", notebookID: h.binding.notebookID, index: 4,
+            template: .folie, widthPt: 960, heightPt: 540, sessionID: nil,
+            backgroundSlideID: "019a4e14-0000-7000-8000-0000000000f9", attachedSlideID: nil, version: 3,
+            createQueued: true, needsReconcile: true, deletedAtMS: nil, deleteQueued: false)
+        h.library.upsert(slidePage)
         h.start()
         _ = await eventually { h.engine.state == .online }
 
-        let resolvedOrNil = await h.engine.resolveBinding()
-        let resolved = try XCTUnwrap(resolvedOrNil)
-        XCTAssertEqual(resolved.notebookID, notebookID)
-        XCTAssertTrue(resolved.pageCreated)
-        XCTAssertEqual(resolved.sessionStartMS, 1_794_384_000_000)
-        XCTAssertEqual(h.bindings.lastNotebookID, notebookID)
-        XCTAssertEqual(resolved.moduleName, "Analysis I")
-        XCTAssertEqual(h.transport.requests.count, 4)
-        XCTAssertTrue(h.transport.requests[0].url?.absoluteString.contains("state=laeuft") ?? false)
-        XCTAssertTrue(h.transport.requests[2].url?.path.hasSuffix("/modules/019a4e14-0000-7000-8000-0000000000c1") ?? false)
+        let model = InkPageModel(
+            pageID: slidePage.id, pageSize: CGSize(width: 960, height: 540),
+            store: FileInkPageStore(root: h.directory.appendingPathComponent("Ink")))
+        var binding = h.binding
+        binding.pageID = slidePage.id
+        await h.engine.reconcile(page: model, binding: binding)
 
-        // `page.create` ging als Erstes raus, mit Index 1 und dem Strom des Notizbuchs
         let sent = await eventually { h.factory.sockets[0].ops.count == 1 }
         XCTAssertTrue(sent)
         let op = try XCTUnwrap(h.factory.sockets[0].ops.first?.object)
         XCTAssertEqual(op["kind"] as? String, "page.create")
-        XCTAssertEqual(op["stream"] as? String, "notebook:\(notebookID)")
         let data = try XCTUnwrap(op["data"] as? [String: Any])
-        XCTAssertEqual(data["page_id"] as? String, resolved.pageID)
-        XCTAssertEqual(data["index"] as? Int, 1)
-        XCTAssertEqual(data["template"] as? String, "blanko")
+        XCTAssertEqual(data["template"] as? String, "folie")
+        XCTAssertEqual(data["index"] as? Int, 4)
+        XCTAssertEqual(data["width_pt"] as? Double, 960)
+        XCTAssertEqual(data["height_pt"] as? Double, 540)
+        XCTAssertEqual(data["background_slide_id"] as? String, "019a4e14-0000-7000-8000-0000000000f9")
+        XCTAssertTrue(data["attached_slide_id"] is NSNull)
+        XCTAssertFalse(h.library.page(slidePage.id)?.needsReconcile ?? true)
     }
 
-    func testRunningLectureOnlyReadsAndStoresNothing() async throws {
-        let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
-        let h = SyncHarness(health: [
-            .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
-            .http(status: 200, body: notebookJSON(id: notebookID, kind: "vorlesung")),
-        ])
-        h.start()
-        _ = await eventually { h.engine.state == .online }
-
-        let running = await h.engine.runningLectureNotebookID()
-        XCTAssertEqual(running, notebookID)
-        // Nur Sessions und Notizbücher: kein Modulname, keine Seitenliste
-        XCTAssertEqual(h.transport.requests.count, 2)
-        // Keine neue Bindung, kein neues „zuletzt verwendet“
-        XCTAssertNil(h.bindings.binding(forNotebook: notebookID))
-        XCTAssertEqual(h.bindings.lastNotebookID, h.binding.notebookID)
-    }
-
-    func testRunningLectureTakesTheNotebookFromTheEndpoint() async throws {
-        let exerciseID = "019a4e14-0000-7000-8000-0000000000e2"
-        let h = SyncHarness(health: [
-            .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
-            .http(status: 200, body: notebookJSON(id: exerciseID, kind: "uebung")),
-        ])
-        h.start()
-        _ = await eventually { h.engine.state == .online }
-
-        let running = await h.engine.runningLectureNotebookID()
-        XCTAssertEqual(running, exerciseID)
-        // Sessions, dann das Notizbuch der Session. Die Liste der Notizbücher wird nicht gebraucht.
-        XCTAssertEqual(h.transport.requests.count, 2)
-        let request = h.transport.requests[1]
-        XCTAssertEqual(request.httpMethod, "GET")
-        XCTAssertEqual(request.url?.path, "/api/v1/sessions/019a4e14-0000-7000-8000-0000000000d1/notebook")
-    }
-
-    func testRunningLectureFallsBackToTheOldRuleOn404() async throws {
-        let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
-        let h = SyncHarness(health: [
-            .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
-            // Älterer Core: kein Endpunkt
-            .http(status: 404, body: Fixtures.apiError("not_found")),
-            .http(
-                status: 200,
-                body:
-                    "{\"items\":[\(notebookJSON(id: "019a4e14-0000-7000-8000-0000000000e2", kind: "uebung")),\(notebookJSON(id: notebookID, kind: "vorlesung"))],\"next_cursor\":null}"
-            ),
-        ])
-        h.start()
-        _ = await eventually { h.engine.state == .online }
-
-        let running = await h.engine.runningLectureNotebookID()
-        XCTAssertEqual(running, notebookID)
-        XCTAssertEqual(h.transport.requests.count, 3)
-        XCTAssertEqual(h.transport.requests[2].url?.path, "/api/v1/notebooks")
-        XCTAssertEqual(h.transport.requests[2].url?.query, "module_id=019a4e14-0000-7000-8000-0000000000c1")
-    }
-
-    func testResolveBindingStillBindsWhenTheModuleNameFails() async throws {
-        let notebookID = "019a4e14-0000-7000-8000-0000000000e1"
-        let h = SyncHarness(health: [
-            .http(status: 200, body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"),
-            .http(status: 200, body: notebookJSON(id: notebookID, kind: "vorlesung")),
-            // Modulname scheitert: Das Notizbuch wird trotzdem gebunden, nur ohne Namen
-            .http(status: 500, body: "{}"),
-            .http(
-                status: 200,
-                body: "{\"items\":[],\"notebook_id\":\"\(notebookID)\",\"stream_op_id\":null,\"stream_seq\":0}"),
-        ])
-        h.start()
-        _ = await eventually { h.engine.state == .online }
-
-        let resolvedOrNil = await h.engine.resolveBinding()
-        let resolved = try XCTUnwrap(resolvedOrNil)
-        XCTAssertEqual(resolved.notebookID, notebookID)
-        XCTAssertNil(resolved.moduleName)
-        XCTAssertEqual(h.bindings.lastNotebookID, notebookID)
-        XCTAssertEqual(h.transport.requests.count, 4)
-    }
-
-    func testRunningLectureWithoutConnectionGivesNil() async throws {
+    func testPageOperationsDoNotMoveTheStrokeMark() async throws {
         let h = SyncHarness()
-        let running = await h.engine.runningLectureNotebookID()
-        XCTAssertNil(running)
-        XCTAssertEqual(h.transport.requests.count, 0)
-    }
-
-    func testResolveBindingOfflineFallsBackToTheLastNotebook() async throws {
-        let h = SyncHarness()
-        // Engine nicht gestartet: kein REST-Versuch
-        let resolved = await h.engine.resolveBinding()
-        XCTAssertEqual(resolved, h.binding)
-        XCTAssertEqual(h.transport.requests.count, 0)
-    }
-
-    func testResolveBindingWithoutAnyBindingGivesNil() async throws {
-        let h = SyncHarness()
-        h.bindings.removeBinding(forPage: h.binding.pageID)
-        h.bindings.lastNotebookID = nil
-        let resolved = await h.engine.resolveBinding()
-        XCTAssertNil(resolved)
+        let page = try XCTUnwrap(h.library.page(h.binding.pageID))
+        let draft = try XCTUnwrap(
+            InkOpBuilder.pageCreate(page: page, nowMS: 1, offsetMS: nil, makeID: { InkID.uuidV7() }))
+        XCTAssertTrue(h.engine.enqueue(drafts: [draft]))
+        XCTAssertEqual(h.engine.outboxMark(forPage: page.id), 0)
+        XCTAssertTrue(h.enqueueStrokes(1))
+        XCTAssertEqual(h.engine.outboxMark(forPage: page.id), 2)
     }
 
     // MARK: Hilfen

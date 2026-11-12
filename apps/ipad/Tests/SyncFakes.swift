@@ -3,45 +3,6 @@ import XCTest
 
 @testable import StudienGehirn
 
-/// Bindungen im Arbeitsspeicher
-@MainActor
-final class MemoryInkBindingStore: InkBindingStore {
-    var lastNotebookID: String?
-    var dbEpoch: String?
-    private(set) var stored: [String: InkBinding] = [:]
-
-    func binding(forNotebook notebookID: String) -> InkBinding? { stored[notebookID] }
-
-    func binding(forPage pageID: String) -> InkBinding? {
-        stored.values.first { $0.pageID == pageID }
-    }
-
-    func save(_ binding: InkBinding, makeLast: Bool) {
-        stored[binding.notebookID] = binding
-        if makeLast { lastNotebookID = binding.notebookID }
-    }
-
-    func removeBinding(forPage pageID: String) {
-        for (key, value) in stored where value.pageID == pageID {
-            stored[key] = nil
-        }
-    }
-
-    func setDBEpoch(_ epoch: String) { dbEpoch = epoch }
-
-    func markAllNeedReconcile() {
-        for key in stored.keys {
-            stored[key]?.needsReconcile = true
-        }
-    }
-
-    func clearNeedsReconcile(forPage pageID: String) {
-        for key in stored.keys where stored[key]?.pageID == pageID {
-            stored[key]?.needsReconcile = false
-        }
-    }
-}
-
 /// Virtuelle Uhr: `sleep` wartet, bis der Test die Zeit mit `advance` weiterdreht
 @MainActor
 final class VirtualClock {
@@ -279,7 +240,8 @@ final class SyncHarness {
     let directory: URL
     let clock: VirtualClock
     let outbox: SyncOutbox
-    let bindings: MemoryInkBindingStore
+    let library: FileInkLibraryStore
+    let service: InkLibraryService
     let tokens: FakeTokenStore
     let transport: FakeTransport
     let factory: FakeSyncSocketFactory
@@ -293,7 +255,7 @@ final class SyncHarness {
         let outbox = SyncOutbox(directory: directory)
         let transport = FakeTransport(health)
         let factory = FakeSyncSocketFactory()
-        let bindings = MemoryInkBindingStore()
+        let library = FileInkLibraryStore(url: directory.appendingPathComponent("library.json"))
         let tokens = FakeTokenStore(token: Fixtures.token)
         let binding = InkBinding(
             notebookID: "019a4e14-0000-7000-8000-0000000000a2",
@@ -304,27 +266,43 @@ final class SyncHarness {
             sessionID: nil,
             sessionStartMS: nil
         )
-        bindings.save(binding, makeLast: true)
+        // Ein Modul mit einem Vorlesungs-Notizbuch und einer Seite, wie nach der Migration einer alten Bindung
+        library.mergeModules(
+            [ModuleBrief(id: binding.moduleID, name: "Analysis I", shortName: nil, inkMode: nil)], at: clock.date)
+        library.upsert(
+            LibraryNotebook(
+                id: binding.notebookID, moduleID: binding.moduleID, title: "Vorlesung", kind: .vorlesung,
+                createdAtMS: 1, knownOnServer: true, hidden: false, lastPageID: binding.pageID,
+                remoteMaxIndex: 0, remoteOnlyPageCount: 0))
+        library.upsert(
+            LibraryPage(
+                id: binding.pageID, notebookID: binding.notebookID, index: 1, template: .blanko,
+                widthPt: 595, heightPt: 842, sessionID: nil, backgroundSlideID: nil, attachedSlideID: nil,
+                version: 1, createQueued: true, needsReconcile: false, deletedAtMS: nil, deleteQueued: false))
+        library.setLast(notebookID: binding.notebookID, pageID: binding.pageID)
 
         self.directory = directory
         self.clock = clock
         self.outbox = outbox
         self.transport = transport
         self.factory = factory
-        self.bindings = bindings
+        self.library = library
         self.tokens = tokens
         self.binding = binding
-        engine = SyncEngine(
-            client: Fixtures.client(transport),
+        let client = Fixtures.client(transport)
+        let engine = SyncEngine(
+            client: client,
             sockets: factory,
             outbox: outbox,
-            bindings: bindings,
+            library: library,
             tokenStore: tokens,
             appVersion: "1.2.3",
             now: { clock.date },
             sleep: { try await clock.sleep($0) },
             random: { 0 }
         )
+        self.engine = engine
+        service = InkLibraryService(store: library, sync: engine, client: client, now: { clock.date })
     }
 
     func stroke(_ id: String, tStart: Int? = nil) -> Stroke {
