@@ -389,6 +389,26 @@ Modul-Einstellungen laufen über `PATCH /modules/{id}` (§14.2).
   - **Ableitungen** (`services/tunnel.ts`, feste Testvektoren in `test/unit/tunnel-keys.test.ts`, dieselben nutzen der Mac-Helfer und das iPad): Als HMAC-Schlüssel dienen die **32 Rohbytes** hinter dem base64url-Text, als Nachricht der ASCII-Text. Gültig ist nur die kanonische Schreibweise (43 Zeichen ohne Padding, die 2 überzähligen Bits im letzten Zeichen sind 0); jede andere lehnen alle Seiten ab. `service_name = "sg-" + hex(HMAC-SHA256(tunnel_key, "sg-tunnel-name-v1"))[0..16]`, `psk = HMAC-SHA256(tunnel_key, "sg-tunnel-psk-v1")` (32 rohe Byte), PSK-Kennung fest `"sg1"`.
 - `POST /devices/pairings`, `pair/start` und `pair/confirm` speichern **keine** Antwort unter einem `Idempotency-Key` (08 §1), der Header wird ignoriert. Sonst stünden Code bzw. Geräte-Token im Klartext in `idempotency_key`. Antworten mit Code oder Token tragen `Cache-Control: no-store`.
 
+### 7.6 Speicherplatz (UX-11)
+
+| Methode und Pfad | Body | Antwort | Fehler |
+|---|---|---|---|
+| `GET /system/storage` | – | 200 `SystemStorage` | 503 `storage_unavailable` (der Datenträger des Datenordners lässt sich nicht lesen, etwa weil der Ordner fehlt) |
+
+- **Zugang:** wie `GET /health` und `GET /jobs` ohne `sgAccess`. Lokal ohne Token, aus dem Netz nur mit gültigem Geräte-Token (§5). Die Größen sind keine Geheimnisse, aber auch nicht für Fremde gedacht. Darum ist die Route nicht offen, wie es nur Kopplung (`pairing`) ist, und braucht kein `local`: Das iPad darf sie lesen.
+- **Antwort:** Das Schema steht in `packages/schemas` (`SystemStorage`). Pflicht sind `data_dir_free_bytes`, `data_dir_size_bytes` und `measured_at`. `media_bytes` (alles unter `media/`), `vault_bytes` (alles unter `vault/`) und `db_bytes` sind optional. `db_bytes` fehlt, wenn die Datenbank nicht binnen 2 s antwortet. Die Antwort enthält nie einen Pfad.
+- **Freier Platz:** `statfs` auf `SG_DATA_DIR`, `bavail × bsize` (frei für den Benutzer), bei **jedem** Aufruf frisch. Er ist billig und für die Warnung allein entscheidend.
+- **Größe:** Summe der Dateigrößen (`lstat`, Symlinks nicht verfolgt, auch kein Link auf einen Ordner außerhalb) über den ganzen Datenordner in einem Durchlauf, der nach erstem Pfadteil in `media` und `vault` aufteilt. Das Ergebnis gilt 5 Minuten (`STORAGE_SIZE_TTL_MS`), `measured_at` nennt den Zeitpunkt. Gleichzeitige Aufrufe teilen sich einen Durchlauf. Der Durchlauf ist begrenzt: höchstens 15 s (`STORAGE_WALK_TIME_LIMIT_MS`) und 1 000 000 Einträge (`STORAGE_WALK_MAX_ENTRIES`). Wird eine Grenze erreicht, endet er, die Größen sind dann eine Untergrenze, der Core loggt eine Warnung, und auch dieser Teilstand gilt 5 Minuten (sonst liefe der teure Durchlauf bei jedem Aufruf). Die Datenbank liegt je nach Einrichtung außerhalb des Datenordners und zählt darum nicht zu `data_dir_size_bytes`; `db_bytes` kommt aus `pg_database_size` und wird bei jedem Aufruf abgefragt.
+- **Web (Verbindliches):**
+  - Einstellungen → Daten zeigt belegt (Daten plus Datenbank) und frei, mit Aufteilung, soweit sie da ist. Fehlt die Antwort, zeigt der Bereich nichts statt eines Fehlers.
+  - „Heute“ warnt ruhig, wenn der freie Platz unter **`max(5 GB, Bedarf für 2 Vorlesungen)`** liegt, Einstellungen → Daten sagt es dann dazu.
+    - **Mindestreserve 5 GB** (UX-11, `STORAGE_MIN_FREE_BYTES`): Der Mac braucht neben den Aufnahmen Platz für macOS selbst (Auslagerungsdateien bei 8 GB Arbeitsspeicher, Updates), das WAL von Postgres, Backups, hochgeladene Folien und die Zwischendateien der Transkription. Unter 5 GB wird es knapp, lange bevor das Audio selbst nicht mehr passt.
+    - **Bedarf je Vorlesungsstunde Audio:** Bitrate der Aufnahme (`AUDIO_BITS_PER_SECOND` = 48 kbit/s, `recorder.ts`) × 3600 s ÷ 8 = 21,6 MB, mal 3 für Chunks, `full.m4a` und Zwischenstände der Verarbeitung = 64,8 MB. Eine Vorlesung gilt als 1,5 Stunden, 2 Vorlesungen sind also rund 194 MB. Heute bestimmt darum die Reserve die Schwelle; der Bedarfsteil greift erst, wenn die Bitrate stark steigt.
+    - Die Konstanten stehen in `apps/web/src/lib/storage.ts`.
+  - Größen zeigt die Web-App wie der Finder in Dezimal-Einheiten (1 GB = 1000³ Byte) mit deutschem Komma, etwa `4,2 GB`.
+  - Nie, solange eine Session läuft oder pausiert (R1, wie der Backup-Hinweis).
+- **Nicht Teil dieses Vertrags:** `sg doctor` (UX-11, Schritt 1).
+
 ## 8. Kalender: Import und Abgleich (T1-01)
 
 **Der Abgleich ist kein Job.** Der Core erledigt ihn synchron. Begründung:
@@ -945,6 +965,7 @@ Die Bereiche KI, Lernen und Planer kommen in späteren Phasen als eigene Schlüs
 | `recording_completed` | 409 | Chunk hinter `last_seq` einer abgeschlossenen Aufnahme (§10.2) |
 | `range_not_satisfiable` | 416 | `Range` liegt außerhalb der Datei (`GET …/file`, `GET …/audio`) |
 | `backup_running`, `backup_target_missing`, `restore_test_running` (läuft gerade ein Restore-Test bzw. ein Backup), `restore_test_no_backup` (noch kein Backup-Lauf mit Prüfsumme für das aktuelle Ziel), `restore_parent_deleted`, `restore_conflict` | 409 | Daten (§13) |
+| `storage_unavailable` | 503 | Datenträger des Datenordners nicht lesbar (§7.6) |
 | `pairing_window_closed` | 409 | Kopplungsfenster zu oder abgelaufen (§12) |
 | `chunk_header_invalid`, `backup_target_invalid`, `backup_encryption_unavailable`, `upload_aborted`, `slide_deck_module_mismatch` | 400 | Anfrage ungültig (`upload_aborted`: der Client hat den Upload abgebrochen; `backup_encryption_unavailable`: Backup-Verschlüsselung lässt sich nicht einschalten, §14.1) |
 | `slide_deck_not_found` | 404 | Foliensatz fehlt oder ist gelöscht (Session-Routen) |

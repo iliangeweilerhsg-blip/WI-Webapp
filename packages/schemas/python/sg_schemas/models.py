@@ -5671,6 +5671,44 @@ class SyncWelcome(BaseModel):
     resume: list[SyncResume]
 
 
+class SystemStorage(BaseModel):
+    """
+    GET /system/storage (UX-11, VERTRAEGE §7.6): freier Platz auf dem Datenträger des Datenordners und Größe der Daten. Größen sind Dateigrößen in Byte (keine Plattenblöcke)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    data_dir_free_bytes: StrictInt = Field(
+        ...,
+        description='Frei für den Benutzer auf dem Datenträger, auf dem `SG_DATA_DIR` liegt (statfs, bei jedem Aufruf frisch)',
+        ge=0,
+    )
+    data_dir_size_bytes: StrictInt = Field(
+        ...,
+        description='Summe aller Dateien in `SG_DATA_DIR` (ohne die Datenbank, sie liegt je nach Einrichtung außerhalb). Gemessen zum Zeitpunkt `measured_at`, nicht bei jedem Aufruf neu',
+        ge=0,
+    )
+    media_bytes: StrictInt | None = Field(
+        None,
+        description='Teil von `data_dir_size_bytes` unter `media/` (Aufnahmen, Folien, Fotos, Notizen)',
+        ge=0,
+    )
+    vault_bytes: StrictInt | None = Field(
+        None, description='Teil von `data_dir_size_bytes` unter `vault/`', ge=0
+    )
+    db_bytes: StrictInt | None = Field(
+        None,
+        description='Größe der Datenbank (`pg_database_size`), zählt nicht zu `data_dir_size_bytes`. Fehlt, wenn die Abfrage scheitert',
+        ge=0,
+    )
+    measured_at: AwareDatetime = Field(
+        ...,
+        description='Zeitpunkt der Messung von `data_dir_size_bytes`, `media_bytes` und `vault_bytes`',
+        title='Timestamp',
+    )
+
+
 class TapeElementPayload(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -8148,6 +8186,7 @@ class SchemaBundle(BaseModel):
     SyncTimePong_1: SyncTimePong | None = Field(None, alias='SyncTimePong')
     SyncUnsubscribe_1: SyncUnsubscribe | None = Field(None, alias='SyncUnsubscribe')
     SyncWelcome_1: SyncWelcome | None = Field(None, alias='SyncWelcome')
+    SystemStorage_1: SystemStorage | None = Field(None, alias='SystemStorage')
     TapeElement_1: TapeElement | None = Field(None, alias='TapeElement')
     TapeElementPayload_1: TapeElementPayload | None = Field(
         None, alias='TapeElementPayload'

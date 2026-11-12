@@ -636,6 +636,10 @@ export type SyncEvent = (SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConne
  */
 export type SyncServerMessage = (SyncWelcome | SyncSubscribed | SyncAck | SyncOp | SyncTimePong | SyncPong | SyncError | SyncEvent)
 /**
+ * ISO 8601, UTC
+ */
+export type Timestamp1 = string
+/**
  * transkribiert: neu geschrieben. unveraendert: gleicher input_hash, übersprungen. ohne_audio: keine full.m4a (altes Transkript entfernt)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -5318,6 +5322,35 @@ export interface SyncTimePong {
 type: "time.pong"
 t0: EpochMs
 ts: EpochMs
+}
+/**
+ * GET /system/storage (UX-11, VERTRAEGE §7.6): freier Platz auf dem Datenträger des Datenordners und Größe der Daten. Größen sind Dateigrößen in Byte (keine Plattenblöcke)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SystemStorage".
+ */
+export interface SystemStorage {
+/**
+ * Frei für den Benutzer auf dem Datenträger, auf dem `SG_DATA_DIR` liegt (statfs, bei jedem Aufruf frisch)
+ */
+data_dir_free_bytes: number
+/**
+ * Summe aller Dateien in `SG_DATA_DIR` (ohne die Datenbank, sie liegt je nach Einrichtung außerhalb). Gemessen zum Zeitpunkt `measured_at`, nicht bei jedem Aufruf neu
+ */
+data_dir_size_bytes: number
+/**
+ * Teil von `data_dir_size_bytes` unter `media/` (Aufnahmen, Folien, Fotos, Notizen)
+ */
+media_bytes?: number
+/**
+ * Teil von `data_dir_size_bytes` unter `vault/`
+ */
+vault_bytes?: number
+/**
+ * Größe der Datenbank (`pg_database_size`), zählt nicht zu `data_dir_size_bytes`. Fehlt, wenn die Abfrage scheitert
+ */
+db_bytes?: number
+measured_at: Timestamp1
 }
 /**
  * Teilaufgabe eines Übungsblatts. Zerlegung erst ab Phase 2 (F-ORG-03).

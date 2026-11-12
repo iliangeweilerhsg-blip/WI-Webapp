@@ -10,6 +10,7 @@ import { BackupHint } from './BackupHint.tsx';
 import { FirstStepsCard } from './FirstSteps.tsx';
 import { SpontaneousStartCard } from './SpontaneousStart.tsx';
 import { StartCard } from './StartCard.tsx';
+import { StorageHint } from './StorageHint.tsx';
 import { TodayList } from './TodayList.tsx';
 import { buildEntries, formatClock, pickCard } from './model.ts';
 import { useNow, useTodayData } from './use-today.ts';
@@ -99,6 +100,9 @@ export function HeuteScreen() {
 
         {/* Ruhiger Hinweis auf ein veraltetes Backup (UX-10), nie während einer Session */}
         {now !== null ? <BackupHint sessions={sessions} /> : null}
+
+        {/* Ruhiger Hinweis bei knappem Speicherplatz (UX-11), nie während einer Session */}
+        {now !== null ? <StorageHint sessions={sessions} /> : null}
 
         {/* Erste Schritte (UX-14): hakt sich selbst ab, nie während einer Session, weg wenn alles erledigt ist */}
         {hasData ? <FirstStepsCard /> : null}

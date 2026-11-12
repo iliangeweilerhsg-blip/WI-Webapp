@@ -1,0 +1,8 @@
+{
+  "data_dir_free_bytes": 48318382080,
+  "data_dir_size_bytes": 3221225472,
+  "media_bytes": 3000000000,
+  "vault_bytes": 1048576,
+  "db_bytes": 73400320,
+  "measured_at": "2026-11-12T08:00:00Z"
+}

@@ -379,6 +379,7 @@ struct SchemaBundle: Codable {
     let syncTimePong: SyncTimePong?
     let syncUnsubscribe: SyncUnsubscribe?
     let syncWelcome: SyncWelcome?
+    let systemStorage: SystemStorage?
     let tapeElement: TapeElement?
     let tapeElementPayload: TapeElementPayload?
     let task: Task?
@@ -778,6 +779,7 @@ struct SchemaBundle: Codable {
         case syncTimePong = "SyncTimePong"
         case syncUnsubscribe = "SyncUnsubscribe"
         case syncWelcome = "SyncWelcome"
+        case systemStorage = "SystemStorage"
         case tapeElement = "TapeElement"
         case tapeElementPayload = "TapeElementPayload"
         case task = "Task"
@@ -1197,6 +1199,7 @@ extension SchemaBundle {
         syncTimePong: SyncTimePong?? = nil,
         syncUnsubscribe: SyncUnsubscribe?? = nil,
         syncWelcome: SyncWelcome?? = nil,
+        systemStorage: SystemStorage?? = nil,
         tapeElement: TapeElement?? = nil,
         tapeElementPayload: TapeElementPayload?? = nil,
         task: Task?? = nil,
@@ -1596,6 +1599,7 @@ extension SchemaBundle {
             syncTimePong: syncTimePong ?? self.syncTimePong,
             syncUnsubscribe: syncUnsubscribe ?? self.syncUnsubscribe,
             syncWelcome: syncWelcome ?? self.syncWelcome,
+            systemStorage: systemStorage ?? self.systemStorage,
             tapeElement: tapeElement ?? self.tapeElement,
             tapeElementPayload: tapeElementPayload ?? self.tapeElementPayload,
             task: task ?? self.task,
@@ -22558,6 +22562,81 @@ enum SyncWelcomeType: String, Codable {
     case welcome = "welcome"
 }
 
+/// GET /system/storage (UX-11, VERTRAEGE §7.6): freier Platz auf dem Datenträger des
+/// Datenordners und Größe der Daten. Größen sind Dateigrößen in Byte (keine Plattenblöcke)
+// MARK: - SystemStorage
+struct SystemStorage: Codable {
+    /// Frei für den Benutzer auf dem Datenträger, auf dem `SG_DATA_DIR` liegt (statfs, bei jedem
+    /// Aufruf frisch)
+    let dataDirFreeBytes: Int
+    /// Summe aller Dateien in `SG_DATA_DIR` (ohne die Datenbank, sie liegt je nach Einrichtung
+    /// außerhalb). Gemessen zum Zeitpunkt `measured_at`, nicht bei jedem Aufruf neu
+    let dataDirSizeBytes: Int
+    /// Größe der Datenbank (`pg_database_size`), zählt nicht zu `data_dir_size_bytes`. Fehlt,
+    /// wenn die Abfrage scheitert
+    let dbBytes: Int?
+    /// Zeitpunkt der Messung von `data_dir_size_bytes`, `media_bytes` und `vault_bytes`
+    let measuredAt: Date
+    /// Teil von `data_dir_size_bytes` unter `media/` (Aufnahmen, Folien, Fotos, Notizen)
+    let mediaBytes: Int?
+    /// Teil von `data_dir_size_bytes` unter `vault/`
+    let vaultBytes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case dataDirFreeBytes = "data_dir_free_bytes"
+        case dataDirSizeBytes = "data_dir_size_bytes"
+        case dbBytes = "db_bytes"
+        case measuredAt = "measured_at"
+        case mediaBytes = "media_bytes"
+        case vaultBytes = "vault_bytes"
+    }
+}
+
+// MARK: SystemStorage convenience initializers and mutators
+
+extension SystemStorage {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SystemStorage.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        dataDirFreeBytes: Int? = nil,
+        dataDirSizeBytes: Int? = nil,
+        dbBytes: Int?? = nil,
+        measuredAt: Date? = nil,
+        mediaBytes: Int?? = nil,
+        vaultBytes: Int?? = nil
+    ) -> SystemStorage {
+        return SystemStorage(
+            dataDirFreeBytes: dataDirFreeBytes ?? self.dataDirFreeBytes,
+            dataDirSizeBytes: dataDirSizeBytes ?? self.dataDirSizeBytes,
+            dbBytes: dbBytes ?? self.dbBytes,
+            measuredAt: measuredAt ?? self.measuredAt,
+            mediaBytes: mediaBytes ?? self.mediaBytes,
+            vaultBytes: vaultBytes ?? self.vaultBytes
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 // MARK: - TapeElement
 struct TapeElement: Codable {
     let elementID: String
@@ -27033,6 +27112,18 @@ extension SyncWelcome {
         try container.encode(serverTime, forKey: .serverTime)
         try container.encode(serverVersion, forKey: .serverVersion)
         try container.encode(type, forKey: .type)
+    }
+}
+
+extension SystemStorage {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(dataDirFreeBytes, forKey: .dataDirFreeBytes)
+        try container.encode(dataDirSizeBytes, forKey: .dataDirSizeBytes)
+        try container.encodeIfPresent(dbBytes, forKey: .dbBytes)
+        try container.encode(measuredAt, forKey: .measuredAt)
+        try container.encodeIfPresent(mediaBytes, forKey: .mediaBytes)
+        try container.encodeIfPresent(vaultBytes, forKey: .vaultBytes)
     }
 }
 
