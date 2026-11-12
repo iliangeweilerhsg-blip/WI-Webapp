@@ -471,6 +471,12 @@ struct InkPageView: View {
         return library.inkMode(forModule: moduleID)
     }
 
+    /// „Auf Folie“ gilt wirklich: Modus gewählt und Folie verfügbar (#268). Nur dann hängen `open()` und
+    /// `moveToLecturePageIfNeeded()` keine Vorlesungsseite an, die Folienseiten übernimmt `followSlideIfNeeded()`.
+    private var writesOnSlide: Bool {
+        InkModeResolver.writesOnSlide(mode: currentMode, slideAvailable: slideModeAvailable)
+    }
+
     /// Hinweis zum ausgegrauten Umschalter: nur 5 s nach einem Tipp darauf (UX-51), nicht dauerhaft
     private var slideModeHint: String? {
         guard slideHint.isVisible, !slideModeAvailable else { return nil }
@@ -711,12 +717,14 @@ struct InkPageView: View {
     }
 
     /// Beginnt die Vorlesung bei offener Seite und gehört die letzte Seite zu einer anderen, öffnet die Ansicht eine
-    /// neue Seite (UX-44). Das gilt nur für die letzte Seite des Notizbuchs und nicht im Modus „Auf Folie“. Wird
-    /// gerade geschrieben, wartet der Wechsel auf die Ruhezeit (UX-43).
+    /// neue Seite (UX-44). Das gilt nur für die letzte Seite des Notizbuchs und nicht, solange „Auf Folie“ mit
+    /// verfügbarer Folie gilt (#268). Ist keine Folie verfügbar, gilt die Logik des freien Modus; wird die erste Folie
+    /// später bekannt, wechselt `followSlideIfNeeded()` nach der Ruhezeit auf die Folienseite. Wird gerade
+    /// geschrieben, wartet der Wechsel auf die Ruhezeit (UX-43).
     private func moveToLecturePageIfNeeded() {
-        // Erst sichern: Ob die Seite leer ist, liest der Dienst von der Platte
+        // Erst sichern: Der Dienst liest die Striche der Seite beim Prüfen von der Platte (`pageHasStrokes`)
         model?.saveNow()
-        guard let binding, currentMode != .aufFolie, pages.last?.id == binding.pageID,
+        guard let binding, !writesOnSlide, pages.last?.id == binding.pageID,
             library.needsLecturePage(notebookID: currentNotebookID)
         else { return }
         guard gate.lectureStarted() else { return }
@@ -727,7 +735,9 @@ struct InkPageView: View {
                 return
             }
             model?.saveNow()
-            guard library.needsLecturePage(notebookID: currentNotebookID),
+            // Ist inzwischen die erste Folie bekannt, übernimmt `followSlideIfNeeded()` (#268): keine leere
+            // Vorlesungsseite, die gleich danach von der Folienseite abgelöst würde
+            guard !writesOnSlide, library.needsLecturePage(notebookID: currentNotebookID),
                 let target = library.openLectureTarget(notebookID: currentNotebookID)
             else { return }
             await show(pageID: target.pageID)
@@ -760,7 +770,8 @@ struct InkPageView: View {
             guard !_Concurrency.Task.isCancelled, model == nil else { return }
         }
         // Läuft eine Vorlesung des Moduls und endet die letzte Seite in einer anderen, beginnt eine neue Seite (UX-44)
-        let appendsForLecture = currentMode != .aufFolie
+        // (nicht bei „Auf Folie“ mit verfügbarer Folie, #268: ohne Folie gilt die Logik des freien Modus)
+        let appendsForLecture = !writesOnSlide
         guard
             let target = appendsForLecture
                 ? library.openLectureTarget(notebookID: notebookID) : library.openTarget(notebookID: notebookID)

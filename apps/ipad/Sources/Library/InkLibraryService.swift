@@ -1342,14 +1342,28 @@ final class InkLibraryService {
 
     /// Seite des Notizbuchs für diese Folie. Gibt es mehrere (Altbestand), gilt die mit dem kleineren `index`. Gibt es
     /// keine, wird sie hinten angehängt: Vorlage „folie“, Größe der Folie, `background_slide_id` = Folie (E10).
+    /// Läuft eine Session des Moduls, wird nur eine Seite derselben Session wiederverwendet (#268): Eine Folienseite
+    /// aus einer früheren Vorlesung mit gleicher `slide_id` trüge die Zeitbasis der alten Session. Eine Seite ohne
+    /// Session zählt nur, wenn sie erst nach Beginn der Session angelegt wurde (offline, wie `needsLecturePage`). Läuft
+    /// keine Session, gibt es keine Zeitbasis zu schützen und die Seite wird wie bisher wiederverwendet. Die neue Seite
+    /// trägt über `addPage` Session und `sessionStartMS`. Maßgeblich ist die Session des Moduls wie bei `addPage` und
+    /// der Zeitbasis der Striche, nicht `lectureSession(for:)`: Auch im Übungsnotizbuch oder solange das Notizbuch der
+    /// Session unbekannt ist (offline), bekäme eine alte Folienseite sonst die Zeit der früheren Session.
     func slidePage(notebookID: String, slide: SlideRef) -> LibraryPage? {
+        let session = store.notebook(notebookID).flatMap { matchingSession(moduleID: $0.moduleID) }
         let existing = store.pages(inNotebook: notebookID)
-            .filter { $0.backgroundSlideID == slide.id }
+            .filter { $0.backgroundSlideID == slide.id && belongsToSession($0, session) }
             .min { ($0.index, $0.id) < ($1.index, $1.id) }
         if let existing { return existing }
         return addPage(
             notebookID: notebookID, template: .folie,
             size: CGSize(width: slide.widthPt, height: slide.heightPt),
             backgroundSlideID: slide.id, attachedSlideID: nil)
+    }
+
+    private func belongsToSession(_ page: LibraryPage, _ session: RunningSession?) -> Bool {
+        guard let session else { return true }
+        if page.sessionID == session.id { return true }
+        return page.sessionID == nil && createdDuring(session, pageID: page.id)
     }
 }
