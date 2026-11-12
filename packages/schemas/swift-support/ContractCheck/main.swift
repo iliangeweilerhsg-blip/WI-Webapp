@@ -54,6 +54,7 @@ let registry: [String: (Data) throws -> Data] = [
     "SyncPresenceEvent": roundtrip(SyncPresenceEvent.self),
     "SyncConnectionEvent": roundtrip(SyncConnectionEvent.self),
     "SyncPairingEvent": roundtrip(SyncPairingEvent.self),
+    "SyncNotebookChangedEvent": roundtrip(SyncNotebookChangedEvent.self),
     "NotebookCreateOp": roundtrip(NotebookCreateOp.self),
     "NotebookUpdateOp": roundtrip(NotebookUpdateOp.self),
     "NotebookDeleteOp": roundtrip(NotebookDeleteOp.self),

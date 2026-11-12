@@ -1093,6 +1093,16 @@ class EventId(RootModel[StrictInt]):
     root: StrictInt = Field(..., description='Moodle-ID', ge=1)
 
 
+class NotebookChangeKind(StrEnum):
+    """
+    Art der Server-Operation: notebook.update, .delete oder .restore
+    """
+
+    update = 'update'
+    delete = 'delete'
+    restore = 'restore'
+
+
 class NotebookKind(StrEnum):
     vorlesung = 'vorlesung'
     uebung = 'uebung'
@@ -3793,6 +3803,23 @@ class Notebook(BaseModel):
     page_count: StrictInt = Field(..., description='Abgeleitet', ge=0)
 
 
+class NotebookChange(BaseModel):
+    """
+    Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client per REST
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    notebook_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    kind: NotebookChangeKind
+
+
 class NotebookCreate(BaseModel):
     """
     POST /notebooks. kind fehlt = frei
@@ -5493,6 +5520,19 @@ class SyncError(BaseModel):
         description='true: der Server schließt die Verbindung direkt danach und verarbeitet keine weitere Nachricht',
     )
     details: dict[str, Any] | None = None
+
+
+class SyncNotebookChangedEvent(BaseModel):
+    """
+    Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms. Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['event']
+    name: Literal['notebook.changed']
+    data: NotebookChange
 
 
 class SyncPairingEvent(BaseModel):
@@ -7719,6 +7759,10 @@ class SchemaBundle(BaseModel):
     )
     MoodleUpload_1: MoodleUpload | None = Field(None, alias='MoodleUpload')
     Notebook_1: Notebook | None = Field(None, alias='Notebook')
+    NotebookChange_1: NotebookChange | None = Field(None, alias='NotebookChange')
+    NotebookChangeKind_1: NotebookChangeKind | None = Field(
+        None, alias='NotebookChangeKind'
+    )
     NotebookCreate_1: NotebookCreate | None = Field(None, alias='NotebookCreate')
     NotebookCreateData_1: NotebookCreateData | None = Field(
         None, alias='NotebookCreateData'
@@ -8004,9 +8048,13 @@ class SchemaBundle(BaseModel):
         | SyncPresenceEvent
         | SyncConnectionEvent
         | SyncPairingEvent
+        | SyncNotebookChangedEvent
         | None
     ) = Field(None, description='Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert', title='SyncEvent')
     SyncHello_1: SyncHello | None = Field(None, alias='SyncHello')
+    SyncNotebookChangedEvent_1: SyncNotebookChangedEvent | None = Field(
+        None, alias='SyncNotebookChangedEvent'
+    )
     SyncOp: (
         NotebookCreateOp
         | PageCreateOp
@@ -8073,6 +8121,7 @@ class SchemaBundle(BaseModel):
         | SyncPresenceEvent
         | SyncConnectionEvent
         | SyncPairingEvent
+        | SyncNotebookChangedEvent
         | None
     ) = Field(None, description='Alle Nachrichten Server → Client', title='SyncServerMessage')
     SyncSessionUpdatedEvent_1: SyncSessionUpdatedEvent | None = Field(
@@ -8157,6 +8206,6 @@ type PageElement = TextElement | ImageElement | ShapeElement | TapeElement | Sta
 type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload
 type SearchHit = SearchHitSlide | SearchHitTranscript
 type SyncClientMessage = SyncHello | SyncSubscribe | SyncUnsubscribe | SyncTimePing | SyncTimeOffset | SyncPing | SyncPresence | SyncOp
-type SyncEvent = SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent
+type SyncEvent = SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent | SyncNotebookChangedEvent
 type SyncOp = NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | NotebookUpdateOp | NotebookDeleteOp | NotebookRestoreOp | PageRestoreOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp
 type SyncServerMessage = SyncWelcome | SyncSubscribed | SyncAck | SyncOp | SyncTimePong | SyncPong | SyncError | SyncEvent

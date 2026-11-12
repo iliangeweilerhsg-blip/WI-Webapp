@@ -117,6 +117,10 @@ struct InkPageView: View {
                             // Ruhige Zeile statt Dialog (R1). Die Seite ist gesperrt, die Datei bleibt, wie sie ist.
                             infoRow(InkPageTitle.unreadableLine)
                         }
+                        if library.isDeletedOnMac(notebookID: currentNotebookID) {
+                            // Ruhige Zeile statt Dialog (R1). Weiterschreiben geht, die Striche landen im Papierkorb.
+                            infoRow(InkLibraryService.deletedOnMacLine)
+                        }
                         if let offlineText {
                             infoRow(offlineText)
                         }

@@ -114,6 +114,9 @@ final class SyncEngine {
     /// Eingehende Nachrichten, die nicht zur Engine selbst gehören (Session-Strom, `session.updated`). Das iPad
     /// liest nur: Die Engine wendet nichts an und schreibt nichts in die Warteschlange.
     @ObservationIgnored var onInbound: (@MainActor (SyncInbound) -> Void)?
+    /// Ein Notizbuch hat sich am Mac geändert (`notebook.changed`, VERTRAEGE §11.6). Getrennt von `onInbound`, das der
+    /// `SessionFollower` belegt: Der `InkLibraryService` lädt die Bibliothek daraufhin neu.
+    @ObservationIgnored var onNotebookChanged: (@MainActor () -> Void)?
     /// Eine Verbindung hat ihr `welcome` bekommen. `true`, wenn die `db_epoch` neu ist (Mac wiederhergestellt). Der
     /// Empfänger (`InkLibraryService`) gleicht dann alle markierten Seiten im Hintergrund ab (UX-46). Bei jedem
     /// weiteren `welcome` kommt der Aufruf wieder, damit ein unterbrochener Durchgang weiterläuft.
@@ -707,7 +710,7 @@ final class SyncEngine {
         case .timePong(let t0, let ts):
             await onTimePong(t0: t0, ts: ts, link: link)
         case .inbound(let value):
-            onInbound?(value)
+            deliver(value)
         case .pong:
             // Ein `pong` allein setzt den Backoff nicht zurück (VERTRAEGE §11.2: nach `ack`). Ausnahme: Die Verbindung
             // hält seit `stableConnectionInterval`. Sonst wartete ein iPad, das nur liest (keine `ack`), nach ein paar
@@ -729,6 +732,14 @@ final class SyncEngine {
         }
     }
 
+    private func deliver(_ inbound: SyncInbound) {
+        if case .notebookChanged = inbound {
+            onNotebookChanged?()
+            return
+        }
+        onInbound?(inbound)
+    }
+
     nonisolated private static func parse(_ text: String) -> SyncIncoming {
         guard let data = text.data(using: .utf8), let message = try? SGServerMessage.decode(data) else {
             return .ignored
@@ -747,10 +758,15 @@ final class SyncEngine {
         case .op(let op):
             return incomingOp(op, text: text)
         case .event(let event):
-            if case .sessionUpdated(let value) = event {
+            switch event {
+            case .sessionUpdated(let value):
                 return .inbound(.sessionUpdated(sessionBrief(value.data)))
+            case .notebookChanged:
+                // Der Inhalt zählt nicht: Die Bibliothek wird ohnehin per REST neu geladen
+                return .inbound(.notebookChanged)
+            default:
+                return .ignored
             }
-            return .ignored
         case .ack(let value):
             return .ack(opID: value.opID)
         case .error(let value):

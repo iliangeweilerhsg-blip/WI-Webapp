@@ -147,6 +147,7 @@ enum SGSyncEvent {
     case presence(SyncPresenceEvent)
     case deviceConnection(SyncConnectionEvent)
     case pairingRequested(SyncPairingEvent)
+    case notebookChanged(SyncNotebookChangedEvent)
     case unknown(name: String)
 
     static func decode(_ data: Data) throws -> SGSyncEvent {
@@ -157,6 +158,7 @@ enum SGSyncEvent {
         case "presence": return .presence(try d.decode(SyncPresenceEvent.self, from: data))
         case "device.connection": return .deviceConnection(try d.decode(SyncConnectionEvent.self, from: data))
         case "pairing.requested": return .pairingRequested(try d.decode(SyncPairingEvent.self, from: data))
+        case "notebook.changed": return .notebookChanged(try d.decode(SyncNotebookChangedEvent.self, from: data))
         default:
             SGSync.log("Unbekanntes Ereignis ignoriert: \(env.name ?? "-")")
             return .unknown(name: env.name ?? "")
@@ -169,6 +171,7 @@ enum SGSyncEvent {
         case .presence(let v): return try SGSync.encode(v)
         case .deviceConnection(let v): return try SGSync.encode(v)
         case .pairingRequested(let v): return try SGSync.encode(v)
+        case .notebookChanged(let v): return try SGSync.encode(v)
         case .unknown(let name): throw SGSyncError.notEncodable("Ereignis \(name)")
         }
     }

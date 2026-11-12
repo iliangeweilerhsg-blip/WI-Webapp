@@ -106,6 +106,9 @@ final class SessionFollower {
             requestLoad(immediately: false)
         case .op(let stream, let seq, let slide):
             apply(op: seq, stream: stream, slide: slide)
+        case .notebookChanged:
+            // Geht an die Bibliothek (`onNotebookChanged`), nicht an den Session-Follower
+            break
         }
     }
 

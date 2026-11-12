@@ -32,4 +32,7 @@ enum SyncInbound: Equatable, Sendable {
     case subscribed(stream: String, reset: Bool)
     /// `slide` ist nur bei `slide.change` gesetzt. Jede Operation des Stroms kommt hier an, auch unbekannte.
     case op(stream: String, seq: Int, slide: SlideBrief?)
+    /// Ereignis `notebook.changed` (umbenannt, gelöscht oder wiederhergestellt), an alle Verbindungen. Die Engine
+    /// reicht es nur an `onNotebookChanged` weiter; der Inhalt zählt nicht, die Bibliothek wird per REST neu geladen.
+    case notebookChanged
 }

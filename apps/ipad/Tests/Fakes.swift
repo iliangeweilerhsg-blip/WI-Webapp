@@ -48,6 +48,8 @@ final class FakeTransport: HTTPTransport {
     /// Läuft mitten in einer Anfrage, bevor die Antwort zurückkommt (z. B. ein `ack`, das während eines Abrufs
     /// eintrifft)
     var duringRequest: (@MainActor (URLRequest) async -> Void)?
+    /// Antwortet nach Pfad statt nach Reihenfolge. `nil` = die Antworten in `replies` gelten.
+    var router: (@MainActor (URLRequest) -> Reply?)?
 
     init(_ replies: [Reply]) {
         self.replies = replies
@@ -59,7 +61,8 @@ final class FakeTransport: HTTPTransport {
         if let duringRequest {
             await duringRequest(request)
         }
-        switch replies[index] {
+        let reply = router?(request) ?? replies[index]
+        switch reply {
         case .failure(let code):
             throw URLError(code)
         case .http(let status, let body):

@@ -1758,6 +1758,42 @@
         }
       }
     },
+    "SyncNotebookChangedEvent": {
+      "type": "object",
+      "description": "Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms. Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)",
+      "required": ["type", "name", "data"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "notebook.changed"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookChange"
+        }
+      }
+    },
+    "NotebookChange": {
+      "type": "object",
+      "description": "Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client per REST",
+      "required": ["notebook_id", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookChangeKind"
+        }
+      }
+    },
+    "NotebookChangeKind": {
+      "type": "string",
+      "description": "Art der Server-Operation: notebook.update, .delete oder .restore",
+      "enum": ["update", "delete", "restore"]
+    },
     "SyncEvent": {
       "description": "Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert",
       "anyOf": [
@@ -1772,6 +1808,9 @@
         },
         {
           "$ref": "#/$defs/SyncPairingEvent"
+        },
+        {
+          "$ref": "#/$defs/SyncNotebookChangedEvent"
         }
       ]
     },

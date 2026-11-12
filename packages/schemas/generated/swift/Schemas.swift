@@ -212,6 +212,8 @@ struct SchemaBundle: Codable {
     let moodleSyncTrigger: MoodleSyncTrigger?
     let moodleUpload: MoodleUpload?
     let notebook: Notebook?
+    let notebookChange: NotebookChange?
+    let notebookChangeKind: NotebookChangeKind?
     let notebookCreate: NotebookCreate?
     let notebookCreateData: NotebookCreateData?
     let notebookCreateOp: NotebookCreateOp?
@@ -356,6 +358,7 @@ struct SchemaBundle: Codable {
     let syncErrorCode: SyncErrorCode?
     let syncEvent: SyncEvent?
     let syncHello: SyncHello?
+    let syncNotebookChangedEvent: SyncNotebookChangedEvent?
     let syncOp: SyncOp?
     let syncOrigin: SyncOrigin?
     let syncPairingEvent: SyncPairingEvent?
@@ -608,6 +611,8 @@ struct SchemaBundle: Codable {
         case moodleSyncTrigger = "MoodleSyncTrigger"
         case moodleUpload = "MoodleUpload"
         case notebook = "Notebook"
+        case notebookChange = "NotebookChange"
+        case notebookChangeKind = "NotebookChangeKind"
         case notebookCreate = "NotebookCreate"
         case notebookCreateData = "NotebookCreateData"
         case notebookCreateOp = "NotebookCreateOp"
@@ -752,6 +757,7 @@ struct SchemaBundle: Codable {
         case syncErrorCode = "SyncErrorCode"
         case syncEvent = "SyncEvent"
         case syncHello = "SyncHello"
+        case syncNotebookChangedEvent = "SyncNotebookChangedEvent"
         case syncOp = "SyncOp"
         case syncOrigin = "SyncOrigin"
         case syncPairingEvent = "SyncPairingEvent"
@@ -1024,6 +1030,8 @@ extension SchemaBundle {
         moodleSyncTrigger: MoodleSyncTrigger?? = nil,
         moodleUpload: MoodleUpload?? = nil,
         notebook: Notebook?? = nil,
+        notebookChange: NotebookChange?? = nil,
+        notebookChangeKind: NotebookChangeKind?? = nil,
         notebookCreate: NotebookCreate?? = nil,
         notebookCreateData: NotebookCreateData?? = nil,
         notebookCreateOp: NotebookCreateOp?? = nil,
@@ -1168,6 +1176,7 @@ extension SchemaBundle {
         syncErrorCode: SyncErrorCode?? = nil,
         syncEvent: SyncEvent?? = nil,
         syncHello: SyncHello?? = nil,
+        syncNotebookChangedEvent: SyncNotebookChangedEvent?? = nil,
         syncOp: SyncOp?? = nil,
         syncOrigin: SyncOrigin?? = nil,
         syncPairingEvent: SyncPairingEvent?? = nil,
@@ -1420,6 +1429,8 @@ extension SchemaBundle {
             moodleSyncTrigger: moodleSyncTrigger ?? self.moodleSyncTrigger,
             moodleUpload: moodleUpload ?? self.moodleUpload,
             notebook: notebook ?? self.notebook,
+            notebookChange: notebookChange ?? self.notebookChange,
+            notebookChangeKind: notebookChangeKind ?? self.notebookChangeKind,
             notebookCreate: notebookCreate ?? self.notebookCreate,
             notebookCreateData: notebookCreateData ?? self.notebookCreateData,
             notebookCreateOp: notebookCreateOp ?? self.notebookCreateOp,
@@ -1564,6 +1575,7 @@ extension SchemaBundle {
             syncErrorCode: syncErrorCode ?? self.syncErrorCode,
             syncEvent: syncEvent ?? self.syncEvent,
             syncHello: syncHello ?? self.syncHello,
+            syncNotebookChangedEvent: syncNotebookChangedEvent ?? self.syncNotebookChangedEvent,
             syncOp: syncOp ?? self.syncOp,
             syncOrigin: syncOrigin ?? self.syncOrigin,
             syncPairingEvent: syncPairingEvent ?? self.syncPairingEvent,
@@ -12632,6 +12644,63 @@ enum NotebookKind: String, Codable {
     case vorlesung = "vorlesung"
 }
 
+/// Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client
+/// per REST
+// MARK: - NotebookChange
+struct NotebookChange: Codable {
+    let kind: NotebookChangeKind
+    let notebookID: String
+
+    enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case notebookID = "notebook_id"
+    }
+}
+
+// MARK: NotebookChange convenience initializers and mutators
+
+extension NotebookChange {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(NotebookChange.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: NotebookChangeKind? = nil,
+        notebookID: String? = nil
+    ) -> NotebookChange {
+        return NotebookChange(
+            kind: kind ?? self.kind,
+            notebookID: notebookID ?? self.notebookID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Art der Server-Operation: notebook.update, .delete oder .restore
+enum NotebookChangeKind: String, Codable {
+    case delete = "delete"
+    case restore = "restore"
+    case update = "update"
+}
+
 /// POST /notebooks. kind fehlt = frei
 // MARK: - NotebookCreate
 struct NotebookCreate: Codable {
@@ -20618,6 +20687,10 @@ enum SyncErrorType: String, Codable {
 /// Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
 ///
 /// Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)
+///
+/// Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation
+/// notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms.
+/// Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
 // MARK: - SyncEvent
 struct SyncEvent: Codable {
     let data: SyncEventData
@@ -20677,6 +20750,9 @@ extension SyncEvent {
 /// Web-App listet sie und kann sie ablehnen (DELETE
 /// /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App
 /// empfiehlt darum den QR-Weg
+///
+/// Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client
+/// per REST
 // MARK: - SyncEventData
 struct SyncEventData: Codable {
     let autoStopExtendedUntil: Date?
@@ -20709,7 +20785,7 @@ struct SyncEventData: Codable {
     let pageID: String?
     let sessionID: String?
     let connected: Bool?
-    let kind: DeviceKind?
+    let kind: EKind?
     let pairingID: String?
     let requestID: String?
     let requestedAt: Date?
@@ -20797,7 +20873,7 @@ extension SyncEventData {
         pageID: String?? = nil,
         sessionID: String?? = nil,
         connected: Bool?? = nil,
-        kind: DeviceKind?? = nil,
+        kind: EKind?? = nil,
         pairingID: String?? = nil,
         requestID: String?? = nil,
         requestedAt: Date?? = nil
@@ -20847,8 +20923,18 @@ extension SyncEventData {
     }
 }
 
+/// Art der Server-Operation: notebook.update, .delete oder .restore
+enum EKind: String, Codable {
+    case delete = "delete"
+    case ipad = "ipad"
+    case iphone = "iphone"
+    case restore = "restore"
+    case update = "update"
+}
+
 enum SyncEventName: String, Codable {
     case deviceConnection = "device.connection"
+    case notebookChanged = "notebook.changed"
     case pairingRequested = "pairing.requested"
     case presence = "presence"
     case sessionUpdated = "session.updated"
@@ -20922,6 +21008,65 @@ extension SyncHello {
 
 enum SyncHelloType: String, Codable {
     case hello = "hello"
+}
+
+/// Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation
+/// notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms.
+/// Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
+// MARK: - SyncNotebookChangedEvent
+struct SyncNotebookChangedEvent: Codable {
+    let data: NotebookChange
+    let name: SyncNotebookChangedEventName
+    let type: SyncConnectionEventType
+
+    enum CodingKeys: String, CodingKey {
+        case data = "data"
+        case name = "name"
+        case type = "type"
+    }
+}
+
+// MARK: SyncNotebookChangedEvent convenience initializers and mutators
+
+extension SyncNotebookChangedEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncNotebookChangedEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: NotebookChange? = nil,
+        name: SyncNotebookChangedEventName? = nil,
+        type: SyncConnectionEventType? = nil
+    ) -> SyncNotebookChangedEvent {
+        return SyncNotebookChangedEvent(
+            data: data ?? self.data,
+            name: name ?? self.name,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum SyncNotebookChangedEventName: String, Codable {
+    case notebookChanged = "notebook.changed"
 }
 
 /// Operation (08 §2.3), unterschieden über kind. Client → Server ohne seq/origin, Server →
@@ -21419,6 +21564,10 @@ extension SyncResume {
 /// Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
 ///
 /// Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)
+///
+/// Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation
+/// notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms.
+/// Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
 // MARK: - SyncServerMessage
 struct SyncServerMessage: Codable {
     let dbEpoch: String?
@@ -21581,6 +21730,9 @@ extension SyncServerMessage {
 /// Web-App listet sie und kann sie ablehnen (DELETE
 /// /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App
 /// empfiehlt darum den QR-Weg
+///
+/// Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client
+/// per REST
 // MARK: - SyncServerMessageData
 struct SyncServerMessageData: Codable {
     let createdAt: CreatedAt?
@@ -21881,12 +22033,16 @@ enum CreatedAt: Codable {
     }
 }
 
+/// Art der Server-Operation: notebook.update, .delete oder .restore
 enum Kind: String, Codable {
+    case delete = "delete"
     case frage = "frage"
     case frei = "frei"
     case ipad = "ipad"
     case iphone = "iphone"
     case klausur = "klausur"
+    case restore = "restore"
+    case update = "update"
     case verknuepfung = "verknuepfung"
 }
 
@@ -25412,6 +25568,14 @@ extension Notebook {
     }
 }
 
+extension NotebookChange {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(notebookID, forKey: .notebookID)
+    }
+}
+
 extension NotebookCreate {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -26699,6 +26863,15 @@ extension SyncHello {
         try container.encodeIfPresent(deviceID, forKey: .deviceID)
         try container.encode(syncHelloProtocol, forKey: .syncHelloProtocol)
         try container.encode(streams, forKey: .streams)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncNotebookChangedEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encode(name, forKey: .name)
         try container.encode(type, forKey: .type)
     }
 }

@@ -614,6 +614,12 @@
     "Notebook": {
       "$ref": "#/$defs/Notebook"
     },
+    "NotebookChange": {
+      "$ref": "#/$defs/NotebookChange"
+    },
+    "NotebookChangeKind": {
+      "$ref": "#/$defs/NotebookChangeKind"
+    },
     "NotebookCreate": {
       "$ref": "#/$defs/NotebookCreate"
     },
@@ -1045,6 +1051,9 @@
     },
     "SyncHello": {
       "$ref": "#/$defs/SyncHello"
+    },
+    "SyncNotebookChangedEvent": {
+      "$ref": "#/$defs/SyncNotebookChangedEvent"
     },
     "SyncOp": {
       "$ref": "#/$defs/SyncOp"
@@ -8325,6 +8334,34 @@
         }
       }
     },
+    "NotebookChange": {
+      "title": "NotebookChange",
+      "type": "object",
+      "description": "Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client per REST",
+      "required": [
+        "notebook_id",
+        "kind"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "notebook_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "$ref": "#/$defs/NotebookChangeKind"
+        }
+      }
+    },
+    "NotebookChangeKind": {
+      "title": "NotebookChangeKind",
+      "type": "string",
+      "description": "Art der Server-Operation: notebook.update, .delete oder .restore",
+      "enum": [
+        "update",
+        "delete",
+        "restore"
+      ]
+    },
     "NotebookCreate": {
       "title": "NotebookCreate",
       "type": "object",
@@ -12939,6 +12976,9 @@
         },
         {
           "$ref": "#/$defs/SyncPairingEvent"
+        },
+        {
+          "$ref": "#/$defs/SyncNotebookChangedEvent"
         }
       ]
     },
@@ -12976,6 +13016,28 @@
           "items": {
             "$ref": "#/$defs/SyncStreamPosition"
           }
+        }
+      }
+    },
+    "SyncNotebookChangedEvent": {
+      "title": "SyncNotebookChangedEvent",
+      "type": "object",
+      "description": "Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms. Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)",
+      "required": [
+        "type",
+        "name",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "notebook.changed"
+        },
+        "data": {
+          "$ref": "#/$defs/NotebookChange"
         }
       }
     },

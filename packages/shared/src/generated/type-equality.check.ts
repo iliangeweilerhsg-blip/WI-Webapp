@@ -209,6 +209,8 @@ const _MoodleSyncedDeadline: Equal<z.infer<typeof Z.MoodleSyncedDeadlineSchema>,
 const _MoodleSyncedDeadlineList: Equal<z.infer<typeof Z.MoodleSyncedDeadlineListSchema>, T.MoodleSyncedDeadlineList> = true;
 const _MoodleUpload: Equal<z.infer<typeof Z.MoodleUploadSchema>, T.MoodleUpload> = true;
 const _Notebook: Equal<z.infer<typeof Z.NotebookSchema>, T.Notebook> = true;
+const _NotebookChange: Equal<z.infer<typeof Z.NotebookChangeSchema>, T.NotebookChange> = true;
+const _NotebookChangeKind: Equal<z.infer<typeof Z.NotebookChangeKindSchema>, T.NotebookChangeKind> = true;
 const _NotebookCreate: Equal<z.infer<typeof Z.NotebookCreateSchema>, T.NotebookCreate> = true;
 const _NotebookCreateData: Equal<z.infer<typeof Z.NotebookCreateDataSchema>, T.NotebookCreateData> = true;
 const _NotebookCreateOp: Equal<z.infer<typeof Z.NotebookCreateOpSchema>, T.NotebookCreateOp> = true;
@@ -353,6 +355,7 @@ const _SyncError: Equal<z.infer<typeof Z.SyncErrorSchema>, T.SyncError> = true;
 const _SyncErrorCode: Equal<z.infer<typeof Z.SyncErrorCodeSchema>, T.SyncErrorCode> = true;
 const _SyncEvent: Equal<z.infer<typeof Z.SyncEventSchema>, T.SyncEvent> = true;
 const _SyncHello: Equal<z.infer<typeof Z.SyncHelloSchema>, T.SyncHello> = true;
+const _SyncNotebookChangedEvent: Equal<z.infer<typeof Z.SyncNotebookChangedEventSchema>, T.SyncNotebookChangedEvent> = true;
 const _SyncOp: Equal<z.infer<typeof Z.SyncOpSchema>, T.SyncOp> = true;
 const _SyncOrigin: Equal<z.infer<typeof Z.SyncOriginSchema>, T.SyncOrigin> = true;
 const _SyncPairingEvent: Equal<z.infer<typeof Z.SyncPairingEventSchema>, T.SyncPairingEvent> = true;

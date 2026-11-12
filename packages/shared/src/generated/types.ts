@@ -442,6 +442,13 @@ export type MoodleSyncState = ("aus" | "bereit" | "laeuft" | "pausiert")
  */
 export type NotebookKind = ("vorlesung" | "uebung" | "frei")
 /**
+ * Art der Server-Operation: notebook.update, .delete oder .restore
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookChangeKind".
+ */
+export type NotebookChangeKind = ("update" | "delete" | "restore")
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PageTemplate".
  */
@@ -620,7 +627,7 @@ export type SyncErrorCode = ("protocol_unsupported" | "hello_required" | "hello_
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SyncEvent".
  */
-export type SyncEvent = (SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent)
+export type SyncEvent = (SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent | SyncNotebookChangedEvent)
 /**
  * Alle Nachrichten Server → Client
  * 
@@ -3464,6 +3471,16 @@ kind: NotebookKind
 page_count: number
 }
 /**
+ * Inhalt von notebook.changed: nur Kennung und Art, kein Titel. Den Stand holt der Client per REST
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "NotebookChange".
+ */
+export interface NotebookChange {
+notebook_id: Uuid
+kind: NotebookChangeKind
+}
+/**
  * POST /notebooks. kind fehlt = frei
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -5226,6 +5243,17 @@ export interface SyncPairingEvent {
 type: "event"
 name: "pairing.requested"
 data: PairingRequest
+}
+/**
+ * Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms. Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SyncNotebookChangedEvent".
+ */
+export interface SyncNotebookChangedEvent {
+type: "event"
+name: "notebook.changed"
+data: NotebookChange
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
