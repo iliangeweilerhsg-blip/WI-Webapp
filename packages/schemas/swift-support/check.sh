@@ -7,6 +7,14 @@ repo="$(cd "$here/../../.." && pwd)"
 out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 # Swift-6-Sprachmodus: Standard in neuen Xcode-Projekten, strengere Sendable-Prüfungen (#56)
+# Sendable-Probe (#97): alle Sync-Typen müssen Sendable sein, sonst lassen sie sich nicht über Isolationsgrenzen reichen
+# (z. B. WebSocket-Task → @MainActor). Nur Typprüfung, die Probe läuft nie
+"${SWIFTC:-swiftc}" -typecheck -swift-version 6 -parse-as-library \
+  "$here/../generated/swift/Schemas.swift" \
+  "$here"/Sources/*.swift \
+  "$here/SendableProbe/SendableProbe.swift"
+echo "Sendable-Probe (Swift 6): bestanden"
+
 "${SWIFTC:-swiftc}" -swift-version 6 \
   "$here/../generated/swift/Schemas.swift" \
   "$here"/Sources/*.swift \

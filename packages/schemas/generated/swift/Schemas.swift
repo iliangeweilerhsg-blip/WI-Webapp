@@ -23620,7 +23620,7 @@ func sgFormatTimestamp(_ date: Date) -> String {
 
 // MARK: - Encode/decode helpers
 
-class JSONNull: Codable, Hashable {
+final class JSONNull: Codable, Hashable, Sendable {
 
     public static func == (lhs: JSONNull, rhs: JSONNull) -> Bool {
         return true
@@ -23669,7 +23669,7 @@ final class JSONCodingKey: CodingKey {
     }
 }
 
-class JSONAny: Codable {
+final class JSONAny: Codable, @unchecked Sendable {
 
     let value: Any
 

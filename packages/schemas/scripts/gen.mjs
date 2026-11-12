@@ -202,6 +202,40 @@ func sgFormatTimestamp(_ date: Date) -> String {
   if (!codingKey.test(text)) throw new Error('quicktype-Ausgabe: JSONCodingKey nicht gefunden');
   text = text.replace(codingKey, 'final class JSONCodingKey: CodingKey {');
 
+  // Swift 6: SGServerMessage ist nur Sendable, wenn JSONAny und JSONNull es sind (SyncError.details, #97).
+  // JSONNull hat keine gespeicherten Eigenschaften, final reicht für geprüftes Sendable.
+  // JSONAny hält `let value: Any`: Any ist nicht Sendable, der Compiler kann es nicht prüfen. Vertretbar mit
+  // @unchecked, weil (1) `value` ein `let` ist und die Klasse final ist, es also nach dem Init nie geändert wird,
+  // und (2) der Decoder nur JSON-Werte hineinlegt (Bool, Int64, Double, String, JSONNull, [Any], [String: Any]),
+  // also Werttypen und die Sendable-Klasse JSONNull. Die Prüfung unten bricht den Codegen, falls quicktype das ändert.
+  const jsonNull = /^(final )?class JSONNull: Codable, Hashable \{$/m;
+  const jsonAny = /^(final )?class JSONAny: Codable \{$/m;
+  if (!jsonNull.test(text)) throw new Error('quicktype-Ausgabe: JSONNull nicht gefunden');
+  if (!jsonAny.test(text)) throw new Error('quicktype-Ausgabe: JSONAny nicht gefunden');
+  // Wächter auf Klassenebene (4 Leerzeichen Einrückung): genau eine Eigenschaft `let value: Any`, kein `var` (gleich
+  // welcher Modifikator) und als einziger Initializer `init(from:)`. Klassen-Extensions dürfen nur Convenience-Inits
+  // ergänzen, die wieder bei `init(from:)` landen. Weitere Initializer oder Eigenschaften (auch
+  // `let cache = NSMutableArray()`) brechen den Codegen.
+  const anyStart = text.search(jsonAny);
+  const anyEnd = text.indexOf('\n}\n', anyStart);
+  if (anyEnd < 0) throw new Error('quicktype-Ausgabe: Ende von JSONAny nicht gefunden');
+  const anyBody = text.slice(anyStart, anyEnd);
+  const members = (re) => [...anyBody.matchAll(re)].map((m) => m[0].trim());
+  const props = members(/^ {4}(?:[\w()]+ )*(?:let|var) .*$/gm);
+  const inits = members(/^ {4}(?:[\w()]+ )*init[?!]?\s*[(<].*$/gm);
+  if (
+    props.length !== 1 ||
+    !/^(?:public )?let value: Any$/.test(props[0]) ||
+    inits.length !== 1 ||
+    !/^(?:public )?required init\(from decoder: Decoder\) throws \{$/.test(inits[0])
+  )
+    throw new Error(
+      `quicktype-Ausgabe: JSONAny hat unerwartete Eigenschaften oder Initializer (${[...props, ...inits].join(' | ')}), @unchecked Sendable nicht mehr vertretbar`,
+    );
+  text = text
+    .replace(jsonNull, 'final class JSONNull: Codable, Hashable, Sendable {')
+    .replace(jsonAny, 'final class JSONAny: Codable, @unchecked Sendable {');
+
   const schemas = Object.entries(bundle.$defs)
     .filter(([, d]) => d.type === 'object' && d.properties)
     .map(([n, d]) => ({
