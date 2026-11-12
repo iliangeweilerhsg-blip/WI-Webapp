@@ -39,7 +39,7 @@ import {
   type RecorderStatus,
 } from '../recorder';
 import { applyActiveSession, extendSession, getSession, stopSession } from '../sessions.ts';
-import { useSettings } from '../settings.ts';
+import { readMicrophoneId, useSettings } from '../settings.ts';
 import { useSyncClient } from '../sync/SyncProvider.tsx';
 import { usePausedSince } from './paused-since.ts';
 import { useTrackedSessionState, type TrackedPhase } from './tracked-session.ts';
@@ -295,6 +295,9 @@ const AutoStopHost = memo(function AutoStopHost({
 export function RecordingProvider({ children, env = {} }: { children: ReactNode; env?: RecordingEnv }) {
   const envRef = useRef(env);
   envRef.current = env;
+  const queryClient = useQueryClient();
+  const queryClientRef = useRef(queryClient);
+  queryClientRef.current = queryClient;
   const sync = useSyncClient();
   const { tracked, pending } = useTrackedSessionState();
   const session = tracked?.session ?? null;
@@ -339,6 +342,8 @@ export function RecordingProvider({ children, env = {} }: { children: ReactNode;
     if (sessionId === null) return;
     const e = envRef.current;
     const recorder = new AudioRecorder({
+      // Das in Einstellungen → Vorlesung gewählte Mikrofon (UX-03): dasselbe, das „Mikrofon testen“ prüft
+      microphoneId: () => readMicrophoneId(queryClientRef.current),
       ...e.recorder,
       // Hochladen darf nur der Leader (Issue #115); der Effekt unten schaltet es mit der Rolle ein
       uploadsEnabled: false,
