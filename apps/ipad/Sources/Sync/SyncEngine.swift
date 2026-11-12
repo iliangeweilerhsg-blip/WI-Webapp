@@ -21,6 +21,7 @@ private enum SyncIncoming: Sendable {
     }
 
     case welcome(dbEpoch: String)
+    case inbound(SyncInbound)
     case timePong(t0: Int, ts: Int)
     case pong
     case ack(opID: String)
@@ -101,6 +102,9 @@ final class SyncEngine {
     /// `page.update` und ruft danach `resumePage` auf. Nach jedem `welcome` kommt der Aufruf für noch offene Seiten
     /// erneut.
     @ObservationIgnored var onPageVersionConflict: (@MainActor (String) -> Void)?
+    /// Eingehende Nachrichten, die nicht zur Engine selbst gehören (Session-Strom, `session.updated`). Das iPad
+    /// liest nur: Die Engine wendet nichts an und schreibt nichts in die Warteschlange.
+    @ObservationIgnored var onInbound: (@MainActor (SyncInbound) -> Void)?
 
     private let client: CoreClient
     private let sockets: any SyncSocketFactory
@@ -412,6 +416,25 @@ final class SyncEngine {
         )
     }
 
+    // MARK: Strom lesen (nur lesend, E8 aus dem Plan)
+
+    /// Abonniert einen Strom ab `lastSeq`. Das iPad hält keinen Stand über Verbindungen hinweg: Nach jedem `welcome`
+    /// lädt der Aufrufer den Snapshot neu und abonniert ab dessen `stream_seq`. Ohne Verbindung passiert nichts.
+    func subscribe(stream: String, lastSeq: Int, lastOpID: String?) {
+        guard let link, link.welcomed else { return }
+        let message = SyncSubscribe(
+            streams: [SyncStreamPosition(lastOpID: lastOpID, lastSeq: lastSeq, stream: stream)],
+            type: .subscribe
+        )
+        _Concurrency.Task { await self.sendMessage(.subscribe(message), on: link) }
+    }
+
+    func unsubscribe(stream: String) {
+        guard let link, link.welcomed else { return }
+        let message = SyncUnsubscribe(streams: [stream], type: .unsubscribe)
+        _Concurrency.Task { await self.sendMessage(.unsubscribe(message), on: link) }
+    }
+
     // MARK: Anwesenheit
 
     /// Meldet dem Mac, wo geschrieben wird. `nil` oder eine Seite ohne `pageID` heißt: nicht mehr hier.
@@ -598,6 +621,8 @@ final class SyncEngine {
             await onWelcome(dbEpoch: epoch, link: link)
         case .timePong(let t0, let ts):
             await onTimePong(t0: t0, ts: ts, link: link)
+        case .inbound(let value):
+            onInbound?(value)
         case .pong:
             link.lastPongAt = now()
             backoff.reset()
@@ -621,6 +646,17 @@ final class SyncEngine {
             return .timePong(t0: value.t0, ts: value.ts)
         case .pong:
             return .pong
+        case .subscribed(let value):
+            // Eine Nachricht kann mehrere Ströme melden. Das iPad abonniert immer genau einen.
+            guard let first = value.resume.first else { return .ignored }
+            return .inbound(.subscribed(stream: first.stream, reset: first.reset))
+        case .op(let op):
+            return incomingOp(op, text: text)
+        case .event(let event):
+            if case .sessionUpdated(let value) = event {
+                return .inbound(.sessionUpdated(sessionBrief(value.data)))
+            }
+            return .ignored
         case .ack(let value):
             return .ack(opID: value.opID)
         case .error(let value):
@@ -638,6 +674,35 @@ final class SyncEngine {
         }
     }
 
+    /// `stream` und `seq` stehen bei jeder Operation im Umschlag, auch bei unbekannten Arten (die zählen trotzdem)
+    nonisolated private static func incomingOp(_ op: SGSyncOp, text: String) -> SyncIncoming {
+        struct Envelope: Decodable {
+            let stream: String?
+            let seq: Int?
+        }
+        guard let data = text.data(using: .utf8),
+            let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
+            let stream = envelope.stream, let seq = envelope.seq
+        else { return .ignored }
+        var slide: SlideBrief?
+        if case .slideChange(let value) = op {
+            slide = SlideBrief(slideID: value.data.slideID, index: value.data.slideIndex)
+        }
+        return .inbound(.op(stream: stream, seq: seq, slide: slide))
+    }
+
+    nonisolated static func sessionBrief(_ session: Session) -> SessionBrief {
+        SessionBrief(
+            id: session.id,
+            moduleID: session.moduleID,
+            state: session.state.rawValue,
+            startedAtMS: session.startedAt.map { InkStrokeCodec.milliseconds($0) },
+            slideDeckID: session.slideDeckID,
+            deleted: session.deletedAt != nil,
+            updatedAtMS: InkStrokeCodec.milliseconds(session.updatedAt)
+        )
+    }
+
     private func onWelcome(dbEpoch: String, link: SyncLink) async {
         link.welcomed = true
         link.lastPongAt = now()
@@ -648,6 +713,7 @@ final class SyncEngine {
         }
         library.setDBEpoch(dbEpoch)
         welcomeCount += 1
+        onInbound?(.connected)
         // Ein Konflikt, dessen Auflösung (REST) nicht gelang, wird mit der neuen Verbindung erneut versucht
         for pageID in parkedPages.sorted() {
             onPageVersionConflict?(pageID)

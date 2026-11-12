@@ -2,7 +2,7 @@
 
 So kommt die App „Studien-Gehirn“ auf dein iPad. Du brauchst kein bezahltes Entwicklerkonto. Dauer beim ersten Mal: etwa 20 Minuten.
 
-**Stand:** Die App kann koppeln, zeigt den Verbindungsstatus und listet deine Notizbücher je Modul. Seiten blättern, anlegen, umsortieren und löschen, dazu Vorlagen (liniert, kariert, Punktraster). Schreibmodi und Folien folgen.
+**Stand:** Die App kann koppeln, zeigt den Verbindungsstatus und listet deine Notizbücher je Modul. Seiten blättern, anlegen, umsortieren und löschen, dazu Vorlagen (liniert, kariert, Punktraster). Schreibmodi und Folien (nur die Vorlesung, die gerade läuft).
 
 ## Was du brauchst
 
@@ -106,7 +106,18 @@ Ein Notizbuch hat viele Seiten. Eine Seite ist sichtbar.
 - **Seitenleiste:** **Seiten ▤** öffnet ein Panel mit Vorschaubildern. Tippe ein Bild an, um zur Seite zu springen. Halte ein Bild gedrückt und ziehe es an eine andere Stelle, um die Seite zu verschieben. Gedrückt halten öffnet außerdem das Menü mit **Vorlage** und **Löschen**. Das Panel schließt du mit dem **✕**. Der Stift schreibt auch bei offenem Panel weiter. Steht unten „N weitere Seiten liegen nur am Mac“, hat der Mac Seiten, die dieses iPad nicht hat.
 - **Vorlage:** Im Menü **⋯** oben (oder in der Seitenleiste) wählst du Blanko, Liniert, Kariert oder Punktraster. Kariert und Punktraster haben ein 5-mm-Raster.
 - **Löschen ohne Rückfrage:** **⋯ → Seite löschen** (oder in der Seitenleiste). Die Seite verschwindet sofort. Unten erscheint 5 Sekunden lang **Seite gelöscht · Rückgängig**. Tippst du darauf, ist die Seite wieder da. Sonst landet sie im Papierkorb am Mac. Verlässt du die Schreibfläche, gilt die Frist als abgelaufen. Auf dem iPad bleiben Zeichnung und Vorschaubild noch erhalten.
-- **Alles geht offline.** Anlegen, Umsortieren, Vorlage und Löschen werden gemerkt und beim nächsten Verbinden zum Mac geschickt. Haben beide Seiten dieselbe Seite verändert, gewinnt der Stand vom iPad.
+- **Alles geht offline.** Anlegen, Umsortieren, Vorlage und Löschen werden gemerkt und beim nächsten Verbinden zum Mac geschickt. Haben beide Seiten dieselbe Seite verändert, gewinnt je Feld die Änderung, die zuletzt gemacht wurde und noch nicht beim Mac war: Hast du nur die Vorlage geändert und der Mac nur die Reihenfolge, bleibt beides.
+
+## Schreibmodi und Folien
+
+Oben in der Seitenzeile steht ein Umschalter. Ein Tipp wechselt zwischen **Freie Seite** und **Auf Folie**. Die Wahl gilt pro Modul, bleibt nach einem Neustart erhalten und geht auch ohne Verbindung. Sie wird beim nächsten Verbinden an den Mac gesendet. Ohne eigene Wahl gilt der Standard aus den Einstellungen am Mac.
+
+- **Freie Seite:** Du schreibst auf der Seite, die offen ist. Blättert der Mac weiter, bleibt deine Seite stehen. Neue Seiten merken sich die Folie, die gerade lief.
+- **Auf Folie:** Blättert der Mac zur nächsten Folie, öffnet das iPad die Seite zu dieser Folie. Gibt es noch keine, wird sie angelegt und hinten angehängt. Kehrt der Mac zu einer früheren Folie zurück, siehst du deine Notizen dazu wieder. Die Folie liegt als Bild unter deiner Schrift.
+- **Mitten im Strich** bleibt die Seite stehen. Erst wenn du den Stift abgesetzt hast, wechselt das iPad zur zuletzt gezeigten Folie.
+- **Nur mit laufender Vorlesung:** „Auf Folie“ geht nur, wenn am Mac eine Vorlesung dieses Moduls mit Foliensatz läuft. Sonst ist der Umschalter ausgegraut, und es steht „Folien brauchen eine laufende Vorlesung mit Foliensatz“. Zurück zur freien Seite geht immer.
+- **Folien auf dem iPad:** Das iPad lädt nur den Foliensatz der laufenden Vorlesung, und nur vom gekoppelten Mac. Die Datei wird vor der Anzeige geprüft (Größe, Prüfsumme) und liegt dann im App-Speicher, nicht im Backup. Insgesamt höchstens 1 GB, der älteste Satz geht zuerst. Schon geladene Folien erscheinen auch ohne Verbindung unter deinen Notizen. Fehlt eine Folie, steht „Folie wird geladen …“ oder „Folie nicht auf dem iPad“. Schreiben geht trotzdem.
+- **Vorab laden und Folien ohne Verbindung wählen** folgt später (T1-15).
 
 ## Die App läuft nur 7 Tage
 

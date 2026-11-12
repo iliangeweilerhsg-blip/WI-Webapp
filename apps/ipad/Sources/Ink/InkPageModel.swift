@@ -44,6 +44,9 @@ final class InkPageModel {
     @ObservationIgnored var onStrokeChanges: (([InkStrokeChange]) -> Void)?
     /// Wird nach jedem erfolgreichen Speichern aufgerufen, mit dem geschriebenen Stand (Vorschaubild der Seitenleiste)
     @ObservationIgnored var onSaved: ((InkPageSnapshot) -> Void)?
+    /// Der Stift setzt an bzw. ab (für den Folienwechsel, der bis zum Absetzen wartet)
+    @ObservationIgnored var onToolUseStarted: (() -> Void)?
+    @ObservationIgnored var onToolUseFinished: (() -> Void)?
     /// Liefert die höchste Nummer der Warteschlange (`SyncOutbox.lastNumber`). Wird beim Speichern festgehalten.
     @ObservationIgnored var outboxNumberProvider: (() -> Int)?
     /// Lokaler Stand und Core müssen abgeglichen werden: nach einem Absturz, bei neu vergebenen IDs, bei einem
@@ -118,11 +121,13 @@ final class InkPageModel {
     func beginToolUse() {
         toolUseOpen = true
         toolUseRecorded = false
+        onToolUseStarted?()
     }
 
     func endToolUse() {
         toolUseOpen = false
         toolUseRecorded = false
+        onToolUseFinished?()
     }
 
     /// Die Nutzerin hat eine Ebene geändert (Strich, Radieren, Lasso)

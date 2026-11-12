@@ -12,6 +12,14 @@ final class InkPaperView: UIView {
         }
     }
 
+    /// Folie unter der Schrift (Seiten mit `background_slide_id`). Sie wird eingepasst und mittig gesetzt, das Papier
+    /// bleibt daneben sichtbar. Ohne Bild zeichnet die Vorlage.
+    var backgroundImage: UIImage? {
+        didSet {
+            if backgroundImage !== oldValue { setNeedsDisplay() }
+        }
+    }
+
     init(pageSize: CGSize, template: PageTemplate) {
         self.pageSize = pageSize
         self.template = template
@@ -38,5 +46,14 @@ final class InkPaperView: UIView {
         context.scaleBy(x: scale, y: scale)
         InkTemplateGeometry.draw(template: template, size: pageSize, in: context)
         context.restoreGState()
+        if let image = backgroundImage, image.size.width > 0, image.size.height > 0 {
+            // Einpassen wie `preserveAspectRatio`: Weicht das Verhältnis ab, bleibt Papier an den Rändern
+            let fit = min(bounds.width / image.size.width, bounds.height / image.size.height)
+            let size = CGSize(width: image.size.width * fit, height: image.size.height * fit)
+            image.draw(
+                in: CGRect(
+                    x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2,
+                    width: size.width, height: size.height))
+        }
     }
 }

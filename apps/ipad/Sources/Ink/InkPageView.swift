@@ -8,7 +8,11 @@ import UIKit
 ///
 /// Seiten (T1-13 Teil 1): Eine Seite ist sichtbar. Oben steht „‹ Seite 3 / 12 ›“, ein Ein-Finger-Wisch blättert
 /// ebenfalls. Die Seitenleiste („Seiten“) zeigt Vorschaubilder und sortiert um. Gelöscht wird ohne Dialog mit einer
-/// Rückgängig-Leiste von 5 s (R1). Schreibmodi und Folien folgen mit T1-13 Teil 2.
+/// Rückgängig-Leiste von 5 s (R1).
+///
+/// Schreibmodi (T1-13 Teil 2): Der Umschalter „Freie Seite“ / „Auf Folie“ gilt pro Modul. Im Modus „Auf Folie“ folgt die
+/// Ansicht dem Folienwechsel des Mac: Sie öffnet die Seite dieser Folie (oder legt sie an). Ein Wechsel mitten im
+/// Strich wartet bis zum Absetzen. Seiten mit `background_slide_id` zeigen die Folie unter der Schrift.
 struct InkPageView: View {
     let library: InkLibraryService
 
@@ -21,6 +25,10 @@ struct InkPageView: View {
     @State private var showsSidebar = false
     /// Eben gelöschte Seite, die noch zurückgeholt werden kann (Leiste „Rückgängig“, 5 s)
     @State private var undoPageID: String?
+    /// Folie unter der Schrift, nur mit Folien-Unterstützung
+    @State private var slideBackground: SlideBackgroundModel?
+    /// Hält Folienwechsel während eines Strichs zurück
+    @State private var gate = SlideSwitchGate()
     /// Händigkeit: Seite der Werkzeugleiste. Später aus `Settings.lecture.toolbar_side` (F-EIN-01).
     @AppStorage("ink.toolbarSide") private var toolbarSideRaw = ToolbarSide.rechts.rawValue
     @Environment(\.scenePhase) private var scenePhase
@@ -70,7 +78,9 @@ struct InkPageView: View {
                         InkToolbar(model: model)
                         Divider()
                     }
-                    InkCanvasView(model: model, template: currentTemplate, onSwipePage: { step($0) })
+                    InkCanvasView(
+                        model: model, template: currentTemplate, backgroundImage: slideBackground?.image,
+                        onSwipePage: { step($0) })
                         .id(model.pageID)
                         .ignoresSafeArea(edges: .bottom)
                     if toolbarSide == .rechts {
@@ -83,6 +93,12 @@ struct InkPageView: View {
                         pageStrip
                         if let offlineText {
                             infoRow(offlineText)
+                        }
+                        if let statusText = slideBackground?.statusText {
+                            infoRow(statusText)
+                        }
+                        if let hint = slideModeHint {
+                            infoRow(hint)
                         }
                         if otherNotebookID != nil {
                             HStack {
@@ -167,6 +183,22 @@ struct InkPageView: View {
         .onChange(of: library.running) { _, _ in
             // Die Vorlesung hat begonnen oder geendet: Session der offenen Seite nachziehen
             applyFreshTarget()
+            followSlideIfNeeded()
+        }
+        .onChange(of: library.slides?.follower.currentSlide) { _, _ in
+            followSlideIfNeeded()
+        }
+        .onChange(of: gate.releases) { _, _ in
+            // Der Stift ist abgesetzt: der zurückgestellte Folienwechsel (nur der letzte) gilt jetzt
+            if let slide = gate.takeReleased() {
+                openSlidePage(slide)
+            }
+        }
+        .onChange(of: binding?.pageID) { _, _ in
+            updateSlideBackground()
+        }
+        .onChange(of: library.slides?.decks.revision) { _, _ in
+            updateSlideBackground()
         }
         .onChange(of: sync.welcomeCount) { _, _ in
             // Neu verbunden (auch nach neuer db_epoch): Bibliothek auffrischen, Seite abgleichen, wenn nötig
@@ -232,6 +264,8 @@ struct InkPageView: View {
 
             Spacer()
 
+            modeButton
+
             Menu {
                 Picker("Vorlage", selection: templateBinding) {
                     ForEach(PageTemplate.choices, id: \.self) { template in
@@ -260,6 +294,88 @@ struct InkPageView: View {
         .padding(.horizontal, 8)
         .frame(maxWidth: .infinity)
         .background(Color(.secondarySystemBackground))
+    }
+
+    // MARK: Schreibmodus und Folie (T1-13 Teil 2)
+
+    private var currentModuleID: String? {
+        library.notebook(currentNotebookID)?.moduleID
+    }
+
+    private var slideModeAvailable: Bool {
+        guard let moduleID = currentModuleID else { return false }
+        return InkModeResolver.isAvailable(
+            running: library.running, moduleID: moduleID, slideKnown: library.slides?.follower.currentSlide != nil)
+    }
+
+    private var currentMode: InkMode? {
+        guard library.slides != nil, let moduleID = currentModuleID else { return nil }
+        return library.inkMode(forModule: moduleID)
+    }
+
+    /// Hinweis, wenn „Auf Folie“ gewählt ist, aber gerade nicht geht
+    private var slideModeHint: String? {
+        guard currentMode == .aufFolie, !slideModeAvailable else { return nil }
+        return InkModeResolver.unavailableHint
+    }
+
+    /// Ein Tipp schaltet um. Zurück zur freien Seite geht immer, „Auf Folie“ nur mit laufender Vorlesung.
+    @ViewBuilder
+    private var modeButton: some View {
+        if let mode = currentMode, let moduleID = currentModuleID {
+            Button {
+                library.setInkMode(mode == .aufFolie ? .freieSeite : .aufFolie, moduleID: moduleID)
+                if mode == .freieSeite {
+                    followSlideIfNeeded(force: true)
+                }
+            } label: {
+                Label(
+                    mode == .aufFolie ? "Auf Folie" : "Freie Seite",
+                    systemImage: mode == .aufFolie ? "rectangle.on.rectangle" : "doc"
+                )
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .disabled(mode == .freieSeite && !slideModeAvailable)
+            .accessibilityLabel(mode == .aufFolie ? "Schreibmodus: Auf Folie" : "Schreibmodus: Freie Seite")
+            .accessibilityHint(
+                slideModeAvailable ? "Ein Tipp wechselt den Modus für dieses Modul" : InkModeResolver.unavailableHint)
+        }
+    }
+
+    /// Folgt dem Mac auf die Seite der aktuellen Folie, wenn der Modus „Auf Folie“ gilt und es geht
+    private func followSlideIfNeeded(force: Bool = false) {
+        guard let slides = library.slides, let moduleID = currentModuleID, slideModeAvailable else { return }
+        // `force`: Der Modus wurde gerade eingeschaltet, die Wahl steht noch nicht überall
+        guard force || library.inkMode(forModule: moduleID) == .aufFolie else { return }
+        _Concurrency.Task {
+            guard let slide = await slides.currentSlide() else { return }
+            if let now = gate.slideChanged(slide) {
+                openSlidePage(now)
+            }
+        }
+    }
+
+    private func openSlidePage(_ slide: SlideRef) {
+        guard let page = library.slidePage(notebookID: currentNotebookID, slide: slide) else { return }
+        _Concurrency.Task { await show(pageID: page.id) }
+    }
+
+    /// Zeigt die Folie der offenen Seite (oder nichts bei einer freien Seite)
+    private func updateSlideBackground() {
+        guard let slides = library.slides else { return }
+        if slideBackground == nil {
+            let sync = library.sync
+            slideBackground = SlideBackgroundModel(support: slides, canReach: { sync.canReachCore })
+        }
+        let slideID = binding.flatMap { library.page($0.pageID)?.backgroundSlideID }
+        slideBackground?.show(slideID: slideID, deckHint: library.running?.slideDeckID)
+    }
+
+    /// Neue freie Seite: trägt die aktuelle Folie als `attached_slide_id`, wenn die Vorlesung zum Modul gehört
+    private func attachedSlideForNewPage() -> String? {
+        guard let moduleID = currentModuleID, library.running?.moduleID == moduleID else { return nil }
+        return library.slides?.knownCurrentSlide()?.id
     }
 
     /// Vorlage der offenen Seite als Auswahl. „Folie“ steht nicht zur Wahl und wechselt nicht.
@@ -340,7 +456,7 @@ struct InkPageView: View {
                 template: template ?? InkPaging.template(after: current),
                 size: InkPaging.size(after: current),
                 backgroundSlideID: nil,
-                attachedSlideID: nil)
+                attachedSlideID: attachedSlideForNewPage())
         else { return }
         _Concurrency.Task { await show(pageID: created.id) }
     }
@@ -436,6 +552,8 @@ struct InkPageView: View {
         guard !_Concurrency.Task.isCancelled, model === page else { return }
         applyFreshTarget()
         await reconcileIfNeeded()
+        await library.refreshLectureDefaults()
+        followSlideIfNeeded()
     }
 
     /// Legt das Modell der Seite an und macht sie zur offenen Seite (alte Seite muss vorher gesichert sein)
@@ -478,9 +596,15 @@ struct InkPageView: View {
                     heightPt: height)
             }
         }
+        // Der Stift setzt an oder ab: Folienwechsel warten bis zum Absetzen. Das Gate gehört der Ansicht, die Rückrufe
+        // halten nur das Gate und nicht die Ansicht.
+        gate.reset()
+        page.onToolUseStarted = { [weak gate] in gate?.toolBegan() }
+        page.onToolUseFinished = { [weak gate] in gate?.finishTool() }
         binding = target
         model = page
         sync.setPresence(presence(onPage: true))
+        updateSlideBackground()
         return page
     }
 

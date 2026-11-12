@@ -26,7 +26,9 @@ protocol InkLibraryStore: AnyObject {
     /// `deleteQueued` false). Sie sind vollständig wiederherstellbar und zählen beim Zusammenführen als gelöscht.
     func pagesInDeleteGrace() -> [LibraryPage]
 
-    func mergeModules(_ server: [ModuleBrief], at: Date)
+    /// - Parameter keepLocalInkMode: Module, deren lokale Wahl bleibt, auch wenn sie nicht mehr `dirty` ist (ein
+    ///   `PATCH` wurde während des Abrufs bestätigt, die Antwort des Abrufs ist älter, L6 aus #225)
+    func mergeModules(_ server: [ModuleBrief], at: Date, keepLocalInkMode: Set<String>)
     func mergeNotebooks(_ server: [Notebook], moduleID: String)
     func mergePages(
         _ server: [Page], notebookID: String, pendingUpdatePageIDs: Set<String>,
@@ -46,6 +48,12 @@ protocol InkLibraryStore: AnyObject {
     func markAllNeedReconcile()
     func clearNeedsReconcile(pageID: String)
     func setModuleInkMode(_ mode: InkMode?, moduleID: String, dirty: Bool)
+}
+
+extension InkLibraryStore {
+    func mergeModules(_ server: [ModuleBrief], at date: Date) {
+        mergeModules(server, at: date, keepLocalInkMode: [])
+    }
 }
 
 /// `Sync/library.json`, atomar geschrieben. Gibt es sie nicht, aber eine alte `bindings.json`, wird diese einmalig
@@ -134,7 +142,7 @@ final class FileInkLibraryStore: InkLibraryStore {
 
     // MARK: Zusammenführen
 
-    func mergeModules(_ server: [ModuleBrief], at date: Date) {
+    func mergeModules(_ server: [ModuleBrief], at date: Date, keepLocalInkMode: Set<String>) {
         var merged: [LibraryModule] = []
         var seen = Set<String>()
         for brief in server where !seen.contains(brief.id) {
@@ -146,7 +154,7 @@ final class FileInkLibraryStore: InkLibraryStore {
             module.name = brief.name
             module.shortName = brief.shortName
             // Eine lokale Wahl, die der Core noch nicht kennt, gewinnt
-            if !module.inkModeDirty {
+            if !module.inkModeDirty, !keepLocalInkMode.contains(brief.id) {
                 module.inkMode = brief.inkMode
             }
             merged.append(module)
@@ -224,6 +232,8 @@ final class FileInkLibraryStore: InkLibraryStore {
                 file.pages[index].sessionID = remote.sessionID
                 file.pages[index].backgroundSlideID = remote.backgroundSlideID
                 file.pages[index].attachedSlideID = remote.attachedSlideID
+                // Der Stand des Core gilt, nichts Eigenes wartet mehr
+                file.pages[index].dirtyFields = nil
             }
             if file.pages[index].deletedAtMS != nil, !pendingDeletePageIDs.contains(remote.id) {
                 // Am Mac wiederhergestellt
