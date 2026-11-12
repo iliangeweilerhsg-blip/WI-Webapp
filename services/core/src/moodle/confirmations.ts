@@ -25,9 +25,32 @@ export function paramsHash(actionId: string, params: unknown): Buffer {
     .digest();
 }
 
+/** Ergebnis von {@link ConfirmationStore.consume} */
+export type ConsumeResult = 'ok' | 'invalid' | 'state_changed';
+
+/** SHA-256 über den kanonischen Stand. Kein Stand zählt als `null` */
+export function stateHash(state: unknown): Buffer {
+  return createHash('sha256')
+    .update(canonicalJson(state ?? null))
+    .digest();
+}
+
 interface OpenCode {
   hash: Buffer;
+  stateHash: Buffer;
+  /** Geltungsbereich, z. B. `assign:42`. `revokeScope` verwirft alle Codes mit diesem Bereich */
+  scope: string | null;
   expiresAt: number;
+}
+
+/** Bindung eines Codes über Aktion und Parameter hinaus (08 §9.3) */
+export interface ConfirmationBinding {
+  /** Stand in Moodle, den die Aktion verändert. Fehlt er, gilt `null` */
+  state?: unknown;
+  /** Geltungsbereich des Codes */
+  scope?: string | null;
+  /** Zählerstand von {@link ConfirmationStore.epoch}, gelesen **bevor** der Stand aus Moodle gelesen wurde */
+  epoch?: number;
 }
 
 export interface ConfirmationStoreOptions {
@@ -37,10 +60,12 @@ export interface ConfirmationStoreOptions {
 
 /**
  * Codes leben nur im Speicher (ein Neustart macht alle ungültig), gelten `ttlMs` lang, einmal und nur
- * für genau diese Aktion mit genau diesen Parametern.
+ * für genau diese Aktion mit genau diesen Parametern und, wenn gebunden, genau diesen Stand.
  */
 export class ConfirmationStore {
   private readonly open = new Map<string, OpenCode>();
+  /** Zähler je Bereich, steigt mit jedem `revokeScope`. Fehlt ein Bereich, steht er auf 0 */
+  private readonly epochs = new Map<string, number>();
   private readonly ttlMs: number;
   private readonly now: () => number;
 
@@ -49,30 +74,73 @@ export class ConfirmationStore {
     this.now = options.now ?? Date.now;
   }
 
-  issue(actionId: string, params: unknown): { token: string; expiresAt: Date } {
+  /**
+   * Zählerstand des Bereichs. Die Vorschau liest ihn, **bevor** sie den Stand aus Moodle liest: Läuft dazwischen ein
+   * `revokeScope`, ist der Zähler beim Ausgeben des Codes höher, und der Code wird gar nicht erst gültig.
+   */
+  epoch(scope: string): number {
+    return this.epochs.get(scope) ?? 0;
+  }
+
+  issue(
+    actionId: string,
+    params: unknown,
+    binding: ConfirmationBinding = {},
+  ): { token: string; expiresAt: Date } {
     this.prune();
     // 128 bit, base64url
     const token = randomBytes(16).toString('base64url');
     const expiresAt = this.now() + this.ttlMs;
-    this.open.set(token, { hash: paramsHash(actionId, params), expiresAt });
-    while (this.open.size > MAX_OPEN_CODES) {
-      const oldest = this.open.keys().next().value;
-      if (oldest === undefined) break;
-      this.open.delete(oldest);
+    const scope = binding.scope ?? null;
+    // Zwischen Lesen und Ausgeben hat ein `revokeScope` gewirkt: Code ausgeben, aber nie speichern → `invalid`
+    const stale = scope !== null && binding.epoch !== undefined && binding.epoch !== this.epoch(scope);
+    if (!stale) {
+      this.open.set(token, {
+        hash: paramsHash(actionId, params),
+        stateHash: stateHash(binding.state),
+        scope,
+        expiresAt,
+      });
+      while (this.open.size > MAX_OPEN_CODES) {
+        const oldest = this.open.keys().next().value;
+        if (oldest === undefined) break;
+        this.open.delete(oldest);
+      }
     }
     return { token, expiresAt: new Date(expiresAt) };
   }
 
   /**
    * Löst einen Code ein. Jeder Versuch verbraucht den Code, auch ein fehlgeschlagener: So lässt sich
-   * ein Code nicht für andere Parameter durchprobieren.
+   * ein Code nicht für andere Parameter durchprobieren. Der Aufrufer liest den Stand **vor** dem Einlösen.
+   * `state_changed`: Parameter stimmen, aber der Stand in Moodle ist ein anderer als bei der Vorschau.
    */
-  consume(token: string, actionId: string, params: unknown): boolean {
+  consume(token: string, actionId: string, params: unknown, state?: unknown): ConsumeResult {
     const entry = this.open.get(token);
-    if (!entry) return false;
+    if (!entry) return 'invalid';
     this.open.delete(token);
-    if (entry.expiresAt <= this.now()) return false;
-    return timingSafeEqual(entry.hash, paramsHash(actionId, params));
+    // Beide Vergleiche immer ausführen, damit die Dauer nichts über den Grund verrät
+    const sameParams = timingSafeEqual(entry.hash, paramsHash(actionId, params));
+    const sameState = timingSafeEqual(entry.stateHash, stateHash(state));
+    if (entry.expiresAt <= this.now() || !sameParams) return 'invalid';
+    return sameState ? 'ok' : 'state_changed';
+  }
+
+  /**
+   * Erhöht den Zähler des Bereichs und verwirft alle offenen Codes mit diesem Bereich. Liefert die Anzahl der
+   * verworfenen (noch nicht abgelaufenen) Codes.
+   */
+  revokeScope(scope: string): number {
+    this.prune();
+    this.epochs.set(scope, this.epoch(scope) + 1);
+    let revoked = 0;
+    for (const [token, entry] of this.open) {
+      if (entry.scope === scope) {
+        this.open.delete(token);
+        revoked += 1;
+      }
+    }
+    return revoked;
   }
 
   /** Anzahl offener Codes (für Tests) */

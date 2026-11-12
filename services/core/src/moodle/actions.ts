@@ -15,6 +15,7 @@ import {
   type MoodleActionId,
   type MoodleActionRisk,
 } from '@sg/shared';
+import { MOODLE_GATED_ACTIONS } from '../config.ts';
 import { HttpError } from '../errors.ts';
 import type { MoodleClient } from './client.ts';
 
@@ -52,9 +53,25 @@ export interface MoodleActionHandler<P> {
    * Darf nur verschärfen, nie lockern. Wird bei Vorschau und Ausführen gleich ausgewertet.
    */
   requiresConfirmation?(ctx: MoodleActionContext, params: P): Promise<boolean>;
-  /** Darf Moodle lesen, aber nie schreiben */
-  preview(ctx: MoodleActionContext, params: P): Promise<MoodleActionPreviewResult>;
-  execute(ctx: MoodleActionContext, params: P): Promise<MoodleActionOutcome>;
+  /**
+   * Stand, an den der Bestätigungscode gebunden wird. Nur Lesen. Muss bei gleichem Stand in Moodle dasselbe JSON
+   * liefern (keine Uhrzeit, keine Zufallswerte, Listen sortiert). Fehlt die Methode, gilt `null`. Scheitert das Lesen,
+   * gibt es keinen Code (Vorschau) bzw. der Code bleibt offen (Ausführen), denn es wurde nichts geschrieben.
+   */
+  state?(ctx: MoodleActionContext, params: P): Promise<unknown>;
+  /** Aktionen mit gleichem Schlüssel laufen im Core nacheinander, z. B. `assign:42`. `null` = keine Sperre */
+  lockKey?(params: P): string | null;
+  /**
+   * Geltungsbereich, dessen offene Codes verfallen, sobald diese Aktion zu schreiben versucht hat (auch bei Fehler
+   * und `outcome_unknown`, denn der Stand kann sich dann schon geändert haben). Eine Ablehnung vor dem Schreiben
+   * (`409 moodle_action_rejected`) widerruft nichts.
+   */
+  revokesScope?(params: P): string | null;
+  /** Geltungsbereich des eigenen Codes, z. B. `assign:42` */
+  scope?(params: P): string | null;
+  /** Darf Moodle lesen, aber nie schreiben. `state` ist der schon gelesene Stand (`null` ohne `state()`) */
+  preview(ctx: MoodleActionContext, params: P, state: unknown): Promise<MoodleActionPreviewResult>;
+  execute(ctx: MoodleActionContext, params: P, state: unknown): Promise<MoodleActionOutcome>;
 }
 
 function spec<P>(value: MoodleActionSpec<P>): MoodleActionSpec<P> {
@@ -148,11 +165,20 @@ export function isMoodleActionId(id: string): id is MoodleActionId {
   return Object.hasOwn(MOODLE_ACTION_SPECS, id);
 }
 
+/** Aktionen, die erst `SG_MOODLE_ACTIONS` freischaltet (E12) */
+const GATED_ACTIONS: ReadonlySet<string> = new Set(MOODLE_GATED_ACTIONS);
+
 export class MoodleActionRegistry {
   private readonly handlers: MoodleActionHandlers;
+  private readonly enabled: ReadonlySet<string>;
 
-  constructor(handlers: MoodleActionHandlers) {
+  /**
+   * `enabled`: die Aktionen aus `SG_MOODLE_ACTIONS` (E12). Eine Aktion aus T1-24 ohne Eintrag gilt als nicht
+   * umgesetzt, auch wenn ihr Handler im Code steht. `completion.set` und `notifications.mark_read` hängen nicht daran.
+   */
+  constructor(handlers: MoodleActionHandlers, enabled: Iterable<string> = []) {
     this.handlers = handlers;
+    this.enabled = new Set(enabled);
   }
 
   spec(id: MoodleActionId): MoodleActionSpec<unknown> {
@@ -160,7 +186,7 @@ export class MoodleActionRegistry {
   }
 
   isImplemented(id: MoodleActionId): boolean {
-    return this.handlers[id] !== undefined;
+    return this.handlers[id] !== undefined && (!GATED_ACTIONS.has(id) || this.enabled.has(id));
   }
 
   /** Fehlende Moodle-Funktionen, leer = alles da. Unbekannte Freigaben (null) zählen als vorhanden */
@@ -204,7 +230,9 @@ export class MoodleActionRegistry {
   }
 
   handler(id: MoodleActionId): MoodleActionHandler<unknown> {
-    const handler = this.handlers[id] as MoodleActionHandler<unknown> | undefined;
+    const handler = this.isImplemented(id)
+      ? (this.handlers[id] as MoodleActionHandler<unknown> | undefined)
+      : undefined;
     if (!handler) {
       throw new HttpError(
         501,
@@ -220,7 +248,8 @@ export class MoodleActionRegistry {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Umgesetzte Aktionen. Weitere (assign.*, forum.*, message.send, calendar.*, files.*) folgen mit T1-24.
+// Umgesetzte Aktionen. Weitere (assign.*, forum.*, message.send, calendar.*, files.*) folgen mit T1-24
+// und bleiben hinter `SG_MOODLE_ACTIONS`.
 
 const completionSet: MoodleActionHandler<MoodleActionParamsMap['completion.set']> = {
   async preview(_ctx, params) {

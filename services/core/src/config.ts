@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
-import { CORE_PORT } from '@sg/shared';
+import { CORE_PORT, type MoodleActionId } from '@sg/shared';
 
 export type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
 
@@ -19,6 +19,11 @@ export interface Config {
   logLevel: LogLevel;
   /** Moodle-Instanz (SG_MOODLE_URL, 08 §9.1), leer = Moodle-Anbindung aus. Ohne Schrägstrich am Ende */
   moodleUrl: string;
+  /**
+   * Freigeschaltete Moodle-Aktionen aus T1-24 (`SG_MOODLE_ACTIONS`, VERTRAEGE §1, E12). Leer = keine. Nur die Aktionen
+   * aus {@link MOODLE_GATED_ACTIONS} lassen sich hier eintragen, `completion.set` und `notifications.mark_read` nicht.
+   */
+  moodleActions: readonly MoodleActionId[];
   /** Bonjour-Ankündigung `_studiengehirn._tcp` (VERTRAEGE §12). `SG_BONJOUR=0` schaltet sie ab */
   bonjour: boolean;
   /**
@@ -112,6 +117,41 @@ export function normalizeMoodleUrl(raw: string): string {
   return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
 }
 
+/**
+ * Aktionen aus T1-24, die erst der Schalter `SG_MOODLE_ACTIONS` anbietet (E12). Die älteren Aktionen
+ * `completion.set` und `notifications.mark_read` hängen nicht daran und laufen wie bisher.
+ */
+export const MOODLE_GATED_ACTIONS = [
+  'assign.save_draft',
+  'assign.submit',
+  'forum.create_discussion',
+  'forum.reply',
+  'message.send',
+  'calendar.create_event',
+  'files.upload_private',
+] as const satisfies readonly MoodleActionId[];
+
+/**
+ * Liest `SG_MOODLE_ACTIONS`: kommagetrennte Aktionskennungen, leer = keine. Eine unbekannte Kennung ist ein Fehler
+ * (der Core startet dann nicht), damit ein Tippfehler nicht still eine Aktion ausgeschaltet lässt.
+ */
+export function parseMoodleActions(raw: string): MoodleActionId[] {
+  const gated: readonly string[] = MOODLE_GATED_ACTIONS;
+  const ids = raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part !== '');
+  const unknown = ids.filter((id) => !gated.includes(id));
+  if (unknown.length > 0) {
+    // Nur die Kennungen nennen (gekürzt): kein Rohwert in der Meldung
+    const shown = unknown.map((id) => id.slice(0, 40)).join(', ');
+    throw new Error(
+      `SG_MOODLE_ACTIONS enthält unbekannte Aktionen: ${shown}. Erlaubt: ${MOODLE_GATED_ACTIONS.join(', ')}`,
+    );
+  }
+  return [...new Set(ids)] as MoodleActionId[];
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const port = env.SG_CORE_PORT ? Number(env.SG_CORE_PORT) : CORE_PORT;
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -131,6 +171,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     devWebOrigin: (env.SG_DEV_WEB_ORIGIN || '').replace(/\/+$/, ''),
     logLevel: logLevel as LogLevel,
     moodleUrl,
+    moodleActions: parseMoodleActions(env.SG_MOODLE_ACTIONS ?? ''),
     bonjour: !['0', 'false', 'off', 'nein'].includes((env.SG_BONJOUR ?? '').trim().toLowerCase()),
     tunnel: !['0', 'false', 'off', 'nein'].includes((env.SG_TUNNEL ?? '').trim().toLowerCase()),
   };
