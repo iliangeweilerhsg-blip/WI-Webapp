@@ -152,7 +152,7 @@ Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Quali
 
 | Variante | Wie | Wann |
 |---|---|---|
-| **Subagent mit eigenem Worktree** | Eigene Git-Arbeitskopie und eigener Branch (`feat/…`) pro Subagent | 2 kleinere Features gleichzeitig (mehr nur mit Owner-Freigabe, siehe §4a) |
+| **Subagent mit eigenem Worktree** | Eigene Git-Arbeitskopie und eigener Branch (`feat/…`) pro Subagent | bis zu 3 Agents gleichzeitig inkl. Reviewern (mehr nur mit Owner-Freigabe, siehe §4a) |
 | **Eigene Cloud-Session pro Feature** | Claude startet eine separate Claude-Code-Session mit eigenem Container und Ziel-Branch und überwacht sie | Größere, länger laufende Features |
 | **Workflow (Multi-Agent)** | Orchestrierung mehrerer Agenten per Skript, Modell pro Agent nach Abschnitt 4 | Vom Owner freigegeben; für größere Pakete, z. B. nachts |
 
