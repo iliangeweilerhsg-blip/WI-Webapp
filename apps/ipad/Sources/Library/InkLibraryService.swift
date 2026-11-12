@@ -11,6 +11,13 @@ import Observation
 final class InkLibraryService {
     /// Abrufe der Bibliothek höchstens in diesem Abstand (Startbildschirm und jedes `welcome`)
     static let refreshInterval: TimeInterval = 30
+    /// Wartezeit, bevor eine Änderung am Notizbuch (vom Mac) die Bibliothek neu lädt. Weitere Änderungen in dieser Zeit
+    /// verschieben den Abruf.
+    static let liveRefreshDelay: Duration = .seconds(1)
+    /// Spätestens nach dieser Zeit läuft der Abruf trotzdem, auch wenn ständig Änderungen eintreffen
+    static let liveRefreshMaxWait: TimeInterval = 5
+    /// Zeile der Schreibfläche, wenn das offene Notizbuch am Mac gelöscht wurde (kein Dialog, Regel R1)
+    static let deletedOnMacLine = "Am Mac gelöscht, liegt im Papierkorb"
     /// Löschfrist: So lange lässt sich eine gelöschte Seite zurückholen. `page.delete` wird erst danach eingereiht.
     static let deleteGrace: Duration = .seconds(5)
 
@@ -39,6 +46,13 @@ final class InkLibraryService {
     @ObservationIgnored private var graceTasks: [String: _Concurrency.Task<Void, Never>] = [:]
     /// Seiten, deren `page_version_conflict` gerade aufgelöst wird
     @ObservationIgnored private var resolvingConflicts = Set<String>()
+    /// Hört auf `notebook.*` vom Mac (nach `attachNotebookFollower`)
+    @ObservationIgnored private(set) var notebookFollower: NotebookFollower?
+    /// Wartender, entprellter Abruf nach einer Änderung am Notizbuch
+    @ObservationIgnored private var liveRefreshTask: _Concurrency.Task<Void, Never>?
+    @ObservationIgnored private var liveRefreshSince: Date?
+    /// Ein erzwungener Abruf kam, während einer lief: Danach läuft einer nach
+    @ObservationIgnored private var refreshAgain = false
 
     /// Stand des Abgleichs aller Seiten nach einer Wiederherstellung am Mac (UX-46), für die Zeile auf dem Startbildschirm
     struct BackgroundReconcile: Equatable, Sendable {
@@ -169,13 +183,23 @@ final class InkLibraryService {
             }
             return
         }
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            // Eine Änderung vom Mac darf nicht verloren gehen, weil gerade ein älterer Abruf läuft
+            if force { refreshAgain = true }
+            return
+        }
         if !force, let last = lastRefreshAt, now().timeIntervalSince(last) < InkLibraryService.refreshInterval {
             return
         }
         isRefreshing = true
         lastRefreshAt = now()
-        defer { isRefreshing = false }
+        defer {
+            isRefreshing = false
+            if refreshAgain {
+                refreshAgain = false
+                _Concurrency.Task { await self.refresh(force: true) }
+            }
+        }
 
         do {
             let epochsBefore = inkModeEpoch
@@ -210,6 +234,8 @@ final class InkLibraryService {
             await refreshRunning(access)
         }
         bump()
+        // Neue Notizbücher am Mac: ihre Ströme mithören
+        notebookFollower?.syncSubscriptions()
         await flushInkModes()
     }
 
@@ -256,6 +282,58 @@ final class InkLibraryService {
             sync.enqueue(drafts: drafts)
         }
         bump()
+    }
+
+    // MARK: Notizbuch-Änderungen vom Mac (#245, VERTRAEGE §11.3)
+
+    /// Hört auf `notebook.update`, `.delete` und `.restore` im Strom jedes bekannten Notizbuchs und lädt die
+    /// Bibliothek danach neu. Ohne Aufruf (Tests) bleibt es beim Abgleich per REST. `feed` und `backend` sind für
+    /// Tests austauschbar.
+    func attachNotebookFollower(feed: (any NotebookFeed)? = nil, backend: (any NotebookFollowerBackend)? = nil) {
+        guard notebookFollower == nil else { return }
+        let follower = NotebookFollower(
+            feed: feed ?? sync,
+            backend: backend ?? CoreNotebookFollowerBackend(client: client, sync: sync),
+            notebookIDs: { [weak self] in
+                self?.store.allNotebooks().filter { $0.knownOnServer && !$0.hidden }.map(\.id) ?? []
+            })
+        follower.onChange = { [weak self] _ in
+            self?.scheduleLiveRefresh()
+        }
+        notebookFollower = follower
+        follower.start()
+    }
+
+    /// Lädt die Bibliothek nach einer Änderung am Notizbuch neu: nach `liveRefreshDelay` Ruhe, spätestens nach
+    /// `liveRefreshMaxWait`. Viele Operationen kurz hintereinander ergeben einen Abruf.
+    func scheduleLiveRefresh() {
+        let since = liveRefreshSince ?? now()
+        liveRefreshSince = since
+        let waited = now().timeIntervalSince(since)
+        let remaining = max(0, InkLibraryService.liveRefreshMaxWait - waited)
+        let wait = min(InkLibraryService.liveRefreshDelay, .milliseconds(Int((remaining * 1000).rounded(.up))))
+        liveRefreshTask?.cancel()
+        let sleeper = graceSleep
+        liveRefreshTask = _Concurrency.Task { [weak self] in
+            do {
+                try await sleeper(wait)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            // Ab hier gehört der Abruf nicht mehr zum wartenden Task: Eine neue Änderung bricht ihn nicht ab
+            self.liveRefreshTask = nil
+            self.liveRefreshSince = nil
+            await self.refresh(force: true)
+        }
+    }
+
+    /// Das Notizbuch ist laut letztem Abruf am Mac gelöscht (liegt im Papierkorb). Die Schreibfläche zeigt dann eine
+    /// ruhige Zeile; Schreiben bleibt möglich, der Core übernimmt `deleted_at` für neue Striche (VERTRAEGE §11.2).
+    func isDeletedOnMac(notebookID: String) -> Bool {
+        track()
+        guard let notebook = store.notebook(notebookID) else { return false }
+        return notebook.knownOnServer && notebook.hidden
     }
 
     // MARK: Anlegen

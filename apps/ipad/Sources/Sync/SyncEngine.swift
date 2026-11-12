@@ -114,6 +114,8 @@ final class SyncEngine {
     /// Eingehende Nachrichten, die nicht zur Engine selbst gehören (Session-Strom, `session.updated`). Das iPad
     /// liest nur: Die Engine wendet nichts an und schreibt nichts in die Warteschlange.
     @ObservationIgnored var onInbound: (@MainActor (SyncInbound) -> Void)?
+    /// Dieselben Nachrichten für den `NotebookFollower`. Getrennt von `onInbound`, das der `SessionFollower` belegt.
+    @ObservationIgnored var onNotebookInbound: (@MainActor (SyncInbound) -> Void)?
     /// Eine Verbindung hat ihr `welcome` bekommen. `true`, wenn die `db_epoch` neu ist (Mac wiederhergestellt). Der
     /// Empfänger (`InkLibraryService`) gleicht dann alle markierten Seiten im Hintergrund ab (UX-46). Bei jedem
     /// weiteren `welcome` kommt der Aufruf wieder, damit ein unterbrochener Durchgang weiterläuft.
@@ -513,6 +515,9 @@ final class SyncEngine {
         _Concurrency.Task { await self.sendMessage(.subscribe(message), on: link) }
     }
 
+    /// Die Verbindung hat ihr `welcome`: Erst dann nimmt `subscribe` etwas an
+    var canSubscribe: Bool { link?.welcomed == true }
+
     func unsubscribe(stream: String) {
         guard let link, link.welcomed else { return }
         let message = SyncUnsubscribe(streams: [stream], type: .unsubscribe)
@@ -707,7 +712,7 @@ final class SyncEngine {
         case .timePong(let t0, let ts):
             await onTimePong(t0: t0, ts: ts, link: link)
         case .inbound(let value):
-            onInbound?(value)
+            deliver(value)
         case .pong:
             // Ein `pong` allein setzt den Backoff nicht zurück (VERTRAEGE §11.2: nach `ack`). Ausnahme: Die Verbindung
             // hält seit `stableConnectionInterval`. Sonst wartete ein iPad, das nur liest (keine `ack`), nach ein paar
@@ -727,6 +732,11 @@ final class SyncEngine {
         case .ignored:
             break
         }
+    }
+
+    private func deliver(_ inbound: SyncInbound) {
+        onInbound?(inbound)
+        onNotebookInbound?(inbound)
     }
 
     nonisolated private static func parse(_ text: String) -> SyncIncoming {
@@ -779,8 +789,17 @@ final class SyncEngine {
             let stream = envelope.stream, let seq = envelope.seq
         else { return .ignored }
         var slide: SlideBrief?
-        if case .slideChange(let value) = op {
+        switch op {
+        case .slideChange(let value):
             slide = SlideBrief(slideID: value.data.slideID, index: value.data.slideIndex)
+        case .notebookUpdate:
+            return .inbound(.notebookOp(stream: stream, seq: seq, kind: .update))
+        case .notebookDelete:
+            return .inbound(.notebookOp(stream: stream, seq: seq, kind: .delete))
+        case .notebookRestore:
+            return .inbound(.notebookOp(stream: stream, seq: seq, kind: .restore))
+        default:
+            break
         }
         return .inbound(.op(stream: stream, seq: seq, slide: slide))
     }
@@ -810,7 +829,7 @@ final class SyncEngine {
         }
         library.setDBEpoch(dbEpoch)
         welcomeCount += 1
-        onInbound?(.connected)
+        deliver(.connected)
         onWelcomed?(epochChanged)
         // Ein Konflikt, dessen Auflösung (REST) nicht gelang, wird mit der neuen Verbindung erneut versucht
         for pageID in parkedPages.sorted() {
