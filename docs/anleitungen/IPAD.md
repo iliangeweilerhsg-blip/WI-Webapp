@@ -127,7 +127,7 @@ Das iPad zeigt nur Seiten, die es selbst angelegt hat. Seiten, die nur der Mac k
 
 ## Fehlerablage
 
-Auf dem Startbildschirm steht im Abschnitt „Sync“ die Zeile „Wartend: N“ (Änderungen, die noch zum Mac müssen) und „Fehlerablage: N“. Steht dort eine Zahl über 0, hat der Mac N Änderungen endgültig abgelehnt. Die Zeichnungen sind nicht automatisch weg, sie liegen in einer Datei auf dem iPad. Die betroffene Seite oder das Notizbuch kann aus der Liste verschwinden. Ein Zurückspielen gibt es noch nicht.
+Auf dem Startbildschirm steht im Abschnitt „Sync“ die Zeile „Wartend: N“ (Änderungen, die noch zum Mac müssen) und „Fehlerablage: N“. Steht dort eine Zahl über 0, konnte der Mac N Änderungen nicht annehmen. Die Zeichnungen sind nicht automatisch weg, sie liegen in einer Datei auf dem iPad. Die betroffene Seite oder das Notizbuch kann aus der Liste verschwinden. Ein Zurückspielen gibt es noch nicht.
 
 Mit **Fehlerablage teilen** schickst du die Datei über das Teilen-Menü zum Mac, damit sie nicht verloren geht. Tritt das öfter auf, melde es.
 
