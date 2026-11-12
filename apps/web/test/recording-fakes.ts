@@ -2,7 +2,7 @@
 import { vi } from 'vitest';
 import { MemoryRecorderStore, type MediaRecorderLike } from '../src/lib/recorder/index.ts';
 import type { AcquireRecordingLock } from '../src/lib/recorder/index.ts';
-import type { RecordingEnv } from '../src/components/dashboard/use-recording.ts';
+import type { RecordingEnv } from '../src/lib/recording/index.ts';
 
 export interface SharedRunning {
   running: Set<object>;
@@ -15,6 +15,8 @@ export function makeFakeMediaRecorder(shared: SharedRunning) {
     static instances: FakeMR[] = [];
     static isTypeSupported = () => true;
     state = 'inactive';
+    /** Wie oft `requestData()` gerufen wurde (`pagehide`, verborgener Tab) */
+    requestCalls = 0;
     ondataavailable: ((ev: { data: Blob }) => void) | null = null;
     onstop: (() => void) | null = null;
     onerror = null;
@@ -25,6 +27,9 @@ export function makeFakeMediaRecorder(shared: SharedRunning) {
       this.state = 'recording';
       shared.running.add(this);
       shared.maxRunning = Math.max(shared.maxRunning, shared.running.size);
+    }
+    requestData() {
+      this.requestCalls++;
     }
     /** Gibt einen Chunk heraus, wie es `timeslice` täte */
     emit(bytes = 8) {
@@ -57,13 +62,18 @@ export function fakeStream(): FakeStream {
 export class FakeWebLocks {
   private held = false;
   private queue: (() => void)[] = [];
+  /** Wie viele Sperren zugleich gehalten wurden (höchstens 1, sonst nahmen zwei Recorder gleichzeitig auf) */
+  maxHeld = 0;
+  private holders = 0;
 
   acquire: AcquireRecordingLock = (signal) =>
     new Promise((resolve) => {
       if (signal.aborted) return resolve(null);
       const grant = () => {
         this.held = true;
+        this.maxHeld = Math.max(this.maxHeld, ++this.holders);
         resolve(() => {
+          this.holders--;
           this.held = false;
           this.queue.shift()?.();
         });

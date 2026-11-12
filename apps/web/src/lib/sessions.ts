@@ -187,7 +187,8 @@ export function applyActiveSession(client: QueryClient, incoming: Session): void
  * Abfrage der aktiven Session, live gehalten durch `session.updated` (z. B. ein Start vom iPad). Nach einer
  * Unterbrechung der Verbindung oder einem Wechsel des Leaders wird neu geladen. Nachgefragt wird nur ohne
  * Live-Verbindung (Folge-Tab, `backoff`, `failed`): alle 10 s mit aktiver Session, sonst alle 30 s (§11.8). Das gilt
- * auch im Hintergrund und ohne Netz (der Core ist lokal). Das Intervall hängt an `online`, nicht an `live`: `live`
+ * auch im Hintergrund (`refetchIntervalInBackground`) und ohne Netz: Der Core ist lokal, darum pausiert React Query
+ * Abfragen nie (`networkMode: 'always'` gilt app-weit, `lib/query.tsx`). Das Intervall hängt an `online`, nicht an `live`: `live`
  * springt bei blockiertem WebSocket zwischen `connecting` und `backoff` und startete den Timer immer wieder neu.
  */
 export function useActiveSession() {
@@ -224,7 +225,6 @@ export function useActiveSession() {
     queryFn: ({ signal }) => findActiveSession(signal),
     refetchInterval: (query) => (online ? false : query.state.data ? ACTIVE_POLL_MS : ACTIVE_IDLE_POLL_MS),
     refetchIntervalInBackground: true,
-    networkMode: 'always',
   });
 }
 

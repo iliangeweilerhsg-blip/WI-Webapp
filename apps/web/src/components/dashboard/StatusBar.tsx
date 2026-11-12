@@ -7,11 +7,9 @@ import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import type { Session } from '@sg/shared';
-import { useAutoStop } from '../../lib/autostop';
 import { DEVICES_KEY, useDevices } from '../../lib/devices.ts';
 import { moduleHref } from '../../lib/nav.ts';
 import { isActive } from '../../lib/sessions.ts';
-import { useSettings } from '../../lib/settings.ts';
 import { rueckblickHref } from '../../lib/transcript.ts';
 import type { SyncClient } from '../../lib/sync/client.ts';
 import { AutoStopHint } from '../autostop';
@@ -19,8 +17,8 @@ import { formatElapsed } from '../today/model.ts';
 import { POLL_MS, useLiveState, useNow } from '../today/use-today.ts';
 import { MarkerControls } from './markers/MarkerControls.tsx';
 import { watchReconnect } from './reconnect.ts';
-import { useSessionRecording, type RecordingKind } from './use-recording.ts';
-import { usePausedSince } from '../../lib/recording/paused-since.ts';
+import { useClaimRecordingDisplay, useRecordingFor } from '../../lib/recording';
+import { RECORDING_LABEL, RecordDot as Dot, recordingStatusText } from '../recording/labels.ts';
 import type { SessionActions } from './use-session.ts';
 
 const secondary =
@@ -56,30 +54,6 @@ export function useIpadConnected(client: SyncClient | null): boolean {
   return devices.data?.some((d) => d.kind === 'ipad' && d.connected) ?? false;
 }
 
-const RUNNING_LABEL: Record<RecordingKind, string> = {
-  rec: 'REC',
-  starting: 'Startet',
-  waiting: 'Wartet auf anderen Tab',
-  paused: 'Pausiert',
-  'needs-start': 'Keine Aufnahme',
-  'mic-denied': 'Zugriff verweigert',
-  'mic-missing': 'Mikrofon fehlt',
-  error: 'Aufnahme gestört',
-  'other-tab': 'Aufnahme in anderem Tab',
-  inactive: 'Nicht gestartet',
-};
-
-function Dot({ filled, record = false }: { filled: boolean; record?: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={`inline-block size-2.5 shrink-0 rounded-full ${
-        record ? 'bg-record' : filled ? 'bg-text-muted' : 'border-2 border-text-muted'
-      }`}
-    />
-  );
-}
-
 /** Ab dieser Pausendauer fragt die Leiste „Noch Pause?“ (UX-07) */
 export const PAUSE_HINT_MS = 20 * 60_000;
 /** So lange steht „Aufnahme neu begonnen“ nach einem Neustart des Recorders (UX-08) */
@@ -111,26 +85,21 @@ export function StatusBar({
 }: StatusBarProps) {
   const now = useNow(1000);
   const ipad = useIpadConnected(client);
-  const settings = useSettings();
   const active = isActive(session);
   const running = session.state === 'laeuft';
   const paused = session.state === 'pausiert';
   const startedAt = session.started_at ? Date.parse(session.started_at) : null;
   const endedAt = session.ended_at ? Date.parse(session.ended_at) : null;
 
-  // Auto-Stopp (F-SES-03): Text und Verhalten sind festgelegt, `extend` ohne `minutes`
-  const auto = useAutoStop({
-    session: active ? session : null,
-    lecture: settings.data?.lecture,
-    events: client ?? undefined,
-  });
-
-  // Aufnahme (Issue #106): nur der Sync-Leader-Tab nimmt auf. REC steht nur, wenn wirklich aufgenommen wird.
-  const rec = useSessionRecording(session, client);
+  // Aufnahme (Issue #106) und Auto-Stopp (F-SES-03) gehören der App-Shell (RecordingProvider, Issue #210): Die
+  // Statusleiste zeigt nur ihren Stand. Nur der Sync-Leader-Tab nimmt auf. REC steht nur, wenn wirklich aufgenommen wird.
+  useClaimRecordingDisplay(session.id);
+  const rec = useRecordingFor(session.id);
+  const auto = rec.autoStop;
   const needsMic = running && rec.kind !== 'rec';
 
-  // Pausendauer (UX-07): der Core kennt keinen Beginn der Pause, die Ansicht merkt ihn sich
-  const pausedSince = usePausedSince(session);
+  // Pausendauer (UX-07): der Core kennt keinen Beginn der Pause, der Provider merkt ihn sich (einmal je Tab)
+  const pausedSince = rec.pausedSince;
   const pauseMs = paused && pausedSince !== null && now !== null ? Math.max(0, now - pausedSince) : null;
   const pauseHint = pauseMs !== null && pauseMs >= PAUSE_HINT_MS;
 
@@ -178,7 +147,7 @@ export function StatusBar({
       dot: 'rec',
     };
   } else if (running) {
-    record = { label: RUNNING_LABEL[rec.kind], time: null, dot: 'hollow' };
+    record = { label: RECORDING_LABEL[rec.kind], time: null, dot: 'hollow' };
   } else if (paused) {
     // Die Dauer der Pause steht separat (`pause-elapsed`), `elapsed` bleibt der Laufzeit vorbehalten
     record = { label: 'Pausiert', time: null, dot: 'hollow' };
@@ -225,9 +194,7 @@ export function StatusBar({
                 ? 'Die Session läuft und wird aufgenommen.'
                 : `Die Session läuft. ${rec.message ?? ''}`.trim()
               : paused
-                ? pauseHint
-                  ? 'Die Session ist seit über 20 Minuten pausiert.'
-                  : 'Die Session ist pausiert.'
+                ? recordingStatusText({ phase: 'pausiert', kind: 'paused', message: null }, pauseHint)
                 : record.label === 'Beendet'
                   ? 'Die Session ist beendet.'
                   : 'Die Session läuft nicht.'}
@@ -276,7 +243,7 @@ export function StatusBar({
         {active ? (
           <AutoStopHint
             status={auto.status}
-            extendMinutes={settings.data?.lecture.auto_stop_extend_min ?? 15}
+            extendMinutes={rec.extendMinutes}
             onExtend={() => void auto.extend()}
             extending={auto.extending}
             error={auto.extendError ?? auto.stopError}

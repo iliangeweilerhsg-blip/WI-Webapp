@@ -7,7 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { CalendarEvent, Notebook, Session } from '@sg/shared';
 import { PAIRING_REQUESTS_KEY } from '../src/lib/devices.ts';
 import { SessionView } from '../src/components/dashboard/SessionView.tsx';
-import { RecordingEnvContext } from '../src/components/dashboard/use-recording.ts';
+import { RecordingProvider } from '../src/lib/recording/index.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { makeEvent } from './calendar-core.ts';
 import { fakeRecording } from './recording-fakes.ts';
@@ -175,13 +175,13 @@ function boot(
   return render(
     <ThemeProvider>
       <QueryProvider>
-        <RecordingEnvContext.Provider value={fakeRecording().env}>
-          <SyncProvider client={sync.client}>
+        <SyncProvider client={sync.client}>
+          <RecordingProvider env={fakeRecording().env}>
             <AppearanceDefault />
             <SessionView />
             {opts.extra}
-          </SyncProvider>
-        </RecordingEnvContext.Provider>
+          </RecordingProvider>
+        </SyncProvider>
       </QueryProvider>
     </ThemeProvider>,
   );
