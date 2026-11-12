@@ -121,16 +121,26 @@ export async function listDevices(
   );
 }
 
-/** Legt ein gekoppeltes Gerät an. Rückgabe: das Gerät und das Token (nur dieses eine Mal im Klartext) */
+/** IDs aller gekoppelten, nicht entfernten Geräte (Abgleich der Tunnel-Schlüsseldatei beim Start, UX-12) */
+export async function listActiveDeviceIds(db: Db): Promise<string[]> {
+  const rows = await db.select({ id: device.id }).from(device).where(isNull(device.deletedAt));
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Legt ein gekoppeltes Gerät an. Rückgabe: das Gerät und das Token (nur dieses eine Mal im Klartext).
+ * `id`: UX-12 braucht die ID vor dem Anlegen, weil der Tunnel-Schlüssel **vor** dem Gerät in die Schlüsseldatei
+ * kommt (VERTRAEGE §12 Schritt 8). Ohne Angabe erzeugt die Funktion eine.
+ */
 export async function createDevice(
   db: Db,
-  input: { name: string; kind: DeviceKind; appVersion: string | null },
+  input: { id?: string; name: string; kind: DeviceKind; appVersion: string | null },
 ): Promise<{ device: Device; token: string }> {
   const token = generateDeviceToken();
   const [row] = await db
     .insert(device)
     .values({
-      id: uuidv7(),
+      id: input.id ?? uuidv7(),
       userId: SINGLE_USER_ID,
       name: input.name,
       kind: input.kind,

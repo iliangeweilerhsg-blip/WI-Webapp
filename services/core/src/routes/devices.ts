@@ -19,8 +19,10 @@ import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
+import { uuidv7 } from '../lib/uuid7.ts';
 import { createDevice, emitDeviceRevoked, listDevices, revokeDevice } from '../services/devices.ts';
 import { cleanDeviceName, cleanDeviceText, type PairingManager } from '../services/pairing.ts';
+import { generateTunnelKey, type TunnelKeyStore } from '../services/tunnel.ts';
 import { closeDeviceConnections, isDeviceConnected } from '../sync/connections.ts';
 import { publishEvent } from '../sync/events.ts';
 
@@ -40,6 +42,8 @@ export interface DevicesRouteDeps {
   pairing: PairingManager;
   /** IPv4 des Macs im lokalen Netz für `PairingCode.host` */
   pairingHost: () => string;
+  /** Tunnel-Schlüsseldatei (UX-12). `null` bei `SG_TUNNEL=0`: kein Schlüssel, `PairResponse` ohne `tunnel_key` */
+  tunnelKeys?: TunnelKeyStore | null;
 }
 
 const IdParams = z.object({ id: UuidSchema });
@@ -62,6 +66,7 @@ function callSync<T>(log: FastifyBaseLogger, fallback: T, fn: () => T): T {
 
 export async function devicesRoutes(app: FastifyInstance, deps: DevicesRouteDeps): Promise<void> {
   const { db, config, pairing } = deps;
+  const tunnelKeys = deps.tunnelKeys ?? null;
   const typed = app.withTypeProvider<ZodTypeProvider>();
   const connected = (id: string) => callSync(app.log, false, () => isDeviceConnected(id));
 
@@ -97,6 +102,13 @@ export async function devicesRoutes(app: FastifyInstance, deps: DevicesRouteDeps
         throw new HttpError(403, 'local_only', 'Andere Geräte lassen sich nur am Mac entfernen.');
       }
       await revokeDevice(db, id);
+      // Nach dem Commit (das Token ist ab hier ungültig): Tunnel-Schlüssel entfernen. Scheitert das, steht der Fehler
+      // im Log und der Abgleich beim nächsten Start holt es nach. Der Core lehnt das Token so oder so ab
+      if (tunnelKeys) {
+        await tunnelKeys.remove(id).catch((error: unknown) => {
+          request.log.error({ err: error, deviceId: id }, 'Tunnel-Schlüssel konnte nicht entfernt werden');
+        });
+      }
       // Nach dem Commit: Verbindungen des Geräts schließen (§7.5) und weitere Zuhörer benachrichtigen
       callSync(request.log, undefined, () => closeDeviceConnections(id, CLOSE_TOKEN_REVOKED));
       for (const error of emitDeviceRevoked(id)) {
@@ -238,9 +250,19 @@ export async function devicesRoutes(app: FastifyInstance, deps: DevicesRouteDeps
     async (request, reply) => {
       const body = request.body;
       const grant = pairing.beginConfirm(body, request.socket.remoteAddress);
+      // UX-12: Der Tunnel-Schlüssel kommt **vor** dem Gerät in die Schlüsseldatei (VERTRAEGE §12 Schritt 8). Scheitert
+      // das Schreiben, scheitert die Kopplung und das Fenster ist wieder offen. Scheitert danach das Anlegen, bleibt
+      // höchstens ein verwaister Eintrag (wird entfernt, sonst räumt ihn der Abgleich beim Start ab)
+      const deviceId = uuidv7();
+      let tunnelKey: string | undefined;
       let created: Awaited<ReturnType<typeof createDevice>>;
       try {
+        if (tunnelKeys) {
+          tunnelKey = generateTunnelKey();
+          await tunnelKeys.add(deviceId, tunnelKey);
+        }
         created = await createDevice(db, {
+          id: deviceId,
           name: cleanDeviceName(body.device_name) ?? 'Unbenanntes Gerät',
           kind: body.kind,
           // Wie der Sync-Server (T1-08, `maxAppVersionLength`): höchstens 64 Zeichen, ohne unsichtbare Zeichen
@@ -249,6 +271,10 @@ export async function devicesRoutes(app: FastifyInstance, deps: DevicesRouteDeps
         });
       } catch (error) {
         grant.abort();
+        if (tunnelKeys && tunnelKey !== undefined) {
+          await tunnelKeys.remove(deviceId).catch(() => undefined);
+        }
+        // Weder Schlüssel noch Token gehören in eine Fehlermeldung: der Fehler enthält sie nie
         throw error;
       }
       grant.commit();
@@ -256,7 +282,11 @@ export async function devicesRoutes(app: FastifyInstance, deps: DevicesRouteDeps
       return reply
         .code(201)
         .header('cache-control', 'no-store')
-        .send({ device: created.device, device_token: created.token });
+        .send({
+          device: created.device,
+          device_token: created.token,
+          ...(tunnelKey !== undefined ? { tunnel_key: tunnelKey } : {}),
+        });
     },
   );
 }

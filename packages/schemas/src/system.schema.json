@@ -250,6 +250,11 @@
           "type": "string",
           "pattern": "^[A-Za-z0-9_-]{43}$",
           "description": "256 Bit Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben"
+        },
+        "tunnel_key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "UX-12: Tunnel-Schlüssel dieses Geräts, 32 Byte Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben, wie `device_token`, und steht am Mac nur in der Schlüsseldatei (nie in der Datenbank, nie im Backup). Fehlt bei `SG_TUNNEL=0` und bei älteren Cores; ältere iPads ignorieren das Feld"
         }
       }
     },

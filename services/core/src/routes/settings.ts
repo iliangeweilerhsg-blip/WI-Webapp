@@ -5,7 +5,7 @@ import { ApiErrorSchema, SettingsSchema, SettingsUpdateSchema } from '@sg/shared
 import type { Config } from '../config.ts';
 import type { Db } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
-import { isLoopbackAddress } from '../plugins/security.ts';
+import { isLocalRequest } from '../plugins/security.ts';
 import { getSettings, updateSettings } from '../services/settings.ts';
 
 export interface SettingsRouteDeps {
@@ -41,10 +41,7 @@ export async function settingsRoutes(app: FastifyInstance, deps: SettingsRouteDe
     },
     async (request) => {
       // Das Backup-Ziel bestimmt, wohin der Core schreibt: nur vom Mac selbst (VERTRAEGE §7.5)
-      if (
-        request.body.data?.backup_target !== undefined &&
-        !isLoopbackAddress(request.socket.remoteAddress)
-      ) {
+      if (request.body.data?.backup_target !== undefined && !isLocalRequest(request)) {
         throw new HttpError(403, 'local_only', 'Das Backup-Ziel lässt sich nur am Mac selbst ändern.');
       }
       return updateSettings(db, config, request.body);

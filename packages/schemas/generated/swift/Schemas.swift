@@ -14465,10 +14465,16 @@ struct PairResponse: Codable {
     let device: Device
     /// 256 Bit Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben
     let deviceToken: String
+    /// UX-12: Tunnel-Schlüssel dieses Geräts, 32 Byte Zufall, base64url ohne Padding. Wird nur
+    /// dieses eine Mal ausgegeben, wie `device_token`, und steht am Mac nur in der
+    /// Schlüsseldatei (nie in der Datenbank, nie im Backup). Fehlt bei `SG_TUNNEL=0` und bei
+    /// älteren Cores; ältere iPads ignorieren das Feld
+    let tunnelKey: String?
 
     enum CodingKeys: String, CodingKey {
         case device = "device"
         case deviceToken = "device_token"
+        case tunnelKey = "tunnel_key"
     }
 }
 
@@ -14492,11 +14498,13 @@ extension PairResponse {
 
     func with(
         device: Device? = nil,
-        deviceToken: String? = nil
+        deviceToken: String? = nil,
+        tunnelKey: String?? = nil
     ) -> PairResponse {
         return PairResponse(
             device: device ?? self.device,
-            deviceToken: deviceToken ?? self.deviceToken
+            deviceToken: deviceToken ?? self.deviceToken,
+            tunnelKey: tunnelKey ?? self.tunnelKey
         )
     }
 
@@ -25890,6 +25898,7 @@ extension PairResponse {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(device, forKey: .device)
         try container.encode(deviceToken, forKey: .deviceToken)
+        try container.encodeIfPresent(tunnelKey, forKey: .tunnelKey)
     }
 }
 

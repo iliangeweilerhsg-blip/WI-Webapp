@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 import { LogController } from 'fastify';
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
-import { isLoopbackAddress } from './security.ts';
+import { isLocalRequest } from './security.ts';
 
 /**
  * Begrenzung der Log-Flut durch abgelehnte Netzanfragen (Issue #87):
@@ -202,7 +202,8 @@ declare module 'fastify' {
 export class RequestLogController extends LogController {
   override isLogDisabled(req: object): boolean {
     const request = req as FastifyRequest;
-    if (isLoopbackAddress(request.socket?.remoteAddress)) return false;
+    // Nur über `isLocalRequest`: Tunnel-Anfragen sind nie lokal (UX-12, B17)
+    if (request.socket && isLocalRequest(request)) return false;
     return request.sgAdmitted !== true;
   }
 }

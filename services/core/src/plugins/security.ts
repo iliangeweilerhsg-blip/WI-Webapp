@@ -8,8 +8,11 @@ import { sourceKey, type RejectionLog } from './rejection-log.ts';
 /**
  * Sicherheitsregeln des Core (docs/VERTRAEGE.md §5, §7, §11.1, §16.2, 09 §4):
  *
- * 1. „Lokal“ entscheidet allein die Socket-Adresse (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`). `Host` und
- *    `X-Forwarded-For` zählen dafür nie, `trustProxy` bleibt aus (Fastify-Standard).
+ * 1. „Lokal“ entscheidet allein `isLocalRequest`: die Socket-Adresse (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`), aber
+ *    **nie** für einen Socket des Tunnel-Eingangs (UX-12, `tunnelSockets`): Der gilt immer als Netz, auch wenn jemand
+ *    seine Adresse fälscht. `Host` und `X-Forwarded-For` zählen dafür nie, `trustProxy` bleibt aus (Fastify-Standard).
+ *    Außerhalb dieser Datei darf niemand `isLoopbackAddress` aufrufen (Architekturtest): alle Lokal-Prüfungen der
+ *    Routen und des Logs gehen über `isLocalRequest`.
  * 2. Lokale Anfragen brauchen kein Token, werden aber gegen DNS-Rebinding geprüft: der `Host`-Header
  *    muss `localhost`, `127.0.0.1` oder `[::1]` mit dem Core-Port sein, sonst 421 `host_not_allowed`.
  *    Der Wächter setzt `request.sgDevice = null`.
@@ -24,7 +27,8 @@ import { sourceKey, type RejectionLog } from './rejection-log.ts';
  *    Routen lehnen jeden `Origin`-Header mit 403 `origin_not_allowed` ab: Die iPad-App sendet keinen, ein Browser
  *    immer. So kann keine Webseite die Kopplung anstoßen oder Codes raten.
  * 4. Routen mit `config.sgAccess = 'local'` lehnen Anfragen aus dem Netz mit 403 `local_only` ab, auch mit
- *    gültigem Token. Ohne Token gilt vorher Regel 3 (401).
+ *    gültigem Token. Ohne Token gilt vorher Regel 3 (401). Am Tunnel-Eingang sind außerdem die Kopplungsrouten
+ *    (`sgAccess = 'pairing'`) gesperrt: 403 `local_only`, mit und ohne Token (gekoppelt wird nur im IP-Netz).
  * 5. Zustandsändernde Anfragen (POST, PUT, PATCH, DELETE) und WebSocket-Upgrades mit `Origin`-Header (Browser)
  *    müssen von der eigenen Herkunft oder `SG_DEV_WEB_ORIGIN` kommen, sonst 403 `origin_not_allowed`
  *    (CSRF bzw. Cross-Site WebSocket Hijacking). Ohne `Origin` (curl, iPad-App) gilt nur die Token-Regel.
@@ -88,13 +92,45 @@ export interface GuardRequest {
 /** Wirft einen `HttpError`, wenn die Anfrage nicht erlaubt ist. Rückgabe wie `request.sgDevice` */
 export type SecurityGuard = (request: GuardRequest) => Promise<SgDevice | undefined>;
 
+/**
+ * Alle Sockets, die der Tunnel-Server des Core angenommen hat (UX-12). Der Server legt jeden Socket im Ereignis
+ * `connection` hier hinein, vor allem anderen. Die Markierung hängt am Socket-Objekt: Sie gilt für Fastify-Anfragen,
+ * rohe Upgrades (`IncomingMessage.socket` ist derselbe Socket), Keep-Alive-Folgeanfragen und die Fehlerpfade
+ * (`frameworkErrors`), weil alle über `isLocalRequest` laufen.
+ */
+export const tunnelSockets = new WeakSet<object>();
+
+/** Hat der Tunnel-Server diesen Socket angenommen? (UX-12) */
+export function isTunnelSocket(socket: object | null | undefined): boolean {
+  return socket !== null && socket !== undefined && tunnelSockets.has(socket);
+}
+
+/**
+ * Nur `isLocalRequest` darf diese Funktion aufrufen (Architekturtest, B17 im Plan UX-12). Sie kennt den Tunnel nicht:
+ * Wer eine Anfrage als lokal einstuft, muss `isLocalRequest` nehmen.
+ */
 export function isLoopbackAddress(address: string | undefined): boolean {
   return address !== undefined && LOOPBACK_ADDRESSES.has(address);
 }
 
-/** `true` nur für Anfragen, deren Socket-Adresse Loopback ist (nie Host oder X-Forwarded-For) */
+/**
+ * `true` nur für Anfragen, deren Socket-Adresse Loopback ist (nie Host oder X-Forwarded-For) **und** deren Socket
+ * nicht vom Tunnel-Eingang stammt. Die Markierung steht vor der Adresse: Auch ein Tunnel-Socket mit gefälschtem
+ * `remoteAddress = '127.0.0.1'` gilt als Netz. **Die** Stelle für „lokal“ im ganzen Core.
+ */
 export function isLocalRequest(request: { socket: { remoteAddress?: string | undefined } }): boolean {
+  if (tunnelSockets.has(request.socket)) return false;
   return isLoopbackAddress(request.socket.remoteAddress);
+}
+
+/**
+ * Quelle einer Anfrage für die Zusammenfassung abgelehnter Netzanfragen (#87): Am Tunnel-Eingang gibt es keine
+ * Adresse, alle Tunnel-Anfragen teilen sich die Quelle `tunnel`.
+ */
+export function rejectionSource(request: {
+  socket: { remoteAddress?: string | undefined };
+}): string | undefined {
+  return tunnelSockets.has(request.socket) ? 'tunnel' : request.socket.remoteAddress;
 }
 
 function bearerToken(header: string | undefined): string | null {
@@ -282,7 +318,9 @@ export class NetworkConnectionGate {
 
   /** Neue Verbindung: mit Vorrang annehmen, annehmen, dafür eine andere verdrängen oder sofort schließen */
   admit(socket: GateSocket): void {
-    if (isLoopbackAddress(socket.remoteAddress)) return;
+    // Loopback zählt nie. Tunnel-Sockets sind nie am Wächter angemeldet (eigene Grenzen am Tunnel-Server), und ohne
+    // Adresse würden alle in den Topf `unbekannt` fallen
+    if (isLoopbackAddress(socket.remoteAddress) || tunnelSockets.has(socket)) return;
     const entry: GateEntry = {
       socket,
       key: sourceKey(socket.remoteAddress),
@@ -332,7 +370,8 @@ export class NetworkConnectionGate {
 
   /** Eine Anfrage auf diesem Socket trug ein gültiges Token: Verbindung und Adresse bekommen Vorrang */
   authenticate(socket: GateSocket): void {
-    if (isLoopbackAddress(socket.remoteAddress)) return;
+    // Tunnel-Sockets überspringen: sonst würde die Pseudo-Adresse `unbekannt` für 15 min freigegeben (UX-12, S6)
+    if (isLoopbackAddress(socket.remoteAddress) || tunnelSockets.has(socket)) return;
     const address = exactAddress(socket.remoteAddress);
     this.trust(address);
     const entry = this.entries.get(socket);
@@ -475,8 +514,9 @@ export function createSecurityGuard(options: SecurityOptions): SecurityGuard {
   if (devWebOrigin) ownOrigins.add(devWebOrigin);
 
   return async (request) => {
-    // Nur die Socket-Adresse zählt (kein X-Forwarded-For, trustProxy ist aus)
+    // Nur die Socket-Adresse und die Markierung des Tunnel-Eingangs zählen (kein X-Forwarded-For, trustProxy ist aus)
     const local = isLocalRequest(request);
+    const tunnel = tunnelSockets.has(request.socket);
     const host = request.headers.host?.toLowerCase();
     const access = request.routeOptions?.config?.sgAccess;
     let allowedOrigins = ownOrigins;
@@ -498,6 +538,11 @@ export function createSecurityGuard(options: SecurityOptions): SecurityGuard {
           'host_not_allowed',
           'Aus dem Netz ist der Core nur über seine IP-Adresse oder seinen .local-Namen erreichbar (Schutz vor DNS-Rebinding).',
         );
+      }
+      // Tunnel-Eingang (UX-12): gekoppelt wird nur im IP-Netz. `pair/start` und `pair/confirm` sind dort gesperrt,
+      // mit und ohne Token, und kommen nie ohne Token durch
+      if (tunnel && access === 'pairing') {
+        throw new HttpError(403, 'local_only', 'Gekoppelt wird nur im IP-Netz, nicht über den Tunnel.');
       }
       // Kopplung (§12): nur POST auf genau diese Routen, ohne Token. Ein mitgesendetes Token wird ignoriert.
       const pairing =
@@ -568,7 +613,7 @@ export function registerSecurity(
     } catch (error) {
       if (!isLocalRequest(request) && error instanceof HttpError) {
         if (rejections) {
-          rejections.record(request.socket.remoteAddress, error.statusCode);
+          rejections.record(rejectionSource(request), error.statusCode);
           request.sgRejectionCounted = true;
         }
         // Abgelehnte Netzanfrage (401/403/421): Verbindung nach der Antwort schließen (#185). Sonst hält ein Gerät
@@ -601,7 +646,7 @@ export function registerSecurity(
       if (request.sgAdmitted || request.sgRejectionCounted || isLocalRequest(request)) return;
       // Netzanfrage ohne Freigabe (Kopplungsroute): ab 4xx nur zählen, sonst einzeln loggen wie bisher
       if (reply.statusCode >= 400) {
-        rejections.record(request.socket.remoteAddress, reply.statusCode);
+        rejections.record(rejectionSource(request), reply.statusCode);
         request.sgRejectionCounted = true;
       } else {
         request.log.info({ req: request }, 'incoming request');
