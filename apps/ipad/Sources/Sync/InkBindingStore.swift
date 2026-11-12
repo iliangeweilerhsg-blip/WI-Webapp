@@ -12,9 +12,10 @@ struct InkBinding: Codable, Equatable, Sendable {
     var pageCreated: Bool
     /// Seite und Core müssen abgeglichen werden (neue `db_epoch`)
     var needsReconcile: Bool
-    /// Session, in der geschrieben wird (für `presence` und `page.create`), `nil` ohne
+    /// Laufende oder pausierte Session des Moduls (für `presence` §11.6 und `page.create` §7.4), `nil` ohne
     var sessionID: String?
-    /// Start dieser Session auf der Uhr des Mac, in ms
+    /// Start der Session, zu der die Striche der Seite gehören (#250), auf der Uhr des Mac, in ms. Das ist die Session
+    /// der Seite, nicht unbedingt `sessionID`. `nil`: Die Striche bekommen keine Sitzungszeit.
     var sessionStartMS: Int?
     /// Name des Moduls, zuletzt vom Core gelesen. Fehlt bei alten `bindings.json` und ohne Antwort des Core.
     var moduleName: String?

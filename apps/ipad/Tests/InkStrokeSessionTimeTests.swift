@@ -96,7 +96,8 @@ final class InkStrokeSessionTimeTests: XCTestCase {
         await runLecture(h, service)
 
         let binding = try XCTUnwrap(service.target(forPage: old))
-        XCTAssertEqual(binding.sessionID, lastWeekID)
+        // `presence.session_id` bleibt die laufende Session (§11.6), die Zeit kommt von der Session der Seite
+        XCTAssertEqual(binding.sessionID, runningID)
         XCTAssertEqual(binding.sessionStartMS, lastWeekStartMS)
 
         // Strich von 10 Minuten nach Beginn der Vorwoche: t_start = 600 000 ms, nicht von der laufenden Session
@@ -114,7 +115,7 @@ final class InkStrokeSessionTimeTests: XCTestCase {
         await runLecture(h, service)
 
         let binding = try XCTUnwrap(service.target(forPage: old))
-        XCTAssertEqual(binding.sessionID, lastWeekID)
+        XCTAssertEqual(binding.sessionID, runningID)
         XCTAssertNil(binding.sessionStartMS)
         let strokes = neutralStrokes(for: binding, createdAtMS: lastWeekStartMS + 600_000)
         XCTAssertEqual(strokes.count, 1)
@@ -130,7 +131,7 @@ final class InkStrokeSessionTimeTests: XCTestCase {
         XCTAssertEqual(service.target(forPage: old)?.sessionStartMS, lastWeekStartMS)
         await runLecture(h, service)
         XCTAssertEqual(service.target(forPage: old)?.sessionStartMS, lastWeekStartMS)
-        XCTAssertEqual(service.target(forPage: old)?.sessionID, lastWeekID)
+        XCTAssertEqual(service.target(forPage: old)?.sessionID, runningID)
     }
 
     // MARK: Seite mit eigener Session
@@ -149,7 +150,7 @@ final class InkStrokeSessionTimeTests: XCTestCase {
         await service.follow(session: nil)
         XCTAssertNil(service.running)
         let binding = try XCTUnwrap(service.target(forPage: page))
-        XCTAssertEqual(binding.sessionID, runningID)
+        XCTAssertNil(binding.sessionID)
         XCTAssertEqual(binding.sessionStartMS, runningStartMS)
         let strokes = neutralStrokes(for: binding, createdAtMS: runningStartMS + 120_000)
         XCTAssertEqual(strokes[0].tStartMS, 120_000)
@@ -160,7 +161,7 @@ final class InkStrokeSessionTimeTests: XCTestCase {
         let service = makeService(h)
         let page = addPage(h, id: uuidV7(ms: lastWeekStartMS + 60_000, tail: 5), sessionID: lastWeekID, sessionStartMS: lastWeekStartMS, index: 2)
         let binding = try XCTUnwrap(service.target(forPage: page))
-        XCTAssertEqual(binding.sessionID, lastWeekID)
+        XCTAssertNil(binding.sessionID)
         XCTAssertEqual(binding.sessionStartMS, lastWeekStartMS)
     }
 
@@ -174,7 +175,7 @@ final class InkStrokeSessionTimeTests: XCTestCase {
         await runLecture(h, service)
 
         let binding = try XCTUnwrap(service.target(forPage: old))
-        XCTAssertNil(binding.sessionID)
+        XCTAssertEqual(binding.sessionID, runningID)
         XCTAssertNil(binding.sessionStartMS)
         let strokes = neutralStrokes(for: binding, createdAtMS: runningStartMS + 60_000)
         XCTAssertNil(strokes[0].tStartMS)
