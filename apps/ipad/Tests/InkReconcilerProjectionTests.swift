@@ -3,7 +3,7 @@ import XCTest
 @testable import StudienGehirn
 
 /// Abgleich mit wartenden Operationen (Review #198): Der Plan rechnet die Warteschlange der Seite zuerst auf den Stand des Core
-final class InkReconcilerTests: XCTestCase {
+final class InkReconcilerProjectionTests: XCTestCase {
     private func stroke(_ id: String, width: Double = 2) -> Stroke {
         Stroke(
             bbox: [0, 0, 10, 10],
