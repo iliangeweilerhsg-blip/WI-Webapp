@@ -10,7 +10,7 @@ import {
 } from './backup-commands.ts';
 import type { CommandName } from './cli.ts';
 import { appUrl, childEnv, CORE_STOP_TIMEOUT_S, healthUrl, type SgConfig } from './config.ts';
-import { doctorExitCode, formatChecks, runChecks } from './doctor.ts';
+import { checkCoreLock, doctorExitCode, formatChecks, realLockDoctorIo, runChecks } from './doctor.ts';
 import { checkIpadApp, ipadCommand } from './ipad-hint.ts';
 import { moodleCommand, realMoodleDeps } from './moodle.ts';
 import {
@@ -503,6 +503,7 @@ export async function doctor(cfg: SgConfig): Promise<number> {
   const sys = realSystem();
   const results = [
     ...(await runChecks(sys, cfg)),
+    await checkCoreLock(cfg, realLockDoctorIo(cfg)),
     ...(await runTunnelChecks(cfg, realTunnelDoctorIo(cfg, sys))),
   ];
   console.log(formatChecks(results));

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { resolveConfig } from '../src/config.ts';
 import {
+  checkCoreLock,
   checkFreeSpace,
+  processAlive,
+  type LockDoctorIo,
   checkNode,
   doctorExitCode,
   MIN_FREE_BYTES,
@@ -198,5 +201,55 @@ describe('formatChecks', () => {
     expect(text).toContain('✗ Docker: läuft nicht');
     expect(text).toContain('    → Docker Desktop');
     expect(text).toContain('1 Prüfung(en) fehlgeschlagen');
+  });
+});
+
+describe('checkCoreLock', () => {
+  const lockCfg = resolveConfig({ SG_DATA_DIR: '/data' }, '/home/u', '/repo');
+  const io = (lock: { pid: number | null } | null, alive: boolean, reachable: boolean): LockDoctorIo => ({
+    readLock: () => lock,
+    alive: () => alive,
+    coreReachable: async () => reachable,
+  });
+
+  it('keine Datei und kein Core: ok', async () => {
+    expect((await checkCoreLock(lockCfg, io(null, false, false))).status).toBe('ok');
+  });
+
+  it('keine Datei, aber der Core antwortet: Hinweis, kein Fehler', async () => {
+    const r = await checkCoreLock(lockCfg, io(null, false, true));
+    expect(r.status).toBe('info');
+    expect(r.detail).toMatch(/fehlt/);
+  });
+
+  it('lebende PID und Core erreichbar: ok', async () => {
+    const r = await checkCoreLock(lockCfg, io({ pid: 4242 }, true, true));
+    expect(r.status).toBe('ok');
+    expect(r.detail).toMatch(/4242/);
+  });
+
+  it('tote PID: veraltet, wird beim nächsten Start übernommen (kein Fehler)', async () => {
+    const r = await checkCoreLock(lockCfg, io({ pid: 4242 }, false, false));
+    expect(r.status).toBe('info');
+    expect(r.detail).toMatch(/veraltet.*nächsten Start übernommen/);
+  });
+
+  it('leere oder kaputte Datei: Hinweis, kein Fehler', async () => {
+    const r = await checkCoreLock(lockCfg, io({ pid: null }, false, false));
+    expect(r.status).toBe('info');
+    expect(r.detail).toMatch(/übernommen/);
+  });
+
+  it('lebende PID, Core nicht erreichbar: PID-Wiederverwendung und Pfad zum Löschen', async () => {
+    const r = await checkCoreLock(lockCfg, io({ pid: 4242 }, true, false));
+    expect(r.status).toBe('info');
+    expect(r.detail).toMatch(/fremder Prozess/);
+    expect(r.detail).toContain('/data/run/core.lock');
+    expect(doctorExitCode([r])).toBe(0);
+  });
+
+  it('processAlive: eigener Prozess lebt, unbelegte PID nicht', () => {
+    expect(processAlive(process.pid)).toBe(true);
+    expect(processAlive(2 ** 22 + 12345)).toBe(false);
   });
 });

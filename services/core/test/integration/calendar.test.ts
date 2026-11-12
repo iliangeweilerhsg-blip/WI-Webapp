@@ -1127,6 +1127,29 @@ describe('Zeitplan: beim Start und alle 6 h', () => {
     const rows = await t.handle.sql`SELECT count(*)::int AS n FROM calendar_event WHERE source_id = ${id}`;
     expect(rows[0]?.n).toBe(0);
   });
+
+  it('onClose wartet höchstens 2 s auf einen Abgleich, der nie antwortet (#174)', async () => {
+    const id = uuidv7();
+    await t.handle.sql`INSERT INTO calendar_source (id, user_id, kind, name, url, readonly)
+      VALUES (${id}, ${SINGLE_USER_ID}, 'ics_url', 'Hängt', 'https://haengt.example.edu/plan.ics', true)`;
+    // Antwortet nie: weder Ergebnis noch Fehler
+    fetchMock.mockReturnValue(new Promise<string>(() => {}));
+    const started = await startTestApp();
+    let closed = false;
+    try {
+      await started.app.listen({ port: 0, host: '127.0.0.1' });
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const begin = performance.now();
+      await started.close();
+      closed = true;
+      const elapsed = performance.now() - begin;
+      expect(elapsed).toBeLessThan(3_000);
+      // Es wurde tatsächlich gewartet (sonst prüfte der Test den Abbruchpfad nicht)
+      expect(elapsed).toBeGreaterThanOrEqual(1_500);
+    } finally {
+      if (!closed) await started.close();
+    }
+  });
 });
 
 const NEVER_RETURNS = wrap(

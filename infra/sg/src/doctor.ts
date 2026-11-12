@@ -1,5 +1,7 @@
 // `sg doctor`: prüft die Voraussetzungen und liefert eine Checkliste mit Lösungshinweisen.
-import { DB_PORT, type SgConfig } from './config.ts';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { DB_PORT, healthUrl, type SgConfig } from './config.ts';
 import type { System } from './system.ts';
 
 export type CheckStatus = 'ok' | 'fail' | 'info';
@@ -214,4 +216,89 @@ export function formatChecks(results: CheckResult[]): string {
 
 export function doctorExitCode(results: CheckResult[]): number {
   return results.some((r) => r.status === 'fail') ? 1 : 0;
+}
+
+/** Zugriffe der Sperrdatei-Prüfung (im Test ersetzbar). `sg doctor` löscht nie etwas, darum gibt es nur Lesezugriffe. */
+export interface LockDoctorIo {
+  /** Inhalt von `core.lock`: `null` = Datei fehlt, `pid: null` = leer oder kaputt */
+  readLock(path: string): { pid: number | null } | null;
+  alive(pid: number): boolean;
+  /** Antwortet der Core unter `/api/v1/health`? */
+  coreReachable(): Promise<boolean>;
+}
+
+/**
+ * Lebt der Prozess? Kopie von `processAlive` aus `services/core/src/lib/instance-lock.ts` (#174): `sg` hängt nicht
+ * vom Core-Paket ab. `EPERM` heißt: lebt, gehört nur einem anderen Benutzer. Bei Änderungen beide Stellen anpassen.
+ */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+export function realLockDoctorIo(cfg: SgConfig): LockDoctorIo {
+  return {
+    readLock(path) {
+      let text: string;
+      try {
+        text = readFileSync(path, 'utf8');
+      } catch {
+        return null;
+      }
+      const pid = Number(text.trim());
+      return { pid: Number.isInteger(pid) && pid > 0 ? pid : null };
+    },
+    alive: processAlive,
+    async coreReachable() {
+      try {
+        const res = await fetch(healthUrl(cfg), { signal: AbortSignal.timeout(1500) });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
+/** Prüft `<Datenordner>/run/core.lock` (#174, #292). Nie `fail`: Eine veraltete Datei übernimmt der nächste Start. */
+export async function checkCoreLock(cfg: SgConfig, io: LockDoctorIo): Promise<CheckResult> {
+  const name = 'Core-Sperrdatei (Hinweis)';
+  const path = join(cfg.dataDir, 'run', 'core.lock');
+  const lock = io.readLock(path);
+  const reachable = await io.coreReachable();
+  if (lock === null) {
+    if (!reachable) return { name, status: 'ok', detail: 'keine Datei, der Core läuft nicht' };
+    return {
+      name,
+      status: 'info',
+      detail: `Der Core antwortet, aber ${path} fehlt (ältere Version oder Datei von Hand gelöscht). Ein zweiter Core würde nicht erkannt.`,
+    };
+  }
+  if (lock.pid === null) {
+    return {
+      name,
+      status: 'info',
+      detail: `${path} ist leer oder kaputt. Das ist harmlos, die Datei wird beim nächsten Start übernommen.`,
+    };
+  }
+  if (!io.alive(lock.pid)) {
+    return {
+      name,
+      status: 'info',
+      detail: `veraltet (PID ${lock.pid} läuft nicht mehr, z. B. nach einem Absturz). Die Datei wird beim nächsten Start übernommen.`,
+    };
+  }
+  if (reachable) return { name, status: 'ok', detail: `Core läuft (PID ${lock.pid})` };
+  return {
+    name,
+    status: 'info',
+    detail:
+      `PID ${lock.pid} lebt, aber der Core antwortet nicht unter ${healthUrl(cfg)}. Vielleicht startet er gerade noch. ` +
+      `Sonst trägt möglicherweise ein fremder Prozess diese PID (PID-Wiederverwendung nach einem Absturz). ` +
+      `Dann die Datei ${path} von Hand löschen ("sg doctor" löscht nichts).`,
+  };
 }
