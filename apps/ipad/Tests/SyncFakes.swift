@@ -246,6 +246,7 @@ final class SyncHarness {
     let transport: FakeTransport
     let factory: FakeSyncSocketFactory
     let engine: SyncEngine
+    let client: CoreClient
     let binding: InkBinding
 
     init(health: [FakeTransport.Reply] = [.http(status: 200, body: "{}")]) {
@@ -302,7 +303,10 @@ final class SyncHarness {
             random: { 0 }
         )
         self.engine = engine
-        service = InkLibraryService(store: library, sync: engine, client: client, now: { clock.date })
+        self.client = client
+        service = InkLibraryService(
+            store: library, sync: engine, client: client, now: { clock.date },
+            graceSleep: { try await clock.sleep($0) })
     }
 
     func stroke(_ id: String, tStart: Int? = nil) -> Stroke {

@@ -1,10 +1,14 @@
+import PencilKit
 import SwiftUI
 import UIKit
 
 /// Schreibfläche einer Seite mit Werkzeugleiste (F-INK-01).
 /// Sie öffnet die letzte Seite des gewählten Notizbuchs (UX-30) und sendet die Striche live an den Mac (T1-14).
-/// Ohne Verbindung wird lokal gepuffert: Die Wahl des Notizbuchs geht auch offline. Seiten, Vorlagen und
-/// Schreibmodi folgen mit T1-13.
+/// Ohne Verbindung wird lokal gepuffert: Die Wahl des Notizbuchs geht auch offline.
+///
+/// Seiten (T1-13 Teil 1): Eine Seite ist sichtbar. Oben steht „‹ Seite 3 / 12 ›“, ein Ein-Finger-Wisch blättert
+/// ebenfalls. Die Seitenleiste („Seiten“) zeigt Vorschaubilder und sortiert um. Gelöscht wird ohne Dialog mit einer
+/// Rückgängig-Leiste von 5 s (R1). Schreibmodi und Folien folgen mit T1-13 Teil 2.
 struct InkPageView: View {
     let library: InkLibraryService
 
@@ -14,6 +18,9 @@ struct InkPageView: View {
     @State private var isReconciling = false
     /// Das Notizbuch ist der Bibliothek nicht bekannt oder die Seite ließ sich nicht anlegen
     @State private var failedToOpen = false
+    @State private var showsSidebar = false
+    /// Eben gelöschte Seite, die noch zurückgeholt werden kann (Leiste „Rückgängig“, 5 s)
+    @State private var undoPageID: String?
     /// Händigkeit: Seite der Werkzeugleiste. Später aus `Settings.lecture.toolbar_side` (F-EIN-01).
     @AppStorage("ink.toolbarSide") private var toolbarSideRaw = ToolbarSide.rechts.rawValue
     @Environment(\.scenePhase) private var scenePhase
@@ -36,6 +43,25 @@ struct InkPageView: View {
             ? running : nil
     }
 
+    private var pages: [LibraryPage] {
+        library.pages(inNotebook: currentNotebookID)
+    }
+
+    private var currentIndex: Int? {
+        guard let binding else { return nil }
+        return pages.firstIndex { $0.id == binding.pageID }
+    }
+
+    private var currentTemplate: PageTemplate {
+        guard let binding else { return .blanko }
+        return library.page(binding.pageID)?.template ?? .blanko
+    }
+
+    private var currentHasStrokes: Bool {
+        guard let model else { return false }
+        return !model.inkDrawing.strokes.isEmpty || !model.highlightDrawing.strokes.isEmpty
+    }
+
     var body: some View {
         Group {
             if let model {
@@ -44,7 +70,8 @@ struct InkPageView: View {
                         InkToolbar(model: model)
                         Divider()
                     }
-                    InkCanvasView(model: model)
+                    InkCanvasView(model: model, template: currentTemplate, onSwipePage: { step($0) })
+                        .id(model.pageID)
                         .ignoresSafeArea(edges: .bottom)
                     if toolbarSide == .rechts {
                         Divider()
@@ -53,6 +80,7 @@ struct InkPageView: View {
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(spacing: 0) {
+                        pageStrip
                         if let offlineText {
                             infoRow(offlineText)
                         }
@@ -74,6 +102,25 @@ struct InkPageView: View {
                         }
                     }
                 }
+                // Die Seitenleiste liegt über der Schreibfläche, auf der Seite gegenüber der Werkzeugleiste. Sie
+                // verkleinert die Fläche nicht (sonst passte sich die Seite neu an) und blockiert den Stift nicht.
+                .overlay(alignment: toolbarSide == .rechts ? .leading : .trailing) {
+                    if showsSidebar {
+                        sidebar
+                            .transition(.move(edge: toolbarSide == .rechts ? .leading : .trailing))
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if let pageID = undoPageID {
+                        InkUndoDeleteBar(
+                            pageID: pageID,
+                            onUndo: { undoDelete() },
+                            onExpire: { if undoPageID == pageID { undoPageID = nil } }
+                        )
+                        .padding(.bottom, 24)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.2), value: showsSidebar)
             } else if failedToOpen {
                 Text("Dieses Notizbuch ist nicht mehr verfügbar.")
                     .font(.subheadline)
@@ -105,11 +152,16 @@ struct InkPageView: View {
         }
         .onDisappear {
             model?.saveNow()
+            // Beim Verlassen läuft die Frist ab: `page.delete` jetzt einreihen
+            library.flushPendingDeletes()
             sync.setPresence(presence(onPage: false))
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 model?.saveNow()
+            }
+            if phase == .background {
+                library.flushPendingDeletes()
             }
         }
         .onChange(of: library.running) { _, _ in
@@ -150,6 +202,204 @@ struct InkPageView: View {
             .background(Color(.secondarySystemBackground))
     }
 
+    // MARK: Seitenleiste und Blättern
+
+    /// „‹ Seite 3 / 12 ›“, Vorlage und Seitenleiste. Alle Ziele sind mindestens 44 × 44 pt groß.
+    private var pageStrip: some View {
+        let count = pages.count
+        let index = currentIndex
+        return HStack(spacing: 4) {
+            Button {
+                step(-1)
+            } label: {
+                Image(systemName: "chevron.left").frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .disabled(!canStep(-1))
+            .accessibilityLabel("Vorherige Seite")
+
+            Text(InkPaging.positionText(index: index, count: count))
+                .font(.subheadline.monospacedDigit())
+                .frame(minWidth: 96)
+                .accessibilityLabel(InkPaging.positionText(index: index, count: count))
+
+            Button {
+                step(1)
+            } label: {
+                Image(systemName: "chevron.right").frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .disabled(!canStep(1))
+            .accessibilityLabel(index.map { $0 + 1 < count } == true ? "Nächste Seite" : "Neue Seite")
+
+            Spacer()
+
+            Menu {
+                Picker("Vorlage", selection: templateBinding) {
+                    ForEach(PageTemplate.choices, id: \.self) { template in
+                        Text(template.germanTitle).tag(template)
+                    }
+                }
+                .disabled(currentTemplate == .folie)
+                Divider()
+                Button("Seite löschen", role: .destructive) {
+                    if let binding { delete(pageID: binding.pageID) }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle").frame(width: 44, height: 44).contentShape(Rectangle())
+            }
+            .accessibilityLabel("Seite: Vorlage und Löschen")
+
+            Button {
+                toggleSidebar()
+            } label: {
+                Label("Seiten", systemImage: "rectangle.grid.2x2")
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel(showsSidebar ? "Seitenleiste schließen" : "Seitenleiste öffnen")
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity)
+        .background(Color(.secondarySystemBackground))
+    }
+
+    /// Vorlage der offenen Seite als Auswahl. „Folie“ steht nicht zur Wahl und wechselt nicht.
+    private var templateBinding: Binding<PageTemplate> {
+        Binding(
+            get: {
+                let template = currentTemplate
+                return PageTemplate.choices.contains(template) ? template : InkTemplateGeometry.effectiveTemplate(template)
+            },
+            set: { newValue in
+                guard let binding else { return }
+                library.setTemplate(pageID: binding.pageID, newValue)
+            }
+        )
+    }
+
+    private var sidebar: some View {
+        InkPageSidebar(
+            library: library,
+            notebookID: currentNotebookID,
+            currentPageID: binding?.pageID,
+            onSelect: { pageID in
+                _Concurrency.Task { await show(pageID: pageID) }
+            },
+            onAdd: { template in
+                addPage(template: template)
+            },
+            onDelete: { pageID in
+                delete(pageID: pageID)
+            },
+            onSetTemplate: { pageID, template in
+                library.setTemplate(pageID: pageID, template)
+            },
+            onMove: { from, to in
+                library.movePage(notebookID: currentNotebookID, from: from, to: to)
+            },
+            onClose: { showsSidebar = false }
+        )
+    }
+
+    private func toggleSidebar() {
+        if !showsSidebar {
+            // Das Vorschaubild der offenen Seite soll den letzten Strich zeigen
+            model?.saveNow()
+        }
+        showsSidebar.toggle()
+    }
+
+    private func canStep(_ direction: Int) -> Bool {
+        guard let binding else { return false }
+        return InkPaging.step(
+            pages: pages, currentID: binding.pageID, direction: direction, currentHasStrokes: currentHasStrokes)
+            != .stay
+    }
+
+    /// Blättert (Knopf oder Wisch). Hinter der letzten Seite legt „weiter“ eine neue an, aber nur, wenn die offene
+    /// Seite einen Strich hat.
+    private func step(_ direction: Int) {
+        guard let binding else { return }
+        switch InkPaging.step(
+            pages: pages, currentID: binding.pageID, direction: direction, currentHasStrokes: currentHasStrokes)
+        {
+        case .go(let pageID):
+            _Concurrency.Task { await show(pageID: pageID) }
+        case .newPage:
+            addPage(template: nil)
+        case .stay:
+            break
+        }
+    }
+
+    /// Legt eine Seite hinter den vorhandenen an und öffnet sie. Ohne Vorlage erbt sie die der offenen Seite.
+    private func addPage(template: PageTemplate?) {
+        guard let binding, let current = library.page(binding.pageID) else { return }
+        guard
+            let created = library.addPage(
+                notebookID: binding.notebookID,
+                template: template ?? InkPaging.template(after: current),
+                size: InkPaging.size(after: current),
+                backgroundSlideID: nil,
+                attachedSlideID: nil)
+        else { return }
+        _Concurrency.Task { await show(pageID: created.id) }
+    }
+
+    // MARK: Löschen mit Frist
+
+    /// Löscht ohne Dialog (R1). Unten erscheint 5 s lang „Rückgängig“. Ist es die offene Seite, rückt die nächste nach.
+    private func delete(pageID: String) {
+        let visible = pages
+        guard let index = visible.firstIndex(where: { $0.id == pageID }) else { return }
+        let wasOpen = binding?.pageID == pageID
+        if wasOpen {
+            model?.saveNow()
+        }
+        library.deletePage(pageID: pageID)
+        undoPageID = pageID
+        guard wasOpen else { return }
+        let remaining = library.pages(inNotebook: currentNotebookID)
+        if let next = InkPaging.pageAfterDeleting(index: index, remaining: remaining) {
+            _Concurrency.Task { await show(pageID: next) }
+        } else {
+            // Die letzte Seite ist weg: `openTarget` legt eine neue an
+            _Concurrency.Task { await openFreshPage() }
+        }
+    }
+
+    private func undoDelete() {
+        guard let pageID = undoPageID else { return }
+        undoPageID = nil
+        if library.undoDelete(pageID: pageID) {
+            _Concurrency.Task { await show(pageID: pageID) }
+        }
+    }
+
+    // MARK: Seite öffnen
+
+    /// Wechselt zu einer Seite: alte Seite sichern, neues Modell, `presence`, bei Bedarf Abgleich
+    private func show(pageID: String) async {
+        guard binding?.pageID != pageID else { return }
+        model?.saveNow()
+        guard let target = library.openPage(pageID: pageID) else { return }
+        let page = present(target)
+        await library.refreshPages(notebookID: target.notebookID)
+        guard !_Concurrency.Task.isCancelled, model === page else { return }
+        applyFreshTarget()
+        await reconcileIfNeeded()
+    }
+
+    /// Nach dem Löschen der letzten Seite: eine neue anlegen und öffnen
+    private func openFreshPage() async {
+        guard let target = library.openTarget(notebookID: currentNotebookID) else {
+            failedToOpen = true
+            return
+        }
+        let page = present(target)
+        guard !_Concurrency.Task.isCancelled, model === page else { return }
+        await reconcileIfNeeded()
+    }
+
     /// Erst der Knopf wechselt: Aktuelle Seite sichern, Abmelden von der alten Seite, neu öffnen
     private func switchToRunningLecture() async {
         guard let target = otherNotebookID else { return }
@@ -158,6 +408,7 @@ struct InkPageView: View {
         model = nil
         binding = nil
         failedToOpen = false
+        showsSidebar = false
         currentNotebookID = target
         await open()
     }
@@ -167,12 +418,30 @@ struct InkPageView: View {
     private func open() async {
         guard model == nil else { return }
         let notebookID = currentNotebookID
-        guard let target = library.openTarget(notebookID: notebookID), let libraryPage = library.page(target.pageID)
-        else {
+        // Ein nie geöffnetes Notizbuch kennt die Seiten des Mac noch nicht: Bei Verbindung zuerst abgleichen, damit
+        // die erste Seite hinter ihnen einsortiert wird (L4 aus #225). Ohne Verbindung geht es ohne Wartezeit weiter.
+        if library.pages(inNotebook: notebookID).isEmpty, sync.state == .online {
+            await library.refreshPages(notebookID: notebookID)
+            guard !_Concurrency.Task.isCancelled, model == nil else { return }
+        }
+        guard let target = library.openTarget(notebookID: notebookID) else {
             failedToOpen = true
             return
         }
+        let page = present(target)
 
+        await library.refresh()
+        guard !_Concurrency.Task.isCancelled, model === page else { return }
+        await library.refreshPages(notebookID: notebookID)
+        guard !_Concurrency.Task.isCancelled, model === page else { return }
+        applyFreshTarget()
+        await reconcileIfNeeded()
+    }
+
+    /// Legt das Modell der Seite an und macht sie zur offenen Seite (alte Seite muss vorher gesichert sein)
+    @discardableResult
+    private func present(_ target: InkBinding) -> InkPageModel? {
+        guard let libraryPage = library.page(target.pageID) else { return nil }
         let store = FileInkPageStore.standard()
         let page = InkPageModel(
             pageID: target.pageID,
@@ -195,16 +464,24 @@ struct InkPageView: View {
                 page.markNeedsReconcile()
             }
         }
+        // Vorschaubild der Seitenleiste nach jedem Speichern, außerhalb des Main-Actors gerendert
+        page.onSaved = { [weak library] snapshot in
+            guard let library, let known = library.page(pageID) else { return }
+            let ink = snapshot.ink
+            let highlight = snapshot.highlight
+            let template = known.template
+            let width = known.widthPt
+            let height = known.heightPt
+            _Concurrency.Task {
+                await InkThumbnailService.shared.schedule(
+                    pageID: pageID, ink: ink, highlight: highlight, template: template, widthPt: width,
+                    heightPt: height)
+            }
+        }
         binding = target
         model = page
         sync.setPresence(presence(onPage: true))
-
-        await library.refresh()
-        guard !_Concurrency.Task.isCancelled, model === page else { return }
-        await library.refreshPages(notebookID: notebookID)
-        guard !_Concurrency.Task.isCancelled, model === page else { return }
-        applyFreshTarget()
-        await reconcileIfNeeded()
+        return page
     }
 
     /// Zieht Session und Modulname der offenen Seite aus der Bibliothek nach
@@ -233,6 +510,31 @@ struct InkPageView: View {
             notebookID: binding.notebookID,
             pageID: onPage ? binding.pageID : nil
         )
+    }
+}
+
+/// Leiste „Seite gelöscht · Rückgängig“. Verschwindet nach 5 s von selbst, kein Dialog (R1).
+private struct InkUndoDeleteBar: View {
+    let pageID: String
+    let onUndo: () -> Void
+    let onExpire: () -> Void
+
+    var body: some View {
+        HStack(spacing: 16) {
+            Text("Seite gelöscht")
+            Button("Rückgängig", action: onUndo)
+                .fontWeight(.semibold)
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .padding(.horizontal, 20)
+        .background(.regularMaterial, in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
+        .task(id: pageID) {
+            try? await _Concurrency.Task.sleep(for: .seconds(5))
+            guard !_Concurrency.Task.isCancelled else { return }
+            onExpire()
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 

@@ -39,7 +39,7 @@ struct DeadLetterRecord: Codable, Equatable, Sendable {
     var at: String
 }
 
-/// Zeile in `outbox.jsonl`. `t` ist `put`, `ack`, `rewrite`, `dead` oder `head`.
+/// Zeile in `outbox.jsonl`. `t` ist `put`, `ack`, `rewrite`, `dead`, `drop` oder `head`.
 private struct OutboxLine: Codable {
     var t: String
     var e: OutboxEntry?
@@ -185,6 +185,24 @@ final class SyncOutbox {
         return victims.count
     }
 
+    /// Entfernt wartende Operationen ohne Bestätigung und ohne Fehlerablage: Eine neuere Operation ersetzt sie
+    /// (`page_version_conflict`, VERTRAEGE §11.2). Die Zeile `drop` steht auf der Platte, bevor die Operation
+    /// aus dem Speicher verschwindet; scheitert das Schreiben, bleibt alles, wie es war.
+    /// - Returns: Anzahl der tatsächlich entfernten Operationen (unbekannte `op_id` zählen nicht)
+    @discardableResult
+    func discard(opIDs: [String]) throws -> Int {
+        let wanted = Set(opIDs)
+        let victims = pending.filter { wanted.contains($0.opID) }
+        guard !victims.isEmpty else { return 0 }
+        try writeLines(victims.map { OutboxLine(t: "drop", op: $0.opID) })
+        for victim in victims {
+            _ = remove(opID: victim.opID)
+        }
+        doneLines += victims.count
+        compactIfNeeded()
+        return victims.count
+    }
+
     // MARK: Intern: Zustand
 
     private func add(_ entry: OutboxEntry) {
@@ -256,7 +274,7 @@ final class SyncOutbox {
                 add(entry)
             }
             nextNumber = max(nextNumber, entry.number + 1)
-        case "ack", "dead":
+        case "ack", "dead", "drop":
             if let opID = line.op {
                 _ = remove(opID: opID)
                 doneLines += 1
