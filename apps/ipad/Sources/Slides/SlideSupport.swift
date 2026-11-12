@@ -19,46 +19,129 @@ enum InkModeResolver {
     }
 }
 
-/// Hält einen Folienwechsel zurück, solange der Stift auf dem Papier ist. Es zählt die letzte Folie: Mehrere Wechsel
-/// während eines Strichs ergeben nach dem Absetzen genau einen Seitenwechsel.
+/// Hält einen Folienwechsel zurück, solange geschrieben wird (UX-43). Der Wechsel gilt erst nach einer Ruhezeit
+/// (`quietPeriod`) ohne neuen Strich: Zwischen zwei Buchstaben ist der Stift kurz oben, dann darf die Seite nicht
+/// springen. Es zählt die letzte Folie: Mehrere Wechsel ergeben genau einen Seitenwechsel. Gab es seit dem letzten
+/// Wechsel keinen Strich, gilt ein Wechsel sofort.
+///
+/// Dasselbe Gate hält auch den Wechsel auf die Seite einer beginnenden Vorlesung zurück (`lectureStarted()`, UX-44).
+///
+/// Die Uhr ist einspritzbar. Das Warten steht in `awaitQuiet(sleep:)`, auch dort ist die Pause einspritzbar. Tests
+/// brauchen so weder echte Zeit noch `sleep`.
 ///
 /// Absichtlich nicht an den Main-Actor gebunden: Die Ansicht legt sie als `@State` an. Benutzt wird sie nur dort.
 @Observable
 final class SlideSwitchGate {
+    /// Ruhezeit ohne neuen Strich, bis ein wartender Wechsel gilt (Sekunden). Der Wert ist geschätzt, am Gerät prüfen.
+    static let quietPeriod: TimeInterval = 2
+
     private(set) var pending: SlideRef?
+    /// Der Wechsel auf die Seite einer beginnenden Vorlesung wartet
+    private(set) var lecturePending = false
     private(set) var toolInUse = false
-    /// Folie, die nach dem Absetzen freigegeben wurde. Die Ansicht holt sie mit `takeReleased()`.
+    /// Folie, die freigegeben wurde. Die Ansicht holt sie mit `takeReleased()`.
     private(set) var released: SlideRef?
+    private(set) var lectureReleased = false
     /// Zählt bei jeder Freigabe hoch (die Ansicht beobachtet das)
     private(set) var releases = 0
+    /// Zählt hoch, wenn die Ansicht das Warten auf die Ruhe (neu) starten soll
+    private(set) var waitToken = 0
+
+    @ObservationIgnored private let now: () -> Date
+    @ObservationIgnored private let quiet: TimeInterval
+    /// Zeitpunkt des letzten Absetzens seit dem letzten Wechsel, `nil` = seitdem kein Strich
+    @ObservationIgnored private var lastToolEnd: Date?
+
+    init(now: @escaping () -> Date = { Date() }, quietPeriod: TimeInterval = SlideSwitchGate.quietPeriod) {
+        self.now = now
+        self.quiet = quietPeriod
+    }
+
+    /// Wartet überhaupt ein Wechsel?
+    var hasPending: Bool { pending != nil || lecturePending }
+
+    /// Folienwechsel, der gerade wartet (für die Infozeile)
+    var pendingSlide: SlideRef? { pending }
+
+    /// Sekunden bis zum Ende der Ruhezeit. 0 oder weniger: Ruhe ist da (auch ohne Strich seit dem letzten Wechsel).
+    private func remainingQuiet() -> TimeInterval {
+        guard let lastToolEnd else { return 0 }
+        return quiet - now().timeIntervalSince(lastToolEnd)
+    }
 
     /// - Returns: die Folie, zu der jetzt gewechselt werden soll, oder `nil` (zurückgestellt)
     func slideChanged(_ slide: SlideRef) -> SlideRef? {
-        if toolInUse {
+        if toolInUse || remainingQuiet() > 0 {
             pending = slide
+            waitToken += 1
             return nil
         }
         pending = nil
+        lastToolEnd = nil
         return slide
+    }
+
+    /// Eine Vorlesung beginnt bei offener Seite (UX-44).
+    /// - Returns: `true`, wenn jetzt gewechselt werden darf, `false`, wenn der Wechsel auf die Ruhe wartet
+    func lectureStarted() -> Bool {
+        if toolInUse || remainingQuiet() > 0 {
+            lecturePending = true
+            waitToken += 1
+            return false
+        }
+        lecturePending = false
+        lastToolEnd = nil
+        return true
     }
 
     func toolBegan() {
         toolInUse = true
     }
 
-    /// - Returns: die zurückgestellte Folie, falls es eine gibt
-    func toolEnded() -> SlideRef? {
+    /// Der Stift ist abgesetzt: Die Ruhezeit läuft ab jetzt. Gibt nichts frei, das tut `awaitQuiet` nach der Ruhe.
+    func finishTool() {
         toolInUse = false
-        defer { pending = nil }
-        return pending
+        lastToolEnd = now()
+        if hasPending {
+            waitToken += 1
+        }
     }
 
-    /// Wie `toolEnded()`, aber das Ergebnis liegt für die Ansicht bereit (`released`, `releases`)
-    func finishTool() {
-        if let slide = toolEnded() {
-            released = slide
-            releases += 1
+    /// Wartet auf die Ruhe und gibt dann den wartenden Wechsel frei. Endet ohne Freigabe, wenn nichts wartet, ein
+    /// neuer Strich beginnt (`finishTool()` startet das Warten dann neu) oder die Pause abgebrochen wird.
+    @MainActor
+    func awaitQuiet(sleep: @MainActor (Duration) async throws -> Void) async {
+        while hasPending, !toolInUse {
+            let remaining = remainingQuiet()
+            if remaining <= 0 {
+                release()
+                return
+            }
+            do {
+                try await sleep(.seconds(remaining))
+            } catch {
+                return
+            }
         }
+    }
+
+    /// Ein Tipp auf die Infozeile: Der wartende Wechsel gilt sofort
+    func releaseNow() {
+        guard hasPending else { return }
+        release()
+    }
+
+    private func release() {
+        if let slide = pending {
+            released = slide
+            pending = nil
+        }
+        if lecturePending {
+            lectureReleased = true
+            lecturePending = false
+        }
+        lastToolEnd = nil
+        releases += 1
     }
 
     func takeReleased() -> SlideRef? {
@@ -66,10 +149,25 @@ final class SlideSwitchGate {
         return released
     }
 
+    func takeLectureReleased() -> Bool {
+        defer { lectureReleased = false }
+        return lectureReleased
+    }
+
+    /// Der Schreibmodus wechselt: Ein wartender Wechsel gehört zum alten Modus und verfällt. Der Stift bleibt, wie er
+    /// ist, und die Ruhezeit läuft weiter.
+    func dropPending() {
+        pending = nil
+        lecturePending = false
+    }
+
     func reset() {
         pending = nil
         released = nil
+        lecturePending = false
+        lectureReleased = false
         toolInUse = false
+        lastToolEnd = nil
     }
 }
 

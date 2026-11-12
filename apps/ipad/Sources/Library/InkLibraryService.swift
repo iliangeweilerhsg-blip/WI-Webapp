@@ -382,6 +382,76 @@ final class InkLibraryService {
         return makeBinding(notebook: notebook, page: page)
     }
 
+    // MARK: Schreibziel der laufenden Vorlesung (UX-44)
+
+    /// Die laufende Session, falls sie zu diesem Notizbuch gehört: Der Core hat genau dieses Notizbuch genannt
+    /// (`GET /sessions/{id}/notebook`). Solange das Notizbuch der Session unbekannt ist (vorläufige Session aus dem
+    /// Strom, offline), gibt es kein Ziel, sonst bekäme „Übung“ oder ein freies Notizbuch eine Seite der Vorlesung.
+    /// Freie Notizbücher sind nie betroffen. Ohne Ziel bleibt alles wie bei `openTarget`.
+    private func lectureSession(for notebook: LibraryNotebook) -> RunningSession? {
+        guard notebook.kind != .frei, let session = matchingSession(moduleID: notebook.moduleID),
+            session.notebookID == notebook.id
+        else { return nil }
+        return session
+    }
+
+    /// Zeitpunkt (ms, Uhr des iPad) aus einer UUIDv7, `nil` bei einer anderen Version
+    private static func createdMS(uuidV7 id: String) -> Int? {
+        let hex = Array(id.replacingOccurrences(of: "-", with: ""))
+        guard hex.count == 32, hex[12] == "7", let value = Int(String(hex[0..<12]), radix: 16) else { return nil }
+        return value
+    }
+
+    /// Wurde die Seite erst nach Beginn der Session angelegt (dann offline, darum ohne `sessionID`)? Die Zeit steckt
+    /// in der UUIDv7 der Seite und wird mit dem gemessenen Versatz auf die Uhr des Mac umgerechnet. Unbekannt: nein.
+    private func createdDuring(_ session: RunningSession, pageID: String) -> Bool {
+        guard let startMS = session.startMS, let created = Self.createdMS(uuidV7: pageID) else { return false }
+        return created + (sync.clockOffsetForDrafts ?? 0) >= startMS
+    }
+
+    /// Die Seite, die `openTarget` öffnen würde (ohne etwas anzulegen)
+    private func lastPage(of notebook: LibraryNotebook) -> LibraryPage? {
+        let pages = store.pages(inNotebook: notebook.id)
+        if let lastID = notebook.lastPageID, let last = pages.first(where: { $0.id == lastID }) { return last }
+        return pages.max(by: { ($0.index, $0.id) < ($1.index, $1.id) })
+    }
+
+    /// Hat die Seite lokal Striche? Ohne Seitenablage ist das unbekannt und gilt als „ja“.
+    private func pageHasStrokes(_ pageID: String) -> Bool {
+        guard let pageStore else { return true }
+        let snapshot = pageStore.load(pageID: pageID)
+        return snapshot.ink != nil || snapshot.highlight != nil
+    }
+
+    /// Braucht die laufende Vorlesung dieses Notizbuchs eine neue Seite? Ja, wenn die letzte Seite eine andere
+    /// `sessionID` trägt als die laufende Session. Ausnahmen für eine Seite ohne Session: Sie ist leer, oder sie wurde
+    /// erst nach Beginn der Session angelegt (offline in dieser Vorlesung). Dann wird sie weiterverwendet. Eine leere
+    /// Seite mit fremder Session bekommt eine neue Seite, sonst ordnet der Rückblick sie der falschen Vorlesung zu.
+    /// `page.session_id` setzt das iPad nur beim Anlegen (§7.4).
+    func needsLecturePage(notebookID: String) -> Bool {
+        guard let notebook = store.notebook(notebookID), let session = lectureSession(for: notebook),
+            let last = lastPage(of: notebook)
+        else { return false }
+        if last.sessionID == session.id { return false }
+        if last.sessionID == nil, !pageHasStrokes(last.id) || createdDuring(session, pageID: last.id) { return false }
+        return true
+    }
+
+    /// Schreibziel für die laufende Vorlesung des Moduls. Wie `openTarget`, hängt aber vorher eine Seite an, wenn die
+    /// letzte Seite zu einer anderen Vorlesung gehört (`needsLecturePage`). Vorlage und Format kommen von der letzten
+    /// Seite wie beim Weiterblättern (nach einer Folienseite: blanko in A4, ohne Folie, §7.4), die `sessionID` ist die
+    /// laufende Session, `attached_slide_id` die bekannte aktuelle Folie. Ohne laufende Session ist es genau
+    /// `openTarget`.
+    func openLectureTarget(notebookID: String) -> InkBinding? {
+        guard needsLecturePage(notebookID: notebookID), let notebook = store.notebook(notebookID),
+            let last = lastPage(of: notebook),
+            let page = addPage(
+                notebookID: notebookID, template: InkPaging.template(after: last), size: InkPaging.size(after: last),
+                backgroundSlideID: nil, attachedSlideID: slides?.knownCurrentSlide()?.id)
+        else { return openTarget(notebookID: notebookID) }
+        return openPage(pageID: page.id)
+    }
+
     /// Aktuelles Schreibziel der Seite, mit frischer Session-Zuordnung (die Vorlesung kann nach dem Öffnen starten)
     func target(forPage pageID: String) -> InkBinding? {
         guard let page = store.page(pageID), let notebook = store.notebook(page.notebookID) else { return nil }

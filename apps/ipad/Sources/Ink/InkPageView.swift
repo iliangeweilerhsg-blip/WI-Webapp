@@ -29,6 +29,8 @@ struct InkPageView: View {
     @State private var slideBackground: SlideBackgroundModel?
     /// Hält Folienwechsel während eines Strichs zurück
     @State private var gate = SlideSwitchGate()
+    /// Wartet auf die Schreibpause, bevor ein zurückgestellter Wechsel gilt (UX-43)
+    @State private var quietTask: _Concurrency.Task<Void, Never>?
     /// Händigkeit: Seite der Werkzeugleiste. Später aus `Settings.lecture.toolbar_side` (F-EIN-01).
     @AppStorage("ink.toolbarSide") private var toolbarSideRaw = ToolbarSide.rechts.rawValue
     @Environment(\.scenePhase) private var scenePhase
@@ -100,6 +102,22 @@ struct InkPageView: View {
                         if let hint = slideModeHint {
                             infoRow(hint)
                         }
+                        if let waiting = pendingSwitchText {
+                            Button {
+                                gate.releaseNow()
+                            } label: {
+                                Text(waiting)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .background(Color(.secondarySystemBackground))
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityHint("Wechselt sofort")
+                        }
                         if otherNotebookID != nil {
                             HStack {
                                 Text("Am Mac läuft eine Vorlesung. Diese Seite gehört nicht dazu.")
@@ -165,8 +183,15 @@ struct InkPageView: View {
         }
         .onAppear {
             sync.setPresence(presence(onPage: true))
+            // Zurück in der Ansicht: Ein Wechsel wartete noch, das Warten läuft weiter
+            if gate.hasPending {
+                startQuietWait()
+            }
         }
         .onDisappear {
+            // Keine Freigabe, solange die Ansicht nicht zu sehen ist
+            quietTask?.cancel()
+            quietTask = nil
             model?.saveNow()
             // Beim Verlassen läuft die Frist ab: `page.delete` jetzt einreihen
             library.flushPendingDeletes()
@@ -184,13 +209,22 @@ struct InkPageView: View {
             // Die Vorlesung hat begonnen oder geendet: Session der offenen Seite nachziehen
             applyFreshTarget()
             followSlideIfNeeded()
+            moveToLecturePageIfNeeded()
         }
         .onChange(of: library.slides?.follower.currentSlide) { _, _ in
             followSlideIfNeeded()
         }
+        .onChange(of: gate.waitToken) { _, _ in
+            // Ein Wechsel wartet: erst nach der Schreibpause gilt er (UX-43). Ein neuer Strich startet das Warten neu.
+            startQuietWait()
+        }
         .onChange(of: gate.releases) { _, _ in
-            // Der Stift ist abgesetzt: der zurückgestellte Folienwechsel (nur der letzte) gilt jetzt
-            if let slide = gate.takeReleased() {
+            // Ruhe oder Tipp: der zurückgestellte Wechsel (nur der letzte) gilt jetzt
+            if gate.takeLectureReleased() {
+                moveToLecturePageIfNeeded()
+            }
+            // Nur im Modus „Auf Folie“ (der Modus kann gewechselt haben, während der Wechsel wartete)
+            if let slide = gate.takeReleased(), currentMode == .aufFolie {
                 openSlidePage(slide)
             }
         }
@@ -209,6 +243,25 @@ struct InkPageView: View {
                 await reconcileIfNeeded()
             }
         }
+    }
+
+    /// Wartet auf die Schreibpause und gibt dann den zurückgestellten Wechsel frei. Ein früheres Warten endet.
+    private func startQuietWait() {
+        quietTask?.cancel()
+        quietTask = _Concurrency.Task {
+            await gate.awaitQuiet(sleep: { try await _Concurrency.Task.sleep(for: $0) })
+        }
+    }
+
+    /// Text der Infozeile, solange ein Wechsel auf die Schreibpause wartet (UX-43). Kein Dialog (R1).
+    private var pendingSwitchText: String? {
+        if let slide = gate.pendingSlide {
+            return "Folie \(slide.index) · Tippen zum Wechseln"
+        }
+        if gate.lecturePending {
+            return "Neue Vorlesung · Tippen zum Wechseln"
+        }
+        return nil
     }
 
     private var title: String {
@@ -324,6 +377,8 @@ struct InkPageView: View {
     private var modeButton: some View {
         if let mode = currentMode, let moduleID = currentModuleID {
             Button {
+                // Ein wartender Wechsel gehört zum alten Modus (Folie bzw. neue Vorlesungsseite)
+                gate.dropPending()
                 library.setInkMode(mode == .aufFolie ? .freieSeite : .aufFolie, moduleID: moduleID)
                 if mode == .freieSeite {
                     followSlideIfNeeded(force: true)
@@ -521,6 +576,30 @@ struct InkPageView: View {
         await reconcileIfNeeded()
     }
 
+    /// Beginnt die Vorlesung bei offener Seite und gehört die letzte Seite zu einer anderen, öffnet die Ansicht eine
+    /// neue Seite (UX-44). Das gilt nur für die letzte Seite des Notizbuchs und nicht im Modus „Auf Folie“. Wird
+    /// gerade geschrieben, wartet der Wechsel auf die Ruhezeit (UX-43).
+    private func moveToLecturePageIfNeeded() {
+        // Erst sichern: Ob die Seite leer ist, liest der Dienst von der Platte
+        model?.saveNow()
+        guard let binding, currentMode != .aufFolie, pages.last?.id == binding.pageID,
+            library.needsLecturePage(notebookID: currentNotebookID)
+        else { return }
+        guard gate.lectureStarted() else { return }
+        _Concurrency.Task {
+            // Setzt der Stift zwischen Freigabe und Wechsel an, wartet der Wechsel erneut
+            guard !gate.toolInUse else {
+                _ = gate.lectureStarted()
+                return
+            }
+            model?.saveNow()
+            guard library.needsLecturePage(notebookID: currentNotebookID),
+                let target = library.openLectureTarget(notebookID: currentNotebookID)
+            else { return }
+            await show(pageID: target.pageID)
+        }
+    }
+
     /// Erst der Knopf wechselt: Aktuelle Seite sichern, Abmelden von der alten Seite, neu öffnen
     private func switchToRunningLecture() async {
         guard let target = otherNotebookID else { return }
@@ -545,7 +624,12 @@ struct InkPageView: View {
             await library.refreshPages(notebookID: notebookID)
             guard !_Concurrency.Task.isCancelled, model == nil else { return }
         }
-        guard let target = library.openTarget(notebookID: notebookID) else {
+        // Läuft eine Vorlesung des Moduls und endet die letzte Seite in einer anderen, beginnt eine neue Seite (UX-44)
+        let appendsForLecture = currentMode != .aufFolie
+        guard
+            let target = appendsForLecture
+                ? library.openLectureTarget(notebookID: notebookID) : library.openTarget(notebookID: notebookID)
+        else {
             failedToOpen = true
             return
         }

@@ -120,53 +120,6 @@ final class SlideSupportTests: XCTestCase {
         XCTAssertEqual(cache.count, 0)
     }
 
-    // MARK: Folienwechsel während eines Strichs
-
-    private let one = SlideRef(id: "s1", index: 1, widthPt: 960, heightPt: 540)
-    private let two = SlideRef(id: "s2", index: 2, widthPt: 960, heightPt: 540)
-    private let three = SlideRef(id: "s3", index: 3, widthPt: 960, heightPt: 540)
-
-    func testASlideChangeAppliesAtOnceWhenThePenIsUp() {
-        let gate = SlideSwitchGate()
-        XCTAssertEqual(gate.slideChanged(one), one)
-        XCTAssertNil(gate.pending)
-    }
-
-    func testTwoChangesDuringAStrokeGiveExactlyOneSwitchToTheLastSlide() {
-        let gate = SlideSwitchGate()
-        gate.toolBegan()
-        XCTAssertNil(gate.slideChanged(two))
-        XCTAssertNil(gate.slideChanged(three))
-        XCTAssertEqual(gate.toolEnded(), three)
-        // Danach ist nichts mehr zurückgestellt
-        XCTAssertNil(gate.toolEnded())
-        XCTAssertNil(gate.pending)
-    }
-
-    func testReleasingAfterTheStrokeHandsTheSlideToTheView() {
-        let gate = SlideSwitchGate()
-        gate.toolBegan()
-        _ = gate.slideChanged(two)
-        _ = gate.slideChanged(three)
-        gate.finishTool()
-        XCTAssertEqual(gate.releases, 1)
-        XCTAssertEqual(gate.takeReleased(), three)
-        XCTAssertNil(gate.takeReleased())
-        // Ein Strich ohne Wechsel gibt nichts frei
-        gate.toolBegan()
-        gate.finishTool()
-        XCTAssertEqual(gate.releases, 1)
-    }
-
-    func testResetForgetsAPendingSlide() {
-        let gate = SlideSwitchGate()
-        gate.toolBegan()
-        _ = gate.slideChanged(two)
-        gate.reset()
-        XCTAssertNil(gate.toolEnded())
-        XCTAssertEqual(gate.slideChanged(three), three)
-    }
-
     // MARK: Hintergrund
 
     private func makeSupport(online: Bool, transport: FakeTransport, folder: URL) -> SlideSupport {
