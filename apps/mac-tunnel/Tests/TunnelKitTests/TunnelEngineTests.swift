@@ -71,9 +71,12 @@ final class TunnelEngineTests: XCTestCase {
         let listenerPort = try await port(rig, device)
         let client = TestClient.tls(port: listenerPort, presharedKey: device.presharedKey)
         let connected = await client.connect(timeout: 8)
-        XCTAssertTrue(
-            connected,
-            "Handshake mit richtigem Schlüssel scheitert. Client: \(client.stateHistory). Helfer: \(rig.logLines)")
+        guard connected else {
+            client.close()
+            // Abbrechen statt weiterlaufen: Ein Senden auf einer nie fertigen Verbindung kehrte nie zurück
+            throw TestError(
+                "Handshake mit richtigem Schlüssel scheitert. Client: \(client.stateHistory). Helfer: \(rig.logLines)")
+        }
         return client
     }
 
@@ -218,10 +221,13 @@ final class TunnelEngineTests: XCTestCase {
 
         var clients: [TestClient] = []
         defer { for client in clients { client.close() } }
-        for _ in 0..<(TunnelLimits.maxConnectionsPerDevice + 1) {
+        for number in 0..<(TunnelLimits.maxConnectionsPerDevice + 1) {
             let client = TestClient.tls(port: listenerPort, presharedKey: device.presharedKey)
             clients.append(client)
-            _ = await client.connect(timeout: 8)
+            let connected = await client.connect(timeout: 8)
+            if !connected && number < TunnelLimits.maxConnectionsPerDevice {
+                throw TestError("Verbindung \(number + 1) scheitert. Client: \(client.stateHistory). Helfer: \(rig.logLines)")
+            }
         }
         let reached = await waitUntil(timeout: 5) { rig.core?.acceptedCount == TunnelLimits.maxConnectionsPerDevice }
         XCTAssertTrue(reached, "Core-Verbindungen: \(String(describing: rig.core?.acceptedCount))")
