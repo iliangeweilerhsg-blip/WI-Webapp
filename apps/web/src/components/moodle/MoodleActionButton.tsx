@@ -181,11 +181,13 @@ function ConfirmBody({
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2">
+        {/* Während des Ausführens ist die Anfrage schon unterwegs: „Abbrechen“ hielte sie nicht mehr auf */}
         <button
           ref={cancelRef}
           type="button"
           onClick={onCancel}
-          className="min-h-9 rounded-md border border-border-strong px-3 text-sm font-medium hover:bg-surface"
+          disabled={busy}
+          className="min-h-9 rounded-md border border-border-strong px-3 text-sm font-medium hover:bg-surface disabled:opacity-50"
         >
           Abbrechen
         </button>
@@ -246,12 +248,15 @@ export function MoodleActionButton({
     return () => clearTimeout(timer);
   }, [expiresAt]);
 
-  // Der Fokus liegt zuerst auf „Abbrechen“ (Standard); nach dem Abbrechen zurück auf dem Knopf, nach einem Ergebnis
-  // aus der Rückfrage auf der Ergebniszeile (sonst landet er nach dem Schließen auf <body>)
+  // Der Fokus liegt zuerst auf „Abbrechen“ (Standard), auch bei jeder neuen Rückfrage (z. B. nach `stand_geaendert`):
+  // Er bleibt nie auf „Bestätigen“ stehen, sonst führte ein zweites Enter die neue Rückfrage ungelesen aus. Nach dem
+  // Abbrechen zurück auf dem Knopf, nach einem Ergebnis aus der Rückfrage auf der Ergebniszeile (sonst landet er nach
+  // dem Schließen auf <body>)
   const returnFocus = useRef(false);
   const focusResult = useRef(false);
+  const shown = phase.kind === 'confirm' ? phase : null;
   useEffect(() => {
-    if (confirming) cancelRef.current?.focus();
+    if (shown) cancelRef.current?.focus();
     else if (returnFocus.current) {
       returnFocus.current = false;
       triggerRef.current?.focus();
@@ -259,7 +264,7 @@ export function MoodleActionButton({
       focusResult.current = false;
       resultRef.current?.focus();
     }
-  }, [confirming, inSession, phase.kind]);
+  }, [shown, inSession, phase.kind]);
 
   const cancel = useCallback(() => {
     focusResult.current = false;
@@ -367,7 +372,8 @@ export function MoodleActionButton({
   function onKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.key === 'Escape') {
       event.stopPropagation();
-      cancel();
+      // Läuft das Ausführen schon, lässt es sich nicht mehr abbrechen (wie der Knopf „Abbrechen“)
+      if (!executing) cancel();
     } else if (!inSession) trapTab(event);
   }
 

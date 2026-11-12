@@ -308,6 +308,41 @@ describe('MoodleActionButton', () => {
     expect(keys[0]).not.toBe(keys[1]);
   });
 
+  it('nach stand_geaendert liegt der Fokus wieder auf „Abbrechen“: ein zweites Enter führt die neue Rückfrage nicht aus', async () => {
+    script.execute.push(() => apiError(409, 'moodle_confirmation_invalid', { reason: 'stand_geaendert' }));
+    script.preview.push(() => json(previewBody()));
+    script.preview.push(() => json(previewBody({ confirmation_token: 'token-bbbbbbbbbbbbbbbb' })));
+    const user = userEvent.setup();
+    render(<Button />);
+    await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
+    const dialog = await screen.findByRole('dialog');
+    within(dialog).getByRole('button', { name: 'Einreichen' }).focus();
+    await user.keyboard('{Enter}');
+    expect(await within(dialog).findByText(/Der Entwurf hat sich geändert/)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Abbrechen' })).toHaveFocus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(callsTo('/execute')).toHaveLength(1);
+  });
+
+  it('während des Ausführens lässt sich nichts mehr abbrechen, das Ergebnis steht ehrlich da', async () => {
+    let release!: () => void;
+    script.execute.push(
+      () => new Promise<Response>((resolve) => (release = () => resolve(json(resultBody)))),
+    );
+    const user = userEvent.setup();
+    render(<Button />);
+    await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Einreichen' }));
+    await waitFor(() => expect(callsTo('/execute')).toHaveLength(1));
+    expect(within(dialog).getByRole('button', { name: 'Abbrechen' })).toBeDisabled();
+    fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Abbrechen' }), { key: 'Escape' });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    await act(async () => release());
+    expect(await screen.findByRole('status')).toHaveTextContent('Eingereicht.');
+  });
+
   it('moodle_action_busy: Rückfrage bleibt mit ruhigem Hinweis, ein neuer Versuch bekommt einen neuen Idempotency-Key', async () => {
     script.execute.push(() => apiError(409, 'moodle_action_busy'));
     const user = userEvent.setup();
@@ -449,6 +484,18 @@ describe('MoodleActionButton', () => {
     await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
     expect(await screen.findByText('Das ist noch nicht freigeschaltet.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Endgültig einreichen' })).toBeDisabled();
+  });
+
+  it('moodle_error ohne outcome_unknown: Moodle meldet den Fehler, nicht der Core', async () => {
+    script.execute.push(() => apiError(502, 'moodle_error', { moodle_errorcode: 'warning' }));
+    const user = userEvent.setup();
+    render(<Button />);
+    await user.click(screen.getByRole('button', { name: 'Endgültig einreichen' }));
+    await user.click(
+      await within(await screen.findByRole('dialog')).findByRole('button', { name: 'Einreichen' }),
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Moodle hat einen Fehler gemeldet.');
+    expect(callsTo('/execute')).toHaveLength(1);
   });
 
   it('outcome_unknown: kein Wiederholen, Hinweis und onUncertain', async () => {
@@ -657,6 +704,36 @@ describe('Seite „Abgabe“', () => {
     expect(screen.getByRole('button', { name: 'Endgültig einreichen' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Dateien wählen' })).toBeDisabled();
     expect(screen.getByText('Die Aufgabe ist schon eingereicht.')).toBeInTheDocument();
+  });
+
+  it('fragt der Core beim Speichern nach, heißt das Bestätigen „Speichern und abgeben“, auch wenn die Aufgabe hier anders aussieht', async () => {
+    // Die Aufgabenliste meldet noch einen Einreichen-Schritt, der Core sieht keinen (veraltet oder unbekannt)
+    script.preview.push(() =>
+      json(
+        previewBody({
+          action_id: 'assign.save_draft',
+          risk: 'aenderbar',
+          summary: '1 Datei als Entwurf in ‚Blatt 3‘ speichern: blatt3.pdf (1 KB).',
+          warnings: ['Bei dieser Aufgabe ist Speichern schon die Abgabe.'],
+          details: { files: [{ name: 'blatt3.pdf', size_bytes: 1 }] },
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    const { container } = render(
+      <QueryProvider>
+        <AbgabeView />
+      </QueryProvider>,
+    );
+    const save = await screen.findByRole('button', { name: 'Als Entwurf speichern' });
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, new File(['x'], 'blatt3.pdf', { type: 'application/pdf' }));
+    await waitFor(() => expect(save).toBeEnabled());
+    await user.click(save);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('button', { name: 'Speichern und abgeben' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Abbrechen' })).toHaveFocus();
+    expect(callsTo('/execute')).toHaveLength(0);
   });
 
   it('bei Aufgaben ohne Einreichen-Schritt steht das ehrlich da', async () => {

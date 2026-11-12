@@ -253,8 +253,9 @@ export function AbgabeView() {
           action="assign.save_draft"
           params={{ assignment_id: assignmentId, upload_ids: uploadIds }}
           label="Als Entwurf speichern"
-          // Ohne Einreichen-Schritt ist Speichern schon die Abgabe, der Core fragt dann nach (Plan §6.2)
-          confirmLabel={requiresSubmit ? 'Als Entwurf speichern' : 'Speichern und abgeben'}
+          // Der Core fragt beim Speichern nur nach, wenn es (vielleicht) schon die Abgabe ist: ohne Einreichen-Schritt
+          // oder unbekannt (Plan §6.2, 08 §9.3). Das gilt auch, wenn die Aufgabenliste hier noch fehlt oder veraltet ist
+          confirmLabel="Speichern und abgeben"
           disabled={!mayEdit || uploading || uploadIds.length === 0}
           disabledReason={
             !mayEdit

@@ -40,6 +40,8 @@ const MESSAGES: Record<string, string> = {
   moodle_not_configured: 'Moodle ist noch nicht eingerichtet.',
   moodle_token_invalid: 'Moodle lehnt den Zugang ab. Erneuere ihn mit pnpm sg moodle login.',
   moodle_unreachable: 'Moodle ist gerade nicht erreichbar.',
+  // Moodle selbst meldet einen Fehler oder lehnt ab (z. B. eine Warnung beim Einreichen), kein Fehler im Core
+  moodle_error: 'Moodle hat einen Fehler gemeldet.',
   moodle_item_not_found: 'Diese Datei gibt es nicht mehr.',
   moodle_link_not_found: 'Dieser Kurs ist keinem Modul mehr zugeordnet.',
   moodle_link_disabled: 'Der Abgleich für diesen Kurs ist ausgeschaltet. Schalte ihn zuerst ein.',
