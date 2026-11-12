@@ -85,6 +85,8 @@ final class SyncEngine {
     static let maxInternalErrors = 5
     static let pingInterval: Duration = .seconds(15)
     static let pongTimeout: TimeInterval = 45
+    /// So lange sammelt die Engine `ack`-Zeilen, bevor sie sie mit einem fsync schreibt
+    static let ackFlushDelay: Duration = .milliseconds(250)
     static let clockResyncInterval: TimeInterval = 300
 
     private(set) var state: State = .stopped
@@ -122,6 +124,7 @@ final class SyncEngine {
     @ObservationIgnored private var waitTask: _Concurrency.Task<Void, Never>?
     @ObservationIgnored private var link: SyncLink?
     @ObservationIgnored private var backoff = SyncBackoff()
+    @ObservationIgnored private var ackFlushTask: _Concurrency.Task<Void, Never>?
     /// Letzter gemessener Versatz Mac − iPad. Bleibt über Verbindungen hinweg gültig.
     @ObservationIgnored private var clockOffsetMS: Int?
     @ObservationIgnored private var lastClockSync: Date?
@@ -229,6 +232,7 @@ final class SyncEngine {
         }
         link = nil
         backoff.reset()
+        flushAcksNow()
         setState(newState)
     }
 
@@ -554,6 +558,7 @@ final class SyncEngine {
         socket.close()
         if self.link === link {
             self.link = nil
+            flushAcksNow()
         }
         guard gen == generation, !_Concurrency.Task.isCancelled else { return .stop }
         return await classify(failure, link: link, mac: mac, token: token)
@@ -646,8 +651,8 @@ final class SyncEngine {
         case .inbound(let value):
             onInbound?(value)
         case .pong:
+            // Kein Backoff-Reset: Laut VERTRAEGE §11.2 beginnt die Folge nur nach einem `ack` von vorn
             link.lastPongAt = now()
-            backoff.reset()
         case .ack(let opID):
             await onAck(opID: opID, link: link)
         case .error(let failure):
@@ -870,10 +875,36 @@ final class SyncEngine {
     private func onAck(opID: String, link: SyncLink) async {
         link.inFlight.remove(opID)
         internalErrors[opID] = nil
-        outbox.acknowledge(opID: opID)
+        outbox.acknowledgeDeferred(opID: opID)
+        scheduleAckFlush()
         backoff.reset()
         refreshCounts()
         await pump(link)
+    }
+
+    /// Bündelt das fsync der `ack`-Zeilen: Bei vielen `ack` kurz hintereinander schreibt ein Aufschub von
+    /// `ackFlushDelay` alles auf einmal, statt jedes `ack` auf dem Main-Actor einzeln auf die Platte zu zwingen.
+    /// Ein verlorener Persist ist harmlos: Die Operation bliebe nach einem Absturz in der Datei und ginge erneut
+    /// raus, der Core bestätigt die bekannte `op_id` noch einmal (Idempotenz, VERTRAEGE §11.2).
+    private func scheduleAckFlush() {
+        guard ackFlushTask == nil else { return }
+        ackFlushTask = _Concurrency.Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.sleeper(SyncEngine.ackFlushDelay)
+            } catch {
+                // Abgebrochen: `flushAcksNow` hat schon geschrieben
+                return
+            }
+            self.ackFlushTask = nil
+            self.outbox.flushAcks()
+        }
+    }
+
+    private func flushAcksNow() {
+        ackFlushTask?.cancel()
+        ackFlushTask = nil
+        outbox.flushAcks()
     }
 
     private func onError(_ failure: SyncIncoming.Failure, link: SyncLink) async {
