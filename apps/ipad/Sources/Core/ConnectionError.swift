@@ -60,6 +60,15 @@ enum ConnectionError: Error, Equatable, Sendable {
     case rePairingNeeded
     /// Ein `.local`-Name ließ sich bei der Kopplung nicht auf eine IPv4-Adresse auflösen (#261)
     case localNameNotResolved
+    /// Gekoppelt, aber ohne Tunnel-Schlüssel (vor UX-12 gekoppelt oder Mac ohne Tunnel): Es geht nichts raus, einmal neu
+    /// koppeln (UX-12 PR 4, `RouteProblem.repairNeeded`)
+    case tunnelKeyMissing
+    /// Der Tunnel zum Mac findet keinen Dienst (`RouteProblem.macNotFound`)
+    case tunnelMacNotFound
+    /// WLAN ist am iPad aus, auch die Direktverbindung braucht es (`RouteProblem.wifiOff`)
+    case wifiSwitchedOff
+    /// Unter dem Namen des Macs antwortet etwas, aber nicht mit dem richtigen Schlüssel (`RouteProblem.handshakeFailed`)
+    case tunnelHandshakeFailed
 
     /// Zuordnung der Systemfehler von URLSession
     static func from(_ error: URLError) -> ConnectionError {
@@ -108,7 +117,19 @@ enum ConnectionError: Error, Equatable, Sendable {
     }
 
     /// Nur neu koppeln hilft
-    var needsNewPairing: Bool { self == .tokenInvalid || self == .rePairingNeeded }
+    var needsNewPairing: Bool { self == .tokenInvalid || self == .rePairingNeeded || self == .tunnelKeyMissing }
+
+    /// Ruhige Überschrift ohne „iPad nicht verbunden“: Das iPad ist nur gerade woanders oder braucht einen Handgriff
+    /// (Regel R1, kein Alarmton)
+    var isCalm: Bool {
+        switch self {
+        case .otherNetwork, .rePairingNeeded, .tunnelKeyMissing, .tunnelMacNotFound, .wifiSwitchedOff,
+            .tunnelHandshakeFailed:
+            return true
+        default:
+            return false
+        }
+    }
 
     /// Kurztext für die Statusanzeige
     var title: String {
@@ -144,6 +165,10 @@ enum ConnectionError: Error, Equatable, Sendable {
         case .otherNetwork: return "Mac nicht im selben Netz"
         case .rePairingNeeded: return "Bitte einmal neu koppeln"
         case .localNameNotResolved: return "Name des Macs nicht aufgelöst"
+        case .tunnelKeyMissing: return "Bitte einmal neu koppeln"
+        case .tunnelMacNotFound: return "Mac nicht gefunden"
+        case .wifiSwitchedOff: return "WLAN ist aus"
+        case .tunnelHandshakeFailed: return "Mac nicht gefunden"
         }
     }
 
@@ -210,6 +235,14 @@ enum ConnectionError: Error, Equatable, Sendable {
             return "Verbindungsdetails → Neu koppeln, dann den QR-Code am Mac scannen. Den alten Eintrag des iPads entfernst du am Mac unter Einstellungen → Geräte. Deine Notizen bleiben auf dem iPad und gleichen sich danach ab."
         case .localNameNotResolved:
             return "Gib die IP-Adresse des Macs ein, zum Beispiel 192.168.1.20, oder scanne den QR-Code am Mac."
+        case .tunnelKeyMissing:
+            return "Für die Direktverbindung braucht das iPad einen neuen Schlüssel. Kopple es einmal zu Hause neu (QR-Code am Mac). Deine Notizen bleiben auf dem iPad und gleichen sich danach ab."
+        case .tunnelMacNotFound:
+            return "Läuft Studien-Gehirn am Mac, und ist er aufgeklappt? Am Mac muss WLAN eingeschaltet sein. Deine Notizen bleiben auf dem iPad und gleichen sich später ab."
+        case .wifiSwitchedOff:
+            return "Schalte WLAN am iPad ein. Ein Netz brauchst du nicht, das iPad verbindet sich direkt mit dem Mac."
+        case .tunnelHandshakeFailed:
+            return "Ein Gerät hat unter dem Namen deines Macs geantwortet, aber nicht mit dem richtigen Schlüssel. Zu Hause prüfen, ob das iPad am Mac noch gekoppelt ist."
         }
     }
 }

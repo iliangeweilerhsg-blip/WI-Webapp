@@ -140,7 +140,7 @@ jobs:
           # Auf main ist HEAD^1 der Stand vor dem Merge. Lässt sich das nicht bestimmen, wird gebaut.
           run=true
           if files="$(git diff --name-only HEAD^1 HEAD 2>/dev/null)"; then
-            pattern='^(apps/ipad/|packages/schemas/swift-support/|packages/schemas/generated/swift/|spikes/s6-p2p/Sources/SpikeShared/|\.github/workflows/ci\.yml$)'
+            pattern='^(apps/ipad/|packages/schemas/swift-support/|packages/schemas/generated/swift/|apps/mac-tunnel/Sources/TunnelShared/|\.github/workflows/ci\.yml$)'
             if ! grep -qE "$pattern" <<<"$files"; then
               run=false
               echo "Keine Änderung an der iPad-App, Build wird übersprungen."

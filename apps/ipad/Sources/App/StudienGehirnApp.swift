@@ -16,9 +16,16 @@ struct StudienGehirnApp: App {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            // Zurück im Vordergrund: Wartezeit überspringen, tote Verbindung früh erkennen
-            if phase == .active {
-                model.sync?.kick()
+            switch phase {
+            case .active:
+                // Zurück im Vordergrund: Weiterleiter neu starten (neuer Port, WLAN zuerst), Wartezeit überspringen,
+                // tote Verbindung früh erkennen
+                model.appBecameActive()
+            case .background:
+                // Im Hintergrund enden Weiterleiter und Verbindungen (UX-12 PR 4)
+                model.appWentToBackground()
+            default:
+                break
             }
         }
     }
@@ -32,10 +39,19 @@ enum AppEnvironment {
 }
 
 extension AppModel {
-    /// Die echte App: URLSession, Schlüsselbund, UserDefaults
+    /// Die echte App: URLSession, Schlüsselbund, UserDefaults, Tunnel zum Mac
     static func live() -> AppModel {
-        let client = CoreClient(transport: URLSessionTransport())
         let tokenStore = KeychainTokenStore()
+        let tunnelKeyStore = KeychainTunnelKeyStore()
+        // Wegewahl zum Mac (UX-12 PR 4): Von nun an geht jede Anfrage mit Token an den lokalen Weiterleiter und durch den
+        // beglaubigten Tunnel, nie an eine IP-Adresse im Netz. Unit-Tests laufen in der App: kein Netz, kein Weiterleiter.
+        let route: MacRoute? =
+            AppEnvironment.isRunningTests
+            ? nil
+            : MacRoute(
+                keys: tunnelKeyStore, dialer: NetworkTunnelDialer(), paths: SystemPathWatcher(),
+                forwarder: LocalForwarder())
+        let client = CoreClient(transport: URLSessionTransport(), routing: route)
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
         // Unit-Tests laufen in der App: keine Dateien und keine Verbindung
         var sync: SyncEngine?
@@ -58,7 +74,9 @@ extension AppModel {
             deviceName: UIDevice.current.name,
             appVersion: appVersion,
             sync: sync,
-            library: library
+            library: library,
+            tunnelKeyStore: tunnelKeyStore,
+            routing: route
         )
     }
 }

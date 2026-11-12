@@ -251,7 +251,8 @@ final class SyncHarness {
 
     init(
         health: [FakeTransport.Reply] = [.http(status: 200, body: "{}")],
-        interfaces: any InterfaceListing = Fixtures.sameNetwork
+        interfaces: any InterfaceListing = Fixtures.sameNetwork,
+        routing: (any MacRouting)? = nil
     ) {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("sync-test-\(UUID().uuidString)", isDirectory: true)
@@ -293,7 +294,7 @@ final class SyncHarness {
         self.library = library
         self.tokens = tokens
         self.binding = binding
-        let client = Fixtures.client(transport, interfaces: interfaces)
+        let client = Fixtures.client(transport, interfaces: interfaces, routing: routing)
         let engine = SyncEngine(
             client: client,
             sockets: factory,

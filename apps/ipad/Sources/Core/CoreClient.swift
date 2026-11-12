@@ -24,7 +24,8 @@ final class URLSessionTransport: HTTPTransport {
         // Ohne Cache und Cookies auf der Platte: Antworten mit Token landen nirgends
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
-        configuration.timeoutIntervalForRequest = 10
+        // 20 s: Durch den Tunnel braucht schon der Verbindungsaufbau bis zu 12 s (WLAN 2 s, dann peer-to-peer bis 10 s)
+        configuration.timeoutIntervalForRequest = 20
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
@@ -42,7 +43,7 @@ final class URLSessionTransport: HTTPTransport {
         // `timeoutIntervalForResource` ist die Gesamtzeit (der Request-Timeout gilt nur im Leerlauf).
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
-        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = limit.maxDuration
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         let delegate = LimitedDownloadDelegate(limit: limit, destination: file)
@@ -198,6 +199,9 @@ struct PairingResult: Equatable, Sendable {
     let deviceToken: String
     let deviceID: String
     let deviceName: String
+    /// `tunnel_key` aus `PairResponse` (UX-12), base64url. `nil` bei einem Core ohne Tunnel. Ein Geheimnis: nur in den
+    /// Schlüsselbund, nie in ein Log.
+    var tunnelKey: String? = nil
 }
 
 /// REST-Zugriff auf den Core. Netz- und Serverfehler kommen als `ConnectionError`.
@@ -220,29 +224,56 @@ final class CoreClient {
     private let maxRetries: Int
     private let retryDelay: Duration
     private let interfaces: any InterfaceListing
+    private let routing: (any MacRouting)?
 
-    /// - Parameter interfaces: Schnittstellen des iPads für die Prüfung „Token nur ins eigene Netz“
-    ///   (`TokenDestination`). Die echte Fassung liest sie per `getifaddrs`.
+    /// - Parameters:
+    ///   - interfaces: Schnittstellen des iPads für die Prüfung „Token nur ins eigene Netz“ (`TokenDestination`,
+    ///     UX-12 PR 0). Die echte Fassung liest sie per `getifaddrs`. Gilt nur ohne `routing`.
+    ///   - routing: Die Wegewahl zum Mac (UX-12 PR 4). **Mit ihr geht ein Token nur an die Adresse des lokalen
+    ///     Weiterleiters** (`MacRouting.endpoint()`), nie an eine IP-Adresse im Netz. Die echte App übergibt sie immer;
+    ///     `nil` ist der Altweg (PR 0) für Tests.
     init(
         transport: any HTTPTransport, maxRetries: Int = 2, retryDelay: Duration = .milliseconds(200),
-        interfaces: any InterfaceListing = SystemInterfaceListing()
+        interfaces: any InterfaceListing = SystemInterfaceListing(), routing: (any MacRouting)? = nil
     ) {
         self.transport = transport
         self.maxRetries = maxRetries
         self.retryDelay = retryDelay
         self.interfaces = interfaces
+        self.routing = routing
     }
 
-    /// Darf eine Anfrage mit Token an diesen Mac gehen? Nur im Subnetz einer aktiven Schnittstelle, nie an einen
-    /// `.local`-Namen (UX-12, PR 0; #261). Billig und lokal: Die Schnittstellen werden bei jedem Aufruf neu gelesen, weil
-    /// das iPad das Netz wechseln kann.
+    /// Darf eine Anfrage mit Token an diese Adresse gehen?
+    /// - Mit Wegewahl (UX-12 PR 4): nur an die Adresse des lokalen Weiterleiters, sonst nirgends hin (E7). Der
+    ///   Weiterleiter reicht durch den beglaubigten Tunnel zum Mac.
+    /// - Ohne Wegewahl (Altweg, PR 0): nur ins Subnetz einer aktiven Schnittstelle, nie an einen `.local`-Namen (#261).
+    ///   Billig und lokal: Die Schnittstellen werden bei jedem Aufruf neu gelesen, weil das iPad das Netz wechseln kann.
     func allowsToken(for endpoint: CoreEndpoint) -> Bool {
+        if let routing {
+            guard let allowed = routing.endpoint() else { return false }
+            return allowed == endpoint
+        }
+        return isInOwnNetwork(endpoint)
+    }
+
+    /// Liegt die Adresse im Netz des iPads? Nur für die Kopplung (sie geht per IP, ohne Token): Code und `pairing_id`
+    /// sollen nicht in ein fremdes Netz gehen. Hängt nicht an der Wegewahl.
+    func isInOwnNetwork(_ endpoint: CoreEndpoint) -> Bool {
         TokenDestination.allows(host: endpoint.host, interfaces: interfaces.activeIPv4())
     }
 
-    /// Wirft `rePairingNeeded` (`.local`) oder `otherNetwork`, bevor eine Anfrage mit Token entsteht
+    /// Adresse für Anfragen mit Token: mit Wegewahl der lokale Weiterleiter (`nil`, solange er nicht läuft), sonst die
+    /// gespeicherte Adresse des Macs (Altweg)
+    func tokenEndpoint(for mac: PairedMac) -> CoreEndpoint? {
+        guard let routing else { return mac.endpoint }
+        return routing.endpoint()
+    }
+
+    /// Wirft einen Fehler, bevor eine Anfrage mit Token entsteht: ohne Weiterleiter den Grund der Wegewahl, im Altweg
+    /// `rePairingNeeded` (`.local`) oder `otherNetwork`
     private func requireTokenDestination(_ endpoint: CoreEndpoint) throws {
         guard allowsToken(for: endpoint) else {
+            if let routing { throw routing.blockedError() }
             throw TokenDestination.isLocalName(endpoint.host) ? ConnectionError.rePairingNeeded : ConnectionError.otherNetwork
         }
     }
@@ -285,7 +316,8 @@ final class CoreClient {
         return PairingResult(
             deviceToken: response.deviceToken,
             deviceID: response.device.id,
-            deviceName: response.device.name
+            deviceName: response.device.name,
+            tunnelKey: response.tunnelKey
         )
     }
 
@@ -511,7 +543,8 @@ final class CoreClient {
         guard let url = endpoint.url(path: path, queryItems: queryItems) else { throw ConnectionError.invalidAddress }
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 10
+        // Durch den Tunnel kann schon der Verbindungsaufbau (WLAN 2 s, dann peer-to-peer bis 10 s) die alten 10 s brauchen
+        request.timeoutInterval = routing == nil ? 10 : 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         // Kein Origin-Header: pair/* mit Origin lehnt der Core ab (VERTRAEGE §5)

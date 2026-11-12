@@ -1,5 +1,8 @@
 # Spike S6: Mac und iPad direkt per Wi-Fi peer-to-peer testen
 
+> **Erledigt (UX-12, PR 4).** Der Spike hat seinen Zweck erfüllt: Die Direktverbindung ist in die App eingebaut und läuft mit der gesicherten Verbindung (TLS 1.2, PSK, Verfahren ECDHE). **Die Testansicht „Direktverbindung testen“ ist aus der iPad-App entfernt.** Die Schritte unten für das iPad gelten nicht mehr. Der Gerätetest im Hörsaal läuft jetzt mit der normalen App: [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md), Abschnitt 6, und der Plan, Abschnitt 9.1. Das Mac-Paket `spikes/s6-p2p` bleibt als Beleg im Repo (Messung der TLS-Verfahren, Selbsttest).
+
+
 Dieser Test klärt, ob iPad und Mac sich im Hörsaal **ohne gemeinsames Netz und ohne Mobilfunk** direkt erreichen (Wi-Fi peer-to-peer, die Technik hinter AirDrop). Ergebnis: ein Protokoll, das du ins Issue #138 kopierst. Es entscheidet, ob der Umbau aus dem Plan `docs/plaene/UX-12-MAC-WIEDERFINDEN.md` gebaut wird.
 
 Aufwand: einmal etwa 20 Minuten zu Hause, dann zwei Vorlesungen (eine kurze, eine mit 90 Minuten Dauertest). Du musst nichts im Code ändern.

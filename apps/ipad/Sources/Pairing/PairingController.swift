@@ -38,6 +38,7 @@ final class PairingController {
 
     private let client: CoreClient
     private let tokenStore: any TokenStore
+    private let tunnelKeyStore: any TunnelKeyStore
     private let macStore: any PairedMacStore
     private let deviceName: String
     private let appVersion: String?
@@ -52,11 +53,13 @@ final class PairingController {
         macStore: any PairedMacStore,
         deviceName: String,
         appVersion: String?,
-        localResolver: any LocalNameResolving = SystemLocalNameResolver()
+        localResolver: any LocalNameResolving = SystemLocalNameResolver(),
+        tunnelKeyStore: any TunnelKeyStore = NoTunnelKeyStore()
     ) {
         self.localResolver = localResolver
         self.client = client
         self.tokenStore = tokenStore
+        self.tunnelKeyStore = tunnelKeyStore
         self.macStore = macStore
         self.deviceName = PairingInput.deviceName(deviceName)
         self.appVersion = appVersion
@@ -149,7 +152,7 @@ final class PairingController {
         guard TokenDestination.isLocalName(endpoint.host) else { return endpoint }
         guard let resolved = await localResolver.resolve(endpoint),
             TokenDestination.parseIPv4(resolved.host) != nil,
-            client.allowsToken(for: resolved)
+            client.isInOwnNetwork(resolved)
         else { return nil }
         return resolved
     }
@@ -201,6 +204,22 @@ final class PairingController {
             lastError = .tokenStorageFailed
             state = .idle
             return
+        }
+        // Tunnel-Schlüssel (UX-12): gehört zum neuen Token und überschreibt den alten. Fehlt er (Core ohne Tunnel) oder
+        // hat er nicht das Format aus `PairResponse`, bleibt keiner stehen: Das iPad zeigt dann „Bitte einmal neu
+        // koppeln“ und schickt nichts. Aus Token oder `token_hash` wird nie ein Schlüssel abgeleitet.
+        if let tunnelKey = result.tunnelKey, (try? TunnelKey(base64url: tunnelKey)) != nil {
+            do {
+                try tunnelKeyStore.saveKey(tunnelKey)
+            } catch {
+                // Halb gekoppelt wäre schlimmer als gar nicht: Token wieder löschen
+                try? tokenStore.deleteToken()
+                lastError = .tokenStorageFailed
+                state = .idle
+                return
+            }
+        } else {
+            try? tunnelKeyStore.deleteKey()
         }
         macStore.savePairedMac(
             PairedMac(endpoint: endpoint, deviceID: result.deviceID, deviceName: result.deviceName))

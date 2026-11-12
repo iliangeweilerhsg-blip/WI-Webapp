@@ -216,6 +216,14 @@ final class SyncEngine {
         runningMac = nil
     }
 
+    /// Die Wegewahl hat sich geändert (neuer Port des Weiterleiters, Mac gefunden): Wartet die Engine, verbindet sie
+    /// sofort neu. Eine laufende Verbindung bleibt, wie sie ist (sie wandert nie auf einen anderen Weg).
+    func routeChanged() {
+        guard runningMac != nil, state == .waiting else { return }
+        backoff.reset()
+        waitTask?.cancel()
+    }
+
     /// App kommt in den Vordergrund: Wartezeit überspringen, tote Verbindung früh erkennen
     func kick() {
         guard runningMac != nil else { return }
@@ -579,13 +587,14 @@ final class SyncEngine {
             setState(.tokenInvalid)
             return .stop
         }
-        guard let url = mac.endpoint.syncURL() else {
+        // Das Token geht nur an den lokalen Weiterleiter (UX-12 PR 4, E7), im Altweg nur ins eigene Netz (PR 0). Läuft
+        // der Weiterleiter nicht (Hintergrund, Schlüssel fehlt, noch nicht bereit) oder liegt der Mac nicht im Netz des
+        // iPads, wird nicht einmal ein Socket geöffnet. Zustand `waiting`, übliche Wartezeit, die Warteschlange bleibt.
+        guard let endpoint = client.tokenEndpoint(for: mac), client.allowsToken(for: endpoint) else { return .retry }
+        guard let url = endpoint.syncURL() else {
             setState(.stopped)
             return .stop
         }
-        // Das Token geht nur ins eigene Netz (UX-12, PR 0): Liegt der Mac nicht im Netz des iPads, wird nicht einmal
-        // ein Socket geöffnet. Zustand `waiting`, übliche Wartezeit, die Warteschlange bleibt.
-        guard client.allowsToken(for: mac.endpoint) else { return .retry }
         // Token nur im Header, kein Origin (VERTRAEGE §11.1)
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
@@ -675,10 +684,10 @@ final class SyncEngine {
     }
 
     private func healthSaysTokenInvalid(mac: PairedMac, token: String) async -> Bool {
-        // Auch hier geht das Token nur ins eigene Netz (der Client prüft ebenfalls)
-        guard client.allowsToken(for: mac.endpoint) else { return false }
+        // Auch hier geht das Token nur an den Weiterleiter bzw. ins eigene Netz (der Client prüft ebenfalls)
+        guard let endpoint = client.tokenEndpoint(for: mac), client.allowsToken(for: endpoint) else { return false }
         do {
-            try await client.checkHealth(endpoint: mac.endpoint, token: token)
+            try await client.checkHealth(endpoint: endpoint, token: token)
             return false
         } catch {
             return (error as? ConnectionError) == .tokenInvalid
@@ -1131,9 +1140,13 @@ final class SyncEngine {
         let token: String
     }
 
+    /// Adresse und Token für REST-Abrufe. Mit Wegewahl (UX-12 PR 4) ist die Adresse der lokale Weiterleiter; läuft er
+    /// nicht (Hintergrund, Schlüssel fehlt, noch nicht bereit), gibt es keinen Zugang und es geht nichts raus.
     private func credentials() -> Credentials? {
-        guard let mac = runningMac, let token = try? tokenStore.loadToken(), !token.isEmpty else { return nil }
-        return Credentials(endpoint: mac.endpoint, token: token)
+        guard let mac = runningMac, let token = try? tokenStore.loadToken(), !token.isEmpty,
+            let endpoint = client.tokenEndpoint(for: mac)
+        else { return nil }
+        return Credentials(endpoint: endpoint, token: token)
     }
 
     /// Ein 401 bei einer REST-Anfrage heißt: Kopplung widerrufen. Alles andere ist ein Netzproblem.

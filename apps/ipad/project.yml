@@ -33,9 +33,10 @@ targets:
       # In der App darum immer _Concurrency.Task schreiben. Ein eigenes Modul geht nicht, die Typen sind internal.
       - path: ../../packages/schemas/generated/swift/Schemas.swift
       - path: ../../packages/schemas/swift-support/Sources
-      # Spike S6 (UX-12, PR 1): Protokoll, Code, TLS-PSK und Client teilen sich Mac-Paket und iPad-App (Swift 6).
-      # Fällt mit PR 4 weg, wenn die Testansicht entfernt wird.
-      - path: ../../spikes/s6-p2p/Sources/SpikeShared
+      # Tunnel zum Mac (UX-12, PR 4): Ableitung von Dienstname und PSK aus `tunnel_key`, TLS-PSK-Optionen. Dieselben
+      # Quelldateien baut der Mac-Helfer `sg-tunnel` (apps/mac-tunnel), es gibt keine zweite Implementierung.
+      # Hier gilt der Swift-6-Sprachmodus und kein bloßes `Task` (Schemas.swift verdeckt den Namen).
+      - path: ../../apps/mac-tunnel/Sources/TunnelShared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: de.studiengehirn.ipad

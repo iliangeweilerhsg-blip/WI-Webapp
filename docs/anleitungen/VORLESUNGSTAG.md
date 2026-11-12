@@ -8,12 +8,13 @@ Diese Liste hilft, dass die Aufnahme in der Vorlesung durchläuft. Sie gilt für
 2. **Nicht am Vorlesungstag updaten.** Kein `git pull`, keine neue iPad-App. Ein Update kann neue Fehler mitbringen und migriert die Datenbank. Updates machst du am Wochenende ([UPDATE.md](UPDATE.md)).
 3. Prüfe, dass alles läuft: `pnpm sg start`, dann im Browser die Seite **Heute** öffnen.
 4. Startet die iPad-App noch? Mit dem kostenlosen Apple-Konto läuft sie nur 7 Tage ([IPAD.md](IPAD.md), Abschnitt „Die App läuft nur 7 Tage“).
+5. Läuft der Mac-Helfer? `pnpm sg doctor` zeigt es (Zeilen „Tunnel-Helfer“). Ohne ihn gibt es keinen Sync mit dem iPad, auch nicht zu Hause. Dein Schreiben bleibt trotzdem auf dem iPad.
 
 ## In der Uni
 
 1. Mac ans Netzteil. **Deckel offen lassen.** Zugeklappt nimmt der Mac nichts auf.
 2. **Energiesparen:** Solange eine Session läuft oder pausiert, hält der Core den Mac wach (macOS-Werkzeug `caffeinate`). Der Bildschirm darf ausgehen. Das gilt nur, solange der Core läuft, und nur auf dem Mac. Der Deckel muss trotzdem offen bleiben (Schritt 1).
-3. **WLAN:** Soll das iPad live mitspiegeln, nimm den **Hotspot deines iPhones** statt des Uni-WLANs. Im Uni-WLAN sehen sich Geräte oft nicht. Verbinde Mac und iPad mit dem Hotspot. Findet das iPad den Mac nicht, hilft [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md). Im Zweifel koppelst du neu ([IPAD.md](IPAD.md), Schritt 8).
+3. **WLAN:** Schalte **WLAN an beiden Geräten ein**. Ein gemeinsames Netz und ein Hotspot sind nicht nötig: Im Uni-WLAN sehen sich Geräte oft nicht, das iPad verbindet sich dann direkt mit dem Mac (Wi-Fi peer-to-peer, siehe [IPAD.md](IPAD.md), Abschnitt „Im Hörsaal ohne gemeinsames Netz“). Öffne die App am iPad und warte, bis **Mac ●** grün ist. Tippst du auf **Mac ●**, steht dort „Direkt verbunden, ohne WLAN-Netz“ oder „Verbunden über das WLAN“. Steht dort „Bitte einmal neu koppeln“, koppelst du **zu Hause** einmal neu ([IPAD.md](IPAD.md), Abschnitt „Nach dem Update: einmal neu koppeln“), nicht in der Uni. Findet das iPad den Mac nicht, hilft [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md), Abschnitt 6.
 4. Die Aufnahme läuft im Browser am Mac und braucht kein Internet.
 
 ## Aufnahme

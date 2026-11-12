@@ -2,7 +2,7 @@
 
 So kommt die App „Studien-Gehirn“ auf dein iPad. Du brauchst kein bezahltes Entwicklerkonto. Dauer beim ersten Mal: etwa 20 Minuten.
 
-**Stand:** Die App kann koppeln, zeigt den Verbindungsstatus und listet deine Notizbücher je Modul. Seiten blättern, anlegen, umsortieren und löschen, dazu Vorlagen (liniert, kariert, Punktraster). Schreibmodi und Folien (nur die Vorlesung, die gerade läuft).
+**Stand:** Die App kann koppeln, zeigt den Verbindungsstatus und listet deine Notizbücher je Modul. Der Sync läuft über einen gesicherten Tunnel, zu Hause im WLAN und im Hörsaal direkt, auch ohne gemeinsames Netz. Seiten blättern, anlegen, umsortieren und löschen, dazu Vorlagen (liniert, kariert, Punktraster). Schreibmodi und Folien (nur die Vorlesung, die gerade läuft).
 
 ## Was du brauchst
 
@@ -10,7 +10,7 @@ So kommt die App „Studien-Gehirn“ auf dein iPad. Du brauchst kein bezahltes 
 - iPad mit **iPadOS 17 oder neuer** und ein USB-C-Kabel
 - Deine Apple-ID
 - [Homebrew](https://brew.sh) auf dem Mac. Noch nicht installiert? Öffne brew.sh, kopiere den Befehl unter „Install Homebrew“ ins Terminal und folge den Hinweisen. Am Ende nennt das Terminal unter „Next steps“ noch zwei oder drei Befehle, die du ebenfalls ausführst.
-- Mac und iPad im **selben WLAN**
+- Mac und iPad im **selben WLAN** (nur zum Koppeln und einmal nach jedem Update, siehe unten. Danach brauchst du kein gemeinsames Netz mehr)
 
 ## 1. Xcode-Projekt erzeugen
 
@@ -85,6 +85,39 @@ Ohne diese Erlaubnis erreicht die App den Mac nicht. Nachträglich ändern: **Ei
 
 Der QR-Code ist der sicherste Weg. Namen in der Liste „Im WLAN gefunden“ sind nicht geprüft.
 
+## Nach dem Update: einmal neu koppeln
+
+Seit der Direktverbindung (UX-12) spricht das iPad nur noch über einen gesicherten Tunnel mit dem Mac. Den Schlüssel dafür bekommt das iPad **bei der Kopplung**, nie nachträglich. Ein iPad, das vorher gekoppelt wurde, hat ihn nicht.
+
+**Was du siehst:** Oben rechts steht bei **Mac ●** „Bitte einmal neu koppeln“, dazu eine ruhige Karte auf dem Startbildschirm. Es geht dann nichts raus, dein Token und deine Notizen bleiben auf dem iPad. Die Warteschlange gleicht sich nach dem Koppeln ab.
+
+**Was du tust (etwa eine Minute, zu Hause im WLAN):**
+
+1. Am Mac Studien-Gehirn starten (`pnpm sg start`).
+2. Am iPad **Mac ●** antippen, dann **Neu koppeln**.
+3. Am Mac unter **Einstellungen → Geräte** den alten Eintrag des iPads entfernen und die Kopplung neu starten (Schritt 8). Dann den QR-Code mit dem iPad scannen.
+
+Danach ist das Neukoppeln wegen eines Netzwechsels nie wieder nötig. Es macht auch ein altes Token wertlos, das vor dem Tunnel in fremde Netze gegangen sein kann.
+
+## Im Hörsaal ohne gemeinsames Netz
+
+Das iPad sucht seinen Mac über einen Namen (Bonjour), nicht über eine gespeicherte Adresse. Darum geht der Sync zu Hause und im Hörsaal auf demselben Weg:
+
+1. Am Mac: aufgeklappt, am Netzteil, `pnpm sg start` läuft, **WLAN eingeschaltet**. Verbunden sein muss der Mac mit keinem Netz.
+2. Am iPad: **WLAN eingeschaltet**, die App öffnen.
+3. Warten, bis **Mac ●** grün wird. Das dauert im Hörsaal einige Sekunden länger als zu Hause.
+
+Ein Hotspot ist nicht nötig. Ein gemeinsames Netz auch nicht.
+
+**Was „über WLAN“ und „direkt“ heißt:** Tippst du auf **Mac ●**, steht in den Verbindungsdetails eine Zeile zum Weg:
+
+- **Verbunden über das WLAN:** iPad und Mac sehen sich in einem gemeinsamen Netz (zu Hause).
+- **Direkt verbunden, ohne WLAN-Netz:** iPad und Mac reden per Wi-Fi peer-to-peer miteinander (die Technik hinter AirDrop), ohne Router. Das ist der Hörsaal-Fall.
+
+Die Zeile erscheint nur bei laufendem Sync und ändert sich nur, wenn die Verbindung neu aufgebaut wird. Eine bestehende Verbindung wechselt nie mitten im Betrieb den Weg.
+
+**Was nicht geprüft ist:** Ob das im vollen Hörsaal zuverlässig trägt, wie viel Akku es kostet und wie lange der Aufbau dauert, steht erst nach dem Test am Gerät fest (`docs/plaene/UX-12-MAC-WIEDERFINDEN.md`, Abschnitt 9). Die **Erstkopplung** geht weiter nur zu Hause im WLAN per QR-Code.
+
 ## Notizbücher wählen
 
 Auf dem Startbildschirm steht je Modul eine Karte mit den Notizbüchern des Moduls („Vorlesung“, „Übung“ und eigene). Tippe ein Notizbuch an, um darin zu schreiben. Die Wahl ist frei und geht auch ohne Verbindung zum Mac.
@@ -148,15 +181,18 @@ Tippe in der App oben rechts auf **Mac ●**. Dort steht die Ursache.
 | Anzeige | Was hilft |
 |---|---|
 | Lokales Netzwerk nicht erlaubt | Schritt 7 |
-| Kein WLAN | iPad ins selbe WLAN wie den Mac bringen. Auch Schritt 7 prüfen |
-| Mac antwortet nicht / Mac nicht gefunden | Läuft Studien-Gehirn am Mac? Stimmt die Adresse? Sonst weiter mit [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md) |
+| Suche deinen Mac … | Normal in den ersten Sekunden. Im Hörsaal dauert es länger als zu Hause |
+| WLAN ist aus | WLAN am iPad einschalten. Ein Netz brauchst du nicht, das iPad verbindet sich direkt mit dem Mac |
+| Bitte einmal neu koppeln | Abschnitt „Nach dem Update: einmal neu koppeln“ |
+| Mac nicht gefunden | Läuft Studien-Gehirn am Mac (`pnpm sg start`), ist er aufgeklappt und ist am Mac WLAN eingeschaltet? Dein Schreiben bleibt auf dem iPad. Sonst weiter mit [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md), Abschnitt 6 |
+| Kein WLAN / Mac antwortet nicht | Nur beim Koppeln: iPad ins selbe WLAN wie den Mac bringen. Auch Schritt 7 prüfen |
 | Kopplung am Mac nicht geöffnet | Am Mac die Kopplung neu starten (Schritt 8). Der Code gilt nur 5 Minuten |
 | Code stimmt nicht | Code vergleichen. Nach 5 falschen Codes von vorn beginnen |
 | Kopplung gesperrt | Am Mac die Kopplung neu starten |
 | Kopplung nicht mehr gültig | Das iPad wurde am Mac entfernt. **Neu koppeln** antippen |
 | Verbindung vom System blockiert | Fehler in der App. Bitte melden |
 
-Im Uni-WLAN sehen sich Geräte oft nicht gegenseitig. Nimm dann das Heim-WLAN oder den Hotspot deines iPhones.
+Im Uni-WLAN sehen sich Geräte oft nicht gegenseitig. Das ist für den Sync egal: Das iPad verbindet sich dann direkt mit dem Mac (Abschnitt „Im Hörsaal ohne gemeinsames Netz“). Koppeln musst du zu Hause im Heim-WLAN.
 
 ## Kopplung aufheben
 
