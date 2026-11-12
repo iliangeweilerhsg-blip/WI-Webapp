@@ -188,7 +188,15 @@ describe('Restore und Geräte (#304 M2)', () => {
       await admin.unsafe(`DROP DATABASE IF EXISTS ${scratch} WITH (FORCE)`);
     }
     const pg = createPg({ databaseUrl: url.toString(), composeFile: '' }, realExec, 'local');
-    // Vom ersten Test ist das neu gekoppelte Gerät aktiv: eins wird widerrufen, danach ist nichts mehr aktiv
+    // Unabhängig vom ersten Test: erst alles widerrufen, dann genau ein aktives Gerät anlegen
+    await revokeRestoredDevices(pg, dbName);
+    const direct = postgres(url.toString(), { max: 1, onnotice: () => {} });
+    try {
+      await direct`INSERT INTO device (id, user_id, name, kind, token_hash)
+        VALUES (gen_random_uuid(), gen_random_uuid(), 'iPad Test', 'ipad', ${randomBytes(32).toString('hex')})`;
+    } finally {
+      await direct.end({ timeout: 5 });
+    }
     expect(await revokeRestoredDevices(pg, dbName)).toBe(1);
     expect(await revokeRestoredDevices(pg, dbName)).toBe(0);
   });

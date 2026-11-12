@@ -502,7 +502,8 @@ async function fullRestore(
   if (!options.yes) {
     const ok = await deps.confirm(
       `Stand ${manifest.stand} (${standDate(manifest.stand).toLocaleString('de-DE')}) wiederherstellen? ` +
-        'Die aktuellen Daten werden zur Seite gelegt, aber nicht gelöscht. (ja/nein)',
+        'Die aktuellen Daten werden zur Seite gelegt, aber nicht gelöscht. ' +
+        'Alle gekoppelten Geräte (iPad) müssen danach neu gekoppelt werden. (ja/nein)',
     );
     if (!ok) {
       log('Abgebrochen.');
