@@ -1,7 +1,7 @@
 # Plan T1-24: Moodle-Aktionen aus dem Katalog, Uploads
 
 Stand: 12. November 2026 · Basis: `main` (`3d22da3`).
-Den Code schreibt Sonnet. **Die PRs 1 bis 3 sind sicherheitskritisch (Stufe A): Ein frischer Opus-Subagent reviewt, ein zweiter frischer Opus-Subagent macht das Gegen-Review** (CLAUDE.md, Merge-Regeln). PR 4 (Web) ist Stufe A, weil er Uploads und die Bestätigung bedient. Dieser Plan geht vor der Umsetzung durch ein Opus-Review.
+Den Code schreibt Sonnet. **Die PRs 1 bis 3 sind sicherheitskritisch (Stufe A): Ein frischer Opus-Subagent reviewt, ein zweiter frischer Opus-Subagent macht das Gegen-Review** (CLAUDE.md, Merge-Regeln). PR 4 (Web) ist Stufe A, weil er Uploads und die Bestätigung bedient. Dieser Plan geht vor der Umsetzung durch ein Opus-Review. **Das Review ist eingearbeitet (12.11.2026).** B1 und B2 sind vorgezogen und in einem eigenen PR behoben (#290). PR 1 baut auf ihm auf.
 
 Quellen: `docs/spezifikation/04-FUNKTIONEN.md` (F-MDL-05, F-MDL-06), `08-SCHNITTSTELLEN.md` §9.1 und §9.3, `07-UX.md` (R1), `10-UMSETZUNG.md` (T1-24, T1-25), `docs/VERTRAEGE.md` §5 und §17, Issue #93 Punkt 4, Code in `services/core/src/moodle/`, `services/core/src/routes/moodle.ts`, `apps/web/src`.
 
@@ -37,9 +37,9 @@ Quellen: `docs/spezifikation/04-FUNKTIONEN.md` (F-MDL-05, F-MDL-06), `08-SCHNITT
 
 ### 1.3 Befunde aus der Prüfung (gehen in PR 1)
 
-- **B1 · Aktionen sind aus dem Netz erreichbar.** Die Moodle-Routen tragen kein `sgAccess: 'local'`. Ein gekoppeltes iPad kann mit seinem Geräte-Token Vorschau und Ausführen aufrufen. Die iPad-App tut das nicht. Ein gestohlenes Geräte-Token könnte aber im Namen des Nutzers abgeben oder posten. Siehe E2.
-- **B2 · Der Code kann in der Datenbank landen.** Die Vorschau hat kein `idempotency: false`. Schickt ein Client `Idempotency-Key` mit, speichert das Plugin die Antwort samt `confirmation_token` in Postgres. Der Vertrag sagt „nur im Speicher des Core“. Siehe E3.
-- **B3 · Keine KI-Stelle schlägt Moodle-Aktionen vor.** Geprüft: Der Worker kennt Moodle nicht (`grep -i moodle services/worker` ist leer). Der LLM-Aufruf hat keine Werkzeuge (`ai/llm.py` filtert `tool_use` nur als internen Blocktyp heraus). Die Vorschläge der Inbox sind `concept_new`, `concept_merge` und `relation`. `MoodleInbox` ordnet nur Dateien lokal ein. Das bleibt so und wird per Test abgesichert (§5.6).
+- **B1 · Aktionen sind aus dem Netz erreichbar.** **Behoben in #290.** Die Moodle-Routen tragen kein `sgAccess: 'local'`. Ein gekoppeltes iPad kann mit seinem Geräte-Token Vorschau und Ausführen aufrufen. Die iPad-App tut das nicht. Ein gestohlenes Geräte-Token könnte aber im Namen des Nutzers abgeben oder posten. Das gilt auch für Aktionen mit Code, denn den Code liefert die Vorschau. Betroffen sind das WLAN und der Tunnel-Eingang (#274). Siehe E2.
+- **B2 · Der Code kann in der Datenbank landen.** **Behoben in #290.** Die Vorschau hat kein `idempotency: false`. Schickt ein Client `Idempotency-Key` mit, speichert das Plugin die Antwort samt `confirmation_token` in Postgres. Ein Replay mit demselben Schlüssel gibt denselben Code noch einmal aus. Der Vertrag sagt „nur im Speicher des Core“. Siehe E3.
+- **B3 · Keine KI-Stelle schlägt Moodle-Aktionen vor.** Geprüft: Der Worker kennt Moodle nicht (`grep -i moodle services/worker` ist leer). Der LLM-Aufruf hat keine Werkzeuge (`ai/llm.py` filtert `tool_use` nur als internen Blocktyp heraus). Der Core ruft selbst kein Modell auf, und außer `routes/moodle.ts` ruft nur `moodle/actions.ts` `client.write` auf. Die Vorschläge der Inbox sind `concept_new`, `concept_merge` und `relation`. `MoodleInbox` ordnet nur Dateien lokal ein. Das bleibt so und wird per Test abgesichert (§5.6).
 - **B4 · Blatt und Aufgabe sind nicht dauerhaft verknüpft.** `matchSheets` überträgt nur das Abgabedatum. Am Übungsblatt steht keine `assignment_id`. Siehe E9.
 
 ### 1.4 Was nicht dazu gehört
@@ -57,9 +57,9 @@ Quellen: `docs/spezifikation/04-FUNKTIONEN.md` (F-MDL-05, F-MDL-06), `08-SCHNITT
 | Nr. | Entscheidung | Grund |
 |---|---|---|
 | E1 | **Der Code hängt an Aktion, Parametern und Stand.** Jeder Handler kann einen Stand liefern (`state`). Er fließt in den Hash ein und wird beim Ausführen neu gelesen (§3.2). | #93 P4, empfohlene Variante. Erfasst auch Änderungen direkt in Moodle |
-| E1a | **Zusätzlich** verwirft `assign.save_draft` nach Erfolg alle offenen Codes derselben Aufgabe. Aktionen zur selben Aufgabe laufen im Core nacheinander (Sperre je Aufgabe). | Schließt die Lücke zwischen Standprüfung und Einreichen für eigene Aufrufe |
-| E2 | `POST /moodle/uploads`, `DELETE /moodle/uploads/{id}`, `preview` und `execute` bekommen `sgAccess: 'local'`. Aus dem Netz: `403 local_only`. | B1. Moodle-Schreiben gehört an den Mac |
-| E3 | `preview` und die Upload-Routen bekommen `idempotency: false`. `execute` behält `Idempotency-Key`. | B2. Die Antwort von `execute` enthält kein Geheimnis |
+| E1a | **Zusätzlich** verwirft `assign.save_draft` alle offenen Codes derselben Aufgabe, sobald es zu schreiben versucht hat. Das gilt auch bei Fehlern und `outcome_unknown`. Umgesetzt wird das über einen Zähler je Bereich (§3.2), damit auch eine Vorschau verfällt, die gerade parallel läuft. Ausführen zur selben Aufgabe läuft im Core nacheinander (Sperre je Aufgabe). | Zweite Linie für eigene Aufrufe. Die erste Linie ist die Standprüfung (E1), sie erfasst auch Änderungen direkt in Moodle |
+| E2 | `POST /moodle/uploads`, `DELETE /moodle/uploads/{id}`, `preview` und `execute` bekommen `sgAccess: 'local'`. Aus dem Netz: `403 local_only`. **`preview` und `execute`: erledigt in #290.** Die Upload-Routen folgen in PR 2. | B1. Moodle-Schreiben gehört an den Mac |
+| E3 | `preview` und die Upload-Routen bekommen `idempotency: false`. `execute` behält `Idempotency-Key`. **`preview`: erledigt in #290.** | B2. Die Antwort von `execute` enthält kein Geheimnis |
 | E4 | Uploads leben nur im Speicher des Core (Verzeichnis plus Liste im Speicher). Beim Start wird `tmp/moodle-uploads/` geleert. | Kein neues Schema, keine Reste. Ein Neustart macht auch alle Codes ungültig |
 | E5 | Der Inhalt eines Uploads ist unveränderlich. `sha256`, Größe und Name jedes Uploads gehören zum Stand (E1). | Der Code gilt für genau diese Dateien |
 | E6 | Neuer Fehlercode `409 moodle_action_rejected` mit `details.reason` für fachliche Ablehnungen vor dem Schreiben (§4.2). | Die Web-App braucht klare Gründe statt `502 moodle_error` |
@@ -67,8 +67,8 @@ Quellen: `docs/spezifikation/04-FUNKTIONEN.md` (F-MDL-05, F-MDL-06), `08-SCHNITT
 | E8 | In einer laufenden Session zeigt die Web-App die Bestätigung **in der Seite**, nicht als Dialog. Kein Toast. Außerhalb einer Session bleibt der Dialog aus F-MDL-06. | R1 verbietet Dialoge und Popups. Eine Frist kann aber in eine Vorlesung fallen. Siehe Owner-Frage F3 |
 | E9 | Einstieg in die Abgabe ist die Fristenliste der Modulseite, nicht das Übungsblatt. | B4. Der Weg vom Blatt braucht eine gespeicherte Verknüpfung, das ist ein eigenes Ticket |
 | E10 | Reihenfolge: zuerst `assign.*`, dann die Web-Abgabe. `forum.*` und der Rest erst nach der Antwort des Owners (F1). | Abgaben sind der Kernnutzen. Öffentliches Posten ist das größere Risiko |
-| E12 | Neuer Schalter `SG_MOODLE_ACTIONS`: Liste der Aktionen aus T1-24, die der Core anbietet. Standard leer. Nicht gelistete Aktionen bleiben `available: false` und antworten mit `501 moodle_action_not_implemented`. `completion.set` und `notifications.mark_read` hängen nicht daran. Kommt in die Tabelle der Umgebungsvariablen in `docs/VERTRAEGE.md`. | Handler lassen sich mergen, bevor sie gegen das echte Moodle geprüft sind (§9.1). Der Owner schaltet jede Aktion einzeln frei |
 | E11 | Handler lesen alles, was sie für Vorschau und Prüfung brauchen, selbst und roh aus Moodle. Die Schemas `Moodle*` der Lese-Endpunkte bleiben unverändert. | Kein Vertragsbruch für die Web-App |
+| E12 | Neuer Schalter `SG_MOODLE_ACTIONS` **(kommt mit PR 1)**: kommagetrennte Liste der Aktionen aus T1-24, die der Core anbietet. Standard leer. Eine unbekannte Kennung bricht den Start mit einer Meldung ab. Nicht gelistete Aktionen bleiben `available: false` und antworten mit `501 moodle_action_not_implemented`, auch wenn ihr Handler im Code steht. `completion.set` und `notifications.mark_read` hängen nicht daran. Solange keine gelistete Aktion `upload_ids` annimmt, antwortet `POST /moodle/uploads` ebenfalls mit `501 moodle_action_not_implemented`. Kommt in die Tabelle der Umgebungsvariablen in `docs/VERTRAEGE.md` §1. | Handler lassen sich mergen, bevor sie gegen das echte Moodle geprüft sind (§9.1). Der Owner schaltet jede Aktion einzeln frei. Standardmäßig ist alles aus, auch die Upload-Route |
 
 ---
 
@@ -99,6 +99,8 @@ export interface MoodleActionContext {
   userId(): Promise<number>;
   /** PR 2. Löst `upload_ids` auf. Unbekannt oder verfallen → 404 `moodle_upload_not_found` */
   uploads: MoodleUploadStore;
+  /** PR 3. Kurs-ID einer Aufgabe aus `moodle_deadline` (lokal, ohne Moodle). `null`, wenn unbekannt oder ohne DB */
+  courseIdOfAssignment(assignmentId: number): Promise<number | null>;
 }
 ```
 
@@ -109,14 +111,17 @@ export interface MoodleActionContext {
 ```ts
 export type ConsumeResult = 'ok' | 'invalid' | 'state_changed';
 
-issue(actionId: string, params: unknown, binding?: { state?: unknown; scope?: string | null }):
+/** Stand des Zählers für diesen Bereich. Die Vorschau liest ihn, **bevor** sie den Stand aus Moodle liest */
+epoch(scope: string): number;
+issue(actionId: string, params: unknown, binding?: { state?: unknown; scope?: string | null; epoch?: number }):
   { token: string; expiresAt: Date };
 consume(token: string, actionId: string, params: unknown, state?: unknown): ConsumeResult;
-/** Verwirft alle offenen Codes mit diesem Geltungsbereich. Liefert die Anzahl */
+/** Erhöht den Zähler des Bereichs und verwirft alle offenen Codes mit diesem Bereich. Liefert die Anzahl */
 revokeScope(scope: string): number;
 ```
 
 - Gespeichert werden zwei Hashes: `paramsHash(actionId, params)` wie heute und `stateHash = sha256(canonicalJson(state ?? null))`.
+- **Zähler je Bereich:** `issue` mit `scope` vergleicht `binding.epoch` mit dem aktuellen Zähler. Ist er inzwischen gestiegen, lief zwischen Lesen und Ausgeben ein `revokeScope`. Dann wird der Code gar nicht erst gültig: `issue` gibt ihn aus, `consume` liefert aber `invalid`. Ohne den Zähler käme eine Vorschau durch, die den Stand vor einem parallelen `save_draft` gelesen und den Code erst nach dessen Widerruf ausgegeben hat. Der Zähler lebt im Speicher wie die Codes.
 - `consume` löscht den Code immer zuerst. Dann: abgelaufen oder falscher Parameter-Hash → `invalid`. Parameter gleich, Stand anders → `state_changed`. Beide Vergleiche mit `timingSafeEqual`.
 - Beide Fälle bleiben `409 moodle_confirmation_invalid`. Bei `state_changed` kommt `details.reason = "stand_geaendert"` dazu. Die Web-App holt dann eine neue Vorschau.
 - Aufrufe ohne `binding` verhalten sich wie heute. Die Tests aus T1-21 bleiben grün.
@@ -125,16 +130,19 @@ revokeScope(scope: string): number;
 
 Vorschau:
 1. `prepare` wie heute.
-2. `state = await handler.state?.(ctx, params) ?? null`.
-3. `preview(ctx, params, state)`.
-4. Bei `confirm`: `confirmations.issue(id, params, { state, scope: handler.scope?.(params) })`.
+2. `scope = handler.scope?.(params) ?? null`, `epoch = scope ? confirmations.epoch(scope) : 0`.
+3. `state = await handler.state?.(ctx, params) ?? null`.
+4. `preview(ctx, params, state)`.
+5. Bei `confirm`: `confirmations.issue(id, params, { state, scope, epoch })`.
+
+Die Vorschau nimmt keine Sperre. Ein langer Upload in `save_draft` soll die Vorschau nicht blockieren. Den Wettlauf deckt der Zähler ab.
 
 Ausführen:
 1. `prepare` wie heute.
-2. Sperre nehmen, wenn `lockKey` einen Schlüssel liefert (`KeyedMutex` im Speicher, neue Datei `moodle/locks.ts`).
+2. Sperre nehmen, wenn `lockKey` einen Schlüssel liefert (`KeyedMutex` im Speicher, neue Datei `moodle/locks.ts`). Höchstens 10 s warten, sonst `409 moodle_action_busy` („Für diese Aufgabe läuft gerade eine andere Aktion.“). Ein Upload kann viele Minuten dauern, die Anfrage soll nicht so lange hängen.
 3. `state` neu lesen. **Erst danach** den Code einlösen: `consume(token, id, params, state)`.
 4. `execute(ctx, params, state)`.
-5. Bei Erfolg: `revokesScope` auswerten und `revokeScope` aufrufen.
+5. Hat `execute` begonnen, wird `revokesScope` ausgewertet und `revokeScope` aufgerufen, **im `finally`**. Das gilt auch bei Fehler und `outcome_unknown`, denn der Entwurf kann sich dann schon geändert haben. Lehnt eine Vorprüfung im Handler ab (`409 moodle_action_rejected`, nichts geschrieben), darf der Widerruf entfallen.
 6. Sperre immer freigeben (`finally`).
 
 Scheitert Schritt 3 am Lesen von Moodle, bleibt der Code offen. Das ist gewollt: Es wurde nichts geschrieben.
@@ -162,8 +170,15 @@ export class MoodleUploadStore {
   remove(id: string): Promise<boolean>;
   /** Löscht Verfallenes. Stündlich und vor jedem `add` */
   sweep(): Promise<void>;
+  /** Markiert Uploads als „in Benutzung“, solange eine Aktion sie liest. `release` im `finally` */
+  acquire(ids: readonly string[]): StoredUpload[];
+  release(ids: readonly string[]): void;
 }
 ```
+
+- **In Benutzung:** `sweep` und `remove` lassen Uploads in Benutzung liegen. `DELETE /moodle/uploads/{id}` antwortet dann mit `409 moodle_upload_in_use`. Sonst kann ein Verfall oder ein „Entfernen“ in der Web-App die Datei mitten im Hochladen zu Moodle löschen. Dasselbe gilt, wenn zwei Aktionen dieselbe `upload_id` nutzen und die erste sie nach Erfolg löscht. Gelöscht wird nach Erfolg nur, was danach nicht mehr in Benutzung ist.
+- **Plätze vor dem Schreiben:** Anzahl (20) und Byte (500 MB) werden **vor** dem Streamen reserviert, laufende Uploads zählen mit. Sonst überschreiten 20 gleichzeitige Uploads die Grenze, bevor einer fertig ist. Bricht ein Upload ab, wird der Platz frei.
+- **Nie ausliefern:** Der Core liefert den Inhalt eines Uploads nie zurück. Es gibt kein `GET` dafür. Damit spielen Polyglot-Dateien (z. B. PNG, das auch ZIP ist) für den Core keine Rolle.
 
 ### 3.5 Upload zu Moodle (`moodle/client.ts`, PR 2)
 
@@ -202,6 +217,8 @@ Beide antworten auch ohne eingerichtetes Moodle. Sie sprechen Moodle nicht an.
 > | 409 | `moodle_action_rejected` | Die Aktion ist nach dem Stand in Moodle nicht möglich. `details.reason` nennt den Grund |
 > | 404 | `moodle_upload_not_found` | Unbekannte oder verfallene `upload_id` |
 > | 409 | `moodle_upload_limit` | Zu viele oder zu große offene Uploads |
+> | 409 | `moodle_upload_in_use` | Upload wird gerade von einer Aktion gelesen und lässt sich nicht entfernen |
+> | 409 | `moodle_action_busy` | Für dieselbe Aufgabe läuft gerade eine andere Aktion (Sperre länger als 10 s belegt) |
 > | 400 | `moodle_upload_type_invalid` | Dateityp nicht erlaubt, Endung passt nicht zum Inhalt oder Datei leer |
 
 **08 §9.3, Tabelle der Parameter:** bei `calendar.create_event` die Funktion auf `core_calendar_create_calendar_events` ändern (E7). Bei allen Aktionen die lesenden Funktionen aus §4 ergänzen.
@@ -246,7 +263,7 @@ Vorprüfungen (alle → `409 moodle_action_rejected`, bevor irgendetwas hochgela
 
 Fallstricke:
 - **Nur schicken, was der Nutzer angibt.** Fehlt `upload_ids`, bleibt `files_filemanager` weg. Fehlt der Text, bleibt `onlinetext_editor` weg. **Nicht geprüft**, ob Moodle den fehlenden Teil dann unverändert lässt. Darum liest der Handler danach den Stand und meldet verlorene Dateien als Warnung im Ergebnis. Vor der Freigabe gegen das echte Moodle prüfen (§9.1).
-- Die Aufgabe ohne Kurs-ID zu finden kostet einen Aufruf über alle Kurse. Zuerst über `moodle_deadline` die Kurs-ID suchen, sonst alle Kurse lesen.
+- Die Aufgabe ohne Kurs-ID zu finden kostet einen großen Aufruf über alle Kurse. Zuerst `ctx.courseIdOfAssignment` fragen (§3.1), sonst `mod_assign_get_assignments` ohne `courseids` lesen.
 - Der Stand wird **vor** dem Upload gelesen. Der Upload ändert den Entwurf noch nicht.
 - Nach Erfolg die benutzten Uploads löschen. Bei `outcome_unknown` bleiben sie liegen.
 
@@ -292,7 +309,9 @@ Tests mit dem Fake:
 - **Gegenprobe #93:** Vorschau, dann ändert der Fake `timemodified` → `409` mit `stand_geaendert`, kein Schreibaufruf.
 - Gleiche Gegenprobe mit geänderter Dateiliste bei gleichem `timemodified`.
 - Vorschau für `submit`, dann `save_draft` derselben Aufgabe → der alte Code ist `invalid`. Ein Code für eine andere Aufgabe bleibt gültig.
-- Zwei `execute` gleichzeitig (Fake hält die erste Antwort zurück): Die zweite wartet und scheitert dann am Stand.
+- Zwei `execute` gleichzeitig (Fake hält die erste Antwort zurück): Die zweite wartet und scheitert dann am Stand. Hält die erste länger als 10 s: `409 moodle_action_busy`, kein Schreibaufruf der zweiten.
+- **Wettlauf Vorschau gegen Speichern:** Die Vorschau zu `submit` liest den Stand, bevor `save_draft` schreibt, und gibt ihren Code erst danach aus (Fake hält das Lesen zurück). Der Code ist `invalid`.
+- `save_draft` endet mit `502` und `outcome_unknown`. Offene Codes zu `submit` derselben Aufgabe sind danach `invalid`.
 - Code ein zweites Mal → `409`. Code mit `accept_statement` anders → `409`.
 - Jede Vorprüfung einzeln.
 - Scheitert das Neulesen (`502`), ist der Code danach noch gültig.
@@ -350,7 +369,7 @@ Tests: Erfolg, falscher Empfänger nach Vorschau (anderer `to_user_id` → `409`
 | Fehler | `start_at` mehr als 5 Jahre entfernt → `400`. Warnliste nicht leer → `502 moodle_error` |
 | Ergebnis | `{ event_id }` |
 
-Fallstrick: Ein doppelter Klick legt zwei Termine an. Die Web-App schickt darum immer `Idempotency-Key`.
+Fallstrick: Ein doppelter Klick legt zwei Termine an. Die Web-App schickt darum immer `Idempotency-Key`. Das hilft nicht nach `502` mit `outcome_unknown`: Antworten ab `500` speichert das Plugin nicht, der Schlüssel wird wieder frei. Darum wiederholt die Web-App dann nie von selbst (§6.2).
 Tests: Erfolg, Zeitstempel in Sekunden und UTC, `eventtype` ist immer `user` und lässt sich nicht überschreiben.
 
 ### 4.9 `files.upload_private` (PR 6)
@@ -385,10 +404,12 @@ Tests: Erfolg, Upload-Fehler ohne `add_user_private_files`, Code-Pflicht.
 | Aktion und Parameter | wie heute (`paramsHash`) |
 | Inhalt der Dateien | `sha256`, Größe, Name jedes Uploads im Stand (E5) |
 | Stand in Moodle | `state` je Handler (§4), neu gelesen vor dem Einlösen |
-| Eigene Änderungen | `revokeScope` nach `assign.save_draft` (E1a) |
+| Eigene Änderungen | `revokeScope` samt Zähler nach jedem Schreibversuch von `assign.save_draft` (E1a) |
 | Zeit, Einmaligkeit, Neustart | wie heute |
 
 Der Stand darf keine Uhrzeit und keine Reihenfolge enthalten, die Moodle zufällig wählt. Listen werden sortiert. Sonst scheitert jede Bestätigung.
+
+**Was der Stand nicht sieht:** Moodle liefert zu Dateien der Abgabe nach unserem Wissen keinen Inhalts-Hash, nur Name, Größe und `timemodified` (**nicht geprüft**, N4). Tauscht jemand direkt in Moodle eine Datei gegen eine gleich große mit gleichem Namen in derselben Sekunde, erkennt der Stand das nicht. Liefert Moodle `contenthash` doch, gehört er in den Stand. Fehlt ein Feld in der Antwort (z. B. `timemodified`), steht `null` im Stand. Liefert Moodle gar keinen Entwurf, ist der Stand `{ submission_id: null, … }` und nicht `null`, damit „kein Entwurf“ und „Lesen fehlgeschlagen“ getrennt bleiben. Scheitert das Lesen, gibt es `502` und keinen Code.
 
 ### 5.3 Uploads
 
@@ -399,7 +420,7 @@ Der Stand darf keine Uhrzeit und keine Reihenfolge enthalten, die Moodle zufäll
 - **Dateirechte:** Verzeichnis `0700`, Dateien `0600`.
 - **Multipart:** `files: 1`, keine weiteren Felder nötig, `parts` klein halten.
 - **Verfall:** 24 h, beim Start alles löschen (E4), nach erfolgreicher Aktion löschen.
-- **Backup:** Nicht geprüft, ob `tmp/` im Backup landet. Der Worker prüft es in PR 2 und schließt das Verzeichnis sonst im selben PR aus. Hinweis: Material-Uploads liegen heute unter `media/.tmp` (`uploadTmpDir`), der Vertrag nennt für Moodle `tmp/moodle-uploads/`. Es bleibt beim Vertrag.
+- **Backup:** Geprüft: `sg backup` sichert nur die Datenbank, `media/` und `vault/` (VERTRAEGE §13). `tmp/moodle-uploads/` landet also nicht im Backup. In PR 2 kommt ein Test dazu, der das festhält: Ein Upload liegt nicht unter `media/` oder `vault/`. Hinweis: Material-Uploads liegen heute unter `media/.tmp` (`uploadTmpDir`), der Vertrag nennt für Moodle `tmp/moodle-uploads/`. Es bleibt beim Vertrag.
 - **Name bei Moodle:** `FormData` maskiert Anführungszeichen und Zeilenumbrüche im Dateinamen. Dazu ein Test mit `a"b\r\n.pdf`.
 
 ### 5.4 Kein Token in Logs, reservierte Felder
@@ -422,7 +443,9 @@ Der Stand darf keine Uhrzeit und keine Reihenfolge enthalten, die Moodle zufäll
 Heute gibt es keine Stelle (B3). Damit das so bleibt:
 - **Regel für den Vertrag:** Vorschau und Ausführen werden nur von einem Klick-Handler der Web-App aufgerufen. Kein Job, kein Abgleich, kein Vorschlag der Inbox und kein Ergebnis eines Modells ruft sie auf.
 - **Architekturtest Core:** `moodle/actions.ts` und `client.write` werden nur von `routes/moodle.ts` und `moodle/index.ts` erreicht. Job-Handler, `sync.ts` und alles unter `routes/` außer `moodle.ts` importieren sie nicht.
-- **Architekturtest Worker:** Im Worker kommt die Zeichenfolge `/moodle/` nicht vor.
+- **Architekturtest Core, HTTP:** Unter `services/core/src` gibt es kein `app.inject` und keinen Aufruf des eigenen Ports. Die Zeichenfolge `moodle/actions` steht nur in `routes/moodle.ts`. Ein Import-Test allein sieht das nicht. Ein Aufruf über `127.0.0.1` gilt aber als lokal und kommt ohne Token durch.
+- **Architekturtest Worker:** Im Worker kommt die Zeichenfolge `/moodle/` nicht vor. Kein Aufruf eines Modells übergibt `tools`. Der Test sucht nach `tools=` bzw. dem Schlüssel `"tools"` in `services/worker`.
+- **Grenze, ehrlich:** Lokale Programme auf dem Mac gelten als vertrauenswürdig (§5.5). Ein fremdes Programm am Mac kann Vorschau und Ausführen aufrufen, das kann kein Test verhindern. Die Tests sichern nur, dass **unser** Code das nie ohne Klick tut.
 - **Web-App:** `executeMoodleAction` wird nur aus `MoodleActionButton` aufgerufen (Lint-Regel oder Test über Importe). Kein `useEffect` löst eine Aktion aus.
 - **Später:** Schlägt eine KI einmal einen Text vor, füllt sie nur das Textfeld. Der Nutzer liest, klickt und bestätigt wie sonst. Texte aus Moodle (Forenbeiträge, Aufgabentexte) sind fremde Eingaben und dürfen nie als Anweisung an ein Modell gelten.
 
@@ -485,26 +508,31 @@ Tests (Vitest, Testing Library): Ablauf ohne und mit Bestätigung, `Escape` bric
 
 Jeder PR ist für sich lauffähig. Die Schnittstellen aus §3 gelten ab PR 1.
 
+### PR 0 · B1 und B2 (Core, Stufe A): #290
+
+- `preview` und `execute` nur lokal, `preview` ohne `Idempotency-Key`. Vorgezogen, weil beide Befunde schon auf `main` bestehen.
+
 ### PR 1 · Rahmen und Härtung (Core, Stufe A)
 
-- Scope: `moodle/actions.ts` (Schnittstelle), `moodle/confirmations.ts`, neu `moodle/locks.ts`, `routes/moodle.ts`, Tests `moodle-core.test.ts`, `moodle-routes.test.ts`, Architekturtests, `08-SCHNITTSTELLEN.md` §9.1 und §9.3.
-- Inhalt: §3.1 bis §3.3, E2, E3, §5.6 (Tests), Katalog-Test aus §5.1.
+- Scope: `moodle/actions.ts` (Schnittstelle), `moodle/confirmations.ts`, neu `moodle/locks.ts`, `routes/moodle.ts`, `moodle/index.ts`, `config.ts` (`SG_MOODLE_ACTIONS`), Tests `moodle-core.test.ts`, `moodle-routes.test.ts`, Architekturtests, `08-SCHNITTSTELLEN.md` §9.1 und §9.3, `docs/VERTRAEGE.md` §1.
+- Inhalt: §3.1 bis §3.3, E12, §5.6 (Tests), Katalog-Test aus §5.1.
+- Abhängig von #290.
 - Kein neuer Handler. `completion.set` und `notifications.mark_read` laufen unverändert.
-- Abnahme: Alte Tests grün. Neue Tests für `state_changed`, `revokeScope`, Sperre, `403 local_only` aus dem Netz, Vorschau ohne gespeicherte Antwort.
+- Abnahme: Alte Tests grün. Neue Tests für `state_changed`, `revokeScope` samt Zähler, Sperre mit Zeitlimit, `SG_MOODLE_ACTIONS` (leer, eine Aktion, unbekannte Kennung).
 
 ### PR 2 · Uploads (Core, Stufe A)
 
 - Scope: neu `moodle/uploads.ts`, `moodle/client.ts` (`uploadDraft`), `moodle/index.ts`, `routes/moodle.ts`, `test/unit/moodle-fake.ts` (multipart), neue Tests, `08` §9.3.
 - Inhalt: §3.4 bis §3.6, §5.3, §5.4.
 - Abhängig von PR 1.
-- Abnahme: Datei hochladen, auflösen, löschen, verfallen. Alle Grenzen aus §5.3 mit Gegenprobe. `uploadDraft` gegen den Fake. Noch keine Aktion nutzt Uploads.
+- Abnahme: Datei hochladen, auflösen, löschen, verfallen, „in Benutzung“. Alle Grenzen aus §5.3 mit Gegenprobe, auch gleichzeitige Uploads. `uploadDraft` gegen den Fake. Noch keine Aktion nutzt Uploads. Darum antwortet `POST /moodle/uploads` mit leerem `SG_MOODLE_ACTIONS` mit `501` (E12). Der Test schaltet die Route über die Konfiguration frei. Die Upload-Routen sind lokal und ohne Idempotenz (E2, E3), Test wie in #290.
 
 ### PR 3 · `assign.save_draft` und `assign.submit` (Core, Stufe A)
 
 - Scope: neu `moodle/actions/assign.ts`, `moodle/actions.ts` (eintragen), Tests, `08` §9.3.
 - Inhalt: §4.3, §4.4, E6.
 - Abhängig von PR 2. **Schließt Punkt 4 von #93.**
-- Abnahme: Tests aus §4.3 und §4.4. Danach Test am echten Moodle durch den Owner (§9.1), vorher bleibt die Aktion hinter `SG_MOODLE_ACTIONS` (Liste erlaubter Aktionen, Standard leer). So kann der PR gemergt werden, ohne dass die Aktion ungeprüft sichtbar ist.
+- Abnahme: Tests aus §4.3 und §4.4. Danach Test am echten Moodle durch den Owner (§9.1). Vorher bleibt die Aktion hinter `SG_MOODLE_ACTIONS` (E12, seit PR 1). So kann der PR gemergt werden, ohne dass die Aktion ungeprüft sichtbar ist.
 
 ### PR 4 · Web: Abgabe (Stufe A)
 
@@ -543,7 +571,7 @@ Alles hier ist nur gegen das echte Moodle klärbar.
 | N1 | Welche Schreibfunktionen der Token wirklich darf | Aktion bleibt `available: false`. Sichtbar in `GET /moodle/actions` |
 | N2 | Felder und Antwort von `upload.php`, Freigabe von Uploads (`uploadfiles`), Größenlimit des Moodle | `uploadDraft` anpassen |
 | N3 | `mod_assign_save_submission`: Bleiben Dateien erhalten, wenn nur Text gespeichert wird, und umgekehrt? | Handler muss den anderen Teil mitschicken oder die Warnung ändern |
-| N4 | Ändert sich `timemodified` der Abgabe bei jeder Änderung an Dateien und Text, auch bei Gruppenabgaben? | Der Stand trägt darum auch Dateiliste und Text-Hash |
+| N4 | Ändert sich `timemodified` der Abgabe bei jeder Änderung an Dateien und Text, auch bei Gruppenabgaben? Liefert `mod_assign_get_submission_status` je Datei einen `contenthash`? | Der Stand trägt darum auch Dateiliste und Text-Hash. Mit `contenthash` wird die Bindung lückenlos (§5.2) |
 | N5 | Namen der Einstellungen einer Aufgabe (`maxfilesubmissions`, `maxsubmissionsizebytes`, `filetypeslist`) und der Text der Erklärung | Vorprüfung entfällt, Moodle lehnt dann selbst ab (`502 moodle_error`) |
 | N6 | Verhalten bei Verspätung, Fristverlängerung, neuem Versuch nach Rückgabe | Warnungen und Gründe anpassen |
 | N7 | `mod_forum_can_add_discussion`, `mod_forum_get_discussion_post`: freigegeben? Gruppenforen, anonyme Foren | Vorschau ohne Namen bzw. Aktion nicht verfügbar |
@@ -574,8 +602,8 @@ Als Issue mit Label `entscheidung`, verlinkt in #188. Keine blockiert PR 1 und P
 | F1 | Welche Aktionen brauchst du wirklich? | Jetzt nur **Abgaben** (`assign.*`). Foren später, wenn du in der App mitlesen willst. `message.send`, `calendar.create_event` und `files.upload_private` streichen oder zurückstellen: wenig Nutzen, eigenes Risiko |
 | F2 | Welche Dateitypen gibst du ab? | Start mit PDF, PNG, JPEG, ZIP und Text. Weitere (z. B. Quellcode, Office) nur auf Wunsch |
 | F3 | Darf man während einer laufenden Vorlesung abgeben? | Ja, aber ohne Dialog: Die Rückfrage steht in der Seite (E8). Sonst blockiert eine Vorlesung eine Frist |
-| F4 | Soll Einreichen auch vom iPad gehen? | Nein. Nur am Mac (E2) |
-| F5 | Erster Test am echten Moodle (§9.1): Gibt es eine Aufgabe, in der ein Versuch folgenlos ist? | Ohne solchen Test bleibt `assign.submit` ausgeschaltet |
+| F4 | Soll Einreichen auch vom iPad gehen? | Nein. Nur am Mac (E2). Ist mit #290 schon so umgesetzt. Ein „Ja“ hieße: eigene Absicherung für Geräte (z. B. Bestätigung am Mac), eigenes Ticket |
+| F5 | Keine Entscheidung, sondern eine Bitte: Gibt es für den ersten Test am echten Moodle (§9.1) eine Aufgabe, in der ein Versuch folgenlos ist? | Ohne solchen Test bleibt `assign.submit` ausgeschaltet |
 
 ---
 
@@ -597,6 +625,8 @@ Als Issue mit Label `entscheidung`, verlinkt in #188. Keine blockiert PR 1 und P
 - [ ] Jede Aktion prüft ihre Parameter, bevor sie Moodle anspricht (F-MDL-05).
 - [ ] Eine Ablehnung von Moodle liefert eine verständliche Meldung mit dem Moodle-Fehlercode in `details`.
 - [ ] Der Token steht in keiner URL, keinem Log und keiner Antwort.
-- [ ] Aus dem Netz sind Uploads, Vorschau und Ausführen gesperrt.
+- [ ] Aus dem Netz sind Uploads, Vorschau und Ausführen gesperrt (Vorschau und Ausführen: #290).
+- [ ] Ein Bestätigungscode steht nie in Postgres, auch nicht mit `Idempotency-Key` (#290).
+- [ ] Mit leerem `SG_MOODLE_ACTIONS` bietet der Core keine Aktion aus T1-24 an und nimmt keine Uploads an.
 - [ ] In einer laufenden Session erscheint kein Dialog und kein Toast.
 - [ ] Kein Job und kein Modell erreicht Vorschau oder Ausführen (Architekturtests).
