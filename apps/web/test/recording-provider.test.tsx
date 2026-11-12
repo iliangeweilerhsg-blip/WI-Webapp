@@ -476,8 +476,10 @@ describe('RecordingProvider: Wechsel der Session', () => {
     expect(rec.mr.instances).toHaveLength(2);
     expect(shared.maxRunning).toBe(1);
     expect(locks.maxHeld).toBe(1);
-    expect(uploads(new RegExp(`^POST .*/sessions/${A_ID}/recordings$`)).length).toBeGreaterThanOrEqual(1);
-    expect(uploads(new RegExp(`^POST .*/sessions/${B_ID}/recordings$`)).length).toBeGreaterThanOrEqual(1);
+    expect(uploads(new RegExp(`^POST .*/sessions/${A_ID}/recordings$`))).toHaveLength(1);
+    expect(uploads(new RegExp(`^POST .*/sessions/${B_ID}/recordings$`))).toHaveLength(1);
+    // A ist sauber abgeschlossen (letzter Chunk, `complete`), bevor B das Mikrofon bekommt
+    await waitFor(() => expect(uploads(/^POST .*\/complete$/)).toHaveLength(1));
 
     // B endet und gibt die Sperre frei: Auch jetzt nimmt kein übrig gebliebener Recorder für A auf
     await sync.emit(
@@ -485,10 +487,12 @@ describe('RecordingProvider: Wechsel der Session', () => {
       session(B_ID, { number: 8, state: 'beendet', updated_at: '2026-11-04T08:50:00Z' }),
     );
     await waitFor(() => expect(shared.running.size).toBe(0));
+    await waitFor(() => expect(uploads(/^POST .*\/complete$/)).toHaveLength(2));
     await settle(150);
     expect(rec.getUserMedia).toHaveBeenCalledTimes(2);
     expect(shared.running.size).toBe(0);
     expect(shared.maxRunning).toBe(1);
+    expect(uploads(/^POST .*\/recordings$/)).toHaveLength(2);
   });
 
   it('A → B → C kurz hintereinander ohne Sperre: C wartet auf A, nicht nur auf B', async () => {

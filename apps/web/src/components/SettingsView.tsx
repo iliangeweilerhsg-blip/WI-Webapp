@@ -1,6 +1,15 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { useSearchParams } from 'next/navigation';
 import { AiSettings } from './settings/AiSettings.tsx';
 import { DevicesSettings } from './settings/DevicesSettings.tsx';
@@ -102,6 +111,20 @@ function PanelScope({
 }
 
 /**
+ * Direkt in einen Bereich springen: /einstellungen?bereich=moodle (z. B. aus der Inbox). Ein Link innerhalb der
+ * Einstellungen (Moodle › „Zu den Semestern“) lädt die Seite nicht neu (die Aufnahme darf nicht enden, Issue #210):
+ * Darum läuft der Effekt bei jeder Änderung der Query erneut.
+ */
+function FollowBereich({ onWanted }: { onWanted: (id: string) => void }) {
+  const query = useSearchParams().toString();
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('bereich');
+    if (wanted && TABS.some((tab) => tab.id === wanted)) onWanted(wanted);
+  }, [query, onWanted]);
+  return null;
+}
+
+/**
  * Einstellungen (07 §3.13): ab `md` links die Bereiche, rechts das Formular; auf schmalen Bildschirmen eine
  * Reiterleiste. Alle Bereiche bleiben gerendert (`hidden`), damit ungespeicherte Eingaben beim Wechsel erhalten
  * bleiben.
@@ -124,15 +147,6 @@ export function SettingsView() {
     if (el && typeof el.scrollIntoView === 'function')
       el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [active]);
-
-  // Direkt in einen Bereich springen: /einstellungen?bereich=moodle (z. B. aus der Inbox). Ein Link innerhalb der
-  // Einstellungen (Moodle › „Zu den Semestern“) lädt die Seite nicht neu (die Aufnahme darf nicht enden, Issue #210):
-  // Darum läuft der Effekt bei jeder Änderung der Query erneut.
-  const query = useSearchParams().toString();
-  useEffect(() => {
-    const wanted = new URLSearchParams(window.location.search).get('bereich');
-    if (wanted && TABS.some((tab) => tab.id === wanted)) setActive(wanted);
-  }, [query]);
 
   const report = useCallback((tabId: string, mark: TabMark) => {
     setMarks((current) => {
@@ -166,6 +180,10 @@ export function SettingsView() {
 
   return (
     <section aria-labelledby="screen-title">
+      {/* Im Static Export braucht `useSearchParams` eine eigene Suspense-Grenze (sonst bricht `next build` ab) */}
+      <Suspense fallback={null}>
+        <FollowBereich onWanted={setActive} />
+      </Suspense>
       <h1 id="screen-title" className="text-xxl font-semibold">
         Einstellungen
       </h1>
