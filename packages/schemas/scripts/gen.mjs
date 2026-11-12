@@ -202,6 +202,26 @@ func sgFormatTimestamp(_ date: Date) -> String {
   if (!codingKey.test(text)) throw new Error('quicktype-Ausgabe: JSONCodingKey nicht gefunden');
   text = text.replace(codingKey, 'final class JSONCodingKey: CodingKey {');
 
+  // Swift 6: SGServerMessage ist nur Sendable, wenn JSONAny und JSONNull es sind (SyncError.details, #97).
+  // JSONNull hat keine gespeicherten Eigenschaften, final reicht für geprüftes Sendable.
+  // JSONAny hält `let value: Any`: Any ist nicht Sendable, der Compiler kann es nicht prüfen. Vertretbar mit
+  // @unchecked, weil (1) `value` ein `let` ist und die Klasse final ist, es also nach dem Init nie geändert wird,
+  // und (2) der Decoder nur JSON-Werte hineinlegt (Bool, Int64, Double, String, JSONNull, [Any], [String: Any]),
+  // also Werttypen und die Sendable-Klasse JSONNull. Die Prüfung unten bricht den Codegen, falls quicktype das ändert.
+  const jsonNull = /^(final )?class JSONNull: Codable, Hashable \{$/m;
+  const jsonAny = /^(final )?class JSONAny: Codable \{$/m;
+  if (!jsonNull.test(text)) throw new Error('quicktype-Ausgabe: JSONNull nicht gefunden');
+  if (!jsonAny.test(text)) throw new Error('quicktype-Ausgabe: JSONAny nicht gefunden');
+  const anyStart = text.search(jsonAny);
+  const anyBody = text.slice(anyStart, text.indexOf('\n}\n', anyStart));
+  if (!/^ {4}let value: Any$/m.test(anyBody) || /^ {4}(public )?var \w+/m.test(anyBody))
+    throw new Error(
+      'quicktype-Ausgabe: JSONAny hat veränderliche oder unerwartete gespeicherte Eigenschaften, @unchecked Sendable nicht mehr vertretbar',
+    );
+  text = text
+    .replace(jsonNull, 'final class JSONNull: Codable, Hashable, Sendable {')
+    .replace(jsonAny, 'final class JSONAny: Codable, @unchecked Sendable {');
+
   const schemas = Object.entries(bundle.$defs)
     .filter(([, d]) => d.type === 'object' && d.properties)
     .map(([n, d]) => ({
