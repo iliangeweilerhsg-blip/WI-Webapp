@@ -11,6 +11,7 @@ export const COMMANDS = {
     'Stand wiederherstellen: restore <stand> | restore --test <stand> | restore --automatisch (Monatstest, nur eigene Stände) | restore (Liste)',
   moodle:
     'Moodle-Zugang: moodle login [--token-stdin] [--gueltig-bis JJJJ-MM-TT] | moodle status | moodle logout (Token im Schlüsselbund)',
+  ipad: 'iPad-App: ipad (aktuell oder neu aufspielen?) | ipad aufgespielt (nach dem Aufspielen bestätigen)',
 } as const;
 
 export type CommandName = keyof typeof COMMANDS;
