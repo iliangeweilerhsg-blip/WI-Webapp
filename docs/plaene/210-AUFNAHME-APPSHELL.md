@@ -79,7 +79,7 @@ Folge-Tabs und Tabs ohne Live-Verbindung bekommen kein `session.updated`. Sie fr
 **V2 · §11.8, „Auto-Stopp“, neuer Satz am Ende:**
 
 ```markdown
-Vor jedem Stopp liest der Controller die Session per `GET /sessions/{id}` neu und wertet die Regeln mit diesem Stand aus. So stoppt ein Tab mit altem Stand keine Session, die ein anderer Tab gerade verlängert hat.
+Vor jedem Stopp liest der Controller die Session per `GET /sessions/{id}` neu und wertet die Regeln mit diesem Stand aus. So stoppt ein Tab mit altem Stand keine Session, die ein anderer Tab gerade verlängert hat. Ist die Session nicht mehr aktiv oder unbekannt (404), sendet er keinen Stopp. Scheitert der Abruf, gilt das wie ein gescheiterter Stopp. In Folge-Tabs kommt ein Verlängern oder Stoppen aus einem anderen Tab nicht über `session.updated` an, sondern über die Abfrage (höchstens 10 s später).
 ```
 
 **V3 · §16.3, neue Zeile nach „T1-11 Rest, T1-13, #199“:**
@@ -108,13 +108,14 @@ export function useActiveSession(): UseQueryResult<Session | null>;
 ```
 
 - `applyActiveSession` enthält die Logik, die heute im `session.updated`-Hörer von `useActiveSession` steht. Der Hörer ruft sie auf.
+- **Neu darin, weil jetzt auch REST-Antworten hineinlaufen:** Eine aktive Fassung mit **anderer** ID ersetzt die bekannte aktive Session nur, wenn ihr `updated_at` nicht älter ist. Sonst ist sie veraltet (z. B. eine verspätete Antwort für A, nachdem B gestartet wurde und der Core A beendet hat) und ändert nichts. Test: Cache B, danach `applyActiveSession` mit A (`laeuft`, älter) → B bleibt.
 - Abfrage-Optionen:
   - `refetchInterval: (q) => online ? false : q.state.data ? ACTIVE_POLL_MS : ACTIVE_IDLE_POLL_MS`
   - `online` = `useConnectionState(sync) === 'online'` (`lib/recorder/leader-state.ts`). Der Wert ist stabil, er springt nicht zwischen `connecting` und `backoff`.
   - `refetchIntervalInBackground: true`. Der Vorlesungs-Tab liegt oft im Hintergrund.
   - `networkMode: 'always'`. Der Core ist lokal. Ohne WLAN meldet der Browser `navigator.onLine = false`, React Query würde die Abfrage sonst anhalten.
 - Zusätzlich neu laden bei `leader.changed`.
-- `useTodayData().apply`, `useSessionData().apply` und der `onSession`-Weg in `SpontaneousStart` rufen zusätzlich `applyActiveSession`. So kennt auch ein Folge-Tab den eigenen Start, die eigene Pause und den eigenen Stopp sofort.
+- `useTodayData().apply` und `useSessionData().apply` rufen zusätzlich `applyActiveSession` (darüber laufen auch die Aktionen der `StartCard`, der Statusleiste und von `SpontaneousStartCard` auf „Heute“). `useSpontaneousStart` ruft es selbst für `result.session` und `result.ended_session`, **unabhängig von `onSession`**: Auf der Modulseite (`ModuleSessionButton`) fehlt `onSession`. So kennt auch ein Folge-Tab den eigenen Start, die eigene Pause und den eigenen Stopp sofort.
 
 ### 3.2 `src/lib/autostop/controller.ts` (PR 1)
 
@@ -138,7 +139,10 @@ Ablauf in `tick()`, wenn `status.state === 'stoppen'` und nichts zurückhält:
    - 404: nichts tun (wie heute bei 404 auf den Stopp).
 3. `fresh` nicht mehr aktiv: `setSession(fresh)`, fertig. Kein `POST`.
 4. `evaluateAutoStop` mit `fresh` und der aktuellen Stille. Ergebnis nicht `stoppen`: `stopSentFor = null`, `setSession(fresh)`, fertig.
-5. Sonst `api.stop(id, reason)` wie heute.
+5. Läuft inzwischen ein `extend` (Klick während des `GET`) oder gilt eine Schonfrist (`graceUntil`), ebenfalls kein Stopp: `stopSentFor = null`, der nächste Takt entscheidet.
+6. Sonst `api.stop(id, reason)` wie heute.
+
+Während des `GET` zeigt der Controller wie heute beim laufenden Stopp `inaktiv` (`stopSentFor` ist gesetzt). Der Hinweis kann dabei für die Dauer des Abrufs verschwinden. Das ist hingenommen.
 
 Der Standard für `api` wird `{ stop: stopSession, extend: extendSession, get: getSession }`.
 
@@ -170,7 +174,7 @@ export interface TrackedSession {
 /** Die aktive Session; nach ihrem Ende dieselbe mit `phase = 'andere'`, bis eine neue aktiv wird. */
 export function useTrackedSession(): TrackedSession | null;
 
-// paused-since.ts  (zieht aus components/dashboard/use-session.ts um, Regel E9)
+// paused-since.ts  (zieht schon in PR 1 aus components/dashboard/use-session.ts um, Regel E9)
 export function usePausedSince(session: Session | undefined): number | null;
 
 // RecordingProvider.tsx
@@ -206,7 +210,11 @@ export interface RecordingView {
 export function RecordingProvider(props: { children: ReactNode; env?: RecordingEnv }): JSX.Element;
 /** Ohne Provider: ein fester, untätiger Stand (`kind: 'inactive'`). Komponenten laufen so auch in Tests ohne Shell. */
 export function useRecordingView(): RecordingView;
-/** Wie `useRecordingView`, aber untätig, wenn `sessionId` nicht die verfolgte Session ist. */
+/**
+ * Wie `useRecordingView`, aber untätig (`kind: 'inactive'`), wenn `sessionId` nicht die verfolgte Session ist.
+ * Ausnahme: Solange `useActiveSession` noch lädt (`isPending`), liefert sie `kind: 'starting'`. Sonst stünde in der
+ * Statusleiste einer laufenden Session kurz „Nicht gestartet“ (`RUNNING_LABEL.inactive`).
+ */
 export function useRecordingFor(sessionId: string): RecordingView;
 /** Das Dashboard meldet: „Ich zeige diese Session.“ (`useLayoutEffect`, meldet sich beim Unmount ab) */
 export function useClaimRecordingDisplay(sessionId: string | null): void;
@@ -223,6 +231,7 @@ Regeln im Provider:
 - **`beforeunload`** zieht unverändert um.
 - **`pagehide` und `visibilitychange` (verborgen):** Solange aufgenommen wird, ruft der Provider `notifyUploadsPending()`. Das Herausgeben der Daten macht der Recorder selbst (§3.3).
 - **Auto-Stopp:** Eine innere Komponente (`AutoStopHost`) wird nur gerendert, solange die Phase `laeuft` oder `pausiert` ist. Nur sie ruft `useSettings()` und `useAutoStop({ session, lecture, events: client, ...env.autoStop })`. So lädt die Shell `GET /settings` nicht auf jeder Seite.
+- **Antworten des Auto-Stopps in den Cache:** `AutoStopHost` umhüllt die API (`env.autoStop.api` oder den Standard): Die Antworten von `stop`, `extend` und `get` gehen zusätzlich an `applyActiveSession`. Sonst nimmt ein Leader ohne Live-Verbindung nach dem eigenen Auto-Stopp bis zu 10 s weiter auf, und ein Folge-Tab zeigt nach dem eigenen Verlängern bis zu 10 s den alten Stand.
 - **Der Kontextwert wird mit `useMemo` gebaut.** `children` kommen als Prop, die Seiten rendern bei einem neuen Recorder-Stand nicht neu. Nur `StatusBar`, Leiste und `StartCard` lesen den Kontext.
 - **Schalter für PR 2 (E11):** `const ROUTE_GATE = true`. Solange er gilt, bekommen `LeaderRecording` und der Auto-Stopp `phase = 'andere'` bzw. `session = null`, wenn `shownByDashboard` falsch ist. PR 3 löscht den Schalter.
 
@@ -293,6 +302,8 @@ Besonderheiten:
 
 - Ist bei A noch die Mikrofon-Abfrage offen, wartet Schritt 2 auf `recorder.start()` (höchstens 30 s, `getUserMediaTimeoutMs`). So lange zeigt B nach 1,5 s „Wartet auf anderen Tab“. Der Text passt hier nicht ganz, der Fall ist selten. Kein eigener Zustand.
 - Ohne Web Locks gibt es keine Sperre. Dann könnten A und B kurz zugleich aufnehmen. Darum wartet der Effekt für B zusätzlich auf ein Promise `previousStopped`, das der Aufräumer von A erfüllt (ein `useRef<Promise<void>>` im Provider). Das gilt mit und ohne Web Locks.
+  - **Umsetzung:** B bekommt eine umhüllte Sperre: `acquireLock: (signal) => previousStopped.then(() => (signal.aborted ? null : baseAcquire(signal)))`. So zeigt B während des Wartens wie gewohnt `isWaiting()` und nach 1,5 s „Wartet auf anderen Tab“, und ein Abbruch per `signal` wirkt auch hier.
+  - `previousStopped` löst auf, sobald `control.idle()` von A durch ist (Aufnahme gestoppt, Mikrofon frei), **nicht** erst nach `flushUploads` (bis zu 8 s). Es lehnt nie ab (`.catch(() => undefined)`).
 - Die Tab-Erlaubnis bleibt (E6). Wurde B am iPad gestartet und ist die Browser-Berechtigung nicht erteilt, steht in der Leiste „Aufnahme starten“.
 
 ### 4.4 Mikrofon nach „Hier übernehmen“ im Folge-Tab
@@ -369,7 +380,7 @@ Rechts immer der Link „Zur Vorlesung“ (`sessionHref(view.sessionId)`), davor
 
 ### 4.8 Pausendauer
 
-- `usePausedSince` zieht nach `lib/recording/paused-since.ts` und läuft **einmal** im Provider. Leiste und Statusleiste lesen `view.pausedSince`. Beide zeigen denselben Wert, egal welche gerade eingehängt ist.
+- `usePausedSince` liegt ab PR 1 in `lib/recording/paused-since.ts` und läuft ab PR 2 **einmal** im Provider. Leiste und Statusleiste lesen `view.pausedSince`. Beide zeigen denselben Wert, egal welche gerade eingehängt ist.
 - Regel E9 ersetzt `Date.now()` beim beobachteten Wechsel durch `updated_at` der ersten pausierten Fassung. `seenOther` entfällt.
 - `sessionStorage` bleibt (je Tab, überlebt Neuladen). Jeder Tab kommt mit E9 selbst auf denselben Wert.
 - Grenze bleibt: Ändert sich `updated_at` während der Pause aus anderem Grund (verschobener Termin, `ensurePlannedSessions`) und lädt ein Tab erst danach, zählt er ab dieser Änderung. Exakt wird es erst mit `paused_at` (§1.3).
@@ -436,7 +447,8 @@ Vier kleine Änderungen. Jede ist schon heute richtig und ändert für den Nutze
 **Scope**
 - `docs/VERTRAEGE.md` (V1 bis V3, wörtlich)
 - `src/lib/sessions.ts`
-- `src/components/today/use-today.ts`, `src/components/dashboard/use-session.ts`, `src/components/today/SpontaneousStart.tsx` (je nur der Aufruf von `applyActiveSession`; in `use-session.ts` zusätzlich Regel E9 in `usePausedSince`, die Datei bleibt hier noch am Ort)
+- `src/components/today/use-today.ts`, `src/components/dashboard/use-session.ts`, `src/components/today/SpontaneousStart.tsx` (je nur der Aufruf von `applyActiveSession`)
+- neu `src/lib/recording/paused-since.ts`: `usePausedSince` zieht mit seinen Helfern (`pausedKey`, `readPaused`, `writePaused`) aus `use-session.ts` hierher und bekommt Regel E9. `src/components/dashboard/StatusBar.tsx` ändert nur den Import. So bleibt in PR 2 ein reiner Umzug weniger.
 - `src/lib/autostop/controller.ts`, `src/lib/autostop/useAutoStop.ts`
 - `src/lib/recorder/recorder.ts`
 - Tests: `test/autostop-controller.test.ts`, `test/recorder.test.ts`, `test/dashboard.test.tsx` (Pausendauer), neu `test/active-session.test.tsx`
@@ -448,7 +460,7 @@ Vier kleine Änderungen. Jede ist schon heute richtig und ändert für den Nutze
 2. Die drei Aufrufer ergänzen.
 3. Vorab-Abgleich im Controller. `useAutoStop` reicht `subscribeLevel` durch.
 4. `pagehide` im Recorder.
-5. `usePausedSince` nach E9. Der Test „zeigt die Dauer ab dem Wechsel“ stellt die Fassung mit passendem `updated_at` bereit.
+5. `usePausedSince` nach `lib/recording/paused-since.ts` umziehen und auf E9 umstellen. Der Test „zeigt die Dauer ab dem Wechsel“ stellt die Fassung mit passendem `updated_at` bereit.
 6. Vertragstext.
 
 **Tests**
@@ -459,11 +471,14 @@ Vier kleine Änderungen. Jede ist schon heute richtig und ändert für den Nutze
   - `session.updated` mit `beendet` für die aktive Session: Cache wird `null`. Ältere Fassung: keine Änderung.
   - Start von B, Ereignisse in beiden Reihenfolgen (A beendet zuerst, B läuft zuerst): Am Ende steht B.
   - `applyActiveSession` nach einer REST-Antwort im Folge-Tab: sofort sichtbar, ohne Abfrage.
+  - Verspätete Antwort für A (`laeuft`, älteres `updated_at`), während B im Cache steht: B bleibt.
+  - Start auf der Modulseite (ohne `onSession`): Der Cache kennt die neue Session sofort.
 - Controller:
   - Grenze erreicht, `get` liefert verlängerte Session: kein `POST …/stop`, Hinweis weg.
   - `get` liefert `beendet`: kein `POST`, Zustand `inaktiv`.
   - `get` scheitert am Netz: neuer Versuch nach `retryMs`, höchstens einer zugleich.
   - `get` liefert unveränderten Stand: genau ein `POST` mit dem richtigen Grund.
+  - Klick auf „Verlängern“, während `get` noch läuft: kein `POST …/stop`.
   - Ohne `api.get`: Verhalten wie bisher. Die vorhandenen Tests mit eigener `api` bleiben unverändert grün. Der Test gegen den Fake-Core nutzt den Standard und sieht einen zusätzlichen `GET`.
 - Recorder: `pagehide` ruft `requestData()` genau einmal je Ereignis. Nach `stop()` ist der Hörer abgemeldet. Ohne laufende Aufnahme passiert nichts.
 - Pausendauer: Pause vom anderen Gerät, der Tab sieht sie 20 s später → die Dauer zählt ab `updated_at`. Die drei vorhandenen Tests (UX-07) bleiben grün.
@@ -489,17 +504,17 @@ Vier kleine Änderungen. Jede ist schon heute richtig und ändert für den Nutze
 Die Architektur zieht um. Der Schalter `ROUTE_GATE` hält das alte Verhalten: Aufgenommen und automatisch gestoppt wird nur, solange das Dashboard der Session offen ist.
 
 **Scope**
-- neu `src/lib/recording/` (`RecordingProvider.tsx`, `tracked-session.ts`, `paused-since.ts`, `index.ts`)
+- `src/lib/recording/` (neu: `RecordingProvider.tsx`, `tracked-session.ts`, `index.ts`; `paused-since.ts` liegt seit PR 1 dort)
 - neu `src/components/recording/labels.ts`
 - `src/components/AppShell.tsx` (Provider einhängen, Prop `recordingEnv`)
 - `src/components/dashboard/StatusBar.tsx`
-- `src/components/dashboard/use-recording.ts` (löschen), `src/components/dashboard/use-session.ts` (`usePausedSince` und seine Helfer entfernen)
+- `src/components/dashboard/use-recording.ts` (löschen)
 - Tests: `test/recording-fakes.ts`, `test/recording.test.tsx`, `test/dashboard.test.tsx`, `test/heute.test.tsx` (Zähler, `recordingEnv`), neu `test/recording-provider.test.tsx`, bei Bedarf weitere Suiten mit `AppShell` und aktiver Session (nur `recordingEnv` ergänzen)
 
 **Schnittstellen:** §3.4, §3.5 (`labels.ts`, `AppShell`).
 
 **Schritte**
-1. `useTrackedSession` und `paused-since.ts` anlegen.
+1. `useTrackedSession` anlegen.
 2. `RecordingProvider` bauen. Die Logik aus `useSessionRecording` zieht zeilenweise um (Recorder-Effekt, `usePermission`, Upload-Schalter mit `wasLeader`, Warte-Hinweis, `beforeunload`, Bestimmung von `kind`). Neu sind: Tab-Erlaubnis, `previousStopped` (§4.3), `AutoStopHost`, `shownByDashboard`, `ROUTE_GATE`, `notifyUploadsPending` bei `pagehide` und verborgenem Tab.
 3. `AppShell`: `<SyncProvider><RecordingProvider env={recordingEnv}><Shell>…`. `QueryProvider` liegt in `app/layout.tsx` schon darüber.
 4. `StatusBar`: `useSessionRecording`, `useAutoStop`, `usePausedSince` und `useSettings` raus. Stattdessen `useRecordingFor(session.id)` und `useClaimRecordingDisplay(session.id)`. `RUNNING_LABEL`, `Dot` und die sr-Sätze kommen aus `labels.ts`. Props, Testkennungen und Texte bleiben gleich.
@@ -529,7 +544,7 @@ Die Architektur zieht um. Der Schalter `ROUTE_GATE` hält das alte Verhalten: Au
 **Review:** Opus, Stufe A (Sperren, Nebenläufigkeit). Gegenproben: `previousStopped` entfernen → Test „ohne Sperre“ rot. Schalter entfernen → Test „Dashboard hängt aus“ rot. Im Browser: zwei Tabs, Start, „Hier übernehmen“, Tab schließen.
 
 **Akzeptanzkriterien**
-- [ ] Für den Nutzer ändert sich nichts außer der genaueren Pausendauer.
+- [ ] Für den Nutzer ändert sich nichts außer der genaueren Pausendauer und einer Folge von E6: Wer im Tab einmal „Aufnahme starten“ geklickt hat, dem startet die Aufnahme beim erneuten Öffnen des Dashboards ohne neuen Klick. Die PR-Beschreibung nennt das.
 - [ ] `use-recording.ts` und `RecordingEnvContext` gibt es nicht mehr.
 - [ ] Es gibt je Tab höchstens einen `AudioRecorder` und einen `AutoStopController`.
 
@@ -545,6 +560,7 @@ Die Architektur zieht um. Der Schalter `ROUTE_GATE` hält das alte Verhalten: Au
 - `src/components/AppShell.tsx` (Leiste, `onTakeOver`, `pageshow`)
 - `src/lib/sync/OtherTabBanner.tsx` (Prop `onTakeOver`)
 - `src/components/today/StartCard.tsx`, `src/components/today/HeuteScreen.tsx`
+- `src/components/settings/MoodleSettings.tsx` (nur der Link „Allgemein“, siehe Schritt 6)
 - `docs/anleitungen/VORLESUNGSTAG.md`, `docs/ux/STUDIENALLTAG-2.md`
 - Tests: `test/recording-provider.test.tsx`, neu `test/recording-bar.test.tsx`, `test/heute.test.tsx`, `test/sync-banner.test.tsx`, `test/appshell.test.tsx`
 
@@ -556,7 +572,8 @@ Die Architektur zieht um. Der Schalter `ROUTE_GATE` hält das alte Verhalten: Au
 3. `OtherTabBanner`: `onClick={() => { onTakeOver?.(); client.takeOver(); }}`. `Shell` übergibt `useNoteRecordingIntent()`.
 4. `pageshow` in `Shell` (E8).
 5. `StartCard` nach §4.9, `HeuteScreen` ohne `otherTab`.
-6. Anleitung und UX-Stand nach §4.11.
+6. Harte Seitenwechsel innerhalb der App entfernen: `MoodleSettings.tsx` verlinkt `/einstellungen?bereich=allgemein` mit einem rohen `<a href>`. Das lädt die Seite neu und beendet die Aufnahme. Ersetzen durch `next/link`. Stand 12.11. ist das die einzige Stelle (`grep -rn '<a' src` ohne `target="_blank"` und Sprungmarken).
+7. Anleitung und UX-Stand nach §4.11.
 
 **Tests**
 - Navigation: REC im Dashboard, Dashboard hängt aus → **dieselbe** `recordingId` läuft weiter, `getUserMedia` wurde genau einmal gerufen, die Leiste zeigt „REC“ mit Laufzeit. Zurück ins Dashboard → Leiste weg, Statusleiste zeigt REC, weiter dieselbe Aufnahme.
@@ -592,6 +609,7 @@ Die Architektur zieht um. Der Schalter `ROUTE_GATE` hält das alte Verhalten: Au
 
 **Akzeptanzkriterien**
 - [ ] Die Aufnahme läuft über jede SPA-Navigation weiter, mit derselben `recordingId`.
+- [ ] Kein Link innerhalb der App lädt die Seite neu (kein rohes `<a href="/…">`).
 - [ ] Außerhalb des Dashboards der aktiven Session steht die Leiste, im Dashboard nicht.
 - [ ] „Heute“ zeigt bei laufender Aufnahme „Läuft · Aufnahme“ mit rotem Punkt.
 - [ ] Kein Text in App und Anleitung sagt noch, die Aufnahme laufe nur in der Vorlesungs-Ansicht.
@@ -610,12 +628,14 @@ Die Architektur zieht um. Der Schalter `ROUTE_GATE` hält das alte Verhalten: Au
 7. **`useLayoutEffect` für die Anmeldung des Dashboards**, sonst blitzt die Leiste beim Öffnen des Dashboards einen Frame lang auf.
 8. **Kein `useSearchParams` in `AppShell`.**
 9. **Texte der Statusleiste bleiben wörtlich.** Viele Tests suchen „REC“, „Keine Aufnahme“, „Aufnahme in anderem Tab“.
+10. **Kein „Nicht gestartet“ für eine laufende Session.** Solange `useActiveSession` lädt, liefert `useRecordingFor` `starting` (§3.4).
+11. **`previousStopped` an `control.idle()` hängen, nicht an `flushUploads`** (§4.3).
 
 ---
 
-## 7. Offene Fragen an den Owner
+## 7. Punkte für den Owner (zur Info, kein Blocker)
 
-Der Lead stellt sie als Issues mit Label `entscheidung`. Bis zur Antwort gilt die Empfehlung, die Umsetzung wartet nicht.
+Beide Punkte entscheidet der Lead mit der Empfehlung. Frage 1 legt der Vertrag (#246, „Aufnahme-Leiste“) schon fest. Frage 2 folgt aus dem Vertrag („Nutzeraktion“, „startet von selbst bei erteilter Berechtigung“) und aus E6. Der Lead nennt beide im Stand in #188. Ein Issue mit Label `entscheidung` gibt es nur, wenn der Owner etwas anders haben will. Die Umsetzung wartet nicht.
 
 **Frage 1 · Soll die Leiste auch „Pause“ und „Beenden“ haben?**
 
@@ -654,7 +674,7 @@ Diese Punkte lassen sich nur im echten Browser klären. Die Tests laufen in jsdo
 | `beforeunload` | Ob die Rückfrage erscheint. Das entscheidet der Browser. | Reviewer |
 | Tab im Hintergrund | Ob Timer-Drosselung das 10-s-Polling und den 1-s-Takt des Auto-Stopps streckt. Ein Tab mit offenem Mikrofon wird meist nicht gedrosselt, ein Folge-Tab schon. | Reviewer, Tab 10 min verdeckt |
 | Lange Aufnahme über viele Seitenwechsel | Ob `MediaRecorder` über Stunden und viele Navigationen stabil bleibt. | Owner (§16.3: lange Aufnahmen kann nur der Owner testen) |
-| Mac ohne Netz | React Query pausiert Abfragen bei `navigator.onLine = false`. Dieser Plan stellt nur die Abfrage der aktiven Session auf `networkMode: 'always'`. Ob andere Ansichten im Hörsaal ohne WLAN hängen, ist ein eigener Befund für den Lead. | Lead |
+| Mac ohne Netz | React Query (5.105) pausiert Abfragen und Mutationen, sobald der Browser das Ereignis `offline` meldet (WLAN fällt weg, während die App offen ist). Dieser Plan stellt nur die Abfrage der aktiven Session auf `networkMode: 'always'`. Betroffen bleibt hier `GET /settings` im `AutoStopHost`: Fehlt der Stand im Cache, bleibt der Auto-Stopp still, bis der Browser wieder `online` meldet. Eigenes Ticket für den Lead (`networkMode: 'always'` app-weit in `makeQueryClient`), möglichst vor PR 3. | Lead |
 | Zwei echte Tabs | Web Locks `steal`, während im alten Tab die Mikrofon-Abfrage offen ist. | Reviewer in Chrome |
 
 ---
