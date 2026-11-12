@@ -169,7 +169,7 @@ final class OpenGate: @unchecked Sendable {
 }
 
 /// Zählt, wie oft Sitzungen fertig sind
-final class CallCounter: @unchecked Sendable {
+final class CloseCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var value = 0
 

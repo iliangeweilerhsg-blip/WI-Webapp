@@ -119,41 +119,41 @@ final class TunnelWrongSuiteIsClosedTests: XCTestCase {
 /// Auswahl der Kandidaten aus den gefundenen Diensten (Plan §5.3, Punkt 1): der Name, bis zu 4 Kandidaten inklusive
 /// Zusatz „ (2)“
 final class TunnelCandidateSelectionTests: XCTestCase {
-    private let name = "sg-076cd8b5e7079472"
+    private let target = "sg-076cd8b5e7079472"
 
     func testMatchesTheNameAndTheBonjourConflictSuffix() {
-        XCTAssertTrue(TunnelCandidates.matches(name, serviceName: name))
-        XCTAssertTrue(TunnelCandidates.matches("\(name) (2)", serviceName: name))
-        XCTAssertTrue(TunnelCandidates.matches("\(name) (17)", serviceName: name))
+        XCTAssertTrue(TunnelCandidates.matches(target, serviceName: target))
+        XCTAssertTrue(TunnelCandidates.matches("\(target) (2)", serviceName: target))
+        XCTAssertTrue(TunnelCandidates.matches("\(target) (17)", serviceName: target))
     }
 
     func testRejectsEverythingElse() {
         for other in [
-            "", "sg-8c534139d3632c4d", "\(name)2", "\(name) 2", "\(name) (2", "\(name) ()", "\(name) (a)",
-            "\(name) (2) (3)", "\(name)  (2)", "x\(name)", "\(name) (1234)", "\(name) (-2)", "\(name) (٢)",
+            "", "sg-8c534139d3632c4d", "\(target)2", "\(target) 2", "\(target) (2", "\(target) ()", "\(target) (a)",
+            "\(target) (2) (3)", "\(target)  (2)", "x\(target)", "\(target) (1234)", "\(target) (-2)", "\(target) (٢)",
         ] {
-            XCTAssertFalse(TunnelCandidates.matches(other, serviceName: name), other)
+            XCTAssertFalse(TunnelCandidates.matches(other, serviceName: target), other)
         }
     }
 
     func testSelectionIsDeduplicatedSortedAndCappedAtFour() {
         let found = [
-            "\(name) (5)", "other", "\(name) (3)", name, "\(name) (2)", "\(name) (3)", "\(name) (4)", "\(name) (6)",
+            "\(target) (5)", "other", "\(target) (3)", target, "\(target) (2)", "\(target) (3)", "\(target) (4)", "\(target) (6)",
         ]
-        let selected = TunnelCandidates.select(from: found, serviceName: name)
-        XCTAssertEqual(selected, [name, "\(name) (2)", "\(name) (3)", "\(name) (4)"])
+        let selected = TunnelCandidates.select(from: found, serviceName: target)
+        XCTAssertEqual(selected, [target, "\(target) (2)", "\(target) (3)", "\(target) (4)"])
         XCTAssertEqual(TunnelCandidates.maxPerName, 4)
     }
 
     func testSelectionDoesNotDependOnArrivalOrder() {
-        let found = ["\(name) (2)", name, "\(name) (3)"]
+        let found = ["\(target) (2)", target, "\(target) (3)"]
         XCTAssertEqual(
-            TunnelCandidates.select(from: found, serviceName: name),
-            TunnelCandidates.select(from: found.reversed(), serviceName: name))
+            TunnelCandidates.select(from: found, serviceName: target),
+            TunnelCandidates.select(from: found.reversed(), serviceName: target))
     }
 
     func testNoMatchGivesNoCandidate() {
-        XCTAssertTrue(TunnelCandidates.select(from: ["_studiengehirn", "sg-0000000000000000"], serviceName: name).isEmpty)
+        XCTAssertTrue(TunnelCandidates.select(from: ["_studiengehirn", "sg-0000000000000000"], serviceName: target).isEmpty)
     }
 }
 

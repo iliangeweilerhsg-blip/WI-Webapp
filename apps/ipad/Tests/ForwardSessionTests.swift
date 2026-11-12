@@ -6,7 +6,7 @@ import XCTest
 /// (UX-12, PR 4; Plan §5.3, Punkt 6). Die Sitzung arbeitet auf `TunnelChannel`, darum laufen die Tests mit Fakes.
 @MainActor
 final class ForwardSessionNoByteBeforeHandshakeTests: XCTestCase {
-    private func makeSession(local: FakeStream, gate: OpenGate, closed: CallCounter) -> ForwardSession {
+    private func makeSession(local: FakeStream, gate: OpenGate, closed: CloseCounter) -> ForwardSession {
         ForwardSession(
             local: local, queue: DispatchQueue(label: "test.forward"),
             open: { await gate.open() },
@@ -16,7 +16,7 @@ final class ForwardSessionNoByteBeforeHandshakeTests: XCTestCase {
     func testNothingIsReadFromTheLocalConnectionWhileTheHandshakeIsPending() async {
         let local = FakeStream()
         let gate = OpenGate()
-        let closed = CallCounter()
+        let closed = CloseCounter()
         let session = makeSession(local: local, gate: gate, closed: closed)
 
         session.start()
@@ -38,7 +38,7 @@ final class ForwardSessionNoByteBeforeHandshakeTests: XCTestCase {
     func testFailedHandshakeClosesTheLocalConnectionWithoutHavingReadAByte() async {
         let local = FakeStream()
         let gate = OpenGate()
-        let closed = CallCounter()
+        let closed = CloseCounter()
         let session = makeSession(local: local, gate: gate, closed: closed)
 
         session.start()
@@ -55,7 +55,7 @@ final class ForwardSessionNoByteBeforeHandshakeTests: XCTestCase {
         let local = FakeStream()
         let remote = FakeStream()
         let gate = OpenGate()
-        let session = makeSession(local: local, gate: gate, closed: CallCounter())
+        let session = makeSession(local: local, gate: gate, closed: CloseCounter())
 
         session.start()
         let asked = await waitUntil { gate.openCalls == 1 }
@@ -73,7 +73,7 @@ final class ForwardSessionNoByteBeforeHandshakeTests: XCTestCase {
         let local = FakeStream()
         let remote = FakeStream()
         let gate = OpenGate()
-        let session = makeSession(local: local, gate: gate, closed: CallCounter())
+        let session = makeSession(local: local, gate: gate, closed: CloseCounter())
         session.start()
         gate.release(remote)
         _ = await waitUntil { local.receiveCalls == 1 && remote.receiveCalls == 1 }
@@ -99,7 +99,7 @@ final class ForwardSessionNoByteBeforeHandshakeTests: XCTestCase {
         let local = FakeStream()
         let remote = FakeStream()
         let gate = OpenGate()
-        let closed = CallCounter()
+        let closed = CloseCounter()
         let session = makeSession(local: local, gate: gate, closed: closed)
         session.start()
         gate.release(remote)
@@ -118,7 +118,7 @@ final class ForwardSessionNoByteBeforeHandshakeTests: XCTestCase {
         let remote = FakeStream()
         remote.failsSending = true
         let gate = OpenGate()
-        let closed = CallCounter()
+        let closed = CloseCounter()
         let session = makeSession(local: local, gate: gate, closed: closed)
         session.start()
         gate.release(remote)
@@ -136,7 +136,7 @@ final class ForwardSessionNoByteBeforeHandshakeTests: XCTestCase {
         let local = FakeStream()
         let remote = FakeStream()
         let gate = OpenGate()
-        let closed = CallCounter()
+        let closed = CloseCounter()
         let session = makeSession(local: local, gate: gate, closed: closed)
         session.start()
         let asked = await waitUntil { gate.openCalls == 1 }
