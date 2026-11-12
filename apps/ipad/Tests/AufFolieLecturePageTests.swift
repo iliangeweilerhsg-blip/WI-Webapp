@@ -174,4 +174,61 @@ final class AufFolieLecturePageTests: XCTestCase {
         // Harness-Seite, alte Folienseite, neue Folienseite
         XCTAssertEqual(service.pages(inNotebook: notebookID).count, 3)
     }
+
+    // MARK: #272 Folienseite offline in der Vorlesung angelegt, sofort öffnen
+
+    /// UUIDv7 mit dem Zeitstempel `ms` (nur die ersten 48 Bit zählen für `createdDuring`)
+    private func uuidV7(atMS ms: Int, tail: Int) -> String {
+        let hex = String(format: "%012llx", ms)
+        return "\(hex.prefix(8))-\(hex.suffix(4))-7000-8000-\(String(format: "%012llx", tail))"
+    }
+
+    private func sessionlessSlidePage(id: String) -> LibraryPage {
+        LibraryPage(
+            id: id, notebookID: notebookID, index: 2, template: .folie, widthPt: 960, heightPt: 540,
+            sessionID: nil, backgroundSlideID: slide1.id, attachedSlideID: nil, version: 1,
+            createQueued: true, needsReconcile: false, deletedAtMS: nil, deleteQueued: false)
+    }
+
+    func testASessionlessSlidePageCreatedOfflineDuringTheLectureIsReused() async throws {
+        let h = makeHarness()
+        let service = makeService(h)
+        let offlineID = uuidV7(atMS: runningStartMS + 60_000, tail: 0xf1)
+        h.library.upsert(sessionlessSlidePage(id: offlineID))
+        await runLecture(h, service, deck: "deck-1")
+
+        let page = try XCTUnwrap(service.slidePage(notebookID: notebookID, slide: slide1))
+        XCTAssertEqual(page.id, offlineID)
+        // Keine neue Seite: Harness-Seite und die Offline-Folienseite
+        XCTAssertEqual(service.pages(inNotebook: notebookID).count, 2)
+    }
+
+    func testASessionlessSlidePageFromBeforeTheLectureIsNotReused() async throws {
+        let h = makeHarness()
+        let service = makeService(h)
+        let beforeID = uuidV7(atMS: runningStartMS - 60_000, tail: 0xf2)
+        h.library.upsert(sessionlessSlidePage(id: beforeID))
+        await runLecture(h, service, deck: "deck-1")
+
+        let page = try XCTUnwrap(service.slidePage(notebookID: notebookID, slide: slide1))
+        XCTAssertNotEqual(page.id, beforeID)
+        XCTAssertEqual(page.sessionID, runningID)
+        XCTAssertEqual(service.pages(inNotebook: notebookID).count, 3)
+    }
+
+    func testOpenSlideTargetOpensTheSlidePageWithTheRunningSessionTime() async throws {
+        let h = makeHarness()
+        let service = makeService(h)
+        await runLecture(h, service, deck: "deck-1")
+
+        // Die letzte Seite ist die Harness-Seite ohne Session; direkt die Folienseite öffnen
+        let target = try XCTUnwrap(service.openSlideTarget(notebookID: notebookID, slide: slide1))
+        XCTAssertNotEqual(target.pageID, firstPageID)
+        XCTAssertEqual(service.page(target.pageID)?.backgroundSlideID, slide1.id)
+        XCTAssertEqual(service.page(target.pageID)?.sessionID, runningID)
+        XCTAssertEqual(target.sessionStartMS, runningStartMS)
+        // Zweiter Aufruf: dieselbe Seite
+        XCTAssertEqual(service.openSlideTarget(notebookID: notebookID, slide: slide1)?.pageID, target.pageID)
+        XCTAssertNil(service.openSlideTarget(notebookID: "unbekannt", slide: slide1))
+    }
 }

@@ -1361,6 +1361,14 @@ final class InkLibraryService {
             backgroundSlideID: slide.id, attachedSlideID: nil)
     }
 
+    /// Schreibziel für die Folienseite einer bekannten Folie: `slidePage` plus `openPage`. Die Ansicht öffnet so beim
+    /// Start gleich die Folienseite (#272), ohne Umweg über `openTarget` und die letzte Seite, auf der kurz mit der
+    /// alten Zeitbasis geschrieben werden könnte.
+    func openSlideTarget(notebookID: String, slide: SlideRef) -> InkBinding? {
+        guard let page = slidePage(notebookID: notebookID, slide: slide) else { return nil }
+        return openPage(pageID: page.id)
+    }
+
     private func belongsToSession(_ page: LibraryPage, _ session: RunningSession?) -> Bool {
         guard let session else { return true }
         if page.sessionID == session.id { return true }
