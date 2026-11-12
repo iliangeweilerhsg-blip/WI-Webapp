@@ -313,7 +313,7 @@ final class InkOpBuilderTests: XCTestCase {
     func testPageCreateOfAFreshPageIsBlankA4WithNulls() throws {
         let ids = IDs()
         let draft = try XCTUnwrap(
-            InkOpBuilder.pageCreate(page: libraryPage(index: 4), nowMS: 5000, offsetMS: nil, makeID: ids.make))
+            InkOpBuilder.pageCreate(page: libraryPage(index: 4, sessionID: binding.sessionID), nowMS: 5000, offsetMS: nil, makeID: ids.make))
         let json = try object(draft)
         XCTAssertEqual(json["kind"] as? String, "page.create")
         XCTAssertEqual(json["stream"] as? String, "notebook:\(binding.notebookID)")
