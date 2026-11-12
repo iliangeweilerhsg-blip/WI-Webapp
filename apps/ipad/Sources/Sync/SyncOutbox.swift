@@ -58,6 +58,11 @@ private struct OutboxLine: Codable {
 final class SyncOutbox {
     /// Ab so vielen erledigten Zeilen wird die Datei verdichtet
     static let compactionThreshold = 500
+    /// Ab so vielen gepufferten `ack`-Zeilen wird sofort geschrieben
+    static let ackFlushThreshold = 100
+
+    /// Zählt die fsyncs der Warteschlange (für Tests)
+    private(set) var syncCount = 0
 
     let deadLetterURL: URL
     /// Unbestätigte Operationen in Reihenfolge der `number`
@@ -72,6 +77,8 @@ final class SyncOutbox {
     /// Höchste vergebene Nummer je Seite (bleibt nach `ack` erhalten)
     private var marks: [String: Int] = [:]
     private var doneLines = 0
+    /// `ack`-Zeilen, die noch nicht auf der Platte stehen (`acknowledgeDeferred`)
+    private var unwrittenAcks: [OutboxLine] = []
     /// Länge des gültigen Teils der Datei. Neue Zeilen beginnen genau dort.
     private var fileLength: UInt64 = 0
 
@@ -158,6 +165,34 @@ final class SyncOutbox {
         compactIfNeeded()
         return true
     }
+
+    /// Wie `acknowledge`, aber ohne sofortiges fsync: Die Operation verschwindet aus dem Speicher, die `ack`-Zeile
+    /// wartet im Puffer, bis `flushAcks()` sie schreibt, spätestens aber mit der nächsten anderen Schreibung oder
+    /// ab `ackFlushThreshold` Zeilen. Kein Datenverlust: Geht der Puffer verloren (Absturz), bleibt die Operation
+    /// beim Neustart in der Datei stehen und wird noch einmal gesendet. Der Core erkennt die bekannte `op_id` und
+    /// bestätigt sie erneut (VERTRAEGE §11.2, Idempotenz). Ein verlorenes `ack`-Persist kostet also nur eine
+    /// doppelte Sendung, nie eine Operation.
+    @discardableResult
+    func acknowledgeDeferred(opID: String) -> Bool {
+        guard remove(opID: opID) else { return false }
+        unwrittenAcks.append(OutboxLine(t: "ack", op: opID))
+        doneLines += 1
+        if unwrittenAcks.count >= SyncOutbox.ackFlushThreshold {
+            flushAcks()
+        }
+        compactIfNeeded()
+        return true
+    }
+
+    /// Schreibt gepufferte `ack`-Zeilen mit einem einzigen fsync. Scheitert das Schreiben, bleibt der Puffer
+    /// stehen (gleiche Folgen wie bei `acknowledge`: erneute Sendung nach einem Neustart).
+    func flushAcks() {
+        guard !unwrittenAcks.isEmpty else { return }
+        try? writeLines([])
+    }
+
+    /// Anzahl der `ack`-Zeilen im Puffer (für Tests)
+    var unwrittenAckCount: Int { unwrittenAcks.count }
 
     /// Verschiebt Operationen in die Fehlerablage. Die Ablage wird zuerst geschrieben: Es geht nichts verloren.
     /// - Returns: Anzahl der tatsächlich verschobenen Operationen (unbekannte `op_id` zählen nicht)
@@ -289,7 +324,11 @@ final class SyncOutbox {
         }
     }
 
-    private func writeLines(_ lines: [OutboxLine]) throws {
+    private func writeLines(_ newLines: [OutboxLine]) throws {
+        // Gepufferte `ack`-Zeilen fahren mit, damit die Reihenfolge in der Datei stimmt
+        let buffered = unwrittenAcks.count
+        let lines = unwrittenAcks + newLines
+        guard !lines.isEmpty else { return }
         var blob = Data()
         for line in lines {
             blob.append(try encoder.encode(line))
@@ -308,7 +347,9 @@ final class SyncOutbox {
             try handle.seek(toOffset: fileLength)
             try handle.write(contentsOf: blob)
             try handle.synchronize()
+            syncCount += 1
             fileLength += UInt64(blob.count)
+            unwrittenAcks.removeFirst(buffered)
         } catch {
             try? handle.truncate(atOffset: fileLength)
             throw error
@@ -347,6 +388,8 @@ final class SyncOutbox {
             try blob.write(to: fileURL, options: .atomic)
             fileLength = UInt64(blob.count)
             doneLines = 0
+            // Die verdichtete Datei enthält nur noch offene Operationen: gepufferte `ack`-Zeilen sind erledigt
+            unwrittenAcks.removeAll()
         } catch {
             // Bleibt, wie es ist. Der nächste Versuch kommt mit der nächsten erledigten Zeile.
         }
