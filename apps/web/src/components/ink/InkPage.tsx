@@ -32,7 +32,7 @@ export interface InkPageProps {
   page?: Partial<PageGeometry>;
   /**
    * Maßstab relativ zur Breite des Containers: 1 = auf die Breite eingepasst, 2 = doppelt (Container scrollt).
-   * Die Seite wird auf höchstens 4096 CSS-Pixel Höhe begrenzt (Speicher), die Auflösung fällt nie unter 1 Pixel
+   * Die längere Seite wird auf höchstens 4096 Pixel begrenzt (Speicher; Seitenverhältnis bleibt), die Auflösung fällt nie unter 1 Pixel
    * je CSS-Pixel. Gilt nicht zusammen mit `width`.
    */
   zoom?: number;
