@@ -42,6 +42,32 @@ public struct CoreHealthProbe: SpikeHealthProbing {
     }
 }
 
+/// Begrenzt `health` für den ganzen Server auf eine Abfrage je `minimumInterval`, über alle Verbindungen zusammen.
+/// Der Code ist offline zu raten (Plan S11). Wer ihn hat, soll den Core nicht in Dauerschleife befragen können:
+/// `health` ist der einzige Befehl, der etwas außerhalb des Spikes anstößt. Der Platz in der Reihe wird vor dem
+/// Warten vergeben, darum gilt der Abstand auch bei gleichzeitigen Verbindungen. Wartezeit höchstens etwa
+/// `maxConnections` × `minimumInterval`.
+actor SpikeHealthGate {
+    private let probe: any SpikeHealthProbing
+    private let intervalNanos: UInt64
+    private var nextStart: UInt64 = 0
+
+    init(probe: any SpikeHealthProbing, minimumInterval: Double) {
+        self.probe = probe
+        self.intervalNanos = UInt64(max(0, minimumInterval) * 1_000_000_000)
+    }
+
+    func run() async -> SpikeHealthReply {
+        let now = DispatchTime.now().uptimeNanoseconds
+        let start = max(now, nextStart)
+        nextStart = start + intervalNanos
+        if start > now {
+            try? await _Concurrency.Task.sleep(nanoseconds: start - now)
+        }
+        return await probe.probe()
+    }
+}
+
 /// Folgt keiner Weiterleitung
 final class SpikeNoRedirect: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     func urlSession(

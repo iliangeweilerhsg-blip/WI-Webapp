@@ -28,6 +28,8 @@ public final class SpikeServer: @unchecked Sendable {
         public var maxConnections: Int
         /// Sperre nach so vielen gescheiterten Handshakes (Raten des Codes übers Netz)
         public var maxFailedHandshakes: Int
+        /// Mindestabstand zwischen zwei `health` in Sekunden, für den ganzen Server (`SpikeHealthGate`)
+        public var healthMinimumInterval: Double
         /// Wird einmal gerufen, wenn die Sperre greift (auf der Queue des Servers). Das Programm beendet sich dann.
         public var onLockout: @Sendable () -> Void
         public var probe: any SpikeHealthProbing
@@ -37,7 +39,8 @@ public final class SpikeServer: @unchecked Sendable {
         public init(
             code: SpikeCode, peerToPeer: Bool = true, advertise: Bool = true, port: UInt16? = nil,
             maxConnections: Int = SpikeLimits.maxConnections,
-            maxFailedHandshakes: Int = SpikeLimits.maxFailedHandshakes, probe: any SpikeHealthProbing,
+            maxFailedHandshakes: Int = SpikeLimits.maxFailedHandshakes, healthMinimumInterval: Double = 1,
+            probe: any SpikeHealthProbing,
             log: @escaping @Sendable (String) -> Void = { _ in }, onLockout: @escaping @Sendable () -> Void = {}
         ) {
             self.code = code
@@ -46,6 +49,7 @@ public final class SpikeServer: @unchecked Sendable {
             self.port = port
             self.maxConnections = maxConnections
             self.maxFailedHandshakes = maxFailedHandshakes
+            self.healthMinimumInterval = healthMinimumInterval
             self.probe = probe
             self.log = log
             self.onLockout = onLockout
@@ -53,6 +57,7 @@ public final class SpikeServer: @unchecked Sendable {
     }
 
     let options: Options
+    let healthGate: SpikeHealthGate
     let queue = DispatchQueue(label: "de.studiengehirn.spike.server")
     private var listener: NWListener?
     // Alles Folgende nur auf `queue` anfassen
@@ -61,6 +66,7 @@ public final class SpikeServer: @unchecked Sendable {
 
     public init(options: Options) {
         self.options = options
+        self.healthGate = SpikeHealthGate(probe: options.probe, minimumInterval: options.healthMinimumInterval)
     }
 
     /// Startet den Listener und wartet, bis er bereit ist. Gibt den Port zurück.
@@ -296,7 +302,7 @@ final class SpikeSession: @unchecked Sendable {
         case .ping:
             try await send(SpikeWire.reply())
         case .health:
-            let reply = await server.options.probe.probe()
+            let reply = await server.healthGate.run()
             try await send(SpikeWire.reply(payload: reply.encoded()))
         case .echo(let payload):
             try await send(SpikeWire.reply(payload: payload))

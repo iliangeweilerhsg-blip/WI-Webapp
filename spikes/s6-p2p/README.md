@@ -33,7 +33,7 @@ Durchsatz „hin und zurück“ nutzt `echo` in Blöcken zu 64 KiB mit höchsten
 
 - Code: 8 Ziffern, `SecRandomCopyBytes`, bei jedem Start neu.
 - `PSK = HMAC-SHA256(Code, "sg-spike-psk-v1")`, PSK-Kennung fest `sgs1` (Plan E13).
-- Bonjour-Name `sgs-` plus 2 Hex-Zeichen aus `HMAC-SHA256(Code, "sg-spike-name-v1")`, Typ `_sg-spike._tcp`. Kein Rechnername im Funk. Bewusst nur 8 Bit: Mit mehr ließe sich der Code allein aus dem offen angekündigten Namen offline zurückrechnen.
+- Bonjour-Name `sgs-` plus 2 Hex-Zeichen aus `HMAC-SHA256(Code, "sg-spike-name-v1")`, Typ `_sg-spike._tcp`. Der Dienstname enthält keinen Rechnernamen. Wie bei jedem Bonjour-Dienst nennt aber der SRV-Eintrag den lokalen Hostnamen des Macs (`<name>.local`, Systemeinstellungen → Allgemein → Freigaben), und der ist in Funkreichweite lesbar. Bewusst nur 8 Bit: Mit mehr ließe sich der Code allein aus dem offen angekündigten Namen offline zurückrechnen.
 - TLS 1.2 (min = max). Angeboten werden `TLS_ECDHE_PSK_WITH_CHACHA20_POLY1305_SHA256` (0xCCAC), `TLS_ECDHE_PSK_WITH_AES_128_CBC_SHA` (0xC035) und `TLS_PSK_WITH_AES_128_GCM_SHA256` (0x00A8). Beide Seiten prüfen nach dem Handshake das ausgehandelte Verfahren und brechen bei einem anderen ab. Die Testansicht misst jedes Verfahren einzeln („TLS-Verfahren messen“).
 - Testvektoren für Code `12345678`: Name `sgs-9a`, PSK `2733e12b18abbee8832c351b8a1e950a239de20aaa1914eedacdd4a7d8b5af43` (stehen in den Tests von Mac und iPad).
 
@@ -48,8 +48,9 @@ Durchsatz „hin und zurück“ nutzt `echo` in Blöcken zu 64 KiB mit höchsten
 | Laufzeit | 4 h nach der Wanduhr (Ruhezustand zählt mit), dann beendet sich das Programm |
 | Gescheiterte Handshakes | 50, dann nimmt der Server nichts mehr an und das Programm beendet sich (Raten des Codes übers Netz) |
 | Zugriff nach außen | nur `health`, feste URL, nur Status und Dauer |
+| `health` | höchstens eine Abfrage je Sekunde, für alle Verbindungen zusammen (`SpikeHealthGate`) |
 
-Der Code hat rund 26 Bit Entropie. Wer einen Handshake mitschneidet, kann ihn offline durchprobieren. Das ist nur vertretbar, weil dahinter nichts liegt außer diesen vier Befehlen.
+Der Code hat rund 26,6 Bit Entropie, nach dem Bonjour-Namen bleiben 18,6 Bit. Übers Netz geraten: höchstens 50 Versuche, also etwa 1 zu 7800 je Start. Offline ist er in Sekunden bis Minuten geraten: bei `TLS_PSK_WITH_AES_128_GCM_SHA256` schon aus einem passiven Mitschnitt (die Verfahrensmessung macht genau so einen Handshake), bei ECDHE_PSK durch einen Fremden, der sich als Mac ausgibt und den Handshake des iPads annimmt. Das ist nur vertretbar, weil dahinter nichts liegt außer diesen vier Befehlen.
 
 ## Tests
 

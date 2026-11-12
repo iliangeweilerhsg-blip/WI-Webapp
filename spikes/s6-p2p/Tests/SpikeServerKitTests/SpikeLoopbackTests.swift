@@ -101,6 +101,20 @@ final class SpikeLoopbackTests: XCTestCase {
 
     // MARK: Härtung
 
+    func testHealthIsLimitedToOneProbePerSecond() async throws {
+        let (server, endpoint, code) = try await makeServer()
+        defer { server.stop() }
+        let client = try await connectedClient(endpoint, code)
+        defer { client.close() }
+        let started = Date()
+        for _ in 0..<3 {
+            let health = try await client.health()
+            XCTAssertEqual(health.reply, SpikeHealthReply(httpStatus: 200, millis: 7))
+        }
+        // Drei Abfragen brauchen mindestens zwei volle Abstände von 1 s
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(started), 1.9)
+    }
+
     func testUnknownCommandAndOversizeEchoCloseTheConnection() async throws {
         let (server, endpoint, code) = try await makeServer()
         defer { server.stop() }
