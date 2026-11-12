@@ -233,7 +233,10 @@ final class InkLibraryService {
             return
         }
 
-        let notebook = LibraryNotebook(
+        // Brach ein früherer Versuch zwischen Notizbuch und Seite ab, steht das Notizbuch schon da: weiterverwenden,
+        // sonst entstünde ein zweites, leeres „Alte Schreibfläche“
+        let orphan = store.allNotebooks().first { $0.kind == .frei && !$0.knownOnServer && $0.lastPageID == pageID }
+        let notebook = orphan ?? LibraryNotebook(
             id: InkID.uuidV7(),
             moduleID: moduleID,
             title: InkLibraryService.legacyNotebookTitle,

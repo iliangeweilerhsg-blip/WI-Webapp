@@ -106,6 +106,32 @@ final class InkLegacyAdoptionTests: XCTestCase {
         XCTAssertEqual(pendingKinds(h).count, 3)
     }
 
+    /// Absturz zwischen dem Speichern von Notizbuch und Seite: Der nächste Versuch nimmt dasselbe Notizbuch
+    func testInterruptedAdoptionReusesItsNotebook() throws {
+        let h = SyncHarness()
+        let orphan = LibraryNotebook(
+            id: "019a4e14-0000-7000-8000-0000000000e1",
+            moduleID: h.binding.moduleID,
+            title: InkLibraryService.legacyNotebookTitle,
+            kind: .frei,
+            createdAtMS: 1,
+            knownOnServer: false,
+            hidden: false,
+            lastPageID: InkPageModel.testPageID,
+            remoteMaxIndex: 0,
+            remoteOnlyPageCount: 0
+        )
+        h.library.upsert(orphan)
+        let pages = pageStore(h)
+        try writeLegacyPage(pages, strokes: 1)
+
+        let service = makeService(h, pageStore: pages)
+        let adopted = service.notebooks(inModule: h.binding.moduleID).filter { $0.title == "Alte Schreibfläche" }
+        XCTAssertEqual(adopted.map(\.id), [orphan.id])
+        XCTAssertEqual(service.page(InkPageModel.testPageID)?.notebookID, orphan.id)
+        XCTAssertEqual(pendingKinds(h), ["notebook.create", "page.create", "stroke.add"])
+    }
+
     func testAdoptionWaitsUntilAModuleIsKnown() throws {
         let h = SyncHarness()
         let pages = pageStore(h)
