@@ -1,4 +1,5 @@
 // Moodle-Endpunkte (08 §9): Status, Lese-Endpunkte mit Datei-Stream (T1-22) und Aktionen.
+import multipart from '@fastify/multipart';
 import type { FastifyInstance } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
@@ -28,6 +29,7 @@ import {
   MoodlePostListSchema,
   MoodleQuizListSchema,
   MoodleStatusSchema,
+  MoodleUploadSchema,
   MoodleSubmissionStatusSchema,
   MoodleSyncedDeadlineListSchema,
   MoodleSyncRequestSchema,
@@ -55,6 +57,7 @@ import {
   putLink,
 } from '../moodle/store.ts';
 import type { MoodleSync } from '../moodle/sync.ts';
+import { MAX_UPLOAD_FILE_BYTES, storeUploadStream } from '../moodle/uploads.ts';
 
 export interface MoodleRouteDeps {
   moodle: MoodleServices;
@@ -62,6 +65,8 @@ export interface MoodleRouteDeps {
   db?: Db;
   sync?: MoodleSync;
   now?: () => Date;
+  /** Nur für Tests: kleineres Größenlimit je Upload (Standard 100 MB) */
+  maxUploadBytes?: number;
 }
 
 const ActionParamsSchema = z.object({ action_id: z.string().min(1).max(64) });
@@ -87,8 +92,8 @@ const errorResponses = {
 
 export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps): Promise<void> {
   const typed = app.withTypeProvider<ZodTypeProvider>();
-  const { client, status, actions, confirmations, locks, reader, files } = deps.moodle;
-  const context: MoodleActionContext = { client, userId: () => status.userId() };
+  const { client, status, actions, confirmations, locks, reader, files, uploads } = deps.moodle;
+  const context: MoodleActionContext = { client, userId: () => status.userId(), uploads };
 
   function actionId(raw: string): MoodleActionId {
     if (!isMoodleActionId(raw)) {
@@ -362,6 +367,160 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
   // Tunnel): Ein gestohlenes Geräte-Token darf keine Abgabe oder keinen Beitrag im Namen des Nutzers auslösen.
   // Die Vorschau speichert nichts unter einem `Idempotency-Key`: Ihre Antwort enthält den Bestätigungscode, und der
   // lebt nur im Speicher des Core (08 §9.3), nie in Postgres
+  // ---------- Uploads für Aktionen (08 §9.3, T1-24 PR 2) ----------
+  // Nur vom Mac selbst und ohne `Idempotency-Key`. Der Core liefert den Inhalt eines Uploads nie zurück (kein GET),
+  // und die Dateien liegen unter `tmp/moodle-uploads/` (nicht gesichert). Beide Routen sprechen Moodle nicht an.
+  const maxUploadBytes = Math.min(deps.maxUploadBytes ?? MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_BYTES);
+  const multipartOptions = {
+    // Die Größe prüft `storeUploadStream` (`file.truncated`) und antwortet mit `file_too_large`
+    throwFileSizeLimit: false,
+    defParamCharset: 'utf8',
+    limits: { fileSize: maxUploadBytes, files: 1, fields: 5, fieldSize: 1024, parts: 6 },
+  };
+  await app.register(multipart, multipartOptions);
+  // Aufräumen beim Start und danach stündlich. Erst nach erfolgreichem `listen` (`onListen`): Ein zweiter Core, der
+  // mit `EADDRINUSE` scheitert, löscht keine Uploads des laufenden Core (wie bei den Material-Uploads, #170)
+  let sweepTimer: NodeJS.Timeout | undefined;
+  let closed = false;
+  app.addHook('onListen', async () => {
+    if (sweepTimer || closed) return;
+    await uploads
+      .reset()
+      .catch((error: unknown) => app.log.warn({ err: error }, 'Upload-Ordner nicht geleert'));
+    sweepTimer = setInterval(
+      () => {
+        void uploads
+          .sweep()
+          .catch((error: unknown) => app.log.warn({ err: error }, 'Uploads nicht aufgeräumt'));
+      },
+      60 * 60 * 1000,
+    );
+    sweepTimer.unref();
+  });
+  app.addHook('onClose', async () => {
+    closed = true;
+    clearInterval(sweepTimer);
+  });
+
+  typed.post(
+    '/moodle/uploads',
+    {
+      config: { sgAccess: 'local', idempotency: false },
+      schema: {
+        tags: ['Moodle'],
+        summary:
+          'Datei für eine Moodle-Aktion hochladen (multipart, genau ein Feld `file`, ≤ 100 MB; PDF, PNG, JPEG, ZIP, Text)',
+        consumes: ['multipart/form-data'],
+        response: {
+          201: MoodleUploadSchema,
+          400: ApiErrorSchema,
+          403: ApiErrorSchema,
+          409: ApiErrorSchema,
+          413: ApiErrorSchema,
+          415: ApiErrorSchema,
+          501: ApiErrorSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      // Solange keine freigeschaltete Aktion `upload_ids` annimmt, gibt es nichts, wofür man hochlädt (E12)
+      if (!deps.moodle.uploadsEnabled) {
+        throw new HttpError(
+          501,
+          'moodle_action_not_implemented',
+          'Uploads für Moodle-Aktionen sind noch nicht freigeschaltet.',
+        );
+      }
+      if (!request.isMultipart()) {
+        throw new HttpError(
+          415,
+          'multipart_required',
+          'Erwartet wird multipart/form-data mit dem Feld „file“.',
+        );
+      }
+      await uploads.whenReady();
+      await uploads.sweep();
+      // Platz vor dem Streamen reservieren. Die Länge der Anfrage ist eine Obergrenze für die Datei
+      const declared = request.headers['content-length'];
+      const slot = uploads.reserve(
+        declared !== undefined && /^\d+$/.test(declared) ? Number(declared) : maxUploadBytes,
+      );
+      try {
+        await uploads.ensureDir();
+        let stored: Awaited<ReturnType<typeof storeUploadStream>> | undefined;
+        let problem: HttpError | undefined;
+        try {
+          for await (const part of request.parts()) {
+            if (part.type === 'field') continue;
+            if (part.fieldname !== 'file' || stored || problem) {
+              problem ??= new HttpError(
+                400,
+                'unexpected_file',
+                'Erwartet wird genau eine Datei im Feld „file“.',
+              );
+              for await (const chunk of part.file) void chunk;
+              continue;
+            }
+            try {
+              stored = await storeUploadStream(slot, { filename: part.filename, file: part.file });
+            } catch (error) {
+              if (!(error instanceof HttpError)) throw error;
+              problem = error;
+            }
+          }
+        } catch (error) {
+          if (stored) await uploads.remove(stored.id).catch(() => {});
+          const code = (error as { code?: string }).code;
+          if (
+            request.raw.aborted ||
+            code === 'FST_MP_PREMATURE_CLOSE' ||
+            code === 'ERR_STREAM_PREMATURE_CLOSE'
+          ) {
+            request.log.info('Upload vom Client abgebrochen');
+            throw new HttpError(400, 'upload_aborted', 'Der Upload wurde abgebrochen.');
+          }
+          if (typeof code === 'string' && code.startsWith('FST_') && code.endsWith('_LIMIT')) {
+            throw new HttpError(400, 'unexpected_file', 'Erwartet wird genau eine Datei im Feld „file“.');
+          }
+          throw error;
+        }
+        if (problem) {
+          if (stored) await uploads.remove(stored.id).catch(() => {});
+          throw problem;
+        }
+        if (!stored) throw new HttpError(400, 'file_missing', 'Das Feld „file“ mit der Datei fehlt.');
+        return reply.code(201).send({
+          upload_id: stored.id,
+          filename: stored.filename,
+          size_bytes: stored.sizeBytes,
+          expires_at: stored.expiresAt.toISOString(),
+        });
+      } finally {
+        // Nach `commit` tut das nichts. Sonst (Fehler, Abbruch) wird der Platz frei, die Teildatei ist gelöscht
+        slot.cancel();
+      }
+    },
+  );
+
+  typed.delete(
+    '/moodle/uploads/:upload_id',
+    {
+      config: { sgAccess: 'local', idempotency: false },
+      schema: {
+        tags: ['Moodle'],
+        summary: 'Upload entfernen. 409, solange eine Aktion ihn gerade liest',
+        params: z.object({ upload_id: UuidSchema }),
+        response: { 204: z.null(), 403: ApiErrorSchema, 404: ApiErrorSchema, 409: ApiErrorSchema },
+      },
+    },
+    async (request, reply) => {
+      if (!(await uploads.remove(request.params.upload_id))) {
+        throw new HttpError(404, 'moodle_upload_not_found', 'Der Upload ist unbekannt oder abgelaufen.');
+      }
+      return reply.code(204).send(null);
+    },
+  );
+
   typed.post(
     '/moodle/actions/:action_id/preview',
     {

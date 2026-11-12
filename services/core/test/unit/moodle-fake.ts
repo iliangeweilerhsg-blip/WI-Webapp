@@ -7,7 +7,10 @@ export const FAKE_TOKEN = 'ab'.repeat(16);
 
 export interface RecordedRequest {
   url: string;
+  /** Formularfelder (urlencoded) bzw. nur die Textfelder eines multipart-Bodys. Dateien stehen in `form` */
   body: URLSearchParams;
+  /** Nur bei `multipart/form-data` (`upload.php`): der `FormData`-Body samt Dateien */
+  form?: FormData;
   init: RequestInit;
 }
 
@@ -24,7 +27,18 @@ export function json(value: unknown, status = 200, headers: Record<string, strin
 export function fakeFetch(handler: FakeHandler): { fetch: FetchFn; requests: RecordedRequest[] } {
   const requests: RecordedRequest[] = [];
   const fetch: FetchFn = async (url, init) => {
-    const request = { url, body: new URLSearchParams(String(init.body ?? '')), init };
+    const request: RecordedRequest =
+      init.body instanceof FormData
+        ? {
+            url,
+            // Textfelder wie bei urlencoded; Dateien nur über `form`
+            body: new URLSearchParams(
+              [...init.body.entries()].filter((e): e is [string, string] => typeof e[1] === 'string'),
+            ),
+            form: init.body,
+            init,
+          }
+        : { url, body: new URLSearchParams(String(init.body ?? '')), init };
     requests.push(request);
     return handler(request);
   };
@@ -57,4 +71,34 @@ export function siteInfo(functions: string[]): Record<string, unknown> {
     userid: 4711,
     functions: functions.map((name) => ({ name, version: '2024100700' })),
   };
+}
+
+/**
+ * `upload.php`: prüft das Formularfeld `token` und antwortet wie Moodle mit einem Array je Datei. Die erste Datei
+ * (`itemid = 0`) bekommt `options.itemid`, weitere die gelieferte `itemid`.
+ */
+export function uploadHandler(options: { itemid?: number } = {}): FakeHandler {
+  return ({ form }) => {
+    if (!form || form.get('token') !== FAKE_TOKEN) {
+      return json({ error: 'Ungültiges Token', errorcode: 'invalidtoken' });
+    }
+    const sent = Number(form.get('itemid'));
+    const itemid = sent > 0 ? sent : (options.itemid ?? 4242);
+    const file = form.get('file_1');
+    return json([
+      {
+        component: 'user',
+        filearea: 'draft',
+        itemid,
+        filename: typeof file === 'object' && file !== null ? (file as File).name : '',
+        filepath: '/',
+      },
+    ]);
+  };
+}
+
+/** Verteilt nach Pfad der Adresse: `upload.php` an `upload`, alles andere an `rest` */
+export function byPath(rest: FakeHandler, upload: FakeHandler): FakeHandler {
+  return (request) =>
+    new URL(request.url).pathname.endsWith('/upload.php') ? upload(request) : rest(request);
 }
