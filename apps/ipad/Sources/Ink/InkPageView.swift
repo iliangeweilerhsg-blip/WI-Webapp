@@ -775,13 +775,13 @@ struct InkPageView: View {
         // Ist die Folie lokal schon bekannt (Foliensatz auf dem iPad), öffnet „Auf Folie“ gleich die Folienseite
         // (#272). So zeigt `openTarget` nicht kurz die alte letzte Seite, auf der bis zum Wechsel nach den
         // Netzabfragen mit der alten Zeitbasis geschrieben würde. Ist die Folie nicht bekannt, bleibt alles wie bisher.
+        // Ohne das Gate: Es gibt noch keine offene Seite, auf der geschrieben wird, und `present` setzt es ohnehin
+        // zurück. Ein zurückgestellter Wechsel (Stift eben noch auf der vorigen Seite) zeigte sonst doch die alte Seite.
+        // Der Folgeaufruf am Ende wechselt nicht noch einmal, weil `show` bei derselben Seite nichts tut.
         let slideTarget: InkBinding? =
             writesOnSlide
-            ? library.slides?.knownCurrentSlide().flatMap { slide in
-                // Das Gate kennt die Folie damit als aktuell: Ein späterer Folgeaufruf wechselt nicht noch einmal
-                gate.slideChanged(slide) == nil
-                    ? nil : library.openSlideTarget(notebookID: notebookID, slide: slide)
-            } : nil
+            ? library.slides?.knownCurrentSlide().flatMap { library.openSlideTarget(notebookID: notebookID, slide: $0) }
+            : nil
         guard
             let target = slideTarget
                 ?? (appendsForLecture
