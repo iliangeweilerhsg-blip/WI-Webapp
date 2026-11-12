@@ -15,7 +15,16 @@ import { decodeCursor, encodeCursor, type CursorKey } from '../lib/pagination.ts
 import { appendOp } from '../sync/append.ts';
 import { resolveDataPath } from './material.ts';
 import { emitSessionUpdated } from './sessions.ts';
-import { CHILDREN, PARENT, restoreFromTrash, softDelete, TITLE, TRASH_KINDS, type Node } from './trash.ts';
+import {
+  CHILDREN,
+  PARENT,
+  parentTitle,
+  restoreFromTrash,
+  softDelete,
+  TITLE,
+  TRASH_KINDS,
+  type Node,
+} from './trash.ts';
 
 /** Aufbewahrung im Papierkorb in Tagen (F-DAT-04). Der Worker (`maintenance.nightly`) nutzt denselben Standard */
 export const TRASH_RETENTION_DAYS = 30;
@@ -361,7 +370,7 @@ export async function listTrash(db: DbOrTx, options: ListTrashOptions): Promise<
     const parent = PARENT[kind];
     const parentCols = parent
       ? sql`(SELECT p.id FROM ${sql.identifier(parent.kind)} p WHERE p.id = t.${sql.identifier(parent.fk)}) AS parent_id,
-            (SELECT ${TITLE[parent.kind]} FROM ${sql.identifier(parent.kind)} WHERE id = t.${sql.identifier(parent.fk)}) AS parent_title`
+            (SELECT ${parentTitle(parent.kind)} FROM ${sql.identifier(parent.kind)} WHERE id = t.${sql.identifier(parent.fk)}) AS parent_title`
       : sql`NULL::uuid AS parent_id, NULL::text AS parent_title`;
     return sql`SELECT ${kind}::text AS kind, t.id, ${TITLE[kind]} AS title, t.deleted_at,
                       to_char(t.deleted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS deleted_iso,

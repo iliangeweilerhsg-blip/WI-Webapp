@@ -10,6 +10,9 @@ struct LibraryListView: View {
     @State private var createModuleID: String?
     @State private var showsCreate = false
     @State private var newTitle = ""
+    /// Das eben angelegte Notizbuch: Die Liste öffnet es (UX-56)
+    @State private var openedNotebookID: String?
+    @State private var createFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -26,6 +29,11 @@ struct LibraryListView: View {
                         notebookTitle: notebook.title)
                 }
                 .buttonStyle(.plain)
+            }
+            if createFailed {
+                Text(LibraryTexts.createFailedLine)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             if !isOnline {
                 Text(LibraryTexts.offlineLine(refreshedAt: library.refreshedAt))
@@ -48,6 +56,7 @@ struct LibraryListView: View {
                     onCreate: {
                         createModuleID = module.id
                         newTitle = ""
+                        createFailed = false
                         showsCreate = true
                     })
             }
@@ -56,28 +65,62 @@ struct LibraryListView: View {
             // Beim Erscheinen auffrischen (höchstens alle 30 s). Ohne Verbindung bleibt der lokale Stand.
             await library.refresh()
         }
+        .navigationDestination(item: $openedNotebookID) { notebookID in
+            InkPageView(library: library, notebookID: notebookID)
+        }
         .alert("Neues Notizbuch", isPresented: $showsCreate) {
             TextField("Titel", text: $newTitle)
             Button("Anlegen") {
                 if let moduleID = createModuleID {
-                    _ = library.createNotebook(moduleID: moduleID, title: newTitle)
+                    if let created = library.createNotebook(moduleID: moduleID, title: newTitle) {
+                        openedNotebookID = created.id
+                    } else {
+                        createFailed = true
+                    }
                 }
                 newTitle = ""
             }
-            .disabled(newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(!canCreate)
             Button("Abbrechen", role: .cancel) {
                 newTitle = ""
             }
         } message: {
             if let moduleID = createModuleID, let name = library.moduleName(moduleID) {
-                Text("Ein freies Notizbuch in \(name).")
+                Text(LibraryTexts.createMessage(moduleName: name, isDuplicate: isDuplicate))
             }
         }
     }
 }
 
+extension LibraryListView {
+    /// Der Titel gibt es im Modul schon (UX-56)
+    fileprivate var isDuplicate: Bool {
+        guard let moduleID = createModuleID else { return false }
+        return library.hasNotebook(inModule: moduleID, titled: newTitle)
+    }
+
+    fileprivate var canCreate: Bool {
+        LibraryTexts.canCreate(title: newTitle, isDuplicate: isDuplicate)
+    }
+}
+
 /// Texte der Bibliothek. Reine Funktionen, damit sie testbar sind.
 enum LibraryTexts {
+    /// Ruhige Zeile, wenn das Anlegen nicht gespeichert werden konnte (UX-56)
+    static let createFailedLine = "Konnte nicht gespeichert werden"
+
+    /// „Anlegen“ ist gesperrt bei leerem oder schon vergebenem Titel (UX-56)
+    static func canCreate(title: String, isDuplicate: Bool) -> Bool {
+        !isDuplicate && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Satz unter dem Titelfeld. Beim doppelten Titel sagt er, warum „Anlegen“ gesperrt ist.
+    static func createMessage(moduleName: String, isDuplicate: Bool) -> String {
+        isDuplicate
+            ? "In \(moduleName) gibt es schon ein Notizbuch mit diesem Titel."
+            : "Ein freies Notizbuch in \(moduleName)."
+    }
+
     static func offlineLine(refreshedAt: Date?) -> String {
         guard let refreshedAt else { return "Offline" }
         return "Offline · Stand von \(refreshedAt.formatted(date: .abbreviated, time: .shortened))"

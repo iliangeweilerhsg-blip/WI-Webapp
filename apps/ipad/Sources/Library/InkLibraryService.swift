@@ -260,12 +260,25 @@ final class InkLibraryService {
 
     // MARK: Anlegen
 
+    /// Gibt es im Modul schon ein Notizbuch mit diesem Titel? Groß- und Kleinschreibung und Leerzeichen am Rand zählen
+    /// nicht (UX-56). Ausgeblendete Notizbücher zählen nicht mit, der Nutzer sieht sie nicht.
+    func hasNotebook(inModule moduleID: String, titled title: String) -> Bool {
+        let wanted = InkLibraryService.normalizedTitle(title)
+        return notebooks(inModule: moduleID).contains { InkLibraryService.normalizedTitle($0.title) == wanted }
+    }
+
+    nonisolated static func normalizedTitle(_ title: String) -> String {
+        title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
     /// Freies Notizbuch anlegen: erst lokal speichern, dann `notebook.create` einreihen. Geht auch offline.
-    /// - Returns: `nil` bei leerem Titel, unbekanntem Modul oder wenn das Schreiben scheitert
+    /// - Returns: `nil` bei leerem oder schon vergebenem Titel, unbekanntem Modul oder wenn das Schreiben scheitert
     func createNotebook(moduleID: String, title: String) -> LibraryNotebook? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         // Ein leerer Titel ergäbe `message_invalid` und die Fehlerablage
         guard !trimmed.isEmpty, store.modules.contains(where: { $0.id == moduleID }) else { return nil }
+        // Gleicher Titel im Modul (UX-56): Die Ansicht sperrt „Anlegen“ schon, hier die Absicherung
+        guard !hasNotebook(inModule: moduleID, titled: trimmed) else { return nil }
         let notebook = LibraryNotebook(
             id: InkID.uuidV7(),
             moduleID: moduleID,
@@ -607,6 +620,16 @@ final class InkLibraryService {
         page.deletedAtMS = nil
         store.upsert(page)
         bump()
+        return true
+    }
+
+    /// Löscht eine Seite mit Frist, aber nur, wenn sie keinen Strich hat (UX-55: leere Ersatzseite nach „Rückgängig“).
+    /// Ohne Seitenablage oder bei unlesbarer Seite gilt sie als beschrieben und bleibt.
+    /// - Returns: `true`, wenn die Seite in die Löschfrist ging
+    @discardableResult
+    func discardEmptyPage(pageID: String) -> Bool {
+        guard let page = store.page(pageID), page.deletedAtMS == nil, !pageHasStrokes(pageID) else { return false }
+        deletePage(pageID: pageID)
         return true
     }
 

@@ -25,6 +25,8 @@ struct InkPageView: View {
     @State private var showsSidebar = false
     /// Eben gelöschte Seite, die noch zurückgeholt werden kann (Leiste „Rückgängig“, 5 s)
     @State private var undoPageID: String?
+    /// Leere Ersatzseite, die nach dem Löschen der letzten Seite geöffnet wurde (UX-55). „Rückgängig“ räumt sie auf.
+    @State private var replacementPageID: String?
     /// Folie unter der Schrift, nur mit Folien-Unterstützung
     @State private var slideBackground: SlideBackgroundModel?
     /// Hält Folienwechsel während eines Strichs zurück
@@ -182,7 +184,12 @@ struct InkPageView: View {
                         InkUndoDeleteBar(
                             pageID: pageID,
                             onUndo: { undoDelete() },
-                            onExpire: { if undoPageID == pageID { undoPageID = nil } }
+                            onExpire: {
+                                if undoPageID == pageID {
+                                    undoPageID = nil
+                                    replacementPageID = nil
+                                }
+                            }
                         )
                         .padding(.bottom, 24)
                     }
@@ -636,20 +643,33 @@ struct InkPageView: View {
         }
         library.deletePage(pageID: pageID)
         undoPageID = pageID
+        replacementPageID = nil
         guard wasOpen else { return }
         let remaining = library.pages(inNotebook: currentNotebookID)
         if let next = InkPaging.pageAfterDeleting(index: index, remaining: remaining) {
             _Concurrency.Task { await show(pageID: next) }
         } else {
             // Die letzte Seite ist weg: `openTarget` legt eine neue an
-            _Concurrency.Task { await openFreshPage() }
+            _Concurrency.Task {
+                await openFreshPage()
+                // Nur merken, wenn die Ersatzseite wirklich neu ist und die Löschfrist noch läuft
+                if undoPageID == pageID { replacementPageID = binding?.pageID }
+            }
         }
     }
 
     private func undoDelete() {
         guard let pageID = undoPageID else { return }
         undoPageID = nil
+        let replacementID = replacementPageID
+        replacementPageID = nil
         if library.undoDelete(pageID: pageID) {
+            // Die leere Ersatzseite der gelöschten letzten Seite wieder entfernen, sonst bleibt eine Restseite (UX-55).
+            // Erst sichern: Ob sie leer ist, liest der Dienst von der Platte. Mit Strich bleibt sie.
+            if let replacementID, replacementID != pageID {
+                model?.saveNow()
+                library.discardEmptyPage(pageID: replacementID)
+            }
             _Concurrency.Task { await show(pageID: pageID) }
         }
     }

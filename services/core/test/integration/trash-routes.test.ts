@@ -391,6 +391,16 @@ describe('POST /trash/:id/restore', () => {
     expect(await count('slide_deck', ids.deck)).toBe(1);
   });
 
+  it('409 restore_parent_deleted einer Seite nennt Modul und Notizbuch (UX-55)', async () => {
+    const ids = await seed();
+    await t.handle.db.transaction((tx) => softDelete(tx, 'page', ids.page));
+    await del(`/notebooks/${ids.notebook}`);
+    const res = await post(`/trash/${ids.page}/restore`);
+    expect(res.statusCode).toBe(409);
+    const body = res.json<{ error: { details: { parent: unknown } } }>();
+    expect(body.error.details.parent).toEqual({ id: ids.notebook, kind: 'notebook', title: 'DBS · Frei' });
+  });
+
   it('409 restore_conflict mit constraint und conflicting_id; nichts wird wiederhergestellt', async () => {
     const ids = await seed();
     // Ein Termin mit Session; Session gelöscht, am Termin entsteht eine neue
@@ -418,9 +428,12 @@ describe('POST /trash/:id/restore', () => {
     const ids = await seed();
     await t.handle.db.transaction((tx) => softDelete(tx, 'page', ids.page));
     const list = (await get('/trash')).json<{
-      items: { kind: string; title: string; parent: { kind: string } | null }[];
+      items: { kind: string; title: string; parent: { kind: string; title: string } | null }[];
     }>();
-    expect(list.items).toMatchObject([{ kind: 'page', title: 'Seite 1', parent: { kind: 'notebook' } }]);
+    // UX-55: Das Elternobjekt nennt das Modul, damit man die Seite im Papierkorb wiederfindet
+    expect(list.items).toMatchObject([
+      { kind: 'page', title: 'Seite 1', parent: { kind: 'notebook', title: 'DBS · Frei' } },
+    ]);
 
     const res = await post(`/trash/${ids.page}/restore`);
     expect(res.statusCode).toBe(200);
