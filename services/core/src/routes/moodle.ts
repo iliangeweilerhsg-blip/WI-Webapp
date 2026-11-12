@@ -358,9 +358,14 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     async () => actions.catalog(await status.availableFunctions()),
   );
 
+  // Vorschau und Ausführen nur vom Mac selbst (403 `local_only` aus dem Netz, auch mit Geräte-Token und über den
+  // Tunnel): Ein gestohlenes Geräte-Token darf keine Abgabe oder keinen Beitrag im Namen des Nutzers auslösen.
+  // Die Vorschau speichert nichts unter einem `Idempotency-Key`: Ihre Antwort enthält den Bestätigungscode, und der
+  // lebt nur im Speicher des Core (08 §9.3), nie in Postgres
   typed.post(
     '/moodle/actions/:action_id/preview',
     {
+      config: { sgAccess: 'local', idempotency: false },
       schema: {
         tags: ['Moodle'],
         summary: 'Vorschau einer Aktion, ändert nichts in Moodle. Liefert bei Bedarf den Bestätigungscode',
@@ -391,6 +396,7 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
   typed.post(
     '/moodle/actions/:action_id/execute',
     {
+      config: { sgAccess: 'local' },
       schema: {
         tags: ['Moodle'],
         summary: 'Aktion ausführen. endgueltig/oeffentlich nur mit Bestätigungscode aus der Vorschau',
