@@ -78,6 +78,28 @@ describe('Core-Sperrdatei (#174)', () => {
     }
   });
 
+  it('lehnt ab, solange ein anderer Start gerade eine veraltete Datei übernimmt', () => {
+    acquireCoreLock(dir, { pid: 4001 });
+    writeFileSync(`${coreLockPath(dir)}.takeover`, '4005\n');
+    let caught: unknown;
+    try {
+      acquireCoreLock(dir, { pid: 4002, alive: alive([4005]) });
+    } catch (error) {
+      caught = error;
+    }
+    expect((caught as CoreLockHeldError).pid).toBe(4005);
+    expect(content()).toBe('4001');
+    expect(readdirSync(join(dir, 'run')).sort()).toEqual(['core.lock', 'core.lock.takeover']);
+  });
+
+  it('räumt die Übernahme-Sperre eines abgestürzten Starts weg', () => {
+    acquireCoreLock(dir, { pid: 4001 });
+    writeFileSync(`${coreLockPath(dir)}.takeover`, '4005\n');
+    acquireCoreLock(dir, { pid: 4002, alive: alive([]) });
+    expect(content()).toBe('4002');
+    expect(readdirSync(join(dir, 'run'))).toEqual(['core.lock']);
+  });
+
   it('Neustart direkt nach Freigabe klappt', () => {
     acquireCoreLock(dir, { pid: 4001 }).release();
     expect(() => acquireCoreLock(dir, { pid: 4002, alive: alive([4001]) })).not.toThrow();

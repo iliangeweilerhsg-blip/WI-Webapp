@@ -29,6 +29,8 @@ try {
   );
   process.exit(1);
 }
+// Freigabe erst beim tatsächlichen Prozessende (auch nach `process.exit`, unbehandeltem Fehler oder Frist), nicht schon
+// nach `app.close()`: Sonst könnte ein Neustart den Logger rotieren, während der alte Core noch Zeilen schreibt
 process.on('exit', () => lock.release());
 const logger = createLogger(config);
 if (scrubbedEnv.length > 0) {
@@ -79,8 +81,6 @@ async function shutdown(signal: string): Promise<void> {
   } catch (error) {
     logger.error({ err: error }, 'Fehler beim Beenden');
     process.exitCode = 1;
-  } finally {
-    lock.release();
   }
 }
 process.on('SIGTERM', () => void shutdown('SIGTERM'));
@@ -116,5 +116,4 @@ try {
   stopping = true;
   await app.close().catch(() => {});
   await handle.close().catch(() => {});
-  lock.release();
 }
