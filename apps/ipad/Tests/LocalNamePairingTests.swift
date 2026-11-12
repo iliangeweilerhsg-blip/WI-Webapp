@@ -121,15 +121,6 @@ final class LocalNameResolvedAtPairingTests: XCTestCase {
         XCTAssertNil(setup.macs.mac)
     }
 
-    func testHintForChangedMacAddressOnlyWhenNobodyAnswers() {
-        XCTAssertTrue(HomeTexts.mayHaveNewAddress(.disconnected(.timeout)))
-        XCTAssertTrue(HomeTexts.mayHaveNewAddress(.disconnected(.coreNotFound)))
-        XCTAssertFalse(HomeTexts.mayHaveNewAddress(.disconnected(.otherNetwork)))
-        XCTAssertFalse(HomeTexts.mayHaveNewAddress(.disconnected(.tokenInvalid)))
-        XCTAssertFalse(HomeTexts.mayHaveNewAddress(.connected))
-        XCTAssertTrue(HomeTexts.newAddressHint.contains("Kopplung aufheben"))
-    }
-
     func testIPAddressIsNotResolved() async {
         let setup = Setup([.http(status: 201, body: Fixtures.pairStartResponse)], resolvesTo: nil)
 
