@@ -254,6 +254,7 @@ interface AutoStopReport {
   auto: UseAutoStopResult;
   extendMinutes: number;
 }
+const IDLE_REPORT: AutoStopReport = { auto: IDLE_AUTO, extendMinutes: DEFAULT_EXTEND_MINUTES };
 
 /**
  * Der Auto-Stopp-Controller (T1-07) der Shell. Wird nur gerendert, solange die Session läuft oder pausiert ist: So
@@ -287,6 +288,8 @@ const AutoStopHost = memo(function AutoStopHost({
     [status, extending, extendError, stopping, stopError, extend, extendMinutes],
   );
   useEffect(() => report(value), [report, value]);
+  // Beim Aushängen den Stand zurücksetzen: Ein neuer Host (andere Session) zeigt nie den alten Hinweis
+  useEffect(() => () => report(IDLE_REPORT), [report]);
   return null;
 });
 
@@ -332,7 +335,11 @@ export function RecordingProvider({ children, env = {} }: { children: ReactNode;
 
   // Beim Wechsel der Session wartet der neue Recorder, bis der alte gestoppt ist (auch ohne Web Locks, Plan §4.3)
   const previousStopped = useRef<Promise<void>>(Promise.resolve());
-  const [parts, setParts] = useState<{ recorder: AudioRecorder; control: LeaderRecording } | null>(null);
+  const [parts, setParts] = useState<{
+    sessionId: string;
+    recorder: AudioRecorder;
+    control: LeaderRecording;
+  } | null>(null);
 
   useEffect(() => {
     if (sessionId === null) return;
@@ -350,19 +357,27 @@ export function RecordingProvider({ children, env = {} }: { children: ReactNode;
       recorder,
       acquireLock: (signal) =>
         new Promise((resolve) => {
-          if (signal.aborted) return resolve(null);
-          signal.addEventListener('abort', () => resolve(null), { once: true });
+          let settled = false;
+          const settle = (release: (() => void) | null) => {
+            // Kommt die Sperre erst nach dem Abbruch, wird sie sofort wieder frei (sonst bliebe sie gehalten)
+            if (settled) return release?.();
+            settled = true;
+            resolve(release);
+          };
+          if (signal.aborted) return settle(null);
+          signal.addEventListener('abort', () => settle(null), { once: true });
           void waitFor
             .then(() => (signal.aborted ? null : baseLock(signal)))
-            .then(resolve, () => resolve(null));
+            .then(settle, () => settle(null));
         }),
     });
-    setParts({ recorder, control });
+    setParts({ sessionId, recorder, control });
     return () => {
       // Erst sauber beenden (letzter Chunk, `complete`), dann den Recorder entsorgen
       control.dispose();
       const stopped = control.idle();
-      previousStopped.current = stopped;
+      // Auch alle Vorgänger: Wartet dieser Recorder selbst noch (A → B → C), ist er schnell „gestoppt“, A aber nicht
+      previousStopped.current = Promise.all([waitFor, stopped]).then(() => undefined);
       void stopped
         .then(() => recorder.flushUploads(envRef.current.flushMs ?? 8000))
         .then(() => {
@@ -375,8 +390,11 @@ export function RecordingProvider({ children, env = {} }: { children: ReactNode;
     };
   }, [sessionId]);
 
-  const recorder = parts?.recorder ?? null;
-  const control = parts?.control ?? null;
+  // Nur die Teile der aktuellen Session: Im Rendern direkt nach dem Wechsel stehen noch die alten (schon entsorgten)
+  // im Zustand. Ein `set` auf sie würde den alten Recorder nach dem Stopp wieder starten.
+  const current = parts !== null && parts.sessionId === sessionId ? parts : null;
+  const recorder = current?.recorder ?? null;
+  const control = current?.control ?? null;
   const status = useSyncExternalStore(
     recorder ? recorder.subscribe : noopSubscribe,
     () => recorder?.getStatus() ?? IDLE_STATUS,
@@ -476,10 +494,7 @@ export function RecordingProvider({ children, env = {} }: { children: ReactNode;
 
   // Auto-Stopp: der Host läuft nur bei laufender oder pausierter Session (und, solange der Schalter gilt, offenem Dashboard)
   const hostSession = tracked && phase !== 'andere' ? tracked.session : null;
-  const [autoReport, setAutoReport] = useState<AutoStopReport>({
-    auto: IDLE_AUTO,
-    extendMinutes: DEFAULT_EXTEND_MINUTES,
-  });
+  const [autoReport, setAutoReport] = useState<AutoStopReport>(IDLE_REPORT);
   const report = setAutoReport;
   const autoStop = hostSession ? autoReport.auto : IDLE_AUTO;
   const extendMinutes = hostSession ? autoReport.extendMinutes : DEFAULT_EXTEND_MINUTES;

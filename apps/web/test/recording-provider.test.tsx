@@ -410,6 +410,86 @@ describe('RecordingProvider: Wechsel der Session', () => {
     },
   );
 
+  it('Start von B aus dem Dashboard von B: der alte Recorder von A startet nicht wieder', async () => {
+    const locks = new FakeWebLocks();
+    const shared = { running: new Set<object>(), maxRunning: 0 };
+    boot({
+      sessions: [session(A_ID), B()],
+      rec: fakeRecording({ locks, shared }),
+      ui: <Dashboard id={B_ID} />,
+    });
+    await waitFor(() => expect(shownSession()).toBe(A_ID));
+    await settle();
+    // A läuft, aber kein Dashboard zeigt A: keine Aufnahme (Schalter)
+    expect(kind()).toBe('inactive');
+    expect(rec.getUserMedia).not.toHaveBeenCalled();
+
+    await switchToB('b-first');
+    await waitFor(() => expect(shownSession()).toBe(B_ID));
+    await waitFor(() => expect(kind()).toBe('rec'));
+    await settle(150);
+    // Genau eine Aufnahme, und zwar für B
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(rec.mr.instances).toHaveLength(1);
+    expect(shared.maxRunning).toBe(1);
+    expect(uploads(new RegExp(`^POST .*/sessions/${B_ID}/recordings$`))).toHaveLength(1);
+
+    // B endet und gibt die Sperre frei: Auch jetzt nimmt kein übrig gebliebener Recorder für A auf
+    await sync.emit(
+      'session.updated',
+      session(B_ID, { number: 8, state: 'beendet', updated_at: '2026-11-04T08:50:00Z' }),
+    );
+    await waitFor(() => expect(uploads(/^POST .*\/complete$/)).toHaveLength(1));
+    await settle(150);
+    expect(rec.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(shared.running.size).toBe(0);
+    expect(uploads(new RegExp(`^POST .*/sessions/${A_ID}/recordings$`))).toHaveLength(0);
+  });
+
+  it('A → B → C kurz hintereinander ohne Sperre: C wartet auf A, nicht nur auf B', async () => {
+    const shared = { running: new Set<object>(), maxRunning: 0 };
+    const base = fakeRecording({ shared });
+    // Der letzte Chunk von A wird erst auf Kommando geschrieben: A ist dann noch nicht fertig gestoppt
+    let hold = false;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const addChunk = base.store.addChunk.bind(base.store);
+    base.store.addChunk = async (...args) => {
+      if (hold) await gate;
+      return addChunk(...args);
+    };
+    const C_ID = '0190f6a2-0000-7000-8000-0000000000e4';
+    boot({
+      sessions: [session(A_ID), B(), session(C_ID, { number: 9, state: 'bereit' })],
+      rec: base,
+      env: { acquireLock: async () => () => undefined },
+    });
+    await waitFor(() => expect(kind()).toBe('rec'));
+    hold = true;
+    await switchToB('a-first');
+    await waitFor(() => expect(shownSession()).toBe(B_ID));
+    // B wartet noch auf A; schon startet C (der Core beendet B)
+    let result!: Awaited<ReturnType<typeof startSession>>;
+    await act(async () => {
+      result = await startSession(C_ID);
+    });
+    await sync.emit('session.updated', result.ended_session!);
+    await sync.emit('session.updated', result.session);
+    await waitFor(() => expect(shownSession()).toBe(C_ID));
+    await settle(150);
+    // A ist noch nicht gestoppt: C hat das Mikrofon noch nicht geöffnet
+    expect(base.getUserMedia).toHaveBeenCalledTimes(1);
+    expect(shared.maxRunning).toBe(1);
+
+    release();
+    await waitFor(() => expect(kind()).toBe('rec'));
+    expect(base.getUserMedia).toHaveBeenCalledTimes(2);
+    expect(shared.maxRunning).toBe(1);
+    expect(shared.running.size).toBe(1);
+  });
+
   it('ohne Sperre (Web Locks fehlen) wartet B, bis A gestoppt ist (previousStopped)', async () => {
     const shared = { running: new Set<object>(), maxRunning: 0 };
     const base = fakeRecording({ shared });
