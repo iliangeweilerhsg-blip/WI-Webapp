@@ -29,6 +29,10 @@ struct HomeView: View {
                     if let expiryNotice {
                         NoticeCard(text: expiryNotice)
                     }
+                    // Anderes Netz: ruhiger Hinweis, kein Dialog (UX-12, PR 0)
+                    if model.connection == .disconnected(.otherNetwork), model.sync?.state != .online {
+                        NoticeCard(text: HomeTexts.otherNetworkCard)
+                    }
                     if let sync = model.sync {
                         if sync.state == .unsupported {
                             NoticeCard(text: HomeTexts.appOutdatedCard)
@@ -97,6 +101,10 @@ struct HomeView: View {
 /// Texte des Startbildschirms. Reine Funktionen, damit sie testbar sind.
 enum HomeTexts {
     static let appOutdatedCard = "App passt nicht mehr zum Mac. Am Mac über Xcode neu aufspielen."
+
+    /// Das iPad ist nicht im Netz des Macs (UX-12, PR 0)
+    static let otherNetworkCard =
+        "Mac nicht im selben Netz · Deine Notizen bleiben auf dem iPad und gleichen sich später ab."
 
     /// Zeile während des Abgleichs aller Seiten (UX-46). Zählt herunter, am Ende verschwindet sie. Markierte Seiten,
     /// die sich nicht lesen ließen (#252), zählt sie nicht mit: Sie werden nie abgeglichen und stehen als eigener

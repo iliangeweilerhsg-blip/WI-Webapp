@@ -137,7 +137,7 @@ final class ConnectionErrorTests: XCTestCase {
             .pairing(.requestsFull), .pairing(.codeInvalid), .pairing(.requestRejected),
             .server(status: 500, code: "x"), .server(status: 500, code: nil), .invalidResponse, .invalidAddress,
             .invalidPairingLink, .invalidCodeFormat, .discoveryFailed, .macNotResolved, .tokenStorageFailed,
-            .network(code: -1), .appOutdated,
+            .network(code: -1), .appOutdated, .otherNetwork,
         ]
         for cause in causes {
             XCTAssertFalse(cause.title.isEmpty)

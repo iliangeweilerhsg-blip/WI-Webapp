@@ -249,7 +249,10 @@ final class SyncHarness {
     let client: CoreClient
     let binding: InkBinding
 
-    init(health: [FakeTransport.Reply] = [.http(status: 200, body: "{}")]) {
+    init(
+        health: [FakeTransport.Reply] = [.http(status: 200, body: "{}")],
+        interfaces: any InterfaceListing = Fixtures.sameNetwork
+    ) {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("sync-test-\(UUID().uuidString)", isDirectory: true)
         let clock = VirtualClock()
@@ -290,7 +293,7 @@ final class SyncHarness {
         self.library = library
         self.tokens = tokens
         self.binding = binding
-        let client = Fixtures.client(transport)
+        let client = Fixtures.client(transport, interfaces: interfaces)
         let engine = SyncEngine(
             client: client,
             sockets: factory,

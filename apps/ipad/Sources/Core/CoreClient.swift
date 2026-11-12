@@ -219,11 +219,30 @@ final class CoreClient {
     private let transport: any HTTPTransport
     private let maxRetries: Int
     private let retryDelay: Duration
+    private let interfaces: any InterfaceListing
 
-    init(transport: any HTTPTransport, maxRetries: Int = 2, retryDelay: Duration = .milliseconds(200)) {
+    /// - Parameter interfaces: Schnittstellen des iPads für die Prüfung „Token nur ins eigene Netz“
+    ///   (`TokenDestination`). Die echte Fassung liest sie per `getifaddrs`.
+    init(
+        transport: any HTTPTransport, maxRetries: Int = 2, retryDelay: Duration = .milliseconds(200),
+        interfaces: any InterfaceListing = SystemInterfaceListing()
+    ) {
         self.transport = transport
         self.maxRetries = maxRetries
         self.retryDelay = retryDelay
+        self.interfaces = interfaces
+    }
+
+    /// Darf eine Anfrage mit Token an diesen Mac gehen? Nur im Subnetz einer aktiven Schnittstelle oder an einen
+    /// `.local`-Namen (UX-12, PR 0). Billig und lokal: Die Schnittstellen werden bei jedem Aufruf neu gelesen, weil
+    /// das iPad das Netz wechseln kann.
+    func allowsToken(for endpoint: CoreEndpoint) -> Bool {
+        TokenDestination.allows(host: endpoint.host, interfaces: interfaces.activeIPv4())
+    }
+
+    /// Wirft `otherNetwork`, bevor eine Anfrage mit Token entsteht
+    private func requireTokenDestination(_ endpoint: CoreEndpoint) throws {
+        guard allowsToken(for: endpoint) else { throw ConnectionError.otherNetwork }
     }
 
     /// `POST /devices/pair/start`: meldet das iPad an und liefert die öffentliche `pairing_id`
@@ -413,6 +432,8 @@ final class CoreClient {
         maxBytes: Int = SlideDeckStore.defaultMaxFileBytes,
         maxDuration: TimeInterval = DownloadLimit.defaultMaxDuration
     ) async throws {
+        // Das Token geht nur ins eigene Netz. Die Zieldatei bleibt unberührt.
+        try requireTokenDestination(endpoint)
         let safeDeck = try Self.safeID(deckID)
         guard let url = endpoint.url(path: "/slide-decks/\(safeDeck)/file", queryItems: []) else {
             throw ConnectionError.invalidAddress
@@ -485,6 +506,10 @@ final class CoreClient {
         queryItems: [URLQueryItem] = [],
         retriesOnConnectionLoss: Bool = true
     ) async throws -> Data {
+        // Mit Token nur ins eigene Netz (UX-12, PR 0). Die Kopplung (`pair/*`, ohne Token) bleibt unberührt.
+        if token != nil {
+            try requireTokenDestination(endpoint)
+        }
         guard let url = endpoint.url(path: path, queryItems: queryItems) else { throw ConnectionError.invalidAddress }
         var request = URLRequest(url: url)
         request.httpMethod = method

@@ -583,6 +583,9 @@ final class SyncEngine {
             setState(.stopped)
             return .stop
         }
+        // Das Token geht nur ins eigene Netz (UX-12, PR 0): Liegt der Mac nicht im Netz des iPads, wird nicht einmal
+        // ein Socket geöffnet. Zustand `waiting`, übliche Wartezeit, die Warteschlange bleibt.
+        guard client.allowsToken(for: mac.endpoint) else { return .retry }
         // Token nur im Header, kein Origin (VERTRAEGE §11.1)
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
@@ -672,6 +675,8 @@ final class SyncEngine {
     }
 
     private func healthSaysTokenInvalid(mac: PairedMac, token: String) async -> Bool {
+        // Auch hier geht das Token nur ins eigene Netz (der Client prüft ebenfalls)
+        guard client.allowsToken(for: mac.endpoint) else { return false }
         do {
             try await client.checkHealth(endpoint: mac.endpoint, token: token)
             return false
