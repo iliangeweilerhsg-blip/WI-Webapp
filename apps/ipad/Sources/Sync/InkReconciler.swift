@@ -4,6 +4,36 @@ import Foundation
 /// Das Ergebnis sind dieselben Änderungen wie beim Zeichnen: `stroke.add` ist ein Upsert über `client_id`,
 /// darum ist ein überflüssiges Senden harmlos.
 enum InkReconciler {
+    /// Rechnet noch nicht bestätigte Operationen der Seite auf den Stand des Core: So sieht der Core aus, sobald die
+    /// Warteschlange abgearbeitet ist. Ohne das plant der Abgleich gegen einen Stand, den die Warteschlange gleich
+    /// ändert (Geisterstriche, fehlende Striche nach einem Absturz).
+    /// - Parameters:
+    ///   - server: Stand des Core, `nil` = Seite dort unbekannt
+    ///   - pending: wartende Strichänderungen der Seite, älteste zuerst
+    ///   - pageCreatePending: Eine `page.create` wartet noch. Die Seite gilt dann als vorhanden und leer.
+    /// - Returns: `nil`, wenn die Seite unbekannt bleibt
+    static func projected(
+        server: [Stroke]?,
+        pending: [InkStrokeChange],
+        pageCreatePending: Bool
+    ) -> [Stroke]? {
+        guard var strokes = server ?? (pageCreatePending ? [] : nil) else { return nil }
+        for change in pending {
+            switch change {
+            case .upsert(let stroke):
+                if let index = strokes.firstIndex(where: { $0.clientID == stroke.clientID }) {
+                    strokes[index] = stroke
+                } else {
+                    strokes.append(stroke)
+                }
+            case .remove(let ids):
+                let gone = Set(ids)
+                strokes.removeAll { gone.contains($0.clientID) }
+            }
+        }
+        return strokes
+    }
+
     /// - Parameters:
     ///   - local: alle Striche der Seite auf dem iPad
     ///   - server: `GET /pages/{id}/strokes`, `nil` = Seite unbekannt (404)

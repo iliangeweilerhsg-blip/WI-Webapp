@@ -365,7 +365,15 @@ final class SyncEngine {
         // Ab hier gibt es kein `await` mehr: Der lokale Stand ist genau der, den der Plan sieht
         guard runningMac != nil else { return }
         var succeeded = true
-        if remote == nil {
+        // Wartende Operationen der Seite zuerst auf den Stand des Core rechnen (Absturz mitten im Senden)
+        let pendingForPage = outbox.pending.filter { $0.pageID == binding.pageID }
+        let createPending = pendingForPage.contains { $0.kind == "page.create" }
+        let projected = InkReconciler.projected(
+            server: remote?.strokes,
+            pending: SyncEngine.strokeChanges(of: pendingForPage),
+            pageCreatePending: createPending
+        )
+        if remote == nil, !createPending {
             // Der Core kennt die Seite nicht (Wiederherstellung): mit allen Feldern der Bibliothek neu anlegen,
             // damit z. B. eine Folienseite nicht als leere A4-Seite zurückkommt
             let known = library.page(binding.pageID) ?? SyncEngine.fallbackPage(for: binding)
@@ -384,7 +392,7 @@ final class SyncEngine {
                 succeeded = false
             }
         }
-        let changes = InkReconciler.plan(local: page.neutralStrokes(), server: remote?.strokes)
+        let changes = InkReconciler.plan(local: page.neutralStrokes(), server: projected)
         if succeeded, !changes.isEmpty {
             succeeded = enqueue(changes, binding: binding)
         }
@@ -394,6 +402,20 @@ final class SyncEngine {
             page.reconcileFinished()
             library.clearNeedsReconcile(pageID: binding.pageID)
         }
+    }
+
+    /// Strichänderungen aus wartenden Operationen, in der Reihenfolge der Warteschlange. Unlesbare Zeilen zählen nicht.
+    private static func strokeChanges(of entries: [OutboxEntry]) -> [InkStrokeChange] {
+        var changes: [InkStrokeChange] = []
+        for entry in entries where entry.kind == "stroke.add" || entry.kind == "stroke.remove" {
+            guard let data = entry.json.data(using: .utf8), let op = try? SGSyncOp.decode(data) else { continue }
+            switch op {
+            case .strokeAdd(let value): changes.append(.upsert(value.data.stroke))
+            case .strokeRemove(let value): changes.append(.remove(value.data.clientIDS))
+            default: break
+            }
+        }
+        return changes
     }
 
     /// Seite, wenn die Bibliothek sie nicht (mehr) kennt: A4, leer, wie die alte Bindung sie angelegt hat

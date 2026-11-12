@@ -609,6 +609,28 @@ final class SyncEngineTests: XCTestCase {
         XCTAssertFalse(h.library.page(slidePage.id)?.needsReconcile ?? true)
     }
 
+    func testReconcileDoesNotQueueASecondPageCreateWhileOneIsWaiting() async throws {
+        let h = SyncHarness(health: [
+            .http(status: 404, body: Fixtures.apiError("page_not_found"))
+        ])
+        let page = try XCTUnwrap(h.library.page(h.binding.pageID))
+        let draft = try XCTUnwrap(
+            InkOpBuilder.pageCreate(page: page, nowMS: 1, offsetMS: nil, makeID: { InkID.uuidV7() }))
+        XCTAssertTrue(h.engine.enqueue(drafts: [draft]))
+        h.start()
+        _ = await eventually { h.engine.state == .online }
+
+        let model = InkPageModel(
+            pageID: page.id, pageSize: CGSize(width: 595, height: 842),
+            store: FileInkPageStore(root: h.directory.appendingPathComponent("Ink")))
+        await h.engine.reconcile(page: model, binding: h.binding)
+
+        let drained = await eventually { h.engine.pendingCount == 0 }
+        XCTAssertTrue(drained)
+        let kinds = h.factory.sockets[0].ops.compactMap { $0.object["kind"] as? String }
+        XCTAssertEqual(kinds, ["page.create"])
+    }
+
     func testPageOperationsDoNotMoveTheStrokeMark() async throws {
         let h = SyncHarness()
         let page = try XCTUnwrap(h.library.page(h.binding.pageID))
