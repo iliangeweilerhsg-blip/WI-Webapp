@@ -215,6 +215,11 @@ export const BULK_MAX_IDS = 500;
  * `POST /inbox/bulk` mit beliebig vielen `ids`: in Blöcken zu höchstens 500, nacheinander, Ergebnisse zusammengeführt.
  * Scheitert ein späterer Block, landen seine und alle folgenden IDs mit dem Fehlercode in `skipped`, damit das schon
  * Entschiedene rückgängig gemacht werden kann. Scheitert der erste Block, kommt der Fehler durch.
+ *
+ * Folge-Einträge (§20.6) können über die Blockgrenze hinweg in einem Block mitentschieden werden und in einem anderen
+ * scheitern: `accept` bestätigt im ersten Block eine Beziehung mit, die im zweiten dann `inbox_item_decided` meldet;
+ * `reopen` scheitert im ersten Block an einem Folge-Eintrag (`inbox_reopen_conflict`), den sein Auslöser im zweiten
+ * mit öffnet. Was am Ende in `decided` steht, fällt darum aus `skipped` heraus.
  */
 export async function bulkInChunks(request: InboxBulkRequest): Promise<InboxBulkResult> {
   const ids = request.ids;
@@ -232,6 +237,8 @@ export async function bulkInChunks(request: InboxBulkRequest): Promise<InboxBulk
       break;
     }
   }
+  const done = new Set(merged.decided);
+  merged.skipped = merged.skipped.filter((entry) => !done.has(entry.id));
   return merged;
 }
 
@@ -269,33 +276,16 @@ export function bulkTarget(
 
 /**
  * „Rückgängig“ nach einer Massenaktion: `reopen` in umgekehrter Reihenfolge (§20.6). `decided` enthält auch die
- * mitentschiedenen Folge-Einträge (§20.6: „geänderte Einträge“); der Core öffnet sie zusammen mit ihrem Auslöser.
- * Bei mehr als 500 IDs landen Folge-Eintrag und Auslöser in verschiedenen Blöcken: Der Folge-Eintrag kommt zuerst
- * dran und scheitert mit `inbox_reopen_conflict`, obwohl ihn der Auslöser im nächsten Block mitöffnet. Darum werden
- * solche Konflikte nach dem letzten Block einmal wiederholt. `inbox_item_not_decided` heißt: schon wieder offen,
- * also kein Fehler.
+ * mitentschiedenen Folge-Einträge (§20.6: „geänderte Einträge“); der Core öffnet sie zusammen mit ihrem Auslöser,
+ * auch über die Blöcke zu 500 hinweg (`bulkInChunks`). `inbox_item_not_decided` heißt: schon wieder offen (etwa aus
+ * einem anderen Tab), also kein Fehler.
  */
 export async function undoBulk(decided: readonly string[]): Promise<InboxBulkResult> {
-  const first = await bulkInChunks({ action: 'reopen', ids: [...decided].reverse() });
-  const retry = first.skipped
-    .filter((entry) => entry.code === 'inbox_reopen_conflict')
-    .map((entry) => entry.id);
-  const result: InboxBulkResult = {
-    decided: [...first.decided],
-    skipped: first.skipped.filter((entry) => entry.code !== 'inbox_item_not_decided'),
+  const result = await bulkInChunks({ action: 'reopen', ids: [...decided].reverse() });
+  return {
+    decided: result.decided,
+    skipped: result.skipped.filter((entry) => entry.code !== 'inbox_item_not_decided'),
   };
-  if (retry.length > 0 && decided.length > BULK_MAX_IDS) {
-    const again = await bulkInChunks({ action: 'reopen', ids: retry }).catch(() => null);
-    if (again) {
-      const retried = new Set(retry);
-      result.decided.push(...again.decided);
-      result.skipped = [
-        ...result.skipped.filter((entry) => !retried.has(entry.id)),
-        ...again.skipped.filter((entry) => entry.code !== 'inbox_item_not_decided'),
-      ];
-    }
-  }
-  return result;
 }
 
 // ---------------------------------------------------------------------------------------------

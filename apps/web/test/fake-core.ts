@@ -985,7 +985,7 @@ export function installFakeCore(
             409,
           );
         }
-        // Kette wie §20.5: danach `concepts.extract` → `concepts.resolve` → `summary.write`
+        // Kette wie §20.2: danach `concepts.extract` → `concepts.resolve` → `summary.write`
         const steps = [
           'audio.finalize',
           'transcribe',
@@ -1004,17 +1004,19 @@ export function installFakeCore(
         ) {
           return json({ error: { code: 'session_no_audio', message: 'x' } }, 409);
         }
-        // Ohne fertigen `concepts.extract` gilt `from_step = concepts.extract`
-        if (from === 'concepts.resolve' && found.processing['concepts.extract'] !== 'fertig') {
+        // Ohne tragenden `concepts.extract` (wartet, läuft oder fertig) gilt `from_step = concepts.extract`
+        const extract = found.processing['concepts.extract'];
+        if (
+          from === 'concepts.resolve' &&
+          extract !== 'wartet' &&
+          extract !== 'laeuft' &&
+          extract !== 'fertig'
+        ) {
           from = 'concepts.extract';
         }
-        // `summary.write` allein; alle anderen Schritte ziehen die folgenden nach
-        // Sessions mit nur den drei alten Schritten behalten sie; die Konzept-Schritte legt erst `from_step` an
-        const fromConcepts = steps.indexOf(from) >= 3;
-        for (const step of steps.slice(steps.indexOf(from))) {
-          if (steps.indexOf(step) < 3 || fromConcepts || step in found.processing)
-            found.processing[step] = 'wartet';
-        }
+        // Wie `ensurePipelineJobs` im Core: `summary.write` allein, alle anderen Schritte ziehen die folgenden nach,
+        // auch die Konzept-Schritte bei Sessions, die bisher nur die drei alten Schritte hatten
+        for (const step of steps.slice(steps.indexOf(from))) found.processing[step] = 'wartet';
         found.updated_at = new Date().toISOString();
         return json({ session: structuredClone(found), jobs: [] }, 202);
       }
@@ -1390,6 +1392,8 @@ function decideInboxItem(
   }
   const request = body ?? {};
   const payload = item.payload;
+  // A1 (neues Konzept, auch `concept_merge` mit `as_new`); nur danach bestätigt der Core Beziehungen mit
+  let acceptedNew = false;
   if (payload.kind === 'relation') {
     if (request.edit !== undefined || request.merge_into !== undefined || request.as_new !== undefined) {
       return { status: 400, code: 'inbox_action_invalid' };
@@ -1427,6 +1431,7 @@ function decideInboxItem(
       if (existing) {
         return { status: 409, code: 'concept_exists', details: { concept_id: existing.concept.id } };
       }
+      acceptedNew = true;
       const own = core.concepts.find((c) => c.concept.id === item.concept_id);
       if (own) Object.assign(own.concept, edit, { status: 'aktiv', updated_at: now });
       else {
@@ -1448,7 +1453,7 @@ function decideInboxItem(
   item.status = 'angenommen';
   item.decided_at = now;
   // A1: offene Beziehungen, deren Endpunkte jetzt beide aktiv sind, werden mitbestätigt (`ai.auto_accept`)
-  if (core.inboxCascade && payload.kind !== 'relation' && payload.kind === 'concept_new') {
+  if (core.inboxCascade && acceptedNew) {
     const active = (conceptId: string) =>
       core.concepts.some((c) => c.concept.id === conceptId && c.concept.status === 'aktiv');
     const followed: string[] = [];
@@ -1577,6 +1582,10 @@ function handleConcepts(
     const wantedIds = new Set(order.map((x) => x.id));
     const decided: string[] = [];
     const skipped: { id: string; code: string }[] = [];
+    // Wie der Core: unbekannte `ids` zuerst mit `inbox_item_not_found`
+    for (const wantedId of new Set(ids ?? [])) {
+      if (!wantedIds.has(wantedId)) skipped.push({ id: wantedId, code: 'inbox_item_not_found' });
+    }
     const done = new Set<string>();
     const deferred: string[] = [];
     for (const item of order) {

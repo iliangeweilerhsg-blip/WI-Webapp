@@ -559,13 +559,14 @@ describe('Rückblick: Zustände', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Erneut versuchen' }));
     await waitFor(() => expect(reprocessPosts()).toHaveLength(1));
     expect(reprocessPosts()[0]?.body).toEqual({ from_step: 'transcribe' });
-    // Die Antwort enthält die Session: Die Schritte stehen jetzt auf „wartet“
+    // Die Antwort enthält die Session: Die Schritte stehen jetzt auf „wartet“. Wie im Core kommen die drei
+    // Konzept-Schritte dazu (§20.2)
     await waitFor(() =>
       expect(
         within(screen.getByTestId('step-list'))
           .getAllByRole('listitem')
           .map((r) => r.getAttribute('data-state')),
-      ).toEqual(['fertig', 'wartet', 'wartet']),
+      ).toEqual(['fertig', 'wartet', 'wartet', 'wartet', 'wartet', 'wartet']),
     );
     expect(screen.queryByRole('button', { name: 'Erneut versuchen' })).toBeNull();
   });

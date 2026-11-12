@@ -3,7 +3,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ModuleListSchema, type InboxItem } from '@sg/shared';
 import { ApiRequestError, apiGet, apiSend, friendlyMessage } from '../src/lib/api.ts';
-import { bulkInChunks, errorDetail, inboxErrorMessage, reopenItem, undoBulk } from '../src/lib/inbox.ts';
+import {
+  bulkInChunks,
+  bulkTarget,
+  errorDetail,
+  inboxErrorMessage,
+  reopenItem,
+  undoBulk,
+} from '../src/lib/inbox.ts';
 import {
   installFakeCore,
   makeConceptDetail,
@@ -181,6 +188,25 @@ describe('Rückgängig nach „Alle annehmen“ (§20.6: mitentschiedene Folge-E
     expect(states()).toEqual(new Set(['offen']));
   });
 
+  it('„Alle annehmen“ mit `ids` über 500: im ersten Block mitbestätigte Beziehungen zählen nicht als offen geblieben', async () => {
+    // Konzepte zuerst, dann Beziehungen (`bulkTarget`): Die letzte Beziehung steht im zweiten Block, ihr Konzept
+    // hat sie im ersten schon mitbestätigt (der Core meldet dann `inbox_item_decided`)
+    boot(250, 1);
+    const ids = bulkTarget(core.inboxItems, null, core.inboxItems.length).ids ?? [];
+    expect(ids).toHaveLength(501);
+    const result = await bulkInChunks({ action: 'accept', ids });
+    expect(result.skipped).toEqual([]);
+    expect(new Set(result.decided).size).toBe(501);
+    expect(states()).toEqual(new Set(['angenommen']));
+  });
+
+  it('unbekannte IDs meldet der Fake-Core wie der Core mit `inbox_item_not_found`', async () => {
+    boot(1);
+    const result = await bulkInChunks({ action: 'accept', ids: [id(10_001), id(99_999)] });
+    expect(result.skipped).toEqual([{ id: id(99_999), code: 'inbox_item_not_found' }]);
+    expect(result.decided).toEqual([id(10_001), id(30_001)]);
+  });
+
   it('echte Konflikte bleiben in `skipped`', async () => {
     boot(1);
     const result = await bulkInChunks({ action: 'accept', session_id: SESSION.id });
@@ -199,7 +225,7 @@ describe('Rückgängig nach „Alle annehmen“ (§20.6: mitentschiedene Folge-E
   });
 });
 
-describe('Fake-Core: reprocess mit den Schritten der Konzepte (§20.5)', () => {
+describe('Fake-Core: reprocess mit den Schritten der Konzepte (§20.2)', () => {
   type Reply = { status: number; body: { session?: { processing: Record<string, string> } } };
   const reprocess = async (from?: string): Promise<Reply> => {
     const res = await fetch(`/api/v1/sessions/${SESSION.id}/reprocess`, {
