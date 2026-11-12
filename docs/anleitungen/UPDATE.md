@@ -29,14 +29,17 @@ So holst du neue Versionen auf den Mac und aufs iPad. Mach das **nicht am Vorles
 
 ## iPad-App
 
-Die iPad-App musst du nur neu aufspielen, wenn sich im Ordner `apps/ipad` etwas geändert hat. Prüfe das direkt nach dem `git pull`:
+Die iPad-App musst du nur neu aufspielen, wenn sich ihr Code geändert hat. Prüfe das direkt nach dem `git pull`:
 
 ```bash
-git diff --stat HEAD@{1} -- apps/ipad
+git diff --stat HEAD@{1} -- apps/ipad apps/mac-tunnel/Sources/TunnelShared packages/schemas/swift-support packages/schemas/generated/swift
 ```
+
+(`apps/mac-tunnel/Sources/TunnelShared` und die beiden Schema-Ordner baut die App mit ein.)
 
 - **Keine Ausgabe:** Es hat sich nichts geändert. Die App bleibt, wie sie ist.
 - **Dateien aufgelistet:** Spiele die App neu auf, wie in [IPAD.md](IPAD.md) beschrieben (Schritt 1 und Schritt 6). Die Kopplung bleibt erhalten. Lösche die App nicht.
+- **Einmalig beim Update auf die Direktverbindung (UX-12):** Danach zeigt das iPad „Bitte einmal neu koppeln“. Das ist erwartet. Was du tust: [IPAD.md](IPAD.md), Abschnitt „Nach dem Update: einmal neu koppeln“.
 
 Meldet die iPad-App „Der Mac spricht ein anderes Protokoll. App aktualisieren.“, ist sie älter als der Mac. Spiele sie dann ebenfalls neu auf. Einen Hinweis darauf am Mac gibt es noch nicht.
 

@@ -182,7 +182,7 @@ Die IDs verweisen auf Abschnitt 3 (alt) und Abschnitt 4 (neu).
 | UX-09 | erledigt | Knopf „Rückblick“ nach dem Ende (#212). |
 | UX-10 | offen | Kein Backup-Hinweis unter `components/today/`. |
 | UX-11 | teilweise | `sg doctor` prüft den Speicher (#216). Core und Web-App zeigen ihn nicht. |
-| UX-12 | offen | `PairedMacStore.swift` speichert weiter Host und Port fest. |
+| UX-12 | erledigt (PR 4, am Gerät nicht geprüft) | Das iPad sucht den Mac über den Dienst `_sg-tunnel._tcp` (gemeinsames WLAN, sonst Wi-Fi peer-to-peer) und spricht nur noch über den Tunnel. `PairedMacStore.swift` speichert Host und Port nur noch für die Erstkopplung. Einmal neu koppeln nach dem Update. Plan: `docs/plaene/UX-12-MAC-WIEDERFINDEN.md`. |
 | UX-13 | erledigt | `ProfileExpiry.swift`, Hinweis auf dem Startbildschirm (#214). Lesen des Profils am Gerät nicht geprüft. Nachbesserung: UX-50. |
 | UX-14 | offen | `SetupDialog.tsx` unverändert, keine Liste auf „Heute“. |
 | UX-15 | erledigt | Vier Anleitungen (#215). Inzwischen teils überholt: UX-58. |

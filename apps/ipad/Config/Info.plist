@@ -49,8 +49,8 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_studiengehirn._tcp</string>
-		<!-- Spike S6 (UX-12, PR 1): Direktverbindung testen. Fällt mit PR 4 wieder weg. -->
-		<string>_sg-spike._tcp</string>
+		<!-- Tunnel zum Mac (UX-12, PR 4): Das iPad sucht seinen Mac über diesen Dienst, im WLAN und direkt. -->
+		<string>_sg-tunnel._tcp</string>
 	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>Studien-Gehirn scannt den QR-Code, den dein Mac beim Koppeln zeigt.</string>

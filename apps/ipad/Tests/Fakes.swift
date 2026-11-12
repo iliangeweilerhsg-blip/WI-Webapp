@@ -183,9 +183,10 @@ enum Fixtures {
     static let otherNetwork = FakeInterfaces([FakeInterfaces.address("198.51.100.5", prefix: 24)])
 
     @MainActor
-    static func client(_ transport: FakeTransport, interfaces: any InterfaceListing = Fixtures.sameNetwork)
-        -> CoreClient
-    {
-        CoreClient(transport: transport, maxRetries: 2, retryDelay: .zero, interfaces: interfaces)
+    static func client(
+        _ transport: FakeTransport, interfaces: any InterfaceListing = Fixtures.sameNetwork,
+        routing: (any MacRouting)? = nil
+    ) -> CoreClient {
+        CoreClient(transport: transport, maxRetries: 2, retryDelay: .zero, interfaces: interfaces, routing: routing)
     }
 }

@@ -38,10 +38,14 @@ final class PairingController {
 
     private let client: CoreClient
     private let tokenStore: any TokenStore
+    private let tunnelKeyStore: any TunnelKeyStore
     private let macStore: any PairedMacStore
     private let deviceName: String
     private let appVersion: String?
     private let localResolver: any LocalNameResolving
+    /// Mit Tunnel (UX-12 PR 4) ist eine Kopplung ohne `tunnel_key` wertlos: Das iPad schickt nie ein Token an eine
+    /// IP-Adresse (E7). Dann wird sie gar nicht erst gespeichert, und der Text sagt, was am Mac fehlt.
+    private let requiresTunnelKey: Bool
 
     @ObservationIgnored private var nonce: String = PairingInput.makeNonce()
     @ObservationIgnored private var wrongCodes = 0
@@ -52,11 +56,15 @@ final class PairingController {
         macStore: any PairedMacStore,
         deviceName: String,
         appVersion: String?,
-        localResolver: any LocalNameResolving = SystemLocalNameResolver()
+        localResolver: any LocalNameResolving = SystemLocalNameResolver(),
+        tunnelKeyStore: any TunnelKeyStore = NoTunnelKeyStore(),
+        requiresTunnelKey: Bool = false
     ) {
         self.localResolver = localResolver
+        self.requiresTunnelKey = requiresTunnelKey
         self.client = client
         self.tokenStore = tokenStore
+        self.tunnelKeyStore = tunnelKeyStore
         self.macStore = macStore
         self.deviceName = PairingInput.deviceName(deviceName)
         self.appVersion = appVersion
@@ -149,7 +157,7 @@ final class PairingController {
         guard TokenDestination.isLocalName(endpoint.host) else { return endpoint }
         guard let resolved = await localResolver.resolve(endpoint),
             TokenDestination.parseIPv4(resolved.host) != nil,
-            client.allowsToken(for: resolved)
+            client.isInOwnNetwork(resolved)
         else { return nil }
         return resolved
     }
@@ -195,12 +203,37 @@ final class PairingController {
             return
         }
 
+        // Tunnel-Schlüssel (UX-12) nur in der Form aus `PairResponse`. Aus Token oder `token_hash` wird nie einer
+        // abgeleitet.
+        let validTunnelKey = result.tunnelKey.flatMap { (try? TunnelKey(base64url: $0)) != nil ? $0 : nil }
+        if requiresTunnelKey && validTunnelKey == nil {
+            // Mac ohne Tunnel (Core vor UX-12 oder `SG_TUNNEL=0`): Mit dieser Kopplung käme das iPad nie zum Mac, und
+            // „neu koppeln“ hälfe nicht. Nichts speichern, die bisherige Kopplung bleibt unberührt.
+            lastError = .macWithoutTunnel
+            state = .idle
+            return
+        }
         do {
             try tokenStore.saveToken(result.deviceToken)
         } catch {
             lastError = .tokenStorageFailed
             state = .idle
             return
+        }
+        // Der Tunnel-Schlüssel gehört zum neuen Token und überschreibt den alten. Fehlt er (nur ohne Tunnel, Tests), bleibt
+        // keiner stehen.
+        if let tunnelKey = validTunnelKey {
+            do {
+                try tunnelKeyStore.saveKey(tunnelKey)
+            } catch {
+                // Halb gekoppelt wäre schlimmer als gar nicht: Token wieder löschen
+                try? tokenStore.deleteToken()
+                lastError = .tokenStorageFailed
+                state = .idle
+                return
+            }
+        } else {
+            try? tunnelKeyStore.deleteKey()
         }
         macStore.savePairedMac(
             PairedMac(endpoint: endpoint, deviceID: result.deviceID, deviceName: result.deviceName))
