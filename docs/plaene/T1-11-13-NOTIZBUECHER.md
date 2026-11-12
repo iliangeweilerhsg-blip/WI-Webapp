@@ -609,7 +609,7 @@ Verhalten:
 ### 4.1 Swift 6, strict concurrency
 
 - Alles mit Zustand ist `@MainActor` (`SyncEngine`, Dienst, Ablagen, Follower). Neue Typen folgen dem Muster.
-- Über Isolationsgrenzen gehen nur eigene `Sendable`-Werte (`SyncInbound`, `SessionBrief`, `SlideRef`, `Data`, `URL`, `UIImage`). **Nie** `SGServerMessage`, `SGSyncOp` oder generierte Typen mit `JSONAny` (`SyncError.details`).
+- Über Isolationsgrenzen gehen nur eigene `Sendable`-Werte (`SyncInbound`, `SessionBrief`, `SlideRef`, `Data`, `URL`, `UIImage`). Generierte Sync-Typen (`SGServerMessage`, `SGSyncOp`, auch mit `JSONAny` in `SyncError.details`) sind seit #97 ebenfalls `Sendable` (Probe in `swift-support/check.sh`).
 - `CGPDFDocument`, `PKCanvasView` und `UIView` sind nicht `Sendable`. `SlideRenderer` öffnet das PDF **innerhalb** der abgetrennten Aufgabe und gibt nur das fertige Bild zurück.
 - `PKDrawing` ist ein Wert. Für Vorschaubilder die `Data` übergeben und die Zeichnung in der Hintergrundaufgabe neu aufbauen.
 - Closures, die über `await` hinweg leben (`onInbound`, `onStrokeChanges`, `onPageVersionConflict`), als `@MainActor`-Closures deklarieren und `[weak self]` fangen.
