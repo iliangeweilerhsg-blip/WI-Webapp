@@ -74,6 +74,12 @@ final class SlideSwitchGate {
         followedSlideID == slide.id
     }
 
+    /// Soll die Ansicht dieser Folie folgen? Nicht, wenn sie es schon getan hat und kein anderer Wechsel wartet. Wartet
+    /// einer (Folie A, B, zurück zu A bei aufliegendem Stift), muss A ihn ersetzen, sonst gälte nach der Ruhe B.
+    func shouldFollow(_ slide: SlideRef, force: Bool = false) -> Bool {
+        force || followedSlideID != slide.id || pending != nil
+    }
+
     func noteFollowed(_ slide: SlideRef) {
         followedSlideID = slide.id
     }

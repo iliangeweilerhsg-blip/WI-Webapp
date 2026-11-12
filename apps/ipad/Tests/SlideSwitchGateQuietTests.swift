@@ -175,6 +175,33 @@ final class SlideSwitchGateQuietTests: XCTestCase {
         XCTAssertFalse(gate.alreadyFollowed(one))
     }
 
+    /// L15: Die gemerkte Folie wird nur ohne wartenden Wechsel übersprungen, mit `force` nie
+    func testShouldFollowSkipsOnlyTheFollowedSlideWithoutAWaitingChange() {
+        let gate = makeGate(GateTestClock())
+        XCTAssertTrue(gate.shouldFollow(one))
+        gate.noteFollowed(one)
+        XCTAssertFalse(gate.shouldFollow(one))
+        XCTAssertTrue(gate.shouldFollow(one, force: true))
+        XCTAssertTrue(gate.shouldFollow(two))
+    }
+
+    /// L15: Folie A, B, zurück zu A bei aufliegendem Stift. Die Rückkehr zu A ersetzt den wartenden Wechsel zu B.
+    func testReturningToTheFollowedSlideWhileWritingReplacesTheWaitingChange() async {
+        let clock = GateTestClock()
+        let gate = makeGate(clock)
+        gate.noteFollowed(one)
+        gate.toolBegan()
+        XCTAssertTrue(gate.shouldFollow(two))
+        XCTAssertNil(gate.slideChanged(two))
+        // Ein wartender Wechsel darf die Rückkehr zur gemerkten Folie nicht verschlucken
+        XCTAssertTrue(gate.shouldFollow(one))
+        XCTAssertNil(gate.slideChanged(one))
+        clock.advance(0.5)
+        gate.finishTool()
+        await gate.awaitQuiet(sleep: { try await clock.sleep($0) })
+        XCTAssertEqual(gate.takeReleased(), one)
+    }
+
     func testTheViewIsToldToRestartTheWaitWhenAChangeWaitsOrAStrokeEnds() {
         let clock = GateTestClock()
         let gate = makeGate(clock)

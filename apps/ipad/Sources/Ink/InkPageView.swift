@@ -527,8 +527,9 @@ struct InkPageView: View {
         guard force || library.inkMode(forModule: moduleID) == .aufFolie else { return }
         _Concurrency.Task {
             guard let slide = await slides.currentSlide() else { return }
-            // Dieselbe Folie wie beim letzten Wechsel: nicht zurückspringen, wenn von Hand weitergeblättert wurde
-            guard force || !gate.alreadyFollowed(slide) else { return }
+            // Dieselbe Folie wie beim letzten Wechsel: nicht zurückspringen, wenn von Hand weitergeblättert wurde.
+            // Wartet aber ein Wechsel zu einer anderen Folie, ersetzt diese ihn (A, B, zurück zu A beim Schreiben).
+            guard gate.shouldFollow(slide, force: force) else { return }
             if let now = gate.slideChanged(slide) {
                 openSlidePage(now)
             }
@@ -540,8 +541,9 @@ struct InkPageView: View {
             // Setzt der Stift zwischen Freigabe und Wechsel an, wartet der Wechsel erneut bis zum Absetzen. Sonst
             // verschwände die Ansicht mitten im Strich.
             guard gate.slideChanged(slide) != nil else { return }
-            gate.noteFollowed(slide)
+            // Erst merken, wenn es die Seite gibt: Scheitert das Anlegen, versucht es der nächste Anstoß erneut
             guard let page = library.slidePage(notebookID: currentNotebookID, slide: slide) else { return }
+            gate.noteFollowed(slide)
             await show(pageID: page.id)
         }
     }
@@ -648,7 +650,7 @@ struct InkPageView: View {
 
     // MARK: Löschen mit Frist
 
-    /// Löscht ohne Dialog (R1). Unten erscheint 5 s lang „Rückgängig“. Ist es die offene Seite, rückt die nächste nach.
+    /// Löscht ohne Dialog (R1). Unten erscheint 4,5 s lang „Rückgängig“. Ist es die offene Seite, rückt die nächste nach.
     private func delete(pageID: String) {
         let visible = pages
         guard let index = visible.firstIndex(where: { $0.id == pageID }) else { return }
@@ -898,7 +900,8 @@ struct InkPageView: View {
     }
 }
 
-/// Leiste „Seite gelöscht · Rückgängig“. Verschwindet nach 5 s von selbst, kein Dialog (R1).
+/// Leiste „Seite gelöscht · Rückgängig“. Verschwindet nach `undoBarDuration` (4,5 s, kürzer als die Löschfrist) von
+/// selbst, kein Dialog (R1).
 private struct InkUndoDeleteBar: View {
     let pageID: String
     let onUndo: () -> Void
