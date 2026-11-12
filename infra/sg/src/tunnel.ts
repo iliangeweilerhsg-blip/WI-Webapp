@@ -53,6 +53,23 @@ export function tunnelCommand(cfg: SgConfig): { cmd: string; args: string[]; cwd
   };
 }
 
+/** Variablen, die der Helfer aus der Umgebung von `sg` erbt. Alles andere bleibt draußen. */
+const TUNNEL_ENV_KEEP = ['HOME', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE'] as const;
+
+/**
+ * Umgebung des Helfers: nur das Nötigste. Er lauscht im Funk und braucht weder `DATABASE_URL` noch API-Schlüssel,
+ * Proxy- oder `DYLD_*`-Variablen. `PATH` ist fest (der Helfer startet keine Programme). Alles, was er wissen muss,
+ * kommt über die Argumente (`tunnelCommand`).
+ */
+export function tunnelEnv(base: Record<string, string | undefined>): Record<string, string> {
+  const env: Record<string, string> = { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' };
+  for (const key of TUNNEL_ENV_KEEP) {
+    const value = base[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
 // ---------------------------------------------------------------- Prüfsumme der Quellen
 
 /** Alle Dateien unter `dir`, nach Pfad sortiert (ohne Ordner). Symlinks zählen mit ihrem Ziel als Text. */

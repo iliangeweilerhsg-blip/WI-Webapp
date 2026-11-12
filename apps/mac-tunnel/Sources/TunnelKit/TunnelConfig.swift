@@ -16,6 +16,10 @@ public enum TunnelLimits {
     public static let coreProbeSeconds: Double = 10
     /// Höchstens so lange liegt die Zustandsdatei hinter der Wirklichkeit zurück
     public static let stateWriteSeconds: Double = 5
+    /// Mindestabstand zwischen zwei Schreibvorgängen der Zustandsdatei, die eine Änderung auslöst (Verbindung
+    /// angenommen, Handshake gescheitert …). Sonst schriebe eine Flut aus dem Funk je Verbindung zweimal mit `fsync`.
+    /// Was dazwischen liegt, schreibt die nächste Runde (alle 2 s).
+    public static let stateEventWriteSeconds: Double = 1
     /// Gescheiterte Handshakes erscheinen höchstens einmal in dieser Zeit im Log (zusammengefasst)
     public static let failedLogSeconds: Double = 60
     /// Ein Listener, der ausgefallen ist, wird frühestens nach dieser Zeit neu gestartet

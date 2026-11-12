@@ -1,6 +1,7 @@
 import Foundation
 
-// Zustandsdatei des Helfers für `sg doctor` (Plan §5.2, Punkt 8). Alle 5 s und bei jeder Änderung, atomar geschrieben.
+// Zustandsdatei des Helfers für `sg doctor` (Plan §5.2, Punkt 8). Alle 5 s und bei jeder Änderung (höchstens einmal je
+// Sekunde, gegen Fluten aus dem Funk), atomar geschrieben.
 // Enthält weder Schlüssel noch Adressen noch Nutzdaten. Der Dienstname ist öffentlich (steht im Funk).
 
 public struct TunnelListenerState: Codable, Equatable, Sendable {

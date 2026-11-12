@@ -206,9 +206,14 @@ public final class TunnelEngine: @unchecked Sendable {
             upstreamFailed: { [weak self] in self?.probeDue = true })
     }
 
+    /// Änderungen aus Listenern und Verbindungen: sofort schreiben, aber höchstens einmal je
+    /// `stateEventWriteSeconds`. Eine Flut von Handshakes (jeder ändert die Zähler) erzeugt so keine Flut von
+    /// Schreibvorgängen mit `fsync` auf der Queue, die auch die Handshakes bedient. Den Rest schreibt `runTick`.
     private func listenerChanged() {
         guard started else { return }
-        writeStateIfNeeded(now(), force: false, onlyIfChanged: true)
+        let current = now()
+        if let last = lastStateWrite, current.timeIntervalSince(last) < TunnelLimits.stateEventWriteSeconds { return }
+        writeStateIfNeeded(current, force: false, onlyIfChanged: true)
     }
 
     /// `last_error`: das aktuell wichtigste Problem. Sobald alles stimmt, ist es leer.

@@ -21,6 +21,7 @@ import {
   tunnelBinaryProblem,
   tunnelBuildReason,
   tunnelCommand,
+  tunnelEnv,
   tunnelSourceFingerprint,
   tunnelStampFile,
   TUNNEL_EXIT_CONFIG,
@@ -76,6 +77,37 @@ describe('tunnelCommand', () => {
   it('SG_TUNNEL_P2P=0 schaltet die Ankündigung im Funk aus', () => {
     const cfg = resolveConfig({ SG_DATA_DIR: '/data', SG_TUNNEL_P2P: '0' }, '/home/u', '/repo');
     expect(tunnelCommand(cfg).args.slice(-2)).toEqual(['--p2p', 'off']);
+  });
+});
+
+describe('tunnelEnv', () => {
+  it('gibt dem Helfer nur eine schlanke Umgebung: keine Datenbank-URL, keine Schlüssel, kein DYLD_*', () => {
+    const env = tunnelEnv({
+      HOME: '/Users/u',
+      USER: 'u',
+      TMPDIR: '/tmp/x/',
+      LANG: 'de_DE.UTF-8',
+      PATH: '/opt/evil/bin:/usr/bin',
+      DATABASE_URL: 'postgres://sg@localhost/sg',
+      ANTHROPIC_API_KEY: 'nicht-echt',
+      DYLD_INSERT_LIBRARIES: '/tmp/x.dylib',
+      NODE_OPTIONS: '--require /tmp/x.js',
+      HTTPS_PROXY: 'http://proxy',
+      SG_DATA_DIR: '/data',
+      LC_ALL: undefined,
+    });
+    expect(env).toEqual({
+      PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+      HOME: '/Users/u',
+      USER: 'u',
+      TMPDIR: '/tmp/x/',
+      LANG: 'de_DE.UTF-8',
+    });
+  });
+
+  it('sg start nutzt sie beim Start des Helfers (nicht die Umgebung von Core und Worker)', () => {
+    const source = readFileSync(join(import.meta.dirname, '..', 'src', 'commands.ts'), 'utf8');
+    expect(source).toContain('tunnelEnv(process.env)');
   });
 });
 

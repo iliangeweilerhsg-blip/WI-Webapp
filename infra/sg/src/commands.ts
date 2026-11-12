@@ -35,6 +35,7 @@ import {
   superviseTunnel,
   tunnelBinaryProblem,
   tunnelCommand,
+  tunnelEnv,
   TUNNEL_EXIT_CONFIG,
   TUNNEL_STOP_TIMEOUT_S,
   type TunnelBuildIo,
@@ -163,10 +164,11 @@ function startService(
   cmd: string,
   args: string[],
   cwd = cfg.repoRoot,
+  env: Record<string, string> = childEnv(cfg, process.env),
 ): Service {
   const child = spawn(cmd, args, {
     cwd,
-    env: childEnv(cfg, process.env),
+    env,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true, // eigene Prozessgruppe (pgid === pid)
   });
@@ -400,7 +402,15 @@ export async function start(cfg: SgConfig): Promise<number> {
               }
               removePid(cfg, 'tunnel');
               const command = tunnelCommand(cfg);
-              const svc = startService(cfg, 'tunnel', command.cmd, command.args, command.cwd);
+              // Eigene, schlanke Umgebung: keine Datenbank-URL, keine API-Schlüssel im Prozess, der im Funk lauscht
+              const svc = startService(
+                cfg,
+                'tunnel',
+                command.cmd,
+                command.args,
+                command.cwd,
+                tunnelEnv(process.env),
+              );
               tunnel = svc;
               await svc.exitedPromise;
               return { code: svc.exitCode, signal: svc.exitSignal };
