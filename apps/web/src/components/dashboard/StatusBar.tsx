@@ -18,6 +18,7 @@ import { POLL_MS, useLiveState, useNow } from '../today/use-today.ts';
 import { MarkerControls } from './markers/MarkerControls.tsx';
 import { watchReconnect } from './reconnect.ts';
 import { useClaimRecordingDisplay, useRecordingFor } from '../../lib/recording';
+import { LowBatteryNote } from '../recording/LowBatteryNote.tsx';
 import { LowStorageNote } from '../recording/LowStorageNote.tsx';
 import { RECORDING_LABEL, RecordDot as Dot, recordingStatusText } from '../recording/labels.ts';
 import type { SessionActions } from './use-session.ts';
@@ -236,6 +237,7 @@ export function StatusBar({
         ) : null}
 
         <LowStorageNote active={active} />
+        <LowBatteryNote active={active} />
 
         <p className="flex items-center gap-2 text-text-muted" data-testid="ipad-status">
           <Dot filled={ipad} />

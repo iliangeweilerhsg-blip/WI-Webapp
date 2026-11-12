@@ -21,6 +21,7 @@ import {
 import { moduleColorVar } from '../../lib/modules.ts';
 import { useRecordingFor, type RecordingKind } from '../../lib/recording';
 import { formatSize, lecturesThatFit, useSystemStorage } from '../../lib/storage.ts';
+import { isBatteryLowForStart, useSystemPower } from '../../lib/system.ts';
 import { rueckblickHref } from '../../lib/transcript.ts';
 import { useNow } from './use-today.ts';
 import {
@@ -91,6 +92,7 @@ export function StartCard({
   const rec = useRecordingFor(session?.id ?? '');
   const recKind = rec.kind;
   const storage = useSystemStorage();
+  const power = useSystemPower();
   const [busy, setBusy] = useState<Action | null>(null);
   // Doppel-Tipp im selben Render-Takt abfangen (der Zustand `busy` kommt erst im nächsten)
   const busyRef = useRef(false);
@@ -250,6 +252,12 @@ export function StartCard({
               >
                 Speicherplatz
               </Link>
+            </p>
+          ) : null}
+          {canStart && isBatteryLowForStart(power.data) ? (
+            <p className="mt-1 text-sm text-text-muted" data-testid="start-battery-hint">
+              Akku bei {power.data?.percent} %. Mac am Netz? Eine Vorlesung dauert rund anderthalb Stunden. Du
+              kannst trotzdem starten.
             </p>
           ) : null}
           {previousRunning && canStart ? (

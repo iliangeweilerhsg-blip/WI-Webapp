@@ -5671,6 +5671,29 @@ class SyncWelcome(BaseModel):
     resume: list[SyncResume]
 
 
+class SystemPower(BaseModel):
+    """
+    GET /system/power (UX-315, VERTRAEGE §7.7): Akku des Macs, nur lokal. Ohne Akku (Mac mini), ohne macOS oder wenn der Stand nicht lesbar ist: `has_battery` false und die übrigen Werte null, kein Fehler. Der Stand gilt bis zu 30 Sekunden
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    has_battery: StrictBool
+    percent: StrictInt | None = Field(
+        ..., description='Ladestand in Prozent, null ohne Akku', ge=0, le=100
+    )
+    on_ac: StrictBool | None = Field(
+        ...,
+        description='true = der Mac hängt am Netzteil (auch wenn er gerade nicht lädt), false = Akkubetrieb, null = unbekannt oder kein Akku',
+    )
+    measured_at: AwareDatetime = Field(
+        ...,
+        description='Zeitpunkt der Messung (höchstens 30 Sekunden alt)',
+        title='Timestamp',
+    )
+
+
 class SystemStorage(BaseModel):
     """
     GET /system/storage (UX-11, VERTRAEGE §7.6): freier Platz auf dem Datenträger des Datenordners und Größe der Daten. Größen sind Dateigrößen in Byte (keine Plattenblöcke)
@@ -8186,6 +8209,7 @@ class SchemaBundle(BaseModel):
     SyncTimePong_1: SyncTimePong | None = Field(None, alias='SyncTimePong')
     SyncUnsubscribe_1: SyncUnsubscribe | None = Field(None, alias='SyncUnsubscribe')
     SyncWelcome_1: SyncWelcome | None = Field(None, alias='SyncWelcome')
+    SystemPower_1: SystemPower | None = Field(None, alias='SystemPower')
     SystemStorage_1: SystemStorage | None = Field(None, alias='SystemStorage')
     TapeElement_1: TapeElement | None = Field(None, alias='TapeElement')
     TapeElementPayload_1: TapeElementPayload | None = Field(

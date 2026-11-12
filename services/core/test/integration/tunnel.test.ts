@@ -320,6 +320,14 @@ describe('Tunnel-Eingang: Wächter und Routentabelle', () => {
     expect(good.body).not.toContain(t.config.dataDir);
   });
 
+  it('GET /system/power über den Tunnel: nur lokal, auch mit Token 403 (UX-315)', async () => {
+    const power = routes.find((r) => r.url === `${API}/system/power`);
+    expect(power?.config?.sgAccess).toBe('local');
+    const res = await viaTunnel(t.sock, { path: `${API}/system/power`, token });
+    expect(res.status).toBe(403);
+    expect(errorCode(res)).toBe('local_only');
+  });
+
   it('abgelehnte Tunnel-Anfragen bekommen Connection: close', async () => {
     const none = await viaTunnel(t.sock, { path: `${API}/health` });
     expect(none.headers.connection).toBe('close');

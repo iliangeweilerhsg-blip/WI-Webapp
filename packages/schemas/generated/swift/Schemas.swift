@@ -379,6 +379,7 @@ struct SchemaBundle: Codable {
     let syncTimePong: SyncTimePong?
     let syncUnsubscribe: SyncUnsubscribe?
     let syncWelcome: SyncWelcome?
+    let systemPower: SystemPower?
     let systemStorage: SystemStorage?
     let tapeElement: TapeElement?
     let tapeElementPayload: TapeElementPayload?
@@ -779,6 +780,7 @@ struct SchemaBundle: Codable {
         case syncTimePong = "SyncTimePong"
         case syncUnsubscribe = "SyncUnsubscribe"
         case syncWelcome = "SyncWelcome"
+        case systemPower = "SystemPower"
         case systemStorage = "SystemStorage"
         case tapeElement = "TapeElement"
         case tapeElementPayload = "TapeElementPayload"
@@ -1199,6 +1201,7 @@ extension SchemaBundle {
         syncTimePong: SyncTimePong?? = nil,
         syncUnsubscribe: SyncUnsubscribe?? = nil,
         syncWelcome: SyncWelcome?? = nil,
+        systemPower: SystemPower?? = nil,
         systemStorage: SystemStorage?? = nil,
         tapeElement: TapeElement?? = nil,
         tapeElementPayload: TapeElementPayload?? = nil,
@@ -1599,6 +1602,7 @@ extension SchemaBundle {
             syncTimePong: syncTimePong ?? self.syncTimePong,
             syncUnsubscribe: syncUnsubscribe ?? self.syncUnsubscribe,
             syncWelcome: syncWelcome ?? self.syncWelcome,
+            systemPower: systemPower ?? self.systemPower,
             systemStorage: systemStorage ?? self.systemStorage,
             tapeElement: tapeElement ?? self.tapeElement,
             tapeElementPayload: tapeElementPayload ?? self.tapeElementPayload,
@@ -22562,6 +22566,69 @@ enum SyncWelcomeType: String, Codable {
     case welcome = "welcome"
 }
 
+/// GET /system/power (UX-315, VERTRAEGE §7.7): Akku des Macs, nur lokal. Ohne Akku (Mac
+/// mini), ohne macOS oder wenn der Stand nicht lesbar ist: `has_battery` false und die
+/// übrigen Werte null, kein Fehler. Der Stand gilt bis zu 30 Sekunden
+// MARK: - SystemPower
+struct SystemPower: Codable {
+    let hasBattery: Bool
+    /// Zeitpunkt der Messung (höchstens 30 Sekunden alt)
+    let measuredAt: Date
+    /// true = der Mac hängt am Netzteil (auch wenn er gerade nicht lädt), false = Akkubetrieb,
+    /// null = unbekannt oder kein Akku
+    let onAC: Bool?
+    /// Ladestand in Prozent, null ohne Akku
+    let percent: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case hasBattery = "has_battery"
+        case measuredAt = "measured_at"
+        case onAC = "on_ac"
+        case percent = "percent"
+    }
+}
+
+// MARK: SystemPower convenience initializers and mutators
+
+extension SystemPower {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SystemPower.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        hasBattery: Bool? = nil,
+        measuredAt: Date? = nil,
+        onAC: Bool?? = nil,
+        percent: Int?? = nil
+    ) -> SystemPower {
+        return SystemPower(
+            hasBattery: hasBattery ?? self.hasBattery,
+            measuredAt: measuredAt ?? self.measuredAt,
+            onAC: onAC ?? self.onAC,
+            percent: percent ?? self.percent
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// GET /system/storage (UX-11, VERTRAEGE §7.6): freier Platz auf dem Datenträger des
 /// Datenordners und Größe der Daten. Größen sind Dateigrößen in Byte (keine Plattenblöcke)
 // MARK: - SystemStorage
@@ -27112,6 +27179,16 @@ extension SyncWelcome {
         try container.encode(serverTime, forKey: .serverTime)
         try container.encode(serverVersion, forKey: .serverVersion)
         try container.encode(type, forKey: .type)
+    }
+}
+
+extension SystemPower {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(hasBattery, forKey: .hasBattery)
+        try container.encode(measuredAt, forKey: .measuredAt)
+        try container.encode(onAC, forKey: .onAC)
+        try container.encode(percent, forKey: .percent)
     }
 }
 
