@@ -9,6 +9,7 @@ import { EmptyState } from '../Placeholder.tsx';
 import { BackupHint } from './BackupHint.tsx';
 import { FirstStepsCard } from './FirstSteps.tsx';
 import { SpontaneousStartCard } from './SpontaneousStart.tsx';
+import { RecentSessions } from './RecentSessions.tsx';
 import { StartCard } from './StartCard.tsx';
 import { StorageHint } from './StorageHint.tsx';
 import { TodayList } from './TodayList.tsx';
@@ -89,6 +90,9 @@ export function HeuteScreen() {
             Heute steht nichts an. Im Kalender siehst du die ganze Woche.
           </EmptyState>
         ) : null}
+
+        {/* Die letzten drei Vorlesungen mit Link auf den Rückblick (UX-307). Ohne Vorlesungen: nichts */}
+        {now !== null && hasData ? <RecentSessions modules={modules} now={now} /> : null}
 
         {/* Fristen aus Moodle der nächsten 14 Tage, höchstens 5 (F-MDL-04). Ohne Fristen: nichts */}
         {now !== null ? (
