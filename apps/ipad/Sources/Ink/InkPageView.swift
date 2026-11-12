@@ -121,6 +121,9 @@ struct InkPageView: View {
                             // Ruhige Zeile statt Dialog (R1). Weiterschreiben geht, die Striche landen im Papierkorb.
                             infoRow(InkLibraryService.deletedOnMacLine)
                         }
+                        if library.isModuleGoneOnMac(notebookID: currentNotebookID) {
+                            infoRow(InkLibraryService.moduleGoneLine)
+                        }
                         if let offlineText {
                             infoRow(offlineText)
                         }

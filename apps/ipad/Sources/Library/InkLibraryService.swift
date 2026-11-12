@@ -18,6 +18,9 @@ final class InkLibraryService {
     static let liveRefreshMaxWait: TimeInterval = 5
     /// Zeile der Schreibfläche, wenn das offene Notizbuch am Mac gelöscht wurde (kein Dialog, Regel R1)
     static let deletedOnMacLine = "Am Mac gelöscht, liegt im Papierkorb"
+    /// Zeile, wenn das Modul des offenen Notizbuchs am Mac ganz gelöscht ist (L8 aus #286)
+    static let moduleGoneLine =
+        "Das Modul wurde am Mac gelöscht. Deine Notizen bleiben auf dem iPad, werden aber nicht mehr übertragen."
     /// Löschfrist: So lange lässt sich eine gelöschte Seite zurückholen. `page.delete` wird erst danach eingereiht.
     static let deleteGrace: Duration = .seconds(5)
     /// So lange zeigt die Leiste „Rückgängig“. Etwas kürzer als die Löschfrist: Die Leiste startet erst mit dem
@@ -261,6 +264,8 @@ final class InkLibraryService {
         let updates = updatesBefore.union(sync.pendingPageIDs(kind: "page.update"))
         let deletes = deletesBefore.union(sync.pendingPageIDs(kind: "page.delete")).union(grace)
         store.mergePages(remote, notebookID: notebookID, pendingUpdatePageIDs: updates, pendingDeletePageIDs: deletes)
+        // Der Mac kann eine gelöschte Folienseite wiederhergestellt haben (E10 aus #286)
+        if mergeDuplicateSlidePages(notebookID: notebookID) > 0 { bump() }
 
         // Neue `db_epoch`: Eine Seite, die der Core nicht mehr kennt und die nie wieder geöffnet wird, käme sonst
         // nie zurück. `page.create` ist idempotent, die Striche folgen im Abgleich (Hintergrund-Durchgang oder Öffnen der Seite).
@@ -327,6 +332,13 @@ final class InkLibraryService {
         return notebook.knownOnServer && notebook.hidden
     }
 
+    /// Der Core kennt das Modul des Notizbuchs nicht mehr (`module_not_found`, L8 aus #286). Die Schreibfläche zeigt
+    /// dann eine ruhige Zeile. Schreiben bleibt möglich, gesendet wird nichts; die Striche bleiben auf dem iPad.
+    func isModuleGoneOnMac(notebookID: String) -> Bool {
+        track()
+        return store.notebook(notebookID)?.isModuleGone ?? false
+    }
+
     // MARK: Anlegen
 
     /// Gibt es im Modul schon ein Notizbuch mit diesem Titel? Groß- und Kleinschreibung und Leerzeichen am Rand zählen
@@ -390,38 +402,61 @@ final class InkLibraryService {
     /// Notizbuch, `page.create` und alle Striche kommen in einem Schritt in die Warteschlange.
     func adoptLegacyTestPage() {
         guard !store.legacyTestPageHandled, let pageStore else { return }
-        let pageID = InkPageModel.testPageID
-        if store.page(pageID) != nil {
+        let legacyID = InkPageModel.testPageID
+        if store.page(legacyID) != nil || store.legacyAdoption.map({ store.page($0.pageID) != nil }) == true {
             store.markLegacyTestPageHandled()
             return
         }
         let moduleID = store.lastNotebookID.flatMap { store.notebook($0)?.moduleID } ?? modules.first?.id
         guard let moduleID, store.modules.contains(where: { $0.id == moduleID }) else { return }
 
-        let model = InkPageModel(pageID: pageID, store: pageStore, saveDelay: .seconds(1))
+        let legacyModel = InkPageModel(pageID: legacyID, store: pageStore, saveDelay: .seconds(1))
         // Unlesbar (#252): nicht als „leer“ abhaken. Der nächste Start versucht es noch einmal.
-        guard !model.isUnreadable else { return }
-        let strokes = model.neutralStrokes()
-        guard !strokes.isEmpty else {
+        guard !legacyModel.isUnreadable else { return }
+        guard !legacyModel.neutralStrokes().isEmpty else {
             store.markLegacyTestPageHandled()
             return
         }
 
-        // Brach ein früherer Versuch zwischen Notizbuch und Seite ab, steht das Notizbuch schon da: weiterverwenden,
-        // sonst entstünde ein zweites, leeres „Alte Schreibfläche“
-        let orphan = store.allNotebooks().first { $0.kind == .frei && !$0.knownOnServer && $0.lastPageID == pageID }
-        let notebook = orphan ?? LibraryNotebook(
-            id: InkID.uuidV7(),
-            moduleID: moduleID,
-            title: InkLibraryService.legacyNotebookTitle,
-            kind: .frei,
-            createdAtMS: nowMS(),
-            knownOnServer: false,
-            hidden: false,
-            lastPageID: pageID,
-            remoteMaxIndex: 0,
-            remoteOnlyPageCount: 0
-        )
+        // Die Testseite hat eine feste ID, die alle iPads teilen. Das Notizbuch bekommt deshalb eigene IDs (L7 aus
+        // #286). Sie stehen vor dem ersten Schreiben in der Bibliothek: Brach ein früherer Versuch ab, nimmt der
+        // nächste dieselben, sonst entstünde ein zweites, leeres „Alte Schreibfläche“. Ein Notizbuch aus der Zeit
+        // vor der Markierung (`lastPageID` = feste ID) wird weiterverwendet.
+        let marker: LegacyAdoptionMarker
+        if let existing = store.legacyAdoption {
+            marker = existing
+        } else {
+            let old = store.allNotebooks().first { $0.kind == .frei && !$0.knownOnServer && $0.lastPageID == legacyID }
+            marker = LegacyAdoptionMarker(notebookID: old?.id ?? InkID.uuidV7(), pageID: InkID.uuidV7())
+            store.beginLegacyAdoption(marker)
+        }
+        let pageID = marker.pageID
+
+        // Die Dateien unter der festen ID bleiben unberührt (nichts geht verloren), die Seite bekommt eine Kopie
+        do {
+            try pageStore.save(pageStore.load(pageID: legacyID), pageID: pageID)
+        } catch {
+            return
+        }
+        let model = InkPageModel(pageID: pageID, store: pageStore, saveDelay: .seconds(1))
+        guard !model.isUnreadable else { return }
+        let strokes = model.neutralStrokes()
+
+        var notebook =
+            store.notebook(marker.notebookID)
+            ?? LibraryNotebook(
+                id: marker.notebookID,
+                moduleID: moduleID,
+                title: InkLibraryService.legacyNotebookTitle,
+                kind: .frei,
+                createdAtMS: nowMS(),
+                knownOnServer: false,
+                hidden: false,
+                lastPageID: pageID,
+                remoteMaxIndex: 0,
+                remoteOnlyPageCount: 0
+            )
+        notebook.lastPageID = pageID
         var page = LibraryPage(
             id: pageID,
             notebookID: notebook.id,
@@ -1075,6 +1110,7 @@ final class InkLibraryService {
     private func track() {
         _ = revision
         _ = sync.deadLetterCount
+        _ = sync.missingModuleCount
     }
 
     private func matchingSession(moduleID: String) -> RunningSession? {
@@ -1353,6 +1389,7 @@ final class InkLibraryService {
     /// der Zeitbasis der Striche, nicht `lectureSession(for:)`: Auch im Übungsnotizbuch oder solange das Notizbuch der
     /// Session unbekannt ist (offline), bekäme eine alte Folienseite sonst die Zeit der früheren Session.
     func slidePage(notebookID: String, slide: SlideRef) -> LibraryPage? {
+        mergeDuplicateSlidePages(notebookID: notebookID)
         let session = store.notebook(notebookID).flatMap { matchingSession(moduleID: $0.moduleID) }
         let existing = store.pages(inNotebook: notebookID)
             .filter { $0.backgroundSlideID == slide.id && belongsToSession($0, session) }
@@ -1362,6 +1399,39 @@ final class InkLibraryService {
             notebookID: notebookID, template: .folie,
             size: CGSize(width: slide.widthPt, height: slide.heightPt),
             backgroundSlideID: slide.id, attachedSlideID: nil)
+    }
+
+    /// E10 (#286): Höchstens eine Folienseite je Notizbuch, Folie und Session. Auf einem Gerät entsteht keine zweite
+    /// (`slidePage` läuft ohne Unterbrechung auf dem Hauptakteur). Doppelte kommen zurück, wenn der Mac eine gelöschte
+    /// Folienseite wiederherstellt, nachdem das iPad schon eine neue angelegt hat (`mergePages`), oder wenn
+    /// „Rückgängig“ eine Seite zurückholt, deren Ersatz schon beschrieben ist.
+    ///
+    /// Zusammengeführt wird ohne Strichverlust: Seiten mit Strichen (oder unlesbare) bleiben immer. Leere Duplikate
+    /// gehen in die übliche Löschfrist und sind am Mac wiederherstellbar. Hat keine Seite der Gruppe Striche, bleibt
+    /// die mit dem kleinsten `index` (dann `id`), wie in `slidePage`. Die zuletzt geöffnete Seite eines Notizbuchs
+    /// bleibt ebenfalls stehen: Sie kann gerade offen sein. Zwei beschriebene Seiten derselben Folie bleiben beide
+    /// (kein Zusammenführen der Striche).
+    /// - Returns: Anzahl der Seiten, die in die Löschfrist gingen
+    @discardableResult
+    func mergeDuplicateSlidePages(notebookID: String) -> Int {
+        guard let notebook = store.notebook(notebookID) else { return 0 }
+        var groups: [String: [LibraryPage]] = [:]
+        for page in store.pages(inNotebook: notebookID) {
+            guard let slideID = page.backgroundSlideID else { continue }
+            groups["\(slideID)|\(page.sessionID ?? "")", default: []].append(page)
+        }
+        var removed = 0
+        for group in groups.values where group.count > 1 {
+            // `pages(inNotebook:)` liefert nach `index`, dann `id` sortiert
+            let written = group.filter { pageHasStrokes($0.id) }
+            let empty = group.filter { page in !written.contains { $0.id == page.id } }
+            let candidates = written.isEmpty ? Array(empty.dropFirst()) : empty
+            for page in candidates where page.id != notebook.lastPageID {
+                deletePage(pageID: page.id)
+                removed += 1
+            }
+        }
+        return removed
     }
 
     /// Schreibziel für die Folienseite einer bekannten Folie: `slidePage` plus `openPage`. Die Ansicht öffnet so beim

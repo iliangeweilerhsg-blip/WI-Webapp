@@ -30,9 +30,14 @@ struct LibraryNotebook: Codable, Equatable, Sendable, Identifiable {
     var remoteMaxIndex: Int
     /// Seiten am Mac, die dieses iPad nicht hat (nur Anzeige)
     var remoteOnlyPageCount: Int
+    /// Der Core hat auf eine Operation dieses Notizbuchs mit `module_not_found` geantwortet: Das Modul ist am Mac
+    /// gelöscht (L8 aus #286). Das Notizbuch ist ausgeblendet, seine Dateien und Seiten bleiben, es wird nichts mehr
+    /// gesendet. Optional, damit eine ältere `library.json` lesbar bleibt.
+    var moduleGone: Bool? = nil
 
     /// Strom aller Operationen dieses Notizbuchs (VERTRAEGE §11.2)
     var stream: String { "notebook:\(id)" }
+    var isModuleGone: Bool { moduleGone ?? false }
 }
 
 /// Seite, die dieses iPad angelegt hat
@@ -115,4 +120,14 @@ struct InkLibraryFile: Codable, Equatable, Sendable {
     /// Die alte lokale Testseite (`InkPageModel.testPageID`) wurde geprüft und bei Strichen übernommen. Optional,
     /// damit eine ältere `library.json` ohne das Feld lesbar bleibt (L3 aus #225): Neue Felder sind immer optional.
     var legacyTestPageHandled: Bool?
+    /// Markierung der laufenden Übernahme der alten Testseite (L7 aus #286). Optional wie jedes neue Feld.
+    var legacyAdoption: LegacyAdoptionMarker?
+}
+
+/// Die IDs, unter denen die alte Testseite übernommen wird. Sie werden vor dem ersten Schreiben festgehalten:
+/// Stürzt die App mitten in der Übernahme ab, findet der nächste Start Notizbuch und Seite wieder, ohne dass
+/// die feste Test-ID dafür herhalten muss.
+struct LegacyAdoptionMarker: Codable, Equatable, Sendable {
+    var notebookID: String
+    var pageID: String
 }

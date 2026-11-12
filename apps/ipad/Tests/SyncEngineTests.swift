@@ -559,7 +559,7 @@ final class SyncEngineTests: XCTestCase {
         h.factory.configure = { socket, _ in
             socket.opPolicy = { _, kind, _ in
                 kind == "notebook.create"
-                    ? .error(code: "module_not_found", retryable: false, fatal: false) : .ack
+                    ? .error(code: "message_invalid", retryable: false, fatal: false) : .ack
             }
         }
         let notebook = freeNotebook("019a4e14-0000-7000-8000-0000000000f1", module: h.binding.moduleID)

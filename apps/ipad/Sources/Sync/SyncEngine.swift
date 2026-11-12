@@ -98,6 +98,9 @@ final class SyncEngine {
     private(set) var pendingCount = 0
     /// Operationen in der Fehlerablage
     private(set) var deadLetterCount = 0
+    /// Zählt hoch, wenn der Core ein Modul nicht mehr kennt (`module_not_found`, L8 aus #286). Die Bibliothek ändert
+    /// sich dann (Notizbücher ausgeblendet), ohne dass die Fehlerablage wächst.
+    private(set) var missingModuleCount = 0
     /// Zählt bei jedem `welcome` hoch. Die Schreibfläche gleicht danach ab, wenn nötig.
     private(set) var welcomeCount = 0
     /// Zählt bei jedem erfolgreichen Abgleich einer Seite hoch (Ansicht oder Hintergrund-Durchgang). Die Zeile
@@ -299,6 +302,8 @@ final class SyncEngine {
     /// - Returns: `false`, wenn das Schreiben scheiterte. Die Seite muss dann später abgeglichen werden.
     @discardableResult
     func enqueue(_ changes: [InkStrokeChange], binding: InkBinding) -> Bool {
+        // Modul am Mac gelöscht (L8 aus #286): Die Striche bleiben lokal, gesendet wird nichts
+        if library.notebook(binding.notebookID)?.isModuleGone ?? false { return true }
         let drafts = InkOpBuilder.ops(
             for: changes,
             binding: binding,
@@ -320,7 +325,12 @@ final class SyncEngine {
     /// Reiht fertige Operationen ein (Notizbuch, Seite). Sie stehen auf der Platte, bevor etwas gesendet wird.
     /// - Returns: `false`, wenn das Schreiben scheiterte. Dann ist nichts eingereiht.
     @discardableResult
-    func enqueue(drafts: [OutboxDraft]) -> Bool {
+    func enqueue(drafts all: [OutboxDraft]) -> Bool {
+        // Notizbücher eines am Mac gelöschten Moduls senden nichts mehr; ihre Seiten sind zum Abgleich vorgemerkt
+        let drafts = all.filter { draft in
+            guard let id = SyncEngine.notebookID(ofStream: draft.stream) else { return true }
+            return !(library.notebook(id)?.isModuleGone ?? false)
+        }
         guard !drafts.isEmpty else { return true }
         do {
             try outbox.append(drafts)
@@ -883,7 +893,7 @@ final class SyncEngine {
     private func requeueFreeNotebooks() {
         var drafts: [OutboxDraft] = []
         for notebook in library.allNotebooks()
-        where notebook.kind == .frei && !library.pages(inNotebook: notebook.id).isEmpty {
+        where notebook.kind == .frei && !notebook.isModuleGone && !library.pages(inNotebook: notebook.id).isEmpty {
             if let draft = InkOpBuilder.notebookCreate(
                 notebook: notebook,
                 nowMS: nowMS(),
@@ -1084,10 +1094,41 @@ final class SyncEngine {
             await pump(link)
             return
         }
+        // `module_not_found`: Das Modul ist am Mac gelöscht. Keine Fehlerablage, die Daten bleiben lokal (L8 aus #286).
+        if failure.code == "module_not_found", let entry, handleModuleMissing(entry, link: link) {
+            await pump(link)
+            return
+        }
         if let entry {
             deadLetter(entry, code: failure.code, message: failure.message, link: link)
         }
         await pump(link)
+    }
+
+    /// Das Modul der abgelehnten Operation gibt es am Core nicht mehr (nicht nur im Papierkorb: weich gelöschte Module
+    /// nimmt der Core an, VERTRAEGE §11.2). Alle wartenden Operationen seiner Notizbücher entfallen ohne Fehlerablage.
+    /// Die Zeichnungen liegen in den Dateien der Seiten, die Seiten sind zum Abgleich vorgemerkt: Kommt das Modul
+    /// zurück, holt der Abgleich alles nach.
+    /// - Returns: `false`, wenn das Modul nicht zu bestimmen ist oder das Schreiben scheitert. Dann gilt der übliche Weg.
+    private func handleModuleMissing(_ entry: OutboxEntry, link: SyncLink) -> Bool {
+        guard let notebookID = SyncEngine.notebookID(ofStream: entry.stream),
+            let moduleID = library.notebook(notebookID)?.moduleID
+        else { return false }
+        let streams = Set(library.allNotebooks().filter { $0.moduleID == moduleID }.map(\.stream))
+        let ids = outbox.pending.filter { streams.contains($0.stream) }.map(\.opID)
+        do {
+            try outbox.discard(opIDs: ids)
+        } catch {
+            return false
+        }
+        for id in ids {
+            link.inFlight.remove(id)
+            internalErrors[id] = nil
+        }
+        library.markModuleGone(moduleID: moduleID)
+        missingModuleCount += 1
+        refreshCounts()
+        return true
     }
 
     /// Verschiebt die Operation und alles, was von ihr abhängt, in die Fehlerablage. Bei `page.create` sind das
