@@ -28,14 +28,7 @@ import {
   sessionRefLabel,
 } from '../src/lib/concepts.ts';
 import { aiStateSentence, budgetPercent, monthLabel, parseBudget } from '../src/lib/costs.ts';
-import {
-  InboxRequestError,
-  acceptItem,
-  bulkInChunks,
-  bulkTarget,
-  inboxErrorMessage,
-  parseAliases,
-} from '../src/lib/inbox.ts';
+import { acceptItem, bulkInChunks, bulkTarget, inboxErrorMessage, parseAliases } from '../src/lib/inbox.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { ToastProvider } from '../src/lib/toast.tsx';
@@ -281,29 +274,38 @@ describe('Hilfen', () => {
     });
   });
 
-  it('Fehlercodes haben verständliche Texte, auch die drei, die im Vertrag noch fehlen', () => {
-    const error = (status: number, code: string, details = {}) =>
-      new InboxRequestError(status, code, 'x', details);
-    expect(inboxErrorMessage(error(503, 'inbox_busy'))).toBe('Gerade beschäftigt, bitte gleich nochmal.');
-    expect(inboxErrorMessage(error(400, 'inbox_action_invalid'))).toBe(
+  it('Fehlercodes haben verständliche Texte, auch die drei, die im Vertrag noch fehlen', async () => {
+    boot([newItem()]);
+    // Echte Fehler über den gemeinsamen Client (`lib/api.ts`), damit auch dessen Texte geprüft werden
+    const error = async (status: number, code: string, details = {}) => {
+      core.rejectNextInbox = { status, code, details };
+      return acceptItem(I_NEW).then(
+        () => null,
+        (e: unknown) => e,
+      );
+    };
+    expect(inboxErrorMessage(await error(503, 'inbox_busy'))).toBe(
+      'Gerade beschäftigt, bitte gleich nochmal.',
+    );
+    expect(inboxErrorMessage(await error(400, 'inbox_action_invalid'))).toBe(
       'Das passt nicht zu dieser Art von Vorschlag.',
     );
-    expect(inboxErrorMessage(error(409, 'inbox_reopen_conflict'))).toBe(
+    expect(inboxErrorMessage(await error(409, 'inbox_reopen_conflict'))).toBe(
       'Rückgängig geht nicht mehr: Darauf baut inzwischen anderes auf.',
     );
     const names = new Map([
       [C_3NF, 'A'],
       [C_FA, 'B'],
     ]);
-    expect(inboxErrorMessage(error(409, 'relation_cycle', { path: [C_3NF, C_FA, C_3NF] }), names)).toBe(
+    expect(inboxErrorMessage(await error(409, 'relation_cycle', { path: [C_3NF, C_FA, C_3NF] }), names)).toBe(
       'Das würde einen Kreis bilden: A → B → A',
     );
-    expect(inboxErrorMessage(error(409, 'relation_cycle', { path: [C_3NF, id(1)] }), names)).toBe(
+    expect(inboxErrorMessage(await error(409, 'relation_cycle', { path: [C_3NF, id(1)] }), names)).toBe(
       'Das würde einen Kreis bilden.',
     );
-    expect(inboxErrorMessage(error(409, 'relation_endpoint_pending', { concept_id: C_3NF }), names)).toBe(
-      'Erst „A“ annehmen, dann die Beziehung.',
-    );
+    expect(
+      inboxErrorMessage(await error(409, 'relation_endpoint_pending', { concept_id: C_3NF }), names),
+    ).toBe('Erst „A“ annehmen, dann die Beziehung.');
     for (const code of [
       'inbox_item_not_found',
       'inbox_item_decided',
@@ -312,26 +314,29 @@ describe('Hilfen', () => {
       'merge_target_invalid',
       'relation_endpoint_pending',
     ]) {
-      expect(inboxErrorMessage(error(409, code))).not.toMatch(/nicht geklappt|schiefgegangen/);
+      expect(inboxErrorMessage(await error(409, code))).not.toMatch(/nicht geklappt|schiefgegangen/);
     }
+    // `session_not_found` heißt in der Inbox „Vorlesung“
+    expect(inboxErrorMessage(await error(404, 'session_not_found'))).toBe(
+      'Diese Vorlesung gibt es nicht mehr.',
+    );
     // Allgemeine Codes und unbekannte Codes fallen wie in `lib/api.ts` auf verständliche Texte zurück
-    expect(inboxErrorMessage(error(400, 'validation_failed'))).toBe(
+    expect(inboxErrorMessage(await error(400, 'validation_failed'))).toBe(
       'Das passt so nicht. Prüfe deine Eingabe.',
     );
-    expect(inboxErrorMessage(error(401, 'device_token_required'))).toBe(
+    expect(inboxErrorMessage(await error(401, 'device_token_required'))).toBe(
       'Dieses Gerät ist noch nicht mit dem Core gekoppelt.',
     );
-    expect(inboxErrorMessage(error(404, 'irgendwas_neues'))).toBe('Das gibt es nicht (mehr).');
-    expect(inboxErrorMessage(error(500, 'internal'))).toMatch(/schiefgegangen/);
+    expect(inboxErrorMessage(await error(404, 'irgendwas_neues'))).toBe('Das gibt es nicht (mehr).');
+    expect(inboxErrorMessage(await error(500, 'internal'))).toMatch(/schiefgegangen/);
   });
 
   it('Aktionen reichen `details` des Core durch und senden einen Idempotency-Key', async () => {
     boot([newItem()]);
     core.rejectNextInbox = { status: 409, code: 'concept_exists', details: { concept_id: C_FA } };
     const failure = await acceptItem(I_NEW).catch((e: unknown) => e);
-    expect(failure).toBeInstanceOf(InboxRequestError);
     expect(failure).toBeInstanceOf(ApiRequestError);
-    expect((failure as InboxRequestError).details).toEqual({ concept_id: C_FA });
+    expect((failure as ApiRequestError).details).toEqual({ concept_id: C_FA });
     expect(posts()[0]?.headers['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/);
     core.down = true;
     await expect(acceptItem(I_NEW)).rejects.toMatchObject({ kind: 'unreachable' });

@@ -536,6 +536,17 @@ export interface FakeCore {
   aiStatus: AiStatus;
   /** Antwort von `GET /costs/summary` */
   costSummary: CostSummary;
+  /**
+   * Wie `ai.auto_accept = alles_ab_0_9` im Core (§20.6 A1): Wird ein Konzept angenommen, bestätigt der Core offene
+   * Beziehungen, deren Endpunkte jetzt beide aktiv sind, und entscheidet sie mit (`decision.triggered_by`).
+   * Standard `false`: Beziehungen bleiben offen.
+   */
+  inboxCascade: boolean;
+  /**
+   * Die Mitentscheidungen je Eintrag (`inbox_item.decision`), die `InboxItem` nicht zeigt: `triggered_by` und
+   * `cascade_item_ids`. Der Core öffnet einen Folge-Eintrag nur über seinen Auslöser wieder (§20.6).
+   */
+  inboxDecisions: Record<string, { triggered_by: string | null; cascade_item_ids: string[] }>;
   /** Der nächste `POST /inbox/…` wird mit diesem Fehler abgelehnt */
   rejectNextInbox: null | { status: number; code: string; details?: Record<string, unknown> };
 }
@@ -746,6 +757,8 @@ export function installFakeCore(
       return created;
     },
     inboxItems: [],
+    inboxCascade: false,
+    inboxDecisions: {},
     concepts: [],
     sessionConcepts: {},
     summaries: {},
@@ -972,13 +985,37 @@ export function installFakeCore(
             409,
           );
         }
-        const steps = ['audio.finalize', 'transcribe', 'align.log'];
-        const from = (body?.from_step as string | undefined) ?? 'transcribe';
+        // Kette wie §20.2: danach `concepts.extract` → `concepts.resolve` → `summary.write`
+        const steps = [
+          'audio.finalize',
+          'transcribe',
+          'align.log',
+          'concepts.extract',
+          'concepts.resolve',
+          'summary.write',
+        ];
+        let from = (body?.from_step as string | undefined) ?? 'transcribe';
         if (!steps.includes(from)) return json({ error: { code: 'validation_failed', message: 'x' } }, 400);
         const recordings = core.transcripts[found.id]?.recordings ?? [];
-        if (from !== 'align.log' && !recordings.some((r) => r.chunk_count > 0)) {
+        // Audio brauchen nur `audio.finalize` und `transcribe`; die Schritte der Konzepte nicht
+        if (
+          (from === 'audio.finalize' || from === 'transcribe') &&
+          !recordings.some((r) => r.chunk_count > 0)
+        ) {
           return json({ error: { code: 'session_no_audio', message: 'x' } }, 409);
         }
+        // Ohne tragenden `concepts.extract` (wartet, läuft oder fertig) gilt `from_step = concepts.extract`
+        const extract = found.processing['concepts.extract'];
+        if (
+          from === 'concepts.resolve' &&
+          extract !== 'wartet' &&
+          extract !== 'laeuft' &&
+          extract !== 'fertig'
+        ) {
+          from = 'concepts.extract';
+        }
+        // Wie `ensurePipelineJobs` im Core: `summary.write` allein, alle anderen Schritte ziehen die folgenden nach,
+        // auch die Konzept-Schritte bei Sessions, die bisher nur die drei alten Schritte hatten
         for (const step of steps.slice(steps.indexOf(from))) found.processing[step] = 'wartet';
         found.updated_at = new Date().toISOString();
         return json({ session: structuredClone(found), jobs: [] }, 202);
@@ -1324,8 +1361,23 @@ function decideInboxItem(
   if (action === 'reopen') {
     if (item.status === 'offen') return { status: 409, code: 'inbox_item_not_decided' };
     if (item.session === null) return { status: 404, code: 'inbox_item_not_found' };
+    // Mitentschieden: nur über den Auslöser wieder zu öffnen
+    const made = core.inboxDecisions[item.id];
+    if (made?.triggered_by) {
+      return { status: 409, code: 'inbox_reopen_conflict', details: { triggered_by: made.triggered_by } };
+    }
     item.status = 'offen';
     item.decided_at = null;
+    // Der Auslöser öffnet seine Folge-Einträge mit
+    for (const followId of made?.cascade_item_ids ?? []) {
+      const follow = core.inboxItems.find((x) => x.id === followId);
+      if (follow) {
+        follow.status = 'offen';
+        follow.decided_at = null;
+      }
+      delete core.inboxDecisions[followId];
+    }
+    delete core.inboxDecisions[item.id];
     const own = core.concepts.find((c) => c.concept.id === item.concept_id);
     if (own && item.kind !== 'relation') own.concept.status = 'vorschlag';
     return null;
@@ -1340,6 +1392,8 @@ function decideInboxItem(
   }
   const request = body ?? {};
   const payload = item.payload;
+  // A1 (neues Konzept, auch `concept_merge` mit `as_new`); nur danach bestätigt der Core Beziehungen mit
+  let acceptedNew = false;
   if (payload.kind === 'relation') {
     if (request.edit !== undefined || request.merge_into !== undefined || request.as_new !== undefined) {
       return { status: 400, code: 'inbox_action_invalid' };
@@ -1377,6 +1431,7 @@ function decideInboxItem(
       if (existing) {
         return { status: 409, code: 'concept_exists', details: { concept_id: existing.concept.id } };
       }
+      acceptedNew = true;
       const own = core.concepts.find((c) => c.concept.id === item.concept_id);
       if (own) Object.assign(own.concept, edit, { status: 'aktiv', updated_at: now });
       else {
@@ -1397,6 +1452,24 @@ function decideInboxItem(
   }
   item.status = 'angenommen';
   item.decided_at = now;
+  // A1: offene Beziehungen, deren Endpunkte jetzt beide aktiv sind, werden mitbestätigt (`ai.auto_accept`)
+  if (core.inboxCascade && acceptedNew) {
+    const active = (conceptId: string) =>
+      core.concepts.some((c) => c.concept.id === conceptId && c.concept.status === 'aktiv');
+    const followed: string[] = [];
+    for (const other of core.inboxItems) {
+      if (other.payload.kind !== 'relation' || other.status !== 'offen') continue;
+      const ends = [other.payload.from_concept_id, other.payload.to_concept_id];
+      if (!ends.includes(item.concept_id ?? '') || !ends.every(active)) continue;
+      other.status = 'angenommen';
+      other.decided_at = now;
+      other.blocked = null;
+      core.inboxDecisions[other.id] = { triggered_by: item.id, cascade_item_ids: [] };
+      followed.push(other.id);
+    }
+    if (followed.length > 0)
+      core.inboxDecisions[item.id] = { triggered_by: null, cascade_item_ids: followed };
+  }
   // Beziehungen, deren Endpunkte jetzt beide entschieden sind, sind nicht mehr blockiert
   for (const other of core.inboxItems) {
     if (other.payload.kind !== 'relation' || other.status !== 'offen') continue;
@@ -1503,12 +1576,40 @@ function handleConcepts(
       ...wanted.filter((x) => x.kind !== 'relation'),
       ...wanted.filter((x) => x.kind === 'relation'),
     ];
+    // Wie der Core (`bulkInbox`): `reopen` läuft in umgekehrter Reihenfolge, ein Folge-Eintrag öffnet sich mit seinem
+    // Auslöser (wenn der ebenfalls dran ist), mitentschiedene Einträge stehen in `decided`
+    const order = action === 'reopen' ? [...ordered].reverse() : ordered;
+    const wantedIds = new Set(order.map((x) => x.id));
     const decided: string[] = [];
     const skipped: { id: string; code: string }[] = [];
-    for (const item of ordered) {
+    // Wie der Core: unbekannte `ids` zuerst mit `inbox_item_not_found`
+    for (const wantedId of new Set(ids ?? [])) {
+      if (!wantedIds.has(wantedId)) skipped.push({ id: wantedId, code: 'inbox_item_not_found' });
+    }
+    const done = new Set<string>();
+    const deferred: string[] = [];
+    for (const item of order) {
+      if (done.has(item.id)) continue;
+      const trigger = core.inboxDecisions[item.id]?.triggered_by;
+      if (action === 'reopen' && trigger && wantedIds.has(trigger)) {
+        deferred.push(item.id);
+        continue;
+      }
+      const before = [...(core.inboxDecisions[item.id]?.cascade_item_ids ?? [])];
       const failure = decideInboxItem(core, item, action, null);
-      if (failure) skipped.push({ id: item.id, code: failure.code });
-      else decided.push(item.id);
+      if (failure) {
+        skipped.push({ id: item.id, code: failure.code });
+        continue;
+      }
+      const also = action === 'reopen' ? before : (core.inboxDecisions[item.id]?.cascade_item_ids ?? []);
+      for (const changed of [item.id, ...also]) {
+        if (done.has(changed)) continue;
+        done.add(changed);
+        decided.push(changed);
+      }
+    }
+    for (const deferredId of deferred) {
+      if (!done.has(deferredId)) skipped.push({ id: deferredId, code: 'inbox_reopen_conflict' });
     }
     return json({ decided, skipped });
   }
