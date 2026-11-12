@@ -66,6 +66,37 @@ async function readFailure(res: Response): Promise<Failure> {
   return { status: res.status, code, message };
 }
 
+/**
+ * Sperre für die Durchgänge auf einer Ablage (Issue #262): Im Tab arbeitet immer nur ein `pass()` die Ablage ab.
+ * Sonst bestätigt und löscht ein Uploader einen Chunk, während der andere ihn noch sendet oder nach einem Netzfehler
+ * zurückschreibt.
+ */
+class PassLock {
+  private tail: Promise<void> = Promise.resolve();
+  /** Aufnahmen, die der Recorder beim Start selbst anlegt: Durchgänge fassen sie bis dahin nicht an */
+  readonly creating = new Set<string>();
+
+  /** Wartet, bis alle früher angemeldeten Durchgänge fertig sind; liefert die Freigabe */
+  acquire(): Promise<() => void> {
+    let release!: () => void;
+    const mine = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const ready = this.tail.then(() => release);
+    this.tail = this.tail.then(() => mine);
+    return ready;
+  }
+}
+
+const locks = new WeakMap<object, PassLock>();
+
+function lockFor(store: RecorderStore): PassLock {
+  const key = store.lockKey ?? store;
+  let lock = locks.get(key);
+  if (!lock) locks.set(key, (lock = new PassLock()));
+  return lock;
+}
+
 export class ChunkUploader {
   private readonly store: RecorderStore;
   private readonly baseUrl: string | undefined;
@@ -78,6 +109,7 @@ export class ChunkUploader {
   private readonly sessionId: string | undefined;
   private readonly onChange: ((status: UploaderStatus) => void) | undefined;
 
+  private readonly lock: PassLock;
   private running: Promise<void> | null = null;
   private disposed = false;
   /** Nur der Leader-Tab lädt hoch (Issue #115): ausgeschaltet läuft nichts, bis es wieder eingeschaltet wird */
@@ -92,6 +124,7 @@ export class ChunkUploader {
 
   constructor(options: UploaderOptions) {
     this.store = options.store;
+    this.lock = lockFor(options.store);
     this.baseUrl = options.baseUrl;
     this.doFetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
     this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
@@ -109,6 +142,17 @@ export class ChunkUploader {
 
   private url(path: string): string {
     return `${(this.baseUrl ?? apiBase()).replace(/\/+$/, '')}${path}`;
+  }
+
+  /**
+   * Reserviert die Aufnahme für das Anlegen beim Start (`tryCreate` durch den Recorder). Bis zur Freigabe überspringen
+   * alle Durchgänge im Tab sie, sonst legte ein zweiter Uploader sie gleichzeitig an.
+   */
+  holdCreate(id: string): () => void {
+    this.lock.creating.add(id);
+    return () => {
+      this.lock.creating.delete(id);
+    };
   }
 
   /** Startet die Schleife, falls sie nicht läuft. Läuft sie schon, sieht sie neue Chunks im nächsten Durchgang. */
@@ -192,7 +236,7 @@ export class ChunkUploader {
       this.dirty = false;
       let result: 'idle' | 'progress' | 'retry';
       try {
-        result = await this.pass();
+        result = await this.serializedPass();
       } catch (error) {
         // IndexedDB oder Code-Fehler: nicht abstürzen, später erneut versuchen
         console.warn('Recorder-Upload: Durchgang fehlgeschlagen', error);
@@ -226,6 +270,32 @@ export class ChunkUploader {
     }
   }
 
+  /**
+   * Ein Durchgang erst, wenn kein anderer Uploader im Tab auf dieser Ablage arbeitet. Wer währenddessen ausgeschaltet
+   * oder entsorgt wurde, tut danach nichts mehr. Das Warten ist nicht unterbrechbar, ein Aufrufer mit Frist
+   * (`flushUploads`) wartet deshalb nicht selbst darauf, sondern setzt eine eigene Frist daneben.
+   */
+  private async serializedPass(): Promise<'idle' | 'progress' | 'retry'> {
+    const release = await this.lock.acquire();
+    try {
+      if (this.disposed || !this.enabled) return 'idle';
+      return await this.pass();
+    } finally {
+      release();
+    }
+  }
+
+  /** Schreibt einen nach Netzfehler offenen Chunk zurück, aber nur, wenn Aufnahme und Chunk noch existieren */
+  private async requeueChunk(chunk: ChunkRecord): Promise<void> {
+    try {
+      if (!(await this.store.getRecording(chunk.recordingId))) return;
+      if (!(await this.store.listChunks(chunk.recordingId)).some((c) => c.seq === chunk.seq)) return;
+      await this.store.putChunk({ ...chunk, attempts: chunk.attempts + 1 });
+    } catch {
+      // Ablage nicht erreichbar: der Chunk bleibt, wie er ist
+    }
+  }
+
   private async pass(): Promise<'idle' | 'progress' | 'retry'> {
     let progress = false;
     const recordings = (await this.store.listRecordings()).sort((a, b) => a.startedMs - b.startedMs);
@@ -239,6 +309,7 @@ export class ChunkUploader {
   }
 
   private async processRecording(id: string): Promise<'idle' | 'progress' | 'retry'> {
+    if (this.lock.creating.has(id)) return 'idle';
     let meta = await this.store.getRecording(id);
     if (!meta || meta.rejected) return 'idle';
     let progress = false;
@@ -328,7 +399,7 @@ export class ChunkUploader {
         signal: AbortSignal.timeout(CHUNK_TIMEOUT_MS),
       });
     } catch {
-      await this.store.putChunk({ ...chunk, attempts: chunk.attempts + 1 }).catch(() => undefined);
+      await this.requeueChunk(chunk);
       return 'retry';
     }
     if (res.ok) {
@@ -337,7 +408,7 @@ export class ChunkUploader {
     }
     const failure = await readFailure(res);
     if (isTransient(res.status)) {
-      await this.store.putChunk({ ...chunk, attempts: chunk.attempts + 1 }).catch(() => undefined);
+      await this.requeueChunk(chunk);
       return 'retry';
     }
     if (res.status === 404 && failure.code === 'recording_not_found') {

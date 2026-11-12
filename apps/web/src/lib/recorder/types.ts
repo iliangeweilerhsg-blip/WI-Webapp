@@ -59,6 +59,11 @@ export interface ShelfRecord {
 }
 
 export interface RecorderStore {
+  /**
+   * Schlüssel der Ablage für die gemeinsame Sperre der Upload-Durchgänge: Objekte mit gleichem Schlüssel greifen auf
+   * dieselben Daten zu (z. B. dieselbe IndexedDB). Ohne Angabe gilt das Store-Objekt selbst.
+   */
+  readonly lockKey?: object;
   putRecording(meta: RecordingMeta): Promise<void>;
   getRecording(id: string): Promise<RecordingMeta | null>;
   listRecordings(): Promise<RecordingMeta[]>;

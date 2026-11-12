@@ -84,7 +84,19 @@ function finished(tx: IDBTransaction): Promise<void> {
  * IndexedDB-Implementierung. Stores: `recordings` (Schlüssel `id`), `chunks` (Schlüssel `[recordingId, seq]`)
  * und `shelf` (Fehlerablage, nie automatisch geleert).
  */
+const lockKeys = new WeakMap<object, Map<string, object>>();
+
+/** Eine Sperre je (Factory, Datenbankname): mehrere Store-Objekte auf derselben IndexedDB teilen sie */
+function sharedLockKey(factory: object, name: string): object {
+  let names = lockKeys.get(factory);
+  if (!names) lockKeys.set(factory, (names = new Map()));
+  let key = names.get(name);
+  if (!key) names.set(name, (key = {}));
+  return key;
+}
+
 export class IndexedDbRecorderStore implements RecorderStore {
+  readonly lockKey: object;
   private dbPromise: Promise<IDBDatabase> | null = null;
   private readonly name: string;
   private readonly factory: IDBFactory;
@@ -92,6 +104,7 @@ export class IndexedDbRecorderStore implements RecorderStore {
   constructor(name = 'sg-recorder', factory: IDBFactory = globalThis.indexedDB) {
     this.name = name;
     this.factory = factory;
+    this.lockKey = sharedLockKey(factory, name);
   }
 
   private db(): Promise<IDBDatabase> {
