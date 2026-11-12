@@ -146,14 +146,82 @@ export function formatValidUntil(date: string): string {
   return dueDateFormat.format(new Date(`${date}T12:00:00`));
 }
 
+/** Frist, die nach dem Ablauf des Zugangs liegt (UX-313) */
+export interface ExpiryDeadline {
+  name: string;
+  due_at: string;
+}
+
+/** So viele Tage vor dem Ablauf warnt die Web-App, wenn danach noch eine Frist liegt (der Core meldet erst ab 7) */
+export const EARLY_HINT_DAYS = 14;
+
+/**
+ * UX-313: Die früheste noch offene Frist, die nach dem Ablauf des Zugangs liegt. Nur wenn der Ablauf höchstens
+ * `EARLY_HINT_DAYS` Tage entfernt ist und noch nicht vorbei. Sonst `null`. Das Ablaufdatum gilt bis Tagesende.
+ */
+export function deadlineAfterExpiry<T extends ExpiryDeadline>(
+  validUntil: string | null,
+  deadlines: readonly T[] | undefined,
+  now: number = Date.now(),
+): T | null {
+  if (!validUntil || !deadlines) return null;
+  const end = new Date(`${validUntil}T23:59:59`).getTime();
+  if (Number.isNaN(end) || end < now || end - now > EARLY_HINT_DAYS * 86_400_000) return null;
+  const later = deadlines
+    .filter((d) => {
+      const due = new Date(d.due_at).getTime();
+      return due > end && due >= now;
+    })
+    .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime());
+  return later[0] ?? null;
+}
+
 /** Ein ruhiger Satz zum Zugang, ohne den Befehl (der steht daneben) */
-export function accessHintText(state: AccessHintState, validUntil: string | null): string {
-  if (state === 'laeuft_bald_ab') {
-    return validUntil
-      ? `Der Moodle-Zugang läuft am ${formatValidUntil(validUntil)} ab. Erneuere ihn vorher mit`
-      : 'Der Moodle-Zugang läuft bald ab. Erneuere ihn vorher mit';
+export function accessHintText(
+  state: AccessHintState | 'ok',
+  validUntil: string | null,
+  deadline: ExpiryDeadline | null = null,
+  now: number = Date.now(),
+): string {
+  if (state === 'laeuft_bald_ab' || state === 'ok') {
+    const until = validUntil ? ` am ${formatValidUntil(validUntil)}` : ' bald';
+    const before = deadline
+      ? `, vor der Frist „${deadline.name}“ (${formatDue(deadline.due_at, now)}).`
+      : '.';
+    return `Der Moodle-Zugang läuft${until} ab${before} Erneuere ihn vorher mit`;
   }
   return 'Moodle nimmt den Zugang nicht mehr an, der Abgleich pausiert. Erneuere ihn mit';
+}
+
+/**
+ * UX-312: Was zur Frist zu sagen ist, ohne Wertung (R11). `null`, wenn nichts zu sagen ist.
+ * Moodle entscheidet selbst, ob es nach der Frist noch annimmt (`cutoff_at`, sonst unbekannt). `due_at` und
+ * `cutoff_at` sind die Daten der Aufgabe, eine persönliche Verlängerung kennt die App nicht. Darum die Einschränkung.
+ */
+export function lateNote(input: {
+  state: 'keine' | 'entwurf' | 'eingereicht';
+  lastModifiedAt: string | null;
+  dueAt: string | null;
+  cutoffAt: string | null;
+  now?: number;
+}): string | null {
+  const now = input.now ?? Date.now();
+  if (!input.dueAt) return null;
+  const due = new Date(input.dueAt).getTime();
+  if (input.state === 'eingereicht') {
+    const at = input.lastModifiedAt ? new Date(input.lastModifiedAt).getTime() : null;
+    return at !== null && at > due
+      ? 'Nach der Frist eingereicht. Ohne Verlängerung zeigt Moodle sie als verspätet.'
+      : null;
+  }
+  if (now <= due) return null;
+  if (input.cutoffAt) {
+    const cutoff = new Date(input.cutoffAt).getTime();
+    return now >= cutoff
+      ? 'Die Frist ist vorbei. Ohne Verlängerung nimmt Moodle keine Abgabe mehr an.'
+      : `Die Frist ist vorbei. Moodle nimmt noch bis ${formatDue(input.cutoffAt, now)} an, die Abgabe gilt dann ohne Verlängerung als verspätet.`;
+  }
+  return 'Die Frist ist vorbei. Ob Moodle noch annimmt, entscheidet die Aufgabe; ohne Verlängerung gilt eine Abgabe als verspätet.';
 }
 
 export function isMoodleNotConfigured(error: unknown): boolean {
@@ -329,8 +397,11 @@ export function useDecideItem() {
 }
 
 /** Fristen aus dem Abgleich ab jetzt, optional für ein Modul bzw. bis `to` */
-export function useSyncedDeadlines(filter: { moduleId?: string; days?: number; limit?: number } = {}) {
+export function useSyncedDeadlines(
+  filter: { moduleId?: string; days?: number; limit?: number; enabled?: boolean } = {},
+) {
   return useQuery({
+    enabled: filter.enabled ?? true,
     queryKey: [...DEADLINES_KEY, filter.moduleId ?? null, filter.days ?? null, filter.limit ?? null],
     queryFn: async ({ signal }) => {
       const params = new URLSearchParams();

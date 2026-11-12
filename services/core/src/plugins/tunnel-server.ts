@@ -126,7 +126,7 @@ export class TunnelEntrance {
     if (withoutKey > 0) {
       logger.warn(
         { devices: withoutKey },
-        'Gekoppelte Geräte ohne Tunnel-Schlüssel (vor UX-12 gekoppelt oder wiederhergestellt): einmal neu koppeln',
+        'Gekoppelte Geräte ohne Tunnel-Schlüssel (vor UX-12 gekoppelt): einmal neu koppeln',
       );
     }
   }

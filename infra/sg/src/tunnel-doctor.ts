@@ -456,7 +456,7 @@ async function checkPairedWithoutKey(io: TunnelDoctorIo, file: KeyFileInfo): Pro
   }
   return fail(
     part,
-    `${missing.length} gekoppelte(s) Gerät(e) ohne Tunnel-Schlüssel (vor UX-12 gekoppelt oder aus einem Backup wiederhergestellt)`,
+    `${missing.length} gekoppelte(s) Gerät(e) ohne Tunnel-Schlüssel (vor UX-12 gekoppelt)`,
     'Neu koppeln: In der Web-App unter Einstellungen → Geräte das Gerät entfernen und das iPad im Heimnetz neu koppeln (QR-Code). Der Schlüssel entsteht nur bei der Kopplung und wird nie nachträglich erzeugt.',
   );
 }
