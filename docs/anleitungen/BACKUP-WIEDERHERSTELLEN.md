@@ -70,9 +70,10 @@ Wurde die Wiederherstellung unterbrochen, schließt `pnpm sg start` sie beim nä
 
 **iPad nach einer Wiederherstellung:** Das iPad erkennt die Wiederherstellung, sobald es sich wieder mit dem Mac verbindet, und gleicht danach alle Seiten selbst neu ab. Du musst dafür keine Notizbücher öffnen. Auf dem Startbildschirm steht solange die Zeile „Mac wiederhergestellt · N Seiten werden abgeglichen“. Die Zahl zählt herunter, am Ende verschwindet die Zeile.
 
-- **Das iPad verbunden lassen, bis die Zeile weg ist.** Reißt die Verbindung ab, pausiert der Abgleich. Beim nächsten Verbinden macht das iPad dort weiter, wo es aufgehört hat.
+- **Das iPad verbunden lassen, bis die Zeile weg ist.** Reißt die Verbindung ab, pausiert der Abgleich. Die Zeile bleibt dann mit der Restzahl stehen. Beim nächsten Verbinden macht das iPad dort weiter, wo es aufgehört hat.
 - Auch während des Abgleichs kannst du auf dem iPad schreiben. Neue Striche gehen nicht verloren.
-- Steht die Zeile nach einer Weile noch da und die Zahl ändert sich nicht, prüfe die Verbindung („Mac ●“ oben rechts).
+- Steht die Zeile nach einer Weile noch da und die Zahl ändert sich nicht, prüfe die Verbindung („Mac ●“ oben rechts). Ist der Mac verbunden, schließ die App und öffne sie neu: Beim Verbinden versucht das iPad die übrigen Seiten noch einmal. Nach einem Neustart der App fehlt der Zusatz „Mac wiederhergestellt“, die Zeile zählt sonst gleich.
+- Eigene Notizbücher legt das iPad selbst neu an. Seiten in einem Modul oder in einem Notizbuch „Vorlesung“ bzw. „Übung“, das erst nach dem Backup entstand, kann der Mac aber nicht annehmen. Sie landen in der Fehlerablage (Karte auf dem Startbildschirm). Die Zeichnungen bleiben auf dem iPad.
 
 ## 4. Papierkorb
 

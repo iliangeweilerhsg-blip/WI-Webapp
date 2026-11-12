@@ -40,7 +40,7 @@ final class InkLibraryService {
     /// Seiten, deren `page_version_conflict` gerade aufgelöst wird
     @ObservationIgnored private var resolvingConflicts = Set<String>()
 
-    /// Stand des Hintergrund-Abgleichs nach einer Wiederherstellung am Mac (UX-46). `nil`, wenn keiner läuft.
+    /// Stand des Abgleichs aller Seiten nach einer Wiederherstellung am Mac (UX-46), für die Zeile auf dem Startbildschirm
     struct BackgroundReconcile: Equatable, Sendable {
         /// Seiten, die noch abgeglichen werden müssen (zählt herunter)
         var remaining: Int
@@ -48,9 +48,12 @@ final class InkLibraryService {
         var afterRestore: Bool
     }
 
-    private(set) var backgroundReconcile: BackgroundReconcile?
+    /// Seit dem Start der App lief ein Durchgang an (erstes `welcome`). Erst dann zeigt der Startbildschirm die Zeile.
+    private var passStarted = false
+    /// Ein Durchgang läuft gerade (für Tests)
+    @ObservationIgnored private(set) var isBackgroundReconcileRunning = false
     /// Die letzte neue `db_epoch` ist noch nicht vollständig abgeglichen (nur im Arbeitsspeicher)
-    @ObservationIgnored private var restorePending = false
+    private var restorePending = false
     @ObservationIgnored private var passTask: _Concurrency.Task<Void, Never>?
     /// Zählt bei jedem neuen Durchgang und bei jedem Abbruch hoch. Ein Durchgang mit alter Nummer endet am nächsten
     /// Prüfpunkt, ohne etwas zu ändern.
@@ -782,6 +785,18 @@ final class InkLibraryService {
         openChanges += 1
     }
 
+    /// Zeile auf dem Startbildschirm: steht, solange nach einem `welcome` markierte Seiten übrig sind, auch wenn der
+    /// Durchgang pausiert (Verbindung weg). Sie zählt herunter, auch wenn die Schreibfläche eine Seite abgleicht, und
+    /// verschwindet erst, wenn alles abgeglichen ist. `nil` = keine Zeile.
+    var backgroundReconcile: BackgroundReconcile? {
+        // Abgleiche der Engine löschen Flags in der Ablage, ohne dass dieser Dienst davon erfährt
+        _ = sync.reconciledPages
+        guard passStarted else { return nil }
+        let remaining = pagesNeedingReconcile
+        guard remaining > 0 else { return nil }
+        return BackgroundReconcile(remaining: remaining, afterRestore: restorePending)
+    }
+
     /// Markierte Seiten (`needsReconcile`), die der Durchgang abgleichen muss: sichtbar und beim Core angelegt bzw.
     /// eingereiht. Eine Seite, deren `page.create` nie eingereiht wurde, hat noch nie Striche gehabt.
     var pagesNeedingReconcile: Int {
@@ -795,6 +810,7 @@ final class InkLibraryService {
     /// Ohne markierte Seiten passiert nichts weiter.
     func startBackgroundReconcile(afterRestore: Bool) {
         if afterRestore { restorePending = true }
+        if !passStarted { passStarted = true }
         passGeneration += 1
         let generation = passGeneration
         let previous = passTask
@@ -806,12 +822,12 @@ final class InkLibraryService {
     }
 
     /// Bricht einen laufenden Durchgang ab (Verbindung weg). Die Flags bleiben, der nächste `welcome` macht weiter.
+    /// Die Zeile auf dem Startbildschirm bleibt mit der Restzahl stehen (`backgroundReconcile`): Sonst hielte man den
+    /// pausierten Abgleich für fertig.
     func cancelBackgroundReconcile() {
         passGeneration += 1
         passTask?.cancel()
-        if backgroundReconcile != nil {
-            backgroundReconcile = nil
-        }
+        isBackgroundReconcileRunning = false
     }
 
     private func isCurrentPass(_ generation: Int) -> Bool {
@@ -820,12 +836,15 @@ final class InkLibraryService {
 
     private func runBackgroundReconcile(generation: Int) async {
         guard isCurrentPass(generation), pageStore != nil else { return }
+        isBackgroundReconcileRunning = true
+        defer {
+            // Ein veralteter Durchgang rührt den Stand nicht an: Der neue Durchgang (oder der Abbruch) besitzt ihn
+            if generation == passGeneration { isBackgroundReconcileRunning = false }
+        }
         guard pagesNeedingReconcile > 0 else {
-            backgroundReconcile = nil
             restorePending = false
             return
         }
-        backgroundReconcile = BackgroundReconcile(remaining: pagesNeedingReconcile, afterRestore: restorePending)
         var unreachable = false
         // Das Notizbuch der offenen Seite zuerst, dann der Rest in fester Reihenfolge
         let openNotebookID = openPageID.flatMap { store.page($0)?.notebookID }
@@ -847,20 +866,22 @@ final class InkLibraryService {
                 guard let current = store.page(page.id), current.needsReconcile, current.createQueued,
                     current.deletedAtMS == nil
                 else { continue }
-                let result = await reconcileForPass(pageID: current.id, generation: generation)
+                var result = await reconcileForPass(pageID: current.id, generation: generation)
+                // Verworfen, weil die Seite währenddessen geöffnet, gewechselt oder geschlossen wurde: einmal mit dem
+                // dann gültigen Modell nachholen. Sonst bliebe sie markiert, wenn der Abgleich der Ansicht genau in
+                // diesem Moment übersprungen wurde.
+                if result == .skipped, isCurrentPass(generation), store.page(current.id)?.needsReconcile == true {
+                    result = await reconcileForPass(pageID: current.id, generation: generation)
+                }
                 if result == .unreachable {
                     unreachable = true
                     break outer
                 }
-                if isCurrentPass(generation), backgroundReconcile != nil {
-                    backgroundReconcile?.remaining = pagesNeedingReconcile
-                }
             }
         }
-        // Ein veralteter Durchgang rührt den Stand nicht an: Der neue Durchgang (oder der Abbruch) besitzt ihn
         guard generation == passGeneration else { return }
+        // Bleiben Seiten übrig (Verbindung weg, Fehler), bleibt die Zeile mit der Restzahl stehen
         if !unreachable, pagesNeedingReconcile == 0 { restorePending = false }
-        backgroundReconcile = nil
         bump()
     }
 
@@ -874,7 +895,10 @@ final class InkLibraryService {
         }
         if pageID == openPageID, let live = openModel, live.pageID == pageID {
             return await sync.reconcile(page: live, binding: binding) { [weak self] in
-                self?.passGeneration == generation
+                // Die Ansicht hat inzwischen ein anderes Modell (Seite verlassen und neu geöffnet): `live` kennt dessen
+                // neue Striche nicht
+                guard let self else { return false }
+                return self.passGeneration == generation && self.openModel === live
             }
         }
         guard let pageStore, let libraryPage = store.page(pageID) else { return .skipped }

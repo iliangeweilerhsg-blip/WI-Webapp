@@ -20,6 +20,10 @@ private final class BackgroundReconcileRig {
     private(set) var progressAtRequest: [InkLibraryService.BackgroundReconcile?] = []
     /// Läuft in der Anfrage nach den Strichen einer Seite, bevor die Antwort kommt
     var onStrokesRequest: (@MainActor (String) async -> Void)?
+    /// Seiten, die der wiederhergestellte Core nicht kennt: `GET /pages/{id}/strokes` → 404, fehlen in der Seitenliste
+    var unknownToCore = Set<String>()
+    /// Seiten, deren Striche der Core mit 500 ablehnt
+    var failingStrokes = Set<String>()
 
     init() {
         notebookID = h.binding.notebookID
@@ -44,13 +48,19 @@ private final class BackgroundReconcileRig {
                 strokeRequests.append(pageID)
                 progressAtRequest.append(service.backgroundReconcile)
                 await onStrokesRequest?(pageID)
-                h.transport.replies = [
-                    .http(
-                        status: 200,
-                        body: "{\"page_id\":\"\(pageID)\",\"stream_op_id\":null,\"stream_seq\":0,\"strokes\":[]}")
-                ]
+                if unknownToCore.contains(pageID) {
+                    h.transport.replies = [.http(status: 404, body: Fixtures.apiError("page_not_found"))]
+                } else if failingStrokes.contains(pageID) {
+                    h.transport.replies = [.http(status: 500, body: Fixtures.apiError("internal"))]
+                } else {
+                    h.transport.replies = [
+                        .http(
+                            status: 200,
+                            body: "{\"page_id\":\"\(pageID)\",\"stream_op_id\":null,\"stream_seq\":0,\"strokes\":[]}")
+                    ]
+                }
             } else if path.hasSuffix("/pages") {
-                let items = [p1, p2, p3].enumerated().map {
+                let items = [p1, p2, p3].enumerated().filter { !unknownToCore.contains($0.element) }.map {
                     LibraryFixtures.pageJSON(id: $0.element, notebookID: notebookID, index: $0.offset + 1)
                 }
                 let body =
@@ -121,6 +131,19 @@ private final class BackgroundReconcileRig {
         h.factory.sockets[socketIndex].ops.compactMap { $0.object["kind"] as? String }
     }
 
+    /// Arten der gesendeten Operationen einer Seite, in der Reihenfolge des Sendens
+    func opKinds(forPage pageID: String, socketIndex: Int = 0) -> [String] {
+        h.factory.sockets[socketIndex].ops.compactMap { op in
+            guard let data = op.object["data"] as? [String: Any], data["page_id"] as? String == pageID else {
+                return nil
+            }
+            return op.object["kind"] as? String
+        }
+    }
+
+    /// Der Durchgang ist durch (oder abgebrochen)
+    var passIdle: Bool { !service.isBackgroundReconcileRunning }
+
     func reload(_ pageID: String) -> InkPageModel {
         InkPageModel(pageID: pageID, store: pageStore, saveDelay: .seconds(3600))
     }
@@ -160,14 +183,16 @@ final class BackgroundReconcileTests: XCTestCase {
         }
         rig.startWithNewEpoch()
 
-        let stopped = await eventually { rig.strokeRequests.count == 2 && rig.service.backgroundReconcile == nil }
+        let stopped = await eventually { rig.strokeRequests.count == 2 && rig.passIdle }
         XCTAssertTrue(stopped)
         await rig.h.clock.settle()
         // Seite 3 blieb markiert, es lief nichts weiter
         XCTAssertEqual(rig.strokeRequests, [rig.p1, rig.p2])
         XCTAssertTrue(rig.needsReconcile(rig.p3))
-        XCTAssertNil(rig.service.backgroundReconcile)
         XCTAssertEqual(rig.service.pagesNeedingReconcile, 1)
+        // Die Zeile bleibt mit der Restzahl stehen: Der Abgleich ist pausiert, nicht fertig
+        XCTAssertEqual(
+            rig.service.backgroundReconcile, InkLibraryService.BackgroundReconcile(remaining: 1, afterRestore: true))
 
         // Neues `welcome` mit derselben `db_epoch`: Der Durchgang macht mit der Rest-Seite weiter
         await rig.h.clock.advance(1.5)
@@ -202,19 +227,19 @@ final class BackgroundReconcileTests: XCTestCase {
         XCTAssertTrue(viewAsking)
 
         rig.service.startBackgroundReconcile(afterRestore: true)
-        let othersDone = await eventually {
-            rig.strokeRequests.count == 3 && rig.service.backgroundReconcile == nil
-        }
+        let othersDone = await eventually { rig.strokeRequests.count == 3 && rig.passIdle }
         XCTAssertTrue(othersDone)
-        // Der Durchgang ist durch, Seite 3 gehört noch der Ansicht
+        // Der Durchgang ist durch, Seite 3 gehört noch der Ansicht. Die Zeile zählt sie noch.
         XCTAssertTrue(rig.needsReconcile(rig.p3))
         XCTAssertEqual(rig.strokeRequests.filter { $0 == rig.p3 }.count, 1)
+        XCTAssertEqual(rig.service.backgroundReconcile?.remaining, 1)
 
         held = false
         let result = await view.value
         XCTAssertEqual(result, .done)
         XCTAssertFalse(rig.needsReconcile(rig.p3))
         XCTAssertEqual(rig.strokeRequests.filter { $0 == rig.p3 }.count, 1)
+        // Der Abgleich der Ansicht zählt mit: Die Zeile verschwindet
         XCTAssertTrue(rig.allDone)
     }
 
@@ -327,13 +352,19 @@ final class BackgroundReconcileTests: XCTestCase {
         }
 
         rig.startWithNewEpoch()
-        let done = await eventually { rig.strokeRequests.count == 3 && rig.service.backgroundReconcile == nil }
+        // Seite 2 wird zweimal gefragt: erst mit dem kurz geladenen Modell (verworfen), dann mit dem der Ansicht
+        let done = await eventually { rig.strokeRequests.count == 4 && rig.passIdle }
         XCTAssertTrue(done)
-        // Der Durchgang hat den veralteten Plan verworfen: Seite 2 bleibt für die Ansicht markiert
-        XCTAssertTrue(rig.needsReconcile(rig.p2))
+        XCTAssertEqual(rig.strokeRequests, [rig.p1, rig.p2, rig.p2, rig.p3])
+        // Der veraltete Plan wurde verworfen, der zweite Versuch nahm das Modell der Ansicht: nichts entfernt
+        XCTAssertFalse(rig.needsReconcile(rig.p2))
+        XCTAssertTrue(rig.allDone)
+        await rig.h.clock.settle()
         XCTAssertFalse(rig.opKinds().contains("stroke.remove"))
+        // Beide Striche sind unterwegs (der zweite kam schon beim Schreiben, je nach `ack` auch doppelt: Upsert)
+        XCTAssertGreaterThanOrEqual(rig.opKinds(forPage: rig.p2).filter { $0 == "stroke.add" }.count, 2)
 
-        // Die Ansicht gleicht danach selbst ab: Beide Striche bleiben, nichts wird entfernt
+        // Ein späterer Abgleich der Ansicht entfernt nichts: Beide Striche bleiben
         let result = await rig.h.engine.reconcile(page: live, binding: try rig.binding(rig.p2))
         XCTAssertEqual(result, .done)
         await rig.h.clock.settle()
@@ -358,11 +389,55 @@ final class BackgroundReconcileTests: XCTestCase {
         }
 
         rig.startWithNewEpoch()
-        let done = await eventually { rig.strokeRequests.count == 3 && rig.service.backgroundReconcile == nil }
+        let done = await eventually { rig.strokeRequests.count == 4 && rig.passIdle }
         XCTAssertTrue(done)
         await rig.h.clock.settle()
 
         // Auf der Platte steht der Stand der Ansicht mit beiden Strichen
         XCTAssertEqual(rig.reload(rig.p2).inkDrawing.strokes.count, 2)
+    }
+
+    // MARK: Wiederherstellung auf einen älteren Stand
+
+    /// Der Kernfall von UX-46: Seite 2 wurde vor langer Zeit angelegt, ihre Striche hat der Core bestätigt (die
+    /// Warteschlange ist leer). Der Mac kommt auf ein Backup von davor zurück und kennt die Seite nicht mehr.
+    func testRestoreRecreatesAPageTheCoreNoLongerKnowsWithItsConfirmedStrokes() async throws {
+        let rig = BackgroundReconcileRig()
+        rig.seedPage(
+            rig.p2,
+            strokes: [rig.stroke(100, createdAt: 1_762_246_500), rig.stroke(200, createdAt: 1_762_246_501)])
+        XCTAssertEqual(rig.h.engine.pendingCount, 0)
+        rig.unknownToCore = [rig.p2]
+
+        rig.startWithNewEpoch()
+        let done = await eventually { rig.strokeRequests.count == 3 && rig.allDone }
+        XCTAssertTrue(done)
+        let sent = await eventually { rig.opKinds(forPage: rig.p2).filter { $0 == "stroke.add" }.count == 2 }
+        XCTAssertTrue(sent)
+
+        // Erst die Seite, dann ihre Striche, nichts entfernt
+        let kinds = rig.opKinds(forPage: rig.p2)
+        XCTAssertEqual(kinds.first, "page.create")
+        XCTAssertFalse(kinds.contains("stroke.remove"))
+        XCTAssertFalse(rig.opKinds().contains("stroke.remove"))
+        // Die Seiten, die der Core kennt, bekommen kein `page.create`
+        XCTAssertFalse(rig.opKinds(forPage: rig.p1).contains("page.create"))
+        XCTAssertFalse(rig.opKinds(forPage: rig.p3).contains("page.create"))
+        XCTAssertFalse(rig.needsReconcile(rig.p2))
+        XCTAssertEqual(rig.reload(rig.p2).inkDrawing.strokes.count, 2)
+    }
+
+    func testAPageTheCoreRejectsDoesNotStopThePass() async throws {
+        let rig = BackgroundReconcileRig()
+        rig.failingStrokes = [rig.p2]
+
+        rig.startWithNewEpoch()
+        let done = await eventually { rig.strokeRequests.count == 3 && rig.passIdle }
+        XCTAssertTrue(done)
+        // Seite 3 kommt trotzdem dran, Seite 2 bleibt markiert und die Zeile zählt sie
+        XCTAssertEqual(rig.strokeRequests, [rig.p1, rig.p2, rig.p3])
+        XCTAssertFalse(rig.needsReconcile(rig.p3))
+        XCTAssertTrue(rig.needsReconcile(rig.p2))
+        XCTAssertEqual(rig.service.backgroundReconcile?.remaining, 1)
     }
 }

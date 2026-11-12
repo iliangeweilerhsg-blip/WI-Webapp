@@ -100,6 +100,9 @@ final class SyncEngine {
     private(set) var deadLetterCount = 0
     /// Zählt bei jedem `welcome` hoch. Die Schreibfläche gleicht danach ab, wenn nötig.
     private(set) var welcomeCount = 0
+    /// Zählt bei jedem erfolgreichen Abgleich einer Seite hoch (Ansicht oder Hintergrund-Durchgang). Die Zeile
+    /// „N Seiten werden abgeglichen“ zählt damit herunter (UX-46).
+    private(set) var reconciledPages = 0
 
     /// Für `AppModel`: Der Verbindungsstatus der App folgt der Engine
     @ObservationIgnored var onStateChange: ((State) -> Void)?
@@ -374,7 +377,8 @@ final class SyncEngine {
         case skipped
         /// Der Core war nicht erreichbar. Das Flag bleibt stehen.
         case unreachable
-        /// Einreihen gescheitert (Platte). Das Flag bleibt stehen.
+        /// Einreihen gescheitert (Platte) oder der Core hat die Anfrage abgelehnt (Fehlerstatus außer 404, unlesbare
+        /// Antwort). Das Flag bleibt stehen.
         case failed
     }
 
@@ -402,7 +406,17 @@ final class SyncEngine {
                 endpoint: credentials.endpoint, token: credentials.token, pageID: binding.pageID)
         } catch {
             handleRESTError(error)
-            return .unreachable
+            switch error as? ConnectionError {
+            case .server(let status, _)? where status != 429 && status != 503:
+                // Der Core antwortet, lehnt diese Seite aber ab: Der Hintergrund-Durchgang geht zur nächsten weiter,
+                // statt bei jedem `welcome` an derselben Seite stehen zu bleiben
+                return .failed
+            case .invalidResponse?:
+                return .failed
+            default:
+                // Keine Verbindung, Zeitüberschreitung, überlastet (429, 503): später noch einmal
+                return .unreachable
+            }
         }
         // Ab hier gibt es kein `await` mehr: Der lokale Stand ist genau der, den der Plan sieht
         guard runningMac != nil, isStillValid() else { return .skipped }
@@ -443,6 +457,7 @@ final class SyncEngine {
         if succeeded {
             page.reconcileFinished()
             library.clearNeedsReconcile(pageID: binding.pageID)
+            reconciledPages += 1
             return .done
         }
         return .failed
