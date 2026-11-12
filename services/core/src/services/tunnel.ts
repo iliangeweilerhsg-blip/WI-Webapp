@@ -39,6 +39,10 @@ function keyBytes(tunnelKey: string): Buffer {
     throw new Error('Der Tunnel-Schlüssel hat nicht das Format aus PairResponse.');
   const bytes = Buffer.from(tunnelKey, 'base64url');
   if (bytes.length !== 32) throw new Error('Der Tunnel-Schlüssel muss 32 Byte lang sein.');
+  // Nur die kanonische Schreibweise: Das 43. Zeichen trägt 2 überzählige Bits. Node ignoriert sie, andere Decoder
+  // (Swift im Helfer und am iPad) lehnen sie womöglich ab. Sonst ergäben zwei Texte dieselben Rohbytes
+  if (bytes.toString('base64url') !== tunnelKey)
+    throw new Error('Der Tunnel-Schlüssel ist nicht kanonisch kodiert.');
   return bytes;
 }
 
@@ -58,13 +62,16 @@ export function tunnelSocketPath(dataDir: string): string {
   return join(dataDir, 'run', 'tunnel.sock');
 }
 
+/** Format der `device_id` in der Schlüsseldatei (UUID, klein geschrieben, wie `uuidv7()` sie erzeugt) */
+const DEVICE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 const KeyFileSchema = z
   .object({
     v: z.literal(1),
     devices: z.array(
       z
         .object({
-          device_id: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
+          device_id: z.string().regex(DEVICE_ID_RE),
           tunnel_key: z.string().regex(TUNNEL_KEY_RE),
         })
         .strict(),
@@ -106,6 +113,12 @@ export class TunnelKeyStore {
   private readonly logger: NonNullable<TunnelKeyStoreOptions['logger']> | undefined;
   private queue: Promise<unknown> = Promise.resolve();
   private readonly listeners = new Set<() => void>();
+  /**
+   * Geräte, deren Schlüssel dieser Prozess eingetragen hat. Der Abgleich beim Start lässt sie stehen: `pair/confirm`
+   * schreibt den Schlüssel **vor** dem Gerät in Postgres, ein Abgleich mit einer Geräteliste von kurz davor hielte ihn
+   * sonst für verwaist. Scheitert das Anlegen, entfernt die Route den Eintrag selbst (sonst der nächste Start).
+   */
+  private readonly addedHere = new Set<string>();
   private loaded = false;
 
   constructor(options: TunnelKeyStoreOptions) {
@@ -282,6 +295,8 @@ export class TunnelKeyStore {
    */
   async add(deviceId: string, tunnelKey: string): Promise<void> {
     keyBytes(tunnelKey); // Format prüfen, bevor etwas geschrieben wird
+    // Eine ID, die `load()` nicht annähme, machte die ganze Datei beim nächsten Start „kaputt“ (alle Schlüssel weg)
+    if (!DEVICE_ID_RE.test(deviceId)) throw new Error('Die Geräte-ID hat nicht das Format einer UUID.');
     return this.serial(async () => {
       await this.ensureLoaded();
       const before = this.entries.get(deviceId);
@@ -293,6 +308,7 @@ export class TunnelKeyStore {
         else this.entries.set(deviceId, before);
         throw error;
       }
+      this.addedHere.add(deviceId);
       this.notify();
     });
   }
@@ -324,7 +340,8 @@ export class TunnelKeyStore {
     const active = new Set(activeDeviceIds);
     return this.serial(async () => {
       await this.ensureLoaded();
-      const stale = [...this.entries.keys()].filter((id) => !active.has(id));
+      // Eigene, frische Einträge nie als verwaist werten (Kopplung läuft womöglich gerade, siehe `addedHere`)
+      const stale = [...this.entries.keys()].filter((id) => !active.has(id) && !this.addedHere.has(id));
       const withoutKey = [...active].filter((id) => !this.entries.has(id)).length;
       if (stale.length > 0) {
         const backup = new Map(this.entries);

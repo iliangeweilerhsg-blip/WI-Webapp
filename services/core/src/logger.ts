@@ -101,7 +101,7 @@ export function initialLogDay(logDir: string, now: Date = new Date()): string {
  * nacktes `key` fehlt bewusst (`sort_key` ist ein normaler Parameter), API-Schlüssel deckt `api_key` u. ä. ab.
  */
 const SECRET_PARAM =
-  /(^|[_-])(pairing_id|token|wstoken|access_token|secret|password|passwd|nonce|code|api_key|apikey|access_key|private_key|auth)($|[_-])/i;
+  /(^|[_-])(pairing_id|token|wstoken|access_token|secret|password|passwd|nonce|code|api_key|apikey|access_key|private_key|tunnel_key|auth)($|[_-])/i;
 
 /**
  * Query-Parameter mit Nutzerinhalt (#167): Suchtexte (`GET /search?q=…`, VERTRAEGE §19.6) sollen nicht 14 Tage im
@@ -214,7 +214,22 @@ export function loggerOptions(config: Pick<Config, 'logLevel'>): pino.LoggerOpti
     base: { service: 'core' },
     timestamp: pino.stdTimeFunctions.isoTime,
     // Geheimnisse nie loggen (09 §4). Moodle-Token (08 §9.1) zur Sicherheit auch, falls er je in ein Log-Objekt gerät
-    redact: ['req.headers.authorization', 'req.headers.cookie', 'wstoken', 'token', '*.wstoken', '*.token'],
+    // `tunnel_key`, `device_token` (UX-12, Gerätekopplung): Defense in depth. Der Core loggt sie nie bewusst, aber falls
+    // je ein Antwort- oder Dateiobjekt (`{ devices: [{ tunnel_key }] }`) in ein Log-Objekt gerät, bleibt es geschwärzt
+    redact: [
+      'req.headers.authorization',
+      'req.headers.cookie',
+      'wstoken',
+      'token',
+      '*.wstoken',
+      '*.token',
+      'tunnel_key',
+      '*.tunnel_key',
+      'devices[*].tunnel_key',
+      '*.devices[*].tunnel_key',
+      'device_token',
+      '*.device_token',
+    ],
     serializers: { req: serializeRequest, err: serializeError },
     hooks: {
       // Auch Meldungstexte schwärzen, in denen eine URL steht („Route … not found“)

@@ -338,6 +338,25 @@ describe('Log-Schwärzung Moodle-Token (08 §9.1)', () => {
     expect(text).toContain('[Redacted]');
     expect(text).not.toMatch(/geheim-/);
   });
+
+  it('schwärzt tunnel_key und device_token (UX-12), auch in der Form der Schlüsseldatei', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-log-'));
+    const logger = createLogger({ dataDir: dir, logLevel: 'info' });
+    logger.info(
+      {
+        tunnel_key: 'geheim-eins',
+        device_token: 'geheim-zwei',
+        res: { tunnel_key: 'geheim-drei', device_token: 'geheim-vier' },
+        devices: [{ device_id: 'a', tunnel_key: 'geheim-fuenf' }],
+        file: { devices: [{ device_id: 'b', tunnel_key: 'geheim-sechs' }] },
+      },
+      'test',
+    );
+    const text = readFileSync(join(dir, 'logs', 'core.log'), 'utf8');
+    expect(text).toContain('[Redacted]');
+    expect(text).not.toMatch(/geheim-/);
+    expect(redactUrl('/x?tunnel_key=geheim')).toBe('/x?tunnel_key=[Redacted]');
+  });
 });
 
 describe('Größengrenzen für core.log (Issue #87)', () => {

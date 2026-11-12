@@ -158,7 +158,7 @@ describe('Architektur: eine Stelle für „lokal“', () => {
       .map((file) => relative(SRC, file))
       .filter((file) => !ALLOWED.has(file))
       .filter((file) =>
-        /remoteAddress\s*(===|!==|==|!=)\s*['"`](127\.0\.0\.1|::1)/.test(
+        /(remoteAddress|\.ip)\s*(===|!==|==|!=)\s*['"`](127\.0\.0\.1|::1|::ffff:127)/.test(
           readFileSync(join(SRC, file), 'utf8'),
         ),
       );

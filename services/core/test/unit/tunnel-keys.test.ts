@@ -67,6 +67,14 @@ describe('Ableitungen (feste Testvektoren)', () => {
     }
   });
 
+  it('nur die kanonische base64url-Schreibweise gilt (überzählige Bits im 43. Zeichen → Fehler)', () => {
+    // `…Hh8` und `…Hh9` ergeben in Node dieselben 32 Rohbytes. Nur `…Hh8` ist kanonisch
+    const nonCanonical = `${KEY_SEQ.slice(0, 42)}9`;
+    expect(Buffer.from(nonCanonical, 'base64url')).toEqual(Buffer.from(KEY_SEQ, 'base64url'));
+    expect(() => tunnelPsk(nonCanonical)).toThrow(/kanonisch/);
+    expect(() => tunnelServiceName(`${KEY_FF.slice(0, 42)}_`)).toThrow(/kanonisch/);
+  });
+
   it('generateTunnelKey: 43 Zeichen base64url, 32 Byte, jedes Mal anders', () => {
     const keys = new Set(Array.from({ length: 50 }, () => generateTunnelKey()));
     expect(keys.size).toBe(50);
@@ -231,6 +239,21 @@ describe('Schlüsseldatei', () => {
     expect(restarted.deviceIds()).not.toContain(ID_C);
   });
 
+  it('Abgleich während einer Kopplung: der frisch eingetragene Schlüssel bleibt (Gerät noch nicht in Postgres)', async () => {
+    const dir = dataDir();
+    const before = new TunnelKeyStore({ dataDir: dir });
+    await before.add(ID_A, KEY_SEQ); // aus einem früheren Lauf, Gerät inzwischen entfernt
+    const store = new TunnelKeyStore({ dataDir: dir });
+    await store.load();
+    // pair/confirm: Schlüssel zuerst, das Gerät steht noch nicht in der Liste aktiver Geräte
+    await store.add(ID_B, KEY_FF);
+    expect(await store.reconcile([])).toEqual({ removed: 1, withoutKey: 0 });
+    expect(store.deviceIds()).toEqual([ID_B]);
+    // entfernt die Route den Eintrag selbst (Anlegen gescheitert), ist er weg
+    expect(await store.remove(ID_B)).toBe(true);
+    expect(store.size).toBe(0);
+  });
+
   it('Abgleich ohne Änderung schreibt die Datei nicht neu', async () => {
     const store = new TunnelKeyStore({ dataDir: dataDir() });
     await store.add(ID_A, KEY_SEQ);
@@ -298,6 +321,17 @@ describe('Schlüsseldatei', () => {
     const store = new TunnelKeyStore({ dataDir: dataDir() });
     await expect(store.add(ID_A, 'zu-kurz')).rejects.toThrow();
     expect(existsSync(store.file)).toBe(false);
+  });
+
+  it('add mit einer ID, die load() nicht annähme, schreibt nichts (sonst wäre die Datei beim Start „kaputt“)', async () => {
+    const store = new TunnelKeyStore({ dataDir: dataDir() });
+    await store.add(ID_A, KEY_SEQ);
+    for (const bad of ['', 'kein-uuid', ID_B.toUpperCase(), `${ID_B}\n`]) {
+      await expect(store.add(bad, KEY_FF), JSON.stringify(bad)).rejects.toThrow(/UUID/);
+    }
+    expect(fileJson(store)).toEqual({ v: 1, devices: [{ device_id: ID_A, tunnel_key: KEY_SEQ }] });
+    const reloaded = new TunnelKeyStore({ dataDir: store.dir.replace(/\/secrets$/, '') });
+    expect(await reloaded.load()).toBe(1);
   });
 
   it('deleteFile löscht die Datei und leert die Liste (SG_TUNNEL=0)', async () => {
