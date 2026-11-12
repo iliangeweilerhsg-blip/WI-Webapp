@@ -100,6 +100,9 @@ final class SyncEngine {
     private(set) var deadLetterCount = 0
     /// Zählt bei jedem `welcome` hoch. Die Schreibfläche gleicht danach ab, wenn nötig.
     private(set) var welcomeCount = 0
+    /// Zählt bei jedem erfolgreichen Abgleich einer Seite hoch (Ansicht oder Hintergrund-Durchgang). Die Zeile
+    /// „N Seiten werden abgeglichen“ zählt damit herunter (UX-46).
+    private(set) var reconciledPages = 0
 
     /// Für `AppModel`: Der Verbindungsstatus der App folgt der Engine
     @ObservationIgnored var onStateChange: ((State) -> Void)?
@@ -111,6 +114,10 @@ final class SyncEngine {
     /// Eingehende Nachrichten, die nicht zur Engine selbst gehören (Session-Strom, `session.updated`). Das iPad
     /// liest nur: Die Engine wendet nichts an und schreibt nichts in die Warteschlange.
     @ObservationIgnored var onInbound: (@MainActor (SyncInbound) -> Void)?
+    /// Eine Verbindung hat ihr `welcome` bekommen. `true`, wenn die `db_epoch` neu ist (Mac wiederhergestellt). Der
+    /// Empfänger (`InkLibraryService`) gleicht dann alle markierten Seiten im Hintergrund ab (UX-46). Bei jedem
+    /// weiteren `welcome` kommt der Aufruf wieder, damit ein unterbrochener Durchgang weiterläuft.
+    @ObservationIgnored var onWelcomed: (@MainActor (_ epochChanged: Bool) -> Void)?
 
     private let client: CoreClient
     private let sockets: any SyncSocketFactory
@@ -137,6 +144,9 @@ final class SyncEngine {
     /// Seiten mit einem offenen `page_version_conflict`: Ihre wartenden `page.update` werden nicht gesendet, bis
     /// `resumePage` sie freigibt. Sonst gäbe die abgelehnte Operation eine Endlosschleife.
     @ObservationIgnored private var parkedPages = Set<String>()
+    /// Seiten, die gerade abgeglichen werden. Ansicht und Hintergrund-Durchgang teilen sich diese Menge: Eine Seite
+    /// wird nie von zwei Abgleichen gleichzeitig bearbeitet.
+    @ObservationIgnored private var reconcilingPages = Set<String>()
 
     init(
         client: CoreClient,
@@ -358,20 +368,58 @@ final class SyncEngine {
 
     // MARK: Abgleich
 
-    /// Vergleicht die Seite mit dem Stand des Core und reiht nach, was fehlt oder abweicht.
+    /// Ausgang eines Abgleichs
+    enum ReconcileResult: Equatable, Sendable {
+        /// Der Stand ist abgeglichen, das Flag ist gelöscht
+        case done
+        /// Nichts getan: Die Seite wird gerade abgeglichen, der Aufrufer wollte nicht mehr (`isStillValid`) oder es
+        /// gibt keine Kopplung. Das Flag bleibt stehen.
+        case skipped
+        /// Der Core war nicht erreichbar. Das Flag bleibt stehen.
+        case unreachable
+        /// Einreihen gescheitert (Platte) oder der Core hat die Anfrage abgelehnt (Fehlerstatus außer 404, unlesbare
+        /// Antwort). Das Flag bleibt stehen.
+        case failed
+    }
+
+    /// Läuft für diese Seite gerade ein Abgleich?
+    func isReconciling(pageID: String) -> Bool {
+        reconcilingPages.contains(pageID)
+    }
+
+    /// Vergleicht die Seite mit dem Stand des Core und reiht nach, was fehlt oder abweicht. Das ist der einzige
+    /// Abgleich: Die Schreibfläche und der Hintergrund-Durchgang (UX-46) rufen genau diese Funktion.
     /// Scheitert die Anfrage, bleibt das Flag stehen und der nächste Aufruf versucht es noch einmal.
-    func reconcile(page: InkPageModel, binding: InkBinding) async {
-        guard let credentials = credentials() else { return }
+    /// - Parameter isStillValid: Wird nach der Anfrage und vor dem Planen geprüft (ohne `await` dazwischen). Der
+    ///   Hintergrund-Durchgang bricht damit ab, wenn die Seite inzwischen geöffnet wurde: Ein kurz geladenes Modell
+    ///   kennt neue Striche der Ansicht nicht und würde sie sonst am Core entfernen.
+    @discardableResult
+    func reconcile(
+        page: InkPageModel, binding: InkBinding, isStillValid: @MainActor () -> Bool = { true }
+    ) async -> ReconcileResult {
+        guard let credentials = credentials() else { return .skipped }
+        guard reconcilingPages.insert(binding.pageID).inserted else { return .skipped }
+        defer { reconcilingPages.remove(binding.pageID) }
         let remote: PageStrokes?
         do {
             remote = try await client.pageStrokes(
                 endpoint: credentials.endpoint, token: credentials.token, pageID: binding.pageID)
         } catch {
             handleRESTError(error)
-            return
+            switch error as? ConnectionError {
+            case .server(let status, _)? where status != 429 && status != 503:
+                // Der Core antwortet, lehnt diese Seite aber ab: Der Hintergrund-Durchgang geht zur nächsten weiter,
+                // statt bei jedem `welcome` an derselben Seite stehen zu bleiben
+                return .failed
+            case .invalidResponse?:
+                return .failed
+            default:
+                // Keine Verbindung, Zeitüberschreitung, überlastet (429, 503): später noch einmal
+                return .unreachable
+            }
         }
         // Ab hier gibt es kein `await` mehr: Der lokale Stand ist genau der, den der Plan sieht
-        guard runningMac != nil else { return }
+        guard runningMac != nil, isStillValid() else { return .skipped }
         var succeeded = true
         // Wartende Operationen der Seite zuerst auf den Stand des Core rechnen (Absturz mitten im Senden)
         let pendingForPage = outbox.pending.filter { $0.pageID == binding.pageID }
@@ -409,7 +457,10 @@ final class SyncEngine {
         if succeeded {
             page.reconcileFinished()
             library.clearNeedsReconcile(pageID: binding.pageID)
+            reconciledPages += 1
+            return .done
         }
+        return .failed
     }
 
     /// Strichänderungen aus wartenden Operationen, in der Reihenfolge der Warteschlange. Unlesbare Zeilen zählen nicht.
@@ -748,13 +799,16 @@ final class SyncEngine {
         link.welcomedAt = now()
         link.lastPongAt = now()
         // Nach einer Wiederherstellung am Mac kennt der Core den Stand nicht mehr: alles abgleichen
+        var epochChanged = false
         if let stored = library.dbEpoch, stored != dbEpoch {
+            epochChanged = true
             library.markAllNeedReconcile()
             requeueFreeNotebooks()
         }
         library.setDBEpoch(dbEpoch)
         welcomeCount += 1
         onInbound?(.connected)
+        onWelcomed?(epochChanged)
         // Ein Konflikt, dessen Auflösung (REST) nicht gelang, wird mit der neuen Verbindung erneut versucht
         for pageID in parkedPages.sorted() {
             onPageVersionConflict?(pageID)
