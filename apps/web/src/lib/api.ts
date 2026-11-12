@@ -69,6 +69,14 @@ const CODE_MESSAGES: Record<string, string> = {
   relation_cycle: 'Das würde einen Kreis bilden.',
   inbox_action_invalid: 'Das passt nicht zu dieser Art von Vorschlag.',
   inbox_busy: 'Gerade beschäftigt, bitte gleich nochmal.',
+  // Notizbücher (VERTRAEGE §7.4) und Papierkorb (§13)
+  notebook_not_found: 'Dieses Notizbuch gibt es nicht mehr.',
+  notebook_default: '„Vorlesung“ und „Übung“ bleiben bestehen.',
+  notebook_kind_exists: 'Dieses Modul hat dieses Notizbuch schon.',
+  notebook_exists: 'Dieses Notizbuch gibt es schon.',
+  trash_item_not_found: 'Das liegt nicht mehr im Papierkorb.',
+  restore_parent_deleted: 'Das Modul ist gelöscht. Stelle zuerst das Modul wieder her.',
+  restore_conflict: 'Wiederherstellen geht nicht, es kollidiert mit etwas Bestehendem.',
 };
 
 function messageForStatus(status: number): string {
