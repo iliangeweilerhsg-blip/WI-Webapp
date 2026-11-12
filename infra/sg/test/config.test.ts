@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { appUrl, childEnv, expandHome, healthUrl, parsePort, resolveConfig } from '../src/config.ts';
+import {
+  appUrl,
+  childEnv,
+  expandHome,
+  healthUrl,
+  parsePort,
+  parseSwitch,
+  resolveConfig,
+} from '../src/config.ts';
 
 const REPO = '/repo';
 
@@ -32,6 +40,39 @@ describe('resolveConfig', () => {
     const cfg = resolveConfig({ SG_DATA_DIR: ' ', SG_CORE_PORT: '' }, '/home/u', REPO);
     expect(cfg.dataDir).toBe('/home/u/StudienGehirn');
     expect(cfg.corePort).toBe(4710);
+  });
+});
+
+describe('Tunnel-Einstellungen (UX-12)', () => {
+  it('Standard: Tunnel und Peer-to-peer an, Pfade im Datenordner und im Repo', () => {
+    const cfg = resolveConfig({}, '/home/u', REPO);
+    expect(cfg.tunnel).toBe(true);
+    expect(cfg.tunnelP2p).toBe(true);
+    expect(cfg.tunnelPackageDir).toBe('/repo/apps/mac-tunnel');
+    expect(cfg.tunnelKeysFile).toBe('/home/u/StudienGehirn/secrets/tunnel-keys.json');
+    expect(cfg.tunnelSocket).toBe('/home/u/StudienGehirn/run/tunnel.sock');
+    expect(cfg.tunnelStateFile).toBe('/home/u/StudienGehirn/run/tunnel-state.json');
+  });
+
+  it('SG_TUNNEL und SG_TUNNEL_P2P schalten mit 0, false, off, nein aus (wie im Core)', () => {
+    for (const off of ['0', 'false', 'off', 'nein', ' 0 ', 'OFF']) {
+      expect(resolveConfig({ SG_TUNNEL: off }, '/h', REPO).tunnel, off).toBe(false);
+      expect(resolveConfig({ SG_TUNNEL_P2P: off }, '/h', REPO).tunnelP2p, off).toBe(false);
+    }
+    for (const on of ['', '1', 'an', 'true']) {
+      expect(parseSwitch(on), on).toBe(true);
+    }
+    expect(parseSwitch(undefined)).toBe(true);
+    // Die beiden Schalter sind unabhängig
+    const cfg = resolveConfig({ SG_TUNNEL_P2P: '0' }, '/h', REPO);
+    expect(cfg.tunnel).toBe(true);
+    expect(cfg.tunnelP2p).toBe(false);
+  });
+
+  it('der Datenordner bestimmt die Pfade', () => {
+    const cfg = resolveConfig({ SG_DATA_DIR: '~/Daten' }, '/home/u', REPO);
+    expect(cfg.tunnelKeysFile).toBe('/home/u/Daten/secrets/tunnel-keys.json');
+    expect(cfg.tunnelSocket).toBe('/home/u/Daten/run/tunnel.sock');
   });
 });
 
