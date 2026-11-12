@@ -115,7 +115,7 @@ function invalidResponse(wsfunction: string): HttpError {
  * Etwas anderes als eine Liste ist unklar, ob geschrieben wurde: `outcome_unknown`, damit die Web-App den Stand
  * neu lädt und nichts wiederholt.
  */
-function assertNoWarnings(response: unknown, wsfunction: string): void {
+function assertNoWarnings(response: unknown, wsfunction: string, partial = false): void {
   if (!Array.isArray(response)) {
     throw new HttpError(
       502,
@@ -126,10 +126,20 @@ function assertNoWarnings(response: unknown, wsfunction: string): void {
   }
   if (response.length > 0) {
     const code = str(rec(response[0])?.warningcode);
-    throw new HttpError(502, 'moodle_error', 'Moodle hat die Änderung abgelehnt.', {
-      wsfunction,
-      moodle_errorcode: code !== null && code !== '' ? code.slice(0, 100) : 'warning',
-    });
+    // `partial`: Moodle speichert die Teile der Abgabe nacheinander. Scheitert ein späterer Teil, kann ein früherer
+    // (z. B. die Dateien) schon übernommen sein. Dann ist der Ausgang unklar, nicht „abgelehnt“
+    throw new HttpError(
+      502,
+      'moodle_error',
+      partial
+        ? 'Moodle hat die Änderung abgelehnt. Teile davon können trotzdem gespeichert sein.'
+        : 'Moodle hat die Änderung abgelehnt.',
+      {
+        wsfunction,
+        moodle_errorcode: code !== null && code !== '' ? code.slice(0, 100) : 'warning',
+        ...(partial ? { outcome_unknown: true } : {}),
+      },
+    );
   }
 }
 
@@ -302,11 +312,15 @@ function draftFilesState(files: readonly DraftFile[]) {
 }
 
 /**
- * Stand des Entwurfs. Keine Uhrzeit, Listen sortiert. Liefert Moodle keinen Entwurf, ist `submission_id` `null`, der
+ * Stand des Entwurfs. Keine Uhrzeit (nur, ob die Frist abgelaufen ist), Listen sortiert. Liefert Moodle keinen Entwurf, ist `submission_id` `null`, der
  * Stand selbst aber nie `null` (so bleiben „kein Entwurf“ und „Lesen fehlgeschlagen“ getrennt).
  */
-function submissionState(a: AssignmentInfo, s: SubmissionInfo) {
+function submissionState(a: AssignmentInfo, s: SubmissionInfo, nowSec: number) {
   return {
+    // Frist samt „verspätet“: Läuft die Frist zwischen Vorschau und Ausführen ab oder ändert sie sich, gilt der Code
+    // nicht mehr. Sonst würde verspätet abgegeben, obwohl die Vorschau keine Verspätung gezeigt hat
+    due_date: a.dueDate,
+    verspaetet: isLate(a, nowSec),
     submission_id: s.submissionId,
     status: s.status,
     timemodified: s.timemodified,
@@ -315,6 +329,10 @@ function submissionState(a: AssignmentInfo, s: SubmissionInfo) {
     text_sha256: s.text === null ? null : sha256(s.text),
     requires_submit: a.requiresSubmit,
   };
+}
+
+function isLate(a: AssignmentInfo, nowSec: number): boolean {
+  return a.dueDate !== null && nowSec > a.dueDate;
 }
 
 /** Was in diesem Aufruf gelesen wurde. Gehört zu genau einem Stand-Objekt (siehe `snapshots`) */
@@ -484,7 +502,7 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
   /** Warnungen, die für Speichern und Einreichen gleich gelten */
   function commonWarnings(a: AssignmentInfo): string[] {
     const out: string[] = [];
-    if (a.dueDate !== null && nowSec() > a.dueDate) {
+    if (a.dueDate !== null && isLate(a, nowSec())) {
       out.push(`Die Frist ist seit ${moment(a.dueDate)} abgelaufen. Die Abgabe gilt als verspätet.`);
     }
     if (a.teamSubmission) out.push('Gruppenabgabe: Das gilt für die ganze Gruppe.');
@@ -502,7 +520,7 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
     async state(ctx, params) {
       const snap = await snapshotOf(ctx, params.assignment_id, uploadsOf(ctx, params.upload_ids));
       const state = {
-        ...submissionState(snap.assignment, snap.submission),
+        ...submissionState(snap.assignment, snap.submission, nowSec()),
         // Der Inhalt eines Uploads ist unveränderlich (E5): Der Code gilt für genau diese Dateien
         uploads: snap.uploads
           .map((u) => ({ sha256: u.sha256, bytes: u.sizeBytes, name: u.filename }))
@@ -528,6 +546,10 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
         .filter((p) => p !== null)
         .join(' und ');
       const warnings: string[] = [];
+      // N3: Bleibt der nicht geschickte Teil erhalten? Nicht geprüft, darum vorher sagen, dass es geprüft wird
+      if (s.text !== null && params.online_text_html === undefined) {
+        warnings.push('Bisheriger Text im Entwurf: Nach dem Speichern wird geprüft, ob er noch da ist.');
+      }
       if (s.files.length > 0 && files.length > 0) {
         warnings.push(`Ersetzt den bisherigen Entwurf: ${s.files.map((f) => f.name).join(', ')}.`);
       } else if (s.files.length > 0) {
@@ -535,7 +557,12 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
           `Bisherige Dateien: ${s.files.map((f) => f.name).join(', ')}. Nach dem Speichern wird geprüft, ob sie noch da sind.`,
         );
       }
-      if (a.requiresSubmit !== true) warnings.push('Bei dieser Aufgabe ist Speichern schon die Abgabe.');
+      if (a.requiresSubmit === false) warnings.push('Bei dieser Aufgabe ist Speichern schon die Abgabe.');
+      if (a.requiresSubmit === null) {
+        warnings.push(
+          'Moodle meldet nicht, ob es einen Einreichen-Schritt gibt. Speichern kann schon die Abgabe sein.',
+        );
+      }
       warnings.push(...commonWarnings(a));
       const text = params.online_text_html === undefined ? null : htmlToPreviewText(params.online_text_html);
       return {
@@ -557,7 +584,8 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
       const snap = await snapshotFor(ctx, state, params.assignment_id, params.upload_ids);
       assertCanSave(params, snap, nowSec());
       // Ohne Code freigegeben, aber jetzt ist Speichern die Abgabe: nichts schreiben, die Web-App holt die Vorschau
-      if (confirmationDecided.get(params) === false && snap.assignment.requiresSubmit !== true) {
+      // Streng: Ohne bekannte Entscheidung (direkter Aufruf ohne `requiresConfirmation`) zählt „kein Code geprüft“
+      if (confirmationDecided.get(params) !== true && snap.assignment.requiresSubmit !== true) {
         throw new HttpError(
           409,
           'moodle_confirmation_required',
@@ -587,6 +615,7 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
         assertNoWarnings(
           await ctx.client.write('mod_assign_save_submission', request),
           'mod_assign_save_submission',
+          true,
         );
       } finally {
         ctx.uploads.release(ids);
@@ -595,10 +624,11 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
 
       // Nachlesen: melden, was Moodle wirklich zeigt. Scheitert nur das, gilt die Aktion als gelungen
       const after = await readSubmission(ctx, params.assignment_id).catch(() => null);
+      // Ohne Einreichen-Schritt ist das Gespeicherte schon abgegeben: nicht „Entwurf“ nennen
+      const saved = snap.assignment.requiresSubmit === true ? 'Entwurf gespeichert' : 'Gespeichert';
       if (after === null) {
         return {
-          summary:
-            'Entwurf gespeichert. Der neue Stand konnte nicht gelesen werden, bitte prüfe ihn in Moodle.',
+          summary: `${saved}. Der neue Stand konnte nicht gelesen werden, bitte prüfe ihn in Moodle.`,
           result: { state: null, files: null, last_modified_at: null, verified: false, warnings: [] },
         };
       }
@@ -619,7 +649,9 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
         warnings.push('Der bisherige Text fehlt jetzt im Entwurf.');
       }
       return {
-        summary: warnings.length > 0 ? 'Entwurf gespeichert, aber mit Abweichungen.' : 'Entwurf gespeichert.',
+        summary:
+          (after.status === 'submitted' ? 'Gespeichert und abgegeben' : saved) +
+          (warnings.length > 0 ? ', aber mit Abweichungen.' : '.'),
         result: {
           state: stateName(after),
           files: fileLines(after.files),
@@ -635,7 +667,7 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
     async state(ctx, params) {
       const snap = await snapshotOf(ctx, params.assignment_id, []);
       const state = {
-        ...submissionState(snap.assignment, snap.submission),
+        ...submissionState(snap.assignment, snap.submission, nowSec()),
         requires_statement: snap.assignment.requiresStatement,
       };
       remember(state, snap);
@@ -701,7 +733,12 @@ export function createAssignHandlers(options: AssignHandlerOptions = {}): {
         );
       }
       return {
-        summary: warnings.length > 0 ? 'Eingereicht, aber mit Abweichungen.' : 'Endgültig eingereicht.',
+        summary:
+          after.status !== 'submitted'
+            ? 'Einreichen gesendet, aber Moodle zeigt die Abgabe nicht als eingereicht.'
+            : warnings.length > 0
+              ? 'Eingereicht, aber mit Abweichungen.'
+              : 'Endgültig eingereicht.',
         result: {
           state: after.status === 'submitted' ? 'eingereicht' : stateName(after),
           last_modified_at: iso(after.timemodified),

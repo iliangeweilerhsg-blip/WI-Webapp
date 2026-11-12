@@ -338,8 +338,11 @@ let app: FastifyInstance | undefined;
 let dataDir: string;
 let moodle: MoodleServices;
 let fake: FakeMoodle;
+/** Uhr der Handler. Tests dürfen sie vorstellen (Fristablauf zwischen Vorschau und Ausführen) */
+let clockMs = NOW_MS;
 
 beforeEach(() => {
+  clockMs = NOW_MS;
   dataDir = mkdtempSync(join(tmpdir(), 'sg-moodle-assign-'));
 });
 afterEach(async () => {
@@ -362,7 +365,7 @@ async function setup(
     },
     tokens: new StaticTokenStore(FAKE_TOKEN),
     fetch: net.fetch,
-    handlers: createAssignHandlers({ now: () => NOW_MS, timeZone: 'Europe/Berlin' }),
+    handlers: createAssignHandlers({ now: () => clockMs, timeZone: 'Europe/Berlin' }),
     readMeta: async () => ({ token_valid_until: '2027-01-27' }),
     now: () => new Date(NOW_MS),
     client: { minIntervalMs: 0, retryDelaysMs: [] },
@@ -514,6 +517,19 @@ describe('assign.save_draft: Erfolg', () => {
     expect(result.warnings.join(' ')).toContain('Nicht mehr im Entwurf: loesung.pdf');
   });
 
+  it('Vorschau: Nur Dateien, im Entwurf steht schon Text → Hinweis, dass der Text nachgeprüft wird (N3)', async () => {
+    await setup();
+    fake.add({ id: A });
+    fake.draft(A, [], '<p>alt</p>');
+    const file = await put();
+    const prev = MoodleActionPreviewSchema.parse(
+      (await preview('assign.save_draft', { assignment_id: A, upload_ids: [file.id] })).json(),
+    );
+    expect(prev.warnings).toContain(
+      'Bisheriger Text im Entwurf: Nach dem Speichern wird geprüft, ob er noch da ist.',
+    );
+  });
+
   it('Vorschau: Warnungen für Ersetzen, Frist und Gruppenabgabe, Text als Klartext', async () => {
     await withDraft({ duedate: unix('2026-11-12T05:00:00Z'), team: true });
     const file = await put('neu.pdf');
@@ -551,6 +567,11 @@ describe('assign.save_draft: Aufgabe ohne Einreichen-Schritt', () => {
     const res = await execute('assign.save_draft', params, prev.confirmation_token);
     expect(res.statusCode, res.body).toBe(200);
     expect(fake.count('mod_assign_save_submission')).toBe(1);
+    // Nicht „Entwurf“ nennen, was Moodle schon als Abgabe führt
+    expect(res.json()).toMatchObject({
+      summary: 'Gespeichert und abgegeben.',
+      result: { state: 'eingereicht', verified: true },
+    });
   });
 });
 
@@ -649,9 +670,10 @@ describe('assign.save_draft: Fehler von Moodle', () => {
     const file = await put();
     const res = await execute('assign.save_draft', { assignment_id: A, upload_ids: [file.id] });
     expect(res.statusCode).toBe(502);
+    // Moodle speichert die Teile nacheinander: Ein Teil kann schon übernommen sein, also Ausgang unklar
     expect(errorOf(res)).toMatchObject({
       code: 'moodle_error',
-      details: { moodle_errorcode: 'couldnotsavesubmission' },
+      details: { moodle_errorcode: 'couldnotsavesubmission', outcome_unknown: true },
     });
     expect(moodle.uploads.resolve([file.id])).toHaveLength(1);
     expect(moodle.uploads.isInUse(file.id)).toBe(false);
@@ -1080,6 +1102,24 @@ describe('assign.submit: Vorprüfungen (409 moodle_action_rejected, nichts gesch
     expect(errorOf(res).details).toMatchObject({ reason: 'nicht_gefunden' });
   });
 
+  it('Frist läuft zwischen Vorschau und Ausführen ab (Vorschau ohne Warnung „verspätet“) → 409 stand_geaendert', async () => {
+    await withDraft({ duedate: NOW_SEC + 60 });
+    const prev = MoodleActionPreviewSchema.parse((await preview('assign.submit', submitParams())).json());
+    expect(prev.warnings).toEqual([]);
+    clockMs = NOW_MS + 2 * 60 * 1000;
+    const res = await execute('assign.submit', submitParams(), prev.confirmation_token);
+    expect(res.statusCode).toBe(409);
+    expect(errorOf(res)).toMatchObject({
+      code: 'moodle_confirmation_invalid',
+      details: { reason: 'stand_geaendert' },
+    });
+    expect(fake.count('mod_assign_submit_for_grading')).toBe(0);
+    // Die neue Vorschau warnt, ihr Code gilt
+    const again = MoodleActionPreviewSchema.parse((await preview('assign.submit', submitParams())).json());
+    expect(again.warnings.join(' ')).toContain('verspätet');
+    expect((await execute('assign.submit', submitParams(), again.confirmation_token)).statusCode).toBe(200);
+  });
+
   it('Frist läuft zwischen Vorschau und Ausführen ab: Ablehnung statt Schreibaufruf', async () => {
     await withDraft();
     const token = await codeFor('assign.submit', submitParams());
@@ -1121,6 +1161,7 @@ describe('assign.submit: Fehler von Moodle', () => {
       code: 'moodle_error',
       details: { moodle_errorcode: 'couldnotsavesubmission' },
     });
+    expect(errorOf(warn).details).not.toHaveProperty('outcome_unknown');
     fake.fail.set('mod_assign_submit_for_grading', 'null');
     const none = await execute(
       'assign.submit',
@@ -1129,6 +1170,23 @@ describe('assign.submit: Fehler von Moodle', () => {
     );
     expect(none.statusCode).toBe(502);
     expect(errorOf(none).details).toMatchObject({ outcome_unknown: true });
+  });
+
+  it('Moodle zeigt nach dem Einreichen keinen Status „eingereicht“: Zusammenfassung sagt das, kein „Eingereicht“', async () => {
+    await withDraft();
+    const token = await codeFor('assign.submit', submitParams());
+    // z. B. Gruppenabgabe, bei der alle Mitglieder einreichen müssen
+    fake.beforeCall = (fn) => {
+      if (fn === 'mod_assign_get_submission_status' && fake.count('mod_assign_submit_for_grading') > 0) {
+        fake.assignments.get(A)!.submission!.status = 'draft';
+      }
+    };
+    const res = await execute('assign.submit', submitParams(), token);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.json()).toMatchObject({
+      summary: 'Einreichen gesendet, aber Moodle zeigt die Abgabe nicht als eingereicht.',
+      result: { state: 'entwurf', verified: true },
+    });
   });
 
   it('Entwurf ändert sich genau beim Einreichen (Restrisiko): Warnung im Ergebnis', async () => {
@@ -1160,6 +1218,7 @@ describe('Gegenprobe: jedes Feld des Stands zählt (Review #303)', () => {
     ['Ordner einer Datei', (_a, s) => (s.files[0]!.path = '/neu/')],
     ['Einreichen-Schritt (submissiondrafts)', (a) => (a.drafts = false)],
     ['Erklärung verlangt', (a) => (a.statement = true)],
+    ['Frist (duedate, z. B. verlängert)', (a) => (a.duedate += HOUR)],
   ];
   for (const [label, change] of cases) {
     it(`${label} ändert sich, sonst alles gleich → 409 stand_geaendert, nichts eingereicht`, async () => {
