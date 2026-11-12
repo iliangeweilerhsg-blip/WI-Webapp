@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 
 /// Schreibziel: eine Seite eines Notizbuchs mit der Session, die dazu passt. Seit der Bibliothek (T1-11 Rest) wird
 /// der Wert nicht mehr gespeichert, sondern aus `InkLibraryService` gebaut. Gespeichert war er früher in
@@ -31,6 +32,40 @@ enum InkBindingCheck {
     static func differs(shownNotebookID: String?, runningNotebookID: String?) -> Bool {
         guard let runningNotebookID else { return false }
         return runningNotebookID != shownNotebookID
+    }
+
+    /// Ob das Banner „Diese Seite gehört nicht dazu“ erscheint (UX-51). Es erscheint nur, wenn die laufende Vorlesung
+    /// zu einem anderen Modul gehört: Die Notizen-Spalte folgt einem freien Notizbuch desselben Moduls (VERTRAEGE
+    /// §11.6), dann stimmt der Text nicht. Mit „✕“ weggeklickt, bleibt es für diese Session aus.
+    /// - Parameters:
+    ///   - shownModuleID: Modul der offenen Seite, `nil` bei der lokalen Testseite
+    ///   - runningModuleID: Modul der laufenden Vorlesung
+    ///   - runningSessionID: Die laufende Session
+    ///   - dismissedSessionIDs: Sessions, deren Banner weggeklickt wurde
+    static func showsBanner(
+        shownNotebookID: String?, shownModuleID: String?, runningNotebookID: String?, runningModuleID: String?,
+        runningSessionID: String?, dismissedSessionIDs: Set<String>
+    ) -> Bool {
+        guard differs(shownNotebookID: shownNotebookID, runningNotebookID: runningNotebookID) else { return false }
+        if let runningModuleID, runningModuleID == shownModuleID { return false }
+        if let runningSessionID, dismissedSessionIDs.contains(runningSessionID) { return false }
+        return true
+    }
+}
+
+/// Merkt sich, für welche Sessions das Banner weggeklickt wurde. Gilt, solange die App läuft („für diese Session“).
+@MainActor
+@Observable
+final class InkBindingBannerState {
+    /// Eine gemeinsame Instanz für die Schreibfläche: Beim Blättern und Zurückkehren bleibt das Wegklicken bestehen
+    static let shared = InkBindingBannerState()
+
+    private(set) var dismissedSessionIDs = Set<String>()
+
+    init() {}
+
+    func dismiss(sessionID: String) {
+        dismissedSessionIDs.insert(sessionID)
     }
 }
 

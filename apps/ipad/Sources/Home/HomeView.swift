@@ -1,36 +1,41 @@
 import SwiftUI
 
-/// Startbildschirm (07-UX §4.2). „Gleich“ und „Jetzt sinnvoll“ sind Platzhalter, bis Kalender und Wiederholung
-/// angebunden sind. Echt sind der Verbindungsstatus und die Notizbücher je Modul.
+/// Startbildschirm (07-UX §4.2). Echt sind der Verbindungsstatus, ruhige Hinweiskarten (Ablauf, App passt nicht zum
+/// Mac, Fehlerablage) und die Notizbücher je Modul. „Gleich“ und „Jetzt sinnvoll“ kommen, sobald Kalender und
+/// Wiederholung angebunden sind (UX-61).
 struct HomeView: View {
     let model: AppModel
     let mac: PairedMac
 
     @State private var showsStatus = false
-    /// Hinweis, wenn die Signatur der App bald abläuft (UX-13). `nil` ohne Profil oder bei genug Restzeit.
-    @State private var expiryNotice: String?
+    /// Ablaufdatum der Signatur (UX-13), `nil` ohne Profil. Wird beim Erscheinen und beim Aktivieren der App neu gelesen.
+    @State private var expiry: Date?
+    /// „Jetzt“ für den Ablaufhinweis, wird beim Erscheinen und beim Aktivieren der App neu gesetzt (UX-50)
+    @State private var expiryNow = Date()
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Hinweis, wenn die Signatur der App bald abläuft. `nil` bei genug Restzeit. Nennt wartende Änderungen.
+    private var expiryNotice: String? {
+        guard let expiry else { return nil }
+        return ProfileExpiry.notice(
+            expiry: expiry, now: expiryNow, pendingChanges: model.sync?.pendingCount ?? 0)
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     if let expiryNotice {
-                        Text(expiryNotice)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding()
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-                            .accessibilityElement(children: .combine)
+                        NoticeCard(text: expiryNotice)
                     }
-                    PlaceholderCard(
-                        title: "Gleich",
-                        text: "Deine nächste Vorlesung erscheint hier, sobald der Kalender angebunden ist."
-                    )
-                    PlaceholderCard(
-                        title: "Jetzt sinnvoll",
-                        text: "Vorschläge zum Wiederholen folgen später."
-                    )
+                    if let sync = model.sync {
+                        if sync.state == .unsupported {
+                            NoticeCard(text: HomeTexts.appOutdatedCard)
+                        }
+                        if sync.deadLetterCount > 0 {
+                            DeadLetterCard(sync: sync)
+                        }
+                    }
                     // Notizbücher je Modul (UX-30). Mit laufender Vorlesung erscheinen die Striche live am Mac (T1-14).
                     if let library = model.library {
                         LibraryListView(library: library, isOnline: model.sync?.state == .online)
@@ -46,7 +51,7 @@ struct HomeView: View {
                     Button {
                         showsStatus = true
                     } label: {
-                        ConnectionBadge(status: model.connection)
+                        ConnectionBadge(state: model.badgeState)
                     }
                     .popover(isPresented: $showsStatus) {
                         ConnectionDetailView(model: model, mac: mac)
@@ -55,7 +60,11 @@ struct HomeView: View {
             }
         }
         .onAppear {
-            expiryNotice = ProfileExpiry.currentNotice()
+            refreshExpiry()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Die App war im Hintergrund: Der Tag kann gewechselt haben (UX-50)
+            if phase == .active { refreshExpiry() }
         }
         .onChange(of: model.sync?.welcomeCount ?? 0) { _, _ in
             _Concurrency.Task { await model.library?.refresh() }
@@ -70,37 +79,74 @@ struct HomeView: View {
             }
         }
     }
+
+    private func refreshExpiry() {
+        expiry = ProfileExpiry.currentExpiry()
+        expiryNow = Date()
+    }
 }
 
-private struct PlaceholderCard: View {
-    let title: String
+/// Texte des Startbildschirms. Reine Funktionen, damit sie testbar sind.
+enum HomeTexts {
+    static let appOutdatedCard = "App passt nicht mehr zum Mac. Am Mac über Xcode neu aufspielen."
+
+    /// Karte zur Fehlerablage (UX-47)
+    static func deadLetterCard(count: Int) -> String {
+        let changes = count == 1 ? "1 Änderung konnte" : "\(count) Änderungen konnten"
+        return "\(changes) der Mac nicht annehmen. Die Zeichnungen liegen noch auf dem iPad."
+    }
+}
+
+/// Ruhige Hinweiskarte ohne Warnfarbe
+private struct NoticeCard: View {
     let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.headline)
-            Text(text).font(.subheadline).foregroundStyle(.secondary)
+        Text(text)
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            .accessibilityElement(children: .combine)
+    }
+}
+
+/// Fehlerablage (UX-47): Der Mac hat Änderungen nicht angenommen. Die Zeichnungen bleiben auf dem iPad.
+private struct DeadLetterCard: View {
+    let sync: SyncEngine
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(HomeTexts.deadLetterCard(count: sync.deadLetterCount))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            // Export an den Mac über das Teilen-Menü (VERTRAEGE §11.2)
+            ShareLink(item: sync.deadLetterURL) {
+                Label("Fehlerablage teilen", systemImage: "square.and.arrow.up")
+                    .font(.subheadline)
+                    .frame(minHeight: 44, alignment: .leading)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .combine)
     }
 }
 
-/// „Mac ●“: grün verbunden, grau getrennt (F-INK-13). Ruhig, ohne Warnfarben.
+/// „Mac ●“: grün nur bei laufendem Sync, sonst grau (F-INK-13, UX-48). Ruhig, ohne Warnfarben.
 struct ConnectionBadge: View {
-    let status: ConnectionStatus
+    let state: BadgeState
 
     var body: some View {
         HStack(spacing: 6) {
             Text("Mac")
             Circle()
-                .fill(status == .connected ? Color.green : Color.gray)
+                .fill(state.isGreen ? Color.green : Color.gray)
                 .frame(width: 10, height: 10)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(status == .connected ? "Mac verbunden" : "iPad nicht verbunden")
+        .accessibilityLabel(state.accessibilityLabel)
     }
 }
 
@@ -156,20 +202,9 @@ struct ConnectionDetailView: View {
         }
     }
 
-    private var headline: String {
-        switch model.connection {
-        case .unknown, .checking: return "Prüfe Verbindung …"
-        case .connected: return "Mit dem Mac verbunden"
-        case .disconnected(let error): return "iPad nicht verbunden: \(error.title)"
-        }
-    }
+    private var headline: String { model.badgeState.headline }
 
-    private var detail: String? {
-        if case .disconnected(let error) = model.connection {
-            return error.advice
-        }
-        return nil
-    }
+    private var detail: String? { model.badgeState.detail }
 
     private var needsNewPairing: Bool {
         if case .disconnected(let error) = model.connection {
@@ -193,11 +228,6 @@ struct SyncStatusRows: View {
             Text("Fehlerablage: \(sync.deadLetterCount)")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-            if sync.state == .unsupported {
-                Text("Der Mac spricht ein anderes Protokoll. App aktualisieren.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
             if sync.deadLetterCount > 0 {
                 // Export an den Mac über das Teilen-Menü (VERTRAEGE §11.2). Ein Wiedereinspielen gibt es noch nicht.
                 ShareLink(item: sync.deadLetterURL) {

@@ -34,6 +34,13 @@ struct InkPageView: View {
     /// Händigkeit: Seite der Werkzeugleiste. Später aus `Settings.lecture.toolbar_side` (F-EIN-01).
     @AppStorage("ink.toolbarSide") private var toolbarSideRaw = ToolbarSide.rechts.rawValue
     @Environment(\.scenePhase) private var scenePhase
+    /// „Alles am Mac“ nach dem Aufholen (UX-49)
+    @State private var allSynced = AllSyncedNotice()
+    /// Hinweis zu „Auf Folie“, 5 s nach einem Tipp auf den ausgegrauten Umschalter (UX-51)
+    @State private var slideHint = TimedNotice(duration: .seconds(5))
+    /// Ablauf der Signatur für die Infozeile (UX-50), beim Erscheinen und Aktivieren neu gelesen
+    @State private var expiryDate: Date?
+    @State private var expiryNow = Date()
 
     init(library: InkLibraryService, notebookID: String) {
         self.library = library
@@ -51,6 +58,16 @@ struct InkPageView: View {
         let running = library.running?.notebookID
         return InkBindingCheck.differs(shownNotebookID: currentNotebookID, runningNotebookID: running)
             ? running : nil
+    }
+
+    private var bannerState: InkBindingBannerState { InkBindingBannerState.shared }
+
+    /// Das Banner „Diese Seite gehört nicht dazu“ gilt nur bei anderem Modul und bis zum „✕“ (UX-51)
+    private var showsOtherLectureBanner: Bool {
+        InkBindingCheck.showsBanner(
+            shownNotebookID: currentNotebookID, shownModuleID: currentModuleID,
+            runningNotebookID: library.running?.notebookID, runningModuleID: library.running?.moduleID,
+            runningSessionID: library.running?.id, dismissedSessionIDs: bannerState.dismissedSessionIDs)
     }
 
     private var pages: [LibraryPage] {
@@ -95,6 +112,11 @@ struct InkPageView: View {
                         pageStrip
                         if let offlineText {
                             infoRow(offlineText)
+                        } else if allSynced.isVisible {
+                            infoRow(InkPageTitle.allSyncedLine)
+                        }
+                        if let expiryLine {
+                            infoRow(expiryLine)
                         }
                         if let statusText = slideBackground?.statusText {
                             infoRow(statusText)
@@ -118,7 +140,7 @@ struct InkPageView: View {
                             .buttonStyle(.plain)
                             .accessibilityHint("Wechselt sofort")
                         }
-                        if otherNotebookID != nil {
+                        if showsOtherLectureBanner {
                             HStack {
                                 Text("Am Mac läuft eine Vorlesung. Diese Seite gehört nicht dazu.")
                                     .font(.footnote)
@@ -128,6 +150,17 @@ struct InkPageView: View {
                                     _Concurrency.Task { await switchToRunningLecture() }
                                 }
                                 .buttonStyle(.bordered)
+                                Button {
+                                    if let sessionID = library.running?.id {
+                                        bannerState.dismiss(sessionID: sessionID)
+                                    }
+                                } label: {
+                                    Image(systemName: "xmark")
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Hinweis ausblenden")
                             }
                             .padding(.horizontal)
                             .padding(.vertical, 8)
@@ -182,6 +215,8 @@ struct InkPageView: View {
             await open()
         }
         .onAppear {
+            refreshExpiry()
+            allSynced.update(isOnline: sync.state == .online, pending: sync.pendingCount)
             sync.setPresence(presence(onPage: true))
             // Zurück in der Ansicht: Ein Wechsel wartete noch, das Warten läuft weiter
             if gate.hasPending {
@@ -198,12 +233,22 @@ struct InkPageView: View {
             sync.setPresence(presence(onPage: false))
         }
         .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                // Der Tag kann gewechselt haben (UX-50)
+                refreshExpiry()
+            }
             if phase != .active {
                 model?.saveNow()
             }
             if phase == .background {
                 library.flushPendingDeletes()
             }
+        }
+        .onChange(of: sync.state) { _, _ in
+            allSynced.update(isOnline: sync.state == .online, pending: sync.pendingCount)
+        }
+        .onChange(of: sync.pendingCount) { _, _ in
+            allSynced.update(isOnline: sync.state == .online, pending: sync.pendingCount)
         }
         .onChange(of: library.running) { _, _ in
             // Die Vorlesung hat begonnen oder geendet: Session der offenen Seite nachziehen
@@ -274,7 +319,19 @@ struct InkPageView: View {
     private var offlineText: String? {
         guard let binding, sync.state != .online else { return nil }
         return InkPageTitle.offlineLine(
-            moduleName: binding.moduleName, notebookTitle: library.notebook(binding.notebookID)?.title)
+            moduleName: binding.moduleName, notebookTitle: library.notebook(binding.notebookID)?.title,
+            pendingChanges: sync.pendingCount, slideNotFollowing: currentMode == .aufFolie)
+    }
+
+    /// Ablauf der Signatur als Infozeile, nur am letzten Tag und am Tag davor (UX-50)
+    private var expiryLine: String? {
+        guard let expiryDate else { return nil }
+        return ProfileExpiry.pageLine(expiry: expiryDate, now: expiryNow, pendingChanges: sync.pendingCount)
+    }
+
+    private func refreshExpiry() {
+        expiryDate = ProfileExpiry.currentExpiry()
+        expiryNow = Date()
     }
 
     private func infoRow(_ text: String) -> some View {
@@ -366,9 +423,9 @@ struct InkPageView: View {
         return library.inkMode(forModule: moduleID)
     }
 
-    /// Hinweis, wenn „Auf Folie“ gewählt ist, aber gerade nicht geht
+    /// Hinweis zum ausgegrauten Umschalter: nur 5 s nach einem Tipp darauf (UX-51), nicht dauerhaft
     private var slideModeHint: String? {
-        guard currentMode == .aufFolie, !slideModeAvailable else { return nil }
+        guard slideHint.isVisible, !slideModeAvailable else { return nil }
         return InkModeResolver.unavailableHint
     }
 
@@ -376,7 +433,14 @@ struct InkPageView: View {
     @ViewBuilder
     private var modeButton: some View {
         if let mode = currentMode, let moduleID = currentModuleID {
+            let dimmed = mode == .freieSeite && !slideModeAvailable
             Button {
+                // Der Umschalter ist ausgegraut: Ein Tipp erklärt es kurz, mehr passiert nicht
+                if dimmed {
+                    slideHint.show()
+                    return
+                }
+                slideHint.hide()
                 // Ein wartender Wechsel gehört zum alten Modus (Folie bzw. neue Vorlesungsseite)
                 gate.dropPending()
                 library.setInkMode(mode == .aufFolie ? .freieSeite : .aufFolie, moduleID: moduleID)
@@ -391,7 +455,7 @@ struct InkPageView: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
-            .disabled(mode == .freieSeite && !slideModeAvailable)
+            .opacity(dimmed ? 0.4 : 1)
             .accessibilityLabel(mode == .aufFolie ? "Schreibmodus: Auf Folie" : "Schreibmodus: Freie Seite")
             .accessibilityHint(
                 slideModeAvailable ? "Ein Tipp wechselt den Modus für dieses Modul" : InkModeResolver.unavailableHint)

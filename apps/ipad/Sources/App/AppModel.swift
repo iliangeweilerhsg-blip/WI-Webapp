@@ -10,6 +10,66 @@ enum ConnectionStatus: Equatable, Sendable {
     case disconnected(ConnectionError)
 }
 
+/// Was das Abzeichen „Mac ●“ und die Verbindungsdetails zeigen (UX-48). Grün ist nur der laufende Sync:
+/// Antwortet der Mac, der Sync aber nicht, steht das ehrlich da.
+enum BadgeState: Equatable, Sendable {
+    case checking
+    /// Der Sync ist online
+    case online
+    /// `/health` antwortet, der Sync verbindet noch oder wartet
+    case macReachable
+    /// Der Mac spricht ein anderes Protokoll
+    case appOutdated
+    case disconnected(ConnectionError)
+
+    /// - Parameters:
+    ///   - connection: Ergebnis der Abfrage von `/health`
+    ///   - syncState: Zustand des Sync, `nil` ohne Engine (dann gilt allein die Abfrage)
+    static func resolve(connection: ConnectionStatus, syncState: SyncEngine.State?) -> BadgeState {
+        if connection == .disconnected(.tokenInvalid) { return .disconnected(.tokenInvalid) }
+        if syncState == .unsupported { return .appOutdated }
+        if syncState == .online { return .online }
+        switch connection {
+        case .unknown, .checking:
+            return .checking
+        case .connected:
+            return syncState == nil ? .online : .macReachable
+        case .disconnected(let error):
+            return error == .appOutdated ? .appOutdated : .disconnected(error)
+        }
+    }
+
+    /// Nur der laufende Sync färbt das Abzeichen grün
+    var isGreen: Bool { self == .online }
+
+    var headline: String {
+        switch self {
+        case .checking: return "Prüfe Verbindung …"
+        case .online: return "Mit dem Mac verbunden"
+        case .macReachable: return "Mac erreichbar, Sync verbindet …"
+        case .appOutdated: return ConnectionError.appOutdated.title
+        case .disconnected(let error): return "iPad nicht verbunden: \(error.title)"
+        }
+    }
+
+    var detail: String? {
+        switch self {
+        case .appOutdated: return ConnectionError.appOutdated.advice
+        case .disconnected(let error): return error.advice
+        case .checking, .online, .macReachable: return nil
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .online: return "Mac verbunden"
+        case .macReachable: return "Mac erreichbar, Sync verbindet"
+        case .appOutdated: return "App passt nicht mehr zum Mac"
+        case .checking, .disconnected: return "iPad nicht verbunden"
+        }
+    }
+}
+
 /// Zustand der ganzen App: gekoppelt oder nicht, verbunden oder nicht.
 /// Spätere Bausteine (Notizbücher, Sync) hängen sich hier ein.
 @MainActor
@@ -22,6 +82,11 @@ final class AppModel {
 
     private(set) var phase: Phase = .unpaired
     private(set) var connection: ConnectionStatus = .unknown
+
+    /// Zustand des Abzeichens aus Abfrage und Sync (UX-48)
+    var badgeState: BadgeState {
+        BadgeState.resolve(connection: connection, syncState: sync?.state)
+    }
 
     let pairing: PairingController
     /// Live-Sync mit dem Mac (T1-14). `nil` in Tests ohne Netz.
@@ -89,8 +154,11 @@ final class AppModel {
             connection = .connected
         case .tokenInvalid:
             connection = .disconnected(.tokenInvalid)
+        case .unsupported:
+            connection = .disconnected(.appOutdated)
         default:
-            break
+            // Nach einem Protokollfehler klärt die nächste Abfrage von `/health` den Stand neu
+            if connection == .disconnected(.appOutdated) { connection = .unknown }
         }
     }
 
@@ -120,7 +188,8 @@ final class AppModel {
         let result: ConnectionStatus
         do {
             try await client.checkHealth(endpoint: mac.endpoint, token: token)
-            result = .connected
+            // Der Mac antwortet, die App passt aber nicht dazu: kein „verbunden“
+            result = sync?.state == .unsupported ? .disconnected(.appOutdated) : .connected
         } catch {
             result = .disconnected(ConnectionError.wrap(error))
         }

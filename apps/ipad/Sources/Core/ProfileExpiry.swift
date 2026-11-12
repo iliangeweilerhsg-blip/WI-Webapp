@@ -14,17 +14,33 @@ enum ProfileExpiry {
         return calendar.dateComponents([.day], from: from, to: to).day ?? 0
     }
 
-    /// Hinweistext, `nil` solange noch genug Zeit bleibt
-    static func notice(expiry: Date, now: Date, calendar: Calendar = .current) -> String? {
+    /// Ab so vielen Tagen Rest steht der Hinweis auch als Infozeile in der Schreibfläche (letzter Tag und Tag davor)
+    static let lineDays = 1
+
+    /// Hinweistext, `nil` solange noch genug Zeit bleibt. Warten noch Änderungen (UX-50), nennt der Text das.
+    static func notice(
+        expiry: Date, now: Date, pendingChanges: Int = 0, calendar: Calendar = .current
+    ) -> String? {
         let days = daysRemaining(expiry: expiry, now: now, calendar: calendar)
         guard days <= warnDays else { return nil }
+        let base: String
         if days <= 0 {
-            return "App läuft heute ab. Am Mac über Xcode neu aufspielen."
+            base = "App läuft heute ab. Am Mac über Xcode neu aufspielen."
+        } else if days == 1 {
+            base = "App läuft noch 1 Tag. Am Mac über Xcode neu aufspielen."
+        } else {
+            base = "App läuft noch \(days) Tage. Am Mac über Xcode neu aufspielen."
         }
-        if days == 1 {
-            return "App läuft noch 1 Tag. Am Mac über Xcode neu aufspielen."
-        }
-        return "App läuft noch \(days) Tage. Am Mac über Xcode neu aufspielen."
+        guard let waiting = InkPageTitle.pendingPhrase(pendingChanges) else { return base }
+        return "\(base) Vorher mit dem Mac verbinden, \(waiting)."
+    }
+
+    /// Infozeile der Schreibfläche: nur am letzten Tag und am Tag davor, sonst `nil`
+    static func pageLine(
+        expiry: Date, now: Date, pendingChanges: Int = 0, calendar: Calendar = .current
+    ) -> String? {
+        guard daysRemaining(expiry: expiry, now: now, calendar: calendar) <= lineDays else { return nil }
+        return notice(expiry: expiry, now: now, pendingChanges: pendingChanges, calendar: calendar)
     }
 
     /// Schneidet den Plist-Teil aus dem signierten Profil (CMS-Hülle mit XML-Plist darin) und liest `ExpirationDate`
@@ -51,8 +67,8 @@ enum ProfileExpiry {
     }
 
     /// Hinweis für den Startbildschirm, `nil` wenn nichts anzuzeigen ist
-    static func currentNotice(now: Date = Date()) -> String? {
+    static func currentNotice(now: Date = Date(), pendingChanges: Int = 0) -> String? {
         guard let expiry = currentExpiry() else { return nil }
-        return notice(expiry: expiry, now: now)
+        return notice(expiry: expiry, now: now, pendingChanges: pendingChanges)
     }
 }
