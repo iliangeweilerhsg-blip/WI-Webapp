@@ -102,6 +102,8 @@ Für die Direktverbindung im Hörsaal (Wi-Fi peer-to-peer, ohne gemeinsames Netz
 
 ### Was `pnpm sg doctor` meldet
 
+`pnpm sg start` führt dieselben Prüfungen wenige Sekunden nach dem Start einmal selbst aus und druckt nur eine Zeile („bereit“) oder die Zeilen mit ✗. Der Start scheitert daran nie.
+
 Die Zeilen beginnen mit „Tunnel-Helfer ·“. Ein ✗ bedeutet: etwas ist kaputt, darunter steht, was zu tun ist.
 
 | Zeile | Bedeutung |
@@ -116,7 +118,8 @@ Die Zeilen beginnen mit „Tunnel-Helfer ·“. Ein ✗ bedeutet: etwas ist kapu
 | Peer-to-peer | ℹ an oder aus (`SG_TUNNEL_P2P`) |
 | Dienstname | ✗ macOS hat den Bonjour-Namen umbenannt („… (2)“), weil ihn jemand schon belegt hat. `pnpm sg stop`, `pnpm sg start`. Bleibt es, ist in Funkreichweite ein zweites Studien-Gehirn oder ein Fremder, der den Namen belegt |
 | Handshakes | ℹ Viele gescheiterte Verbindungsversuche seit dem Start. Meist ein iPad mit altem Schlüssel (neu koppeln) oder jemand im Funk. Das ist nur Verzögerung, kein Leck |
-| Geräte ohne Schlüssel | ✗ Gekoppelte Geräte ohne Tunnel-Schlüssel (vor UX-12 gekoppelt). Sie müssen **einmal neu gekoppelt** werden: In der Web-App unter Einstellungen → Geräte entfernen, dann das iPad zu Hause neu koppeln (QR-Code). Der Schlüssel entsteht nur bei der Kopplung, nie nachträglich |
+| Geräte ohne Schlüssel | ✗ Gekoppelte Geräte ohne Tunnel-Schlüssel (vor UX-12 gekoppelt, oder der Core lief zwischendurch mit `SG_TUNNEL=0` und hat die Schlüssel gelöscht; nach `pnpm sg restore` ist ohnehin kein Gerät mehr gekoppelt). Sie müssen **einmal neu gekoppelt** werden: In der Web-App unter Einstellungen → Geräte entfernen, dann das iPad zu Hause neu koppeln (QR-Code). Der Schlüssel entsteht nur bei der Kopplung, nie nachträglich |
+| WLAN am Mac | ✗ Das WLAN am Mac ist ausgeschaltet. Einschalten (ein Netz braucht es nicht, aber die Direktverbindung läuft über das WLAN-Gerät). `pnpm sg start` zeigt das nach dem Start selbst an |
 | Firewall | siehe unten |
 
 ### Die Firewall-Frage

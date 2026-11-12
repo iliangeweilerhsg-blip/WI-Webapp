@@ -42,7 +42,7 @@ import {
   type TunnelBuildIo,
   type TunnelExit,
 } from './tunnel.ts';
-import { realTunnelDoctorIo, runTunnelChecks } from './tunnel-doctor.ts';
+import { checkTunnelAfterStart, realTunnelDoctorIo, runTunnelChecks } from './tunnel-doctor.ts';
 import { ensureWebBuild, type PrepareIo } from './webbuild.ts';
 
 const log = (msg: string): void => console.log(`[sg] ${msg}`);
@@ -303,6 +303,7 @@ export async function start(cfg: SgConfig): Promise<number> {
   const services: Service[] = [];
   let tunnel: Service | null = null;
   let tunnelLoop: Promise<void> | null = null;
+  let tunnelCheck: Promise<void> | null = null;
   let shuttingDown = false;
   let forced = false;
   let shutdownPromise: Promise<void> | null = null;
@@ -426,6 +427,13 @@ export async function start(cfg: SgConfig): Promise<number> {
             log,
             err,
           });
+          // UX-302: nicht blockierend prüfen, ob die Direktverbindung wirklich trägt; nur Hinweise, nie ein Fehler
+          tunnelCheck = checkTunnelAfterStart(cfg, realTunnelDoctorIo(cfg, realSystem()), {
+            sleep,
+            now: () => Date.now(),
+            isStopping: () => shuttingDown || stopRequested(cfg),
+            log,
+          });
         }
         if (process.platform === 'darwin') {
           const opener = spawn('open', [appUrl(cfg)], { stdio: 'ignore', detached: true });
@@ -445,6 +453,7 @@ export async function start(cfg: SgConfig): Promise<number> {
   await Promise.all(services.map((s) => s.exitedPromise));
   if (shutdownPromise) await shutdownPromise;
   if (tunnelLoop) await tunnelLoop;
+  if (tunnelCheck) await tunnelCheck;
   // Enkel können die Pipes noch kurz offen halten; nicht ewig darauf warten.
   // Der Timer wird danach gelöscht, sonst hielte er den Prozess 3 s am Leben.
   let giveUp: ReturnType<typeof setTimeout> | undefined;
