@@ -489,14 +489,15 @@ export class AudioRecorder {
     this.activeIds.add(meta.id);
     ACTIVE_RECORDINGS.add(meta.id);
     // Beim Start legt dieser Recorder die Aufnahme selbst an: Uploader im Tab lassen sie bis dahin liegen (Issue #262)
+    // Die Reservierung endet in jedem Fall (auch wenn ein Listener wirft), sonst lüde der Tab die Aufnahme nie hoch
     const endCreate = first ? this.uploader.holdCreate(meta.id) : () => undefined;
-    this.patch({ recordingId: meta.id, chunkCount: 0, recordedMs: 0 });
-    // Chunk-Verarbeitung wartet, bis die Metadaten in IndexedDB stehen
-    this.chain = this.chain.then(() => this.store.putRecording(meta)).catch(() => undefined);
-    await this.chain;
+    try {
+      this.patch({ recordingId: meta.id, chunkCount: 0, recordedMs: 0 });
+      // Chunk-Verarbeitung wartet, bis die Metadaten in IndexedDB stehen
+      this.chain = this.chain.then(() => this.store.putRecording(meta)).catch(() => undefined);
+      await this.chain;
 
-    if (first) {
-      try {
+      if (first) {
         // Beim Start sofort wissen, ob der Core die Aufnahme ablehnt (Session läuft nicht). Offline ist erlaubt.
         const created = await this.uploader.tryCreate(meta);
         if (created === 'permanent') {
@@ -514,9 +515,9 @@ export class AudioRecorder {
           this.fail('error', 'Der Core hat die Aufnahme abgelehnt. Läuft die Session?');
         }
         if (created === 'ok') await this.store.patchRecording(meta.id, { created: true });
-      } finally {
-        endCreate();
       }
+    } finally {
+      endCreate();
     }
     this.uploader.kick();
   }
