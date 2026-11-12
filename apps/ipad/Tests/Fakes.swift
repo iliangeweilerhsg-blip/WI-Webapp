@@ -45,6 +45,9 @@ final class FakeTransport: HTTPTransport {
     /// Antworten in Reihenfolge der Anfragen. Die letzte gilt für alle weiteren.
     var replies: [Reply]
     private(set) var requests: [URLRequest] = []
+    /// Läuft mitten in einer Anfrage, bevor die Antwort zurückkommt (z. B. ein `ack`, das während eines Abrufs
+    /// eintrifft)
+    var duringRequest: (@MainActor (URLRequest) async -> Void)?
 
     init(_ replies: [Reply]) {
         self.replies = replies
@@ -53,6 +56,9 @@ final class FakeTransport: HTTPTransport {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
         let index = min(requests.count - 1, replies.count - 1)
+        if let duringRequest {
+            await duringRequest(request)
+        }
         switch replies[index] {
         case .failure(let code):
             throw URLError(code)

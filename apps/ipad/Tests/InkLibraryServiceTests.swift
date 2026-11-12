@@ -274,6 +274,53 @@ final class InkLibraryServiceTests: XCTestCase {
         XCTAssertEqual(h.library.notebook(h.binding.notebookID)?.remoteMaxIndex, 5)
     }
 
+    func testAnAckDuringTheFetchDoesNotLetTheStaleAnswerWin() async throws {
+        let deletedID = "019a4e14-0000-7000-8000-0000000000b2"
+        let updateOpID = "019a4e14-0000-7000-8000-0000000000aa"
+        let deleteOpID = "019a4e14-0000-7000-8000-0000000000ab"
+        // Die Antwort zeigt den Stand vor dem Umsortieren und vor dem Löschen
+        let h = SyncHarness(health: [
+            .http(
+                status: 200,
+                body: pagesBody([
+                    LibraryFixtures.pageJSON(id: h_binding_page, notebookID: h_binding_notebook, index: 5),
+                    LibraryFixtures.pageJSON(id: deletedID, notebookID: h_binding_notebook, index: 2),
+                ]))
+        ])
+        h.library.upsert(
+            LibraryPage(
+                id: deletedID, notebookID: h.binding.notebookID, index: 2, template: .blanko, widthPt: 595,
+                heightPt: 842, sessionID: nil, backgroundSlideID: nil, attachedSlideID: nil, version: 1,
+                createQueued: true, needsReconcile: false, deletedAtMS: 5000, deleteQueued: true))
+        let stream = "notebook:\(h.binding.notebookID)"
+        XCTAssertTrue(
+            h.engine.enqueue(drafts: [
+                OutboxDraft(
+                    opID: updateOpID, stream: stream, kind: "page.update", pageID: h.binding.pageID, json: "{}",
+                    clockUncertain: false, sessionStartMS: nil),
+                OutboxDraft(
+                    opID: deleteOpID, stream: stream, kind: "page.delete", pageID: deletedID, json: "{}",
+                    clockUncertain: false, sessionStartMS: nil),
+            ]))
+        await startOnline(h)
+        XCTAssertEqual(h.engine.pendingCount, 2)
+
+        // Beide Operationen werden bestätigt, während `GET /notebooks/{id}/pages` läuft
+        h.transport.duringRequest = { _ in
+            h.factory.sockets[0].ack(updateOpID)
+            h.factory.sockets[0].ack(deleteOpID)
+            _ = await eventually { h.engine.pendingCount == 0 }
+        }
+        await h.service.refreshPages(notebookID: h.binding.notebookID)
+        h.transport.duringRequest = nil
+
+        XCTAssertEqual(h.engine.pendingCount, 0)
+        // Das bestätigte Umsortieren wird nicht zurückgedreht, die gelöschte Seite kommt nicht zurück
+        XCTAssertEqual(h.library.page(h.binding.pageID)?.index, 1)
+        XCTAssertNotNil(h.library.page(deletedID)?.deletedAtMS)
+        XCTAssertEqual(h.library.pages(inNotebook: h.binding.notebookID).map(\.id), [h.binding.pageID])
+    }
+
     func testRefreshPagesQueuesPageCreateForAPageTheCoreLostAfterANewEpoch() async throws {
         let h = SyncHarness(health: [
             .http(status: 200, body: pagesBody([]))

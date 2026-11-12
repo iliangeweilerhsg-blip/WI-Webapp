@@ -43,7 +43,7 @@ final class InkLibraryService {
 
     /// Alphabetisch, ohne Semesterfilter
     var modules: [LibraryModule] {
-        _ = revision
+        track()
         return store.modules.sorted { first, second in
             let order = first.name.localizedCaseInsensitiveCompare(second.name)
             if order == .orderedSame { return first.id < second.id }
@@ -53,27 +53,27 @@ final class InkLibraryService {
 
     /// Zeitpunkt des letzten erfolgreichen Abrufs der Module (für „Stand von …“)
     var refreshedAt: Date? {
-        _ = revision
+        track()
         return store.refreshedAt
     }
 
     func notebooks(inModule moduleID: String) -> [LibraryNotebook] {
-        _ = revision
+        track()
         return store.notebooks(inModule: moduleID)
     }
 
     func notebook(_ id: String) -> LibraryNotebook? {
-        _ = revision
+        track()
         return store.notebook(id)
     }
 
     func page(_ id: String) -> LibraryPage? {
-        _ = revision
+        track()
         return store.page(id)
     }
 
     func moduleName(_ moduleID: String) -> String? {
-        _ = revision
+        track()
         return store.modules.first { $0.id == moduleID }?.name
     }
 
@@ -251,6 +251,14 @@ final class InkLibraryService {
 
     private func bump() {
         revision += 1
+    }
+
+    /// Meldet SwiftUI, wovon die Lesefunktionen abhängen: eigene Änderungen (`revision`) und die der Engine. Die
+    /// Engine ändert die Ablage auch selbst, etwa wenn `notebook.create` in die Fehlerablage geht
+    /// (`removeNotebook`). Das zeigt sich an `deadLetterCount`.
+    private func track() {
+        _ = revision
+        _ = sync.deadLetterCount
     }
 
     private func matchingSession(moduleID: String) -> RunningSession? {
