@@ -91,11 +91,15 @@ Seit der Direktverbindung (UX-12) spricht das iPad nur noch über einen gesicher
 
 **Was du siehst:** Oben rechts steht bei **Mac ●** „Bitte einmal neu koppeln“, dazu eine ruhige Karte auf dem Startbildschirm. Es geht dann nichts raus, dein Token und deine Notizen bleiben auf dem iPad. Die Warteschlange gleicht sich nach dem Koppeln ab.
 
-**Was du tust (etwa eine Minute, zu Hause im WLAN):**
+**Was du tust (etwa fünf Minuten, zu Hause im WLAN):**
 
-1. Am Mac Studien-Gehirn starten (`pnpm sg start`).
-2. Am iPad **Mac ●** antippen, dann **Neu koppeln**.
-3. Am Mac unter **Einstellungen → Geräte** den alten Eintrag des iPads entfernen und die Kopplung neu starten (Schritt 8). Dann den QR-Code mit dem iPad scannen.
+1. **Am Mac den Helfer starten:** `pnpm sg stop`, dann `pnpm sg start`. Beim ersten Mal baut `sg` den Tunnel-Helfer `sg-tunnel` (etwa eine Minute, braucht Xcode oder `xcode-select --install`). Fragt macOS, ob „sg-tunnel“ eingehende Verbindungen annehmen darf: **Erlauben**.
+2. **Prüfen:** In einem zweiten Terminal `pnpm sg doctor`. Die Zeilen „Tunnel-Helfer ·“ dürfen kein ✗ zeigen, außer „Geräte ohne Schlüssel“ (das ist dein altes iPad, das ändert Schritt 3). Was bei einem ✗ hilft: [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md), Abschnitt 5.
+3. **Alten Eintrag entfernen:** In der Web-App am Mac unter **Einstellungen → Geräte** den Eintrag des iPads entfernen.
+4. **Neu koppeln:** Am iPad **Mac ●** antippen, dann **Neu koppeln**. Am Mac die Kopplung starten (Schritt 8) und den QR-Code mit dem iPad scannen.
+5. **Fertig, wenn** **Mac ●** grün ist. In den Verbindungsdetails steht dann „Verbunden über das WLAN“.
+
+**Meldet das iPad beim Koppeln „Mac ohne Direktverbindung“,** hat der Mac keinen Schlüssel geschickt. Dann läuft am Mac eine alte Version oder `SG_TUNNEL=0`. Das iPad speichert so eine Kopplung nicht, denn mit ihr käme es nie zum Mac. Am Mac aktualisieren ([UPDATE.md](UPDATE.md)), ohne `SG_TUNNEL=0` starten, den eben entstandenen Eintrag unter Einstellungen → Geräte entfernen und noch einmal koppeln.
 
 Danach ist das Neukoppeln wegen eines Netzwechsels nie wieder nötig. Es macht auch ein altes Token wertlos, das vor dem Tunnel in fremde Netze gegangen sein kann.
 
@@ -114,7 +118,7 @@ Ein Hotspot ist nicht nötig. Ein gemeinsames Netz auch nicht.
 - **Verbunden über das WLAN:** iPad und Mac sehen sich in einem gemeinsamen Netz (zu Hause).
 - **Direkt verbunden, ohne WLAN-Netz:** iPad und Mac reden per Wi-Fi peer-to-peer miteinander (die Technik hinter AirDrop), ohne Router. Das ist der Hörsaal-Fall.
 
-Die Zeile erscheint nur bei laufendem Sync und ändert sich nur, wenn die Verbindung neu aufgebaut wird. Eine bestehende Verbindung wechselt nie mitten im Betrieb den Weg.
+Die Zeile erscheint nur bei laufendem Sync. Sie nennt den Weg der zuletzt aufgebauten Verbindung zum Mac und ändert sich nur, wenn eine neue Verbindung entsteht (etwa nach einem Wechsel des WLANs). Eine bestehende Verbindung wechselt nie mitten im Betrieb den Weg.
 
 **Was nicht geprüft ist:** Ob das im vollen Hörsaal zuverlässig trägt, wie viel Akku es kostet und wie lange der Aufbau dauert, steht erst nach dem Test am Gerät fest (`docs/plaene/UX-12-MAC-WIEDERFINDEN.md`, Abschnitt 9). Die **Erstkopplung** geht weiter nur zu Hause im WLAN per QR-Code.
 
@@ -184,6 +188,7 @@ Tippe in der App oben rechts auf **Mac ●**. Dort steht die Ursache.
 | Suche deinen Mac … | Normal in den ersten Sekunden. Im Hörsaal dauert es länger als zu Hause |
 | WLAN ist aus | WLAN am iPad einschalten. Ein Netz brauchst du nicht, das iPad verbindet sich direkt mit dem Mac |
 | Bitte einmal neu koppeln | Abschnitt „Nach dem Update: einmal neu koppeln“ |
+| Mac ohne Direktverbindung (beim Koppeln) | Am Mac läuft eine alte Version oder `SG_TUNNEL=0`. Abschnitt „Nach dem Update: einmal neu koppeln“, letzter Absatz |
 | Mac nicht gefunden | Läuft Studien-Gehirn am Mac (`pnpm sg start`), ist er aufgeklappt und ist am Mac WLAN eingeschaltet? Dein Schreiben bleibt auf dem iPad. Sonst weiter mit [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md), Abschnitt 6 |
 | Kein WLAN / Mac antwortet nicht | Nur beim Koppeln: iPad ins selbe WLAN wie den Mac bringen. Auch Schritt 7 prüfen |
 | Kopplung am Mac nicht geöffnet | Am Mac die Kopplung neu starten (Schritt 8). Der Code gilt nur 5 Minuten |

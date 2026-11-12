@@ -139,10 +139,12 @@ Das iPad sucht seinen Mac über einen Bonjour-Dienst (`_sg-tunnel._tcp`), erst i
 | Mac nicht gefunden | Kein Dienst mit dem Namen deines Macs zu sehen | Mac aufgeklappt und am Netzteil? `pnpm sg start` läuft? Am Mac WLAN an? `pnpm sg doctor` ansehen (Zeilen „Tunnel-Helfer“) |
 | WLAN ist aus | Am iPad ist WLAN ausgeschaltet. Auch die Direktverbindung braucht es | WLAN am iPad einschalten. Ein Netz brauchst du nicht |
 | Lokales Netzwerk nicht erlaubt | iPadOS lässt die Suche nicht zu | Einstellungen → Datenschutz & Sicherheit → Lokales Netzwerk → Studien-Gehirn. Nach dem Aufspielen kann die Erlaubnis zurückgesetzt sein |
-| Mac nicht gefunden, mit dem Satz „… nicht mit dem richtigen Schlüssel“ | Etwas unter dem Namen deines Macs antwortet, kennt aber den Schlüssel nicht. Jeder in Funkreichweite kann den Namen nachsprechen | Nichts entkoppeln. Zu Hause prüfen, ob das iPad am Mac unter Einstellungen → Geräte noch steht. Kommt der Hinweis zu Hause, am Mac `pnpm sg doctor` ansehen |
+| Mac nicht gefunden, mit dem Satz „… nicht mit dem richtigen Schlüssel“ | Etwas unter dem Namen deines Macs hat den Handshake begonnen, kennt aber den Schlüssel nicht. Jeder in Funkreichweite kann den Namen nachsprechen. Der Satz erscheint erst nach drei vergeblichen Suchläufen | Nichts entkoppeln. Zu Hause prüfen, ob das iPad am Mac unter Einstellungen → Geräte noch steht. Kommt der Hinweis zu Hause, am Mac `pnpm sg doctor` ansehen |
 | Bitte einmal neu koppeln | Dieses iPad hat keinen Tunnel-Schlüssel (vor dem Tunnel gekoppelt) | [IPAD.md](IPAD.md), Abschnitt „Nach dem Update: einmal neu koppeln“ |
 
-**Was in den Verbindungsdetails steht, wenn alles läuft:** „Verbunden über das WLAN“ (gemeinsames Netz) oder „Direkt verbunden, ohne WLAN-Netz“ (peer-to-peer). Die Zeile wechselt nur, wenn die Sync-Verbindung neu aufgebaut wird.
+**Was in den Verbindungsdetails steht, wenn alles läuft:** „Verbunden über das WLAN“ (gemeinsames Netz) oder „Direkt verbunden, ohne WLAN-Netz“ (peer-to-peer). Die Zeile nennt den Weg der zuletzt aufgebauten Verbindung. Sie wechselt nur, wenn eine neue Verbindung entsteht, nie mitten in einer bestehenden.
+
+**Tempo:** Den Weg zu deinem Mac merkt sich das iPad zwei Minuten lang. Folgende Verbindungen (Seiten, Folien) sparen sich so die Suche. Nach einem Netzwechsel oder wenn die App wieder in den Vordergrund kommt, sucht es neu.
 
 **Die macOS-Firewall und der Cisco-Socket-Filter** (Abschnitte 1 und 5) können den Helfer sperren. `pnpm sg doctor` meldet das.
 
