@@ -124,6 +124,7 @@ export interface ClientEventMap {
   presence: Extract<SyncEvent, { name: 'presence' }>['data'];
   'device.connection': Extract<SyncEvent, { name: 'device.connection' }>['data'];
   'pairing.requested': Extract<SyncEvent, { name: 'pairing.requested' }>['data'];
+  'notebook.changed': Extract<SyncEvent, { name: 'notebook.changed' }>['data'];
   /** Verbindungszustand */
   connection: { state: ConnectionState; retryInMs: number | null; closeCode: number | null };
   /** Ein Strom hat `reset` gemeldet (§11.1) */

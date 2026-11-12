@@ -353,6 +353,7 @@ const _SyncError: Equal<z.infer<typeof Z.SyncErrorSchema>, T.SyncError> = true;
 const _SyncErrorCode: Equal<z.infer<typeof Z.SyncErrorCodeSchema>, T.SyncErrorCode> = true;
 const _SyncEvent: Equal<z.infer<typeof Z.SyncEventSchema>, T.SyncEvent> = true;
 const _SyncHello: Equal<z.infer<typeof Z.SyncHelloSchema>, T.SyncHello> = true;
+const _SyncNotebookChangedEvent: Equal<z.infer<typeof Z.SyncNotebookChangedEventSchema>, T.SyncNotebookChangedEvent> = true;
 const _SyncOp: Equal<z.infer<typeof Z.SyncOpSchema>, T.SyncOp> = true;
 const _SyncOrigin: Equal<z.infer<typeof Z.SyncOriginSchema>, T.SyncOrigin> = true;
 const _SyncPairingEvent: Equal<z.infer<typeof Z.SyncPairingEventSchema>, T.SyncPairingEvent> = true;

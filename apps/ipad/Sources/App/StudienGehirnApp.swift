@@ -49,7 +49,7 @@ extension AppModel {
                 store: store, sync: engine, client: client, pageStore: FileInkPageStore.standard())
             library = service
             service.slides = SlideSupport.live(client: client, engine: engine, library: service)
-            service.attachNotebookFollower()
+            service.attachNotebookChanges()
         }
         return AppModel(
             client: client,

@@ -620,7 +620,7 @@ export type SyncErrorCode = ("protocol_unsupported" | "hello_required" | "hello_
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SyncEvent".
  */
-export type SyncEvent = (SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent)
+export type SyncEvent = (SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent | SyncNotebookChangedEvent)
 /**
  * Alle Nachrichten Server → Client
  * 
@@ -5226,6 +5226,20 @@ export interface SyncPairingEvent {
 type: "event"
 name: "pairing.requested"
 data: PairingRequest
+}
+/**
+ * Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms. Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SyncNotebookChangedEvent".
+ */
+export interface SyncNotebookChangedEvent {
+type: "event"
+name: "notebook.changed"
+data: {
+notebook_id: Uuid
+kind: ("update" | "delete" | "restore")
+}
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema

@@ -69,7 +69,7 @@ struct SchemaBundle: Codable {
     let dataSettings: DataSettings?
     let dataSettingsUpdate: DataSettingsUpdate?
     let device: Device?
-    let deviceKind: DeviceKind?
+    let deviceKind: DeviceKindEnum?
     let deviceList: DeviceList?
     let drawingSnapshotData: DrawingSnapshotData?
     let drawingSnapshotOp: DrawingSnapshotOp?
@@ -356,6 +356,7 @@ struct SchemaBundle: Codable {
     let syncErrorCode: SyncErrorCode?
     let syncEvent: SyncEvent?
     let syncHello: SyncHello?
+    let syncNotebookChangedEvent: SyncNotebookChangedEvent?
     let syncOp: SyncOp?
     let syncOrigin: SyncOrigin?
     let syncPairingEvent: SyncPairingEvent?
@@ -752,6 +753,7 @@ struct SchemaBundle: Codable {
         case syncErrorCode = "SyncErrorCode"
         case syncEvent = "SyncEvent"
         case syncHello = "SyncHello"
+        case syncNotebookChangedEvent = "SyncNotebookChangedEvent"
         case syncOp = "SyncOp"
         case syncOrigin = "SyncOrigin"
         case syncPairingEvent = "SyncPairingEvent"
@@ -881,7 +883,7 @@ extension SchemaBundle {
         dataSettings: DataSettings?? = nil,
         dataSettingsUpdate: DataSettingsUpdate?? = nil,
         device: Device?? = nil,
-        deviceKind: DeviceKind?? = nil,
+        deviceKind: DeviceKindEnum?? = nil,
         deviceList: DeviceList?? = nil,
         drawingSnapshotData: DrawingSnapshotData?? = nil,
         drawingSnapshotOp: DrawingSnapshotOp?? = nil,
@@ -1168,6 +1170,7 @@ extension SchemaBundle {
         syncErrorCode: SyncErrorCode?? = nil,
         syncEvent: SyncEvent?? = nil,
         syncHello: SyncHello?? = nil,
+        syncNotebookChangedEvent: SyncNotebookChangedEvent?? = nil,
         syncOp: SyncOp?? = nil,
         syncOrigin: SyncOrigin?? = nil,
         syncPairingEvent: SyncPairingEvent?? = nil,
@@ -1564,6 +1567,7 @@ extension SchemaBundle {
             syncErrorCode: syncErrorCode ?? self.syncErrorCode,
             syncEvent: syncEvent ?? self.syncEvent,
             syncHello: syncHello ?? self.syncHello,
+            syncNotebookChangedEvent: syncNotebookChangedEvent ?? self.syncNotebookChangedEvent,
             syncOp: syncOp ?? self.syncOp,
             syncOrigin: syncOrigin ?? self.syncOrigin,
             syncPairingEvent: syncPairingEvent ?? self.syncPairingEvent,
@@ -4981,7 +4985,7 @@ struct Device: Codable {
     let createdAt: Date
     let deletedAt: Date?
     let id: String
-    let kind: DeviceKind
+    let kind: DeviceKindEnum
     let lastSeenAt: Date?
     let name: String
     let updatedAt: Date
@@ -5027,7 +5031,7 @@ extension Device {
         createdAt: Date? = nil,
         deletedAt: Date?? = nil,
         id: String? = nil,
-        kind: DeviceKind? = nil,
+        kind: DeviceKindEnum? = nil,
         lastSeenAt: Date?? = nil,
         name: String? = nil,
         updatedAt: Date? = nil,
@@ -5057,7 +5061,7 @@ extension Device {
     }
 }
 
-enum DeviceKind: String, Codable {
+enum DeviceKindEnum: String, Codable {
     case ipad = "ipad"
     case iphone = "iphone"
 }
@@ -14331,7 +14335,7 @@ struct PairConfirmRequest: Codable {
     let appVersion: String?
     let code: String
     let deviceName: String
-    let kind: DeviceKind
+    let kind: DeviceKindEnum
     let pairingID: String
     let publicNonce: String
 
@@ -14367,7 +14371,7 @@ extension PairConfirmRequest {
         appVersion: String?? = nil,
         code: String? = nil,
         deviceName: String? = nil,
-        kind: DeviceKind? = nil,
+        kind: DeviceKindEnum? = nil,
         pairingID: String? = nil,
         publicNonce: String? = nil
     ) -> PairConfirmRequest {
@@ -14445,7 +14449,7 @@ extension PairResponse {
 // MARK: - PairStartRequest
 struct PairStartRequest: Codable {
     let deviceName: String
-    let kind: DeviceKind
+    let kind: DeviceKindEnum
     /// Zufallswert des iPads (base64url, ≥ 128 Bit)
     let publicNonce: String
 
@@ -14476,7 +14480,7 @@ extension PairStartRequest {
 
     func with(
         deviceName: String? = nil,
-        kind: DeviceKind? = nil,
+        kind: DeviceKindEnum? = nil,
         publicNonce: String? = nil
     ) -> PairStartRequest {
         return PairStartRequest(
@@ -14626,7 +14630,7 @@ extension PairingCode {
 // MARK: - PairingRequest
 struct PairingRequest: Codable {
     let deviceName: String
-    let kind: DeviceKind
+    let kind: DeviceKindEnum
     let pairingID: String
     let requestID: String
     let requestedAt: Date
@@ -14660,7 +14664,7 @@ extension PairingRequest {
 
     func with(
         deviceName: String? = nil,
-        kind: DeviceKind? = nil,
+        kind: DeviceKindEnum? = nil,
         pairingID: String? = nil,
         requestID: String? = nil,
         requestedAt: Date? = nil
@@ -19889,7 +19893,7 @@ struct SyncClientMessage: Codable {
     let sessionID: String?
     let at: Int?
     let clockUncertain: Bool?
-    let data: DataClass?
+    let data: SyncClientMessageData?
     let kind: SyncClientMessageKind?
     let opID: String?
     let origin: SyncOrigin?
@@ -19954,7 +19958,7 @@ extension SyncClientMessage {
         sessionID: String?? = nil,
         at: Int?? = nil,
         clockUncertain: Bool?? = nil,
-        data: DataClass?? = nil,
+        data: SyncClientMessageData?? = nil,
         kind: SyncClientMessageKind?? = nil,
         opID: String?? = nil,
         origin: SyncOrigin?? = nil,
@@ -20009,8 +20013,8 @@ extension SyncClientMessage {
 /// Rückgängig (⌘Z, F-DSH-05) bzw. Löschen
 ///
 /// Datei per PUT /photos/{photo_id}/file, Reihenfolge egal
-// MARK: - DataClass
-struct DataClass: Codable {
+// MARK: - SyncClientMessageData
+struct SyncClientMessageData: Codable {
     let createdAt: Int?
     /// Nur frei. Die Notizbücher vorlesung/uebung legt der Core an
     let kind: PurpleMarkerKind?
@@ -20090,11 +20094,11 @@ struct DataClass: Codable {
     }
 }
 
-// MARK: DataClass convenience initializers and mutators
+// MARK: SyncClientMessageData convenience initializers and mutators
 
-extension DataClass {
+extension SyncClientMessageData {
     init(data: Data) throws {
-        self = try newJSONDecoder().decode(DataClass.self, from: data)
+        self = try newJSONDecoder().decode(SyncClientMessageData.self, from: data)
     }
 
     init(_ json: String, using encoding: String.Encoding = .utf8) throws {
@@ -20145,8 +20149,8 @@ extension DataClass {
         source: ClientDevice?? = nil,
         fileRef: PhotoFileRef?? = nil,
         photoID: String?? = nil
-    ) -> DataClass {
-        return DataClass(
+    ) -> SyncClientMessageData {
+        return SyncClientMessageData(
             createdAt: createdAt ?? self.createdAt,
             kind: kind ?? self.kind,
             moduleID: moduleID ?? self.moduleID,
@@ -20618,9 +20622,13 @@ enum SyncErrorType: String, Codable {
 /// Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
 ///
 /// Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)
+///
+/// Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation
+/// notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms.
+/// Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
 // MARK: - SyncEvent
 struct SyncEvent: Codable {
-    let data: SyncEventData
+    let data: DataClass
     let name: SyncEventName
     let type: SyncConnectionEventType
 
@@ -20650,7 +20658,7 @@ extension SyncEvent {
     }
 
     func with(
-        data: SyncEventData? = nil,
+        data: DataClass? = nil,
         name: SyncEventName? = nil,
         type: SyncConnectionEventType? = nil
     ) -> SyncEvent {
@@ -20677,8 +20685,8 @@ extension SyncEvent {
 /// Web-App listet sie und kann sie ablehnen (DELETE
 /// /devices/pairings/requests/{request_id}). Gerätenamen sind frei wählbar, die Web-App
 /// empfiehlt darum den QR-Weg
-// MARK: - SyncEventData
-struct SyncEventData: Codable {
+// MARK: - DataClass
+struct DataClass: Codable {
     let autoStopExtendedUntil: Date?
     let calendarEventID: String?
     let createdAt: Date?
@@ -20709,7 +20717,7 @@ struct SyncEventData: Codable {
     let pageID: String?
     let sessionID: String?
     let connected: Bool?
-    let kind: DeviceKind?
+    let kind: PurpleDeviceKind?
     let pairingID: String?
     let requestID: String?
     let requestedAt: Date?
@@ -20750,11 +20758,11 @@ struct SyncEventData: Codable {
     }
 }
 
-// MARK: SyncEventData convenience initializers and mutators
+// MARK: DataClass convenience initializers and mutators
 
-extension SyncEventData {
+extension DataClass {
     init(data: Data) throws {
-        self = try newJSONDecoder().decode(SyncEventData.self, from: data)
+        self = try newJSONDecoder().decode(DataClass.self, from: data)
     }
 
     init(_ json: String, using encoding: String.Encoding = .utf8) throws {
@@ -20797,12 +20805,12 @@ extension SyncEventData {
         pageID: String?? = nil,
         sessionID: String?? = nil,
         connected: Bool?? = nil,
-        kind: DeviceKind?? = nil,
+        kind: PurpleDeviceKind?? = nil,
         pairingID: String?? = nil,
         requestID: String?? = nil,
         requestedAt: Date?? = nil
-    ) -> SyncEventData {
-        return SyncEventData(
+    ) -> DataClass {
+        return DataClass(
             autoStopExtendedUntil: autoStopExtendedUntil ?? self.autoStopExtendedUntil,
             calendarEventID: calendarEventID ?? self.calendarEventID,
             createdAt: createdAt ?? self.createdAt,
@@ -20847,8 +20855,17 @@ extension SyncEventData {
     }
 }
 
+enum PurpleDeviceKind: String, Codable {
+    case delete = "delete"
+    case ipad = "ipad"
+    case iphone = "iphone"
+    case restore = "restore"
+    case update = "update"
+}
+
 enum SyncEventName: String, Codable {
     case deviceConnection = "device.connection"
+    case notebookChanged = "notebook.changed"
     case pairingRequested = "pairing.requested"
     case presence = "presence"
     case sessionUpdated = "session.updated"
@@ -20924,6 +20941,119 @@ enum SyncHelloType: String, Codable {
     case hello = "hello"
 }
 
+/// Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation
+/// notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms.
+/// Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
+// MARK: - SyncNotebookChangedEvent
+struct SyncNotebookChangedEvent: Codable {
+    let data: SyncNotebookChangedEventData
+    let name: SyncNotebookChangedEventName
+    let type: SyncConnectionEventType
+
+    enum CodingKeys: String, CodingKey {
+        case data = "data"
+        case name = "name"
+        case type = "type"
+    }
+}
+
+// MARK: SyncNotebookChangedEvent convenience initializers and mutators
+
+extension SyncNotebookChangedEvent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncNotebookChangedEvent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        data: SyncNotebookChangedEventData? = nil,
+        name: SyncNotebookChangedEventName? = nil,
+        type: SyncConnectionEventType? = nil
+    ) -> SyncNotebookChangedEvent {
+        return SyncNotebookChangedEvent(
+            data: data ?? self.data,
+            name: name ?? self.name,
+            type: type ?? self.type
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+// MARK: - SyncNotebookChangedEventData
+struct SyncNotebookChangedEventData: Codable {
+    let kind: PurpleKind
+    let notebookID: String
+
+    enum CodingKeys: String, CodingKey {
+        case kind = "kind"
+        case notebookID = "notebook_id"
+    }
+}
+
+// MARK: SyncNotebookChangedEventData convenience initializers and mutators
+
+extension SyncNotebookChangedEventData {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(SyncNotebookChangedEventData.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        kind: PurpleKind? = nil,
+        notebookID: String? = nil
+    ) -> SyncNotebookChangedEventData {
+        return SyncNotebookChangedEventData(
+            kind: kind ?? self.kind,
+            notebookID: notebookID ?? self.notebookID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum PurpleKind: String, Codable {
+    case delete = "delete"
+    case restore = "restore"
+    case update = "update"
+}
+
+enum SyncNotebookChangedEventName: String, Codable {
+    case notebookChanged = "notebook.changed"
+}
+
 /// Operation (08 §2.3), unterschieden über kind. Client → Server ohne seq/origin, Server →
 /// Client mit seq und origin.
 ///
@@ -20933,7 +21063,7 @@ enum SyncHelloType: String, Codable {
 struct SyncOp: Codable {
     let at: Int
     let clockUncertain: Bool
-    let data: DataClass
+    let data: SyncClientMessageData
     let kind: SyncClientMessageKind
     let opID: String
     let origin: SyncOrigin?
@@ -20976,7 +21106,7 @@ extension SyncOp {
     func with(
         at: Int? = nil,
         clockUncertain: Bool? = nil,
-        data: DataClass? = nil,
+        data: SyncClientMessageData? = nil,
         kind: SyncClientMessageKind? = nil,
         opID: String? = nil,
         origin: SyncOrigin?? = nil,
@@ -21419,6 +21549,10 @@ extension SyncResume {
 /// Ein Client hat sich verbunden oder getrennt (iPad-Status, F-DSH-06)
 ///
 /// Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)
+///
+/// Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation
+/// notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms.
+/// Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
 // MARK: - SyncServerMessage
 struct SyncServerMessage: Codable {
     let dbEpoch: String?
@@ -21882,11 +22016,14 @@ enum CreatedAt: Codable {
 }
 
 enum Kind: String, Codable {
+    case delete = "delete"
     case frage = "frage"
     case frei = "frei"
     case ipad = "ipad"
     case iphone = "iphone"
     case klausur = "klausur"
+    case restore = "restore"
+    case update = "update"
     case verknuepfung = "verknuepfung"
 }
 
@@ -26699,6 +26836,15 @@ extension SyncHello {
         try container.encodeIfPresent(deviceID, forKey: .deviceID)
         try container.encode(syncHelloProtocol, forKey: .syncHelloProtocol)
         try container.encode(streams, forKey: .streams)
+        try container.encode(type, forKey: .type)
+    }
+}
+
+extension SyncNotebookChangedEvent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(data, forKey: .data)
+        try container.encode(name, forKey: .name)
         try container.encode(type, forKey: .type)
     }
 }

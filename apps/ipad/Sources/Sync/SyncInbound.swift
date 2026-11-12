@@ -24,14 +24,6 @@ struct SlideBrief: Equatable, Sendable {
     var index: Int
 }
 
-/// Art einer Server-Operation, die ein Notizbuch am Mac ändert (VERTRAEGE §11.3: nur Server, nach `PATCH`/`DELETE
-/// /notebooks/{id}` bzw. Wiederherstellung aus dem Papierkorb)
-enum NotebookOpKind: String, Equatable, Sendable {
-    case update
-    case delete
-    case restore
-}
-
 /// Was die Engine nach außen gibt. Alle Werte sind einfach und `Sendable`.
 enum SyncInbound: Equatable, Sendable {
     /// Neue Verbindung (`welcome`). Abonnements der alten Verbindung gelten nicht mehr.
@@ -39,9 +31,8 @@ enum SyncInbound: Equatable, Sendable {
     case sessionUpdated(SessionBrief)
     case subscribed(stream: String, reset: Bool)
     /// `slide` ist nur bei `slide.change` gesetzt. Jede Operation des Stroms kommt hier an, auch unbekannte.
-    /// Ausnahme: `notebook.update`, `.delete` und `.restore` kommen als `notebookOp` an.
     case op(stream: String, seq: Int, slide: SlideBrief?)
-    /// `notebook.update`, `notebook.delete` oder `notebook.restore` im Strom `notebook:<id>`. Das iPad liest sie nur,
-    /// um die Bibliothek neu zu laden (Inhalt und `seq` zählen nicht).
-    case notebookOp(stream: String, seq: Int, kind: NotebookOpKind)
+    /// Ereignis `notebook.changed` (umbenannt, gelöscht oder wiederhergestellt), an alle Verbindungen. Die Engine
+    /// reicht es nur an `onNotebookChanged` weiter; der Inhalt zählt nicht, die Bibliothek wird per REST neu geladen.
+    case notebookChanged
 }

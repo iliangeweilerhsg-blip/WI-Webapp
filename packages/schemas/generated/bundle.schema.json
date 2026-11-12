@@ -1046,6 +1046,9 @@
     "SyncHello": {
       "$ref": "#/$defs/SyncHello"
     },
+    "SyncNotebookChangedEvent": {
+      "$ref": "#/$defs/SyncNotebookChangedEvent"
+    },
     "SyncOp": {
       "$ref": "#/$defs/SyncOp"
     },
@@ -12939,6 +12942,9 @@
         },
         {
           "$ref": "#/$defs/SyncPairingEvent"
+        },
+        {
+          "$ref": "#/$defs/SyncNotebookChangedEvent"
         }
       ]
     },
@@ -12975,6 +12981,45 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/SyncStreamPosition"
+          }
+        }
+      }
+    },
+    "SyncNotebookChangedEvent": {
+      "title": "SyncNotebookChangedEvent",
+      "type": "object",
+      "description": "Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms. Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)",
+      "required": [
+        "type",
+        "name",
+        "data"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "name": {
+          "const": "notebook.changed"
+        },
+        "data": {
+          "type": "object",
+          "required": [
+            "notebook_id",
+            "kind"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "notebook_id": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "kind": {
+              "enum": [
+                "update",
+                "delete",
+                "restore"
+              ]
+            }
           }
         }
       }

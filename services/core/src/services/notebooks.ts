@@ -14,6 +14,7 @@ import { HttpError } from '../errors.ts';
 import { afterCursor, cursorTs, decodeCursor, keysetOrder, toPage } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { appendOp } from '../sync/append.ts';
+import { publishAfterCommit } from '../sync/events.ts';
 import { softDelete } from './trash.ts';
 
 type NotebookRow = typeof notebook.$inferSelect;
@@ -223,7 +224,10 @@ async function lockNotebookStream(tx: Tx, notebookId: string): Promise<void> {
     .for('update');
 }
 
-/** Server-Operation (`origin = server`) in den Strom des Notizbuchs schreiben */
+/**
+ * Server-Operation (`origin = server`) in den Strom des Notizbuchs schreiben und in derselben Transaktion das
+ * Ereignis `notebook.changed` an alle Verbindungen vormerken (VERTRAEGE §11.6). Clients brauchen dafür kein Abo.
+ */
 async function appendServerOp(
   tx: Tx,
   notebookId: string,
@@ -237,6 +241,13 @@ async function appendServerOp(
     clockUncertain: false,
     origin: 'server',
   });
+  if (kind.startsWith('notebook.')) {
+    await publishAfterCommit(tx, {
+      type: 'event',
+      name: 'notebook.changed',
+      data: { notebook_id: notebookId, kind: kind === 'notebook.update' ? 'update' : 'delete' },
+    });
+  }
 }
 
 /**

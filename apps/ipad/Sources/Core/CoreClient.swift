@@ -356,19 +356,6 @@ final class CoreClient {
         return try decode(NotebookPages.self, from: data).items
     }
 
-    /// `GET /notebooks/{id}/pages`, nur der Kopf des Stroms `notebook:<id>` (`stream_seq`, `stream_op_id`), um ihn
-    /// lesend zu abonnieren (VERTRAEGE §11.1). `nil` bei 404 (gelöscht oder unbekannt).
-    func notebookStreamHead(endpoint: CoreEndpoint, token: String, notebookID: String) async throws -> NotebookHead? {
-        do {
-            let data = try await send(
-                "GET", "/notebooks/\(try Self.safeID(notebookID))/pages", endpoint: endpoint, token: token, body: nil)
-            let pages = try decode(NotebookPages.self, from: data)
-            return NotebookHead(seq: pages.streamSeq, opID: pages.streamOpID)
-        } catch ConnectionError.server(let status, _) where status == 404 {
-            return nil
-        }
-    }
-
     /// `GET /pages/{id}/strokes`. `nil`, wenn der Core die Seite nicht kennt (404).
     func pageStrokes(endpoint: CoreEndpoint, token: String, pageID: String) async throws -> PageStrokes? {
         do {

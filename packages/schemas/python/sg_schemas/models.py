@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from enum import StrEnum
+from enum import Enum, StrEnum
 from typing import Any, Literal
 
 from pydantic import (
@@ -1444,6 +1444,12 @@ class SyncErrorCode(StrEnum):
     op_not_allowed = 'op_not_allowed'
     session_superseded = 'session_superseded'
     internal_error = 'internal_error'
+
+
+class Kind1(Enum):
+    update = 'update'
+    delete = 'delete'
+    restore = 'restore'
 
 
 class SyncOrigin(StrEnum):
@@ -5495,6 +5501,32 @@ class SyncError(BaseModel):
     details: dict[str, Any] | None = None
 
 
+class Data(BaseModel):
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    notebook_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    kind: Kind1
+
+
+class SyncNotebookChangedEvent(BaseModel):
+    """
+    Ein Notizbuch wurde umbenannt, gelöscht oder wiederhergestellt (Server-Operation notebook.update/.delete/.restore). Geht an alle Verbindungen, auch ohne Abo des Stroms. Clients laden die Bibliothek per REST neu (VERTRAEGE §11.3)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    type: Literal['event']
+    name: Literal['notebook.changed']
+    data: Data
+
+
 class SyncPairingEvent(BaseModel):
     """
     Ein Gerät hat pair/start aufgerufen. Nur an lokale Web-Clients (VERTRAEGE §12)
@@ -8004,9 +8036,13 @@ class SchemaBundle(BaseModel):
         | SyncPresenceEvent
         | SyncConnectionEvent
         | SyncPairingEvent
+        | SyncNotebookChangedEvent
         | None
     ) = Field(None, description='Server-Ereignisse (08 §2.4) an alle verbundenen Clients, ohne seq, nicht nachgeliefert', title='SyncEvent')
     SyncHello_1: SyncHello | None = Field(None, alias='SyncHello')
+    SyncNotebookChangedEvent_1: SyncNotebookChangedEvent | None = Field(
+        None, alias='SyncNotebookChangedEvent'
+    )
     SyncOp: (
         NotebookCreateOp
         | PageCreateOp
@@ -8073,6 +8109,7 @@ class SchemaBundle(BaseModel):
         | SyncPresenceEvent
         | SyncConnectionEvent
         | SyncPairingEvent
+        | SyncNotebookChangedEvent
         | None
     ) = Field(None, description='Alle Nachrichten Server → Client', title='SyncServerMessage')
     SyncSessionUpdatedEvent_1: SyncSessionUpdatedEvent | None = Field(
@@ -8157,6 +8194,6 @@ type PageElement = TextElement | ImageElement | ShapeElement | TapeElement | Sta
 type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload
 type SearchHit = SearchHitSlide | SearchHitTranscript
 type SyncClientMessage = SyncHello | SyncSubscribe | SyncUnsubscribe | SyncTimePing | SyncTimeOffset | SyncPing | SyncPresence | SyncOp
-type SyncEvent = SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent
+type SyncEvent = SyncSessionUpdatedEvent | SyncPresenceEvent | SyncConnectionEvent | SyncPairingEvent | SyncNotebookChangedEvent
 type SyncOp = NotebookCreateOp | PageCreateOp | PageUpdateOp | PageDeleteOp | NotebookUpdateOp | NotebookDeleteOp | NotebookRestoreOp | PageRestoreOp | StrokeAddOp | StrokeRemoveOp | ElementUpsertOp | ElementRemoveOp | DrawingSnapshotOp | SessionStartOp | SessionPauseOp | SessionResumeOp | SessionStopOp | SlideChangeOp | MarkerAddOp | MarkerRemoveOp | PhotoAddOp
 type SyncServerMessage = SyncWelcome | SyncSubscribed | SyncAck | SyncOp | SyncTimePong | SyncPong | SyncError | SyncEvent

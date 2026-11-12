@@ -46,8 +46,6 @@ final class InkLibraryService {
     @ObservationIgnored private var graceTasks: [String: _Concurrency.Task<Void, Never>] = [:]
     /// Seiten, deren `page_version_conflict` gerade aufgelöst wird
     @ObservationIgnored private var resolvingConflicts = Set<String>()
-    /// Hört auf `notebook.*` vom Mac (nach `attachNotebookFollower`)
-    @ObservationIgnored private(set) var notebookFollower: NotebookFollower?
     /// Wartender, entprellter Abruf nach einer Änderung am Notizbuch
     @ObservationIgnored private var liveRefreshTask: _Concurrency.Task<Void, Never>?
     @ObservationIgnored private var liveRefreshSince: Date?
@@ -234,8 +232,6 @@ final class InkLibraryService {
             await refreshRunning(access)
         }
         bump()
-        // Neue Notizbücher am Mac: ihre Ströme mithören
-        notebookFollower?.syncSubscriptions()
         await flushInkModes()
     }
 
@@ -284,24 +280,14 @@ final class InkLibraryService {
         bump()
     }
 
-    // MARK: Notizbuch-Änderungen vom Mac (#245, VERTRAEGE §11.3)
+    // MARK: Notizbuch-Änderungen vom Mac (#245, VERTRAEGE §11.3, §11.6)
 
-    /// Hört auf `notebook.update`, `.delete` und `.restore` im Strom jedes bekannten Notizbuchs und lädt die
-    /// Bibliothek danach neu. Ohne Aufruf (Tests) bleibt es beim Abgleich per REST. `feed` und `backend` sind für
-    /// Tests austauschbar.
-    func attachNotebookFollower(feed: (any NotebookFeed)? = nil, backend: (any NotebookFollowerBackend)? = nil) {
-        guard notebookFollower == nil else { return }
-        let follower = NotebookFollower(
-            feed: feed ?? sync,
-            backend: backend ?? CoreNotebookFollowerBackend(client: client, sync: sync),
-            notebookIDs: { [weak self] in
-                self?.store.allNotebooks().filter { $0.knownOnServer && !$0.hidden }.map(\.id) ?? []
-            })
-        follower.onChange = { [weak self] _ in
+    /// Reagiert auf das Ereignis `notebook.changed` (umbenannt, gelöscht, wiederhergestellt; geht an alle
+    /// Verbindungen, ein Abo ist nicht nötig, VERTRAEGE §11.3 und §11.6). Ohne Aufruf (Tests) bleibt es beim Abgleich per REST.
+    func attachNotebookChanges() {
+        sync.onNotebookChanged = { [weak self] in
             self?.scheduleLiveRefresh()
         }
-        notebookFollower = follower
-        follower.start()
     }
 
     /// Lädt die Bibliothek nach einer Änderung am Notizbuch neu: nach `liveRefreshDelay` Ruhe, spätestens nach

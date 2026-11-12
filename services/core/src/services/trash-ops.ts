@@ -13,6 +13,7 @@ import { HttpError } from '../errors.ts';
 import { SEMESTER_LOCK_KEY } from '../lib/locks.ts';
 import { decodeCursor, encodeCursor, type CursorKey } from '../lib/pagination.ts';
 import { appendOp } from '../sync/append.ts';
+import { publishAfterCommit } from '../sync/events.ts';
 import { resolveDataPath } from './material.ts';
 import { emitSessionUpdated } from './sessions.ts';
 import {
@@ -168,6 +169,10 @@ async function lockAffected(tx: Tx, kind: TrashKind, id: string, mode: Mode): Pr
   return affected;
 }
 
+/**
+ * Server-Operation in den Strom des Notizbuchs schreiben. Bei `notebook.*` geht in derselben Transaktion das Ereignis
+ * `notebook.changed` an alle Verbindungen (VERTRAEGE §11.6), bei `page.restore` nicht.
+ */
 async function appendServerOp(
   tx: Tx,
   notebookId: string,
@@ -181,6 +186,13 @@ async function appendServerOp(
     clockUncertain: false,
     origin: 'server',
   });
+  if (kind.startsWith('notebook.')) {
+    await publishAfterCommit(tx, {
+      type: 'event',
+      name: 'notebook.changed',
+      data: { notebook_id: notebookId, kind: kind === 'notebook.delete' ? 'delete' : 'restore' },
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
