@@ -617,17 +617,26 @@ final class SyncEngineTests: XCTestCase {
         let draft = try XCTUnwrap(
             InkOpBuilder.pageCreate(page: page, nowMS: 1, offsetMS: nil, makeID: { InkID.uuidV7() }))
         XCTAssertTrue(h.engine.enqueue(drafts: [draft]))
+        // Der Core bestätigt `page.create` erst später: Beim Abgleich wartet es noch
+        h.factory.configure = { socket, _ in
+            socket.opPolicy = { _, kind, _ in kind == "page.create" ? .silent : .ack }
+        }
         h.start()
-        _ = await eventually { h.engine.state == .online }
+        let socket = try await waitForSocket(h, index: 0)
+        let sent = await eventually { socket.ops.count == 1 }
+        XCTAssertTrue(sent)
 
         let model = InkPageModel(
             pageID: page.id, pageSize: CGSize(width: 595, height: 842),
             store: FileInkPageStore(root: h.directory.appendingPathComponent("Ink")))
         await h.engine.reconcile(page: model, binding: h.binding)
+        await h.clock.settle()
+        XCTAssertEqual(h.engine.pendingOpIDs(kind: "page.create", pageID: page.id), [draft.opID])
 
+        socket.ack(socket.opIDs[0])
         let drained = await eventually { h.engine.pendingCount == 0 }
         XCTAssertTrue(drained)
-        let kinds = h.factory.sockets[0].ops.compactMap { $0.object["kind"] as? String }
+        let kinds = socket.ops.compactMap { $0.object["kind"] as? String }
         XCTAssertEqual(kinds, ["page.create"])
     }
 
