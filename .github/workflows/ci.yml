@@ -1,5 +1,6 @@
 # CI (10 §1): Lint, Typen, Tests, Codegen-Prüfung, Contract-Tests, Secret-Scanning.
 # Swift: Contract-Check im Swift-6-Sprachmodus unter Linux; die iPad-App baut und testet der Job `ipad` auf einem macOS-Runner im Simulator.
+# Der Mac-Helfer `sg-tunnel` (apps/mac-tunnel) baut und testet der Job `mac-tunnel` auf einem macOS-Runner (UX-12, PR 3).
 name: CI
 
 on:
@@ -211,6 +212,57 @@ jobs:
       - name: Verfahrenstabelle (Loopback)
         if: always() && steps.changes.outputs.run == 'true'
         run: grep -A8 "Selbsttest über Loopback" "$RUNNER_TEMP/spike-test.log" || true
+
+  mac-tunnel:
+    name: Mac-Helfer sg-tunnel (bauen und testen)
+    # UX-12, PR 3: Swift-Paket apps/mac-tunnel. Bauen wie `sg start` (release), `swift test` mit Testvektoren aus dem Vertrag,
+    # Loopback-Tests (TLS-PSK-Client -> Listener -> Fake-Core am Unix-Socket) und Tests der Schlüsseldatei. Kein Funk, kein Bonjour.
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Betrifft die Änderung den Mac-Helfer?
+        id: changes
+        run: |
+          # Wie beim Job `ipad`: Im PR ist HEAD^1 der Stand von main. Lässt sich das nicht bestimmen, wird gebaut.
+          run=true
+          if files="$(git diff --name-only HEAD^1 HEAD 2>/dev/null)"; then
+            pattern='^(apps/mac-tunnel/|\.github/workflows/ci\.yml$)'
+            if ! grep -qE "$pattern" <<<"$files"; then
+              run=false
+              echo "Keine Änderung am Mac-Helfer, Build wird übersprungen."
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+      - name: Swift-Version
+        if: steps.changes.outputs.run == 'true'
+        run: swift --version
+      - name: Bauen (release, wie "sg start")
+        if: steps.changes.outputs.run == 'true'
+        run: swift build -c release --package-path apps/mac-tunnel
+      - name: Programm startet (Hilfe und Argumentprüfung)
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          apps/mac-tunnel/.build/release/sg-tunnel --help
+          # Ohne Pflichtargumente bricht der Helfer mit Code 64 ab
+          set +e
+          apps/mac-tunnel/.build/release/sg-tunnel
+          code=$?
+          set -e
+          test "$code" -eq 64
+      - name: Tests (Testvektoren, Schlüsseldatei, Loopback mit Fake-Core)
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          set -o pipefail
+          swift test --package-path apps/mac-tunnel 2>&1 | tee "$RUNNER_TEMP/mac-tunnel-test.log"
+      - name: Fehler aus dem Testlauf (Kurzfassung)
+        if: failure() && steps.changes.outputs.run == 'true'
+        run: |
+          if [ -f "$RUNNER_TEMP/mac-tunnel-test.log" ]; then
+            grep -nE "error:|failed|XCTAssert" "$RUNNER_TEMP/mac-tunnel-test.log" | head -100 || true
+          fi
 
   secrets:
     name: Secret-Scanning

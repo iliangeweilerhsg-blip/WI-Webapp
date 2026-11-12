@@ -12,6 +12,18 @@ export interface SgConfig {
   logDir: string;
   /** Gnadenfrist beim Beenden des Workers (er beendet erst den laufenden Job). */
   workerStopTimeoutS: number;
+  /** UX-12: Tunnel-Eingang des Core und Mac-Helfer `sg-tunnel`. `SG_TUNNEL=0` schaltet beides ab (wie im Core). */
+  tunnel: boolean;
+  /** UX-12: Ankündigung des Tunnels im Funk (Wi-Fi peer-to-peer). `SG_TUNNEL_P2P=0` schaltet sie ab. */
+  tunnelP2p: boolean;
+  /** Swift-Paket des Helfers (`apps/mac-tunnel`) */
+  tunnelPackageDir: string;
+  /** Schlüsseldatei des Core, wird vom Helfer nur gelesen (`<SG_DATA_DIR>/secrets/tunnel-keys.json`) */
+  tunnelKeysFile: string;
+  /** Tunnel-Eingang des Core, Unix-Socket (`<SG_DATA_DIR>/run/tunnel.sock`) */
+  tunnelSocket: string;
+  /** Zustandsdatei des Helfers für `sg doctor` (`<SG_DATA_DIR>/run/tunnel-state.json`) */
+  tunnelStateFile: string;
 }
 
 export const CORE_STOP_TIMEOUT_S = 15;
@@ -35,6 +47,11 @@ export const DATA_SUBDIRS = [
   'logs',
   'run',
 ] as const;
+
+/** Schalter wie im Core (`services/core/src/config.ts`): `0`, `false`, `off`, `nein` schalten aus, alles andere an. */
+export function parseSwitch(value: string | undefined): boolean {
+  return !['0', 'false', 'off', 'nein'].includes((value ?? '').trim().toLowerCase());
+}
 
 export function parsePositiveInt(name: string, value: string | undefined, fallback: number): number {
   if (value === undefined || value.trim() === '') return fallback;
@@ -67,6 +84,7 @@ export function resolveConfig(
 ): SgConfig {
   const dataDir = resolve(expandHome(env.SG_DATA_DIR?.trim() || '~/StudienGehirn', home));
   const webDir = resolve(env.SG_WEB_DIR?.trim() || join(repoRoot, 'apps', 'web', 'out'));
+  const runDir = join(dataDir, 'run');
   return {
     repoRoot,
     dataDir,
@@ -74,13 +92,19 @@ export function resolveConfig(
     corePort: parsePort(env.SG_CORE_PORT, DEFAULT_CORE_PORT),
     webDir,
     composeFile: join(repoRoot, 'infra', 'docker-compose.yml'),
-    runDir: join(dataDir, 'run'),
+    runDir,
     logDir: join(dataDir, 'logs'),
     workerStopTimeoutS: parsePositiveInt(
       'SG_WORKER_STOP_TIMEOUT_S',
       env.SG_WORKER_STOP_TIMEOUT_S,
       DEFAULT_WORKER_STOP_TIMEOUT_S,
     ),
+    tunnel: parseSwitch(env.SG_TUNNEL),
+    tunnelP2p: parseSwitch(env.SG_TUNNEL_P2P),
+    tunnelPackageDir: join(repoRoot, 'apps', 'mac-tunnel'),
+    tunnelKeysFile: join(dataDir, 'secrets', 'tunnel-keys.json'),
+    tunnelSocket: join(runDir, 'tunnel.sock'),
+    tunnelStateFile: join(runDir, 'tunnel-state.json'),
   };
 }
 

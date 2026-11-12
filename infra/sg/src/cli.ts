@@ -1,10 +1,11 @@
 // Argumente der CLI (reine Logik, gut testbar).
 
 export const COMMANDS = {
-  start: 'Datenbank, Core und Worker starten und die Web-App öffnen',
-  stop: 'Core, Worker und Datenbank anhalten',
+  start: 'Datenbank, Core, Worker und Tunnel-Helfer starten und die Web-App öffnen',
+  stop: 'Tunnel-Helfer, Core, Worker und Datenbank anhalten',
   migrate: 'Datenbank-Migrationen ausführen, vorher Backup (--ohne-backup überspringt es)',
-  doctor: 'Voraussetzungen prüfen (Node, pnpm, uv, ffmpeg, Docker, Ports, Datenordner, freier Speicher)',
+  doctor:
+    'Voraussetzungen prüfen (Node, pnpm, uv, ffmpeg, Docker, Ports, Datenordner, freier Speicher, Tunnel-Helfer)',
   backup: 'Datensicherung in das Ziel aus den Einstellungen (pg_dump + media/ + vault/)',
   restore:
     'Stand wiederherstellen: restore <stand> | restore --test <stand> | restore --automatisch (Monatstest, nur eigene Stände) | restore (Liste)',
@@ -46,7 +47,7 @@ export function helpText(): string {
     'Befehle:',
     ...lines,
     '',
-    'Umgebungsvariablen: SG_DATA_DIR (Standard ~/StudienGehirn), DATABASE_URL, SG_CORE_PORT (Standard 4710), SG_WEB_DIR, SG_MOODLE_URL',
+    'Umgebungsvariablen: SG_DATA_DIR (Standard ~/StudienGehirn), DATABASE_URL, SG_CORE_PORT (Standard 4710), SG_WEB_DIR, SG_MOODLE_URL, SG_TUNNEL und SG_TUNNEL_P2P (0 schaltet aus)',
     'Hinweis: Backups sind nicht signiert. Spiele mit "restore" nur eigene Backups ein, einem fremden Stand wird vertraut.',
     'Hilfe: pnpm sg --help',
   ].join('\n');

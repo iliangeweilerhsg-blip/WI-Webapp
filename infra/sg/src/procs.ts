@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { DATA_SUBDIRS, type SgConfig } from './config.ts';
 
-export type ServiceName = 'core' | 'worker';
+export type ServiceName = 'core' | 'worker' | 'tunnel';
 
 /** Zerlegt einen Strom in Zeilen und setzt jeder Zeile ein Präfix voran. */
 export function createLinePrefixer(prefix: string, write: (line: string) => void) {
