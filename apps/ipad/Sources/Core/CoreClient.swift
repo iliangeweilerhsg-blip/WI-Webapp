@@ -233,16 +233,18 @@ final class CoreClient {
         self.interfaces = interfaces
     }
 
-    /// Darf eine Anfrage mit Token an diesen Mac gehen? Nur im Subnetz einer aktiven Schnittstelle oder an einen
-    /// `.local`-Namen (UX-12, PR 0). Billig und lokal: Die Schnittstellen werden bei jedem Aufruf neu gelesen, weil
+    /// Darf eine Anfrage mit Token an diesen Mac gehen? Nur im Subnetz einer aktiven Schnittstelle, nie an einen
+    /// `.local`-Namen (UX-12, PR 0; #261). Billig und lokal: Die Schnittstellen werden bei jedem Aufruf neu gelesen, weil
     /// das iPad das Netz wechseln kann.
     func allowsToken(for endpoint: CoreEndpoint) -> Bool {
         TokenDestination.allows(host: endpoint.host, interfaces: interfaces.activeIPv4())
     }
 
-    /// Wirft `otherNetwork`, bevor eine Anfrage mit Token entsteht
+    /// Wirft `rePairingNeeded` (`.local`) oder `otherNetwork`, bevor eine Anfrage mit Token entsteht
     private func requireTokenDestination(_ endpoint: CoreEndpoint) throws {
-        guard allowsToken(for: endpoint) else { throw ConnectionError.otherNetwork }
+        guard allowsToken(for: endpoint) else {
+            throw TokenDestination.isLocalName(endpoint.host) ? ConnectionError.rePairingNeeded : ConnectionError.otherNetwork
+        }
     }
 
     /// `POST /devices/pair/start`: meldet das iPad an und liefert die öffentliche `pairing_id`

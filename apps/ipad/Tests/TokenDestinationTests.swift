@@ -86,10 +86,21 @@ final class TokenDestinationTests: XCTestCase {
         XCTAssertFalse(allows("10.0.0.1", []))
     }
 
-    func testLocalNamesAreAlwaysAllowed() {
-        XCTAssertTrue(allows("mein-mac.local", []))
-        XCTAssertTrue(allows("Mein-Mac.LOCAL", [iface("192.168.1.5", 24)]))
-        XCTAssertTrue(allows("a.b.local", []))
+    func testLocalNamesNeverGetAToken() {
+        // #261: Ein fremdes Netz kann die mDNS-Frage beantworten, darum geht an `.local` nie ein Token
+        XCTAssertFalse(allows("mein-mac.local", []))
+        XCTAssertFalse(allows("Mein-Mac.LOCAL", [iface("192.168.1.5", 24)]))
+        XCTAssertFalse(allows("a.b.local", [iface("192.168.1.5", 24)]))
+        XCTAssertFalse(allows("mein-mac.local", [iface("0.0.0.0", 1)]))
+    }
+
+    func testIsLocalName() {
+        XCTAssertTrue(TokenDestination.isLocalName("mein-mac.local"))
+        XCTAssertTrue(TokenDestination.isLocalName(" Mein-Mac.LOCAL "))
+        XCTAssertFalse(TokenDestination.isLocalName("192.168.1.20"))
+        XCTAssertFalse(TokenDestination.isLocalName("example.com"))
+        XCTAssertFalse(TokenDestination.isLocalName("mac.local.evil.com"))
+        XCTAssertFalse(TokenDestination.isLocalName(".local"))
     }
 
     func testOtherNamesAreRejected() {
@@ -282,14 +293,36 @@ final class TokenOnlyInOwnNetworkClientTests: XCTestCase {
         XCTAssertEqual(transport.requests.count, 1)
     }
 
-    func testLocalNamesAreNotBlocked() async throws {
-        let transport = FakeTransport([.http(status: 200, body: "{}")])
-        let client = Fixtures.client(transport, interfaces: FakeInterfaces([]))
+    func testLocalNamesNeverGetARequestWithToken() async throws {
+        // #261: auch dann nicht, wenn das iPad im Heimnetz hängt
         let endpoint = try XCTUnwrap(CoreEndpoint(host: "mein-mac.local"))
-
-        try await client.checkHealth(endpoint: endpoint, token: Fixtures.token)
-
-        XCTAssertEqual(transport.requests.count, 1)
+        for interfaces in [FakeInterfaces([]), Fixtures.sameNetwork] {
+            let transport = FakeTransport([.http(status: 200, body: "{}")])
+            let file = tempFile()
+            let client = Fixtures.client(transport, interfaces: interfaces)
+            let calls: [(String, @MainActor () async throws -> Void)] = [
+                ("checkHealth", { try await client.checkHealth(endpoint: endpoint, token: Fixtures.token) }),
+                (
+                    "removeDevice",
+                    { try await client.removeDevice(endpoint: endpoint, deviceID: Fixtures.deviceID, token: Fixtures.token) }
+                ),
+                ("modules", { _ = try await client.modules(endpoint: endpoint, token: Fixtures.token) }),
+                (
+                    "downloadSlideDeckFile",
+                    {
+                        try await client.downloadSlideDeckFile(
+                            endpoint: endpoint, token: Fixtures.token, deckID: Fixtures.deviceID, to: file)
+                    }
+                ),
+            ]
+            for (name, call) in calls {
+                let error = await failure(of: call)
+                XCTAssertEqual(error, .rePairingNeeded, name)
+            }
+            XCTAssertEqual(transport.requests.count, 0)
+            XCTAssertEqual(transport.downloadRequests.count, 0)
+            XCTAssertFalse(client.allowsToken(for: endpoint))
+        }
     }
 
     func testPairingWithoutTokenStaysPossibleInAnyNetwork() async throws {
@@ -309,6 +342,17 @@ final class TokenOnlyInOwnNetworkClientTests: XCTestCase {
         XCTAssertEqual(result.deviceToken, Fixtures.token)
         // Die Kopplung schickt kein Token
         XCTAssertTrue(transport.requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == nil })
+    }
+
+    func testRePairingNeededHasQuietTexts() {
+        let error = ConnectionError.rePairingNeeded
+        XCTAssertEqual(error.title, "Bitte einmal neu koppeln")
+        XCTAssertTrue(error.advice.contains("Neu koppeln"))
+        XCTAssertTrue(error.advice.contains("QR-Code"))
+        XCTAssertNotEqual(error.title, ConnectionError.otherNetwork.title)
+        XCTAssertFalse(error.title.contains("nicht im selben Netz"))
+        XCTAssertTrue(error.needsNewPairing)
+        XCTAssertEqual(HomeTexts.rePairingCard, "\(error.title) · \(error.advice)")
     }
 
     func testOtherNetworkHasQuietTexts() {
@@ -448,6 +492,32 @@ final class TokenOnlyInOwnNetworkAppModelTests: XCTestCase {
         await model.pollConnection()
         XCTAssertEqual(model.connection, .connected)
         XCTAssertEqual(transport.requests.count, 1)
+    }
+
+    func testStoredLocalNameShowsRePairingTextWithoutAnyRequest() async {
+        let local = PairedMac(
+            endpoint: CoreEndpoint(host: "mein-mac.local")!, deviceID: Fixtures.deviceID, deviceName: "iPad Test")
+        let transport = FakeTransport([.http(status: 200, body: "{}")])
+        let model = AppModel(
+            client: Fixtures.client(transport, interfaces: Fixtures.sameNetwork),
+            tokenStore: FakeTokenStore(token: Fixtures.token),
+            macStore: FakePairedMacStore(mac: local),
+            deviceName: "iPad Test",
+            appVersion: "0.1.0"
+        )
+
+        await model.pollConnection()
+        await model.pollConnection()
+
+        XCTAssertEqual(transport.requests.count, 0)
+        XCTAssertEqual(model.connection, .disconnected(.rePairingNeeded))
+        // Die Kopplung bleibt, nichts wird gelöscht
+        XCTAssertEqual(model.phase, .paired(local))
+        let badge = model.badgeState
+        XCTAssertFalse(badge.isGreen)
+        XCTAssertEqual(badge.headline, "Bitte einmal neu koppeln")
+        XCTAssertEqual(badge.detail, ConnectionError.rePairingNeeded.advice)
+        XCTAssertNotEqual(badge.headline, "Mac nicht im selben Netz")
     }
 
     func testUnpairDeletesLocallyEvenWhenTheMacIsNotInTheSameNetwork() async {

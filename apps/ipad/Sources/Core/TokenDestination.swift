@@ -18,15 +18,16 @@ protocol InterfaceListing: Sendable {
 ///
 /// Bisher ging das Token an die gespeicherte Adresse des Macs, in jedem Netz. In einem fremden Netz (offenes WLAN,
 /// falsches Gateway) könnte unter dieser Adresse ein fremder Rechner antworten und das Token mitlesen. Darum geht
-/// eine Anfrage mit Token nur an eine IPv4-Adresse im Subnetz einer aktiven Schnittstelle des iPads, oder an einen
-/// `.local`-Namen (mDNS antwortet nur im eigenen Netzsegment). Sonst geht nichts raus.
+/// eine Anfrage mit Token nur an eine IPv4-Adresse im Subnetz einer aktiven Schnittstelle des iPads. Sonst geht nichts
+/// raus.
 ///
-/// Grenzen (schließt erst der Tunnel, PR 4):
-/// - Ein fremdes Netz mit demselben Adressbereich (zum Beispiel `192.168.1.0/24`) besteht die Prüfung. Wer das fremde
-///   Netz stellt, kann per DHCP auch eine sehr weite Netzmaske vergeben.
-/// - `.local` schützt nur gegen das Gateway, nicht gegen andere Teilnehmer: Im fremden Netzsegment kann jeder auf die
-///   mDNS-Frage nach dem Namen antworten. Eine Prüfung der aufgelösten Adresse hilft nicht: Wer antwortet, steht
-///   ja im Subnetz.
+/// `.local`-Namen bekommen nie ein Token (#261): Im fremden Netzsegment kann jeder auf die mDNS-Frage nach dem Namen
+/// antworten, und eine Prüfung der aufgelösten Adresse hilft nicht, denn wer antwortet, steht ja im Subnetz. Darum
+/// löst die Kopplung einen `.local`-Namen einmal auf IPv4 auf und speichert die IP (`PairingController`).
+///
+/// Grenze (schließt erst der Tunnel, PR 4): Ein fremdes Netz mit demselben Adressbereich (zum Beispiel
+/// `192.168.1.0/24`) besteht die Prüfung. Wer das fremde Netz stellt, kann per DHCP auch eine sehr weite Netzmaske
+/// vergeben.
 ///
 /// Tunnel (VPN) und Mobilfunk zählen nicht als eigenes Netz (`SystemInterfaceListing.counts`): Hinter einer
 /// Punkt-zu-Punkt-Verbindung liegt kein Netzsegment. Wohin die Anfrage geht, entscheidet die Gegenstelle
@@ -38,21 +39,25 @@ enum TokenDestination {
     /// - IPv4 (vier Zahlen 0 bis 255, ohne führende Nullen): erlaubt, wenn sie im Subnetz einer der `interfaces` liegt.
     ///   Eine Schnittstelle mit Netzmaske 0 oder mit einer Maske, die nicht aus einem zusammenhängenden Block
     ///   führender Einsen besteht, zählt nicht (sie ließe sonst beliebige Adressen durch).
-    /// - Namen: nur gültige `<name>.local`-Namen, wie `CoreEndpoint` sie annimmt.
+    /// - Namen, auch `.local`: abgewiesen (#261).
     /// - IPv6 und alles andere (auch Unlesbares): abgewiesen. `CoreEndpoint` speichert ohnehin nur IPv4 und
     ///   `.local`, und eine IPv6-Adresse bräuchte eine eigene Subnetzprüfung.
     static func allows(host rawHost: String, interfaces: [InterfaceAddress]) -> Bool {
         let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if host.contains(":") { return false }
-        guard let address = parseIPv4(host) else {
-            return host.hasSuffix(".local") && CoreEndpoint.isAllowedHost(host)
-        }
+        guard let address = parseIPv4(host) else { return false }
         for interface in interfaces where isUsableMask(interface.netmask) {
             if (address & interface.netmask) == (interface.address & interface.netmask) {
                 return true
             }
         }
         return false
+    }
+
+    /// Ist das ein gültiger `<name>.local`-Name? Dann geht kein Token dorthin; er muss zuerst auf IPv4 aufgelöst werden.
+    static func isLocalName(_ rawHost: String) -> Bool {
+        let host = rawHost.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return parseIPv4(host) == nil && host.hasSuffix(".local") && CoreEndpoint.isAllowedHost(host)
     }
 
     /// Vier Zahlen von 0 bis 255 ohne führende Nullen (`010` könnte das System oktal lesen), sonst `nil`

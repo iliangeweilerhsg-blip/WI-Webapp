@@ -35,6 +35,10 @@ struct HomeView: View {
                     if model.connection == .disconnected(.otherNetwork), model.sync?.state != .online {
                         NoticeCard(text: HomeTexts.otherNetworkCard)
                     }
+                    // Gespeicherter `.local`-Name aus älterer Version: einmal neu koppeln, ebenfalls ruhig (#261)
+                    if model.connection == .disconnected(.rePairingNeeded) {
+                        NoticeCard(text: HomeTexts.rePairingCard)
+                    }
                     if let sync = model.sync {
                         if sync.state == .unsupported {
                             NoticeCard(text: HomeTexts.appOutdatedCard)
@@ -117,6 +121,9 @@ enum HomeTexts {
     /// Das iPad ist nicht im Netz des Macs (UX-12, PR 0)
     static let otherNetworkCard =
         "Mac nicht im selben Netz · Deine Notizen bleiben auf dem iPad und gleichen sich später ab."
+
+    /// Die Kopplung speichert einen `.local`-Namen, dorthin geht kein Token mehr (#261)
+    static let rePairingCard = "\(ConnectionError.rePairingNeeded.title) · \(ConnectionError.rePairingNeeded.advice)"
 
     /// Zeile während des Abgleichs aller Seiten (UX-46). Zählt herunter, am Ende verschwindet sie. Markierte Seiten,
     /// die sich nicht lesen ließen (#252), zählt sie nicht mit: Sie werden nie abgeglichen und stehen als eigener

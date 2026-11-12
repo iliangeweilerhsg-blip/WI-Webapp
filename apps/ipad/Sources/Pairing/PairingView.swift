@@ -122,7 +122,7 @@ struct PairingView: View {
         } header: {
             Text("Adresse von Hand")
         } footer: {
-            Text("Der Mac zeigt seine Adresse neben dem Code an.")
+            Text("Der Mac zeigt seine IP-Adresse neben dem Code an. Ein Name mit .local wird einmal in die IP-Adresse umgewandelt.")
         }
     }
 

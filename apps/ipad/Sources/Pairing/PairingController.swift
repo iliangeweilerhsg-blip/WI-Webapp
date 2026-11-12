@@ -41,6 +41,7 @@ final class PairingController {
     private let macStore: any PairedMacStore
     private let deviceName: String
     private let appVersion: String?
+    private let localResolver: any LocalNameResolving
 
     @ObservationIgnored private var nonce: String = PairingInput.makeNonce()
     @ObservationIgnored private var wrongCodes = 0
@@ -50,8 +51,10 @@ final class PairingController {
         tokenStore: any TokenStore,
         macStore: any PairedMacStore,
         deviceName: String,
-        appVersion: String?
+        appVersion: String?,
+        localResolver: any LocalNameResolving = SystemLocalNameResolver()
     ) {
+        self.localResolver = localResolver
         self.client = client
         self.tokenStore = tokenStore
         self.macStore = macStore
@@ -69,19 +72,29 @@ final class PairingController {
     /// Bonjour-Weg und Eingabe von Hand: Anfrage am Mac anlegen.
     /// Liegt gerade ein QR-Code zur Bestätigung vor, passiert nichts: Eine Bonjour-Auflösung,
     /// die erst nach dem Scan fertig wird, soll die Rückfrage nicht wegschieben.
-    func start(endpoint: CoreEndpoint) async {
+    ///
+    /// Ein `.local`-Name wird zuerst auf IPv4 aufgelöst; alle Schritte (auch `pair/start`) gehen an die IP, und
+    /// gespeichert wird die IP (#261). Löst der Name nicht auf, geht nichts raus.
+    func start(endpoint requested: CoreEndpoint) async {
         guard !isBusy else { return }
         if case .reviewing = state { return }
         lastError = nil
         beginAttempt()
-        state = .requesting(endpoint)
+        state = .requesting(requested)
+        guard let endpoint = await addressForPairing(requested) else {
+            guard state == .requesting(requested) else { return }
+            lastError = .localNameNotResolved
+            state = .idle
+            return
+        }
+        guard state == .requesting(requested) else { return }
         do {
             let pairingID = try await client.pairStart(endpoint: endpoint, deviceName: deviceName, nonce: nonce)
             // Inzwischen abgebrochen?
-            guard state == .requesting(endpoint) else { return }
+            guard state == .requesting(requested) else { return }
             state = .awaitingCode(endpoint, pairingID: pairingID)
         } catch {
-            guard state == .requesting(endpoint) else { return }
+            guard state == .requesting(requested) else { return }
             lastError = ConnectionError.wrap(error)
             state = .idle
         }
@@ -127,14 +140,32 @@ final class PairingController {
         lastError = error
     }
 
+    /// Die Adresse, an die die Kopplung geht: IPv4 bleibt, ein `.local`-Name wird aufgelöst. `nil`, wenn das nicht
+    /// klappt. Ein Ergebnis, das selbst wieder ein Name ist, zählt als gescheitert: Gespeichert wird nie ein Name.
+    private func addressForPairing(_ endpoint: CoreEndpoint) async -> CoreEndpoint? {
+        guard TokenDestination.isLocalName(endpoint.host) else { return endpoint }
+        guard let resolved = await localResolver.resolve(endpoint),
+            TokenDestination.parseIPv4(resolved.host) != nil
+        else { return nil }
+        return resolved
+    }
+
     private func beginAttempt() {
         nonce = PairingInput.makeNonce()
         wrongCodes = 0
     }
 
-    private func confirm(endpoint: CoreEndpoint, pairingID: String, code: String, fallback: PairingState) async {
+    private func confirm(
+        endpoint requested: CoreEndpoint, pairingID: String, code: String, fallback: PairingState
+    ) async {
         lastError = nil
-        state = .confirming(endpoint)
+        state = .confirming(requested)
+        // QR-Code mit `.local`-Host (nicht von uns erzeugt): ebenfalls erst auflösen, es wird nur die IP gespeichert
+        guard let endpoint = await addressForPairing(requested) else {
+            lastError = .localNameNotResolved
+            state = fallback
+            return
+        }
         let result: PairingResult
         do {
             result = try await client.pairConfirm(
