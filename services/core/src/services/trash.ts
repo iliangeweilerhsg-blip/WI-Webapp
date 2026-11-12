@@ -143,6 +143,18 @@ export const TITLE: Record<TrashKind, SQL> = {
   photo: sql`'Foto'`,
 };
 
+/**
+ * Anzeigename, wenn die Art als Elternobjekt erscheint (Liste und `restore_parent_deleted`). Ein Notizbuch nennt dort
+ * sein Modul („Modul A · Vorlesung“), damit man eine gelöschte Seite im Papierkorb wiederfindet. Ohne Modul bleibt der Titel.
+ * Unqualifizierte Spalten, damit der Ausdruck mit und ohne Alias der Notizbuch-Tabelle funktioniert.
+ */
+export function parentTitle(kind: TrashKind): SQL {
+  if (kind === 'notebook') {
+    return sql`coalesce((SELECT m.name FROM module m WHERE m.id = module_id) || ' · ', '') || title`;
+  }
+  return TITLE[kind];
+}
+
 export const TRASH_KINDS: readonly TrashKind[] = [
   'semester',
   'module',
@@ -397,7 +409,7 @@ export async function restoreFromTrash(tx: Tx, id: string): Promise<TrashRestore
   const parentRef = PARENT[kind];
   if (parentRef) {
     const [parent] = await tx.execute<{ id: string; deleted: boolean; title: string }>(
-      sql`SELECT p.id, p.deleted_at IS NOT NULL AS deleted, ${TITLE[parentRef.kind]} AS title
+      sql`SELECT p.id, p.deleted_at IS NOT NULL AS deleted, ${parentTitle(parentRef.kind)} AS title
           FROM ${sql.identifier(parentRef.kind)} p
           WHERE p.id = (SELECT ${sql.identifier(parentRef.fk)} FROM ${sql.identifier(kind)} WHERE id = ${id})`,
     );
