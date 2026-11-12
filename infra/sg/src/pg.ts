@@ -3,7 +3,7 @@
 // Passwörter gehen nie in Argumente oder Logs: lokal als `PGPASSWORD` in der Umgebung, im Container gar nicht
 // nötig (Socket-Anmeldung des offiziellen Images).
 import { spawn } from 'node:child_process';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import type { SgConfig } from './config.ts';
 
@@ -166,6 +166,41 @@ export function createPg(
       ? ['-U', url.user, '-d', db]
       : ['-h', url.host, '-p', url.port, '-U', url.user, '-d', db];
 
+  // Lokal: `pg_dump`/`pg_restore` in der Hauptversion des Servers verwenden. Ein neueres Werkzeug (z. B. 17/18 gegen
+  // einen 16er-Server, wie es `apt`/Homebrew im PATH nach vorn legen) schreibt `SET transaction_timeout = 0;` in den
+  // Dump, und `pg_restore --exit-on-error` bricht dann am älteren Server ab ("unrecognized configuration parameter").
+  // Gibt es keine passende Installation, bleibt es beim Programm im PATH.
+  const toolCache = new Map<string, Promise<string>>();
+  const serverTool = (name: 'pg_dump' | 'pg_restore', db: string): Promise<string> => {
+    if (mode !== 'local') return Promise.resolve(name);
+    const cached = toolCache.get(name);
+    if (cached) return cached;
+    const resolved = (async () => {
+      try {
+        const probe = await exec(
+          'psql',
+          [...connArgs(db), '-X', '-q', '-A', '-t', '-c', 'SHOW server_version_num'],
+          { env: env ?? {} },
+        );
+        const num = Number.parseInt(probe.stdout.trim(), 10);
+        if (probe.code !== 0 || !Number.isFinite(num) || num < 100000) return name;
+        const major = Math.floor(num / 10000);
+        for (const dir of [
+          `/usr/lib/postgresql/${major}/bin`,
+          `/opt/homebrew/opt/postgresql@${major}/bin`,
+          `/usr/local/opt/postgresql@${major}/bin`,
+        ]) {
+          if (existsSync(`${dir}/${name}`)) return `${dir}/${name}`;
+        }
+      } catch {
+        // Erkennung ist nur eine Hilfe: bei Fehlern das Programm im PATH nehmen
+      }
+      return name;
+    })();
+    toolCache.set(name, resolved);
+    return resolved;
+  };
+
   return {
     mode,
     database: url.database,
@@ -201,7 +236,10 @@ export function createPg(
       const result =
         mode === 'docker'
           ? await exec('docker', compose(...base), { stdoutFile: file })
-          : await exec(base[0] as string, base.slice(1), { stdoutFile: file, ...(env ? { env } : {}) });
+          : await exec(await serverTool('pg_dump', url.database), base.slice(1), {
+              stdoutFile: file,
+              ...(env ? { env } : {}),
+            });
       if (result.code !== 0) throw fail('Die Sicherung der Datenbank (pg_dump) ist fehlgeschlagen', result);
     },
     async restore(db, file) {
@@ -212,7 +250,8 @@ export function createPg(
         });
         if (result.code !== 0) throw fail('Das Einspielen des Dumps (pg_restore) ist fehlgeschlagen', result);
       } else {
-        const result = await exec('pg_restore', [...connArgs(db), ...flags, file], { env: env ?? {} });
+        const bin = await serverTool('pg_restore', db);
+        const result = await exec(bin, [...connArgs(db), ...flags, file], { env: env ?? {} });
         if (result.code !== 0) throw fail('Das Einspielen des Dumps (pg_restore) ist fehlgeschlagen', result);
       }
     },

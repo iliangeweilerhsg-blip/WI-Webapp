@@ -686,6 +686,32 @@ describe('pg (Docker und lokal)', () => {
     expect(JSON.stringify(calls[0]?.args)).not.toContain('geheim');
   });
 
+  it('lokal: pg_dump/pg_restore passend zur Server-Version suchen, sonst das Programm im PATH nehmen', async () => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const exec: Exec = async (cmd, args) => {
+      calls.push({ cmd, args });
+      // Server 99: keine passende Installation, also Rückfall auf den PATH
+      return { code: 0, stdout: cmd === 'psql' ? '990000\n' : '', stderr: '' };
+    };
+    const pg = createPg(cfg, exec, 'local');
+    await pg.dump('/tmp/x');
+    await pg.restore('sg_x', '/tmp/x');
+    expect(calls.map((c) => c.cmd)).toEqual(['psql', 'pg_dump', 'psql', 'pg_restore']);
+    expect(calls[0]?.args).toContain('SHOW server_version_num');
+    // Ohne lesbare Version (Fehler der Abfrage) ebenfalls PATH
+    const calls2: string[] = [];
+    const pg2 = createPg(
+      cfg,
+      async (cmd) => {
+        calls2.push(cmd);
+        return cmd === 'psql' ? { code: 2, stdout: '', stderr: 'x' } : { code: 0, stdout: '', stderr: '' };
+      },
+      'local',
+    );
+    await pg2.dump('/tmp/x');
+    expect(calls2).toEqual(['psql', 'pg_dump']);
+  });
+
   it('openPg wählt Docker, wenn der Container läuft, sonst lokal, sonst Fehler', async () => {
     const make =
       (dockerOut: string, local: number): Exec =>
