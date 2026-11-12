@@ -36,7 +36,7 @@ describe('measureDir', () => {
     fill(join(dir, 'vault', 'Notiz.md'), 30);
     fill(join(dir, 'logs', 'core.log'), 4);
     const sizes = await measureDir(dir);
-    expect(sizes).toEqual({ total: 1234, media: 1200, vault: 30 });
+    expect(sizes).toEqual({ total: 1234, media: 1200, vault: 30, complete: true });
   });
 
   it('folgt Symlinks nicht', async () => {
@@ -54,8 +54,42 @@ describe('measureDir', () => {
     }
   });
 
+  it('folgt einem Symlink auf einen Ordner außerhalb auch auf oberster Ebene nicht', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'sg-storage-out-'));
+    try {
+      fill(join(outside, 'sub', 'gross.bin'), 50_000);
+      symlinkSync(outside, join(dir, 'vault'));
+      const sizes = await measureDir(dir);
+      expect(sizes.total).toBeLessThan(1000);
+      expect(sizes.complete).toBe(true);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('bricht bei zu vielen Einträgen ab und meldet den Teilstand als unvollständig', async () => {
+    for (let i = 0; i < 50; i += 1) fill(join(dir, 'media', `f${i}.bin`), 10);
+    const sizes = await measureDir(dir, { maxEntries: 20 });
+    expect(sizes.complete).toBe(false);
+    expect(sizes.total).toBeLessThan(500);
+  });
+
+  it('bricht nach der Zeitgrenze ab', async () => {
+    for (let i = 0; i < 10; i += 1) fill(join(dir, 'media', `f${i}.bin`), 10);
+    let now = 0;
+    // Jeder Blick auf die Uhr kostet 1 s: nach wenigen Einträgen ist die Grenze von 3 s überschritten
+    const sizes = await measureDir(dir, { timeLimitMs: 3000, now: () => (now += 1000) });
+    expect(sizes.complete).toBe(false);
+    expect(sizes.total).toBeLessThan(100);
+  });
+
   it('ein fehlender Ordner ergibt 0', async () => {
-    expect(await measureDir(join(dir, 'gibt-es-nicht'))).toEqual({ total: 0, media: 0, vault: 0 });
+    expect(await measureDir(join(dir, 'gibt-es-nicht'))).toEqual({
+      total: 0,
+      media: 0,
+      vault: 0,
+      complete: true,
+    });
   });
 });
 
@@ -100,6 +134,22 @@ describe('StorageMeter', () => {
     expect('db_bytes' in failing).toBe(false);
     const hanging = await new StorageMeter({ dataDir: dir, db: fakeDb('haengt'), dbTimeoutMs: 20 }).read();
     expect('db_bytes' in hanging).toBe(false);
+  });
+
+  it('ein unvollständiger Durchlauf wird gemeldet und zwischengespeichert (kein neuer Durchlauf je Aufruf)', async () => {
+    for (let i = 0; i < 30; i += 1) fill(join(dir, 'media', `f${i}.bin`), 10);
+    const onIncomplete = vi.fn();
+    const meter = new StorageMeter({
+      dataDir: dir,
+      db: fakeDb(1),
+      walkLimits: { maxEntries: 5 },
+      onIncomplete,
+    });
+    const first = await meter.read();
+    const second = await meter.read();
+    expect(SystemStorageSchema.safeParse(first).success).toBe(true);
+    expect(onIncomplete).toHaveBeenCalledTimes(1);
+    expect(second.measured_at).toBe(first.measured_at);
   });
 
   it('ein fehlender Datenordner wirft (die Route macht daraus 503)', async () => {

@@ -143,7 +143,7 @@ describe('Hilfsfunktionen', () => {
   it('formatSize und daysLeft', () => {
     expect(formatSize(null)).toBe('–');
     expect(formatSize(512)).toBe('512 B');
-    expect(formatSize(2048)).toBe('2.0 KB');
+    expect(formatSize(2048)).toBe('2 KB');
     expect(daysLeft(iso(29 * 86_400_000 + 1000), new Date(NOW))).toBe(30);
     expect(daysLeft(iso(-1000), new Date(NOW))).toBe(0);
   });
@@ -261,7 +261,7 @@ describe('DataSettings', () => {
     mount(<DataSettings />);
     expect(await screen.findByText(/Letztes Backup:/)).toBeInTheDocument();
     expect(screen.getByText(/veraltet/)).toBeInTheDocument();
-    expect(screen.getByText('2.0 KB')).toBeInTheDocument();
+    expect(screen.getByText('2 KB')).toBeInTheDocument();
 
     const input = screen.getByLabelText(/Backup-Ziel/);
     await user.clear(input);

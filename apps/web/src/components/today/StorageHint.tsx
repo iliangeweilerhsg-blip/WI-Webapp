@@ -3,10 +3,16 @@
 import Link from 'next/link';
 import type { Session } from '@sg/shared';
 import { useRecordingView } from '../../lib/recording';
-import { formatSize, isStorageLow, lecturesThatFit, useSystemStorage } from '../../lib/storage.ts';
+import {
+  formatSize,
+  isStorageLow,
+  lecturesThatFit,
+  STORAGE_MIN_FREE_BYTES,
+  useSystemStorage,
+} from '../../lib/storage.ts';
 
 /**
- * Speicher-Hinweis auf „Heute“ (UX-11): Reicht der freie Platz nicht für etwa 2 Vorlesungen Audio, steht hier eine
+ * Speicher-Hinweis auf „Heute“ (UX-11): Ist weniger frei als `max(5 GB, Bedarf für 2 Vorlesungen)`, steht hier eine
  * ruhige Zeile mit Link zu Einstellungen → Daten. Nie, solange eine Session läuft oder pausiert. Bei Fehlern der
  * Abfrage (etwa ein älterer Core): nichts.
  */
@@ -24,8 +30,8 @@ export function StorageHint({ sessions }: { sessions: readonly Session[] }) {
       {fit < 1
         ? 'Das reicht nicht für eine ganze Vorlesung.'
         : fit === 1
-          ? 'Das reicht für etwa eine Vorlesung.'
-          : `Das reicht für etwa ${fit} Vorlesungen.`}{' '}
+          ? 'Das reicht nur noch für etwa eine Vorlesung.'
+          : `Empfohlen sind mindestens ${formatSize(STORAGE_MIN_FREE_BYTES)}, damit macOS, Datenbank, Backups und Verarbeitung Luft haben.`}{' '}
       Räume Platz frei, bevor du aufnimmst.{' '}
       <Link
         href="/einstellungen?bereich=daten"

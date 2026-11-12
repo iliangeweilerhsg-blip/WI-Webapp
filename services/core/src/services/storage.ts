@@ -12,20 +12,41 @@ export const STORAGE_SIZE_TTL_MS = 5 * 60_000;
 /** Höchstzeit für die Abfrage der Datenbankgröße; danach fehlt `db_bytes` */
 const DB_SIZE_TIMEOUT_MS = 2000;
 
-interface DirSizes {
+/** Höchstzeit eines Durchlaufs über den Datenordner (ms); danach gilt der Teilstand als Untergrenze */
+export const STORAGE_WALK_TIME_LIMIT_MS = 15_000;
+/** Höchstzahl der Einträge eines Durchlaufs; danach gilt der Teilstand als Untergrenze */
+export const STORAGE_WALK_MAX_ENTRIES = 1_000_000;
+
+export interface DirSizes {
   total: number;
   media: number;
   vault: number;
-  measuredAt: number;
+  /** false: der Durchlauf hat eine Grenze erreicht, die Summen sind eine Untergrenze */
+  complete: boolean;
+}
+
+export interface MeasureDirLimits {
+  /** Höchstzeit in ms (Standard `STORAGE_WALK_TIME_LIMIT_MS`) */
+  timeLimitMs?: number;
+  /** Höchstzahl der Einträge (Standard `STORAGE_WALK_MAX_ENTRIES`) */
+  maxEntries?: number;
+  /** Uhr in ms (nur für Tests) */
+  now?: () => number;
 }
 
 /**
  * Summe der Dateigrößen unter `root`, aufgeteilt nach dem ersten Pfadteil (`media`, `vault`). Symlinks werden nicht
- * verfolgt (sie zählen mit ihrer eigenen Größe), unlesbare Einträge und Dateien, die während des Durchlaufs
- * verschwinden, werden übersprungen.
+ * verfolgt (sie zählen mit ihrer eigenen Größe, ein Link auf einen Ordner führt nicht aus dem Datenordner heraus),
+ * unlesbare Einträge und Dateien, die während des Durchlaufs verschwinden, werden übersprungen.
+ * Der Durchlauf ist begrenzt (Zeit und Zahl der Einträge), damit sehr viele Dateien den Core nicht beschäftigen:
+ * Wird eine Grenze erreicht, endet er mit `complete: false` und den bis dahin gezählten Größen.
  */
-export async function measureDir(root: string): Promise<Omit<DirSizes, 'measuredAt'>> {
-  const sizes = { total: 0, media: 0, vault: 0 };
+export async function measureDir(root: string, limits: MeasureDirLimits = {}): Promise<DirSizes> {
+  const now = limits.now ?? Date.now;
+  const deadline = now() + (limits.timeLimitMs ?? STORAGE_WALK_TIME_LIMIT_MS);
+  const maxEntries = limits.maxEntries ?? STORAGE_WALK_MAX_ENTRIES;
+  const sizes: DirSizes = { total: 0, media: 0, vault: 0, complete: true };
+  let seen = 0;
   const pending: Array<{ dir: string; top: string | null }> = [{ dir: root, top: null }];
   while (pending.length > 0) {
     const { dir, top } = pending.pop()!;
@@ -36,8 +57,14 @@ export async function measureDir(root: string): Promise<Omit<DirSizes, 'measured
       continue;
     }
     for (const entry of entries) {
+      seen += 1;
+      if (seen > maxEntries || now() > deadline) {
+        sizes.complete = false;
+        return sizes;
+      }
       const path = join(dir, entry.name);
       const group = top ?? entry.name;
+      // Dirent aus readdir: ein Symlink ist nie `isDirectory()`, er wird also nicht betreten
       if (entry.isDirectory()) {
         pending.push({ dir: path, top: group });
         continue;
@@ -56,6 +83,10 @@ export async function measureDir(root: string): Promise<Omit<DirSizes, 'measured
   return sizes;
 }
 
+interface CachedSizes extends DirSizes {
+  measuredAt: number;
+}
+
 export interface StorageMeterOptions {
   dataDir: string;
   db: Db;
@@ -63,12 +94,16 @@ export interface StorageMeterOptions {
   /** Höchstzeit für `pg_database_size` (ms) */
   dbTimeoutMs?: number;
   now?: () => number;
+  /** Grenzen des Durchlaufs (nur für Tests anders als der Standard) */
+  walkLimits?: Omit<MeasureDirLimits, 'now'>;
+  /** Meldet einen Durchlauf, der eine Grenze erreicht hat */
+  onIncomplete?: (sizes: DirSizes) => void;
 }
 
 /** Misst Speicherplatz; die Größe des Datenordners wird höchstens alle `ttlMs` neu bestimmt. */
 export class StorageMeter {
-  private cache: DirSizes | null = null;
-  private inflight: Promise<DirSizes> | null = null;
+  private cache: CachedSizes | null = null;
+  private inflight: Promise<CachedSizes> | null = null;
   private readonly ttlMs: number;
   private readonly now: () => number;
 
@@ -80,12 +115,16 @@ export class StorageMeter {
     this.now = options.now ?? Date.now;
   }
 
-  private sizes(): Promise<DirSizes> {
+  private sizes(): Promise<CachedSizes> {
     const cached = this.cache;
     if (cached && this.now() - cached.measuredAt < this.ttlMs) return Promise.resolve(cached);
     // Gleichzeitige Aufrufe teilen sich einen Durchlauf
-    this.inflight ??= measureDir(this.options.dataDir)
-      .then((s) => (this.cache = { ...s, measuredAt: this.now() }))
+    // Auch ein unvollständiger Durchlauf gilt `ttlMs` lang, sonst liefe der teure Durchlauf bei jedem Aufruf
+    this.inflight ??= measureDir(this.options.dataDir, { ...this.options.walkLimits, now: this.now })
+      .then((s) => {
+        if (!s.complete) this.options.onIncomplete?.(s);
+        return (this.cache = { ...s, measuredAt: this.now() });
+      })
       .finally(() => {
         this.inflight = null;
       });

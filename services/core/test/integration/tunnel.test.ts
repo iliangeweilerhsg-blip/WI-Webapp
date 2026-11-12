@@ -309,6 +309,17 @@ describe('Tunnel-Eingang: Wächter und Routentabelle', () => {
     expect(good.status).toBe(200);
   });
 
+  it('GET /system/storage über den Tunnel: nur mit Token, nie als lokal, ohne Pfade (UX-11)', async () => {
+    const storage = routes.find((r) => r.url === `${API}/system/storage`);
+    expect(storage?.config?.sgAccess).toBeUndefined();
+    const none = await viaTunnel(t.sock, { path: `${API}/system/storage` });
+    expect(none.status).toBe(401);
+    expect(errorCode(none)).toBe('device_token_required');
+    const good = await viaTunnel(t.sock, { path: `${API}/system/storage`, token });
+    expect(good.status).toBe(200);
+    expect(good.body).not.toContain(t.config.dataDir);
+  });
+
   it('abgelehnte Tunnel-Anfragen bekommen Connection: close', async () => {
     const none = await viaTunnel(t.sock, { path: `${API}/health` });
     expect(none.headers.connection).toBe('close');
@@ -327,6 +338,7 @@ describe('Tunnel-Eingang: Wächter und Routentabelle', () => {
       `POST ${API}/devices/pair/start`,
       `POST ${API}/devices/pair/confirm`,
       `GET ${API}/health`,
+      `GET ${API}/system/storage`,
     ]) {
       expect(table, known).toContain(known);
     }

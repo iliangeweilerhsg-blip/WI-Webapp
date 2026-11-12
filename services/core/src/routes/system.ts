@@ -82,7 +82,18 @@ export async function systemRoutes(app: FastifyInstance, deps: SystemRouteDeps):
   );
 
   const storage =
-    deps.storage ?? (deps.dataDir ? new StorageMeter({ dataDir: deps.dataDir, db: deps.db }) : null);
+    deps.storage ??
+    (deps.dataDir
+      ? new StorageMeter({
+          dataDir: deps.dataDir,
+          db: deps.db,
+          onIncomplete: (sizes) =>
+            app.log.warn(
+              { bytes: sizes.total },
+              'Größe des Datenordners nur teilweise gemessen (Zeit- oder Dateigrenze erreicht)',
+            ),
+        })
+      : null);
   if (storage) {
     // Zugang wie die übrigen Systemrouten: lokal ohne Token, aus dem Netz mit Geräte-Token (kein `sgAccess`)
     typed.get(

@@ -1,6 +1,12 @@
 'use client';
 
-import { formatSize, isStorageLow, lecturesThatFit, useSystemStorage } from '../../lib/storage.ts';
+import {
+  formatSize,
+  isStorageLow,
+  lecturesThatFit,
+  STORAGE_MIN_FREE_BYTES,
+  useSystemStorage,
+} from '../../lib/storage.ts';
 
 /**
  * Speicherplatz in Einstellungen → Daten (UX-11): belegt (Daten plus Datenbank) und frei, darunter die Aufteilung,
@@ -28,7 +34,9 @@ export function StorageInfo() {
         {fit < 1
           ? 'Das reicht nicht für eine ganze Vorlesung Audio.'
           : `Das reicht für etwa ${fit} ${fit === 1 ? 'Vorlesung' : 'Vorlesungen'} Audio.`}
-        {isStorageLow(data.data_dir_free_bytes) ? ' Räume Platz frei, bevor du aufnimmst.' : ''}
+        {isStorageLow(data.data_dir_free_bytes)
+          ? ` Empfohlen sind mindestens ${formatSize(STORAGE_MIN_FREE_BYTES)} frei, damit macOS, Datenbank, Backups und Verarbeitung Luft haben. Räume Platz frei, bevor du aufnimmst.`
+          : ''}
       </p>
       {parts.length > 0 ? (
         <ul className="text-sm text-text-muted">
