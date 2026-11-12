@@ -163,8 +163,15 @@ def env_file_open(path: Path) -> bool:
     """True, wenn der Schlüssel aus `path` nicht genutzt werden darf: für Gruppe oder andere
     lesbar (nicht `chmod 600`), Symlink, keine reguläre Datei oder fremder Besitzer. Eine fehlende
     Datei gilt nicht als offen."""
-    problem = inspect_env_file(path)
+    return _problem_blocks_key(inspect_env_file(path))
+
+
+def _problem_blocks_key(problem: str | None) -> bool:
     return problem is not None and problem != "fehlt"
+
+
+#: Kennzeichen für „Befund nicht übergeben“ (`take_llm_settings` prüft dann selbst)
+_UNCHECKED = "__ungeprueft__"
 
 
 def take_llm_settings(
@@ -172,6 +179,7 @@ def take_llm_settings(
     *,
     key_from_environment: bool,
     environ: MutableMapping[str, str] | None = None,
+    env_problem: str | None = _UNCHECKED,
 ) -> LlmSettings:
     """Liest `SG_LLM` und `ANTHROPIC_API_KEY` und entfernt danach **alle** Variablen, die mit
     `ANTHROPIC_` beginnen, aus `environ` (Standard: os.environ), damit Kindprozesse und das SDK
@@ -180,6 +188,10 @@ def take_llm_settings(
     `key_from_environment`: Der Schlüssel stand schon vor dem Laden der `.env` in der Umgebung
     (Entwicklung). Sonst stammt er aus `env_file`; ist die Datei für Gruppe oder andere lesbar,
     wird er nicht genutzt (`env_offen`).
+
+    `env_problem`: der Befund, den `load_env_file` beim Lesen **genau dieser** Bytes geliefert hat.
+    So gilt die Prüfung für den gelesenen Inhalt und nicht für eine zweite Öffnung der Datei
+    (kein TOCTOU zwischen Lesen und Prüfen). Ohne Angabe wird `env_file` neu geprüft.
     """
     env = os.environ if environ is None else environ
     provider = (env.get("SG_LLM") or DEFAULT_LLM_PROVIDER).strip() or DEFAULT_LLM_PROVIDER
@@ -192,6 +204,8 @@ def take_llm_settings(
         return LlmSettings(provider="fake")
     if key is None:
         return LlmSettings(provider=provider, issue="kein_schluessel")
-    if not key_from_environment and env_file_open(env_file):
+    if env_problem == _UNCHECKED:
+        env_problem = inspect_env_file(env_file)
+    if not key_from_environment and _problem_blocks_key(env_problem):
         return LlmSettings(provider=provider, issue="env_offen")
     return LlmSettings(provider=provider, api_key=key)

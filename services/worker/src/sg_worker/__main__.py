@@ -62,7 +62,9 @@ def main() -> int:
     env_problem = load_env_file(env_file)
     settings = Settings.from_env()  # nach dem Laden der .env erneut lesen
     # §20.5: Schlüssel übernehmen, danach alle ANTHROPIC_* aus der Umgebung entfernen
-    llm_settings = take_llm_settings(env_file, key_from_environment=key_from_environment)
+    llm_settings = take_llm_settings(
+        env_file, key_from_environment=key_from_environment, env_problem=env_problem
+    )
     log = setup_logging(settings.data_dir, settings.log_level)
     llm.configure(llm_settings)
     if env_problem in ENV_UNSAFE:

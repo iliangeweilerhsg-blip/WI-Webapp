@@ -515,6 +515,28 @@ def test_load_env_then_take(tmp_path: Path) -> None:
     assert settings.issue == "env_offen" and environ == {}
 
 
+def test_take_uses_finding_of_the_read_bytes(tmp_path: Path) -> None:
+    """Der Befund beim Lesen gilt, nicht eine zweite Öffnung (kein TOCTOU zwischen beiden)."""
+    from sg_worker.config import load_env_file
+
+    path = env_file(tmp_path, 0o644)
+    environ: dict[str, str] = {}
+    problem = load_env_file(path, environ)
+    assert problem == "offen" and environ["ANTHROPIC_API_KEY"] == KEY
+    path.chmod(0o600)  # nach dem Lesen „repariert“: der gelesene Schlüssel bleibt gesperrt
+    settings = take_llm_settings(
+        path, key_from_environment=False, environ=environ, env_problem=problem
+    )
+    assert (settings.configured, settings.issue) == (False, "env_offen")
+    environ = {}
+    problem = load_env_file(path, environ)
+    path.chmod(0o644)  # umgekehrt: sicher gelesen, danach geöffnet
+    settings = take_llm_settings(
+        path, key_from_environment=False, environ=environ, env_problem=problem
+    )
+    assert settings.configured and settings.api_key == KEY
+
+
 @pytest.mark.parametrize(
     ("env", "provider", "issue"),
     [
