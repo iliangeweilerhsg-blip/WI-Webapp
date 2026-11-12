@@ -545,8 +545,12 @@ final class InkLibraryService {
             var page = change.updated
             if change.original.createQueued {
                 // Geänderte Felder festhalten: Bei einem Konflikt gewinnen nur diese (L9)
+                // Wartet kein `page.update` der Seite mehr, sind frühere Änderungen bestätigt: Sie zählen nicht mehr,
+                // sonst überschriebe ein späterer Konflikt eine neuere Änderung des Mac an diesen Feldern.
                 let changed = LibraryPage.changedFields(from: change.original, to: change.updated).map(\.rawValue)
-                page.dirtyFields = Array(Set(change.original.dirtyFields ?? []).union(changed)).sorted()
+                let waiting = !sync.pendingOpIDs(kind: "page.update", pageID: change.original.id).isEmpty
+                let earlier = waiting ? (change.original.dirtyFields ?? LibraryPage.Field.allCases.map(\.rawValue)) : []
+                page.dirtyFields = Array(Set(earlier).union(changed)).sorted()
                 guard
                     let draft = InkOpBuilder.pageUpdate(
                         page: change.updated, nowMS: nowMS(), offsetMS: sync.clockOffsetForDrafts,

@@ -143,6 +143,32 @@ final class SessionFollowerTests: XCTestCase {
         XCTAssertTrue(rig.feed.subscribes.isEmpty)
     }
 
+    func testAFailedLoadIsRetriedSoTheLectureIsFollowedWithoutANewConnection() async {
+        let rig = makeRig()
+        rig.backend.failing = true
+        rig.feed.deliver(.connected)
+        await rig.clock.settle()
+        XCTAssertNil(rig.follower.running)
+
+        rig.backend.failing = false
+        await rig.clock.advance(5)
+        let followed = await eventually { rig.follower.running != nil }
+        XCTAssertTrue(followed)
+        XCTAssertEqual(rig.feed.subscribes.count, 1)
+    }
+
+    func testRetriesAfterFailuresStopAfterAFewAttempts() async {
+        let rig = makeRig()
+        rig.backend.failing = true
+        rig.feed.deliver(.connected)
+        await rig.clock.settle()
+        XCTAssertEqual(rig.backend.sessionCalls, 1)
+        for _ in 0..<6 {
+            await rig.clock.advance(5)
+        }
+        XCTAssertEqual(rig.backend.sessionCalls, 1 + SessionFollower.maxLoadRetries)
+    }
+
     // MARK: Strom
 
     func testTheNextSeqMovesTheSlideADuplicateAndOldSeqAreIgnored() async {
@@ -278,6 +304,30 @@ final class SessionFollowerTests: XCTestCase {
         let started = await eventually { rig.follower.running != nil }
         XCTAssertTrue(started)
         XCTAssertEqual(rig.feed.subscribes.last?.stream, stream)
+    }
+
+    func testASessionThatEndsWhileTheSnapshotLoadsIsNotFollowed() async {
+        let rig = makeRig()
+        rig.feed.deliver(.connected)
+        // Das Ende kommt an, bevor der Snapshot (noch „laeuft“, updated 1000) verarbeitet ist
+        rig.feed.deliver(.sessionUpdated(brief(state: "beendet", updated: 2000)))
+        let loaded = await eventually { rig.backend.snapshotCalls == 1 }
+        XCTAssertTrue(loaded)
+        await rig.clock.settle()
+        XCTAssertNil(rig.follower.running)
+        XCTAssertNil(rig.follower.currentSlide)
+        XCTAssertTrue(rig.feed.subscribes.isEmpty)
+    }
+
+    func testANewerSessionUpdatedBeatsAnOlderSnapshot() async {
+        let rig = makeRig()
+        rig.feed.deliver(.connected)
+        rig.feed.deliver(.sessionUpdated(brief(state: "pausiert", updated: 2000)))
+        let ready = await eventually { rig.follower.running != nil }
+        XCTAssertTrue(ready)
+        await rig.clock.settle()
+        XCTAssertEqual(rig.follower.running?.state, "pausiert")
+        XCTAssertEqual(rig.follower.running?.updatedAtMS, 2000)
     }
 
     // MARK: Neue Verbindung

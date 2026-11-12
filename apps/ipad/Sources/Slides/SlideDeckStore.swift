@@ -107,6 +107,9 @@ enum SlideCachePlan {
 final class SlideDeckStore {
     static let defaultMaxFileBytes = 400 * 1024 * 1024
     static let defaultMaxTotalBytes = 1024 * 1024 * 1024
+    /// Eine abgelehnte Datei (Prüfsumme, Größe, kein PDF) wird mit derselben `sha256` so lange nicht erneut geladen.
+    /// Sonst zöge jeder Folienwechsel bis zu 400 MB neu.
+    static let rejectedRetryInterval: TimeInterval = 10 * 60
 
     /// Zählt bei jeder Änderung hoch, damit SwiftUI neu zeichnet
     private(set) var revision = 0
@@ -124,6 +127,7 @@ final class SlideDeckStore {
     @ObservationIgnored private var infos: [String: SlideDeckInfo] = [:]
     @ObservationIgnored private var accessed: [String: Date] = [:]
     @ObservationIgnored private var inflight: [String: _Concurrency.Task<SlideDeckInfo?, Never>] = [:]
+    @ObservationIgnored private var rejected: [String: (sha256: String, at: Date)] = [:]
 
     init(
         directory: URL,
@@ -202,6 +206,11 @@ final class SlideDeckStore {
             return nil
         }
         guard var info = fetched, info.deckID == deckID, !info.slides.isEmpty else { return nil }
+        if let earlier = rejected[deckID], earlier.sha256 == info.sha256,
+            now().timeIntervalSince(earlier.at) < SlideDeckStore.rejectedRetryInterval
+        {
+            return nil
+        }
 
         let folder = folderURL(deckID)
         let part = folder.appendingPathComponent("deck.pdf.part")
@@ -230,6 +239,7 @@ final class SlideDeckStore {
         guard case .ok(let size) = verdict else {
             // Falsche oder beschädigte Datei: weg damit, nie rendern
             try? FileManager.default.removeItem(at: part)
+            rejected[deckID] = (expected, now())
             return nil
         }
 

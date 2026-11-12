@@ -34,6 +34,9 @@ extension SyncEngine: SessionFeed {}
 final class SessionFollower {
     /// Neu laden (Reset, Lücke) höchstens in diesem Abstand
     static let reloadInterval: TimeInterval = 5
+    /// Scheitert das Laden (REST), wird es so oft im Abstand von `reloadInterval` wiederholt. Danach erst wieder bei
+    /// einer neuen Verbindung, einem Ereignis oder einer Lücke.
+    static let maxLoadRetries = 3
 
     /// Die verfolgte Session, `nil` ohne laufende Vorlesung
     private(set) var running: SessionBrief?
@@ -52,11 +55,15 @@ final class SessionFollower {
     @ObservationIgnored private var streamSeq = 0
     @ObservationIgnored private var subscribedStream: String?
     @ObservationIgnored private var lastUpdatedAtMS = 0
+    /// Neueste Fassung aus `session.updated` je Session (nur diese Verbindung). Ein Snapshot, der älter ist (die Session
+    /// endete, während er lud), verliert dagegen.
+    @ObservationIgnored private var newestUpdates: [String: SessionBrief] = [:]
     @ObservationIgnored private var lastLoadAt: Date?
     @ObservationIgnored private var loadTask: _Concurrency.Task<Void, Never>?
     @ObservationIgnored private var delayedLoad: _Concurrency.Task<Void, Never>?
     /// Zählt bei jedem Neuladen und jeder neuen Verbindung hoch. Eine veraltete Antwort wird verworfen.
     @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var failedLoads = 0
     @ObservationIgnored private var started = false
 
     init(
@@ -89,6 +96,8 @@ final class SessionFollower {
             streamSeq = 0
             subscribedStream = nil
             lastLoadAt = nil
+            newestUpdates = [:]
+            failedLoads = 0
             requestLoad(immediately: true)
         case .sessionUpdated(let brief):
             apply(sessionUpdate: brief)
@@ -116,6 +125,9 @@ final class SessionFollower {
     }
 
     private func apply(sessionUpdate brief: SessionBrief) {
+        if (newestUpdates[brief.id]?.updatedAtMS ?? Int.min) <= brief.updatedAtMS {
+            newestUpdates[brief.id] = brief
+        }
         if let followed = running, followed.id == brief.id {
             if brief.updatedAtMS < lastUpdatedAtMS { return }
             lastUpdatedAtMS = brief.updatedAtMS
@@ -181,12 +193,21 @@ final class SessionFollower {
         }
     }
 
+    private func retryAfterFailure(generation gen: Int) {
+        guard gen == generation, !_Concurrency.Task.isCancelled, failedLoads < SessionFollower.maxLoadRetries
+        else { return }
+        failedLoads += 1
+        requestLoad(immediately: false)
+    }
+
     private func load(generation gen: Int) async {
         let sessions: [SessionBrief]
         do {
             sessions = try await backend.activeSessions()
         } catch {
-            // Ohne Verbindung bleibt der letzte Stand stehen. Die nächste Verbindung lädt neu.
+            // Ohne Verbindung bleibt der letzte Stand stehen. Ein einzelner Fehler darf die Vorlesung aber nicht bis zur
+            // nächsten Verbindung unsichtbar lassen: kurz darauf erneut versuchen.
+            retryAfterFailure(generation: gen)
             return
         }
         guard gen == generation, !_Concurrency.Task.isCancelled else { return }
@@ -203,21 +224,33 @@ final class SessionFollower {
         do {
             snapshot = try await backend.snapshot(sessionID: session.id)
         } catch {
+            retryAfterFailure(generation: gen)
             return
         }
         guard gen == generation, !_Concurrency.Task.isCancelled else { return }
+        failedLoads = 0
         guard let snapshot else {
             if running != nil || subscribedStream != nil { stopFollowing() }
             return
         }
-        let stream = "session:\(session.id)"
+        // Kam während des Ladens ein neuerer Stand per `session.updated` (etwa „beendet“), gilt er
+        var current = snapshot.session
+        if let newer = newestUpdates[current.id], newer.updatedAtMS > current.updatedAtMS {
+            current = newer
+        }
+        guard current.isActive else {
+            if running != nil || subscribedStream != nil { stopFollowing() }
+            return
+        }
+        let stream = "session:\(current.id)"
         if let old = subscribedStream, old != stream {
             feed.unsubscribe(stream: old)
         }
         let latest = snapshot.latestSlide
-        let changed = running != snapshot.session || currentSlide != latest
-        running = snapshot.session
-        lastUpdatedAtMS = max(lastUpdatedAtMS, snapshot.session.updatedAtMS)
+        let changed = running != current || currentSlide != latest
+        let sameSession = running?.id == current.id
+        running = current
+        lastUpdatedAtMS = sameSession ? max(lastUpdatedAtMS, current.updatedAtMS) : current.updatedAtMS
         currentSlide = latest
         streamSeq = snapshot.streamSeq
         subscribedStream = stream

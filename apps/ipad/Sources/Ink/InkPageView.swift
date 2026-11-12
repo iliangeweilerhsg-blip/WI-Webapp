@@ -357,8 +357,13 @@ struct InkPageView: View {
     }
 
     private func openSlidePage(_ slide: SlideRef) {
-        guard let page = library.slidePage(notebookID: currentNotebookID, slide: slide) else { return }
-        _Concurrency.Task { await show(pageID: page.id) }
+        _Concurrency.Task {
+            // Setzt der Stift zwischen Freigabe und Wechsel an, wartet der Wechsel erneut bis zum Absetzen. Sonst
+            // verschwände die Ansicht mitten im Strich.
+            guard gate.slideChanged(slide) != nil else { return }
+            guard let page = library.slidePage(notebookID: currentNotebookID, slide: slide) else { return }
+            await show(pageID: page.id)
+        }
     }
 
     /// Zeigt die Folie der offenen Seite (oder nichts bei einer freien Seite)

@@ -64,6 +64,20 @@ final class InkConflictFieldsTests: XCTestCase {
         XCTAssertEqual(h.library.page(secondPageID)?.dirtyFields, ["index"])
     }
 
+    func testAConfirmedChangeNoLongerCountsForTheNextOne() async {
+        let h = SyncHarness()
+        XCTAssertTrue(h.service.setTemplate(pageID: firstPageID, .liniert))
+        await startOnline(h)
+        // Das `page.update` mit der Vorlage ist bestätigt
+        let acked = await eventually { h.engine.pendingCount == 0 }
+        XCTAssertTrue(acked)
+
+        h.library.upsert(secondPage())
+        XCTAssertTrue(h.service.movePage(notebookID: notebookID, from: 0, to: 1))
+        // Nur das Umsortieren wartet: Ein Konflikt darf eine neuere Vorlage des Mac nicht mit der alten überschreiben
+        XCTAssertEqual(h.library.page(firstPageID)?.dirtyFields, ["index"])
+    }
+
     func testMergingThePagesDropsTheListOnlyWhenNothingIsWaiting() throws {
         let h = SyncHarness()
         XCTAssertTrue(h.service.setTemplate(pageID: firstPageID, .liniert))

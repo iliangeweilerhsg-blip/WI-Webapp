@@ -170,6 +170,28 @@ final class SlideDeckStoreTests: XCTestCase {
         XCTAssertFalse(left.contains("deck.pdf.part"))
     }
 
+    func testARejectedFileIsNotDownloadedAgainUntilItsChecksumChanges() async {
+        let pdf = TestPDF.make(pages: pageSizes)
+        let transport = FakeTransport([
+            .http(status: 200, body: deckJSON(id: "deck-1", sha: String(repeating: "0", count: 64)))
+        ])
+        transport.downloadData = pdf
+        let store = makeStore(transport, directory: directory())
+
+        let first = await store.ensure(deckID: "deck-1")
+        XCTAssertNil(first)
+        // Gleiche Prüfsumme kurz danach (nächster Folienwechsel): nur die Metadaten, kein zweiter Download
+        let second = await store.ensure(deckID: "deck-1")
+        XCTAssertNil(second)
+        XCTAssertEqual(transport.downloadRequests.count, 1)
+
+        // Der Mac hat die Datei inzwischen korrigiert: neue Prüfsumme, neuer Versuch
+        transport.replies = [.http(status: 200, body: deckJSON(id: "deck-1", sha: TestPDF.sha256(pdf)))]
+        let third = await store.ensure(deckID: "deck-1")
+        XCTAssertEqual(third?.deckID, "deck-1")
+        XCTAssertEqual(transport.downloadRequests.count, 2)
+    }
+
     func testAFileOverTheSizeLimitIsDiscarded() async {
         let pdf = TestPDF.make(pages: pageSizes)
         let transport = FakeTransport([.http(status: 200, body: deckJSON(id: "deck-1", sha: TestPDF.sha256(pdf)))])
