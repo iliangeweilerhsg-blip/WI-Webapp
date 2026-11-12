@@ -28,7 +28,7 @@ Owner ──Ziel──▶ Claude (Lead, Claude Code in der Cloud)
                  └──▶ Claude-Subagents/Workflows, parallel      Branches feat/…
                           │
                           ▼
-                 frischer Subagent reviewt (Opus bei Code, Sonnet bei Doku)
+                 frischer Subagent reviewt (Opus bei Code, Sonnet bei Doku und kleinen Darstellungs-Änderungen)
                  Claude merged nach Freigabe
 
 (ruht: Argon-Queue mit Label agent:argon, PRs "[Argon] …", Review und Nacharbeit über GitHub)
@@ -88,7 +88,7 @@ Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so gü
 |---|---|
 | **Fable 5.2** | Planung von Features (Owner-Regel vom 11.11.2026): Umsetzungsplan mit Vertragstext, Dateien/Scope, Schnittstellen, Testfällen und Fallstricken. Der Plan liegt unter `docs/plaene/` und wird vor der Umsetzung von Opus geprüft |
 | **Opus 5.5** | Reviews von Code, Security-Reviews und Gegen-Reviews (ersetzt Argons Gegen-Review), Security-kritischer Code, Debugging, Merge-Konflikte, Verträge und Architektur |
-| **Sonnet 5.5** | Schreibt den Code nach Plan, außerdem UI und Doku. Reviewt Doku. Code prüft immer Opus (Merge-Regeln in CLAUDE.md) |
+| **Sonnet 5.5** | Schreibt den Code nach Plan, außerdem UI und Doku. Reviewt Doku und kleine Darstellungs-Änderungen ohne Logik (Texte, Layout, Rendering; Owner-Freigabe vom 12.11.2026). Logik, Sync, iPad-Daten und Sicherheit prüft immer Opus |
 | **Haiku** | Mechanisches: Umbenennen, Labels, einfache Formatierung |
 
 (Ruht: Die frühere Gemini-Tabelle mit Argon und Flash gilt nicht, solange Argon pausiert ist.)
@@ -97,14 +97,14 @@ Für jeden Agenten wird das Modell bewusst gewählt: so stark wie nötig, so gü
 
 Der Owner hat Claude beauftragt, den Token-Verbrauch zu senken, **ohne die Qualität zu verschlechtern**. Claude verantwortet das als Orchestrator. Die Regeln:
 
-**Review-Tiefe nach Risiko.** Das erste Review jedes eigenen Code-PRs macht ein frischer Opus-Subagent, Doku-PRs ein frischer Sonnet-Subagent. Die Tiefe richtet sich nach dem Risiko:
+**Review-Tiefe nach Risiko.** Das erste Review jedes eigenen Code-PRs macht ein frischer Opus-Subagent. Doku-PRs und kleine Darstellungs-Änderungen ohne Logik prüft ein frischer Sonnet-Subagent. Die Tiefe richtet sich nach dem Risiko:
 
 | Stufe | Wann | Review-Umfang |
 |---|---|---|
 | **A – kritisch** | Anmeldung und Geräte-Kopplung (Tokens, Auth-Wächter), Moodle-Zugangsdaten und andere Geheimnisse, Dateipfade und Uploads, Löschen/Papierkorb/Wiederherstellen, Backup/Restore, Sync-Protokoll, Sperren und Nebenläufigkeit, Migrationen, alles mit Datenverlust- oder Sicherheitsrisiko | voll: Gegenproben auf alle Kernpfade (gezielt eingebaute Fehler, die die Tests finden müssen), echte Nachstellung gegen Postgres oder den echten Core, Angriffsszenarien |
 | **B – normal** | UI-Features, Darstellung, Einstellungen (ohne Zugangsdaten und Berechtigungen), Hilfsfunktionen | gezielt: Diff und direkt betroffene Dateien, 2–3 Gegenproben auf die Kernlogik, Browser-Check nur wenn die Tests das Verhalten nicht abdecken (z. B. Layout, echte Timer) |
 
-**Im Zweifel gilt Stufe A.** Stufe B nur, wenn der PR keinen Bereich aus A berührt, auch nicht indirekt. Security-Kritisches bekommt zusätzlich ein Gegen-Review durch einen weiteren frischen Opus-Subagent. Doku-PRs prüft ein frischer Sonnet-Subagent im Umfang von Stufe B.
+**Im Zweifel gilt Stufe A.** Stufe B nur, wenn der PR keinen Bereich aus A berührt, auch nicht indirekt. Security-Kritisches bekommt zusätzlich ein Gegen-Review durch einen weiteren frischen Opus-Subagent. Doku-PRs und kleine Darstellungs-Änderungen ohne Logik prüft ein frischer Sonnet-Subagent im Umfang von Stufe B. Im Zweifel prüft Opus.
 
 **Nachrunden.** Das Erst-Review macht immer ein frischer Subagent. Die folgenden Nachrunden erfüllen die Regel „unabhängiges Review“ weiterhin.
 - Eine kleine Nacharbeit (Stufe B, bis 150 geänderte Zeilen und ohne Berührung von Bereichen aus Stufe A) prüft Claude selbst anhand des Diffs.
