@@ -1,6 +1,7 @@
 # UX-Durchlauf 3: Studienalltag mit Direktverbindung und Moodle-Abgabe
 
-> **Stand:** 12.11.2026, Commit `135c769` auf `main`. Der Web-Entwurf zur Abgabe (PR #298) ist noch nicht gemergt und wurde nur gelesen.
+> **Stand:** 12.11.2026, Commit `135c769` auf `main`. Danach kam nur #300 (CI) dazu. Offen und nur gelesen: PR #303 (Core, `assign.save_draft` und `assign.submit`) und PR #298 (Web, Seite „Abgabe“).
+> **Abgrenzung:** Das Sicherheitsaudit zu UX-12 steht in #304 (Befunde M1, M2, N1 bis N4, I1 bis I4). Dieser Durchlauf erfasst diese Punkte nicht noch einmal, sondern verweist darauf. Achtung bei den Nummern: UX-304 ist ein Befund dieses Dokuments, #304 ist das Audit.
 > **Zweck:** Den Alltag ein drittes Mal durchspielen. Neu sind die Direktverbindung im Hörsaal (UX-12, #274 bis #276), die Aufnahme in der App-Hülle (#210), die Speicherplatz-Anzeige (#285), die iPad-Restpunkte (#291) und der Anfang der Moodle-Abgabe (#288, #294, #299).
 > **Methode:** Anleitungen, Pläne, offene `entscheidung`-Issues und Code gelesen. Nichts wurde ausgeführt, nichts am Gerät oder im Hörsaal gemessen.
 > Aussagen mit „nicht geprüft“ sind Annahmen. Abschnitt 7 sammelt sie für den Test am Gerät.
@@ -54,7 +55,7 @@ Die IDs verweisen auf Abschnitt 3 (neu) oder auf offene Issues.
 | | |
 |---|---|
 | **Muss** | Lösung wählen, als Entwurf speichern, prüfen, endgültig einreichen. Danach ist klar, dass es angekommen ist. |
-| **Heute** | Auf `main` gibt es den Rahmen (Bestätigungscodes, Schalter `SG_MOODLE_ACTIONS`, #294) und den Upload-Speicher (#299). Die Handler `assign.*` (PR 3) und die Seite „Abgabe“ (PR #298) fehlen noch. Abgeben geht heute nur in Moodle selbst. Die Fristenliste zeigt die Fristen. |
+| **Heute** | Auf `main` gibt es den Rahmen (Bestätigungscodes, Schalter `SG_MOODLE_ACTIONS`, #294) und den Upload-Speicher (#299). Die Handler `assign.*` liegen in PR #303, die Seite „Abgabe“ in PR #298. Beides ist nicht gemergt. Abgeben geht heute nur in Moodle selbst. Die Fristenliste zeigt die Fristen. |
 | **Kann schiefgehen** | Die Lösung liegt als Handschrift im Notizbuch „Übung“. Daraus wird nirgends eine Datei (UX-311). Die Abgabe ist ausgeschaltet, bis ein Schalter in der `.env` steht. Die Anleitung nennt ihn nicht (UX-312). Läuft der Moodle-Zugang am Fristabend ab, führt der Weg über Terminal und, mit Uni-Anmeldung, über die Safari-Konsole (UX-313). Die Fristenliste sagt nicht, was schon abgegeben ist (UX-314). Umfang und Grenzen: #289. |
 
 ### 1.5 Prüfungsvorbereitung
@@ -152,6 +153,7 @@ Regel R1 bleibt: kein Dialog während einer Vorlesung. Swift lässt sich im Cont
   2. Einstellungen → Geräte: eine Zeile „Direktverbindung: bereit“ oder der Grund. Am Gerät ohne Schlüssel die Marke „Neu koppeln nötig“ mit den drei Schritten.
   3. „Heute“: eine ruhige Zeile, solange ein Gerät ohne Schlüssel gekoppelt ist. Nie während einer Session.
 - **Offen:** Neue Route, also Vertrag durch den Lead und Sicherheits-Review.
+- **Bezug zu #304:** Das Audit verlangt in M1 und N4 dasselbe aus Sicht der Sicherheit: Geräte ohne Tunnel-Schlüssel am Mac markieren, „Entfernen“ anbieten, nach einer neuen Kopplung das alte Gerät gleichen Namens zum Entfernen vorschlagen. Laut M1 meldet „Neu koppeln“ am iPad das alte Gerät nicht ab, es bleibt mit gültigem Token stehen. UX-301 ist die Alltagsseite davon. Beides gehört in einen PR, die Maßnahmen am Haupteingang bleiben bei #304.
 
 ### UX-302 · `sg start` sagt „läuft“, auch wenn das iPad nicht durchkommt
 - **Beleg:** `infra/sg/src/commands.ts`, `start()`: Nach „Studien-Gehirn läuft“ startet `superviseTunnel` den Helfer. Geprüft wird nur, ob der Prozess lebt. `runTunnelChecks` ruft allein `doctor()` auf. Die Firewall-Frage kann nach jedem Neubau wiederkommen (`tunnel-doctor.ts`, `checkFirewall`), und `sg start` öffnet im selben Moment den Browser (`spawn('open', …)`). Die Auswertung von `socketfilterfw --getappblocked` ist laut Kommentar an `parseFirewallBlocked` nicht geprüft. Ob am Mac das WLAN eingeschaltet ist, prüft keine Zeile in `doctor.ts` oder `tunnel-doctor.ts`, obwohl `VORLESUNGSTAG.md` es verlangt.
@@ -170,13 +172,14 @@ Regel R1 bleibt: kein Dialog während einer Vorlesung. Swift lässt sich im Cont
 - **Beleg:** `infra/sg/src/backup.ts`, Kopfkommentar: `secrets/` ist nicht im Stand (Plan UX-12, E3). `tunnel-doctor.ts` nennt den Fall („aus einem Backup wiederhergestellt“). `docs/anleitungen/BACKUP-WIEDERHERSTELLEN.md` sagt dagegen, das iPad gleiche sich ab, „sobald es sich wieder mit dem Mac verbindet“. In `restore.ts` und `backup-commands.ts` steht kein Hinweis. Auf dem iPad tragen `tunnelMacNotFound` und `tunnelHandshakeFailed` denselben Titel „Mac nicht gefunden“ (`apps/ipad/Sources/Core/ConnectionError.swift`).
 - **Folge:** Auf einem neuen Mac oder nach verlorenem Datenordner verbindet sich das iPad nie. Der Titel schickt den Nutzer auf die falsche Fährte. Bleibt der Datenordner erhalten, betrifft es nur Geräte, deren Schlüssel fehlt.
 - **Vorschlag:** Absatz in der Anleitung. `sg restore` druckt am Ende „iPad zu Hause neu koppeln, wenn `sg doctor` Geräte ohne Schlüssel meldet“. Auf dem iPad bekommt der gescheiterte Handshake nach mehreren Versuchen einen eigenen Titel, etwa „Schlüssel passt nicht mehr“, mit dem Rat zum Neukoppeln. Zusammen mit UX-301 sieht man es auch am Mac.
+- **Bezug zu #304:** M2 behandelt die Sicherheitsseite der Wiederherstellung (widerrufene Geräte werden wieder gültig) und verlangt ebenfalls eine klare Ansage von `sg restore`. I2 nennt einen zweiten Weg in denselben Zustand: Ein Start mit `SG_TUNNEL=0` löscht alle Schlüssel, danach zeigt das iPad ebenfalls „Mac nicht gefunden“. Der eigene Titel auf dem iPad hilft in beiden Fällen. Die Texte von `sg restore` sollten mit der Maßnahme aus M2 zusammen entstehen.
 
 ### UX-305 · Das iPad sperrt sich beim Zuhören
 - **Beleg:** In `apps/ipad/Sources` setzt nichts `isIdleTimerDisabled`. `Tunnel/MacRoute.swift`: `RouteState.idle` gilt bei „App im Hintergrund“. Zurückgesetzt wird der Weg, „wenn die App in den Vordergrund kommt“, mit `wifiSeconds = 2` und `directSeconds = 10`. `Tunnel/TunnelDialer.swift`: Der gemerkte Endpunkt wird bei „Vordergrund, Hintergrund“ vergessen.
 - **Folge:** Wer zwei Minuten zuhört, findet ein gesperrtes iPad vor. Nach dem Entsperren sucht es erst im WLAN, dann direkt. Im Modus „Auf Folie“ steht so lange die alte Folie. Das wiederholt sich mehrmals je Vorlesung. Die Dauer ist am Gerät nicht geprüft.
 - **Vorschlag:**
   1. Solange eine Vorlesung läuft und die Schreibfläche offen ist, bleibt der Bildschirm an. Endet die Vorlesung oder verlässt man die Schreibfläche, gilt wieder die Systemeinstellung.
-  2. Den zuletzt erfolgreichen Weg über eine kurze Sperre merken, damit der Umweg über das WLAN entfällt. Das ändert die Wegewahl aus dem Sicherheits-Review und braucht ein neues.
+  2. Den zuletzt erfolgreichen Weg über eine kurze Sperre merken, damit der Umweg über das WLAN entfällt. Das ändert die Wegewahl aus dem Sicherheits-Review und braucht ein neues. #304 führt das Vergessen des Cache bei Vordergrund und Hintergrund als geprüfte Eigenschaft („Geprüft, ohne Befund“, iPad).
 - **Frage an den Owner:** Abschnitt 5.
 
 ### UX-306 · iPad-Punkt nur in der Vorlesungs-Ansicht
@@ -215,7 +218,7 @@ Regel R1 bleibt: kein Dialog während einer Vorlesung. Swift lässt sich im Cont
 - **Frage an den Owner:** Abschnitt 5.
 
 ### UX-312 · Die Abgabe ist aus, und niemand sagt, wie sie angeht
-- **Beleg:** `services/core/src/config.ts`: `SG_MOODLE_ACTIONS` ist leer, also keine Aktion aus T1-24. Der Schalter steht in `docs/VERTRAEGE.md`, in der Spezifikation und im Plan, nicht in `docs/anleitungen/MOODLE.md`. PR #298 nennt unter „Offene Punkte“: Die Seite zeigt den Zustand erst nach dem Klick („Das ist noch nicht freigeschaltet.“).
+- **Beleg:** `services/core/src/config.ts`: `SG_MOODLE_ACTIONS` ist leer, also keine Aktion aus T1-24. Der Schalter steht in `docs/VERTRAEGE.md`, in der Spezifikation und im Plan, nicht in `docs/anleitungen/MOODLE.md`. PR #298 nennt unter „Offene Punkte“: Die Seite zeigt den Zustand erst nach dem Klick („Das ist noch nicht freigeschaltet.“). PR #303 lässt beide Handler hinter dem Schalter und nennt den Test am echten Moodle als offen.
 - **Vorschlag:** Abschnitt „Abgaben freischalten“ in `MOODLE.md`, mit dem Test an einer folgenlosen Aufgabe (Frage 5 in #289). Die Seite „Abgabe“ zeigt oben eine ruhige Zeile, wenn die Aktion aus ist, und bietet „In Moodle öffnen“ als Hauptknopf. Gehört in PR 4 oder einen direkten Nachfolger, kein eigenes Ticket nötig.
 
 ### UX-313 · Moodle-Zugang läuft am Fristabend ab
@@ -226,7 +229,7 @@ Regel R1 bleibt: kein Dialog während einer Vorlesung. Swift lässt sich im Cont
   3. `sg moodle login` stößt am laufenden Core eine sofortige Prüfung an, damit die Minute entfällt.
 
 ### UX-314 · Fristenliste ohne Abgabestand
-- **Beleg:** `apps/web/src/components/MoodleDeadlines.tsx` zeigt Fristen nach Datum, ohne Stand. PR #298 lädt den Stand nur auf der Seite „Abgabe“ (`GET /moodle/assignments/{id}/submission`).
+- **Beleg:** `apps/web/src/components/MoodleDeadlines.tsx` zeigt Fristen nach Datum, ohne Stand. PR #298 lädt den Stand nur auf der Seite „Abgabe“ (`GET /moodle/assignments/{id}/submission`). PR #303 liefert in der Vorschau nur Aufgabenname und `assignment_id`, der Kursname fehlt dort (dort unter „Offene Punkte“).
 - **Vorschlag:** Die Fristenliste zeigt „Entwurf“ oder „eingereicht“, sobald der Core den Stand kennt. Erst nach PR 3 und PR 4 sinnvoll.
 
 ### UX-315 · Kein Hinweis auf den Mac-Akku
@@ -277,6 +280,8 @@ Ergänzt #205.
 - b) Nein, Seiten verschiebt man einzeln von Hand.
 - c) Beides.
 
+Das Audit #304 nennt in M1 eine eigene Owner-Entscheidung (Token aus dem Netz nur noch über den Tunnel). Sie gehört dorthin, nicht hierher.
+
 Weiter offen und für diesen Durchlauf wichtig: #201 (Mac zugeklappt), #202 (Start ohne Terminal), #207 (Lernen vorziehen), #219 Frage 4 (Folien vorab), #239, #240, #271, #287 und #289.
 
 ---
@@ -304,13 +309,13 @@ Danach: UX-304, UX-318, UX-314, UX-306, UX-303, UX-319.
 
 | PR | Inhalt | Bereich | Review |
 |---|---|---|---|
-| 1 | `sg`: UX-302, UX-303, Hinweis aus UX-304 | `infra/sg/src`, `docs/anleitungen/` | Opus |
+| 1 | `sg`: UX-302, UX-303, Hinweis aus UX-304 (abgestimmt mit #304, M2 und I2) | `infra/sg/src`, `docs/anleitungen/` | Opus |
 | 2 | iPad: UX-305 Teil 1, UX-317, Titel aus UX-304, UX-319 Punkt 2 | `apps/ipad/Sources/Ink`, `Core`, `Home` | Opus |
 | 3 | Web: UX-307, UX-308 | `ModulView.tsx`, `today/`, `lib/sessions.ts` | Opus |
 | 4 | Web: UX-310, UX-306, UX-316 (Web-Teil) | `rueckblick/`, `recording/`, `dashboard/StatusBar.tsx`, `today/StartCard.tsx` | Opus |
-| 5 | Core und Web: UX-301 | neue lokale Route, `settings/DevicesSettings.tsx`, `today/` | Opus, dazu Gegen-Review |
+| 5 | Core und Web: UX-301, zusammen mit den Web-Maßnahmen aus #304 (M1, N4) | neue lokale Route, `settings/DevicesSettings.tsx`, `today/` | Opus, dazu Gegen-Review |
 | 6 | Core und Web: UX-315, UX-316 (Core-Teil) | `services/core/src/services`, Statusleiste | Opus |
-| 7 | Moodle: UX-312, UX-313, später UX-314 | mit PR 4 von T1-24 | wie T1-24 |
+| 7 | Moodle: UX-312, UX-313, später UX-314 | mit PR #298, nach dem Merge von #303 | wie T1-24 |
 | 8 | Suche: UX-309 | `services/core/src/services/search.ts`, `lib/search.ts` | Opus |
 
 PR 1, 2 und 3 können sofort parallel laufen. PR 5 braucht zuerst den Vertrag. UX-311 und UX-318 warten auf die Antworten.
@@ -329,7 +334,8 @@ Diese Punkte lassen sich nur am Gerät oder im Hörsaal klären:
 - Wie schnell der Foliensatz über die Direktverbindung auf dem iPad ist, wenn die Vorlesung beginnt.
 - Wie sich die Direktverbindung mit AirDrop, AirPlay oder einem Hotspot am selben Mac verträgt.
 - Ob der Zweig mit `newAddressHint` auf dem iPad noch erreichbar ist (UX-319).
-- Alles zur Abgabe am echten Moodle (Plan T1-24, Abschnitt 9.1). Auf `main` fehlen die Handler noch.
+- Alles zur Abgabe am echten Moodle (Plan T1-24, Abschnitt 9.1, und „Nicht geprüft“ in PR #303). Auf `main` fehlen die Handler noch.
+- Verfügbarkeit im Funk bei belegten Dienstnamen oder einer Flut von Verbindungen: #304, N1 und N2.
 - Weiter offen aus den Vorgängern: Ablaufdatum der iPad-App lesen (UX-13), Transkription auf 8 GB (UX-40), Ruhezeit beim Folienwechsel (UX-43).
 
 ---
