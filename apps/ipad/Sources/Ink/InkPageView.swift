@@ -92,6 +92,11 @@ struct InkPageView: View {
     }
 
     var body: some View {
+        // Wachhalten in der Vorlesung (UX-305) als eigener Modifier: Die Kette unten ist für den Typprüfer schon lang
+        pageBody.modifier(InkScreenWakeModifier(library: library))
+    }
+
+    private var pageBody: some View {
         Group {
             if let model {
                 HStack(spacing: 0) {
@@ -113,6 +118,10 @@ struct InkPageView: View {
                 .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(spacing: 0) {
                         pageStrip
+                        if model.saveFailed {
+                            // Ruhige Zeile statt Dialog (R1, #287 Empfehlung a). Bleibt, bis das Speichern wieder klappt.
+                            infoRow(InkPageTitle.saveFailedLine)
+                        }
                         if model.isUnreadable {
                             // Ruhige Zeile statt Dialog (R1). Die Seite ist gesperrt, die Datei bleibt, wie sie ist.
                             infoRow(InkPageTitle.unreadableLine)
