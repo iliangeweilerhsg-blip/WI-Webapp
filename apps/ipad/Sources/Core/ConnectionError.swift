@@ -55,6 +55,11 @@ enum ConnectionError: Error, Equatable, Sendable {
     /// Die gespeicherte Adresse des Macs liegt nicht im Netz des iPads (UX-12, PR 0): Eine Anfrage mit Token ginge in
     /// ein fremdes Netz, darum geht gar nichts raus. Kein Fehler des Macs, kein Grund zum Neukoppeln.
     case otherNetwork
+    /// Die Kopplung speichert einen `.local`-Namen (ältere App-Version, #261): Dorthin geht nie ein Token, weil ein
+    /// fremdes Netz die mDNS-Frage beantworten könnte. Einmal neu koppeln speichert die IP-Adresse.
+    case rePairingNeeded
+    /// Ein `.local`-Name ließ sich bei der Kopplung nicht auf eine IPv4-Adresse auflösen (#261)
+    case localNameNotResolved
 
     /// Zuordnung der Systemfehler von URLSession
     static func from(_ error: URLError) -> ConnectionError {
@@ -103,7 +108,7 @@ enum ConnectionError: Error, Equatable, Sendable {
     }
 
     /// Nur neu koppeln hilft
-    var needsNewPairing: Bool { self == .tokenInvalid }
+    var needsNewPairing: Bool { self == .tokenInvalid || self == .rePairingNeeded }
 
     /// Kurztext für die Statusanzeige
     var title: String {
@@ -137,6 +142,8 @@ enum ConnectionError: Error, Equatable, Sendable {
         case .network(let code): return "Netzwerkfehler (\(code))"
         case .appOutdated: return "App passt nicht mehr zum Mac"
         case .otherNetwork: return "Mac nicht im selben Netz"
+        case .rePairingNeeded: return "Bitte einmal neu koppeln"
+        case .localNameNotResolved: return "Name des Macs nicht aufgelöst"
         }
     }
 
@@ -160,7 +167,7 @@ enum ConnectionError: Error, Equatable, Sendable {
         case .tokenInvalid:
             return "Das iPad wurde am Mac entfernt oder die Kopplung ist abgelaufen. Kopple es neu."
         case .hostNotAllowed:
-            return "Verbinde dich über die IP-Adresse des Macs oder seinen Namen mit .local."
+            return "Verbinde dich über die IP-Adresse des Macs."
         case .pairing(let failure):
             switch failure {
             case .windowClosed:
@@ -199,6 +206,10 @@ enum ConnectionError: Error, Equatable, Sendable {
             return "Am Mac über Xcode neu aufspielen."
         case .otherNetwork:
             return "Deine Notizen bleiben auf dem iPad und gleichen sich später ab."
+        case .rePairingNeeded:
+            return "Verbindungsdetails → Neu koppeln, dann den QR-Code am Mac scannen. Den alten Eintrag des iPads entfernst du am Mac unter Einstellungen → Geräte. Deine Notizen bleiben auf dem iPad und gleichen sich danach ab."
+        case .localNameNotResolved:
+            return "Gib die IP-Adresse des Macs ein, zum Beispiel 192.168.1.20, oder scanne den QR-Code am Mac."
         }
     }
 }

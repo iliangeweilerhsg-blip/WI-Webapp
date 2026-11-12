@@ -33,6 +33,11 @@ enum PairingInput {
 
 /// Inhalt des QR-Codes der Web-App (VERTRAEGE §12, Schritt 1):
 /// `sg://pair?v=1&host=<host>&port=<port>&pairing_id=<uuid>&code=<6 Ziffern>`
+///
+/// `host` muss eine IPv4-Adresse sein, so erzeugt sie der Mac (`PairingCode.host`). Einen `.local`-Namen weist der
+/// QR-Weg ab (#261): Seine Auflösung liefe über mDNS, und ein Angreifer im WLAN könnte antworten. Er bekäme dann die
+/// geheime `pairing_id` mitsamt Code und könnte die Kopplung weiterreichen (Relay, VERTRAEGE §12 H-5). Der QR-Weg
+/// soll ohne Bonjour auskommen.
 struct PairingLink: Equatable, Sendable {
     let endpoint: CoreEndpoint
     /// Geheime Kennung des Fensters. Nie protokollieren.
@@ -59,6 +64,7 @@ struct PairingLink: Equatable, Sendable {
             let portText = values["port"],
             let port = Int(portText),
             let endpoint = CoreEndpoint(host: host, port: port),
+            TokenDestination.parseIPv4(endpoint.host) != nil,
             let rawID = values["pairing_id"],
             let uuid = UUID(uuidString: rawID),
             let rawCode = values["code"],

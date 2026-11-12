@@ -41,6 +41,7 @@ final class PairingController {
     private let macStore: any PairedMacStore
     private let deviceName: String
     private let appVersion: String?
+    private let localResolver: any LocalNameResolving
 
     @ObservationIgnored private var nonce: String = PairingInput.makeNonce()
     @ObservationIgnored private var wrongCodes = 0
@@ -50,8 +51,10 @@ final class PairingController {
         tokenStore: any TokenStore,
         macStore: any PairedMacStore,
         deviceName: String,
-        appVersion: String?
+        appVersion: String?,
+        localResolver: any LocalNameResolving = SystemLocalNameResolver()
     ) {
+        self.localResolver = localResolver
         self.client = client
         self.tokenStore = tokenStore
         self.macStore = macStore
@@ -69,19 +72,29 @@ final class PairingController {
     /// Bonjour-Weg und Eingabe von Hand: Anfrage am Mac anlegen.
     /// Liegt gerade ein QR-Code zur Bestätigung vor, passiert nichts: Eine Bonjour-Auflösung,
     /// die erst nach dem Scan fertig wird, soll die Rückfrage nicht wegschieben.
-    func start(endpoint: CoreEndpoint) async {
+    ///
+    /// Ein `.local`-Name wird zuerst auf IPv4 aufgelöst; alle Schritte (auch `pair/start`) gehen an die IP, und
+    /// gespeichert wird die IP (#261). Löst der Name nicht auf, geht nichts raus.
+    func start(endpoint requested: CoreEndpoint) async {
         guard !isBusy else { return }
         if case .reviewing = state { return }
         lastError = nil
         beginAttempt()
-        state = .requesting(endpoint)
+        state = .requesting(requested)
+        guard let endpoint = await addressForPairing(requested) else {
+            guard state == .requesting(requested) else { return }
+            lastError = .localNameNotResolved
+            state = .idle
+            return
+        }
+        guard state == .requesting(requested) else { return }
         do {
             let pairingID = try await client.pairStart(endpoint: endpoint, deviceName: deviceName, nonce: nonce)
             // Inzwischen abgebrochen?
-            guard state == .requesting(endpoint) else { return }
+            guard state == .requesting(requested) else { return }
             state = .awaitingCode(endpoint, pairingID: pairingID)
         } catch {
-            guard state == .requesting(endpoint) else { return }
+            guard state == .requesting(requested) else { return }
             lastError = ConnectionError.wrap(error)
             state = .idle
         }
@@ -127,6 +140,20 @@ final class PairingController {
         lastError = error
     }
 
+    /// Die Adresse, an die die Kopplung geht: IPv4 bleibt, ein `.local`-Name wird aufgelöst. `nil`, wenn das nicht
+    /// klappt. Ein Ergebnis, das selbst wieder ein Name ist, zählt als gescheitert: Gespeichert wird nie ein Name.
+    /// Ebenso eine IP außerhalb des Netzes des iPads: Die Antwort auf die Namensfrage ist nicht geprüft, Code und
+    /// `pairing_id` sollen nicht in ein fremdes Netz gehen, und das Token ginge dorthin ohnehin nie
+    /// (`TokenDestination`); die Kopplung wäre also nutzlos.
+    private func addressForPairing(_ endpoint: CoreEndpoint) async -> CoreEndpoint? {
+        guard TokenDestination.isLocalName(endpoint.host) else { return endpoint }
+        guard let resolved = await localResolver.resolve(endpoint),
+            TokenDestination.parseIPv4(resolved.host) != nil,
+            client.allowsToken(for: resolved)
+        else { return nil }
+        return resolved
+    }
+
     private func beginAttempt() {
         nonce = PairingInput.makeNonce()
         wrongCodes = 0
@@ -134,6 +161,14 @@ final class PairingController {
 
     private func confirm(endpoint: CoreEndpoint, pairingID: String, code: String, fallback: PairingState) async {
         lastError = nil
+        // `pair/confirm` trägt den Code (beim QR-Weg auch die geheime `pairing_id`) und geht nur an eine IPv4-Adresse,
+        // nie per mDNS an einen Namen (#261, VERTRAEGE §12 H-5). `PairingLink` nimmt nur IPv4 an, und `start` hat einen
+        // `.local`-Namen schon aufgelöst; diese Prüfung ist die zweite Sicherung.
+        guard TokenDestination.parseIPv4(endpoint.host) != nil else {
+            lastError = .invalidAddress
+            state = fallback
+            return
+        }
         state = .confirming(endpoint)
         let result: PairingResult
         do {

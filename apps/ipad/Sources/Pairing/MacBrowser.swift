@@ -108,12 +108,24 @@ final class MacBrowser {
 /// `.local`-Namen an (VERTRAEGE §5).
 enum MacResolver {
     static func resolve(_ mac: DiscoveredMac, timeout: TimeInterval = 5) async -> CoreEndpoint? {
+        let service = NWEndpoint.service(name: mac.name, type: mac.type, domain: mac.domain, interface: nil)
+        return await firstIPv4(of: service, timeout: timeout)
+    }
+
+    /// Löst einen von Hand eingegebenen `.local`-Namen auf IPv4 auf (#261): kurz eine TCP-Verbindung zum Namen, danach
+    /// die Gegenstelle des Pfads lesen. Nur bei der Kopplung; zu diesem Zeitpunkt geht noch kein Token raus. Gespeichert
+    /// wird die IP, nie der Name.
+    static func resolve(localName host: String, port: Int, timeout: TimeInterval = 5) async -> CoreEndpoint? {
+        guard let nwPort = NWEndpoint.Port(rawValue: UInt16(clamping: port)), port > 0 else { return nil }
+        return await firstIPv4(of: .hostPort(host: .name(host, nil), port: nwPort), timeout: timeout)
+    }
+
+    private static func firstIPv4(of target: NWEndpoint, timeout: TimeInterval) async -> CoreEndpoint? {
         let parameters = NWParameters.tcp
         if let ip = parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
             ip.version = .v4
         }
-        let service = NWEndpoint.service(name: mac.name, type: mac.type, domain: mac.domain, interface: nil)
-        let connection = NWConnection(to: service, using: parameters)
+        let connection = NWConnection(to: target, using: parameters)
         let queue = DispatchQueue(label: "de.studiengehirn.ipad.resolve")
 
         return await withCheckedContinuation { (continuation: CheckedContinuation<CoreEndpoint?, Never>) in
@@ -167,5 +179,22 @@ private final class ResumeOnce: @unchecked Sendable {
         continuation = nil
         lock.unlock()
         pending?.resume(returning: value)
+    }
+}
+
+/// Löst `.local`-Namen bei der Kopplung auf IPv4 auf. Eigenes Protokoll, damit Tests ohne Netz laufen (#261).
+protocol LocalNameResolving: Sendable {
+    /// Der Endpunkt mit IPv4-Adresse und demselben Port, oder `nil`, wenn der Name nicht auflöst
+    func resolve(_ endpoint: CoreEndpoint) async -> CoreEndpoint?
+}
+
+struct SystemLocalNameResolver: LocalNameResolving {
+    init() {}
+
+    func resolve(_ endpoint: CoreEndpoint) async -> CoreEndpoint? {
+        let found = await MacResolver.resolve(localName: endpoint.host, port: endpoint.port)
+        // Den Port behält die Eingabe: Die Gegenstelle des Pfads liefert ihn ohnehin gleich, aber so bleibt es eindeutig
+        guard let found else { return nil }
+        return CoreEndpoint(host: found.host, port: endpoint.port)
     }
 }

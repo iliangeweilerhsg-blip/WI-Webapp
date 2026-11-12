@@ -35,6 +35,10 @@ struct HomeView: View {
                     if model.connection == .disconnected(.otherNetwork), model.sync?.state != .online {
                         NoticeCard(text: HomeTexts.otherNetworkCard)
                     }
+                    // Gespeicherter `.local`-Name aus älterer Version: einmal neu koppeln, ebenfalls ruhig (#261)
+                    if model.connection == .disconnected(.rePairingNeeded) {
+                        NoticeCard(text: HomeTexts.rePairingCard)
+                    }
                     if let sync = model.sync {
                         if sync.state == .unsupported {
                             NoticeCard(text: HomeTexts.appOutdatedCard)
@@ -117,6 +121,19 @@ enum HomeTexts {
     /// Das iPad ist nicht im Netz des Macs (UX-12, PR 0)
     static let otherNetworkCard =
         "Mac nicht im selben Netz · Deine Notizen bleiben auf dem iPad und gleichen sich später ab."
+
+    /// Die Kopplung speichert einen `.local`-Namen, dorthin geht kein Token mehr (#261)
+    static let rePairingCard = "\(ConnectionError.rePairingNeeded.title) · \(ConnectionError.rePairingNeeded.advice)"
+
+    /// Gespeichert ist nur die IP des Macs (#261). Bekommt er per DHCP eine neue, antwortet unter der alten niemand.
+    /// Der Weg zurück: Kopplung aufheben und neu koppeln.
+    static let newAddressHint =
+        "Hat der Mac inzwischen eine andere IP-Adresse? Am Mac zeigt Einstellungen → Geräte sie an. Weicht sie ab: Kopplung aufheben und neu koppeln."
+
+    /// Nur, wenn unter der gespeicherten Adresse niemand antwortet
+    static func mayHaveNewAddress(_ connection: ConnectionStatus) -> Bool {
+        connection == .disconnected(.timeout) || connection == .disconnected(.coreNotFound)
+    }
 
     /// Zeile während des Abgleichs aller Seiten (UX-46). Zählt herunter, am Ende verschwindet sie. Markierte Seiten,
     /// die sich nicht lesen ließen (#252), zählt sie nicht mit: Sie werden nie abgeglichen und stehen als eigener
@@ -215,6 +232,11 @@ struct ConnectionDetailView: View {
             Text("Mac: \(mac.endpoint.displayText)")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            if HomeTexts.mayHaveNewAddress(model.connection) {
+                Text(HomeTexts.newAddressHint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
             if let sync = model.sync {
                 SyncStatusRows(sync: sync)
