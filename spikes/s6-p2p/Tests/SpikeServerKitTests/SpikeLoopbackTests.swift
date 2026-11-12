@@ -17,11 +17,13 @@ final class SpikeLoopbackTests: XCTestCase {
     }
 
     private func makeServer(
-        code: SpikeCode = SpikeCode.random(), maxConnections: Int = SpikeLimits.maxConnections
+        code: SpikeCode = SpikeCode.random(), maxConnections: Int = SpikeLimits.maxConnections,
+        maxFailedHandshakes: Int = SpikeLimits.maxFailedHandshakes
     ) async throws -> (server: SpikeServer, endpoint: NWEndpoint, code: SpikeCode) {
         let server = SpikeServer(
             options: SpikeServer.Options(
                 code: code, peerToPeer: false, advertise: false, maxConnections: maxConnections,
+                maxFailedHandshakes: maxFailedHandshakes,
                 probe: FakeProbe(reply: SpikeHealthReply(httpStatus: 200, millis: 7))))
         let port = try await server.start()
         let nwPort = try XCTUnwrap(NWEndpoint.Port(rawValue: port))
@@ -149,6 +151,35 @@ final class SpikeLoopbackTests: XCTestCase {
         try await _Concurrency.Task.sleep(nanoseconds: 300_000_000)
         XCTAssertGreaterThanOrEqual(server.stats.handshakesFailed, 1)
         XCTAssertEqual(server.stats.handshakesSucceeded, 0)
+    }
+
+    func testTooManyFailedHandshakesLockTheServer() async throws {
+        let (server, endpoint, code) = try await makeServer(maxFailedHandshakes: 2)
+        defer { server.stop() }
+        var wrong = SpikeCode.random()
+        while wrong == code { wrong = SpikeCode.random() }
+        for _ in 0..<2 {
+            let intruder = SpikeClient(endpoint: endpoint, code: wrong, suites: SpikeSuites.all, peerToPeer: false)
+            let outcome = await intruder.connect(timeout: 4)
+            if case .ready = outcome { XCTFail("Handshake mit falschem Code gelungen") }
+            intruder.close()
+        }
+        // Der Server zählt den Fehlschlag spätestens nach der Handshake-Frist (5 s)
+        for _ in 0..<80 where !server.stats.lockedOut {
+            try await _Concurrency.Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTAssertTrue(server.stats.lockedOut, "Sperre nach 2 Fehlversuchen greift nicht: \(server.stats)")
+
+        // Danach kommt auch der richtige Code nicht mehr durch
+        let owner = SpikeClient(endpoint: endpoint, code: code, suites: SpikeSuites.all, peerToPeer: false)
+        defer { owner.close() }
+        let outcome = await owner.connect(timeout: 4)
+        if case .ready = outcome {
+            // Die Verbindung kann kurz `ready` melden, bevor der Server sie schließt. Ein Befehl darf nie ankommen.
+            let answered = (try? await owner.ping(timeout: 3)) != nil
+            XCTAssertFalse(answered, "Nach der Sperre hat der Server noch geantwortet")
+        }
+        XCTAssertEqual(server.stats.commands, 0)
     }
 
     // MARK: Hilfen

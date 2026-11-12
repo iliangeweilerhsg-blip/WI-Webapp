@@ -44,10 +44,11 @@ public struct SpikeCode: Equatable, Sendable {
     /// `HMAC-SHA256(Code, "sg-spike-psk-v1")`, 32 Byte
     public var presharedKey: [UInt8] { mac("sg-spike-psk-v1") }
 
-    /// Bonjour-Name: `sgs-` plus die ersten 8 Hex-Zeichen von `HMAC-SHA256(Code, "sg-spike-name-v1")`.
-    /// Enthält keinen Rechnernamen. Jeder Start des Mac-Teils hat damit einen anderen Namen.
+    /// Bonjour-Name: `sgs-` plus die ersten 2 Hex-Zeichen von `HMAC-SHA256(Code, "sg-spike-name-v1")`.
+    /// Enthält keinen Rechnernamen. Bewusst nur 8 Bit: Der Name steht offen im Funk. Mit 32 Bit ließe sich der Code
+    /// (rund 26 Bit) allein aus dem Namen offline zurückrechnen, ganz ohne Mitschnitt eines Handshakes.
     public var serviceName: String {
-        let hex = mac("sg-spike-name-v1").prefix(4).map { String(format: "%02x", $0) }.joined()
+        let hex = mac("sg-spike-name-v1").prefix(1).map { String(format: "%02x", $0) }.joined()
         return "sgs-" + hex
     }
 

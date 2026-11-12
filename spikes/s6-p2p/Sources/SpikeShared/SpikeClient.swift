@@ -302,11 +302,15 @@ public final class SpikeClient: @unchecked Sendable {
         do {
             return try await body()
         } catch {
-            lock.lock()
-            let expired = timedOut
-            lock.unlock()
-            throw expired ? SpikeClientError.timedOut : error
+            throw deadlinePassed() ? SpikeClientError.timedOut : error
         }
+    }
+
+    /// Synchron, weil `NSLock` in `async`-Funktionen nicht erlaubt ist (Swift 6)
+    private func deadlinePassed() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return timedOut
     }
 
     static func randomBytes(_ count: Int) -> [UInt8] {

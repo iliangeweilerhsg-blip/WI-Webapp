@@ -14,6 +14,9 @@ public enum SpikeLimits {
     /// Höchstens so viele Verbindungen gleichzeitig (auch solche im Handshake)
     public static let maxConnections = 4
     public static let handshakeSeconds: Double = 5
+    /// Nach so vielen gescheiterten Handshakes nimmt der Mac-Teil nichts mehr an und beendet sich. Begrenzt das
+    /// Raten des Codes übers Netz auf 50 von 10^8 Versuchen. Ein Neustart bringt einen neuen Code.
+    public static let maxFailedHandshakes = 50
     public static let idleSeconds: Double = 60
     /// Höchste Nutzlast eines `echo`
     public static let echoMaxBytes = 64 * 1024

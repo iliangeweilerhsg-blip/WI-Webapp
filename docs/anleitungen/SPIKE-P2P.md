@@ -7,7 +7,7 @@ Aufwand: einmal etwa 20 Minuten zu Hause, dann zwei Vorlesungen (eine kurze, ein
 ## Was der Test tut (und was nicht)
 
 - Der Mac-Teil ist ein kleines Programm, das du von Hand im Terminal startest. Es zeigt einen **Code mit 8 Ziffern**, der bei jedem Start neu ist, und beendet sich nach spätestens **4 Stunden** von selbst.
-- Es kennt nur vier feste Befehle: `ping`, `health` (fragt den Core nach seinem Status, gibt nur Status und Dauer zurück), `echo` (höchstens 64 KiB) und `blob` (höchstens 50 MB Zufallsdaten). Höchstens 4 Verbindungen gleichzeitig.
+- Es kennt nur vier feste Befehle: `ping`, `health` (fragt den Core nach seinem Status, gibt nur Status und Dauer zurück), `echo` (höchstens 64 KiB) und `blob` (höchstens 50 MB Zufallsdaten). Höchstens 4 Verbindungen gleichzeitig. Nach 50 gescheiterten Verbindungsversuchen (zum Beispiel jemand rät den Code) beendet er sich zum Schutz. Dann einfach neu starten, es gilt ein neuer Code.
 - Es **reicht nichts weiter** und kennt keine Daten der App, keine Notizen, kein Geräte-Token.
 - Die Testansicht am iPad steckt in den Verbindungsdetails und nutzt eigene Verbindungen. Sie schickt dein Token nie.
 - `sg start` startet den Mac-Teil nie. Er läuft nur, solange du das Terminal-Fenster offen lässt.

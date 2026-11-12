@@ -83,7 +83,14 @@ let startedAt = Date()
 let server = SpikeServer(
     options: SpikeServer.Options(
         code: code, peerToPeer: arguments.peerToPeer, advertise: true, port: arguments.port, probe: probe,
-        log: { text in say("[\(clock(Date()))] \(text)") }))
+        log: { text in say("[\(clock(Date()))] \(text)") },
+        onLockout: {
+            // Raten des Codes übers Netz: nach zu vielen Fehlversuchen ganz aus. Neustart bringt einen neuen Code.
+            DispatchQueue.main.async {
+                say("Der Spike beendet sich zum Schutz. Neu starten, dann gilt ein neuer Code.")
+                exit(3)
+            }
+        }))
 
 // Strg+C und Beenden von außen: Listener sauber schließen
 var signalSources: [DispatchSourceSignal] = []
@@ -126,8 +133,9 @@ _Concurrency.Task {
     }
 }
 
-// Selbstbeendigung nach spätestens 4 Stunden
-DispatchQueue.main.asyncAfter(deadline: .now() + SpikeLimits.selfDestructSeconds) {
+// Selbstbeendigung nach spätestens 4 Stunden. Nach der Wanduhr (`wallDeadline`): Die Zeit im Ruhezustand
+// (Deckel zu) zählt mit. `deadline` würde im Ruhezustand stehen bleiben und die 4 Stunden verlängern.
+DispatchQueue.main.asyncAfter(wallDeadline: .now() + SpikeLimits.selfDestructSeconds) {
     say("4 Stunden sind um, der Spike beendet sich.")
     server.stop()
     exit(0)
@@ -138,6 +146,12 @@ var lastStats = server.stats
 let statsTimer = DispatchSource.makeTimerSource(queue: .main)
 statsTimer.schedule(deadline: .now() + 60, repeating: 60)
 statsTimer.setEventHandler {
+    // Zweite Sicherung für die 4 Stunden, falls der Wanduhr-Zeitgeber nach dem Aufwachen spät kommt
+    if Date().timeIntervalSince(startedAt) >= SpikeLimits.selfDestructSeconds {
+        say("4 Stunden sind um, der Spike beendet sich.")
+        server.stop()
+        exit(0)
+    }
     let now = server.stats
     if now != lastStats {
         say(

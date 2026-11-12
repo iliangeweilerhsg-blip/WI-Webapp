@@ -38,19 +38,19 @@ final class SpikeCodeTests: XCTestCase {
         let code = try XCTUnwrap(SpikeCode(input: "12345678"))
         XCTAssertEqual(
             hex(code.presharedKey), "2733e12b18abbee8832c351b8a1e950a239de20aaa1914eedacdd4a7d8b5af43")
-        XCTAssertEqual(code.serviceName, "sgs-9a27d218")
+        XCTAssertEqual(code.serviceName, "sgs-9a")
 
         let other = try XCTUnwrap(SpikeCode(input: "00000042"))
         XCTAssertEqual(
             hex(other.presharedKey), "db5b7109b4b7bf2684a40c8de156414c6ab7373f7751ba84efb9e811ab8018cb")
-        XCTAssertEqual(other.serviceName, "sgs-efdcfad2")
+        XCTAssertEqual(other.serviceName, "sgs-ef")
     }
 
     func testPskIsThirtyTwoBytesAndNameHasNoHostname() throws {
         let code = try XCTUnwrap(SpikeCode(input: "87654321"))
         XCTAssertEqual(code.presharedKey.count, 32)
         XCTAssertTrue(code.serviceName.hasPrefix("sgs-"))
-        XCTAssertEqual(code.serviceName.count, 12)
+        XCTAssertEqual(code.serviceName.count, 6)
         XCTAssertEqual(SpikeCode.pskIdentity, "sgs1")
     }
 

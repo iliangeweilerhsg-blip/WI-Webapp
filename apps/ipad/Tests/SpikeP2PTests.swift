@@ -26,7 +26,7 @@ final class SpikeP2PTests: XCTestCase {
     func testSharedCodeIsCompiledIntoTheApp() throws {
         // Dieselben Testvektoren wie im Mac-Paket: Mac und iPad müssen dasselbe ableiten
         let code = try XCTUnwrap(SpikeCode(input: "1234 5678"))
-        XCTAssertEqual(code.serviceName, "sgs-9a27d218")
+        XCTAssertEqual(code.serviceName, "sgs-9a")
         XCTAssertEqual(code.presharedKey.count, 32)
         XCTAssertEqual(Array(code.presharedKey.prefix(4)), [0x27, 0x33, 0xe1, 0x2b])
         XCTAssertNil(SpikeCode(input: "1234"))

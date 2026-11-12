@@ -10,6 +10,8 @@ public struct SpikeServerStats: Equatable, Sendable {
     public var handshakesFailed = 0
     public var refusedOverLimit = 0
     public var commands = 0
+    /// Zu viele gescheiterte Handshakes: Der Server nimmt nichts mehr an
+    public var lockedOut = false
 }
 
 /// Mac-Teil des Spikes. Kennt nur vier feste Befehle (`SpikeCommand`). Ein allgemeines Weiterreichen gibt es nicht:
@@ -24,22 +26,29 @@ public final class SpikeServer: @unchecked Sendable {
         /// Fester Port, sonst wählt das System
         public var port: UInt16?
         public var maxConnections: Int
+        /// Sperre nach so vielen gescheiterten Handshakes (Raten des Codes übers Netz)
+        public var maxFailedHandshakes: Int
+        /// Wird einmal gerufen, wenn die Sperre greift (auf der Queue des Servers). Das Programm beendet sich dann.
+        public var onLockout: @Sendable () -> Void
         public var probe: any SpikeHealthProbing
         /// Meldungen (ohne Adressen). Standard: still.
         public var log: @Sendable (String) -> Void
 
         public init(
             code: SpikeCode, peerToPeer: Bool = true, advertise: Bool = true, port: UInt16? = nil,
-            maxConnections: Int = SpikeLimits.maxConnections, probe: any SpikeHealthProbing,
-            log: @escaping @Sendable (String) -> Void = { _ in }
+            maxConnections: Int = SpikeLimits.maxConnections,
+            maxFailedHandshakes: Int = SpikeLimits.maxFailedHandshakes, probe: any SpikeHealthProbing,
+            log: @escaping @Sendable (String) -> Void = { _ in }, onLockout: @escaping @Sendable () -> Void = {}
         ) {
             self.code = code
             self.peerToPeer = peerToPeer
             self.advertise = advertise
             self.port = port
             self.maxConnections = maxConnections
+            self.maxFailedHandshakes = maxFailedHandshakes
             self.probe = probe
             self.log = log
+            self.onLockout = onLockout
         }
     }
 
@@ -107,6 +116,10 @@ public final class SpikeServer: @unchecked Sendable {
 
     private func accept(_ connection: NWConnection) {
         counters.accepted += 1
+        if counters.lockedOut {
+            connection.cancel()
+            return
+        }
         if sessions.count >= options.maxConnections {
             counters.refusedOverLimit += 1
             connection.cancel()
@@ -129,6 +142,13 @@ public final class SpikeServer: @unchecked Sendable {
         queue.async {
             if self.sessions.removeValue(forKey: ObjectIdentifier(session)) != nil, !handshakeDone {
                 self.counters.handshakesFailed += 1
+                if self.counters.handshakesFailed >= self.options.maxFailedHandshakes, !self.counters.lockedOut {
+                    self.counters.lockedOut = true
+                    for other in self.sessions.values { other.cancel() }
+                    self.options.log(
+                        "Zu viele gescheiterte Handshakes (\(self.counters.handshakesFailed)): Der Spike nimmt nichts mehr an.")
+                    self.options.onLockout()
+                }
             }
         }
     }
@@ -176,7 +196,7 @@ final class SpikeSession: @unchecked Sendable {
         lock.lock()
         watchdog = timer
         lock.unlock()
-        _Concurrency.Task { await self.run() }
+        // Der Ablauf (Lesen, Befehle) startet erst in `handle(.ready)`, nach der Prüfung des Verfahrens
     }
 
     func cancel() {
@@ -198,6 +218,7 @@ final class SpikeSession: @unchecked Sendable {
             lock.unlock()
             server.options.log("Verbindung bereit (\(negotiated.text))")
             server.sessionBecameReady()
+            _Concurrency.Task { await self.run() }
         case .failed, .cancelled:
             end()
         default:
