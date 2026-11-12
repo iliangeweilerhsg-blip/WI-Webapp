@@ -392,18 +392,45 @@ describe('RecordingProvider: Wechsel der Session', () => {
       await switchToB(order);
       await waitFor(() => expect(shownSession()).toBe(B_ID));
       await waitFor(() => expect(kind()).toBe('rec'));
-      expect(screen.getByTestId('recording-id').textContent).not.toBe(first);
+      const second = screen.getByTestId('recording-id').textContent;
+      expect(second).not.toBe(first);
       expect(rec.mr.instances).toHaveLength(2);
-      // A: letzter Chunk (laufender Chunk 0 und der beim Stopp) und complete, danach räumt der Uploader die Ablage auf
-      await waitFor(() =>
-        expect(uploads(new RegExp(`^POST .*/recordings/${first}/complete$`))).toHaveLength(1),
-      );
-      expect(uploads(new RegExp(`^PUT .*/recordings/${first}/chunks/\\d+$`))).toHaveLength(2);
-      // B: eigene Aufnahme für die neue Session, noch nicht abgeschlossen
-      expect(uploads(new RegExp(`^POST .*/sessions/${B_ID}/recordings$`))).toHaveLength(1);
-      expect(uploads(/^POST .*\/complete$/)).toHaveLength(1);
+      // Nie zwei zugleich: ein MediaRecorder und eine Sperre zur Zeit, und A gibt das Mikrofon frei, bevor B es öffnet
       expect(shared.maxRunning).toBe(1);
       expect(locks.maxHeld).toBe(1);
+      expect(rec.getUserMedia).toHaveBeenCalledTimes(2);
+      const [trackA] = rec.tracks;
+      expect(trackA?.stop).toHaveBeenCalled();
+      expect(trackA!.stop.mock.invocationCallOrder[0]).toBeLessThan(
+        rec.getUserMedia.mock.invocationCallOrder[1]!,
+      );
+
+      // A: letzter Chunk (laufender Chunk 0 und der beim Stopp) und complete. Der Uploader löscht die Aufnahme erst nach
+      // dem `complete` aus der Ablage; danach ist für A alles beim Core.
+      await waitFor(async () => expect(await rec.store.getRecording(first!)).toBeNull());
+      // Im Tab arbeiten zwei Uploader dieselbe Ablage ab: der Abschluss von A (`flushUploads`) und der Recorder von B.
+      // Je nach Takt senden beide denselben Chunk und dasselbe `complete`. Das ist erlaubt (VERTRAEGE §10.2: „200 bei
+      // Duplikat“, `complete` mit denselben Werten ist wirkungslos). Geprüft wird darum, WAS beim Core ankommt, nicht
+      // wie oft: jede `seq` von A mit genau einem Inhalt, `complete` nur mit `last_seq` 1.
+      const shaBySeq = new Map<number, Set<string>>();
+      for (const [url, init] of uploads(new RegExp(`^PUT .*/recordings/${first}/chunks/\\d+$`))) {
+        const seq = Number(String(url).split('/').pop());
+        const sha = (init as RequestInit & { headers: Record<string, string> }).headers['X-Sha256']!;
+        shaBySeq.set(seq, (shaBySeq.get(seq) ?? new Set()).add(sha));
+      }
+      expect([...shaBySeq.keys()].sort((a, b) => a - b)).toEqual([0, 1]);
+      for (const shas of shaBySeq.values()) expect(shas.size).toBe(1);
+      const completesA = uploads(new RegExp(`^POST .*/recordings/${first}/complete$`));
+      expect(completesA.length).toBeGreaterThanOrEqual(1);
+      for (const [, init] of completesA)
+        expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({ last_seq: 1 });
+      // B: eigene Aufnahme für die neue Session, noch nicht abgeschlossen. Abgeschlossen wurde nur A.
+      const createsB = uploads(new RegExp(`^POST .*/sessions/${B_ID}/recordings$`));
+      expect(createsB.length).toBeGreaterThanOrEqual(1);
+      for (const [, init] of createsB)
+        expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({ id: second });
+      expect(uploads(new RegExp(`^POST .*/recordings/${second}/complete$`))).toHaveLength(0);
+      expect(uploads(/^POST .*\/complete$/)).toHaveLength(completesA.length);
       // B beginnt mit der Sitzungszeit von B
       const recordings = await rec.store.listRecordings();
       expect(recordings.find((r) => r.sessionId === B_ID)?.startedMs).toBeGreaterThanOrEqual(0);
