@@ -20,3 +20,7 @@ c0167947743c814a184fe84bc4b52dada1d21a94:services/core/test/unit/moodle-fake.ts:
 # in späterem Commit ohne Literal gebaut.
 c5d5bfe9db5b1cdb64ca9642b5c65f2029461416:services/core/test/integration/moodle-sync.test.ts:generic-api-key:31
 20df47b988c189d4cd04235bc568898900e9fb42:services/core/test/integration/moodle-sync.test.ts:generic-api-key:31
+# Falsch-Positive (generic-api-key) in Commit caf85e9 (PR #274, UX-12): fester Testvektor für tunnel_key,
+# Rohbytes 0x00 … 0x1f in base64url. Kein echtes Geheimnis, absichtlich in den Tests (Ableitung prüfbar).
+caf85e95fac3b636425d73e226b56292c35bbffe:services/core/test/unit/tunnel-keys.test.ts:generic-api-key:29
+caf85e95fac3b636425d73e226b56292c35bbffe:infra/sg/test/backup.test.ts:generic-api-key:2408

@@ -18,7 +18,7 @@ import {
 } from '@sg/shared';
 import type { Db } from '../db/client.ts';
 import { HttpError } from '../errors.ts';
-import { isLoopbackAddress } from '../plugins/security.ts';
+import { isLocalRequest } from '../plugins/security.ts';
 import { PageQuerySchema } from '../lib/pagination.ts';
 import {
   createFileSource,
@@ -354,7 +354,7 @@ export async function calendarRoutes(app: FastifyInstance, deps: CalendarRouteDe
       },
     },
     async (request) => {
-      if (!isLoopbackAddress(request.socket.remoteAddress)) {
+      if (!isLocalRequest(request)) {
         throw new HttpError(
           403,
           'local_only',

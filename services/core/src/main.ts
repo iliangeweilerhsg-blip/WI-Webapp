@@ -78,6 +78,14 @@ setInterval(() => void purge(), 60 * 60 * 1000).unref();
 try {
   await purge();
   await app.listen({ port: config.port, host: config.host });
+  // Tunnel-Eingang (UX-12): erst nach erfolgreichem `listen`, damit ein zweiter Core (EADDRINUSE) nichts anfasst (#170).
+  // Scheitert er, läuft der Core ohne Tunnel weiter (sicherer Ausfall: kein Eingang)
+  await app.tunnel.start().catch((error: unknown) => {
+    logger.error(
+      { err: error },
+      'Tunnel-Eingang konnte nicht gestartet werden. Der Core läuft ohne ihn weiter',
+    );
+  });
   // Nur wenn der Core aus dem Netz erreichbar ist, hilft die Ankündigung dem iPad (§12)
   if (config.bonjour && config.host !== '127.0.0.1' && config.host !== 'localhost' && config.host !== '::1') {
     bonjour = startBonjour({ port: config.port, logger });

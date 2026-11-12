@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
 import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
-import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyReply } from 'fastify';
+import Fastify, {
+  type FastifyBaseLogger,
+  type FastifyInstance,
+  type FastifyReply,
+  type RouteOptions,
+} from 'fastify';
 import { jsonSchemaTransform, serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import type { Logger } from 'pino';
 import { API_BASE } from '@sg/shared';
@@ -10,6 +15,7 @@ import type { Db } from './db/client.ts';
 import { apiErrorBody, HttpError } from './errors.ts';
 import { registerErrorHandler } from './plugins/errors.ts';
 import { registerIdempotency } from './plugins/idempotency.ts';
+import { registerTunnel } from './plugins/tunnel-server.ts';
 import { createRejectionLog, RequestLogController } from './plugins/rejection-log.ts';
 import {
   closeRejectedUpgrade,
@@ -17,6 +23,7 @@ import {
   isLocalRequest,
   NetworkConnectionGate,
   registerSecurity,
+  rejectionSource,
   type DeviceTokenVerifier,
 } from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
@@ -41,12 +48,13 @@ import { systemRoutes } from './routes/system.ts';
 import { searchRoutes } from './routes/search.ts';
 import { trashRoutes } from './routes/trash.ts';
 import { transcriptRoutes } from './routes/transcript.ts';
-import { LastSeenTracker, verifyDeviceToken } from './services/devices.ts';
+import { LastSeenTracker, listActiveDeviceIds, verifyDeviceToken } from './services/devices.ts';
 import { pickPairingHost } from './services/discovery.ts';
 import { PairingManager } from './services/pairing.ts';
 import { registerKeepAwake } from './services/keep-awake.ts';
 import { registerSearchBackfill } from './services/search-backfill.ts';
 import { startSessionTicker, type SessionTicker } from './services/sessions.ts';
+import { TunnelKeyStore } from './services/tunnel.ts';
 import { syncPlugin } from './sync/server.ts';
 
 export interface BuildAppOptions {
@@ -75,6 +83,11 @@ export interface BuildAppOptions {
   searchBackfill?: boolean;
   /** Mac während einer Session wach halten (`caffeinate`, UX-04). Standard: aus; `main.ts` schaltet es ein */
   keepAwake?: boolean;
+  /**
+   * Nur für Tests: sieht jede registrierte Route samt `config` (`sgAccess`). So läuft der Tunnel-Test über die
+   * Routentabelle statt über eine Liste von Hand (UX-12, PR 2).
+   */
+  onRoute?: (route: RouteOptions) => void;
 }
 
 function readVersion(): string {
@@ -159,6 +172,10 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const connections = new NetworkConnectionGate(connectionLimits, logger);
   const pairing = options.pairing ?? new PairingManager();
   const pairingHost = options.pairingHost ?? (() => pickPairingHost());
+  // Tunnel-Schlüsseldatei (UX-12, E3). Mit `SG_TUNNEL=0` gibt es sie nicht
+  const tunnelKeys = config.tunnel
+    ? new TunnelKeyStore({ dataDir: config.dataDir, logger: logger.child({ module: 'tunnel' }) })
+    : null;
 
   const app: FastifyInstance = Fastify({
     loggerInstance: logger as FastifyBaseLogger,
@@ -185,7 +202,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           if (denied instanceof HttpError) {
             if (!isLocalRequest(request)) {
               if (!request.sgRejectionCounted) {
-                rejections.record(request.socket.remoteAddress, denied.statusCode);
+                rejections.record(rejectionSource(request), denied.statusCode);
                 request.sgRejectionCounted = true;
               }
               // Wie im onRequest-Hook: abgelehnte Netzanfrage schließt die Verbindung (#185)
@@ -203,9 +220,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     },
   });
 
+  if (options.onRoute) app.addHook('onRoute', options.onRoute);
+
   const rejections = createRejectionLog(app);
   app.server.maxConnections = connectionLimits.maxConnections;
   connections.attach(app.server);
+  // Tunnel-Eingang (UX-12): zweiter Server auf einem Unix-Socket. Gestartet wird er erst von `main.ts` nach dem
+  // erfolgreichen `listen` (wie die anderen Start-Hooks, #170); er teilt Routen und Wächter, nicht die Verbindungsgrenzen
+  registerTunnel(app, {
+    dataDir: config.dataDir,
+    enabled: config.tunnel,
+    keys: tunnelKeys,
+    activeDeviceIds: () => listActiveDeviceIds(db),
+    limits: connectionLimits,
+    logger: logger.child({ module: 'tunnel' }),
+  });
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -260,7 +289,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       await api.register(backupRoutes, { db, config });
       await api.register(trashRoutes, { db, config });
       await api.register(settingsRoutes, { db, config });
-      await api.register(devicesRoutes, { db, config, pairing, pairingHost });
+      await api.register(devicesRoutes, { db, config, pairing, pairingHost, tunnelKeys });
     },
     { prefix: API_BASE },
   );

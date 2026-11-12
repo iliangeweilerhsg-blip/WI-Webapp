@@ -3886,6 +3886,10 @@ device: Device
  * 256 Bit Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben
  */
 device_token: string
+/**
+ * UX-12: Tunnel-Schlüssel dieses Geräts, 32 Byte Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben, wie `device_token`, und steht am Mac nur in der Schlüsseldatei (nie in der Datenbank, nie im Backup). Fehlt bei `SG_TUNNEL=0` und bei älteren Cores; ältere iPads ignorieren das Feld
+ */
+tunnel_key?: string
 }
 /**
  * POST /devices/pair/start (aus dem Netz ohne Token erlaubt). Nur bei offenem Kopplungsfenster; belegt es nicht exklusiv

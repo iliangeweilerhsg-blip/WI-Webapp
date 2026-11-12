@@ -87,6 +87,13 @@ describe('loadConfig', () => {
       expect(loadConfig({ SG_BONJOUR: off }).bonjour).toBe(false);
   });
 
+  it('der Tunnel-Eingang ist standardmäßig an und lässt sich mit SG_TUNNEL=0 abschalten (UX-12)', () => {
+    expect(loadConfig({}).tunnel).toBe(true);
+    expect(loadConfig({ SG_TUNNEL: '1' }).tunnel).toBe(true);
+    for (const off of ['0', 'false', 'OFF', ' nein '])
+      expect(loadConfig({ SG_TUNNEL: off }).tunnel).toBe(false);
+  });
+
   it('weist ungültige Ports und Log-Level ab', () => {
     expect(() => loadConfig({ SG_CORE_PORT: 'abc' })).toThrow(/SG_CORE_PORT/);
     expect(() => loadConfig({ SG_CORE_PORT: '70000' })).toThrow(/SG_CORE_PORT/);

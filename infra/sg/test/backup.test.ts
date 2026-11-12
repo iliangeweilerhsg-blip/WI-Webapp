@@ -2400,3 +2400,71 @@ describe('Härtung aus #114: restore von Hand verlangt die Prüfsumme eines eige
     expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(0);
   });
 });
+
+// UX-12 (Plan E3, §5.1): Die Tunnel-Schlüssel liegen in `<SG_DATA_DIR>/secrets/tunnel-keys.json` und dürfen nie ins
+// Backup. `sg backup` sichert nur die Datenbank, `media/` und `vault/`. Ein Test hält das fest, damit eine spätere
+// Änderung (z. B. „den ganzen Datenordner sichern“) nicht still Geheimnisse mitnimmt.
+describe('Tunnel-Schlüssel gehören nie ins Backup (UX-12, E3)', () => {
+  const TUNNEL_KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+
+  function withSecrets(dataDir: string): void {
+    const secrets = join(dataDir, 'secrets');
+    mkdirSync(secrets, { mode: 0o700 });
+    const file = join(secrets, 'tunnel-keys.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        v: 1,
+        devices: [{ device_id: '019a4e14-0000-7000-8000-0000000000a1', tunnel_key: TUNNEL_KEY }],
+      }),
+      { mode: 0o600 },
+    );
+    // Auch ein Weg über Symlinks in `media/` und `vault/` führt nicht zu den Schlüsseln (Symlinks werden nie verfolgt)
+    symlinkSync(secrets, join(dataDir, 'media', 'geheim'));
+    symlinkSync(file, join(dataDir, 'vault', 'tunnel-keys.json'));
+    // `run/` (Socket, Worker-Token) ist ebenfalls nicht Teil eines Standes
+    mkdirSync(join(dataDir, 'run'), { mode: 0o700 });
+    writeFileSync(join(dataDir, 'run', 'tunnel.sock'), 'KEIN-SOCKET');
+  }
+
+  function filesOf(dir: string): string[] {
+    return readdirSync(dir, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => join(entry.parentPath, entry.name));
+  }
+
+  it('der Stand enthält weder die Schlüsseldatei noch einen Schlüssel noch den Ordner secrets/', async () => {
+    const { dataDir, target, deps } = setup();
+    withSecrets(dataDir);
+    expect(await runBackup(deps, { trigger: 'manuell' })).toBe(0);
+    const stand = join(target, '20261104T030012Z');
+    const files = filesOf(stand);
+    expect(files.length).toBeGreaterThan(3);
+    for (const file of files) {
+      expect(file, file).not.toMatch(/tunnel-keys|secrets|tunnel\.sock/);
+      expect(readFileSync(file).includes(TUNNEL_KEY), file).toBe(false);
+    }
+    // Nur Datenbank, Manifest, media/ und vault/ sind im Stand
+    expect(readdirSync(stand).sort()).toEqual(['db.dump', 'manifest.json', 'media', 'vault']);
+  });
+
+  it('auch ein zweiter, inkrementeller Lauf nimmt die Schlüssel nicht mit', async () => {
+    const { dataDir, target, deps } = setup();
+    withSecrets(dataDir);
+    expect(await runBackup(deps, { trigger: 'zeitplan' })).toBe(0);
+    const second: BackupDeps = { ...deps, now: () => new Date('2026-11-05T03:00:12Z') };
+    expect(await runBackup(second, { trigger: 'zeitplan' })).toBe(0);
+    expect(readdirSync(target)).toHaveLength(2);
+    for (const stand of readdirSync(target)) {
+      for (const file of filesOf(join(target, stand))) {
+        expect(readFileSync(file).includes(TUNNEL_KEY), file).toBe(false);
+      }
+    }
+  });
+
+  it('ein Backup-Ziel im Ordner secrets/ wird abgelehnt (liegt im Datenordner)', () => {
+    const { dataDir } = setup();
+    withSecrets(dataDir);
+    expect(() => validateTarget(join(dataDir, 'secrets'), dataDir)).toThrow();
+  });
+});

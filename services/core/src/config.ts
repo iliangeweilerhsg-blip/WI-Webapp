@@ -21,6 +21,11 @@ export interface Config {
   moodleUrl: string;
   /** Bonjour-Ankündigung `_studiengehirn._tcp` (VERTRAEGE §12). `SG_BONJOUR=0` schaltet sie ab */
   bonjour: boolean;
+  /**
+   * Tunnel-Eingang (Unix-Socket) und Schlüsseldatei (UX-12, VERTRAEGE §5, §12 Schritt 8). `SG_TUNNEL=0` schaltet
+   * beides ab: kein Socket, keine Schlüsseldatei (sie wird beim Start gelöscht).
+   */
+  tunnel: boolean;
 }
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'];
@@ -127,5 +132,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     logLevel: logLevel as LogLevel,
     moodleUrl,
     bonjour: !['0', 'false', 'off', 'nein'].includes((env.SG_BONJOUR ?? '').trim().toLowerCase()),
+    tunnel: !['0', 'false', 'off', 'nein'].includes((env.SG_TUNNEL ?? '').trim().toLowerCase()),
   };
 }

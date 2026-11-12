@@ -6,6 +6,9 @@
 //   <ziel>/<stand>/media/…        Kopie (unveränderte Dateien als Hardlink auf den vorigen Stand)
 //   <ziel>/<stand>/vault/…
 //   <ziel>/<stand>/manifest.json  Prüfsumme des Dumps, Zähler (für `sg restore --test`)
+// **Nicht** im Stand (UX-12, Plan E3): `secrets/` (Tunnel-Schlüssel je Gerät, `secrets/tunnel-keys.json`) und `run/`. Ein
+// Stand enthält nur die Datenbank, `media/` und `vault/`. Wer das ändert, muss `test/backup.test.ts` („Tunnel-Schlüssel
+// gehören nie ins Backup“) bewusst anpassen: Ein Backup mit Schlüsseln erlaubte, sich als Mac auszugeben.
 // Der Lauf schreibt zuerst nach <ziel>/.<stand>.partial und benennt erst am Ende um: Ein Stand ohne Manifest gibt
 // es nie unter seinem endgültigen Namen.
 import { createHash, randomBytes } from 'node:crypto';

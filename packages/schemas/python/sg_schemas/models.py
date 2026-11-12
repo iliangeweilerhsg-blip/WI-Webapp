@@ -4227,6 +4227,11 @@ class PairResponse(BaseModel):
         description='256 Bit Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben',
         pattern='^[A-Za-z0-9_-]{43}$',
     )
+    tunnel_key: StrictStr | None = Field(
+        None,
+        description='UX-12: Tunnel-Schlüssel dieses Geräts, 32 Byte Zufall, base64url ohne Padding. Wird nur dieses eine Mal ausgegeben, wie `device_token`, und steht am Mac nur in der Schlüsseldatei (nie in der Datenbank, nie im Backup). Fehlt bei `SG_TUNNEL=0` und bei älteren Cores; ältere iPads ignorieren das Feld',
+        pattern='^[A-Za-z0-9_-]{43}$',
+    )
 
 
 class PairStartResponse(BaseModel):
