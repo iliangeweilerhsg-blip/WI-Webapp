@@ -24,13 +24,28 @@ final class ModuleGoneOnMacTests: XCTestCase {
             needsReconcile: false, deletedAtMS: nil, deleteQueued: false)
     }
 
-    /// Core, dem das Modul fehlt: `notebook.create` kommt mit `module_not_found` zurück
-    private func rejectNotebookCreates(_ h: SyncHarness) {
+    /// Core, dem das Modul fehlt: `notebook.create` kommt mit `module_not_found` zurück, `page.create` desselben
+    /// Stroms mit `notebook_not_found`. `GET /modules/{id}` antwortet mit `modules` (Standard: 404, Modul fehlt).
+    private func rejectNotebookCreates(
+        _ h: SyncHarness,
+        modules: FakeTransport.Reply = .http(status: 404, body: Fixtures.apiError("module_not_found"))
+    ) {
         h.factory.configure = { socket, _ in
             socket.opPolicy = { _, kind, _ in
-                kind == "notebook.create" ? .error(code: "module_not_found", retryable: false, fatal: false) : .ack
+                switch kind {
+                case "notebook.create": return .error(code: "module_not_found", retryable: false, fatal: false)
+                case "page.create": return .error(code: "notebook_not_found", retryable: false, fatal: false)
+                default: return .ack
+                }
             }
         }
+        h.transport.router = { request in
+            (request.url?.path ?? "").contains("/modules/") ? modules : nil
+        }
+    }
+
+    private func moduleChecks(_ h: SyncHarness) -> Int {
+        h.transport.requests.filter { ($0.url?.path ?? "").contains("/modules/") }.count
     }
 
     private func queueFreeNotebook(_ h: SyncHarness) throws -> LibraryNotebook {
@@ -66,6 +81,60 @@ final class ModuleGoneOnMacTests: XCTestCase {
         XCTAssertTrue(h.service.isModuleGoneOnMac(notebookID: free.id))
         // Die Seiten sind zum Abgleich vorgemerkt: Kommt das Modul zurück, holt er die Striche nach
         XCTAssertEqual(h.library.page(freePageID)?.needsReconcile, true)
+        // Erst nach der Rückfrage beim Core
+        XCTAssertEqual(moduleChecks(h), 1)
+    }
+
+    /// Ein einzelnes `module_not_found` blendet nichts aus, wenn der Core das Modul per REST noch kennt
+    func testAModuleThatStillExistsIsNotHidden() async throws {
+        let h = SyncHarness()
+        rejectNotebookCreates(h, modules: .http(status: 200, body: LibraryFixtures.moduleJSON()))
+        let free = try queueFreeNotebook(h)
+        h.start()
+
+        let done = await eventually { h.engine.pendingCount == 0 && h.engine.deadLetterCount == 2 }
+        XCTAssertTrue(done)
+        XCTAssertEqual(h.engine.missingModuleCount, 0)
+        // Die übliche Regel: das abgelehnte Notizbuch fällt weg, das Modul und seine übrigen Notizbücher bleiben
+        XCTAssertNil(h.library.notebook(free.id))
+        XCTAssertEqual(h.library.notebook(h.binding.notebookID)?.hidden, false)
+        XCTAssertFalse(h.service.isModuleGoneOnMac(notebookID: h.binding.notebookID))
+    }
+
+    /// Ist der Core per REST nicht zu erreichen, bleibt alles in der Warteschlange: nichts ausgeblendet, nichts in der
+    /// Fehlerablage, auch nicht das abhängige `page.create`
+    func testAnUnconfirmedModuleKeepsItsOperationsQueued() async throws {
+        let h = SyncHarness()
+        rejectNotebookCreates(h, modules: .failure(.notConnectedToInternet))
+        let free = try queueFreeNotebook(h)
+        h.start()
+
+        let answered = await eventually { h.factory.sockets.first?.ops.count == 2 && self.moduleChecks(h) == 1 }
+        XCTAssertTrue(answered)
+        for _ in 0..<200 { await _Concurrency.Task.yield() }
+        XCTAssertEqual(h.engine.pendingCount, 2)
+        XCTAssertEqual(h.engine.deadLetterCount, 0)
+        XCTAssertEqual(h.engine.missingModuleCount, 0)
+        XCTAssertEqual(h.library.notebook(free.id)?.hidden, false)
+        XCTAssertNotNil(h.library.page(freePageID))
+        // Auf dieser Verbindung wird nichts erneut gesendet
+        XCTAssertEqual(h.factory.sockets[0].ops.count, 2)
+    }
+
+    /// Ein Abgleich im ausgeblendeten Notizbuch plant nichts: kein `page.create` an der Sperre vorbei, das Flag bleibt
+    func testReconcileOfAGoneNotebookChangesNothing() async throws {
+        let h = SyncHarness()
+        h.start()
+        let online = await eventually { h.engine.state == .online }
+        XCTAssertTrue(online)
+        h.library.markModuleGone(moduleID: h.binding.moduleID)
+        let page = InkPageModel(pageID: h.binding.pageID, store: FakeInkPageStore(), saveDelay: .seconds(1))
+
+        let result = await h.engine.reconcile(page: page, binding: h.binding)
+        XCTAssertEqual(result, .skipped)
+        XCTAssertEqual(h.engine.pendingCount, 0)
+        XCTAssertEqual(h.library.page(h.binding.pageID)?.needsReconcile, true)
+        XCTAssertEqual(h.service.pagesNeedingReconcile, 0)
     }
 
     func testOtherModulesStayUntouched() async throws {
@@ -144,6 +213,35 @@ final class ModuleGoneOnMacTests: XCTestCase {
         // `notebook.create` und `page.create` werden beim Öffnen neu eingereiht
         XCTAssertEqual(h.library.page(freePageID)?.createQueued, false)
         XCTAssertEqual(h.library.page(freePageID)?.needsReconcile, true)
+    }
+
+    /// Kommt das Modul beim Abruf zurück, reiht der Dienst Notizbuch und Seiten gleich ein, nicht erst beim Öffnen
+    func testRefreshRequeuesTheNotebooksOfAReturnedModule() async throws {
+        let h = SyncHarness()
+        h.library.upsert(notebook(freeID, module: h.binding.moduleID))
+        h.library.upsert(page(freePageID, in: freeID))
+        h.library.markModuleGone(moduleID: h.binding.moduleID)
+        h.transport.router = { request in
+            let path = request.url?.path ?? ""
+            if path.hasSuffix("/modules") {
+                return .http(status: 200, body: LibraryFixtures.list([LibraryFixtures.moduleJSON()]))
+            }
+            if path.hasSuffix("/notebooks") {
+                return .http(status: 200, body: LibraryFixtures.list([]))
+            }
+            return .http(status: 200, body: LibraryFixtures.list([]))
+        }
+        h.factory.configure = { socket, _ in socket.opPolicy = { _, _, _ in .silent } }
+        h.start()
+        let online = await eventually { h.engine.state == .online }
+        XCTAssertTrue(online)
+
+        await h.service.refresh(force: true)
+        XCTAssertEqual(h.library.notebook(freeID)?.isModuleGone, false)
+        XCTAssertEqual(h.library.page(freePageID)?.createQueued, true)
+        XCTAssertEqual(h.library.page(freePageID)?.needsReconcile, true)
+        XCTAssertTrue(h.engine.hasPending(kind: "notebook.create", stream: "notebook:\(freeID)"))
+        XCTAssertEqual(h.engine.pendingPageIDs(kind: "page.create"), [freePageID])
     }
 
     func testAGoneModuleDisappearsFromTheLibrary() {

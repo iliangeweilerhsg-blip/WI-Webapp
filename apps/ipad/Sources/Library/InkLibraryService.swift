@@ -125,6 +125,10 @@ final class InkLibraryService {
         sync.onWelcomed = { [weak self] epochChanged in
             self?.startBackgroundReconcile(afterRestore: epochChanged)
         }
+        // Modul am Mac gelöscht (L8 aus #286): Die offene Seite steht auf der Platte, bevor ihre wartenden Striche entfallen
+        sync.onModuleMissing = { [weak self] _ in
+            self?.openModel?.saveNow()
+        }
         // Stürzte die App in der Löschfrist ab, steht die Seite als gelöscht in der Bibliothek, ihr `page.delete`
         // fehlt aber noch: jetzt nachreihen
         flushPendingDeletes()
@@ -214,7 +218,9 @@ final class InkLibraryService {
             for (moduleID, epoch) in inkModeEpoch where epochsBefore[moduleID, default: 0] != epoch {
                 keep.insert(moduleID)
             }
+            let goneBefore = Set(store.allNotebooks().filter(\.isModuleGone).map(\.id))
             store.mergeModules(briefs, at: now(), keepLocalInkMode: keep)
+            requeueReturnedNotebooks(goneBefore)
             // Waren beim Start noch keine Module bekannt, wird die Übernahme der alten Testseite jetzt nachgeholt
             adoptLegacyTestPage()
             bump()
@@ -330,6 +336,20 @@ final class InkLibraryService {
         track()
         guard let notebook = store.notebook(notebookID) else { return false }
         return notebook.knownOnServer && notebook.hidden
+    }
+
+    /// Das Modul ist wieder da (am Mac wiederhergestellt, L8 aus #286): Die freien Notizbücher und ihre Seiten werden
+    /// gleich wieder angelegt, nicht erst beim Öffnen jeder Seite. Die Striche holt danach der Hintergrund-Abgleich.
+    /// Scheitert das Einreihen, bleibt `createQueued` aus und das Öffnen der Seite holt es nach.
+    private func requeueReturnedNotebooks(_ goneBefore: Set<String>) {
+        var queued = false
+        for id in goneBefore.sorted() {
+            guard let notebook = store.notebook(id), !notebook.isModuleGone, notebook.kind == .frei else { continue }
+            for page in store.pages(inNotebook: id) where !page.createQueued {
+                if ensureCreateQueued(page, notebook: notebook) != nil { queued = true }
+            }
+        }
+        if queued { startBackgroundReconcile(afterRestore: false) }
     }
 
     /// Der Core kennt das Modul des Notizbuchs nicht mehr (`module_not_found`, L8 aus #286). Die Schreibfläche zeigt
@@ -965,7 +985,8 @@ final class InkLibraryService {
 
     private func flaggedPages() -> [LibraryPage] {
         track()
-        return store.allNotebooks().flatMap { notebook in
+        // Notizbücher eines am Mac gelöschten Moduls warten, bis es zurückkommt (L8 aus #286)
+        return store.allNotebooks().filter { !$0.isModuleGone }.flatMap { notebook in
             store.pages(inNotebook: notebook.id).filter { $0.needsReconcile && $0.createQueued }
         }
     }
@@ -1018,7 +1039,9 @@ final class InkLibraryService {
         }
         outer: for notebook in notebooks {
             guard isCurrentPass(generation) else { break }
-            guard store.pages(inNotebook: notebook.id).contains(where: { $0.needsReconcile }) else { continue }
+            guard !(store.notebook(notebook.id)?.isModuleGone ?? true),
+                store.pages(inNotebook: notebook.id).contains(where: { $0.needsReconcile })
+            else { continue }
             await refreshPages(notebookID: notebook.id)
             // Die offene Seite zuerst
             let pages = store.pages(inNotebook: notebook.id).sorted { first, second in
@@ -1409,8 +1432,9 @@ final class InkLibraryService {
     /// Zusammengeführt wird ohne Strichverlust: Seiten mit Strichen (oder unlesbare) bleiben immer. Leere Duplikate
     /// gehen in die übliche Löschfrist und sind am Mac wiederherstellbar. Hat keine Seite der Gruppe Striche, bleibt
     /// die mit dem kleinsten `index` (dann `id`), wie in `slidePage`. Die zuletzt geöffnete Seite eines Notizbuchs
-    /// bleibt ebenfalls stehen: Sie kann gerade offen sein. Zwei beschriebene Seiten derselben Folie bleiben beide
-    /// (kein Zusammenführen der Striche).
+    /// bleibt ebenfalls stehen, ebenso die offene Seite (ihre letzten Striche stehen evtl. erst im Speicher) und jede
+    /// Seite mit wartenden Strichen. Zwei beschriebene Seiten derselben Folie bleiben beide (kein Zusammenführen der
+    /// Striche).
     /// - Returns: Anzahl der Seiten, die in die Löschfrist gingen
     @discardableResult
     func mergeDuplicateSlidePages(notebookID: String) -> Int {
@@ -1421,12 +1445,18 @@ final class InkLibraryService {
             groups["\(slideID)|\(page.sessionID ?? "")", default: []].append(page)
         }
         var removed = 0
+        var pendingStrokes: Set<String>?
         for group in groups.values where group.count > 1 {
+            // Striche nur in der Warteschlange (Absturz vor dem Speichern) zählen wie Striche in der Datei
+            let pending =
+                pendingStrokes
+                ?? sync.pendingPageIDs(kind: "stroke.add").union(sync.pendingPageIDs(kind: "stroke.remove"))
+            pendingStrokes = pending
             // `pages(inNotebook:)` liefert nach `index`, dann `id` sortiert
-            let written = group.filter { pageHasStrokes($0.id) }
+            let written = group.filter { pending.contains($0.id) || pageHasStrokes($0.id) }
             let empty = group.filter { page in !written.contains { $0.id == page.id } }
             let candidates = written.isEmpty ? Array(empty.dropFirst()) : empty
-            for page in candidates where page.id != notebook.lastPageID {
+            for page in candidates where page.id != notebook.lastPageID && page.id != openPageID {
                 deletePage(pageID: page.id)
                 removed += 1
             }

@@ -111,6 +111,39 @@ final class DuplicateSlidePagesTests: XCTestCase {
         XCTAssertFalse(isDeleted(h, "page-z"))
     }
 
+    /// Die offene Seite kann Striche haben, die noch nicht auf der Platte stehen: Sie bleibt
+    func testTheOpenPageIsNeverRemoved() {
+        let h = SyncHarness()
+        let pages = FakeInkPageStore()
+        let service = makeService(h, pages)
+        h.library.upsert(slidePage("page-a", index: 3))
+        h.library.upsert(slidePage("page-z", index: 5))
+        let open = InkPageModel(pageID: "page-z", store: pages, saveDelay: .seconds(1))
+        service.setOpenPage(open)
+
+        XCTAssertEqual(service.mergeDuplicateSlidePages(notebookID: notebookID), 0)
+        XCTAssertFalse(isDeleted(h, "page-a"))
+        XCTAssertFalse(isDeleted(h, "page-z"))
+    }
+
+    /// Striche, die nur in der Warteschlange stehen (Absturz vor dem Speichern), zählen wie Striche in der Datei
+    func testAPageWithQueuedStrokesCountsAsWritten() {
+        let h = SyncHarness()
+        let pages = FakeInkPageStore()
+        let service = makeService(h, pages)
+        let queuedID = "019a4e14-0000-7000-8000-0000000000e9"
+        h.library.upsert(slidePage("page-a", index: 3))
+        h.library.upsert(slidePage(queuedID, index: 5))
+        let binding = InkBinding(
+            notebookID: notebookID, pageID: queuedID, moduleID: h.binding.moduleID, pageCreated: true,
+            needsReconcile: false, sessionID: nil, sessionStartMS: nil)
+        XCTAssertTrue(h.engine.enqueue([.upsert(h.stroke("s1"))], binding: binding))
+
+        XCTAssertEqual(service.mergeDuplicateSlidePages(notebookID: notebookID), 1)
+        XCTAssertTrue(isDeleted(h, "page-a"))
+        XCTAssertFalse(isDeleted(h, queuedID))
+    }
+
     func testPagesWithoutASlideAreIgnored() {
         let h = SyncHarness()
         let service = makeService(h, FakeInkPageStore())
