@@ -6,6 +6,7 @@
 // und Beenden (Lead-Entscheidung): Ein versehentliches Beenden von einer fremden Seite wäre teurer als zwei Klicks.
 // Im Dashboard der aktiven Session übernimmt die Statusleiste. Keine Farbe außer dem roten Punkt, keine Animation.
 import Link from 'next/link';
+import { useRef } from 'react';
 import { useRecordingView } from '../../lib/recording';
 import { isDashboardAvailable, sessionHref } from '../../lib/sessions.ts';
 import { AutoStopHint } from '../autostop';
@@ -19,8 +20,9 @@ const primary =
 const secondary =
   'inline-flex min-h-11 items-center justify-center rounded-md border border-border-strong px-4 py-2 text-md hover:bg-surface-raised';
 
-export function RecordingBar() {
+export function RecordingBar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const view = useRecordingView();
+  const statusLine = useRef<HTMLParagraphElement>(null);
   const now = useNow(1000);
   // Ohne aktive Session, oder wenn das Dashboard dieser Session offen ist (dort zeigt die Statusleiste alles)
   if (view.session === null || view.phase === 'andere' || view.shownByDashboard) return null;
@@ -45,7 +47,7 @@ export function RecordingBar() {
       className="shrink-0 border-t border-border bg-surface"
     >
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-3 py-2 text-sm">
-        <p className="flex items-center gap-2">
+        <p ref={statusLine} tabIndex={-1} className="flex items-center gap-2 outline-none">
           <RecordDot filled={false} record={recording} />
           <span className={needsAction ? 'font-semibold' : 'font-medium'}>{label}</span>
           {/* Laufzeit und Pausendauer stehen außerhalb des Status-Satzes: Er soll sich nicht jede Sekunde ändern */}
@@ -68,7 +70,15 @@ export function RecordingBar() {
         </span>
 
         {needsAction ? (
-          <button type="button" className={kind === 'needs-start' ? primary : secondary} onClick={view.start}>
+          <button
+            type="button"
+            className={kind === 'needs-start' ? primary : secondary}
+            onClick={() => {
+              // Der Knopf verschwindet, sobald die Aufnahme beginnt: Der Fokus geht vorher auf den Statussatz
+              statusLine.current?.focus();
+              view.start();
+            }}
+          >
             {actionLabel}
           </button>
         ) : null}
@@ -83,7 +93,7 @@ export function RecordingBar() {
           />
           {/* Der Link erst, wenn die Route existiert (T1-04, siehe `SESSION_DASHBOARD_AVAILABLE`) */}
           {isDashboardAvailable() ? (
-            <Link href={sessionHref(session.id)} className={secondary}>
+            <Link href={sessionHref(session.id)} className={secondary} onClick={onNavigate}>
               Zur Vorlesung
             </Link>
           ) : null}
