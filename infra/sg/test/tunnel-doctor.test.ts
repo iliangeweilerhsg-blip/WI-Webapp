@@ -72,6 +72,7 @@ function io(over: Partial<TunnelDoctorIo> = {}): TunnelDoctorIo {
     platform: 'darwin',
     hasSwift: async () => true,
     binaryExists: () => true,
+    binaryProblem: () => null,
     fingerprint: () => 'abc',
     stamp: () => 'abc',
     helperRunning: () => true,
@@ -120,6 +121,15 @@ describe('runTunnelChecks', () => {
     const r = byName(await runTunnelChecks(cfg, io({ hasSwift: async () => false })), 'Swift');
     expect(r.status).toBe('fail');
     expect(r.hint).toMatch(/xcode-select --install/);
+  });
+
+  it('Programm mit fremdem Besitzer oder beschreibbar: Fehler, sg startet es nicht', async () => {
+    const r = byName(
+      await runTunnelChecks(cfg, io({ binaryProblem: () => '/repo/x gehört einem anderen Benutzer.' })),
+      'Programm',
+    );
+    expect(r.status).toBe('fail');
+    expect(r.detail).toContain('anderen Benutzer');
   });
 
   it('Programm nicht gebaut oder veraltet: nur ein Hinweis, "sg start" baut es', async () => {

@@ -107,7 +107,7 @@ Die Zeilen beginnen mit „Tunnel-Helfer ·“. Ein ✗ bedeutet: etwas ist kapu
 | Zeile | Bedeutung |
 |---|---|
 | Swift | ✗ Swift fehlt: `xcode-select --install`. Ohne Swift gibt es keine Direktverbindung, der Rest läuft |
-| Programm | ℹ „noch nicht gebaut“ oder „veraltet“: `pnpm sg start` baut es beim nächsten Start |
+| Programm | ℹ „noch nicht gebaut“ oder „veraltet“: `pnpm sg start` baut es beim nächsten Start. ✗ „wird nicht gestartet“: Das Programm oder ein Ordner auf dem Weg dorthin gehört nicht dir, ist für andere beschreibbar oder zeigt aus dem Repo heraus. `sg` startet so ein Programm nie. `apps/mac-tunnel/.build` löschen, dann `pnpm sg stop` und `pnpm sg start` |
 | Prozess | ✗ „läuft nicht, obwohl der Core läuft“: im Terminal von `pnpm sg start` nach `[tunnel]` suchen (Bau fehlgeschlagen? Absturz?), dann `pnpm sg stop` und `pnpm sg start`. ℹ „läuft nicht“ ist normal, solange `sg start` nicht läuft |
 | Zustand | ✗ Zustandsdatei fehlt, ist unlesbar oder älter als 15 Sekunden: Der Helfer hängt, `pnpm sg stop` und `pnpm sg start` |
 | Core | ✗ Der Helfer erreicht den Tunnel-Eingang des Core nicht. Läuft der Core, und ist er ohne `SG_TUNNEL=0` gestartet? Solange das so ist, nimmt der Helfer keine Verbindung an |

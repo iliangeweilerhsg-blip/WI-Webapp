@@ -120,8 +120,26 @@ public enum TunnelKeyFile {
             return .insecure("secrets/ hat zu offene Rechte (erwartet 0700).")
         }
 
+        // Gegen einen Austausch des Ordners zwischen Prüfung und Öffnen (TOCTOU): den geprüften Ordner selbst öffnen
+        // (kein Symlink, O_NOFOLLOW), mit Gerät und Inode der Prüfung vergleichen und die Datei relativ dazu öffnen.
+        let directoryDescriptor = open(directory, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        if directoryDescriptor < 0 {
+            let code = errno
+            if code == ENOENT { return .missing }
+            if code == ELOOP || code == ENOTDIR { return .insecure("secrets/ ist kein echter Ordner (Symlink?).") }
+            return .broken("Der Ordner der Schlüsseldatei lässt sich nicht öffnen (Fehler \(code)).")
+        }
+        defer { close(directoryDescriptor) }
+        var openedDirectory = stat()
+        guard fstat(directoryDescriptor, &openedDirectory) == 0,
+            openedDirectory.st_dev == directoryInfo.st_dev, openedDirectory.st_ino == directoryInfo.st_ino
+        else {
+            return .insecure("secrets/ hat sich während der Prüfung geändert.")
+        }
+
         // Datei: nie einem Symlink folgen (O_NOFOLLOW), ein FIFO o. Ä. blockiert nicht (O_NONBLOCK)
-        let descriptor = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
+        let fileName = (path as NSString).lastPathComponent
+        let descriptor = openat(directoryDescriptor, fileName, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK)
         if descriptor < 0 {
             let code = errno
             if code == ENOENT { return .missing }

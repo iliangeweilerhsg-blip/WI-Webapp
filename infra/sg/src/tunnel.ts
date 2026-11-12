@@ -2,8 +2,16 @@
 // Überwachung. `sg start` startet den Helfer nach dem Core, `sg stop` beendet ihn davor. Fehlt Swift oder scheitert der
 // Bau, startet der Rest trotzdem (nur ohne Direktverbindung), und `sg` sagt es deutlich.
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import type { SgConfig } from './config.ts';
 
 export const TUNNEL_PRODUCT = 'sg-tunnel';
@@ -273,4 +281,44 @@ export async function superviseTunnel(
 
 export function hasTunnelBinary(cfg: SgConfig): boolean {
   return existsSync(tunnelBinary(cfg));
+}
+
+/**
+ * Darf `sg` das gebaute Programm starten? `null` heißt ja, sonst steht da der Grund (ohne Inhalt der Datei).
+ *
+ * Es wird nie eine fremde Binärdatei gestartet: Das Programm muss (nach Auflösen aller Symlinks, `.build/release` ist bei
+ * SwiftPM selbst einer) innerhalb des Repos liegen und eine reguläre Datei sein. Jede Stufe vom Repo-Ordner bis zum
+ * Programm muss dem Benutzer gehören, der `sg` ausführt, und darf für Gruppe und andere nicht beschreibbar sein. Sonst
+ * könnte ein anderes Konto am Mac (auf macOS sind alle Konten in der Gruppe `staff`) das Programm austauschen, und `sg`
+ * startete fremden Code mit den Rechten des Owners, der die Schlüsseldatei lesen darf.
+ */
+export function tunnelBinaryProblem(
+  cfg: SgConfig,
+  uid: number | undefined = process.getuid?.(),
+): string | null {
+  let root: string;
+  let target: string;
+  try {
+    root = realpathSync(cfg.repoRoot);
+    target = realpathSync(tunnelBinary(cfg));
+  } catch {
+    return `Das Programm ${tunnelBinary(cfg)} fehlt oder lässt sich nicht auflösen.`;
+  }
+  const rel = relative(root, target);
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    return `Das Programm ${tunnelBinary(cfg)} zeigt (über einen Symlink) aus dem Repo heraus.`;
+  }
+  const chain = [root];
+  for (const part of rel.split(sep)) chain.push(join(chain[chain.length - 1] ?? root, part));
+  try {
+    for (const path of chain) {
+      const info = lstatSync(path);
+      if (uid !== undefined && info.uid !== uid) return `${path} gehört einem anderen Benutzer.`;
+      if ((info.mode & 0o022) !== 0) return `${path} ist für Gruppe oder andere beschreibbar.`;
+    }
+    if (!lstatSync(target).isFile()) return `Das Programm ${target} ist keine reguläre Datei.`;
+  } catch (e) {
+    return `Das Programm lässt sich nicht prüfen (${(e as NodeJS.ErrnoException).code ?? 'Fehler'}).`;
+  }
+  return null;
 }

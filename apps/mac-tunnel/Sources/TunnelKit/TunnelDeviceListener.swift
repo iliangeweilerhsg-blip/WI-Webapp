@@ -179,8 +179,10 @@ final class TunnelDeviceListener {
         let connection = item.connection
         connection.stateUpdateHandler = nil
         // Beide Seiten prüfen das ausgehandelte Verfahren (Plan E12). Ohne passendes Verfahren: sofort zu.
-        guard let negotiated = TunnelTLS.negotiated(on: connection), negotiated.isAllowed else {
-            hooks.log("Verbindung abgewiesen: TLS-Verfahren nicht zulässig")
+        let negotiated = TunnelTLS.negotiated(on: connection)
+        guard let negotiated, negotiated.isAllowed else {
+            // Nennt nur Version und Verfahren (öffentlich im Handshake), nie Schlüssel oder Adressen
+            hooks.log("Verbindung abgewiesen: TLS-Verfahren nicht zulässig (\(negotiated?.text ?? "unbekannt"))")
             connection.cancel()
             handshakesFailed += 1
             hooks.handshakeFailed()

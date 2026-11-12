@@ -22,6 +22,7 @@ import {
   hasTunnelBinary,
   readTunnelStamp,
   tunnelBinary,
+  tunnelBinaryProblem,
   tunnelBuildReason,
   tunnelSourceFingerprint,
 } from './tunnel.ts';
@@ -61,6 +62,8 @@ export interface TunnelDoctorIo {
   platform: string;
   hasSwift: () => Promise<boolean>;
   binaryExists: () => boolean;
+  /** Grund, warum `sg` das vorhandene Programm nicht starten würde (fremder Besitzer, beschreibbar), sonst `null` */
+  binaryProblem: () => string | null;
   fingerprint: () => string | null;
   stamp: () => string | null;
   /** Läuft der Helfer (PID-Datei mit passender Identität)? */
@@ -156,20 +159,28 @@ export async function runTunnelChecks(cfg: SgConfig, io: TunnelDoctorIo): Promis
           'Xcode oder die Kommandozeilenwerkzeuge installieren ("xcode-select --install"). Ohne Swift startet "pnpm sg start" ohne Direktverbindung vom iPad.',
         ),
   );
+  const binaryExists = io.binaryExists();
   const reason = tunnelBuildReason({
-    binaryExists: io.binaryExists(),
+    binaryExists,
     fingerprint: io.fingerprint(),
     stamp: io.stamp(),
   });
+  const binaryProblem = binaryExists ? io.binaryProblem() : null;
   results.push(
-    reason === null
-      ? ok('Programm', 'gebaut und aktuell')
-      : info(
+    binaryProblem !== null
+      ? fail(
           'Programm',
-          reason === 'missing'
-            ? 'noch nicht gebaut: "pnpm sg start" baut es beim nächsten Start (etwa eine Minute)'
-            : 'veraltet: "pnpm sg start" baut es beim nächsten Start neu',
-        ),
+          `wird nicht gestartet: ${binaryProblem}`,
+          'apps/mac-tunnel/.build löschen, Rechte des Repo-Ordners prüfen ("chmod go-w"), dann "pnpm sg stop" und "pnpm sg start" (baut neu).',
+        )
+      : reason === null
+        ? ok('Programm', 'gebaut und aktuell')
+        : info(
+            'Programm',
+            reason === 'missing'
+              ? 'noch nicht gebaut: "pnpm sg start" baut es beim nächsten Start (etwa eine Minute)'
+              : 'veraltet: "pnpm sg start" baut es beim nächsten Start neu',
+          ),
   );
 
   // Prozess und Zustand
@@ -482,6 +493,7 @@ export function realTunnelDoctorIo(cfg: SgConfig, sys: System): TunnelDoctorIo {
     platform: sys.platform,
     hasSwift: async () => (await sys.run('swift', ['--version'])).ok,
     binaryExists: () => hasTunnelBinary(cfg),
+    binaryProblem: () => tunnelBinaryProblem(cfg),
     fingerprint: () => tunnelSourceFingerprint(cfg.tunnelPackageDir),
     stamp: () => readTunnelStamp(cfg),
     helperRunning: () => readService(cfg, 'tunnel') !== null,

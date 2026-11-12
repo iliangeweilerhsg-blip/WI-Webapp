@@ -71,7 +71,9 @@ final class TunnelEngineTests: XCTestCase {
         let listenerPort = try await port(rig, device)
         let client = TestClient.tls(port: listenerPort, presharedKey: device.presharedKey)
         let connected = await client.connect(timeout: 8)
-        XCTAssertTrue(connected, "Handshake mit richtigem Schlüssel scheitert")
+        XCTAssertTrue(
+            connected,
+            "Handshake mit richtigem Schlüssel scheitert. Client: \(client.stateHistory). Helfer: \(rig.logLines)")
         return client
     }
 
@@ -143,7 +145,9 @@ final class TunnelEngineTests: XCTestCase {
         defer { for (_, client) in intruders { client.close() } }
         for (title, client) in intruders {
             let connected = await client.connect(timeout: 4)
-            XCTAssertFalse(connected, "Handshake gelungen trotz: \(title)")
+            XCTAssertFalse(
+                connected,
+                "Handshake gelungen trotz: \(title). Ausgehandelt: \(client.negotiated?.text ?? "-"). Client: \(client.stateHistory). Helfer: \(rig.logLines)")
         }
 
         // Kein TLS: reines TCP mit Daten, die wie eine HTTP-Anfrage aussehen

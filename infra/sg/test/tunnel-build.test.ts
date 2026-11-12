@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -17,6 +18,7 @@ import {
   RestartLimiter,
   superviseTunnel,
   tunnelBinary,
+  tunnelBinaryProblem,
   tunnelBuildReason,
   tunnelCommand,
   tunnelSourceFingerprint,
@@ -128,6 +130,56 @@ describe('tunnelSourceFingerprint', () => {
     expect(before).not.toBeNull();
     symlinkSync('/etc/hostname', join(cfg.tunnelPackageDir, 'Sources/TunnelKit/link2.txt'));
     expect(tunnelSourceFingerprint(cfg.tunnelPackageDir)).not.toBe(before);
+  });
+});
+
+describe('tunnelBinaryProblem', () => {
+  /** Programm wie bei SwiftPM: `.build/release` ist ein Symlink auf den Ordner der Zielplattform */
+  function makeBuilt(): { cfg: SgConfig; real: string } {
+    const { cfg } = makeRepo();
+    const realDir = join(cfg.tunnelPackageDir, '.build', 'arm64-apple-macosx', 'release');
+    mkdirSync(realDir, { recursive: true });
+    symlinkSync('arm64-apple-macosx/release', join(cfg.tunnelPackageDir, '.build', 'release'));
+    const real = join(realDir, 'sg-tunnel');
+    writeFileSync(real, '#!/bin/sh\n');
+    chmodSync(real, 0o755);
+    for (const d of [cfg.repoRoot, join(cfg.repoRoot, 'apps'), cfg.tunnelPackageDir]) chmodSync(d, 0o755);
+    return { cfg, real };
+  }
+  const uid = process.getuid?.();
+
+  it('eigenes, nur für den Besitzer beschreibbares Programm im Repo: startbar', () => {
+    const { cfg } = makeBuilt();
+    expect(tunnelBinaryProblem(cfg, uid)).toBeNull();
+  });
+
+  it('fehlendes Programm: nicht startbar', () => {
+    const { cfg } = makeRepo();
+    expect(tunnelBinaryProblem(cfg, uid)).toContain('fehlt');
+  });
+
+  it('fremder Besitzer: nicht startbar', () => {
+    const { cfg } = makeBuilt();
+    expect(tunnelBinaryProblem(cfg, (uid ?? 0) + 1)).toContain('anderen Benutzer');
+  });
+
+  it('für die Gruppe beschreibbares Programm oder beschreibbarer Ordner: nicht startbar', () => {
+    const { cfg, real } = makeBuilt();
+    chmodSync(real, 0o775);
+    expect(tunnelBinaryProblem(cfg, uid)).toContain('beschreibbar');
+    chmodSync(real, 0o755);
+    chmodSync(join(cfg.tunnelPackageDir, '.build'), 0o777);
+    expect(tunnelBinaryProblem(cfg, uid)).toContain('beschreibbar');
+  });
+
+  it('Symlink aus dem Repo heraus: nicht startbar', () => {
+    const { cfg } = makeRepo();
+    const outside = join(tmp(), 'sg-tunnel');
+    writeFileSync(outside, '#!/bin/sh\n');
+    chmodSync(outside, 0o755);
+    mkdirSync(join(cfg.tunnelPackageDir, '.build', 'release'), { recursive: true });
+    symlinkSync(outside, tunnelBinary(cfg));
+    expect(tunnelBinaryProblem(cfg, uid)).toContain('aus dem Repo heraus');
   });
 });
 

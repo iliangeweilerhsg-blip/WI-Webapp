@@ -238,6 +238,7 @@ final class TestClient: @unchecked Sendable {
     private var closed = false
     private var buffer = Data()
     private var sent = 0
+    private var states: [String] = []
 
     init(connection: NWConnection) {
         self.connection = connection
@@ -284,10 +285,24 @@ final class TestClient: @unchecked Sendable {
 
     var negotiated: TunnelNegotiated? { TunnelTLS.negotiated(on: connection) }
 
+    /// Verlauf der Zustände (Fehlersuche in der CI, ohne Schlüssel)
+    var stateHistory: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return states.joined(separator: " → ")
+    }
+
+    private func record(_ state: NWConnection.State) {
+        lock.lock()
+        if states.count < 20 { states.append("\(state)") }
+        lock.unlock()
+    }
+
     /// Startet und wartet, bis die Verbindung steht (bei TLS: der Handshake gelungen ist) oder die Frist abläuft
     func connect(timeout: TimeInterval) async -> Bool {
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
+            self.record(state)
             switch state {
             case .ready:
                 self.lock.lock()

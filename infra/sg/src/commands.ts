@@ -33,7 +33,9 @@ import { realSystem } from './system.ts';
 import {
   ensureTunnelBuild,
   superviseTunnel,
+  tunnelBinaryProblem,
   tunnelCommand,
+  TUNNEL_EXIT_CONFIG,
   TUNNEL_STOP_TIMEOUT_S,
   type TunnelBuildIo,
   type TunnelExit,
@@ -387,6 +389,15 @@ export async function start(cfg: SgConfig): Promise<number> {
         if (tunnelBuild.status === 'ready') {
           tunnelLoop = superviseTunnel({
             spawn: async (): Promise<TunnelExit> => {
+              // Vor jedem Start: Nie eine fremde oder von anderen austauschbare Binärdatei starten
+              const problem = tunnelBinaryProblem(cfg);
+              if (problem !== null) {
+                err(
+                  `Tunnel-Helfer wird nicht gestartet: ${problem} Abhilfe: apps/mac-tunnel/.build löschen, ` +
+                    '"pnpm sg stop" und "pnpm sg start" (baut neu).',
+                );
+                return { code: TUNNEL_EXIT_CONFIG, signal: null };
+              }
               removePid(cfg, 'tunnel');
               const command = tunnelCommand(cfg);
               const svc = startService(cfg, 'tunnel', command.cmd, command.args, command.cwd);
