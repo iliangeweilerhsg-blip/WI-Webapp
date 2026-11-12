@@ -224,6 +224,16 @@ final class FakeSyncSocketFactory: SyncSocketFactory {
     /// Stellt die n-te Verbindung ein, bevor sie benutzt wird
     var configure: (FakeSyncSocket, Int) -> Void = { _, _ in }
 
+    /// Wie oft die Session ungültig gemacht wurde (Issue #282)
+    private(set) var invalidateCount = 0
+    /// Waren beim letzten Ungültigmachen alle bis dahin geöffneten Verbindungen schon geschlossen?
+    private(set) var allClosedAtInvalidate: Bool?
+
+    func invalidateSessions() {
+        invalidateCount += 1
+        allClosedAtInvalidate = sockets.allSatisfy { $0.isClosed }
+    }
+
     func open(_ request: URLRequest) -> any SyncSocket {
         maxOpenAtOpen = max(maxOpenAtOpen, sockets.filter { !$0.isClosed }.count)
         let socket = FakeSyncSocket()

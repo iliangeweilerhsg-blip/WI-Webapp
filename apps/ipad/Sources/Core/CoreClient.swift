@@ -8,9 +8,14 @@ protocol HTTPTransport {
     /// `file` unberührt. Kommen mehr als `limit.maxBytes` an oder dauert es länger als `limit.maxDuration`, bricht der
     /// Transport ab und wirft `URLError(.dataLengthExceedsMaximum)` bzw. `.timedOut`; `file` bleibt dann nicht zurück.
     func download(_ request: URLRequest, to file: URL, limit: DownloadLimit) async throws -> HTTPURLResponse
+    /// Bricht alle laufenden Aufgaben ab und macht die Sessions ungültig (`invalidateAndCancel`). Der nächste Aufruf
+    /// legt neue Sessions an. So wiederholt URLSession nichts mehr von selbst (Issue #282).
+    func cancelAll()
 }
 
 extension HTTPTransport {
+    func cancelAll() {}
+
     func download(_ request: URLRequest, to file: URL, limit: DownloadLimit) async throws -> HTTPURLResponse {
         throw URLError(.unsupportedURL)
     }
@@ -18,9 +23,30 @@ extension HTTPTransport {
 
 @MainActor
 final class URLSessionTransport: HTTPTransport {
-    private let session: URLSession
+    /// Wird beim ersten Gebrauch angelegt und nach `cancelAll()` neu (Issue #282)
+    private var session: URLSession?
+    /// Sessions laufender Downloads, damit `cancelAll()` auch sie erreicht
+    private var downloadSessions: [UUID: URLSession] = [:]
 
-    init() {
+    init() {}
+
+    private func currentSession() -> URLSession {
+        if let session { return session }
+        let created = Self.makeSession()
+        session = created
+        return created
+    }
+
+    func cancelAll() {
+        session?.invalidateAndCancel()
+        session = nil
+        for downloadSession in downloadSessions.values {
+            downloadSession.invalidateAndCancel()
+        }
+        downloadSessions.removeAll()
+    }
+
+    private static func makeSession() -> URLSession {
         // Ohne Cache und Cookies auf der Platte: Antworten mit Token landen nirgends
         let configuration = URLSessionConfiguration.ephemeral
         configuration.waitsForConnectivity = false
@@ -30,11 +56,11 @@ final class URLSessionTransport: HTTPTransport {
         // Nie über einen Proxy (Gegen-Review PR #276): Anfragen mit Token gehen im Klartext an den Weiterleiter auf
         // Loopback. Ein Proxy aus den WLAN-Einstellungen oder einer PAC-Datei bekäme sie sonst samt Token.
         configuration.connectionProxyDictionary = [:]
-        session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
+        return URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await currentSession().data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
@@ -53,7 +79,12 @@ final class URLSessionTransport: HTTPTransport {
         configuration.connectionProxyDictionary = [:]
         let delegate = LimitedDownloadDelegate(limit: limit, destination: file)
         let limitedSession = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
-        defer { limitedSession.finishTasksAndInvalidate() }
+        let downloadID = UUID()
+        downloadSessions[downloadID] = limitedSession
+        defer {
+            downloadSessions[downloadID] = nil
+            limitedSession.finishTasksAndInvalidate()
+        }
         let task = limitedSession.downloadTask(with: request)
         do {
             return try await withTaskCancellationHandler {
@@ -246,6 +277,12 @@ final class CoreClient {
         self.retryDelay = retryDelay
         self.interfaces = interfaces
         self.routing = routing
+    }
+
+    /// Bricht alle laufenden Anfragen und Downloads ab und macht die URLSessions ungültig (Issue #282). Der nächste Aufruf
+    /// legt neue Sessions an. Aufgerufen, bevor der Weiterleiter seinen Port freigibt.
+    func cancelRequests() {
+        transport.cancelAll()
     }
 
     /// Darf eine Anfrage mit Token an diese Adresse gehen?

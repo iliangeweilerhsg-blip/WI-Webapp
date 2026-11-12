@@ -216,6 +216,17 @@ final class SyncEngine {
         runningMac = nil
     }
 
+    /// Die App geht in den Hintergrund oder der Weiterleiter stoppt (Issue #282): Schließt die Verbindung, hält die Schleife
+    /// an und macht die URLSession ungültig. Die Warteschlange bleibt auf der Platte; was noch unbestätigt unterwegs war,
+    /// geht bei der nächsten Verbindung erneut raus (gleiche `op_id`, der Core bestätigt sie idempotent). `runningMac`
+    /// bleibt, damit `start(mac:)` im Vordergrund die Schleife wieder aufnimmt.
+    func suspendConnections() {
+        if runningMac != nil {
+            halt(to: .stopped)
+        }
+        sockets.invalidateSessions()
+    }
+
     /// Die Wegewahl hat sich geändert (neuer Port des Weiterleiters, Mac gefunden): Wartet die Engine, verbindet sie
     /// sofort neu. Eine laufende Verbindung bleibt, wie sie ist (sie wandert nie auf einen anderen Weg).
     func routeChanged() {

@@ -356,6 +356,7 @@ final class FakeRouting: MacRouting {
     var state: RouteState
     var fixedEndpoint: CoreEndpoint?
     var onChange: (@MainActor () -> Void)?
+    var willStopForwarder: (@MainActor () -> Void)?
     private(set) var pairedCalls: [Bool] = []
     private(set) var activeCalls = 0
     private(set) var backgroundCalls = 0
@@ -368,5 +369,10 @@ final class FakeRouting: MacRouting {
     func endpoint() -> CoreEndpoint? { fixedEndpoint }
     func setPaired(_ paired: Bool) { pairedCalls.append(paired) }
     func appBecameActive() { activeCalls += 1 }
-    func appWentToBackground() { backgroundCalls += 1 }
+    func appWentToBackground() {
+        // Wie die echte Wegewahl: erst die Meldung vor dem Stopp, dann der Stopp
+        willStopForwarder?()
+        fixedEndpoint = nil
+        backgroundCalls += 1
+    }
 }

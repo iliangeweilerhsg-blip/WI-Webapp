@@ -270,7 +270,7 @@ enum RouteProblem: Equatable, Sendable {
 | Lage | Verhalten |
 |---|---|
 | App im Vordergrund, gekoppelt | Weiterleiter läuft. Verbindungen entstehen bei Bedarf (Sync, REST) |
-| App im Hintergrund | Weiterleiter und Verbindungen enden. Beim Zurückkehren neuer Port, `MacRoute` meldet die neue Adresse, der Sync startet neu |
+| App im Hintergrund | Erst brechen alle URLSession-Aufgaben ab (REST, Download, Sync) und die Sessions werden ungültig (`invalidateAndCancel`, Issue #282), dann stoppt der Weiterleiter. So geht keine Anfrage samt Token an einen Port, den inzwischen eine fremde App belegt. Beim Zurückkehren neuer Port und neue Sessions, `MacRoute` meldet die neue Adresse, der Sync startet neu. Die Warteschlange bleibt auf der Platte; Unbestätigtes geht erneut raus |
 | WLAN am iPad aus | Keine Versuche. Text „WLAN ist aus“ |
 | Token ungültig (`401`) | Keine Versuche, wie heute |
 

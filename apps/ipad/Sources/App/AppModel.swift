@@ -149,6 +149,9 @@ final class AppModel {
         sync?.onStateChange = { [weak self] state in
             self?.syncStateChanged(state)
         }
+        routing?.willStopForwarder = { [weak self] in
+            self?.cancelConnections()
+        }
         routing?.onChange = { [weak self] in
             // Neuer Port oder neuer Zustand des Weiterleiters: Wartet der Sync, verbindet er sofort neu
             self?.sync?.routeChanged()
@@ -272,7 +275,20 @@ final class AppModel {
     /// Die App kommt in den Vordergrund: Die Wegewahl startet den Weiterleiter (neuer Port), WLAN gilt wieder zuerst
     func appBecameActive() {
         routing?.appBecameActive()
+        // Der Sync wurde im Hintergrund angehalten (`cancelConnections`): neue Schleife, neue URLSession. Läuft er schon,
+        // passiert nichts.
+        if case .paired(let mac) = phase {
+            sync?.start(mac: mac)
+        }
         sync?.kick()
+    }
+
+    /// Bricht alle Anfragen ab und macht die URLSessions ungültig (REST, Download, Sync), bevor der Weiterleiter seinen
+    /// Port freigibt (Issue #282). Die Warteschlange bleibt auf der Platte; ein abgebrochener Upload geht bei der nächsten
+    /// Verbindung erneut raus.
+    func cancelConnections() {
+        sync?.suspendConnections()
+        client.cancelRequests()
     }
 
     /// Die App geht in den Hintergrund: Weiterleiter und Verbindungen enden

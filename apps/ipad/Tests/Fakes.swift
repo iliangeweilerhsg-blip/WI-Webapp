@@ -75,6 +75,16 @@ final class FakeTransport: HTTPTransport {
         self.replies = replies
     }
 
+    /// Wie oft die Sessions abgebrochen wurden (Issue #282)
+    private(set) var cancelAllCount = 0
+    /// Läuft in `cancelAll`, damit ein Test die Reihenfolge zu anderen Aufrufen festhalten kann
+    var onCancelAll: (@MainActor () -> Void)?
+
+    func cancelAll() {
+        cancelAllCount += 1
+        onCancelAll?()
+    }
+
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
         let index = min(requests.count - 1, replies.count - 1)
