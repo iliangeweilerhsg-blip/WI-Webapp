@@ -17,7 +17,10 @@ final class TunnelKeyPairingTests: XCTestCase {
         let macs: FakePairedMacStore
         let controller: PairingController
 
-        init(keyInResponse: String?, existingKey: String? = nil, failsSavingKey: Bool = false) {
+        init(
+            keyInResponse: String?, existingKey: String? = nil, failsSavingKey: Bool = false,
+            requiresTunnelKey: Bool = false
+        ) {
             var body = Fixtures.pairResponse
             if let keyInResponse {
                 body = body.replacingOccurrences(
@@ -42,7 +45,8 @@ final class TunnelKeyPairingTests: XCTestCase {
                 macStore: macs,
                 deviceName: "iPad Test",
                 appVersion: "0.1.0",
-                tunnelKeyStore: keys
+                tunnelKeyStore: keys,
+                requiresTunnelKey: requiresTunnelKey
             )
         }
 
@@ -86,6 +90,42 @@ final class TunnelKeyPairingTests: XCTestCase {
         XCTAssertEqual(setup.controller.state, .paired)
         XCTAssertNil(setup.keys.key)
         XCTAssertEqual(setup.tokens.token, Fixtures.token)
+    }
+
+    func testWithTheTunnelAPairingWithoutKeyIsNotStoredAndSaysWhatIsMissingAtTheMac() async {
+        // Mit Tunnel (echte App) wäre eine Kopplung ohne Schlüssel wertlos, und „neu koppeln“ hälfe nicht: Der Mac
+        // (Core vor UX-12 oder `SG_TUNNEL=0`) muss erst geändert werden. Nichts wird gespeichert, die alte Kopplung
+        // bleibt unberührt.
+        let old = TunnelTestKeys.text(9)
+        for keyInResponse in [nil, "abc", String(TunnelTestKeys.text().dropLast())] as [String?] {
+            let setup = Setup(keyInResponse: keyInResponse, existingKey: old, requiresTunnelKey: true)
+
+            await setup.pair()
+
+            XCTAssertEqual(setup.controller.state, .idle)
+            XCTAssertEqual(setup.controller.lastError, .macWithoutTunnel)
+            XCTAssertNil(setup.tokens.token)
+            XCTAssertNil(setup.macs.mac)
+            XCTAssertEqual(setup.keys.key, old)
+            XCTAssertEqual(setup.keys.saveCount, 0)
+            XCTAssertEqual(setup.keys.deleteCount, 0)
+        }
+        let advice = ConnectionError.macWithoutTunnel.advice
+        XCTAssertTrue(advice.contains("sg start"))
+        XCTAssertTrue(advice.contains("SG_TUNNEL=0"))
+        XCTAssertFalse(advice.contains("!"))
+        XCTAssertFalse(ConnectionError.macWithoutTunnel.title.contains("!"))
+    }
+
+    func testWithTheTunnelAPairingWithKeyStoresBoth() async {
+        let key = TunnelTestKeys.text(4)
+        let setup = Setup(keyInResponse: key, requiresTunnelKey: true)
+
+        await setup.pair()
+
+        XCTAssertEqual(setup.controller.state, .paired)
+        XCTAssertEqual(setup.tokens.token, Fixtures.token)
+        XCTAssertEqual(setup.keys.key, key)
     }
 
     func testKeyWithWrongFormatIsNeverStored() async {

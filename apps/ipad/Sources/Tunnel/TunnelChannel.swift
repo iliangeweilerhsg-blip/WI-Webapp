@@ -52,6 +52,14 @@ protocol TunnelDialing: Sendable {
     ///   - peerToPeer: `false` = nur das gemeinsame WLAN (Stufe 1), `true` = auch Wi-Fi peer-to-peer (Stufe 2)
     ///   - timeout: Sekunden für Suche und Handshake zusammen
     func dial(key: TunnelKey, peerToPeer: Bool, timeout: TimeInterval) async -> TunnelDialResult
+    /// Vergisst gemerkte Endpunkte (Netzwechsel, Vordergrund, Hintergrund, neuer Schlüssel). Die nächste Verbindung
+    /// sucht wieder per Bonjour.
+    func forgetCachedEndpoints()
+}
+
+extension TunnelDialing {
+    /// Ohne gemerkte Endpunkte gibt es nichts zu vergessen
+    func forgetCachedEndpoints() {}
 }
 
 /// Eine `NWConnection` als `TunnelChannel`. Die Verbindung ist schon gestartet (der Aufrufer hat die Warteschlange

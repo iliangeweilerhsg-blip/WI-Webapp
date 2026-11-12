@@ -69,6 +69,10 @@ enum ConnectionError: Error, Equatable, Sendable {
     case wifiSwitchedOff
     /// Unter dem Namen des Macs antwortet etwas, aber nicht mit dem richtigen Schlüssel (`RouteProblem.handshakeFailed`)
     case tunnelHandshakeFailed
+    /// Die Kopplung hat geklappt, aber der Mac hat keinen Tunnel-Schlüssel geschickt (Core vor UX-12 oder `SG_TUNNEL=0`).
+    /// Die Kopplung wird nicht gespeichert: Ohne Schlüssel käme das iPad nie zum Mac, neu koppeln hilft erst nach einer
+    /// Änderung am Mac.
+    case macWithoutTunnel
 
     /// Zuordnung der Systemfehler von URLSession
     static func from(_ error: URLError) -> ConnectionError {
@@ -169,6 +173,7 @@ enum ConnectionError: Error, Equatable, Sendable {
         case .tunnelMacNotFound: return "Mac nicht gefunden"
         case .wifiSwitchedOff: return "WLAN ist aus"
         case .tunnelHandshakeFailed: return "Mac nicht gefunden"
+        case .macWithoutTunnel: return "Mac ohne Direktverbindung"
         }
     }
 
@@ -243,6 +248,8 @@ enum ConnectionError: Error, Equatable, Sendable {
             return "Schalte WLAN am iPad ein. Ein Netz brauchst du nicht, das iPad verbindet sich direkt mit dem Mac."
         case .tunnelHandshakeFailed:
             return "Ein Gerät hat unter dem Namen deines Macs geantwortet, aber nicht mit dem richtigen Schlüssel. Zu Hause prüfen, ob das iPad am Mac noch gekoppelt ist."
+        case .macWithoutTunnel:
+            return "Der Mac hat beim Koppeln keinen Schlüssel für die Verbindung geschickt. Am Mac Studien-Gehirn aktualisieren und mit pnpm sg start starten (ohne SG_TUNNEL=0), pnpm sg doctor zeigt den Tunnel-Helfer. Den eben angelegten Eintrag des iPads unter Einstellungen → Geräte entfernen, dann neu koppeln."
         }
     }
 }

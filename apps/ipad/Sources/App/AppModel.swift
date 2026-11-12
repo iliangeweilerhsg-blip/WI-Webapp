@@ -143,7 +143,8 @@ final class AppModel {
             macStore: macStore,
             deviceName: deviceName,
             appVersion: appVersion,
-            tunnelKeyStore: tunnelKeyStore
+            tunnelKeyStore: tunnelKeyStore,
+            requiresTunnelKey: routing != nil
         )
         sync?.onStateChange = { [weak self] state in
             self?.syncStateChanged(state)

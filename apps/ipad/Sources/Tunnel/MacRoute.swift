@@ -85,7 +85,8 @@ extension MacRouting {
 }
 
 /// Zustandsautomat der Wegewahl (E5):
-/// - Je neuer Verbindung des Weiterleiters: erst gemeinsames WLAN (2 s), dann peer-to-peer (10 s).
+/// - Je neuer Verbindung des Weiterleiters: erst gemeinsames WLAN (2 s), dann peer-to-peer (10 s). Der Dialer beginnt
+///   dabei mit dem zuletzt erfolgreichen Endpunkt und sucht nur, wenn der nicht gleich antwortet.
 /// - **Merken:** Der zuletzt erfolgreiche Weg wird zuerst versucht, im Hörsaal entfällt so die Wartezeit von 2 s.
 /// - **Zurücksetzen** (WLAN zuerst) nur bei Netzwechsel und wenn die App in den Vordergrund kommt. Kein Zeitgeber,
 ///   kein Umschalten im Betrieb.
@@ -161,8 +162,9 @@ final class MacRoute: MacRouting {
 
     func appBecameActive() {
         isActive = true
-        // Zurück im Vordergrund: WLAN wieder zuerst (Plan §5.3, Punkt 3)
+        // Zurück im Vordergrund: WLAN wieder zuerst (Plan §5.3, Punkt 3), gemerkte Endpunkte gelten nicht mehr
         rememberedStage = nil
+        dialer.forgetCachedEndpoints()
         handshakeFailures = 0
         reconcile()
     }
@@ -172,9 +174,11 @@ final class MacRoute: MacRouting {
         reconcile()
     }
 
-    /// Netzwechsel: nur den gemerkten Weg vergessen. Die Anzeige ändert sich nicht (kein Flattern).
+    /// Netzwechsel: nur den gemerkten Weg und die gemerkten Endpunkte vergessen. Die Anzeige ändert sich nicht (kein
+    /// Flattern), bestehende Verbindungen bleiben, wie sie sind.
     func networkPathChanged() {
         rememberedStage = nil
+        dialer.forgetCachedEndpoints()
     }
 
     private var wanted: Bool { paired && isActive }
@@ -194,6 +198,7 @@ final class MacRoute: MacRouting {
             // Neue Kopplung oder Schlüssel weg: alles Gemerkte gilt nicht mehr, alte Suchläufe auch nicht
             keyServiceName = newName
             rememberedStage = nil
+            dialer.forgetCachedEndpoints()
             handshakeFailures = 0
             lastProbeFailure = nil
             sessionGeneration += 1
@@ -265,6 +270,7 @@ final class MacRoute: MacRouting {
     }
 
     private func stopAll() {
+        dialer.forgetCachedEndpoints()
         forwarderGeneration += 1
         forwarderStarting = false
         forwarderPort = nil

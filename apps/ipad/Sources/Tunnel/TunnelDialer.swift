@@ -54,6 +54,23 @@ enum TunnelHandshakeCheck {
     static func accepts(_ negotiated: TunnelNegotiated?) -> Bool {
         negotiated?.isAllowed ?? false
     }
+
+    /// Zählt ein gescheiterter Kandidat als „falscher Schlüssel“? Nur wenn der Aufbau bis zum Gegenüber kam und dann
+    /// scheiterte (TLS-Fehler, Abbruch im Handshake). Ist niemand da (abgewiesen, nicht erreichbar, Namensauflösung),
+    /// heißt das „nicht gefunden“: Sonst stünde nach einem Neustart des Helfers der Text vom falschen Schlüssel da.
+    static func isHandshakeFailure(_ error: NWError) -> Bool {
+        switch error {
+        case .tls:
+            return true
+        case .posix(let code):
+            let notReached: [POSIXErrorCode] = [.ECONNREFUSED, .ETIMEDOUT, .ENETUNREACH, .EHOSTUNREACH, .ENETDOWN, .EHOSTDOWN]
+            return !notReached.contains(code)
+        case .dns:
+            return false
+        @unknown default:
+            return false
+        }
+    }
 }
 
 /// Weg einer Verbindung nach den Namen der Schnittstellen (nie Adressen)
@@ -89,13 +106,108 @@ enum TunnelPathInfo {
     }
 }
 
-/// Die echte Wahl des Weges zum Mac. Zustandslos: Jeder Aufruf von `dial` legt einen eigenen Versuch an.
+/// Der zuletzt erfolgreiche Endpunkt je Dienstname und Stufe (Leistung, Review PR #276): Ohne ihn startet **jede** neue
+/// Verbindung des Weiterleiters eine eigene Bonjour-Suche. `URLSession` öffnet nach 10 s Leerlauf (Keep-Alive des Core)
+/// und für jeden Folien-Download eine neue Verbindung; im Hörsaal kostet die Suche über peer-to-peer jedes Mal Sekunden.
+///
+/// - Gespeichert wird nur ein Endpunkt, dessen Handshake **und** Verfahrensprüfung gelungen sind. Er ist nur ein
+///   Kandidat: Auch über ihn fließt kein Byte vor einem neuen, geprüften Handshake. Ein Fremder kann ihn darum weder
+///   setzen noch nutzen.
+/// - Gültig `lifetime` Sekunden ab dem letzten Erfolg. Vergessen bei Netzwechsel, Vordergrund, Hintergrund, neuem
+///   Schlüssel (`forgetAll`, aus `MacRoute`) und sobald ein Versuch über ihn scheitert.
+/// - Ein Versuch, der vor `forgetAll` begann, schreibt nichts mehr hinein (`epoch`): Sonst käme ein Endpunkt aus dem
+///   alten Netz zurück.
+final class TunnelEndpointCache: @unchecked Sendable {
+    static let defaultLifetime: TimeInterval = 120
+
+    struct Ticket: Equatable, Sendable {
+        let epoch: Int
+    }
+
+    private struct Key: Hashable {
+        let serviceName: String
+        let peerToPeer: Bool
+    }
+
+    private struct Entry {
+        let endpoint: NWEndpoint
+        let storedAt: Date
+    }
+
+    private let lock = NSLock()
+    private let lifetime: TimeInterval
+    private let now: @Sendable () -> Date
+    private var entries: [Key: Entry] = [:]
+    private var epoch = 0
+
+    init(lifetime: TimeInterval = TunnelEndpointCache.defaultLifetime, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.lifetime = lifetime
+        self.now = now
+    }
+
+    /// Merkt sich den Stand vor einem Versuch. Nur mit diesem Ticket darf der Versuch später etwas ablegen.
+    func ticket() -> Ticket {
+        lock.lock()
+        defer { lock.unlock() }
+        return Ticket(epoch: epoch)
+    }
+
+    func lookup(serviceName: String, peerToPeer: Bool) -> NWEndpoint? {
+        lock.lock()
+        defer { lock.unlock() }
+        let key = Key(serviceName: serviceName, peerToPeer: peerToPeer)
+        guard let entry = entries[key] else { return nil }
+        let age = now().timeIntervalSince(entry.storedAt)
+        guard age >= 0, age < lifetime else {
+            entries[key] = nil
+            return nil
+        }
+        return entry.endpoint
+    }
+
+    func remember(_ endpoint: NWEndpoint, serviceName: String, peerToPeer: Bool, ticket: Ticket) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard ticket.epoch == epoch else { return }
+        entries[Key(serviceName: serviceName, peerToPeer: peerToPeer)] = Entry(endpoint: endpoint, storedAt: now())
+    }
+
+    func forget(serviceName: String, peerToPeer: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        entries[Key(serviceName: serviceName, peerToPeer: peerToPeer)] = nil
+    }
+
+    func forgetAll() {
+        lock.lock()
+        defer { lock.unlock() }
+        entries = [:]
+        epoch += 1
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.count
+    }
+}
+
+/// Die echte Wahl des Weges zum Mac. Jeder Aufruf von `dial` legt einen eigenen Versuch an. Der Versuch beginnt mit dem
+/// zuletzt erfolgreichen Endpunkt (`TunnelEndpointCache`), sonst mit der Bonjour-Suche.
 struct NetworkTunnelDialer: TunnelDialing {
-    init() {}
+    let cache: TunnelEndpointCache
+
+    init(cache: TunnelEndpointCache = TunnelEndpointCache()) {
+        self.cache = cache
+    }
 
     func dial(key: TunnelKey, peerToPeer: Bool, timeout: TimeInterval) async -> TunnelDialResult {
-        let attempt = TunnelDialAttempt(key: key, peerToPeer: peerToPeer)
+        let attempt = TunnelDialAttempt(key: key, peerToPeer: peerToPeer, cache: cache)
         return await attempt.run(timeout: timeout)
+    }
+
+    func forgetCachedEndpoints() {
+        cache.forgetAll()
     }
 }
 
@@ -105,13 +217,23 @@ private struct FoundService: Sendable {
     let domain: String
 }
 
-/// Ein Verbindungsversuch: sucht den Dienst, verbindet sich mit bis zu vier Kandidaten gleichzeitig und nimmt den
-/// ersten, dessen Handshake gelingt **und** dessen Verfahren erlaubt ist. Alles läuft auf einer eigenen seriellen
-/// Warteschlange, darum gibt es keine Sperren. `@unchecked Sendable`: Der Zustand wird nur dort angefasst.
+/// Ein Verbindungsversuch: nimmt zuerst den zuletzt erfolgreichen Endpunkt, sonst (oder wenn der nicht gleich klappt)
+/// sucht er den Dienst, verbindet sich mit bis zu vier Kandidaten gleichzeitig und nimmt den ersten, dessen Handshake
+/// gelingt **und** dessen Verfahren erlaubt ist. Alles läuft auf einer eigenen seriellen Warteschlange, darum gibt es
+/// keine Sperren. `@unchecked Sendable`: Der Zustand wird nur dort angefasst.
 private final class TunnelDialAttempt: @unchecked Sendable {
+    /// So lange bekommt der gemerkte Endpunkt einen Vorsprung, bevor zusätzlich gesucht wird. Ein Handshake im selben
+    /// WLAN dauert Millisekunden; scheitert der Endpunkt oder wartet er, beginnt die Suche sofort.
+    static let cachedHeadStartSeconds: TimeInterval = 0.75
+    /// Schlüssel des gemerkten Endpunkts unter den Kandidaten. Kann mit keinem Bonjour-Namen kollidieren: Kandidaten aus
+    /// der Suche beginnen immer mit `sg-` (`TunnelCandidates.matches`).
+    private static let cachedCandidate = " gemerkt"
+
     private let serviceName: String
     private let presharedKey: [UInt8]
     private let peerToPeer: Bool
+    private let cache: TunnelEndpointCache
+    private let ticket: TunnelEndpointCache.Ticket
     private let queue = DispatchQueue(label: "de.studiengehirn.ipad.tunnel.dial")
 
     private var continuation: CheckedContinuation<TunnelDialResult, Never>?
@@ -122,10 +244,12 @@ private final class TunnelDialAttempt: @unchecked Sendable {
     private var finished = false
     private var sawHandshakeFailure = false
 
-    init(key: TunnelKey, peerToPeer: Bool) {
+    init(key: TunnelKey, peerToPeer: Bool, cache: TunnelEndpointCache) {
         self.serviceName = key.serviceName
         self.presharedKey = key.presharedKey
         self.peerToPeer = peerToPeer
+        self.cache = cache
+        self.ticket = cache.ticket()
     }
 
     func run(timeout: TimeInterval) async -> TunnelDialResult {
@@ -140,6 +264,23 @@ private final class TunnelDialAttempt: @unchecked Sendable {
     // MARK: Suche
 
     private func begin(timeout: TimeInterval) {
+        queue.asyncAfter(deadline: .now() + timeout) { [weak self] in
+            self?.deadlinePassed()
+        }
+        guard let remembered = cache.lookup(serviceName: serviceName, peerToPeer: peerToPeer) else {
+            startBrowsing()
+            return
+        }
+        // Gemerkter Endpunkt: keine Suche, solange er gleich antwortet
+        startConnection(key: Self.cachedCandidate, to: remembered)
+        queue.asyncAfter(deadline: .now() + Self.cachedHeadStartSeconds) { [weak self] in
+            self?.startBrowsing()
+        }
+    }
+
+    /// Startet die Bonjour-Suche, höchstens einmal je Versuch
+    private func startBrowsing() {
+        guard !finished, browser == nil else { return }
         let parameters = NWParameters()
         parameters.includePeerToPeer = peerToPeer
         let browser = NWBrowser(for: .bonjour(type: TunnelConstants.serviceType, domain: nil), using: parameters)
@@ -157,9 +298,6 @@ private final class TunnelDialAttempt: @unchecked Sendable {
         }
         self.browser = browser
         browser.start(queue: queue)
-        queue.asyncAfter(deadline: .now() + timeout) { [weak self] in
-            self?.deadlinePassed()
-        }
     }
 
     private func browserChanged(_ state: NWBrowser.State) {
@@ -191,9 +329,13 @@ private final class TunnelDialAttempt: @unchecked Sendable {
     private func startCandidate(name: String, domain: String) {
         // Ohne Schnittstelle: Das System wählt den Weg (WLAN oder peer-to-peer, je nach `includePeerToPeer`)
         let endpoint = NWEndpoint.service(name: name, type: TunnelConstants.serviceType, domain: domain, interface: nil)
+        attempted.insert(name)
+        startConnection(key: name, to: endpoint)
+    }
+
+    private func startConnection(key name: String, to endpoint: NWEndpoint) {
         let connection = NWConnection(
             to: endpoint, using: TunnelTLS.parameters(presharedKey: presharedKey, peerToPeer: peerToPeer))
-        attempted.insert(name)
         candidates[name] = connection
         connection.stateUpdateHandler = { [weak self] state in
             self?.candidateChanged(name: name, connection: connection, state: state)
@@ -207,34 +349,62 @@ private final class TunnelDialAttempt: @unchecked Sendable {
             connection.cancel()
             return
         }
+        let isRemembered = name == Self.cachedCandidate
         switch state {
         case .ready:
             // Die eigentliche Sperre (E12): ausgehandelte Version und Verfahren prüfen. Network.framework erzwingt
             // sie nicht. Bei jeder Abweichung sofort schließen, ohne dass der Aufrufer die Verbindung sieht.
             guard TunnelHandshakeCheck.accepts(TunnelTLS.negotiated(on: connection)) else {
-                sawHandshakeFailure = true
+                if isRemembered {
+                    rememberedFailed()
+                } else {
+                    sawHandshakeFailure = true
+                }
                 candidates[name] = nil
                 connection.stateUpdateHandler = nil
                 connection.cancel()
                 return
             }
             win(name: name, connection: connection)
-        case .failed:
-            // Falscher Schlüssel, Abbruch im Handshake oder Netzfehler
-            sawHandshakeFailure = true
+        case .failed(let error):
+            candidates[name] = nil
             connection.stateUpdateHandler = nil
             connection.cancel()
+            if isRemembered {
+                // Der gemerkte Endpunkt gilt nicht mehr (Mac woanders, Helfer neu gestartet): sofort suchen
+                rememberedFailed()
+            } else if TunnelHandshakeCheck.isHandshakeFailure(error) {
+                sawHandshakeFailure = true
+            }
+        case .waiting:
+            // Kann vorübergehend sein: Die Frist entscheidet. Beim gemerkten Endpunkt nicht warten, sondern vergessen
+            // und suchen; er bleibt Kandidat und wird wieder gemerkt, falls er doch noch gewinnt.
+            if isRemembered { rememberedFailed() }
         default:
-            // `waiting` kann vorübergehend sein: Die Frist entscheidet
             break
         }
+    }
+
+    /// Der gemerkte Endpunkt hat nicht geklappt: vergessen und sofort suchen. Zählt nicht als falscher Schlüssel, denn
+    /// unter einer alten Adresse kann inzwischen ein anderes Gerät antworten.
+    private func rememberedFailed() {
+        cache.forget(serviceName: serviceName, peerToPeer: peerToPeer)
+        startBrowsing()
     }
 
     private func win(name: String, connection: NWConnection) {
         finished = true
         candidates[name] = nil
         connection.stateUpdateHandler = nil
-        let path = TunnelPathInfo.kind(of: connection.currentPath)
+        let currentPath = connection.currentPath
+        let path = TunnelPathInfo.kind(of: currentPath)
+        // Den aufgelösten Endpunkt merken (Adresse samt Schnittstelle), sonst den Dienst selbst: Die nächste Verbindung
+        // spart die Suche. Geprüft wird sie trotzdem wieder vollständig.
+        if let resolved = currentPath?.remoteEndpoint, case .hostPort = resolved {
+            cache.remember(resolved, serviceName: serviceName, peerToPeer: peerToPeer, ticket: ticket)
+        } else {
+            cache.remember(connection.endpoint, serviceName: serviceName, peerToPeer: peerToPeer, ticket: ticket)
+        }
         cleanup()
         let channel = NetworkStream(connection: connection)
         resume(.connected(channel, path))

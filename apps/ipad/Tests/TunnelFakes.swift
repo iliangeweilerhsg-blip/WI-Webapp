@@ -211,6 +211,7 @@ final class FakeDialer: TunnelDialing, @unchecked Sendable {
     private let lock = NSLock()
     private var recorded: [Call] = []
     private var waiting: [CheckedContinuation<TunnelDialResult, Never>] = []
+    private var forgets = 0
     private let scriptFn: @Sendable (Bool, Int) -> TunnelDialResult
     private let manual: Bool
 
@@ -234,6 +235,19 @@ final class FakeDialer: TunnelDialing, @unchecked Sendable {
             }
         }
         return scriptFn(peerToPeer, index)
+    }
+
+    func forgetCachedEndpoints() {
+        lock.lock()
+        forgets += 1
+        lock.unlock()
+    }
+
+    /// So oft hat die Wegewahl gemerkte Endpunkte verworfen
+    var forgetCalls: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return forgets
     }
 
     private func record(_ call: Call) -> Int {
