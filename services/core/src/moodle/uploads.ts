@@ -260,31 +260,20 @@ export class MoodleUploadStore {
 
 // ---------- Annehmen einer Datei ----------
 
-/** Endung → Art. Nur Endungen, deren Inhalt wir prüfen können. Kein HTML, kein SVG */
+/**
+ * Endung → Art. Nur Endungen, deren Inhalt wir prüfen können. Kein HTML, kein SVG.
+ * Text nur als `txt`, `md` und `csv` (Startumfang laut Plan T1-24, F2). Weitere Endungen (z. B. Quellcode, Office)
+ * kommen erst nach der Entscheidung des Owners zu F2 (Issue #289).
+ */
 const EXTENSION_KINDS: ReadonlyMap<string, UploadKind> = new Map([
   ['pdf', 'pdf'],
   ['png', 'png'],
   ['jpg', 'jpeg'],
   ['jpeg', 'jpeg'],
   ['zip', 'zip'],
-  ...[
-    'txt',
-    'md',
-    'csv',
-    'tsv',
-    'tex',
-    'py',
-    'java',
-    'c',
-    'h',
-    'cpp',
-    'hpp',
-    'js',
-    'ts',
-    'json',
-    'sql',
-    'r',
-  ].map((ext): [string, UploadKind] => [ext, 'text']),
+  ['txt', 'text'],
+  ['md', 'text'],
+  ['csv', 'text'],
 ]);
 
 /** `%PDF` darf in den ersten 1024 Byte stehen (wie bei den Material-Uploads) */
@@ -356,7 +345,7 @@ export async function storeUploadStream(slot: UploadSlot, input: UploadInput): P
   if (filename === null || kind === null) {
     await drain(input.file);
     throw typeInvalid(
-      'Erlaubt sind PDF, PNG, JPEG, ZIP und Text (UTF-8). Die Endung der Datei passt nicht dazu.',
+      'Erlaubt sind PDF, PNG, JPEG, ZIP und Text (UTF-8, .txt, .md, .csv). Die Endung der Datei passt nicht dazu.',
     );
   }
   const hash = createHash('sha256');

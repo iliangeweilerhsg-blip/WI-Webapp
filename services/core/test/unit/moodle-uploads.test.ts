@@ -312,6 +312,7 @@ describe('Annahme: Typ, Endung und Anfangsbytes (Content-Type zählt nicht)', ()
     ['code.zip', ZIP, 'zip'],
     ['notiz.txt', Buffer.from('Grüße, 日本語, ß'), 'text'],
     ['daten.csv', Buffer.from('a;b\n1;2\n'), 'text'],
+    ['notizen.md', Buffer.from('# Lösung\n'), 'text'],
     ['GROSS.PDF', PDF, 'pdf'],
     ['Foto.JPG', JPEG, 'jpeg'],
   ] as [string, Buffer, string][])(
@@ -337,6 +338,7 @@ describe('Annahme: Typ, Endung und Anfangsbytes (Content-Type zählt nicht)', ()
     ['ausführbar', 'a.exe', Buffer.from('MZ')],
     ['ohne Endung', 'README', Buffer.from('Hallo')],
     ['nur Punkt am Ende', 'a.', Buffer.from('Hallo')],
+    ['Quellcode (erst nach F2, #289)', 'loesung.py', Buffer.from('print(1)\n')],
     ['Text mit NUL', 'a.txt', Buffer.from('ab\0cd')],
     ['Text mit ungültigem UTF-8', 'a.txt', Buffer.from([0x61, 0xff, 0xfe, 0x62])],
     ['Text mit abgeschnittenem UTF-8 am Ende', 'a.txt', Buffer.from([0x61, 0xc3])],
@@ -440,6 +442,13 @@ describe('Hilfsfunktionen', () => {
     expect(uploadKindOf('a')).toBeNull();
     expect(uploadKindOf('constructor')).toBeNull();
     expect(uploadKindOf('a.__proto__')).toBeNull();
+    // Text nur txt, md, csv (F2, #289): Quellcode und andere Textformate erst nach der Entscheidung des Owners
+    expect(uploadKindOf('a.txt')).toBe('text');
+    expect(uploadKindOf('a.MD')).toBe('text');
+    expect(uploadKindOf('a.csv')).toBe('text');
+    for (const ext of ['py', 'java', 'c', 'h', 'cpp', 'js', 'ts', 'json', 'sql', 'r', 'tex', 'tsv', 'docx']) {
+      expect(uploadKindOf(`a.${ext}`)).toBeNull();
+    }
   });
 
   it('matchesMagic prüft die Anfangsbytes', () => {
