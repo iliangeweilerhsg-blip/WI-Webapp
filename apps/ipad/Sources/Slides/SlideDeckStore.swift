@@ -17,8 +17,7 @@ enum SlideDeckVerification: Equatable, Sendable {
 enum SlideDeckFile {
     /// Ordnername aus der `deck_id`: nur Zeichen, die in einer UUID vorkommen. Kein Pfad aus dem Netz.
     static func isSafeID(_ id: String) -> Bool {
-        guard !id.isEmpty, id.count <= 64 else { return false }
-        return id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }
+        SafeID.isValid(id)
     }
 
     /// SHA-256 der Datei, stückweise gelesen (nie die ganze Datei im Speicher)
@@ -218,7 +217,8 @@ final class SlideDeckStore {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try? FileManager.default.removeItem(at: part)
             try await client.downloadSlideDeckFile(
-                endpoint: access.endpoint, token: access.token, deckID: deckID, to: part)
+                endpoint: access.endpoint, token: access.token, deckID: deckID, to: part,
+                maxBytes: maxFileBytes)
         } catch {
             try? FileManager.default.removeItem(at: part)
             onRESTError?(error)

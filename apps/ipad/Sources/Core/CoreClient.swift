@@ -5,12 +5,13 @@ import Foundation
 protocol HTTPTransport {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
     /// Lädt den Body **in eine Datei**, nie in den Speicher (Folien-PDF). Bei einer Antwort außerhalb von 2xx bleibt
-    /// `file` unberührt.
-    func download(_ request: URLRequest, to file: URL) async throws -> HTTPURLResponse
+    /// `file` unberührt. Kommen mehr als `limit.maxBytes` an oder dauert es länger als `limit.maxDuration`, bricht der
+    /// Transport ab und wirft `URLError(.dataLengthExceedsMaximum)` bzw. `.timedOut`; `file` bleibt dann nicht zurück.
+    func download(_ request: URLRequest, to file: URL, limit: DownloadLimit) async throws -> HTTPURLResponse
 }
 
 extension HTTPTransport {
-    func download(_ request: URLRequest, to file: URL) async throws -> HTTPURLResponse {
+    func download(_ request: URLRequest, to file: URL, limit: DownloadLimit) async throws -> HTTPURLResponse {
         throw URLError(.unsupportedURL)
     }
 }
@@ -36,20 +37,106 @@ final class URLSessionTransport: HTTPTransport {
         return (data, http)
     }
 
-    func download(_ request: URLRequest, to file: URL) async throws -> HTTPURLResponse {
-        let (temporary, response) = try await session.download(for: request)
-        guard let http = response as? HTTPURLResponse else {
-            try? FileManager.default.removeItem(at: temporary)
-            throw URLError(.badServerResponse)
+    func download(_ request: URLRequest, to file: URL, limit: DownloadLimit) async throws -> HTTPURLResponse {
+        // Eigene Session je Download: Der Delegate zählt die Bytes mit und bricht beim Überschreiten ab.
+        // `timeoutIntervalForResource` ist die Gesamtzeit (der Request-Timeout gilt nur im Leerlauf).
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = false
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = limit.maxDuration
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        let delegate = LimitedDownloadDelegate(limit: limit, destination: file)
+        let limitedSession = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        defer { limitedSession.finishTasksAndInvalidate() }
+        let task = limitedSession.downloadTask(with: request)
+        do {
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<HTTPURLResponse, Error>) in
+                    delegate.start(continuation)
+                    task.resume()
+                }
+            } onCancel: {
+                task.cancel()
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: file)
+            throw error
         }
-        guard (200..<300).contains(http.statusCode) else {
-            try? FileManager.default.removeItem(at: temporary)
-            return http
+    }
+}
+
+/// Download-Delegate mit Größengrenze. `@unchecked Sendable`: URLSession ruft ihn auf einer eigenen seriellen Queue
+/// auf, der veränderliche Zustand (`continuation`, `exceeded`, `moveError`) liegt hinter `lock`.
+final class LimitedDownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let limit: DownloadLimit
+    private let destination: URL
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<HTTPURLResponse, Error>?
+    private var exceeded = false
+    private var moveError: Error?
+
+    init(limit: DownloadLimit, destination: URL) {
+        self.limit = limit
+        self.destination = destination
+    }
+
+    func start(_ continuation: CheckedContinuation<HTTPURLResponse, Error>) {
+        lock.lock()
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    private func markExceeded() {
+        lock.lock()
+        exceeded = true
+        lock.unlock()
+    }
+
+    func urlSession(
+        _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
+    ) {
+        if limit.isExceeded(written: totalBytesWritten, announced: totalBytesExpectedToWrite) {
+            markExceeded()
+            downloadTask.cancel()
         }
-        // Gleich verschieben: Die Datei von URLSession ist nur kurz gültig
-        try? FileManager.default.removeItem(at: file)
-        try FileManager.default.moveItem(at: temporary, to: file)
-        return http
+    }
+
+    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+        // Die Datei von URLSession ist nur in diesem Aufruf gültig: hier verschieben (nur bei 2xx)
+        guard let http = downloadTask.response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
+        do {
+            try? FileManager.default.removeItem(at: destination)
+            try FileManager.default.moveItem(at: location, to: destination)
+        } catch {
+            lock.lock()
+            moveError = error
+            lock.unlock()
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.lock()
+        let continuation = self.continuation
+        self.continuation = nil
+        let wasExceeded = exceeded
+        let moveFailure = moveError
+        lock.unlock()
+        guard let continuation else { return }
+        if wasExceeded {
+            try? FileManager.default.removeItem(at: destination)
+            continuation.resume(throwing: URLError(.dataLengthExceedsMaximum))
+        } else if let error {
+            try? FileManager.default.removeItem(at: destination)
+            continuation.resume(throwing: error)
+        } else if let moveFailure {
+            try? FileManager.default.removeItem(at: destination)
+            continuation.resume(throwing: moveFailure)
+        } else if let http = task.response as? HTTPURLResponse {
+            continuation.resume(returning: http)
+        } else {
+            continuation.resume(throwing: URLError(.badServerResponse))
+        }
     }
 }
 
@@ -135,7 +222,7 @@ final class CoreClient {
 
     /// `DELETE /devices/{id}`: Das iPad meldet sich selbst ab (aus dem Netz nur für das eigene Gerät erlaubt)
     func removeDevice(endpoint: CoreEndpoint, deviceID: String, token: String) async throws {
-        _ = try await send("DELETE", "/devices/\(deviceID)", endpoint: endpoint, token: token, body: nil)
+        _ = try await send("DELETE", "/devices/\(try Self.safeID(deviceID))", endpoint: endpoint, token: token, body: nil)
     }
 
     // MARK: Lesen für den Sync (T1-14). Nur `GET`, darum mit Wiederholung bei `networkConnectionLost`.
@@ -150,7 +237,7 @@ final class CoreClient {
 
     /// `GET /modules/{id}`: nur der Name wird gebraucht (Titel der Schreibfläche, UX-19)
     func moduleName(endpoint: CoreEndpoint, token: String, moduleID: String) async throws -> String {
-        let data = try await send("GET", "/modules/\(moduleID)", endpoint: endpoint, token: token, body: nil)
+        let data = try await send("GET", "/modules/\(try Self.safeID(moduleID))", endpoint: endpoint, token: token, body: nil)
         return try decode(ModuleNameResponse.self, from: data).name
     }
 
@@ -201,7 +288,7 @@ final class CoreClient {
     func sessionNotebook(endpoint: CoreEndpoint, token: String, sessionID: String) async throws -> Notebook? {
         do {
             let data = try await send(
-                "GET", "/sessions/\(sessionID)/notebook", endpoint: endpoint, token: token, body: nil)
+                "GET", "/sessions/\(try Self.safeID(sessionID))/notebook", endpoint: endpoint, token: token, body: nil)
             return try decode(Notebook.self, from: data)
         } catch ConnectionError.server(let status, _) where status == 404 {
             return nil
@@ -211,7 +298,7 @@ final class CoreClient {
     /// `GET /notebooks/{id}/pages`
     func notebookPages(endpoint: CoreEndpoint, token: String, notebookID: String) async throws -> [Page] {
         let data = try await send(
-            "GET", "/notebooks/\(notebookID)/pages", endpoint: endpoint, token: token, body: nil)
+            "GET", "/notebooks/\(try Self.safeID(notebookID))/pages", endpoint: endpoint, token: token, body: nil)
         return try decode(NotebookPages.self, from: data).items
     }
 
@@ -219,7 +306,7 @@ final class CoreClient {
     func pageStrokes(endpoint: CoreEndpoint, token: String, pageID: String) async throws -> PageStrokes? {
         do {
             let data = try await send(
-                "GET", "/pages/\(pageID)/strokes", endpoint: endpoint, token: token, body: nil)
+                "GET", "/pages/\(try Self.safeID(pageID))/strokes", endpoint: endpoint, token: token, body: nil)
             return try decode(PageStrokes.self, from: data)
         } catch ConnectionError.server(let status, _) where status == 404 {
             return nil
@@ -231,7 +318,7 @@ final class CoreClient {
     /// des Core erneut.
     func pageState(endpoint: CoreEndpoint, token: String, pageID: String) async throws -> RemotePageState? {
         do {
-            let data = try await send("GET", "/pages/\(pageID)", endpoint: endpoint, token: token, body: nil)
+            let data = try await send("GET", "/pages/\(try Self.safeID(pageID))", endpoint: endpoint, token: token, body: nil)
             return try decode(RemotePageState.self, from: data)
         } catch ConnectionError.server(let status, _) where status == 404 {
             return nil
@@ -246,7 +333,7 @@ final class CoreClient {
     {
         do {
             let data = try await send(
-                "GET", "/sessions/\(sessionID)/snapshot", endpoint: endpoint, token: token, body: nil)
+                "GET", "/sessions/\(try Self.safeID(sessionID))/snapshot", endpoint: endpoint, token: token, body: nil)
             return try decode(SessionSnapshotBrief.self, from: data)
         } catch ConnectionError.server(let status, _) where status == 404 {
             return nil
@@ -256,7 +343,7 @@ final class CoreClient {
     /// `GET /slide-decks/{id}`: Folienliste und `sha256`, ohne Text. `nil` bei 404.
     func slideDeck(endpoint: CoreEndpoint, token: String, deckID: String) async throws -> SlideDeckInfo? {
         do {
-            let data = try await send("GET", "/slide-decks/\(deckID)", endpoint: endpoint, token: token, body: nil)
+            let data = try await send("GET", "/slide-decks/\(try Self.safeID(deckID))", endpoint: endpoint, token: token, body: nil)
             return try decode(SlideDeckDetailBrief.self, from: data).info
         } catch ConnectionError.server(let status, _) where status == 404 {
             return nil
@@ -264,9 +351,16 @@ final class CoreClient {
     }
 
     /// `GET /slide-decks/{id}/file`: das PDF **in eine Datei**. Keine Wiederholung (große Datei). Das Token steht nur
-    /// im Header. Geprüft wird die Datei erst vom Aufrufer (Größe, Hash).
-    func downloadSlideDeckFile(endpoint: CoreEndpoint, token: String, deckID: String, to file: URL) async throws {
-        guard let url = endpoint.url(path: "/slide-decks/\(deckID)/file", queryItems: []) else {
+    /// im Header. Der Transport bricht ab, sobald mehr als `maxBytes` ankommen (auch ohne oder mit falschem
+    /// `Content-Length`) oder die Gesamtzeit `maxDuration` verstrichen ist (Review L13). Bei jedem Fehler ist `file`
+    /// danach weg. Hash und Seitenzahl prüft der Aufrufer.
+    func downloadSlideDeckFile(
+        endpoint: CoreEndpoint, token: String, deckID: String, to file: URL,
+        maxBytes: Int = SlideDeckStore.defaultMaxFileBytes,
+        maxDuration: TimeInterval = DownloadLimit.defaultMaxDuration
+    ) async throws {
+        let safeDeck = try Self.safeID(deckID)
+        guard let url = endpoint.url(path: "/slide-decks/\(safeDeck)/file", queryItems: []) else {
             throw ConnectionError.invalidAddress
         }
         var request = URLRequest(url: url)
@@ -277,11 +371,17 @@ final class CoreClient {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let response: HTTPURLResponse
         do {
-            response = try await transport.download(request, to: file)
+            response = try await transport.download(
+                request, to: file, limit: DownloadLimit(maxBytes: maxBytes, maxDuration: maxDuration))
         } catch let error as URLError {
+            try? FileManager.default.removeItem(at: file)
             throw ConnectionError.from(error)
+        } catch {
+            try? FileManager.default.removeItem(at: file)
+            throw error
         }
         guard (200..<300).contains(response.statusCode) else {
+            try? FileManager.default.removeItem(at: file)
             throw ConnectionError.from(status: response.statusCode, code: nil)
         }
     }
@@ -298,7 +398,14 @@ final class CoreClient {
     /// (VERTRAEGE §14.2): Layout und Spaltenbreiten der Web-App bleiben unberührt. Das Setzen ist idempotent.
     func patchModuleInkMode(endpoint: CoreEndpoint, token: String, moduleID: String, mode: InkMode) async throws {
         let body = try encode(ModuleInkModePatch(settings: .init(inkMode: mode.rawValue)))
-        _ = try await send("PATCH", "/modules/\(moduleID)", endpoint: endpoint, token: token, body: body)
+        _ = try await send("PATCH", "/modules/\(try Self.safeID(moduleID))", endpoint: endpoint, token: token, body: body)
+    }
+
+    /// Bausteine aus Serverdaten gehen nur in einen Pfad, wenn sie `SafeID` bestehen (Review L14). Sonst Fehler, bevor
+    /// eine Anfrage entsteht.
+    private static func safeID(_ id: String) throws -> String {
+        guard SafeID.isValid(id) else { throw ConnectionError.invalidResponse }
+        return id
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {

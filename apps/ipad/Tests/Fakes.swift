@@ -78,10 +78,17 @@ final class FakeTransport: HTTPTransport {
     /// Inhalt, den `download` in die Zieldatei schreibt
     var downloadData = Data()
     var downloadStatus = 200
+    /// Wert von `Content-Length`; `nil` = Header fehlt (der Fake kennt dann vorab keine Größe)
+    var downloadAnnouncedLength: Int?
+    /// Der Fake schreibt in Stücken dieser Größe und prüft nach jedem Stück die Grenze, wie der echte Delegate.
+    /// Reißt die Grenze, bleibt die Teil-Datei absichtlich liegen: Der Aufrufer muss sie löschen.
+    var downloadChunkSize = 1024
     private(set) var downloadRequests: [URLRequest] = []
+    private(set) var downloadLimits: [DownloadLimit] = []
 
-    func download(_ request: URLRequest, to file: URL) async throws -> HTTPURLResponse {
+    func download(_ request: URLRequest, to file: URL, limit: DownloadLimit) async throws -> HTTPURLResponse {
         downloadRequests.append(request)
+        downloadLimits.append(limit)
         guard
             let url = request.url,
             let response = HTTPURLResponse(
@@ -91,8 +98,21 @@ final class FakeTransport: HTTPTransport {
         }
         // Gibt anderen gleichzeitigen Aufrufen die Chance, sich an den laufenden Ladevorgang zu hängen
         await _Concurrency.Task.yield()
-        if (200..<300).contains(downloadStatus) {
-            try downloadData.write(to: file)
+        guard (200..<300).contains(downloadStatus) else { return response }
+        if let announced = downloadAnnouncedLength, limit.isExceeded(written: 0, announced: Int64(announced)) {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        FileManager.default.createFile(atPath: file.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        var offset = 0
+        while offset < downloadData.count {
+            let end = min(offset + downloadChunkSize, downloadData.count)
+            try handle.write(contentsOf: downloadData[offset..<end])
+            offset = end
+            if limit.isExceeded(written: Int64(offset), announced: -1) {
+                throw URLError(.dataLengthExceedsMaximum)
+            }
         }
         return response
     }
