@@ -28,10 +28,66 @@ enum ScreenWakePolicy {
     }
 }
 
-/// Schlüssel für die Aufgabe, die das Wachhalten nach der Frist ohne Verbindung freigibt
-struct ScreenWakeTaskKey: Equatable {
-    var isOnline: Bool
-    var reportedAt: Date?
+/// Wachhalten an der Schreibfläche (UX-305): Sperre nur, solange eine Vorlesung läuft, die Fläche zu sehen und die App
+/// aktiv ist. Beim Verlassen, im Hintergrund, am Ende der Vorlesung und nach der Frist ohne Verbindung wird sie
+/// freigegeben. Eigener Modifier, damit die Kette in `InkPageView.body` nicht wächst.
+struct InkScreenWakeModifier: ViewModifier {
+    let library: InkLibraryService
+
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var controller = ScreenWakeController()
+    /// Zwischen `onAppear` und `onDisappear`
+    @State private var isOnScreen = false
+
+    /// Schlüssel für die Aufgabe, die nach der Frist ohne Verbindung freigibt
+    private struct GraceKey: Equatable {
+        var isOnline: Bool
+        var reportedAt: Date?
+    }
+
+    private var isOnline: Bool { library.sync.state == .online }
+
+    func body(content: Content) -> some View {
+        content
+            .task(id: GraceKey(isOnline: isOnline, reportedAt: library.runningReportedAt)) {
+                await releaseAfterOfflineGrace()
+            }
+            .onAppear {
+                isOnScreen = true
+                update(visible: true)
+            }
+            .onDisappear {
+                isOnScreen = false
+                controller.release()
+            }
+            .onChange(of: library.running?.id) { _, _ in
+                update()
+            }
+            .onChange(of: scenePhase) { _, phase in
+                update(phase: phase)
+            }
+    }
+
+    /// Ohne Verbindung gilt die Vorlesung nur eine Frist lang als laufend: danach neu entscheiden (und freigeben)
+    private func releaseAfterOfflineGrace() async {
+        update()
+        while let left = ScreenWakePolicy.offlineGraceLeft(
+            running: library.running != nil, isOnline: isOnline, reportedAt: library.runningReportedAt, now: Date())
+        {
+            try? await _Concurrency.Task.sleep(for: .seconds(left + 1))
+            if _Concurrency.Task.isCancelled { return }
+        }
+        update()
+    }
+
+    /// Ohne Angabe gelten `isOnScreen` und `scenePhase`
+    private func update(visible: Bool? = nil, phase: ScenePhase? = nil) {
+        let lecture = ScreenWakePolicy.lectureCounts(
+            running: library.running != nil, isOnline: isOnline, reportedAt: library.runningReportedAt, now: Date())
+        controller.update(
+            lectureRunning: lecture, writingSurfaceVisible: visible ?? isOnScreen,
+            appActive: (phase ?? scenePhase) == .active)
+    }
 }
 
 /// Schaltstelle für `UIApplication.isIdleTimerDisabled`, einspritzbar für Tests
