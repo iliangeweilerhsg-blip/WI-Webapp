@@ -12,6 +12,7 @@ import {
   DEFAULT_PAGE,
   clearLayer,
   drawStrokes,
+  PAPER_COLOR,
   paintTop,
   paintUnder,
   redrawRegion,
@@ -21,6 +22,7 @@ import {
   type Rect,
   type PageGeometry,
 } from './render.ts';
+import { fileUrl } from '../../lib/material.ts';
 import { decodeStrokeCached, type DecodedStroke } from './stroke.ts';
 
 export interface InkPageProps {
@@ -149,10 +151,21 @@ export function InkPage({
   const widthPt = page?.width_pt ?? DEFAULT_PAGE.width_pt;
   const heightPt = page?.height_pt ?? DEFAULT_PAGE.height_pt;
   const template = page?.template ?? DEFAULT_PAGE.template;
+  const slideId = page?.background_slide_id ?? null;
   const geometry = useMemo<PageGeometry>(
     () => ({ width_pt: widthPt, height_pt: heightPt, template }),
     [widthPt, heightPt, template],
   );
+  // Folie als Hintergrund: Das Bild liegt unter dem Canvas. Bis es geladen ist (und wenn es fehlt) bleibt Papier.
+  const [slideState, setSlideState] = useState<{
+    id: string | null;
+    status: 'loading' | 'loaded' | 'failed';
+  }>({
+    id: slideId,
+    status: 'loading',
+  });
+  const slideStatus = slideId === null ? 'none' : slideState.id === slideId ? slideState.status : 'loading';
+  const slideLoaded = slideStatus === 'loaded';
   const dark = useDarkTheme();
   const wrapRef = useRef<HTMLDivElement>(null);
   const underRef = useRef<HTMLCanvasElement>(null);
@@ -201,7 +214,7 @@ export function InkPage({
   const pixelRatio = Math.max(1, Math.min(dpr, MAX_CANVAS_SIDE / Math.max(cssWidth, cssHeight)));
   const pw = Math.round(cssWidth * pixelRatio);
   const ph = Math.round(cssHeight * pixelRatio);
-  const sizeKey = `${pw}x${ph}@${k.toFixed(5)}:${geometry.width_pt}x${geometry.height_pt}:${geometry.template}`;
+  const sizeKey = `${pw}x${ph}@${k.toFixed(5)}:${geometry.width_pt}x${geometry.height_pt}:${geometry.template}:${slideLoaded ? 'slide' : 'paper'}`;
 
   // Striche dekodieren (je Strich-Objekt nur einmal) und auf die Ebenen verteilen
   const { highlights, ink } = useMemo(() => {
@@ -243,7 +256,7 @@ export function InkPage({
       return;
     const ctx = prepare(underRef.current);
     if (!ctx) return;
-    paintUnder(ctx, geometry, below, highlights);
+    paintUnder(ctx, geometry, below, highlights, slideLoaded);
     underState.current = { key: sizeKey, images: below, highlights };
     if (underRef.current) underRef.current.dataset.paint = 'full';
   }, [sizeKey, below, highlights, geometry, waiting]);
@@ -299,17 +312,40 @@ export function InkPage({
           height: cssHeight,
           borderRadius: 4,
           overflow: 'hidden',
+          // Passt die Folie nicht genau (anderes Seitenverhältnis), bleibt daneben Papier sichtbar wie auf dem iPad
+          backgroundColor: slideLoaded ? PAPER_COLOR : undefined,
           boxShadow: '0 0 0 1px rgba(128,128,138,0.35)',
           filter: dark && dim === 'auto' ? DIM_FILTER : undefined,
         }}
       >
+        {slideId !== null && slideStatus !== 'failed' ? (
+          <img
+            key={slideId}
+            src={fileUrl(`/slides/${encodeURIComponent(slideId)}/image`)}
+            alt=""
+            data-layer="slide"
+            draggable={false}
+            onLoad={() => setSlideState({ id: slideId, status: 'loaded' })}
+            onError={() => setSlideState({ id: slideId, status: 'failed' })}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: cssWidth,
+              height: cssHeight,
+              maxWidth: 'none',
+              objectFit: 'contain',
+              pointerEvents: 'none',
+            }}
+          />
+        ) : null}
         <canvas
           ref={underRef}
           role="img"
           aria-label={ariaLabel}
           data-stroke-count={strokes.length}
           data-layer="under"
-          style={layerStyle(cssWidth, cssHeight, false)}
+          style={{ ...layerStyle(cssWidth, cssHeight, false), position: 'relative' }}
         />
         <canvas
           ref={inkRef}

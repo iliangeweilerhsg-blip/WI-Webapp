@@ -14,6 +14,8 @@ export interface PageGeometry {
   width_pt: number;
   height_pt: number;
   template: PageTemplate;
+  /** Folie als Hintergrund (nur in `InkPage` ausgewertet, dort liegt sie als Bild unter dem Canvas) */
+  background_slide_id?: string | null;
 }
 
 export const DEFAULT_PAGE: PageGeometry = { width_pt: 595, height_pt: 842, template: 'liniert' };
@@ -268,43 +270,98 @@ export function drawStrokes(ctx: CanvasRenderingContext2D, strokes: readonly Dec
   for (const s of strokes) drawStroke(ctx, s);
 }
 
-/** Papier und Vorlage (Linien, Karos, Punkte, Cornell). `folie` hat hier nur Papier (Folienbild kommt später). */
-export function drawPaper(ctx: CanvasRenderingContext2D, page: PageGeometry): void {
-  const { width_pt: w, height_pt: h, template } = page;
-  ctx.fillStyle = PAPER_COLOR;
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = GRID_COLOR;
-  ctx.fillStyle = GRID_COLOR;
-  ctx.lineWidth = 0.7;
-  const line = (x1: number, y1: number, x2: number, y2: number) => {
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
-  };
+/**
+ * Geometrie der Vorlagen, identisch zur iPad-App (`InkTemplateGeometry.swift`, VERTRAEGE §7.4). Einheit pt,
+ * Ursprung oben links, bezogen auf `width_pt` × `height_pt` der Seite.
+ */
+/** Rastermaß für kariert und Punktraster: 5 mm */
+export const GRID_PT = 14.173;
+export const LINE_WIDTH_PT = 0.7;
+export const DOT_DIAMETER_PT = 1.2;
+export const RULED_FIRST_PT = 60;
+export const RULED_SPACING_PT = 30;
+export const RULED_MARGIN_PT = 40;
+export const RULED_BOTTOM_PT = 20;
+/** Toleranz, damit eine Linie genau auf dem Seitenrand nicht gezeichnet wird */
+const EPSILON = 0.001;
+
+export interface TemplateLine {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+/** Linien der Vorlage (`liniert`, `kariert`). `cornell` wird hier wie auf dem iPad als `liniert` gezeichnet. */
+export function templateLines(template: PageTemplate, w: number, h: number): TemplateLine[] {
+  if (!(w > 0) || !(h > 0)) return [];
+  const result: TemplateLine[] = [];
   switch (template) {
     case 'liniert':
-      for (let y = 60; y < h - 20; y += 30) line(40, y, w - 40, y);
+    case 'cornell':
+      for (let step = 0; ; step++) {
+        const y = RULED_FIRST_PT + step * RULED_SPACING_PT;
+        if (!(y < h - RULED_BOTTOM_PT)) break;
+        result.push({ x1: RULED_MARGIN_PT, y1: y, x2: w - RULED_MARGIN_PT, y2: y });
+      }
       break;
     case 'kariert':
-      for (let y = 20; y < h; y += 20) line(0, y, w, y);
-      for (let x = 20; x < w; x += 20) line(x, 0, x, h);
+      for (let row = 1; row * GRID_PT < h - EPSILON; row++)
+        result.push({ x1: 0, y1: row * GRID_PT, x2: w, y2: row * GRID_PT });
+      for (let col = 1; col * GRID_PT < w - EPSILON; col++)
+        result.push({ x1: col * GRID_PT, y1: 0, x2: col * GRID_PT, y2: h });
       break;
-    case 'punktraster':
-      for (let y = 30; y < h; y += 20)
-        for (let x = 30; x < w; x += 20) ctx.fillRect(x - 0.6, y - 0.6, 1.2, 1.2);
-      break;
-    case 'cornell': {
-      for (let y = 80; y < h - 140; y += 28) line(30, y, w - 20, y);
-      ctx.strokeStyle = MARGIN_COLOR;
-      line(w * 0.3, 40, w * 0.3, h - 140);
-      line(30, h - 140, w - 20, h - 140);
-      break;
-    }
-    case 'blanko':
-    case 'folie':
+    default:
       break;
   }
+  return result;
+}
+
+/** Mittelpunkte der Punkte des Punktrasters: alle Kreuzungen des Rasters, ohne Rand */
+export function templateDots(template: PageTemplate, w: number, h: number): [number, number][] {
+  if (template !== 'punktraster' || !(w > 0) || !(h > 0)) return [];
+  const result: [number, number][] = [];
+  for (let row = 1; row * GRID_PT < h - EPSILON; row++)
+    for (let col = 1; col * GRID_PT < w - EPSILON; col++) result.push([col * GRID_PT, row * GRID_PT]);
+  return result;
+}
+
+/**
+ * Papier und Vorlage (Linien, Karos, Punkte). Hat die Seite eine Folie als Hintergrund und ist sie geladen
+ * (`transparent`), bleibt das Papier aus; die Folie liegt dann als Bild unter dem Canvas.
+ */
+export function drawPaper(ctx: CanvasRenderingContext2D, page: PageGeometry, transparent = false): void {
+  const { width_pt: w, height_pt: h, template } = page;
+  if (!transparent) {
+    ctx.fillStyle = PAPER_COLOR;
+    ctx.fillRect(0, 0, w, h);
+  }
+  ctx.strokeStyle = GRID_COLOR;
+  ctx.fillStyle = GRID_COLOR;
+  ctx.lineWidth = LINE_WIDTH_PT;
+  if (template === 'cornell') {
+    // Eigene Cornell-Vorlage des Webs (das iPad zeichnet sie wie `liniert`)
+    const line = (x1: number, y1: number, x2: number, y2: number) => {
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    };
+    for (let y = 80; y < h - 140; y += 28) line(30, y, w - 20, y);
+    ctx.strokeStyle = MARGIN_COLOR;
+    line(w * 0.3, 40, w * 0.3, h - 140);
+    line(30, h - 140, w - 20, h - 140);
+    return;
+  }
+  for (const l of templateLines(template, w, h)) {
+    ctx.beginPath();
+    ctx.moveTo(l.x1, l.y1);
+    ctx.lineTo(l.x2, l.y2);
+    ctx.stroke();
+  }
+  const r = DOT_DIAMETER_PT / 2;
+  for (const [x, y] of templateDots(template, w, h))
+    ctx.fillRect(x - r, y - r, DOT_DIAMETER_PT, DOT_DIAMETER_PT);
 }
 
 const TEXT_SIZE = { s: 12, m: 16, l: 22 } as const;
@@ -455,8 +512,9 @@ export function paintUnder(
   page: PageGeometry,
   images: readonly PageElement[],
   highlights: readonly DecodedStroke[],
+  transparentPaper = false,
 ): void {
-  drawPaper(ctx, page);
+  drawPaper(ctx, page, transparentPaper);
   for (const e of images) drawElement(ctx, e);
   drawStrokes(ctx, highlights);
 }
