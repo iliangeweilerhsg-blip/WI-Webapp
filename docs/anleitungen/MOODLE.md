@@ -71,7 +71,7 @@ Meldet der Befehl trotz Token weiter `nicht eingerichtet` (und `Seite:` fehlt), 
 
 ## Abgeben
 
-Die Web-App kann eine Aufgabe in Moodle abgeben: Datei wählen, als Entwurf speichern, endgültig einreichen. Die Seite „Abgabe“ öffnest du über die Frist einer Aufgabe im Modul. **Das ist standardmäßig aus.** Bis du es einschaltest, zeigt die Seite oben „Abgeben aus der App ist noch nicht freigeschaltet“ und „In Moodle öffnen“. Die Aufgabe gibst du dann direkt in Moodle ab.
+Die Web-App kann eine Aufgabe in Moodle abgeben: Datei wählen, als Entwurf speichern, endgültig einreichen. Die Seite „Abgabe“ öffnest du über eine Aufgabe in der Fristenliste (auf „Heute“ oder im Modul). **Das ist standardmäßig aus.** Bis du es einschaltest, zeigt die Seite oben „Abgeben aus der App ist noch nicht freigeschaltet“ und „In Moodle öffnen“. Die Aufgabe gibst du dann direkt in Moodle ab.
 
 ### Freischalten
 
@@ -84,7 +84,7 @@ Die Web-App kann eine Aufgabe in Moodle abgeben: Datei wählen, als Entwurf spei
    ```bash
    pnpm sg stop && pnpm sg start
    ```
-3. Die Seite „Abgabe“ neu laden. Die Zeile „noch nicht freigeschaltet“ ist weg. Steht stattdessen am Knopf „Dein Moodle-Zugang erlaubt das nicht“, lässt dein Moodle diese Funktion für den Token nicht zu. Das lässt sich hier nicht ändern.
+3. Die Seite „Abgabe“ neu laden. Die Zeile „noch nicht freigeschaltet“ ist weg. Bleibt sie stehen oder steht am Knopf weiter „Dein Moodle-Zugang erlaubt das nicht“, lässt dein Moodle diese Funktion für den Token nicht zu. Das lässt sich hier nicht ändern.
 
 ### Erster Test an einer folgenlosen Aufgabe
 
@@ -114,7 +114,7 @@ Die App meldet das, wenn die Verbindung abbrach, nachdem die Anfrage an Moodle g
 
 ### Stand und Frist
 
-Oben auf der Seite steht der aktuelle Stand in Moodle: kein Entwurf, Entwurf oder eingereicht, die Dateien, die Frist und ob die Abgabe verspätet ist. Ist die Frist vorbei, sagt die Seite, ob Moodle noch bis zu einer Nachfrist annimmt. Ob eine späte Abgabe angenommen wird, entscheidet die Aufgabe in Moodle.
+Oben auf der Seite steht der aktuelle Stand in Moodle: kein Entwurf, Entwurf oder eingereicht, die Dateien, die Frist und ob die Abgabe verspätet ist. Ist die Frist vorbei, sagt die Seite, ob Moodle noch bis zu einer Nachfrist annimmt. Ob eine späte Abgabe angenommen wird, entscheidet die Aufgabe in Moodle. Eine persönliche Verlängerung kennt die App nicht, darum steht dort „ohne Verlängerung“.
 
 ## Abmelden
 

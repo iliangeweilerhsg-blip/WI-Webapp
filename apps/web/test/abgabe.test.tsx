@@ -817,6 +817,24 @@ describe('Seite „Abgabe“: Stand oben (UX-312) und Zugang (UX-313)', () => {
     const link = screen.getByRole('link', { name: 'In Moodle öffnen' });
     expect(link.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getAllByText(/pnpm sg moodle login/)).toHaveLength(1);
+    // Der Katalog ist dann auch ganz aus, aber der Grund ist der Zugang, nicht der Schalter
+    expect(screen.queryByText(/noch nicht freigeschaltet/)).not.toBeInTheDocument();
+  });
+
+  it('Moodle nicht erreichbar: keine Zeile „noch nicht freigeschaltet“, obwohl der Katalog alles aus meldet', async () => {
+    script.status = { ...script.status, state: 'nicht_erreichbar' };
+    script.catalog = [
+      { id: 'assign.save_draft', label: 'Als Entwurf speichern', available: false },
+      { id: 'assign.submit', label: 'Abgabe einreichen', available: false },
+    ];
+    render(
+      <QueryProvider>
+        <AbgabeView />
+      </QueryProvider>,
+    );
+    await screen.findByText(/Entwurf gespeichert/);
+    await screen.findAllByText('Dein Moodle-Zugang erlaubt das nicht.');
+    expect(screen.queryByText(/noch nicht freigeschaltet/)).not.toBeInTheDocument();
   });
 });
 

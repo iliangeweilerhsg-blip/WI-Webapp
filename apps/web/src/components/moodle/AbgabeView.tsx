@@ -14,7 +14,6 @@ import {
   isWebUrl,
   isMoodleTokenInvalid,
   lateNote,
-  needsRenewal,
   useMoodleActionCatalog,
   MOODLE_UPLOAD_ACCEPT,
   moodleErrorMessage,
@@ -136,12 +135,15 @@ export function AbgabeView() {
   const openLink =
     moodleLink ?? (isWebUrl(status.data?.site_url ?? null) ? (status.data?.site_url ?? null) : null);
   // UX-313: Nimmt Moodle den Zugang nicht mehr an, steht „In Moodle öffnen“ vor dem Weg zum Erneuern
-  const accessBroken =
-    isMoodleTokenInvalid(submission.error) ||
-    status.data?.state === 'abgelaufen' ||
-    status.data?.state === 'ungueltig';
-  // UX-312: Sind beide Aktionen aus (`SG_MOODLE_ACTIONS` leer oder Zugang ohne Recht), sagt die Seite es gleich oben
+  const accessRejected = status.data?.state === 'abgelaufen' || status.data?.state === 'ungueltig';
+  const accessBroken = isMoodleTokenInvalid(submission.error) || accessRejected;
+  // UX-312: Sind beide Aktionen aus (`SG_MOODLE_ACTIONS` leer oder Zugang ohne Recht), sagt die Seite es gleich oben.
+  // Nur bei gültigem, erreichbarem Zugang: Sonst ist im Katalog ohnehin alles `available: false`, und der Grund ist ein
+  // anderer (Zugang abgelehnt, Moodle nicht erreichbar oder nicht eingerichtet)
+  const accessUsable = status.data?.state === 'ok' || status.data?.state === 'laeuft_bald_ab';
   const actionsOff =
+    accessUsable &&
+    !accessBroken &&
     catalog.data !== undefined &&
     ['assign.save_draft', 'assign.submit'].every(
       (id) => catalog.data.find((item) => item.id === id)?.available !== true,
@@ -173,9 +175,7 @@ export function AbgabeView() {
     <Shell back={back} title={assignment?.name ?? 'Abgabe'}>
       {accessBroken ? openInMoodle : null}
       <MoodleAccessHint withLink />
-      {submission.error &&
-      !isMoodleNotConfigured(submission.error) &&
-      !(accessBroken && needsRenewal(status.data?.state)) ? (
+      {submission.error && !isMoodleNotConfigured(submission.error) && !accessRejected ? (
         isUnreachable(submission.error) ? (
           <CoreHint error={submission.error} />
         ) : (
@@ -214,7 +214,8 @@ export function AbgabeView() {
         ) : null}
         {actionsOff ? (
           <p className="text-sm text-text-muted">
-            Abgeben aus der App ist noch nicht freigeschaltet. Gib die Aufgabe so lange direkt in Moodle ab.
+            Abgeben aus der App ist noch nicht freigeschaltet oder dein Moodle-Zugang erlaubt es nicht. Gib
+            die Aufgabe so lange direkt in Moodle ab.
           </p>
         ) : null}
         {accessBroken ? null : openInMoodle}

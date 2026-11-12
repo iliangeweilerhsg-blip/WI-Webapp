@@ -195,7 +195,8 @@ export function accessHintText(
 
 /**
  * UX-312: Was zur Frist zu sagen ist, ohne Wertung (R11). `null`, wenn nichts zu sagen ist.
- * Moodle entscheidet selbst, ob es nach der Frist noch annimmt (`cutoff_at`, sonst unbekannt).
+ * Moodle entscheidet selbst, ob es nach der Frist noch annimmt (`cutoff_at`, sonst unbekannt). `due_at` und
+ * `cutoff_at` sind die Daten der Aufgabe, eine persönliche Verlängerung kennt die App nicht. Darum die Einschränkung.
  */
 export function lateNote(input: {
   state: 'keine' | 'entwurf' | 'eingereicht';
@@ -209,16 +210,18 @@ export function lateNote(input: {
   const due = new Date(input.dueAt).getTime();
   if (input.state === 'eingereicht') {
     const at = input.lastModifiedAt ? new Date(input.lastModifiedAt).getTime() : null;
-    return at !== null && at > due ? 'Nach der Frist eingereicht, Moodle zeigt sie als verspätet.' : null;
+    return at !== null && at > due
+      ? 'Nach der Frist eingereicht. Ohne Verlängerung zeigt Moodle sie als verspätet.'
+      : null;
   }
   if (now <= due) return null;
   if (input.cutoffAt) {
     const cutoff = new Date(input.cutoffAt).getTime();
     return now >= cutoff
-      ? 'Die Frist ist vorbei, Moodle nimmt keine Abgabe mehr an.'
-      : `Die Frist ist vorbei. Moodle nimmt noch bis ${formatDue(input.cutoffAt, now)} an, die Abgabe gilt dann als verspätet.`;
+      ? 'Die Frist ist vorbei. Ohne Verlängerung nimmt Moodle keine Abgabe mehr an.'
+      : `Die Frist ist vorbei. Moodle nimmt noch bis ${formatDue(input.cutoffAt, now)} an, die Abgabe gilt dann ohne Verlängerung als verspätet.`;
   }
-  return 'Die Frist ist vorbei. Ob Moodle noch annimmt, entscheidet die Aufgabe; eine Abgabe gilt als verspätet.';
+  return 'Die Frist ist vorbei. Ob Moodle noch annimmt, entscheidet die Aufgabe; ohne Verlängerung gilt eine Abgabe als verspätet.';
 }
 
 export function isMoodleNotConfigured(error: unknown): boolean {
