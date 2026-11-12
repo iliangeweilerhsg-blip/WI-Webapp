@@ -45,6 +45,15 @@ const coreFiles: Source[] = walk(coreSrc, '.ts').map((file) => {
   return { path: relative(coreSrc, file).split(sep).join('/'), raw, code: stripComments(raw) };
 });
 
+/**
+ * Registry, Codes, Sperren und Katalog. Auch jeder Zugriff `.actions`/`.locks` über einen anderen Namen und jedes
+ * Auspacken `{ actions } = …`
+ */
+const ACCESS_PATTERN =
+  /\b(MoodleActionRegistry|MoodleActionHandler|ConfirmationStore|KeyedMutex|DEFAULT_ACTION_HANDLERS|MOODLE_ACTION_SPECS)\b|\bconfirmations\b|\.\s*(?:actions|locks)\b|\{[^}]*\b(?:actions|locks)\b[^}]*\}\s*=|['"`](?:actions|locks)['"`]/;
+/** Schreibender Moodle-Aufruf: auch ohne Typparameter, mit jedem Anführungszeichen und als `['write']` */
+const WRITE_PATTERN = /\bclient\.write\b|\.write(?:<[^>]*>)?\(\s*['"`][a-z]+_[a-z]|\[\s*['"`]write['"`]\s*\]/;
+
 const only = (sources: Source[], pattern: RegExp) =>
   sources
     .filter((s) => pattern.test(s.code))
@@ -121,17 +130,26 @@ describe('Architektur Core: nur routes/moodle.ts erreicht Moodle-Aktionen', () =
       'moodle/confirmations.ts',
       'moodle/locks.ts',
     ]);
-    const pattern =
-      /\b(MoodleActionRegistry|MoodleActionHandler|ConfirmationStore|KeyedMutex|DEFAULT_ACTION_HANDLERS|MOODLE_ACTION_SPECS)\b|\bconfirmations\b|\bmoodle\.actions\b|\bmoodle\.locks\b|['"`](?:actions|locks)['"`]/;
+    const pattern = ACCESS_PATTERN;
     const offenders = only(coreFiles, pattern).filter((path) => !allowed.has(path));
     expect(offenders).toEqual([]);
   });
 
   it('client.write (schreibender Moodle-Aufruf) steht nur in moodle/actions.ts und moodle/client.ts', () => {
-    expect(only(coreFiles, /\bclient\.write\b|\.write<[^>]*>\(\s*'(?:core|mod)_/)).toEqual([
-      'moodle/actions.ts',
-    ]);
+    expect(only(coreFiles, WRITE_PATTERN)).toEqual(['moodle/actions.ts']);
     expect(only(coreFiles, /\basync write\b|\bwrite<T/)).toEqual(['moodle/client.ts']);
+  });
+
+  it('die Muster greifen auch bei anderen Namen (Gegenprobe)', () => {
+    const access = ACCESS_PATTERN;
+    expect(access.test('svc.actions.handler(id)')).toBe(true);
+    expect(access.test('const { client, actions } = deps.moodle;')).toBe(true);
+    expect(access.test("import { MOODLE_AUTO_LOCK_KEY } from '../lib/locks.ts';")).toBe(false);
+    const write = WRITE_PATTERN;
+    expect(write.test("await c.write('mod_assign_submit_for_grading', {})")).toBe(true);
+    expect(write.test('await c.write("core_x_y")')).toBe(true);
+    expect(write.test("c['write']('x')")).toBe(true);
+    expect(write.test("stream.write('hallo')")).toBe(false);
   });
 
   it('kein app.inject und kein Aufruf des eigenen Ports (lokale Aufrufe kämen ohne Token durch)', () => {

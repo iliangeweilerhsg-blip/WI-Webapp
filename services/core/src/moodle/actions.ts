@@ -165,7 +165,17 @@ export function isMoodleActionId(id: string): id is MoodleActionId {
   return Object.hasOwn(MOODLE_ACTION_SPECS, id);
 }
 
-/** Aktionen, die erst `SG_MOODLE_ACTIONS` freischaltet (E12) */
+/**
+ * Die einzigen Aktionen, die **nicht** am Schalter `SG_MOODLE_ACTIONS` hängen (E12). Alle anderen brauchen einen
+ * Eintrag, auch eine später neu in den Katalog aufgenommene Kennung: Fehlt sie in {@link MOODLE_GATED_ACTIONS}, lässt
+ * sie sich nicht freischalten und bleibt aus (fail closed), statt ungefragt zu laufen.
+ */
+export const MOODLE_UNGATED_ACTIONS = [
+  'completion.set',
+  'notifications.mark_read',
+] as const satisfies readonly MoodleActionId[];
+const UNGATED_ACTIONS: ReadonlySet<string> = new Set(MOODLE_UNGATED_ACTIONS);
+/** Nur diese Kennungen nimmt `enabled` an (Schutz vor Tippfehlern in Tests und Aufrufern) */
 const GATED_ACTIONS: ReadonlySet<string> = new Set(MOODLE_GATED_ACTIONS);
 
 export class MoodleActionRegistry {
@@ -188,7 +198,7 @@ export class MoodleActionRegistry {
       }
     }
     this.handlers = handlers;
-    this.enabled = new Set(enabled);
+    this.enabled = new Set([...enabled].filter((id) => GATED_ACTIONS.has(id)));
   }
 
   spec(id: MoodleActionId): MoodleActionSpec<unknown> {
@@ -196,7 +206,9 @@ export class MoodleActionRegistry {
   }
 
   isImplemented(id: MoodleActionId): boolean {
-    return this.handlers[id] !== undefined && (!GATED_ACTIONS.has(id) || this.enabled.has(id));
+    // Nur eigene Einträge: keine Kennung darf über den Prototyp (`constructor`, `__proto__`) einen Handler finden
+    if (!Object.hasOwn(MOODLE_ACTION_SPECS, id) || !Object.hasOwn(this.handlers, id)) return false;
+    return this.handlers[id] !== undefined && (UNGATED_ACTIONS.has(id) || this.enabled.has(id));
   }
 
   /** Fehlende Moodle-Funktionen, leer = alles da. Unbekannte Freigaben (null) zählen als vorhanden */

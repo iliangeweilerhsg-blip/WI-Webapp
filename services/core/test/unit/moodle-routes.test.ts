@@ -13,6 +13,8 @@ import { MOODLE_GATED_ACTIONS } from '../../src/config.ts';
 import {
   DEFAULT_ACTION_HANDLERS,
   MOODLE_ACTION_SPECS,
+  MOODLE_UNGATED_ACTIONS,
+  MoodleActionRegistry,
   type MoodleActionContext,
   type MoodleActionHandlers,
 } from '../../src/moodle/actions.ts';
@@ -993,6 +995,45 @@ describe('T1-24 Rahmen: Schalter SG_MOODLE_ACTIONS (E12)', () => {
     expect((await executeOf(a, 'assign.submit', submitFor(12), preview.confirmation_token)).statusCode).toBe(
       200,
     );
+  });
+});
+
+describe('T1-24 Rahmen: Schalter fail closed (Gegen-Review)', () => {
+  it('jede Kennung des Katalogs ist entweder geschaltet oder ausdrücklich ungeschaltet, nie beides', () => {
+    const gated: readonly string[] = MOODLE_GATED_ACTIONS;
+    const ungated: readonly string[] = MOODLE_UNGATED_ACTIONS;
+    expect(gated.filter((id) => ungated.includes(id))).toEqual([]);
+    expect([...gated, ...ungated].sort()).toEqual(Object.keys(MOODLE_ACTION_SPECS).sort());
+  });
+
+  it('enabled nimmt nur geschaltete Kennungen an; Prototyp-Namen finden keinen Handler', () => {
+    const writing = {
+      async preview() {
+        return { summary: 'x' };
+      },
+      async execute() {
+        return { summary: 'x', result: {} };
+      },
+    };
+    const handlers: Record<string, unknown> = {};
+    for (const id of Object.keys(MOODLE_ACTION_SPECS)) handlers[id] = writing;
+    const registry = new MoodleActionRegistry(handlers as MoodleActionHandlers, [
+      'assign.submit',
+      'constructor',
+      '__proto__',
+    ]);
+    const on = (Object.keys(MOODLE_ACTION_SPECS) as MoodleActionId[]).filter((id) =>
+      registry.isImplemented(id),
+    );
+    expect(on.sort()).toEqual(['assign.submit', 'completion.set', 'notifications.mark_read']);
+    for (const id of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      expect(registry.isImplemented(id as MoodleActionId), id).toBe(false);
+    }
+    // Handler-Objekt mit Prototyp-Kette: geerbte Einträge zählen nicht
+    const inherited = new MoodleActionRegistry(
+      Object.create({ 'completion.set': writing }) as MoodleActionHandlers,
+    );
+    expect(inherited.isImplemented('completion.set')).toBe(false);
   });
 });
 

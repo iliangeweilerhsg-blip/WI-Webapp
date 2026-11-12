@@ -380,7 +380,7 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
       // Zähler zuerst, dann Stand: Läuft dazwischen ein `revokeScope`, wird der Code nicht gültig (08 §9.3).
       // Die Vorschau nimmt keine Sperre, ein langer Upload soll sie nicht blockieren
       const scope = handler.scope?.(params) ?? null;
-      const epoch = scope ? confirmations.epoch(scope) : 0;
+      const epoch = scope !== null ? confirmations.epoch(scope) : 0;
       const state = (await handler.state?.(context, params)) ?? null;
       const preview = await handler.preview(context, params, state);
       const risk = actions.spec(id).risk;
