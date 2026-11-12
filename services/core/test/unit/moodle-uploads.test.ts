@@ -431,6 +431,15 @@ describe('Annahme: Typ, Endung und Anfangsbytes (Content-Type zählt nicht)', ()
     expect(limitFilename('kurz.pdf')).toBe('kurz.pdf');
     expect(Buffer.byteLength(limitFilename('x'.repeat(255) + '.pdf'))).toBe(255);
   });
+
+  it('kürzt je Codepunkt: kein halbes Ersatzpaar am Schnitt, die Endung bleibt', () => {
+    // 4 Byte je Emoji: 63 * 4 + 4 = 256 Byte, eins muss weg. Eine Kürzung je UTF-16-Einheit ließe ein Surrogat stehen
+    const limited = limitFilename('\u{1F600}'.repeat(63) + '.pdf');
+    expect(limited).toBe('\u{1F600}'.repeat(62) + '.pdf');
+    // Mit `u` steht ein vollständiges Paar für einen Codepunkt, nur ein einzelnes Surrogat trifft die Klasse
+    expect(limited).not.toMatch(/[\uD800-\uDFFF]/u);
+    expect(Buffer.byteLength(limited)).toBeLessThanOrEqual(255);
+  });
 });
 
 describe('Hilfsfunktionen', () => {

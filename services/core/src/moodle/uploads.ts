@@ -308,16 +308,20 @@ export function matchesMagic(kind: Exclude<UploadKind, 'text'>, head: Buffer): b
   }
 }
 
-/** Kürzt auf {@link MAX_UPLOAD_FILENAME_BYTES} Byte, die Endung bleibt */
+/**
+ * Kürzt auf {@link MAX_UPLOAD_FILENAME_BYTES} Byte, die Endung bleibt. Gekürzt wird je Codepunkt, nie mitten in einem
+ * Ersatzpaar (sonst bliebe ein einzelnes Surrogat stehen, das bei Moodle als U+FFFD ankommt)
+ */
 export function limitFilename(name: string): string {
   if (Buffer.byteLength(name) <= MAX_UPLOAD_FILENAME_BYTES) return name;
   const dot = name.lastIndexOf('.');
   const ext = dot > 0 ? name.slice(dot) : '';
-  let base = dot > 0 ? name.slice(0, dot) : name;
-  while (base.length > 0 && Buffer.byteLength(base) + Buffer.byteLength(ext) > MAX_UPLOAD_FILENAME_BYTES) {
-    base = base.slice(0, -1);
+  const base = Array.from(dot > 0 ? name.slice(0, dot) : name);
+  let bytes = Buffer.byteLength(base.join('')) + Buffer.byteLength(ext);
+  while (base.length > 0 && bytes > MAX_UPLOAD_FILENAME_BYTES) {
+    bytes -= Buffer.byteLength(base.pop() ?? '');
   }
-  return base + ext;
+  return base.join('') + ext;
 }
 
 export interface UploadInput {
