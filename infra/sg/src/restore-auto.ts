@@ -151,7 +151,7 @@ async function autoRestoreTest(
     try {
       // Ziel einmal prüfen und mit dieser Identität (dev/ino) verankert lesen (#161): Wird es danach ersetzt,
       // scheitert das Lesen des Standes (`beschaedigt`), statt einem fremden Ordner zu folgen
-      const checked = validateTarget(target, cfg.dataDir, false);
+      const checked = validateTarget(target, cfg.dataDir, false, false);
       resolved = checked.path;
       targetId = { dev: checked.dev, ino: checked.ino };
     } catch (e) {

@@ -40,6 +40,8 @@ export class BackupTargetError extends Error {
 export interface BackupTargetOptions {
   /** Fehlt der Ordner, aber der Elternordner existiert: anlegen (CLI) statt ablehnen (Core) */
   createMissing: boolean;
+  /** Schreibrecht verlangen (Standard `true`). `false` für Lesezugriffe wie Restore von einem schreibgeschützten Ziel */
+  writable?: boolean;
 }
 
 const MAX_LINK_HOPS = 40;
@@ -229,7 +231,7 @@ export function checkBackupTarget(target: string, dataDir: string, options: Back
     } else if (!info.isDirectory()) {
       throw new BackupTargetError('Der Backup-Pfad ist kein Ordner.');
     }
-    accessSync(full, constants.W_OK);
+    if (options.writable !== false) accessSync(full, constants.W_OK);
     return full;
   } catch (error) {
     throw fsError(error);
@@ -323,7 +325,7 @@ export async function checkBackupTargetAsync(
     } else if (!info.isDirectory()) {
       throw new BackupTargetError('Der Backup-Pfad ist kein Ordner.');
     }
-    await access(full, constants.W_OK);
+    if (options.writable !== false) await access(full, constants.W_OK);
     return full;
   } catch (error) {
     throw fsError(error);

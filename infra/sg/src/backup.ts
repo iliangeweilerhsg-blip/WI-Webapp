@@ -161,14 +161,20 @@ export async function readBackupSettings(pg: PgAccess): Promise<BackupSettings> 
  * Prüft das Ziel mit der gemeinsamen Regel aus `@sg/shared/backup-target` (wie `PATCH /settings`): absoluter Pfad,
  * Symlinks aufgelöst, nicht im Datenordner (auch nicht in `media/` oder `vault/`: sonst kopiert sich das Backup in
  * sich selbst), kein Systemordner. Ein fehlender Ordner wird angelegt, wenn der Elternordner existiert (ein nicht eingehängter
- * Datenträger legt keinen Ordner an).
+ * Datenträger legt keinen Ordner an). `writable = false` (Restore) verlangt kein Schreibrecht: ein schreibgeschütztes
+ * Ziel bleibt lesbar.
  *
  * Rückgabe: aufgelöster Pfad und Identität (`dev`/`ino` per `lstat`, H2 aus #124). Der ganze Lauf verankert das Ziel
  * mit genau dieser Identität (Schreiben, Lesen, Ausdünnen): Wird es danach ausgetauscht, scheitert jeder Zugriff,
  * statt in einem anderen Ordner zu schreiben oder zu löschen.
  */
-export function validateTarget(target: string, dataDir: string, createMissing = true): TargetDir {
-  const path = checkBackupTarget(target, dataDir, { createMissing });
+export function validateTarget(
+  target: string,
+  dataDir: string,
+  createMissing = true,
+  writable = true,
+): TargetDir {
+  const path = checkBackupTarget(target, dataDir, { createMissing, writable });
   const info = lstatSync(path);
   if (info.isSymbolicLink() || !info.isDirectory()) {
     throw new UnsafeTargetError(`${path} wurde nach der Prüfung ersetzt. Der Lauf bricht ab.`);

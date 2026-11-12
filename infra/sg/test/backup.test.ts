@@ -20,6 +20,20 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+// Schreibgeschütztes Ziel simulieren (auch als root, der Dateirechte übergeht): `accessSync(W_OK)` auf einem Pfad
+// in `readOnlyDirs` scheitert mit EACCES, wie bei einem read-only NAS, Snapshot oder schreibgeschütztem Stick.
+const readOnlyDirs = vi.hoisted(() => new Set<string>());
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const accessSync = ((path: Parameters<typeof actual.accessSync>[0], mode?: number) => {
+    if (typeof path === 'string' && mode === actual.constants.W_OK && readOnlyDirs.has(path)) {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    }
+    return actual.accessSync(path, mode);
+  }) as typeof actual.accessSync;
+  return { ...actual, accessSync };
+});
 import { resolveConfig } from '../src/config.ts';
 import {
   copyTree,
@@ -76,6 +90,7 @@ it.runIf(process.env.SG_ROOT_TESTS === '1')('[root] Wächter: läuft wirklich al
 });
 
 const dirs: string[] = [];
+afterEach(() => readOnlyDirs.clear());
 function tmp(): string {
   const d = mkdtempSync(join(tmpdir(), 'sg-backup-'));
   dirs.push(d);
@@ -1049,6 +1064,44 @@ describe('Backup vor der Migration ist fail-closed', () => {
     spy.mockRestore();
     expect(errors.join('\n')).toContain('--ohne-backup');
     expect(errors.join('\n')).toContain('nicht ausgeführt');
+  });
+});
+
+describe('Schreibgeschütztes Backup-Ziel (read-only NAS, Snapshot, Stick)', () => {
+  async function readOnlyAfterBackup() {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'zeitplan' })).toBe(0);
+    readOnlyDirs.add(realpathSync(s.target));
+    return s;
+  }
+
+  it('sg backup scheitert weiter an einem nicht beschreibbaren Ziel', async () => {
+    const s = restoreSetup();
+    readOnlyDirs.add(realpathSync(s.target));
+    expect(() => validateTarget(s.target, s.dataDir)).toThrow(/nicht beschreibbar/);
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(1);
+  });
+
+  it('validateTarget ohne Schreibprüfung akzeptiert das Ziel, die übrigen Prüfungen bleiben', () => {
+    const s = restoreSetup();
+    readOnlyDirs.add(realpathSync(s.target));
+    expect(validateTarget(s.target, s.dataDir, false, false).path).toBe(realpathSync(s.target));
+    expect(() => validateTarget('relativ/pfad', s.dataDir, false, false)).toThrow(/absolut/);
+    expect(() => validateTarget(join(s.dataDir, 'media'), s.dataDir, false, false)).toThrow(/media/);
+    expect(() => validateTarget(join(s.target, 'fehlt'), s.dataDir, false, false)).toThrow(/nicht vorhanden/);
+  });
+
+  it('sg restore --test und vollständig laufen von einem schreibgeschützten Ziel', async () => {
+    const s = await readOnlyAfterBackup();
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: true, yes: false })).toBe(0);
+    expect(await runRestore(s.deps, { test: false, yes: false })).toBe(0);
+    expect(s.errs).toEqual([]);
+  });
+
+  it('der Monatstest läuft von einem schreibgeschützten Ziel', async () => {
+    const s = await readOnlyAfterBackup();
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'zeitplan' })).toBe(0);
+    expect(s.pg.testResult).toMatchObject({ state: 'ok' });
   });
 });
 

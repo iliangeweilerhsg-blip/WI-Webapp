@@ -16,13 +16,24 @@ import { BackupTargetError, checkBackupTarget, checkBackupTargetAsync } from '@s
 // Ein Pfad mit dem Namen „ALIAS“ gilt für statSync als derselbe Ordner wie `aliasOf` (simuliert Bind-Mount,
 // Firmlink, andere Groß-/Kleinschreibung oder NFD, die sich unter Linux nicht direkt herstellen lassen).
 let aliasOf: string | null = null;
+// Pfade, auf denen `access(W_OK)` mit EACCES scheitert (schreibgeschütztes Ziel, auch als root simulierbar)
+const readOnly = new Set<string>();
+const denyWrite = (path: unknown, mode: unknown, actualW: number): void => {
+  if (typeof path === 'string' && mode === actualW && readOnly.has(path)) {
+    throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+  }
+};
 vi.mock('node:fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs')>();
   const wrapped = ((path: Parameters<typeof actual.statSync>[0], ...rest: unknown[]) => {
     const target = typeof path === 'string' && aliasOf && path.endsWith('/ALIAS') ? aliasOf : path;
     return (actual.statSync as (...args: unknown[]) => unknown)(target, ...rest);
   }) as typeof actual.statSync;
-  return { ...actual, statSync: wrapped };
+  const accessSync = ((path: Parameters<typeof actual.accessSync>[0], mode?: number) => {
+    denyWrite(path, mode, actual.constants.W_OK);
+    return actual.accessSync(path, mode);
+  }) as typeof actual.accessSync;
+  return { ...actual, statSync: wrapped, accessSync };
 });
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -31,12 +42,17 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     const target = typeof path === 'string' && aliasOf && path.endsWith('/ALIAS') ? aliasOf : path;
     return (actual.stat as (...args: unknown[]) => Promise<unknown>)(target, ...rest);
   }) as typeof actual.stat;
-  return { ...actual, stat: wrapped };
+  const access = (async (path: Parameters<typeof actual.access>[0], mode?: number) => {
+    denyWrite(path, mode, 2);
+    return actual.access(path, mode);
+  }) as typeof actual.access;
+  return { ...actual, stat: wrapped, access };
 });
 
 const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), 'sg-bt-')));
 afterEach(() => {
   aliasOf = null;
+  readOnly.clear();
 });
 
 const sync = (target: string, dataDir: string) => checkBackupTarget(target, dataDir, { createMissing: true });
@@ -215,5 +231,41 @@ describe('Backup-Ziel: `..` und relative Links mit echten Ordnern', () => {
     expect(await asyncCore(join(base, 'via', 'a', 'deep', 'tot'), dataDir)).toBe(
       join(base, 'real', 'ziel-ok', 'neu'),
     );
+  });
+});
+
+describe('Backup-Ziel: Option writable', () => {
+  it('Standard und writable: true verlangen Schreibrecht (sync und async)', async () => {
+    const target = tmp();
+    readOnly.add(target);
+    expect(() => checkBackupTarget(target, tmp(), { createMissing: false })).toThrow(/nicht beschreibbar/);
+    expect(() => checkBackupTarget(target, tmp(), { createMissing: false, writable: true })).toThrow(
+      /nicht beschreibbar/,
+    );
+    await expect(checkBackupTargetAsync(target, tmp(), { createMissing: false })).rejects.toThrow(
+      /nicht beschreibbar/,
+    );
+  });
+
+  it('writable: false lässt ein schreibgeschütztes Ziel zu (sync und async)', async () => {
+    const target = tmp();
+    readOnly.add(target);
+    expect(checkBackupTarget(target, tmp(), { createMissing: false, writable: false })).toBe(target);
+    await expect(
+      checkBackupTargetAsync(target, tmp(), { createMissing: false, writable: false }),
+    ).resolves.toBe(target);
+  });
+
+  it('writable: false prüft alles andere weiter: absolut, Existenz, Ordner, Datenordner', async () => {
+    const dataDir = tmp();
+    const parent = tmp();
+    const file = join(parent, 'datei');
+    writeFileSync(file, 'x');
+    const opts = { createMissing: false, writable: false };
+    expect(() => checkBackupTarget('relativ/pfad', dataDir, opts)).toThrow(/absolut/);
+    expect(() => checkBackupTarget(join(parent, 'fehlt'), dataDir, opts)).toThrow(/nicht vorhanden/);
+    expect(() => checkBackupTarget(file, dataDir, opts)).toThrow(/kein Ordner/);
+    expect(() => checkBackupTarget(dataDir, dataDir, opts)).toThrow(/Datenordner/);
+    await expect(checkBackupTargetAsync(file, dataDir, opts)).rejects.toThrow(/kein Ordner/);
   });
 });

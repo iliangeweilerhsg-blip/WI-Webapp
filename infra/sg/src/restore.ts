@@ -233,7 +233,7 @@ export async function runRestore(deps: RestoreDeps, options: RestoreOptions): Pr
       return 2;
     }
     // Ziel einmal prüfen und mit dieser Identität (dev/ino) übernehmen, nicht später per `statSync` (#161)
-    const { path: target, dev, ino } = validateTarget(setting, cfg.dataDir, false);
+    const { path: target, dev, ino } = validateTarget(setting, cfg.dataDir, false, false);
     const targetId: Identity = { dev, ino };
 
     if (!options.stand) {
