@@ -12,6 +12,7 @@ import {
   DEFAULT_PAGE,
   clearLayer,
   drawStrokes,
+  PAPER_COLOR,
   paintTop,
   paintUnder,
   redrawRegion,
@@ -311,6 +312,8 @@ export function InkPage({
           height: cssHeight,
           borderRadius: 4,
           overflow: 'hidden',
+          // Passt die Folie nicht genau (anderes Seitenverhältnis), bleibt daneben Papier sichtbar wie auf dem iPad
+          backgroundColor: slideLoaded ? PAPER_COLOR : undefined,
           boxShadow: '0 0 0 1px rgba(128,128,138,0.35)',
           filter: dark && dim === 'auto' ? DIM_FILTER : undefined,
         }}
