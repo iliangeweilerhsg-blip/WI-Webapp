@@ -710,6 +710,37 @@ describe('pg (Docker und lokal)', () => {
     );
     await pg2.dump('/tmp/x');
     expect(calls2).toEqual(['psql', 'pg_dump']);
+    // Keine reine Ziffernfolge: nicht in einen Pfad einsetzen, sondern PATH
+    const calls3: string[] = [];
+    const pg3 = createPg(
+      cfg,
+      async (cmd) => {
+        calls3.push(cmd);
+        return { code: 0, stdout: cmd === 'psql' ? '16/../../x\n' : '', stderr: '' };
+      },
+      'local',
+    );
+    await pg3.restore('sg_x', '/tmp/x');
+    expect(calls3).toEqual(['psql', 'pg_restore']);
+  });
+
+  it('lokal: Werkzeug passt nicht zur Server-Version, dann nennt die Meldung die Version zum Installieren', async () => {
+    const pg = createPg(
+      cfg,
+      async (cmd) =>
+        cmd === 'psql'
+          ? { code: 0, stdout: '990003\n', stderr: '' }
+          : {
+              code: 1,
+              stdout: '',
+              stderr:
+                'pg_restore: error: could not execute query: ERROR:  unrecognized configuration parameter "transaction_timeout"',
+            },
+      'local',
+    );
+    await expect(pg.restore('sg_x', '/tmp/x')).rejects.toThrow(
+      /brew install postgresql@99.*postgresql-client-99/,
+    );
   });
 
   it('openPg wählt Docker, wenn der Container läuft, sonst lokal, sonst Fehler', async () => {

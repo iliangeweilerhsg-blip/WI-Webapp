@@ -3,7 +3,7 @@
 // Passwörter gehen nie in Argumente oder Logs: lokal als `PGPASSWORD` in der Umgebung, im Container gar nicht
 // nötig (Socket-Anmeldung des offiziellen Images).
 import { spawn } from 'node:child_process';
-import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { accessSync, constants as fsConstants, createReadStream, createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import type { SgConfig } from './config.ts';
 
@@ -145,6 +145,8 @@ export function createPg(
   const url = parseDatabaseUrl(cfg.databaseUrl);
   const compose = (...rest: string[]) => composeArgs(cfg, 'exec', '-T', 'db', ...rest);
   const secrets = [url.password];
+  /** Hauptversion des Servers, sobald `serverTool` sie lokal abgefragt hat (für die Fehlermeldung) */
+  let serverMajor: number | undefined;
   const fail = (what: string, result: ExecResult): Error => {
     const raw = result.stderr.trim();
     let reason = '';
@@ -153,6 +155,16 @@ export function createPg(
     } else if (/password authentication failed|authentication failed/i.test(raw)) {
       reason =
         ' Die Anmeldung an der Datenbank wurde abgelehnt (Benutzer oder Passwort in DATABASE_URL prüfen).';
+    } else if (
+      /server version mismatch|unrecognized configuration parameter|unsupported version .* in file header/i.test(
+        raw,
+      )
+    ) {
+      const n = serverMajor ?? '<Hauptversion des Servers>';
+      reason =
+        ` Die PostgreSQL-Werkzeuge passen nicht zur Version des Servers (${serverMajor ? `PostgreSQL ${n}` : 'unbekannt'}).` +
+        ` Installiere sie in derselben Hauptversion (Mac: "brew install postgresql@${n}",` +
+        ` Debian/Ubuntu: "postgresql-client-${n}") oder starte die Datenbank im Container ("pnpm sg start").`;
     } else if (result.code === 127) {
       reason = ' Das Programm wurde nicht gefunden.';
     }
@@ -171,6 +183,14 @@ export function createPg(
   // Dump, und `pg_restore --exit-on-error` bricht dann am älteren Server ab ("unrecognized configuration parameter").
   // Gibt es keine passende Installation, bleibt es beim Programm im PATH.
   const toolCache = new Map<string, Promise<string>>();
+  const isExecutable = (file: string): boolean => {
+    try {
+      accessSync(file, fsConstants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   const serverTool = (name: 'pg_dump' | 'pg_restore', db: string): Promise<string> => {
     if (mode !== 'local') return Promise.resolve(name);
     const cached = toolCache.get(name);
@@ -182,15 +202,17 @@ export function createPg(
           [...connArgs(db), '-X', '-q', '-A', '-t', '-c', 'SHOW server_version_num'],
           { env: env ?? {} },
         );
-        const num = Number.parseInt(probe.stdout.trim(), 10);
-        if (probe.code !== 0 || !Number.isFinite(num) || num < 100000) return name;
-        const major = Math.floor(num / 10000);
+        // Nur eine reine Ziffernfolge ab Version 10 (z. B. "160004") gilt; erst danach landet die Zahl im Pfad
+        const text = probe.stdout.trim();
+        if (probe.code !== 0 || !/^[1-9]\d{5}$/.test(text)) return name;
+        const major = Math.floor(Number(text) / 10000);
+        serverMajor = major;
         for (const dir of [
           `/usr/lib/postgresql/${major}/bin`,
           `/opt/homebrew/opt/postgresql@${major}/bin`,
           `/usr/local/opt/postgresql@${major}/bin`,
         ]) {
-          if (existsSync(`${dir}/${name}`)) return `${dir}/${name}`;
+          if (isExecutable(`${dir}/${name}`)) return `${dir}/${name}`;
         }
       } catch {
         // Erkennung ist nur eine Hilfe: bei Fehlern das Programm im PATH nehmen
