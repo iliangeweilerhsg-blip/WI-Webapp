@@ -188,9 +188,16 @@ function setup(
 }
 
 const settle = async (h: Harness) => {
-  // Chunk-Verarbeitung und Upload-Schleife abwarten
+  // Chunk-Verarbeitung und Upload-Schleife abwarten. Hashen (Web Crypto) und Puffern sind echt asynchron und dauern
+  // unter Last länger als ein paar Macrotasks: darum auf die Chunk-Kette des Recorders warten, dann auf den Uploader.
+  const rec = h.recorder as unknown as { chain: Promise<void>; uploader: { drain(): Promise<void> } };
   for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 0));
-  await (h.recorder as unknown as { uploader: { drain(): Promise<void> } }).uploader.drain();
+  let chain: Promise<void>;
+  do {
+    chain = rec.chain;
+    await chain;
+    await rec.uploader.drain();
+  } while (chain !== rec.chain);
 };
 
 describe('Codec-Wahl', () => {

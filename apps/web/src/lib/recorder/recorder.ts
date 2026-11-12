@@ -363,7 +363,18 @@ export class AudioRecorder {
   /** Stößt das Hochladen an und wartet höchstens `maxMs`, bis nichts mehr ansteht (beim Verlassen der Seite) */
   async flushUploads(maxMs: number): Promise<void> {
     this.uploader.kick();
-    await Promise.race([this.uploader.drain(), new Promise<void>((r) => setTimeout(r, maxMs))]);
+    // Die Frist gilt auch, wenn der Durchgang hinter dem eines anderen Uploaders im Tab wartet (Issue #262)
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.uploader.drain(),
+        new Promise<void>((r) => {
+          timer = setTimeout(r, maxMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   retryUploadNow(): void {
@@ -477,29 +488,36 @@ export class AudioRecorder {
     this.run = run;
     this.activeIds.add(meta.id);
     ACTIVE_RECORDINGS.add(meta.id);
-    this.patch({ recordingId: meta.id, chunkCount: 0, recordedMs: 0 });
-    // Chunk-Verarbeitung wartet, bis die Metadaten in IndexedDB stehen
-    this.chain = this.chain.then(() => this.store.putRecording(meta)).catch(() => undefined);
-    await this.chain;
+    // Beim Start legt dieser Recorder die Aufnahme selbst an: Uploader im Tab lassen sie bis dahin liegen (Issue #262)
+    // Die Reservierung endet in jedem Fall (auch wenn ein Listener wirft), sonst lüde der Tab die Aufnahme nie hoch
+    const endCreate = first ? this.uploader.holdCreate(meta.id) : () => undefined;
+    try {
+      this.patch({ recordingId: meta.id, chunkCount: 0, recordedMs: 0 });
+      // Chunk-Verarbeitung wartet, bis die Metadaten in IndexedDB stehen
+      this.chain = this.chain.then(() => this.store.putRecording(meta)).catch(() => undefined);
+      await this.chain;
 
-    if (first) {
-      // Beim Start sofort wissen, ob der Core die Aufnahme ablehnt (Session läuft nicht). Offline ist erlaubt.
-      const created = await this.uploader.tryCreate(meta);
-      if (created === 'permanent') {
-        run.ending = true;
-        this.run = null;
-        try {
-          recorder.stop();
-        } catch {
-          // schon beendet
+      if (first) {
+        // Beim Start sofort wissen, ob der Core die Aufnahme ablehnt (Session läuft nicht). Offline ist erlaubt.
+        const created = await this.uploader.tryCreate(meta);
+        if (created === 'permanent') {
+          run.ending = true;
+          this.run = null;
+          try {
+            recorder.stop();
+          } catch {
+            // schon beendet
+          }
+          this.activeIds.delete(meta.id);
+          ACTIVE_RECORDINGS.delete(meta.id);
+          await this.chain;
+          await this.store.deleteRecording(meta.id);
+          this.fail('error', 'Der Core hat die Aufnahme abgelehnt. Läuft die Session?');
         }
-        this.activeIds.delete(meta.id);
-        ACTIVE_RECORDINGS.delete(meta.id);
-        await this.chain;
-        await this.store.deleteRecording(meta.id);
-        this.fail('error', 'Der Core hat die Aufnahme abgelehnt. Läuft die Session?');
+        if (created === 'ok') await this.store.patchRecording(meta.id, { created: true });
       }
-      if (created === 'ok') await this.store.patchRecording(meta.id, { created: true });
+    } finally {
+      endCreate();
     }
     this.uploader.kick();
   }
