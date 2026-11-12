@@ -35,6 +35,20 @@ final class InkLibraryService {
     /// Seiten, deren `page_version_conflict` gerade aufgelöst wird
     @ObservationIgnored private var resolvingConflicts = Set<String>()
 
+    /// Folien und Session-Strom (T1-13 Teil 2). `nil` in Tests ohne Folien.
+    @ObservationIgnored var slides: SlideSupport?
+
+    /// Standard für den Schreibmodus aus den Einstellungen (`lecture.default_ink_mode`), `nil` = noch nicht geladen
+    private(set) var lectureDefaultInkMode: InkMode?
+    /// Zählt je Modul bei jeder Änderung der Wahl und bei jedem bestätigten `PATCH` hoch. Ein Abruf der Module, der
+    /// währenddessen lief, ist älter als die lokale Wahl und darf sie nicht überschreiben (L6 aus #225).
+    @ObservationIgnored private var inkModeEpoch: [String: Int] = [:]
+    @ObservationIgnored private var inkModeInFlight = Set<String>()
+    @ObservationIgnored private var isFlushingInkModes = false
+    /// Die Session kommt vom `SessionFollower` (Strom), nicht mehr aus dem Abruf in `refresh`
+    @ObservationIgnored private var followsSessions = false
+    @ObservationIgnored private var followToken = 0
+
     init(
         store: any InkLibraryStore,
         sync: SyncEngine,
@@ -108,7 +122,8 @@ final class InkLibraryService {
     /// Ohne `force` höchstens alle 30 s.
     func refresh(force: Bool = false) async {
         guard sync.canReachCore, let access = sync.restAccess() else {
-            if running != nil { running = nil }
+            // Mit dem Follower bleibt die Session stehen: Er lädt bei der nächsten Verbindung neu
+            if !followsSessions, running != nil { running = nil }
             return
         }
         guard !isRefreshing else { return }
@@ -120,9 +135,15 @@ final class InkLibraryService {
         defer { isRefreshing = false }
 
         do {
+            let epochsBefore = inkModeEpoch
             let briefs = try await client.modules(endpoint: access.endpoint, token: access.token)
             guard !_Concurrency.Task.isCancelled else { return }
-            store.mergeModules(briefs, at: now())
+            // Module, deren Wahl sich während des Abrufs geändert hat oder gerade gesendet wird, behalten die lokale Wahl
+            var keep = inkModeInFlight
+            for (moduleID, epoch) in inkModeEpoch where epochsBefore[moduleID, default: 0] != epoch {
+                keep.insert(moduleID)
+            }
+            store.mergeModules(briefs, at: now(), keepLocalInkMode: keep)
             // Waren beim Start noch keine Module bekannt, wird die Übernahme der alten Testseite jetzt nachgeholt
             adoptLegacyTestPage()
             bump()
@@ -142,8 +163,11 @@ final class InkLibraryService {
             sync.reportRESTError(error)
         }
         guard !_Concurrency.Task.isCancelled else { return }
-        await refreshRunning(access)
+        if !followsSessions {
+            await refreshRunning(access)
+        }
         bump()
+        await flushInkModes()
     }
 
     /// Seiten eines Notizbuchs mit dem Core zusammenführen (beim Öffnen, wenn erreichbar)
@@ -520,6 +544,13 @@ final class InkLibraryService {
         for change in changes {
             var page = change.updated
             if change.original.createQueued {
+                // Geänderte Felder festhalten: Bei einem Konflikt gewinnen nur diese (L9)
+                // Wartet kein `page.update` der Seite mehr, sind frühere Änderungen bestätigt: Sie zählen nicht mehr,
+                // sonst überschriebe ein späterer Konflikt eine neuere Änderung des Mac an diesen Feldern.
+                let changed = LibraryPage.changedFields(from: change.original, to: change.updated).map(\.rawValue)
+                let waiting = !sync.pendingOpIDs(kind: "page.update", pageID: change.original.id).isEmpty
+                let earlier = waiting ? (change.original.dirtyFields ?? LibraryPage.Field.allCases.map(\.rawValue)) : []
+                page.dirtyFields = Array(Set(earlier).union(changed)).sorted()
                 guard
                     let draft = InkOpBuilder.pageUpdate(
                         page: change.updated, nowMS: nowMS(), offsetMS: sync.clockOffsetForDrafts,
@@ -578,11 +609,26 @@ final class InkLibraryService {
             sync.resumePage(pageID)
             return
         }
+        // Feldweise (VERTRAEGE §11.2: „eigene geänderte Felder auflegen“): Was lokal nicht geändert wurde, übernimmt
+        // den Stand des Core. Ohne Merkliste (Altbestand) gelten alle lokalen Felder.
+        let dirty = Set(page.dirtyFields ?? LibraryPage.Field.allCases.map(\.rawValue))
+        var merged = page
+        if !dirty.contains(LibraryPage.Field.index.rawValue) { merged.index = remote.index }
+        if !dirty.contains(LibraryPage.Field.template.rawValue) { merged.template = remote.template }
+        if !dirty.contains(LibraryPage.Field.sessionID.rawValue) { merged.sessionID = remote.sessionID }
+        if !dirty.contains(LibraryPage.Field.backgroundSlideID.rawValue) {
+            merged.backgroundSlideID = remote.backgroundSlideID
+        }
+        if !dirty.contains(LibraryPage.Field.attachedSlideID.rawValue) {
+            merged.attachedSlideID = remote.attachedSlideID
+        }
         let differs =
-            page.index != remote.index || page.template != remote.template || page.sessionID != remote.sessionID
-            || page.backgroundSlideID != remote.backgroundSlideID || page.attachedSlideID != remote.attachedSlideID
+            merged.index != remote.index || merged.template != remote.template || merged.sessionID != remote.sessionID
+            || merged.backgroundSlideID != remote.backgroundSlideID
+            || merged.attachedSlideID != remote.attachedSlideID
+        page = merged
         if differs {
-            var replacement = page
+            var replacement = merged
             replacement.version = remote.version
             // Erst den Ersatz einreihen, dann die alten verwerfen: Bricht die App dazwischen ab, wartet weiter ein
             // `page.update` mit den lokalen Feldern, und der nächste Konflikt löst es auf. Andersherum stünde keins
@@ -597,6 +643,8 @@ final class InkLibraryService {
             page.version = remote.version + 1
         } else {
             page.version = remote.version
+            // Nichts Eigenes weicht mehr ab
+            page.dirtyFields = nil
         }
         // Scheitert das Verwerfen, bleibt die Seite geparkt. Der nächste Versuch verwirft auch den Ersatz und reiht
         // einen neuen ein.
@@ -691,37 +739,9 @@ final class InkLibraryService {
             running = nil
             return
         }
-        var notebook: Notebook?
-        do {
-            // Der Core entscheidet (#199): „Übung“ bei Übung und Tutorium, sonst „Vorlesung“
-            notebook = try await client.sessionNotebook(
-                endpoint: access.endpoint, token: access.token, sessionID: session.id)
-            if notebook == nil {
-                // Älterer Core ohne den Endpunkt (404): die alte Regel, das erste „Vorlesung“ des Moduls
-                let all = try await client.notebooks(
-                    endpoint: access.endpoint, token: access.token, moduleID: session.moduleID)
-                notebook = all.first { $0.kind == .vorlesung && $0.deletedAt == nil }
-            }
-        } catch {
-            sync.reportRESTError(error)
-        }
+        let notebook = await resolveNotebook(sessionID: session.id, moduleID: session.moduleID, access: access)
         guard !_Concurrency.Task.isCancelled else { return }
-        if let notebook, store.notebook(notebook.id) == nil {
-            // Ein Notizbuch, das der Abruf der Module noch nicht kannte
-            store.upsert(
-                LibraryNotebook(
-                    id: notebook.id,
-                    moduleID: notebook.moduleID,
-                    title: notebook.title,
-                    kind: notebook.kind,
-                    createdAtMS: InkStrokeCodec.milliseconds(notebook.createdAt),
-                    knownOnServer: true,
-                    hidden: false,
-                    lastPageID: nil,
-                    remoteMaxIndex: 0,
-                    remoteOnlyPageCount: 0
-                ))
-        }
+        register(notebook)
         running = RunningSession(
             id: session.id,
             moduleID: session.moduleID,
@@ -729,5 +749,165 @@ final class InkLibraryService {
             slideDeckID: session.slideDeckID,
             notebookID: notebook?.id
         )
+    }
+
+    /// Das Notizbuch der Session. Der Core entscheidet (#199): „Übung“ bei Übung und Tutorium, sonst „Vorlesung“.
+    private func resolveNotebook(
+        sessionID: String, moduleID: String, access: (endpoint: CoreEndpoint, token: String)
+    ) async -> Notebook? {
+        var notebook: Notebook?
+        do {
+            notebook = try await client.sessionNotebook(
+                endpoint: access.endpoint, token: access.token, sessionID: sessionID)
+            if notebook == nil {
+                // Älterer Core ohne den Endpunkt (404): die alte Regel, das erste „Vorlesung“ des Moduls
+                let all = try await client.notebooks(
+                    endpoint: access.endpoint, token: access.token, moduleID: moduleID)
+                notebook = all.first { $0.kind == .vorlesung && $0.deletedAt == nil }
+            }
+        } catch {
+            sync.reportRESTError(error)
+        }
+        return notebook
+    }
+
+    /// Ein Notizbuch, das der Abruf der Module noch nicht kannte
+    private func register(_ notebook: Notebook?) {
+        guard let notebook, store.notebook(notebook.id) == nil else { return }
+        store.upsert(
+            LibraryNotebook(
+                id: notebook.id,
+                moduleID: notebook.moduleID,
+                title: notebook.title,
+                kind: notebook.kind,
+                createdAtMS: InkStrokeCodec.milliseconds(notebook.createdAt),
+                knownOnServer: true,
+                hidden: false,
+                lastPageID: nil,
+                remoteMaxIndex: 0,
+                remoteOnlyPageCount: 0
+            ))
+    }
+
+    // MARK: Session aus dem Strom (T1-13 Teil 2)
+
+    /// Ab jetzt kommt die laufende Session vom `SessionFollower`, `refresh` fragt sie nicht mehr ab
+    func attachFollower() {
+        followsSessions = true
+    }
+
+    /// Der Follower meldet die laufende Session (oder keine). Das Notizbuch der Session holt der Dienst per REST,
+    /// solange es nicht bekannt ist. Eine veraltete Antwort (die Session hat inzwischen gewechselt) wird verworfen.
+    func follow(session brief: SessionBrief?) async {
+        followToken += 1
+        let token = followToken
+        guard let brief else {
+            if running != nil {
+                running = nil
+                bump()
+            }
+            return
+        }
+        let known = running?.id == brief.id ? running?.notebookID : nil
+        let provisional = RunningSession(
+            id: brief.id, moduleID: brief.moduleID, startMS: brief.startedAtMS, slideDeckID: brief.slideDeckID,
+            notebookID: known)
+        if running != provisional {
+            running = provisional
+            bump()
+        }
+        guard known == nil, sync.canReachCore, let access = sync.restAccess() else { return }
+        let notebook = await resolveNotebook(sessionID: brief.id, moduleID: brief.moduleID, access: access)
+        guard token == followToken, !_Concurrency.Task.isCancelled, let notebook else { return }
+        register(notebook)
+        running = RunningSession(
+            id: brief.id, moduleID: brief.moduleID, startMS: brief.startedAtMS, slideDeckID: brief.slideDeckID,
+            notebookID: notebook.id)
+        bump()
+    }
+
+    // MARK: Schreibmodus (F-INK-03, T1-13 Teil 2)
+
+    /// Modus des Moduls: eigene Wahl, sonst Standard aus den Einstellungen, sonst „freie Seite“
+    func inkMode(forModule moduleID: String) -> InkMode {
+        track()
+        let module = store.modules.first { $0.id == moduleID }
+        return InkModeResolver.resolve(module: module?.inkMode, lectureDefault: lectureDefaultInkMode)
+    }
+
+    /// Standard aus den Einstellungen holen. Ohne Verbindung bleibt der letzte bekannte Wert.
+    func refreshLectureDefaults() async {
+        guard sync.canReachCore, let access = sync.restAccess() else { return }
+        do {
+            let mode = try await client.lectureDefaults(endpoint: access.endpoint, token: access.token)
+            guard !_Concurrency.Task.isCancelled else { return }
+            if lectureDefaultInkMode != mode {
+                lectureDefaultInkMode = mode
+                bump()
+            }
+        } catch {
+            sync.reportRESTError(error)
+        }
+    }
+
+    /// Ein Tipp: Der Modus gilt pro Modul. Die Wahl steht sofort in der Bibliothek (`dirty`) und geht bei Verbindung per
+    /// `PATCH` an den Core, auch nach einem Neustart.
+    func setInkMode(_ mode: InkMode, moduleID: String) {
+        guard let module = store.modules.first(where: { $0.id == moduleID }) else { return }
+        // Dieselbe Wahl steht schon da (gesendet oder wartend): nichts zu tun
+        if module.inkMode == mode { return }
+        inkModeEpoch[moduleID, default: 0] += 1
+        store.setModuleInkMode(mode, moduleID: moduleID, dirty: true)
+        bump()
+        _Concurrency.Task { await self.flushInkModes() }
+    }
+
+    /// Sendet jede lokal geänderte Wahl per `PATCH /modules/{id}`. Ändert sich die Wahl währenddessen, bleibt das Modul
+    /// `dirty` und geht danach erneut raus. Scheitert ein Modul, kommen die anderen trotzdem dran.
+    func flushInkModes() async {
+        guard !isFlushingInkModes, sync.canReachCore, let access = sync.restAccess() else { return }
+        isFlushingInkModes = true
+        defer { isFlushingInkModes = false }
+        var failed = Set<String>()
+        for _ in 0..<50 {
+            guard
+                let module = store.modules.first(where: {
+                    $0.inkModeDirty && $0.inkMode != nil && !failed.contains($0.id)
+                }), let sent = module.inkMode
+            else { break }
+            inkModeInFlight.insert(module.id)
+            do {
+                try await client.patchModuleInkMode(
+                    endpoint: access.endpoint, token: access.token, moduleID: module.id, mode: sent)
+            } catch {
+                inkModeInFlight.remove(module.id)
+                sync.reportRESTError(error)
+                failed.insert(module.id)
+                if (error as? ConnectionError) == .tokenInvalid { return }
+                continue
+            }
+            inkModeInFlight.remove(module.id)
+            inkModeEpoch[module.id, default: 0] += 1
+            // Hat sich die Wahl währenddessen geändert, bleibt sie `dirty` und die Schleife sendet sie erneut
+            if let current = store.modules.first(where: { $0.id == module.id }), current.inkMode == sent {
+                store.setModuleInkMode(sent, moduleID: module.id, dirty: false)
+            }
+            bump()
+        }
+    }
+
+    // MARK: Folienseiten
+
+    /// Seite des Notizbuchs für diese Folie. Gibt es mehrere (Altbestand), gilt die mit dem kleineren `index`. Gibt es
+    /// keine, wird sie hinten angehängt: Vorlage „folie“, Größe der Folie, `background_slide_id` = Folie (E10).
+    func slidePage(notebookID: String, slide: SlideRef) -> LibraryPage? {
+        let existing = store.pages(inNotebook: notebookID)
+            .filter { $0.backgroundSlideID == slide.id }
+            .min { ($0.index, $0.id) < ($1.index, $1.id) }
+        if let existing { return existing }
+        return addPage(
+            notebookID: notebookID, template: .folie,
+            size: CGSize(width: slide.widthPt, height: slide.heightPt),
+            backgroundSlideID: slide.id, attachedSlideID: nil)
     }
 }

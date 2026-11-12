@@ -36,6 +36,12 @@ final class InkCanvasContainerView: UIView {
         set { paper.template = newValue }
     }
 
+    /// Folie unter der Schrift, `nil` = nur Papier
+    var backgroundImage: UIImage? {
+        get { paper.backgroundImage }
+        set { paper.backgroundImage = newValue }
+    }
+
     private let paper: InkPaperView
     private var activeLayer: StrokeLayer = .ink
     private var appliedTools: InkToolState?
@@ -354,12 +360,15 @@ extension InkCanvasContainerView: UIPencilInteractionDelegate {
 struct InkCanvasView: UIViewRepresentable {
     let model: InkPageModel
     var template: PageTemplate = .blanko
+    /// Folie unter der Schrift (T1-13 Teil 2)
+    var backgroundImage: UIImage?
     /// Wisch zum Blättern: +1 weiter, -1 zurück
     var onSwipePage: (@MainActor (Int) -> Void)?
 
     func makeUIView(context: Context) -> InkCanvasContainerView {
         let model = self.model
         let view = InkCanvasContainerView(pageSize: model.pageSize, template: template)
+        view.backgroundImage = backgroundImage
         view.onDrawingChanged = { layer, drawing in
             model.canvasDidChange(layer: layer, drawing: drawing)
         }
@@ -376,6 +385,7 @@ struct InkCanvasView: UIViewRepresentable {
 
     func updateUIView(_ view: InkCanvasContainerView, context: Context) {
         view.template = template
+        view.backgroundImage = backgroundImage
         view.onSwipePage = onSwipePage
         view.apply(model.tools)
         view.setDrawing(model.inkDrawing, revision: model.inkRevision, layer: .ink)

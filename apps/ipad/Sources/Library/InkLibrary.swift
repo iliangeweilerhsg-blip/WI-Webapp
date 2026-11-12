@@ -55,9 +55,33 @@ struct LibraryPage: Codable, Equatable, Sendable, Identifiable {
     var deletedAtMS: Int?
     /// `page.delete` ist eingereiht. `false` in der Löschfrist von 5 s.
     var deleteQueued: Bool
+    /// Felder (`LibraryPage.Field`), die lokal geändert wurden und deren `page.update` noch nicht bestätigt ist.
+    /// `nil` = unbekannt (Altbestand): Bei einem Konflikt gelten dann alle lokalen Felder (L9 aus #225).
+    /// Optional, damit eine ältere `library.json` lesbar bleibt (L3).
+    var dirtyFields: [String]? = nil
 
     /// Strom aller Operationen des Notizbuchs dieser Seite
     var stream: String { "notebook:\(notebookID)" }
+
+    /// Felder einer Seite, die ein `page.update` ändern kann (VERTRAEGE §11.2: Konflikte feldweise auflösen)
+    enum Field: String, CaseIterable, Sendable {
+        case index
+        case template
+        case sessionID
+        case backgroundSlideID
+        case attachedSlideID
+    }
+
+    /// Welche Felder unterscheiden sich?
+    static func changedFields(from old: LibraryPage, to new: LibraryPage) -> Set<Field> {
+        var result = Set<Field>()
+        if old.index != new.index { result.insert(.index) }
+        if old.template != new.template { result.insert(.template) }
+        if old.sessionID != new.sessionID { result.insert(.sessionID) }
+        if old.backgroundSlideID != new.backgroundSlideID { result.insert(.backgroundSlideID) }
+        if old.attachedSlideID != new.attachedSlideID { result.insert(.attachedSlideID) }
+        return result
+    }
 
     /// A4 hochkant, wie `page.create` es für freie Seiten sendet (VERTRAEGE §7.4)
     static let a4Width: Double = 595

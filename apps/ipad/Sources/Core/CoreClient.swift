@@ -4,6 +4,15 @@ import Foundation
 @MainActor
 protocol HTTPTransport {
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse)
+    /// Lädt den Body **in eine Datei**, nie in den Speicher (Folien-PDF). Bei einer Antwort außerhalb von 2xx bleibt
+    /// `file` unberührt.
+    func download(_ request: URLRequest, to file: URL) async throws -> HTTPURLResponse
+}
+
+extension HTTPTransport {
+    func download(_ request: URLRequest, to file: URL) async throws -> HTTPURLResponse {
+        throw URLError(.unsupportedURL)
+    }
 }
 
 @MainActor
@@ -25,6 +34,22 @@ final class URLSessionTransport: HTTPTransport {
             throw URLError(.badServerResponse)
         }
         return (data, http)
+    }
+
+    func download(_ request: URLRequest, to file: URL) async throws -> HTTPURLResponse {
+        let (temporary, response) = try await session.download(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            try? FileManager.default.removeItem(at: temporary)
+            throw URLError(.badServerResponse)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            try? FileManager.default.removeItem(at: temporary)
+            return http
+        }
+        // Gleich verschieben: Die Datei von URLSession ist nur kurz gültig
+        try? FileManager.default.removeItem(at: file)
+        try FileManager.default.moveItem(at: temporary, to: file)
+        return http
     }
 }
 
@@ -213,6 +238,69 @@ final class CoreClient {
         }
     }
 
+    // MARK: Schreibmodi und Folien (T1-13 Teil 2)
+
+    /// `GET /sessions/{id}/snapshot`, auf das Nötige gekürzt (`SessionSnapshotBrief`). `nil` bei 404.
+    func sessionSnapshot(endpoint: CoreEndpoint, token: String, sessionID: String) async throws
+        -> SessionSnapshotBrief?
+    {
+        do {
+            let data = try await send(
+                "GET", "/sessions/\(sessionID)/snapshot", endpoint: endpoint, token: token, body: nil)
+            return try decode(SessionSnapshotBrief.self, from: data)
+        } catch ConnectionError.server(let status, _) where status == 404 {
+            return nil
+        }
+    }
+
+    /// `GET /slide-decks/{id}`: Folienliste und `sha256`, ohne Text. `nil` bei 404.
+    func slideDeck(endpoint: CoreEndpoint, token: String, deckID: String) async throws -> SlideDeckInfo? {
+        do {
+            let data = try await send("GET", "/slide-decks/\(deckID)", endpoint: endpoint, token: token, body: nil)
+            return try decode(SlideDeckDetailBrief.self, from: data).info
+        } catch ConnectionError.server(let status, _) where status == 404 {
+            return nil
+        }
+    }
+
+    /// `GET /slide-decks/{id}/file`: das PDF **in eine Datei**. Keine Wiederholung (große Datei). Das Token steht nur
+    /// im Header. Geprüft wird die Datei erst vom Aufrufer (Größe, Hash).
+    func downloadSlideDeckFile(endpoint: CoreEndpoint, token: String, deckID: String, to file: URL) async throws {
+        guard let url = endpoint.url(path: "/slide-decks/\(deckID)/file", queryItems: []) else {
+            throw ConnectionError.invalidAddress
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 120
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("application/pdf", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let response: HTTPURLResponse
+        do {
+            response = try await transport.download(request, to: file)
+        } catch let error as URLError {
+            throw ConnectionError.from(error)
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw ConnectionError.from(status: response.statusCode, code: nil)
+        }
+    }
+
+    /// `GET /settings` → `lecture.default_ink_mode`. Fehlt der Wert oder ist er unbekannt: „freie Seite“ (der Standard
+    /// laut VERTRAEGE §14.1).
+    func lectureDefaults(endpoint: CoreEndpoint, token: String) async throws -> InkMode {
+        let data = try await send("GET", "/settings", endpoint: endpoint, token: token, body: nil)
+        let excerpt = try decode(SettingsInkExcerpt.self, from: data)
+        return excerpt.lecture?.defaultInkMode.flatMap { InkMode(rawValue: $0) } ?? .freieSeite
+    }
+
+    /// `PATCH /modules/{id}` mit `{"settings":{"ink_mode":…}}`. Der Core führt die Schlüssel einzeln zusammen
+    /// (VERTRAEGE §14.2): Layout und Spaltenbreiten der Web-App bleiben unberührt. Das Setzen ist idempotent.
+    func patchModuleInkMode(endpoint: CoreEndpoint, token: String, moduleID: String, mode: InkMode) async throws {
+        let body = try encode(ModuleInkModePatch(settings: .init(inkMode: mode.rawValue)))
+        _ = try await send("PATCH", "/modules/\(moduleID)", endpoint: endpoint, token: token, body: body)
+    }
+
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         guard let value = try? newJSONDecoder().decode(type, from: data) else {
             throw ConnectionError.invalidResponse
@@ -276,6 +364,31 @@ final class CoreClient {
     private static func errorCode(in data: Data) -> String? {
         (try? newJSONDecoder().decode(APIError.self, from: data))?.error.code
     }
+}
+
+/// Ausschnitt aus `Settings`: nur `lecture.default_ink_mode`
+private struct SettingsInkExcerpt: Decodable {
+    struct Lecture: Decodable {
+        let defaultInkMode: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case defaultInkMode = "default_ink_mode"
+        }
+    }
+
+    let lecture: Lecture?
+}
+
+private struct ModuleInkModePatch: Encodable {
+    struct Settings: Encodable {
+        let inkMode: String
+
+        private enum CodingKeys: String, CodingKey {
+            case inkMode = "ink_mode"
+        }
+    }
+
+    let settings: Settings
 }
 
 /// Ausschnitt aus `Module`: Unbekannte Felder werden ignoriert

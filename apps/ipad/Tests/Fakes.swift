@@ -73,6 +73,30 @@ final class FakeTransport: HTTPTransport {
         }
     }
 
+    // MARK: Download in eine Datei (Folien-PDF)
+
+    /// Inhalt, den `download` in die Zieldatei schreibt
+    var downloadData = Data()
+    var downloadStatus = 200
+    private(set) var downloadRequests: [URLRequest] = []
+
+    func download(_ request: URLRequest, to file: URL) async throws -> HTTPURLResponse {
+        downloadRequests.append(request)
+        guard
+            let url = request.url,
+            let response = HTTPURLResponse(
+                url: url, statusCode: downloadStatus, httpVersion: "HTTP/1.1", headerFields: nil)
+        else {
+            throw URLError(.badServerResponse)
+        }
+        // Gibt anderen gleichzeitigen Aufrufen die Chance, sich an den laufenden Ladevorgang zu hängen
+        await _Concurrency.Task.yield()
+        if (200..<300).contains(downloadStatus) {
+            try downloadData.write(to: file)
+        }
+        return response
+    }
+
     /// JSON-Body der Anfrage mit diesem Index
     func jsonBody(at index: Int) throws -> [String: Any] {
         let data = try XCTUnwrap(requests[index].httpBody)
