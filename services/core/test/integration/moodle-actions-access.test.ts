@@ -13,6 +13,12 @@ import { StaticTokenStore } from '../../src/moodle/token-store.ts';
 import { FAKE_BASE, FAKE_TOKEN, fakeFetch, restHandler, siteInfo } from '../unit/moodle-fake.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 
+/** Nur die Aktionen ohne Schalter: Die Handler aus T1-24 ersetzen die Tests selbst (siehe moodle-assign.test.ts) */
+const BASE_HANDLERS: MoodleActionHandlers = {
+  'completion.set': DEFAULT_ACTION_HANDLERS['completion.set']!,
+  'notifications.mark_read': DEFAULT_ACTION_HANDLERS['notifications.mark_read']!,
+};
+
 const API = '/api/v1';
 const DEVICE_ID = '0190f6a2-0000-7000-8000-0000000000f2';
 const submitParams = { assignment_id: 12, accept_statement: true };
@@ -25,6 +31,7 @@ beforeAll(async () => {
   const fake = fakeFetch(
     restHandler({
       core_webservice_get_site_info: siteInfo([
+        'mod_assign_get_assignments',
         'core_webservice_get_site_info',
         'mod_assign_get_submission_status',
         'mod_assign_submit_for_grading',
@@ -47,7 +54,7 @@ beforeAll(async () => {
     config: { moodleUrl: FAKE_BASE, dataDir, moodleActions: ['assign.submit'] },
     tokens: new StaticTokenStore(FAKE_TOKEN),
     fetch: fake.fetch,
-    handlers: { ...DEFAULT_ACTION_HANDLERS, 'assign.submit': submitHandler },
+    handlers: { ...BASE_HANDLERS, 'assign.submit': submitHandler },
     readMeta: async () => ({ token_valid_until: '2027-01-27' }),
   });
   t = await startTestApp(

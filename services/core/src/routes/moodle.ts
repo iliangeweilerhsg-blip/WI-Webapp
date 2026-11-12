@@ -48,6 +48,7 @@ import { autoAssignCourses, removeAutoModule } from '../moodle/auto.ts';
 import type { MoodleServices } from '../moodle/index.ts';
 import {
   annotateCourses,
+  courseIdOfAssignment,
   decideItem,
   deleteLink,
   isKnownFileRef,
@@ -93,7 +94,16 @@ const errorResponses = {
 export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps): Promise<void> {
   const typed = app.withTypeProvider<ZodTypeProvider>();
   const { client, status, actions, confirmations, locks, reader, files, uploads } = deps.moodle;
-  const context: MoodleActionContext = { client, userId: () => status.userId(), uploads };
+  const context: MoodleActionContext = {
+    client,
+    userId: () => status.userId(),
+    uploads,
+    // Kurs-ID einer Aufgabe aus dem lokalen Abgleich (nur zur Abkürzung, nie zur Berechtigung). Fehler → unbekannt
+    courseIdOfAssignment: async (assignmentId) => {
+      if (!deps.db) return null;
+      return courseIdOfAssignment(deps.db, assignmentId).catch(() => null);
+    },
+  };
 
   function actionId(raw: string): MoodleActionId {
     if (!isMoodleActionId(raw)) {
