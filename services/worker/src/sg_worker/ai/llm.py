@@ -50,7 +50,7 @@ import anthropic
 from pydantic import BaseModel, ValidationError
 
 from ..config import LlmSettings
-from ..registry import JobContext, NonRetryableError
+from ..registry import JobContext, NonRetryableError, RetryableError
 from .budget import BudgetReached
 from .interfaces import CallCost, Meter, StructuredRequest, StructuredResult, Tier
 from .pricing import Tokens, cost_usd, to_eur
@@ -80,7 +80,7 @@ class LlmFatalError(NonRetryableError):
     """KI-Fehler ohne Retry (§20.5). Die Meldung landet unverändert in `job.error`."""
 
 
-class LlmUnavailable(Exception):
+class LlmUnavailable(RetryableError):
     """KI vorübergehend nicht erreichbar (429, 5xx, 529, Verbindung, Zeitlimit): Retry nach §3."""
 
     def __init__(self, status: str) -> None:

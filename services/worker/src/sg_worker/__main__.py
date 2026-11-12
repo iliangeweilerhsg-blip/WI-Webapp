@@ -13,7 +13,7 @@ from . import handlers  # noqa: F401  (registriert die Handler)
 from .ai import llm
 from .ai.embedder import configure_tuning, shutdown_when, start_embedder
 from .ai.transcriber import config_error
-from .config import KEY_VAR, Settings, load_env_file, take_llm_settings
+from .config import ENV_UNSAFE, KEY_VAR, Settings, load_env_file, take_llm_settings
 from .logging_setup import setup_logging
 from .loop import Worker
 from .server import start_server
@@ -59,12 +59,21 @@ def main() -> int:
     settings = Settings.from_env()
     env_file = settings.data_dir / "config" / ".env"
     key_from_environment = bool((os.environ.get(KEY_VAR) or "").strip())
-    load_env_file(env_file)
+    env_problem = load_env_file(env_file)
     settings = Settings.from_env()  # nach dem Laden der .env erneut lesen
     # §20.5: Schlüssel übernehmen, danach alle ANTHROPIC_* aus der Umgebung entfernen
-    llm_settings = take_llm_settings(env_file, key_from_environment=key_from_environment)
+    llm_settings = take_llm_settings(
+        env_file, key_from_environment=key_from_environment, env_problem=env_problem
+    )
     log = setup_logging(settings.data_dir, settings.log_level)
     llm.configure(llm_settings)
+    if env_problem in ENV_UNSAFE:
+        # Fail-closed (§20.5): Die Datei wurde nicht gelesen. Nur der Befund, nie ein Inhalt
+        log.error(
+            "config/.env wird ignoriert: Symlink, keine reguläre Datei, unlesbar oder gehört "
+            "einem anderen Benutzer",
+            extra={"issue": env_problem},
+        )
     lower_priority(settings.worker_nice, log)
     configure_tuning(threads=settings.embed_threads, pause_ms=settings.embed_pause_ms)
     if llm_settings.issue == "env_offen":
