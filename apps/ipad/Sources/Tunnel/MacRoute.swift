@@ -74,6 +74,11 @@ protocol MacRouting: AnyObject {
     func appWentToBackground()
     /// Der Weiterleiter ist (un)erreichbar geworden, der Zustand hat sich geändert oder der Port ist neu
     var onChange: (@MainActor () -> Void)? { get set }
+    /// Läuft **unmittelbar vor** `forwarder.stop()`, solange ein Weiterleiter lief oder startete, und sobald ein schon
+    /// gemeldeter Port verloren geht (der Listener fällt aus, Issue #282). Der Empfänger
+    /// bricht dort alle Anfragen ab (REST, Download, Sync-Verbindung) und macht die URLSessions ungültig: Der Port wird
+    /// gleich frei, und eine Anfrage, die URLSession danach intern wiederholt, ginge samt Token an eine fremde App.
+    var willStopForwarder: (@MainActor () -> Void)? { get set }
 }
 
 extension MacRouting {
@@ -107,6 +112,7 @@ final class MacRoute: MacRouting {
 
     private(set) var state: RouteState = .idle
     @ObservationIgnored var onChange: (@MainActor () -> Void)?
+    @ObservationIgnored var willStopForwarder: (@MainActor () -> Void)?
 
     /// Der zuletzt erfolgreiche Weg. `nil` = unbekannt, dann gilt WLAN zuerst.
     @ObservationIgnored private(set) var rememberedStage: RouteKind?
@@ -260,6 +266,11 @@ final class MacRoute: MacRouting {
         guard generation == forwarderGeneration else { return }
         forwarderStarting = false
         guard wanted, key != nil else { return }
+        if let published = forwarderPort, published != port {
+            // Der Listener ist nach `ready` ausgefallen (oder meldet einen anderen Port): Der alte Port wird frei, ohne
+            // dass `stopAll` lief. Auch dann erst alle Anfragen abbrechen (Issue #282).
+            willStopForwarder?()
+        }
         forwarderPort = port
         if port == nil {
             // Der Listener konnte nicht starten. Beim nächsten Wechsel in den Vordergrund neuer Versuch.
@@ -270,6 +281,11 @@ final class MacRoute: MacRouting {
     }
 
     private func stopAll() {
+        // Erst Anfragen abbrechen, dann den Port freigeben (Issue #282). Ohne laufenden Weiterleiter gibt es nichts, was
+        // an einen fremden Port gehen könnte; dann bleibt auch eine Kopplung (ohne Token) unberührt.
+        if forwarderPort != nil || forwarderStarting {
+            willStopForwarder?()
+        }
         dialer.forgetCachedEndpoints()
         forwarderGeneration += 1
         forwarderStarting = false

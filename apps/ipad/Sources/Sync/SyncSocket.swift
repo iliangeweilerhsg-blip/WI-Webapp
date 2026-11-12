@@ -25,6 +25,12 @@ protocol SyncSocket: AnyObject {
 protocol SyncSocketFactory {
     /// Öffnet die Verbindung (das Upgrade läuft im Hintergrund). Fehler zeigen sich bei `send`/`receive`.
     func open(_ request: URLRequest) -> any SyncSocket
+    /// Macht die URLSession ungültig und bricht alle ihre Aufgaben ab. Der nächste `open` legt eine neue an (Issue #282).
+    func invalidateSessions()
+}
+
+extension SyncSocketFactory {
+    func invalidateSessions() {}
 }
 
 /// Echte Verbindung über URLSession
@@ -87,9 +93,12 @@ final class URLSessionSyncSocket: SyncSocket {
 
 @MainActor
 final class URLSessionSyncSocketFactory: SyncSocketFactory {
-    private let session: URLSession
+    /// Wird beim ersten `open` angelegt und nach `invalidateSessions()` neu
+    private var session: URLSession?
 
-    init() {
+    init() {}
+
+    private static func makeSession() -> URLSession {
         // Ohne Cache und Cookies auf der Platte. Kein Warten auf Netz: Die Engine entscheidet über Wiederholungen.
         // Das Zeitlimit zählt auch für eine ruhige Verbindung; `ping` alle 15 s hält sie darunter.
         let configuration = URLSessionConfiguration.ephemeral
@@ -98,10 +107,17 @@ final class URLSessionSyncSocketFactory: SyncSocketFactory {
         // Nie über einen Proxy (Gegen-Review PR #276): Das Upgrade trägt das Token im Klartext an den Weiterleiter
         configuration.connectionProxyDictionary = [:]
         // Keine Weiterleitung beim Upgrade (Review L16), auch wenn URLSession dort selten eine verfolgt
-        session = URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
+        return URLSession(configuration: configuration, delegate: NoRedirectDelegate(), delegateQueue: nil)
     }
 
     func open(_ request: URLRequest) -> any SyncSocket {
-        URLSessionSyncSocket(session: session, request: request)
+        let current = session ?? Self.makeSession()
+        session = current
+        return URLSessionSyncSocket(session: current, request: request)
+    }
+
+    func invalidateSessions() {
+        session?.invalidateAndCancel()
+        session = nil
     }
 }
