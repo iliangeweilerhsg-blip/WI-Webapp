@@ -20,7 +20,7 @@ final class InkLecturePageTargetTests: XCTestCase {
 
     private func brief() -> SessionBrief {
         SessionBrief(
-            id: runningID, moduleID: moduleID, state: "laeuft", startedAtMS: 1_794_384_000_000, slideDeckID: nil,
+            id: runningID, moduleID: moduleID, state: "laeuft", startedAtMS: startMS, slideDeckID: nil,
             deleted: false, updatedAtMS: 1)
     }
 
@@ -38,19 +38,37 @@ final class InkLecturePageTargetTests: XCTestCase {
         }
     }
 
-    private func runLecture(_ service: InkLibraryService) async {
+    private let exerciseID = "019a4e14-0000-7000-8000-0000000000e2"
+    private let startMS = 1_794_384_000_000
+
+    /// Harness, dessen Core das Notizbuch der Session nennt (`GET /sessions/{id}/notebook`)
+    private func makeHarness(sessionNotebook: String? = nil, kind: String = "vorlesung") -> SyncHarness {
+        SyncHarness(health: [
+            .http(
+                status: 200,
+                body: LibraryFixtures.notebookJSON(id: sessionNotebook ?? notebookID, kind: kind, title: "Vorlesung"))
+        ])
+    }
+
+    /// Die Session läuft, der Core hat ihr Notizbuch genannt
+    private func runLecture(_ h: SyncHarness, _ service: InkLibraryService) async {
         service.attachFollower()
-        // Ohne Verbindung: die Session ist bekannt, ihr Notizbuch noch nicht
+        // Der Fake bestätigt nichts: Was eingereiht wird, bleibt in der Warteschlange sichtbar
+        h.factory.configure = { socket, _ in socket.opPolicy = { _, _, _ in .silent } }
+        h.start()
+        let online = await eventually { h.engine.state == .online }
+        XCTAssertTrue(online)
         await service.follow(session: brief())
         XCTAssertEqual(service.running?.id, runningID)
+        XCTAssertNotNil(service.running?.notebookID)
     }
 
     func testAPageFromAnotherSessionGetsANewPageWithTheRunningSession() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true, template: .kariert)
         let service = makeService(h, pageStore: store)
-        await runLecture(service)
+        await runLecture(h, service)
 
         XCTAssertTrue(service.needsLecturePage(notebookID: notebookID))
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
@@ -74,11 +92,11 @@ final class InkLecturePageTargetTests: XCTestCase {
     }
 
     func testASecondCallReusesTheNewPage() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true)
         let service = makeService(h, pageStore: store)
-        await runLecture(service)
+        await runLecture(h, service)
 
         let first = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
         XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
@@ -88,11 +106,11 @@ final class InkLecturePageTargetTests: XCTestCase {
     }
 
     func testAnEmptyPageWithTheSameSessionIsReused() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: runningID, hasStrokes: false)
         let service = makeService(h, pageStore: store)
-        await runLecture(service)
+        await runLecture(h, service)
 
         XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
@@ -101,11 +119,11 @@ final class InkLecturePageTargetTests: XCTestCase {
     }
 
     func testAPageWithStrokesAndTheSameSessionIsReused() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: runningID, hasStrokes: true)
         let service = makeService(h, pageStore: store)
-        await runLecture(service)
+        await runLecture(h, service)
 
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
         XCTAssertEqual(target.pageID, firstPageID)
@@ -113,11 +131,11 @@ final class InkLecturePageTargetTests: XCTestCase {
     }
 
     func testAnEmptyPageWithoutASessionIsReused() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: nil, hasStrokes: false)
         let service = makeService(h, pageStore: store)
-        await runLecture(service)
+        await runLecture(h, service)
 
         XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
@@ -126,11 +144,11 @@ final class InkLecturePageTargetTests: XCTestCase {
     }
 
     func testAnEmptyPageWithAnotherSessionStillGetsANewPage() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: false)
         let service = makeService(h, pageStore: store)
-        await runLecture(service)
+        await runLecture(h, service)
 
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
         XCTAssertNotEqual(target.pageID, firstPageID)
@@ -139,11 +157,11 @@ final class InkLecturePageTargetTests: XCTestCase {
     }
 
     func testAPageWithStrokesAndNoSessionGetsANewPage() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: nil, hasStrokes: true)
         let service = makeService(h, pageStore: store)
-        await runLecture(service)
+        await runLecture(h, service)
 
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
         XCTAssertNotEqual(target.pageID, firstPageID)
@@ -151,7 +169,7 @@ final class InkLecturePageTargetTests: XCTestCase {
     }
 
     func testWithoutARunningSessionNothingChanges() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true)
         let service = makeService(h, pageStore: store)
@@ -165,7 +183,7 @@ final class InkLecturePageTargetTests: XCTestCase {
     }
 
     func testARunningSessionOfAnotherModuleChangesNothing() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true)
         let service = makeService(h, pageStore: store)
@@ -181,15 +199,84 @@ final class InkLecturePageTargetTests: XCTestCase {
     }
 
     func testASlideTemplateBecomesABlankPageWithoutASlide() async throws {
-        let h = SyncHarness()
+        let h = makeHarness()
         let store = FakeInkPageStore()
         try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true, template: .folie)
         let service = makeService(h, pageStore: store)
-        await runLecture(service)
+        await runLecture(h, service)
 
         let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
         let page = try XCTUnwrap(service.page(target.pageID))
         XCTAssertEqual(page.template, .blanko)
         XCTAssertNil(page.backgroundSlideID)
+        // Eine freie Seite ist A4 hochkant (VERTRAEGE §7.4), nicht im Format der Folie
+        XCTAssertEqual(page.widthPt, LibraryPage.a4Width)
+        XCTAssertEqual(page.heightPt, LibraryPage.a4Height)
+    }
+
+    func testAnOfflinePageWithStrokesCreatedDuringTheSessionIsReused() async throws {
+        let h = makeHarness()
+        let store = FakeInkPageStore()
+        try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true)
+        // Offline in dieser Vorlesung angelegt: ohne Session, die UUIDv7 liegt nach dem Beginn
+        let offlineID = InkID.uuidV7(now: Date(timeIntervalSince1970: Double(startMS + 600_000) / 1000))
+        h.library.upsert(
+            LibraryPage(
+                id: offlineID, notebookID: notebookID, index: 2, template: .liniert, widthPt: 595, heightPt: 842,
+                sessionID: nil, backgroundSlideID: nil, attachedSlideID: nil, version: 1, createQueued: true,
+                needsReconcile: false, deletedAtMS: nil, deleteQueued: false))
+        h.library.setLast(notebookID: notebookID, pageID: offlineID)
+        store.snapshots[offlineID] = InkPageSnapshot(ink: Data([1, 2, 3]))
+        let service = makeService(h, pageStore: store)
+        await runLecture(h, service)
+
+        XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
+        let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
+        XCTAssertEqual(target.pageID, offlineID)
+        XCTAssertEqual(service.pages(inNotebook: notebookID).count, 2)
+    }
+
+    func testWhileTheNotebookOfTheSessionIsUnknownNothingChanges() async throws {
+        let h = SyncHarness()
+        let store = FakeInkPageStore()
+        try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true)
+        let service = makeService(h, pageStore: store)
+        service.attachFollower()
+        // Ohne Verbindung: die Session ist bekannt, ihr Notizbuch noch nicht. Es könnte auch „Übung“ sein.
+        await service.follow(session: brief())
+        XCTAssertNil(service.running?.notebookID)
+
+        XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
+        let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
+        XCTAssertEqual(target.pageID, firstPageID)
+        XCTAssertEqual(service.pages(inNotebook: notebookID).count, 1)
+    }
+
+    func testASessionOfTheOtherNotebookOfTheModuleChangesNothing() async throws {
+        let h = makeHarness(sessionNotebook: exerciseID, kind: "uebung")
+        let store = FakeInkPageStore()
+        try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true)
+        let service = makeService(h, pageStore: store)
+        await runLecture(h, service)
+        XCTAssertEqual(service.running?.notebookID, exerciseID)
+
+        XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
+        let target = try XCTUnwrap(service.openLectureTarget(notebookID: notebookID))
+        XCTAssertEqual(target.pageID, firstPageID)
+        XCTAssertEqual(service.pages(inNotebook: notebookID).count, 1)
+    }
+
+    func testAFreeNotebookIsNeverAffected() async throws {
+        let h = makeHarness()
+        let store = FakeInkPageStore()
+        try prepareLastPage(h, store: store, session: lastWeekID, hasStrokes: true)
+        var notebook = try XCTUnwrap(h.library.notebook(notebookID))
+        notebook.kind = .frei
+        h.library.upsert(notebook)
+        let service = makeService(h, pageStore: store)
+        await runLecture(h, service)
+
+        XCTAssertFalse(service.needsLecturePage(notebookID: notebookID))
+        XCTAssertEqual(service.pages(inNotebook: notebookID).count, 1)
     }
 }

@@ -161,6 +161,42 @@ final class SlideSwitchGateQuietTests: XCTestCase {
         XCTAssertEqual(gate.slideChanged(three), three)
     }
 
+    func testTheViewIsToldToRestartTheWaitWhenAChangeWaitsOrAStrokeEnds() {
+        let clock = GateTestClock()
+        let gate = makeGate(clock)
+        // Ein Strich ohne wartenden Wechsel startet kein Warten
+        stroke(gate, clock)
+        XCTAssertEqual(gate.waitToken, 0)
+        XCTAssertNil(gate.slideChanged(two))
+        XCTAssertEqual(gate.waitToken, 1)
+        stroke(gate, clock)
+        XCTAssertEqual(gate.waitToken, 2)
+    }
+
+    func testACancelledWaitReleasesNothing() async {
+        let clock = GateTestClock()
+        let gate = makeGate(clock)
+        stroke(gate, clock)
+        XCTAssertNil(gate.slideChanged(two))
+        await gate.awaitQuiet(sleep: { _ in throw CancellationError() })
+        XCTAssertEqual(gate.releases, 0)
+        XCTAssertEqual(gate.pendingSlide, two)
+    }
+
+    func testAModeSwitchDropsTheWaitingChange() async {
+        let clock = GateTestClock()
+        let gate = makeGate(clock)
+        stroke(gate, clock)
+        XCTAssertNil(gate.slideChanged(two))
+        XCTAssertFalse(gate.lectureStarted())
+        gate.dropPending()
+        XCTAssertFalse(gate.hasPending)
+        await gate.awaitQuiet(sleep: { try await clock.sleep($0) })
+        XCTAssertEqual(gate.releases, 0)
+        // Die Ruhezeit nach dem Strich gilt weiter
+        XCTAssertNil(gate.slideChanged(three))
+    }
+
     func testALectureStartWaitsForTheQuietPeriodLikeASlideChange() async {
         let clock = GateTestClock()
         let gate = makeGate(clock)

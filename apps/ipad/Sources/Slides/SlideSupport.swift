@@ -154,6 +154,13 @@ final class SlideSwitchGate {
         return lectureReleased
     }
 
+    /// Der Schreibmodus wechselt: Ein wartender Wechsel gehört zum alten Modus und verfällt. Der Stift bleibt, wie er
+    /// ist, und die Ruhezeit läuft weiter.
+    func dropPending() {
+        pending = nil
+        lecturePending = false
+    }
+
     func reset() {
         pending = nil
         released = nil

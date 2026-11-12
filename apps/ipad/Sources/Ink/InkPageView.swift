@@ -183,8 +183,15 @@ struct InkPageView: View {
         }
         .onAppear {
             sync.setPresence(presence(onPage: true))
+            // Zurück in der Ansicht: Ein Wechsel wartete noch, das Warten läuft weiter
+            if gate.hasPending {
+                startQuietWait()
+            }
         }
         .onDisappear {
+            // Keine Freigabe, solange die Ansicht nicht zu sehen ist
+            quietTask?.cancel()
+            quietTask = nil
             model?.saveNow()
             // Beim Verlassen läuft die Frist ab: `page.delete` jetzt einreihen
             library.flushPendingDeletes()
@@ -209,17 +216,15 @@ struct InkPageView: View {
         }
         .onChange(of: gate.waitToken) { _, _ in
             // Ein Wechsel wartet: erst nach der Schreibpause gilt er (UX-43). Ein neuer Strich startet das Warten neu.
-            quietTask?.cancel()
-            quietTask = _Concurrency.Task {
-                await gate.awaitQuiet(sleep: { try await _Concurrency.Task.sleep(for: $0) })
-            }
+            startQuietWait()
         }
         .onChange(of: gate.releases) { _, _ in
             // Ruhe oder Tipp: der zurückgestellte Wechsel (nur der letzte) gilt jetzt
             if gate.takeLectureReleased() {
                 moveToLecturePageIfNeeded()
             }
-            if let slide = gate.takeReleased() {
+            // Nur im Modus „Auf Folie“ (der Modus kann gewechselt haben, während der Wechsel wartete)
+            if let slide = gate.takeReleased(), currentMode == .aufFolie {
                 openSlidePage(slide)
             }
         }
@@ -237,6 +242,14 @@ struct InkPageView: View {
                 applyFreshTarget()
                 await reconcileIfNeeded()
             }
+        }
+    }
+
+    /// Wartet auf die Schreibpause und gibt dann den zurückgestellten Wechsel frei. Ein früheres Warten endet.
+    private func startQuietWait() {
+        quietTask?.cancel()
+        quietTask = _Concurrency.Task {
+            await gate.awaitQuiet(sleep: { try await _Concurrency.Task.sleep(for: $0) })
         }
     }
 
@@ -364,6 +377,8 @@ struct InkPageView: View {
     private var modeButton: some View {
         if let mode = currentMode, let moduleID = currentModuleID {
             Button {
+                // Ein wartender Wechsel gehört zum alten Modus (Folie bzw. neue Vorlesungsseite)
+                gate.dropPending()
                 library.setInkMode(mode == .aufFolie ? .freieSeite : .aufFolie, moduleID: moduleID)
                 if mode == .freieSeite {
                     followSlideIfNeeded(force: true)
