@@ -52,18 +52,93 @@ export function getSession(id: string, signal?: AbortSignal): Promise<Session> {
   return apiGet(`/sessions/${encodeURIComponent(id)}`, SessionSchema, { signal });
 }
 
-/** `GET /sessions` mit Zeitraum (`from` einschließlich, `to` ausschließlich) und/oder Zuständen (§7.2). Eine Seite. */
-export async function listSessions(
-  filter: { from?: Date; to?: Date; states?: readonly string[]; limit?: number },
-  signal?: AbortSignal,
-): Promise<Session[]> {
+type SessionFilter = {
+  from?: Date;
+  to?: Date;
+  states?: readonly string[];
+  limit?: number;
+  moduleId?: string;
+  cursor?: string | null;
+};
+
+async function fetchSessionPage(filter: SessionFilter, signal?: AbortSignal) {
   const params = new URLSearchParams();
   if (filter.from) params.set('from', filter.from.toISOString());
   if (filter.to) params.set('to', filter.to.toISOString());
   if (filter.states?.length) params.set('state', filter.states.join(','));
+  if (filter.moduleId) params.set('module_id', filter.moduleId);
+  if (filter.cursor) params.set('cursor', filter.cursor);
   params.set('limit', String(filter.limit ?? 200));
   const page = await apiGet(`/sessions?${params.toString()}`, SessionListSchema, { signal });
-  return page.items.filter((item) => item.deleted_at === null);
+  return { items: page.items.filter((item) => item.deleted_at === null), next: page.next_cursor };
+}
+
+/** `GET /sessions` mit Zeitraum (`from` einschließlich, `to` ausschließlich), Zuständen und/oder Modul (§7.2). Eine Seite. */
+export async function listSessions(filter: SessionFilter, signal?: AbortSignal): Promise<Session[]> {
+  return (await fetchSessionPage(filter, signal)).items;
+}
+
+/** So viele Seiten (je 200) lädt `listSessionsAll` höchstens */
+const MAX_SESSION_PAGES = 5;
+
+/** Wie `listSessions`, folgt aber dem Cursor (der Core sortiert aufsteigend und kennt keine andere Reihenfolge) */
+export async function listSessionsAll(filter: SessionFilter, signal?: AbortSignal): Promise<Session[]> {
+  const items: Session[] = [];
+  let cursor: string | null = null;
+  for (let page = 0; page < MAX_SESSION_PAGES; page += 1) {
+    const result = await fetchSessionPage({ ...filter, cursor }, signal);
+    items.push(...result.items);
+    cursor = result.next;
+    if (!cursor) break;
+  }
+  return items;
+}
+
+/** Vorbei und aufgenommen: Den Rückblick gibt es für `beendet` und `verarbeitet` */
+export const FINISHED_STATES = ['beendet', 'verarbeitet'] as const;
+
+export function isFinished(session: Pick<Session, 'state'>): boolean {
+  return (FINISHED_STATES as readonly string[]).includes(session.state);
+}
+
+/** Neueste zuerst (nach Startzeit; gleiche Zeit nach ID) */
+export function newestFirst(sessions: readonly Session[]): Session[] {
+  return [...sessions].sort((a, b) => sessionAnchor(b) - sessionAnchor(a) || b.id.localeCompare(a.id));
+}
+
+/** Dauer von Start bis Ende in ms; `null`, solange eines von beiden fehlt. Pausen sind nicht abgezogen. */
+export function sessionDurationMs(session: Pick<Session, 'started_at' | 'ended_at'>): number | null {
+  const ms = time(session.ended_at) - time(session.started_at);
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+}
+
+/** „45 Min.“, „1 Std.“, „1 Std. 30 Min.“; unter einer Minute „< 1 Min.“ */
+export function formatDuration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 1) return '< 1 Min.';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m} Min.`;
+  return m === 0 ? `${h} Std.` : `${h} Std. ${m} Min.`;
+}
+
+/** „VL 7 · Normalformen“; ohne Nummer und Titel der Foliensatz, sonst „Vorlesung“ */
+export function sessionLabel(session: Pick<Session, 'number' | 'title'>, deckTitle?: string | null): string {
+  const name = session.title?.trim() || deckTitle?.trim() || null;
+  const parts = [session.number !== null ? `VL ${session.number}` : null, name].filter(
+    (p): p is string => p !== null,
+  );
+  return parts.join(' · ') || 'Vorlesung';
+}
+
+/** Abfrage: vergangene Vorlesungen eines Moduls, neueste zuerst */
+export function useModuleSessions(moduleId: string) {
+  return useQuery({
+    queryKey: ['sessions', 'modul', moduleId],
+    // Der Core filtert die Zustände schon, damit geplante Termine des Semesters keine Seiten belegen
+    queryFn: ({ signal }) => listSessionsAll({ moduleId, states: FINISHED_STATES }, signal),
+    select: (items) => newestFirst(items.filter(isFinished)),
+  });
 }
 
 /**

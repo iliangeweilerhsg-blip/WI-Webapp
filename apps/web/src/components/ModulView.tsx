@@ -20,6 +20,8 @@ import { documentHref, type MaterialKind } from '../lib/material.ts';
 import { useToast } from '../lib/toast.tsx';
 import { useUploadTarget } from '../lib/uploads.tsx';
 import { CoreHint } from './CoreHint.tsx';
+import { ModuleConcepts } from './modul/ModuleConcepts.tsx';
+import { ModuleSessions } from './modul/ModuleSessions.tsx';
 import { ModuleSessionButton } from './today/SpontaneousStart.tsx';
 import { MaterialPanel } from './MaterialPanel.tsx';
 import { ModuleMoodle } from './ModuleMoodle.tsx';
@@ -117,7 +119,12 @@ function ModuleTabs({ moduleId }: { moduleId: string }) {
         className="mt-4"
       >
         {kind ? (
-          <MaterialPanel key={kind} moduleId={moduleId} kind={kind} onOpen={openDocument} />
+          <>
+            {kind === 'folien' ? <ModuleSessions moduleId={moduleId} /> : null}
+            <MaterialPanel key={kind} moduleId={moduleId} kind={kind} onOpen={openDocument} />
+          </>
+        ) : current.id === 'konzepte' ? (
+          <ModuleConcepts moduleId={moduleId} />
         ) : (
           <EmptyState>{current.empty}</EmptyState>
         )}
