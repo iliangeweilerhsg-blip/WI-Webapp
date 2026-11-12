@@ -296,6 +296,7 @@ final class FakeForwarder: LocalForwarding {
     private(set) var startCount = 0
     private(set) var stopCount = 0
     private var open: (@Sendable () async -> (any TunnelChannel)?)?
+    private var ready: (@MainActor @Sendable (UInt16?) -> Void)?
     /// Port, den der Fake beim Start meldet. `nil` = der Listener kann nicht starten.
     var portToReport: UInt16? = 41000
     /// Erhöht den Port bei jedem Start (wie ein neuer zufälliger Port)
@@ -306,6 +307,7 @@ final class FakeForwarder: LocalForwarding {
     ) {
         startCount += 1
         self.open = open
+        self.ready = ready
         var reported = portToReport
         if incrementsPort, let base = reported { reported = base + UInt16(startCount - 1) }
         port = reported
@@ -316,6 +318,14 @@ final class FakeForwarder: LocalForwarding {
         stopCount += 1
         port = nil
         open = nil
+        ready = nil
+    }
+
+    /// Der Listener fällt nach `ready` aus (wie `LocalForwarder` bei `.failed`): erst `ready(nil)`, dann aufräumen
+    func failListener() {
+        let report = ready
+        report?(nil)
+        stop()
     }
 
     var isRunning: Bool { open != nil }
@@ -356,6 +366,7 @@ final class FakeRouting: MacRouting {
     var state: RouteState
     var fixedEndpoint: CoreEndpoint?
     var onChange: (@MainActor () -> Void)?
+    var willStopForwarder: (@MainActor () -> Void)?
     private(set) var pairedCalls: [Bool] = []
     private(set) var activeCalls = 0
     private(set) var backgroundCalls = 0
@@ -368,5 +379,10 @@ final class FakeRouting: MacRouting {
     func endpoint() -> CoreEndpoint? { fixedEndpoint }
     func setPaired(_ paired: Bool) { pairedCalls.append(paired) }
     func appBecameActive() { activeCalls += 1 }
-    func appWentToBackground() { backgroundCalls += 1 }
+    func appWentToBackground() {
+        // Wie die echte Wegewahl: erst die Meldung vor dem Stopp, dann der Stopp
+        willStopForwarder?()
+        fixedEndpoint = nil
+        backgroundCalls += 1
+    }
 }
