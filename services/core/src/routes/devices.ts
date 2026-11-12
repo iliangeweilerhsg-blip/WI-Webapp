@@ -102,17 +102,19 @@ export async function devicesRoutes(app: FastifyInstance, deps: DevicesRouteDeps
         throw new HttpError(403, 'local_only', 'Andere Geräte lassen sich nur am Mac entfernen.');
       }
       await revokeDevice(db, id);
-      // Nach dem Commit (das Token ist ab hier ungültig): Tunnel-Schlüssel entfernen. Scheitert das, steht der Fehler
-      // im Log und der Abgleich beim nächsten Start holt es nach. Der Core lehnt das Token so oder so ab
+      // Nach dem Commit, **synchron** und vor jedem `await`: Verbindungen des Geräts schließen (§7.5) und weitere
+      // Zuhörer benachrichtigen (der Hub merkt sich den Widerruf, §11.1). Ein offener WebSocket des Geräts darf nicht
+      // weiterarbeiten, während die Schlüsseldatei geschrieben wird (Warteschlange, fsync, hängende Platte)
+      callSync(request.log, undefined, () => closeDeviceConnections(id, CLOSE_TOKEN_REVOKED));
+      for (const error of emitDeviceRevoked(id)) {
+        request.log.error({ err: error, deviceId: id }, 'Zuhörer von onDeviceRevoked ist fehlgeschlagen');
+      }
+      // Danach den Tunnel-Schlüssel entfernen (UX-12). Scheitert das, steht der Fehler im Log und der Abgleich beim
+      // nächsten Start holt es nach. Der Core lehnt das Token so oder so ab
       if (tunnelKeys) {
         await tunnelKeys.remove(id).catch((error: unknown) => {
           request.log.error({ err: error, deviceId: id }, 'Tunnel-Schlüssel konnte nicht entfernt werden');
         });
-      }
-      // Nach dem Commit: Verbindungen des Geräts schließen (§7.5) und weitere Zuhörer benachrichtigen
-      callSync(request.log, undefined, () => closeDeviceConnections(id, CLOSE_TOKEN_REVOKED));
-      for (const error of emitDeviceRevoked(id)) {
-        request.log.error({ err: error, deviceId: id }, 'Zuhörer von onDeviceRevoked ist fehlgeschlagen');
       }
       return reply.code(204).send(null);
     },

@@ -640,6 +640,35 @@ describe('Tunnel-Eingang: WebSocket /sync', () => {
     expect(res.statusCode).toBe(204);
     expect(await client.closed()).toBe(4401);
   });
+
+  it('der Widerruf schließt den WebSocket sofort, auch wenn die Schlüsseldatei noch nicht geschrieben ist', async () => {
+    const other = await pair(t);
+    const client = await TestClient.open(wsUrl(), {
+      host: FORWARDER_HOST,
+      authorization: `Bearer ${other.token}`,
+    });
+    await client.hello();
+    // Hängende Platte: Das Entfernen aus der Schlüsseldatei wartet, bis der Test es freigibt
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const remove = t.keys.remove.bind(t.keys);
+    const spy = vi.spyOn(t.keys, 'remove').mockImplementationOnce(async (id: string) => {
+      await held;
+      return remove(id);
+    });
+    const pending = t.request({ method: 'DELETE', url: `${API}/devices/${other.deviceId}` });
+    try {
+      expect(await client.closed()).toBe(4401);
+      expect(spy).toHaveBeenCalledWith(other.deviceId);
+    } finally {
+      release();
+    }
+    expect((await pending).statusCode).toBe(204);
+    expect(t.keys.deviceIds()).not.toContain(other.deviceId);
+    spy.mockRestore();
+  });
 });
 
 describe('Kopplung und Schlüsseldatei', () => {
