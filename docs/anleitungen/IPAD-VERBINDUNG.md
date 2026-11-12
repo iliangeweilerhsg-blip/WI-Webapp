@@ -136,7 +136,7 @@ Das iPad sucht seinen Mac über einen Bonjour-Dienst (`_sg-tunnel._tcp`), erst i
 | Anzeige | Was sie heißt | Was hilft |
 |---|---|---|
 | Suche deinen Mac … | Normal in den ersten Sekunden | Warten |
-| Mac nicht gefunden | Kein Dienst mit dem Namen deines Macs zu sehen | Mac aufgeklappt und am Netzteil? `pnpm sg start` läuft? Am Mac WLAN an? `pnpm sg doctor` ansehen (Zeilen „Tunnel-Helfer“) |
+| Mac nicht gefunden | Kein Dienst mit dem Namen deines Macs zu sehen | Mac aufgeklappt und am Netzteil? `pnpm sg start` läuft? Am Mac WLAN an? `pnpm sg doctor` ansehen (Zeilen „Tunnel-Helfer“). Nach einer Wiederherstellung aus dem Backup (`pnpm sg restore`) sind alle Geräte entkoppelt: neu koppeln, siehe [BACKUP-WIEDERHERSTELLEN.md](BACKUP-WIEDERHERSTELLEN.md) |
 | WLAN ist aus | Am iPad ist WLAN ausgeschaltet. Auch die Direktverbindung braucht es | WLAN am iPad einschalten. Ein Netz brauchst du nicht |
 | Lokales Netzwerk nicht erlaubt | iPadOS lässt die Suche nicht zu | Einstellungen → Datenschutz & Sicherheit → Lokales Netzwerk → Studien-Gehirn. Nach dem Aufspielen kann die Erlaubnis zurückgesetzt sein |
 | Mac nicht gefunden, mit dem Satz „… nicht mit dem richtigen Schlüssel“ | Etwas unter dem Namen deines Macs hat den Handshake begonnen, kennt aber den Schlüssel nicht. Jeder in Funkreichweite kann den Namen nachsprechen. Der Satz erscheint erst nach drei vergeblichen Suchläufen | Nichts entkoppeln. Zu Hause prüfen, ob das iPad am Mac unter Einstellungen → Geräte noch steht. Kommt der Hinweis zu Hause, am Mac `pnpm sg doctor` ansehen |
