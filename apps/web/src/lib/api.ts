@@ -18,6 +18,8 @@ export class ApiRequestError extends Error {
   readonly status: number | null;
   readonly code: string | null;
   readonly userMessage: string;
+  /** `error.details` der Core-Antwort (z. B. `concept_id`, `path`, `triggered_by`); leer, wenn es keine gibt */
+  readonly details: Record<string, unknown>;
 
   constructor(opts: {
     kind: ApiFailureKind;
@@ -25,6 +27,7 @@ export class ApiRequestError extends Error {
     code?: string | null;
     message: string;
     userMessage: string;
+    details?: Record<string, unknown>;
   }) {
     super(opts.message);
     this.name = 'ApiRequestError';
@@ -32,6 +35,7 @@ export class ApiRequestError extends Error {
     this.status = opts.status ?? null;
     this.code = opts.code ?? null;
     this.userMessage = opts.userMessage;
+    this.details = opts.details ?? {};
   }
 }
 
@@ -53,6 +57,18 @@ const CODE_MESSAGES: Record<string, string> = {
   idempotency_key_in_progress: 'Die Datei wird gerade schon hochgeladen.',
   // Nur am Mac selbst erlaubt (z. B. „Jetzt sichern“, „Jetzt testen“ von einem gekoppelten Gerät, #113)
   local_only: 'Das geht nur direkt am Mac.',
+  // Inbox der Vorschläge (VERTRAEGE §20.11)
+  inbox_item_not_found: 'Diesen Vorschlag gibt es nicht mehr.',
+  concept_not_found: 'Dieses Konzept gibt es nicht mehr.',
+  inbox_item_decided: 'Dieser Vorschlag ist schon entschieden.',
+  inbox_item_not_decided: 'Dieser Vorschlag ist noch offen.',
+  inbox_reopen_conflict: 'Rückgängig geht nicht mehr: Darauf baut inzwischen anderes auf.',
+  concept_exists: 'Ein Konzept mit diesem Namen gibt es schon.',
+  merge_target_invalid: 'Mit diesem Konzept lässt sich nicht zusammenführen. Wähle ein anderes Ziel.',
+  relation_endpoint_pending: 'Erst die beiden Konzepte annehmen, dann die Beziehung.',
+  relation_cycle: 'Das würde einen Kreis bilden.',
+  inbox_action_invalid: 'Das passt nicht zu dieser Art von Vorschlag.',
+  inbox_busy: 'Gerade beschäftigt, bitte gleich nochmal.',
 };
 
 function messageForStatus(status: number): string {
@@ -70,11 +86,12 @@ async function toApiError(res: Response): Promise<ApiRequestError> {
   }
   const parsed = ApiErrorSchema.safeParse(body);
   if (parsed.success) {
-    const { code, message } = parsed.data.error;
+    const { code, message, details } = parsed.data.error;
     return new ApiRequestError({
       kind: 'api',
       status: res.status,
       code,
+      details,
       message: `${code}: ${message}`,
       userMessage: CODE_MESSAGES[code] ?? messageForStatus(res.status),
     });

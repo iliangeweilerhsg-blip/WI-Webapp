@@ -4,7 +4,6 @@
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import {
-  ApiErrorSchema,
   InboxBulkResultSchema,
   InboxDecisionResultSchema,
   InboxItemListSchema,
@@ -18,7 +17,7 @@ import {
   type InboxOverview,
 } from '@sg/shared';
 import { watchReconnect } from '../components/dashboard/reconnect.ts';
-import { ApiRequestError, apiBase, apiGet, friendlyMessage, isUnreachable, type Parser } from './api.ts';
+import { ApiRequestError, apiGet, apiSend, friendlyMessage, isUnreachable } from './api.ts';
 import { CONCEPTS_KEY, relationSentence } from './concepts.ts';
 import { useHydrationSafe } from './hydrated.ts';
 import { useActiveSession } from './sessions.ts';
@@ -53,106 +52,13 @@ export const INBOX_KIND_SYMBOLS: Record<InboxKind, string> = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// Fehler: `lib/api.ts` reicht `details` nicht durch und kennt die Codes aus §20.11 nicht
+// Fehler: Codes und `details` kommen aus `lib/api.ts`
 // ---------------------------------------------------------------------------------------------
 
+/** Texte, die in der Inbox von `lib/api.ts` abweichen */
 const INBOX_MESSAGES: Record<string, string> = {
-  inbox_item_not_found: 'Diesen Vorschlag gibt es nicht mehr.',
-  concept_not_found: 'Dieses Konzept gibt es nicht mehr.',
-  inbox_item_decided: 'Dieser Vorschlag ist schon entschieden.',
-  inbox_item_not_decided: 'Dieser Vorschlag ist noch offen.',
-  inbox_reopen_conflict: 'Rückgängig geht nicht mehr: Darauf baut inzwischen anderes auf.',
-  concept_exists: 'Ein Konzept mit diesem Namen gibt es schon.',
-  merge_target_invalid: 'Mit diesem Konzept lässt sich nicht zusammenführen. Wähle ein anderes Ziel.',
-  relation_endpoint_pending: 'Erst die beiden Konzepte annehmen, dann die Beziehung.',
-  relation_cycle: 'Das würde einen Kreis bilden.',
-  inbox_action_invalid: 'Das passt nicht zu dieser Art von Vorschlag.',
-  inbox_busy: 'Gerade beschäftigt, bitte gleich nochmal.',
   session_not_found: 'Diese Vorlesung gibt es nicht mehr.',
-  // Allgemeine Codes, die `lib/api.ts` auch kennt (dort nicht exportiert)
-  validation_failed: 'Das passt so nicht. Prüfe deine Eingabe.',
-  device_token_required: 'Dieses Gerät ist noch nicht mit dem Core gekoppelt.',
 };
-
-/** Unbekannter Code: Text nach dem Status (wie `lib/api.ts`) */
-function fallbackMessage(status: number): string {
-  if (status === 404) return 'Das gibt es nicht (mehr).';
-  if (status >= 500) return 'Im Core ist etwas schiefgegangen. Versuch es gleich noch einmal.';
-  return 'Das hat nicht geklappt.';
-}
-
-/** Fehler einer Inbox-Aktion samt `details` des Core (`concept_id`, `path`, `triggered_by`, …) */
-export class InboxRequestError extends ApiRequestError {
-  readonly details: Record<string, unknown>;
-
-  constructor(status: number, code: string, message: string, details: Record<string, unknown>) {
-    super({
-      kind: 'api',
-      status,
-      code,
-      message: `${code}: ${message}`,
-      userMessage: INBOX_MESSAGES[code] ?? fallbackMessage(status),
-    });
-    this.name = 'InboxRequestError';
-    this.details = details;
-  }
-}
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
-
-/** POST mit `Idempotency-Key` (08 §1); Fehler behalten ihre `details` */
-async function inboxPost<T>(path: string, schema: Parser<T>, body?: unknown): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(`${apiBase()}${path}`, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Idempotency-Key': globalThis.crypto.randomUUID(),
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-  } catch (cause) {
-    throw new ApiRequestError({
-      kind: 'unreachable',
-      message: `Core nicht erreichbar: ${String(cause)}`,
-      userMessage: 'Core nicht erreichbar',
-    });
-  }
-  let json: unknown = null;
-  try {
-    json = await res.json();
-  } catch {
-    // Kein JSON: unten als Fehler behandelt
-  }
-  if (!res.ok) {
-    const parsed = ApiErrorSchema.safeParse(json);
-    const raw = isRecord(json) && isRecord(json.error) ? json.error : null;
-    if (parsed.success || (raw && typeof raw.code === 'string')) {
-      const code = parsed.success ? parsed.data.error.code : String(raw?.code);
-      const message = parsed.success ? parsed.data.error.message : String(raw?.message ?? '');
-      throw new InboxRequestError(res.status, code, message, isRecord(raw?.details) ? raw.details : {});
-    }
-    throw new ApiRequestError({
-      kind: 'api',
-      status: res.status,
-      message: `HTTP ${res.status}`,
-      userMessage: res.status >= 500 ? 'Im Core ist etwas schiefgegangen.' : 'Core antwortet unerwartet',
-    });
-  }
-  const parsed = schema.safeParse(json);
-  if (!parsed.success) {
-    throw new ApiRequestError({
-      kind: 'invalid',
-      status: res.status,
-      message: `Antwort passt nicht zum Schema: ${parsed.error.message}`,
-      userMessage: 'Der Core hat unerwartet geantwortet.',
-    });
-  }
-  return parsed.data;
-}
 
 /** Code eines Fehlers aus dem Core, sonst `null` */
 export function errorCode(error: unknown): string | null {
@@ -161,13 +67,13 @@ export function errorCode(error: unknown): string | null {
 
 /** `details.<key>` als Text (z. B. `concept_id`), sonst `null` */
 export function errorDetail(error: unknown, key: string): string | null {
-  const value = error instanceof InboxRequestError ? error.details[key] : null;
+  const value = error instanceof ApiRequestError ? error.details[key] : null;
   return typeof value === 'string' ? value : null;
 }
 
 /** „Das würde einen Kreis bilden: A → B → A“ (F-BIB-03); ohne bekannte Namen nur der erste Satz */
 export function cycleMessage(error: unknown, names: ReadonlyMap<string, string>): string {
-  const path = error instanceof InboxRequestError ? error.details.path : null;
+  const path = error instanceof ApiRequestError ? error.details.path : null;
   const labels = Array.isArray(path)
     ? path.map((id) => (typeof id === 'string' ? names.get(id) : undefined))
     : [];
@@ -287,19 +193,19 @@ const itemPath = (id: string, action: 'accept' | 'reject' | 'reopen') =>
   `/inbox/${encodeURIComponent(id)}/${action}`;
 
 export function acceptItem(id: string, request: InboxAcceptRequest = {}): Promise<InboxDecisionResult> {
-  return inboxPost(itemPath(id, 'accept'), InboxDecisionResultSchema, request);
+  return apiSend('POST', itemPath(id, 'accept'), InboxDecisionResultSchema, { body: request });
 }
 
 export function rejectItem(id: string): Promise<InboxDecisionResult> {
-  return inboxPost(itemPath(id, 'reject'), InboxDecisionResultSchema);
+  return apiSend('POST', itemPath(id, 'reject'), InboxDecisionResultSchema);
 }
 
 export function reopenItem(id: string): Promise<InboxDecisionResult> {
-  return inboxPost(itemPath(id, 'reopen'), InboxDecisionResultSchema);
+  return apiSend('POST', itemPath(id, 'reopen'), InboxDecisionResultSchema);
 }
 
 export function bulkInbox(request: InboxBulkRequest): Promise<InboxBulkResult> {
-  return inboxPost('/inbox/bulk', InboxBulkResultSchema, request);
+  return apiSend('POST', '/inbox/bulk', InboxBulkResultSchema, { body: request });
 }
 
 /** Höchstzahl der `ids` je `POST /inbox/bulk` (Schema `InboxBulkRequest`) */
@@ -361,9 +267,35 @@ export function bulkTarget(
   return { ids: ordered.map((item) => item.id) };
 }
 
-/** „Rückgängig“ nach einer Massenaktion: `reopen` in umgekehrter Reihenfolge (§20.6) */
-export function undoBulk(decided: readonly string[]): Promise<InboxBulkResult> {
-  return bulkInChunks({ action: 'reopen', ids: [...decided].reverse() });
+/**
+ * „Rückgängig“ nach einer Massenaktion: `reopen` in umgekehrter Reihenfolge (§20.6). `decided` enthält auch die
+ * mitentschiedenen Folge-Einträge (§20.6: „geänderte Einträge“); der Core öffnet sie zusammen mit ihrem Auslöser.
+ * Bei mehr als 500 IDs landen Folge-Eintrag und Auslöser in verschiedenen Blöcken: Der Folge-Eintrag kommt zuerst
+ * dran und scheitert mit `inbox_reopen_conflict`, obwohl ihn der Auslöser im nächsten Block mitöffnet. Darum werden
+ * solche Konflikte nach dem letzten Block einmal wiederholt. `inbox_item_not_decided` heißt: schon wieder offen,
+ * also kein Fehler.
+ */
+export async function undoBulk(decided: readonly string[]): Promise<InboxBulkResult> {
+  const first = await bulkInChunks({ action: 'reopen', ids: [...decided].reverse() });
+  const retry = first.skipped
+    .filter((entry) => entry.code === 'inbox_reopen_conflict')
+    .map((entry) => entry.id);
+  const result: InboxBulkResult = {
+    decided: [...first.decided],
+    skipped: first.skipped.filter((entry) => entry.code !== 'inbox_item_not_decided'),
+  };
+  if (retry.length > 0 && decided.length > BULK_MAX_IDS) {
+    const again = await bulkInChunks({ action: 'reopen', ids: retry }).catch(() => null);
+    if (again) {
+      const retried = new Set(retry);
+      result.decided.push(...again.decided);
+      result.skipped = [
+        ...result.skipped.filter((entry) => !retried.has(entry.id)),
+        ...again.skipped.filter((entry) => entry.code !== 'inbox_item_not_decided'),
+      ];
+    }
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------------------------
