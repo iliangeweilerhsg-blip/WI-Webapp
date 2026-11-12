@@ -3,10 +3,16 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { System } from '../src/system.ts';
 import { formatChecks, doctorExitCode, type CheckResult } from '../src/doctor.ts';
 import { resolveConfig } from '../src/config.ts';
 import {
+  checkTunnelAfterStart,
+  formatStartCheck,
   inspectKeyFile,
+  parseWifiDevice,
+  parseWifiPower,
+  realTunnelDoctorIo,
   parseFirewallBlocked,
   parseFirewallEnabled,
   parseTunnelState,
@@ -81,6 +87,7 @@ function io(over: Partial<TunnelDoctorIo> = {}): TunnelDoctorIo {
     keyFile: () => GOOD_FILE,
     pairedDeviceIds: async () => ['dev-1'],
     firewall: async () => firewall,
+    wifiPower: async () => true,
     ...over,
   };
 }
@@ -462,5 +469,153 @@ describe('inspectKeyFile', () => {
     expect(inspectKeyFile(file, uid).deviceIds).toBeNull();
     writeFileSync(file, JSON.stringify({ v: 1, devices: [{ nope: 1 }] }));
     expect(inspectKeyFile(file, uid).deviceIds).toBeNull();
+  });
+});
+
+describe('WLAN am Mac (UX-302)', () => {
+  it('aus: Fehler mit Abhilfe, an: ok, unbekannt: nur Info', async () => {
+    const off = await runTunnelChecks(cfg, io({ wifiPower: async () => false }));
+    expect(byName(off, 'WLAN am Mac').status).toBe('fail');
+    expect(byName(off, 'WLAN am Mac').hint).toMatch(/einschalten/);
+    expect(byName(await runTunnelChecks(cfg, io()), 'WLAN am Mac').status).toBe('ok');
+    const unknown = await runTunnelChecks(cfg, io({ wifiPower: async () => null }));
+    expect(byName(unknown, 'WLAN am Mac').status).toBe('info');
+  });
+
+  it('wertet networksetup aus', () => {
+    const ports = `Hardware Port: Ethernet\nDevice: en5\nEthernet Address: aa\n\nHardware Port: Wi-Fi\nDevice: en0\nEthernet Address: bb\n`;
+    expect(parseWifiDevice(ports)).toBe('en0');
+    expect(parseWifiDevice('Hardware Port: Ethernet\nDevice: en5\n')).toBeNull();
+    expect(parseWifiDevice('Hardware Port: Wi-Fi\nDevice: ; rm -rf\n')).toBeNull();
+    expect(parseWifiPower('Wi-Fi Power (en0): On')).toBe(true);
+    expect(parseWifiPower('Wi-Fi Power (en0): Off')).toBe(false);
+    expect(parseWifiPower('Fehler')).toBeNull();
+  });
+
+  it('echte Fassung: feste Argumente, macOS-Befehle gemockt', async () => {
+    const calls: [string, string[]][] = [];
+    const run =
+      (answers: Record<string, { ok: boolean; stdout: string }>): System['run'] =>
+      async (cmd, args) => {
+        calls.push([cmd, args]);
+        const a = answers[args[0] ?? ''] ?? { ok: false, stdout: '' };
+        return { ...a, stderr: '' };
+      };
+    const sys = (r: System['run']) => ({ platform: 'darwin', run: r }) as unknown as System;
+    const ports = { ok: true, stdout: 'Hardware Port: Wi-Fi\nDevice: en1\n' };
+    const off = realTunnelDoctorIo(
+      cfg,
+      sys(
+        run({
+          '-listallhardwareports': ports,
+          '-getairportpower': { ok: true, stdout: 'Wi-Fi Power (en1): Off' },
+        }),
+      ),
+    );
+    expect(await off.wifiPower()).toBe(false);
+    expect(calls).toEqual([
+      ['/usr/sbin/networksetup', ['-listallhardwareports']],
+      ['/usr/sbin/networksetup', ['-getairportpower', 'en1']],
+    ]);
+    const broken = realTunnelDoctorIo(cfg, sys(run({})));
+    expect(await broken.wifiPower()).toBeNull();
+  });
+});
+
+describe('Prüfung nach sg start (UX-302)', () => {
+  const clock = () => {
+    let t = 0;
+    return { now: () => t, sleep: async (ms: number) => void (t += ms) };
+  };
+  const run = async (i: TunnelDoctorIo, over: { isStopping?: () => boolean } = {}) => {
+    const lines: string[] = [];
+    const c = clock();
+    await checkTunnelAfterStart(cfg, i, {
+      ...c,
+      isStopping: () => false,
+      ...over,
+      log: (l) => lines.push(l),
+    });
+    return { lines, elapsed: c.now() };
+  };
+
+  it('alles in Ordnung: genau eine Zeile', async () => {
+    const { lines } = await run(io());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/bereit/);
+  });
+
+  it('Firewall sperrt den Helfer: Zeile mit Abhilfe, kein Wurf', async () => {
+    const { lines } = await run(io({ firewall: async () => ({ enabled: true, blocked: true }) }));
+    const text = lines.join('\n');
+    expect(text).toMatch(/noch nicht bereit/);
+    expect(text).toMatch(/Firewall/);
+    expect(text).toMatch(/sg-tunnel/);
+    expect(text).not.toMatch(/WLAN am Mac/);
+  });
+
+  it('WLAN am Mac aus', async () => {
+    const { lines } = await run(io({ wifiPower: async () => false }));
+    expect(lines.join('\n')).toMatch(/WLAN am Mac.*ausgeschaltet/);
+  });
+
+  it('Gerät ohne Schlüssel: die drei Schritte zum Neukoppeln', async () => {
+    const { lines } = await run(io({ pairedDeviceIds: async () => ['dev-1', 'dev-2'] }));
+    const text = lines.join('\n');
+    expect(text).toMatch(/ohne Tunnel-Schlüssel/);
+    expect(text).toMatch(/1\. Web-App am Mac/);
+    expect(text).toMatch(/2\. iPad: Mac/);
+    expect(text).toMatch(/3\. Zu Hause/);
+  });
+
+  it('wartet begrenzt auf die erste Zustandsdatei und prüft dann trotzdem', async () => {
+    const { lines, elapsed } = await run(io({ readState: () => ({ kind: 'missing' }) }));
+    expect(elapsed).toBeGreaterThanOrEqual(12_000);
+    expect(lines.join('\n')).toMatch(/Zustandsdatei fehlt/);
+  });
+
+  it('wartet, bis die Dienste nicht mehr starten', async () => {
+    let reads = 0;
+    const starting = goodState({
+      listeners: [{ service_name: 'sg-a', advertised_name: null, state: 'starting', handshakes_failed: 0 }],
+    });
+    const { lines, elapsed } = await run(
+      io({
+        readState: () => ({ kind: 'ok', state: ++reads < 4 ? starting : goodState(), ageMs: 1000 }),
+      }),
+    );
+    expect(elapsed).toBeGreaterThan(0);
+    expect(elapsed).toBeLessThan(12_000);
+    expect(lines.join('\n')).toMatch(/bereit/);
+  });
+
+  it('bricht still ab, wenn sg beendet wird, und schweigt bei SG_TUNNEL=0 oder Linux', async () => {
+    expect((await run(io(), { isStopping: () => true })).lines).toEqual([]);
+    const off = resolveConfig({ SG_DATA_DIR: '/data', SG_TUNNEL: '0' }, '/home/u', '/repo');
+    const lines: string[] = [];
+    await checkTunnelAfterStart(off, io(), {
+      ...clock(),
+      isStopping: () => false,
+      log: (l) => lines.push(l),
+    });
+    expect(lines).toEqual([]);
+    expect((await run(io({ platform: 'linux' }))).lines).toEqual([]);
+  });
+
+  it('wirft nie, auch wenn eine Prüfung abstürzt', async () => {
+    const { lines } = await run(
+      io({
+        hasSwift: async () => {
+          throw new Error('kaputt');
+        },
+      }),
+    );
+    expect(lines.join('\n')).toMatch(/Prüfung nicht möglich \(kaputt\)/);
+  });
+
+  it('formatStartCheck: nur Info ergibt keine Zeile', () => {
+    expect(formatStartCheck([{ name: 'Tunnel-Helfer · Hinweis', status: 'info', detail: 'aus' }])).toEqual(
+      [],
+    );
   });
 });

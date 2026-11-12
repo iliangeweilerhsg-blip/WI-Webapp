@@ -75,6 +75,8 @@ export interface TunnelDoctorIo {
   /** IDs der gekoppelten Geräte laut Core (`GET /devices`), `null` wenn der Core nicht antwortet */
   pairedDeviceIds: () => Promise<string[] | null>;
   firewall: () => Promise<FirewallInfo>;
+  /** Ist das WLAN am Mac eingeschaltet? `null`: nicht feststellbar (z. B. Mac ohne WLAN-Karte, Ethernet) */
+  wifiPower: () => Promise<boolean | null>;
 }
 
 const NAME = 'Tunnel-Helfer';
@@ -211,7 +213,92 @@ export async function runTunnelChecks(cfg: SgConfig, io: TunnelDoctorIo): Promis
   // Firewall
   results.push(await checkFirewall(io));
 
+  // WLAN am Mac
+  results.push(await checkWifi(io));
+
   return results;
+}
+
+async function checkWifi(io: TunnelDoctorIo): Promise<CheckResult> {
+  const part = 'WLAN am Mac';
+  const power = await io.wifiPower();
+  if (power === null) return info(part, 'Zustand des WLAN am Mac nicht feststellbar');
+  if (power) return ok(part, 'eingeschaltet');
+  return fail(
+    part,
+    'Das WLAN am Mac ist ausgeschaltet',
+    'WLAN am Mac einschalten (Menüleiste oder Systemeinstellungen → WLAN). Auch die Direktverbindung braucht es: Ohne WLAN am Mac findet das iPad den Mac nicht, ein Netz ist aber nicht nötig.',
+  );
+}
+
+// ---------------------------------------------------------------- Prüfung nach `sg start`
+
+export interface StartCheckDeps {
+  sleep: (ms: number) => Promise<void>;
+  now: () => number;
+  /** `true`, sobald `sg` beendet wird: dann bricht die Prüfung still ab */
+  isStopping: () => boolean;
+  log: (line: string) => void;
+  /** Höchstens so lange auf die erste Zustandsdatei des Helfers warten (Standard: 12 s) */
+  waitMs?: number;
+}
+
+/** Die drei Schritte zum Neukoppeln (UX-302, UX-304), so wie `IPAD.md` sie beschreibt */
+export const RECOUPLE_STEPS = [
+  '  1. Web-App am Mac: Einstellungen → Geräte → das iPad entfernen.',
+  '  2. iPad: Mac ● antippen → Neu koppeln.',
+  '  3. Zu Hause im Heimnetz den QR-Code vom Mac scannen (Details: docs/anleitungen/IPAD.md).',
+];
+
+/** Hat der Helfer schon eine aktuelle Zustandsdatei geschrieben und sind die Dienste nicht mehr beim Starten? */
+function helperSettled(io: TunnelDoctorIo): boolean {
+  const read = io.readState();
+  if (read.kind !== 'ok' || read.ageMs > TUNNEL_STATE_MAX_AGE_MS) return false;
+  const state = parseTunnelState(read.state);
+  return state !== null && !state.listeners.some((l) => l.state === 'starting');
+}
+
+/**
+ * Prüfung kurz nach dem Start (UX-302): wartet begrenzt auf die erste Zustandsdatei des Helfers, führt dann einmal
+ * dieselben Prüfungen aus wie `sg doctor` (`runTunnelChecks`) und druckt eine Zeile bei Erfolg, sonst nur die
+ * Fehlerzeilen samt Abhilfe. Scheitert nie und wirft nie: der Start bleibt davon unberührt.
+ */
+export async function checkTunnelAfterStart(
+  cfg: SgConfig,
+  io: TunnelDoctorIo,
+  deps: StartCheckDeps,
+): Promise<void> {
+  try {
+    if (!cfg.tunnel || io.platform !== 'darwin') return;
+    const deadline = deps.now() + (deps.waitMs ?? 12_000);
+    while (!helperSettled(io) && deps.now() < deadline) {
+      if (deps.isStopping() || !io.helperRunning()) break;
+      await deps.sleep(500);
+    }
+    if (deps.isStopping()) return;
+    const results = await runTunnelChecks(cfg, io);
+    for (const line of formatStartCheck(results)) deps.log(line);
+  } catch (e) {
+    deps.log(
+      `Direktverbindung: Prüfung nicht möglich (${(e as Error).message}). "pnpm sg doctor" prüft in einem zweiten Terminal.`,
+    );
+  }
+}
+
+/** Zeilen für die Ausgabe von `sg start`: eine Zeile bei Erfolg, sonst die Fehler mit Abhilfe */
+export function formatStartCheck(results: CheckResult[]): string[] {
+  const fails = results.filter((r) => r.status === 'fail');
+  if (fails.length === 0) {
+    if (results.length === 1 && results[0]?.status === 'info') return [];
+    return ['Direktverbindung vom iPad: bereit (Details: "pnpm sg doctor").'];
+  }
+  const lines = ['Direktverbindung vom iPad: noch nicht bereit.'];
+  for (const r of fails) {
+    lines.push(`  ✗ ${r.name.replace(`${NAME} · `, '')}: ${r.detail}`);
+    if (r.hint) lines.push(`    → ${r.hint}`);
+    if (r.name.endsWith('Geräte ohne Schlüssel')) lines.push(...RECOUPLE_STEPS.map((l) => `    ${l.trim()}`));
+  }
+  return lines;
 }
 
 function checkState(io: TunnelDoctorIo): CheckResult[] {
@@ -397,6 +484,27 @@ async function checkFirewall(io: TunnelDoctorIo): Promise<CheckResult> {
 
 const SOCKETFILTERFW = '/usr/libexec/ApplicationFirewall/socketfilterfw';
 
+const NETWORKSETUP = '/usr/sbin/networksetup';
+
+/** WLAN-Gerät aus `networksetup -listallhardwareports` („Hardware Port: Wi-Fi“, darunter „Device: en0“) */
+export function parseWifiDevice(output: string): string | null {
+  const lines = output.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    if (/^Hardware Port:\s*(Wi-?Fi|AirPort)\s*$/i.test(lines[i] ?? '')) {
+      const m = /^Device:\s*(en\d{1,3})\s*$/.exec(lines[i + 1] ?? '');
+      return m?.[1] ?? null;
+    }
+  }
+  return null;
+}
+
+/** Auswertung von `networksetup -getairportpower <gerät>` („Wi-Fi Power (en0): On“ bzw. „Off“) */
+export function parseWifiPower(output: string): boolean | null {
+  if (/:\s*on\b/i.test(output)) return true;
+  if (/:\s*off\b/i.test(output)) return false;
+  return null;
+}
+
 /** Auswertung der Ausgabe von `socketfilterfw --getglobalstate` („Firewall is enabled. (State = 1)“ o. Ä.). */
 export function parseFirewallEnabled(output: string): boolean | null {
   const text = output.toLowerCase();
@@ -535,6 +643,15 @@ export function realTunnelDoctorIo(cfg: SgConfig, sys: System): TunnelDoctorIo {
       if (enabled !== true || !hasTunnelBinary(cfg)) return { enabled, blocked: null };
       const blocked = await sys.run(SOCKETFILTERFW, ['--getappblocked', tunnelBinary(cfg)]);
       return { enabled, blocked: blocked.ok ? parseFirewallBlocked(blocked.stdout + blocked.stderr) : null };
+    },
+    wifiPower: async () => {
+      // Feste Argumente, kein Shell. Erst das WLAN-Gerät (en0, en1 …) suchen, dann dessen Strom abfragen.
+      const ports = await sys.run(NETWORKSETUP, ['-listallhardwareports']);
+      if (!ports.ok) return null;
+      const device = parseWifiDevice(ports.stdout);
+      if (device === null) return null;
+      const power = await sys.run(NETWORKSETUP, ['-getairportpower', device]);
+      return power.ok ? parseWifiPower(power.stdout + power.stderr) : null;
     },
   };
 }

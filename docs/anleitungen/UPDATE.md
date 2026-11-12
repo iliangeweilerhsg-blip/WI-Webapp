@@ -48,7 +48,22 @@ git diff --stat HEAD@{1} -- apps/ipad apps/mac-tunnel/Sources/TunnelShared packa
 
 Meldet die iPad-App „Der Mac spricht ein anderes Protokoll. App aktualisieren.“, ist sie älter als der Mac. Spiele sie dann ebenfalls neu auf.
 
-**Einmalig beim Update auf die Direktverbindung (UX-12):** Danach zeigt das iPad „Bitte einmal neu koppeln“. Das ist erwartet. Was du tust: [IPAD.md](IPAD.md), Abschnitt „Nach dem Update: einmal neu koppeln“.
+## Einmalig beim Update auf die Direktverbindung (UX-12)
+
+Danach zeigt das iPad „Bitte einmal neu koppeln“. Das ist erwartet. Hier steht die vollständige Liste, [IPAD.md](IPAD.md) und der Issue #188 verweisen darauf. Du brauchst nur **ein** Terminal. Das Neukoppeln geht nur zu Hause im WLAN, mach es also nicht erst in der Uni.
+
+1. **Starten:** `pnpm sg stop`, dann `pnpm sg start`. Beim ersten Mal baut `sg` den Tunnel-Helfer `sg-tunnel` (etwa eine Minute, braucht Xcode oder `xcode-select --install`). Fragt macOS, ob „sg-tunnel“ eingehende Verbindungen annehmen darf: **Erlauben**.
+2. **Auf die Zeile zur Direktverbindung achten:** Wenige Sekunden nach „Studien-Gehirn läuft“ prüft `sg start` selbst, ob das iPad durchkommt. Steht dort „Direktverbindung vom iPad: bereit“, weiter mit Schritt 3. Sonst nennt `sg start` unter „noch nicht bereit“, was fehlt, und was hilft:
+   - **Firewall:** Systemeinstellungen → Netzwerk → Firewall → Optionen: „sg-tunnel“ auf „Eingehende Verbindungen erlauben“, dann `pnpm sg stop` und `pnpm sg start`.
+   - **WLAN am Mac aus:** WLAN einschalten. Ein Netz brauchst du nicht, aber die Direktverbindung braucht das WLAN.
+   - **Gerät ohne Schlüssel:** Das ist dein altes iPad, das ändert Schritt 3 bis 5.
+
+   Das ist dieselbe Prüfung wie `pnpm sg doctor` (zusätzlich zeigt `sg doctor` alle Zeilen). Was bei einem ✗ hilft: [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md), Abschnitt 5.
+3. **Alten Eintrag entfernen:** In der Web-App am Mac unter **Einstellungen → Geräte** den Eintrag des iPads entfernen.
+4. **Neu koppeln:** Am iPad **Mac ●** antippen, dann **Neu koppeln**. Am Mac die Kopplung starten und den QR-Code mit dem iPad scannen ([IPAD.md](IPAD.md), Abschnitt „Koppeln“).
+5. **Fertig, wenn** **Mac ●** grün ist. In den Verbindungsdetails steht „Verbunden über das WLAN“ oder „Direkt verbunden, ohne WLAN-Netz“.
+
+Dieselben Schritte gelten, wenn nach einer Wiederherstellung (`pnpm sg restore`) alle Geräte entkoppelt sind ([BACKUP-WIEDERHERSTELLEN.md](BACKUP-WIEDERHERSTELLEN.md)).
 
 ## Wenn etwas schiefgeht
 

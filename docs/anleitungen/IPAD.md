@@ -92,13 +92,7 @@ Seit der Direktverbindung (UX-12) spricht das iPad nur noch über einen gesicher
 
 **Was du siehst:** Oben rechts steht bei **Mac ●** „Bitte einmal neu koppeln“, dazu eine ruhige Karte auf dem Startbildschirm. Es geht dann nichts raus, dein Token und deine Notizen bleiben auf dem iPad. Die Warteschlange gleicht sich nach dem Koppeln ab.
 
-**Was du tust (etwa fünf Minuten, zu Hause im WLAN):**
-
-1. **Am Mac den Helfer starten:** `pnpm sg stop`, dann `pnpm sg start`. Beim ersten Mal baut `sg` den Tunnel-Helfer `sg-tunnel` (etwa eine Minute, braucht Xcode oder `xcode-select --install`). Fragt macOS, ob „sg-tunnel“ eingehende Verbindungen annehmen darf: **Erlauben**.
-2. **Prüfen:** In einem zweiten Terminal `pnpm sg doctor`. Die Zeilen „Tunnel-Helfer ·“ dürfen kein ✗ zeigen, außer „Geräte ohne Schlüssel“ (das ist dein altes iPad, das ändert Schritt 3). Was bei einem ✗ hilft: [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md), Abschnitt 5.
-3. **Alten Eintrag entfernen:** In der Web-App am Mac unter **Einstellungen → Geräte** den Eintrag des iPads entfernen.
-4. **Neu koppeln:** Am iPad **Mac ●** antippen, dann **Neu koppeln**. Am Mac die Kopplung starten (Schritt 8) und den QR-Code mit dem iPad scannen.
-5. **Fertig, wenn** **Mac ●** grün ist. In den Verbindungsdetails steht dann „Verbunden über das WLAN“.
+**Was du tust (etwa fünf Minuten, zu Hause im WLAN):** Die nummerierte Liste steht an einer Stelle: [UPDATE.md](UPDATE.md), Abschnitt „Einmalig beim Update auf die Direktverbindung (UX-12)“. Kurz: `pnpm sg stop` und `pnpm sg start` (die Zeile „Direktverbindung vom iPad“ zeigt, ob etwas fehlt), den alten Eintrag unter Einstellungen → Geräte entfernen, am iPad **Mac ●** → **Neu koppeln**, QR-Code scannen. **Fertig, wenn** **Mac ●** grün ist.
 
 **Meldet das iPad beim Koppeln „Mac ohne Direktverbindung“,** hat der Mac keinen Schlüssel geschickt. Dann läuft am Mac eine alte Version oder `SG_TUNNEL=0`. Das iPad speichert so eine Kopplung nicht, denn mit ihr käme es nie zum Mac. Am Mac aktualisieren ([UPDATE.md](UPDATE.md)), ohne `SG_TUNNEL=0` starten, den eben entstandenen Eintrag unter Einstellungen → Geräte entfernen und noch einmal koppeln.
 
