@@ -61,8 +61,12 @@ final class TunnelDeviceListener {
 
     var isFailed: Bool { state == "failed" }
 
-    /// Port des Listeners, sobald er bereit ist (Tests)
-    var port: UInt16? { listener?.port?.rawValue }
+    /// Port des Listeners, sobald er bereit ist (Tests). Vor `.ready` meldet `NWListener.port` schon `0` (beliebig);
+    /// ein Client dorthin scheitert mit EADDRNOTAVAIL. Darum erst ab `.ready` und nie `0`.
+    var port: UInt16? {
+        guard state == "ready", let raw = listener?.port?.rawValue, raw != 0 else { return nil }
+        return raw
+    }
 
     var snapshot: TunnelListenerState {
         TunnelListenerState(
