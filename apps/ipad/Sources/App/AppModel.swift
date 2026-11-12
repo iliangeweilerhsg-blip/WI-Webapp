@@ -50,6 +50,8 @@ enum BadgeState: Equatable, Sendable {
         case .online: return "Mit dem Mac verbunden"
         case .macReachable: return "Mac erreichbar, Sync verbindet …"
         case .appOutdated: return ConnectionError.appOutdated.title
+        // Ruhig, ohne „nicht verbunden“: Das iPad ist nur gerade woanders (UX-12, PR 0)
+        case .disconnected(.otherNetwork): return ConnectionError.otherNetwork.title
         case .disconnected(let error): return "iPad nicht verbunden: \(error.title)"
         }
     }

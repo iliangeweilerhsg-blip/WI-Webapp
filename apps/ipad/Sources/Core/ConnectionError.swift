@@ -52,6 +52,9 @@ enum ConnectionError: Error, Equatable, Sendable {
     case network(code: Int)
     /// Der Mac antwortet, spricht aber ein anderes Protokoll (Sync-Code 4426): die App ist veraltet (UX-48)
     case appOutdated
+    /// Die gespeicherte Adresse des Macs liegt nicht im Netz des iPads (UX-12, PR 0): Eine Anfrage mit Token ginge in
+    /// ein fremdes Netz, darum geht gar nichts raus. Kein Fehler des Macs, kein Grund zum Neukoppeln.
+    case otherNetwork
 
     /// Zuordnung der Systemfehler von URLSession
     static func from(_ error: URLError) -> ConnectionError {
@@ -133,6 +136,7 @@ enum ConnectionError: Error, Equatable, Sendable {
         case .tokenStorageFailed: return "Schlüsselbund nicht verfügbar"
         case .network(let code): return "Netzwerkfehler (\(code))"
         case .appOutdated: return "App passt nicht mehr zum Mac"
+        case .otherNetwork: return "Mac nicht im selben Netz"
         }
     }
 
@@ -193,6 +197,8 @@ enum ConnectionError: Error, Equatable, Sendable {
             return "Prüfe das WLAN und versuch es noch einmal."
         case .appOutdated:
             return "Am Mac über Xcode neu aufspielen."
+        case .otherNetwork:
+            return "Deine Notizen bleiben auf dem iPad und gleichen sich später ab."
         }
     }
 }

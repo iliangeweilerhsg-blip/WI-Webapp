@@ -34,6 +34,26 @@ final class FakePairedMacStore: PairedMacStore {
     func clearPairedMac() { mac = nil }
 }
 
+/// Schnittstellen des iPads aus einer festen Liste statt aus `getifaddrs`
+struct FakeInterfaces: InterfaceListing {
+    let list: [InterfaceAddress]
+
+    init(_ list: [InterfaceAddress]) {
+        self.list = list
+    }
+
+    func activeIPv4() -> [InterfaceAddress] { list }
+
+    /// `address` mit Präfixlänge, zum Beispiel `("192.168.1.5", prefix: 24)`
+    static func address(_ text: String, prefix: Int) -> InterfaceAddress {
+        guard let value = TokenDestination.parseIPv4(text), (0...32).contains(prefix) else {
+            preconditionFailure("Ungültige Testadresse \(text)/\(prefix)")
+        }
+        let mask: UInt32 = prefix == 0 ? 0 : UInt32.max << UInt32(32 - prefix)
+        return InterfaceAddress(address: value, netmask: mask)
+    }
+}
+
 /// Antworten ohne Netz. Jede Anfrage wird gemerkt.
 @MainActor
 final class FakeTransport: HTTPTransport {
@@ -156,8 +176,16 @@ enum Fixtures {
 
     static let pairedMac = PairedMac(endpoint: endpoint, deviceID: deviceID, deviceName: "iPad Test")
 
+    /// Das iPad hängt im selben Netz wie `endpoint` (192.0.2.77/24): Anfragen mit Token sind erlaubt
+    static let sameNetwork = FakeInterfaces([FakeInterfaces.address("192.0.2.77", prefix: 24)])
+
+    /// Das iPad hängt in einem anderen Netz (198.51.100.5/24, Dokumentationsbereich): Anfragen mit Token sind gesperrt
+    static let otherNetwork = FakeInterfaces([FakeInterfaces.address("198.51.100.5", prefix: 24)])
+
     @MainActor
-    static func client(_ transport: FakeTransport) -> CoreClient {
-        CoreClient(transport: transport, maxRetries: 2, retryDelay: .zero)
+    static func client(_ transport: FakeTransport, interfaces: any InterfaceListing = Fixtures.sameNetwork)
+        -> CoreClient
+    {
+        CoreClient(transport: transport, maxRetries: 2, retryDelay: .zero, interfaces: interfaces)
     }
 }
