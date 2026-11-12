@@ -1009,7 +1009,12 @@ export function installFakeCore(
           from = 'concepts.extract';
         }
         // `summary.write` allein; alle anderen Schritte ziehen die folgenden nach
-        for (const step of steps.slice(steps.indexOf(from))) found.processing[step] = 'wartet';
+        // Sessions mit nur den drei alten Schritten behalten sie; die Konzept-Schritte legt erst `from_step` an
+        const fromConcepts = steps.indexOf(from) >= 3;
+        for (const step of steps.slice(steps.indexOf(from))) {
+          if (steps.indexOf(step) < 3 || fromConcepts || step in found.processing)
+            found.processing[step] = 'wartet';
+        }
         found.updated_at = new Date().toISOString();
         return json({ session: structuredClone(found), jobs: [] }, 202);
       }
