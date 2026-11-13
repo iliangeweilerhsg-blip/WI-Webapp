@@ -18,6 +18,7 @@ import {
 import { pageThumbUrl } from '../../lib/material.ts';
 import { moduleHref } from '../../lib/nav.ts';
 import { formatMmSs } from '../../lib/search.ts';
+import { ConceptCards } from '../learn/ConceptCards.tsx';
 import { EmptyState } from '../Placeholder.tsx';
 
 const action =
@@ -202,6 +203,9 @@ export function ConceptView({ id }: { id: string }) {
           </ul>
         )}
       </section>
+
+      {/* Karten des Konzepts (VERTRAEGE §21.10); ein Vorschlag hat noch keine */}
+      {concept.status === 'aktiv' ? <ConceptCards conceptId={concept.id} /> : null}
 
       <section aria-labelledby="concept-relations" className="mt-8">
         <h2 id="concept-relations" className="text-lg font-medium">

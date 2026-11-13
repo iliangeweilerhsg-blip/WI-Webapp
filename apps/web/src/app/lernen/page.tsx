@@ -1,12 +1,9 @@
 import type { Metadata } from 'next';
-import { PlaceholderScreen } from '../../components/Placeholder.tsx';
+import { LearnView } from '../../components/learn/LearnView.tsx';
 
 export const metadata: Metadata = { title: 'Lernen' };
 
+/** Lernen (VERTRAEGE §21.10): Heute wiederholen mit Zeitbudget und FSRS */
 export default function LernenPage() {
-  return (
-    <PlaceholderScreen title="Lernen" phase={3}>
-      Hier startest du Wiederholungen und Lerneinheiten, jeweils mit Dauer.
-    </PlaceholderScreen>
-  );
+  return <LearnView />;
 }
