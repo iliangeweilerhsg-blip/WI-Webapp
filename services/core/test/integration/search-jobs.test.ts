@@ -216,6 +216,7 @@ describe('search.index in ensurePipelineJobs (§19.5)', () => {
       'concepts.extract',
       'concepts.resolve',
       'summary.write',
+      'cards.generate',
     ]);
     const [search] = await searchJobs();
     expect(search).toMatchObject({
@@ -228,6 +229,7 @@ describe('search.index in ensurePipelineJobs (§19.5)', () => {
     const [row] = await handle.db.select().from(session).where(eq(session.id, sessionId));
     expect(Object.keys(row!.processing ?? {}).sort()).toEqual([
       'align.log',
+      'cards.generate',
       'concepts.extract',
       'concepts.resolve',
       'summary.write',
@@ -274,6 +276,7 @@ describe('search.index in ensurePipelineJobs (§19.5)', () => {
       'concepts.extract',
       'concepts.resolve',
       'summary.write',
+      'cards.generate',
     ]);
     expect(await searchJobs()).toEqual([]);
   });

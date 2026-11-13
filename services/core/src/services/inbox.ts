@@ -11,6 +11,7 @@
 import { and, asc, eq, inArray, isNull, ne, or, sql, type SQL } from 'drizzle-orm';
 import type {
   AutoAcceptMode,
+  Card,
   Concept,
   ConceptEdit,
   ConceptRelationKind,
@@ -45,6 +46,7 @@ import {
   type ItemRow,
 } from './concept-graph.ts';
 import { loadApiConcept, loadSessionRefs } from './concepts.ts';
+import { acceptCardBatch, cardBatchVisible, undoCardBatch } from './inbox-cards.ts';
 import { isoTs, requireSession } from './sessions.ts';
 
 const notFound = () => new HttpError(404, 'inbox_item_not_found', 'Der Eintrag wurde nicht gefunden.');
@@ -152,7 +154,7 @@ const sessionAlive = sql`(${inboxItem.sessionId} IS NULL OR EXISTS (
 
 /** `GET /inbox`: Sortierung `(created_at DESC, priority, id)`, Einträge eines Laufs stehen nach `priority` */
 export async function listInbox(db: DbOrTx, options: ListInboxOptions): Promise<InboxItemList> {
-  const conditions: (SQL | undefined)[] = [notDeleted(inboxItem), sessionAlive];
+  const conditions: (SQL | undefined)[] = [notDeleted(inboxItem), sessionAlive, cardBatchVisible];
   if (options.status === 'offen') conditions.push(eq(inboxItem.status, 'offen'));
   else if (options.status === 'entschieden') conditions.push(ne(inboxItem.status, 'offen'));
   if (options.sessionId) conditions.push(eq(inboxItem.sessionId, options.sessionId));
@@ -203,6 +205,8 @@ export async function getInboxOverview(db: DbOrTx): Promise<InboxOverview> {
         eq(inboxItem.status, 'offen'),
         notDeleted(inboxItem),
         or(isNull(inboxItem.sessionId), isNull(session.deletedAt)),
+        // §21.7: Kartenvorschläge zählen erst, wenn ihr Konzept aktiv ist
+        cardBatchVisible,
       ),
     )
     .groupBy(inboxItem.sessionId, session.startedAt, session.createdAt)
@@ -262,6 +266,7 @@ async function withRetry<T>(run: () => Promise<T>): Promise<T> {
 }
 
 type AcceptPlan =
+  | { type: 'cards' }
   | { type: 'new'; edit: ConceptEdit | undefined }
   | { type: 'merge'; targetId: string }
   | { type: 'relation'; relationKind: ConceptRelationKind | undefined };
@@ -275,6 +280,14 @@ export function planAccept(
     new HttpError(400, 'inbox_action_invalid', `Das Feld ${field} passt nicht zu diesem Vorschlag.`, {
       field,
     });
+  if (item.kind === 'card_batch') {
+    // A4 (§21.7): nur `cards`. Die Schlüssel der Karten prüft `acceptCardBatch` gegen die Nutzlast
+    for (const field of ['edit', 'merge_into', 'as_new', 'relation_kind'] as const) {
+      if (body[field] !== undefined) throw invalid(field);
+    }
+    return { type: 'cards' };
+  }
+  if (body.cards !== undefined) throw invalid('cards');
   if (item.kind === 'relation') {
     for (const field of ['edit', 'merge_into', 'as_new'] as const) {
       if (body[field] !== undefined) throw invalid(field);
@@ -307,6 +320,8 @@ interface OpOutcome {
   conceptId: string | null;
   /** Einträge, die diese Entscheidung mitentschieden bzw. mit geöffnet hat */
   alsoChanged: string[];
+  /** Nur Kartenvorschlag nach `accept`: die angelegten Karten */
+  cards?: Card[];
 }
 
 /** Folge-Einträge, die der Eintrag `itemId` mitentschieden hat (nicht die nur umgehängten aus A2) */
@@ -361,7 +376,8 @@ async function applyOp(
     }
     await lockGraph();
     const alsoChanged = await triggeredItems(tx, decision.cascade_item_ids, item.id);
-    if (decision.action === 'abgelehnt') await undoReject(tx, item, decision);
+    if (decision.action === 'karten_angenommen') await undoCardBatch(tx, item, decision);
+    else if (decision.action === 'abgelehnt') await undoReject(tx, item, decision);
     else if (decision.action === 'angenommen_neu') await undoAcceptNew(tx, item, decision);
     else if (decision.action === 'zusammengefuehrt') await undoMerge(tx, item, decision);
     else await undoRelation(tx, item, decision);
@@ -376,21 +392,33 @@ async function applyOp(
   }
 
   let decision: InboxDecision;
+  let status: InboxStatus = 'angenommen';
   let conceptId = item.conceptId;
+  let cards: Card[] | undefined;
   if (op === 'reject') {
     decision = await rejectItem(tx, item);
-    await markItem(tx, item.id, 'abgelehnt', decision);
+    status = 'abgelehnt';
   } else {
     const plan = planAccept(item, body);
     await lockGraph();
-    if (plan.type === 'new') decision = await acceptNew(tx, item, plan.edit, state.autoAccept);
+    if (plan.type === 'cards') {
+      const accepted = await acceptCardBatch(tx, item, body, new Date());
+      decision = accepted.decision;
+      // Alle Karten abgewählt: wie „Ablehnen“ (§21.7), ohne Antwortkarten
+      if (accepted.rejected) status = 'abgelehnt';
+      else cards = accepted.cards;
+    } else if (plan.type === 'new') decision = await acceptNew(tx, item, plan.edit, state.autoAccept);
     else if (plan.type === 'merge') {
       decision = await acceptMerge(tx, item, plan.targetId);
       conceptId = plan.targetId;
     } else decision = await confirmRelation(tx, item, plan.relationKind);
-    await markItem(tx, item.id, 'angenommen', decision);
   }
-  return { conceptId, alsoChanged: await triggeredItems(tx, decision.cascade_item_ids, item.id) };
+  await markItem(tx, item.id, status, decision);
+  return {
+    conceptId,
+    alsoChanged: await triggeredItems(tx, decision.cascade_item_ids, item.id),
+    ...(cards ? { cards } : {}),
+  };
 }
 
 /** Schritte 1 und 2: Session des Eintrags `FOR SHARE`, dann der Eintrag `FOR UPDATE` */
@@ -441,7 +469,7 @@ export async function decideInboxItem(
       const [view] = await toApiItems(tx, fresh ? [fresh] : []);
       if (!view) throw notFound();
       const result: Concept | null = outcome.conceptId ? await loadApiConcept(tx, outcome.conceptId) : null;
-      return { item: view, concept: result };
+      return { item: view, concept: result, ...(outcome.cards ? { cards: outcome.cards } : {}) };
     }),
   );
 }
@@ -450,13 +478,25 @@ export async function decideInboxItem(
 
 const CONCEPT_KINDS: readonly string[] = ['concept_new', 'concept_merge'];
 
-/** Reihenfolge: erst Konzepte nach `priority`, dann Beziehungen. `reopen` läuft in umgekehrter Reihenfolge */
+/**
+ * Reihenfolge: erst Konzepte nach `priority`, dann Beziehungen, zuletzt Kartenvorschläge (§21.7: Sie werden erst mit
+ * dem Konzept sichtbar). `reopen` läuft in umgekehrter Reihenfolge
+ */
 function bulkOrder(rows: ItemRow[], op: InboxOp): ItemRow[] {
-  const rank = (row: ItemRow) => (CONCEPT_KINDS.includes(row.kind) ? 0 : 1);
+  const rank = (row: ItemRow) => (CONCEPT_KINDS.includes(row.kind) ? 0 : row.kind === 'card_batch' ? 2 : 1);
   const sorted = [...rows].sort(
     (a, b) => rank(a) - rank(b) || a.priority - b.priority || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
   );
   return op === 'reopen' ? sorted.reverse() : sorted;
+}
+
+/** Zählt der Eintrag nach den Regeln aus §21.7 zur Inbox (Kartenvorschläge erst mit aktivem Konzept)? */
+async function isVisible(tx: Tx, id: string): Promise<boolean> {
+  const [row] = await tx
+    .select({ id: inboxItem.id })
+    .from(inboxItem)
+    .where(and(eq(inboxItem.id, id), cardBatchVisible));
+  return !!row;
 }
 
 /**
@@ -525,6 +565,10 @@ export async function bulkInbox(db: Db, request: InboxBulkRequest): Promise<Inbo
         // Frühere Entscheidungen dieser Aktion können den Eintrag geändert haben
         const [item] = await tx.select().from(inboxItem).where(eq(inboxItem.id, id));
         if (!item) continue;
+        // §21.7: Mit `session_id` fasst die Massenaktion nur Kartenvorschläge an, die in diesem Moment sichtbar sind
+        // (das Konzept kann eben erst angenommen worden sein). Andere bleiben still liegen, kein Eintrag in `skipped`
+        if (request.session_id !== undefined && item.kind === 'card_batch' && !(await isVisible(tx, id)))
+          continue;
         const trigger = item.decision?.triggered_by;
         if (op === 'reopen' && trigger && lockedIds.has(trigger)) {
           // Öffnet sich mit seinem Auslöser, der ebenfalls dran ist

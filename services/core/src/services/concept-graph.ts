@@ -18,6 +18,7 @@ import type {
 } from '@sg/shared';
 import type { Tx } from '../db/client.ts';
 import {
+  card,
   concept,
   conceptModule,
   conceptRelation,
@@ -503,6 +504,15 @@ export async function undoAcceptNew(tx: Tx, item: ItemRow, decision: InboxDecisi
     .limit(1);
   if (foreignItem) throw reopenConflict('Vorschläge anderer Vorlesungen hängen an diesem Konzept.');
 
+  // §21.7: Mit nicht gelöschten Karten würde das Konzept zum Vorschlag, und das endgültige Löschen der Session risse die
+  // Karten mit. Die Karten dürfen auch nicht aus einem Kartenvorschlag stammen (der wird zuerst rückgängig gemacht).
+  const [liveCard] = await tx
+    .select({ id: card.id })
+    .from(card)
+    .where(and(eq(card.conceptId, conceptId), notDeleted(card)))
+    .limit(1);
+  if (liveCard) throw reopenConflict('Das Konzept hat inzwischen Karten.', { reason: 'cards' });
+
   const previous = decision.previous ?? {};
   const textChanged = 'name' in previous || 'aliases' in previous || 'one_liner' in previous;
   await tx
@@ -712,6 +722,21 @@ export async function undoMerge(tx: Tx, item: ItemRow, decision: InboxDecision):
     throw reopenConflict('Die Zusammenführung besteht nicht mehr.');
   }
 
+  // §21.7: Ein angenommener Kartenvorschlag der Hülle hat Karten am Ziel angelegt, die nicht am Vorschlag hängen dürfen
+  const [acceptedBatch] = await tx
+    .select({ id: inboxItem.id })
+    .from(inboxItem)
+    .where(
+      and(
+        eq(inboxItem.kind, 'card_batch'),
+        eq(inboxItem.cardConceptId, pId),
+        eq(inboxItem.status, 'angenommen'),
+      ),
+    )
+    .limit(1);
+  if (acceptedBatch)
+    throw reopenConflict('Zu diesem Vorschlag wurden schon Karten angenommen.', { reason: 'cards' });
+
   // Erst prüfen, dann schreiben: bei einem Konflikt ändert sich nichts
   const movedBack: { row: ItemRow; relation: RelationRow }[] = [];
   const reopened: ItemRow[] = [];
@@ -916,15 +941,49 @@ export async function undoRelation(tx: Tx, item: ItemRow, decision: InboxDecisio
 
 // --- Ablehnen ----------------------------------------------------------------------------------------------
 
+/** Offene Kartenvorschläge (`card_batch`) zu diesem Konzept, alle Sessions, nach `priority` (§21.7) */
+async function openCardBatchItems(tx: Tx, conceptId: string): Promise<{ itemId: string }[]> {
+  return tx
+    .select({ itemId: inboxItem.id })
+    .from(inboxItem)
+    .where(
+      and(
+        eq(inboxItem.kind, 'card_batch'),
+        eq(inboxItem.cardConceptId, conceptId),
+        eq(inboxItem.status, 'offen'),
+        notDeleted(inboxItem),
+      ),
+    )
+    .orderBy(asc(inboxItem.priority), asc(inboxItem.id));
+}
+
+/** Entscheidung „abgelehnt“ eines Kartenvorschlags: alle Karten `verworfen` (Ablehnen, Verfall mit dem Konzept, alles abgewählt) */
+export function rejectedBatchDecision(
+  item: Pick<ItemRow, 'payload'>,
+  triggeredBy: string | null,
+): InboxDecision {
+  const payload = item.payload as InboxPayload;
+  if (payload.kind !== 'card_batch') throw new Error('Eintrag ist kein Kartenvorschlag');
+  return {
+    ...emptyDecision('abgelehnt'),
+    triggered_by: triggeredBy,
+    cards: payload.cards.map((c) => ({ key: c.key, outcome: 'verworfen' as const, card_id: null })),
+  };
+}
+
 /**
- * Eintrag ablehnen. Bei einem Konzept-Vorschlag werden die offenen Beziehungs-Einträge mit ihm als Endpunkt mit
- * abgelehnt. Vorschlag und Beziehungen bleiben liegen (§20.6). Ist einer davon gerade gesperrt, rollt das Ablehnen
- * zurück und läuft neu (`require`): sonst bliebe er offen, obwohl sein Endpunkt abgelehnt ist.
+ * Eintrag ablehnen. Bei einem Konzept-Vorschlag werden die offenen Beziehungs-Einträge mit ihm als Endpunkt und
+ * seine offenen Kartenvorschläge (§21.7, alle Karten `verworfen`) mit abgelehnt. Vorschlag, Beziehungen und
+ * Kartenvorschläge bleiben liegen (§20.6). Ist einer davon gerade gesperrt, rollt das Ablehnen zurück und läuft neu
+ * (`require`): sonst bliebe er offen, obwohl sein Endpunkt abgelehnt ist.
  */
 export async function rejectItem(tx: Tx, item: ItemRow): Promise<InboxDecision> {
   const cascade: string[] = [];
   if (item.conceptId) {
-    const candidates = await openRelationItems(tx, item.conceptId);
+    const candidates = [
+      ...(await openRelationItems(tx, item.conceptId)),
+      ...(await openCardBatchItems(tx, item.conceptId)),
+    ];
     const locked = await lockItems(
       tx,
       candidates.map((row) => row.itemId),
@@ -933,9 +992,15 @@ export async function rejectItem(tx: Tx, item: ItemRow): Promise<InboxDecision> 
     for (const { itemId } of candidates) {
       const row = locked.get(itemId);
       if (!row || row.status !== 'offen') continue;
-      await markItem(tx, row.id, 'abgelehnt', { ...emptyDecision('abgelehnt'), triggered_by: item.id });
+      const decision =
+        row.kind === 'card_batch'
+          ? rejectedBatchDecision(row, item.id)
+          : { ...emptyDecision('abgelehnt'), triggered_by: item.id };
+      await markItem(tx, row.id, 'abgelehnt', decision);
       cascade.push(row.id);
     }
+  } else if (item.kind === 'card_batch') {
+    return rejectedBatchDecision(item, null);
   }
   return { ...emptyDecision('abgelehnt'), cascade_item_ids: cascade };
 }

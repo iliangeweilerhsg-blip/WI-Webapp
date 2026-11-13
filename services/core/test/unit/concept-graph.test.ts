@@ -148,6 +148,13 @@ describe('planAccept: welche Felder zu welcher Art passen (§20.6)', () => {
     });
   });
 
+  it('card_batch (A4, §21.7): mit und ohne cards', () => {
+    expect(planAccept(item('card_batch'), {})).toEqual({ type: 'cards' });
+    expect(planAccept(item('card_batch'), { cards: [{ key: 'k1', accept: false }] })).toEqual({
+      type: 'cards',
+    });
+  });
+
   it.each([
     ['relation', { edit: {} }],
     ['relation', { merge_into: T }],
@@ -159,6 +166,15 @@ describe('planAccept: welche Felder zu welcher Art passen (§20.6)', () => {
     ['concept_merge', { relation_kind: 'verwandt' as const }],
     ['concept_merge', { as_new: true, merge_into: X }],
     ['concept_merge', { edit: { name: 'A' } }],
+    // §21.7: `cards` gibt es nur beim Kartenvorschlag, und dort nichts von den Konzept-Feldern
+    ['concept_new', { cards: [{ key: 'k1', accept: true }] }],
+    ['concept_merge', { cards: [{ key: 'k1', accept: true }] }],
+    ['relation', { cards: [{ key: 'k1', accept: true }] }],
+    ['card_batch', { edit: { name: 'A' } }],
+    ['card_batch', { merge_into: T }],
+    ['card_batch', { as_new: true }],
+    ['card_batch', { as_new: false }],
+    ['card_batch', { relation_kind: 'verwandt' as const }],
   ])('%s mit %j → inbox_action_invalid', (kind, body) => {
     expect(code(() => planAccept(item(kind, T), body))).toBe('inbox_action_invalid');
   });

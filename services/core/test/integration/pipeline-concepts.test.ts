@@ -28,6 +28,8 @@ let moduleId = '';
 /** Minuten nach 2026-11-04 09:00 UTC */
 const T = (min: number): Date => new Date(Date.UTC(2026, 10, 4, 9, 0) + min * 60_000);
 const CONCEPT_STEPS = ['concepts.extract', 'concepts.resolve', 'summary.write'] as const;
+/** Die Schritte ab `concepts.extract` samt Karten (§21.3): `cards.generate` hängt hinter `concepts.resolve` */
+const CHAIN_STEPS = [...CONCEPT_STEPS, 'cards.generate'] as const;
 
 beforeAll(async () => {
   app = await startTestApp();
@@ -155,6 +157,7 @@ describe('Konzept-Kette beim Stopp (§20.2)', () => {
     const [extract] = await jobsOf(id, 'concepts.extract');
     const [resolve] = await jobsOf(id, 'concepts.resolve');
     const [summary] = await jobsOf(id, 'summary.write');
+    const [cards] = await jobsOf(id, 'cards.generate');
     expect(extract).toMatchObject({
       state: 'wartet',
       priority: 8,
@@ -179,6 +182,15 @@ describe('Konzept-Kette beim Stopp (§20.2)', () => {
       payload: { session_id: id },
       dependsOn: [resolve!.id],
     });
+    // §21.3: neben `summary.write`, hinter `concepts.resolve`, niedrigste Priorität der Kette (auch unter `search.index`, 5)
+    expect(cards).toMatchObject({
+      state: 'wartet',
+      priority: 4,
+      maxAttempts: 3,
+      sessionId: id,
+      dependsOn: [resolve!.id],
+    });
+    expect(cards!.payload).toEqual({ session_id: id });
     // unter Transkription (20) und Ausrichtung (10)
     expect(transcribe!.priority).toBeGreaterThan(align!.priority);
     expect(align!.priority).toBeGreaterThan(extract!.priority);
@@ -186,9 +198,10 @@ describe('Konzept-Kette beim Stopp (§20.2)', () => {
       'concepts.extract': 'wartet',
       'concepts.resolve': 'wartet',
       'summary.write': 'wartet',
+      'cards.generate': 'wartet',
     });
     // genau je ein Job, kein `force`
-    for (const type of CONCEPT_STEPS) expect(await jobsOf(id, type)).toHaveLength(1);
+    for (const type of CHAIN_STEPS) expect(await jobsOf(id, type)).toHaveLength(1);
     expect(extract!.payload).toEqual({ session_id: id });
     expect(summary!.payload).toEqual({ session_id: id });
   });
@@ -209,12 +222,13 @@ describe('ensurePipelineJobs: from_step der Konzept-Schritte (§20.2)', () => {
   it('[F1] align.log: align.log und danach die drei; concepts.extract hängt nur am align.log dieses Aufrufs', async () => {
     const id = await mkSession();
     const jobs = await ensure(id, 'align.log');
-    expect(jobs.map((j) => j.type)).toEqual(['align.log', ...CONCEPT_STEPS]);
-    const [align, extract, resolve, summary] = jobs;
+    expect(jobs.map((j) => j.type)).toEqual(['align.log', ...CHAIN_STEPS]);
+    const [align, extract, resolve, summary, cards] = jobs;
     expect(extract!.dependsOn).toEqual([align!.id]);
     expect(resolve!.dependsOn).toEqual([extract!.id]);
     expect(resolve!.payload).toEqual({ session_id: id, extract_job_id: extract!.id });
     expect(summary!.dependsOn).toEqual([resolve!.id]);
+    expect(cards!.dependsOn).toEqual([resolve!.id]);
     expect(await jobsOf(id, 'transcribe')).toEqual([]);
   });
 
@@ -224,10 +238,11 @@ describe('ensurePipelineJobs: from_step der Konzept-Schritte (§20.2)', () => {
     await mkJob(id, 'transcribe', 'fehler');
     await mkJob(id, 'align.log', 'fertig');
     const jobs = await ensure(id, 'concepts.extract');
-    expect(jobs.map((j) => j.type)).toEqual([...CONCEPT_STEPS]);
+    expect(jobs.map((j) => j.type)).toEqual([...CHAIN_STEPS]);
     expect(jobs[0]!.dependsOn).toEqual([]);
     expect(jobs[1]!.dependsOn).toEqual([jobs[0]!.id]);
     expect(jobs[2]!.dependsOn).toEqual([jobs[1]!.id]);
+    expect(jobs[3]!.dependsOn).toEqual([jobs[1]!.id]);
     expect(await jobsOf(id, 'transcribe')).toHaveLength(1);
     expect(await jobsOf(id, 'align.log')).toHaveLength(1);
 
@@ -236,11 +251,13 @@ describe('ensurePipelineJobs: from_step der Konzept-Schritte (§20.2)', () => {
     const runE = await mkJob(id2, 'concepts.extract', 'laeuft');
     const runR = await mkJob(id2, 'concepts.resolve', 'laeuft', { payload: { extract_job_id: runE } });
     const runS = await mkJob(id2, 'summary.write', 'laeuft');
-    const [e, r, s] = await ensure(id2, 'concepts.extract');
+    const runC = await mkJob(id2, 'cards.generate', 'laeuft');
+    const [e, r, s, c] = await ensure(id2, 'concepts.extract');
     expect(e).toMatchObject({ state: 'wartet', dependsOn: [runE] });
     expect(r).toMatchObject({ state: 'wartet', dependsOn: [e!.id, runR] });
     expect(r!.payload).toEqual({ session_id: id2, extract_job_id: e!.id });
     expect(s).toMatchObject({ state: 'wartet', dependsOn: [r!.id, runS] });
+    expect(c).toMatchObject({ state: 'wartet', dependsOn: [r!.id, runC] });
   });
 
   it('[F3] concepts.resolve: setzt auf dem neuesten fertigen concepts.extract auf, legt keinen neuen an, danach summary.write', async () => {
@@ -250,30 +267,36 @@ describe('ensurePipelineJobs: from_step der Konzept-Schritte (§20.2)', () => {
     await mkJob(id, 'concepts.extract', 'fehler'); // neuer, aber gescheitert: zählt nicht
     await mkJob(id, 'concepts.extract', 'fertig', { deleted: true }); // gelöscht: zählt nicht
     const jobs = await ensure(id, 'concepts.resolve');
-    expect(jobs.map((j) => j.type)).toEqual(['concepts.resolve', 'summary.write']);
+    expect(jobs.map((j) => j.type)).toEqual(['concepts.resolve', 'summary.write', 'cards.generate']);
     expect(jobs[0]!.payload).toEqual({ session_id: id, extract_job_id: newest });
     expect(jobs[0]!.dependsOn).toEqual([newest]);
     expect(jobs[1]!.dependsOn).toEqual([jobs[0]!.id]);
+    expect(jobs[2]!.dependsOn).toEqual([jobs[0]!.id]);
     expect(await jobsOf(id, 'concepts.extract')).toHaveLength(4);
     // processing: concepts.extract wurde nicht berührt
-    expect(await processingOf(id)).toEqual({ 'concepts.resolve': 'wartet', 'summary.write': 'wartet' });
+    expect(await processingOf(id)).toEqual({
+      'concepts.resolve': 'wartet',
+      'summary.write': 'wartet',
+      'cards.generate': 'wartet',
+    });
   });
 
   it('[F4] concepts.resolve ohne brauchbaren concepts.extract gilt als from_step concepts.extract', async () => {
     const none = await mkSession();
-    expect((await ensure(none, 'concepts.resolve')).map((j) => j.type)).toEqual([...CONCEPT_STEPS]);
+    expect((await ensure(none, 'concepts.resolve')).map((j) => j.type)).toEqual([...CHAIN_STEPS]);
 
     const failedOnly = await mkSession();
     const failed = await mkJob(failedOnly, 'concepts.extract', 'fehler');
     await mkJob(failedOnly, 'concepts.extract', 'abgebrochen');
     const jobs = await ensure(failedOnly, 'concepts.resolve', true);
-    expect(jobs.map((j) => j.type)).toEqual([...CONCEPT_STEPS]);
+    expect(jobs.map((j) => j.type)).toEqual([...CHAIN_STEPS]);
     expect(jobs[0]!.id).not.toBe(failed);
     expect(jobs[1]!.payload).toMatchObject({ extract_job_id: jobs[0]!.id });
     // `force` wirkt dann auf concepts.extract (den tatsächlichen ersten Schritt), nicht auf die Folgeschritte
     expect(jobs[0]!.payload).toEqual({ session_id: failedOnly, force: true });
     expect(jobs[1]!.payload).toEqual({ session_id: failedOnly, extract_job_id: jobs[0]!.id });
     expect(jobs[2]!.payload).toEqual({ session_id: failedOnly });
+    expect(jobs[3]!.payload).toEqual({ session_id: failedOnly });
   });
 
   it('[F5] concepts.resolve bei offener Kette: der wartende Job bleibt am neueren, noch offenen concepts.extract', async () => {
@@ -284,11 +307,12 @@ describe('ensurePipelineJobs: from_step der Konzept-Schritte (§20.2)', () => {
       payload: { extract_job_id: open },
       dependsOn: [open],
     });
-    const [resolve, summary] = await ensure(id, 'concepts.resolve');
+    const [resolve, summary, cards] = await ensure(id, 'concepts.resolve');
     // sonst hinge er vom laufenden Job ab und läse das Ergebnis des älteren
     expect(resolve).toMatchObject({ id: waiting, dependsOn: [open] });
     expect(resolve!.payload).toEqual({ session_id: id, extract_job_id: open });
     expect(summary!.dependsOn).toEqual([waiting]);
+    expect(cards!.dependsOn).toEqual([waiting]);
     expect(await jobsOf(id, 'concepts.extract')).toHaveLength(2);
   });
 
@@ -305,6 +329,40 @@ describe('ensurePipelineJobs: from_step der Konzept-Schritte (§20.2)', () => {
     const running = await mkJob(id2, 'summary.write', 'laeuft');
     const [second] = await ensure(id2, 'summary.write');
     expect(second!.dependsOn).toEqual([running]);
+  });
+
+  it('[F8] cards.generate: nur cards.generate, ohne depends_on außer einem laufenden Job desselben Typs', async () => {
+    const id = await mkSession();
+    await mkJob(id, 'concepts.extract', 'fertig');
+    await mkJob(id, 'concepts.resolve', 'laeuft');
+    await mkJob(id, 'summary.write', 'laeuft');
+    const jobs = await ensure(id, 'cards.generate');
+    expect(jobs.map((j) => j.type)).toEqual(['cards.generate']);
+    expect(jobs[0]).toMatchObject({
+      state: 'wartet',
+      priority: 4,
+      dependsOn: [],
+      sessionId: id,
+      maxAttempts: 3,
+    });
+    expect(jobs[0]!.payload).toEqual({ session_id: id });
+    expect(await jobsOf(id)).toHaveLength(4);
+    expect(await processingOf(id)).toEqual({ 'cards.generate': 'wartet' });
+
+    const id2 = await mkSession();
+    const running = await mkJob(id2, 'cards.generate', 'laeuft');
+    const [second] = await ensure(id2, 'cards.generate');
+    expect(second!.dependsOn).toEqual([running]);
+    expect(await processingOf(id2)).toEqual({ 'cards.generate': 'laeuft' });
+  });
+
+  it('[F9] summary.write legt keinen Karten-Job an, concepts.extract schon', async () => {
+    const a = await mkSession();
+    await ensure(a, 'summary.write');
+    expect(await jobsOf(a, 'cards.generate')).toEqual([]);
+    const b = await mkSession();
+    await ensure(b, 'concepts.extract');
+    expect(await jobsOf(b, 'cards.generate')).toHaveLength(1);
   });
 
   it('[F7] search.index bleibt unverändert: die Konzept-Schritte legen keinen an', async () => {
@@ -326,7 +384,7 @@ describe('ensurePipelineJobs: Wiederverwenden und force (§20.2)', () => {
     const third = await ensure(id, 'align.log');
     expect(second.map((j) => j.id)).toEqual(first.map((j) => j.id));
     expect(third.slice(1).map((j) => j.id)).toEqual(first.map((j) => j.id));
-    for (const type of CONCEPT_STEPS) expect(await jobsOf(id, type)).toHaveLength(1);
+    for (const type of CHAIN_STEPS) expect(await jobsOf(id, type)).toHaveLength(1);
     // der wiederverwendete concepts.extract hängt jetzt zusätzlich am neuen align.log
     expect((await jobById(first[0]!.id)).dependsOn).toEqual([third[0]!.id]);
   });
@@ -362,6 +420,7 @@ describe('ensurePipelineJobs: Wiederverwenden und force (§20.2)', () => {
       false,
       false,
       false,
+      false,
     ]);
 
     // ab concepts.extract: nur concepts.extract
@@ -370,6 +429,7 @@ describe('ensurePipelineJobs: Wiederverwenden und force (§20.2)', () => {
     expect(forced[0]!.payload).toEqual({ session_id: b, force: true });
     expect(forced[1]!.payload).toEqual({ session_id: b, extract_job_id: forced[0]!.id });
     expect(forced[2]!.payload).toEqual({ session_id: b });
+    expect(forced[3]!.payload).toEqual({ session_id: b });
     // alt ODER neu: bleibt true, auch wenn der nächste Aufruf ohne force kommt
     const again = await ensure(b, 'concepts.extract', false);
     expect(again[0]!.payload).toEqual({ session_id: b, force: true });
@@ -380,6 +440,12 @@ describe('ensurePipelineJobs: Wiederverwenden und force (§20.2)', () => {
     const fromResolve = await ensure(c, 'concepts.resolve', true);
     expect(fromResolve[0]!.payload).toEqual({ session_id: c, extract_job_id: done, force: true });
     expect(fromResolve[1]!.payload).toEqual({ session_id: c });
+    expect(fromResolve[2]!.payload).toEqual({ session_id: c });
+
+    // ab cards.generate: force wirkt hier, und bei einem wartenden Job wird es alt ODER neu
+    const f = await mkSession();
+    expect((await ensure(f, 'cards.generate', true))[0]!.payload).toEqual({ session_id: f, force: true });
+    expect((await ensure(f, 'cards.generate', false))[0]!.payload).toEqual({ session_id: f, force: true });
 
     // ab summary.write
     const d = await mkSession();
@@ -402,6 +468,7 @@ describe('ensurePipelineJobs: Wiederverwenden und force (§20.2)', () => {
       'concepts.extract': 'fertig',
       'concepts.resolve': 'wartet',
       'summary.write': 'wartet',
+      'cards.generate': 'wartet',
     });
 
     const running = await mkSession();
@@ -411,6 +478,7 @@ describe('ensurePipelineJobs: Wiederverwenden und force (§20.2)', () => {
       'concepts.extract': 'laeuft', // nie pauschal wartet
       'concepts.resolve': 'wartet',
       'summary.write': 'wartet',
+      'cards.generate': 'wartet',
     });
   });
 });
@@ -436,6 +504,17 @@ describe('JOB_PAYLOAD_SCHEMAS (§20.2)', () => {
       enqueue('concepts.resolve', { session_id: id, extract_job_id: uuidv7() }),
     ).resolves.toBeTruthy();
   });
+
+  it('[J2] kennt cards.generate (§21.3) und lehnt ungültige Payloads vor dem INSERT ab', async () => {
+    expect(JOB_PAYLOAD_SCHEMAS['cards.generate']).toBeDefined();
+    const id = await mkSession();
+    const enqueue = (payload: Record<string, unknown>) =>
+      handle.db.transaction((tx) => enqueueJob(tx, { type: 'cards.generate', payload, sessionId: id }));
+    await expect(enqueue({})).rejects.toThrow(/Ungültiges Payload/);
+    await expect(enqueue({ session_id: id, force: 'ja' })).rejects.toThrow(/Ungültiges Payload/);
+    await expect(enqueue({ session_id: id, extra: 1 })).rejects.toThrow(/Ungültiges Payload/);
+    await expect(enqueue({ session_id: id, force: true })).resolves.toBeTruthy();
+  });
 });
 
 // --- POST /sessions/{id}/reprocess ------------------------------------------------------------------
@@ -450,10 +529,11 @@ describe('POST /sessions/{id}/reprocess mit den Konzept-Schritten (§20.2, §18.
       expect(await jobsOf(id)).toEqual([]);
     }
     const expected: Record<string, string[]> = {
-      'align.log': ['align.log', ...CONCEPT_STEPS],
-      'concepts.extract': [...CONCEPT_STEPS],
-      'concepts.resolve': [...CONCEPT_STEPS], // kein fertiger concepts.extract: wie concepts.extract
+      'align.log': ['align.log', ...CHAIN_STEPS],
+      'concepts.extract': [...CHAIN_STEPS],
+      'concepts.resolve': [...CHAIN_STEPS], // kein fertiger concepts.extract: wie concepts.extract
       'summary.write': ['summary.write'],
+      'cards.generate': ['cards.generate'], // §21.3: kein Audio nötig
     };
     for (const [from_step, types] of Object.entries(expected)) {
       const id = await mkSession();
@@ -474,19 +554,22 @@ describe('POST /sessions/{id}/reprocess mit den Konzept-Schritten (§20.2, §18.
     expect(first.statusCode).toBe(202);
     expect(events.at(-1)).toMatchObject({
       name: 'session.updated',
-      data: { id, processing: { 'concepts.extract': 'wartet', 'summary.write': 'wartet' } },
+      data: {
+        id,
+        processing: { 'concepts.extract': 'wartet', 'summary.write': 'wartet', 'cards.generate': 'wartet' },
+      },
     });
     const second = await post(id, { from_step: 'concepts.extract' });
     expect(second.json().jobs.map((j: { id: string }) => j.id)).toEqual(
       first.json().jobs.map((j: { id: string }) => j.id),
     );
-    expect(await jobsOf(id)).toHaveLength(3);
+    expect(await jobsOf(id)).toHaveLength(4);
     const key = { 'idempotency-key': uuidv7() };
     const k1 = await post(id, { from_step: 'summary.write', force: true }, key);
     const k2 = await post(id, { from_step: 'summary.write', force: true }, key);
     expect(k2.headers['idempotent-replay']).toBe('true');
     expect(k2.json()).toEqual(k1.json());
-    expect(await jobsOf(id)).toHaveLength(3);
+    expect(await jobsOf(id)).toHaveLength(4);
   });
 
   it('[R3] 404, 409 session_not_ended und 400 gelten auch für die neuen Schritte', async () => {
@@ -520,6 +603,7 @@ describe('POST /sessions/{id}/reprocess mit den Konzept-Schritten (§20.2, §18.
       'concepts.extract': 'wartet',
       'concepts.resolve': 'wartet',
       'summary.write': 'wartet',
+      'cards.generate': 'wartet',
     });
   });
 });

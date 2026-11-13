@@ -44,12 +44,13 @@ let moduleId = '';
 /** Minuten nach 2026-11-04 09:00 UTC */
 const T = (min: number): Date => new Date(Date.UTC(2026, 10, 4, 9, 0) + min * 60_000);
 const HEX = 'a'.repeat(64);
-/** Schritte aus §20.2 (T2-22a): Sie hängen an jeder Kette ab `transcribe` bzw. `align.log`. Details in pipeline-concepts.test.ts */
-const CONCEPT_STEPS = ['concepts.extract', 'concepts.resolve', 'summary.write'] as const;
+/** Schritte aus §20.2 (T2-22a) und §21.3 (Karten): Sie hängen an jeder Kette ab `transcribe` bzw. `align.log`. Details in pipeline-concepts.test.ts */
+const CONCEPT_STEPS = ['concepts.extract', 'concepts.resolve', 'summary.write', 'cards.generate'] as const;
 const CONCEPTS_WAITING = {
   'concepts.extract': 'wartet',
   'concepts.resolve': 'wartet',
   'summary.write': 'wartet',
+  'cards.generate': 'wartet',
 } as const;
 
 beforeAll(async () => {
@@ -398,7 +399,7 @@ describe('ensurePipelineJobs', () => {
     const res = await post(id, { from_step: 'transcribe' });
     expect(res.statusCode).toBe(202);
     const byId = new Map((await jobsOf(id)).map((j) => [j.id, j]));
-    expect(byId.size).toBe(5 + CONCEPT_STEPS.length); // nichts neu angelegt (die drei Konzept-Jobs stammen von oben)
+    expect(byId.size).toBe(5 + CONCEPT_STEPS.length); // nichts neu angelegt (die Konzept-Jobs stammen von oben)
     expect(byId.get(waitingT)).toMatchObject({ state: 'wartet', dependsOn: [runningT] });
     expect(byId.get(waitingA)).toMatchObject({ state: 'wartet', dependsOn: [runningA] });
   });
