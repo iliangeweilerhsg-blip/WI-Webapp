@@ -14,8 +14,10 @@ import type {
   Module,
   Recording,
   Notebook,
+  Page,
   PairingCode,
   PairingRequest,
+  Photo,
   SearchDegraded,
   SearchHitSlide,
   SearchHitTranscript,
@@ -32,6 +34,7 @@ import type {
   SlideDeck,
   SlideEvent,
   SlideSegment,
+  Stroke,
   TranscriptInfo,
   TranscriptLine,
 } from '@sg/shared';
@@ -66,6 +69,65 @@ export function makeNotebook(overrides: Partial<Notebook> = {}): Notebook {
     title: 'Notizbuch',
     kind: 'frei',
     page_count: 0,
+    ...overrides,
+  };
+}
+
+export function makeNotePage(overrides: Partial<Page> = {}): Page {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000c1',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    notebook_id: '0190f6a2-0000-7000-8000-0000000000b1',
+    session_id: '0190f6a2-0000-7000-8000-0000000000e1',
+    index: 1,
+    template: 'liniert',
+    background_slide_id: null,
+    attached_slide_id: null,
+    width_pt: 595,
+    height_pt: 842,
+    version: 1,
+    has_pkdrawing: false,
+    ...overrides,
+  };
+}
+
+export function makeMarker(overrides: Partial<Marker> = {}): Marker {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000c8',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    session_id: '0190f6a2-0000-7000-8000-0000000000e1',
+    kind: 'frage',
+    t_ms: 0,
+    page_id: null,
+    position: null,
+    source: 'mac',
+    note: null,
+    resolved_at: null,
+    ...overrides,
+  };
+}
+
+export function makePhoto(overrides: Partial<Photo> = {}): Photo {
+  return {
+    id: '0190f6a2-0000-7000-8000-0000000000c9',
+    user_id: USER,
+    created_at: NOW,
+    updated_at: NOW,
+    deleted_at: null,
+    session_id: '0190f6a2-0000-7000-8000-0000000000e1',
+    t_ms: 0,
+    page_id: null,
+    mime: 'image/jpeg',
+    sha256: 'a'.repeat(64),
+    size_bytes: 1000,
+    has_file: true,
+    ocr_text: null,
     ...overrides,
   };
 }
@@ -483,6 +545,11 @@ export interface FakeCore {
   notebooks: Notebook[];
   /** Termine für GET /calendar/events/{id} (VERTRAEGE §7.3) */
   events: CalendarEvent[];
+  /** Notizseiten für GET /notebooks/{id}/pages (VERTRAEGE §7.4), Striche je Seiten-ID für GET /pages/{id}/strokes */
+  pages: Page[];
+  strokes: Record<string, Stroke[]>;
+  /** Fotos im Snapshot der Session (GET /sessions/{id}/snapshot) */
+  photos: Photo[];
   /** GET /notebooks scheitert mit 500, solange true */
   failNotebooks: boolean;
   /** GET /sessions/{id}/notebook scheitert mit 500, solange true */
@@ -708,6 +775,9 @@ export function installFakeCore(
     slides: {},
     sessions: structuredClone(initial.sessions ?? []),
     notebooks: [],
+    pages: [],
+    strokes: {},
+    photos: [],
     events: [],
     failNotebooks: false,
     failSessionNotebook: false,
@@ -1050,7 +1120,7 @@ export function installFakeCore(
           session: structuredClone(found),
           slide_events: structuredClone(core.slideEvents.filter((e) => e.session_id === found.id)),
           markers: structuredClone(core.markers.filter((m) => m.session_id === found.id && !m.deleted_at)),
-          photos: [],
+          photos: structuredClone(core.photos.filter((p) => p.session_id === found.id && !p.deleted_at)),
           recordings: [],
           stream_seq: core.streamSeq,
           stream_op_id: core.streamOpId,
@@ -1156,6 +1226,31 @@ export function installFakeCore(
               !core.modules.some((m) => m.id === n.module_id && m.deleted_at),
           ),
           next_cursor: null,
+        });
+      }
+
+      // GET /notebooks/{id}/pages und GET /pages/{id}/strokes (§7.4)
+      const notebookPages = /^\/notebooks\/([^/]+)\/pages$/.exec(path);
+      if (notebookPages && method === 'GET') {
+        if (core.failNotebooks) return json({ error: { code: 'internal', message: 'x' } }, 500);
+        return json({
+          notebook_id: notebookPages[1],
+          stream_seq: 0,
+          stream_op_id: null,
+          items: structuredClone(
+            core.pages
+              .filter((p) => p.notebook_id === notebookPages[1] && !p.deleted_at)
+              .sort((a, b) => a.index - b.index),
+          ),
+        });
+      }
+      const pageStrokes = /^\/pages\/([^/]+)\/strokes$/.exec(path);
+      if (pageStrokes && method === 'GET') {
+        return json({
+          page_id: pageStrokes[1],
+          stream_seq: 0,
+          stream_op_id: null,
+          strokes: structuredClone(core.strokes[pageStrokes[1] ?? ''] ?? []),
         });
       }
 

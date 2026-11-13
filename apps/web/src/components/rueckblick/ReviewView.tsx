@@ -3,7 +3,8 @@
 // Rückblick einer Vorlesung (T2-03, F-NAC-02, 07 §3.4): links die Folie, daneben, was dazu gesagt wurde. Ein Klick
 // auf einen Abschnitt spielt die Aufnahme ab dieser Stelle. Dazu der Verarbeitungsstand als ruhige Schrittliste.
 // Route `/rueckblick?id=<session_id>` (Static Export: Query-Parameter, VERTRAEGE §5). Zustände: VERTRAEGE §18.9.
-// Noch nicht Teil dieses Schnitts: Notizseiten, Marker und Fotos (rechte Spalte aus 07 §3.4).
+// Rechte Spalte (07 §3.4, A1): Notizseiten, Marker und Fotos zur Folie; ein Tipp auf einen Strich spielt ab `t_start_ms − 3 s`.
+// Noch nicht Teil dieses Schnitts: der Wiedergabe-Modus der Notizen (F-NAC-04).
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
@@ -12,6 +13,7 @@ import { ApiRequestError, friendlyMessage } from '../../lib/api.ts';
 import { CONCEPT_STEPS, useSessionConcepts, useSessionSummary } from '../../lib/concepts.ts';
 import { AI_SETTINGS_HREF, sessionCostText, useAiStatus, useSessionCost } from '../../lib/costs.ts';
 import { useDeckDetail } from '../../lib/material.ts';
+import { useSessionPages, useSessionSnapshot } from '../../lib/review-notes.ts';
 import { moduleColorVar, useModules } from '../../lib/modules.ts';
 import { moduleHref } from '../../lib/nav.ts';
 import { isEditableTarget } from '../../lib/shortcuts.ts';
@@ -38,10 +40,12 @@ import { useSessionData } from '../dashboard/use-session.ts';
 import { EmptyState } from '../Placeholder.tsx';
 import { StepList } from '../processing/StepList.tsx';
 import { PlayerBar } from './PlayerBar.tsx';
+import { NotesColumn } from './NotesColumn.tsx';
 import { SessionConceptChips } from './SessionConceptChips.tsx';
 import { SlideColumn, type SlideItem } from './SlideColumn.tsx';
 import { SummaryPanel } from './SummaryPanel.tsx';
 import { gapsSummary, recordingGaps } from './gaps.ts';
+import { notesForSlide } from './notes.ts';
 import { TranscriptList, lineKey } from './TranscriptList.tsx';
 import { SKIP_MS, usePlayer } from './use-player.ts';
 
@@ -298,6 +302,41 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
   );
   const playLine = (line: TranscriptLine) => player.seek(line.start_ms, true);
 
+  // Notizseiten, Marker und Fotos (§18.9): Seiten und Snapshot einmal je Session, gefiltert auf die gewählte Folie
+  const pagesQuery = useSessionPages(session.module_id, session.id);
+  const snapshotQuery = useSessionSnapshot(session.id);
+  const notes = useMemo(
+    () =>
+      notesForSlide(
+        mapped ? selected : null,
+        {
+          pages: pagesQuery.data ?? [],
+          markers: snapshotQuery.data?.markers ?? [],
+          photos: snapshotQuery.data?.photos ?? [],
+        },
+        segments,
+      ),
+    [mapped, selected, pagesQuery.data, snapshotQuery.data, segments],
+  );
+  const notesError =
+    pagesQuery.isError || snapshotQuery.isError
+      ? friendlyMessage(pagesQuery.error ?? snapshotQuery.error)
+      : null;
+  const notesColumn = (
+    <NotesColumn
+      notes={notes}
+      startedAt={startedAt}
+      canPlay={hasRecordings}
+      onPlay={(t) => player.seek(t, true)}
+      loading={pagesQuery.isPending || snapshotQuery.isPending}
+      error={notesError}
+      onRetry={() => {
+        void pagesQuery.refetch();
+        void snapshotQuery.refetch();
+      }}
+    />
+  );
+
   // Tasten (07 §10): Leertaste Abspielen/Pause, J −15 s, L +15 s. Nicht in Eingabefeldern; ein Positionsregler zählt nicht
   // als Eingabefeld. Schaltflächen, Links und Auswahlfelder behalten ihre eigene Leertaste.
   const { toggle, skip } = player;
@@ -458,11 +497,12 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
             gaps={gaps}
           />
         </div>
+        <div className="mt-6">{notesColumn}</div>
       </div>
     );
   } else {
     content = (
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)] lg:gap-8">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,5fr)_minmax(0,4fr)] lg:gap-8 xl:grid-cols-[minmax(0,5fr)_minmax(0,4fr)_minmax(0,4fr)]">
         <div className="min-w-0 lg:sticky lg:top-0 lg:self-start">
           <SlideColumn
             deckId={deckId}
@@ -500,6 +540,7 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
             )}
           </div>
         </div>
+        <div className="min-w-0 lg:col-span-2 xl:col-span-1">{notesColumn}</div>
       </div>
     );
   }
@@ -507,7 +548,7 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 md:px-8">
-        <div className="mx-auto flex max-w-6xl flex-col gap-4">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4">
           {notices}
           {conceptsInColumn ? null : conceptChips}
           {content}
