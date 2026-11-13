@@ -144,7 +144,7 @@ export function NotesColumn({
   const empty = pages.length === 0 && markers.length === 0 && photos.length === 0;
   return (
     <div data-testid="review-notes" className="flex min-w-0 flex-col gap-4">
-      {error && empty ? (
+      {error ? (
         <p role="alert" className={muted}>
           {`Die Notizen sind gerade nicht erreichbar: ${error} `}
           <button type="button" onClick={onRetry} className="underline underline-offset-2 hover:text-text">

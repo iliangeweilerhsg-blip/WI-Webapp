@@ -27,13 +27,39 @@ export interface NotePageProps {
   onPlay: (tMs: number) => void;
 }
 
-export function NotePage({ page, startedAt, canPlay, onPlay }: NotePageProps) {
-  const [observe, inView] = useInView();
-  const strokes = usePageStrokes(page.id, inView);
+export function NotePage(props: NotePageProps) {
+  const { page } = props;
+  const [observe, inView] = useInView<HTMLElement>();
+  return (
+    <figure
+      ref={observe}
+      data-testid="note-page"
+      data-in-view={inView ? 'true' : 'false'}
+      className="min-w-0"
+    >
+      {inView ? (
+        <VisiblePage {...props} />
+      ) : (
+        <>
+          <figcaption className="mb-1 text-sm text-text-muted">{`Seite ${page.index}`}</figcaption>
+          <div className="relative w-full" style={{ aspectRatio: `${page.width_pt} / ${page.height_pt}` }} />
+        </>
+      )}
+    </figure>
+  );
+}
+
+/**
+ * Inhalt einer Seite im Bild. Eigene Komponente, damit die Strichabfrage beim Verlassen des Bilds abgemeldet wird:
+ * Eine abgeschaltete, aber noch eingehängte Abfrage hielte Striche und dekodierte Punkte im Speicher; ohne Beobachter
+ * räumt `gcTime` sie nach 60 s ab (#79).
+ */
+function VisiblePage({ page, startedAt, canPlay, onPlay }: NotePageProps) {
+  const strokes = usePageStrokes(page.id, true);
   const boxRef = useRef<HTMLDivElement>(null);
   const [pickedId, setPickedId] = useState<string | null>(null);
 
-  const list = inView ? (strokes.data?.strokes ?? NO_STROKES) : NO_STROKES;
+  const list = strokes.data?.strokes ?? NO_STROKES;
   const index = useMemo(() => buildHitIndex(list), [list]);
   const picked = index.timed.find((e) => e.id === pickedId) ?? null;
   const pickedAt = picked ? index.timed.indexOf(picked) : -1;
@@ -69,13 +95,13 @@ export function NotePage({ page, startedAt, canPlay, onPlay }: NotePageProps) {
     }
   };
 
-  const loaded = inView && strokes.data !== undefined;
+  const loaded = strokes.data !== undefined;
   const untimed = loaded && list.length > 0 && index.timed.length === 0;
   const label = `Notizseite ${page.index}`;
   const rect = picked?.rect;
 
   return (
-    <figure data-testid="note-page" data-in-view={inView ? 'true' : 'false'} className="min-w-0">
+    <>
       <figcaption className="mb-1 flex items-baseline justify-between gap-2 text-sm text-text-muted">
         <span>{`Seite ${page.index}`}</span>
         {picked ? (
@@ -85,26 +111,21 @@ export function NotePage({ page, startedAt, canPlay, onPlay }: NotePageProps) {
         ) : null}
       </figcaption>
       <div
-        ref={(el) => {
-          boxRef.current = el;
-          observe(el);
-        }}
+        ref={boxRef}
         className="relative w-full"
         style={{ aspectRatio: `${page.width_pt} / ${page.height_pt}` }}
       >
-        {inView ? (
-          <InkPage
-            strokes={list}
-            page={{
-              width_pt: page.width_pt,
-              height_pt: page.height_pt,
-              template: page.template,
-              background_slide_id: page.background_slide_id,
-            }}
-            aria-label={label}
-          />
-        ) : null}
-        {inView && canPlay && index.timed.length > 0 ? (
+        <InkPage
+          strokes={list}
+          page={{
+            width_pt: page.width_pt,
+            height_pt: page.height_pt,
+            template: page.template,
+            background_slide_id: page.background_slide_id,
+          }}
+          aria-label={label}
+        />
+        {canPlay && index.timed.length > 0 ? (
           <div
             role="group"
             tabIndex={0}
@@ -129,7 +150,7 @@ export function NotePage({ page, startedAt, canPlay, onPlay }: NotePageProps) {
             ) : null}
           </div>
         ) : null}
-        {inView && strokes.isPending ? (
+        {strokes.isPending ? (
           <p role="status" className="absolute inset-x-0 top-2 text-center text-sm text-text-muted">
             Wird geladen …
           </p>
@@ -140,7 +161,7 @@ export function NotePage({ page, startedAt, canPlay, onPlay }: NotePageProps) {
           ? `Strich ${pickedAt + 1} von ${index.timed.length}, ${clockAt(startedAt, picked.t, true)}`
           : ''}
       </p>
-      {inView && strokes.isError ? (
+      {strokes.isError ? (
         <p role="alert" className="mt-1 text-sm text-text-muted">
           {`Die Seite ist gerade nicht erreichbar: ${friendlyMessage(strokes.error)} `}
           <button
@@ -155,6 +176,6 @@ export function NotePage({ page, startedAt, canPlay, onPlay }: NotePageProps) {
       {untimed ? (
         <p className="mt-1 text-sm text-text-muted">Diese Striche haben keine Zeit, daher kein Abspielen.</p>
       ) : null}
-    </figure>
+    </>
   );
 }

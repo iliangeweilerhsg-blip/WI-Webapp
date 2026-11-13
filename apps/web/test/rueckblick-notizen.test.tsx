@@ -444,7 +444,7 @@ describe('Rückblick: Leistung bei vielen Seiten und Strichen (#79)', () => {
     expect(document.querySelectorAll('canvas')).toHaveLength(0);
 
     // Zwei Seiten kommen ins Bild
-    const boxes = cards.map((c) => c.querySelector('div.relative') as HTMLElement);
+    const boxes = cards;
     const observerOf = (el: Element) => nowIO.instances.find((o) => o.els.has(el))!;
     act(() => {
       observerOf(boxes[0]!).fire(boxes[0]!, true);
