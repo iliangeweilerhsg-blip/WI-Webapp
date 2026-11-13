@@ -97,7 +97,7 @@ Einen Bereich **Einstellungen → Lernen** (Zeitbudget, neue Karten je Tag) **gi
 - **Rückgängig** erscheint 10 Sekunden lang nach dem Löschen einer Karte und nach Entscheidungen in der Inbox.
 - Gelöschte Karten liegen 30 Tage im Papierkorb (**Einstellungen → Daten und Papierkorb**, Abschnitt „Papierkorb“, Art „Karte“) und lassen sich dort mit **Wiederherstellen** zurückholen.
 - Eine Annahme in der Inbox lässt sich nicht mehr zurücknehmen, sobald eine ihrer Karten bewertet wurde. Dann bleibt nur, die Karte zu löschen.
-- Ein verworfener Kartenvorschlag lässt sich in der Inbox wieder öffnen.
+- Ein verworfener Kartenvorschlag lässt sich in der Inbox wieder öffnen. Wurde er mit seinem Konzept abgelehnt, öffnest du das Konzept wieder, dann kommt der Vorschlag mit zurück.
 
 ## 7. Was noch nicht geht
 
