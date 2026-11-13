@@ -82,6 +82,10 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # E2E-Test Inbox (#324): `e2e-inbox-worker.test.ts` startet den echten Worker (Fake-KI, Fake-Embedder, kein Netz)
+      # gegen dieselbe Datenbank wie den Core. Dafür die Worker-Umgebung einmal aufbauen; der Test ruft `uv run --locked`.
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --locked --project services/worker
       # Der Restore-Test ruft pg_dump/pg_restore lokal auf. Der Runner liefert einen neueren
       # Client als den Server (pg16); dessen Dump enthält SET transaction_timeout (erst ab pg17).
       # Darum den zum Server passenden Client aus dem PGDG-Repo installieren (infra/sg/src/pg.ts
