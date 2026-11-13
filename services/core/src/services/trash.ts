@@ -422,16 +422,28 @@ export async function softDelete(tx: Tx, kind: TrashKind, id: string): Promise<D
  * 409 `restore_conflict` mit `details: { constraint, conflicting_id }` (ein gleichwertiges Objekt ist inzwischen
  * aktiv, z. B. eine neue Session zum selben Termin). Bei einem Fehler bleibt nichts halb wiederhergestellt.
  */
-export async function restoreFromTrash(tx: Tx, id: string): Promise<TrashRestoreResult> {
-  const lookup = sql.join(
-    TRASH_KINDS.map(
-      (kind) =>
-        sql`SELECT ${kind}::text AS kind, deleted_at::text AS ts FROM ${sql.identifier(kind)}
+export async function restoreFromTrash(
+  tx: Tx,
+  id: string,
+  /**
+   * Art und Zeitstempel, falls der Aufrufer sie schon gelesen und danach seine Ströme gesperrt hat
+   * (`restoreWithOps`, #352): Dann arbeiten Ströme und Kaskade mit genau derselben Menge. Ohne Angabe liest die
+   * Funktion beide selbst.
+   */
+  known?: { kind: TrashKind; ts: string },
+): Promise<TrashRestoreResult> {
+  let found = known;
+  if (!found) {
+    const lookup = sql.join(
+      TRASH_KINDS.map(
+        (kind) =>
+          sql`SELECT ${kind}::text AS kind, deleted_at::text AS ts FROM ${sql.identifier(kind)}
             WHERE id = ${id} AND deleted_at IS NOT NULL`,
-    ),
-    sql` UNION ALL `,
-  );
-  const [found] = await tx.execute<{ kind: TrashKind; ts: string }>(lookup);
+      ),
+      sql` UNION ALL `,
+    );
+    [found] = await tx.execute<{ kind: TrashKind; ts: string }>(lookup);
+  }
   if (!found) throw new HttpError(404, 'trash_item_not_found', 'Dieses Objekt liegt nicht im Papierkorb.');
   const { kind, ts } = found;
 
@@ -439,8 +451,11 @@ export async function restoreFromTrash(tx: Tx, id: string): Promise<TrashRestore
   if (parentRef) {
     // Eine Karte kommt nur zu einem aktiven Konzept zurück (§21.8): gelöscht oder nicht mehr `aktiv` blockiert
     const inactive = parentRef.kind === 'concept' ? sql`p.status <> 'aktiv'` : sql`FALSE`;
-    // Konzept `FOR SHARE` (wie `createCard`, §21.7): Ein gleichzeitiges `reopen` von A1 wartet, bis die Karte wieder steht
-    const lock = parentRef.kind === 'concept' ? sql`FOR SHARE OF p` : sql``;
+    // Elternobjekt immer `FOR SHARE` (#352), vor der Wurzel: Ein gleichzeitiges `softDelete` des Elternteils wartet, bis
+    // das Kind wieder steht (oder der Restore sieht den Elternteil danach gelöscht: 409). Beim Konzept (§21.7) ist es
+    // dieselbe Sperre wie in `createCard`: Ein gleichzeitiges `reopen` von A1 wartet, bis die Karte wieder steht.
+    // Reihenfolge überall Elternteil → Wurzel → Kinder, auch in `softDelete` (Elternteil, dann dessen Kaskade).
+    const lock = sql`FOR SHARE OF p`;
     const [parent] = await tx.execute<{ id: string; deleted: boolean; inactive: boolean; title: string }>(
       sql`SELECT p.id, p.deleted_at IS NOT NULL AS deleted, ${inactive} AS inactive,
                  ${parentTitle(parentRef.kind)} AS title

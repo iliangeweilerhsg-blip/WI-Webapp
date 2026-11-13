@@ -894,6 +894,39 @@ describe('Papierkorb (§21.8)', () => {
     );
   }
 
+  it('Foliensatz wiederherstellen und sein Modul gleichzeitig löschen: kein aktives Kind unter gelöschtem Modul, kein 40P01 (#352)', async () => {
+    await seed();
+    expect((await call('DELETE', '/slide-decks/' + refId('d1'))).statusCode).toBe(204);
+    // Eine fremde Transaktion hält die Wurzel (den Foliensatz): Der Restore hat dann das Modul schon `FOR SHARE`
+    const gate = await app.handle.sql.reserve();
+    await gate`BEGIN`;
+    try {
+      await gate`SELECT id FROM slide_deck WHERE id = ${refId('d1')} FOR UPDATE`;
+      const restoring = call('POST', `/trash/${refId('d1')}/restore`);
+      await waitForBlocked(1);
+      // Das Löschen des Moduls muss auf die Elternsperre warten, statt dazwischenzufahren
+      const deleting = call('DELETE', '/modules/' + refId('m1'));
+      await waitForBlocked(2);
+      await gate`COMMIT`;
+      const [restored, deleted] = await Promise.all([restoring, deleting]);
+      expect(restored.statusCode, restored.body).toBe(200);
+      expect(deleted.statusCode, deleted.body).toBe(204);
+    } finally {
+      await gate`ROLLBACK`.catch(() => undefined);
+      gate.release();
+    }
+    // Das Modul nahm den wiederhergestellten Foliensatz mit in den Papierkorb
+    expect(
+      await app.handle.sql`SELECT d.id FROM slide_deck d JOIN module m ON m.id = d.module_id
+                           WHERE d.deleted_at IS NULL AND m.deleted_at IS NOT NULL`,
+    ).toHaveLength(0);
+    expect(
+      await app.handle.sql`SELECT 1 FROM slide s JOIN slide_deck d ON d.id = s.deck_id
+                           WHERE s.deleted_at IS NULL AND d.deleted_at IS NOT NULL`,
+    ).toHaveLength(0);
+    expect(await app.handle.sql`SELECT 1 FROM slide_deck WHERE deleted_at IS NOT NULL`).toHaveLength(1);
+  });
+
   it('Wiederherstellen und endgültiges Löschen derselben Karte verklemmen sich nicht (#348): erst Restore, dann Purge', async () => {
     await seed();
     const created = await create();

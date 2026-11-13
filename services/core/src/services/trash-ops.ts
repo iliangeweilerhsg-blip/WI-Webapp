@@ -284,7 +284,7 @@ export async function restoreWithOps(db: Db, id: string): Promise<TrashRestoreRe
       }
     }
     const affected = await lockAffected(tx, kind, id, { op: 'restore', ts });
-    const result = await restoreFromTrash(tx, id);
+    const result = await restoreFromTrash(tx, id, { kind, ts });
     if (kind === 'page') {
       for (const notebookId of affected.notebooks) {
         await appendServerOp(tx, notebookId, 'page.restore', { page_id: id });
@@ -646,7 +646,11 @@ export async function purgeTrashItems(
 ): Promise<PurgeResult> {
   if (roots.length === 0) return { byKind: {}, filesRemoved: 0, syncOpsRemoved: 0 };
   const outcome = await db.transaction(async (tx) => {
-    // 1. Teilbaum lesen, Ströme sperren, Teilbaum unter der Sperre erneut lesen
+    // 1. Teilbaum lesen, Ströme sperren, Teilbaum unter der Sperre erneut lesen. Jede Runde sperrt ihre neuen Ströme
+    //    sortiert, über Runden hinweg gibt es keine Gesamtordnung. Das ist harmlos (#352): Ein Teilbaum im Papierkorb
+    //    bekommt keine neuen Kinder (Anlegen unter gelöschtem Elternteil scheitert), Runde 2 findet praktisch nie
+    //    neue Ströme. Eine echte Gesamtsortierung ginge nur, indem man ohne Sperre liest und alles auf einmal sperrt,
+    //    was die Prüfung unter der Sperre (Runde 2) verlöre.
     const locked = new Set<string>();
     let tree = emptySubtree();
     for (let round = 0; round < 3; round += 1) {
