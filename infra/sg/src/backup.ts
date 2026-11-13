@@ -465,11 +465,14 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
           reader,
           owner,
           sums: sums[sub],
-          onDamagedLink: (path) =>
+          onDamagedLink: (path, reason) =>
             log(
-              `  WARNUNG: ${sub}/${path} ist im vorigen Stand ${previous} beschädigt (Prüfsumme weicht von der Datei im ` +
-                'Datenordner ab). Die Datei wird neu kopiert statt verlinkt. Der vorige Stand lässt sich an dieser Datei ' +
-                'nicht wiederherstellen.',
+              reason === 'unreadable'
+                ? `  WARNUNG: ${sub}/${path} ist im vorigen Stand ${previous} nicht lesbar. Die Datei wird neu kopiert statt ` +
+                    `verlinkt. Prüfen mit \`pnpm sg restore --test ${previous}\`.`
+                : `  WARNUNG: ${sub}/${path} unterscheidet sich vom vorigen Stand ${previous} trotz gleicher Größe und Zeit. ` +
+                    'Sie wird neu kopiert statt verlinkt. Ist die Quelle unverändert, ist der vorige Stand an dieser Datei ' +
+                    `beschädigt; prüfen mit \`pnpm sg restore --test ${previous}\`.`,
             ),
         });
         log(

@@ -178,10 +178,11 @@ export interface CopyTreeOptions {
   sums?: Map<string, string>;
   /**
    * Nur mit `sums`: Eine unveränderte Datei des vorigen Standes hat nicht die Prüfsumme der Quelle (der vorige Stand ist
-   * an dieser Datei beschädigt oder manipuliert, #324). Sie wird dann kopiert statt verlinkt; hier kommt die Warnung
-   * (Pfad relativ zu `src`). Ohne diese Angabe wird der Fall still behandelt.
+   * an dieser Datei beschädigt oder manipuliert, oder die Quelle hat sich bei gleicher Größe und Zeit geändert, #324).
+   * Sie wird dann kopiert statt verlinkt; hier kommt die Meldung (Pfad relativ zu `src`; `differs`: Prüfsumme weicht ab,
+   * `unreadable`: Datei im vorigen Stand nicht lesbar). Ohne diese Angabe wird der Fall still behandelt.
    */
-  onDamagedLink?: (path: string) => void;
+  onDamagedLink?: (path: string, reason: 'differs' | 'unreadable') => void;
 }
 
 /**
@@ -239,7 +240,7 @@ interface Level {
   /** Besitzer eigener Dateien im Ziel (`undefined`: ohne Unix-Besitzer, nicht geprüft) */
   owner: number | undefined;
   sums?: Map<string, string> | undefined;
-  onDamagedLink?: ((path: string) => void) | undefined;
+  onDamagedLink?: ((path: string, reason: 'differs' | 'unreadable') => void) | undefined;
 }
 
 /**
@@ -367,7 +368,10 @@ function copyLevel(
         old &&
         (level.owner === undefined || old.uid === level.owner) &&
         old.size === real.size &&
-        Math.abs(old.mtimeMs - real.mtimeMs) < 2
+        Math.abs(old.mtimeMs - real.mtimeMs) < 2 &&
+        // Ohne Hardlinks im Ziel (exFAT, manche SMB/NAS-Freigaben) bringt das Prüfen des vorigen Standes nichts: direkt
+        // kopieren und dabei hashen, jede Datei wird genau einmal gelesen.
+        out.canLink(dst)
       ) {
         // Backup mit Prüfsummen (#324): Die Prüfsumme kommt aus der Quelle. Der Link gilt nur, wenn auch die Datei im
         // vorigen Stand dieselbe Prüfsumme hat; sonst bekäme der neue Stand eine Datei, die nicht zu seiner Liste passt
@@ -376,10 +380,11 @@ function copyLevel(
         let linkable = true;
         if (level.sums) {
           sha = hashFdAt(opened.fd);
-          if (prevSha(reader, prev as string, name, old) !== sha) {
+          const previousSha = prevSha(reader, prev as string, name, old);
+          if (previousSha !== sha) {
             linkable = false;
             sha = undefined;
-            level.onDamagedLink?.(relPath);
+            level.onDamagedLink?.(relPath, previousSha === undefined ? 'unreadable' : 'differs');
           }
         }
         // `old` stammt aus dem verankerten Ordner des vorigen Standes: der Link wird nur behalten, wenn er genau auf

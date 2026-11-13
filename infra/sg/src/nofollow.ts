@@ -200,6 +200,9 @@ export class AnchoredDirs {
 export const LINK_STAGING_DIR = '.sg-link.partial';
 /** Name des Hardlinks im privaten Unterordner */
 const LINK_STAGING_FILE = 'neu';
+/** Probedateien für `canLink` (im privaten Ordner, werden gleich wieder entfernt) */
+const LINK_PROBE_FILE = 'probe';
+const LINK_PROBE_COPY = 'probe-link';
 /** Probedatei für `ownerOfNew` (wird gleich wieder entfernt; endet auf `.partial`, falls sie doch liegen bleibt) */
 const OWNER_PROBE = '.sg-besitzer.partial';
 
@@ -385,6 +388,39 @@ export class NoFollowWriter extends AnchoredDirs {
     });
     this.files.set(to, identity(expected));
     return true;
+  }
+
+  /** Ergebnis der Probe, ob das Ziel Hardlinks kann (einmal je Schreiber, also je Lauf; ein Dateisystem) */
+  private linkProbe: boolean | undefined = undefined;
+
+  /**
+   * Kann in `dir` verlinkt werden? Nein, wenn es keinen privaten Ordner für Hardlinks gibt (`linkDir`) oder das Ziel
+   * Hardlinks nicht kann (exFAT, manche SMB-/NAS-Freigaben). Letzteres wird einmal je Schreiber im privaten Ordner
+   * ausprobiert. Wer kopieren muss, erfährt es so vor dem Prüfen des vorigen Standes. Ändert nichts an `link`: Auch bei
+   * `true` prüft `link` weiter selbst und liefert bei Misserfolg `false`.
+   */
+  canLink(dir: string): boolean {
+    const staging = this.linkDir(dir);
+    if (staging === null) return false;
+    if (this.linkProbe === undefined) {
+      const source = join(staging, LINK_PROBE_FILE);
+      const fd = this.openNew(source, 0o600);
+      closeSync(fd);
+      try {
+        this.linkProbe = this.inDir(staging, () => {
+          try {
+            linkSync(LINK_PROBE_FILE, LINK_PROBE_COPY);
+          } catch {
+            return false;
+          }
+          unlinkSync(LINK_PROBE_COPY);
+          return true;
+        });
+      } finally {
+        this.removeOwnFile(source);
+      }
+    }
+    return this.linkProbe;
   }
 
   /**

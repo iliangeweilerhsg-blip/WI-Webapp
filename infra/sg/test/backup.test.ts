@@ -50,7 +50,7 @@ import {
   readFileListFd,
   sha256Hex,
 } from '../src/file-sums.ts';
-import { NoFollowReader } from '../src/nofollow.ts';
+import { NoFollowReader, NoFollowWriter } from '../src/nofollow.ts';
 import {
   copyTree,
   listStands,
@@ -3132,7 +3132,11 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
       ),
     ).toBe(0);
     const log = backupLogs.join('\n');
-    expect(log).toMatch(/WARNUNG: media\/photos\/a\.jpg ist im vorigen Stand 20261104T030012Z beschädigt/);
+    expect(log).toMatch(
+      /WARNUNG: media\/photos\/a\.jpg unterscheidet sich vom vorigen Stand 20261104T030012Z trotz gleicher Größe und Zeit/,
+    );
+    expect(log).toContain('pnpm sg restore --test 20261104T030012Z');
+    expect(log).not.toMatch(/lässt sich nicht wiederherstellen/);
     // vault/n.md war heil: weiter verlinkt, keine Warnung dazu
     expect(log).not.toMatch(/WARNUNG: vault/);
     const newFile = join(s.target, STAND2, 'media', 'photos', 'a.jpg');
@@ -3148,6 +3152,99 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
     expect(await runRestore(s.deps, { stand: STAND2, test: true, yes: false })).toBe(0);
     // Der vorige Stand ist wie erwartet beschädigt
     expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(1);
+  });
+
+  it('vorige Datei nicht lesbar: eigene Meldung, wird kopiert', async () => {
+    const s = await prepared();
+    const prevFile = join(s.target, STAND, 'media', 'photos', 'a.jpg');
+    const original = NoFollowReader.prototype.open;
+    const spy = vi.spyOn(NoFollowReader.prototype, 'open').mockImplementation(function (
+      this: NoFollowReader,
+      dir: string,
+      name: string,
+    ) {
+      if (join(dir, name) === prevFile) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      return original.call(this, dir, name);
+    });
+    const backupLogs: string[] = [];
+    try {
+      expect(
+        await runBackup(
+          second(s, (m) => backupLogs.push(m)),
+          { trigger: 'manuell' },
+        ),
+      ).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    const log = backupLogs.join('\n');
+    expect(log).toMatch(/WARNUNG: media\/photos\/a\.jpg ist im vorigen Stand 20261104T030012Z nicht lesbar/);
+    expect(log).not.toMatch(/unterscheidet sich/);
+    expect(readFileSync(join(s.target, STAND2, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+  });
+
+  it('Ziel ohne Hardlinks: jede unveränderte Datei wird genau einmal gelesen, der vorige Stand nie', () => {
+    const root = tmp();
+    const src = join(root, 'src');
+    mkdirSync(src);
+    writeFileSync(join(src, 'a.txt'), 'AAAA');
+    copyTree(src, join(root, 's1'), null);
+    const opens: string[] = [];
+    const original = NoFollowReader.prototype.open;
+    const spy = vi.spyOn(NoFollowReader.prototype, 'open').mockImplementation(function (
+      this: NoFollowReader,
+      dir: string,
+      name: string,
+    ) {
+      opens.push(join(dir, name));
+      return original.call(this, dir, name);
+    });
+    const sums = new Map<string, string>();
+    const warnings: string[] = [];
+    try {
+      const out = new NoFollowWriter();
+      out.adopt(root);
+      // Ein Besitzer, den das Ziel nie vergibt: kein privater Ordner, also keine Hardlinks
+      out.owner = 4_000_000_000;
+      const result = copyTree(src, join(root, 's2'), join(root, 's1'), undefined, {
+        out,
+        sums,
+        onDamagedLink: (p) => warnings.push(p),
+      });
+      expect(result.linked).toBe(0);
+      expect(result.copied).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(opens).toEqual([join(src, 'a.txt')]);
+    expect(warnings).toEqual([]);
+    expect(sums.get('a.txt')).toBe(sha('AAAA'));
+    expect(readFileSync(join(root, 's2', 'a.txt'), 'utf8')).toBe('AAAA');
+  });
+
+  it('Ziel mit Hardlinks: bleibt beim Ablauf mit Prüfung des vorigen Standes (Quelle und vorige Datei je einmal gelesen)', () => {
+    const root = tmp();
+    const src = join(root, 'src');
+    mkdirSync(src);
+    writeFileSync(join(src, 'a.txt'), 'AAAA');
+    copyTree(src, join(root, 's1'), null);
+    const opens: string[] = [];
+    const original = NoFollowReader.prototype.open;
+    const spy = vi.spyOn(NoFollowReader.prototype, 'open').mockImplementation(function (
+      this: NoFollowReader,
+      dir: string,
+      name: string,
+    ) {
+      opens.push(join(dir, name));
+      return original.call(this, dir, name);
+    });
+    try {
+      const result = copyTree(src, join(root, 's2'), join(root, 's1'), undefined, { sums: new Map() });
+      expect(result.linked).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(opens.sort()).toEqual([join(root, 's1', 'a.txt'), join(src, 'a.txt')]);
   });
 
   it('unveränderter vorheriger Stand: weiter verlinkt, keine Warnung', async () => {
