@@ -1,4 +1,4 @@
-// H-1 aus #191: Antworten 400/429 an Netzverbindungen ohne gültiges Token schließen die Verbindung.
+// H-1 aus #191: Antworten 400/403/413/415/429 an Netzverbindungen ohne gültiges Token schließen die Verbindung.
 // Mit echten Sockets: geprüft wird, ob der Server den Socket tatsächlich schließt, nicht nur der Header.
 import { connect, type Socket } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,8 +16,8 @@ const original = { ...connectionLimits };
 
 describe('closesTokenlessResponse (Regel)', () => {
   const net = { local: false, device: undefined };
-  it('Netz ohne Token: 400, 403, 413, 429 schließen; 200, 404, 409, 423 nicht', () => {
-    for (const statusCode of [400, 403, 413, 429]) {
+  it('Netz ohne Token: 400, 403, 413, 415, 429 schließen; 200, 201, 404, 409, 423 nicht', () => {
+    for (const statusCode of [400, 403, 413, 415, 429]) {
       expect(closesTokenlessResponse({ ...net, statusCode })).toBe(true);
     }
     for (const statusCode of [200, 201, 404, 409, 423]) {
@@ -90,9 +90,21 @@ describe('Connection: close für Netzverbindungen ohne Token (H-1)', () => {
     expect(conn.data().toLowerCase()).toContain('connection: close');
   });
 
+  it('Netz, kein Token, 415 (ohne Content-Type, zählt nicht gegen das Rate-Limit): Socket zu', async () => {
+    const conn = await open(NET);
+    const body = 'x';
+    conn.socket.write(
+      `POST ${API}/devices/pair/start HTTP/1.1\r\nHost: 127.0.0.1:${app.port}\r\n` +
+        `Content-Length: ${body.length}\r\n\r\n${body}`,
+    );
+    await waitFor(conn.closed, 3000, 'Schließen nach 415');
+    expect(conn.data().startsWith('HTTP/1.1 415')).toBe(true);
+    expect(conn.data().toLowerCase()).toContain('connection: close');
+  });
+
   it('Netz, kein Token, 429 (Rate-Limit): Header gesetzt und Socket zu', async () => {
-    // Das Limit (10 pro Minute und Adresse) zählt nur gültige Anfragen. Antworten ohne Fehler halten die
-    // Verbindung offen; erst die 11. bekommt 429 und schließt
+    // Das Limit (10 pro Minute und Adresse) zählt nur gültige Anfragen. Ohne offenes Fenster sind das 409
+    // (`pairing_window_closed`), die die Verbindung offen halten; erst die 11. bekommt 429 und schließt
     const conn = await open(NET);
     for (let i = 0; i < 10; i++) {
       const before = conn.data().length;

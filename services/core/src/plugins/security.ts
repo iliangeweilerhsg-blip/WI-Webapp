@@ -590,12 +590,18 @@ export function createSecurityGuard(options: SecurityOptions): SecurityGuard {
 
 /**
  * Statuscodes, bei denen der Core einer Netzverbindung ohne gültiges Token nach der Antwort `Connection: close`
- * setzt (H-1 aus #191): 400 (ungültige Anfrage), 429 (Rate-Limit), dazu 403 (Kopplungsroute mit `Origin`, also
- * ein Browser) und 413 (Body zu groß, der Rest des Bodys ist ungelesen). Bewusst NICHT dabei: 404, 409, 423 und
- * andere Antworten der Kopplung (Fenster geschlossen, gesperrt), die ein echtes iPad zum Wiederholen oder
- * Anzeigen braucht. Selbst bei den gelisteten Codes kostet das dem iPad nur einen neuen Verbindungsaufbau.
+ * setzt (H-1 aus #191):
+ * - 400 (ungültige Anfrage, auch kaputtes JSON) und 415 (kein oder falscher `Content-Type`): Beide entstehen vor dem
+ *   Handler und zählen nicht gegen das Rate-Limit der Kopplung. Ohne Schließen hielte eine Gegenstelle damit ihre
+ *   Verbindung beliebig lange.
+ * - 413 (Body zu groß): Der Rest des Bodys ist ungelesen.
+ * - 429 (`pairing_rate_limited`, `pairing_requests_full`).
+ * - 403 (`pairing_code_invalid`, `pairing_request_rejected` aus `pair/confirm`). `origin_not_allowed` lehnt schon der
+ *   Wächter ab, das schloss vorher schon.
+ * Bewusst NICHT dabei: 201, 409 und 423. Sie zählen gegen das Rate-Limit (nach 10 je Minute kommt 429 und schließt).
+ * Auch bei den gelisteten Codes bekommt das iPad die Antwort vollständig und verbindet für den nächsten Versuch neu.
  */
-const TOKENLESS_CLOSE_STATUS = new Set([400, 403, 413, 429]);
+const TOKENLESS_CLOSE_STATUS = new Set([400, 403, 413, 415, 429]);
 
 /**
  * Soll die Verbindung nach dieser Antwort schließen? Nur für Anfragen aus dem Netz (auch Tunnel-Eingang), die
@@ -665,7 +671,9 @@ export function registerSecurity(
     }
   });
   // Antworten an Netzverbindungen ohne Token (Kopplung): 400/429 usw. schließen die Verbindung (H-1 aus #191).
-  // `onSend` läuft vor dem Schreiben der Header, auch für Fehlerantworten aus Handlern und Validierung
+  // `onSend` läuft vor dem Schreiben der Header, auch für Fehlerantworten aus Handlern und Validierung. Nicht für
+  // `frameworkErrors` (kaputte URL): Dort gibt es keine Route und darum keine Kopplung, ohne Token lehnt der Wächter
+  // mit 401 ab und schließt selbst
   app.addHook('onSend', async (request, reply, payload) => {
     if (
       closesTokenlessResponse({
