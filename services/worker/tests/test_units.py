@@ -128,15 +128,16 @@ def test_prompt_files_exist() -> None:
     über `uv run --project`), nicht im Wheel. Fehlt eine Datei, scheitern die Jobs erst zur
     Laufzeit: darum hier prüfen."""
     from sg_worker.ai import outputs
-    from sg_worker.handlers import concepts_extract, concepts_resolve, summary_write
+    from sg_worker.handlers import cards_generate, concepts_extract, concepts_resolve, summary_write
 
     root = Path(concepts_extract.PROMPT_FILE).parents[1]
     for version in (
         outputs.CONCEPTS_EXTRACT_PROMPT,
         outputs.CONCEPTS_RESOLVE_PROMPT,
         outputs.SUMMARY_WRITE_PROMPT,
+        outputs.CARDS_GENERATE_PROMPT,
     ):
         task, _, v = version.partition("/")
         assert (root / task / f"{v}.md").read_text(encoding="utf-8").strip(), version
-    for module in (concepts_extract, concepts_resolve, summary_write):
+    for module in (cards_generate, concepts_extract, concepts_resolve, summary_write):
         assert module.PROMPT_FILE.is_file(), module.__name__

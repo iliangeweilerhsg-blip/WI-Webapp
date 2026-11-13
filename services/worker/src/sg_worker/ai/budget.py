@@ -30,6 +30,8 @@ log = logging.getLogger(__name__)
 Conn = psycopg.Connection[Any]
 
 DEFAULT_MONTHLY_BUDGET_EUR = 10.0
+#: `cards.generate` pausiert schon ab diesem Anteil des Monatsbudgets (§21.6)
+CARDS_BUDGET_SHARE = 0.8
 MAX_MONTHLY_BUDGET_EUR = 1000.0
 MAX_REQUEST_ID = 200
 
@@ -103,8 +105,10 @@ class CostMeter:
         session_id: str | None,
         task: str,
         tz: str | None = None,
+        budget_share: float = 1.0,
     ) -> None:
         self.conn = conn
+        self.budget_share = budget_share
         self.user_id = user_id
         self.job_id = job_id
         self.session_id = session_id
@@ -114,10 +118,11 @@ class CostMeter:
         self.calls = 0
 
     def check(self) -> None:
-        """`BudgetReached`, wenn die Summe des Monats das Budget erreicht hat."""
+        """`BudgetReached`, wenn die Summe des Monats das Budget (mal `budget_share`, Standard 1;
+        `cards.generate` 0,8, §21.6) erreicht hat."""
         budget = monthly_budget_eur(self.conn)
         spent = month_spent_eur(self.conn, self.tz)
-        if spent >= budget:
+        if spent >= budget * self.budget_share:
             raise BudgetReached(f"{spent:.2f} von {budget:.2f} EUR")
 
     def record(self, cost: CallCost) -> None:
