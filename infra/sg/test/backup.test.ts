@@ -3520,16 +3520,45 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
       try {
         const result = readFileListFd(fd, { anchor: sha256Hex(text), read });
         expect(result.sha256).not.toBe(sha256Hex(text));
+        expect(result.sums).toBeNull();
       } finally {
         closeSync(fd);
       }
     });
 
     it('Anker zu groß: Liste über FILES_MAX_BYTES wird auch mit Anker abgelehnt', () => {
-      const read = (() => FILES_MAX_BYTES + 1) as unknown as typeof readSync;
-      const result = readFileListFd(0, { chunkSize: 16, anchor: sha256Hex('x'), read });
+      // Virtuelle Datei endlicher Länge: fehlt die tooLarge-Prüfung, endet die Suite rot statt zu hängen
+      let offset = 0;
+      const total = FILES_MAX_BYTES + 1;
+      const read = ((_fd: number, _buf: Buffer, _off: number, len: number) => {
+        const n = Math.min(len, total - offset);
+        offset += n;
+        return n;
+      }) as unknown as typeof readSync;
+      const result = readFileListFd(0, { chunkSize: 1024 * 1024, anchor: sha256Hex('x'), read });
       expect(result.tooLarge).toBe(true);
       expect(result.sums).toBeNull();
+    });
+
+    it('mit Anker: Datei wächst im zweiten Durchgang → bytes über der ersten Länge, keine Map, SHA leer', () => {
+      const text = listText(20);
+      const path = join(tmp(), 'files.sha256');
+      writeFileSync(path, text);
+      const fd = openSync(path, 'r');
+      let eofs = 0;
+      const read = ((f: number, buf: Buffer, off: number, len: number, pos: number | null) => {
+        const n = readSync(f, buf, off, len, pos);
+        if (n === 0 && (eofs += 1) === 1) appendFileSync(path, 'x'); // nach Durchgang 1
+        return n;
+      }) as typeof readSync;
+      try {
+        const result = readFileListFd(fd, { anchor: sha256Hex(text), read });
+        expect(result.bytes).toBe(Buffer.byteLength(text) + 1);
+        expect(result.sums).toBeNull();
+        expect(result.sha256).toBe('');
+      } finally {
+        closeSync(fd);
+      }
     });
 
     it('Parser: letzte Zeile ohne Zeilenumbruch, doppelter Pfad und fremder Unterordner sind ungültig, leer ist gültig', () => {
@@ -3567,6 +3596,31 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
         expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(1);
         expect(s.errs.join('\n')).toMatch(/passt nicht zur Prüfsumme im Manifest/);
         expect(feed).not.toHaveBeenCalled();
+      } finally {
+        feed.mockRestore();
+      }
+    });
+
+    it('Restore: Liste wächst im zweiten Durchgang → „hat sich beim Lesen verändert“, nicht „nicht authentisch“', async () => {
+      const s = await prepared();
+      const path = join(s.target, STAND, 'files.sha256');
+      const original = FileListParser.prototype.feed;
+      let grown = false;
+      const feed = vi.spyOn(FileListParser.prototype, 'feed').mockImplementation(function (
+        this: FileListParser,
+        chunk: Buffer,
+      ) {
+        if (!grown) {
+          grown = true;
+          appendFileSync(path, 'x');
+        }
+        original.call(this, chunk);
+      });
+      try {
+        expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(1);
+        expect(s.errs.join('\n')).toMatch(/hat sich beim Lesen verändert/);
+        expect(s.errs.join('\n')).not.toMatch(/passt nicht zur Prüfsumme im Manifest/);
+        expect(grown).toBe(true);
       } finally {
         feed.mockRestore();
       }
