@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { InboxAcceptRequest, InboxKind, SessionRef } from '@sg/shared';
+import type { InboxAcceptRequest, InboxItem, InboxKind, SessionRef } from '@sg/shared';
 import { conceptKey, fetchConcept, sessionRefLabel } from '../../lib/concepts.ts';
 import {
   INBOX_KIND_FILTERS,
@@ -19,6 +19,7 @@ import {
   errorCode,
   errorDetail,
   inboxErrorMessage,
+  isConceptItem,
   isOlder,
   olderLabel,
   pendingConcepts,
@@ -29,11 +30,15 @@ import {
   unknownEndpoints,
   useInboxOverview,
   useOpenInboxItems,
-  type ConceptInboxItem as InboxItem,
+  isCardBatch,
+  type CardBatchItem,
+  type ConceptInboxItem,
 } from '../../lib/inbox.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { rueckblickHref } from '../../lib/transcript.ts';
 import { CoreHint } from '../CoreHint.tsx';
+import { cardsCount } from '../../lib/cards.ts';
+import { CardBatchRow } from './CardBatchRow.tsx';
 import { InboxRow } from './InboxRow.tsx';
 
 const button =
@@ -71,6 +76,10 @@ function acceptedMessage(
   request: InboxAcceptRequest,
   names: ReadonlyMap<string, string>,
 ): string {
+  if (item.payload.kind === 'card_batch') {
+    const dropped = new Set(request.cards?.filter((c) => !c.accept).map((c) => c.key));
+    return `${cardsCount(item.payload.cards.length - dropped.size)} angenommen`;
+  }
   if (item.payload.kind === 'relation') return 'Beziehung bestätigt';
   const name = request.edit?.name ?? item.payload.proposal.name;
   const merges =
@@ -190,7 +199,7 @@ export function SuggestionInbox() {
     } catch (error) {
       const code = errorCode(error);
       const existing = errorDetail(error, 'concept_id');
-      if (code === 'concept_exists' && existing && item.payload.kind !== 'relation') {
+      if (code === 'concept_exists' && existing && isConceptItem(item) && item.payload.kind !== 'relation') {
         // Kein Dialog: Der Toast bietet das Zusammenführen mit dem vorhandenen Konzept an (§20.10)
         const name = request?.edit?.name ?? item.payload.proposal.name;
         toast.show({
@@ -248,26 +257,37 @@ export function SuggestionInbox() {
     }
   }
 
-  const row = (item: InboxItem, showSession = false) => (
-    <InboxRow
-      key={item.id}
-      item={item}
-      names={names}
-      pending={pending}
-      busy={busy.has(item.id) || bulkBusy}
-      editing={editing === item.id}
-      showSession={showSession}
-      onAccept={(target, request) => void decide(target, request)}
-      onReject={(target) => void decide(target, null)}
-      onEdit={(target) => {
-        setEditing(target?.id ?? null);
-        if (target === null) {
-          container.current?.querySelector<HTMLElement>(`[data-inbox-item="${item.id}"]`)?.focus();
-        }
-      }}
-      onMove={moveFocus}
-    />
-  );
+  const row = (item: InboxItem, showSession = false) =>
+    isCardBatch(item) ? (
+      <CardBatchRow
+        key={item.id}
+        item={item}
+        busy={busy.has(item.id) || bulkBusy}
+        showSession={showSession}
+        onAccept={(target: CardBatchItem, request) => void decide(target, request)}
+        onReject={(target: CardBatchItem) => void decide(target, null)}
+        onMove={moveFocus}
+      />
+    ) : (
+      <InboxRow
+        key={item.id}
+        item={item as ConceptInboxItem}
+        names={names}
+        pending={pending}
+        busy={busy.has(item.id) || bulkBusy}
+        editing={editing === item.id}
+        showSession={showSession}
+        onAccept={(target, request) => void decide(target, request)}
+        onReject={(target) => void decide(target, null)}
+        onEdit={(target) => {
+          setEditing(target?.id ?? null);
+          if (target === null) {
+            container.current?.querySelector<HTMLElement>(`[data-inbox-item="${item.id}"]`)?.focus();
+          }
+        }}
+        onMove={moveFocus}
+      />
+    );
 
   let body;
   if (open.isError) body = <CoreHint error={open.error} />;
@@ -285,7 +305,7 @@ export function SuggestionInbox() {
   } else if (items.length === 0) {
     body = (
       <p className="rounded-lg border border-dashed border-border-strong px-6 py-6 text-center text-md text-text-muted">
-        Keine offenen Vorschläge. Nach einer Vorlesung stehen hier neue Konzepte und Beziehungen.
+        Keine offenen Vorschläge. Nach einer Vorlesung stehen hier neue Konzepte, Beziehungen und Karten.
       </p>
     );
   } else {

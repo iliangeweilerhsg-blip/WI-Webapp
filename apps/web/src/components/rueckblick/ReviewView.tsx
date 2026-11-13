@@ -217,10 +217,13 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
   const startedAt = session.started_at;
   const deckId = session.slide_deck_id;
   const rows = stepRows(session.processing);
-  const showSteps = rows.some((row) => row.state !== 'fertig');
   // Kurzfassung, Konzepte und Stand der KI (VERTRAEGE §20.10). `ReviewBody` gibt es nur für beendete Sessions.
   const summary = useSessionSummary(session.id, session.processing, true);
   const concepts = useSessionConcepts(session.id, session.processing, true);
+  // Ältere Sessions haben keinen Schritt „Karten“: Hat die Session Konzepte, bietet die Liste „Karten erzeugen“ an (§21.10)
+  const cardsMissing =
+    session.processing['cards.generate'] === undefined && (concepts.data?.items.length ?? 0) > 0;
+  const showSteps = rows.some((row) => row.state !== 'fertig') || (cardsMissing && rows.length > 0);
   const ai = useAiStatus();
   const processingPending = Object.values(session.processing).some(
     (step) => step !== undefined && isPending(step),
@@ -413,6 +416,7 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
           error={reprocess.error}
           onRetry={(step) => void reprocess.run(step)}
           ai={ai.data}
+          cardsMissing={cardsMissing}
           lectureRunning={active.data != null && active.data.id !== session.id}
         />
       ) : null}

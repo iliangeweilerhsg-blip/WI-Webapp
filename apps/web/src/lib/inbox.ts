@@ -18,21 +18,28 @@ import {
 } from '@sg/shared';
 import { watchReconnect } from '../components/dashboard/reconnect.ts';
 import { ApiRequestError, apiGet, apiSend, friendlyMessage, isUnreachable } from './api.ts';
+import { cardErrorMessage } from './cards.ts';
 import { CONCEPTS_KEY, relationSentence } from './concepts.ts';
 import { useHydrationSafe } from './hydrated.ts';
 import { useActiveSession } from './sessions.ts';
 import { useSyncClient } from './sync/SyncProvider.tsx';
 
-/**
- * Einträge, die die Inbox heute darstellt. Kartenvorschläge (`card_batch`, VERTRAEGE §21.7) bekommen ihre Zeile
- * mit B4 (§21.10). Bis dahin lädt die Inbox sie nicht.
- */
+/** Vorschläge zu Konzepten und Beziehungen (VERTRAEGE §20.6) */
 export type ConceptInboxItem = InboxItem & {
   payload: Exclude<InboxItem['payload'], { kind: 'card_batch' }>;
 };
 
-function isConceptItem(item: InboxItem): item is ConceptInboxItem {
+/** Kartenvorschlag zu einem Konzept (`card_batch`, VERTRAEGE §21.7) */
+export type CardBatchItem = InboxItem & {
+  payload: Extract<InboxItem['payload'], { kind: 'card_batch' }>;
+};
+
+export function isConceptItem(item: InboxItem): item is ConceptInboxItem {
   return item.payload.kind !== 'card_batch';
+}
+
+export function isCardBatch(item: InboxItem): item is CardBatchItem {
+  return item.payload.kind === 'card_batch';
 }
 
 export const INBOX_KEY = ['inbox'] as const;
@@ -55,6 +62,7 @@ export const INBOX_KIND_FILTERS: readonly { kind: InboxKind; label: string }[] =
   { kind: 'concept_new', label: 'Neue Konzepte' },
   { kind: 'concept_merge', label: 'Zusammenführen' },
   { kind: 'relation', label: 'Beziehungen' },
+  { kind: 'card_batch', label: 'Karten' },
 ];
 
 /** Typ-Symbol je Art (rein dekorativ, die Art steht zusätzlich als Text für Screenreader da) */
@@ -105,6 +113,11 @@ export function inboxErrorMessage(error: unknown, names: ReadonlyMap<string, str
     const name = names.get(errorDetail(error, 'concept_id') ?? '');
     if (name) return `Erst „${name}“ annehmen, dann die Beziehung.`;
   }
+  if (code === 'card_concept_pending') {
+    const name = names.get(errorDetail(error, 'concept_id') ?? '');
+    return name ? `Erst „${name}“ annehmen, dann die Karten.` : cardErrorMessage(error);
+  }
+  if (code === 'card_invalid' || code === 'card_source_invalid') return cardErrorMessage(error);
   if (code !== null && INBOX_MESSAGES[code]) return INBOX_MESSAGES[code];
   return friendlyMessage(error);
 }
@@ -118,14 +131,14 @@ const MAX_PAGES = 10;
 export const INBOX_OPEN_CAP = MAX_PAGES * 200;
 
 /** Alle offenen Einträge (`GET /inbox?status=offen`, Seiten zu 200) */
-export async function fetchOpenItems(signal?: AbortSignal): Promise<ConceptInboxItem[]> {
-  const items: ConceptInboxItem[] = [];
+export async function fetchOpenItems(signal?: AbortSignal): Promise<InboxItem[]> {
+  const items: InboxItem[] = [];
   let cursor: string | null = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const params = new URLSearchParams({ status: 'offen', limit: '200' });
     if (cursor) params.set('cursor', cursor);
     const list = await apiGet(`/inbox?${params.toString()}`, InboxItemListSchema, { signal });
-    items.push(...list.items.filter(isConceptItem));
+    items.push(...list.items);
     cursor = list.next_cursor;
     if (!cursor) break;
   }
@@ -161,7 +174,11 @@ export function useInboxOverview() {
   useEffect(() => {
     if (!sync) return;
     const offUpdated = sync.onEvent('session.updated', (session) => {
-      if (session.processing['concepts.resolve'] === 'fertig') {
+      // Mit `cards.generate` kommen Kartenvorschläge dazu (§21.9)
+      if (
+        session.processing['concepts.resolve'] === 'fertig' ||
+        session.processing['cards.generate'] === 'fertig'
+      ) {
         void client.invalidateQueries({ queryKey: INBOX_KEY });
       }
     });
@@ -281,9 +298,9 @@ export function bulkTarget(
   sessionOpenCount: number,
 ): Pick<InboxBulkRequest, 'ids' | 'session_id'> {
   if (sessionId !== null && visible.length === sessionOpenCount) return { session_id: sessionId };
-  // Reihenfolge wie im Core (§20.6): erst Konzepte nach `priority`, dann Beziehungen. So bleibt sie auch über die
+  // Reihenfolge wie im Core (§20.6, §21.7): erst Konzepte nach `priority`, dann Beziehungen, dann Karten. So bleibt sie auch über die
   // Blöcke zu 500 hinweg erhalten.
-  const rank = (item: InboxItem) => (item.kind === 'relation' ? 1 : 0);
+  const rank = (item: InboxItem) => (item.kind === 'relation' ? 1 : item.kind === 'card_batch' ? 2 : 0);
   const ordered = [...visible].sort((a, b) => rank(a) - rank(b) || a.priority - b.priority);
   return { ids: ordered.map((item) => item.id) };
 }

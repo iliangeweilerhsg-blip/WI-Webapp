@@ -10,6 +10,7 @@ import { BackupHint } from './BackupHint.tsx';
 import { FirstStepsCard } from './FirstSteps.tsx';
 import { SpontaneousStartCard } from './SpontaneousStart.tsx';
 import { RecentSessions } from './RecentSessions.tsx';
+import { ReviewTile } from './ReviewTile.tsx';
 import { StartCard } from './StartCard.tsx';
 import { StorageHint } from './StorageHint.tsx';
 import { TodayList } from './TodayList.tsx';
@@ -75,6 +76,9 @@ export function HeuteScreen() {
         ) : null}
 
         {now !== null && entries.length > 0 ? <TodayList entries={entries} now={now} /> : null}
+
+        {/* Karten fällig? Ruhige Kachel nach /lernen (VERTRAEGE §21.10), nie während einer Session */}
+        {hasData ? <ReviewTile sessions={sessions} /> : null}
 
         {!data.loading && hasData && entries.length === 0 ? (
           <EmptyState

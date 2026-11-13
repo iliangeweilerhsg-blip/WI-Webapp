@@ -38,6 +38,14 @@ import type {
   TranscriptInfo,
   TranscriptLine,
 } from '@sg/shared';
+import {
+  acceptCardBatch,
+  cardBatchVisible,
+  handleCards,
+  makeFakeCardsState,
+  reopenCardBatch,
+  type FakeCardsState,
+} from './fake-cards.ts';
 
 const USER = '0190f6a2-0000-7000-8000-000000000000';
 const NOW = '2026-11-04T08:00:00Z';
@@ -631,6 +639,8 @@ export interface FakeCore {
   inboxDecisions: Record<string, { triggered_by: string | null; cascade_item_ids: string[] }>;
   /** Der nächste `POST /inbox/…` wird mit diesem Fehler abgelehnt */
   rejectNextInbox: null | { status: number; code: string; details?: Record<string, unknown> };
+  /** Karten, Bewertungen und Papierkorb für Karten (VERTRAEGE §21.4), siehe `fake-cards.ts` */
+  cards: FakeCardsState;
 }
 
 const CONCEPT_NOW = '2026-11-05T14:12:30Z';
@@ -850,6 +860,7 @@ export function installFakeCore(
     aiStatus: makeAiStatus(),
     costSummary: makeCostSummary(),
     rejectNextInbox: null,
+    cards: makeFakeCardsState(),
   };
 
   vi.stubGlobal(
@@ -866,6 +877,9 @@ export function installFakeCore(
 
       if (method === 'POST' && core.postGate) await core.postGate;
       if (core.down) throw new TypeError('Failed to fetch');
+
+      const cardsResponse = handleCards(core, path, method, url, body);
+      if (cardsResponse) return cardsResponse;
 
       const materialResponse = await handleMaterial(core, { path, method, url, body, form, headers, newId });
       if (materialResponse) return materialResponse;
@@ -1533,6 +1547,10 @@ function decideInboxItem(
   if (action === 'reopen') {
     if (item.status === 'offen') return { status: 409, code: 'inbox_item_not_decided' };
     if (item.session === null) return { status: 404, code: 'inbox_item_not_found' };
+    if (item.kind === 'card_batch' && item.status === 'angenommen') {
+      const conflict = reopenCardBatch(core, item);
+      if (conflict) return conflict;
+    }
     // Mitentschieden: nur über den Auslöser wieder zu öffnen
     const made = core.inboxDecisions[item.id];
     if (made?.triggered_by) {
@@ -1566,8 +1584,14 @@ function decideInboxItem(
   const payload = item.payload;
   // A1 (neues Konzept, auch `concept_merge` mit `as_new`); nur danach bestätigt der Core Beziehungen mit
   let acceptedNew = false;
-  // Kartenvorschläge (`card_batch`, VERTRAEGE §21.7) bekommt der Fake-Core mit B4
-  if (payload.kind === 'card_batch') return { status: 400, code: 'inbox_action_invalid' };
+  if (payload.kind === 'card_batch') {
+    // A4 (§21.7): Karten anlegen; sind alle verworfen, gilt es wie „Ablehnen“
+    const result = acceptCardBatch(core, item, request);
+    if ('failure' in result) return result.failure;
+    item.status = result.cards.length === 0 ? 'abgelehnt' : 'angenommen';
+    item.decided_at = now;
+    return null;
+  }
   if (payload.kind === 'relation') {
     if (request.edit !== undefined || request.merge_into !== undefined || request.as_new !== undefined) {
       return { status: 400, code: 'inbox_action_invalid' };
@@ -1677,12 +1701,14 @@ function handleConcepts(
       failure.status,
     );
   const sorted = () =>
-    [...core.inboxItems].sort(
-      (a, b) =>
-        Date.parse(b.created_at) - Date.parse(a.created_at) ||
-        a.priority - b.priority ||
-        a.id.localeCompare(b.id),
-    );
+    core.inboxItems
+      .filter((x) => cardBatchVisible(core, x))
+      .sort(
+        (a, b) =>
+          Date.parse(b.created_at) - Date.parse(a.created_at) ||
+          a.priority - b.priority ||
+          a.id.localeCompare(b.id),
+      );
 
   if (path === '/inbox' && method === 'GET') {
     const status = url.searchParams.get('status') ?? 'offen';
@@ -1794,6 +1820,15 @@ function handleConcepts(
     const failure = decideInboxItem(core, item, decision[2] as 'accept' | 'reject' | 'reopen', body);
     if (failure) return fail(failure);
     const concept = core.concepts.find((c) => c.concept.id === item.concept_id)?.concept ?? null;
+    if (item.kind === 'card_batch') {
+      // §21.7: `concept = null`, `cards` = die angelegten Karten (nur nach `accept`)
+      const made = decision[2] === 'accept' ? (core.cards.batchCards[item.id] ?? []) : [];
+      return json({
+        item,
+        concept: null,
+        ...(decision[2] === 'accept' ? { cards: core.cards.cards.filter((c) => made.includes(c.id)) } : {}),
+      });
+    }
     return json({ item, concept });
   }
 

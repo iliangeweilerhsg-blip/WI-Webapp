@@ -41,11 +41,22 @@ export interface StepListProps {
    * aber nicht, welche. Darum steht nur ein allgemeiner Hinweis, wenn ein Schritt wartet, ohne die Liste zu kopieren.
    */
   lectureRunning?: boolean;
+  /**
+   * Die Session hat Konzepte, aber keinen Schritt „Karten“ (ältere Session): dann bietet die Liste „Karten erzeugen“
+   * an (VERTRAEGE §21.10)
+   */
+  cardsMissing?: boolean;
 }
 
 /** Ruhiger Grund, warum ein Konzept-Schritt nicht fertig ist; `null` = „nicht fertig“ */
 export function aiReason(step: PipelineStep, ai: AiStatus | null | undefined): string | null {
-  if (!ai || !CONCEPT_STEPS.includes(step)) return null;
+  if (!ai) return null;
+  // Karten pausieren schon ab 80 % des Monatsbudgets (VERTRAEGE §21.6): ruhig sagen, warum, und wie es weitergeht
+  if (step === 'cards.generate') {
+    if (aiNotConfigured(ai)) return 'KI nicht eingerichtet';
+    return ai.budget.warn ? 'Karten pausiert · KI-Budget' : null;
+  }
+  if (!CONCEPT_STEPS.includes(step)) return null;
   if (aiNotConfigured(ai)) return 'KI nicht eingerichtet';
   if (ai.budget.reached) return `KI-Budget für ${monthLabel(ai.budget.month)} erreicht`;
   return null;
@@ -67,12 +78,16 @@ export function StepList({
   onRetry,
   ai,
   lectureRunning = false,
+  cardsMissing = false,
 }: StepListProps) {
   const rows = stepRows(processing);
   if (rows.length === 0) return null;
   const retry = retryStep(processing);
   const resume = canContinueWithAudio(processing);
   const slidesOnly = processing?.transcribe === 'fehler';
+  // Pause durch das Budget: statt „Erneut versuchen“ steht dort „Karten erzeugen“ (der Nutzer erhöht erst das Budget)
+  const cardsPaused = retry === 'cards.generate' && aiReason('cards.generate', ai) !== null;
+  const generateCards = cardsPaused || (cardsMissing && retry === null);
 
   return (
     <section
@@ -118,17 +133,17 @@ export function StepList({
           Manche Schritte warten, bis die Vorlesung vorbei ist.
         </p>
       ) : null}
-      {retry && onRetry ? (
+      {(retry || generateCards) && onRetry ? (
         <div className="mt-3 flex flex-wrap gap-2">
           <button
             type="button"
             className={button}
             aria-disabled={busy}
             onClick={() => {
-              if (!busy) onRetry(retry);
+              if (!busy) onRetry(generateCards ? 'cards.generate' : (retry ?? 'cards.generate'));
             }}
           >
-            Erneut versuchen
+            {generateCards ? 'Karten erzeugen' : 'Erneut versuchen'}
           </button>
           {resume ? (
             <button
