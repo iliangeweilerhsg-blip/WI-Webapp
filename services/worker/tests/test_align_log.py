@@ -280,6 +280,17 @@ def test_timeline_end_from_recordings(
     assert stored(conn) == [(1, 0, 120_000)]
 
 
+def test_timeline_end_without_recording_and_times(
+    worker: Worker, conn: Conn, slides: dict[int, Any]
+) -> None:
+    # Keine Aufnahme, kein `started_at`/`ended_at`: Ende 0 statt TypeError (`max(0)`, #330)
+    add_session(conn, started_at=None, ended_at=None)
+    job = run_align(worker, conn)
+    assert job["state"] == "fertig", job["error"]
+    assert job["result"]["timeline_end_ms"] == 0
+    assert stored(conn) == []
+
+
 def test_slide_resolved_by_index_and_deleted_rows_ignored(
     worker: Worker, conn: Conn, slides: dict[int, Any]
 ) -> None:

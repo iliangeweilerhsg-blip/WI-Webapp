@@ -107,7 +107,9 @@ def _timeline_end(conn: Conn, sid: uuid.UUID, started: Any, ended: Any) -> int:
         (sid,),
     ).fetchone()
     candidates = [v for v in (_ms_between(started, ended), row and row[0]) if v is not None]
-    return max(0, *(int(v) for v in candidates))
+    # Ohne Aufnahme und ohne `started_at`/`ended_at` ist `candidates` leer: Ende 0. (`max(0, *[])`
+    # wäre `max(0)` und damit ein TypeError, #330.)
+    return max([0, *(int(v) for v in candidates)])
 
 
 def _offsets(raw: Any) -> dict[str, int]:
