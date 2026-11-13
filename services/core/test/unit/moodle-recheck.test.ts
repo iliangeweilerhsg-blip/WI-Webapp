@@ -45,7 +45,7 @@ async function setup(options: { baseUrl?: string; token?: string | null; down?: 
   registerErrorHandler(app);
   await app.register(moodleRoutes, { moodle });
   await app.ready();
-  return { app, keychain, logs, requests: fake.requests };
+  return { app, keychain, logs, moodle, requests: fake.requests };
 }
 
 const recheck = (a: FastifyInstance) => a.inject({ method: 'POST', url: '/moodle/recheck' });
@@ -126,6 +126,41 @@ describe('POST /moodle/recheck', () => {
     const t = await setup({ token: FAKE_TOKEN });
     await recheck(t.app);
     expect(t.requests.map((r) => r.body.get('wsfunction'))).toEqual(['core_webservice_get_site_info']);
+  });
+
+  it('verwirft offene Bestätigungscodes: ein Code aus der Vorschau mit dem alten Token gilt nicht unter dem neuen', async () => {
+    const t = await setup({ token: FAKE_TOKEN });
+    const code = t.moodle.confirmations.issue('assign.submit', { assignment_id: 3 }, { scope: 'assign:3' });
+    const unscoped = t.moodle.confirmations.issue('notifications.mark_read', {});
+    expect((await recheck(t.app)).statusCode).toBe(200);
+    expect(t.moodle.confirmations.size).toBe(0);
+    expect(t.moodle.confirmations.consume(code.token, 'assign.submit', { assignment_id: 3 })).toBe('invalid');
+    expect(t.moodle.confirmations.consume(unscoped.token, 'notifications.mark_read', {})).toBe('invalid');
+  });
+
+  it('ein Schlüsselbund-Lesen, das vor dem Recheck begann, überschreibt den neuen Token nicht', async () => {
+    let release: (() => void) | undefined;
+    let slowFirst = true;
+    const keychain = { token: FAKE_TOKEN as string | null };
+    const tokens = new KeychainTokenStore({
+      exec: async () => {
+        const value = keychain.token;
+        if (slowFirst) {
+          // Liest noch den alten Eintrag, antwortet aber erst nach dem Recheck
+          slowFirst = false;
+          await new Promise<void>((resolve) => (release = resolve));
+        }
+        if (value === null) throw new Error('not found');
+        return { stdout: `${value}\n` };
+      },
+    });
+    const stale = tokens.getToken();
+    keychain.token = OTHER_TOKEN;
+    tokens.invalidate();
+    expect(await tokens.getToken()).toBe(OTHER_TOKEN);
+    release?.();
+    expect(await stale).toBe(FAKE_TOKEN);
+    expect(await tokens.getToken()).toBe(OTHER_TOKEN);
   });
 
   it('Token steht weder in der Antwort noch im Log', async () => {

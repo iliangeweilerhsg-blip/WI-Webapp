@@ -100,6 +100,8 @@ export class ConfirmationStore {
   private readonly open = new Map<string, OpenCode>();
   /** Zähler je Bereich, steigt mit jedem `revokeScope`. Fehlt ein Bereich, steht er auf 0 */
   private readonly epochs = new Map<string, number>();
+  /** Steigt mit jedem `revokeAll` (z. B. neuer Token, evtl. anderes Konto) und zählt für alle Bereiche mit */
+  private generation = 0;
   private readonly ttlMs: number;
   private readonly now: () => number;
 
@@ -110,10 +112,11 @@ export class ConfirmationStore {
 
   /**
    * Zählerstand des Bereichs. Die Vorschau liest ihn, **bevor** sie den Stand aus Moodle liest: Läuft dazwischen ein
-   * `revokeScope`, ist der Zähler beim Ausgeben des Codes höher, und der Code wird gar nicht erst gültig.
+   * `revokeScope` oder `revokeAll`, ist der Zähler beim Ausgeben des Codes höher, und der Code wird gar nicht erst
+   * gültig. Ohne Bereich (`null`) zählt nur `revokeAll`. Beide Summanden steigen nur, die Summe ändert sich also bei jedem.
    */
-  epoch(scope: string): number {
-    return this.epochs.get(scope) ?? 0;
+  epoch(scope: string | null): number {
+    return this.generation + (scope === null ? 0 : (this.epochs.get(scope) ?? 0));
   }
 
   issue(
@@ -128,8 +131,8 @@ export class ConfirmationStore {
     const token = randomBytes(16).toString('base64url');
     const expiresAt = this.now() + this.ttlMs;
     const scope = binding.scope ?? null;
-    // Zwischen Lesen und Ausgeben hat ein `revokeScope` gewirkt: Code ausgeben, aber nie speichern → `invalid`
-    const stale = scope !== null && binding.epoch !== undefined && binding.epoch !== this.epoch(scope);
+    // Zwischen Lesen und Ausgeben hat ein `revokeScope` oder `revokeAll` gewirkt: Code ausgeben, nie speichern → `invalid`
+    const stale = binding.epoch !== undefined && binding.epoch !== this.epoch(scope);
     if (!stale) {
       this.open.set(token, {
         hash: paramsHash(actionId, params),
@@ -178,6 +181,18 @@ export class ConfirmationStore {
         revoked += 1;
       }
     }
+    return revoked;
+  }
+
+  /**
+   * Verwirft alle offenen Codes und erhöht den Zähler für alle Bereiche (`POST /moodle/recheck`): Ein Code aus der
+   * Vorschau mit dem alten Token (evtl. ein anderes Moodle-Konto) darf nicht unter dem neuen eingelöst werden.
+   * Liefert die Anzahl der verworfenen Codes.
+   */
+  revokeAll(): number {
+    this.generation += 1;
+    const revoked = this.open.size;
+    this.open.clear();
     return revoked;
   }
 

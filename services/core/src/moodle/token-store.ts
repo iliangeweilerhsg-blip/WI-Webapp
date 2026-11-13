@@ -33,6 +33,8 @@ const defaultExec: ExecFileFn = (file, args) =>
 export class KeychainTokenStore implements MoodleTokenStore {
   private cached: string | null | undefined;
   private missingSince = 0;
+  /** Steigt mit jedem `invalidate`: Ein Lesen, das vorher begann, darf den Zwischenspeicher nicht mehr füllen */
+  private generation = 0;
   private readonly exec: ExecFileFn;
   private readonly service: string;
   private readonly now: () => number;
@@ -46,6 +48,7 @@ export class KeychainTokenStore implements MoodleTokenStore {
   async getToken(): Promise<string | null> {
     if (typeof this.cached === 'string') return this.cached;
     if (this.cached === null && this.now() - this.missingSince < MISSING_TOKEN_CACHE_MS) return null;
+    const generation = this.generation;
     let token: string | null;
     try {
       const { stdout } = await this.exec('security', ['find-generic-password', '-s', this.service, '-w']);
@@ -55,12 +58,17 @@ export class KeychainTokenStore implements MoodleTokenStore {
       // Kein Eintrag, kein macOS oder Schlüsselbund gesperrt: wie „nicht eingerichtet“ behandeln
       token = null;
     }
-    this.cached = token;
-    if (token === null) this.missingSince = this.now();
+    // Begann das Lesen vor einem `invalidate` (z. B. `POST /moodle/recheck` nach `sg moodle login`), kann es den alten
+    // Eintrag gesehen haben: dann nicht merken, sonst überschriebe es den neuen Token im Zwischenspeicher
+    if (generation === this.generation) {
+      this.cached = token;
+      if (token === null) this.missingSince = this.now();
+    }
     return token;
   }
 
   invalidate(): void {
+    this.generation += 1;
     this.cached = undefined;
   }
 }

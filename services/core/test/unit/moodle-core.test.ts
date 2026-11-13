@@ -370,6 +370,27 @@ describe('Bestätigungscodes: Bindung an den Stand (T1-24, 08 §9.3)', () => {
     });
     expect(store.consume(fresh.token, 'assign.submit', params, { v: 1 })).toBe('ok');
   });
+
+  it('revokeAll verwirft alle offenen Codes (mit und ohne Bereich) und macht laufende Vorschauen ungültig', () => {
+    const store = new ConfirmationStore();
+    const scoped = store.issue('assign.submit', params, { scope: 'assign:3' });
+    const unscoped = store.issue('assign.submit', params);
+    // Zähler vor dem revokeAll gelesen (Vorschau läuft noch), mit und ohne Bereich
+    const epochScoped = store.epoch('assign:3');
+    const epochNone = store.epoch(null);
+    expect(store.revokeAll()).toBe(2);
+    expect(store.size).toBe(0);
+    expect(store.consume(scoped.token, 'assign.submit', params)).toBe('invalid');
+    expect(store.consume(unscoped.token, 'assign.submit', params)).toBe('invalid');
+    const lateScoped = store.issue('assign.submit', params, { scope: 'assign:3', epoch: epochScoped });
+    const lateNone = store.issue('assign.submit', params, { scope: null, epoch: epochNone });
+    expect(store.size).toBe(0);
+    expect(store.consume(lateScoped.token, 'assign.submit', params)).toBe('invalid');
+    expect(store.consume(lateNone.token, 'assign.submit', params)).toBe('invalid');
+    // Mit frischem Zähler gelten Codes wieder
+    const fresh = store.issue('assign.submit', params, { scope: null, epoch: store.epoch(null) });
+    expect(store.consume(fresh.token, 'assign.submit', params)).toBe('ok');
+  });
 });
 
 describe('Bestätigungscodes: Stand muss reines JSON sein (fail closed)', () => {
