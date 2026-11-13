@@ -1421,10 +1421,6 @@ skipped_decided: number
  */
 skipped_empty: number
 /**
- * Konzepte, die wegen der 80-%-Grenze nicht mehr dran waren
- */
-skipped_budget: number
-/**
  * Konzepte mit ungültiger oder abgelehnter KI-Ausgabe
  */
 failed_concepts: number
@@ -1433,10 +1429,6 @@ dropped_length: number
 dropped_sources: number
 dropped_cloze: number
 dropped_duplicates: number
-/**
- * true: die 80-%-Grenze des Monatsbudgets hat den Lauf beendet
- */
-budget_paused: boolean
 /**
  * null: ohne Embedder, Dubletten nur über gleichen Text
  */

@@ -2175,20 +2175,24 @@ Priorität(c) = (1 − R) · (1 + 0,1 · min(Überfälligkeit in Tagen, 10)) · 
 - **„Heute begonnen“** sind Karten, deren erste Bewertung am heutigen Lerntag liegt (`state_before.state = new` in `review_log`). `learning.new_cards_per_day` hat den Standard **20**. Ohne diese Grenze füllten neue Karten nach einer Vorlesung tagelang den ganzen Block.
 
 Auswahl in dieser Reihenfolge:
-1. Ist der Rest 0: `items = []`.
-2. Alle `angefangen` kommen hinein (sie werden nie gekappt). `rest` = Rest minus ihre Kosten, mindestens 0.
+1. Alle `angefangen` kommen hinein, **vor jeder Kappung** (sie werden nie gekappt, auch nicht bei Rest 0 oder wenn ihre Kosten den Rest übersteigen). `rest` = Rest minus ihre Kosten, mindestens 0.
+2. Ist der ursprüngliche Rest 0, endet die Auswahl hier: Es kommen keine `faellig` und keine `neu` dazu (ohne `angefangen` ist `items` dann leer).
 3. `reserve` = `min(rest / 2, Kosten aller zugelassenen neuen Karten)`.
 4. `faellig` in ihrer Reihenfolge, solange die Summe `≤ rest − reserve` bleibt. Die erste Karte, die nicht passt, beendet den Schritt.
 5. `neu` in ihrer Reihenfolge, solange die Summe `≤ rest` bleibt. Ebenso.
 6. Weitere `faellig` ab der Stelle aus Schritt 4, solange die Summe `≤ rest` bleibt.
-7. Ist bis hier nichts ausgewählt und gibt es Kandidaten: die erste `faellig`-Karte, sonst die erste neue. So gibt es bei knappem Rest nie einen leeren Block.
+7. Ist der ursprüngliche Rest größer als 0 und bis hier nichts ausgewählt (auch keine `angefangen`) und gibt es Kandidaten: die erste `faellig`-Karte, sonst die erste neue. So gibt es bei knappem Rest nie einen leeren Block.
 
-Anzeige-Reihenfolge der `items`: zuerst `angefangen`, danach `faellig` und `neu` gemeinsam nach Priorität (mit Tie-Breaker). Darauf folgt die **Mischung** (06 §3.2): Von vorn nach hinten wird jeweils die erste noch nicht gesetzte Karte genommen, deren Konzept ein anderes ist als das der zuletzt gesetzten. Gibt es keine, die nächste.
+**Anzeige-Reihenfolge** der `items` (Lead-Entscheidung): Die Auswahl oben bleibt, nur die Reihenfolge der ausgewählten Karten ist eine andere, in zwei Gruppen:
+1. **Wiederholungen:** zuerst die ausgewählten `angefangen` (nach `due`, dann ID), danach die ausgewählten `faellig` nach Priorität (mit Tie-Breaker).
+2. **Neue Karten:** die ausgewählten `neu` nach Priorität (mit Tie-Breaker).
+
+So bleiben bei frühem Abbruch keine Wiederholungen liegen. Die **Mischung** (06 §3.2) gilt **innerhalb jeder der beiden Gruppen** für sich: Von vorn nach hinten wird jeweils die erste noch nicht gesetzte Karte genommen, deren Konzept ein anderes ist als das der zuletzt gesetzten (am Anfang jeder Gruppe gibt es keine zuletzt gesetzte). Gibt es keine, die nächste. An der Grenze zwischen den Gruppen darf dasselbe Konzept zweimal hintereinander stehen.
 
 - `estimate_seconds` je Karte sind ihre Kosten, `estimated_seconds` die Summe (Anzeige „≈ n min“, aufgerundet).
 - **Kein Rückstand** (LP9, F-LRN-03): Die Antwort nennt nie, wie viele Karten insgesamt fällig sind. `more_due` sagt nur, ob ein Kandidat aus den drei Gruppen (neue nur bis zur Tagesgrenze) nicht im Block ist. Was nicht dran war, bleibt fällig und steht morgen nach Priorität wieder an. Das ersetzt den Lastausgleich aus 06 §3.2.
 - `has_cards = false`, wenn es keine nicht gelöschte Karte gibt. `reviewed_today` zählt die Bewertungen des Lerntags.
-- Höchstens 500 `items`. Das ist erreichbar (360 min bei 5 s je Karte), darum endet die Auswahl in den Schritten 2 bis 7 bei der 500. Karte, alles Weitere zählt für `more_due`.
+- Höchstens 500 `items`. Das ist erreichbar (360 min bei 5 s je Karte), darum endet die Auswahl in den Schritten 1 bis 7 bei der 500. Karte (die `angefangen` stehen davor), alles Weitere zählt für `more_due`.
 - Testfälle: `packages/schemas/fixtures/cards/queue.json`.
 
 ### 21.6 `cards.generate` (Worker, 05 §P10)
@@ -2202,7 +2206,7 @@ Anzeige-Reihenfolge der `items`: zuerst `angefangen`, danach `faellig` und `neu`
    2. **Eingabe bauen** (deterministisch): Name, Aliase, One-Liner, Art, `exam_relevant`. Die Belege des Konzepts aus dieser Session als nummerierte Liste `E1`, `E2`, … (höchstens 12, Folien zuerst): Folie mit Titel und Text (≤ 1 500 Zeichen), Zeitraum mit dem Text der überlappenden `transcript_segment` (≤ 300 Wörter). Die Marker `frage` der Session, deren `t_ms` in einem Zeitraum-Beleg liegt (05 §P10 Regel 7, als Hinweis im Prompt). Die Vorderseiten der vorhandenen, nicht gelöschten Karten des Konzepts (bei einem Vorschlag mit `concept_merge` zusätzlich die des Ziels), höchstens 50. Alles Material in Tags. Sprache der Ausgabe wie §20.3.
    3. **Kein Belegtext** (alle Belege ohne Text): Konzept entfällt (`skipped_empty`), kein Aufruf.
    4. `input_hash` = SHA-256 wie §20.3 Schritt 4 mit `CARDS_VERSION = 1`. Hat der offene Eintrag `(Konzept, Session)` denselben `input_hash` in seiner Nutzlast und ist `force` nicht gesetzt: bleibt stehen (`unchanged_batches`), kein Aufruf.
-   5. **Budget prüfen** (unten). Ist die Grenze erreicht, endet die Schleife: dieses und alle weiteren Konzepte zählen als `skipped_budget`, `budget_paused = true`.
+   5. **Budget prüfen** (unten). Ist die Grenze erreicht, endet der Job sofort mit `fehler` (Text und Regeln unter „Budget“). Schon geschriebene Vorschläge bleiben.
    6. **Aufruf.** Ausgabe je Karte: `kind`, Vorderseite, bei `basic` Antwort und optionale Erklärung, bei `cloze` die Lösungen, und die Nummern der Belege (`E…`), aus denen die Antwort stammt. Der Prompt verlangt 2 bis 5 Karten, bei vorhandenen Karten 0 bis 3 neue, mindestens eine `basic` (05 §P10 Regeln 1, 4, 5, 8).
    7. **Prüfen**, in dieser Reihenfolge, jede Karte fällt beim ersten Verstoß weg:
       - Inhalt säubern und prüfen wie §21.2 → `dropped_invalid`.
@@ -2222,9 +2226,8 @@ Anzeige-Reihenfolge der `items`: zuerst `angefangen`, danach `faellig` und `neu`
 
 **Budget** (Lead-Entscheidung, ergänzt §20.5)
 - `cards.generate` **pausiert schon ab 80 %** des Monatsbudgets (`CARDS_BUDGET_SHARE = 0,8`): Vor jedem Aufruf (auch vor dem Nachfordern) gilt `Summe ≥ 0,8 · ai.monthly_budget_eur` als erreicht. Summe und Monat wie §20.5. Die übrigen KI-Jobs laufen weiter bis 100 %. So verdrängen Karten weder Transkript noch Konzepte noch Kurzfassung.
-- Erreicht **vor dem ersten Aufruf** des Laufs: `fehler` sofort, `job.error = "Karten pausiert (KI-Budget zu 80 % genutzt)"`, kein Retry. Die Schrittliste zeigt das ruhig (§21.10).
-- Erreicht **später im Lauf:** Der Job endet `fertig` mit `budget_paused = true`, die bis dahin geschriebenen Vorschläge bleiben.
-- Fortsetzen: Der Nutzer erhöht das Budget, oder ein neuer Monat beginnt, und stößt `reprocess` mit `from_step: "cards.generate"` an. Von selbst läuft nichts nach. `monthly_budget_eur = 0` schaltet auch die Karten ab.
+- Erreicht **vor dem ersten Aufruf oder mitten im Lauf:** In beiden Fällen endet der Job sofort mit `fehler` und `job.error = "Karten pausiert (KI-Budget zu 80 % genutzt)"`, kein automatischer Retry. So zeigt die Schrittliste die Pause ruhig an (§21.10) und bietet „Karten erzeugen" an. Bereits geschriebene Vorschläge bleiben, denn jedes Konzept hat seine eigene Transaktion (Schritt 3.8). Ein `CardsGenerateResult` entsteht in diesem Fall nicht, darum gibt es darin weder `budget_paused` noch `skipped_budget`.
+- Fortsetzen (nur so): Der Nutzer erhöht das Budget, oder ein neuer Monat beginnt, und stößt `reprocess` mit `from_step: "cards.generate"` an. Von selbst läuft nichts nach. `monthly_budget_eur = 0` schaltet auch die Karten ab.
 
 **Fake** (`SG_LLM=fake`, §20.5), deterministisch, ohne Netz. Je Konzept zwei Karten, beide mit dem ersten Beleg der Eingabe (`E1`):
 - `k1` `basic`: Vorderseite `Was ist <Name>?`, Antwort = One-Liner, ohne One-Liner `Erfundene Antwort zu <Name>.`, Erklärung `null`.
@@ -2234,7 +2237,9 @@ Anzeige-Reihenfolge der `items`: zuerst `angefangen`, danach `faellig` und `neu`
 
 ### 21.7 Inbox-Art `card_batch` (Ergänzung zu §20.6)
 
-Ein Eintrag je Konzept und Session. Nutzlast `InboxPayloadCardBatch`: `concept_id`, `concept_name` (Name beim Erzeugen, nur Anzeige), `cards` (1–8 `CardProposal` mit `key`, `content`, `sources`), `input_hash`, `prompt_version`, `model`. In `InboxItem` sind `concept_id`, `target_concept_id`, `relation_id` und `blocked` `null`. Das Konzept steht in der Nutzlast.
+Ein Eintrag je Konzept und Session. Nutzlast `InboxPayloadCardBatch`: `concept_id`, `concept_name` (Name zum Zeitpunkt der Erzeugung, nur Anzeige und Rückfall, siehe unten), `cards` (1–8 `CardProposal` mit `key`, `content`, `sources`), `input_hash`, `prompt_version`, `model`. In `InboxItem` sind `concept_id`, `target_concept_id`, `relation_id` und `blocked` `null`. Das Konzept steht in der Nutzlast.
+
+**Anzeigename:** Die Inbox-Zeile zeigt den **aktuellen** Namen des Konzepts (aus `card_concept_id`, bei einer Hülle das wirksame Konzept), nicht `payload.concept_name`. Der Core liefert ihn nachgeladen mit, oder die Web-App löst ihn über das Konzept auf. `payload.concept_name` ist nur der Name zum Zeitpunkt der Erzeugung.
 
 **Wirksames Konzept** eines Eintrags: das Konzept aus `card_concept_id`. Ist es eine Hülle (`zusammengefuehrt`), gilt ihr `merged_into` (Invariante 5: Karten gehören zum Ziel). Der Eintrag selbst wird beim Zusammenführen nicht umgehängt.
 
@@ -2305,7 +2310,7 @@ Ein Eintrag je Konzept und Session. Nutzlast `InboxPayloadCardBatch`: `concept_i
 - **Heute:** Kachel „Heute wiederholen · ≈ n min“ mit Sprung nach `/lernen`, nur wenn `items` nicht leer ist. Während eine Session läuft (`laeuft`/`pausiert`), zeigt Heute die Kachel nicht (R1).
 - **Konzeptansicht:** Abschnitt „Karten“ aus `GET /concepts/{id}/cards`: Vorderseite, Typ, Zustand in Worten („neu“, „fällig am <Datum>“, „pausiert“), ✦ bei `origin = ki`. „Karte anlegen“ öffnet den Editor (B5): Typ, Vorderseite, Rückseite, Beleg aus den Belegen des Konzepts wählen (Pflicht, der erste ist vorgewählt). Ohne Belege ist „Karte anlegen“ nicht verfügbar, mit dem Hinweis „Keine Belege mehr“.
 - **„Karte daraus“** (B5) an einem Satz der Kurzfassung im Rückblick: Editor mit dem Satz als Antwort und seinen Quellen als Beleg, das Konzept wählt der Nutzer aus den Konzepten der Session (nur aktive).
-- **Inbox:** Zeile für `card_batch`: Symbol, „n Karten zu *Konzept*“, ✦, aufklappbar mit je Karte Vorderseite, Rückseite, Quellen-Chips und einem Häkchen (Standard an). `→` übernimmt die angehakten (`cards` mit `accept: false` für die anderen), `←` verwirft alle, `E` bearbeitet die markierte Karte inline. 10-s-Toast „Rückgängig“ (`reopen`). Filter „Karten“. „Alle annehmen“ je Gruppe schließt die sichtbaren Kartenvorschläge ein.
+- **Inbox:** Zeile für `card_batch`: Symbol, „n Karten zu *Konzept*“ (aktueller Name des Konzepts, nicht `payload.concept_name`), ✦, aufklappbar mit je Karte Vorderseite, Rückseite, Quellen-Chips und einem Häkchen (Standard an). `→` übernimmt die angehakten (`cards` mit `accept: false` für die anderen), `←` verwirft alle, `E` bearbeitet die markierte Karte inline. 10-s-Toast „Rückgängig“ (`reopen`). Filter „Karten“. „Alle annehmen“ je Gruppe schließt die sichtbaren Kartenvorschläge ein.
 - **Schrittliste:** Schritt „Karten“. Steht er auf `fehler` und meldet `GET /ai/status` `budget.warn`, zeigt die Liste ruhig „Karten pausiert · KI-Budget“ mit Link zu den Einstellungen statt „nicht fertig“, dazu „Karten erzeugen“ (`reprocess` mit `from_step: "cards.generate"`). Fehlt der Schritt in `processing` (ältere Session) und hat die Session Konzepte: „Karten erzeugen“.
 - **Einstellungen → Lernen** (mit B4, nach B2): Zeitbudget in Minuten, neue Karten je Tag.
 - Texte ruhig und sachlich (07 §7), keine modalen Dialoge, Hell- und Dunkelmodus, alles mit der Tastatur bedienbar.
@@ -2344,7 +2349,7 @@ Ein Eintrag je Konzept und Session. Nutzlast `InboxPayloadCardBatch`: `concept_i
 ### 21.13 Abweichungen von der Spezifikation (Überblick)
 
 - **06 §1 Lernschritte:** über die Standard-Lernschritte von `ts-fsrs` statt über die Lernsitzung, weil es die Lernsitzung noch nicht gibt (§21.5). Zielbehaltensquote fest 0,90, kein Optimierer, kein `py-fsrs`.
-- **06 §3.2 Reihenfolge:** vereinfachte Priorität ohne `Importance` und `Urgency`, Klausurrelevanz als Faktor 1,5 (§21.5). Kein Lastausgleich über Tage und kein Hinweis „Budget erhöhen“ im Tagesbriefing: Was nicht in den Block passt, bleibt fällig.
+- **06 §3.2 Reihenfolge:** vereinfachte Priorität ohne `Importance` und `Urgency`, Klausurrelevanz als Faktor 1,5 (§21.5). Angezeigt werden zuerst alle Wiederholungen (inklusive Lernschritt-Karten), danach die neuen Karten, die Mischung gilt je Gruppe (§21.5). Kein Lastausgleich über Tage und kein Hinweis „Budget erhöhen“ im Tagesbriefing: Was nicht in den Block passt, bleibt fällig.
 - **06 §3.1:** Schätzung aus dem eigenen Median erst ab 20 Bewertungen je Typ, begrenzt auf 5 bis 60 s. Neu: Tagesgrenze für neue Karten (`new_cards_per_day`) und höchstens die Hälfte des Rests für neue Karten, solange Wiederholungen warten.
 - **06 §3.3/§3.4:** kein Klausurmodus, kein Erhaltungsmodus.
 - **03 §9 `card`:** nur `basic` und `cloze`. `sources jsonb` statt `source_evidence_ids uuid[]` (§21.1). Ohne `related_concept_ids` und `starred`. `origin` nur `ki` und `manuell`. Zusätzlich `inbox_item_id`.
@@ -2355,7 +2360,7 @@ Ein Eintrag je Konzept und Session. Nutzlast `InboxPayloadCardBatch`: `concept_i
 - **08 §1:** `POST /cards/{id}/review` statt `POST /reviews`, `GET /review/queue` ohne `context`, `GET /concepts/{id}/cards` statt `GET /cards`, dazu `GET`/`DELETE /cards/{id}`. Ohne `POST /cards/from-selection`, `/learn-sessions`, `/grade/open`, `/readiness`, `/mastery`.
 - **05 §P10:** ein Aufruf je Konzept, nur Stufe 2 (Regel 2 entfällt), keine MC-Ablenker (Regel 3), keine Aufgaben des Moduls und kein Altklausur-Stil in der Eingabe (gibt es noch nicht), ❓-Marker nur als Hinweis im Prompt ohne Prüfung (Regel 7). 2 bis 5 Karten je Konzept statt 3 bis 8 (F-LRN-02), weil nur zwei Typen zur Wahl stehen. Dubletten ohne Embedder nur über gleichen Text.
 - **05 §2 / F-LRN-02:** Karten entstehen in der Kette für alle Konzepte der Session und warten unsichtbar auf die Annahme des Konzepts, statt erst in Schritt 5 der geführten Nacharbeitung (F-NAC-05 nutzt später dieselben Einträge).
-- **F-DAT-05 / §20.5:** `cards.generate` pausiert schon ab 80 % des Monatsbudgets (§21.6). Bei einer Pause vor dem ersten Aufruf endet der Job mit `fehler`, damit die Schrittliste „Erneut“ anbieten kann.
+- **F-DAT-05 / §20.5:** `cards.generate` pausiert schon ab 80 % des Monatsbudgets (§21.6). Bei einer Pause endet der Job immer mit `fehler` (vor dem ersten Aufruf wie mitten im Lauf), damit die Schrittliste die Pause zeigen und „Karten erzeugen“ anbieten kann. Schon geschriebene Vorschläge bleiben.
 - **§20.7:** `ai.auto_accept` nimmt Kartenvorschläge nie automatisch an.
 - **F-LRN-03:** „Still auf die nächsten Tage verteilt“ heißt hier: Der Rest bleibt fällig und wird am nächsten Tag neu nach Priorität gewählt. Das Akzeptanzkriterium (nach 7 Tagen Pause kein Rückstandsberg) ist über das Zeitbudget erfüllt.
 - **03 §1 Versionierung:** `card` ohne `version` (§21.4).

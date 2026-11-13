@@ -2342,11 +2342,6 @@ class CardsGenerateResult(BaseModel):
         description='Konzepte ohne brauchbaren Belegtext oder ohne neue Karte',
         ge=0,
     )
-    skipped_budget: StrictInt = Field(
-        ...,
-        description='Konzepte, die wegen der 80-%-Grenze nicht mehr dran waren',
-        ge=0,
-    )
     failed_concepts: StrictInt = Field(
         ..., description='Konzepte mit ungültiger oder abgelehnter KI-Ausgabe', ge=0
     )
@@ -2355,9 +2350,6 @@ class CardsGenerateResult(BaseModel):
     dropped_sources: StrictInt = Field(..., ge=0)
     dropped_cloze: StrictInt = Field(..., ge=0)
     dropped_duplicates: StrictInt = Field(..., ge=0)
-    budget_paused: StrictBool = Field(
-        ..., description='true: die 80-%-Grenze des Monatsbudgets hat den Lauf beendet'
-    )
     embedding_model: StrictStr | None = Field(
         ...,
         description='null: ohne Embedder, Dubletten nur über gleichen Text',

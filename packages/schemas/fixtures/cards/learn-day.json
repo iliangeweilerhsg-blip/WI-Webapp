@@ -1,5 +1,5 @@
 {
-  "README": "VERTRAEGE §21.5: Lerntag = Kalendertag in Ortszeit (tz), vor 04:00 zählt der Vortag. day_ends_at = erster Zeitpunkt des nächsten Lerntags. overdue_days = max(0, Lerntag(now) − Lerntag(due)) in Kalendertagen. Core (B2) prüft dagegen.",
+  "README": "VERTRAEGE §21.5: Lerntag = Kalendertag in Ortszeit (tz), vor 04:00 zählt der Vortag. day_ends_at = erster Zeitpunkt des nächsten Lerntags. overdue_days = max(0, Lerntag(now) − Lerntag(due)) in Kalendertagen. Core (B2) prüft dagegen. Die Liste cases prüft day und day_ends_at, die Liste overdue prüft overdue_days: Je Eintrag sind now (der Zeitpunkt der Anfrage), due (die Fälligkeit der Karte) und tz Eingabe, overdue_days ist der erwartete Wert.",
   "cases": [
     {
       "name": "kurz vor dem Tageswechsel",
@@ -142,6 +142,41 @@
       "now": "2026-11-13T10:00:00Z",
       "due": "2026-11-14T09:00:00Z",
       "overdue_days": 0
+    },
+    {
+      "name": "knapp vor dem Tageswechsel fällig (03:59 Ortszeit zählt noch zum Vortag)",
+      "tz": "Europe/Zurich",
+      "now": "2026-11-13T10:00:00Z",
+      "due": "2026-11-13T02:59:00Z",
+      "overdue_days": 1
+    },
+    {
+      "name": "genau zum Tageswechsel fällig (04:00 Ortszeit gehört zu heute)",
+      "tz": "Europe/Zurich",
+      "now": "2026-11-13T10:00:00Z",
+      "due": "2026-11-13T03:00:00Z",
+      "overdue_days": 0
+    },
+    {
+      "name": "jetzt nach Mitternacht, fällig am Abend davor (derselbe Lerntag)",
+      "tz": "Europe/Zurich",
+      "now": "2026-11-13T23:30:00Z",
+      "due": "2026-11-13T18:00:00Z",
+      "overdue_days": 0
+    },
+    {
+      "name": "über die Umstellung auf Winterzeit (25-Stunden-Tag)",
+      "tz": "Europe/Zurich",
+      "now": "2026-10-26T10:00:00Z",
+      "due": "2026-10-24T10:00:00Z",
+      "overdue_days": 2
+    },
+    {
+      "name": "westlich von UTC",
+      "tz": "America/New_York",
+      "now": "2026-11-13T10:00:00Z",
+      "due": "2026-11-12T10:00:00Z",
+      "overdue_days": 1
     }
   ]
 }

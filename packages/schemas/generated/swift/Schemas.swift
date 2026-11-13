@@ -4482,8 +4482,6 @@ extension CardsGeneratePayload {
 /// Ergebnis von cards.generate
 // MARK: - CardsGenerateResult
 struct CardsGenerateResult: Codable {
-    /// true: die 80-%-Grenze des Monatsbudgets hat den Lauf beendet
-    let budgetPaused: Bool
     /// betrachtete Konzepte der Session
     let concepts: Int
     /// Euro (Schätzung, VERTRAEGE §20.5)
@@ -4504,8 +4502,6 @@ struct CardsGenerateResult: Codable {
     let proposedCards: Int
     let sessionDeleted: Bool
     let sessionID: String
-    /// Konzepte, die wegen der 80-%-Grenze nicht mehr dran waren
-    let skippedBudget: Int
     /// Konzepte, deren Vorschlag aus dieser Session schon entschieden ist
     let skippedDecided: Int
     /// Konzepte ohne brauchbaren Belegtext oder ohne neue Karte
@@ -4514,7 +4510,6 @@ struct CardsGenerateResult: Codable {
     let unchangedBatches: Int
 
     enum CodingKeys: String, CodingKey {
-        case budgetPaused = "budget_paused"
         case concepts = "concepts"
         case costEur = "cost_eur"
         case droppedCloze = "dropped_cloze"
@@ -4530,7 +4525,6 @@ struct CardsGenerateResult: Codable {
         case proposedCards = "proposed_cards"
         case sessionDeleted = "session_deleted"
         case sessionID = "session_id"
-        case skippedBudget = "skipped_budget"
         case skippedDecided = "skipped_decided"
         case skippedEmpty = "skipped_empty"
         case unchangedBatches = "unchanged_batches"
@@ -4556,7 +4550,6 @@ extension CardsGenerateResult {
     }
 
     func with(
-        budgetPaused: Bool? = nil,
         concepts: Int? = nil,
         costEur: Double? = nil,
         droppedCloze: Int? = nil,
@@ -4572,13 +4565,11 @@ extension CardsGenerateResult {
         proposedCards: Int? = nil,
         sessionDeleted: Bool? = nil,
         sessionID: String? = nil,
-        skippedBudget: Int? = nil,
         skippedDecided: Int? = nil,
         skippedEmpty: Int? = nil,
         unchangedBatches: Int? = nil
     ) -> CardsGenerateResult {
         return CardsGenerateResult(
-            budgetPaused: budgetPaused ?? self.budgetPaused,
             concepts: concepts ?? self.concepts,
             costEur: costEur ?? self.costEur,
             droppedCloze: droppedCloze ?? self.droppedCloze,
@@ -4594,7 +4585,6 @@ extension CardsGenerateResult {
             proposedCards: proposedCards ?? self.proposedCards,
             sessionDeleted: sessionDeleted ?? self.sessionDeleted,
             sessionID: sessionID ?? self.sessionID,
-            skippedBudget: skippedBudget ?? self.skippedBudget,
             skippedDecided: skippedDecided ?? self.skippedDecided,
             skippedEmpty: skippedEmpty ?? self.skippedEmpty,
             unchangedBatches: unchangedBatches ?? self.unchangedBatches
@@ -26254,7 +26244,6 @@ extension CardsGeneratePayload {
 extension CardsGenerateResult {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(budgetPaused, forKey: .budgetPaused)
         try container.encode(concepts, forKey: .concepts)
         try container.encode(costEur, forKey: .costEur)
         try container.encode(droppedCloze, forKey: .droppedCloze)
@@ -26270,7 +26259,6 @@ extension CardsGenerateResult {
         try container.encode(proposedCards, forKey: .proposedCards)
         try container.encode(sessionDeleted, forKey: .sessionDeleted)
         try container.encode(sessionID, forKey: .sessionID)
-        try container.encode(skippedBudget, forKey: .skippedBudget)
         try container.encode(skippedDecided, forKey: .skippedDecided)
         try container.encode(skippedEmpty, forKey: .skippedEmpty)
         try container.encode(unchangedBatches, forKey: .unchangedBatches)

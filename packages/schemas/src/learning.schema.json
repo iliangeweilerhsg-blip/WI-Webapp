@@ -718,14 +718,12 @@
         "unchanged_batches",
         "skipped_decided",
         "skipped_empty",
-        "skipped_budget",
         "failed_concepts",
         "dropped_invalid",
         "dropped_length",
         "dropped_sources",
         "dropped_cloze",
         "dropped_duplicates",
-        "budget_paused",
         "embedding_model",
         "prompt_version",
         "model",
@@ -769,11 +767,6 @@
           "minimum": 0,
           "description": "Konzepte ohne brauchbaren Belegtext oder ohne neue Karte"
         },
-        "skipped_budget": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Konzepte, die wegen der 80-%-Grenze nicht mehr dran waren"
-        },
         "failed_concepts": {
           "type": "integer",
           "minimum": 0,
@@ -798,10 +791,6 @@
         "dropped_duplicates": {
           "type": "integer",
           "minimum": 0
-        },
-        "budget_paused": {
-          "type": "boolean",
-          "description": "true: die 80-%-Grenze des Monatsbudgets hat den Lauf beendet"
         },
         "embedding_model": {
           "type": ["string", "null"],
