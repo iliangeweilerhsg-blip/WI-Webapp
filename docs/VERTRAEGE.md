@@ -283,7 +283,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 
 | Methode und Pfad | Body | Antwort | Fehler |
 |---|---|---|---|
-| `GET /sessions?module_id&state&from&to&order` | – | 200 `SessionList` | 400 bei ungültigem `order` oder Cursor |
+| `GET /sessions?module_id&state&from&to&order` | – | 200 `SessionList` | 400 `validation_failed` bei ungültigem `order`, 400 `invalid_cursor` bei ungültigem Cursor |
 | `POST /sessions` | `SessionCreate` | 201 `Session` (Zustand `bereit`) | 404 `module_not_found`, 404 `slide_deck_not_found`, 400 `slide_deck_module_mismatch` (Foliensatz eines anderen Moduls), 409 `session_exists` |
 | `GET /sessions/{id}` | – | 200 `Session` | 404 `session_not_found` |
 | `PATCH /sessions/{id}` | `SessionUpdate` | 200 `Session` | 404 |
@@ -1161,7 +1161,7 @@ Basis `/api/v1`. Die Pfade sind festgelegt (Lead, Review #133).
 | Endpunkt | Body / Query | Antwort | Fehler |
 |---|---|---|---|
 | `GET /moodle/status` | – | `MoodleStatus` (08 §9). Zustand des Zugangs, `core_webservice_get_site_info` höchstens alle 5 min, „ungültig“ und „nicht erreichbar“ nur 60 s gemerkt. Der Core merkt sich einen gefundenen Token bis zum Neustart oder bis Moodle ihn ablehnt, einen fehlenden 30 s | – |
-| `POST /moodle/recheck` | – (kein Body) | `200 MoodleStatus` (gleiches Schema wie `GET /moodle/status`). Leert den Token-Cache und den Status-Cache und holt den Zustand neu, damit ein neuer Token nach `pnpm sg moodle login` sofort gilt. Verwirft alle offenen Bestätigungscodes (08 §9.3): Ein Code aus einer Vorschau mit dem alten Token, evtl. eines anderen Kontos, gilt danach nicht mehr. Löst keinen Abgleich und keine Moodle-Aktion aus (nur `core_webservice_get_site_info`). Gleichzeitige Aufrufe teilen sich einen Lauf. Kein Token oder fehlende `SG_MOODLE_URL` ist kein Fehler, sondern `200` mit `nicht_eingerichtet`. **Zugang `local`** wie `GET /system/power`: aus dem Netz `401` ohne Token, `403 local_only` mit Token | – |
+| `POST /moodle/recheck` | – (kein Body) | `200 MoodleStatus` (gleiches Schema wie `GET /moodle/status`). Leert den Token-Cache und den Status-Cache und holt den Zustand neu, damit ein neuer Token nach `pnpm sg moodle login` sofort gilt. Verwirft alle offenen Bestätigungscodes (08 §9.3): Ein Code aus einer Vorschau mit dem alten Token, evtl. eines anderen Kontos, gilt danach nicht mehr. Löst keinen Abgleich und keine Moodle-Aktion aus (nur `core_webservice_get_site_info`). Läuft schon ein Recheck, wird höchstens ein weiterer nachgereiht und von allen Aufrufern geteilt, die währenddessen kommen (der laufende hat eventuell vor dem neuen Token begonnen). Zwischen den Starts zweier Läufe liegt mindestens 1 s. Kein Token oder fehlende `SG_MOODLE_URL` ist kein Fehler, sondern `200` mit `nicht_eingerichtet`. **Zugang `local`** wie `GET /system/power`: aus dem Netz `401` ohne Token, `403 local_only` mit Token | – |
 | `GET /moodle/courses` | – | `MoodleCourseList` mit `module_id`, `suggested_module_id`, `category`. Nur lesend | wie 08 §9.2 |
 | `POST /moodle/auto-assign` | – | `MoodleAutoAssignResult` (`assigned`, `created`). Automatische Zuordnung (§17.7). Origin-Schutz wie alle POSTs | `503 moodle_not_configured`, Fehler der Kursliste wie 08 §9.2 |
 | `GET /moodle/links` | – | `MoodleCourseLinkList` mit `auto` und `module_removable` | – |

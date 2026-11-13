@@ -22,6 +22,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { processAlive } from './liveness.ts';
+import { readSmallRegularFile } from './nofollow.ts';
 
 export class CoreLockHeldError extends Error {
   readonly pid: number;
@@ -32,6 +33,64 @@ export class CoreLockHeldError extends Error {
     this.pid = pid;
     this.lockPath = lockPath;
   }
+}
+
+/** Markierung `run/restore.pid` (`<pid>\n`): `sg restore` und der Rückbau legen sie neben `core.lock` ab, solange sie die Sperre halten */
+export function restoreMarkerPath(dataDir: string): string {
+  return join(dataDir, 'run', 'restore.pid');
+}
+
+/** Eine PID-Datei ist `<pid>\n`; mehr wird nie gelesen */
+const MARKER_MAX_BYTES = 64;
+
+/**
+ * Schreibt die Markierung für die eigene PID (best effort, die Sperre selbst bleibt maßgeblich). Neu angelegt mit
+ * `wx` (`O_EXCL`): Ein symbolischer Link an dieser Stelle wird entfernt, nie verfolgt.
+ */
+export function writeRestoreMarker(dataDir: string, pid: number = process.pid): void {
+  try {
+    rmSync(restoreMarkerPath(dataDir), { force: true });
+    writeFileSync(restoreMarkerPath(dataDir), `${pid}\n`, { mode: 0o600, flag: 'wx' });
+  } catch {
+    // Nur für die Anzeige
+  }
+}
+
+export function removeRestoreMarker(dataDir: string, pid: number = process.pid): void {
+  try {
+    if (readRestoreMarker(dataDir) === pid) rmSync(restoreMarkerPath(dataDir), { force: true });
+  } catch {
+    // Aufräumen darf nie stören
+  }
+}
+
+/**
+ * PID aus der Markierung, `null` wenn es keine gibt oder sie keine kleine reguläre Datei ist (kein Folgen eines
+ * Links, kein Warten an einer FIFO, wie `readLockFileSafe` in `sg doctor`). Nur ein Hinweis: gilt nur, wenn sie der
+ * PID in `core.lock` gleicht.
+ */
+export function readRestoreMarker(dataDir: string): number | null {
+  try {
+    const buffer = readSmallRegularFile(restoreMarkerPath(dataDir), MARKER_MAX_BYTES);
+    return buffer === null ? null : parsePid(buffer.toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Setzt die Markierung zur gehaltenen Sperre. Das zurückgegebene Handle entfernt beim Freigeben zuerst die
+ * Markierung, dann die Sperre, auch über `releaseOnSignal` (Strg+C).
+ */
+export function markRestore(lock: CoreLockHandle, dataDir: string): CoreLockHandle {
+  writeRestoreMarker(dataDir);
+  return {
+    path: lock.path,
+    release() {
+      removeRestoreMarker(dataDir);
+      lock.release();
+    },
+  };
 }
 
 export interface CoreLockHandle {

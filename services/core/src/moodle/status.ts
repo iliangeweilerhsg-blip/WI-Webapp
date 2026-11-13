@@ -11,6 +11,20 @@ export const STATUS_CACHE_MS = 5 * 60 * 1000;
 /** „Nicht erreichbar“ und „ungültig“ nur kurz merken: Ausfall oder neuer Token wirken so schnell */
 export const UNREACHABLE_CACHE_MS = 60 * 1000;
 
+/** Mindestabstand zwischen den Starts zweier Rechecks (`POST /moodle/recheck` kann nur ein lokaler Prozess aufrufen) */
+export const RECHECK_MIN_GAP_MS = 1000;
+
+/** Uhr des Recheck-Abstands (monotone Millisekunden, Warten); im Test ersetzbar */
+export interface RecheckClock {
+  now(): number;
+  sleep(ms: number): Promise<void>;
+}
+
+const REAL_RECHECK_CLOCK: RecheckClock = {
+  now: () => performance.now(),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export type MoodleCheckResult = 'ok' | 'invalid' | 'unreachable' | 'not_configured';
@@ -63,6 +77,9 @@ export interface MoodleStatusServiceOptions {
   readMeta: () => Promise<MoodleMeta>;
   now?: () => Date;
   cacheMs?: number;
+  /** Mindestabstand zwischen zwei Rechecks, Standard `RECHECK_MIN_GAP_MS` */
+  recheckMinGapMs?: number;
+  recheckClock?: RecheckClock;
 }
 
 export class MoodleStatusService {
@@ -72,7 +89,13 @@ export class MoodleStatusService {
   private readonly cacheMs: number;
   private cached: CachedCheck | null = null;
   private pending: Promise<CachedCheck> | null = null;
-  private pendingRecheck: Promise<MoodleStatus> | null = null;
+  private readonly recheckMinGapMs: number;
+  private readonly recheckClock: RecheckClock;
+  /** Laufender Recheck */
+  private runningRecheck: Promise<MoodleStatus> | null = null;
+  /** Höchstens ein weiterer Recheck wartet; alle späteren Aufrufer teilen ihn */
+  private queuedRecheck: Promise<MoodleStatus> | null = null;
+  private lastRecheckStart: number | null = null;
   /** Zählt Verwerfungen des Zwischenspeichers: Ein Lauf mit altem Stand darf ihn nicht mehr füllen */
   private epoch = 0;
 
@@ -81,6 +104,8 @@ export class MoodleStatusService {
     this.readMeta = options.readMeta;
     this.now = options.now ?? (() => new Date());
     this.cacheMs = options.cacheMs ?? STATUS_CACHE_MS;
+    this.recheckMinGapMs = options.recheckMinGapMs ?? RECHECK_MIN_GAP_MS;
+    this.recheckClock = options.recheckClock ?? REAL_RECHECK_CLOCK;
     // Lehnt Moodle den Token bei irgendeinem Aufruf ab, gilt der Status sofort als veraltet
     this.client.onTokenRejected(() => this.invalidate());
   }
@@ -91,22 +116,53 @@ export class MoodleStatusService {
   }
 
   /**
-   * Token-Cache und Status-Cache leeren und den Zustand neu holen (`POST /moodle/recheck`). Gleichzeitige
-   * Aufrufe teilen sich einen Lauf. Löst keinen Abgleich und keine Moodle-Aktion aus.
+   * Token-Cache und Status-Cache leeren und den Zustand neu holen (`POST /moodle/recheck`). Läuft schon ein
+   * Recheck, wird höchstens EIN weiterer nachgereiht und von allen Aufrufern geteilt, die währenddessen kommen:
+   * Der laufende Lauf hat eventuell vor dem neuen Token begonnen. Zwischen den Starts liegt mindestens
+   * `recheckMinGapMs`. Löst keinen Abgleich und keine Moodle-Aktion aus.
    */
   recheck(): Promise<MoodleStatus> {
-    this.pendingRecheck ??= this.runRecheck().finally(() => {
-      this.pendingRecheck = null;
+    // Sofort verwerfen, nicht erst beim Start des nachgereihten Laufs: Sonst liefe eine Vorschau in der Wartezeit
+    // noch mit dem alten Token und Stand, und ihr Code überstünde das `revokeAll` der Route (#320)
+    this.discardForRecheck();
+    if (this.queuedRecheck) return this.queuedRecheck;
+    const previous = this.runningRecheck;
+    if (previous === null && this.gapLeft() <= 0) return this.startRecheck();
+    const queued = (async () => {
+      await previous?.catch(() => undefined);
+      const wait = this.gapLeft();
+      if (wait > 0) await this.recheckClock.sleep(wait);
+      this.queuedRecheck = null;
+      return this.startRecheck();
+    })();
+    this.queuedRecheck = queued;
+    return queued;
+  }
+
+  private gapLeft(): number {
+    if (this.lastRecheckStart === null) return 0;
+    return this.lastRecheckStart + this.recheckMinGapMs - this.recheckClock.now();
+  }
+
+  private startRecheck(): Promise<MoodleStatus> {
+    this.lastRecheckStart = this.recheckClock.now();
+    const run = this.runRecheck().finally(() => {
+      if (this.runningRecheck === run) this.runningRecheck = null;
     });
-    return this.pendingRecheck;
+    this.runningRecheck = run;
+    return run;
+  }
+
+  /** Status- und Token-Cache verwerfen; ein noch laufender Aufruf mit dem alten Token füllt den Cache nicht mehr */
+  private discardForRecheck(): void {
+    this.epoch += 1;
+    this.cached = null;
+    this.pending = null;
+    this.client.resetToken();
   }
 
   private async runRecheck(): Promise<MoodleStatus> {
-    this.epoch += 1;
-    this.cached = null;
-    // Ein noch laufender Aufruf mit dem alten Token zählt nicht
-    this.pending = null;
-    this.client.resetToken();
+    this.discardForRecheck();
     return this.getStatus();
   }
 

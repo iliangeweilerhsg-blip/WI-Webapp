@@ -232,6 +232,14 @@ describe('checkCoreLock', () => {
     expect(r.detail).toMatch(/4242/);
   });
 
+  it('Sperre gehört laut Markierung zu sg restore: "Wiederherstellung läuft"', async () => {
+    const r = await checkCoreLock(lockCfg, { ...io(pid(4242), true, false), restorePid: () => 4242 });
+    expect(r.status).toBe('info');
+    expect(r.detail).toBe('Wiederherstellung läuft (PID 4242). Warte, bis sie fertig ist.');
+    const other = await checkCoreLock(lockCfg, { ...io(pid(4242), true, false), restorePid: () => 99 });
+    expect(other.detail).toMatch(/antwortet nicht/);
+  });
+
   it('tote PID: veraltet, wird beim nächsten Start übernommen (kein Fehler)', async () => {
     const r = await checkCoreLock(lockCfg, io(pid(4242), false, false));
     expect(r.status).toBe('info');

@@ -28,7 +28,13 @@ import {
   type BackupIo,
 } from './backup.ts';
 import type { SgConfig } from './config.ts';
-import { CoreLockHeldError, releaseOnSignal, type CoreLockHandle } from './core-lock.ts';
+import {
+  CoreLockHeldError,
+  markRestore,
+  readRestoreMarker,
+  releaseOnSignal,
+  type CoreLockHandle,
+} from './core-lock.ts';
 import { NoFollowReader, UnsafeTargetError, type Identity } from './nofollow.ts';
 import { safeIdent, type PgAccess } from './pg.ts';
 import { StandError, withVerifiedDump } from './staging.ts';
@@ -270,15 +276,18 @@ async function withCoreLock(deps: RestoreDeps, fn: () => Promise<number>): Promi
     lock = deps.holdLock();
   } catch (error) {
     if (!(error instanceof CoreLockHeldError)) throw error;
-    deps.err(await blockedMessage(deps, ['Core']));
+    if (readRestoreMarker(deps.cfg.dataDir) === error.pid) {
+      deps.err(`Eine Wiederherstellung läuft bereits (PID ${error.pid}). Warte, bis sie fertig ist.`);
+    } else deps.err(await blockedMessage(deps, ['Core']));
     return 3;
   }
-  const unhook = releaseOnSignal(lock);
+  const marked = markRestore(lock, deps.cfg.dataDir);
+  const unhook = releaseOnSignal(marked);
   try {
     return await fn();
   } finally {
     unhook();
-    lock.release();
+    marked.release();
   }
 }
 
