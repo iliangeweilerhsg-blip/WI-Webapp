@@ -209,6 +209,9 @@ importers:
       postgres:
         specifier: 4.0.0
         version: 4.0.0
+      ts-fsrs:
+        specifier: 5.4.2
+        version: 5.4.2
       zod:
         specifier: 4.6.7
         version: 4.6.7
@@ -2815,6 +2818,10 @@ packages:
     peerDependencies:
       typescript: '>=4.8.4'
 
+  ts-fsrs@5.4.2:
+    resolution: {integrity: sha512-z4qop4pzTcyTzuJ566d9EaX/4bZZzhYfeaPImfVr+xcYT65c5oBgFDijUhCE/D+C78eaolHIhKRZ04/RwF+v2g==}
+    engines: {node: '>=20.0.0'}
+
   ts-node@10.9.2:
     resolution: {integrity: sha512-f0FFpIdcHgn8zcPSbf1dRevwt047YMnaiJM3u2w2RewrB+fob/zePZcrOyQoLMMO7aBIddLcQIEK5dYjkLnGrQ==}
     hasBin: true
@@ -5270,6 +5277,8 @@ snapshots:
   ts-api-utils@2.5.0(typescript@6.0.3):
     dependencies:
       typescript: 6.0.3
+
+  ts-fsrs@5.4.2: {}
 
   ts-node@10.9.2(@types/node@24.19.2)(typescript@5.9.3):
     dependencies:

@@ -1,0 +1,13 @@
+{
+  "id": "0190f6a2-0000-7000-8000-0000000000c1",
+  "kind": "card",
+  "title": "Wann ist eine Relation in dritter Normalform?",
+  "deleted_at": "2026-11-13T10:00:00.000Z",
+  "purge_at": "2026-12-13T10:00:00.000Z",
+  "parent": {
+    "id": "0190f6a2-0000-7000-8000-0000000000c2",
+    "kind": "concept",
+    "title": "Dritte Normalform"
+  },
+  "dependent_count": 0
+}

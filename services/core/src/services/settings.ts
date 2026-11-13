@@ -1,6 +1,6 @@
 // Globale Einstellungen (F-EIN-01, VERTRAEGE §14.1). getSettings aus T1-DB; PATCH baut T1-19.
 //
-// Gespeichert ist je Bereich (`general`, `lecture`, `pen`, `data`, `ai`) eine Zeile in `setting` mit dem Bereichsobjekt
+// Gespeichert ist je Bereich (`general`, `lecture`, `pen`, `data`, `ai`, `learning`) eine Zeile in `setting` mit dem Bereichsobjekt
 // OHNE Standardwerte. getSettings füllt fehlende oder ungültige Felder mit den Standards auf.
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import {
@@ -8,11 +8,13 @@ import {
   AiSettingsUpdateSchema,
   DataSettingsUpdateSchema,
   GeneralSettingsUpdateSchema,
+  LearningSettingsUpdateSchema,
   LectureSettingsUpdateSchema,
   PenSettingsUpdateSchema,
   type AiSettings,
   type DataSettings,
   type GeneralSettings,
+  type LearningSettings,
   type LectureSettings,
   type PenSettings,
   type Settings,
@@ -24,8 +26,9 @@ import type { Config } from '../config.ts';
 import type { Db, DbOrTx } from '../db/client.ts';
 import { notDeleted, setting } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
+import { DEFAULT_NEW_CARDS_PER_DAY, DEFAULT_REVIEW_BUDGET_MINUTES } from '../learning/params.ts';
 
-export const SETTING_KEYS = ['general', 'lecture', 'pen', 'data', 'ai'] as const;
+export const SETTING_KEYS = ['general', 'lecture', 'pen', 'data', 'ai', 'learning'] as const;
 export type SettingKey = (typeof SETTING_KEYS)[number];
 
 /** Standards aus VERTRAEGE §14.1 und §20.7 (ohne `general.data_dir`, das kommt aus SG_DATA_DIR) */
@@ -35,6 +38,7 @@ export const DEFAULT_SETTINGS: {
   pen: PenSettings;
   data: DataSettings;
   ai: AiSettings;
+  learning: LearningSettings;
 } = {
   general: { content_lang: 'de', appearance: 'system' },
   lecture: {
@@ -68,6 +72,11 @@ export const DEFAULT_SETTINGS: {
   data: { backup_target: null, backup_encryption: false, backup_time: '03:00' },
   // KI (§20.7): Der Worker liest denselben Bereich direkt aus `setting` und nutzt dieselben Standards
   ai: { monthly_budget_eur: 10, auto_accept: 'aus' },
+  // Lernen (§21.9)
+  learning: {
+    review_budget_minutes: DEFAULT_REVIEW_BUDGET_MINUTES,
+    new_cards_per_day: DEFAULT_NEW_CARDS_PER_DAY,
+  },
 };
 
 /**
@@ -86,7 +95,7 @@ function mergeArea<T extends object>(defaults: T, stored: unknown, schema: z.Zod
 }
 
 /**
- * Alle Bereiche (Phase 1 und `ai`, §20.7) mit Standards aufgefüllt (`GET /settings`).
+ * Alle Bereiche (Phase 1, `ai` nach §20.7 und `learning` nach §21.9) mit Standards aufgefüllt (`GET /settings`).
  * `general.data_dir` kommt aus der App-Konfiguration (`SG_DATA_DIR`), nie aus der Datenbank.
  */
 export async function getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): Promise<Settings> {
@@ -104,6 +113,7 @@ export async function getSettings(db: DbOrTx, config: Pick<Config, 'dataDir'>): 
     pen: mergeArea(DEFAULT_SETTINGS.pen, stored.get('pen'), PenSettingsUpdateSchema),
     data: mergeArea(DEFAULT_SETTINGS.data, stored.get('data'), DataSettingsUpdateSchema),
     ai: mergeArea(DEFAULT_SETTINGS.ai, stored.get('ai'), AiSettingsUpdateSchema),
+    learning: mergeArea(DEFAULT_SETTINGS.learning, stored.get('learning'), LearningSettingsUpdateSchema),
   };
 }
 
@@ -117,6 +127,15 @@ export async function getAiSettings(db: DbOrTx): Promise<AiSettings> {
     .from(setting)
     .where(and(eq(setting.key, 'ai'), notDeleted(setting)));
   return mergeArea(DEFAULT_SETTINGS.ai, row?.value, AiSettingsUpdateSchema);
+}
+
+/** Nur der Bereich `learning` (§21.9), mit Standards aufgefüllt: Zeitbudget und neue Karten je Tag */
+export async function getLearningSettings(db: DbOrTx): Promise<LearningSettings> {
+  const [row] = await db
+    .select({ value: setting.value })
+    .from(setting)
+    .where(and(eq(setting.key, 'learning'), notDeleted(setting)));
+  return mergeArea(DEFAULT_SETTINGS.learning, row?.value, LearningSettingsUpdateSchema);
 }
 
 /**

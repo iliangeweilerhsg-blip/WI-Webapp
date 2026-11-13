@@ -18,6 +18,7 @@ const KIND_LABEL: Record<TrashKind, string> = {
   page: 'Seite',
   marker: 'Marker',
   photo: 'Foto',
+  card: 'Karte',
 };
 
 const smallButton = 'rounded-md border border-border px-3 py-1 text-sm hover:bg-surface disabled:opacity-50';

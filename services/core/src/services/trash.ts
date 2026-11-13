@@ -38,7 +38,11 @@ export type Node =
   | 'notebook'
   | 'page'
   | 'stroke'
-  | 'page_element';
+  | 'page_element'
+  // Karten (§21.8): Zustand und Bewertungen hängen an der Karte und gehen mit ihr
+  | 'card'
+  | 'card_state'
+  | 'review_log';
 
 export interface Edge {
   child: Node;
@@ -104,7 +108,11 @@ export const CHILDREN: Record<Node, Edge[]> = {
   search_chunk: [],
   inbox_item: [],
   evidence: [],
-  concept: [{ child: 'concept_module', fk: 'concept_id' }],
+  concept: [
+    { child: 'concept_module', fk: 'concept_id' },
+    // §21.8: Die Kante wirkt erst, wenn Konzepte selbst löschbar werden (F-BIB-05)
+    { child: 'card', fk: 'concept_id' },
+  ],
   concept_module: [],
   concept_relation: [],
   session_summary: [],
@@ -115,10 +123,16 @@ export const CHILDREN: Record<Node, Edge[]> = {
   ],
   stroke: [],
   page_element: [],
+  card: [
+    { child: 'card_state', fk: 'card_id' },
+    { child: 'review_log', fk: 'card_id' },
+  ],
+  card_state: [],
+  review_log: [],
 };
 
 /** Direktes Elternobjekt je Papierkorb-Art (für `restore_parent_deleted`) */
-export const PARENT: Partial<Record<TrashKind, { kind: TrashKind; fk: string }>> = {
+export const PARENT: Partial<Record<TrashKind, { kind: TrashKind | 'concept'; fk: string }>> = {
   module: { kind: 'semester', fk: 'semester_id' },
   slide_deck: { kind: 'module', fk: 'module_id' },
   exercise_sheet: { kind: 'module', fk: 'module_id' },
@@ -127,6 +141,8 @@ export const PARENT: Partial<Record<TrashKind, { kind: TrashKind; fk: string }>>
   page: { kind: 'notebook', fk: 'notebook_id' },
   marker: { kind: 'session', fk: 'session_id' },
   photo: { kind: 'session', fk: 'session_id' },
+  // Das Elternobjekt einer Karte ist ein Konzept, das selbst keine `TrashKind` ist (§21.8)
+  card: { kind: 'concept', fk: 'concept_id' },
 };
 
 /** Anzeigename je Art (SQL-Ausdruck über die Zeile) */
@@ -141,6 +157,11 @@ export const TITLE: Record<TrashKind, SQL> = {
   page: sql`'Seite ' || index`,
   marker: sql`'Marker'`,
   photo: sql`'Foto'`,
+  // Die ersten 80 Zeichen der Vorderseite, bei `cloze` mit […] statt der Lücken (§21.8)
+  card: sql`left(
+    CASE WHEN kind = 'cloze'
+      THEN regexp_replace(front->>'text_md', ${'\\{\\{c[0-9]+::[^{}]*\\}\\}'}, '[…]', 'g')
+      ELSE front->>'text_md' END, 80)`,
 };
 
 /**
@@ -148,7 +169,8 @@ export const TITLE: Record<TrashKind, SQL> = {
  * sein Modul („Modul A · Vorlesung“), damit man eine gelöschte Seite im Papierkorb wiederfindet. Ohne Modul bleibt der Titel.
  * Unqualifizierte Spalten, damit der Ausdruck mit und ohne Alias der Notizbuch-Tabelle funktioniert.
  */
-export function parentTitle(kind: TrashKind): SQL {
+export function parentTitle(kind: TrashKind | 'concept'): SQL {
+  if (kind === 'concept') return sql`name`;
   if (kind === 'notebook') {
     return sql`coalesce((SELECT m.name FROM module m WHERE m.id = module_id) || ' · ', '') || title`;
   }
@@ -166,6 +188,7 @@ export const TRASH_KINDS: readonly TrashKind[] = [
   'page',
   'marker',
   'photo',
+  'card',
 ];
 
 const notFound = (kind: TrashKind) =>
@@ -408,17 +431,22 @@ export async function restoreFromTrash(tx: Tx, id: string): Promise<TrashRestore
 
   const parentRef = PARENT[kind];
   if (parentRef) {
-    const [parent] = await tx.execute<{ id: string; deleted: boolean; title: string }>(
-      sql`SELECT p.id, p.deleted_at IS NOT NULL AS deleted, ${parentTitle(parentRef.kind)} AS title
+    // Eine Karte kommt nur zu einem aktiven Konzept zurück (§21.8): gelöscht oder nicht mehr `aktiv` blockiert
+    const inactive = parentRef.kind === 'concept' ? sql`p.status <> 'aktiv'` : sql`FALSE`;
+    const [parent] = await tx.execute<{ id: string; deleted: boolean; inactive: boolean; title: string }>(
+      sql`SELECT p.id, p.deleted_at IS NOT NULL AS deleted, ${inactive} AS inactive,
+                 ${parentTitle(parentRef.kind)} AS title
           FROM ${sql.identifier(parentRef.kind)} p
           WHERE p.id = (SELECT ${sql.identifier(parentRef.fk)} FROM ${sql.identifier(kind)} WHERE id = ${id})`,
     );
-    if (parent?.deleted) {
+    if (parent?.deleted || parent?.inactive) {
       const details: TrashParent = { id: parent.id, kind: parentRef.kind, title: parent.title };
       throw new HttpError(
         409,
         'restore_parent_deleted',
-        'Das übergeordnete Objekt ist selbst gelöscht. Stelle es zuerst wieder her.',
+        parent.deleted
+          ? 'Das übergeordnete Objekt ist selbst gelöscht. Stelle es zuerst wieder her.'
+          : 'Das Konzept der Karte ist nicht mehr aktiv.',
         { parent: details },
       );
     }

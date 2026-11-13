@@ -12831,13 +12831,14 @@
     "Settings": {
       "title": "Settings",
       "type": "object",
-      "description": "GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.",
+      "description": "GET /settings: alle Bereiche (Phase 1, ai nach VERTRAEGE §20.7 und learning nach §21.9), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.",
       "required": [
         "general",
         "lecture",
         "pen",
         "data",
-        "ai"
+        "ai",
+        "learning"
       ],
       "additionalProperties": false,
       "properties": {
@@ -12855,6 +12856,9 @@
         },
         "ai": {
           "$ref": "#/$defs/AiSettings"
+        },
+        "learning": {
+          "$ref": "#/$defs/LearningSettings"
         }
       }
     },
@@ -12878,6 +12882,9 @@
         },
         "ai": {
           "$ref": "#/$defs/AiSettingsUpdate"
+        },
+        "learning": {
+          "$ref": "#/$defs/LearningSettingsUpdate"
         }
       }
     },
@@ -15431,7 +15438,8 @@
         "notebook",
         "page",
         "marker",
-        "photo"
+        "photo",
+        "card"
       ]
     },
     "TrashList": {
@@ -15471,7 +15479,15 @@
           "$ref": "#/$defs/Uuid"
         },
         "kind": {
-          "$ref": "#/$defs/TrashKind"
+          "description": "Art des Elternobjekts. Bei einer Karte das Konzept (kein eigener TrashKind, VERTRAEGE §21.8)",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrashKind"
+            },
+            {
+              "const": "concept"
+            }
+          ]
         },
         "title": {
           "type": "string"

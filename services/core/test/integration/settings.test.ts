@@ -3,7 +3,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { SettingsSchema, SINGLE_USER_ID } from '@sg/shared';
 import { createDb, type DbHandle } from '../../src/db/client.ts';
 import { setting } from '../../src/db/schema/index.ts';
-import { DEFAULT_SETTINGS, getAiSettings, getSettings } from '../../src/services/settings.ts';
+import {
+  DEFAULT_SETTINGS,
+  getAiSettings,
+  getLearningSettings,
+  getSettings,
+} from '../../src/services/settings.ts';
 import { testDatabaseUrl } from './helpers.ts';
 
 let handle: DbHandle;
@@ -61,7 +66,25 @@ describe('getSettings', () => {
       data: { backup_target: null, backup_encryption: false, backup_time: '03:00' },
       // Bereich `ai` (VERTRAEGE §20.7)
       ai: { monthly_budget_eur: 10, auto_accept: 'aus' },
+      // Bereich `learning` (VERTRAEGE §21.9)
+      learning: { review_budget_minutes: 20, new_cards_per_day: 20 },
     });
+  });
+
+  it('Bereich learning: gespeicherte Felder über den Standards, ungültige und unbekannte zählen nicht (§21.9)', async () => {
+    await store('learning', { review_budget_minutes: 45, new_cards_per_day: 500, modell: 'x' });
+    const expected = { review_budget_minutes: 45, new_cards_per_day: 20 };
+    expect((await getSettings(handle.db, CONFIG)).learning).toEqual(expected);
+    expect(await getLearningSettings(handle.db)).toEqual(expected);
+    await handle.sql`TRUNCATE setting`;
+    for (const bad of [4, 121, 30.5, '30', null]) {
+      await handle.sql`TRUNCATE setting`;
+      await store('learning', { review_budget_minutes: bad, new_cards_per_day: 0 });
+      expect(await getLearningSettings(handle.db)).toEqual({
+        review_budget_minutes: 20,
+        new_cards_per_day: 0,
+      });
+    }
   });
 
   it('Bereich ai: gespeicherte Felder über den Standards, ungültige und unbekannte zählen nicht (§20.7)', async () => {
