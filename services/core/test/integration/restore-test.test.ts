@@ -115,6 +115,7 @@ describe('Ergebnis in GET /backups', () => {
       'ai',
       'data',
       'general',
+      'learning',
       'lecture',
       'pen',
     ]);

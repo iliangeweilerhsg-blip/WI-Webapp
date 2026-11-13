@@ -433,7 +433,7 @@ struct SchemaBundle: Codable {
     let transcriptWord: TranscriptWord?
     let transform: [Double]?
     let trashItem: TrashItem?
-    let trashKind: TrashKind?
+    let trashKind: TrashKindEnum?
     let trashList: TrashList?
     let trashParent: TrashParent?
     let trashRestoreResult: TrashRestoreResult?
@@ -1321,7 +1321,7 @@ extension SchemaBundle {
         transcriptWord: TranscriptWord?? = nil,
         transform: [Double]?? = nil,
         trashItem: TrashItem?? = nil,
-        trashKind: TrashKind?? = nil,
+        trashKind: TrashKindEnum?? = nil,
         trashList: TrashList?? = nil,
         trashParent: TrashParent?? = nil,
         trashRestoreResult: TrashRestoreResult?? = nil,
@@ -20504,13 +20504,14 @@ extension SessionUpdate {
     }
 }
 
-/// GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit
-/// Standard aufgefüllt. Geräte stehen unter /devices.
+/// GET /settings: alle Bereiche (Phase 1, ai nach VERTRAEGE §20.7 und learning nach §21.9),
+/// fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
 // MARK: - Settings
 struct Settings: Codable {
     let ai: AISettings
     let data: DataSettings
     let general: GeneralSettings
+    let learning: LearningSettings
     let lecture: LectureSettings
     let pen: PenSettings
 
@@ -20518,6 +20519,7 @@ struct Settings: Codable {
         case ai = "ai"
         case data = "data"
         case general = "general"
+        case learning = "learning"
         case lecture = "lecture"
         case pen = "pen"
     }
@@ -20545,6 +20547,7 @@ extension Settings {
         ai: AISettings? = nil,
         data: DataSettings? = nil,
         general: GeneralSettings? = nil,
+        learning: LearningSettings? = nil,
         lecture: LectureSettings? = nil,
         pen: PenSettings? = nil
     ) -> Settings {
@@ -20552,6 +20555,7 @@ extension Settings {
             ai: ai ?? self.ai,
             data: data ?? self.data,
             general: general ?? self.general,
+            learning: learning ?? self.learning,
             lecture: lecture ?? self.lecture,
             pen: pen ?? self.pen
         )
@@ -20572,6 +20576,7 @@ struct SettingsUpdate: Codable {
     let ai: AISettingsUpdate?
     let data: DataSettingsUpdate?
     let general: GeneralSettingsUpdate?
+    let learning: LearningSettingsUpdate?
     let lecture: LectureSettingsUpdate?
     let pen: PenSettingsUpdate?
 
@@ -20579,6 +20584,7 @@ struct SettingsUpdate: Codable {
         case ai = "ai"
         case data = "data"
         case general = "general"
+        case learning = "learning"
         case lecture = "lecture"
         case pen = "pen"
     }
@@ -20606,6 +20612,7 @@ extension SettingsUpdate {
         ai: AISettingsUpdate?? = nil,
         data: DataSettingsUpdate?? = nil,
         general: GeneralSettingsUpdate?? = nil,
+        learning: LearningSettingsUpdate?? = nil,
         lecture: LectureSettingsUpdate?? = nil,
         pen: PenSettingsUpdate?? = nil
     ) -> SettingsUpdate {
@@ -20613,6 +20620,7 @@ extension SettingsUpdate {
             ai: ai ?? self.ai,
             data: data ?? self.data,
             general: general ?? self.general,
+            learning: learning ?? self.learning,
             lecture: lecture ?? self.lecture,
             pen: pen ?? self.pen
         )
@@ -25158,7 +25166,7 @@ struct TrashItem: Codable {
     /// werden mitgelöscht und mitwiederhergestellt, aber nicht mitgezählt (VERTRAEGE §13)
     let dependentCount: Int
     let id: String
-    let kind: TrashKind
+    let kind: TrashKindEnum
     let parent: TrashParent?
     let purgeAt: Date
     /// Anzeigename (Titel, Name oder z. B. „Seite 3")
@@ -25197,7 +25205,7 @@ extension TrashItem {
         deletedAt: Date? = nil,
         dependentCount: Int? = nil,
         id: String? = nil,
-        kind: TrashKind? = nil,
+        kind: TrashKindEnum? = nil,
         parent: TrashParent?? = nil,
         purgeAt: Date? = nil,
         title: String? = nil
@@ -25222,8 +25230,9 @@ extension TrashItem {
     }
 }
 
-enum TrashKind: String, Codable {
+enum TrashKindEnum: String, Codable {
     case calendarSource = "calendar_source"
+    case card = "card"
     case exerciseSheet = "exercise_sheet"
     case marker = "marker"
     case module = "module"
@@ -25238,7 +25247,9 @@ enum TrashKind: String, Codable {
 // MARK: - TrashParent
 struct TrashParent: Codable {
     let id: String
-    let kind: TrashKind
+    /// Art des Elternobjekts. Bei einer Karte das Konzept (kein eigener TrashKind, VERTRAEGE
+    /// §21.8)
+    let kind: TrashParentKind
     let title: String
 
     enum CodingKeys: String, CodingKey {
@@ -25268,7 +25279,7 @@ extension TrashParent {
 
     func with(
         id: String? = nil,
-        kind: TrashKind? = nil,
+        kind: TrashParentKind? = nil,
         title: String? = nil
     ) -> TrashParent {
         return TrashParent(
@@ -25285,6 +25296,23 @@ extension TrashParent {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// Art des Elternobjekts. Bei einer Karte das Konzept (kein eigener TrashKind, VERTRAEGE
+/// §21.8)
+enum TrashParentKind: String, Codable {
+    case calendarSource = "calendar_source"
+    case card = "card"
+    case concept = "concept"
+    case exerciseSheet = "exercise_sheet"
+    case marker = "marker"
+    case module = "module"
+    case notebook = "notebook"
+    case page = "page"
+    case photo = "photo"
+    case semester = "semester"
+    case session = "session"
+    case slideDeck = "slide_deck"
 }
 
 // MARK: - TrashList
@@ -25339,7 +25367,7 @@ extension TrashList {
 // MARK: - TrashRestoreResult
 struct TrashRestoreResult: Codable {
     let id: String
-    let kind: TrashKind
+    let kind: TrashKindEnum
     /// Alle wiederhergestellten Zeilen samt Objekt selbst, auch Maschinenausgaben (anders als
     /// dependent_count, VERTRAEGE §13)
     let restoredCount: Int
@@ -25371,7 +25399,7 @@ extension TrashRestoreResult {
 
     func with(
         id: String? = nil,
-        kind: TrashKind? = nil,
+        kind: TrashKindEnum? = nil,
         restoredCount: Int? = nil
     ) -> TrashRestoreResult {
         return TrashRestoreResult(
@@ -28920,6 +28948,7 @@ extension Settings {
         try container.encode(ai, forKey: .ai)
         try container.encode(data, forKey: .data)
         try container.encode(general, forKey: .general)
+        try container.encode(learning, forKey: .learning)
         try container.encode(lecture, forKey: .lecture)
         try container.encode(pen, forKey: .pen)
     }
@@ -28931,6 +28960,7 @@ extension SettingsUpdate {
         try container.encodeIfPresent(ai, forKey: .ai)
         try container.encodeIfPresent(data, forKey: .data)
         try container.encodeIfPresent(general, forKey: .general)
+        try container.encodeIfPresent(learning, forKey: .learning)
         try container.encodeIfPresent(lecture, forKey: .lecture)
         try container.encodeIfPresent(pen, forKey: .pen)
     }
