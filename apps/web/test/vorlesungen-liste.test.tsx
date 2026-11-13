@@ -165,6 +165,50 @@ describe('Modul: Vorlesungen (UX-307)', () => {
         (r) => r.method === 'GET' && r.path.startsWith('/sessions') && r.path.includes(`module_id=${DBS.id}`),
       ),
     ).toBe(true);
+    // Der Core sortiert (`order=desc`) und begrenzt; der Client holt nicht alle Seiten
+    const listCalls = core.requests.filter(
+      (r) => r.method === 'GET' && r.path.startsWith('/sessions?') && r.path.includes('module_id='),
+    );
+    expect(listCalls.length).toBeGreaterThan(0);
+    for (const call of listCalls) {
+      const params = new URL(call.path, 'http://x').searchParams;
+      expect(params.get('order')).toBe('desc');
+      expect(params.get('limit')).toBe('50');
+      expect(params.has('cursor')).toBe(false);
+    }
+    // Alles passt auf eine Seite: kein „Ältere laden“
+    expect(screen.queryByRole('button', { name: 'Ältere laden' })).not.toBeInTheDocument();
+  });
+
+  it('zeigt erst die 50 neuesten und lädt ältere auf Wunsch nach, ohne Lücke und ohne Doppel', async () => {
+    // 52 Vorlesungen im Wochenabstand, die älteste zuerst
+    const sessions = Array.from({ length: 52 }, (_, i) =>
+      finished(i + 1, new Date(Date.parse('2025-01-06T07:15:00Z') + i * 7 * 86_400_000).toISOString(), 90, {
+        number: i + 1,
+      }),
+    );
+    const core = installFakeCore({ semesters: [makeSemester()], modules: [DBS], sessions });
+    modulePage();
+    const list = await screen.findByRole('list', { name: /Aufgenommene Vorlesungen/ });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(50);
+    expect(screen.getByRole('heading', { name: /Aufgenommene Vorlesungen/ })).toHaveTextContent('50+');
+    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('VL 52');
+    expect(within(list).queryByText('VL 2')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ältere laden' }));
+    await waitFor(() => expect(within(list).getAllByRole('listitem')).toHaveLength(52));
+    const rows = within(list).getAllByRole('listitem');
+    expect(rows.map((r) => within(r).getByRole('link').textContent)).toEqual(
+      Array.from({ length: 52 }, (_, i) => `VL ${52 - i}`),
+    );
+    expect(screen.queryByRole('button', { name: 'Ältere laden' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Aufgenommene Vorlesungen/ })).toHaveTextContent(/52$/);
+    // Die zweite Seite kommt über den Cursor der ersten, weiter absteigend
+    const second = core.requests
+      .filter((r) => r.method === 'GET' && r.path.startsWith('/sessions?') && r.path.includes('cursor='))
+      .map((r) => new URL(r.path, 'http://x').searchParams);
+    expect(second).toHaveLength(1);
+    expect(second[0]!.get('order')).toBe('desc');
   });
 
   it('zeigt ohne Vorlesungen nichts Zusätzliches, die Foliensätze bleiben', async () => {
@@ -223,8 +267,13 @@ describe('Heute: Zuletzt (UX-307)', () => {
   });
 
   function boot(sessions: ReturnType<typeof finished>[]) {
-    installCalendarCore({ semesters: [makeSemester()], modules: [DBS, STAT], sessions, events: [] });
-    return render(
+    const core = installCalendarCore({
+      semesters: [makeSemester()],
+      modules: [DBS, STAT],
+      sessions,
+      events: [],
+    });
+    render(
       <ThemeProvider>
         <QueryProvider>
           <ToastProvider>
@@ -233,15 +282,23 @@ describe('Heute: Zuletzt (UX-307)', () => {
         </QueryProvider>
       </ThemeProvider>,
     );
+    return core;
   }
 
   it('zeigt die letzten drei Vorlesungen aus allen Modulen, neueste zuerst', async () => {
-    boot([
+    const core = boot([
       finished(1, '2026-11-02T07:15:00Z', 90, { title: 'Alt' }),
       finished(2, '2026-11-05T07:15:00Z', 90, { title: 'Normalformen' }),
       finished(3, '2026-11-09T09:15:00Z', 60, { title: 'Erwartungswert', module_id: STAT.id }),
       finished(4, '2026-11-10T07:15:00Z', 45, { number: 4 }),
       finished(5, '2025-01-10T07:15:00Z', 45, { title: 'Zu lange her' }),
+      // Die laufende Session ist neuer, belegt aber keinen der drei Plätze (der Core filtert den Zustand)
+      makeSession({
+        id: id(1006),
+        state: 'laeuft',
+        started_at: '2026-11-12T09:15:00Z',
+        title: 'Läuft gerade',
+      }),
     ]);
     const heading = await screen.findByRole('heading', { name: 'Zuletzt' });
     const rows = within(heading.closest('section')!).getAllByRole('listitem');
@@ -253,6 +310,13 @@ describe('Heute: Zuletzt (UX-307)', () => {
     expect(rows[2]).toHaveTextContent('Normalformen');
     expect(within(rows[0]!).getByRole('link')).toHaveAttribute('href', `/rueckblick?id=${id(1004)}`);
     expect(screen.queryByText('Zu lange her')).not.toBeInTheDocument();
+    expect(within(heading.closest('section')!).queryByText('Läuft gerade')).not.toBeInTheDocument();
+    const recent = core.requests
+      .filter((r) => r.method === 'GET' && r.path.startsWith('/sessions?') && r.path.includes('from='))
+      .map((r) => new URL(r.path, 'http://x').searchParams)
+      .find((p) => p.get('state') === 'beendet,verarbeitet');
+    expect(recent?.get('order')).toBe('desc');
+    expect(recent?.get('limit')).toBe('3');
   });
 
   it('ohne vergangene Vorlesungen fehlt der Abschnitt', async () => {

@@ -944,7 +944,12 @@ export function installFakeCore(
           .filter((x) => !from || anchor(x) >= Date.parse(from))
           .filter((x) => !to || anchor(x) < Date.parse(to))
           .sort((a, b) => anchor(a) - anchor(b) || a.id.localeCompare(b.id));
-        return json({ items, next_cursor: null });
+        // `order=desc` dreht Zeitpunkt und Tie-Breaker um; `limit` schneidet, der Cursor ist hier nur ein Versatz
+        if (url.searchParams.get('order') === 'desc') items.reverse();
+        const limit = Number(url.searchParams.get('limit') ?? 50);
+        const start = Number(url.searchParams.get('cursor') ?? 0);
+        const end = start + limit;
+        return json({ items: items.slice(start, end), next_cursor: end < items.length ? String(end) : null });
       }
 
       // POST /sessions (§7.2): spontane Session im Zustand `bereit`

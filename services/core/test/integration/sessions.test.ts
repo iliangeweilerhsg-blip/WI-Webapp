@@ -1531,6 +1531,44 @@ describe('REST (§7.2)', () => {
     expect((await call('GET', '/sessions?cursor=kaputt')).status).toBe(400);
   });
 
+  it('GET /sessions?order: desc dreht alles um, Paginierung ohne Lücke und Doppel, Standard unverändert, 400 bei ungültigem Wert', async () => {
+    const eventLate = await mkEvent(600, 690);
+    const a = await mkSession({ state: 'beendet', startedAt: T(10), endedAt: T(20) });
+    const b = await mkSession({ state: 'geplant', calendarEventId: eventLate });
+    const c = await mkSession({ state: 'laeuft', startedAt: T(30) });
+    const d = await mkSession({ state: 'bereit', createdAt: T(40) });
+    // Gleicher Zeitpunkt: der Tie-Breaker `id` dreht sich mit
+    const e1 = await mkSession({ state: 'bereit', createdAt: T(50) });
+    const e2 = await mkSession({ state: 'bereit', createdAt: T(50) });
+    const tie = [e1, e2].sort();
+    const asc = [a, c, d, ...tie, b];
+    const ids = async (path: string) =>
+      (await call<{ items: Session[] }>('GET', path)).body.items.map((s) => s.id);
+
+    expect(await ids('/sessions')).toEqual(asc);
+    expect(await ids('/sessions?order=asc')).toEqual(asc);
+    expect(await ids('/sessions?order=desc')).toEqual([...asc].reverse());
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const res: { body: { items: Session[]; next_cursor: string | null } } = await call(
+        'GET',
+        `/sessions?order=desc&limit=2${cursor ? `&cursor=${cursor}` : ''}`,
+      );
+      seen.push(...res.body.items.map((s) => s.id));
+      cursor = res.body.next_cursor;
+      pages += 1;
+    } while (cursor && pages < 10);
+    expect(pages).toBe(3);
+    expect(seen).toEqual([...asc].reverse());
+
+    expect((await call('GET', '/sessions?order=quatsch')).status).toBe(400);
+    expect((await call('GET', '/sessions?order=DESC')).status).toBe(400);
+    expect((await call('GET', '/sessions?order=desc&cursor=kaputt')).status).toBe(400);
+  });
+
   it('GET /sessions/{id}/snapshot: Daten ohne gelöschte Objekte, sortiert, stream_seq und stream_op_id passen', async () => {
     const id = (await call<Session>('POST', '/sessions', { module_id: moduleId })).body.id;
     const empty = await call<unknown>('GET', `/sessions/${id}/snapshot`);

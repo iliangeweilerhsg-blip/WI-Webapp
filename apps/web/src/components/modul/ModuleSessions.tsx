@@ -1,7 +1,8 @@
 'use client';
 
 // Vorlesungen eines Moduls (UX-307): vergangene Sessions, neueste zuerst, jede mit Link auf den Rückblick.
-// Ohne Vorlesung bleibt der Bereich leer, damit der Tab weiter nur die Foliensätze zeigt.
+// Ohne Vorlesung bleibt der Bereich leer, damit der Tab weiter nur die Foliensätze zeigt. Geladen wird seitenweise
+// (die neuesten zuerst); ältere Vorlesungen holt „Ältere laden“, damit nichts still wegfällt.
 import Link from 'next/link';
 import { useHydrationSafe } from '../../lib/hydrated.ts';
 import { formatDate, useDecks } from '../../lib/material.ts';
@@ -33,7 +34,11 @@ export function ModuleSessions({ moduleId }: { moduleId: string }) {
   return (
     <section aria-labelledby="modul-vorlesungen" className="mb-8">
       <h2 id="modul-vorlesungen" className="text-sm font-medium text-text-muted">
-        Aufgenommene Vorlesungen <span className="tabular-nums">{items.length}</span>
+        Aufgenommene Vorlesungen{' '}
+        <span className="tabular-nums">
+          {items.length}
+          {sessions.hasNextPage ? '+' : ''}
+        </span>
       </h2>
       <ul
         aria-labelledby="modul-vorlesungen"
@@ -57,6 +62,16 @@ export function ModuleSessions({ moduleId }: { moduleId: string }) {
           );
         })}
       </ul>
+      {sessions.hasNextPage ? (
+        <button
+          type="button"
+          disabled={sessions.isFetchingNextPage}
+          className="mt-2 rounded-md border border-border px-3 py-1 text-sm hover:bg-surface disabled:opacity-50"
+          onClick={() => void sessions.fetchNextPage()}
+        >
+          Ältere laden
+        </button>
+      ) : null}
     </section>
   );
 }

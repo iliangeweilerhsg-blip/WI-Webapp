@@ -4,7 +4,7 @@
 // damit zwei gleichzeitige Starts nacheinander laufen und die Invariante „höchstens eine aktive Session“
 // (`session_one_active_uq`) nie über einen Unique-Fehler, sondern über die Regeln aus §9 durchgesetzt wird.
 // Sperrreihenfolge: erst die Advisory-Sperre, dann Session-Zeilen, dann `sync_stream` (in `appendOp`).
-import { and, asc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import {
   SINGLE_USER_ID,
   type ClientDevice,
@@ -37,7 +37,7 @@ import {
   syncStream,
 } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
-import { decodeCursor, toPage, type Page } from '../lib/pagination.ts';
+import { decodeCursor, toPage, type Page, type SortDir } from '../lib/pagination.ts';
 import { uuidv7 } from '../lib/uuid7.ts';
 import { appendOp } from '../sync/append.ts';
 import { publishAfterCommit, publishEvent } from '../sync/events.ts';
@@ -994,6 +994,8 @@ export interface ListSessionsOptions {
   to?: Date | undefined;
   cursor?: string | undefined;
   limit: number;
+  /** `desc` dreht Sortierung samt Tie-Breaker um. Standard `asc` */
+  order?: SortDir | undefined;
 }
 
 /** Sortierzeitpunkt der Liste: `coalesce(started_at, planned_starts_at, created_at)` (§7.2) */
@@ -1001,20 +1003,26 @@ const sortKey = sql`coalesce(${session.startedAt}, ${calendarEvent.startsAt}, ${
 
 export async function listSessions(db: DbOrTx, options: ListSessionsOptions): Promise<Page<Session>> {
   const cursor = options.cursor ? decodeCursor(options.cursor) : undefined;
+  const dir: SortDir = options.order ?? 'asc';
   const conditions: (SQL | undefined)[] = [
     notDeleted(session),
     options.moduleId ? eq(session.moduleId, options.moduleId) : undefined,
     options.states?.length ? inArray(session.state, options.states) : undefined,
     options.from ? sql`${sortKey} >= ${options.from.toISOString()}::timestamptz` : undefined,
     options.to ? sql`${sortKey} < ${options.to.toISOString()}::timestamptz` : undefined,
-    cursor ? sql`(${sortKey}, ${session.id}) > (${cursor.ts}::timestamptz, ${cursor.id}::uuid)` : undefined,
+    cursor
+      ? sql`(${sortKey}, ${session.id}) ${dir === 'desc' ? sql`<` : sql`>`} (${cursor.ts}::timestamptz, ${cursor.id}::uuid)`
+      : undefined,
   ];
   const rows = await db
     .select({ ...sessionSelect, ts: sql<string>`${sortKey}::text` })
     .from(session)
     .leftJoin(calendarEvent, eq(calendarEvent.id, session.calendarEventId))
     .where(and(...conditions))
-    .orderBy(asc(sortKey), asc(session.id))
+    .orderBy(
+      dir === 'desc' ? desc(sortKey) : asc(sortKey),
+      dir === 'desc' ? desc(session.id) : asc(session.id),
+    )
     .limit(options.limit + 1);
   return toPage(
     rows,
