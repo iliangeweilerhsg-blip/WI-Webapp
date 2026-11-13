@@ -217,6 +217,25 @@ describe('NetworkConnectionGate', () => {
     expect([slow.destroyed, quick.destroyed]).toEqual([true, false]);
   });
 
+  it('nach einer Antwort ohne Token gilt die Header-Frist wieder (kein Halten mit tröpfelnden Folge-Headern)', () => {
+    const { gate, open } = setup({ firstRequestTimeoutMs: 500, tokenlessRequestTimeoutMs: 1000 });
+    const holder = open('10.0.0.1');
+    const next = open('10.0.0.2');
+    const paired = open('10.0.0.3');
+    for (const socket of [holder, next, paired]) gate.requestStarted(socket);
+    const responses = [new EventEmitter(), new EventEmitter(), new EventEmitter()];
+    gate.limitTokenlessRequest(holder, responses[0]!);
+    gate.limitTokenlessRequest(next, responses[1]!);
+    gate.limitTokenlessRequest(paired, responses[2]!);
+    for (const response of responses) response.emit('close');
+    // `next` schickt rechtzeitig die Header der Folgeanfrage, `paired` zeigt danach ein gültiges Token
+    vi.advanceTimersByTime(400);
+    gate.requestStarted(next);
+    gate.authenticate(paired);
+    vi.advanceTimersByTime(100);
+    expect([holder.destroyed, next.destroyed, paired.destroyed]).toEqual([true, false, false]);
+  });
+
   it('geschlossene Verbindungen geben ihren Platz frei', async () => {
     const { gate, open } = setup({ maxPerSource: 2, maxNetwork: 2 });
     const a = open('10.0.0.1');

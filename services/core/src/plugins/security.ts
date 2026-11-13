@@ -270,11 +270,14 @@ function exactAddress(address: string | undefined): string {
  *   verdrängt so sich selbst, nicht die eine neue Verbindung des iPads. Über `maxPerSource` je Quelle wird weiter
  *   abgewiesen: Das ist das eigene Budget der Quelle.
  * - **Kurze Fristen ohne Token:** Eine Verbindung muss die Header ihrer ersten Anfrage binnen
- *   `firstRequestTimeoutMs` senden, sofern sie nicht schon ein gültiges Token gezeigt hat. Eine Netzanfrage ohne
+ *   `firstRequestTimeoutMs` senden, sofern sie nicht schon ein gültiges Token gezeigt hat; nach jeder Antwort ohne Token
+ *   gilt das erneut für die nächste Anfrage. Eine Netzanfrage ohne
  *   Token, die der Wächter durchlässt (Kopplung), muss binnen `tokenlessRequestTimeoutMs` samt Body beantwortet
  *   sein. Langsame Uploads gibt es nur mit Token.
  * - Vom Wächter abgelehnte Netzanfragen bekommen `Connection: close` (`registerSecurity`). So hält niemand einen
  *   Platz mit Keep-Alive-401 oder einem tröpfelnden Body nach der 401.
+ * - Dasselbe gilt für Antworten an Netzverbindungen ohne gültiges Token, die der Wächter durchgelassen hat
+ *   (Kopplungsrouten): siehe `closesTokenlessResponse` (H-1 aus #191).
  */
 export class NetworkConnectionGate {
   private readonly entries = new WeakMap<GateSocket, GateEntry>();
@@ -353,12 +356,7 @@ export class NetworkConnectionGate {
       this.addOpen(entry);
     }
     this.entries.set(socket, entry);
-    const timer = setTimeout(() => {
-      entry.firstRequestTimer = undefined;
-      if (!entry.authenticated && entry.bucket !== 'gone' && !socket.destroyed) socket.destroy();
-    }, this.limits.firstRequestTimeoutMs);
-    timer.unref?.();
-    entry.firstRequestTimer = timer;
+    this.armHeaderDeadline(entry);
     socket.once('close', () => this.release(entry));
   }
 
@@ -384,7 +382,12 @@ export class NetworkConnectionGate {
     }
   }
 
-  /** Netzanfrage ohne Token (Kopplung): Socket schließen, wenn die Antwort nicht binnen der Frist fertig ist */
+  /**
+   * Netzanfrage ohne Token (Kopplung): Socket schließen, wenn die Antwort nicht binnen der Frist fertig ist. Bleibt die
+   * Verbindung danach offen (z. B. 409 ohne Kopplungsfenster), gilt für die Header der nächsten Anfrage wieder
+   * `firstRequestTimeoutMs`. Sonst hielte eine Gegenstelle ohne Token ihren Platz mit tröpfelnden Headern bis zu
+   * `headersTimeout` (60 s) je Anfrage, und das bis zu `maxRequestsPerSocket` mal (Gegen-Review H-1).
+   */
   limitTokenlessRequest(
     socket: GateSocket,
     response: { once(event: 'close', cb: () => void): unknown },
@@ -395,7 +398,10 @@ export class NetworkConnectionGate {
       if (!socket.destroyed) socket.destroy();
     }, this.limits.tokenlessRequestTimeoutMs);
     timer.unref?.();
-    response.once('close', () => clearTimeout(timer));
+    response.once('close', () => {
+      clearTimeout(timer);
+      if (!entry.authenticated && entry.bucket !== 'gone' && !socket.destroyed) this.armHeaderDeadline(entry);
+    });
   }
 
   private isTrusted(address: string): boolean {
@@ -474,6 +480,17 @@ export class NetworkConnectionGate {
       else this.protectedPerAddress.delete(entry.address);
     }
     entry.bucket = 'gone';
+  }
+
+  /** Ohne Token-Vorrang müssen die Header der (nächsten) Anfrage binnen `firstRequestTimeoutMs` da sein */
+  private armHeaderDeadline(entry: GateEntry): void {
+    this.clearFirstRequestTimer(entry);
+    const timer = setTimeout(() => {
+      entry.firstRequestTimer = undefined;
+      if (!entry.authenticated && entry.bucket !== 'gone' && !entry.socket.destroyed) entry.socket.destroy();
+    }, this.limits.firstRequestTimeoutMs);
+    timer.unref?.();
+    entry.firstRequestTimer = timer;
   }
 
   private clearFirstRequestTimer(entry: GateEntry): void {
@@ -587,6 +604,35 @@ export function createSecurityGuard(options: SecurityOptions): SecurityGuard {
 }
 
 /**
+ * Statuscodes, bei denen der Core einer Netzverbindung ohne gültiges Token nach der Antwort `Connection: close`
+ * setzt (H-1 aus #191):
+ * - 400 (ungültige Anfrage, auch kaputtes JSON) und 415 (kein oder falscher `Content-Type`): Beide entstehen vor dem
+ *   Handler und zählen nicht gegen das Rate-Limit der Kopplung. Ohne Schließen hielte eine Gegenstelle damit ihre
+ *   Verbindung beliebig lange.
+ * - 413 (Body zu groß): Der Rest des Bodys ist ungelesen.
+ * - 429 (`pairing_rate_limited`, `pairing_requests_full`).
+ * - 403 (`pairing_code_invalid`, `pairing_request_rejected` aus `pair/confirm`). `origin_not_allowed` lehnt schon der
+ *   Wächter ab, das schloss vorher schon.
+ * Bewusst NICHT dabei: 201, 409 und 423. Sie zählen gegen das Rate-Limit (nach 10 je Minute kommt 429 und schließt).
+ * Tröpfelnde Header der Folgeanfrage helfen dort nicht: Der Wächter setzt nach jeder Antwort ohne Token die
+ * Header-Frist neu (`NetworkConnectionGate.limitTokenlessRequest`).
+ * Auch bei den gelisteten Codes bekommt das iPad die Antwort vollständig und verbindet für den nächsten Versuch neu.
+ */
+const TOKENLESS_CLOSE_STATUS = new Set([400, 403, 413, 415, 429]);
+
+/**
+ * Soll die Verbindung nach dieser Antwort schließen? Nur für Anfragen aus dem Netz (auch Tunnel-Eingang), die
+ * kein gültiges Token trugen (`sgDevice` undefiniert). Lokale (`null`) und authentifizierte Anfragen: nie.
+ */
+export function closesTokenlessResponse(args: {
+  local: boolean;
+  device: SgDevice | undefined;
+  statusCode: number;
+}): boolean {
+  return !args.local && args.device === undefined && TOKENLESS_CLOSE_STATUS.has(args.statusCode);
+}
+
+/**
  * `rejections`: Zähler für abgelehnte Netzanfragen (#87). Ohne ihn loggt jede Anfrage einzeln, wie Fastify es tut.
  * Mit ihm muss Fastify den `RequestLogController` bekommen, der abgelehnte Netzanfragen still lässt.
  */
@@ -640,6 +686,22 @@ export function registerSecurity(
       // Angenommene Netzanfragen loggen wie bisher; der Request-Log-Controller hat die Zeile bis hierhin zurückgehalten
       if (!isLocalRequest(request)) request.log.info({ req: request }, 'incoming request');
     }
+  });
+  // Antworten an Netzverbindungen ohne Token (Kopplung): 400/429 usw. schließen die Verbindung (H-1 aus #191).
+  // `onSend` läuft vor dem Schreiben der Header, auch für Fehlerantworten aus Handlern und Validierung. Nicht für
+  // `frameworkErrors` (kaputte URL): Dort gibt es keine Route und darum keine Kopplung, ohne Token lehnt der Wächter
+  // mit 401 ab und schließt selbst
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (
+      closesTokenlessResponse({
+        local: isLocalRequest(request),
+        device: request.sgDevice,
+        statusCode: reply.statusCode,
+      })
+    ) {
+      reply.header('connection', 'close');
+    }
+    return payload;
   });
   if (rejections) {
     app.addHook('onResponse', async (request, reply) => {
