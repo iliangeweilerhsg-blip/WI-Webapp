@@ -6,7 +6,15 @@ import { HttpError } from '../errors.ts';
 import { nameKey } from '../services/concept-graph.ts';
 
 /** Erster Verstoß beim Prüfen (`details.reason` von `400 card_invalid`) */
-export type CardInvalidReason = 'empty' | 'cloze_syntax' | 'cloze_none' | 'cloze_numbers' | 'cloze_answers';
+export type CardInvalidReason =
+  'empty' | 'cloze_syntax' | 'cloze_none' | 'cloze_numbers' | 'cloze_answers' | 'too_long';
+
+/**
+ * Zeichengrenzen des Schemas (§21.2), nach dem Säubern noch einmal geprüft wie im Worker (B1, `too_long`): NFC kann einen
+ * Text verlängern (etwa U+0958 → zwei Zeichen), und eine zu lange Karte ließe sich nicht mehr ausliefern. Gezählt wird wie
+ * im Schema der Antwort (`zod`, UTF-16-Einheiten).
+ */
+const MAX_LENGTH = { front: 500, back: 1000, explanation: 1000, solution: 200 } as const;
 
 /** Ergebnis von {@link checkCardContent} */
 export type CardContentCheck =
@@ -25,14 +33,15 @@ export type CardContentCheck =
 
 /**
  * Säubern: NFC, Zeilenenden zu `\n`, Tab zu Leerzeichen, Steuerzeichen (`Cc` außer `\n`) und Formatzeichen (`Cf`)
- * entfernen, trimmen.
+ * entfernen, trimmen. NFC kommt nach dem Entfernen (wie im Worker): Ein entferntes Formatzeichen zwischen Buchstabe und
+ * Akzent (`e` + ZWJ + U+0301) ergäbe sonst einen Text, der nicht in NFC ist.
  */
 export function sanitizeCardText(text: string): string {
   return text
-    .normalize('NFC')
     .replace(/\r\n?/g, '\n')
     .replace(/\t/g, ' ')
     .replace(/[\p{Cc}\p{Cf}]/gu, (char) => (char === '\n' ? char : ''))
+    .normalize('NFC')
     .trim();
 }
 
@@ -47,7 +56,8 @@ interface Gap {
   text: string;
 }
 
-const GAP_RE = /\{\{c(\d+)::([^{}]*)\}\}/gu;
+// Bis zum ersten `}}` wie im Worker: Eine Lücke mit `{` oder `}` im Text ist `cloze_syntax`, nicht `cloze_none`
+const GAP_RE = /\{\{c(\d+)::([\s\S]*?)\}\}/gu;
 
 /** Lücken `{{cN::Text}}` des Textes in der Reihenfolge ihres Auftretens (Text noch nicht getrimmt) */
 function findGaps(text: string): Gap[] {
@@ -68,9 +78,9 @@ function replaceGaps(text: string, replacement: (gap: Gap) => string): string {
 
 /**
  * Prüft den Inhalt einer Karte und liefert die gespeicherte Fassung (§21.2). Erster Verstoß als `reason`, in der
- * Reihenfolge: `empty` (nach dem Säubern leer), `cloze_syntax` (Lücke mit `::` oder leerem Text), `cloze_none`,
- * `cloze_syntax` (offene oder lose Klammern außerhalb gültiger Lücken), `cloze_numbers`, `cloze_answers`.
- * Die Längengrenzen des Schemas (500 / 1 000 / 200 Zeichen) prüft vorher die Validierung der Anfrage.
+ * Reihenfolge: `empty` (nach dem Säubern leer), `cloze_syntax` (Lücke mit `::`, Klammern oder leerem Text), `cloze_none`,
+ * `cloze_syntax` (offene oder lose Klammern außerhalb gültiger Lücken), `cloze_numbers`, `cloze_answers`, zuletzt
+ * `too_long` (Zeichengrenzen des Schemas nach dem Säubern, wie im Worker).
  */
 export function checkCardContent(input: CardContent): CardContentCheck {
   const frontText = sanitizeCardText(input.front.text_md);
@@ -81,6 +91,13 @@ export function checkCardContent(input: CardContent): CardContentCheck {
     const explanation =
       input.back.explanation_md === null ? null : sanitizeCardText(input.back.explanation_md);
     if (answer === '' || explanation === '') return { ok: false, reason: 'empty' };
+    if (
+      frontText.length > MAX_LENGTH.front ||
+      answer.length > MAX_LENGTH.back ||
+      (explanation !== null && explanation.length > MAX_LENGTH.explanation)
+    ) {
+      return { ok: false, reason: 'too_long' };
+    }
     return {
       ok: true,
       content: {
@@ -104,8 +121,8 @@ export function checkCardContent(input: CardContent): CardContentCheck {
   }
 
   const gaps = findGaps(frontText);
-  // 1. Syntax einer Lücke: kein Hinweis (`::`), Text nicht leer
-  if (gaps.some((gap) => gap.text.includes('::') || gap.text.trim() === '')) {
+  // 1. Syntax einer Lücke: kein Hinweis (`::`), keine Klammern, Text nicht leer
+  if (gaps.some((gap) => /::|[{}]/u.test(gap.text) || gap.text.trim() === '')) {
     return { ok: false, reason: 'cloze_syntax' };
   }
   // 2. keine Lücke
@@ -138,6 +155,12 @@ export function checkCardContent(input: CardContent): CardContentCheck {
   }
 
   const front = trimGaps(frontText);
+  if (
+    front.length > MAX_LENGTH.front ||
+    Object.values(answers).some((list) => list.some((answer) => answer.length > MAX_LENGTH.solution))
+  ) {
+    return { ok: false, reason: 'too_long' };
+  }
   const longestGap = Math.max(...gaps.map((gap) => countWords(gap.text)));
   return {
     ok: true,
@@ -160,6 +183,7 @@ const INVALID_MESSAGE: Record<CardInvalidReason, string> = {
   cloze_numbers:
     'Die Lücken müssen bei c1 beginnen, lückenlos sein und je Nummer einmal vorkommen (höchstens c3).',
   cloze_answers: 'Die Lösungen passen nicht zu den Lücken.',
+  too_long: 'Ein Text der Karte ist nach dem Säubern zu lang.',
 };
 
 /** `400 card_invalid` mit `details.reason` (und bei Bedarf weiteren Angaben wie `key` in der Inbox) */

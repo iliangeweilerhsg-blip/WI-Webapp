@@ -110,11 +110,25 @@ describe('FSRS (ts-fsrs 5)', () => {
       state = applyRating(scheduler, state, state.due, 4);
       intervals.push(state.scheduledDays);
     }
-    // Die Obergrenze 365 greift (ohne sie wären es viele Jahre). Die Bibliothek verlangt bei pünktlicher Wiederholung
-    // einen Tag mehr als die verstrichene Zeit je Stufe (Nochmal < Schwer < Gut < Leicht), darum liegt „Leicht“ danach
-    // 1 bis 2 Tage darüber. Das ist Verhalten von ts-fsrs 5.4.2, kein Fehler des Core (PR, „Offene Punkte“).
-    expect(intervals.find((days) => days >= 365)).toBe(365);
-    expect(Math.max(...intervals)).toBeLessThanOrEqual(365 + 2);
+    // Die Obergrenze 365 greift (ohne sie wären es viele Jahre). ts-fsrs 5.4.2 liefert für „Leicht“ bei pünktlicher
+    // Wiederholung 1 bis 2 Tage mehr (Nochmal < Schwer < Gut < Leicht nach der Kappung), der Core kappt streng
+    expect(intervals.at(-1)).toBe(365);
+    expect(Math.max(...intervals)).toBe(365);
+    expect(state.due.getTime() - state.lastReview!.getTime()).toBe(365 * 86_400_000);
+  });
+
+  it('365 Tage gelten streng für jede Bewertung, auch mit Streuung', () => {
+    const fuzz = params.createScheduler();
+    const plain = params.createScheduler({ enableFuzz: false });
+    for (const scheduler of [fuzz, plain]) {
+      let state = applyRating(scheduler, emptyCardState(now), now, 4);
+      for (let i = 0; i < 8; i += 1) state = applyRating(scheduler, state, state.due, 4);
+      for (const rating of [2, 3, 4] as const) {
+        const next = applyRating(scheduler, state, state.due, rating);
+        expect(next.scheduledDays).toBeLessThanOrEqual(365);
+        expect(next.due.getTime() - state.due.getTime()).toBeLessThanOrEqual(365 * 86_400_000);
+      }
+    }
   });
 
   it('Abbildung hin und zurück verliert nichts; Rating-Zahlen stimmen mit der Bibliothek überein', () => {

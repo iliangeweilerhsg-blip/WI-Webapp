@@ -109,7 +109,14 @@ export function applyRating(
 ): CardStateRecord {
   const grade: Grade =
     rating === 1 ? Rating.Again : rating === 2 ? Rating.Hard : rating === 3 ? Rating.Good : Rating.Easy;
-  return fromFsrsCard(scheduler.next(toFsrsCard(before), now, grade).card);
+  const after = fromFsrsCard(scheduler.next(toFsrsCard(before), now, grade).card);
+  // `maximum_interval` gilt streng (§21.5): ts-fsrs 5 erzwingt nach der Kappung Nochmal < Schwer < Gut < Leicht mit je
+  // einem Tag Abstand und liefert darum bis zu zwei Tage mehr. Die Bibliothek rechnet `due` als `now + scheduled_days`
+  const maxDays = scheduler.parameters.maximum_interval;
+  if (after.scheduledDays > maxDays) {
+    return { ...after, scheduledDays: maxDays, due: new Date(now.getTime() + maxDays * 86_400_000) };
+  }
+  return after;
 }
 
 /** Abrufwahrscheinlichkeit `R` jetzt (0..1). Neue Karten haben `R = 0` (06 §2.1) */

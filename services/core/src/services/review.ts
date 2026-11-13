@@ -58,7 +58,6 @@ export async function submitReview(
   cardId: string,
   body: ReviewRequest,
 ): Promise<ReviewResult> {
-  const now = deps.now();
   try {
     return await db.transaction(async (tx) => {
       const [locked] = await tx
@@ -68,6 +67,9 @@ export async function submitReview(
         .where(and(eq(cardState.cardId, cardId), notDeleted(cardState), notDeleted(card)))
         .for('update', { of: cardState });
       if (!locked) throw cardNotFound();
+      // Die Uhr erst unter der Sperre lesen: Eine zweite Bewertung derselben Karte, die gewartet hat, liegt so nie vor
+      // `last_review` der ersten (FSRS rechnet mit der vergangenen Zeit)
+      const now = deps.now();
 
       const [existing] = await tx.select().from(reviewLog).where(eq(reviewLog.id, body.id));
       if (existing) {

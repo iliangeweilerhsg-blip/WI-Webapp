@@ -62,6 +62,41 @@ describe('Säubern', () => {
   it('lässt Zeilenumbrüche stehen und entfernt NEL', () => {
     expect(sanitizeCardText('a\nb\u0085c')).toBe('a\nbc');
   });
+
+  it('NFC erst nach dem Entfernen (wie der Worker): e + ZWJ + Akut wird é', () => {
+    expect(sanitizeCardText('e‍́')).toBe('é');
+  });
+});
+
+describe('Abgleich mit dem Worker (B1)', () => {
+  it('Klammer im Text einer Lücke ist cloze_syntax, nicht cloze_none', () => {
+    for (const text of ['A {{c1::a}b}} x', 'A {{c1::a{b}} x']) {
+      const content: CardContent = {
+        kind: 'cloze',
+        front: { text_md: text },
+        back: { answers: { c1: ['a'] } },
+      };
+      expect(checkCardContent(content)).toEqual({ ok: false, reason: 'cloze_syntax' });
+    }
+  });
+
+  it('too_long, wenn NFC den Text über die Grenze des Schemas verlängert', () => {
+    // U+0958 ist von der Komposition ausgenommen: NFC macht daraus zwei Zeichen
+    const front = 'क़'.repeat(300);
+    expect(front.length).toBe(300);
+    const basic: CardContent = {
+      kind: 'basic',
+      front: { text_md: front },
+      back: { text_md: 'x', explanation_md: null },
+    };
+    expect(checkCardContent(basic)).toEqual({ ok: false, reason: 'too_long' });
+    const cloze: CardContent = {
+      kind: 'cloze',
+      front: { text_md: 'Ein {{c1::x}}.' },
+      back: { answers: { c1: ['x', 'क़'.repeat(150)] } },
+    };
+    expect(checkCardContent(cloze)).toEqual({ ok: false, reason: 'too_long' });
+  });
 });
 
 describe('Wörter', () => {
