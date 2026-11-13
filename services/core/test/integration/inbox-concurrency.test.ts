@@ -513,3 +513,82 @@ describe('keine Verklemmung über Folge-Einträge', () => {
     }
   });
 });
+
+describe('Kartenvorschläge (§21.7 „Sperren“)', () => {
+  const ROUNDS = 8;
+  const review = (cardId: string) =>
+    post(`/cards/${cardId}/review`, { id: crypto.randomUUID(), rating: 3, duration_ms: 1000 });
+
+  /** Aktives Konzept `c1` mit dem angenommenen Kartenvorschlag `b1` (Session `s1`). Rückgabe: die Karten-IDs */
+  async function acceptedBatch(): Promise<string[]> {
+    await world.concept('c1', { status: 'aktiv', name: 'Tupel' });
+    await world.item('b1', { kind: 'card_batch', cardConcept: 'c1' });
+    const res = await accept('b1');
+    expect(res.statusCode, res.body).toBe(200);
+    return (res.json() as { cards: { id: string }[] }).cards.map((c) => c.id);
+  }
+
+  it('cards.generate hält die Session FOR NO KEY UPDATE: die Annahme wartet auf den Worker', async () => {
+    await world.concept('c1', { status: 'aktiv', name: 'Tupel' });
+    await world.item('b1', { kind: 'card_batch', cardConcept: 'c1' });
+    const worker = await openTx();
+    await worker.sql`SELECT id FROM session WHERE id = ${refId('s1')} FOR NO KEY UPDATE`;
+    const request = accept('b1');
+    try {
+      expect(await pending(request)).toBe(true);
+      await worker.commit();
+    } finally {
+      await worker.rollback();
+    }
+    expect((await request).statusCode).toBe(200);
+  });
+
+  it('Rückgängig wartet auf eine laufende Bewertung und scheitert danach an ihr', async () => {
+    const [first] = await acceptedBatch();
+    // Wie `POST /cards/{id}/review`: `card_state` gesperrt, `review_log` geschrieben, noch nicht festgeschrieben
+    const rating = await openTx();
+    await rating.sql`SELECT id FROM card_state WHERE card_id = ${first!} FOR UPDATE`;
+    await rating.sql`INSERT INTO review_log (id, user_id, card_id, reviewed_at, rating, duration_ms, state_before,
+                       state_after)
+                     SELECT ${crypto.randomUUID()}, user_id, id, now(), 3, 1000, '{}', '{}' FROM card
+                      WHERE id = ${first!}`;
+    const request = reopen('b1');
+    try {
+      expect(await pending(request)).toBe(true);
+      await rating.commit();
+    } finally {
+      await rating.rollback();
+    }
+    const res = await request;
+    expect(codeOf(res)).toBe('inbox_reopen_conflict');
+    expect(await world.cardRows()).toHaveLength(2);
+  });
+
+  it('Rückgängig und Bewertung gleichzeitig: nie beides, nie eine Bewertung ohne Karte', async () => {
+    for (let round = 0; round < ROUNDS; round += 1) {
+      await world.reset();
+      const [first] = await acceptedBatch();
+      const [undo, rated] = await Promise.all([reopen('b1'), review(first!)]);
+      const outcome = [codeOf(undo), codeOf(rated)];
+      expect([
+        ['ok', 'card_not_found'],
+        ['inbox_reopen_conflict', 'ok'],
+      ]).toContainEqual(outcome);
+      expect(await world.cardRows()).toHaveLength(outcome[0] === 'ok' ? 0 : 2);
+    }
+  });
+
+  it('Rückgängig und Löschen einer Karte gleichzeitig: kein Serverfehler, keine Karte bleibt übrig', async () => {
+    for (let round = 0; round < ROUNDS; round += 1) {
+      await world.reset();
+      const [first] = await acceptedBatch();
+      const [undo, removed] = await Promise.all([
+        reopen('b1'),
+        app.request({ method: 'DELETE', url: `${API}/cards/${first!}` }),
+      ]);
+      expect(undo.statusCode, undo.body).toBe(200);
+      expect([204, 404], removed.body).toContain(removed.statusCode);
+      expect(await world.cardRows()).toEqual([]);
+    }
+  });
+});

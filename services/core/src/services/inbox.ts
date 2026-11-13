@@ -565,10 +565,13 @@ export async function bulkInbox(db: Db, request: InboxBulkRequest): Promise<Inbo
         // Frühere Entscheidungen dieser Aktion können den Eintrag geändert haben
         const [item] = await tx.select().from(inboxItem).where(eq(inboxItem.id, id));
         if (!item) continue;
-        // §21.7: Mit `session_id` fasst die Massenaktion nur Kartenvorschläge an, die in diesem Moment sichtbar sind
-        // (das Konzept kann eben erst angenommen worden sein). Andere bleiben still liegen, kein Eintrag in `skipped`
-        if (request.session_id !== undefined && item.kind === 'card_batch' && !(await isVisible(tx, id)))
+        // §21.7: Die Massenaktion fasst nur Kartenvorschläge an, die in diesem Moment sichtbar sind (das Konzept kann
+        // eben erst angenommen worden sein). Mit `session_id` bleiben andere still liegen, mit `ids` landen sie in
+        // `skipped` mit `card_concept_pending` (auch bei `reject`)
+        if (item.kind === 'card_batch' && !(await isVisible(tx, id))) {
+          if (request.ids !== undefined) skipped.push({ id, code: 'card_concept_pending' });
           continue;
+        }
         const trigger = item.decision?.triggered_by;
         if (op === 'reopen' && trigger && lockedIds.has(trigger)) {
           // Öffnet sich mit seinem Auslöser, der ebenfalls dran ist

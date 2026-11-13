@@ -112,10 +112,22 @@ describe('Sichtbarkeit (§21.7)', () => {
 
   it('mit ids landet ein nicht sichtbarer Kartenvorschlag in skipped', async () => {
     await proposalBatch();
-    const res = await bulk({ action: 'accept', ids: [refId('b1')] });
+    for (const action of ['accept', 'reject'] as const) {
+      const res = await bulk({ action, ids: [refId('b1')] });
+      expect(InboxBulkResultSchema.parse(res.json())).toEqual({
+        decided: [],
+        skipped: [{ id: refId('b1'), code: 'card_concept_pending' }],
+      });
+    }
+    expect((await world.itemRow('b1')).status).toBe('offen');
+  });
+
+  it('mit ids: wird das Konzept in derselben Aktion angenommen, zählt der Kartenvorschlag', async () => {
+    await proposalBatch();
+    const res = await bulk({ action: 'accept', ids: [refId('b1'), refId('i1')] });
     expect(InboxBulkResultSchema.parse(res.json())).toEqual({
-      decided: [],
-      skipped: [{ id: refId('b1'), code: 'card_concept_pending' }],
+      decided: [refId('i1'), refId('b1')],
+      skipped: [],
     });
   });
 
