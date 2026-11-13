@@ -445,6 +445,9 @@ export async function moodleLogin(cfg: SgConfig, args: string[], deps: MoodleDep
   if (rechecked === 'unsupported') {
     const hint = coreHint(coreBefore);
     if (hint) io.out(hint);
+  } else if (rechecked === 'timeout') {
+    // Ein Core ohne die Route antwortet sofort mit 404. Langsam ist Moodle: Der Core hat die Caches schon geleert
+    io.out(`Der Core prüft Moodle noch neu (keine Antwort nach ${CORE_TIMEOUT_MS / 1000} Sekunden).`);
   } else if (rechecked?.site_url === null) {
     // Ohne SG_MOODLE_URL liest der Core keinen Token, auch nicht nach der Neuprüfung
     io.out('Der Core läuft ohne SG_MOODLE_URL. Nach dem Eintrag: pnpm sg stop && pnpm sg start.');
@@ -497,13 +500,14 @@ export async function fetchCoreStatus(cfg: SgConfig, fetchFn: FetchFn): Promise<
 }
 
 /**
- * `POST /moodle/recheck`: der Core leert Token- und Status-Cache und prüft neu. `'unsupported'` = älterer Core (404).
- * Alles andere (Core aus, Fehler, falsche Antwort) ergibt `null`. Wirft nie, und Antworttexte werden nie ausgegeben.
+ * `POST /moodle/recheck`: der Core leert Token- und Status-Cache und prüft neu. `'unsupported'` = älterer Core (404),
+ * `'timeout'` = keine Antwort nach `CORE_TIMEOUT_MS` (Moodle langsam, der Core prüft weiter). Alles andere (Core aus,
+ * Fehler, falsche Antwort) ergibt `null`. Wirft nie, und Antworttexte werden nie ausgegeben.
  */
 export async function recheckCore(
   cfg: SgConfig,
   fetchFn: FetchFn,
-): Promise<MoodleStatus | 'unsupported' | null> {
+): Promise<MoodleStatus | 'unsupported' | 'timeout' | null> {
   try {
     const response = await fetchFn(`http://127.0.0.1:${cfg.corePort}/api/v1/moodle/recheck`, {
       method: 'POST',
@@ -520,8 +524,8 @@ export async function recheckCore(
     }
     const parsed = MoodleStatusSchema.safeParse(await response.json());
     return parsed.success ? parsed.data : null;
-  } catch {
-    return null;
+  } catch (error) {
+    return error instanceof Error && error.name === 'TimeoutError' ? 'timeout' : null;
   }
 }
 

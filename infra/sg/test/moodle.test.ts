@@ -572,6 +572,19 @@ describe('moodle login: Neuprüfung im Core (POST /moodle/recheck)', () => {
     expect(io.lines.join('\n')).not.toMatch(/Core/);
   });
 
+  it('Zeitlimit (Moodle langsam): kein Neustart-Hinweis, Exit-Code 0', async () => {
+    const core = withCore(
+      async () => Response.json(status('ok')),
+      async () =>
+        Promise.reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError')),
+    );
+    const { deps, io } = makeDeps({ fetch: core.fetch });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    const out = io.lines.join('\n');
+    expect(out).toMatch(/Der Core prüft Moodle noch neu \(keine Antwort nach 3 Sekunden\)/);
+    expect(out).not.toMatch(/sg stop|bisherigen Token/);
+  });
+
   it('Fehler beim Aufruf (Abbruch, 500, kaputte Antwort): wirft nie, Exit-Code 0, Rückfall-Hinweis, Antworttext nicht ausgegeben', async () => {
     for (const recheck of [
       async (): Promise<Response> => Promise.reject(new Error(`boom ${TOKEN}`)),
