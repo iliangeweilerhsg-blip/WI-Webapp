@@ -30,6 +30,7 @@ import {
   type InboxItem,
 } from '@sg/shared';
 import { startTestApp, testDatabaseUrl, type TestApp } from './helpers.ts';
+import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { refId, World } from './inbox-helpers.ts';
 
 const API = '/api/v1';
@@ -539,6 +540,29 @@ e2e('Inbox mit echtem Worker (Fake-KI, Fake-Embedder)', { timeout: 90_000 }, () 
     const [wieder] = await app.handle.sql`SELECT i.status FROM inbox_item i
       JOIN concept c ON c.id = i.card_concept_id WHERE i.kind = 'card_batch' AND c.name = 'Relation'`;
     expect(wieder!.status).toBe('offen');
+  });
+
+  it('Karten: Konzept annehmen → Karten annehmen → Warteschlange → eine Bewertung → Karte ist nicht mehr fällig', async () => {
+    await lecture('s1', SESSION_1, 1);
+    await accept(await find('concept_new Relation'));
+    const [batch] = await inbox('offen', ['card_batch']);
+    const accepted = await accept(batch!, {});
+    expect(accepted.cards).toHaveLength(2);
+
+    const queueUrl = `${API}/review/queue`;
+    const before = ReviewQueueSchema.parse((await app.request({ method: 'GET', url: queueUrl })).json());
+    expect(before.items).toHaveLength(2);
+    const card = before.items[0]!.card;
+
+    // „Leicht“ (4) schickt eine neue Karte über den Tageswechsel hinaus (06 §1); die andere bleibt dran
+    const review = await post(`/cards/${card.id}/review`, { id: uuidv7(), rating: 4, duration_ms: 3000 });
+    expect(review.statusCode, review.body).toBe(200);
+    expect(review.json().requeue).toBe(false);
+
+    const after = ReviewQueueSchema.parse((await app.request({ method: 'GET', url: queueUrl })).json());
+    expect(after.items.map((item) => item.card.id)).not.toContain(card.id);
+    expect(after.items).toHaveLength(1);
+    expect(after.reviewed_today).toBe(1);
   });
 
   // Nachträglich angelegtes Material: keine Aufnahme, kein started_at/ended_at. Früher scheiterte `concepts.extract` hier
