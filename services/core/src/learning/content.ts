@@ -32,8 +32,8 @@ export type CardContentCheck =
   | { ok: false; reason: CardInvalidReason };
 
 /**
- * Säubern: NFC, Zeilenenden zu `\n`, Tab zu Leerzeichen, Steuerzeichen (`Cc` außer `\n`) und Formatzeichen (`Cf`)
- * entfernen, trimmen. NFC kommt nach dem Entfernen (wie im Worker): Ein entferntes Formatzeichen zwischen Buchstabe und
+ * Säubern (§21.2): Zeilenenden zu `\n`, Tab zu Leerzeichen, Steuerzeichen (`Cc` außer `\n`) und Formatzeichen (`Cf`)
+ * entfernen, dann NFC, trimmen. NFC kommt nach dem Entfernen (wie im Worker): Ein entferntes Formatzeichen zwischen Buchstabe und
  * Akzent (`e` + ZWJ + U+0301) ergäbe sonst einen Text, der nicht in NFC ist.
  */
 export function sanitizeCardText(text: string): string {

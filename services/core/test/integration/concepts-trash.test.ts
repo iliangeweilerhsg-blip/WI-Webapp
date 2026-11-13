@@ -244,7 +244,7 @@ describe('Kanten (§20.8)', () => {
       ]),
     );
     expect(edges('module')).toContain('concept_module.module_id');
-    // Karten (§21.8): die Kante concept → card wirkt erst, wenn Konzepte selbst löschbar werden (F-BIB-05)
+    // Karten (§21.8): die Kante concept → card wirkt schon heute, über Session → Vorschlag-Konzept → Karte
     expect(edges('concept')).toEqual(['concept_module.concept_id', 'card.concept_id']);
     expect(edges('card')).toEqual(['card_state.card_id', 'review_log.card_id']);
     for (const leaf of [

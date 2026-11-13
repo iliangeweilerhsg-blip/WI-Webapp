@@ -504,14 +504,11 @@ export async function undoAcceptNew(tx: Tx, item: ItemRow, decision: InboxDecisi
     .limit(1);
   if (foreignItem) throw reopenConflict('Vorschläge anderer Vorlesungen hängen an diesem Konzept.');
 
-  // §21.7: Mit nicht gelöschten Karten würde das Konzept zum Vorschlag, und das endgültige Löschen der Session risse die
-  // Karten mit. Die Karten dürfen auch nicht aus einem Kartenvorschlag stammen (der wird zuerst rückgängig gemacht).
-  const [liveCard] = await tx
-    .select({ id: card.id })
-    .from(card)
-    .where(and(eq(card.conceptId, conceptId), notDeleted(card)))
-    .limit(1);
-  if (liveCard) throw reopenConflict('Das Konzept hat inzwischen Karten.', { reason: 'cards' });
+  // §21.7 (Lead-Entscheidung 13.11.2026): Mit irgendeiner Karte, auch einer im Papierkorb, würde das Konzept zum Vorschlag.
+  // Käme danach `concepts.resolve` oder würde die Session endgültig gelöscht, verschwänden die Karten samt Bewertungsverlauf
+  // vor Ablauf der 30 Tage. Die Karten dürfen auch nicht aus einem Kartenvorschlag stammen (der wird zuerst rückgängig gemacht).
+  const [anyCard] = await tx.select({ id: card.id }).from(card).where(eq(card.conceptId, conceptId)).limit(1);
+  if (anyCard) throw reopenConflict('Das Konzept hat Karten (auch im Papierkorb).', { reason: 'cards' });
 
   const previous = decision.previous ?? {};
   const textChanged = 'name' in previous || 'aliases' in previous || 'one_liner' in previous;

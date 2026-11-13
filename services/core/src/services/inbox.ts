@@ -46,7 +46,13 @@ import {
   type ItemRow,
 } from './concept-graph.ts';
 import { loadApiConcept, loadSessionRefs } from './concepts.ts';
-import { acceptCardBatch, cardBatchVisible, undoCardBatch } from './inbox-cards.ts';
+import {
+  acceptCardBatch,
+  cardBatchVisible,
+  conceptPending,
+  peekEffectiveConceptId,
+  undoCardBatch,
+} from './inbox-cards.ts';
 import { isoTs, requireSession } from './sessions.ts';
 
 const notFound = () => new HttpError(404, 'inbox_item_not_found', 'Der Eintrag wurde nicht gefunden.');
@@ -464,6 +470,10 @@ export async function decideInboxItem(
         autoAccept: op === 'accept' ? await readAutoAccept(tx) : 'aus',
         graphLocked: false,
       };
+      // §21.7: Ein unsichtbarer Kartenvorschlag lässt sich auch einzeln nicht ablehnen (wie `accept` und wie bulk mit `ids`)
+      if (op === 'reject' && item.kind === 'card_batch' && !(await isVisible(tx, id))) {
+        throw conceptPending(await peekEffectiveConceptId(tx, item));
+      }
       const outcome = await applyOp(tx, item, op, body, state);
       const [fresh] = await tx.select().from(inboxItem).where(eq(inboxItem.id, id));
       const [view] = await toApiItems(tx, fresh ? [fresh] : []);

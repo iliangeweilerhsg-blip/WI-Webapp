@@ -110,7 +110,8 @@ export const CHILDREN: Record<Node, Edge[]> = {
   evidence: [],
   concept: [
     { child: 'concept_module', fk: 'concept_id' },
-    // §21.8: Die Kante wirkt erst, wenn Konzepte selbst löschbar werden (F-BIB-05)
+    // §21.8: Wirkt schon heute, über Session → Vorschlag-Konzept (`proposal_session_id`) → Karte. An solchen Konzepten
+    // hängen kaum Karten (A1-`reopen` sperrt, §21.7), eine vorhandene geht aber mit, mit demselben Zeitstempel
     { child: 'card', fk: 'concept_id' },
   ],
   concept_module: [],
@@ -389,7 +390,12 @@ export async function softDelete(tx: Tx, kind: TrashKind, id: string): Promise<D
   const [row] = await tx.execute<{ id: string; extra: string | null }>(
     sql`SELECT id, ${
       kind === 'session' ? sql`state` : kind === 'notebook' ? sql`kind` : sql`NULL::text`
-    } AS extra FROM ${table} WHERE id = ${id} AND deleted_at IS NULL FOR UPDATE`,
+    } AS extra FROM ${table} WHERE id = ${id} AND deleted_at IS NULL ${
+      // Karte: `FOR NO KEY UPDATE` (§21.7), wie das `UPDATE deleted_at` selbst und wie `undoCardBatch`. Die Reihenfolge ist
+      // überall `card` vor `card_state`. `FOR UPDATE` hielte die Bewertung auf (`review_log` nimmt `FOR KEY SHARE` an `card`,
+      // während sie `card_state` hält) und könnte mit ihr verklemmen
+      kind === 'card' ? sql`FOR NO KEY UPDATE` : sql`FOR UPDATE`
+    }`,
   );
   if (!row) throw notFound(kind);
   if (kind === 'session' && (row.extra === 'laeuft' || row.extra === 'pausiert')) throw sessionActive([id]);
@@ -433,11 +439,14 @@ export async function restoreFromTrash(tx: Tx, id: string): Promise<TrashRestore
   if (parentRef) {
     // Eine Karte kommt nur zu einem aktiven Konzept zurück (§21.8): gelöscht oder nicht mehr `aktiv` blockiert
     const inactive = parentRef.kind === 'concept' ? sql`p.status <> 'aktiv'` : sql`FALSE`;
+    // Konzept `FOR SHARE` (wie `createCard`, §21.7): Ein gleichzeitiges `reopen` von A1 wartet, bis die Karte wieder steht
+    const lock = parentRef.kind === 'concept' ? sql`FOR SHARE OF p` : sql``;
     const [parent] = await tx.execute<{ id: string; deleted: boolean; inactive: boolean; title: string }>(
       sql`SELECT p.id, p.deleted_at IS NOT NULL AS deleted, ${inactive} AS inactive,
                  ${parentTitle(parentRef.kind)} AS title
           FROM ${sql.identifier(parentRef.kind)} p
-          WHERE p.id = (SELECT ${sql.identifier(parentRef.fk)} FROM ${sql.identifier(kind)} WHERE id = ${id})`,
+          WHERE p.id = (SELECT ${sql.identifier(parentRef.fk)} FROM ${sql.identifier(kind)} WHERE id = ${id})
+          ${lock}`,
     );
     if (parent?.deleted || parent?.inactive) {
       const details: TrashParent = { id: parent.id, kind: parentRef.kind, title: parent.title };
