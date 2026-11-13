@@ -3,7 +3,7 @@
 Diese Datei legt fest, wie Core, Worker, Web-App, iPad-App und `sg`-CLI zusammenspielen. So können die Teile parallel gebaut werden (`AGENTS.md`, Regel 4).
 Änderungen nur durch den Lead. Datenformate selbst stehen in `packages/schemas`.
 
-§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1, §17 ist der Moodle-Abgleich. Ab §18 folgt Phase 2: §18 Transkription und Rückblick, §19 Suche, §20 Konzepte, Inbox und Zusammenfassung.
+§1–5 gelten seit Phase 0. §6–16 sind die Verträge und der Ticketplan für Phase 1, §17 ist der Moodle-Abgleich. Ab §18 folgt Phase 2: §18 Transkription und Rückblick, §19 Suche, §20 Konzepte, Inbox und Zusammenfassung. §21 ist der vorgezogene Schnitt „Karten und Wiederholung“ (Minimal-Lernen) aus Phase 3.
 
 ## 1. Umgebungsvariablen
 
@@ -1679,7 +1679,7 @@ Datenformate in `packages/schemas/src/concepts.schema.json`, dazu `PipelineStep`
 | `concept_module` | `concept_id`, `module_id` (beide FK, `ON DELETE CASCADE`), `UNIQUE (concept_id, module_id)` | Worker, Core |
 | `concept_relation` | `from_id`, `to_id` (FK `concept`, Kaskade), `kind` (`ConceptRelationKind`), `source` (`ki` \| `manuell` \| `wikilink`), `confidence` (0..1), `confirmed`, `why` (≤ 500), `proposal_session_id` (FK `session`, Kaskade), `job_id` (ohne FK) | Worker, Core |
 | `evidence` | `concept_id` (FK, Kaskade), `session_id` (FK, Kaskade, Herkunft des Belegs), `kind`, `ref_id`, `t_start_ms`, `t_end_ms`, `region jsonb`, `quote` (≤ 300), `weight` (Standard 1), `auto`, `job_id` (ohne FK) | Worker, Core (beim Zusammenführen) |
-| `inbox_item` | 03 §8: `kind` (`concept_new` \| `concept_merge` \| `relation`), `session_id` (FK, Kaskade), `job_id` (ohne FK), `payload jsonb` (`InboxPayload`), `status` (`offen` \| `angenommen` \| `abgelehnt` \| `automatisch`), `decided_at`, `decision jsonb` (`InboxDecision`), `priority` (kleiner = früher), `concept_id`, `target_concept_id` (FK `concept`, Kaskade), `relation_id` (FK `concept_relation`, Kaskade) | Worker (anlegen, automatisch annehmen), Core (entscheiden) |
+| `inbox_item` | 03 §8: `kind` (`concept_new` \| `concept_merge` \| `relation`, seit §21 auch `card_batch`), `session_id` (FK, Kaskade), `job_id` (ohne FK), `payload jsonb` (`InboxPayload`), `status` (`offen` \| `angenommen` \| `abgelehnt` \| `automatisch`), `decided_at`, `decision jsonb` (`InboxDecision`), `priority` (kleiner = früher), `concept_id`, `target_concept_id` (FK `concept`, Kaskade), `relation_id` (FK `concept_relation`, Kaskade) | Worker (anlegen, automatisch annehmen), Core (entscheiden) |
 | `session_summary` | Eine je Session (`UNIQUE (session_id)`, FK Kaskade): `lang`, `sentences jsonb` (`SummarySentence[]`, 1–5), `outline jsonb` (`SummaryOutlineItem[]`, ≤ 30), `provider`, `model`, `prompt_version`, `input_hash`, `job_id` (ohne FK) | Worker (`summary.write`) |
 | `cost_entry` (Ergänzung) | dazu `session_id` (ohne FK: Kosten bleiben nach dem Löschen gezählt), `cache_creation_input_tokens`, `cache_read_input_tokens`, `cost_estimate_usd`, `request_id` (≤ 200). CHECKs gegen negative Werte | Worker (§20.5) |
 
@@ -2004,3 +2004,364 @@ Zwei offene Tabs können kurz verschiedene Zähler zeigen. Das iPad ist nicht be
 - **§13 Wiederherstellen:** Kollidierende unbestätigte Beziehungen und Belege einer Session werden beim Wiederherstellen hart gelöscht statt `409 restore_conflict` (§20.8).
 - **Invariante 5:** Bei A2 bleiben Beziehungen, deren Umhängen einen Selbstbezug oder eine Dublette ergäbe, unbestätigt an der Hülle `P` (Eintrag `abgelehnt`), statt auf das Ziel umgehängt zu werden.
 - **Dubletten beim Annehmen** (A2, A3) werden nie hart gelöscht: Die Zeile bleibt unbestätigt liegen, der Eintrag hält `decision.duplicate_of` fest (§20.6).
+
+---
+
+## 21. Karten und Wiederholung, Minimal-Lernen (F-LRN-01/-02/-03 in schmaler Form, 05 §P10, 06 §1/§3, 08 §6)
+
+Vorgezogener Schnitt aus Phase 3 (`docs/plaene/PHASE-2-STAND.md` §5, Variante B): **Konzepte → Kartenvorschläge in der Inbox → Karten → tägliche Wiederholung mit FSRS.**
+Datenformate in `packages/schemas/src/learning.schema.json`, dazu `InboxKind`, `InboxPayload`, `InboxDecision`, `InboxAcceptRequest`, `InboxDecisionResult` (`concepts.schema.json`) und `PipelineStep` (`transcript.schema.json`). Tabellen in der Migration `0012_cards`. Gemeinsame Testfälle in `packages/schemas/fixtures/cards/`.
+**Nicht Teil dieses Schnitts:** Lernsitzung (F-LRN-04), KI-Bewertung und Fehleranalyse, die Kartentypen `reverse`, `mc`, `open`, `calc`, `relation`, `image_occlusion`, `tape`, Antworten tippen, Beherrschung, Unsicherheit, Wichtigkeit, Dringlichkeit und Readiness (06 §2), Klausur- und Erhaltungsmodus (06 §3.3/§3.4), FSRS-Optimierer, Probeklausur, Planer, Tagesbriefing, Wiederholen am iPad, Karten in der Suche, Formelsatz (KaTeX) und Markdown in Karten, „Rückgängig“ für eine Bewertung, Karten zwischen Konzepten verschieben.
+
+### 21.1 Tabellen
+
+| Tabelle | Inhalt | Schreiber |
+|---|---|---|
+| `card` | 03 §9 in schmaler Form: `concept_id` (FK `concept`, `ON DELETE CASCADE`), `kind` (`basic` \| `cloze`), `stage` (1–4, Standard 2), `front jsonb`, `back jsonb` (§21.2), `sources jsonb` (`EvidenceRef[]`, 1–6), `origin` (`ki` \| `manuell`), `suspended` (Standard `false`), `inbox_item_id` (ohne FK, nur bei `origin = ki`) | Core |
+| `card_state` | FSRS-Zustand, 1:1 zur Karte: `card_id` (FK `card`, Kaskade, `UNIQUE`), `state` (`new` \| `learning` \| `review` \| `relearning`), `due`, `stability`, `difficulty` (beide `double precision`), `elapsed_days`, `scheduled_days`, `learning_steps`, `reps`, `lapses`, `last_review` | Core |
+| `review_log` | Eine Zeile je Bewertung: `card_id` (FK `card`, Kaskade), `reviewed_at`, `rating` (1–4), `rating_source` (nur `nutzer`), `duration_ms` (0–3 600 000), `context` (nur `taeglich`), `state_before jsonb`, `state_after jsonb` (`CardState`) | Core |
+| `inbox_item` (Ergänzung) | `kind` erlaubt zusätzlich `card_batch`. Neue Spalte `card_concept_id` (FK `concept`, Kaskade): das Konzept, zu dem die Karten vorgeschlagen sind | Worker (anlegen), Core (entscheiden) |
+
+- Alle drei neuen Tabellen haben die Pflichtfelder aus 03 §1 und den `updated_at`-Trigger. Der Worker schreibt keine von ihnen.
+- **Indizes:** `card_concept_idx (concept_id) WHERE deleted_at IS NULL`, `card_state_due_idx (due) WHERE deleted_at IS NULL`, `review_log_card_idx (card_id, reviewed_at)`, `review_log_reviewed_idx (reviewed_at) WHERE deleted_at IS NULL`.
+- **CHECKs `card`:** `kind`, `stage`, `origin`. `front` und `back` sind JSON-Objekte. `sources` ist ein Array mit 1 bis 6 Einträgen (Invariante 3, LP8, jetzt in der Datenbank abgesichert). `inbox_item_id` nur bei `origin = ki`.
+- **CHECKs `card_state`:** `state`. Keine negativen Zahlen. `state = new` genau dann, wenn `last_review` leer ist.
+- **CHECKs `review_log`:** `rating` 1–4, `duration_ms`, `rating_source`, `context`. Beide Zustände sind JSON-Objekte.
+- **`card_state` entsteht mit der Karte** in derselben Transaktion: `state = new`, `due = now()`, alle Zahlen 0, `last_review = NULL` (wie `createEmptyCard` von `ts-fsrs`). Eine Karte ohne `card_state` gibt es nicht.
+- **`sources` statt `source_evidence_ids`** (Abweichung von 03 §9): Die Karte hält ihre Belege als `EvidenceRef` fest (Folie mit `slide_id`, `deck_id`, `slide_index` oder Zeitraum mit `session_id`, `t_start_ms`, `t_end_ms`), nicht als IDs der Tabelle `evidence`. Grund: Zeilen in `evidence` werden bei einem neuen Abgleich und beim Zusammenführen hart ersetzt (§20.3 Schritt 7, §20.6 A2), eine ID würde ins Leere zeigen. Die Regeln je Art stehen in §20.1 („Belege“).
+- **`inbox_item` mit `card_batch`:** `card_concept_id` und `session_id` sind gesetzt, `concept_id`, `target_concept_id` und `relation_id` leer. Bei den anderen Arten ist `card_concept_id` leer (CHECK `inbox_item_refs_chk`). Je Konzept und Session höchstens ein Eintrag, auch ein entschiedener: `UNIQUE (card_concept_id, session_id) WHERE card_concept_id IS NOT NULL` (`inbox_item_card_batch_uq`). `inbox_item_concept_uq` bleibt unberührt: Ein Vorschlag hat weiter genau einen Eintrag `concept_new` bzw. `concept_merge` und daneben höchstens einen Kartenvorschlag je Session.
+- **Kartenvorschläge sind keine Zeilen in `card`.** Sie stehen nur in `inbox_item.payload` (`InboxPayloadCardBatch`). Karten entstehen erst beim Annehmen (§21.7). So gibt es keinen Kartenstatus „Vorschlag“, und die Warteschlange muss nichts ausfiltern.
+- **Löschen:** weich mit demselben `deleted_at` auf `card`, `card_state` und `review_log` (§21.8). Endgültig über die FKs. Wird ein Konzept endgültig gelöscht, gehen seine Karten mit. Wird eine Session gelöscht, gehen ihre Kartenvorschläge mit (`inbox_item.session_id`), **angenommene Karten bleiben**.
+
+### 21.2 Kartenformat
+
+Format nach 08 §6, nur `basic` und `cloze`. In der API und in der Inbox als `CardContent` (Union über `kind`), in der Datenbank als `card.kind`, `card.front`, `card.back`.
+
+```jsonc
+// basic
+{ "kind": "basic",
+  "front": { "text_md": "Wann ist eine Relation in dritter Normalform?" },
+  "back":  { "text_md": "…", "explanation_md": "…" } }      // explanation_md darf null sein
+// cloze
+{ "kind": "cloze",
+  "front": { "text_md": "Eine Relation in 3NF ist immer auch in {{c1::2NF}}." },
+  "back":  { "answers": { "c1": ["2NF", "zweite Normalform"] } } }
+```
+
+- **Reiner Text** (Lead-Entscheidung): Die Felder heißen wie in 08 §6 `…_md`, die Web-App zeigt sie aber als reinen Text, ohne Markdown, HTML, Links und Formelsatz (wie KI-Texte in §20.10). Zeilenumbrüche bleiben sichtbar. KaTeX folgt als eigener Schnitt. Formeln stehen bis dahin so da, wie sie getippt sind (`$…$`).
+- **Grenzen** (Schema): Vorderseite 1–500 Zeichen, Antwort 1–1 000, Erklärung 1–1 000 oder `null`, je Lücke 1–5 Lösungen mit je 1–200 Zeichen.
+- **Säubern** (Core beim Anlegen, Ändern und Annehmen; Worker vor dem Prüfen): NFC, Zeilenenden zu `\n`, Tab zu Leerzeichen, Steuerzeichen (`Cc` außer `\n`) und Formatzeichen (`Cf`) entfernen, trimmen. Gespeichert wird die gesäuberte Fassung.
+- **Lücken:** `{{cN::Text}}` mit `N` = 1 bis 3. Die Nummern beginnen bei 1 und sind lückenlos, jede kommt genau einmal vor. Der Text einer Lücke enthält weder `{` noch `}` noch `::` und wird am Rand getrimmt. Außerhalb gültiger Lücken darf der Text weder `{{` noch `}}` enthalten. `back.answers` hat genau die Schlüssel der Lücken, die **erste** Lösung ist der Text der Lücke, weitere sind gleichwertige Schreibweisen (für späteres Tippen).
+- **Eine Karte je Lückentext:** Alle Lücken werden zusammen verdeckt (`[…]`) und zusammen aufgedeckt. Es entstehen nicht mehrere Karten wie bei Anki.
+- **Prüfung** mit dem ersten Verstoß als `reason`: `empty` (nach dem Säubern leer), `cloze_syntax`, `cloze_none` (keine Lücke), `cloze_numbers`, `cloze_answers`. Der Core antwortet mit `400 card_invalid` und `details.reason`. Eine `basic`-Karte darf `{{…}}` als normalen Text enthalten.
+- **Wörter zählen** (für die Regeln aus §21.6): Folgen von Zeichen ohne Leerraum. Bei `cloze` zählt die Vorderseite mit eingesetzten Lücken.
+- **Gemeinsame Testfälle:** `packages/schemas/fixtures/cards/content.json` (Säubern, Prüfung, Wortzahlen, Anzeige der Vorderseite). Core (B2) und Worker (B1) prüfen beide dagegen.
+
+### 21.3 Kette, Fortschritt und Anlegen (Core)
+
+**Kette** (Lead-Entscheidung, 05 §2): `… → concepts.resolve → summary.write` und daneben `concepts.resolve → cards.generate`. Karten entstehen für **alle Konzepte der Session**, schon bevor der Nutzer die Konzepte entschieden hat. Sichtbar wird ein Kartenvorschlag erst, wenn sein Konzept `aktiv` ist (§21.7).
+
+| Job | Payload | `priority` | `depends_on` | Ergebnis |
+|---|---|---|---|---|
+| `cards.generate` | `CardsGeneratePayload` `{ session_id, force? }` | 4 | der `concepts.resolve`-Job desselben Aufrufs, dazu ein laufender `cards.generate` der Session | `CardsGenerateResult` |
+
+- `job.session_id` ist gesetzt, `max_attempts` bleibt 3. Priorität 4 ist die niedrigste der Kette und liegt auch unter `search.index` (5): Karten verdrängen nichts (05 §1: „… alles für die Nacharbeitung > Karten“).
+- **Der Job hält `verarbeitet` auf** wie die Jobs aus §20.2 (allgemeine Regel aus §3). Pausiert er wegen des Budgets (§21.6), endet er sofort und hält nichts auf.
+- **`ensurePipelineJobs`** (§18.2, §20.2) bekommt den Schritt 8, nach `summary.write` angelegt. Wiederverwenden wie in §20.2 (`payload.force` wird `alt ODER neu`, `depends_on` bereinigt und ergänzt).
+
+| `from_step` | angelegt bzw. wiederverwendet |
+|---|---|
+| `audio.finalize`, `transcribe`, `align.log`, `concepts.extract`, `concepts.resolve` | wie §20.2, dazu `cards.generate` nach dem `concepts.resolve`-Job |
+| `summary.write` | nur `summary.write`, **kein** `cards.generate` |
+| `cards.generate` | nur `cards.generate` (ohne `depends_on` außer einem laufenden Job desselben Typs) |
+
+- `force` wirkt bei `cards.generate` nur, wenn `from_step = cards.generate` ist (wie §20.2). Sonst erkennt der Job geänderte Eingaben über den `input_hash` je Konzept.
+- **`POST /sessions/{id}/reprocess`** nimmt `from_step: "cards.generate"` an (kein Audio nötig). Die Web-App nutzt das für „Karten erzeugen“ und nach einer Budget-Pause (§21.10).
+- **Fortschritt und Anzeige:** `PipelineStep` endet mit `cards.generate`, Text der Schrittliste „Karten“.
+- `JOB_PAYLOAD_SCHEMAS` bekommt den Typ.
+- **Merge-Reihenfolge:** Die Kette im Core (B3) erst nach dem Worker-Handler (B1). Sonst enden alle Karten-Jobs mit `unbekannter Job-Typ` (§3).
+- **Übergang bis B3:** `PipelineStep` kennt den Schritt seit B0. Bis B3 legt `ensurePipelineJobs` für `from_step = cards.generate` nichts an (`jobs = []`), die Web-App zeigt in der Inbox keine Kartenvorschläge.
+
+### 21.4 Core: Karten und Bewertungen
+
+| Route | Antwort | Fehler |
+|---|---|---|
+| `GET /review/queue?budget_minutes&extra_minutes` | 200 `ReviewQueue` | `400 validation_failed` |
+| `POST /cards/{id}/review` mit `ReviewRequest` | 200 `ReviewResult` | `404 card_not_found`, `409 card_suspended`, `409 review_exists` |
+| `GET /concepts/{id}/cards` | 200 `CardList` | `404 concept_not_found` |
+| `GET /cards/{id}` | 200 `Card` | `404 card_not_found` |
+| `POST /cards` mit `CardCreate` | 201 `Card` | `404 concept_not_found`, `409 concept_not_active`, `409 card_exists`, `400 card_invalid`, `400 card_source_invalid` |
+| `PATCH /cards/{id}` mit `CardUpdate` | 200 `Card` | `404 card_not_found`, `400 validation_failed` (kein Feld), `400 card_invalid`, `400 card_source_invalid` |
+| `DELETE /cards/{id}` | 204 | `404 card_not_found` |
+
+**Zugang:** Keine Route trägt `config.sgAccess`. Alle gelten lokal und aus dem Netz mit Geräte-Token wie die übrigen (§5). Gelöschte Karten gibt es nicht (`404`). `Idempotency-Key` gilt für die beiden `POST` (08 §1).
+
+**Lesen**
+- **`Card`:** `content` aus `kind`, `front`, `back`. `sources` als `CardSource` mit `missing = true`, wenn bei `slide` die Folie oder ihr Foliensatz fehlt oder gelöscht ist bzw. bei `transcript` die Session fehlt oder gelöscht ist. `state` aus `card_state`.
+- **`GET /concepts/{id}/cards`:** alle nicht gelöschten Karten des Konzepts, auch pausierte, sortiert `(created_at, id)`, höchstens 500. Auch für Vorschläge und Hüllen (dann leer). Die Web-App folgt bei Hüllen `merged_into` (§20.10).
+- **`GET /review/queue`:** §21.5.
+
+**`POST /cards`** (von Hand, B5)
+- Das Konzept muss existieren (`404`) und `aktiv` sein, sonst `409 concept_not_active` (`details.status`, bei einer Hülle zusätzlich `details.merged_into`).
+- `content` säubern und prüfen (§21.2). Die Längenregeln für KI-Karten (§21.6) gelten hier nicht.
+- **Beleg ist Pflicht** (LP8): `sources` mit 1 bis 6 `EvidenceRef`, ohne Dubletten. Der Core prüft jeden: `slide` → die Folie existiert, ist nicht gelöscht und `deck_id` und `slide_index` passen zu ihr. `transcript` → die Session existiert und ist nicht gelöscht, `t_start_ms ≤ t_end_ms`. Sonst `400 card_source_invalid` mit `details.index`. Der Beleg muss **kein** Beleg des Konzepts sein (etwa „Karte daraus“ aus einem Satz der Kurzfassung mit dessen Quellen).
+- `id` optional (§6). Schon vergeben → `409 card_exists`.
+- Legt `card` (`origin = manuell`, `stage = 2`) und `card_state` an. Keine Dublettenprüfung: Wer von Hand anlegt, entscheidet selbst.
+
+**`PATCH /cards/{id}`**
+- `content` ersetzt Vorder- und Rückseite, auch mit anderem `kind`. Säubern und prüfen wie oben. `sources` ersetzt die Belege (Prüfung wie oben). `suspended` pausiert bzw. setzt fort.
+- Der FSRS-Zustand und `review_log` bleiben bei jeder Änderung unverändert. `origin` bleibt.
+- Kein `version`-Feld: Es gilt die letzte Änderung (ein Nutzer, eine Web-App).
+
+**`DELETE /cards/{id}`:** weich, Papierkorb (§21.8). „Rückgängig“ im Toast über `POST /trash/{id}/restore`.
+
+**`POST /cards/{id}/review`** (Selbstbewertung 1 bis 4)
+- `ReviewRequest`: `id` (UUIDv7 vom Client, **Pflicht**, wird die ID der Zeile in `review_log`), `rating`, `duration_ms` (Zeit vom Anzeigen der Vorderseite bis zur Bewertung).
+- **Eine Transaktion:** `card_state` der Karte `FOR UPDATE` sperren, Karte prüfen (nicht gelöscht, sonst `404`; pausiert → `409 card_suspended`), neuen Zustand rechnen (`fsrs.next(card, now, rating)`, §21.5), `card_state` schreiben und `review_log` einfügen (`state_before`, `state_after`, `reviewed_at = now`). `now` ist die Uhr des Core, nie eine Zeit vom Client.
+- **Idempotent über `id`:** Gibt es die Bewertung schon mit derselben Karte und demselben `rating`, antwortet der Core mit 200 und dem **heutigen** Stand der Karte, ohne etwas zu ändern (`review` aus der gespeicherten Zeile, `requeue` nach der Regel unten). Gibt es sie mit einer anderen Karte oder einem anderen `rating`: `409 review_exists`. So ist ein wiederholter Tastendruck oder ein erneutes Senden nach einem Netzfehler nie eine zweite Bewertung. Geprüft wird unter der Sperre.
+- Eine Karte darf bewertet werden, auch wenn sie noch nicht fällig ist (etwa eine Karte im Lernschritt, die der Block vorzieht). FSRS rechnet mit der tatsächlich vergangenen Zeit.
+- `ReviewResult.requeue = true`, wenn die neue `due` vor dem Ende des Lerntags liegt (§21.5). Dann kommt die Karte im selben Block noch einmal (§21.10).
+
+### 21.5 FSRS, Lerntag und Tageswarteschlange (Core)
+
+Alle Konstanten stehen in `services/core/src/learning/params.ts` und sind über Tests abgesichert (06, Einleitung).
+
+**FSRS** (06 §1)
+
+| Punkt | Festlegung |
+|---|---|
+| Bibliothek | `ts-fsrs` im Core, **Hauptversion 5** (geprüft gegen 5.4.2, neueste 5.x vom 01.09.2026). 6.x verlangt Node ≥ 24, das Repo läuft auf Node 22 (`.nvmrc`). Neue Abhängigkeit in B2, genaue Version dort (mindestens zwei Wochen alt, Begründung im PR). Der Kartentyp `Card` der Bibliothek hat genau die Felder von `card_state`: `due`, `stability`, `difficulty`, `elapsed_days`, `scheduled_days`, `learning_steps`, `reps`, `lapses`, `state`, `last_review` |
+| Startparameter | Standardgewichte der Bibliothek |
+| Zielbehaltensquote | 0,90 (`request_retention`), fest. Die Einstellung dazu kommt mit Phase 3 |
+| Maximales Intervall | 365 Tage (`maximum_interval`, Standard der Bibliothek wäre 36 500) |
+| Zufallsstreuung | an (`enable_fuzz = true`, Standard der Bibliothek wäre aus). Die Streuung ist deterministisch: gleiche Karte, gleicher Zeitpunkt, gleiche Bewertung ergeben dieselbe `due`. Tests mit festen Erwartungswerten setzen `enable_fuzz = false` |
+| **Lernschritte** | **Standard der Bibliothek** (`enable_short_term = true`, `learning_steps` `['1m', '10m']`, `relearning_steps` `['10m']`). Abweichung von 06 §1, siehe unten |
+| Bewertung | nur Selbstbewertung 1 Nochmal · 2 Schwer · 3 Gut · 4 Leicht (`Rating.Again` … `Rating.Easy` haben dieselben Zahlen, `Rating.Manual = 0` wird nicht genutzt) |
+
+- **Abweichung von 06 §1 (Lead-Entscheidung):** 06 legt Kurzzeit-Lernschritte in die Lernsitzung (F-LRN-04) und gibt einer Karte erst danach ihren ersten FSRS-Zustand. Die Lernsitzung gibt es in diesem Schnitt nicht. Ohne Lernschritte ginge eine neue Karte nach der ersten Bewertung sofort für Tage weg, auch nach „Nochmal“. Darum übernehmen die Lernschritte von `ts-fsrs` das Einprägen am ersten Tag. Kommt die Lernsitzung, werden sie abgeschaltet. Die Zustände `learning` und `relearning` bleiben dann einfach ungenutzt.
+- **Abrufwahrscheinlichkeit** `R` einer Karte jetzt: `fsrs.get_retrievability(card, now, false)` (Zahl 0..1). Neue Karten haben `R = 0` (06 §2.1).
+- Die Zustände in `review_log` und in der API (`CardState`) haben die Felder der Bibliothek, Zeiten als ISO-Text. Abbildung: `state` ist in der Bibliothek eine Zahl (`State.New = 0`, `Learning = 1`, `Review = 2`, `Relearning = 3`), in Datenbank und API der Text `new`, `learning`, `review`, `relearning`. `last_review` fehlt in der Bibliothek bei neuen Karten (`undefined`) und ist bei uns `null`.
+- **`elapsed_days`** ist in `ts-fsrs` 5 als veraltet markiert und fällt mit 6 weg. Der Core speichert den Wert, den die Bibliothek liefert, rechnet aber nie selbst damit (Überfälligkeit und `R` kommen aus `due`, `last_review` und `get_retrievability`).
+
+**Lerntag** (Lead-Entscheidung)
+- Es gilt die **Ortszeit des Macs**: `<tz>` ist der IANA-Name der Ortszeit des Core-Prozesses, wie beim Monatsbudget (§20.5).
+- **Tageswechsel ist 04:00** (`LEARN_DAY_START_HOUR = 4`). Der Lerntag eines Zeitpunkts ist sein Kalendertag in `<tz>`, vor 04:00 der Vortag. Wer um 01:30 noch wiederholt, lernt für „heute“. `day_ends_at` ist der erste Zeitpunkt des nächsten Lerntags.
+- **Heute fällig** ist eine Karte mit `due < day_ends_at`.
+- **Überfälligkeit in Tagen** = `max(0, Lerntag(jetzt) − Lerntag(due))` in Kalendertagen.
+- Testfälle mit Sommer- und Winterzeit: `packages/schemas/fixtures/cards/learn-day.json`.
+
+**Zeitbudget** (06 §3.1, F-LRN-03)
+- Budget = `budget_minutes` aus der Anfrage (1–240), sonst `learning.review_budget_minutes` (Standard **20**), plus `extra_minutes` (0–120, Standard 0, für „Weitere 10 min“).
+- **Heute verbraucht** (`used_seconds`): Summe über die nicht gelöschten Bewertungen des Lerntags von `min(duration_ms, 120 000)`, auf Sekunden gerundet. Der Deckel von 2 min je Bewertung fängt Pausen ab.
+- **Schätzung je Kartentyp:** Median von `min(duration_ms, 120 000)` der letzten 200 nicht gelöschten Bewertungen von Karten dieses Typs, auf ganze Sekunden gerundet und auf 5 bis 60 s begrenzt. Bei weniger als 20 Bewertungen die Startwerte aus 06 §3.1: `basic` 12 s, `cloze` 20 s.
+- **Rest** = Budget in Sekunden minus `used_seconds`, mindestens 0.
+
+**Auswahl und Reihenfolge** (`learning/queue.ts`, deterministisch)
+
+Kandidaten sind Karten, die nicht gelöscht und nicht pausiert sind, deren Konzept nicht gelöscht ist und die heute fällig sind. Sie zerfallen in drei Gruppen (`ReviewQueueGroup`):
+
+| Gruppe | Zustand | Kosten | Reihenfolge in der Gruppe |
+|---|---|---|---|
+| `angefangen` | `learning`, `relearning` | Schätzung | `due` aufsteigend, dann ID |
+| `faellig` | `review` | Schätzung | Priorität absteigend, dann `due` aufsteigend, dann ID |
+| `neu` | `new` | 3 × Schätzung (eine neue Karte kommt am ersten Tag etwa dreimal) | wie `faellig`. Nur die ersten `new_cards_per_day − heute begonnene` |
+
+```
+Priorität(c) = (1 − R) · (1 + 0,1 · min(Überfälligkeit in Tagen, 10)) · (1,5 falls concept.exam_relevant, sonst 1)
+```
+
+- Lead-Entscheidung, vereinfacht gegenüber 06 §3.2: `Importance` und `Urgency` gibt es noch nicht. Bei `angefangen` und `neu` ist die Überfälligkeit 0. Die Priorität wird vor dem Vergleich auf 6 Nachkommastellen gerundet.
+- **Tie-Breaker:** frühere `due` zuerst, danach die kleinere Karten-ID (UUIDv7, also die ältere Karte).
+- **„Heute begonnen“** sind Karten, deren erste Bewertung am heutigen Lerntag liegt (`state_before.state = new` in `review_log`). `learning.new_cards_per_day` hat den Standard **20**. Ohne diese Grenze füllten neue Karten nach einer Vorlesung tagelang den ganzen Block.
+
+Auswahl in dieser Reihenfolge:
+1. Alle `angefangen` kommen hinein, **vor jeder Kappung** (sie werden nie gekappt, auch nicht bei Rest 0 oder wenn ihre Kosten den Rest übersteigen). `rest` = Rest minus ihre Kosten, mindestens 0.
+2. Ist der ursprüngliche Rest 0, endet die Auswahl hier: Es kommen keine `faellig` und keine `neu` dazu (ohne `angefangen` ist `items` dann leer).
+3. `reserve` = `min(rest / 2, Kosten aller zugelassenen neuen Karten)`.
+4. `faellig` in ihrer Reihenfolge, solange die Summe `≤ rest − reserve` bleibt. Die erste Karte, die nicht passt, beendet den Schritt.
+5. `neu` in ihrer Reihenfolge, solange die Summe `≤ rest` bleibt. Ebenso.
+6. Weitere `faellig` ab der Stelle aus Schritt 4, solange die Summe `≤ rest` bleibt.
+7. Ist der ursprüngliche Rest größer als 0 und bis hier nichts ausgewählt (auch keine `angefangen`) und gibt es Kandidaten: die erste `faellig`-Karte, sonst die erste neue. So gibt es bei knappem Rest nie einen leeren Block.
+
+**Anzeige-Reihenfolge** der `items` (Lead-Entscheidung): Die Auswahl oben bleibt, nur die Reihenfolge der ausgewählten Karten ist eine andere, in zwei Gruppen:
+1. **Wiederholungen:** zuerst die ausgewählten `angefangen` (nach `due`, dann ID), danach die ausgewählten `faellig` nach Priorität (mit Tie-Breaker).
+2. **Neue Karten:** die ausgewählten `neu` nach Priorität (mit Tie-Breaker).
+
+So bleiben bei frühem Abbruch keine Wiederholungen liegen. Die **Mischung** (06 §3.2) gilt **innerhalb jeder der beiden Gruppen** für sich: Von vorn nach hinten wird jeweils die erste noch nicht gesetzte Karte genommen, deren Konzept ein anderes ist als das der zuletzt gesetzten (am Anfang jeder Gruppe gibt es keine zuletzt gesetzte). Gibt es keine, die nächste. An der Grenze zwischen den Gruppen darf dasselbe Konzept zweimal hintereinander stehen.
+
+- `estimate_seconds` je Karte sind ihre Kosten, `estimated_seconds` die Summe (Anzeige „≈ n min“, aufgerundet).
+- **Kein Rückstand** (LP9, F-LRN-03): Die Antwort nennt nie, wie viele Karten insgesamt fällig sind. `more_due` sagt nur, ob ein Kandidat aus den drei Gruppen (neue nur bis zur Tagesgrenze) nicht im Block ist. Was nicht dran war, bleibt fällig und steht morgen nach Priorität wieder an. Das ersetzt den Lastausgleich aus 06 §3.2.
+- `has_cards = false`, wenn es keine nicht gelöschte Karte gibt. `reviewed_today` zählt die Bewertungen des Lerntags.
+- Höchstens 500 `items`. Das ist erreichbar (360 min bei 5 s je Karte), darum endet die Auswahl in den Schritten 1 bis 7 bei der 500. Karte (die `angefangen` stehen davor), alles Weitere zählt für `more_due`.
+- Testfälle: `packages/schemas/fixtures/cards/queue.json`.
+
+### 21.6 `cards.generate` (Worker, 05 §P10)
+
+`handlers/cards_generate.py`, Stufe `standard`, Prompt `prompts/cards.generate/v1.md`, `output_config.effort = medium`, `max_tokens` 8 000, ohne Streaming. Ein Aufruf **je Konzept**. Es gelten die Regeln aus §20.3 („Material ist keine Anweisung“, „Session lesen“, „KI-Aufrufe“) und §20.5 (Schlüssel, Aufrufe, Kosten), soweit hier nichts anderes steht. `cost_entry.task = cards.generate`.
+
+1. Payload prüfen, Session lesen (§20.3). Ist die KI nicht eingerichtet: `fehler` sofort (§20.5).
+2. **Konzepte der Session:** wie `GET /sessions/{id}/concepts` (§20.6): `aktiv` oder `vorschlag` mit mindestens einem nicht gelöschten Beleg aus dieser Session, ohne Vorschläge mit abgelehntem Eintrag, ohne Hüllen. Reihenfolge wie dort, höchstens 30. Keine Konzepte → `fertig` mit lauter Nullen.
+3. **Je Konzept, der Reihe nach:**
+   1. **Schon entschieden:** Gibt es für `(Konzept, Session)` einen Eintrag `card_batch` mit Status `angenommen` oder `abgelehnt`, entfällt das Konzept (`skipped_decided`). Entschiedenes bleibt, und für dieselbe Session kommt kein zweiter Vorschlag (wie §20.3).
+   2. **Eingabe bauen** (deterministisch): Name, Aliase, One-Liner, Art, `exam_relevant`. Die Belege des Konzepts aus dieser Session als nummerierte Liste `E1`, `E2`, … (höchstens 12, Folien zuerst): Folie mit Titel und Text (≤ 1 500 Zeichen), Zeitraum mit dem Text der überlappenden `transcript_segment` (≤ 300 Wörter). Die Marker `frage` der Session, deren `t_ms` in einem Zeitraum-Beleg liegt (05 §P10 Regel 7, als Hinweis im Prompt). Die Vorderseiten der vorhandenen, nicht gelöschten Karten des Konzepts (bei einem Vorschlag mit `concept_merge` zusätzlich die des Ziels), höchstens 50. Alles Material in Tags. Sprache der Ausgabe wie §20.3.
+   3. **Kein Belegtext** (alle Belege ohne Text): Konzept entfällt (`skipped_empty`), kein Aufruf.
+   4. `input_hash` = SHA-256 wie §20.3 Schritt 4 mit `CARDS_VERSION = 1`. Hat der offene Eintrag `(Konzept, Session)` denselben `input_hash` in seiner Nutzlast und ist `force` nicht gesetzt: bleibt stehen (`unchanged_batches`), kein Aufruf.
+   5. **Budget prüfen** (unten). Ist die Grenze erreicht, endet der Job sofort mit `fehler` (Text und Regeln unter „Budget“). Schon geschriebene Vorschläge bleiben.
+   6. **Aufruf.** Ausgabe je Karte: `kind`, Vorderseite, bei `basic` Antwort und optionale Erklärung, bei `cloze` die Lösungen, und die Nummern der Belege (`E…`), aus denen die Antwort stammt. Der Prompt verlangt 2 bis 5 Karten, bei vorhandenen Karten 0 bis 3 neue, mindestens eine `basic` (05 §P10 Regeln 1, 4, 5, 8).
+   7. **Prüfen**, in dieser Reihenfolge, jede Karte fällt beim ersten Verstoß weg:
+      - Inhalt säubern und prüfen wie §21.2 → `dropped_invalid`.
+      - **Länge** (05 §P10 Regel 1): Vorderseite höchstens 25 Wörter, Antwort höchstens 40, Erklärung höchstens 60, je Lücke höchstens 5 → `dropped_length`.
+      - **Belege** (Regel 5, LP8): Jede genannte Nummer muss ein Beleg der Eingabe sein, unbekannte fallen weg, Dubletten ebenso, höchstens 6. Bleibt keiner, fällt die Karte weg → `dropped_sources`.
+      - **Lücke nur auf Fachbegriff** (Regel 4): Jede Lücke hat 1 bis 5 Wörter und höchstens 60 Zeichen, und mindestens ein Wort enthält einen Buchstaben und ist kein Füllwort. Liste und Testfälle: `packages/schemas/fixtures/cards/cloze-gap.json` → `dropped_cloze`.
+      - **Dubletten** (Regel 6): Embedding der Vorderseite (bei `cloze` mit `[…]` statt der Lücken, gesäubert wie §19.3) gegen die vorhandenen Karten des Konzepts und gegen die schon behaltenen Karten dieser Ausgabe. Ähnlichkeit über 0,92 → `dropped_duplicates`. Die Vorderseiten der vorhandenen Karten bettet der Job bei jedem Lauf neu ein (wenige je Konzept, lokal), gespeichert wird kein Vektor. **Ohne Embedder:** nur gleiche Vergleichsform `key` (§20.3) der Vorderseite, Ergebnis `embedding_model = null`.
+      - Höchstens 8 Karten je Konzept, in der Reihenfolge der Ausgabe. Schlüssel `k1`, `k2`, ….
+      - Hat die KI Karten geliefert und bleibt **keine**, gilt die Ausgabe als ungültig: **einmal** nachfordern (§20.5). Bleibt es dabei, oder lehnt die KI ab, oder ist die Ausgabe zu lang, entfällt nur dieses Konzept (`failed_concepts`). Liefert die KI von sich aus keine Karte: `skipped_empty`.
+   8. **Schreiben, je Konzept eine eigene Transaktion** direkt nach seinem Aufruf: Session sperren (`progress.lock_session`, inzwischen gelöscht → Lauf endet `fertig` mit `session_deleted = true`), Job-Besitz prüfen (`LockLostError`), Konzept `FOR KEY SHARE` lesen. Ist es inzwischen gelöscht, eine Hülle oder sein Eintrag abgelehnt, oder gibt es inzwischen einen entschiedenen Kartenvorschlag: nichts schreiben. Sonst den offenen Eintrag `(Konzept, Session)` hart löschen und den neuen einfügen: `kind = card_batch`, `card_concept_id`, `session_id`, `job_id`, `payload` = `InboxPayloadCardBatch`, `priority = 2000 + Position des Konzepts`.
+4. `ctx.finish(CardsGenerateResult)`.
+
+- **Warum je Konzept schreiben:** Scheitert ein späterer Aufruf vorübergehend (Retry nach §3), sind die fertigen Konzepte schon gespeichert. Der neue Versuch erkennt sie am `input_hash` und bezahlt sie nicht noch einmal.
+- **Alle aufgerufenen Konzepte gescheitert** (`failed_concepts > 0` und kein Eintrag geschrieben oder unverändert): `fehler` sofort, `KI-Ausgabe ungültig`.
+- **Vorschläge, deren Konzept verschwindet,** räumt die Datenbank ab: Löscht ein neuer Abgleich einen Vorschlag hart (§20.3 Schritt 7), nimmt der FK `card_concept_id` den Kartenvorschlag mit. Der folgende `cards.generate` derselben Kette erzeugt ihn für das neue Konzept neu.
+- **Nie automatisch annehmen:** `ai.auto_accept` (§20.7) gilt nicht für Kartenvorschläge. Die Annahmequote ist das Maß für die Kartenqualität (05 §4).
+
+**Budget** (Lead-Entscheidung, ergänzt §20.5)
+- `cards.generate` **pausiert schon ab 80 %** des Monatsbudgets (`CARDS_BUDGET_SHARE = 0,8`): Vor jedem Aufruf (auch vor dem Nachfordern) gilt `Summe ≥ 0,8 · ai.monthly_budget_eur` als erreicht. Summe und Monat wie §20.5. Die übrigen KI-Jobs laufen weiter bis 100 %. So verdrängen Karten weder Transkript noch Konzepte noch Kurzfassung.
+- Erreicht **vor dem ersten Aufruf oder mitten im Lauf:** In beiden Fällen endet der Job sofort mit `fehler` und `job.error = "Karten pausiert (KI-Budget zu 80 % genutzt)"`, kein automatischer Retry. So zeigt die Schrittliste die Pause ruhig an (§21.10) und bietet „Karten erzeugen" an. Bereits geschriebene Vorschläge bleiben, denn jedes Konzept hat seine eigene Transaktion (Schritt 3.8). Ein `CardsGenerateResult` entsteht in diesem Fall nicht, darum gibt es darin weder `budget_paused` noch `skipped_budget`.
+- Fortsetzen (nur so): Der Nutzer erhöht das Budget, oder ein neuer Monat beginnt, und stößt `reprocess` mit `from_step: "cards.generate"` an. Von selbst läuft nichts nach. `monthly_budget_eur = 0` schaltet auch die Karten ab.
+
+**Fake** (`SG_LLM=fake`, §20.5), deterministisch, ohne Netz. Je Konzept zwei Karten, beide mit dem ersten Beleg der Eingabe (`E1`):
+- `k1` `basic`: Vorderseite `Was ist <Name>?`, Antwort = One-Liner, ohne One-Liner `Erfundene Antwort zu <Name>.`, Erklärung `null`.
+- `k2` `cloze`: Vorderseite `{{c1::<Name>}} ist ein Thema dieser Vorlesung.`, Lösungen `[<Name>]`.
+- Die Prüfungen aus Schritt 7 laufen unverändert. Damit lassen sich die Regeln ohne KI testen: Ein Name mit mehr als 5 Wörtern lässt `k2` an der Lückenregel scheitern, ein Name mit `{` an der Syntax, ein zweiter Lauf mit `force` nach dem Annehmen findet Dubletten.
+- Kosten wie §20.5 (`SG_FAKE_LLM_EUR_PER_CALL`), damit die 80-%-Grenze in der CI prüfbar ist.
+
+### 21.7 Inbox-Art `card_batch` (Ergänzung zu §20.6)
+
+Ein Eintrag je Konzept und Session. Nutzlast `InboxPayloadCardBatch`: `concept_id`, `concept_name` (Name zum Zeitpunkt der Erzeugung, nur Anzeige und Rückfall, siehe unten), `cards` (1–8 `CardProposal` mit `key`, `content`, `sources`), `input_hash`, `prompt_version`, `model`. In `InboxItem` sind `concept_id`, `target_concept_id`, `relation_id` und `blocked` `null`. Das Konzept steht in der Nutzlast.
+
+**Anzeigename:** Die Inbox-Zeile zeigt den **aktuellen** Namen des Konzepts (aus `card_concept_id`, bei einer Hülle das wirksame Konzept), nicht `payload.concept_name`. Der Core liefert ihn nachgeladen mit, oder die Web-App löst ihn über das Konzept auf. `payload.concept_name` ist nur der Name zum Zeitpunkt der Erzeugung.
+
+**Wirksames Konzept** eines Eintrags: das Konzept aus `card_concept_id`. Ist es eine Hülle (`zusammengefuehrt`), gilt ihr `merged_into` (Invariante 5: Karten gehören zum Ziel). Der Eintrag selbst wird beim Zusammenführen nicht umgehängt.
+
+**Sichtbarkeit** (Lead-Entscheidung)
+- Ein offener Kartenvorschlag ist **erst sichtbar, wenn sein wirksames Konzept `aktiv` und nicht gelöscht ist.** Vorher liefern ihn weder `GET /inbox` noch `GET /inbox/overview` (er zählt in `open_count`, `older_count` und den Gruppen nicht mit), und `POST /inbox/bulk` mit `session_id` fasst ihn nicht an.
+- `GET /inbox?kind=card_batch` filtert wie die anderen Arten. Sortierung unverändert: `priority` ab 2000 stellt Karten hinter Konzepte (0–299) und Beziehungen (ab 1000).
+- **Verfällt mit dem Konzept:** Wird der Eintrag des Konzepts abgelehnt (§20.6 „Ablehnen“), werden die offenen Kartenvorschläge mit diesem `card_concept_id` mit abgelehnt: `status = abgelehnt`, `decision.action = abgelehnt`, `decision.triggered_by` = Eintrag des Konzepts, alle Karten `verworfen`. Ihre IDs stehen in `cascade_item_ids` des Konzept-Eintrags. `reopen` des Konzept-Eintrags öffnet sie wieder (§20.6), direkt lassen sie sich nicht öffnen (`409 inbox_reopen_conflict`).
+
+**A4 Karten annehmen** (`POST /inbox/{id}/accept`)
+- `InboxAcceptRequest.cards` (optional): je Karte `key`, `accept` und optional `content` und `sources` (bearbeitete Fassung). **Nicht genannte Karten werden unverändert angenommen.** Ohne `cards` also alle. Ein unbekannter oder doppelter `key`, oder `content`/`sources` bei `accept: false`: `400 inbox_action_invalid`. `edit`, `merge_into`, `as_new` und `relation_kind` passen nicht zur Art: `400 inbox_action_invalid`. Umgekehrt ist `cards` bei den anderen Arten `400 inbox_action_invalid`.
+- Das wirksame Konzept muss `aktiv` sein, sonst `409 card_concept_pending` (`details.concept_id`).
+- Bearbeitete Karten säubern und prüfen (§21.2, `400 card_invalid` mit `details.key` und `details.reason`), ihre Belege prüfen wie bei `POST /cards` (`400 card_source_invalid` mit `details.key`). Die Längenregeln aus §21.6 gelten für Bearbeitetes nicht. Die Belege unveränderter Karten werden nicht erneut geprüft (ein inzwischen gelöschter Foliensatz macht sie nur `missing`).
+- **Dubletten:** Hat eine angenommene Karte dieselbe Vergleichsform `key` (§20.3) der Vorderseite wie eine nicht gelöschte Karte des wirksamen Konzepts oder wie eine frühere Karte derselben Annahme, entsteht sie nicht (`outcome = dublette`).
+- Je verbleibender Karte: `card` (`concept_id` = wirksames Konzept, `origin = ki`, `stage = 2`, `inbox_item_id`) und `card_state` (§21.1).
+- Eintrag: `status = angenommen`, `decided_at`, `decision` mit `action = karten_angenommen`, `concept_id` = wirksames Konzept und `cards` (`InboxCardOutcome` je vorgeschlagener Karte: `angenommen` mit `card_id`, `verworfen` oder `dublette`). Die übrigen Felder von `InboxDecision` sind `null` bzw. leer.
+- **Alle Karten verworfen** (`accept: false` für jede): wie „Ablehnen“.
+- Antwort `InboxDecisionResult` mit `concept = null` und `cards` = die angelegten Karten.
+
+**Ablehnen:** `status = abgelehnt`, `decision.action = abgelehnt`, alle Karten `verworfen`. Es entsteht nichts. Ein neuer Lauf schlägt für diese Session und dieses Konzept nichts mehr vor (§21.6).
+
+**Rückgängig (`reopen`):**
+- `abgelehnt` → `offen` (außer mit `triggered_by`, oben).
+- `angenommen` → `offen`: Die Karten aus `decision.cards` werden **hart gelöscht** (auch solche im Papierkorb), aber nur, wenn keine von ihnen eine Bewertung hat (`review_log`). Sonst `409 inbox_reopen_conflict`. Zwischenzeitliche Änderungen an diesen Karten gehen dabei verloren (Rückgängig ist für die 10 s nach dem Annehmen gedacht).
+
+**Zusammenspiel mit A1 bis A3**
+- **A1** (Konzept annehmen): Seine Kartenvorschläge werden sichtbar. Sie werden **nicht** mit angenommen und stehen nicht in `cascade_item_ids`.
+- **A2** (zusammenführen): Die Kartenvorschläge der Hülle gelten für das Ziel und werden sichtbar.
+- **`reopen` von A1 und A2** bekommt je eine weitere Bedingung für `409 inbox_reopen_conflict`: A1, wenn das Konzept nicht gelöschte Karten hat. A2, wenn ein Kartenvorschlag der Hülle `angenommen` ist. Sonst hingen Karten an einem Vorschlag bzw. am falschen Konzept.
+- **Massenaktionen:** `accept` mit `session_id` nimmt nach Konzepten und Beziehungen auch die dann sichtbaren Kartenvorschläge an (alle Karten). `reject` und `reopen` entsprechend. Mit `ids` landet ein nicht sichtbarer Kartenvorschlag in `skipped` mit `card_concept_pending`.
+- **Sperren:** wie §20.6: (1) Session `FOR SHARE`, (2) Eintrag `FOR UPDATE`, (3) `pg_advisory_xact_lock(CONCEPT_GRAPH_LOCK_KEY)`, (4) wirksames Konzept (und die Hülle) `FOR NO KEY UPDATE`. So kann ein gleichzeitiges `reopen` das Konzept nicht unter den neuen Karten zurückstufen. `cards.generate` sperrt die Session `FOR NO KEY UPDATE` und liegt damit davor oder danach.
+
+### 21.8 Papierkorb (§13)
+
+| Gelöscht | Mitgelöscht (gleiches `deleted_at`) | Bleibt |
+|---|---|---|
+| `card` (neue `TrashKind`) | `card_state`, `review_log` | – |
+| `session` | wie §20.8, damit auch ihre Kartenvorschläge (`inbox_item.session_id`) | Karten, die aus ihren Vorschlägen angenommen wurden. Ihre Belege zeigen `missing` |
+| `slide_deck` | – | Karten mit Folien-Belegen (`missing`) |
+| `module` | wie §20.8 | Konzepte und ihre Karten (in der Warteschlange weiter dabei) |
+
+- **`TrashKind` bekommt `card`** (Schemaänderung mit B2, im selben PR wie `trash.ts`, damit `main` grün bleibt, wie §20.7). Dazu gehört eine Zeile in `apps/web/src/components/settings/TrashSettings.tsx` (`KIND_LABEL`: „Karte“). Beides ist für B2 vorab freigegeben.
+- `CHILDREN`: `card → card_state (card_id), review_log (card_id)` und `concept → card (concept_id)`. Die zweite Kante wirkt erst, wenn Konzepte selbst löschbar werden (F-BIB-05). Die neuen Tabellen kommen in den Typ `Node`.
+- `GET /trash`: Titel einer Karte = die ersten 80 Zeichen der Vorderseite (bei `cloze` mit `[…]`), `parent` = das Konzept mit seinem Namen. `dependent_count = 0` (Zustand und Bewertungen kennt der Nutzer nicht als eigene Objekte).
+- **Wiederherstellen:** Ist das Konzept der Karte gelöscht oder nicht mehr `aktiv`, folgt `409 restore_parent_deleted` (`details.parent`). Der Zustand kommt unverändert zurück, die Karte ist danach meist sofort fällig.
+- **Begründung „angenommene Karten bleiben“:** wie bei aktiven Konzepten (§20.8). Angenommenes ist bestätigtes Wissen des Nutzers, und der Lernstand soll nicht mit einer Vorlesung verschwinden.
+- Endgültiges Löschen (30 Tage, `maintenance.nightly`) über die FKs.
+
+### 21.9 Einstellungen und Sync
+
+- **Neuer Bereich `learning`** in `setting` (`LearningSettings`): `review_budget_minutes` (5–120, Standard 20) und `new_cards_per_day` (0–100, Standard 20). `GET /settings` liefert ihn aufgefüllt, `PATCH /settings` mit `learning` (`LearningSettingsUpdate`) führt Feld für Feld zusammen (§14.1).
+- **Schemaänderung mit B2:** `Settings` bekommt `learning: LearningSettings` als Pflichtfeld, `SettingsUpdate` bekommt `learning?: LearningSettingsUpdate`, im selben PR wie `services/settings.ts` (wie §20.7). Für B2 vorab freigegeben. Die beiden Typen selbst liegen schon in `learning.schema.json`.
+- **Sync: kein neues Ereignis.** Die Web-App lädt nach:
+  - `GET /inbox/overview` und die Inbox, wenn in `session.updated` `processing['cards.generate']` auf `fertig` wechselt, und nach eigenen Entscheidungen (ein angenommenes Konzept macht Kartenvorschläge sichtbar),
+  - `GET /review/queue` beim Öffnen von Heute und `/lernen`, wenn das Fenster wieder sichtbar wird, nach dem Neuverbinden (§11.6) und am Ende eines Blocks.
+- Zwei offene Tabs können kurz verschiedene Blöcke zeigen. Die Bewertung selbst ist über ihre `id` gegen doppeltes Zählen gesichert, eine Karte wird aber nicht gegen Bewerten in zwei Tabs gesperrt. Das iPad ist nicht betroffen.
+
+### 21.10 Web (verbindliche Eckpunkte, B4 und B5)
+
+- **`/lernen`** ersetzt den Platzhalter. Oben „Heute wiederholen · ≈ n min“ (`ceil(estimated_seconds / 60)`), ein Knopf „Starten“ (Taste `Enter`). Keine Zahl fälliger Karten, kein Rückstand, kein Rot (LP9, 07 §2).
+- **Ablauf:** Vorderseite → aufdecken (`Leertaste` oder `Enter`) → Rückseite mit vier Knöpfen „Nochmal“ `1`, „Schwer“ `2`, „Gut“ `3`, „Leicht“ `4`. Vor dem Aufdecken tun `1` bis `4` nichts. `Esc` beendet den Block. Jederzeit beenden, was nicht dran war, bleibt fällig. Ruhiger Fortschritt „Karte 3 von 14“ für den heutigen Block.
+- **Karte anzeigen:** reiner Text (§21.2). `cloze`: vorn `[…]`, hinten der ganze Satz mit hervorgehobenen Lösungen. `basic`: hinten Antwort, darunter die Erklärung. Darüber dezent das Konzept (Link zur Konzeptansicht), bei `exam_relevant` das Klausur-Kennzeichen.
+- **Quellen-Chips** je Karte nach dem Aufdecken („F 14“, „42:12“), Ziele wie §20.10. `missing` → ausgegraut ohne Link.
+- **Bewerten:** `POST /cards/{id}/review` mit neuer UUIDv7 als `id` und der gemessenen `duration_ms`. Die nächste Karte erscheint sofort. Scheitert die Anfrage, sendet die Web-App sie mit **derselben** `id` erneut und zeigt bei anhaltendem Fehler einen ruhigen Hinweis mit „Erneut versuchen“. `409 review_exists` kann dabei nicht entstehen.
+- **`requeue = true`:** Die Karte kommt ans Ende des laufenden Blocks. Ist sie dran, bevor ihre `due` erreicht ist, wird sie trotzdem gezeigt (kein Warten). Der Zähler „von n“ wächst mit.
+- **Ende des Blocks:** „Für heute geschafft · n Karten in m min“. Danach `GET /review/queue` neu. Bei `more_due` ein Knopf „Weitere 10 min“ (`extra_minutes` in Schritten von 10).
+- **Leerzustände:** `has_cards = false` → „Noch keine Karten. Sie entstehen als Vorschlag nach einer Vorlesung oder von Hand in der Konzeptansicht.“ mit Link zur Inbox. Karten da, `items` leer, `reviewed_today = 0` → „Heute ist nichts fällig.“ `items` leer nach Bewertungen → „Für heute geschafft.“, bei `more_due` mit „Weitere 10 min“. Core nicht erreichbar → der übliche ruhige Hinweis.
+- **Menü je Karte** im Ablauf und in der Konzeptansicht: „Bearbeiten“ (inline, kein Dialog, `PATCH`), „Pausieren“ bzw. „Fortsetzen“, „Löschen“ mit 10-s-Toast „Rückgängig“ (R15, `POST /trash/{id}/restore`).
+- **Heute:** Kachel „Heute wiederholen · ≈ n min“ mit Sprung nach `/lernen`, nur wenn `items` nicht leer ist. Während eine Session läuft (`laeuft`/`pausiert`), zeigt Heute die Kachel nicht (R1).
+- **Konzeptansicht:** Abschnitt „Karten“ aus `GET /concepts/{id}/cards`: Vorderseite, Typ, Zustand in Worten („neu“, „fällig am <Datum>“, „pausiert“), ✦ bei `origin = ki`. „Karte anlegen“ öffnet den Editor (B5): Typ, Vorderseite, Rückseite, Beleg aus den Belegen des Konzepts wählen (Pflicht, der erste ist vorgewählt). Ohne Belege ist „Karte anlegen“ nicht verfügbar, mit dem Hinweis „Keine Belege mehr“.
+- **„Karte daraus“** (B5) an einem Satz der Kurzfassung im Rückblick: Editor mit dem Satz als Antwort und seinen Quellen als Beleg, das Konzept wählt der Nutzer aus den Konzepten der Session (nur aktive).
+- **Inbox:** Zeile für `card_batch`: Symbol, „n Karten zu *Konzept*“ (aktueller Name des Konzepts, nicht `payload.concept_name`), ✦, aufklappbar mit je Karte Vorderseite, Rückseite, Quellen-Chips und einem Häkchen (Standard an). `→` übernimmt die angehakten (`cards` mit `accept: false` für die anderen), `←` verwirft alle, `E` bearbeitet die markierte Karte inline. 10-s-Toast „Rückgängig“ (`reopen`). Filter „Karten“. „Alle annehmen“ je Gruppe schließt die sichtbaren Kartenvorschläge ein.
+- **Schrittliste:** Schritt „Karten“. Steht er auf `fehler` und meldet `GET /ai/status` `budget.warn`, zeigt die Liste ruhig „Karten pausiert · KI-Budget“ mit Link zu den Einstellungen statt „nicht fertig“, dazu „Karten erzeugen“ (`reprocess` mit `from_step: "cards.generate"`). Fehlt der Schritt in `processing` (ältere Session) und hat die Session Konzepte: „Karten erzeugen“.
+- **Einstellungen → Lernen** (mit B4, nach B2): Zeitbudget in Minuten, neue Karten je Tag.
+- Texte ruhig und sachlich (07 §7), keine modalen Dialoge, Hell- und Dunkelmodus, alles mit der Tastatur bedienbar.
+
+### 21.11 Neue Fehlercodes
+
+| Code | HTTP | Bedeutung |
+|---|---|---|
+| `card_not_found` | 404 | Karte fehlt oder ist gelöscht |
+| `card_exists` | 409 | `id` in `POST /cards` schon vergeben |
+| `card_invalid` | 400 | Inhalt verletzt §21.2 (`details.reason`, in der Inbox zusätzlich `details.key`) |
+| `card_source_invalid` | 400 | Beleg zeigt auf nichts Vorhandenes (`details.index`, in der Inbox zusätzlich `details.key`) |
+| `concept_not_active` | 409 | Karte von Hand für ein Konzept, das nicht `aktiv` ist (`details.status`, `details.merged_into`) |
+| `card_suspended` | 409 | Bewertung einer pausierten Karte |
+| `review_exists` | 409 | Bewertungs-`id` schon für eine andere Karte oder ein anderes `rating` vergeben |
+| `card_concept_pending` | 409 | Kartenvorschlag, dessen Konzept noch nicht `aktiv` ist (`details.concept_id`) |
+
+`inbox_action_invalid`, `inbox_reopen_conflict`, `concept_not_found`, `restore_parent_deleted` und `validation_failed` gelten wie bisher mit den Ergänzungen aus §21.4, §21.7 und §21.8.
+
+### 21.12 Tickets und Besitz
+
+| Ticket | Inhalt | Besitzt (Dateien) | Abhängig von |
+|---|---|---|---|
+| **B0** (Lead) | Dieser Vertrag, `learning.schema.json`, Ergänzungen in `concepts.schema.json` und `transcript.schema.json`, Beispiele, gemeinsame Testfälle, Migration `0012_cards`, Drizzle-Schema. Dazu die kleinsten Anpassungen, damit `main` grün bleibt: `STEP_LABELS`, Priorität und Übergang in `pipeline.ts`, eine Typ-Verzweigung in `concept-graph.ts`, in der Web-Inbox der Typ `ConceptInboxItem` | `packages/schemas/src/learning.schema.json`, die genannten Ergänzungen, `packages/schemas/examples/**`, `packages/schemas/fixtures/cards/**`, generierte Dateien, `services/core/src/db/schema/learning.ts`, die Spalte und die CHECKs von `inbox_item` in `concepts.ts`, eine Zeile in `index.ts`, `services/core/drizzle/0012_*`, dieser Abschnitt | – |
+| **B1** (Worker) | `cards.generate` mit Prompt, Ausgabemodell, Prüfungen, Fake-Regeln, 80-%-Grenze | `services/worker/src/sg_worker/handlers/cards_generate.py`, `services/worker/src/sg_worker/cards/**` (Säubern, Prüfen, Lückenregel, Füllwörter), `services/worker/prompts/cards.generate/**`, in `ai/outputs.py`, `ai/llm_fake.py` und `ai/budget.py` nur die eigenen Teile, eine Zeile in `handlers/__init__.py`, Tests (Migration `0012` in `conftest.py` laden) | B0 |
+| **B2** (Core) | `ts-fsrs`, `learning/params.ts`, Lerntag, Warteschlange, Routen aus §21.4, Einstellungen `learning` samt Schema, Papierkorb samt `TrashKind` | `services/core/src/learning/**`, `services/core/src/{routes,services}/{cards,review}.ts`, in `services/trash.ts` und `trash-ops.ts` nur die Karten-Teile aus §21.8, in `services/settings.ts` nur `learning`, `Settings`/`SettingsUpdate` und `TrashKind` (§21.8, §21.9), eine Zeile in `TrashSettings.tsx`, Zeilen in `app.ts`, `package.json` und Lockfile (Abhängigkeit `ts-fsrs`, Begründung im PR), Tests | B0 |
+| **B3** (Core) | Kette und `reprocess` (§21.3), `card_batch` in der Inbox (§21.7): Sichtbarkeit, A4, Ablehnen, Rückgängig, Verfall mit dem Konzept, Massenaktionen, neue Bedingungen für `reopen` von A1 und A2 | `services/core/src/services/pipeline.ts`, `services/core/src/{routes,services}/inbox.ts`, in `concept-graph.ts` nur Verfall und die `reopen`-Bedingungen, in `services/jobs.ts` nur `JOB_PAYLOAD_SCHEMAS`, Tests | B0. Nutzt aus B2 das Säubern und Prüfen (`learning/content.ts`), die Prüfung der Belege, das Anlegen von `card` mit `card_state` und die Umwandlung in `Card`. B2 exportiert diese Teile dafür. **Merge erst nach B1 und B2** |
+| **B4** (Web) | `/lernen`, Kachel auf Heute, Karten in der Konzeptansicht, Inbox-Zeile, Schrittliste, Einstellungen → Lernen | `apps/web/src/app/lernen/**`, `apps/web/src/components/learn/**`, `apps/web/src/lib/cards.ts`, in `components/inbox/**`, `lib/inbox.ts`, `components/concepts/**`, `components/processing/**`, `components/today/**` und `components/settings/**` nur die Karten-Teile, in `apps/web/test/fake-core.ts` nur die Routen aus §21.4 und `card_batch` | B0. Gegen die Beispiele und den Fake-Core bauen. **Einstellungen → Lernen erst nach B2 mergen** (`Settings.learning`) |
+| **B5** (Web) | Karte von Hand: Editor, „Karte anlegen“, „Karte daraus“ | `apps/web/src/components/learn/CardEditor.tsx`, Aufrufstellen | B2, B4 |
+| **B6** | Ende-zu-Ende-Test mit `SG_LLM=fake` (Session → Karten → Wiederholung), Anleitung `docs/anleitungen/LERNEN.md`, Prüfliste für den Owner | `tests/`, `docs/anleitungen/` | B1 bis B4 |
+
+**Gemeinsame Regeln von Worker und Core:** Säubern und Prüfen des Karteninhalts (§21.2) stehen in beiden Sprachen (Worker vor dem Vorschlag, Core beim Anlegen, Ändern und Annehmen). B1 und B2 prüfen gegen `packages/schemas/fixtures/cards/content.json`, B1 zusätzlich gegen `cloze-gap.json`, B2 gegen `learn-day.json` und `queue.json` (Aufbau im `README`-Feld jeder Datei). Ändert sich eine Regel, ändern sich die Testfälle, die Umsetzungen und dieser Abschnitt.
+
+**Nur der Owner kann testen:** die Qualität der Karten (05 §4: Stichprobe von 30 Karten, „würde ich behalten“ ≥ 75 %), die Kosten je Vorlesung mit der echten API, ob 20 min und 20 neue Karten je Tag zum Alltag passen, und das Gefühl der Lernschritte am ersten Tag.
+
+### 21.13 Abweichungen von der Spezifikation (Überblick)
+
+- **06 §1 Lernschritte:** über die Standard-Lernschritte von `ts-fsrs` statt über die Lernsitzung, weil es die Lernsitzung noch nicht gibt (§21.5). Zielbehaltensquote fest 0,90, kein Optimierer, kein `py-fsrs`.
+- **06 §3.2 Reihenfolge:** vereinfachte Priorität ohne `Importance` und `Urgency`, Klausurrelevanz als Faktor 1,5 (§21.5). Angezeigt werden zuerst alle Wiederholungen (inklusive Lernschritt-Karten), danach die neuen Karten, die Mischung gilt je Gruppe (§21.5). Kein Lastausgleich über Tage und kein Hinweis „Budget erhöhen“ im Tagesbriefing: Was nicht in den Block passt, bleibt fällig.
+- **06 §3.1:** Schätzung aus dem eigenen Median erst ab 20 Bewertungen je Typ, begrenzt auf 5 bis 60 s. Neu: Tagesgrenze für neue Karten (`new_cards_per_day`) und höchstens die Hälfte des Rests für neue Karten, solange Wiederholungen warten.
+- **06 §3.3/§3.4:** kein Klausurmodus, kein Erhaltungsmodus.
+- **03 §9 `card`:** nur `basic` und `cloze`. `sources jsonb` statt `source_evidence_ids uuid[]` (§21.1). Ohne `related_concept_ids` und `starred`. `origin` nur `ki` und `manuell`. Zusätzlich `inbox_item_id`.
+- **03 §9 `card_state`:** `stability` und `difficulty` als `double precision` statt `real`, zusätzlich `learning_steps` (Zustand von `ts-fsrs`).
+- **03 §9 `review_log`:** ohne `answer`. `rating_source` nur `nutzer`, `context` nur `taeglich`. `error_record`, `learn_session` und `mastery_snapshot` gibt es noch nicht.
+- **03 §8 `inbox_item`:** zusätzlich `card_concept_id`. Kartenvorschläge stehen nur in der Nutzlast, nicht als Zeilen in `card`.
+- **08 §6:** Texte werden als reiner Text gezeigt, ohne Markdown und LaTeX (§21.2). `basic` mit Pflichtfeld `explanation_md` (darf `null` sein). Lücken ohne Hinweis-Syntax, höchstens 3 je Karte, eine Karte je Lückentext.
+- **08 §1:** `POST /cards/{id}/review` statt `POST /reviews`, `GET /review/queue` ohne `context`, `GET /concepts/{id}/cards` statt `GET /cards`, dazu `GET`/`DELETE /cards/{id}`. Ohne `POST /cards/from-selection`, `/learn-sessions`, `/grade/open`, `/readiness`, `/mastery`.
+- **05 §P10:** ein Aufruf je Konzept, nur Stufe 2 (Regel 2 entfällt), keine MC-Ablenker (Regel 3), keine Aufgaben des Moduls und kein Altklausur-Stil in der Eingabe (gibt es noch nicht), ❓-Marker nur als Hinweis im Prompt ohne Prüfung (Regel 7). 2 bis 5 Karten je Konzept statt 3 bis 8 (F-LRN-02), weil nur zwei Typen zur Wahl stehen. Dubletten ohne Embedder nur über gleichen Text.
+- **05 §2 / F-LRN-02:** Karten entstehen in der Kette für alle Konzepte der Session und warten unsichtbar auf die Annahme des Konzepts, statt erst in Schritt 5 der geführten Nacharbeitung (F-NAC-05 nutzt später dieselben Einträge).
+- **F-DAT-05 / §20.5:** `cards.generate` pausiert schon ab 80 % des Monatsbudgets (§21.6). Bei einer Pause endet der Job immer mit `fehler` (vor dem ersten Aufruf wie mitten im Lauf), damit die Schrittliste die Pause zeigen und „Karten erzeugen“ anbieten kann. Schon geschriebene Vorschläge bleiben.
+- **§20.7:** `ai.auto_accept` nimmt Kartenvorschläge nie automatisch an.
+- **F-LRN-03:** „Still auf die nächsten Tage verteilt“ heißt hier: Der Rest bleibt fällig und wird am nächsten Tag neu nach Priorität gewählt. Das Akzeptanzkriterium (nach 7 Tagen Pause kein Rückstandsberg) ist über das Zeitbudget erfüllt.
+- **03 §1 Versionierung:** `card` ohne `version` (§21.4).
+- **§13:** neue `TrashKind` `card`. Ihr Elternobjekt in `GET /trash` ist ein Konzept, das selbst keine `TrashKind` ist (§21.8).

@@ -3,13 +3,7 @@
 // Bearbeiten in der Zeile (§20.10, Taste E): Name, Aliase, One-Liner und Art, bei Beziehungen die Art der Beziehung.
 // Kein Dialog. Das Ziel zum Zusammenführen kommt aus einer Konzeptsuche (`GET /concepts?q`).
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import type {
-  ConceptEdit,
-  ConceptKind,
-  ConceptRelationKind,
-  InboxAcceptRequest,
-  InboxItem,
-} from '@sg/shared';
+import type { ConceptEdit, ConceptKind, ConceptRelationKind, InboxAcceptRequest } from '@sg/shared';
 import {
   CONCEPT_KINDS,
   KIND_LABELS,
@@ -18,7 +12,7 @@ import {
   relationSentence,
   useConcepts,
 } from '../../lib/concepts.ts';
-import { parseAliases } from '../../lib/inbox.ts';
+import { parseAliases, type ConceptInboxItem as InboxItem } from '../../lib/inbox.ts';
 
 const input =
   'mt-1 w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md aria-[invalid=true]:border-2 aria-[invalid=true]:border-text';

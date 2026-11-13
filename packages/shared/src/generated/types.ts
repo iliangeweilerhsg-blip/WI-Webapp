@@ -135,6 +135,41 @@ export type CalendarUpdateScope = ("serie" | "einzeln")
  */
 export type CalendarSourceKind = ("ics_file" | "ics_url" | "google")
 /**
+ * Herkunft einer Karte (03 §9): KI-Vorschlag aus der Inbox oder von Hand
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardOrigin".
+ */
+export type CardOrigin = ("ki" | "manuell")
+/**
+ * Inhalt einer Karte nach 08 §6 (card.kind, card.front, card.back)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardContent".
+ */
+export type CardContent = (CardContentBasic | CardContentCloze)
+/**
+ * Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EvidenceRef".
+ */
+export type EvidenceRef = (EvidenceRefSlide | EvidenceRefTranscript)
+/**
+ * FSRS-Zustand einer Karte (03 §9, ts-fsrs)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "FsrsState".
+ */
+export type FsrsState = ("new" | "learning" | "review" | "relearning")
+/**
+ * Kartentyp (F-LRN-01). Dieser Schnitt kennt nur basic und cloze (VERTRAEGE §21.2), weitere kommen später
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardKind".
+ */
+export type CardKind = ("basic" | "cloze")
+/**
  * Gerät, auf dem ein Ereignis entstanden ist
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -165,13 +200,6 @@ export type ConceptKind = ("definition" | "verfahren" | "modell" | "satz" | "bei
  * via the `definition` "ConceptStatus".
  */
 export type ConceptStatus = ("vorschlag" | "aktiv" | "zusammengefuehrt")
-/**
- * Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt)
- * 
- * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "EvidenceRef".
- */
-export type EvidenceRef = (EvidenceRefSlide | EvidenceRefTranscript)
 /**
  * Beziehungstyp (03 §7). „A baut_auf B“: B ist Voraussetzung von A. gegensatz und verwandt sind symmetrisch
  * 
@@ -281,12 +309,19 @@ export type Lang = ("de" | "en" | "mixed")
  */
 export type InboxBlockedReason = ("endpunkt_offen" | "endpunkt_abgelehnt")
 /**
- * Art eines Inbox-Eintrags (03 §8). Weitere Arten (card_batch, slide_correction, …) kommen mit ihren Tickets
+ * Was aus einer vorgeschlagenen Karte wurde (§21.7). dublette: gleiche Vorderseite gab es schon
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxCardOutcomeKind".
+ */
+export type InboxCardOutcomeKind = ("angenommen" | "verworfen" | "dublette")
+/**
+ * Art eines Inbox-Eintrags (03 §8). card_batch seit VERTRAEGE §21. Weitere Arten (slide_correction, …) kommen mit ihren Tickets
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "InboxKind".
  */
-export type InboxKind = ("concept_new" | "concept_merge" | "relation")
+export type InboxKind = ("concept_new" | "concept_merge" | "relation" | "card_batch")
 /**
  * Status eines Inbox-Eintrags (03 §8). automatisch: nach der Einstellung ai.auto_accept angenommen
  * 
@@ -300,7 +335,7 @@ export type InboxStatus = ("offen" | "angenommen" | "abgelehnt" | "automatisch")
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "InboxPayload".
  */
-export type InboxPayload = (InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation)
+export type InboxPayload = (InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation | InboxPayloadCardBatch)
 /**
  * Entscheidung im Abgleich (05 §P8, Band 0,75–0,88). Abbildung auf Inbox-Arten: VERTRAEGE §20.3
  * 
@@ -498,12 +533,26 @@ export type PencilSqueezeAction = ("werkzeugpalette" | "radierer" | "system" | "
  */
 export type PhotoMime = ("image/heic" | "image/jpeg")
 /**
- * Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge = Anzeige-Reihenfolge
+ * Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2, §20.2 und §21.3). Reihenfolge = Anzeige-Reihenfolge
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PipelineStep".
  */
-export type PipelineStep = ("audio.finalize" | "transcribe" | "align.log" | "concepts.extract" | "concepts.resolve" | "summary.write")
+export type PipelineStep = ("audio.finalize" | "transcribe" | "align.log" | "concepts.extract" | "concepts.resolve" | "summary.write" | "cards.generate")
+/**
+ * Selbstbewertung (06 §1): 1 Nochmal, 2 Schwer, 3 Gut, 4 Leicht
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ReviewRating".
+ */
+export type ReviewRating = number
+/**
+ * Gruppe in der Tageswarteschlange (§21.5): angefangen = Lernschritt offen, faellig = Wiederholung, neu = noch nie bewertet
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ReviewQueueGroup".
+ */
+export type ReviewQueueGroup = ("angefangen" | "faellig" | "neu")
 /**
  * Nacharbeitung (F-NAC-05, Phase 2)
  * 
@@ -556,9 +605,9 @@ export type SessionState = ("geplant" | "bereit" | "laeuft" | "pausiert" | "been
  */
 export type StopReason = ("manuell" | "kalenderende" | "stille" | "maximaldauer" | "absturz_wiederhergestellt")
 /**
- * Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge = Anzeige-Reihenfolge
+ * Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2, §20.2 und §21.3). Reihenfolge = Anzeige-Reihenfolge
  */
-export type PipelineStep1 = ("audio.finalize" | "transcribe" | "align.log" | "concepts.extract" | "concepts.resolve" | "summary.write")
+export type PipelineStep1 = ("audio.finalize" | "transcribe" | "align.log" | "concepts.extract" | "concepts.resolve" | "summary.write" | "cards.generate")
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SlideEventSource".
@@ -1088,6 +1137,310 @@ items: CalendarSource[]
 next_cursor: (string | null)
 }
 /**
+ * Karte (03 §9) mit Zustand. Gehört zu genau einem aktiven Konzept
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "Card".
+ */
+export interface Card {
+id: Uuid
+created_at: Timestamp
+updated_at: Timestamp
+concept_id: Uuid
+/**
+ * Lernstufe (F-LRN-01). basic und cloze: 2
+ */
+stage: number
+origin: CardOrigin
+/**
+ * true: pausiert, kommt nicht in die Warteschlange
+ */
+suspended: boolean
+content: CardContent
+/**
+ * @minItems 1
+ * @maxItems 6
+ */
+sources: CardSource[]
+state: CardState
+}
+/**
+ * Frage und Antwort
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardContentBasic".
+ */
+export interface CardContentBasic {
+kind: "basic"
+front: CardFrontText
+back: CardBackBasic
+}
+/**
+ * Vorderseite (08 §6). Reiner Text, bei cloze mit Lücken {{c1::Lösung}} (§21.2)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardFrontText".
+ */
+export interface CardFrontText {
+text_md: string
+}
+/**
+ * Rückseite einer basic-Karte (08 §6)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardBackBasic".
+ */
+export interface CardBackBasic {
+/**
+ * Antwort
+ */
+text_md: string
+/**
+ * Erklärung unter der Antwort, null = keine
+ */
+explanation_md: (string | null)
+}
+/**
+ * Lückentext. Alle Lücken einer Karte werden zusammen verdeckt und aufgedeckt
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardContentCloze".
+ */
+export interface CardContentCloze {
+kind: "cloze"
+front: CardFrontText
+back: CardBackCloze
+}
+/**
+ * Rückseite einer cloze-Karte (08 §6)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardBackCloze".
+ */
+export interface CardBackCloze {
+answers: CardClozeAnswers
+}
+/**
+ * Lösungen je Lücke. Genau die Schlüssel der Lücken im Text, lückenlos ab c1 (prüft der Schreiber, §21.2)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardClozeAnswers".
+ */
+export interface CardClozeAnswers {
+/**
+ * erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen
+ * 
+ * @minItems 1
+ * @maxItems 5
+ */
+c1: string[]
+/**
+ * erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen
+ * 
+ * @minItems 1
+ * @maxItems 5
+ */
+c2?: string[]
+/**
+ * erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen
+ * 
+ * @minItems 1
+ * @maxItems 5
+ */
+c3?: string[]
+}
+/**
+ * Beleg einer Karte mit Anzeigeangabe
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardSource".
+ */
+export interface CardSource {
+ref: EvidenceRef
+/**
+ * true: Ziel gelöscht (Folie, Foliensatz oder Session), nicht mehr anspringbar
+ */
+missing: boolean
+}
+/**
+ * Beleg auf eine Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EvidenceRefSlide".
+ */
+export interface EvidenceRefSlide {
+kind: "slide"
+slide_id: Uuid
+deck_id: Uuid
+/**
+ * Index der Folie im Foliensatz, ab 1
+ */
+slide_index: number
+}
+/**
+ * Beleg auf einen Zeitraum des Gesagten (Sitzungszeit, §18.1). t_end_ms ≥ t_start_ms prüft der Schreiber. Ziel: /rueckblick?id=<session_id>&t=<t_start_ms>
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "EvidenceRefTranscript".
+ */
+export interface EvidenceRefTranscript {
+kind: "transcript"
+session_id: Uuid
+t_start_ms: SessionMs
+t_end_ms: SessionMs
+}
+/**
+ * FSRS-Zustand (Tabelle card_state, 1:1 zur Karte). Felder wie der Kartentyp von ts-fsrs
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardState".
+ */
+export interface CardState {
+state: FsrsState
+due: Timestamp
+stability: number
+difficulty: number
+elapsed_days: number
+scheduled_days: number
+/**
+ * Position in den Lernschritten von ts-fsrs
+ */
+learning_steps: number
+reps: number
+lapses: number
+last_review: (Timestamp | null)
+}
+/**
+ * POST /cards: Karte von Hand (origin = manuell). Das Konzept muss aktiv sein (§21.4)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardCreate".
+ */
+export interface CardCreate {
+id?: Uuid
+concept_id: Uuid
+content: CardContent
+/**
+ * Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten
+ * 
+ * @minItems 1
+ * @maxItems 6
+ */
+sources: EvidenceRef[]
+}
+/**
+ * GET /concepts/{id}/cards: alle nicht gelöschten Karten des Konzepts, älteste zuerst, höchstens 500
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardList".
+ */
+export interface CardList {
+/**
+ * @maxItems 500
+ */
+items: Card[]
+}
+/**
+ * Eine vorgeschlagene Karte in einem card_batch, nach den Prüfungen aus §21.6
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardProposal".
+ */
+export interface CardProposal {
+/**
+ * Schlüssel im Vorschlag: k1, k2, …
+ */
+key: string
+content: CardContent
+/**
+ * Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten
+ * 
+ * @minItems 1
+ * @maxItems 6
+ */
+sources: EvidenceRef[]
+}
+/**
+ * PATCH /cards/{id}. Mindestens ein Feld (sonst 400 validation_failed). content ersetzt Vorder- und Rückseite, der FSRS-Zustand bleibt
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardUpdate".
+ */
+export interface CardUpdate {
+content?: CardContent
+/**
+ * Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten
+ * 
+ * @minItems 1
+ * @maxItems 6
+ */
+sources?: EvidenceRef[]
+suspended?: boolean
+}
+/**
+ * cards.generate (VERTRAEGE §21.6). job.session_id ist gesetzt
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardsGeneratePayload".
+ */
+export interface CardsGeneratePayload {
+session_id: Uuid
+/**
+ * true: auch offene Vorschläge mit unveränderter Eingabe neu erzeugen
+ */
+force?: boolean
+}
+/**
+ * Ergebnis von cards.generate
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardsGenerateResult".
+ */
+export interface CardsGenerateResult {
+session_id: Uuid
+session_deleted: boolean
+/**
+ * betrachtete Konzepte der Session
+ */
+concepts: number
+/**
+ * neu geschriebene Inbox-Einträge
+ */
+proposed_batches: number
+proposed_cards: number
+/**
+ * offene Vorschläge mit gleicher Eingabe, kein Aufruf
+ */
+unchanged_batches: number
+/**
+ * Konzepte, deren Vorschlag aus dieser Session schon entschieden ist
+ */
+skipped_decided: number
+/**
+ * Konzepte ohne brauchbaren Belegtext oder ohne neue Karte
+ */
+skipped_empty: number
+/**
+ * Konzepte mit ungültiger oder abgelehnter KI-Ausgabe
+ */
+failed_concepts: number
+dropped_invalid: number
+dropped_length: number
+dropped_sources: number
+dropped_cloze: number
+dropped_duplicates: number
+/**
+ * null: ohne Embedder, Dubletten nur über gleichen Text
+ */
+embedding_model: (string | null)
+prompt_version: (string | null)
+model: (string | null)
+/**
+ * Euro (Schätzung, VERTRAEGE §20.5)
+ */
+cost_eur: number
+}
+/**
  * Konzept (03 §7). Gehört keinem Fach allein (concept_module). Ohne embedding, vault_path und block_hashes (kommen mit dem Vault)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1174,33 +1527,6 @@ quote: (string | null)
  * true: beim Abgleich automatisch an ein vorhandenes Konzept gehängt (§20.3)
  */
 auto: boolean
-}
-/**
- * Beleg auf eine Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
- * 
- * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "EvidenceRefSlide".
- */
-export interface EvidenceRefSlide {
-kind: "slide"
-slide_id: Uuid
-deck_id: Uuid
-/**
- * Index der Folie im Foliensatz, ab 1
- */
-slide_index: number
-}
-/**
- * Beleg auf einen Zeitraum des Gesagten (Sitzungszeit, §18.1). t_end_ms ≥ t_start_ms prüft der Schreiber. Ziel: /rueckblick?id=<session_id>&t=<t_start_ms>
- * 
- * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "EvidenceRefTranscript".
- */
-export interface EvidenceRefTranscript {
-kind: "transcript"
-session_id: Uuid
-t_start_ms: SessionMs
-t_end_ms: SessionMs
 }
 /**
  * Kurzangabe einer Session für Listen (Anzeige „VL 7 · Titel“ bzw. Datum)
@@ -2023,7 +2349,7 @@ message: string
 external_uid: (string | null)
 }
 /**
- * POST /inbox/{id}/accept (§20.6). Welche Felder zu welcher Art passen, regelt der Vertrag (sonst 400 inbox_action_invalid)
+ * POST /inbox/{id}/accept (§20.6, §21.7). Welche Felder zu welcher Art passen, regelt der Vertrag (sonst 400 inbox_action_invalid)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "InboxAcceptRequest".
@@ -2036,6 +2362,33 @@ merge_into?: Uuid
  */
 as_new?: boolean
 relation_kind?: ConceptRelationKind
+/**
+ * nur card_batch: Entscheidung je Karte. Nicht genannte Karten werden unverändert angenommen
+ * 
+ * @maxItems 8
+ */
+cards?: InboxCardChoice[]
+}
+/**
+ * Entscheidung zu einer Karte eines card_batch (POST /inbox/{id}/accept, §21.7)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxCardChoice".
+ */
+export interface InboxCardChoice {
+key: string
+/**
+ * false: diese Karte verwerfen
+ */
+accept: boolean
+content?: CardContent
+/**
+ * Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten
+ * 
+ * @minItems 1
+ * @maxItems 6
+ */
+sources?: EvidenceRef[]
 }
 /**
  * POST /inbox/bulk. Genau eins von ids und session_id (sonst 400 validation_failed)
@@ -2072,7 +2425,18 @@ code: string
 }[]
 }
 /**
- * Was eine Annahme geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST /inbox/{id}/reopen, §20.6)
+ * Ergebnis je Karte eines entschiedenen card_batch (inbox_item.decision.cards)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxCardOutcome".
+ */
+export interface InboxCardOutcome {
+key: string
+outcome: InboxCardOutcomeKind
+card_id: (Uuid | null)
+}
+/**
+ * Was eine Entscheidung geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST /inbox/{id}/reopen, §20.6, §21.7)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "InboxDecision".
@@ -2081,7 +2445,7 @@ export interface InboxDecision {
 /**
  * Wirkung
  */
-action: ("angenommen_neu" | "zusammengefuehrt" | "beziehung_bestaetigt" | "abgelehnt")
+action: ("angenommen_neu" | "zusammengefuehrt" | "beziehung_bestaetigt" | "karten_angenommen" | "abgelehnt")
 concept_id: (Uuid | null)
 merged_into: (Uuid | null)
 moved_evidence_ids: Uuid[]
@@ -2090,7 +2454,7 @@ added_module_ids: Uuid[]
 previous: (ConceptEdit | null)
 relation_kind_before: (ConceptRelationKind | null)
 /**
- * mit derselben Entscheidung geänderte Beziehungs-Einträge
+ * mit derselben Entscheidung geänderte Einträge: Beziehungen (§20.6) und Kartenvorschläge des Konzepts (§21.7)
  */
 cascade_item_ids: Uuid[]
 /**
@@ -2101,6 +2465,12 @@ duplicate_of: (Uuid | null)
  * Eintrag, dessen Entscheidung diesen mitentschieden hat (A1: bestätigte Beziehung, A2: umgehängte Dublette, A3: bestätigte vorhandene Beziehung). Wieder öffnen nur über diesen Eintrag (§20.6)
  */
 triggered_by: (Uuid | null)
+/**
+ * nur card_batch: Ergebnis je vorgeschlagener Karte (§21.7). Fehlt bei den anderen Arten
+ * 
+ * @maxItems 8
+ */
+cards?: InboxCardOutcome[]
 }
 /**
  * Antwort auf accept, reject und reopen
@@ -2111,6 +2481,12 @@ triggered_by: (Uuid | null)
 export interface InboxDecisionResult {
 item: InboxItem
 concept: (Concept | null)
+/**
+ * nur card_batch nach accept: die angelegten Karten
+ * 
+ * @maxItems 8
+ */
+cards?: Card[]
 }
 /**
  * Inbox-Eintrag (03 §8, F-NAC-06)
@@ -2229,6 +2605,28 @@ prompt_version: string
 model: string
 }
 /**
+ * Nutzlast card_batch: Kartenvorschläge zu einem Konzept aus einer Session (05 §P10, §21.7)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "InboxPayloadCardBatch".
+ */
+export interface InboxPayloadCardBatch {
+kind: "card_batch"
+concept_id: Uuid
+/**
+ * Name des Konzepts beim Erzeugen (Anzeige)
+ */
+concept_name: string
+/**
+ * @minItems 1
+ * @maxItems 8
+ */
+cards: CardProposal[]
+input_hash: string
+prompt_version: string
+model: string
+}
+/**
  * GET /inbox
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -2305,6 +2703,32 @@ run_after: (Timestamp | null)
 export interface JobList {
 items: Job[]
 next_cursor: (string | null)
+}
+/**
+ * Bereich learning in setting (§21.5). Kommt mit B2 in Settings
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "LearningSettings".
+ */
+export interface LearningSettings {
+/**
+ * Zeitbudget für „Heute wiederholen“, Standard 20
+ */
+review_budget_minutes: number
+/**
+ * höchstens so viele neue Karten je Lerntag, Standard 20
+ */
+new_cards_per_day: number
+}
+/**
+ * PATCH /settings, Bereich learning
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "LearningSettingsUpdate".
+ */
+export interface LearningSettingsUpdate {
+review_budget_minutes?: number
+new_cards_per_day?: number
 }
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -4150,6 +4574,115 @@ mime: string
 codec: AudioCodec
 started_ms: SessionMs
 chunks_independent?: boolean
+}
+/**
+ * Konzept einer Karte in der Warteschlange
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ReviewConceptRef".
+ */
+export interface ReviewConceptRef {
+id: Uuid
+name: string
+exam_relevant: boolean
+}
+/**
+ * Eine Bewertung (Tabelle review_log, ohne die Zustände davor und danach)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ReviewLogEntry".
+ */
+export interface ReviewLogEntry {
+id: Uuid
+card_id: Uuid
+reviewed_at: Timestamp
+rating: ReviewRating
+duration_ms: number
+}
+/**
+ * GET /review/queue: der heutige Block (F-LRN-03). Bewusst ohne Zahl der insgesamt fälligen Karten (kein Rückstand, LP9)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ReviewQueue".
+ */
+export interface ReviewQueue {
+/**
+ * Lerntag in Ortszeit des Macs, Tageswechsel 04:00 (§21.5)
+ */
+day: string
+day_ends_at: Timestamp
+generated_at: Timestamp
+/**
+ * Zeitbudget dieses Abrufs ohne extra_minutes
+ */
+budget_minutes: number
+/**
+ * heute schon mit Bewertungen verbrachte Zeit
+ */
+used_seconds: number
+/**
+ * Summe der Schätzungen aller items (Anzeige „≈ n min“)
+ */
+estimated_seconds: number
+/**
+ * Bewertungen am heutigen Lerntag
+ */
+reviewed_today: number
+/**
+ * @maxItems 500
+ */
+items: ReviewQueueItem[]
+/**
+ * true: heute wäre noch mehr fällig, als ins Budget passt
+ */
+more_due: boolean
+/**
+ * false: es gibt noch gar keine Karte (anderer Leerzustand)
+ */
+has_cards: boolean
+}
+/**
+ * Eine Karte der Tageswarteschlange
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ReviewQueueItem".
+ */
+export interface ReviewQueueItem {
+card: Card
+concept: ReviewConceptRef
+group: ReviewQueueGroup
+/**
+ * geschätzte Dauer für diese Karte heute (§21.5)
+ */
+estimate_seconds: number
+}
+/**
+ * POST /cards/{id}/review. id erzeugt der Client (UUIDv7) je Bewertung, eine Wiederholung mit derselben id ändert nichts (§21.4)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ReviewRequest".
+ */
+export interface ReviewRequest {
+id: Uuid
+rating: ReviewRating
+/**
+ * Zeit vom Anzeigen der Vorderseite bis zur Bewertung
+ */
+duration_ms: number
+}
+/**
+ * Antwort auf POST /cards/{id}/review
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "ReviewResult".
+ */
+export interface ReviewResult {
+review: ReviewLogEntry
+card: Card
+/**
+ * true: die Karte ist heute noch einmal dran (neue Fälligkeit vor dem Tageswechsel, §21.5)
+ */
+requeue: boolean
 }
 /**
  * Treffer auf einer Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>

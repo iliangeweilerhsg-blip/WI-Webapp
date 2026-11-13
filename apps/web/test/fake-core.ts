@@ -1566,6 +1566,8 @@ function decideInboxItem(
   const payload = item.payload;
   // A1 (neues Konzept, auch `concept_merge` mit `as_new`); nur danach bestätigt der Core Beziehungen mit
   let acceptedNew = false;
+  // Kartenvorschläge (`card_batch`, VERTRAEGE §21.7) bekommt der Fake-Core mit B4
+  if (payload.kind === 'card_batch') return { status: 400, code: 'inbox_action_invalid' };
   if (payload.kind === 'relation') {
     if (request.edit !== undefined || request.merge_into !== undefined || request.as_new !== undefined) {
       return { status: 400, code: 'inbox_action_invalid' };

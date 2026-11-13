@@ -1,0 +1,20 @@
+{
+  "action": "karten_angenommen",
+  "concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e31",
+  "merged_into": null,
+  "moved_evidence_ids": [],
+  "added_aliases": [],
+  "added_module_ids": [],
+  "previous": null,
+  "relation_kind_before": null,
+  "cascade_item_ids": [],
+  "duplicate_of": null,
+  "triggered_by": null,
+  "cards": [
+    {
+      "key": "k1",
+      "outcome": "behalten",
+      "card_id": null
+    }
+  ]
+}

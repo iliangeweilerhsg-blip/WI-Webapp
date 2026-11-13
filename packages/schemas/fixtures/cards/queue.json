@@ -1,0 +1,858 @@
+{
+  "README": "VERTRAEGE §21.5, Auswahl und Reihenfolge der Tageswarteschlange. Eingabe je Fall: now, tz, remaining_seconds (Budget minus heute verbrauchte Zeit), new_cards_left (Tagesgrenze minus heute begonnene neue Karten), estimates (Sekunden je Kartentyp) und cards mit r = Abrufwahrscheinlichkeit jetzt (kommt im Core aus ts-fsrs, bei neuen Karten null und in der Formel 0). Die Priorität wird vor dem Vergleich auf 6 Nachkommastellen gerundet. concept steht für die Konzept-ID. expected: items in Anzeige-Reihenfolge mit Gruppe und Schätzung, estimated_seconds, more_due. Anzeige-Reihenfolge (Lead-Entscheidung, Stand 13.11.2026): zuerst die Wiederholungen (angefangen nach due, dann faellig nach Priorität), danach die neuen Karten nach Priorität; die Mischung gilt je Gruppe für sich. Angefangene Karten werden vor jeder Kappung aufgenommen und nie gekappt, auch nicht bei Rest 0. Gegenüber der ersten Fassung haben sich geändert: Fall 3 (r1 jetzt vor n1), Fall 4 (n1 jetzt hinter r7), Fall 7 (l1 bleibt im Block statt items = [], estimated_seconds 12). Neu sind die Fälle „Angefangene werden nie gekappt …“ und „Wiederholungen vor neuen Karten …“. Alle erwarteten Werte wurden mit einem unabhängigen Wegwerf-Skript nach dem Text von §21.5 gerechnet und von Hand gegengeprüft. Core (B2) prüft dagegen.",
+  "cases": [
+    {
+      "name": "Reihenfolge nach Priorität: Abrufwahrscheinlichkeit, Überfälligkeit, Klausurrelevanz",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 1200,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "r-frisch",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r-schwach",
+          "concept": "k2",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.7,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r-ueberfaellig",
+          "concept": "k3",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-08T08:00:00Z",
+          "r": 0.85,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r-klausur",
+          "concept": "k4",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.9,
+          "exam_relevant": true,
+          "suspended": false
+        },
+        {
+          "id": "r-morgen",
+          "concept": "k5",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-14T08:00:00Z",
+          "r": 0.95,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r-pausiert",
+          "concept": "k6",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-10T08:00:00Z",
+          "r": 0.5,
+          "exam_relevant": false,
+          "suspended": true
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "r-schwach",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r-ueberfaellig",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r-klausur",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r-frisch",
+            "group": "faellig",
+            "estimate_seconds": 12
+          }
+        ],
+        "estimated_seconds": 48,
+        "more_due": false
+      }
+    },
+    {
+      "name": "Gleichstand: frühere Fälligkeit zuerst, dann die kleinere ID",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 1200,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "b",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "a",
+          "concept": "k2",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "c",
+          "concept": "k3",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T07:00:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "c",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "a",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "b",
+            "group": "faellig",
+            "estimate_seconds": 12
+          }
+        ],
+        "estimated_seconds": 36,
+        "more_due": false
+      }
+    },
+    {
+      "name": "Angefangene zuerst nach Fälligkeit, auch wenn sie erst später am Tag fällig sind",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 1200,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "r1",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.6,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "l-spaeter",
+          "concept": "k2",
+          "kind": "basic",
+          "state": "learning",
+          "due": "2026-11-13T10:08:00Z",
+          "r": 0.99,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "l-jetzt",
+          "concept": "k3",
+          "kind": "cloze",
+          "state": "relearning",
+          "due": "2026-11-13T09:59:00Z",
+          "r": 0.97,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n1",
+          "concept": "k4",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:00:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "l-jetzt",
+            "group": "angefangen",
+            "estimate_seconds": 20
+          },
+          {
+            "id": "l-spaeter",
+            "group": "angefangen",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r1",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "n1",
+            "group": "neu",
+            "estimate_seconds": 36
+          }
+        ],
+        "estimated_seconds": 80,
+        "more_due": false
+      }
+    },
+    {
+      "name": "Neue Karten zählen dreifach und bekommen höchstens die Hälfte, solange Wiederholungen warten",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 120,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "r1",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.51,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r2",
+          "concept": "k2",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.52,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r3",
+          "concept": "k3",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.53,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r4",
+          "concept": "k4",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.54,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r5",
+          "concept": "k5",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.55,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r6",
+          "concept": "k6",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.56,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r7",
+          "concept": "k7",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.5700000000000001,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r8",
+          "concept": "k8",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.58,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n1",
+          "concept": "m1",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:01:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n2",
+          "concept": "m2",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:02:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n3",
+          "concept": "m3",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:03:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "r1",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r2",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r3",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r4",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r5",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r6",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r7",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "n1",
+            "group": "neu",
+            "estimate_seconds": 36
+          }
+        ],
+        "estimated_seconds": 120,
+        "more_due": true
+      }
+    },
+    {
+      "name": "Ohne fällige Wiederholungen nutzen neue Karten das ganze Budget, bis zur Tagesgrenze für neue",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 1200,
+      "new_cards_left": 2,
+      "cards": [
+        {
+          "id": "n1",
+          "concept": "m1",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:01:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n2",
+          "concept": "m2",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:02:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n3",
+          "concept": "m3",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:03:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n4",
+          "concept": "m4",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:04:00Z",
+          "r": null,
+          "exam_relevant": true,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "n4",
+            "group": "neu",
+            "estimate_seconds": 36
+          },
+          {
+            "id": "n1",
+            "group": "neu",
+            "estimate_seconds": 36
+          }
+        ],
+        "estimated_seconds": 72,
+        "more_due": false
+      }
+    },
+    {
+      "name": "Wenig Budget: mindestens die wichtigste Karte",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 5,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "r1",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.8,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r2",
+          "concept": "k2",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.6,
+          "exam_relevant": false,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "r2",
+            "group": "faellig",
+            "estimate_seconds": 12
+          }
+        ],
+        "estimated_seconds": 12,
+        "more_due": true
+      }
+    },
+    {
+      "name": "Budget aufgebraucht: nur Angefangene bleiben im Block, der Rest zählt für more_due",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 0,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "r1",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "l1",
+          "concept": "k2",
+          "kind": "basic",
+          "state": "learning",
+          "due": "2026-11-13T09:00:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "l1",
+            "group": "angefangen",
+            "estimate_seconds": 12
+          }
+        ],
+        "estimated_seconds": 12,
+        "more_due": true
+      }
+    },
+    {
+      "name": "Angefangene werden nie gekappt, auch wenn ihre Kosten den Rest übersteigen",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 20,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "l1",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "learning",
+          "due": "2026-11-13T09:00:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "l2",
+          "concept": "k2",
+          "kind": "cloze",
+          "state": "relearning",
+          "due": "2026-11-13T09:30:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r1",
+          "concept": "k3",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.5,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n1",
+          "concept": "m1",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:00:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "l1",
+            "group": "angefangen",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "l2",
+            "group": "angefangen",
+            "estimate_seconds": 20
+          }
+        ],
+        "estimated_seconds": 32,
+        "more_due": true
+      }
+    },
+    {
+      "name": "Wiederholungen vor neuen Karten, die Mischung gilt je Gruppe (an der Grenze darf dasselbe Konzept folgen)",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 1200,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "n1",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:01:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n2",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:02:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "n3",
+          "concept": "k2",
+          "kind": "basic",
+          "state": "new",
+          "due": "2026-11-12T15:03:00Z",
+          "r": null,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r1",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.5,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "r2",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.6,
+          "exam_relevant": false,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "r1",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "r2",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "n1",
+            "group": "neu",
+            "estimate_seconds": 36
+          },
+          {
+            "id": "n3",
+            "group": "neu",
+            "estimate_seconds": 36
+          },
+          {
+            "id": "n2",
+            "group": "neu",
+            "estimate_seconds": 36
+          }
+        ],
+        "estimated_seconds": 132,
+        "more_due": false
+      }
+    },
+    {
+      "name": "Mischung: nicht zwei Karten desselben Konzepts hintereinander, wenn es anders geht",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 1200,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "a1",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.5,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "a2",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.55,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "a3",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.6,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "b1",
+          "concept": "k2",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.8,
+          "exam_relevant": false,
+          "suspended": false
+        },
+        {
+          "id": "c1",
+          "concept": "k3",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-13T08:00:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [
+          {
+            "id": "a1",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "b1",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "a2",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "c1",
+            "group": "faellig",
+            "estimate_seconds": 12
+          },
+          {
+            "id": "a3",
+            "group": "faellig",
+            "estimate_seconds": 12
+          }
+        ],
+        "estimated_seconds": 60,
+        "more_due": false
+      }
+    },
+    {
+      "name": "Nichts fällig",
+      "now": "2026-11-13T10:00:00Z",
+      "tz": "Europe/Zurich",
+      "estimates": {
+        "basic": 12,
+        "cloze": 20
+      },
+      "remaining_seconds": 1200,
+      "new_cards_left": 20,
+      "cards": [
+        {
+          "id": "r1",
+          "concept": "k1",
+          "kind": "basic",
+          "state": "review",
+          "due": "2026-11-20T08:00:00Z",
+          "r": 0.9,
+          "exam_relevant": false,
+          "suspended": false
+        }
+      ],
+      "expected": {
+        "items": [],
+        "estimated_seconds": 0,
+        "more_due": false
+      }
+    }
+  ]
+}

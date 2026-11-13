@@ -5,7 +5,7 @@
 import Link from 'next/link';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { InboxAcceptRequest, InboxItem, InboxKind, SessionRef } from '@sg/shared';
+import type { InboxAcceptRequest, InboxKind, SessionRef } from '@sg/shared';
 import { conceptKey, fetchConcept, sessionRefLabel } from '../../lib/concepts.ts';
 import {
   INBOX_KIND_FILTERS,
@@ -29,6 +29,7 @@ import {
   unknownEndpoints,
   useInboxOverview,
   useOpenInboxItems,
+  type ConceptInboxItem as InboxItem,
 } from '../../lib/inbox.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { rueckblickHref } from '../../lib/transcript.ts';

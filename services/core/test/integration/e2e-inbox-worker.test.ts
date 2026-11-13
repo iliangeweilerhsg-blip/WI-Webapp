@@ -127,6 +127,7 @@ async function labels(items: InboxItem[]): Promise<string[]> {
       return `relation ${names.get(p.from_concept_id)} ${p.relation_kind} ${names.get(p.to_concept_id)}`;
     }
     if (p.kind === 'concept_merge') return `concept_merge ${p.proposal.name} => ${p.target.name}`;
+    if (p.kind === 'card_batch') return `card_batch ${p.concept_name}`;
     return `concept_new ${p.proposal.name}`;
   });
 }

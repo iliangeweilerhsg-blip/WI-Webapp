@@ -75,6 +75,8 @@ export const STEP_LABELS: Record<PipelineStep, string> = {
   'concepts.extract': 'Konzepte',
   'concepts.resolve': 'Abgleich',
   'summary.write': 'Zusammenfassung',
+  // VERTRAEGE §21.3
+  'cards.generate': 'Karten',
 };
 
 export interface StepRow {
