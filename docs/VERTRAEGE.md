@@ -283,7 +283,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 
 | Methode und Pfad | Body | Antwort | Fehler |
 |---|---|---|---|
-| `GET /sessions?module_id&state&from&to` | – | 200 `SessionList` | |
+| `GET /sessions?module_id&state&from&to&order` | – | 200 `SessionList` | 400 bei ungültigem `order` oder Cursor |
 | `POST /sessions` | `SessionCreate` | 201 `Session` (Zustand `bereit`) | 404 `module_not_found`, 404 `slide_deck_not_found`, 400 `slide_deck_module_mismatch` (Foliensatz eines anderen Moduls), 409 `session_exists` |
 | `GET /sessions/{id}` | – | 200 `Session` | 404 `session_not_found` |
 | `PATCH /sessions/{id}` | `SessionUpdate` | 200 `Session` | 404 |
@@ -298,7 +298,7 @@ Listen mit `?cursor&limit` (Standard 50, höchstens 200).
 
 - **Notizbuch der Session (#199).** Der Core ist die einzige Quelle für diese Regel, iPad und Web leiten sie nicht selbst ab. Hat die Session einen Termin mit `kind` `uebung` oder `tutorium`, ist es das Notizbuch `uebung` des Moduls. In allen anderen Fällen ist es `vorlesung`, auch ohne Termin. Ein weich gelöschter Termin zählt mit seiner Art, damit das Notizbuch nicht nachträglich wechselt. Fehlen die Standard-Notizbücher, legt der Core sie vorher an (wie `GET /notebooks?module_id`, §7.4). Die Antwort hängt nicht vom Zustand der Session ab. Gelöschte Sessions ergeben 404 `session_not_found`.
 - `state` ist eine Komma-Liste, z. B. `state=laeuft,pausiert` für die aktive Session nach einem Neuladen (F-SES-05).
-- Sortierung: aufsteigend nach `coalesce(started_at, planned_starts_at, created_at)`, bei Gleichstand nach `id`.
+- Sortierung: aufsteigend nach `coalesce(started_at, planned_starts_at, created_at)`, bei Gleichstand nach `id`. `order=desc` dreht beides um (neueste zuerst, bei Gleichstand größere `id` zuerst); Standard ist `order=asc`. Ein Cursor gilt nur für die Richtung, aus der er stammt. Andere Werte für `order` ergeben 400 `validation_failed`.
 - `from`/`to` filtern auf denselben Zeitpunkt. Der Heute-Bildschirm (T1-03) fragt `from=<heute 00:00>&to=<morgen 00:00>` ab. Zusätzlich holt er `GET /sessions?state=laeuft,pausiert` (eine laufende Session vom Vortag) und `GET /calendar/events?from&to` für den Raum (`location`), verknüpft über `calendar_event_id`; danach hält `session.updated` die Liste aktuell. Das ist kein neuer Endpunkt.
 
 ### 7.3 Audio (T1-06)

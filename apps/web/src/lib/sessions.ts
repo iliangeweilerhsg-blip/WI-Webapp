@@ -59,6 +59,8 @@ type SessionFilter = {
   limit?: number;
   moduleId?: string;
   cursor?: string | null;
+  /** Sortierung des Core (`order`), Standard aufsteigend */
+  order?: 'asc' | 'desc';
 };
 
 async function fetchSessionPage(filter: SessionFilter, signal?: AbortSignal) {
@@ -68,6 +70,7 @@ async function fetchSessionPage(filter: SessionFilter, signal?: AbortSignal) {
   if (filter.states?.length) params.set('state', filter.states.join(','));
   if (filter.moduleId) params.set('module_id', filter.moduleId);
   if (filter.cursor) params.set('cursor', filter.cursor);
+  if (filter.order) params.set('order', filter.order);
   params.set('limit', String(filter.limit ?? 200));
   const page = await apiGet(`/sessions?${params.toString()}`, SessionListSchema, { signal });
   return { items: page.items.filter((item) => item.deleted_at === null), next: page.next_cursor };
@@ -81,7 +84,7 @@ export async function listSessions(filter: SessionFilter, signal?: AbortSignal):
 /** So viele Seiten (je 200) lädt `listSessionsAll` höchstens */
 const MAX_SESSION_PAGES = 5;
 
-/** Wie `listSessions`, folgt aber dem Cursor (der Core sortiert aufsteigend und kennt keine andere Reihenfolge) */
+/** Wie `listSessions`, folgt aber dem Cursor (aufsteigend, sofern `order` nicht gesetzt ist) */
 export async function listSessionsAll(filter: SessionFilter, signal?: AbortSignal): Promise<Session[]> {
   const items: Session[] = [];
   let cursor: string | null = null;
@@ -131,12 +134,19 @@ export function sessionLabel(session: Pick<Session, 'number' | 'title'>, deckTit
   return parts.join(' · ') || 'Vorlesung';
 }
 
+/** So viele Vorlesungen eines Moduls zeigt der Modul-Tab höchstens (die neuesten) */
+export const MODULE_SESSIONS_LIMIT = 50;
+
 /** Abfrage: vergangene Vorlesungen eines Moduls, neueste zuerst */
 export function useModuleSessions(moduleId: string) {
   return useQuery({
     queryKey: ['sessions', 'modul', moduleId],
     // Der Core filtert die Zustände schon, damit geplante Termine des Semesters keine Seiten belegen
-    queryFn: ({ signal }) => listSessionsAll({ moduleId, states: FINISHED_STATES }, signal),
+    queryFn: ({ signal }) =>
+      listSessions(
+        { moduleId, states: FINISHED_STATES, order: 'desc', limit: MODULE_SESSIONS_LIMIT },
+        signal,
+      ),
     select: (items) => newestFirst(items.filter(isFinished)),
   });
 }

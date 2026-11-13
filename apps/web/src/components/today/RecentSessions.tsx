@@ -1,7 +1,7 @@
 'use client';
 
-// „Zuletzt“ auf Heute (UX-307): die letzten drei Vorlesungen, egal aus welchem Modul. Der Core sortiert Sessions nur
-// aufsteigend und kennt kein „neueste n“; darum lädt die Ansicht die letzten 60 Tage und nimmt davon die drei neuesten.
+// „Zuletzt“ auf Heute (UX-307): die letzten drei Vorlesungen, egal aus welchem Modul. Der Core sortiert auf Wunsch
+// absteigend (`order=desc`); die Ansicht fragt darum im Fenster der letzten 60 Tage nur die drei neuesten ab.
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useMemo } from 'react';
@@ -13,7 +13,7 @@ import {
   FINISHED_STATES,
   formatDuration,
   isFinished,
-  listSessionsAll,
+  listSessions,
   newestFirst,
   sessionDurationMs,
   sessionLabel,
@@ -32,7 +32,8 @@ export function RecentSessions({ modules, now }: { modules: readonly Module[]; n
       // Unter ['sessions','heute'], damit Ereignisse und Neuladen der Ansicht auch diese Liste auffrischen
       queryKey: ['sessions', 'heute', 'zuletzt', key],
       // Nur vergangene Vorlesungen: Ohne Zustandsfilter kämen alle geplanten Termine bis Semesterende mit
-      queryFn: ({ signal }) => listSessionsAll({ from, states: FINISHED_STATES }, signal),
+      queryFn: ({ signal }) =>
+        listSessions({ from, states: FINISHED_STATES, order: 'desc', limit: RECENT_COUNT }, signal),
       select: (items) => newestFirst(items.filter(isFinished)).slice(0, RECENT_COUNT),
     }),
   );

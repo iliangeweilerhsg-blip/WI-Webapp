@@ -67,6 +67,8 @@ const SessionsQuery = PageQuerySchema.extend({
     }),
   from: isoDate.optional(),
   to: isoDate.optional(),
+  /** Sortierrichtung nach Startzeit bzw. geplantem Beginn. Standard `asc`; ein Cursor gilt nur für seine Richtung */
+  order: z.enum(['asc', 'desc']).default('asc'),
 });
 
 export async function sessionRoutes(app: FastifyInstance, deps: SessionRouteDeps): Promise<void> {
@@ -79,7 +81,8 @@ export async function sessionRoutes(app: FastifyInstance, deps: SessionRouteDeps
     {
       schema: {
         tags: ['Sessions'],
-        summary: 'Sessions auflisten, aufsteigend nach Startzeit bzw. geplantem Beginn',
+        summary:
+          'Sessions auflisten, nach Startzeit bzw. geplantem Beginn, `order=asc` (Standard) oder `desc`',
         querystring: SessionsQuery,
         response: { 200: SessionListSchema, 400: ApiErrorSchema },
       },
@@ -90,6 +93,7 @@ export async function sessionRoutes(app: FastifyInstance, deps: SessionRouteDeps
         states: request.query.state,
         from: request.query.from ? new Date(request.query.from) : undefined,
         to: request.query.to ? new Date(request.query.to) : undefined,
+        order: request.query.order,
         cursor: request.query.cursor,
         limit: request.query.limit,
       }),

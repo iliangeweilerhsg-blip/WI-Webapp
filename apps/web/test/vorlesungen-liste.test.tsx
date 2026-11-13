@@ -165,6 +165,17 @@ describe('Modul: Vorlesungen (UX-307)', () => {
         (r) => r.method === 'GET' && r.path.startsWith('/sessions') && r.path.includes(`module_id=${DBS.id}`),
       ),
     ).toBe(true);
+    // Der Core sortiert (`order=desc`) und begrenzt; der Client holt nicht alle Seiten
+    const listCalls = core.requests.filter(
+      (r) => r.method === 'GET' && r.path.startsWith('/sessions?') && r.path.includes('module_id='),
+    );
+    expect(listCalls.length).toBeGreaterThan(0);
+    for (const call of listCalls) {
+      const params = new URL(call.path, 'http://x').searchParams;
+      expect(params.get('order')).toBe('desc');
+      expect(params.get('limit')).toBe('50');
+      expect(params.has('cursor')).toBe(false);
+    }
   });
 
   it('zeigt ohne Vorlesungen nichts Zusätzliches, die Foliensätze bleiben', async () => {
