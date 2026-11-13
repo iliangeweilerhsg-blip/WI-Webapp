@@ -7,7 +7,7 @@ import { DECODED_STRIDE, decodeStrokeCached, type DecodedStroke } from '../ink/s
 
 export interface HitEntry {
   id: string;
-  /** Beginn des Strichs in Sitzungszeit (ms) */
+  /** Beginn des Strichs in Sitzungszeit nach Serveruhr (ms) */
   t: number;
   d: DecodedStroke;
   rect: Rect;
@@ -18,13 +18,25 @@ export interface HitIndex {
   timed: HitEntry[];
 }
 
-export function buildHitIndex(strokes: readonly Stroke[]): HitIndex {
+/**
+ * `offsets`: Geräteversatz je Strich (`PageStrokes.stroke_offsets_ms`, §9.3, #332). Die Zeit eines Strichs ist dann
+ * `max(0, t_start_ms + Versatz)`. Fehlt der Versatz (älterer Core, Strich ohne Eintrag), gilt `t_start_ms`.
+ */
+export function buildHitIndex(
+  strokes: readonly Stroke[],
+  offsets: Readonly<Record<string, number>> = {},
+): HitIndex {
   const timed: HitEntry[] = [];
   for (const s of strokes) {
     if (s.t_start_ms === null) continue;
     const d = decodeStrokeCached(s);
     if (!d || d.count === 0) continue;
-    timed.push({ id: d.id, t: s.t_start_ms, d, rect: strokeBounds(d) });
+    timed.push({
+      id: d.id,
+      t: Math.max(0, s.t_start_ms + (offsets[s.client_id] ?? 0)),
+      d,
+      rect: strokeBounds(d),
+    });
   }
   // Array.sort ist stabil: gleiche Zeiten behalten ihre Reihenfolge
   timed.sort((a, b) => a.t - b.t);

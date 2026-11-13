@@ -342,6 +342,9 @@ export const MACHINE_OUTPUT_NODES: ReadonlySet<Node> = new Set<Node>([
   'concept_module',
   'concept_relation',
   'session_summary',
+  // Karten (§21.8): Zustand und Bewertungen kennt der Nutzer nicht als eigene Objekte, `dependent_count` bleibt 0
+  'card_state',
+  'review_log',
 ]);
 
 /** Anzahl der mit `ts` mitgelöschten abhängigen Objekte (Kaskade aus trash.ts, ohne die Wurzel und ohne Maschinenausgaben) */
@@ -444,6 +447,7 @@ interface Subtree {
   pages: string[];
   markers: string[];
   photos: string[];
+  cards: string[];
   sources: string[];
   events: string[];
 }
@@ -458,6 +462,7 @@ const emptySubtree = (): Subtree => ({
   pages: [],
   markers: [],
   photos: [],
+  cards: [],
   sources: [],
   events: [],
 });
@@ -510,6 +515,9 @@ async function collectSubtree(tx: DbOrTx, roots: { kind: TrashKind; id: string }
         break;
       case 'photo':
         add(tree.photos, [id]);
+        break;
+      case 'card':
+        add(tree.cards, [id]);
         break;
     }
   }
@@ -613,6 +621,7 @@ export interface PurgeResult {
 type PurgeTable =
   | 'marker'
   | 'photo'
+  | 'card'
   | 'page'
   | 'session'
   | 'slide_deck'
@@ -696,6 +705,8 @@ export async function purgeTrashItems(
     // Kinder zuerst, damit sie einzeln mitgezählt werden (Slides, Striche, Chunks … folgen per CASCADE)
     await remove('marker', tree.markers);
     await remove('photo', tree.photos);
+    // `card_state` und `review_log` folgen über die Fremdschlüssel (ON DELETE CASCADE, §21.1)
+    await remove('card', tree.cards);
     await remove('page', tree.pages);
     await remove('session', tree.sessions);
     await remove('slide_deck', tree.decks);

@@ -387,6 +387,10 @@ export type LanguageCode = string
  */
 export type ToolbarSide = ("links" | "rechts")
 /**
+ * Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.
+ */
+export type SessionMs1 = number
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "MarkerSource".
  */
@@ -527,6 +531,10 @@ export type PencilDoubleTapAction = ("radierer" | "letztes_werkzeug" | "farbpale
  * via the `definition` "PencilSqueezeAction".
  */
 export type PencilSqueezeAction = ("werkzeugpalette" | "radierer" | "system" | "aus")
+/**
+ * Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.
+ */
+export type SessionMs2 = number
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PhotoMime".
@@ -703,7 +711,7 @@ export type TranscribeOutcome = ("transkribiert" | "unveraendert" | "ohne_audio"
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "TrashKind".
  */
-export type TrashKind = ("semester" | "module" | "slide_deck" | "exercise_sheet" | "calendar_source" | "session" | "notebook" | "page" | "marker" | "photo")
+export type TrashKind = ("semester" | "module" | "slide_deck" | "exercise_sheet" | "calendar_source" | "session" | "notebook" | "page" | "marker" | "photo" | "card")
 
 /**
  * GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
@@ -2857,6 +2865,7 @@ deleted_at: (Timestamp | null)
 session_id: Uuid
 kind: MarkerKind
 t_ms: SessionMs
+t_session_ms?: SessionMs1
 page_id: (Uuid | null)
 position: (MarkerPosition | null)
 source: MarkerSource
@@ -4223,6 +4232,12 @@ stream_seq: number
  */
 stream_op_id: (Uuid | null)
 strokes: Stroke[]
+/**
+ * Geräteversatz je Strich (client_id → offset_ms aus session.start_offsets der Session der Seite, VERTRAEGE §9.3). Nur Striche mit Versatz ≠ 0 und t_start_ms ≠ null. Sitzungszeit nach Serveruhr = max(0, t_start_ms + Versatz), ebenso t_end_ms. Fehlt das Feld (älterer Core) oder der Strich darin, ist der Versatz 0. Nur in Antworten des Core
+ */
+stroke_offsets_ms?: {
+[k: string]: number
+}
 }
 /**
  * Neutrales Strich-Format (08 §4.1/4.2). points sind Rohkoordinaten VOR transform, bbox gilt NACH transform inklusive halber Breite. dt des ersten Punkts ist 0; t_end_ms − t_start_ms entspricht dem letzten dt. t_start_ms/t_end_ms null außerhalb einer Session.
@@ -4462,6 +4477,7 @@ updated_at: Timestamp
 deleted_at: (Timestamp | null)
 session_id: Uuid
 t_ms: SessionMs
+t_session_ms?: SessionMs2
 page_id: (Uuid | null)
 mime: PhotoMime
 sha256: Sha256
@@ -4924,7 +4940,7 @@ export interface SessionProcessing {
 [k: string]: JobState
 }
 /**
- * Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase 2).
+ * Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms. Der Core liefert sie umgerechnet mit (Marker.t_session_ms, Photo.t_session_ms, PageStrokes.stroke_offsets_ms, VERTRAEGE §9.3).
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SessionStartOffset".
@@ -5364,7 +5380,7 @@ title?: (string | null)
 slide_deck_id?: (Uuid | null)
 }
 /**
- * GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
+ * GET /settings: alle Bereiche (Phase 1, ai nach VERTRAEGE §20.7 und learning nach §21.9), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "Settings".
@@ -5375,6 +5391,7 @@ lecture: LectureSettings
 pen: PenSettings
 data: DataSettings
 ai: AiSettings
+learning: LearningSettings
 }
 /**
  * PATCH /settings: nur die angegebenen Felder ändern sich. Antwort: Settings
@@ -5388,6 +5405,7 @@ lecture?: LectureSettingsUpdate
 pen?: PenSettingsUpdate
 data?: DataSettingsUpdate
 ai?: AiSettingsUpdate
+learning?: LearningSettingsUpdate
 }
 /**
  * Eine Seite eines Foliensatzes. Bilder über GET /slides/{id}/image bzw. /thumb.
@@ -6009,7 +6027,10 @@ dependent_count: number
  */
 export interface TrashParent {
 id: Uuid
-kind: TrashKind
+/**
+ * Art des Elternobjekts. Bei einer Karte das Konzept (kein eigener TrashKind, VERTRAEGE §21.8)
+ */
+kind: (TrashKind | "concept")
 title: string
 }
 /**

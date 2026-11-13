@@ -4,7 +4,8 @@ Gemeinsame Teile von `concepts.extract`, `concepts.resolve` und `summary.write` 
 „Gemeinsame Regeln“ und Schritte 1, 2 und 7, §20.4 Schritt 2):
 
 - `session_row`, `load`: Session, Modul, Folien, `slide_segment` (Quelle `manuell` vor
-  `ausrichtung` vor `log`, §18.4), Transkript-Abschnitte und Marker lesen.
+  `ausrichtung` vor `log`, §18.4), Transkript-Abschnitte und Marker (mit Geräteversatz, §9.3)
+  lesen.
 - `build_input`: die deterministische Eingabe. Alles Material steht in Tags, spitze Klammern sind
   maskiert (`esc`).
 - `overlaps`, `merge_ranges`: Zeit-Belege prüfen. `shorten`, `unit`: Texte und Konfidenzen
@@ -131,14 +132,7 @@ def load(conn: Conn, sid: uuid.UUID, row: tuple[Any, ...]) -> Material:
     ).fetchall():
         by_source.setdefault(source, []).append((int(start), int(end), slide_id))
     spans = next((by_source[s] for s in SOURCES if by_source.get(s)), [])
-    markers = [
-        (str(r[0]), int(r[1]))
-        for r in conn.execute(
-            "SELECT kind, t_ms FROM marker WHERE session_id = %s AND deleted_at IS NULL "
-            "AND kind IN ('frage', 'klausur') ORDER BY t_ms, id",
-            (sid,),
-        ).fetchall()
-    ]
+    markers = load_markers(conn, sid)
     date = None
     if started_at is not None:
         date = started_at.astimezone(ZoneInfo(local_tz_name())).date().isoformat()
@@ -157,6 +151,47 @@ def load(conn: Conn, sid: uuid.UUID, row: tuple[Any, ...]) -> Material:
         spans=spans,
         markers=markers,
     )
+
+
+def load_markers(conn: Conn, sid: uuid.UUID) -> list[tuple[str, int]]:
+    """Marker `frage`/`klausur` mit Sitzungszeit nach Serveruhr (VERTRAEGE §9.3, #332).
+
+    Hat ein Gerät die Session offline mit eigenem Start begonnen, gilt `t_ms + offset_ms`
+    (nie unter 0). Das Gerät eines Markers ist das der ersten `marker.add` im Strom der Session,
+    wie in `align.log` für Folienwechsel. Ohne Eintrag in `start_offsets` gilt `t_ms`.
+    """
+    # Spät importiert, Grund wie bei `_clean_text`
+    from ..handlers.align_log import _offsets
+
+    row = conn.execute("SELECT start_offsets FROM session WHERE id = %s", (sid,)).fetchone()
+    offsets = _offsets(row[0] if row else None)
+    if not offsets:
+        return [
+            (str(r[0]), int(r[1]))
+            for r in conn.execute(
+                "SELECT kind, t_ms FROM marker WHERE session_id = %s AND deleted_at IS NULL "
+                "AND kind IN ('frage', 'klausur') ORDER BY t_ms, id",
+                (sid,),
+            ).fetchall()
+        ]
+    rows = conn.execute(
+        """
+        SELECT m.kind, m.t_ms, m.id, (
+          SELECT o.device_id FROM sync_op o
+           WHERE o.stream = %(stream)s AND o.kind = 'marker.add'
+             AND o.data->>'marker_id' = m.id::text
+           ORDER BY o.seq LIMIT 1)
+        FROM marker m
+        WHERE m.session_id = %(sid)s AND m.deleted_at IS NULL AND m.kind IN ('frage', 'klausur')
+        """,
+        {"sid": sid, "stream": f"session:{sid}"},
+    ).fetchall()
+    timed = []
+    for kind, t_ms, mid, device_id in rows:
+        offset = offsets.get(str(device_id).lower(), 0) if device_id is not None else 0
+        timed.append((max(int(t_ms) + offset, 0), str(mid), str(kind)))
+    timed.sort()
+    return [(kind, t) for t, _mid, kind in timed]
 
 
 # ---------- Eingabe ----------

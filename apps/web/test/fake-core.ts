@@ -556,6 +556,8 @@ export interface FakeCore {
   /** Notizseiten für GET /notebooks/{id}/pages (VERTRAEGE §7.4), Striche je Seiten-ID für GET /pages/{id}/strokes */
   pages: Page[];
   strokes: Record<string, Stroke[]>;
+  /** Geräteversatz je Seiten-ID für `stroke_offsets_ms` (VERTRAEGE §9.3). Fehlt die Seite, fehlt das Feld (älterer Core) */
+  strokeOffsets: Record<string, Record<string, number>>;
   /** Fotos im Snapshot der Session (GET /sessions/{id}/snapshot) */
   photos: Photo[];
   /** GET /notebooks scheitert mit 500, solange true */
@@ -762,6 +764,8 @@ export function makeSettings(): Settings {
     data: { backup_target: null, backup_encryption: false, backup_time: '03:00' },
     // Pflichtfeld seit T2-22a (VERTRAEGE §20.7). Die Oberfläche dazu baut T2-23
     ai: { monthly_budget_eur: 10, auto_accept: 'aus' },
+    // Pflichtfeld seit B2 (VERTRAEGE §21.9). Die Oberfläche dazu baut B4
+    learning: { review_budget_minutes: 20, new_cards_per_day: 20 },
   };
 }
 
@@ -787,6 +791,7 @@ export function installFakeCore(
     notebooks: [],
     pages: [],
     strokes: {},
+    strokeOffsets: {},
     photos: [],
     events: [],
     failNotebooks: false,
@@ -1265,6 +1270,9 @@ export function installFakeCore(
           stream_seq: 0,
           stream_op_id: null,
           strokes: structuredClone(core.strokes[pageStrokes[1] ?? ''] ?? []),
+          ...(core.strokeOffsets[pageStrokes[1] ?? '']
+            ? { stroke_offsets_ms: structuredClone(core.strokeOffsets[pageStrokes[1] ?? '']) }
+            : {}),
         });
       }
 

@@ -172,8 +172,8 @@
     },
     "Settings": {
       "type": "object",
-      "description": "GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.",
-      "required": ["general", "lecture", "pen", "data", "ai"],
+      "description": "GET /settings: alle Bereiche (Phase 1, ai nach VERTRAEGE §20.7 und learning nach §21.9), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.",
+      "required": ["general", "lecture", "pen", "data", "ai", "learning"],
       "additionalProperties": false,
       "properties": {
         "general": {
@@ -190,6 +190,9 @@
         },
         "ai": {
           "$ref": "#/$defs/AiSettings"
+        },
+        "learning": {
+          "$ref": "#/$defs/LearningSettings"
         }
       }
     },
@@ -321,6 +324,9 @@
         },
         "ai": {
           "$ref": "#/$defs/AiSettingsUpdate"
+        },
+        "learning": {
+          "$ref": "#/$defs/LearningSettingsUpdate"
         }
       }
     },

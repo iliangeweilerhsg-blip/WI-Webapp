@@ -433,7 +433,7 @@ struct SchemaBundle: Codable {
     let transcriptWord: TranscriptWord?
     let transform: [Double]?
     let trashItem: TrashItem?
-    let trashKind: TrashKind?
+    let trashKind: TrashKindEnum?
     let trashList: TrashList?
     let trashParent: TrashParent?
     let trashRestoreResult: TrashRestoreResult?
@@ -1321,7 +1321,7 @@ extension SchemaBundle {
         transcriptWord: TranscriptWord?? = nil,
         transform: [Double]?? = nil,
         trashItem: TrashItem?? = nil,
-        trashKind: TrashKind?? = nil,
+        trashKind: TrashKindEnum?? = nil,
         trashList: TrashList?? = nil,
         trashParent: TrashParent?? = nil,
         trashRestoreResult: TrashRestoreResult?? = nil,
@@ -10021,6 +10021,10 @@ struct Marker: Codable {
     let sessionID: String
     let source: MarkerSource
     let tMS: Int
+    /// Sitzungszeit nach Serveruhr (VERTRAEGE §9.3): t_ms + offset_ms des Geräts aus
+    /// session.start_offsets, nie unter 0. Ohne Eintrag gleich t_ms. Nur in Antworten des Core
+    /// (Snapshot), fehlt bei älteren Cores: dann gilt t_ms
+    let tSessionMS: Int?
     let updatedAt: Date
     let userID: String
 
@@ -10036,6 +10040,7 @@ struct Marker: Codable {
         case sessionID = "session_id"
         case source = "source"
         case tMS = "t_ms"
+        case tSessionMS = "t_session_ms"
         case updatedAt = "updated_at"
         case userID = "user_id"
     }
@@ -10071,6 +10076,7 @@ extension Marker {
         sessionID: String? = nil,
         source: MarkerSource? = nil,
         tMS: Int? = nil,
+        tSessionMS: Int?? = nil,
         updatedAt: Date? = nil,
         userID: String? = nil
     ) -> Marker {
@@ -10086,6 +10092,7 @@ extension Marker {
             sessionID: sessionID ?? self.sessionID,
             source: source ?? self.source,
             tMS: tMS ?? self.tMS,
+            tSessionMS: tSessionMS ?? self.tSessionMS,
             updatedAt: updatedAt ?? self.updatedAt,
             userID: userID ?? self.userID
         )
@@ -15559,12 +15566,18 @@ struct PageStrokes: Codable {
     let streamOpID: String?
     /// seq des Stroms notebook:<id> zu diesem Stand
     let streamSeq: Int
+    /// Geräteversatz je Strich (client_id → offset_ms aus session.start_offsets der Session der
+    /// Seite, VERTRAEGE §9.3). Nur Striche mit Versatz ≠ 0 und t_start_ms ≠ null. Sitzungszeit
+    /// nach Serveruhr = max(0, t_start_ms + Versatz), ebenso t_end_ms. Fehlt das Feld (älterer
+    /// Core) oder der Strich darin, ist der Versatz 0. Nur in Antworten des Core
+    let strokeOffsetsMS: [String: Int]?
     let strokes: [Stroke]
 
     enum CodingKeys: String, CodingKey {
         case pageID = "page_id"
         case streamOpID = "stream_op_id"
         case streamSeq = "stream_seq"
+        case strokeOffsetsMS = "stroke_offsets_ms"
         case strokes = "strokes"
     }
 }
@@ -15591,12 +15604,14 @@ extension PageStrokes {
         pageID: String? = nil,
         streamOpID: String?? = nil,
         streamSeq: Int? = nil,
+        strokeOffsetsMS: [String: Int]?? = nil,
         strokes: [Stroke]? = nil
     ) -> PageStrokes {
         return PageStrokes(
             pageID: pageID ?? self.pageID,
             streamOpID: streamOpID ?? self.streamOpID,
             streamSeq: streamSeq ?? self.streamSeq,
+            strokeOffsetsMS: strokeOffsetsMS ?? self.strokeOffsetsMS,
             strokes: strokes ?? self.strokes
         )
     }
@@ -16660,6 +16675,10 @@ struct Photo: Codable {
     let sha256: String
     let sizeBytes: Int
     let tMS: Int
+    /// Sitzungszeit nach Serveruhr (VERTRAEGE §9.3): t_ms + offset_ms des Geräts aus
+    /// session.start_offsets, nie unter 0. Ohne Eintrag gleich t_ms. Nur in Antworten des Core
+    /// (Snapshot, GET /photos/{id}), fehlt bei älteren Cores: dann gilt t_ms
+    let tSessionMS: Int?
     let updatedAt: Date
     let userID: String
 
@@ -16675,6 +16694,7 @@ struct Photo: Codable {
         case sha256 = "sha256"
         case sizeBytes = "size_bytes"
         case tMS = "t_ms"
+        case tSessionMS = "t_session_ms"
         case updatedAt = "updated_at"
         case userID = "user_id"
     }
@@ -16710,6 +16730,7 @@ extension Photo {
         sha256: String? = nil,
         sizeBytes: Int? = nil,
         tMS: Int? = nil,
+        tSessionMS: Int?? = nil,
         updatedAt: Date? = nil,
         userID: String? = nil
     ) -> Photo {
@@ -16725,6 +16746,7 @@ extension Photo {
             sha256: sha256 ?? self.sha256,
             sizeBytes: sizeBytes ?? self.sizeBytes,
             tMS: tMS ?? self.tMS,
+            tSessionMS: tSessionMS ?? self.tSessionMS,
             updatedAt: updatedAt ?? self.updatedAt,
             userID: userID ?? self.userID
         )
@@ -18544,8 +18566,9 @@ extension Session {
 
 /// Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at
 /// des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben
-/// unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase
-/// 2).
+/// unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms. Der Core liefert sie
+/// umgerechnet mit (Marker.t_session_ms, Photo.t_session_ms, PageStrokes.stroke_offsets_ms,
+/// VERTRAEGE §9.3).
 // MARK: - SessionStartOffset
 struct SessionStartOffset: Codable {
     let deviceID: String
@@ -20481,13 +20504,14 @@ extension SessionUpdate {
     }
 }
 
-/// GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit
-/// Standard aufgefüllt. Geräte stehen unter /devices.
+/// GET /settings: alle Bereiche (Phase 1, ai nach VERTRAEGE §20.7 und learning nach §21.9),
+/// fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
 // MARK: - Settings
 struct Settings: Codable {
     let ai: AISettings
     let data: DataSettings
     let general: GeneralSettings
+    let learning: LearningSettings
     let lecture: LectureSettings
     let pen: PenSettings
 
@@ -20495,6 +20519,7 @@ struct Settings: Codable {
         case ai = "ai"
         case data = "data"
         case general = "general"
+        case learning = "learning"
         case lecture = "lecture"
         case pen = "pen"
     }
@@ -20522,6 +20547,7 @@ extension Settings {
         ai: AISettings? = nil,
         data: DataSettings? = nil,
         general: GeneralSettings? = nil,
+        learning: LearningSettings? = nil,
         lecture: LectureSettings? = nil,
         pen: PenSettings? = nil
     ) -> Settings {
@@ -20529,6 +20555,7 @@ extension Settings {
             ai: ai ?? self.ai,
             data: data ?? self.data,
             general: general ?? self.general,
+            learning: learning ?? self.learning,
             lecture: lecture ?? self.lecture,
             pen: pen ?? self.pen
         )
@@ -20549,6 +20576,7 @@ struct SettingsUpdate: Codable {
     let ai: AISettingsUpdate?
     let data: DataSettingsUpdate?
     let general: GeneralSettingsUpdate?
+    let learning: LearningSettingsUpdate?
     let lecture: LectureSettingsUpdate?
     let pen: PenSettingsUpdate?
 
@@ -20556,6 +20584,7 @@ struct SettingsUpdate: Codable {
         case ai = "ai"
         case data = "data"
         case general = "general"
+        case learning = "learning"
         case lecture = "lecture"
         case pen = "pen"
     }
@@ -20583,6 +20612,7 @@ extension SettingsUpdate {
         ai: AISettingsUpdate?? = nil,
         data: DataSettingsUpdate?? = nil,
         general: GeneralSettingsUpdate?? = nil,
+        learning: LearningSettingsUpdate?? = nil,
         lecture: LectureSettingsUpdate?? = nil,
         pen: PenSettingsUpdate?? = nil
     ) -> SettingsUpdate {
@@ -20590,6 +20620,7 @@ extension SettingsUpdate {
             ai: ai ?? self.ai,
             data: data ?? self.data,
             general: general ?? self.general,
+            learning: learning ?? self.learning,
             lecture: lecture ?? self.lecture,
             pen: pen ?? self.pen
         )
@@ -25135,7 +25166,7 @@ struct TrashItem: Codable {
     /// werden mitgelöscht und mitwiederhergestellt, aber nicht mitgezählt (VERTRAEGE §13)
     let dependentCount: Int
     let id: String
-    let kind: TrashKind
+    let kind: TrashKindEnum
     let parent: TrashParent?
     let purgeAt: Date
     /// Anzeigename (Titel, Name oder z. B. „Seite 3")
@@ -25174,7 +25205,7 @@ extension TrashItem {
         deletedAt: Date? = nil,
         dependentCount: Int? = nil,
         id: String? = nil,
-        kind: TrashKind? = nil,
+        kind: TrashKindEnum? = nil,
         parent: TrashParent?? = nil,
         purgeAt: Date? = nil,
         title: String? = nil
@@ -25199,8 +25230,9 @@ extension TrashItem {
     }
 }
 
-enum TrashKind: String, Codable {
+enum TrashKindEnum: String, Codable {
     case calendarSource = "calendar_source"
+    case card = "card"
     case exerciseSheet = "exercise_sheet"
     case marker = "marker"
     case module = "module"
@@ -25215,7 +25247,9 @@ enum TrashKind: String, Codable {
 // MARK: - TrashParent
 struct TrashParent: Codable {
     let id: String
-    let kind: TrashKind
+    /// Art des Elternobjekts. Bei einer Karte das Konzept (kein eigener TrashKind, VERTRAEGE
+    /// §21.8)
+    let kind: TrashParentKind
     let title: String
 
     enum CodingKeys: String, CodingKey {
@@ -25245,7 +25279,7 @@ extension TrashParent {
 
     func with(
         id: String? = nil,
-        kind: TrashKind? = nil,
+        kind: TrashParentKind? = nil,
         title: String? = nil
     ) -> TrashParent {
         return TrashParent(
@@ -25262,6 +25296,23 @@ extension TrashParent {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// Art des Elternobjekts. Bei einer Karte das Konzept (kein eigener TrashKind, VERTRAEGE
+/// §21.8)
+enum TrashParentKind: String, Codable {
+    case calendarSource = "calendar_source"
+    case card = "card"
+    case concept = "concept"
+    case exerciseSheet = "exercise_sheet"
+    case marker = "marker"
+    case module = "module"
+    case notebook = "notebook"
+    case page = "page"
+    case photo = "photo"
+    case semester = "semester"
+    case session = "session"
+    case slideDeck = "slide_deck"
 }
 
 // MARK: - TrashList
@@ -25316,7 +25367,7 @@ extension TrashList {
 // MARK: - TrashRestoreResult
 struct TrashRestoreResult: Codable {
     let id: String
-    let kind: TrashKind
+    let kind: TrashKindEnum
     /// Alle wiederhergestellten Zeilen samt Objekt selbst, auch Maschinenausgaben (anders als
     /// dependent_count, VERTRAEGE §13)
     let restoredCount: Int
@@ -25348,7 +25399,7 @@ extension TrashRestoreResult {
 
     func with(
         id: String? = nil,
-        kind: TrashKind? = nil,
+        kind: TrashKindEnum? = nil,
         restoredCount: Int? = nil
     ) -> TrashRestoreResult {
         return TrashRestoreResult(
@@ -27127,6 +27178,7 @@ extension Marker {
         try container.encode(sessionID, forKey: .sessionID)
         try container.encode(source, forKey: .source)
         try container.encode(tMS, forKey: .tMS)
+        try container.encodeIfPresent(tSessionMS, forKey: .tSessionMS)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(userID, forKey: .userID)
     }
@@ -28076,6 +28128,7 @@ extension PageStrokes {
         try container.encode(pageID, forKey: .pageID)
         try container.encode(streamOpID, forKey: .streamOpID)
         try container.encode(streamSeq, forKey: .streamSeq)
+        try container.encodeIfPresent(strokeOffsetsMS, forKey: .strokeOffsetsMS)
         try container.encode(strokes, forKey: .strokes)
     }
 }
@@ -28258,6 +28311,7 @@ extension Photo {
         try container.encode(sha256, forKey: .sha256)
         try container.encode(sizeBytes, forKey: .sizeBytes)
         try container.encode(tMS, forKey: .tMS)
+        try container.encodeIfPresent(tSessionMS, forKey: .tSessionMS)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(userID, forKey: .userID)
     }
@@ -28894,6 +28948,7 @@ extension Settings {
         try container.encode(ai, forKey: .ai)
         try container.encode(data, forKey: .data)
         try container.encode(general, forKey: .general)
+        try container.encode(learning, forKey: .learning)
         try container.encode(lecture, forKey: .lecture)
         try container.encode(pen, forKey: .pen)
     }
@@ -28905,6 +28960,7 @@ extension SettingsUpdate {
         try container.encodeIfPresent(ai, forKey: .ai)
         try container.encodeIfPresent(data, forKey: .data)
         try container.encodeIfPresent(general, forKey: .general)
+        try container.encodeIfPresent(learning, forKey: .learning)
         try container.encodeIfPresent(lecture, forKey: .lecture)
         try container.encodeIfPresent(pen, forKey: .pen)
     }

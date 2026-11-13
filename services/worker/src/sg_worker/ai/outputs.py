@@ -125,3 +125,37 @@ class SummaryWriteOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     sentences: list[SummarySentenceOut]
     outline: list[SummaryOutlineOut]
+
+
+# ---------- cards.generate/v1 (05 §P10, VERTRAEGE §21.6) ----------
+
+CARDS_GENERATE_PROMPT = "cards.generate/v1"
+
+CardKindOut = Literal["basic", "cloze"]
+
+
+class CardGapOut(BaseModel):
+    """Lösungen einer Lücke `{{cN::…}}` einer Lückentext-Karte."""
+
+    model_config = ConfigDict(extra="forbid")
+    gap: int = Field(description="Nummer N der Lücke, 1 bis 3")
+    solutions: list[str] = Field(
+        description="erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen"
+    )
+
+
+class CardOut(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: CardKindOut
+    front: str = Field(description="Vorderseite, bei cloze mit Lücken {{c1::Begriff}}")
+    answer: str | None = Field(description="Antwort einer basic-Karte, bei cloze null")
+    explanation: str | None = Field(description="kurze Erklärung einer basic-Karte, sonst null")
+    gaps: list[CardGapOut] = Field(description="Lösungen je Lücke bei cloze, bei basic leer")
+    evidence: list[str] = Field(
+        description="Nummern der Belege (E1, E2, …), aus denen die Antwort stammt"
+    )
+
+
+class CardsGenerateOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    cards: list[CardOut]
