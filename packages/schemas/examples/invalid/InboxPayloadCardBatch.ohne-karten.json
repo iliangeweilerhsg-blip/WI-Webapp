@@ -1,0 +1,9 @@
+{
+  "kind": "card_batch",
+  "concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e31",
+  "concept_name": "Dritte Normalform (3NF)",
+  "cards": [],
+  "input_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "prompt_version": "cards.generate/v1",
+  "model": "claude-sonnet-5-5"
+}

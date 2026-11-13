@@ -1,0 +1,29 @@
+{
+  "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e63",
+  "concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e31",
+  "content": {
+    "kind": "cloze",
+    "front": {
+      "text_md": "Eine Relation in 3NF ist immer auch in {{c1::2NF}}."
+    },
+    "back": {
+      "answers": {
+        "c1": ["2NF", "zweite Normalform"]
+      }
+    }
+  },
+  "sources": [
+    {
+      "kind": "transcript",
+      "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+      "t_start_ms": 2512000,
+      "t_end_ms": 2730000
+    },
+    {
+      "kind": "slide",
+      "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+      "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+      "slide_index": 14
+    }
+  ]
+}

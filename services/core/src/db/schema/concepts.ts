@@ -1,4 +1,4 @@
-// Wissen und Inbox (03 §7/§8, 05 §P7a/§P8/§P9, VERTRAEGE §20). Migration 0010_concepts.
+// Wissen und Inbox (03 §7/§8, 05 §P7a/§P8/§P9, VERTRAEGE §20). Migration 0010_concepts, `card_batch` mit 0012_cards (§21).
 //
 // Schreiber: der Worker (`concepts.resolve` legt Vorschläge, Belege und Inbox-Einträge an, `summary.write` die
 // Zusammenfassung) und der Core (Entscheidungen in der Inbox, §20.6). Konzepte gehören keinem Fach allein
@@ -220,6 +220,8 @@ export const inboxItem = pgTable(
     conceptId: uuid('concept_id').references(() => concept.id, { onDelete: 'cascade' }),
     targetConceptId: uuid('target_concept_id').references(() => concept.id, { onDelete: 'cascade' }),
     relationId: uuid('relation_id').references(() => conceptRelation.id, { onDelete: 'cascade' }),
+    /** nur `card_batch` (§21.7): Konzept, zu dem die Karten vorgeschlagen sind (Vorschlag oder aktiv) */
+    cardConceptId: uuid('card_concept_id').references(() => concept.id, { onDelete: 'cascade' }),
   },
   (t) => [
     index('inbox_item_open_idx')
@@ -233,13 +235,18 @@ export const inboxItem = pgTable(
       .on(t.relationId)
       .where(sql`${t.relationId} IS NOT NULL`),
     index('inbox_item_target_idx').on(t.targetConceptId),
-    check('inbox_item_kind_chk', sql`${t.kind} IN ('concept_new','concept_merge','relation')`),
+    // Je Konzept und Session höchstens ein Kartenvorschlag, auch ein entschiedener (§21.6)
+    uniqueIndex('inbox_item_card_batch_uq')
+      .on(t.cardConceptId, t.sessionId)
+      .where(sql`${t.cardConceptId} IS NOT NULL`),
+    check('inbox_item_kind_chk', sql`${t.kind} IN ('concept_new','concept_merge','relation','card_batch')`),
     check('inbox_item_status_chk', sql`${t.status} IN ('offen','angenommen','abgelehnt','automatisch')`),
     check(
       'inbox_item_refs_chk',
-      sql`(${t.kind} = 'concept_new' AND ${t.conceptId} IS NOT NULL AND ${t.targetConceptId} IS NULL AND ${t.relationId} IS NULL)
-        OR (${t.kind} = 'concept_merge' AND ${t.conceptId} IS NOT NULL AND ${t.targetConceptId} IS NOT NULL AND ${t.relationId} IS NULL)
-        OR (${t.kind} = 'relation' AND ${t.relationId} IS NOT NULL AND ${t.conceptId} IS NULL AND ${t.targetConceptId} IS NULL)`,
+      sql`(${t.kind} = 'concept_new' AND ${t.conceptId} IS NOT NULL AND ${t.targetConceptId} IS NULL AND ${t.relationId} IS NULL AND ${t.cardConceptId} IS NULL)
+        OR (${t.kind} = 'concept_merge' AND ${t.conceptId} IS NOT NULL AND ${t.targetConceptId} IS NOT NULL AND ${t.relationId} IS NULL AND ${t.cardConceptId} IS NULL)
+        OR (${t.kind} = 'relation' AND ${t.relationId} IS NOT NULL AND ${t.conceptId} IS NULL AND ${t.targetConceptId} IS NULL AND ${t.cardConceptId} IS NULL)
+        OR (${t.kind} = 'card_batch' AND ${t.cardConceptId} IS NOT NULL AND ${t.sessionId} IS NOT NULL AND ${t.conceptId} IS NULL AND ${t.targetConceptId} IS NULL AND ${t.relationId} IS NULL)`,
     ),
     check(
       'inbox_item_decided_chk',

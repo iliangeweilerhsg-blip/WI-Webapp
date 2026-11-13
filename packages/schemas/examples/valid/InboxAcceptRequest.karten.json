@@ -1,0 +1,22 @@
+{
+  "cards": [
+    {
+      "key": "k1",
+      "accept": true,
+      "content": {
+        "kind": "basic",
+        "front": {
+          "text_md": "Wann ist eine Relation in dritter Normalform?"
+        },
+        "back": {
+          "text_md": "In 2NF und ohne transitive Abhängigkeiten.",
+          "explanation_md": null
+        }
+      }
+    },
+    {
+      "key": "k2",
+      "accept": false
+    }
+  ]
+}

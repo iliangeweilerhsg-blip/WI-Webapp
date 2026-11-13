@@ -1,0 +1,140 @@
+{
+  "item": {
+    "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e81",
+    "created_at": "2026-11-05T14:18:00Z",
+    "updated_at": "2026-11-05T15:01:00Z",
+    "kind": "card_batch",
+    "status": "angenommen",
+    "session": {
+      "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+      "number": 7,
+      "title": "Normalformen",
+      "started_at": "2026-11-05T12:15:00Z",
+      "module": {
+        "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e02",
+        "name": "Datenbanksysteme",
+        "short_name": "DBS"
+      }
+    },
+    "job_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e23",
+    "priority": 2000,
+    "decided_at": "2026-11-05T15:01:00Z",
+    "payload": {
+      "kind": "card_batch",
+      "concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e31",
+      "concept_name": "Dritte Normalform (3NF)",
+      "cards": [
+        {
+          "key": "k1",
+          "content": {
+            "kind": "basic",
+            "front": {
+              "text_md": "Wann ist eine Relation in dritter Normalform?"
+            },
+            "back": {
+              "text_md": "Wenn sie in 2NF ist und kein Nichtschlüsselattribut transitiv vom Schlüssel abhängt.",
+              "explanation_md": "Transitive Abhängigkeiten wandern in eine eigene Tabelle."
+            }
+          },
+          "sources": [
+            {
+              "kind": "slide",
+              "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+              "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+              "slide_index": 14
+            },
+            {
+              "kind": "transcript",
+              "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+              "t_start_ms": 2512000,
+              "t_end_ms": 2730000
+            }
+          ]
+        },
+        {
+          "key": "k2",
+          "content": {
+            "kind": "cloze",
+            "front": {
+              "text_md": "Eine Relation in 3NF ist immer auch in {{c1::2NF}}."
+            },
+            "back": {
+              "answers": {
+                "c1": ["2NF", "zweite Normalform"]
+              }
+            }
+          },
+          "sources": [
+            {
+              "kind": "slide",
+              "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+              "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+              "slide_index": 14
+            }
+          ]
+        }
+      ],
+      "input_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "prompt_version": "cards.generate/v1",
+      "model": "claude-sonnet-5-5"
+    },
+    "concept_id": null,
+    "target_concept_id": null,
+    "relation_id": null,
+    "blocked": null
+  },
+  "concept": null,
+  "cards": [
+    {
+      "id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e61",
+      "created_at": "2026-11-05T14:20:00Z",
+      "updated_at": "2026-11-05T14:20:00Z",
+      "concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e31",
+      "stage": 2,
+      "origin": "ki",
+      "suspended": false,
+      "content": {
+        "kind": "basic",
+        "front": {
+          "text_md": "Wann ist eine Relation in dritter Normalform?"
+        },
+        "back": {
+          "text_md": "Wenn sie in 2NF ist und kein Nichtschlüsselattribut transitiv vom Schlüssel abhängt.",
+          "explanation_md": "Transitive Abhängigkeiten wandern in eine eigene Tabelle."
+        }
+      },
+      "sources": [
+        {
+          "ref": {
+            "kind": "slide",
+            "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+            "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+            "slide_index": 14
+          },
+          "missing": false
+        },
+        {
+          "ref": {
+            "kind": "transcript",
+            "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+            "t_start_ms": 2512000,
+            "t_end_ms": 2730000
+          },
+          "missing": false
+        }
+      ],
+      "state": {
+        "state": "new",
+        "due": "2026-11-05T14:20:00Z",
+        "stability": 0,
+        "difficulty": 0,
+        "elapsed_days": 0,
+        "scheduled_days": 0,
+        "learning_steps": 0,
+        "reps": 0,
+        "lapses": 0,
+        "last_review": null
+      }
+    }
+  ]
+}

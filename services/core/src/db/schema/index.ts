@@ -10,3 +10,4 @@ export * from './moodle.ts';
 export * from './transcript.ts';
 export * from './search.ts';
 export * from './concepts.ts';
+export * from './learning.ts';

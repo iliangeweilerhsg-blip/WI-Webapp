@@ -44,6 +44,24 @@ struct SchemaBundle: Codable {
     let calendarSourceKind: CalendarSourceKind?
     let calendarSourceList: CalendarSourceList?
     let calendarUpdateScope: CalendarUpdateScope?
+    let card: Card?
+    let cardBackBasic: CardBackBasic?
+    let cardBackCloze: CardBackCloze?
+    let cardClozeAnswers: CardClozeAnswers?
+    let cardContent: CardContent?
+    let cardContentBasic: CardContentBasic?
+    let cardContentCloze: CardContentCloze?
+    let cardCreate: CardCreate?
+    let cardFrontText: CardFrontText?
+    let cardKind: CardKind?
+    let cardList: CardList?
+    let cardOrigin: CardOrigin?
+    let cardProposal: CardProposal?
+    let cardsGeneratePayload: CardsGeneratePayload?
+    let cardsGenerateResult: CardsGenerateResult?
+    let cardSource: CardSource?
+    let cardState: CardState?
+    let cardUpdate: CardUpdate?
     let clientDevice: ClientDevice?
     let columnWidths: [Double]?
     let concept: Concept?
@@ -92,6 +110,7 @@ struct SchemaBundle: Codable {
     let extractedRelation: ExtractedRelation?
     let fileReceipt: FileReceipt?
     let fileRef: FileRef?
+    let fsrsState: FsrsState?
     let generalSettings: GeneralSettings?
     let generalSettingsUpdate: GeneralSettingsUpdate?
     let health: Health?
@@ -107,6 +126,9 @@ struct SchemaBundle: Codable {
     let inboxBlockedReason: InboxBlockedReason?
     let inboxBulkRequest: InboxBulkRequest?
     let inboxBulkResult: InboxBulkResult?
+    let inboxCardChoice: InboxCardChoice?
+    let inboxCardOutcome: InboxCardOutcome?
+    let inboxCardOutcomeKind: InboxCardOutcomeKind?
     let inboxDecision: InboxDecision?
     let inboxDecisionResult: InboxDecisionResult?
     let inboxItem: InboxItem?
@@ -115,6 +137,7 @@ struct SchemaBundle: Codable {
     let inboxOverview: InboxOverview?
     let inboxOverviewSession: InboxOverviewSession?
     let inboxPayload: InboxPayload?
+    let inboxPayloadCardBatch: InboxPayloadCardBatch?
     let inboxPayloadConceptMerge: InboxPayloadConceptMerge?
     let inboxPayloadConceptNew: InboxPayloadConceptNew?
     let inboxPayloadRelation: InboxPayloadRelation?
@@ -129,6 +152,8 @@ struct SchemaBundle: Codable {
     let jobType: JobType?
     let lang: Lang?
     let languageCode: String?
+    let learningSettings: LearningSettings?
+    let learningSettingsUpdate: LearningSettingsUpdate?
     let lectureSettings: LectureSettings?
     let lectureSettingsUpdate: LectureSettingsUpdate?
     let llmIssue: LlmIssue?
@@ -273,6 +298,14 @@ struct SchemaBundle: Codable {
     let restoreTestReason: RestoreTestReason?
     let restoreTestState: RestoreTestState?
     let restoreTestTrigger: RestoreTestTrigger?
+    let reviewConceptRef: ReviewConceptRef?
+    let reviewLogEntry: ReviewLogEntry?
+    let reviewQueue: ReviewQueue?
+    let reviewQueueGroup: ReviewQueueGroup?
+    let reviewQueueItem: ReviewQueueItem?
+    let reviewRating: Int?
+    let reviewRequest: ReviewRequest?
+    let reviewResult: ReviewResult?
     let reviewState: ReviewState?
     let searchDegraded: SearchDegraded?
     let searchHit: SearchHit?
@@ -445,6 +478,24 @@ struct SchemaBundle: Codable {
         case calendarSourceKind = "CalendarSourceKind"
         case calendarSourceList = "CalendarSourceList"
         case calendarUpdateScope = "CalendarUpdateScope"
+        case card = "Card"
+        case cardBackBasic = "CardBackBasic"
+        case cardBackCloze = "CardBackCloze"
+        case cardClozeAnswers = "CardClozeAnswers"
+        case cardContent = "CardContent"
+        case cardContentBasic = "CardContentBasic"
+        case cardContentCloze = "CardContentCloze"
+        case cardCreate = "CardCreate"
+        case cardFrontText = "CardFrontText"
+        case cardKind = "CardKind"
+        case cardList = "CardList"
+        case cardOrigin = "CardOrigin"
+        case cardProposal = "CardProposal"
+        case cardsGeneratePayload = "CardsGeneratePayload"
+        case cardsGenerateResult = "CardsGenerateResult"
+        case cardSource = "CardSource"
+        case cardState = "CardState"
+        case cardUpdate = "CardUpdate"
         case clientDevice = "ClientDevice"
         case columnWidths = "ColumnWidths"
         case concept = "Concept"
@@ -493,6 +544,7 @@ struct SchemaBundle: Codable {
         case extractedRelation = "ExtractedRelation"
         case fileReceipt = "FileReceipt"
         case fileRef = "FileRef"
+        case fsrsState = "FsrsState"
         case generalSettings = "GeneralSettings"
         case generalSettingsUpdate = "GeneralSettingsUpdate"
         case health = "Health"
@@ -508,6 +560,9 @@ struct SchemaBundle: Codable {
         case inboxBlockedReason = "InboxBlockedReason"
         case inboxBulkRequest = "InboxBulkRequest"
         case inboxBulkResult = "InboxBulkResult"
+        case inboxCardChoice = "InboxCardChoice"
+        case inboxCardOutcome = "InboxCardOutcome"
+        case inboxCardOutcomeKind = "InboxCardOutcomeKind"
         case inboxDecision = "InboxDecision"
         case inboxDecisionResult = "InboxDecisionResult"
         case inboxItem = "InboxItem"
@@ -516,6 +571,7 @@ struct SchemaBundle: Codable {
         case inboxOverview = "InboxOverview"
         case inboxOverviewSession = "InboxOverviewSession"
         case inboxPayload = "InboxPayload"
+        case inboxPayloadCardBatch = "InboxPayloadCardBatch"
         case inboxPayloadConceptMerge = "InboxPayloadConceptMerge"
         case inboxPayloadConceptNew = "InboxPayloadConceptNew"
         case inboxPayloadRelation = "InboxPayloadRelation"
@@ -530,6 +586,8 @@ struct SchemaBundle: Codable {
         case jobType = "JobType"
         case lang = "Lang"
         case languageCode = "LanguageCode"
+        case learningSettings = "LearningSettings"
+        case learningSettingsUpdate = "LearningSettingsUpdate"
         case lectureSettings = "LectureSettings"
         case lectureSettingsUpdate = "LectureSettingsUpdate"
         case llmIssue = "LlmIssue"
@@ -674,6 +732,14 @@ struct SchemaBundle: Codable {
         case restoreTestReason = "RestoreTestReason"
         case restoreTestState = "RestoreTestState"
         case restoreTestTrigger = "RestoreTestTrigger"
+        case reviewConceptRef = "ReviewConceptRef"
+        case reviewLogEntry = "ReviewLogEntry"
+        case reviewQueue = "ReviewQueue"
+        case reviewQueueGroup = "ReviewQueueGroup"
+        case reviewQueueItem = "ReviewQueueItem"
+        case reviewRating = "ReviewRating"
+        case reviewRequest = "ReviewRequest"
+        case reviewResult = "ReviewResult"
         case reviewState = "ReviewState"
         case searchDegraded = "SearchDegraded"
         case searchHit = "SearchHit"
@@ -866,6 +932,24 @@ extension SchemaBundle {
         calendarSourceKind: CalendarSourceKind?? = nil,
         calendarSourceList: CalendarSourceList?? = nil,
         calendarUpdateScope: CalendarUpdateScope?? = nil,
+        card: Card?? = nil,
+        cardBackBasic: CardBackBasic?? = nil,
+        cardBackCloze: CardBackCloze?? = nil,
+        cardClozeAnswers: CardClozeAnswers?? = nil,
+        cardContent: CardContent?? = nil,
+        cardContentBasic: CardContentBasic?? = nil,
+        cardContentCloze: CardContentCloze?? = nil,
+        cardCreate: CardCreate?? = nil,
+        cardFrontText: CardFrontText?? = nil,
+        cardKind: CardKind?? = nil,
+        cardList: CardList?? = nil,
+        cardOrigin: CardOrigin?? = nil,
+        cardProposal: CardProposal?? = nil,
+        cardsGeneratePayload: CardsGeneratePayload?? = nil,
+        cardsGenerateResult: CardsGenerateResult?? = nil,
+        cardSource: CardSource?? = nil,
+        cardState: CardState?? = nil,
+        cardUpdate: CardUpdate?? = nil,
         clientDevice: ClientDevice?? = nil,
         columnWidths: [Double]?? = nil,
         concept: Concept?? = nil,
@@ -914,6 +998,7 @@ extension SchemaBundle {
         extractedRelation: ExtractedRelation?? = nil,
         fileReceipt: FileReceipt?? = nil,
         fileRef: FileRef?? = nil,
+        fsrsState: FsrsState?? = nil,
         generalSettings: GeneralSettings?? = nil,
         generalSettingsUpdate: GeneralSettingsUpdate?? = nil,
         health: Health?? = nil,
@@ -929,6 +1014,9 @@ extension SchemaBundle {
         inboxBlockedReason: InboxBlockedReason?? = nil,
         inboxBulkRequest: InboxBulkRequest?? = nil,
         inboxBulkResult: InboxBulkResult?? = nil,
+        inboxCardChoice: InboxCardChoice?? = nil,
+        inboxCardOutcome: InboxCardOutcome?? = nil,
+        inboxCardOutcomeKind: InboxCardOutcomeKind?? = nil,
         inboxDecision: InboxDecision?? = nil,
         inboxDecisionResult: InboxDecisionResult?? = nil,
         inboxItem: InboxItem?? = nil,
@@ -937,6 +1025,7 @@ extension SchemaBundle {
         inboxOverview: InboxOverview?? = nil,
         inboxOverviewSession: InboxOverviewSession?? = nil,
         inboxPayload: InboxPayload?? = nil,
+        inboxPayloadCardBatch: InboxPayloadCardBatch?? = nil,
         inboxPayloadConceptMerge: InboxPayloadConceptMerge?? = nil,
         inboxPayloadConceptNew: InboxPayloadConceptNew?? = nil,
         inboxPayloadRelation: InboxPayloadRelation?? = nil,
@@ -951,6 +1040,8 @@ extension SchemaBundle {
         jobType: JobType?? = nil,
         lang: Lang?? = nil,
         languageCode: String?? = nil,
+        learningSettings: LearningSettings?? = nil,
+        learningSettingsUpdate: LearningSettingsUpdate?? = nil,
         lectureSettings: LectureSettings?? = nil,
         lectureSettingsUpdate: LectureSettingsUpdate?? = nil,
         llmIssue: LlmIssue?? = nil,
@@ -1095,6 +1186,14 @@ extension SchemaBundle {
         restoreTestReason: RestoreTestReason?? = nil,
         restoreTestState: RestoreTestState?? = nil,
         restoreTestTrigger: RestoreTestTrigger?? = nil,
+        reviewConceptRef: ReviewConceptRef?? = nil,
+        reviewLogEntry: ReviewLogEntry?? = nil,
+        reviewQueue: ReviewQueue?? = nil,
+        reviewQueueGroup: ReviewQueueGroup?? = nil,
+        reviewQueueItem: ReviewQueueItem?? = nil,
+        reviewRating: Int?? = nil,
+        reviewRequest: ReviewRequest?? = nil,
+        reviewResult: ReviewResult?? = nil,
         reviewState: ReviewState?? = nil,
         searchDegraded: SearchDegraded?? = nil,
         searchHit: SearchHit?? = nil,
@@ -1267,6 +1366,24 @@ extension SchemaBundle {
             calendarSourceKind: calendarSourceKind ?? self.calendarSourceKind,
             calendarSourceList: calendarSourceList ?? self.calendarSourceList,
             calendarUpdateScope: calendarUpdateScope ?? self.calendarUpdateScope,
+            card: card ?? self.card,
+            cardBackBasic: cardBackBasic ?? self.cardBackBasic,
+            cardBackCloze: cardBackCloze ?? self.cardBackCloze,
+            cardClozeAnswers: cardClozeAnswers ?? self.cardClozeAnswers,
+            cardContent: cardContent ?? self.cardContent,
+            cardContentBasic: cardContentBasic ?? self.cardContentBasic,
+            cardContentCloze: cardContentCloze ?? self.cardContentCloze,
+            cardCreate: cardCreate ?? self.cardCreate,
+            cardFrontText: cardFrontText ?? self.cardFrontText,
+            cardKind: cardKind ?? self.cardKind,
+            cardList: cardList ?? self.cardList,
+            cardOrigin: cardOrigin ?? self.cardOrigin,
+            cardProposal: cardProposal ?? self.cardProposal,
+            cardsGeneratePayload: cardsGeneratePayload ?? self.cardsGeneratePayload,
+            cardsGenerateResult: cardsGenerateResult ?? self.cardsGenerateResult,
+            cardSource: cardSource ?? self.cardSource,
+            cardState: cardState ?? self.cardState,
+            cardUpdate: cardUpdate ?? self.cardUpdate,
             clientDevice: clientDevice ?? self.clientDevice,
             columnWidths: columnWidths ?? self.columnWidths,
             concept: concept ?? self.concept,
@@ -1315,6 +1432,7 @@ extension SchemaBundle {
             extractedRelation: extractedRelation ?? self.extractedRelation,
             fileReceipt: fileReceipt ?? self.fileReceipt,
             fileRef: fileRef ?? self.fileRef,
+            fsrsState: fsrsState ?? self.fsrsState,
             generalSettings: generalSettings ?? self.generalSettings,
             generalSettingsUpdate: generalSettingsUpdate ?? self.generalSettingsUpdate,
             health: health ?? self.health,
@@ -1330,6 +1448,9 @@ extension SchemaBundle {
             inboxBlockedReason: inboxBlockedReason ?? self.inboxBlockedReason,
             inboxBulkRequest: inboxBulkRequest ?? self.inboxBulkRequest,
             inboxBulkResult: inboxBulkResult ?? self.inboxBulkResult,
+            inboxCardChoice: inboxCardChoice ?? self.inboxCardChoice,
+            inboxCardOutcome: inboxCardOutcome ?? self.inboxCardOutcome,
+            inboxCardOutcomeKind: inboxCardOutcomeKind ?? self.inboxCardOutcomeKind,
             inboxDecision: inboxDecision ?? self.inboxDecision,
             inboxDecisionResult: inboxDecisionResult ?? self.inboxDecisionResult,
             inboxItem: inboxItem ?? self.inboxItem,
@@ -1338,6 +1459,7 @@ extension SchemaBundle {
             inboxOverview: inboxOverview ?? self.inboxOverview,
             inboxOverviewSession: inboxOverviewSession ?? self.inboxOverviewSession,
             inboxPayload: inboxPayload ?? self.inboxPayload,
+            inboxPayloadCardBatch: inboxPayloadCardBatch ?? self.inboxPayloadCardBatch,
             inboxPayloadConceptMerge: inboxPayloadConceptMerge ?? self.inboxPayloadConceptMerge,
             inboxPayloadConceptNew: inboxPayloadConceptNew ?? self.inboxPayloadConceptNew,
             inboxPayloadRelation: inboxPayloadRelation ?? self.inboxPayloadRelation,
@@ -1352,6 +1474,8 @@ extension SchemaBundle {
             jobType: jobType ?? self.jobType,
             lang: lang ?? self.lang,
             languageCode: languageCode ?? self.languageCode,
+            learningSettings: learningSettings ?? self.learningSettings,
+            learningSettingsUpdate: learningSettingsUpdate ?? self.learningSettingsUpdate,
             lectureSettings: lectureSettings ?? self.lectureSettings,
             lectureSettingsUpdate: lectureSettingsUpdate ?? self.lectureSettingsUpdate,
             llmIssue: llmIssue ?? self.llmIssue,
@@ -1496,6 +1620,14 @@ extension SchemaBundle {
             restoreTestReason: restoreTestReason ?? self.restoreTestReason,
             restoreTestState: restoreTestState ?? self.restoreTestState,
             restoreTestTrigger: restoreTestTrigger ?? self.restoreTestTrigger,
+            reviewConceptRef: reviewConceptRef ?? self.reviewConceptRef,
+            reviewLogEntry: reviewLogEntry ?? self.reviewLogEntry,
+            reviewQueue: reviewQueue ?? self.reviewQueue,
+            reviewQueueGroup: reviewQueueGroup ?? self.reviewQueueGroup,
+            reviewQueueItem: reviewQueueItem ?? self.reviewQueueItem,
+            reviewRating: reviewRating ?? self.reviewRating,
+            reviewRequest: reviewRequest ?? self.reviewRequest,
+            reviewResult: reviewResult ?? self.reviewResult,
             reviewState: reviewState ?? self.reviewState,
             searchDegraded: searchDegraded ?? self.searchDegraded,
             searchHit: searchHit ?? self.searchHit,
@@ -3338,6 +3470,1146 @@ extension CalendarSourceList {
     }
 }
 
+/// Karte (03 §9) mit Zustand. Gehört zu genau einem aktiven Konzept
+// MARK: - Card
+struct Card: Codable {
+    let conceptID: String
+    let content: CardContent
+    let createdAt: Date
+    let id: String
+    let origin: CardOrigin
+    let sources: [CardSource]
+    /// Lernstufe (F-LRN-01). basic und cloze: 2
+    let stage: Int
+    let state: CardState
+    /// true: pausiert, kommt nicht in die Warteschlange
+    let suspended: Bool
+    let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case conceptID = "concept_id"
+        case content = "content"
+        case createdAt = "created_at"
+        case id = "id"
+        case origin = "origin"
+        case sources = "sources"
+        case stage = "stage"
+        case state = "state"
+        case suspended = "suspended"
+        case updatedAt = "updated_at"
+    }
+}
+
+// MARK: Card convenience initializers and mutators
+
+extension Card {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(Card.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        conceptID: String? = nil,
+        content: CardContent? = nil,
+        createdAt: Date? = nil,
+        id: String? = nil,
+        origin: CardOrigin? = nil,
+        sources: [CardSource]? = nil,
+        stage: Int? = nil,
+        state: CardState? = nil,
+        suspended: Bool? = nil,
+        updatedAt: Date? = nil
+    ) -> Card {
+        return Card(
+            conceptID: conceptID ?? self.conceptID,
+            content: content ?? self.content,
+            createdAt: createdAt ?? self.createdAt,
+            id: id ?? self.id,
+            origin: origin ?? self.origin,
+            sources: sources ?? self.sources,
+            stage: stage ?? self.stage,
+            state: state ?? self.state,
+            suspended: suspended ?? self.suspended,
+            updatedAt: updatedAt ?? self.updatedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Inhalt einer Karte nach 08 §6 (card.kind, card.front, card.back)
+///
+/// Frage und Antwort
+///
+/// Lückentext. Alle Lücken einer Karte werden zusammen verdeckt und aufgedeckt
+// MARK: - CardContent
+struct CardContent: Codable {
+    let back: CardBack
+    let front: CardFrontText
+    let kind: CardKind
+
+    enum CodingKeys: String, CodingKey {
+        case back = "back"
+        case front = "front"
+        case kind = "kind"
+    }
+}
+
+// MARK: CardContent convenience initializers and mutators
+
+extension CardContent {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardContent.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        back: CardBack? = nil,
+        front: CardFrontText? = nil,
+        kind: CardKind? = nil
+    ) -> CardContent {
+        return CardContent(
+            back: back ?? self.back,
+            front: front ?? self.front,
+            kind: kind ?? self.kind
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Rückseite einer basic-Karte (08 §6)
+///
+/// Rückseite einer cloze-Karte (08 §6)
+// MARK: - CardBack
+struct CardBack: Codable {
+    /// Erklärung unter der Antwort, null = keine
+    let explanationMd: String?
+    /// Antwort
+    let textMd: String?
+    let answers: CardClozeAnswers?
+
+    enum CodingKeys: String, CodingKey {
+        case explanationMd = "explanation_md"
+        case textMd = "text_md"
+        case answers = "answers"
+    }
+}
+
+// MARK: CardBack convenience initializers and mutators
+
+extension CardBack {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardBack.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        explanationMd: String?? = nil,
+        textMd: String?? = nil,
+        answers: CardClozeAnswers?? = nil
+    ) -> CardBack {
+        return CardBack(
+            explanationMd: explanationMd ?? self.explanationMd,
+            textMd: textMd ?? self.textMd,
+            answers: answers ?? self.answers
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Lösungen je Lücke. Genau die Schlüssel der Lücken im Text, lückenlos ab c1 (prüft der
+/// Schreiber, §21.2)
+// MARK: - CardClozeAnswers
+struct CardClozeAnswers: Codable {
+    /// erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen
+    let c1: [String]
+    /// erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen
+    let c2: [String]?
+    /// erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen
+    let c3: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case c1 = "c1"
+        case c2 = "c2"
+        case c3 = "c3"
+    }
+}
+
+// MARK: CardClozeAnswers convenience initializers and mutators
+
+extension CardClozeAnswers {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardClozeAnswers.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        c1: [String]? = nil,
+        c2: [String]?? = nil,
+        c3: [String]?? = nil
+    ) -> CardClozeAnswers {
+        return CardClozeAnswers(
+            c1: c1 ?? self.c1,
+            c2: c2 ?? self.c2,
+            c3: c3 ?? self.c3
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Vorderseite (08 §6). Reiner Text, bei cloze mit Lücken {{c1::Lösung}} (§21.2)
+// MARK: - CardFrontText
+struct CardFrontText: Codable {
+    let textMd: String
+
+    enum CodingKeys: String, CodingKey {
+        case textMd = "text_md"
+    }
+}
+
+// MARK: CardFrontText convenience initializers and mutators
+
+extension CardFrontText {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardFrontText.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        textMd: String? = nil
+    ) -> CardFrontText {
+        return CardFrontText(
+            textMd: textMd ?? self.textMd
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Kartentyp (F-LRN-01). Dieser Schnitt kennt nur basic und cloze (VERTRAEGE §21.2), weitere
+/// kommen später
+enum CardKind: String, Codable {
+    case basic = "basic"
+    case cloze = "cloze"
+}
+
+/// Herkunft einer Karte (03 §9): KI-Vorschlag aus der Inbox oder von Hand
+enum CardOrigin: String, Codable {
+    case ki = "ki"
+    case manuell = "manuell"
+}
+
+/// Beleg einer Karte mit Anzeigeangabe
+// MARK: - CardSource
+struct CardSource: Codable {
+    /// true: Ziel gelöscht (Folie, Foliensatz oder Session), nicht mehr anspringbar
+    let missing: Bool
+    let ref: EvidenceRef
+
+    enum CodingKeys: String, CodingKey {
+        case missing = "missing"
+        case ref = "ref"
+    }
+}
+
+// MARK: CardSource convenience initializers and mutators
+
+extension CardSource {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardSource.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        missing: Bool? = nil,
+        ref: EvidenceRef? = nil
+    ) -> CardSource {
+        return CardSource(
+            missing: missing ?? self.missing,
+            ref: ref ?? self.ref
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen
+/// typisierten Union erzeugt)
+///
+/// Beleg auf eine Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
+///
+/// Beleg auf einen Zeitraum des Gesagten (Sitzungszeit, §18.1). t_end_ms ≥ t_start_ms prüft
+/// der Schreiber. Ziel: /rueckblick?id=<session_id>&t=<t_start_ms>
+// MARK: - EvidenceRef
+struct EvidenceRef: Codable {
+    let deckID: String?
+    let kind: SearchKind
+    let slideID: String?
+    /// Index der Folie im Foliensatz, ab 1
+    let slideIndex: Int?
+    let sessionID: String?
+    let tEndMS: Int?
+    let tStartMS: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case deckID = "deck_id"
+        case kind = "kind"
+        case slideID = "slide_id"
+        case slideIndex = "slide_index"
+        case sessionID = "session_id"
+        case tEndMS = "t_end_ms"
+        case tStartMS = "t_start_ms"
+    }
+}
+
+// MARK: EvidenceRef convenience initializers and mutators
+
+extension EvidenceRef {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(EvidenceRef.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        deckID: String?? = nil,
+        kind: SearchKind? = nil,
+        slideID: String?? = nil,
+        slideIndex: Int?? = nil,
+        sessionID: String?? = nil,
+        tEndMS: Int?? = nil,
+        tStartMS: Int?? = nil
+    ) -> EvidenceRef {
+        return EvidenceRef(
+            deckID: deckID ?? self.deckID,
+            kind: kind ?? self.kind,
+            slideID: slideID ?? self.slideID,
+            slideIndex: slideIndex ?? self.slideIndex,
+            sessionID: sessionID ?? self.sessionID,
+            tEndMS: tEndMS ?? self.tEndMS,
+            tStartMS: tStartMS ?? self.tStartMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Art eines Sucheintrags (search_chunk.source_kind). Konzepte, Notizen, Aufgaben, Karten
+/// und Fotos kommen mit ihren Tickets als neue Werte dazu
+enum SearchKind: String, Codable {
+    case slide = "slide"
+    case transcript = "transcript"
+}
+
+/// FSRS-Zustand (Tabelle card_state, 1:1 zur Karte). Felder wie der Kartentyp von ts-fsrs
+// MARK: - CardState
+struct CardState: Codable {
+    let difficulty: Double
+    let due: Date
+    let elapsedDays: Int
+    let lapses: Int
+    let lastReview: Date?
+    /// Position in den Lernschritten von ts-fsrs
+    let learningSteps: Int
+    let reps: Int
+    let scheduledDays: Int
+    let stability: Double
+    let state: FsrsState
+
+    enum CodingKeys: String, CodingKey {
+        case difficulty = "difficulty"
+        case due = "due"
+        case elapsedDays = "elapsed_days"
+        case lapses = "lapses"
+        case lastReview = "last_review"
+        case learningSteps = "learning_steps"
+        case reps = "reps"
+        case scheduledDays = "scheduled_days"
+        case stability = "stability"
+        case state = "state"
+    }
+}
+
+// MARK: CardState convenience initializers and mutators
+
+extension CardState {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardState.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        difficulty: Double? = nil,
+        due: Date? = nil,
+        elapsedDays: Int? = nil,
+        lapses: Int? = nil,
+        lastReview: Date?? = nil,
+        learningSteps: Int? = nil,
+        reps: Int? = nil,
+        scheduledDays: Int? = nil,
+        stability: Double? = nil,
+        state: FsrsState? = nil
+    ) -> CardState {
+        return CardState(
+            difficulty: difficulty ?? self.difficulty,
+            due: due ?? self.due,
+            elapsedDays: elapsedDays ?? self.elapsedDays,
+            lapses: lapses ?? self.lapses,
+            lastReview: lastReview ?? self.lastReview,
+            learningSteps: learningSteps ?? self.learningSteps,
+            reps: reps ?? self.reps,
+            scheduledDays: scheduledDays ?? self.scheduledDays,
+            stability: stability ?? self.stability,
+            state: state ?? self.state
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// FSRS-Zustand einer Karte (03 §9, ts-fsrs)
+enum FsrsState: String, Codable {
+    case learning = "learning"
+    case new = "new"
+    case relearning = "relearning"
+    case review = "review"
+}
+
+/// Rückseite einer basic-Karte (08 §6)
+// MARK: - CardBackBasic
+struct CardBackBasic: Codable {
+    /// Erklärung unter der Antwort, null = keine
+    let explanationMd: String?
+    /// Antwort
+    let textMd: String
+
+    enum CodingKeys: String, CodingKey {
+        case explanationMd = "explanation_md"
+        case textMd = "text_md"
+    }
+}
+
+// MARK: CardBackBasic convenience initializers and mutators
+
+extension CardBackBasic {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardBackBasic.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        explanationMd: String?? = nil,
+        textMd: String? = nil
+    ) -> CardBackBasic {
+        return CardBackBasic(
+            explanationMd: explanationMd ?? self.explanationMd,
+            textMd: textMd ?? self.textMd
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Rückseite einer cloze-Karte (08 §6)
+// MARK: - CardBackCloze
+struct CardBackCloze: Codable {
+    let answers: CardClozeAnswers
+
+    enum CodingKeys: String, CodingKey {
+        case answers = "answers"
+    }
+}
+
+// MARK: CardBackCloze convenience initializers and mutators
+
+extension CardBackCloze {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardBackCloze.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        answers: CardClozeAnswers? = nil
+    ) -> CardBackCloze {
+        return CardBackCloze(
+            answers: answers ?? self.answers
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Frage und Antwort
+// MARK: - CardContentBasic
+struct CardContentBasic: Codable {
+    let back: CardBackBasic
+    let front: CardFrontText
+    let kind: CardContentBasicKind
+
+    enum CodingKeys: String, CodingKey {
+        case back = "back"
+        case front = "front"
+        case kind = "kind"
+    }
+}
+
+// MARK: CardContentBasic convenience initializers and mutators
+
+extension CardContentBasic {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardContentBasic.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        back: CardBackBasic? = nil,
+        front: CardFrontText? = nil,
+        kind: CardContentBasicKind? = nil
+    ) -> CardContentBasic {
+        return CardContentBasic(
+            back: back ?? self.back,
+            front: front ?? self.front,
+            kind: kind ?? self.kind
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum CardContentBasicKind: String, Codable {
+    case basic = "basic"
+}
+
+/// Lückentext. Alle Lücken einer Karte werden zusammen verdeckt und aufgedeckt
+// MARK: - CardContentCloze
+struct CardContentCloze: Codable {
+    let back: CardBackCloze
+    let front: CardFrontText
+    let kind: CardContentClozeKind
+
+    enum CodingKeys: String, CodingKey {
+        case back = "back"
+        case front = "front"
+        case kind = "kind"
+    }
+}
+
+// MARK: CardContentCloze convenience initializers and mutators
+
+extension CardContentCloze {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardContentCloze.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        back: CardBackCloze? = nil,
+        front: CardFrontText? = nil,
+        kind: CardContentClozeKind? = nil
+    ) -> CardContentCloze {
+        return CardContentCloze(
+            back: back ?? self.back,
+            front: front ?? self.front,
+            kind: kind ?? self.kind
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum CardContentClozeKind: String, Codable {
+    case cloze = "cloze"
+}
+
+/// POST /cards: Karte von Hand (origin = manuell). Das Konzept muss aktiv sein (§21.4)
+// MARK: - CardCreate
+struct CardCreate: Codable {
+    let conceptID: String
+    let content: CardContent
+    let id: String?
+    /// Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten
+    let sources: [EvidenceRef]
+
+    enum CodingKeys: String, CodingKey {
+        case conceptID = "concept_id"
+        case content = "content"
+        case id = "id"
+        case sources = "sources"
+    }
+}
+
+// MARK: CardCreate convenience initializers and mutators
+
+extension CardCreate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardCreate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        conceptID: String? = nil,
+        content: CardContent? = nil,
+        id: String?? = nil,
+        sources: [EvidenceRef]? = nil
+    ) -> CardCreate {
+        return CardCreate(
+            conceptID: conceptID ?? self.conceptID,
+            content: content ?? self.content,
+            id: id ?? self.id,
+            sources: sources ?? self.sources
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /concepts/{id}/cards: alle nicht gelöschten Karten des Konzepts, älteste zuerst,
+/// höchstens 500
+// MARK: - CardList
+struct CardList: Codable {
+    let items: [Card]
+
+    enum CodingKeys: String, CodingKey {
+        case items = "items"
+    }
+}
+
+// MARK: CardList convenience initializers and mutators
+
+extension CardList {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardList.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        items: [Card]? = nil
+    ) -> CardList {
+        return CardList(
+            items: items ?? self.items
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Eine vorgeschlagene Karte in einem card_batch, nach den Prüfungen aus §21.6
+// MARK: - CardProposal
+struct CardProposal: Codable {
+    let content: CardContent
+    /// Schlüssel im Vorschlag: k1, k2, …
+    let key: String
+    /// Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten
+    let sources: [EvidenceRef]
+
+    enum CodingKeys: String, CodingKey {
+        case content = "content"
+        case key = "key"
+        case sources = "sources"
+    }
+}
+
+// MARK: CardProposal convenience initializers and mutators
+
+extension CardProposal {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardProposal.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        content: CardContent? = nil,
+        key: String? = nil,
+        sources: [EvidenceRef]? = nil
+    ) -> CardProposal {
+        return CardProposal(
+            content: content ?? self.content,
+            key: key ?? self.key,
+            sources: sources ?? self.sources
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// PATCH /cards/{id}. Mindestens ein Feld (sonst 400 validation_failed). content ersetzt
+/// Vorder- und Rückseite, der FSRS-Zustand bleibt
+// MARK: - CardUpdate
+struct CardUpdate: Codable {
+    let content: CardContent?
+    /// Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten
+    let sources: [EvidenceRef]?
+    let suspended: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case content = "content"
+        case sources = "sources"
+        case suspended = "suspended"
+    }
+}
+
+// MARK: CardUpdate convenience initializers and mutators
+
+extension CardUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        content: CardContent?? = nil,
+        sources: [EvidenceRef]?? = nil,
+        suspended: Bool?? = nil
+    ) -> CardUpdate {
+        return CardUpdate(
+            content: content ?? self.content,
+            sources: sources ?? self.sources,
+            suspended: suspended ?? self.suspended
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// cards.generate (VERTRAEGE §21.6). job.session_id ist gesetzt
+// MARK: - CardsGeneratePayload
+struct CardsGeneratePayload: Codable {
+    /// true: auch offene Vorschläge mit unveränderter Eingabe neu erzeugen
+    let force: Bool?
+    let sessionID: String
+
+    enum CodingKeys: String, CodingKey {
+        case force = "force"
+        case sessionID = "session_id"
+    }
+}
+
+// MARK: CardsGeneratePayload convenience initializers and mutators
+
+extension CardsGeneratePayload {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardsGeneratePayload.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        force: Bool?? = nil,
+        sessionID: String? = nil
+    ) -> CardsGeneratePayload {
+        return CardsGeneratePayload(
+            force: force ?? self.force,
+            sessionID: sessionID ?? self.sessionID
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Ergebnis von cards.generate
+// MARK: - CardsGenerateResult
+struct CardsGenerateResult: Codable {
+    /// true: die 80-%-Grenze des Monatsbudgets hat den Lauf beendet
+    let budgetPaused: Bool
+    /// betrachtete Konzepte der Session
+    let concepts: Int
+    /// Euro (Schätzung, VERTRAEGE §20.5)
+    let costEur: Double
+    let droppedCloze: Int
+    let droppedDuplicates: Int
+    let droppedInvalid: Int
+    let droppedLength: Int
+    let droppedSources: Int
+    /// null: ohne Embedder, Dubletten nur über gleichen Text
+    let embeddingModel: String?
+    /// Konzepte mit ungültiger oder abgelehnter KI-Ausgabe
+    let failedConcepts: Int
+    let model: String?
+    let promptVersion: String?
+    /// neu geschriebene Inbox-Einträge
+    let proposedBatches: Int
+    let proposedCards: Int
+    let sessionDeleted: Bool
+    let sessionID: String
+    /// Konzepte, die wegen der 80-%-Grenze nicht mehr dran waren
+    let skippedBudget: Int
+    /// Konzepte, deren Vorschlag aus dieser Session schon entschieden ist
+    let skippedDecided: Int
+    /// Konzepte ohne brauchbaren Belegtext oder ohne neue Karte
+    let skippedEmpty: Int
+    /// offene Vorschläge mit gleicher Eingabe, kein Aufruf
+    let unchangedBatches: Int
+
+    enum CodingKeys: String, CodingKey {
+        case budgetPaused = "budget_paused"
+        case concepts = "concepts"
+        case costEur = "cost_eur"
+        case droppedCloze = "dropped_cloze"
+        case droppedDuplicates = "dropped_duplicates"
+        case droppedInvalid = "dropped_invalid"
+        case droppedLength = "dropped_length"
+        case droppedSources = "dropped_sources"
+        case embeddingModel = "embedding_model"
+        case failedConcepts = "failed_concepts"
+        case model = "model"
+        case promptVersion = "prompt_version"
+        case proposedBatches = "proposed_batches"
+        case proposedCards = "proposed_cards"
+        case sessionDeleted = "session_deleted"
+        case sessionID = "session_id"
+        case skippedBudget = "skipped_budget"
+        case skippedDecided = "skipped_decided"
+        case skippedEmpty = "skipped_empty"
+        case unchangedBatches = "unchanged_batches"
+    }
+}
+
+// MARK: CardsGenerateResult convenience initializers and mutators
+
+extension CardsGenerateResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(CardsGenerateResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        budgetPaused: Bool? = nil,
+        concepts: Int? = nil,
+        costEur: Double? = nil,
+        droppedCloze: Int? = nil,
+        droppedDuplicates: Int? = nil,
+        droppedInvalid: Int? = nil,
+        droppedLength: Int? = nil,
+        droppedSources: Int? = nil,
+        embeddingModel: String?? = nil,
+        failedConcepts: Int? = nil,
+        model: String?? = nil,
+        promptVersion: String?? = nil,
+        proposedBatches: Int? = nil,
+        proposedCards: Int? = nil,
+        sessionDeleted: Bool? = nil,
+        sessionID: String? = nil,
+        skippedBudget: Int? = nil,
+        skippedDecided: Int? = nil,
+        skippedEmpty: Int? = nil,
+        unchangedBatches: Int? = nil
+    ) -> CardsGenerateResult {
+        return CardsGenerateResult(
+            budgetPaused: budgetPaused ?? self.budgetPaused,
+            concepts: concepts ?? self.concepts,
+            costEur: costEur ?? self.costEur,
+            droppedCloze: droppedCloze ?? self.droppedCloze,
+            droppedDuplicates: droppedDuplicates ?? self.droppedDuplicates,
+            droppedInvalid: droppedInvalid ?? self.droppedInvalid,
+            droppedLength: droppedLength ?? self.droppedLength,
+            droppedSources: droppedSources ?? self.droppedSources,
+            embeddingModel: embeddingModel ?? self.embeddingModel,
+            failedConcepts: failedConcepts ?? self.failedConcepts,
+            model: model ?? self.model,
+            promptVersion: promptVersion ?? self.promptVersion,
+            proposedBatches: proposedBatches ?? self.proposedBatches,
+            proposedCards: proposedCards ?? self.proposedCards,
+            sessionDeleted: sessionDeleted ?? self.sessionDeleted,
+            sessionID: sessionID ?? self.sessionID,
+            skippedBudget: skippedBudget ?? self.skippedBudget,
+            skippedDecided: skippedDecided ?? self.skippedDecided,
+            skippedEmpty: skippedEmpty ?? self.skippedEmpty,
+            unchangedBatches: unchangedBatches ?? self.unchangedBatches
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
 /// Gerät, auf dem ein Ereignis entstanden ist
 enum ClientDevice: String, Codable {
     case ipad = "ipad"
@@ -3585,89 +4857,6 @@ extension EvidenceView {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
-}
-
-/// Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen
-/// typisierten Union erzeugt)
-///
-/// Beleg auf eine Folie. Ziel: /dokument?typ=folien&id=<deck_id>&seite=<slide_index>
-///
-/// Beleg auf einen Zeitraum des Gesagten (Sitzungszeit, §18.1). t_end_ms ≥ t_start_ms prüft
-/// der Schreiber. Ziel: /rueckblick?id=<session_id>&t=<t_start_ms>
-// MARK: - EvidenceRef
-struct EvidenceRef: Codable {
-    let deckID: String?
-    let kind: SearchKind
-    let slideID: String?
-    /// Index der Folie im Foliensatz, ab 1
-    let slideIndex: Int?
-    let sessionID: String?
-    let tEndMS: Int?
-    let tStartMS: Int?
-
-    enum CodingKeys: String, CodingKey {
-        case deckID = "deck_id"
-        case kind = "kind"
-        case slideID = "slide_id"
-        case slideIndex = "slide_index"
-        case sessionID = "session_id"
-        case tEndMS = "t_end_ms"
-        case tStartMS = "t_start_ms"
-    }
-}
-
-// MARK: EvidenceRef convenience initializers and mutators
-
-extension EvidenceRef {
-    init(data: Data) throws {
-        self = try newJSONDecoder().decode(EvidenceRef.self, from: data)
-    }
-
-    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
-        guard let data = json.data(using: encoding) else {
-            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
-        }
-        try self.init(data: data)
-    }
-
-    init(fromURL url: URL) throws {
-        try self.init(data: try Data(contentsOf: url))
-    }
-
-    func with(
-        deckID: String?? = nil,
-        kind: SearchKind? = nil,
-        slideID: String?? = nil,
-        slideIndex: Int?? = nil,
-        sessionID: String?? = nil,
-        tEndMS: Int?? = nil,
-        tStartMS: Int?? = nil
-    ) -> EvidenceRef {
-        return EvidenceRef(
-            deckID: deckID ?? self.deckID,
-            kind: kind ?? self.kind,
-            slideID: slideID ?? self.slideID,
-            slideIndex: slideIndex ?? self.slideIndex,
-            sessionID: sessionID ?? self.sessionID,
-            tEndMS: tEndMS ?? self.tEndMS,
-            tStartMS: tStartMS ?? self.tStartMS
-        )
-    }
-
-    func jsonData() throws -> Data {
-        return try newJSONEncoder().encode(self)
-    }
-
-    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
-        return String(data: try self.jsonData(), encoding: encoding)
-    }
-}
-
-/// Art eines Sucheintrags (search_chunk.source_kind). Konzepte, Notizen, Aufgaben, Karten
-/// und Fotos kommen mit ihren Tickets als neue Werte dazu
-enum SearchKind: String, Codable {
-    case slide = "slide"
-    case transcript = "transcript"
 }
 
 /// Kurzangabe einer Session für Listen (Anzeige „VL 7 · Titel“ bzw. Datum)
@@ -6874,18 +8063,21 @@ extension ImageElementPayload {
     }
 }
 
-/// POST /inbox/{id}/accept (§20.6). Welche Felder zu welcher Art passen, regelt der Vertrag
-/// (sonst 400 inbox_action_invalid)
+/// POST /inbox/{id}/accept (§20.6, §21.7). Welche Felder zu welcher Art passen, regelt der
+/// Vertrag (sonst 400 inbox_action_invalid)
 // MARK: - InboxAcceptRequest
 struct InboxAcceptRequest: Codable {
     /// concept_merge: als neues Konzept annehmen statt zusammenführen
     let asNew: Bool?
+    /// nur card_batch: Entscheidung je Karte. Nicht genannte Karten werden unverändert angenommen
+    let cards: [InboxCardChoice]?
     let edit: ConceptEdit?
     let mergeInto: String?
     let relationKind: ConceptRelationKind?
 
     enum CodingKeys: String, CodingKey {
         case asNew = "as_new"
+        case cards = "cards"
         case edit = "edit"
         case mergeInto = "merge_into"
         case relationKind = "relation_kind"
@@ -6912,15 +8104,76 @@ extension InboxAcceptRequest {
 
     func with(
         asNew: Bool?? = nil,
+        cards: [InboxCardChoice]?? = nil,
         edit: ConceptEdit?? = nil,
         mergeInto: String?? = nil,
         relationKind: ConceptRelationKind?? = nil
     ) -> InboxAcceptRequest {
         return InboxAcceptRequest(
             asNew: asNew ?? self.asNew,
+            cards: cards ?? self.cards,
             edit: edit ?? self.edit,
             mergeInto: mergeInto ?? self.mergeInto,
             relationKind: relationKind ?? self.relationKind
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Entscheidung zu einer Karte eines card_batch (POST /inbox/{id}/accept, §21.7)
+// MARK: - InboxCardChoice
+struct InboxCardChoice: Codable {
+    /// false: diese Karte verwerfen
+    let accept: Bool
+    let content: CardContent?
+    let key: String
+    /// Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten
+    let sources: [EvidenceRef]?
+
+    enum CodingKeys: String, CodingKey {
+        case accept = "accept"
+        case content = "content"
+        case key = "key"
+        case sources = "sources"
+    }
+}
+
+// MARK: InboxCardChoice convenience initializers and mutators
+
+extension InboxCardChoice {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxCardChoice.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        accept: Bool? = nil,
+        content: CardContent?? = nil,
+        key: String? = nil,
+        sources: [EvidenceRef]?? = nil
+    ) -> InboxCardChoice {
+        return InboxCardChoice(
+            accept: accept ?? self.accept,
+            content: content ?? self.content,
+            key: key ?? self.key,
+            sources: sources ?? self.sources
         )
     }
 
@@ -7099,15 +8352,79 @@ extension Skipped {
     }
 }
 
-/// Was eine Annahme geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST
-/// /inbox/{id}/reopen, §20.6)
+/// Ergebnis je Karte eines entschiedenen card_batch (inbox_item.decision.cards)
+// MARK: - InboxCardOutcome
+struct InboxCardOutcome: Codable {
+    let cardID: String?
+    let key: String
+    let outcome: InboxCardOutcomeKind
+
+    enum CodingKeys: String, CodingKey {
+        case cardID = "card_id"
+        case key = "key"
+        case outcome = "outcome"
+    }
+}
+
+// MARK: InboxCardOutcome convenience initializers and mutators
+
+extension InboxCardOutcome {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxCardOutcome.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cardID: String?? = nil,
+        key: String? = nil,
+        outcome: InboxCardOutcomeKind? = nil
+    ) -> InboxCardOutcome {
+        return InboxCardOutcome(
+            cardID: cardID ?? self.cardID,
+            key: key ?? self.key,
+            outcome: outcome ?? self.outcome
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Was aus einer vorgeschlagenen Karte wurde (§21.7). dublette: gleiche Vorderseite gab es
+/// schon
+enum InboxCardOutcomeKind: String, Codable {
+    case angenommen = "angenommen"
+    case dublette = "dublette"
+    case verworfen = "verworfen"
+}
+
+/// Was eine Entscheidung geändert hat (inbox_item.decision). Grundlage für „Rückgängig“
+/// (POST /inbox/{id}/reopen, §20.6, §21.7)
 // MARK: - InboxDecision
 struct InboxDecision: Codable {
     /// Wirkung
     let action: InboxDecisionAction
     let addedAliases: [String]
     let addedModuleIDS: [String]
-    /// mit derselben Entscheidung geänderte Beziehungs-Einträge
+    /// nur card_batch: Ergebnis je vorgeschlagener Karte (§21.7). Fehlt bei den anderen Arten
+    let cards: [InboxCardOutcome]?
+    /// mit derselben Entscheidung geänderte Einträge: Beziehungen (§20.6) und Kartenvorschläge
+    /// des Konzepts (§21.7)
     let cascadeItemIDS: [String]
     let conceptID: String?
     /// A2/A3: vorhandene Beziehung, mit der die umgehängte (A2) bzw. umgewidmete (A3) Beziehung
@@ -7126,6 +8443,7 @@ struct InboxDecision: Codable {
         case action = "action"
         case addedAliases = "added_aliases"
         case addedModuleIDS = "added_module_ids"
+        case cards = "cards"
         case cascadeItemIDS = "cascade_item_ids"
         case conceptID = "concept_id"
         case duplicateOf = "duplicate_of"
@@ -7159,6 +8477,7 @@ extension InboxDecision {
         action: InboxDecisionAction? = nil,
         addedAliases: [String]? = nil,
         addedModuleIDS: [String]? = nil,
+        cards: [InboxCardOutcome]?? = nil,
         cascadeItemIDS: [String]? = nil,
         conceptID: String?? = nil,
         duplicateOf: String?? = nil,
@@ -7172,6 +8491,7 @@ extension InboxDecision {
             action: action ?? self.action,
             addedAliases: addedAliases ?? self.addedAliases,
             addedModuleIDS: addedModuleIDS ?? self.addedModuleIDS,
+            cards: cards ?? self.cards,
             cascadeItemIDS: cascadeItemIDS ?? self.cascadeItemIDS,
             conceptID: conceptID ?? self.conceptID,
             duplicateOf: duplicateOf ?? self.duplicateOf,
@@ -7197,16 +8517,20 @@ enum InboxDecisionAction: String, Codable {
     case abgelehnt = "abgelehnt"
     case angenommenNeu = "angenommen_neu"
     case beziehungBestaetigt = "beziehung_bestaetigt"
+    case kartenAngenommen = "karten_angenommen"
     case zusammengefuehrt = "zusammengefuehrt"
 }
 
 /// Antwort auf accept, reject und reopen
 // MARK: - InboxDecisionResult
 struct InboxDecisionResult: Codable {
+    /// nur card_batch nach accept: die angelegten Karten
+    let cards: [Card]?
     let concept: Concept?
     let item: InboxItem
 
     enum CodingKeys: String, CodingKey {
+        case cards = "cards"
         case concept = "concept"
         case item = "item"
     }
@@ -7231,10 +8555,12 @@ extension InboxDecisionResult {
     }
 
     func with(
+        cards: [Card]?? = nil,
         concept: Concept?? = nil,
         item: InboxItem? = nil
     ) -> InboxDecisionResult {
         return InboxDecisionResult(
+            cards: cards ?? self.cards,
             concept: concept ?? self.concept,
             item: item ?? self.item
         )
@@ -7347,9 +8673,10 @@ extension InboxItem {
     }
 }
 
-/// Art eines Inbox-Eintrags (03 §8). Weitere Arten (card_batch, slide_correction, …) kommen
-/// mit ihren Tickets
+/// Art eines Inbox-Eintrags (03 §8). card_batch seit VERTRAEGE §21. Weitere Arten
+/// (slide_correction, …) kommen mit ihren Tickets
 enum InboxKind: String, Codable {
+    case cardBatch = "card_batch"
     case conceptMerge = "concept_merge"
     case conceptNew = "concept_new"
     case relation = "relation"
@@ -7362,6 +8689,8 @@ enum InboxKind: String, Codable {
 /// Nutzlast concept_merge (Vorschlag: dasselbe wie ein vorhandenes Konzept)
 ///
 /// Nutzlast relation (Beziehung zwischen zwei Konzepten)
+///
+/// Nutzlast card_batch: Kartenvorschläge zu einem Konzept aus einer Session (05 §P10, §21.7)
 // MARK: - InboxPayload
 struct InboxPayload: Codable {
     let evidence: [EvidenceRef]?
@@ -7382,6 +8711,11 @@ struct InboxPayload: Codable {
     let relationKind: ConceptRelationKind?
     let toConceptID: String?
     let why: String?
+    let cards: [CardProposal]?
+    let conceptID: String?
+    /// Name des Konzepts beim Erzeugen (Anzeige)
+    let conceptName: String?
+    let inputHash: String?
 
     enum CodingKeys: String, CodingKey {
         case evidence = "evidence"
@@ -7399,6 +8733,10 @@ struct InboxPayload: Codable {
         case relationKind = "relation_kind"
         case toConceptID = "to_concept_id"
         case why = "why"
+        case cards = "cards"
+        case conceptID = "concept_id"
+        case conceptName = "concept_name"
+        case inputHash = "input_hash"
     }
 }
 
@@ -7435,7 +8773,11 @@ extension InboxPayload {
         fromConceptID: String?? = nil,
         relationKind: ConceptRelationKind?? = nil,
         toConceptID: String?? = nil,
-        why: String?? = nil
+        why: String?? = nil,
+        cards: [CardProposal]?? = nil,
+        conceptID: String?? = nil,
+        conceptName: String?? = nil,
+        inputHash: String?? = nil
     ) -> InboxPayload {
         return InboxPayload(
             evidence: evidence ?? self.evidence,
@@ -7452,7 +8794,11 @@ extension InboxPayload {
             fromConceptID: fromConceptID ?? self.fromConceptID,
             relationKind: relationKind ?? self.relationKind,
             toConceptID: toConceptID ?? self.toConceptID,
-            why: why ?? self.why
+            why: why ?? self.why,
+            cards: cards ?? self.cards,
+            conceptID: conceptID ?? self.conceptID,
+            conceptName: conceptName ?? self.conceptName,
+            inputHash: inputHash ?? self.inputHash
         )
     }
 
@@ -7752,6 +9098,80 @@ extension InboxOverviewSession {
     func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
         return String(data: try self.jsonData(), encoding: encoding)
     }
+}
+
+/// Nutzlast card_batch: Kartenvorschläge zu einem Konzept aus einer Session (05 §P10, §21.7)
+// MARK: - InboxPayloadCardBatch
+struct InboxPayloadCardBatch: Codable {
+    let cards: [CardProposal]
+    let conceptID: String
+    /// Name des Konzepts beim Erzeugen (Anzeige)
+    let conceptName: String
+    let inputHash: String
+    let kind: InboxPayloadCardBatchKind
+    let model: String
+    let promptVersion: String
+
+    enum CodingKeys: String, CodingKey {
+        case cards = "cards"
+        case conceptID = "concept_id"
+        case conceptName = "concept_name"
+        case inputHash = "input_hash"
+        case kind = "kind"
+        case model = "model"
+        case promptVersion = "prompt_version"
+    }
+}
+
+// MARK: InboxPayloadCardBatch convenience initializers and mutators
+
+extension InboxPayloadCardBatch {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(InboxPayloadCardBatch.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cards: [CardProposal]? = nil,
+        conceptID: String? = nil,
+        conceptName: String? = nil,
+        inputHash: String? = nil,
+        kind: InboxPayloadCardBatchKind? = nil,
+        model: String? = nil,
+        promptVersion: String? = nil
+    ) -> InboxPayloadCardBatch {
+        return InboxPayloadCardBatch(
+            cards: cards ?? self.cards,
+            conceptID: conceptID ?? self.conceptID,
+            conceptName: conceptName ?? self.conceptName,
+            inputHash: inputHash ?? self.inputHash,
+            kind: kind ?? self.kind,
+            model: model ?? self.model,
+            promptVersion: promptVersion ?? self.promptVersion
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+enum InboxPayloadCardBatchKind: String, Codable {
+    case cardBatch = "card_batch"
 }
 
 /// Nutzlast concept_merge (Vorschlag: dasselbe wie ein vorhandenes Konzept)
@@ -8183,6 +9603,106 @@ extension JobList {
         return JobList(
             items: items ?? self.items,
             nextCursor: nextCursor ?? self.nextCursor
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Bereich learning in setting (§21.5). Kommt mit B2 in Settings
+// MARK: - LearningSettings
+struct LearningSettings: Codable {
+    /// höchstens so viele neue Karten je Lerntag, Standard 20
+    let newCardsPerDay: Int
+    /// Zeitbudget für „Heute wiederholen“, Standard 20
+    let reviewBudgetMinutes: Int
+
+    enum CodingKeys: String, CodingKey {
+        case newCardsPerDay = "new_cards_per_day"
+        case reviewBudgetMinutes = "review_budget_minutes"
+    }
+}
+
+// MARK: LearningSettings convenience initializers and mutators
+
+extension LearningSettings {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(LearningSettings.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        newCardsPerDay: Int? = nil,
+        reviewBudgetMinutes: Int? = nil
+    ) -> LearningSettings {
+        return LearningSettings(
+            newCardsPerDay: newCardsPerDay ?? self.newCardsPerDay,
+            reviewBudgetMinutes: reviewBudgetMinutes ?? self.reviewBudgetMinutes
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// PATCH /settings, Bereich learning
+// MARK: - LearningSettingsUpdate
+struct LearningSettingsUpdate: Codable {
+    let newCardsPerDay: Int?
+    let reviewBudgetMinutes: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case newCardsPerDay = "new_cards_per_day"
+        case reviewBudgetMinutes = "review_budget_minutes"
+    }
+}
+
+// MARK: LearningSettingsUpdate convenience initializers and mutators
+
+extension LearningSettingsUpdate {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(LearningSettingsUpdate.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        newCardsPerDay: Int?? = nil,
+        reviewBudgetMinutes: Int?? = nil
+    ) -> LearningSettingsUpdate {
+        return LearningSettingsUpdate(
+            newCardsPerDay: newCardsPerDay ?? self.newCardsPerDay,
+            reviewBudgetMinutes: reviewBudgetMinutes ?? self.reviewBudgetMinutes
         )
     }
 
@@ -15429,13 +16949,14 @@ enum PhotoAddOpKind: String, Codable {
     case photoAdd = "photo.add"
 }
 
-/// Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge
-/// = Anzeige-Reihenfolge
+/// Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2, §20.2 und §21.3).
+/// Reihenfolge = Anzeige-Reihenfolge
 ///
 /// Standard transcribe. Alle späteren Schritte laufen mit (VERTRAEGE §18.2)
 enum PipelineStep: String, Codable {
     case alignLog = "align.log"
     case audioFinalize = "audio.finalize"
+    case cardsGenerate = "cards.generate"
     case conceptsExtract = "concepts.extract"
     case conceptsResolve = "concepts.resolve"
     case summaryWrite = "summary.write"
@@ -15649,6 +17170,384 @@ extension RecordingCreate {
             id: id ?? self.id,
             mime: mime ?? self.mime,
             startedMS: startedMS ?? self.startedMS
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Konzept einer Karte in der Warteschlange
+// MARK: - ReviewConceptRef
+struct ReviewConceptRef: Codable {
+    let examRelevant: Bool
+    let id: String
+    let name: String
+
+    enum CodingKeys: String, CodingKey {
+        case examRelevant = "exam_relevant"
+        case id = "id"
+        case name = "name"
+    }
+}
+
+// MARK: ReviewConceptRef convenience initializers and mutators
+
+extension ReviewConceptRef {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ReviewConceptRef.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        examRelevant: Bool? = nil,
+        id: String? = nil,
+        name: String? = nil
+    ) -> ReviewConceptRef {
+        return ReviewConceptRef(
+            examRelevant: examRelevant ?? self.examRelevant,
+            id: id ?? self.id,
+            name: name ?? self.name
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Eine Bewertung (Tabelle review_log, ohne die Zustände davor und danach)
+// MARK: - ReviewLogEntry
+struct ReviewLogEntry: Codable {
+    let cardID: String
+    let durationMS: Int
+    let id: String
+    let rating: Int
+    let reviewedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case cardID = "card_id"
+        case durationMS = "duration_ms"
+        case id = "id"
+        case rating = "rating"
+        case reviewedAt = "reviewed_at"
+    }
+}
+
+// MARK: ReviewLogEntry convenience initializers and mutators
+
+extension ReviewLogEntry {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ReviewLogEntry.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        cardID: String? = nil,
+        durationMS: Int? = nil,
+        id: String? = nil,
+        rating: Int? = nil,
+        reviewedAt: Date? = nil
+    ) -> ReviewLogEntry {
+        return ReviewLogEntry(
+            cardID: cardID ?? self.cardID,
+            durationMS: durationMS ?? self.durationMS,
+            id: id ?? self.id,
+            rating: rating ?? self.rating,
+            reviewedAt: reviewedAt ?? self.reviewedAt
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// GET /review/queue: der heutige Block (F-LRN-03). Bewusst ohne Zahl der insgesamt fälligen
+/// Karten (kein Rückstand, LP9)
+// MARK: - ReviewQueue
+struct ReviewQueue: Codable {
+    /// Zeitbudget dieses Abrufs ohne extra_minutes
+    let budgetMinutes: Int
+    /// Lerntag in Ortszeit des Macs, Tageswechsel 04:00 (§21.5)
+    let day: String
+    let dayEndsAt: Date
+    /// Summe der Schätzungen aller items (Anzeige „≈ n min“)
+    let estimatedSeconds: Int
+    let generatedAt: Date
+    /// false: es gibt noch gar keine Karte (anderer Leerzustand)
+    let hasCards: Bool
+    let items: [ReviewQueueItem]
+    /// true: heute wäre noch mehr fällig, als ins Budget passt
+    let moreDue: Bool
+    /// Bewertungen am heutigen Lerntag
+    let reviewedToday: Int
+    /// heute schon mit Bewertungen verbrachte Zeit
+    let usedSeconds: Int
+
+    enum CodingKeys: String, CodingKey {
+        case budgetMinutes = "budget_minutes"
+        case day = "day"
+        case dayEndsAt = "day_ends_at"
+        case estimatedSeconds = "estimated_seconds"
+        case generatedAt = "generated_at"
+        case hasCards = "has_cards"
+        case items = "items"
+        case moreDue = "more_due"
+        case reviewedToday = "reviewed_today"
+        case usedSeconds = "used_seconds"
+    }
+}
+
+// MARK: ReviewQueue convenience initializers and mutators
+
+extension ReviewQueue {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ReviewQueue.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        budgetMinutes: Int? = nil,
+        day: String? = nil,
+        dayEndsAt: Date? = nil,
+        estimatedSeconds: Int? = nil,
+        generatedAt: Date? = nil,
+        hasCards: Bool? = nil,
+        items: [ReviewQueueItem]? = nil,
+        moreDue: Bool? = nil,
+        reviewedToday: Int? = nil,
+        usedSeconds: Int? = nil
+    ) -> ReviewQueue {
+        return ReviewQueue(
+            budgetMinutes: budgetMinutes ?? self.budgetMinutes,
+            day: day ?? self.day,
+            dayEndsAt: dayEndsAt ?? self.dayEndsAt,
+            estimatedSeconds: estimatedSeconds ?? self.estimatedSeconds,
+            generatedAt: generatedAt ?? self.generatedAt,
+            hasCards: hasCards ?? self.hasCards,
+            items: items ?? self.items,
+            moreDue: moreDue ?? self.moreDue,
+            reviewedToday: reviewedToday ?? self.reviewedToday,
+            usedSeconds: usedSeconds ?? self.usedSeconds
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Eine Karte der Tageswarteschlange
+// MARK: - ReviewQueueItem
+struct ReviewQueueItem: Codable {
+    let card: Card
+    let concept: ReviewConceptRef
+    /// geschätzte Dauer für diese Karte heute (§21.5)
+    let estimateSeconds: Int
+    let group: ReviewQueueGroup
+
+    enum CodingKeys: String, CodingKey {
+        case card = "card"
+        case concept = "concept"
+        case estimateSeconds = "estimate_seconds"
+        case group = "group"
+    }
+}
+
+// MARK: ReviewQueueItem convenience initializers and mutators
+
+extension ReviewQueueItem {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ReviewQueueItem.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        card: Card? = nil,
+        concept: ReviewConceptRef? = nil,
+        estimateSeconds: Int? = nil,
+        group: ReviewQueueGroup? = nil
+    ) -> ReviewQueueItem {
+        return ReviewQueueItem(
+            card: card ?? self.card,
+            concept: concept ?? self.concept,
+            estimateSeconds: estimateSeconds ?? self.estimateSeconds,
+            group: group ?? self.group
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Gruppe in der Tageswarteschlange (§21.5): angefangen = Lernschritt offen, faellig =
+/// Wiederholung, neu = noch nie bewertet
+enum ReviewQueueGroup: String, Codable {
+    case angefangen = "angefangen"
+    case faellig = "faellig"
+    case neu = "neu"
+}
+
+/// POST /cards/{id}/review. id erzeugt der Client (UUIDv7) je Bewertung, eine Wiederholung
+/// mit derselben id ändert nichts (§21.4)
+// MARK: - ReviewRequest
+struct ReviewRequest: Codable {
+    /// Zeit vom Anzeigen der Vorderseite bis zur Bewertung
+    let durationMS: Int
+    let id: String
+    let rating: Int
+
+    enum CodingKeys: String, CodingKey {
+        case durationMS = "duration_ms"
+        case id = "id"
+        case rating = "rating"
+    }
+}
+
+// MARK: ReviewRequest convenience initializers and mutators
+
+extension ReviewRequest {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ReviewRequest.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        durationMS: Int? = nil,
+        id: String? = nil,
+        rating: Int? = nil
+    ) -> ReviewRequest {
+        return ReviewRequest(
+            durationMS: durationMS ?? self.durationMS,
+            id: id ?? self.id,
+            rating: rating ?? self.rating
+        )
+    }
+
+    func jsonData() throws -> Data {
+        return try newJSONEncoder().encode(self)
+    }
+
+    func jsonString(encoding: String.Encoding = .utf8) throws -> String? {
+        return String(data: try self.jsonData(), encoding: encoding)
+    }
+}
+
+/// Antwort auf POST /cards/{id}/review
+// MARK: - ReviewResult
+struct ReviewResult: Codable {
+    let card: Card
+    /// true: die Karte ist heute noch einmal dran (neue Fälligkeit vor dem Tageswechsel, §21.5)
+    let requeue: Bool
+    let review: ReviewLogEntry
+
+    enum CodingKeys: String, CodingKey {
+        case card = "card"
+        case requeue = "requeue"
+        case review = "review"
+    }
+}
+
+// MARK: ReviewResult convenience initializers and mutators
+
+extension ReviewResult {
+    init(data: Data) throws {
+        self = try newJSONDecoder().decode(ReviewResult.self, from: data)
+    }
+
+    init(_ json: String, using encoding: String.Encoding = .utf8) throws {
+        guard let data = json.data(using: encoding) else {
+            throw NSError(domain: "JSONDecoding", code: 0, userInfo: nil)
+        }
+        try self.init(data: data)
+    }
+
+    init(fromURL url: URL) throws {
+        try self.init(data: try Data(contentsOf: url))
+    }
+
+    func with(
+        card: Card? = nil,
+        requeue: Bool? = nil,
+        review: ReviewLogEntry? = nil
+    ) -> ReviewResult {
+        return ReviewResult(
+            card: card ?? self.card,
+            requeue: requeue ?? self.requeue,
+            review: review ?? self.review
         )
     }
 
@@ -24211,6 +26110,173 @@ extension CalendarSourceList {
     }
 }
 
+extension Card {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(conceptID, forKey: .conceptID)
+        try container.encode(content, forKey: .content)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encode(id, forKey: .id)
+        try container.encode(origin, forKey: .origin)
+        try container.encode(sources, forKey: .sources)
+        try container.encode(stage, forKey: .stage)
+        try container.encode(state, forKey: .state)
+        try container.encode(suspended, forKey: .suspended)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+}
+
+extension CardContent {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(back, forKey: .back)
+        try container.encode(front, forKey: .front)
+        try container.encode(kind, forKey: .kind)
+    }
+}
+
+extension CardClozeAnswers {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(c1, forKey: .c1)
+        try container.encodeIfPresent(c2, forKey: .c2)
+        try container.encodeIfPresent(c3, forKey: .c3)
+    }
+}
+
+extension CardFrontText {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(textMd, forKey: .textMd)
+    }
+}
+
+extension CardSource {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(missing, forKey: .missing)
+        try container.encode(ref, forKey: .ref)
+    }
+}
+
+extension CardState {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(difficulty, forKey: .difficulty)
+        try container.encode(due, forKey: .due)
+        try container.encode(elapsedDays, forKey: .elapsedDays)
+        try container.encode(lapses, forKey: .lapses)
+        try container.encode(lastReview, forKey: .lastReview)
+        try container.encode(learningSteps, forKey: .learningSteps)
+        try container.encode(reps, forKey: .reps)
+        try container.encode(scheduledDays, forKey: .scheduledDays)
+        try container.encode(stability, forKey: .stability)
+        try container.encode(state, forKey: .state)
+    }
+}
+
+extension CardBackBasic {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(explanationMd, forKey: .explanationMd)
+        try container.encode(textMd, forKey: .textMd)
+    }
+}
+
+extension CardBackCloze {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(answers, forKey: .answers)
+    }
+}
+
+extension CardContentBasic {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(back, forKey: .back)
+        try container.encode(front, forKey: .front)
+        try container.encode(kind, forKey: .kind)
+    }
+}
+
+extension CardContentCloze {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(back, forKey: .back)
+        try container.encode(front, forKey: .front)
+        try container.encode(kind, forKey: .kind)
+    }
+}
+
+extension CardCreate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(conceptID, forKey: .conceptID)
+        try container.encode(content, forKey: .content)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode(sources, forKey: .sources)
+    }
+}
+
+extension CardList {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(items, forKey: .items)
+    }
+}
+
+extension CardProposal {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(content, forKey: .content)
+        try container.encode(key, forKey: .key)
+        try container.encode(sources, forKey: .sources)
+    }
+}
+
+extension CardUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(content, forKey: .content)
+        try container.encodeIfPresent(sources, forKey: .sources)
+        try container.encodeIfPresent(suspended, forKey: .suspended)
+    }
+}
+
+extension CardsGeneratePayload {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(force, forKey: .force)
+        try container.encode(sessionID, forKey: .sessionID)
+    }
+}
+
+extension CardsGenerateResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(budgetPaused, forKey: .budgetPaused)
+        try container.encode(concepts, forKey: .concepts)
+        try container.encode(costEur, forKey: .costEur)
+        try container.encode(droppedCloze, forKey: .droppedCloze)
+        try container.encode(droppedDuplicates, forKey: .droppedDuplicates)
+        try container.encode(droppedInvalid, forKey: .droppedInvalid)
+        try container.encode(droppedLength, forKey: .droppedLength)
+        try container.encode(droppedSources, forKey: .droppedSources)
+        try container.encode(embeddingModel, forKey: .embeddingModel)
+        try container.encode(failedConcepts, forKey: .failedConcepts)
+        try container.encode(model, forKey: .model)
+        try container.encode(promptVersion, forKey: .promptVersion)
+        try container.encode(proposedBatches, forKey: .proposedBatches)
+        try container.encode(proposedCards, forKey: .proposedCards)
+        try container.encode(sessionDeleted, forKey: .sessionDeleted)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(skippedBudget, forKey: .skippedBudget)
+        try container.encode(skippedDecided, forKey: .skippedDecided)
+        try container.encode(skippedEmpty, forKey: .skippedEmpty)
+        try container.encode(unchangedBatches, forKey: .unchangedBatches)
+    }
+}
+
 extension Concept {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -24778,9 +26844,20 @@ extension InboxAcceptRequest {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(asNew, forKey: .asNew)
+        try container.encodeIfPresent(cards, forKey: .cards)
         try container.encodeIfPresent(edit, forKey: .edit)
         try container.encodeIfPresent(mergeInto, forKey: .mergeInto)
         try container.encodeIfPresent(relationKind, forKey: .relationKind)
+    }
+}
+
+extension InboxCardChoice {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(accept, forKey: .accept)
+        try container.encodeIfPresent(content, forKey: .content)
+        try container.encode(key, forKey: .key)
+        try container.encodeIfPresent(sources, forKey: .sources)
     }
 }
 
@@ -24801,12 +26878,22 @@ extension InboxBulkResult {
     }
 }
 
+extension InboxCardOutcome {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cardID, forKey: .cardID)
+        try container.encode(key, forKey: .key)
+        try container.encode(outcome, forKey: .outcome)
+    }
+}
+
 extension InboxDecision {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(action, forKey: .action)
         try container.encode(addedAliases, forKey: .addedAliases)
         try container.encode(addedModuleIDS, forKey: .addedModuleIDS)
+        try container.encodeIfPresent(cards, forKey: .cards)
         try container.encode(cascadeItemIDS, forKey: .cascadeItemIDS)
         try container.encode(conceptID, forKey: .conceptID)
         try container.encode(duplicateOf, forKey: .duplicateOf)
@@ -24821,6 +26908,7 @@ extension InboxDecision {
 extension InboxDecisionResult {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(cards, forKey: .cards)
         try container.encode(concept, forKey: .concept)
         try container.encode(item, forKey: .item)
     }
@@ -24879,6 +26967,19 @@ extension InboxOverviewSession {
         try container.encode(oldestAt, forKey: .oldestAt)
         try container.encode(openCount, forKey: .openCount)
         try container.encode(session, forKey: .session)
+    }
+}
+
+extension InboxPayloadCardBatch {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cards, forKey: .cards)
+        try container.encode(conceptID, forKey: .conceptID)
+        try container.encode(conceptName, forKey: .conceptName)
+        try container.encode(inputHash, forKey: .inputHash)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(model, forKey: .model)
+        try container.encode(promptVersion, forKey: .promptVersion)
     }
 }
 
@@ -24952,6 +27053,22 @@ extension JobList {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(items, forKey: .items)
         try container.encode(nextCursor, forKey: .nextCursor)
+    }
+}
+
+extension LearningSettings {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(newCardsPerDay, forKey: .newCardsPerDay)
+        try container.encode(reviewBudgetMinutes, forKey: .reviewBudgetMinutes)
+    }
+}
+
+extension LearningSettingsUpdate {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(newCardsPerDay, forKey: .newCardsPerDay)
+        try container.encodeIfPresent(reviewBudgetMinutes, forKey: .reviewBudgetMinutes)
     }
 }
 
@@ -26230,6 +28347,70 @@ extension RecordingCreate {
         try container.encodeIfPresent(id, forKey: .id)
         try container.encode(mime, forKey: .mime)
         try container.encode(startedMS, forKey: .startedMS)
+    }
+}
+
+extension ReviewConceptRef {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(examRelevant, forKey: .examRelevant)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+    }
+}
+
+extension ReviewLogEntry {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cardID, forKey: .cardID)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(id, forKey: .id)
+        try container.encode(rating, forKey: .rating)
+        try container.encode(reviewedAt, forKey: .reviewedAt)
+    }
+}
+
+extension ReviewQueue {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(budgetMinutes, forKey: .budgetMinutes)
+        try container.encode(day, forKey: .day)
+        try container.encode(dayEndsAt, forKey: .dayEndsAt)
+        try container.encode(estimatedSeconds, forKey: .estimatedSeconds)
+        try container.encode(generatedAt, forKey: .generatedAt)
+        try container.encode(hasCards, forKey: .hasCards)
+        try container.encode(items, forKey: .items)
+        try container.encode(moreDue, forKey: .moreDue)
+        try container.encode(reviewedToday, forKey: .reviewedToday)
+        try container.encode(usedSeconds, forKey: .usedSeconds)
+    }
+}
+
+extension ReviewQueueItem {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(card, forKey: .card)
+        try container.encode(concept, forKey: .concept)
+        try container.encode(estimateSeconds, forKey: .estimateSeconds)
+        try container.encode(group, forKey: .group)
+    }
+}
+
+extension ReviewRequest {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(durationMS, forKey: .durationMS)
+        try container.encode(id, forKey: .id)
+        try container.encode(rating, forKey: .rating)
+    }
+}
+
+extension ReviewResult {
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(card, forKey: .card)
+        try container.encode(requeue, forKey: .requeue)
+        try container.encode(review, forKey: .review)
     }
 }
 

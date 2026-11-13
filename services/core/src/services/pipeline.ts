@@ -30,6 +30,8 @@ const PRIORITY: Record<SessionStep, number> = {
   'concepts.extract': 8,
   'concepts.resolve': 7,
   'summary.write': 6,
+  // §21.3: niedrigste Priorität der Kette, auch unter `search.index` (5)
+  'cards.generate': 4,
 };
 
 export interface EnsurePipelineOptions {
@@ -259,6 +261,8 @@ export async function ensurePipelineJobs(
   options: EnsurePipelineOptions,
 ): Promise<JobRow[]> {
   let fromStep = options.fromStep;
+  // `cards.generate` (§21.3) hängt B3 an die Kette. Bis dahin entsteht für diesen Schritt kein Job
+  if (fromStep === 'cards.generate') return [];
   const force = options.force ?? false;
   const jobs: JobRow[] = [];
   const touched: PipelineStep[] = [];

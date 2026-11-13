@@ -74,6 +74,10 @@ const TABLES = [
   'evidence',
   'inbox_item',
   'session_summary',
+  // Karten und Wiederholung (B0, VERTRAEGE §21.1)
+  'card',
+  'card_state',
+  'review_log',
 ];
 
 /** Phase-1-Tabellen ohne die Pflichtfelder aus 03 §1 (Struktur genau nach VERTRAEGE §6.1) */

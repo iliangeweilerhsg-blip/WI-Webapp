@@ -1,0 +1,11 @@
+{
+  "kind": "cloze",
+  "front": {
+    "text_md": "Eine Relation in 3NF ist immer auch in {{c1::2NF}}."
+  },
+  "back": {
+    "answers": {
+      "c2": ["2NF"]
+    }
+  }
+}

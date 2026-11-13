@@ -1,0 +1,22 @@
+{
+  "session_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e01",
+  "session_deleted": true,
+  "concepts": 0,
+  "proposed_batches": 0,
+  "proposed_cards": 0,
+  "unchanged_batches": 0,
+  "skipped_decided": 0,
+  "skipped_empty": 0,
+  "skipped_budget": 0,
+  "failed_concepts": 0,
+  "dropped_invalid": 0,
+  "dropped_length": 0,
+  "dropped_sources": 0,
+  "dropped_cloze": 0,
+  "dropped_duplicates": 0,
+  "budget_paused": false,
+  "embedding_model": null,
+  "prompt_version": null,
+  "model": null,
+  "cost_eur": 0
+}

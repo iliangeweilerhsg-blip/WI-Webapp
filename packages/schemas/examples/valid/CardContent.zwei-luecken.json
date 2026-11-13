@@ -1,0 +1,12 @@
+{
+  "kind": "cloze",
+  "front": {
+    "text_md": "{{c1::Primärschlüssel}} identifizieren ein {{c2::Tupel}} eindeutig."
+  },
+  "back": {
+    "answers": {
+      "c1": ["Primärschlüssel"],
+      "c2": ["Tupel", "Zeile"]
+    }
+  }
+}

@@ -1,0 +1,827 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Karten und Wiederholung, Minimal-Lernen (03 §9, 05 §P10, 06 §1/§3, 08 §6, F-LRN-01/-02/-03, VERTRAEGE §21)",
+  "$defs": {
+    "CardKind": {
+      "type": "string",
+      "enum": ["basic", "cloze"],
+      "description": "Kartentyp (F-LRN-01). Dieser Schnitt kennt nur basic und cloze (VERTRAEGE §21.2), weitere kommen später"
+    },
+    "CardOrigin": {
+      "type": "string",
+      "enum": ["ki", "manuell"],
+      "description": "Herkunft einer Karte (03 §9): KI-Vorschlag aus der Inbox oder von Hand"
+    },
+    "FsrsState": {
+      "type": "string",
+      "enum": ["new", "learning", "review", "relearning"],
+      "description": "FSRS-Zustand einer Karte (03 §9, ts-fsrs)"
+    },
+    "ReviewQueueGroup": {
+      "type": "string",
+      "enum": ["angefangen", "faellig", "neu"],
+      "description": "Gruppe in der Tageswarteschlange (§21.5): angefangen = Lernschritt offen, faellig = Wiederholung, neu = noch nie bewertet"
+    },
+    "InboxCardOutcomeKind": {
+      "type": "string",
+      "enum": ["angenommen", "verworfen", "dublette"],
+      "description": "Was aus einer vorgeschlagenen Karte wurde (§21.7). dublette: gleiche Vorderseite gab es schon"
+    },
+    "CardFrontText": {
+      "type": "object",
+      "description": "Vorderseite (08 §6). Reiner Text, bei cloze mit Lücken {{c1::Lösung}} (§21.2)",
+      "required": ["text_md"],
+      "additionalProperties": false,
+      "properties": {
+        "text_md": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "CardBackBasic": {
+      "type": "object",
+      "description": "Rückseite einer basic-Karte (08 §6)",
+      "required": ["text_md", "explanation_md"],
+      "additionalProperties": false,
+      "properties": {
+        "text_md": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Antwort"
+        },
+        "explanation_md": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 1000,
+          "description": "Erklärung unter der Antwort, null = keine"
+        }
+      }
+    },
+    "CardClozeAnswers": {
+      "type": "object",
+      "description": "Lösungen je Lücke. Genau die Schlüssel der Lücken im Text, lückenlos ab c1 (prüft der Schreiber, §21.2)",
+      "required": ["c1"],
+      "additionalProperties": false,
+      "properties": {
+        "c1": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen"
+        },
+        "c2": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen"
+        },
+        "c3": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen"
+        }
+      }
+    },
+    "CardBackCloze": {
+      "type": "object",
+      "description": "Rückseite einer cloze-Karte (08 §6)",
+      "required": ["answers"],
+      "additionalProperties": false,
+      "properties": {
+        "answers": {
+          "$ref": "#/$defs/CardClozeAnswers"
+        }
+      }
+    },
+    "CardContentBasic": {
+      "type": "object",
+      "description": "Frage und Antwort",
+      "required": ["kind", "front", "back"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "basic"
+        },
+        "front": {
+          "$ref": "#/$defs/CardFrontText"
+        },
+        "back": {
+          "$ref": "#/$defs/CardBackBasic"
+        }
+      }
+    },
+    "CardContentCloze": {
+      "type": "object",
+      "description": "Lückentext. Alle Lücken einer Karte werden zusammen verdeckt und aufgedeckt",
+      "required": ["kind", "front", "back"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "cloze"
+        },
+        "front": {
+          "$ref": "#/$defs/CardFrontText"
+        },
+        "back": {
+          "$ref": "#/$defs/CardBackCloze"
+        }
+      }
+    },
+    "CardContent": {
+      "description": "Inhalt einer Karte nach 08 §6 (card.kind, card.front, card.back)",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CardContentBasic"
+        },
+        {
+          "$ref": "#/$defs/CardContentCloze"
+        }
+      ]
+    },
+    "CardSource": {
+      "type": "object",
+      "description": "Beleg einer Karte mit Anzeigeangabe",
+      "required": ["ref", "missing"],
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "$ref": "#/$defs/EvidenceRef"
+        },
+        "missing": {
+          "type": "boolean",
+          "description": "true: Ziel gelöscht (Folie, Foliensatz oder Session), nicht mehr anspringbar"
+        }
+      }
+    },
+    "CardState": {
+      "type": "object",
+      "description": "FSRS-Zustand (Tabelle card_state, 1:1 zur Karte). Felder wie der Kartentyp von ts-fsrs",
+      "required": [
+        "state",
+        "due",
+        "stability",
+        "difficulty",
+        "elapsed_days",
+        "scheduled_days",
+        "learning_steps",
+        "reps",
+        "lapses",
+        "last_review"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/FsrsState"
+        },
+        "due": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "stability": {
+          "type": "number",
+          "minimum": 0
+        },
+        "difficulty": {
+          "type": "number",
+          "minimum": 0
+        },
+        "elapsed_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "scheduled_days": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "learning_steps": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Position in den Lernschritten von ts-fsrs"
+        },
+        "reps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "lapses": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "last_review": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Card": {
+      "type": "object",
+      "description": "Karte (03 §9) mit Zustand. Gehört zu genau einem aktiven Konzept",
+      "required": [
+        "id",
+        "created_at",
+        "updated_at",
+        "concept_id",
+        "stage",
+        "origin",
+        "suspended",
+        "content",
+        "sources",
+        "state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "created_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "concept_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "stage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4,
+          "description": "Lernstufe (F-LRN-01). basic und cloze: 2"
+        },
+        "origin": {
+          "$ref": "#/$defs/CardOrigin"
+        },
+        "suspended": {
+          "type": "boolean",
+          "description": "true: pausiert, kommt nicht in die Warteschlange"
+        },
+        "content": {
+          "$ref": "#/$defs/CardContent"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardSource"
+          },
+          "minItems": 1,
+          "maxItems": 6
+        },
+        "state": {
+          "$ref": "#/$defs/CardState"
+        }
+      }
+    },
+    "CardList": {
+      "type": "object",
+      "description": "GET /concepts/{id}/cards: alle nicht gelöschten Karten des Konzepts, älteste zuerst, höchstens 500",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Card"
+          },
+          "maxItems": 500
+        }
+      }
+    },
+    "CardCreate": {
+      "type": "object",
+      "description": "POST /cards: Karte von Hand (origin = manuell). Das Konzept muss aktiv sein (§21.4)",
+      "required": ["concept_id", "content", "sources"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "concept_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "content": {
+          "$ref": "#/$defs/CardContent"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 1,
+          "maxItems": 6,
+          "description": "Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten"
+        }
+      }
+    },
+    "CardUpdate": {
+      "type": "object",
+      "description": "PATCH /cards/{id}. Mindestens ein Feld (sonst 400 validation_failed). content ersetzt Vorder- und Rückseite, der FSRS-Zustand bleibt",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "$ref": "#/$defs/CardContent"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 1,
+          "maxItems": 6,
+          "description": "Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten"
+        },
+        "suspended": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ReviewRating": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4,
+      "description": "Selbstbewertung (06 §1): 1 Nochmal, 2 Schwer, 3 Gut, 4 Leicht"
+    },
+    "ReviewRequest": {
+      "type": "object",
+      "description": "POST /cards/{id}/review. id erzeugt der Client (UUIDv7) je Bewertung, eine Wiederholung mit derselben id ändert nichts (§21.4)",
+      "required": ["id", "rating", "duration_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "rating": {
+          "$ref": "#/$defs/ReviewRating"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600000,
+          "description": "Zeit vom Anzeigen der Vorderseite bis zur Bewertung"
+        }
+      }
+    },
+    "ReviewLogEntry": {
+      "type": "object",
+      "description": "Eine Bewertung (Tabelle review_log, ohne die Zustände davor und danach)",
+      "required": ["id", "card_id", "reviewed_at", "rating", "duration_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "card_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "reviewed_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "rating": {
+          "$ref": "#/$defs/ReviewRating"
+        },
+        "duration_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600000
+        }
+      }
+    },
+    "ReviewResult": {
+      "type": "object",
+      "description": "Antwort auf POST /cards/{id}/review",
+      "required": ["review", "card", "requeue"],
+      "additionalProperties": false,
+      "properties": {
+        "review": {
+          "$ref": "#/$defs/ReviewLogEntry"
+        },
+        "card": {
+          "$ref": "#/$defs/Card"
+        },
+        "requeue": {
+          "type": "boolean",
+          "description": "true: die Karte ist heute noch einmal dran (neue Fälligkeit vor dem Tageswechsel, §21.5)"
+        }
+      }
+    },
+    "ReviewConceptRef": {
+      "type": "object",
+      "description": "Konzept einer Karte in der Warteschlange",
+      "required": ["id", "name", "exam_relevant"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "exam_relevant": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ReviewQueueItem": {
+      "type": "object",
+      "description": "Eine Karte der Tageswarteschlange",
+      "required": ["card", "concept", "group", "estimate_seconds"],
+      "additionalProperties": false,
+      "properties": {
+        "card": {
+          "$ref": "#/$defs/Card"
+        },
+        "concept": {
+          "$ref": "#/$defs/ReviewConceptRef"
+        },
+        "group": {
+          "$ref": "#/$defs/ReviewQueueGroup"
+        },
+        "estimate_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600,
+          "description": "geschätzte Dauer für diese Karte heute (§21.5)"
+        }
+      }
+    },
+    "ReviewQueue": {
+      "type": "object",
+      "description": "GET /review/queue: der heutige Block (F-LRN-03). Bewusst ohne Zahl der insgesamt fälligen Karten (kein Rückstand, LP9)",
+      "required": [
+        "day",
+        "day_ends_at",
+        "generated_at",
+        "budget_minutes",
+        "used_seconds",
+        "estimated_seconds",
+        "reviewed_today",
+        "items",
+        "more_due",
+        "has_cards"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "day": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "description": "Lerntag in Ortszeit des Macs, Tageswechsel 04:00 (§21.5)"
+        },
+        "day_ends_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "generated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "budget_minutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 240,
+          "description": "Zeitbudget dieses Abrufs ohne extra_minutes"
+        },
+        "used_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "heute schon mit Bewertungen verbrachte Zeit"
+        },
+        "estimated_seconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Summe der Schätzungen aller items (Anzeige „≈ n min“)"
+        },
+        "reviewed_today": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bewertungen am heutigen Lerntag"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ReviewQueueItem"
+          },
+          "maxItems": 500
+        },
+        "more_due": {
+          "type": "boolean",
+          "description": "true: heute wäre noch mehr fällig, als ins Budget passt"
+        },
+        "has_cards": {
+          "type": "boolean",
+          "description": "false: es gibt noch gar keine Karte (anderer Leerzustand)"
+        }
+      }
+    },
+    "LearningSettings": {
+      "type": "object",
+      "description": "Bereich learning in setting (§21.5). Kommt mit B2 in Settings",
+      "required": ["review_budget_minutes", "new_cards_per_day"],
+      "additionalProperties": false,
+      "properties": {
+        "review_budget_minutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120,
+          "description": "Zeitbudget für „Heute wiederholen“, Standard 20"
+        },
+        "new_cards_per_day": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "höchstens so viele neue Karten je Lerntag, Standard 20"
+        }
+      }
+    },
+    "LearningSettingsUpdate": {
+      "type": "object",
+      "description": "PATCH /settings, Bereich learning",
+      "required": [],
+      "additionalProperties": false,
+      "properties": {
+        "review_budget_minutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 120
+        },
+        "new_cards_per_day": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "CardProposal": {
+      "type": "object",
+      "description": "Eine vorgeschlagene Karte in einem card_batch, nach den Prüfungen aus §21.6",
+      "required": ["key", "content", "sources"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^k[1-9][0-9]?$",
+          "description": "Schlüssel im Vorschlag: k1, k2, …"
+        },
+        "content": {
+          "$ref": "#/$defs/CardContent"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 1,
+          "maxItems": 6,
+          "description": "Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten"
+        }
+      }
+    },
+    "InboxPayloadCardBatch": {
+      "type": "object",
+      "description": "Nutzlast card_batch: Kartenvorschläge zu einem Konzept aus einer Session (05 §P10, §21.7)",
+      "required": ["kind", "concept_id", "concept_name", "cards", "input_hash", "prompt_version", "model"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "card_batch"
+        },
+        "concept_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "concept_name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Name des Konzepts beim Erzeugen (Anzeige)"
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardProposal"
+          },
+          "minItems": 1,
+          "maxItems": 8
+        },
+        "input_hash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "prompt_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "InboxCardChoice": {
+      "type": "object",
+      "description": "Entscheidung zu einer Karte eines card_batch (POST /inbox/{id}/accept, §21.7)",
+      "required": ["key", "accept"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^k[1-9][0-9]?$"
+        },
+        "accept": {
+          "type": "boolean",
+          "description": "false: diese Karte verwerfen"
+        },
+        "content": {
+          "$ref": "#/$defs/CardContent"
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "minItems": 1,
+          "maxItems": 6,
+          "description": "Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten"
+        }
+      }
+    },
+    "InboxCardOutcome": {
+      "type": "object",
+      "description": "Ergebnis je Karte eines entschiedenen card_batch (inbox_item.decision.cards)",
+      "required": ["key", "outcome", "card_id"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^k[1-9][0-9]?$"
+        },
+        "outcome": {
+          "$ref": "#/$defs/InboxCardOutcomeKind"
+        },
+        "card_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "CardsGeneratePayload": {
+      "type": "object",
+      "description": "cards.generate (VERTRAEGE §21.6). job.session_id ist gesetzt",
+      "required": ["session_id"],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "force": {
+          "type": "boolean",
+          "description": "true: auch offene Vorschläge mit unveränderter Eingabe neu erzeugen"
+        }
+      }
+    },
+    "CardsGenerateResult": {
+      "type": "object",
+      "description": "Ergebnis von cards.generate",
+      "required": [
+        "session_id",
+        "session_deleted",
+        "concepts",
+        "proposed_batches",
+        "proposed_cards",
+        "unchanged_batches",
+        "skipped_decided",
+        "skipped_empty",
+        "skipped_budget",
+        "failed_concepts",
+        "dropped_invalid",
+        "dropped_length",
+        "dropped_sources",
+        "dropped_cloze",
+        "dropped_duplicates",
+        "budget_paused",
+        "embedding_model",
+        "prompt_version",
+        "model",
+        "cost_eur"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "session_id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "session_deleted": {
+          "type": "boolean"
+        },
+        "concepts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30,
+          "description": "betrachtete Konzepte der Session"
+        },
+        "proposed_batches": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "neu geschriebene Inbox-Einträge"
+        },
+        "proposed_cards": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "unchanged_batches": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "offene Vorschläge mit gleicher Eingabe, kein Aufruf"
+        },
+        "skipped_decided": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Konzepte, deren Vorschlag aus dieser Session schon entschieden ist"
+        },
+        "skipped_empty": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Konzepte ohne brauchbaren Belegtext oder ohne neue Karte"
+        },
+        "skipped_budget": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Konzepte, die wegen der 80-%-Grenze nicht mehr dran waren"
+        },
+        "failed_concepts": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Konzepte mit ungültiger oder abgelehnter KI-Ausgabe"
+        },
+        "dropped_invalid": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_sources": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_cloze": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_duplicates": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "budget_paused": {
+          "type": "boolean",
+          "description": "true: die 80-%-Grenze des Monatsbudgets hat den Lauf beendet"
+        },
+        "embedding_model": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "description": "null: ohne Embedder, Dubletten nur über gleichen Text"
+        },
+        "prompt_version": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "model": {
+          "type": ["string", "null"],
+          "minLength": 1
+        },
+        "cost_eur": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Euro (Schätzung, VERTRAEGE §20.5)"
+        }
+      }
+    }
+  }
+}

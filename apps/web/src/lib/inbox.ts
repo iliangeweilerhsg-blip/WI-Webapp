@@ -23,6 +23,18 @@ import { useHydrationSafe } from './hydrated.ts';
 import { useActiveSession } from './sessions.ts';
 import { useSyncClient } from './sync/SyncProvider.tsx';
 
+/**
+ * Einträge, die die Inbox heute darstellt. Kartenvorschläge (`card_batch`, VERTRAEGE §21.7) bekommen ihre Zeile
+ * mit B4 (§21.11). Bis dahin lädt die Inbox sie nicht.
+ */
+export type ConceptInboxItem = InboxItem & {
+  payload: Exclude<InboxItem['payload'], { kind: 'card_batch' }>;
+};
+
+function isConceptItem(item: InboxItem): item is ConceptInboxItem {
+  return item.payload.kind !== 'card_batch';
+}
+
 export const INBOX_KEY = ['inbox'] as const;
 export const INBOX_OVERVIEW_KEY = ['inbox', 'overview'] as const;
 export const INBOX_OPEN_KEY = ['inbox', 'open'] as const;
@@ -36,6 +48,7 @@ export const INBOX_KIND_LABELS: Record<InboxKind, string> = {
   concept_new: 'Neues Konzept',
   concept_merge: 'Zusammenführen',
   relation: 'Beziehung',
+  card_batch: 'Karten',
 };
 
 export const INBOX_KIND_FILTERS: readonly { kind: InboxKind; label: string }[] = [
@@ -49,6 +62,7 @@ export const INBOX_KIND_SYMBOLS: Record<InboxKind, string> = {
   concept_new: '◆',
   concept_merge: '⇄',
   relation: '↗',
+  card_batch: '▤',
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -104,14 +118,14 @@ const MAX_PAGES = 10;
 export const INBOX_OPEN_CAP = MAX_PAGES * 200;
 
 /** Alle offenen Einträge (`GET /inbox?status=offen`, Seiten zu 200) */
-export async function fetchOpenItems(signal?: AbortSignal): Promise<InboxItem[]> {
-  const items: InboxItem[] = [];
+export async function fetchOpenItems(signal?: AbortSignal): Promise<ConceptInboxItem[]> {
+  const items: ConceptInboxItem[] = [];
   let cursor: string | null = null;
   for (let page = 0; page < MAX_PAGES; page += 1) {
     const params = new URLSearchParams({ status: 'offen', limit: '200' });
     if (cursor) params.set('cursor', cursor);
     const list = await apiGet(`/inbox?${params.toString()}`, InboxItemListSchema, { signal });
-    items.push(...list.items);
+    items.push(...list.items.filter(isConceptItem));
     cursor = list.next_cursor;
     if (!cursor) break;
   }
@@ -296,7 +310,7 @@ export async function undoBulk(decided: readonly string[]): Promise<InboxBulkRes
 export function conceptNames(items: readonly InboxItem[]): Map<string, string> {
   const names = new Map<string, string>();
   for (const item of items) {
-    if (item.payload.kind === 'relation') continue;
+    if (item.payload.kind === 'relation' || item.payload.kind === 'card_batch') continue;
     if (item.concept_id) names.set(item.concept_id, item.payload.proposal.name);
     if (item.payload.kind === 'concept_merge') {
       names.set(item.payload.target.concept_id, item.payload.target.name);

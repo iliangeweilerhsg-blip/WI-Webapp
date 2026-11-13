@@ -373,7 +373,9 @@ async function openRelationItems(tx: Tx, conceptId: string): Promise<OpenRelatio
 
 function proposalOf(item: ItemRow): { importance: number; exam_hint: boolean } {
   const payload = item.payload as InboxPayload;
-  if (payload.kind === 'relation') throw new Error('Eintrag ohne Konzept-Vorschlag');
+  if (payload.kind === 'relation' || payload.kind === 'card_batch') {
+    throw new Error('Eintrag ohne Konzept-Vorschlag');
+  }
   return payload.proposal;
 }
 

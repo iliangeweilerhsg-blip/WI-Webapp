@@ -1,0 +1,12 @@
+{
+  "state": "review",
+  "due": "2026-11-12T09:30:00Z",
+  "stability": 6.4131,
+  "difficulty": 5.2817,
+  "elapsed_days": 2,
+  "scheduled_days": 6,
+  "learning_steps": 0,
+  "reps": 3,
+  "lapses": 0,
+  "last_review": "2026-11-06T09:30:00Z"
+}
