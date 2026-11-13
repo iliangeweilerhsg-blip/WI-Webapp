@@ -23,10 +23,10 @@ export const FILES_FILE = 'files.sha256';
 export const FILES_MAX_BYTES = 256 * 1024 * 1024;
 /**
  * Höchstlänge einer Zeile der Liste (Zeichen, ohne Zeilenumbruch). Eine echte Zeile hat 65 Zeichen plus Pfad; ein Pfad
- * von 1 Mio. Zeichen kommt praktisch nicht vor. Die Grenze hält den Puffer des Streaming-Lesers klein: Eine Liste ohne
+ * von über 64 Ki Zeichen kommt praktisch nicht vor (macOS: PATH_MAX 1024 Bytes). Die Grenze hält den Puffer des Streaming-Lesers klein: Eine Liste ohne
  * Zeilenumbruch würde sonst ganz im Speicher landen und bei jedem Block neu durchsucht (vor dem Ankervergleich).
  */
-export const FILES_MAX_LINE = 1024 * 1024;
+export const FILES_MAX_LINE = 64 * 1024;
 const MAX_PROBLEMS = 10;
 
 export type SumSub = 'media' | 'vault';
