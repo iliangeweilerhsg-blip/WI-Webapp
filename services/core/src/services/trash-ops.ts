@@ -15,7 +15,7 @@ import { decodeCursor, encodeCursor, type CursorKey } from '../lib/pagination.ts
 import { appendOp } from '../sync/append.ts';
 import { publishAfterCommit } from '../sync/events.ts';
 import { resolveDataPath } from './material.ts';
-import { emitSessionUpdated } from './sessions.ts';
+import { emitSessionUpdated, lockSessionTransitions } from './sessions.ts';
 import {
   CHILDREN,
   PARENT,
@@ -271,7 +271,15 @@ async function sessionParentSource(tx: DbOrTx, id: string, ts: string): Promise<
 export async function restoreWithOps(db: Db, id: string): Promise<TrashRestoreResult> {
   return db.transaction(async (tx) => {
     const { kind, ts } = await findTrashRow(tx, id);
-    if (kind === 'semester') await lockSemesters(tx);
+    // Gleiche Reihenfolge wie das Löschen eines Semesters (organisation.ts: Semester-Sperre, dann Zustandswechsel,
+    // dann Ströme): Semester löschen und Modul wiederherstellen serialisieren sich vollständig (#352). Läuft der
+    // Restore zuerst, liest das Löschen danach neu und schreibt die Ops auch für das zurückgeholte Modul; läuft das
+    // Löschen zuerst, sieht der Restore das Semester gelöscht (409). Die Zustandswechsel-Sperre brauchen die Arten,
+    // deren Kaskade Session-Zeilen ändert (§16.2). Marker/Foto sperren die Session nur `FOR KEY SHARE`: kein Konflikt.
+    if (kind === 'semester' || kind === 'module') await lockSemesters(tx);
+    if (kind === 'semester' || kind === 'module' || kind === 'session' || kind === 'calendar_source') {
+      await lockSessionTransitions(tx);
+    }
     if (kind === 'session') {
       const source = await sessionParentSource(tx, id, ts);
       if (source) {
@@ -284,7 +292,7 @@ export async function restoreWithOps(db: Db, id: string): Promise<TrashRestoreRe
       }
     }
     const affected = await lockAffected(tx, kind, id, { op: 'restore', ts });
-    const result = await restoreFromTrash(tx, id);
+    const result = await restoreFromTrash(tx, id, { kind, ts });
     if (kind === 'page') {
       for (const notebookId of affected.notebooks) {
         await appendServerOp(tx, notebookId, 'page.restore', { page_id: id });
@@ -646,7 +654,11 @@ export async function purgeTrashItems(
 ): Promise<PurgeResult> {
   if (roots.length === 0) return { byKind: {}, filesRemoved: 0, syncOpsRemoved: 0 };
   const outcome = await db.transaction(async (tx) => {
-    // 1. Teilbaum lesen, Ströme sperren, Teilbaum unter der Sperre erneut lesen
+    // 1. Teilbaum lesen, Ströme sperren, Teilbaum unter der Sperre erneut lesen. Jede Runde sperrt ihre neuen Ströme
+    //    sortiert, über Runden hinweg gibt es keine Gesamtordnung. Das ist harmlos (#352): Ein Teilbaum im Papierkorb
+    //    bekommt keine neuen Kinder (Anlegen unter gelöschtem Elternteil scheitert), Runde 2 findet praktisch nie
+    //    neue Ströme. Eine echte Gesamtsortierung ginge nur, indem man ohne Sperre liest und alles auf einmal sperrt,
+    //    was die Prüfung unter der Sperre (Runde 2) verlöre.
     const locked = new Set<string>();
     let tree = emptySubtree();
     for (let round = 0; round < 3; round += 1) {

@@ -280,6 +280,25 @@ describe('softDelete / restoreFromTrash', () => {
     expect((await deletedAt('marker', [earlier]))[earlier]).toBe(earlierTs);
   });
 
+  it('Wiederherstellen mit übergebenem Zeitstempel (#352): ein abweichender Wert trifft die Wurzel nicht → 404, nichts wiederhergestellt', async () => {
+    const ids = await seed();
+    await del('module', ids.module);
+    const [moduleTs] = Object.values(await deletedAt('module', [ids.module]));
+    const stale = await errorOf(
+      handle.db.transaction((tx) =>
+        restoreFromTrash(tx, ids.module, { kind: 'module', ts: '2020-01-01 00:00:00+00' }),
+      ),
+    );
+    expect(stale).toMatchObject({ statusCode: 404, code: 'trash_item_not_found' });
+    expect(Object.values(await deletedAt('module', [ids.module]))).toEqual([moduleTs]);
+    // Mit dem echten Zeitstempel klappt es, ohne dass die Funktion ihn selbst liest
+    const result = await handle.db.transaction((tx) =>
+      restoreFromTrash(tx, ids.module, { kind: 'module', ts: moduleTs! }),
+    );
+    expect(result.kind).toBe('module');
+    expect(Object.values(await deletedAt('module', [ids.module]))).toEqual([null]);
+  });
+
   it('Semester: Module mit Kaskade; Modul allein nicht wiederherstellbar, solange das Semester gelöscht ist', async () => {
     const ids = await seed();
     await del('semester', ids.semester);
