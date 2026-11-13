@@ -664,7 +664,10 @@ export async function purgeTrashItems(
     // 3. Zeilen der Wurzeln sperren und prüfen, dass sie noch im Papierkorb liegen
     for (const { kind, id } of roots) {
       const [row] = await tx.execute<{ id: string }>(
-        sql`SELECT id FROM ${sql.identifier(kind)} WHERE id = ${id} AND deleted_at IS NOT NULL FOR UPDATE`,
+        // Karte: `FOR NO KEY UPDATE`, einheitlich mit §21.7 (`softDelete`, `undoCardBatch`, Restore) und dem
+        // Worker-Purge. Kein Deadlock-Schutz: Eine Bewertung hält nie `card_state` einer Karte im Papierkorb.
+        sql`SELECT id FROM ${sql.identifier(kind)} WHERE id = ${id} AND deleted_at IS NOT NULL
+            ${kind === 'card' ? sql`FOR NO KEY UPDATE` : sql`FOR UPDATE`}`,
       );
       if (!row) throw new HttpError(404, 'trash_item_not_found', 'Dieses Objekt liegt nicht im Papierkorb.');
     }

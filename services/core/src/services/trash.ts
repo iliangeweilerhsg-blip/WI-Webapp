@@ -461,6 +461,21 @@ export async function restoreFromTrash(tx: Tx, id: string): Promise<TrashRestore
     }
   }
 
+  // Wurzel zuerst sperren, dann die Kinder (#348). Der Purge (trash-ops.ts) sperrt ebenfalls erst die Wurzel und
+  // erreicht die Kinder über die Kaskade; schriebe der Restore zuerst die Kinder, könnten beide sich verklemmen
+  // (40P01). Karte: `FOR NO KEY UPDATE` (§21.7, wie `softDelete`), sonst `FOR UPDATE`. Bei der Karte steht das
+  // Konzept `FOR SHARE` oben davor: Dieselbe Reihenfolge wie `createCard` und `reopen` (Konzept vor Karte).
+  // Die Zeile muss noch mit genau diesem Zeitstempel im Papierkorb liegen. Hat sie inzwischen ein `reopen` hart
+  // gelöscht oder ein anderer Restore geholt, trifft das 0 Zeilen: 404, bevor ein Kind angefasst wurde. Die Transaktion
+  // des Aufrufers rollt beim Fehler zurück.
+  const rootLocked = await tx.execute<{ id: string }>(
+    sql`SELECT id FROM ${sql.identifier(kind)} WHERE id = ${id} AND deleted_at = ${ts}::timestamptz
+        ${kind === 'card' ? sql`FOR NO KEY UPDATE` : sql`FOR UPDATE`}`,
+  );
+  if (rootLocked.length === 0) {
+    throw new HttpError(404, 'trash_item_not_found', 'Dieses Objekt liegt nicht im Papierkorb.');
+  }
+
   const mode: Mode = { op: 'restore', ts };
   try {
     // Savepoint: Ein unerwarteter Unique-Verstoß lässt die Transaktion des Aufrufers benutzbar
