@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   cpSync,
   existsSync,
   lchownSync,
@@ -3268,6 +3269,40 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
     copyTree(src, join(root, 's1'), null);
     tamperKeepingTimes(join(root, 's1', 'a.txt'), 'AAAX');
     expect(copyTree(src, join(root, 's2'), join(root, 's1')).linked).toBe(1);
+  });
+
+  it('Datei im vorigen Stand wächst nach der Größenprüfung (gleiche Inode): nicht verlinkt, kopiert, Warnung', () => {
+    const root = tmp();
+    const src = join(root, 'src');
+    mkdirSync(src);
+    writeFileSync(join(src, 'a.txt'), 'AAAA');
+    const s1 = join(root, 's1');
+    copyTree(src, s1, null);
+    const prevFile = join(s1, 'a.txt');
+    const ino = lstatSync(prevFile).ino;
+    const reader = new NoFollowReader({
+      // Wie ein Angreifer im Ziel: unmittelbar vor dem Öffnen im vorigen Stand an dieselbe Inode anhängen
+      step: (op, phase, dir, name) => {
+        if (op === 'open' && phase === 'before' && dir === s1 && name === 'a.txt') {
+          appendFileSync(prevFile, Buffer.alloc(4 * 1024 * 1024));
+        }
+      },
+    });
+    reader.adopt(src);
+    reader.adopt(s1);
+    const damaged: string[] = [];
+    const sums = new Map<string, string>();
+    const stats = copyTree(src, join(root, 's2'), s1, undefined, {
+      reader,
+      sums,
+      onDamagedLink: (p) => damaged.push(p),
+    });
+    expect(lstatSync(prevFile).ino).toBe(ino);
+    expect(stats.linked).toBe(0);
+    expect(stats.copied).toBe(1);
+    expect(damaged).toEqual(['a.txt']);
+    expect(readFileSync(join(root, 's2', 'a.txt'), 'utf8')).toBe('AAAA');
+    expect(sums.get('a.txt')).toBe(sha('AAAA'));
   });
 
   it('Restore liest die Kopie nicht zweimal: jede Datei des Standes wird einmal geöffnet, nie eine im Datenordner', async () => {

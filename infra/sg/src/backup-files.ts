@@ -1,10 +1,10 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
+import { createHash } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, readdirSync, readSync, type Stats } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { FilesRef } from './file-sums.ts';
 import {
   type AnchoredDirs,
-  hashFd,
   hashFdAt,
   NoFollowReader,
   NoFollowRemover,
@@ -244,15 +244,27 @@ interface Level {
 }
 
 /**
- * SHA-256 der Datei `name` im vorigen Stand, wenn sie noch genau die Datei `old` ist (Identität) und lesbar. Sonst
- * `undefined` (nicht verlinken, kopieren).
+ * SHA-256 der Datei `name` im vorigen Stand, wenn sie noch genau die Datei `old` ist (Identität und Größe) und lesbar.
+ * Sonst `undefined` (nicht verlinken, kopieren). Gelesen werden höchstens `old.size + 1` Bytes: Die Datei liegt im Ziel,
+ * wer es beschreiben kann, könnte sie sonst (gleiche Inode) beliebig wachsen lassen und den Lauf so aufhalten.
  */
 function prevSha(reader: NoFollowReader, prev: string, name: string, old: Stats): string | undefined {
   try {
     const opened = reader.open(prev, name);
     try {
-      if (opened.info.dev !== old.dev || opened.info.ino !== old.ino) return undefined;
-      return hashFd(opened.fd);
+      const info = opened.info;
+      if (info.dev !== old.dev || info.ino !== old.ino || info.size !== old.size) return undefined;
+      const hash = createHash('sha256');
+      const buffer = Buffer.allocUnsafe(Math.min(1024 * 1024, old.size + 1));
+      let total = 0;
+      for (;;) {
+        const n = readSync(opened.fd, buffer, 0, Math.min(buffer.length, old.size + 1 - total), total);
+        if (n === 0) break;
+        total += n;
+        if (total > old.size) return undefined; // gewachsen
+        hash.update(buffer.subarray(0, n));
+      }
+      return total === old.size ? hash.digest('hex') : undefined;
     } finally {
       closeSync(opened.fd);
     }
