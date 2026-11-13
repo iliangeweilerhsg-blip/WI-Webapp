@@ -6,6 +6,10 @@
 3. Verwaiste Dateien: Fotos, `.pkdrawing` und Medienordner ohne Zeile (nach 30 Tagen), Fotos mit anderer
    Datei als in der Zeile (HEIC-Waisen) und `*.part` (nach 1 Tag).
 
+Karten (§21.8) sind eigene Wurzeln, solange ihr Konzept nicht mit demselben `deleted_at` im Papierkorb liegt. Dann
+hängen sie an dessen Frist (Konzepte sind noch keine Papierkorb-Art, F-BIB-05) und gehen später über den
+Fremdschlüssel mit. `card_state` und `review_log` gehen über `ON DELETE CASCADE` mit der Karte.
+
 Spiegelt `services/core/src/services/trash-ops.ts` (`purgeTrashItems`). Sperrreihenfolge wie im Core:
 zuerst die Ströme (nach Namen sortiert), dann die Zeilen. Dateien werden erst nach dem Commit gelöscht und nur
 über geprüfte Pfade unterhalb von `SG_DATA_DIR`.
@@ -40,6 +44,8 @@ PARENT: dict[str, tuple[str, str]] = {
     "page": ("notebook", "notebook_id"),
     "marker": ("session", "session_id"),
     "photo": ("session", "session_id"),
+    # §21.8: Das Elternobjekt einer Karte ist ihr Konzept (selbst keine Papierkorb-Art, darum nie Wurzel)
+    "card": ("concept", "concept_id"),
 }
 KINDS = [
     "semester",
@@ -52,11 +58,13 @@ KINDS = [
     "page",
     "marker",
     "photo",
+    "card",
 ]
 #: Löschreihenfolge (Kinder vor Eltern)
 DELETE_ORDER = [
     "marker",
     "photo",
+    "card",  # card_state und review_log folgen über ON DELETE CASCADE (Migration 0012)
     "page",
     "session",
     "slide_deck",
@@ -108,6 +116,7 @@ def _subtree(conn: psycopg.Connection[Any], roots: list[tuple[str, str]]) -> dic
             "page",
             "marker",
             "photo",
+            "card",
             "calendar_source",
             "calendar_event",
         ]

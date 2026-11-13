@@ -279,3 +279,80 @@ def test_active_session_skips_only_its_root(core: psycopg.Connection[Any], tmp_p
     result = run_nightly(core, tmp_path, MaintenanceNightlyPayload())
     assert result["purged_by_kind"] == {"semester": 1}
     assert count(core, "session") == 1
+
+
+def _card(conn: psycopg.Connection[Any], concept: str, deleted_at: Any) -> str:
+    """Karte mit Zustand und einer Bewertung; alle Zeilen mit demselben `deleted_at` (Kaskade §21.8)."""
+    cid = ins(
+        conn,
+        "card",
+        concept_id=concept,
+        kind="basic",
+        front='{"text_md": "F"}',
+        back='{"text_md": "B"}',
+        sources='[{"type": "transcript"}]',
+        origin="manuell",
+        deleted_at=deleted_at,
+    )
+    ins(conn, "card_state", card_id=cid, due=deleted_at or "2026-01-01", deleted_at=deleted_at)
+    ins(
+        conn,
+        "review_log",
+        card_id=cid,
+        reviewed_at="2026-01-02",
+        rating=3,
+        duration_ms=1000,
+        state_before="{}",
+        state_after="{}",
+        deleted_at=deleted_at,
+    )
+    return cid
+
+
+def _concept(conn: psycopg.Connection[Any], deleted_at: Any = None) -> str:
+    return ins(conn, "concept", name="K", status="aktiv", deleted_at=deleted_at)
+
+
+def _ago(conn: psycopg.Connection[Any], days: int) -> Any:
+    row = conn.execute("SELECT now() - make_interval(days => %s)", (days,)).fetchone()
+    assert row is not None
+    return row[0]
+
+
+def test_old_card_is_purged_with_state_and_log(
+    core: psycopg.Connection[Any], tmp_path: Path
+) -> None:
+    concept = _concept(core)
+    _card(core, concept, _ago(core, 40))
+    result = run_nightly(core, tmp_path, MaintenanceNightlyPayload())
+    assert result["purged_by_kind"] == {"card": 1}
+    assert count(core, "card") == 0
+    assert count(core, "card_state") == 0 and count(core, "review_log") == 0
+    assert count(core, "concept") == 1
+
+
+def test_card_within_retention_stays(core: psycopg.Connection[Any], tmp_path: Path) -> None:
+    concept = _concept(core)
+    _card(core, concept, _ago(core, 5))
+    _card(core, concept, None)
+    assert run_nightly(core, tmp_path, MaintenanceNightlyPayload())["purged_count"] == 0
+    assert count(core, "card") == 2 and count(core, "card_state") == 2
+    dry = run_nightly(
+        core, tmp_path, MaintenanceNightlyPayload(purge_older_than_days=3, dry_run=True)
+    )
+    assert dry["purged_by_kind"] == {"card": 1}
+    assert count(core, "card") == 2
+
+
+def test_card_follows_deleted_concept(core: psycopg.Connection[Any], tmp_path: Path) -> None:
+    old = _ago(core, 40)
+    concept = _concept(core, old)
+    _card(core, concept, old)  # gleiches deleted_at: hängt am Konzept, ist keine eigene Wurzel
+    assert run_nightly(core, tmp_path, MaintenanceNightlyPayload())["purged_count"] == 0
+    assert count(core, "card") == 1 and count(core, "review_log") == 1
+    # Karte früher gelöscht als das Konzept: eigene Frist, gelöscht wird nur die Karte
+    other = _concept(core, _ago(core, 2))
+    _card(core, other, _ago(core, 40))
+    result = run_nightly(core, tmp_path, MaintenanceNightlyPayload())
+    assert result["purged_by_kind"] == {"card": 1}
+    assert count(core, "card") == 1 and count(core, "concept") == 2
