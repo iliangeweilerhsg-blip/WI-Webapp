@@ -362,7 +362,10 @@ interface OpOutcome {
   cards?: Card[];
 }
 
-/** Folge-Einträge, die der Eintrag `itemId` mitentschieden hat (nicht die nur umgehängten aus A2) */
+/**
+ * Folge-Einträge, die der Eintrag `itemId` mitentschieden hat (nicht die nur umgehängten aus A2). Weich gelöschte
+ * Einträge zählen nicht: `lockItems` fasst sie nicht an, ein `reopen` öffnet sie also auch nicht wieder
+ */
 async function triggeredItems(tx: Tx, ids: readonly string[], itemId: string): Promise<string[]> {
   if (ids.length === 0) return [];
   const rows = await tx
@@ -371,6 +374,7 @@ async function triggeredItems(tx: Tx, ids: readonly string[], itemId: string): P
     .where(
       and(
         inArray(inboxItem.id, [...ids]),
+        notDeleted(inboxItem),
         ne(inboxItem.status, 'offen'),
         sql`${inboxItem.decision}->>'triggered_by' = ${itemId}`,
       ),
@@ -488,6 +492,9 @@ async function lockSessions(tx: Tx, ids: readonly string[]): Promise<void> {
     .for('share');
 }
 
+/** Obergrenze von `InboxDecisionResult.also_changed` im Schema (VERTRAEGE §20.6) */
+const ALSO_CHANGED_MAX = 500;
+
 /** `POST /inbox/{id}/accept|reject|reopen` */
 export async function decideInboxItem(
   db: Db,
@@ -507,6 +514,11 @@ export async function decideInboxItem(
         throw conceptPending(await peekEffectiveConceptId(tx, item));
       }
       const outcome = await applyOp(tx, item, op, body, state);
+      // Der Serializer prüft erst nach dem Commit. Praktisch unerreichbar (der Worker legt je Lauf höchstens
+      // `MAX_RELATIONS` = 60 Beziehungen an), aber lieber hier zurückrollen als eine gespeicherte Entscheidung mit 500
+      if (outcome.alsoChanged.length > ALSO_CHANGED_MAX) {
+        throw new Error(`also_changed hat mehr als ${ALSO_CHANGED_MAX} Einträge`);
+      }
       const [fresh] = await tx.select().from(inboxItem).where(eq(inboxItem.id, id));
       const [view] = await toApiItems(tx, fresh ? [fresh] : []);
       if (!view) throw notFound();

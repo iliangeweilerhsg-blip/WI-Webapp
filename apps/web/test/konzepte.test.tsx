@@ -494,6 +494,45 @@ describe('Inbox: Vorschläge', () => {
     expect(posts().map((r) => r.path)).toEqual([`/inbox/${I_NEW}/accept`]);
   });
 
+  it('Einzelaktion: der Fokus springt über mitentschiedene Zeilen auf die nächste verbleibende', async () => {
+    // Reihenfolge in der Liste: Konzept, seine Beziehung (wird mitentschieden), eine fremde Beziehung (bleibt offen)
+    const I_OTHER = id(959);
+    const base = relationItem().payload as Extract<InboxItem['payload'], { kind: 'relation' }>;
+    boot([
+      newItem(),
+      relationItem(),
+      relationItem({
+        id: I_OTHER,
+        relation_id: id(951),
+        priority: 101,
+        payload: { ...base, from_concept_id: C_FA, to_concept_id: id(803) },
+      }),
+    ]);
+    core.inboxCascade = true;
+    wrap(<SuggestionInbox />);
+    await screen.findByText('Dritte Normalform');
+    const order = [...document.querySelectorAll<HTMLElement>('[data-inbox-item]')].map(
+      (el) => el.dataset.inboxItem,
+    );
+    expect(order).toEqual([I_NEW, I_REL, I_OTHER]);
+    const real = globalThis.fetch;
+    let decided = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const url = String(args[0]);
+        if (decided && /\/inbox(\?|$)/.test(url)) return new Promise<Response>(() => undefined);
+        const response = await real(...args);
+        if (url.endsWith(`/inbox/${I_NEW}/accept`)) decided = true;
+        return response;
+      }),
+    );
+    fireEvent.click(within(rowOf(I_NEW)).getByRole('button', { name: 'Annehmen' }));
+    await waitFor(() => expect(rowOf(I_REL)).toBeNull());
+    expect(rowOf(I_NEW)).toBeNull();
+    await waitFor(() => expect(rowOf(I_OTHER)).toHaveFocus());
+  });
+
   it('Doppelklick auf „Annehmen“ schickt die Entscheidung nur einmal', async () => {
     boot();
     wrap(<SuggestionInbox />);
