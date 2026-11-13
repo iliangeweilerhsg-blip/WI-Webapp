@@ -890,7 +890,7 @@ describe('Papierkorb (§21.8)', () => {
           WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`;
         expect(rows[0]?.n).toBe(n);
       },
-      { timeout: 10_000, interval: 25 },
+      { timeout: 5_000, interval: 25 },
     );
   }
 
@@ -900,12 +900,14 @@ describe('Papierkorb (§21.8)', () => {
     // Eine fremde Transaktion hält die Wurzel (den Foliensatz): Der Restore hat dann das Modul schon `FOR SHARE`
     const gate = await app.handle.sql.reserve();
     await gate`BEGIN`;
+    let restoring: ReturnType<typeof call> | undefined;
+    let deleting: ReturnType<typeof call> | undefined;
     try {
       await gate`SELECT id FROM slide_deck WHERE id = ${refId('d1')} FOR UPDATE`;
-      const restoring = call('POST', `/trash/${refId('d1')}/restore`);
+      restoring = call('POST', `/trash/${refId('d1')}/restore`);
       await waitForBlocked(1);
       // Das Löschen des Moduls muss auf die Elternsperre warten, statt dazwischenzufahren
-      const deleting = call('DELETE', '/modules/' + refId('m1'));
+      deleting = call('DELETE', '/modules/' + refId('m1'));
       await waitForBlocked(2);
       await gate`COMMIT`;
       const [restored, deleted] = await Promise.all([restoring, deleting]);
@@ -914,6 +916,8 @@ describe('Papierkorb (§21.8)', () => {
     } finally {
       await gate`ROLLBACK`.catch(() => undefined);
       gate.release();
+      // Bei einem Fehlschlag laufende Anfragen abwarten, damit sie nicht in den nächsten Test hineinragen
+      await Promise.allSettled([restoring, deleting]);
     }
     // Das Modul nahm den wiederhergestellten Foliensatz mit in den Papierkorb
     expect(
@@ -935,11 +939,13 @@ describe('Papierkorb (§21.8)', () => {
     // Eine fremde Transaktion hält den Zustand der Karte, damit beide Anfragen mitten in ihrer Reihenfolge stehen
     const gate = await app.handle.sql.reserve();
     await gate`BEGIN`;
+    let restoring: ReturnType<typeof call> | undefined;
+    let purging: ReturnType<typeof call> | undefined;
     try {
       await gate`SELECT id FROM card_state WHERE card_id = ${created.id} FOR UPDATE`;
-      const restoring = call('POST', `/trash/${created.id}/restore`);
+      restoring = call('POST', `/trash/${created.id}/restore`);
       await waitForBlocked(1);
-      const purging = call('DELETE', `/trash/${created.id}`);
+      purging = call('DELETE', `/trash/${created.id}`);
       await waitForBlocked(2);
       await gate`COMMIT`;
       const [restored, purged] = await Promise.all([restoring, purging]);
@@ -950,6 +956,7 @@ describe('Papierkorb (§21.8)', () => {
     } finally {
       await gate`ROLLBACK`.catch(() => undefined);
       gate.release();
+      await Promise.allSettled([restoring, purging]);
     }
     expect(
       await app.handle.sql`SELECT 1 FROM card WHERE id = ${created.id} AND deleted_at IS NULL`,
@@ -968,11 +975,13 @@ describe('Papierkorb (§21.8)', () => {
     await call('DELETE', `/cards/${created.id}`);
     const gate = await app.handle.sql.reserve();
     await gate`BEGIN`;
+    let purging: ReturnType<typeof call> | undefined;
+    let restoring: ReturnType<typeof call> | undefined;
     try {
       await gate`SELECT id FROM card_state WHERE card_id = ${created.id} FOR UPDATE`;
-      const purging = call('DELETE', `/trash/${created.id}`);
+      purging = call('DELETE', `/trash/${created.id}`);
       await waitForBlocked(1);
-      const restoring = call('POST', `/trash/${created.id}/restore`);
+      restoring = call('POST', `/trash/${created.id}/restore`);
       await waitForBlocked(2);
       await gate`COMMIT`;
       const [purged, restored] = await Promise.all([purging, restoring]);
@@ -982,6 +991,7 @@ describe('Papierkorb (§21.8)', () => {
     } finally {
       await gate`ROLLBACK`.catch(() => undefined);
       gate.release();
+      await Promise.allSettled([purging, restoring]);
     }
     expect(await app.handle.sql`SELECT 1 FROM card`).toHaveLength(0);
     expect(await app.handle.sql`SELECT 1 FROM card_state`).toHaveLength(0);
@@ -994,9 +1004,10 @@ describe('Papierkorb (§21.8)', () => {
     // Ein `reopen`/Rückgängig hält das Konzept und löscht die Karte hart (das Konzept bleibt aktiv)
     const holder = await app.handle.sql.reserve();
     await holder`BEGIN`;
+    let restoring: ReturnType<typeof call> | undefined;
     try {
       await holder`SELECT id FROM concept WHERE id = ${refId('k1')} FOR NO KEY UPDATE`;
-      const restoring = call('POST', `/trash/${created.id}/restore`);
+      restoring = call('POST', `/trash/${created.id}/restore`);
       await waitForBlocked(1);
       await holder`DELETE FROM card WHERE id = ${created.id}`;
       await holder`COMMIT`;
@@ -1006,6 +1017,7 @@ describe('Papierkorb (§21.8)', () => {
     } finally {
       await holder`ROLLBACK`.catch(() => undefined);
       holder.release();
+      await Promise.allSettled([restoring]);
     }
     expect(await app.handle.sql`SELECT 1 FROM card`).toHaveLength(0);
     expect(await app.handle.sql`SELECT 1 FROM card_state`).toHaveLength(0);

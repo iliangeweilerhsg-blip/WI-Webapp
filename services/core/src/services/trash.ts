@@ -451,11 +451,15 @@ export async function restoreFromTrash(
   if (parentRef) {
     // Eine Karte kommt nur zu einem aktiven Konzept zurück (§21.8): gelöscht oder nicht mehr `aktiv` blockiert
     const inactive = parentRef.kind === 'concept' ? sql`p.status <> 'aktiv'` : sql`FALSE`;
-    // Elternobjekt immer `FOR SHARE` (#352), vor der Wurzel: Ein gleichzeitiges `softDelete` des Elternteils wartet, bis
-    // das Kind wieder steht (oder der Restore sieht den Elternteil danach gelöscht: 409). Beim Konzept (§21.7) ist es
-    // dieselbe Sperre wie in `createCard`: Ein gleichzeitiges `reopen` von A1 wartet, bis die Karte wieder steht.
-    // Reihenfolge überall Elternteil → Wurzel → Kinder, auch in `softDelete` (Elternteil, dann dessen Kaskade).
-    const lock = sql`FOR SHARE OF p`;
+    // Elternobjekt sperren (#352), vor der Wurzel: Ein gleichzeitiges `softDelete` des Elternteils (`FOR UPDATE`) wartet,
+    // bis das Kind wieder steht (oder der Restore sieht den Elternteil danach gelöscht: 409). Konzept (§21.7): `FOR SHARE`,
+    // dieselbe Sperre wie in `createCard`: Ein gleichzeitiges `reopen` von A1 wartet, bis die Karte wieder steht. Alle
+    // anderen Eltern nur `FOR KEY SHARE`: Das kollidiert mit `FOR UPDATE` (Löschen, Kaskade, Purge), aber nicht mit
+    // `FOR NO KEY UPDATE` und normalen UPDATEs. Wichtig bei Marker/Foto: Die Session-Zeile darf nicht stärker gesperrt
+    // werden als `transitionSession` und `runSessionTick` es tun (Session `FOR NO KEY UPDATE`, dann Strom, §16.2),
+    // sonst kreuzt sich das mit dem Strom, den der Restore schon hält (40P01).
+    // Reihenfolge überall Semester-Sperre → Ströme → Elternteil → Wurzel → Kinder, auch in `softDelete`.
+    const lock = parentRef.kind === 'concept' ? sql`FOR SHARE OF p` : sql`FOR KEY SHARE OF p`;
     const [parent] = await tx.execute<{ id: string; deleted: boolean; inactive: boolean; title: string }>(
       sql`SELECT p.id, p.deleted_at IS NOT NULL AS deleted, ${inactive} AS inactive,
                  ${parentTitle(parentRef.kind)} AS title
