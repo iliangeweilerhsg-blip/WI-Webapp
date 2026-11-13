@@ -415,6 +415,8 @@ export async function moodleLogin(cfg: SgConfig, args: string[], deps: MoodleDep
   io.out(`Moodle-Instanz: ${url}`);
   const token = await obtainToken(deps, url, options);
   const info = await fetchSiteInfo(deps.fetch, url, token);
+  // Den Core vor dem Ablegen fragen: Danach könnte schon diese Abfrage den neuen Token laden und den Zustand verdecken
+  const coreBefore = await fetchCoreStatus(cfg, deps.fetch);
   await storeToken(deps, token);
   const validUntil =
     options.validUntil ?? isoDate(new Date(today.getTime() + TOKEN_VALIDITY_DAYS * 24 * 60 * 60 * 1000));
@@ -438,24 +440,32 @@ export async function moodleLogin(cfg: SgConfig, args: string[], deps: MoodleDep
       `Damit der Core Moodle nutzt: SG_MOODLE_URL=${url} in ${join(cfg.dataDir, 'config', '.env')} eintragen.`,
     );
   }
-  await coreHint(cfg, deps);
+  const hint = coreHint(coreBefore);
+  if (hint) io.out(hint);
   io.out('Prüfen: pnpm sg moodle status');
   return 0;
 }
 
 /**
- * Hinweis, wenn der Core läuft. Ein sofortiges Neuprüfen gibt es nicht: Der Core merkt sich einen gefundenen Token bis
- * zum Neustart (oder bis Moodle ihn ablehnt), einen fehlenden 30 s; weder `GET /moodle/status` noch `POST /moodle/sync`
- * laden ihn neu. Darum nur ein Hinweis, nie ein Fehler: Der Exit-Code bleibt 0, auch wenn der Core nicht antwortet.
+ * Hinweis, wenn der Core läuft, abgeleitet aus seinem Zustand vor dem Login. Ein sofortiges Neuprüfen gibt es nicht:
+ * Der Core merkt sich einen gefundenen Token bis zum Neustart oder bis Moodle ihn ablehnt (dann liest er beim nächsten
+ * Status-Abruf neu, „ungültig“ gilt 60 s), einen fehlenden 30 s. Ohne `SG_MOODLE_URL` liest er gar keinen Token.
+ * Darum nur ein Hinweis, nie ein Fehler: Der Exit-Code bleibt 0, auch wenn der Core nicht antwortet (`null`).
  */
-async function coreHint(cfg: SgConfig, deps: MoodleDeps): Promise<void> {
-  const status = await fetchCoreStatus(cfg, deps.fetch);
-  if (!status) return;
-  deps.io.out(
-    status.state === 'nicht_eingerichtet'
-      ? 'Der Core läuft und liest den neuen Token spätestens nach etwa 30 Sekunden.'
-      : 'Der Core läuft und nutzt womöglich noch den bisherigen Token: pnpm sg stop && pnpm sg start.',
-  );
+export function coreHint(before: MoodleStatus | null): string | null {
+  if (!before) return null;
+  if (before.site_url === null) {
+    return 'Der Core läuft ohne SG_MOODLE_URL. Nach dem Eintrag: pnpm sg stop && pnpm sg start.';
+  }
+  switch (before.state) {
+    case 'nicht_eingerichtet':
+      return 'Der Core läuft und liest den neuen Token spätestens nach etwa 30 Sekunden.';
+    case 'ungueltig':
+    case 'abgelaufen':
+      return 'Der Core läuft und liest den neuen Token spätestens nach etwa einer Minute.';
+    default:
+      return 'Der Core läuft und nutzt noch den bisherigen Token: pnpm sg stop && pnpm sg start.';
+  }
 }
 
 export async function fetchCoreStatus(cfg: SgConfig, fetchFn: FetchFn): Promise<MoodleStatus | null> {

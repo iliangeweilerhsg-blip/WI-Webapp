@@ -386,9 +386,9 @@ describe('moodle login mit Benutzername und Passwort', () => {
 });
 
 describe('moodle login: Hinweis zum laufenden Core', () => {
-  const coreStatus = (state: string): Record<string, unknown> => ({
+  const coreStatus = (state: string, siteUrl: string | null = MOODLE): Record<string, unknown> => ({
     state,
-    site_url: null,
+    site_url: siteUrl,
     site_name: null,
     user_fullname: null,
     token_valid_until: null,
@@ -421,17 +421,54 @@ describe('moodle login: Hinweis zum laufenden Core', () => {
     expectNoSecrets(io);
   });
 
-  it('Core läuft mit bisherigem Token: Hinweis auf Neustart, Exit-Code 0', async () => {
-    const { fetch: fetchFn } = routedFetch(async () => Response.json(coreStatus('ok')));
+  it('fragt den Core, bevor der Token im Schlüsselbund liegt (sonst lädt schon die Abfrage den neuen Token)', async () => {
+    const keychain = new MemoryKeychain();
+    const seen: (string | null)[] = [];
+    const { fetch: fetchFn } = routedFetch(async () => {
+      seen.push(await keychain.read(TEST_SERVICE));
+      return Response.json(coreStatus('nicht_eingerichtet'));
+    });
+    const { deps } = makeDeps({ fetch: fetchFn, keychain });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    expect(seen).toEqual([null]);
+    expect(await keychain.read(TEST_SERVICE)).toBe(TOKEN);
+  });
+
+  it('Core lief mit bisherigem Token: Hinweis auf Neustart, Exit-Code 0', async () => {
+    for (const state of ['ok', 'laeuft_bald_ab', 'nicht_erreichbar']) {
+      const { deps, io } = makeDeps({
+        fetch: routedFetch(async () => Response.json(coreStatus(state))).fetch,
+      });
+      expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+      expect(io.lines.join('\n')).toMatch(/bisherigen Token: pnpm sg stop && pnpm sg start/);
+    }
+  });
+
+  it('Core hatte einen abgelehnten Token: liest den neuen binnen etwa einer Minute', async () => {
+    for (const state of ['ungueltig', 'abgelaufen']) {
+      const { deps, io } = makeDeps({
+        fetch: routedFetch(async () => Response.json(coreStatus(state))).fetch,
+      });
+      expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+      expect(io.lines.join('\n')).toMatch(/spätestens nach etwa einer Minute/);
+    }
+  });
+
+  it('Core läuft ohne SG_MOODLE_URL: Hinweis auf Eintrag und Neustart', async () => {
+    const { fetch: fetchFn } = routedFetch(async () => Response.json(coreStatus('nicht_eingerichtet', null)));
     const { deps, io } = makeDeps({ fetch: fetchFn });
     expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
-    expect(io.lines.join('\n')).toMatch(/bisherigen Token: pnpm sg stop && pnpm sg start/);
+    expect(io.lines.join('\n')).toMatch(
+      /ohne SG_MOODLE_URL\. Nach dem Eintrag: pnpm sg stop && pnpm sg start/,
+    );
+    expect(io.lines.join('\n')).not.toMatch(/30 Sekunden/);
   });
 
   it('Core läuft nicht oder antwortet falsch: kein Hinweis, kein Fehler', async () => {
     for (const core of [
       async (): Promise<Response> => Promise.reject(new Error('ECONNREFUSED')),
       async (): Promise<Response> => new Response('kaputt', { status: 500 }),
+      async (): Promise<Response> => Response.json({ state: 'unbekannt' }),
     ]) {
       const { deps, io } = makeDeps({ fetch: routedFetch(core).fetch });
       expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
