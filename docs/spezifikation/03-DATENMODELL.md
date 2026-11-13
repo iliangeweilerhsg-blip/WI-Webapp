@@ -361,8 +361,13 @@ device(name text, kind text, token_hash text, last_seen_at timestamptz,
   clock_offset_ms int, app_version text)
 
 backup_run(started_at timestamptz, finished_at timestamptz, target text,
-  size_bytes int8, state text, error text NULL,
-  files_sha256 text NULL)               -- SHA-256 der Prüfsummenliste files.sha256 (64 Hex), Vertrauensanker für media/ und vault/
+  size_bytes int8, state text, error text NULL,       -- state: laeuft | fertig | fehler
+  trigger text,                         -- zeitplan | manuell | vor_migration (Pflicht)
+  stand text NULL,                      -- Name des Stands für `sg restore <stand>`, z. B. 20261104T030012Z
+  dump_sha256 text NULL,                -- SHA-256 des Dumps (64 Hex); der Restore-Test vertraut nur Ständen mit dieser Prüfsumme im Manifest
+  files_sha256 text NULL,               -- SHA-256 der Prüfsummenliste files.sha256 (64 Hex), Vertrauensanker für media/ und vault/
+  thin_left text[] NULL,                -- Reste des Ausdünnens nach dem Lauf (Stände/.partial, die stehen blieben); nur für den Vergleich mit dem nächsten Lauf, nicht in der API
+  warning text NULL)                    -- Warnung zum Lauf, höchstens 500 Zeichen (z. B. Stand, der sich seit mehreren Läufen nicht entfernen lässt)
 
 setting(key text primary key, value jsonb)
 ```

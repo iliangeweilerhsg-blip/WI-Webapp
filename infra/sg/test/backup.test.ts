@@ -45,6 +45,7 @@ import {
   emptySums,
   FILES_MAX_LINE,
   FileListParser,
+  FILES_MAX_BYTES,
   formatFileList,
   NameConflictError,
   parseFileList,
@@ -3330,6 +3331,22 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
     expect(readFileSync(join(s.dataDir, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
   });
 
+  it('Restore: beim Kopieren erscheint gedrosselt eine Fortschrittszeile (injizierte Uhr)', async () => {
+    const s = await prepared();
+    let t = 0;
+    const deps: RestoreDeps = { ...s.deps, clock: () => (t += 6000) };
+    expect(await runRestore(deps, { stand: STAND, test: false, yes: true })).toBe(0);
+    const lines = s.logs.filter((l) => /Dateien kopiert und geprüft/.test(l));
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toMatch(/^ {2}(media|vault): 1 Dateien kopiert und geprüft \(\d+ MB\) …$/);
+  });
+
+  it('Restore: stehende Uhr → keine Fortschrittszeile', async () => {
+    const s = await prepared();
+    expect(await runRestore({ ...s.deps, clock: () => 1 }, { stand: STAND, test: false, yes: true })).toBe(0);
+    expect(s.logs.filter((l) => /Dateien kopiert und geprüft/.test(l))).toEqual([]);
+  });
+
   it('Restore: Datei im Stand verändert → Abweichung wird an den kopierten Bytes erkannt, nichts wird getauscht', async () => {
     const s = await prepared();
     writeFileSync(join(s.target, STAND, 'vault', 'n.md'), '# Notiy');
@@ -3387,6 +3404,56 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
       const result = withFile(text, (fd) => readFileListFd(fd, { chunkSize: 50 }));
       expect(result.sums).toBeNull();
       expect(result.sha256).toBe(sha256Hex(text));
+    });
+
+    it('mit Anker: falscher Anker → keine Map, kein Parsen, nur ein Durchgang; richtiger Anker → gleiches Ergebnis wie ohne', () => {
+      const text = listText(300);
+      const feed = vi.spyOn(FileListParser.prototype, 'feed');
+      try {
+        const wrong = withFile(text, (fd) => readFileListFd(fd, { chunkSize: 1000, anchor: sha256Hex('x') }));
+        expect(wrong.sums).toBeNull();
+        expect(wrong.sha256).toBe(sha256Hex(text));
+        expect(feed).not.toHaveBeenCalled();
+        // Auch eine ungültige Liste wird mit falschem Anker nie geparst
+        const bad = withFile('kaputt\n', (fd) => readFileListFd(fd, { anchor: sha256Hex(text) }));
+        expect(bad.sums).toBeNull();
+        expect(feed).not.toHaveBeenCalled();
+        const right = withFile(text, (fd) =>
+          readFileListFd(fd, { chunkSize: 1000, anchor: sha256Hex(text) }),
+        );
+        expect(feed).toHaveBeenCalled();
+        expect(right.sha256).toBe(sha256Hex(text));
+        expect(right.bytes).toBe(Buffer.byteLength(text));
+        expect(right.sums).toEqual(parseFileList(text));
+      } finally {
+        feed.mockRestore();
+      }
+    });
+
+    it('mit Anker: Datei ändert sich zwischen den Durchgängen → SHA des Parse-Durchgangs weicht vom Anker ab', () => {
+      const text = listText(20);
+      const path = join(tmp(), 'files.sha256');
+      writeFileSync(path, text);
+      const fd = openSync(path, 'r');
+      let eofs = 0;
+      const read = ((f: number, buf: Buffer, off: number, len: number, pos: number | null) => {
+        const n = readSync(f, buf, off, len, pos);
+        if (n === 0 && (eofs += 1) === 1) writeFileSync(path, text.replace('Übung 1', 'Übung 9')); // nach Durchgang 1
+        return n;
+      }) as typeof readSync;
+      try {
+        const result = readFileListFd(fd, { anchor: sha256Hex(text), read });
+        expect(result.sha256).not.toBe(sha256Hex(text));
+      } finally {
+        closeSync(fd);
+      }
+    });
+
+    it('Anker zu groß: Liste über FILES_MAX_BYTES wird auch mit Anker abgelehnt', () => {
+      const read = (() => FILES_MAX_BYTES + 1) as unknown as typeof readSync;
+      const result = readFileListFd(0, { chunkSize: 16, anchor: sha256Hex('x'), read });
+      expect(result.tooLarge).toBe(true);
+      expect(result.sums).toBeNull();
     });
 
     it('Parser: letzte Zeile ohne Zeilenumbruch, doppelter Pfad und fremder Unterordner sind ungültig, leer ist gültig', () => {

@@ -176,6 +176,8 @@ export interface CopyTreeOptions {
    * Quelle gelesen wurden (#114 N-1). Beim Kopieren entsteht sie nebenbei, bei verlinkten Dateien durch Lesen der Quelle.
    */
   sums?: Map<string, string>;
+  /** Wird nach jeder Datei aufgerufen, mit ihrer Größe in Byte (Fortschrittsanzeige, z. B. beim Restore) */
+  onFile?: (bytes: number) => void;
   /**
    * Nur mit `sums`: Eine unveränderte Datei des vorigen Standes hat nicht die Prüfsumme der Quelle (der vorige Stand ist
    * an dieser Datei beschädigt oder manipuliert, oder die Quelle hat sich bei gleicher Größe und Zeit geändert, #324).
@@ -227,6 +229,7 @@ export function copyTree(
     strict,
     owner,
     sums: options.sums,
+    onFile: options.onFile,
     onDamagedLink: options.onDamagedLink,
   });
   return result;
@@ -240,6 +243,7 @@ interface Level {
   /** Besitzer eigener Dateien im Ziel (`undefined`: ohne Unix-Besitzer, nicht geprüft) */
   owner: number | undefined;
   sums?: Map<string, string> | undefined;
+  onFile?: ((bytes: number) => void) | undefined;
   onDamagedLink?: ((path: string, reason: 'differs' | 'unreadable') => void) | undefined;
 }
 
@@ -409,6 +413,7 @@ function copyLevel(
       result.files += 1;
       result.bytes += real.size;
       result[how] += 1;
+      level.onFile?.(real.size);
     } finally {
       closeSync(opened.fd);
     }

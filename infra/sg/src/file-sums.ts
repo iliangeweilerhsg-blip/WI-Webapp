@@ -186,27 +186,45 @@ export interface StreamedList {
  * Liest `files.sha256` aus `fd` in einem Durchgang: SHA-256 und Zeile für Zeile Parsen aus denselben Blöcken. Im Speicher
  * liegen nur ein Block und die geparsten Einträge, nie der ganze Text (#324). Das Ergebnis ist erst gültig, wenn der
  * Aufrufer `sha256` mit dem Anker verglichen hat; bis dahin hat das Lesen keine Nebenwirkungen (nichts wird geschrieben,
- * nichts weitergegeben). `read` nur für Tests.
+ * nichts weitergegeben). Mit `anchor` wird erst nur gehasht und erst bei passender SHA geparst (zweiter Durchgang
+ * über denselben Deskriptor, siehe unten); `read` nur für Tests.
  */
 export function readFileListFd(
   fd: number,
-  options: { chunkSize?: number; read?: typeof readSync } = {},
+  options: { chunkSize?: number; read?: typeof readSync; anchor?: string } = {},
 ): StreamedList {
   const read = options.read ?? readSync;
   const buffer = Buffer.allocUnsafe(options.chunkSize ?? 1024 * 1024);
-  const hash = createHash('sha256');
-  const parser = new FileListParser();
-  let bytes = 0;
-  for (;;) {
-    const n = read(fd, buffer, 0, buffer.length, null);
-    if (n === 0) break;
-    bytes += n;
-    if (bytes > FILES_MAX_BYTES) return { sha256: '', bytes, sums: null, tooLarge: true };
-    const block = buffer.subarray(0, n);
-    hash.update(block);
-    parser.feed(block);
+  /** Ein Durchgang über die Datei; `position` `null`: fortlaufend lesen, sonst ab dieser Stelle mit festen Positionen */
+  const pass = (parser: FileListParser | null, position: number | null) => {
+    const hash = createHash('sha256');
+    let bytes = 0;
+    for (;;) {
+      const n = read(fd, buffer, 0, buffer.length, position === null ? null : position + bytes);
+      if (n === 0) break;
+      bytes += n;
+      if (bytes > FILES_MAX_BYTES) return { sha256: '', bytes, tooLarge: true };
+      const block = buffer.subarray(0, n);
+      hash.update(block);
+      parser?.feed(block);
+    }
+    return { sha256: hash.digest('hex'), bytes, tooLarge: false };
+  };
+  if (options.anchor !== undefined) {
+    // Mit Anker (#324): erst nur hashen, ohne Einträge zu sammeln. Passt die SHA nicht zum Anker, entsteht nie eine Map
+    // (bei einer manipulierten Liste mit Millionen kurzer Zeilen wären das sonst mehrere hundert MB, bevor der Vergleich
+    // abgelehnt hätte). Erst danach wird derselbe Deskriptor noch einmal von vorn gelesen und geparst; die SHA dieses
+    // zweiten Durchgangs gilt (und wird vom Aufrufer wieder gegen den Anker geprüft): Ändert jemand die Datei zwischen
+    // den Durchgängen, passt sie nicht mehr und wird abgelehnt.
+    const first = pass(null, 0);
+    if (first.tooLarge || first.sha256 !== options.anchor) return { ...first, sums: null };
+    const parser = new FileListParser();
+    const second = pass(parser, 0);
+    return { ...second, sums: second.tooLarge ? null : parser.finish() };
   }
-  return { sha256: hash.digest('hex'), bytes, sums: parser.finish(), tooLarge: false };
+  const parser = new FileListParser();
+  const only = pass(parser, null);
+  return { ...only, sums: only.tooLarge ? null : parser.finish() };
 }
 
 export interface VerifyOptions {
@@ -362,6 +380,7 @@ export function progressLogger(
   label: string,
   everyMs = 5000,
   now: () => number = Date.now,
+  verb = 'geprüft',
 ): (bytes: number) => void {
   let files = 0;
   let bytes = 0;
@@ -371,7 +390,7 @@ export function progressLogger(
     bytes += n;
     if (now() - last >= everyMs) {
       last = now();
-      log(`  ${label}: ${files} Dateien geprüft (${(bytes / 1024 / 1024).toFixed(0)} MB) …`);
+      log(`  ${label}: ${files} Dateien ${verb} (${(bytes / 1024 / 1024).toFixed(0)} MB) …`);
     }
   };
 }

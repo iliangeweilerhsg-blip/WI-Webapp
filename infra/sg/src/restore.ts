@@ -69,6 +69,8 @@ export interface RestoreDeps extends BackupIo {
   /** Frage stellen, `true` = ja */
   confirm: (question: string) => Promise<boolean>;
   now?: () => Date;
+  /** Uhr in Millisekunden für die Fortschrittszeilen (nur für Tests), Standard `Date.now` */
+  clock?: () => number;
   random?: () => string;
   /** Anzahl der Migrationen im Code (`services/core/drizzle`), `undefined` = nicht prüfen */
   codeMigrations?: number;
@@ -309,14 +311,15 @@ export function readFileSums(dir: string, manifest: Manifest, tree: StandTree): 
       }
       throw error;
     }
-    // Ein Durchgang (#324): SHA-256 und Parsen aus denselben Blöcken, nie die ganze Liste im Speicher. Das Ergebnis gilt
-    // erst, wenn die SHA zum Anker passt (unten); bis dahin hat das Lesen keine Nebenwirkung.
+    // Streamend (#324), nie die ganze Liste im Speicher. Erst wird nur die SHA-256 gebildet und mit dem Anker verglichen,
+    // eine Map der Einträge entsteht erst danach; die SHA des Durchgangs, der parst, wird unten noch einmal gegen den
+    // Anker geprüft. Bis dahin hat das Lesen keine Nebenwirkung.
     let list: StreamedList;
     try {
       if (opened.info.size > FILES_MAX_BYTES) {
         throw bad('beschaedigt', `${FILES_FILE} im Stand ${manifest.stand} ist unerwartet groß.`);
       }
-      list = readFileListFd(opened.fd);
+      list = readFileListFd(opened.fd, { anchor: ref.sha256 });
     } finally {
       closeSync(opened.fd);
     }
@@ -926,6 +929,7 @@ async function swapIn(
           reader: tree.reader,
           strictSource: true,
           ...(copied ? { sums: copied } : {}),
+          onFile: progressLogger(log, d.name, 5000, deps.clock ?? Date.now, 'kopiert und geprüft'),
         }),
       );
       if (sums && copied) {
