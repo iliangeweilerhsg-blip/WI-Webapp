@@ -96,6 +96,12 @@ export const backupRun = pgTable(
      */
     dumpSha256: text('dump_sha256'),
     /**
+     * SHA-256 der Prüfsummenliste von `media/` und `vault/` (`files.sha256` im Stand, hex), von `sg backup` beim
+     * Abschluss eingetragen (#114 N-1). Wie `dump_sha256` die Vertrauensquelle: Das Manifest im Ziel muss genau diese
+     * Prüfsumme tragen, sonst gilt die Liste als nicht authentisch. `null` = Lauf vor dieser Spalte.
+     */
+    filesSha256: text('files_sha256'),
+    /**
      * Reste des Ausdünnens nach diesem Lauf (Stände bzw. `.partial`-Ordner, die stehen blieben), von `sg backup`
      * eingetragen (#124). `null` = nicht ausgedünnt oder Lauf vor dieser Spalte. Nur für den Vergleich mit dem
      * nächsten Lauf, nicht in der API.
@@ -106,6 +112,10 @@ export const backupRun = pgTable(
   },
   (t) => [
     check('backup_run_dump_sha256_chk', sql`${t.dumpSha256} IS NULL OR ${t.dumpSha256} ~ '^[0-9a-f]{64}$'`),
+    check(
+      'backup_run_files_sha256_chk',
+      sql`${t.filesSha256} IS NULL OR ${t.filesSha256} ~ '^[0-9a-f]{64}$'`,
+    ),
     check('backup_run_warning_chk', sql`${t.warning} IS NULL OR char_length(${t.warning}) <= 500`),
     check('backup_run_state_chk', sql`${t.state} IN ('laeuft','fertig','fehler')`),
     check('backup_run_trigger_chk', sql`${t.trigger} IN ('zeitplan','manuell','vor_migration')`),

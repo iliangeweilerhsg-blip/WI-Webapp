@@ -7,7 +7,7 @@
 //   Ordner neben den alten; erst dann wird getauscht. Die alten Daten bleiben unter anderem Namen liegen
 //   (`<db>_vor_restore_<zeit>`, `media.vor-restore-<zeit>`), nichts wird gelöscht. Backup-Hardlinks werden nie
 //   übernommen: Der Datenordner bekommt echte Kopien, sonst würden spätere Änderungen den Stand verändern.
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import {
   copyTree,
@@ -23,6 +23,7 @@ import {
   COUNT_TABLES,
   countObjects,
   errorText,
+  hasBackupRunColumn,
   readBackupSettings,
   validateTarget,
   type BackupIo,
@@ -35,6 +36,17 @@ import {
   releaseOnSignal,
   type CoreLockHandle,
 } from './core-lock.ts';
+import {
+  FILES_FILE,
+  FILES_MAX_BYTES,
+  HEX64,
+  parseFileList,
+  progressLogger,
+  sha256Hex,
+  SUBS,
+  verifyTree,
+  type SumMap,
+} from './file-sums.ts';
 import { NoFollowReader, UnsafeTargetError, type Identity } from './nofollow.ts';
 import { safeIdent, type PgAccess } from './pg.ts';
 import { StandError, withVerifiedDump } from './staging.ts';
@@ -101,12 +113,16 @@ export function listStandsText(target: string): string[] {
  * (`withVerifiedDump`): Prüfen und Einspielen betreffen so dieselben Bytes (kein Austausch dazwischen, TOCTOU).
  * Mit `maxDumpBytes` (aus `backup_run.size_bytes`, M-1 aus #114) darf das Manifest keinen größeren Dump nennen: Die
  * Größe im Manifest begrenzt die Prüfkopie, darf aber selbst nicht beliebig groß gefälscht sein.
+ * Mit `expectedFilesSha` (`backup_run.files_sha256`, #114 N-1) muss das Manifest außerdem genau diese Prüfsumme der
+ * Dateiliste tragen: Ein Manifest ohne Liste (Herabstufung auf den alten Stand) oder mit anderer Liste wird abgelehnt.
+ * `null`/`undefined`: der Lauf kennt keine (Lauf vor Migration 0011), dann gibt es nur die Prüfung gegen das Manifest.
  */
 export async function loadStand(
   target: string,
   stand: string,
   expectedSha?: string,
   maxDumpBytes?: number,
+  expectedFilesSha?: string | null,
 ): Promise<{ dir: string; manifest: Manifest }> {
   if (!STAND_RE.test(stand)) throw new Error(`„${stand}“ ist kein Stand (erwartet z. B. 20261104T030012Z).`);
   const dir = join(target, stand);
@@ -126,6 +142,30 @@ export async function loadStand(
       `Das Manifest des Standes ${stand} nennt einen größeren Dump, als der protokollierte Backup-Lauf war. Der Stand wird nicht eingespielt.`,
     );
   }
+  const files = manifest.files;
+  if (
+    files !== undefined &&
+    !(
+      typeof files === 'object' &&
+      files !== null &&
+      files.file === FILES_FILE &&
+      typeof files.sha256 === 'string' &&
+      HEX64.test(files.sha256) &&
+      Number.isSafeInteger(files.count) &&
+      files.count >= 0
+    )
+  ) {
+    throw new StandError(
+      'beschaedigt',
+      `Das Manifest des Standes ${stand} beschreibt die Dateiliste ungültig.`,
+    );
+  }
+  if (expectedFilesSha && files?.sha256 !== expectedFilesSha) {
+    throw new StandError(
+      'nicht_authentisch',
+      `Die Prüfsummen für media/ und vault/ im Stand ${stand} passen nicht zum protokollierten Backup-Lauf. Der Stand wird nicht eingespielt.`,
+    );
+  }
   if (!existsSync(join(dir, DUMP_FILE)))
     throw new StandError('beschaedigt', `Im Stand ${stand} fehlt ${DUMP_FILE}.`);
   return { dir, manifest };
@@ -136,6 +176,8 @@ export interface RunAnchor {
   sha256: string;
   /** `backup_run.size_bytes` (Dump plus Dateien), `undefined` = unbekannt */
   sizeBytes: number | undefined;
+  /** `backup_run.files_sha256` (#114 N-1), `null` = Lauf vor Migration 0011 */
+  filesSha256: string | null;
 }
 
 /**
@@ -146,15 +188,21 @@ export interface RunAnchor {
  */
 export async function runAnchor(pg: PgAccess, stand: string): Promise<RunAnchor | null> {
   if (!STAND_RE.test(stand)) return null;
+  // Die Spalte `files_sha256` fehlt in einer Datenbank vor Migration 0011
+  const filesColumn = (await hasBackupRunColumn(pg, 'files_sha256')) ? `coalesce(files_sha256, '')` : `''`;
   const [row] = await pg.query(
-    `SELECT dump_sha256, coalesce(size_bytes::text, '') FROM backup_run
+    `SELECT dump_sha256, coalesce(size_bytes::text, ''), ${filesColumn} FROM backup_run
       WHERE state = 'fertig' AND deleted_at IS NULL AND dump_sha256 <> '' AND stand = :'stand'
       ORDER BY started_at DESC, id DESC LIMIT 1`,
     { stand },
   );
   if (!row?.[0]) return null;
   const size = row[1] ? Number(row[1]) : NaN;
-  return { sha256: row[0], sizeBytes: Number.isSafeInteger(size) ? size : undefined };
+  return {
+    sha256: row[0],
+    sizeBytes: Number.isSafeInteger(size) ? size : undefined,
+    filesSha256: row[2] ? row[2] : null,
+  };
 }
 
 /** Dump des Standes in den privaten Ordner kopieren, dabei prüfen, dann mit genau dieser Kopie weitermachen */
@@ -190,6 +238,8 @@ function asStandError<T>(dir: string, fn: () => T): T {
 
 export interface StandTree {
   reader: NoFollowReader;
+  /** Der Stand-Ordner selbst (für `files.sha256`) */
+  standDir: string;
   media: string | null;
   vault: string | null;
 }
@@ -207,7 +257,12 @@ export function openStandTree(dir: string, targetId?: Identity): StandTree {
     reader.adopt(parent, targetId);
     const standDir = reader.child(parent, basename(dir));
     if (!standDir) throw new UnsafeTargetError(`${dir} fehlt.`);
-    return { reader, media: reader.child(standDir, 'media'), vault: reader.child(standDir, 'vault') };
+    return {
+      reader,
+      standDir,
+      media: reader.child(standDir, 'media'),
+      vault: reader.child(standDir, 'vault'),
+    };
   });
 }
 
@@ -229,6 +284,101 @@ export function standFilesMatch(dir: string, manifest: Manifest, targetId?: Iden
     vault.files === manifest.vault.files &&
     vault.bytes === manifest.vault.bytes
   );
+}
+
+/**
+ * Liest `files.sha256` aus dem Stand (verankert, ohne Symlink-Folgen, höchstens 256 MB) und prüft sie gegen das
+ * Manifest: Die SHA-256 der Datei muss `manifest.files.sha256` sein und die Zeilenzahl `manifest.files.count`.
+ * `null`: der Stand hat keine Liste (Stand vor #114 N-1).
+ */
+export function readFileSums(dir: string, manifest: Manifest, tree: StandTree): SumMap | null {
+  const ref = manifest.files;
+  if (!ref) return null;
+  const bad = (reason: 'beschaedigt' | 'nicht_authentisch', text: string) => new StandError(reason, text);
+  return asStandError(dir, () => {
+    let opened: { fd: number; info: { size: number } };
+    try {
+      opened = tree.reader.open(tree.standDir, FILES_FILE);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw bad(
+          'beschaedigt',
+          `Im Stand ${manifest.stand} fehlt ${FILES_FILE} (Prüfsummen von media/ und vault/).`,
+        );
+      }
+      throw error;
+    }
+    let buffer: Buffer;
+    try {
+      if (opened.info.size > FILES_MAX_BYTES) {
+        throw bad('beschaedigt', `${FILES_FILE} im Stand ${manifest.stand} ist unerwartet groß.`);
+      }
+      buffer = Buffer.alloc(opened.info.size);
+      let offset = 0;
+      while (offset < buffer.length) {
+        const n = readSync(opened.fd, buffer, offset, buffer.length - offset, null);
+        if (n === 0) break;
+        offset += n;
+      }
+      // Wächst die Datei beim Lesen, ist sie nicht mehr die geprüfte
+      if (offset !== buffer.length || readSync(opened.fd, Buffer.alloc(1), 0, 1, null) !== 0) {
+        throw bad('beschaedigt', `${FILES_FILE} im Stand ${manifest.stand} hat sich beim Lesen verändert.`);
+      }
+    } finally {
+      closeSync(opened.fd);
+    }
+    if (sha256Hex(buffer) !== ref.sha256) {
+      throw bad(
+        'nicht_authentisch',
+        `${FILES_FILE} im Stand ${manifest.stand} passt nicht zur Prüfsumme im Manifest. Der Stand wird nicht eingespielt.`,
+      );
+    }
+    const sums = parseFileList(buffer.toString('utf8'));
+    if (!sums || sums.media.size + sums.vault.size !== ref.count) {
+      throw bad('beschaedigt', `${FILES_FILE} im Stand ${manifest.stand} ist ungültig oder unvollständig.`);
+    }
+    return sums;
+  });
+}
+
+export interface SumsReport {
+  /** `false`: Stand vor #114 N-1, nur Anzahl und Größe wurden geprüft */
+  checked: boolean;
+  files: number;
+  bytes: number;
+  /** Abweichungen (höchstens 10) */
+  problems: string[];
+}
+
+/**
+ * Prüfsummen jeder Datei in `media/` und `vault/` des Standes im Ziel gegen die Liste (streamend, mit Fortschritt).
+ * Abweichungen, fehlende und zusätzliche Dateien stehen in `problems`. Eine ungültige Liste wirft `StandError`.
+ */
+export function verifyStandSums(
+  deps: Pick<RestoreDeps, 'log'>,
+  dir: string,
+  manifest: Manifest,
+  targetId?: Identity,
+): SumsReport {
+  if (!manifest.files) return { checked: false, files: 0, bytes: 0, problems: [] };
+  const tree = openStandTree(dir, targetId);
+  const sums = readFileSums(dir, manifest, tree) as SumMap;
+  const report: SumsReport = { checked: true, files: 0, bytes: 0, problems: [] };
+  for (const sub of SUBS) {
+    if (report.problems.length > 0) break;
+    deps.log(`Prüfe Prüfsummen von ${sub}/ (${sums[sub].size} Dateien) …`);
+    const part = asStandError(dir, () =>
+      verifyTree(tree[sub], sub, sums[sub], {
+        reader: tree.reader,
+        strict: true,
+        onFile: progressLogger(deps.log, sub),
+      }),
+    );
+    report.files += part.files;
+    report.bytes += part.bytes;
+    report.problems.push(...part.problems);
+  }
+  return report;
 }
 
 export async function dropDatabase(pg: PgAccess, name: string): Promise<void> {
@@ -339,7 +489,13 @@ export async function runRestore(deps: RestoreDeps, options: RestoreOptions): Pr
         `Hinweis: backup_run ist nicht lesbar (${errorText(error, cfg)}). Der Stand wird nur gegen sein Manifest geprüft.`,
       );
     }
-    const { dir, manifest } = await loadStand(target, options.stand, anchor?.sha256, anchor?.sizeBytes);
+    const { dir, manifest } = await loadStand(
+      target,
+      options.stand,
+      anchor?.sha256,
+      anchor?.sizeBytes,
+      anchor?.filesSha256,
+    );
     if (anchor)
       log(`Stand ${options.stand} gehört zu einem eigenen Backup-Lauf, seine Prüfsumme wird verlangt.`);
     else if (anchorRead)
@@ -362,7 +518,12 @@ export interface RestoreTestReport {
   /** Tabellen mit anderer Zeilenzahl als im Manifest (Richtwert, Schreibzugriffe während des Backups sind möglich) */
   differences: { table: string; expected: number; actual: number }[];
   missingTables: string[];
+  /** Anzahl und Größe stimmen und, wenn der Stand Prüfsummen hat, auch jede Datei */
   mediaOk: boolean;
+  /** Wurden Prüfsummen von media/ und vault/ verglichen? `false` bei Ständen vor #114 N-1 */
+  sumsChecked: boolean;
+  /** Abweichungen bei den Prüfsummen (höchstens 10) */
+  sumsProblems: string[];
 }
 
 export const reportOk = (report: RestoreTestReport): boolean =>
@@ -396,8 +557,16 @@ export async function restoreIntoScratch(
       const differences = Object.entries(manifest.counts)
         .filter(([table, expected]) => table in counts && counts[table] !== expected)
         .map(([table, expected]) => ({ table, expected, actual: counts[table] as number }));
-      const mediaOk = standFilesMatch(dir, manifest, targetId);
-      return { counts, differences, missingTables, mediaOk };
+      const sizesOk = standFilesMatch(dir, manifest, targetId);
+      const sums = verifyStandSums(deps, dir, manifest, targetId);
+      return {
+        counts,
+        differences,
+        missingTables,
+        mediaOk: sizesOk && sums.problems.length === 0,
+        sumsChecked: sums.checked,
+        sumsProblems: sums.problems,
+      };
     } finally {
       await dropDatabase(pg, name).catch((e: unknown) =>
         err(`Wegwerf-Datenbank ${name} ließ sich nicht löschen: ${errorText(e, deps.cfg)}`),
@@ -421,6 +590,18 @@ async function testRestore(
     if (n !== undefined) log(`  ${table.padEnd(16)} ${n}`);
   }
   log(`Dateien (media/vault): ${report.mediaOk ? 'vollständig' : 'ABWEICHEND vom Manifest'}`);
+  if (report.sumsChecked) {
+    log(
+      report.sumsProblems.length === 0
+        ? 'Prüfsummen (media/vault): alle Dateien stimmen.'
+        : `Prüfsummen (media/vault) weichen ab: ${report.sumsProblems.join('; ')}`,
+    );
+  } else {
+    log(
+      'Hinweis: Dieser Stand hat keine Prüfsummen für media/ und vault/ (angelegt vor dieser Funktion). ' +
+        'Geprüft werden nur Anzahl und Größe.',
+    );
+  }
   for (const d of report.differences) {
     log(
       `Hinweis: ${d.table} hat ${d.actual} statt ${d.expected} Zeilen (Schreibzugriffe während des Backups?).`,
@@ -546,6 +727,9 @@ async function fullRestoreLocked(
   const { cfg, pg, log, err } = deps;
 
   // Prüfungen vor jeder Änderung
+  // Prüfsummenliste (#114 N-1) laden und gegen Manifest (und Lauf) prüfen: billig, die Dateien selbst werden erst
+  // nach dem Kopieren in den Datenordner gehasht (genau die Bytes, die später live gehen, kein Austausch dazwischen).
+  const sums = loadSumsForRestore(deps, dir, manifest, targetId);
   if (!standFilesMatch(dir, manifest, targetId)) {
     err(
       `Die Dateien im Stand ${manifest.stand} stimmen nicht mit dem Manifest überein (Anzahl oder Größe). ` +
@@ -615,8 +799,39 @@ async function fullRestoreLocked(
   }
   // Erst die Kopie des Dumps prüfen (Prüfsumme über dieselben Bytes, die `pg_restore` liest), dann ändern
   return withStandDump(deps, dir, manifest, (verifiedDump) =>
-    swapIn(deps, dir, manifest, journal, stamp, live, fresh, old, verifiedDump, tree),
+    swapIn(deps, dir, manifest, journal, stamp, live, fresh, old, verifiedDump, tree, sums),
   );
+}
+
+/**
+ * Prüfsummenliste für den vollständigen Restore laden (vor jeder Änderung). Hat der Stand keine (angelegt vor
+ * #114 N-1), geht es mit Hinweis weiter: dann gelten nur Anzahl und Größe. Eine Liste, die Dateien in einem Ordner
+ * nennt, den der Stand nicht enthält, ist beschädigt.
+ */
+function loadSumsForRestore(
+  deps: Pick<RestoreDeps, 'log'>,
+  dir: string,
+  manifest: Manifest,
+  targetId?: Identity,
+): SumMap | null {
+  if (!manifest.files) {
+    deps.log(
+      'Hinweis: Dieser Stand hat keine Prüfsummen für media/ und vault/ (angelegt vor dieser Funktion). ' +
+        'Geprüft werden nur Anzahl und Größe der Dateien.',
+    );
+    return null;
+  }
+  const tree = openStandTree(dir, targetId);
+  const sums = readFileSums(dir, manifest, tree) as SumMap;
+  for (const sub of SUBS) {
+    if (tree[sub] === null && sums[sub].size > 0) {
+      throw new StandError(
+        'beschaedigt',
+        `Im Stand ${manifest.stand} fehlt ${sub}/, die Prüfsummen nennen aber Dateien.`,
+      );
+    }
+  }
+  return sums;
 }
 
 async function swapIn(
@@ -630,6 +845,7 @@ async function swapIn(
   old: string,
   verifiedDump: string,
   tree: StandTree,
+  sums: SumMap | null,
 ): Promise<number> {
   const { cfg, pg, log, err } = deps;
   // Das Journal steht vor der ersten Änderung: Bricht der Prozess ab, räumt der nächste Start auf
@@ -679,6 +895,26 @@ async function swapIn(
       asStandError(dir, () =>
         copyTree(source, d.staged, null, undefined, { reader: tree.reader, strictSource: true }),
       );
+      // Prüfsummen der Kopie (#114 N-1): gehasht wird, was im Datenordner liegt und gleich live geht. Weicht eine
+      // Datei ab, fehlt eine oder ist eine dazugekommen, bricht der Restore hier ab: Das Journal baut alles zurück,
+      // getauscht wurde noch nichts.
+      if (sums) {
+        log(`Prüfe die Prüfsummen von ${d.name}/ (${sums[d.name].size} Dateien) …`);
+        const checkReader = new NoFollowReader();
+        checkReader.adopt(d.staged);
+        const result = verifyTree(d.staged, d.name, sums[d.name], {
+          reader: checkReader,
+          strict: true,
+          onFile: progressLogger(log, d.name),
+        });
+        if (result.problems.length > 0) {
+          throw new StandError(
+            'beschaedigt',
+            `Die Dateien im Stand ${manifest.stand} stimmen nicht mit den Prüfsummen überein: ${result.problems.join('; ')}. ` +
+              'Es wurde nichts verändert, deine Daten sind unverändert.',
+          );
+        }
+      }
     }
 
     journal.phase = 'swapping';

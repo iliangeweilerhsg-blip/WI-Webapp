@@ -114,6 +114,8 @@ interface Run {
   /** `backup_run.thin_left` (H3, #124): Reste des Ausdünnens nach diesem Lauf */
   thinLeft?: string[] | null;
   warning?: string | null;
+  /** `backup_run.files_sha256` (#114 N-1) */
+  filesSha?: string | null;
 }
 
 /** Datenbank-Attrappe: erkennt die SQL-Texte der CLI und führt Buch über `backup_run` */
@@ -146,6 +148,8 @@ class FakePg implements PgAccess {
   testAborted: Record<string, unknown> | null = null;
   /** Hat `backup_run` schon die Spalten aus `0008` (`thin_left`, `warning`)? */
   hasThinLeft = true;
+  /** Hat `backup_run` schon die Spalte aus `0011` (`files_sha256`)? */
+  hasFilesSha = true;
 
   async query(sql: string, vars: Record<string, string> = {}, db?: string): Promise<string[][]> {
     this.queries.push({ sql, vars, db });
@@ -155,7 +159,7 @@ class FakePg implements PgAccess {
       const run = [...this.runs.values()]
         .filter((r) => r.state === 'fertig' && r.stand === vars.stand && r.sha)
         .reverse()[0];
-      return run ? [[run.sha as string, run.size ?? '']] : [];
+      return run ? [[run.sha as string, run.size ?? '', run.filesSha ?? '']] : [];
     }
     if (sql.includes("SELECT stand, trigger, coalesce(dump_sha256, '')")) {
       // Eigene Stände (H-1, #161)
@@ -187,6 +191,14 @@ class FakePg implements PgAccess {
       });
       return [];
     }
+    if (sql.includes("column_name = :'column'")) {
+      return [[vars.column === 'files_sha256' ? (this.hasFilesSha ? '1' : '0') : '1']];
+    }
+    if (sql.includes('SET files_sha256 = ')) {
+      const run = this.runs.get(vars.id as string);
+      if (run) run.filesSha = vars.sha as string;
+      return [];
+    }
     if (sql.includes('pg_tables')) return this.tables.map((t) => [t]);
     if (sql.includes('UNION ALL')) return this.counts;
     if (sql.includes('SHOW server_version')) return [['16.4']];
@@ -214,7 +226,7 @@ class FakePg implements PgAccess {
       return [...this.runs.values()]
         .filter((r) => r.state === 'fertig' && r.stand && r.sha && r.target === vars.target)
         .reverse()
-        .map((r) => [r.stand as string, r.sha as string, r.size ?? '']);
+        .map((r) => [r.stand as string, r.sha as string, r.size ?? '', r.filesSha ?? '']);
     }
     if (sql.includes("INSERT INTO setting (key, value, user_id) VALUES ('restore_test'")) {
       this.testResult = JSON.parse(vars.value as string) as Record<string, unknown>;
@@ -2672,7 +2684,7 @@ describe('Tunnel-Schlüssel gehören nie ins Backup (UX-12, E3)', () => {
       expect(readFileSync(file).includes(TUNNEL_KEY), file).toBe(false);
     }
     // Nur Datenbank, Manifest, media/ und vault/ sind im Stand
-    expect(readdirSync(stand).sort()).toEqual(['db.dump', 'manifest.json', 'media', 'vault']);
+    expect(readdirSync(stand).sort()).toEqual(['db.dump', 'files.sha256', 'manifest.json', 'media', 'vault']);
   });
 
   it('auch ein zweiter, inkrementeller Lauf nimmt die Schlüssel nicht mit', async () => {
@@ -2693,5 +2705,220 @@ describe('Tunnel-Schlüssel gehören nie ins Backup (UX-12, E3)', () => {
     const { dataDir } = setup();
     withSecrets(dataDir);
     expect(() => validateTarget(join(dataDir, 'secrets'), dataDir)).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------- Prüfsummen für media/ und vault/ (#114 N-1)
+
+describe('Prüfsummen für media/ und vault/ (#114 N-1)', () => {
+  const STAND = '20261104T030012Z';
+  const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+
+  async function prepared(over: Partial<FakePg> = {}) {
+    const s = restoreSetup(over);
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    return s;
+  }
+  const standDir = (s: { target: string }) => join(s.target, STAND);
+  const manifestOf = (s: { target: string }) =>
+    JSON.parse(readFileSync(join(standDir(s), 'manifest.json'), 'utf8')) as Record<string, unknown> & {
+      files?: { file: string; count: number; sha256: string };
+    };
+  const writeManifest = (s: { target: string }, manifest: unknown) =>
+    writeFileSync(join(standDir(s), 'manifest.json'), JSON.stringify(manifest));
+  const restoreTest = (s: { deps: RestoreDeps }) =>
+    runRestore(s.deps, { stand: STAND, test: true, yes: false });
+  const restoreFull = (s: { deps: RestoreDeps }) =>
+    runRestore(s.deps, { stand: STAND, test: false, yes: true });
+
+  /** Nichts wurde angefasst: alte Daten, keine Zwischenordner, kein Journal, keine neue Datenbank */
+  function expectUntouched(s: { dataDir: string; pg: FakePg }) {
+    expect(readFileSync(join(s.dataDir, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+    expect(readFileSync(join(s.dataDir, 'vault', 'n.md'), 'utf8')).toBe('# Notiz');
+    expect(readdirSync(s.dataDir).filter((n) => /neu-|vor-restore|journal/.test(n))).toEqual([]);
+    expect([...s.pg.databases]).toEqual(['sg']);
+  }
+
+  it('Backup: files.sha256 enthält die echte SHA-256 jeder Datei, Manifest und backup_run tragen die Prüfsumme der Liste', async () => {
+    const s = await prepared();
+    const list = readFileSync(join(standDir(s), 'files.sha256'), 'utf8');
+    expect(list).toBe(`${sha('JPEG')}\tmedia/photos/a.jpg\n${sha('# Notiz')}\tvault/n.md\n`);
+    expect(manifestOf(s).files).toEqual({ file: 'files.sha256', count: 2, sha256: sha(list) });
+    expect([...s.pg.runs.values()][0]?.filesSha).toBe(sha(list));
+  });
+
+  it('inkrementeller Lauf (Hardlinks): auch verlinkte Dateien stehen mit ihrer Prüfsumme in der Liste', async () => {
+    const s = await prepared();
+    const second: BackupDeps = { ...s.backupDeps, now: () => new Date('2026-11-05T03:00:12Z') };
+    expect(await runBackup(second, { trigger: 'manuell' })).toBe(0);
+    const list = readFileSync(join(s.target, '20261105T030012Z', 'files.sha256'), 'utf8');
+    expect(list).toContain(`${sha('JPEG')}\tmedia/photos/a.jpg\n`);
+    expect(list).toContain(`${sha('# Notiz')}\tvault/n.md\n`);
+  });
+
+  it('Dateinamen mit Zeilenumbruch und Backslash bleiben eindeutig', async () => {
+    const s = restoreSetup();
+    writeFileSync(join(s.dataDir, 'media', 'a\nb\\c.txt'), 'x');
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    expect(readFileSync(join(standDir(s), 'files.sha256'), 'utf8')).toContain(
+      `${sha('x')}\tmedia/a\\nb\\\\c.txt\n`,
+    );
+    expect(await restoreTest(s)).toBe(0);
+  });
+
+  it('unverändert: --test und vollständiger Restore bestehen, Prüfsummen werden geprüft und gemeldet', async () => {
+    const s = await prepared();
+    expect(await restoreTest(s)).toBe(0);
+    expect(s.logs.join('\n')).toMatch(/Prüfsummen \(media\/vault\): alle Dateien stimmen/);
+    expect(await restoreFull(s)).toBe(0);
+    expect(s.logs.join('\n')).toMatch(/Prüfe die Prüfsummen von media\/ \(1 Dateien\)/);
+  });
+
+  it('manipulierte Datei mit gleicher Größe: --test schlägt fehl', async () => {
+    const s = await prepared();
+    writeFileSync(join(standDir(s), 'media', 'photos', 'a.jpg'), 'JPEX');
+    expect(await restoreTest(s)).toBe(1);
+    expect(s.logs.join('\n')).toMatch(/weicht von der Prüfsumme ab/);
+  });
+
+  it('manipulierte Datei mit gleicher Größe: vollständiger Restore bricht ab, nichts wird verändert', async () => {
+    const s = await prepared();
+    writeFileSync(join(standDir(s), 'media', 'photos', 'a.jpg'), 'JPEX');
+    expect(await restoreFull(s)).toBe(1);
+    expect(s.errs.join('\n')).toMatch(/stimmen nicht mit den Prüfsummen überein.*media\/photos\/a\.jpg/);
+    expect(s.errs.join('\n')).toMatch(/deine Daten sind unverändert/);
+    expectUntouched(s);
+  });
+
+  it('manipulierte Datei in vault/: vollständiger Restore bricht ab, nichts wird verändert', async () => {
+    const s = await prepared();
+    writeFileSync(join(standDir(s), 'vault', 'n.md'), '# Notiy');
+    expect(await restoreFull(s)).toBe(1);
+    expect(s.errs.join('\n')).toMatch(/vault\/n\.md/);
+    expectUntouched(s);
+  });
+
+  it('fehlende Datei (Anzahl und Größe bleiben durch eine andere Datei gleich): bricht ab, nichts wird verändert', async () => {
+    const s = await prepared();
+    rmSync(join(standDir(s), 'media', 'photos', 'a.jpg'));
+    writeFileSync(join(standDir(s), 'media', 'photos', 'b.jpg'), 'JPEG');
+    expect(await restoreFull(s)).toBe(1);
+    expect(s.errs.join('\n')).toMatch(/zusätzliche Datei media\/photos\/b\.jpg/);
+    expectUntouched(s);
+    expect(await restoreTest(s)).toBe(1);
+    expect(s.logs.join('\n')).toMatch(/media\/photos\/a\.jpg fehlt/);
+  });
+
+  it('fehlende Datei ohne Ersatz: bricht ab (Anzahl weicht ab), nichts wird verändert', async () => {
+    const s = await prepared();
+    rmSync(join(standDir(s), 'vault', 'n.md'));
+    expect(await restoreFull(s)).toBe(1);
+    expectUntouched(s);
+  });
+
+  it('veränderte Liste files.sha256: passt nicht zum Manifest, Stand wird nicht eingespielt', async () => {
+    const s = await prepared();
+    const path = join(standDir(s), 'files.sha256');
+    writeFileSync(path, readFileSync(path, 'utf8').replace(sha('JPEG'), sha('JPEX')));
+    expect(await restoreFull(s)).toBe(1);
+    expect(s.errs.join('\n')).toMatch(/passt nicht zur Prüfsumme im Manifest/);
+    expectUntouched(s);
+  });
+
+  it('fehlende Liste files.sha256 bei vorhandenem Manifest-Eintrag: bricht ab', async () => {
+    const s = await prepared();
+    rmSync(join(standDir(s), 'files.sha256'));
+    expect(await restoreFull(s)).toBe(1);
+    expect(s.errs.join('\n')).toMatch(/fehlt files\.sha256/);
+    expectUntouched(s);
+  });
+
+  it('Angreifer ändert Datei, Liste UND Manifest: backup_run entlarvt es (Prüfsumme der Liste)', async () => {
+    const s = await prepared();
+    const list = `${sha('JPEX')}\tmedia/photos/a.jpg\n${sha('# Notiz')}\tvault/n.md\n`;
+    writeFileSync(join(standDir(s), 'media', 'photos', 'a.jpg'), 'JPEX');
+    writeFileSync(join(standDir(s), 'files.sha256'), list);
+    writeManifest(s, { ...manifestOf(s), files: { file: 'files.sha256', count: 2, sha256: sha(list) } });
+    expect(await restoreFull(s)).toBe(1);
+    expect(s.errs.join('\n')).toMatch(/passen nicht zum protokollierten Backup-Lauf/);
+    expectUntouched(s);
+    s.errs.length = 0;
+    expect(await restoreTest(s)).toBe(1);
+  });
+
+  it('Herabstufung: Manifest ohne Liste bei einem Lauf mit Prüfsumme wird abgelehnt', async () => {
+    const s = await prepared();
+    const { files: _files, ...old } = manifestOf(s);
+    writeManifest(s, old);
+    writeFileSync(join(standDir(s), 'media', 'photos', 'a.jpg'), 'JPEX');
+    expect(await restoreFull(s)).toBe(1);
+    expect(s.errs.join('\n')).toMatch(/passen nicht zum protokollierten Backup-Lauf/);
+    expectUntouched(s);
+  });
+
+  it('alter Stand ohne Prüfsummen (Manifest ohne files, Lauf ohne files_sha256) bleibt wiederherstellbar, mit Hinweis', async () => {
+    const s = await prepared();
+    const { files: _files, ...old } = manifestOf(s);
+    writeManifest(s, old);
+    rmSync(join(standDir(s), 'files.sha256'));
+    for (const run of s.pg.runs.values()) run.filesSha = null;
+    expect(await restoreTest(s)).toBe(0);
+    expect(s.logs.join('\n')).toMatch(/keine Prüfsummen für media\/ und vault\/.*Anzahl und Größe/);
+    s.logs.length = 0;
+    expect(await restoreFull(s)).toBe(0);
+    expect(s.logs.join('\n')).toMatch(/keine Prüfsummen für media\/ und vault\//);
+    expect(existsSync(join(s.dataDir, 'media.vor-restore-20261110t080000z'))).toBe(true);
+  });
+
+  it('alter Stand ohne Prüfsummen: eine Änderung bleibt (wie bisher) unbemerkt, solange Anzahl und Größe passen', async () => {
+    // Dokumentiert die Grenze: Nur neue Stände sind durch Prüfsummen geschützt
+    const s = await prepared();
+    const { files: _files, ...old } = manifestOf(s);
+    writeManifest(s, old);
+    for (const run of s.pg.runs.values()) run.filesSha = null;
+    writeFileSync(join(standDir(s), 'media', 'photos', 'a.jpg'), 'JPEX');
+    expect(await restoreTest(s)).toBe(0);
+  });
+
+  it('Datenbank vor Migration 0011 (ohne Spalte files_sha256): Backup und Restore laufen, Dateien gelten über das Manifest', async () => {
+    const s = restoreSetup({ hasFilesSha: false });
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    expect([...s.pg.runs.values()][0]?.filesSha).toBeUndefined();
+    expect(s.pg.queries.some((q) => q.sql.includes('SET files_sha256'))).toBe(false);
+    expect(await restoreTest(s)).toBe(0);
+    writeFileSync(join(standDir(s), 'media', 'photos', 'a.jpg'), 'JPEX');
+    expect(await restoreFull(s)).toBe(1);
+    expectUntouched(s);
+  });
+
+  it('automatischer Test: bestanden; manipulierte Datei gibt dateien_abweichend mit Pfad', async () => {
+    const s = await prepared();
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'manuell' })).toBe(0);
+    writeFileSync(join(standDir(s), 'media', 'photos', 'a.jpg'), 'JPEX');
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'manuell' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ state: 'fehler', reason: 'dateien_abweichend' });
+    expect(String(s.pg.testResult?.error)).toMatch(/media\/photos\/a\.jpg/);
+    expect(s.pg.databases.has('sg_autotest_abc123')).toBe(false);
+  });
+
+  it('automatischer Test: Liste und Manifest ausgetauscht → nicht_authentisch', async () => {
+    const s = await prepared();
+    const list = `${sha('JPEX')}\tmedia/photos/a.jpg\n${sha('# Notiz')}\tvault/n.md\n`;
+    writeFileSync(join(standDir(s), 'media', 'photos', 'a.jpg'), 'JPEX');
+    writeFileSync(join(standDir(s), 'files.sha256'), list);
+    writeManifest(s, { ...manifestOf(s), files: { file: 'files.sha256', count: 2, sha256: sha(list) } });
+    expect(await runAutoRestoreTest(s.deps, { trigger: 'manuell' })).toBe(1);
+    expect(s.pg.testResult).toMatchObject({ state: 'fehler', reason: 'nicht_authentisch' });
+    expect(s.pg.restored).toEqual([]);
+  });
+
+  it('große Datei wird streamend gehasht (mehr als ein Block)', async () => {
+    const s = restoreSetup();
+    const big = Buffer.alloc(3 * 1024 * 1024 + 17, 7);
+    writeFileSync(join(s.dataDir, 'media', 'audio.m4a'), big);
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    const want = createHash('sha256').update(big).digest('hex');
+    expect(readFileSync(join(standDir(s), 'files.sha256'), 'utf8')).toContain(`${want}\tmedia/audio.m4a\n`);
+    expect(await restoreFull(s)).toBe(0);
   });
 });

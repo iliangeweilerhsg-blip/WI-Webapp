@@ -9,7 +9,13 @@
 import { SINGLE_USER_ID } from '@sg/shared';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { readBackupSettings, errorText, RESTORE_TEST_PID_NAME, validateTarget } from './backup.ts';
+import {
+  errorText,
+  hasBackupRunColumn,
+  readBackupSettings,
+  RESTORE_TEST_PID_NAME,
+  validateTarget,
+} from './backup.ts';
 import { writeRunPid } from './liveness.ts';
 import type { Identity } from './nofollow.ts';
 import {
@@ -163,8 +169,10 @@ async function autoRestoreTest(
     }
 
     // Nur eigene, protokollierte Läufe für genau dieses Ziel (Einstellung `data.backup_target`)
+    // `files_sha256` (Migration 0011, #114 N-1) fehlt in einer Datenbank davor
+    const filesColumn = (await hasBackupRunColumn(pg, 'files_sha256')) ? `coalesce(files_sha256, '')` : `''`;
     const runs = await pg.query(
-      `SELECT stand, dump_sha256, coalesce(size_bytes::text, '') FROM backup_run
+      `SELECT stand, dump_sha256, coalesce(size_bytes::text, ''), ${filesColumn} FROM backup_run
         WHERE state = 'fertig' AND deleted_at IS NULL AND stand IS NOT NULL AND dump_sha256 IS NOT NULL
           AND target = :'target'
         ORDER BY started_at DESC, id DESC LIMIT ${CANDIDATES}`,
@@ -178,7 +186,12 @@ async function autoRestoreTest(
         'Im Backup-Ziel gibt es keinen Stand, der zu einem eigenen, abgeschlossenen Backup-Lauf gehört.',
       );
     }
-    const [stand, sha, sizeText] = candidate as [string, string, string | undefined];
+    const [stand, sha, sizeText, filesSha] = candidate as [
+      string,
+      string,
+      string | undefined,
+      string | undefined,
+    ];
     // Obergrenze für den Dump aus der Datenbank (M-1, #114): Das Manifest allein ist hier nicht vertrauenswürdig
     const size = sizeText ? Number(sizeText) : NaN;
     const maxDumpBytes = Number.isSafeInteger(size) ? size : undefined;
@@ -194,7 +207,7 @@ async function autoRestoreTest(
 
     let loaded;
     try {
-      loaded = await loadStand(resolved, stand, sha, maxDumpBytes);
+      loaded = await loadStand(resolved, stand, sha, maxDumpBytes, filesSha || null);
     } catch (e) {
       if (e instanceof StandError) return await fail(stand, e.reason, e.message);
       throw e;
@@ -227,7 +240,9 @@ async function autoRestoreTest(
       return await fail(
         stand,
         'dateien_abweichend',
-        'Die Dateien (media/vault) im Stand weichen vom Manifest ab (Anzahl oder Größe).',
+        report.sumsProblems.length > 0
+          ? `Die Dateien (media/vault) im Stand weichen von den Prüfsummen ab: ${report.sumsProblems.join('; ')}.`
+          : 'Die Dateien (media/vault) im Stand weichen vom Manifest ab (Anzahl oder Größe).',
       );
     }
     if (!reportOk(report)) return await fail(stand, 'intern', 'Die Prüfung ergab kein eindeutiges Ergebnis.');

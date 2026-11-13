@@ -1,8 +1,10 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
 import { closeSync, existsSync, lstatSync, readdirSync, readSync, type Stats } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
+import type { FilesRef } from './file-sums.ts';
 import {
   type AnchoredDirs,
+  hashFd,
   NoFollowReader,
   NoFollowRemover,
   NoFollowWriter,
@@ -152,6 +154,11 @@ export interface CopyTreeOptions {
    * Benutzer dieses Prozesses.
    */
   owner?: number | undefined;
+  /**
+   * Sammelt die SHA-256 jeder Datei des Stands (Schlüssel: Pfad relativ zu `src`), gebildet aus den Bytes, die aus der
+   * Quelle gelesen wurden (#114 N-1). Beim Kopieren entsteht sie nebenbei, bei verlinkten Dateien durch Lesen der Quelle.
+   */
+  sums?: Map<string, string>;
 }
 
 /**
@@ -195,6 +202,7 @@ export function copyTree(
     reader,
     strict,
     owner,
+    sums: options.sums,
   });
   return result;
 }
@@ -206,6 +214,7 @@ interface Level {
   strict: boolean;
   /** Besitzer eigener Dateien im Ziel (`undefined`: ohne Unix-Besitzer, nicht geprüft) */
   owner: number | undefined;
+  sums?: Map<string, string> | undefined;
 }
 
 function unsafe(message: string): UnsafeTargetError {
@@ -232,7 +241,14 @@ function prevFile(reader: NoFollowReader, prev: string | null, name: string): St
   }
 }
 
-function copyLevel(src: string, dst: string, prev: string | null, result: CopyStats, level: Level): void {
+function copyLevel(
+  src: string,
+  dst: string,
+  prev: string | null,
+  result: CopyStats,
+  level: Level,
+  rel = '',
+): void {
   const { out, reader, strict } = level;
   out.mkdir(dst);
   let entries: { name: string; info: Stats }[];
@@ -250,7 +266,14 @@ function copyLevel(src: string, dst: string, prev: string | null, result: CopySt
     const from = join(src, name);
     const to = join(dst, name);
     if (!info.isSymbolicLink() && info.isDirectory()) {
-      copyLevel(reader.enter(src, name, info), to, prevChild(reader, prev, name), result, level);
+      copyLevel(
+        reader.enter(src, name, info),
+        to,
+        prevChild(reader, prev, name),
+        result,
+        level,
+        rel === '' ? name : `${rel}/${name}`,
+      );
       continue;
     }
     if (info.isSymbolicLink() || !info.isFile()) {
@@ -292,7 +315,10 @@ function copyLevel(src: string, dst: string, prev: string | null, result: CopySt
         // diese Datei zeigt (N2). Kein Hardlink möglich: kopieren.
         if (out.link(join(prev as string, name), to, old)) how = 'linked';
       }
-      if (how === 'copied') out.copyFromFd(opened.fd, to, real);
+      let sha: string | undefined;
+      if (how === 'copied') sha = out.copyFromFd(opened.fd, to, real);
+      else if (level.sums) sha = hashFd(opened.fd);
+      if (level.sums && sha !== undefined) level.sums.set(rel === '' ? name : `${rel}/${name}`, sha);
       result.files += 1;
       result.bytes += real.size;
       result[how] += 1;
@@ -368,6 +394,11 @@ export interface Manifest {
   counts: Record<string, number>;
   media: { files: number; bytes: number };
   vault: { files: number; bytes: number };
+  /**
+   * Prüfsummenliste von `media/` und `vault/` (#114 N-1). Fehlt bei Ständen vor dieser Version: Dort gibt es nur
+   * Anzahl und Größe.
+   */
+  files?: FilesRef;
 }
 
 export const MANIFEST_FILE = 'manifest.json';

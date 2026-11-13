@@ -39,6 +39,7 @@ import {
   type TargetDir,
 } from './backup-files.ts';
 import type { SgConfig } from './config.ts';
+import { emptySums, FILES_FILE, formatFileList, sha256Hex } from './file-sums.ts';
 import { removeRunPids, runLiveness, sweepDeadRunPids, writeRunPid } from './liveness.ts';
 import { NoFollowReader, NoFollowWriter, UnsafeTargetError, type NoFollowHooks } from './nofollow.ts';
 import { scrubSecrets, type PgAccess } from './pg.ts';
@@ -447,6 +448,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       const reader = new NoFollowReader(deps.targetHooks, true);
       reader.adopt(target, targetDir);
       const previousDir = previous ? reader.child(target, previous, 'skip') : null;
+      const sums = emptySums();
       for (const sub of ['media', 'vault'] as const) {
         const source = join(cfg.dataDir, sub);
         if (!existsSync(source)) continue;
@@ -458,11 +460,18 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         } catch {
           prevSub = null; // voriger Stand nicht lesbar: alles kopieren
         }
-        copyTree(source, join(partial, sub), prevSub, stats[sub], { out, reader, owner });
+        copyTree(source, join(partial, sub), prevSub, stats[sub], { out, reader, owner, sums: sums[sub] });
         log(
           `  ${stats[sub].files} Dateien, ${stats[sub].copied} neu kopiert, ${stats[sub].linked} unverändert`,
         );
       }
+
+      // Prüfsummen aller Dateien (#114 N-1): gebildet aus den gelesenen Bytes, Liste im Stand, ihre Prüfsumme im Manifest
+      // und in `backup_run`. Dateien, die beim Zählen schon wieder verschwunden sind, stehen nicht darin.
+      const list = formatFileList(sums);
+      const listSha = sha256Hex(list.text);
+      out.writeFile(join(partial, FILES_FILE), list.text);
+      log(`  Prüfsummen für ${list.count} Dateien gebildet.`);
 
       const manifest: Manifest = {
         version: 1,
@@ -475,6 +484,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         counts,
         media: { files: stats.media.files, bytes: stats.media.bytes },
         vault: { files: stats.vault.files, bytes: stats.vault.bytes },
+        files: { file: FILES_FILE, count: list.count, sha256: listSha },
       };
       out.writeFile(join(partial, MANIFEST_FILE), `${JSON.stringify(manifest, null, 2)}\n`);
       out.renameDir(partial, finalDir);
@@ -487,6 +497,13 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
             WHERE id = :'id'::uuid`,
           { id: runId, size: String(size), stand, sha: dumpSha },
         );
+        // Spalte aus Migration 0011: Ein Backup vor dieser Migration (`vor_migration`) kennt sie noch nicht
+        if (await hasBackupRunColumn(pg, 'files_sha256')) {
+          await pg.query(`UPDATE backup_run SET files_sha256 = :'sha' WHERE id = :'id'::uuid`, {
+            id: runId,
+            sha: listSha,
+          });
+        }
       }
       log(`Backup ${stand} fertig (${size} Bytes).`);
     } catch (error) {
@@ -543,6 +560,16 @@ async function dumpPrivately(
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** Gibt es die Spalte in `backup_run`? (Spalten späterer Migrationen fehlen bei einem Backup vor der Migration.) */
+export async function hasBackupRunColumn(pg: PgAccess, column: string): Promise<boolean> {
+  const [has] = await pg.query(
+    `SELECT count(*) FROM information_schema.columns
+      WHERE table_schema = current_schema() AND table_name = 'backup_run' AND column_name = :'column'`,
+    { column },
+  );
+  return Number(has?.[0] ?? 0) > 0;
 }
 
 /** Ein eigener Stand laut `backup_run` (H-1, #161) */
