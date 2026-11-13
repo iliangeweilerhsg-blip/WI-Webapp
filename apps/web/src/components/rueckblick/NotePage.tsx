@@ -1,8 +1,9 @@
 'use client';
 
 // Eine Notizseite im Rückblick (F-NAC-02, F-NAC-04): Striche mit der Ink-Darstellung des Dashboards. Ein Tipp auf einen
-// Strich spielt die Aufnahme ab `t_start_ms − 3 s` ab. Mit der Tastatur wählen die Pfeiltasten den nächsten oder
-// vorigen Strich (nach Schreibzeit), Enter spielt ab. Die Seite lädt und zeichnet nur, solange sie (fast) im Bild ist.
+// Strich spielt die Aufnahme ab `t_start_ms − 3 s` ab (mit Geräteversatz, §9.3). Mit der Tastatur wählen die
+// Pfeiltasten den nächsten oder vorigen Strich (nach Schreibzeit), Enter spielt ab. Die Seite lädt und zeichnet nur,
+// solange sie (fast) im Bild ist.
 import { useMemo, useRef, useState } from 'react';
 import type { Page, Stroke } from '@sg/shared';
 import { friendlyMessage } from '../../lib/api.ts';
@@ -16,6 +17,7 @@ import { useInView } from './use-in-view.ts';
 /** Trefferfläche um den Strich in Bildschirmpixeln (Finger und Stift sind ungenau) */
 const TAP_RADIUS_PX = 12;
 const NO_STROKES: readonly Stroke[] = [];
+const NO_OFFSETS: Readonly<Record<string, number>> = {};
 
 export interface NotePageProps {
   page: Page;
@@ -60,7 +62,8 @@ function VisiblePage({ page, startedAt, canPlay, onPlay }: NotePageProps) {
   const [pickedId, setPickedId] = useState<string | null>(null);
 
   const list = strokes.data?.strokes ?? NO_STROKES;
-  const index = useMemo(() => buildHitIndex(list), [list]);
+  const offsets = strokes.data?.stroke_offsets_ms ?? NO_OFFSETS;
+  const index = useMemo(() => buildHitIndex(list, offsets), [list, offsets]);
   const picked = index.timed.find((e) => e.id === pickedId) ?? null;
   const pickedAt = picked ? index.timed.indexOf(picked) : -1;
 

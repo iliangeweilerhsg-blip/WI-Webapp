@@ -8,7 +8,7 @@ import type { Marker, MarkerKind, Photo } from '@sg/shared';
 import { photoFileUrl } from '../../lib/review-notes.ts';
 import { clockAt } from '../../lib/transcript.ts';
 import { NotePage } from './NotePage.tsx';
-import { playbackStart, type ReviewNotes } from './notes.ts';
+import { playbackStart, sessionTimeOf, type ReviewNotes } from './notes.ts';
 
 const MARKER_LABELS: Record<MarkerKind, { icon: string; label: string }> = {
   frage: { icon: '❓', label: 'Frage' },
@@ -44,7 +44,8 @@ function MarkerRow({
   onPlay: (tMs: number) => void;
 }) {
   const { icon, label } = MARKER_LABELS[marker.kind];
-  const time = clockAt(startedAt, marker.t_ms, true);
+  const at = sessionTimeOf(marker);
+  const time = clockAt(startedAt, at, true);
   const done = marker.resolved_at !== null;
   const content = (
     <>
@@ -65,7 +66,7 @@ function MarkerRow({
           type="button"
           data-testid="note-marker"
           aria-label={`${label} um ${time}${marker.note ? `: ${marker.note}` : ''}. Ab hier abspielen`}
-          onClick={() => onPlay(playbackStart(marker.t_ms))}
+          onClick={() => onPlay(playbackStart(at))}
           className={`${box} hover:bg-surface-raised`}
         >
           {content}
@@ -91,7 +92,8 @@ function PhotoItem({
   onPlay: (tMs: number) => void;
 }) {
   const [failed, setFailed] = useState(false);
-  const time = clockAt(startedAt, photo.t_ms, true);
+  const at = sessionTimeOf(photo);
+  const time = clockAt(startedAt, at, true);
   return (
     <li data-testid="note-photo" className="min-w-0">
       {photo.has_file && !failed ? (
@@ -119,7 +121,7 @@ function PhotoItem({
         <button
           type="button"
           aria-label={`Aufnahme ab Foto von ${time} abspielen`}
-          onClick={() => onPlay(playbackStart(photo.t_ms))}
+          onClick={() => onPlay(playbackStart(at))}
           className="mt-1 inline-flex min-h-11 items-center rounded-md px-2 text-sm tabular-nums text-text-muted hover:bg-surface-raised hover:text-text"
         >
           {`▶ ${time}`}

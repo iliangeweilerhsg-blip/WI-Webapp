@@ -352,6 +352,10 @@ export type LanguageCode = string
  */
 export type ToolbarSide = ("links" | "rechts")
 /**
+ * Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.
+ */
+export type SessionMs1 = number
+/**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "MarkerSource".
  */
@@ -492,6 +496,10 @@ export type PencilDoubleTapAction = ("radierer" | "letztes_werkzeug" | "farbpale
  * via the `definition` "PencilSqueezeAction".
  */
 export type PencilSqueezeAction = ("werkzeugpalette" | "radierer" | "system" | "aus")
+/**
+ * Sitzungszeit in ms seit session.started_at (02 §5). Clients setzen negative Werte (Uhrversatz) auf 0.
+ */
+export type SessionMs2 = number
 /**
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "PhotoMime".
@@ -2433,6 +2441,7 @@ deleted_at: (Timestamp | null)
 session_id: Uuid
 kind: MarkerKind
 t_ms: SessionMs
+t_session_ms?: SessionMs1
 page_id: (Uuid | null)
 position: (MarkerPosition | null)
 source: MarkerSource
@@ -3799,6 +3808,12 @@ stream_seq: number
  */
 stream_op_id: (Uuid | null)
 strokes: Stroke[]
+/**
+ * Geräteversatz je Strich (client_id → offset_ms aus session.start_offsets der Session der Seite, VERTRAEGE §9.3). Nur Striche mit Versatz ≠ 0 und t_start_ms ≠ null. Sitzungszeit nach Serveruhr = max(0, t_start_ms + Versatz), ebenso t_end_ms. Fehlt das Feld (älterer Core) oder der Strich darin, ist der Versatz 0. Nur in Antworten des Core
+ */
+stroke_offsets_ms?: {
+[k: string]: number
+}
 }
 /**
  * Neutrales Strich-Format (08 §4.1/4.2). points sind Rohkoordinaten VOR transform, bbox gilt NACH transform inklusive halber Breite. dt des ersten Punkts ist 0; t_end_ms − t_start_ms entspricht dem letzten dt. t_start_ms/t_end_ms null außerhalb einer Session.
@@ -4038,6 +4053,7 @@ updated_at: Timestamp
 deleted_at: (Timestamp | null)
 session_id: Uuid
 t_ms: SessionMs
+t_session_ms?: SessionMs2
 page_id: (Uuid | null)
 mime: PhotoMime
 sha256: Sha256
@@ -4391,7 +4407,7 @@ export interface SessionProcessing {
 [k: string]: JobState
 }
 /**
- * Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase 2).
+ * Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms. Der Core liefert sie umgerechnet mit (Marker.t_session_ms, Photo.t_session_ms, PageStrokes.stroke_offsets_ms, VERTRAEGE §9.3).
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "SessionStartOffset".

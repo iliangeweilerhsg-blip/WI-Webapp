@@ -9,9 +9,11 @@ import {
   notesForSlide,
   pageSlideKey,
   playbackStart,
+  sessionTimeOf,
 } from '../src/components/rueckblick/notes.ts';
 import { buildHitIndex, hitTest } from '../src/components/rueckblick/stroke-hit.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
+import { clockAt } from '../src/lib/transcript.ts';
 import { SyncProvider } from '../src/lib/sync/SyncProvider.tsx';
 import type { SyncClient } from '../src/lib/sync/client.ts';
 import { installAudioStub, type AudioStub } from './audio-stub.ts';
@@ -126,6 +128,23 @@ describe('Notizen: Hilfen', () => {
     expect(notesForSlide(S1.id, all, segments).pages).toHaveLength(0);
   });
 
+  it('nimmt für Marker und Fotos die Sitzungszeit nach Serveruhr, sonst t_ms (Geräteversatz, §9.3)', () => {
+    expect(sessionTimeOf({ t_ms: 60_000, t_session_ms: 180_000 })).toBe(180_000);
+    expect(sessionTimeOf({ t_ms: 60_000 })).toBe(60_000);
+    const segments = [makeSlideSegment(1, S1, 0, 100_000), makeSlideSegment(2, S2, 100_000, 200_000)];
+    // Rohwert 60 s läge auf Folie 1, das offline gestartete iPad lief aber 2 min hinter dem Mac her
+    const markers = [
+      makeMarker({ id: uid(11), t_ms: 60_000, t_session_ms: 180_000 }),
+      makeMarker({ id: uid(12), t_ms: 150_000 }), // älterer Core ohne t_session_ms
+    ];
+    const photos = [makePhoto({ id: uid(21), t_ms: 10_000, t_session_ms: 110_000 })];
+    const all = { pages: [], markers, photos };
+    expect(notesForSlide(S1.id, all, segments).markers).toHaveLength(0);
+    // Sortiert nach Sitzungszeit: 150 s vor 180 s
+    expect(notesForSlide(S2.id, all, segments).markers.map((m) => m.id)).toEqual([uid(12), uid(11)]);
+    expect(notesForSlide(S2.id, all, segments).photos.map((p) => p.id)).toEqual([uid(21)]);
+  });
+
   it('lässt gelöschte Marker und Fotos weg', () => {
     const all = {
       pages: [],
@@ -145,6 +164,17 @@ describe('Notizen: Treffer auf Striche', () => {
     expect(hitTest(index, 150, 305, 8)?.t).toBe(2000);
     expect(hitTest(index, 150, 200, 8)).toBeNull();
     expect(hitTest(index, 400, 100, 8)).toBeNull();
+  });
+
+  it('rechnet den Geräteversatz je Strich ein (stroke_offsets_ms, §9.3), nie unter 0', () => {
+    const a = line(1, 100, 30_000);
+    const b = line(2, 300, 40_000);
+    const c = line(3, 500, 10_000);
+    const index = buildHitIndex([a, b, c], { [a.client_id]: 120_000, [c.client_id]: -60_000 });
+    expect(index.timed.map((e) => e.t)).toEqual([0, 40_000, 150_000]);
+    expect(hitTest(index, 150, 100, 8)?.t).toBe(150_000);
+    // Ohne Versatz (älterer Core): Rohwerte
+    expect(buildHitIndex([a, b]).timed.map((e) => e.t)).toEqual([30_000, 40_000]);
   });
 
   it('überspringt Striche ohne Zeit und sortiert die übrigen nach Zeit', () => {
@@ -363,6 +393,41 @@ describe('Rückblick: rechte Spalte', () => {
     fireEvent.click(hit, { clientX: 500, clientY: 600 });
     expect(stub.started).toHaveLength(plays);
     expect(screen.queryByTestId('note-picked-box')).toBeNull();
+  });
+
+  it('Strich eines offline gestarteten iPads: Sprung und Zeitanzeige mit Geräteversatz (#332)', async () => {
+    const offline = line(1, 100, 30_000);
+    const online = line(2, 300, 40_000);
+    boot((c) => {
+      c.pages.push({ ...notePage(1), attached_slide_id: S1.id });
+      c.strokes[uid(1)] = [offline, online];
+      // Das iPad hat 2 min nach dem Mac offline gestartet: Rohwert 30 s = 150 s nach Serveruhr
+      c.strokeOffsets[uid(1)] = { [offline.client_id]: 120_000 };
+    });
+    const hit = await screen.findByTestId('note-hit');
+    fireEvent.click(hit, { clientX: 150, clientY: 100 });
+    await waitFor(() => expect(stub.started.at(-1)).toMatchObject({ id: R1, at: 147 }));
+    // Beginn der Session + 150 s (Ortszeit)
+    expect(screen.getByTestId('note-picked')).toHaveTextContent(clockAt(STARTED, 150_000, true));
+    // Der Strich ohne Versatz bleibt beim Rohwert
+    fireEvent.click(hit, { clientX: 150, clientY: 300 });
+    await waitFor(() => expect(stub.started.at(-1)).toMatchObject({ id: R1, at: 37 }));
+  });
+
+  it('Marker und Foto eines offline gestarteten iPads: Folie und Sprung nach t_session_ms (#332)', async () => {
+    boot((c) => {
+      // Rohwerte lägen auf Folie 1, nach Serveruhr gehören beide zu Folie 2
+      c.markers.push(
+        makeMarker({ id: uid(11), session_id: SESSION_ID, t_ms: 90_000, t_session_ms: 210_000 }),
+      );
+      c.photos.push(makePhoto({ id: uid(21), session_id: SESSION_ID, t_ms: 100_000, t_session_ms: 220_000 }));
+    });
+    expect(await screen.findByText('Keine Marker.')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Nächste Folie' }));
+    fireEvent.click(await screen.findByTestId('note-marker'));
+    await waitFor(() => expect(stub.started.at(-1)).toMatchObject({ at: 207 }));
+    fireEvent.click(screen.getByRole('button', { name: /Aufnahme ab Foto/ }));
+    await waitFor(() => expect(stub.started.at(-1)).toMatchObject({ at: 217 }));
   });
 
   it('beginnt bei einem Strich in den ersten Sekunden bei 0', async () => {
