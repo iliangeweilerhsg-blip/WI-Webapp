@@ -929,7 +929,7 @@ async function swapIn(
           reader: tree.reader,
           strictSource: true,
           ...(copied ? { sums: copied } : {}),
-          onFile: progressLogger(log, d.name, 5000, deps.clock ?? Date.now, 'kopiert und geprüft'),
+          onFile: progressLogger(log, d.name, 5000, deps.clock ?? Date.now, 'kopiert'),
         }),
       );
       if (sums && copied) {

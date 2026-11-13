@@ -360,8 +360,8 @@ cost_entry(job_id → job, provider text, model text, task text,
 device(name text, kind text, token_hash text, last_seen_at timestamptz,
   clock_offset_ms int, app_version text)
 
-backup_run(started_at timestamptz, finished_at timestamptz, target text,
-  size_bytes int8, state text, error text NULL,       -- state: laeuft | fertig | fehler
+backup_run(started_at timestamptz, finished_at timestamptz NULL, target text,
+  size_bytes int8 NULL, state text, error text NULL,       -- state: laeuft | fertig | fehler
   trigger text,                         -- zeitplan | manuell | vor_migration (Pflicht)
   stand text NULL,                      -- Name des Stands für `sg restore <stand>`, z. B. 20261104T030012Z
   dump_sha256 text NULL,                -- SHA-256 des Dumps (64 Hex); der Restore-Test vertraut nur Ständen mit dieser Prüfsumme im Manifest

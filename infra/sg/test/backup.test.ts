@@ -49,6 +49,7 @@ import {
   formatFileList,
   NameConflictError,
   parseFileList,
+  progressLogger,
   readFileListFd,
   sha256Hex,
 } from '../src/file-sums.ts';
@@ -3331,20 +3332,37 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
     expect(readFileSync(join(s.dataDir, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
   });
 
-  it('Restore: beim Kopieren erscheint gedrosselt eine Fortschrittszeile (injizierte Uhr)', async () => {
+  it('Restore: beim Kopieren erscheint eine Fortschrittszeile (injizierte Uhr), ohne "geprüft"', async () => {
     const s = await prepared();
     let t = 0;
     const deps: RestoreDeps = { ...s.deps, clock: () => (t += 6000) };
     expect(await runRestore(deps, { stand: STAND, test: false, yes: true })).toBe(0);
-    const lines = s.logs.filter((l) => /Dateien kopiert und geprüft/.test(l));
+    const lines = s.logs.filter((l) => /Dateien kopiert \(/.test(l));
     expect(lines.length).toBeGreaterThan(0);
-    expect(lines[0]).toMatch(/^ {2}(media|vault): 1 Dateien kopiert und geprüft \(\d+ MB\) …$/);
+    expect(lines[0]).toMatch(/^ {2}(media|vault): 1 Dateien kopiert \(\d+ MB\) …$/);
+    expect(s.logs.filter((l) => /kopiert und geprüft/.test(l))).toEqual([]);
+  });
+
+  it('progressLogger drosselt: Uhr überschreitet nur bei jedem dritten Aufruf 5 s → weniger Zeilen als Dateien', () => {
+    let calls = 0;
+    let t = 0;
+    const clock = () => {
+      calls += 1;
+      if (calls % 3 === 0) t += 6000;
+      return t;
+    };
+    const lines: string[] = [];
+    const onFile = progressLogger((l) => lines.push(l), 'media', 5000, clock, 'kopiert');
+    for (let i = 0; i < 12; i += 1) onFile(1024 * 1024);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.length).toBeLessThan(12);
+    expect(lines.every((l) => /^ {2}media: \d+ Dateien kopiert \(\d+ MB\) …$/.test(l))).toBe(true);
   });
 
   it('Restore: stehende Uhr → keine Fortschrittszeile', async () => {
     const s = await prepared();
     expect(await runRestore({ ...s.deps, clock: () => 1 }, { stand: STAND, test: false, yes: true })).toBe(0);
-    expect(s.logs.filter((l) => /Dateien kopiert und geprüft/.test(l))).toEqual([]);
+    expect(s.logs.filter((l) => /Dateien kopiert \(/.test(l))).toEqual([]);
   });
 
   it('Restore: Datei im Stand verändert → Abweichung wird an den kopierten Bytes erkannt, nichts wird getauscht', async () => {
@@ -3399,6 +3417,49 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
       }
     });
 
+    it('Blockgrenzen mitten in Zeile und Umlaut gelten auch auf dem Anker-Weg (feste Positionen)', () => {
+      const text = listText(300);
+      for (const chunkSize of [1, 3, 7, 100]) {
+        const positions: Array<number | null> = [];
+        const read = ((fd: number, buf: Buffer, off: number, len: number, pos: number | null) => {
+          positions.push(pos);
+          return readSync(fd, buf, off, len, pos);
+        }) as typeof readSync;
+        const result = withFile(text, (fd) =>
+          readFileListFd(fd, { chunkSize, anchor: sha256Hex(text), read }),
+        );
+        expect(positions.every((p) => typeof p === 'number')).toBe(true);
+        expect(result.sha256).toBe(sha256Hex(text));
+        expect(result.sums).toEqual(parseFileList(text));
+      }
+    });
+
+    it('mit Anker: im zweiten Durchgang angehängte Bytes → kein weiteres feed, keine Map', () => {
+      const text = listText(20);
+      const path = join(tmp(), 'files.sha256');
+      writeFileSync(path, text);
+      const fd = openSync(path, 'r');
+      let eofs = 0;
+      const read = ((f: number, buf: Buffer, off: number, len: number, pos: number | null) => {
+        const n = readSync(f, buf, off, len, pos);
+        if (n === 0 && (eofs += 1) === 1) appendFileSync(path, `${sha('x')}\tmedia/neu\n`); // nach Durchgang 1
+        return n;
+      }) as typeof readSync;
+      const feed = vi.spyOn(FileListParser.prototype, 'feed');
+      try {
+        const result = readFileListFd(fd, { chunkSize: 64, anchor: sha256Hex(text), read });
+        expect(result.sums).toBeNull();
+        expect(result.sha256).not.toBe(sha256Hex(text));
+        // Höchstens die Blöcke bis zur Länge des ersten Durchgangs wurden geparst
+        expect(feed.mock.calls.reduce((n, [b]) => n + (b as Buffer).length, 0)).toBeLessThanOrEqual(
+          Buffer.byteLength(text),
+        );
+      } finally {
+        feed.mockRestore();
+        closeSync(fd);
+      }
+    });
+
     it('ungültige Liste: SHA wird trotzdem zu Ende gebildet (Vorrang der Echtheitsprüfung), Ergebnis ist null', () => {
       const text = `${listText(5)}kaputt\n${listText(5)}`;
       const result = withFile(text, (fd) => readFileListFd(fd, { chunkSize: 50 }));
@@ -3406,14 +3467,24 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
       expect(result.sha256).toBe(sha256Hex(text));
     });
 
-    it('mit Anker: falscher Anker → keine Map, kein Parsen, nur ein Durchgang; richtiger Anker → gleiches Ergebnis wie ohne', () => {
+    it('mit Anker: falscher Anker → keine Map, kein Parsen, nur ein Lese-Durchgang; richtiger Anker → gleiches Ergebnis wie ohne', () => {
       const text = listText(300);
       const feed = vi.spyOn(FileListParser.prototype, 'feed');
       try {
-        const wrong = withFile(text, (fd) => readFileListFd(fd, { chunkSize: 1000, anchor: sha256Hex('x') }));
+        let reads = 0;
+        const counting = ((fd: number, buf: Buffer, off: number, len: number, pos: number | null) => {
+          reads += 1;
+          return readSync(fd, buf, off, len, pos);
+        }) as typeof readSync;
+        const wrong = withFile(text, (fd) =>
+          readFileListFd(fd, { chunkSize: 1000, anchor: sha256Hex('x'), read: counting }),
+        );
         expect(wrong.sums).toBeNull();
         expect(wrong.sha256).toBe(sha256Hex(text));
         expect(feed).not.toHaveBeenCalled();
+        // Ein Durchgang: ceil(Länge / 1000) Blöcke plus das leere Lesen am Ende
+        const onePass = Math.ceil(Buffer.byteLength(text) / 1000) + 1;
+        expect(reads).toBe(onePass);
         // Auch eine ungültige Liste wird mit falschem Anker nie geparst
         const bad = withFile('kaputt\n', (fd) => readFileListFd(fd, { anchor: sha256Hex(text) }));
         expect(bad.sums).toBeNull();
@@ -3422,6 +3493,11 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
           readFileListFd(fd, { chunkSize: 1000, anchor: sha256Hex(text) }),
         );
         expect(feed).toHaveBeenCalled();
+        reads = 0;
+        withFile(text, (fd) =>
+          readFileListFd(fd, { chunkSize: 1000, anchor: sha256Hex(text), read: counting }),
+        );
+        expect(reads).toBe(2 * onePass);
         expect(right.sha256).toBe(sha256Hex(text));
         expect(right.bytes).toBe(Buffer.byteLength(text));
         expect(right.sums).toEqual(parseFileList(text));
@@ -3480,6 +3556,20 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
       // Bis zur Grenze gültig
       const path = `media/${'x'.repeat(FILES_MAX_LINE - 65 - 6)}`;
       expect(parseFileList(`${sha('a')}\t${path}\n`)?.media.size).toBe(1);
+    });
+
+    it('Restore mit falscher Liste: readFileSums übergibt den Anker, feed wird nie aufgerufen', async () => {
+      const s = await prepared();
+      const path = join(s.target, STAND, 'files.sha256');
+      writeFileSync(path, readFileSync(path, 'utf8').replace(sha('JPEG'), sha('JPEX')));
+      const feed = vi.spyOn(FileListParser.prototype, 'feed');
+      try {
+        expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(1);
+        expect(s.errs.join('\n')).toMatch(/passt nicht zur Prüfsumme im Manifest/);
+        expect(feed).not.toHaveBeenCalled();
+      } finally {
+        feed.mockRestore();
+      }
     });
 
     it('Liste passt nicht zum Manifest: nicht_authentisch, auch wenn der Aufbau ungültig ist; mit passender SHA: ungültig', async () => {
