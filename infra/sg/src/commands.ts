@@ -12,6 +12,7 @@ import type { CommandName } from './cli.ts';
 import { appUrl, childEnv, CORE_STOP_TIMEOUT_S, healthUrl, type SgConfig } from './config.ts';
 import { checkCoreLock, doctorExitCode, formatChecks, realLockDoctorIo, runChecks } from './doctor.ts';
 import { checkIpadApp, ipadCommand } from './ipad-hint.ts';
+import { messenCommand, realMessenDeps } from './messen.ts';
 import { moodleCommand, realMoodleDeps } from './moodle.ts';
 import {
   clearStopMarker,
@@ -543,5 +544,7 @@ export async function dispatch(command: CommandName, cfg: SgConfig, rest: string
       return moodleCommand(cfg, rest, realMoodleDeps());
     case 'ipad':
       return ipadCommand(cfg, rest);
+    case 'messen':
+      return messenCommand(cfg, rest, realMessenDeps());
   }
 }
