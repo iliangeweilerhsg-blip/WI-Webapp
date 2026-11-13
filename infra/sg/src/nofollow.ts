@@ -21,6 +21,7 @@
 //     dort geprüft und erst danach relativ an seinen Platz gelegt (H1, #124). Ein falscher Link ist so für keinen
 //     anderen Benutzer erreichbar.
 // Grenze: Die Quelle eines Hardlinks nennt `link` über ihren absoluten Pfad (ohne `linkat` geht das nicht verankert).
+import { createHash } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -46,6 +47,18 @@ export const NEW_FILE_FLAGS =
   constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
 /** Quelle lesen: Symlink nicht verfolgen, eine FIFO blockiert `open` nicht (die Typprüfung folgt per `fstat`) */
 export const READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+
+/** SHA-256 des Inhalts von `fd` (ab der aktuellen Position bis zum Ende), blockweise */
+export function hashFd(fd: number): string {
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(CHUNK);
+  for (;;) {
+    const n = readSync(fd, buffer, 0, buffer.length, null);
+    if (n === 0) break;
+    hash.update(buffer.subarray(0, n));
+  }
+  return hash.digest('hex');
+}
 
 /** Im Ziel wurde etwas ausgetauscht oder lag schon etwas im Weg: der Lauf bricht ab (fail-closed) */
 export class UnsafeTargetError extends Error {
@@ -267,14 +280,19 @@ export class NoFollowWriter extends AnchoredDirs {
     }
   }
 
-  /** Kopiert aus dem offenen Deskriptor `input` (verankert geöffnet) nach `to` (neu, exklusiv), Rechte und Zeiten von `info` */
-  copyFromFd(input: number, to: string, info: Stats): void {
+  /**
+   * Kopiert aus dem offenen Deskriptor `input` (verankert geöffnet) nach `to` (neu, exklusiv), Rechte und Zeiten von
+   * `info`. Rückgabe: SHA-256 der gelesenen Bytes (#114 N-1), also genau dessen, was in der Kopie steht.
+   */
+  copyFromFd(input: number, to: string, info: Stats): string {
     const output = this.openNew(to, info.mode & 0o777);
+    const hash = createHash('sha256');
     try {
       const buffer = Buffer.allocUnsafe(CHUNK);
       for (;;) {
         const n = readSync(input, buffer, 0, buffer.length, null);
         if (n === 0) break;
+        hash.update(buffer.subarray(0, n));
         let offset = 0;
         while (offset < n) offset += writeSync(output, buffer, offset, n - offset);
       }
@@ -282,6 +300,7 @@ export class NoFollowWriter extends AnchoredDirs {
     } finally {
       closeSync(output);
     }
+    return hash.digest('hex');
   }
 
   /**

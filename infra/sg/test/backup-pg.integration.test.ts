@@ -128,12 +128,12 @@ describe.skipIf(!BASE)(
 
     async function run(
       id: string,
-      over: { state?: string; target?: string; stand?: string; sha?: string; size?: number },
+      over: { state?: string; target?: string; stand?: string; sha?: string; size?: number; files?: string },
     ): Promise<void> {
       await pg.query(
-        `INSERT INTO backup_run (id, user_id, started_at, finished_at, target, state, trigger, stand, dump_sha256, size_bytes)
+        `INSERT INTO backup_run (id, user_id, started_at, finished_at, target, state, trigger, stand, dump_sha256, size_bytes, files_sha256)
        VALUES (:'id'::uuid, :'user'::uuid, now(), now(), :'target', :'state', 'vor_migration',
-               NULLIF(:'stand', ''), NULLIF(:'sha', ''), NULLIF(:'size', '')::bigint)`,
+               NULLIF(:'stand', ''), NULLIF(:'sha', ''), NULLIF(:'size', '')::bigint, NULLIF(:'files', ''))`,
         {
           id,
           user: SINGLE_USER_ID,
@@ -142,6 +142,7 @@ describe.skipIf(!BASE)(
           stand: over.stand ?? '',
           sha: over.sha ?? '',
           size: over.size === undefined ? '' : String(over.size),
+          files: over.files ?? '',
         },
       );
     }
@@ -168,10 +169,27 @@ describe.skipIf(!BASE)(
         size: 1234,
         target: '/woanders',
       });
-      expect(await runAnchor(pg, '20261101T030000Z')).toEqual({ sha256: sha, sizeBytes: 1234 });
+      expect(await runAnchor(pg, '20261101T030000Z')).toEqual({
+        sha256: sha,
+        sizeBytes: 1234,
+        filesSha256: null,
+      });
       expect(await runAnchor(pg, '20261002T030000Z')).toBeNull(); // Lauf ohne Prüfsumme
       expect(await runAnchor(pg, '20261231T030000Z')).toBeNull(); // kein Lauf
       expect(await runAnchor(pg, "x' OR 1=1")).toBeNull(); // kein Standname
+    });
+
+    it('runAnchor: files_sha256 (Migration 0011, #114 N-1) kommt als Anker mit; die CHECK-Regel verlangt 64 Hex-Zeichen', async () => {
+      const files = 'd'.repeat(64);
+      await run('019a4e14-0000-7000-8000-000000000221', {
+        stand: '20261102T030000Z',
+        sha: 'e'.repeat(64),
+        files,
+      });
+      expect(await runAnchor(pg, '20261102T030000Z')).toMatchObject({ filesSha256: files });
+      await expect(
+        run('019a4e14-0000-7000-8000-000000000222', { stand: '20261103T030000Z', files: 'kaputt' }),
+      ).rejects.toThrow(/backup_run_files_sha256_chk/);
     });
   },
 );

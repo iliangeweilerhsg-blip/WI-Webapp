@@ -1,0 +1,2 @@
+ALTER TABLE "backup_run" ADD COLUMN "files_sha256" text;--> statement-breakpoint
+ALTER TABLE "backup_run" ADD CONSTRAINT "backup_run_files_sha256_chk" CHECK ("backup_run"."files_sha256" IS NULL OR "backup_run"."files_sha256" ~ '^[0-9a-f]{64}$');

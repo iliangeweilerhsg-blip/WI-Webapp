@@ -1,8 +1,10 @@
 // Dateien eines Backups: Standnamen, Aufbewahrung (Ausdünnen) und inkrementelles Kopieren mit Hardlinks.
 import { closeSync, existsSync, lstatSync, readdirSync, readSync, type Stats } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
+import type { FilesRef } from './file-sums.ts';
 import {
   type AnchoredDirs,
+  hashFd,
   NoFollowReader,
   NoFollowRemover,
   NoFollowWriter,
@@ -131,6 +133,22 @@ export function skipped(name: string): boolean {
   return name.endsWith('.part') || name.endsWith('.partial') || name === '.tmp' || name === '.DS_Store';
 }
 
+/** Schlüssel eines Pfades in `files.sha256` und beim Vergleich (Unicode-NFC, #114 N-1) */
+export const pathKey = (path: string): string => path.normalize('NFC');
+
+/**
+ * Zwei Einträge, deren Pfade nach NFC gleich sind (#114 N-1): Die Prüfsummenliste könnte sie nicht unterscheiden, ein
+ * Ziel, das Namen normalisiert (HFS+, exFAT, manche SMB-/NAS-Freigaben), auch nicht. Das Backup bricht ab (fail-closed).
+ */
+export class NameConflictError extends Error {}
+
+export function nameConflictText(a: string, b: string): string {
+  return (
+    `„${a}“ und „${b}“ unterscheiden sich nur in der Unicode-Schreibweise (NFC/NFD) und wären im Backup nicht ` +
+    'unterscheidbar. Benenne eine der beiden um, dann läuft das Backup wieder.'
+  );
+}
+
 export interface CopyTreeOptions {
   /** Nur für Tests: läuft vor dem Kopieren jeder Datei */
   beforeCopy?: (path: string) => void;
@@ -152,6 +170,11 @@ export interface CopyTreeOptions {
    * Benutzer dieses Prozesses.
    */
   owner?: number | undefined;
+  /**
+   * Sammelt die SHA-256 jeder Datei des Stands (Schlüssel: Pfad relativ zu `src`), gebildet aus den Bytes, die aus der
+   * Quelle gelesen wurden (#114 N-1). Beim Kopieren entsteht sie nebenbei, bei verlinkten Dateien durch Lesen der Quelle.
+   */
+  sums?: Map<string, string>;
 }
 
 /**
@@ -195,6 +218,7 @@ export function copyTree(
     reader,
     strict,
     owner,
+    sums: options.sums,
   });
   return result;
 }
@@ -206,6 +230,7 @@ interface Level {
   strict: boolean;
   /** Besitzer eigener Dateien im Ziel (`undefined`: ohne Unix-Besitzer, nicht geprüft) */
   owner: number | undefined;
+  sums?: Map<string, string> | undefined;
 }
 
 function unsafe(message: string): UnsafeTargetError {
@@ -232,7 +257,14 @@ function prevFile(reader: NoFollowReader, prev: string | null, name: string): St
   }
 }
 
-function copyLevel(src: string, dst: string, prev: string | null, result: CopyStats, level: Level): void {
+function copyLevel(
+  src: string,
+  dst: string,
+  prev: string | null,
+  result: CopyStats,
+  level: Level,
+  rel = '',
+): void {
   const { out, reader, strict } = level;
   out.mkdir(dst);
   let entries: { name: string; info: Stats }[];
@@ -245,12 +277,32 @@ function copyLevel(src: string, dst: string, prev: string | null, result: CopySt
     }
     throw error;
   }
+  // Prüfsummen (Backup): zwei Namen, die nach NFC gleich sind, vor dem Kopieren ablehnen. Ein normalisierendes Ziel
+  // scheiterte sonst mitten im Lauf mit „gibt es schon“, ein anderes bekäme zwei Dateien unter einem Listenschlüssel.
+  if (level.sums) {
+    const keys = new Map<string, string>();
+    for (const { name, info } of entries) {
+      if (skipped(name) || info.isSymbolicLink() || !(info.isDirectory() || info.isFile())) continue;
+      const key = pathKey(name);
+      const other = keys.get(key);
+      if (other !== undefined)
+        throw new NameConflictError(nameConflictText(join(src, other), join(src, name)));
+      keys.set(key, name);
+    }
+  }
   for (const { name, info } of entries) {
     if (skipped(name)) continue;
     const from = join(src, name);
     const to = join(dst, name);
     if (!info.isSymbolicLink() && info.isDirectory()) {
-      copyLevel(reader.enter(src, name, info), to, prevChild(reader, prev, name), result, level);
+      copyLevel(
+        reader.enter(src, name, info),
+        to,
+        prevChild(reader, prev, name),
+        result,
+        level,
+        rel === '' ? name : `${rel}/${name}`,
+      );
       continue;
     }
     if (info.isSymbolicLink() || !info.isFile()) {
@@ -292,7 +344,10 @@ function copyLevel(src: string, dst: string, prev: string | null, result: CopySt
         // diese Datei zeigt (N2). Kein Hardlink möglich: kopieren.
         if (out.link(join(prev as string, name), to, old)) how = 'linked';
       }
-      if (how === 'copied') out.copyFromFd(opened.fd, to, real);
+      let sha: string | undefined;
+      if (how === 'copied') sha = out.copyFromFd(opened.fd, to, real);
+      else if (level.sums) sha = hashFd(opened.fd);
+      if (level.sums && sha !== undefined) level.sums.set(rel === '' ? name : `${rel}/${name}`, sha);
       result.files += 1;
       result.bytes += real.size;
       result[how] += 1;
@@ -368,6 +423,11 @@ export interface Manifest {
   counts: Record<string, number>;
   media: { files: number; bytes: number };
   vault: { files: number; bytes: number };
+  /**
+   * Prüfsummenliste von `media/` und `vault/` (#114 N-1). Fehlt bei Ständen vor dieser Version: Dort gibt es nur
+   * Anzahl und Größe.
+   */
+  files?: FilesRef;
 }
 
 export const MANIFEST_FILE = 'manifest.json';
