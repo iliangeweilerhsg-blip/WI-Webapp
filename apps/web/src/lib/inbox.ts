@@ -25,7 +25,7 @@ import { useSyncClient } from './sync/SyncProvider.tsx';
 
 /**
  * Einträge, die die Inbox heute darstellt. Kartenvorschläge (`card_batch`, VERTRAEGE §21.7) bekommen ihre Zeile
- * mit B4 (§21.11). Bis dahin lädt die Inbox sie nicht.
+ * mit B4 (§21.10). Bis dahin lädt die Inbox sie nicht.
  */
 export type ConceptInboxItem = InboxItem & {
   payload: Exclude<InboxItem['payload'], { kind: 'card_batch' }>;
