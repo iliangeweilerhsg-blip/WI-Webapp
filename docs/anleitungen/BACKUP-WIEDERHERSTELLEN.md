@@ -25,7 +25,7 @@ Ohne Backup-Ziel gibt es nichts zu testen.
 
 ## 3. Wiederherstellen
 
-Das geht nur im Terminal und nur, wenn Core und Worker **nicht** laufen. Es ersetzt deinen aktuellen Stand. Als laufend gilt ein Core auch, wenn nur seine Sperrdatei (`run/core.lock`) eine lebende PID trägt, etwa bei anderem Port oder verlorener PID-Datei. Eine veraltete Sperrdatei (Prozess tot) stört nicht.
+Das geht nur im Terminal und nur, wenn Core und Worker **nicht** laufen. Es ersetzt deinen aktuellen Stand. Als laufend gilt ein Core auch, wenn nur seine Sperrdatei (`run/core.lock`) eine lebende PID trägt, etwa bei anderem Port oder verlorener PID-Datei. Eine veraltete Sperrdatei (Prozess tot) stört nicht. Während der Wiederherstellung belegt `sg` die Sperrdatei selbst, ein Core, der in dieser Zeit startet, beendet sich also. Meldet `sg restore`, dass der Core noch läuft, `pnpm sg stop` aber nichts findet, erklärt `pnpm sg doctor` den Fall (oft eine wiederverwendete PID).
 
 1. Im Repo-Ordner beenden:
 

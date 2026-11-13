@@ -11,6 +11,7 @@ import {
   type BackupTrigger,
 } from './backup.ts';
 import { healthUrl, type SgConfig } from './config.ts';
+import { acquireCoreLock } from './core-lock.ts';
 import { coreLockHeld } from './doctor.ts';
 import { openPg, realExec, type Exec, type PgAccess } from './pg.ts';
 import { readService } from './procs.ts';
@@ -148,14 +149,8 @@ export interface RunningIo {
   coreReachable: () => Promise<boolean>;
 }
 
-/**
- * Core und Worker, die noch laufen. Der Core zählt als laufend, wenn seine Pid-Datei stimmt, in `run/core.lock` eine
- * lebende PID steht (#292, auch bei anderem Port oder verlorener Pid-Datei) oder er unter dem Health-Pfad antwortet.
- * Eine veraltete Sperrdatei (PID tot) blockiert nicht.
- */
-export async function runningServices(
-  cfg: SgConfig,
-  io: RunningIo = {
+function realRunningIo(cfg: SgConfig): RunningIo {
+  return {
     lockHeld: () => coreLockHeld(cfg),
     async coreReachable() {
       try {
@@ -165,12 +160,28 @@ export async function runningServices(
         return false; // antwortet nicht: läuft nicht
       }
     },
-  },
-): Promise<string[]> {
+  };
+}
+
+/**
+ * Core und Worker, die noch laufen. Der Core zählt als laufend, wenn seine Pid-Datei stimmt, in `run/core.lock` eine
+ * lebende PID steht (#292, auch bei anderem Port oder verlorener Pid-Datei) oder er unter dem Health-Pfad antwortet.
+ * Eine veraltete Sperrdatei (PID tot) blockiert nicht.
+ */
+export async function runningServices(cfg: SgConfig, io: RunningIo = realRunningIo(cfg)): Promise<string[]> {
   const names: string[] = [];
   if (readService(cfg, 'core') !== null || io.lockHeld() || (await io.coreReachable())) names.push('Core');
   if (readService(cfg, 'worker') !== null) names.push('Worker');
   return names;
+}
+
+/**
+ * Hält allein die Sperrdatei den Core für laufend (keine PID-Datei von Core oder Worker, keine Health-Antwort)?
+ * Dann findet `sg stop` nichts, und die PID in der Datei kann von einem fremden Prozess stammen (wiederverwendet).
+ */
+export async function blockedByLockOnly(cfg: SgConfig, io: RunningIo = realRunningIo(cfg)): Promise<boolean> {
+  if (readService(cfg, 'core') !== null || readService(cfg, 'worker') !== null) return false;
+  return io.lockHeld() && !(await io.coreReachable());
 }
 
 async function askYesNo(question: string): Promise<boolean> {
@@ -206,6 +217,8 @@ export async function restoreCommand(cfg: SgConfig, rest: string[]): Promise<num
     pg,
     ...io,
     servicesRunning: () => runningServices(cfg),
+    holdLock: () => acquireCoreLock(cfg.dataDir),
+    lockOnly: () => blockedByLockOnly(cfg),
     confirm: askYesNo,
     codeMigrations: journalCount(cfg.repoRoot),
   };
