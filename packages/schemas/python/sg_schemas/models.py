@@ -3248,6 +3248,12 @@ class Marker(BaseModel):
         ge=0,
         title='SessionMs',
     )
+    t_session_ms: StrictInt | None = Field(
+        None,
+        description='Sitzungszeit nach Serveruhr (VERTRAEGE §9.3): t_ms + offset_ms des Geräts aus session.start_offsets, nie unter 0. Ohne Eintrag gleich t_ms. Nur in Antworten des Core (Snapshot), fehlt bei älteren Cores: dann gilt t_ms',
+        ge=0,
+        title='SessionMs',
+    )
     page_id: Uuid | None
     position: MarkerPosition | None
     source: MarkerSource
@@ -4702,6 +4708,12 @@ class Photo(BaseModel):
         ge=0,
         title='SessionMs',
     )
+    t_session_ms: StrictInt | None = Field(
+        None,
+        description='Sitzungszeit nach Serveruhr (VERTRAEGE §9.3): t_ms + offset_ms des Geräts aus session.start_offsets, nie unter 0. Ohne Eintrag gleich t_ms. Nur in Antworten des Core (Snapshot, GET /photos/{id}), fehlt bei älteren Cores: dann gilt t_ms',
+        ge=0,
+        title='SessionMs',
+    )
     page_id: Uuid | None
     mime: PhotoMime
     sha256: StrictStr = Field(
@@ -5218,7 +5230,7 @@ class SessionStartData(BaseModel):
 
 class SessionStartOffset(BaseModel):
     """
-    Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase 2).
+    Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms. Der Core liefert sie umgerechnet mit (Marker.t_session_ms, Photo.t_session_ms, PageStrokes.stroke_offsets_ms, VERTRAEGE §9.3).
     """
 
     model_config = ConfigDict(
@@ -6931,6 +6943,10 @@ class PageStrokes(BaseModel):
         description='op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden',
     )
     strokes: list[Stroke]
+    stroke_offsets_ms: dict[str, StrictInt] | None = Field(
+        None,
+        description='Geräteversatz je Strich (client_id → offset_ms aus session.start_offsets der Session der Seite, VERTRAEGE §9.3). Nur Striche mit Versatz ≠ 0 und t_start_ms ≠ null. Sitzungszeit nach Serveruhr = max(0, t_start_ms + Versatz), ebenso t_end_ms. Fehlt das Feld (älterer Core) oder der Strich darin, ist der Versatz 0. Nur in Antworten des Core',
+    )
 
 
 class PageUpdateData(BaseModel):

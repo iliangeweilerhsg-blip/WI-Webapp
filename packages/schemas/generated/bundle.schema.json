@@ -6300,6 +6300,10 @@
         "t_ms": {
           "$ref": "#/$defs/SessionMs"
         },
+        "t_session_ms": {
+          "$ref": "#/$defs/SessionMs",
+          "description": "Sitzungszeit nach Serveruhr (VERTRAEGE §9.3): t_ms + offset_ms des Geräts aus session.start_offsets, nie unter 0. Ohne Eintrag gleich t_ms. Nur in Antworten des Core (Snapshot), fehlt bei älteren Cores: dann gilt t_ms"
+        },
         "page_id": {
           "anyOf": [
             {
@@ -10034,6 +10038,13 @@
           "items": {
             "$ref": "#/$defs/Stroke"
           }
+        },
+        "stroke_offsets_ms": {
+          "type": "object",
+          "description": "Geräteversatz je Strich (client_id → offset_ms aus session.start_offsets der Session der Seite, VERTRAEGE §9.3). Nur Striche mit Versatz ≠ 0 und t_start_ms ≠ null. Sitzungszeit nach Serveruhr = max(0, t_start_ms + Versatz), ebenso t_end_ms. Fehlt das Feld (älterer Core) oder der Strich darin, ist der Versatz 0. Nur in Antworten des Core",
+          "additionalProperties": {
+            "type": "integer"
+          }
         }
       }
     },
@@ -10563,6 +10574,10 @@
         },
         "t_ms": {
           "$ref": "#/$defs/SessionMs"
+        },
+        "t_session_ms": {
+          "$ref": "#/$defs/SessionMs",
+          "description": "Sitzungszeit nach Serveruhr (VERTRAEGE §9.3): t_ms + offset_ms des Geräts aus session.start_offsets, nie unter 0. Ohne Eintrag gleich t_ms. Nur in Antworten des Core (Snapshot, GET /photos/{id}), fehlt bei älteren Cores: dann gilt t_ms"
         },
         "page_id": {
           "anyOf": [
@@ -12433,7 +12448,7 @@
     "SessionStartOffset": {
       "title": "SessionStartOffset",
       "type": "object",
-      "description": "Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase 2).",
+      "description": "Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms. Der Core liefert sie umgerechnet mit (Marker.t_session_ms, Photo.t_session_ms, PageStrokes.stroke_offsets_ms, VERTRAEGE §9.3).",
       "required": [
         "device_id",
         "offset_ms"

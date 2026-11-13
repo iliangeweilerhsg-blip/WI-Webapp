@@ -23,6 +23,7 @@ import { notebook, page, pageElement, stroke, syncOp, syncStream } from '../db/s
 import { HttpError } from '../errors.ts';
 import { resolveDataPath } from './material.ts';
 import { moduleIsActive } from './notebooks.ts';
+import { strokeOffsets } from './session-time.ts';
 
 type PageRow = typeof page.$inferSelect;
 type StrokeRow = typeof stroke.$inferSelect;
@@ -156,7 +157,7 @@ export async function getNotebookPages(db: Db, notebookId: string): Promise<Note
   });
 }
 
-/** `GET /pages/{id}/strokes`: nach `created_at`, dann `client_id` */
+/** `GET /pages/{id}/strokes`: nach `created_at`, dann `client_id`, dazu der Geräteversatz je Strich (§9.3) */
 export async function getPageStrokes(db: Db, id: string): Promise<PageStrokes> {
   return snapshot(db, async (tx) => {
     const row = await activePage(tx, id);
@@ -165,10 +166,13 @@ export async function getPageStrokes(db: Db, id: string): Promise<PageStrokes> {
       .from(stroke)
       .where(and(eq(stroke.pageId, id), isNull(stroke.deletedAt)))
       .orderBy(asc(stroke.createdAt), asc(stroke.clientId));
+    const timed = rows.filter((r) => r.tStartMs !== null).map((r) => r.clientId);
     return {
       page_id: id,
       ...(await streamPosition(tx, `notebook:${row.notebookId}`)),
       strokes: rows.map(toApiStroke),
+      // Geräteversatz je Strich (§9.3), nur bei einem Eintrag in start_offsets der Session der Seite
+      stroke_offsets_ms: await strokeOffsets(tx, row, timed),
     };
   });
 }

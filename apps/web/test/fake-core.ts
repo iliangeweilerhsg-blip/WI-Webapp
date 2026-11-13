@@ -548,6 +548,8 @@ export interface FakeCore {
   /** Notizseiten für GET /notebooks/{id}/pages (VERTRAEGE §7.4), Striche je Seiten-ID für GET /pages/{id}/strokes */
   pages: Page[];
   strokes: Record<string, Stroke[]>;
+  /** Geräteversatz je Seiten-ID für `stroke_offsets_ms` (VERTRAEGE §9.3). Fehlt die Seite, fehlt das Feld (älterer Core) */
+  strokeOffsets: Record<string, Record<string, number>>;
   /** Fotos im Snapshot der Session (GET /sessions/{id}/snapshot) */
   photos: Photo[];
   /** GET /notebooks scheitert mit 500, solange true */
@@ -779,6 +781,7 @@ export function installFakeCore(
     notebooks: [],
     pages: [],
     strokes: {},
+    strokeOffsets: {},
     photos: [],
     events: [],
     failNotebooks: false,
@@ -1253,6 +1256,9 @@ export function installFakeCore(
           stream_seq: 0,
           stream_op_id: null,
           strokes: structuredClone(core.strokes[pageStrokes[1] ?? ''] ?? []),
+          ...(core.strokeOffsets[pageStrokes[1] ?? '']
+            ? { stroke_offsets_ms: structuredClone(core.strokeOffsets[pageStrokes[1] ?? '']) }
+            : {}),
         });
       }
 

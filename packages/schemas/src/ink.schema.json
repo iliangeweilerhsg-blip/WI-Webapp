@@ -368,6 +368,13 @@
           "items": {
             "$ref": "#/$defs/Stroke"
           }
+        },
+        "stroke_offsets_ms": {
+          "type": "object",
+          "description": "Geräteversatz je Strich (client_id → offset_ms aus session.start_offsets der Session der Seite, VERTRAEGE §9.3). Nur Striche mit Versatz ≠ 0 und t_start_ms ≠ null. Sitzungszeit nach Serveruhr = max(0, t_start_ms + Versatz), ebenso t_end_ms. Fehlt das Feld (älterer Core) oder der Strich darin, ist der Versatz 0. Nur in Antworten des Core",
+          "additionalProperties": {
+            "type": "integer"
+          }
         }
       }
     },

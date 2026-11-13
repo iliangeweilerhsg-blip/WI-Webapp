@@ -44,6 +44,7 @@ import { publishAfterCommit, publishEvent } from '../sync/events.ts';
 import { autoStopBoundary, autoStopReason, type AutoStopLimits, type AutoStopSession } from './auto-stop.ts';
 import { ensurePipelineJobs, summarizeProcessing } from './pipeline.ts';
 import { ensureFinalizeOnStop } from './recordings.ts';
+import { deviceOffsets, sessionItemOffsets, sessionTime } from './session-time.ts';
 import { getSettings } from './settings.ts';
 import { softDelete } from './trash.ts';
 import { softDeleteWithOps } from './trash-ops.ts';
@@ -1146,6 +1147,10 @@ export async function getSessionSnapshot(db: Db, id: string): Promise<SessionSna
           .where(and(eq(syncOp.stream, stream), eq(syncOp.seq, streamSeq)));
         streamOpId = op?.opId ?? null;
       }
+      // Geräteversatz (§9.3): nur bei einem Eintrag in start_offsets ein Blick in den Strom
+      const offsets = deviceOffsets(loaded.row.startOffsets);
+      const markerOffsets = await sessionItemOffsets(tx, id, offsets, 'marker.add');
+      const photoOffsets = await sessionItemOffsets(tx, id, offsets, 'photo.add');
 
       const base = (r: {
         id: string;
@@ -1179,6 +1184,7 @@ export async function getSessionSnapshot(db: Db, id: string): Promise<SessionSna
             session_id: r.sessionId,
             kind: r.kind as Marker['kind'],
             t_ms: r.tMs,
+            t_session_ms: sessionTime(r.tMs, markerOffsets.get(r.id)),
             page_id: r.pageId,
             position: r.position,
             source: r.source as Marker['source'],
@@ -1191,6 +1197,7 @@ export async function getSessionSnapshot(db: Db, id: string): Promise<SessionSna
             ...base(r),
             session_id: r.sessionId,
             t_ms: r.tMs,
+            t_session_ms: sessionTime(r.tMs, photoOffsets.get(r.id)),
             page_id: r.pageId,
             mime: r.mime as Photo['mime'],
             sha256: r.sha256,
