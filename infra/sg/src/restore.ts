@@ -7,7 +7,7 @@
 //   Ordner neben den alten; erst dann wird getauscht. Die alten Daten bleiben unter anderem Namen liegen
 //   (`<db>_vor_restore_<zeit>`, `media.vor-restore-<zeit>`), nichts wird gelöscht. Backup-Hardlinks werden nie
 //   übernommen: Der Datenordner bekommt echte Kopien, sonst würden spätere Änderungen den Stand verändern.
-import { closeSync, existsSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import {
   copyTree,
@@ -39,12 +39,13 @@ import {
 import {
   FILES_FILE,
   FILES_MAX_BYTES,
+  compareSums,
   HEX64,
-  parseFileList,
   progressLogger,
-  sha256Hex,
+  readFileListFd,
   SUBS,
   verifyTree,
+  type StreamedList,
   type SumMap,
 } from './file-sums.ts';
 import { NoFollowReader, UnsafeTargetError, type Identity } from './nofollow.ts';
@@ -308,32 +309,31 @@ export function readFileSums(dir: string, manifest: Manifest, tree: StandTree): 
       }
       throw error;
     }
-    let buffer: Buffer;
+    // Ein Durchgang (#324): SHA-256 und Parsen aus denselben Blöcken, nie die ganze Liste im Speicher. Das Ergebnis gilt
+    // erst, wenn die SHA zum Anker passt (unten); bis dahin hat das Lesen keine Nebenwirkung.
+    let list: StreamedList;
     try {
       if (opened.info.size > FILES_MAX_BYTES) {
         throw bad('beschaedigt', `${FILES_FILE} im Stand ${manifest.stand} ist unerwartet groß.`);
       }
-      buffer = Buffer.alloc(opened.info.size);
-      let offset = 0;
-      while (offset < buffer.length) {
-        const n = readSync(opened.fd, buffer, offset, buffer.length - offset, null);
-        if (n === 0) break;
-        offset += n;
-      }
-      // Wächst die Datei beim Lesen, ist sie nicht mehr die geprüfte
-      if (offset !== buffer.length || readSync(opened.fd, Buffer.alloc(1), 0, 1, null) !== 0) {
-        throw bad('beschaedigt', `${FILES_FILE} im Stand ${manifest.stand} hat sich beim Lesen verändert.`);
-      }
+      list = readFileListFd(opened.fd);
     } finally {
       closeSync(opened.fd);
     }
-    if (sha256Hex(buffer) !== ref.sha256) {
+    if (list.tooLarge) {
+      throw bad('beschaedigt', `${FILES_FILE} im Stand ${manifest.stand} ist unerwartet groß.`);
+    }
+    // Wächst oder schrumpft die Datei beim Lesen, ist sie nicht mehr die geprüfte
+    if (list.bytes !== opened.info.size) {
+      throw bad('beschaedigt', `${FILES_FILE} im Stand ${manifest.stand} hat sich beim Lesen verändert.`);
+    }
+    if (list.sha256 !== ref.sha256) {
       throw bad(
         'nicht_authentisch',
         `${FILES_FILE} im Stand ${manifest.stand} passt nicht zur Prüfsumme im Manifest. Der Stand wird nicht eingespielt.`,
       );
     }
-    const sums = parseFileList(buffer.toString('utf8'));
+    const sums = list.sums;
     if (!sums || sums.media.size + sums.vault.size !== ref.count) {
       throw bad('beschaedigt', `${FILES_FILE} im Stand ${manifest.stand} ist ungültig oder unvollständig.`);
     }
@@ -916,25 +916,25 @@ async function swapIn(
       // Ohne vorigen Stand: echte Kopien, keine Hardlinks ins Backup. Die Quelle wird verankert gelesen, ein Symlink
       // oder ein Tausch im Stand bricht ab (#119)
       const source = tree[d.name] as string;
+      // Prüfsummen (#114 N-1, #324): Die Kopie liest die Quelle einmal, hasht dabei genau die Bytes, die sie in den
+      // Datenordner schreibt (`copyFromFd`), und vergleicht danach mit der Liste. Die Kopie wird nicht noch einmal
+      // gelesen. Weicht eine Datei ab, fehlt eine oder ist eine dazugekommen, bricht der Restore hier ab: Das Journal
+      // baut alles zurück, getauscht wurde noch nichts.
+      const copied = sums ? new Map<string, string>() : undefined;
       asStandError(dir, () =>
-        copyTree(source, d.staged, null, undefined, { reader: tree.reader, strictSource: true }),
+        copyTree(source, d.staged, null, undefined, {
+          reader: tree.reader,
+          strictSource: true,
+          ...(copied ? { sums: copied } : {}),
+        }),
       );
-      // Prüfsummen der Kopie (#114 N-1): gehasht wird, was im Datenordner liegt und gleich live geht. Weicht eine
-      // Datei ab, fehlt eine oder ist eine dazugekommen, bricht der Restore hier ab: Das Journal baut alles zurück,
-      // getauscht wurde noch nichts.
-      if (sums) {
-        log(`Prüfe die Prüfsummen von ${d.name}/ (${sums[d.name].size} Dateien) …`);
-        const checkReader = new NoFollowReader();
-        checkReader.adopt(d.staged);
-        const result = verifyTree(d.staged, d.name, sums[d.name], {
-          reader: checkReader,
-          strict: true,
-          onFile: progressLogger(log, d.name),
-        });
-        if (result.problems.length > 0) {
+      if (sums && copied) {
+        log(`Vergleiche die Prüfsummen von ${d.name}/ (${sums[d.name].size} Dateien) …`);
+        const problems = compareSums(d.name, sums[d.name], copied);
+        if (problems.length > 0) {
           throw new StandError(
             'beschaedigt',
-            `Die Dateien im Stand ${manifest.stand} stimmen nicht mit den Prüfsummen überein: ${result.problems.join('; ')}. ` +
+            `Die Dateien im Stand ${manifest.stand} stimmen nicht mit den Prüfsummen überein: ${problems.join('; ')}. ` +
               'Es wurde nichts verändert, deine Daten sind unverändert.',
           );
         }
