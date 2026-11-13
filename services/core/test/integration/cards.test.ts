@@ -853,14 +853,18 @@ describe('Papierkorb (§21.8)', () => {
     await call('DELETE', `/cards/${created.id}`);
     let release!: () => void;
     const released = new Promise<void>((resolve) => (release = resolve));
+    let markLocked!: () => void;
+    const locked = new Promise<void>((resolve) => (markLocked = resolve));
     // Verbindung 1 stuft das Konzept zurück (hält `FOR NO KEY UPDATE`), committet aber erst später
     const downgrade = app.handle.db.transaction(async (tx) => {
       await tx.execute(
         dsql`UPDATE concept SET status = 'vorschlag', proposal_session_id = ${refId('s1')} WHERE id = ${refId('k1')}`,
       );
+      markLocked();
       await released;
     });
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Erst weiter, wenn Verbindung 1 die Zeile wirklich hält (kein festes Warten, das unter Last zu kurz sein kann)
+    await locked;
     // Verbindung 2 stellt die Karte wieder her und muss auf die Sperre warten, sieht danach das zurückgestufte Konzept
     let finished = false;
     const restoring = call('POST', `/trash/${created.id}/restore`).then((res) => {

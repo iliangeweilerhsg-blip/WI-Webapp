@@ -1,7 +1,7 @@
 """Karteninhalt säubern und prüfen (VERTRAEGE §21.2), Format nach 08 §6, nur `basic` und `cloze`.
 
-- **Säubern:** NFC, Zeilenenden zu `\\n`, Tab zu Leerzeichen, Steuerzeichen (`Cc` außer `\\n`) und
-  Formatzeichen (`Cf`) entfernen, trimmen. Gespeichert wird die gesäuberte Fassung.
+- **Säubern:** Zeilenenden zu `\\n`, Tab zu Leerzeichen, Steuerzeichen (`Cc` außer `\\n`) und
+  Formatzeichen (`Cf`) entfernen, dann NFC, trimmen. Gespeichert wird die gesäuberte Fassung.
 - **Lücken:** `{{cN::Text}}` mit `N` = 1 bis 3, lückenlos ab 1, jede Nummer einmal. Der Text einer
   Lücke enthält weder `{` noch `}` noch `::` und wird am Rand getrimmt. Außerhalb gültiger Lücken
   darf der Text weder `{{` noch `}}` enthalten. `back.answers` hat genau die Schlüssel der Lücken,
