@@ -2,7 +2,7 @@
 // Von Hand gestartet, nicht Teil der CI (liegt bewusst nicht unter test/unit oder test/integration).
 //
 //   DATABASE_URL=postgres://sg:sg@127.0.0.1:5432/postgres node services/core/test/perf/lasttest-suche.ts
-//   Optionen: --faktor <x>  Datenmenge (Standard 1 = ein Studienjahr, siehe daten.ts), --laeufe <n>  Messungen je Anfrage
+//   Optionen: --faktor <x>  Datenmenge (Standard 1 = Menge aus 09-NFA, siehe daten.ts), --laeufe <n>  Messungen je Anfrage
 //
 // Das Skript legt eine EIGENE Datenbank `sg_perf_…` auf dem Server aus DATABASE_URL an, baut sie über die Migrationen
 // auf, füllt sie mit erfundenen Daten und löscht sie am Ende wieder. Die Daten in der Datenbank aus DATABASE_URL
@@ -144,8 +144,11 @@ async function main(): Promise<number> {
   let worker: FakeWorker | undefined;
   let app: Awaited<ReturnType<typeof buildApp>> | undefined;
   const previousPort = process.env.SG_WORKER_PORT;
+  // Gelöscht wird nur, was dieser Lauf selbst angelegt hat (nie eine vorhandene Datenbank gleichen Namens)
+  let created = false;
   try {
     await admin.unsafe(`CREATE DATABASE ${name}`);
+    created = true;
     console.log(`Eigene Test-Datenbank: ${name} (wird am Ende gelöscht)`);
     handle = createDb(testUrl.toString());
     await runMigrations(handle.db);
@@ -241,7 +244,7 @@ async function main(): Promise<number> {
     await worker?.stop().catch(() => {});
     await handle?.close().catch(() => {});
     try {
-      await admin.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+      if (created) await admin.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
     } finally {
       await admin.end({ timeout: 5 });
       rmSync(dataDir, { recursive: true, force: true });

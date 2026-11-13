@@ -92,7 +92,7 @@ export function pipelineQuery(args: { sessionId?: string; last: number }): {
       : `s.id IN (SELECT s2.id FROM session s2
            WHERE s2.deleted_at IS NULL
              AND EXISTS (SELECT 1 FROM job jj WHERE jj.session_id = s2.id AND jj.deleted_at IS NULL AND jj.type IN (${TYPE_LIST}))
-           ORDER BY s2.started_at DESC, s2.id DESC LIMIT ${Math.trunc(args.last)})`;
+           ORDER BY s2.started_at DESC NULLS LAST, s2.id DESC LIMIT ${Math.trunc(args.last)})`;
   const sql = `BEGIN READ ONLY;
 SELECT s.id,
        coalesce(m.short_name, m.name, '?') || ' · Nr. ' || coalesce(s.number::text, '?') || ' · '
@@ -105,7 +105,7 @@ FROM job j
 JOIN session s ON s.id = j.session_id
 LEFT JOIN module m ON m.id = s.module_id
 WHERE j.deleted_at IS NULL AND s.deleted_at IS NULL AND j.type IN (${TYPE_LIST}) AND ${pick}
-ORDER BY s.started_at DESC, s.id, j.created_at, j.id;
+ORDER BY s.started_at DESC NULLS LAST, s.id, j.created_at, j.id;
 COMMIT;
 `;
   return { sql, vars: args.sessionId !== undefined ? { sid: args.sessionId } : {} };
@@ -161,6 +161,11 @@ export interface SessionReport {
   steps: StepReport[];
   /** Alle Schritte `fertig` */
   complete: boolean;
+  /**
+   * Die neuesten Jobs je Schritt stammen aus verschiedenen Läufen (z. B. erneut verarbeitet ab `concepts.extract`).
+   * Dann gibt es keine Gesamtzeit: Anlegen des ersten bis Ende des letzten Jobs würde die Zeit dazwischen mitzählen.
+   */
+  mixedRuns: boolean;
   startMs: number;
   endMs: number | null;
   totalMs: number | null;
@@ -227,14 +232,20 @@ export function summarizePipeline(rows: JobRow[]): SessionReport[] {
       steps.push({ type, jobs: jobs.length, state, durationMs, runMs: done ? runMs : null, waitMs, endMs });
     }
     const complete = steps.every((s) => s.state === 'fertig');
+    // Ein Lauf legt alle Schritte ab `transcribe` in einer Transaktion an (`ensurePipelineJobs`)
+    const sessionStepCreated = chosen.filter((j) => j.type !== 'audio.finalize').map((j) => j.createdMs);
+    const mixedRuns =
+      sessionStepCreated.length > 1 &&
+      Math.max(...sessionStepCreated) - Math.min(...sessionStepCreated) > WAVE_TOLERANCE_MS;
     const startMs = Math.min(...chosen.map((j) => j.createdMs));
     const endMs = complete ? Math.max(...steps.map((s) => s.endMs ?? 0)) : null;
-    const totalMs = endMs === null ? null : Math.max(0, endMs - startMs);
+    const totalMs = endMs === null || mixedRuns ? null : Math.max(0, endMs - startMs);
     reports.push({
       sessionId,
       label: all[0]?.sessionLabel ?? sessionId,
       steps,
       complete,
+      mixedRuns,
       startMs,
       endMs,
       totalMs,
@@ -292,6 +303,10 @@ export function formatPipelineReport(reports: SessionReport[]): string[] {
     if (r.totalMs !== null) {
       const goal = `Ziel ≤ ${PIPELINE_GOAL_MS / 60000} min: ${r.withinGoal ? 'erreicht' : 'verfehlt'}`;
       lines.push(`  Gesamt: ${formatDuration(r.totalMs)} (${goal})`);
+    } else if (r.complete && r.mixedRuns) {
+      lines.push(
+        '  Gesamt: nicht bestimmbar. Die Schritte stammen aus verschiedenen Läufen (Session erneut verarbeitet ab einem späteren Schritt).',
+      );
     } else {
       lines.push('  Gesamt: noch nicht fertig (mindestens ein Schritt ist nicht im Zustand fertig).');
     }

@@ -22,13 +22,13 @@ DATABASE_URL=postgres://sg:sg@127.0.0.1:5432/postgres node services/core/test/pe
 
 Die Datenbank in der URL (hier `postgres`) dient nur zum Anmelden. Es wird dort nichts gelesen oder geändert.
 
-**Datenmenge** (Standard, `--faktor 1`): ein Studienjahr, erfunden. 2 Semester, 10 Module, 300 Sessions mit je 90 Fenstern à 60 s (27 000 Einträge Gesagtes), 80 Foliensätze mit 40 Folien (3 200 Folien). Konzepte sind nicht im Suchindex und darum nicht Teil des Tests.
+**Datenmenge** (Standard, `--faktor 1`): die Menge aus der Anforderung (`docs/spezifikation/09-NFA.md`: 5 000 Folien, 200 h Transkript), erfunden. 2 Semester, 10 Module, 125 Foliensätze mit 40 Folien (5 000 Folien), 134 Sessions mit je 90 Fenstern à 60 s (12 060 Einträge Gesagtes, 201 h). Konzepte sind nicht im Suchindex und darum nicht Teil des Tests.
 
 **Anfragen** (13, in `services/core/test/perf/daten.ts`): Präfixe (`nor`, `ver`), kurze Begriffe, lange Mehrwort-Anfragen, Filter (`fach:`, `typ:`). Jede Anfrage läuft 3 Mal zum Aufwärmen und danach 40 Mal.
 
 **Optionen**
 
-- `--faktor <x>`: Datenmenge, `0.1` für einen schnellen Probelauf, `2` für zwei Studienjahre.
+- `--faktor <x>`: Datenmenge, `0.1` für einen schnellen Probelauf, `2` für die doppelte Menge (Reserve).
 - `--laeufe <n>`: Messungen je Anfrage (mindestens 5).
 
 **Ausgabe:** je Anfrage p50, p95 und Maximum, dann je Art und für alle zusammen. Das Ziel gilt als erreicht, wenn p95 über alle Anfragen **und** p95 jeder einzelnen Anfrage unter 300 ms liegen. Der Exit-Code ist 0 (erreicht), 2 (verfehlt) oder 1 (Fehler).
@@ -68,7 +68,7 @@ Session M1 · Nr. 4 · 2026-11-10 (0198f3a2-1111-7000-8000-000000000001)
 - **Gesamt** = Ende des letzten Schritts minus Anlegen des ersten Jobs. Das ist die Zahl für das Ziel. Sie umfasst alle Schritte der Kette (`audio.finalize`, `transcribe`, `align.log`, `concepts.extract`, `concepts.resolve`, `summary.write`). `search.index` gehört nicht dazu, es hält die Session nicht auf.
 - **Dauer** = Ende des Schritts minus „bereit“ (Job angelegt, Wartezeit nach einem Fehlversuch vorbei, Vorgänger fertig). Sie enthält die Zeit, die der Job auf den Worker wartete.
 - **Laufzeit** meldet der Worker nur für `audio.finalize`, `transcribe` und `align.log` (`job_duration_ms`). Nur dort lässt sich die **Wartezeit** abtrennen (Dauer minus Laufzeit). Bei den übrigen Schritten steht `–` und die Dauer ist mit `~` markiert.
-- Wurde eine Session erneut verarbeitet, zählt je Schritt der neueste Job.
+- Wurde eine Session erneut verarbeitet, zählt je Schritt der neueste Job. Lief die neue Verarbeitung erst ab einem späteren Schritt (z. B. `concepts.extract`), stammen die Schritte aus verschiedenen Läufen. Dann steht „nicht bestimmbar“ statt einer Gesamtzeit, weil sonst die Zeit zwischen den Läufen mitzählen würde.
 - Ist ein Schritt noch nicht `fertig` (läuft, wartet, Fehler), steht „noch nicht fertig“ statt einer Gesamtzeit.
 
 Der Befehl endet mit Exit-Code 0, auch wenn das Ziel verfehlt ist (er misst, er bewertet nicht). Bei einer unbekannten Session oder einem Datenbankfehler ist der Code 1.
@@ -86,7 +86,7 @@ Die Quelle ist `log` (Standard), `ausrichtung` oder `manuell`.
 
 ### Format der Datei
 
-Eine JSON-Datei, Zeiten in Millisekunden ab Beginn der Aufnahme der Session (wie in `slide_segment`). Folien sind 1-basiert (`slide_index`, die Nummer in deinem Foliensatz).
+Eine JSON-Datei, Zeiten in Millisekunden Sitzungszeit, also ab dem Start der Session (wie in `slide_segment`, VERTRAEGE „Sitzungszeit“). Pausen laufen mit: Nach einer Pause beginnt eine neue Aufnahme, deren Datei nicht bei der Sitzungszeit 0 anfängt. Wer an der Datei mitstoppt, addiert ihren Beginn (`recording.started_ms`). Folien sind 1-basiert (`slide_index`, die Nummer in deinem Foliensatz).
 
 ```json
 {

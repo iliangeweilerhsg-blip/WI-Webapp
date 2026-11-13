@@ -150,6 +150,17 @@ describe('summarizePipeline', () => {
     expect(report?.totalMs).toBe(min(5));
   });
 
+  it('keine Gesamtzeit, wenn die Schritte aus verschiedenen Läufen stammen (erneut ab concepts.extract)', () => {
+    const tr = job('transcribe', { updatedMs: T0 + min(5) });
+    const ex = job('concepts.extract', { createdMs: T0 + min(600), updatedMs: T0 + min(603) });
+    const [report] = summarizePipeline([tr, ex]);
+    expect(report?.complete).toBe(true);
+    expect(report?.mixedRuns).toBe(true);
+    expect(report?.totalMs).toBeNull();
+    expect(report?.withinGoal).toBeNull();
+    expect(formatPipelineReport([report!]).join('\n')).toContain('nicht bestimmbar');
+  });
+
   it('trennt Sessions', () => {
     const other = job('summary.write', { sessionId: '22222222-2222-4222-8222-222222222222' });
     expect(summarizePipeline([job('transcribe'), other])).toHaveLength(2);

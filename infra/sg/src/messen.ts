@@ -32,7 +32,11 @@ export function realMessenDeps(): MessenDeps {
         throw new Error(`Die Datei "${path}" lässt sich nicht lesen (Pfad prüfen).`);
       }
       if (size > MAX_GOLDEN_BYTES) throw new Error(`Die Datei "${path}" ist größer als 1 MB.`);
-      return readFileSync(path, 'utf8');
+      try {
+        return readFileSync(path, 'utf8');
+      } catch {
+        throw new Error(`Die Datei "${path}" lässt sich nicht lesen (Pfad prüfen, kein Ordner).`);
+      }
     },
     io: {
       out: (line) => console.log(line),

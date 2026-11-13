@@ -1,7 +1,8 @@
 // Datenmenge und Anfragen des Lasttests ⌘K (lasttest-suche.ts). Alles erfunden.
 //
-// Größenordnung eines Studienjahrs: 2 Semester, 10 Module, 300 Sessions à 90 Minuten (90 Fenster à 60 s, wie der
-// Suchindex sie schneidet, VERTRAEGE §19.3), 80 Foliensätze à 40 Folien. Zusammen etwa 30 000 Einträge in
+// Menge aus der Anforderung (09-NFA: „⌘K erste Ergebnisse < 300 ms bei 5 000 Folien, 200 h Transkript“):
+// 2 Semester, 10 Module, 125 Foliensätze à 40 Folien (5 000 Folien), 134 Sessions à 90 Minuten (90 Fenster à 60 s,
+// wie der Suchindex sie schneidet, VERTRAEGE §19.3; zusammen 201 h). Zusammen etwa 17 000 Einträge in
 // `search_chunk`. Gesucht wird nur in Folien und Gesagtem; Konzepte sind nicht Teil des Suchindex (VERTRAEGE §19).
 
 export interface Counts {
@@ -13,14 +14,14 @@ export interface Counts {
   windowsPerSession: number;
 }
 
-/** Menge bei `--faktor 1`; der Faktor skaliert Foliensätze und Sessions (mindestens 10 Sessions und 4 Foliensätze) */
+/** Menge bei `--faktor 1` (09-NFA); der Faktor skaliert Foliensätze und Sessions (mindestens 10 Sessions und 4 Foliensätze) */
 export function planCounts(factor: number): Counts {
   return {
     semesters: 2,
     modules: 10,
-    decks: Math.max(4, Math.round(80 * factor)),
+    decks: Math.max(4, Math.round(125 * factor)),
     slidesPerDeck: 40,
-    sessions: Math.max(10, Math.round(300 * factor)),
+    sessions: Math.max(10, Math.round(134 * factor)),
     windowsPerSession: 90,
   };
 }
