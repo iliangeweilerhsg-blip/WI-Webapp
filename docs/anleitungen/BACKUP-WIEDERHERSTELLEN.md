@@ -67,6 +67,8 @@ Das geht nur im Terminal und nur, wenn Core und Worker **nicht** laufen. Es erse
 
 **Umlaute im Dateinamen:** Manche Backup-Ziele (ältere Mac-Platten, exFAT-Sticks, manche NAS) speichern Umlaute intern anders. Das ist kein Fehler, die Prüfung vergleicht die Namen unabhängig davon. Meldet das Backup, zwei Dateien „unterscheiden sich nur in der Unicode-Schreibweise“, liegen zwei Dateien mit scheinbar gleichem Namen im selben Ordner. Benenne eine davon um, dann läuft das Backup wieder.
 
+**Warnung „im vorigen Stand beschädigt“ beim Backup:** Das Backup übernimmt unveränderte Dateien per Hardlink aus dem vorigen Stand, prüft dabei aber die Datei dort. Weicht sie ab, kopiert das Backup die Datei neu aus dem Datenordner, der neue Stand ist in Ordnung. Der **vorige** Stand lässt sich an dieser Datei nicht mehr wiederherstellen: Prüfe das Backup-Ziel (Datenträger, Zugriffe) und nimm im Zweifel den neuen Stand.
+
 **Ältere Stände ohne Prüfsummen:** Stände, die vor dieser Funktion angelegt wurden, haben keine Prüfsummen für `media/` und `vault/`. Sie lassen sich weiter wiederherstellen, `sg restore` weist darauf hin und prüft dann nur Anzahl und Größe der Dateien. Jedes neue Backup hat die Prüfsummen.
 
 Die bisherigen Daten bleiben als Sicherheitsnetz liegen: als Datenbank mit dem Zusatz `_vor_restore_…` und als Ordner `media.vor-restore-…` bzw. `vault.vor-restore-…` im Datenordner. Löschen musst du sie selbst.

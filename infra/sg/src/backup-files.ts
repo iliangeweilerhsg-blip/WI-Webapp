@@ -5,6 +5,7 @@ import type { FilesRef } from './file-sums.ts';
 import {
   type AnchoredDirs,
   hashFd,
+  hashFdAt,
   NoFollowReader,
   NoFollowRemover,
   NoFollowWriter,
@@ -175,6 +176,12 @@ export interface CopyTreeOptions {
    * Quelle gelesen wurden (#114 N-1). Beim Kopieren entsteht sie nebenbei, bei verlinkten Dateien durch Lesen der Quelle.
    */
   sums?: Map<string, string>;
+  /**
+   * Nur mit `sums`: Eine unveränderte Datei des vorigen Standes hat nicht die Prüfsumme der Quelle (der vorige Stand ist
+   * an dieser Datei beschädigt oder manipuliert, #324). Sie wird dann kopiert statt verlinkt; hier kommt die Warnung
+   * (Pfad relativ zu `src`). Ohne diese Angabe wird der Fall still behandelt.
+   */
+  onDamagedLink?: (path: string) => void;
 }
 
 /**
@@ -219,6 +226,7 @@ export function copyTree(
     strict,
     owner,
     sums: options.sums,
+    onDamagedLink: options.onDamagedLink,
   });
   return result;
 }
@@ -231,6 +239,25 @@ interface Level {
   /** Besitzer eigener Dateien im Ziel (`undefined`: ohne Unix-Besitzer, nicht geprüft) */
   owner: number | undefined;
   sums?: Map<string, string> | undefined;
+  onDamagedLink?: ((path: string) => void) | undefined;
+}
+
+/**
+ * SHA-256 der Datei `name` im vorigen Stand, wenn sie noch genau die Datei `old` ist (Identität) und lesbar. Sonst
+ * `undefined` (nicht verlinken, kopieren).
+ */
+function prevSha(reader: NoFollowReader, prev: string, name: string, old: Stats): string | undefined {
+  try {
+    const opened = reader.open(prev, name);
+    try {
+      if (opened.info.dev !== old.dev || opened.info.ino !== old.ino) return undefined;
+      return hashFd(opened.fd);
+    } finally {
+      closeSync(opened.fd);
+    }
+  } catch {
+    return undefined;
+  }
 }
 
 function unsafe(message: string): UnsafeTargetError {
@@ -330,6 +357,8 @@ function copyLevel(
       }
       let how: 'linked' | 'copied' = 'copied';
       const old = prevFile(reader, prev, name);
+      const relPath = rel === '' ? name : `${rel}/${name}`;
+      let sha: string | undefined;
       // Nur eigene Dateien verlinken (H-1, #161): Die Besitzerprüfung des vorigen Standes (`ownStandsIn`) läuft vor
       // `pg_dump`, gelesen wird er erst danach. Tauscht ihn jemand dazwischen gegen einen eigenen Ordner, gehören
       // dessen Dateien nicht diesem Benutzer und werden kopiert statt verlinkt (sonst änderte er später den neuen Stand).
@@ -340,14 +369,26 @@ function copyLevel(
         old.size === real.size &&
         Math.abs(old.mtimeMs - real.mtimeMs) < 2
       ) {
+        // Backup mit Prüfsummen (#324): Die Prüfsumme kommt aus der Quelle. Der Link gilt nur, wenn auch die Datei im
+        // vorigen Stand dieselbe Prüfsumme hat; sonst bekäme der neue Stand eine Datei, die nicht zu seiner Liste passt
+        // und sich nicht wiederherstellen ließe. Die Quelle wird mit festen Positionen gelesen (`hashFdAt`), damit sie bei
+        // Abweichung noch von vorn kopiert werden kann.
+        let linkable = true;
+        if (level.sums) {
+          sha = hashFdAt(opened.fd);
+          if (prevSha(reader, prev as string, name, old) !== sha) {
+            linkable = false;
+            sha = undefined;
+            level.onDamagedLink?.(relPath);
+          }
+        }
         // `old` stammt aus dem verankerten Ordner des vorigen Standes: der Link wird nur behalten, wenn er genau auf
         // diese Datei zeigt (N2). Kein Hardlink möglich: kopieren.
-        if (out.link(join(prev as string, name), to, old)) how = 'linked';
+        if (linkable && out.link(join(prev as string, name), to, old)) how = 'linked';
+        else sha = undefined;
       }
-      let sha: string | undefined;
       if (how === 'copied') sha = out.copyFromFd(opened.fd, to, real);
-      else if (level.sums) sha = hashFd(opened.fd);
-      if (level.sums && sha !== undefined) level.sums.set(rel === '' ? name : `${rel}/${name}`, sha);
+      if (level.sums && sha !== undefined) level.sums.set(relPath, sha);
       result.files += 1;
       result.bytes += real.size;
       result[how] += 1;

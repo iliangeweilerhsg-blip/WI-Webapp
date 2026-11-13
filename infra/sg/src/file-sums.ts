@@ -12,8 +12,9 @@
 //
 // Berechnet wird streamend (1-MiB-Blöcke): Audio kann mehrere GB groß sein, nichts wird ganz in den Speicher geladen.
 import { createHash } from 'node:crypto';
-import { closeSync, type Stats } from 'node:fs';
+import { closeSync, readSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { NameConflictError, nameConflictText, pathKey, skipped } from './backup-files.ts';
 import { hashFd, NoFollowReader, UnsafeTargetError } from './nofollow.ts';
 
@@ -88,28 +89,111 @@ export function formatFileList(sums: SumMap): { text: string; count: number } {
 export const sha256Hex = (data: string | Buffer): string => createHash('sha256').update(data).digest('hex');
 
 /**
- * Liste lesen. Schlüssel sind die Pfade in NFC (auch wenn eine Liste sie anders schreibt). `null`: Aufbau ungültig
- * (falsche Zeile, doppelter Pfad, auch nach NFC, fremder Unterordner).
+ * Liest die Liste Stück für Stück (Streaming, #324): `feed` nimmt beliebig geschnittene Blöcke, `finish` liefert das
+ * Ergebnis. Schlüssel sind die Pfade in NFC (auch wenn eine Liste sie anders schreibt). Ungültiger Aufbau (falsche
+ * Zeile, doppelter Pfad, auch nach NFC, fremder Unterordner, letzte Zeile ohne Zeilenumbruch) merkt sich der Leser;
+ * danach sammelt er nichts mehr, nimmt aber weiter Blöcke an (der Aufrufer hasht sie trotzdem zu Ende).
  */
-export function parseFileList(text: string): SumMap | null {
-  const sums = emptySums();
-  if (text === '') return sums;
-  if (!text.endsWith('\n')) return null;
-  for (const line of text.slice(0, -1).split('\n')) {
+export class FileListParser {
+  private sums: SumMap | null = emptySums();
+  private pending = '';
+  private readonly decoder = new StringDecoder('utf8');
+
+  /** `false`, sobald die Liste ungültig ist */
+  get valid(): boolean {
+    return this.sums !== null;
+  }
+
+  feed(chunk: Buffer): void {
+    if (this.sums === null) return;
+    this.pending += this.decoder.write(chunk);
+    this.drain();
+  }
+
+  /** `null`: Aufbau ungültig. Leere Liste (`''`) ist gültig. */
+  finish(): SumMap | null {
+    if (this.sums === null) return null;
+    this.pending += this.decoder.end();
+    this.drain();
+    if (this.sums !== null && this.pending !== '') this.sums = null; // letzte Zeile ohne Zeilenumbruch
+    return this.sums;
+  }
+
+  private drain(): void {
+    let from = 0;
+    for (;;) {
+      const nl = this.pending.indexOf('\n', from);
+      if (nl < 0) break;
+      if (!this.line(this.pending.slice(from, nl))) {
+        this.sums = null;
+        this.pending = '';
+        return;
+      }
+      from = nl + 1;
+    }
+    this.pending = this.pending.slice(from);
+  }
+
+  private line(line: string): boolean {
+    const sums = this.sums as SumMap;
     const tab = line.indexOf('\t');
-    if (tab !== 64) return null;
+    if (tab !== 64) return false;
     const sha = line.slice(0, 64);
-    if (!HEX64.test(sha)) return null;
+    if (!HEX64.test(sha)) return false;
     const path = unescapePath(line.slice(65));
-    if (path === null) return null;
+    if (path === null) return false;
     const slash = path.indexOf('/');
     const sub = path.slice(0, slash);
     const rel = pathKey(path.slice(slash + 1));
-    if (slash < 1 || (sub !== 'media' && sub !== 'vault') || rel === '') return null;
-    if (sums[sub].has(rel)) return null;
+    if (slash < 1 || (sub !== 'media' && sub !== 'vault') || rel === '') return false;
+    if (sums[sub].has(rel)) return false;
     sums[sub].set(rel, sha);
+    return true;
   }
-  return sums;
+}
+
+/** Liste aus einem Text lesen (siehe `FileListParser`). `null`: Aufbau ungültig. */
+export function parseFileList(text: string): SumMap | null {
+  const parser = new FileListParser();
+  parser.feed(Buffer.from(text, 'utf8'));
+  return parser.finish();
+}
+
+export interface StreamedList {
+  /** SHA-256 über alle gelesenen Bytes */
+  sha256: string;
+  bytes: number;
+  /** `null`: Aufbau ungültig */
+  sums: SumMap | null;
+  /** `true`: mehr Bytes als `FILES_MAX_BYTES` (das Lesen wurde dort beendet) */
+  tooLarge: boolean;
+}
+
+/**
+ * Liest `files.sha256` aus `fd` in einem Durchgang: SHA-256 und Zeile für Zeile Parsen aus denselben Blöcken. Im Speicher
+ * liegen nur ein Block und die geparsten Einträge, nie der ganze Text (#324). Das Ergebnis ist erst gültig, wenn der
+ * Aufrufer `sha256` mit dem Anker verglichen hat; bis dahin hat das Lesen keine Nebenwirkungen (nichts wird geschrieben,
+ * nichts weitergegeben). `read` nur für Tests.
+ */
+export function readFileListFd(
+  fd: number,
+  options: { chunkSize?: number; read?: typeof readSync } = {},
+): StreamedList {
+  const read = options.read ?? readSync;
+  const buffer = Buffer.allocUnsafe(options.chunkSize ?? 1024 * 1024);
+  const hash = createHash('sha256');
+  const parser = new FileListParser();
+  let bytes = 0;
+  for (;;) {
+    const n = read(fd, buffer, 0, buffer.length, null);
+    if (n === 0) break;
+    bytes += n;
+    if (bytes > FILES_MAX_BYTES) return { sha256: '', bytes, sums: null, tooLarge: true };
+    const block = buffer.subarray(0, n);
+    hash.update(block);
+    parser.feed(block);
+  }
+  return { sha256: hash.digest('hex'), bytes, sums: parser.finish(), tooLarge: false };
 }
 
 export interface VerifyOptions {
@@ -219,6 +303,44 @@ export function verifyTree(
     if (!seen.has(key) && problem(`Datei ${full(key)} fehlt`)) break;
   }
   return result;
+}
+
+/**
+ * Vergleicht die beim Kopieren gebildeten Prüfsummen (`actual`, Schlüssel: Pfad relativ zu `media/` bzw. `vault/`) mit
+ * der Liste (`expected`), ohne eine Datei zu lesen (#324). Gleiche Meldungen wie `verifyTree`: `weicht von der Prüfsumme
+ * ab`, `zusätzliche Datei`, `fehlt`, `doppelt`. Verglichen wird in NFC. Höchstens 10 Meldungen.
+ */
+export function compareSums(
+  sub: SumSub,
+  expected: Map<string, string>,
+  actual: Map<string, string>,
+): string[] {
+  const problems: string[] = [];
+  const add = (text: string): boolean => {
+    problems.push(text);
+    return problems.length >= MAX_PROBLEMS;
+  };
+  const seen = new Map<string, string>();
+  for (const [path, sha] of actual) {
+    const key = pathKey(path);
+    const twin = seen.get(key);
+    if (twin !== undefined) {
+      if (add(`Datei ${sub}/${path} gibt es doppelt (wie ${sub}/${twin}, andere Unicode-Schreibweise)`))
+        return problems;
+      continue;
+    }
+    seen.set(key, path);
+    const want = expected.get(key);
+    if (want === undefined) {
+      if (add(`zusätzliche Datei ${sub}/${path}`)) return problems;
+    } else if (want !== sha) {
+      if (add(`Datei ${sub}/${path} weicht von der Prüfsumme ab`)) return problems;
+    }
+  }
+  for (const key of expected.keys()) {
+    if (!seen.has(key) && add(`Datei ${sub}/${key} fehlt`)) break;
+  }
+  return problems;
 }
 
 /** Fortschritt höchstens alle `everyMs` Millisekunden melden */

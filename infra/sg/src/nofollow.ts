@@ -60,6 +60,23 @@ export function hashFd(fd: number): string {
   return hash.digest('hex');
 }
 
+/**
+ * SHA-256 des Inhalts von `fd` vom Dateianfang an, mit festen Positionen (`pread`): Die Leseposition von `fd` bleibt
+ * unverändert, der Deskriptor lässt sich danach noch von vorn kopieren (#324).
+ */
+export function hashFdAt(fd: number): string {
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(CHUNK);
+  let position = 0;
+  for (;;) {
+    const n = readSync(fd, buffer, 0, buffer.length, position);
+    if (n === 0) break;
+    hash.update(buffer.subarray(0, n));
+    position += n;
+  }
+  return hash.digest('hex');
+}
+
 /** Im Ziel wurde etwas ausgetauscht oder lag schon etwas im Weg: der Lauf bricht ab (fail-closed) */
 export class UnsafeTargetError extends Error {
   /** Systemfehler, wenn der Ordner nicht ausgetauscht, sondern nicht zugänglich war (`EACCES`, `EPERM`) */

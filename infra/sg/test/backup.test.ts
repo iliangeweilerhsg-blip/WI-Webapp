@@ -5,6 +5,9 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
+  closeSync,
+  readSync,
   readFileSync,
   readdirSync,
   statSync,
@@ -37,7 +40,16 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 import { resolveConfig } from '../src/config.ts';
 import { acquireCoreLock } from '../src/core-lock.ts';
-import { emptySums, formatFileList, NameConflictError, parseFileList } from '../src/file-sums.ts';
+import {
+  emptySums,
+  FileListParser,
+  formatFileList,
+  NameConflictError,
+  parseFileList,
+  readFileListFd,
+  sha256Hex,
+} from '../src/file-sums.ts';
+import { NoFollowReader } from '../src/nofollow.ts';
 import {
   copyTree,
   listStands,
@@ -2769,7 +2781,7 @@ describe('Prüfsummen für media/ und vault/ (#114 N-1)', () => {
     expect(await restoreTest(s)).toBe(0);
     expect(s.logs.join('\n')).toMatch(/Prüfsummen \(media\/vault\): alle Dateien stimmen/);
     expect(await restoreFull(s)).toBe(0);
-    expect(s.logs.join('\n')).toMatch(/Prüfe die Prüfsummen von media\/ \(1 Dateien\)/);
+    expect(s.logs.join('\n')).toMatch(/Vergleiche die Prüfsummen von media\/ \(1 Dateien\)/);
   });
 
   it('manipulierte Datei mit gleicher Größe: --test schlägt fehl', async () => {
@@ -3081,5 +3093,193 @@ describe('Prüfsummen: Unicode-Normalisierung (NFC/NFD) der Pfade (#114 N-1)', (
     expect(s.errs.join('\n')).toMatch(/zusätzliche Datei vault\/gross\.bin/);
     expect(s.logs.join('\n')).not.toMatch(/Kopiere vault\//);
     expect([...s.pg.databases]).toEqual(['sg']);
+  });
+});
+
+describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Liste streamend lesen', () => {
+  const STAND = '20261104T030012Z';
+  const STAND2 = '20261105T030012Z';
+  const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+
+  async function prepared() {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    return s;
+  }
+  const second = (s: Awaited<ReturnType<typeof prepared>>, log?: (m: string) => void) => ({
+    ...s.backupDeps,
+    ...(log ? { log } : {}),
+    now: () => new Date('2026-11-05T03:00:12Z'),
+  });
+
+  /** Datei im Stand im Ziel ändern, Größe und Zeiten bleiben (so wirkt sie für das Backup „unverändert“) */
+  function tamperKeepingTimes(path: string, content: string) {
+    const before = statSync(path);
+    writeFileSync(path, content);
+    utimesSync(path, before.atime, before.mtime);
+  }
+
+  it('verlinkte Datei im vorigen Stand manipuliert: wird kopiert statt verlinkt, Warnung im Log, neuer Stand lässt sich wiederherstellen', async () => {
+    const s = await prepared();
+    const prevFile = join(s.target, STAND, 'media', 'photos', 'a.jpg');
+    tamperKeepingTimes(prevFile, 'JPEX');
+    const backupLogs: string[] = [];
+    expect(
+      await runBackup(
+        second(s, (m) => backupLogs.push(m)),
+        { trigger: 'manuell' },
+      ),
+    ).toBe(0);
+    const log = backupLogs.join('\n');
+    expect(log).toMatch(/WARNUNG: media\/photos\/a\.jpg ist im vorigen Stand 20261104T030012Z beschädigt/);
+    // vault/n.md war heil: weiter verlinkt, keine Warnung dazu
+    expect(log).not.toMatch(/WARNUNG: vault/);
+    const newFile = join(s.target, STAND2, 'media', 'photos', 'a.jpg');
+    expect(readFileSync(newFile, 'utf8')).toBe('JPEG');
+    expect(lstatSync(newFile).ino).not.toBe(lstatSync(prevFile).ino);
+    expect(lstatSync(join(s.target, STAND2, 'vault', 'n.md')).ino).toBe(
+      lstatSync(join(s.target, STAND, 'vault', 'n.md')).ino,
+    );
+    // Die Liste trägt die Prüfsumme der Quelle, der neue Stand besteht den Test
+    expect(readFileSync(join(s.target, STAND2, 'files.sha256'), 'utf8')).toContain(
+      `${sha('JPEG')}\tmedia/photos/a.jpg\n`,
+    );
+    expect(await runRestore(s.deps, { stand: STAND2, test: true, yes: false })).toBe(0);
+    // Der vorige Stand ist wie erwartet beschädigt
+    expect(await runRestore(s.deps, { stand: STAND, test: true, yes: false })).toBe(1);
+  });
+
+  it('unveränderter vorheriger Stand: weiter verlinkt, keine Warnung', async () => {
+    const s = await prepared();
+    const backupLogs: string[] = [];
+    expect(
+      await runBackup(
+        second(s, (m) => backupLogs.push(m)),
+        { trigger: 'manuell' },
+      ),
+    ).toBe(0);
+    expect(backupLogs.join('\n')).not.toMatch(/WARNUNG/);
+    expect(lstatSync(join(s.target, STAND2, 'media', 'photos', 'a.jpg')).nlink).toBeGreaterThan(1);
+  });
+
+  it('copyTree ohne Prüfsummen: verlinkt wie bisher, ohne den vorigen Stand zu lesen', () => {
+    const root = tmp();
+    const src = join(root, 'src');
+    mkdirSync(src);
+    writeFileSync(join(src, 'a.txt'), 'AAAA');
+    copyTree(src, join(root, 's1'), null);
+    tamperKeepingTimes(join(root, 's1', 'a.txt'), 'AAAX');
+    expect(copyTree(src, join(root, 's2'), join(root, 's1')).linked).toBe(1);
+  });
+
+  it('Restore liest die Kopie nicht zweimal: jede Datei des Standes wird einmal geöffnet, nie eine im Datenordner', async () => {
+    const s = await prepared();
+    const opens: string[] = [];
+    const original = NoFollowReader.prototype.open;
+    const spy = vi.spyOn(NoFollowReader.prototype, 'open').mockImplementation(function (
+      this: NoFollowReader,
+      dir: string,
+      name: string,
+    ) {
+      opens.push(join(dir, name));
+      return original.call(this, dir, name);
+    });
+    try {
+      expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+    const media = join(s.target, STAND, 'media');
+    const vault = join(s.target, STAND, 'vault');
+    const inStand = opens.filter((p) => p.startsWith(media) || p.startsWith(vault));
+    expect(inStand.sort()).toEqual([join(media, 'photos', 'a.jpg'), join(vault, 'n.md')]);
+    expect(opens.filter((p) => p.startsWith(s.dataDir))).toEqual([]);
+    expect(readFileSync(join(s.dataDir, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+  });
+
+  it('Restore: Datei im Stand verändert → Abweichung wird an den kopierten Bytes erkannt, nichts wird getauscht', async () => {
+    const s = await prepared();
+    writeFileSync(join(s.target, STAND, 'vault', 'n.md'), '# Notiy');
+    expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(1);
+    expect(s.errs.join('\n')).toMatch(/vault\/n\.md weicht von der Prüfsumme ab/);
+    expect(readFileSync(join(s.dataDir, 'vault', 'n.md'), 'utf8')).toBe('# Notiz');
+    expect(readdirSync(s.dataDir).filter((n) => /neu-|vor-restore|journal/.test(n))).toEqual([]);
+  });
+
+  describe('files.sha256 streamend lesen', () => {
+    function listText(n: number): string {
+      const sums = emptySums();
+      for (let i = 0; i < n; i += 1) sums.media.set(`ordner ${i % 50}/Übung ${i}.m4a`, sha(String(i)));
+      return formatFileList(sums).text;
+    }
+    function withFile<T>(text: string, fn: (fd: number) => T): T {
+      const path = join(tmp(), 'files.sha256');
+      writeFileSync(path, text);
+      const fd = openSync(path, 'r');
+      try {
+        return fn(fd);
+      } finally {
+        closeSync(fd);
+      }
+    }
+
+    it('große Liste: nur Blöcke von höchstens chunkSize, SHA und Ergebnis wie beim Lesen im Ganzen', () => {
+      const text = listText(40000);
+      expect(text.length).toBeGreaterThan(2_000_000);
+      const sizes: number[] = [];
+      const read = ((fd: number, buf: Buffer, off: number, len: number, pos: number | null) => {
+        sizes.push(len);
+        return readSync(fd, buf, off, len, pos);
+      }) as typeof readSync;
+      const result = withFile(text, (fd) => readFileListFd(fd, { chunkSize: 64 * 1024, read }));
+      expect(Math.max(...sizes)).toBeLessThanOrEqual(64 * 1024);
+      expect(sizes.length).toBeGreaterThan(Buffer.byteLength(text) / (64 * 1024));
+      expect(result.sha256).toBe(sha256Hex(text));
+      expect(result.bytes).toBe(Buffer.byteLength(text));
+      expect(result.sums).toEqual(parseFileList(text));
+      expect(result.sums?.media.size).toBe(40000);
+    });
+
+    it('Blockgrenzen mitten in einer Zeile und in einem Umlaut ändern nichts', () => {
+      const text = listText(300);
+      for (const chunkSize of [1, 3, 7, 100]) {
+        const result = withFile(text, (fd) => readFileListFd(fd, { chunkSize }));
+        expect(result.sha256).toBe(sha256Hex(text));
+        expect(result.sums).toEqual(parseFileList(text));
+      }
+    });
+
+    it('ungültige Liste: SHA wird trotzdem zu Ende gebildet (Vorrang der Echtheitsprüfung), Ergebnis ist null', () => {
+      const text = `${listText(5)}kaputt\n${listText(5)}`;
+      const result = withFile(text, (fd) => readFileListFd(fd, { chunkSize: 50 }));
+      expect(result.sums).toBeNull();
+      expect(result.sha256).toBe(sha256Hex(text));
+    });
+
+    it('Parser: letzte Zeile ohne Zeilenumbruch, doppelter Pfad und fremder Unterordner sind ungültig, leer ist gültig', () => {
+      const line = `${sha('a')}\tmedia/a\n`;
+      expect(parseFileList('')).toEqual(emptySums());
+      expect(parseFileList(line.slice(0, -1))).toBeNull();
+      expect(parseFileList(line + line)).toBeNull();
+      expect(parseFileList(`${sha('a')}\tsecrets/a\n`)).toBeNull();
+      const parser = new FileListParser();
+      parser.feed(Buffer.from(line.slice(0, 10)));
+      parser.feed(Buffer.from(line.slice(10)));
+      expect(parser.finish()?.media.get('a')).toBe(sha('a'));
+    });
+
+    it('Liste passt nicht zum Manifest: nicht_authentisch, auch wenn der Aufbau ungültig ist; mit passender SHA: ungültig', async () => {
+      const s = await prepared();
+      writeFileSync(join(s.target, STAND, 'files.sha256'), 'kaputt\n');
+      expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(1);
+      expect(s.errs.join('\n')).toMatch(/passt nicht zur Prüfsumme im Manifest/);
+      const manifestPath = join(s.target, STAND, 'manifest.json');
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { files: { sha256: string } };
+      manifest.files.sha256 = sha256Hex('kaputt\n');
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      s.errs.length = 0;
+      expect(await runRestore(s.deps, { stand: STAND, test: false, yes: true })).toBe(1);
+      expect(s.errs.join('\n')).not.toMatch(/passt nicht zur Prüfsumme im Manifest/);
+    });
   });
 });

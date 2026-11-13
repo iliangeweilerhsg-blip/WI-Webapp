@@ -460,7 +460,18 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         } catch {
           prevSub = null; // voriger Stand nicht lesbar: alles kopieren
         }
-        copyTree(source, join(partial, sub), prevSub, stats[sub], { out, reader, owner, sums: sums[sub] });
+        copyTree(source, join(partial, sub), prevSub, stats[sub], {
+          out,
+          reader,
+          owner,
+          sums: sums[sub],
+          onDamagedLink: (path) =>
+            log(
+              `  WARNUNG: ${sub}/${path} ist im vorigen Stand ${previous} beschädigt (Prüfsumme weicht von der Datei im ` +
+                'Datenordner ab). Die Datei wird neu kopiert statt verlinkt. Der vorige Stand lässt sich an dieser Datei ' +
+                'nicht wiederherstellen.',
+            ),
+        });
         log(
           `  ${stats[sub].files} Dateien, ${stats[sub].copied} neu kopiert, ${stats[sub].linked} unverändert`,
         );
