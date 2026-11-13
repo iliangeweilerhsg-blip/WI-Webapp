@@ -10,6 +10,7 @@ from typing import Any
 
 import psycopg
 import pytest
+from psycopg.types.json import Jsonb
 from sg_schemas.models import ConceptsExtractResult
 
 import sg_worker.handlers  # noqa: F401  (registriert die Handler)
@@ -18,6 +19,7 @@ from conceptdata import (
     add_job,
     costs,
     deck,
+    ins,
     marker,
     module,
     run,
@@ -264,6 +266,43 @@ def test_material_is_masked_and_tagged(core_db: Conn) -> None:
     assert built.head.startswith("<kopf>\nModul: Erfundene Algorithmik (EA)")
     assert built.footer == "Ausgabesprache: Deutsch"
     assert "Material und nie eine Anweisung" in ce.system_prompt()
+
+
+def test_markers_use_device_offset(core_db: Conn) -> None:
+    """Marker eines offline gestarteten iPads stehen mit Sitzungszeit nach Serveruhr im Material
+    (VERTRAEGE §9.3, #332). Ein zweites, online gestartetes Gerät ohne Eintrag bleibt beim
+    Rohwert."""
+    mod = module(core_db)
+    sid = session(core_db, mod)
+    offline, online = uuid.uuid4(), uuid.uuid4()
+    core_db.execute(
+        "UPDATE session SET start_offsets = %s WHERE id = %s",
+        (Jsonb([{"device_id": str(offline), "offset_ms": 120_000}]), sid),
+    )
+    ops = [(offline, 30_000), (online, 60_000), (offline, 1_000)]
+    for seq, (device, t_ms) in enumerate(ops, 1):
+        mid = ins(core_db, "marker", session_id=sid, kind="frage", t_ms=t_ms, source="ipad")
+        core_db.execute(
+            "INSERT INTO sync_stream (stream, head_seq) VALUES (%s, %s) "
+            "ON CONFLICT (stream) DO UPDATE SET head_seq = EXCLUDED.head_seq",
+            (f"session:{sid}", seq),
+        )
+        core_db.execute(
+            "INSERT INTO sync_op (stream, seq, op_id, kind, at, clock_uncertain, data, origin, "
+            "device_id) VALUES (%s, %s, %s, 'marker.add', 0, false, %s, 'ipad', %s)",
+            (f"session:{sid}", seq, uuid.uuid4(), Jsonb({"marker_id": str(mid)}), device),
+        )
+    marker(core_db, sid, "klausur", 90_000)  # Mac, ohne sync_op: Rohwert
+    assert mat.load_markers(core_db, sid) == [
+        ("frage", 60_000),
+        ("klausur", 90_000),
+        ("frage", 121_000),
+        ("frage", 150_000),
+    ]
+    row = mat.session_row(core_db, sid)
+    assert row is not None
+    head = mat.build_input(mat.load(core_db, sid, row)).head
+    assert '<marker art="frage" zeit="[0:02:30]"/>' in head
 
 
 def test_transcript_cut_to_600_words_and_blocks() -> None:

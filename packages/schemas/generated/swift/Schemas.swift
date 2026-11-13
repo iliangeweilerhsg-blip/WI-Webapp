@@ -10021,6 +10021,10 @@ struct Marker: Codable {
     let sessionID: String
     let source: MarkerSource
     let tMS: Int
+    /// Sitzungszeit nach Serveruhr (VERTRAEGE §9.3): t_ms + offset_ms des Geräts aus
+    /// session.start_offsets, nie unter 0. Ohne Eintrag gleich t_ms. Nur in Antworten des Core
+    /// (Snapshot), fehlt bei älteren Cores: dann gilt t_ms
+    let tSessionMS: Int?
     let updatedAt: Date
     let userID: String
 
@@ -10036,6 +10040,7 @@ struct Marker: Codable {
         case sessionID = "session_id"
         case source = "source"
         case tMS = "t_ms"
+        case tSessionMS = "t_session_ms"
         case updatedAt = "updated_at"
         case userID = "user_id"
     }
@@ -10071,6 +10076,7 @@ extension Marker {
         sessionID: String? = nil,
         source: MarkerSource? = nil,
         tMS: Int? = nil,
+        tSessionMS: Int?? = nil,
         updatedAt: Date? = nil,
         userID: String? = nil
     ) -> Marker {
@@ -10086,6 +10092,7 @@ extension Marker {
             sessionID: sessionID ?? self.sessionID,
             source: source ?? self.source,
             tMS: tMS ?? self.tMS,
+            tSessionMS: tSessionMS ?? self.tSessionMS,
             updatedAt: updatedAt ?? self.updatedAt,
             userID: userID ?? self.userID
         )
@@ -15559,12 +15566,18 @@ struct PageStrokes: Codable {
     let streamOpID: String?
     /// seq des Stroms notebook:<id> zu diesem Stand
     let streamSeq: Int
+    /// Geräteversatz je Strich (client_id → offset_ms aus session.start_offsets der Session der
+    /// Seite, VERTRAEGE §9.3). Nur Striche mit Versatz ≠ 0 und t_start_ms ≠ null. Sitzungszeit
+    /// nach Serveruhr = max(0, t_start_ms + Versatz), ebenso t_end_ms. Fehlt das Feld (älterer
+    /// Core) oder der Strich darin, ist der Versatz 0. Nur in Antworten des Core
+    let strokeOffsetsMS: [String: Int]?
     let strokes: [Stroke]
 
     enum CodingKeys: String, CodingKey {
         case pageID = "page_id"
         case streamOpID = "stream_op_id"
         case streamSeq = "stream_seq"
+        case strokeOffsetsMS = "stroke_offsets_ms"
         case strokes = "strokes"
     }
 }
@@ -15591,12 +15604,14 @@ extension PageStrokes {
         pageID: String? = nil,
         streamOpID: String?? = nil,
         streamSeq: Int? = nil,
+        strokeOffsetsMS: [String: Int]?? = nil,
         strokes: [Stroke]? = nil
     ) -> PageStrokes {
         return PageStrokes(
             pageID: pageID ?? self.pageID,
             streamOpID: streamOpID ?? self.streamOpID,
             streamSeq: streamSeq ?? self.streamSeq,
+            strokeOffsetsMS: strokeOffsetsMS ?? self.strokeOffsetsMS,
             strokes: strokes ?? self.strokes
         )
     }
@@ -16660,6 +16675,10 @@ struct Photo: Codable {
     let sha256: String
     let sizeBytes: Int
     let tMS: Int
+    /// Sitzungszeit nach Serveruhr (VERTRAEGE §9.3): t_ms + offset_ms des Geräts aus
+    /// session.start_offsets, nie unter 0. Ohne Eintrag gleich t_ms. Nur in Antworten des Core
+    /// (Snapshot, GET /photos/{id}), fehlt bei älteren Cores: dann gilt t_ms
+    let tSessionMS: Int?
     let updatedAt: Date
     let userID: String
 
@@ -16675,6 +16694,7 @@ struct Photo: Codable {
         case sha256 = "sha256"
         case sizeBytes = "size_bytes"
         case tMS = "t_ms"
+        case tSessionMS = "t_session_ms"
         case updatedAt = "updated_at"
         case userID = "user_id"
     }
@@ -16710,6 +16730,7 @@ extension Photo {
         sha256: String? = nil,
         sizeBytes: Int? = nil,
         tMS: Int? = nil,
+        tSessionMS: Int?? = nil,
         updatedAt: Date? = nil,
         userID: String? = nil
     ) -> Photo {
@@ -16725,6 +16746,7 @@ extension Photo {
             sha256: sha256 ?? self.sha256,
             sizeBytes: sizeBytes ?? self.sizeBytes,
             tMS: tMS ?? self.tMS,
+            tSessionMS: tSessionMS ?? self.tSessionMS,
             updatedAt: updatedAt ?? self.updatedAt,
             userID: userID ?? self.userID
         )
@@ -18544,8 +18566,9 @@ extension Session {
 
 /// Ein Gerät hat die Session offline mit eigenem started_at begonnen. offset_ms = started_at
 /// des Geräts − started_at der Session (ms). Die t_ms der Operationen dieses Geräts bleiben
-/// unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms (für die Ausrichtung in Phase
-/// 2).
+/// unverändert; Sitzungszeit nach Serveruhr = t_ms + offset_ms. Der Core liefert sie
+/// umgerechnet mit (Marker.t_session_ms, Photo.t_session_ms, PageStrokes.stroke_offsets_ms,
+/// VERTRAEGE §9.3).
 // MARK: - SessionStartOffset
 struct SessionStartOffset: Codable {
     let deviceID: String
@@ -27127,6 +27150,7 @@ extension Marker {
         try container.encode(sessionID, forKey: .sessionID)
         try container.encode(source, forKey: .source)
         try container.encode(tMS, forKey: .tMS)
+        try container.encodeIfPresent(tSessionMS, forKey: .tSessionMS)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(userID, forKey: .userID)
     }
@@ -28076,6 +28100,7 @@ extension PageStrokes {
         try container.encode(pageID, forKey: .pageID)
         try container.encode(streamOpID, forKey: .streamOpID)
         try container.encode(streamSeq, forKey: .streamSeq)
+        try container.encodeIfPresent(strokeOffsetsMS, forKey: .strokeOffsetsMS)
         try container.encode(strokes, forKey: .strokes)
     }
 }
@@ -28258,6 +28283,7 @@ extension Photo {
         try container.encode(sha256, forKey: .sha256)
         try container.encode(sizeBytes, forKey: .sizeBytes)
         try container.encode(tMS, forKey: .tMS)
+        try container.encodeIfPresent(tSessionMS, forKey: .tSessionMS)
         try container.encode(updatedAt, forKey: .updatedAt)
         try container.encode(userID, forKey: .userID)
     }

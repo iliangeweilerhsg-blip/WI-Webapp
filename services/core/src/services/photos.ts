@@ -14,6 +14,7 @@ import { HttpError } from '../errors.ts';
 import { SyncOpError } from '../sync/handlers.ts';
 import { resolveDataPath } from './material.ts';
 import { sha256OfFile, writePartFile } from './pages.ts';
+import { itemOffset, sessionTime } from './session-time.ts';
 
 type PhotoRow = typeof photo.$inferSelect;
 
@@ -57,7 +58,8 @@ async function fileIsFor(path: string, sha256: string, size: number): Promise<bo
   return info?.isFile() === true && info.size === size && (await sha256OfFile(path)) === sha256;
 }
 
-export function toApiPhoto(row: PhotoRow): Photo {
+/** API-Form. `offsetMs`: Geräteversatz für `t_session_ms` (§9.3), Standard 0 */
+export function toApiPhoto(row: PhotoRow, offsetMs = 0): Photo {
   return {
     id: row.id,
     user_id: row.userId,
@@ -66,6 +68,7 @@ export function toApiPhoto(row: PhotoRow): Photo {
     deleted_at: row.deletedAt?.toISOString() ?? null,
     session_id: row.sessionId,
     t_ms: row.tMs,
+    t_session_ms: sessionTime(row.tMs, offsetMs),
     page_id: row.pageId,
     mime: row.mime as PhotoMime,
     sha256: row.sha256,
@@ -82,7 +85,7 @@ export async function getPhoto(db: Db, id: string): Promise<Photo> {
     .from(photo)
     .where(and(eq(photo.id, id), isNull(photo.deletedAt)));
   if (!row) throw new HttpError(404, 'photo_not_found', 'Dieses Foto gibt es nicht.');
-  return toApiPhoto(row);
+  return toApiPhoto(row, await itemOffset(db, row.sessionId, row.id, 'photo.add'));
 }
 
 /** Datei für `GET /photos/{id}/file`, oder `null` (kein Foto, gelöscht, Datei fehlt) */
