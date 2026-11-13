@@ -491,19 +491,16 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
       const size = dumpBytes + stats.media.bytes + stats.vault.bytes;
 
       if (runId) {
+        // Spalte aus Migration 0011: Ein Backup vor dieser Migration (`vor_migration`) kennt sie noch nicht. Im selben
+        // UPDATE wie `state = 'fertig'`: Ein Abbruch dazwischen hinterließe sonst einen fertigen Lauf ohne Anker, dessen
+        // Stand nur noch gegen sein Manifest geprüft würde (Herabstufungsschutz aus).
+        const filesSet = (await hasBackupRunColumn(pg, 'files_sha256')) ? `, files_sha256 = :'files'` : '';
         await pg.query(
           `UPDATE backup_run SET state = 'fertig', finished_at = now(), updated_at = now(), error = NULL,
-                  size_bytes = :'size'::bigint, stand = :'stand', dump_sha256 = :'sha'
+                  size_bytes = :'size'::bigint, stand = :'stand', dump_sha256 = :'sha'${filesSet}
             WHERE id = :'id'::uuid`,
-          { id: runId, size: String(size), stand, sha: dumpSha },
+          { id: runId, size: String(size), stand, sha: dumpSha, files: listSha },
         );
-        // Spalte aus Migration 0011: Ein Backup vor dieser Migration (`vor_migration`) kennt sie noch nicht
-        if (await hasBackupRunColumn(pg, 'files_sha256')) {
-          await pg.query(`UPDATE backup_run SET files_sha256 = :'sha' WHERE id = :'id'::uuid`, {
-            id: runId,
-            sha: listSha,
-          });
-        }
       }
       log(`Backup ${stand} fertig (${size} Bytes).`);
     } catch (error) {

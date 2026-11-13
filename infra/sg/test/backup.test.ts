@@ -194,11 +194,6 @@ class FakePg implements PgAccess {
     if (sql.includes("column_name = :'column'")) {
       return [[vars.column === 'files_sha256' ? (this.hasFilesSha ? '1' : '0') : '1']];
     }
-    if (sql.includes('SET files_sha256 = ')) {
-      const run = this.runs.get(vars.id as string);
-      if (run) run.filesSha = vars.sha as string;
-      return [];
-    }
     if (sql.includes('pg_tables')) return this.tables.map((t) => [t]);
     if (sql.includes('UNION ALL')) return this.counts;
     if (sql.includes('SHOW server_version')) return [['16.4']];
@@ -211,6 +206,8 @@ class FakePg implements PgAccess {
           size: vars.size as string,
           sha: vars.sha as string,
         });
+      // Anker der Dateiliste nur, wenn das UPDATE die Spalte setzt (Migration 0011, #114 N-1)
+      if (run && sql.includes("files_sha256 = :'files'")) run.filesSha = vars.files as string;
       return [];
     }
     if (sql.includes("SET state = 'fehler'")) {
@@ -2884,7 +2881,7 @@ describe('Prüfsummen für media/ und vault/ (#114 N-1)', () => {
     const s = restoreSetup({ hasFilesSha: false });
     expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
     expect([...s.pg.runs.values()][0]?.filesSha).toBeUndefined();
-    expect(s.pg.queries.some((q) => q.sql.includes('SET files_sha256'))).toBe(false);
+    expect(s.pg.queries.some((q) => q.sql.includes('files_sha256 = '))).toBe(false);
     expect(await restoreTest(s)).toBe(0);
     writeFileSync(join(standDir(s), 'media', 'photos', 'a.jpg'), 'JPEX');
     expect(await restoreFull(s)).toBe(1);
