@@ -34,6 +34,33 @@ export class CoreLockHeldError extends Error {
   }
 }
 
+/** Markierung `run/restore.pid` (`<pid>\n`): `sg restore` und der Rückbau legen sie neben `core.lock` ab, solange sie die Sperre halten */
+export function restoreMarkerPath(dataDir: string): string {
+  return join(dataDir, 'run', 'restore.pid');
+}
+
+/** Schreibt die Markierung für die eigene PID (best effort, die Sperre selbst bleibt maßgeblich) */
+export function writeRestoreMarker(dataDir: string, pid: number = process.pid): void {
+  try {
+    writeFileSync(restoreMarkerPath(dataDir), `${pid}\n`, { mode: 0o600 });
+  } catch {
+    // Nur für die Anzeige
+  }
+}
+
+export function removeRestoreMarker(dataDir: string, pid: number = process.pid): void {
+  try {
+    if (readLockPid(restoreMarkerPath(dataDir)) === pid) rmSync(restoreMarkerPath(dataDir), { force: true });
+  } catch {
+    // Aufräumen darf nie stören
+  }
+}
+
+/** PID aus der Markierung, `null` wenn es keine gibt. Nur ein Hinweis: gilt nur, wenn sie der PID in `core.lock` gleicht */
+export function readRestoreMarker(dataDir: string): number | null {
+  return readLockPid(restoreMarkerPath(dataDir));
+}
+
 export interface CoreLockHandle {
   readonly path: string;
   /** Gibt die Datei frei, aber nur, wenn sie die eigene PID enthält. Mehrfach aufrufbar. */

@@ -11,7 +11,15 @@ import {
   type BackupTrigger,
 } from './backup.ts';
 import { healthUrl, type SgConfig } from './config.ts';
-import { acquireCoreLock } from './core-lock.ts';
+import {
+  acquireCoreLock,
+  CoreLockHeldError,
+  readRestoreMarker,
+  releaseOnSignal,
+  removeRestoreMarker,
+  writeRestoreMarker,
+  type CoreLockHandle,
+} from './core-lock.ts';
 import { coreLockHeld } from './doctor.ts';
 import { openPg, realExec, type Exec, type PgAccess } from './pg.ts';
 import { readService } from './procs.ts';
@@ -274,9 +282,32 @@ export function journalCount(repoRoot: string): number {
 /**
  * Schließt einen unterbrochenen Restore ab bzw. baut ihn zurück (Journal im Datenordner). Wird von `sg start`
  * vor allem anderen aufgerufen. Rückgabe `false` = es ging schief, nicht weiterstarten.
+ *
+ * Der Rückbau läuft unter `run/core.lock` (#316), damit nicht zwei Prozesse (`sg start` und `sg restore`) dasselbe
+ * Journal zurückbauen und kein Core mitten im Rückbau startet. Die Sperre ist frei, bevor der Core startet. Ist sie
+ * belegt, wird nichts zurückgebaut (Rückgabe `false`, wie bei „läuft bereits“). Ohne Journal wird nichts gesperrt.
  */
-export async function recoverRestoreIfOpen(cfg: SgConfig): Promise<boolean> {
+export async function recoverRestoreIfOpen(
+  cfg: SgConfig,
+  holdLock: () => CoreLockHandle = () => acquireCoreLock(cfg.dataDir),
+): Promise<boolean> {
   if (readJournal(cfg.dataDir) === null) return true;
+  let lock: CoreLockHandle;
+  try {
+    lock = holdLock();
+  } catch (e) {
+    if (e instanceof CoreLockHeldError) {
+      err(
+        readRestoreMarker(cfg.dataDir) === e.pid
+          ? `Eine Wiederherstellung läuft (PID ${e.pid}). Warte, bis sie fertig ist, und starte dann erneut.`
+          : `Core läuft bereits (PID ${e.pid}). Zuerst "pnpm sg stop" ausführen; "pnpm sg doctor" erklärt den Zustand.`,
+      );
+      err('Der offene Restore wird nicht zurückgebaut, solange die Sperre run/core.lock belegt ist.');
+    } else err(`Die Sperre run/core.lock ließ sich nicht belegen: ${(e as Error).message}`);
+    return false;
+  }
+  writeRestoreMarker(cfg.dataDir);
+  const unhook = releaseOnSignal(lock);
   try {
     const pg = await openPg(cfg, realExec);
     await recoverRestore({ cfg, pg, ...io });
@@ -285,6 +316,10 @@ export async function recoverRestoreIfOpen(cfg: SgConfig): Promise<boolean> {
     err(`Ein unterbrochener Restore ließ sich nicht abschließen: ${(e as Error).message}`);
     err('Starte die Datenbank und führe "pnpm sg restore" erneut aus, dann wird er wiederholt.');
     return false;
+  } finally {
+    unhook();
+    removeRestoreMarker(cfg.dataDir);
+    lock.release();
   }
 }
 

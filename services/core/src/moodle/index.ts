@@ -7,7 +7,7 @@ import { ConfirmationStore } from './confirmations.ts';
 import { KeyedMutex } from './locks.ts';
 import { readMoodleMeta, type MoodleMeta } from './meta.ts';
 import { MoodleFileRegistry, MoodleReader } from './reader.ts';
-import { MoodleStatusService } from './status.ts';
+import { MoodleStatusService, type RecheckClock } from './status.ts';
 import { MoodleUploadStore } from './uploads.ts';
 import { KeychainTokenStore, type MoodleTokenStore } from './token-store.ts';
 
@@ -57,6 +57,8 @@ export interface CreateMoodleServicesOptions {
   readMeta?: () => Promise<MoodleMeta>;
   now?: () => Date;
   client?: MoodleClientTuning;
+  /** Mindestabstand und Uhr für `POST /moodle/recheck` (nur für Tests) */
+  recheck?: { minGapMs?: number; clock?: RecheckClock };
   /** Wartezeit auf die Sperre, Standard 10 s (nur für Tests) */
   lockTimeoutMs?: number;
   /** Zeitzone für Kursdaten, Standard: die des Rechners */
@@ -83,6 +85,8 @@ export function createMoodleServices(options: CreateMoodleServicesOptions): Mood
     client,
     readMeta: options.readMeta ?? (() => readMoodleMeta(options.config.dataDir)),
     ...(options.now ? { now: options.now } : {}),
+    ...(options.recheck?.minGapMs !== undefined ? { recheckMinGapMs: options.recheck.minGapMs } : {}),
+    ...(options.recheck?.clock ? { recheckClock: options.recheck.clock } : {}),
   });
   const now = options.now;
   const files = new MoodleFileRegistry();

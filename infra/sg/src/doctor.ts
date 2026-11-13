@@ -2,6 +2,7 @@
 import { closeSync, fstatSync, lstatSync, openSync, readSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
 import { DB_PORT, healthUrl, type SgConfig } from './config.ts';
+import { readRestoreMarker } from './core-lock.ts';
 import { processAlive } from './liveness.ts';
 import { READ_FLAGS } from './nofollow.ts';
 import type { System } from './system.ts';
@@ -241,6 +242,8 @@ export interface LockDoctorIo {
   alive(pid: number): boolean;
   /** Antwortet der Core unter `/api/v1/health`? */
   coreReachable(): Promise<boolean>;
+  /** PID aus `run/restore.pid` (von `sg restore` neben der Sperre gesetzt); fehlt bei älteren Tests */
+  restorePid?(): number | null;
 }
 
 /** Eine PID-Datei des Core ist `<pid>\n`; mehr wird nie gelesen */
@@ -292,6 +295,7 @@ export function realLockDoctorIo(cfg: SgConfig): LockDoctorIo {
   return {
     readLock: readLockFileSafe,
     alive: processAlive,
+    restorePid: () => readRestoreMarker(cfg.dataDir),
     async coreReachable() {
       try {
         const res = await fetch(healthUrl(cfg), { signal: AbortSignal.timeout(1500) });
@@ -357,6 +361,10 @@ export async function checkCoreLock(cfg: SgConfig, io: LockDoctorIo): Promise<Ch
     return info(
       `${path} ist veraltet (PID ${lock.pid} läuft nicht mehr, z. B. nach einem Absturz). Die Datei wird beim nächsten Start übernommen.${unguarded}`,
     );
+  }
+  // `sg restore` (und der Rückbau eines offenen Restores) markiert die Sperre in run/restore.pid: dann ist es kein Core
+  if (!reachable && io.restorePid?.() === lock.pid) {
+    return info(`Wiederherstellung läuft (PID ${lock.pid}). Warte, bis sie fertig ist.`);
   }
   if (reachable) return { name, status: 'ok', detail: `Core läuft (PID ${lock.pid})` };
   return info(

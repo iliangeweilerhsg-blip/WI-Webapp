@@ -4,6 +4,7 @@ import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod
 import { afterEach, describe, expect, it } from 'vitest';
 import { MoodleStatusSchema } from '@sg/shared';
 import { createMoodleServices } from '../../src/moodle/index.ts';
+import type { RecheckClock } from '../../src/moodle/status.ts';
 import { KeychainTokenStore, type ExecFileFn } from '../../src/moodle/token-store.ts';
 import { registerErrorHandler } from '../../src/plugins/errors.ts';
 import { moodleRoutes } from '../../src/routes/moodle.ts';
@@ -18,7 +19,14 @@ afterEach(async () => {
 });
 
 /** Echter `KeychainTokenStore` mit einem Schlüsselbund aus dem Speicher, damit dessen Zwischenspeicher mitzählen */
-async function setup(options: { baseUrl?: string; token?: string | null; down?: boolean } = {}) {
+async function setup(
+  options: {
+    baseUrl?: string;
+    token?: string | null;
+    down?: boolean;
+    recheck?: { minGapMs?: number; clock?: RecheckClock };
+  } = {},
+) {
   const keychain = { token: options.token === undefined ? (null as string | null) : options.token, reads: 0 };
   const exec: ExecFileFn = async () => {
     keychain.reads += 1;
@@ -38,6 +46,7 @@ async function setup(options: { baseUrl?: string; token?: string | null; down?: 
     },
     readMeta: async () => ({ token_valid_until: '2099-01-01' }),
     client: { retryDelaysMs: [], minIntervalMs: 0 },
+    recheck: options.recheck ?? { minGapMs: 0 },
   });
   app = Fastify({ logger: false });
   app.setValidatorCompiler(validatorCompiler);
@@ -78,16 +87,89 @@ describe('POST /moodle/recheck', () => {
     expect(t.requests.length).toBe(before + 1);
   });
 
-  it('gleichzeitige Aufrufe teilen sich einen Lauf (ein Moodle-Aufruf, ein Schlüsselbund-Lesen)', async () => {
+  it('gleichzeitige Aufrufe: ein laufender und höchstens ein nachgereihter Lauf', async () => {
     const t = await setup({ token: FAKE_TOKEN });
     await t.app.inject('/moodle/status');
     const reads = t.keychain.reads;
     const before = t.requests.length;
     const results = await Promise.all(Array.from({ length: 5 }, () => recheck(t.app)));
     expect(results.map((r) => r.statusCode)).toEqual([200, 200, 200, 200, 200]);
-    expect(new Set(results.map((r) => r.body)).size).toBe(1);
-    expect(t.requests.length).toBe(before + 1);
-    expect(t.keychain.reads).toBe(reads + 1);
+    expect(t.requests.length).toBe(before + 2);
+    expect(t.keychain.reads).toBe(reads + 2);
+  });
+
+  it('ein Aufruf während eines Laufs mit altem Token bekommt einen späteren Lauf mit dem neuen', async () => {
+    const t = await setup({ token: FAKE_TOKEN });
+    const first = recheck(t.app); // liest den alten Token
+    t.keychain.token = OTHER_TOKEN;
+    const second = recheck(t.app); // wird nachgereiht
+    const third = recheck(t.app); // teilt den nachgereihten Lauf
+    expect((await second).json()).toMatchObject({ state: 'ungueltig' });
+    expect((await third).json()).toMatchObject({ state: 'ungueltig' });
+    await first;
+  });
+
+  describe('Mindestpause (Fake-Uhr)', () => {
+    /** Uhr, die nur vorrückt, wenn der Test es sagt; `sleep` wartet auf diese Zeit */
+    function fakeClock() {
+      let time = 10_000;
+      const sleepers: Array<{ until: number; resolve: () => void }> = [];
+      const clock: RecheckClock = {
+        now: () => time,
+        sleep: (ms) =>
+          new Promise<void>((resolve) => {
+            sleepers.push({ until: time + ms, resolve });
+          }),
+      };
+      const advance = (ms: number) => {
+        time += ms;
+        for (const s of sleepers.splice(0)) {
+          if (s.until <= time) s.resolve();
+          else sleepers.push(s);
+        }
+      };
+      return { clock, advance, sleeping: () => sleepers.length };
+    }
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+    it('der nachgereihte Lauf startet frühestens 1 s nach dem Start des vorigen', async () => {
+      const f = fakeClock();
+      const t = await setup({ token: FAKE_TOKEN, recheck: { minGapMs: 1000, clock: f.clock } });
+      await recheck(t.app); // Start bei t=0
+      expect(t.requests).toHaveLength(1);
+      const queued = recheck(t.app);
+      await settle();
+      expect(t.requests).toHaveLength(1); // wartet auf die Pause
+      expect(f.sleeping()).toBe(1);
+      f.advance(999);
+      await settle();
+      expect(t.requests).toHaveLength(1);
+      f.advance(1);
+      expect((await queued).statusCode).toBe(200);
+      expect(t.requests).toHaveLength(2);
+    });
+
+    it('eine Schleife von Aufrufen löst höchstens einen Lauf pro Sekunde aus', async () => {
+      const f = fakeClock();
+      const t = await setup({ token: FAKE_TOKEN, recheck: { minGapMs: 1000, clock: f.clock } });
+      await recheck(t.app);
+      const calls = Array.from({ length: 10 }, () => recheck(t.app));
+      await settle();
+      expect(t.requests).toHaveLength(1);
+      f.advance(1000);
+      await Promise.all(calls);
+      expect(t.requests).toHaveLength(2); // alle zehn teilen sich den einen nachgereihten Lauf
+    });
+
+    it('nach Ablauf der Pause startet ein Aufruf sofort', async () => {
+      const f = fakeClock();
+      const t = await setup({ token: FAKE_TOKEN, recheck: { minGapMs: 1000, clock: f.clock } });
+      await recheck(t.app);
+      f.advance(1000);
+      await recheck(t.app);
+      expect(t.requests).toHaveLength(2);
+      expect(f.sleeping()).toBe(0);
+    });
   });
 
   it('ein vor dem Recheck gestarteter Aufruf mit altem Token füllt den Zwischenspeicher nicht mehr', async () => {
