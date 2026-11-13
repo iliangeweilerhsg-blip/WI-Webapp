@@ -2,7 +2,7 @@
 // `POST /cards/{id}/review`, `GET /review/queue`, Papierkorb (§21.8) und Einstellungen `learning` (§21.9).
 // Echte Datenbank. Die Uhr des Core ist gestellt (`clock`), die Ortszeit ist Europe/Zurich.
 import { sql as dsql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiErrorSchema,
   CardListSchema,
@@ -879,6 +879,104 @@ describe('Papierkorb (§21.8)', () => {
     expect(res.statusCode, res.body).toBe(409);
     expect(errorOf(res).code).toBe('restore_parent_deleted');
     expect(await app.handle.sql`SELECT 1 FROM card WHERE deleted_at IS NULL`).toHaveLength(0);
+  });
+
+  /** Wartet, bis `n` Verbindungen dieser Datenbank auf eine Sperre warten (kein festes Warten) */
+  async function waitForBlocked(n: number): Promise<void> {
+    await vi.waitFor(
+      async () => {
+        const rows = await app.handle.sql`
+          SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock' AND pid <> pg_backend_pid()`;
+        expect(rows[0]?.n).toBe(n);
+      },
+      { timeout: 10_000, interval: 25 },
+    );
+  }
+
+  it('Wiederherstellen und endgültiges Löschen derselben Karte verklemmen sich nicht (#348): erst Restore, dann Purge', async () => {
+    await seed();
+    const created = await create();
+    await reviewOk(created.id, 3);
+    await call('DELETE', `/cards/${created.id}`);
+    // Eine fremde Transaktion hält den Zustand der Karte, damit beide Anfragen mitten in ihrer Reihenfolge stehen
+    const gate = await app.handle.sql.reserve();
+    await gate`BEGIN`;
+    try {
+      await gate`SELECT id FROM card_state WHERE card_id = ${created.id} FOR UPDATE`;
+      const restoring = call('POST', `/trash/${created.id}/restore`);
+      await waitForBlocked(1);
+      const purging = call('DELETE', `/trash/${created.id}`);
+      await waitForBlocked(2);
+      await gate`COMMIT`;
+      const [restored, purged] = await Promise.all([restoring, purging]);
+      // Vorher: 40P01 und 500 auf einer Seite. Jetzt gewinnt der Restore, der Purge findet nichts mehr
+      expect(restored.statusCode, restored.body).toBe(200);
+      expect(purged.statusCode, purged.body).toBe(404);
+      expect(errorOf(purged).code).toBe('trash_item_not_found');
+    } finally {
+      await gate`ROLLBACK`.catch(() => undefined);
+      gate.release();
+    }
+    expect(
+      await app.handle.sql`SELECT 1 FROM card WHERE id = ${created.id} AND deleted_at IS NULL`,
+    ).toHaveLength(1);
+    expect(
+      await app.handle.sql`SELECT 1 FROM card_state WHERE card_id = ${created.id} AND deleted_at IS NULL`,
+    ).toHaveLength(1);
+    expect(
+      await app.handle.sql`SELECT 1 FROM review_log WHERE card_id = ${created.id} AND deleted_at IS NULL`,
+    ).toHaveLength(1);
+  });
+
+  it('Wiederherstellen und endgültiges Löschen derselben Karte: erst Purge, dann Restore → 404 ohne Fehler 500', async () => {
+    await seed();
+    const created = await create();
+    await call('DELETE', `/cards/${created.id}`);
+    const gate = await app.handle.sql.reserve();
+    await gate`BEGIN`;
+    try {
+      await gate`SELECT id FROM card_state WHERE card_id = ${created.id} FOR UPDATE`;
+      const purging = call('DELETE', `/trash/${created.id}`);
+      await waitForBlocked(1);
+      const restoring = call('POST', `/trash/${created.id}/restore`);
+      await waitForBlocked(2);
+      await gate`COMMIT`;
+      const [purged, restored] = await Promise.all([purging, restoring]);
+      expect(purged.statusCode, purged.body).toBe(204);
+      expect(restored.statusCode, restored.body).toBe(404);
+      expect(errorOf(restored).code).toBe('trash_item_not_found');
+    } finally {
+      await gate`ROLLBACK`.catch(() => undefined);
+      gate.release();
+    }
+    expect(await app.handle.sql`SELECT 1 FROM card`).toHaveLength(0);
+    expect(await app.handle.sql`SELECT 1 FROM card_state`).toHaveLength(0);
+  });
+
+  it('Wiederherstellen wartet auf das Konzept, die Karte wird inzwischen hart gelöscht → 404 statt 200 mit restored_count 1 (#348)', async () => {
+    await seed();
+    const created = await create();
+    await reviewOk(created.id, 3);
+    await call('DELETE', `/cards/${created.id}`);
+    // Ein `reopen`/Rückgängig hält das Konzept und löscht die Karte hart (das Konzept bleibt aktiv)
+    const holder = await app.handle.sql.reserve();
+    await holder`BEGIN`;
+    try {
+      await holder`SELECT id FROM concept WHERE id = ${refId('k1')} FOR NO KEY UPDATE`;
+      const restoring = call('POST', `/trash/${created.id}/restore`);
+      await waitForBlocked(1);
+      await holder`DELETE FROM card WHERE id = ${created.id}`;
+      await holder`COMMIT`;
+      const res = await restoring;
+      expect(res.statusCode, res.body).toBe(404);
+      expect(errorOf(res).code).toBe('trash_item_not_found');
+    } finally {
+      await holder`ROLLBACK`.catch(() => undefined);
+      holder.release();
+    }
+    expect(await app.handle.sql`SELECT 1 FROM card`).toHaveLength(0);
+    expect(await app.handle.sql`SELECT 1 FROM card_state`).toHaveLength(0);
   });
 
   it('endgültig löschen entfernt Karte, Zustand und Bewertungen', async () => {
