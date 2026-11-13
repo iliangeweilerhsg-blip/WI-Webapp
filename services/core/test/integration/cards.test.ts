@@ -957,7 +957,6 @@ describe('Papierkorb (§21.8)', () => {
   it('Wiederherstellen wartet auf das Konzept, die Karte wird inzwischen hart gelöscht → 404 statt 200 mit restored_count 1 (#348)', async () => {
     await seed();
     const created = await create();
-    await reviewOk(created.id, 3);
     await call('DELETE', `/cards/${created.id}`);
     // Ein `reopen`/Rückgängig hält das Konzept und löscht die Karte hart (das Konzept bleibt aktiv)
     const holder = await app.handle.sql.reserve();

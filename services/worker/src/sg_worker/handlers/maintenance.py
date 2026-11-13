@@ -267,9 +267,11 @@ def purge_roots(
         return by_kind, set(), ops
     _lock_streams(conn, t)
     for kind, rid in roots:
+        # Karte: FOR NO KEY UPDATE (VERTRAEGE §21.7, wie im Core), alle anderen Arten FOR UPDATE.
+        lock = "FOR NO KEY UPDATE" if kind == "card" else "FOR UPDATE"
         row = conn.execute(
             f"SELECT 1 FROM {kind} WHERE id = %s AND deleted_at IS NOT NULL"
-            " AND deleted_at < now() - make_interval(days => %s) FOR UPDATE",
+            f" AND deleted_at < now() - make_interval(days => %s) {lock}",
             (rid, days),
         ).fetchone()
         if row is None:

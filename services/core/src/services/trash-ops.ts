@@ -664,8 +664,8 @@ export async function purgeTrashItems(
     // 3. Zeilen der Wurzeln sperren und prüfen, dass sie noch im Papierkorb liegen
     for (const { kind, id } of roots) {
       const [row] = await tx.execute<{ id: string }>(
-        // Karte: `FOR NO KEY UPDATE` (§21.7), sonst hielte `FOR UPDATE` die Bewertung auf (`review_log` nimmt
-        // `FOR KEY SHARE` an `card`, während sie `card_state` hält) und könnte mit der Kaskade auf `card_state` verklemmen
+        // Karte: `FOR NO KEY UPDATE`, einheitlich mit §21.7 (`softDelete`, `undoCardBatch`, Restore) und dem
+        // Worker-Purge. Kein Deadlock-Schutz: Eine Bewertung hält nie `card_state` einer Karte im Papierkorb.
         sql`SELECT id FROM ${sql.identifier(kind)} WHERE id = ${id} AND deleted_at IS NOT NULL
             ${kind === 'card' ? sql`FOR NO KEY UPDATE` : sql`FOR UPDATE`}`,
       );
