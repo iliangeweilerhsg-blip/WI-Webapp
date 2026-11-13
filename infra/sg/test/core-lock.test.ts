@@ -153,6 +153,15 @@ describe('Verträglichkeit mit dem Core', () => {
     lock.release();
   });
 
+  it('beide achten auf dieselbe Übernahme-Sperre (core.lock.takeover) eines lebenden Prozesses', () => {
+    const other = livingPid();
+    writeLock(`${deadPid()}\n`);
+    writeFileSync(`${lockPath}.takeover`, `${other}\n`);
+    expect(() => acquireCoreLock(dataDir)).toThrow(CoreLockHeldError);
+    expect(() => acquireCoreLockOfCore(dataDir)).toThrow(CoreHeldErrorOfCore);
+    expect(readFileSync(`${lockPath}.takeover`, 'utf8')).toBe(`${other}\n`);
+  });
+
   it('beide Fassungen schreiben dieselben Bytes', () => {
     const a = acquireCoreLock(dataDir, { pid: 4711 });
     const bytesSg = readFileSync(lockPath);
