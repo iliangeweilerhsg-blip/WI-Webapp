@@ -175,7 +175,7 @@ export function parseFileList(text: string): SumMap | null {
 export interface StreamedList {
   /** SHA-256 über alle gelesenen Bytes (`''`, wenn das Lesen vorzeitig abgebrochen wurde: zu groß oder gewachsen) */
   sha256: string;
-  /** Gelesene Bytes; bei einer im zweiten Durchgang gewachsenen Datei mindestens ein Byte mehr als im ersten */
+  /** Gelesene Bytes; bei einer im zweiten Durchgang gewachsenen Datei genau ein Byte mehr als im ersten */
   bytes: number;
   /** `null`: Aufbau ungültig */
   sums: SumMap | null;
@@ -224,8 +224,8 @@ export function readFileListFd(
     // Durchgang nie eine Map (bei einer manipulierten Liste mit Millionen kurzer Zeilen wären das sonst mehrere hundert
     // MB, bevor der Vergleich abgelehnt hätte). Danach wird derselbe Deskriptor noch einmal von vorn gelesen und
     // geparst, höchstens bis zur Länge des ersten Durchgangs. Schreibt jemand zwischen den Durchgängen in die Datei,
-    // entsteht dabei eine Map aus ungeprüften Bytes (höchstens etwa so groß wie beim normalen Parsen der echten Liste,
-    // rund das Anderthalbfache des Speichers); sie wird verworfen, sobald die SHA dieses Durchgangs vom Anker abweicht
+    // entsteht dabei eine Map aus ungeprüften Bytes (begrenzt auf die Bytelänge der echten Liste; bei kürzesten Pfaden
+    // etwas mehr Einträge als diese); sie wird verworfen, sobald die SHA dieses Durchgangs vom Anker abweicht
     // oder die Datei gewachsen ist. Der Aufrufer prüft zusätzlich.
     const first = pass(null, 0);
     if (first.tooLarge || first.sha256 !== options.anchor) return { ...first, sums: null };
