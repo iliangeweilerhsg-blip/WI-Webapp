@@ -3,6 +3,7 @@ import type { ZodType } from 'zod';
 import {
   AlignLogPayloadSchema,
   AudioFinalizePayloadSchema,
+  CardsGeneratePayloadSchema,
   ConceptsExtractPayloadSchema,
   ConceptsResolvePayloadSchema,
   PdfIngestPayloadSchema,
@@ -38,6 +39,8 @@ export const JOB_PAYLOAD_SCHEMAS: Partial<Record<JobType, ZodType>> = {
   'concepts.extract': ConceptsExtractPayloadSchema,
   'concepts.resolve': ConceptsResolvePayloadSchema,
   'summary.write': SummaryWritePayloadSchema,
+  // Karten (VERTRAEGE §21.3)
+  'cards.generate': CardsGeneratePayloadSchema,
 };
 
 export interface EnqueueJobInput {

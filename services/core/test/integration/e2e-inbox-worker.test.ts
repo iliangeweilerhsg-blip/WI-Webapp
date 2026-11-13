@@ -20,9 +20,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ConceptDetailSchema,
   ConceptListSchema,
+  CardListSchema,
   InboxBulkResultSchema,
   InboxDecisionResultSchema,
   InboxItemListSchema,
+  ReviewQueueSchema,
   type InboxBulkResult,
   type InboxDecisionResult,
   type InboxItem,
@@ -95,10 +97,11 @@ async function lecture(ref: string, titles: string[], number: number): Promise<s
     payload: { from_step: 'concepts.extract' },
   });
   expect(res.statusCode, res.body).toBe(202);
-  expect(await drainWorker()).toBe(3); // concepts.extract, concepts.resolve, summary.write
+  expect(await drainWorker()).toBe(4); // concepts.extract, concepts.resolve, summary.write, cards.generate (§21.3)
   const states = await app.handle
     .sql`SELECT type, state, error FROM job WHERE session_id = ${id} ORDER BY type`;
   expect(states.map((j) => [j.type, j.state, j.error])).toEqual([
+    ['cards.generate', 'fertig', null],
     ['concepts.extract', 'fertig', null],
     ['concepts.resolve', 'fertig', null],
     ['summary.write', 'fertig', null],
@@ -106,8 +109,10 @@ async function lecture(ref: string, titles: string[], number: number): Promise<s
   return id;
 }
 
-async function inbox(status = 'offen'): Promise<InboxItem[]> {
-  const res = await app.request({ method: 'GET', url: `${API}/inbox?status=${status}&limit=100` });
+/** Die Einträge zu Konzepten und Beziehungen (Kartenvorschläge nur mit `kinds = ['card_batch']`) */
+async function inbox(status = 'offen', kinds: string[] = ['concept_new', 'concept_merge', 'relation']) {
+  const kind = kinds.map((k) => `&kind=${k}`).join('');
+  const res = await app.request({ method: 'GET', url: `${API}/inbox?status=${status}&limit=100${kind}` });
   expect(res.statusCode, res.body).toBe(200);
   return InboxItemListSchema.parse(res.json()).items;
 }
@@ -127,7 +132,7 @@ async function labels(items: InboxItem[]): Promise<string[]> {
       return `relation ${names.get(p.from_concept_id)} ${p.relation_kind} ${names.get(p.to_concept_id)}`;
     }
     if (p.kind === 'concept_merge') return `concept_merge ${p.proposal.name} => ${p.target.name}`;
-    if (p.kind === 'card_batch') return `card_batch ${p.concept_name}`;
+    if (p.kind === 'card_batch') return `card_batch ${names.get(p.concept_id)}`;
     return `concept_new ${p.proposal.name}`;
   });
 }
@@ -252,7 +257,8 @@ e2e('Inbox mit echtem Worker (Fake-KI, Fake-Embedder)', { timeout: 90_000 }, () 
     const s1 = await lecture('s1', SESSION_1, 1);
     const accepted = await bulk({ action: 'accept', session_id: s1 });
     expect(accepted.skipped).toEqual([]);
-    expect(accepted.decided).toHaveLength(5);
+    // 3 Konzepte, 2 Beziehungen und danach die drei dann sichtbaren Kartenvorschläge (§21.7)
+    expect(accepted.decided).toHaveLength(8);
 
     expect((await conceptRow('Normalisierung')).status).toBe('aktiv');
     expect((await relationRows()).map((r) => `${r.text}:${r.confirmed}`)).toEqual([
@@ -391,22 +397,148 @@ e2e('Inbox mit echtem Worker (Fake-KI, Fake-Embedder)', { timeout: 90_000 }, () 
     // Bulk reject der ganzen Vorlesung, dann reopen: wieder alles wie zu Beginn
     const all = await bulk({ action: 'reject', session_id: s1 });
     expect(all.skipped).toEqual([]);
-    expect(all.decided).toHaveLength(5);
+    expect(all.decided).toHaveLength(8); // die Kartenvorschläge verfallen mit ihren Konzepten
     expect(await inbox()).toHaveLength(0);
-    expect((await bulk({ action: 'reopen', session_id: s1 })).decided).toHaveLength(5);
+    expect((await bulk({ action: 'reopen', session_id: s1 })).decided).toHaveLength(8);
     expect(await world.snapshot()).toEqual(initial);
 
     // Ein Konzept ablehnen, den Rest der Vorlesung annehmen: die Beziehungen am abgelehnten Konzept bleiben außen vor
     await reject(await find('concept_new Normalisierung'));
     const rest = await bulk({ action: 'accept', session_id: s1 });
     expect(rest.skipped).toEqual([]);
-    expect(rest.decided).toHaveLength(3); // Relation, Schlüssel, Schlüssel baut_auf Relation
+    // Relation, Schlüssel, Schlüssel baut_auf Relation und die Kartenvorschläge zu Relation und Schlüssel
+    expect(rest.decided).toHaveLength(5);
     expect((await relationRows()).map((r) => `${r.text}:${r.confirmed}`)).toEqual([
       'Normalisierung baut_auf Schlüssel:false',
       'Schlüssel baut_auf Relation:true',
     ]);
     expect((await conceptRow('Normalisierung')).status).toBe('vorschlag');
     expect((await conceptRow('Relation')).status).toBe('aktiv');
+  });
+
+  it('Karten: Konzept annehmen → Kartenvorschlag sichtbar → Karten annehmen → Warteschlange; Verfall, Rückgängig und reprocess', async () => {
+    const s1 = await lecture('s1', SESSION_1, 1);
+
+    // Karten entstehen für alle Konzepte der Session, sind aber erst mit aktivem Konzept sichtbar (§21.3, §21.7)
+    const hidden = await app.handle
+      .sql`SELECT count(*)::int AS n FROM inbox_item WHERE kind = 'card_batch' AND status = 'offen'`;
+    expect(hidden[0]!.n).toBe(3);
+    expect(await inbox('offen', ['card_batch'])).toEqual([]);
+    const queueBefore = ReviewQueueSchema.parse(
+      (await app.request({ method: 'GET', url: `${API}/review/queue` })).json(),
+    );
+    expect(queueBefore).toMatchObject({ items: [], has_cards: false });
+
+    // Konzept „Relation“ annehmen: sein Kartenvorschlag wird sichtbar, die anderen nicht, und er wird nicht mit angenommen
+    const relation = await find('concept_new Relation');
+    await accept(relation);
+    const batches = await inbox('offen', ['card_batch']);
+    expect(await labels(batches)).toEqual(['card_batch Relation']);
+    const batch = batches[0]!;
+    expect(batch.session?.id).toBe(s1);
+    expect(batch.concept_id).toBeNull();
+    expect(batch.payload).toMatchObject({
+      kind: 'card_batch',
+      model: 'fake-llm-1',
+      prompt_version: 'cards.generate/v1',
+      concept_name: 'Relation',
+      // Fake (§21.6): zwei Karten, beide mit dem ersten Beleg
+      cards: [
+        {
+          key: 'k1',
+          content: { kind: 'basic', front: { text_md: 'Was ist Relation?' } },
+          sources: [{ kind: 'slide', slide_index: 1 }],
+        },
+        {
+          key: 'k2',
+          content: { kind: 'cloze', front: { text_md: '{{c1::Relation}} ist ein Thema dieser Vorlesung.' } },
+          sources: [{ kind: 'slide', slide_index: 1 }],
+        },
+      ],
+    });
+    const overview = await app.request({ method: 'GET', url: `${API}/inbox/overview` });
+    // 2 Konzepte, 2 Beziehungen und 1 sichtbarer Kartenvorschlag
+    expect(overview.json().open_count).toBe(5);
+
+    // Vor dem Konzept kann man die Karten eines anderen Vorschlags nicht annehmen
+    const [hiddenBatch] = await app.handle
+      .sql`SELECT i.id FROM inbox_item i JOIN concept c ON c.id = i.card_concept_id
+      WHERE i.kind = 'card_batch' AND c.name = 'Schlüssel'`;
+    const pending = await post(`/inbox/${hiddenBatch!.id}/accept`);
+    expect(pending.statusCode).toBe(409);
+    expect(pending.json().error.code).toBe('card_concept_pending');
+
+    // Karte k1 bearbeiten, k2 verwerfen
+    const accepted = await accept(batch, {
+      cards: [
+        {
+          key: 'k1',
+          accept: true,
+          content: {
+            kind: 'basic',
+            front: { text_md: 'Was ist eine Relation?' },
+            back: { text_md: 'Eine Menge von Tupeln.', explanation_md: null },
+          },
+        },
+        { key: 'k2', accept: false },
+      ],
+    });
+    expect(accepted.concept).toBeNull();
+    expect(accepted.cards).toHaveLength(1);
+    const card = accepted.cards![0]!;
+    expect(card).toMatchObject({
+      origin: 'ki',
+      content: { front: { text_md: 'Was ist eine Relation?' } },
+      sources: [{ ref: { kind: 'slide', slide_index: 1 }, missing: false }],
+    });
+    const conceptCards = CardListSchema.parse(
+      (await app.request({ method: 'GET', url: `${API}/concepts/${card.concept_id}/cards` })).json(),
+    );
+    expect(conceptCards.items.map((c) => c.id)).toEqual([card.id]);
+
+    // Die Karte steht in der heutigen Warteschlange (neu, fällig sofort)
+    const queue = ReviewQueueSchema.parse(
+      (await app.request({ method: 'GET', url: `${API}/review/queue` })).json(),
+    );
+    expect(queue.has_cards).toBe(true);
+    expect(queue.items.map((item) => [item.card.id, item.concept.name, item.group])).toEqual([
+      [card.id, 'Relation', 'neu'],
+    ]);
+
+    // reprocess mit from_step cards.generate legt einen Job an (nur diesen); der Worker erzeugt für „Relation“
+    // nichts Neues, weil der Eintrag entschieden ist (skipped_decided), und für die offenen Konzepte dasselbe wie vorher
+    const reprocess = await post(`/sessions/${s1}/reprocess`, { from_step: 'cards.generate' });
+    expect(reprocess.statusCode, reprocess.body).toBe(202);
+    expect(reprocess.json().jobs.map((j: { type: string }) => j.type)).toEqual(['cards.generate']);
+    expect(await drainWorker()).toBe(1);
+    expect(await inbox('offen', ['card_batch'])).toHaveLength(0);
+    const decidedBatches = await inbox('entschieden', ['card_batch']);
+    expect(decidedBatches.map((i) => i.id)).toEqual([batch.id]);
+    expect(await app.handle.sql`SELECT 1 FROM card`).toHaveLength(1);
+
+    // A1 zurücknehmen scheitert, solange das Konzept Karten hat (§21.7); erst die Karten, dann das Konzept
+    const blocked = await reopen(relation);
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json().error.code).toBe('inbox_reopen_conflict');
+    expect((await reopen(batch)).statusCode).toBe(200);
+    expect(await app.handle.sql`SELECT 1 FROM card`).toHaveLength(0);
+    expect((await reopen(relation)).statusCode).toBe(200);
+    expect(await inbox('offen', ['card_batch'])).toEqual([]);
+    expect((await conceptRow('Relation')).status).toBe('vorschlag');
+
+    // Konzept ablehnen: sein Kartenvorschlag verfällt mit; Rückgängig öffnet ihn wieder
+    const rejected = await reject(await find('concept_new Relation'));
+    expect(rejected.item.status).toBe('abgelehnt');
+    const [verfallen] = await app.handle.sql`SELECT i.status, i.decision FROM inbox_item i
+      JOIN concept c ON c.id = i.card_concept_id WHERE i.kind = 'card_batch' AND c.name = 'Relation'`;
+    expect(verfallen).toMatchObject({
+      status: 'abgelehnt',
+      decision: { action: 'abgelehnt', triggered_by: relation.id },
+    });
+    ok(await post(`/inbox/${relation.id}/reopen`));
+    const [wieder] = await app.handle.sql`SELECT i.status FROM inbox_item i
+      JOIN concept c ON c.id = i.card_concept_id WHERE i.kind = 'card_batch' AND c.name = 'Relation'`;
+    expect(wieder!.status).toBe('offen');
   });
 
   // Nachträglich angelegtes Material: keine Aufnahme, kein started_at/ended_at. Früher scheiterte `concepts.extract` hier
@@ -419,10 +551,11 @@ e2e('Inbox mit echtem Worker (Fake-KI, Fake-Embedder)', { timeout: 90_000 }, () 
     const id = await world.session('s1', { slideDeckId: refId('d-s1'), state: 'beendet', number: 1 });
     const res = await post(`/sessions/${id}/reprocess`, { from_step: 'concepts.extract' });
     expect(res.statusCode, res.body).toBe(202);
-    expect(await drainWorker()).toBe(3);
+    expect(await drainWorker()).toBe(4);
     const states = await app.handle
       .sql`SELECT type, state, error FROM job WHERE session_id = ${id} ORDER BY type`;
     expect(states.map((j) => [j.type, j.state, j.error])).toEqual([
+      ['cards.generate', 'fertig', null],
       ['concepts.extract', 'fertig', null],
       ['concepts.resolve', 'fertig', null],
       ['summary.write', 'fertig', null],

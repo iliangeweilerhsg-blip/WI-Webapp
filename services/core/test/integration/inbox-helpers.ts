@@ -6,11 +6,14 @@ import {
   SINGLE_USER_ID,
   type AutoAcceptMode,
   type ConceptProposal,
+  type CardProposal,
   type InboxDecision,
   type InboxPayload,
 } from '@sg/shared';
 import type { DbHandle } from '../../src/db/client.ts';
 import {
+  card,
+  cardState,
   concept,
   conceptModule,
   conceptRelation,
@@ -67,8 +70,12 @@ export interface RelationSeed {
 }
 
 export interface ItemSeed {
-  kind: 'concept_new' | 'concept_merge' | 'relation';
+  kind: 'concept_new' | 'concept_merge' | 'relation' | 'card_batch';
   concept?: string;
+  /** `card_batch`: Kurzname des Konzepts, zu dem die Karten vorgeschlagen sind (`card_concept_id`) */
+  cardConcept?: string;
+  /** `card_batch`: Karten des Vorschlags (Standard: `k1` basic und `k2` cloze) */
+  cards?: CardProposal[];
   target?: string;
   relation?: string;
   session?: string | null;
@@ -78,6 +85,33 @@ export interface ItemSeed {
   decision?: Partial<InboxDecision>;
   priority?: number;
   createdAt?: Date;
+}
+
+/** Zwei Karten wie im Fake des Workers (§21.6), beide mit einem Zeitraum-Beleg der Session */
+export function defaultCards(sessionRef: string): CardProposal[] {
+  const sources = [
+    { kind: 'transcript' as const, session_id: refId(sessionRef), t_start_ms: 0, t_end_ms: 1000 },
+  ];
+  return [
+    {
+      key: 'k1',
+      content: {
+        kind: 'basic',
+        front: { text_md: 'Was ist ein Tupel?' },
+        back: { text_md: 'Eine Zeile einer Relation.', explanation_md: null },
+      },
+      sources,
+    },
+    {
+      key: 'k2',
+      content: {
+        kind: 'cloze',
+        front: { text_md: '{{c1::Tupel}} ist ein Thema dieser Vorlesung.' },
+        back: { answers: { c1: ['Tupel'] } },
+      },
+      sources,
+    },
+  ];
 }
 
 const VECTOR = `[${Array.from({ length: 1024 }, (_, i) => (i === 0 ? 1 : 0)).join(',')}]`;
@@ -242,7 +276,17 @@ export class World {
     if (sessionRef) await this.ensureSession(sessionRef);
     const status = seed.status ?? 'offen';
     let payload: InboxPayload;
-    if (seed.kind === 'relation') {
+    if (seed.kind === 'card_batch') {
+      payload = {
+        kind: 'card_batch',
+        concept_id: refId(seed.cardConcept!),
+        concept_name: 'Name beim Erzeugen',
+        cards: seed.cards ?? defaultCards(sessionRef ?? 's1'),
+        input_hash: 'a'.repeat(64),
+        prompt_version: 'cards.generate/v1',
+        model: 'fake',
+      };
+    } else if (seed.kind === 'relation') {
       const relation = this.relations.get(seed.relation!);
       if (!relation) throw new Error(`Beziehung ${seed.relation} fehlt`);
       payload = {
@@ -297,7 +341,9 @@ export class World {
                 ? 'abgelehnt'
                 : seed.kind === 'relation'
                   ? 'beziehung_bestaetigt'
-                  : 'angenommen_neu',
+                  : seed.kind === 'card_batch'
+                    ? 'karten_angenommen'
+                    : 'angenommen_neu',
             ),
             ...seed.decision,
           };
@@ -310,7 +356,8 @@ export class World {
       status,
       decidedAt: status === 'offen' ? null : new Date(),
       decision,
-      priority: seed.priority ?? 0,
+      priority: seed.priority ?? (seed.kind === 'card_batch' ? 2000 : 0),
+      cardConceptId: seed.cardConcept ? refId(seed.cardConcept) : null,
       conceptId: seed.concept ? refId(seed.concept) : null,
       targetConceptId: seed.target ? refId(seed.target) : null,
       relationId: seed.relation ? refId(seed.relation) : null,
@@ -362,6 +409,15 @@ export class World {
       .from(inboxItem)
       .where(eq(inboxItem.id, refId(ref)));
     return row!;
+  }
+
+  /** Karten (auch gelöschte) samt Zustand, nach ID */
+  async cardRows() {
+    return this.db.select().from(card).orderBy(asc(card.id));
+  }
+
+  async cardStateCount(): Promise<number> {
+    return (await this.db.select({ id: cardState.id }).from(cardState)).length;
   }
 
   async evidenceRow(ref: string) {

@@ -1,6 +1,7 @@
 // Verarbeitungskette nach dem Session-Ende (VERTRAEGE §18.2 und §20.2, 05 §2):
 // audio.finalize → transcribe und audio.finalize → align.log, danach
-// transcribe + align.log → concepts.extract → concepts.resolve → summary.write.
+// transcribe + align.log → concepts.extract → concepts.resolve → summary.write und daneben
+// concepts.resolve → cards.generate (§21.3).
 //
 // `ensurePipelineJobs` legt die Jobs an oder verwendet wartende wieder und rechnet `session.processing` mit
 // derselben Regel wie der Worker („neuester Job je Einheit“, `summarizeProcessing`). Der Aufrufer hält die
@@ -241,7 +242,7 @@ export async function summarizeProcessing(
 /**
  * Kette anlegen (VERTRAEGE §18.2, §20.2). Rückgabe: die angelegten oder wiederverwendeten Jobs in Ketten-Reihenfolge
  * (`audio.finalize` je Aufnahme nach ID, `transcribe`, `align.log`, `concepts.extract`, `concepts.resolve`,
- * `summary.write`).
+ * `summary.write`, `cards.generate`).
  *
  * | `fromStep`         | angelegt bzw. wiederverwendet                                                        |
  * |--------------------|--------------------------------------------------------------------------------------|
@@ -249,8 +250,9 @@ export async function summarizeProcessing(
  * | `transcribe`       | ab `transcribe`                                                                      |
  * | `align.log`        | `align.log`, danach die drei Konzept-Schritte                                        |
  * | `concepts.extract` | die drei Konzept-Schritte (`concepts.extract` nur hinter einem laufenden desselben Typs) |
- * | `concepts.resolve` | `concepts.resolve` auf dem neuesten `concepts.extract`, danach `summary.write`. Gibt es keinen, wie `concepts.extract` |
- * | `summary.write`    | nur `summary.write`                                                                  |
+ * | `concepts.resolve` | `concepts.resolve` auf dem neuesten `concepts.extract`, danach `summary.write` und `cards.generate`. Gibt es keinen, wie `concepts.extract` |
+ * | `summary.write`    | nur `summary.write`, kein `cards.generate`                                           |
+ * | `cards.generate`   | nur `cards.generate` (§21.3), ohne `depends_on` außer einem laufenden Job desselben Typs |
  *
  * Danach wird `session.processing` für jeden berührten Typ neu gerechnet (nie pauschal `wartet`), `updated_at`
  * angehoben und `session.updated` gesendet.
@@ -261,8 +263,6 @@ export async function ensurePipelineJobs(
   options: EnsurePipelineOptions,
 ): Promise<JobRow[]> {
   let fromStep = options.fromStep;
-  // `cards.generate` (§21.3) hängt B3 an die Kette. Bis dahin entsteht für diesen Schritt kein Job
-  if (fromStep === 'cards.generate') return [];
   const force = options.force ?? false;
   const jobs: JobRow[] = [];
   const touched: PipelineStep[] = [];
@@ -307,39 +307,62 @@ export async function ensurePipelineJobs(
     inputJobs.push(alignJob.id);
   }
 
-  // Schritte 5 bis 7 (§20.2)
-  let summaryAfter: string[] = [];
-  if (fromStep !== 'summary.write') {
-    let extractJob = fromStep === 'concepts.resolve' ? await latestExtractJob(tx, sessionId) : null;
-    // Ohne brauchbaren `concepts.extract` gilt `from_step = concepts.extract` (§20.2), auch für `force`
-    if (fromStep === 'concepts.resolve' && !extractJob) fromStep = 'concepts.extract';
-    extractJob ??= add(
-      'concepts.extract',
+  if (fromStep === 'cards.generate') {
+    // Nur dieser Schritt (§21.3): ohne `depends_on` außer einem laufenden Job desselben Typs, `force` wirkt hier
+    add(
+      'cards.generate',
+      await ensureSessionJob(tx, sessionId, { type: 'cards.generate', predecessors: [], force }),
+    );
+  } else {
+    // Schritte 5 bis 7 (§20.2)
+    let summaryAfter: string[] = [];
+    let resolveId: string | null = null;
+    if (fromStep !== 'summary.write') {
+      let extractJob = fromStep === 'concepts.resolve' ? await latestExtractJob(tx, sessionId) : null;
+      // Ohne brauchbaren `concepts.extract` gilt `from_step = concepts.extract` (§20.2), auch für `force`
+      if (fromStep === 'concepts.resolve' && !extractJob) fromStep = 'concepts.extract';
+      extractJob ??= add(
+        'concepts.extract',
+        await ensureSessionJob(tx, sessionId, {
+          type: 'concepts.extract',
+          predecessors: inputJobs,
+          force: force && fromStep === 'concepts.extract',
+        }),
+      );
+      const resolveJob = add(
+        'concepts.resolve',
+        await ensureSessionJob(tx, sessionId, {
+          type: 'concepts.resolve',
+          predecessors: [extractJob.id],
+          force: force && fromStep === 'concepts.resolve',
+          extra: { extract_job_id: extractJob.id },
+        }),
+      );
+      summaryAfter = [resolveJob.id];
+      resolveId = resolveJob.id;
+    }
+    add(
+      'summary.write',
       await ensureSessionJob(tx, sessionId, {
-        type: 'concepts.extract',
-        predecessors: inputJobs,
-        force: force && fromStep === 'concepts.extract',
+        type: 'summary.write',
+        predecessors: summaryAfter,
+        force: force && fromStep === 'summary.write',
       }),
     );
-    const resolveJob = add(
-      'concepts.resolve',
-      await ensureSessionJob(tx, sessionId, {
-        type: 'concepts.resolve',
-        predecessors: [extractJob.id],
-        force: force && fromStep === 'concepts.resolve',
-        extra: { extract_job_id: extractJob.id },
-      }),
-    );
-    summaryAfter = [resolveJob.id];
+    // Schritt 8 (§21.3): Karten zu allen Konzepten der Session, daneben zu `summary.write`. `force` gilt nur für
+    // `from_step = cards.generate`, sonst erkennt der Job geänderte Eingaben über den `input_hash`.
+    // `summary.write` allein legt keinen Karten-Job an.
+    if (resolveId) {
+      add(
+        'cards.generate',
+        await ensureSessionJob(tx, sessionId, {
+          type: 'cards.generate',
+          predecessors: [resolveId],
+          force: false,
+        }),
+      );
+    }
   }
-  add(
-    'summary.write',
-    await ensureSessionJob(tx, sessionId, {
-      type: 'summary.write',
-      predecessors: summaryAfter,
-      force: force && fromStep === 'summary.write',
-    }),
-  );
 
   const patch: Record<string, JobState> = {};
   for (const type of touched) {

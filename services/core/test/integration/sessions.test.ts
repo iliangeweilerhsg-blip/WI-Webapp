@@ -857,6 +857,7 @@ describe('Core-Takt', () => {
       ).toEqual([
         'align.log',
         'audio.finalize',
+        'cards.generate',
         'concepts.extract',
         'concepts.resolve',
         'summary.write',
@@ -1890,6 +1891,7 @@ describe('Stopp und Aufnahmen', () => {
     ).toEqual([
       'align.log',
       'audio.finalize',
+      'cards.generate',
       'concepts.extract',
       'concepts.resolve',
       'summary.write',
