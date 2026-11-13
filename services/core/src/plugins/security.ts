@@ -270,7 +270,8 @@ function exactAddress(address: string | undefined): string {
  *   verdrängt so sich selbst, nicht die eine neue Verbindung des iPads. Über `maxPerSource` je Quelle wird weiter
  *   abgewiesen: Das ist das eigene Budget der Quelle.
  * - **Kurze Fristen ohne Token:** Eine Verbindung muss die Header ihrer ersten Anfrage binnen
- *   `firstRequestTimeoutMs` senden, sofern sie nicht schon ein gültiges Token gezeigt hat. Eine Netzanfrage ohne
+ *   `firstRequestTimeoutMs` senden, sofern sie nicht schon ein gültiges Token gezeigt hat; nach jeder Antwort ohne Token
+ *   gilt das erneut für die nächste Anfrage. Eine Netzanfrage ohne
  *   Token, die der Wächter durchlässt (Kopplung), muss binnen `tokenlessRequestTimeoutMs` samt Body beantwortet
  *   sein. Langsame Uploads gibt es nur mit Token.
  * - Vom Wächter abgelehnte Netzanfragen bekommen `Connection: close` (`registerSecurity`). So hält niemand einen
@@ -355,12 +356,7 @@ export class NetworkConnectionGate {
       this.addOpen(entry);
     }
     this.entries.set(socket, entry);
-    const timer = setTimeout(() => {
-      entry.firstRequestTimer = undefined;
-      if (!entry.authenticated && entry.bucket !== 'gone' && !socket.destroyed) socket.destroy();
-    }, this.limits.firstRequestTimeoutMs);
-    timer.unref?.();
-    entry.firstRequestTimer = timer;
+    this.armHeaderDeadline(entry);
     socket.once('close', () => this.release(entry));
   }
 
@@ -386,7 +382,12 @@ export class NetworkConnectionGate {
     }
   }
 
-  /** Netzanfrage ohne Token (Kopplung): Socket schließen, wenn die Antwort nicht binnen der Frist fertig ist */
+  /**
+   * Netzanfrage ohne Token (Kopplung): Socket schließen, wenn die Antwort nicht binnen der Frist fertig ist. Bleibt die
+   * Verbindung danach offen (z. B. 409 ohne Kopplungsfenster), gilt für die Header der nächsten Anfrage wieder
+   * `firstRequestTimeoutMs`. Sonst hielte eine Gegenstelle ohne Token ihren Platz mit tröpfelnden Headern bis zu
+   * `headersTimeout` (60 s) je Anfrage, und das bis zu `maxRequestsPerSocket` mal (Gegen-Review H-1).
+   */
   limitTokenlessRequest(
     socket: GateSocket,
     response: { once(event: 'close', cb: () => void): unknown },
@@ -397,7 +398,10 @@ export class NetworkConnectionGate {
       if (!socket.destroyed) socket.destroy();
     }, this.limits.tokenlessRequestTimeoutMs);
     timer.unref?.();
-    response.once('close', () => clearTimeout(timer));
+    response.once('close', () => {
+      clearTimeout(timer);
+      if (!entry.authenticated && entry.bucket !== 'gone' && !socket.destroyed) this.armHeaderDeadline(entry);
+    });
   }
 
   private isTrusted(address: string): boolean {
@@ -476,6 +480,17 @@ export class NetworkConnectionGate {
       else this.protectedPerAddress.delete(entry.address);
     }
     entry.bucket = 'gone';
+  }
+
+  /** Ohne Token-Vorrang müssen die Header der (nächsten) Anfrage binnen `firstRequestTimeoutMs` da sein */
+  private armHeaderDeadline(entry: GateEntry): void {
+    this.clearFirstRequestTimer(entry);
+    const timer = setTimeout(() => {
+      entry.firstRequestTimer = undefined;
+      if (!entry.authenticated && entry.bucket !== 'gone' && !entry.socket.destroyed) entry.socket.destroy();
+    }, this.limits.firstRequestTimeoutMs);
+    timer.unref?.();
+    entry.firstRequestTimer = timer;
   }
 
   private clearFirstRequestTimer(entry: GateEntry): void {
@@ -599,6 +614,8 @@ export function createSecurityGuard(options: SecurityOptions): SecurityGuard {
  * - 403 (`pairing_code_invalid`, `pairing_request_rejected` aus `pair/confirm`). `origin_not_allowed` lehnt schon der
  *   Wächter ab, das schloss vorher schon.
  * Bewusst NICHT dabei: 201, 409 und 423. Sie zählen gegen das Rate-Limit (nach 10 je Minute kommt 429 und schließt).
+ * Tröpfelnde Header der Folgeanfrage helfen dort nicht: Der Wächter setzt nach jeder Antwort ohne Token die
+ * Header-Frist neu (`NetworkConnectionGate.limitTokenlessRequest`).
  * Auch bei den gelisteten Codes bekommt das iPad die Antwort vollständig und verbindet für den nächsten Versuch neu.
  */
 const TOKENLESS_CLOSE_STATUS = new Set([400, 403, 413, 415, 429]);

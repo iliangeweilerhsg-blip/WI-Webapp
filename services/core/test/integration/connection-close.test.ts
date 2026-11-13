@@ -119,6 +119,21 @@ describe('Connection: close für Netzverbindungen ohne Token (H-1)', () => {
     expect(last.toLowerCase()).toContain('connection: close');
   });
 
+  it('Netz, kein Token, 409 bleibt offen, aber tröpfelnde Header der Folgeanfrage halten den Platz nicht', async () => {
+    // Nach jeder Antwort ohne Token gilt die Header-Frist des Wächters neu (Gegen-Review H-1)
+    connectionLimits.firstRequestTimeoutMs = 400;
+    const conn = await open(NET);
+    conn.socket.write(validPairStart(`127.0.0.1:${app.port}`));
+    await waitFor(() => conn.data().startsWith('HTTP/1.1 409'), 3000, '409');
+    expect(conn.closed()).toBe(false);
+    const next = validPairStart(`127.0.0.1:${app.port}`);
+    for (let i = 0; i < 20 && !conn.closed(); i++) {
+      conn.socket.write(next[i]!);
+      await sleep(100);
+    }
+    expect(conn.closed()).toBe(true);
+  });
+
   it('Netz, gültiges Token, 400: Socket bleibt offen, Folgeanfrage geht', async () => {
     const conn = await open(NET_WITH_TOKEN);
     const body = '{}';
