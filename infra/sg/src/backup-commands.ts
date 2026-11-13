@@ -14,10 +14,9 @@ import { healthUrl, type SgConfig } from './config.ts';
 import {
   acquireCoreLock,
   CoreLockHeldError,
+  markRestore,
   readRestoreMarker,
   releaseOnSignal,
-  removeRestoreMarker,
-  writeRestoreMarker,
   type CoreLockHandle,
 } from './core-lock.ts';
 import { coreLockHeld } from './doctor.ts';
@@ -306,8 +305,8 @@ export async function recoverRestoreIfOpen(
     } else err(`Die Sperre run/core.lock ließ sich nicht belegen: ${(e as Error).message}`);
     return false;
   }
-  writeRestoreMarker(cfg.dataDir);
-  const unhook = releaseOnSignal(lock);
+  const marked = markRestore(lock, cfg.dataDir);
+  const unhook = releaseOnSignal(marked);
   try {
     const pg = await openPg(cfg, realExec);
     await recoverRestore({ cfg, pg, ...io });
@@ -318,8 +317,7 @@ export async function recoverRestoreIfOpen(
     return false;
   } finally {
     unhook();
-    removeRestoreMarker(cfg.dataDir);
-    lock.release();
+    marked.release();
   }
 }
 

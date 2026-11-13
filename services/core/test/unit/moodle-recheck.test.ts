@@ -95,7 +95,9 @@ describe('POST /moodle/recheck', () => {
     const results = await Promise.all(Array.from({ length: 5 }, () => recheck(t.app)));
     expect(results.map((r) => r.statusCode)).toEqual([200, 200, 200, 200, 200]);
     expect(t.requests.length).toBe(before + 2);
-    expect(t.keychain.reads).toBe(reads + 2);
+    // Jeder Aufruf verwirft den Token-Cache sofort: Der erste Lauf merkt sein Lesen nicht und liest einmal nach,
+    // der nachgereihte einmal. Mehr Aufrufe ändern daran nichts
+    expect(t.keychain.reads).toBe(reads + 3);
   });
 
   it('ein Aufruf während eines Laufs mit altem Token bekommt einen späteren Lauf mit dem neuen', async () => {
@@ -159,6 +161,20 @@ describe('POST /moodle/recheck', () => {
       f.advance(1000);
       await Promise.all(calls);
       expect(t.requests).toHaveLength(2); // alle zehn teilen sich den einen nachgereihten Lauf
+    });
+
+    it('in der Wartezeit gilt schon der neue Token (Caches sofort verworfen, #320)', async () => {
+      const f = fakeClock();
+      const t = await setup({ token: FAKE_TOKEN, recheck: { minGapMs: 1000, clock: f.clock } });
+      expect((await recheck(t.app)).json()).toMatchObject({ state: 'ok' });
+      t.keychain.token = OTHER_TOKEN;
+      const queued = recheck(t.app);
+      await settle();
+      expect(f.sleeping()).toBe(1);
+      // Eine Vorschau oder Statusabfrage in der Wartezeit sieht nicht mehr den alten Token und Stand
+      expect((await t.app.inject('/moodle/status')).json()).toMatchObject({ state: 'ungueltig' });
+      f.advance(1000);
+      expect((await queued).json()).toMatchObject({ state: 'ungueltig' });
     });
 
     it('nach Ablauf der Pause startet ein Aufruf sofort', async () => {

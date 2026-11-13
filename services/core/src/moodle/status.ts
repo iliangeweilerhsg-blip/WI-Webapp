@@ -122,6 +122,9 @@ export class MoodleStatusService {
    * `recheckMinGapMs`. Löst keinen Abgleich und keine Moodle-Aktion aus.
    */
   recheck(): Promise<MoodleStatus> {
+    // Sofort verwerfen, nicht erst beim Start des nachgereihten Laufs: Sonst liefe eine Vorschau in der Wartezeit
+    // noch mit dem alten Token und Stand, und ihr Code überstünde das `revokeAll` der Route (#320)
+    this.discardForRecheck();
     if (this.queuedRecheck) return this.queuedRecheck;
     const previous = this.runningRecheck;
     if (previous === null && this.gapLeft() <= 0) return this.startRecheck();
@@ -150,12 +153,16 @@ export class MoodleStatusService {
     return run;
   }
 
-  private async runRecheck(): Promise<MoodleStatus> {
+  /** Status- und Token-Cache verwerfen; ein noch laufender Aufruf mit dem alten Token füllt den Cache nicht mehr */
+  private discardForRecheck(): void {
     this.epoch += 1;
     this.cached = null;
-    // Ein noch laufender Aufruf mit dem alten Token zählt nicht
     this.pending = null;
     this.client.resetToken();
+  }
+
+  private async runRecheck(): Promise<MoodleStatus> {
+    this.discardForRecheck();
     return this.getStatus();
   }
 

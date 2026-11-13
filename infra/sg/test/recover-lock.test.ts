@@ -1,12 +1,28 @@
 // `recoverRestoreIfOpen` baut ein offenes Restore-Journal nur unter `run/core.lock` zurück (#316)
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { recoverRestoreIfOpen } from '../src/backup-commands.ts';
 import { resolveConfig } from '../src/config.ts';
-import { readRestoreMarker, writeRestoreMarker } from '../src/core-lock.ts';
+import {
+  acquireCoreLock,
+  markRestore,
+  readRestoreMarker,
+  releaseOnSignal,
+  restoreMarkerPath,
+  writeRestoreMarker,
+  type SignalHost,
+} from '../src/core-lock.ts';
 
 let dataDir: string;
 const children: ChildProcess[] = [];
@@ -54,5 +70,43 @@ describe('Restore-Markierung', () => {
     expect(readRestoreMarker(dataDir)).toBeNull();
     writeRestoreMarker(dataDir, 4242);
     expect(readRestoreMarker(dataDir)).toBe(4242);
+  });
+
+  it('folgt keinem symbolischen Link: weder beim Schreiben noch beim Lesen', () => {
+    mkdirSync(join(dataDir, 'run'), { recursive: true });
+    const victim = join(dataDir, 'fremd.txt');
+    writeFileSync(victim, '4242\n');
+    symlinkSync(victim, restoreMarkerPath(dataDir));
+    expect(readRestoreMarker(dataDir)).toBeNull();
+    writeRestoreMarker(dataDir, 77);
+    expect(readFileSync(victim, 'utf8')).toBe('4242\n');
+    expect(readRestoreMarker(dataDir)).toBe(77);
+  });
+
+  it('FIFO oder zu große Datei: null, ohne zu hängen', () => {
+    mkdirSync(join(dataDir, 'run'), { recursive: true });
+    writeFileSync(restoreMarkerPath(dataDir), `${'1'.repeat(100)}\n`);
+    expect(readRestoreMarker(dataDir)).toBeNull();
+    rmSync(restoreMarkerPath(dataDir));
+    execFileSync('mkfifo', [restoreMarkerPath(dataDir)]);
+    expect(readRestoreMarker(dataDir)).toBeNull();
+  });
+
+  it('wird bei Strg+C zusammen mit der Sperre entfernt', () => {
+    const lock = acquireCoreLock(dataDir);
+    const marked = markRestore(lock, dataDir);
+    expect(readRestoreMarker(dataDir)).toBe(process.pid);
+    const handlers = new Map<string, () => void>();
+    const host: SignalHost = {
+      on: (event, listener) => handlers.set(event, listener),
+      off: (event) => handlers.delete(event),
+      exit: ((code: number) => {
+        throw new Error(`exit ${code}`);
+      }) as SignalHost['exit'],
+    };
+    releaseOnSignal(marked, host);
+    expect(() => handlers.get('SIGINT')?.()).toThrow('exit 130');
+    expect(existsSync(restoreMarkerPath(dataDir))).toBe(false);
+    expect(existsSync(lock.path)).toBe(false);
   });
 });

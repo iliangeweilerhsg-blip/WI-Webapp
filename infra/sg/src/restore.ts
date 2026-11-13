@@ -30,10 +30,9 @@ import {
 import type { SgConfig } from './config.ts';
 import {
   CoreLockHeldError,
+  markRestore,
   readRestoreMarker,
   releaseOnSignal,
-  removeRestoreMarker,
-  writeRestoreMarker,
   type CoreLockHandle,
 } from './core-lock.ts';
 import { NoFollowReader, UnsafeTargetError, type Identity } from './nofollow.ts';
@@ -282,14 +281,13 @@ async function withCoreLock(deps: RestoreDeps, fn: () => Promise<number>): Promi
     } else deps.err(await blockedMessage(deps, ['Core']));
     return 3;
   }
-  writeRestoreMarker(deps.cfg.dataDir);
-  const unhook = releaseOnSignal(lock);
+  const marked = markRestore(lock, deps.cfg.dataDir);
+  const unhook = releaseOnSignal(marked);
   try {
     return await fn();
   } finally {
     unhook();
-    removeRestoreMarker(deps.cfg.dataDir);
-    lock.release();
+    marked.release();
   }
 }
 
