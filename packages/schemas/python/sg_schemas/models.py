@@ -173,6 +173,94 @@ class CalendarUpdateScope(StrEnum):
     einzeln = 'einzeln'
 
 
+class CardBackBasic(BaseModel):
+    """
+    Rückseite einer basic-Karte (08 §6)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    text_md: StrictStr = Field(
+        ..., description='Antwort', max_length=1000, min_length=1
+    )
+    explanation_md: StrictStr | None = Field(
+        ...,
+        description='Erklärung unter der Antwort, null = keine',
+        max_length=1000,
+        min_length=1,
+    )
+
+
+class C1Item(RootModel[StrictStr]):
+    root: StrictStr = Field(..., max_length=200, min_length=1)
+
+
+class C2Item(RootModel[StrictStr]):
+    root: StrictStr = Field(..., max_length=200, min_length=1)
+
+
+class C3Item(RootModel[StrictStr]):
+    root: StrictStr = Field(..., max_length=200, min_length=1)
+
+
+class CardClozeAnswers(BaseModel):
+    """
+    Lösungen je Lücke. Genau die Schlüssel der Lücken im Text, lückenlos ab c1 (prüft der Schreiber, §21.2)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    c1: list[C1Item] = Field(
+        ...,
+        description='erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen',
+        max_length=5,
+        min_length=1,
+    )
+    c2: list[C2Item] | None = Field(
+        None,
+        description='erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen',
+        max_length=5,
+        min_length=1,
+    )
+    c3: list[C3Item] | None = Field(
+        None,
+        description='erste Angabe = Text der Lücke, weitere = gleichwertige Schreibweisen',
+        max_length=5,
+        min_length=1,
+    )
+
+
+class CardFrontText(BaseModel):
+    """
+    Vorderseite (08 §6). Reiner Text, bei cloze mit Lücken {{c1::Lösung}} (§21.2)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    text_md: StrictStr = Field(..., max_length=500, min_length=1)
+
+
+class CardKind(StrEnum):
+    """
+    Kartentyp (F-LRN-01). Dieser Schnitt kennt nur basic und cloze (VERTRAEGE §21.2), weitere kommen später
+    """
+
+    basic = 'basic'
+    cloze = 'cloze'
+
+
+class CardOrigin(StrEnum):
+    """
+    Herkunft einer Karte (03 §9): KI-Vorschlag aus der Inbox oder von Hand
+    """
+
+    ki = 'ki'
+    manuell = 'manuell'
+
+
 class ClientDevice(StrEnum):
     """
     Gerät, auf dem ein Ereignis entstanden ist
@@ -433,6 +521,17 @@ class ExtractedRelation(BaseModel):
     )
 
 
+class FsrsState(StrEnum):
+    """
+    FSRS-Zustand einer Karte (03 §9, ts-fsrs)
+    """
+
+    new = 'new'
+    learning = 'learning'
+    review = 'review'
+    relearning = 'relearning'
+
+
 class Status(StrEnum):
     ok = 'ok'
 
@@ -515,6 +614,16 @@ class Action(StrEnum):
     reopen = 'reopen'
 
 
+class InboxCardOutcomeKind(StrEnum):
+    """
+    Was aus einer vorgeschlagenen Karte wurde (§21.7). dublette: gleiche Vorderseite gab es schon
+    """
+
+    angenommen = 'angenommen'
+    verworfen = 'verworfen'
+    dublette = 'dublette'
+
+
 class Action1(StrEnum):
     """
     Wirkung
@@ -523,6 +632,7 @@ class Action1(StrEnum):
     angenommen_neu = 'angenommen_neu'
     zusammengefuehrt = 'zusammengefuehrt'
     beziehung_bestaetigt = 'beziehung_bestaetigt'
+    karten_angenommen = 'karten_angenommen'
     abgelehnt = 'abgelehnt'
 
 
@@ -532,12 +642,13 @@ class AddedAliase(RootModel[StrictStr]):
 
 class InboxKind(StrEnum):
     """
-    Art eines Inbox-Eintrags (03 §8). Weitere Arten (card_batch, slide_correction, …) kommen mit ihren Tickets
+    Art eines Inbox-Eintrags (03 §8). card_batch seit VERTRAEGE §21. Weitere Arten (slide_correction, …) kommen mit ihren Tickets
     """
 
     concept_new = 'concept_new'
     concept_merge = 'concept_merge'
     relation = 'relation'
+    card_batch = 'card_batch'
 
 
 class InboxStatus(StrEnum):
@@ -623,6 +734,37 @@ class LanguageCode(RootModel[StrictStr]):
         pattern='^[a-z]{2,3}$',
         title='LanguageCode',
     )
+
+
+class LearningSettings(BaseModel):
+    """
+    Bereich learning in setting (§21.5). Kommt mit B2 in Settings
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    review_budget_minutes: StrictInt = Field(
+        ..., description='Zeitbudget für „Heute wiederholen“, Standard 20', ge=5, le=120
+    )
+    new_cards_per_day: StrictInt = Field(
+        ...,
+        description='höchstens so viele neue Karten je Lerntag, Standard 20',
+        ge=0,
+        le=100,
+    )
+
+
+class LearningSettingsUpdate(BaseModel):
+    """
+    PATCH /settings, Bereich learning
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    review_budget_minutes: StrictInt | None = Field(None, ge=5, le=120)
+    new_cards_per_day: StrictInt | None = Field(None, ge=0, le=100)
 
 
 class LlmIssue(StrEnum):
@@ -1170,7 +1312,7 @@ class PhotoMime(StrEnum):
 
 class PipelineStep(StrEnum):
     """
-    Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge = Anzeige-Reihenfolge
+    Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2, §20.2 und §21.3). Reihenfolge = Anzeige-Reihenfolge
     """
 
     audio_finalize = 'audio.finalize'
@@ -1179,6 +1321,7 @@ class PipelineStep(StrEnum):
     concepts_extract = 'concepts.extract'
     concepts_resolve = 'concepts.resolve'
     summary_write = 'summary.write'
+    cards_generate = 'cards.generate'
 
 
 class Point2(RootModel[list[StrictFloat]]):
@@ -1248,6 +1391,16 @@ class RestoreTestState(StrEnum):
 class RestoreTestTrigger(StrEnum):
     zeitplan = 'zeitplan'
     manuell = 'manuell'
+
+
+class ReviewQueueGroup(StrEnum):
+    """
+    Gruppe in der Tageswarteschlange (§21.5): angefangen = Lernschritt offen, faellig = Wiederholung, neu = noch nie bewertet
+    """
+
+    angefangen = 'angefangen'
+    faellig = 'faellig'
+    neu = 'neu'
 
 
 class ReviewState(StrEnum):
@@ -2075,6 +2228,140 @@ class CalendarSourceList(BaseModel):
     next_cursor: StrictStr | None
 
 
+class CardBackCloze(BaseModel):
+    """
+    Rückseite einer cloze-Karte (08 §6)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    answers: CardClozeAnswers
+
+
+class CardContentBasic(BaseModel):
+    """
+    Frage und Antwort
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['basic']
+    front: CardFrontText
+    back: CardBackBasic
+
+
+class CardContentCloze(BaseModel):
+    """
+    Lückentext. Alle Lücken einer Karte werden zusammen verdeckt und aufgedeckt
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['cloze']
+    front: CardFrontText
+    back: CardBackCloze
+
+
+class CardState(BaseModel):
+    """
+    FSRS-Zustand (Tabelle card_state, 1:1 zur Karte). Felder wie der Kartentyp von ts-fsrs
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    state: FsrsState
+    due: AwareDatetime = Field(..., description='ISO 8601, UTC', title='Timestamp')
+    stability: StrictFloat = Field(..., ge=0.0)
+    difficulty: StrictFloat = Field(..., ge=0.0)
+    elapsed_days: StrictInt = Field(..., ge=0)
+    scheduled_days: StrictInt = Field(..., ge=0)
+    learning_steps: StrictInt = Field(
+        ..., description='Position in den Lernschritten von ts-fsrs', ge=0
+    )
+    reps: StrictInt = Field(..., ge=0)
+    lapses: StrictInt = Field(..., ge=0)
+    last_review: AwareDatetime | None
+
+
+class CardsGeneratePayload(BaseModel):
+    """
+    cards.generate (VERTRAEGE §21.6). job.session_id ist gesetzt
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    force: StrictBool | None = Field(
+        None,
+        description='true: auch offene Vorschläge mit unveränderter Eingabe neu erzeugen',
+    )
+
+
+class CardsGenerateResult(BaseModel):
+    """
+    Ergebnis von cards.generate
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    session_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    session_deleted: StrictBool
+    concepts: StrictInt = Field(
+        ..., description='betrachtete Konzepte der Session', ge=0, le=30
+    )
+    proposed_batches: StrictInt = Field(
+        ..., description='neu geschriebene Inbox-Einträge', ge=0
+    )
+    proposed_cards: StrictInt = Field(..., ge=0)
+    unchanged_batches: StrictInt = Field(
+        ..., description='offene Vorschläge mit gleicher Eingabe, kein Aufruf', ge=0
+    )
+    skipped_decided: StrictInt = Field(
+        ...,
+        description='Konzepte, deren Vorschlag aus dieser Session schon entschieden ist',
+        ge=0,
+    )
+    skipped_empty: StrictInt = Field(
+        ...,
+        description='Konzepte ohne brauchbaren Belegtext oder ohne neue Karte',
+        ge=0,
+    )
+    failed_concepts: StrictInt = Field(
+        ..., description='Konzepte mit ungültiger oder abgelehnter KI-Ausgabe', ge=0
+    )
+    dropped_invalid: StrictInt = Field(..., ge=0)
+    dropped_length: StrictInt = Field(..., ge=0)
+    dropped_sources: StrictInt = Field(..., ge=0)
+    dropped_cloze: StrictInt = Field(..., ge=0)
+    dropped_duplicates: StrictInt = Field(..., ge=0)
+    embedding_model: StrictStr | None = Field(
+        ...,
+        description='null: ohne Embedder, Dubletten nur über gleichen Text',
+        min_length=1,
+    )
+    prompt_version: StrictStr | None = Field(..., min_length=1)
+    model: StrictStr | None = Field(..., min_length=1)
+    cost_eur: StrictFloat = Field(
+        ..., description='Euro (Schätzung, VERTRAEGE §20.5)', ge=0.0
+    )
+
+
 class Concept(BaseModel):
     """
     Konzept (03 §7). Gehört keinem Fach allein (concept_module). Ohne embedding, vault_path und block_hashes (kommen mit dem Vault)
@@ -2639,28 +2926,6 @@ class ImageElementPayload(BaseModel):
     crop: BBox | None
 
 
-class InboxAcceptRequest(BaseModel):
-    """
-    POST /inbox/{id}/accept (§20.6). Welche Felder zu welcher Art passen, regelt der Vertrag (sonst 400 inbox_action_invalid)
-    """
-
-    model_config = ConfigDict(
-        extra='forbid',
-    )
-    edit: ConceptEdit | None = None
-    merge_into: StrictStr | None = Field(
-        None,
-        description='UUIDv7 (03 §1), Kleinbuchstaben',
-        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
-        title='Uuid',
-    )
-    as_new: StrictBool | None = Field(
-        None,
-        description='concept_merge: als neues Konzept annehmen statt zusammenführen',
-    )
-    relation_kind: ConceptRelationKind | None = None
-
-
 class InboxBulkRequest(BaseModel):
     """
     POST /inbox/bulk. Genau eins von ids und session_id (sonst 400 validation_failed)
@@ -2706,9 +2971,22 @@ class InboxBulkResult(BaseModel):
     skipped: list[SkippedItem]
 
 
+class InboxCardOutcome(BaseModel):
+    """
+    Ergebnis je Karte eines entschiedenen card_batch (inbox_item.decision.cards)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    key: StrictStr = Field(..., pattern='^k[1-9][0-9]?$')
+    outcome: InboxCardOutcomeKind
+    card_id: Uuid | None
+
+
 class InboxDecision(BaseModel):
     """
-    Was eine Annahme geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST /inbox/{id}/reopen, §20.6)
+    Was eine Entscheidung geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST /inbox/{id}/reopen, §20.6, §21.7)
     """
 
     model_config = ConfigDict(
@@ -2723,7 +3001,8 @@ class InboxDecision(BaseModel):
     previous: ConceptEdit | None
     relation_kind_before: ConceptRelationKind | None
     cascade_item_ids: list[Uuid] = Field(
-        ..., description='mit derselben Entscheidung geänderte Beziehungs-Einträge'
+        ...,
+        description='mit derselben Entscheidung geänderte Einträge: Beziehungen (§20.6) und Kartenvorschläge des Konzepts (§21.7)',
     )
     duplicate_of: Uuid | None = Field(
         ...,
@@ -2732,6 +3011,11 @@ class InboxDecision(BaseModel):
     triggered_by: Uuid | None = Field(
         ...,
         description='Eintrag, dessen Entscheidung diesen mitentschieden hat (A1: bestätigte Beziehung, A2: umgehängte Dublette, A3: bestätigte vorhandene Beziehung). Wieder öffnen nur über diesen Eintrag (§20.6)',
+    )
+    cards: list[InboxCardOutcome] | None = Field(
+        None,
+        description='nur card_batch: Ergebnis je vorgeschlagener Karte (§21.7). Fehlt bei den anderen Arten',
+        max_length=8,
     )
 
 
@@ -4582,6 +4866,86 @@ class RestoreTest(BaseModel):
     )
 
 
+class ReviewConceptRef(BaseModel):
+    """
+    Konzept einer Karte in der Warteschlange
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    name: StrictStr = Field(..., max_length=200, min_length=1)
+    exam_relevant: StrictBool
+
+
+class ReviewLogEntry(BaseModel):
+    """
+    Eine Bewertung (Tabelle review_log, ohne die Zustände davor und danach)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    card_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    reviewed_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    rating: StrictInt = Field(
+        ...,
+        description='Selbstbewertung (06 §1): 1 Nochmal, 2 Schwer, 3 Gut, 4 Leicht',
+        ge=1,
+        le=4,
+        title='ReviewRating',
+    )
+    duration_ms: StrictInt = Field(..., ge=0, le=3600000)
+
+
+class ReviewRequest(BaseModel):
+    """
+    POST /cards/{id}/review. id erzeugt der Client (UUIDv7) je Bewertung, eine Wiederholung mit derselben id ändert nichts (§21.4)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    rating: StrictInt = Field(
+        ...,
+        description='Selbstbewertung (06 §1): 1 Nochmal, 2 Schwer, 3 Gut, 4 Leicht',
+        ge=1,
+        le=4,
+        title='ReviewRating',
+    )
+    duration_ms: StrictInt = Field(
+        ...,
+        description='Zeit vom Anzeigen der Vorderseite bis zur Bewertung',
+        ge=0,
+        le=3600000,
+    )
+
+
 class SearchIndexPayload(BaseModel):
     """
     search.index (VERTRAEGE §19.3). job.session_id bleibt NULL, auch bei scope = session
@@ -6281,6 +6645,29 @@ class ImageElement(BaseModel):
     payload: ImageElementPayload
 
 
+class InboxCardChoice(BaseModel):
+    """
+    Entscheidung zu einer Karte eines card_batch (POST /inbox/{id}/accept, §21.7)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    key: StrictStr = Field(..., pattern='^k[1-9][0-9]?$')
+    accept: StrictBool = Field(..., description='false: diese Karte verwerfen')
+    content: CardContentBasic | CardContentCloze | None = Field(
+        None,
+        description='Inhalt einer Karte nach 08 §6 (card.kind, card.front, card.back)',
+        title='CardContent',
+    )
+    sources: list[EvidenceRefSlide | EvidenceRefTranscript] | None = Field(
+        None,
+        description='Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten',
+        max_length=6,
+        min_length=1,
+    )
+
+
 class InboxOverviewSession(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -7151,6 +7538,104 @@ class BackupOverview(BaseModel):
     next_cursor: StrictStr | None
 
 
+class CardCreate(BaseModel):
+    """
+    POST /cards: Karte von Hand (origin = manuell). Das Konzept muss aktiv sein (§21.4)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    concept_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    content: CardContentBasic | CardContentCloze = Field(
+        ...,
+        description='Inhalt einer Karte nach 08 §6 (card.kind, card.front, card.back)',
+        title='CardContent',
+    )
+    sources: list[EvidenceRefSlide | EvidenceRefTranscript] = Field(
+        ...,
+        description='Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten',
+        max_length=6,
+        min_length=1,
+    )
+
+
+class CardProposal(BaseModel):
+    """
+    Eine vorgeschlagene Karte in einem card_batch, nach den Prüfungen aus §21.6
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    key: StrictStr = Field(
+        ..., description='Schlüssel im Vorschlag: k1, k2, …', pattern='^k[1-9][0-9]?$'
+    )
+    content: CardContentBasic | CardContentCloze = Field(
+        ...,
+        description='Inhalt einer Karte nach 08 §6 (card.kind, card.front, card.back)',
+        title='CardContent',
+    )
+    sources: list[EvidenceRefSlide | EvidenceRefTranscript] = Field(
+        ...,
+        description='Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten',
+        max_length=6,
+        min_length=1,
+    )
+
+
+class CardSource(BaseModel):
+    """
+    Beleg einer Karte mit Anzeigeangabe
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    ref: EvidenceRefSlide | EvidenceRefTranscript = Field(
+        ...,
+        description='Verweis auf eine Quelle, unterschieden über kind (anyOf statt oneOf, damit Zod einen typisierten Union erzeugt)',
+        title='EvidenceRef',
+    )
+    missing: StrictBool = Field(
+        ...,
+        description='true: Ziel gelöscht (Folie, Foliensatz oder Session), nicht mehr anspringbar',
+    )
+
+
+class CardUpdate(BaseModel):
+    """
+    PATCH /cards/{id}. Mindestens ein Feld (sonst 400 validation_failed). content ersetzt Vorder- und Rückseite, der FSRS-Zustand bleibt
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    content: CardContentBasic | CardContentCloze | None = Field(
+        None,
+        description='Inhalt einer Karte nach 08 §6 (card.kind, card.front, card.back)',
+        title='CardContent',
+    )
+    sources: list[EvidenceRefSlide | EvidenceRefTranscript] | None = Field(
+        None,
+        description='Belege (LP8, Invariante 3): Folie oder Zeitraum des Gesagten',
+        max_length=6,
+        min_length=1,
+    )
+    suspended: StrictBool | None = None
+
+
 class ConceptDetail(BaseModel):
     """
     GET /concepts/{id}
@@ -7230,6 +7715,33 @@ class ConceptsExtractResult(BaseModel):
     )
 
 
+class InboxAcceptRequest(BaseModel):
+    """
+    POST /inbox/{id}/accept (§20.6, §21.7). Welche Felder zu welcher Art passen, regelt der Vertrag (sonst 400 inbox_action_invalid)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    edit: ConceptEdit | None = None
+    merge_into: StrictStr | None = Field(
+        None,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    as_new: StrictBool | None = Field(
+        None,
+        description='concept_merge: als neues Konzept annehmen statt zusammenführen',
+    )
+    relation_kind: ConceptRelationKind | None = None
+    cards: list[InboxCardChoice] | None = Field(
+        None,
+        description='nur card_batch: Entscheidung je Karte. Nicht genannte Karten werden unverändert angenommen',
+        max_length=8,
+    )
+
+
 class InboxOverview(BaseModel):
     """
     GET /inbox/overview: Zähler für Navigation und Gruppen (F-NAC-06)
@@ -7247,6 +7759,33 @@ class InboxOverview(BaseModel):
     sessions: list[InboxOverviewSession] = Field(
         ..., description='Gruppen mit offenen Einträgen, neueste Session zuerst'
     )
+
+
+class InboxPayloadCardBatch(BaseModel):
+    """
+    Nutzlast card_batch: Kartenvorschläge zu einem Konzept aus einer Session (05 §P10, §21.7)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    kind: Literal['card_batch']
+    concept_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    concept_name: StrictStr = Field(
+        ...,
+        description='Name des Konzepts beim Erzeugen (Anzeige)',
+        max_length=200,
+        min_length=1,
+    )
+    cards: list[CardProposal] = Field(..., max_length=8, min_length=1)
+    input_hash: StrictStr = Field(..., pattern='^[0-9a-f]{64}$')
+    prompt_version: StrictStr = Field(..., min_length=1)
+    model: StrictStr = Field(..., min_length=1)
 
 
 class MoodleCourseContents(BaseModel):
@@ -7332,6 +7871,59 @@ class SessionSummaryView(BaseModel):
     summary: SessionSummary | None
 
 
+class Card(BaseModel):
+    """
+    Karte (03 §9) mit Zustand. Gehört zu genau einem aktiven Konzept
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    created_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    updated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    concept_id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    stage: StrictInt = Field(
+        ..., description='Lernstufe (F-LRN-01). basic und cloze: 2', ge=1, le=4
+    )
+    origin: CardOrigin
+    suspended: StrictBool = Field(
+        ..., description='true: pausiert, kommt nicht in die Warteschlange'
+    )
+    content: CardContentBasic | CardContentCloze = Field(
+        ...,
+        description='Inhalt einer Karte nach 08 §6 (card.kind, card.front, card.back)',
+        title='CardContent',
+    )
+    sources: list[CardSource] = Field(..., max_length=6, min_length=1)
+    state: CardState
+
+
+class CardList(BaseModel):
+    """
+    GET /concepts/{id}/cards: alle nicht gelöschten Karten des Konzepts, älteste zuerst, höchstens 500
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[Card] = Field(..., max_length=500)
+
+
 class ElementUpsertData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -7380,6 +7972,55 @@ class ElementUpsertOp(BaseModel):
     origin: SyncOrigin | None = None
 
 
+class PageDetail(BaseModel):
+    """
+    GET /pages/{id}: Seite mit Elementen (ohne gelöschte, nach z sortiert)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    page: Page
+    elements: list[TextElement | ImageElement | ShapeElement | TapeElement | StampElement]
+    stream_seq: StrictInt = Field(..., ge=0)
+    stream_op_id: Uuid | None = Field(
+        ...,
+        description='op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden',
+    )
+
+
+class ReviewQueueItem(BaseModel):
+    """
+    Eine Karte der Tageswarteschlange
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    card: Card
+    concept: ReviewConceptRef
+    group: ReviewQueueGroup
+    estimate_seconds: StrictInt = Field(
+        ..., description='geschätzte Dauer für diese Karte heute (§21.5)', ge=1, le=600
+    )
+
+
+class ReviewResult(BaseModel):
+    """
+    Antwort auf POST /cards/{id}/review
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    review: ReviewLogEntry
+    card: Card
+    requeue: StrictBool = Field(
+        ...,
+        description='true: die Karte ist heute noch einmal dran (neue Fälligkeit vor dem Tageswechsel, §21.5)',
+    )
+
+
 class InboxItem(BaseModel):
     """
     Inbox-Eintrag (03 §8, F-NAC-06)
@@ -7409,7 +8050,10 @@ class InboxItem(BaseModel):
     )
     decided_at: AwareDatetime | None
     payload: (
-        InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation
+        InboxPayloadConceptNew
+        | InboxPayloadConceptMerge
+        | InboxPayloadRelation
+        | InboxPayloadCardBatch
     ) = Field(..., description='Schemageprüfte Nutzlast eines Inbox-Eintrags (03 §8), unterschieden über kind', title='InboxPayload')
     concept_id: Uuid | None
     target_concept_id: Uuid | None
@@ -7429,20 +8073,43 @@ class InboxItemList(BaseModel):
     next_cursor: StrictStr | None
 
 
-class PageDetail(BaseModel):
+class ReviewQueue(BaseModel):
     """
-    GET /pages/{id}: Seite mit Elementen (ohne gelöschte, nach z sortiert)
+    GET /review/queue: der heutige Block (F-LRN-03). Bewusst ohne Zahl der insgesamt fälligen Karten (kein Rückstand, LP9)
     """
 
     model_config = ConfigDict(
         extra='forbid',
     )
-    page: Page
-    elements: list[TextElement | ImageElement | ShapeElement | TapeElement | StampElement]
-    stream_seq: StrictInt = Field(..., ge=0)
-    stream_op_id: Uuid | None = Field(
+    day: StrictStr = Field(
         ...,
-        description='op_id der Operation stream_seq, null bei stream_seq = 0. Beim Abonnieren als last_op_id senden',
+        description='Lerntag in Ortszeit des Macs, Tageswechsel 04:00 (§21.5)',
+        pattern='^[0-9]{4}-[0-9]{2}-[0-9]{2}$',
+    )
+    day_ends_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    generated_at: AwareDatetime = Field(
+        ..., description='ISO 8601, UTC', title='Timestamp'
+    )
+    budget_minutes: StrictInt = Field(
+        ..., description='Zeitbudget dieses Abrufs ohne extra_minutes', ge=1, le=240
+    )
+    used_seconds: StrictInt = Field(
+        ..., description='heute schon mit Bewertungen verbrachte Zeit', ge=0
+    )
+    estimated_seconds: StrictInt = Field(
+        ..., description='Summe der Schätzungen aller items (Anzeige „≈ n min“)', ge=0
+    )
+    reviewed_today: StrictInt = Field(
+        ..., description='Bewertungen am heutigen Lerntag', ge=0
+    )
+    items: list[ReviewQueueItem] = Field(..., max_length=500)
+    more_due: StrictBool = Field(
+        ..., description='true: heute wäre noch mehr fällig, als ins Budget passt'
+    )
+    has_cards: StrictBool = Field(
+        ..., description='false: es gibt noch gar keine Karte (anderer Leerzustand)'
     )
 
 
@@ -7456,6 +8123,11 @@ class InboxDecisionResult(BaseModel):
     )
     item: InboxItem
     concept: Concept | None
+    cards: list[Card] | None = Field(
+        None,
+        description='nur card_batch nach accept: die angelegten Karten',
+        max_length=8,
+    )
 
 
 class SchemaBundle(BaseModel):
@@ -7521,6 +8193,32 @@ class SchemaBundle(BaseModel):
     )
     CalendarUpdateScope_1: CalendarUpdateScope | None = Field(
         None, alias='CalendarUpdateScope'
+    )
+    Card_1: Card | None = Field(None, alias='Card')
+    CardBackBasic_1: CardBackBasic | None = Field(None, alias='CardBackBasic')
+    CardBackCloze_1: CardBackCloze | None = Field(None, alias='CardBackCloze')
+    CardClozeAnswers_1: CardClozeAnswers | None = Field(None, alias='CardClozeAnswers')
+    CardContent: CardContentBasic | CardContentCloze | None = Field(
+        None,
+        description='Inhalt einer Karte nach 08 §6 (card.kind, card.front, card.back)',
+        title='CardContent',
+    )
+    CardContentBasic_1: CardContentBasic | None = Field(None, alias='CardContentBasic')
+    CardContentCloze_1: CardContentCloze | None = Field(None, alias='CardContentCloze')
+    CardCreate_1: CardCreate | None = Field(None, alias='CardCreate')
+    CardFrontText_1: CardFrontText | None = Field(None, alias='CardFrontText')
+    CardKind_1: CardKind | None = Field(None, alias='CardKind')
+    CardList_1: CardList | None = Field(None, alias='CardList')
+    CardOrigin_1: CardOrigin | None = Field(None, alias='CardOrigin')
+    CardProposal_1: CardProposal | None = Field(None, alias='CardProposal')
+    CardSource_1: CardSource | None = Field(None, alias='CardSource')
+    CardState_1: CardState | None = Field(None, alias='CardState')
+    CardUpdate_1: CardUpdate | None = Field(None, alias='CardUpdate')
+    CardsGeneratePayload_1: CardsGeneratePayload | None = Field(
+        None, alias='CardsGeneratePayload'
+    )
+    CardsGenerateResult_1: CardsGenerateResult | None = Field(
+        None, alias='CardsGenerateResult'
     )
     ClientDevice_1: ClientDevice | None = Field(None, alias='ClientDevice')
     ColumnWidths: list[ColumnWidth] | None = Field(
@@ -7617,6 +8315,7 @@ class SchemaBundle(BaseModel):
     )
     FileReceipt_1: FileReceipt | None = Field(None, alias='FileReceipt')
     FileRef_1: FileRef | None = Field(None, alias='FileRef')
+    FsrsState_1: FsrsState | None = Field(None, alias='FsrsState')
     GeneralSettings_1: GeneralSettings | None = Field(None, alias='GeneralSettings')
     GeneralSettingsUpdate_1: GeneralSettingsUpdate | None = Field(
         None, alias='GeneralSettingsUpdate'
@@ -7648,6 +8347,11 @@ class SchemaBundle(BaseModel):
     )
     InboxBulkRequest_1: InboxBulkRequest | None = Field(None, alias='InboxBulkRequest')
     InboxBulkResult_1: InboxBulkResult | None = Field(None, alias='InboxBulkResult')
+    InboxCardChoice_1: InboxCardChoice | None = Field(None, alias='InboxCardChoice')
+    InboxCardOutcome_1: InboxCardOutcome | None = Field(None, alias='InboxCardOutcome')
+    InboxCardOutcomeKind_1: InboxCardOutcomeKind | None = Field(
+        None, alias='InboxCardOutcomeKind'
+    )
     InboxDecision_1: InboxDecision | None = Field(None, alias='InboxDecision')
     InboxDecisionResult_1: InboxDecisionResult | None = Field(
         None, alias='InboxDecisionResult'
@@ -7660,8 +8364,15 @@ class SchemaBundle(BaseModel):
         None, alias='InboxOverviewSession'
     )
     InboxPayload: (
-        InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation | None
+        InboxPayloadConceptNew
+        | InboxPayloadConceptMerge
+        | InboxPayloadRelation
+        | InboxPayloadCardBatch
+        | None
     ) = Field(None, description='Schemageprüfte Nutzlast eines Inbox-Eintrags (03 §8), unterschieden über kind', title='InboxPayload')
+    InboxPayloadCardBatch_1: InboxPayloadCardBatch | None = Field(
+        None, alias='InboxPayloadCardBatch'
+    )
     InboxPayloadConceptMerge_1: InboxPayloadConceptMerge | None = Field(
         None, alias='InboxPayloadConceptMerge'
     )
@@ -7689,6 +8400,10 @@ class SchemaBundle(BaseModel):
         examples=['de'],
         pattern='^[a-z]{2,3}$',
         title='LanguageCode',
+    )
+    LearningSettings_1: LearningSettings | None = Field(None, alias='LearningSettings')
+    LearningSettingsUpdate_1: LearningSettingsUpdate | None = Field(
+        None, alias='LearningSettingsUpdate'
     )
     LectureSettings_1: LectureSettings | None = Field(None, alias='LectureSettings')
     LectureSettingsUpdate_1: LectureSettingsUpdate | None = Field(
@@ -7946,6 +8661,20 @@ class SchemaBundle(BaseModel):
     RestoreTestTrigger_1: RestoreTestTrigger | None = Field(
         None, alias='RestoreTestTrigger'
     )
+    ReviewConceptRef_1: ReviewConceptRef | None = Field(None, alias='ReviewConceptRef')
+    ReviewLogEntry_1: ReviewLogEntry | None = Field(None, alias='ReviewLogEntry')
+    ReviewQueue_1: ReviewQueue | None = Field(None, alias='ReviewQueue')
+    ReviewQueueGroup_1: ReviewQueueGroup | None = Field(None, alias='ReviewQueueGroup')
+    ReviewQueueItem_1: ReviewQueueItem | None = Field(None, alias='ReviewQueueItem')
+    ReviewRating: StrictInt | None = Field(
+        None,
+        description='Selbstbewertung (06 §1): 1 Nochmal, 2 Schwer, 3 Gut, 4 Leicht',
+        ge=1,
+        le=4,
+        title='ReviewRating',
+    )
+    ReviewRequest_1: ReviewRequest | None = Field(None, alias='ReviewRequest')
+    ReviewResult_1: ReviewResult | None = Field(None, alias='ReviewResult')
     ReviewState_1: ReviewState | None = Field(None, alias='ReviewState')
     SearchDegraded: SearchDegraded1 | None = Field(
         None,
@@ -8284,8 +9013,9 @@ class SchemaBundle(BaseModel):
 
 
 # Union-Typen (für Validierung: pydantic.TypeAdapter(<Typ>))
+type CardContent = CardContentBasic | CardContentCloze
 type EvidenceRef = EvidenceRefSlide | EvidenceRefTranscript
-type InboxPayload = InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation
+type InboxPayload = InboxPayloadConceptNew | InboxPayloadConceptMerge | InboxPayloadRelation | InboxPayloadCardBatch
 type PageElement = TextElement | ImageElement | ShapeElement | TapeElement | StampElement
 type PdfIngestPayload = PdfIngestDeckPayload | PdfIngestSheetPayload
 type SearchHit = SearchHitSlide | SearchHitTranscript

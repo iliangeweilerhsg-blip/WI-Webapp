@@ -361,7 +361,8 @@ device(name text, kind text, token_hash text, last_seen_at timestamptz,
   clock_offset_ms int, app_version text)
 
 backup_run(started_at timestamptz, finished_at timestamptz, target text,
-  size_bytes int8, state text, error text NULL)
+  size_bytes int8, state text, error text NULL,
+  files_sha256 text NULL)               -- SHA-256 der Prüfsummenliste files.sha256 (64 Hex), Vertrauensanker für media/ und vault/
 
 setting(key text primary key, value jsonb)
 ```

@@ -24,8 +24,8 @@
     },
     "InboxKind": {
       "type": "string",
-      "enum": ["concept_new", "concept_merge", "relation"],
-      "description": "Art eines Inbox-Eintrags (03 §8). Weitere Arten (card_batch, slide_correction, …) kommen mit ihren Tickets"
+      "enum": ["concept_new", "concept_merge", "relation", "card_batch"],
+      "description": "Art eines Inbox-Eintrags (03 §8). card_batch seit VERTRAEGE §21. Weitere Arten (slide_correction, …) kommen mit ihren Tickets"
     },
     "InboxStatus": {
       "type": "string",
@@ -1262,12 +1262,15 @@
         },
         {
           "$ref": "#/$defs/InboxPayloadRelation"
+        },
+        {
+          "$ref": "#/$defs/InboxPayloadCardBatch"
         }
       ]
     },
     "InboxDecision": {
       "type": "object",
-      "description": "Was eine Annahme geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST /inbox/{id}/reopen, §20.6)",
+      "description": "Was eine Entscheidung geändert hat (inbox_item.decision). Grundlage für „Rückgängig“ (POST /inbox/{id}/reopen, §20.6, §21.7)",
       "required": [
         "action",
         "concept_id",
@@ -1285,7 +1288,13 @@
       "properties": {
         "action": {
           "type": "string",
-          "enum": ["angenommen_neu", "zusammengefuehrt", "beziehung_bestaetigt", "abgelehnt"],
+          "enum": [
+            "angenommen_neu",
+            "zusammengefuehrt",
+            "beziehung_bestaetigt",
+            "karten_angenommen",
+            "abgelehnt"
+          ],
           "description": "Wirkung"
         },
         "concept_id": {
@@ -1353,7 +1362,7 @@
           "items": {
             "$ref": "#/$defs/Uuid"
           },
-          "description": "mit derselben Entscheidung geänderte Beziehungs-Einträge"
+          "description": "mit derselben Entscheidung geänderte Einträge: Beziehungen (§20.6) und Kartenvorschläge des Konzepts (§21.7)"
         },
         "duplicate_of": {
           "anyOf": [
@@ -1376,6 +1385,14 @@
             }
           ],
           "description": "Eintrag, dessen Entscheidung diesen mitentschieden hat (A1: bestätigte Beziehung, A2: umgehängte Dublette, A3: bestätigte vorhandene Beziehung). Wieder öffnen nur über diesen Eintrag (§20.6)"
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxCardOutcome"
+          },
+          "maxItems": 8,
+          "description": "nur card_batch: Ergebnis je vorgeschlagener Karte (§21.7). Fehlt bei den anderen Arten"
         }
       }
     },
@@ -1566,7 +1583,7 @@
     },
     "InboxAcceptRequest": {
       "type": "object",
-      "description": "POST /inbox/{id}/accept (§20.6). Welche Felder zu welcher Art passen, regelt der Vertrag (sonst 400 inbox_action_invalid)",
+      "description": "POST /inbox/{id}/accept (§20.6, §21.7). Welche Felder zu welcher Art passen, regelt der Vertrag (sonst 400 inbox_action_invalid)",
       "required": [],
       "additionalProperties": false,
       "properties": {
@@ -1582,6 +1599,14 @@
         },
         "relation_kind": {
           "$ref": "#/$defs/ConceptRelationKind"
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InboxCardChoice"
+          },
+          "maxItems": 8,
+          "description": "nur card_batch: Entscheidung je Karte. Nicht genannte Karten werden unverändert angenommen"
         }
       }
     },
@@ -1603,6 +1628,14 @@
               "type": "null"
             }
           ]
+        },
+        "cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Card"
+          },
+          "maxItems": 8,
+          "description": "nur card_batch nach accept: die angelegten Karten"
         }
       }
     },

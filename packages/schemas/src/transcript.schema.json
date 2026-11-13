@@ -362,9 +362,10 @@
         "align.log",
         "concepts.extract",
         "concepts.resolve",
-        "summary.write"
+        "summary.write",
+        "cards.generate"
       ],
-      "description": "Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2 und §20.2). Reihenfolge = Anzeige-Reihenfolge"
+      "description": "Schritte der Kette nach dem Session-Ende (05 §2, VERTRAEGE §18.2, §20.2 und §21.3). Reihenfolge = Anzeige-Reihenfolge"
     },
     "SessionReprocessRequest": {
       "type": "object",

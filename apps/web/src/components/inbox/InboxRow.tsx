@@ -2,9 +2,15 @@
 
 import Link from 'next/link';
 import type { KeyboardEvent } from 'react';
-import type { InboxAcceptRequest, InboxItem } from '@sg/shared';
+import type { InboxAcceptRequest } from '@sg/shared';
 import { conceptHref, sessionRefLabel } from '../../lib/concepts.ts';
-import { INBOX_KIND_LABELS, INBOX_KIND_SYMBOLS, blockedHint, relationText } from '../../lib/inbox.ts';
+import {
+  INBOX_KIND_LABELS,
+  INBOX_KIND_SYMBOLS,
+  blockedHint,
+  relationText,
+  type ConceptInboxItem as InboxItem,
+} from '../../lib/inbox.ts';
 import { isEditableTarget } from '../../lib/shortcuts.ts';
 import { SourceChips } from '../concepts/SourceChips.tsx';
 import { InboxEdit } from './InboxEdit.tsx';

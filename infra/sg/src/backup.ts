@@ -460,7 +460,21 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         } catch {
           prevSub = null; // voriger Stand nicht lesbar: alles kopieren
         }
-        copyTree(source, join(partial, sub), prevSub, stats[sub], { out, reader, owner, sums: sums[sub] });
+        copyTree(source, join(partial, sub), prevSub, stats[sub], {
+          out,
+          reader,
+          owner,
+          sums: sums[sub],
+          onDamagedLink: (path, reason) =>
+            log(
+              reason === 'unreadable'
+                ? `  WARNUNG: ${sub}/${path} ist im vorigen Stand ${previous} nicht lesbar. Die Datei wird neu kopiert statt ` +
+                    `verlinkt. Prüfen mit \`pnpm sg restore --test ${previous}\`.`
+                : `  WARNUNG: ${sub}/${path} unterscheidet sich vom vorigen Stand ${previous} trotz gleicher Größe und Zeit. ` +
+                    'Sie wird neu kopiert statt verlinkt. Ist die Quelle unverändert, ist der vorige Stand an dieser Datei ' +
+                    `beschädigt; prüfen mit \`pnpm sg restore --test ${previous}\`.`,
+            ),
+        });
         log(
           `  ${stats[sub].files} Dateien, ${stats[sub].copied} neu kopiert, ${stats[sub].linked} unverändert`,
         );

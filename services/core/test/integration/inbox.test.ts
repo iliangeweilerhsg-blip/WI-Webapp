@@ -144,7 +144,13 @@ describe('GET /inbox', () => {
   });
 
   it('400 bei ungültigen Parametern', async () => {
-    for (const query of ['?status=neu', '?kind=card_batch', '?session_id=x', '?limit=0', '?limit=201']) {
+    for (const query of [
+      '?status=neu',
+      '?kind=slide_correction',
+      '?session_id=x',
+      '?limit=0',
+      '?limit=201',
+    ]) {
       const res = await get(`/inbox${query}`);
       expect(res.statusCode, query).toBe(400);
       expect(errorOf(res)?.code).toBe('validation_failed');

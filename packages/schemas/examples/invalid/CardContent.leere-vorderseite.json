@@ -1,0 +1,10 @@
+{
+  "kind": "basic",
+  "front": {
+    "text_md": ""
+  },
+  "back": {
+    "text_md": "Wenn sie in 2NF ist und kein Nichtschlüsselattribut transitiv vom Schlüssel abhängt.",
+    "explanation_md": "Transitive Abhängigkeiten wandern in eine eigene Tabelle."
+  }
+}

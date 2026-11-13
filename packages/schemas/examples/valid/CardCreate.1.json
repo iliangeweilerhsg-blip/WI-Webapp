@@ -1,0 +1,21 @@
+{
+  "concept_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e31",
+  "content": {
+    "kind": "basic",
+    "front": {
+      "text_md": "Wann ist eine Relation in dritter Normalform?"
+    },
+    "back": {
+      "text_md": "Wenn sie in 2NF ist und kein Nichtschlüsselattribut transitiv vom Schlüssel abhängt.",
+      "explanation_md": "Transitive Abhängigkeiten wandern in eine eigene Tabelle."
+    }
+  },
+  "sources": [
+    {
+      "kind": "slide",
+      "slide_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e14",
+      "deck_id": "01960a3c-7b10-7c4e-9a01-3f2b5c6d7e03",
+      "slide_index": 14
+    }
+  ]
+}
