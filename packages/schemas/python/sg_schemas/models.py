@@ -1788,6 +1788,7 @@ class TrashKind(StrEnum):
     page = 'page'
     marker = 'marker'
     photo = 'photo'
+    card = 'card'
 
 
 class Uuid(RootModel[StrictStr]):
@@ -5352,7 +5353,7 @@ class SessionUpdate(BaseModel):
 
 class Settings(BaseModel):
     """
-    GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
+    GET /settings: alle Bereiche (Phase 1, ai nach VERTRAEGE §20.7 und learning nach §21.9), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
     """
 
     model_config = ConfigDict(
@@ -5363,6 +5364,7 @@ class Settings(BaseModel):
     pen: PenSettings
     data: DataSettings
     ai: AiSettings
+    learning: LearningSettings
 
 
 class SettingsUpdate(BaseModel):
@@ -5378,6 +5380,7 @@ class SettingsUpdate(BaseModel):
     pen: PenSettingsUpdate | None = None
     data: DataSettingsUpdate | None = None
     ai: AiSettingsUpdate | None = None
+    learning: LearningSettingsUpdate | None = None
 
 
 class ShapeElementPayload(BaseModel):
@@ -6362,7 +6365,10 @@ class TrashParent(BaseModel):
         pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
         title='Uuid',
     )
-    kind: TrashKind
+    kind: TrashKind | Literal['concept'] = Field(
+        ...,
+        description='Art des Elternobjekts. Bei einer Karte das Konzept (kein eigener TrashKind, VERTRAEGE §21.8)',
+    )
     title: StrictStr
 
 

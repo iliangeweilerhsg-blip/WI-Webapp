@@ -84,6 +84,8 @@ const settings = (target: string | null) => ({
   data: { backup_target: target, backup_encryption: false, backup_time: '03:00' },
   // Pflichtfeld seit T2-22a (VERTRAEGE §20.7)
   ai: { monthly_budget_eur: 10, auto_accept: 'aus' },
+  // Pflichtfeld seit B2 (VERTRAEGE §21.9)
+  learning: { review_budget_minutes: 20, new_cards_per_day: 20 },
 });
 
 function trashItem(n: number, title: string) {

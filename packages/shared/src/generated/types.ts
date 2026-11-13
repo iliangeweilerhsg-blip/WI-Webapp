@@ -711,7 +711,7 @@ export type TranscribeOutcome = ("transkribiert" | "unveraendert" | "ohne_audio"
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "TrashKind".
  */
-export type TrashKind = ("semester" | "module" | "slide_deck" | "exercise_sheet" | "calendar_source" | "session" | "notebook" | "page" | "marker" | "photo")
+export type TrashKind = ("semester" | "module" | "slide_deck" | "exercise_sheet" | "calendar_source" | "session" | "notebook" | "page" | "marker" | "photo" | "card")
 
 /**
  * GENERIERT aus packages/schemas/src – nicht von Hand ändern. Neu erzeugen: pnpm schemas:gen
@@ -5380,7 +5380,7 @@ title?: (string | null)
 slide_deck_id?: (Uuid | null)
 }
 /**
- * GET /settings: alle Bereiche (Phase 1 und ai, VERTRAEGE §20.7), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
+ * GET /settings: alle Bereiche (Phase 1, ai nach VERTRAEGE §20.7 und learning nach §21.9), fehlende Werte mit Standard aufgefüllt. Geräte stehen unter /devices.
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "Settings".
@@ -5391,6 +5391,7 @@ lecture: LectureSettings
 pen: PenSettings
 data: DataSettings
 ai: AiSettings
+learning: LearningSettings
 }
 /**
  * PATCH /settings: nur die angegebenen Felder ändern sich. Antwort: Settings
@@ -5404,6 +5405,7 @@ lecture?: LectureSettingsUpdate
 pen?: PenSettingsUpdate
 data?: DataSettingsUpdate
 ai?: AiSettingsUpdate
+learning?: LearningSettingsUpdate
 }
 /**
  * Eine Seite eines Foliensatzes. Bilder über GET /slides/{id}/image bzw. /thumb.
@@ -6025,7 +6027,10 @@ dependent_count: number
  */
 export interface TrashParent {
 id: Uuid
-kind: TrashKind
+/**
+ * Art des Elternobjekts. Bei einer Karte das Konzept (kein eigener TrashKind, VERTRAEGE §21.8)
+ */
+kind: (TrashKind | "concept")
 title: string
 }
 /**

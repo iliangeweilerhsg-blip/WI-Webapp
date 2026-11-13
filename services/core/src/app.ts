@@ -27,11 +27,14 @@ import {
   type DeviceTokenVerifier,
 } from './plugins/security.ts';
 import { registerWeb } from './plugins/web.ts';
+import { localTimeZone } from './learning/day.ts';
+import { createScheduler } from './learning/params.ts';
 import { createMoodleServices, type MoodleServices } from './moodle/index.ts';
 import { MoodleSync } from './moodle/sync.ts';
 import { aiStatusRoutes } from './routes/ai-status.ts';
 import { backupRoutes } from './routes/backups.ts';
 import { calendarRoutes } from './routes/calendar.ts';
+import { cardRoutes } from './routes/cards.ts';
 import { conceptRoutes } from './routes/concepts.ts';
 import { costsRoutes } from './routes/costs.ts';
 import { devicesRoutes } from './routes/devices.ts';
@@ -41,6 +44,7 @@ import { moodleRoutes } from './routes/moodle.ts';
 import { inkRoutes } from './routes/notebooks.ts';
 import { organisationRoutes } from './routes/organisation.ts';
 import { recordingRoutes } from './routes/recordings.ts';
+import { reviewRoutes } from './routes/review.ts';
 import { sessionRoutes } from './routes/sessions.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { summaryRoutes } from './routes/summary.ts';
@@ -67,6 +71,8 @@ export interface BuildAppOptions {
   sessionTicker?: boolean;
   /** Uhr für die Session-Routen und den Takt. Standard: Systemzeit */
   now?: () => Date;
+  /** Ortszeit des Macs für den Lerntag der Wiederholung (IANA-Name, VERTRAEGE §21.5). Standard: die des Prozesses */
+  learningTimeZone?: string;
   /** Moodle-Anbindung (08 §9). Standard: aus `SG_MOODLE_URL` und dem Schlüsselbund */
   moodle?: MoodleServices;
   /** Moodle-Abgleich (T1-23). Standard: einer auf `moodle` und der Datenbank */
@@ -286,6 +292,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       // Inbox und Konzepte (VERTRAEGE §20.6, T2-22b)
       await api.register(inboxRoutes, { db });
       await api.register(conceptRoutes, { db });
+      // Karten und Wiederholung (VERTRAEGE §21.4, B2)
+      await api.register(cardRoutes, { db, ...(options.now ? { now: options.now } : {}) });
+      await api.register(reviewRoutes, {
+        db,
+        scheduler: createScheduler(),
+        tz: options.learningTimeZone ?? localTimeZone(),
+        ...(options.now ? { now: options.now } : {}),
+      });
       await api.register(backupRoutes, { db, config });
       await api.register(trashRoutes, { db, config });
       await api.register(settingsRoutes, { db, config });
