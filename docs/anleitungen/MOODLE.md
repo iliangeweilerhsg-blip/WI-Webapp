@@ -31,7 +31,7 @@ pnpm sg moodle login
 2. Das Passwort eingeben. **Es erscheint nichts, auch keine Sternchen.** Enter.
 3. Die CLI holt den Token, prüft ihn bei Moodle und legt ihn im Schlüsselbund ab. Am Ende steht z. B.
    `Verbunden mit Moodle.UP (https://moodle2.uni-potsdam.de) als Anna Muster.`
-4. Läuft der Core, steht danach ein Hinweis: Hatte er noch keinen Token, liest er den neuen nach spätestens etwa 30 Sekunden, nach einem abgelehnten oder abgelaufenen Token nach spätestens etwa einer Minute. Hatte er einen gültigen Token (oder fehlt ihm `SG_MOODLE_URL`), hilft `pnpm sg stop && pnpm sg start`.
+4. Läuft der Core, prüft er danach sofort neu und die CLI meldet den Zustand, z. B. `Der Core hat Moodle neu geprüft. Zustand: ok.` Der neue Token gilt also ohne Neustart. Fehlt dem Core `SG_MOODLE_URL`, hilft `pnpm sg stop && pnpm sg start`. Einen älteren Core ohne diese Neuprüfung meldet die CLI mit einem Hinweis: Hatte er noch keinen Token, liest er den neuen nach spätestens etwa 30 Sekunden, nach einem abgelehnten oder abgelaufenen Token nach spätestens etwa einer Minute, sonst hilft `pnpm sg stop && pnpm sg start`. Läuft der Core nicht, kommt kein Hinweis.
 
 Das Passwort wird nicht gespeichert. Es steht nicht in der Shell-History und ist für andere Programme nicht sichtbar.
 

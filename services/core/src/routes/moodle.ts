@@ -145,6 +145,21 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     async () => status.getStatus(),
   );
 
+  typed.post(
+    '/moodle/recheck',
+    {
+      // Nur vom Mac selbst (wie GET /system/power): `sg moodle login` ruft sie nach dem Ablegen des Tokens auf
+      config: { sgAccess: 'local', idempotency: false },
+      schema: {
+        tags: ['Moodle'],
+        summary:
+          'Token- und Status-Cache leeren und den Moodle-Zustand neu prüfen (kein Abgleich, keine Aktion)',
+        response: { 200: MoodleStatusSchema },
+      },
+    },
+    async () => status.recheck(),
+  );
+
   // ---------- Lese-Endpunkte (F-MDL-02, 08 §9.2) ----------
 
   typed.get(

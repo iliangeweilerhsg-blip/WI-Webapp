@@ -440,16 +440,29 @@ export async function moodleLogin(cfg: SgConfig, args: string[], deps: MoodleDep
       `Damit der Core Moodle nutzt: SG_MOODLE_URL=${url} in ${join(cfg.dataDir, 'config', '.env')} eintragen.`,
     );
   }
-  const hint = coreHint(coreBefore);
-  if (hint) io.out(hint);
+  // Läuft der Core, übernimmt er den neuen Token jetzt. Ältere Cores kennen die Route nicht: dann der Hinweis
+  const rechecked = coreBefore ? await recheckCore(cfg, deps.fetch) : null;
+  if (rechecked === 'unsupported') {
+    const hint = coreHint(coreBefore);
+    if (hint) io.out(hint);
+  } else if (rechecked?.site_url === null) {
+    // Ohne SG_MOODLE_URL liest der Core keinen Token, auch nicht nach der Neuprüfung
+    io.out('Der Core läuft ohne SG_MOODLE_URL. Nach dem Eintrag: pnpm sg stop && pnpm sg start.');
+  } else if (rechecked) {
+    io.out(`Der Core hat Moodle neu geprüft. Zustand: ${STATE_TEXT[rechecked.state]}.`);
+  } else if (coreBefore) {
+    // Core antwortete eben noch, die Neuprüfung schlug aber fehl: Hinweis wie bei einem älteren Core
+    const hint = coreHint(coreBefore);
+    if (hint) io.out(hint);
+  }
   io.out('Prüfen: pnpm sg moodle status');
   return 0;
 }
 
 /**
- * Hinweis, wenn der Core läuft, abgeleitet aus seinem Zustand vor dem Login. Ein sofortiges Neuprüfen gibt es nicht:
- * Der Core merkt sich einen gefundenen Token bis zum Neustart oder bis Moodle ihn ablehnt (dann liest er beim nächsten
- * Status-Abruf neu, „ungültig“ gilt 60 s), einen fehlenden 30 s. Ohne `SG_MOODLE_URL` liest er gar keinen Token.
+ * Hinweis, wenn der Core läuft, abgeleitet aus seinem Zustand vor dem Login. Nur der Rückfall für Cores ohne
+ * `POST /moodle/recheck` (404): Dort merkt sich der Core einen gefundenen Token bis zum Neustart oder bis Moodle ihn
+ * ablehnt (dann liest er beim nächsten Status-Abruf neu, „ungültig“ gilt 60 s), einen fehlenden 30 s. Ohne `SG_MOODLE_URL` liest er gar keinen Token.
  * Darum nur ein Hinweis, nie ein Fehler: Der Exit-Code bleibt 0, auch wenn der Core nicht antwortet (`null`).
  */
 export function coreHint(before: MoodleStatus | null): string | null {
@@ -476,6 +489,35 @@ export async function fetchCoreStatus(cfg: SgConfig, fetchFn: FetchFn): Promise<
       signal: AbortSignal.timeout(CORE_TIMEOUT_MS),
     });
     if (!response.ok) return null;
+    const parsed = MoodleStatusSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `POST /moodle/recheck`: der Core leert Token- und Status-Cache und prüft neu. `'unsupported'` = älterer Core (404).
+ * Alles andere (Core aus, Fehler, falsche Antwort) ergibt `null`. Wirft nie, und Antworttexte werden nie ausgegeben.
+ */
+export async function recheckCore(
+  cfg: SgConfig,
+  fetchFn: FetchFn,
+): Promise<MoodleStatus | 'unsupported' | null> {
+  try {
+    const response = await fetchFn(`http://127.0.0.1:${cfg.corePort}/api/v1/moodle/recheck`, {
+      method: 'POST',
+      redirect: 'manual',
+      signal: AbortSignal.timeout(CORE_TIMEOUT_MS),
+    });
+    if (response.status === 404) {
+      await response.body?.cancel().catch(() => {});
+      return 'unsupported';
+    }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => {});
+      return null;
+    }
     const parsed = MoodleStatusSchema.safeParse(await response.json());
     return parsed.success ? parsed.data : null;
   } catch {
