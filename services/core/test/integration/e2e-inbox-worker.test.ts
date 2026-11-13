@@ -195,7 +195,10 @@ async function relationRows() {
 
 const SESSION_1 = ['Relation', 'Schlüssel', 'Normalisierung'];
 // Zweite Vorlesung: „Schlüssel“ ist schon aktiv (Beleg ohne Vorschlag), „Normalisierung (Datenbanken)“ gleicht dem
-// aktiven „Normalisierung“ (Ähnlichkeit 0,80 im Band, der Fake urteilt „gleich“ → Zusammenführen), „Tupel“ ist neu.
+// aktiven „Normalisierung“ (der Fake urteilt „gleich“ → Zusammenführen), „Tupel“ ist neu.
+// Die Ähnlichkeit ist exakt, nicht zufällig: Der Fake-Embedder zählt Wörter (gehasht, ±1) im Text „Name, Aliase,
+// Einzeiler“, der Fake-Einzeiler ist „Erfundene Erklärung zu <Name>.“. Wortzähler (2,2,1,1,1) gegen (2,0,1,1,1) ergeben
+// 7/√77 ≈ 0,7977, mit Abstand zu beiden Bandgrenzen SIM_MIN 0,75 und SIM_AUTO 0,88 (concepts_resolve.py).
 const SESSION_2 = ['Schlüssel', 'Normalisierung (Datenbanken)', 'Tupel'];
 
 // --- Tests -------------------------------------------------------------------------------------------------
@@ -234,9 +237,10 @@ e2e('Inbox mit echtem Worker (Fake-KI, Fake-Embedder)', { timeout: 90_000 }, () 
     // Belege hängen als Entwurf an den Vorschlägen (payload.evidence) und in `evidence`; nichts ist bestätigt
     expect(await app.handle.sql`SELECT 1 FROM evidence`).toHaveLength(3);
 
-    // Kosten: nur Fake, 0 €, ohne Schlüssel (extract + resolve + summary)
+    // Kosten: nur Fake, 0 €, ohne Schlüssel (extract + resolve + summary). `cost_entry` hat keinen FK und wird von
+    // `world.reset()` nicht geleert; andere Testdateien derselben Datenbank schreiben auch hinein. Darum nach Session.
     const costs = await app.handle
-      .sql`SELECT provider, model, task, cost_estimate_eur FROM cost_entry ORDER BY task`;
+      .sql`SELECT provider, model, task, cost_estimate_eur FROM cost_entry WHERE session_id = ${s1} ORDER BY task`;
     expect(costs.length).toBeGreaterThanOrEqual(2);
     expect(new Set(costs.map((c) => `${c.provider}/${c.model}`))).toEqual(new Set(['fake/fake-llm-1']));
     expect(costs.every((c) => Number(c.cost_estimate_eur) === 0)).toBe(true);
@@ -404,23 +408,37 @@ e2e('Inbox mit echtem Worker (Fake-KI, Fake-Embedder)', { timeout: 90_000 }, () 
     expect((await conceptRow('Relation')).status).toBe('aktiv');
   });
 
-  // BEKANNTER FEHLER (nicht behoben, Produktionscode liegt außerhalb dieses Tickets): `concepts.extract` scheitert mit
-  // „TypeError: 'int' object is not iterable“ für eine Session ohne Aufnahme und ohne started_at/ended_at, weil
-  // `align_log._timeline_end` `max(0, *candidates)` mit leerer Liste aufruft (= `max(0)`). `it.fails` hält den Fehler
-  // sichtbar: Wird er behoben, schlägt dieser Test fehl und `it.fails` muss zu `it` werden. Siehe PR „Offene Punkte“.
-  it.fails(
-    'Session ohne Aufnahme und ohne Zeiten: concepts.extract wird fertig (bekannter Fehler in align_log)',
-    async () => {
-      await world.deck(
-        'd-s1',
-        SESSION_1.map((title, i) => ({ ref: `f${i}`, index: i + 1, title })),
-      );
-      const id = await world.session('s1', { slideDeckId: refId('d-s1'), state: 'beendet', number: 1 });
-      const res = await post(`/sessions/${id}/reprocess`, { from_step: 'concepts.extract' });
-      expect(res.statusCode, res.body).toBe(202);
-      await drainWorker();
-      const [extract] = await app.handle.sql`SELECT state, error FROM job WHERE type = 'concepts.extract'`;
-      expect(extract).toMatchObject({ state: 'fertig', error: null });
-    },
-  );
+  // Nachträglich angelegtes Material: keine Aufnahme, kein started_at/ended_at. Früher scheiterte `concepts.extract` hier
+  // mit „TypeError: 'int' object is not iterable“ (`align_log._timeline_end`: `max(0, *[])`, gefunden in #330).
+  it('Session ohne Aufnahme und ohne Zeiten: die Konzept-Kette läuft durch, Vorschläge aus den Folien', async () => {
+    await world.deck(
+      'd-s1',
+      SESSION_1.map((title, i) => ({ ref: `f${i}`, index: i + 1, title })),
+    );
+    const id = await world.session('s1', { slideDeckId: refId('d-s1'), state: 'beendet', number: 1 });
+    const res = await post(`/sessions/${id}/reprocess`, { from_step: 'concepts.extract' });
+    expect(res.statusCode, res.body).toBe(202);
+    expect(await drainWorker()).toBe(3);
+    const states = await app.handle
+      .sql`SELECT type, state, error FROM job WHERE session_id = ${id} ORDER BY type`;
+    expect(states.map((j) => [j.type, j.state, j.error])).toEqual([
+      ['concepts.extract', 'fertig', null],
+      ['concepts.resolve', 'fertig', null],
+      ['summary.write', 'fertig', null],
+    ]);
+    const items = await inbox();
+    expect(await labels(items)).toEqual([
+      'concept_new Relation',
+      'concept_new Schlüssel',
+      'concept_new Normalisierung',
+      'relation Schlüssel baut_auf Relation',
+      'relation Normalisierung baut_auf Schlüssel',
+    ]);
+    // Ohne Zeitleiste nur Folien-Belege
+    for (const item of items) {
+      if (item.payload.kind === 'concept_new') {
+        expect(item.payload.evidence.map((e) => e.kind)).toEqual(['slide']);
+      }
+    }
+  });
 });

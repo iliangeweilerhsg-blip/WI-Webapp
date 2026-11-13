@@ -153,6 +153,17 @@ def test_fake_without_transcript(core_db: Conn, go: Any) -> None:
         assert [e.kind for e in concept.evidence] == ["slide"]
 
 
+def test_fake_without_recording_and_times(core_db: Conn, go: Any) -> None:
+    """Nachträglich angelegtes Material: keine Aufnahme, kein `started_at`/`ended_at`. Das Ende der
+    Zeitleiste ist dann 0 (früher TypeError in `align_log._timeline_end`, #330)."""
+    sid = lecture(core_db, with_transcript=False)
+    core_db.execute("UPDATE session SET started_at = NULL, ended_at = NULL WHERE id = %s", (sid,))
+    res = result_of(go(add_job(core_db, sid)))
+    assert [c.proposal.name for c in res.concepts] == ["Rekursion", "Induktion"]
+    for concept in res.concepts:
+        assert [e.kind for e in concept.evidence] == ["slide"]
+
+
 def test_fake_without_slides(core_db: Conn, go: Any) -> None:
     sid = lecture(core_db, with_slides=False)
     res = result_of(go(add_job(core_db, sid)))
