@@ -19,6 +19,7 @@ import {
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Schreibgeschütztes Ziel simulieren (auch als root, der Dateirechte übergeht): `accessSync(W_OK)` auf einem Pfad
@@ -35,6 +36,7 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...actual, accessSync };
 });
 import { resolveConfig } from '../src/config.ts';
+import { acquireCoreLock } from '../src/core-lock.ts';
 import {
   copyTree,
   listStands,
@@ -1030,6 +1032,174 @@ describe('recoverRestore (Journal)', () => {
     renameSync(join(s.dataDir, 'media'), join(s.dataDir, `media.vor-restore-${s.stamp}`));
     expect(await recoverRestore(s.deps)).toBe('zurueckgebaut');
     expect(readFileSync(join(s.dataDir, 'media', 'photos', 'a.jpg'), 'utf8')).toBe('JPEG');
+  });
+
+  it('Rückbau über runRestore hält core.lock und gibt sie danach frei; fremde lebende PID bricht ab', async () => {
+    const s = journalSetup(['sg', 'sg_restore_20261110t080000z'], false);
+    const lockPath = join(s.dataDir, 'run', 'core.lock');
+    let heldDuring: string | null = null;
+    const deps: RestoreDeps = {
+      ...s.deps,
+      holdLock: () => {
+        const lock = acquireCoreLock(s.dataDir);
+        heldDuring = readFileSync(lockPath, 'utf8');
+        return lock;
+      },
+    };
+    expect(await runRestore(deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(0);
+    expect(heldDuring).toBe(`${process.pid}\n`);
+    expect(existsSync(lockPath)).toBe(false);
+
+    // Zweiter Versuch mit offenem Journal, aber fremdem Core: nichts wird zurückgebaut
+    const s2 = journalSetup(['sg', 'sg_restore_20261110t080000z'], false);
+    const foreign = livingChild();
+    mkdirSync(join(s2.dataDir, 'run'), { recursive: true });
+    writeFileSync(join(s2.dataDir, 'run', 'core.lock'), `${foreign}\n`);
+    const deps2: RestoreDeps = { ...s2.deps, holdLock: () => acquireCoreLock(s2.dataDir) };
+    expect(await runRestore(deps2, { stand: '20261104T030012Z', test: false, yes: true })).toBe(3);
+    expect(existsSync(join(s2.dataDir, 'restore.journal.json'))).toBe(true);
+    expect([...s2.pg.databases].sort()).toEqual(['sg', 'sg_restore_20261110t080000z']);
+  });
+});
+
+const spawned: ChildProcess[] = [];
+afterEach(() => {
+  for (const c of spawned.splice(0)) c.kill('SIGKILL');
+});
+
+/** Ein lebender fremder Prozess (PID) */
+function livingChild(): number {
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  spawned.push(child);
+  return child.pid as number;
+}
+
+/** PID eines beendeten Prozesses */
+function deadChildPid(): number {
+  return spawnSync(process.execPath, ['-e', '0']).pid;
+}
+
+describe('vollständiger Restore hält core.lock (#316)', () => {
+  function lockSetup() {
+    const s = restoreSetup();
+    const lockPath = join(s.dataDir, 'run', 'core.lock');
+    const seen: Array<string | null> = [];
+    const deps: RestoreDeps = {
+      ...s.deps,
+      holdLock: () => acquireCoreLock(s.dataDir),
+      confirm: async (q) => {
+        // Die Rückfrage läuft schon unter der Sperre
+        seen.push(existsSync(lockPath) ? readFileSync(lockPath, 'utf8') : null);
+        return s.deps.confirm(q);
+      },
+    };
+    return { ...s, deps, lockPath, seen };
+  }
+
+  it('Erfolg: Sperre mit eigener PID während des Restores, danach frei', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: false })).toBe(0);
+    expect(s.seen).toEqual([`${process.pid}\n`]);
+    expect(existsSync(s.lockPath)).toBe(false);
+    expect(readdirSync(join(s.dataDir, 'run'))).toEqual([]);
+  });
+
+  it('Fehler beim Tausch: Sperre wird trotzdem freigegeben', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    s.pg.renameFailsFor = 'ja';
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(1);
+    expect(existsSync(s.lockPath)).toBe(false);
+  });
+
+  it('Abbruch bei der Rückfrage ("nein"): Sperre frei', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    s.state.answer = false;
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: false })).toBe(1);
+    expect(existsSync(s.lockPath)).toBe(false);
+  });
+
+  it('Ausnahme mitten im Restore: Sperre frei', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    const deps: RestoreDeps = { ...s.deps, confirm: async () => Promise.reject(new Error('Abbruch')) };
+    expect(await runRestore(deps, { stand: '20261104T030012Z', test: false, yes: false })).toBe(1);
+    expect(existsSync(s.lockPath)).toBe(false);
+  });
+
+  it('fremde lebende PID in der Sperrdatei: Abbruch mit der Meldung für laufenden Core, Datei unverändert', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    const foreign = livingChild();
+    mkdirSync(join(s.dataDir, 'run'), { recursive: true });
+    writeFileSync(s.lockPath, `${foreign}\n`);
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(3);
+    expect(s.errs.join('\n')).toContain('Core läuft noch. Zuerst "pnpm sg stop" ausführen');
+    expect(s.pg.restored).toEqual([]);
+    expect(readFileSync(s.lockPath, 'utf8')).toBe(`${foreign}\n`); // eine fremde Datei wird nie gelöscht
+  });
+
+  it('tote PID in der Sperrdatei: wird übernommen, Restore läuft, danach ist die Datei weg', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    mkdirSync(join(s.dataDir, 'run'), { recursive: true });
+    writeFileSync(s.lockPath, `${deadChildPid()}\n`);
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(0);
+    expect(existsSync(s.lockPath)).toBe(false);
+  });
+
+  it('ohne Sperrfehler: Prüfungen vor der Sperre (laufender Core) berühren die Datei nicht', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    s.state.running = ['Core'];
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(3);
+    expect(existsSync(s.lockPath)).toBe(false);
+  });
+
+  it('--test braucht die Sperre nicht (läuft auch bei laufendem Core)', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    const foreign = livingChild();
+    mkdirSync(join(s.dataDir, 'run'), { recursive: true });
+    writeFileSync(s.lockPath, `${foreign}\n`);
+    expect(await runRestore(s.deps, { stand: '20261104T030012Z', test: true, yes: false })).toBe(0);
+    expect(readFileSync(s.lockPath, 'utf8')).toBe(`${foreign}\n`);
+  });
+
+  it('Meldung: blockiert nur die Sperrdatei, verweist sie zusätzlich auf "pnpm sg doctor"', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    s.state.running = ['Core'];
+    const deps: RestoreDeps = { ...s.deps, lockOnly: async () => true };
+    expect(await runRestore(deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(3);
+    const msg = s.errs.join('\n');
+    expect(msg).toContain('Zuerst "pnpm sg stop" ausführen');
+    expect(msg).toContain('pnpm sg doctor');
+  });
+
+  it('Meldung: andere Fälle behalten den bisherigen Wortlaut ohne doctor-Hinweis', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    s.state.running = ['Core'];
+    const deps: RestoreDeps = { ...s.deps, lockOnly: async () => false };
+    expect(await runRestore(deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(3);
+    expect(s.errs.join('\n')).not.toContain('doctor');
+    expect(s.errs.join('\n')).toBe(
+      'Core läuft noch. Zuerst "pnpm sg stop" ausführen, die Wiederherstellung braucht stillstehende Daten.',
+    );
+  });
+
+  it('Meldung: scheitert das Belegen der Datei und nur sie blockiert, kommt der doctor-Hinweis', async () => {
+    const s = lockSetup();
+    await runBackup(s.backupDeps, { trigger: 'manuell' });
+    const foreign = livingChild();
+    mkdirSync(join(s.dataDir, 'run'), { recursive: true });
+    writeFileSync(s.lockPath, `${foreign}\n`);
+    const deps: RestoreDeps = { ...s.deps, lockOnly: async () => true };
+    expect(await runRestore(deps, { stand: '20261104T030012Z', test: false, yes: true })).toBe(3);
+    expect(s.errs.join('\n')).toContain('pnpm sg doctor');
   });
 });
 

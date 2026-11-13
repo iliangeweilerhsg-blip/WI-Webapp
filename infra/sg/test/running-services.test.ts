@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { runningServices, type RunningIo } from '../src/backup-commands.ts';
+import { blockedByLockOnly, runningServices, type RunningIo } from '../src/backup-commands.ts';
 import { resolveConfig, type SgConfig } from '../src/config.ts';
 import { coreLockHeld, type LockRead } from '../src/doctor.ts';
 
@@ -60,6 +60,25 @@ describe('runningServices mit Sperrdatei', () => {
     expect(await runningServices(cfg, { lockHeld: () => true, coreReachable: async () => true })).toEqual([
       'Core',
     ]);
+  });
+});
+
+describe('blockedByLockOnly', () => {
+  it('Sperrdatei mit lebender PID, keine PID-Datei, keine Health-Antwort: nur die Sperrdatei blockiert', async () => {
+    writeLock(`${process.pid}\n`);
+    expect(await blockedByLockOnly(cfg, { lockHeld: () => coreLockHeld(cfg), ...noHealth })).toBe(true);
+  });
+
+  it('antwortet der Core: nicht nur die Sperrdatei', async () => {
+    expect(await blockedByLockOnly(cfg, { lockHeld: () => true, coreReachable: async () => true })).toBe(
+      false,
+    );
+  });
+
+  it('Sperrdatei nicht belegt (fehlt oder PID tot): nein', async () => {
+    expect(await blockedByLockOnly(cfg, { lockHeld: () => coreLockHeld(cfg), ...noHealth })).toBe(false);
+    writeLock(`${deadPid()}\n`);
+    expect(await blockedByLockOnly(cfg, { lockHeld: () => coreLockHeld(cfg), ...noHealth })).toBe(false);
   });
 });
 

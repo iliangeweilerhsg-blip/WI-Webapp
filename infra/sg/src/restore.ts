@@ -28,6 +28,7 @@ import {
   type BackupIo,
 } from './backup.ts';
 import type { SgConfig } from './config.ts';
+import { CoreLockHeldError, releaseOnSignal, type CoreLockHandle } from './core-lock.ts';
 import { NoFollowReader, UnsafeTargetError, type Identity } from './nofollow.ts';
 import { safeIdent, type PgAccess } from './pg.ts';
 import { StandError, withVerifiedDump } from './staging.ts';
@@ -39,6 +40,13 @@ export interface RestoreDeps extends BackupIo {
   pg: PgAccess;
   /** Läuft der Core oder der Worker? (Pid-Dateien, Sperrdatei des Core und Health-Abfrage) */
   servicesRunning: () => Promise<string[]>;
+  /**
+   * Belegt `run/core.lock` für die Dauer des Austauschs (wirft `CoreLockHeldError`, wenn ein anderer Prozess sie hält).
+   * Fehlt es, wird keine Sperre gehalten.
+   */
+  holdLock?: () => CoreLockHandle;
+  /** Blockiert nur die Sperrdatei (keine PID-Datei, keine Health-Antwort)? Dann verweist die Meldung auf `sg doctor`. */
+  lockOnly?: () => Promise<boolean>;
   /** Frage stellen, `true` = ja */
   confirm: (question: string) => Promise<boolean>;
   now?: () => Date;
@@ -240,10 +248,53 @@ export async function revokeRestoredDevices(pg: PgAccess, database: string): Pro
   return Number(rows[0]?.[0] ?? 0);
 }
 
+/** Meldung, wenn Core oder Worker den Restore blockieren. Blockiert nur die Sperrdatei, hilft `sg stop` nicht. */
+async function blockedMessage(deps: RestoreDeps, running: string[]): Promise<string> {
+  let text = `${running.join(' und ')} läuft noch. Zuerst "pnpm sg stop" ausführen, die Wiederherstellung braucht stillstehende Daten.`;
+  if (await deps.lockOnly?.().catch(() => false)) {
+    text +=
+      ' Findet "pnpm sg stop" nichts, trägt die Sperrdatei run/core.lock womöglich eine wiederverwendete PID: ' +
+      '"pnpm sg doctor" erklärt, was dann zu tun ist.';
+  }
+  return text;
+}
+
+/**
+ * Hält `run/core.lock`, solange `fn` läuft, und gibt die Datei immer frei (Erfolg, Fehler, Strg+C). Ist sie von einem
+ * anderen Prozess belegt, bricht es mit derselben Meldung ab wie bei laufendem Core (Rückgabe 3).
+ */
+async function withCoreLock(deps: RestoreDeps, fn: () => Promise<number>): Promise<number> {
+  if (!deps.holdLock) return fn();
+  let lock: CoreLockHandle;
+  try {
+    lock = deps.holdLock();
+  } catch (error) {
+    if (!(error instanceof CoreLockHeldError)) throw error;
+    deps.err(await blockedMessage(deps, ['Core']));
+    return 3;
+  }
+  const unhook = releaseOnSignal(lock);
+  try {
+    return await fn();
+  } finally {
+    unhook();
+    lock.release();
+  }
+}
+
 export async function runRestore(deps: RestoreDeps, options: RestoreOptions): Promise<number> {
   const { cfg, pg, log, err } = deps;
   try {
-    if ((await recoverRestore(deps)) !== null) return 0;
+    // Ein offenes Journal wird unter der Sperre zurückgebaut: Ein Core, der währenddessen startet, träfe Teilzustände
+    if (readJournal(cfg.dataDir) !== null) {
+      let recovered: 'abgeschlossen' | 'zurueckgebaut' | null = null;
+      const code = await withCoreLock(deps, async () => {
+        recovered = await recoverRestore(deps);
+        return 0;
+      });
+      if (code !== 0) return code;
+      if (recovered !== null) return 0;
+    }
     const setting = options.target ?? (await readBackupSettings(pg).catch(() => ({ target: null }))).target;
     if (!setting) {
       err(
@@ -466,14 +517,24 @@ async function fullRestore(
   manifest: Manifest,
   targetId?: Identity,
 ): Promise<number> {
-  const { cfg, pg, log, err } = deps;
+  const { err } = deps;
   const running = await deps.servicesRunning();
   if (running.length > 0) {
-    err(
-      `${running.join(' und ')} läuft noch. Zuerst "pnpm sg stop" ausführen, die Wiederherstellung braucht stillstehende Daten.`,
-    );
+    err(await blockedMessage(deps, running));
     return 3;
   }
+  // Ab hier gehört die Sperrdatei dem Restore: Ein Core, der jetzt startet, beendet sich
+  return withCoreLock(deps, () => fullRestoreLocked(deps, options, dir, manifest, targetId));
+}
+
+async function fullRestoreLocked(
+  deps: RestoreDeps,
+  options: RestoreOptions,
+  dir: string,
+  manifest: Manifest,
+  targetId?: Identity,
+): Promise<number> {
+  const { cfg, pg, log, err } = deps;
 
   // Prüfungen vor jeder Änderung
   if (!standFilesMatch(dir, manifest, targetId)) {
