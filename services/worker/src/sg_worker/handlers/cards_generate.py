@@ -412,6 +412,8 @@ class Dedupe:
         self.used = False
 
     def _embed(self, texts: list[str]) -> list[list[float] | None] | None:
+        if self.degraded:  # einmal ohne Embedder: der Rest des Laufs auch (nicht je Konzept warten)
+            return None
         embedder = search_index.get_embedder()
         try:
             if not embedder.wait_ready(search_index.WAIT_READY_S):
@@ -612,16 +614,19 @@ def write_batch(
 # ---------- Handler ----------
 
 
-def _inbox_state(conn: Conn, concept_id: uuid.UUID, sid: uuid.UUID) -> tuple[bool, str | None]:
-    """(entschieden?, `input_hash` des offenen Eintrags) zu `(Konzept, Session)`."""
+def _inbox_state(
+    conn: Conn, concept_id: uuid.UUID, sid: uuid.UUID
+) -> tuple[bool, str | None, str | None]:
+    """(entschieden?, `input_hash` und `job_id` des offenen Eintrags) zu `(Konzept, Session)`."""
     rows = conn.execute(
-        "SELECT status, payload->>'input_hash' FROM inbox_item WHERE kind = 'card_batch' "
-        "AND card_concept_id = %s AND session_id = %s ORDER BY created_at DESC, id",
+        "SELECT status, payload->>'input_hash', job_id::text FROM inbox_item "
+        "WHERE kind = 'card_batch' AND card_concept_id = %s AND session_id = %s "
+        "ORDER BY created_at DESC, id",
         (concept_id, sid),
     ).fetchall()
     if any(r[0] != "offen" for r in rows):
-        return True, None
-    return False, rows[0][1] if rows else None
+        return True, None, None
+    return (False, rows[0][1], rows[0][2]) if rows else (False, None, None)
 
 
 @handler(TASK, payload_type=CardsGeneratePayload)
@@ -659,7 +664,7 @@ def cards_generate(payload: CardsGeneratePayload, ctx: JobContext) -> dict[str, 
         if info is None:
             counts.skipped_empty += 1
             continue
-        decided, open_hash = _inbox_state(conn, info.id, sid)
+        decided, open_hash, open_job = _inbox_state(conn, info.id, sid)
         if decided:
             counts.skipped_decided += 1
             continue
@@ -675,7 +680,9 @@ def cards_generate(payload: CardsGeneratePayload, ctx: JobContext) -> dict[str, 
         existing = existing_cards(conn, concept_ids)
         text = build_input(material, info, evidence, marker_hints(material, evidence), existing)
         digest = input_hash(model, text)
-        if open_hash == digest and not payload.force:
+        # Mit `force` neu, außer der Eintrag stammt schon von diesem Job (Retry nach §3: die
+        # fertigen Konzepte werden nicht noch einmal bezahlt, §21.6 „Warum je Konzept schreiben“)
+        if open_hash == digest and (not payload.force or open_job == ctx.job_id):
             counts.unchanged_batches += 1
             continue
 

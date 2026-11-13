@@ -487,6 +487,32 @@ def test_decided_unchanged_and_force(core_db: Conn, go: Any) -> None:
     assert sorted(x["status"] for x in batches(core_db)) == ["abgelehnt", "angenommen"]
 
 
+def test_retry_with_force_does_not_pay_written_concepts_again(
+    core_db: Conn, go: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sid, a, _, _ = two_concepts(core_db)
+    result_of(go(job(core_db, sid)))
+    good = out(basic("Was ist das?"))
+
+    def flaky(n: int) -> None:
+        if n == 1:  # zweites Konzept im ersten Versuch: vorübergehend nicht erreichbar
+            raise llm.LlmUnavailable("529")
+
+    backend = Scripted([good], hook=flaky)
+    use(monkeypatch, backend)
+    jid = job(core_db, sid, force=True)
+    row = go(jid)
+    assert (row["state"], row["attempts"]) == ("wartet", 1)
+    (first,) = [x for x in batches(core_db) if x["job_id"] == jid]
+    assert first["card_concept_id"] == a
+    core_db.execute("UPDATE job SET run_after = now() WHERE id = %s", (jid,))
+    res = result_of(go(jid))
+    # Konzept a hat dieser Job schon geschrieben: trotz `force` kein neuer Aufruf
+    assert (res.unchanged_batches, res.proposed_batches) == (1, 1)
+    assert len(backend.requests) == 3
+    assert {x["job_id"] for x in batches(core_db)} == {jid}
+
+
 def test_changed_input_replaces_open_batch(core_db: Conn, go: Any) -> None:
     sid, ids, _ = lecture(core_db)
     cid = concept(core_db, sid, "Rekursion", slides=[ids[0]])

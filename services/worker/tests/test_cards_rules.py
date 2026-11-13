@@ -295,6 +295,11 @@ def test_duplicates_without_embedder(shared: None) -> None:
     kept, dropped = dedupe.filter(["Was ist X?"], [cand("was ist x?"), cand("Was ist Y?")])
     assert [c.plain for c in kept] == ["Was ist Y?"] and dropped == 1
     assert dedupe.degraded and dedupe.model() is None
+    # Einmal ohne Embedder: für den Rest des Laufs kein neuer Versuch (kein erneutes Warten)
+    embedders.set_shared_embedder(FakeEmbedder())
+    kept, dropped = dedupe.filter([], [cand("Was ist Z?"), cand("was ist z?")])
+    assert len(kept) == 1 and dropped == 1
+    assert dedupe.degraded and not dedupe.used and dedupe.model() is None
 
 
 def test_single_candidate_needs_no_embedder(shared: None) -> None:
