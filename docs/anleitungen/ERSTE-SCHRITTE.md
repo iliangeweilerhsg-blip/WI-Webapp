@@ -58,5 +58,6 @@ Der Dialog endet bei den Modulen. Alles Weitere stellst du selbst ein.
 | Backup | **Einstellungen → Daten und Papierkorb**: Backup-Ziel eintragen, **Speichern**, dann **Jetzt sichern** | [BACKUP-WIEDERHERSTELLEN.md](BACKUP-WIEDERHERSTELLEN.md) |
 | iPad | App aufspielen, dann **Einstellungen → Geräte** | [IPAD.md](IPAD.md), bei Problemen [IPAD-VERBINDUNG.md](IPAD-VERBINDUNG.md) |
 | Suche | ⌘K | [SUCHE.md](SUCHE.md) |
+| Lernen | **Inbox** (Kartenvorschläge), **Lernen** (täglich wiederholen) | [LERNEN.md](LERNEN.md), Stichprobe in [KARTEN-PRUEFEN.md](KARTEN-PRUEFEN.md) |
 
 Für den ersten Vorlesungstag lies [VORLESUNGSTAG.md](VORLESUNGSTAG.md). Für spätere Updates [UPDATE.md](UPDATE.md).
