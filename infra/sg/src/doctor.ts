@@ -303,6 +303,24 @@ export function realLockDoctorIo(cfg: SgConfig): LockDoctorIo {
   };
 }
 
+/** Pfad der Sperrdatei des Core */
+export function coreLockPath(cfg: Pick<SgConfig, 'dataDir'>): string {
+  return join(cfg.dataDir, 'run', 'core.lock');
+}
+
+/**
+ * Hält ein lebender Core die Sperrdatei? Nur eine gültige PID, die noch lebt, zählt. Fehlende, leere, kaputte oder
+ * veraltete Datei (PID tot) und Dateien, die sich nicht lesen lassen, gelten als „nicht belegt“: Den Core zu
+ * erkennen, ist hier nur Zusatz zu PID-Datei und Health-Abruf. Nie schreibend.
+ */
+export function coreLockHeld(
+  cfg: Pick<SgConfig, 'dataDir'>,
+  io: Pick<LockDoctorIo, 'readLock' | 'alive'> = { readLock: readLockFileSafe, alive: processAlive },
+): boolean {
+  const lock = io.readLock(coreLockPath(cfg));
+  return lock.kind === 'pid' && io.alive(lock.pid);
+}
+
 /**
  * Prüft `<Datenordner>/run/core.lock` (#174, #292). Nie `fail` und nie schreibend: Eine veraltete Datei übernimmt der
  * nächste Start selbst. Zuerst die Datei, dann der Health-Abruf: Startet der Core währenddessen, ist die Datei schon
@@ -310,7 +328,7 @@ export function realLockDoctorIo(cfg: SgConfig): LockDoctorIo {
  */
 export async function checkCoreLock(cfg: SgConfig, io: LockDoctorIo): Promise<CheckResult> {
   const name = 'Core-Sperrdatei (Hinweis)';
-  const path = join(cfg.dataDir, 'run', 'core.lock');
+  const path = coreLockPath(cfg);
   const lock = io.readLock(path);
   const reachable = await io.coreReachable();
   const info = (detail: string): CheckResult => ({ name, status: 'info', detail });
