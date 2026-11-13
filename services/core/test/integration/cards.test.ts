@@ -1,6 +1,7 @@
 // B2: Karten und Wiederholung (VERTRAEGE §21.4): `POST/GET/PATCH/DELETE /cards`, `GET /concepts/{id}/cards`,
 // `POST /cards/{id}/review`, `GET /review/queue`, Papierkorb (§21.8) und Einstellungen `learning` (§21.9).
 // Echte Datenbank. Die Uhr des Core ist gestellt (`clock`), die Ortszeit ist Europe/Zurich.
+import { sql as dsql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   ApiErrorSchema,
@@ -844,6 +845,36 @@ describe('Papierkorb (§21.8)', () => {
     expect(errorOf(gone).code).toBe('restore_parent_deleted');
     await app.handle.sql`UPDATE concept SET deleted_at = NULL WHERE id = ${refId('k1')}`;
     expect((await call('POST', `/trash/${created.id}/restore`)).statusCode).toBe(200);
+  });
+
+  it('Wiederherstellen sperrt das Konzept FOR SHARE: ein gleichzeitiges Zurückstufen (reopen von A1) kommt nicht dazwischen', async () => {
+    await seed();
+    const created = await create();
+    await call('DELETE', `/cards/${created.id}`);
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    // Verbindung 1 stuft das Konzept zurück (hält `FOR NO KEY UPDATE`), committet aber erst später
+    const downgrade = app.handle.db.transaction(async (tx) => {
+      await tx.execute(
+        dsql`UPDATE concept SET status = 'vorschlag', proposal_session_id = ${refId('s1')} WHERE id = ${refId('k1')}`,
+      );
+      await released;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Verbindung 2 stellt die Karte wieder her und muss auf die Sperre warten, sieht danach das zurückgestufte Konzept
+    let finished = false;
+    const restoring = call('POST', `/trash/${created.id}/restore`).then((res) => {
+      finished = true;
+      return res;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(finished).toBe(false);
+    release();
+    await downgrade;
+    const res = await restoring;
+    expect(res.statusCode, res.body).toBe(409);
+    expect(errorOf(res).code).toBe('restore_parent_deleted');
+    expect(await app.handle.sql`SELECT 1 FROM card WHERE deleted_at IS NULL`).toHaveLength(0);
   });
 
   it('endgültig löschen entfernt Karte, Zustand und Bewertungen', async () => {

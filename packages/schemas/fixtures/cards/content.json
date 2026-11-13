@@ -1,5 +1,5 @@
 {
-  "README": "VERTRAEGE §21.2: Säubern = NFC, Zeilenenden zu \\n, Tab zu Leerzeichen, Steuerzeichen (Cc außer \\n) und Formatzeichen (Cf) entfernen, trimmen. Lücken: {{cN::Text}} mit N = 1..3, lückenlos ab 1, jede Nummer einmal, Text ohne {, } und ::, am Rand getrimmt. reason = erster Verstoß in der Reihenfolge empty, cloze_syntax, cloze_none, cloze_syntax (Lückentext), cloze_numbers, cloze_answers, sonst null. Bei null: normalized = gespeicherte Fassung, front_words und answer_words = Wörter (Folgen ohne Leerraum; cloze: Vorderseite mit eingesetzten Lücken, Antwort = längste Lücke), plain = Anzeige der Vorderseite. Core (B2) und Worker (B1) prüfen dagegen.",
+  "README": "VERTRAEGE §21.2: Säubern = Zeilenenden zu \\n, Tab zu Leerzeichen, Steuerzeichen (Cc außer \\n) und Formatzeichen (Cf) entfernen, dann NFC (so ist das Ergebnis immer NFC, auch wenn ein ZWJ vor einem kombinierenden Zeichen stand), trimmen. Lücken: {{cN::Text}} mit N = 1..3, lückenlos ab 1, jede Nummer einmal, Text ohne {, } und ::, am Rand getrimmt. reason = erster Verstoß in der Reihenfolge empty, cloze_syntax, cloze_none, cloze_syntax (Lückentext), cloze_numbers, cloze_answers, too_long (Zeichengrenzen des Schemas nach dem Säubern: NFC kann Text verlängern), sonst null. Bei null: normalized = gespeicherte Fassung, front_words und answer_words = Wörter (Folgen ohne Leerraum; cloze: Vorderseite mit eingesetzten Lücken, Antwort = längste Lücke), plain = Anzeige der Vorderseite. Core (B2) und Worker (B1) prüfen dagegen.",
   "cases": [
     {
       "name": "basic",
@@ -350,6 +350,62 @@
         }
       },
       "reason": "cloze_answers"
+    },
+    {
+      "name": "basic ZWJ vor kombinierendem Zeichen: erst Cf entfernen, dann NFC",
+      "content": {
+        "kind": "basic",
+        "front": {
+          "text_md": "Wo liegt das Cafe\u200d\u0301?"
+        },
+        "back": {
+          "text_md": "Am Rand.",
+          "explanation_md": null
+        }
+      },
+      "reason": null,
+      "normalized": {
+        "kind": "basic",
+        "front": {
+          "text_md": "Wo liegt das Café?"
+        },
+        "back": {
+          "text_md": "Am Rand.",
+          "explanation_md": null
+        }
+      },
+      "front_words": 4,
+      "answer_words": 2,
+      "plain": "Wo liegt das Café?"
+    },
+    {
+      "name": "cloze Klammer in der Lücke",
+      "content": {
+        "kind": "cloze",
+        "front": {
+          "text_md": "Ein {{c1::a}b}} ist eine Zeile."
+        },
+        "back": {
+          "answers": {
+            "c1": ["a"]
+          }
+        }
+      },
+      "reason": "cloze_syntax"
+    },
+    {
+      "name": "too_long nach NFC (300 × U+0958 werden 600 Zeichen)",
+      "content": {
+        "kind": "basic",
+        "front": {
+          "text_md": "क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़क़"
+        },
+        "back": {
+          "text_md": "x",
+          "explanation_md": null
+        }
+      },
+      "reason": "too_long"
     }
   ]
 }

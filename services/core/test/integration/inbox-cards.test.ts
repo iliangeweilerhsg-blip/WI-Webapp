@@ -110,6 +110,19 @@ describe('Sichtbarkeit (§21.7)', () => {
     expect(await world.cardRows()).toEqual([]);
   });
 
+  it('einzeln ablehnen scheitert ebenso mit card_concept_pending, nichts ändert sich', async () => {
+    await proposalBatch();
+    const before = await world.snapshot();
+    const res = await reject('b1');
+    expect(res.statusCode).toBe(409);
+    expect(errorOf(res)).toMatchObject({
+      code: 'card_concept_pending',
+      details: { concept_id: refId('p1') },
+    });
+    expect(await world.snapshot()).toEqual(before);
+    expect((await world.itemRow('b1')).status).toBe('offen');
+  });
+
   it('mit ids landet ein nicht sichtbarer Kartenvorschlag in skipped', async () => {
     await proposalBatch();
     for (const action of ['accept', 'reject'] as const) {
@@ -515,13 +528,30 @@ describe('reopen von A1 und A2 (§21.7)', () => {
     expect(await openIds('&kind=card_batch')).toEqual([]);
   });
 
-  it('A1: gelöschte Karten (Papierkorb) sperren nicht', async () => {
+  it('A1: auch eine Karte im Papierkorb sperrt (Lead-Entscheidung 13.11.2026)', async () => {
     await proposalBatch();
     ok(await accept('i1'));
     const result = ok(await accept('b1'));
     for (const c of result.cards!) {
       expect((await app.request({ method: 'DELETE', url: `${API}/cards/${c.id}` })).statusCode).toBe(204);
     }
+    const before = await world.snapshot();
+    const res = await reopen('i1');
+    expect(res.statusCode).toBe(409);
+    expect(errorOf(res)).toMatchObject({ code: 'inbox_reopen_conflict', details: { reason: 'cards' } });
+    expect(await world.snapshot()).toEqual(before);
+    expect((await world.conceptRow('p1')).status).toBe('aktiv');
+  });
+
+  it('A1: nach reopen des Kartenvorschlags sind die Karten hart weg, auch die im Papierkorb, und A1 geht', async () => {
+    await proposalBatch();
+    ok(await accept('i1'));
+    const result = ok(await accept('b1'));
+    expect(
+      (await app.request({ method: 'DELETE', url: `${API}/cards/${result.cards![0]!.id}` })).statusCode,
+    ).toBe(204);
+    ok(await reopen('b1'));
+    expect(await world.cardRows()).toEqual([]);
     expect(ok(await reopen('i1')).item.status).toBe('offen');
   });
 

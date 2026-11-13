@@ -78,6 +78,16 @@ export const conceptPending = (conceptId: string) =>
     concept_id: conceptId,
   });
 
+/** Das wirksame Konzept ohne Sperre (für Fehlerdetails): bei einer Hülle ihr `merged_into` */
+export async function peekEffectiveConceptId(tx: Tx, item: Pick<ItemRow, 'cardConceptId'>): Promise<string> {
+  const shellId = item.cardConceptId!;
+  const [peek] = await tx
+    .select({ status: concept.status, mergedInto: concept.mergedInto })
+    .from(concept)
+    .where(eq(concept.id, shellId));
+  return peek?.status === 'zusammengefuehrt' && peek.mergedInto ? peek.mergedInto : shellId;
+}
+
 /**
  * Das wirksame Konzept des Eintrags, gesperrt (`FOR NO KEY UPDATE`, Hülle und Ziel zusammen nach ID sortiert).
  * Setzt die Graph-Sperre voraus: Erst damit ist `merged_into` stabil. `active = false`, wenn es fehlt, gelöscht ist
@@ -190,14 +200,22 @@ export async function acceptCardBatch(
  * `reopen` eines Kartenvorschlags (§21.7). `abgelehnt`: nichts zu tun. `karten_angenommen`: Die Karten aus
  * `decision.cards` werden **hart** gelöscht (auch aus dem Papierkorb), wenn keine von ihnen eine Bewertung hat, sonst
  * `409 inbox_reopen_conflict`. Eine schon endgültig gelöschte Karte ist kein Fehler (der DELETE trifft 0 Zeilen).
- * Der Zustand der Karten wird vorher `FOR UPDATE` gesperrt (wie `POST /cards/{id}/review`): Eine gleichzeitige
- * Bewertung wartet und findet die Karte danach nicht mehr.
+ * Vorher werden die Karten (`FOR NO KEY UPDATE`) und dann ihr Zustand (`FOR UPDATE`, wie `POST /cards/{id}/review`)
+ * gesperrt: Eine gleichzeitige Bewertung wartet und findet die Karte danach nicht mehr.
  */
 export async function undoCardBatch(tx: Tx, item: ItemRow, decision: InboxDecision): Promise<void> {
   if (decision.action !== 'karten_angenommen') return;
   const ids = [...new Set((decision.cards ?? []).flatMap((c) => (c.card_id ? [c.card_id] : [])))].sort();
   if (ids.length === 0) return;
   await lockEffectiveConcept(tx, item);
+  // Reihenfolge `card` → `card_state` wie beim Löschen in den Papierkorb (§21.7). `FOR NO KEY UPDATE` statt `FOR UPDATE`:
+  // Die Bewertung hält `card_state` und nimmt für `review_log` nur `FOR KEY SHARE` an `card`, das vertragen sich
+  await tx
+    .select({ id: card.id })
+    .from(card)
+    .where(inArray(card.id, ids))
+    .orderBy(asc(card.id))
+    .for('no key update');
   await tx
     .select({ id: cardState.id })
     .from(cardState)
