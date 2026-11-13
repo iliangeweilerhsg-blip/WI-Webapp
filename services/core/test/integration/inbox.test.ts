@@ -110,6 +110,35 @@ describe('GET /inbox', () => {
     expect(page.items[1]).toMatchObject({ kind: 'concept_new', status: 'offen', concept_id: refId('p1') });
   });
 
+  it('Beziehungen tragen from_name und to_name (aktueller Name, null bei gelöschtem Endpunkt), die Nutzlast in der DB nicht', async () => {
+    await seed();
+    await world.concept('gone', { name: 'Gelöscht', status: 'aktiv', deletedAt: new Date() });
+    await world.relation('rg', { from: 't2', to: 'gone' });
+    await world.item('irg', { kind: 'relation', relation: 'rg', priority: 1000, createdAt: B });
+    const byId = new Map((await list()).items.map((item) => [item.id, item.payload]));
+    expect(byId.get(refId('ir1'))).toMatchObject({
+      from_name: 'Zweite Normalform',
+      to_name: 'Erste Normalform',
+    });
+    expect(byId.get(refId('irg'))).toMatchObject({ from_name: 'Relation', to_name: null });
+    // Nur Beziehungen bekommen Namen
+    expect(byId.get(refId('i1'))).not.toHaveProperty('from_name');
+    // Der Name gilt zum Lesezeitpunkt
+    await world.renameConcept('p1', 'Zweite Normalform (2NF)');
+    const again = new Map((await list()).items.map((item) => [item.id, item.payload]));
+    expect(again.get(refId('ir1'))).toMatchObject({ from_name: 'Zweite Normalform (2NF)' });
+    // gespeichert wird die Nutzlast ohne Namen, auch nach einer Entscheidung
+    for (const ref of ['ir1', 'irg']) {
+      expect((await world.itemRow(ref)).payload).not.toHaveProperty('from_name');
+      expect((await world.itemRow(ref)).payload).not.toHaveProperty('to_name');
+    }
+    ok(await accept('ir3'));
+    const decided = ok(await reopen('ir3'));
+    expect(decided.item.payload).toMatchObject({ from_name: 'Erste Normalform', to_name: 'Relation' });
+    expect((await world.itemRow('ir3')).payload).not.toHaveProperty('from_name');
+    expect((await world.itemRow('ir3')).payload).not.toHaveProperty('to_name');
+  });
+
   it('blocked: Endpunkt noch offen, abgelehnt oder frei', async () => {
     await seed();
     const byId = new Map((await list()).items.map((item) => [item.id, item.blocked]));
@@ -295,7 +324,9 @@ describe('A1: neues Konzept annehmen', () => {
     await world.item('ipend', { kind: 'relation', relation: 'rpend', priority: 1002 });
     await world.item('iback', { kind: 'relation', relation: 'rback', priority: 1003 });
 
-    ok(await accept('i1'));
+    const accepted = ok(await accept('i1'));
+    // A1 mit Kaskade: die mitbestätigten Beziehungen, nach priority
+    expect(accepted.also_changed).toEqual([refId('ihi'), refId('iback')]);
     expect((await world.itemRow('i1')).decision?.cascade_item_ids).toEqual([refId('ihi'), refId('iback')]);
     expect((await world.relationRow('rhi')).confirmed).toBe(true);
     expect((await world.itemRow('ihi')).decision).toMatchObject({
@@ -320,7 +351,8 @@ describe('A1: neues Konzept annehmen', () => {
     await world.item('ir1', { kind: 'relation', relation: 'r1', priority: 1000 });
     await world.item('ir2', { kind: 'relation', relation: 'r2', priority: 1001 });
 
-    ok(await accept('i1'));
+    // Der Folge-Eintrag mit Kreis bleibt offen und steht darum nicht in also_changed
+    expect(ok(await accept('i1')).also_changed).toEqual([refId('ir1')]);
     expect((await world.itemRow('i1')).decision?.cascade_item_ids).toEqual([refId('ir1')]);
     expect((await world.itemRow('ir2')).status).toBe('offen');
     expect((await world.relationRow('r2')).confirmed).toBe(false);
@@ -419,6 +451,8 @@ describe('A2: zusammenführen', () => {
   it('hängt Belege, Aliase, Module und Beziehungen an das Ziel', async () => {
     await seed();
     const result = ok(await accept('i1'));
+    // Nur der abgelehnte Selbstbezug (it); die umgehängten Beziehungen ia und ib bleiben offen
+    expect(result.also_changed).toEqual([refId('it')]);
     expect(result.concept).toMatchObject({ id: refId('t'), status: 'aktiv', exam_relevant: true });
     expect(result.concept!.aliases).toHaveLength(20);
     expect(result.concept!.aliases.at(-1)).toBe('Funktionale Abhängigkeit');
@@ -564,6 +598,7 @@ describe('A3: Beziehung bestätigen', () => {
     await world.relation('r1', { from: 'b', to: 'a' });
     await world.item('i1', { kind: 'relation', relation: 'r1' });
     const result = ok(await accept('i1'));
+    expect(result.also_changed).toEqual([]);
     expect(result.concept).toBeNull();
     expect(result.item).toMatchObject({ status: 'angenommen', relation_id: refId('r1'), blocked: null });
     expect(await world.relationRow('r1')).toMatchObject({ confirmed: true, proposalSessionId: null });
@@ -702,6 +737,8 @@ describe('Ablehnen und Rückgängig', () => {
     const before = await world.snapshot();
 
     const result = ok(await reject('i1'));
+    // Die offene Beziehung ir1 wurde mit abgelehnt; ir2 war schon abgelehnt, ir3 bleibt offen
+    expect(result.also_changed).toEqual([refId('ir1')]);
     expect(result.item.status).toBe('abgelehnt');
     expect(result.concept).toMatchObject({ id: refId('p'), status: 'vorschlag' });
     expect((await world.itemRow('i1')).decision).toMatchObject({
@@ -720,7 +757,7 @@ describe('Ablehnen und Rückgängig', () => {
       details: { triggered_by: refId('i1') },
     });
 
-    ok(await reopen('i1'));
+    expect(ok(await reopen('i1')).also_changed).toEqual([refId('ir1')]);
     // Der schon vorher abgelehnte Eintrag ir2 bleibt abgelehnt
     expect(await world.snapshot()).toEqual(before);
 

@@ -2495,6 +2495,12 @@ concept: (Concept | null)
  * @maxItems 8
  */
 cards?: Card[]
+/**
+ * IDs der anderen Einträge, deren Status diese Entscheidung mitgeändert hat (ohne item.id, in Bearbeitungsreihenfolge, ohne Duplikate). Leer, wenn keiner
+ * 
+ * @maxItems 500
+ */
+also_changed: Uuid[]
 }
 /**
  * Inbox-Eintrag (03 §8, F-NAC-06)
@@ -2603,6 +2609,14 @@ export interface InboxPayloadRelation {
 kind: "relation"
 from_concept_id: Uuid
 to_concept_id: Uuid
+/**
+ * Nur in Antworten des Core: aktueller Name des Konzepts from_concept_id beim Lesen, null wenn gelöscht oder nicht auffindbar. Wird nie gespeichert
+ */
+from_name?: (string | null)
+/**
+ * Nur in Antworten des Core: aktueller Name des Konzepts to_concept_id beim Lesen, null wenn gelöscht oder nicht auffindbar. Wird nie gespeichert
+ */
+to_name?: (string | null)
 relation_kind: ConceptRelationKind
 why: string
 /**

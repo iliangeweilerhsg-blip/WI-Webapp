@@ -8514,12 +8514,16 @@ enum InboxDecisionAction: String, Codable {
 /// Antwort auf accept, reject und reopen
 // MARK: - InboxDecisionResult
 struct InboxDecisionResult: Codable {
+    /// IDs der anderen Einträge, deren Status diese Entscheidung mitgeändert hat (ohne item.id,
+    /// in Bearbeitungsreihenfolge, ohne Duplikate). Leer, wenn keiner
+    let alsoChanged: [String]
     /// nur card_batch nach accept: die angelegten Karten
     let cards: [Card]?
     let concept: Concept?
     let item: InboxItem
 
     enum CodingKeys: String, CodingKey {
+        case alsoChanged = "also_changed"
         case cards = "cards"
         case concept = "concept"
         case item = "item"
@@ -8545,11 +8549,13 @@ extension InboxDecisionResult {
     }
 
     func with(
+        alsoChanged: [String]? = nil,
         cards: [Card]?? = nil,
         concept: Concept?? = nil,
         item: InboxItem? = nil
     ) -> InboxDecisionResult {
         return InboxDecisionResult(
+            alsoChanged: alsoChanged ?? self.alsoChanged,
             cards: cards ?? self.cards,
             concept: concept ?? self.concept,
             item: item ?? self.item
@@ -8698,8 +8704,14 @@ struct InboxPayload: Codable {
     /// Selbsteinschätzung der KI, 0..1
     let confidence: Double?
     let fromConceptID: String?
+    /// Nur in Antworten des Core: aktueller Name des Konzepts from_concept_id beim Lesen, null
+    /// wenn gelöscht oder nicht auffindbar. Wird nie gespeichert
+    let fromName: String?
     let relationKind: ConceptRelationKind?
     let toConceptID: String?
+    /// Nur in Antworten des Core: aktueller Name des Konzepts to_concept_id beim Lesen, null
+    /// wenn gelöscht oder nicht auffindbar. Wird nie gespeichert
+    let toName: String?
     let why: String?
     let cards: [CardProposal]?
     let conceptID: String?
@@ -8720,8 +8732,10 @@ struct InboxPayload: Codable {
         case target = "target"
         case confidence = "confidence"
         case fromConceptID = "from_concept_id"
+        case fromName = "from_name"
         case relationKind = "relation_kind"
         case toConceptID = "to_concept_id"
+        case toName = "to_name"
         case why = "why"
         case cards = "cards"
         case conceptID = "concept_id"
@@ -8761,8 +8775,10 @@ extension InboxPayload {
         target: Target?? = nil,
         confidence: Double?? = nil,
         fromConceptID: String?? = nil,
+        fromName: String?? = nil,
         relationKind: ConceptRelationKind?? = nil,
         toConceptID: String?? = nil,
+        toName: String?? = nil,
         why: String?? = nil,
         cards: [CardProposal]?? = nil,
         conceptID: String?? = nil,
@@ -8782,8 +8798,10 @@ extension InboxPayload {
             target: target ?? self.target,
             confidence: confidence ?? self.confidence,
             fromConceptID: fromConceptID ?? self.fromConceptID,
+            fromName: fromName ?? self.fromName,
             relationKind: relationKind ?? self.relationKind,
             toConceptID: toConceptID ?? self.toConceptID,
+            toName: toName ?? self.toName,
             why: why ?? self.why,
             cards: cards ?? self.cards,
             conceptID: conceptID ?? self.conceptID,
@@ -9322,21 +9340,29 @@ struct InboxPayloadRelation: Codable {
     /// Selbsteinschätzung der KI, 0..1
     let confidence: Double
     let fromConceptID: String
+    /// Nur in Antworten des Core: aktueller Name des Konzepts from_concept_id beim Lesen, null
+    /// wenn gelöscht oder nicht auffindbar. Wird nie gespeichert
+    let fromName: String?
     let kind: InboxPayloadRelationKind
     let model: String
     let promptVersion: String
     let relationKind: ConceptRelationKind
     let toConceptID: String
+    /// Nur in Antworten des Core: aktueller Name des Konzepts to_concept_id beim Lesen, null
+    /// wenn gelöscht oder nicht auffindbar. Wird nie gespeichert
+    let toName: String?
     let why: String
 
     enum CodingKeys: String, CodingKey {
         case confidence = "confidence"
         case fromConceptID = "from_concept_id"
+        case fromName = "from_name"
         case kind = "kind"
         case model = "model"
         case promptVersion = "prompt_version"
         case relationKind = "relation_kind"
         case toConceptID = "to_concept_id"
+        case toName = "to_name"
         case why = "why"
     }
 }
@@ -9362,21 +9388,25 @@ extension InboxPayloadRelation {
     func with(
         confidence: Double? = nil,
         fromConceptID: String? = nil,
+        fromName: String?? = nil,
         kind: InboxPayloadRelationKind? = nil,
         model: String? = nil,
         promptVersion: String? = nil,
         relationKind: ConceptRelationKind? = nil,
         toConceptID: String? = nil,
+        toName: String?? = nil,
         why: String? = nil
     ) -> InboxPayloadRelation {
         return InboxPayloadRelation(
             confidence: confidence ?? self.confidence,
             fromConceptID: fromConceptID ?? self.fromConceptID,
+            fromName: fromName ?? self.fromName,
             kind: kind ?? self.kind,
             model: model ?? self.model,
             promptVersion: promptVersion ?? self.promptVersion,
             relationKind: relationKind ?? self.relationKind,
             toConceptID: toConceptID ?? self.toConceptID,
+            toName: toName ?? self.toName,
             why: why ?? self.why
         )
     }
@@ -26947,6 +26977,7 @@ extension InboxDecision {
 extension InboxDecisionResult {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(alsoChanged, forKey: .alsoChanged)
         try container.encodeIfPresent(cards, forKey: .cards)
         try container.encode(concept, forKey: .concept)
         try container.encode(item, forKey: .item)
@@ -27054,11 +27085,13 @@ extension InboxPayloadRelation {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(confidence, forKey: .confidence)
         try container.encode(fromConceptID, forKey: .fromConceptID)
+        try container.encodeIfPresent(fromName, forKey: .fromName)
         try container.encode(kind, forKey: .kind)
         try container.encode(model, forKey: .model)
         try container.encode(promptVersion, forKey: .promptVersion)
         try container.encode(relationKind, forKey: .relationKind)
         try container.encode(toConceptID, forKey: .toConceptID)
+        try container.encodeIfPresent(toName, forKey: .toName)
         try container.encode(why, forKey: .why)
     }
 }

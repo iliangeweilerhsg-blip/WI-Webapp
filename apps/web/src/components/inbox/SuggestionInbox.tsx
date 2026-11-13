@@ -190,11 +190,11 @@ export function SuggestionInbox() {
     if (busy.has(item.id)) return;
     setItemBusy(item.id, true);
     try {
-      if (request) await acceptItem(item.id, request);
-      else await rejectItem(item.id);
+      const result = request ? await acceptItem(item.id, request) : await rejectItem(item.id);
       focusNextAfter(item.id);
       setEditing((current) => (current === item.id ? null : current));
-      applyDecided(client, [item.id]);
+      // Mitentschiedene Folge-Einträge (`also_changed`) verschwinden sofort mit, wie bei der Massenaktion
+      applyDecided(client, [item.id, ...result.also_changed]);
       showUndo(request ? acceptedMessage(item, request, names) : 'Verworfen', item.id);
     } catch (error) {
       const code = errorCode(error);

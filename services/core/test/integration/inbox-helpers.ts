@@ -214,6 +214,14 @@ export class World {
     return refId(ref);
   }
 
+  /** Name eines Konzepts nachträglich ändern (die Nutzlast der Einträge bleibt, wie sie war) */
+  async renameConcept(ref: string, name: string): Promise<void> {
+    await this.db
+      .update(concept)
+      .set({ name })
+      .where(eq(concept.id, refId(ref)));
+  }
+
   async relation(ref: string, seed: RelationSeed): Promise<string> {
     const confirmed = seed.confirmed ?? false;
     const sessionRef = seed.session === undefined ? (confirmed ? null : 's1') : seed.session;
