@@ -192,7 +192,8 @@ function buildQueue(core: FakeCore, budgetMinutes: number, extraMinutes: number)
     reviewed_today: core.cards.reviews.size,
     items,
     more_due: candidates.some((c) => !picked.includes(c)),
-    has_cards: live.length > 0 || core.cards.trashed.length > 0,
+    // §21.5: nur nicht gelöschte Karten zählen
+    has_cards: live.length > 0,
   };
 }
 

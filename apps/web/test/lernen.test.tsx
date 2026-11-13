@@ -12,7 +12,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 import { LearnView } from '../src/components/learn/LearnView.tsx';
-import { ratingOutbox } from '../src/lib/cards.ts';
+import { nextExtraMinutes, ratingOutbox } from '../src/lib/cards.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
 import { ToastProvider } from '../src/lib/toast.tsx';
@@ -281,7 +281,74 @@ describe('Ablauf', () => {
   });
 });
 
+describe('Weitere 10 min', () => {
+  it('ein Abruf genügt: so viele Zehnerschritte, dass wieder mindestens 10 min frei sind, höchstens 120', () => {
+    // Budget nicht ausgeschöpft (Block früh beendet): ein Schritt
+    expect(nextExtraMinutes({ budget_minutes: 20, used_seconds: 15 * 60 }, 0)).toBe(10);
+    // Genau ausgeschöpft: ein Schritt
+    expect(nextExtraMinutes({ budget_minutes: 20, used_seconds: 20 * 60 }, 0)).toBe(10);
+    // 35 von 20 min verbraucht: 30 (15 min frei), nicht 20 (nur 5 min)
+    expect(nextExtraMinutes({ budget_minutes: 20, used_seconds: 35 * 60 }, 0)).toBe(30);
+    // Schon 10 zusätzlich: der nächste Schritt
+    expect(nextExtraMinutes({ budget_minutes: 20, used_seconds: 30 * 60 }, 10)).toBe(20);
+    // Deckel 120
+    expect(nextExtraMinutes({ budget_minutes: 20, used_seconds: 300 * 60 }, 0)).toBe(120);
+    expect(nextExtraMinutes({ budget_minutes: 20, used_seconds: 300 * 60 }, 120)).toBeNull();
+  });
+
+  it('holt die Warteschlange einmal mit passendem `extra_minutes`, auch wenn heute schon viel Zeit verbraucht ist', async () => {
+    boot([basicCard(), basicCard()]);
+    core.cards.budgetMinutes = 5;
+    // 24 min schon heute verbracht (12 Bewertungen zu je 2 min): Rest 0, nur `more_due`
+    core.cards.reviews.set('0190f6a2-0000-7000-8000-00000000aaaa', {
+      id: '0190f6a2-0000-7000-8000-00000000aaaa',
+      card_id: 'x',
+      reviewed_at: '2026-11-12T08:00:00Z',
+      rating: 3,
+      duration_ms: 120_000,
+    });
+    for (let i = 0; i < 11; i += 1) {
+      const key = `0190f6a2-0000-7000-8000-0000000b${String(i).padStart(4, '0')}`;
+      core.cards.reviews.set(key, {
+        id: key,
+        card_id: 'x',
+        reviewed_at: '2026-11-12T08:00:00Z',
+        rating: 3,
+        duration_ms: 120_000,
+      });
+    }
+    const user = userEvent.setup();
+    wrap(<LearnView />);
+    await user.click(await screen.findByRole('button', { name: 'Weitere 10 min' }));
+    expect(await screen.findByTestId('learn-progress')).toHaveTextContent('Karte 1 von 2');
+    const queueCalls = core.requests.filter((r) => r.path.startsWith('/review/queue?extra_minutes='));
+    // Kein Herantasten über 10 und 20
+    expect(new Set(queueCalls.map((r) => r.path))).toEqual(new Set(['/review/queue?extra_minutes=30']));
+  });
+});
+
 describe('Bewerten ist idempotent', () => {
+  it('Esc direkt nach dem Bewerten: „Weiter“ erst, wenn die Bewertung beim Core ist; die Karte kommt nicht noch einmal', async () => {
+    boot([basicCard(), clozeCard()]);
+    const user = await start();
+    await screen.findByTestId('learn-progress');
+    let release = () => {};
+    core.postGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await user.keyboard(' 3');
+    await user.keyboard('{Escape}');
+    expect(await screen.findByTestId('learn-done')).toHaveTextContent('Block beendet · 1 Karte');
+    // Die Bewertung ist noch unterwegs: kein „Weiter“ mit der alten Warteschlange
+    expect(screen.queryByRole('button', { name: 'Weiter' })).toBeNull();
+    core.postGate = null;
+    release();
+    await user.click(await screen.findByRole('button', { name: 'Weiter' }));
+    expect(await screen.findByTestId('learn-progress')).toHaveTextContent('Karte 1 von 1');
+    expect(screen.getByText('[…]')).toBeInTheDocument();
+    expect(core.cards.reviews.size).toBe(1);
+  });
+
   it('Netzfehler: dieselbe `id` geht noch einmal hinaus und zählt nicht doppelt', async () => {
     boot([basicCard()]);
     ratingOutbox.retryDelaysMs = [5, 5];

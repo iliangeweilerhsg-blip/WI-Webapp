@@ -37,6 +37,21 @@ export const conceptCardsKey = (conceptId: string) => ['cards', 'concept', conce
 export const EXTRA_STEP_MINUTES = 10;
 export const EXTRA_MAX_MINUTES = 120;
 
+/**
+ * `extra_minutes` für „Weitere 10 min“: so viele Zehnerschritte, dass nach der heute schon verbrauchten Zeit wieder
+ * mindestens 10 min frei sind, höchstens 120. Ein Abruf genügt, kein Herantasten in Schritten. `null`: Die Grenze ist
+ * erreicht.
+ */
+export function nextExtraMinutes(
+  queue: Pick<ReviewQueue, 'budget_minutes' | 'used_seconds'>,
+  extraMinutes: number,
+): number | null {
+  const overMinutes = queue.used_seconds / 60 - queue.budget_minutes;
+  const needed = Math.ceil((overMinutes + EXTRA_STEP_MINUTES) / EXTRA_STEP_MINUTES) * EXTRA_STEP_MINUTES;
+  const next = Math.min(EXTRA_MAX_MINUTES, Math.max(extraMinutes + EXTRA_STEP_MINUTES, needed));
+  return next > extraMinutes ? next : null;
+}
+
 export function fetchReviewQueue(extraMinutes: number, signal?: AbortSignal): Promise<ReviewQueue> {
   const query = extraMinutes > 0 ? `?extra_minutes=${extraMinutes}` : '';
   return apiGet(`/review/queue${query}`, ReviewQueueSchema, { signal });
@@ -347,6 +362,11 @@ export class RatingOutbox {
     this.update();
   }
 
+  /** Karten mit einer Bewertung, die noch nicht beim Core ist: Sie kommen nicht in einen neuen Block (sonst zweimal bewertet) */
+  unsentCardIds(): Set<string> {
+    return new Set([...this.entries.values()].map((entry) => entry.job.cardId));
+  }
+
   /** Verwirft alles (nur für Tests) */
   reset(): void {
     for (const entry of this.entries.values()) if (entry.timer) clearTimeout(entry.timer);
@@ -384,6 +404,8 @@ export class RatingOutbox {
     try {
       result = await apiSend('POST', `/cards/${encodeURIComponent(job.cardId)}/review`, ReviewResultSchema, {
         body: { id: job.id, rating: job.rating, duration_ms: job.durationMs },
+        // Eine Bewertung, die beim Neuladen oder Schließen der Seite unterwegs ist, kommt trotzdem an
+        keepalive: true,
       });
     } catch (error) {
       if (!isRetryable(error)) {

@@ -8,15 +8,16 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import type { ReviewRating } from '@sg/shared';
 import {
   CARDS_KEY,
-  EXTRA_MAX_MINUTES,
   EXTRA_STEP_MINUTES,
   INITIAL_BLOCK,
   REVIEW_KEY,
+  type BlockState,
   blockReducer,
   blockSummary,
   cardFrontText,
   fetchReviewQueue,
   newRatingJob,
+  nextExtraMinutes,
   queueMinutes,
   ratingOutbox,
   reviewQueueKey,
@@ -84,7 +85,12 @@ function isTyping(target: EventTarget | null): boolean {
 
 export function LearnView() {
   const client = useQueryClient();
-  const [extra, setExtra] = useState(0);
+  // „Weitere 10 min“ gilt nur für den Lerntag, an dem sie gewählt wurden
+  const [extraFor, setExtraFor] = useState<{ minutes: number; day: string | null }>({
+    minutes: 0,
+    day: null,
+  });
+  const extra = extraFor.minutes;
   const queue = useReviewQueue(extra);
   const [block, dispatch] = useReducer(blockReducer, INITIAL_BLOCK);
   const outbox = useRatingOutbox();
@@ -95,9 +101,20 @@ export function LearnView() {
   const [note, setNote] = useState<string | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const startButton = useRef<HTMLButtonElement>(null);
+  /** Stand, in dem zuletzt bewertet wurde: Ein zweiter Tastendruck vor dem Neuzeichnen bewertet nicht noch einmal */
+  const lastRated = useRef<BlockState | null>(null);
 
   const current = block.phase === 'running' ? block.deck[block.index] : undefined;
   const data = queue.data;
+  const settled = outbox.pending === 0;
+
+  // Neuer Lerntag: die zusätzlichen Minuten von gestern zählen nicht mehr
+  const day = data?.day ?? null;
+  useEffect(() => {
+    if (extraFor.minutes > 0 && day !== null && extraFor.day !== null && day !== extraFor.day) {
+      setExtraFor({ minutes: 0, day });
+    }
+  }, [day, extraFor]);
 
   // Der Block ist durch, sobald nichts mehr dran ist und alle Bewertungen beim Core sind (eine Antwort mit
   // `requeue` hängt die Karte vorher noch hinten an)
@@ -106,10 +123,19 @@ export function LearnView() {
       dispatch({ type: 'end', early: false });
   }, [block.phase, current, outbox.pending]);
 
-  // Am Ende des Blocks neu laden (§21.9)
+  // Am Ende des Blocks neu laden (§21.9), aber erst, wenn alle Bewertungen beim Core sind: Sonst stünden eben
+  // bewertete Karten noch in der Warteschlange (etwa nach Esc direkt nach dem Bewerten)
   useEffect(() => {
-    if (block.phase === 'finished') void client.invalidateQueries({ queryKey: REVIEW_KEY });
-  }, [block.phase, client]);
+    if (block.phase === 'finished' && settled) void client.invalidateQueries({ queryKey: REVIEW_KEY });
+  }, [block.phase, settled, client]);
+  // Ebenso in der Übersicht, wenn Bewertungen von vorhin erst jetzt angekommen sind
+  const wasSettled = useRef(settled);
+  useEffect(() => {
+    if (block.phase === 'overview' && settled && !wasSettled.current) {
+      void client.invalidateQueries({ queryKey: REVIEW_KEY });
+    }
+    wasSettled.current = settled;
+  }, [block.phase, settled, client]);
 
   // Fokus auf die Karte, damit die Tasten sofort gelten; auf „Starten“, solange noch nichts läuft
   const currentId = current?.card.id ?? null;
@@ -121,16 +147,23 @@ export function LearnView() {
     if (canStart) startButton.current?.focus();
   }, [canStart]);
 
-  function start(items = data?.items ?? []) {
-    if (items.length === 0) return;
+  /** `false`: nichts zu tun */
+  function start(queued = data?.items ?? []): boolean {
+    // Karten, deren Bewertung noch nicht beim Core ist (etwa vom letzten Besuch der Seite), kommen nicht noch einmal
+    // dran: Sonst würden sie zweimal bewertet
+    const unsent = ratingOutbox.unsentCardIds();
+    const items = unsent.size > 0 ? queued.filter((item) => !unsent.has(item.card.id)) : queued;
+    if (items.length === 0) return false;
     setNote(null);
     setEditing(false);
     dispatch({ type: 'start', items, now: Date.now() });
+    return true;
   }
 
   function rate(rating: ReviewRating) {
     const item = current;
-    if (!item || !block.revealed) return;
+    if (!item || !block.revealed || lastRated.current === block) return;
+    lastRated.current = block;
     const now = Date.now();
     const duration = Math.max(0, now - block.shownAt);
     dispatch({ type: 'rate', durationMs: Math.min(duration, SPENT_CAP_MS), now });
@@ -159,28 +192,29 @@ export function LearnView() {
     dispatch({ type: 'end', early: true });
   }
 
-  /** „Weitere 10 min“: `extra_minutes` in Schritten von 10, bis wieder Karten dran sind */
-  async function more() {
-    if (loadingMore) return;
+  /**
+   * Neuer Block aus einer frisch geholten Warteschlange („Weiter“ nach Esc, „Weitere 10 min“), erst wenn alle
+   * Bewertungen beim Core sind. `null`: Die 120 zusätzlichen Minuten sind ausgeschöpft.
+   */
+  async function continueWith(extraMinutes: number | null) {
+    if (loadingMore || !settled) return;
     setLoadingMore(true);
     setNote(null);
     try {
-      let next = extra;
-      while (next + EXTRA_STEP_MINUTES <= EXTRA_MAX_MINUTES) {
-        next += EXTRA_STEP_MINUTES;
-        const fetched = await client.fetchQuery({
-          queryKey: reviewQueueKey(next),
-          queryFn: ({ signal }) => fetchReviewQueue(next, signal),
-          staleTime: 0,
-        });
-        if (fetched.items.length > 0) {
-          setExtra(next);
-          dispatch({ type: 'start', items: fetched.items, now: Date.now() });
-          return;
-        }
-        if (!fetched.more_due) break;
+      if (extraMinutes === null) {
+        setNote('Gerade ist nichts weiter dran.');
+        return;
       }
-      setNote('Gerade ist nichts weiter dran.');
+      const fetched = await client.fetchQuery({
+        queryKey: reviewQueueKey(extraMinutes),
+        queryFn: ({ signal }) => fetchReviewQueue(extraMinutes, signal),
+        staleTime: 0,
+      });
+      if (!start(fetched.items)) {
+        setNote('Gerade ist nichts weiter dran.');
+        return;
+      }
+      if (extraMinutes !== extra) setExtraFor({ minutes: extraMinutes, day: fetched.day });
     } catch {
       setNote('Das hat nicht geklappt. Versuch es gleich noch einmal.');
     } finally {
@@ -366,17 +400,22 @@ export function LearnView() {
             {blockSummary(block)}
           </p>
           <div className="flex flex-wrap items-center gap-3">
-            {block.endedEarly && data && data.items.length > 0 && !queue.isFetching ? (
-              <button type="button" className={button} onClick={() => start()}>
-                Weiter
-              </button>
-            ) : null}
-            {data?.more_due && !queue.isFetching ? (
+            {block.endedEarly && data && data.items.length > 0 && !queue.isFetching && settled ? (
               <button
                 type="button"
                 className={button}
                 aria-disabled={loadingMore}
-                onClick={() => void more()}
+                onClick={() => void continueWith(extra)}
+              >
+                Weiter
+              </button>
+            ) : null}
+            {data?.more_due && !queue.isFetching && settled ? (
+              <button
+                type="button"
+                className={button}
+                aria-disabled={loadingMore}
+                onClick={() => void continueWith(nextExtraMinutes(data, extra))}
               >
                 Weitere {EXTRA_STEP_MINUTES} min
               </button>
@@ -425,7 +464,12 @@ export function LearnView() {
       <EmptyState
         action={
           data.more_due ? (
-            <button type="button" className={button} aria-disabled={loadingMore} onClick={() => void more()}>
+            <button
+              type="button"
+              className={button}
+              aria-disabled={loadingMore}
+              onClick={() => void continueWith(nextExtraMinutes(data, extra))}
+            >
               Weitere {EXTRA_STEP_MINUTES} min
             </button>
           ) : undefined

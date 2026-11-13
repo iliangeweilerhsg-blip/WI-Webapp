@@ -433,7 +433,8 @@ describe('Inbox: Kartenvorschläge', () => {
     await user.click(within(row).getByRole('button', { name: 'Übernehmen' }));
     expect(within(row).getByText('Was ist die 3NF? eee')).toBeInTheDocument();
     expect(within(row).getByText('Geändert, wird so angenommen.')).toBeInTheDocument();
-    row.focus();
+    // Nach dem Übernehmen steht der Fokus wieder auf der Zeile
+    expect(row).toHaveFocus();
     await user.keyboard('{ArrowRight}');
     await waitFor(() => expect(inboxPosts()).toHaveLength(1));
     const body = inboxPosts()[0]?.body as {

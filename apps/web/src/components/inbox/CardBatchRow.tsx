@@ -4,7 +4,7 @@
 // Karte Vorderseite, Rückseite, Quellen-Chips und Häkchen (Standard an). → übernimmt die angehakten, ← verwirft alle,
 // E bearbeitet die markierte Karte inline (der Entwurf geht beim Annehmen mit). Keine Dialoge.
 import Link from 'next/link';
-import { useState, type KeyboardEvent } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import type { CardContent, CardProposal, InboxAcceptRequest, InboxCardChoice } from '@sg/shared';
 import { cardFrontText, cardsCount, useEffectiveConcept } from '../../lib/cards.ts';
 import { conceptHref, sessionRefLabel } from '../../lib/concepts.ts';
@@ -62,6 +62,13 @@ export function CardBatchRow({
   const [edits, setEdits] = useState<Readonly<Record<string, CardContent>>>({});
   const [marked, setMarked] = useState<string>(payload.cards[0]?.key ?? '');
   const [editingKey, setEditingKey] = useState<string | null>(null);
+  const rowRef = useRef<HTMLLIElement>(null);
+
+  /** Nach dem Bearbeiten steht der Fokus wieder auf der Zeile, damit → ← E gleich weiter gelten */
+  function stopEditing() {
+    setEditingKey(null);
+    rowRef.current?.focus();
+  }
 
   const heading = `${cardsCount(payload.cards.length)} zu ${concept.name}`;
   const acceptedCount = payload.cards.filter((c) => checked.has(c.key)).length;
@@ -104,6 +111,7 @@ export function CardBatchRow({
 
   return (
     <li
+      ref={rowRef}
       tabIndex={0}
       data-inbox-item={item.id}
       data-kind={item.kind}
@@ -172,10 +180,10 @@ export function CardBatchRow({
                         <CardEditFields
                           content={content}
                           saveLabel="Übernehmen"
-                          onCancel={() => setEditingKey(null)}
+                          onCancel={stopEditing}
                           onSave={(next) => {
                             setEdits((current) => ({ ...current, [card.key]: next }));
-                            setEditingKey(null);
+                            stopEditing();
                           }}
                         />
                       ) : (
