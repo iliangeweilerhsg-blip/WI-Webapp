@@ -275,6 +275,8 @@ function exactAddress(address: string | undefined): string {
  *   sein. Langsame Uploads gibt es nur mit Token.
  * - Vom Wächter abgelehnte Netzanfragen bekommen `Connection: close` (`registerSecurity`). So hält niemand einen
  *   Platz mit Keep-Alive-401 oder einem tröpfelnden Body nach der 401.
+ * - Dasselbe gilt für Antworten an Netzverbindungen ohne gültiges Token, die der Wächter durchgelassen hat
+ *   (Kopplungsrouten): siehe `closesTokenlessResponse` (H-1 aus #191).
  */
 export class NetworkConnectionGate {
   private readonly entries = new WeakMap<GateSocket, GateEntry>();
@@ -587,6 +589,27 @@ export function createSecurityGuard(options: SecurityOptions): SecurityGuard {
 }
 
 /**
+ * Statuscodes, bei denen der Core einer Netzverbindung ohne gültiges Token nach der Antwort `Connection: close`
+ * setzt (H-1 aus #191): 400 (ungültige Anfrage), 429 (Rate-Limit), dazu 403 (Kopplungsroute mit `Origin`, also
+ * ein Browser) und 413 (Body zu groß, der Rest des Bodys ist ungelesen). Bewusst NICHT dabei: 404, 409, 423 und
+ * andere Antworten der Kopplung (Fenster geschlossen, gesperrt), die ein echtes iPad zum Wiederholen oder
+ * Anzeigen braucht. Selbst bei den gelisteten Codes kostet das dem iPad nur einen neuen Verbindungsaufbau.
+ */
+const TOKENLESS_CLOSE_STATUS = new Set([400, 403, 413, 429]);
+
+/**
+ * Soll die Verbindung nach dieser Antwort schließen? Nur für Anfragen aus dem Netz (auch Tunnel-Eingang), die
+ * kein gültiges Token trugen (`sgDevice` undefiniert). Lokale (`null`) und authentifizierte Anfragen: nie.
+ */
+export function closesTokenlessResponse(args: {
+  local: boolean;
+  device: SgDevice | undefined;
+  statusCode: number;
+}): boolean {
+  return !args.local && args.device === undefined && TOKENLESS_CLOSE_STATUS.has(args.statusCode);
+}
+
+/**
  * `rejections`: Zähler für abgelehnte Netzanfragen (#87). Ohne ihn loggt jede Anfrage einzeln, wie Fastify es tut.
  * Mit ihm muss Fastify den `RequestLogController` bekommen, der abgelehnte Netzanfragen still lässt.
  */
@@ -640,6 +663,20 @@ export function registerSecurity(
       // Angenommene Netzanfragen loggen wie bisher; der Request-Log-Controller hat die Zeile bis hierhin zurückgehalten
       if (!isLocalRequest(request)) request.log.info({ req: request }, 'incoming request');
     }
+  });
+  // Antworten an Netzverbindungen ohne Token (Kopplung): 400/429 usw. schließen die Verbindung (H-1 aus #191).
+  // `onSend` läuft vor dem Schreiben der Header, auch für Fehlerantworten aus Handlern und Validierung
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (
+      closesTokenlessResponse({
+        local: isLocalRequest(request),
+        device: request.sgDevice,
+        statusCode: reply.statusCode,
+      })
+    ) {
+      reply.header('connection', 'close');
+    }
+    return payload;
   });
   if (rejections) {
     app.addHook('onResponse', async (request, reply) => {

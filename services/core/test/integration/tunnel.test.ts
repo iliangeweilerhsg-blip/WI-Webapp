@@ -515,6 +515,30 @@ describe('Tunnel-Eingang: Wächter und Routentabelle', () => {
     expect(errorCode(withToken)).toBe('bad_request');
   });
 
+  it('H-1: am Tunnel schließt die Antwort ohne Token (401), mit Token (400) bleibt der Socket offen', async () => {
+    const rawCall = (path: string, auth?: string) => {
+      const socket = net.connect(t.sock);
+      const state = { data: '', closed: false };
+      socket.on('data', (chunk: Buffer) => (state.data += chunk.toString('utf8')));
+      socket.on('close', () => (state.closed = true));
+      socket.on('error', () => {});
+      socket.write(
+        `GET ${path} HTTP/1.1\r\nHost: ${FORWARDER_HOST}\r\n` +
+          (auth ? `Authorization: Bearer ${auth}\r\n` : '') +
+          '\r\n',
+      );
+      return { socket, state };
+    };
+    const noToken = rawCall('/%E0%A4%A');
+    await waitFor(() => noToken.state.closed, 3000, 'Schließen ohne Token');
+    expect(noToken.state.data.startsWith('HTTP/1.1 401')).toBe(true);
+    const withToken = rawCall('/%E0%A4%A', token);
+    await waitFor(() => withToken.state.data.startsWith('HTTP/1.1 400'), 3000, '400 mit Token');
+    await sleep(150);
+    expect(withToken.state.closed).toBe(false);
+    withToken.socket.destroy();
+  });
+
   it('Keep-Alive-Folgeanfragen auf demselben Socket bleiben Netz (Markierung hängt am Socket)', async () => {
     const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
     const call = (path: string, method = 'GET', auth?: string) =>
