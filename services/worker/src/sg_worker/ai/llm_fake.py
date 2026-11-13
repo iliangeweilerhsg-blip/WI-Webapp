@@ -21,6 +21,9 @@ from typing import Any
 from .interfaces import CallCost, StructuredRequest, Tier
 from .llm import Backend, LlmFatalError, Reply
 from .outputs import (
+    CardGapOut,
+    CardOut,
+    CardsGenerateOutput,
     ConceptsExtractOutput,
     ConceptsResolveOutput,
     ExtractConceptOut,
@@ -276,3 +279,33 @@ def summary_write(
         SummaryOutlineOut(title=s.title or "", slides=[s.index]) for s in titled[:MAX_FAKE_OUTLINE]
     ]
     return SummaryWriteOutput(sentences=sentences, outline=outline)
+
+
+# ---------- cards.generate (§21.6 „Fake“) ----------
+
+
+def cards_generate(name: str, one_liner: str | None) -> CardsGenerateOutput:
+    """Je Konzept zwei Karten, beide mit dem ersten Beleg der Eingabe (`E1`): `basic` mit
+    Vorderseite `Was ist <Name>?`, Antwort = One-Liner (ohne `Erfundene Antwort zu <Name>.`),
+    Erklärung `null`, und `cloze` mit `{{c1::<Name>}} ist ein Thema dieser Vorlesung.`. Die
+    Prüfungen des Handlers laufen unverändert darüber (§21.6)."""
+    return CardsGenerateOutput(
+        cards=[
+            CardOut(
+                kind="basic",
+                front=f"Was ist {name}?",
+                answer=one_liner or f"Erfundene Antwort zu {name}.",
+                explanation=None,
+                gaps=[],
+                evidence=["E1"],
+            ),
+            CardOut(
+                kind="cloze",
+                front="{{c1::" + name + "}} ist ein Thema dieser Vorlesung.",
+                answer=None,
+                explanation=None,
+                gaps=[CardGapOut(gap=1, solutions=[name])],
+                evidence=["E1"],
+            ),
+        ]
+    )

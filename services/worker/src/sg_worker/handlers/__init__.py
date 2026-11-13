@@ -3,6 +3,7 @@
 from . import (  # noqa: F401
     align_log,
     audio_finalize,
+    cards_generate,
     concepts_extract,
     concepts_resolve,
     internal,
