@@ -1227,6 +1227,18 @@
         "to_concept_id": {
           "$ref": "#/$defs/Uuid"
         },
+        "from_name": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Nur in Antworten des Core: aktueller Name des Konzepts from_concept_id beim Lesen, null wenn gelöscht oder nicht auffindbar. Wird nie gespeichert"
+        },
+        "to_name": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "Nur in Antworten des Core: aktueller Name des Konzepts to_concept_id beim Lesen, null wenn gelöscht oder nicht auffindbar. Wird nie gespeichert"
+        },
         "relation_kind": {
           "$ref": "#/$defs/ConceptRelationKind"
         },
@@ -1613,7 +1625,7 @@
     "InboxDecisionResult": {
       "type": "object",
       "description": "Antwort auf accept, reject und reopen",
-      "required": ["item", "concept"],
+      "required": ["item", "concept", "also_changed"],
       "additionalProperties": false,
       "properties": {
         "item": {
@@ -1636,6 +1648,14 @@
           },
           "maxItems": 8,
           "description": "nur card_batch nach accept: die angelegten Karten"
+        },
+        "also_changed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "maxItems": 500,
+          "description": "IDs der anderen Einträge, deren Status diese Entscheidung mitgeändert hat (ohne item.id, in Bearbeitungsreihenfolge, ohne Duplikate). Leer, wenn keiner"
         }
       }
     },

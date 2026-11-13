@@ -1825,8 +1825,12 @@ function handleConcepts(
   if (decision && method === 'POST') {
     const item = core.inboxItems.find((x) => x.id === decision[1]);
     if (!item) return fail({ status: 404, code: 'inbox_item_not_found' });
+    // Vor `reopen` merken: die Entscheidung wird dabei gelöscht
+    const cascadeBefore = [...(core.inboxDecisions[item.id]?.cascade_item_ids ?? [])];
     const failure = decideInboxItem(core, item, decision[2] as 'accept' | 'reject' | 'reopen', body);
     if (failure) return fail(failure);
+    const alsoChanged =
+      decision[2] === 'reopen' ? cascadeBefore : [...(core.inboxDecisions[item.id]?.cascade_item_ids ?? [])];
     const concept = core.concepts.find((c) => c.concept.id === item.concept_id)?.concept ?? null;
     if (item.kind === 'card_batch') {
       // §21.7: `concept = null`, `cards` = die angelegten Karten (nur nach `accept`)
@@ -1834,10 +1838,11 @@ function handleConcepts(
       return json({
         item,
         concept: null,
+        also_changed: alsoChanged,
         ...(decision[2] === 'accept' ? { cards: core.cards.cards.filter((c) => made.includes(c.id)) } : {}),
       });
     }
-    return json({ item, concept });
+    return json({ item, concept, also_changed: alsoChanged });
   }
 
   if (path === '/concepts' && method === 'GET') {

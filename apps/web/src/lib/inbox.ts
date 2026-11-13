@@ -323,11 +323,20 @@ export async function undoBulk(decided: readonly string[]): Promise<InboxBulkRes
 // Anzeige
 // ---------------------------------------------------------------------------------------------
 
-/** Namen der Konzepte, die in offenen Einträgen vorkommen (Vorschläge und Ziele) */
+/**
+ * Namen der Konzepte, die in offenen Einträgen vorkommen (Vorschläge, Ziele und die Endpunkte von Beziehungen:
+ * `from_name`/`to_name` der Nutzlast, die der Core beim Lesen einsetzt)
+ */
 export function conceptNames(items: readonly InboxItem[]): Map<string, string> {
   const names = new Map<string, string>();
   for (const item of items) {
-    if (item.payload.kind === 'relation' || item.payload.kind === 'card_batch') continue;
+    if (item.payload.kind === 'card_batch') continue;
+    if (item.payload.kind === 'relation') {
+      const { from_concept_id, from_name, to_concept_id, to_name } = item.payload;
+      if (from_name && !names.has(from_concept_id)) names.set(from_concept_id, from_name);
+      if (to_name && !names.has(to_concept_id)) names.set(to_concept_id, to_name);
+      continue;
+    }
     if (item.concept_id) names.set(item.concept_id, item.payload.proposal.name);
     if (item.payload.kind === 'concept_merge') {
       names.set(item.payload.target.concept_id, item.payload.target.name);
@@ -336,14 +345,18 @@ export function conceptNames(items: readonly InboxItem[]): Map<string, string> {
   return names;
 }
 
-/** IDs der Endpunkte von Beziehungen, deren Name aus den offenen Einträgen nicht hervorgeht */
+/**
+ * IDs der Endpunkte von Beziehungen, deren Name weder aus den offenen Einträgen noch aus der Nutzlast hervorgeht.
+ * Steht `from_name`/`to_name` mit `null` da, ist das Konzept weg: kein Nachladen. Nur wenn das Feld fehlt (älterer
+ * Core), bleibt `GET /concepts/{id}` der Weg.
+ */
 export function unknownEndpoints(items: readonly InboxItem[], names: ReadonlyMap<string, string>): string[] {
   const ids = new Set<string>();
   for (const item of items) {
     if (item.payload.kind !== 'relation') continue;
-    for (const id of [item.payload.from_concept_id, item.payload.to_concept_id]) {
-      if (!names.has(id)) ids.add(id);
-    }
+    const { from_concept_id, from_name, to_concept_id, to_name } = item.payload;
+    if (!names.has(from_concept_id) && from_name === undefined) ids.add(from_concept_id);
+    if (!names.has(to_concept_id) && to_name === undefined) ids.add(to_concept_id);
   }
   return [...ids].sort();
 }

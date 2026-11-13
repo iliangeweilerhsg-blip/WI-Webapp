@@ -433,6 +433,106 @@ describe('Inbox: Vorschläge', () => {
     expect(posts().at(-1)?.path).toBe(`/inbox/${I_NEW}/reopen`);
   });
 
+  it('Beziehungen zeigen die Namen aus der Nutzlast und laden sie nicht einzeln nach', async () => {
+    const base = relationItem().payload as Extract<InboxItem['payload'], { kind: 'relation' }>;
+    boot([
+      relationItem({
+        payload: {
+          ...base,
+          from_name: 'Dritte Normalform (aus dem Core)',
+          to_name: 'Funktionale Abhängigkeit',
+        },
+      }),
+    ]);
+    wrap(<SuggestionInbox />);
+    await screen.findByText('Dritte Normalform (aus dem Core) baut auf Funktionale Abhängigkeit auf');
+    expect(core.requests.filter((r) => r.path.startsWith('/concepts/'))).toEqual([]);
+  });
+
+  it('`from_name`/`to_name` mit null (Konzept gelöscht): kein Nachladen, ruhiger Platzhalter', async () => {
+    const base = relationItem().payload as Extract<InboxItem['payload'], { kind: 'relation' }>;
+    boot([relationItem({ payload: { ...base, from_name: null, to_name: 'Funktionale Abhängigkeit' } })]);
+    wrap(<SuggestionInbox />);
+    await screen.findByText('Ein Konzept baut auf Funktionale Abhängigkeit auf');
+    expect(core.requests.filter((r) => r.path.startsWith('/concepts/'))).toEqual([]);
+  });
+
+  it('ohne `from_name`/`to_name` (älterer Core) bleibt GET /concepts/{id} der Weg', async () => {
+    boot([relationItem()]);
+    core.concepts = [
+      makeConceptDetail({ id: C_FA, name: 'Funktionale Abhängigkeit' }),
+      makeConceptDetail({ id: C_3NF, name: 'Dritte Normalform' }),
+    ];
+    wrap(<SuggestionInbox />);
+    await screen.findByText('Dritte Normalform baut auf Funktionale Abhängigkeit auf');
+    expect(core.requests.filter((r) => r.path.startsWith('/concepts/')).length).toBeGreaterThan(0);
+  });
+
+  it('Einzelaktion: `also_changed` nimmt mitentschiedene Beziehungen sofort aus der Liste', async () => {
+    boot([newItem(), relationItem()]);
+    core.inboxCascade = true;
+    core.concepts = [makeConceptDetail({ id: C_FA, name: 'Funktionale Abhängigkeit' })];
+    wrap(<SuggestionInbox />);
+    await screen.findByText('Dritte Normalform');
+    expect(rowOf(I_REL)).not.toBeNull();
+    // Nach der Entscheidung kommt keine neue Liste mehr an: weg ist nur, was die Antwort meldet
+    const real = globalThis.fetch;
+    let decided = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const url = String(args[0]);
+        if (decided && /\/inbox(\?|$)/.test(url)) return new Promise<Response>(() => undefined);
+        const response = await real(...args);
+        if (url.endsWith(`/inbox/${I_NEW}/accept`)) decided = true;
+        return response;
+      }),
+    );
+    fireEvent.click(within(rowOf(I_NEW)).getByRole('button', { name: 'Annehmen' }));
+    await waitFor(() => expect(rowOf(I_NEW)).toBeNull());
+    expect(rowOf(I_REL)).toBeNull();
+    expect(posts().map((r) => r.path)).toEqual([`/inbox/${I_NEW}/accept`]);
+  });
+
+  it('Einzelaktion: der Fokus springt über mitentschiedene Zeilen auf die nächste verbleibende', async () => {
+    // Reihenfolge in der Liste: Konzept, seine Beziehung (wird mitentschieden), eine fremde Beziehung (bleibt offen)
+    const I_OTHER = id(959);
+    const base = relationItem().payload as Extract<InboxItem['payload'], { kind: 'relation' }>;
+    boot([
+      newItem(),
+      relationItem(),
+      relationItem({
+        id: I_OTHER,
+        relation_id: id(951),
+        priority: 101,
+        payload: { ...base, from_concept_id: C_FA, to_concept_id: id(803) },
+      }),
+    ]);
+    core.inboxCascade = true;
+    wrap(<SuggestionInbox />);
+    await screen.findByText('Dritte Normalform');
+    const order = [...document.querySelectorAll<HTMLElement>('[data-inbox-item]')].map(
+      (el) => el.dataset.inboxItem,
+    );
+    expect(order).toEqual([I_NEW, I_REL, I_OTHER]);
+    const real = globalThis.fetch;
+    let decided = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (...args: Parameters<typeof fetch>) => {
+        const url = String(args[0]);
+        if (decided && /\/inbox(\?|$)/.test(url)) return new Promise<Response>(() => undefined);
+        const response = await real(...args);
+        if (url.endsWith(`/inbox/${I_NEW}/accept`)) decided = true;
+        return response;
+      }),
+    );
+    fireEvent.click(within(rowOf(I_NEW)).getByRole('button', { name: 'Annehmen' }));
+    await waitFor(() => expect(rowOf(I_REL)).toBeNull());
+    expect(rowOf(I_NEW)).toBeNull();
+    await waitFor(() => expect(rowOf(I_OTHER)).toHaveFocus());
+  });
+
   it('Doppelklick auf „Annehmen“ schickt die Entscheidung nur einmal', async () => {
     boot();
     wrap(<SuggestionInbox />);

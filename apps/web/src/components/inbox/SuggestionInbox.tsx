@@ -159,10 +159,13 @@ export function SuggestionInbox() {
     if (next) container.current?.querySelector<HTMLElement>(`[data-inbox-item="${next}"]`)?.focus();
   }
 
-  function focusNextAfter(id: string) {
+  /** Fokus-Ziel nach einer Entscheidung: die nächste Zeile, die nicht mitentschieden wurde (`skip`), sonst die davor */
+  function focusNextAfter(id: string, skip: readonly string[] = []) {
     const ids = rowIds();
     const at = ids.indexOf(id);
-    setFocusAfter({ next: ids[at + 1] ?? ids[at - 1] ?? null });
+    const gone = new Set([id, ...skip]);
+    const remaining = (list: string[]) => list.find((candidate) => !gone.has(candidate)) ?? null;
+    setFocusAfter({ next: remaining(ids.slice(at + 1)) ?? remaining(ids.slice(0, at).reverse()) });
   }
 
   const setItemBusy = (id: string, on: boolean) =>
@@ -190,11 +193,11 @@ export function SuggestionInbox() {
     if (busy.has(item.id)) return;
     setItemBusy(item.id, true);
     try {
-      if (request) await acceptItem(item.id, request);
-      else await rejectItem(item.id);
-      focusNextAfter(item.id);
+      const result = request ? await acceptItem(item.id, request) : await rejectItem(item.id);
+      focusNextAfter(item.id, result.also_changed);
       setEditing((current) => (current === item.id ? null : current));
-      applyDecided(client, [item.id]);
+      // Mitentschiedene Folge-Einträge (`also_changed`) verschwinden sofort mit, wie bei der Massenaktion
+      applyDecided(client, [item.id, ...result.also_changed]);
       showUndo(request ? acceptedMessage(item, request, names) : 'Verworfen', item.id);
     } catch (error) {
       const code = errorCode(error);

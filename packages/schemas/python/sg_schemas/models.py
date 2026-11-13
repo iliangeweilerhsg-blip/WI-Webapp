@@ -3059,6 +3059,18 @@ class InboxPayloadRelation(BaseModel):
         pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
         title='Uuid',
     )
+    from_name: StrictStr | None = Field(
+        None,
+        description='Nur in Antworten des Core: aktueller Name des Konzepts from_concept_id beim Lesen, null wenn gelöscht oder nicht auffindbar. Wird nie gespeichert',
+        max_length=200,
+        min_length=1,
+    )
+    to_name: StrictStr | None = Field(
+        None,
+        description='Nur in Antworten des Core: aktueller Name des Konzepts to_concept_id beim Lesen, null wenn gelöscht oder nicht auffindbar. Wird nie gespeichert',
+        max_length=200,
+        min_length=1,
+    )
     relation_kind: ConceptRelationKind
     why: StrictStr = Field(..., max_length=500, min_length=1)
     confidence: StrictFloat = Field(
@@ -8133,6 +8145,11 @@ class InboxDecisionResult(BaseModel):
         None,
         description='nur card_batch nach accept: die angelegten Karten',
         max_length=8,
+    )
+    also_changed: list[Uuid] = Field(
+        ...,
+        description='IDs der anderen Einträge, deren Status diese Entscheidung mitgeändert hat (ohne item.id, in Bearbeitungsreihenfolge, ohne Duplikate). Leer, wenn keiner',
+        max_length=500,
     )
 
 

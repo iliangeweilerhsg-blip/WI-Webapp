@@ -91,12 +91,44 @@ async function loadBlocked(db: DbOrTx, rows: readonly ItemRow[]): Promise<Map<st
   return result;
 }
 
+/**
+ * Aktuelle Namen der Endpunkte aller Beziehungs-Nutzlasten (eine Abfrage für die ganze Liste). Fehlt ein Konzept
+ * (gelöscht oder unbekannt), fehlt es in der Karte und der Name wird `null`.
+ */
+async function loadEndpointNames(db: DbOrTx, rows: readonly ItemRow[]): Promise<Map<string, string>> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.payload.kind !== 'relation') continue;
+    ids.add(row.payload.from_concept_id);
+    ids.add(row.payload.to_concept_id);
+  }
+  const names = new Map<string, string>();
+  if (ids.size === 0) return names;
+  const found = await db
+    .select({ id: concept.id, name: concept.name })
+    .from(concept)
+    .where(and(inArray(concept.id, [...ids]), notDeleted(concept)));
+  for (const row of found) names.set(row.id, row.name);
+  return names;
+}
+
+/** Nutzlast für die Antwort: Beziehungen bekommen `from_name`/`to_name`. In der Datenbank steht sie ohne diese Felder */
+function toApiPayload(payload: ItemRow['payload'], names: ReadonlyMap<string, string>): InboxItem['payload'] {
+  if (payload.kind !== 'relation') return payload;
+  return {
+    ...payload,
+    from_name: names.get(payload.from_concept_id) ?? null,
+    to_name: names.get(payload.to_concept_id) ?? null,
+  };
+}
+
 export async function toApiItems(db: DbOrTx, rows: readonly ItemRow[]): Promise<InboxItem[]> {
   const sessions = await loadSessionRefs(
     db,
     rows.flatMap((row) => (row.sessionId ? [row.sessionId] : [])),
   );
   const blocked = await loadBlocked(db, rows);
+  const names = await loadEndpointNames(db, rows);
   return rows.map((row) => ({
     id: row.id,
     created_at: isoTs(row.createdAt),
@@ -107,7 +139,7 @@ export async function toApiItems(db: DbOrTx, rows: readonly ItemRow[]): Promise<
     job_id: row.jobId,
     priority: row.priority,
     decided_at: row.decidedAt ? isoTs(row.decidedAt) : null,
-    payload: row.payload,
+    payload: toApiPayload(row.payload, names),
     concept_id: row.conceptId,
     target_concept_id: row.targetConceptId,
     relation_id: row.relationId,
@@ -330,7 +362,10 @@ interface OpOutcome {
   cards?: Card[];
 }
 
-/** Folge-Einträge, die der Eintrag `itemId` mitentschieden hat (nicht die nur umgehängten aus A2) */
+/**
+ * Folge-Einträge, die der Eintrag `itemId` mitentschieden hat (nicht die nur umgehängten aus A2). Weich gelöschte
+ * Einträge zählen nicht: `lockItems` fasst sie nicht an, ein `reopen` öffnet sie also auch nicht wieder
+ */
 async function triggeredItems(tx: Tx, ids: readonly string[], itemId: string): Promise<string[]> {
   if (ids.length === 0) return [];
   const rows = await tx
@@ -339,6 +374,7 @@ async function triggeredItems(tx: Tx, ids: readonly string[], itemId: string): P
     .where(
       and(
         inArray(inboxItem.id, [...ids]),
+        notDeleted(inboxItem),
         ne(inboxItem.status, 'offen'),
         sql`${inboxItem.decision}->>'triggered_by' = ${itemId}`,
       ),
@@ -456,6 +492,9 @@ async function lockSessions(tx: Tx, ids: readonly string[]): Promise<void> {
     .for('share');
 }
 
+/** Obergrenze von `InboxDecisionResult.also_changed` im Schema (VERTRAEGE §20.6) */
+const ALSO_CHANGED_MAX = 500;
+
 /** `POST /inbox/{id}/accept|reject|reopen` */
 export async function decideInboxItem(
   db: Db,
@@ -475,11 +514,21 @@ export async function decideInboxItem(
         throw conceptPending(await peekEffectiveConceptId(tx, item));
       }
       const outcome = await applyOp(tx, item, op, body, state);
+      // Der Serializer prüft erst nach dem Commit. Praktisch unerreichbar (der Worker legt je Lauf höchstens
+      // `MAX_RELATIONS` = 60 Beziehungen an), aber lieber hier zurückrollen als eine gespeicherte Entscheidung mit 500
+      if (outcome.alsoChanged.length > ALSO_CHANGED_MAX) {
+        throw new Error(`also_changed hat mehr als ${ALSO_CHANGED_MAX} Einträge`);
+      }
       const [fresh] = await tx.select().from(inboxItem).where(eq(inboxItem.id, id));
       const [view] = await toApiItems(tx, fresh ? [fresh] : []);
       if (!view) throw notFound();
       const result: Concept | null = outcome.conceptId ? await loadApiConcept(tx, outcome.conceptId) : null;
-      return { item: view, concept: result, ...(outcome.cards ? { cards: outcome.cards } : {}) };
+      return {
+        item: view,
+        concept: result,
+        also_changed: outcome.alsoChanged,
+        ...(outcome.cards ? { cards: outcome.cards } : {}),
+      };
     }),
   );
 }
