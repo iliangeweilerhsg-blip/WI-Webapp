@@ -356,3 +356,44 @@ def test_card_follows_deleted_concept(core: psycopg.Connection[Any], tmp_path: P
     result = run_nightly(core, tmp_path, MaintenanceNightlyPayload())
     assert result["purged_by_kind"] == {"card": 1}
     assert count(core, "card") == 1 and count(core, "concept") == 2
+
+
+def test_card_of_session_proposal(core: psycopg.Connection[Any], tmp_path: Path) -> None:
+    """Heute bekommt ein Konzept `deleted_at` nur als Vorschlag oder Hülle mit seiner Session (§20.8)."""
+    sem = ins(core, "semester", name="HS")
+    mod = ins(core, "module", semester_id=sem, name="DBS", color="mod-01")
+    old, new = _ago(core, 40), _ago(core, 2)
+
+    def proposal(deleted_at: Any) -> str:
+        s = ins(core, "session", module_id=mod, state="beendet", deleted_at=deleted_at)
+        return ins(
+            core,
+            "concept",
+            name="K",
+            status="vorschlag",
+            proposal_session_id=s,
+            deleted_at=deleted_at,
+        )
+
+    # Session, Konzept und Karte alt mit demselben deleted_at: die Karte geht über die FKs mit der Session
+    _card(core, proposal(old), old)
+    # dasselbe innerhalb der Frist: nichts wird gelöscht
+    c_new = proposal(new)
+    keep = _card(core, c_new, new)
+    # Karte alt, Konzept später mit seiner Session gelöscht: nur die Karte (eigene Frist)
+    c_later = proposal(new)
+    _card(core, c_later, old)
+    # aktive Karte an aktivem Konzept
+    c_live = _concept(core)
+    live = _card(core, c_live, None)
+    dry = run_nightly(core, tmp_path, MaintenanceNightlyPayload(dry_run=True))
+    res = run_nightly(core, tmp_path, MaintenanceNightlyPayload())
+    assert dry["purged_by_kind"] == res["purged_by_kind"] == {"session": 1, "card": 1}
+    left = {str(r[0]) for r in core.execute("SELECT id FROM card").fetchall()}
+    assert left == {keep, live}
+    assert count(core, "card_state") == 2 and count(core, "review_log") == 2
+    assert {str(r[0]) for r in core.execute("SELECT id FROM concept").fetchall()} == {
+        c_new,
+        c_later,
+        c_live,
+    }

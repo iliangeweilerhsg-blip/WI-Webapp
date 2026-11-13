@@ -8,7 +8,9 @@
 
 Karten (§21.8) sind eigene Wurzeln, solange ihr Konzept nicht mit demselben `deleted_at` im Papierkorb liegt. Dann
 hängen sie an dessen Frist (Konzepte sind noch keine Papierkorb-Art, F-BIB-05) und gehen später über den
-Fremdschlüssel mit. `card_state` und `review_log` gehen über `ON DELETE CASCADE` mit der Karte.
+Fremdschlüssel mit. Ein `deleted_at` bekommt ein Konzept bisher nur als Vorschlag oder Hülle mit seiner Session
+(§20.8). Wird diese endgültig gelöscht, gehen Konzept und Karten über `ON DELETE CASCADE` mit.
+`card_state` und `review_log` gehen über `ON DELETE CASCADE` mit der Karte.
 
 Spiegelt `services/core/src/services/trash-ops.ts` (`purgeTrashItems`). Sperrreihenfolge wie im Core:
 zuerst die Ströme (nach Namen sortiert), dann die Zeilen. Dateien werden erst nach dem Commit gelöscht und nur
