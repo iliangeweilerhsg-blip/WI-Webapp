@@ -282,7 +282,7 @@ export function contentFromDraft(draft: CardDraft, previous: CardContent): Draft
 const CARD_MESSAGES: Record<string, string> = {
   card_not_found: 'Diese Karte gibt es nicht mehr.',
   card_suspended: 'Diese Karte ist pausiert.',
-  card_source_invalid: 'Ein Beleg dieser Karte gibt es nicht mehr.',
+  card_source_invalid: 'Einen Beleg dieser Karte gibt es nicht mehr.',
   card_concept_pending: 'Erst das Konzept annehmen, dann die Karten.',
   concept_not_active:
     'Zu diesem Konzept lassen sich keine Karten anlegen. Es ist noch nicht angenommen oder wurde zusammengeführt.',
@@ -303,7 +303,7 @@ export function cardErrorMessage(error: unknown): string {
     if (error.code === 'card_source_invalid') {
       const index = error.details.index;
       return typeof index === 'number'
-        ? `Der Beleg ${index + 1} gibt es nicht mehr. Wähle einen anderen.`
+        ? `Den Beleg ${index + 1} gibt es nicht mehr. Wähle einen anderen.`
         : (CARD_MESSAGES.card_source_invalid ?? '');
     }
     const known = CARD_MESSAGES[error.code];

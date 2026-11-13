@@ -494,6 +494,9 @@ export function handleCards(
         if (problem) return fail(400, 'card_invalid', { reason: problem });
         card.content = body.content as CardContent;
       }
+      if (Array.isArray(body?.sources)) {
+        card.sources = (body.sources as EvidenceRef[]).map((ref) => ({ ref, missing: false }));
+      }
       if (typeof body?.suspended === 'boolean') card.suspended = body.suspended;
       card.updated_at = new Date().toISOString();
       return json(card);

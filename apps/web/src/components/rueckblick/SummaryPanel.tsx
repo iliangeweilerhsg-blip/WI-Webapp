@@ -5,7 +5,7 @@
 import { useState } from 'react';
 import type { EvidenceRef, SessionSummary } from '@sg/shared';
 import { SourceChips } from '../concepts/SourceChips.tsx';
-import { CardEditor, MAX_CARD_SOURCES, type EditorConcept } from '../learn/CardEditor.tsx';
+import { CardEditor, MAX_CARD_SOURCES, uniqueSources, type EditorConcept } from '../learn/CardEditor.tsx';
 
 export interface SummaryPanelProps {
   summary: SessionSummary;
@@ -54,7 +54,7 @@ export function SummaryPanel({ summary, onPick, concepts = [] }: SummaryPanelPro
               <div className="basis-full">
                 <CardEditor
                   concepts={concepts}
-                  sources={sentence.sources.slice(0, MAX_CARD_SOURCES).map((ref) => ({ ref }))}
+                  sources={uniqueSources(sentence.sources.map((ref) => ({ ref }))).slice(0, MAX_CARD_SOURCES)}
                   preselect="all"
                   seedText={sentence.text}
                   onDone={() => {

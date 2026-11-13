@@ -15,6 +15,7 @@ import {
   contentFromDraft,
   createCard,
   fetchCard,
+  patchCard,
   type CardDraft,
 } from '../../lib/cards.ts';
 import { ApiRequestError } from '../../lib/api.ts';
@@ -54,14 +55,26 @@ export interface CardEditorProps {
   onDone: (card: Card | null) => void;
 }
 
-/** Gleiche Beleg-Form zweimal? (Dubletten lehnt der Core ab) */
-const sameRef = (a: EvidenceRef, b: EvidenceRef) => JSON.stringify(a) === JSON.stringify(b);
-
-export function uniqueSources(sources: readonly EditorSource[]): EditorSource[] {
-  const out: EditorSource[] = [];
-  for (const source of sources) if (!out.some((o) => sameRef(o.ref, source.ref))) out.push(source);
-  return out;
+/** Schlüssel eines Belegs wie im Core (`sourceKey`): Folie über `slide_id`, Zeitraum über Session und Grenzen */
+export function refKey(ref: EvidenceRef): string {
+  return ref.kind === 'slide'
+    ? `slide:${ref.slide_id}`
+    : `transcript:${ref.session_id}:${ref.t_start_ms}:${ref.t_end_ms}`;
 }
+
+/** Ohne Dubletten (der Core lehnt sie mit `card_source_invalid` ab) */
+export function uniqueSources(sources: readonly EditorSource[]): EditorSource[] {
+  const seen = new Set<string>();
+  return sources.filter((source) => {
+    const key = refKey(source.ref);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+const sameRefs = (a: readonly EvidenceRef[], b: readonly EvidenceRef[]) =>
+  a.length === b.length && a.every((ref, i) => refKey(ref) === refKey(b[i] as EvidenceRef));
 
 const PLACEHOLDER: CardContent = {
   kind: 'basic',
@@ -84,6 +97,8 @@ export function CardEditor({ concepts, sources, preselect = 'first', seedText, o
   );
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Sperre gegen Doppelklick und Strg+Enter während einer laufenden Anfrage (unabhängig vom nächsten Rendern)
+  const sending = useRef(false);
   // Eine `id` je Editor: Ein erneutes Senden nach abgerissener Antwort legt keine zweite Karte an
   const cardId = useRef(uuidv7());
   const first = useRef<HTMLTextAreaElement>(null);
@@ -109,7 +124,7 @@ export function CardEditor({ concepts, sources, preselect = 'first', seedText, o
   }
 
   async function save() {
-    if (busy) return;
+    if (sending.current) return;
     const result = contentFromDraft({ kind, front, back, explanation }, PLACEHOLDER);
     if (!result.ok) {
       setProblem(result.message);
@@ -123,32 +138,54 @@ export function CardEditor({ concepts, sources, preselect = 'first', seedText, o
       setProblem('Wähle ein Konzept.');
       return;
     }
+    const refs = chosen.map((source) => source.ref);
+    sending.current = true;
     setBusy(true);
     setProblem(null);
     try {
       let card: Card;
+      let message = 'Karte angelegt';
       try {
         card = await createCard({
           id: cardId.current,
           concept_id: conceptId,
           content: result.content,
-          sources: chosen.map((source) => source.ref),
+          sources: refs,
         });
       } catch (error) {
-        // Die Antwort ging verloren, die Karte steht aber schon: dann ist sie unsere
-        if (error instanceof ApiRequestError && error.code === 'card_exists') {
-          card = await fetchCard(cardId.current);
-        } else {
-          throw error;
+        if (!(error instanceof ApiRequestError && error.code === 'card_exists')) throw error;
+        // Ein früherer Versuch kam an, nur die Antwort ging verloren: Die Karte ist unsere. Wurde seither etwas
+        // geändert, gilt der jetzige Stand (PATCH), damit nicht still der alte Inhalt stehen bleibt.
+        card = await fetchCard(cardId.current);
+        const changed =
+          JSON.stringify(card.content) !== JSON.stringify(result.content) ||
+          !sameRefs(
+            card.sources.map((source) => source.ref),
+            refs,
+          );
+        if (changed) card = await patchCard(card.id, { content: result.content, sources: refs });
+        // Karten wandern nicht zwischen Konzepten (§21): dann sagen, wo sie steht
+        if (card.concept_id !== conceptId) {
+          const where = concepts.find((concept) => concept.id === card.concept_id)?.name;
+          message = where ? `Karte angelegt, bei „${where}“` : 'Karte angelegt, bei einem anderen Konzept';
         }
       }
       void client.invalidateQueries({ queryKey: CARDS_KEY });
       void client.invalidateQueries({ queryKey: REVIEW_KEY });
-      toast.show({ message: 'Karte angelegt' });
+      toast.show({ message });
       onDone(card);
     } catch (error) {
-      setProblem(cardErrorMessage(error));
+      // `details.index` zählt die gesendeten Belege, nicht die Liste im Editor: den Beleg beim Namen nennen
+      const index =
+        error instanceof ApiRequestError && error.code === 'card_source_invalid' ? error.details.index : null;
+      const bad = typeof index === 'number' ? refs[index] : undefined;
+      setProblem(
+        bad
+          ? `Den Beleg „${evidenceSpoken(bad)}“ gibt es nicht mehr. Wähle einen anderen.`
+          : cardErrorMessage(error),
+      );
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }

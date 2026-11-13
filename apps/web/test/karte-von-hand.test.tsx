@@ -1,10 +1,13 @@
 // B5 (VERTRAEGE §21.4 `POST /cards`, §21.10): Karte von Hand anlegen, aus der Konzeptansicht und mit „Karte daraus“
 // aus der Kurzfassung. Alle Inhalte sind erfunden.
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
-import type { EvidenceView, SessionSummary } from '@sg/shared';
+import type { CardContent, EvidenceView, SessionSummary } from '@sg/shared';
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/konzepte',
@@ -14,7 +17,7 @@ vi.mock('next/navigation', () => ({
 
 import { ConceptView } from '../src/components/concepts/ConceptView.tsx';
 import { SummaryPanel } from '../src/components/rueckblick/SummaryPanel.tsx';
-import { cardErrorMessage, createCard } from '../src/lib/cards.ts';
+import { cardErrorMessage, contentFromDraft, createCard, draftFromContent } from '../src/lib/cards.ts';
 import { ApiRequestError } from '../src/lib/api.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
@@ -192,7 +195,7 @@ describe('Konzeptansicht: Karte anlegen', () => {
     await user.type(within(editor).getByLabelText('Antwort'), 'Antwort.');
     await user.click(within(editor).getByRole('button', { name: 'Karte anlegen' }));
     expect(await within(editor).findByRole('alert')).toHaveTextContent(
-      'Der Beleg 1 gibt es nicht mehr. Wähle einen anderen.',
+      'Den Beleg „Folie 14“ gibt es nicht mehr. Wähle einen anderen.',
     );
     expect(within(editor).getByLabelText('Vorderseite')).toHaveValue('Frage?');
     await user.click(within(editor).getByLabelText('Folie 14'));
@@ -219,6 +222,45 @@ describe('Konzeptansicht: Karte anlegen', () => {
     expect(core.cards.cards).toHaveLength(1);
     expect(posts()).toHaveLength(2);
     expect(bodyOf(0)?.id).toBe(bodyOf(1)?.id);
+  });
+
+  it('abgerissene Antwort, danach geändert: dieselbe Karte bekommt den neuen Stand, keine zweite', async () => {
+    boot();
+    core.cards.failNextCreate = 'after';
+    const user = userEvent.setup();
+    wrap(<ConceptView id={C_3NF} />);
+    await user.click(await screen.findByRole('button', { name: 'Karte anlegen' }));
+    const editor = screen.getByTestId('card-editor');
+    await user.type(within(editor).getByLabelText('Vorderseite'), 'Frage?');
+    await user.type(within(editor).getByLabelText('Antwort'), 'Alt.');
+    await user.click(within(editor).getByRole('button', { name: 'Karte anlegen' }));
+    await within(editor).findByRole('alert');
+    await user.clear(within(editor).getByLabelText('Antwort'));
+    await user.type(within(editor).getByLabelText('Antwort'), 'Neu.');
+    await user.click(within(editor).getByLabelText(/^Aufnahme ab/));
+    await user.click(within(editor).getByRole('button', { name: 'Karte anlegen' }));
+    await waitFor(() => expect(screen.queryByTestId('card-editor')).toBeNull());
+    expect(core.cards.cards).toHaveLength(1);
+    const card = core.cards.cards[0];
+    expect(card?.content).toMatchObject({ back: { text_md: 'Neu.' } });
+    expect(card?.sources.map((s) => s.ref)).toEqual([slideRef(DECK_ID, 14), timeRef(SESSION_ID, 42_000)]);
+  });
+
+  it('card_source_invalid nennt den gesendeten Beleg, nicht die Stelle in der Liste', async () => {
+    boot();
+    core.cards.goneRefs = [timeRef(SESSION_ID, 42_000)];
+    const user = userEvent.setup();
+    wrap(<ConceptView id={C_3NF} />);
+    await user.click(await screen.findByRole('button', { name: 'Karte anlegen' }));
+    const editor = screen.getByTestId('card-editor');
+    await user.type(within(editor).getByLabelText('Vorderseite'), 'Frage?');
+    await user.type(within(editor).getByLabelText('Antwort'), 'Antwort.');
+    await user.click(within(editor).getByLabelText('Folie 14'));
+    await user.click(within(editor).getByLabelText(/^Aufnahme ab/));
+    await user.click(within(editor).getByRole('button', { name: 'Karte anlegen' }));
+    expect(await within(editor).findByRole('alert')).toHaveTextContent(
+      /^Den Beleg „Aufnahme ab [\d:]+“ gibt es/,
+    );
   });
 });
 
@@ -278,6 +320,19 @@ describe('Rückblick: Karte daraus', () => {
     );
   });
 
+  it('doppelte Quellen eines Satzes erscheinen nur einmal', async () => {
+    boot();
+    const user = userEvent.setup();
+    const sentence = SUMMARY.sentences[0];
+    const doubled: SessionSummary = {
+      ...SUMMARY,
+      sentences: [{ text: sentence?.text ?? '', sources: [slideRef(DECK_ID, 14), slideRef(DECK_ID, 14)] }],
+    };
+    wrap(<SummaryPanel summary={doubled} onPick={() => false} concepts={concepts} />);
+    await user.click(screen.getByRole('button', { name: 'Karte aus Satz 1 anlegen' }));
+    expect(within(screen.getByTestId('card-editor')).getAllByRole('checkbox')).toHaveLength(1);
+  });
+
   it('ohne aktive Konzepte gibt es den Knopf nicht', () => {
     boot();
     wrap(<SummaryPanel summary={SUMMARY} onPick={() => false} concepts={[]} />);
@@ -298,6 +353,28 @@ describe('Hilfen', () => {
     expect(cardErrorMessage(err('concept_not_active', { status: 'zusammengefuehrt' }))).toMatch(
       /zusammengeführt/,
     );
+  });
+
+  it('Clientprüfung gegen die gemeinsamen Testfälle (fixtures/cards/content.json)', () => {
+    const file = join(
+      dirname(fileURLToPath(import.meta.url)),
+      '../../../packages/schemas/fixtures/cards/content.json',
+    );
+    const { cases } = JSON.parse(readFileSync(file, 'utf8')) as {
+      cases: { name: string; content: CardContent; reason: string | null }[];
+    };
+    const messages: Record<string, RegExp> = {
+      empty: /Ein Feld ist leer/,
+      cloze_none: /Es fehlt eine Lücke/,
+      cloze_numbers: /bei c1 beginnen/,
+    };
+    expect(cases.length).toBeGreaterThan(10);
+    for (const testCase of cases) {
+      const result = contentFromDraft(draftFromContent(testCase.content), testCase.content);
+      // Gültiges lehnt der Client nie ab; was er ablehnt, lehnt er mit dem Grund des Core ab (den Rest prüft der Core)
+      if (testCase.reason === null) expect(result.ok, testCase.name).toBe(true);
+      else if (!result.ok) expect(result.message, testCase.name).toMatch(messages[testCase.reason] ?? /^$/);
+    }
   });
 
   it('createCard sendet POST /cards und liest die Karte', async () => {
