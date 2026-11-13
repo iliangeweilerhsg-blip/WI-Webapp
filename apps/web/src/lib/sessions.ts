@@ -1,5 +1,5 @@
 // REST-Funktionen für Sessions (VERTRAEGE §7.2): Stopp und Verlängerung (T1-07), Liste und Zustandswechsel (T1-03).
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import {
   SessionListSchema,
@@ -134,20 +134,22 @@ export function sessionLabel(session: Pick<Session, 'number' | 'title'>, deckTit
   return parts.join(' · ') || 'Vorlesung';
 }
 
-/** So viele Vorlesungen eines Moduls zeigt der Modul-Tab höchstens (die neuesten) */
+/** So viele Vorlesungen eines Moduls lädt der Modul-Tab je Seite (die neuesten zuerst, ältere auf Wunsch) */
 export const MODULE_SESSIONS_LIMIT = 50;
 
-/** Abfrage: vergangene Vorlesungen eines Moduls, neueste zuerst */
+/** Abfrage: vergangene Vorlesungen eines Moduls, neueste zuerst; ältere Seiten über `fetchNextPage` */
 export function useModuleSessions(moduleId: string) {
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: ['sessions', 'modul', moduleId],
+    initialPageParam: null as string | null,
     // Der Core filtert die Zustände schon, damit geplante Termine des Semesters keine Seiten belegen
-    queryFn: ({ signal }) =>
-      listSessions(
-        { moduleId, states: FINISHED_STATES, order: 'desc', limit: MODULE_SESSIONS_LIMIT },
+    queryFn: ({ pageParam, signal }) =>
+      fetchSessionPage(
+        { moduleId, states: FINISHED_STATES, order: 'desc', limit: MODULE_SESSIONS_LIMIT, cursor: pageParam },
         signal,
       ),
-    select: (items) => newestFirst(items.filter(isFinished)),
+    getNextPageParam: (page) => page.next ?? undefined,
+    select: (data) => newestFirst(data.pages.flatMap((page) => page.items).filter(isFinished)),
   });
 }
 
