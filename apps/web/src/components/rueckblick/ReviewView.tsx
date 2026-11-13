@@ -224,6 +224,10 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
   const cardsMissing =
     session.processing['cards.generate'] === undefined && (concepts.data?.items.length ?? 0) > 0;
   const showSteps = rows.some((row) => row.state !== 'fertig') || (cardsMissing && rows.length > 0);
+  // „Karte daraus“ in der Kurzfassung: nur aktive Konzepte der Session (§21.10)
+  const activeConcepts = (concepts.data?.items ?? [])
+    .filter((item) => item.concept.status === 'aktiv')
+    .map((item) => ({ id: item.concept.id, name: item.concept.name }));
   const ai = useAiStatus();
   const processingPending = Object.values(session.processing).some(
     (step) => step !== undefined && isPending(step),
@@ -457,7 +461,9 @@ function ReviewBody({ session, transcript, state, reprocess, moduleHrefValue, la
           ) : null}
         </div>
       ) : null}
-      {summary.data?.summary ? <SummaryPanel summary={summary.data.summary} onPick={pickSource} /> : null}
+      {summary.data?.summary ? (
+        <SummaryPanel summary={summary.data.summary} onPick={pickSource} concepts={activeConcepts} />
+      ) : null}
     </>
   );
 

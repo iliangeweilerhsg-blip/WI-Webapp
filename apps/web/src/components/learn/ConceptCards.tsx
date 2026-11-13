@@ -1,11 +1,12 @@
 'use client';
 
 // Abschnitt „Karten“ in der Konzeptansicht (VERTRAEGE §21.10): Vorderseite, Typ, Zustand in Worten, ✦ bei KI-Karten.
-// „Karte anlegen“ (von Hand) kommt mit B5.
-import { useState } from 'react';
-import type { Card } from '@sg/shared';
+// „Karte anlegen“ (von Hand, B5) öffnet den Editor mit den Belegen des Konzepts.
+import { useRef, useState } from 'react';
+import type { Card, EvidenceView } from '@sg/shared';
 import { CARD_KIND_LABELS, cardFrontText, cardStateText, useConceptCards } from '../../lib/cards.ts';
 import { friendlyMessage } from '../../lib/api.ts';
+import { CardEditor } from './CardEditor.tsx';
 import { CardEditFields } from './CardEditFields.tsx';
 import { CardMenu } from './CardMenu.tsx';
 import { CardSourceChips } from './CardSourceChips.tsx';
@@ -74,9 +75,24 @@ function CardRow({ card }: { card: Card }) {
   );
 }
 
-export function ConceptCards({ conceptId }: { conceptId: string }) {
+const addButton = 'min-h-9 rounded-md border border-border px-3 py-1 text-sm hover:bg-surface sg-transition';
+
+export interface ConceptCardsProps {
+  conceptId: string;
+  conceptName: string;
+  /** Belege des Konzepts: Aus ihnen wählt der Editor den Beleg der neuen Karte (§21.10) */
+  evidence: readonly EvidenceView[];
+}
+
+export function ConceptCards({ conceptId, conceptName, evidence }: ConceptCardsProps) {
   const cards = useConceptCards(conceptId);
   const items = cards.data?.items;
+  const [creating, setCreating] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  // Gelöschte Folien und Foliensätze kann der Core nicht mehr belegen
+  const sources = evidence
+    .filter((e) => !e.missing)
+    .map((e) => ({ ref: e.ref, hint: e.slide_title ?? e.session?.title ?? null }));
   return (
     <section aria-labelledby="concept-cards" className="mt-8">
       <h2 id="concept-cards" className="flex items-center gap-2 text-lg font-medium">
@@ -87,6 +103,26 @@ export function ConceptCards({ conceptId }: { conceptId: string }) {
           </span>
         ) : null}
       </h2>
+      <div className="mt-2">
+        {sources.length === 0 ? (
+          <p className="text-sm text-text-muted">
+            Keine Belege mehr. Ohne Beleg lässt sich keine Karte anlegen.
+          </p>
+        ) : creating ? (
+          <CardEditor
+            concepts={[{ id: conceptId, name: conceptName }]}
+            sources={sources}
+            onDone={() => {
+              setCreating(false);
+              requestAnimationFrame(() => trigger.current?.focus());
+            }}
+          />
+        ) : (
+          <button ref={trigger} type="button" className={addButton} onClick={() => setCreating(true)}>
+            Karte anlegen
+          </button>
+        )}
+      </div>
       {cards.isError && !items ? (
         <p role="status" className="mt-2 text-md text-text-muted">
           Die Karten sind gerade nicht erreichbar: {friendlyMessage(cards.error)}

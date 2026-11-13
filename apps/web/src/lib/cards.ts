@@ -11,6 +11,7 @@ import {
   ReviewResultSchema,
   type Card,
   type CardContent,
+  type CardCreate,
   type CardUpdate,
   type ReviewQueue,
   type ReviewQueueItem,
@@ -94,6 +95,16 @@ export function useConceptCards(conceptId: string, enabled = true) {
       apiGet(`/concepts/${encodeURIComponent(conceptId)}/cards`, CardListSchema, { signal }),
   });
   return useHydrationSafe(query);
+}
+
+/** `POST /cards`: Karte von Hand (§21.4). Die `id` vergibt der Client, damit ein Wiederholen keine zweite Karte anlegt. */
+export function createCard(body: CardCreate): Promise<Card> {
+  return apiSend('POST', '/cards', CardSchema, { body });
+}
+
+/** `GET /cards/{id}` */
+export function fetchCard(id: string): Promise<Card> {
+  return apiGet(`/cards/${encodeURIComponent(id)}`, CardSchema);
 }
 
 export function patchCard(id: string, update: CardUpdate): Promise<Card> {
@@ -212,6 +223,7 @@ export type DraftResult = { ok: true; content: CardContent } | { ok: false; mess
 
 const REASON_MESSAGES: Record<string, string> = {
   empty: 'Ein Feld ist leer.',
+  too_long: 'Ein Text ist zu lang. Bitte kürze ihn.',
   cloze_syntax: 'Die Lücken sind nicht richtig geschrieben. So geht es: {{c1::Begriff}}.',
   cloze_none: 'Es fehlt eine Lücke. So geht es: {{c1::Begriff}}.',
   cloze_numbers: 'Die Lücken müssen bei c1 beginnen und lückenlos zählen.',
@@ -272,7 +284,10 @@ const CARD_MESSAGES: Record<string, string> = {
   card_suspended: 'Diese Karte ist pausiert.',
   card_source_invalid: 'Ein Beleg dieser Karte gibt es nicht mehr.',
   card_concept_pending: 'Erst das Konzept annehmen, dann die Karten.',
-  concept_not_active: 'Dieses Konzept ist noch nicht angenommen.',
+  concept_not_active:
+    'Zu diesem Konzept lassen sich keine Karten anlegen. Es ist noch nicht angenommen oder wurde zusammengeführt.',
+  concept_not_found: 'Dieses Konzept gibt es nicht mehr.',
+  card_exists: 'Diese Karte gibt es schon.',
 };
 
 /** Text für die Oberfläche zu einem Fehler rund um Karten */
@@ -284,6 +299,12 @@ export function cardErrorMessage(error: unknown): string {
         (typeof reason === 'string' ? REASON_MESSAGES[reason] : undefined) ??
         'Der Inhalt der Karte passt so nicht.'
       );
+    }
+    if (error.code === 'card_source_invalid') {
+      const index = error.details.index;
+      return typeof index === 'number'
+        ? `Der Beleg ${index + 1} gibt es nicht mehr. Wähle einen anderen.`
+        : (CARD_MESSAGES.card_source_invalid ?? '');
     }
     const known = CARD_MESSAGES[error.code];
     if (known) return known;

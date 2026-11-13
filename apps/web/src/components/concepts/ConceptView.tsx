@@ -205,7 +205,9 @@ export function ConceptView({ id }: { id: string }) {
       </section>
 
       {/* Karten des Konzepts (VERTRAEGE §21.10); ein Vorschlag hat noch keine */}
-      {concept.status === 'aktiv' ? <ConceptCards conceptId={concept.id} /> : null}
+      {concept.status === 'aktiv' ? (
+        <ConceptCards conceptId={concept.id} conceptName={concept.name} evidence={data.evidence} />
+      ) : null}
 
       <section aria-labelledby="concept-relations" className="mt-8">
         <h2 id="concept-relations" className="text-lg font-medium">

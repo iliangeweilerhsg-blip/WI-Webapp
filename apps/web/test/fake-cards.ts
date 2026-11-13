@@ -38,6 +38,10 @@ export interface FakeCardsState {
   conceptNames: Record<string, string>;
   /** Je Eintrag `card_batch`: die beim Annehmen angelegten Karten (für `reopen`) */
   batchCards: Record<string, string[]>;
+  /** Belege, die es nicht (mehr) gibt: `POST /cards` antwortet mit `card_source_invalid` (§21.4) */
+  goneRefs: EvidenceRef[];
+  /** Die nächste Anlage von Hand scheitert wie bei abgerissener Verbindung; `after` = der Core hat sie davor angelegt */
+  failNextCreate: null | 'before' | 'after';
 }
 
 export function makeFakeCardsState(): FakeCardsState {
@@ -50,6 +54,8 @@ export function makeFakeCardsState(): FakeCardsState {
     failReviews: 0,
     conceptNames: {},
     batchCards: {},
+    goneRefs: [],
+    failNextCreate: null,
   };
 }
 
@@ -204,6 +210,66 @@ function contentProblem(content: unknown): string | null {
   if (c.front.text_md.trim() === '') return 'empty';
   if (c.kind === 'basic') return c.back.text_md.trim() === '' ? 'empty' : null;
   return /\{\{c1::[^}]+\}\}/.test(c.front.text_md) ? null : 'cloze_none';
+}
+
+/** `POST /cards` (§21.4): von Hand, `origin = manuell`, `stage = 2`, Beleg ist Pflicht (LP8) */
+function createManual(
+  core: FakeCore,
+  body: Record<string, unknown> | null,
+): { failure: { status: number; code: string; details?: Record<string, unknown> } } | { card: Card } {
+  const allowed = ['id', 'concept_id', 'content', 'sources'];
+  if (
+    !body ||
+    Object.keys(body).some((k) => !allowed.includes(k)) ||
+    typeof body.concept_id !== 'string' ||
+    !Array.isArray(body.sources) ||
+    body.sources.length < 1 ||
+    body.sources.length > 6 ||
+    (body.id !== undefined && (typeof body.id !== 'string' || !/^[0-9a-f-]{36}$/.test(body.id)))
+  ) {
+    return { failure: { status: 400, code: 'validation_failed' } };
+  }
+  const concept = core.concepts.find((c) => c.concept.id === body.concept_id)?.concept;
+  if (!concept) return { failure: { status: 404, code: 'concept_not_found' } };
+  if (concept.status !== 'aktiv') {
+    return {
+      failure: {
+        status: 409,
+        code: 'concept_not_active',
+        details: {
+          status: concept.status,
+          ...(concept.merged_into ? { merged_into: concept.merged_into } : {}),
+        },
+      },
+    };
+  }
+  const problem = contentProblem(body.content);
+  if (problem) return { failure: { status: 400, code: 'card_invalid', details: { reason: problem } } };
+  const refs = body.sources as EvidenceRef[];
+  for (const [index, ref] of refs.entries()) {
+    const text = JSON.stringify(ref);
+    const duplicate = refs.findIndex((r) => JSON.stringify(r) === text) !== index;
+    const gone = core.cards.goneRefs.some((r) => JSON.stringify(r) === text);
+    const badTime = ref.kind === 'transcript' && ref.t_start_ms > ref.t_end_ms;
+    if (duplicate || gone || badTime) {
+      return { failure: { status: 400, code: 'card_source_invalid', details: { index } } };
+    }
+  }
+  if (
+    typeof body.id === 'string' &&
+    [...core.cards.cards, ...core.cards.trashed].some((c) => c.id === body.id)
+  ) {
+    return { failure: { status: 409, code: 'card_exists' } };
+  }
+  const card = makeCard({
+    ...(typeof body.id === 'string' ? { id: body.id } : {}),
+    concept_id: concept.id,
+    origin: 'manuell',
+    content: body.content as CardContent,
+    sources: refs.map((ref) => ({ ref, missing: false })),
+  });
+  core.cards.cards.push(card);
+  return { card };
 }
 
 /** Neuer Zustand nach einer Bewertung, ohne FSRS: 1 und 2 bleiben im Lernschritt (noch heute), 3 und 4 gehen auf Tage */
@@ -388,6 +454,21 @@ export function handleCards(
       throw new TypeError('Failed to fetch');
     }
     return json({ review: entry, card, requeue: next.requeue });
+  }
+
+  if (path === '/cards' && method === 'POST') {
+    if (core.cards.failNextCreate === 'before') {
+      core.cards.failNextCreate = null;
+      throw new TypeError('Failed to fetch');
+    }
+    const created = createManual(core, body);
+    if ('failure' in created)
+      return fail(created.failure.status, created.failure.code, created.failure.details);
+    if (core.cards.failNextCreate === 'after') {
+      core.cards.failNextCreate = null;
+      throw new TypeError('Failed to fetch');
+    }
+    return json(created.card, 201);
   }
 
   const ofConcept = /^\/concepts\/([^/]+)\/cards$/.exec(path);
