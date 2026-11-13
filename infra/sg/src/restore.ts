@@ -37,7 +37,7 @@ export { StandError };
 export interface RestoreDeps extends BackupIo {
   cfg: Pick<SgConfig, 'dataDir' | 'databaseUrl'>;
   pg: PgAccess;
-  /** Läuft der Core oder der Worker? (Pid-Dateien und Health-Abfrage) */
+  /** Läuft der Core oder der Worker? (Pid-Dateien, Sperrdatei des Core und Health-Abfrage) */
   servicesRunning: () => Promise<string[]>;
   /** Frage stellen, `true` = ja */
   confirm: (question: string) => Promise<boolean>;

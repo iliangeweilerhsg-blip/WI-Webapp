@@ -438,8 +438,24 @@ export async function moodleLogin(cfg: SgConfig, args: string[], deps: MoodleDep
       `Damit der Core Moodle nutzt: SG_MOODLE_URL=${url} in ${join(cfg.dataDir, 'config', '.env')} eintragen.`,
     );
   }
+  await coreHint(cfg, deps);
   io.out('Prüfen: pnpm sg moodle status');
   return 0;
+}
+
+/**
+ * Hinweis, wenn der Core läuft. Ein sofortiges Neuprüfen gibt es nicht: Der Core merkt sich einen gefundenen Token bis
+ * zum Neustart (oder bis Moodle ihn ablehnt), einen fehlenden 30 s; weder `GET /moodle/status` noch `POST /moodle/sync`
+ * laden ihn neu. Darum nur ein Hinweis, nie ein Fehler: Der Exit-Code bleibt 0, auch wenn der Core nicht antwortet.
+ */
+async function coreHint(cfg: SgConfig, deps: MoodleDeps): Promise<void> {
+  const status = await fetchCoreStatus(cfg, deps.fetch);
+  if (!status) return;
+  deps.io.out(
+    status.state === 'nicht_eingerichtet'
+      ? 'Der Core läuft und liest den neuen Token spätestens nach etwa 30 Sekunden.'
+      : 'Der Core läuft und nutzt womöglich noch den bisherigen Token: pnpm sg stop && pnpm sg start.',
+  );
 }
 
 export async function fetchCoreStatus(cfg: SgConfig, fetchFn: FetchFn): Promise<MoodleStatus | null> {

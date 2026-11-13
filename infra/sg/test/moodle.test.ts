@@ -385,6 +385,61 @@ describe('moodle login mit Benutzername und Passwort', () => {
   });
 });
 
+describe('moodle login: Hinweis zum laufenden Core', () => {
+  const coreStatus = (state: string): Record<string, unknown> => ({
+    state,
+    site_url: null,
+    site_name: null,
+    user_fullname: null,
+    token_valid_until: null,
+    checked_at: null,
+  });
+
+  /** Moodle-Aufrufe gehen an den Fake-Server, Core-Aufrufe (127.0.0.1) an `core` */
+  function routedFetch(core: (url: string) => Promise<Response>): { fetch: FetchFn; coreCalls: string[] } {
+    const coreCalls: string[] = [];
+    const fetchFn: FetchFn = (url, init) => {
+      if (url.startsWith('http://127.0.0.1:')) {
+        coreCalls.push(`${init.method ?? 'GET'} ${url}`);
+        return core(url);
+      }
+      return moodle.fetch(url, init);
+    };
+    return { fetch: fetchFn, coreCalls };
+  }
+
+  it('Core läuft und kennt noch keinen Token: Hinweis auf höchstens etwa 30 Sekunden, nur lesend über 127.0.0.1', async () => {
+    const { fetch: fetchFn, coreCalls } = routedFetch(async () =>
+      Response.json(coreStatus('nicht_eingerichtet')),
+    );
+    const { deps, io } = makeDeps({ fetch: fetchFn });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    expect(coreCalls).toEqual([`GET http://127.0.0.1:${cfg.corePort}/api/v1/moodle/status`]);
+    expect(io.lines.join('\n')).toMatch(
+      /Der Core läuft und liest den neuen Token spätestens nach etwa 30 Sekunden/,
+    );
+    expectNoSecrets(io);
+  });
+
+  it('Core läuft mit bisherigem Token: Hinweis auf Neustart, Exit-Code 0', async () => {
+    const { fetch: fetchFn } = routedFetch(async () => Response.json(coreStatus('ok')));
+    const { deps, io } = makeDeps({ fetch: fetchFn });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    expect(io.lines.join('\n')).toMatch(/bisherigen Token: pnpm sg stop && pnpm sg start/);
+  });
+
+  it('Core läuft nicht oder antwortet falsch: kein Hinweis, kein Fehler', async () => {
+    for (const core of [
+      async (): Promise<Response> => Promise.reject(new Error('ECONNREFUSED')),
+      async (): Promise<Response> => new Response('kaputt', { status: 500 }),
+    ]) {
+      const { deps, io } = makeDeps({ fetch: routedFetch(core).fetch });
+      expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+      expect(io.lines.join('\n')).not.toMatch(/Der Core läuft/);
+    }
+  });
+});
+
 describe('moodle login --token-stdin', () => {
   it('nimmt einen Token aus einer Pipe, ohne login/token.php', async () => {
     const { deps, io, keychain } = makeDeps({ fetch: moodle.fetch, tty: false, stdin: `${TOKEN}\n` });

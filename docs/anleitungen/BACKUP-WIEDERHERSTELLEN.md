@@ -25,7 +25,7 @@ Ohne Backup-Ziel gibt es nichts zu testen.
 
 ## 3. Wiederherstellen
 
-Das geht nur im Terminal und nur, wenn Core und Worker **nicht** laufen. Es ersetzt deinen aktuellen Stand.
+Das geht nur im Terminal und nur, wenn Core und Worker **nicht** laufen. Es ersetzt deinen aktuellen Stand. Als laufend gilt ein Core auch, wenn nur seine Sperrdatei (`run/core.lock`) eine lebende PID trägt, etwa bei anderem Port oder verlorener PID-Datei. Eine veraltete Sperrdatei (Prozess tot) stört nicht.
 
 1. Im Repo-Ordner beenden:
 

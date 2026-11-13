@@ -11,6 +11,7 @@ import {
   type BackupTrigger,
 } from './backup.ts';
 import { healthUrl, type SgConfig } from './config.ts';
+import { coreLockHeld } from './doctor.ts';
 import { openPg, realExec, type Exec, type PgAccess } from './pg.ts';
 import { readService } from './procs.ts';
 import { readJournal, recoverRestore, runRestore } from './restore.ts';
@@ -140,18 +141,34 @@ export async function backupCommand(cfg: SgConfig, rest: string[]): Promise<numb
   return runBackup({ cfg, pg, ...io }, { trigger: args.trigger, runId: args.runId, target: args.target });
 }
 
-/** Core und Worker, die noch laufen (Pid-Datei oder antwortender Core) */
-async function runningServices(cfg: SgConfig): Promise<string[]> {
+export interface RunningIo {
+  /** Sperrdatei des Core: Lebt die PID darin? (wie `sg doctor`) */
+  lockHeld: () => boolean;
+  /** Antwortet der Core unter `/api/v1/health`? */
+  coreReachable: () => Promise<boolean>;
+}
+
+/**
+ * Core und Worker, die noch laufen. Der Core zählt als laufend, wenn seine Pid-Datei stimmt, in `run/core.lock` eine
+ * lebende PID steht (#292, auch bei anderem Port oder verlorener Pid-Datei) oder er unter dem Health-Pfad antwortet.
+ * Eine veraltete Sperrdatei (PID tot) blockiert nicht.
+ */
+export async function runningServices(
+  cfg: SgConfig,
+  io: RunningIo = {
+    lockHeld: () => coreLockHeld(cfg),
+    async coreReachable() {
+      try {
+        const res = await fetch(healthUrl(cfg), { signal: AbortSignal.timeout(1500) });
+        return res.ok;
+      } catch {
+        return false; // antwortet nicht: läuft nicht
+      }
+    },
+  },
+): Promise<string[]> {
   const names: string[] = [];
-  if (readService(cfg, 'core') !== null) names.push('Core');
-  else {
-    try {
-      const res = await fetch(healthUrl(cfg), { signal: AbortSignal.timeout(1500) });
-      if (res.ok) names.push('Core');
-    } catch {
-      // antwortet nicht: läuft nicht
-    }
-  }
+  if (readService(cfg, 'core') !== null || io.lockHeld() || (await io.coreReachable())) names.push('Core');
   if (readService(cfg, 'worker') !== null) names.push('Worker');
   return names;
 }
