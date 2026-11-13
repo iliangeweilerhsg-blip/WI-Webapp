@@ -311,9 +311,10 @@ export function readFileSums(dir: string, manifest: Manifest, tree: StandTree): 
       }
       throw error;
     }
-    // Streamend (#324), nie die ganze Liste im Speicher. Erst wird nur die SHA-256 gebildet und mit dem Anker verglichen,
-    // eine Map der Einträge entsteht erst danach; die SHA des Durchgangs, der parst, wird unten noch einmal gegen den
-    // Anker geprüft. Bis dahin hat das Lesen keine Nebenwirkung.
+    // Streamend (#324), nie die ganze Liste im Speicher. Erst wird nur die SHA-256 gebildet und mit dem Anker verglichen;
+    // eine Map entsteht nur, wenn sie passt. Ändert jemand die Datei zwischen den beiden Durchgängen, wird im zweiten
+    // Durchgang kurz eine Map aus ungeprüften Bytes gebaut (begrenzt auf die Länge der echten Liste) und verworfen. Die
+    // SHA dieses Durchgangs wird unten noch einmal gegen den Anker geprüft. Das Lesen hat keine Nebenwirkung.
     let list: StreamedList;
     try {
       if (opened.info.size > FILES_MAX_BYTES) {

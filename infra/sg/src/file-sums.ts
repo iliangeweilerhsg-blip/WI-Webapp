@@ -173,8 +173,9 @@ export function parseFileList(text: string): SumMap | null {
 }
 
 export interface StreamedList {
-  /** SHA-256 über alle gelesenen Bytes */
+  /** SHA-256 über alle gelesenen Bytes (`''`, wenn das Lesen vorzeitig abgebrochen wurde: zu groß oder gewachsen) */
   sha256: string;
+  /** Gelesene Bytes; bei einer im zweiten Durchgang gewachsenen Datei genau ein Byte mehr als im ersten */
   bytes: number;
   /** `null`: Aufbau ungültig */
   sums: SumMap | null;
@@ -209,7 +210,7 @@ export function readFileListFd(
       const n = read(fd, buffer, 0, want, position === null ? null : position + bytes);
       if (n === 0) break;
       if (limit !== undefined && bytes + n > limit)
-        return { sha256: '', bytes: limit, tooLarge: false, grown: true };
+        return { sha256: '', bytes: limit + 1, tooLarge: false, grown: true };
       bytes += n;
       if (bytes > FILES_MAX_BYTES) return { sha256: '', bytes, tooLarge: true };
       const block = buffer.subarray(0, n);
@@ -219,11 +220,13 @@ export function readFileListFd(
     return { sha256: hash.digest('hex'), bytes, tooLarge: false };
   };
   if (options.anchor !== undefined) {
-    // Mit Anker (#324): erst nur hashen, ohne Einträge zu sammeln. Passt die SHA nicht zum Anker, entsteht nie eine Map
-    // (bei einer manipulierten Liste mit Millionen kurzer Zeilen wären das sonst mehrere hundert MB, bevor der Vergleich
-    // abgelehnt hätte). Erst danach wird derselbe Deskriptor noch einmal von vorn gelesen und geparst; die SHA dieses
-    // zweiten Durchgangs gilt (hier verworfen, wenn sie vom Anker abweicht; der Aufrufer prüft zusätzlich): Ändert jemand die Datei zwischen
-    // den Durchgängen, passt sie nicht mehr und wird abgelehnt.
+    // Mit Anker (#324): erst nur hashen, ohne Einträge zu sammeln. Passt die SHA nicht zum Anker, entsteht in diesem
+    // Durchgang nie eine Map (bei einer manipulierten Liste mit Millionen kurzer Zeilen wären das sonst mehrere hundert
+    // MB, bevor der Vergleich abgelehnt hätte). Danach wird derselbe Deskriptor noch einmal von vorn gelesen und
+    // geparst, höchstens bis zur Länge des ersten Durchgangs. Schreibt jemand zwischen den Durchgängen in die Datei,
+    // entsteht dabei eine Map aus ungeprüften Bytes (begrenzt auf die Bytelänge der echten Liste; bei kürzesten Pfaden
+    // etwas mehr Einträge als diese); sie wird verworfen, sobald die SHA dieses Durchgangs vom Anker abweicht
+    // oder die Datei gewachsen ist. Der Aufrufer prüft zusätzlich.
     const first = pass(null, 0);
     if (first.tooLarge || first.sha256 !== options.anchor) return { ...first, sums: null };
     const parser = new FileListParser();
