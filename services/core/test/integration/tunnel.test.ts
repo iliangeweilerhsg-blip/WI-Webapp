@@ -328,6 +328,17 @@ describe('Tunnel-Eingang: Wächter und Routentabelle', () => {
     expect(errorCode(res)).toBe('local_only');
   });
 
+  it('POST /moodle/recheck über den Tunnel: nur lokal, ohne Token 401, mit Token 403 local_only', async () => {
+    const route = routes.find((r) => r.url === `${API}/moodle/recheck`);
+    expect(route?.config?.sgAccess).toBe('local');
+    const none = await viaTunnel(t.sock, { method: 'POST', path: `${API}/moodle/recheck` });
+    expect(none.status).toBe(401);
+    expect(errorCode(none)).toBe('device_token_required');
+    const res = await viaTunnel(t.sock, { method: 'POST', path: `${API}/moodle/recheck`, token });
+    expect(res.status).toBe(403);
+    expect(errorCode(res)).toBe('local_only');
+  });
+
   it('abgelehnte Tunnel-Anfragen bekommen Connection: close', async () => {
     const none = await viaTunnel(t.sock, { path: `${API}/health` });
     expect(none.headers.connection).toBe('close');

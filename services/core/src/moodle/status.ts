@@ -72,6 +72,9 @@ export class MoodleStatusService {
   private readonly cacheMs: number;
   private cached: CachedCheck | null = null;
   private pending: Promise<CachedCheck> | null = null;
+  private pendingRecheck: Promise<MoodleStatus> | null = null;
+  /** Zählt Verwerfungen des Zwischenspeichers: Ein Lauf mit altem Stand darf ihn nicht mehr füllen */
+  private epoch = 0;
 
   constructor(options: MoodleStatusServiceOptions) {
     this.client = options.client;
@@ -85,6 +88,26 @@ export class MoodleStatusService {
   /** Nächste Abfrage geht wieder an Moodle (z. B. nach neuem Token) */
   invalidate(): void {
     this.cached = null;
+  }
+
+  /**
+   * Token-Cache und Status-Cache leeren und den Zustand neu holen (`POST /moodle/recheck`). Gleichzeitige
+   * Aufrufe teilen sich einen Lauf. Löst keinen Abgleich und keine Moodle-Aktion aus.
+   */
+  recheck(): Promise<MoodleStatus> {
+    this.pendingRecheck ??= this.runRecheck().finally(() => {
+      this.pendingRecheck = null;
+    });
+    return this.pendingRecheck;
+  }
+
+  private async runRecheck(): Promise<MoodleStatus> {
+    this.epoch += 1;
+    this.cached = null;
+    // Ein noch laufender Aufruf mit dem alten Token zählt nicht
+    this.pending = null;
+    this.client.resetToken();
+    return this.getStatus();
   }
 
   async getStatus(): Promise<MoodleStatus> {
@@ -133,15 +156,19 @@ export class MoodleStatusService {
       if (now.getTime() - this.cached.checkedAt.getTime() < ttl) return this.cached;
     }
     // Gleichzeitige Anfragen teilen sich einen Aufruf
-    this.pending ??= this.fetchCheck().finally(() => {
-      this.pending = null;
-    });
+    if (!this.pending) {
+      const run: Promise<CachedCheck> = this.fetchCheck().finally(() => {
+        if (this.pending === run) this.pending = null;
+      });
+      this.pending = run;
+    }
     return this.pending;
   }
 
   private async fetchCheck(): Promise<CachedCheck> {
     const empty = { siteName: null, userFullname: null, userId: null, functions: null };
     const checkedAt = this.now();
+    const epoch = this.epoch;
     if (!(await this.client.isConfigured())) {
       // Nicht zwischenspeichern: Nach `security add-generic-password` soll der Zugang sofort gehen
       return { check: 'not_configured', ...empty, checkedAt };
@@ -185,7 +212,7 @@ export class MoodleStatusService {
             : 'unreachable';
       result = { check, ...empty, checkedAt };
     }
-    this.cached = result;
+    if (epoch === this.epoch) this.cached = result;
     return result;
   }
 }

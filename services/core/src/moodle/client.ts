@@ -464,6 +464,11 @@ export class MoodleClient {
     this.tokenRejectedListeners.push(listener);
   }
 
+  /** Merkt sich keinen Token mehr: Der nächste Aufruf liest den Schlüsselbund neu (z. B. nach `sg moodle login`) */
+  resetToken(): void {
+    this.tokens.invalidate();
+  }
+
   /** Moodle-Instanz eingetragen und Token vorhanden */
   async isConfigured(): Promise<boolean> {
     return this.baseUrl !== '' && (await this.tokens.getToken()) !== null;

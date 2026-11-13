@@ -396,25 +396,32 @@ describe('moodle login: Hinweis zum laufenden Core', () => {
   });
 
   /** Moodle-Aufrufe gehen an den Fake-Server, Core-Aufrufe (127.0.0.1) an `core` */
-  function routedFetch(core: (url: string) => Promise<Response>): { fetch: FetchFn; coreCalls: string[] } {
+  function routedFetch(
+    core: (url: string) => Promise<Response>,
+    // Standard: älterer Core, der `POST /moodle/recheck` nicht kennt
+    recheck: () => Promise<Response> = async () => new Response('nicht gefunden', { status: 404 }),
+  ): { fetch: FetchFn; coreCalls: string[] } {
     const coreCalls: string[] = [];
     const fetchFn: FetchFn = (url, init) => {
       if (url.startsWith('http://127.0.0.1:')) {
         coreCalls.push(`${init.method ?? 'GET'} ${url}`);
-        return core(url);
+        return init.method === 'POST' ? recheck() : core(url);
       }
       return moodle.fetch(url, init);
     };
     return { fetch: fetchFn, coreCalls };
   }
 
-  it('Core läuft und kennt noch keinen Token: Hinweis auf höchstens etwa 30 Sekunden, nur lesend über 127.0.0.1', async () => {
+  it('Core läuft und kennt noch keinen Token: Rückfall-Hinweis auf höchstens etwa 30 Sekunden (Core ohne recheck, 404), nur über 127.0.0.1', async () => {
     const { fetch: fetchFn, coreCalls } = routedFetch(async () =>
       Response.json(coreStatus('nicht_eingerichtet')),
     );
     const { deps, io } = makeDeps({ fetch: fetchFn });
     expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
-    expect(coreCalls).toEqual([`GET http://127.0.0.1:${cfg.corePort}/api/v1/moodle/status`]);
+    expect(coreCalls).toEqual([
+      `GET http://127.0.0.1:${cfg.corePort}/api/v1/moodle/status`,
+      `POST http://127.0.0.1:${cfg.corePort}/api/v1/moodle/recheck`,
+    ]);
     expect(io.lines.join('\n')).toMatch(
       /Der Core läuft und liest den neuen Token spätestens nach etwa 30 Sekunden/,
     );
@@ -473,6 +480,123 @@ describe('moodle login: Hinweis zum laufenden Core', () => {
       const { deps, io } = makeDeps({ fetch: routedFetch(core).fetch });
       expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
       expect(io.lines.join('\n')).not.toMatch(/Der Core läuft/);
+    }
+  });
+});
+
+describe('moodle login: Neuprüfung im Core (POST /moodle/recheck)', () => {
+  const status = (state: string, siteUrl: string | null = MOODLE): Record<string, unknown> => ({
+    state,
+    site_url: siteUrl,
+    site_name: null,
+    user_fullname: null,
+    token_valid_until: null,
+    checked_at: null,
+  });
+  function withCore(
+    before: () => Promise<Response>,
+    recheck: () => Promise<Response>,
+  ): { fetch: FetchFn; calls: string[] } {
+    const calls: string[] = [];
+    const fetchFn: FetchFn = (url, init) => {
+      if (url.startsWith('http://127.0.0.1:')) {
+        calls.push(`${init.method ?? 'GET'} ${new URL(url).pathname}`);
+        return init.method === 'POST' ? recheck() : before();
+      }
+      return moodle.fetch(url, init);
+    };
+    return { fetch: fetchFn, calls };
+  }
+
+  it('200: eine Zeile mit dem neuen Zustand, kein Neustart-Hinweis, Aufruf erst nach dem Ablegen des Tokens', async () => {
+    const keychain = new MemoryKeychain();
+    const seen: (string | null)[] = [];
+    const core = withCore(
+      async () => Response.json(status('nicht_eingerichtet')),
+      async () => {
+        seen.push(await keychain.read(TEST_SERVICE));
+        return Response.json(status('ok'));
+      },
+    );
+    const { deps, io } = makeDeps({ fetch: core.fetch, keychain });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    expect(core.calls).toEqual(['GET /api/v1/moodle/status', 'POST /api/v1/moodle/recheck']);
+    expect(seen).toEqual([TOKEN]);
+    const out = io.lines.join('\n');
+    expect(out.match(/Der Core hat Moodle neu geprüft\. Zustand: ok\./g)).toHaveLength(1);
+    expect(out).not.toMatch(/sg stop|30 Sekunden|einer Minute/);
+    expectNoSecrets(io);
+  });
+
+  it('200 mit anderem Zustand: nennt ihn (ungültig)', async () => {
+    const core = withCore(
+      async () => Response.json(status('ok')),
+      async () => Response.json(status('ungueltig')),
+    );
+    const { deps, io } = makeDeps({ fetch: core.fetch });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    expect(io.lines.join('\n')).toMatch(/Zustand: ungültig/);
+  });
+
+  it('200, aber der Core hat keine SG_MOODLE_URL: Hinweis auf Eintrag und Neustart', async () => {
+    const core = withCore(
+      async () => Response.json(status('nicht_eingerichtet', null)),
+      async () => Response.json(status('nicht_eingerichtet', null)),
+    );
+    const { deps, io } = makeDeps({ fetch: core.fetch });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    expect(io.lines.join('\n')).toMatch(
+      /ohne SG_MOODLE_URL\. Nach dem Eintrag: pnpm sg stop && pnpm sg start/,
+    );
+  });
+
+  it('404 (älterer Core): bisheriger Hinweis als Rückfall', async () => {
+    const core = withCore(
+      async () => Response.json(status('ok')),
+      async () => new Response('nicht gefunden', { status: 404 }),
+    );
+    const { deps, io } = makeDeps({ fetch: core.fetch });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    expect(io.lines.join('\n')).toMatch(/bisherigen Token: pnpm sg stop && pnpm sg start/);
+    expect(io.lines.join('\n')).not.toMatch(/neu geprüft/);
+  });
+
+  it('Core aus: kein Aufruf von recheck, kein Hinweis, Exit-Code 0', async () => {
+    const core = withCore(
+      async () => Promise.reject(new Error('ECONNREFUSED')),
+      async () => Promise.reject(new Error('ECONNREFUSED')),
+    );
+    const { deps, io } = makeDeps({ fetch: core.fetch });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    expect(core.calls).toEqual(['GET /api/v1/moodle/status']);
+    expect(io.lines.join('\n')).not.toMatch(/Core/);
+  });
+
+  it('Zeitlimit (Moodle langsam): kein Neustart-Hinweis, Exit-Code 0', async () => {
+    const core = withCore(
+      async () => Response.json(status('ok')),
+      async () =>
+        Promise.reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError')),
+    );
+    const { deps, io } = makeDeps({ fetch: core.fetch });
+    expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+    const out = io.lines.join('\n');
+    expect(out).toMatch(/Der Core prüft Moodle noch neu \(keine Antwort nach 3 Sekunden\)/);
+    expect(out).not.toMatch(/sg stop|bisherigen Token/);
+  });
+
+  it('Fehler beim Aufruf (Abbruch, 500, kaputte Antwort): wirft nie, Exit-Code 0, Rückfall-Hinweis, Antworttext nicht ausgegeben', async () => {
+    for (const recheck of [
+      async (): Promise<Response> => Promise.reject(new Error(`boom ${TOKEN}`)),
+      async (): Promise<Response> => new Response(`Fehler ${TOKEN}`, { status: 500 }),
+      async (): Promise<Response> => new Response(`kein json ${TOKEN}`, { status: 200 }),
+      async (): Promise<Response> => Response.json({ state: 'unbekannt' }),
+    ]) {
+      const core = withCore(async () => Response.json(status('ok')), recheck);
+      const { deps, io } = makeDeps({ fetch: core.fetch });
+      expect(await moodleCommand(cfg, ['login'], deps)).toBe(0);
+      expect(io.lines.join('\n')).toMatch(/bisherigen Token: pnpm sg stop && pnpm sg start/);
+      expectNoSecrets(io);
     }
   });
 });

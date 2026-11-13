@@ -145,6 +145,25 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
     async () => status.getStatus(),
   );
 
+  typed.post(
+    '/moodle/recheck',
+    {
+      // Nur vom Mac selbst (wie GET /system/power): `sg moodle login` ruft sie nach dem Ablegen des Tokens auf
+      config: { sgAccess: 'local', idempotency: false },
+      schema: {
+        tags: ['Moodle'],
+        summary:
+          'Token- und Status-Cache leeren, offene Bestätigungscodes verwerfen und den Moodle-Zustand neu prüfen (kein Abgleich, keine Aktion)',
+        response: { 200: MoodleStatusSchema },
+      },
+    },
+    async () => {
+      // Neuer Token, evtl. anderes Konto: Codes aus Vorschauen mit dem alten Token gelten nicht mehr
+      confirmations.revokeAll();
+      return status.recheck();
+    },
+  );
+
   // ---------- Lese-Endpunkte (F-MDL-02, 08 §9.2) ----------
 
   typed.get(
@@ -549,7 +568,7 @@ export async function moodleRoutes(app: FastifyInstance, deps: MoodleRouteDeps):
       // Zähler zuerst, dann Stand: Läuft dazwischen ein `revokeScope`, wird der Code nicht gültig (08 §9.3).
       // Die Vorschau nimmt keine Sperre, ein langer Upload soll sie nicht blockieren
       const scope = handler.scope?.(params) ?? null;
-      const epoch = scope !== null ? confirmations.epoch(scope) : 0;
+      const epoch = confirmations.epoch(scope);
       const state = (await handler.state?.(context, params)) ?? null;
       const preview = await handler.preview(context, params, state);
       const risk = actions.spec(id).risk;
