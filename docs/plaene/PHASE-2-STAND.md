@@ -13,7 +13,7 @@ Quellen: `docs/spezifikation/10-UMSETZUNG.md` §3 und §5, `04-FUNKTIONEN.md` (N
 - **Phase 2 ist etwa zur Hälfte gebaut.** Die Kette Aufnahme → Transkript → Folienzuordnung → Konzepte → Inbox → Kurzfassung steht. Dazu kommen Rückblick, ⌘K, Konzeptansicht und Kostenzähler.
 - **Es fehlen vier Blöcke:** der Vault (F-BIB-01, F-BIB-05 und F-DAT-03), `align.content` (F-NAC-03), die geführte Nacharbeitung (F-NAC-05) und die Notizen im Rückblick (F-NAC-02 rechts, F-NAC-04).
 - **Kein Abnahmekriterium aus Phase 1 oder Phase 2 ist durch eine echte Vorlesung belegt.** Im Repo liegt kein ausgefülltes Hörsaal-Protokoll. Die Konzept-Kette lief noch nie gegen die echte API (#188, „Konzepte erstmals echt testen“).
-- **Für Lernen gibt es nichts:** keine Tabellen `card`, `card_state`, `review_log`, kein `ts-fsrs`, keine Seite hinter `/lernen`.
+- **Für Lernen gibt es nichts:** keine Tabellen `card`, `card_state`, `review_log`, kein `ts-fsrs`, hinter `/lernen` liegt nur ein Platzhalter (`apps/web/src/app/lernen/page.tsx`, „Phase 3“).
 - **F-NAC-05 hängt an Phase 3.** Schritt 3 (Abruf mit KI-Bewertung) und Schritt 5 (Karten) brauchen F-LRN-02 und F-LRN-05. Die Abnahme „Nacharbeitung Median ≤ 15 min“ ist ohne Karten nicht voll erreichbar.
 - **Empfehlung: Variante B (Minimal-Lernen) jetzt, in schmaler Form.** Begründung in §6.
 
