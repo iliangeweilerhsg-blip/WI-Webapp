@@ -2,16 +2,25 @@
 
 // Kurzfassung ✦ einer Vorlesung über dem Transkript (VERTRAEGE §20.4, §20.10, F-NAC-08): höchstens fünf Sätze mit
 // Quellen-Chips und die Gliederung. Aufklappbar. Die Texte kommen von der KI und stehen als reiner Text da.
+import { useState } from 'react';
 import type { EvidenceRef, SessionSummary } from '@sg/shared';
 import { SourceChips } from '../concepts/SourceChips.tsx';
+import { CardEditor, MAX_CARD_SOURCES, uniqueSources, type EditorConcept } from '../learn/CardEditor.tsx';
 
 export interface SummaryPanelProps {
   summary: SessionSummary;
   /** Folien-Chip wählt die Folie, Zeit-Chip springt in der Aufnahme; `false` = normales Ziel */
   onPick: (ref: EvidenceRef) => boolean;
+  /** Aktive Konzepte der Session: Ziel von „Karte daraus“ (§21.10). Ohne sie gibt es den Knopf nicht. */
+  concepts?: readonly EditorConcept[];
 }
 
-export function SummaryPanel({ summary, onPick }: SummaryPanelProps) {
+const cardButton =
+  'min-h-7 rounded-md border border-border px-2 text-xs text-text-muted hover:bg-bg hover:text-text sg-transition';
+
+export function SummaryPanel({ summary, onPick, concepts = [] }: SummaryPanelProps) {
+  // Welcher Satz gerade den Editor zeigt, und wohin der Fokus nach dem Schließen zurückkehrt
+  const [editing, setEditing] = useState<number | null>(null);
   return (
     <details
       open
@@ -30,6 +39,31 @@ export function SummaryPanel({ summary, onPick }: SummaryPanelProps) {
           <li key={i} className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <p className="min-w-0 flex-1 basis-72 break-words text-md">{sentence.text}</p>
             <SourceChips sources={sentence.sources} label={`Quellen zu Satz ${i + 1}`} onPick={onPick} />
+            {concepts.length > 0 && sentence.sources.length > 0 && editing !== i ? (
+              <button
+                type="button"
+                id={`summary-card-${i}`}
+                className={cardButton}
+                aria-label={`Karte aus Satz ${i + 1} anlegen`}
+                onClick={() => setEditing(i)}
+              >
+                Karte daraus
+              </button>
+            ) : null}
+            {editing === i ? (
+              <div className="basis-full">
+                <CardEditor
+                  concepts={concepts}
+                  sources={uniqueSources(sentence.sources.map((ref) => ({ ref }))).slice(0, MAX_CARD_SOURCES)}
+                  preselect="all"
+                  seedText={sentence.text}
+                  onDone={() => {
+                    setEditing(null);
+                    requestAnimationFrame(() => document.getElementById(`summary-card-${i}`)?.focus());
+                  }}
+                />
+              </div>
+            ) : null}
           </li>
         ))}
       </ol>
