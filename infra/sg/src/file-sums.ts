@@ -21,6 +21,12 @@ import { hashFd, NoFollowReader, UnsafeTargetError } from './nofollow.ts';
 export const FILES_FILE = 'files.sha256';
 /** Höchstgröße der Liste (rund 100 Byte je Datei: reicht für über 2 Mio. Dateien) */
 export const FILES_MAX_BYTES = 256 * 1024 * 1024;
+/**
+ * Höchstlänge einer Zeile der Liste (Zeichen, ohne Zeilenumbruch). Eine echte Zeile hat 65 Zeichen plus Pfad; ein Pfad
+ * von 1 Mio. Zeichen kommt praktisch nicht vor. Die Grenze hält den Puffer des Streaming-Lesers klein: Eine Liste ohne
+ * Zeilenumbruch würde sonst ganz im Speicher landen und bei jedem Block neu durchsucht (vor dem Ankervergleich).
+ */
+export const FILES_MAX_LINE = 1024 * 1024;
 const MAX_PROBLEMS = 10;
 
 export type SumSub = 'media' | 'vault';
@@ -91,7 +97,8 @@ export const sha256Hex = (data: string | Buffer): string => createHash('sha256')
 /**
  * Liest die Liste Stück für Stück (Streaming, #324): `feed` nimmt beliebig geschnittene Blöcke, `finish` liefert das
  * Ergebnis. Schlüssel sind die Pfade in NFC (auch wenn eine Liste sie anders schreibt). Ungültiger Aufbau (falsche
- * Zeile, doppelter Pfad, auch nach NFC, fremder Unterordner, letzte Zeile ohne Zeilenumbruch) merkt sich der Leser;
+ * Zeile, doppelter Pfad, auch nach NFC, fremder Unterordner, letzte Zeile ohne Zeilenumbruch,
+ * Zeile länger als `FILES_MAX_LINE`) merkt sich der Leser;
  * danach sammelt er nichts mehr, nimmt aber weiter Blöcke an (der Aufrufer hasht sie trotzdem zu Ende).
  */
 export class FileListParser {
@@ -132,10 +139,16 @@ export class FileListParser {
       from = nl + 1;
     }
     this.pending = this.pending.slice(from);
+    if (this.pending.length > FILES_MAX_LINE) {
+      // Zeile zu lang: ungültig, nichts mehr puffern
+      this.sums = null;
+      this.pending = '';
+    }
   }
 
   private line(line: string): boolean {
     const sums = this.sums as SumMap;
+    if (line.length > FILES_MAX_LINE) return false;
     const tab = line.indexOf('\t');
     if (tab !== 64) return false;
     const sha = line.slice(0, 64);

@@ -42,6 +42,7 @@ import { resolveConfig } from '../src/config.ts';
 import { acquireCoreLock } from '../src/core-lock.ts';
 import {
   emptySums,
+  FILES_MAX_LINE,
   FileListParser,
   formatFileList,
   NameConflictError,
@@ -3266,6 +3267,20 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
       parser.feed(Buffer.from(line.slice(0, 10)));
       parser.feed(Buffer.from(line.slice(10)));
       expect(parser.finish()?.media.get('a')).toBe(sha('a'));
+    });
+
+    it('Zeile über FILES_MAX_LINE: ungültig, der Leser puffert nicht weiter (Liste ohne Zeilenumbruch)', () => {
+      const parser = new FileListParser();
+      const block = Buffer.alloc(64 * 1024, 0x61);
+      for (let i = 0; i <= FILES_MAX_LINE / block.length; i += 1) parser.feed(block);
+      expect(parser.valid).toBe(false);
+      expect((parser as unknown as { pending: string }).pending).toBe('');
+      expect(parser.finish()).toBeNull();
+      // Auch als vollständige Zeile in einem Block
+      expect(parseFileList(`${sha('a')}\tmedia/${'x'.repeat(FILES_MAX_LINE)}\n`)).toBeNull();
+      // Bis zur Grenze gültig
+      const path = `media/${'x'.repeat(FILES_MAX_LINE - 65 - 6)}`;
+      expect(parseFileList(`${sha('a')}\t${path}\n`)?.media.size).toBe(1);
     });
 
     it('Liste passt nicht zum Manifest: nicht_authentisch, auch wenn der Aufbau ungültig ist; mit passender SHA: ungültig', async () => {
