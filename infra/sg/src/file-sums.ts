@@ -6,11 +6,15 @@
 // Datenbank ist damit die Vertrauensquelle: Wer im Ziel eine Datei UND die Liste ändert, ändert die Prüfsumme der
 // Liste und fällt gegenüber `backup_run` auf (wie beim Dump).
 //
+// Pfade werden in Unicode-NFC geschrieben und verglichen: Manche Ziele (HFS+, exFAT, SMB-/NAS-Freigaben) geben Namen
+// mit Umlaut in NFD zurück, die Quelle schreibt sie meist in NFC. Zwei Dateien, deren Pfade nach NFC gleich sind, sind
+// ein Konflikt (fail-closed), beim Backup wie beim Prüfen.
+//
 // Berechnet wird streamend (1-MiB-Blöcke): Audio kann mehrere GB groß sein, nichts wird ganz in den Speicher geladen.
 import { createHash } from 'node:crypto';
 import { closeSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
-import { skipped } from './backup-files.ts';
+import { NameConflictError, nameConflictText, pathKey, skipped } from './backup-files.ts';
 import { hashFd, NoFollowReader, UnsafeTargetError } from './nofollow.ts';
 
 export const FILES_FILE = 'files.sha256';
@@ -38,6 +42,8 @@ export const emptySums = (): SumMap => ({ media: new Map(), vault: new Map() });
 
 export { hashFd };
 
+export { NameConflictError, pathKey };
+
 const escapePath = (path: string): string =>
   path.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
 
@@ -59,19 +65,32 @@ function unescapePath(text: string): string | null {
   return out;
 }
 
-/** Liste als Text, sortiert nach Pfad (Byte-Reihenfolge) */
+/**
+ * Liste als Text: Pfade in NFC, sortiert nach Pfad (Byte-Reihenfolge). Ergeben zwei Pfade nach NFC denselben
+ * Schlüssel, wirft das `NameConflictError` (fail-closed).
+ */
 export function formatFileList(sums: SumMap): { text: string; count: number } {
   const lines: string[] = [];
   for (const sub of SUBS) {
-    const keys = [...sums[sub].keys()].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
-    for (const key of keys) lines.push(`${sums[sub].get(key)}\t${escapePath(`${sub}/${key}`)}\n`);
+    const byKey = new Map<string, { path: string; sha: string }>();
+    for (const [path, sha] of sums[sub]) {
+      const key = pathKey(path);
+      const other = byKey.get(key);
+      if (other) throw new NameConflictError(nameConflictText(`${sub}/${other.path}`, `${sub}/${path}`));
+      byKey.set(key, { path, sha });
+    }
+    const keys = [...byKey.keys()].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+    for (const key of keys) lines.push(`${byKey.get(key)?.sha}\t${escapePath(`${sub}/${key}`)}\n`);
   }
   return { text: lines.join(''), count: lines.length };
 }
 
 export const sha256Hex = (data: string | Buffer): string => createHash('sha256').update(data).digest('hex');
 
-/** Liste lesen. `null`: Aufbau ungültig (falsche Zeile, doppelter Pfad, fremder Unterordner). */
+/**
+ * Liste lesen. Schlüssel sind die Pfade in NFC (auch wenn eine Liste sie anders schreibt). `null`: Aufbau ungültig
+ * (falsche Zeile, doppelter Pfad, auch nach NFC, fremder Unterordner).
+ */
 export function parseFileList(text: string): SumMap | null {
   const sums = emptySums();
   if (text === '') return sums;
@@ -85,7 +104,7 @@ export function parseFileList(text: string): SumMap | null {
     if (path === null) return null;
     const slash = path.indexOf('/');
     const sub = path.slice(0, slash);
-    const rel = path.slice(slash + 1);
+    const rel = pathKey(path.slice(slash + 1));
     if (slash < 1 || (sub !== 'media' && sub !== 'vault') || rel === '') return null;
     if (sums[sub].has(rel)) return null;
     sums[sub].set(rel, sha);
@@ -100,6 +119,11 @@ export interface VerifyOptions {
   strict: boolean;
   /** Wird nach jeder Datei aufgerufen (Fortschritt) */
   onFile?: (bytes: number) => void;
+  /**
+   * `false`: nur Namen vergleichen (fehlt, zusätzlich, doppelt), keine Datei öffnen. Billige Vorprüfung vor dem
+   * Kopieren. Standard: Inhalte hashen.
+   */
+  contents?: boolean;
 }
 
 export interface VerifyResult {
@@ -110,9 +134,11 @@ export interface VerifyResult {
 }
 
 /**
- * Hasht jede Datei unter `root` (streamend) und vergleicht mit `expected` (Schlüssel: Pfad relativ zu `root`). Meldet
- * Dateien mit anderer Prüfsumme (`abweichend`), nicht in der Liste (`zusätzlich`) und in der Liste, aber nicht da
- * (`fehlt`). Hört nach 10 Abweichungen auf. Dateien, die auch das Kopieren ignoriert (`skipped`), zählen nie.
+ * Hasht jede Datei unter `root` (streamend) und vergleicht mit `expected` (Schlüssel: Pfad relativ zu `root` in NFC).
+ * Meldet Dateien mit anderer Prüfsumme (`abweichend`), nicht in der Liste (`zusätzlich`, ohne sie zu hashen), in der
+ * Liste, aber nicht da (`fehlt`), und zwei Dateien, deren Pfade nach NFC gleich sind (`doppelt`). Verglichen wird in
+ * NFC: Ein Ziel, das Namen in NFD zurückgibt, passt so zur Liste. Hört nach 10 Abweichungen auf. Dateien, die auch das
+ * Kopieren ignoriert (`skipped`), zählen nie.
  */
 export function verifyTree(
   root: string | null,
@@ -121,7 +147,12 @@ export function verifyTree(
   options: VerifyOptions,
 ): VerifyResult {
   const result: VerifyResult = { files: 0, bytes: 0, problems: [] };
-  const seen = new Set<string>();
+  /** Gesehene Schlüssel (NFC) mit dem Pfad, wie er im Baum steht: Dateien und, getrennt, Ordner */
+  const seen = new Map<string, string>();
+  const seenDirs = new Map<string, string>();
+  const twinOf = (key: string) => seen.get(key) ?? seenDirs.get(key);
+  const twinText = (path: string, twin: string) =>
+    `${full(path)} gibt es doppelt (wie ${full(twin)}, andere Unicode-Schreibweise)`;
   const full = (rel: string) => `${sub}/${rel}`;
   const problem = (text: string): boolean => {
     result.problems.push(text);
@@ -132,13 +163,36 @@ export function verifyTree(
     for (const { name, info } of options.reader.list(dir)) {
       if (skipped(name)) continue;
       const path = rel === '' ? name : `${rel}/${name}`;
+      const key = pathKey(path);
       if (!info.isSymbolicLink() && info.isDirectory()) {
+        // Zwei Ordner (oder Ordner und Datei) mit nach NFC gleichem Namen: Ein normalisierender Datenordner könnte sie
+        // nicht beide anlegen, ein anderer verteilte die Dateien auf zwei Ordner
+        const twin = twinOf(key);
+        if (twin !== undefined) {
+          if (problem(`Ordner ${twinText(path, twin)}`)) return true;
+          continue;
+        }
+        seenDirs.set(key, path);
         if (walk(options.reader.enter(dir, name, info), path)) return true;
         continue;
       }
       if (info.isSymbolicLink() || !info.isFile()) {
         if (options.strict)
           throw new UnsafeTargetError(`${join(dir, name)} ist ein Symlink oder eine Sonderdatei.`);
+        continue;
+      }
+      const twin = twinOf(key);
+      if (twin !== undefined) {
+        if (problem(`Datei ${twinText(path, twin)}`)) return true;
+        continue;
+      }
+      seen.set(key, path);
+      const want = expected.get(key);
+      if (want === undefined || options.contents === false) {
+        result.files += 1;
+        result.bytes += info.size;
+        options.onFile?.(info.size);
+        if (want === undefined && problem(`zusätzliche Datei ${full(path)}`)) return true;
         continue;
       }
       const opened = options.reader.open(dir, name);
@@ -153,11 +207,7 @@ export function verifyTree(
       result.files += 1;
       result.bytes += real.size;
       options.onFile?.(real.size);
-      const want = expected.get(path);
-      seen.add(path);
-      if (want === undefined) {
-        if (problem(`zusätzliche Datei ${full(path)}`)) return true;
-      } else if (want !== sha) {
+      if (want !== sha) {
         if (problem(`Datei ${full(path)} weicht von der Prüfsumme ab`)) return true;
       }
     }

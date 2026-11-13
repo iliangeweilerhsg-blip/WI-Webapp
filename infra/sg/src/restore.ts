@@ -737,6 +737,7 @@ async function fullRestoreLocked(
     );
     return 1;
   }
+  if (sums) checkStandNames(dir, manifest, sums, targetId);
   if (deps.codeMigrations !== undefined && typeof manifest.migrations === 'number') {
     if (manifest.migrations > deps.codeMigrations) {
       err(
@@ -832,6 +833,29 @@ function loadSumsForRestore(
     }
   }
   return sums;
+}
+
+/**
+ * Namen im Stand gegen die Liste, bevor etwas kopiert wird (billig, kein Hashen, Vergleich in NFC): Eine zusätzliche
+ * Datei im Stand (auch eine große) oder zwei Namen, die nach NFC gleich sind, kommen so gar nicht erst in den
+ * Datenordner. Die Inhalte prüft danach `swapIn` an der Kopie.
+ */
+function checkStandNames(dir: string, manifest: Manifest, sums: SumMap, targetId?: Identity): void {
+  const tree = openStandTree(dir, targetId);
+  for (const sub of SUBS) {
+    const root = tree[sub];
+    if (root === null) continue;
+    const { problems } = asStandError(dir, () =>
+      verifyTree(root, sub, sums[sub], { reader: tree.reader, strict: true, contents: false }),
+    );
+    if (problems.length > 0) {
+      throw new StandError(
+        'beschaedigt',
+        `Die Dateien im Stand ${manifest.stand} stimmen nicht mit den Prüfsummen überein: ${problems.join('; ')}. ` +
+          'Es wurde nichts verändert, deine Daten sind unverändert.',
+      );
+    }
+  }
 }
 
 async function swapIn(

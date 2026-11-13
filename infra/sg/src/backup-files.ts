@@ -133,6 +133,22 @@ export function skipped(name: string): boolean {
   return name.endsWith('.part') || name.endsWith('.partial') || name === '.tmp' || name === '.DS_Store';
 }
 
+/** Schlüssel eines Pfades in `files.sha256` und beim Vergleich (Unicode-NFC, #114 N-1) */
+export const pathKey = (path: string): string => path.normalize('NFC');
+
+/**
+ * Zwei Einträge, deren Pfade nach NFC gleich sind (#114 N-1): Die Prüfsummenliste könnte sie nicht unterscheiden, ein
+ * Ziel, das Namen normalisiert (HFS+, exFAT, manche SMB-/NAS-Freigaben), auch nicht. Das Backup bricht ab (fail-closed).
+ */
+export class NameConflictError extends Error {}
+
+export function nameConflictText(a: string, b: string): string {
+  return (
+    `„${a}“ und „${b}“ unterscheiden sich nur in der Unicode-Schreibweise (NFC/NFD) und wären im Backup nicht ` +
+    'unterscheidbar. Benenne eine der beiden um, dann läuft das Backup wieder.'
+  );
+}
+
 export interface CopyTreeOptions {
   /** Nur für Tests: läuft vor dem Kopieren jeder Datei */
   beforeCopy?: (path: string) => void;
@@ -260,6 +276,19 @@ function copyLevel(
       return;
     }
     throw error;
+  }
+  // Prüfsummen (Backup): zwei Namen, die nach NFC gleich sind, vor dem Kopieren ablehnen. Ein normalisierendes Ziel
+  // scheiterte sonst mitten im Lauf mit „gibt es schon“, ein anderes bekäme zwei Dateien unter einem Listenschlüssel.
+  if (level.sums) {
+    const keys = new Map<string, string>();
+    for (const { name, info } of entries) {
+      if (skipped(name) || info.isSymbolicLink() || !(info.isDirectory() || info.isFile())) continue;
+      const key = pathKey(name);
+      const other = keys.get(key);
+      if (other !== undefined)
+        throw new NameConflictError(nameConflictText(join(src, other), join(src, name)));
+      keys.set(key, name);
+    }
   }
   for (const { name, info } of entries) {
     if (skipped(name)) continue;

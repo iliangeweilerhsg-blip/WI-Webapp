@@ -37,6 +37,7 @@ vi.mock('node:fs', async (importOriginal) => {
 });
 import { resolveConfig } from '../src/config.ts';
 import { acquireCoreLock } from '../src/core-lock.ts';
+import { emptySums, formatFileList, NameConflictError, parseFileList } from '../src/file-sums.ts';
 import {
   copyTree,
   listStands,
@@ -2917,5 +2918,168 @@ describe('Prüfsummen für media/ und vault/ (#114 N-1)', () => {
     const want = createHash('sha256').update(big).digest('hex');
     expect(readFileSync(join(standDir(s), 'files.sha256'), 'utf8')).toContain(`${want}\tmedia/audio.m4a\n`);
     expect(await restoreFull(s)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------- Unicode-Normalisierung der Prüfsummenliste
+
+describe('Prüfsummen: Unicode-Normalisierung (NFC/NFD) der Pfade (#114 N-1)', () => {
+  const STAND = '20261104T030012Z';
+  const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+  const NFC = 'Übung 1.md'.normalize('NFC');
+  const NFD = 'Übung 1.md'.normalize('NFD');
+  const standDir = (s: { target: string }) => join(s.target, STAND);
+  const restoreTest = (s: { deps: RestoreDeps }) =>
+    runRestore(s.deps, { stand: STAND, test: true, yes: false });
+  const restoreFull = (s: { deps: RestoreDeps }) =>
+    runRestore(s.deps, { stand: STAND, test: false, yes: true });
+
+  /**
+   * Unterscheidet das Dateisystem unter `dir` NFC- und NFD-Namen? (ext4: ja; APFS/HFS+: nein, dort lassen sich die
+   * Fälle mit zwei Schreibweisen nicht nachstellen)
+   */
+  function distinguishesNfd(): boolean {
+    const dir = mkdtempSync(join(tmpdir(), 'sg-nfd-'));
+    try {
+      writeFileSync(join(dir, NFC), '');
+      return !existsSync(join(dir, NFD));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const twoForms = distinguishesNfd();
+
+  it('Liste: Pfade werden in NFC geschrieben, gelesen und verglichen', () => {
+    const sums = emptySums();
+    sums.vault.set(`Ordner Ä/${NFD}`, sha('x'));
+    const { text } = formatFileList(sums);
+    expect(text).toBe(`${sha('x')}\tvault/${`Ordner Ä/${NFC}`.normalize('NFC')}\n`);
+    expect(text.includes(NFD)).toBe(false);
+    // Eine Liste mit NFD (etwa von Hand oder aus einer älteren Fassung) ergibt dieselben Schlüssel
+    const parsed = parseFileList(`${sha('x')}\tvault/${NFD}\n`);
+    expect([...(parsed?.vault.keys() ?? [])]).toEqual([NFC]);
+  });
+
+  it('Liste: zwei Pfade, die nach NFC gleich sind, sind ein Konflikt (Schreiben und Lesen)', () => {
+    const sums = emptySums();
+    sums.vault.set(NFC, sha('a'));
+    sums.vault.set(NFD, sha('b'));
+    expect(() => formatFileList(sums)).toThrow(NameConflictError);
+    expect(parseFileList(`${sha('a')}\tvault/${NFC}\n${sha('b')}\tvault/${NFD}\n`)).toBeNull();
+  });
+
+  it('Umlaute, Leerzeichen und Tabs im Namen: Backup, --test und Restore', async () => {
+    const s = restoreSetup();
+    const name = 'Ä ö\tü ß.txt';
+    mkdirSync(join(s.dataDir, 'vault', 'Grüße Ordner'));
+    writeFileSync(join(s.dataDir, 'vault', 'Grüße Ordner', name), 'Inhalt');
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    expect(readFileSync(join(standDir(s), 'files.sha256'), 'utf8')).toContain(
+      `${sha('Inhalt')}\tvault/Grüße Ordner/${name}\n`,
+    );
+    expect(await restoreTest(s)).toBe(0);
+    expect(await restoreFull(s)).toBe(0);
+    expect(readFileSync(join(s.dataDir, 'vault', 'Grüße Ordner', name), 'utf8')).toBe('Inhalt');
+  });
+
+  it.skipIf(!twoForms)(
+    'Ziel gibt Namen in NFD zurück, die Liste hat NFC: --test und Restore bestehen, wiederhergestellt wird der Name aus dem Stand, nur einmal',
+    async () => {
+      const s = restoreSetup();
+      mkdirSync(join(s.dataDir, 'vault', 'Ärger'));
+      writeFileSync(join(s.dataDir, 'vault', 'Ärger', NFC), 'Notiz');
+      expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+      expect(readFileSync(join(standDir(s), 'files.sha256'), 'utf8')).toContain(`vault/Ärger/${NFC}\n`);
+      // Wie ein normalisierendes Ziel (HFS+, NAS): Ordner und Datei stehen dort in NFD
+      const nfdDir = 'Ärger'.normalize('NFD');
+      renameSync(join(standDir(s), 'vault', 'Ärger'), join(standDir(s), 'vault', nfdDir));
+      renameSync(join(standDir(s), 'vault', nfdDir, NFC), join(standDir(s), 'vault', nfdDir, NFD));
+      expect(await restoreTest(s)).toBe(0);
+      expect(s.logs.join('\n')).toMatch(/Prüfsummen \(media\/vault\): alle Dateien stimmen/);
+      expect(await restoreFull(s)).toBe(0);
+      expect(readdirSync(join(s.dataDir, 'vault')).sort()).toEqual(['n.md', nfdDir].sort());
+      expect(readdirSync(join(s.dataDir, 'vault', nfdDir))).toEqual([NFD]);
+      expect(readFileSync(join(s.dataDir, 'vault', nfdDir, NFD), 'utf8')).toBe('Notiz');
+    },
+  );
+
+  it.skipIf(!twoForms)('Quelle schreibt NFD: die Liste trägt NFC, --test besteht', async () => {
+    const s = restoreSetup();
+    writeFileSync(join(s.dataDir, 'vault', NFD), 'Notiz');
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    const list = readFileSync(join(standDir(s), 'files.sha256'), 'utf8');
+    expect(list).toContain(`${sha('Notiz')}\tvault/${NFC}\n`);
+    expect(list.includes(NFD)).toBe(false);
+    expect(await restoreTest(s)).toBe(0);
+  });
+
+  it.skipIf(!twoForms)(
+    'Kollision in der Quelle (NFC und NFD nebeneinander): Backup bricht mit klarer Meldung ab',
+    async () => {
+      const s = restoreSetup();
+      writeFileSync(join(s.dataDir, 'vault', NFC), 'eins');
+      writeFileSync(join(s.dataDir, 'vault', NFD), 'zwei');
+      expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(1);
+      const run = [...s.pg.runs.values()][0];
+      expect(run?.state).toBe('fehler');
+      expect(run?.error).toMatch(/nur in der Unicode-Schreibweise \(NFC\/NFD\)/);
+      expect(existsSync(standDir(s))).toBe(false);
+    },
+  );
+
+  it.skipIf(!twoForms)(
+    'Kollision im Stand (Angreifer legt einen NFD-Zwilling an): Restore bricht vor jeder Änderung ab, --test schlägt fehl',
+    async () => {
+      const s = restoreSetup();
+      writeFileSync(join(s.dataDir, 'vault', NFC), 'Notiz');
+      expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+      // Zwilling statt der Datei n.md: Anzahl und Größe bleiben gleich
+      rmSync(join(standDir(s), 'vault', 'n.md'));
+      writeFileSync(join(standDir(s), 'vault', NFD), '# Notiz');
+      expect(await restoreFull(s)).toBe(1);
+      expect(s.errs.join('\n')).toMatch(/gibt es doppelt/);
+      expect(s.errs.join('\n')).toMatch(/deine Daten sind unverändert/);
+      expect(readFileSync(join(s.dataDir, 'vault', 'n.md'), 'utf8')).toBe('# Notiz');
+      expect(readdirSync(s.dataDir).filter((n) => /neu-|vor-restore|journal/.test(n))).toEqual([]);
+      expect([...s.pg.databases]).toEqual(['sg']);
+      expect(await restoreTest(s)).toBe(1);
+      expect(s.logs.join('\n')).toMatch(/gibt es doppelt/);
+    },
+  );
+
+  it.skipIf(!twoForms)(
+    'Ordner-Zwilling im Stand (Dateien auf NFC- und NFD-Ordner verteilt): Restore bricht vor jeder Änderung ab',
+    async () => {
+      const s = restoreSetup();
+      mkdirSync(join(s.dataDir, 'vault', 'Ärger'));
+      writeFileSync(join(s.dataDir, 'vault', 'Ärger', 'a.md'), 'A');
+      writeFileSync(join(s.dataDir, 'vault', 'Ärger', 'b.md'), 'B');
+      expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+      // Jede Datei passt für sich zur Liste, liegt aber in einem von zwei Ordnern gleichen Namens
+      const nfdDir = join(standDir(s), 'vault', 'Ärger'.normalize('NFD'));
+      mkdirSync(nfdDir);
+      renameSync(join(standDir(s), 'vault', 'Ärger', 'b.md'), join(nfdDir, 'b.md'));
+      expect(await restoreFull(s)).toBe(1);
+      expect(s.errs.join('\n')).toMatch(/Ordner vault\/.* gibt es doppelt/);
+      expect([...s.pg.databases]).toEqual(['sg']);
+      expect(await restoreTest(s)).toBe(1);
+    },
+  );
+
+  it('zusätzliche Datei im Stand wird vor dem Kopieren erkannt und nie in den Datenordner kopiert', async () => {
+    const s = restoreSetup();
+    expect(await runBackup(s.backupDeps, { trigger: 'manuell' })).toBe(0);
+    const manifestPath = join(standDir(s), 'manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+      vault: { files: number; bytes: number };
+    };
+    // Angreifer passt Anzahl und Größe im Manifest an (nicht verankert), die Liste kann er nicht ändern
+    writeFileSync(join(standDir(s), 'vault', 'gross.bin'), 'x'.repeat(1000));
+    manifest.vault = { files: manifest.vault.files + 1, bytes: manifest.vault.bytes + 1000 };
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+    expect(await restoreFull(s)).toBe(1);
+    expect(s.errs.join('\n')).toMatch(/zusätzliche Datei vault\/gross\.bin/);
+    expect(s.logs.join('\n')).not.toMatch(/Kopiere vault\//);
+    expect([...s.pg.databases]).toEqual(['sg']);
   });
 });

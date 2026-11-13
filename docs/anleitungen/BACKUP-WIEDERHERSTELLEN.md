@@ -65,6 +65,8 @@ Das geht nur im Terminal und nur, wenn Core und Worker **nicht** laufen. Es erse
 
 **Wenn eine Prüfsumme nicht stimmt:** Die Meldung nennt die betroffenen Dateien („weicht von der Prüfsumme ab“, „fehlt“ oder „zusätzliche Datei“). Dann wurde der Stand verändert oder ist beschädigt. `pnpm sg restore` bricht ab, **bevor** es etwas tauscht: Deine bisherigen Daten sind unverändert, es bleibt nichts Halbes liegen. Nimm in dem Fall einen anderen Stand aus der Liste und prüfe das Backup-Ziel.
 
+**Umlaute im Dateinamen:** Manche Backup-Ziele (ältere Mac-Platten, exFAT-Sticks, manche NAS) speichern Umlaute intern anders. Das ist kein Fehler, die Prüfung vergleicht die Namen unabhängig davon. Meldet das Backup, zwei Dateien „unterscheiden sich nur in der Unicode-Schreibweise“, liegen zwei Dateien mit scheinbar gleichem Namen im selben Ordner. Benenne eine davon um, dann läuft das Backup wieder.
+
 **Ältere Stände ohne Prüfsummen:** Stände, die vor dieser Funktion angelegt wurden, haben keine Prüfsummen für `media/` und `vault/`. Sie lassen sich weiter wiederherstellen, `sg restore` weist darauf hin und prüft dann nur Anzahl und Größe der Dateien. Jedes neue Backup hat die Prüfsummen.
 
 Die bisherigen Daten bleiben als Sicherheitsnetz liegen: als Datenbank mit dem Zusatz `_vor_restore_…` und als Ordner `media.vor-restore-…` bzw. `vault.vor-restore-…` im Datenordner. Löschen musst du sie selbst.
