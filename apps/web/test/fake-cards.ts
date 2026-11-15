@@ -47,6 +47,8 @@ export interface FakeCardsState {
   conceptModules: Record<string, SearchModuleRef[]>;
   /** Obergrenze je Seite von `GET /cards`, unabhängig vom `limit` der Anfrage (kleine Seiten für „Mehr laden“) */
   listPageSize: number;
+  /** Gelöschte Konzepte: ihre Karten fehlen in `GET /cards`, `restore` einer Karte davon gibt `409 restore_parent_deleted` */
+  deletedConcepts: string[];
 }
 
 export function makeFakeCardsState(): FakeCardsState {
@@ -63,6 +65,7 @@ export function makeFakeCardsState(): FakeCardsState {
     failNextCreate: null,
     conceptModules: {},
     listPageSize: 200,
+    deletedConcepts: [],
   };
 }
 
@@ -521,11 +524,14 @@ export function handleCards(
   const restore = /^\/trash\/([^/]+)\/restore$/.exec(path);
   if (restore && method === 'POST') {
     const card = core.cards.trashed.find((c) => c.id === restore[1]);
-    if (card) {
-      core.cards.trashed = core.cards.trashed.filter((c) => c !== card);
-      core.cards.cards.push(card);
-      return json({ id: card.id, kind: 'card', restored_count: 3 });
+    // Nicht im Karten-Papierkorb: andere Arten (Notizbücher …) und das 404 liefert der übrige Fake-Core
+    if (!card) return null;
+    if (core.cards.deletedConcepts.includes(card.concept_id)) {
+      return fail(409, 'restore_parent_deleted', { parent: { kind: 'concept', id: card.concept_id } });
     }
+    core.cards.trashed = core.cards.trashed.filter((c) => c !== card);
+    core.cards.cards.push(card);
+    return json({ id: card.id, kind: 'card', restored_count: 3 });
   }
   return null;
 }
@@ -583,15 +589,18 @@ function listCards(core: FakeCore, url: URL): Response {
   ) {
     return fail(400, 'validation_failed');
   }
+  // Der Cursor gehört zu seiner Sortierung (wie im Core): ein fremder ergibt `invalid_cursor`
   let offset = 0;
   if (cursor !== null) {
-    const m = /^o(\d+)$/.exec(cursor);
-    if (!m) return fail(400, 'invalid_cursor');
-    offset = Number(m[1]);
+    const m = /^(neu|faellig|schwer):o(\d+)$/.exec(cursor);
+    if (!m || m[1] !== sort) return fail(400, 'invalid_cursor');
+    offset = Number(m[2]);
   }
   const needle = q?.toLowerCase();
   const matching = core.cards.cards.filter(
     (card) =>
+      !core.cards.deletedConcepts.includes(card.concept_id) &&
+      core.concepts.every((c) => c.concept.id !== card.concept_id || c.concept.status === 'aktiv') &&
       (conceptId === null || card.concept_id === conceptId) &&
       (moduleId === null ||
         (core.cards.conceptModules[card.concept_id] ?? []).some((m) => m.id === moduleId)) &&
@@ -619,7 +628,7 @@ function listCards(core: FakeCore, url: URL): Response {
       concept: (({ id, name }) => ({ id, name }))(conceptRef(core, card.concept_id)),
       modules: core.cards.conceptModules[card.concept_id] ?? [],
     })),
-    next_cursor: more ? `o${offset + size}` : null,
+    next_cursor: more ? `${sort}:o${offset + size}` : null,
   });
 }
 

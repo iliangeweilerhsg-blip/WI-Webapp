@@ -15,11 +15,13 @@ import { CardManager } from '../src/components/learn/CardManager.tsx';
 import { ConceptCards } from '../src/components/learn/ConceptCards.tsx';
 import { LearnView } from '../src/components/learn/LearnView.tsx';
 import {
+  RESTORE_CONCURRENCY,
   bulkMessage,
   cardListHref,
   cardListQuery,
   filtersFromParams,
   filtersToSearch,
+  restoreMessage,
 } from '../src/lib/card-list.ts';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { ThemeProvider } from '../src/lib/theme.tsx';
@@ -146,6 +148,19 @@ describe('Liste', () => {
     expect(hard.closest('p')?.className).toMatch(/text-muted/);
   });
 
+  it('„schwer“ steht auch bei pausierten Karten da (wie der Filter „Schwer“)', async () => {
+    boot([
+      frage('Pausiert und schwer', {
+        suspended: true,
+        state: makeCardState({ state: 'review', due: '2026-12-02T10:00:00Z', lapses: 4, difficulty: 8 }),
+      }),
+    ]);
+    wrap(<CardManager />);
+    const state = await screen.findByTestId('card-state');
+    expect(state).toHaveTextContent('pausiert');
+    expect(state).toHaveTextContent('schwer');
+  });
+
   it('lädt die erste Seite ohne Filter mit dem Standard', async () => {
     boot([frage('Eins')]);
     wrap(<CardManager />);
@@ -237,6 +252,24 @@ describe('Filter und Adresse', () => {
     expect(window.history.length).toBe(lengthBefore);
   });
 
+  it('Zurück während des Tippens: der wartende Suchbegriff landet nicht im vorigen Eintrag', async () => {
+    boot([frage('Normalform Eins'), frage('Joins Zwei')]);
+    wrap(<CardManager />);
+    await screen.findByText('Normalform Eins');
+    const input = screen.getByLabelText('Karten suchen');
+    fireEvent.change(input, { target: { value: 'Joins' } });
+    // Zurück vor Ablauf der 250 ms: die Adresse bleibt ohne Suche
+    act(() => {
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 450));
+    });
+    expect(new URLSearchParams(window.location.search).get('q')).toBeNull();
+    expect(input).toHaveValue('');
+    expect(listGets().filter((r) => param(r.path, 'q') !== null)).toHaveLength(0);
+  });
+
   it('concept_id steht als entfernbarer Chip und filtert', async () => {
     boot([frage('3NF-Karte'), makeCard({ concept_id: C_SQL, content: CLOZE })]);
     setUrl(`?concept_id=${C_3NF}`);
@@ -308,6 +341,43 @@ describe('Mehr laden', () => {
   });
 });
 
+describe('Sortierwechsel nach „Mehr laden“', () => {
+  it('geht ohne Cursor der alten Sortierung raus und endet nicht im Fehler', async () => {
+    boot(Array.from({ length: 60 }, (_, n) => frage(`Karte ${n}`)));
+    const user = userEvent.setup();
+    wrap(<CardManager />);
+    await screen.findAllByRole('listitem', { name: /^Karte:/ });
+    await user.click(await screen.findByRole('button', { name: 'Mehr laden' }));
+    await waitFor(() => expect(screen.getAllByRole('listitem', { name: /^Karte:/ }).length).toBe(60));
+    expect(param(lastListGet(), 'cursor')).not.toBeNull();
+    await user.selectOptions(screen.getByLabelText('Sortierung'), 'faellig');
+    await waitFor(() => expect(param(lastListGet(), 'sort')).toBe('faellig'));
+    expect(param(lastListGet(), 'cursor')).toBeNull();
+    await screen.findByRole('button', { name: 'Mehr laden' });
+    expect(screen.queryByText(/lassen sich gerade nicht laden/)).not.toBeInTheDocument();
+  });
+
+  it('der Fake-Core bindet den Cursor an die Sortierung (fremder Cursor: invalid_cursor)', async () => {
+    boot(Array.from({ length: 60 }, (_, n) => frage(`Karte ${n}`)));
+    const first = (await (await fetch('/api/v1/cards?limit=50')).json()) as { next_cursor: string };
+    const own = await fetch(`/api/v1/cards?limit=50&cursor=${encodeURIComponent(first.next_cursor)}`);
+    expect(own.status).toBe(200);
+    const other = await fetch(
+      `/api/v1/cards?limit=50&sort=faellig&cursor=${encodeURIComponent(first.next_cursor)}`,
+    );
+    expect(other.status).toBe(400);
+    expect(((await other.json()) as { error: { code: string } }).error.code).toBe('invalid_cursor');
+  });
+
+  it('der Fake-Core listet keine Karten gelöschter oder nicht aktiver Konzepte', async () => {
+    boot([frage('Eins'), frage('SQL', { concept_id: C_SQL })]);
+    core.cards.deletedConcepts.push(C_SQL);
+    wrap(<CardManager />);
+    await screen.findByText('Eins');
+    expect(screen.queryByText('SQL')).not.toBeInTheDocument();
+  });
+});
+
 describe('Einzelaktionen', () => {
   async function openMenu(user: ReturnType<typeof userEvent.setup>, front: string) {
     await user.click(await screen.findByRole('button', { name: `Menü: ${front}` }));
@@ -370,6 +440,21 @@ describe('Einzelaktionen', () => {
     await user.click(await screen.findByRole('button', { name: 'Rückgängig' }));
     await screen.findByText('Eins');
     expect(restorePosts()).toHaveLength(1);
+  });
+
+  it('Rückgängig nach dem Löschen, wenn das Konzept inzwischen gelöscht ist: Text für Karten, nicht für Module', async () => {
+    boot([frage('Eins')]);
+    const user = userEvent.setup();
+    wrap(<CardManager />);
+    await openMenu(user, 'Eins');
+    await user.click(screen.getByRole('button', { name: 'Löschen' }));
+    await screen.findByText('Karte gelöscht');
+    core.cards.deletedConcepts.push(C_3NF);
+    await user.click(await screen.findByRole('button', { name: 'Rückgängig' }));
+    expect(
+      await screen.findByText('Das Konzept dieser Karte ist gelöscht oder nicht mehr aktiv.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Das Modul ist gelöscht/)).not.toBeInTheDocument();
   });
 });
 
@@ -463,6 +548,88 @@ describe('Mehrfachauswahl', () => {
     expect(await screen.findByText('1 nicht mehr vorhanden')).toBeInTheDocument();
   });
 
+  it('Rückgängig nach Sammel-Löschen zählt: wiederhergestellt und nicht möglich (Konzept gelöscht)', async () => {
+    boot([frage('Eins'), frage('Zwei'), frage('Drei'), frage('SQL eins', { concept_id: C_SQL })]);
+    const user = userEvent.setup();
+    wrap(<CardManager />);
+    await screen.findByText('Eins');
+    await user.click(screen.getByRole('checkbox', { name: 'Alle auf dieser Seite' }));
+    await user.click(screen.getByRole('button', { name: 'Löschen' }));
+    await screen.findByText('4 gelöscht');
+    core.cards.deletedConcepts.push(C_SQL);
+    await user.click(screen.getByRole('button', { name: 'Rückgängig' }));
+    expect(
+      await screen.findByText('3 wiederhergestellt · 1 nicht möglich (Konzept gelöscht)'),
+    ).toBeInTheDocument();
+    expect(core.cards.cards).toHaveLength(3);
+  });
+
+  it('Rückgängig: eine Karte, die nicht mehr im Papierkorb liegt, zählt als „nicht möglich“', async () => {
+    const cards = three();
+    boot(cards);
+    const user = userEvent.setup();
+    wrap(<CardManager />);
+    await screen.findByText('Eins');
+    await user.click(screen.getByRole('checkbox', { name: 'Alle auf dieser Seite' }));
+    await user.click(screen.getByRole('button', { name: 'Löschen' }));
+    await screen.findByText('3 gelöscht');
+    core.cards.trashed = core.cards.trashed.filter((c) => c.id !== cards[0]?.id);
+    await user.click(screen.getByRole('button', { name: 'Rückgängig' }));
+    expect(await screen.findByText('2 wiederhergestellt · 1 nicht möglich')).toBeInTheDocument();
+  });
+
+  it('Rückgängig stellt höchstens RESTORE_CONCURRENCY Karten gleichzeitig wieder her', async () => {
+    boot(Array.from({ length: 20 }, (_, n) => frage(`Karte ${n}`)));
+    const user = userEvent.setup();
+    wrap(<CardManager />);
+    await screen.findByText('Karte 0');
+    await user.click(screen.getByRole('checkbox', { name: 'Alle auf dieser Seite' }));
+    await user.click(screen.getByRole('button', { name: 'Löschen' }));
+    await screen.findByText('20 gelöscht');
+    // Wiederherstellungen verzögern und die gleichzeitig offenen zählen
+    const real = globalThis.fetch;
+    let open = 0;
+    let peak = 0;
+    globalThis.fetch = (async (input: string, init?: RequestInit) => {
+      if (!/\/trash\/.+\/restore/.test(String(input))) return real(input, init);
+      open += 1;
+      peak = Math.max(peak, open);
+      await new Promise((r) => setTimeout(r, 15));
+      try {
+        return await real(input, init);
+      } finally {
+        open -= 1;
+      }
+    }) as typeof fetch;
+    try {
+      await user.click(screen.getByRole('button', { name: 'Rückgängig' }));
+      await waitFor(() => expect(core.cards.cards).toHaveLength(20));
+    } finally {
+      globalThis.fetch = real;
+    }
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(RESTORE_CONCURRENCY);
+  });
+
+  it('nach Sammel-Pausieren und -Fortsetzen steht der Fokus auf „Alle auf dieser Seite“', async () => {
+    boot(three());
+    const user = userEvent.setup();
+    wrap(<CardManager />);
+    await screen.findByText('Eins');
+    await user.click(screen.getByRole('checkbox', { name: 'Karte auswählen: Eins' }));
+    await user.click(screen.getByRole('button', { name: 'Pausieren' }));
+    await screen.findByText('1 pausiert');
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'Alle auf dieser Seite' })).toHaveFocus(),
+    );
+    await user.click(screen.getByRole('checkbox', { name: 'Karte auswählen: Zwei' }));
+    await user.click(screen.getByRole('button', { name: 'Fortsetzen' }));
+    await screen.findByText('1 fortgesetzt');
+    await waitFor(() =>
+      expect(screen.getByRole('checkbox', { name: 'Alle auf dieser Seite' })).toHaveFocus(),
+    );
+  });
+
   it('bulkMessage fasst ruhig zusammen', () => {
     expect(bulkMessage('suspend', { changed: ['a', 'b', 'c'], skipped: [] })).toBe('3 pausiert');
     expect(
@@ -474,9 +641,73 @@ describe('Mehrfachauswahl', () => {
         ],
       }),
     ).toBe('1 gelöscht · 2 unverändert');
+    expect(restoreMessage({ restored: 3, conceptGone: 1, failed: 0 })).toBe(
+      '3 wiederhergestellt · 1 nicht möglich (Konzept gelöscht)',
+    );
     expect(bulkMessage('resume', { changed: [], skipped: [{ id: 'b', code: 'unchanged' }] })).toBe(
       '1 unverändert',
     );
+  });
+});
+
+describe('Auswahl-Grenze (200)', () => {
+  async function loadAll(user: ReturnType<typeof userEvent.setup>, expected: number) {
+    for (let guard = 0; guard < 10; guard += 1) {
+      const more = screen.queryByRole('button', { name: 'Mehr laden' });
+      if (!more) break;
+      const before = screen.getAllByRole('listitem', { name: /^Karte:/ }).length;
+      await user.click(more);
+      await waitFor(() =>
+        expect(screen.getAllByRole('listitem', { name: /^Karte:/ }).length).toBeGreaterThan(before),
+      );
+    }
+    expect(screen.getAllByRole('listitem', { name: /^Karte:/ })).toHaveLength(expected);
+  }
+  const many = () => Array.from({ length: 205 }, (_, n) => frage(`Karte ${String(n).padStart(3, '0')}`));
+
+  it('„Die ersten 200 auswählen“ wählt genau 200; der 201. Haken geht nicht; Aktionen senden höchstens 200 IDs', async () => {
+    boot(many());
+    const user = userEvent.setup();
+    wrap(<CardManager />);
+    await screen.findAllByRole('listitem', { name: /^Karte:/ });
+    await loadAll(user, 205);
+    expect(screen.queryByRole('checkbox', { name: 'Alle auf dieser Seite' })).not.toBeInTheDocument();
+    const all = screen.getByRole('checkbox', { name: 'Die ersten 200 auswählen' });
+    await user.click(all);
+    expect(await screen.findByText('200 ausgewählt')).toBeInTheDocument();
+    expect(all).toBeChecked();
+    expect(screen.getByText('Höchstens 200 auf einmal.')).toBeInTheDocument();
+    // Die Zeilen 201 bis 205 sind gesperrt, per Maus ...
+    const boxes = screen.getAllByRole('checkbox', { name: /^Karte auswählen:/ });
+    const unselected = boxes.filter((b) => !(b as HTMLInputElement).checked);
+    expect(unselected).toHaveLength(5);
+    for (const box of unselected) expect(box).toBeDisabled();
+    await user.click(unselected[0] as HTMLElement);
+    expect(screen.getByText('200 ausgewählt')).toBeInTheDocument();
+    // ... und per Leertaste auf der Zeile
+    const row = screen.getAllByRole('listitem', { name: /^Karte:/ })[204] as HTMLElement;
+    row.focus();
+    await user.keyboard(' ');
+    expect(screen.getByText('200 ausgewählt')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Pausieren' }));
+    await waitFor(() => expect(bulkPosts()).toHaveLength(1));
+    expect((bodyOf(bulkPosts()[0]).ids as string[]).length).toBe(200);
+  });
+
+  it('wieder abhaken macht Platz für eine andere Karte', async () => {
+    boot(many());
+    const user = userEvent.setup();
+    wrap(<CardManager />);
+    await screen.findAllByRole('listitem', { name: /^Karte:/ });
+    await loadAll(user, 205);
+    await user.click(screen.getByRole('checkbox', { name: 'Die ersten 200 auswählen' }));
+    const boxes = () => screen.getAllByRole('checkbox', { name: /^Karte auswählen:/ }) as HTMLInputElement[];
+    await user.click(boxes().find((b) => b.checked) as HTMLElement);
+    expect(screen.getByText('199 ausgewählt')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Die ersten 200 auswählen' })).not.toBeChecked();
+    // Jetzt ist wieder Platz: eine gesperrte Zeile lässt sich haken
+    await user.click(boxes().find((b) => !b.checked && !b.disabled) as HTMLElement);
+    expect(screen.getByText('200 ausgewählt')).toBeInTheDocument();
   });
 });
 

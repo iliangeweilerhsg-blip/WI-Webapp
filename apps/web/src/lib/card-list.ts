@@ -12,8 +12,8 @@ import {
   type CardListSort,
   type CardListStatus,
 } from '@sg/shared';
-import { apiGet, apiSend } from './api.ts';
-import { CARDS_KEY } from './cards.ts';
+import { ApiRequestError, apiGet, apiSend } from './api.ts';
+import { CARDS_KEY, restoreCard } from './cards.ts';
 import { useHydrated, useQueryParam } from './hydrated.ts';
 
 export const CARD_LIST_PATH = '/lernen/karten';
@@ -188,7 +188,10 @@ export function bulkCards(ids: readonly string[], action: CardBulkAction): Promi
   return apiSend('POST', '/cards/bulk', CardBulkResultSchema, { body: { ids: [...ids], action } });
 }
 
-/** Ab dieser Schwelle gilt eine Karte als „schwer“ (wie im Core, `learning/params.ts`, §21.14) */
+/**
+ * Ab dieser Schwelle gilt eine Karte als „schwer“. Absichtlich dupliziert: gleiche Werte wie im Core
+ * (`services/core/src/learning/params.ts`, VERTRAEGE §21.14), damit Markierung und Filter `status=schwer` übereinstimmen.
+ */
 const HARD_LAPSES = 3;
 const HARD_DIFFICULTY = 7;
 
@@ -209,5 +212,48 @@ export function bulkMessage(action: CardBulkAction, result: CardBulkResult): str
   }
   if (unchanged > 0) parts.push(`${unchanged} unverändert`);
   if (gone > 0) parts.push(`${gone} nicht mehr vorhanden`);
+  return parts.join(' · ');
+}
+
+/** So viele Wiederherstellungen laufen gleichzeitig (statt bis zu 200 auf einmal) */
+export const RESTORE_CONCURRENCY = 6;
+
+export interface RestoreSummary {
+  restored: number;
+  /** Das Konzept der Karte ist gelöscht oder nicht mehr aktiv (`409 restore_parent_deleted`) */
+  conceptGone: number;
+  /** Aus anderem Grund nicht möglich (nicht mehr im Papierkorb, Verbindung, …) */
+  failed: number;
+}
+
+/** Karten aus dem Papierkorb holen, höchstens `RESTORE_CONCURRENCY` gleichzeitig; scheitert eine, laufen die anderen weiter */
+export async function restoreCards(ids: readonly string[]): Promise<RestoreSummary> {
+  const summary: RestoreSummary = { restored: 0, conceptGone: 0, failed: 0 };
+  let next = 0;
+  const worker = async () => {
+    while (next < ids.length) {
+      const id = ids[next++] as string;
+      try {
+        await restoreCard(id);
+        summary.restored += 1;
+      } catch (error) {
+        if (error instanceof ApiRequestError && error.code === 'restore_parent_deleted') {
+          summary.conceptGone += 1;
+        } else {
+          summary.failed += 1;
+        }
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(RESTORE_CONCURRENCY, ids.length) }, worker));
+  return summary;
+}
+
+/** Meldung nach „Rückgängig“ (nur bei Lücken): „3 wiederhergestellt · 1 nicht möglich (Konzept gelöscht)“ */
+export function restoreMessage(summary: RestoreSummary): string {
+  const parts: string[] = [];
+  if (summary.restored > 0) parts.push(`${summary.restored} wiederhergestellt`);
+  if (summary.conceptGone > 0) parts.push(`${summary.conceptGone} nicht möglich (Konzept gelöscht)`);
+  if (summary.failed > 0) parts.push(`${summary.failed} nicht möglich`);
   return parts.join(' · ');
 }

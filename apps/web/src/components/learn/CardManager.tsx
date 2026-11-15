@@ -16,8 +16,11 @@ import {
   STATUS_OPTIONS,
   bulkCards,
   bulkMessage,
+  filtersFromParams,
   hasActiveFilter,
   isHardCard,
+  restoreCards,
+  restoreMessage,
   updateCardFilters,
   useCardFilters,
   useCardList,
@@ -30,7 +33,6 @@ import {
   cardErrorMessage,
   cardFrontText,
   cardStateText,
-  restoreCard,
 } from '../../lib/cards.ts';
 import { conceptHref, useConceptDetail } from '../../lib/concepts.ts';
 import { UNDO_MS } from '../../lib/inbox.ts';
@@ -105,6 +107,7 @@ function FilterBar({ filters }: { filters: CardFilters }) {
   const [text, setText] = useState(filters.q);
   // Was zuletzt in die Adresse geschrieben wurde: Nur andere Änderungen (Zurück-Taste) setzen das Feld neu
   const written = useRef(filters.q);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (filters.q !== written.current) {
@@ -116,12 +119,29 @@ function FilterBar({ filters }: { filters: CardFilters }) {
   useEffect(() => {
     const q = text.trim();
     if (q === written.current) return;
-    const timer = setTimeout(() => {
+    const handle = setTimeout(() => {
+      timer.current = null;
       written.current = q;
       updateCardFilters({ q }, 'replace');
     }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
+    timer.current = handle;
+    return () => clearTimeout(handle);
   }, [text]);
+
+  // Zurück/Vorwärts: Ein noch wartendes Tippen würde sonst den Suchbegriff in den vorigen Verlaufseintrag schreiben.
+  // Die Adresse gilt, das Feld folgt ihr.
+  useEffect(() => {
+    const onPop = () => {
+      if (timer.current === null) return;
+      clearTimeout(timer.current);
+      timer.current = null;
+      const q = filtersFromParams((name) => new URLSearchParams(window.location.search).get(name)).q;
+      written.current = q;
+      setText(q);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   const moduleList = modules.data ?? [];
   const unknownModule = filters.module_id !== null && !moduleList.some((m) => m.id === filters.module_id);
@@ -233,10 +253,12 @@ function FilterBar({ filters }: { filters: CardFilters }) {
 interface RowProps {
   item: CardListItem;
   selected: boolean;
+  /** Die Auswahl ist voll (`BULK_MAX`): weitere Häkchen gehen nicht */
+  locked: boolean;
   onToggle: (id: string) => void;
 }
 
-function CardListRow({ item, selected, onToggle }: RowProps) {
+function CardListRow({ item, selected, locked, onToggle }: RowProps) {
   const { card, concept, modules } = item;
   const actions = useCardActions();
   const [editing, setEditing] = useState(false);
@@ -283,6 +305,7 @@ function CardListRow({ item, selected, onToggle }: RowProps) {
         id={checkboxId}
         type="checkbox"
         checked={selected}
+        disabled={locked}
         aria-label={`Karte auswählen: ${front}`}
         className="mt-1 size-5 shrink-0"
         onChange={() => onToggle(card.id)}
@@ -332,7 +355,8 @@ function CardListRow({ item, selected, onToggle }: RowProps) {
               <span>{CARD_KIND_LABELS[card.content.kind]}</span>
               <span data-testid="card-state">
                 {cardStateText(card)}
-                {!card.suspended && isHardCard(card) ? <span data-testid="card-hard"> · schwer</span> : null}
+                {/* Auch bei pausierten Karten: gleiche Regel wie der Filter „Schwer“, der sie ebenfalls listet */}
+                {isHardCard(card) ? <span data-testid="card-hard"> · schwer</span> : null}
               </span>
             </p>
             <div className="mt-2">
@@ -371,6 +395,10 @@ export function CardManager() {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const selectAllId = useId();
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const [focusTick, setFocusTick] = useState(0);
+  const focusPending = useRef(false);
 
   const items = useMemo(() => query.data?.pages.flatMap((page) => page.items) ?? [], [query.data]);
 
@@ -388,8 +416,20 @@ export function CardManager() {
     void client.invalidateQueries({ queryKey: REVIEW_KEY });
   };
 
+  // Nach einer Sammelaktion ohne „Rückgängig“-Toast: Fokus auf „Alle auf dieser Seite“, sonst erste Zeile, sonst Titel
+  useEffect(() => {
+    if (!focusPending.current || selected.size > 0) return;
+    focusPending.current = false;
+    const target =
+      selectAllRef.current ??
+      listRef.current?.querySelector<HTMLElement>('[data-card-row]') ??
+      document.getElementById('screen-title');
+    target?.focus();
+  }, [focusTick, selected, items]);
+
   function toggle(id: string) {
     setSelected((current) => {
+      if (!current.has(id) && current.size >= BULK_MAX) return current;
       const next = new Set(current);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -399,6 +439,7 @@ export function CardManager() {
 
   const selectable = items.slice(0, BULK_MAX);
   const allSelected = selectable.length > 0 && selectable.every((i) => selected.has(i.card.id));
+  const limitReached = selected.size >= BULK_MAX;
 
   function toggleAll() {
     setSelected(allSelected ? new Set() : new Set(selectable.map((i) => i.card.id)));
@@ -408,7 +449,7 @@ export function CardManager() {
     if (bulkBusy || selected.size === 0) return;
     setBulkBusy(true);
     try {
-      const result = await bulkCards([...selected], action);
+      const result = await bulkCards([...selected].slice(0, BULK_MAX), action);
       setSelected(new Set());
       refresh();
       const message = bulkMessage(action, result);
@@ -420,17 +461,18 @@ export function CardManager() {
           durationMs: UNDO_MS,
           focusAction: true,
           onAction: () => {
-            void Promise.allSettled(ids.map((id) => restoreCard(id))).then((results) => {
+            void restoreCards(ids).then((summary) => {
               refresh();
-              const failed = results.find((r) => r.status === 'rejected');
-              if (failed && failed.status === 'rejected') {
-                toast.show({ message: cardErrorMessage(failed.reason) });
+              if (summary.conceptGone > 0 || summary.failed > 0) {
+                toast.show({ message: restoreMessage(summary) });
               }
             });
           },
         });
       } else {
         toast.show({ message });
+        focusPending.current = true;
+        setFocusTick((n) => n + 1);
       }
     } catch (error) {
       toast.show({ message: cardErrorMessage(error) });
@@ -490,13 +532,17 @@ export function CardManager() {
           <div className="flex min-h-9 items-center gap-2">
             <input
               id={selectAllId}
+              ref={(el) => {
+                selectAllRef.current = el;
+                if (el) el.indeterminate = selected.size > 0 && !allSelected;
+              }}
               type="checkbox"
               className="size-5"
               checked={allSelected}
               onChange={toggleAll}
             />
             <label htmlFor={selectAllId} className="text-sm">
-              Alle auf dieser Seite
+              {items.length > BULK_MAX ? `Die ersten ${BULK_MAX} auswählen` : 'Alle auf dieser Seite'}
             </label>
           </div>
           {selected.size > 0 ? (
@@ -518,15 +564,18 @@ export function CardManager() {
             </div>
           ) : null}
         </div>
-        {items.length > BULK_MAX ? (
-          <p className="mt-1 text-xs text-text-muted">Eine Auswahl umfasst höchstens {BULK_MAX} Karten.</p>
+        {limitReached || items.length > BULK_MAX ? (
+          <p role="status" data-testid="bulk-limit" className="mt-1 text-xs text-text-muted">
+            Höchstens {BULK_MAX} auf einmal.
+          </p>
         ) : null}
-        <ul className="mt-2 divide-y divide-border rounded-lg border border-border px-2">
+        <ul ref={listRef} className="mt-2 divide-y divide-border rounded-lg border border-border px-2">
           {items.map((item) => (
             <CardListRow
               key={item.card.id}
               item={item}
               selected={selected.has(item.card.id)}
+              locked={limitReached && !selected.has(item.card.id)}
               onToggle={toggle}
             />
           ))}
