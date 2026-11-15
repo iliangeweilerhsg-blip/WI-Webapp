@@ -5,7 +5,9 @@
 import { useRef, useState } from 'react';
 import type { Card, EvidenceView } from '@sg/shared';
 import { CARD_KIND_LABELS, cardFrontText, cardStateText, useConceptCards } from '../../lib/cards.ts';
+import Link from 'next/link';
 import { friendlyMessage } from '../../lib/api.ts';
+import { cardListHref } from '../../lib/card-list.ts';
 import { CardEditor } from './CardEditor.tsx';
 import { CardEditFields } from './CardEditFields.tsx';
 import { CardMenu } from './CardMenu.tsx';
@@ -136,11 +138,21 @@ export function ConceptCards({ conceptId, conceptName, evidence }: ConceptCardsP
           Noch keine Karten. Sie entstehen als Vorschlag nach einer Vorlesung.
         </p>
       ) : (
-        <ul className="mt-2 divide-y divide-border">
-          {items.map((card) => (
-            <CardRow key={card.id} card={card} />
-          ))}
-        </ul>
+        <>
+          <ul className="mt-2 divide-y divide-border">
+            {items.map((card) => (
+              <CardRow key={card.id} card={card} />
+            ))}
+          </ul>
+          <p className="mt-2 text-sm">
+            <Link
+              href={cardListHref({ concept_id: conceptId })}
+              className="text-text-muted underline-offset-2 hover:text-text hover:underline"
+            >
+              Alle Karten dieses Konzepts
+            </Link>
+          </p>
+        </>
       )}
     </section>
   );

@@ -24,6 +24,7 @@ import {
   useRatingOutbox,
   useReviewQueue,
 } from '../../lib/cards.ts';
+import { cardListHref } from '../../lib/card-list.ts';
 import { conceptHref } from '../../lib/concepts.ts';
 import { CoreHint } from '../CoreHint.tsx';
 import { EmptyState } from '../Placeholder.tsx';
@@ -513,6 +514,14 @@ export function LearnView() {
             {note}
           </p>
         ) : null}
+        <p className="text-sm">
+          <Link
+            href={cardListHref()}
+            className="text-text-muted underline-offset-2 hover:text-text hover:underline"
+          >
+            Karten verwalten
+          </Link>
+        </p>
       </div>
     </section>
   );

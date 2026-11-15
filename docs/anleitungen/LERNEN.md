@@ -88,6 +88,18 @@ Ein Lerntag endet um **04:00 Uhr** (Ortszeit des Macs). Wer um 01:30 noch wieder
 
 Bewertungen werden erneut gesendet. Bleibt es dabei, steht „Einige Bewertungen sind noch nicht gespeichert“ mit **Erneut versuchen**.
 
+## 4a. Karten verwalten
+
+Eine Liste aller Karten mit Filtern, Suche und Sammelaktionen. Du erreichst sie über **Karten verwalten** auf **Lernen** oder über **Alle Karten dieses Konzepts** im Abschnitt „Karten“ der Konzeptansicht.
+
+- **Filter:** Fach, Typ (Frage und Antwort, Lückentext), Herkunft (KI, von Hand), Status (Alle, Aktiv, Pausiert, Neu, Schwer) und Sortierung (Neueste, Fällig zuerst, Schwerste). Die Suche findet Teilwörter in Vorderseite, Antwort, Erklärung und Lücken. Alle Filter stehen in der Adresse: Du kannst sie als Lesezeichen speichern, und die Zurück-Taste führt zum vorigen Filter. Kommst du aus einem Konzept, steht dessen Name als Chip da. Mit ✕ entfernst du ihn.
+- **Liste:** Je Karte siehst du die Vorderseite (Lücken als […]), das Konzept als Link, das Modul-Kürzel, den Typ und den Zustand („neu“, „pausiert“, „fällig am …“, bei Bedarf dezent „schwer“) sowie die Quellen. Eine Gesamtzahl gibt es nicht. **Mehr laden** holt die nächsten Karten.
+- **Eine Karte ändern:** Das Menü ⋯ bietet Bearbeiten, Pausieren bzw. Fortsetzen und Löschen. Nach dem Löschen steht 10 Sekunden lang **Rückgängig** da.
+- **Mehrere Karten:** Hake Karten an oder wähle **Alle auf dieser Seite** (höchstens 200 auf einmal). Dann erscheinen „n ausgewählt“ und **Pausieren**, **Fortsetzen**, **Löschen**. Karten, die schon im Zielzustand sind, meldet die Seite ruhig als „unverändert“. Nach dem Löschen holt **Rückgängig** (10 Sekunden) alle gelöschten Karten zurück.
+- **Tastatur:** ↑ und ↓ wechseln die Zeile, Leertaste markiert sie, **E** bearbeitet sie.
+
+Pausierte Karten kommen nicht in „Heute wiederholen“, bis du sie fortsetzt.
+
 ## 5. Einstellungen
 
 Einen Bereich **Einstellungen → Lernen** (Zeitbudget, neue Karten je Tag) **gibt es in der Web-App noch nicht**. Es gelten die Standardwerte: 20 Minuten und 20 neue Karten am Tag. Im Core sind beide Werte schon einstellbar, nur die Oberfläche fehlt.

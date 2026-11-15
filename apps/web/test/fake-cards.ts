@@ -11,6 +11,7 @@ import type {
   ReviewLogEntry,
   ReviewQueue,
   ReviewQueueItem,
+  SearchModuleRef,
 } from '@sg/shared';
 import type { FakeCore } from './fake-core.ts';
 
@@ -42,6 +43,10 @@ export interface FakeCardsState {
   goneRefs: EvidenceRef[];
   /** Die nächste Anlage von Hand scheitert wie bei abgerissener Verbindung; `after` = der Core hat sie davor angelegt */
   failNextCreate: null | 'before' | 'after';
+  /** Module je Konzept für `GET /cards` (`module_id`-Filter und `modules` je Karte) */
+  conceptModules: Record<string, SearchModuleRef[]>;
+  /** Obergrenze je Seite von `GET /cards`, unabhängig vom `limit` der Anfrage (kleine Seiten für „Mehr laden“) */
+  listPageSize: number;
 }
 
 export function makeFakeCardsState(): FakeCardsState {
@@ -56,6 +61,8 @@ export function makeFakeCardsState(): FakeCardsState {
     batchCards: {},
     goneRefs: [],
     failNextCreate: null,
+    conceptModules: {},
+    listPageSize: 200,
   };
 }
 
@@ -456,6 +463,9 @@ export function handleCards(
     return json({ review: entry, card, requeue: next.requeue });
   }
 
+  if (path === '/cards' && method === 'GET') return listCards(core, url);
+  if (path === '/cards/bulk' && method === 'POST') return bulkCards(core, body);
+
   if (path === '/cards' && method === 'POST') {
     if (core.cards.failNextCreate === 'before') {
       core.cards.failNextCreate = null;
@@ -518,4 +528,131 @@ export function handleCards(
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Karten verwalten (§21.14): GET /cards und POST /cards/bulk
+// ---------------------------------------------------------------------------------------------
+
+const HARD_LAPSES = 3;
+const HARD_DIFFICULTY = 7;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function cardTexts(card: Card): string[] {
+  const c = card.content;
+  if (c.kind === 'basic') return [c.front.text_md, c.back.text_md, c.back.explanation_md ?? ''];
+  return [c.front.text_md, ...Object.values(c.back.answers).flat()];
+}
+
+function matchesStatus(card: Card, status: string): boolean {
+  const s = card.state;
+  switch (status) {
+    case 'aktiv':
+      return !card.suspended;
+    case 'pausiert':
+      return card.suspended;
+    case 'neu':
+      return s.state === 'new';
+    case 'schwer':
+      return s.state !== 'new' && (s.lapses >= HARD_LAPSES || s.difficulty >= HARD_DIFFICULTY);
+    default:
+      return true;
+  }
+}
+
+function listCards(core: FakeCore, url: URL): Response {
+  const get = (name: string) => url.searchParams.get(name);
+  const moduleId = get('module_id');
+  const conceptId = get('concept_id');
+  const kinds = url.searchParams.getAll('kind');
+  const origin = get('origin');
+  const status = get('status') ?? 'alle';
+  const q = get('q');
+  const sort = get('sort') ?? 'neu';
+  const limit = get('limit') === null ? 50 : Number(get('limit'));
+  const cursor = get('cursor');
+  if (
+    (moduleId !== null && !UUID.test(moduleId)) ||
+    (conceptId !== null && !UUID.test(conceptId)) ||
+    kinds.some((k) => k !== 'basic' && k !== 'cloze') ||
+    (origin !== null && origin !== 'ki' && origin !== 'manuell') ||
+    !['alle', 'aktiv', 'pausiert', 'neu', 'schwer'].includes(status) ||
+    !['neu', 'faellig', 'schwer'].includes(sort) ||
+    (q !== null && (q.length < 1 || q.length > 100)) ||
+    !(Number.isInteger(limit) && limit >= 1 && limit <= 200)
+  ) {
+    return fail(400, 'validation_failed');
+  }
+  let offset = 0;
+  if (cursor !== null) {
+    const m = /^o(\d+)$/.exec(cursor);
+    if (!m) return fail(400, 'invalid_cursor');
+    offset = Number(m[1]);
+  }
+  const needle = q?.toLowerCase();
+  const matching = core.cards.cards.filter(
+    (card) =>
+      (conceptId === null || card.concept_id === conceptId) &&
+      (moduleId === null ||
+        (core.cards.conceptModules[card.concept_id] ?? []).some((m) => m.id === moduleId)) &&
+      (kinds.length === 0 || kinds.includes(card.content.kind)) &&
+      (origin === null || card.origin === origin) &&
+      matchesStatus(card, status) &&
+      (needle === undefined || cardTexts(card).some((t) => t.toLowerCase().includes(needle))),
+  );
+  const order = (a: Card, b: Card): number => {
+    if (sort === 'faellig') return a.state.due.localeCompare(b.state.due) || a.id.localeCompare(b.id);
+    if (sort === 'schwer') {
+      return (
+        b.state.lapses - a.state.lapses || b.state.difficulty - a.state.difficulty || a.id.localeCompare(b.id)
+      );
+    }
+    return b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id);
+  };
+  const sorted = [...matching].sort(order);
+  const size = Math.min(limit, core.cards.listPageSize);
+  const page = sorted.slice(offset, offset + size);
+  const more = offset + size < sorted.length;
+  return json({
+    items: page.map((card) => ({
+      card,
+      concept: (({ id, name }) => ({ id, name }))(conceptRef(core, card.concept_id)),
+      modules: core.cards.conceptModules[card.concept_id] ?? [],
+    })),
+    next_cursor: more ? `o${offset + size}` : null,
+  });
+}
+
+function bulkCards(core: FakeCore, body: Record<string, unknown> | null): Response {
+  const ids = body?.ids;
+  const action = body?.action;
+  if (
+    !Array.isArray(ids) ||
+    ids.length < 1 ||
+    ids.length > 200 ||
+    new Set(ids).size !== ids.length ||
+    !ids.every((id) => typeof id === 'string' && UUID.test(id)) ||
+    (action !== 'suspend' && action !== 'resume' && action !== 'delete')
+  ) {
+    return fail(400, 'validation_failed');
+  }
+  const changed: string[] = [];
+  const skipped: { id: string; code: 'unchanged' | 'card_not_found' }[] = [];
+  for (const id of [...(ids as string[])].sort()) {
+    const card = core.cards.cards.find((c) => c.id === id);
+    if (!card) {
+      skipped.push({ id, code: 'card_not_found' });
+    } else if (action === 'delete') {
+      core.cards.cards = core.cards.cards.filter((c) => c !== card);
+      core.cards.trashed.push(card);
+      changed.push(id);
+    } else if (card.suspended === (action === 'suspend')) {
+      skipped.push({ id, code: 'unchanged' });
+    } else {
+      card.suspended = action === 'suspend';
+      card.updated_at = new Date().toISOString();
+      changed.push(id);
+    }
+  }
+  return json({ changed, skipped });
 }
