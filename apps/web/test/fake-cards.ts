@@ -589,7 +589,8 @@ function listCards(core: FakeCore, url: URL): Response {
   ) {
     return fail(400, 'validation_failed');
   }
-  // Der Cursor gehört zu seiner Sortierung (wie im Core): ein fremder ergibt `invalid_cursor`
+  // Der Cursor gehört zu seiner Sortierung: ein fremder ergibt `invalid_cursor`. Der Core prüft das Präfix je Sortierung
+  // (n/f/s) und danach Aufbau und Teile des Cursors; der Fake ist strenger und kennt nur sein eigenes Format `<Sortierung>:o<offset>`.
   let offset = 0;
   if (cursor !== null) {
     const m = /^(neu|faellig|schwer):o(\d+)$/.exec(cursor);

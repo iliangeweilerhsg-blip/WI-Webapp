@@ -255,10 +255,12 @@ interface RowProps {
   selected: boolean;
   /** Die Auswahl ist voll (`BULK_MAX`): weitere Häkchen gehen nicht */
   locked: boolean;
+  /** Id des Hinweises „Höchstens … auf einmal“, wenn die Zeile gesperrt ist */
+  limitHintId: string;
   onToggle: (id: string) => void;
 }
 
-function CardListRow({ item, selected, locked, onToggle }: RowProps) {
+function CardListRow({ item, selected, locked, limitHintId, onToggle }: RowProps) {
   const { card, concept, modules } = item;
   const actions = useCardActions();
   const [editing, setEditing] = useState(false);
@@ -284,6 +286,7 @@ function CardListRow({ item, selected, locked, onToggle }: RowProps) {
       next?.focus();
     } else if (event.key === ' ' && own) {
       event.preventDefault();
+      // Auf einer gesperrten Zeile meldet `onToggle` die Grenze erneut
       onToggle(card.id);
     } else if ((event.key === 'e' || event.key === 'E') && own) {
       event.preventDefault();
@@ -306,6 +309,7 @@ function CardListRow({ item, selected, locked, onToggle }: RowProps) {
         type="checkbox"
         checked={selected}
         disabled={locked}
+        aria-describedby={locked ? limitHintId : undefined}
         aria-label={`Karte auswählen: ${front}`}
         className="mt-1 size-5 shrink-0"
         onChange={() => onToggle(card.id)}
@@ -399,6 +403,9 @@ export function CardManager() {
   const listRef = useRef<HTMLUListElement | null>(null);
   const [focusTick, setFocusTick] = useState(0);
   const focusPending = useRef(false);
+  const limitHintId = useId();
+  // Zähler für die erneute Ansage, wenn die Leertaste auf einer gesperrten Zeile nichts mehr auswählt
+  const [blockedTick, setBlockedTick] = useState(0);
 
   const items = useMemo(() => query.data?.pages.flatMap((page) => page.items) ?? [], [query.data]);
 
@@ -411,23 +418,30 @@ export function CardManager() {
     });
   }, [items]);
 
-  const refresh = () => {
-    void client.invalidateQueries({ queryKey: CARDS_KEY });
-    void client.invalidateQueries({ queryKey: REVIEW_KEY });
-  };
+  const refresh = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: CARDS_KEY }),
+      client.invalidateQueries({ queryKey: REVIEW_KEY }),
+    ]);
 
   // Nach einer Sammelaktion ohne „Rückgängig“-Toast: Fokus auf „Alle auf dieser Seite“, sonst erste Zeile, sonst Titel
   useEffect(() => {
-    if (!focusPending.current || selected.size > 0) return;
+    // Erst nach dem Refetch: vorher steht noch die alte Liste da, und der Leerzustand käme danach ohne Fokusziel
+    if (!focusPending.current || selected.size > 0 || query.isFetching) return;
     focusPending.current = false;
-    const target =
-      selectAllRef.current ??
-      listRef.current?.querySelector<HTMLElement>('[data-card-row]') ??
-      document.getElementById('screen-title');
-    target?.focus();
-  }, [focusTick, selected, items]);
+    const candidates = [
+      selectAllRef.current,
+      listRef.current?.querySelector<HTMLElement>('[data-card-row]'),
+      document.getElementById('screen-title'),
+    ];
+    candidates.find((el) => el?.isConnected)?.focus();
+  }, [focusTick, selected, items, query.isFetching]);
 
   function toggle(id: string) {
+    if (!selected.has(id) && selected.size >= BULK_MAX) {
+      setBlockedTick((n) => n + 1);
+      return;
+    }
     setSelected((current) => {
       if (!current.has(id) && current.size >= BULK_MAX) return current;
       const next = new Set(current);
@@ -451,7 +465,7 @@ export function CardManager() {
     try {
       const result = await bulkCards([...selected].slice(0, BULK_MAX), action);
       setSelected(new Set());
-      refresh();
+      const refreshed = refresh();
       const message = bulkMessage(action, result);
       if (action === 'delete' && result.changed.length > 0) {
         const ids = result.changed;
@@ -462,7 +476,7 @@ export function CardManager() {
           focusAction: true,
           onAction: () => {
             void restoreCards(ids).then((summary) => {
-              refresh();
+              void refresh();
               if (summary.conceptGone > 0 || summary.failed > 0) {
                 toast.show({ message: restoreMessage(summary) });
               }
@@ -471,6 +485,7 @@ export function CardManager() {
         });
       } else {
         toast.show({ message });
+        await refreshed;
         focusPending.current = true;
         setFocusTick((n) => n + 1);
       }
@@ -565,10 +580,14 @@ export function CardManager() {
           ) : null}
         </div>
         {limitReached || items.length > BULK_MAX ? (
-          <p role="status" data-testid="bulk-limit" className="mt-1 text-xs text-text-muted">
+          <p id={limitHintId} data-testid="bulk-limit" className="mt-1 text-xs text-text-muted">
             Höchstens {BULK_MAX} auf einmal.
           </p>
         ) : null}
+        {/* Dauerhaft im Dokument, damit die Ansage beim Erreichen der Grenze (und bei jedem weiteren Versuch) kommt */}
+        <p role="status" data-testid="bulk-limit-live" className="sr-only">
+          {limitReached ? `Höchstens ${BULK_MAX} auf einmal.${blockedTick % 2 === 1 ? '\u00a0' : ''}` : ''}
+        </p>
         <ul ref={listRef} className="mt-2 divide-y divide-border rounded-lg border border-border px-2">
           {items.map((item) => (
             <CardListRow
@@ -576,6 +595,7 @@ export function CardManager() {
               item={item}
               selected={selected.has(item.card.id)}
               locked={limitReached && !selected.has(item.card.id)}
+              limitHintId={limitHintId}
               onToggle={toggle}
             />
           ))}

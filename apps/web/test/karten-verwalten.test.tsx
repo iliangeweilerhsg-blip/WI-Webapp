@@ -548,7 +548,7 @@ describe('Mehrfachauswahl', () => {
     expect(await screen.findByText('1 nicht mehr vorhanden')).toBeInTheDocument();
   });
 
-  it('Rückgängig nach Sammel-Löschen zählt: wiederhergestellt und nicht möglich (Konzept gelöscht)', async () => {
+  it('Rückgängig nach Sammel-Löschen zählt: wiederhergestellt und nicht möglich (Konzept gelöscht oder nicht mehr aktiv)', async () => {
     boot([frage('Eins'), frage('Zwei'), frage('Drei'), frage('SQL eins', { concept_id: C_SQL })]);
     const user = userEvent.setup();
     wrap(<CardManager />);
@@ -559,7 +559,9 @@ describe('Mehrfachauswahl', () => {
     core.cards.deletedConcepts.push(C_SQL);
     await user.click(screen.getByRole('button', { name: 'Rückgängig' }));
     expect(
-      await screen.findByText('3 wiederhergestellt · 1 nicht möglich (Konzept gelöscht)'),
+      await screen.findByText(
+        '3 wiederhergestellt · 1 nicht möglich (Konzept gelöscht oder nicht mehr aktiv)',
+      ),
     ).toBeInTheDocument();
     expect(core.cards.cards).toHaveLength(3);
   });
@@ -630,6 +632,26 @@ describe('Mehrfachauswahl', () => {
     );
   });
 
+  it('Sammelaktion leert die Liste: der Fokus fällt nicht auf body, sondern auf die Überschrift', async () => {
+    boot(three());
+    const user = userEvent.setup();
+    wrap(<CardManager />);
+    await screen.findByText('Eins');
+    await user.click(screen.getByRole('checkbox', { name: 'Alle auf dieser Seite' }));
+    // Nach der Aktion ist nichts mehr übrig (wie bei Filter „Aktiv“ und „Pausieren“)
+    core.cards.cards = [];
+    await user.click(screen.getByRole('button', { name: 'Pausieren' }));
+    await screen.findByText(/^Noch keine Karten/);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Karten verwalten' })).toHaveFocus());
+  });
+
+  it('restoreMessage: nur Fehlschläge heißen „nicht wiederherstellbar“', () => {
+    expect(restoreMessage({ restored: 0, conceptGone: 0, failed: 3 })).toBe('3 nicht wiederherstellbar');
+    expect(restoreMessage({ restored: 0, conceptGone: 2, failed: 1 })).toBe(
+      '2 nicht möglich (Konzept gelöscht oder nicht mehr aktiv) · 1 nicht möglich',
+    );
+  });
+
   it('bulkMessage fasst ruhig zusammen', () => {
     expect(bulkMessage('suspend', { changed: ['a', 'b', 'c'], skipped: [] })).toBe('3 pausiert');
     expect(
@@ -642,7 +664,7 @@ describe('Mehrfachauswahl', () => {
       }),
     ).toBe('1 gelöscht · 2 unverändert');
     expect(restoreMessage({ restored: 3, conceptGone: 1, failed: 0 })).toBe(
-      '3 wiederhergestellt · 1 nicht möglich (Konzept gelöscht)',
+      '3 wiederhergestellt · 1 nicht möglich (Konzept gelöscht oder nicht mehr aktiv)',
     );
     expect(bulkMessage('resume', { changed: [], skipped: [{ id: 'b', code: 'unchanged' }] })).toBe(
       '1 unverändert',
@@ -676,19 +698,31 @@ describe('Auswahl-Grenze (200)', () => {
     await user.click(all);
     expect(await screen.findByText('200 ausgewählt')).toBeInTheDocument();
     expect(all).toBeChecked();
-    expect(screen.getByText('Höchstens 200 auf einmal.')).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-limit')).toHaveTextContent('Höchstens 200 auf einmal.');
+    // Gesperrte Zeilen verweisen auf den Hinweis; die Ansage steht in einer dauerhaften Live-Region
+    const hintId = screen.getByTestId('bulk-limit').id;
+    expect(hintId).not.toBe('');
+    expect(screen.getByTestId('bulk-limit-live')).toHaveTextContent('Höchstens 200 auf einmal.');
     // Die Zeilen 201 bis 205 sind gesperrt, per Maus ...
     const boxes = screen.getAllByRole('checkbox', { name: /^Karte auswählen:/ });
     const unselected = boxes.filter((b) => !(b as HTMLInputElement).checked);
     expect(unselected).toHaveLength(5);
-    for (const box of unselected) expect(box).toBeDisabled();
+    for (const box of unselected) {
+      expect(box).toBeDisabled();
+      expect(box).toHaveAttribute('aria-describedby', hintId);
+    }
     await user.click(unselected[0] as HTMLElement);
     expect(screen.getByText('200 ausgewählt')).toBeInTheDocument();
     // ... und per Leertaste auf der Zeile
     const row = screen.getAllByRole('listitem', { name: /^Karte:/ })[204] as HTMLElement;
     row.focus();
+    const live = screen.getByTestId('bulk-limit-live');
+    const before = live.textContent;
     await user.keyboard(' ');
     expect(screen.getByText('200 ausgewählt')).toBeInTheDocument();
+    // dieselbe Ansage noch einmal: der Text wechselt, ohne anders zu klingen
+    expect(live.textContent).not.toBe(before);
+    expect(live.textContent?.trim()).toBe('Höchstens 200 auf einmal.');
     await user.click(screen.getByRole('button', { name: 'Pausieren' }));
     await waitFor(() => expect(bulkPosts()).toHaveLength(1));
     expect((bodyOf(bulkPosts()[0]).ids as string[]).length).toBe(200);

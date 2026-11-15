@@ -253,7 +253,13 @@ export async function restoreCards(ids: readonly string[]): Promise<RestoreSumma
 export function restoreMessage(summary: RestoreSummary): string {
   const parts: string[] = [];
   if (summary.restored > 0) parts.push(`${summary.restored} wiederhergestellt`);
-  if (summary.conceptGone > 0) parts.push(`${summary.conceptGone} nicht möglich (Konzept gelöscht)`);
-  if (summary.failed > 0) parts.push(`${summary.failed} nicht möglich`);
+  if (summary.conceptGone > 0) {
+    parts.push(`${summary.conceptGone} nicht möglich (Konzept gelöscht oder nicht mehr aktiv)`);
+  }
+  if (summary.failed > 0) {
+    parts.push(
+      `${summary.failed} ${summary.restored + summary.conceptGone > 0 ? 'nicht möglich' : 'nicht wiederherstellbar'}`,
+    );
+  }
   return parts.join(' · ');
 }
