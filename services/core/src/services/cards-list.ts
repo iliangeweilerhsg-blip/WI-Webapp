@@ -16,7 +16,7 @@ import type { Db, DbOrTx } from '../db/client.ts';
 import { card, cardState, concept, notDeleted } from '../db/schema/index.ts';
 import { HttpError } from '../errors.ts';
 import { HARD_DIFFICULTY, HARD_LAPSES } from '../learning/params.ts';
-import { afterCursor, cursorTs, decodeCursor, encodeCursor } from '../lib/pagination.ts';
+import { afterCursor, cursorTs, decodeCursor } from '../lib/pagination.ts';
 import { loadApiCards } from './cards.ts';
 import { softDelete } from './trash.ts';
 
@@ -37,28 +37,53 @@ export interface ListCardsOptions {
 
 const invalidCursor = () => new HttpError(400, 'invalid_cursor', 'Der Cursor ist ungültig.');
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const FLOAT_RE = /^\d+(\.\d+)?([eE][+-]?\d+)?$/;
+const INT_MAX = 2147483647;
 const INT_RE = /^\d{1,10}$/;
+const FLOAT_RE = /^\d+(\.\d+)?([eE][+-]?\d+)?$/;
+const FLOAT_MAX_LENGTH = 32;
 
-/** Cursor der Sortierung `schwer`: `[lapses, difficulty, id]`, alles als Text (Gleitkommazahl verlustfrei) */
-function decodeHardCursor(raw: string): { lapses: string; difficulty: string; id: string } {
+/** Präfix im Cursor je Sortierung: ein Cursor einer anderen Sortierung ergibt `400 invalid_cursor` */
+const CURSOR_PREFIX: Record<CardListSort, string> = { neu: 'n', faellig: 'f', schwer: 's' };
+
+const encodeCardCursor = (sort: CardListSort, ...parts: string[]): string =>
+  Buffer.from(JSON.stringify([CURSOR_PREFIX[sort], ...parts]), 'utf8').toString('base64url');
+
+/** Cursor lesen, Präfix der Sortierung prüfen; liefert die Teile nach dem Präfix */
+function parseCardCursor(raw: string, sort: CardListSort, parts: number): string[] {
   try {
     const parsed: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
-    if (Array.isArray(parsed) && parsed.length === 3) {
-      const [lapses, difficulty, id] = parsed as unknown[];
-      if (
-        typeof lapses === 'string' &&
-        typeof difficulty === 'string' &&
-        typeof id === 'string' &&
-        INT_RE.test(lapses) &&
-        FLOAT_RE.test(difficulty) &&
-        UUID_RE.test(id)
-      ) {
-        return { lapses, difficulty, id };
-      }
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === parts + 1 &&
+      parsed[0] === CURSOR_PREFIX[sort] &&
+      parsed.every((p) => typeof p === 'string')
+    ) {
+      return (parsed as string[]).slice(1);
     }
   } catch {
     // unten
+  }
+  throw invalidCursor();
+}
+
+/** Cursor von `neu` und `faellig`: `[Präfix, Zeit als Datenbank-Text, id]` (Zeit und id prüft `decodeCursor`) */
+function decodeTimeCursor(raw: string, sort: CardListSort) {
+  const [ts, id] = parseCardCursor(raw, sort, 2);
+  return decodeCursor(Buffer.from(JSON.stringify([ts, id]), 'utf8').toString('base64url'));
+}
+
+/** Cursor der Sortierung `schwer`: `[s, lapses, difficulty, id]`, alles als Text (Gleitkommazahl verlustfrei) */
+function decodeHardCursor(raw: string): { lapses: string; difficulty: string; id: string } {
+  const [lapses, difficulty, id] = parseCardCursor(raw, 'schwer', 3) as [string, string, string];
+  if (
+    INT_RE.test(lapses) &&
+    Number(lapses) <= INT_MAX &&
+    difficulty.length <= FLOAT_MAX_LENGTH &&
+    FLOAT_RE.test(difficulty) &&
+    Number.isFinite(Number(difficulty)) &&
+    UUID_RE.test(id)
+  ) {
+    return { lapses, difficulty, id };
   }
   throw invalidCursor();
 }
@@ -129,19 +154,24 @@ export async function listCards(db: DbOrTx, options: ListCardsOptions): Promise<
     )`);
   }
 
-  // Sortierung und Cursor: `neu` über `(created_at, id)` absteigend (gemeinsamer Cursor aus lib/pagination), `faellig` über
-  // `(due, id)` aufsteigend (derselbe Cursor mit `due::text`), `schwer` mit eigenem Cursor `[lapses, difficulty, id]`.
+  // Sortierung und Cursor: `neu` über `(created_at, id)` absteigend (Zeit und id prüft `decodeCursor` aus lib/pagination), `faellig` über
+  // `(due, id)` aufsteigend (mit `due::text`), `schwer` mit `[lapses, difficulty, id]`; jeder Cursor trägt ein Präfix der Sortierung.
   const keyTs = sql<string>`${cardState.due}::text`;
   const keyDifficulty = sql<string>`${cardState.difficulty}::text`;
   let orderBy: SQL[];
   if (options.sort === 'neu') {
     conditions.push(
-      afterCursor(card.createdAt, card.id, options.cursor ? decodeCursor(options.cursor) : undefined, 'desc'),
+      afterCursor(
+        card.createdAt,
+        card.id,
+        options.cursor ? decodeTimeCursor(options.cursor, 'neu') : undefined,
+        'desc',
+      ),
     );
     orderBy = [sql`${card.createdAt} DESC`, sql`${card.id} DESC`];
   } else if (options.sort === 'faellig') {
     if (options.cursor) {
-      const c = decodeCursor(options.cursor);
+      const c = decodeTimeCursor(options.cursor, 'faellig');
       conditions.push(sql`(${cardState.due}, ${card.id}) > (${c.ts}::timestamptz, ${c.id}::uuid)`);
     }
     orderBy = [sql`${cardState.due} ASC`, sql`${card.id} ASC`];
@@ -185,17 +215,23 @@ export async function listCards(db: DbOrTx, options: ListCardsOptions): Promise<
   const last = visible.at(-1);
   let nextCursor: string | null = null;
   if (hasMore && last) {
-    if (options.sort === 'neu') nextCursor = encodeCursor({ ts: last.createdKey, id: last.card.id });
-    else if (options.sort === 'faellig') nextCursor = encodeCursor({ ts: last.dueKey, id: last.card.id });
+    if (options.sort === 'neu') nextCursor = encodeCardCursor('neu', last.createdKey, last.card.id);
+    else if (options.sort === 'faellig') nextCursor = encodeCardCursor('faellig', last.dueKey, last.card.id);
     else {
-      nextCursor = Buffer.from(
-        JSON.stringify([String(last.state.lapses), last.difficultyKey, last.card.id]),
-        'utf8',
-      ).toString('base64url');
+      nextCursor = encodeCardCursor('schwer', String(last.state.lapses), last.difficultyKey, last.card.id);
     }
   }
   return { items, next_cursor: nextCursor };
 }
+
+/** Sperr-Abfrage des Bulk: `ORDER BY id` vor `FOR NO KEY UPDATE` (ohne die Reihenfolge drohen Verklemmungen); getrennt, damit ein Test das SQL prüft */
+export const lockCardsQuery = (tx: DbOrTx, ids: readonly string[]) =>
+  tx
+    .select({ id: card.id, suspended: card.suspended })
+    .from(card)
+    .where(and(inArray(card.id, [...ids]), notDeleted(card)))
+    .orderBy(card.id)
+    .for('no key update');
 
 /**
  * `POST /cards/bulk` (§21.14): Pausieren, Fortsetzen oder Löschen mehrerer Karten in einer Transaktion.
@@ -211,12 +247,7 @@ export async function bulkCards(
 ): Promise<CardBulkResult> {
   const ids = [...new Set(request.ids)].sort();
   return db.transaction(async (tx) => {
-    const locked = await tx
-      .select({ id: card.id, suspended: card.suspended })
-      .from(card)
-      .where(and(inArray(card.id, ids), notDeleted(card)))
-      .orderBy(card.id)
-      .for('no key update');
+    const locked = await lockCardsQuery(tx, ids);
     const found = new Map(locked.map((r) => [r.id, r.suspended]));
 
     const changed: string[] = [];

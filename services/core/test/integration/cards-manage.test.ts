@@ -14,6 +14,7 @@ import {
   type EvidenceRef,
 } from '@sg/shared';
 import { insertCardWithState } from '../../src/services/cards.ts';
+import { lockCardsQuery } from '../../src/services/cards-list.ts';
 import { uuidv7 } from '../../src/lib/uuid7.ts';
 import { startTestApp, type TestApp } from './helpers.ts';
 import { refId, World } from './inbox-helpers.ts';
@@ -277,6 +278,50 @@ describe('GET /cards: Filter', () => {
     const res = await call('GET', `/cards?sort=schwer&cursor=${neuCursor}`);
     expect(res.statusCode).toBe(400);
   });
+
+  it('präparierter schwer-Cursor außerhalb des Wertebereichs: 400 statt 500 (N1)', async () => {
+    await seed();
+    const enc = (parts: string[]) => Buffer.from(JSON.stringify(parts), 'utf8').toString('base64url');
+    const id = refId('a1');
+    const cursors = [
+      enc(['s', '9999999999', '1', id]), // lapses über int-Bereich
+      enc(['s', '1', '1e999', id]), // Gleitkomma außerhalb des Bereichs
+      enc(['s', '1', '1'.repeat(400), id]), // zu lang
+    ];
+    for (const c of cursors) {
+      const res = await call('GET', `/cards?sort=schwer&cursor=${c}`);
+      expect(res.statusCode, c).toBe(400);
+      expect(errorOf(res).code).toBe('invalid_cursor');
+    }
+    // Grenzwerte sind gültig
+    const ok = await call('GET', `/cards?sort=schwer&cursor=${enc(['s', '2147483647', '1e300', id])}`);
+    expect(ok.statusCode, ok.body).toBe(200);
+  });
+
+  it('Cursor einer anderen Sortierung: 400 invalid_cursor (N2)', async () => {
+    await seed();
+    await mk('x1', { createdAt: '2026-11-01T10:00:00Z', state: { lapses: 4, difficulty: 8 } });
+    await mk('x2', { createdAt: '2026-11-02T10:00:00Z', state: { lapses: 5, difficulty: 8 } });
+    const cursorOf = async (sort: string) => {
+      const p = await page(`?sort=${sort}&limit=1`);
+      expect(p.next_cursor).not.toBeNull();
+      return p.next_cursor!;
+    };
+    const cursors = {
+      neu: await cursorOf('neu'),
+      faellig: await cursorOf('faellig'),
+      schwer: await cursorOf('schwer'),
+    };
+    for (const sort of ['neu', 'faellig', 'schwer'] as const) {
+      expect((await call('GET', `/cards?sort=${sort}&limit=1&cursor=${cursors[sort]}`)).statusCode).toBe(200);
+      for (const other of ['neu', 'faellig', 'schwer'] as const) {
+        if (other === sort) continue;
+        const res = await call('GET', `/cards?sort=${sort}&cursor=${cursors[other]}`);
+        expect(res.statusCode, `${sort} mit ${other}-Cursor`).toBe(400);
+        expect(errorOf(res).code).toBe('invalid_cursor');
+      }
+    }
+  });
 });
 
 describe('GET /cards: Suche q', () => {
@@ -374,6 +419,19 @@ describe('GET /cards: Sortierung und Cursor', () => {
     const expected = ['s6', 's3', 's4', 's2', 's1', 's5', 's7'].map(refId);
     expect(ids(await page('?sort=schwer'))).toEqual(expected);
     for (const limit of [1, 2, 3, 4, 7, 8]) expect(await walk('sort=schwer', limit)).toEqual(expected);
+  });
+
+  it('schwer: Cursor verlustfrei für Gleitkomma-Schwierigkeiten mit vielen Stellen (N4)', async () => {
+    await seed();
+    // gleiche lapses, difficulty nur in der 7. bis 16. Stelle verschieden: rundet der Cursor, geht eine Karte verloren oder doppelt
+    await mk('h1', { state: { lapses: 4, difficulty: 2 / 3 } });
+    await mk('h2', { state: { lapses: 4, difficulty: 0.6666667 } });
+    await mk('h3', { state: { lapses: 4, difficulty: 8.0000004 } });
+    await mk('h4', { state: { lapses: 4, difficulty: 8.0000003 } });
+    await mk('h5', { state: { lapses: 4, difficulty: 0.66666666666666 } });
+    const expected = ['h3', 'h4', 'h2', 'h1', 'h5'].map(refId);
+    expect(ids(await page('?sort=schwer'))).toEqual(expected);
+    for (const limit of [1, 2, 3, 4]) expect(await walk('sort=schwer', limit)).toEqual(expected);
   });
 
   it('Cursor mit Filter: Seiten bleiben im gefilterten Satz', async () => {
@@ -573,6 +631,18 @@ describe('POST /cards/bulk', () => {
         }
       },
     );
+
+    it('Sperr-Abfrage: ORDER BY id steht vor FOR NO KEY UPDATE und der Plan sortiert vor dem Sperren (N3)', async () => {
+      const q = lockCardsQuery(app.handle.db, [refId('n1'), refId('n2')]);
+      const { sql: text, params } = q.toSQL();
+      expect(text).toMatch(/order by "card"\."id"\s+for no key update/i);
+      const plan = await app.handle.sql.unsafe(`EXPLAIN ${text}`, params as never[]);
+      const lines = plan.map((r) => String(r['QUERY PLAN']));
+      const lockAt = lines.findIndex((l) => l.includes('LockRows'));
+      const sortAt = lines.findIndex((l) => /Sort\b/.test(l));
+      expect(lockAt, lines.join('\n')).toBeGreaterThanOrEqual(0);
+      expect(sortAt, lines.join('\n')).toBeGreaterThan(lockAt);
+    });
 
     it('Bulk-Delete wartet auf eine laufende Bewertung (card_state) und verklemmt nicht', async () => {
       await seed();

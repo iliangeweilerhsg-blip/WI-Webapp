@@ -365,7 +365,7 @@ export async function updateCard(db: Db, id: string, update: CardUpdate): Promis
       .select({ id: card.id })
       .from(card)
       .where(and(eq(card.id, id), notDeleted(card)))
-      .for('update');
+      .for('no key update');
     if (!existing) throw cardNotFound();
     const set: Partial<typeof card.$inferInsert> = {};
     if (update.content !== undefined) {
