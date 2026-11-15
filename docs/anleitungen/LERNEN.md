@@ -88,6 +88,18 @@ Ein Lerntag endet um **04:00 Uhr** (Ortszeit des Macs). Wer um 01:30 noch wieder
 
 Bewertungen werden erneut gesendet. Bleibt es dabei, steht „Einige Bewertungen sind noch nicht gespeichert“ mit **Erneut versuchen**.
 
+## 4a. Karten verwalten
+
+Eine Liste aller Karten mit Filtern, Suche und Sammelaktionen. Du erreichst sie über **Karten verwalten** auf **Lernen** oder über **Alle Karten dieses Konzepts** im Abschnitt „Karten“ der Konzeptansicht.
+
+- **Filter:** Fach, Typ (Frage und Antwort, Lückentext), Herkunft (KI, von Hand), Status (Alle, Aktiv, Pausiert, Neu, Schwer) und Sortierung (Neueste, Fällig zuerst, Schwerste). Die Suche findet Teilwörter in Vorderseite, Antwort, Erklärung und Lücken. Alle Filter stehen in der Adresse: Du kannst sie als Lesezeichen speichern, und die Zurück-Taste führt zum vorigen Filter. Kommst du aus einem Konzept, steht dessen Name als Chip da. Mit ✕ entfernst du ihn.
+- **Liste:** Je Karte siehst du die Vorderseite (Lücken als […]), das Konzept als Link, das Modul-Kürzel, den Typ und den Zustand („neu“, „pausiert“, „fällig am …“, bei Bedarf dezent „schwer“, auch bei pausierten Karten) sowie die Quellen. Eine Gesamtzahl gibt es nicht. **Mehr laden** holt die nächsten Karten.
+- **Eine Karte ändern:** Das Menü ⋯ bietet Bearbeiten, Pausieren bzw. Fortsetzen und Löschen. Nach dem Löschen steht 10 Sekunden lang **Rückgängig** da.
+- **Mehrere Karten:** Hake Karten an oder wähle **Alle auf dieser Seite** (höchstens 200 auf einmal: Sind mehr als 200 Karten geladen, heißt es **Die ersten 200 auswählen**, und bei 200 Haken sind weitere gesperrt, bis du einen abhakst). Dann erscheinen „n ausgewählt“ und **Pausieren**, **Fortsetzen**, **Löschen**. Karten, die schon im Zielzustand sind, meldet die Seite ruhig als „unverändert“. Nach dem Löschen holt **Rückgängig** (10 Sekunden) alle gelöschten Karten zurück. Ist das Konzept einer Karte inzwischen gelöscht oder nicht mehr aktiv, bleibt sie im Papierkorb. Die Seite meldet dann z. B. „3 wiederhergestellt · 1 nicht möglich (Konzept gelöscht oder nicht mehr aktiv)“.
+- **Tastatur:** ↑ und ↓ wechseln die Zeile, Leertaste markiert sie, **E** bearbeitet sie.
+
+Pausierte Karten kommen nicht in „Heute wiederholen“, bis du sie fortsetzt.
+
 ## 5. Einstellungen
 
 Unter **Einstellungen → Lernen** stellst du zwei Werte ein:

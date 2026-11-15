@@ -306,6 +306,10 @@ export function cardErrorMessage(error: unknown): string {
         ? `Den Beleg ${index + 1} gibt es nicht mehr. Wähle einen anderen.`
         : (CARD_MESSAGES.card_source_invalid ?? '');
     }
+    if (error.code === 'restore_parent_deleted') {
+      // Rückgängig nach dem Löschen: ohne aktives Konzept bleibt die Karte im Papierkorb
+      return 'Das Konzept dieser Karte ist gelöscht oder nicht mehr aktiv.';
+    }
     const known = CARD_MESSAGES[error.code];
     if (known) return known;
   }
