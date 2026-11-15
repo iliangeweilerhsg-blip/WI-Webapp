@@ -65,3 +65,10 @@ export const OVERDUE_CAP_DAYS = 10;
 export const PRIORITY_DECIMALS = 6;
 /** Höchstzahl der Karten im Block */
 export const QUEUE_MAX_ITEMS = 500;
+
+// --- Karten verwalten (§21.14) ---------------------------------------------------------------------
+
+/** „Schwer“ in `GET /cards?status=schwer`: nicht neu und mindestens so viele Fehler (lapses) … */
+export const HARD_LAPSES = 3;
+/** … oder mindestens diese FSRS-Schwierigkeit */
+export const HARD_DIFFICULTY = 7;

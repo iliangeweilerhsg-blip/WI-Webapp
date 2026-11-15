@@ -2111,6 +2111,8 @@ Format nach 08 §6, nur `basic` und `cloze`. In der API und in der Inbox als `Ca
 | `POST /cards` mit `CardCreate` | 201 `Card` | `404 concept_not_found`, `409 concept_not_active`, `409 card_exists`, `400 card_invalid`, `400 card_source_invalid` |
 | `PATCH /cards/{id}` mit `CardUpdate` | 200 `Card` | `404 card_not_found`, `400 validation_failed` (kein Feld), `400 card_invalid`, `400 card_source_invalid` |
 | `DELETE /cards/{id}` | 204 | `404 card_not_found` |
+| `GET /cards?…` | 200 `CardPage` | `400 validation_failed`, `400 invalid_cursor` (§21.14) |
+| `POST /cards/bulk` mit `CardBulkRequest` | 200 `CardBulkResult` | `400 validation_failed` (§21.14) |
 
 **Zugang:** Keine Route trägt `config.sgAccess`. Alle gelten lokal und aus dem Netz mit Geräte-Token wie die übrigen (§5). Gelöschte Karten gibt es nicht (`404`). `Idempotency-Key` gilt für die beiden `POST` (08 §1).
 
@@ -2295,7 +2297,7 @@ Ein Eintrag je Konzept und Session. Nutzlast `InboxPayloadCardBatch`: `concept_i
 - **Massenaktionen:** `accept` mit `session_id` nimmt nach Konzepten und Beziehungen auch die dann sichtbaren Kartenvorschläge an (alle Karten). `reject` und `reopen` entsprechend. Mit `ids` landet ein nicht sichtbarer Kartenvorschlag in `skipped` mit `card_concept_pending`.
 - **Sperren:** wie §20.6: (1) Session `FOR SHARE`, (2) Eintrag `FOR UPDATE`, (3) `pg_advisory_xact_lock(CONCEPT_GRAPH_LOCK_KEY)`, (4) wirksames Konzept (und die Hülle) `FOR NO KEY UPDATE`. So kann ein gleichzeitiges `reopen` das Konzept nicht unter den neuen Karten zurückstufen. `cards.generate` sperrt die Session `FOR NO KEY UPDATE` und liegt damit davor oder danach.
 - **Karte wiederherstellen** (Lead-Entscheidung 13.11.2026): `restoreFromTrash` sperrt das Elternkonzept der Karte `FOR SHARE`, wie `POST /cards` (§21.4); alle anderen Arten sperren ihr Elternobjekt nur `FOR KEY SHARE` (§13). Ein gleichzeitiges `reopen` von A1 wartet, bis die Karte wieder steht, und sieht sie dann (und lehnt ab). Umgekehrt sieht der Restore ein inzwischen zurückgestuftes Konzept (`409 restore_parent_deleted`).
-- **Reihenfolge `card` vor `card_state`:** `undoCardBatch`, das Löschen einer Karte in den Papierkorb, das Wiederherstellen (`restoreFromTrash`, nach dem Konzept `FOR SHARE`; trifft die Sperre keine Zeile mehr, etwa weil `reopen` die Karte hart gelöscht hat, folgt `404 trash_item_not_found`) und das endgültige Löschen sperren alle erst `card`, dann `card_state`. Sie nehmen an `card` `FOR NO KEY UPDATE`, nicht `FOR UPDATE`. Karten werden überall so gesperrt (Core-Löschen, Core-Restore, Core- und Worker-Purge). Das ist Einheitlichkeit: `POST /cards/{id}/review` (§21.4) hält `card_state` und braucht danach für `review_log` ein `FOR KEY SHARE` an `card`, was sich mit `FOR NO KEY UPDATE` verträgt; eine Karte im Papierkorb wird aber nie bewertet (`notDeleted`), ein `FOR UPDATE` würde also nicht verklemmen. Die Bewertung selbst bleibt bei „nur `card_state`“.
+- **Reihenfolge `card` vor `card_state`:** `undoCardBatch`, das Löschen einer Karte in den Papierkorb, das Wiederherstellen (`restoreFromTrash`, nach dem Konzept `FOR SHARE`; trifft die Sperre keine Zeile mehr, etwa weil `reopen` die Karte hart gelöscht hat, folgt `404 trash_item_not_found`) und das endgültige Löschen sperren alle erst `card`, dann `card_state`. Sie nehmen an `card` `FOR NO KEY UPDATE`, nicht `FOR UPDATE`. Karten werden überall so gesperrt (Core-Löschen, Core-Restore, Core- und Worker-Purge, `PATCH /cards/{id}` und Bulk). Das ist Einheitlichkeit: `POST /cards/{id}/review` (§21.4) hält `card_state` und braucht danach für `review_log` ein `FOR KEY SHARE` an `card`, was sich mit `FOR NO KEY UPDATE` verträgt; eine Karte im Papierkorb wird aber nie bewertet (`notDeleted`), ein `FOR UPDATE` würde also nicht verklemmen. Die Bewertung selbst bleibt bei „nur `card_state`“.
 - **Bekannt und harmlos:** Lehnt der Core ein Konzept über den Eintrag einer **anderen** Session ab (die Sperre (1) liegt dann auf dieser, nicht auf der Session des Kartenvorschlags), kann ein gleichzeitig von `cards.generate` geschriebener Kartenvorschlag `offen` an dem abgelehnten Konzept bleiben. Er ist unsichtbar, weil das Konzept nicht `aktiv` ist. Das ist bekannt und harmlos und braucht keine Behandlung.
 - **„Alle annehmen“** (Web, §21.10) nimmt alle Karten eines Vorschlags an, auch solche, die der Nutzer vorher lokal abgehakt (abgewählt) hatte. So ist es umgesetzt: Die Massenaktion (`accept` ohne `cards`) kennt die lokalen Häkchen nicht.
 
@@ -2395,3 +2397,31 @@ Ein Eintrag je Konzept und Session. Nutzlast `InboxPayloadCardBatch`: `concept_i
 - **F-LRN-03:** „Still auf die nächsten Tage verteilt“ heißt hier: Der Rest bleibt fällig und wird am nächsten Tag neu nach Priorität gewählt. Das Akzeptanzkriterium (nach 7 Tagen Pause kein Rückstandsberg) ist über das Zeitbudget erfüllt.
 - **03 §1 Versionierung:** `card` ohne `version` (§21.4).
 - **§13:** neue `TrashKind` `card`. Ihr Elternobjekt in `GET /trash` ist ein Konzept, das selbst keine `TrashKind` ist (§21.8).
+
+### 21.14 Karten verwalten (F-LRN-16, schmal)
+
+Eine Liste aller Karten mit Filtern, Suche und Massenaktionen. Ohne Gesamtzahl und ohne Rückstandszahl (LP9). Schemas in `learning.schema.json`, Umsetzung in `services/core/src/services/cards-list.ts`. Die Web-Seite folgt in einem eigenen Schnitt.
+
+| Route | Antwort | Fehler |
+|---|---|---|
+| `GET /cards?module_id&concept_id&kind&origin&status&q&sort&cursor&limit` | 200 `CardPage` | `400 validation_failed`, `400 invalid_cursor` |
+| `POST /cards/bulk` mit `CardBulkRequest` | 200 `CardBulkResult` | `400 validation_failed` (u. a. doppelte IDs) |
+
+**`GET /cards`** (alle Parameter optional; Zugang wie §21.4)
+- `module_id`, `concept_id` (Uuid). `module_id` filtert über `concept_module` des Kartenkonzepts. `kind` (`basic` oder `cloze`, mehrfach wie bei `GET /inbox`), `origin` (`ki` oder `manuell`).
+- `status` (`CardListStatus`): `alle` (Standard), `aktiv` (nicht pausiert), `pausiert`, `neu` (`card_state.state = new`), `schwer` (nicht `new` **und** `lapses ≥ HARD_LAPSES` **oder** `difficulty ≥ HARD_DIFFICULTY`). Die Konstanten `HARD_LAPSES = 3` und `HARD_DIFFICULTY = 7` stehen in `learning/params.ts`.
+- `q` (1 bis 100 Zeichen): Teilwort ohne Groß-/Kleinschreibung (`ILIKE`, `%`, `_` und der Rückwärtsstrich wörtlich, wie `GET /concepts`, §20.6) über Vorderseite, Antwort, Erklärung und alle Lückenlösungen (auch die gleichwertigen Schreibweisen). Bei `cloze` zählt die Vorderseite samt `{{cN::…}}`-Syntax.
+- `sort` (`CardListSort`): `neu` (Standard: `created_at DESC, id DESC`), `faellig` (`due ASC, id ASC`), `schwer` (`lapses DESC, difficulty DESC, id ASC`).
+- `cursor`, `limit` wie §7 (Standard 50, höchstens 200). Der Cursor ist ein opaker String und an die Sortierung gebunden: Er trägt als erstes Element ein Präfix (`n` für `neu`, `f` für `faellig`, `s` für `schwer`), danach bei `neu` und `faellig` `[Zeit als Datenbank-Text, id]` (bei `faellig` ist die Zeit `due`), bei `schwer` `[lapses, difficulty, id]` (Text, `lapses` 0 bis 2147483647, `difficulty` endlich und höchstens 32 Zeichen). Ein Cursor, den die Sortierung nicht lesen kann, auch der einer anderen Sortierung oder mit Werten außerhalb des Bereichs, ergibt `400 invalid_cursor`.
+- **Sichtbar** sind nur nicht gelöschte Karten (samt nicht gelöschtem `card_state`), deren Konzept nicht gelöscht und `aktiv` ist. Vorschläge und Hüllen (`zusammengefuehrt`) listet die Route nicht.
+- **`CardPage`** `{ items: CardListItem[], next_cursor: string | null }`. **`CardListItem`** `{ card: Card, concept: { id, name }, modules: SearchModuleRef[] }`: `card` ist das unveränderte `Card` aus §21.4 und enthält den FSRS-Zustand schon in `card.state` (`state`, `due`, `lapses`, `reps`, `difficulty`, …), nichts steht doppelt. `modules` sind die Module des Konzepts (nicht gelöschte Zuordnung und Modul), nach Name, höchstens 10, je mit `id`, `name`, `short_name` (kann `null` sein, die Web-App fällt auf `name` zurück).
+- Eine Abfrage je Seite: Konzeptname und Module kommen per Unterabfrage mit. Danach prüft `loadApiCards` die Belege (`missing`) gebündelt in zwei weiteren Abfragen je Seite, nicht je Karte.
+
+**`POST /cards/bulk`**
+- `CardBulkRequest` `{ ids: Uuid[] (1 bis 200, ohne Doppelte), action: "suspend" | "resume" | "delete" }`. Doppelte IDs, leere oder zu lange Liste und unbekannte Aktion ergeben `400 validation_failed`, es wird nichts geändert.
+- `CardBulkResult` `{ changed: Uuid[], skipped: { id, code }[] }`. Jede ID des Requests steht in genau einer der Listen, beide **aufsteigend nach ID** sortiert. `code`: `unchanged` (schon im Zielzustand) oder `card_not_found` (unbekannt oder gelöscht).
+- `suspend` und `resume` wie `PATCH /cards/{id}` mit `suspended`: Der FSRS-Zustand und `review_log` bleiben, `updated_at` wird gesetzt. `delete` wie `DELETE /cards/{id}`: je Karte `softDelete` (Papierkorb, §21.8, Zustand und Bewertungen gehen mit). „Rückgängig“ geht je Karte über `POST /trash/{id}/restore`, die IDs dafür stehen in `changed`.
+- **Eine Transaktion, Sperren (§21.7):** Alle vorhandenen, nicht gelöschten Karten werden in **einer** Abfrage aufsteigend nach ID `FOR NO KEY UPDATE` gesperrt, `card` immer vor `card_state`. Zwei gleichzeitige Aufrufe mit überlappenden IDs warten deshalb hintereinander an der kleinsten gemeinsamen ID und verklemmen nicht (kein `40P01`). Wer wartet, sieht danach den Zustand des anderen (`unchanged` bzw. `card_not_found`). Wie `PATCH /cards/{id}` und `DELETE /cards/{id}` wirkt Bulk auch auf Karten nicht-aktiver Konzepte (Entwurf, archiviert); die Einschränkung auf aktive Konzepte gilt nur für die Liste.
+- Keine Teilfehler: Außer den beiden `skipped`-Codes gibt es keinen Fehlercode je Karte. Ein Datenbankfehler rollt alles zurück.
+
+**Fehlercodes:** keine neuen. `validation_failed` und `invalid_cursor` gelten wie bisher, `card_not_found` taucht nur als `skipped.code` auf (§21.11).

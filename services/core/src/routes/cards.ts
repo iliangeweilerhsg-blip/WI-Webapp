@@ -5,13 +5,22 @@ import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import {
   ApiErrorSchema,
+  CardBulkRequestSchema,
+  CardBulkResultSchema,
   CardCreateSchema,
+  CardKindSchema,
   CardListSchema,
+  CardListSortSchema,
+  CardListStatusSchema,
+  CardOriginSchema,
+  CardPageSchema,
   CardSchema,
   CardUpdateSchema,
   UuidSchema,
 } from '@sg/shared';
 import type { Db } from '../db/client.ts';
+import { PageQuerySchema } from '../lib/pagination.ts';
+import { bulkCards, listCards } from '../services/cards-list.ts';
 import { createCard, getCard, listConceptCards, updateCard } from '../services/cards.ts';
 import { softDeleteWithOps } from '../services/trash-ops.ts';
 
@@ -23,10 +32,65 @@ export interface CardRouteDeps {
 
 const IdParams = z.object({ id: UuidSchema });
 
+const CardListQuerySchema = PageQuerySchema.extend({
+  module_id: UuidSchema.optional(),
+  concept_id: UuidSchema.optional(),
+  // `kind` mehrfach: ?kind=basic&kind=cloze (wie bei GET /inbox)
+  kind: z
+    .preprocess(
+      (value) => (value === undefined || Array.isArray(value) ? value : [value]),
+      z.array(CardKindSchema).max(10),
+    )
+    .optional(),
+  origin: CardOriginSchema.optional(),
+  status: CardListStatusSchema.default('alle'),
+  q: z.string().min(1).max(100).optional(),
+  sort: CardListSortSchema.default('neu'),
+});
+
 export async function cardRoutes(app: FastifyInstance, deps: CardRouteDeps): Promise<void> {
   const typed = app.withTypeProvider<ZodTypeProvider>();
   const { db } = deps;
   const now = deps.now ?? (() => new Date());
+
+  typed.get(
+    '/cards',
+    {
+      schema: {
+        tags: ['Karten'],
+        summary:
+          'Karten verwalten (§21.14): Karten aktiver Konzepte mit Filtern (module_id, concept_id, kind, origin, status), Suche q und Sortierung neu | faellig | schwer. Ohne Gesamtzahl. 400 `validation_failed`, 400 `invalid_cursor`',
+        querystring: CardListQuerySchema,
+        response: { 200: CardPageSchema, 400: ApiErrorSchema },
+      },
+    },
+    async (request) =>
+      listCards(db, {
+        moduleId: request.query.module_id,
+        conceptId: request.query.concept_id,
+        kinds: request.query.kind,
+        origin: request.query.origin,
+        status: request.query.status,
+        q: request.query.q,
+        sort: request.query.sort,
+        cursor: request.query.cursor,
+        limit: request.query.limit,
+      }),
+  );
+
+  typed.post(
+    '/cards/bulk',
+    {
+      schema: {
+        tags: ['Karten'],
+        summary:
+          'Mehrere Karten pausieren, fortsetzen oder löschen (§21.14, eine Transaktion). Nicht Geändertes steht in `skipped` (`unchanged`, `card_not_found`). 400 `validation_failed` (u. a. doppelte IDs)',
+        body: CardBulkRequestSchema,
+        response: { 200: CardBulkResultSchema, 400: ApiErrorSchema },
+      },
+    },
+    async (request) => bulkCards(db, request.body),
+  );
 
   typed.get(
     '/concepts/:id/cards',
