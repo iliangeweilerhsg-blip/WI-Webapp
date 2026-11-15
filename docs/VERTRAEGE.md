@@ -2111,6 +2111,8 @@ Format nach 08 §6, nur `basic` und `cloze`. In der API und in der Inbox als `Ca
 | `POST /cards` mit `CardCreate` | 201 `Card` | `404 concept_not_found`, `409 concept_not_active`, `409 card_exists`, `400 card_invalid`, `400 card_source_invalid` |
 | `PATCH /cards/{id}` mit `CardUpdate` | 200 `Card` | `404 card_not_found`, `400 validation_failed` (kein Feld), `400 card_invalid`, `400 card_source_invalid` |
 | `DELETE /cards/{id}` | 204 | `404 card_not_found` |
+| `GET /cards?…` | 200 `CardPage` | `400 validation_failed`, `400 invalid_cursor` (§21.14) |
+| `POST /cards/bulk` mit `CardBulkRequest` | 200 `CardBulkResult` | `400 validation_failed` (§21.14) |
 
 **Zugang:** Keine Route trägt `config.sgAccess`. Alle gelten lokal und aus dem Netz mit Geräte-Token wie die übrigen (§5). Gelöschte Karten gibt es nicht (`404`). `Idempotency-Key` gilt für die beiden `POST` (08 §1).
 
@@ -2395,3 +2397,31 @@ Ein Eintrag je Konzept und Session. Nutzlast `InboxPayloadCardBatch`: `concept_i
 - **F-LRN-03:** „Still auf die nächsten Tage verteilt“ heißt hier: Der Rest bleibt fällig und wird am nächsten Tag neu nach Priorität gewählt. Das Akzeptanzkriterium (nach 7 Tagen Pause kein Rückstandsberg) ist über das Zeitbudget erfüllt.
 - **03 §1 Versionierung:** `card` ohne `version` (§21.4).
 - **§13:** neue `TrashKind` `card`. Ihr Elternobjekt in `GET /trash` ist ein Konzept, das selbst keine `TrashKind` ist (§21.8).
+
+### 21.14 Karten verwalten (F-LRN-16, schmal)
+
+Eine Liste aller Karten mit Filtern, Suche und Massenaktionen. Ohne Gesamtzahl und ohne Rückstandszahl (LP9). Schemas in `learning.schema.json`, Umsetzung in `services/core/src/services/cards-list.ts`. Die Web-Seite folgt in einem eigenen Schnitt.
+
+| Route | Antwort | Fehler |
+|---|---|---|
+| `GET /cards?module_id&concept_id&kind&origin&status&q&sort&cursor&limit` | 200 `CardPage` | `400 validation_failed`, `400 invalid_cursor` |
+| `POST /cards/bulk` mit `CardBulkRequest` | 200 `CardBulkResult` | `400 validation_failed` (u. a. doppelte IDs) |
+
+**`GET /cards`** (alle Parameter optional; Zugang wie §21.4)
+- `module_id`, `concept_id` (Uuid). `module_id` filtert über `concept_module` des Kartenkonzepts. `kind` (`basic` oder `cloze`, mehrfach wie bei `GET /inbox`), `origin` (`ki` oder `manuell`).
+- `status` (`CardListStatus`): `alle` (Standard), `aktiv` (nicht pausiert), `pausiert`, `neu` (`card_state.state = new`), `schwer` (nicht `new` **und** `lapses ≥ HARD_LAPSES` **oder** `difficulty ≥ HARD_DIFFICULTY`). Die Konstanten `HARD_LAPSES = 3` und `HARD_DIFFICULTY = 7` stehen in `learning/params.ts`.
+- `q` (1 bis 100 Zeichen): Teilwort ohne Groß-/Kleinschreibung (`ILIKE`, `%`, `_` und der Rückwärtsstrich wörtlich, wie `GET /concepts`, §20.6) über Vorderseite, Antwort, Erklärung und alle Lückenlösungen (auch die gleichwertigen Schreibweisen). Bei `cloze` zählt die Vorderseite samt `{{cN::…}}`-Syntax.
+- `sort` (`CardListSort`): `neu` (Standard: `created_at DESC, id DESC`), `faellig` (`due ASC, id ASC`), `schwer` (`lapses DESC, difficulty DESC, id ASC`).
+- `cursor`, `limit` wie §7 (Standard 50, höchstens 200). Der Cursor ist an die Sortierung gebunden: `neu` und `faellig` nutzen den Cursor der übrigen Listen (`[Zeit als Datenbank-Text, id]`, bei `faellig` ist die Zeit `due`), `schwer` einen eigenen `[lapses, difficulty, id]`. Ein Cursor, den die Sortierung nicht lesen kann, ergibt `400 invalid_cursor`.
+- **Sichtbar** sind nur nicht gelöschte Karten (samt nicht gelöschtem `card_state`), deren Konzept nicht gelöscht und `aktiv` ist. Vorschläge und Hüllen (`zusammengefuehrt`) listet die Route nicht.
+- **`CardPage`** `{ items: CardListItem[], next_cursor: string | null }`. **`CardListItem`** `{ card: Card, concept: { id, name }, modules: SearchModuleRef[] }`: `card` ist das unveränderte `Card` aus §21.4 und enthält den FSRS-Zustand schon in `card.state` (`state`, `due`, `lapses`, `reps`, `difficulty`, …), nichts steht doppelt. `modules` sind die Module des Konzepts (nicht gelöschte Zuordnung und Modul), nach Name, höchstens 10, je mit `id`, `name`, `short_name` (kann `null` sein, die Web-App fällt auf `name` zurück).
+- Eine Abfrage je Seite: Konzeptname und Module kommen per Unterabfrage mit. Danach prüft `loadApiCards` die Belege (`missing`) gebündelt in zwei weiteren Abfragen je Seite, nicht je Karte.
+
+**`POST /cards/bulk`**
+- `CardBulkRequest` `{ ids: Uuid[] (1 bis 200, ohne Doppelte), action: "suspend" | "resume" | "delete" }`. Doppelte IDs, leere oder zu lange Liste und unbekannte Aktion ergeben `400 validation_failed`, es wird nichts geändert.
+- `CardBulkResult` `{ changed: Uuid[], skipped: { id, code }[] }`. Jede ID des Requests steht in genau einer der Listen, beide **aufsteigend nach ID** sortiert. `code`: `unchanged` (schon im Zielzustand) oder `card_not_found` (unbekannt oder gelöscht).
+- `suspend` und `resume` wie `PATCH /cards/{id}` mit `suspended`: Der FSRS-Zustand und `review_log` bleiben, `updated_at` wird gesetzt. `delete` wie `DELETE /cards/{id}`: je Karte `softDelete` (Papierkorb, §21.8, Zustand und Bewertungen gehen mit). „Rückgängig“ geht je Karte über `POST /trash/{id}/restore`, die IDs dafür stehen in `changed`.
+- **Eine Transaktion, Sperren (§21.7):** Alle vorhandenen, nicht gelöschten Karten werden in **einer** Abfrage aufsteigend nach ID `FOR NO KEY UPDATE` gesperrt, `card` immer vor `card_state`. Zwei gleichzeitige Aufrufe mit überlappenden IDs warten deshalb hintereinander an der kleinsten gemeinsamen ID und verklemmen nicht (kein `40P01`). Wer wartet, sieht danach den Zustand des anderen (`unchanged` bzw. `card_not_found`).
+- Keine Teilfehler: Außer den beiden `skipped`-Codes gibt es keinen Fehlercode je Karte. Ein Datenbankfehler rollt alles zurück.
+
+**Fehlercodes:** keine neuen. `validation_failed` und `invalid_cursor` gelten wie bisher, `card_not_found` taucht nur als `skipped.code` auf (§21.11).

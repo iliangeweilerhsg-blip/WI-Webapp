@@ -163,12 +163,40 @@ export type EvidenceRef = (EvidenceRefSlide | EvidenceRefTranscript)
  */
 export type FsrsState = ("new" | "learning" | "review" | "relearning")
 /**
+ * Massenaktion in POST /cards/bulk (§21.14). suspend/resume wie PATCH suspended, delete wie DELETE /cards/{id}
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardBulkAction".
+ */
+export type CardBulkAction = ("suspend" | "resume" | "delete")
+/**
+ * unchanged: schon im Zielzustand. card_not_found: Karte fehlt oder ist gelöscht
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardBulkSkippedCode".
+ */
+export type CardBulkSkippedCode = ("unchanged" | "card_not_found")
+/**
  * Kartentyp (F-LRN-01). Dieser Schnitt kennt nur basic und cloze (VERTRAEGE §21.2), weitere kommen später
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
  * via the `definition` "CardKind".
  */
 export type CardKind = ("basic" | "cloze")
+/**
+ * Sortierung in GET /cards (§21.14). neu: created_at absteigend. faellig: due aufsteigend. schwer: lapses, dann difficulty absteigend
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardListSort".
+ */
+export type CardListSort = ("neu" | "faellig" | "schwer")
+/**
+ * Filter in GET /cards (§21.14). aktiv: nicht pausiert. neu: card_state.state = new. schwer: nicht neu und (lapses ≥ 3 oder difficulty ≥ 7)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardListStatus".
+ */
+export type CardListStatus = ("alle" | "aktiv" | "pausiert" | "neu" | "schwer")
 /**
  * Gerät, auf dem ein Ereignis entstanden ist
  * 
@@ -1319,6 +1347,46 @@ lapses: number
 last_review: (Timestamp | null)
 }
 /**
+ * POST /cards/bulk (§21.14). Doppelte IDs → 400 validation_failed
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardBulkRequest".
+ */
+export interface CardBulkRequest {
+/**
+ * @minItems 1
+ * @maxItems 200
+ */
+ids: Uuid[]
+action: CardBulkAction
+}
+/**
+ * Antwort von POST /cards/bulk (§21.14): jede ID des Requests steht in genau einer der beiden Listen, aufsteigend sortiert
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardBulkResult".
+ */
+export interface CardBulkResult {
+/**
+ * @maxItems 200
+ */
+changed: Uuid[]
+/**
+ * @maxItems 200
+ */
+skipped: CardBulkSkipped[]
+}
+/**
+ * Eine Karte, die POST /cards/bulk nicht geändert hat
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardBulkSkipped".
+ */
+export interface CardBulkSkipped {
+id: Uuid
+code: CardBulkSkippedCode
+}
+/**
  * POST /cards: Karte von Hand (origin = manuell). Das Konzept muss aktiv sein (§21.4)
  * 
  * This interface was referenced by `SchemaBundle`'s JSON-Schema
@@ -1347,6 +1415,54 @@ export interface CardList {
  * @maxItems 500
  */
 items: Card[]
+}
+/**
+ * Konzept einer Karte in GET /cards
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardListConceptRef".
+ */
+export interface CardListConceptRef {
+id: Uuid
+name: string
+}
+/**
+ * Eine Karte in GET /cards (§21.14). Der FSRS-Zustand steht schon in card.state
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardListItem".
+ */
+export interface CardListItem {
+card: Card
+concept: CardListConceptRef
+/**
+ * Module des Konzepts, nach Name, höchstens 10
+ * 
+ * @maxItems 10
+ */
+modules: SearchModuleRef[]
+}
+/**
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "SearchModuleRef".
+ */
+export interface SearchModuleRef {
+id: Uuid
+name: string
+short_name: (string | null)
+}
+/**
+ * GET /cards (§21.14): eine Seite Karten. Ohne Gesamtzahl (LP9: keine Rückstandszahl)
+ * 
+ * This interface was referenced by `SchemaBundle`'s JSON-Schema
+ * via the `definition` "CardPage".
+ */
+export interface CardPage {
+/**
+ * @maxItems 200
+ */
+items: CardListItem[]
+next_cursor: (string | null)
 }
 /**
  * Eine vorgeschlagene Karte in einem card_batch, nach den Prüfungen aus §21.6
@@ -1499,15 +1615,6 @@ evidence: EvidenceView[]
  */
 relations: ConceptRelationView[]
 inbox_item_id: (Uuid | null)
-}
-/**
- * This interface was referenced by `SchemaBundle`'s JSON-Schema
- * via the `definition` "SearchModuleRef".
- */
-export interface SearchModuleRef {
-id: Uuid
-name: string
-short_name: (string | null)
 }
 /**
  * Gespeicherter Beleg (Tabelle evidence) mit Anzeigeangaben

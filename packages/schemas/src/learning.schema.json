@@ -309,6 +309,138 @@
         }
       }
     },
+    "CardListStatus": {
+      "type": "string",
+      "enum": ["alle", "aktiv", "pausiert", "neu", "schwer"],
+      "description": "Filter in GET /cards (§21.14). aktiv: nicht pausiert. neu: card_state.state = new. schwer: nicht neu und (lapses ≥ 3 oder difficulty ≥ 7)"
+    },
+    "CardListSort": {
+      "type": "string",
+      "enum": ["neu", "faellig", "schwer"],
+      "description": "Sortierung in GET /cards (§21.14). neu: created_at absteigend. faellig: due aufsteigend. schwer: lapses, dann difficulty absteigend"
+    },
+    "CardListConceptRef": {
+      "type": "object",
+      "description": "Konzept einer Karte in GET /cards",
+      "required": ["id", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    },
+    "CardListItem": {
+      "type": "object",
+      "description": "Eine Karte in GET /cards (§21.14). Der FSRS-Zustand steht schon in card.state",
+      "required": ["card", "concept", "modules"],
+      "additionalProperties": false,
+      "properties": {
+        "card": {
+          "$ref": "#/$defs/Card"
+        },
+        "concept": {
+          "$ref": "#/$defs/CardListConceptRef"
+        },
+        "modules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SearchModuleRef"
+          },
+          "maxItems": 10,
+          "description": "Module des Konzepts, nach Name, höchstens 10"
+        }
+      }
+    },
+    "CardPage": {
+      "type": "object",
+      "description": "GET /cards (§21.14): eine Seite Karten. Ohne Gesamtzahl (LP9: keine Rückstandszahl)",
+      "required": ["items", "next_cursor"],
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardListItem"
+          },
+          "maxItems": 200
+        },
+        "next_cursor": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "CardBulkAction": {
+      "type": "string",
+      "enum": ["suspend", "resume", "delete"],
+      "description": "Massenaktion in POST /cards/bulk (§21.14). suspend/resume wie PATCH suspended, delete wie DELETE /cards/{id}"
+    },
+    "CardBulkRequest": {
+      "type": "object",
+      "description": "POST /cards/bulk (§21.14). Doppelte IDs → 400 validation_failed",
+      "required": ["ids", "action"],
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "minItems": 1,
+          "maxItems": 200,
+          "uniqueItems": true
+        },
+        "action": {
+          "$ref": "#/$defs/CardBulkAction"
+        }
+      }
+    },
+    "CardBulkSkippedCode": {
+      "type": "string",
+      "enum": ["unchanged", "card_not_found"],
+      "description": "unchanged: schon im Zielzustand. card_not_found: Karte fehlt oder ist gelöscht"
+    },
+    "CardBulkSkipped": {
+      "type": "object",
+      "description": "Eine Karte, die POST /cards/bulk nicht geändert hat",
+      "required": ["id", "code"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "code": {
+          "$ref": "#/$defs/CardBulkSkippedCode"
+        }
+      }
+    },
+    "CardBulkResult": {
+      "type": "object",
+      "description": "Antwort von POST /cards/bulk (§21.14): jede ID des Requests steht in genau einer der beiden Listen, aufsteigend sortiert",
+      "required": ["changed", "skipped"],
+      "additionalProperties": false,
+      "properties": {
+        "changed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          },
+          "maxItems": 200
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CardBulkSkipped"
+          },
+          "maxItems": 200
+        }
+      }
+    },
     "CardCreate": {
       "type": "object",
       "description": "POST /cards: Karte von Hand (origin = manuell). Das Konzept muss aktiv sein (§21.4)",

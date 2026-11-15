@@ -192,6 +192,25 @@ class CardBackBasic(BaseModel):
     )
 
 
+class CardBulkAction(StrEnum):
+    """
+    Massenaktion in POST /cards/bulk (§21.14). suspend/resume wie PATCH suspended, delete wie DELETE /cards/{id}
+    """
+
+    suspend = 'suspend'
+    resume = 'resume'
+    delete = 'delete'
+
+
+class CardBulkSkippedCode(StrEnum):
+    """
+    unchanged: schon im Zielzustand. card_not_found: Karte fehlt oder ist gelöscht
+    """
+
+    unchanged = 'unchanged'
+    card_not_found = 'card_not_found'
+
+
 class C1Item(RootModel[StrictStr]):
     root: StrictStr = Field(..., max_length=200, min_length=1)
 
@@ -250,6 +269,28 @@ class CardKind(StrEnum):
 
     basic = 'basic'
     cloze = 'cloze'
+
+
+class CardListSort(StrEnum):
+    """
+    Sortierung in GET /cards (§21.14). neu: created_at absteigend. faellig: due aufsteigend. schwer: lapses, dann difficulty absteigend
+    """
+
+    neu = 'neu'
+    faellig = 'faellig'
+    schwer = 'schwer'
+
+
+class CardListStatus(StrEnum):
+    """
+    Filter in GET /cards (§21.14). aktiv: nicht pausiert. neu: card_state.state = new. schwer: nicht neu und (lapses ≥ 3 oder difficulty ≥ 7)
+    """
+
+    alle = 'alle'
+    aktiv = 'aktiv'
+    pausiert = 'pausiert'
+    neu = 'neu'
+    schwer = 'schwer'
 
 
 class CardOrigin(StrEnum):
@@ -2240,6 +2281,35 @@ class CardBackCloze(BaseModel):
     answers: CardClozeAnswers
 
 
+class CardBulkRequest(BaseModel):
+    """
+    POST /cards/bulk (§21.14). Doppelte IDs → 400 validation_failed
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    ids: list[Uuid] = Field(..., max_length=200, min_length=1)
+    action: CardBulkAction
+
+
+class CardBulkSkipped(BaseModel):
+    """
+    Eine Karte, die POST /cards/bulk nicht geändert hat
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    code: CardBulkSkippedCode
+
+
 class CardContentBasic(BaseModel):
     """
     Frage und Antwort
@@ -2264,6 +2334,23 @@ class CardContentCloze(BaseModel):
     kind: Literal['cloze']
     front: CardFrontText
     back: CardBackCloze
+
+
+class CardListConceptRef(BaseModel):
+    """
+    Konzept einer Karte in GET /cards
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    id: StrictStr = Field(
+        ...,
+        description='UUIDv7 (03 §1), Kleinbuchstaben',
+        pattern='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        title='Uuid',
+    )
+    name: StrictStr = Field(..., max_length=200, min_length=1)
 
 
 class CardState(BaseModel):
@@ -6477,6 +6564,18 @@ class BackupStatus(BaseModel):
     )
 
 
+class CardBulkResult(BaseModel):
+    """
+    Antwort von POST /cards/bulk (§21.14): jede ID des Requests steht in genau einer der beiden Listen, aufsteigend sortiert
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    changed: list[Uuid] = Field(..., max_length=200)
+    skipped: list[CardBulkSkipped] = Field(..., max_length=200)
+
+
 class ConceptListItem(BaseModel):
     """
     Eintrag in GET /concepts
@@ -7942,6 +8041,33 @@ class CardList(BaseModel):
     items: list[Card] = Field(..., max_length=500)
 
 
+class CardListItem(BaseModel):
+    """
+    Eine Karte in GET /cards (§21.14). Der FSRS-Zustand steht schon in card.state
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    card: Card
+    concept: CardListConceptRef
+    modules: list[SearchModuleRef] = Field(
+        ..., description='Module des Konzepts, nach Name, höchstens 10', max_length=10
+    )
+
+
+class CardPage(BaseModel):
+    """
+    GET /cards (§21.14): eine Seite Karten. Ohne Gesamtzahl (LP9: keine Rückstandszahl)
+    """
+
+    model_config = ConfigDict(
+        extra='forbid',
+    )
+    items: list[CardListItem] = Field(..., max_length=200)
+    next_cursor: StrictStr | None
+
+
 class ElementUpsertData(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
@@ -8220,6 +8346,13 @@ class SchemaBundle(BaseModel):
     Card_1: Card | None = Field(None, alias='Card')
     CardBackBasic_1: CardBackBasic | None = Field(None, alias='CardBackBasic')
     CardBackCloze_1: CardBackCloze | None = Field(None, alias='CardBackCloze')
+    CardBulkAction_1: CardBulkAction | None = Field(None, alias='CardBulkAction')
+    CardBulkRequest_1: CardBulkRequest | None = Field(None, alias='CardBulkRequest')
+    CardBulkResult_1: CardBulkResult | None = Field(None, alias='CardBulkResult')
+    CardBulkSkipped_1: CardBulkSkipped | None = Field(None, alias='CardBulkSkipped')
+    CardBulkSkippedCode_1: CardBulkSkippedCode | None = Field(
+        None, alias='CardBulkSkippedCode'
+    )
     CardClozeAnswers_1: CardClozeAnswers | None = Field(None, alias='CardClozeAnswers')
     CardContent: CardContentBasic | CardContentCloze | None = Field(
         None,
@@ -8232,7 +8365,14 @@ class SchemaBundle(BaseModel):
     CardFrontText_1: CardFrontText | None = Field(None, alias='CardFrontText')
     CardKind_1: CardKind | None = Field(None, alias='CardKind')
     CardList_1: CardList | None = Field(None, alias='CardList')
+    CardListConceptRef_1: CardListConceptRef | None = Field(
+        None, alias='CardListConceptRef'
+    )
+    CardListItem_1: CardListItem | None = Field(None, alias='CardListItem')
+    CardListSort_1: CardListSort | None = Field(None, alias='CardListSort')
+    CardListStatus_1: CardListStatus | None = Field(None, alias='CardListStatus')
     CardOrigin_1: CardOrigin | None = Field(None, alias='CardOrigin')
+    CardPage_1: CardPage | None = Field(None, alias='CardPage')
     CardProposal_1: CardProposal | None = Field(None, alias='CardProposal')
     CardSource_1: CardSource | None = Field(None, alias='CardSource')
     CardState_1: CardState | None = Field(None, alias='CardState')
