@@ -1,5 +1,6 @@
 // Einstellungen (T1-19): Reiter, Formulare je Bereich, Speichern mit Toast, Fehleranzeige
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useQuery } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -10,6 +11,7 @@ vi.mock('next/navigation', () => ({
 }));
 
 import { AppShell } from '../src/components/AppShell.tsx';
+import { LearningSettingsForm } from '../src/components/settings/LearningSettings.tsx';
 import { SettingsView } from '../src/components/SettingsView.tsx';
 import { QueryProvider } from '../src/lib/query.tsx';
 import { AppearanceDefault, ThemeProvider } from '../src/lib/theme.tsx';
@@ -49,7 +51,16 @@ describe('Reiter', () => {
       within(tabs)
         .getAllByRole('tab')
         .map((t) => t.textContent),
-    ).toEqual(['Allgemein', 'Vorlesung', 'Stift', 'Geräte', 'Moodle', 'KI', 'Daten und Papierkorb']);
+    ).toEqual([
+      'Allgemein',
+      'Vorlesung',
+      'Lernen',
+      'Stift',
+      'Geräte',
+      'Moodle',
+      'KI',
+      'Daten und Papierkorb',
+    ]);
     expect(screen.getByRole('tab', { name: 'Allgemein' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('group', { name: 'Darstellung' })).toBeInTheDocument();
     expect(await screen.findByRole('heading', { name: 'Semester' })).toBeInTheDocument();
@@ -279,6 +290,127 @@ describe('Vorlesung', () => {
     await user.click(screen.getByRole('button', { name: 'Speichern' }));
     await screen.findByText('Vorlesungs-Einstellungen gespeichert');
     expect(patches(core).map((r) => r.body)).toEqual([{ lecture: { microphone_id: null } }]);
+  });
+});
+
+describe('Lernen', () => {
+  async function open() {
+    const user = userEvent.setup();
+    page();
+    await user.click(screen.getByRole('tab', { name: 'Lernen' }));
+    await screen.findByLabelText('Neue Karten pro Tag (Karten)');
+    return user;
+  }
+  const budget = () => screen.getByLabelText('Zeitbudget für Heute wiederholen (Minuten)');
+  const newCards = () => screen.getByLabelText('Neue Karten pro Tag (Karten)');
+
+  it('zeigt die Standardwerte mit Hilfetexten', async () => {
+    installFakeCore();
+    await open();
+    expect(budget()).toHaveValue('20');
+    expect(newCards()).toHaveValue('20');
+    expect(budget()).toHaveAccessibleDescription(/Was nicht in den Block passt, bleibt fällig/);
+    expect(newCards()).toHaveAccessibleDescription(/0 pausiert neue Karten, Wiederholungen laufen weiter\./);
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeDisabled();
+  });
+
+  it('speichert nur geänderte Felder über PATCH /settings', async () => {
+    const core = installFakeCore();
+    const user = await open();
+    await user.clear(budget());
+    await user.type(budget(), '45');
+    await user.click(screen.getByRole('button', { name: 'Speichern' }));
+    expect(await screen.findByText('Lern-Einstellungen gespeichert')).toBeInTheDocument();
+    expect(patches(core).map((r) => r.body)).toEqual([{ learning: { review_budget_minutes: 45 } }]);
+    expect(core.settings.learning).toEqual({ review_budget_minutes: 45, new_cards_per_day: 20 });
+  });
+
+  it('0 neue Karten und die Grenzen 5, 120 und 100 sind erlaubt', async () => {
+    const core = installFakeCore();
+    const user = await open();
+    await user.clear(budget());
+    await user.type(budget(), '120');
+    await user.clear(newCards());
+    await user.type(newCards(), '0');
+    await user.click(screen.getByRole('button', { name: 'Speichern' }));
+    await screen.findByText('Lern-Einstellungen gespeichert');
+    expect(patches(core).map((r) => r.body)).toEqual([
+      { learning: { review_budget_minutes: 120, new_cards_per_day: 0 } },
+    ]);
+    await user.clear(budget());
+    await user.type(budget(), '5');
+    await user.clear(newCards());
+    await user.type(newCards(), '100');
+    expect(budget()).not.toHaveAttribute('aria-invalid');
+    expect(newCards()).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeEnabled();
+  });
+
+  it.each([
+    ['Zeitbudget für Heute wiederholen (Minuten)', '4', 'von 5 bis 120'],
+    ['Zeitbudget für Heute wiederholen (Minuten)', '121', 'von 5 bis 120'],
+    ['Neue Karten pro Tag (Karten)', '-1', 'von 0 bis 100'],
+    ['Neue Karten pro Tag (Karten)', '101', 'von 0 bis 100'],
+    ['Neue Karten pro Tag (Karten)', '2,5', 'von 0 bis 100'],
+  ])('%s = %s wird abgelehnt, nichts wird gesendet', async (label, value, range) => {
+    const core = installFakeCore();
+    const user = await open();
+    const field = screen.getByLabelText(label);
+    await user.clear(field);
+    await user.type(field, value);
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field).toHaveAccessibleDescription(new RegExp(`Bitte eine ganze Zahl ${range} eingeben\\.`));
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeDisabled();
+    expect(patches(core)).toHaveLength(0);
+  });
+
+  it('zeigt die Fehlermeldung des Core und behält die Eingabe', async () => {
+    const core = installFakeCore();
+    core.rejectNextSettings = {
+      status: 400,
+      code: 'validation_failed',
+      message: 'Die Anfrage ist ungültig.',
+    };
+    const user = await open();
+    await user.clear(newCards());
+    await user.type(newCards(), '10');
+    await user.click(screen.getByRole('button', { name: 'Speichern' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByText('Lern-Einstellungen gespeichert')).not.toBeInTheDocument();
+    expect(newCards()).toHaveValue('10');
+    expect(screen.getByRole('button', { name: 'Speichern' })).toBeEnabled();
+    expect(core.settings.learning.new_cards_per_day).toBe(20);
+  });
+
+  it('Speichern markiert die Warteschlange für /lernen als veraltet (Neuladen)', async () => {
+    installFakeCore();
+    const user = userEvent.setup();
+    let loads = 0;
+    function Queue() {
+      useQuery({
+        queryKey: ['review', 'queue', 0],
+        staleTime: Infinity,
+        queryFn: async () => ++loads,
+      });
+      return null;
+    }
+    render(
+      <ThemeProvider>
+        <QueryProvider>
+          <AppShell>
+            <Queue />
+            <LearningSettingsForm />
+          </AppShell>
+        </QueryProvider>
+      </ThemeProvider>,
+    );
+    await waitFor(() => expect(loads).toBe(1));
+    const field = await screen.findByLabelText('Neue Karten pro Tag (Karten)');
+    await user.clear(field);
+    await user.type(field, '15');
+    await user.click(screen.getByRole('button', { name: 'Speichern' }));
+    await screen.findByText('Lern-Einstellungen gespeichert');
+    await waitFor(() => expect(loads).toBe(2));
   });
 });
 

@@ -16,6 +16,7 @@ import { DevicesSettings } from './settings/DevicesSettings.tsx';
 import { SettingsTabContext, type TabMark } from './settings/form.tsx';
 import { DataSettings } from './settings/DataSettings.tsx';
 import { GeneralSettingsForm } from './settings/GeneralSettings.tsx';
+import { LearningSettingsForm } from './settings/LearningSettings.tsx';
 import { LectureSettingsForm } from './settings/LectureSettings.tsx';
 import { MoodleSettings } from './settings/MoodleSettings.tsx';
 import { PenSettingsForm } from './settings/PenSettings.tsx';
@@ -59,6 +60,7 @@ interface SettingsTab {
 const TABS: readonly SettingsTab[] = [
   { id: 'allgemein', label: 'Allgemein', panel: () => <GeneralTab /> },
   { id: 'vorlesung', label: 'Vorlesung', panel: () => <LectureSettingsForm /> },
+  { id: 'lernen', label: 'Lernen', panel: () => <LearningSettingsForm /> },
   { id: 'stift', label: 'Stift', panel: () => <PenSettingsForm /> },
   { id: 'geraete', label: 'Geräte', lazy: true, panel: () => <DevicesSettings /> },
   { id: 'moodle', label: 'Moodle', lazy: true, panel: () => <MoodleSettings /> },

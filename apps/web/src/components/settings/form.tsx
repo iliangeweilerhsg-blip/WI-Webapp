@@ -16,7 +16,7 @@ import { useSettings, useUpdateSettings } from '../../lib/settings.ts';
 import { useToast } from '../../lib/toast.tsx';
 import { CoreHint } from '../CoreHint.tsx';
 
-export type AreaKey = 'general' | 'lecture' | 'pen';
+export type AreaKey = 'general' | 'lecture' | 'pen' | 'learning';
 
 const inputClass =
   'mt-1 w-full rounded-md border border-border-strong bg-bg px-3 py-2 text-md font-normal aria-[invalid=true]:border-2 aria-[invalid=true]:border-text';
@@ -48,18 +48,26 @@ export function useAreaForm<K extends AreaKey>(
     setDraft((current) => ({ ...current, [field]: value }));
   }
 
-  /** Zahlenfeld: gültige ganze Zahlen ≥ `min` gehen in den Entwurf, alles andere bleibt als Text samt Fehler */
-  function numberField<F extends keyof Settings[K] & string>(field: F, min: number) {
+  /**
+   * Zahlenfeld: gültige ganze Zahlen ≥ `min` (und ≤ `max`, falls angegeben) gehen in den Entwurf, alles andere
+   * bleibt als Text samt Fehler
+   */
+  function numberField<F extends keyof Settings[K] & string>(field: F, min: number, max?: number) {
     const raw = texts[field];
     const current = values ? (values[field] as unknown as number) : 0;
     const text = raw ?? String(current);
-    const message = raw === undefined ? null : `Bitte eine ganze Zahl ab ${min} eingeben.`;
+    const message =
+      raw === undefined
+        ? null
+        : max === undefined
+          ? `Bitte eine ganze Zahl ab ${min} eingeben.`
+          : `Bitte eine ganze Zahl von ${min} bis ${max} eingeben.`;
     return {
       text,
       error: message,
       onChange(next: string) {
         const n = Number(next);
-        if (next.trim() !== '' && Number.isInteger(n) && n >= min) {
+        if (next.trim() !== '' && Number.isInteger(n) && n >= min && (max === undefined || n <= max)) {
           setTexts((t) => withoutKey(t, field));
           set(field, n as Settings[K][F]);
         } else {
