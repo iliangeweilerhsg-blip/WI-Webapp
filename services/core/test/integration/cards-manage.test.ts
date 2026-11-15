@@ -287,6 +287,11 @@ describe('GET /cards: Filter', () => {
       enc(['s', '9999999999', '1', id]), // lapses über int-Bereich
       enc(['s', '1', '1e999', id]), // Gleitkomma außerhalb des Bereichs
       enc(['s', '1', '1'.repeat(400), id]), // zu lang
+      enc(['s', '1', '0'.repeat(399) + '1', id]), // nur die Länge ist ungültig (Wert 1)
+      enc(['s', '1', '0.' + '0'.repeat(400), id]), // nur die Länge ist ungültig (Wert 0)
+      enc(['s', '1', '0.' + '0'.repeat(400) + '1', id]), // zu lang und Unterlauf
+      enc(['s', '1', '1e-400', id]), // Unterlauf: Postgres lehnt es ab
+      enc(['s', '1', '9e-999', id]), // Unterlauf
     ];
     for (const c of cursors) {
       const res = await call('GET', `/cards?sort=schwer&cursor=${c}`);
@@ -296,6 +301,11 @@ describe('GET /cards: Filter', () => {
     // Grenzwerte sind gültig
     const ok = await call('GET', `/cards?sort=schwer&cursor=${enc(['s', '2147483647', '1e300', id])}`);
     expect(ok.statusCode, ok.body).toBe(200);
+    // subnormale Werte und Null (auch mit Nachkommastellen) sind gültig
+    for (const d of ['1e-310', '0', '0.0', '0e-999']) {
+      const res = await call('GET', `/cards?sort=schwer&cursor=${enc(['s', '1', d, id])}`);
+      expect(res.statusCode, `${d}: ${res.body}`).toBe(200);
+    }
   });
 
   it('Cursor einer anderen Sortierung: 400 invalid_cursor (N2)', async () => {
@@ -638,10 +648,12 @@ describe('POST /cards/bulk', () => {
       expect(text).toMatch(/order by "card"\."id"\s+for no key update/i);
       const plan = await app.handle.sql.unsafe(`EXPLAIN ${text}`, params as never[]);
       const lines = plan.map((r) => String(r['QUERY PLAN']));
-      const lockAt = lines.findIndex((l) => l.includes('LockRows'));
-      const sortAt = lines.findIndex((l) => /Sort\b/.test(l));
-      expect(lockAt, lines.join('\n')).toBeGreaterThanOrEqual(0);
-      expect(sortAt, lines.join('\n')).toBeGreaterThan(lockAt);
+      // Der eigentliche Regressionsschutz ist die SQL-Prüfung oben. Der Plan hängt von der Tabellengröße ab:
+      // oben `LockRows`, darunter entweder `Sort` nach id oder ein Index-Scan über den Primärschlüssel (id-Reihenfolge).
+      const plain = lines.join('\n');
+      expect(lines[0], plain).toContain('LockRows');
+      const below = lines.slice(1).join('\n');
+      expect(/Sort Key: .*\bid\b/.test(below) || /Index Scan using card_pkey/.test(below), plain).toBe(true);
     });
 
     it('Bulk-Delete wartet auf eine laufende Bewertung (card_state) und verklemmt nicht', async () => {

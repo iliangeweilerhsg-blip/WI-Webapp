@@ -72,6 +72,9 @@ function decodeTimeCursor(raw: string, sort: CardListSort) {
   return decodeCursor(Buffer.from(JSON.stringify([ts, id]), 'utf8').toString('base64url'));
 }
 
+/** Wert rundet auf 0, obwohl die Mantisse nicht 0 ist (`1e-400`): Postgres lehnt das als `float8` ab */
+const underflows = (d: string) => Number(d) === 0 && /[1-9]/.test(d.split(/e/i)[0]!);
+
 /** Cursor der Sortierung `schwer`: `[s, lapses, difficulty, id]`, alles als Text (Gleitkommazahl verlustfrei) */
 function decodeHardCursor(raw: string): { lapses: string; difficulty: string; id: string } {
   const [lapses, difficulty, id] = parseCardCursor(raw, 'schwer', 3) as [string, string, string];
@@ -81,6 +84,7 @@ function decodeHardCursor(raw: string): { lapses: string; difficulty: string; id
     difficulty.length <= FLOAT_MAX_LENGTH &&
     FLOAT_RE.test(difficulty) &&
     Number.isFinite(Number(difficulty)) &&
+    !underflows(difficulty) &&
     UUID_RE.test(id)
   ) {
     return { lapses, difficulty, id };
