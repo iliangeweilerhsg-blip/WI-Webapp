@@ -90,7 +90,12 @@ Bewertungen werden erneut gesendet. Bleibt es dabei, steht „Einige Bewertungen
 
 ## 5. Einstellungen
 
-Einen Bereich **Einstellungen → Lernen** (Zeitbudget, neue Karten je Tag) **gibt es in der Web-App noch nicht**. Es gelten die Standardwerte: 20 Minuten und 20 neue Karten am Tag. Im Core sind beide Werte schon einstellbar, nur die Oberfläche fehlt.
+Unter **Einstellungen → Lernen** stellst du zwei Werte ein:
+
+- **Zeitbudget für Heute wiederholen** (5 bis 120 Minuten, Standard 20). Was nicht in den Block passt, bleibt fällig und kommt morgen dran.
+- **Neue Karten pro Tag** (0 bis 100, Standard 20). Mit 0 pausieren neue Karten, Wiederholungen laufen weiter.
+
+Mit **Speichern** gelten die Werte beim nächsten Laden von Heute und `/lernen`. Außerhalb des erlaubten Bereichs markiert das Feld den Fehler und **Speichern** bleibt gesperrt. Eine Einstellung der Zielbehaltensquote gibt es nicht.
 
 ## 6. Papierkorb und Rückgängig
 
@@ -104,7 +109,7 @@ Einen Bereich **Einstellungen → Lernen** (Zeitbudget, neue Karten je Tag) **gi
 - **Keine Lernsitzung** mit Kurzzeit-Lernschritten und **keine Probeklausur**. Es gibt nur „Heute wiederholen“.
 - **Keine Formeln** in Karten, nur Text.
 - **Keine Wiederholung auf dem iPad.** Karten gibt es nur in der Web-App am Mac.
-- **Keine Lern-Einstellungen** in der Oberfläche (Abschnitt 5) und keine Einstellung der Zielbehaltensquote.
+- **Keine Einstellung der Zielbehaltensquote.** Einstellbar sind nur Zeitbudget und neue Karten je Tag (Abschnitt 5).
 - Neue Karten entstehen nur nach einer Vorlesung oder von Hand.
 
 ## Wenn etwas nicht klappt
