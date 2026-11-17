@@ -507,23 +507,35 @@ function drawShape2(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
   ctx.fill('nonzero');
 }
 
-/** Alle Punkte (auch mehrere) liegen auf einem Fleck, wie bei v2 (Punkte unter `MERGE_DIST` werden zusammengefasst). */
-function isSinglePoint(d: DecodedStroke): boolean {
-  if (d.count < 1) return false;
-  const x = d.pts[0]!;
-  const y = d.pts[1]!;
-  for (let i = 1; i < d.count; i++) {
-    if (Math.hypot(d.pts[i * DECODED_STRIDE]! - x, d.pts[i * DECODED_STRIDE + 1]! - y) >= MERGE_DIST)
-      return false;
+/**
+ * Mitte des Flecks, wenn alle Punkte (auch mehrere) auf einem Fleck liegen, sonst `null`. Beim Füller ist das jeder
+ * Strich, dessen Ausdehnung (Diagonale des umschließenden Rechtecks) kleiner als `width` ist: Ein getipptes Pünktchen
+ * zittert, und `perfect-freehand` frisst mit dem auslaufenden Ende (`taper`, 1,2 × `width`) so kurze Striche ganz auf
+ * (#390, VERTRAEGE §23.8). Bei den anderen Werkzeugen gilt wie bei v2 `MERGE_DIST`.
+ */
+function singlePointCenter(d: DecodedStroke): { x: number; y: number } | null {
+  if (d.count < 1) return null;
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (let i = 0; i < d.count; i++) {
+    const x = d.pts[i * DECODED_STRIDE]!;
+    const y = d.pts[i * DECODED_STRIDE + 1]!;
+    if (x < x0) x0 = x;
+    if (x > x1) x1 = x;
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
   }
-  return true;
+  const limit = d.tool === 'fountain' ? Math.max(MERGE_DIST, d.width) : MERGE_DIST;
+  if (Math.hypot(x1 - x0, y1 - y0) >= limit) return null;
+  return d.count === 1 ? { x: x0, y: y0 } : { x: (x0 + x1) / 2, y: (y0 + y1) / 2 };
 }
 
 /** v1-Strich aus einem einzigen Punkt: Scheibe mit Durchmesser `width`, beim Textmarker (stumpf) ein Quadrat. */
-function drawDot(ctx: CanvasRenderingContext2D, d: DecodedStroke): void {
+function drawDot(ctx: CanvasRenderingContext2D, d: DecodedStroke, c: { x: number; y: number }): void {
   const r = d.width / 2;
-  const x = d.pts[0]!;
-  const y = d.pts[1]!;
+  const { x, y } = c;
   ctx.fillStyle = rgba(d.color, d.color.a * styleOf(d).alpha);
   ctx.beginPath();
   if (styleOf(d).cap) {
@@ -545,8 +557,9 @@ export function drawStroke(ctx: CanvasRenderingContext2D, d: DecodedStroke): voi
     drawShape2(ctx, d);
     return;
   }
-  if (isSinglePoint(d)) {
-    drawDot(ctx, d);
+  const dot = singlePointCenter(d);
+  if (dot) {
+    drawDot(ctx, d, dot);
     return;
   }
   const pts = strokeOutline(d);
