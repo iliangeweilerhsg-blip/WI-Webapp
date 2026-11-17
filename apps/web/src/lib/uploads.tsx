@@ -38,6 +38,8 @@ export interface UploadEntry {
   file: File;
   moduleId: string;
   kind: MaterialKind;
+  /** „Für Vorlesung“ (§22.5): Die Session, die den hochgeladenen Foliensatz bekommen soll */
+  sessionId?: string;
   batch: string;
   status: UploadStatus;
   /** Nur bei `fehler`: ruhiger Text */
@@ -63,7 +65,17 @@ interface UploadApi {
   entries: readonly UploadEntry[];
   /** Läuft gerade ein Drag mit Dateien über das Fenster? */
   dragging: boolean;
-  enqueue: (files: File[], target: Omit<UploadTarget, 'kind'> & { kind: MaterialKind }) => void;
+  enqueue: (
+    files: File[],
+    target: Omit<UploadTarget, 'kind' | 'open'> & {
+      kind: MaterialKind;
+      sessionId?: string;
+      /** Ohne `open` gibt es bei „Schon vorhanden“ keinen Knopf „Anzeigen“ */
+      open?: UploadTarget['open'];
+    },
+  ) => void;
+  /** Vorlesung, der Dateien zugeordnet werden, die ins Fenster gezogen werden (die Auswahl „Für Vorlesung“) */
+  setDropSession: (moduleId: string, sessionId: string | null) => void;
   retry: (id: string) => void;
   dismiss: (id: string) => void;
   registerTarget: (target: UploadTarget | null) => void;
@@ -140,6 +152,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const target = useRef<UploadTarget | null>(null);
   const chain = useRef<Promise<void>>(Promise.resolve());
   const openers = useRef(new Map<string, UploadTarget['open']>());
+  const dropSession = useRef<{ moduleId: string; sessionId: string } | null>(null);
 
   const commit = useCallback((next: UploadEntry[]) => {
     entriesRef.current = next;
@@ -260,6 +273,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       patch(id, { status: 'laeuft', message: undefined, retryable: undefined });
       try {
         const fields: Record<string, string> = { module_id: entry.moduleId };
+        if (entry.sessionId) fields.session_id = entry.sessionId;
         // Lesbarer Titel statt Dateiname: „Mikro_Vorlesung_70.pdf“ → „Mikro Vorlesung 70“
         const title = titleFromFile(entry.file.name);
         if (title) fields.title = title;
@@ -297,13 +311,15 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           resultId: result.id,
           ...(restoredTitle !== undefined ? { restoredTitle } : {}),
         });
+        // Eine Datei „für Vorlesung“ ändert auch die Session (§22.5): Heute, Live-Ansicht und Modulliste neu lesen
+        if (entry.sessionId) await client.invalidateQueries({ queryKey: ['sessions'] });
         if (!result.duplicate) watchIngest(entry.kind, result.id);
       } catch (failure) {
         const retryable =
           failure instanceof ApiRequestError &&
           (failure.kind === 'unreachable' ||
             // 409: Derselbe Schlüssel ist noch in Arbeit (erster Versuch lief weiter), später gleicher Key
-            failure.status === 409 ||
+            (failure.status === 409 && failure.code !== 'slide_deck_session_closed') ||
             (failure.status !== null && failure.status >= 500));
         patch(id, {
           status: 'fehler',
@@ -311,7 +327,9 @@ export function UploadProvider({ children }: { children: ReactNode }) {
           message:
             failure instanceof ApiRequestError && failure.kind === 'unreachable'
               ? 'Core nicht erreichbar. Versuch es noch einmal, sobald er läuft.'
-              : friendlyMessage(failure),
+              : failure instanceof ApiRequestError && failure.code === 'slide_deck_session_closed'
+                ? `${friendlyMessage(failure)} Lade die Datei ohne „Für Vorlesung“ hoch.`
+                : friendlyMessage(failure),
         });
       }
       finishBatch(entry.batch);
@@ -323,13 +341,14 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     (files, to) => {
       if (files.length === 0) return;
       const batch = uuidv7();
-      openers.current.set(batch, to.open);
+      if (to.open) openers.current.set(batch, to.open);
       const created: UploadEntry[] = files.map((file) => ({
         id: uuidv7(),
         key: globalThis.crypto.randomUUID(),
         file,
         moduleId: to.moduleId,
         kind: to.kind,
+        ...(to.sessionId ? { sessionId: to.sessionId } : {}),
         batch,
         status: looksLikePdf(file) ? 'wartet' : 'fehler',
         ...(looksLikePdf(file) ? {} : { message: 'Das ist kein PDF. Wähle eine PDF-Datei.' }),
@@ -364,6 +383,10 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     (id: string) => commit(entriesRef.current.filter((e) => e.id !== id)),
     [commit],
   );
+
+  const setDropSession = useCallback((moduleId: string, sessionId: string | null) => {
+    dropSession.current = sessionId ? { moduleId, sessionId } : null;
+  }, []);
 
   const registerTarget = useCallback((next: UploadTarget | null) => {
     target.current = next;
@@ -404,7 +427,14 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         toast.show({ message: 'Wechsle zum Tab Vorlesungen oder Übungen, dann zieh die PDFs hinein.' });
         return;
       }
-      enqueue(files, { moduleId: current.moduleId, kind: current.kind, open: current.open });
+      const forSession =
+        dropSession.current?.moduleId === current.moduleId ? dropSession.current.sessionId : null;
+      enqueue(files, {
+        moduleId: current.moduleId,
+        kind: current.kind,
+        open: current.open,
+        ...(forSession && current.kind === 'folien' ? { sessionId: forSession } : {}),
+      });
     };
     window.addEventListener('dragenter', onEnter);
     window.addEventListener('dragover', onOver);
@@ -419,8 +449,8 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   }, [enqueue, toast]);
 
   const api = useMemo<UploadApi>(
-    () => ({ entries, dragging, enqueue, retry, dismiss, registerTarget }),
-    [entries, dragging, enqueue, retry, dismiss, registerTarget],
+    () => ({ entries, dragging, enqueue, retry, dismiss, registerTarget, setDropSession }),
+    [entries, dragging, enqueue, retry, dismiss, registerTarget, setDropSession],
   );
   return <UploadContext.Provider value={api}>{children}</UploadContext.Provider>;
 }
@@ -429,6 +459,11 @@ export function useUploads(): UploadApi {
   const api = useContext(UploadContext);
   if (!api) throw new Error('useUploads braucht einen UploadProvider');
   return api;
+}
+
+/** Wie `useUploads`, aber `null` ohne UploadProvider (Bildschirme, die auch ohne App-Shell gerendert werden) */
+export function useOptionalUploads(): UploadApi | null {
+  return useContext(UploadContext);
 }
 
 /** Meldet die offene Modulseite als Ziel für Dateien, die irgendwo ins Fenster fallen. */

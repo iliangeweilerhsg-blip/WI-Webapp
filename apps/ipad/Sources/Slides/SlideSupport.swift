@@ -270,12 +270,23 @@ final class SlideSupport {
     }
 
     /// Aktuelle Folie des Mac. Lädt den Foliensatz bei Bedarf (nur den der laufenden Session).
+    /// Wechselt der Satz während des Ladens (`session.updated`), wird die Folie nie aus dem alten Satz geliefert:
+    /// Die Auflösung beginnt mit dem neuen Satz von vorn, höchstens `maxAttempts`-mal, danach `nil`. Der Aufrufer
+    /// (`followSlideIfNeeded` in `InkPageView`) öffnet genau diese Folie, darum ist die Folie des
+    /// neuen Satzes besser als `nil`; `nil` bleibt nur, wenn der Satz auch danach nicht stillsteht.
     func currentSlide() async -> SlideRef? {
-        guard let deckID = follower.running?.slideDeckID, follower.currentSlide != nil else { return nil }
-        guard let info = await decks.ensure(deckID: deckID) else { return nil }
-        // Die Folie nach dem Laden neu lesen: Der Mac kann inzwischen weitergeblättert haben
-        guard let brief = follower.currentSlide else { return nil }
-        return info.resolve(brief)
+        let maxAttempts = 3
+        for _ in 0..<maxAttempts {
+            guard let deckID = follower.running?.slideDeckID, follower.currentSlide != nil else { return nil }
+            let info = await decks.ensure(deckID: deckID)
+            // Der Satz kann sich während des Ladens geändert haben: Ergebnis verwerfen und neu auflösen
+            guard follower.running?.slideDeckID == deckID else { continue }
+            guard let info else { return nil }
+            // Die Folie nach dem Laden neu lesen: Der Mac kann inzwischen weitergeblättert haben
+            guard let brief = follower.currentSlide else { return nil }
+            return info.resolve(brief)
+        }
+        return nil
     }
 }
 
