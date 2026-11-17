@@ -72,6 +72,8 @@ import {
 } from '../src/backup-commands.ts';
 import {
   errorText,
+  composeWarnings,
+  leftoverWarning,
   linkedFilesWarning,
   recordLeftovers,
   runBackup,
@@ -3220,21 +3222,90 @@ describe('Restpunkte aus #324: Hash beim Kopieren, verlinkte Dateien prüfen, Li
       trigger: 'manuell',
       target: run?.target as string,
     });
-    const linked = linkedFilesWarning(['media/photos/a.jpg'], STAND);
-    await recordLeftovers(deps, id, run?.target as string, [stuck], linked);
+    const linked = { paths: ['media/photos/a.jpg'], previous: STAND };
+    await recordLeftovers(deps, id, run?.target as string, [stuck], null, linked);
     const warning = s.pg.runs.get(id)?.warning as string;
     expect(warning).toContain('media/photos/a.jpg');
     expect(warning).toContain('lässt sich seit mehreren Läufen nicht löschen');
     expect(warning).toContain(' · ');
     expect(warning.indexOf('media/photos/a.jpg')).toBeLessThan(warning.indexOf(' · '));
     expect(warning.length).toBeLessThanOrEqual(500);
-    // Zu lang: auf 500 Zeichen mit „…“ gekürzt, die Anzahl am Anfang bleibt
+    // Zu lang: die Warnung zu verlinkten Dateien wird gekürzt, die Reste-Warnung bleibt vollständig
     const many = Array.from({ length: 40 }, (_, i) => `media/${'x'.repeat(90)}${i}.jpg`);
-    await recordLeftovers(deps, id, run?.target as string, [stuck], linkedFilesWarning(many, STAND));
+    await recordLeftovers(deps, id, run?.target as string, [stuck], null, { paths: many, previous: STAND });
     const cut = s.pg.runs.get(id)?.warning as string;
     expect(cut.length).toBeLessThanOrEqual(500);
     expect(cut.startsWith('40 unveränderte Dateien weichen')).toBe(true);
-    expect(cut.endsWith('…')).toBe(true);
+    expect(cut.endsWith(leftoverWarning([stuck]) as string)).toBe(true);
+  });
+
+  it('#324: lange Pfade verdrängen Reste- und Besitzer-Warnung nicht; verlinkte Dateien stehen zuerst', async () => {
+    const s = await prepared();
+    const run = runOf(s, STAND);
+    const stuck: Leftover = { name: '20261001T030000Z', reason: 'x', cause: 'EPERM' };
+    const deps = { pg: s.pg, err: () => {}, cfg: s.backupDeps.cfg };
+    const id = '019a4e14-0000-7000-8000-0000000000d2';
+    s.pg.runs.set(id, {
+      id,
+      state: 'fertig',
+      error: null,
+      stand: STAND2,
+      size: null,
+      sha: null,
+      trigger: 'manuell',
+      target: run?.target as string,
+    });
+    if (run) run.thinLeft = [stuck.name];
+    const owner = 'Besitzer-Warnung: Stände eines anderen Benutzers bleiben unberührt.';
+    const rest = leftoverWarning([stuck]) as string;
+    const long = ['media/', 'vault/', 'media/'].map((d, i) => `${d}${'p'.repeat(150)}${i}.jpg`);
+    await recordLeftovers(deps, id, run?.target as string, [stuck], owner, { paths: long, previous: STAND });
+    const w = s.pg.runs.get(id)?.warning as string;
+    expect(w.length).toBeLessThanOrEqual(500);
+    expect(w).toContain(rest); // vollständig, mit dem Ordnernamen
+    expect(w).toContain(owner);
+    expect(w.startsWith('3 unveränderte Dateien weichen')).toBe(true);
+    expect(w.indexOf('pnpm sg restore --test')).toBeLessThan(w.indexOf(owner)); // verlinkte Dateien zuerst
+    expect(w.indexOf(owner)).toBeLessThan(w.indexOf(rest));
+  });
+
+  it('#324: composeWarnings und linkedFilesWarning: Reihenfolge, Pfadkürzung, Platz, Emoji an der Grenze', () => {
+    const paths = ['media/a.jpg'];
+    const linked = { paths, previous: STAND };
+    const full = linkedFilesWarning(paths, STAND) as string;
+    // Reihenfolge: verlinkte Dateien vor Besitzer- und Reste-Warnung
+    expect(composeWarnings(linked, ['Besitzer', 'Reste'])).toBe(`${full} · Besitzer · Reste`);
+    // Pfadkürzung auf 100 Zeichen mit „…“
+    const cut = linkedFilesWarning([`media/${'x'.repeat(200)}`], STAND) as string;
+    expect(cut).toContain(`media/${'x'.repeat(93)}…)`);
+    expect(cut).not.toContain('x'.repeat(94));
+    // Wenig Platz: weniger Pfade, dann nur die Anzahl mit dem Hinweis
+    const three = ['media/a.jpg', 'media/b.jpg', 'media/c.jpg'];
+    const bare = linkedFilesWarning(three, STAND, 175) as string;
+    expect(bare.length).toBeLessThanOrEqual(175);
+    expect(bare).toContain(`pnpm sg restore --test ${STAND}`);
+    const none = linkedFilesWarning(three, STAND, 160) as string;
+    expect(none).not.toContain('media/');
+    expect(none).toContain('3 unveränderte Dateien');
+    // Andere Warnungen haben Vorrang: kein Platz mehr, die Gesamtgrenze bleibt
+    const others = 'R'.repeat(496);
+    expect(composeWarnings(linked, [others])).toBe(others);
+    expect(composeWarnings(linked, ['R'.repeat(600)])?.length).toBe(500);
+    expect(composeWarnings(null, [null, ''])).toBeNull();
+    // Emoji an der Grenze: nie ein halbes Surrogatpaar, höchstens 500 UTF-16-Einheiten
+    const lone = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+    const emojiPath = `${'a'.repeat(99)}😀tail`;
+    const e = linkedFilesWarning([emojiPath], STAND) as string;
+    expect(e).toContain(`(${'a'.repeat(99)}…)`);
+    expect(lone.test(e)).toBe(false);
+    const total = composeWarnings(null, [`${'b'.repeat(498)}😀😀`]) as string;
+    expect(total.length).toBeLessThanOrEqual(500);
+    expect(total.endsWith('…')).toBe(true);
+    expect(total.endsWith(`${'b'.repeat(498)}…`)).toBe(true);
+    expect(lone.test(total)).toBe(false);
+    const total2 = composeWarnings(null, [`${'b'.repeat(497)}😀😀`]) as string;
+    expect(total2).toBe(`${'b'.repeat(497)}😀…`);
+    expect(lone.test(total2)).toBe(false);
   });
 
   it('#324: Ausdünnen schlägt fehl: die Warnung zu verlinkten Dateien wird trotzdem eingetragen, thin_left bleibt', async () => {

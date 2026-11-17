@@ -409,7 +409,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     out.adopt(target, targetDir);
     const created = out.mkdir(partial);
     let owner: number | undefined;
-    let linkedWarn: string | null = null;
+    let linked: LinkedFiles | null = null;
 
     try {
       // Eigen ist im Ziel, was den Besitzer des eigenen `.partial` hat (#183), nicht zwingend den Benutzer des Laufs.
@@ -523,7 +523,7 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
         );
       }
       log(`Backup ${stand} fertig (${size} Bytes).`);
-      linkedWarn = previous ? linkedFilesWarning(damagedLinks, previous) : null;
+      linked = previous && damagedLinks.length > 0 ? { paths: damagedLinks, previous } : null;
     } catch (error) {
       // Nur Eigenes entfernen, nie einem Symlink folgend; Fremdes bleibt liegen (Ausdünnen räumt alte .partial weg)
       const left = out.cleanup();
@@ -546,11 +546,10 @@ export async function runBackup(deps: BackupDeps, options: BackupOptions): Promi
     }
     const ownerWarn = thinned ? foreignOwnerWarning(thinned.foreign ?? []) : null;
     if (ownerWarn) err(`Warnung: ${ownerWarn}`);
-    if (linkedWarn) err(`Warnung: ${linkedWarn}`);
+    if (linked) err(`Warnung: ${linkedFilesWarning(linked.paths, linked.previous)}`);
     // Auch ohne Ausdünnen eintragen (`left: null`): Die Warnung zu verlinkten Dateien gehört zum Lauf, nicht zum Ausdünnen
-    const extra = joinWarnings(linkedWarn, ownerWarn);
-    if (runId && (thinned || extra))
-      await recordLeftovers(deps, runId, targetSetting, thinned?.left ?? null, extra);
+    if (runId && (thinned || ownerWarn || linked))
+      await recordLeftovers(deps, runId, targetSetting, thinned?.left ?? null, ownerWarn, linked);
     return 0;
   } catch (error) {
     return await fail(errorText(error, cfg), 1);
@@ -836,13 +835,14 @@ export function leftoverWarning(stuck: Leftover[]): string | null {
     const text = `${head}${names.slice(0, shown).join(', ')}${rest > 0 ? ` und ${rest} weitere` : ''}.`;
     if (text.length <= WARNING_MAX) return text;
   }
-  return `${head.slice(0, WARNING_MAX - 1)}…`;
+  return clipUnits(head, WARNING_MAX);
 }
 
 /**
  * Reste des Ausdünnens am Lauf festhalten (`backup_run.thin_left`) und warnen, wenn ein Rest schon nach dem vorigen
- * Lauf mit demselben Ziel stehen blieb (`backup_run.warning`, H3). `extra`: weitere Warnungen (verlinkte Dateien #324,
- * Besitzer #183), die vor der zu den Resten stehen. `left: null`: das Ausdünnen lief nicht, `thin_left` bleibt unberührt,
+ * Lauf mit demselben Ziel stehen blieb (`backup_run.warning`, H3). `extra`: weitere Warnung (Besitzer #183) und
+ * `linked`: verlinkte Dateien mit Abweichung (#324), beide stehen vor der zu den Resten (`composeWarnings`: die anderen
+ * bleiben vollständig, die zu verlinkten Dateien bekommt nur den übrigen Platz). `left: null`: das Ausdünnen lief nicht, `thin_left` bleibt unberührt,
  * nur `warning` wird eingetragen. Fehlt die Spalte (Backup vor der Migration, die sie anlegt), passiert nichts. Fehler
  * hier machen das Backup nicht ungültig.
  */
@@ -852,6 +852,7 @@ export async function recordLeftovers(
   targetSetting: string,
   left: Leftover[] | null,
   extra: string | null = null,
+  linked: LinkedFiles | null = null,
 ): Promise<void> {
   const { pg } = deps;
   try {
@@ -870,7 +871,7 @@ export async function recordLeftovers(
     const before = new Set((previous?.[0] ?? '').split('/').filter((name) => name !== ''));
     const stuck = left ? leftoverWarning(left.filter((l) => before.has(l.name))) : null;
     if (stuck) deps.err(`Warnung: ${stuck}`);
-    const warning = joinWarnings(extra, stuck);
+    const warning = composeWarnings(linked, [extra, stuck]);
     if (left === null) {
       await pg.query(
         `UPDATE backup_run SET warning = NULLIF(:'warning', ''), updated_at = now() WHERE id = :'id'::uuid`,
@@ -885,40 +886,80 @@ export async function recordLeftovers(
       { id: runId, left: left.map((l) => l.name).join('/'), warning: warning ?? '' },
     );
   } catch (error) {
-    deps.err(`Reste des Ausdünnens ließen sich nicht eintragen: ${errorText(error, deps.cfg)}`);
+    deps.err(
+      `${left === null ? 'Warnungen zum Lauf' : 'Reste des Ausdünnens'} ließen sich nicht eintragen: ${errorText(error, deps.cfg)}`,
+    );
   }
 }
 
 /** So viele Dateipfade nennt die Warnung zu verlinkten Dateien höchstens */
 const LINKED_PATHS_MAX = 3;
+/** Ein einzelner Pfad in der Warnung: höchstens so viele UTF-16-Einheiten (mit „…“) */
+const LINKED_PATH_LEN = 100;
+/** Kürzer als das ergibt ein gekürzter Pfad keinen Sinn mehr, dann entfallen lieber Pfade */
+const LINKED_PATH_MIN = 12;
+
+/** Verlinkte Dateien mit Abweichung (relativ im Stand) und der Stand, der zu prüfen ist (#324) */
+export interface LinkedFiles {
+  paths: string[];
+  previous: string;
+}
+
+/**
+ * Text auf höchstens `max` UTF-16-Einheiten, gekürzt mit „…“. Schneidet nach Codepoints (nie mitten in einem
+ * Surrogatpaar), zählt aber UTF-16 wie zod `max(…)` und der CHECK (`char_length` zählt Codepoints, das ist weniger).
+ */
+function clipUnits(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let out = '';
+  for (const cp of Array.from(text)) {
+    if (out.length + cp.length > max - 1) break;
+    out += cp;
+  }
+  return `${out}…`;
+}
 
 /**
  * Warnung für die Oberfläche (`backup_run.warning`): unveränderte Dateien wichen vom vorigen Stand ab oder waren dort
  * nicht lesbar und wurden neu kopiert statt verlinkt (#324). Nennt die Anzahl und höchstens die ersten 3 Pfade
  * relativ im Backup (`media/…`, `vault/…`), nie absolute Pfade. Pfade aus dem Datenordner: Steuerzeichen werden zu `?`,
- * ein einzelner Pfad wird auf 100 Zeichen gekürzt. `null`: keine Abweichung.
+ * ein einzelner Pfad wird auf 100 Zeichen gekürzt. `maxLen`: so viel Platz bleibt der Warnung; reicht er nicht, werden
+ * weniger oder kürzere Pfade genannt, zuletzt nur die Anzahl mit dem Hinweis auf `restore --test`. `null`: keine
+ * Abweichung (oder kein Platz).
  */
-export function linkedFilesWarning(paths: string[], previous: string): string | null {
+export function linkedFilesWarning(paths: string[], previous: string, maxLen = WARNING_MAX): string | null {
   if (paths.length === 0) return null;
-  const shown = paths.slice(0, LINKED_PATHS_MAX).map((p) => {
-    const line = oneLine(p);
-    return line.length > 100 ? `${line.slice(0, 99)}…` : line;
-  });
-  const rest = paths.length - shown.length;
-  const list = `${shown.join(', ')}${rest > 0 ? ` und ${rest} weitere` : ''}`;
+  const lines = paths.map(oneLine);
   const what =
     paths.length === 1
       ? 'Eine unveränderte Datei weicht vom vorigen Stand ab'
       : `${paths.length} unveränderte Dateien weichen vom vorigen Stand ab`;
-  return (
-    `${what} (${list}) und wurde${paths.length === 1 ? '' : 'n'} neu kopiert statt verlinkt. ` +
-    `Prüfe den Stand ${previous} mit „pnpm sg restore --test ${previous}“.`
-  );
+  const tail = `neu kopiert statt verlinkt. Prüfe den Stand ${previous} mit „pnpm sg restore --test ${previous}“.`;
+  const assemble = (shown: string[]): string => {
+    const rest = paths.length - shown.length;
+    const list = shown.length === 0 ? '' : ` (${shown.join(', ')}${rest > 0 ? ` und ${rest} weitere` : ''})`;
+    return `${what}${list} und wurde${paths.length === 1 ? '' : 'n'} ${tail}`;
+  };
+  for (let k = Math.min(LINKED_PATHS_MAX, lines.length); k >= 1; k--) {
+    const room = maxLen - assemble(Array.from({ length: k }, () => '')).length;
+    const limit = Math.min(LINKED_PATH_LEN, Math.floor(room / k));
+    if (limit >= LINKED_PATH_MIN) return assemble(lines.slice(0, k).map((l) => clipUnits(l, limit)));
+  }
+  const bare = assemble([]);
+  if (bare.length <= maxLen) return bare;
+  return maxLen >= 20 ? clipUnits(bare, maxLen) : null;
 }
 
-/** Warnungen in einem Text für `backup_run.warning`, getrennt mit „ · “, höchstens 500 Zeichen mit „…“ (`null`: keine) */
-function joinWarnings(...warnings: (string | null)[]): string | null {
-  const text = warnings.filter((w): w is string => w !== null && w !== '').join(' · ');
-  if (text === '') return null;
-  return text.length <= WARNING_MAX ? text : `${text.slice(0, WARNING_MAX - 1)}…`;
+/**
+ * Warnungen eines Laufs in einem Text für `backup_run.warning`, getrennt mit „ · “, die zu verlinkten Dateien zuerst
+ * (Vertrag 13). Die übrigen Warnungen (Besitzer, Reste) bleiben vollständig, die zu verlinkten Dateien bekommt nur
+ * den übrigen Platz (sonst fehlte bei den Resten der Ordnername zum Löschen). Insgesamt höchstens 500 Zeichen
+ * (`null`: keine).
+ */
+export function composeWarnings(linked: LinkedFiles | null, others: (string | null)[]): string | null {
+  const rest = others.filter((w): w is string => w !== null && w !== '').join(' · ');
+  const room = WARNING_MAX - (rest === '' ? 0 : rest.length + 3);
+  const first = linked && room > 0 ? linkedFilesWarning(linked.paths, linked.previous, room) : null;
+  const text = [first, rest].filter((w): w is string => w !== null && w !== '').join(' · ');
+  return text === '' ? null : clipUnits(text, WARNING_MAX);
 }
