@@ -518,8 +518,8 @@ export function DevicesSettings() {
         Geräte
       </h2>
       <p className="mt-1 text-sm text-text-muted">
-        Das iPad verbindet sich zu Hause über das WLAN mit diesem Mac, unterwegs direkt. Gekoppelte Geräte
-        haben vollen Zugriff auf deine Daten.
+        Das iPad verbindet sich mit diesem Mac zu Hause über das gemeinsame WLAN und in der Uni auch ohne
+        gemeinsames Netz direkt. Gekoppelte Geräte haben vollen Zugriff auf deine Daten.
       </p>
 
       {devices.isError ? (
