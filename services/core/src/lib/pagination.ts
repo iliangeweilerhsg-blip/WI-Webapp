@@ -25,8 +25,35 @@ export const PageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_LIMIT).default(DEFAULT_LIMIT),
 });
 
-const TS_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,6})?[+-]\d{2}(:\d{2})?$/;
+const TS_RE = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?[+-](\d{2})(?::(\d{2}))?$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Prüft Format und Gültigkeit des Zeitstempels (`created_at::text`). Nur so scheitert der Cast
+ * `::timestamptz` nie in Postgres (sonst 500 statt 400): echtes Kalenderdatum, Jahr 1..9999,
+ * Uhrzeit 00:00:00..23:59:59 und Offset bis ±15:59 (Postgres-Grenze). Bleibt als Text erhalten,
+ * damit Mikrosekunden verlustfrei bleiben.
+ */
+function isValidTimestamp(ts: string): boolean {
+  const m = TS_RE.exec(ts);
+  if (!m) return false;
+  const [year, month, day, hour, minute, second, offHour, offMinute] = [
+    m[1],
+    m[2],
+    m[3],
+    m[4],
+    m[5],
+    m[6],
+    m[7],
+    m[8] ?? '0',
+  ].map(Number) as [number, number, number, number, number, number, number, number];
+  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const daysInMonth = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]!;
+  if (day > daysInMonth) return false;
+  if (hour > 23 || minute > 59 || second > 59) return false;
+  return offHour <= 15 && offMinute <= 59;
+}
 
 export function encodeCursor(key: CursorKey): string {
   return Buffer.from(JSON.stringify([key.ts, key.id]), 'utf8').toString('base64url');
@@ -42,7 +69,7 @@ export function decodeCursor(raw: string): CursorKey {
   }
   if (!Array.isArray(parsed) || parsed.length !== 2) throw invalid();
   const [ts, id] = parsed as unknown[];
-  if (typeof ts !== 'string' || typeof id !== 'string' || !TS_RE.test(ts) || !UUID_RE.test(id)) {
+  if (typeof ts !== 'string' || typeof id !== 'string' || !isValidTimestamp(ts) || !UUID_RE.test(id)) {
     throw invalid();
   }
   return { ts, id };
